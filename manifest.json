@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "GitHub PR Tree",
+  "version": "1.0.0",
+  "description": "Display GitHub pull requests as a tree based on base/head branch relationships.",
+  "permissions": [],
+  "host_permissions": [
+    "https://github.com/*",
+    "https://api.github.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://github.com/*/*/pulls*"],
+      "js": ["src/tree.js", "src/dom.js", "src/content.js"],
+      "css": ["src/styles.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}
