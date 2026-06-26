@@ -82,6 +82,45 @@ async function main() {
     assert.equal(app.isActive(), true);
   }
 
+  // Re-apply after simulated SPA list re-render (same URL, fresh rows)
+  {
+    const dom = new JSDOM(fixtureHtml, {
+      url: 'https://github.com/octo/repo/pulls',
+      runScripts: 'outside-only',
+    });
+    const { window } = dom;
+    const { document } = window;
+
+    const mockFetch = async () => ({
+      ok: true,
+      json: async () => apiPayload,
+    });
+
+    const app = createPrTreeApp({
+      document,
+      window,
+      PRTree: treeApi,
+      PRTreeDOM: domApi,
+      PRTreeFetch: fetchApi,
+      fetchImpl: mockFetch,
+    });
+
+    await app.bootstrap();
+    assert.equal(document.querySelectorAll('.pr-tree-indented').length, 3);
+
+    const list = document.querySelector('ul');
+    const pristineHtml = new JSDOM(fixtureHtml).window.document.querySelector('ul').innerHTML;
+    list.innerHTML = '';
+    assert.equal(document.querySelectorAll('.pr-tree-indented').length, 0);
+
+    list.innerHTML = pristineHtml;
+    assert.equal(app.needsReapply(), true);
+
+    await app.handlePageChange();
+    assert.equal(document.querySelectorAll('.pr-tree-indented').length, 3);
+    assert.equal(app.isActive(), true);
+  }
+
   console.log('content-bootstrap.test.js: all assertions passed');
 }
 
