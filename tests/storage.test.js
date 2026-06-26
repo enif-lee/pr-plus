@@ -1,8 +1,10 @@
 const assert = require('node:assert/strict');
 const {
   getGithubToken,
+  getGithubTokenStatus,
   setGithubToken,
   watchGithubToken,
+  maskGithubToken,
 } = require('../src/storage.js');
 
 function mockStorage(initial = {}) {
@@ -53,6 +55,19 @@ async function main() {
     assert.equal(await getGithubToken(area), 'ghp_test_token');
     await setGithubToken('', area);
     assert.equal(await getGithubToken(area), null);
+  }
+
+  {
+    assert.equal(maskGithubToken('ghp_abcdefghijklmnop'), 'ghp_••••••••mnop');
+    assert.equal(maskGithubToken(''), '');
+  }
+
+  {
+    const { area } = mockStorage({ githubToken: 'ghp_testtoken1234' });
+    const status = await getGithubTokenStatus(area);
+    assert.equal(status.configured, true);
+    assert.match(status.mask, /ghp_/);
+    assert.match(status.mask, /••••/);
   }
 
   {

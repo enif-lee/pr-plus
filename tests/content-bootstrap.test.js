@@ -124,6 +124,47 @@ async function main() {
     assert.equal(app.isActive(), true);
   }
 
+  // bootstrap queues retry when called while in-flight
+  {
+    const dom = new JSDOM(fixtureHtml, {
+      url: 'https://github.com/octo/repo/pulls',
+      runScripts: 'outside-only',
+    });
+    const { window } = dom;
+    const { document } = window;
+
+    let resolveFetch;
+    const mockFetch = () =>
+      new Promise((resolve) => {
+        resolveFetch = resolve;
+      });
+
+    const app = createPrTreeApp({
+      document,
+      window,
+      PRTree: treeApi,
+      PRTreeDOM: domApi,
+      PRTreeFetch: fetchApi,
+      PRTreeStorage: storageApi,
+      fetchImpl: mockFetch,
+    });
+
+    const first = app.bootstrap();
+    const second = app.bootstrap();
+    const secondResult = await second;
+    assert.equal(secondResult.reason, 'in-flight');
+
+    resolveFetch({
+      ok: true,
+      json: async () => apiPayload,
+    });
+    const firstResult = await first;
+    assert.equal(firstResult.ok, true);
+
+    await new Promise((r) => setTimeout(r, 0));
+    assert.equal(document.querySelectorAll('.pr-tree-indented').length, 3);
+  }
+
   console.log('content-bootstrap.test.js: all assertions passed');
 }
 

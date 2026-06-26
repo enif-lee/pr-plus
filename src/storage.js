@@ -4,6 +4,13 @@ function getStorageArea(storageApi = globalThis.chrome?.storage?.local) {
   return storageApi || null;
 }
 
+function maskGithubToken(token) {
+  if (!token || typeof token !== 'string') return '';
+  const trimmed = token.trim();
+  if (trimmed.length <= 8) return '••••••••';
+  return `${trimmed.slice(0, 4)}${'•'.repeat(8)}${trimmed.slice(-4)}`;
+}
+
 function getGithubToken(storageApi) {
   const area = getStorageArea(storageApi);
   if (!area) return Promise.resolve(null);
@@ -14,6 +21,14 @@ function getGithubToken(storageApi) {
       resolve(typeof token === 'string' && token.trim() ? token.trim() : null);
     });
   });
+}
+
+async function getGithubTokenStatus(storageApi) {
+  const token = await getGithubToken(storageApi);
+  if (!token) {
+    return { configured: false, mask: '' };
+  }
+  return { configured: true, mask: maskGithubToken(token) };
 }
 
 function setGithubToken(token, storageApi) {
@@ -54,7 +69,9 @@ function watchGithubToken(onChange, storageApi = globalThis.chrome?.storage) {
 
 const storageApi = {
   TOKEN_KEY,
+  maskGithubToken,
   getGithubToken,
+  getGithubTokenStatus,
   setGithubToken,
   watchGithubToken,
 };

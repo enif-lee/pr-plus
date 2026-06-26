@@ -37,10 +37,19 @@ function createPrTreeApp(deps) {
   let toggleButton = null;
   let syncTimer = null;
   let bootstrapping = false;
-  let lastPath = window.location.pathname;
+  let bootstrapQueued = false;
+  let syncAttempts = 0;
+  let lastSyncedPath = null;
 
   function repoKey(owner, repo) {
     return `${owner}/${repo}`;
+  }
+
+  function clearCache() {
+    cachedForest = null;
+    cachedPrs = null;
+    cachedRepoKey = null;
+    lastSyncedPath = null;
   }
 
   function applyTreeView() {
@@ -101,10 +110,12 @@ function createPrTreeApp(deps) {
 
   function needsReapply() {
     if (!treeModeEnabled || !cachedForest) return false;
+
     const rows = findOriginalPrRows(document);
     if (rows.length === 0) return false;
-    const indented = document.querySelectorAll(`.${PR_TREE_INDENT_CLASS}`);
-    return indented.length < rows.length;
+
+    const unstyled = rows.filter((row) => !row.classList.contains(PR_TREE_INDENT_CLASS));
+    return unstyled.length > 0;
   }
 
   function scheduleSync(delayMs = 200) {
@@ -114,53 +125,78 @@ function createPrTreeApp(deps) {
     }, delayMs);
   }
 
-  async function handlePageChange() {
+  function currentPullsContext() {
     const path = window.location.pathname;
-    const onPulls = path.includes('/pulls');
-    const pathChanged = path !== lastPath;
-    lastPath = path;
+    if (!path.includes('/pulls')) return null;
+    const repoInfo = parseRepoFromPathname(path);
+    if (!repoInfo) return null;
+    return { path, repoInfo, key: repoKey(repoInfo.owner, repoInfo.repo) };
+  }
 
-    if (!onPulls) {
+  async function handlePageChange() {
+    const ctx = currentPullsContext();
+    if (!ctx) {
       active = false;
       return;
     }
 
-    const repoInfo = parseRepoFromPathname(path);
-    if (!repoInfo) return;
+    const { path, repoInfo, key } = ctx;
+    const repoChanged = cachedRepoKey !== null && cachedRepoKey !== key;
+    const needsBootstrap = !cachedForest || repoChanged || lastSyncedPath !== path;
 
-    const key = repoKey(repoInfo.owner, repoInfo.repo);
-    const repoChanged = cachedRepoKey !== key;
-
-    if (pathChanged || repoChanged || !cachedForest) {
-      await bootstrap();
+    if (needsBootstrap) {
+      if (repoChanged) clearCache();
+      const result = await bootstrap();
+      if (result.ok) {
+        lastSyncedPath = path;
+        syncAttempts = 0;
+      } else if (result.reason !== 'in-flight') {
+        scheduleSync(Math.min(300 * (syncAttempts + 1), 2000));
+        syncAttempts += 1;
+      }
       return;
     }
 
     ensureToggle();
 
-    if (treeModeEnabled && needsReapply()) {
-      applyTreeView();
-      return;
+    if (treeModeEnabled) {
+      if (needsReapply()) {
+        if (applyTreeView()) {
+          syncAttempts = 0;
+          return;
+        }
+      } else if (active) {
+        return;
+      }
     }
 
     if (findOriginalPrRows(document).length === 0) {
-      scheduleSync(300);
+      scheduleSync(Math.min(300 * (syncAttempts + 1), 2000));
+      syncAttempts += 1;
     }
   }
 
   async function bootstrap() {
-    if (bootstrapping) return { ok: false, reason: 'in-flight' };
+    if (bootstrapping) {
+      bootstrapQueued = true;
+      return { ok: false, reason: 'in-flight' };
+    }
+
     bootstrapping = true;
 
     try {
-      const repoInfo = parseRepoFromPathname(window.location.pathname);
-      if (!repoInfo) return { ok: false, reason: 'not-pulls-page' };
+      const ctx = currentPullsContext();
+      if (!ctx) return { ok: false, reason: 'not-pulls-page' };
 
-      const key = repoKey(repoInfo.owner, repoInfo.repo);
+      const { repoInfo, key } = ctx;
       const container = findPrListContainer(document);
       if (!container) {
-        scheduleSync(300);
         return { ok: false, reason: 'no-list-container' };
+      }
+
+      const rows = findOriginalPrRows(document);
+      if (rows.length === 0) {
+        return { ok: false, reason: 'no-rows' };
       }
 
       if (cachedRepoKey !== key || !cachedForest) {
@@ -183,10 +219,11 @@ function createPrTreeApp(deps) {
 
       if (treeModeEnabled) {
         if (!applyTreeView()) {
-          scheduleSync(300);
+          return { ok: false, reason: 'apply-failed' };
         }
       }
 
+      lastSyncedPath = ctx.path;
       return {
         ok: true,
         prCount: cachedPrs.length,
@@ -195,31 +232,39 @@ function createPrTreeApp(deps) {
       };
     } catch (err) {
       console.warn('[PR Tree] Failed to load PR data:', err);
-      scheduleSync(1000);
       return { ok: false, reason: 'fetch-failed', error: err };
     } finally {
       bootstrapping = false;
+      if (bootstrapQueued) {
+        bootstrapQueued = false;
+        scheduleSync(0);
+      }
     }
   }
 
   function watchPullsPage() {
-    const observer = new MutationObserver(() => scheduleSync(200));
+    const observer = new MutationObserver(() => scheduleSync(250));
     observer.observe(document.body, { childList: true, subtree: true });
 
     watchGithubToken(() => {
-      cachedForest = null;
-      cachedPrs = null;
-      cachedRepoKey = null;
-      void bootstrap();
+      clearCache();
+      scheduleSync(0);
     });
 
-    const onNav = () => scheduleSync(50);
+    const onNav = () => scheduleSync(80);
     window.addEventListener('popstate', onNav);
     window.addEventListener('hashchange', onNav);
     window.addEventListener('turbo:load', onNav);
     window.addEventListener('turbo:frame-load', onNav);
     window.addEventListener('pjax:complete', onNav);
     window.addEventListener('pjax:end', onNav);
+
+    window.setInterval(() => {
+      if (!currentPullsContext()) return;
+      if (treeModeEnabled && (needsReapply() || !document.getElementById(PR_TREE_TOGGLE_ID))) {
+        scheduleSync(0);
+      }
+    }, 2000);
 
     return observer;
   }
@@ -233,6 +278,7 @@ function createPrTreeApp(deps) {
     scheduleSync,
     watchPullsPage,
     needsReapply,
+    clearCache,
     getCachedForest: () => cachedForest,
     getCachedPrs: () => cachedPrs,
     isActive: () => active,

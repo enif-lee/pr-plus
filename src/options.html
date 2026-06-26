@@ -23,7 +23,16 @@
       border-radius: 6px;
       font-size: 14px;
     }
-    .actions { margin-top: 16px; display: flex; gap: 8px; align-items: center; }
+    .token-saved {
+      margin: 8px 0 0;
+      font-size: 13px;
+      color: #1f2328;
+    }
+    .token-saved code {
+      font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+      letter-spacing: 0.04em;
+    }
+    .actions { margin-top: 16px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
     button {
       padding: 6px 14px;
       border: 1px solid #d0d7de;
@@ -33,7 +42,7 @@
       font-size: 14px;
     }
     button.primary { background: #0969da; color: #fff; border-color: #0969da; }
-    #status { font-size: 13px; color: #656d76; min-height: 1.2em; }
+    #status { font-size: 13px; color: #656d76; min-height: 1.2em; flex: 1 1 100%; }
     a { color: #0969da; }
     code { font-size: 13px; background: #f6f8fa; padding: 2px 4px; border-radius: 4px; }
   </style>
@@ -48,6 +57,7 @@
 
   <label for="token">GitHub API Token</label>
   <input id="token" type="password" autocomplete="off" placeholder="ghp_... 또는 github_pat_..." />
+  <p id="token-saved" class="token-saved" hidden>저장됨: <code id="token-mask"></code></p>
 
   <div class="actions">
     <button id="save" class="primary" type="button">Save</button>
