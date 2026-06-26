@@ -9,6 +9,7 @@ function createPrTreeApp(deps) {
     PRTree,
     PRTreeDOM,
     PRTreeFetch,
+    PRTreeStorage,
     fetchImpl = globalThis.fetch,
   } = deps;
 
@@ -26,6 +27,7 @@ function createPrTreeApp(deps) {
 
   const { buildPrTree } = PRTree;
   const { fetchOpenPulls } = PRTreeFetch;
+  const { getGithubToken, watchGithubToken } = PRTreeStorage;
 
   let cachedForest = null;
   let cachedPrs = null;
@@ -72,7 +74,29 @@ function createPrTreeApp(deps) {
       initialMode: treeModeEnabled ? 'tree' : 'original',
     });
     mountToggleNearHeader(document, toggleButton);
+    ensureSettingsLink();
     return toggleButton;
+  }
+
+  function ensureSettingsLink() {
+    if (document.getElementById('pr-tree-settings')) return;
+
+    const link = document.createElement('a');
+    link.id = 'pr-tree-settings';
+    link.href = '#';
+    link.className = 'pr-tree-settings-link';
+    link.textContent = 'API token';
+    link.title = 'Open GitHub API token settings';
+    link.addEventListener('click', (event) => {
+      event.preventDefault();
+      globalThis.chrome?.runtime?.openOptionsPage?.();
+    });
+
+    if (toggleButton?.parentElement) {
+      toggleButton.insertAdjacentElement('afterend', link);
+    } else {
+      mountToggleNearHeader(document, link);
+    }
   }
 
   function needsReapply() {
@@ -140,11 +164,12 @@ function createPrTreeApp(deps) {
       }
 
       if (cachedRepoKey !== key || !cachedForest) {
+        const token = await getGithubToken();
         cachedPrs = await fetchOpenPulls(
           repoInfo.owner,
           repoInfo.repo,
           fetchImpl,
-          { document, findOriginalPrRows }
+          { document, findOriginalPrRows, token }
         );
         cachedForest = buildPrTree(cachedPrs);
         cachedRepoKey = key;
@@ -180,6 +205,13 @@ function createPrTreeApp(deps) {
   function watchPullsPage() {
     const observer = new MutationObserver(() => scheduleSync(200));
     observer.observe(document.body, { childList: true, subtree: true });
+
+    watchGithubToken(() => {
+      cachedForest = null;
+      cachedPrs = null;
+      cachedRepoKey = null;
+      void bootstrap();
+    });
 
     const onNav = () => scheduleSync(50);
     window.addEventListener('popstate', onNav);

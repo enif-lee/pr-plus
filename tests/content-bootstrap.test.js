@@ -5,6 +5,7 @@ const { JSDOM } = require('jsdom');
 const treeApi = require('../src/tree.js');
 const domApi = require('../src/dom.js');
 const fetchApi = require('../src/fetch-pulls.js');
+const storageApi = require('../src/storage.js');
 const { createPrTreeApp } = require('../src/content-bootstrap.js');
 
 async function main() {
@@ -62,6 +63,7 @@ async function main() {
       PRTree: treeApi,
       PRTreeDOM: domApi,
       PRTreeFetch: fetchApi,
+      PRTreeStorage: storageApi,
       fetchImpl: mockFetch,
     });
 
@@ -102,6 +104,7 @@ async function main() {
       PRTree: treeApi,
       PRTreeDOM: domApi,
       PRTreeFetch: fetchApi,
+      PRTreeStorage: storageApi,
       fetchImpl: mockFetch,
     });
 

@@ -130,10 +130,18 @@ async function fetchOpenPullsViaSameOrigin(owner, repo, doc, fetchImpl, findOrig
   );
 }
 
-async function fetchOpenPullsPublic(owner, repo, fetchImpl) {
+function buildApiHeaders(token) {
+  const headers = { Accept: 'application/vnd.github+json' };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  return headers;
+}
+
+async function fetchOpenPullsPublic(owner, repo, fetchImpl, token = null) {
   const url = `https://api.github.com/repos/${owner}/${repo}/pulls?state=open&per_page=100`;
   const res = await fetchImpl(url, {
-    headers: { Accept: 'application/vnd.github+json' },
+    headers: buildApiHeaders(token),
   });
   if (!res.ok) {
     const err = new Error(`GitHub API ${res.status}: ${res.statusText}`);
@@ -145,11 +153,19 @@ async function fetchOpenPullsPublic(owner, repo, fetchImpl) {
 }
 
 async function fetchOpenPulls(owner, repo, fetchImpl, options = {}) {
-  const { document, findOriginalPrRows } = options;
+  const { document, findOriginalPrRows, token = null } = options;
 
   try {
-    return await fetchOpenPullsPublic(owner, repo, fetchImpl);
+    return await fetchOpenPullsPublic(owner, repo, fetchImpl, token);
   } catch (err) {
+    if (token && (err.status === 401 || err.status === 403)) {
+      const authErr = new Error(
+        'GitHub API auth failed. Check your token in extension settings.'
+      );
+      authErr.status = err.status;
+      throw authErr;
+    }
+
     const needsFallback =
       err.status === 404 ||
       err.status === 403 ||
@@ -175,6 +191,7 @@ const fetchApi = {
   parsePrPageHtml,
   scrapePrListFromDom,
   fetchPrPageBranchData,
+  buildApiHeaders,
   fetchOpenPullsViaSameOrigin,
   fetchOpenPullsPublic,
   fetchOpenPulls,

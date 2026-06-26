@@ -8,6 +8,7 @@ const {
   scrapePrListFromDom,
   fetchOpenPulls,
   fetchOpenPullsPublic,
+  buildApiHeaders,
 } = require('../src/fetch-pulls.js');
 const { findOriginalPrRows } = require('../src/dom.js');
 
@@ -94,6 +95,38 @@ window.data = {
   assert.ok(calls.some((u) => u.includes('/pull/10')));
   assert.equal(prs.length, 3);
   assert.equal(prs[0].headRef, 'fix/insight-brevity');
+}
+
+// buildApiHeaders with token
+{
+  const headers = buildApiHeaders('ghp_secret');
+  assert.equal(headers.Authorization, 'Bearer ghp_secret');
+  assert.equal(buildApiHeaders(null).Authorization, undefined);
+}
+
+// fetchOpenPulls uses token on API request
+{
+  let authHeader = null;
+  const mockFetch = async (url, init) => {
+    authHeader = init?.headers?.Authorization;
+    return {
+      ok: true,
+      json: async () => [
+        {
+          number: 2,
+          title: 'B',
+          head: { ref: 'feat-b' },
+          base: { ref: 'main' },
+          user: { login: 'dev' },
+          draft: false,
+          html_url: 'https://github.com/o/r/pull/2',
+        },
+      ],
+    };
+  };
+  const prs = await fetchOpenPulls('octo', 'repo', mockFetch, { token: 'ghp_test' });
+  assert.equal(authHeader, 'Bearer ghp_test');
+  assert.equal(prs.length, 1);
 }
 
 // fetchOpenPulls uses public API when available

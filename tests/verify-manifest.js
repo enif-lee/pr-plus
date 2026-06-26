@@ -9,13 +9,21 @@ if (manifest.manifest_version !== 3) {
   throw new Error('Expected manifest_version 3');
 }
 
+if (!manifest.permissions?.includes('storage')) {
+  throw new Error('storage permission required for API token');
+}
+
+if (!manifest.options_ui?.page) {
+  throw new Error('options_ui required for API token settings');
+}
+
 const script = manifest.content_scripts?.[0];
 if (!script) throw new Error('Missing content_scripts');
 if (!script.matches.some((m) => m.includes('github.com') && m.includes('pulls'))) {
   throw new Error('Content script must match github PR list URLs');
 }
 
-const requiredJs = ['src/tree.js', 'src/dom.js', 'src/fetch-pulls.js', 'src/content-bootstrap.js', 'src/content.js'];
+const requiredJs = ['src/tree.js', 'src/dom.js', 'src/storage.js', 'src/fetch-pulls.js', 'src/content-bootstrap.js', 'src/content.js'];
 for (const f of requiredJs) {
   if (!script.js.includes(f)) throw new Error(`Missing ${f} in content_scripts`);
 }

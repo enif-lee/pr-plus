@@ -11,6 +11,7 @@
     PRTree: globalThis.PRTree,
     PRTreeDOM: globalThis.PRTreeDOM,
     PRTreeFetch: globalThis.PRTreeFetch,
+    PRTreeStorage: globalThis.PRTreeStorage,
   });
 
   function start() {
