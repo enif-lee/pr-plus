@@ -13,18 +13,6 @@
   background: var(--button-default-bgColor-hover, #eef1f4);
 }
 
-.pr-tree-settings-link {
-  margin-left: 8px;
-  font-size: 12px;
-  color: var(--fgColor-accent, #0969da);
-  text-decoration: none;
-  vertical-align: middle;
-}
-
-.pr-tree-settings-link:hover {
-  text-decoration: underline;
-}
-
 .js-issue-row.pr-tree-indented,
 li[role='listitem'].pr-tree-indented {
   position: relative;

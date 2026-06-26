@@ -83,29 +83,7 @@ function createPrTreeApp(deps) {
       initialMode: treeModeEnabled ? 'tree' : 'original',
     });
     mountToggleNearHeader(document, toggleButton);
-    ensureSettingsLink();
     return toggleButton;
-  }
-
-  function ensureSettingsLink() {
-    if (document.getElementById('pr-tree-settings')) return;
-
-    const link = document.createElement('a');
-    link.id = 'pr-tree-settings';
-    link.href = '#';
-    link.className = 'pr-tree-settings-link';
-    link.textContent = 'API token';
-    link.title = 'Open GitHub API token settings';
-    link.addEventListener('click', (event) => {
-      event.preventDefault();
-      globalThis.chrome?.runtime?.openOptionsPage?.();
-    });
-
-    if (toggleButton?.parentElement) {
-      toggleButton.insertAdjacentElement('afterend', link);
-    } else {
-      mountToggleNearHeader(document, link);
-    }
   }
 
   function needsReapply() {
