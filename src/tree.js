@@ -2,8 +2,8 @@
  * Pure PR tree builder. Accepts flat PR descriptors, returns an ordered forest.
  * Each node: { pr, children: Node[] }
  *
- * Root rule: baseRef is not the headRef of any PR in the set.
- * Child rule: pr.baseRef === parent.headRef (exact string match).
+ * Root rule: walk parent chain (base=head match); cycle members become roots.
+ * Child rule: pr.baseRef === parent.headRef within the same acyclic component.
  */
 
 function buildPrTree(prs) {
@@ -11,28 +11,55 @@ function buildPrTree(prs) {
     return [];
   }
 
-  const headRefs = new Set(prs.map((p) => p.headRef));
   const byHeadRef = new Map();
   for (const pr of prs) {
     byHeadRef.set(pr.headRef, pr);
   }
 
-  const childrenByParentHead = new Map();
-  const roots = [];
-
+  const parentOf = new Map();
   for (const pr of prs) {
     const parent = byHeadRef.get(pr.baseRef);
-    if (parent) {
-      if (!childrenByParentHead.has(parent.headRef)) {
-        childrenByParentHead.set(parent.headRef, []);
-      }
-      childrenByParentHead.get(parent.headRef).push(pr);
-    } else if (!headRefs.has(pr.baseRef)) {
-      roots.push(pr);
-    } else {
-      // base matches a head but parent PR not found (shouldn't happen with unique heads)
-      roots.push(pr);
+    if (parent && parent !== pr) {
+      parentOf.set(pr, parent);
     }
+  }
+
+  const rootCache = new Map();
+  function resolveRoot(pr) {
+    if (rootCache.has(pr)) return rootCache.get(pr);
+    const stack = new Set();
+    let cur = pr;
+    while (parentOf.has(cur)) {
+      if (stack.has(cur)) {
+        rootCache.set(pr, pr);
+        return pr;
+      }
+      stack.add(cur);
+      cur = parentOf.get(cur);
+    }
+    rootCache.set(pr, cur);
+    return cur;
+  }
+
+  const roots = [];
+  const seenRoots = new Set();
+  for (const pr of prs) {
+    const root = resolveRoot(pr);
+    if (!seenRoots.has(root)) {
+      seenRoots.add(root);
+      roots.push(root);
+    }
+  }
+
+  const childrenByParentHead = new Map();
+  for (const pr of prs) {
+    const parent = parentOf.get(pr);
+    if (!parent) continue;
+    if (resolveRoot(pr) !== resolveRoot(parent)) continue;
+    if (!childrenByParentHead.has(parent.headRef)) {
+      childrenByParentHead.set(parent.headRef, []);
+    }
+    childrenByParentHead.get(parent.headRef).push(pr);
   }
 
   function buildNode(pr) {

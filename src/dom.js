@@ -1,11 +1,20 @@
 /**
  * DOM manipulation for GitHub PR list tree view.
- * Operates against a document reference for testability.
+ * Selectors aligned with refined-github (legacy .js-issue-row + React li[role=listitem]).
  */
 
 const PR_TREE_ROOT_ID = 'pr-tree-root';
 const PR_TREE_TOGGLE_ID = 'pr-tree-toggle';
 const PR_TREE_HIDDEN_CLASS = 'pr-tree-hidden-original';
+
+const PR_ROW_SELECTORS = [
+  '.js-navigation-container .js-issue-row',
+  '.js-issue-row:has(.octicon-git-pull-request)',
+  '.js-issue-row:has(.octicon-git-pull-request-draft)',
+  'li[role="listitem"]:has(a[data-hovercard-url*="/pull"])',
+  'li[role="listitem"]:has(h3 a[href*="/pull/"])',
+  '#js-issues-results [id^="issue_"]',
+];
 
 function parseRepoFromPathname(pathname) {
   const match = pathname.match(/^\/([^/]+)\/([^/]+)\/pulls/);
@@ -13,27 +22,48 @@ function parseRepoFromPathname(pathname) {
   return { owner: match[1], repo: match[2] };
 }
 
-function findPrListContainer(doc) {
-  return (
-    doc.querySelector('#issues-index') ||
-    doc.querySelector('.js-navigation-container') ||
-    doc.querySelector('[data-testid="pull-requests-list"]') ||
-    doc.querySelector('main')
-  );
+function queryAllPrRows(doc) {
+  const seen = new Set();
+  const rows = [];
+  for (const selector of PR_ROW_SELECTORS) {
+    let matches;
+    try {
+      matches = doc.querySelectorAll(selector);
+    } catch {
+      continue;
+    }
+    for (const el of matches) {
+      if (!seen.has(el)) {
+        seen.add(el);
+        rows.push(el);
+      }
+    }
+  }
+  return rows;
 }
 
 function findOriginalPrRows(doc) {
-  const selectors = [
-    '#issues-index .js-issue-row',
-    '#issues-index [id^="issue_"]',
-    '.js-navigation-container .js-issue-row',
-    '[data-testid="pull-requests-list"] > div',
-  ];
-  for (const sel of selectors) {
-    const rows = doc.querySelectorAll(sel);
-    if (rows.length > 0) return Array.from(rows);
-  }
-  return [];
+  return queryAllPrRows(doc);
+}
+
+function findPrListMount(doc) {
+  const rows = queryAllPrRows(doc);
+  if (rows.length === 0) return null;
+  const firstRow = rows[0];
+  const parent = firstRow.parentElement;
+  if (!parent) return null;
+  return { parent, insertBefore: firstRow, rowCount: rows.length };
+}
+
+function findPrListContainer(doc) {
+  const mount = findPrListMount(doc);
+  if (mount) return mount.parent;
+
+  return (
+    doc.querySelector('#js-issues-results') ||
+    doc.querySelector('.js-navigation-container') ||
+    doc.querySelector('main')
+  );
 }
 
 function hideOriginalList(doc) {
@@ -123,10 +153,13 @@ function renderPrTree(doc, container, forest) {
     root.appendChild(createTreeNodeElement(doc, entry));
   }
 
-  if (container.firstChild) {
-    container.insertBefore(root, container.firstChild);
-  } else {
+  const mount = findPrListMount(doc);
+  if (mount?.parent) {
+    mount.parent.insertBefore(root, mount.insertBefore);
+  } else if (container) {
     container.appendChild(root);
+  } else {
+    doc.body.appendChild(root);
   }
 
   return root;
@@ -172,7 +205,7 @@ function createToggleButton(doc, { onShowTree, onShowOriginal, initialMode = 'tr
 function mountToggleNearHeader(doc, button) {
   const anchors = [
     doc.querySelector('.gh-header-actions'),
-    doc.querySelector('#issues-index .subnav-search'),
+    doc.querySelector('.subnav-search'),
     doc.querySelector('main .subnav-search'),
     doc.querySelector('main h1')?.parentElement,
   ];
@@ -190,8 +223,10 @@ const domApi = {
   PR_TREE_ROOT_ID,
   PR_TREE_TOGGLE_ID,
   PR_TREE_HIDDEN_CLASS,
+  PR_ROW_SELECTORS,
   parseRepoFromPathname,
   findPrListContainer,
+  findPrListMount,
   findOriginalPrRows,
   hideOriginalList,
   showOriginalList,

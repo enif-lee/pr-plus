@@ -92,6 +92,25 @@ function flatNumbers(forest) {
   assert.match(text, /#99/);
 }
 
+// Base/head cycle: both PRs become roots (no empty forest)
+{
+  const prs = [
+    pr(1, 'Cycle A', 'branch-a', 'branch-b'),
+    pr(2, 'Cycle B', 'branch-b', 'branch-a'),
+  ];
+  const forest = buildPrTree(prs);
+  assert.equal(forest.length, 2, 'cycle members are roots');
+  assert.deepEqual(
+    forest.map((n) => n.pr.number).sort((a, b) => a - b),
+    [1, 2]
+  );
+  for (const root of forest) {
+    assert.equal(root.children.length, 0, 'no cyclic child edges');
+  }
+  const flat = flattenPrTree(forest);
+  assert.equal(flat.length, 2);
+}
+
 // Empty input
 {
   assert.deepEqual(buildPrTree([]), []);
