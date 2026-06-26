@@ -1,7 +1,3 @@
-.pr-tree-hidden-original {
-  display: none !important;
-}
-
 .pr-tree-toggle {
   margin-left: 8px;
   cursor: pointer;
@@ -17,89 +13,17 @@
   background: var(--button-default-bgColor-hover, #eef1f4);
 }
 
-.pr-tree-container {
-  border: 1px solid var(--borderColor-default, #d0d7de);
-  border-radius: 6px;
-  margin: 8px 0 16px;
-  background: var(--bgColor-default, #ffffff);
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+.js-issue-row.pr-tree-indented,
+li[role='listitem'].pr-tree-indented {
+  position: relative;
+  box-sizing: border-box;
+  margin-left: calc(var(--pr-tree-depth, 0) * 24px) !important;
+  border-left: calc(var(--pr-tree-depth, 0) * 2px) solid
+    color-mix(in srgb, var(--fgColor-accent, #0969da) 35%, transparent);
+  padding-left: calc(8px + max(0, var(--pr-tree-depth, 0) - 1) * 4px);
 }
 
-.pr-tree-node {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 6px 8px;
-  padding: 10px 12px;
-  padding-left: calc(12px + var(--pr-tree-depth, 0) * 24px);
-  border-bottom: 1px solid var(--borderColor-muted, #eaeef2);
-}
-
-.pr-tree-node:last-child {
-  border-bottom: none;
-}
-
-.pr-tree-node[data-depth='0'] {
-  background: var(--bgColor-muted, #f6f8fa);
-  font-weight: 600;
-}
-
-.pr-tree-connector {
-  color: var(--fgColor-muted, #656d76);
-  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
-  flex-shrink: 0;
-  width: 1.5em;
-}
-
-.pr-tree-number {
-  color: var(--fgColor-accent, #0969da);
-  text-decoration: none;
-  font-weight: 600;
-  flex-shrink: 0;
-}
-
-.pr-tree-number:hover {
-  text-decoration: underline;
-}
-
-.pr-tree-title {
-  color: var(--fgColor-default, #1f2328);
-  text-decoration: none;
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.pr-tree-title:hover {
-  color: var(--fgColor-accent, #0969da);
-  text-decoration: underline;
-}
-
-.pr-tree-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  width: 100%;
-  margin-left: calc(1.5em + 6px);
-  font-size: 12px;
-  color: var(--fgColor-muted, #656d76);
-}
-
-.pr-tree-branch {
-  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
-  background: var(--bgColor-neutral-muted, #eaeef2);
-  padding: 2px 6px;
-  border-radius: 4px;
-}
-
-.pr-tree-author::before {
-  content: 'by ';
-}
-
-.pr-tree-draft {
-  color: var(--fgColor-muted, #656d76);
-  font-style: italic;
-}
-
-.pr-tree-draft::before {
-  content: '· ';
+.pr-tree-indented[data-pr-tree-depth='0'] {
+  border-left-color: transparent;
+  padding-left: 0;
 }

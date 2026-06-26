@@ -16,9 +16,8 @@ function createPrTreeApp(deps) {
     parseRepoFromPathname,
     findPrListContainer,
     findOriginalPrRows,
-    hideOriginalList,
-    showOriginalList,
-    renderPrTree,
+    applyTreeIndents,
+    clearTreeIndents,
     createToggleButton,
     mountToggleNearHeader,
   } = PRTreeDOM;
@@ -32,17 +31,15 @@ function createPrTreeApp(deps) {
   let toggleButton = null;
 
   function applyTreeView() {
-    const container = findPrListContainer(document);
-    if (!container || !cachedForest) return false;
-
-    hideOriginalList(document);
-    renderPrTree(document, container, cachedForest);
+    if (!cachedForest) return false;
+    const applied = applyTreeIndents(document, cachedForest);
+    if (applied === 0) return false;
     active = true;
     return true;
   }
 
   function restoreOriginalView() {
-    showOriginalList(document);
+    clearTreeIndents(document);
     active = false;
     return true;
   }

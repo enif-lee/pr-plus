@@ -1,11 +1,11 @@
 /**
  * DOM manipulation for GitHub PR list tree view.
- * Selectors aligned with refined-github (legacy .js-issue-row + React li[role=listitem]).
+ * Keeps native list rows; applies stack depth via left indent and reordering.
  */
 
-const PR_TREE_ROOT_ID = 'pr-tree-root';
 const PR_TREE_TOGGLE_ID = 'pr-tree-toggle';
-const PR_TREE_HIDDEN_CLASS = 'pr-tree-hidden-original';
+const PR_TREE_INDENT_CLASS = 'pr-tree-indented';
+const PR_TREE_ACTIVE_CLASS = 'pr-tree-active';
 
 const PR_ROW_SELECTORS = [
   '.js-navigation-container .js-issue-row',
@@ -46,6 +46,16 @@ function findOriginalPrRows(doc) {
   return queryAllPrRows(doc);
 }
 
+function getPrNumberFromRow(row) {
+  const link = row.querySelector(
+    'a.js-navigation-open, a[id$="_link"], h3 a[href*="/pull/"]'
+  );
+  const href = link?.getAttribute('href') || link?.href || '';
+  const fromHref = href.match(/\/pull\/(\d+)/)?.[1];
+  const fromId = row.id?.match(/issue_(\d+)/)?.[1];
+  return Number.parseInt(fromHref || fromId, 10);
+}
+
 function findPrListMount(doc) {
   const rows = queryAllPrRows(doc);
   if (rows.length === 0) return null;
@@ -66,103 +76,87 @@ function findPrListContainer(doc) {
   );
 }
 
-function hideOriginalList(doc) {
-  const rows = findOriginalPrRows(doc);
-  for (const row of rows) {
-    row.classList.add(PR_TREE_HIDDEN_CLASS);
-    row.dataset.prTreeHidden = 'true';
-  }
-  return rows.length;
-}
-
-function showOriginalList(doc) {
-  const rows = doc.querySelectorAll(`.${PR_TREE_HIDDEN_CLASS}`);
-  for (const row of rows) {
-    row.classList.remove(PR_TREE_HIDDEN_CLASS);
-    delete row.dataset.prTreeHidden;
-  }
-  const treeRoot = doc.getElementById(PR_TREE_ROOT_ID);
-  if (treeRoot) treeRoot.remove();
-}
-
-function removeTreeView(doc) {
-  const treeRoot = doc.getElementById(PR_TREE_ROOT_ID);
-  if (treeRoot) treeRoot.remove();
-}
-
-function createTreeNodeElement(doc, { pr, depth }) {
-  const item = doc.createElement('div');
-  item.className = 'pr-tree-node';
-  item.style.setProperty('--pr-tree-depth', String(depth));
-  item.dataset.prNumber = String(pr.number);
-  item.dataset.depth = String(depth);
-
-  const connector = doc.createElement('span');
-  connector.className = 'pr-tree-connector';
-  connector.textContent = depth > 0 ? '└ ' : '';
-  item.appendChild(connector);
-
-  const numberLink = doc.createElement('a');
-  numberLink.className = 'pr-tree-number';
-  numberLink.href = pr.htmlUrl || `#${pr.number}`;
-  numberLink.textContent = `#${pr.number}`;
-  item.appendChild(numberLink);
-
-  const titleLink = doc.createElement('a');
-  titleLink.className = 'pr-tree-title';
-  titleLink.href = pr.htmlUrl || `#${pr.number}`;
-  titleLink.textContent = pr.title;
-  item.appendChild(titleLink);
-
-  const meta = doc.createElement('span');
-  meta.className = 'pr-tree-meta';
-  const branch = doc.createElement('span');
-  branch.className = 'pr-tree-branch';
-  branch.textContent = `${pr.headRef} ← ${pr.baseRef}`;
-  meta.appendChild(branch);
-
-  if (pr.author) {
-    const author = doc.createElement('span');
-    author.className = 'pr-tree-author';
-    author.textContent = pr.author;
-    meta.appendChild(author);
-  }
-
-  if (pr.draft) {
-    const draft = doc.createElement('span');
-    draft.className = 'pr-tree-draft';
-    draft.textContent = 'Draft';
-    meta.appendChild(draft);
-  }
-
-  item.appendChild(meta);
-  return item;
-}
-
-function renderPrTree(doc, container, forest) {
-  removeTreeView(doc);
-
-  const root = doc.createElement('div');
-  root.id = PR_TREE_ROOT_ID;
-  root.className = 'pr-tree-container';
-  root.setAttribute('role', 'tree');
-  root.setAttribute('aria-label', 'Pull request stack tree');
-
+function buildDepthAndOrderMaps(forest) {
   const flat = globalThis.PRTree.flattenPrTree(forest);
-  for (const entry of flat) {
-    root.appendChild(createTreeNodeElement(doc, entry));
+  const depthByNumber = new Map();
+  const order = [];
+  for (const { pr, depth } of flat) {
+    depthByNumber.set(pr.number, depth);
+    order.push(pr.number);
+  }
+  return { depthByNumber, order };
+}
+
+function applyTreeIndents(doc, forest) {
+  const rows = findOriginalPrRows(doc);
+  if (rows.length === 0) return 0;
+
+  const parent = rows[0].parentElement;
+  if (!parent) return 0;
+
+  const { depthByNumber, order } = buildDepthAndOrderMaps(forest);
+  const rowByNumber = new Map();
+
+  for (const [index, row] of rows.entries()) {
+    if (row.dataset.prTreeOriginalIndex === undefined) {
+      row.dataset.prTreeOriginalIndex = String(index);
+    }
+    const num = getPrNumberFromRow(row);
+    if (Number.isFinite(num)) rowByNumber.set(num, row);
   }
 
-  const mount = findPrListMount(doc);
-  if (mount?.parent) {
-    mount.parent.insertBefore(root, mount.insertBefore);
-  } else if (container) {
-    container.appendChild(root);
-  } else {
-    doc.body.appendChild(root);
+  const orderedRows = [];
+  const used = new Set();
+  for (const num of order) {
+    const row = rowByNumber.get(num);
+    if (row) {
+      orderedRows.push(row);
+      used.add(row);
+    }
+  }
+  for (const row of rows) {
+    if (!used.has(row)) orderedRows.push(row);
   }
 
-  return root;
+  for (const row of orderedRows) {
+    parent.appendChild(row);
+  }
+
+  let applied = 0;
+  for (const row of orderedRows) {
+    const num = getPrNumberFromRow(row);
+    const depth = depthByNumber.get(num) ?? 0;
+    row.classList.add(PR_TREE_INDENT_CLASS, PR_TREE_ACTIVE_CLASS);
+    row.dataset.prTreeDepth = String(depth);
+    row.style.setProperty('--pr-tree-depth', String(depth));
+    applied += 1;
+  }
+
+  return applied;
+}
+
+function clearTreeIndents(doc) {
+  const rows = [...doc.querySelectorAll(`.${PR_TREE_INDENT_CLASS}`)];
+  const parent = rows[0]?.parentElement;
+
+  if (parent && rows.length > 0) {
+    const sorted = [...rows].sort(
+      (a, b) =>
+        Number(a.dataset.prTreeOriginalIndex ?? 0) -
+        Number(b.dataset.prTreeOriginalIndex ?? 0)
+    );
+    for (const row of sorted) {
+      parent.appendChild(row);
+    }
+  }
+
+  for (const row of rows) {
+    row.classList.remove(PR_TREE_INDENT_CLASS, PR_TREE_ACTIVE_CLASS);
+    row.style.removeProperty('--pr-tree-depth');
+    delete row.dataset.prTreeDepth;
+  }
+
+  return rows.length;
 }
 
 function createToggleButton(doc, { onShowTree, onShowOriginal, initialMode = 'tree' }) {
@@ -178,12 +172,12 @@ function createToggleButton(doc, { onShowTree, onShowOriginal, initialMode = 'tr
 
   function updateLabel() {
     btn.textContent =
-      mode === 'tree' ? 'Show default list' : 'Show PR tree';
+      mode === 'tree' ? 'Show default order' : 'Show stack tree';
     btn.setAttribute(
       'aria-label',
       mode === 'tree'
-        ? 'Restore GitHub default pull request list'
-        : 'Show pull requests as branch stack tree'
+        ? 'Restore GitHub default pull request sort order'
+        : 'Reorder and indent pull requests by branch stack depth'
     );
   }
 
@@ -208,6 +202,7 @@ function mountToggleNearHeader(doc, button) {
     doc.querySelector('.subnav-search'),
     doc.querySelector('main .subnav-search'),
     doc.querySelector('main h1')?.parentElement,
+    doc.querySelector('.table-list-header-toggle'),
   ];
   for (const anchor of anchors) {
     if (anchor) {
@@ -220,19 +215,17 @@ function mountToggleNearHeader(doc, button) {
 }
 
 const domApi = {
-  PR_TREE_ROOT_ID,
   PR_TREE_TOGGLE_ID,
-  PR_TREE_HIDDEN_CLASS,
+  PR_TREE_INDENT_CLASS,
+  PR_TREE_ACTIVE_CLASS,
   PR_ROW_SELECTORS,
   parseRepoFromPathname,
   findPrListContainer,
   findPrListMount,
   findOriginalPrRows,
-  hideOriginalList,
-  showOriginalList,
-  removeTreeView,
-  createTreeNodeElement,
-  renderPrTree,
+  getPrNumberFromRow,
+  applyTreeIndents,
+  clearTreeIndents,
   createToggleButton,
   mountToggleNearHeader,
 };

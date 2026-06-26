@@ -4,13 +4,12 @@ const path = require('node:path');
 const { JSDOM } = require('jsdom');
 const { buildPrTree, serializePrTree } = require('../src/tree.js');
 const {
-  renderPrTree,
-  hideOriginalList,
-  showOriginalList,
+  applyTreeIndents,
+  clearTreeIndents,
   createToggleButton,
-  findPrListMount,
   findOriginalPrRows,
-  PR_TREE_ROOT_ID,
+  getPrNumberFromRow,
+  PR_TREE_INDENT_CLASS,
   PR_TREE_TOGGLE_ID,
 } = require('../src/dom.js');
 
@@ -26,69 +25,80 @@ function pr(number, title, headRef, baseRef) {
   };
 }
 
-function runDomScenario(fixtureName) {
+function runDomScenario(fixtureName, prs) {
   const html = fs.readFileSync(path.join(__dirname, 'fixtures', fixtureName), 'utf8');
   const dom = new JSDOM(html, { url: 'https://github.com/octo/repo/pulls' });
   const { document } = dom.window;
 
   globalThis.PRTree = require('../src/tree.js');
 
-  const prs = [
-    pr(100, 'Base feature', 'feat-a', 'main'),
-    pr(101, 'Stack on a', 'feat-b', 'feat-a'),
-    pr(102, 'Stack on b', 'feat-c', 'feat-b'),
-    pr(200, 'Unrelated', 'other', 'main'),
-  ];
   const forest = buildPrTree(prs);
-
   const rows = findOriginalPrRows(document);
   assert.ok(rows.length > 0, `${fixtureName}: finds PR rows`);
 
-  const mount = findPrListMount(document);
-  assert.ok(mount?.parent, `${fixtureName}: list mount resolved`);
+  const applied = applyTreeIndents(document, forest);
+  assert.equal(applied, rows.length, `${fixtureName}: indents all rows`);
 
-  const hiddenCount = hideOriginalList(document);
-  assert.equal(hiddenCount, rows.length, `${fixtureName}: hides all rows`);
+  for (const row of rows) {
+    assert.ok(row.classList.contains(PR_TREE_INDENT_CLASS), 'row keeps native element');
+    assert.ok(row.querySelector('a'), 'native link preserved');
+  }
 
-  const treeRoot = renderPrTree(document, mount.parent, forest);
-  assert.ok(treeRoot);
-  assert.equal(treeRoot.id, PR_TREE_ROOT_ID);
-  assert.equal(treeRoot.parentElement, mount.parent);
-  assert.equal(treeRoot.nextElementSibling, mount.insertBefore);
+  const parent = rows[0].parentElement;
+  const childNums = [...parent.children].map((r) => getPrNumberFromRow(r));
+  assert.deepEqual(childNums, prs.map((p) => p.number), `${fixtureName}: tree order`);
 
-  const nodes = treeRoot.querySelectorAll('.pr-tree-node');
-  assert.equal(nodes.length, 4);
-
-  return { forest, fixtureName, rows: rows.length };
+  const depthByNum = Object.fromEntries(
+    rows.map((r) => [getPrNumberFromRow(r), r.dataset.prTreeDepth])
+  );
+  return { forest, fixtureName, rows: rows.length, depthByNum, parent, document };
 }
 
-const react = runDomScenario('github-pulls-react.html');
-const legacy = runDomScenario('github-pulls-legacy.html');
+const reactPrs = [
+  pr(100, 'Base feature', 'feat-a', 'main'),
+  pr(101, 'Stack on a', 'feat-b', 'feat-a'),
+  pr(200, 'Unrelated', 'other', 'main'),
+];
+const legacyPrs = [
+  pr(10, 'Root PR', 'feat-a', 'main'),
+  pr(11, 'Stack 1', 'feat-b', 'feat-a'),
+  pr(12, 'Stack 2', 'feat-c', 'feat-b'),
+];
 
-assert.equal(legacy.rows, 3);
-assert.equal(react.rows, 3);
+const react = runDomScenario('github-pulls-react.html', reactPrs);
+const legacy = runDomScenario('github-pulls-legacy.html', legacyPrs);
 
-// Toggle on react fixture
+assert.equal(react.depthByNum[100], '0');
+assert.equal(react.depthByNum[101], '1');
+assert.equal(react.depthByNum[200], '0');
+assert.equal(legacy.depthByNum[11], '1');
+
+// clear restores original order
+{
+  clearTreeIndents(react.document);
+  const rows = findOriginalPrRows(react.document);
+  assert.equal(rows[0].dataset.prTreeDepth, undefined);
+  assert.ok(!rows[0].classList.contains(PR_TREE_INDENT_CLASS));
+}
+
+// Toggle
 {
   const html = fs.readFileSync(path.join(__dirname, 'fixtures', 'github-pulls-react.html'), 'utf8');
   const dom = new JSDOM(html, { url: 'https://github.com/octo/repo/pulls' });
   const { document } = dom.window;
   globalThis.PRTree = require('../src/tree.js');
 
-  const forest = buildPrTree([pr(100, 'Base', 'a', 'main')]);
-  const mount = findPrListMount(document);
-  hideOriginalList(document);
-  renderPrTree(document, mount.parent, forest);
+  const forest = buildPrTree([pr(100, 'Base', 'a', 'main'), pr(101, 'Child', 'b', 'a')]);
+  applyTreeIndents(document, forest);
 
   let treeMode = true;
   const toggle = createToggleButton(document, {
     onShowTree: () => {
-      hideOriginalList(document);
-      renderPrTree(document, mount.parent, forest);
+      applyTreeIndents(document, forest);
       treeMode = true;
     },
     onShowOriginal: () => {
-      showOriginalList(document);
+      clearTreeIndents(document);
       treeMode = false;
     },
   });
@@ -97,19 +107,11 @@ assert.equal(react.rows, 3);
 
   toggle.click();
   assert.equal(treeMode, false);
-  assert.equal(document.getElementById(PR_TREE_ROOT_ID), null);
-
   toggle.click();
   assert.equal(treeMode, true);
-  assert.ok(document.getElementById(PR_TREE_ROOT_ID));
 }
 
-const treeText = serializePrTree(buildPrTree([
-  pr(100, 'Base feature', 'feat-a', 'main'),
-  pr(101, 'Stack on a', 'feat-b', 'feat-a'),
-  pr(102, 'Stack on b', 'feat-c', 'feat-b'),
-  pr(200, 'Unrelated', 'other', 'main'),
-]));
+const treeText = serializePrTree(buildPrTree(reactPrs));
 
 console.log('dom.test.js: all assertions passed');
 console.log(`react fixture rows: ${react.rows}, legacy fixture rows: ${legacy.rows}`);

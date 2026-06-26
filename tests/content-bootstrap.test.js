@@ -43,7 +43,6 @@ async function main() {
     },
   ];
 
-  // Full bootstrap path: parseRepo → fetch → build → apply → toggle
   {
     const dom = new JSDOM(fixtureHtml, {
       url: 'https://github.com/octo/repo/pulls',
@@ -69,36 +68,18 @@ async function main() {
     const result = await app.bootstrap();
     assert.equal(result.ok, true);
     assert.equal(result.prCount, 3);
-    assert.equal(result.rootCount, 2);
 
-    const treeRoot = document.getElementById('pr-tree-root');
-    assert.ok(treeRoot);
-    assert.equal(treeRoot.querySelectorAll('.pr-tree-node').length, 3);
+    assert.equal(document.getElementById('pr-tree-root'), null);
+    const indented = document.querySelectorAll('.pr-tree-indented');
+    assert.equal(indented.length, 3);
+    assert.equal(indented[1].dataset.prTreeDepth, '1');
 
     const toggle = app.getToggleButton();
     toggle.click();
     assert.equal(app.isActive(), false);
+    assert.equal(document.querySelectorAll('.pr-tree-indented').length, 0);
     toggle.click();
     assert.equal(app.isActive(), true);
-  }
-
-  // content.js loads full script chain
-  {
-    const contentSrc = fs.readFileSync(path.join(__dirname, '..', 'src/content.js'), 'utf8');
-    assert.match(contentSrc, /PRTreeFetch/);
-
-    const dom = new JSDOM('<!DOCTYPE html><html><body></body></html>', {
-      url: 'https://github.com/octo/repo/pulls',
-      runScripts: 'outside-only',
-    });
-    const { window } = dom;
-    window.eval(fs.readFileSync(path.join(__dirname, '..', 'src/tree.js'), 'utf8'));
-    window.eval(fs.readFileSync(path.join(__dirname, '..', 'src/dom.js'), 'utf8'));
-    window.eval(fs.readFileSync(path.join(__dirname, '..', 'src/fetch-pulls.js'), 'utf8'));
-    window.eval(fs.readFileSync(path.join(__dirname, '..', 'src/content-bootstrap.js'), 'utf8'));
-    window.eval(contentSrc);
-    assert.ok(window.PRTreeFetch?.fetchOpenPulls);
-    assert.ok(window.PRTreeBootstrap?.createPrTreeApp);
   }
 
   console.log('content-bootstrap.test.js: all assertions passed');

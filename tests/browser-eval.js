@@ -37,7 +37,7 @@ function runBrowserEval(fixtureName) {
   window.eval(bootstrapSrc);
 
   assert.ok(window.PRTree?.buildPrTree, 'PRTree loaded via eval');
-  assert.ok(window.PRTreeDOM?.renderPrTree, 'PRTreeDOM loaded via eval');
+  assert.ok(window.PRTreeDOM?.applyTreeIndents, 'PRTreeDOM loaded via eval');
   assert.ok(window.PRTreeBootstrap?.createPrTreeApp, 'PRTreeBootstrap loaded via eval');
 
   const prs = [
@@ -52,34 +52,23 @@ function runBrowserEval(fixtureName) {
   const rowCount = window.PRTreeDOM.findOriginalPrRows(document).length;
   assert.ok(rowCount > 0, `${fixtureName}: found PR rows`);
 
-  const hidden = window.PRTreeDOM.hideOriginalList(document);
-  assert.equal(hidden, rowCount, `${fixtureName}: hid all rows`);
+  const applied = window.PRTreeDOM.applyTreeIndents(document, forest);
+  assert.equal(applied, rowCount, `${fixtureName}: indents all rows`);
 
-  const mount = window.PRTreeDOM.findPrListMount(document);
-  assert.ok(mount?.parent, `${fixtureName}: list mount found`);
-
-  const container = window.PRTreeDOM.findPrListContainer(document);
-  const treeRoot = window.PRTreeDOM.renderPrTree(document, container, forest);
-
-  assert.ok(treeRoot, `${fixtureName}: tree root created`);
-  assert.equal(treeRoot.id, 'pr-tree-root');
-  assert.ok(treeRoot.children.length > 0, `${fixtureName}: non-empty tree`);
-  assert.equal(treeRoot.parentElement, mount.parent, `${fixtureName}: tree inserted in list region`);
-  assert.equal(treeRoot.nextElementSibling, mount.insertBefore, `${fixtureName}: tree before first row`);
-
-  const hiddenRows = document.querySelectorAll('.pr-tree-hidden-original');
-  assert.equal(hiddenRows.length, rowCount, `${fixtureName}: originals hidden`);
+  const indented = document.querySelectorAll('.pr-tree-indented');
+  assert.equal(indented.length, rowCount, `${fixtureName}: native rows still visible`);
+  assert.equal(document.getElementById('pr-tree-root'), null, `${fixtureName}: no custom list`);
 
   const serialized = window.PRTree.serializePrTree(forest);
   logs.push(`=== browser-eval: ${fixtureName} ===`);
   logs.push(`rows found: ${rowCount}`);
-  logs.push(`tree nodes: ${treeRoot.querySelectorAll('.pr-tree-node').length}`);
+  logs.push(`indented rows: ${indented.length}`);
   logs.push(`node globals absent: module=${typeof window.module}, require=${typeof window.require}`);
   logs.push('--- serialized tree ---');
   logs.push(serialized);
   logs.push('');
 
-  return { forest, serialized, treeRoot, rowCount };
+  return { forest, serialized, rowCount };
 }
 
 const reactResult = runBrowserEval('github-pulls-react.html');
