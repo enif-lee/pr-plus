@@ -5,7 +5,7 @@ const { spawnSync } = require('node:child_process');
 const SCRATCH = '/var/folders/sl/km7nh7qj50b9mw4901n7ch940000gn/T/grok-goal-00241f759391/implementer';
 fs.mkdirSync(SCRATCH, { recursive: true });
 
-const tests = ['tree.test.js', 'dom.test.js', 'content-bootstrap.test.js', 'browser-eval.js'];
+const tests = ['tree.test.js', 'fetch-pulls.test.js', 'dom.test.js', 'content-bootstrap.test.js', 'browser-eval.js'];
 const combined = [];
 
 for (const file of tests) {

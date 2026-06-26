@@ -1,1 +1,4 @@
 node_modules/
+.browser/profile/
+.browser/state.json
+.browser/screenshots/

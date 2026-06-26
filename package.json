@@ -3,7 +3,12 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "test": "node tests/run-all.js"
+    "test": "node tests/run-all.js",
+    "browser:login": "agent-browser --extension . open https://github.com/login",
+    "browser:pulls": "agent-browser --extension . open https://github.com/rtzr/callabo-server/pulls",
+    "browser:open": "agent-browser --extension . open",
+    "browser:close": "agent-browser close",
+    "browser:snapshot": "agent-browser snapshot -i -c"
   },
   "devDependencies": {
     "jsdom": "^25.0.1"

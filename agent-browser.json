@@ -1,0 +1,6 @@
+{
+  "$schema": "https://agent-browser.dev/schema.json",
+  "headed": true,
+  "profile": "./.browser/profile",
+  "session": "pr-tree"
+}

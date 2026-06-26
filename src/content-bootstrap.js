@@ -2,42 +2,20 @@
  * Testable content-script bootstrap: fetch, tree build, DOM apply, toggle.
  */
 
-function mapApiPullRequest(pr) {
-  return {
-    number: pr.number,
-    title: pr.title,
-    headRef: pr.head.ref,
-    baseRef: pr.base.ref,
-    author: pr.user?.login || '',
-    draft: Boolean(pr.draft),
-    htmlUrl: pr.html_url,
-  };
-}
-
-async function fetchOpenPulls(owner, repo, fetchImpl = globalThis.fetch) {
-  const url = `https://api.github.com/repos/${owner}/${repo}/pulls?state=open&per_page=100`;
-  const res = await fetchImpl(url, {
-    headers: { Accept: 'application/vnd.github+json' },
-  });
-  if (!res.ok) {
-    throw new Error(`GitHub API ${res.status}: ${res.statusText}`);
-  }
-  const data = await res.json();
-  return data.map(mapApiPullRequest);
-}
-
 function createPrTreeApp(deps) {
   const {
     document,
     window,
     PRTree,
     PRTreeDOM,
+    PRTreeFetch,
     fetchImpl = globalThis.fetch,
   } = deps;
 
   const {
     parseRepoFromPathname,
     findPrListContainer,
+    findOriginalPrRows,
     hideOriginalList,
     showOriginalList,
     renderPrTree,
@@ -46,6 +24,7 @@ function createPrTreeApp(deps) {
   } = PRTreeDOM;
 
   const { buildPrTree } = PRTree;
+  const { fetchOpenPulls } = PRTreeFetch;
 
   let cachedForest = null;
   let cachedPrs = null;
@@ -76,7 +55,12 @@ function createPrTreeApp(deps) {
     if (!container) return { ok: false, reason: 'no-list-container' };
 
     try {
-      cachedPrs = await fetchOpenPulls(repoInfo.owner, repoInfo.repo, fetchImpl);
+      cachedPrs = await fetchOpenPulls(
+        repoInfo.owner,
+        repoInfo.repo,
+        fetchImpl,
+        { document, findOriginalPrRows }
+      );
       cachedForest = buildPrTree(cachedPrs);
     } catch (err) {
       return { ok: false, reason: 'fetch-failed', error: err };
@@ -115,7 +99,7 @@ function createPrTreeApp(deps) {
   };
 }
 
-const bootstrapApi = { mapApiPullRequest, fetchOpenPulls, createPrTreeApp };
+const bootstrapApi = { createPrTreeApp };
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = bootstrapApi;

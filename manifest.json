@@ -11,7 +11,7 @@
   "content_scripts": [
     {
       "matches": ["https://github.com/*/*/pulls*"],
-      "js": ["src/tree.js", "src/dom.js", "src/content-bootstrap.js", "src/content.js"],
+      "js": ["src/tree.js", "src/dom.js", "src/fetch-pulls.js", "src/content-bootstrap.js", "src/content.js"],
       "css": ["src/styles.css"],
       "run_at": "document_idle"
     }

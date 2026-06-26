@@ -28,10 +28,12 @@ function runBrowserEval(fixtureName) {
 
   const treeSrc = fs.readFileSync(path.join(ROOT, 'src/tree.js'), 'utf8');
   const domSrc = fs.readFileSync(path.join(ROOT, 'src/dom.js'), 'utf8');
+  const fetchSrc = fs.readFileSync(path.join(ROOT, 'src/fetch-pulls.js'), 'utf8');
   const bootstrapSrc = fs.readFileSync(path.join(ROOT, 'src/content-bootstrap.js'), 'utf8');
 
   window.eval(treeSrc);
   window.eval(domSrc);
+  window.eval(fetchSrc);
   window.eval(bootstrapSrc);
 
   assert.ok(window.PRTree?.buildPrTree, 'PRTree loaded via eval');

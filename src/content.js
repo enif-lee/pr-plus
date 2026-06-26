@@ -10,6 +10,7 @@
     window,
     PRTree: globalThis.PRTree,
     PRTreeDOM: globalThis.PRTreeDOM,
+    PRTreeFetch: globalThis.PRTreeFetch,
   });
 
   function runBootstrap() {

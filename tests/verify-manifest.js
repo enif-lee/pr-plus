@@ -15,7 +15,7 @@ if (!script.matches.some((m) => m.includes('github.com') && m.includes('pulls'))
   throw new Error('Content script must match github PR list URLs');
 }
 
-const requiredJs = ['src/tree.js', 'src/dom.js', 'src/content-bootstrap.js', 'src/content.js'];
+const requiredJs = ['src/tree.js', 'src/dom.js', 'src/fetch-pulls.js', 'src/content-bootstrap.js', 'src/content.js'];
 for (const f of requiredJs) {
   if (!script.js.includes(f)) throw new Error(`Missing ${f} in content_scripts`);
 }
