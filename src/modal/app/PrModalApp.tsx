@@ -31,6 +31,17 @@ import {
   normalizeShell,
   type ShellMode,
 } from '../lib/shell-preference';
+import {
+  FILE_NAV_DEFAULT_WIDTH,
+  clampFileNavWidth,
+  toggleFileNavCollapsed,
+  nextFileNavWidthFromDrag,
+  fileNavGridTemplate,
+  loadFileNavPref,
+  saveFileNavPref,
+  resolveFileNavStorage,
+  type FileNavPref,
+} from '../lib/file-nav-layout';
 import { annotateFilesForCollapse } from '../lib/collapse';
 import { filterFilesByQuery, countReviewThreadsByPath, groupReviewThreads, toggleViewedPath, isPathViewed } from '../lib/review-threads';
 import { flattenFilesToVirtualRows, fileStartIndexMap } from '../lib/diff-rows';
@@ -186,6 +197,18 @@ export function PrModalApp({
       return SHELL_MODAL;
     }
   });
+  /** Diff files navigator: collapsed + width (persisted). */
+  const [fileNav, setFileNav] = useState<FileNavPref>(() => {
+    try {
+      if (typeof window === 'undefined') {
+        return { collapsed: false, width: FILE_NAV_DEFAULT_WIDTH };
+      }
+      return loadFileNavPref(resolveFileNavStorage(window));
+    } catch {
+      return { collapsed: false, width: FILE_NAV_DEFAULT_WIDTH };
+    }
+  });
+  const fileNavDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const listRef = useRef<any>(null);
   const searchInputRef = useRef<any>(null);
   const shellRef = useRef<any>(null);
@@ -561,13 +584,76 @@ export function PrModalApp({
     });
   }
 
-  // Re-apply saved shell when modal opens (next PR / reopen)
+  function persistFileNav(next: FileNavPref) {
+    try {
+      if (typeof window !== 'undefined') {
+        saveFileNavPref(resolveFileNavStorage(window), next);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function onToggleFileNavCollapse() {
+    setFileNav((prev) => {
+      const next = {
+        ...prev,
+        collapsed: toggleFileNavCollapsed(prev.collapsed),
+        width: clampFileNavWidth(prev.width),
+      };
+      persistFileNav(next);
+      return next;
+    });
+  }
+
+  function onFileNavResizeStart(e: React.PointerEvent) {
+    if (fileNav.collapsed) return;
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = clampFileNavWidth(fileNav.width);
+    fileNavDragRef.current = { startX, startWidth };
+    const target = e.currentTarget as HTMLElement;
+    try {
+      target.setPointerCapture?.(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+
+    const onMove = (ev: PointerEvent) => {
+      const drag = fileNavDragRef.current;
+      if (!drag) return;
+      const nextW = nextFileNavWidthFromDrag(drag.startWidth, ev.clientX - drag.startX);
+      setFileNav((prev) => ({ ...prev, width: nextW, collapsed: false }));
+    };
+    const onUp = (ev: PointerEvent) => {
+      fileNavDragRef.current = null;
+      try {
+        target.releasePointerCapture?.(ev.pointerId);
+      } catch {
+        /* ignore */
+      }
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      setFileNav((prev) => {
+        const next = { ...prev, width: clampFileNavWidth(prev.width) };
+        persistFileNav(next);
+        return next;
+      });
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  }
+
+  // Re-apply saved shell + file nav when modal opens (next PR / reopen)
   useEffect(() => {
     if (!open) return;
     try {
       if (typeof window === 'undefined') return;
       const stored = loadShellPref(resolveShellStorage(window));
       setShellMode(normalizeShell(stored));
+      setFileNav(loadFileNavPref(resolveFileNavStorage(window)));
     } catch {
       /* ignore */
     }
@@ -2132,7 +2218,19 @@ export function PrModalApp({
           />
         ) : null}
         {detail && layoutMode === LAYOUT_DIFF ? (
-          <div className="prp-diff-layout">
+          <div
+            className={`prp-diff-layout${
+              fileNav.collapsed ? ' prp-diff-layout--nav-collapsed' : ''
+            }`}
+            style={
+              {
+                gridTemplateColumns: fileNavGridTemplate(fileNav),
+                ['--prp-file-nav-width' as any]: `${clampFileNavWidth(fileNav.width)}px`,
+              } as React.CSSProperties
+            }
+            data-file-nav-collapsed={fileNav.collapsed ? '1' : '0'}
+            data-file-nav-width={clampFileNavWidth(fileNav.width)}
+          >
             <FolderFileTree
               files={annotatedFiles}
               tree={fileTree}
@@ -2147,6 +2245,20 @@ export function PrModalApp({
               threadCounts={threadCounts}
               viewedPaths={viewedPaths}
               onToggleViewed={onToggleViewed}
+              navCollapsed={fileNav.collapsed}
+              onToggleNavCollapse={onToggleFileNavCollapse}
+            />
+            <div
+              className="prp-file-nav-resizer"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize files navigator"
+              aria-valuenow={clampFileNavWidth(fileNav.width)}
+              aria-valuemin={160}
+              aria-valuemax={520}
+              data-collapsed={fileNav.collapsed ? '1' : '0'}
+              onPointerDown={onFileNavResizeStart}
+              title="Drag to resize files navigator"
             />
             <div className="prp-diff-pane">
               <DiffChrome detail={detail} />

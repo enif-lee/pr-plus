@@ -32,6 +32,8 @@ const tests = [
   'session-view.test.js',
   'shell-preference.test.js',
   'side-sheet-toggle.test.js',
+  'file-nav-layout.test.js',
+  'file-nav-ui.test.js',
   'uri-route.test.js',
   'uri-route-host.test.js',
   'diff-snippet.test.js',

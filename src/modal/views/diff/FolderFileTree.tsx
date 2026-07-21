@@ -17,6 +17,8 @@ function FolderFileTreeImpl(props: any) {
     threadCounts,
     viewedPaths,
     onToggleViewed,
+    navCollapsed = false,
+    onToggleNavCollapse,
   } = props;
 
   const visible = useMemo(() => {
@@ -26,14 +28,47 @@ function FolderFileTreeImpl(props: any) {
     return tree || [];
   }, [tree, expandedDirs]);
 
+  if (navCollapsed) {
+    return (
+      <aside className="prp-filetree prp-filetree--collapsed" aria-label="Files navigator collapsed">
+        <button
+          type="button"
+          className="prp-filetree__rail-toggle"
+          onClick={onToggleNavCollapse}
+          title="Expand files navigator"
+          aria-label="Expand files navigator"
+          aria-expanded={false}
+        >
+          <span aria-hidden="true">▸</span>
+        </button>
+      </aside>
+    );
+  }
+
   return (
-    <aside className="prp-filetree">
+    <aside className="prp-filetree" aria-label="Files navigator">
+      <div className="prp-filetree__head">
+        <span className="prp-filetree__head-label">Files</span>
+        {typeof onToggleNavCollapse === 'function' ? (
+          <button
+            type="button"
+            className="prp-filetree__collapse-nav"
+            onClick={onToggleNavCollapse}
+            title="Collapse files navigator"
+            aria-label="Collapse files navigator"
+            aria-expanded={true}
+          >
+            <span aria-hidden="true">◂</span>
+          </button>
+        ) : null}
+      </div>
       <div className="prp-filetree__search">
         <input
-          className="prp-filetree__input"
+          className="prp-filetree__search-input"
           placeholder="Filter files…"
           value={fileQuery || ''}
           onChange={(e) => onFileQuery?.(e.target.value)}
+          aria-label="Filter files"
         />
       </div>
       <ul className="prp-filetree__list">
