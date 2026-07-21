@@ -3,7 +3,13 @@
 const { useCallback, useEffect, useMemo, useRef, useState } = React;
 const { LAYOUT_CENTERED, LAYOUT_DIFF, layoutClassName } = PRModalLayout;
 const { calculateVisibleRange, scrollTopForIndex } = PRModalVirtual;
-const { buildSearchIndex, searchIndex, nextHitIndex } = PRModalSearch;
+const {
+  buildSearchIndex,
+  searchIndex,
+  nextHitIndex,
+  resolveQuerySearchState,
+  resolveNavSearchState,
+} = PRModalSearch;
 const { flattenFilesToVirtualRows, fileStartIndexMap } = PRModalDiffRows;
 
 const ROW_HEIGHT = 22;
@@ -463,13 +469,6 @@ function PrModalApp({ open, loading, error, detail, onClose, onRefresh }) {
     return () => window.removeEventListener('keydown', onKey, true);
   }, [open, searchOpen, layoutMode, onClose]);
 
-  useEffect(() => {
-    if (!searchOpen) return;
-    const hits = searchIndex(docs, searchQuery);
-    setSearchHits(hits);
-    setSearchHitIndex(hits.length ? 0 : -1);
-  }, [searchQuery, docs, searchOpen]);
-
   const jumpToHit = useCallback(
     (hit) => {
       if (!hit) return;
@@ -492,11 +491,20 @@ function PrModalApp({ open, loading, error, detail, onClose, onRefresh }) {
     [layoutMode, viewportHeight, virtualRows.length]
   );
 
+  // Query change: always jump via resolveQuerySearchState (even if hitIndex stays 0).
   useEffect(() => {
-    if (searchHitIndex >= 0 && searchHits[searchHitIndex]) {
-      jumpToHit(searchHits[searchHitIndex]);
-    }
-  }, [searchHitIndex]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!searchOpen) return;
+    const state = resolveQuerySearchState(docs, searchQuery);
+    setSearchHits(state.hits);
+    setSearchHitIndex(state.hitIndex);
+    if (state.shouldJump) jumpToHit(state.activeHit);
+  }, [searchQuery, docs, searchOpen, jumpToHit]);
+
+  function navSearch(delta) {
+    const state = resolveNavSearchState(searchHits, searchHitIndex, delta);
+    setSearchHitIndex(state.hitIndex);
+    if (state.shouldJump) jumpToHit(state.activeHit);
+  }
 
   function expandDiff(after) {
     setAnimClass('prp-modal--animating');
@@ -632,12 +640,8 @@ function PrModalApp({ open, loading, error, detail, onClose, onRefresh }) {
           inputRef={searchInputRef}
           onChange={setSearchQuery}
           onClose={() => setSearchOpen(false)}
-          onNext={() =>
-            setSearchHitIndex((i) => nextHitIndex(i, searchHits.length, 1))
-          }
-          onPrev={() =>
-            setSearchHitIndex((i) => nextHitIndex(i, searchHits.length, -1))
-          }
+          onNext={() => navSearch(1)}
+          onPrev={() => navSearch(-1)}
         />
         {loading ? <div className="prp-status">Loading pull request…</div> : null}
         {error ? <div className="prp-status prp-status--error">{error}</div> : null}
@@ -683,10 +687,30 @@ function PrModalApp({ open, loading, error, detail, onClose, onRefresh }) {
   );
 }
 
+/**
+ * Create or reuse a React root on hostEl. Prefer updating via returned
+ * `.render(nextProps)` instead of unmounting (preserves layout/scroll/search).
+ */
 function mountPrModal(hostEl, props) {
-  const root = ReactDOM.createRoot(hostEl);
+  let root = hostEl.__prpReactRoot;
+  if (!root) {
+    root = ReactDOM.createRoot(hostEl);
+    hostEl.__prpReactRoot = root;
+  }
   root.render(React.createElement(PrModalApp, props));
-  return root;
+  return {
+    render(nextProps) {
+      root.render(React.createElement(PrModalApp, nextProps));
+    },
+    unmount() {
+      try {
+        root.unmount();
+      } catch {
+        /* ignore */
+      }
+      delete hostEl.__prpReactRoot;
+    },
+  };
 }
 
 globalThis.PRModalApp = PrModalApp;

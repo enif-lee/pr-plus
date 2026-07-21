@@ -111,10 +111,57 @@ function nextHitIndex(current, total, delta) {
   return (current + delta + total) % total;
 }
 
+/**
+ * React search wiring contract for a **query change** (typing / new search).
+ * Always returns shouldJump when any hit exists so stagnant hitIndex=0 still
+ * scrolls to the correct (possibly different) row for a refined query.
+ *
+ * @param {SearchDoc[]} docs
+ * @param {string} query
+ * @returns {{ hits: SearchHit[], hitIndex: number, activeHit: SearchHit|null, shouldJump: boolean }}
+ */
+function resolveQuerySearchState(docs, query) {
+  const hits = searchIndex(docs, query);
+  if (!hits.length) {
+    return { hits, hitIndex: -1, activeHit: null, shouldJump: false };
+  }
+  return {
+    hits,
+    hitIndex: 0,
+    activeHit: hits[0],
+    shouldJump: true,
+  };
+}
+
+/**
+ * React search wiring contract for next/prev navigation.
+ * shouldJump is true whenever a hit exists — including a single-hit wrap
+ * where hitIndex stays 0 so the user can re-scroll to the only match.
+ *
+ * @param {SearchHit[]} hits
+ * @param {number} hitIndex
+ * @param {number} delta
+ */
+function resolveNavSearchState(hits, hitIndex, delta) {
+  const list = Array.isArray(hits) ? hits : [];
+  if (!list.length) {
+    return { hits: list, hitIndex: -1, activeHit: null, shouldJump: false };
+  }
+  const next = nextHitIndex(hitIndex, list.length, delta);
+  return {
+    hits: list,
+    hitIndex: next,
+    activeHit: list[next],
+    shouldJump: next >= 0,
+  };
+}
+
 const api = {
   buildSearchIndex,
   searchIndex,
   nextHitIndex,
+  resolveQuerySearchState,
+  resolveNavSearchState,
 };
 
 if (typeof module !== 'undefined' && module.exports) {

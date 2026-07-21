@@ -1,6 +1,7 @@
 /**
  * Content-script host: intercept PR list clicks, mount React modal overlay.
  * Bundle + CSS are extension-local (no remote code).
+ * Host updates reuse the same React root so Diff/search/scroll state survives refresh.
  */
 
 (function initPrModalHost() {
@@ -37,28 +38,11 @@
     return host;
   }
 
-  function render() {
-    if (typeof globalThis.mountPrModal !== 'function') {
-      console.warn('[pr+] modal bundle not loaded (mountPrModal missing)');
-      return;
-    }
-    const host = ensureHost();
-    if (reactRoot) {
-      try {
-        reactRoot.unmount();
-      } catch {
-        /* ignore */
-      }
-      reactRoot = null;
-      host.replaceChildren();
-    }
-    if (!current.open) {
-      return;
-    }
+  function buildProps() {
     const owner = current.owner;
     const repo = current.repo;
     const number = current.number;
-    reactRoot = globalThis.mountPrModal(host, {
+    return {
       open: current.open,
       loading: current.loading,
       error: current.error,
@@ -90,7 +74,36 @@
           }
         }
       },
-    });
+    };
+  }
+
+  function render() {
+    if (typeof globalThis.mountPrModal !== 'function') {
+      console.warn('[pr+] modal bundle not loaded (mountPrModal missing)');
+      return;
+    }
+    const host = ensureHost();
+
+    if (!current.open) {
+      if (reactRoot) {
+        try {
+          reactRoot.unmount();
+        } catch {
+          /* ignore */
+        }
+        reactRoot = null;
+        host.replaceChildren();
+      }
+      return;
+    }
+
+    const props = buildProps();
+    if (reactRoot && typeof reactRoot.render === 'function') {
+      // Reuse root — preserves Diff layout, scrollTop, and search UI state.
+      reactRoot.render(props);
+      return;
+    }
+    reactRoot = globalThis.mountPrModal(host, props);
   }
 
   function closeModal() {

@@ -29,6 +29,8 @@ const outfile = path.join(outDir, 'pr-modal.bundle.js');
 const tmpEntry = path.join(outDir, '_entry.jsx');
 
 const appSource = fs.readFileSync(entry, 'utf8');
+// Source uses ReactDOM.createRoot for readability / non-bundled eval; the
+// production IIFE gets esbuild-injected createRoot from react-dom/client.
 const appFixed = appSource
   .replace(
     '/* global React, PRModalLayout, PRModalVirtual, PRModalSearch, PRModalDiffRows */',
@@ -39,14 +41,7 @@ const PRModalVirtual = globalThis.PRModalVirtual;
 const PRModalSearch = globalThis.PRModalSearch;
 const PRModalDiffRows = globalThis.PRModalDiffRows;`
   )
-  .replace(
-    'function mountPrModal(hostEl, props) {\n  const root = ReactDOM.createRoot(hostEl);\n  root.render(React.createElement(PrModalApp, props));\n  return root;\n}',
-    `function mountPrModal(hostEl, props) {
-  const root = createRoot(hostEl);
-  root.render(React.createElement(PrModalApp, props));
-  return root;
-}`
-  );
+  .replace(/ReactDOM\.createRoot/g, 'createRoot');
 
 fs.writeFileSync(
   tmpEntry,

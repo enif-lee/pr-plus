@@ -37,9 +37,12 @@ const dom = new JSDOM(fixtureHtml, {
 const { window } = dom;
 const { document } = window;
 
-// Provide stubs for mount
+// Provide stubs for mount — render() must update props without unmount
 let lastProps = null;
+let mountCount = 0;
+let renderCount = 0;
 window.mountPrModal = (host, props) => {
+  mountCount += 1;
   lastProps = props;
   host.setAttribute('data-mounted', '1');
   host.textContent = props.loading
@@ -52,7 +55,15 @@ window.mountPrModal = (host, props) => {
       host.removeAttribute('data-mounted');
       host.textContent = '';
     },
-    render() {},
+    render(nextProps) {
+      renderCount += 1;
+      lastProps = nextProps;
+      host.textContent = nextProps.loading
+        ? 'loading'
+        : nextProps.detail
+          ? `detail:${nextProps.detail.number}`
+          : 'open';
+    },
   };
 };
 window.PRTreeFetch = {
@@ -137,6 +148,9 @@ function flush() {
   await flush();
   await flush();
   const after = window.PRModalHost._getState();
+  // After loading detail, host must reuse root via .render (not remount)
+  assert.equal(mountCount, 1, 'mountPrModal called once');
+  assert.ok(renderCount >= 1, 'subsequent updates use root.render');
   assert.equal(after.open, true);
   assert.equal(after.loading, false);
   assert.equal(after.detail?.number, 101);
