@@ -245,6 +245,228 @@ async function fetchOpenPulls(owner, repo, fetchImpl, options = {}) {
   return attachMagicLinks(prs, autolinks);
 }
 
+async function apiJson(url, fetchImpl, token) {
+  const res = await fetchImpl(url, { headers: buildApiHeaders(token) });
+  if (!res.ok) {
+    const err = new Error(`GitHub API ${res.status}: ${res.statusText}`);
+    err.status = res.status;
+    throw err;
+  }
+  return res.json();
+}
+
+async function apiSend(url, fetchImpl, token, { method = 'GET', body } = {}) {
+  const headers = buildApiHeaders(token);
+  if (body != null) headers['Content-Type'] = 'application/json';
+  const res = await fetchImpl(url, {
+    method,
+    headers,
+    body: body != null ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const j = await res.json();
+      if (j?.message) detail = j.message;
+    } catch {
+      /* ignore */
+    }
+    const err = new Error(`GitHub API ${res.status}: ${detail}`);
+    err.status = res.status;
+    throw err;
+  }
+  if (res.status === 204) return null;
+  return res.json();
+}
+
+/**
+ * Full PR detail payload for the modal: header, body, files+patches,
+ * issue comments, reviews, review comments, commits, checks.
+ */
+async function fetchPrDetail(owner, repo, pullNumber, fetchImpl, token = null) {
+  const base = `https://api.github.com/repos/${owner}/${repo}`;
+  const n = Number(pullNumber);
+
+  const [pr, files, comments, reviews, commits, reviewComments] = await Promise.all([
+    apiJson(`${base}/pulls/${n}`, fetchImpl, token),
+    apiJson(`${base}/pulls/${n}/files?per_page=100`, fetchImpl, token),
+    apiJson(`${base}/issues/${n}/comments?per_page=100`, fetchImpl, token).catch(
+      () => []
+    ),
+    apiJson(`${base}/pulls/${n}/reviews?per_page=100`, fetchImpl, token).catch(
+      () => []
+    ),
+    apiJson(`${base}/pulls/${n}/commits?per_page=100`, fetchImpl, token).catch(
+      () => []
+    ),
+    apiJson(`${base}/pulls/${n}/comments?per_page=100`, fetchImpl, token).catch(
+      () => []
+    ),
+  ]);
+
+  const headSha = pr.head?.sha || '';
+  let checks = { state: 'unknown', totalCount: 0, statuses: [] };
+  if (headSha) {
+    try {
+      const status = await apiJson(
+        `${base}/commits/${headSha}/status`,
+        fetchImpl,
+        token
+      );
+      checks = {
+        state: status.state || 'unknown',
+        totalCount: status.total_count || 0,
+        statuses: (status.statuses || []).slice(0, 40).map((s) => ({
+          context: s.context || '',
+          state: s.state || '',
+          description: s.description || '',
+          targetUrl: s.target_url || '',
+        })),
+      };
+    } catch {
+      /* ignore */
+    }
+    try {
+      const runs = await apiJson(
+        `${base}/commits/${headSha}/check-runs?per_page=40`,
+        fetchImpl,
+        token
+      );
+      const list = runs.check_runs || [];
+      if (list.length) {
+        checks.checkRuns = list.map((r) => ({
+          name: r.name || '',
+          status: r.status || '',
+          conclusion: r.conclusion || '',
+          htmlUrl: r.html_url || '',
+        }));
+        if (checks.state === 'unknown') {
+          const failed = list.some(
+            (r) => r.conclusion === 'failure' || r.conclusion === 'timed_out'
+          );
+          const pending = list.some(
+            (r) => r.status === 'queued' || r.status === 'in_progress'
+          );
+          checks.state = failed ? 'failure' : pending ? 'pending' : 'success';
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  return {
+    owner,
+    repo,
+    number: pr.number,
+    title: pr.title,
+    body: pr.body || '',
+    state: pr.state,
+    draft: Boolean(pr.draft),
+    author: pr.user?.login || '',
+    baseRef: pr.base?.ref || '',
+    headRef: pr.head?.ref || '',
+    headSha,
+    htmlUrl: pr.html_url,
+    merged: Boolean(pr.merged),
+    mergeable: pr.mergeable,
+    createdAt: pr.created_at,
+    updatedAt: pr.updated_at,
+    additions: pr.additions,
+    deletions: pr.deletions,
+    changedFiles: pr.changed_files,
+    files: (Array.isArray(files) ? files : []).map((f) => ({
+      filename: f.filename,
+      status: f.status,
+      additions: f.additions,
+      deletions: f.deletions,
+      changes: f.changes,
+      patch: f.patch || '',
+    })),
+    comments: (Array.isArray(comments) ? comments : []).map((c) => ({
+      id: c.id,
+      author: c.user?.login || '',
+      body: c.body || '',
+      createdAt: c.created_at,
+    })),
+    reviews: (Array.isArray(reviews) ? reviews : []).map((r) => ({
+      id: r.id,
+      author: r.user?.login || '',
+      state: r.state || '',
+      body: r.body || '',
+      submittedAt: r.submitted_at,
+    })),
+    reviewComments: (Array.isArray(reviewComments) ? reviewComments : []).map(
+      (c) => ({
+        id: c.id,
+        author: c.user?.login || '',
+        body: c.body || '',
+        path: c.path || '',
+        line: c.line ?? c.original_line ?? null,
+        side: c.side || 'RIGHT',
+        diffHunk: c.diff_hunk || '',
+        createdAt: c.created_at,
+      })
+    ),
+    commits: (Array.isArray(commits) ? commits : []).map((c) => ({
+      sha: c.sha || '',
+      message: c.commit?.message || '',
+      author: c.commit?.author?.name || c.author?.login || '',
+    })),
+    checks,
+  };
+}
+
+async function postIssueComment(owner, repo, issueNumber, body, fetchImpl, token) {
+  return apiSend(
+    `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/comments`,
+    fetchImpl,
+    token,
+    { method: 'POST', body: { body } }
+  );
+}
+
+/**
+ * @param {'APPROVE'|'REQUEST_CHANGES'|'COMMENT'} event
+ */
+async function submitPullReview(
+  owner,
+  repo,
+  pullNumber,
+  { event, body = '' },
+  fetchImpl,
+  token
+) {
+  return apiSend(
+    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`,
+    fetchImpl,
+    token,
+    { method: 'POST', body: { event, body } }
+  );
+}
+
+/**
+ * Line-level review comment on a PR file.
+ * Prefer commit_id + path + line (side RIGHT) for multi-line API.
+ */
+async function postReviewComment(
+  owner,
+  repo,
+  pullNumber,
+  { body, path, line, side = 'RIGHT', commitId },
+  fetchImpl,
+  token
+) {
+  const payload = { body, path, line, side };
+  if (commitId) payload.commit_id = commitId;
+  return apiSend(
+    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/comments`,
+    fetchImpl,
+    token,
+    { method: 'POST', body: payload }
+  );
+}
+
 const fetchApi = {
   mapApiPullRequest,
   buildApiHeaders,
@@ -259,6 +481,12 @@ const fetchApi = {
   prMatchText,
   attachMagicLinks,
   fetchOpenPulls,
+  fetchPrDetail,
+  postIssueComment,
+  submitPullReview,
+  postReviewComment,
+  apiJson,
+  apiSend,
 };
 
 if (typeof module !== 'undefined' && module.exports) {

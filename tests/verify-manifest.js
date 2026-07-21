@@ -41,7 +41,6 @@ if (!script.matches.some((m) => m.includes('github.com/*') || m === 'https://git
   throw new Error('Content script must match https://github.com/* for SPA navigation');
 }
 
-// Content scripts must not load storage.js / fetch-pulls.js (they hold/use the PAT).
 const forbiddenInContent = ['src/storage.js', 'src/fetch-pulls.js', 'src/background.js'];
 for (const f of forbiddenInContent) {
   if (script.js.includes(f)) {
@@ -55,9 +54,18 @@ const requiredJs = [
   'src/content-bridge.js',
   'src/content-bootstrap.js',
   'src/content.js',
+  'src/modal/dist/pr-modal.bundle.js',
+  'src/pr-modal-host.js',
 ];
 for (const f of requiredJs) {
   if (!script.js.includes(f)) throw new Error(`Missing ${f} in content_scripts`);
+  const abs = path.join(__dirname, '..', f);
+  if (!fs.existsSync(abs)) throw new Error(`Missing file on disk: ${f}`);
 }
 
-console.log('verify-manifest.js: manifest v3 OK, PAT isolated in service worker');
+const war = manifest.web_accessible_resources?.[0];
+if (!war?.resources?.includes('src/modal/dist/pr-modal.css')) {
+  throw new Error('web_accessible_resources must expose pr-modal.css');
+}
+
+console.log('verify-manifest.js: manifest v3 OK, modal bundle wired, PAT isolated');

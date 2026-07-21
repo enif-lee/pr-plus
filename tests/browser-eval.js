@@ -7,7 +7,10 @@ const path = require('node:path');
 const { JSDOM } = require('jsdom');
 
 const ROOT = path.join(__dirname, '..');
-const SCRATCH = '/var/folders/sl/km7nh7qj50b9mw4901n7ch940000gn/T/grok-goal-00241f759391/implementer';
+const SCRATCH =
+  process.env.PRP_SCRATCH ||
+  '/var/folders/sl/km7nh7qj50b9mw4901n7ch940000gn/T/grok-goal-090750d025fa/implementer';
+fs.mkdirSync(SCRATCH, { recursive: true });
 
 const logs = [];
 

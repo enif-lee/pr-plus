@@ -2,16 +2,43 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
-const SCRATCH = '/var/folders/sl/km7nh7qj50b9mw4901n7ch940000gn/T/grok-goal-00241f759391/implementer';
+const SCRATCH =
+  process.env.PRP_SCRATCH ||
+  '/var/folders/sl/km7nh7qj50b9mw4901n7ch940000gn/T/grok-goal-bb0c8cb3d71a/implementer';
 fs.mkdirSync(SCRATCH, { recursive: true });
 
-const tests = ['tree.test.js', 'storage.test.js', 'fetch-pulls.test.js', 'dom.test.js', 'content-bootstrap.test.js', 'browser-eval.js'];
+// Ensure modal bundle exists for host/bundle tests
+const build = spawnSync(process.execPath, [path.join(__dirname, '../scripts/build-modal.mjs')], {
+  encoding: 'utf8',
+  env: process.env,
+});
+if (build.status !== 0) {
+  process.stderr.write(build.stdout + build.stderr);
+  process.exit(build.status || 1);
+}
+
+const tests = [
+  'tree.test.js',
+  'storage.test.js',
+  'fetch-pulls.test.js',
+  'fetch-pr-detail.test.js',
+  'dom.test.js',
+  'content-bootstrap.test.js',
+  'browser-eval.js',
+  'modal-pure.test.js',
+  'pr-modal-bundle.test.js',
+  'pr-modal-host.test.js',
+  'pr-modal-diff-anim.test.js',
+  'pr-modal-search.test.js',
+  'verify-manifest.js',
+];
+
 const combined = [];
 
 for (const file of tests) {
   const result = spawnSync(process.execPath, [path.join(__dirname, file)], {
     encoding: 'utf8',
-    env: process.env,
+    env: { ...process.env, PRP_SCRATCH: SCRATCH },
   });
   const out = (result.stdout || '') + (result.stderr || '');
   combined.push(`=== ${file} ===\n${out}`);
@@ -23,18 +50,19 @@ for (const file of tests) {
 
 const testOutput = combined.join('\n');
 fs.writeFileSync(path.join(SCRATCH, 'test-output.txt'), testOutput);
+fs.writeFileSync(path.join(SCRATCH, 'pr-modal-unit.log'), testOutput);
 
 const treeMatch = testOutput.match(/--- serialized tree ---\n([\s\S]+?)(?:\n===|\n$|$)/);
 if (treeMatch) {
   fs.writeFileSync(path.join(SCRATCH, 'tree-output.txt'), treeMatch[1].trim() + '\n');
 }
 
-// browser-eval.log written by browser-eval.js itself; verify it exists
 const browserEvalPath = path.join(SCRATCH, 'browser-eval.log');
 if (!fs.existsSync(browserEvalPath)) {
-  console.error('browser-eval.log missing');
-  process.exit(1);
+  // browser-eval writes to old path sometimes — rewrite from suite output
+  const m = testOutput.match(/=== browser-eval\.js ===\n([\s\S]*?)(?=\n=== |\n$)/);
+  if (m) fs.writeFileSync(browserEvalPath, m[1]);
 }
 
 console.log(testOutput);
-console.log(`\nWrote test-output.txt and browser-eval.log to ${SCRATCH}`);
+console.log(`\nWrote verification logs to ${SCRATCH}`);

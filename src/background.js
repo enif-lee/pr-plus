@@ -14,6 +14,10 @@ const MSG = {
   TOKEN_CHANGED: 'PR_TREE_TOKEN_CHANGED',
   FETCH_OPEN_PULLS: 'PR_TREE_FETCH_OPEN_PULLS',
   FETCH_DANGLING: 'PR_TREE_FETCH_DANGLING',
+  FETCH_PR_DETAIL: 'PR_TREE_FETCH_PR_DETAIL',
+  POST_ISSUE_COMMENT: 'PR_TREE_POST_ISSUE_COMMENT',
+  SUBMIT_REVIEW: 'PR_TREE_SUBMIT_REVIEW',
+  POST_REVIEW_COMMENT: 'PR_TREE_POST_REVIEW_COMMENT',
 };
 
 function broadcastTokenChanged() {
@@ -86,6 +90,66 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           token
         );
         sendResponse({ ok: true, prs });
+        return;
+      }
+      case MSG.FETCH_PR_DETAIL: {
+        const token = await PRTreeStorage.getGithubToken();
+        const detail = await PRTreeFetch.fetchPrDetail(
+          message.owner,
+          message.repo,
+          message.number,
+          globalThis.fetch.bind(globalThis),
+          token
+        );
+        sendResponse({ ok: true, detail });
+        return;
+      }
+      case MSG.POST_ISSUE_COMMENT: {
+        const token = await PRTreeStorage.getGithubToken();
+        if (!token) throw new Error('GitHub PAT required to post comments');
+        const result = await PRTreeFetch.postIssueComment(
+          message.owner,
+          message.repo,
+          message.number,
+          message.body,
+          globalThis.fetch.bind(globalThis),
+          token
+        );
+        sendResponse({ ok: true, result });
+        return;
+      }
+      case MSG.SUBMIT_REVIEW: {
+        const token = await PRTreeStorage.getGithubToken();
+        if (!token) throw new Error('GitHub PAT required to submit reviews');
+        const result = await PRTreeFetch.submitPullReview(
+          message.owner,
+          message.repo,
+          message.number,
+          { event: message.event, body: message.body || '' },
+          globalThis.fetch.bind(globalThis),
+          token
+        );
+        sendResponse({ ok: true, result });
+        return;
+      }
+      case MSG.POST_REVIEW_COMMENT: {
+        const token = await PRTreeStorage.getGithubToken();
+        if (!token) throw new Error('GitHub PAT required to post review comments');
+        const result = await PRTreeFetch.postReviewComment(
+          message.owner,
+          message.repo,
+          message.number,
+          {
+            body: message.body,
+            path: message.path,
+            line: message.line,
+            side: message.side || 'RIGHT',
+            commitId: message.commitId,
+          },
+          globalThis.fetch.bind(globalThis),
+          token
+        );
+        sendResponse({ ok: true, result });
         return;
       }
       default:

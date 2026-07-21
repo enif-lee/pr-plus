@@ -66,6 +66,66 @@
       }
       return res.prs || [];
     },
+    async fetchPrDetail(owner, repo, number) {
+      const res = await send({
+        type: 'PR_TREE_FETCH_PR_DETAIL',
+        owner,
+        repo,
+        number,
+      });
+      if (!res?.ok) {
+        const err = new Error(res?.error || 'Failed to fetch PR detail');
+        err.status = res?.status;
+        throw err;
+      }
+      return res.detail;
+    },
+    async postIssueComment(owner, repo, number, body) {
+      const res = await send({
+        type: 'PR_TREE_POST_ISSUE_COMMENT',
+        owner,
+        repo,
+        number,
+        body,
+      });
+      if (!res?.ok) {
+        const err = new Error(res?.error || 'Failed to post comment');
+        err.status = res?.status;
+        throw err;
+      }
+      return res.result;
+    },
+    async submitPullReview(owner, repo, number, { event, body }) {
+      const res = await send({
+        type: 'PR_TREE_SUBMIT_REVIEW',
+        owner,
+        repo,
+        number,
+        event,
+        body,
+      });
+      if (!res?.ok) {
+        const err = new Error(res?.error || 'Failed to submit review');
+        err.status = res?.status;
+        throw err;
+      }
+      return res.result;
+    },
+    async postReviewComment(owner, repo, number, payload) {
+      const res = await send({
+        type: 'PR_TREE_POST_REVIEW_COMMENT',
+        owner,
+        repo,
+        number,
+        ...payload,
+      });
+      if (!res?.ok) {
+        const err = new Error(res?.error || 'Failed to post review comment');
+        err.status = res?.status;
+        throw err;
+      }
+      return res.result;
+    },
   };
 
   const PRTreeStorage = {

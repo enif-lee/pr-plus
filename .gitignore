@@ -2,7 +2,7 @@
 node_modules/
 
 # Packaged extension builds (zip / unpacked release trees)
-dist/
+/dist/
 
 # Local agent-browser profile, screenshots, session junk
 .browser/

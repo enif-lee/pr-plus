@@ -1,9 +1,11 @@
 {
   "name": "pr-plus",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "private": true,
   "scripts": {
-    "test": "node tests/run-all.js",
+    "build:modal": "node scripts/build-modal.mjs",
+    "build": "npm run build:modal",
+    "test": "npm run build:modal && node tests/run-all.js",
     "browser:login": "agent-browser close --all 2>/dev/null; agent-browser open https://github.com/login",
     "browser:pulls": "agent-browser close --all 2>/dev/null; agent-browser open https://github.com/rtzr/callabo-server/pulls",
     "browser:open": "agent-browser close --all 2>/dev/null; agent-browser open",
@@ -11,6 +13,9 @@
     "browser:snapshot": "agent-browser snapshot -i -c"
   },
   "devDependencies": {
-    "jsdom": "^25.0.1"
+    "esbuild": "^0.28.1",
+    "jsdom": "^25.0.1",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
   }
 }
