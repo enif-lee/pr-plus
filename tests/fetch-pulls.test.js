@@ -1,159 +1,321 @@
 const assert = require('node:assert/strict');
-const { JSDOM } = require('jsdom');
 
 async function main() {
-const {
-  parseBranchFromRefChannel,
-  parsePrPageHtml,
-  scrapePrListFromDom,
-  fetchOpenPulls,
-  fetchOpenPullsPublic,
-  buildApiHeaders,
-} = require('../src/fetch-pulls.js');
-const { findOriginalPrRows } = require('../src/dom.js');
+  const {
+    fetchOpenPulls,
+    fetchOpenPullsPublic,
+    buildApiHeaders,
+    mapApiPullRequest,
+    findDanglingPrNumbers,
+    fetchPullByNumber,
+  } = require('../src/fetch-pulls.js');
 
-const samplePrHtml = `
-<html><body>
-<script>
-window.data = {
-  "headRefChannel":"eyJjIjoicmVwbzo1MjQwMjQzNTI6YnJhbmNoOmZpeC9pbnNpZ2h0LWJyZXZpdHkiLCJ0IjoxNzgyNDY2ODc3fQ==--abc",
-  "baseRefChannel":"eyJjIjoicmVwbzo1MjQwMjQzNTI6YnJhbmNoOm1haW4iLCJ0IjoxNzgyNDY2ODc3fQ==--def",
-  "title":"fix(insight): brevity",
-  "isDraft":false
-};
-</script>
-</body></html>
-`;
+  // buildApiHeaders with token
+  {
+    const headers = buildApiHeaders('ghp_secret');
+    assert.equal(headers.Authorization, 'Bearer ghp_secret');
+    assert.equal(buildApiHeaders(null).Authorization, undefined);
+  }
 
-// parseBranchFromRefChannel
-{
-  assert.equal(
-    parseBranchFromRefChannel(samplePrHtml, 'headRefChannel'),
-    'fix/insight-brevity'
-  );
-  assert.equal(parseBranchFromRefChannel(samplePrHtml, 'baseRefChannel'), 'main');
-  assert.equal(parseBranchFromRefChannel(samplePrHtml, 'missing'), null);
-}
+  // mapApiPullRequest
+  {
+    const mapped = mapApiPullRequest({
+      number: 7,
+      title: 'Feat',
+      head: { ref: 'feat-x' },
+      base: { ref: 'main' },
+      user: { login: 'dev' },
+      draft: true,
+      html_url: 'https://github.com/o/r/pull/7',
+    });
+    assert.deepEqual(mapped, {
+      number: 7,
+      title: 'Feat',
+      headRef: 'feat-x',
+      baseRef: 'main',
+      author: 'dev',
+      draft: true,
+      htmlUrl: 'https://github.com/o/r/pull/7',
+    });
+  }
 
-// parsePrPageHtml
-{
-  const pr = parsePrPageHtml(samplePrHtml, {
-    number: 2416,
-    title: 'fallback title',
-    author: 'jiunbae',
-    draft: false,
-    htmlUrl: 'https://github.com/o/r/pull/2416',
-  });
-  assert.equal(pr.number, 2416);
-  assert.equal(pr.headRef, 'fix/insight-brevity');
-  assert.equal(pr.baseRef, 'main');
-  assert.equal(pr.author, 'jiunbae');
-  assert.match(pr.title, /brevity/);
-}
+  // findDanglingPrNumbers
+  {
+    assert.deepEqual(
+      findDanglingPrNumbers([10, 11, 12, 11, 'x'], [{ number: 10 }, { number: 12 }]),
+      [11]
+    );
+    assert.deepEqual(findDanglingPrNumbers([], [{ number: 1 }]), []);
+    assert.deepEqual(findDanglingPrNumbers([1, 2], []), [1, 2]);
+  }
 
-// scrapePrListFromDom on legacy fixture
-{
-  const html = require('node:fs').readFileSync(
-    require('node:path').join(__dirname, 'fixtures/github-pulls-legacy.html'),
-    'utf8'
-  );
-  const dom = new JSDOM(html, { url: 'https://github.com/octo/repo/pulls' });
-  const stubs = scrapePrListFromDom(dom.window.document, findOriginalPrRows);
-  assert.equal(stubs.length, 3);
-  assert.deepEqual(
-    stubs.map((s) => s.number),
-    [10, 11, 12]
-  );
-}
-
-// fetchOpenPulls falls back on 404
-{
-  const html = require('node:fs').readFileSync(
-    require('node:path').join(__dirname, 'fixtures/github-pulls-legacy.html'),
-    'utf8'
-  );
-  const dom = new JSDOM(html, { url: 'https://github.com/octo/repo/pulls' });
-
-  const calls = [];
-  const mockFetch = async (url) => {
-    calls.push(url);
-    if (url.includes('api.github.com')) {
-      return { ok: false, status: 404, statusText: 'Not Found' };
-    }
-    if (url.includes('/pull/10')) return { ok: true, text: async () => samplePrHtml.replace('2416', '10') };
-    if (url.includes('/pull/11')) return { ok: true, text: async () => samplePrHtml };
-    if (url.includes('/pull/12')) return { ok: true, text: async () => samplePrHtml };
-    return { ok: false, status: 404, statusText: 'Not Found' };
-  };
-
-  const prs = await fetchOpenPulls('octo', 'repo', mockFetch, {
-    document: dom.window.document,
-    findOriginalPrRows,
-  });
-
-  assert.ok(calls[0].includes('api.github.com'));
-  assert.ok(calls.some((u) => u.includes('/pull/10')));
-  assert.equal(prs.length, 3);
-  assert.equal(prs[0].headRef, 'fix/insight-brevity');
-}
-
-// buildApiHeaders with token
-{
-  const headers = buildApiHeaders('ghp_secret');
-  assert.equal(headers.Authorization, 'Bearer ghp_secret');
-  assert.equal(buildApiHeaders(null).Authorization, undefined);
-}
-
-// fetchOpenPulls uses token on API request
-{
-  let authHeader = null;
-  const mockFetch = async (url, init) => {
-    authHeader = init?.headers?.Authorization;
-    return {
-      ok: true,
-      json: async () => [
-        {
-          number: 2,
-          title: 'B',
-          head: { ref: 'feat-b' },
-          base: { ref: 'main' },
-          user: { login: 'dev' },
-          draft: false,
-          html_url: 'https://github.com/o/r/pull/2',
-        },
-      ],
+  // fetchOpenPulls uses token on API request
+  {
+    let authHeader = null;
+    const mockFetch = async (url, init) => {
+      authHeader = init?.headers?.Authorization;
+      return {
+        ok: true,
+        json: async () => [
+          {
+            number: 2,
+            title: 'B',
+            head: { ref: 'feat-b' },
+            base: { ref: 'main' },
+            user: { login: 'dev' },
+            draft: false,
+            html_url: 'https://github.com/o/r/pull/2',
+          },
+        ],
+      };
     };
-  };
-  const prs = await fetchOpenPulls('octo', 'repo', mockFetch, { token: 'ghp_test' });
-  assert.equal(authHeader, 'Bearer ghp_test');
-  assert.equal(prs.length, 1);
-}
+    const prs = await fetchOpenPulls('octo', 'repo', mockFetch, { token: 'ghp_test' });
+    assert.equal(authHeader, 'Bearer ghp_test');
+    assert.equal(prs.length, 1);
+  }
 
-// fetchOpenPulls uses public API when available
-{
-  const mockFetch = async (url) => {
-    if (!url.includes('api.github.com')) throw new Error('should not fallback');
-    return {
-      ok: true,
-      json: async () => [
+  // fetchOpenPullsPublic maps API payload
+  {
+    const mockFetch = async (url) => {
+      assert.ok(url.includes('api.github.com'));
+      assert.ok(!/\/pulls\/\d+$/.test(url));
+      return {
+        ok: true,
+        json: async () => [
+          {
+            number: 1,
+            title: 'A',
+            head: { ref: 'feat-a' },
+            base: { ref: 'main' },
+            user: { login: 'dev' },
+            draft: false,
+            html_url: 'https://github.com/o/r/pull/1',
+          },
+        ],
+      };
+    };
+    const prs = await fetchOpenPullsPublic('octo', 'repo', mockFetch);
+    assert.equal(prs.length, 1);
+    assert.equal(prs[0].headRef, 'feat-a');
+  }
+
+  // list API failure still throws (no HTML fallback)
+  {
+    const calls = [];
+    const mockFetch = async (url) => {
+      calls.push(url);
+      return { ok: false, status: 404, statusText: 'Not Found' };
+    };
+
+    await assert.rejects(
+      () => fetchOpenPulls('octo', 'repo', mockFetch, { pagePrNumbers: [1] }),
+      (err) => err.status === 404
+    );
+    assert.equal(calls.length, 1);
+    assert.match(calls[0], /\/pulls\?/);
+  }
+
+  // dangling page PRs are filled via single-PR GET
+  {
+    const calls = [];
+    const mockFetch = async (url) => {
+      calls.push(url);
+      if (/\/pulls\?/.test(url)) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              number: 100,
+              title: 'Listed',
+              head: { ref: 'feat-a' },
+              base: { ref: 'main' },
+              user: { login: 'dev' },
+              draft: false,
+              html_url: 'https://github.com/octo/repo/pull/100',
+            },
+          ],
+        };
+      }
+      if (url.endsWith('/pulls/999')) {
+        return {
+          ok: true,
+          json: async () => ({
+            number: 999,
+            title: 'Dangling',
+            head: { ref: 'feat-z' },
+            base: { ref: 'feat-a' },
+            user: { login: 'other' },
+            draft: true,
+            html_url: 'https://github.com/octo/repo/pull/999',
+          }),
+        };
+      }
+      return { ok: false, status: 404, statusText: 'Not Found' };
+    };
+
+    const prs = await fetchOpenPulls('octo', 'repo', mockFetch, {
+      pagePrNumbers: [100, 999],
+    });
+
+    assert.equal(prs.length, 2);
+    const dangling = prs.find((p) => p.number === 999);
+    assert.equal(dangling.headRef, 'feat-z');
+    assert.equal(dangling.baseRef, 'feat-a');
+    assert.equal(dangling.draft, true);
+
+    assert.equal(calls.filter((u) => /\/pulls\?/.test(u)).length, 1);
+    assert.equal(calls.filter((u) => u.endsWith('/pulls/999')).length, 1);
+    assert.equal(calls.filter((u) => u.endsWith('/pulls/100')).length, 0);
+  }
+
+  // dangling 404 is skipped; listed PRs still returned
+  {
+    const mockFetch = async (url) => {
+      if (/\/pulls\?/.test(url)) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              number: 1,
+              title: 'A',
+              head: { ref: 'a' },
+              base: { ref: 'main' },
+              user: { login: 'dev' },
+              draft: false,
+              html_url: 'https://github.com/o/r/pull/1',
+            },
+          ],
+        };
+      }
+      return { ok: false, status: 404, statusText: 'Not Found' };
+    };
+
+    const prs = await fetchOpenPulls('octo', 'repo', mockFetch, {
+      pagePrNumbers: [1, 2],
+    });
+    assert.equal(prs.length, 1);
+    assert.equal(prs[0].number, 1);
+  }
+
+  // fetchPullByNumber
+  {
+    const mockFetch = async (url, init) => {
+      assert.equal(url, 'https://api.github.com/repos/o/r/pulls/42');
+      assert.equal(init.headers.Authorization, 'Bearer tok');
+      return {
+        ok: true,
+        json: async () => ({
+          number: 42,
+          title: 'Single',
+          head: { ref: 'h' },
+          base: { ref: 'b' },
+          user: { login: 'u' },
+          draft: false,
+          html_url: 'https://github.com/o/r/pull/42',
+        }),
+      };
+    };
+    const pr = await fetchPullByNumber('o', 'r', 42, mockFetch, 'tok');
+    assert.equal(pr.number, 42);
+    assert.equal(pr.headRef, 'h');
+  }
+
+  // Autolink / magic link matching
+  {
+    const {
+      matchAutolinksInText,
+      buildAutolinkUrl,
+      attachMagicLinks,
+      fetchRepoAutolinks,
+      fetchOpenPulls,
+    } = require('../src/fetch-pulls.js');
+
+    assert.equal(
+      buildAutolinkUrl('https://linear.app/t/issue/ENG-<num>', '123'),
+      'https://linear.app/t/issue/ENG-123'
+    );
+
+    const rules = [
+      {
+        key_prefix: 'ENG-',
+        url_template: 'https://linear.app/acme/issue/ENG-<num>',
+        is_alphanumeric: true,
+      },
+      {
+        key_prefix: 'JIRA-',
+        url_template: 'https://jira.example/browse/JIRA-<num>',
+        is_alphanumeric: false,
+      },
+    ];
+
+    const matches = matchAutolinksInText(
+      'feat: ENG-42 improve stack (also JIRA-99 and ENG-42 again)',
+      rules
+    );
+    assert.equal(matches.length, 2);
+    assert.equal(matches[0].key, 'ENG-42');
+    assert.equal(matches[0].url, 'https://linear.app/acme/issue/ENG-42');
+    assert.equal(matches[1].key, 'JIRA-99');
+
+    const attached = attachMagicLinks(
+      [
         {
           number: 1,
-          title: 'A',
-          head: { ref: 'feat-a' },
-          base: { ref: 'main' },
-          user: { login: 'dev' },
-          draft: false,
-          html_url: 'https://github.com/o/r/pull/1',
+          title: 'fix ENG-7',
+          headRef: 'feat/ENG-7-foo',
+          baseRef: 'main',
         },
+        { number: 2, title: 'no ticket', headRef: 'misc', baseRef: 'main' },
       ],
-    };
-  };
-  const prs = await fetchOpenPullsPublic('octo', 'repo', mockFetch);
-  assert.equal(prs.length, 1);
-  assert.equal(prs[0].headRef, 'feat-a');
-}
+      rules
+    );
+    assert.equal(attached[0].magicLinks.length, 1);
+    assert.equal(attached[0].magicLinks[0].key, 'ENG-7');
+    assert.equal(attached[1].magicLinks.length, 0);
 
-console.log('fetch-pulls.test.js: all assertions passed');
+    // fetchRepoAutolinks soft-fails
+    const empty = await fetchRepoAutolinks('o', 'r', async () => ({
+      ok: false,
+      status: 403,
+      statusText: 'Forbidden',
+    }));
+    assert.deepEqual(empty, []);
+
+    // fetchOpenPulls attaches magic links when autolinks API works
+    const mockFetch = async (url) => {
+      if (url.includes('/autolinks')) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              key_prefix: 'ENG-',
+              url_template: 'https://ex.test/ENG-<num>',
+              is_alphanumeric: true,
+            },
+          ],
+        };
+      }
+      return {
+        ok: true,
+        json: async () => [
+          {
+            number: 5,
+            title: 'ENG-88 work',
+            head: { ref: 'f' },
+            base: { ref: 'main' },
+            user: { login: 'd' },
+            draft: false,
+            html_url: 'https://github.com/o/r/pull/5',
+          },
+        ],
+      };
+    };
+    const prs = await fetchOpenPulls('o', 'r', mockFetch, { token: null });
+    assert.equal(prs[0].magicLinks[0].key, 'ENG-88');
+    assert.equal(prs[0].magicLinks[0].url, 'https://ex.test/ENG-88');
+  }
+
+  console.log('fetch-pulls.test.js: all assertions passed');
 }
 
 main().catch((err) => {

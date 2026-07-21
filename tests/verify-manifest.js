@@ -13,19 +13,51 @@ if (!manifest.permissions?.includes('storage')) {
   throw new Error('storage permission required for API token');
 }
 
-if (!manifest.options_ui?.page) {
-  throw new Error('options_ui required for API token settings');
+if (!manifest.background?.service_worker) {
+  throw new Error('background service_worker required to keep PAT out of content scripts');
+}
+
+const swPath = path.join(__dirname, '..', manifest.background.service_worker);
+if (!fs.existsSync(swPath)) {
+  throw new Error(`Service worker missing: ${manifest.background.service_worker}`);
+}
+
+if (!manifest.action?.default_popup) {
+  throw new Error('action.default_popup required for API token settings');
+}
+
+const popupPath = path.join(__dirname, '..', manifest.action.default_popup);
+if (!fs.existsSync(popupPath)) {
+  throw new Error(`Popup file missing: ${manifest.action.default_popup}`);
+}
+
+if (manifest.options_ui) {
+  throw new Error('options_ui should be removed; use action popup instead');
 }
 
 const script = manifest.content_scripts?.[0];
 if (!script) throw new Error('Missing content_scripts');
-if (!script.matches.some((m) => m.includes('github.com') && m.includes('pulls'))) {
-  throw new Error('Content script must match github PR list URLs');
+if (!script.matches.some((m) => m.includes('github.com/*') || m === 'https://github.com/*')) {
+  throw new Error('Content script must match https://github.com/* for SPA navigation');
 }
 
-const requiredJs = ['src/tree.js', 'src/dom.js', 'src/storage.js', 'src/fetch-pulls.js', 'src/content-bootstrap.js', 'src/content.js'];
+// Content scripts must not load storage.js / fetch-pulls.js (they hold/use the PAT).
+const forbiddenInContent = ['src/storage.js', 'src/fetch-pulls.js', 'src/background.js'];
+for (const f of forbiddenInContent) {
+  if (script.js.includes(f)) {
+    throw new Error(`${f} must not be injected into content scripts (PAT isolation)`);
+  }
+}
+
+const requiredJs = [
+  'src/tree.js',
+  'src/dom.js',
+  'src/content-bridge.js',
+  'src/content-bootstrap.js',
+  'src/content.js',
+];
 for (const f of requiredJs) {
   if (!script.js.includes(f)) throw new Error(`Missing ${f} in content_scripts`);
 }
 
-console.log('verify-manifest.js: manifest v3 OK, content_scripts match pulls pages');
+console.log('verify-manifest.js: manifest v3 OK, PAT isolated in service worker');

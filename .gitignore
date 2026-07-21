@@ -1,4 +1,28 @@
+# Dependencies
 node_modules/
-.browser/profile/
-.browser/state.json
-.browser/screenshots/
+
+# Packaged extension builds (zip / unpacked release trees)
+dist/
+
+# Local agent-browser profile, screenshots, session junk
+.browser/
+
+# OS / editor
+.DS_Store
+**/.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# Env / secrets (never commit tokens)
+.env
+.env.*
+*.pem
+
+# Logs & temp
+*.log
+npm-debug.log*
+.turbo/
+coverage/
+tmp/

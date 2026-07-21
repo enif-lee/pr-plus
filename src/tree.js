@@ -64,14 +64,14 @@ function buildPrTree(prs) {
 
   function buildNode(pr) {
     const childPrs = childrenByParentHead.get(pr.headRef) || [];
-    childPrs.sort((a, b) => a.number - b.number);
+    childPrs.sort((a, b) => b.number - a.number);
     return {
       pr,
       children: childPrs.map(buildNode),
     };
   }
 
-  roots.sort((a, b) => a.number - b.number);
+  roots.sort((a, b) => b.number - a.number);
   return roots.map(buildNode);
 }
 

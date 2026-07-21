@@ -37,7 +37,7 @@ function flatNumbers(forest) {
   ]);
 }
 
-// Siblings under same parent
+// Siblings under same parent (newest PR number first)
 {
   const prs = [
     pr(1, 'Root', 'feat-a', 'main'),
@@ -47,7 +47,52 @@ function flatNumbers(forest) {
   const forest = buildPrTree(prs);
   assert.equal(forest.length, 1);
   assert.deepEqual(nodeNumbers(forest), [
-    { number: 1, children: [{ number: 2, children: [] }, { number: 3, children: [] }] },
+    { number: 1, children: [{ number: 3, children: [] }, { number: 2, children: [] }] },
+  ]);
+}
+
+// Multiple roots sorted newest first
+{
+  const prs = [
+    pr(10, 'Older root', 'old', 'main'),
+    pr(30, 'Newest root', 'new', 'main'),
+    pr(20, 'Middle root', 'mid', 'main'),
+  ];
+  const forest = buildPrTree(prs);
+  assert.deepEqual(
+    forest.map((n) => n.pr.number),
+    [30, 20, 10]
+  );
+}
+
+// Depth-1 stack: one root with multiple children (newest sibling first)
+{
+  const prs = [
+    pr(46, 'Root', 'puma-5.6.9', 'main'),
+    pr(48, 'Child actiontext', 'actiontext-7.0.8.5', 'puma-5.6.9'),
+    pr(49, 'Child actionmailer', 'actionmailer-7.0.8.5', 'puma-5.6.9'),
+    pr(50, 'Child actionpack', 'actionpack-7.0.8.5', 'puma-5.6.9'),
+    pr(52, 'Child rexml', 'rexml-3.3.9', 'puma-5.6.9'),
+  ];
+  const forest = buildPrTree(prs);
+  assert.equal(forest.length, 1);
+  assert.deepEqual(nodeNumbers(forest), [
+    {
+      number: 46,
+      children: [
+        { number: 52, children: [] },
+        { number: 50, children: [] },
+        { number: 49, children: [] },
+        { number: 48, children: [] },
+      ],
+    },
+  ]);
+  assert.deepEqual(flatNumbers(forest), [
+    { number: 46, depth: 0 },
+    { number: 52, depth: 1 },
+    { number: 50, depth: 1 },
+    { number: 49, depth: 1 },
+    { number: 48, depth: 1 },
   ]);
 }
 

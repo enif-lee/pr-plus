@@ -11,30 +11,70 @@
       </div>
       <div class="subnav-search"></div>
       <div id="js-issues-results">
-        <div data-hpc>
-          <ul aria-label="Issues" class="ListView-module__ul--gI0aM">
-            <li role="listitem" id="issue_100" class="Box-row">
-              <div class="opened-by">
-                <h3>
-                  <a data-hovercard-url="/octo/repo/pull/100/hovercard" href="/octo/repo/pull/100">Base feature</a>
-                </h3>
+        <div class="js-navigation-container">
+          <div id="issue_100" class="Box-row js-issue-row">
+            <div class="d-flex Box-row--drag-hide position-relative">
+              <div class="flex-shrink-0 pt-2">
+                <span class="octicon octicon-git-pull-request color-fg-open"></span>
               </div>
-            </li>
-            <li role="listitem" id="issue_101" class="Box-row">
-              <div class="opened-by">
-                <h3>
-                  <a data-hovercard-url="/octo/repo/pull/101/hovercard" href="/octo/repo/pull/101">Stack on a</a>
-                </h3>
+              <div class="flex-auto min-width-0 p-2">
+                <a id="issue_100_link" class="js-navigation-open markdown-title" href="/octo/repo/pull/100">Base feature</a>
+                <div class="d-flex mt-1 text-small color-fg-muted">
+                  <span class="opened-by">
+                    #100 opened
+                    <relative-time datetime="2026-07-20T12:00:00Z" class="no-wrap">Jul 20, 2026</relative-time>
+                    by
+                    <a class="Link--muted" data-hovercard-type="user" href="/octocat">octocat</a>
+                  </span>
+                  <span class="d-none d-md-inline-flex">
+                    <span class="d-inline-block ml-1">• Review required</span>
+                  </span>
+                </div>
               </div>
-            </li>
-            <li role="listitem" id="issue_200" class="Box-row">
-              <div class="opened-by">
-                <h3>
-                  <a data-hovercard-url="/octo/repo/pull/200/hovercard" href="/octo/repo/pull/200">Unrelated</a>
-                </h3>
+            </div>
+          </div>
+          <div id="issue_101" class="Box-row js-issue-row">
+            <div class="d-flex Box-row--drag-hide position-relative">
+              <div class="flex-shrink-0 pt-2">
+                <span class="octicon octicon-git-pull-request-draft"></span>
               </div>
-            </li>
-          </ul>
+              <div class="flex-auto min-width-0 p-2">
+                <a id="issue_101_link" class="js-navigation-open markdown-title" href="/octo/repo/pull/101">Stack on a</a>
+                <div class="d-flex mt-1 text-small color-fg-muted">
+                  <span class="opened-by">
+                    #101 opened
+                    <relative-time datetime="2026-07-19T12:00:00Z" class="no-wrap">Jul 19, 2026</relative-time>
+                    by
+                    <a class="Link--muted" data-hovercard-type="user" href="/octocat">octocat</a>
+                  </span>
+                  <span class="d-none d-md-inline-flex">
+                    <span class="d-inline-block ml-1">• Review required</span>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div id="issue_200" class="Box-row js-issue-row">
+            <div class="d-flex Box-row--drag-hide position-relative">
+              <div class="flex-shrink-0 pt-2">
+                <span class="octicon octicon-git-pull-request color-fg-open"></span>
+              </div>
+              <div class="flex-auto min-width-0 p-2">
+                <a id="issue_200_link" class="js-navigation-open markdown-title" href="/octo/repo/pull/200">Unrelated</a>
+                <div class="d-flex mt-1 text-small color-fg-muted">
+                  <span class="opened-by">
+                    #200 opened
+                    <relative-time datetime="2026-07-18T12:00:00Z" class="no-wrap">Jul 18, 2026</relative-time>
+                    by
+                    <a class="Link--muted" data-hovercard-type="user" href="/octocat">octocat</a>
+                  </span>
+                  <span class="d-none d-md-inline-flex">
+                    <span class="d-inline-block ml-1">• Changes requested</span>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </main>

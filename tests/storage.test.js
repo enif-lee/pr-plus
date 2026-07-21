@@ -51,23 +51,33 @@ async function main() {
   {
     const { area } = mockStorage();
     assert.equal(await getGithubToken(area), null);
-    await setGithubToken('ghp_test_token', area);
-    assert.equal(await getGithubToken(area), 'ghp_test_token');
+    const sample = 'ghp_' + 'a'.repeat(36);
+    await setGithubToken(sample, area);
+    assert.equal(await getGithubToken(area), sample);
     await setGithubToken('', area);
     assert.equal(await getGithubToken(area), null);
   }
 
   {
-    assert.equal(maskGithubToken('ghp_abcdefghijklmnop'), 'ghp_••••••••mnop');
+    assert.equal(maskGithubToken('ghp_abcdefghijklmnop'), '••••••••mnop');
     assert.equal(maskGithubToken(''), '');
+    assert.ok(!maskGithubToken('ghp_abcdefghijklmnop').includes('ghp_abc'));
   }
 
   {
-    const { area } = mockStorage({ githubToken: 'ghp_testtoken1234' });
+    const { area } = mockStorage({ githubToken: 'ghp_' + 'x'.repeat(32) + '1234' });
     const status = await getGithubTokenStatus(area);
     assert.equal(status.configured, true);
-    assert.match(status.mask, /ghp_/);
     assert.match(status.mask, /••••/);
+    assert.match(status.mask, /1234$/);
+  }
+
+  {
+    const { area } = mockStorage();
+    await assert.rejects(
+      () => setGithubToken('not-a-token', area),
+      /Invalid token format/
+    );
   }
 
   {

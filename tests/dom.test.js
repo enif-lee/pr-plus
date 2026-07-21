@@ -2,14 +2,20 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { JSDOM } = require('jsdom');
-const { buildPrTree, serializePrTree } = require('../src/tree.js');
+const { buildPrTree, flattenPrTree, serializePrTree } = require('../src/tree.js');
 const {
   applyTreeIndents,
   clearTreeIndents,
   createToggleButton,
   findOriginalPrRows,
   getPrNumberFromRow,
+  collectPagePrNumbers,
+  selectPrimaryRowGroup,
+  applyListDecorations,
+  clearListDecorations,
+  countMissingDecorations,
   PR_TREE_INDENT_CLASS,
+  PR_TREE_META_CLASS,
   PR_TREE_TOGGLE_ID,
 } = require('../src/dom.js');
 
@@ -46,7 +52,8 @@ function runDomScenario(fixtureName, prs) {
 
   const parent = rows[0].parentElement;
   const childNums = [...parent.children].map((r) => getPrNumberFromRow(r));
-  assert.deepEqual(childNums, prs.map((p) => p.number), `${fixtureName}: tree order`);
+  const expectedOrder = flattenPrTree(forest).map((e) => e.pr.number);
+  assert.deepEqual(childNums, expectedOrder, `${fixtureName}: tree order`);
 
   const depthByNum = Object.fromEntries(
     rows.map((r) => [getPrNumberFromRow(r), r.dataset.prTreeDepth])
@@ -109,6 +116,93 @@ assert.equal(legacy.depthByNum[11], '1');
   assert.equal(treeMode, false);
   toggle.click();
   assert.equal(treeMode, true);
+}
+
+// collectPagePrNumbers + primary group ignores stray matches outside list
+{
+  const html = fs.readFileSync(path.join(__dirname, 'fixtures', 'github-pulls-react.html'), 'utf8');
+  const dom = new JSDOM(html, { url: 'https://github.com/octo/repo/pulls' });
+  const { document } = dom.window;
+  const stray = document.createElement('div');
+  stray.className = 'Box-row js-issue-row';
+  stray.id = 'issue_999';
+  stray.innerHTML = '<a class="js-navigation-open" href="/octo/repo/pull/999">Stray</a>';
+  document.body.appendChild(stray);
+
+  const nums = collectPagePrNumbers(document);
+  assert.deepEqual(nums.sort((a, b) => a - b), [100, 101, 200]);
+
+  const all = findOriginalPrRows(document);
+  // primary group is the 3 list rows, not the stray body child
+  assert.equal(all.length, 3);
+  assert.ok(!all.includes(stray));
+  assert.deepEqual(
+    selectPrimaryRowGroup([...all, stray]).map((r) => r.id).sort(),
+    ['issue_100', 'issue_101', 'issue_200']
+  );
+}
+
+// List decorations: replace 2nd row with #num + badges + branches
+{
+  const html = fs.readFileSync(path.join(__dirname, 'fixtures', 'github-pulls-react.html'), 'utf8');
+  const dom = new JSDOM(html, { url: 'https://github.com/octo/repo/pulls' });
+  const { document } = dom.window;
+  globalThis.PRTree = require('../src/tree.js');
+
+  const prs = [
+    {
+      ...pr(100, 'Base feature ENG-9', 'feat-a', 'main'),
+      magicLinks: [{ key: 'ENG-9', url: 'https://linear.app/x/issue/ENG-9' }],
+    },
+    { ...pr(101, 'Stack on a', 'feat-b', 'feat-a'), draft: true, magicLinks: [] },
+    pr(200, 'Unrelated', 'other', 'main'),
+  ];
+
+  assert.equal(countMissingDecorations(document, prs), 3);
+  const decorated = applyListDecorations(document, prs);
+  assert.equal(decorated, 3);
+  assert.equal(countMissingDecorations(document, prs), 0);
+
+  const metas = document.querySelectorAll(`.${PR_TREE_META_CLASS}`);
+  assert.equal(metas.length, 3);
+
+  // Native second line hidden (kept for deferred review), our meta visible
+  assert.ok(document.querySelector('#issue_100 .pr-tree-native-meta[hidden]'));
+  assert.ok(document.querySelector('#issue_100 .opened-by'));
+
+  const meta100 = document.querySelector('#issue_100 .pr-tree-row-meta');
+  assert.equal(meta100.querySelector('.pr-tree-pr-number')?.textContent, '#100');
+  assert.ok(meta100.querySelector('.pr-tree-opened'));
+  assert.ok(meta100.querySelector('relative-time, .pr-tree-relative-time'));
+  assert.ok(meta100.querySelector('.pr-tree-author'));
+  assert.match(meta100.querySelector('.pr-tree-author').textContent, /octocat/);
+  assert.ok(meta100.querySelector('.pr-tree-badge-review-required'));
+  // Single muted branch chip
+  const branch = meta100.querySelector('.pr-tree-badge-branch');
+  assert.ok(branch);
+  assert.match(branch.textContent, /main\s*←\s*feat-a/);
+  assert.equal(meta100.querySelectorAll('.pr-tree-branch-base, .pr-tree-branches').length, 0);
+
+  // Magic / autolink
+  const magic = meta100.querySelector('a.pr-tree-badge-magic');
+  assert.ok(magic);
+  assert.equal(magic.textContent, 'ENG-9');
+  assert.equal(magic.getAttribute('href'), 'https://linear.app/x/issue/ENG-9');
+  assert.equal(magic.getAttribute('target'), '_blank');
+
+  const draftMeta = document.querySelector('#issue_101 .pr-tree-row-meta');
+  assert.ok(draftMeta.querySelector('.pr-tree-badge-draft'));
+  assert.ok(draftMeta.querySelector('.pr-tree-badge-review-required'));
+
+  const meta200 = document.querySelector('#issue_200 .pr-tree-row-meta');
+  assert.ok(meta200.querySelector('.pr-tree-badge-changes-requested'));
+
+  // Restore native second row
+  clearListDecorations(document);
+  assert.equal(document.querySelectorAll(`.${PR_TREE_META_CLASS}`).length, 0);
+  assert.equal(document.querySelectorAll('.pr-tree-native-meta').length, 0);
+  assert.ok(document.querySelector('#issue_100 .opened-by'));
+  assert.match(document.querySelector('#issue_100 .opened-by').textContent, /#100/);
 }
 
 const treeText = serializePrTree(buildPrTree(reactPrs));
