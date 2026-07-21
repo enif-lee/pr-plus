@@ -2,11 +2,11 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const fs = require('node:fs');
 
-const layout = require('../src/modal/pure/layout-mode.js');
-const virt = require('../src/modal/pure/virtual-range.js');
-const search = require('../src/modal/pure/search-index.js');
-const diffRows = require('../src/modal/pure/diff-rows.js');
-const modalState = require('../src/modal/pure/modal-state.js');
+const layout = require('../src/modal/lib/layout-mode.ts');
+const virt = require('../src/modal/lib/virtual-range.ts');
+const search = require('../src/modal/lib/search-index.ts');
+const diffRows = require('../src/modal/lib/diff-rows.ts');
+const modalState = require('../src/modal/lib/modal-state.ts');
 
 // layout
 assert.equal(layout.toggleDiffLayout('centered'), 'diff');

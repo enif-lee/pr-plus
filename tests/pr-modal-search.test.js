@@ -3,13 +3,12 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const SCRATCH =
-  process.env.PRP_SCRATCH ||
-  '/var/folders/sl/km7nh7qj50b9mw4901n7ch940000gn/T/grok-goal-bb0c8cb3d71a/implementer';
+  process.env.PRP_SCRATCH || '/var/folders/px/qw6l220x5glb_gxf44lws9p80000gn/T/grok-goal-5a6d37e1751e/implementer';
 fs.mkdirSync(SCRATCH, { recursive: true });
 
-const search = require('../src/modal/pure/search-index.js');
-const virt = require('../src/modal/pure/virtual-range.js');
-const diffRows = require('../src/modal/pure/diff-rows.js');
+const search = require('../src/modal/lib/search-index.ts');
+const virt = require('../src/modal/lib/virtual-range.ts');
+const diffRows = require('../src/modal/lib/diff-rows.ts');
 
 // Build large multi-file corpus
 const files = [];
@@ -130,13 +129,15 @@ assert.equal(
   assert.equal(nav.activeHit.rowIndex, hit.rowIndex);
 }
 
-// App wires Ctrl/Cmd+F and uses resolveQuerySearchState / resolveNavSearchState
-const appSrc = fs.readFileSync(path.join(__dirname, '../src/modal/App.jsx'), 'utf8');
-assert.ok(appSrc.includes("key === 'f'") || appSrc.includes('ctrlKey'));
+// App still uses resolveQuerySearchState / resolveNavSearchState (search UI);
+// global ⌘F shortcut was removed — only Diff / palette / Esc remain.
+const appSrc = fs.readFileSync(path.join(__dirname, '../src/modal/app/PrModalApp.tsx'), 'utf8');
+assert.ok(appSrc.includes('ctrlKey') || appSrc.includes('metaKey'));
 assert.ok(appSrc.includes('preventDefault'));
 assert.ok(appSrc.includes('resolveQuerySearchState'));
 assert.ok(appSrc.includes('resolveNavSearchState'));
 assert.ok(appSrc.includes('shouldJump'));
+assert.ok(!appSrc.includes("case 'openSearch'"));
 
 const hostSrc = fs.readFileSync(path.join(__dirname, '../src/pr-modal-host.js'), 'utf8');
 assert.ok(hostSrc.includes('reactRoot.render'));

@@ -24,21 +24,41 @@ function renderTokenStatus(status) {
 
 function send(message) {
   return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage(message, (response) => {
-      const err = chrome.runtime.lastError;
-      if (err) {
-        reject(new Error(err.message || String(err)));
-        return;
-      }
-      resolve(response);
-    });
+    try {
+      chrome.runtime.sendMessage(message, (response) => {
+        const err = chrome.runtime.lastError;
+        if (err) {
+          const msg = err.message || String(err);
+          // Common after extension reload when service worker failed to start
+          if (/Receiving end does not exist|Could not establish connection/i.test(msg)) {
+            reject(
+              new Error(
+                'Background worker offline. Open chrome://extensions, click Reload on pr+, then try again.'
+              )
+            );
+            return;
+          }
+          reject(new Error(msg));
+          return;
+        }
+        resolve(response);
+      });
+    } catch (e) {
+      reject(e);
+    }
   });
 }
 
 async function load() {
   try {
     const status = await send({ type: 'PR_TREE_TOKEN_STATUS' });
+    if (!status?.ok && status?.error) {
+      throw new Error(status.error);
+    }
     renderTokenStatus(status);
+    if (!status?.configured) {
+      setStatus('No token saved yet');
+    }
   } catch (err) {
     setStatus(err.message || 'Failed to load status', true);
   }
@@ -47,11 +67,16 @@ async function load() {
 saveBtn.addEventListener('click', async () => {
   try {
     const value = tokenInput.value;
-    tokenInput.value = '';
+    if (!String(value || '').trim()) {
+      setStatus('Paste a GitHub PAT first', true);
+      return;
+    }
     const status = await send({ type: 'PR_TREE_TOKEN_SET', token: value });
     if (!status?.ok && status?.error) {
       throw new Error(status.error);
     }
+    // Only clear the input after a successful save
+    tokenInput.value = '';
     renderTokenStatus(status);
     setStatus('Saved securely in extension storage');
   } catch (err) {

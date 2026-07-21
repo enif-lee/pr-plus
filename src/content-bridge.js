@@ -80,6 +80,24 @@
       }
       return res.detail;
     },
+    
+    async uploadRepoFile(owner, repo, { path, contentBase64, message, branch }) {
+      const res = await send({
+        type: 'PR_TREE_UPLOAD_REPO_FILE',
+        owner,
+        repo,
+        path,
+        contentBase64,
+        message,
+        branch,
+      });
+      if (!res?.ok) {
+        const err = new Error(res?.error || 'Failed to upload file');
+        err.status = res?.status;
+        throw err;
+      }
+      return res.result;
+    },
     async postIssueComment(owner, repo, number, body) {
       const res = await send({
         type: 'PR_TREE_POST_ISSUE_COMMENT',
@@ -95,7 +113,7 @@
       }
       return res.result;
     },
-    async submitPullReview(owner, repo, number, { event, body }) {
+    async submitPullReview(owner, repo, number, { event, body, commitId, comments }) {
       const res = await send({
         type: 'PR_TREE_SUBMIT_REVIEW',
         owner,
@@ -103,6 +121,8 @@
         number,
         event,
         body,
+        commitId,
+        comments,
       });
       if (!res?.ok) {
         const err = new Error(res?.error || 'Failed to submit review');
@@ -117,10 +137,323 @@
         owner,
         repo,
         number,
-        ...payload,
+        body: payload.body,
+        path: payload.path,
+        line: payload.line,
+        side: payload.side,
+        commitId: payload.commitId,
+        startLine: payload.startLine ?? payload.start_line,
+        startSide: payload.startSide ?? payload.start_side,
       });
       if (!res?.ok) {
         const err = new Error(res?.error || 'Failed to post review comment');
+        err.status = res?.status;
+        throw err;
+      }
+      return res.result;
+    },
+    async replyToReviewComment(owner, repo, number, commentId, body) {
+      const res = await send({
+        type: 'PR_TREE_REPLY_REVIEW_COMMENT',
+        owner,
+        repo,
+        number,
+        commentId,
+        body,
+      });
+      if (!res?.ok) {
+        const err = new Error(res?.error || 'Failed to reply to review comment');
+        err.status = res?.status;
+        throw err;
+      }
+      return res.result;
+    },
+    async resolveReviewThread(threadNodeId, resolved = true) {
+      const res = await send({
+        type: 'PR_TREE_RESOLVE_REVIEW_THREAD',
+        threadNodeId,
+        resolved,
+      });
+      if (!res?.ok) {
+        const err = new Error(res?.error || 'Failed to resolve review thread');
+        err.status = res?.status;
+        throw err;
+      }
+      return res.result;
+    },
+    async updatePullState(owner, repo, number, state) {
+      const res = await send({
+        type: 'PR_TREE_UPDATE_PULL_STATE',
+        owner,
+        repo,
+        number,
+        state,
+      });
+      if (!res?.ok) {
+        const err = new Error(res?.error || 'Failed to update pull request state');
+        err.status = res?.status;
+        throw err;
+      }
+      return res.result;
+    },
+    async closePullRequest(owner, repo, number) {
+      return PRTreeFetch.updatePullState(owner, repo, number, 'closed');
+    },
+    async reopenPullRequest(owner, repo, number) {
+      return PRTreeFetch.updatePullState(owner, repo, number, 'open');
+    },
+    async deleteReviewComment(owner, repo, commentId) {
+      const res = await send({
+        type: 'PR_TREE_DELETE_REVIEW_COMMENT',
+        owner,
+        repo,
+        commentId,
+      });
+      if (!res?.ok) {
+        const err = new Error(res?.error || 'Failed to delete review comment');
+        err.status = res?.status;
+        throw err;
+      }
+      return res.result;
+    },
+    async deleteIssueComment(owner, repo, commentId) {
+      const res = await send({
+        type: 'PR_TREE_DELETE_ISSUE_COMMENT',
+        owner,
+        repo,
+        commentId,
+      });
+      if (!res?.ok) {
+        const err = new Error(res?.error || 'Failed to delete comment');
+        err.status = res?.status;
+        throw err;
+      }
+      return res.result;
+    },
+    async updatePullRequest(owner, repo, number, fields) {
+      const res = await send({
+        type: 'PR_TREE_UPDATE_PULL',
+        owner,
+        repo,
+        number,
+        fields,
+      });
+      if (!res?.ok) {
+        const err = new Error(res?.error || 'Failed to update pull request');
+        err.status = res?.status;
+        throw err;
+      }
+      return res.result;
+    },
+    async editIssueComment(owner, repo, commentId, body) {
+      const res = await send({
+        type: 'PR_TREE_EDIT_ISSUE_COMMENT',
+        owner,
+        repo,
+        commentId,
+        body,
+      });
+      if (!res?.ok) {
+        const err = new Error(res?.error || 'Failed to edit comment');
+        err.status = res?.status;
+        throw err;
+      }
+      return res.result;
+    },
+    async editReviewComment(owner, repo, commentId, body) {
+      const res = await send({
+        type: 'PR_TREE_EDIT_REVIEW_COMMENT',
+        owner,
+        repo,
+        commentId,
+        body,
+      });
+      if (!res?.ok) {
+        const err = new Error(res?.error || 'Failed to edit review comment');
+        err.status = res?.status;
+        throw err;
+      }
+      return res.result;
+    },
+    async requestReviewers(owner, repo, number, reviewers, teamReviewers = []) {
+      const res = await send({
+        type: 'PR_TREE_REQUEST_REVIEWERS',
+        owner,
+        repo,
+        number,
+        reviewers,
+        teamReviewers,
+      });
+      if (!res?.ok) {
+        const err = new Error(res?.error || 'Failed to request reviewers');
+        err.status = res?.status;
+        throw err;
+      }
+      return res.result;
+    },
+    async removeReviewers(owner, repo, number, reviewers, teamReviewers = []) {
+      const res = await send({
+        type: 'PR_TREE_REMOVE_REVIEWERS',
+        owner,
+        repo,
+        number,
+        reviewers,
+        teamReviewers,
+      });
+      if (!res?.ok) {
+        const err = new Error(res?.error || 'Failed to remove reviewers');
+        err.status = res?.status;
+        throw err;
+      }
+      return res.result;
+    },
+    async addAssignees(owner, repo, number, assignees) {
+      const res = await send({
+        type: 'PR_TREE_ADD_ASSIGNEES',
+        owner,
+        repo,
+        number,
+        assignees,
+      });
+      if (!res?.ok) {
+        const err = new Error(res?.error || 'Failed to add assignees');
+        err.status = res?.status;
+        throw err;
+      }
+      return res.result;
+    },
+    async removeAssignees(owner, repo, number, assignees) {
+      const res = await send({
+        type: 'PR_TREE_REMOVE_ASSIGNEES',
+        owner,
+        repo,
+        number,
+        assignees,
+      });
+      if (!res?.ok) {
+        const err = new Error(res?.error || 'Failed to remove assignees');
+        err.status = res?.status;
+        throw err;
+      }
+      return res.result;
+    },
+    async setIssueLabels(owner, repo, number, labels) {
+      const res = await send({
+        type: 'PR_TREE_SET_LABELS',
+        owner,
+        repo,
+        number,
+        labels,
+      });
+      if (!res?.ok) {
+        const err = new Error(res?.error || 'Failed to set labels');
+        err.status = res?.status;
+        throw err;
+      }
+      return res.result;
+    },
+    async applyReviewSuggestion(owner, repo, payload) {
+      const res = await send({
+        type: 'PR_TREE_APPLY_SUGGESTION',
+        owner,
+        repo,
+        ...payload,
+      });
+      if (!res?.ok) {
+        const err = new Error(res?.error || 'Failed to apply suggestion');
+        err.status = res?.status;
+        throw err;
+      }
+      return res.result;
+    },
+    async mergePullRequest(owner, repo, number, opts = {}) {
+      const res = await send({
+        type: 'PR_TREE_MERGE_PULL',
+        owner,
+        repo,
+        number,
+        mergeMethod: opts.mergeMethod || 'merge',
+        commitTitle: opts.commitTitle,
+        commitMessage: opts.commitMessage,
+      });
+      if (!res?.ok) {
+        const err = new Error(res?.error || 'Failed to merge pull request');
+        err.status = res?.status;
+        throw err;
+      }
+      return res.result;
+    },
+    async updatePullBranch(owner, repo, number, expectedHeadSha) {
+      const res = await send({
+        type: 'PR_TREE_UPDATE_BRANCH',
+        owner,
+        repo,
+        number,
+        expectedHeadSha,
+      });
+      if (!res?.ok) {
+        const err = new Error(res?.error || 'Failed to update branch');
+        err.status = res?.status;
+        throw err;
+      }
+      return res.result;
+    },
+    async setIssueSubscription(owner, repo, number, { subscribed = true, ignored = false } = {}) {
+      const res = await send({
+        type: 'PR_TREE_SET_SUBSCRIPTION',
+        owner,
+        repo,
+        number,
+        subscribed,
+        ignored,
+      });
+      if (!res?.ok) {
+        const err = new Error(res?.error || 'Failed to update subscription');
+        err.status = res?.status;
+        throw err;
+      }
+      return res.result;
+    },
+    async deleteIssueSubscription(owner, repo, number) {
+      const res = await send({
+        type: 'PR_TREE_DELETE_SUBSCRIPTION',
+        owner,
+        repo,
+        number,
+      });
+      if (!res?.ok) {
+        const err = new Error(res?.error || 'Failed to unsubscribe');
+        err.status = res?.status;
+        throw err;
+      }
+      return res.result;
+    },
+    async setIssueMilestone(owner, repo, number, milestone) {
+      const res = await send({
+        type: 'PR_TREE_SET_MILESTONE',
+        owner,
+        repo,
+        number,
+        milestone,
+      });
+      if (!res?.ok) {
+        const err = new Error(res?.error || 'Failed to set milestone');
+        err.status = res?.status;
+        throw err;
+      }
+      return res.result;
+    },
+    async setPullRequestDraftStage(owner, repo, number, stage, nodeId) {
+      const res = await send({
+        type: 'PR_TREE_SET_DRAFT_STAGE',
+        owner,
+        repo,
+        number,
+        stage,
+        nodeId,
+      });
+      if (!res?.ok) {
+        const err = new Error(res?.error || 'Failed to change draft stage');
         err.status = res?.status;
         throw err;
       }

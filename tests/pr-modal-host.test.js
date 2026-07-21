@@ -4,8 +4,7 @@ const path = require('node:path');
 const { JSDOM } = require('jsdom');
 
 const SCRATCH =
-  process.env.PRP_SCRATCH ||
-  '/var/folders/sl/km7nh7qj50b9mw4901n7ch940000gn/T/grok-goal-090750d025fa/implementer';
+  process.env.PRP_SCRATCH || '/var/folders/px/qw6l220x5glb_gxf44lws9p80000gn/T/grok-goal-5a6d37e1751e/implementer';
 fs.mkdirSync(SCRATCH, { recursive: true });
 
 const fixtureHtml = fs.readFileSync(
@@ -106,6 +105,10 @@ assert.ok(window.PRModalHost);
   assert.equal(Number(parsed.number), 101);
 }
 
+// Host is disabled until PAT is configured (content enables it). Tests enable explicitly.
+window.PRModalHost.setEnabled(true);
+assert.equal(window.PRModalHost.isEnabled(), true);
+
 // click intercept opens modal without navigation
 {
   assert.equal(window.PRModalHost.isPullsListPage(), true);
@@ -157,7 +160,7 @@ function flush() {
   assert.ok(document.getElementById('prp-modal-host'));
 
   // expand path is pure + App level; assert layout helpers used by shipped pure module
-  const layout = require('../src/modal/pure/layout-mode.js');
+  const layout = require('../src/modal/lib/layout-mode.ts');
   assert.ok(layout.layoutClassName('diff').includes('diff'));
 
   const log = [

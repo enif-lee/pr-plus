@@ -3,15 +3,14 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const SCRATCH =
-  process.env.PRP_SCRATCH ||
-  '/var/folders/sl/km7nh7qj50b9mw4901n7ch940000gn/T/grok-goal-4eb56420c3d0/implementer';
+  process.env.PRP_SCRATCH || '/var/folders/px/qw6l220x5glb_gxf44lws9p80000gn/T/grok-goal-5a6d37e1751e/implementer';
 fs.mkdirSync(SCRATCH, { recursive: true });
 
-const fileTree = require('../src/modal/pure/file-tree.js');
-const collapse = require('../src/modal/pure/collapse.js');
-const commentNav = require('../src/modal/pure/comment-nav.js');
-const theme = require('../src/modal/pure/theme.js');
-const diffRows = require('../src/modal/pure/diff-rows.js');
+const fileTree = require('../src/modal/lib/file-tree.ts');
+const collapse = require('../src/modal/lib/collapse.ts');
+const commentNav = require('../src/modal/lib/comment-nav.ts');
+const theme = require('../src/modal/lib/theme.ts');
+const diffRows = require('../src/modal/lib/diff-rows.ts');
 
 const lines = [];
 
@@ -109,7 +108,15 @@ package-lock.json linguist-generated=true
       annotated.filter((f) => f.defaultCollapsed).map((f) => f.filename)
     ),
   });
-  assert.ok(rowsCollapsed.some((r) => /collapsed/i.test(r.text)));
+  // Fully closed headers: collapsed flag set, no "collapsed" label text, no diff lines
+  const collapsedHeaders = rowsCollapsed.filter(
+    (r) => r.kind === 'file-header' && r.collapsed
+  );
+  assert.ok(collapsedHeaders.length > 0, 'expected collapsed file headers');
+  assert.ok(
+    collapsedHeaders.every((r) => !/collapsed/i.test(r.text)),
+    'collapsed headers must not include the word collapsed'
+  );
   assert.ok(!rowsCollapsed.some((r) => r.filePath === 'blob.bin' && r.kind === 'diff-line'));
   lines.push('collapse: defaults ok');
   lines.push('collapse: linguist-generated=true on foo.pb.go ok');

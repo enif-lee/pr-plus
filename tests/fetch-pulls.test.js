@@ -17,11 +17,12 @@ async function main() {
     assert.equal(buildApiHeaders(null).Authorization, undefined);
   }
 
-  // mapApiPullRequest
+  // mapApiPullRequest (body kept for magic-link matching on description)
   {
     const mapped = mapApiPullRequest({
       number: 7,
       title: 'Feat',
+      body: 'Closes ENG-99',
       head: { ref: 'feat-x' },
       base: { ref: 'main' },
       user: { login: 'dev' },
@@ -31,6 +32,7 @@ async function main() {
     assert.deepEqual(mapped, {
       number: 7,
       title: 'Feat',
+      body: 'Closes ENG-99',
       headRef: 'feat-x',
       baseRef: 'main',
       author: 'dev',
@@ -272,6 +274,37 @@ async function main() {
     assert.equal(attached[0].magicLinks.length, 1);
     assert.equal(attached[0].magicLinks[0].key, 'ENG-7');
     assert.equal(attached[1].magicLinks.length, 0);
+
+    // Body-only token (title/branch have no key) → mapApiPullRequest + attachMagicLinks
+    {
+      const listPr = mapApiPullRequest({
+        number: 3,
+        title: 'no key in title',
+        body: 'Closes ENG-99 and done',
+        head: { ref: 'misc-branch' },
+        base: { ref: 'main' },
+        user: { login: 'dev' },
+        draft: false,
+        html_url: 'https://github.com/o/r/pull/3',
+      });
+      assert.equal(listPr.body, 'Closes ENG-99 and done');
+      const withLinks = attachMagicLinks([listPr], rules);
+      assert.equal(withLinks[0].magicLinks.length, 1);
+      assert.equal(withLinks[0].magicLinks[0].key, 'ENG-99');
+      assert.equal(
+        withLinks[0].magicLinks[0].url,
+        'https://linear.app/acme/issue/ENG-99'
+      );
+      // Modal enhance path: body HTML gets an anchor for the magic key
+      const polish = require('../src/modal/lib/ui-polish.ts');
+      const html = polish.enhanceMarkdownHtml('<p>Closes ENG-99 and done</p>', {
+        owner: 'o',
+        repo: 'r',
+        magicLinks: withLinks[0].magicLinks,
+      });
+      assert.match(html, /href="https:\/\/linear\.app\/acme\/issue\/ENG-99"/);
+      assert.match(html, /ENG-99/);
+    }
 
     // fetchRepoAutolinks soft-fails
     const empty = await fetchRepoAutolinks('o', 'r', async () => ({

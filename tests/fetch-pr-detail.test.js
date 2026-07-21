@@ -4,6 +4,14 @@ const {
   postIssueComment,
   submitPullReview,
   postReviewComment,
+  replyToReviewComment,
+  resolveReviewThread,
+  deleteReviewComment,
+  deleteIssueComment,
+  apiGraphql,
+  updatePullState,
+  closePullRequest,
+  reopenPullRequest,
 } = require('../src/fetch-pulls.js');
 
 async function main() {
@@ -76,8 +84,40 @@ async function main() {
             line: 3,
             side: 'RIGHT',
             created_at: '',
+            // Intentionally no thread_id — REST never returns it
           },
         ],
+      };
+    }
+    if (url.includes('api.github.com/user') && !url.includes('/users/')) {
+      return {
+        ok: true,
+        json: async () => ({ login: 'viewer-bot' }),
+      };
+    }
+    if (url.includes('api.github.com/graphql')) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: {
+            repository: {
+              pullRequest: {
+                reviewThreads: {
+                  nodes: [
+                    {
+                      id: 'PRRT_from_graphql',
+                      isResolved: false,
+                      comments: {
+                        nodes: [{ databaseId: 2, id: 'RC_2' }],
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        }),
       };
     }
     if (url.includes('/reviews')) {
@@ -130,7 +170,7 @@ async function main() {
     return { ok: false, status: 404, statusText: 'no' };
   };
 
-  const detail = await fetchPrDetail('o', 'r', 9, mockFetch, null);
+  const detail = await fetchPrDetail('o', 'r', 9, mockFetch, 'tok');
   assert.equal(detail.number, 9);
   assert.equal(detail.files.length, 2);
   assert.equal(detail.files[0].patch.includes('+x'), true);
@@ -147,7 +187,7 @@ async function main() {
   );
   assert.equal(detail.files.find((f) => f.filename === 'a.js').defaultCollapsed, false);
   // Real App path: re-annotate always applies gitattributesText even if flags already set
-  const collapse = require('../src/modal/pure/collapse.js');
+  const collapse = require('../src/modal/lib/collapse.ts');
   const re = collapse.annotateFilesForCollapse(
     detail.files.map((f) => ({ ...f, defaultCollapsed: false })),
     detail.gitattributesText
@@ -159,27 +199,161 @@ async function main() {
   assert.equal(detail.checks.state, 'success');
   assert.equal(detail.reviewComments.length, 1);
   assert.ok(calls.some((c) => c.url.includes('/pulls/9/files')));
+  assert.ok(
+    calls.some((c) => String(c.url).includes('api.github.com/graphql')),
+    'fetchPrDetail must call GraphQL for review threads'
+  );
+  // Realistic merge: GraphQL thread id + resolved on REST comment id=2
+  const rc = detail.reviewComments[0];
+  assert.equal(
+    rc.threadNodeId,
+    'PRRT_from_graphql',
+    'reviewComments must receive GraphQL threadNodeId (not REST thread_id)'
+  );
+  assert.equal(rc.resolved, false, 'resolved must come from GraphQL isResolved');
+  assert.ok(
+    Array.isArray(detail.reviewThreads) && detail.reviewThreads.length === 1,
+    'reviewThreads exposed on detail payload'
+  );
+  assert.equal(detail.viewerLogin, 'viewer-bot', 'viewerLogin from /user for delete-own');
 
-  // mutations
+  // mutations: comment, review, line comment, reply, resolve, close, reopen
   const posts = [];
   const writeFetch = async (url, init) => {
     posts.push({ url, method: init?.method, body: init?.body });
-    return { ok: true, status: 201, json: async () => ({ id: 99 }) };
+    // GraphQL resolve success payload
+    if (String(url).includes('graphql')) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: {
+            resolveReviewThread: {
+              thread: { id: 'PRRT_abc', isResolved: true },
+            },
+          },
+        }),
+      };
+    }
+    return { ok: true, status: 201, json: async () => ({ id: 99, state: 'closed' }) };
   };
   await postIssueComment('o', 'r', 9, 'hello', writeFetch, 'tok');
-  await submitPullReview('o', 'r', 9, { event: 'APPROVE', body: 'lgtm' }, writeFetch, 'tok');
+  await submitPullReview(
+    'o',
+    'r',
+    9,
+    {
+      event: 'APPROVE',
+      body: 'lgtm',
+      commitId: 'deadbeef',
+      comments: [{ path: 'a.js', line: 3, body: 'pending line', side: 'RIGHT' }],
+    },
+    writeFetch,
+    'tok'
+  );
   await postReviewComment(
     'o',
     'r',
     9,
-    { body: 'n', path: 'a.js', line: 2, commitId: 'deadbeef' },
+    {
+      body: 'n',
+      path: 'a.js',
+      line: 4,
+      commitId: 'deadbeef',
+      startLine: 2,
+      startSide: 'RIGHT',
+    },
     writeFetch,
     'tok'
   );
-  assert.equal(posts.length, 3);
+  await replyToReviewComment('o', 'r', 9, 42, 'reply body', writeFetch, 'tok');
+  const resolveData = await resolveReviewThread('PRRT_abc', true, writeFetch, 'tok');
+  assert.ok(resolveData?.resolveReviewThread?.thread?.isResolved === true);
+  await closePullRequest('o', 'r', 9, writeFetch, 'tok');
+  await reopenPullRequest('o', 'r', 9, writeFetch, 'tok');
+  await updatePullState('o', 'r', 9, 'closed', writeFetch, 'tok');
+
+  assert.ok(posts.length >= 8);
   assert.equal(posts[0].method, 'POST');
-  assert.ok(JSON.parse(posts[1].body).event === 'APPROVE');
-  assert.ok(JSON.parse(posts[2].body).path === 'a.js');
+  assert.ok(posts[0].url.endsWith('/issues/9/comments'));
+  assert.equal(JSON.parse(posts[0].body).body, 'hello');
+  assert.equal(posts[1].method, 'POST');
+  assert.ok(posts[1].url.endsWith('/pulls/9/reviews'));
+  const reviewBody = JSON.parse(posts[1].body);
+  assert.equal(reviewBody.event, 'APPROVE');
+  assert.equal(reviewBody.commit_id, 'deadbeef');
+  assert.ok(Array.isArray(reviewBody.comments) && reviewBody.comments[0].path === 'a.js');
+  const multiLine = JSON.parse(posts[2].body);
+  assert.equal(multiLine.path, 'a.js');
+  assert.equal(multiLine.line, 4);
+  assert.equal(multiLine.start_line, 2);
+  assert.equal(multiLine.start_side, 'RIGHT');
+  assert.ok(posts[3].url.endsWith('/comments/42/replies'));
+  assert.equal(JSON.parse(posts[3].body).body, 'reply body');
+  assert.equal(posts[4].url, 'https://api.github.com/graphql');
+  assert.ok(JSON.parse(posts[4].body).query.includes('resolveReviewThread'));
+  const closeCall = posts.find(
+    (p) => p.method === 'PATCH' && p.url.endsWith('/pulls/9') && JSON.parse(p.body).state === 'closed'
+  );
+  const reopenCall = posts.find(
+    (p) => p.method === 'PATCH' && p.url.endsWith('/pulls/9') && JSON.parse(p.body).state === 'open'
+  );
+  assert.ok(closeCall, 'closePullRequest must PATCH state:closed');
+  assert.ok(reopenCall, 'reopenPullRequest must PATCH state:open');
+
+  // GraphQL HTTP 200 + errors must throw (not silent success)
+  let gqlErr = null;
+  try {
+    await apiGraphql(
+      'mutation { x }',
+      {},
+      async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          errors: [{ message: 'Could not resolve to a node' }],
+        }),
+      }),
+      'tok'
+    );
+  } catch (e) {
+    gqlErr = e;
+  }
+  assert.ok(gqlErr, 'apiGraphql must throw on body.errors');
+  assert.match(String(gqlErr.message), /GraphQL|Could not resolve/i);
+
+  let resolveErr = null;
+  try {
+    await resolveReviewThread(
+      'PRRT_bad',
+      true,
+      async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          errors: [{ message: 'Thread not found' }],
+        }),
+      }),
+      'tok'
+    );
+  } catch (e) {
+    resolveErr = e;
+  }
+  assert.ok(resolveErr, 'resolveReviewThread must fail on GraphQL errors');
+  assert.match(String(resolveErr.message), /Thread not found|GraphQL/i);
+
+  // Delete own review / issue comments — real DELETE paths
+  const dels = [];
+  const delFetch = async (url, init) => {
+    dels.push({ url, method: init?.method || 'GET' });
+    return { ok: true, status: 204, json: async () => null };
+  };
+  await deleteReviewComment('o', 'r', 99, delFetch, 'tok');
+  await deleteIssueComment('o', 'r', 88, delFetch, 'tok');
+  assert.equal(dels[0].method, 'DELETE');
+  assert.ok(dels[0].url.endsWith('/pulls/comments/99'));
+  assert.equal(dels[1].method, 'DELETE');
+  assert.ok(dels[1].url.endsWith('/issues/comments/88'));
 
   console.log('fetch-pr-detail.test.js: all assertions passed');
 }

@@ -4,8 +4,7 @@ const path = require('node:path');
 const { JSDOM } = require('jsdom');
 
 const SCRATCH =
-  process.env.PRP_SCRATCH ||
-  '/var/folders/sl/km7nh7qj50b9mw4901n7ch940000gn/T/grok-goal-090750d025fa/implementer';
+  process.env.PRP_SCRATCH || '/var/folders/px/qw6l220x5glb_gxf44lws9p80000gn/T/grok-goal-5a6d37e1751e/implementer';
 fs.mkdirSync(SCRATCH, { recursive: true });
 
 const bundlePath = path.join(__dirname, '../src/modal/dist/pr-modal.bundle.js');
@@ -28,9 +27,7 @@ window.eval(code);
 
 assert.equal(typeof window.mountPrModal, 'function', 'mountPrModal export');
 assert.equal(typeof window.PRModalApp, 'function', 'PRModalApp export');
-assert.ok(window.PRModalLayout, 'pure layout global');
-assert.ok(window.PRModalVirtual, 'pure virtual global');
-assert.ok(window.PRModalSearch, 'pure search global');
+// Vite ESM bundles pure as imports (not globalThis.PRModal* banners).
 
 const host = window.document.getElementById('root');
 const detail = {
@@ -72,8 +69,9 @@ const log = [
   'pr-modal-bundle.test.js: bundle load ok',
   `bytes=${code.length}`,
   `hasMount=${typeof window.mountPrModal}`,
-  `hasLayout=${Boolean(window.PRModalLayout)}`,
+  `hasPRModalApp=${typeof window.PRModalApp}`,
 ].join('\n');
 fs.writeFileSync(path.join(SCRATCH, 'pr-modal-bundle-load.log'), log + '\n');
+fs.writeFileSync(path.join(SCRATCH, 'bundle-load.log'), log + '\n');
 console.log('pr-modal-bundle.test.js: all assertions passed');
 console.log(log);

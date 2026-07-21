@@ -32,9 +32,11 @@ function maskGithubToken(token) {
 function looksLikeGithubToken(token) {
   if (typeof token !== 'string') return false;
   const t = token.trim();
-  if (t.length < 20 || t.length > 300) return false;
+  // Classic PATs ~40+, fine-grained often 80–255; allow a wide band.
+  if (t.length < 20 || t.length > 400) return false;
   if (/\s/.test(t)) return false;
-  return /^(gh[pours]|github_pat_)[A-Za-z0-9_]+$/.test(t);
+  // ghp_/gho_/ghu_/ghs_/ghr_ classic; github_pat_ fine-grained
+  return /^(gh[pours]_|github_pat_)[A-Za-z0-9_]+$/.test(t);
 }
 
 function getGithubToken(storageApi) {

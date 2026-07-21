@@ -27,29 +27,23 @@ function flattenFilesToVirtualRows(files, mode = 'unified', options = {}) {
       (collapsedSet.has(path) ||
         (collapsedSet.size === 0 && file.defaultCollapsed === true));
 
+    const additions = Number(file.additions) || 0;
+    const deletions = Number(file.deletions) || 0;
     rows.push({
       kind: 'file-header',
       filePath: path,
-      text: `${status} ${path} ${stats}${isCollapsed ? ' (collapsed)' : ''}`,
+      status,
+      additions,
+      deletions,
+      // Fully closed when collapsed — no "(collapsed)" label text
+      text: `${status} ${path} ${stats}`,
       rowIndex: index++,
       lineType: 'header',
       collapsed: isCollapsed,
     });
 
+    // Collapsed files expose only the header (toggle to expand) — no meta row.
     if (isCollapsed) {
-      const reason = !file.patch
-        ? 'Binary, too large, or no textual patch — expand to attempt view'
-        : file.defaultCollapsed
-          ? 'Collapsed by default (generated / large / lockfile) — expand to view'
-          : 'Collapsed';
-      rows.push({
-        kind: 'diff-meta',
-        filePath: path,
-        text: reason,
-        rowIndex: index++,
-        lineType: 'meta',
-        collapsed: true,
-      });
       continue;
     }
 
@@ -97,12 +91,15 @@ function flattenFilesToVirtualRows(files, mode = 'unified', options = {}) {
           lineType === 'add' ? '' : lineType === 'del' ? line.slice(1) : line.slice(1);
         const right =
           lineType === 'del' ? '' : lineType === 'add' ? line.slice(1) : line.slice(1);
-        const text = `${String(o ?? '').padStart(4)} │ ${left.padEnd(48).slice(0, 48)} │ ${String(n ?? '').padStart(4)} │ ${right}`;
+        const text = `${String(o ?? '').padStart(4)} │ ${left} │ ${String(n ?? '').padStart(4)} │ ${right}`;
         rows.push({
           kind: 'diff-line',
           filePath: path,
           text,
-          code: lineType === 'meta' || lineType === 'hunk' ? line : line.slice(1) || line,
+          code: right || left || line.slice(1) || line,
+          leftCode: left,
+          rightCode: right,
+          split: true,
           raw: line,
           rowIndex: index++,
           lineType,
@@ -118,6 +115,7 @@ function flattenFilesToVirtualRows(files, mode = 'unified', options = {}) {
             lineType === 'add' || lineType === 'del' || lineType === 'context'
               ? line.slice(1)
               : line,
+          split: false,
           raw: line,
           rowIndex: index++,
           lineType,
@@ -138,6 +136,8 @@ function flattenFilesToVirtualRows(files, mode = 'unified', options = {}) {
             body: c.body || '',
             author: c.author || '',
             commentId: c.id,
+            threadNodeId: c.threadNodeId || null,
+            resolved: Boolean(c.resolved),
             rowIndex: index++,
             lineType: 'comment',
             newLine: n,
@@ -157,11 +157,25 @@ function toSet(paths) {
   return new Set(Array.isArray(paths) ? paths : []);
 }
 
+/**
+ * Group review comments by path:line for inline rows.
+ * Only **root** comments become rows; replies (inReplyToId → known id) are
+ * nested under the root via groupReviewThreads / InlineThread.replies.
+ */
 function groupComments(comments) {
   const map = new Map();
   if (!Array.isArray(comments)) return map;
+  const byId = new Map();
+  for (const c of comments) {
+    if (c && c.id != null) byId.set(String(c.id), c);
+  }
   for (const c of comments) {
     if (!c || !c.path || c.line == null) continue;
+    const parentId = c.inReplyToId ?? c.in_reply_to_id ?? null;
+    if (parentId != null && byId.has(String(parentId))) {
+      // Reply — do not emit a second inline-comment row
+      continue;
+    }
     const key = `${c.path}:${Number(c.line)}`;
     if (!map.has(key)) map.set(key, []);
     map.get(key).push(c);
@@ -230,6 +244,7 @@ const api = {
   flattenFilesToVirtualRows,
   fileStartIndexMap,
   languageFromPath,
+  groupComments,
 };
 
 if (typeof module !== 'undefined' && module.exports) {

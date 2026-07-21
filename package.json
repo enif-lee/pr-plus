@@ -10,20 +10,33 @@
     "browser:pulls": "agent-browser close --all 2>/dev/null; agent-browser open https://github.com/rtzr/callabo-server/pulls",
     "browser:open": "agent-browser close --all 2>/dev/null; agent-browser open",
     "browser:close": "agent-browser close --all",
-    "browser:snapshot": "agent-browser snapshot -i -c"
+    "browser:snapshot": "agent-browser snapshot -i -c",
+    "typecheck": "tsc --noEmit",
+    "test:unit": "node --import tsx tests/run-all.js"
   },
   "devDependencies": {
+    "@types/dompurify": "^3.0.5",
+    "@types/node": "^26.1.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@types/react-test-renderer": "^19.1.0",
     "autoprefixer": "^10.5.4",
     "esbuild": "^0.28.1",
     "jsdom": "^25.0.1",
     "postcss": "^8.5.21",
-    "react": "^19.2.7",
-    "react-dom": "^19.2.7",
-    "tailwindcss": "^3.4.19"
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "react-test-renderer": "^19.2.7",
+    "tailwindcss": "^3.4.19",
+    "tsx": "^4.23.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.1.5",
+    "zustand": "^5.0.14"
   },
   "dependencies": {
     "dompurify": "^3.4.12",
     "highlight.js": "^11.11.1",
-    "marked": "^18.0.7"
+    "marked": "^18.0.7",
+    "mermaid": "^11.16.0"
   }
 }
