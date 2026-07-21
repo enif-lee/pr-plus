@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.jpg" alt="pr+ logo" width="96" height="96" />
+  <img src="assets/logo.jpeg" alt="pr+ logo" width="96" height="96" />
 </p>
 
 <h1 align="center">pr+</h1>
@@ -33,7 +33,7 @@ It keeps the native GitHub list UI and applies a minimal overlay.
 Example pull request list with stack tree, review badges, and `base ← head` branch chips.
 
 <p align="center">
-  <img src="assets/screenshot-stack-demo.jpg" alt="pr+ stack tree demo on GitHub pull requests list" width="720" />
+  <img src="assets/screenshot-stack-demo.jpeg" alt="pr+ stack tree demo on GitHub pull requests list" width="720" />
 </p>
 
 ---
@@ -147,6 +147,18 @@ src/
   tree.js                # pure tree builder
   popup.html / popup.js  # PAT settings UI
   styles.css
+```
+
+---
+
+## Privacy
+
+See **[PRIVACY.md](./PRIVACY.md)** for how pr+ handles data and optional GitHub PATs.
+
+Chrome Web Store privacy policy URL (public):
+
+```text
+https://github.com/enif-lee/pr-plus/blob/main/PRIVACY.md
 ```
 
 ---
