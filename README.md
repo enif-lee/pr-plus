@@ -28,6 +28,28 @@ GitHub의 PR 리스트는 기본적으로 **정렬된 평면 목록**이라, sta
 
 네이티브 GitHub 리스트 UI는 유지한 채, 최소한의 오버레이로 동작합니다.
 
+### 스크린샷
+
+스택 트리 · 리뷰 뱃지 · `base ← head` 브랜치 칩이 적용된 PR 목록 예시입니다.
+
+<p align="center">
+  <img src="assets/screenshot-stack-demo.jpg" alt="pr+ stack tree demo on GitHub pull requests list" width="720" />
+</p>
+
+데모 스택 구조:
+
+```text
+g
+-i
+-h
+f
+a
+-e
+--c
+---d
+-b
+```
+
 ---
 
 ## 주요 기능
