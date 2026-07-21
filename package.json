@@ -1,6 +1,6 @@
 {
   "name": "pr-plus",
-  "version": "1.0.0",
+  "version": "1.0.3",
   "private": true,
   "scripts": {
     "test": "node tests/run-all.js",
