@@ -2027,6 +2027,24 @@
   height: auto !important;
   min-height: 96px;
   white-space: normal;
+  /* Diff list is mono for code; comments/reviews use UI font like conversation */
+  font-family: var(--prp-font);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.prp-vline--comment .prp-inline-thread,
+.prp-vline--comment .prp-inline-comment,
+.prp-vline--comment .prp-md,
+.prp-vline--comment .prp-mdc,
+.prp-vline--comment .prp-review-thread {
+  font-family: var(--prp-font);
+}
+
+/* Path/loc stays mono; body copy stays proportional */
+.prp-vline--comment .prp-mono,
+.prp-vline--comment .prp-inline-thread__loc {
+  font-family: var(--prp-mono);
 }
 
 .prp-vline--header {
@@ -2171,6 +2189,7 @@
   background: color-mix(in srgb, var(--prp-accent) 8%, var(--prp-bg));
   border-left-color: var(--prp-accent);
   padding: 4px 0;
+  font-family: var(--prp-font);
 }
 
 .prp-inline-comment {
@@ -2603,6 +2622,9 @@
   width: 100%;
   padding: 8px 12px 12px;
   box-sizing: border-box;
+  font-family: var(--prp-font);
+  font-size: 14px;
+  line-height: 1.5;
 }
 
 .prp-inline-thread__card {
