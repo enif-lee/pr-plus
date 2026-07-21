@@ -518,18 +518,65 @@
 .prp-status {
   padding: var(--prp-space-4);
   color: var(--prp-fg-muted);
+  flex: 0 0 auto;
 }
 
 .prp-status--error {
   color: var(--prp-danger);
+  border-bottom: 1px solid var(--prp-border-muted);
+  background: color-mix(in srgb, var(--prp-danger) 8%, var(--prp-bg));
 }
 
-.prp-status--revalidate {
-  padding: 8px 18px;
-  font-size: 12px;
-  border-bottom: 1px solid var(--prp-border-muted);
-  background: color-mix(in srgb, var(--prp-accent) 8%, var(--prp-bg-muted));
-  color: var(--prp-fg-muted);
+/* Soft revalidate: thin top-edge progress overlay (no layout shift) */
+.prp-top-loading-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  z-index: 50;
+  pointer-events: none;
+  overflow: hidden;
+  border-radius: inherit;
+}
+.prp-top-loading-bar::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--prp-accent, #0969da) 35%, transparent);
+}
+.prp-top-loading-bar::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 40%;
+  border-radius: 0 2px 2px 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--prp-accent, #0969da) 35%,
+    var(--prp-accent-bg, #1f6feb) 70%,
+    transparent 100%
+  );
+  animation: prp-top-loading-slide 1.05s ease-in-out infinite;
+}
+@keyframes prp-top-loading-slide {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .prp-top-loading-bar::after {
+    animation: none;
+    width: 100%;
+    opacity: 0.85;
+    background: var(--prp-accent, #0969da);
+    transform: none;
+  }
 }
 
 /* Skeleton placeholders — small units matching real chrome/conversation/diff */

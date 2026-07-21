@@ -2017,6 +2017,14 @@ export function PrModalApp({
         data-color-mode={theme.mode}
         data-shell={shellMode}
       >
+        {isRevalidating ? (
+          <div
+            className="prp-top-loading-bar"
+            role="progressbar"
+            aria-label="Refreshing pull request"
+            aria-busy="true"
+          />
+        ) : null}
         <Header
           detail={detail}
           onClose={onClose}
@@ -2047,9 +2055,6 @@ export function PrModalApp({
           onNext={() => navSearch(1)}
           onPrev={() => navSearch(-1)}
         />
-        {isRevalidating ? (
-          <div className="prp-status prp-status--revalidate">Refreshing…</div>
-        ) : null}
         {error ? <div className="prp-status prp-status--error">{error}</div> : null}
         {/* Diff layout initial load uses full-body skeleton; conversation uses per-region skeletons */}
         {isInitialLoad && layoutMode === LAYOUT_DIFF ? (
