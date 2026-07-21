@@ -4,7 +4,7 @@ const { spawnSync } = require('node:child_process');
 
 const SCRATCH =
   process.env.PRP_SCRATCH ||
-  '/var/folders/sl/km7nh7qj50b9mw4901n7ch940000gn/T/grok-goal-bb0c8cb3d71a/implementer';
+  '/var/folders/sl/km7nh7qj50b9mw4901n7ch940000gn/T/grok-goal-4eb56420c3d0/implementer';
 fs.mkdirSync(SCRATCH, { recursive: true });
 
 // Ensure modal bundle exists for host/bundle tests
@@ -26,6 +26,7 @@ const tests = [
   'content-bootstrap.test.js',
   'browser-eval.js',
   'modal-pure.test.js',
+  'modal-modern-pure.test.js',
   'pr-modal-bundle.test.js',
   'pr-modal-host.test.js',
   'pr-modal-diff-anim.test.js',

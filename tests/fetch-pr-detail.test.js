@@ -95,6 +95,17 @@ async function main() {
     if (url.includes('/check-runs')) {
       return { ok: true, json: async () => ({ check_runs: [] }) };
     }
+    if (url.includes('/contents/.gitattributes')) {
+      return {
+        ok: true,
+        json: async () => ({
+          content: Buffer.from('*.min.js linguist-generated=true\n', 'utf8').toString(
+            'base64'
+          ),
+          encoding: 'base64',
+        }),
+      };
+    }
     if (url.includes('/commits')) {
       return {
         ok: true,

@@ -14,6 +14,10 @@ const pureFiles = [
   'src/modal/pure/search-index.js',
   'src/modal/pure/diff-rows.js',
   'src/modal/pure/modal-state.js',
+  'src/modal/pure/file-tree.js',
+  'src/modal/pure/collapse.js',
+  'src/modal/pure/comment-nav.js',
+  'src/modal/pure/theme.js',
 ];
 
 // Each pure module already assigns globalThis.* — wrap to avoid const collisions.
@@ -33,13 +37,39 @@ const appSource = fs.readFileSync(entry, 'utf8');
 // production IIFE gets esbuild-injected createRoot from react-dom/client.
 const appFixed = appSource
   .replace(
-    '/* global React, PRModalLayout, PRModalVirtual, PRModalSearch, PRModalDiffRows */',
+    '/* global React, PRModalLayout, PRModalVirtual, PRModalSearch, PRModalDiffRows, PRModalFileTree, PRModalCollapse, PRModalCommentNav, PRModalTheme */\n/* global hljs, marked, DOMPurify */',
     `import React from 'react';
 import { createRoot } from 'react-dom/client';
+import hljs from 'highlight.js/lib/core';
+import javascript from 'highlight.js/lib/languages/javascript';
+import typescript from 'highlight.js/lib/languages/typescript';
+import json from 'highlight.js/lib/languages/json';
+import xml from 'highlight.js/lib/languages/xml';
+import css from 'highlight.js/lib/languages/css';
+import markdown from 'highlight.js/lib/languages/markdown';
+import bash from 'highlight.js/lib/languages/bash';
+import python from 'highlight.js/lib/languages/python';
+import yaml from 'highlight.js/lib/languages/yaml';
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
+hljs.registerLanguage('javascript', javascript);
+hljs.registerLanguage('typescript', typescript);
+hljs.registerLanguage('json', json);
+hljs.registerLanguage('xml', xml);
+hljs.registerLanguage('css', css);
+hljs.registerLanguage('markdown', markdown);
+hljs.registerLanguage('bash', bash);
+hljs.registerLanguage('python', python);
+hljs.registerLanguage('yaml', yaml);
+marked.setOptions({ gfm: true, breaks: true });
 const PRModalLayout = globalThis.PRModalLayout;
 const PRModalVirtual = globalThis.PRModalVirtual;
 const PRModalSearch = globalThis.PRModalSearch;
-const PRModalDiffRows = globalThis.PRModalDiffRows;`
+const PRModalDiffRows = globalThis.PRModalDiffRows;
+const PRModalFileTree = globalThis.PRModalFileTree;
+const PRModalCollapse = globalThis.PRModalCollapse;
+const PRModalCommentNav = globalThis.PRModalCommentNav;
+const PRModalTheme = globalThis.PRModalTheme;`
   )
   .replace(/ReactDOM\.createRoot/g, 'createRoot');
 

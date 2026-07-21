@@ -24,8 +24,11 @@ assert.ok(/280ms|cubic-bezier/.test(css), 'timing curve for expand/collapse');
 assert.ok(appSrc.includes('LAYOUT_DIFF'));
 assert.ok(appSrc.includes('prp-modal--animating'));
 assert.ok(appSrc.includes('expandDiff') || appSrc.includes('setLayoutMode'));
-assert.ok(appSrc.includes('FileTree'));
+assert.ok(appSrc.includes('FolderFileTree') || appSrc.includes('FileTree'));
 assert.ok(appSrc.includes('VirtualDiff'));
+assert.ok(appSrc.includes('MarkdownView') || appSrc.includes('marked'));
+assert.ok(appSrc.includes('highlightCode') || appSrc.includes('hljs'));
+assert.ok(appSrc.includes('navComment') || appSrc.includes('CommentNav'));
 
 // Pure state transitions
 assert.equal(layout.openDiffLayout(), 'diff');

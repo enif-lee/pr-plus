@@ -245,6 +245,24 @@ async function fetchOpenPulls(owner, repo, fetchImpl, options = {}) {
   return attachMagicLinks(prs, autolinks);
 }
 
+function decodeBase64Utf8(b64) {
+  try {
+    if (typeof Buffer !== 'undefined') {
+      return Buffer.from(b64, 'base64').toString('utf8');
+    }
+  } catch {
+    /* fall through */
+  }
+  try {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new TextDecoder('utf-8').decode(bytes);
+  } catch {
+    return '';
+  }
+}
+
 async function apiJson(url, fetchImpl, token) {
   const res = await fetchImpl(url, { headers: buildApiHeaders(token) });
   if (!res.ok) {
@@ -355,6 +373,59 @@ async function fetchPrDetail(owner, repo, pullNumber, fetchImpl, token = null) {
     }
   }
 
+  // Optional .gitattributes for linguist-generated / binary collapse defaults
+  let gitattributesText = '';
+  try {
+    const ref = headSha || pr.head?.ref || 'HEAD';
+    const attr = await apiJson(
+      `${base}/contents/.gitattributes?ref=${encodeURIComponent(ref)}`,
+      fetchImpl,
+      token
+    );
+    if (attr?.content && attr.encoding === 'base64') {
+      gitattributesText = decodeBase64Utf8(attr.content.replace(/\n/g, ''));
+    } else if (typeof attr?.content === 'string') {
+      gitattributesText = attr.content;
+    }
+  } catch {
+    gitattributesText = '';
+  }
+
+  const mappedFiles = (Array.isArray(files) ? files : []).map((f) => ({
+    filename: f.filename,
+    status: f.status,
+    additions: f.additions,
+    deletions: f.deletions,
+    changes: f.changes,
+    patch: f.patch || '',
+  }));
+
+  // Prefer pure collapse annotator when available (tests / content); SW falls back.
+  let filesOut = mappedFiles.map((f) => ({
+    ...f,
+    defaultCollapsed:
+      !f.patch ||
+      (f.changes || 0) >= 500 ||
+      /package-lock\.json$|yarn\.lock$|\.min\.(js|css)$|\.bundle\.js$/i.test(
+        f.filename || ''
+      ),
+  }));
+  try {
+    let collapse = typeof globalThis !== 'undefined' ? globalThis.PRModalCollapse : null;
+    if (!collapse && typeof require === 'function') {
+      try {
+        collapse = require('./modal/pure/collapse.js');
+      } catch {
+        collapse = null;
+      }
+    }
+    if (collapse?.annotateFilesForCollapse) {
+      filesOut = collapse.annotateFilesForCollapse(mappedFiles, gitattributesText);
+    }
+  } catch {
+    /* keep fallback filesOut */
+  }
+
   return {
     owner,
     repo,
@@ -375,14 +446,8 @@ async function fetchPrDetail(owner, repo, pullNumber, fetchImpl, token = null) {
     additions: pr.additions,
     deletions: pr.deletions,
     changedFiles: pr.changed_files,
-    files: (Array.isArray(files) ? files : []).map((f) => ({
-      filename: f.filename,
-      status: f.status,
-      additions: f.additions,
-      deletions: f.deletions,
-      changes: f.changes,
-      patch: f.patch || '',
-    })),
+    gitattributesText,
+    files: filesOut,
     comments: (Array.isArray(comments) ? comments : []).map((c) => ({
       id: c.id,
       author: c.user?.login || '',

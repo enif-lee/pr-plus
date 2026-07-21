@@ -1,31 +1,57 @@
 /**
  * Flatten PR files + patches into virtual table rows.
  * mode: 'unified' | 'split'
+ * Supports default-collapsed files and inline review comments.
  */
 
 /**
- * @param {Array<{ filename: string, status?: string, additions?: number, deletions?: number, patch?: string }>} files
+ * @param {Array<{ filename: string, status?: string, additions?: number, deletions?: number, patch?: string, defaultCollapsed?: boolean }>} files
  * @param {'unified'|'split'} [mode='unified']
- * @returns {Array<{ kind: string, filePath: string, text: string, rowIndex: number, lineType?: string, oldLine?: number|null, newLine?: number|null }>}
+ * @param {{ collapsedPaths?: Set<string>|string[], reviewComments?: Array, expandAll?: boolean }} [options]
+ * @returns {Array<object>}
  */
-function flattenFilesToVirtualRows(files, mode = 'unified') {
+function flattenFilesToVirtualRows(files, mode = 'unified', options = {}) {
   const rows = [];
   if (!Array.isArray(files)) return rows;
   const split = mode === 'split';
+  const collapsedSet = toSet(options.collapsedPaths);
+  const commentsByKey = groupComments(options.reviewComments || []);
 
   let index = 0;
   for (const file of files) {
     const path = file.filename || file.path || 'unknown';
     const status = file.status || 'modified';
     const stats = `+${file.additions ?? 0} −${file.deletions ?? 0}`;
+    const isCollapsed =
+      !options.expandAll &&
+      (collapsedSet.has(path) ||
+        (collapsedSet.size === 0 && file.defaultCollapsed === true));
 
     rows.push({
       kind: 'file-header',
       filePath: path,
-      text: `${status} ${path} ${stats}`,
+      text: `${status} ${path} ${stats}${isCollapsed ? ' (collapsed)' : ''}`,
       rowIndex: index++,
       lineType: 'header',
+      collapsed: isCollapsed,
     });
+
+    if (isCollapsed) {
+      const reason = !file.patch
+        ? 'Binary, too large, or no textual patch — expand to attempt view'
+        : file.defaultCollapsed
+          ? 'Collapsed by default (generated / large / lockfile) — expand to view'
+          : 'Collapsed';
+      rows.push({
+        kind: 'diff-meta',
+        filePath: path,
+        text: reason,
+        rowIndex: index++,
+        lineType: 'meta',
+        collapsed: true,
+      });
+      continue;
+    }
 
     const patch = file.patch || '';
     if (!patch) {
@@ -76,6 +102,8 @@ function flattenFilesToVirtualRows(files, mode = 'unified') {
           kind: 'diff-line',
           filePath: path,
           text,
+          code: lineType === 'meta' || lineType === 'hunk' ? line : line.slice(1) || line,
+          raw: line,
           rowIndex: index++,
           lineType,
           oldLine: o,
@@ -86,16 +114,59 @@ function flattenFilesToVirtualRows(files, mode = 'unified') {
           kind: 'diff-line',
           filePath: path,
           text: line,
+          code:
+            lineType === 'add' || lineType === 'del' || lineType === 'context'
+              ? line.slice(1)
+              : line,
+          raw: line,
           rowIndex: index++,
           lineType,
           oldLine: o,
           newLine: n,
         });
       }
+
+      // Inline comments after matching RIGHT/new line
+      if (n != null) {
+        const key = `${path}:${n}`;
+        const list = commentsByKey.get(key) || [];
+        for (const c of list) {
+          rows.push({
+            kind: 'inline-comment',
+            filePath: path,
+            text: `${c.author || 'user'}: ${c.body || ''}`,
+            body: c.body || '',
+            author: c.author || '',
+            commentId: c.id,
+            rowIndex: index++,
+            lineType: 'comment',
+            newLine: n,
+            oldLine: o,
+          });
+        }
+      }
     }
   }
 
   return rows;
+}
+
+function toSet(paths) {
+  if (!paths) return new Set();
+  if (paths instanceof Set) return paths;
+  return new Set(Array.isArray(paths) ? paths : []);
+}
+
+function groupComments(comments) {
+  const map = new Map();
+  if (!Array.isArray(comments)) return map;
+  for (const c of comments) {
+    if (!c || !c.path || c.line == null) continue;
+    const key = `${c.path}:${Number(c.line)}`;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(c);
+  }
+  return map;
 }
 
 /**
@@ -112,9 +183,53 @@ function fileStartIndexMap(virtualRows) {
   return map;
 }
 
+/**
+ * Guess highlight language from path.
+ * @param {string} filePath
+ */
+function languageFromPath(filePath) {
+  const p = (filePath || '').toLowerCase();
+  const base = p.split('/').pop() || '';
+  if (base === 'dockerfile') return 'dockerfile';
+  if (base === 'makefile') return 'makefile';
+  const ext = base.includes('.') ? base.split('.').pop() : '';
+  const map = {
+    js: 'javascript',
+    jsx: 'javascript',
+    mjs: 'javascript',
+    cjs: 'javascript',
+    ts: 'typescript',
+    tsx: 'typescript',
+    json: 'json',
+    md: 'markdown',
+    css: 'css',
+    scss: 'scss',
+    html: 'xml',
+    htm: 'xml',
+    xml: 'xml',
+    yml: 'yaml',
+    yaml: 'yaml',
+    py: 'python',
+    rb: 'ruby',
+    go: 'go',
+    rs: 'rust',
+    java: 'java',
+    kt: 'kotlin',
+    sh: 'bash',
+    bash: 'bash',
+    zsh: 'bash',
+    sql: 'sql',
+    graphql: 'graphql',
+    vue: 'xml',
+    svelte: 'xml',
+  };
+  return map[ext] || 'plaintext';
+}
+
 const api = {
   flattenFilesToVirtualRows,
   fileStartIndexMap,
+  languageFromPath,
 };
 
 if (typeof module !== 'undefined' && module.exports) {

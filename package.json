@@ -1,6 +1,6 @@
 {
   "name": "pr-plus",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "scripts": {
     "build:modal": "node scripts/build-modal.mjs",
@@ -13,9 +13,17 @@
     "browser:snapshot": "agent-browser snapshot -i -c"
   },
   "devDependencies": {
+    "autoprefixer": "^10.5.4",
     "esbuild": "^0.28.1",
     "jsdom": "^25.0.1",
+    "postcss": "^8.5.21",
     "react": "^19.2.7",
-    "react-dom": "^19.2.7"
+    "react-dom": "^19.2.7",
+    "tailwindcss": "^3.4.19"
+  },
+  "dependencies": {
+    "dompurify": "^3.4.12",
+    "highlight.js": "^11.11.1",
+    "marked": "^18.0.7"
   }
 }
