@@ -45,6 +45,14 @@ async function main() {
             changes: 1,
             patch: '@@\n+x\n',
           },
+          {
+            filename: 'api/v1/foo.pb.go',
+            status: 'modified',
+            additions: 2,
+            deletions: 0,
+            changes: 2,
+            patch: '@@ -1,1 +1,3 @@\n package v1\n+// generated\n+var x\n',
+          },
         ],
       };
     }
@@ -99,9 +107,10 @@ async function main() {
       return {
         ok: true,
         json: async () => ({
-          content: Buffer.from('*.min.js linguist-generated=true\n', 'utf8').toString(
-            'base64'
-          ),
+          content: Buffer.from(
+            '*.pb.go linguist-generated=true\n*.min.js linguist-generated=true\n',
+            'utf8'
+          ).toString('base64'),
           encoding: 'base64',
         }),
       };
@@ -123,8 +132,27 @@ async function main() {
 
   const detail = await fetchPrDetail('o', 'r', 9, mockFetch, null);
   assert.equal(detail.number, 9);
-  assert.equal(detail.files.length, 1);
+  assert.equal(detail.files.length, 2);
   assert.equal(detail.files[0].patch.includes('+x'), true);
+  assert.ok(
+    detail.gitattributesText.includes('*.pb.go linguist-generated=true'),
+    'gitattributesText must be decoded from contents API'
+  );
+  const pb = detail.files.find((f) => f.filename === 'api/v1/foo.pb.go');
+  assert.ok(pb, 'pb.go file present');
+  assert.equal(
+    pb.defaultCollapsed,
+    true,
+    'fetchPrDetail must annotate collapse via gitattributes (not path hardcode)'
+  );
+  assert.equal(detail.files.find((f) => f.filename === 'a.js').defaultCollapsed, false);
+  // Real App path: re-annotate always applies gitattributesText even if flags already set
+  const collapse = require('../src/modal/pure/collapse.js');
+  const re = collapse.annotateFilesForCollapse(
+    detail.files.map((f) => ({ ...f, defaultCollapsed: false })),
+    detail.gitattributesText
+  );
+  assert.equal(re.find((f) => f.filename === 'api/v1/foo.pb.go').defaultCollapsed, true);
   assert.equal(detail.comments.length, 1);
   assert.equal(detail.reviews[0].state, 'APPROVED');
   assert.equal(detail.commits[0].sha, 'abcdef1');

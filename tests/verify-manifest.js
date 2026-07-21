@@ -21,6 +21,10 @@ const swPath = path.join(__dirname, '..', manifest.background.service_worker);
 if (!fs.existsSync(swPath)) {
   throw new Error(`Service worker missing: ${manifest.background.service_worker}`);
 }
+const swSrc = fs.readFileSync(swPath, 'utf8');
+if (!swSrc.includes('modal/pure/collapse.js')) {
+  throw new Error('service worker must importScripts collapse pure helper for gitattributes');
+}
 
 if (!manifest.action?.default_popup) {
   throw new Error('action.default_popup required for API token settings');

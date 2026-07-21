@@ -86,6 +86,26 @@ function attributesForPath(filePath, rules) {
 }
 
 /**
+ * gitattributes values arrive as booleans (flag form) or strings ("true"/"false"
+ * from key=value). Treat truthy-enabled forms as on.
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function isAttrEnabled(value) {
+  if (value === true) return true;
+  if (value === false || value == null) return false;
+  if (typeof value === 'string') {
+    const v = value.trim().toLowerCase();
+    if (v === '' || v === 'false' || v === '0' || v === 'no' || v === 'unset') {
+      return false;
+    }
+    // "true", "set", "yes", "1", or bare presence-like values
+    return true;
+  }
+  return Boolean(value);
+}
+
+/**
  * Whether a PR file should start collapsed in the diff view.
  * @param {{ filename?: string, path?: string, patch?: string, changes?: number, additions?: number, deletions?: number, status?: string, linguistGenerated?: boolean, binary?: boolean }} file
  * @param {{ rules?: Array, largeChanges?: number, largePatchChars?: number }} [opts]
@@ -102,10 +122,17 @@ function shouldCollapseFile(file, opts = {}) {
   const rules = opts.rules || [];
 
   const attrs = attributesForPath(path, rules);
-  if (file.linguistGenerated === true || attrs['linguist-generated'] === true) {
+  if (
+    isAttrEnabled(file.linguistGenerated) ||
+    isAttrEnabled(attrs['linguist-generated'])
+  ) {
     return true;
   }
-  if (file.binary === true || attrs.binary === true || attrs['-diff'] === true || attrs.diff === false) {
+  if (isAttrEnabled(file.binary) || isAttrEnabled(attrs.binary)) {
+    return true;
+  }
+  // `-diff` sets attrs.diff=false; `diff=false` arrives as string
+  if (attrs.diff === false || String(attrs.diff || '').toLowerCase() === 'false') {
     return true;
   }
   // GitHub omits patch for binary / too large
@@ -133,6 +160,7 @@ function shouldCollapseFile(file, opts = {}) {
 
 /**
  * Annotate files with collapse + attrs metadata (pure).
+ * Always re-runnable with gitattributesText so SW weak defaults can be upgraded.
  * @param {object[]} files
  * @param {string} [gitattributesText]
  */
@@ -145,8 +173,9 @@ function annotateFilesForCollapse(files, gitattributesText) {
       {
         ...f,
         linguistGenerated:
-          f.linguistGenerated === true || attrs['linguist-generated'] === true,
-        binary: f.binary === true || attrs.binary === true,
+          isAttrEnabled(f.linguistGenerated) ||
+          isAttrEnabled(attrs['linguist-generated']),
+        binary: isAttrEnabled(f.binary) || isAttrEnabled(attrs.binary),
       },
       { rules }
     );
@@ -162,6 +191,7 @@ const api = {
   parseGitattributes,
   matchAttrPattern,
   attributesForPath,
+  isAttrEnabled,
   shouldCollapseFile,
   annotateFilesForCollapse,
   DEFAULT_LARGE_CHANGES,

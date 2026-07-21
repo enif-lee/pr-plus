@@ -689,9 +689,10 @@ function PrModalApp({ open, loading, error, detail, onClose, onRefresh }) {
   const shellRef = useRef(null);
   const collapseInitRef = useRef(null);
 
+  // Always re-annotate with gitattributesText so SW fallback defaults cannot
+  // skip linguist-generated / binary rules from the fetched attributes file.
   const annotatedFiles = useMemo(() => {
     if (!detail?.files) return [];
-    if (detail.files.some((f) => 'defaultCollapsed' in f)) return detail.files;
     return annotateFilesForCollapse(detail.files, detail.gitattributesText || '');
   }, [detail]);
 

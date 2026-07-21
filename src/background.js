@@ -3,9 +3,11 @@
  * Content scripts never receive the raw token.
  */
 
-/* global importScripts, PRTreeStorage, PRTreeFetch */
+/* global importScripts, PRTreeStorage, PRTreeFetch, PRModalCollapse */
 
-importScripts('storage.js', 'fetch-pulls.js');
+// collapse pure helper must load before fetch-pulls so annotateFilesForCollapse
+// is available when fetchPrDetail runs in the service worker.
+importScripts('modal/pure/collapse.js', 'storage.js', 'fetch-pulls.js');
 
 const MSG = {
   TOKEN_STATUS: 'PR_TREE_TOKEN_STATUS',

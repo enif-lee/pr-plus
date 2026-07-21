@@ -68,6 +68,42 @@ package-lock.json linguist-generated=true
   assert.equal(byName['huge.js'], true);
   assert.equal(byName['package-lock.json'], true);
 
+  // Non-hardcoded path: only collapses via key=true string form (not path heuristics)
+  const pbBase = {
+    filename: 'api/v1/foo.pb.go',
+    patch: '@@ -1,2 +1,3 @@\n package v1\n+// gen\n',
+    additions: 1,
+    deletions: 0,
+    changes: 1,
+  };
+  const withoutAttr = collapse.annotateFilesForCollapse([pbBase], '');
+  assert.equal(
+    withoutAttr[0].defaultCollapsed,
+    false,
+    'pb.go must stay open without attributes (no hardcode)'
+  );
+  const withAttr = collapse.annotateFilesForCollapse(
+    [pbBase],
+    '*.pb.go linguist-generated=true\n'
+  );
+  assert.equal(
+    withAttr[0].defaultCollapsed,
+    true,
+    'linguist-generated=true string must enable collapse'
+  );
+  assert.equal(collapse.isAttrEnabled('true'), true);
+  assert.equal(collapse.isAttrEnabled(true), true);
+  assert.equal(collapse.isAttrEnabled('false'), false);
+  assert.equal(collapse.isAttrEnabled(false), false);
+
+  // Re-annotate upgrades SW weak defaults when gitattributes arrive later
+  const swLike = [{ ...pbBase, defaultCollapsed: false }];
+  const upgraded = collapse.annotateFilesForCollapse(
+    swLike,
+    '*.pb.go linguist-generated=true\n'
+  );
+  assert.equal(upgraded[0].defaultCollapsed, true, 're-annotate must honor attributes');
+
   const rowsCollapsed = diffRows.flattenFilesToVirtualRows(annotated, 'unified', {
     collapsedPaths: new Set(
       annotated.filter((f) => f.defaultCollapsed).map((f) => f.filename)
@@ -76,6 +112,7 @@ package-lock.json linguist-generated=true
   assert.ok(rowsCollapsed.some((r) => /collapsed/i.test(r.text)));
   assert.ok(!rowsCollapsed.some((r) => r.filePath === 'blob.bin' && r.kind === 'diff-line'));
   lines.push('collapse: defaults ok');
+  lines.push('collapse: linguist-generated=true on foo.pb.go ok');
 }
 
 // (c) comment next/prev + row mapping

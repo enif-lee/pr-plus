@@ -400,16 +400,9 @@ async function fetchPrDetail(owner, repo, pullNumber, fetchImpl, token = null) {
     patch: f.patch || '',
   }));
 
-  // Prefer pure collapse annotator when available (tests / content); SW falls back.
-  let filesOut = mappedFiles.map((f) => ({
-    ...f,
-    defaultCollapsed:
-      !f.patch ||
-      (f.changes || 0) >= 500 ||
-      /package-lock\.json$|yarn\.lock$|\.min\.(js|css)$|\.bundle\.js$/i.test(
-        f.filename || ''
-      ),
-  }));
+  // Prefer pure collapse annotator (SW loads modal/pure/collapse.js via importScripts;
+  // Node tests require() it). Fallback only if the pure module is unavailable.
+  let filesOut;
   try {
     let collapse = typeof globalThis !== 'undefined' ? globalThis.PRModalCollapse : null;
     if (!collapse && typeof require === 'function') {
@@ -423,7 +416,18 @@ async function fetchPrDetail(owner, repo, pullNumber, fetchImpl, token = null) {
       filesOut = collapse.annotateFilesForCollapse(mappedFiles, gitattributesText);
     }
   } catch {
-    /* keep fallback filesOut */
+    filesOut = null;
+  }
+  if (!filesOut) {
+    filesOut = mappedFiles.map((f) => ({
+      ...f,
+      defaultCollapsed:
+        !f.patch ||
+        (f.changes || 0) >= 500 ||
+        /package-lock\.json$|yarn\.lock$|\.min\.(js|css)$|\.bundle\.js$/i.test(
+          f.filename || ''
+        ),
+    }));
   }
 
   return {
