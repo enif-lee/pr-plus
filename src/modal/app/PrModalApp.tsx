@@ -2030,10 +2030,6 @@ export function PrModalApp({
           onChangeBase={openBasePicker}
           baseBranchRef={baseBranchRef}
           sectionLoading={isInitialLoad}
-          onOpenPalette={() => {
-            setPaletteOpen(true);
-            setPaletteQuery('');
-          }}
           shortcutMod={shortcutMod}
           shellMode={shellMode}
           onToggleShell={onToggleShell}
@@ -2056,7 +2052,9 @@ export function PrModalApp({
         ) : null}
         {error ? <div className="prp-status prp-status--error">{error}</div> : null}
         {/* Diff layout initial load uses full-body skeleton; conversation uses per-region skeletons */}
-        {isInitialLoad && layoutMode === LAYOUT_DIFF ? <LoadingSkeleton /> : null}
+        {isInitialLoad && layoutMode === LAYOUT_DIFF ? (
+          <LoadingSkeleton variant="diff" />
+        ) : null}
         {(detail || isInitialLoad) && layoutMode === LAYOUT_CENTERED ? (
           <ConversationView
             detail={

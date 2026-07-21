@@ -16,6 +16,7 @@ import { DiffSnippetView } from './DiffSnippetView';
 import { AsideCommitsTimeline } from './AsideCommitsTimeline';
 import { AsideFilesTree } from './AsideFilesTree';
 import { ChecksPanel, hasChecksData } from './ChecksPanel';
+import { LoadingSkeleton } from '../chrome/LoadingSkeleton';
 
 function ConversationViewImpl(props: any) {
   const {
@@ -92,12 +93,7 @@ function ConversationViewImpl(props: any) {
   }, [allItems, timelinePage]);
 
   if (!detail && sectionLoading) {
-    return (
-      <div className="prp-conversation">
-        <div className="prp-section-skeleton" />
-        <div className="prp-section-skeleton prp-section-skeleton--aside" />
-      </div>
-    );
+    return <LoadingSkeleton variant="conversation" />;
   }
   if (!detail) return null;
 
@@ -494,7 +490,7 @@ function ConversationViewImpl(props: any) {
               </Button>
               {detail.state === 'open' && !detail.merged ? (
                 <Button size="sm" variant="danger" disabled={actionBusy} onClick={onClosePr}>
-                  Close PR
+                  Close
                 </Button>
               ) : null}
               {detail.state === 'closed' && !detail.merged ? (

@@ -20,7 +20,6 @@ export function Header(props: any) {
     onChangeBase,
     baseBranchRef,
     sectionLoading,
-    onOpenPalette,
     shortcutMod,
     onSubscribe,
     shellMode = 'modal',
@@ -37,14 +36,23 @@ export function Header(props: any) {
       <header className="prp-header" data-section-loading={sectionLoading ? '1' : '0'}>
         <div className="prp-header__main">
           <div className="prp-header__title-row">
-            <span className="prp-header__number">PR</span>
-            <h2 className="prp-header__title">{sectionLoading ? 'Loading…' : 'Pull request'}</h2>
+            <span className="prp-header__number prp-skeleton__chip prp-skeleton__chip--num" aria-hidden="true" />
+            <span className="prp-skeleton__row prp-skeleton__row--lg prp-skeleton__row--w45" aria-hidden="true" />
+            <span className="prp-skeleton__chip" aria-hidden="true" />
+            <span className="prp-skeleton__chip prp-skeleton__chip--sm" aria-hidden="true" />
           </div>
-          {sectionLoading ? (
-            <div className="prp-section-skeleton prp-section-skeleton--sm" aria-busy="true" />
-          ) : null}
+          <div className="prp-header__meta" aria-hidden="true">
+            <span className="prp-skeleton__chip prp-skeleton__chip--branch" />
+            <span className="prp-skeleton__row prp-skeleton__row--sm prp-skeleton__row--w20" />
+            <span className="prp-skeleton__chip prp-skeleton__chip--sm" />
+          </div>
         </div>
         <div className="prp-header__aside">
+          <div className="prp-header__stats prp-header__stats--skeleton" aria-hidden="true">
+            <span className="prp-skeleton__chip prp-skeleton__chip--stat" />
+            <span className="prp-skeleton__chip prp-skeleton__chip--stat" />
+            <span className="prp-skeleton__chip prp-skeleton__chip--stat-w" />
+          </div>
           <div className="prp-header__actions">
             {typeof onToggleShell === 'function' ? (
               <button
@@ -63,7 +71,9 @@ export function Header(props: any) {
                 <span aria-hidden="true">{shellMode === 'sheet' ? '▢' : '◨'}</span>
               </button>
             ) : null}
-            <Button onClick={onClose} aria-label="Close">
+            <span className="prp-skeleton__chip prp-skeleton__chip--btn" aria-hidden="true" />
+            <span className="prp-skeleton__chip prp-skeleton__chip--btn" aria-hidden="true" />
+            <Button onClick={onClose} aria-label="Close" shortcut="Esc">
               ✕
             </Button>
           </div>
@@ -189,16 +199,9 @@ export function Header(props: any) {
           >
             {effectiveLayout === LAYOUT_DIFF ? 'Conversation' : 'Diff'}
           </Button>
-          <Button
-            size="sm"
-            onClick={onOpenPalette}
-            shortcut={shortcutMod ? `${shortcutMod}K` : undefined}
-          >
-            Commands
-          </Button>
           {canClose ? (
             <Button size="sm" variant="danger" disabled={actionBusy} onClick={onClosePr}>
-              Close PR
+              Close
             </Button>
           ) : null}
           {canReopen ? (
