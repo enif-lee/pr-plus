@@ -23,6 +23,8 @@ export function Header(props: any) {
     onOpenPalette,
     shortcutMod,
     onSubscribe,
+    shellMode = 'modal',
+    onToggleShell,
   } = props;
 
   const localBaseRef = useRef<HTMLButtonElement | null>(null);
@@ -44,6 +46,23 @@ export function Header(props: any) {
         </div>
         <div className="prp-header__aside">
           <div className="prp-header__actions">
+            {typeof onToggleShell === 'function' ? (
+              <button
+                type="button"
+                className="prp-shell-toggle"
+                onClick={onToggleShell}
+                aria-label={
+                  shellMode === 'sheet' ? 'Switch to modal view' : 'Switch to side sheet view'
+                }
+                title={
+                  shellMode === 'sheet' ? 'Switch to modal view' : 'Switch to side sheet view'
+                }
+                aria-pressed={shellMode === 'sheet'}
+                data-shell={shellMode}
+              >
+                <span aria-hidden="true">{shellMode === 'sheet' ? '▢' : '◨'}</span>
+              </button>
+            ) : null}
             <Button onClick={onClose} aria-label="Close">
               ✕
             </Button>
@@ -135,6 +154,24 @@ export function Header(props: any) {
           <span className="prp-muted">{fileCount} files</span>
         </div>
         <div className="prp-header__actions">
+          {typeof onToggleShell === 'function' ? (
+            <button
+              type="button"
+              className="prp-shell-toggle"
+              onClick={onToggleShell}
+              aria-label={
+                shellMode === 'sheet' ? 'Switch to modal view' : 'Switch to side sheet view'
+              }
+              title={
+                shellMode === 'sheet' ? 'Switch to modal view' : 'Switch to side sheet view'
+              }
+              aria-pressed={shellMode === 'sheet'}
+              data-shell={shellMode}
+            >
+              {/* sheet = docked panel icon; modal = floating window icon */}
+              <span aria-hidden="true">{shellMode === 'sheet' ? '▢' : '◨'}</span>
+            </button>
+          ) : null}
           {typeof onSubscribe === 'function' ? (
             <Button
               size="sm"

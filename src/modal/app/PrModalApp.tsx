@@ -20,6 +20,17 @@ import { FolderFileTree } from '../views/diff/FolderFileTree';
 import { VirtualDiff } from '../views/diff/VirtualDiff';
 import { SelectionCommentBar } from '../views/diff/SelectionCommentBar';
 import { LAYOUT_CENTERED, LAYOUT_DIFF, layoutClassName } from '../lib/layout-mode';
+import {
+  SHELL_MODAL,
+  SHELL_SHEET,
+  loadShellPref,
+  saveShellPref,
+  resolveShellStorage,
+  toggleShell,
+  shellClassName,
+  normalizeShell,
+  type ShellMode,
+} from '../lib/shell-preference';
 import { annotateFilesForCollapse } from '../lib/collapse';
 import { filterFilesByQuery, countReviewThreadsByPath, groupReviewThreads, toggleViewedPath, isPathViewed } from '../lib/review-threads';
 import { flattenFilesToVirtualRows, fileStartIndexMap } from '../lib/diff-rows';
@@ -166,6 +177,15 @@ export function PrModalApp({
     resolveGithubTheme(typeof document !== 'undefined' ? document : null, typeof window !== 'undefined' ? window : null)
   );
   const [collapsedThreads, setCollapsedThreads] = useState(() => new Set<string>());
+  /** Outer shell: modal (default) vs side sheet — persisted preference. */
+  const [shellMode, setShellMode] = useState<ShellMode>(() => {
+    try {
+      if (typeof window === 'undefined') return SHELL_MODAL;
+      return loadShellPref(resolveShellStorage(window));
+    } catch {
+      return SHELL_MODAL;
+    }
+  });
   const listRef = useRef<any>(null);
   const searchInputRef = useRef<any>(null);
   const shellRef = useRef<any>(null);
@@ -526,6 +546,32 @@ export function PrModalApp({
     if (layoutMode === LAYOUT_DIFF) collapseDiff();
     else expandDiff();
   }
+
+  function onToggleShell() {
+    setShellMode((prev) => {
+      const next = toggleShell(prev);
+      try {
+        if (typeof window !== 'undefined') {
+          saveShellPref(resolveShellStorage(window), next);
+        }
+      } catch {
+        /* ignore quota / private mode */
+      }
+      return next;
+    });
+  }
+
+  // Re-apply saved shell when modal opens (next PR / reopen)
+  useEffect(() => {
+    if (!open) return;
+    try {
+      if (typeof window === 'undefined') return;
+      const stored = loadShellPref(resolveShellStorage(window));
+      setShellMode(normalizeShell(stored));
+    } catch {
+      /* ignore */
+    }
+  }, [open]);
 
   function onSelectFile(path: any) {
     setActiveFilePath(path);
@@ -1948,13 +1994,19 @@ export function PrModalApp({
   if (!open) return null;
 
   const hit = searchHitIndex >= 0 ? searchHits[searchHitIndex] : null;
-  const cls = `${layoutClassName(layoutMode)} ${animClass} ${theme.className}`.trim();
+  const cls =
+    `${layoutClassName(layoutMode)} ${shellClassName(shellMode)} ${animClass} ${theme.className}`.trim();
   // Independent section loading: initial (no detail yet) vs soft revalidate (detail present)
   const isInitialLoad = Boolean(loading && !detailProp);
   const isRevalidating = Boolean(loading && detailProp);
 
   return (
-    <div className={`prp-overlay ${theme.className}`} tabIndex={-1} data-color-mode={theme.mode}>
+    <div
+      className={`prp-overlay ${shellClassName(shellMode)} ${theme.className}`.trim()}
+      tabIndex={-1}
+      data-color-mode={theme.mode}
+      data-shell={shellMode}
+    >
       <div className="prp-backdrop" onClick={onClose} />
       <div
         className={cls}
@@ -1963,6 +2015,7 @@ export function PrModalApp({
         aria-modal="true"
         aria-label={detail ? `Pull request #${detail.number}` : 'Pull request'}
         data-color-mode={theme.mode}
+        data-shell={shellMode}
       >
         <Header
           detail={detail}
@@ -1982,6 +2035,8 @@ export function PrModalApp({
             setPaletteQuery('');
           }}
           shortcutMod={shortcutMod}
+          shellMode={shellMode}
+          onToggleShell={onToggleShell}
           onSubscribe={onSubscribe}
         />
         <StackStrip items={stackItems} onOpenPr={onOpenStackPr} />

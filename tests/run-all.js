@@ -30,6 +30,8 @@ const tests = [
   'pending-review.test.js',
   'conversation-timeline.test.js',
   'session-view.test.js',
+  'shell-preference.test.js',
+  'side-sheet-toggle.test.js',
   'uri-route.test.js',
   'uri-route-host.test.js',
   'diff-snippet.test.js',
