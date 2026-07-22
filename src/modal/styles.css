@@ -31,7 +31,8 @@
   --prp-pad-body: 16px 18px;
   --prp-gap-stack: 16px;
   --prp-gap-aside: 14px;
-  --prp-backdrop-alpha: 0.28;
+  /* Soft dim only — no solid wash; page remains visible under the panel */
+  --prp-backdrop-alpha: 0.14;
   --prp-backdrop-color: rgba(1, 4, 9, var(--prp-backdrop-alpha));
   /* Multi-line selection: amber/yellow block (not blue accent) */
   --prp-sel-bg: color-mix(in srgb, #eab308 28%, transparent);
@@ -49,6 +50,8 @@
   font-size: 14px;
   color: var(--prp-fg);
   line-height: 1.5;
+  /* Overlay host is always transparent; only .prp-backdrop dims (or not) */
+  background: transparent;
   color-scheme: light;
 }
 
@@ -69,21 +72,23 @@
   --prp-del-bg: rgba(248, 81, 73, 0.15);
   --prp-hunk-bg: rgba(56, 139, 253, 0.1);
   --prp-shadow: 0 16px 48px rgba(1, 4, 9, 0.65);
-  --prp-backdrop-alpha: 0.42;
+  --prp-backdrop-alpha: 0.22;
   --prp-backdrop-color: rgba(1, 4, 9, var(--prp-backdrop-alpha));
   --prp-sel-bg: color-mix(in srgb, #eab308 22%, transparent);
   --prp-sel-bg-strong: color-mix(in srgb, #eab308 32%, transparent);
   --prp-sel-edge: #fbbf24;
   --prp-sel-border: color-mix(in srgb, #fbbf24 50%, transparent);
+  background: transparent;
   color-scheme: dark;
 }
 
 .prp-backdrop {
   position: absolute;
   inset: 0;
-  /* Translucent so the underlying PR list stays legible */
+  /* Light dim; no blur (blur washed to white over light pages) */
   background: var(--prp-backdrop-color);
-  backdrop-filter: blur(2px);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   animation: prp-fade-in 180ms ease-out;
 }
 
@@ -154,6 +159,14 @@
 .prp-overlay.prp-shell--modal {
   align-items: center;
   justify-content: center;
+  background: transparent;
+}
+
+/* Modal: keep a slight dim so the floating panel reads as layered over the page */
+.prp-overlay.prp-shell--modal .prp-backdrop {
+  background: rgba(1, 4, 9, var(--prp-backdrop-alpha, 0.14));
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .prp-overlay.prp-shell--sheet {
