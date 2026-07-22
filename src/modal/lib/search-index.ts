@@ -324,8 +324,16 @@ export function isNavigableSearchHit(hit) {
   return hit.rowIndex != null && Number.isFinite(Number(hit.rowIndex));
 }
 
-export function resolveQuerySearchState(docs, query) {
-  const hits = searchIndex(docs, query);
+/**
+ * @param {SearchDoc[]} docs
+ * @param {string} query
+ * @param {{ mode?: 'conversation'|'diff'|'full', detail?: object }} [opts]
+ */
+export function resolveQuerySearchState(docs, query, opts: any = {}) {
+  let hits = searchIndex(docs, query);
+  if (opts.mode || opts.detail) {
+    hits = sortSearchHitsForUi(hits, opts.mode || 'conversation', opts.detail || null);
+  }
   if (!hits.length) {
     return { hits, hitIndex: -1, activeHit: null, shouldJump: false };
   }
@@ -342,12 +350,15 @@ export function resolveQuerySearchState(docs, query) {
  * Async counterpart of {@link resolveQuerySearchState} for UI typing path.
  * @param {SearchDoc[]} docs
  * @param {string} query
- * @param {{ isCancelled?: () => boolean }} [opts]
+ * @param {{ isCancelled?: () => boolean, mode?: string, detail?: object }} [opts]
  */
 export async function resolveQuerySearchStateAsync(docs, query, opts: any = {}) {
-  const hits = await searchIndexAsync(docs, query, opts);
+  let hits = await searchIndexAsync(docs, query, opts);
   if (typeof opts.isCancelled === 'function' && opts.isCancelled()) {
     return { hits: [], hitIndex: -1, activeHit: null, shouldJump: false, cancelled: true };
+  }
+  if (opts.mode || opts.detail) {
+    hits = sortSearchHitsForUi(hits, opts.mode || 'conversation', opts.detail || null);
   }
   if (!hits.length) {
     return { hits, hitIndex: -1, activeHit: null, shouldJump: false, cancelled: false };
@@ -413,6 +424,257 @@ export function markSearchInText(text, query, opts: any = {}) {
     i = at + Math.max(1, q.length);
   }
   return out;
+}
+
+/**
+ * Decode a short HTML entity / numeric char ref at `html[i]` (must be '&').
+ * Returns { ch, end } or null.
+ */
+function decodeEntityAt(html, i) {
+  if (html[i] !== '&') return null;
+  const semi = html.indexOf(';', i + 1);
+  if (semi < 0 || semi - i > 12) return null;
+  const body = html.slice(i + 1, semi);
+  if (body[0] === '#') {
+    const hex = body[1] === 'x' || body[1] === 'X';
+    const num = hex ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
+    if (!Number.isFinite(num)) return null;
+    return { ch: String.fromCodePoint(num), end: semi + 1 };
+  }
+  const map = {
+    amp: '&',
+    lt: '<',
+    gt: '>',
+    quot: '"',
+    apos: "'",
+    nbsp: '\u00a0',
+  };
+  const ch = map[body.toLowerCase()];
+  if (!ch) return null;
+  return { ch, end: semi + 1 };
+}
+
+/**
+ * Inject search `<mark>` tags into **already-rendered HTML** (markdown output,
+ * syntax-highlighted code, etc.) without destroying tags/structure.
+ *
+ * Offsets for `currentStart` / match discovery use **decoded text content**
+ * order (same as a browser textContent walk), not raw HTML string indexes.
+ *
+ * @param {string} html
+ * @param {string} query
+ * @param {{ currentStart?: number|null, occurrenceIndex?: number|null }} [opts]
+ * @returns {string}
+ */
+export function markSearchInHtml(html, query, opts: any = {}) {
+  const src = html == null ? '' : String(html);
+  const q = (query || '').trim();
+  if (!src) return '';
+  if (!q) return src;
+
+  const ql = q.toLowerCase();
+  const qLen = q.length;
+
+  // 1) Flatten to decoded plain text + map each plain index → HTML [start,end)
+  const plainChars = [];
+  /** @type {Array<{ hStart: number, hEnd: number }>} */
+  const plainToHtml = [];
+  let i = 0;
+  let inTag = false;
+  while (i < src.length) {
+    const c = src[i];
+    if (inTag) {
+      if (c === '>') inTag = false;
+      i += 1;
+      continue;
+    }
+    if (c === '<') {
+      inTag = true;
+      i += 1;
+      continue;
+    }
+    if (c === '&') {
+      const ent = decodeEntityAt(src, i);
+      if (ent) {
+        plainChars.push(ent.ch);
+        plainToHtml.push({ hStart: i, hEnd: ent.end });
+        i = ent.end;
+        continue;
+      }
+    }
+    plainChars.push(c);
+    plainToHtml.push({ hStart: i, hEnd: i + 1 });
+    i += 1;
+  }
+
+  const plain = plainChars.join('');
+  const plainLower = plain.toLowerCase();
+
+  // 2) Collect match ranges in plain-text space
+  /** @type {Array<{ start: number, end: number, current: boolean }>} */
+  const ranges = [];
+  let from = 0;
+  let occ = 0;
+  const wantOcc =
+    opts.occurrenceIndex != null && Number.isFinite(Number(opts.occurrenceIndex))
+      ? Number(opts.occurrenceIndex)
+      : null;
+  const currentStart =
+    opts.currentStart != null && Number.isFinite(Number(opts.currentStart))
+      ? Number(opts.currentStart)
+      : null;
+
+  while (from < plainLower.length) {
+    const at = plainLower.indexOf(ql, from);
+    if (at < 0) break;
+    let isCurrent = false;
+    if (currentStart != null && at === currentStart) isCurrent = true;
+    else if (wantOcc != null && occ === wantOcc) isCurrent = true;
+    ranges.push({ start: at, end: at + qLen, current: isCurrent });
+    occ += 1;
+    from = at + Math.max(1, qLen);
+  }
+  if (!ranges.length) return src;
+
+  // 3) Rebuild HTML: copy tags verbatim; wrap matching text runs
+  let out = '';
+  let plainIdx = 0;
+  let htmlIdx = 0;
+  inTag = false;
+
+  const openMark = (current) =>
+    current
+      ? '<mark class="prp-search-mark prp-search-mark--current">'
+      : '<mark class="prp-search-mark">';
+  const closeMark = '</mark>';
+
+  /** Active mark range covering plainIdx, if any */
+  const rangeAt = (p) => {
+    for (const r of ranges) {
+      if (p >= r.start && p < r.end) return r;
+    }
+    return null;
+  };
+
+  let openRange = null;
+  while (htmlIdx < src.length) {
+    const c = src[htmlIdx];
+    if (inTag) {
+      out += c;
+      if (c === '>') inTag = false;
+      htmlIdx += 1;
+      continue;
+    }
+    if (c === '<') {
+      if (openRange) {
+        out += closeMark;
+        openRange = null;
+      }
+      inTag = true;
+      out += c;
+      htmlIdx += 1;
+      continue;
+    }
+
+    // Text node / entity — consume one plain char
+    const map = plainToHtml[plainIdx];
+    if (!map || map.hStart !== htmlIdx) {
+      // Desync fallback: copy rest raw
+      out += src.slice(htmlIdx);
+      break;
+    }
+    const r = rangeAt(plainIdx);
+    if (r && (!openRange || openRange.start !== r.start)) {
+      if (openRange) out += closeMark;
+      out += openMark(r.current);
+      openRange = r;
+    } else if (!r && openRange) {
+      out += closeMark;
+      openRange = null;
+    }
+    out += src.slice(map.hStart, map.hEnd);
+    htmlIdx = map.hEnd;
+    plainIdx += 1;
+    if (openRange && plainIdx >= openRange.end) {
+      out += closeMark;
+      openRange = null;
+    }
+  }
+  if (openRange) out += closeMark;
+  return out;
+}
+
+/**
+ * Sort hits to match visible UI order for the active layout.
+ * Conversation: description body first, then timeline newest-first (by `at`),
+ * then within a doc by start offset. Diff: rowIndex then start.
+ *
+ * @param {SearchHit[]} hits
+ * @param {'conversation'|'diff'|'full'} mode
+ * @param {object} [detail]
+ * @returns {SearchHit[]}
+ */
+export function sortSearchHitsForUi(hits, mode, detail = null) {
+  const list = Array.isArray(hits) ? hits.slice() : [];
+  if (!list.length) return list;
+
+  if (mode === 'diff' || mode === 'full') {
+    list.sort((a, b) => {
+      const ar = a.rowIndex != null ? Number(a.rowIndex) : Number.POSITIVE_INFINITY;
+      const br = b.rowIndex != null ? Number(b.rowIndex) : Number.POSITIVE_INFINITY;
+      if (ar !== br) return ar - br;
+      // Conversation anchors without row: after all rows, keep doc order
+      const aa = String(a.anchorId || a.docId || '');
+      const bb = String(b.anchorId || b.docId || '');
+      if (ar === Number.POSITIVE_INFINITY && aa !== bb) return aa.localeCompare(bb);
+      return (Number(a.start) || 0) - (Number(b.start) || 0);
+    });
+    return list;
+  }
+
+  // Conversation UI order
+  const timeByAnchor = new Map();
+  const putTime = (anchorId, at) => {
+    if (!anchorId) return;
+    timeByAnchor.set(String(anchorId), String(at || ''));
+  };
+  putTime('body', detail?.createdAt || detail?.updatedAt || '');
+  for (const c of detail?.comments || []) {
+    putTime(`issue-comment:${c.id}`, c.createdAt);
+  }
+  for (const r of detail?.reviews || []) {
+    putTime(`review:${r.id}`, r.submittedAt);
+  }
+  for (const c of detail?.reviewComments || []) {
+    putTime(`review-comment:${c.id}`, c.createdAt);
+  }
+
+  const kindRank = (h) => {
+    const k = String(h.kind || '');
+    if (k === 'body' || h.anchorId === 'body') return 0;
+    if (k === 'issue-comment') return 1;
+    if (k === 'review') return 2;
+    if (k === 'review-comment' || k === 'review-reply') return 3;
+    return 9;
+  };
+
+  list.sort((a, b) => {
+    const ka = kindRank(a);
+    const kb = kindRank(b);
+    // body always first (description is above the timeline)
+    if (ka === 0 && kb !== 0) return -1;
+    if (kb === 0 && ka !== 0) return 1;
+    const ta = timeByAnchor.get(String(a.anchorId || '')) || '';
+    const tb = timeByAnchor.get(String(b.anchorId || '')) || '';
+    // Newest first (matches conversation timeline)
+    if (ta !== tb) return String(tb).localeCompare(String(ta));
+    if (ka !== kb) return ka - kb;
+    const aa = String(a.anchorId || a.docId || '');
+    const bb = String(b.anchorId || b.docId || '');
+    if (aa !== bb) return aa.localeCompare(bb);
+    return (Number(a.start) || 0) - (Number(b.start) || 0);
+  });
+  return list;
 }
 
 /**

@@ -15,7 +15,6 @@ import {
   pageTimelineItems,
   partitionTimelineWithThreadGap,
 } from '@lib/conversation-timeline';
-import { markSearchInText } from '@lib/search-index';
 import { snippetForComment } from '@lib/diff-snippet';
 import {
   buildMergeBoxStatus,
@@ -285,28 +284,42 @@ function ConversationViewImpl(props: any) {
           ? 'warn'
           : 'muted';
 
-  /** Body with search marks when this anchor is a hit. */
-  function renderSearchableBody(source: string, anchorId: string, compact = true) {
+  /** Markdown body with search marks injected into rendered HTML (structure preserved). */
+  function renderSearchableBody(
+    source: string,
+    anchorId: string,
+    compact = true,
+    extra: any = {}
+  ) {
     const cls = compact ? 'prp-md--compact' : '';
-    if (!qSearch || !isAnchorHit(anchorId)) {
-      return (
-        <MarkdownView
-          source={source || ''}
-          className={cls}
-          linkCtx={linkCtx}
-        />
-      );
-    }
+    const hit = qSearch && isAnchorHit(anchorId);
     const currentStart =
-      isAnchorCurrent(anchorId) && activeSearchHit?.start != null
+      hit && isAnchorCurrent(anchorId) && activeSearchHit?.start != null
         ? Number(activeSearchHit.start)
         : null;
+    // Count occurrence among hits on this anchor for multi-match navigation
+    let occ: number | null = null;
+    if (hit && isAnchorCurrent(anchorId) && Array.isArray(searchHits)) {
+      let n = 0;
+      for (let i = 0; i <= (searchHitIndex ?? 0); i++) {
+        if (String(searchHits[i]?.anchorId || '') === anchorId) {
+          if (i === searchHitIndex) {
+            occ = n;
+            break;
+          }
+          n += 1;
+        }
+      }
+    }
     return (
-      <div
-        className={`prp-md ${cls} prp-md--search-hit`.trim()}
-        dangerouslySetInnerHTML={{
-          __html: markSearchInText(source || '', qSearch, { currentStart }),
-        }}
+      <MarkdownView
+        source={source || ''}
+        className={cls}
+        linkCtx={linkCtx}
+        searchQuery={hit ? qSearch : ''}
+        searchCurrentStart={currentStart}
+        searchOccurrenceIndex={occ}
+        {...extra}
       />
     );
   }
@@ -342,27 +355,18 @@ function ConversationViewImpl(props: any) {
       item.line != null &&
       (item.side || 'RIGHT') === 'RIGHT' &&
       detail.state === 'open';
-    if (anchorId && qSearch && isAnchorHit(anchorId) && !canApply) {
-      return renderSearchableBody(item.body || '', anchorId, true);
-    }
-    return (
-      <MarkdownView
-        source={item.body || ''}
-        className="prp-md--compact"
-        canApplySuggestion={canApply}
-        actionBusy={actionBusy}
-        onRegisterApply={onRegisterApply}
-        linkCtx={linkCtx}
-        onApplySuggestion={(content: string) =>
-          onApplySuggestion?.({
-            path: item.path,
-            startLine: item.startLine || item.line,
-            endLine: item.line,
-            suggestion: content,
-          })
-        }
-      />
-    );
+    return renderSearchableBody(item.body || '', anchorId || `item:${item.id}`, true, {
+      canApplySuggestion: canApply,
+      actionBusy,
+      onRegisterApply,
+      onApplySuggestion: (content: string) =>
+        onApplySuggestion?.({
+          path: item.path,
+          startLine: item.startLine || item.line,
+          endLine: item.line,
+          suggestion: content,
+        }),
+    });
   }
 
   function commentActions(kind: string | null, id: any, canDelete: boolean, body?: string) {
@@ -429,17 +433,12 @@ function ConversationViewImpl(props: any) {
               onUploadFile={onUploadFile}
               linkCtx={linkCtx}
             />
-          ) : qSearch && isAnchorHit('body') ? (
+          ) : (
             renderSearchableBody(
               detail.body || '_No description provided._',
               'body',
               false
             )
-          ) : (
-            <MarkdownView
-              source={detail.body || '_No description provided._'}
-              linkCtx={linkCtx}
-            />
           )}
         </Card>
 

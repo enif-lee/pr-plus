@@ -14,9 +14,17 @@ import {
   selectionBlockRole,
 } from '@lib/line-selection';
 import { isPathViewed } from '@lib/review-threads';
-import { markSearchInText, resolveActiveMarkStart } from '@lib/search-index';
+import {
+  markSearchInText,
+  markSearchInHtml,
+  resolveActiveMarkStart,
+} from '@lib/search-index';
 import { InlineThread } from './InlineThread';
 
+/**
+ * Diff line HTML: optional syntax highlight, then inject search marks into the
+ * rendered HTML so structure (and hljs spans) are preserved.
+ */
 function renderSearchableHtml(
   displayText: string,
   filePath: string | undefined,
@@ -28,10 +36,10 @@ function renderSearchableHtml(
   useSyntax: boolean
 ) {
   const q = (searchQuery || '').trim();
-  if (!q) {
-    if (useSyntax) return highlightCode(displayText, filePath);
-    return escapeHtml(displayText ?? '');
-  }
+  let html = useSyntax
+    ? highlightCode(displayText, filePath)
+    : escapeHtml(displayText ?? '');
+  if (!q) return html;
   const currentStart = resolveActiveMarkStart(
     displayText ?? '',
     q,
@@ -40,6 +48,12 @@ function renderSearchableHtml(
     occurrenceIndex,
     field
   );
+  if (typeof markSearchInHtml === 'function') {
+    return markSearchInHtml(html, q, {
+      currentStart,
+      occurrenceIndex: activeHit ? occurrenceIndex : null,
+    });
+  }
   return markSearchInText(displayText ?? '', q, { currentStart });
 }
 
@@ -85,6 +99,8 @@ function VirtualDiffImpl(props: any) {
     searchMatchRows = null,
     activeSearchHit = null,
     activeSearchOccurrence = 0,
+    searchHits = null,
+    searchHitIndex = -1,
   } = props;
 
   const matchRowSet = useMemo(() => {
@@ -184,6 +200,8 @@ function VirtualDiffImpl(props: any) {
 
             if (row.kind === 'inline-comment') {
               const thread = threadsByCommentId?.get?.(String(row.commentId));
+              const commentAnchor =
+                row.commentId != null ? `review-comment:${row.commentId}` : null;
               return (
                 <div
                   key={row.rowIndex}
@@ -191,6 +209,7 @@ function VirtualDiffImpl(props: any) {
                   style={{ minHeight: COMMENT_ROW_HEIGHT }}
                   data-row-index={row.rowIndex}
                   data-search-current={isActiveHit ? '1' : undefined}
+                  data-search-anchor={commentAnchor || undefined}
                 >
                   <InlineThread
                     row={row}
@@ -215,6 +234,10 @@ function VirtualDiffImpl(props: any) {
                     collapsed={Boolean(collapsedThreads?.has?.(String(row.commentId)))}
                     onToggleCollapse={() => onToggleThreadCollapse?.(row.commentId)}
                     pendingCount={pendingCount}
+                    searchQuery={qActive ? searchQuery : ''}
+                    activeSearchHit={activeSearchHit}
+                    searchHits={searchHits}
+                    searchHitIndex={searchHitIndex}
                   />
                 </div>
               );
@@ -346,7 +369,7 @@ function VirtualDiffImpl(props: any) {
                     <div className="prp-split-cols__left">
                       <span className="prp-split-cols__ln">{row.oldLine ?? ''}</span>
                       <code
-                        className={`prp-code${qActive && isSearchMatch ? '' : ' hljs'}`}
+                        className="hljs prp-code"
                         dangerouslySetInnerHTML={{
                           __html: renderSearchableHtml(
                             row.leftCode ?? '',
@@ -356,7 +379,7 @@ function VirtualDiffImpl(props: any) {
                             activeHitForMarks,
                             occ,
                             'left',
-                            !(qActive && isSearchMatch)
+                            true
                           ),
                         }}
                       />
@@ -364,7 +387,7 @@ function VirtualDiffImpl(props: any) {
                     <div className="prp-split-cols__right">
                       <span className="prp-split-cols__ln">{row.newLine ?? ''}</span>
                       <code
-                        className={`prp-code${qActive && isSearchMatch ? '' : ' hljs'}`}
+                        className="hljs prp-code"
                         dangerouslySetInnerHTML={{
                           __html: renderSearchableHtml(
                             row.rightCode ?? '',
@@ -374,7 +397,7 @@ function VirtualDiffImpl(props: any) {
                             activeHitForMarks,
                             occ,
                             'right',
-                            !(qActive && isSearchMatch)
+                            true
                           ),
                         }}
                       />
@@ -382,9 +405,7 @@ function VirtualDiffImpl(props: any) {
                   </div>
                 ) : (
                   <code
-                    className={
-                      isCode && !(qActive && isSearchMatch) ? 'hljs prp-code' : 'prp-code'
-                    }
+                    className={isCode ? 'hljs prp-code' : 'prp-code'}
                     dangerouslySetInnerHTML={{
                       __html: isCode
                         ? renderSearchableHtml(
@@ -395,20 +416,18 @@ function VirtualDiffImpl(props: any) {
                             activeHitForMarks,
                             occ,
                             'code',
-                            !(qActive && isSearchMatch)
+                            true
                           )
-                        : isSearchMatch
-                          ? markSearchInText(row.text || '', searchQuery, {
-                              currentStart: resolveActiveMarkStart(
-                                row.text || '',
-                                searchQuery,
-                                row,
-                                activeHitForMarks,
-                                occ,
-                                'text'
-                              ),
-                            })
-                          : escapeHtml(row.text),
+                        : renderSearchableHtml(
+                            row.text || '',
+                            row.filePath,
+                            isSearchMatch ? searchQuery : '',
+                            row,
+                            activeHitForMarks,
+                            occ,
+                            'text',
+                            false
+                          ),
                     }}
                   />
                 )}

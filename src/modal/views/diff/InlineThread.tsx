@@ -32,7 +32,37 @@ function InlineThreadImpl(props: any) {
     collapsed: collapsedProp,
     onToggleCollapse,
     pendingCount = 0,
+    searchQuery = '',
+    activeSearchHit = null,
+    searchHits = null,
+    searchHitIndex = -1,
   } = props;
+
+  const qSearch = String(searchQuery || '').trim();
+  function commentOcc(commentId: any) {
+    if (!qSearch || !Array.isArray(searchHits) || commentId == null) return null;
+    const anchor = `review-comment:${commentId}`;
+    let n = 0;
+    for (let i = 0; i <= (searchHitIndex ?? 0); i++) {
+      const h = searchHits[i];
+      if (String(h?.anchorId || '') === anchor || Number(h?.commentId) === Number(commentId)) {
+        if (i === searchHitIndex) return n;
+        n += 1;
+      }
+    }
+    return null;
+  }
+  function commentCurrentStart(commentId: any) {
+    if (
+      activeSearchHit &&
+      (String(activeSearchHit.anchorId || '') === `review-comment:${commentId}` ||
+        Number(activeSearchHit.commentId) === Number(commentId)) &&
+      activeSearchHit.start != null
+    ) {
+      return Number(activeSearchHit.start);
+    }
+    return null;
+  }
 
   const [localCollapsed, setLocalCollapsed] = useState(false);
   const controlled = typeof collapsedProp === 'boolean';
@@ -146,6 +176,9 @@ function InlineThreadImpl(props: any) {
         actionBusy={actionBusy}
         onRegisterApply={onRegisterApply}
         linkCtx={linkCtx}
+        searchQuery={qSearch}
+        searchCurrentStart={commentCurrentStart(id)}
+        searchOccurrenceIndex={commentOcc(id)}
         onApplySuggestion={
           canApplySuggestion
             ? (content: string) =>

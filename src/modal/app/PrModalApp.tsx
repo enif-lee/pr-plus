@@ -744,12 +744,17 @@ export function PrModalApp({
       const isCancelled = () => cancelled || gen !== searchGenRef.current;
       try {
         let st: any = null;
+        const sortOpts = {
+          isCancelled,
+          mode: searchMode === 'full' ? 'diff' : 'conversation',
+          detail,
+        };
         if (typeof resolveQuerySearchStateAsync === 'function') {
-          st = await resolveQuerySearchStateAsync(searchDocs, q, { isCancelled });
+          st = await resolveQuerySearchStateAsync(searchDocs, q, sortOpts);
         } else if (typeof resolveQuerySearchState === 'function') {
           await new Promise((r) => setTimeout(r, 0));
           if (isCancelled()) return;
-          st = resolveQuerySearchState(searchDocs, q);
+          st = resolveQuerySearchState(searchDocs, q, sortOpts);
         } else {
           st = { hits: [], hitIndex: -1, shouldJump: false, activeHit: null };
         }
@@ -790,7 +795,53 @@ export function PrModalApp({
     return () => {
       cancelled = true;
     };
-  }, [searchQuery, searchDocs, setSearchHitsStore, jumpToSearchHit]);
+  }, [searchQuery, searchDocs, setSearchHitsStore, jumpToSearchHit, searchMode, detail]);
+
+  // Diff enter → drain all remaining review threads once (idempotent if complete)
+  const diffFullLoadGenRef = useRef(0);
+  const diffFullLoadKeyRef = useRef('');
+  useEffect(() => {
+    if (layoutMode !== LAYOUT_DIFF) return undefined;
+    if (!detail?.owner || !detail?.repo || !detail?.number) return undefined;
+    if (typeof onLoadMoreReviewThreads !== 'function') return undefined;
+    const meta = detail.reviewThreadsMeta || {};
+    if (!meta.hasMore) return undefined;
+    const key = `${detail.owner}/${detail.repo}#${detail.number}`;
+    // Avoid re-entry for same PR while a load is in flight / already kicked off
+    if (diffFullLoadKeyRef.current === key && diffFullLoadGenRef.current > 0) {
+      return undefined;
+    }
+    diffFullLoadKeyRef.current = key;
+    const gen = ++diffFullLoadGenRef.current;
+    void (async () => {
+      try {
+        await onLoadMoreReviewThreads('all');
+      } catch {
+        /* host stage surfaces errors */
+      } finally {
+        if (gen === diffFullLoadGenRef.current) {
+          // allow retry if still hasMore after failure
+          if (detail?.reviewThreadsMeta?.hasMore) {
+            diffFullLoadKeyRef.current = '';
+          }
+        }
+      }
+    })();
+    return undefined;
+  }, [
+    layoutMode,
+    detail?.owner,
+    detail?.repo,
+    detail?.number,
+    detail?.reviewThreadsMeta?.hasMore,
+    onLoadMoreReviewThreads,
+  ]);
+
+  // Reset full-load gate when switching PRs
+  useEffect(() => {
+    diffFullLoadKeyRef.current = '';
+    diffFullLoadGenRef.current = 0;
+  }, [prIdentity]);
 
   const navSearch = useCallback(
     (delta: number) => {
@@ -3506,6 +3557,8 @@ export function PrModalApp({
                 searchMatchRows={searchMatchRows}
                 activeSearchHit={hit}
                 activeSearchOccurrence={activeSearchOccurrence}
+                searchHits={searchHits}
+                searchHitIndex={searchHitIndex}
                 onScroll={(top) => setScrollTop(top)}
                 selection={lineSelection}
                 selecting={selecting}

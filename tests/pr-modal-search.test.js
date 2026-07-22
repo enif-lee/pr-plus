@@ -275,9 +275,104 @@ assert.ok(
       appSrc2.includes('onLoadMoreReviewThreads("all")'),
     'Load Comments must request full thread dump (direction all)'
   );
+  assert.ok(
+    appSrc2.includes("LAYOUT_DIFF") &&
+      appSrc2.includes("onLoadMoreReviewThreads('all')") &&
+      appSrc2.includes('diffFullLoad'),
+    'Diff enter must auto-load all review threads'
+  );
   const hostSrc = fs.readFileSync(path.join(__dirname, '../src/pr-modal-host.js'), 'utf8');
   assert.ok(hostSrc.includes("loadAll") || hostSrc.includes("'all'"), 'host supports load-all threads');
   assert.ok(hostSrc.includes('maxPages'), 'host pages until complete');
+}
+
+// Markdown-preserving HTML mark injection
+{
+  const mdHtml =
+    '<p>Hello <strong>participant</strong> and <a href="https://x">link</a> participant</p>';
+  const marked = search.markSearchInHtml(mdHtml, 'participant', { occurrenceIndex: 1 });
+  assert.ok(marked.includes('<strong>'), 'preserves strong');
+  assert.ok(marked.includes('<a href="https://x">'), 'preserves links');
+  assert.ok(marked.includes('prp-search-mark'), 'injects marks');
+  assert.ok(marked.includes('prp-search-mark--current'), 'current occurrence marked');
+  // first participant is inside strong; second is current
+  const firstMark = marked.indexOf('prp-search-mark');
+  const currentMark = marked.indexOf('prp-search-mark--current');
+  assert.ok(currentMark > firstMark, 'current is the later occurrence');
+
+  const entityHtml = '<p>foo &amp; bar participant</p>';
+  const em = search.markSearchInHtml(entityHtml, 'participant');
+  assert.ok(em.includes('&amp;'), 'keeps entities outside matches');
+  assert.ok(em.includes('<mark'), 'marks plain query');
+}
+
+// UI order: body first, then newest timeline comments
+{
+  const detail = {
+    createdAt: '2020-01-01T00:00:00Z',
+    body: '## Overview\n\nPR body participant line',
+    comments: [
+      { id: 1, body: 'old participant', createdAt: '2024-01-01T00:00:00Z' },
+      { id: 2, body: 'new participant', createdAt: '2025-06-01T00:00:00Z' },
+    ],
+    reviews: [],
+    reviewComments: [
+      { id: 9, body: 'thread participant', createdAt: '2025-01-01T00:00:00Z' },
+    ],
+  };
+  const docs = search.buildConversationSearchIndex(detail);
+  const raw = search.searchIndex(docs, 'participant');
+  // Scramble
+  const scrambled = [raw[2], raw[0], raw[1]].filter(Boolean);
+  const ordered = search.sortSearchHitsForUi(scrambled, 'conversation', detail);
+  assert.equal(ordered[0].anchorId, 'body');
+  // Newest issue comment before older (timeline newest-first among non-body)
+  const issueHits = ordered.filter((h) => String(h.anchorId || '').startsWith('issue-comment:'));
+  if (issueHits.length >= 2) {
+    assert.equal(issueHits[0].anchorId, 'issue-comment:2');
+    assert.equal(issueHits[1].anchorId, 'issue-comment:1');
+  }
+  const diffOrdered = search.sortSearchHitsForUi(
+    [
+      { rowIndex: 10, start: 0, docId: 'a' },
+      { rowIndex: 2, start: 5, docId: 'b' },
+      { rowIndex: 2, start: 1, docId: 'c' },
+    ],
+    'diff'
+  );
+  assert.equal(diffOrdered[0].rowIndex, 2);
+  assert.equal(diffOrdered[0].start, 1);
+  assert.equal(diffOrdered[1].rowIndex, 2);
+  assert.equal(diffOrdered[2].rowIndex, 10);
+}
+
+// MarkdownView uses markSearchInHtml (not plain-only substitution)
+{
+  const mdView = fs.readFileSync(
+    path.join(__dirname, '../src/modal/components/common/MarkdownView.tsx'),
+    'utf8'
+  );
+  assert.ok(mdView.includes('markSearchInHtml'), 'MarkdownView injects marks into HTML');
+  assert.ok(mdView.includes('searchQuery'), 'MarkdownView accepts searchQuery');
+  const conv = fs.readFileSync(
+    path.join(__dirname, '../src/modal/views/conversation/ConversationView.tsx'),
+    'utf8'
+  );
+  assert.ok(
+    !conv.includes("dangerouslySetInnerHTML={{\n          __html: markSearchInText"),
+    'Conversation must not replace markdown with plain markSearchInText-only path'
+  );
+  assert.ok(conv.includes('searchQuery={hit ? qSearch : \'\'}') || conv.includes('searchQuery={hit'));
+  const virt = fs.readFileSync(
+    path.join(__dirname, '../src/modal/views/diff/VirtualDiff.tsx'),
+    'utf8'
+  );
+  assert.ok(virt.includes('markSearchInHtml'), 'Diff uses HTML mark injection');
+  const inline = fs.readFileSync(
+    path.join(__dirname, '../src/modal/views/diff/InlineThread.tsx'),
+    'utf8'
+  );
+  assert.ok(inline.includes('searchQuery'), 'InlineThread passes search to MarkdownView');
 }
 
 const virtSrc = fs.readFileSync(

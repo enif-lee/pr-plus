@@ -1,7 +1,8 @@
-import React, { useMemo , memo} from 'react';
+import React, { useMemo, memo } from 'react';
 // memo for render isolation
 import { parseSuggestionFences } from '@lib/pr-edit-api';
 import { splitMarkdownSegments } from '@lib/markdown-composer';
+import { markSearchInHtml } from '@lib/search-index';
 import { MermaidBlock } from './MermaidBlock';
 import { SuggestionBlock } from './SuggestionBlock';
 import { renderMdHtml } from './utils';
@@ -14,6 +15,12 @@ function MarkdownViewImpl({
   actionBusy,
   onRegisterApply,
   linkCtx,
+  /** When set, inject search marks into rendered markdown HTML */
+  searchQuery = '',
+  /** Plain-text start offset for current match (decoded textContent space) */
+  searchCurrentStart = null,
+  /** 0-based occurrence among matches in this block for current mark */
+  searchOccurrenceIndex = null,
 }: any) {
   const raw = source == null || source === '' ? '_No content_' : String(source);
   const suggestions =
@@ -44,6 +51,9 @@ function MarkdownViewImpl({
     }
     return out.length ? out : [{ type: 'md', content: raw }];
   }, [raw]);
+
+  const q = String(searchQuery || '').trim();
+
   return (
     <div className={`prp-md ${className}`.trim()}>
       {segments.map((seg, i) => {
@@ -62,11 +72,18 @@ function MarkdownViewImpl({
             />
           );
         }
+        let html = renderMdHtml(seg.content || '', linkCtx);
+        if (q && typeof markSearchInHtml === 'function') {
+          html = markSearchInHtml(html, q, {
+            currentStart: searchCurrentStart,
+            occurrenceIndex: searchOccurrenceIndex,
+          });
+        }
         return (
           <div
             key={`h-${i}`}
             dangerouslySetInnerHTML={{
-              __html: renderMdHtml(seg.content || '', linkCtx),
+              __html: html,
             }}
           />
         );
