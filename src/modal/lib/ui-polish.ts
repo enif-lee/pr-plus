@@ -81,6 +81,34 @@ export function githubPullUrl(owner, repo, number) {
   return `https://github.com/${encodeURIComponent(o)}/${encodeURIComponent(r)}/pull/${n}`;
 }
 
+/** Encode a git ref for a path (keep `/` as path separators). */
+export function encodeGitRefPath(ref) {
+  const raw = String(ref || '').trim();
+  if (!raw) return '';
+  return raw
+    .split('/')
+    .map((seg) => encodeURIComponent(seg))
+    .join('/');
+}
+
+/** Branch / tag tree page: /owner/repo/tree/ref */
+export function githubTreeUrl(owner, repo, ref) {
+  const o = String(owner || '').trim();
+  const r = String(repo || '').trim();
+  const path = encodeGitRefPath(ref);
+  if (!o || !r || !path) return '';
+  return `https://github.com/${encodeURIComponent(o)}/${encodeURIComponent(r)}/tree/${path}`;
+}
+
+/** Commit page: /owner/repo/commit/sha */
+export function githubCommitUrl(owner, repo, sha) {
+  const o = String(owner || '').trim();
+  const r = String(repo || '').trim();
+  const s = String(sha || '').trim();
+  if (!o || !r || !s) return '';
+  return `https://github.com/${encodeURIComponent(o)}/${encodeURIComponent(r)}/commit/${encodeURIComponent(s)}`;
+}
+
 function escapeHtmlLite(s) {
   return String(s)
     .replace(/&/g, '&amp;')

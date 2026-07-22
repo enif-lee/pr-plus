@@ -691,7 +691,11 @@ function ConversationViewImpl(props: any) {
           </Card>
         ) : null}
         <Card title={`Commits${detail.commits?.length ? ` (${detail.commits.length})` : ''}`}>
-          <AsideCommitsTimeline commits={detail.commits || []} />
+          <AsideCommitsTimeline
+            commits={detail.commits || []}
+            owner={detail.owner}
+            repo={detail.repo}
+          />
         </Card>
         <Card title={`Files${detail.files?.length ? ` (${detail.files.length})` : ''}`}>
           <AsideFilesTree files={detail.files || []} />

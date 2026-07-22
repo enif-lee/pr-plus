@@ -4,21 +4,49 @@
  */
 
 (function initPrTreeContentBridge() {
-  function send(message) {
-    return new Promise((resolve, reject) => {
-      if (!globalThis.chrome?.runtime?.sendMessage) {
-        reject(new Error('chrome.runtime unavailable'));
-        return;
-      }
-      chrome.runtime.sendMessage(message, (response) => {
-        const err = chrome.runtime.lastError;
-        if (err) {
-          reject(new Error(err.message || String(err)));
-          return;
+  function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  function isTransientChannelError(msg) {
+    return /message channel closed|Receiving end does not exist|asynchronous response|Extension context invalidated/i.test(
+      String(msg || '')
+    );
+  }
+
+  /**
+   * Prefer Promise-based chrome.runtime.sendMessage (MV3). Retry once when the
+   * service worker was asleep or the port closed mid-flight.
+   */
+  async function send(message, { retries = 1 } = {}) {
+    if (!globalThis.chrome?.runtime?.sendMessage) {
+      throw new Error('chrome.runtime unavailable');
+    }
+
+    let lastErr;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        // No callback → Chrome returns a Promise and keeps the channel open
+        // for the full SW handler lifetime.
+        const response = await chrome.runtime.sendMessage(message);
+        return response;
+      } catch (e) {
+        const msg = e?.message || String(e);
+        lastErr = new Error(msg);
+        if (attempt < retries && isTransientChannelError(msg)) {
+          // Wake SW and retry (common after idle / extension reload)
+          await sleep(120 + attempt * 180);
+          continue;
         }
-        resolve(response);
-      });
-    });
+        if (/Receiving end does not exist|Extension context invalidated/i.test(msg)) {
+          throw new Error(
+            'Background worker offline. Open chrome://extensions, click Reload on pr+, then refresh this page.'
+          );
+        }
+        throw lastErr;
+      }
+    }
+    throw lastErr || new Error('Failed to message background worker');
   }
 
   /** Pure helper (no network / no token). */
@@ -80,7 +108,23 @@
       }
       return res.detail;
     },
-    
+    async fetchCompareFiles(owner, repo, base, head, options = {}) {
+      const res = await send({
+        type: 'PR_TREE_FETCH_COMPARE_FILES',
+        owner,
+        repo,
+        base,
+        head,
+        gitattributesText: options.gitattributesText || '',
+      });
+      if (!res?.ok) {
+        const err = new Error(res?.error || 'Failed to fetch compare files');
+        err.status = res?.status;
+        throw err;
+      }
+      return res.result;
+    },
+
     async uploadRepoFile(owner, repo, { path, contentBase64, message, branch }) {
       const res = await send({
         type: 'PR_TREE_UPLOAD_REPO_FILE',
@@ -490,6 +534,8 @@
         if (message?.type === 'PR_TREE_TOKEN_CHANGED') {
           onChange(null);
         }
+        // Never claim async response — broadcasts have no reply
+        return false;
       };
       chrome.runtime.onMessage.addListener(listener);
       return () => chrome.runtime.onMessage.removeListener(listener);

@@ -113,12 +113,14 @@
     // Bridge may broadcast TOKEN_CHANGED without the secret
     try {
       chrome.runtime?.onMessage?.addListener((message) => {
-        if (message?.type !== 'PR_TREE_TOKEN_CHANGED') return;
+        if (message?.type !== 'PR_TREE_TOKEN_CHANGED') return false;
         void (async () => {
           const ok = await tokenConfigured();
           if (ok) await enableFeatures();
           else disableFeatures();
         })();
+        // Sync listener: do not return true (no async sendResponse)
+        return false;
       });
     } catch {
       /* ignore */

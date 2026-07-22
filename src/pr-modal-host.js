@@ -156,6 +156,21 @@
           }
         }
       },
+      /** Files for a single commit or commit range (GitHub compare). */
+      onFetchCompareFiles: async (base, head, options = {}) => {
+        if (!owner || !repo) {
+          throw new Error('No open repository for compare');
+        }
+        if (!globalThis.PRTreeFetch?.fetchCompareFiles) {
+          throw new Error('Compare fetch unavailable');
+        }
+        return globalThis.PRTreeFetch.fetchCompareFiles(owner, repo, base, head, {
+          gitattributesText:
+            options.gitattributesText ||
+            current.detail?.gitattributesText ||
+            '',
+        });
+      },
     };
   }
 

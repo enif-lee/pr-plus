@@ -1,8 +1,9 @@
-import React, { useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Button } from '@common/Button';
 import { Badge } from '@common/Badge';
 import { UserLink } from '@common/UserLink';
 import { LabelLink } from '@common/LabelLink';
+import { RefLink } from '@common/RefLink';
 import { LAYOUT_DIFF } from '@lib/layout-mode';
 import { useModalStore } from '../../store/modal-store';
 
@@ -24,12 +25,68 @@ export function Header(props: any) {
     onSubscribe,
     shellMode = 'modal',
     onToggleShell,
+    /** Increment to open inline title editor (e.g. command palette). */
+    titleEditSignal = 0,
   } = props;
 
   const localBaseRef = useRef<HTMLButtonElement | null>(null);
+  const titleInputRef = useRef<HTMLInputElement | null>(null);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState('');
+  const skipBlurSaveRef = useRef(false);
   // Prefer store-owned layout when parent omits prop (ownership model proof)
   const storeLayout = useModalStore((s) => s.layoutMode);
   const effectiveLayout = layoutMode ?? storeLayout;
+
+  const beginEditTitle = () => {
+    if (!detail || actionBusy) return;
+    setTitleDraft(String(detail.title || ''));
+    setEditingTitle(true);
+    skipBlurSaveRef.current = false;
+  };
+
+  const cancelEditTitle = () => {
+    skipBlurSaveRef.current = true;
+    setEditingTitle(false);
+    setTitleDraft('');
+  };
+
+  const commitEditTitle = async () => {
+    if (!detail || typeof onEditTitle !== 'function') {
+      setEditingTitle(false);
+      return;
+    }
+    const next = String(titleDraft || '').trim();
+    if (!next || next === String(detail.title || '').trim()) {
+      setEditingTitle(false);
+      return;
+    }
+    skipBlurSaveRef.current = true;
+    setEditingTitle(false);
+    await onEditTitle(next);
+  };
+
+  // External kick (command palette)
+  useEffect(() => {
+    if (!titleEditSignal) return;
+    beginEditTitle();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- signal only
+  }, [titleEditSignal]);
+
+  // Focus + select when entering edit mode
+  useEffect(() => {
+    if (!editingTitle) return;
+    const el = titleInputRef.current;
+    if (!el) return;
+    el.focus();
+    el.select();
+  }, [editingTitle]);
+
+  // Drop edit mode when PR changes
+  useEffect(() => {
+    setEditingTitle(false);
+    setTitleDraft('');
+  }, [detail?.owner, detail?.repo, detail?.number]);
 
   if (!detail) {
     return (
@@ -92,10 +149,89 @@ export function Header(props: any) {
       <div className="prp-header__main">
         <div className="prp-header__title-row">
           <span className="prp-header__number">#{detail.number}</span>
-          <h2 className="prp-header__title">{detail.title}</h2>
-          <Button size="sm" disabled={actionBusy} onClick={onEditTitle} title="Edit title">
-            Edit title
-          </Button>
+          {editingTitle ? (
+            <div className="prp-header__title-edit">
+              <input
+                ref={titleInputRef}
+                className="prp-header__title-input"
+                type="text"
+                value={titleDraft}
+                disabled={actionBusy}
+                aria-label="Pull request title"
+                maxLength={256}
+                onChange={(e) => setTitleDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    void commitEditTitle();
+                  } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    cancelEditTitle();
+                  }
+                }}
+                onBlur={() => {
+                  if (skipBlurSaveRef.current) {
+                    skipBlurSaveRef.current = false;
+                    return;
+                  }
+                  // Defer so click on cancel/save buttons can set skip flag first
+                  window.setTimeout(() => {
+                    if (skipBlurSaveRef.current) {
+                      skipBlurSaveRef.current = false;
+                      return;
+                    }
+                    void commitEditTitle();
+                  }, 0);
+                }}
+              />
+              <button
+                type="button"
+                className="prp-icon-btn prp-header__title-action"
+                disabled={actionBusy || !String(titleDraft || '').trim()}
+                title="Save title"
+                aria-label="Save title"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  skipBlurSaveRef.current = true;
+                }}
+                onClick={() => void commitEditTitle()}
+              >
+                ✓
+              </button>
+              <button
+                type="button"
+                className="prp-icon-btn prp-header__title-action"
+                disabled={actionBusy}
+                title="Cancel"
+                aria-label="Cancel title edit"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  skipBlurSaveRef.current = true;
+                }}
+                onClick={cancelEditTitle}
+              >
+                ✕
+              </button>
+            </div>
+          ) : (
+            <>
+              <h2 className="prp-header__title">{detail.title}</h2>
+              {typeof onEditTitle === 'function' ? (
+                <button
+                  type="button"
+                  className="prp-icon-btn prp-header__title-edit-btn"
+                  disabled={actionBusy}
+                  title="Edit title"
+                  aria-label="Edit title"
+                  onClick={beginEditTitle}
+                >
+                  ✎
+                </button>
+              ) : null}
+            </>
+          )}
           {detail.draft ? <Badge tone="draft">Draft</Badge> : null}
           {detail.state ? (
             <Badge tone={detail.state === 'open' ? 'ok' : 'muted'}>{detail.state}</Badge>
@@ -122,26 +258,39 @@ export function Header(props: any) {
         </div>
         <div className="prp-header__meta">
           <span className="prp-branch-split" title="Base ← head">
-            <button
-              type="button"
-              className="prp-branch-tag prp-branch-tag--base"
-              disabled={actionBusy || !onChangeBase}
-              onClick={onChangeBase}
-              title="Change base branch"
-              ref={(el) => {
-                localBaseRef.current = el;
-                if (baseBranchRef) baseBranchRef.current = el;
-              }}
-            >
-              <span className="prp-branch-tag__text">{detail.baseRef || '—'}</span>
-              <span className="prp-branch-tag__edit" aria-hidden="true">
-                ✎
-              </span>
-            </button>
+            <span className="prp-branch-tag prp-branch-tag--base">
+              <RefLink
+                className="prp-branch-tag__text"
+                owner={detail.baseOwner || detail.owner}
+                repo={detail.baseRepo || detail.repo}
+                refName={detail.baseRef}
+              />
+              <button
+                type="button"
+                className="prp-branch-tag__edit-btn"
+                disabled={actionBusy || !onChangeBase}
+                onClick={onChangeBase}
+                title="Change base branch"
+                aria-label="Change base branch"
+                ref={(el) => {
+                  localBaseRef.current = el;
+                  if (baseBranchRef) baseBranchRef.current = el;
+                }}
+              >
+                <span className="prp-branch-tag__edit" aria-hidden="true">
+                  ✎
+                </span>
+              </button>
+            </span>
             <span className="prp-branch-split__arrow" aria-hidden="true">
               ←
             </span>
-            <span className="prp-branch-tag prp-branch-tag--head">{detail.headRef || '—'}</span>
+            <RefLink
+              className="prp-branch-tag prp-branch-tag--head"
+              owner={detail.headOwner || detail.owner}
+              repo={detail.headRepo || detail.repo}
+              refName={detail.headRef}
+            />
           </span>
           {detail.author ? (
             <span className="prp-muted">

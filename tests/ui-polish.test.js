@@ -40,6 +40,16 @@ function ok(name) {
   assert.equal(polish.githubUserUrl('@octocat'), 'https://github.com/octocat');
   assert.match(polish.githubLabelUrl('o', 'r', 'bug'), /labels\/bug$/);
   assert.match(polish.githubIssueUrl('o', 'r', 12), /issues\/12$/);
+  assert.equal(
+    polish.githubTreeUrl('acme', 'app', 'feature/modal-pr-view'),
+    'https://github.com/acme/app/tree/feature/modal-pr-view'
+  );
+  assert.equal(
+    polish.githubCommitUrl('acme', 'app', 'abc123def'),
+    'https://github.com/acme/app/commit/abc123def'
+  );
+  assert.equal(polish.githubTreeUrl('acme', 'app', ''), '');
+  assert.equal(polish.encodeGitRefPath('a/b c'), 'a/b%20c');
   ok('github entity URLs');
 }
 

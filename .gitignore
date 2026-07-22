@@ -26,3 +26,6 @@ npm-debug.log*
 .turbo/
 coverage/
 tmp/
+
+# Packaged/signed extension artifacts
+*.crx

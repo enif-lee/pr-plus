@@ -401,6 +401,57 @@
   font-size: 17px;
   font-weight: 650;
   line-height: 1.3;
+  min-width: 0;
+}
+
+.prp-header__title-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 220px;
+  min-width: min(100%, 180px);
+  max-width: 100%;
+}
+
+.prp-header__title-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  max-width: 520px;
+  height: 32px;
+  margin: 0;
+  padding: 4px 10px;
+  border: 1px solid var(--prp-accent);
+  border-radius: 8px;
+  background: var(--prp-bg);
+  color: var(--prp-fg);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 650;
+  line-height: 1.3;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--prp-accent) 18%, transparent);
+}
+
+.prp-header__title-input:focus {
+  outline: none;
+}
+
+.prp-header__title-input:disabled {
+  opacity: 0.65;
+}
+
+.prp-header__title-edit-btn {
+  flex-shrink: 0;
+  opacity: 0.55;
+}
+
+.prp-header__title-row:hover .prp-header__title-edit-btn,
+.prp-header__title-edit-btn:focus-visible {
+  opacity: 1;
+}
+
+.prp-header__title-action {
+  flex-shrink: 0;
 }
 
 .prp-header__meta {
@@ -1931,6 +1982,80 @@
   accent-color: var(--prp-accent);
 }
 
+/* ── Diff commit / range filter ── */
+.prp-commit-filter {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+.prp-commit-filter__range-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--prp-fg-muted);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.prp-commit-filter__range-toggle input {
+  margin: 0;
+  accent-color: var(--prp-accent);
+}
+.prp-commit-filter__select {
+  max-width: min(320px, 42vw);
+  min-width: 140px;
+  height: 28px;
+  padding: 2px 8px;
+  border: 1px solid var(--prp-border);
+  border-radius: 6px;
+  background: var(--prp-bg);
+  color: var(--prp-fg);
+  font-family: var(--prp-mono);
+  font-size: 11px;
+  line-height: 1.3;
+}
+.prp-commit-filter__select:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--prp-accent) 55%, transparent);
+  outline-offset: 1px;
+}
+.prp-commit-filter__select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.prp-commit-filter__range {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  min-width: 0;
+}
+.prp-commit-filter__arrow {
+  color: var(--prp-fg-muted);
+  font-size: 12px;
+  user-select: none;
+}
+.prp-commit-filter__status {
+  font-size: 11px;
+  color: var(--prp-fg-muted);
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prp-commit-filter__error {
+  font-size: 11px;
+  color: var(--prp-danger);
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .prp-selection-bar {
   flex: 0 0 auto;
   padding: 12px 14px;
@@ -3335,18 +3460,55 @@ a.prp-label:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-button.prp-branch-tag {
-  appearance: none;
-  cursor: pointer;
+  text-decoration: none;
   transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
 }
-button.prp-branch-tag:hover,
-button.prp-branch-tag:focus-visible {
+a.prp-branch-tag:hover,
+a.prp-branch-tag:focus-visible {
   border-color: var(--prp-accent);
   color: var(--prp-accent);
   background: color-mix(in srgb, var(--prp-accent) 10%, var(--prp-bg));
   outline: none;
+  text-decoration: none;
+}
+.prp-branch-tag__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: inherit;
+  text-decoration: none;
+  font: inherit;
+}
+a.prp-branch-tag__text:hover,
+a.prp-branch-tag__text:focus-visible {
+  color: var(--prp-accent);
+  text-decoration: underline;
+  outline: none;
+}
+.prp-branch-tag__edit-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 0 0 0 2px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.prp-branch-tag__edit-btn:hover:not(:disabled),
+.prp-branch-tag__edit-btn:focus-visible:not(:disabled) {
+  color: var(--prp-accent);
+  outline: none;
+}
+.prp-branch-tag__edit-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 .prp-branch-tag--head {
   border-style: dashed;
@@ -3763,8 +3925,24 @@ button.prp-branch-tag:focus-visible {
   opacity: 0.65;
   flex-shrink: 0;
 }
-button.prp-branch-tag--base:hover .prp-branch-tag__edit {
+.prp-branch-tag--base:hover .prp-branch-tag__edit,
+.prp-branch-tag__edit-btn:hover:not(:disabled) .prp-branch-tag__edit,
+.prp-branch-tag__edit-btn:focus-visible:not(:disabled) .prp-branch-tag__edit {
   opacity: 1;
+}
+a.prp-commit-timeline__sha {
+  text-decoration: none;
+}
+a.prp-commit-timeline__sha:hover,
+a.prp-commit-timeline__sha:focus-visible {
+  text-decoration: underline;
+  color: var(--prp-accent);
+  outline: none;
+}
+a.prp-commit-timeline__sha code {
+  font: inherit;
+  color: inherit;
+  background: transparent;
 }
 
 /* ── Thread collapse toggle ── */

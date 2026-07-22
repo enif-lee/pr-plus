@@ -76,6 +76,11 @@ export interface PrDetail {
   mergeableState?: string | null;
   baseRef?: string;
   headRef?: string;
+  baseSha?: string;
+  baseOwner?: string;
+  baseRepo?: string;
+  headOwner?: string;
+  headRepo?: string;
   headSha?: string;
   author?: string;
   viewerLogin?: string;
@@ -110,4 +115,10 @@ export interface PrModalHostProps {
   onClose?: () => void;
   onRefresh?: () => void | Promise<void>;
   onOpenStackPr?: (n: number) => void;
+  /** GitHub compare files for a commit / range (base...head). */
+  onFetchCompareFiles?: (
+    base: string,
+    head: string,
+    options?: { gitattributesText?: string }
+  ) => Promise<{ files: Array<Record<string, unknown>>; [k: string]: unknown }>;
 }

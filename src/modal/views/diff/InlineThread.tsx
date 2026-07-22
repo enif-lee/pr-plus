@@ -6,6 +6,7 @@ import { UserLink } from '@common/UserLink';
 import { MarkdownComposer } from '@common/MarkdownComposer';
 import { formatWhen } from '@common/utils';
 import { Avatar } from '@common/Avatar';
+import { BodyEditor } from '../composers/BodyEditor';
 
 function InlineThreadImpl(props: any) {
   const {
@@ -17,6 +18,10 @@ function InlineThreadImpl(props: any) {
     onResolve,
     onDelete,
     onEdit,
+    onSaveEdit,
+    onCancelEdit,
+    editingCommentId,
+    onRegisterEditorSave,
     onApplySuggestion,
     onRegisterApply,
     actionBusy,
@@ -69,8 +74,12 @@ function InlineThreadImpl(props: any) {
         : ''
   }${side ? ` · ${side}` : ''}`;
 
+  function isEditingId(id: any) {
+    return editingCommentId != null && String(editingCommentId) === String(id);
+  }
+
   function renderCommentActions(id: any, commentBody: any, own: boolean) {
-    if (!own) return null;
+    if (!own || isEditingId(id)) return null;
     return (
       <div className="prp-icon-actions">
         <button
@@ -97,7 +106,27 @@ function InlineThreadImpl(props: any) {
     );
   }
 
-  function renderCommentBody(commentBody: any, { canApplySuggestion = false } = {}) {
+  function renderCommentBody(
+    id: any,
+    commentBody: any,
+    { canApplySuggestion = false } = {}
+  ) {
+    if (isEditingId(id)) {
+      return (
+        <BodyEditor
+          value={commentBody || ''}
+          actionBusy={actionBusy}
+          rows={4}
+          compact
+          placeholder="Edit comment…"
+          onSave={(body: string) => onSaveEdit?.(id, body)}
+          onCancel={onCancelEdit}
+          onRegisterSave={onRegisterEditorSave}
+          onUploadFile={onUploadFile}
+          linkCtx={linkCtx}
+        />
+      );
+    }
     return (
       <MarkdownView
         source={commentBody || ''}
@@ -173,7 +202,9 @@ function InlineThreadImpl(props: any) {
                       {canOwn ? <Badge tone="muted">you</Badge> : null}
                       {renderCommentActions(row?.commentId || thread?.id, body, canOwn)}
                     </div>
-                    {renderCommentBody(body, { canApplySuggestion: canApply })}
+                    {renderCommentBody(row?.commentId || thread?.id, body, {
+                      canApplySuggestion: canApply,
+                    })}
                   </div>
                 </li>
                 {replies.map((r: any, idx: number) => {
@@ -205,7 +236,7 @@ function InlineThreadImpl(props: any) {
                           ) : null}
                           {renderCommentActions(r.id, r.body, ownReply)}
                         </div>
-                        {renderCommentBody(r.body)}
+                        {renderCommentBody(r.id, r.body)}
                       </div>
                     </li>
                   );
@@ -231,7 +262,9 @@ function InlineThreadImpl(props: any) {
                   {renderCommentActions(row?.commentId || thread?.id, body, canOwn)}
                 </div>
                 <div className="prp-inline-thread__body">
-                  {renderCommentBody(body, { canApplySuggestion: canApply })}
+                  {renderCommentBody(row?.commentId || thread?.id, body, {
+                    canApplySuggestion: canApply,
+                  })}
                 </div>
               </div>
             )}

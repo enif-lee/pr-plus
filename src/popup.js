@@ -22,31 +22,39 @@ function renderTokenStatus(status) {
   }
 }
 
-function send(message) {
-  return new Promise((resolve, reject) => {
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isTransientChannelError(msg) {
+  return /message channel closed|Receiving end does not exist|asynchronous response|Could not establish connection|Extension context invalidated/i.test(
+    String(msg || '')
+  );
+}
+
+/** Promise-based messaging with one retry after SW wake. */
+async function send(message, { retries = 1 } = {}) {
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      chrome.runtime.sendMessage(message, (response) => {
-        const err = chrome.runtime.lastError;
-        if (err) {
-          const msg = err.message || String(err);
-          // Common after extension reload when service worker failed to start
-          if (/Receiving end does not exist|Could not establish connection/i.test(msg)) {
-            reject(
-              new Error(
-                'Background worker offline. Open chrome://extensions, click Reload on pr+, then try again.'
-              )
-            );
-            return;
-          }
-          reject(new Error(msg));
-          return;
-        }
-        resolve(response);
-      });
+      const response = await chrome.runtime.sendMessage(message);
+      return response;
     } catch (e) {
-      reject(e);
+      const msg = e?.message || String(e);
+      lastErr = new Error(msg);
+      if (attempt < retries && isTransientChannelError(msg)) {
+        await sleep(120 + attempt * 180);
+        continue;
+      }
+      if (/Receiving end does not exist|Could not establish connection|Extension context invalidated/i.test(msg)) {
+        throw new Error(
+          'Background worker offline. Open chrome://extensions, click Reload on pr+, then try again.'
+        );
+      }
+      throw lastErr;
     }
-  });
+  }
+  throw lastErr || new Error('Failed to message background worker');
 }
 
 async function load() {

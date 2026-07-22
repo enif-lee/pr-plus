@@ -487,44 +487,7 @@ async function fetchPrDetail(owner, repo, pullNumber, fetchImpl, token = null) {
     gitattributesText = '';
   }
 
-  const mappedFiles = (Array.isArray(files) ? files : []).map((f) => ({
-    filename: f.filename,
-    status: f.status,
-    additions: f.additions,
-    deletions: f.deletions,
-    changes: f.changes,
-    patch: f.patch || '',
-  }));
-
-  // Prefer pure collapse annotator (SW loads modal/pure/collapse.js via importScripts;
-  // Node tests require() it). Fallback only if the pure module is unavailable.
-  let filesOut;
-  try {
-    let collapse = typeof globalThis !== 'undefined' ? globalThis.PRModalCollapse : null;
-    if (!collapse && typeof require === 'function') {
-      try {
-        collapse = require('./modal/pure/collapse.js');
-      } catch {
-        collapse = null;
-      }
-    }
-    if (collapse?.annotateFilesForCollapse) {
-      filesOut = collapse.annotateFilesForCollapse(mappedFiles, gitattributesText);
-    }
-  } catch {
-    filesOut = null;
-  }
-  if (!filesOut) {
-    filesOut = mappedFiles.map((f) => ({
-      ...f,
-      defaultCollapsed:
-        !f.patch ||
-        (f.changes || 0) >= 500 ||
-        /package-lock\.json$|yarn\.lock$|\.min\.(js|css)$|\.bundle\.js$/i.test(
-          f.filename || ''
-        ),
-    }));
-  }
+  const filesOut = mapAndAnnotateFiles(files, gitattributesText);
 
   // Linked issue numbers from body (closing keywords / #N) — display only unless set via body edit
   let linkedIssues = [];
@@ -576,6 +539,13 @@ async function fetchPrDetail(owner, repo, pullNumber, fetchImpl, token = null) {
     viewerLogin: viewerLogin || null,
     baseRef: pr.base?.ref || '',
     headRef: pr.head?.ref || '',
+    baseSha: pr.base?.sha || '',
+    /** Repo that owns the base ref (usually same as PR repo). */
+    baseOwner: pr.base?.repo?.owner?.login || owner,
+    baseRepo: pr.base?.repo?.name || repo,
+    /** Head may be a fork — prefer head.repo when present. */
+    headOwner: pr.head?.repo?.owner?.login || pr.head?.user?.login || owner,
+    headRepo: pr.head?.repo?.name || repo,
     headSha,
     magicLinks,
     htmlUrl: pr.html_url,
@@ -1221,6 +1191,80 @@ async function fetchViewerLogin(fetchImpl, token) {
   }
 }
 
+/**
+ * Map GitHub file list (+ optional gitattributes) to modal file rows with collapse hints.
+ * @param {Array} files raw API file objects
+ * @param {string} [gitattributesText]
+ */
+function mapAndAnnotateFiles(files, gitattributesText = '') {
+  const mappedFiles = (Array.isArray(files) ? files : []).map((f) => ({
+    filename: f.filename,
+    status: f.status,
+    additions: f.additions,
+    deletions: f.deletions,
+    changes: f.changes,
+    patch: f.patch || '',
+  }));
+
+  let filesOut;
+  try {
+    let collapse = typeof globalThis !== 'undefined' ? globalThis.PRModalCollapse : null;
+    if (!collapse && typeof require === 'function') {
+      try {
+        collapse = require('./modal/pure/collapse.js');
+      } catch {
+        collapse = null;
+      }
+    }
+    if (collapse?.annotateFilesForCollapse) {
+      filesOut = collapse.annotateFilesForCollapse(mappedFiles, gitattributesText);
+    }
+  } catch {
+    filesOut = null;
+  }
+  if (!filesOut) {
+    filesOut = mappedFiles.map((f) => ({
+      ...f,
+      defaultCollapsed:
+        !f.patch ||
+        (f.changes || 0) >= 500 ||
+        /package-lock\.json$|yarn\.lock$|\.min\.(js|css)$|\.bundle\.js$/i.test(
+          f.filename || ''
+        ),
+    }));
+  }
+  return filesOut;
+}
+
+/**
+ * Files+patches for a commit or commit range via GitHub compare API.
+ * Use base...head (triple-dot) for merge-base style PR commit diffs.
+ * @returns {Promise<{ files: Array, base: string, head: string, status?: string, aheadBy?: number, behindBy?: number, totalCommits?: number }>}
+ */
+async function fetchCompareFiles(owner, repo, base, head, fetchImpl, token = null, options = {}) {
+  const o = String(owner || '').trim();
+  const r = String(repo || '').trim();
+  const b = String(base || '').trim();
+  const h = String(head || '').trim();
+  if (!o || !r || !b || !h) {
+    throw new Error('owner, repo, base, and head are required for compare');
+  }
+  const gitattributesText = String(options.gitattributesText || '');
+  const url = `https://api.github.com/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/compare/${encodeURIComponent(b)}...${encodeURIComponent(h)}`;
+  const data = await apiJson(url, fetchImpl, token);
+  const files = mapAndAnnotateFiles(data?.files || [], gitattributesText);
+  return {
+    files,
+    base: b,
+    head: h,
+    status: data?.status || null,
+    aheadBy: data?.ahead_by ?? null,
+    behindBy: data?.behind_by ?? null,
+    totalCommits: data?.total_commits ?? (Array.isArray(data?.commits) ? data.commits.length : null),
+    truncated: Boolean(data?.files && data.files.length >= 300),
+  };
+}
+
 const fetchApi = {
   mapApiPullRequest,
   buildApiHeaders,
@@ -1236,6 +1280,8 @@ const fetchApi = {
   attachMagicLinks,
   fetchOpenPulls,
   fetchPrDetail,
+  fetchCompareFiles,
+  mapAndAnnotateFiles,
   fetchPullReviewThreads,
   postIssueComment,
   submitPullReview,

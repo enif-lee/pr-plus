@@ -41,6 +41,7 @@ const tests = [
   'searchable-select.test.js',
   'diff-thread-refresh.test.js',
   'ui-polish.test.js',
+  'diff-commit-filter.test.js',
   'refresh-loading.test.js',
   'dom.test.js',
   'content-bootstrap.test.js',

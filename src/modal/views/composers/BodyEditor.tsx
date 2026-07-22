@@ -10,6 +10,9 @@ export function BodyEditor({
   onRegisterSave,
   onUploadFile,
   linkCtx,
+  rows = 10,
+  compact = false,
+  placeholder = 'Write a description…',
 }: any) {
   const [draft, setDraft] = useState(value || '');
   useEffect(() => {
@@ -22,14 +25,14 @@ export function BodyEditor({
     return () => onRegisterSave(null);
   }, [draft, onSave, onRegisterSave]);
   return (
-    <div className="prp-body-editor">
+    <div className={`prp-body-editor${compact ? ' prp-body-editor--compact' : ''}`}>
       <MarkdownComposer
         value={draft}
         onChange={setDraft}
-        placeholder="Write a description…"
+        placeholder={placeholder}
         forceOpen
-        compact={false}
-        rows={10}
+        compact={compact}
+        rows={rows}
         disabled={actionBusy}
         showTabs
         onUploadFile={onUploadFile}

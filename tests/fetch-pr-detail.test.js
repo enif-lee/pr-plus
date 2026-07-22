@@ -28,7 +28,7 @@ async function main() {
           state: 'open',
           draft: false,
           user: { login: 'u' },
-          base: { ref: 'main' },
+          base: { ref: 'main', sha: 'basebeef' },
           head: { ref: 'feat', sha: 'deadbeef' },
           html_url: 'https://github.com/o/r/pull/9',
           merged: false,
@@ -196,6 +196,8 @@ async function main() {
   assert.equal(detail.comments.length, 1);
   assert.equal(detail.reviews[0].state, 'APPROVED');
   assert.equal(detail.commits[0].sha, 'abcdef1');
+  assert.equal(detail.baseSha, 'basebeef');
+  assert.equal(detail.headSha, 'deadbeef');
   assert.equal(detail.checks.state, 'success');
   assert.equal(detail.reviewComments.length, 1);
   assert.ok(calls.some((c) => c.url.includes('/pulls/9/files')));

@@ -19,7 +19,15 @@ import { ConversationView } from '../views/conversation/ConversationView';
 import { FolderFileTree } from '../views/diff/FolderFileTree';
 import { VirtualDiff } from '../views/diff/VirtualDiff';
 import { SelectionCommentBar } from '../views/diff/SelectionCommentBar';
+import { DiffCommitFilter } from '../views/diff/DiffCommitFilter';
 import { LAYOUT_CENTERED, LAYOUT_DIFF, layoutClassName } from '../lib/layout-mode';
+import {
+  compareCacheKey,
+  isAllCommitsFilter,
+  normalizeDiffCommitFilter,
+  resolveCompareRange,
+  type DiffCommitFilter as DiffCommitFilterState,
+} from '../lib/diff-commit-filter';
 import {
   SHELL_MODAL,
   SHELL_SHEET,
@@ -98,6 +106,7 @@ export function PrModalApp({
   onClose,
   onRefresh,
   onOpenStackPr,
+  onFetchCompareFiles = null,
   initialRoute = null,
   onRouteChange = null,
 }: any) {
@@ -113,6 +122,31 @@ export function PrModalApp({
   }, [detailProp]);
   // Prefer optimistic local copy for all rendering / virtual rows / threads
   const detail = localDetail || detailProp;
+
+  /** Diff files scoped to a commit or commit range (null = full PR files). */
+  const [diffCommitFilter, setDiffCommitFilter] = useState<DiffCommitFilterState>({
+    mode: 'all',
+  });
+  const [diffFilesOverride, setDiffFilesOverride] = useState<any[] | null>(null);
+  const [diffCommitLoading, setDiffCommitLoading] = useState(false);
+  const [diffCommitError, setDiffCommitError] = useState<string | null>(null);
+  const [diffCommitLabel, setDiffCommitLabel] = useState<string | null>(null);
+  const compareFilesCacheRef = useRef(new Map<string, any[]>());
+  const compareFetchGenRef = useRef(0);
+
+  // Reset commit filter when switching PRs
+  const prIdentity = detail
+    ? `${detail.owner}/${detail.repo}#${detail.number}`
+    : '';
+  useEffect(() => {
+    setDiffCommitFilter({ mode: 'all' });
+    setDiffFilesOverride(null);
+    setDiffCommitError(null);
+    setDiffCommitLabel(null);
+    setDiffCommitLoading(false);
+    compareFilesCacheRef.current = new Map();
+    compareFetchGenRef.current += 1;
+  }, [prIdentity]);
 
   // --- Zustand-owned interactive UI (selective subscriptions) ---
   const layoutMode = useModalStore((s) => s.layoutMode);
@@ -213,6 +247,8 @@ export function PrModalApp({
   /** True while playing close exit animation before host onClose. */
   const [closing, setClosing] = useState(false);
   const closingRef = useRef(false);
+  /** Bump to open inline title editor from command palette. */
+  const [titleEditSignal, setTitleEditSignal] = useState(0);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const listRef = useRef<any>(null);
   const searchInputRef = useRef<any>(null);
@@ -248,10 +284,75 @@ export function PrModalApp({
   // Always re-annotate with gitattributesText so SW fallback defaults cannot
   // skip linguist-generated / binary rules from the fetched attributes file.
 
+  const sourceFiles = useMemo(() => {
+    if (diffFilesOverride) return diffFilesOverride;
+    return detail?.files || [];
+  }, [detail?.files, diffFilesOverride]);
+
   const annotatedFiles = useMemo(() => {
-    if (!detail?.files) return [];
-    return annotateFilesForCollapse(detail.files, detail.gitattributesText || '');
-  }, [detail]);
+    if (!sourceFiles?.length) return [];
+    return annotateFilesForCollapse(sourceFiles, detail?.gitattributesText || '');
+  }, [sourceFiles, detail?.gitattributesText]);
+
+  const applyDiffCommitFilter = useCallback(
+    async (nextRaw: DiffCommitFilterState) => {
+      const next = normalizeDiffCommitFilter(nextRaw);
+      setDiffCommitFilter(next);
+      setDiffCommitError(null);
+      setScrollTop(0);
+      if (listRef.current) listRef.current.scrollTop = 0;
+
+      if (isAllCommitsFilter(next) || !detail) {
+        setDiffFilesOverride(null);
+        setDiffCommitLabel(null);
+        setDiffCommitLoading(false);
+        return;
+      }
+
+      const baseRefOrSha = detail.baseSha || detail.baseRef || '';
+      const range = resolveCompareRange(detail.commits || [], baseRefOrSha, next);
+      if (!range) {
+        setDiffFilesOverride(null);
+        setDiffCommitLabel(null);
+        setDiffCommitError('Could not resolve commit range');
+        return;
+      }
+      setDiffCommitLabel(range.label);
+
+      if (typeof onFetchCompareFiles !== 'function') {
+        setDiffCommitError('Compare fetch is unavailable');
+        return;
+      }
+
+      const cacheKey = compareCacheKey(detail.owner, detail.repo, range.base, range.head);
+      const cached = compareFilesCacheRef.current.get(cacheKey);
+      if (cached) {
+        setDiffFilesOverride(cached);
+        setDiffCommitLoading(false);
+        return;
+      }
+
+      const gen = ++compareFetchGenRef.current;
+      setDiffCommitLoading(true);
+      try {
+        const result = await onFetchCompareFiles(range.base, range.head, {
+          gitattributesText: detail.gitattributesText || '',
+        });
+        if (gen !== compareFetchGenRef.current) return;
+        const files = Array.isArray(result?.files) ? result.files : [];
+        compareFilesCacheRef.current.set(cacheKey, files);
+        setDiffFilesOverride(files);
+        setDiffCommitError(null);
+      } catch (err: any) {
+        if (gen !== compareFetchGenRef.current) return;
+        setDiffCommitError(err?.message || String(err));
+        setDiffFilesOverride(null);
+      } finally {
+        if (gen === compareFetchGenRef.current) setDiffCommitLoading(false);
+      }
+    },
+    [detail, onFetchCompareFiles, setScrollTop]
+  );
 
   const navFiles = useMemo(() => {
     if (typeof filterFilesByQuery === 'function') {
@@ -1254,17 +1355,9 @@ export function PrModalApp({
     }
   }
 
-  function onStartEditReviewComment(id, body) {
+  function onStartEditReviewComment(id, _body) {
+    // Opens inline BodyEditor (conversation timeline or Diff InlineThread)
     setEditingComment({ kind: 'review', id });
-    // For inline edit from diff we use prompt for speed when body is long in virtual list
-    if (layoutMode === LAYOUT_DIFF) {
-      const next = window.prompt('Edit review comment:', body || '');
-      if (next == null) {
-        setEditingComment(null);
-        return;
-      }
-      void onSaveEditComment('review', id, next);
-    }
   }
 
   const paletteCommands = useMemo(() => {
@@ -1283,7 +1376,7 @@ export function PrModalApp({
         onToggleDiff();
         break;
       case 'editTitle':
-        void onEditTitle();
+        setTitleEditSignal((n) => n + 1);
         break;
       case 'editBody':
         setEditingBody(true);
@@ -1673,14 +1766,14 @@ export function PrModalApp({
     }
   }
 
-  async function onEditTitle() {
+  async function onEditTitle(nextTitle: string) {
     if (!detail) return;
-    const next = window.prompt('PR title:', detail.title || '');
-    if (next == null) return;
-    const title = String(next).trim();
-    if (!title || title === detail.title) return;
+    const title = String(nextTitle ?? '').trim();
+    if (!title || title === String(detail.title || '').trim()) return;
     setActionBusy(true);
     setActionMsg('');
+    // Optimistic title so header updates immediately
+    setLocalDetail((prev) => (prev ? { ...prev, title } : prev));
     try {
       const api = globalThis.PRTreeFetch;
       if (!api?.updatePullRequest) throw new Error('Update PR API unavailable');
@@ -1689,6 +1782,10 @@ export function PrModalApp({
       await onRefresh?.();
     } catch (err) {
       setActionMsg(err?.message || String(err));
+      // Revert optimistic title on failure
+      setLocalDetail((prev) =>
+        prev ? { ...prev, title: detail.title } : prev
+      );
     } finally {
       setActionBusy(false);
     }
@@ -1946,38 +2043,8 @@ export function PrModalApp({
     return url;
   }
 
-  async function onRerequestReview() {
-    if (!detail) return;
-    // Only past reviewers not already in requested_reviewers (pending POST → 422).
-    let logins =
-      typeof buildRerequestReviewerLogins === 'function'
-        ? buildRerequestReviewerLogins({
-            requestedReviewers: detail.requestedReviewers,
-            reviews: detail.reviews,
-            author: detail.author,
-          })
-        : [];
-    if (!logins.length) {
-      const one = window.prompt(
-        'No completed reviewers to re-request (pending requests are skipped). Username:'
-      );
-      if (!one) return;
-      logins =
-        typeof buildRerequestReviewerLogins === 'function'
-          ? buildRerequestReviewerLogins({
-              requestedReviewers: detail.requestedReviewers,
-              reviews: detail.reviews,
-              author: detail.author,
-              extraLogins: [String(one).trim()],
-            })
-          : [String(one).trim()];
-      if (!logins.length) {
-        setActionMsg('That user is already a pending requested reviewer.');
-        return;
-      }
-    } else if (!window.confirm(`Re-request review from: ${logins.join(', ')}?`)) {
-      return;
-    }
+  async function applyRerequestReviewers(logins: string[]) {
+    if (!detail || !logins?.length) return;
     setActionBusy(true);
     setActionMsg('');
     try {
@@ -1991,6 +2058,74 @@ export function PrModalApp({
     } finally {
       setActionBusy(false);
     }
+  }
+
+  function openRerequestReviewerPicker() {
+    if (!detail) return;
+    const exclude = detail.requestedReviewers || [];
+    const logins = collectPeopleLogins(exclude);
+    const options =
+      typeof buildPeopleOptions === 'function'
+        ? buildPeopleOptions(logins, {}, detail.avatarUrls || {})
+        : logins.map((id) => ({
+            id,
+            label: id,
+            meta: {
+              login: id,
+              kind: 'user',
+              avatarUrl: detail.avatarUrls?.[String(id).toLowerCase()] || '',
+            },
+          }));
+    pickerAnchorRef.current = reviewerAddRef.current;
+    setPicker({
+      type: 'reviewer',
+      title: 'Re-request review (username)',
+      options,
+      query: '',
+      allowFreeText: true,
+      placeholder: 'Filter or type a username…',
+      onPick: (opt) => {
+        closePicker();
+        const login = String(opt?.id || opt?.label || '').trim();
+        if (!login) return;
+        const filtered =
+          typeof buildRerequestReviewerLogins === 'function'
+            ? buildRerequestReviewerLogins({
+                requestedReviewers: detail.requestedReviewers,
+                reviews: detail.reviews,
+                author: detail.author,
+                extraLogins: [login],
+              })
+            : [login];
+        if (!filtered.length) {
+          setActionMsg('That user is already a pending requested reviewer.');
+          return;
+        }
+        void applyRerequestReviewers(filtered);
+      },
+    });
+  }
+
+  async function onRerequestReview() {
+    if (!detail) return;
+    // Only past reviewers not already in requested_reviewers (pending POST → 422).
+    const logins =
+      typeof buildRerequestReviewerLogins === 'function'
+        ? buildRerequestReviewerLogins({
+            requestedReviewers: detail.requestedReviewers,
+            reviews: detail.reviews,
+            author: detail.author,
+          })
+        : [];
+    if (!logins.length) {
+      // No completed reviewers — pick a username via SearchableSelect
+      openRerequestReviewerPicker();
+      return;
+    }
+    if (!window.confirm(`Re-request review from: ${logins.join(', ')}?`)) {
+      return;
+    }
+    await applyRerequestReviewers(logins);
   }
 
   async function onDeleteReviewComment(commentId: any) {
@@ -2057,6 +2192,14 @@ export function PrModalApp({
 
       // Escape is handled with layout context (diff vs close modal)
       if (e.key === 'Escape') {
+        // Inline title editor owns Escape (cancel) while focused
+        const ae = typeof document !== 'undefined' ? document.activeElement : null;
+        if (
+          ae &&
+          (ae as HTMLElement).classList?.contains('prp-header__title-input')
+        ) {
+          return;
+        }
         if (ui.pickerOpen) {
           e.preventDefault();
           e.stopPropagation();
@@ -2196,6 +2339,7 @@ export function PrModalApp({
           onClosePr={onClosePr}
           onReopenPr={onReopenPr}
           onEditTitle={onEditTitle}
+          titleEditSignal={titleEditSignal}
           onChangeBase={openBasePicker}
           baseBranchRef={baseBranchRef}
           sectionLoading={isInitialLoad}
@@ -2372,8 +2516,20 @@ export function PrModalApp({
                     Split
                   </label>
                 </div>
+                <DiffCommitFilter
+                  commits={detail.commits || []}
+                  filter={diffCommitFilter}
+                  onChange={applyDiffCommitFilter}
+                  loading={diffCommitLoading}
+                  error={diffCommitError}
+                  label={diffCommitLabel}
+                  disabled={!onFetchCompareFiles}
+                />
                 <span className="prp-muted" data-diff-mode={diffMode}>
-                  {diffMode} · {virtualRows.length} rows · click single · drag multi
+                  {diffMode}
+                  {diffFilesOverride
+                    ? ` · filtered · ${annotatedFiles.length} files · ${virtualRows.length} rows`
+                    : ` · ${virtualRows.length} rows · click single · drag multi`}
                 </span>
                 <CommentNavBar
                   comments={mappedComments}
@@ -2419,6 +2575,16 @@ export function PrModalApp({
                 onResolve={onResolveThread}
                 onDeleteReviewComment={onDeleteReviewComment}
                 onEditReviewComment={onStartEditReviewComment}
+                onSaveEditReviewComment={(id, body) =>
+                  onSaveEditComment('review', id, body)
+                }
+                onCancelEditReviewComment={() => setEditingComment(null)}
+                editingCommentId={
+                  editingComment?.kind === 'review' ? editingComment.id : null
+                }
+                onRegisterEditorSave={(fn) => {
+                  editorSaveRef.current = fn;
+                }}
                 onApplySuggestion={onApplySuggestion}
                 onRegisterApply={(fn) => {
                   applyActionRef.current = fn;
