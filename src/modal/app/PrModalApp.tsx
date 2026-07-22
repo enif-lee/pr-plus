@@ -209,6 +209,10 @@ export function PrModalApp({
     }
   });
   const fileNavDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  /** True while playing close exit animation before host onClose. */
+  const [closing, setClosing] = useState(false);
+  const closingRef = useRef(false);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const listRef = useRef<any>(null);
   const searchInputRef = useRef<any>(null);
   const shellRef = useRef<any>(null);
@@ -569,6 +573,47 @@ export function PrModalApp({
     if (layoutMode === LAYOUT_DIFF) collapseDiff();
     else expandDiff();
   }
+
+  /** Play exit animation, then notify host to unmount (modal + side sheet). */
+  const requestClose = useCallback(() => {
+    if (closingRef.current || !open) return;
+    closingRef.current = true;
+    setClosing(true);
+    // Docked sheet slides out; fullscreen Diff / modal scale-fades out
+    const sheetSlide =
+      shellMode === SHELL_SHEET && layoutMode !== LAYOUT_DIFF;
+    const duration = sheetSlide ? 240 : 280;
+    setAnimClass(
+      sheetSlide
+        ? 'prp-modal--sheet-out'
+        : 'prp-modal--animating prp-modal--anim-out'
+    );
+    if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = setTimeout(() => {
+      closeTimerRef.current = null;
+      closingRef.current = false;
+      setClosing(false);
+      setAnimClass('');
+      onClose?.();
+    }, duration);
+  }, [open, onClose, shellMode, layoutMode, setAnimClass]);
+
+  // Reset close animation if host forces open again mid-exit / after unmount
+  useEffect(() => {
+    if (!open) {
+      if (closeTimerRef.current) {
+        clearTimeout(closeTimerRef.current);
+        closeTimerRef.current = null;
+      }
+      closingRef.current = false;
+      setClosing(false);
+      return;
+    }
+    // Opening: clear residual exit classes
+    if (!closingRef.current) {
+      setAnimClass('');
+    }
+  }, [open, setAnimClass]);
 
   function onToggleShell() {
     setShellMode((prev) => {
@@ -1970,7 +2015,7 @@ export function PrModalApp({
     showSelectionComposer,
   };
   actionsRef.current = {
-    onClose,
+    onClose: requestClose,
     onToggleDiff,
     collapseDiff,
     closePicker,
@@ -2088,13 +2133,16 @@ export function PrModalApp({
 
   return (
     <div
-      className={`prp-overlay ${shellClassName(shellMode)} ${theme.className}`.trim()}
+      className={`prp-overlay ${shellClassName(shellMode)} ${theme.className}${
+        closing ? ' prp-overlay--leaving' : ''
+      }`.trim()}
       tabIndex={-1}
       data-color-mode={theme.mode}
       data-shell={shellMode}
       data-layout={layoutMode === LAYOUT_DIFF ? 'diff' : 'conversation'}
+      data-leaving={closing ? '1' : '0'}
     >
-      <div className="prp-backdrop" onClick={onClose} />
+      <div className="prp-backdrop" onClick={requestClose} />
       <div
         className={cls}
         ref={shellRef}
@@ -2114,7 +2162,7 @@ export function PrModalApp({
         ) : null}
         <Header
           detail={detail}
-          onClose={onClose}
+          onClose={requestClose}
           onToggleDiff={onToggleDiff}
           layoutMode={layoutMode}
           themeMode={theme.mode}
