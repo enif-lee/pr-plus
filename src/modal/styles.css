@@ -207,7 +207,7 @@
    * - preferred ~56vw
    * - max 1200px (capped by viewport)
    */
-  --prp-sheet-min: 800px;
+  --prp-sheet-min: 950px;
   --prp-sheet-max: 1200px;
   width: clamp(
     min(var(--prp-sheet-min), 100vw),
