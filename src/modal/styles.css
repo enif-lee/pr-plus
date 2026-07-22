@@ -201,9 +201,21 @@
 }
 
 .prp-overlay.prp-shell--sheet .prp-modal--centered {
-  /* Viewport-relative sheet width (no fixed px ceiling) */
-  width: min(52vw, 100vw);
-  max-width: 100vw;
+  /*
+   * Side sheet bounds (conversation):
+   * - min ≥ 800px (or full viewport if the window is narrower)
+   * - preferred ~56vw
+   * - max 1200px (capped by viewport)
+   */
+  --prp-sheet-min: 800px;
+  --prp-sheet-max: 1200px;
+  width: clamp(
+    min(var(--prp-sheet-min), 100vw),
+    56vw,
+    min(var(--prp-sheet-max), 100vw)
+  );
+  min-width: min(var(--prp-sheet-min), 100vw);
+  max-width: min(var(--prp-sheet-max), 100vw);
   height: 100vh;
   max-height: 100vh;
 }
