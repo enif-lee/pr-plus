@@ -159,16 +159,23 @@
 .prp-overlay.prp-shell--sheet {
   align-items: stretch;
   justify-content: flex-end;
+  /* Do not paint a solid layer over the page; only the sheet panel is opaque */
+  background: transparent;
+  color-scheme: inherit;
 }
 
 .prp-overlay.prp-shell--sheet .prp-backdrop {
-  /* Keep list readable; slightly lighter than full-modal dim */
-  --prp-backdrop-alpha: 0.18;
+  /* Transparent click-catcher so the GitHub list stays fully visible */
+  background: transparent !important;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .prp-overlay.prp-shell--sheet.prp-theme-dark .prp-backdrop,
 .prp-overlay.prp-shell--sheet[data-color-mode='dark'] .prp-backdrop {
-  --prp-backdrop-alpha: 0.32;
+  background: transparent !important;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .prp-overlay.prp-shell--sheet .prp-modal {
@@ -200,12 +207,17 @@
 
 .prp-overlay.prp-shell--sheet:has(.prp-modal--diff) .prp-backdrop,
 .prp-overlay.prp-shell--sheet[data-layout='diff'] .prp-backdrop {
-  --prp-backdrop-alpha: 0.28;
+  /* Fullscreen Diff still keeps transparent outer overlay; panel covers content */
+  background: transparent !important;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .prp-overlay.prp-shell--sheet.prp-theme-dark:has(.prp-modal--diff) .prp-backdrop,
 .prp-overlay.prp-shell--sheet[data-color-mode='dark'][data-layout='diff'] .prp-backdrop {
-  --prp-backdrop-alpha: 0.42;
+  background: transparent !important;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .prp-overlay.prp-shell--sheet .prp-modal--diff {
