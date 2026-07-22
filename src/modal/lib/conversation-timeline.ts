@@ -83,8 +83,13 @@ export function buildConversationTimeline(detail, opts: any = {}) {
         avatarUrl: r.avatarUrl || r.avatar_url || null,
         body: r.body || '',
         at: r.createdAt,
+        pending: Boolean(r.pending),
+        nodeId: r.nodeId || r.node_id || null,
         canDelete: Boolean(
-          detail.viewerLogin && r.author && r.author === detail.viewerLogin
+          detail.viewerLogin &&
+            r.author &&
+            r.author === detail.viewerLogin &&
+            !r.pending
         ),
       }));
     const snippet = snippetFn
@@ -92,12 +97,22 @@ export function buildConversationTimeline(detail, opts: any = {}) {
           {
             path: c.path,
             line: c.line,
+            originalLine: c.originalLine ?? c.original_line,
             startLine: c.startLine ?? c.start_line,
             side: c.side,
+            diffHunk: c.diffHunk || c.diff_hunk || '',
           },
           files
         )
       : null;
+    const displayLine =
+      c.line != null
+        ? Number(c.line)
+        : c.originalLine != null
+          ? Number(c.originalLine)
+          : c.original_line != null
+            ? Number(c.original_line)
+            : null;
     items.push({
       key: `thread-${c.id || i}`,
       kind: 'review-thread',
@@ -107,15 +122,22 @@ export function buildConversationTimeline(detail, opts: any = {}) {
       body: c.body || '',
       at: c.createdAt,
       path: c.path,
-      line: c.line,
+      line: displayLine,
       startLine: c.startLine ?? c.start_line ?? null,
       side: c.side || 'RIGHT',
       resolved: Boolean(c.resolved),
+      outdated: Boolean(c.outdated),
       threadNodeId: c.threadNodeId || null,
+      // PRRC_… needed for pending-review GraphQL replies (REST GET 404s on PENDING)
+      nodeId: c.nodeId || c.node_id || null,
+      pending: Boolean(c.pending),
       replies,
       snippet,
       canDelete: Boolean(
-        detail.viewerLogin && c.author && c.author === detail.viewerLogin
+        detail.viewerLogin &&
+          c.author &&
+          c.author === detail.viewerLogin &&
+          !c.pending
       ),
     });
   });
@@ -152,5 +174,60 @@ export function pageTimelineItems(items, opts: any = {}) {
     hasPrev: hasNewer,
     hasNewer,
     hasOlder,
+  };
+}
+
+/**
+ * Split a newest-first timeline into dual windows with a middle gap, matching
+ * GitHub's "N hidden items / Load more…" fold when review threads are partial.
+ *
+ * @param {Array} items
+ * @param {{ oldestThreadIds?: string[], newestThreadIds?: string[], hiddenCount?: number, hasMore?: boolean }|null} meta
+ * @returns {{ top: Array, bottom: Array, hiddenCount: number, showGap: boolean }}
+ */
+export function partitionTimelineWithThreadGap(items, meta: any = null) {
+  const list = Array.isArray(items) ? items : [];
+  const hiddenCount = Math.max(0, Number(meta?.hiddenCount) || 0);
+  const oldestIds = new Set(
+    (meta?.oldestThreadIds || []).map(String).filter(Boolean)
+  );
+  const showGap = Boolean(meta?.hasMore) && hiddenCount > 0;
+
+  if (!showGap || oldestIds.size === 0) {
+    // Single window (or no dual seed yet): gap sits after all loaded items
+    return {
+      top: list,
+      bottom: [],
+      hiddenCount,
+      showGap,
+    };
+  }
+
+  const top = [];
+  const bottom = [];
+  for (const item of list) {
+    const tid =
+      item?.threadNodeId != null
+        ? String(item.threadNodeId)
+        : item?.kind === 'review-thread' && item?.id != null
+          ? null
+          : null;
+    if (
+      (item?.kind === 'review-thread' || item?.kind === 'review-comment') &&
+      tid &&
+      oldestIds.has(tid)
+    ) {
+      bottom.push(item);
+    } else {
+      top.push(item);
+    }
+  }
+
+  // Preserve newest-first inside each window (items already sorted)
+  return {
+    top,
+    bottom,
+    hiddenCount,
+    showGap: showGap && bottom.length > 0,
   };
 }

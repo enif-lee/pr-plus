@@ -22,7 +22,15 @@ if (!fs.existsSync(swPath)) {
   throw new Error(`Service worker missing: ${manifest.background.service_worker}`);
 }
 const swSrc = fs.readFileSync(swPath, 'utf8');
-if (!swSrc.includes('modal/pure/collapse.js')) {
+// Prefer single-file SW bundle (no multi importScripts — avoids Chrome status 15).
+if (manifest.background.service_worker.endsWith('background.bundle.js')) {
+  if (!swSrc.includes('PRModalCollapse') && !swSrc.includes('annotateFilesForCollapse')) {
+    throw new Error('background.bundle.js must include collapse helpers');
+  }
+  if (swSrc.includes('importScripts(')) {
+    throw new Error('background.bundle.js must not call importScripts (deps inlined)');
+  }
+} else if (!swSrc.includes('modal/pure/collapse.js')) {
   throw new Error('service worker must importScripts collapse pure helper for gitattributes');
 }
 

@@ -127,6 +127,19 @@ export function compareCacheKey(owner: string, repo: string, base: string, head:
   return `${String(owner || '').toLowerCase()}/${String(repo || '').toLowerCase()}@${base}...${head}`;
 }
 
+/** Max visible chars for commit option / trigger labels (ellipsis beyond). */
+export const COMMIT_LABEL_MAX_LEN = 42;
+
+/**
+ * Truncate a label for the commit picker (keeps UI width bounded).
+ */
+export function truncateCommitLabel(label: string, maxLen = COMMIT_LABEL_MAX_LEN): string {
+  const s = String(label || '').trim();
+  if (!s) return '';
+  if (s.length <= maxLen) return s;
+  return `${s.slice(0, Math.max(1, maxLen - 1))}…`;
+}
+
 /**
  * Build select options for the commit filter UI (newest-first for scanning).
  */
@@ -134,12 +147,73 @@ export function buildCommitFilterOptions(commits: CommitLike[] | null | undefine
   sha: string;
   label: string;
   shortSha: string;
+  fullLabel: string;
 }> {
   const list = normalizePrCommits(commits);
   // newest first in the dropdown
-  return [...list].reverse().map((c) => ({
-    sha: String(c.sha),
-    shortSha: shortSha(c.sha),
-    label: commitOptionLabel(c),
-  }));
+  return [...list].reverse().map((c) => {
+    const fullLabel = commitOptionLabel(c);
+    return {
+      sha: String(c.sha),
+      shortSha: shortSha(c.sha),
+      fullLabel,
+      label: truncateCommitLabel(fullLabel),
+    };
+  });
+}
+
+/**
+ * Map multi-checkbox selection (sha ids, ignoring "all") to a DiffCommitFilter.
+ * - 0 selected → all commits
+ * - 1 selected → single commit
+ * - 2+ selected → inclusive range from oldest to newest among the selection
+ *   (order independent; uses PR commit chronology).
+ */
+export function selectionToDiffCommitFilter(
+  selectedIds: string[] | null | undefined,
+  commits: CommitLike[] | null | undefined
+): DiffCommitFilter {
+  const ids = (Array.isArray(selectedIds) ? selectedIds : [])
+    .map((x) => String(x || '').trim())
+    .filter((x) => x && x !== 'all');
+  if (!ids.length) return { mode: 'all' };
+
+  const list = normalizePrCommits(commits);
+  const indexOf = (sha: string) => list.findIndex((c) => String(c.sha) === sha);
+  const ordered = ids
+    .map((sha) => ({ sha, i: indexOf(sha) }))
+    .filter((x) => x.i >= 0)
+    .sort((a, b) => a.i - b.i);
+
+  if (!ordered.length) return { mode: 'all' };
+  if (ordered.length === 1) return { mode: 'single', sha: ordered[0].sha };
+  return {
+    mode: 'range',
+    sha: ordered[0].sha,
+    endSha: ordered[ordered.length - 1].sha,
+  };
+}
+
+/** Inverse: selected sha ids for a filter (for multi-select initial state). */
+export function diffCommitFilterToSelection(
+  filter: DiffCommitFilter | null | undefined,
+  commits: CommitLike[] | null | undefined
+): string[] {
+  const f = normalizeDiffCommitFilter(filter);
+  if (f.mode === 'all' || !f.sha) return [];
+  if (f.mode === 'single') return [String(f.sha)];
+  // range: include all commits from start..end inclusive
+  const list = normalizePrCommits(commits);
+  let i = list.findIndex((c) => String(c.sha) === String(f.sha));
+  let j = list.findIndex((c) => String(c.sha) === String(f.endSha));
+  if (i < 0 || j < 0) return [String(f.sha), String(f.endSha || f.sha)].filter(Boolean);
+  if (i > j) {
+    const t = i;
+    i = j;
+    j = t;
+  }
+  // For checkbox UI we only need endpoints as selected markers for range,
+  // or all in range? User asked for checkboxes for single or range (2 commits).
+  // Keep endpoints only so 2 checks = range.
+  return [String(list[i].sha), String(list[j].sha)];
 }

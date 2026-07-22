@@ -39,10 +39,12 @@ assert.equal(
   fileNavGridTemplate({ collapsed: false, width: 300 }),
   '300px 4px minmax(0, 1fr)'
 );
+// Collapsed = 0-width nav+resizer tracks (children stay mounted for animation)
 assert.equal(
   fileNavGridTemplate({ collapsed: true, width: 300 }),
-  `${FILE_NAV_RAIL_WIDTH}px 0 minmax(0, 1fr)`
+  '0px 0px minmax(0, 1fr)'
 );
+assert.equal(FILE_NAV_RAIL_WIDTH, 0);
 assert.ok(fileNavGridTemplate({ width: 50 }).startsWith(`${FILE_NAV_MIN_WIDTH}px`));
 
 // serialize / parse / storage
@@ -67,8 +69,10 @@ assert.equal(loadFileNavPref(null).collapsed, false);
 assert.equal(saveFileNavPref(mem, { collapsed: true, width: 300 }), true);
 assert.ok(mem.data[FILE_NAV_PREF_KEY]);
 const loaded = loadFileNavPref(mem);
-assert.equal(loaded.collapsed, true);
+// Load always opens expanded; width is restored
+assert.equal(loaded.collapsed, false);
 assert.equal(loaded.width, 300);
+assert.equal(parseFileNavPref(mem.data[FILE_NAV_PREF_KEY]).collapsed, true);
 
 // round-trip toggle + resize
 let pref = loadFileNavPref(mem);

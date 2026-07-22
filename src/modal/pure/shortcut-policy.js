@@ -1,6 +1,7 @@
+(function(){
 /**
  * Pure policy for PR modal global shortcuts.
- * Only Diff toggle, command palette, and Esc-related navigation remain active.
+ * Diff toggle, command palette, Find (⌘F), and Esc-related navigation.
  */
 
 /**
@@ -35,15 +36,13 @@ function resolveModalShortcutAction(opts = {}) {
   // ⌘. / Ctrl+. → toggle Diff ↔ Conversation
   if (key === '.' || key === 'period') return 'toggleDiff';
 
-  // Find (⌘F) and all other chords intentionally disabled — only Diff / palette / Esc
+  // ⌘F / Ctrl+F → in-modal search (PR body / comments / diff rows)
+  if (key === 'f') return 'openSearch';
+
   return null;
 }
 
 const api = { resolveModalShortcutAction };
-
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = api;
-}
-if (typeof globalThis !== 'undefined') {
-  globalThis.PRModalShortcutPolicy = api;
-}
+if (typeof module !== "undefined" && module.exports) module.exports = api;
+if (typeof globalThis !== "undefined") globalThis.PRModalShortcutPolicy = api;
+})();

@@ -28,13 +28,62 @@ export function MarkdownComposer({
   const [dragging, setDragging] = useState(false);
   const [uploadMsg, setUploadMsg] = useState('');
   const taRef = useRef<HTMLTextAreaElement | null>(null);
-  const open = forceOpen || focused || Boolean(String(value || '').trim()) || tab === 'preview';
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const blurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Keep open on Preview even when empty — do not collapse while tab is preview.
+  const open =
+    forceOpen || focused || Boolean(String(value || '').trim()) || tab === 'preview';
 
   useEffect(() => {
     if (!focused && taRef.current && taRef.current.value !== (value || '')) {
       taRef.current.value = value || '';
     }
   }, [value, focused]);
+
+  useEffect(() => {
+    return () => {
+      if (blurTimerRef.current) clearTimeout(blurTimerRef.current);
+    };
+  }, []);
+
+  function clearBlurTimer() {
+    if (blurTimerRef.current) {
+      clearTimeout(blurTimerRef.current);
+      blurTimerRef.current = null;
+    }
+  }
+
+  function onTaFocus() {
+    clearBlurTimer();
+    setFocused(true);
+  }
+
+  /**
+   * Defer blur so Write/Preview tab mousedown/click runs first.
+   * Otherwise empty composers collapse to the ghost before setTab('preview').
+   */
+  function onTaBlur() {
+    clearBlurTimer();
+    blurTimerRef.current = setTimeout(() => {
+      blurTimerRef.current = null;
+      const root = rootRef.current;
+      const active = typeof document !== 'undefined' ? document.activeElement : null;
+      if (root && active && root.contains(active)) {
+        // Focus moved to a control inside the composer (tabs, etc.)
+        return;
+      }
+      setFocused(false);
+    }, 0);
+  }
+
+  function selectTab(next: 'write' | 'preview') {
+    clearBlurTimer();
+    setTab(next);
+    setFocused(true);
+    if (next === 'write') {
+      requestAnimationFrame(() => taRef.current?.focus());
+    }
+  }
 
   async function handleFiles(fileList: FileList | File[] | null) {
     if (!fileList || !onUploadFile || disabled) return;
@@ -101,7 +150,7 @@ export function MarkdownComposer({
 
   if (!open && !forceOpen) {
     return (
-      <div className={`prp-mdc ${className}`.trim()}>
+      <div className={`prp-mdc ${className}`.trim()} ref={rootRef}>
         <button
           type="button"
           className="prp-mdc__ghost"
@@ -120,6 +169,7 @@ export function MarkdownComposer({
 
   return (
     <div
+      ref={rootRef}
       className={`prp-mdc prp-mdc--open ${dragging ? 'prp-mdc--drag' : ''} ${className}`.trim()}
       onDragEnter={(e) => {
         e.preventDefault();
@@ -137,7 +187,9 @@ export function MarkdownComposer({
           <button
             type="button"
             className={tab === 'write' ? 'prp-tab prp-tab--active' : 'prp-tab'}
-            onClick={() => setTab('write')}
+            // preventDefault keeps textarea focus until setTab runs (avoids ghost collapse)
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => selectTab('write')}
             disabled={disabled}
           >
             Write
@@ -145,7 +197,8 @@ export function MarkdownComposer({
           <button
             type="button"
             className={tab === 'preview' ? 'prp-tab prp-tab--active' : 'prp-tab'}
-            onClick={() => setTab('preview')}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => selectTab('preview')}
             disabled={disabled}
           >
             Preview
@@ -160,13 +213,20 @@ export function MarkdownComposer({
           placeholder={placeholder}
           value={value || ''}
           disabled={disabled}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
+          onFocus={onTaFocus}
+          onBlur={onTaBlur}
           onChange={(e) => onChange?.(e.target.value)}
           onPaste={onPaste}
         />
       ) : (
-        <div className="prp-mdc__preview">
+        <div
+          className="prp-mdc__preview"
+          tabIndex={-1}
+          onMouseDown={() => {
+            clearBlurTimer();
+            setFocused(true);
+          }}
+        >
           <MarkdownView source={value || '_Nothing to preview_'} linkCtx={linkCtx} />
         </div>
       )}

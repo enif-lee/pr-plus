@@ -1,5 +1,12 @@
 /* pr+ modal — GitHub-themed, shadcn-inspired, theme-aware (not forced dark) */
 
+/* Document scroll lock while modal open (see scroll-lock.ts) */
+html.prp-scroll-lock,
+html.prp-scroll-lock body {
+  overflow: hidden !important;
+  overscroll-behavior: none;
+}
+
 .prp-overlay {
   --prp-fg: var(--fgColor-default, #1f2328);
   --prp-fg-muted: var(--fgColor-muted, #656d76);
@@ -53,6 +60,9 @@
   /* Overlay host is always transparent; only .prp-backdrop dims (or not) */
   background: transparent;
   color-scheme: light;
+  /* Do not chain wheel/touch scroll to the page under the overlay */
+  overscroll-behavior: none;
+  overflow: hidden;
 }
 
 .prp-overlay.prp-theme-dark,
@@ -116,6 +126,7 @@
   border-radius: var(--prp-radius);
   box-shadow: var(--prp-shadow);
   overflow: hidden;
+  overscroll-behavior: contain;
   color: var(--prp-fg);
   transition:
     width 280ms cubic-bezier(0.22, 1, 0.36, 1),
@@ -180,6 +191,8 @@
   /* Overlay host stays clear; dim lives on .prp-backdrop only */
   background: transparent;
   color-scheme: inherit;
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 .prp-overlay.prp-shell--sheet .prp-backdrop {
@@ -365,16 +378,50 @@
   }
 }
 
-/* Header — GitHub PR title bar */
-.prp-header {
+/* Header — same component for modal + side sheet (two rows).
+   Container queries use the panel (modal/sheet) width, not the window. */
+.prp-header,
+.prp-header--unified {
+  --prp-header-compact-max: 760px; /* keep in sync with HEADER_COMPACT_MAX_PX */
   display: flex;
-  gap: var(--prp-space-3);
-  align-items: flex-start;
-  justify-content: space-between;
+  flex-direction: column;
+  gap: 10px;
   padding: var(--prp-pad-header);
   border-bottom: 1px solid var(--prp-border-muted);
   background: var(--prp-bg-muted);
   flex: 0 0 auto;
+  container-type: inline-size;
+  container-name: prp-header;
+}
+
+.prp-header__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  min-width: 0;
+  width: 100%;
+}
+
+.prp-header__row--primary {
+  /* # · title · status · checks · stats */
+  row-gap: 8px;
+}
+
+.prp-header__row--secondary {
+  justify-content: space-between;
+  gap: 10px 14px;
+}
+
+.prp-header__branch-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  min-width: 0;
+  flex: 1 1 auto;
+  color: var(--prp-fg-muted);
+  font-size: 13px;
 }
 
 .prp-header__main {
@@ -387,6 +434,11 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 10px;
+}
+
+.prp-pen-icon {
+  display: block;
+  flex-shrink: 0;
 }
 
 .prp-header__number {
@@ -458,7 +510,6 @@
   display: flex;
   flex-wrap: wrap;
   gap: 10px 14px;
-  margin-top: 10px;
   color: var(--prp-fg-muted);
   font-size: 13px;
   align-items: center;
@@ -482,15 +533,116 @@
   border-radius: 999px;
   border: 1px solid var(--prp-border-muted);
   background: var(--prp-bg);
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 .prp-header__actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 8px;
   flex: 0 0 auto;
   align-items: center;
   justify-content: flex-end;
+  margin-left: auto;
+  min-width: 0;
+}
+
+.prp-header__actions-inline {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.prp-header__actions-more {
+  display: none;
+  position: relative;
+}
+
+.prp-header__more-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--prp-border);
+  border-radius: 8px;
+  background: var(--prp-bg);
+  color: var(--prp-fg);
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.prp-header__more-btn:hover,
+.prp-header__more-btn:focus-visible {
+  background: var(--prp-bg-muted);
+}
+
+.prp-header__more-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 50;
+  min-width: 200px;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  border: 1px solid var(--prp-border);
+  border-radius: 10px;
+  background: var(--prp-bg);
+  box-shadow: 0 12px 32px rgba(1, 4, 9, 0.16);
+}
+
+.prp-header__more-item {
+  appearance: none;
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  padding: 8px 12px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  text-decoration: none;
+  box-sizing: border-box;
+}
+
+.prp-header__more-item:hover,
+.prp-header__more-item:focus-visible {
+  background: var(--prp-bg-muted);
+}
+
+.prp-header__more-item--danger {
+  color: var(--prp-danger);
+}
+
+/*
+ * Compact actions when the *header/panel* is narrow (≈700–800px wrap point),
+ * not the browser window. Side sheet at 56vw on a large display can stay wide
+ * enough for inline actions; a narrow sheet or small modal collapses to ⋯.
+ */
+@container prp-header (max-width: 760px) {
+  .prp-header__actions-inline {
+    display: none !important;
+  }
+  .prp-header__actions-more {
+    display: inline-flex;
+  }
+  .prp-header__row--secondary {
+    flex-wrap: nowrap;
+  }
+  .prp-header__branch-meta {
+    min-width: 0;
+    overflow: hidden;
+  }
 }
 
 .prp-label {
@@ -514,13 +666,6 @@
   border: 1px solid var(--prp-border);
   background: var(--prp-bg);
   font-size: 12px;
-}
-
-.prp-theme-chip {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  opacity: 0.7;
 }
 
 /* shadcn-like buttons */
@@ -612,6 +757,8 @@
 .prp-badge {
   display: inline-flex;
   align-items: center;
+  max-width: min(160px, 100%);
+  min-width: 0;
   height: 20px;
   padding: 0 8px;
   border-radius: 999px;
@@ -621,6 +768,20 @@
   background: var(--prp-bg-muted);
   color: var(--prp-fg-muted);
   text-transform: none;
+  overflow: hidden;
+  white-space: nowrap;
+  vertical-align: middle;
+  /* ellipsis needs a block-like text box; apply on the badge itself */
+  text-overflow: ellipsis;
+}
+
+/* When badge wraps icons + text, truncate the text child */
+.prp-badge > span,
+.prp-badge > .prp-badge__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .prp-badge--ok,
@@ -673,53 +834,164 @@
   background: color-mix(in srgb, var(--prp-danger) 8%, var(--prp-bg));
 }
 
-/* Soft revalidate: thin top-edge progress overlay (no layout shift) */
+/* Soft revalidate / partial load / find: top-edge progress overlay */
 .prp-top-loading-bar {
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
-  height: 2px;
-  z-index: 50;
+  height: 3px;
+  z-index: 80;
   pointer-events: none;
   overflow: hidden;
   border-radius: inherit;
+  opacity: 1;
+  transform: translateY(0);
+  /* Transition for hide — more reliable than restarting keyframes on class toggle */
+  transition:
+    opacity 260ms ease,
+    transform 260ms ease;
+  animation: prp-top-loading-in 180ms ease-out both;
 }
+.prp-top-loading-bar--leaving {
+  opacity: 0;
+  transform: translateY(-2px);
+  /* Keep shimmer from fighting the fade-out */
+  animation: none;
+}
+.prp-top-loading-bar--leaving::after {
+  animation: none !important;
+  opacity: 0.5;
+}
+@keyframes prp-top-loading-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Human-readable load stage under the bar (initial + progressive threads) */
+.prp-load-stage {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 6px 16px;
+  font-size: 12px;
+  color: var(--prp-fg-muted);
+  background: color-mix(in srgb, var(--prp-accent, #0969da) 6%, var(--prp-bg));
+  border-bottom: 1px solid var(--prp-border-muted);
+  overflow: hidden;
+  opacity: 1;
+  max-height: 40px;
+  transition:
+    opacity 260ms ease,
+    max-height 260ms ease,
+    padding 260ms ease,
+    border-color 260ms ease;
+  animation: prp-load-stage-in 220ms ease-out both;
+}
+.prp-load-stage--busy {
+  color: var(--prp-fg);
+}
+.prp-load-stage--leaving {
+  opacity: 0;
+  max-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  border-bottom-color: transparent;
+  pointer-events: none;
+  animation: none;
+}
+.prp-load-stage__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prp-load-stage__spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid color-mix(in srgb, var(--prp-accent, #0969da) 30%, transparent);
+  border-top-color: var(--prp-accent, #0969da);
+  border-radius: 50%;
+  flex-shrink: 0;
+  animation: prp-load-stage-spin 0.7s linear infinite;
+}
+@keyframes prp-load-stage-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes prp-load-stage-in {
+  from {
+    opacity: 0;
+    max-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    border-bottom-color: transparent;
+  }
+  to {
+    opacity: 1;
+    max-height: 40px;
+    padding-top: 6px;
+    padding-bottom: 6px;
+  }
+}
+
 .prp-top-loading-bar::before {
   content: '';
   position: absolute;
   inset: 0;
-  background: color-mix(in srgb, var(--prp-accent, #0969da) 35%, transparent);
+  background: color-mix(in srgb, var(--prp-accent, #0969da) 40%, transparent);
 }
 .prp-top-loading-bar::after {
   content: '';
   position: absolute;
   top: 0;
   bottom: 0;
-  width: 40%;
+  width: 42%;
   border-radius: 0 2px 2px 0;
   background: linear-gradient(
     90deg,
     transparent 0%,
-    var(--prp-accent, #0969da) 35%,
-    var(--prp-accent-bg, #1f6feb) 70%,
+    var(--prp-accent, #0969da) 30%,
+    var(--prp-accent-bg, #1f6feb) 65%,
     transparent 100%
   );
-  animation: prp-top-loading-slide 1.05s ease-in-out infinite;
+  animation: prp-top-loading-slide 0.95s ease-in-out infinite;
+  will-change: transform;
 }
 @keyframes prp-top-loading-slide {
   0% {
-    transform: translateX(-120%);
+    transform: translateX(-130%);
   }
   100% {
-    transform: translateX(320%);
+    transform: translateX(280%);
   }
 }
 @media (prefers-reduced-motion: reduce) {
+  .prp-top-loading-bar,
+  .prp-load-stage {
+    animation: none;
+    transition: none;
+  }
+  .prp-top-loading-bar--leaving,
+  .prp-load-stage--leaving {
+    opacity: 0;
+  }
+  .prp-load-stage__spinner {
+    animation: none;
+    opacity: 0.7;
+  }
   .prp-top-loading-bar::after {
     animation: none;
     width: 100%;
-    opacity: 0.85;
+    opacity: 0.9;
     background: var(--prp-accent, #0969da);
     transform: none;
   }
@@ -930,7 +1202,7 @@
 /* Conversation-shaped skeleton (main + aside cards) */
 .prp-skeleton-conversation {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
+  grid-template-columns: minmax(0, 1fr) 280px;
   gap: var(--prp-gap-stack);
   width: 100%;
   min-height: 0;
@@ -1075,7 +1347,7 @@
 
 .prp-skeleton__grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 300px;
+  grid-template-columns: minmax(0, 1fr) 260px;
   gap: var(--prp-gap-stack);
 }
 
@@ -1091,13 +1363,15 @@
 /* Conversation layout — GitHub PR overview */
 .prp-conversation {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
+  grid-template-columns: minmax(0, 1fr) 280px;
   gap: var(--prp-gap-stack);
   overflow: auto;
   flex: 1 1 auto;
   min-height: 0;
   padding: var(--prp-pad-body);
   background: var(--prp-bg);
+  /* Keep wheel scroll inside the panel (no page scroll under side sheet) */
+  overscroll-behavior: contain;
 }
 
 @media (max-width: 840px) {
@@ -1166,10 +1440,11 @@
   max-height: none;
 }
 
-/* Conversation feed: stacked cards (no outer rail — GitHub issue conversation style) */
+/* Timeline items sit as top-level cards in .prp-conversation__main (no outer
+   “Conversation” wrapper). Feed list wrappers kept for residual / tests. */
 .prp-conversation-feed {
   list-style: none;
-  margin: 0 0 var(--prp-space-4);
+  margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
@@ -1196,6 +1471,22 @@
   align-items: center;
   margin-bottom: 8px;
   font-size: 13px;
+}
+
+/* Top-level timeline cards (comment / review / thread / reply) */
+.prp-card--timeline .prp-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.prp-card--timeline-reply {
+  border-left: 3px solid var(--prp-border-muted);
+}
+
+.prp-conversation-empty {
+  margin: 0;
+  padding: 8px 2px;
 }
 
 /* Legacy class aliases used by commits aside / residual markup */
@@ -1492,15 +1783,20 @@
   padding-left: 1.4em;
 }
 
+/* Inline codespan — light chip (not a full code box) */
 .prp-md code {
   font-family: var(--prp-mono);
   font-size: 0.9em;
-  padding: 0.1em 0.35em;
+  padding: 0.12em 0.35em;
   border-radius: 4px;
-  background: var(--prp-bg-muted);
-  border: 1px solid var(--prp-border-muted);
+  background: color-mix(in srgb, var(--prp-fg-muted) 12%, var(--prp-bg));
+  border: 0;
+  display: inline;
+  white-space: break-spaces;
+  word-break: break-word;
 }
 
+/* Fenced / indented block code — the “box” chrome */
 .prp-md pre {
   overflow: auto;
   padding: 10px 12px;
@@ -1508,12 +1804,16 @@
   background: var(--prp-bg-muted);
   border: 1px solid var(--prp-border-muted);
   margin: 0.5em 0;
+  display: block;
 }
 
 .prp-md pre code {
   border: 0;
   padding: 0;
   background: transparent;
+  display: inline;
+  white-space: pre;
+  word-break: normal;
 }
 
 .prp-md a {
@@ -1541,10 +1841,13 @@
 }
 
 /* Diff layout — fills modal shell (viewport-sized)
-   columns: [file nav | resizer | pane] — widths set inline via fileNavGridTemplate */
+   flex row: [file nav | resizer | pane]; open/close animates nav width */
 .prp-diff-layout {
-  display: grid;
-  grid-template-columns: var(--prp-file-nav-width, 260px) 4px minmax(0, 1fr);
+  --prp-file-nav-width: 260px;
+  --prp-file-nav-resizer: 4px;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
   flex: 1 1 auto;
   min-height: 0;
   width: 100%;
@@ -1553,13 +1856,14 @@
 }
 
 .prp-diff-layout--nav-collapsed {
-  /* rail only; resizer column collapses to 0 via inline template */
+  /* width vars driven inline to 0; transitions live on children */
 }
 
 .prp-file-nav-resizer {
   position: relative;
   z-index: 2;
-  width: 100%;
+  flex: 0 0 var(--prp-file-nav-resizer, 4px);
+  width: var(--prp-file-nav-resizer, 4px);
   min-width: 0;
   cursor: col-resize;
   touch-action: none;
@@ -1568,6 +1872,11 @@
   padding: 0;
   margin: 0;
   outline: none;
+  opacity: 1;
+  transition:
+    flex-basis 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    width 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 160ms ease;
 }
 .prp-file-nav-resizer::after {
   content: '';
@@ -1578,6 +1887,7 @@
   width: 1px;
   transform: translateX(-50%);
   background: var(--prp-border-muted);
+  transition: opacity 160ms ease;
 }
 .prp-file-nav-resizer:hover::after,
 .prp-file-nav-resizer:focus-visible::after {
@@ -1587,12 +1897,15 @@
 .prp-file-nav-resizer[data-collapsed='1'] {
   cursor: default;
   pointer-events: none;
+  opacity: 0;
 }
 .prp-file-nav-resizer[data-collapsed='1']::after {
-  display: none;
+  opacity: 0;
 }
 
 .prp-filetree {
+  flex: 0 0 var(--prp-file-nav-width, 260px);
+  width: var(--prp-file-nav-width, 260px);
   border-right: 1px solid var(--prp-border-muted);
   background: var(--prp-bg-muted);
   display: flex;
@@ -1600,12 +1913,32 @@
   min-height: 0;
   min-width: 0;
   overflow: hidden;
+  opacity: 1;
+  transition:
+    flex-basis 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    width 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 160ms ease,
+    border-color 160ms ease;
+}
+
+.prp-filetree--nav-collapsed,
+.prp-diff-layout--nav-collapsed .prp-filetree {
+  opacity: 0;
+  border-right-color: transparent;
+  pointer-events: none;
 }
 
 .prp-filetree--collapsed {
   border-right: 1px solid var(--prp-border-muted);
   align-items: center;
   padding: 8px 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .prp-filetree,
+  .prp-file-nav-resizer {
+    transition: none;
+  }
 }
 
 .prp-filetree__rail-toggle,
@@ -1635,36 +1968,21 @@
   outline: none;
 }
 
-.prp-filetree__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 10px 10px 10px 14px;
-  font-size: 12px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: var(--prp-fg-muted);
-  border-bottom: 1px solid var(--prp-border-muted);
-  flex: 0 0 auto;
-}
-
-.prp-filetree__head-label {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .prp-filetree__search {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
   padding: 8px 10px;
   border-bottom: 1px solid var(--prp-border-muted);
   flex: 0 0 auto;
+  min-width: 0;
 }
 
 .prp-filetree__search-input {
+  display: block;
   width: 100%;
+  min-width: 0;
   box-sizing: border-box;
   border: 1px solid var(--prp-border);
   border-radius: 6px;
@@ -1673,6 +1991,50 @@
   font-size: 12px;
   background: var(--prp-bg);
   color: var(--prp-fg);
+}
+
+/* Extension tags always sit under the name filter (never inline beside it) */
+.prp-filetree__exts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+}
+
+.prp-filetree__ext {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 2px 6px;
+  border: 1px solid var(--prp-border);
+  border-radius: 999px;
+  background: var(--prp-bg);
+  color: var(--prp-fg-muted);
+  font: inherit;
+  font-size: 10px;
+  font-family: var(--prp-mono);
+  line-height: 1.3;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.prp-filetree__ext:hover {
+  border-color: var(--prp-accent);
+  color: var(--prp-accent);
+}
+
+.prp-filetree__ext--on,
+.prp-filetree__ext[aria-pressed='true'] {
+  border-color: color-mix(in srgb, var(--prp-accent) 55%, var(--prp-border));
+  background: color-mix(in srgb, var(--prp-accent) 12%, var(--prp-bg));
+  color: var(--prp-accent);
+  font-weight: 600;
 }
 
 .prp-filetree__viewed {
@@ -1792,6 +2154,7 @@
 .prp-diff-pane {
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
   height: 100%;
@@ -1830,6 +2193,7 @@
   line-height: 22px;
   /* Bottom padding so last lines/comments clear the fold */
   scrollbar-gutter: stable;
+  overscroll-behavior: contain;
 }
 
 .prp-vlist__spacer {
@@ -2149,6 +2513,59 @@
   align-items: center;
   gap: 10px;
   margin: 10px 0;
+}
+
+/* GitHub-style dual-window fold: N hidden items · Load more… */
+.prp-timeline-gap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 14px 0;
+  padding: 0 4px;
+}
+
+.prp-timeline-gap__line {
+  flex: 1 1 auto;
+  height: 0;
+  border-top: 1px solid var(--prp-border-muted, var(--prp-border));
+  min-width: 24px;
+}
+
+.prp-timeline-gap__body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+  text-align: center;
+}
+
+.prp-timeline-gap__count {
+  font-size: 12px;
+  color: var(--prp-fg-muted);
+  line-height: 1.3;
+}
+
+.prp-timeline-gap__load {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--prp-accent);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 4px;
+  line-height: 1.3;
+}
+
+.prp-timeline-gap__load:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.prp-timeline-gap__load:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .prp-leave-review-hint {
@@ -2516,6 +2933,11 @@
   outline: 2px solid var(--prp-accent);
   outline-offset: -2px;
   z-index: 1;
+  background: color-mix(in srgb, var(--prp-accent, #0969da) 10%, var(--prp-bg));
+}
+
+.prp-vline--hit.prp-vline--search-match {
+  background: color-mix(in srgb, #ff9f1a 14%, var(--prp-bg));
 }
 
 .prp-vline--comment {
@@ -2545,6 +2967,7 @@
 
 /* Search */
 .prp-search {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -2554,8 +2977,13 @@
   flex: 0 0 auto;
 }
 
+.prp-search--busy {
+  background: color-mix(in srgb, var(--prp-accent, #0969da) 5%, var(--prp-bg));
+}
+
 .prp-search__input {
   flex: 1 1 auto;
+  min-width: 0;
   border: 1px solid var(--prp-border);
   border-radius: 6px;
   padding: 5px 10px;
@@ -2565,12 +2993,163 @@
   color: var(--prp-fg);
 }
 
+.prp-search__load-comments {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 .prp-search__count {
   font-variant-numeric: tabular-nums;
   color: var(--prp-fg-muted);
   font-size: 11px;
   min-width: 40px;
   text-align: center;
+}
+
+.prp-search__loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  min-width: 96px;
+  color: var(--prp-fg-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.prp-search__spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid color-mix(in srgb, var(--prp-accent, #0969da) 28%, transparent);
+  border-top-color: var(--prp-accent, #0969da);
+  border-radius: 50%;
+  flex-shrink: 0;
+  animation: prp-search-spin 0.7s linear infinite;
+}
+
+.prp-search__loading-label {
+  white-space: nowrap;
+}
+
+.prp-search__loading-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  overflow: hidden;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--prp-accent, #0969da) 18%, transparent);
+}
+
+.prp-search__loading-bar::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 36%;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--prp-accent, #0969da) 40%,
+    var(--prp-accent-bg, #1f6feb) 70%,
+    transparent 100%
+  );
+  animation: prp-search-loading-slide 1s ease-in-out infinite;
+}
+
+@keyframes prp-search-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes prp-search-loading-slide {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+
+/* In-diff search match marks */
+.prp-search-mark {
+  background: color-mix(in srgb, #e4b300 55%, transparent);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+/* Conversation find chrome */
+.prp-card--search-match {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #eab308 55%, transparent);
+}
+.prp-card--search-current {
+  outline: 2px solid var(--prp-accent, #0969da);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #fbbf24 35%, transparent);
+}
+.prp-review-thread__item--search-match {
+  background: color-mix(in srgb, #eab308 10%, transparent);
+  border-radius: 6px;
+}
+.prp-review-thread__item--search-current {
+  outline: 2px solid var(--prp-accent, #0969da);
+  outline-offset: -1px;
+  border-radius: 6px;
+  background: color-mix(in srgb, #ff9f1a 12%, transparent);
+}
+.prp-md--search-hit {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.prp-search-mark--current {
+  background: color-mix(in srgb, #ff9f1a 72%, #fff 10%);
+  outline: 1px solid color-mix(in srgb, #d97706 70%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, #fbbf24 35%, transparent);
+  font-weight: 600;
+}
+
+.prp-theme-dark .prp-search-mark,
+[data-color-mode='dark'] .prp-search-mark {
+  background: color-mix(in srgb, #eab308 42%, transparent);
+  color: var(--prp-fg);
+}
+
+.prp-theme-dark .prp-search-mark--current,
+[data-color-mode='dark'] .prp-search-mark--current {
+  background: color-mix(in srgb, #f59e0b 55%, transparent);
+  outline-color: #fbbf24;
+  box-shadow: 0 0 0 2px color-mix(in srgb, #f59e0b 30%, transparent);
+}
+
+.prp-vline--search-match {
+  background: color-mix(in srgb, #eab308 10%, var(--prp-bg));
+}
+
+.prp-vline--search-match.prp-vline--add {
+  background: color-mix(in srgb, #eab308 12%, var(--prp-add-bg));
+}
+
+.prp-vline--search-match.prp-vline--del {
+  background: color-mix(in srgb, #eab308 12%, var(--prp-del-bg));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .prp-search__spinner {
+    animation: none;
+    opacity: 0.75;
+  }
+  .prp-search__loading-bar::after {
+    animation: none;
+    width: 100%;
+    opacity: 0.85;
+    transform: none;
+  }
 }
 
 /* highlight.js — light + dark via GitHub theme vars */
@@ -2880,8 +3459,9 @@
 .prp-people-chip {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   padding: 4px 0;
+  min-width: 0;
 }
 
 .prp-people-chip__name {
@@ -2889,6 +3469,24 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prp-people-chip__name a,
+.prp-people-chip__name .prp-user-link {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.prp-people-chip__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 .prp-avatar {
@@ -2951,9 +3549,10 @@
 }
 
 .prp-composer--review {
-  margin-top: 18px;
-  padding-top: 14px;
-  border-top: 1px solid var(--prp-border-muted);
+  /* No top splitter — Card already frames the composer */
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
 }
 
 .prp-composer__label {
@@ -2966,6 +3565,82 @@
 
 .prp-composer__row--review {
   gap: 10px;
+  align-items: center;
+}
+
+.prp-composer__pending-empty {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* Composer card: no double chrome under the “Comment” title */
+.prp-card--composer .prp-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.prp-card--composer .prp-composer {
+  margin-top: 0;
+}
+
+.prp-card--composer .prp-card__title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Comment | Review mode tabs in composer card header */
+.prp-composer-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--prp-bg-muted);
+  border: 1px solid var(--prp-border-muted);
+}
+
+.prp-composer-mode__tab {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 5px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--prp-fg-muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.prp-composer-mode__tab:hover {
+  color: var(--prp-fg);
+}
+
+.prp-composer-mode__tab--active {
+  background: var(--prp-bg);
+  color: var(--prp-fg);
+  box-shadow: 0 1px 2px rgba(1, 4, 9, 0.08);
+}
+
+.prp-composer-mode__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--prp-warn) 22%, var(--prp-bg));
+  color: var(--prp-warn);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
 }
 
 /* Polished inline review threads on diff */
@@ -3077,6 +3752,14 @@
   padding-bottom: 8px;
 }
 
+.prp-review-thread__item--pending .prp-review-thread__content {
+  opacity: 0.92;
+}
+.prp-review-thread__item--pending .prp-md {
+  border-left: 2px solid color-mix(in srgb, var(--prp-warn) 55%, var(--prp-border));
+  padding-left: 8px;
+}
+
 .prp-review-thread__avatar {
   justify-self: center;
   z-index: 1;
@@ -3132,11 +3815,11 @@ a.prp-label:hover {
   filter: brightness(0.97);
 }
 
-/* Stacked PR strip (top of modal) */
+/* Stacked PR strip (top of modal) — single row + horizontal scroll when long */
 .prp-stack-strip {
   flex: 0 0 auto;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 6px 4px;
   padding: 8px 16px;
@@ -3144,18 +3827,37 @@ a.prp-label:hover {
   background: var(--prp-bg-muted);
   font-size: 12px;
   overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  max-width: 100%;
+  min-width: 0;
+}
+.prp-stack-strip::-webkit-scrollbar {
+  height: 6px;
+}
+.prp-stack-strip::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--prp-fg-muted) 35%, transparent);
+  border-radius: 999px;
 }
 .prp-stack-strip__label {
   color: var(--prp-fg-muted);
   font-weight: 600;
   margin-right: 4px;
   flex: 0 0 auto;
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--prp-bg-muted);
+  padding-right: 4px;
 }
 .prp-stack-strip__item {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  max-width: 220px;
+  max-width: 180px;
+  min-width: 0;
+  flex: 0 0 auto;
   padding: 4px 10px;
   border-radius: 999px;
   border: 1px solid var(--prp-border);
@@ -3165,7 +3867,6 @@ a.prp-label:hover {
   font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 .prp-stack-strip__item:hover {
   border-color: var(--prp-accent);
@@ -3185,9 +3886,262 @@ a.prp-label:hover {
 .prp-stack-strip__num {
   font-family: var(--prp-mono);
   font-size: 11px;
+  flex: 0 0 auto;
+}
+/* Title truncates with ellipsis; full title remains on chip title= tooltip */
+.prp-stack-strip__title {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prp-stack-strip__item--fork {
+  cursor: pointer;
+  padding-right: 8px;
+}
+.prp-stack-strip__item--picker-open {
+  border-color: var(--prp-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--prp-accent) 25%, transparent);
+  z-index: 2;
+  position: relative;
+}
+.prp-stack-strip__fork {
+  font-size: 9px;
+  color: var(--prp-fg-muted);
+  margin-left: 2px;
+  opacity: 0.85;
+  flex: 0 0 auto;
+}
+.prp-stack-strip__item--fork:hover .prp-stack-strip__fork,
+.prp-stack-strip__item--fork:focus-visible .prp-stack-strip__fork,
+.prp-stack-strip__item--picker-open .prp-stack-strip__fork {
+  color: var(--prp-accent);
+  opacity: 1;
+}
+/* Clickable chips (including current) */
+button.prp-stack-strip__item {
+  font: inherit;
+  cursor: pointer;
+  appearance: none;
+}
+/* Floating path picker sits above modal chrome, aligned to the level chip */
+.prp-overlay .prp-sselect-panel--popover {
+  z-index: 120000;
+  pointer-events: auto;
+}
+.prp-overlay .prp-sselect-backdrop--soft {
+  z-index: 119990;
+  pointer-events: none;
 }
 
 /* Diff chrome (checks + labels) */
+/* Unified Diff top toolbar */
+.prp-diff-toolbar {
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--prp-border-muted);
+  background: var(--prp-bg-muted);
+  padding: 8px 12px;
+}
+
+.prp-diff-toolbar__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  min-width: 0;
+}
+
+.prp-diff-toolbar__nav-toggle {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--prp-border);
+  border-radius: 8px;
+  background: var(--prp-bg);
+  color: var(--prp-fg);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.prp-diff-toolbar__nav-toggle:hover {
+  background: var(--prp-bg-muted);
+}
+
+.prp-diff-toolbar__commits {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.prp-diff-toolbar__commit-btn,
+.prp-commit-filter__trigger {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  /* Hard cap — long commit messages must not stretch the toolbar */
+  max-width: 220px;
+  width: auto;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--prp-border);
+  border-radius: 8px;
+  background: var(--prp-bg);
+  color: var(--prp-fg);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Grouped review-comment navigator */
+.prp-btn-group {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--prp-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--prp-bg);
+  flex-shrink: 0;
+}
+.prp-btn-group__meta {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 8px;
+  font-size: 12px;
+  border-right: 1px solid var(--prp-border);
+  background: var(--prp-bg-muted);
+}
+.prp-btn-group__btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  min-width: 28px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+.prp-btn-group__btn + .prp-btn-group__btn {
+  border-left: 1px solid var(--prp-border);
+}
+.prp-btn-group__btn:hover,
+.prp-btn-group__btn:focus-visible {
+  background: var(--prp-bg-muted);
+}
+
+.prp-diff-toolbar__commit-btn:disabled,
+.prp-commit-filter__trigger:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.prp-diff-toolbar__chevron {
+  opacity: 0.6;
+  flex-shrink: 0;
+}
+
+.prp-diff-toolbar__stats {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.prp-diff-toolbar__pending {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin-left: auto;
+}
+.prp-diff-toolbar__pending-label {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.prp-diff-toolbar__comments {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.prp-diff-toolbar__range-hint,
+.prp-commit-filter__status {
+  font-size: 11px;
+}
+
+/* Thread box: nested replies + reply composer inside one card */
+.prp-card--timeline-review-thread .prp-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding-bottom: 0;
+}
+
+/* Thin file:line header for file-anchored review threads */
+.prp-review-thread__file-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -2px 0 8px;
+  padding: 4px 2px 8px;
+  border-bottom: 1px solid var(--prp-border-muted);
+  min-width: 0;
+}
+
+.prp-review-thread__file-loc {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.3;
+  color: var(--prp-fg-muted);
+  opacity: 0.92;
+}
+
+.prp-review-thread__file-side {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.prp-review-thread__file-header .prp-badge {
+  flex-shrink: 0;
+  font-size: 10px;
+  padding: 1px 6px;
+}
+
+.prp-conversation-thread {
+  margin: 0;
+  padding: 4px 0 0;
+}
+.prp-conversation-thread__composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 -2px 0;
+  padding: 12px 2px 14px;
+  border-top: 1px solid var(--prp-border-muted);
+}
+
 .prp-diff-chrome {
   flex: 0 0 auto;
   display: flex;
@@ -3354,6 +4308,91 @@ a.prp-label:hover {
 .prp-sselect-item__avatar {
   flex-shrink: 0;
 }
+/* Commit multi-select: fixed panel width so long messages don't grow the popover */
+.prp-sselect-panel--multi {
+  max-width: min(320px, calc(100vw - 24px));
+  width: min(320px, calc(100vw - 24px));
+}
+.prp-sselect-panel--multi .prp-sselect-item__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 240px;
+}
+
+/* Commit multi-select: fixed panel width so long messages don't grow the popover */
+.prp-sselect-panel--multi {
+  max-width: min(320px, calc(100vw - 24px));
+  width: min(320px, calc(100vw - 24px));
+}
+.prp-sselect-panel--multi .prp-sselect-item__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 240px;
+}
+
+.prp-sselect-check {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  border: 1.5px solid var(--prp-border);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  line-height: 1;
+  color: #fff;
+  background: var(--prp-bg);
+  box-sizing: border-box;
+}
+.prp-sselect-check--on {
+  background: var(--prp-accent-bg);
+  border-color: var(--prp-accent-bg);
+}
+.prp-sselect-item--selected {
+  background: color-mix(in srgb, var(--prp-accent) 10%, var(--prp-bg));
+}
+.prp-sselect-selected {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 0 8px;
+  max-height: 72px;
+  overflow: auto;
+}
+.prp-sselect-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 2px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--prp-border);
+  background: var(--prp-bg-muted);
+  color: var(--prp-fg);
+  font-size: 11px;
+  cursor: pointer;
+}
+.prp-sselect-chip__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prp-sselect-chip__x {
+  color: var(--prp-fg-muted);
+  font-size: 12px;
+}
+.prp-sselect-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 8px;
+  margin-top: 4px;
+  border-top: 1px solid var(--prp-border-muted);
+}
 .prp-sselect-empty {
   padding: 12px 10px;
   font-size: 12px;
@@ -3486,6 +4525,60 @@ a.prp-branch-tag__text:focus-visible {
   text-decoration: underline;
   outline: none;
 }
+.prp-branch-tag__copy-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--prp-fg-muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+  opacity: 0.55;
+}
+
+.prp-branch-tag:hover .prp-branch-tag__copy-btn,
+.prp-branch-tag__copy-btn:focus-visible,
+.prp-branch-tag__copy-btn--done {
+  opacity: 1;
+}
+
+.prp-branch-tag__copy-btn:hover:not(:disabled),
+.prp-branch-tag__copy-btn:focus-visible:not(:disabled) {
+  background: var(--prp-bg-muted);
+  color: var(--prp-fg);
+}
+
+.prp-branch-tag__copy-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.prp-branch-tag__copy-btn--done {
+  color: var(--prp-ok);
+}
+
+.prp-people-chip__rerequest {
+  /* icon-sized control; inherits .prp-icon-btn */
+  width: 22px;
+  height: 22px;
+  font-size: 14px;
+}
+
+.prp-people-chip__rerequest-icon {
+  display: block;
+  line-height: 1;
+  transform: scaleX(-1); /* clockwise refresh feel */
+}
+
 .prp-branch-tag__edit-btn {
   appearance: none;
   display: inline-flex;
@@ -3594,16 +4687,33 @@ a.prp-branch-tag__text:focus-visible {
   font-size: 11px;
 }
 
-/* ── Merge box (conversation main, above comment) ── */
+/* Milestone aside: status on first line, set/change action below */
+.prp-milestone {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+.prp-milestone__empty {
+  display: block;
+  line-height: 1.4;
+}
+.prp-milestone__action {
+  display: inline-block;
+  margin-top: 0;
+}
+
+/* ── Merge box (GitHub-like: status + primary merge + secondary actions) ── */
 .prp-merge-box {
   margin: 12px 0 4px;
-  padding: 14px 16px;
+  padding: 16px 18px;
   border-radius: 12px;
   border: 1px solid color-mix(in srgb, var(--prp-ok) 28%, var(--prp-border));
   background: color-mix(in srgb, var(--prp-ok) 8%, var(--prp-bg));
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 14px;
   box-shadow: 0 1px 0 color-mix(in srgb, var(--prp-ok) 12%, transparent);
 }
 .prp-merge-box--ok {
@@ -3614,54 +4724,180 @@ a.prp-branch-tag__text:focus-visible {
   border-color: color-mix(in srgb, var(--prp-warn) 35%, var(--prp-border));
   box-shadow: 0 1px 0 color-mix(in srgb, var(--prp-warn) 12%, transparent);
 }
+.prp-merge-box--danger {
+  background: color-mix(in srgb, var(--prp-danger) 8%, var(--prp-bg));
+  border-color: color-mix(in srgb, var(--prp-danger) 32%, var(--prp-border));
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--prp-danger) 10%, transparent);
+}
 .prp-merge-box--muted {
   background: var(--prp-bg-muted);
   border-color: var(--prp-border);
   box-shadow: none;
 }
-.prp-merge-box__head {
+
+.prp-merge-box__status-block {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px 12px;
-}
-.prp-merge-box__title {
-  font-size: 13px;
-  font-weight: 700;
-  margin: 0;
-  letter-spacing: 0.01em;
-}
-.prp-merge-box__badges {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
+  gap: 12px;
+  align-items: flex-start;
   min-width: 0;
 }
-.prp-merge-box__badge {
-  font-size: 11px;
-  font-weight: 650;
-  letter-spacing: 0.01em;
-  text-transform: none;
-}
-.prp-merge-box__badge--lg {
-  font-size: 12px;
-  padding: 4px 10px;
-  border-radius: 999px;
+.prp-merge-box__icon {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
   font-weight: 700;
+  background: color-mix(in srgb, var(--prp-ok) 18%, var(--prp-bg));
+  color: var(--prp-ok);
+  margin-top: 1px;
 }
-.prp-merge-box__status {
-  font-size: 12px;
+.prp-merge-box__icon--warn,
+.prp-merge-box__icon--draft {
+  background: color-mix(in srgb, var(--prp-warn) 18%, var(--prp-bg));
+  color: var(--prp-warn);
+}
+.prp-merge-box__icon--danger {
+  background: color-mix(in srgb, var(--prp-danger) 16%, var(--prp-bg));
+  color: var(--prp-danger);
+}
+.prp-merge-box__icon--muted {
+  background: var(--prp-bg-muted);
   color: var(--prp-fg-muted);
+}
+.prp-merge-box__copy {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.prp-merge-box__headline {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.35;
+  color: var(--prp-fg);
+}
+.prp-merge-box__helper {
   margin: 0;
+  font-size: 13px;
   line-height: 1.45;
+  color: var(--prp-fg-muted);
+}
+.prp-merge-box__checks-line {
+  margin: 6px 0 0;
+  font-size: 12px;
 }
 .prp-merge-box__actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
+}
+
+/* Split merge CTA + method menu (GitHub-style) */
+.prp-merge-method {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+.prp-merge-method__split {
+  display: inline-flex;
+  align-items: stretch;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 1px 0 rgba(27, 31, 36, 0.04);
+}
+.prp-merge-method__primary {
+  border-top-right-radius: 0 !important;
+  border-bottom-right-radius: 0 !important;
+  border-right: 0 !important;
+}
+.prp-merge-method__caret {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--prp-ok) 55%, var(--prp-border));
+  border-left: 1px solid color-mix(in srgb, var(--prp-ok) 35%, var(--prp-border));
+  background: color-mix(in srgb, var(--prp-ok) 88%, #000);
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  border-top-right-radius: 8px;
+  border-bottom-right-radius: 8px;
+}
+.prp-merge-method__caret:hover:not(:disabled) {
+  filter: brightness(1.05);
+}
+.prp-merge-method__caret:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.prp-merge-method__menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+  min-width: min(360px, 92vw);
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  border: 1px solid var(--prp-border);
+  border-radius: 10px;
+  background: var(--prp-bg);
+  box-shadow: 0 12px 32px rgba(1, 4, 9, 0.16);
+}
+.prp-merge-method__item {
+  appearance: none;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  padding: 10px 12px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font: inherit;
+}
+.prp-merge-method__item:hover,
+.prp-merge-method__item--active {
+  background: var(--prp-bg-muted);
+}
+.prp-merge-method__item-label {
+  font-size: 13px;
+  font-weight: 650;
+}
+.prp-merge-method__item-desc {
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+/* legacy aliases kept for older markup/tests */
+.prp-merge-box__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+}
+.prp-merge-box__title {
+  font-size: 13px;
+  font-weight: 700;
+  margin: 0;
+}
+.prp-merge-box__status {
+  font-size: 12px;
+  color: var(--prp-fg-muted);
+  margin: 0;
+  line-height: 1.45;
 }
 
 /* ── Conversation snippet: continuous yellow (no line borders), scroll only if long ── */
@@ -3858,6 +5094,8 @@ a.prp-branch-tag__text:focus-visible {
   inset: 0;
   z-index: 70;
   background: transparent;
+  /* Do not steal clicks from stack chips / modal — outside close uses mousedown capture */
+  pointer-events: none;
   pointer-events: auto;
 }
 

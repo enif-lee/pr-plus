@@ -92,9 +92,97 @@ function flattenVisibleTree(nodes, expandedDirs) {
   return out;
 }
 
+/**
+ * Lowercase extension without the leading dot.
+ * Dotfiles (`.gitignore`) and names without a `.` → empty string.
+ */
+function fileExtensionFromPath(pathOrName) {
+  const base = String(pathOrName || '')
+    .split('/')
+    .pop() || '';
+  const i = base.lastIndexOf('.');
+  if (i <= 0) return '';
+  return base.slice(i + 1).toLowerCase();
+}
+
+/**
+ * Unique extensions from a file list, most frequent first (then alpha).
+ */
+function listFileExtensions(files, opts) {
+  const list = Array.isArray(files) ? files : [];
+  const counts = new Map();
+  for (const f of list) {
+    const path = (f && (f.filename || f.path)) || '';
+    if (!path) continue;
+    const ext = fileExtensionFromPath(path);
+    counts.set(ext, (counts.get(ext) || 0) + 1);
+  }
+  const sorted = [...counts.entries()].sort((a, b) => {
+    if (b[1] !== a[1]) return b[1] - a[1];
+    if (a[0] === '') return 1;
+    if (b[0] === '') return -1;
+    return a[0].localeCompare(b[0]);
+  });
+  const max =
+    opts && Number.isFinite(opts.max) && opts.max > 0
+      ? Math.floor(opts.max)
+      : sorted.length;
+  return sorted.slice(0, max).map(([ext]) => ext);
+}
+
+/**
+ * Keep files whose extension is in `selected`. Empty selection → all files.
+ */
+function filterFilesByExtensions(files, selected) {
+  const list = Array.isArray(files) ? files : [];
+  const set =
+    selected instanceof Set
+      ? selected
+      : new Set(Array.isArray(selected) ? selected : selected ? [...selected] : []);
+  if (set.size === 0) return list.slice();
+  return list.filter((f) => {
+    const path = (f && (f.filename || f.path)) || '';
+    return set.has(fileExtensionFromPath(path));
+  });
+}
+
+function toggleFileExtension(selected, ext) {
+  const next = selected instanceof Set ? new Set(selected) : new Set(selected || []);
+  const key = String(ext == null ? '' : ext);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  return next;
+}
+
+function formatFileExtensionLabel(ext) {
+  const e = String(ext == null ? '' : ext);
+  return e ? `.${e}` : '∅';
+}
+
+function collectDirPaths(nodes) {
+  const out = new Set();
+  function walk(list) {
+    if (!Array.isArray(list)) return;
+    for (const n of list) {
+      if (n && n.type === 'dir') {
+        if (n.path) out.add(n.path);
+        walk(n.children);
+      }
+    }
+  }
+  walk(nodes);
+  return out;
+}
+
 const api = {
   buildNestedFileTree,
   flattenVisibleTree,
+  fileExtensionFromPath,
+  listFileExtensions,
+  filterFilesByExtensions,
+  toggleFileExtension,
+  formatFileExtensionLabel,
+  collectDirPaths,
 };
 
 if (typeof module !== 'undefined' && module.exports) {

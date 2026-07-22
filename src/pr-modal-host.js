@@ -10,6 +10,11 @@
   let reactRoot = null;
   /** When false (no PAT), click intercept is idle — native GitHub navigation works. */
   let hostEnabled = false;
+  /**
+   * Monotonic generation for detail fetches. Parallel soft-refreshes after meta
+   * writes used to complete out of order and resurrect stale assignees/labels.
+   */
+  let detailFetchGen = 0;
   let current = {
     open: false,
     loading: false,
@@ -22,7 +27,23 @@
     routePage: null,
     /** @type {string|null} */
     routePosition: null,
+    /**
+     * Progressive load UI: { busy: boolean, label: string|null, phase: string|null }
+     * Shown as top bar + stage caption during initial/partial loads.
+     */
+    loadStage: null,
   };
+
+  function setLoadStage(phase, label, busy = true) {
+    current.loadStage =
+      phase || label
+        ? { phase: phase || null, label: label || null, busy: Boolean(busy) }
+        : null;
+  }
+
+  function clearLoadStage() {
+    current.loadStage = null;
+  }
 
   const detailCache =
     globalThis.PRModalDetailCache?.createDetailCache?.({ ttlMs: 60_000 }) ||
@@ -108,6 +129,7 @@
       loading: current.loading,
       error: current.error,
       detail: current.detail,
+      loadStage: current.loadStage,
       openPulls,
       // Deep-link restore (page/position); App also writes URI on focus changes
       initialRoute: {
@@ -125,17 +147,20 @@
         if (!owner || !repo || !number) return;
         if (!globalThis.PRTreeFetch?.fetchPrDetail) return;
         const key = detailKey(owner, repo, number);
-        // Invalidate cache so write actions never re-surface stale conversation
+        const gen = ++detailFetchGen;
         detailCache.invalidate?.(key);
-        current.loading = true;
         current.error = null;
+        setLoadStage('refresh', 'Refreshing pull request…', true);
         render();
         try {
+          // Soft refresh: core + first threads page only (same as open)
           const detail = await globalThis.PRTreeFetch.fetchPrDetail(
             owner,
             repo,
-            number
+            number,
+            { threadsMaxPages: 1 }
           );
+          if (gen !== detailFetchGen) return;
           if (
             current.open &&
             current.owner === owner &&
@@ -145,16 +170,208 @@
             current.loading = false;
             current.detail = detail;
             current.error = null;
+            clearLoadStage();
             detailCache.set(key, detail);
             render();
           }
         } catch (err) {
+          if (gen !== detailFetchGen) return;
           if (current.open) {
             current.loading = false;
             current.error = err?.message || String(err);
+            clearLoadStage();
             render();
           }
         }
+      },
+      /**
+       * Lazy GraphQL page of review threads (middle fold / dual-window).
+       * @param {'older'|'newer'|'all'|string} [direction]
+       *   older/newer: one page toward the gap
+       *   all: keep paging until hasMore is false (full comment/thread corpus)
+       */
+      onLoadMoreReviewThreads: async (direction) => {
+        if (!owner || !repo || !number) return null;
+        if (!globalThis.PRTreeFetch?.fetchReviewThreadsPage) return null;
+        if (!current.detail) return null;
+        const loadAll =
+          direction === 'all' ||
+          direction === true ||
+          (direction && String(direction).toLowerCase() === 'all');
+        const gen = detailFetchGen;
+        const mergeFn =
+          globalThis.PRTreeFetch?.mergeReviewThreadsPageIntoDetail || null;
+
+        const pickDirection = (meta) => {
+          if (meta.hasOlder) return 'older';
+          if (meta.hasNewerFromOldest) return 'newer';
+          return null;
+        };
+        const cursorFor = (meta, dir) =>
+          dir === 'older' || dir === 'newest'
+            ? meta.newestStartCursor || meta.endCursor || null
+            : meta.oldestEndCursor || null;
+
+        const loadOnePage = async (detailSnap) => {
+          const meta = detailSnap.reviewThreadsMeta || {};
+          if (!meta.hasMore) return { detail: detailSnap, progressed: false };
+          let dir = String(direction || '').toLowerCase();
+          if (loadAll || !['older', 'newer', 'oldest', 'newest'].includes(dir)) {
+            dir = pickDirection(meta);
+          }
+          if (!dir) return { detail: detailSnap, progressed: false };
+          if (
+            (dir === 'older' || dir === 'newest') &&
+            !meta.hasOlder &&
+            meta.hasNewerFromOldest
+          ) {
+            dir = 'newer';
+          }
+          if (
+            (dir === 'newer' || dir === 'oldest') &&
+            !meta.hasNewerFromOldest &&
+            meta.hasOlder
+          ) {
+            dir = 'older';
+          }
+          const cursor = cursorFor(meta, dir);
+          const beforeCount = Number(meta.loadedThreadCount) || 0;
+          const page = await globalThis.PRTreeFetch.fetchReviewThreadsPage(
+            owner,
+            repo,
+            number,
+            { direction: dir, cursor }
+          );
+          if (gen !== detailFetchGen) return { detail: null, progressed: false };
+          let next = detailSnap;
+          if (typeof mergeFn === 'function') {
+            next = mergeFn(detailSnap, page, dir);
+          }
+          const afterCount =
+            Number(next?.reviewThreadsMeta?.loadedThreadCount) || 0;
+          return {
+            detail: next,
+            progressed: afterCount > beforeCount || Boolean(page?.threads?.length),
+          };
+        };
+
+        let meta0 = current.detail.reviewThreadsMeta || {};
+        if (!meta0.hasMore) return current.detail;
+
+        const totalHint = Number(meta0.totalCount) || 0;
+        const hidden0 = Number(meta0.hiddenCount) || 0;
+        setLoadStage(
+          'threads',
+          loadAll
+            ? `Loading all review comments… (${hidden0 || '?'} remaining)`
+            : hidden0 > 0
+              ? `Loading more review threads… (${hidden0} still hidden)`
+              : `Loading more review threads… (${meta0.loadedThreadCount || 0} loaded)`,
+          true
+        );
+        render();
+
+        try {
+          // Single page (timeline gap) or drain dual-window until complete
+          const maxPages = loadAll ? 80 : 1;
+          let next = current.detail;
+          let pages = 0;
+          while (pages < maxPages) {
+            const meta = next.reviewThreadsMeta || {};
+            if (!meta.hasMore) break;
+            const hidden = Number(meta.hiddenCount) || 0;
+            const loaded = Number(meta.loadedThreadCount) || 0;
+            if (loadAll) {
+              setLoadStage(
+                'threads',
+                totalHint > 0
+                  ? `Loading all review comments… ${loaded}/${totalHint}`
+                  : `Loading all review comments… ${loaded} loaded${
+                      hidden > 0 ? `, ${hidden} remaining` : ''
+                    }`,
+                true
+              );
+              render();
+            }
+            const step = await loadOnePage(next);
+            if (gen !== detailFetchGen) return null;
+            if (!current.open || Number(current.number) !== Number(number)) {
+              return null;
+            }
+            if (!step.detail) return null;
+            next = step.detail;
+            current.detail = next;
+            detailCache.set(detailKey(owner, repo, number), next);
+            pages += 1;
+            if (!loadAll) break;
+            if (!step.progressed) break;
+            if (!(next.reviewThreadsMeta || {}).hasMore) break;
+          }
+          clearLoadStage();
+          render();
+          return next;
+        } catch (err) {
+          if (current.open) {
+            setLoadStage(
+              'threads',
+              err?.message ||
+                (loadAll
+                  ? 'Failed to load all comments'
+                  : 'Failed to load more threads'),
+              false
+            );
+            render();
+          }
+          return null;
+        }
+      },
+      /**
+       * Patch in-memory detail + cache after a successful meta write so a
+       * remount / soft refresh does not resurrect pre-write assignees/labels.
+       */
+      onPatchDetail: (patch) => {
+        if (!patch || typeof patch !== 'object') return;
+        if (!current.open || !current.detail) return;
+        if (
+          owner &&
+          repo &&
+          number &&
+          (current.owner !== owner ||
+            current.repo !== repo ||
+            Number(current.number) !== Number(number))
+        ) {
+          return;
+        }
+        // Supersede in-flight soft-refreshes that started before this write so
+        // their responses cannot resurrect pre-write assignees/labels.
+        detailFetchGen += 1;
+        const next = {
+          ...current.detail,
+          ...patch,
+          avatarUrls: {
+            ...(current.detail.avatarUrls || {}),
+            ...(patch.avatarUrls && typeof patch.avatarUrls === 'object'
+              ? patch.avatarUrls
+              : {}),
+          },
+          // Meta lock is React-local only; never stick it in the SWR cache.
+          _metaSeq: 0,
+        };
+        // Explicit empty arrays must win (spread alone is fine; keep intent clear)
+        if (Object.prototype.hasOwnProperty.call(patch, 'assignees')) {
+          next.assignees = Array.isArray(patch.assignees) ? patch.assignees : [];
+        }
+        if (Object.prototype.hasOwnProperty.call(patch, 'labels')) {
+          next.labels = Array.isArray(patch.labels) ? patch.labels : [];
+        }
+        current.detail = next;
+        try {
+          const key = detailKey(current.owner, current.repo, current.number);
+          detailCache.set(key, next);
+        } catch {
+          /* ignore */
+        }
+        render();
       },
       /** Files for a single commit or commit range (GitHub compare). */
       onFetchCompareFiles: async (base, head, options = {}) => {
@@ -284,6 +501,7 @@
       number: null,
       routePage: null,
       routePosition: null,
+      loadStage: null,
     };
     render();
   }
@@ -293,10 +511,11 @@
     const key = detailKey(owner, repo, number);
     const peeked = detailCache.peek(key);
     const cached = peeked.value;
+    const gen = ++detailFetchGen;
 
     current = {
       open: true,
-      loading: true,
+      loading: !cached,
       error: null,
       detail: cached || null,
       owner,
@@ -304,42 +523,154 @@
       number,
       routePage: page || null,
       routePosition: position || null,
+      loadStage: {
+        phase: 'core',
+        label: cached ? 'Refreshing pull request…' : 'Loading pull request…',
+        busy: true,
+      },
     };
     persistOpenModal(owner, repo, number, { page, position });
     writeUriRoute({ page: page || 'conversation', number, position });
     render();
 
-    // Fresh cache: still revalidate in background (SWR)
     try {
       if (!globalThis.PRTreeFetch?.fetchPrDetail) {
         throw new Error('PR detail bridge unavailable');
       }
-      const detail = await globalThis.PRTreeFetch.fetchPrDetail(
-        owner,
-        repo,
-        number
-      );
+
+      async function fetchDetailOnce(opts) {
+        let lastErr;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            return await globalThis.PRTreeFetch.fetchPrDetail(
+              owner,
+              repo,
+              number,
+              opts
+            );
+          } catch (err) {
+            lastErr = err;
+            const msg = String(err?.message || err || '');
+            if (
+              attempt === 0 &&
+              /message channel closed|Receiving end does not exist|Background worker offline|Extension context invalidated/i.test(
+                msg
+              )
+            ) {
+              await new Promise((r) => setTimeout(r, 200));
+              continue;
+            }
+            throw err;
+          }
+        }
+        throw lastErr || new Error('Failed to fetch PR detail');
+      }
+
+      // Phase 1: core PR (no threads) — paint header / description / issue comments fast
+      setLoadStage('core', 'Loading pull request…', true);
+      render();
+      let detail = await fetchDetailOnce({ skipReviewThreads: true });
+      if (gen !== detailFetchGen) return;
       if (
-        current.open &&
-        current.owner === owner &&
-        current.repo === repo &&
-        Number(current.number) === Number(number)
+        !(
+          current.open &&
+          current.owner === owner &&
+          current.repo === repo &&
+          Number(current.number) === Number(number)
+        )
       ) {
-        current.loading = false;
-        current.detail = detail;
-        current.error = null;
-        detailCache.set(key, detail);
+        return;
+      }
+      current.loading = false;
+      current.detail = detail;
+      current.error = null;
+      setLoadStage('threads', 'Loading review threads…', true);
+      detailCache.set(key, detail);
+      render();
+
+      // Phase 2: dual-window GraphQL threads — newest (last) + oldest (first) when large
+      if (globalThis.PRTreeFetch.fetchReviewThreadsPage) {
+        try {
+          const mergeFn =
+            globalThis.PRTreeFetch.mergeReviewThreadsPageIntoDetail || null;
+          const newest = await globalThis.PRTreeFetch.fetchReviewThreadsPage(
+            owner,
+            repo,
+            number,
+            { direction: 'newest', cursor: null }
+          );
+          if (gen !== detailFetchGen) return;
+          if (
+            !(
+              current.open &&
+              Number(current.number) === Number(number) &&
+              current.detail
+            )
+          ) {
+            return;
+          }
+          let next =
+            typeof mergeFn === 'function'
+              ? mergeFn(current.detail, newest, 'newest')
+              : current.detail;
+          // Seed oldest end when more than one window of threads
+          const totalCount =
+            typeof newest.totalCount === 'number'
+              ? newest.totalCount
+              : newest.threads?.length || 0;
+          const pageLen = newest.threads?.length || 0;
+          if (totalCount > pageLen && newest.hasPreviousPage) {
+            try {
+              const oldest = await globalThis.PRTreeFetch.fetchReviewThreadsPage(
+                owner,
+                repo,
+                number,
+                { direction: 'oldest', cursor: null, pageSize: 20 }
+              );
+              if (gen === detailFetchGen && typeof mergeFn === 'function') {
+                next = mergeFn(next, oldest, 'oldest');
+              }
+            } catch {
+              /* keep newest-only window */
+            }
+          }
+          if (gen !== detailFetchGen) return;
+          if (
+            current.open &&
+            Number(current.number) === Number(number) &&
+            current.detail
+          ) {
+            detail = next;
+            current.detail = detail;
+            detailCache.set(key, detail);
+            // Initial dual-window load done — hide top bar / stage caption.
+            // Remaining threads use the Conversation "Load more…" gap, not the bar.
+            clearLoadStage();
+            render();
+          }
+        } catch (threadErr) {
+          // Core already painted — keep it; surface soft stage error
+          if (gen === detailFetchGen && current.open) {
+            setLoadStage(
+              'threads',
+              threadErr?.message || 'Review threads failed to load',
+              false
+            );
+            render();
+          }
+        }
+      } else {
+        clearLoadStage();
         render();
       }
     } catch (err) {
+      if (gen !== detailFetchGen) return;
       if (current.open) {
         current.loading = false;
-        // Keep stale detail if revalidation fails
         if (!current.detail) {
           current.error = err?.message || String(err);
-        } else {
-          current.error = null;
         }
+        clearLoadStage();
         render();
       }
     }
@@ -449,6 +780,7 @@
           number: null,
           routePage: null,
           routePosition: null,
+          loadStage: null,
         };
         render();
       }
@@ -525,6 +857,17 @@
     window.addEventListener('pr-plus-stack-ready', () => {
       if (!hostEnabled) return;
       void tryRestoreOpenModal();
+    });
+    // Back/forward cache can restore a frozen modal without re-running content
+    // scripts — pending review rows then look missing until a soft refresh.
+    window.addEventListener('pageshow', (event) => {
+      if (!event?.persisted) return;
+      if (!hostEnabled || !current.open) return;
+      if (!current.owner || !current.repo || current.number == null) return;
+      const props = buildProps();
+      if (typeof props.onRefresh === 'function') {
+        void props.onRefresh();
+      }
     });
   }
 

@@ -3,7 +3,8 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const SCRATCH =
-  process.env.PRP_SCRATCH || '/var/folders/px/qw6l220x5glb_gxf44lws9p80000gn/T/grok-goal-5a6d37e1751e/implementer';
+  process.env.PRP_SCRATCH ||
+  require('node:path').join(require('node:os').tmpdir(), 'pr-plus-test-scratch');
 fs.mkdirSync(SCRATCH, { recursive: true });
 
 // Ensure modal bundle exists for host/bundle tests
@@ -19,12 +20,16 @@ if (build.status !== 0) {
 const tests = [
   'tree.test.js',
   'storage.test.js',
+  'service-worker-load.test.js',
   'fetch-pulls.test.js',
   'fetch-pr-detail.test.js',
   'detail-cache.test.js',
   'aside-lists.test.js',
   'line-selection.test.js',
+  'comment-nav.test.js',
+  'md-inline-vs-fence.test.js',
   'review-threads.test.js',
+  'review-threads-dual-window.test.js',
   'markdown-composer.test.js',
   'composer-attach.test.js',
   'pending-review.test.js',
@@ -32,8 +37,14 @@ const tests = [
   'session-view.test.js',
   'shell-preference.test.js',
   'side-sheet-toggle.test.js',
+  'scroll-lock.test.js',
+  'ui-chrome-goal.test.js',
+  'branch-rerequest.test.js',
+  'merge-box.test.js',
+  'narrow-chrome.test.js',
   'file-nav-layout.test.js',
   'file-nav-ui.test.js',
+  'file-tree-ext-filter.test.js',
   'uri-route.test.js',
   'uri-route-host.test.js',
   'diff-snippet.test.js',
@@ -41,6 +52,8 @@ const tests = [
   'searchable-select.test.js',
   'diff-thread-refresh.test.js',
   'ui-polish.test.js',
+  'stack-strip-path.test.js',
+  'comments-page.test.js',
   'diff-commit-filter.test.js',
   'refresh-loading.test.js',
   'dom.test.js',

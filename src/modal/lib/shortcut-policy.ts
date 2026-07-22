@@ -1,7 +1,7 @@
 /** @module modal/lib/shortcut-policy */
 /**
  * Pure policy for PR modal global shortcuts.
- * Only Diff toggle, command palette, and Esc-related navigation remain active.
+ * Diff toggle, command palette, Find (⌘F), and Esc-related navigation.
  */
 
 /**
@@ -36,6 +36,8 @@ export function resolveModalShortcutAction(opts: any = {}) {
   // ⌘. / Ctrl+. → toggle Diff ↔ Conversation
   if (key === '.' || key === 'period') return 'toggleDiff';
 
-  // Find (⌘F) and all other chords intentionally disabled — only Diff / palette / Esc
+  // ⌘F / Ctrl+F → in-modal search (PR body / comments / diff rows)
+  if (key === 'f') return 'openSearch';
+
   return null;
 }

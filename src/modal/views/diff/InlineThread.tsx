@@ -31,6 +31,7 @@ function InlineThreadImpl(props: any) {
     onUploadFile,
     collapsed: collapsedProp,
     onToggleCollapse,
+    pendingCount = 0,
   } = props;
 
   const [localCollapsed, setLocalCollapsed] = useState(false);
@@ -65,6 +66,16 @@ function InlineThreadImpl(props: any) {
   const replies = thread?.replies || [];
   const useTimeline = replies.length > 0;
   const replyCount = replies.length;
+  const pendingReplyCount = replies.filter((r: any) => r?.pending).length;
+  const hasPendingReplies = pendingReplyCount > 0;
+  // Pending (unsubmitted) threads can be deleted but not resolved on GitHub
+  const rootPending = Boolean(
+    thread?.root?.pending || row?.pending || thread?.pending
+  );
+  const canResolveThread =
+    Boolean(thread?.threadNodeId || row?.threadNodeId) &&
+    !rootPending &&
+    !hasPendingReplies;
 
   const locLabel = `${path}${
     startLine != null && line != null && startLine !== line
@@ -175,6 +186,11 @@ function InlineThreadImpl(props: any) {
               </span>
             ) : null}
           </button>
+          {thread?.root?.outdated || row?.outdated || thread?.outdated ? (
+            <Badge tone="muted" title="No longer applies to the latest revision">
+              outdated
+            </Badge>
+          ) : null}
           {thread?.resolved || row?.resolved ? (
             <Badge tone="ok">resolved</Badge>
           ) : (
@@ -213,12 +229,13 @@ function InlineThreadImpl(props: any) {
                     r.author &&
                     String(r.author).toLowerCase() === String(viewerLogin).toLowerCase();
                   const isLast = idx === replies.length - 1;
+                  const isPending = Boolean(r.pending);
                   return (
                     <li
                       key={r.id}
                       className={`prp-review-thread__item${
                         isLast ? ' prp-review-thread__item--last' : ''
-                      }`}
+                      }${isPending ? ' prp-review-thread__item--pending' : ''}`}
                     >
                       <Avatar
                         login={r.author}
@@ -231,10 +248,20 @@ function InlineThreadImpl(props: any) {
                           <strong>
                             <UserLink login={r.author || 'user'} />
                           </strong>
+                          {isPending ? (
+                            <Badge tone="warn" title="Part of an unsubmitted review">
+                              pending
+                            </Badge>
+                          ) : null}
+                          {r.outdated ? (
+                            <Badge tone="muted" title="No longer applies to the latest revision">
+                              outdated
+                            </Badge>
+                          ) : null}
                           {r.createdAt ? (
                             <span className="prp-muted">{formatWhen(r.createdAt)}</span>
                           ) : null}
-                          {renderCommentActions(r.id, r.body, ownReply)}
+                          {!isPending ? renderCommentActions(r.id, r.body, ownReply) : null}
                         </div>
                         {renderCommentBody(r.id, r.body)}
                       </div>
@@ -286,11 +313,31 @@ function InlineThreadImpl(props: any) {
                   size="sm"
                   variant="primary"
                   disabled={actionBusy || !String(replyText || '').trim()}
-                  onClick={() => onReply?.(thread || { id: row?.commentId, root: row })}
+                  onClick={() =>
+                    onReply?.(thread || { id: row?.commentId, root: row }, {
+                      mode: 'comment',
+                    })
+                  }
                 >
-                  Reply
+                  Comment
                 </Button>
-                {thread?.threadNodeId || row?.threadNodeId ? (
+                <Button
+                  size="sm"
+                  disabled={actionBusy || !String(replyText || '').trim()}
+                  onClick={() =>
+                    onReply?.(thread || { id: row?.commentId, root: row }, {
+                      mode: 'pending',
+                    })
+                  }
+                  title={
+                    pendingCount > 0 || hasPendingReplies
+                      ? 'Add this reply to your pending review'
+                      : 'Start a pending review with this reply'
+                  }
+                >
+                  {pendingCount > 0 || hasPendingReplies ? 'Add comment' : 'Start review'}
+                </Button>
+                {canResolveThread ? (
                   <Button
                     size="sm"
                     disabled={actionBusy}

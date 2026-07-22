@@ -3,7 +3,15 @@
  * View surfaces live under views/*; common UI under components/common.
  * Interactive UI state can also be read via zustand store (see store/modal-store).
  */
-import React, { useCallback, useEffect, useMemo, useRef, useState, memo } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  memo,
+  startTransition,
+} from 'react';
 import { createRoot } from 'react-dom/client';
 import { Button } from '@common/Button';
 import { SearchableSelect } from '@common/SearchableSelect';
@@ -12,14 +20,11 @@ import { StackStrip } from '../views/chrome/StackStrip';
 import { SearchBar } from '../views/chrome/SearchBar';
 import { CommandPalette } from '../views/chrome/CommandPalette';
 import { LoadingSkeleton } from '../views/chrome/LoadingSkeleton';
-import { CommentNavBar } from '../views/chrome/CommentNavBar';
-import { PendingReviewBar } from '../views/chrome/PendingReviewBar';
-import { DiffChrome } from '../views/chrome/DiffChrome';
+import { DiffToolbar } from '../views/chrome/DiffToolbar';
 import { ConversationView } from '../views/conversation/ConversationView';
 import { FolderFileTree } from '../views/diff/FolderFileTree';
 import { VirtualDiff } from '../views/diff/VirtualDiff';
 import { SelectionCommentBar } from '../views/diff/SelectionCommentBar';
-import { DiffCommitFilter } from '../views/diff/DiffCommitFilter';
 import { LAYOUT_CENTERED, LAYOUT_DIFF, layoutClassName } from '../lib/layout-mode';
 import {
   compareCacheKey,
@@ -40,6 +45,12 @@ import {
   type ShellMode,
 } from '../lib/shell-preference';
 import {
+  applyScrollLock,
+  measureScrollbarWidth,
+  restoreScrollLock,
+  type ScrollLockSnapshot,
+} from '../lib/scroll-lock';
+import {
   FILE_NAV_DEFAULT_WIDTH,
   clampFileNavWidth,
   toggleFileNavCollapsed,
@@ -51,19 +62,38 @@ import {
   type FileNavPref,
 } from '../lib/file-nav-layout';
 import { annotateFilesForCollapse } from '../lib/collapse';
-import { filterFilesByQuery, countReviewThreadsByPath, groupReviewThreads, toggleViewedPath, isPathViewed } from '../lib/review-threads';
+import {
+  filterFilesByQuery,
+  countReviewThreadsByPath,
+  groupReviewThreads,
+  toggleViewedPath,
+  isPathViewed,
+  resolveRootReviewCommentId,
+  normalizeReviewCommentId,
+} from '../lib/review-threads';
 import { flattenFilesToVirtualRows, fileStartIndexMap } from '../lib/diff-rows';
-import { buildNestedFileTree, flattenVisibleTree } from '../lib/file-tree';
-import { sortInlineComments, mapCommentsToRowIndices, resolveCommentNav } from '../lib/comment-nav';
-import { buildSearchIndex, resolveQuerySearchState, resolveNavSearchState } from '../lib/search-index';
+import { buildNestedFileTree, flattenVisibleTree, collectDirPaths } from '../lib/file-tree';
+import {
+  sortThreadRootComments,
+  mapCommentsToRowIndices,
+  resolveCommentNav,
+} from '../lib/comment-nav';
+import {
+  buildSearchIndex,
+  resolveQuerySearchState,
+  resolveQuerySearchStateAsync,
+  resolveNavSearchState,
+  searchHitRowIndexSet,
+  occurrenceIndexAmongRowHits,
+  isNavigableSearchHit,
+} from '../lib/search-index';
 import { calculateVisibleRange, scrollTopForIndex } from '../lib/virtual-range';
 import {
   beginLineSelection, extendLineSelection, normalizeSelection, selectionToCommentPayload,
   finalizeSelection, selectionGestureMode, isRowInSelection, isSelectableDiffRow, selectionBlockRole,
 } from '../lib/line-selection';
 import {
-  createEmptyPendingReview, addPendingComment, discardPendingReview, pendingReviewCount,
-  buildPendingReviewSubmitPayload,
+  discardPendingReview,
 } from '../lib/pending-review';
 import {
   parseSuggestionFences, applySuggestionToFileContent, mapLeaveReviewAction,
@@ -72,13 +102,20 @@ import {
 import { buildPaletteCommands, filterPaletteCommands } from '../lib/command-palette';
 import { resolveModalShortcutAction } from '../lib/shortcut-policy';
 import { resolveGithubTheme } from '../lib/theme';
-import { buildStackStrip } from '../lib/ui-polish';
+import { buildStackStrip, buildStackPathModel } from '../lib/ui-polish';
+import {
+  mergeCommentsById,
+  advanceCommentsMeta,
+  sinceCursorFromMeta,
+  DEFAULT_COMMENT_PAGE_SIZE,
+} from '../lib/comments-page';
 import {
   filterSelectOptions, buildPeopleOptions, buildLabelOptions, buildBranchOptions, buildUnifiedReviewerRows,
 } from '../lib/searchable-select';
 import { loadSessionView, saveSessionView } from '../lib/session-view';
 import {
   mergeDetailPreserveOptimistic,
+  stripPendingReviewFromDetail,
   buildAssetRepoPath,
 } from '../lib/composer-attach';
 import {
@@ -100,25 +137,59 @@ import {
 export function PrModalApp({
   open,
   loading,
+  loadStage = null,
+  onLoadMoreReviewThreads = null,
   error,
   detail: detailProp,
   openPulls,
   onClose,
   onRefresh,
+  onPatchDetail = null,
   onOpenStackPr,
   onFetchCompareFiles = null,
   initialRoute = null,
   onRouteChange = null,
 }: any) {
   const [localDetail, setLocalDetail] = useState(detailProp);
+  /**
+   * After discard/submit, host refresh can race and re-merge stale pending rows
+   * (mergeDetailPreserveOptimistic keeps local pending while prev still holds
+   * viewerPendingReview). While this ref is set, always strip pending from the
+   * merged snapshot. Clear the flag only once the host also has no PENDING.
+   */
+  const forceDropPendingRef = useRef(false);
   // Merge host detail onto optimistic local state so reply/comment flash-revert is avoided
   useEffect(() => {
     if (!detailProp) return;
-    setLocalDetail((prev) =>
-      typeof mergeDetailPreserveOptimistic === 'function'
-        ? mergeDetailPreserveOptimistic(prev, detailProp)
-        : detailProp
-    );
+    setLocalDetail((prev) => {
+      let merged =
+        typeof mergeDetailPreserveOptimistic === 'function'
+          ? mergeDetailPreserveOptimistic(prev, detailProp)
+          : detailProp;
+      const hostHasPending =
+        Boolean(detailProp.viewerPendingReview?.id) ||
+        (Array.isArray(detailProp.reviewComments) &&
+          detailProp.reviewComments.some((c: any) => c?.pending));
+      if (forceDropPendingRef.current) {
+        // Always strip — do not wait for host to clear first. Waiting left the
+        // toolbar stuck on "N pending" after Discard when the host snapshot was
+        // empty but local raceKeep still held viewerPendingReview + rows.
+        merged =
+          typeof stripPendingReviewFromDetail === 'function'
+            ? stripPendingReviewFromDetail(merged)
+            : {
+                ...merged,
+                viewerPendingReview: null,
+                reviewComments: (merged.reviewComments || []).filter(
+                  (c: any) => c && !c.pending
+                ),
+              };
+        if (!hostHasPending) {
+          forceDropPendingRef.current = false;
+        }
+      }
+      return merged;
+    });
   }, [detailProp]);
   // Prefer optimistic local copy for all rendering / virtual rows / threads
   const detail = localDetail || detailProp;
@@ -138,6 +209,11 @@ export function PrModalApp({
   const prIdentity = detail
     ? `${detail.owner}/${detail.repo}#${detail.number}`
     : '';
+  const [stackPathSelections, setStackPathSelections] = useState<Record<string, number>>(
+    {}
+  );
+  const commentPrefetchGenRef = useRef(0);
+
   useEffect(() => {
     setDiffCommitFilter({ mode: 'all' });
     setDiffFilesOverride(null);
@@ -146,7 +222,102 @@ export function PrModalApp({
     setDiffCommitLoading(false);
     compareFilesCacheRef.current = new Map();
     compareFetchGenRef.current += 1;
+    setStackPathSelections({});
+    commentPrefetchGenRef.current += 1;
   }, [prIdentity]);
+
+  // Lazy-load remaining comment / review-comment pages (offset) then since-refresh.
+  useEffect(() => {
+    if (!open || !detail?.owner || !detail?.repo || !detail?.number) return undefined;
+    const api = globalThis.PRTreeFetch;
+    if (!api?.fetchPrCommentsPage) return undefined;
+    const gen = ++commentPrefetchGenRef.current;
+    let cancelled = false;
+
+    async function loadKind(kind: 'issue' | 'review') {
+      const metaKey = kind === 'issue' ? 'commentsMeta' : 'reviewCommentsMeta';
+      const listKey = kind === 'issue' ? 'comments' : 'reviewComments';
+      let guard = 0;
+      while (!cancelled && gen === commentPrefetchGenRef.current && guard < 40) {
+        guard += 1;
+        const snap = localDetail || detailProp;
+        if (!snap) break;
+        const meta = snap[metaKey] || {};
+        if (!meta.hasMore || !meta.nextPage) break;
+        try {
+          const page = await api.fetchPrCommentsPage(snap.owner, snap.repo, snap.number, {
+            kind,
+            page: meta.nextPage,
+            perPage: meta.perPage || DEFAULT_COMMENT_PAGE_SIZE,
+          });
+          if (cancelled || gen !== commentPrefetchGenRef.current) return;
+          setLocalDetail((prev) => {
+            if (!prev || Number(prev.number) !== Number(snap.number)) return prev;
+            const merged = mergeCommentsById(prev[listKey] || [], page?.items || []);
+            return {
+              ...prev,
+              [listKey]: merged,
+              [metaKey]: advanceCommentsMeta(prev[metaKey], page?.meta, merged.length),
+            };
+          });
+          if (!page?.meta?.hasMore) break;
+        } catch {
+          break;
+        }
+      }
+    }
+
+    // Defer so conversation paints first page immediately
+    const t = window.setTimeout(() => {
+      void (async () => {
+        await loadKind('issue');
+        await loadKind('review');
+        // Incremental since-pass: pick up comments created after first page window
+        if (cancelled || gen !== commentPrefetchGenRef.current) return;
+        const snap = localDetail || detailProp;
+        if (!snap || !api.fetchPrCommentsPage) return;
+        for (const kind of ['issue', 'review'] as const) {
+          const metaKey = kind === 'issue' ? 'commentsMeta' : 'reviewCommentsMeta';
+          const listKey = kind === 'issue' ? 'comments' : 'reviewComments';
+          const since = sinceCursorFromMeta(snap[metaKey]);
+          if (!since) continue;
+          try {
+            const page = await api.fetchPrCommentsPage(snap.owner, snap.repo, snap.number, {
+              kind,
+              page: 1,
+              perPage: DEFAULT_COMMENT_PAGE_SIZE,
+              since,
+            });
+            if (cancelled || gen !== commentPrefetchGenRef.current) return;
+            if (!page?.items?.length) continue;
+            setLocalDetail((prev) => {
+              if (!prev || Number(prev.number) !== Number(snap.number)) return prev;
+              const merged = mergeCommentsById(prev[listKey] || [], page.items);
+              return {
+                ...prev,
+                [listKey]: merged,
+                [metaKey]: {
+                  ...(prev[metaKey] || {}),
+                  newestCreatedAt:
+                    page.meta?.newestCreatedAt || prev[metaKey]?.newestCreatedAt,
+                  maxId: page.meta?.maxId ?? prev[metaKey]?.maxId,
+                  loadedCount: merged.length,
+                },
+              };
+            });
+          } catch {
+            /* ignore incremental errors */
+          }
+        }
+      })();
+    }, 400);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- prefetch keyed by PR identity + open
+  }, [open, prIdentity, detailProp?.commentsMeta?.hasMore, detailProp?.reviewCommentsMeta?.hasMore]);
 
   // --- Zustand-owned interactive UI (selective subscriptions) ---
   const layoutMode = useModalStore((s) => s.layoutMode);
@@ -238,6 +409,7 @@ export function PrModalApp({
       if (typeof window === 'undefined') {
         return { collapsed: false, width: FILE_NAV_DEFAULT_WIDTH };
       }
+      // loadFileNavPref restores width; always opens expanded by default.
       return loadFileNavPref(resolveFileNavStorage(window));
     } catch {
       return { collapsed: false, width: FILE_NAV_DEFAULT_WIDTH };
@@ -397,6 +569,21 @@ export function PrModalApp({
     return [];
   }, [navFiles]);
 
+  // Expand every folder when a PR's file list first becomes available.
+  // expandedDirs starts empty in the store, so without this only top-level names show.
+  const fileTreeExpandKeyRef = useRef<string>('');
+  useEffect(() => {
+    if (!prIdentity || !annotatedFiles?.length) return;
+    if (fileTreeExpandKeyRef.current === prIdentity) return;
+    if (typeof buildNestedFileTree !== 'function' || typeof collectDirPaths !== 'function') {
+      return;
+    }
+    const fullTree = buildNestedFileTree(annotatedFiles);
+    const dirs = collectDirPaths(fullTree);
+    fileTreeExpandKeyRef.current = prIdentity;
+    setExpandedDirs(dirs);
+  }, [prIdentity, annotatedFiles, setExpandedDirs]);
+
   const virtualRows = useMemo(
     () =>
       flattenFilesToVirtualRows(annotatedFiles, diffMode, {
@@ -413,48 +600,269 @@ export function PrModalApp({
     [virtualRows]
   );
 
+  // Diff comment navigator: one stop per review **thread** (roots only; replies excluded).
   const mappedComments = useMemo(() => {
     if (typeof mapCommentsToRowIndices !== 'function') return [];
-    const sorted =
-      typeof sortInlineComments === 'function'
-        ? sortInlineComments(detail?.reviewComments || [])
+    const roots =
+      typeof sortThreadRootComments === 'function'
+        ? sortThreadRootComments(detail?.reviewComments || [])
         : detail?.reviewComments || [];
-    return mapCommentsToRowIndices(sorted, virtualRows);
+    return mapCommentsToRowIndices(roots, virtualRows);
   }, [detail?.reviewComments, virtualRows]);
 
-  useEffect(() => {
-    if (!searchQuery || !virtualRows?.length) {
-      setSearchHits([], -1);
-      return;
-    }
-    if (typeof resolveQuerySearchState === 'function') {
-      const docs =
-        typeof buildSearchIndex === 'function'
-          ? buildSearchIndex(detail, virtualRows)
-          : virtualRows;
-      const st = resolveQuerySearchState(docs, searchQuery);
-      setSearchHits(st.hits || [], st.hitIndex ?? 0);
-    }
-  }, [searchQuery, virtualRows, detail]);
+  // Conversation = body/comments/reviews/replies only. Diff = conversation + rows.
+  const searchMode =
+    layoutMode === LAYOUT_DIFF ? 'full' : 'conversation';
 
-  function navSearch(delta: number) {
-    if (!searchHits.length) return;
-    if (typeof resolveNavSearchState === 'function') {
-      const st = resolveNavSearchState(searchHits, searchHitIndex, delta);
+  // Build index only while find is open — not on every keystroke.
+  const searchDocs = useMemo(() => {
+    if (!searchOpen) return [];
+    if (typeof buildSearchIndex === 'function') {
+      return buildSearchIndex(detail, virtualRows, { mode: searchMode });
+    }
+    return Array.isArray(virtualRows) ? virtualRows : [];
+  }, [detail, virtualRows, searchOpen, searchMode]);
+
+  const searchGenRef = useRef(0);
+  const [searchBusy, setSearchBusy] = useState(false);
+  /** After first non-empty search in this open session — gates Load Comments. */
+  const [searchHasRun, setSearchHasRun] = useState(false);
+
+  // New PR / close find → allow Load Comments to reappear after next search
+  useEffect(() => {
+    setSearchHasRun(false);
+  }, [prIdentity]);
+  // Jump geometry via ref so resize/scroll does not re-trigger search.
+  const searchJumpRef = useRef({
+    avgH,
+    viewportHeight,
+    rowCount: virtualRows.length,
+    rowOffsetList,
+  });
+  searchJumpRef.current = {
+    avgH,
+    viewportHeight,
+    rowCount: virtualRows.length,
+    rowOffsetList,
+  };
+
+  const jumpToSearchHit = useCallback(
+    (hit: any) => {
+      if (!hit) return;
+
+      // Conversation anchors (body / comments / reviews / replies)
+      if (hit.anchorId) {
+        if (layoutMode === LAYOUT_DIFF) {
+          // Stay in conversation for conversation-only hits when possible
+          setLayoutMode(LAYOUT_CENTERED);
+        }
+        const apply = () => {
+          try {
+            const el = document.querySelector(
+              `[data-search-anchor="${CSS.escape(String(hit.anchorId))}"]`
+            ) as HTMLElement | null;
+            if (!el) return;
+            el.scrollIntoView({ block: 'center', inline: 'nearest' });
+            const mark = el.querySelector(
+              '.prp-search-mark--current'
+            ) as HTMLElement | null;
+            mark?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+          } catch {
+            /* ignore */
+          }
+        };
+        apply();
+        requestAnimationFrame(() => {
+          apply();
+          requestAnimationFrame(apply);
+        });
+        return;
+      }
+
+      if (hit.rowIndex == null || !Number.isFinite(Number(hit.rowIndex))) {
+        return;
+      }
+      // Diff row jump
+      if (layoutMode !== LAYOUT_DIFF) {
+        setLayoutMode(LAYOUT_DIFF);
+      }
+      const j = searchJumpRef.current;
+      const top = scrollTopForIndex(
+        hit.rowIndex,
+        j.avgH,
+        j.viewportHeight,
+        j.rowCount,
+        j.rowOffsetList
+      );
+      setScrollTop(top);
+      const applyDomScroll = () => {
+        const list = listRef.current as HTMLElement | null;
+        if (list) list.scrollTop = top;
+        const rowEl = list?.querySelector?.(
+          `[data-row-index="${hit.rowIndex}"]`
+        ) as HTMLElement | null;
+        if (rowEl) {
+          try {
+            const mark = rowEl.querySelector(
+              '.prp-search-mark--current'
+            ) as HTMLElement | null;
+            (mark || rowEl).scrollIntoView({ block: 'center', inline: 'nearest' });
+          } catch {
+            /* ignore */
+          }
+        }
+      };
+      applyDomScroll();
+      requestAnimationFrame(() => {
+        applyDomScroll();
+        requestAnimationFrame(applyDomScroll);
+      });
+    },
+    [layoutMode, setLayoutMode, setScrollTop]
+  );
+
+  /**
+   * SearchBar already debounces typing → setSearchQuery.
+   * This effect only runs on committed query / corpus change: chunked async scan.
+   */
+  useEffect(() => {
+    const q = (searchQuery || '').trim();
+    if (!q) {
+      searchGenRef.current += 1;
+      setSearchBusy(false);
+      startTransition(() => {
+        setSearchHitsStore([], -1);
+      });
+      return undefined;
+    }
+
+    const gen = ++searchGenRef.current;
+    setSearchBusy(true);
+
+    let cancelled = false;
+    void (async () => {
+      const isCancelled = () => cancelled || gen !== searchGenRef.current;
+      try {
+        let st: any = null;
+        if (typeof resolveQuerySearchStateAsync === 'function') {
+          st = await resolveQuerySearchStateAsync(searchDocs, q, { isCancelled });
+        } else if (typeof resolveQuerySearchState === 'function') {
+          await new Promise((r) => setTimeout(r, 0));
+          if (isCancelled()) return;
+          st = resolveQuerySearchState(searchDocs, q);
+        } else {
+          st = { hits: [], hitIndex: -1, shouldJump: false, activeHit: null };
+        }
+        if (isCancelled() || st?.cancelled) return;
+
+        if (isCancelled()) return;
+        setSearchBusy(false);
+        setSearchHasRun(true);
+        const hits = st.hits || [];
+        const hitIndex =
+          st.hitIndex != null && st.hitIndex >= 0
+            ? st.hitIndex
+            : hits.length
+              ? 0
+              : -1;
+        const activeHit = hits[hitIndex] || st.activeHit || null;
+        setSearchHitsStore(hits, hitIndex);
+        // Conversation stays on conversation; only jump to diff rows when already in Diff
+        // or when the active hit is a pure diff-row hit without conversation anchor.
+        if (
+          st.shouldJump &&
+          activeHit &&
+          isNavigableSearchHit(activeHit)
+        ) {
+          queueMicrotask(() => {
+            if (isCancelled()) return;
+            jumpToSearchHit(activeHit);
+          });
+        }
+      } catch {
+        if (!isCancelled()) {
+          setSearchBusy(false);
+          startTransition(() => setSearchHitsStore([], -1));
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [searchQuery, searchDocs, setSearchHitsStore, jumpToSearchHit]);
+
+  const navSearch = useCallback(
+    (delta: number) => {
+      if (!searchHits.length) return;
+      if (typeof resolveNavSearchState !== 'function') return;
+      let st = resolveNavSearchState(searchHits, searchHitIndex, delta);
+      let guard = 0;
+      while (
+        st.activeHit &&
+        !isNavigableSearchHit(st.activeHit) &&
+        guard < searchHits.length
+      ) {
+        st = resolveNavSearchState(searchHits, st.hitIndex, delta);
+        guard += 1;
+        if (st.hitIndex === searchHitIndex) break;
+      }
       setSearchHitIndex(st.hitIndex);
       if (st.shouldJump && st.activeHit) {
-        const top = scrollTopForIndex(
-          st.activeHit.rowIndex,
-          avgH,
-          viewportHeight,
-          virtualRows.length,
-          rowOffsetList
-        );
-        setScrollTop(top);
-        if (listRef.current) listRef.current.scrollTop = top;
+        jumpToSearchHit(st.activeHit);
       }
+    },
+    [searchHits, searchHitIndex, setSearchHitIndex, jumpToSearchHit]
+  );
+
+  const onSearchQueryCommit = useCallback(
+    (q: string) => {
+      // Low-priority store update — never block the input frame.
+      startTransition(() => {
+        setSearchQuery(q);
+      });
+    },
+    [setSearchQuery]
+  );
+
+  const onSearchClose = useCallback(() => {
+    setSearchOpen(false);
+    setSearchHasRun(false);
+  }, [setSearchOpen]);
+
+  const onSearchNext = useCallback(() => navSearch(1), [navSearch]);
+  const onSearchPrev = useCallback(() => navSearch(-1), [navSearch]);
+
+  const threadsMeta = detail?.reviewThreadsMeta || null;
+  const showLoadComments =
+    searchHasRun &&
+    searchOpen &&
+    Boolean(threadsMeta?.hasMore) &&
+    typeof onLoadMoreReviewThreads === 'function';
+
+  const onSearchLoadComments = useCallback(async () => {
+    if (typeof onLoadMoreReviewThreads !== 'function') return;
+    try {
+      // 'all' drains dual-window cursors until every review thread is loaded
+      await onLoadMoreReviewThreads('all');
+      // detail update rebuilds searchDocs → effect re-runs with same query
+    } catch {
+      /* host surfaces stage errors */
     }
-  }
+  }, [onLoadMoreReviewThreads]);
+
+  const searchMatchRows = useMemo(
+    () => searchHitRowIndexSet(searchHits),
+    [searchHits]
+  );
+  const activeSearchHit =
+    searchHitIndex >= 0 && searchHits[searchHitIndex]
+      ? searchHits[searchHitIndex]
+      : null;
+  const activeSearchOccurrence = useMemo(
+    () => occurrenceIndexAmongRowHits(searchHits, searchHitIndex),
+    [searchHits, searchHitIndex]
+  );
 
   function navComment(delta: number) {
     if (!mappedComments.length) return;
@@ -724,6 +1132,20 @@ export function PrModalApp({
     }
   }, [open, setAnimClass]);
 
+  // Lock document scroll while overlay is open so only the panel scrolls
+  // (side sheet otherwise leaves a global scrollbar + nested scroll).
+  useEffect(() => {
+    if (!open || typeof document === 'undefined') return undefined;
+    const sbw =
+      typeof window !== 'undefined' ? measureScrollbarWidth(window) : 0;
+    const snap: ScrollLockSnapshot | null = applyScrollLock(document, {
+      scrollbarWidth: sbw,
+    });
+    return () => {
+      restoreScrollLock(document, snap);
+    };
+  }, [open]);
+
   function onToggleShell() {
     setShellMode((prev) => {
       const next = toggleShell(prev);
@@ -908,8 +1330,30 @@ export function PrModalApp({
 
 
 
+  /**
+   * Unified pending model: only GitHub PENDING review (no separate local batch).
+   * Count + submit/discard all target detail.viewerPendingReview / pending comments.
+   */
+  const serverPendingComments = useMemo(() => {
+    const list = detail?.reviewComments || [];
+    return list.filter((c: any) => c && c.pending);
+  }, [detail?.reviewComments]);
+  const pendingCount = serverPendingComments.length;
+  const serverPendingReviewId =
+    detail?.viewerPendingReview?.id ||
+    serverPendingComments.find((c: any) => c.pendingReviewId)?.pendingReviewId ||
+    null;
+  const hasServerPending = Boolean(serverPendingReviewId) || pendingCount > 0;
+  /** @deprecated alias — all UI uses server pending only */
+  const totalPendingCount = pendingCount || (serverPendingReviewId ? 1 : 0);
+
   async function onLeaveReviewAction(kind: any) {
     if (!detail) return;
+    const body = commentText.trim();
+    // Explicit issue-comment (Conversation "Comment" tab) — never submit PENDING
+    const forceIssueComment =
+      kind === 'issue-comment' || kind === 'post-comment' || kind === 'comment-only';
+
     const mapped =
       typeof mapLeaveReviewAction === 'function'
         ? mapLeaveReviewAction(kind)
@@ -918,14 +1362,9 @@ export function PrModalApp({
           : kind === 'request_changes'
             ? { kind: 'review', event: 'REQUEST_CHANGES' }
             : { kind: 'issue-comment', event: 'COMMENT' };
-    const body = commentText.trim();
-    const pending =
-      typeof pendingReviewCount === 'function'
-        ? pendingReviewCount(pendingReview)
-        : pendingReview?.comments?.length || 0;
 
-    // Plain conversation comment (no pending line comments)
-    if (mapped.kind === 'issue-comment' && !pending) {
+    // Plain conversation comment (Comment tab, or no open PENDING review)
+    if (forceIssueComment || (mapped.kind === 'issue-comment' && !hasServerPending)) {
       if (!body) {
         setActionMsg('Write a comment first.');
         focusCommentBox();
@@ -967,11 +1406,11 @@ export function PrModalApp({
       return;
     }
 
-    // Review path: Approve / Request changes / Comment with pending
+    // Review path: submit existing PENDING review, or create one-shot review
     const event =
       mapped.kind === 'issue-comment' ? 'COMMENT' : mapped.event || 'COMMENT';
-    if (event === 'REQUEST_CHANGES' && !body && !pending) {
-      setActionMsg('Request changes requires a comment body or pending line comments.');
+    if (event === 'REQUEST_CHANGES' && !body && !hasServerPending) {
+      setActionMsg('Request changes requires a comment body or pending review items.');
       focusCommentBox();
       return;
     }
@@ -979,34 +1418,48 @@ export function PrModalApp({
     setActionMsg('');
     try {
       const api = globalThis.PRTreeFetch;
-      if (!api?.submitPullReview) throw new Error('Review API unavailable');
-      const payload: any =
-        typeof buildPendingReviewSubmitPayload === 'function'
-          ? buildPendingReviewSubmitPayload(pendingReview, {
-              event,
-              body,
-              commitId: detail.headSha,
-            })
-          : { event, body, commit_id: detail.headSha, comments: [] };
-      if (!payload) throw new Error('Invalid review payload');
-      await api.submitPullReview(detail.owner, detail.repo, detail.number, {
-        event: payload.event,
-        body: payload.body,
-        commitId: payload.commit_id,
-        comments: payload.comments,
-      });
+      if (hasServerPending && serverPendingReviewId && api?.submitPendingPullReview) {
+        await api.submitPendingPullReview(
+          detail.owner,
+          detail.repo,
+          detail.number,
+          serverPendingReviewId,
+          { event, body }
+        );
+      } else if (api?.submitPullReview) {
+        // No PENDING review: one-shot Approve / Request changes / Comment review
+        await api.submitPullReview(detail.owner, detail.repo, detail.number, {
+          event,
+          body,
+          commitId: detail.headSha,
+          comments: [],
+        });
+      } else {
+        throw new Error('Review API unavailable');
+      }
       setCommentText('');
+      // Clear any legacy local batch if present
       setPendingReview(
         typeof discardPendingReview === 'function'
           ? discardPendingReview()
           : { comments: [], body: '' }
+      );
+      forceDropPendingRef.current = true;
+      setLocalDetail((prev) =>
+        typeof stripPendingReviewFromDetail === 'function'
+          ? stripPendingReviewFromDetail(prev)
+          : prev
+            ? { ...prev, viewerPendingReview: null }
+            : prev
       );
       setActionMsg(
         event === 'APPROVE'
           ? 'Approved.'
           : event === 'REQUEST_CHANGES'
             ? 'Requested changes.'
-            : 'Review comment submitted.'
+            : hasServerPending
+              ? 'Pending review submitted.'
+              : 'Review submitted.'
       );
       await onRefresh?.();
     } catch (err) {
@@ -1171,24 +1624,144 @@ export function PrModalApp({
     }
   }
 
-  async function applyAddAssignee(login: any) {
-    if (!detail || !login) return;
-    const name = String(login).trim();
-    if (!name) return;
+  function mapAssigneesFromApi(result: any, fallback: string[] = []) {
+    if (Array.isArray(result?.assignees)) {
+      return result.assignees
+        .map((u: any) => (typeof u === 'string' ? u : u?.login || ''))
+        .map((s: string) => String(s).trim())
+        .filter(Boolean);
+    }
+    if (Array.isArray(result) && result.every((x) => typeof x === 'string' || x?.login)) {
+      return result
+        .map((u: any) => (typeof u === 'string' ? u : u?.login || ''))
+        .map((s: string) => String(s).trim())
+        .filter(Boolean);
+    }
+    return fallback;
+  }
+
+  function mapLabelsFromApi(result: any, fallback: any[] = []) {
+    // PUT labels returns Label[] directly
+    const list = Array.isArray(result)
+      ? result
+      : Array.isArray(result?.labels)
+        ? result.labels
+        : null;
+    if (!list) return fallback;
+    return list
+      .map((l: any) => {
+        if (typeof l === 'string') return { name: l, color: '' };
+        const name = String(l?.name || '').trim();
+        if (!name) return null;
+        return {
+          name,
+          color: l.color || '',
+          description: l.description || '',
+        };
+      })
+      .filter(Boolean);
+  }
+
+  function mergeAvatarUrls(prev: any, result: any, logins: string[] = []) {
+    const map = {
+      ...(prev?.avatarUrls && typeof prev.avatarUrls === 'object' ? prev.avatarUrls : {}),
+    };
+    for (const u of result?.assignees || []) {
+      const login = u?.login || '';
+      if (login && u?.avatar_url) map[String(login).toLowerCase()] = u.avatar_url;
+    }
+    for (const login of logins) {
+      const key = String(login).toLowerCase();
+      if (!map[key] && prev?.avatarUrls?.[key]) map[key] = prev.avatarUrls[key];
+    }
+    return map;
+  }
+
+  const metaRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function scheduleMetaRefresh() {
+    // One debounced full refresh after the last meta write. Host detailFetchGen
+    // drops any older in-flight fetches so we do not resurrect pre-write meta.
+    if (metaRefreshTimerRef.current) clearTimeout(metaRefreshTimerRef.current);
+    metaRefreshTimerRef.current = setTimeout(() => {
+      metaRefreshTimerRef.current = null;
+      try {
+        const p = onRefresh?.();
+        if (p && typeof (p as Promise<void>).catch === 'function') {
+          void (p as Promise<void>).catch(() => {});
+        }
+      } catch {
+        /* ignore */
+      }
+    }, 450);
+  }
+
+  function commitMetaPatch(patch: Record<string, unknown>) {
+    const base = detail;
+    if (!base) return;
+    const next = {
+      ...base,
+      ...patch,
+      avatarUrls: {
+        ...(base.avatarUrls && typeof base.avatarUrls === 'object' ? base.avatarUrls : {}),
+        ...(patch.avatarUrls && typeof patch.avatarUrls === 'object'
+          ? (patch.avatarUrls as Record<string, string>)
+          : {}),
+      },
+      // Local-only lock so in-session host re-renders cannot clobber the write.
+      // Never persist _metaSeq to host/cache — that blocked empty API results on reopen.
+      _metaSeq: (Number(base._metaSeq) || 0) + 1,
+    };
+    setLocalDetail(next);
+    try {
+      const { _metaSeq: _drop, ...forHost } = next;
+      onPatchDetail?.({
+        ...forHost,
+        assignees: next.assignees,
+        labels: next.labels,
+        avatarUrls: next.avatarUrls,
+      });
+    } catch {
+      /* host optional */
+    }
+    scheduleMetaRefresh();
+  }
+
+  async function applyAddAssignees(logins: any) {
+    if (!detail) return;
+    const names = (Array.isArray(logins) ? logins : [logins])
+      .map((s) => String(s || '').trim())
+      .filter(Boolean);
+    if (!names.length) return;
     setActionBusy(true);
     setActionMsg('');
     try {
       const api = globalThis.PRTreeFetch;
       if (!api?.addAssignees) throw new Error('Add assignees API unavailable');
-      await api.addAssignees(detail.owner, detail.repo, detail.number, [name]);
-      setLocalDetail((prev) => {
-        if (!prev) return prev;
-        const existing = prev.assignees || [];
-        if (existing.some((x) => String(x).toLowerCase() === name.toLowerCase())) return prev;
-        return { ...prev, assignees: [...existing, name] };
-      });
-      setActionMsg(`Assigned ${name}.`);
-      await onRefresh?.();
+      const result = await api.addAssignees(
+        detail.owner,
+        detail.repo,
+        detail.number,
+        names
+      );
+      const fromApi = mapAssigneesFromApi(result, []);
+      const existing = Array.isArray(detail.assignees) ? detail.assignees.slice() : [];
+      const merged = [...existing];
+      for (const name of names) {
+        if (!merged.some((x) => String(x).toLowerCase() === name.toLowerCase())) {
+          merged.push(name);
+        }
+      }
+      // Prefer API assignees when present; otherwise merge into existing.
+      // Empty API list after a successful add is treated as lag — keep merged.
+      const assignees = fromApi.length ? fromApi : merged;
+      const avatarUrls = mergeAvatarUrls(detail, result, assignees);
+      // Trust write response + host cache patch only — full soft-refresh races
+      // with in-flight detail fetches and was resurrecting stale labels/assignees.
+      commitMetaPatch({ assignees, avatarUrls });
+      setActionMsg(
+        names.length === 1 ? `Assigned ${names[0]}.` : `Assigned ${names.length} people.`
+      );
     } catch (err) {
       setActionMsg(err?.message || String(err));
     } finally {
@@ -1206,18 +1779,29 @@ export function PrModalApp({
         : logins.map((id) => ({
             id,
             label: id,
-            meta: { login: id, kind: 'user', avatarUrl: detail.avatarUrls?.[String(id).toLowerCase()] || '' },
+            meta: {
+              login: id,
+              kind: 'user',
+              avatarUrl: detail.avatarUrls?.[String(id).toLowerCase()] || '',
+            },
           }));
     pickerAnchorRef.current = assigneeAddRef.current;
     setPicker({
       type: 'assignee',
-      title: 'Add assignee',
+      title: 'Add assignees',
       options,
       query: '',
       allowFreeText: true,
+      multi: true,
+      confirmLabel: 'Add assignees',
+      onConfirm: (ids: string[]) => {
+        closePicker();
+        void applyAddAssignees(ids);
+      },
+      // single-click fallback
       onPick: (opt) => {
         closePicker();
-        void applyAddAssignee(opt?.id || opt?.label);
+        void applyAddAssignees([opt?.id || opt?.label || opt?.meta?.login]);
       },
     });
   }
@@ -1230,9 +1814,22 @@ export function PrModalApp({
     try {
       const api = globalThis.PRTreeFetch;
       if (!api?.removeAssignees) throw new Error('Remove assignees API unavailable');
-      await api.removeAssignees(detail.owner, detail.repo, detail.number, [login]);
+      const result = await api.removeAssignees(detail.owner, detail.repo, detail.number, [
+        login,
+      ]);
+      const assignees = Array.isArray(result?.assignees)
+        ? result.assignees
+            .map((u: any) => (typeof u === 'string' ? u : u?.login || ''))
+            .map((s: string) => String(s).trim())
+            .filter(Boolean)
+        : (detail.assignees || []).filter(
+            (x) => String(x).toLowerCase() !== String(login).toLowerCase()
+          );
+      commitMetaPatch({
+        assignees,
+        avatarUrls: mergeAvatarUrls(detail, result, assignees),
+      });
       setActionMsg(`Unassigned ${login}.`);
-      await onRefresh?.();
     } catch (err) {
       setActionMsg(err?.message || String(err));
     } finally {
@@ -1248,22 +1845,40 @@ export function PrModalApp({
     try {
       const api = globalThis.PRTreeFetch;
       if (!api?.setIssueLabels) throw new Error('Set labels API unavailable');
-      await api.setIssueLabels(detail.owner, detail.repo, detail.number, next);
-      setLocalDetail((prev) =>
-        prev
-          ? {
-              ...prev,
-              labels: next.map((name) => {
-                const existing = (prev.labels || []).find(
+      const result = await api.setIssueLabels(
+        detail.owner,
+        detail.repo,
+        detail.number,
+        next
+      );
+      let labelsOut;
+      if (Array.isArray(result)) {
+        // PUT /labels returns Label[] (may be empty — clearing is intentional)
+        labelsOut = mapLabelsFromApi(result, []);
+      } else {
+        const fromApi = mapLabelsFromApi(result, []);
+        labelsOut =
+          fromApi.length > 0 || next.length === 0
+            ? fromApi
+            : next.map((name) => {
+                const existing = (detail.labels || []).find(
                   (l) => String(l.name || l).toLowerCase() === name.toLowerCase()
                 );
-                return existing || { name };
-              }),
-            }
-          : prev
+                return existing && typeof existing === 'object'
+                  ? existing
+                  : { name, color: '' };
+              });
+      }
+      // No full soft-refresh: in-flight fetchPrDetail responses were overwriting
+      // this patch with pre-write assignees/labels a few seconds later.
+      commitMetaPatch({ labels: labelsOut });
+      setActionMsg(
+        next.length === 0
+          ? 'Labels cleared.'
+          : next.length === 1
+            ? `Label “${next[0]}” set.`
+            : `Labels updated (${next.length}).`
       );
-      setActionMsg('Labels updated.');
-      await onRefresh?.();
     } catch (err) {
       setActionMsg(err?.message || String(err));
     } finally {
@@ -1273,9 +1888,8 @@ export function PrModalApp({
 
   function openLabelPicker() {
     if (!detail) return;
-    const current = new Set(
-      (detail.labels || []).map((l) => String(l.name || l).toLowerCase())
-    );
+    const currentNames = (detail.labels || []).map((l) => String(l.name || l).trim());
+    const current = new Set(currentNames.map((n) => n.toLowerCase()));
     const common = [
       'bug',
       'enhancement',
@@ -1291,27 +1905,51 @@ export function PrModalApp({
       ...(detail.labels || []),
       ...common.filter((n) => !current.has(n.toLowerCase())),
     ];
+    // Multi-select: include current labels as pre-selected so user can add more
     const options =
       typeof buildLabelOptions === 'function'
-        ? buildLabelOptions(pool).filter((o) => !current.has(String(o.id).toLowerCase()))
-        : pool
-            .map((l) => (typeof l === 'string' ? l : l?.name))
-            .filter((n) => n && !current.has(String(n).toLowerCase()))
-            .map((id) => ({ id, label: id }));
+        ? buildLabelOptions([
+            ...pool,
+            ...common.map((n) => ({ name: n })),
+          ])
+        : [...new Set([...currentNames, ...common])].map((id) => ({
+            id,
+            label: id,
+            meta: { kind: 'label', name: id },
+          }));
+    // de-dupe options by id
+    const seen = new Set();
+    const uniqueOpts = [];
+    for (const o of options) {
+      const id = String(o.id || o.label || '').toLowerCase();
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      uniqueOpts.push(o);
+    }
     pickerAnchorRef.current = labelAddRef.current;
     setPicker({
       type: 'label',
-      title: 'Add label',
-      options,
+      title: 'Set labels',
+      options: uniqueOpts,
       query: '',
       allowFreeText: true,
+      multi: true,
+      initialSelectedIds: currentNames,
+      confirmLabel: 'Apply labels',
+      onConfirm: (ids: string[]) => {
+        closePicker();
+        void applySetLabels(ids);
+      },
       onPick: (opt) => {
+        // single fallback: add one
         closePicker();
         const name = String(opt?.id || opt?.label || '').trim();
         if (!name) return;
-        const names = (detail.labels || []).map((l) => l.name || l);
-        if (names.some((n) => String(n).toLowerCase() === name.toLowerCase())) return;
-        void applySetLabels([...names, name]);
+        const names = currentNames.slice();
+        if (!names.some((n) => String(n).toLowerCase() === name.toLowerCase())) {
+          names.push(name);
+        }
+        void applySetLabels(names);
       },
     });
   }
@@ -1374,6 +2012,17 @@ export function PrModalApp({
     switch (action) {
       case 'toggleDiff':
         onToggleDiff();
+        break;
+      case 'openSearch':
+        setSearchOpen(true);
+        queueMicrotask(() => {
+          try {
+            searchInputRef.current?.focus?.();
+            searchInputRef.current?.select?.();
+          } catch {
+            /* ignore */
+          }
+        });
         break;
       case 'editTitle':
         setTitleEditSignal((n) => n + 1);
@@ -1555,6 +2204,82 @@ export function PrModalApp({
     setShowSelectionComposer(true);
   }
 
+  /**
+   * Post a selection line comment.
+   * @param asPending Start review / Add comment — always GitHub PENDING review
+   */
+  async function postSelectionLineComment(payload: any, { asPending = false } = {}) {
+    const api = globalThis.PRTreeFetch;
+    if (!api?.postReviewComment) throw new Error('Line comment API unavailable');
+    // New pending activity cancels a prior discard force-drop so host PENDING
+    // from this post is not immediately stripped on the next refresh merge.
+    if (asPending) forceDropPendingRef.current = false;
+    const raw = await api.postReviewComment(detail.owner, detail.repo, detail.number, {
+      body: payload.body,
+      path: payload.path,
+      line: payload.line,
+      side: payload.side,
+      commitId: payload.commit_id || detail.headSha,
+      startLine: payload.start_line,
+      startSide: payload.start_side,
+      asPending: Boolean(asPending),
+    });
+    const isPending = Boolean(raw?.pending || asPending || serverPendingReviewId);
+    if (isPending) forceDropPendingRef.current = false;
+    const optimistic = mapRestReviewComment(raw, {
+      body: payload.body,
+      path: payload.path,
+      line: payload.line,
+      startLine: payload.start_line,
+      side: payload.side,
+      author: detail.viewerLogin || '',
+      pending: isPending,
+      pendingReviewId: raw?.pendingReviewId || serverPendingReviewId || null,
+      threadNodeId: raw?.threadNodeId || null,
+    });
+    if (optimistic) {
+      setLocalDetail((prev) => {
+        const withComment =
+          typeof appendOptimisticReviewComment === 'function'
+            ? appendOptimisticReviewComment(prev, { ...optimistic, pending: isPending })
+            : prev
+              ? {
+                  ...prev,
+                  reviewComments: [
+                    ...(prev.reviewComments || []),
+                    { ...optimistic, pending: isPending },
+                  ],
+                }
+              : prev;
+        if (!withComment) return withComment;
+        // New activity cancels discard-strip so merge won't drop this row
+        if (!isPending) {
+          return withComment._dropPending
+            ? { ...withComment, _dropPending: undefined }
+            : withComment;
+        }
+        // Seed viewerPendingReview so toolbar Submit appears immediately
+        const reviewId = optimistic.pendingReviewId || raw?.pendingReviewId || null;
+        const pendingRows = (withComment.reviewComments || []).filter(
+          (c: any) => c?.pending
+        );
+        return {
+          ...withComment,
+          _dropPending: undefined,
+          viewerPendingReview: withComment.viewerPendingReview ||
+            (reviewId
+              ? {
+                  id: reviewId,
+                  nodeId: null,
+                  commentCount: pendingRows.length,
+                }
+              : null),
+        };
+      });
+    }
+    return { raw, isPending };
+  }
+
   async function onSubmitSelectionCommentImmediate() {
     if (!detail || !lineSelection || typeof selectionToCommentPayload !== 'function') return;
     const payload: any = selectionToCommentPayload(lineSelection, {
@@ -1565,41 +2290,16 @@ export function PrModalApp({
     setActionBusy(true);
     setActionMsg('');
     try {
-      const api = globalThis.PRTreeFetch;
-      if (!api?.postReviewComment) throw new Error('Line comment API unavailable');
-      const raw = await api.postReviewComment(detail.owner, detail.repo, detail.number, {
-        body: payload.body,
-        path: payload.path,
-        line: payload.line,
-        side: payload.side,
-        commitId: payload.commit_id,
-        startLine: payload.start_line,
-        startSide: payload.start_side,
-      });
-      const optimistic = mapRestReviewComment(raw, {
-        body: payload.body,
-        path: payload.path,
-        line: payload.line,
-        startLine: payload.start_line,
-        side: payload.side,
-        author: detail.viewerLogin || '',
-      });
-      if (optimistic) {
-        setLocalDetail((prev) =>
-          typeof appendOptimisticReviewComment === 'function'
-            ? appendOptimisticReviewComment(prev, optimistic)
-            : prev
-              ? {
-                  ...prev,
-                  reviewComments: [...(prev.reviewComments || []), optimistic],
-                }
-              : prev
-        );
-      }
+      // If a PENDING review already exists, GitHub forces attach — shown as pending
+      const { isPending } = await postSelectionLineComment(payload, { asPending: false });
       setActionMsg(
-        payload.start_line != null
-          ? `Comment posted on ${payload.path}:${payload.start_line}–${payload.line}.`
-          : `Comment posted on ${payload.path}:${payload.line}.`
+        isPending
+          ? payload.start_line != null
+            ? `Added to pending review on ${payload.path}:${payload.start_line}–${payload.line}.`
+            : `Added to pending review on ${payload.path}:${payload.line}.`
+          : payload.start_line != null
+            ? `Comment posted on ${payload.path}:${payload.start_line}–${payload.line}.`
+            : `Comment posted on ${payload.path}:${payload.line}.`
       );
       dismissSelectionIsland();
       await onRefresh?.();
@@ -1610,81 +2310,198 @@ export function PrModalApp({
     }
   }
 
-  function onSubmitSelectionCommentPending() {
-    if (!lineSelection || typeof selectionToCommentPayload !== 'function') return;
-    if (typeof addPendingComment !== 'function') {
-      setActionMsg('Pending review API unavailable');
-      return;
-    }
+  async function onSubmitSelectionCommentPending() {
+    if (!detail || !lineSelection || typeof selectionToCommentPayload !== 'function') return;
     const payload: any = selectionToCommentPayload(lineSelection, {
       body: selectionDraft,
-      commitId: detail?.headSha,
+      commitId: detail.headSha,
     });
     if (!payload) return;
-    const { batch, added } = addPendingComment(pendingReview, {
-      path: payload.path,
-      line: payload.line,
-      side: payload.side,
-      startLine: payload.start_line,
-      startSide: payload.start_side,
-      body: payload.body,
-    });
-    if (!added) return;
-    setPendingReview(batch);
-    setActionMsg(
-      `Added to pending review (${typeof pendingReviewCount === 'function' ? pendingReviewCount(batch) : batch.comments.length}).`
-    );
-    dismissSelectionIsland();
+    setActionBusy(true);
+    setActionMsg('');
+    try {
+      // Unified: always create/attach GitHub PENDING review (no local-only batch)
+      await postSelectionLineComment(payload, { asPending: true });
+      setActionMsg(
+        hasServerPending
+          ? `Added to pending review on ${payload.path}:${payload.line}.`
+          : `Started pending review on ${payload.path}:${payload.line}.`
+      );
+      dismissSelectionIsland();
+      await onRefresh?.();
+    } catch (err: any) {
+      setActionMsg(err?.message || String(err));
+    } finally {
+      setActionBusy(false);
+    }
   }
 
-  function onDiscardPendingReview() {
-    setPendingReview(
-      typeof discardPendingReview === 'function'
-        ? discardPendingReview()
-        : { comments: [], body: '' }
-    );
-    setActionMsg('Pending review discarded.');
+  async function onDiscardPendingReview() {
+    setActionBusy(true);
+    setActionMsg('');
+    try {
+      const api = globalThis.PRTreeFetch;
+      const reviewId = serverPendingReviewId;
+      if (reviewId && api?.deletePendingPullReview && detail) {
+        await api.deletePendingPullReview(
+          detail.owner,
+          detail.repo,
+          detail.number,
+          reviewId
+        );
+      }
+      // Clear local draft batch
+      setPendingReview(
+        typeof discardPendingReview === 'function'
+          ? discardPendingReview()
+          : { comments: [], body: '' }
+      );
+      // Force-drop pending across the post-discard refresh race.
+      forceDropPendingRef.current = true;
+      setLocalDetail((prev) =>
+        typeof stripPendingReviewFromDetail === 'function'
+          ? stripPendingReviewFromDetail(prev)
+          : prev
+            ? {
+                ...prev,
+                viewerPendingReview: null,
+                reviewComments: (prev.reviewComments || []).filter(
+                  (c: any) => c && !c.pending
+                ),
+              }
+            : prev
+      );
+      setActionMsg('Pending review discarded.');
+      await onRefresh?.();
+    } catch (err: any) {
+      setActionMsg(err?.message || String(err));
+    } finally {
+      setActionBusy(false);
+    }
   }
 
-  async function onReplyToThread(thread: any) {
-    const id = thread?.id || thread?.root?.id;
-    const body = (replyDrafts[String(id)] || '').trim();
-    if (!detail || !id || !body) return;
+  /**
+   * Thread reply — Diff-style dual actions:
+   * - mode `comment`: publish immediately when possible
+   * - mode `pending`: Start review / Add comment (PENDING review)
+   */
+  async function onReplyToThread(thread: any, opts: any = {}) {
+    const mode = opts?.mode === 'pending' ? 'pending' : 'comment';
+    // Draft keys use the inline row / timeline id (usually the root comment id).
+    const draftKey =
+      thread?.id ??
+      thread?.root?.id ??
+      thread?.commentId ??
+      thread?.root?.commentId;
+    const body = (
+      replyDrafts[String(draftKey)] ||
+      (draftKey != null ? replyDrafts[String(Number(draftKey))] : '') ||
+      ''
+    ).trim();
+    if (!detail || draftKey == null || !body) return;
+
+    // GitHub only accepts replies to **top-level** review comments.
+    const rootId =
+      typeof resolveRootReviewCommentId === 'function'
+        ? resolveRootReviewCommentId(detail.reviewComments || [], draftKey)
+        : Number(draftKey);
+    const parentId =
+      typeof normalizeReviewCommentId === 'function'
+        ? normalizeReviewCommentId(rootId ?? draftKey)
+        : Number(rootId ?? draftKey);
+    if (parentId == null || !Number.isFinite(Number(parentId))) {
+      setActionMsg('Cannot reply: invalid review comment id.');
+      return;
+    }
+
     setActionBusy(true);
     setActionMsg('');
     try {
       const api = globalThis.PRTreeFetch;
       if (!api?.replyToReviewComment) throw new Error('Reply API unavailable');
+      // Pending reply cancels a prior discard force-drop
+      if (mode === 'pending') forceDropPendingRef.current = false;
+      const threadNodeId =
+        thread?.threadNodeId || thread?.root?.threadNodeId || null;
+      const parentNodeId =
+        thread?.root?.nodeId ||
+        thread?.root?.node_id ||
+        thread?.nodeId ||
+        null;
       const raw = await api.replyToReviewComment(
         detail.owner,
         detail.repo,
         detail.number,
-        id,
-        body
+        parentId,
+        body,
+        {
+          mode,
+          threadNodeId,
+          parentNodeId,
+          path: thread?.root?.path || thread?.path || '',
+          line: thread?.root?.line ?? thread?.line ?? null,
+          side: thread?.root?.side || thread?.side || 'RIGHT',
+          commitId: detail.headSha || null,
+        }
       );
+      const isPending = Boolean(raw?.pending || mode === 'pending');
+      if (isPending) forceDropPendingRef.current = false;
       const optimistic = mapRestReviewComment(raw, {
         body,
         author: detail.viewerLogin || '',
         path: thread?.root?.path || thread?.path || '',
         line: thread?.root?.line ?? thread?.line ?? null,
         side: thread?.root?.side || 'RIGHT',
-        inReplyToId: id,
-        threadNodeId: thread?.threadNodeId || thread?.root?.threadNodeId || null,
+        inReplyToId: parentId,
+        threadNodeId,
+        pending: isPending,
+        pendingReviewId: raw?.pendingReviewId ?? serverPendingReviewId ?? null,
       });
       if (optimistic) {
-        setLocalDetail((prev) =>
-          typeof appendOptimisticReviewComment === 'function'
-            ? appendOptimisticReviewComment(prev, optimistic)
-            : prev
-              ? {
-                  ...prev,
-                  reviewComments: [...(prev.reviewComments || []), optimistic],
-                }
+        setLocalDetail((prev) => {
+          const withReply =
+            typeof appendOptimisticReviewComment === 'function'
+              ? appendOptimisticReviewComment(prev, {
+                  ...optimistic,
+                  pending: isPending,
+                })
               : prev
-        );
+                ? {
+                    ...prev,
+                    reviewComments: [
+                      ...(prev.reviewComments || []),
+                      { ...optimistic, pending: isPending },
+                    ],
+                  }
+                : prev;
+          if (!withReply || !isPending) return withReply;
+          const reviewId =
+            optimistic.pendingReviewId || raw?.pendingReviewId || serverPendingReviewId;
+          return {
+            ...withReply,
+            _dropPending: undefined,
+            viewerPendingReview:
+              withReply.viewerPendingReview ||
+              (reviewId
+                ? {
+                    id: reviewId,
+                    nodeId: null,
+                    commentCount: (withReply.reviewComments || []).filter(
+                      (c: any) => c?.pending
+                    ).length,
+                  }
+                : null),
+          };
+        });
       }
-      setReplyDrafts((prev: any) => ({ ...prev, [String(id)]: '' }));
-      setActionMsg('Reply posted.');
+      setReplyDrafts((prev: any) => ({ ...prev, [String(draftKey)]: '' }));
+      setActionMsg(
+        isPending
+          ? mode === 'pending'
+            ? 'Reply added to pending review.'
+            : 'Reply attached to your pending review.'
+          : 'Reply posted.'
+      );
       await onRefresh?.();
     } catch (err) {
       setActionMsg(err?.message || String(err));
@@ -1696,6 +2513,17 @@ export function PrModalApp({
   async function onResolveThread(threadNodeId, resolved) {
     if (!threadNodeId) {
       setActionMsg('Resolve requires a review thread id from GitHub.');
+      return;
+    }
+    // Pending (unsubmitted) review threads cannot be resolved on GitHub
+    const pendingOnThread = (detail?.reviewComments || []).some(
+      (c: any) =>
+        c?.pending && c.threadNodeId && String(c.threadNodeId) === String(threadNodeId)
+    );
+    if (pendingOnThread) {
+      setActionMsg(
+        'Cannot resolve a pending review thread. Submit or discard the pending review first.'
+      );
       return;
     }
     setActionBusy(true);
@@ -2128,6 +2956,21 @@ export function PrModalApp({
     await applyRerequestReviewers(logins);
   }
 
+  /** Per-row re-request from the Reviewers widget (single login). */
+  async function onRerequestReviewer(login: any) {
+    if (!detail) return;
+    const name = String(login || '').trim();
+    if (!name) return;
+    const alreadyPending = (detail.requestedReviewers || []).some(
+      (r: any) => String(r || '').toLowerCase() === name.toLowerCase()
+    );
+    if (alreadyPending) {
+      setActionMsg(`${name} is already a requested reviewer.`);
+      return;
+    }
+    await applyRerequestReviewers([name]);
+  }
+
   async function onDeleteReviewComment(commentId: any) {
     if (!detail || commentId == null) return;
     if (!window.confirm('Delete this review comment?')) return;
@@ -2190,7 +3033,8 @@ export function PrModalApp({
       const ui = uiRef.current || {};
       const act = actionsRef.current || {};
 
-      // Escape is handled with layout context (diff vs close modal)
+      // Escape: dismiss nested UI first, otherwise close the whole modal
+      // (including from Diff — do not shrink back to conversation).
       if (e.key === 'Escape') {
         // Inline title editor owns Escape (cancel) while focused
         const ae = typeof document !== 'undefined' ? document.activeElement : null;
@@ -2229,11 +3073,6 @@ export function PrModalApp({
           editorSaveRef.current = null;
           return;
         }
-        if (ui.layoutMode === LAYOUT_DIFF) {
-          e.preventDefault();
-          act.collapseDiff?.();
-          return;
-        }
         e.preventDefault();
         act.onClose?.();
         return;
@@ -2264,6 +3103,18 @@ export function PrModalApp({
         case 'toggleDiff':
           act.onToggleDiff?.();
           break;
+        case 'openSearch':
+          setSearchOpen(true);
+          // Focus after SearchBar mounts
+          queueMicrotask(() => {
+            try {
+              searchInputRef.current?.focus?.();
+              searchInputRef.current?.select?.();
+            } catch {
+              /* ignore */
+            }
+          });
+          break;
         default:
           break;
       }
@@ -2272,8 +3123,8 @@ export function PrModalApp({
     return () => window.removeEventListener('keydown', onKey, true);
   }, [open]);
 
-  const stackItems = useMemo(() => {
-    if (typeof buildStackStrip !== 'function' || !detail?.number) return [];
+  const stackPath = useMemo(() => {
+    if (!detail?.number) return { items: [], branches: [] };
     const list = Array.isArray(openPulls) ? openPulls : [];
     const merged = list.some((p) => Number(p.number) === Number(detail.number))
       ? list
@@ -2288,17 +3139,93 @@ export function PrModalApp({
             draft: detail.draft,
           },
         ];
-    return buildStackStrip(merged, detail.number);
-  }, [openPulls, detail]);
+    if (typeof buildStackPathModel === 'function') {
+      return buildStackPathModel(merged, detail.number, stackPathSelections);
+    }
+    if (typeof buildStackStrip === 'function') {
+      return { items: buildStackStrip(merged, detail.number, stackPathSelections), branches: [] };
+    }
+    return { items: [], branches: [] };
+  }, [openPulls, detail, stackPathSelections]);
+  const stackItems = stackPath.items;
 
-  if (!open) return null;
-
-  const hit = searchHitIndex >= 0 ? searchHits[searchHitIndex] : null;
-  const cls =
-    `${layoutClassName(layoutMode)} ${shellClassName(shellMode)} ${animClass} ${theme.className}`.trim();
   // Independent section loading: initial (no detail yet) vs soft revalidate (detail present)
   const isInitialLoad = Boolean(loading && !detailProp);
   const isRevalidating = Boolean(loading && detailProp);
+  const stageBusy = Boolean(loadStage?.busy);
+  const stageLabel = loadStage?.label ? String(loadStage.label) : '';
+  const showTopLoadBar = Boolean(
+    isRevalidating ||
+      stageBusy ||
+      (isInitialLoad && !detailProp) ||
+      searchBusy
+  );
+
+  // Keep bar/stage mounted through exit so hide transitions can finish.
+  // Use CSS transitions (not only keyframes) — more reliable when class toggles.
+  const LOAD_BAR_EXIT_MS = 280;
+  const [topBarMounted, setTopBarMounted] = useState(false);
+  const [topBarLeaving, setTopBarLeaving] = useState(false);
+  const topBarTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const topBarVisibleRef = useRef(false);
+  const [stageMounted, setStageMounted] = useState(false);
+  const [stageLeaving, setStageLeaving] = useState(false);
+  const [stageDisplayLabel, setStageDisplayLabel] = useState('');
+  const stageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stageVisibleRef = useRef(false);
+
+  useEffect(() => {
+    if (showTopLoadBar) {
+      if (topBarTimerRef.current) {
+        clearTimeout(topBarTimerRef.current);
+        topBarTimerRef.current = null;
+      }
+      topBarVisibleRef.current = true;
+      setTopBarLeaving(false);
+      setTopBarMounted(true);
+      return undefined;
+    }
+    // Exit path: only once per hide cycle
+    if (!topBarVisibleRef.current || !topBarMounted) return undefined;
+    topBarVisibleRef.current = false;
+    setTopBarLeaving(true);
+    topBarTimerRef.current = setTimeout(() => {
+      setTopBarMounted(false);
+      setTopBarLeaving(false);
+      topBarTimerRef.current = null;
+    }, LOAD_BAR_EXIT_MS);
+    return undefined;
+  }, [showTopLoadBar, topBarMounted]);
+
+  useEffect(() => {
+    if (stageLabel) {
+      if (stageTimerRef.current) {
+        clearTimeout(stageTimerRef.current);
+        stageTimerRef.current = null;
+      }
+      stageVisibleRef.current = true;
+      setStageDisplayLabel(stageLabel);
+      setStageLeaving(false);
+      setStageMounted(true);
+      return undefined;
+    }
+    if (!stageVisibleRef.current || !stageMounted) return undefined;
+    stageVisibleRef.current = false;
+    setStageLeaving(true);
+    stageTimerRef.current = setTimeout(() => {
+      setStageMounted(false);
+      setStageLeaving(false);
+      setStageDisplayLabel('');
+      stageTimerRef.current = null;
+    }, LOAD_BAR_EXIT_MS);
+    return undefined;
+  }, [stageLabel, stageMounted]);
+
+  if (!open) return null;
+
+  const hit = activeSearchHit;
+  const cls =
+    `${layoutClassName(layoutMode)} ${shellClassName(shellMode)} ${animClass} ${theme.className}`.trim();
 
   return (
     <div
@@ -2321,20 +3248,38 @@ export function PrModalApp({
         data-color-mode={theme.mode}
         data-shell={shellMode}
       >
-        {isRevalidating ? (
+        {topBarMounted ? (
           <div
-            className="prp-top-loading-bar"
+            className={`prp-top-loading-bar${topBarLeaving ? ' prp-top-loading-bar--leaving' : ''}`}
             role="progressbar"
-            aria-label="Refreshing pull request"
-            aria-busy="true"
+            aria-label={
+              stageDisplayLabel ||
+              (isRevalidating ? 'Refreshing pull request' : 'Loading pull request')
+            }
+            aria-busy={!topBarLeaving}
+            aria-hidden={topBarLeaving ? true : undefined}
           />
+        ) : null}
+        {stageMounted && stageDisplayLabel ? (
+          <div
+            className={`prp-load-stage${stageBusy && !stageLeaving ? ' prp-load-stage--busy' : ''}${
+              stageLeaving ? ' prp-load-stage--leaving' : ''
+            }`}
+            role="status"
+            aria-live="polite"
+            aria-hidden={stageLeaving ? true : undefined}
+          >
+            {stageBusy && !stageLeaving ? (
+              <span className="prp-load-stage__spinner" aria-hidden="true" />
+            ) : null}
+            <span className="prp-load-stage__label">{stageDisplayLabel}</span>
+          </div>
         ) : null}
         <Header
           detail={detail}
           onClose={requestClose}
           onToggleDiff={onToggleDiff}
           layoutMode={layoutMode}
-          themeMode={theme.mode}
           actionBusy={actionBusy}
           onClosePr={onClosePr}
           onReopenPr={onReopenPr}
@@ -2348,17 +3293,32 @@ export function PrModalApp({
           onToggleShell={onToggleShell}
           onSubscribe={onSubscribe}
         />
-        <StackStrip items={stackItems} onOpenPr={onOpenStackPr} />
+        <StackStrip
+          items={stackItems}
+          branches={stackPath.branches}
+          resetKey={prIdentity}
+          onOpenPr={onOpenStackPr}
+          onPathChange={(parentHeadRef, childNumber) => {
+            setStackPathSelections((prev) => ({
+              ...prev,
+              [parentHeadRef]: Number(childNumber),
+            }));
+          }}
+        />
         <SearchBar
           open={searchOpen}
           query={searchQuery}
           hits={searchHits}
           hitIndex={searchHitIndex}
           inputRef={searchInputRef}
-          onChange={setSearchQuery}
-          onClose={() => setSearchOpen(false)}
-          onNext={() => navSearch(1)}
-          onPrev={() => navSearch(-1)}
+          searching={searchBusy}
+          showLoadComments={showLoadComments}
+          onLoadComments={onSearchLoadComments}
+          loadCommentsBusy={Boolean(loadStage?.busy && loadStage?.phase === 'threads')}
+          onChange={onSearchQueryCommit}
+          onClose={onSearchClose}
+          onNext={onSearchNext}
+          onPrev={onSearchPrev}
         />
         {error ? <div className="prp-status prp-status--error">{error}</div> : null}
         {/* Diff layout initial load uses full-body skeleton; conversation uses per-region skeletons */}
@@ -2386,6 +3346,7 @@ export function PrModalApp({
             actionBusy={actionBusy}
             actionMsg={actionMsg}
             onLeaveReviewAction={onLeaveReviewAction}
+            onDiscardPending={onDiscardPendingReview}
             timelinePage={timelinePage}
             onTimelinePage={setTimelinePage}
             sectionLoading={isInitialLoad}
@@ -2401,11 +3362,13 @@ export function PrModalApp({
             onStartEditComment={(kind, id) => setEditingComment({ kind, id })}
             onCancelEditComment={() => setEditingComment(null)}
             onSaveEditComment={onSaveEditComment}
-            pendingCount={
-              typeof pendingReviewCount === 'function'
-                ? pendingReviewCount(pendingReview)
-                : 0
-            }
+            pendingCount={totalPendingCount}
+            onLoadMoreReviewThreads={onLoadMoreReviewThreads}
+            reviewThreadsMeta={detail?.reviewThreadsMeta || null}
+            searchQuery={(searchQuery || '').trim()}
+            searchHits={searchHits}
+            searchHitIndex={searchHitIndex}
+            activeSearchHit={activeSearchHit}
             onAddReviewer={openReviewerPicker}
             onRemoveReviewer={onRemoveReviewer}
             onAddAssignee={openAssigneePicker}
@@ -2422,7 +3385,7 @@ export function PrModalApp({
             onSetMilestone={onSetMilestone}
             onOpenMilestonePicker={openMilestonePicker}
             onClearMilestone={() => void onSetMilestone(true)}
-            onRerequestReview={onRerequestReview}
+            onRerequestReviewer={onRerequestReviewer}
             onMergePr={onMergePr}
             onUpdateBranch={onUpdateBranch}
             onSetDraftStage={onSetDraftStage}
@@ -2434,6 +3397,12 @@ export function PrModalApp({
             assigneeAddRef={assigneeAddRef}
             labelAddRef={labelAddRef}
             milestoneAddRef={milestoneAddRef}
+            replyDrafts={replyDrafts}
+            onReplyDraft={(id: any, text: string) =>
+              setReplyDrafts((prev: any) => ({ ...prev, [String(id)]: text }))
+            }
+            onReplyToThread={onReplyToThread}
+            onResolveThread={onResolveThread}
           />
         ) : null}
         {detail && layoutMode === LAYOUT_DIFF ? (
@@ -2443,13 +3412,22 @@ export function PrModalApp({
             }`}
             style={
               {
+                // Keep a 3-track template for any grid fallbacks; primary layout
+                // is flex + animated --prp-file-nav-width (see styles.css).
                 gridTemplateColumns: fileNavGridTemplate(fileNav),
-                ['--prp-file-nav-width' as any]: `${clampFileNavWidth(fileNav.width)}px`,
+                ['--prp-file-nav-width' as any]: fileNav.collapsed
+                  ? '0px'
+                  : `${clampFileNavWidth(fileNav.width)}px`,
+                ['--prp-file-nav-resizer' as any]: fileNav.collapsed ? '0px' : '4px',
               } as React.CSSProperties
             }
             data-file-nav-collapsed={fileNav.collapsed ? '1' : '0'}
             data-file-nav-width={clampFileNavWidth(fileNav.width)}
           >
+            {/*
+              Nav + resizer stay mounted so width/opacity can animate. Collapse
+              is purely CSS (0-width tracks / flex basis); do not unmount.
+            */}
             <FolderFileTree
               files={annotatedFiles}
               tree={fileTree}
@@ -2480,70 +3458,37 @@ export function PrModalApp({
               title="Drag to resize files navigator"
             />
             <div className="prp-diff-pane">
-              <DiffChrome detail={detail} />
-              <div className="prp-diff-pane__head">
-                <div
-                  className="prp-diff-mode"
-                  role="radiogroup"
-                  aria-label="Diff view mode"
-                >
-                  <label className="prp-diff-mode__opt">
-                    <input
-                      type="radio"
-                      name="prp-diff-mode"
-                      value="unified"
-                      checked={diffMode === 'unified'}
-                      onChange={() => {
-                        setDiffMode('unified');
-                        setScrollTop(0);
-                        if (listRef.current) listRef.current.scrollTop = 0;
-                      }}
-                    />
-                    Unified
-                  </label>
-                  <label className="prp-diff-mode__opt">
-                    <input
-                      type="radio"
-                      name="prp-diff-mode"
-                      value="split"
-                      checked={diffMode === 'split'}
-                      onChange={() => {
-                        setDiffMode('split');
-                        setScrollTop(0);
-                        if (listRef.current) listRef.current.scrollTop = 0;
-                      }}
-                    />
-                    Split
-                  </label>
-                </div>
-                <DiffCommitFilter
-                  commits={detail.commits || []}
-                  filter={diffCommitFilter}
-                  onChange={applyDiffCommitFilter}
-                  loading={diffCommitLoading}
-                  error={diffCommitError}
-                  label={diffCommitLabel}
-                  disabled={!onFetchCompareFiles}
-                />
-                <span className="prp-muted" data-diff-mode={diffMode}>
-                  {diffMode}
-                  {diffFilesOverride
-                    ? ` · filtered · ${annotatedFiles.length} files · ${virtualRows.length} rows`
-                    : ` · ${virtualRows.length} rows · click single · drag multi`}
-                </span>
-                <CommentNavBar
-                  comments={mappedComments}
-                  commentIndex={commentIndex}
-                  onPrev={() => navComment(-1)}
-                  onNext={() => navComment(1)}
-                />
-                {actionMsg ? <span className="prp-action-inline"> · {actionMsg}</span> : null}
-              </div>
-              <PendingReviewBar
-                batch={pendingReview}
-                onDiscard={onDiscardPendingReview}
+              <DiffToolbar
+                detail={detail}
+                fileNavCollapsed={fileNav.collapsed}
+                onToggleFileNav={onToggleFileNavCollapse}
+                annotatedFileCount={annotatedFiles.length}
+                rowCount={virtualRows.length}
+                filtered={Boolean(diffFilesOverride)}
+                diffMode={diffMode}
+                onDiffMode={(mode: string) => {
+                  setDiffMode(mode);
+                  setScrollTop(0);
+                  if (listRef.current) listRef.current.scrollTop = 0;
+                }}
+                commits={detail.commits || []}
+                commitFilter={diffCommitFilter}
+                onCommitFilter={applyDiffCommitFilter}
+                commitLoading={diffCommitLoading}
+                commitError={diffCommitError}
+                commitLabel={diffCommitLabel}
+                commitDisabled={!onFetchCompareFiles}
+                comments={mappedComments}
+                commentIndex={commentIndex}
+                onPrevComment={() => navComment(-1)}
+                onNextComment={() => navComment(1)}
+                pendingBatch={null}
+                pendingServerCount={pendingCount}
+                totalPendingCount={totalPendingCount}
+                onDiscardPending={onDiscardPendingReview}
                 onLeaveReviewAction={onLeaveReviewAction}
                 actionBusy={actionBusy}
+                actionMsg={actionMsg}
               />
               <VirtualDiff
                 virtualRows={virtualRows}
@@ -2557,6 +3502,10 @@ export function PrModalApp({
                   hit?.rowIndex ??
                   (commentIndex >= 0 ? mappedComments[commentIndex]?.rowIndex : undefined)
                 }
+                searchQuery={(searchQuery || '').trim()}
+                searchMatchRows={searchMatchRows}
+                activeSearchHit={hit}
+                activeSearchOccurrence={activeSearchOccurrence}
                 onScroll={(top) => setScrollTop(top)}
                 selection={lineSelection}
                 selecting={selecting}
@@ -2572,6 +3521,7 @@ export function PrModalApp({
                   setReplyDrafts((prev) => ({ ...prev, [String(id)]: text }))
                 }
                 onReply={onReplyToThread}
+                pendingCount={totalPendingCount}
                 onResolve={onResolveThread}
                 onDeleteReviewComment={onDeleteReviewComment}
                 onEditReviewComment={onStartEditReviewComment}
@@ -2617,11 +3567,7 @@ export function PrModalApp({
                   actionBusy={actionBusy}
                   listRef={listRef}
                   leaving={selectionIslandLeaving}
-                  pendingCount={
-                    typeof pendingReviewCount === 'function'
-                      ? pendingReviewCount(pendingReview)
-                      : 0
-                  }
+                  pendingCount={totalPendingCount}
                   onUploadFile={onUploadFile}
                   linkCtx={{
                     owner: detail.owner,
@@ -2650,6 +3596,14 @@ export function PrModalApp({
           onPick={(opt) => picker?.onPick?.(opt)}
           onClose={closePicker}
           allowFreeText={picker?.allowFreeText !== false}
+          multi={Boolean(picker?.multi)}
+          initialSelectedIds={picker?.initialSelectedIds || null}
+          onConfirm={
+            picker?.onConfirm
+              ? (ids: string[]) => picker.onConfirm(ids)
+              : null
+          }
+          confirmLabel={picker?.confirmLabel || 'Apply'}
           anchorRef={pickerAnchorRef}
           placement="top"
           placeholder={
@@ -2657,10 +3611,12 @@ export function PrModalApp({
             (picker?.type === 'base'
               ? 'Filter or type a branch…'
               : picker?.type === 'label'
-                ? 'Filter or type a label…'
+                ? 'Filter or type labels…'
                 : picker?.type === 'milestone'
                   ? 'Filter or type a milestone number…'
-                  : 'Filter or type a username…')
+                  : picker?.type === 'assignee'
+                    ? 'Filter or type usernames…'
+                    : 'Filter or type a username…')
           }
         />
       </div>

@@ -79,8 +79,13 @@ function buildConversationTimeline(detail, opts = {}) {
         author: r.author,
         body: r.body || '',
         at: r.createdAt,
+        pending: Boolean(r.pending),
+        nodeId: r.nodeId || r.node_id || null,
         canDelete: Boolean(
-          detail.viewerLogin && r.author && r.author === detail.viewerLogin
+          detail.viewerLogin &&
+            r.author &&
+            r.author === detail.viewerLogin &&
+            !r.pending
         ),
       }));
     const snippet = snippetFn
@@ -88,12 +93,22 @@ function buildConversationTimeline(detail, opts = {}) {
           {
             path: c.path,
             line: c.line,
+            originalLine: c.originalLine ?? c.original_line,
             startLine: c.startLine ?? c.start_line,
             side: c.side,
+            diffHunk: c.diffHunk || c.diff_hunk || '',
           },
           files
         )
       : null;
+    const displayLine =
+      c.line != null
+        ? Number(c.line)
+        : c.originalLine != null
+          ? Number(c.originalLine)
+          : c.original_line != null
+            ? Number(c.original_line)
+            : null;
     items.push({
       key: `thread-${c.id || i}`,
       kind: 'review-thread',
@@ -102,15 +117,22 @@ function buildConversationTimeline(detail, opts = {}) {
       body: c.body || '',
       at: c.createdAt,
       path: c.path,
-      line: c.line,
+      line: displayLine,
       startLine: c.startLine ?? c.start_line ?? null,
       side: c.side || 'RIGHT',
       resolved: Boolean(c.resolved),
+      outdated: Boolean(c.outdated),
       threadNodeId: c.threadNodeId || null,
+      // PRRC_… needed for pending-review GraphQL replies (REST GET 404s on PENDING)
+      nodeId: c.nodeId || c.node_id || null,
+      pending: Boolean(c.pending),
       replies,
       snippet,
       canDelete: Boolean(
-        detail.viewerLogin && c.author && c.author === detail.viewerLogin
+        detail.viewerLogin &&
+          c.author &&
+          c.author === detail.viewerLogin &&
+          !c.pending
       ),
     });
   });
@@ -150,9 +172,55 @@ function pageTimelineItems(items, opts = {}) {
   };
 }
 
+/**
+ * Split newest-first timeline into dual windows + middle gap.
+ * @param {Array} items
+ * @param {object|null} meta
+ */
+function partitionTimelineWithThreadGap(items, meta = null) {
+  const list = Array.isArray(items) ? items : [];
+  const hiddenCount = Math.max(0, Number(meta?.hiddenCount) || 0);
+  const oldestIds = new Set(
+    (meta?.oldestThreadIds || []).map(String).filter(Boolean)
+  );
+  const showGap = Boolean(meta?.hasMore) && hiddenCount > 0;
+
+  if (!showGap || oldestIds.size === 0) {
+    return {
+      top: list,
+      bottom: [],
+      hiddenCount,
+      showGap,
+    };
+  }
+
+  const top = [];
+  const bottom = [];
+  for (const item of list) {
+    const tid = item?.threadNodeId != null ? String(item.threadNodeId) : null;
+    if (
+      (item?.kind === 'review-thread' || item?.kind === 'review-comment') &&
+      tid &&
+      oldestIds.has(tid)
+    ) {
+      bottom.push(item);
+    } else {
+      top.push(item);
+    }
+  }
+
+  return {
+    top,
+    bottom,
+    hiddenCount,
+    showGap: showGap && bottom.length > 0,
+  };
+}
+
 const api = {
   buildConversationTimeline,
   pageTimelineItems,
+  partitionTimelineWithThreadGap,
 };
 
 if (typeof module !== 'undefined' && module.exports) {

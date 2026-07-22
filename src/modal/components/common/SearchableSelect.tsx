@@ -1,10 +1,11 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { filterSelectOptions, labelColorCss } from '@lib/searchable-select';
 import { Avatar } from './Avatar';
 
 /**
- * Anchored popover searchable select (opens above trigger by default).
- * Pass `anchorRef` for positioning; falls back to centered layer when missing.
+ * Anchored popover searchable select.
+ * - Single: click option → onPick
+ * - Multi: toggle options, free-text Enter adds to selection, Apply → onConfirm(ids)
  */
 export function SearchableSelect({
   open,
@@ -18,33 +19,71 @@ export function SearchableSelect({
   emptyLabel = 'No matches',
   allowFreeText = true,
   anchorRef,
+  anchorKey = null,
   placement = 'top',
+  multi = false,
+  /** Initial selected ids when multi opens */
+  initialSelectedIds = null,
+  onConfirm = null,
+  confirmLabel = 'Apply',
 }: any) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
+  const [selected, setSelected] = useState<string[]>([]);
 
-  useLayoutEffect(() => {
+  // Reset multi selection when opening
+  useEffect(() => {
     if (!open) return;
-    const el = anchorRef?.current as HTMLElement | null;
-    if (!el) {
-      setPos(null);
+    if (!multi) {
+      setSelected([]);
       return;
     }
-    const r = el.getBoundingClientRect();
-    const width = Math.max(220, Math.min(320, r.width + 40));
-    let top = placement === 'bottom' ? r.bottom + 6 : r.top - 8;
-    let left = Math.min(Math.max(8, r.left), window.innerWidth - width - 8);
-    // After paint, flip if off-screen
-    requestAnimationFrame(() => {
-      const h = panelRef.current?.offsetHeight || 200;
-      if (placement !== 'bottom' && r.top - h < 8) {
-        top = r.bottom + 6;
-      } else if (placement === 'top') {
+    const init = Array.isArray(initialSelectedIds)
+      ? initialSelectedIds.map((x) => String(x))
+      : [];
+    setSelected(init);
+  }, [open, multi, initialSelectedIds]);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setPos(null);
+      return undefined;
+    }
+
+    function measure() {
+      const el = (anchorRef?.current || null) as HTMLElement | null;
+      if (!el || typeof el.getBoundingClientRect !== 'function') return;
+      const r = el.getBoundingClientRect();
+      if (!r.width && !r.height && r.top === 0 && r.left === 0) return;
+
+      const width = Math.max(220, Math.min(320, Math.max(r.width, 200)));
+      let left = Math.min(Math.max(8, r.left), window.innerWidth - width - 8);
+      let top = placement === 'bottom' ? r.bottom + 6 : Math.max(8, r.top - 8);
+      const h = panelRef.current?.offsetHeight || 0;
+      if (placement === 'top' && h > 0) {
         top = r.top - h - 6;
+        if (top < 8) top = r.bottom + 6;
+      } else if (placement === 'bottom' && h > 0) {
+        if (r.bottom + 6 + h > window.innerHeight - 8) {
+          top = Math.max(8, r.top - h - 6);
+        }
       }
       setPos({ top: Math.max(8, top), left, width });
+    }
+
+    measure();
+    const id = requestAnimationFrame(() => {
+      measure();
+      requestAnimationFrame(measure);
     });
-  }, [open, anchorRef, placement, query, options?.length]);
+    window.addEventListener('resize', measure);
+    window.addEventListener('scroll', measure, true);
+    return () => {
+      cancelAnimationFrame(id);
+      window.removeEventListener('resize', measure);
+      window.removeEventListener('scroll', measure, true);
+    };
+  }, [open, anchorRef, anchorKey, placement, query, options?.length, selected.length, multi]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -68,6 +107,11 @@ export function SearchableSelect({
     };
   }, [open, onClose, anchorRef]);
 
+  const selectedSet = useMemo(
+    () => new Set(selected.map((s) => s.toLowerCase())),
+    [selected]
+  );
+
   if (!open) return null;
 
   const filtered =
@@ -76,7 +120,30 @@ export function SearchableSelect({
       : (options || []).slice(0, 50);
   const free = String(query || '').trim();
 
+  function toggleId(id: string) {
+    const raw = String(id || '').trim();
+    if (!raw) return;
+    setSelected((prev) => {
+      const key = raw.toLowerCase();
+      const has = prev.some((x) => x.toLowerCase() === key);
+      if (has) return prev.filter((x) => x.toLowerCase() !== key);
+      return [...prev, raw];
+    });
+  }
+
   function pickEnter() {
+    if (multi) {
+      if (filtered[0]) {
+        toggleId(String(filtered[0].id || filtered[0].label || ''));
+        onQuery?.('');
+        return;
+      }
+      if (allowFreeText && free) {
+        toggleId(free);
+        onQuery?.('');
+      }
+      return;
+    }
     if (filtered[0]) {
       onPick?.(filtered[0]);
       return;
@@ -86,25 +153,52 @@ export function SearchableSelect({
     }
   }
 
+  function confirmMulti() {
+    const ids = selected.slice();
+    if (typeof onConfirm === 'function') onConfirm(ids);
+    else if (ids.length === 1) onPick?.({ id: ids[0], label: ids[0] });
+  }
+
   const style: React.CSSProperties = pos
     ? {
         position: 'fixed',
         top: pos.top,
         left: pos.left,
         width: pos.width,
-        zIndex: 80,
+        zIndex: 120000,
       }
-    : {};
+    : { zIndex: 120000 };
 
   const panel = (
     <div
       ref={panelRef}
-      className={`prp-sselect-panel prp-sselect-panel--popover${pos ? '' : ' prp-sselect-panel--center'}`}
+      className={`prp-sselect-panel prp-sselect-panel--popover${pos ? '' : ' prp-sselect-panel--center'}${
+        multi ? ' prp-sselect-panel--multi' : ''
+      }`}
       role="dialog"
       aria-label={title || 'Select'}
+      aria-multiselectable={multi || undefined}
       style={pos ? style : undefined}
     >
       {title ? <div className="prp-sselect-title">{title}</div> : null}
+      {multi && selected.length ? (
+        <div className="prp-sselect-selected" aria-label="Selected">
+          {selected.map((id) => (
+            <button
+              key={id}
+              type="button"
+              className="prp-sselect-chip"
+              onClick={() => toggleId(id)}
+              title={`Remove ${id}`}
+            >
+              <span className="prp-sselect-chip__label">{id}</span>
+              <span className="prp-sselect-chip__x" aria-hidden="true">
+                ×
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : null}
       <input
         className="prp-sselect-input"
         autoFocus
@@ -117,6 +211,10 @@ export function SearchableSelect({
             onClose?.();
           } else if (e.key === 'Enter') {
             e.preventDefault();
+            if (multi && !filtered[0] && !free && selected.length) {
+              confirmMulti();
+              return;
+            }
             pickEnter();
           }
         }}
@@ -124,25 +222,48 @@ export function SearchableSelect({
       <ul className="prp-sselect-list">
         {filtered.length === 0 ? (
           <li className="prp-sselect-empty prp-muted">
-            {allowFreeText && free ? `Press Enter to use “${free}”` : emptyLabel}
+            {allowFreeText && free
+              ? multi
+                ? `Press Enter to add “${free}”`
+                : `Press Enter to use “${free}”`
+              : emptyLabel}
           </li>
         ) : (
           filtered.map((o: any) => {
             const meta = o.meta || {};
             const kind = String(meta.kind || '');
+            const id = String(o.id || o.label || '');
+            const isOn = selectedSet.has(id.toLowerCase());
             const colorCss =
               typeof labelColorCss === 'function'
                 ? labelColorCss(meta.color)
                 : meta.color
                   ? `#${String(meta.color).replace(/^#/, '')}`
                   : '';
-            const showLabelSwatch = kind === 'label' || (kind !== 'user' && Boolean(meta.color));
+            const showLabelSwatch =
+              kind === 'label' || (kind !== 'user' && Boolean(meta.color));
             const showAvatar =
               kind === 'user' ||
               (!showLabelSwatch && (Boolean(meta.login) || Boolean(meta.avatarUrl)));
             return (
-              <li key={String(o.id)}>
-                <button type="button" className="prp-sselect-item" onClick={() => onPick?.(o)}>
+              <li key={id}>
+                <button
+                  type="button"
+                  className={`prp-sselect-item${isOn ? ' prp-sselect-item--selected' : ''}`}
+                  aria-selected={multi ? isOn : undefined}
+                  onClick={() => {
+                    if (multi) toggleId(id);
+                    else onPick?.(o);
+                  }}
+                >
+                  {multi ? (
+                    <span
+                      className={`prp-sselect-check${isOn ? ' prp-sselect-check--on' : ''}`}
+                      aria-hidden="true"
+                    >
+                      {isOn ? '✓' : ''}
+                    </span>
+                  ) : null}
                   {showLabelSwatch ? (
                     <span
                       className="prp-sselect-item__swatch"
@@ -170,6 +291,22 @@ export function SearchableSelect({
           })
         )}
       </ul>
+      {multi ? (
+        <div className="prp-sselect-footer">
+          <button type="button" className="prp-btn prp-btn--size-sm" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="prp-btn prp-btn--primary prp-btn--size-sm"
+            // Empty selection is valid for some callers (e.g. commits → full PR diff).
+            onClick={confirmMulti}
+          >
+            {confirmLabel}
+            {selected.length ? ` (${selected.length})` : ''}
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 

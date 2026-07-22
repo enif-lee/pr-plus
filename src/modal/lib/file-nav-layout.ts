@@ -6,8 +6,11 @@
 export const FILE_NAV_MIN_WIDTH = 160;
 export const FILE_NAV_MAX_WIDTH = 520;
 export const FILE_NAV_DEFAULT_WIDTH = 260;
-/** Thin rail width when navigator is collapsed (expand control only). */
-export const FILE_NAV_RAIL_WIDTH = 28;
+/**
+ * Legacy rail width (no longer used for collapsed layout — expand is toolbar-only).
+ * Kept for any callers that still reference the constant.
+ */
+export const FILE_NAV_RAIL_WIDTH = 0;
 export const FILE_NAV_PREF_KEY = 'prp:file-nav';
 
 export type FileNavPref = {
@@ -56,7 +59,10 @@ export function nextFileNavWidthFromDrag(
 }
 
 /**
- * CSS grid-template-columns for [nav | resizer | pane].
+ * CSS grid-template-columns for Diff layout (legacy helper; layout is flex now).
+ * Always returns 3 tracks so open/close can animate first-column width
+ * without auto-placement gaps: expanded `Wpx Rpx 1fr`, collapsed `0 0 1fr`.
+ * Children must stay mounted with stable order (nav | resizer | pane).
  */
 export function fileNavGridTemplate(
   pref: Partial<FileNavPref> | null | undefined,
@@ -65,7 +71,7 @@ export function fileNavGridTemplate(
   const resizer = Number.isFinite(opts.resizerPx as number) ? (opts.resizerPx as number) : 4;
   const collapsed = Boolean(pref?.collapsed);
   if (collapsed) {
-    return `${FILE_NAV_RAIL_WIDTH}px 0 minmax(0, 1fr)`;
+    return `0px 0px minmax(0, 1fr)`;
   }
   const w = clampFileNavWidth(pref?.width, {
     min: opts.min,
@@ -73,6 +79,9 @@ export function fileNavGridTemplate(
   });
   return `${w}px ${resizer}px minmax(0, 1fr)`;
 }
+
+/** Default open state for the files navigator (expanded). */
+export const FILE_NAV_DEFAULT_COLLAPSED = false;
 
 export function serializeFileNavPref(pref: Partial<FileNavPref> | null | undefined): string {
   const width = clampFileNavWidth(pref?.width);
@@ -82,7 +91,7 @@ export function serializeFileNavPref(pref: Partial<FileNavPref> | null | undefin
 
 export function parseFileNavPref(raw: unknown): FileNavPref {
   const fallback: FileNavPref = {
-    collapsed: false,
+    collapsed: FILE_NAV_DEFAULT_COLLAPSED,
     width: FILE_NAV_DEFAULT_WIDTH,
   };
   if (raw == null || raw === '') return { ...fallback };
@@ -112,12 +121,15 @@ export function loadFileNavPref(
   storage: { getItem?: (k: string) => string | null } | null | undefined
 ): FileNavPref {
   if (!storage || typeof storage.getItem !== 'function') {
-    return { collapsed: false, width: FILE_NAV_DEFAULT_WIDTH };
+    return { collapsed: FILE_NAV_DEFAULT_COLLAPSED, width: FILE_NAV_DEFAULT_WIDTH };
   }
   try {
-    return parseFileNavPref(storage.getItem(FILE_NAV_PREF_KEY));
+    const pref = parseFileNavPref(storage.getItem(FILE_NAV_PREF_KEY));
+    // Width is restored; open/closed always starts expanded so Diff opens with
+    // the navigator visible (user can still collapse for the session / persist).
+    return { ...pref, collapsed: FILE_NAV_DEFAULT_COLLAPSED };
   } catch {
-    return { collapsed: false, width: FILE_NAV_DEFAULT_WIDTH };
+    return { collapsed: FILE_NAV_DEFAULT_COLLAPSED, width: FILE_NAV_DEFAULT_WIDTH };
   }
 }
 

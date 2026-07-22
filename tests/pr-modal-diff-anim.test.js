@@ -72,7 +72,14 @@ assert.ok(appSrc.includes('onClosePr') && appSrc.includes('onReopenPr'));
 assert.ok(appSrc.includes('beginLineSelection') || appSrc.includes('onSelectionStart'));
 assert.ok(appSrc.includes('finalizeSelection') || appSrc.includes('selectionGestureMode'));
 assert.ok(appSrc.includes('role="radiogroup"') || appSrc.includes('prp-diff-mode'));
-assert.ok(appSrc.includes("setDiffMode('unified')") && appSrc.includes("setDiffMode('split')"));
+assert.ok(
+  (appSrc.includes("setDiffMode('unified')") && appSrc.includes("setDiffMode('split')")) ||
+    (appSrc.includes('DiffToolbar') &&
+      appSrc.includes('onDiffMode') &&
+      (appSrc.includes('unified') && appSrc.includes('split'))),
+  'unified/split via App or DiffToolbar'
+);
+assert.ok(appSrc.includes('DiffToolbar') || appSrc.includes('prp-diff-toolbar'), 'unified Diff toolbar');
 assert.ok(appSrc.includes("flattenFilesToVirtualRows(annotatedFiles, diffMode"));
 assert.ok(appSrc.includes('Filter files') || appSrc.includes('fileQuery'));
 assert.ok(appSrc.includes('onToggleViewed') || appSrc.includes('viewedPaths'));

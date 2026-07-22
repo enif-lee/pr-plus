@@ -4,6 +4,7 @@ const {
   insertMarkdownAtCursor,
   guessContentType,
   mergeDetailPreserveOptimistic,
+  stripPendingReviewFromDetail,
   buildAssetRepoPath,
 } = require('../src/modal/lib/composer-attach.ts');
 
@@ -75,10 +76,222 @@ assert.equal(row.threadNodeId, 'TH_1');
 
 // Host-only comments kept
 const m3 = mergeDetailPreserveOptimistic(
-  { reviewComments: [], comments: [{ id: 1, body: 'a' }] },
-  { reviewComments: [{ id: 9, body: 'r' }], comments: [{ id: 2, body: 'b' }] }
+  { number: 1, owner: 'o', repo: 'r', reviewComments: [], comments: [{ id: 1, body: 'a' }] },
+  { number: 1, owner: 'o', repo: 'r', reviewComments: [{ id: 9, body: 'r' }], comments: [{ id: 2, body: 'b' }] }
 );
 assert.equal(m3.comments.length, 2);
 assert.equal(m3.reviewComments.length, 1);
+
+// Different PR identity → take host wholesale (no cross-PR optimistic bleed)
+const cross = mergeDetailPreserveOptimistic(
+  { number: 1, owner: 'o', repo: 'r', assignees: ['alice'], _metaSeq: 3 },
+  { number: 2, owner: 'o', repo: 'r', assignees: [], labels: [{ name: 'bug' }] }
+);
+assert.equal(cross.number, 2);
+assert.deepEqual(cross.assignees, []);
+assert.equal(cross.labels[0].name, 'bug');
+
+// Local meta write must survive stale host rehydrate (non-empty stale labels)
+const afterWrite = mergeDetailPreserveOptimistic(
+  {
+    number: 9,
+    owner: 'o',
+    repo: 'r',
+    assignees: [],
+    labels: [{ name: 'documentation' }],
+    _metaSeq: 2,
+  },
+  {
+    number: 9,
+    owner: 'o',
+    repo: 'r',
+    assignees: ['stale-user'],
+    labels: [{ name: 'bug' }, { name: 'wontfix' }],
+    _metaSeq: 0,
+  }
+);
+assert.deepEqual(afterWrite.assignees, []);
+assert.equal(afterWrite.labels.length, 1);
+assert.equal(afterWrite.labels[0].name, 'documentation');
+assert.equal(afterWrite._metaSeq, 2);
+
+// Once host matches local write, drop the meta lock
+const synced = mergeDetailPreserveOptimistic(
+  {
+    number: 9,
+    owner: 'o',
+    repo: 'r',
+    assignees: ['enif-lee'],
+    labels: [{ name: 'documentation' }],
+    _metaSeq: 2,
+  },
+  {
+    number: 9,
+    owner: 'o',
+    repo: 'r',
+    assignees: ['enif-lee'],
+    labels: [{ name: 'documentation', color: '0075ca' }],
+    _metaSeq: 0,
+  }
+);
+assert.equal(synced.labels[0].color, '0075ca');
+assert.equal(synced._metaSeq, 0);
+
+// Intentional clear (empty arrays) held while host is still stale
+const cleared = mergeDetailPreserveOptimistic(
+  {
+    number: 9,
+    owner: 'o',
+    repo: 'r',
+    assignees: [],
+    labels: [],
+    _metaSeq: 1,
+  },
+  {
+    number: 9,
+    owner: 'o',
+    repo: 'r',
+    assignees: ['ghost'],
+    labels: [{ name: 'bug' }],
+  }
+);
+assert.deepEqual(cleared.assignees, []);
+assert.deepEqual(cleared.labels, []);
+
+// stripPendingReviewFromDetail removes pending rows + clears viewerPendingReview
+const stripped = stripPendingReviewFromDetail({
+  number: 1,
+  owner: 'o',
+  repo: 'r',
+  viewerPendingReview: { id: 9, commentCount: 2 },
+  reviewComments: [
+    { id: 1, body: 'published', pending: false },
+    { id: 2, body: 'pending reply', pending: true, inReplyToId: 1 },
+    { id: 3, body: 'pending root', pending: true },
+  ],
+});
+assert.equal(stripped.viewerPendingReview, null);
+assert.equal(stripped.reviewComments.length, 1);
+assert.equal(stripped.reviewComments[0].id, 1);
+
+// After explicit discard strip (no viewerPendingReview on prev), host empty → drop zombies
+const afterDiscard = mergeDetailPreserveOptimistic(
+  {
+    number: 1,
+    owner: 'o',
+    repo: 'r',
+    viewerPendingReview: null,
+    reviewComments: [
+      { id: 1, body: 'root', pending: false },
+      { id: 99, body: 'zombie pending', pending: true },
+    ],
+  },
+  {
+    number: 1,
+    owner: 'o',
+    repo: 'r',
+    viewerPendingReview: null,
+    reviewComments: [{ id: 1, body: 'root', pending: false }],
+  }
+);
+assert.equal(afterDiscard.viewerPendingReview, null);
+assert.equal(afterDiscard.reviewComments.length, 1);
+assert.ok(!afterDiscard.reviewComments.some((c) => String(c.id) === '99'));
+
+// strip() sets _dropPending so even if prev still has viewerPendingReview id
+// (React setState race before strip commit), discard merge drops zombies
+const stripRace = stripPendingReviewFromDetail({
+  number: 1,
+  owner: 'o',
+  repo: 'r',
+  viewerPendingReview: { id: 9 },
+  reviewComments: [
+    { id: 1, body: 'root', pending: false },
+    { id: 50, body: 'pending', pending: true },
+  ],
+});
+assert.equal(stripRace._dropPending, true);
+assert.equal(stripRace.viewerPendingReview, null);
+// Simulate race: merge from a prev that still held review id but also _dropPending
+const stripRaceMerge = mergeDetailPreserveOptimistic(
+  {
+    number: 1,
+    owner: 'o',
+    repo: 'r',
+    viewerPendingReview: { id: 9 },
+    _dropPending: true,
+    reviewComments: [
+      { id: 1, body: 'root', pending: false },
+      { id: 50, body: 'pending', pending: true },
+    ],
+  },
+  {
+    number: 1,
+    owner: 'o',
+    repo: 'r',
+    viewerPendingReview: null,
+    reviewComments: [{ id: 1, body: 'root', pending: false }],
+  }
+);
+assert.equal(stripRaceMerge.viewerPendingReview, null);
+assert.ok(
+  !stripRaceMerge.reviewComments.some((c) => String(c.id) === '50'),
+  '_dropPending must drop pending across discard race'
+);
+
+// Race: just posted (local still has viewerPendingReview) but host refresh is empty
+const raceKeep = mergeDetailPreserveOptimistic(
+  {
+    number: 1,
+    owner: 'o',
+    repo: 'r',
+    viewerPendingReview: { id: 9 },
+    reviewComments: [
+      { id: 1, body: 'root', pending: false },
+      { id: 50, body: 'just posted', pending: true },
+    ],
+  },
+  {
+    number: 1,
+    owner: 'o',
+    repo: 'r',
+    viewerPendingReview: null,
+    reviewComments: [{ id: 1, body: 'root', pending: false }],
+  }
+);
+assert.ok(
+  raceKeep.reviewComments.some((c) => String(c.id) === '50'),
+  'keep optimistic pending across racey empty refresh while local still holds pending review'
+);
+assert.equal(
+  raceKeep.viewerPendingReview?.id,
+  9,
+  'keep local viewerPendingReview across race so Submit/Discard still work'
+);
+
+// Still-pending host keeps optimistic pending not yet in snapshot
+const keepOptimisticPending = mergeDetailPreserveOptimistic(
+  {
+    number: 1,
+    owner: 'o',
+    repo: 'r',
+    viewerPendingReview: { id: 9 },
+    reviewComments: [
+      { id: 1, body: 'root' },
+      { id: 50, body: 'just posted pending', pending: true },
+    ],
+  },
+  {
+    number: 1,
+    owner: 'o',
+    repo: 'r',
+    viewerPendingReview: { id: 9, commentCount: 1 },
+    reviewComments: [{ id: 1, body: 'root' }],
+  }
+);
+assert.ok(
+  keepOptimisticPending.reviewComments.some((c) => String(c.id) === '50'),
+  'optimistic pending kept while host still has pending review'
+);
 
 console.log('composer-attach.test.js: all assertions passed');

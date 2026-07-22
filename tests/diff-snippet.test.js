@@ -35,6 +35,28 @@ const forC = snippetForComment({ path: 'src/a.js', line: 2, side: 'RIGHT' }, fil
 assert.ok(forC && forC.lines.length > 0);
 assert.equal(snippetForComment({ path: 'missing.js', line: 1 }, files), null);
 
+// Prefer comment.diffHunk when files[] has no patch (or wrong path)
+const { snippetFromDiffHunk } = require('../src/modal/lib/diff-snippet.ts');
+const hunk = `@@ -10,3 +10,4 @@
+ keep
+-old
++new
+ keep2
+`;
+const fromHunk = snippetFromDiffHunk(hunk, { line: 11, side: 'RIGHT' });
+assert.ok(fromHunk && fromHunk.lines.some((l) => l.highlight));
+const viaComment = snippetForComment(
+  { path: 'gone.js', line: 11, side: 'RIGHT', diffHunk: hunk },
+  []
+);
+assert.ok(viaComment && viaComment.lines.length > 0, 'diffHunk preview without files[]');
+// original_line fallback when line is null (outdated)
+const outdatedSnip = snippetForComment(
+  { path: 'gone.js', line: null, originalLine: 11, side: 'RIGHT', diffHunk: hunk },
+  []
+);
+assert.ok(outdatedSnip && outdatedSnip.lines.length > 0, 'originalLine + diffHunk');
+
 // Collapsed file header must not contain the word "collapsed"
 const rows = flattenFilesToVirtualRows(
   [

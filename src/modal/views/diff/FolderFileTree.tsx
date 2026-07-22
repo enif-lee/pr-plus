@@ -1,11 +1,22 @@
-import React, { useMemo, memo } from 'react';
-import { flattenVisibleTree } from '@lib/file-tree';
-import { isPathViewed } from '@lib/review-threads';
+import React, { useMemo, useState, memo, useCallback } from 'react';
+import {
+  buildNestedFileTree,
+  flattenVisibleTree,
+  listFileExtensions,
+  filterFilesByExtensions,
+  toggleFileExtension,
+  formatFileExtensionLabel,
+  collectDirPaths,
+} from '@lib/file-tree';
+import { filterFilesByQuery, isPathViewed } from '@lib/review-threads';
+
+/** Cap extension chips so the search row stays usable on narrow nav. */
+const MAX_EXT_CHIPS = 10;
 
 function FolderFileTreeImpl(props: any) {
   const {
     files,
-    tree,
+    tree: treeProp,
     expandedDirs,
     onToggleDir,
     activePath,
@@ -18,50 +29,58 @@ function FolderFileTreeImpl(props: any) {
     viewedPaths,
     onToggleViewed,
     navCollapsed = false,
-    onToggleNavCollapse,
   } = props;
+
+  const [selectedExts, setSelectedExts] = useState(() => new Set<string>());
+
+  const extOptions = useMemo(
+    () => listFileExtensions(files || [], { max: MAX_EXT_CHIPS }),
+    [files]
+  );
+
+  const filteredTree = useMemo(() => {
+    let list = Array.isArray(files) ? files : [];
+    if (typeof filterFilesByQuery === 'function') {
+      list = filterFilesByQuery(list, fileQuery);
+    }
+    list = filterFilesByExtensions(list, selectedExts);
+    if (typeof buildNestedFileTree === 'function') {
+      return buildNestedFileTree(list);
+    }
+    return treeProp || [];
+  }, [files, fileQuery, selectedExts, treeProp]);
+
+  const filtering = Boolean(String(fileQuery || '').trim()) || selectedExts.size > 0;
+
+  const effectiveExpanded = useMemo(() => {
+    if (!filtering) return expandedDirs;
+    // While filtering, expand every dir so matches are not hidden under collapsed folders.
+    const dirs = collectDirPaths(filteredTree);
+    if (expandedDirs instanceof Set) {
+      for (const p of expandedDirs) dirs.add(p);
+    }
+    return dirs;
+  }, [filtering, filteredTree, expandedDirs]);
 
   const visible = useMemo(() => {
     if (typeof flattenVisibleTree === 'function') {
-      return flattenVisibleTree(tree || [], expandedDirs);
+      return flattenVisibleTree(filteredTree || [], effectiveExpanded);
     }
-    return tree || [];
-  }, [tree, expandedDirs]);
+    return filteredTree || [];
+  }, [filteredTree, effectiveExpanded]);
 
-  if (navCollapsed) {
-    return (
-      <aside className="prp-filetree prp-filetree--collapsed" aria-label="Files navigator collapsed">
-        <button
-          type="button"
-          className="prp-filetree__rail-toggle"
-          onClick={onToggleNavCollapse}
-          title="Expand files navigator"
-          aria-label="Expand files navigator"
-          aria-expanded={false}
-        >
-          <span aria-hidden="true">▸</span>
-        </button>
-      </aside>
-    );
-  }
+  const onToggleExt = useCallback((ext: string) => {
+    setSelectedExts((prev) => toggleFileExtension(prev, ext));
+  }, []);
 
+  // Stay mounted while collapsed so open/close width animation can run.
+  // Expand/collapse is driven by Diff toolbar “Files” + layout CSS.
   return (
-    <aside className="prp-filetree" aria-label="Files navigator">
-      <div className="prp-filetree__head">
-        <span className="prp-filetree__head-label">Files</span>
-        {typeof onToggleNavCollapse === 'function' ? (
-          <button
-            type="button"
-            className="prp-filetree__collapse-nav"
-            onClick={onToggleNavCollapse}
-            title="Collapse files navigator"
-            aria-label="Collapse files navigator"
-            aria-expanded={true}
-          >
-            <span aria-hidden="true">◂</span>
-          </button>
-        ) : null}
-      </div>
+    <aside
+      className={`prp-filetree${navCollapsed ? ' prp-filetree--nav-collapsed' : ''}`}
+      aria-label="Files navigator"
+      aria-hidden={navCollapsed ? true : undefined}
+    >
       <div className="prp-filetree__search">
         <input
           className="prp-filetree__search-input"
@@ -70,11 +89,43 @@ function FolderFileTreeImpl(props: any) {
           onChange={(e) => onFileQuery?.(e.target.value)}
           aria-label="Filter files"
         />
+        {extOptions.length > 0 ? (
+          <div
+            className="prp-filetree__exts"
+            role="group"
+            aria-label="Filter by extension"
+          >
+            {extOptions.map((ext) => {
+              const on = selectedExts.has(ext);
+              const label = formatFileExtensionLabel(ext);
+              return (
+                <button
+                  key={ext || '__none__'}
+                  type="button"
+                  className={
+                    on
+                      ? 'prp-filetree__ext prp-filetree__ext--on'
+                      : 'prp-filetree__ext'
+                  }
+                  aria-pressed={on}
+                  title={
+                    on
+                      ? `Clear filter ${label}`
+                      : `Show only ${label} files`
+                  }
+                  onClick={() => onToggleExt(ext)}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
       </div>
       <ul className="prp-filetree__list">
         {visible.map((node: any) => {
           if (node.type === 'dir') {
-            const open = expandedDirs?.has?.(node.path);
+            const open = effectiveExpanded?.has?.(node.path);
             return (
               <li
                 key={`d-${node.path}`}

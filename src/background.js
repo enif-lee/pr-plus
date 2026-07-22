@@ -15,6 +15,7 @@
 // review-threads pure helpers needed so fetchPrDetail can merge GraphQL thread ids
 importScripts(
   'modal/pure/collapse.js',
+  'modal/pure/comments-page.js',
   'modal/pure/review-threads.js',
   'modal/pure/pending-review.js',
   'modal/pure/pr-edit-api.js',
@@ -30,9 +31,13 @@ const MSG = {
   FETCH_OPEN_PULLS: 'PR_TREE_FETCH_OPEN_PULLS',
   FETCH_DANGLING: 'PR_TREE_FETCH_DANGLING',
   FETCH_PR_DETAIL: 'PR_TREE_FETCH_PR_DETAIL',
+  FETCH_REVIEW_THREADS_PAGE: 'PR_TREE_FETCH_REVIEW_THREADS_PAGE',
+  FETCH_COMMENTS_PAGE: 'PR_TREE_FETCH_COMMENTS_PAGE',
   FETCH_COMPARE_FILES: 'PR_TREE_FETCH_COMPARE_FILES',
   POST_ISSUE_COMMENT: 'PR_TREE_POST_ISSUE_COMMENT',
   SUBMIT_REVIEW: 'PR_TREE_SUBMIT_REVIEW',
+  SUBMIT_PENDING_REVIEW: 'PR_TREE_SUBMIT_PENDING_REVIEW',
+  DELETE_PENDING_REVIEW: 'PR_TREE_DELETE_PENDING_REVIEW',
   POST_REVIEW_COMMENT: 'PR_TREE_POST_REVIEW_COMMENT',
   REPLY_REVIEW_COMMENT: 'PR_TREE_REPLY_REVIEW_COMMENT',
   RESOLVE_REVIEW_THREAD: 'PR_TREE_RESOLVE_REVIEW_THREAD',
@@ -186,14 +191,64 @@ async function handleMessage(message) {
     }
     case MSG.FETCH_PR_DETAIL: {
       const token = await PRTreeStorage.getGithubToken();
+      // Partial by default: core + first GraphQL threads page (not all pages)
       const detail = await PRTreeFetch.fetchPrDetail(
         message.owner,
         message.repo,
         message.number,
         fetchImpl(),
-        token
+        token,
+        {
+          skipReviewThreads: Boolean(message.skipReviewThreads),
+          threadsMaxPages: message.threadsMaxPages != null ? Number(message.threadsMaxPages) : 1,
+        }
       );
       return { ok: true, detail };
+    }
+    case MSG.FETCH_REVIEW_THREADS_PAGE: {
+      const token = await PRTreeStorage.getGithubToken();
+      if (!token) {
+        return {
+          ok: true,
+          page: {
+            threads: [],
+            comments: [],
+            hasMore: false,
+            endCursor: null,
+            pageCount: 0,
+          },
+        };
+      }
+      const page = await PRTreeFetch.fetchReviewThreadsPage(
+        message.owner,
+        message.repo,
+        message.number,
+        {
+          direction: message.direction || 'newest',
+          cursor: message.cursor || null,
+          pageSize: message.pageSize != null ? Number(message.pageSize) : undefined,
+        },
+        fetchImpl(),
+        token
+      );
+      return { ok: true, page };
+    }
+    case MSG.FETCH_COMMENTS_PAGE: {
+      const token = await PRTreeStorage.getGithubToken();
+      const page = await PRTreeFetch.fetchPrCommentsPage(
+        message.owner,
+        message.repo,
+        message.number,
+        message.kind === 'review' ? 'review' : 'issue',
+        {
+          page: message.page,
+          perPage: message.perPage,
+          since: message.since || null,
+        },
+        fetchImpl(),
+        token
+      );
+      return { ok: true, page };
     }
     case MSG.FETCH_COMPARE_FILES: {
       const token = await PRTreeStorage.getGithubToken();
@@ -239,6 +294,33 @@ async function handleMessage(message) {
       );
       return { ok: true, result };
     }
+    case MSG.SUBMIT_PENDING_REVIEW: {
+      const token = await PRTreeStorage.getGithubToken();
+      if (!token) throw new Error('GitHub PAT required to submit pending reviews');
+      const result = await PRTreeFetch.submitPendingPullReview(
+        message.owner,
+        message.repo,
+        message.number,
+        message.reviewId,
+        { event: message.event || 'COMMENT', body: message.body || '' },
+        fetchImpl(),
+        token
+      );
+      return { ok: true, result };
+    }
+    case MSG.DELETE_PENDING_REVIEW: {
+      const token = await PRTreeStorage.getGithubToken();
+      if (!token) throw new Error('GitHub PAT required to discard pending reviews');
+      const result = await PRTreeFetch.deletePendingPullReview(
+        message.owner,
+        message.repo,
+        message.number,
+        message.reviewId,
+        fetchImpl(),
+        token
+      );
+      return { ok: true, result };
+    }
     case MSG.POST_REVIEW_COMMENT: {
       const token = await PRTreeStorage.getGithubToken();
       if (!token) throw new Error('GitHub PAT required to post review comments');
@@ -254,6 +336,7 @@ async function handleMessage(message) {
           commitId: message.commitId,
           startLine: message.startLine,
           startSide: message.startSide,
+          asPending: Boolean(message.asPending),
         },
         fetchImpl(),
         token
@@ -270,7 +353,16 @@ async function handleMessage(message) {
         message.commentId,
         message.body,
         fetchImpl(),
-        token
+        token,
+        {
+          mode: message.mode || 'comment',
+          threadNodeId: message.threadNodeId || null,
+          parentNodeId: message.parentNodeId || null,
+          path: message.path || null,
+          line: message.line ?? null,
+          side: message.side || null,
+          commitId: message.commitId || null,
+        }
       );
       return { ok: true, result };
     }

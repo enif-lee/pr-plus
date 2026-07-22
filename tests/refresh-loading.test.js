@@ -20,12 +20,26 @@ assert.ok(
   hostSrc.includes('detailCache.invalidate') && hostSrc.includes('fetchPrDetail'),
   'onRefresh must invalidate cache before fetchPrDetail'
 );
+// Soft refresh must NOT flip loading=true mid-flight (that clobbered optimistic
+// assignees/labels). openModal still sets loading for the initial open path.
 assert.ok(
-  hostSrc.includes('current.loading = true') && hostSrc.includes('current.loading = false'),
-  'refresh toggles loading for revalidate UI'
+  hostSrc.includes('current.loading = false'),
+  'refresh/open clears loading when fetch settles'
+);
+assert.ok(
+  hostSrc.includes('onPatchDetail'),
+  'host exposes onPatchDetail so meta writes update cache without full reload'
+);
+assert.ok(
+  hostSrc.includes('detailFetchGen'),
+  'host uses detailFetchGen to drop out-of-order soft-refresh responses'
+);
+assert.ok(
+  !/onRefresh:\s*async\s*\(\)\s*=>\s*\{[\s\S]*?current\.loading\s*=\s*true/.test(hostSrc),
+  'onRefresh must not set loading=true (avoids stale detail re-render races)'
 );
 
-// App write handlers await onRefresh after success
+// App write handlers await onRefresh after success (conversation writes)
 const writeSites = [
   'onLeaveReviewAction',
   'onSaveBody',
@@ -43,6 +57,10 @@ assert.ok(
   (appSrc.match(/await onRefresh\?\.\(\)/g) || []).length >= 5,
   'multiple write paths must await onRefresh'
 );
+// Meta writes patch local+host immediately, then debounced single soft-refresh
+// (detailFetchGen drops older in-flight fetches so stale meta cannot win).
+assert.ok(appSrc.includes('commitMetaPatch'), 'meta writes patch local+host detail');
+assert.ok(appSrc.includes('scheduleMetaRefresh'), 'meta writes schedule debounced refresh');
 
 // Per-region skeleton markers — must be wired to real loading flags
 assert.ok(appSrc.includes('prp-section-skeleton') || appSrc.includes('LoadingSkeleton'));

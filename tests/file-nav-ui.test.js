@@ -17,13 +17,13 @@ const {
 
 const root = path.join(__dirname, '..');
 
-// --- Behavioral: collapse hides list width near rail ---
+// --- Behavioral: collapse → 0-width nav tracks (children stay mounted for anim) ---
 {
   let pref = { collapsed: false, width: 280 };
   pref = { ...pref, collapsed: toggleFileNavCollapsed(pref.collapsed) };
   const tpl = fileNavGridTemplate(pref);
-  assert.ok(tpl.startsWith(`${FILE_NAV_RAIL_WIDTH}px`));
-  assert.ok(tpl.includes(' 0 ')); // resizer column 0 when collapsed
+  assert.equal(tpl, '0px 0px minmax(0, 1fr)');
+  assert.ok(!tpl.includes('28px'), 'no residual 28px rail');
   pref = { ...pref, collapsed: toggleFileNavCollapsed(pref.collapsed) };
   assert.equal(fileNavGridTemplate(pref), '280px 4px minmax(0, 1fr)');
 }
@@ -53,25 +53,40 @@ const root = path.join(__dirname, '..');
   };
   assert.equal(saveFileNavPref(mem, next), true);
   const loaded = loadFileNavPref(mem);
-  assert.equal(loaded.collapsed, true);
+  // loadFileNavPref always opens expanded; width restored
+  assert.equal(loaded.collapsed, false);
   assert.equal(loaded.width, 340);
-  assert.ok(fileNavGridTemplate(loaded).startsWith(`${FILE_NAV_RAIL_WIDTH}px`));
+  assert.equal(
+    fileNavGridTemplate({ collapsed: true, width: loaded.width }),
+    '0px 0px minmax(0, 1fr)'
+  );
 }
 
-// --- FolderFileTree: collapse control ---
+// --- FolderFileTree: stays mounted when collapsed (for open/close animation) ---
 {
   const tree = fs.readFileSync(
     path.join(root, 'src/modal/views/diff/FolderFileTree.tsx'),
     'utf8'
   );
   assert.ok(tree.includes('navCollapsed'));
-  assert.ok(tree.includes('onToggleNavCollapse'));
-  assert.ok(tree.includes('prp-filetree--collapsed') || tree.includes('rail-toggle'));
-  assert.ok(tree.includes('Collapse files navigator') || tree.includes('collapse-nav'));
-  assert.ok(tree.includes('Expand files navigator') || tree.includes('rail-toggle'));
+  assert.ok(
+    tree.includes('prp-filetree--nav-collapsed') || tree.includes('aria-hidden'),
+    'collapsed uses class/aria, not unmount'
+  );
+  assert.ok(!/if\s*\(\s*navCollapsed\s*\)\s*\{\s*return null/.test(tree), 'no null unmount');
+  assert.ok(!tree.includes('prp-filetree__rail-toggle'), 'no residual rail toggle');
+  assert.ok(!tree.includes('Expand files navigator'), 'no expand chrome in column');
+  const toolbar = fs.readFileSync(
+    path.join(root, 'src/modal/views/chrome/DiffToolbar.tsx'),
+    'utf8'
+  );
+  assert.ok(
+    toolbar.includes('onToggleFileNav') || toolbar.includes('Files'),
+    'toolbar Files remains the expand control'
+  );
 }
 
-// --- App: resizer + grid template wiring ---
+// --- App: nav stays mounted; collapse via CSS width animation ---
 {
   const app = fs.readFileSync(path.join(root, 'src/modal/app/PrModalApp.tsx'), 'utf8');
   assert.ok(app.includes('fileNavGridTemplate'));
@@ -81,6 +96,11 @@ const root = path.join(__dirname, '..');
   assert.ok(app.includes('data-file-nav-collapsed'));
   assert.ok(app.includes('saveFileNavPref'));
   assert.ok(app.includes('loadFileNavPref'));
+  assert.ok(app.includes('FolderFileTree'), 'FolderFileTree always mounted for anim');
+  assert.ok(
+    !/!fileNav\.collapsed\s*\?\s*\(/.test(app),
+    'do not gate-mount nav on collapsed (breaks animation)'
+  );
 }
 
 // --- CSS affordances ---
@@ -88,8 +108,12 @@ const root = path.join(__dirname, '..');
   const css = fs.readFileSync(path.join(root, 'src/modal/styles.css'), 'utf8');
   assert.ok(css.includes('prp-file-nav-resizer'));
   assert.ok(css.includes('col-resize'));
-  assert.ok(css.includes('prp-filetree--collapsed') || css.includes('rail-toggle'));
   assert.ok(css.includes('prp-diff-layout'));
+  assert.ok(
+    /transition[\s\S]{0,80}width/.test(css) || css.includes('flex-basis'),
+    'nav open/close width transition'
+  );
+  assert.ok(css.includes('prp-filetree--nav-collapsed') || css.includes('--prp-file-nav-width'));
 }
 
 console.log('file-nav-ui.test.js: all assertions passed');

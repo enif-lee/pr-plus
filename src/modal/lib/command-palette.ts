@@ -33,6 +33,14 @@ export function buildPaletteCommands(detail: any) {
       action: 'toggleDiff',
     },
     {
+      id: 'find-in-pr',
+      title: 'Find in PR…',
+      section: 'Navigate',
+      keywords: ['search', 'find', 'filter', 'query'],
+      shortcut: 'mod+f',
+      action: 'openSearch',
+    },
+    {
       id: 'edit-title',
       title: 'Edit PR title…',
       section: 'PR',

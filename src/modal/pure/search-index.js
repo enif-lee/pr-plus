@@ -1,18 +1,24 @@
+(function(){
 /**
  * Full-corpus search index for modal Ctrl+F.
  * Indexes header fields + every virtual row text so unmounted rows are findable.
+ *
+ * Large PRs: build once (caller memos docs); search is chunked + cancellable so
+ * typing does not freeze the main thread.
  */
 
-/**
- * @typedef {{ id: string, kind: string, filePath?: string, text: string, rowIndex?: number }} SearchDoc
- * @typedef {{ docId: string, kind: string, filePath?: string, text: string, rowIndex?: number, start: number, end: number }} SearchHit
- */
+/** Hard cap so short queries cannot allocate millions of hits. */
+const SEARCH_MAX_HITS = 2000;
+/** Cap occurrences per doc. */
+const SEARCH_MAX_HITS_PER_DOC = 8;
+/** Docs processed per slice before yielding. */
+const SEARCH_CHUNK_SIZE = 400;
 
 /**
  * Build docs from PR detail payload + flattened virtual rows.
  * @param {object} prDetail
- * @param {Array<{ kind: string, filePath?: string, text: string, rowIndex: number }>} virtualRows
- * @returns {SearchDoc[]}
+ * @param {Array} virtualRows
+ * @returns {Array}
  */
 function buildSearchIndex(prDetail, virtualRows) {
   const docs = [];
@@ -21,7 +27,7 @@ function buildSearchIndex(prDetail, virtualRows) {
   const push = (id, kind, text, extra = {}) => {
     const t = (text == null ? '' : String(text)).trim();
     if (!t) return;
-    docs.push({ id, kind, text: t, ...extra });
+    docs.push({ id, kind, text: t, textLower: t.toLowerCase(), ...extra });
   };
 
   push('title', 'title', pr.title);
@@ -32,7 +38,22 @@ function buildSearchIndex(prDetail, virtualRows) {
 
   if (Array.isArray(pr.comments)) {
     pr.comments.forEach((c, i) => {
-      push(`comment-${i}`, 'comment', `${c.author || ''}: ${c.body || ''}`);
+      push(`comment-${c.id ?? i}`, 'comment', `${c.author || ''}: ${c.body || ''}`);
+    });
+  }
+  if (Array.isArray(pr.reviewComments)) {
+    pr.reviewComments.forEach((c, i) => {
+      push(
+        `review-comment-${c.id ?? i}`,
+        'review-comment',
+        `${c.author || ''}: ${c.body || ''} ${c.path || ''}${
+          c.line != null ? `:${c.line}` : ''
+        }`,
+        {
+          filePath: c.path,
+          rowIndex: c.rowIndex,
+        }
+      );
     });
   }
   if (Array.isArray(pr.reviews)) {
@@ -66,60 +87,117 @@ function buildSearchIndex(prDetail, virtualRows) {
   return docs;
 }
 
+function collectDocHits(doc, lower, qLen, hits, maxHits, maxPerDoc) {
+  const text = doc.text || '';
+  const hay = doc.textLower || text.toLowerCase();
+  let from = 0;
+  let perDoc = 0;
+  while (from < hay.length && hits.length < maxHits && perDoc < maxPerDoc) {
+    const at = hay.indexOf(lower, from);
+    if (at < 0) break;
+    hits.push({
+      docId: doc.id,
+      kind: doc.kind,
+      filePath: doc.filePath,
+      text: text.slice(Math.max(0, at - 40), at + qLen + 40),
+      rowIndex: doc.rowIndex,
+      start: at,
+      end: at + qLen,
+    });
+    perDoc += 1;
+    from = at + Math.max(1, qLen);
+  }
+  return hits.length >= maxHits;
+}
+
 /**
- * Case-insensitive substring search over all docs.
- * @param {SearchDoc[]} docs
- * @param {string} query
- * @returns {SearchHit[]}
+ * Case-insensitive substring search over all docs (sync).
  */
-function searchIndex(docs, query) {
+function searchIndex(docs, query, opts = {}) {
   const q = (query || '').trim();
   if (!q || !Array.isArray(docs) || docs.length === 0) return [];
 
   const lower = q.toLowerCase();
+  const maxHits =
+    Number.isFinite(opts.maxHits) && opts.maxHits > 0
+      ? Math.floor(opts.maxHits)
+      : SEARCH_MAX_HITS;
+  const maxPerDoc =
+    Number.isFinite(opts.maxPerDoc) && opts.maxPerDoc > 0
+      ? Math.floor(opts.maxPerDoc)
+      : SEARCH_MAX_HITS_PER_DOC;
   const hits = [];
 
   for (const doc of docs) {
-    const text = doc.text || '';
-    const hay = text.toLowerCase();
-    let from = 0;
-    while (from < hay.length) {
-      const at = hay.indexOf(lower, from);
-      if (at < 0) break;
-      hits.push({
-        docId: doc.id,
-        kind: doc.kind,
-        filePath: doc.filePath,
-        text: text.slice(Math.max(0, at - 40), at + q.length + 40),
-        rowIndex: doc.rowIndex,
-        start: at,
-        end: at + q.length,
-      });
-      from = at + Math.max(1, q.length);
+    if (collectDocHits(doc, lower, q.length, hits, maxHits, maxPerDoc)) break;
+  }
+
+  return hits;
+}
+
+function yieldToMain() {
+  return new Promise((resolve) => {
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => setTimeout(resolve, 0));
+    } else {
+      setTimeout(resolve, 0);
+    }
+  });
+}
+
+/**
+ * Chunked async search for UI typing path.
+ */
+async function searchIndexAsync(docs, query, opts = {}) {
+  const q = (query || '').trim();
+  if (!q || !Array.isArray(docs) || docs.length === 0) return [];
+
+  const lower = q.toLowerCase();
+  const maxHits =
+    Number.isFinite(opts.maxHits) && opts.maxHits > 0
+      ? Math.floor(opts.maxHits)
+      : SEARCH_MAX_HITS;
+  const maxPerDoc =
+    Number.isFinite(opts.maxPerDoc) && opts.maxPerDoc > 0
+      ? Math.floor(opts.maxPerDoc)
+      : SEARCH_MAX_HITS_PER_DOC;
+  const chunkSize =
+    Number.isFinite(opts.chunkSize) && opts.chunkSize > 0
+      ? Math.floor(opts.chunkSize)
+      : SEARCH_CHUNK_SIZE;
+  const isCancelled =
+    typeof opts.isCancelled === 'function' ? opts.isCancelled : () => false;
+
+  const hits = [];
+  const n = docs.length;
+
+  if (n <= chunkSize) {
+    if (isCancelled()) return [];
+    return searchIndex(docs, query, { maxHits, maxPerDoc });
+  }
+
+  for (let i = 0; i < n; i += chunkSize) {
+    if (isCancelled()) return [];
+    const end = Math.min(i + chunkSize, n);
+    for (let j = i; j < end; j++) {
+      if (collectDocHits(docs[j], lower, q.length, hits, maxHits, maxPerDoc)) {
+        return hits;
+      }
+    }
+    if (end < n) {
+      await yieldToMain();
     }
   }
 
   return hits;
 }
 
-/**
- * Next hit index wrapping around.
- */
 function nextHitIndex(current, total, delta) {
   if (!total || total <= 0) return -1;
   if (current < 0) return delta >= 0 ? 0 : total - 1;
   return (current + delta + total) % total;
 }
 
-/**
- * React search wiring contract for a **query change** (typing / new search).
- * Always returns shouldJump when any hit exists so stagnant hitIndex=0 still
- * scrolls to the correct (possibly different) row for a refined query.
- *
- * @param {SearchDoc[]} docs
- * @param {string} query
- * @returns {{ hits: SearchHit[], hitIndex: number, activeHit: SearchHit|null, shouldJump: boolean }}
- */
 function resolveQuerySearchState(docs, query) {
   const hits = searchIndex(docs, query);
   if (!hits.length) {
@@ -133,15 +211,23 @@ function resolveQuerySearchState(docs, query) {
   };
 }
 
-/**
- * React search wiring contract for next/prev navigation.
- * shouldJump is true whenever a hit exists — including a single-hit wrap
- * where hitIndex stays 0 so the user can re-scroll to the only match.
- *
- * @param {SearchHit[]} hits
- * @param {number} hitIndex
- * @param {number} delta
- */
+async function resolveQuerySearchStateAsync(docs, query, opts = {}) {
+  const hits = await searchIndexAsync(docs, query, opts);
+  if (typeof opts.isCancelled === 'function' && opts.isCancelled()) {
+    return { hits: [], hitIndex: -1, activeHit: null, shouldJump: false, cancelled: true };
+  }
+  if (!hits.length) {
+    return { hits, hitIndex: -1, activeHit: null, shouldJump: false, cancelled: false };
+  }
+  return {
+    hits,
+    hitIndex: 0,
+    activeHit: hits[0],
+    shouldJump: true,
+    cancelled: false,
+  };
+}
+
 function resolveNavSearchState(hits, hitIndex, delta) {
   const list = Array.isArray(hits) ? hits : [];
   if (!list.length) {
@@ -159,14 +245,14 @@ function resolveNavSearchState(hits, hitIndex, delta) {
 const api = {
   buildSearchIndex,
   searchIndex,
-  nextHitIndex,
+  searchIndexAsync,
   resolveQuerySearchState,
+  resolveQuerySearchStateAsync,
   resolveNavSearchState,
+  SEARCH_MAX_HITS,
+  SEARCH_MAX_HITS_PER_DOC,
+  SEARCH_CHUNK_SIZE,
 };
-
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = api;
-}
-if (typeof globalThis !== 'undefined') {
-  globalThis.PRModalSearch = api;
-}
+if (typeof module !== "undefined" && module.exports) module.exports = api;
+if (typeof globalThis !== "undefined") globalThis.PRModalSearchIndex = api;
+})();

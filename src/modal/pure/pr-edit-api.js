@@ -2,6 +2,7 @@
  * Pure request builders for PR metadata edits, comment edits, and suggestion apply.
  * Unit-tested without network; fetch layer uses the same shapes.
  */
+(function () {
 
 function buildUpdatePullRequest(owner, repo, pullNumber, fields = {}) {
   const body = {};
@@ -304,12 +305,21 @@ function mapLeaveReviewAction(action) {
 function mapRestReviewComment(raw, fallback = {}) {
   if (!raw && !fallback.body && fallback.line == null) return null;
   const r = raw || {};
+  // PENDING comments often omit line and only have position / original_line
+  const lineRaw =
+    r.line ??
+    r.original_line ??
+    (r.position != null && Number.isFinite(Number(r.position))
+      ? Number(r.position)
+      : null) ??
+    fallback.line ??
+    null;
   return {
     id: r.id ?? fallback.id ?? null,
     author: r.user?.login || fallback.author || '',
     body: r.body || fallback.body || '',
     path: r.path || fallback.path || '',
-    line: r.line ?? r.original_line ?? fallback.line ?? null,
+    line: lineRaw != null ? Number(lineRaw) : null,
     originalLine: r.original_line ?? null,
     startLine: r.start_line ?? fallback.startLine ?? null,
     side: r.side || fallback.side || 'RIGHT',
@@ -318,8 +328,10 @@ function mapRestReviewComment(raw, fallback = {}) {
     createdAt: r.created_at || fallback.createdAt || null,
     inReplyToId: r.in_reply_to_id ?? fallback.inReplyToId ?? null,
     nodeId: r.node_id || null,
-    threadNodeId: fallback.threadNodeId || null,
+    threadNodeId: r.threadNodeId || fallback.threadNodeId || null,
     resolved: false,
+    pending: Boolean(r.pending ?? fallback.pending),
+    pendingReviewId: r.pendingReviewId ?? fallback.pendingReviewId ?? null,
   };
 }
 
@@ -386,3 +398,4 @@ if (typeof module !== 'undefined' && module.exports) {
 if (typeof globalThis !== 'undefined') {
   globalThis.PRModalPrEditApi = api;
 }
+})();

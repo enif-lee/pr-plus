@@ -9,7 +9,7 @@
     "https://api.github.com/*"
   ],
   "background": {
-    "service_worker": "src/background.js"
+    "service_worker": "src/background.bundle.js"
   },
   "action": {
     "default_title": "pr+",

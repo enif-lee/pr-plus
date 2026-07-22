@@ -1,10 +1,42 @@
+(function(){
 /**
- * Inline review comment ordering + next/prev navigation.
+ * Inline review **thread** ordering + next/prev navigation.
+ * Diff comment navigator jumps between thread roots only (replies excluded).
  */
 
 /**
- * @typedef {{ id?: string|number, path: string, line: number|null, side?: string, body?: string, author?: string, rowIndex?: number }} InlineComment
+ * @typedef {{
+ *   id?: string|number,
+ *   path: string,
+ *   line: number|null,
+ *   side?: string,
+ *   body?: string,
+ *   author?: string,
+ *   rowIndex?: number,
+ *   inReplyToId?: string|number|null,
+ *   in_reply_to_id?: string|number|null,
+ * }} InlineComment
  */
+
+/**
+ * Keep only review-thread roots. A comment is a reply (excluded) when its
+ * in_reply_to / inReplyToId points at another comment in the same list.
+ * @param {InlineComment[]} comments
+ * @returns {InlineComment[]}
+ */
+function filterThreadRootComments(comments) {
+  const list = Array.isArray(comments) ? comments : [];
+  const byId = new Map();
+  for (const c of list) {
+    if (c && c.id != null) byId.set(String(c.id), c);
+  }
+  return list.filter((c) => {
+    if (!c) return false;
+    const parentId = c.inReplyToId ?? c.in_reply_to_id ?? null;
+    if (parentId != null && byId.has(String(parentId))) return false;
+    return true;
+  });
+}
 
 /**
  * Sort comments for navigation: path, then line, then id.
@@ -26,7 +58,17 @@ function sortInlineComments(comments) {
 }
 
 /**
+ * Thread roots only, sorted for Diff comment navigator.
+ * @param {InlineComment[]} comments
+ * @returns {InlineComment[]}
+ */
+function sortThreadRootComments(comments) {
+  return sortInlineComments(filterThreadRootComments(comments));
+}
+
+/**
  * Attach rowIndex by matching virtual rows (filePath + newLine).
+ * Expects **thread roots** (use sortThreadRootComments / filterThreadRootComments).
  * @param {InlineComment[]} comments
  * @param {Array<{ kind: string, filePath?: string, newLine?: number|null, rowIndex: number }>} virtualRows
  */
@@ -36,30 +78,52 @@ function mapCommentsToRowIndices(comments, virtualRows) {
     return sorted.map((c) => ({ ...c, rowIndex: undefined }));
   }
   return sorted.map((c) => {
-    const line = c.line == null ? null : Number(c.line);
+    const line =
+      c.line != null
+        ? Number(c.line)
+        : c.originalLine != null
+          ? Number(c.originalLine)
+          : null;
+    const side = String(c.side || 'RIGHT').toUpperCase() === 'LEFT' ? 'LEFT' : 'RIGHT';
     let rowIndex;
+
+    // 1) Exact inline-comment row for this comment id
     for (const row of virtualRows) {
       if (row.kind === 'inline-comment' && String(row.commentId) === String(c.id)) {
         rowIndex = row.rowIndex;
         break;
       }
-      if (
-        row.kind === 'diff-line' &&
-        row.filePath === c.path &&
-        line != null &&
-        row.newLine === line
-      ) {
-        rowIndex = row.rowIndex;
-        // prefer the inline-comment row after this line if present later
+    }
+
+    // 2) Diff line on the correct side (LEFT → oldLine, RIGHT → newLine)
+    if (rowIndex == null && line != null) {
+      for (const row of virtualRows) {
+        if (row.kind !== 'diff-line' || row.filePath !== c.path) continue;
+        const rowLine = side === 'LEFT' ? row.oldLine : row.newLine;
+        if (rowLine === line) {
+          rowIndex = row.rowIndex;
+          break;
+        }
+      }
+      // Fallback: either side if primary side missed (outdated / split quirks)
+      if (rowIndex == null) {
+        for (const row of virtualRows) {
+          if (row.kind !== 'diff-line' || row.filePath !== c.path) continue;
+          if (row.newLine === line || row.oldLine === line) {
+            rowIndex = row.rowIndex;
+            break;
+          }
+        }
       }
     }
-    // Prefer dedicated comment row if exists after the line
-    if (rowIndex != null) {
+
+    // 3) Prefer dedicated comment row after the line (same path + line)
+    if (rowIndex != null && line != null) {
       for (const row of virtualRows) {
         if (
           row.kind === 'inline-comment' &&
           row.filePath === c.path &&
-          row.newLine === line &&
+          (row.newLine === line || row.oldLine === line) &&
           (c.id == null || String(row.commentId) === String(c.id))
         ) {
           rowIndex = row.rowIndex;
@@ -67,6 +131,17 @@ function mapCommentsToRowIndices(comments, virtualRows) {
         }
       }
     }
+
+    // 4) Collapsed file / no line row — jump to file header so nav still scrolls
+    if (rowIndex == null && c.path) {
+      for (const row of virtualRows) {
+        if (row.kind === 'file-header' && row.filePath === c.path) {
+          rowIndex = row.rowIndex;
+          break;
+        }
+      }
+    }
+
     return { ...c, rowIndex };
   });
 }
@@ -102,16 +177,16 @@ function resolveCommentNav(mappedComments, commentIndex, delta) {
   };
 }
 
+
 const api = {
+  filterThreadRootComments,
   sortInlineComments,
+  sortThreadRootComments,
   mapCommentsToRowIndices,
   nextCommentIndex,
   resolveCommentNav,
 };
+if (typeof module !== 'undefined' && module.exports) module.exports = api;
+if (typeof globalThis !== 'undefined') globalThis.PRModalCommentNav = api;
 
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = api;
-}
-if (typeof globalThis !== 'undefined') {
-  globalThis.PRModalCommentNav = api;
-}
+})();

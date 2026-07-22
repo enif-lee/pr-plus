@@ -187,42 +187,72 @@ function enhanceMarkdownHtml(html, { owner, repo, magicLinks } = {}) {
   return out;
 }
 
-/**
- * Build stacked-PR strip for the open PR from same-repo open PR list (base/head chain).
- * Order: root → … → current → … → deepest child path through current.
- * @param {Array} prs flat open PR descriptors
- * @param {number|string} currentNumber
- * @returns {Array<{ number: number, title: string, headRef: string, baseRef: string, htmlUrl: string, current: boolean, depth: number }>}
- */
-function buildStackStrip(prs, currentNumber) {
+function indexStackPulls(prs) {
   const list = Array.isArray(prs) ? prs : [];
-  const curNum = Number(currentNumber);
-  if (!list.length || !Number.isFinite(curNum)) return [];
-
   const byNumber = new Map();
   const byHead = new Map();
+  const childrenOf = new Map();
   for (const pr of list) {
     if (!pr || pr.number == null) continue;
     byNumber.set(Number(pr.number), pr);
     if (pr.headRef) byHead.set(pr.headRef, pr);
+    if (pr.baseRef && pr.headRef) {
+      if (!childrenOf.has(pr.baseRef)) childrenOf.set(pr.baseRef, []);
+      childrenOf.get(pr.baseRef).push(pr);
+    }
   }
+  for (const arr of childrenOf.values()) {
+    arr.sort((a, b) => Number(b.number) - Number(a.number));
+  }
+  return { byNumber, byHead, childrenOf };
+}
+
+function stripItem(pr, curNum, depth) {
+  return {
+    number: Number(pr.number),
+    title: pr.title || '',
+    headRef: pr.headRef || '',
+    baseRef: pr.baseRef || '',
+    htmlUrl: pr.htmlUrl || pr.html_url || '',
+    draft: Boolean(pr.draft),
+    current: Number(pr.number) === curNum,
+    depth,
+  };
+}
+
+function pickStackChild(kids, parentHeadRef, pathSelections = {}) {
+  const list = Array.isArray(kids) ? kids : [];
+  if (!list.length) return null;
+  const pref = pathSelections?.[parentHeadRef];
+  if (pref != null) {
+    const hit = list.find((c) => Number(c.number) === Number(pref));
+    if (hit) return hit;
+  }
+  return list[0];
+}
+
+function buildStackPathModel(prs, currentNumber, pathSelections = {}) {
+  const curNum = Number(currentNumber);
+  const empty = { items: [], branches: [] };
+  if (!Number.isFinite(curNum)) return empty;
+  const { byNumber, byHead, childrenOf } = indexStackPulls(prs);
   const current = byNumber.get(curNum);
   if (!current) {
-    // Only current known — single-node strip
-    return [
-      {
-        number: curNum,
-        title: '',
-        headRef: '',
-        baseRef: '',
-        htmlUrl: '',
-        current: true,
-        depth: 0,
-      },
-    ];
+    return {
+      items: [
+        {
+          number: curNum,
+          title: '',
+          headRef: '',
+          baseRef: '',
+          htmlUrl: '',
+          current: true,
+          depth: 0,
+        },
+      ],
+      branches: [],
+    };
   }
-
-  // Walk parents (base → head of parent)
   const ancestors = [];
   const seenUp = new Set();
   let p = current;
@@ -234,41 +264,122 @@ function buildStackStrip(prs, currentNumber) {
     ancestors.unshift(parent);
     p = parent;
   }
-
-  // Walk one child chain preferring child that continues stack (first by number)
-  const childrenOf = new Map();
-  for (const pr of list) {
-    if (!pr?.baseRef || !pr.headRef) continue;
-    if (!childrenOf.has(pr.baseRef)) childrenOf.set(pr.baseRef, []);
-    childrenOf.get(pr.baseRef).push(pr);
-  }
-  for (const arr of childrenOf.values()) {
-    arr.sort((a, b) => Number(b.number) - Number(a.number));
-  }
-
+  const toOption = (c) => ({
+    number: Number(c.number),
+    title: c.title || '',
+    headRef: c.headRef || '',
+    baseRef: c.baseRef || '',
+    htmlUrl: c.htmlUrl || c.html_url || '',
+    draft: Boolean(c.draft),
+  });
   const descendants = [];
   const seenDown = new Set([current.number]);
   let node = current;
   while (node?.headRef) {
-    const kids = childrenOf.get(node.headRef) || [];
-    const child = kids.find((c) => !seenDown.has(c.number));
+    const kids = (childrenOf.get(node.headRef) || []).filter(
+      (c) => !seenDown.has(c.number)
+    );
+    if (!kids.length) break;
+    const child = pickStackChild(kids, node.headRef, pathSelections);
     if (!child) break;
     seenDown.add(child.number);
     descendants.push(child);
     node = child;
   }
-
   const chain = [...ancestors, current, ...descendants];
-  return chain.map((pr, depth) => ({
-    number: Number(pr.number),
-    title: pr.title || '',
-    headRef: pr.headRef || '',
-    baseRef: pr.baseRef || '',
-    htmlUrl: pr.htmlUrl || pr.html_url || '',
-    draft: Boolean(pr.draft),
-    current: Number(pr.number) === curNum,
-    depth,
-  }));
+  const branches = [];
+  const seenParents = new Set();
+  for (let depth = 0; depth < chain.length; depth++) {
+    const pr = chain[depth];
+    if (!pr?.baseRef) continue;
+    const parent = byHead.get(pr.baseRef);
+    if (!parent?.headRef) continue;
+    const parentHeadRef = parent.headRef;
+    if (seenParents.has(parentHeadRef)) continue;
+    const kids = childrenOf.get(parentHeadRef) || [];
+    if (kids.length < 2) continue;
+    seenParents.add(parentHeadRef);
+    let selected = pickStackChild(kids, parentHeadRef, pathSelections);
+    const onChain = kids.find((c) =>
+      chain.some((x) => Number(x.number) === Number(c.number))
+    );
+    if (pathSelections?.[parentHeadRef] == null && onChain) selected = onChain;
+    if (!selected) selected = pr;
+    branches.push({
+      parentNumber: Number(parent.number),
+      parentHeadRef,
+      levelNumber: Number(selected.number),
+      selectedNumber: Number(selected.number),
+      depth,
+      options: kids.map(toOption),
+    });
+  }
+  const items = chain.map((pr, depth) => stripItem(pr, curNum, depth));
+  return { items, branches };
+}
+
+function buildStackStrip(prs, currentNumber, pathSelections = {}) {
+  return buildStackPathModel(prs, currentNumber, pathSelections).items;
+}
+
+const STACK_PATH_HOVER_MS = 450;
+
+function stackBranchHasPathPicker(branch) {
+  return Boolean(branch && Array.isArray(branch.options) && branch.options.length >= 2);
+}
+
+function buildStackBranchSelectOptions(branch) {
+  const opts = Array.isArray(branch?.options) ? branch.options : [];
+  return opts.map((o) => {
+    const num = Number(o.number);
+    const title = o.title ? String(o.title) : '';
+    const head = o.headRef ? String(o.headRef) : '';
+    return {
+      id: String(num),
+      label: title ? `#${num} · ${title}` : `#${num}${head ? ` (${head})` : ''}`,
+      keywords: [title, head, o.baseRef, String(num)].filter(Boolean),
+      meta: {
+        kind: 'pr',
+        number: num,
+        headRef: head,
+        baseRef: o.baseRef || '',
+        htmlUrl: o.htmlUrl || '',
+        selected: Number(branch?.selectedNumber) === num,
+      },
+    };
+  });
+}
+
+function reduceStackPathHover(state, event) {
+  const cur = state || { openKey: null, armedKey: null };
+  const type = event?.type;
+  const key = event?.key == null ? null : String(event.key);
+
+  if (type === 'enter') {
+    if (!key) {
+      return { openKey: cur.openKey, armedKey: null, scheduleOpen: false, cancelTimer: true };
+    }
+    if (cur.openKey === key) {
+      return { openKey: cur.openKey, armedKey: key, scheduleOpen: false, cancelTimer: true };
+    }
+    return { openKey: cur.openKey, armedKey: key, scheduleOpen: true, cancelTimer: true };
+  }
+  if (type === 'leave') {
+    return { openKey: cur.openKey, armedKey: null, scheduleOpen: false, cancelTimer: true };
+  }
+  if (type === 'timer-fire') {
+    if (cur.armedKey && cur.armedKey === key) {
+      return { openKey: key, armedKey: null, scheduleOpen: false, cancelTimer: true };
+    }
+    return { openKey: cur.openKey, armedKey: cur.armedKey, scheduleOpen: false, cancelTimer: false };
+  }
+  if (type === 'close') {
+    return { openKey: null, armedKey: null, scheduleOpen: false, cancelTimer: true };
+  }
+  if (type === 'open-now') {
+    return { openKey: key, armedKey: null, scheduleOpen: false, cancelTimer: true };
+  }
+  return { openKey: cur.openKey, armedKey: cur.armedKey, scheduleOpen: false, cancelTimer: false };
 }
 
 const api = {
@@ -285,7 +396,14 @@ const api = {
   linkifyMentionsAndIssues,
   applyMagicLinksToHtml,
   enhanceMarkdownHtml,
+  indexStackPulls,
+  pickStackChild,
+  buildStackPathModel,
   buildStackStrip,
+  STACK_PATH_HOVER_MS,
+  stackBranchHasPathPicker,
+  buildStackBranchSelectOptions,
+  reduceStackPathHover,
 };
 
 if (typeof module !== 'undefined' && module.exports) {

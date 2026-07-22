@@ -4,8 +4,9 @@
   "private": true,
   "scripts": {
     "build:modal": "node scripts/build-modal.mjs",
-    "build": "npm run build:modal",
-    "test": "npm run build:modal && node tests/run-all.js",
+    "build:sw": "node scripts/build-sw.mjs",
+    "build": "npm run build:sw && npm run build:modal",
+    "test": "npm run build && node tests/run-all.js",
     "browser:login": "agent-browser close --all 2>/dev/null; agent-browser open https://github.com/login",
     "browser:pulls": "agent-browser close --all 2>/dev/null; agent-browser open https://github.com/rtzr/callabo-server/pulls",
     "browser:open": "agent-browser close --all 2>/dev/null; agent-browser open",

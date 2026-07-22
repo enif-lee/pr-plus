@@ -92,3 +92,114 @@ export function flattenVisibleTree(nodes, expandedDirs) {
   walk(nodes, 0);
   return out;
 }
+
+/**
+ * Lowercase extension without the leading dot.
+ * Dotfiles (`.gitignore`) and names without a `.` → empty string.
+ * @param {string|null|undefined} pathOrName
+ * @returns {string}
+ */
+export function fileExtensionFromPath(pathOrName) {
+  const base = String(pathOrName || '')
+    .split('/')
+    .pop() || '';
+  const i = base.lastIndexOf('.');
+  if (i <= 0) return '';
+  return base.slice(i + 1).toLowerCase();
+}
+
+/**
+ * Unique extensions from a file list, most frequent first (then alpha).
+ * @param {Array<{ filename?: string, path?: string }>} files
+ * @param {{ max?: number }} [opts]
+ * @returns {string[]} extension tokens (no leading dot; '' for no-extension)
+ */
+export function listFileExtensions(files, opts = {}) {
+  const list = Array.isArray(files) ? files : [];
+  const counts = new Map();
+  for (const f of list) {
+    const path = f?.filename || f?.path || '';
+    if (!path) continue;
+    const ext = fileExtensionFromPath(path);
+    counts.set(ext, (counts.get(ext) || 0) + 1);
+  }
+  const sorted = [...counts.entries()].sort((a, b) => {
+    if (b[1] !== a[1]) return b[1] - a[1];
+    // Keep no-ext last among equals
+    if (a[0] === '') return 1;
+    if (b[0] === '') return -1;
+    return a[0].localeCompare(b[0]);
+  });
+  const max =
+    Number.isFinite(opts.max) && (opts.max as number) > 0
+      ? Math.floor(opts.max as number)
+      : sorted.length;
+  return sorted.slice(0, max).map(([ext]) => ext);
+}
+
+/**
+ * Keep files whose extension is in `selected`. Empty selection → all files.
+ * @param {Array<{ filename?: string, path?: string }>} files
+ * @param {Iterable<string>|Set<string>|string[]|null|undefined} selected
+ */
+export function filterFilesByExtensions(files, selected) {
+  const list = Array.isArray(files) ? files : [];
+  const set =
+    selected instanceof Set
+      ? selected
+      : new Set(
+          Array.isArray(selected)
+            ? selected
+            : selected
+              ? [...(selected as Iterable<string>)]
+              : []
+        );
+  if (set.size === 0) return list.slice();
+  return list.filter((f) => {
+    const path = f?.filename || f?.path || '';
+    return set.has(fileExtensionFromPath(path));
+  });
+}
+
+/**
+ * Toggle one extension in a selection set (immutable).
+ * @param {Set<string>|string[]|null|undefined} selected
+ * @param {string} ext
+ * @returns {Set<string>}
+ */
+export function toggleFileExtension(selected, ext) {
+  const next = selected instanceof Set ? new Set(selected) : new Set(selected || []);
+  const key = String(ext ?? '');
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  return next;
+}
+
+/**
+ * Display label for an extension token (`.ts` or `∅` for none).
+ * @param {string} ext
+ */
+export function formatFileExtensionLabel(ext) {
+  const e = String(ext ?? '');
+  return e ? `.${e}` : '∅';
+}
+
+/**
+ * Collect every dir path in a nested tree (for auto-expand while filtering).
+ * @param {TreeNode[]} nodes
+ * @returns {Set<string>}
+ */
+export function collectDirPaths(nodes) {
+  const out = new Set();
+  function walk(list) {
+    if (!Array.isArray(list)) return;
+    for (const n of list) {
+      if (n?.type === 'dir') {
+        if (n.path) out.add(n.path);
+        walk(n.children);
+      }
+    }
+  }
+  walk(nodes);
+  return out;
+}

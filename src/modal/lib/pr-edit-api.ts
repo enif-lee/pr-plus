@@ -307,23 +307,35 @@ export function mapLeaveReviewAction(action) {
 export function mapRestReviewComment(raw, fallback: any = {}) {
   if (!raw && !fallback.body && fallback.line == null) return null;
   const r = raw || {};
+  // PENDING comments often omit line and only have position / original_line
+  const lineRaw =
+    r.line ??
+    r.original_line ??
+    (r.position != null && Number.isFinite(Number(r.position))
+      ? Number(r.position)
+      : null) ??
+    fallback.line ??
+    null;
   return {
     id: r.id ?? fallback.id ?? null,
     author: r.user?.login || fallback.author || '',
     avatarUrl: r.user?.avatar_url || fallback.avatarUrl || '',
     body: r.body || fallback.body || '',
     path: r.path || fallback.path || '',
-    line: r.line ?? r.original_line ?? fallback.line ?? null,
+    line: lineRaw != null ? Number(lineRaw) : null,
     originalLine: r.original_line ?? null,
     startLine: r.start_line ?? fallback.startLine ?? null,
     side: r.side || fallback.side || 'RIGHT',
     startSide: r.start_side || null,
-    diffHunk: r.diff_hunk || '',
+    diffHunk: r.diffHunk || r.diff_hunk || fallback.diffHunk || '',
     createdAt: r.created_at || fallback.createdAt || null,
     inReplyToId: r.in_reply_to_id ?? fallback.inReplyToId ?? null,
     nodeId: r.node_id || null,
-    threadNodeId: fallback.threadNodeId || null,
-    resolved: false,
+    threadNodeId: r.threadNodeId || fallback.threadNodeId || null,
+    resolved: Boolean(r.resolved ?? fallback.resolved),
+    pending: Boolean(r.pending ?? fallback.pending),
+    pendingReviewId: r.pendingReviewId ?? fallback.pendingReviewId ?? null,
+    outdated: Boolean(r.outdated ?? fallback.outdated),
   };
 }
 

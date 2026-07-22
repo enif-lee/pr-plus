@@ -42,6 +42,7 @@
         root,
         replies,
         resolved: Boolean(root.resolved ?? root.isResolved),
+        outdated: Boolean(root.outdated),
         threadNodeId: root.threadNodeId || root.thread_id || root.pullRequestReviewThreadId || null,
         count: 1 + replies.length,
       };
@@ -123,15 +124,74 @@
     return map;
   }
 
+  function normalizeReviewCommentId(raw) {
+    if (raw == null || raw === '') return null;
+    if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) {
+      return Math.floor(raw);
+    }
+    const s = String(raw).trim();
+    if (!/^\d+$/.test(s)) return null;
+    const n = Number(s);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }
+
   /**
-   * Shape POST reply to a review comment.
-   * POST /repos/{owner}/{repo}/pulls/{pull}/comments/{id}/replies
+   * Walk in_reply_to chain to the top-level review comment.
+   * GitHub rejects replies-to-replies (422 Validation Failed).
    */
-  function buildReplyReviewCommentRequest(owner, repo, pullNumber, commentId, body) {
+  function resolveRootReviewCommentId(comments, commentId) {
+    const start = normalizeReviewCommentId(commentId);
+    if (start == null) return null;
+    const byId = new Map();
+    for (const c of Array.isArray(comments) ? comments : []) {
+      if (!c || c.id == null) continue;
+      const id = normalizeReviewCommentId(c.id);
+      if (id != null) byId.set(id, c);
+    }
+    let cur = byId.get(start) || null;
+    if (!cur) return start;
+    const seen = new Set();
+    while (cur) {
+      const id = normalizeReviewCommentId(cur.id);
+      if (id == null || seen.has(id)) break;
+      seen.add(id);
+      const parentRaw = cur.inReplyToId ?? cur.in_reply_to_id ?? null;
+      const parentId = normalizeReviewCommentId(parentRaw);
+      if (parentId == null || !byId.has(parentId)) return id;
+      cur = byId.get(parentId);
+    }
+    return start;
+  }
+
+  function buildReplyReviewThreadGraphql(threadNodeId, body) {
     return {
       method: 'POST',
-      url: `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/comments/${commentId}/replies`,
-      body: { body: String(body || '').trim() },
+      url: 'https://api.github.com/graphql',
+      body: {
+        query: `mutation($id:ID!,$body:String!){
+  addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$id,body:$body}){
+    comment { databaseId body }
+  }
+}`,
+        variables: {
+          id: String(threadNodeId || ''),
+          body: String(body || '').trim(),
+        },
+      },
+    };
+  }
+
+  /**
+   * REST fallback reply (no pending review).
+   * POST /pulls/{n}/comments/{id}/replies
+   */
+  function buildReplyReviewCommentRequest(owner, repo, pullNumber, commentId, body) {
+    const parentId = normalizeReviewCommentId(commentId);
+    const text = String(body || '').trim();
+    return {
+      method: 'POST',
+      url: `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/comments/${parentId ?? commentId}/replies`,
+      body: { body: text },
     };
   }
 
@@ -196,6 +256,9 @@
     mergeReviewThreadMeta,
     mapGraphqlReviewThreads,
     countReviewThreadsByPath,
+    normalizeReviewCommentId,
+    resolveRootReviewCommentId,
+    buildReplyReviewThreadGraphql,
     buildReplyReviewCommentRequest,
     buildResolveThreadGraphql,
     filterFilesByQuery,

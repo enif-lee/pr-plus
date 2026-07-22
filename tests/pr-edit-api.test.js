@@ -244,7 +244,7 @@ function mockRecorder() {
     }),
     'toggleDiff'
   );
-  // ⌘F must NOT open search — only Diff / palette / Esc remain
+  // ⌘F / Ctrl+F opens in-modal Find
   assert.equal(
     sp.resolveModalShortcutAction({
       mod: true,
@@ -252,7 +252,7 @@ function mockRecorder() {
       key: 'f',
       paletteOpen: false,
     }),
-    null
+    'openSearch'
   );
   // Leave-review chords intentionally disabled
   assert.equal(

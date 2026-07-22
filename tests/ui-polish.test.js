@@ -3,7 +3,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const SCRATCH =
-  process.env.PRP_SCRATCH || '/var/folders/px/qw6l220x5glb_gxf44lws9p80000gn/T/grok-goal-5a6d37e1751e/implementer';
+  process.env.PRP_SCRATCH ||
+  require('node:os').tmpdir() + '/pr-plus-test-scratch';
 fs.mkdirSync(SCRATCH, { recursive: true });
 
 const polish = require('../src/modal/lib/ui-polish.ts');
@@ -114,6 +115,52 @@ function ok(name) {
   assert.equal(strip.length, 1);
   assert.equal(strip[0].current, true);
   ok('buildStackStrip solo');
+}
+
+// stack path with fork (degree ≥ 2) — select first branch by default
+{
+  const prs = [
+    { number: 1, title: 'Root', headRef: 'a', baseRef: 'main' },
+    { number: 2, title: 'Left', headRef: 'b1', baseRef: 'a' },
+    { number: 3, title: 'Right', headRef: 'b2', baseRef: 'a' },
+    { number: 4, title: 'L2', headRef: 'c1', baseRef: 'b1' },
+    { number: 5, title: 'R2', headRef: 'c2', baseRef: 'b2' },
+  ];
+  const model = polish.buildStackPathModel(prs, 1, {});
+  assert.ok(model.branches.some((b) => b.options.length === 2));
+  const viaRight = polish.buildStackPathModel(prs, 1, { a: 3 });
+  assert.deepEqual(
+    viaRight.items.map((i) => i.number),
+    [1, 3, 5]
+  );
+  const viaLeft = polish.buildStackPathModel(prs, 1, { a: 2 });
+  assert.deepEqual(
+    viaLeft.items.map((i) => i.number),
+    [1, 2, 4]
+  );
+  ok('buildStackPathModel path select');
+}
+
+// stack path hover helpers
+{
+  assert.equal(polish.STACK_PATH_HOVER_MS > 0, true);
+  const branch = {
+    parentHeadRef: 'a',
+    selectedNumber: 3,
+    options: [
+      { number: 2, title: 'Left', headRef: 'b1' },
+      { number: 3, title: 'Right', headRef: 'b2' },
+    ],
+  };
+  assert.equal(polish.stackBranchHasPathPicker(branch), true);
+  const opts = polish.buildStackBranchSelectOptions(branch);
+  assert.equal(opts.length, 2);
+  assert.match(opts[0].label, /^#/);
+  let h = polish.reduceStackPathHover({ openKey: null, armedKey: null }, { type: 'enter', key: 'a' });
+  assert.equal(h.scheduleOpen, true);
+  h = polish.reduceStackPathHover({ openKey: null, armedKey: 'a' }, { type: 'timer-fire', key: 'a' });
+  assert.equal(h.openKey, 'a');
+  ok('stack path hover helpers');
 }
 
 const out = log.join('\n') + '\n';

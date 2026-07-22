@@ -1,11 +1,16 @@
 /**
- * Extract a small unified-diff snippet around a review comment line from a file patch.
+ * Diff snippet helpers (synced from lib/diff-snippet.ts).
+ */
+
+/**
+ * Extract a small unified-diff snippet around a review comment line from a file patch,
+ * or from a review comment's own `diffHunk` (preferred — no files[] dependency).
  */
 
 /**
  * Parse patch into line records with old/new numbers.
  * @param {string} patch
- * @returns {Array<{ oldLine: number|null, newLine: number|null, type: string, text: string }>}
+ * @returns {*}>}
  */
 function parsePatchLines(patch) {
   const out = [];
@@ -45,9 +50,9 @@ function parsePatchLines(patch) {
 
 /**
  * @param {string} patch
- * @param {{ line?: number|null, startLine?: number|null, side?: string }} anchor
+ * @param {{ line?: number, startLine?: number, side? }} anchor
  * @param {{ context?: number }} [opts]
- * @returns {{ lines: Array, startLine: number|null, endLine: number|null }|null}
+ * @returns {*}}
  */
 function extractDiffSnippet(patch, anchor, opts = {}) {
   const lines = parsePatchLines(patch);
@@ -69,7 +74,7 @@ function extractDiffSnippet(patch, anchor, opts = {}) {
     if (n != null && n >= start && n <= end) matchIdx.push(i);
   }
   if (!matchIdx.length) {
-    // Fallback: any side
+    // Fallback side
     for (let i = 0; i < lines.length; i++) {
       const L = lines[i];
       const n = L.newLine ?? L.oldLine;
@@ -103,34 +108,130 @@ function extractDiffSnippet(patch, anchor, opts = {}) {
 }
 
 /**
- * Attach snippet to a comment/thread using files[] patches.
- * @param {object} comment { path, line, startLine, side }
- * @param {Array<{ filename?: string, path?: string, patch?: string }>} files
+ * Build a preview from a review comment's `diffHunk` (GitHub stores a focused
+ * unified-diff slice on every review comment — works even when files[] lacks patch).
+ * @param {string} diffHunk
+ * @param {{ line?: number, startLine?: number, originalLine?: number, side? }} [anchor]
+ * @param {{ context?: number, maxLines?: number }} [opts]
+ */
+function snippetFromDiffHunk(diffHunk, anchor = {}, opts = {}) {
+  if (!diffHunk || typeof diffHunk !== 'string') return null;
+  const lines = parsePatchLines(diffHunk);
+  if (!lines.length) return null;
+
+  const side = String(anchor.side || 'RIGHT').toUpperCase() === 'LEFT' ? 'LEFT' : 'RIGHT';
+  const end =
+    anchor.line != null
+      ? Number(anchor.line)
+      : anchor.originalLine != null
+        ? Number(anchor.originalLine)
+        : null;
+  const start =
+    anchor.startLine != null && end != null && Number(anchor.startLine) <= end
+      ? Number(anchor.startLine)
+      : end;
+
+  // Prefer extractDiffSnippet when we have a line anchor inside the hunk
+  if (end != null) {
+    const focused = extractDiffSnippet(
+      diffHunk,
+      { line: end, startLine: start, side },
+      { context: opts.context ?? 3 }
+    );
+    if (focused?.lines?.length) return focused;
+  }
+
+  // Whole hunk as preview (already short). Cap very long hunks.
+  const maxLines =
+    Number.isFinite(opts.maxLines) && opts.maxLines > 0 ? Math.floor(opts.maxLines) : 40;
+  const body = lines.filter((L) => L.type !== 'meta');
+  const slice = (body.length > maxLines ? body.slice(0, maxLines) : body).map((L) => ({
+    type: L.type,
+    text: L.text,
+    oldLine: L.oldLine,
+    newLine: L.newLine,
+    highlight:
+      end != null &&
+      ((side === 'LEFT' ? L.oldLine : L.newLine) === end ||
+        (start != null &&
+          end != null &&
+          (side === 'LEFT' ? L.oldLine : L.newLine) != null &&
+          (side === 'LEFT' ? L.oldLine : L.newLine) >= start &&
+          (side === 'LEFT' ? L.oldLine : L.newLine) <= end)),
+  }));
+  if (!slice.length) return null;
+  // If no line matched, highlight last code line as anchor
+  if (!slice.some((L) => L.highlight)) {
+    for (let i = slice.length - 1; i >= 0; i--) {
+      if (slice[i].type === 'add' || slice[i].type === 'context' || slice[i].type === 'del') {
+        slice[i] = { ...slice[i], highlight: true };
+        break;
+      }
+    }
+  }
+  return {
+    lines: slice,
+    startLine: start,
+    endLine: end,
+    side,
+  };
+}
+
+/**
+ * Attach snippet to a comment/thread.
+ * Prefer comment.diffHunk (GraphQL/REST), then files[] patch.
+ * @param {object} comment { path, line, startLine, side, originalLine, diffHunk }
+ * @param {Array<{ filename?, path?, patch? }>} files
  */
 function snippetForComment(comment, files) {
-  if (!comment?.path || !Array.isArray(files)) return null;
-  const file = files.find(
-    (f) => (f.filename || f.path || '') === comment.path
-  );
+  if (!comment) return null;
+  const path = comment.path || '';
+  const line =
+    comment.line != null
+      ? Number(comment.line)
+      : comment.originalLine != null
+        ? Number(comment.originalLine)
+        : comment.original_line != null
+          ? Number(comment.original_line)
+          : null;
+  const startLine = comment.startLine ?? comment.start_line ?? null;
+  const side = comment.side || 'RIGHT';
+  const hunk = comment.diffHunk || comment.diff_hunk || '';
+
+  if (hunk) {
+    const fromHunk = snippetFromDiffHunk(
+      hunk,
+      { line, startLine, originalLine: comment.originalLine ?? comment.original_line, side },
+      { context: 3, maxLines: 40 }
+    );
+    if (fromHunk?.lines?.length) {
+      return { ...fromHunk, path, filePath: path };
+    }
+  }
+
+  if (!path || !Array.isArray(files)) return null;
+  const file = files.find((f) => (f.filename || f.path || '') === path);
   if (!file?.patch) return null;
-  const snippet = extractDiffSnippet(file.patch, {
-    line: comment.line,
-    startLine: comment.startLine ?? comment.start_line,
-    side: comment.side,
-  });
+  const snippet = extractDiffSnippet(
+    file.patch,
+    { line, startLine, side },
+    { context: 2 }
+  );
   if (!snippet) return null;
-  return { ...snippet, path: comment.path, filePath: comment.path };
+  return { ...snippet, path, filePath: path };
 }
+
 
 const api = {
   parsePatchLines,
   extractDiffSnippet,
+  snippetFromDiffHunk,
   snippetForComment,
 };
 
-if (typeof module !== 'undefined' && module.exports) {
+if (typeof module !== "undefined" && module.exports) {
   module.exports = api;
 }
-if (typeof globalThis !== 'undefined') {
+if (typeof globalThis !== "undefined") {
   globalThis.PRModalDiffSnippet = api;
 }

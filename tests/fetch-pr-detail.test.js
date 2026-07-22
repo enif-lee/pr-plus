@@ -67,14 +67,16 @@ async function main() {
     if (url.includes('/issues/9/comments')) {
       return {
         ok: true,
+        headers: { get: () => null },
         json: async () => [
-          { id: 1, user: { login: 'c' }, body: 'hi', created_at: '' },
+          { id: 1, user: { login: 'c' }, body: 'hi', created_at: '2026-01-01T00:00:00Z' },
         ],
       };
     }
     if (url.includes('/pulls/9/comments') && !url.includes('/reviews')) {
       return {
         ok: true,
+        headers: { get: () => null },
         json: async () => [
           {
             id: 2,
@@ -104,12 +106,32 @@ async function main() {
             repository: {
               pullRequest: {
                 reviewThreads: {
+                  totalCount: 1,
+                  pageInfo: {
+                    hasNextPage: false,
+                    hasPreviousPage: false,
+                    startCursor: 'c0',
+                    endCursor: 'c0',
+                  },
                   nodes: [
                     {
                       id: 'PRRT_from_graphql',
                       isResolved: false,
+                      isOutdated: false,
+                      path: 'a.js',
+                      diffSide: 'RIGHT',
+                      line: 1,
                       comments: {
-                        nodes: [{ databaseId: 2, id: 'RC_2' }],
+                        nodes: [
+                          {
+                            databaseId: 2,
+                            id: 'RC_2',
+                            body: 'x',
+                            path: 'a.js',
+                            line: 1,
+                            author: { login: 'r' },
+                          },
+                        ],
                       },
                     },
                   ],
@@ -187,7 +209,7 @@ async function main() {
   );
   assert.equal(detail.files.find((f) => f.filename === 'a.js').defaultCollapsed, false);
   // Real App path: re-annotate always applies gitattributesText even if flags already set
-  const collapse = require('../src/modal/lib/collapse.ts');
+  const collapse = require('../src/modal/pure/collapse.js');
   const re = collapse.annotateFilesForCollapse(
     detail.files.map((f) => ({ ...f, defaultCollapsed: false })),
     detail.gitattributesText
@@ -223,8 +245,49 @@ async function main() {
   const posts = [];
   const writeFetch = async (url, init) => {
     posts.push({ url, method: init?.method, body: init?.body });
-    // GraphQL resolve success payload
     if (String(url).includes('graphql')) {
+      let q = '';
+      try {
+        q = JSON.parse(init?.body || '{}').query || '';
+      } catch {
+        q = '';
+      }
+      if (q.includes('addPullRequestReviewThreadReply')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            data: {
+              addPullRequestReviewThreadReply: {
+                comment: {
+                  databaseId: 777,
+                  body: 'gql reply',
+                  author: { login: 'viewer-bot' },
+                  replyTo: { databaseId: 42 },
+                },
+              },
+            },
+          }),
+        };
+      }
+      if (q.includes('addPullRequestReviewComment')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            data: {
+              addPullRequestReviewComment: {
+                comment: {
+                  databaseId: 778,
+                  body: 'pending reply',
+                  author: { login: 'viewer-bot' },
+                  replyTo: { databaseId: 42 },
+                },
+              },
+            },
+          }),
+        };
+      }
       return {
         ok: true,
         status: 200,
@@ -236,6 +299,45 @@ async function main() {
           },
         }),
       };
+    }
+    // Pending-review probe GETs must not look like a PENDING review
+    if (String(init?.method || 'GET').toUpperCase() === 'GET') {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => {
+          if (String(url).includes('/reviews/') && String(url).includes('/comments')) {
+            return [];
+          }
+          if (String(url).includes('/reviews')) return [];
+          if (String(url).includes('/user')) return { login: 'viewer-bot' };
+          return { login: 'viewer-bot' };
+        },
+      };
+    }
+    // Create PENDING review (no event in body)
+    if (
+      String(init?.method).toUpperCase() === 'POST' &&
+      String(url).includes('/pulls/') &&
+      String(url).endsWith('/reviews')
+    ) {
+      let parsed = {};
+      try {
+        parsed = JSON.parse(init?.body || '{}');
+      } catch {
+        parsed = {};
+      }
+      if (!parsed.event) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            id: 555,
+            node_id: 'PRR_pending_mock',
+            state: 'PENDING',
+          }),
+        };
+      }
     }
     return { ok: true, status: 201, json: async () => ({ id: 99, state: 'closed' }) };
   };
@@ -269,6 +371,10 @@ async function main() {
     'tok'
   );
   await replyToReviewComment('o', 'r', 9, 42, 'reply body', writeFetch, 'tok');
+  // Prefer GraphQL thread path when threadNodeId provided (pending-safe)
+  await replyToReviewComment('o', 'r', 9, 42, 'gql reply', writeFetch, 'tok', {
+    threadNodeId: 'PRRT_xyz',
+  });
   const resolveData = await resolveReviewThread('PRRT_abc', true, writeFetch, 'tok');
   assert.ok(resolveData?.resolveReviewThread?.thread?.isResolved === true);
   await closePullRequest('o', 'r', 9, writeFetch, 'tok');
@@ -285,15 +391,81 @@ async function main() {
   assert.equal(reviewBody.event, 'APPROVE');
   assert.equal(reviewBody.commit_id, 'deadbeef');
   assert.ok(Array.isArray(reviewBody.comments) && reviewBody.comments[0].path === 'a.js');
-  const multiLine = JSON.parse(posts[2].body);
+  // postReviewComment probes pending review first (GET), then REST POST when none
+  const multiLinePost = posts.find(
+    (p) =>
+      p.method === 'POST' &&
+      String(p.url).endsWith('/pulls/9/comments') &&
+      p.body &&
+      (() => {
+        try {
+          const b = JSON.parse(p.body);
+          return b.path === 'a.js' && b.line === 4;
+        } catch {
+          return false;
+        }
+      })()
+  );
+  assert.ok(multiLinePost, 'line comment POST present');
+  const multiLine = JSON.parse(multiLinePost.body);
   assert.equal(multiLine.path, 'a.js');
   assert.equal(multiLine.line, 4);
   assert.equal(multiLine.start_line, 2);
   assert.equal(multiLine.start_side, 'RIGHT');
-  assert.ok(posts[3].url.endsWith('/comments/42/replies'));
-  assert.equal(JSON.parse(posts[3].body).body, 'reply body');
-  assert.equal(posts[4].url, 'https://api.github.com/graphql');
-  assert.ok(JSON.parse(posts[4].body).query.includes('resolveReviewThread'));
+  // REST reply fallback (no threadNodeId, no pending in mock)
+  const replyRest = posts.find(
+    (p) => p.method === 'POST' && String(p.url).includes('/comments/42/replies')
+  );
+  assert.ok(replyRest, 'REST /replies used when no threadNodeId / no pending');
+  assert.equal(JSON.parse(replyRest.body).body, 'reply body');
+  // GraphQL thread reply when threadNodeId provided (mode=comment, no pending)
+  const replyGql = posts.find((p) => {
+    if (!String(p.url).includes('graphql') || !p.body) return false;
+    try {
+      const b = JSON.parse(p.body);
+      return String(b.query || '').includes('addPullRequestReviewThreadReply');
+    } catch {
+      return false;
+    }
+  });
+  assert.ok(replyGql, 'GraphQL addPullRequestReviewThreadReply used with threadNodeId');
+
+  // mode=pending creates/uses pending review path
+  await replyToReviewComment('o', 'r', 9, 42, 'pending reply', writeFetch, 'tok', {
+    mode: 'pending',
+    parentNodeId: 'PRRC_parent',
+    commitId: 'deadbeef',
+  });
+  const pendingCreate = posts.find(
+    (p) =>
+      p.method === 'POST' &&
+      String(p.url).endsWith('/pulls/9/reviews') &&
+      p.body &&
+      !JSON.parse(p.body).event
+  );
+  // Either created pending or found existing; GraphQL addPullRequestReviewComment
+  const pendingGql = posts.find((p) => {
+    if (!String(p.url).includes('graphql') || !p.body) return false;
+    try {
+      return JSON.parse(p.body).query?.includes('addPullRequestReviewComment');
+    } catch {
+      return false;
+    }
+  });
+  assert.ok(
+    pendingCreate || pendingGql,
+    'pending mode creates review and/or uses addPullRequestReviewComment'
+  );
+  const resolvePost = posts.find((p) => {
+    if (!String(p.url).includes('graphql') || !p.body) return false;
+    try {
+      return JSON.parse(p.body).query?.includes('resolveReviewThread');
+    } catch {
+      return false;
+    }
+  });
+  assert.ok(resolvePost, 'resolve uses GraphQL');
+  assert.ok(JSON.parse(resolvePost.body).query.includes('resolveReviewThread'));
   const closeCall = posts.find(
     (p) => p.method === 'PATCH' && p.url.endsWith('/pulls/9') && JSON.parse(p.body).state === 'closed'
   );

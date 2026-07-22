@@ -14,7 +14,34 @@ import {
   selectionBlockRole,
 } from '@lib/line-selection';
 import { isPathViewed } from '@lib/review-threads';
+import { markSearchInText, resolveActiveMarkStart } from '@lib/search-index';
 import { InlineThread } from './InlineThread';
+
+function renderSearchableHtml(
+  displayText: string,
+  filePath: string | undefined,
+  searchQuery: string,
+  row: any,
+  activeHit: any,
+  occurrenceIndex: number,
+  field: 'code' | 'left' | 'right' | 'text',
+  useSyntax: boolean
+) {
+  const q = (searchQuery || '').trim();
+  if (!q) {
+    if (useSyntax) return highlightCode(displayText, filePath);
+    return escapeHtml(displayText ?? '');
+  }
+  const currentStart = resolveActiveMarkStart(
+    displayText ?? '',
+    q,
+    row,
+    activeHit,
+    occurrenceIndex,
+    field
+  );
+  return markSearchInText(displayText ?? '', q, { currentStart });
+}
 
 function VirtualDiffImpl(props: any) {
   const {
@@ -53,7 +80,21 @@ function VirtualDiffImpl(props: any) {
     onUploadFile,
     collapsedThreads,
     onToggleThreadCollapse,
+    pendingCount = 0,
+    searchQuery = '',
+    searchMatchRows = null,
+    activeSearchHit = null,
+    activeSearchOccurrence = 0,
   } = props;
+
+  const matchRowSet = useMemo(() => {
+    if (searchMatchRows instanceof Set) return searchMatchRows;
+    if (Array.isArray(searchMatchRows)) return new Set(searchMatchRows.map(Number));
+    return null;
+  }, [searchMatchRows]);
+
+  const qActive = Boolean((searchQuery || '').trim());
+  const occ = Number(activeSearchOccurrence) || 0;
 
   const [measuredH, setMeasuredH] = useState(() =>
     Math.max(120, Number(viewportHeight) || 520)
@@ -86,6 +127,25 @@ function VirtualDiffImpl(props: any) {
     };
   }, [listRef, onViewportHeight, virtualRows?.length]);
 
+  // After jump, ensure current mark is in view (virtual list may need a frame)
+  useLayoutEffect(() => {
+    if (highlightRowIndex == null || !listRef?.current) return;
+    const root = listRef.current as HTMLElement;
+    const rowEl = root.querySelector?.(
+      `[data-row-index="${highlightRowIndex}"]`
+    ) as HTMLElement | null;
+    if (!rowEl) return;
+    const mark = rowEl.querySelector?.(
+      '.prp-search-mark--current'
+    ) as HTMLElement | null;
+    const target = mark || rowEl;
+    try {
+      target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    } catch {
+      /* ignore */
+    }
+  }, [highlightRowIndex, activeSearchHit, activeSearchOccurrence, listRef]);
+
   const vp = Math.max(120, measuredH || Number(viewportHeight) || 520);
   const range = calculateVisibleRange({
     totalRows: virtualRows?.length || 0,
@@ -112,16 +172,25 @@ function VirtualDiffImpl(props: any) {
       <div className="prp-vlist__spacer" style={{ height: range.totalHeight }}>
         <div className="prp-vlist__window" style={{ transform: `translateY(${range.offsetY}px)` }}>
           {slice.map((row: any) => {
+            const isSearchMatch =
+              qActive && matchRowSet && matchRowSet.has(Number(row.rowIndex));
+            const isActiveHit =
+              highlightRowIndex != null &&
+              Number(highlightRowIndex) === Number(row.rowIndex);
+            const searchRowClass = `${isSearchMatch ? ' prp-vline--search-match' : ''}${
+              isActiveHit ? ' prp-vline--hit' : ''
+            }`;
+            const activeHitForMarks = isActiveHit ? activeSearchHit : null;
+
             if (row.kind === 'inline-comment') {
               const thread = threadsByCommentId?.get?.(String(row.commentId));
               return (
                 <div
                   key={row.rowIndex}
-                  className={`prp-vline prp-vline--comment${
-                    highlightRowIndex === row.rowIndex ? ' prp-vline--hit' : ''
-                  }`}
+                  className={`prp-vline prp-vline--comment${searchRowClass}`}
                   style={{ minHeight: COMMENT_ROW_HEIGHT }}
                   data-row-index={row.rowIndex}
+                  data-search-current={isActiveHit ? '1' : undefined}
                 >
                   <InlineThread
                     row={row}
@@ -145,6 +214,7 @@ function VirtualDiffImpl(props: any) {
                     onUploadFile={onUploadFile}
                     collapsed={Boolean(collapsedThreads?.has?.(String(row.commentId)))}
                     onToggleCollapse={() => onToggleThreadCollapse?.(row.commentId)}
+                    pendingCount={pendingCount}
                   />
                 </div>
               );
@@ -170,12 +240,11 @@ function VirtualDiffImpl(props: any) {
               return (
                 <div
                   key={row.rowIndex}
-                  className={`prp-vline prp-vline--header prp-vline--header-${headerTone}${
-                    highlightRowIndex === row.rowIndex ? ' prp-vline--hit' : ''
-                  }`}
+                  className={`prp-vline prp-vline--header prp-vline--header-${headerTone}${searchRowClass}`}
                   style={{ height: ROW_HEIGHT }}
                   data-row-index={row.rowIndex}
                   data-file-status={status}
+                  data-search-current={isActiveHit ? '1' : undefined}
                 >
                   <label className="prp-file-header__viewed" title="Mark as viewed">
                     <input
@@ -201,7 +270,25 @@ function VirtualDiffImpl(props: any) {
                     <span className={`prp-file-header__status prp-file-header__status--${headerTone}`}>
                       {status}
                     </span>
-                    <code className="prp-file-header__path">{row.filePath}</code>
+                    <code
+                      className="prp-file-header__path"
+                      dangerouslySetInnerHTML={{
+                        __html: isSearchMatch
+                          ? markSearchInText(row.filePath || '', searchQuery, {
+                              currentStart: isActiveHit
+                                ? resolveActiveMarkStart(
+                                    row.filePath || '',
+                                    searchQuery,
+                                    row,
+                                    activeHitForMarks,
+                                    occ,
+                                    'text'
+                                  )
+                                : null,
+                            })
+                          : escapeHtml(row.filePath || ''),
+                      }}
+                    />
                     <span className="prp-file-header__stats" aria-label={`+${adds} −${dels}`}>
                       <span className="prp-stat-add">+{adds}</span>
                       <span className="prp-stat-del">−{dels}</span>
@@ -224,22 +311,23 @@ function VirtualDiffImpl(props: any) {
             const selectable =
               typeof isSelectableDiffRow === 'function' ? isSelectableDiffRow(row) : false;
             const isSplit = Boolean(row.split);
+
             return (
               <div
                 key={row.rowIndex}
                 className={`prp-vline prp-vline--${row.lineType || row.kind}${
                   isSplit ? ' prp-vline--split' : ''
-                }${highlightRowIndex === row.rowIndex ? ' prp-vline--hit' : ''}${
-                  selected ? ' prp-vline--selected' : ''
-                }${selRole ? ` prp-vline--sel-${selRole}` : ''}${
-                  selectable ? ' prp-vline--selectable' : ''
-                }`}
+                }${searchRowClass}${selected ? ' prp-vline--selected' : ''}${
+                  selRole ? ` prp-vline--sel-${selRole}` : ''
+                }${selectable ? ' prp-vline--selectable' : ''}`}
                 style={{ height: ROW_HEIGHT }}
                 data-row-index={row.rowIndex}
                 data-file-path={row.filePath || ''}
                 data-new-line={row.newLine ?? ''}
                 data-sel-role={selRole || undefined}
                 data-split={isSplit ? '1' : '0'}
+                data-search-match={isSearchMatch ? '1' : undefined}
+                data-search-current={isActiveHit ? '1' : undefined}
                 title={
                   selectable ? 'Click = single line · Drag = multi-line comment' : undefined
                 }
@@ -258,29 +346,69 @@ function VirtualDiffImpl(props: any) {
                     <div className="prp-split-cols__left">
                       <span className="prp-split-cols__ln">{row.oldLine ?? ''}</span>
                       <code
-                        className="hljs prp-code"
+                        className={`prp-code${qActive && isSearchMatch ? '' : ' hljs'}`}
                         dangerouslySetInnerHTML={{
-                          __html: highlightCode(row.leftCode ?? '', row.filePath),
+                          __html: renderSearchableHtml(
+                            row.leftCode ?? '',
+                            row.filePath,
+                            isSearchMatch ? searchQuery : '',
+                            row,
+                            activeHitForMarks,
+                            occ,
+                            'left',
+                            !(qActive && isSearchMatch)
+                          ),
                         }}
                       />
                     </div>
                     <div className="prp-split-cols__right">
                       <span className="prp-split-cols__ln">{row.newLine ?? ''}</span>
                       <code
-                        className="hljs prp-code"
+                        className={`prp-code${qActive && isSearchMatch ? '' : ' hljs'}`}
                         dangerouslySetInnerHTML={{
-                          __html: highlightCode(row.rightCode ?? '', row.filePath),
+                          __html: renderSearchableHtml(
+                            row.rightCode ?? '',
+                            row.filePath,
+                            isSearchMatch ? searchQuery : '',
+                            row,
+                            activeHitForMarks,
+                            occ,
+                            'right',
+                            !(qActive && isSearchMatch)
+                          ),
                         }}
                       />
                     </div>
                   </div>
                 ) : (
                   <code
-                    className={isCode ? 'hljs prp-code' : 'prp-code'}
+                    className={
+                      isCode && !(qActive && isSearchMatch) ? 'hljs prp-code' : 'prp-code'
+                    }
                     dangerouslySetInnerHTML={{
                       __html: isCode
-                        ? highlightCode(row.code ?? row.text, row.filePath)
-                        : escapeHtml(row.text),
+                        ? renderSearchableHtml(
+                            row.code ?? row.text,
+                            row.filePath,
+                            isSearchMatch ? searchQuery : '',
+                            row,
+                            activeHitForMarks,
+                            occ,
+                            'code',
+                            !(qActive && isSearchMatch)
+                          )
+                        : isSearchMatch
+                          ? markSearchInText(row.text || '', searchQuery, {
+                              currentStart: resolveActiveMarkStart(
+                                row.text || '',
+                                searchQuery,
+                                row,
+                                activeHitForMarks,
+                                occ,
+                                'text'
+                              ),
+                            })
+                          : escapeHtml(row.text),
                     }}
                   />
                 )}

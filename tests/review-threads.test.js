@@ -9,6 +9,8 @@ const {
   filterFilesByQuery,
   toggleViewedPath,
   isPathViewed,
+  normalizeReviewCommentId,
+  resolveRootReviewCommentId,
 } = require('../src/modal/lib/review-threads.ts');
 
 const comments = [
@@ -50,8 +52,23 @@ assert.equal(counts.get('b.js'), 1);
 
 const replyReq = buildReplyReviewCommentRequest('o', 'r', 9, 1, 'hi');
 assert.equal(replyReq.method, 'POST');
-assert.ok(replyReq.url.endsWith('/pulls/9/comments/1/replies'));
+assert.ok(replyReq.url.endsWith('/comments/1/replies'));
 assert.equal(replyReq.body.body, 'hi');
+
+const {
+  buildReplyReviewThreadGraphql,
+} = require('../src/modal/lib/review-threads.ts');
+const gqlReply = buildReplyReviewThreadGraphql('PRRT_1', 'hi');
+assert.equal(gqlReply.url, 'https://api.github.com/graphql');
+assert.ok(gqlReply.body.query.includes('addPullRequestReviewThreadReply'));
+assert.equal(gqlReply.body.variables.id, 'PRRT_1');
+
+// Root resolution: replies-to-replies are invalid — always walk to top-level
+assert.equal(normalizeReviewCommentId('42'), 42);
+assert.equal(normalizeReviewCommentId('PRRC_x'), null);
+assert.equal(resolveRootReviewCommentId(comments, 1), 1);
+assert.equal(resolveRootReviewCommentId(comments, 2), 1);
+assert.equal(resolveRootReviewCommentId(comments, '2'), 1);
 
 const resolveReq = buildResolveThreadGraphql('PRRT_1', true);
 assert.equal(resolveReq.method, 'POST');

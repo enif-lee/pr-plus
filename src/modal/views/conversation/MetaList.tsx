@@ -1,5 +1,4 @@
 import React, { useRef } from 'react';
-import { Button } from '@common/Button';
 import { Badge } from '@common/Badge';
 import { Card } from '@common/Card';
 import { UserLink } from '@common/UserLink';
@@ -12,6 +11,8 @@ export function MetaList({
   emptyLabel,
   onRemove,
   onAdd,
+  /** Optional per-row re-request (reviewers). Receives login. */
+  onRerequest = null,
   addLabel,
   actionBusy,
   renderStatus,
@@ -31,6 +32,9 @@ export function MetaList({
             const login = typeof row === 'string' ? row : row?.login;
             if (!login) return null;
             const status = typeof row === 'object' ? row.status : null;
+            const canRerequest =
+              typeof onRerequest === 'function' &&
+              (typeof row !== 'object' || row?.canRerequest !== false);
             const avatarUrl =
               (typeof row === 'object' && (row.avatarUrl || row.avatar_url)) ||
               avatars[String(login).toLowerCase()] ||
@@ -38,7 +42,7 @@ export function MetaList({
             return (
               <li key={String(login).toLowerCase()} className="prp-people-chip">
                 <Avatar login={login} avatarUrl={avatarUrl} size="md" />
-                <span className="prp-people-chip__name">
+                <span className="prp-people-chip__name" title={login}>
                   <UserLink login={login} />
                 </span>
                 {status
@@ -53,18 +57,34 @@ export function MetaList({
                         </Badge>
                       )
                   : null}
-                {onRemove ? (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    disabled={actionBusy}
-                    onClick={() => onRemove(login)}
-                    title={`Remove ${login}`}
-                    className="prp-icon-btn"
-                  >
-                    ✕
-                  </Button>
-                ) : null}
+                <span className="prp-people-chip__actions">
+                  {canRerequest ? (
+                    <button
+                      type="button"
+                      className="prp-icon-btn prp-people-chip__rerequest"
+                      disabled={actionBusy}
+                      onClick={() => onRerequest(login, row)}
+                      title={`Re-request review from ${login}`}
+                      aria-label={`Re-request review from ${login}`}
+                    >
+                      <span className="prp-people-chip__rerequest-icon" aria-hidden="true">
+                        ↻
+                      </span>
+                    </button>
+                  ) : null}
+                  {onRemove ? (
+                    <button
+                      type="button"
+                      className="prp-icon-btn"
+                      disabled={actionBusy}
+                      onClick={() => onRemove(login)}
+                      title={`Remove ${login}`}
+                      aria-label={`Remove ${login}`}
+                    >
+                      ✕
+                    </button>
+                  ) : null}
+                </span>
               </li>
             );
           })

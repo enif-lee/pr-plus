@@ -1,0 +1,4857 @@
+/**
+ * AUTO-GENERATED — do not edit. Run: npm run build:sw
+ * Single-file MV3 service worker (deps + background handler).
+ */
+/* eslint-disable */
+
+
+/* ---- modal/pure/collapse.js ---- */
+
+/* sw-iife */
+(function () {
+  /**
+   * Default-collapse rules for PR files (binary / huge / generated).
+   * Aligns with GitHub + linguist-style .gitattributes signals.
+   */
+
+  const DEFAULT_LARGE_CHANGES = 500;
+  const DEFAULT_LARGE_PATCH_CHARS = 80_000;
+
+  /**
+   * Parse .gitattributes body into path-pattern → attributes map.
+   * @param {string} text
+   * @returns {Array<{ pattern: string, attrs: Record<string, string|boolean> }>}
+   */
+  function parseGitattributes(text) {
+    const rules = [];
+    if (!text || typeof text !== 'string') return rules;
+    for (const raw of text.split(/\r?\n/)) {
+      const line = raw.replace(/#.*$/, '').trim();
+      if (!line) continue;
+      const parts = line.split(/\s+/);
+      if (parts.length < 2) continue;
+      const pattern = parts[0];
+      const attrs = {};
+      for (let i = 1; i < parts.length; i++) {
+        const p = parts[i];
+        if (p.startsWith('-')) {
+          attrs[p.slice(1)] = false;
+        } else if (p.includes('=')) {
+          const [k, v] = p.split('=');
+          attrs[k] = v;
+        } else {
+          attrs[p] = true;
+        }
+      }
+      rules.push({ pattern, attrs });
+    }
+    return rules;
+  }
+
+  /**
+   * Simple gitignore-style match for attributes patterns (basename or ** suffix).
+   * @param {string} filePath
+   * @param {string} pattern
+   */
+  function matchAttrPattern(filePath, pattern) {
+    if (!filePath || !pattern) return false;
+    const path = filePath.replace(/^\/+/, '');
+    if (pattern === path) return true;
+    // **/foo or *.min.js style
+    if (pattern.startsWith('**/')) {
+      const rest = pattern.slice(3);
+      return path === rest || path.endsWith(`/${rest}`) || path.endsWith(rest);
+    }
+    if (pattern.startsWith('*.')) {
+      return path.endsWith(pattern.slice(1));
+    }
+    if (pattern.includes('*')) {
+      const re = new RegExp(
+        '^' +
+          pattern
+            .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+            .replace(/\*\*/g, '§§')
+            .replace(/\*/g, '[^/]*')
+            .replace(/§§/g, '.*') +
+          '$'
+      );
+      return re.test(path);
+    }
+    return path === pattern || path.endsWith(`/${pattern}`);
+  }
+
+  /**
+   * Resolve attributes for a path (later rules override).
+   * @param {string} filePath
+   * @param {Array<{ pattern: string, attrs: Record<string, string|boolean> }>} rules
+   */
+  function attributesForPath(filePath, rules) {
+    const out = {};
+    if (!Array.isArray(rules)) return out;
+    for (const rule of rules) {
+      if (matchAttrPattern(filePath, rule.pattern)) {
+        Object.assign(out, rule.attrs);
+      }
+    }
+    return out;
+  }
+
+  /**
+   * gitattributes values arrive as booleans (flag form) or strings ("true"/"false"
+   * from key=value). Treat truthy-enabled forms as on.
+   * @param {unknown} value
+   * @returns {boolean}
+   */
+  function isAttrEnabled(value) {
+    if (value === true) return true;
+    if (value === false || value == null) return false;
+    if (typeof value === 'string') {
+      const v = value.trim().toLowerCase();
+      if (v === '' || v === 'false' || v === '0' || v === 'no' || v === 'unset') {
+        return false;
+      }
+      // "true", "set", "yes", "1", or bare presence-like values
+      return true;
+    }
+    return Boolean(value);
+  }
+
+  /**
+   * Whether a PR file should start collapsed in the diff view.
+   * @param {{ filename?: string, path?: string, patch?: string, changes?: number, additions?: number, deletions?: number, status?: string, linguistGenerated?: boolean, binary?: boolean }} file
+   * @param {{ rules?: Array, largeChanges?: number, largePatchChars?: number }} [opts]
+   */
+  function shouldCollapseFile(file, opts = {}) {
+    if (!file) return true;
+    const path = file.filename || file.path || '';
+    const patch = file.patch || '';
+    const changes =
+      file.changes ??
+      (Number(file.additions || 0) + Number(file.deletions || 0));
+    const largeChanges = opts.largeChanges ?? DEFAULT_LARGE_CHANGES;
+    const largePatchChars = opts.largePatchChars ?? DEFAULT_LARGE_PATCH_CHARS;
+    const rules = opts.rules || [];
+
+    const attrs = attributesForPath(path, rules);
+    if (
+      isAttrEnabled(file.linguistGenerated) ||
+      isAttrEnabled(attrs['linguist-generated'])
+    ) {
+      return true;
+    }
+    if (isAttrEnabled(file.binary) || isAttrEnabled(attrs.binary)) {
+      return true;
+    }
+    // `-diff` sets attrs.diff=false; `diff=false` arrives as string
+    if (attrs.diff === false || String(attrs.diff || '').toLowerCase() === 'false') {
+      return true;
+    }
+    // GitHub omits patch for binary / too large
+    if (!patch) return true;
+    if (changes >= largeChanges) return true;
+    if (patch.length >= largePatchChars) return true;
+
+    // Common generated / lockfile noise
+    const lower = path.toLowerCase();
+    if (
+      lower.endsWith('package-lock.json') ||
+      lower.endsWith('yarn.lock') ||
+      lower.endsWith('pnpm-lock.yaml') ||
+      lower.endsWith('.min.js') ||
+      lower.endsWith('.min.css') ||
+      lower.endsWith('.map') ||
+      lower.includes('/dist/') ||
+      lower.endsWith('.bundle.js')
+    ) {
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Annotate files with collapse + attrs metadata (pure).
+   * Always re-runnable with gitattributesText so SW weak defaults can be upgraded.
+   * @param {object[]} files
+   * @param {string} [gitattributesText]
+   */
+  function annotateFilesForCollapse(files, gitattributesText) {
+    const rules = parseGitattributes(gitattributesText || '');
+    return (Array.isArray(files) ? files : []).map((f) => {
+      const path = f.filename || f.path || '';
+      const attrs = attributesForPath(path, rules);
+      const collapsed = shouldCollapseFile(
+        {
+          ...f,
+          linguistGenerated:
+            isAttrEnabled(f.linguistGenerated) ||
+            isAttrEnabled(attrs['linguist-generated']),
+          binary: isAttrEnabled(f.binary) || isAttrEnabled(attrs.binary),
+        },
+        { rules }
+      );
+      return {
+        ...f,
+        attrs,
+        defaultCollapsed: collapsed,
+      };
+    });
+  }
+
+  const api = {
+    parseGitattributes,
+    matchAttrPattern,
+    attributesForPath,
+    isAttrEnabled,
+    shouldCollapseFile,
+    annotateFilesForCollapse,
+    DEFAULT_LARGE_CHANGES,
+    DEFAULT_LARGE_PATCH_CHARS,
+  };
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = api;
+  }
+  if (typeof globalThis !== 'undefined') {
+    globalThis.PRModalCollapse = api;
+  }
+})();
+
+
+/* ---- modal/pure/comments-page.js ---- */
+
+/**
+ * Pure helpers for paginated / incremental GitHub comment fetches.
+ * REST: page+per_page (Link rel=next) and since=ISO8601 incremental windows.
+ */
+(function () {
+
+const DEFAULT_COMMENT_PAGE_SIZE = 50;
+
+function parseLinkNextPage(linkHeader) {
+  const raw = String(linkHeader || '');
+  if (!raw) return null;
+  const parts = raw.split(',');
+  for (const part of parts) {
+    if (!/rel="?next"?/i.test(part)) continue;
+    const m = part.match(/[?&]page=(\d+)/i);
+    if (m) {
+      const n = Number(m[1]);
+      return Number.isFinite(n) && n > 0 ? n : null;
+    }
+  }
+  return null;
+}
+
+function linkHasMore(linkHeader) {
+  return parseLinkNextPage(linkHeader) != null;
+}
+
+function clampPerPage(n, max = 100) {
+  const v = Number(n);
+  if (!Number.isFinite(v) || v <= 0) return DEFAULT_COMMENT_PAGE_SIZE;
+  return Math.min(max, Math.floor(v));
+}
+
+function buildCommentsListUrl(kind, owner, repo, number, opts = {}) {
+  const o = encodeURIComponent(String(owner || ''));
+  const r = encodeURIComponent(String(repo || ''));
+  const n = Number(number);
+  const perPage = clampPerPage(opts.perPage);
+  const page = Math.max(1, Number(opts.page) || 1);
+  const base =
+    kind === 'review'
+      ? `https://api.github.com/repos/${o}/${r}/pulls/${n}/comments`
+      : `https://api.github.com/repos/${o}/${r}/issues/${n}/comments`;
+  const params = new URLSearchParams();
+  params.set('per_page', String(perPage));
+  params.set('page', String(page));
+  if (opts.sort) params.set('sort', String(opts.sort));
+  if (opts.direction) params.set('direction', String(opts.direction));
+  if (opts.since) params.set('since', String(opts.since));
+  return `${base}?${params.toString()}`;
+}
+
+function mergeCommentsById(existing, incoming) {
+  const map = new Map();
+  for (const c of Array.isArray(existing) ? existing : []) {
+    if (c && c.id != null) map.set(String(c.id), c);
+  }
+  for (const c of Array.isArray(incoming) ? incoming : []) {
+    if (c && c.id != null) map.set(String(c.id), c);
+  }
+  return [...map.values()].sort((a, b) => {
+    const ta = String(a.createdAt || a.created_at || '');
+    const tb = String(b.createdAt || b.created_at || '');
+    if (ta !== tb) return ta.localeCompare(tb);
+    return Number(a.id) - Number(b.id);
+  });
+}
+
+function buildCommentsPageMeta(items, opts = {}) {
+  const list = Array.isArray(items) ? items : [];
+  const page = Math.max(1, Number(opts.page) || 1);
+  const perPage = clampPerPage(opts.perPage);
+  const nextPage = parseLinkNextPage(opts.linkHeader);
+  const hasMore =
+    nextPage != null || (opts.linkHeader == null && list.length >= perPage);
+  let oldest = null;
+  let newest = null;
+  let maxId = null;
+  for (const c of list) {
+    const at = c?.createdAt || c?.created_at || null;
+    if (at) {
+      if (!oldest || at < oldest) oldest = at;
+      if (!newest || at > newest) newest = at;
+    }
+    if (c?.id != null) {
+      const id = Number(c.id);
+      if (Number.isFinite(id) && (maxId == null || id > maxId)) maxId = id;
+    }
+  }
+  return {
+    page,
+    perPage,
+    hasMore: Boolean(hasMore),
+    nextPage: nextPage ?? (hasMore ? page + 1 : null),
+    since: opts.since || null,
+    oldestCreatedAt: oldest,
+    newestCreatedAt: newest,
+    maxId,
+    loadedCount: list.length,
+  };
+}
+
+function minIso(a, b) {
+  if (!a) return b || null;
+  if (!b) return a;
+  return a < b ? a : b;
+}
+
+function maxIso(a, b) {
+  if (!a) return b || null;
+  if (!b) return a;
+  return a > b ? a : b;
+}
+
+function advanceCommentsMeta(prevMeta, pageMeta, totalLoaded) {
+  const prev = prevMeta || {};
+  const page = pageMeta || {};
+  return {
+    page: page.page ?? prev.page ?? 1,
+    perPage: page.perPage ?? prev.perPage ?? DEFAULT_COMMENT_PAGE_SIZE,
+    hasMore: Boolean(page.hasMore),
+    nextPage: page.hasMore ? page.nextPage : null,
+    since: prev.since || null,
+    oldestCreatedAt: minIso(prev.oldestCreatedAt, page.oldestCreatedAt),
+    newestCreatedAt: maxIso(prev.newestCreatedAt, page.newestCreatedAt),
+    maxId:
+      page.maxId != null && (prev.maxId == null || page.maxId > prev.maxId)
+        ? page.maxId
+        : prev.maxId ?? page.maxId ?? null,
+    loadedCount: Number.isFinite(totalLoaded) ? totalLoaded : page.loadedCount || 0,
+  };
+}
+
+function sinceCursorFromMeta(meta) {
+  if (meta?.newestCreatedAt) return meta.newestCreatedAt;
+  return null;
+}
+
+const api = {
+  DEFAULT_COMMENT_PAGE_SIZE,
+  parseLinkNextPage,
+  linkHasMore,
+  buildCommentsListUrl,
+  clampPerPage,
+  mergeCommentsById,
+  buildCommentsPageMeta,
+  advanceCommentsMeta,
+  sinceCursorFromMeta,
+};
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = api;
+}
+if (typeof globalThis !== 'undefined') {
+  globalThis.PRModalCommentsPage = api;
+}
+})();
+
+
+/* ---- modal/pure/review-threads.js ---- */
+
+/* sw-iife */
+(function () {
+  /**
+   * Pure review-thread grouping, counts, resolve/reply request builders.
+   */
+
+  /**
+   * Group review comments into threads by root (in_reply_to_id).
+   * @param {Array} comments
+   * @returns {Array<{ id, path, line, side, root, replies, resolved, threadNodeId }>}
+   */
+  function groupReviewThreads(comments) {
+    const list = Array.isArray(comments) ? comments : [];
+    const byId = new Map();
+    for (const c of list) {
+      if (c && c.id != null) byId.set(String(c.id), c);
+    }
+    const roots = [];
+    const children = new Map();
+    for (const c of list) {
+      if (!c) continue;
+      const parentId = c.inReplyToId ?? c.in_reply_to_id ?? null;
+      if (parentId != null && byId.has(String(parentId))) {
+        const key = String(parentId);
+        if (!children.has(key)) children.set(key, []);
+        children.get(key).push(c);
+      } else {
+        roots.push(c);
+      }
+    }
+    return roots.map((root) => {
+      const replies = (children.get(String(root.id)) || []).slice().sort((a, b) =>
+        String(a.createdAt || a.created_at || '').localeCompare(
+          String(b.createdAt || b.created_at || '')
+        )
+      );
+      return {
+        id: root.id,
+        path: root.path || '',
+        line: root.line ?? root.original_line ?? null,
+        side: root.side || 'RIGHT',
+        root,
+        replies,
+        resolved: Boolean(root.resolved ?? root.isResolved),
+        outdated: Boolean(root.outdated),
+        threadNodeId: root.threadNodeId || root.thread_id || root.pullRequestReviewThreadId || null,
+        count: 1 + replies.length,
+      };
+    });
+  }
+
+  /**
+   * Merge GraphQL review-thread metadata onto REST review comments.
+   * GitHub REST list comments never includes thread GraphQL ids or isResolved;
+   * threads come from repository.pullRequest.reviewThreads.
+   *
+   * @param {Array<{ id?: number|string }>} comments mapped REST comments
+   * @param {Array<{ threadNodeId: string, resolved?: boolean, commentIds?: Array<number|string> }>} threads
+   * @returns {Array}
+   */
+  function mergeReviewThreadMeta(comments, threads) {
+    const list = Array.isArray(comments) ? comments : [];
+    /** @type {Map<string, { threadNodeId: string, resolved: boolean }>} */
+    const byCommentId = new Map();
+    for (const t of Array.isArray(threads) ? threads : []) {
+      if (!t || !t.threadNodeId) continue;
+      const meta = {
+        threadNodeId: String(t.threadNodeId),
+        resolved: Boolean(t.resolved),
+      };
+      for (const id of t.commentIds || []) {
+        if (id == null) continue;
+        byCommentId.set(String(id), meta);
+      }
+    }
+    return list.map((c) => {
+      if (!c) return c;
+      const meta = c.id != null ? byCommentId.get(String(c.id)) : null;
+      if (!meta) {
+        return {
+          ...c,
+          threadNodeId: c.threadNodeId || null,
+          resolved: Boolean(c.resolved),
+        };
+      }
+      return {
+        ...c,
+        threadNodeId: meta.threadNodeId,
+        resolved: meta.resolved,
+      };
+    });
+  }
+
+  /**
+   * Normalize GraphQL reviewThreads.nodes into merge-friendly rows.
+   * @param {Array} nodes
+   */
+  function mapGraphqlReviewThreads(nodes) {
+    if (!Array.isArray(nodes)) return [];
+    return nodes
+      .filter((t) => t && t.id)
+      .map((t) => ({
+        threadNodeId: t.id,
+        resolved: Boolean(t.isResolved),
+        commentIds: (t.comments?.nodes || [])
+          .map((c) => c?.databaseId)
+          .filter((id) => id != null),
+      }));
+  }
+
+  /**
+   * Count review threads (root comments) per file path.
+   * @param {Array} comments
+   * @returns {Map<string, number>}
+   */
+  function countReviewThreadsByPath(comments) {
+    const threads = groupReviewThreads(comments);
+    const map = new Map();
+    for (const t of threads) {
+      const p = t.path || '';
+      if (!p) continue;
+      map.set(p, (map.get(p) || 0) + 1);
+    }
+    return map;
+  }
+
+  function normalizeReviewCommentId(raw) {
+    if (raw == null || raw === '') return null;
+    if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) {
+      return Math.floor(raw);
+    }
+    const s = String(raw).trim();
+    if (!/^\d+$/.test(s)) return null;
+    const n = Number(s);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }
+
+  /**
+   * Walk in_reply_to chain to the top-level review comment.
+   * GitHub rejects replies-to-replies (422 Validation Failed).
+   */
+  function resolveRootReviewCommentId(comments, commentId) {
+    const start = normalizeReviewCommentId(commentId);
+    if (start == null) return null;
+    const byId = new Map();
+    for (const c of Array.isArray(comments) ? comments : []) {
+      if (!c || c.id == null) continue;
+      const id = normalizeReviewCommentId(c.id);
+      if (id != null) byId.set(id, c);
+    }
+    let cur = byId.get(start) || null;
+    if (!cur) return start;
+    const seen = new Set();
+    while (cur) {
+      const id = normalizeReviewCommentId(cur.id);
+      if (id == null || seen.has(id)) break;
+      seen.add(id);
+      const parentRaw = cur.inReplyToId ?? cur.in_reply_to_id ?? null;
+      const parentId = normalizeReviewCommentId(parentRaw);
+      if (parentId == null || !byId.has(parentId)) return id;
+      cur = byId.get(parentId);
+    }
+    return start;
+  }
+
+  function buildReplyReviewThreadGraphql(threadNodeId, body) {
+    return {
+      method: 'POST',
+      url: 'https://api.github.com/graphql',
+      body: {
+        query: `mutation($id:ID!,$body:String!){
+  addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$id,body:$body}){
+    comment { databaseId body }
+  }
+}`,
+        variables: {
+          id: String(threadNodeId || ''),
+          body: String(body || '').trim(),
+        },
+      },
+    };
+  }
+
+  /**
+   * REST fallback reply (no pending review).
+   * POST /pulls/{n}/comments/{id}/replies
+   */
+  function buildReplyReviewCommentRequest(owner, repo, pullNumber, commentId, body) {
+    const parentId = normalizeReviewCommentId(commentId);
+    const text = String(body || '').trim();
+    return {
+      method: 'POST',
+      url: `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/comments/${parentId ?? commentId}/replies`,
+      body: { body: text },
+    };
+  }
+
+  /**
+   * GraphQL resolve / unresolve review thread.
+   * @param {string} threadNodeId GraphQL node id (PRRT_…)
+   * @param {boolean} resolved
+   */
+  function buildResolveThreadGraphql(threadNodeId, resolved = true) {
+    const mutation = resolved
+      ? `mutation($id:ID!){ resolveReviewThread(input:{threadId:$id}){ thread { id isResolved } } }`
+      : `mutation($id:ID!){ unresolveReviewThread(input:{threadId:$id}){ thread { id isResolved } } }`;
+    return {
+      method: 'POST',
+      url: 'https://api.github.com/graphql',
+      body: {
+        query: mutation,
+        variables: { id: threadNodeId },
+      },
+    };
+  }
+
+  /**
+   * Filter files by path query (case-insensitive substring).
+   */
+  function filterFilesByQuery(files, query) {
+    const list = Array.isArray(files) ? files : [];
+    const q = String(query || '')
+      .trim()
+      .toLowerCase();
+    if (!q) return list.slice();
+    return list.filter((f) => {
+      const path = String(f.filename || f.path || '').toLowerCase();
+      return path.includes(q);
+    });
+  }
+
+  /**
+   * Toggle path in a viewed set (immutable).
+   * @param {Set<string>|string[]} viewed
+   * @param {string} path
+   * @returns {Set<string>}
+   */
+  function toggleViewedPath(viewed, path) {
+    const next = viewed instanceof Set ? new Set(viewed) : new Set(viewed || []);
+    const p = String(path || '');
+    if (!p) return next;
+    if (next.has(p)) next.delete(p);
+    else next.add(p);
+    return next;
+  }
+
+  function isPathViewed(viewed, path) {
+    if (!path) return false;
+    if (viewed instanceof Set) return viewed.has(path);
+    if (Array.isArray(viewed)) return viewed.includes(path);
+    return false;
+  }
+
+  const api = {
+    groupReviewThreads,
+    mergeReviewThreadMeta,
+    mapGraphqlReviewThreads,
+    countReviewThreadsByPath,
+    normalizeReviewCommentId,
+    resolveRootReviewCommentId,
+    buildReplyReviewThreadGraphql,
+    buildReplyReviewCommentRequest,
+    buildResolveThreadGraphql,
+    filterFilesByQuery,
+    toggleViewedPath,
+    isPathViewed,
+  };
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = api;
+  }
+  if (typeof globalThis !== 'undefined') {
+    globalThis.PRModalReviewThreads = api;
+  }
+})();
+
+
+/* ---- modal/pure/pending-review.js ---- */
+
+/* sw-iife */
+(function () {
+  /**
+   * Pure pending (draft) review batch for multi-comment submit.
+   * Comment path posts immediately; "start/add review" appends to batch.
+   */
+
+  /**
+   * @typedef {{
+   *   id: string,
+   *   path: string,
+   *   line: number,
+   *   side?: string,
+   *   startLine?: number,
+   *   startSide?: string,
+   *   body: string,
+   * }} PendingComment
+   */
+
+  function createEmptyPendingReview() {
+    return { comments: [], body: '' };
+  }
+
+  /**
+   * @param {{ comments?: PendingComment[], body?: string }|null} batch
+   * @param {PendingComment} comment
+   */
+  function addPendingComment(batch, comment) {
+    const base = batch && Array.isArray(batch.comments) ? batch : createEmptyPendingReview();
+    const body = String(comment?.body || '').trim();
+    if (!body || !comment?.path || comment.line == null) {
+      return { batch: base, added: false };
+    }
+    const id =
+      comment.id ||
+      `pc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+    const next = {
+      body: base.body || '',
+      comments: [
+        ...base.comments,
+        {
+          id,
+          path: comment.path,
+          line: Number(comment.line),
+          side: comment.side || 'RIGHT',
+          startLine:
+            comment.startLine != null && Number(comment.startLine) !== Number(comment.line)
+              ? Number(comment.startLine)
+              : undefined,
+          startSide: comment.startSide || comment.side || 'RIGHT',
+          body,
+        },
+      ],
+    };
+    return { batch: next, added: true };
+  }
+
+  function discardPendingReview() {
+    return createEmptyPendingReview();
+  }
+
+  function setPendingReviewBody(batch, body) {
+    const base = batch && Array.isArray(batch.comments) ? batch : createEmptyPendingReview();
+    return { ...base, body: String(body || '') };
+  }
+
+  function pendingReviewCount(batch) {
+    return Array.isArray(batch?.comments) ? batch.comments.length : 0;
+  }
+
+  /**
+   * CTA label for pending batch: empty → "Start review", else "Add comment".
+   * @param {{ comments?: unknown[] }|null} batch
+   */
+  function pendingReviewCtaLabel(batch) {
+    return pendingReviewCount(batch) > 0 ? 'Add comment' : 'Start review';
+  }
+
+  /**
+   * Shape GitHub create-review payload (with inline comments).
+   * @param {{ comments?: PendingComment[], body?: string }} batch
+   * @param {{ event: 'COMMENT'|'APPROVE'|'REQUEST_CHANGES', commitId?: string, body?: string }} opts
+   */
+  function buildPendingReviewSubmitPayload(batch, opts = {}) {
+    const event = opts.event || 'COMMENT';
+    if (!['COMMENT', 'APPROVE', 'REQUEST_CHANGES'].includes(event)) {
+      return null;
+    }
+    const comments = (batch?.comments || []).map((c) => {
+      const row = {
+        path: c.path,
+        body: c.body,
+        line: Number(c.line),
+        side: c.side || 'RIGHT',
+      };
+      if (c.startLine != null && Number(c.startLine) !== Number(c.line)) {
+        row.start_line = Number(c.startLine);
+        row.start_side = c.startSide || c.side || 'RIGHT';
+      }
+      return row;
+    });
+    const payload = {
+      event,
+      body: opts.body != null ? String(opts.body) : String(batch?.body || ''),
+    };
+    if (opts.commitId) payload.commit_id = opts.commitId;
+    if (comments.length) payload.comments = comments;
+    return payload;
+  }
+
+  const api = {
+    createEmptyPendingReview,
+    addPendingComment,
+    discardPendingReview,
+    setPendingReviewBody,
+    pendingReviewCount,
+    pendingReviewCtaLabel,
+    buildPendingReviewSubmitPayload,
+  };
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = api;
+  }
+  if (typeof globalThis !== 'undefined') {
+    globalThis.PRModalPendingReview = api;
+  }
+})();
+
+
+/* ---- modal/pure/pr-edit-api.js ---- */
+
+/**
+ * Pure request builders for PR metadata edits, comment edits, and suggestion apply.
+ * Unit-tested without network; fetch layer uses the same shapes.
+ */
+(function () {
+
+function buildUpdatePullRequest(owner, repo, pullNumber, fields = {}) {
+  const body = {};
+  if (fields.title != null) body.title = String(fields.title);
+  if (fields.body != null) body.body = String(fields.body);
+  if (fields.base != null) body.base = String(fields.base);
+  if (fields.state != null) body.state = fields.state === 'closed' ? 'closed' : 'open';
+  return {
+    method: 'PATCH',
+    url: `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}`,
+    body,
+  };
+}
+
+function buildEditIssueComment(owner, repo, commentId, body) {
+  return {
+    method: 'PATCH',
+    url: `https://api.github.com/repos/${owner}/${repo}/issues/comments/${commentId}`,
+    body: { body: String(body || '') },
+  };
+}
+
+function buildEditReviewComment(owner, repo, commentId, body) {
+  return {
+    method: 'PATCH',
+    url: `https://api.github.com/repos/${owner}/${repo}/pulls/comments/${commentId}`,
+    body: { body: String(body || '') },
+  };
+}
+
+function buildRequestReviewers(owner, repo, pullNumber, { reviewers = [], teamReviewers = [] } = {}) {
+  return {
+    method: 'POST',
+    url: `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/requested_reviewers`,
+    body: {
+      reviewers: reviewers.slice(),
+      team_reviewers: teamReviewers.slice(),
+    },
+  };
+}
+
+function buildRemoveReviewers(owner, repo, pullNumber, { reviewers = [], teamReviewers = [] } = {}) {
+  return {
+    method: 'DELETE',
+    url: `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/requested_reviewers`,
+    body: {
+      reviewers: reviewers.slice(),
+      team_reviewers: teamReviewers.slice(),
+    },
+  };
+}
+
+function buildSetAssignees(owner, repo, issueNumber, assignees) {
+  return {
+    method: 'POST',
+    url: `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/assignees`,
+    body: { assignees: (assignees || []).slice() },
+  };
+}
+
+function buildRemoveAssignees(owner, repo, issueNumber, assignees) {
+  return {
+    method: 'DELETE',
+    url: `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/assignees`,
+    body: { assignees: (assignees || []).slice() },
+  };
+}
+
+function buildSetLabels(owner, repo, issueNumber, labels) {
+  return {
+    method: 'PUT',
+    url: `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/labels`,
+    body: { labels: (labels || []).slice() },
+  };
+}
+
+/** Merge PR via REST. mergeMethod: merge | squash | rebase */
+function buildMergePullRequest(owner, repo, pullNumber, { mergeMethod = 'merge', commitTitle, commitMessage } = {}) {
+  const body = { merge_method: mergeMethod };
+  if (commitTitle != null) body.commit_title = String(commitTitle);
+  if (commitMessage != null) body.commit_message = String(commitMessage);
+  return {
+    method: 'PUT',
+    url: `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/merge`,
+    body,
+  };
+}
+
+/** Update PR head branch with latest base (update branch button). */
+function buildUpdateBranch(owner, repo, pullNumber, { expectedHeadSha } = {}) {
+  const body = {};
+  if (expectedHeadSha) body.expected_head_sha = String(expectedHeadSha);
+  return {
+    method: 'PUT',
+    url: `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/update-branch`,
+    body,
+  };
+}
+
+/** Issue/PR subscription (notifications). */
+function buildSetSubscription(owner, repo, issueNumber, { subscribed = true, ignored = false } = {}) {
+  return {
+    method: 'PUT',
+    url: `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/subscription`,
+    body: { subscribed: Boolean(subscribed), ignored: Boolean(ignored) },
+  };
+}
+
+function buildDeleteSubscription(owner, repo, issueNumber) {
+  return {
+    method: 'DELETE',
+    url: `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/subscription`,
+    body: null,
+  };
+}
+
+/** Set or clear milestone on the PR issue. */
+function buildSetMilestone(owner, repo, issueNumber, milestoneNumber) {
+  return {
+    method: 'PATCH',
+    url: `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}`,
+    body: { milestone: milestoneNumber == null ? null : Number(milestoneNumber) },
+  };
+}
+
+/**
+ * GraphQL mutation names for draft stage (need pullRequest node id).
+ * @param {'draft'|'ready'} stage
+ */
+function buildDraftStageGraphql(stage, pullRequestId) {
+  const id = String(pullRequestId || '');
+  if (stage === 'ready') {
+    return {
+      query: `mutation($id:ID!){markPullRequestReadyForReview(input:{pullRequestId:$id}){pullRequest{id isDraft}}}`,
+      variables: { id },
+    };
+  }
+  return {
+    query: `mutation($id:ID!){convertPullRequestToDraft(input:{pullRequestId:$id}){pullRequest{id isDraft}}}`,
+    variables: { id },
+  };
+}
+
+/**
+ * Extract linked issue numbers from PR body (closes/fixes/refs #N and bare #N).
+ * @returns {number[]}
+ */
+function parseLinkedIssueNumbers(body) {
+  const text = body == null ? '' : String(body);
+  const nums = new Set();
+  const re = /(?:(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+)?#(\d+)/gi;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const n = Number(m[1]);
+    if (Number.isFinite(n) && n > 0) nums.add(n);
+  }
+  return [...nums].sort((a, b) => a - b);
+}
+
+/**
+ * Logins to POST for "re-request review".
+ * GitHub 422s if you re-POST reviewers who are already in requested_reviewers.
+ * Target: past review authors (and optional extras) who are not currently pending
+ * and are not the PR author.
+ *
+ * @param {{
+ *   requestedReviewers?: string[],
+ *   reviews?: Array<{ author?: string }>,
+ *   author?: string,
+ *   extraLogins?: string[],
+ * }} detail
+ * @returns {string[]}
+ */
+function buildRerequestReviewerLogins(detail) {
+  const d = detail || {};
+  const pending = new Set(
+    (d.requestedReviewers || [])
+      .map((x) => String(x || '').trim())
+      .filter(Boolean)
+      .map((x) => x.toLowerCase())
+  );
+  const author = String(d.author || '')
+    .trim()
+    .toLowerCase();
+  const out = [];
+  const seen = new Set();
+
+  function consider(login) {
+    const raw = String(login || '').trim();
+    if (!raw) return;
+    const key = raw.toLowerCase();
+    if (author && key === author) return;
+    if (pending.has(key)) return; // already requested → would 422
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(raw);
+  }
+
+  for (const r of d.reviews || []) {
+    consider(r?.author);
+  }
+  for (const login of d.extraLogins || []) {
+    consider(login);
+  }
+  return out;
+}
+
+/**
+ * Parse GitHub ```suggestion fences from a comment body.
+ * @returns {Array<{ content: string, raw: string }>}
+ */
+function parseSuggestionFences(body) {
+  const text = body == null ? '' : String(body);
+  const out = [];
+  const re = /```suggestion[^\n]*\r?\n([\s\S]*?)```/gi;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    out.push({ content: m[1].replace(/\n$/, ''), raw: m[0] });
+  }
+  return out;
+}
+
+/**
+ * Apply suggestion lines into full file content (1-based inclusive line range on RIGHT side of the new file).
+ * Replaces lines [startLine, endLine] with suggestion lines (may change line count).
+ * @param {string} fileContent
+ * @param {{ startLine: number, endLine: number, suggestion: string }} range
+ */
+function applySuggestionToFileContent(fileContent, { startLine, endLine, suggestion }) {
+  const lines = String(fileContent ?? '').split('\n');
+  // Preserve trailing newline semantics: split keeps last empty if file ends with \n
+  const endsWithNl = String(fileContent ?? '').endsWith('\n');
+  if (endsWithNl && lines[lines.length - 1] === '') lines.pop();
+
+  const start = Math.max(1, Number(startLine) || 1);
+  const end = Math.max(start, Number(endLine) || start);
+  const sugLines = String(suggestion ?? '').split('\n');
+  // Drop final empty from suggestion if it was trailing newline only
+  if (sugLines.length && sugLines[sugLines.length - 1] === '' && suggestion.endsWith('\n')) {
+    sugLines.pop();
+  }
+
+  const before = lines.slice(0, start - 1);
+  const after = lines.slice(end);
+  const next = [...before, ...sugLines, ...after];
+  let out = next.join('\n');
+  if (endsWithNl || out.length) out = out.endsWith('\n') ? out : `${out}\n`;
+  return out;
+}
+
+/**
+ * Contents API PUT shape for committing applied suggestion on head branch.
+ */
+function buildApplySuggestionCommitRequest(
+  owner,
+  repo,
+  {
+    path,
+    branch,
+    contentBase64,
+    sha,
+    message,
+  }
+) {
+  return {
+    method: 'PUT',
+    url: `https://api.github.com/repos/${owner}/${repo}/contents/${path
+      .split('/')
+      .map(encodeURIComponent)
+      .join('/')}`,
+    body: {
+      message: message || `Apply suggestion to ${path}`,
+      content: contentBase64,
+      branch,
+      sha,
+    },
+  };
+}
+
+/**
+ * Map unified leave-review form button → GitHub review event or issue comment.
+ * @param {'comment'|'approve'|'request_changes'} action
+ */
+function mapLeaveReviewAction(action) {
+  const a = String(action || '').toLowerCase();
+  if (a === 'approve') return { kind: 'review', event: 'APPROVE' };
+  if (a === 'request_changes' || a === 'request-changes') {
+    return { kind: 'review', event: 'REQUEST_CHANGES' };
+  }
+  return { kind: 'issue-comment', event: 'COMMENT' };
+}
+
+/**
+ * Map GitHub REST review-comment payload → app shape (optimistic UI).
+ * Used after postReviewComment / replyToReviewComment so diff virtual rows
+ * and groupReviewThreads update before the next full refresh.
+ * @param {object|null} raw REST response body
+ * @param {object} [fallback] path/line/body when raw is partial
+ */
+function mapRestReviewComment(raw, fallback = {}) {
+  if (!raw && !fallback.body && fallback.line == null) return null;
+  const r = raw || {};
+  // PENDING comments often omit line and only have position / original_line
+  const lineRaw =
+    r.line ??
+    r.original_line ??
+    (r.position != null && Number.isFinite(Number(r.position))
+      ? Number(r.position)
+      : null) ??
+    fallback.line ??
+    null;
+  return {
+    id: r.id ?? fallback.id ?? null,
+    author: r.user?.login || fallback.author || '',
+    body: r.body || fallback.body || '',
+    path: r.path || fallback.path || '',
+    line: lineRaw != null ? Number(lineRaw) : null,
+    originalLine: r.original_line ?? null,
+    startLine: r.start_line ?? fallback.startLine ?? null,
+    side: r.side || fallback.side || 'RIGHT',
+    startSide: r.start_side || null,
+    diffHunk: r.diff_hunk || '',
+    createdAt: r.created_at || fallback.createdAt || null,
+    inReplyToId: r.in_reply_to_id ?? fallback.inReplyToId ?? null,
+    nodeId: r.node_id || null,
+    threadNodeId: r.threadNodeId || fallback.threadNodeId || null,
+    resolved: false,
+    pending: Boolean(r.pending ?? fallback.pending),
+    pendingReviewId: r.pendingReviewId ?? fallback.pendingReviewId ?? null,
+  };
+}
+
+/**
+ * Map GitHub REST issue comment payload → app shape.
+ */
+function mapRestIssueComment(raw, fallback = {}) {
+  if (!raw && !fallback.body) return null;
+  const r = raw || {};
+  return {
+    id: r.id ?? fallback.id ?? null,
+    author: r.user?.login || fallback.author || '',
+    body: r.body || fallback.body || '',
+    createdAt: r.created_at || fallback.createdAt || null,
+    htmlUrl: r.html_url || null,
+  };
+}
+
+/**
+ * Append an optimistic review comment into a detail-like snapshot.
+ * @param {{ reviewComments?: Array }} detail
+ * @param {object|null} comment mapped comment
+ */
+function appendOptimisticReviewComment(detail, comment) {
+  const base = detail || {};
+  if (!comment || comment.id == null) return base;
+  const list = Array.isArray(base.reviewComments) ? base.reviewComments.slice() : [];
+  if (list.some((c) => String(c.id) === String(comment.id))) {
+    return { ...base, reviewComments: list };
+  }
+  list.push(comment);
+  return { ...base, reviewComments: list };
+}
+
+const api = {
+  buildUpdatePullRequest,
+  buildEditIssueComment,
+  buildEditReviewComment,
+  buildRequestReviewers,
+  buildRemoveReviewers,
+  buildSetAssignees,
+  buildRemoveAssignees,
+  buildSetLabels,
+  buildMergePullRequest,
+  buildUpdateBranch,
+  buildSetSubscription,
+  buildDeleteSubscription,
+  buildSetMilestone,
+  buildDraftStageGraphql,
+  parseLinkedIssueNumbers,
+  buildRerequestReviewerLogins,
+  parseSuggestionFences,
+  applySuggestionToFileContent,
+  buildApplySuggestionCommitRequest,
+  mapLeaveReviewAction,
+  mapRestReviewComment,
+  mapRestIssueComment,
+  appendOptimisticReviewComment,
+};
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = api;
+}
+if (typeof globalThis !== 'undefined') {
+  globalThis.PRModalPrEditApi = api;
+}
+})();
+
+
+/* ---- storage.js ---- */
+
+;(function(){
+/**
+ * PAT storage helpers.
+ *
+ * Storage location: chrome.storage.local (extension-private, not page-accessible,
+ * not synced to Google account). Key: "githubToken".
+ *
+ * Security notes:
+ * - Prefer reading the token only from the extension service worker / popup.
+ * - Content scripts must not call getGithubToken(); use background messaging.
+ * - UI only ever displays a mask, never the full secret after save.
+ */
+
+const TOKEN_KEY = 'githubToken';
+
+function getStorageArea(storageApi = globalThis.chrome?.storage?.local) {
+  return storageApi || null;
+}
+
+/** Mask for UI — keep only last 4 chars (no usable prefix leak). */
+function maskGithubToken(token) {
+  if (!token || typeof token !== 'string') return '';
+  const trimmed = token.trim();
+  if (!trimmed) return '';
+  if (trimmed.length <= 4) return '••••••••';
+  return `${'•'.repeat(8)}${trimmed.slice(-4)}`;
+}
+
+/**
+ * Looks like a GitHub PAT (classic ghp_/gho_/… or fine-grained github_pat_).
+ * Rejects obvious garbage; does not guarantee validity.
+ */
+function looksLikeGithubToken(token) {
+  if (typeof token !== 'string') return false;
+  const t = token.trim();
+  // Classic PATs ~40+, fine-grained often 80–255; allow a wide band.
+  if (t.length < 20 || t.length > 400) return false;
+  if (/\s/.test(t)) return false;
+  // ghp_/gho_/ghu_/ghs_/ghr_ classic; github_pat_ fine-grained
+  return /^(gh[pours]_|github_pat_)[A-Za-z0-9_]+$/.test(t);
+}
+
+function getGithubToken(storageApi) {
+  const area = getStorageArea(storageApi);
+  if (!area) return Promise.resolve(null);
+
+  return new Promise((resolve) => {
+    area.get([TOKEN_KEY], (result) => {
+      const token = result?.[TOKEN_KEY];
+      resolve(typeof token === 'string' && token.trim() ? token.trim() : null);
+    });
+  });
+}
+
+async function getGithubTokenStatus(storageApi) {
+  const token = await getGithubToken(storageApi);
+  if (!token) {
+    return { configured: false, mask: '' };
+  }
+  return { configured: true, mask: maskGithubToken(token) };
+}
+
+function setGithubToken(token, storageApi) {
+  const area = getStorageArea(storageApi);
+  if (!area) return Promise.reject(new Error('chrome.storage unavailable'));
+
+  const value = typeof token === 'string' ? token.trim() : '';
+  return new Promise((resolve, reject) => {
+    if (!value) {
+      area.remove([TOKEN_KEY], () => {
+        const err = globalThis.chrome?.runtime?.lastError;
+        if (err) reject(err);
+        else resolve(false);
+      });
+      return;
+    }
+
+    if (!looksLikeGithubToken(value)) {
+      reject(
+        new Error(
+          'Invalid token format. Use a GitHub PAT (ghp_… / github_pat_…).'
+        )
+      );
+      return;
+    }
+
+    area.set({ [TOKEN_KEY]: value }, () => {
+      const err = globalThis.chrome?.runtime?.lastError;
+      if (err) reject(err);
+      else resolve(true);
+    });
+  });
+}
+
+function watchGithubToken(onChange, storageApi = globalThis.chrome?.storage) {
+  if (!storageApi?.onChanged) return () => {};
+
+  const listener = (changes, areaName) => {
+    if (areaName !== 'local' || !changes[TOKEN_KEY]) return;
+    const next = changes[TOKEN_KEY].newValue;
+    // Callers must treat this as a signal only; avoid logging the value.
+    onChange(typeof next === 'string' && next.trim() ? next.trim() : null);
+  };
+
+  storageApi.onChanged.addListener(listener);
+  return () => storageApi.onChanged.removeListener(listener);
+}
+
+const storageApi = {
+  TOKEN_KEY,
+  maskGithubToken,
+  looksLikeGithubToken,
+  getGithubToken,
+  getGithubTokenStatus,
+  setGithubToken,
+  watchGithubToken,
+};
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = storageApi;
+}
+if (typeof globalThis !== 'undefined') {
+  globalThis.PRTreeStorage = storageApi;
+}
+})();
+
+
+/* ---- fetch-pulls.js ---- */
+
+;(function(){
+/**
+ * Fetch open PR branch metadata via GitHub REST API.
+ * List up to 100 open PRs, then fill page-visible dangling PRs via single-PR gets.
+ */
+
+function mapApiPullRequest(pr) {
+  return {
+    number: pr.number,
+    title: pr.title,
+    // Body required so attachMagicLinks/prMatchText can match description tokens
+    body: pr.body || '',
+    headRef: pr.head.ref,
+    baseRef: pr.base.ref,
+    author: pr.user?.login || '',
+    draft: Boolean(pr.draft),
+    htmlUrl: pr.html_url,
+  };
+}
+
+function buildApiHeaders(token) {
+  const headers = { Accept: 'application/vnd.github+json' };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  return headers;
+}
+
+/** Page PR numbers missing from the list-API result set. */
+function findDanglingPrNumbers(pagePrNumbers, prs) {
+  if (!Array.isArray(pagePrNumbers) || pagePrNumbers.length === 0) {
+    return [];
+  }
+  const have = new Set((prs || []).map((pr) => pr.number));
+  const dangling = [];
+  const seen = new Set();
+  for (const raw of pagePrNumbers) {
+    const num = Number(raw);
+    if (!Number.isFinite(num) || seen.has(num) || have.has(num)) continue;
+    seen.add(num);
+    dangling.push(num);
+  }
+  return dangling;
+}
+
+async function mapWithConcurrency(items, limit, worker) {
+  if (!items.length) return [];
+  const results = new Array(items.length);
+  let index = 0;
+
+  async function run() {
+    while (index < items.length) {
+      const i = index++;
+      results[i] = await worker(items[i], i);
+    }
+  }
+
+  const runners = Array.from({ length: Math.min(limit, items.length) }, run);
+  await Promise.all(runners);
+  return results;
+}
+
+async function fetchOpenPullsPublic(owner, repo, fetchImpl, token = null) {
+  const url = `https://api.github.com/repos/${owner}/${repo}/pulls?state=open&per_page=100`;
+  const res = await fetchImpl(url, {
+    headers: buildApiHeaders(token),
+  });
+  if (!res.ok) {
+    const err = new Error(`GitHub API ${res.status}: ${res.statusText}`);
+    err.status = res.status;
+    throw err;
+  }
+  const data = await res.json();
+  return data.map(mapApiPullRequest);
+}
+
+async function fetchPullByNumber(owner, repo, pullNumber, fetchImpl, token = null) {
+  const url = `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}`;
+  const res = await fetchImpl(url, {
+    headers: buildApiHeaders(token),
+  });
+  if (!res.ok) {
+    const err = new Error(`GitHub API ${res.status}: ${res.statusText} (PR #${pullNumber})`);
+    err.status = res.status;
+    err.pullNumber = pullNumber;
+    throw err;
+  }
+  const data = await res.json();
+  return mapApiPullRequest(data);
+}
+
+/**
+ * Fetch dangling page PRs by number. Auth errors rethrow; other failures are skipped.
+ */
+async function fetchDanglingPulls(owner, repo, numbers, fetchImpl, token = null) {
+  if (!numbers.length) return [];
+
+  const settled = await mapWithConcurrency(numbers, 5, async (pullNumber) => {
+    try {
+      return await fetchPullByNumber(owner, repo, pullNumber, fetchImpl, token);
+    } catch (err) {
+      if (err.status === 401 || err.status === 403) {
+        throw err;
+      }
+      console.warn(`[PR Tree] Skipping dangling PR #${pullNumber}:`, err.message || err);
+      return null;
+    }
+  });
+
+  return settled.filter(Boolean);
+}
+
+/**
+ * Repo autolink rules (GitHub "magic" external references).
+ * Requires admin on the token for the API; returns [] on 403/404.
+ * @returns {Promise<Array<{key_prefix:string,url_template:string,is_alphanumeric:boolean}>>}
+ */
+async function fetchRepoAutolinks(owner, repo, fetchImpl, token = null) {
+  const url = `https://api.github.com/repos/${owner}/${repo}/autolinks`;
+  try {
+    const res = await fetchImpl(url, { headers: buildApiHeaders(token) });
+    if (!res.ok) return [];
+    const data = await res.json();
+    if (!Array.isArray(data)) return [];
+    return data
+      .filter((a) => a && typeof a.key_prefix === 'string' && typeof a.url_template === 'string')
+      .map((a) => ({
+        key_prefix: a.key_prefix,
+        url_template: a.url_template,
+        is_alphanumeric: a.is_alphanumeric !== false,
+      }));
+  } catch {
+    return [];
+  }
+}
+
+function escapeRegExp(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Build external magic-link URL from autolink rule + captured num.
+ * Supports both `<num>` (GitHub) and `{num}` placeholders.
+ */
+function buildAutolinkUrl(urlTemplate, num) {
+  return String(urlTemplate)
+    .replace(/<num>/gi, num)
+    .replace(/\{num\}/gi, num);
+}
+
+/**
+ * Find autolink matches in free text (title, branch, body).
+ * @returns {Array<{key:string,url:string,prefix:string}>}
+ */
+function matchAutolinksInText(text, autolinks) {
+  if (!text || !Array.isArray(autolinks) || autolinks.length === 0) return [];
+
+  const found = [];
+  const seen = new Set();
+
+  for (const rule of autolinks) {
+    const prefix = rule.key_prefix;
+    if (!prefix) continue;
+    // Prefer pure digits after prefix (ENG-7 in feat/ENG-7-foo) before broader alnum ids.
+    const numClass =
+      rule.is_alphanumeric !== false
+        ? '(?:\\d+|[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*)'
+        : '\\d+';
+    // Word-ish boundary before prefix so we don't match mid-token noise.
+    const re = new RegExp(
+      `(^|[^A-Za-z0-9_])(${escapeRegExp(prefix)})(${numClass})`,
+      'gi'
+    );
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      const key = `${m[2]}${m[3]}`;
+      const url = buildAutolinkUrl(rule.url_template, m[3]);
+      if (!url || seen.has(url)) continue;
+      seen.add(url);
+      found.push({ key, url, prefix: m[2] });
+    }
+  }
+
+  return found;
+}
+
+/** Collect matchable text for a PR descriptor. */
+function prMatchText(pr) {
+  if (!pr) return '';
+  return [pr.title, pr.headRef, pr.baseRef, pr.body, pr.author]
+    .filter(Boolean)
+    .join('\n');
+}
+
+/**
+ * Attach `magicLinks` array onto each PR from repo autolink rules.
+ */
+function attachMagicLinks(prs, autolinks) {
+  if (!Array.isArray(prs)) return [];
+  if (!Array.isArray(autolinks) || autolinks.length === 0) {
+    return prs.map((pr) => ({ ...pr, magicLinks: pr.magicLinks || [] }));
+  }
+  return prs.map((pr) => ({
+    ...pr,
+    magicLinks: matchAutolinksInText(prMatchText(pr), autolinks),
+  }));
+}
+
+/**
+ * @param {object} options
+ * @param {string|null} [options.token]
+ * @param {number[]} [options.pagePrNumbers] PR numbers visible on the pulls page
+ * @param {boolean} [options.includeAutolinks=true]
+ */
+async function fetchOpenPulls(owner, repo, fetchImpl, options = {}) {
+  const {
+    token = null,
+    pagePrNumbers = [],
+    includeAutolinks = true,
+  } = options;
+
+  const listed = await fetchOpenPullsPublic(owner, repo, fetchImpl, token);
+  const danglingNumbers = findDanglingPrNumbers(pagePrNumbers, listed);
+
+  let prs = listed;
+  if (danglingNumbers.length > 0) {
+    const extras = await fetchDanglingPulls(
+      owner,
+      repo,
+      danglingNumbers,
+      fetchImpl,
+      token
+    );
+    if (extras.length > 0) {
+      const byNumber = new Map(listed.map((pr) => [pr.number, pr]));
+      for (const pr of extras) {
+        byNumber.set(pr.number, pr);
+      }
+      prs = [...byNumber.values()];
+    }
+  }
+
+  if (!includeAutolinks) {
+    return attachMagicLinks(prs, []);
+  }
+
+  const autolinks = await fetchRepoAutolinks(owner, repo, fetchImpl, token);
+  return attachMagicLinks(prs, autolinks);
+}
+
+function decodeBase64Utf8(b64) {
+  try {
+    if (typeof Buffer !== 'undefined') {
+      return Buffer.from(b64, 'base64').toString('utf8');
+    }
+  } catch {
+    /* fall through */
+  }
+  try {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new TextDecoder('utf-8').decode(bytes);
+  } catch {
+    return '';
+  }
+}
+
+async function apiJson(url, fetchImpl, token) {
+  const res = await fetchImpl(url, { headers: buildApiHeaders(token) });
+  if (!res.ok) {
+    const err = new Error(`GitHub API ${res.status}: ${res.statusText}`);
+    err.status = res.status;
+    throw err;
+  }
+  return res.json();
+}
+
+/**
+ * JSON GET that also returns Link header for pagination.
+ * @returns {Promise<{ data: any, link: string }>}
+ */
+async function apiJsonWithLink(url, fetchImpl, token) {
+  const res = await fetchImpl(url, { headers: buildApiHeaders(token) });
+  if (!res.ok) {
+    const err = new Error(`GitHub API ${res.status}: ${res.statusText}`);
+    err.status = res.status;
+    throw err;
+  }
+  const data = await res.json();
+  let link = '';
+  try {
+    if (typeof res.headers?.get === 'function') {
+      link = res.headers.get('link') || res.headers.get('Link') || '';
+    }
+  } catch {
+    link = '';
+  }
+  return { data, link };
+}
+
+const COMMENT_PAGE_SIZE = 50;
+
+function commentsPageHelpers() {
+  try {
+    let mod =
+      typeof globalThis !== 'undefined' ? globalThis.PRModalCommentsPage : null;
+    if (!mod && typeof require === 'function') {
+      try {
+        mod = require('./modal/pure/comments-page.js');
+      } catch {
+        mod = null;
+      }
+    }
+    return mod;
+  } catch {
+    return null;
+  }
+}
+
+function mapIssueComment(c) {
+  return {
+    id: c.id,
+    author: c.user?.login || '',
+    avatarUrl: c.user?.avatar_url || '',
+    body: c.body || '',
+    createdAt: c.created_at,
+  };
+}
+
+function mapReviewComment(c, extra = {}) {
+  // Pending-review comments often omit line and only have position/original_line
+  const line =
+    c.line ??
+    c.original_line ??
+    (c.position != null && Number.isFinite(Number(c.position))
+      ? Number(c.position)
+      : null);
+  // REST has no outdated flag — infer when line is gone but original_line remains
+  const outdated =
+    extra.outdated != null
+      ? Boolean(extra.outdated)
+      : c.outdated != null
+        ? Boolean(c.outdated)
+        : c.line == null && c.original_line != null;
+  return {
+    id: c.id,
+    author: c.user?.login || '',
+    avatarUrl: c.user?.avatar_url || '',
+    body: c.body || '',
+    path: c.path || '',
+    line: line != null ? Number(line) : null,
+    originalLine: c.original_line ?? null,
+    startLine: c.start_line ?? null,
+    side: c.side || 'RIGHT',
+    startSide: c.start_side || null,
+    diffHunk: c.diff_hunk || c.diffHunk || '',
+    createdAt: c.created_at,
+    inReplyToId: c.in_reply_to_id ?? null,
+    nodeId: c.node_id || null,
+    threadNodeId: extra.threadNodeId ?? null,
+    resolved: Boolean(extra.resolved),
+    outdated,
+    /** True when part of a not-yet-submitted PENDING review (hidden from main list). */
+    pending: Boolean(extra.pending || c.pending),
+    pendingReviewId: extra.pendingReviewId ?? c.pendingReviewId ?? null,
+  };
+}
+
+/**
+ * Map a GraphQL PullRequestReviewComment node (+ parent thread meta) → app shape.
+ */
+function mapGraphqlReviewCommentNode(node, threadMeta = {}) {
+  if (!node) return null;
+  const id = node.databaseId ?? null;
+  if (id == null) return null;
+  const reviewState = String(node.pullRequestReview?.state || '').toUpperCase();
+  const pending = reviewState === 'PENDING';
+  const line =
+    node.line != null
+      ? Number(node.line)
+      : node.originalLine != null
+        ? Number(node.originalLine)
+        : null;
+  const sideRaw = threadMeta.diffSide || threadMeta.side || 'RIGHT';
+  const side = String(sideRaw).toUpperCase() === 'LEFT' ? 'LEFT' : 'RIGHT';
+  return {
+    id: Number(id),
+    author: node.author?.login || '',
+    avatarUrl: node.author?.avatarUrl || '',
+    body: node.body || '',
+    path: node.path || threadMeta.path || '',
+    line,
+    originalLine: node.originalLine ?? null,
+    startLine: node.startLine ?? node.originalStartLine ?? null,
+    side,
+    startSide: threadMeta.startDiffSide || null,
+    diffHunk: node.diffHunk || '',
+    createdAt: node.createdAt || null,
+    inReplyToId: node.replyTo?.databaseId ?? null,
+    nodeId: node.id || null,
+    threadNodeId: threadMeta.threadNodeId || null,
+    resolved: Boolean(threadMeta.resolved),
+    outdated: Boolean(node.outdated ?? threadMeta.isOutdated),
+    pending,
+    pendingReviewId: pending
+      ? node.pullRequestReview?.databaseId ?? null
+      : null,
+  };
+}
+
+/**
+ * Merge published / GraphQL review comments with PENDING-only rows.
+ * GraphQL rows win for threadNodeId / outdated / diffHunk; pending flag merges in.
+ */
+function mergePendingReviewComments(published, pendingList) {
+  const list = Array.isArray(published) ? published.slice() : [];
+  const seen = new Set(list.map((c) => (c && c.id != null ? String(c.id) : '')).filter(Boolean));
+  for (const p of Array.isArray(pendingList) ? pendingList : []) {
+    if (!p || p.id == null) continue;
+    const key = String(p.id);
+    if (seen.has(key)) {
+      const idx = list.findIndex((c) => c && String(c.id) === key);
+      if (idx < 0) continue;
+      const host = list[idx];
+      list[idx] = {
+        ...p,
+        ...host,
+        pending: Boolean(host.pending || p.pending),
+        pendingReviewId: host.pendingReviewId ?? p.pendingReviewId ?? null,
+        threadNodeId: host.threadNodeId || p.threadNodeId || null,
+        nodeId: host.nodeId || p.nodeId || null,
+        outdated: Boolean(host.outdated || p.outdated),
+        diffHunk: host.diffHunk || p.diffHunk || '',
+        resolved: Boolean(host.resolved || p.resolved),
+      };
+      continue;
+    }
+    seen.add(key);
+    list.push(p);
+  }
+  return list;
+}
+
+/**
+ * Pick the viewer's latest PENDING review from a reviews list payload.
+ * @param {Array} reviews
+ * @param {string|null} login
+ * @returns {{ id: number, node_id: string|null }|null}
+ */
+function pickViewerPendingFromReviews(reviews, login) {
+  const list = Array.isArray(reviews) ? reviews : [];
+  const mine = list.filter((r) => {
+    if (!r || String(r.state || '').toUpperCase() !== 'PENDING') return false;
+    if (!login) return true;
+    return (
+      String(r.user?.login || '').toLowerCase() === String(login).toLowerCase()
+    );
+  });
+  if (!mine.length) return null;
+  const r = mine[mine.length - 1];
+  return {
+    id: Number(r.id),
+    node_id: r.node_id || null,
+  };
+}
+
+/**
+ * Comments on the viewer's PENDING review (includes replies not in the main list).
+ * Pass `preloaded` reviews + login from fetchPrDetail to avoid a second
+ * GET /reviews (rate-limit / race) that can miss PENDING on hard reload.
+ * @returns {Promise<{ comments: Array, review: { id: number, nodeId: string|null, commentCount: number }|null }>}
+ */
+async function fetchViewerPendingReviewBundle(
+  owner,
+  repo,
+  pullNumber,
+  fetchImpl,
+  token,
+  preloaded = null
+) {
+  if (!token) return { comments: [], review: null };
+  let pending = null;
+  if (preloaded && (Array.isArray(preloaded.reviews) || preloaded.login != null)) {
+    pending = pickViewerPendingFromReviews(
+      preloaded.reviews,
+      preloaded.login || null
+    );
+  }
+  if (!pending?.id) {
+    pending = await findViewerPendingReview(
+      owner,
+      repo,
+      pullNumber,
+      fetchImpl,
+      token
+    );
+  }
+  if (!pending?.id) return { comments: [], review: null };
+  try {
+    const n = Number(pullNumber);
+    const raw = await apiJson(
+      `https://api.github.com/repos/${owner}/${repo}/pulls/${n}/reviews/${pending.id}/comments?per_page=100`,
+      fetchImpl,
+      token
+    );
+    const comments = (Array.isArray(raw) ? raw : []).map((c) =>
+      mapReviewComment(c, { pending: true, pendingReviewId: pending.id })
+    );
+    return {
+      comments,
+      review: {
+        id: pending.id,
+        nodeId: pending.node_id || null,
+        commentCount: comments.length,
+      },
+    };
+  } catch {
+    return {
+      comments: [],
+      review: {
+        id: pending.id,
+        nodeId: pending.node_id || null,
+        commentCount: 0,
+      },
+    };
+  }
+}
+
+/**
+ * @returns {Promise<Array>}
+ */
+async function fetchViewerPendingReviewComments(
+  owner,
+  repo,
+  pullNumber,
+  fetchImpl,
+  token
+) {
+  const { comments } = await fetchViewerPendingReviewBundle(
+    owner,
+    repo,
+    pullNumber,
+    fetchImpl,
+    token
+  );
+  return comments;
+}
+
+/**
+ * Create an empty PENDING review (no event). Required before attaching
+ * "Start review" replies when none exists yet.
+ */
+async function createPendingPullReview(
+  owner,
+  repo,
+  pullNumber,
+  { commitId } = {},
+  fetchImpl,
+  token
+) {
+  const body = {};
+  if (commitId) body.commit_id = commitId;
+  return apiSend(
+    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`,
+    fetchImpl,
+    token,
+    { method: 'POST', body }
+  );
+}
+
+/**
+ * Submit an existing PENDING review.
+ * POST /repos/{owner}/{repo}/pulls/{pull}/reviews/{review_id}/events
+ */
+async function submitPendingPullReview(
+  owner,
+  repo,
+  pullNumber,
+  reviewId,
+  { event = 'COMMENT', body = '' } = {},
+  fetchImpl,
+  token
+) {
+  const id = Number(reviewId);
+  if (!Number.isFinite(id) || id <= 0) {
+    throw new Error('Invalid pending review id');
+  }
+  const ev = String(event || 'COMMENT').toUpperCase();
+  if (!['COMMENT', 'APPROVE', 'REQUEST_CHANGES'].includes(ev)) {
+    throw new Error('Invalid review event');
+  }
+  return apiSend(
+    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${id}/events`,
+    fetchImpl,
+    token,
+    { method: 'POST', body: { event: ev, body: body || '' } }
+  );
+}
+
+/**
+ * Delete a PENDING review (discards all pending comments/replies on it).
+ * DELETE /repos/{owner}/{repo}/pulls/{pull}/reviews/{review_id}
+ */
+async function deletePendingPullReview(
+  owner,
+  repo,
+  pullNumber,
+  reviewId,
+  fetchImpl,
+  token
+) {
+  const id = Number(reviewId);
+  if (!Number.isFinite(id) || id <= 0) {
+    throw new Error('Invalid pending review id');
+  }
+  return apiSend(
+    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${id}`,
+    fetchImpl,
+    token,
+    { method: 'DELETE' }
+  );
+}
+
+/**
+ * Paginated issue or pull review comments.
+ * Supports page/per_page offset and since= (ISO8601) incremental windows.
+ *
+ * @param {'issue'|'review'} kind
+ * @param {{ page?: number, perPage?: number, since?: string|null }} [opts]
+ */
+async function fetchPrCommentsPage(
+  owner,
+  repo,
+  pullNumber,
+  kind,
+  opts,
+  fetchImpl,
+  token
+) {
+  const helpers = commentsPageHelpers();
+  const perPage =
+    helpers?.clampPerPage?.(opts?.perPage) ||
+    Math.min(100, Number(opts?.perPage) || COMMENT_PAGE_SIZE);
+  const page = Math.max(1, Number(opts?.page) || 1);
+  const since = opts?.since || null;
+  const url = helpers?.buildCommentsListUrl
+    ? helpers.buildCommentsListUrl(kind, owner, repo, pullNumber, {
+        page,
+        perPage,
+        since,
+        sort: kind === 'review' ? 'created' : undefined,
+        direction: kind === 'review' ? 'asc' : undefined,
+      })
+    : (() => {
+        const base =
+          kind === 'review'
+            ? `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/comments`
+            : `https://api.github.com/repos/${owner}/${repo}/issues/${pullNumber}/comments`;
+        const q = new URLSearchParams({
+          per_page: String(perPage),
+          page: String(page),
+        });
+        if (since) q.set('since', since);
+        return `${base}?${q}`;
+      })();
+
+  const { data, link } = await apiJsonWithLink(url, fetchImpl, token);
+  const raw = Array.isArray(data) ? data : [];
+  const items =
+    kind === 'review' ? raw.map(mapReviewComment) : raw.map(mapIssueComment);
+  const meta = helpers?.buildCommentsPageMeta
+    ? helpers.buildCommentsPageMeta(items, {
+        page,
+        perPage,
+        linkHeader: link,
+        since,
+      })
+    : {
+        page,
+        perPage,
+        hasMore: raw.length >= perPage,
+        nextPage: raw.length >= perPage ? page + 1 : null,
+        since,
+        loadedCount: items.length,
+      };
+  return { items, meta, kind };
+}
+
+async function apiSend(url, fetchImpl, token, { method = 'GET', body } = {}) {
+  const headers = buildApiHeaders(token);
+  if (body != null) headers['Content-Type'] = 'application/json';
+  const res = await fetchImpl(url, {
+    method,
+    headers,
+    body: body != null ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const j = await res.json();
+      if (j?.message) detail = j.message;
+      // Surface field-level validation (common on 422 replies / review comments)
+      if (Array.isArray(j?.errors) && j.errors.length) {
+        const bits = j.errors
+          .map((e) => {
+            if (!e || typeof e !== 'object') return String(e);
+            if (e.message) return e.message;
+            const field = e.field || e.resource || '';
+            const code = e.code || '';
+            return [field, code].filter(Boolean).join(' ') || null;
+          })
+          .filter(Boolean);
+        if (bits.length) detail = `${detail}: ${bits.join('; ')}`;
+      }
+    } catch {
+      /* ignore */
+    }
+    const err = new Error(`GitHub API ${res.status}: ${detail}`);
+    err.status = res.status;
+    throw err;
+  }
+  if (res.status === 204) return null;
+  return res.json();
+}
+
+/**
+ * GraphQL client: HTTP 200 can still carry body.errors — treat those as failures.
+ * @returns {Promise<object>} data field only
+ */
+async function apiGraphql(query, variables, fetchImpl, token) {
+  const json = await apiSend(
+    'https://api.github.com/graphql',
+    fetchImpl,
+    token,
+    { method: 'POST', body: { query, variables: variables || {} } }
+  );
+  if (json?.errors?.length) {
+    const msg = json.errors
+      .map((e) => e?.message || String(e))
+      .filter(Boolean)
+      .join('; ');
+    const err = new Error(`GitHub GraphQL: ${msg || 'unknown error'}`);
+    err.graphqlErrors = json.errors;
+    err.status = 200;
+    throw err;
+  }
+  return json?.data ?? null;
+}
+
+/** Thread node fields shared by first/last pagination queries. */
+const REVIEW_THREAD_NODE_FIELDS = `
+  id
+  isResolved
+  isOutdated
+  path
+  line
+  originalLine
+  startLine
+  originalStartLine
+  diffSide
+  startDiffSide
+  comments(first:100){
+    nodes{
+      id
+      databaseId
+      body
+      path
+      line
+      originalLine
+      startLine
+      originalStartLine
+      outdated
+      diffHunk
+      createdAt
+      author { login avatarUrl }
+      replyTo { databaseId }
+      pullRequestReview { databaseId state }
+    }
+  }
+`;
+
+/** Oldest → newer (forward). */
+const REVIEW_THREADS_FIRST_QUERY = `
+query($owner:String!,$name:String!,$number:Int!,$n:Int!,$cursor:String){
+  repository(owner:$owner,name:$name){
+    pullRequest(number:$number){
+      reviewThreads(first:$n, after:$cursor){
+        totalCount
+        pageInfo { hasNextPage hasPreviousPage startCursor endCursor }
+        nodes { ${REVIEW_THREAD_NODE_FIELDS} }
+      }
+    }
+  }
+}`;
+
+/** Newest ← older (backward). */
+const REVIEW_THREADS_LAST_QUERY = `
+query($owner:String!,$name:String!,$number:Int!,$n:Int!,$cursor:String){
+  repository(owner:$owner,name:$name){
+    pullRequest(number:$number){
+      reviewThreads(last:$n, before:$cursor){
+        totalCount
+        pageInfo { hasNextPage hasPreviousPage startCursor endCursor }
+        nodes { ${REVIEW_THREAD_NODE_FIELDS} }
+      }
+    }
+  }
+}`;
+
+/** Default page size for dual-window thread loading. */
+const REVIEW_THREADS_PAGE_SIZE = 40;
+
+/**
+ * Map GraphQL reviewThreads.nodes → { threads, comments }.
+ */
+function mapReviewThreadNodes(allNodes) {
+  const threads = [];
+  const comments = [];
+  for (const t of Array.isArray(allNodes) ? allNodes : []) {
+    if (!t?.id) continue;
+    const threadMeta = {
+      threadNodeId: t.id,
+      resolved: Boolean(t.isResolved),
+      isOutdated: Boolean(t.isOutdated),
+      path: t.path || '',
+      diffSide: t.diffSide || 'RIGHT',
+      startDiffSide: t.startDiffSide || null,
+      line: t.line ?? null,
+      originalLine: t.originalLine ?? null,
+      startLine: t.startLine ?? t.originalStartLine ?? null,
+    };
+    const commentIds = [];
+    for (const node of t.comments?.nodes || []) {
+      const mapped = mapGraphqlReviewCommentNode(node, threadMeta);
+      if (!mapped) continue;
+      comments.push(mapped);
+      commentIds.push(mapped.id);
+    }
+    threads.push({
+      threadNodeId: t.id,
+      resolved: Boolean(t.isResolved),
+      outdated: Boolean(t.isOutdated),
+      path: t.path || '',
+      line: t.line ?? t.originalLine ?? null,
+      startLine: t.startLine ?? t.originalStartLine ?? null,
+      side: t.diffSide || 'RIGHT',
+      commentIds,
+    });
+  }
+  return { threads, comments };
+}
+
+/**
+ * Single GraphQL page of review threads.
+ * @param {'newest'|'older'|'oldest'|'newer'} direction
+ *   - newest: last:N (connection end = most recent)
+ *   - older:  last:N before startCursor (expand newest window into older)
+ *   - oldest: first:N (connection start = earliest)
+ *   - newer:  first:N after endCursor (expand oldest window into newer)
+ */
+async function fetchReviewThreadsPage(
+  owner,
+  repo,
+  pullNumber,
+  { direction = 'newest', cursor = null, pageSize = REVIEW_THREADS_PAGE_SIZE } = {},
+  fetchImpl,
+  token
+) {
+  const empty = {
+    threads: [],
+    comments: [],
+    hasMore: false,
+    endCursor: null,
+    startCursor: null,
+    hasNextPage: false,
+    hasPreviousPage: false,
+    totalCount: null,
+    pageCount: 0,
+    direction,
+  };
+  if (!token) return empty;
+  const n = Number(pullNumber);
+  if (!Number.isFinite(n)) return empty;
+  const size = Math.max(1, Math.min(100, Number(pageSize) || REVIEW_THREADS_PAGE_SIZE));
+  const dir = String(direction || 'newest');
+  const useLast = dir === 'newest' || dir === 'older';
+  const query = useLast ? REVIEW_THREADS_LAST_QUERY : REVIEW_THREADS_FIRST_QUERY;
+  // newest: last:N, cursor=null
+  // older:  last:N, before=cursor (start of current newest window)
+  // oldest: first:N, cursor=null
+  // newer:  first:N, after=cursor (end of current oldest window)
+  const data = await apiGraphql(
+    query,
+    {
+      owner,
+      name: repo,
+      number: n,
+      n: size,
+      cursor: cursor || null,
+    },
+    fetchImpl,
+    token
+  );
+  const conn = data?.repository?.pullRequest?.reviewThreads;
+  const nodes = conn?.nodes || [];
+  const pageInfo = conn?.pageInfo || {};
+  const mapped = mapReviewThreadNodes(nodes);
+  // Tag threads with load window for UI gap split
+  const windowTag =
+    dir === 'newest' || dir === 'older' ? 'newest' : 'oldest';
+  for (const t of mapped.threads) {
+    t.loadWindow = windowTag;
+  }
+  return {
+    threads: mapped.threads,
+    comments: mapped.comments,
+    totalCount:
+      typeof conn?.totalCount === 'number' ? conn.totalCount : null,
+    startCursor: pageInfo.startCursor || null,
+    endCursor: pageInfo.endCursor || null,
+    hasNextPage: Boolean(pageInfo.hasNextPage),
+    hasPreviousPage: Boolean(pageInfo.hasPreviousPage),
+    // Convenience for dual-window UI
+    hasMore:
+      useLast
+        ? Boolean(pageInfo.hasPreviousPage)
+        : Boolean(pageInfo.hasNextPage),
+    pageCount: 1,
+    direction: dir,
+    window: windowTag,
+  };
+}
+
+/**
+ * Initial dual-window load: newest (last) + oldest (first) when total is large.
+ * Small PRs load a single newest window covering everything.
+ */
+async function fetchPullReviewThreadsBundle(
+  owner,
+  repo,
+  pullNumber,
+  fetchImpl,
+  token,
+  opts = {}
+) {
+  if (!token) {
+    return {
+      threads: [],
+      comments: [],
+      hasMore: false,
+      endCursor: null,
+      startCursor: null,
+      pageCount: 0,
+      totalCount: 0,
+      reviewThreadsMeta: emptyReviewThreadsMeta(),
+    };
+  }
+  const pageSize =
+    Number(opts.pageSize) || REVIEW_THREADS_PAGE_SIZE;
+  // Newest first page
+  const newest = await fetchReviewThreadsPage(
+    owner,
+    repo,
+    pullNumber,
+    { direction: 'newest', cursor: null, pageSize },
+    fetchImpl,
+    token
+  );
+  const totalCount = Number(newest.totalCount) || newest.threads.length;
+  let oldest = null;
+  // If more than one page, also seed oldest window for dual-end fold
+  if (totalCount > pageSize && newest.hasPreviousPage) {
+    try {
+      oldest = await fetchReviewThreadsPage(
+        owner,
+        repo,
+        pullNumber,
+        {
+          direction: 'oldest',
+          cursor: null,
+          pageSize: Math.min(20, pageSize),
+        },
+        fetchImpl,
+        token
+      );
+    } catch {
+      oldest = null;
+    }
+  }
+
+  const threads = [...(newest.threads || [])];
+  const comments = [...(newest.comments || [])];
+  const newestIds = newest.threads.map((t) => t.threadNodeId).filter(Boolean);
+  const oldestIds = [];
+  if (oldest) {
+    for (const t of oldest.threads || []) {
+      if (!newestIds.includes(t.threadNodeId)) {
+        threads.push(t);
+        oldestIds.push(t.threadNodeId);
+      }
+    }
+    for (const c of oldest.comments || []) {
+      if (!comments.some((x) => String(x.id) === String(c.id))) comments.push(c);
+    }
+  }
+
+  const loaded = threads.length;
+  const hiddenCount = Math.max(0, totalCount - loaded);
+  const meta = {
+    totalCount,
+    hiddenCount,
+    loadedThreadCount: loaded,
+    loadedCommentCount: comments.length,
+    pagesLoaded: 1 + (oldest ? 1 : 0),
+    // Newest window cursors (expand older with before: startCursor)
+    newestStartCursor: newest.startCursor || null,
+    newestEndCursor: newest.endCursor || null,
+    hasOlder: Boolean(newest.hasPreviousPage),
+    // Oldest window cursors (expand newer with after: endCursor)
+    oldestStartCursor: oldest?.startCursor || null,
+    oldestEndCursor: oldest?.endCursor || null,
+    hasNewerFromOldest: Boolean(oldest?.hasNextPage),
+    newestThreadIds: newestIds,
+    oldestThreadIds: oldestIds,
+    hasMore: hiddenCount > 0,
+    endCursor: newest.startCursor || null, // legacy: load-more-older
+  };
+
+  return {
+    threads,
+    comments,
+    hasMore: meta.hasMore,
+    endCursor: meta.endCursor,
+    startCursor: newest.startCursor || null,
+    pageCount: meta.pagesLoaded,
+    totalCount,
+    reviewThreadsMeta: meta,
+  };
+}
+
+function emptyReviewThreadsMeta() {
+  return {
+    totalCount: 0,
+    hiddenCount: 0,
+    loadedThreadCount: 0,
+    loadedCommentCount: 0,
+    pagesLoaded: 0,
+    newestStartCursor: null,
+    newestEndCursor: null,
+    hasOlder: false,
+    oldestStartCursor: null,
+    oldestEndCursor: null,
+    hasNewerFromOldest: false,
+    newestThreadIds: [],
+    oldestThreadIds: [],
+    hasMore: false,
+    endCursor: null,
+  };
+}
+
+/**
+ * Merge a dual-window page into detail.reviewThreadsMeta + comments.
+ * @param {'older'|'newer'|'newest'|'oldest'} direction
+ */
+function mergeReviewThreadsPageIntoDetail(detail, page, direction = 'older') {
+  if (!detail) return detail;
+  const dir = String(direction || page?.direction || 'older');
+  const prevMeta = detail.reviewThreadsMeta || emptyReviewThreadsMeta();
+  const prevRc = Array.isArray(detail.reviewComments) ? detail.reviewComments : [];
+  const prevTh = Array.isArray(detail.reviewThreads) ? detail.reviewThreads : [];
+
+  const reviewComments = mergePendingReviewComments(prevRc, page?.comments || []);
+  const thById = new Map(
+    prevTh.map((t) => [String(t.threadNodeId), t]).filter(([k]) => k && k !== 'undefined')
+  );
+  for (const t of page?.threads || []) {
+    if (t?.threadNodeId) {
+      thById.set(String(t.threadNodeId), {
+        ...(thById.get(String(t.threadNodeId)) || {}),
+        ...t,
+      });
+    }
+  }
+  const reviewThreads = [...thById.values()];
+
+  let newestIds = new Set((prevMeta.newestThreadIds || []).map(String));
+  let oldestIds = new Set((prevMeta.oldestThreadIds || []).map(String));
+  const pageIds = (page?.threads || [])
+    .map((t) => t.threadNodeId)
+    .filter(Boolean)
+    .map(String);
+
+  let newestStartCursor = prevMeta.newestStartCursor;
+  let newestEndCursor = prevMeta.newestEndCursor;
+  let hasOlder = prevMeta.hasOlder;
+  let oldestStartCursor = prevMeta.oldestStartCursor;
+  let oldestEndCursor = prevMeta.oldestEndCursor;
+  let hasNewerFromOldest = prevMeta.hasNewerFromOldest;
+
+  if (dir === 'newest' || dir === 'older') {
+    for (const id of pageIds) newestIds.add(id);
+    // Expanding older moves the "start" of newest window further back
+    if (page?.startCursor) newestStartCursor = page.startCursor;
+    if (dir === 'newest' && page?.endCursor) newestEndCursor = page.endCursor;
+    hasOlder = Boolean(page?.hasPreviousPage);
+  } else {
+    // oldest | newer — expand oldest window toward the middle
+    for (const id of pageIds) oldestIds.add(id);
+    if (page?.endCursor) oldestEndCursor = page.endCursor;
+    if (dir === 'oldest' && page?.startCursor) oldestStartCursor = page.startCursor;
+    hasNewerFromOldest = Boolean(page?.hasNextPage);
+  }
+
+  // Windows meet when no hidden left or cursors exhausted both ways
+  const totalCount =
+    typeof page?.totalCount === 'number'
+      ? page.totalCount
+      : Number(prevMeta.totalCount) || reviewThreads.length;
+  const loadedThreadCount = reviewThreads.length;
+  const hiddenCount = Math.max(0, totalCount - loadedThreadCount);
+
+  // Drop ids from oldest that are now in newest (overlap)
+  for (const id of newestIds) oldestIds.delete(id);
+
+  const meta = {
+    ...prevMeta,
+    totalCount,
+    hiddenCount,
+    loadedThreadCount,
+    loadedCommentCount: reviewComments.length,
+    pagesLoaded: (Number(prevMeta.pagesLoaded) || 0) + (page?.pageCount || 1),
+    newestStartCursor,
+    newestEndCursor,
+    hasOlder: hiddenCount > 0 && hasOlder,
+    oldestStartCursor,
+    oldestEndCursor,
+    hasNewerFromOldest: hiddenCount > 0 && hasNewerFromOldest,
+    newestThreadIds: [...newestIds],
+    oldestThreadIds: [...oldestIds],
+    hasMore: hiddenCount > 0,
+    endCursor: newestStartCursor,
+  };
+
+  return {
+    ...detail,
+    reviewComments,
+    reviewThreads,
+    reviewCommentsMeta: {
+      ...(detail.reviewCommentsMeta || {}),
+      loadedCount: reviewComments.length,
+      hasMore: meta.hasMore,
+    },
+    reviewThreadsMeta: meta,
+  };
+}
+
+/**
+ * Fetch PR review threads (ids + isResolved) for resolve UI / legacy callers.
+ * Returns [] on failure so REST detail still loads.
+ */
+async function fetchPullReviewThreads(owner, repo, pullNumber, fetchImpl, token) {
+  try {
+    const bundle = await fetchPullReviewThreadsBundle(
+      owner,
+      repo,
+      pullNumber,
+      fetchImpl,
+      token
+    );
+    return bundle.threads || [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Full PR detail payload for the modal: header, body, files+patches,
+ * issue comments, reviews, review comments, commits, checks.
+ *
+ * Partial by default: only the **first GraphQL page** of review threads
+ * (see opts.threadsMaxPages / opts.skipReviewThreads). More pages load via
+ * fetchReviewThreadsPage + mergeReviewThreadsPageIntoDetail.
+ *
+ * @param {{ skipReviewThreads?: boolean, threadsMaxPages?: number, threadsCursor?: string|null }} [opts]
+ */
+async function fetchPrDetail(
+  owner,
+  repo,
+  pullNumber,
+  fetchImpl,
+  token = null,
+  opts = {}
+) {
+  const base = `https://api.github.com/repos/${owner}/${repo}`;
+  const n = Number(pullNumber);
+  const skipReviewThreads = Boolean(opts.skipReviewThreads);
+  const threadsMaxPages = skipReviewThreads
+    ? 0
+    : Math.max(1, Math.min(20, Number(opts.threadsMaxPages) || 1));
+
+  // Core PR payload (no full thread dump) — parallel REST + light helpers
+  const [pr, files, commentsPage, reviews, commits, viewerLogin, subscription, autolinks] =
+    await Promise.all([
+      apiJson(`${base}/pulls/${n}`, fetchImpl, token),
+      apiJson(`${base}/pulls/${n}/files?per_page=100`, fetchImpl, token),
+      fetchPrCommentsPage(owner, repo, n, 'issue', { page: 1, perPage: COMMENT_PAGE_SIZE }, fetchImpl, token).catch(
+        () => ({ items: [], meta: { page: 1, perPage: COMMENT_PAGE_SIZE, hasMore: false, nextPage: null, loadedCount: 0 } })
+      ),
+      apiJson(`${base}/pulls/${n}/reviews?per_page=100`, fetchImpl, token).catch(
+        () => []
+      ),
+      apiJson(`${base}/pulls/${n}/commits?per_page=100`, fetchImpl, token).catch(
+        () => []
+      ),
+      fetchViewerLogin(fetchImpl, token),
+      // Notifications subscription (auth required; null when unavailable)
+      token
+        ? apiJson(`${base}/issues/${n}/subscription`, fetchImpl, token).catch(() => null)
+        : Promise.resolve(null),
+      // Repo autolinks for magic-link matching on title/body/branches
+      fetchRepoAutolinks(owner, repo, fetchImpl, token),
+    ]);
+  const comments = commentsPage?.items || [];
+
+  // First page (or zero) of review threads — not the full 500+ dump
+  let reviewThreadBundle = {
+    threads: [],
+    comments: [],
+    hasMore: false,
+    endCursor: null,
+    pageCount: 0,
+  };
+  if (token && threadsMaxPages > 0) {
+    reviewThreadBundle = await fetchPullReviewThreadsBundle(
+      owner,
+      repo,
+      n,
+      fetchImpl,
+      token,
+      {
+        cursor: opts.threadsCursor || null,
+        maxPages: threadsMaxPages,
+      }
+    ).catch(() => reviewThreadBundle);
+  }
+
+  const reviewThreads = reviewThreadBundle?.threads || [];
+  // PENDING-only REST rows when GraphQL misses them
+  const pendingBundle = token
+    ? await fetchViewerPendingReviewBundle(
+        owner,
+        repo,
+        n,
+        fetchImpl,
+        token,
+        { reviews, login: viewerLogin }
+      ).catch(() => ({ comments: [], review: null }))
+    : { comments: [], review: null };
+  const pendingReviewComments = pendingBundle.comments || [];
+  const reviewComments = mergePendingReviewComments(
+    reviewThreadBundle?.comments || [],
+    pendingReviewComments
+  );
+  const viewerPendingReview = pendingBundle.review || null;
+  const reviewCommentsMeta = {
+    page: 1,
+    perPage: (reviewThreadBundle?.comments || []).length || COMMENT_PAGE_SIZE,
+    hasMore: Boolean(reviewThreadBundle?.hasMore),
+    nextPage: null,
+    loadedCount: (reviewComments || []).length,
+  };
+  const reviewThreadsMeta = reviewThreadBundle?.reviewThreadsMeta
+    ? { ...reviewThreadBundle.reviewThreadsMeta }
+    : {
+        ...emptyReviewThreadsMeta(),
+        hasMore: Boolean(reviewThreadBundle?.hasMore),
+        endCursor: reviewThreadBundle?.endCursor || null,
+        loadedThreadCount: (reviewThreads || []).length,
+        loadedCommentCount: (reviewThreadBundle?.comments || []).length,
+        pagesLoaded: reviewThreadBundle?.pageCount || (threadsMaxPages > 0 ? 1 : 0),
+        totalCount: Number(reviewThreadBundle?.totalCount) || (reviewThreads || []).length,
+        hiddenCount: Math.max(
+          0,
+          (Number(reviewThreadBundle?.totalCount) || 0) - (reviewThreads || []).length
+        ),
+      };
+
+  const headSha = pr.head?.sha || '';
+  let checks = { state: 'unknown', totalCount: 0, statuses: [] };
+  if (headSha) {
+    try {
+      const status = await apiJson(
+        `${base}/commits/${headSha}/status`,
+        fetchImpl,
+        token
+      );
+      checks = {
+        state: status.state || 'unknown',
+        totalCount: status.total_count || 0,
+        statuses: (status.statuses || []).slice(0, 40).map((s) => ({
+          context: s.context || '',
+          state: s.state || '',
+          description: s.description || '',
+          targetUrl: s.target_url || '',
+        })),
+      };
+    } catch {
+      /* ignore */
+    }
+    try {
+      const runs = await apiJson(
+        `${base}/commits/${headSha}/check-runs?per_page=40`,
+        fetchImpl,
+        token
+      );
+      const list = runs.check_runs || [];
+      if (list.length) {
+        checks.checkRuns = list.map((r) => ({
+          name: r.name || '',
+          status: r.status || '',
+          conclusion: r.conclusion || '',
+          htmlUrl: r.html_url || '',
+        }));
+        if (checks.state === 'unknown') {
+          const failed = list.some(
+            (r) => r.conclusion === 'failure' || r.conclusion === 'timed_out'
+          );
+          const pending = list.some(
+            (r) => r.status === 'queued' || r.status === 'in_progress'
+          );
+          checks.state = failed ? 'failure' : pending ? 'pending' : 'success';
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // Optional .gitattributes for linguist-generated / binary collapse defaults
+  let gitattributesText = '';
+  try {
+    const ref = headSha || pr.head?.ref || 'HEAD';
+    const attr = await apiJson(
+      `${base}/contents/.gitattributes?ref=${encodeURIComponent(ref)}`,
+      fetchImpl,
+      token
+    );
+    if (attr?.content && attr.encoding === 'base64') {
+      gitattributesText = decodeBase64Utf8(attr.content.replace(/\n/g, ''));
+    } else if (typeof attr?.content === 'string') {
+      gitattributesText = attr.content;
+    }
+  } catch {
+    gitattributesText = '';
+  }
+
+  const filesOut = mapAndAnnotateFiles(files, gitattributesText);
+
+  // Linked issue numbers from body (closing keywords / #N) — display only unless set via body edit
+  let linkedIssues = [];
+  try {
+    let editApi =
+      typeof globalThis !== 'undefined' ? globalThis.PRModalPrEditApi : null;
+    if (!editApi && typeof require === 'function') {
+      try {
+        editApi = require('./modal/pure/pr-edit-api.js');
+      } catch {
+        editApi = null;
+      }
+    }
+    if (editApi?.parseLinkedIssueNumbers) {
+      linkedIssues = editApi.parseLinkedIssueNumbers(pr.body || '');
+    }
+  } catch {
+    linkedIssues = [];
+  }
+
+  const subscribed =
+    subscription && typeof subscription.subscribed === 'boolean'
+      ? Boolean(subscription.subscribed)
+      : null;
+
+  // Magic links from title/body/branch (body-only tokens e.g. ENG-99 must match)
+  const magicLinks = matchAutolinksInText(
+    prMatchText({
+      title: pr.title,
+      body: pr.body || '',
+      headRef: pr.head?.ref || '',
+      baseRef: pr.base?.ref || '',
+      author: pr.user?.login || '',
+    }),
+    Array.isArray(autolinks) ? autolinks : []
+  );
+
+  return {
+    owner,
+    repo,
+    number: pr.number,
+    nodeId: pr.node_id || null,
+    title: pr.title,
+    body: pr.body || '',
+    state: pr.state,
+    draft: Boolean(pr.draft),
+    author: pr.user?.login || '',
+    authorAvatarUrl: pr.user?.avatar_url || '',
+    viewerLogin: viewerLogin || null,
+    baseRef: pr.base?.ref || '',
+    headRef: pr.head?.ref || '',
+    baseSha: pr.base?.sha || '',
+    /** Repo that owns the base ref (usually same as PR repo). */
+    baseOwner: pr.base?.repo?.owner?.login || owner,
+    baseRepo: pr.base?.repo?.name || repo,
+    /** Head may be a fork — prefer head.repo when present. */
+    headOwner: pr.head?.repo?.owner?.login || pr.head?.user?.login || owner,
+    headRepo: pr.head?.repo?.name || repo,
+    headSha,
+    magicLinks,
+    htmlUrl: pr.html_url,
+    merged: Boolean(pr.merged),
+    mergeable: pr.mergeable,
+    mergeableState: pr.mergeable_state || null,
+    rebaseable: pr.rebaseable ?? null,
+    createdAt: pr.created_at,
+    updatedAt: pr.updated_at,
+    additions: pr.additions,
+    deletions: pr.deletions,
+    changedFiles: pr.changed_files,
+    labels: Array.isArray(pr.labels)
+      ? pr.labels.map((l) => ({
+          name: l.name || '',
+          color: l.color || '',
+          description: l.description || '',
+        }))
+      : [],
+    assignees: Array.isArray(pr.assignees)
+      ? pr.assignees.map((u) => u.login || u).filter(Boolean)
+      : [],
+    /** login → avatar_url for people chips when API provided them */
+    avatarUrls: (() => {
+      const map = {};
+      const putUser = (u) => {
+        const login = u?.login || (typeof u === 'string' ? u : '');
+        const url = u?.avatar_url || '';
+        if (login && url) map[String(login).toLowerCase()] = url;
+      };
+      putUser(pr.user);
+      for (const u of pr.assignees || []) putUser(u);
+      for (const u of pr.requested_reviewers || []) putUser(u);
+      for (const c of comments || []) putUser(c?.user);
+      for (const r of reviews || []) putUser(r?.user);
+      for (const c of reviewComments || []) putUser(c?.user);
+      return map;
+    })(),
+    requestedReviewers: Array.isArray(pr.requested_reviewers)
+      ? pr.requested_reviewers.map((u) => u.login || u).filter(Boolean)
+      : [],
+    requestedTeams: Array.isArray(pr.requested_teams)
+      ? pr.requested_teams.map((t) => t.slug || t.name).filter(Boolean)
+      : [],
+    milestone: pr.milestone
+      ? {
+          number: pr.milestone.number,
+          title: pr.milestone.title || '',
+          state: pr.milestone.state || '',
+          dueOn: pr.milestone.due_on || null,
+        }
+      : null,
+    linkedIssues,
+    subscribed,
+    locked: Boolean(pr.locked),
+    gitattributesText,
+    files: filesOut,
+    comments: Array.isArray(comments) ? comments : [],
+    commentsMeta: commentsPage?.meta || {
+      page: 1,
+      perPage: COMMENT_PAGE_SIZE,
+      hasMore: false,
+      nextPage: null,
+      loadedCount: Array.isArray(comments) ? comments.length : 0,
+    },
+    reviews: (Array.isArray(reviews) ? reviews : []).map((r) => ({
+      id: r.id,
+      author: r.user?.login || '',
+      avatarUrl: r.user?.avatar_url || '',
+      state: r.state || '',
+      body: r.body || '',
+      submittedAt: r.submitted_at,
+    })),
+    // GraphQL first page (or empty if skipReviewThreads) — more via fetchReviewThreadsPage
+    reviewComments: Array.isArray(reviewComments) ? reviewComments : [],
+    reviewCommentsMeta,
+    reviewThreads: Array.isArray(reviewThreads) ? reviewThreads : [],
+    reviewThreadsMeta,
+    /**
+     * Viewer's unsubmitted PENDING review (if any), including replies that only
+     * appear via GET /reviews/{id}/comments.
+     */
+    viewerPendingReview,
+    commits: (Array.isArray(commits) ? commits : []).map((c) => ({
+      sha: c.sha || '',
+      message: c.commit?.message || '',
+      author: c.commit?.author?.name || c.author?.login || '',
+      date: c.commit?.author?.date || c.commit?.committer?.date || '',
+    })),
+    checks,
+  };
+}
+
+async function postIssueComment(owner, repo, issueNumber, body, fetchImpl, token) {
+  return apiSend(
+    `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/comments`,
+    fetchImpl,
+    token,
+    { method: 'POST', body: { body } }
+  );
+}
+
+/**
+ * @param {'APPROVE'|'REQUEST_CHANGES'|'COMMENT'} event
+ * @param {Array} [comments] pending inline comments for bulk submit
+ */
+async function submitPullReview(
+  owner,
+  repo,
+  pullNumber,
+  { event, body = '', commitId, comments },
+  fetchImpl,
+  token
+) {
+  const payload = { event, body: body || '' };
+  if (commitId) payload.commit_id = commitId;
+  if (Array.isArray(comments) && comments.length) {
+    payload.comments = comments.map((c) => {
+      const row = {
+        path: c.path,
+        body: c.body,
+        line: c.line,
+        side: c.side || 'RIGHT',
+      };
+      if (c.start_line != null || c.startLine != null) {
+        const sl = c.start_line != null ? c.start_line : c.startLine;
+        if (Number(sl) !== Number(c.line)) {
+          row.start_line = Number(sl);
+          row.start_side = c.start_side || c.startSide || c.side || 'RIGHT';
+        }
+      }
+      return row;
+    });
+  }
+  return apiSend(
+    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`,
+    fetchImpl,
+    token,
+    { method: 'POST', body: payload }
+  );
+}
+
+/**
+ * GraphQL: add a new review *thread* (line comment) onto an existing PENDING review.
+ * REST POST /comments creates a second pending review → 422.
+ */
+async function postReviewCommentViaPendingGraphql(
+  pendingReviewNodeId,
+  { body, path, line, side = 'RIGHT', startLine, startSide },
+  fetchImpl,
+  token
+) {
+  const hasRange =
+    startLine != null &&
+    Number.isFinite(Number(startLine)) &&
+    Number(startLine) !== Number(line);
+  const variables = {
+    review: String(pendingReviewNodeId),
+    body: String(body || '').trim(),
+    path: String(path || ''),
+    line: Number(line),
+    side: String(side || 'RIGHT').toUpperCase() === 'LEFT' ? 'LEFT' : 'RIGHT',
+  };
+  let query;
+  if (hasRange) {
+    variables.startLine = Number(startLine);
+    variables.startSide =
+      String(startSide || side || 'RIGHT').toUpperCase() === 'LEFT' ? 'LEFT' : 'RIGHT';
+    query = `mutation($review:ID!,$body:String!,$path:String!,$line:Int!,$side:DiffSide!,$startLine:Int!,$startSide:DiffSide!){
+      addPullRequestReviewThread(input:{
+        pullRequestReviewId:$review
+        body:$body
+        path:$path
+        line:$line
+        side:$side
+        startLine:$startLine
+        startSide:$startSide
+      }){
+        thread {
+          id
+          comments(first:1){
+            nodes{
+              id
+              databaseId
+              body
+              path
+              createdAt
+              author { login avatarUrl }
+              pullRequestReview { databaseId }
+            }
+          }
+        }
+      }
+    }`;
+  } else {
+    query = `mutation($review:ID!,$body:String!,$path:String!,$line:Int!,$side:DiffSide!){
+      addPullRequestReviewThread(input:{
+        pullRequestReviewId:$review
+        body:$body
+        path:$path
+        line:$line
+        side:$side
+      }){
+        thread {
+          id
+          comments(first:1){
+            nodes{
+              id
+              databaseId
+              body
+              path
+              createdAt
+              author { login avatarUrl }
+              pullRequestReview { databaseId }
+            }
+          }
+        }
+      }
+    }`;
+  }
+  const data = await apiGraphql(query, variables, fetchImpl, token);
+  const thread = data?.addPullRequestReviewThread?.thread;
+  const node = thread?.comments?.nodes?.[0];
+  if (!node) {
+    throw new Error(
+      `Could not add pending comment on ${path}:${line} (${side || 'RIGHT'}). ` +
+        `The line may be outside the diff or on the wrong side.`
+    );
+  }
+  const threadNodeId = thread?.id || null;
+  const rest = mapGraphqlReviewCommentToRest(node, {
+    body,
+    path,
+    line,
+    startLine: hasRange ? Number(startLine) : null,
+    side,
+    inReplyToId: null,
+  });
+  return {
+    ...rest,
+    // GraphQL/REST often omit line on pending comments — keep selection line for UI
+    line: rest.line ?? Number(line),
+    path: rest.path || path,
+    side: side || 'RIGHT',
+    start_line: hasRange ? Number(startLine) : null,
+    start_side: hasRange ? startSide || side || 'RIGHT' : null,
+    pending: true,
+    pendingReviewId: node.pullRequestReview?.databaseId ?? null,
+    threadNodeId,
+  };
+}
+
+/**
+ * Resolve the viewer's PENDING review, creating one if needed (asPending).
+ * Recovers from 422 "one pending review" by re-fetching the existing review.
+ * Always re-GETs the review so discarded/stale list entries (with a dead
+ * node_id) are not returned after Discard.
+ */
+async function ensureViewerPendingReview(
+  owner,
+  repo,
+  pullNumber,
+  { commitId = null, createIfMissing = false } = {},
+  fetchImpl,
+  token
+) {
+  /** Re-fetch review; return null if missing or no longer PENDING. */
+  const hydrateNodeId = async (pending) => {
+    if (!pending?.id) return null;
+    try {
+      const full = await apiJson(
+        `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${pending.id}`,
+        fetchImpl,
+        token
+      );
+      if (!full || String(full.state || '').toUpperCase() !== 'PENDING') {
+        return null;
+      }
+      return {
+        id: Number(pending.id),
+        node_id: full.node_id || pending.node_id || null,
+      };
+    } catch (err) {
+      // 404 after discard — list can briefly still show the dead PENDING row
+      if (err?.status === 404) return null;
+      // Keep list node_id only when re-GET is unavailable (network); prefer null
+      // over a known-dead id when status is 4xx.
+      if (err?.status >= 400 && err?.status < 500) return null;
+      return pending?.node_id
+        ? { id: Number(pending.id), node_id: pending.node_id }
+        : null;
+    }
+  };
+
+  let pending = await findViewerPendingReview(
+    owner,
+    repo,
+    pullNumber,
+    fetchImpl,
+    token
+  );
+  pending = await hydrateNodeId(pending);
+  if (pending?.node_id) return pending;
+  if (!createIfMissing) return pending;
+
+  try {
+    const created = await createPendingPullReview(
+      owner,
+      repo,
+      pullNumber,
+      { commitId },
+      fetchImpl,
+      token
+    );
+    return {
+      id: Number(created?.id),
+      node_id: created?.node_id || null,
+    };
+  } catch (err) {
+    // Already have a PENDING review (race or find missed it) — attach to it
+    const msg = String(err?.message || err || '');
+    if (
+      err?.status === 422 ||
+      /one pending review/i.test(msg) ||
+      /Unprocessable Entity/i.test(msg)
+    ) {
+      pending = await findViewerPendingReview(
+        owner,
+        repo,
+        pullNumber,
+        fetchImpl,
+        token
+      );
+      pending = await hydrateNodeId(pending);
+      if (pending?.node_id) return pending;
+    }
+    throw err;
+  }
+}
+
+/**
+ * Line-level review comment on a PR file.
+ * Prefer commit_id + path + line (side RIGHT). Multi-line uses start_line/start_side.
+ *
+ * Unified pending model (single GitHub PENDING review):
+ * - asPending: true → create PENDING review if needed, always attach via GraphQL
+ * - existing PENDING (any path) → GraphQL attach (REST would 422)
+ * - else → REST published single comment
+ *
+ * @param {object} fields
+ * @param {boolean} [fields.asPending] Start review / Add comment — always pending
+ */
+async function postReviewComment(
+  owner,
+  repo,
+  pullNumber,
+  { body, path, line, side = 'RIGHT', commitId, startLine, startSide, asPending = false },
+  fetchImpl,
+  token
+) {
+  const text = String(body || '').trim();
+  if (!text) throw new Error('Comment body is required');
+  if (!path || line == null) throw new Error('path and line are required');
+
+  // Unified PENDING: attach to existing, or create (asPending). Recover from 422.
+  let pending = await ensureViewerPendingReview(
+    owner,
+    repo,
+    pullNumber,
+    {
+      commitId: commitId || null,
+      // Create only when caller wants pending; also create path recovers on 422
+      createIfMissing: Boolean(asPending),
+    },
+    fetchImpl,
+    token
+  );
+
+  // Existing PENDING (or just created) → always GraphQL attach (REST 422s)
+  if (pending?.node_id) {
+    try {
+      const raw = await postReviewCommentViaPendingGraphql(
+        pending.node_id,
+        { body: text, path, line, side, startLine, startSide },
+        fetchImpl,
+        token
+      );
+      return {
+        ...raw,
+        pending: true,
+        pendingReviewId: raw.pendingReviewId || pending.id || null,
+      };
+    } catch (err) {
+      // Discarded review can linger in the list with a dead GraphQL node id.
+      const msg = String(err?.message || err || '');
+      if (
+        asPending &&
+        /Could not resolve to a node|global id|NOT_FOUND|Could not find/i.test(msg)
+      ) {
+        // Force a fresh PENDING review and retry once
+        try {
+          const created = await createPendingPullReview(
+            owner,
+            repo,
+            pullNumber,
+            { commitId: commitId || null },
+            fetchImpl,
+            token
+          );
+          pending = {
+            id: Number(created?.id),
+            node_id: created?.node_id || null,
+          };
+        } catch (createErr) {
+          if (
+            createErr?.status === 422 ||
+            /one pending review/i.test(String(createErr?.message || ''))
+          ) {
+            pending = await ensureViewerPendingReview(
+              owner,
+              repo,
+              pullNumber,
+              { commitId: commitId || null, createIfMissing: false },
+              fetchImpl,
+              token
+            );
+          } else {
+            throw createErr;
+          }
+        }
+        if (pending?.node_id) {
+          const raw = await postReviewCommentViaPendingGraphql(
+            pending.node_id,
+            { body: text, path, line, side, startLine, startSide },
+            fetchImpl,
+            token
+          );
+          return {
+            ...raw,
+            pending: true,
+            pendingReviewId: raw.pendingReviewId || pending.id || null,
+          };
+        }
+      }
+      throw err;
+    }
+  }
+
+  // asPending but still no node_id — cannot attach
+  if (asPending) {
+    throw new Error(
+      'Could not start or find a pending review. Try Discard any leftover pending review, then retry.'
+    );
+  }
+
+  // Published single comment (no PENDING review)
+  const payload = { body: text, path, line, side };
+  if (commitId) payload.commit_id = commitId;
+  if (startLine != null && Number(startLine) !== Number(line)) {
+    payload.start_line = Number(startLine);
+    payload.start_side = startSide || side || 'RIGHT';
+  }
+  return apiSend(
+    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/comments`,
+    fetchImpl,
+    token,
+    { method: 'POST', body: payload }
+  );
+}
+
+/**
+ * Viewer's PENDING review on a PR (at most one). Used because REST
+ * POST /comments and /replies 422 with:
+ * "user_id can only have one pending review per pull request".
+ * @returns {Promise<{ id: number, node_id: string|null }|null>}
+ */
+async function findViewerPendingReview(owner, repo, pullNumber, fetchImpl, token) {
+  if (!token) return null;
+  const n = Number(pullNumber);
+  if (!Number.isFinite(n)) return null;
+  try {
+    const [reviews, login] = await Promise.all([
+      apiJson(
+        `https://api.github.com/repos/${owner}/${repo}/pulls/${n}/reviews?per_page=100`,
+        fetchImpl,
+        token
+      ).catch(() => []),
+      fetchViewerLogin(fetchImpl, token).catch(() => null),
+    ]);
+    return pickViewerPendingFromReviews(reviews, login);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Map GraphQL review-comment payload → REST-like shape (mapRestReviewComment).
+ */
+function mapGraphqlReviewCommentToRest(c, fallback = {}) {
+  if (!c) return null;
+  return {
+    id: c.databaseId ?? fallback.id ?? null,
+    node_id: c.id || null,
+    body: c.body || fallback.body || '',
+    path: c.path || fallback.path || '',
+    line: c.line ?? fallback.line ?? null,
+    original_line: c.originalLine ?? null,
+    start_line: c.startLine ?? fallback.startLine ?? null,
+    side: c.side || fallback.side || 'RIGHT',
+    start_side: c.startSide || null,
+    diff_hunk: c.diffHunk || '',
+    created_at: c.createdAt || fallback.createdAt || null,
+    in_reply_to_id:
+      c.replyTo?.databaseId ??
+      c.replyTo?.id ??
+      fallback.inReplyToId ??
+      fallback.in_reply_to_id ??
+      null,
+    user: {
+      login: c.author?.login || fallback.author || '',
+      avatar_url: c.author?.avatarUrl || fallback.avatarUrl || '',
+    },
+    pull_request_review_id: c.pullRequestReview?.databaseId ?? null,
+  };
+}
+
+/**
+ * GraphQL: addPullRequestReviewThreadReply — works with or without a pending
+ * review (attaches to pending when one exists).
+ */
+async function replyViaThreadGraphql(threadNodeId, body, fetchImpl, token, fallback = {}) {
+  const data = await apiGraphql(
+    `mutation($id:ID!,$body:String!){
+      addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$id,body:$body}){
+        comment {
+          id
+          databaseId
+          body
+          path
+          diffHunk
+          createdAt
+          author { login avatarUrl }
+          replyTo { databaseId }
+          pullRequestReview { databaseId }
+        }
+      }
+    }`,
+    { id: String(threadNodeId), body: String(body) },
+    fetchImpl,
+    token
+  );
+  const c = data?.addPullRequestReviewThreadReply?.comment;
+  if (!c) throw new Error('GraphQL thread reply returned no comment');
+  return mapGraphqlReviewCommentToRest(c, fallback);
+}
+
+/**
+ * GraphQL: addPullRequestReviewComment on an existing PENDING review.
+ */
+async function replyViaPendingReviewGraphql(
+  pendingReviewNodeId,
+  parentCommentNodeId,
+  body,
+  fetchImpl,
+  token,
+  fallback = {}
+) {
+  const data = await apiGraphql(
+    `mutation($review:ID!,$body:String!,$inReplyTo:ID!){
+      addPullRequestReviewComment(input:{
+        pullRequestReviewId:$review
+        body:$body
+        inReplyTo:$inReplyTo
+      }){
+        comment {
+          id
+          databaseId
+          body
+          path
+          diffHunk
+          createdAt
+          author { login avatarUrl }
+          replyTo { databaseId }
+          pullRequestReview { databaseId }
+        }
+      }
+    }`,
+    {
+      review: String(pendingReviewNodeId),
+      body: String(body),
+      inReplyTo: String(parentCommentNodeId),
+    },
+    fetchImpl,
+    token
+  );
+  const c = data?.addPullRequestReviewComment?.comment;
+  if (!c) throw new Error('GraphQL pending-review reply returned no comment');
+  return mapGraphqlReviewCommentToRest(c, fallback);
+}
+
+/**
+ * Resolve parent comment GraphQL node id (PRRC_…) for pending-review replies.
+ * Published comments: GET /pulls/comments/{id}.
+ * PENDING comments are omitted from that endpoint (404) — fall back to the
+ * viewer's pending-review comment list (or a known node id from UI state).
+ */
+async function resolveParentCommentNodeId(
+  owner,
+  repo,
+  parentId,
+  fetchImpl,
+  token,
+  knownNodeId,
+  pullNumber = null
+) {
+  if (knownNodeId) return String(knownNodeId);
+  const id = Math.floor(Number(parentId));
+  if (!Number.isFinite(id) || id <= 0) return null;
+  try {
+    const parent = await apiJson(
+      `https://api.github.com/repos/${owner}/${repo}/pulls/comments/${id}`,
+      fetchImpl,
+      token
+    );
+    if (parent?.node_id) return String(parent.node_id);
+  } catch {
+    /* pending comments 404 here — try pending review bundle below */
+  }
+  if (pullNumber == null || !token) return null;
+  try {
+    const { comments } = await fetchViewerPendingReviewBundle(
+      owner,
+      repo,
+      pullNumber,
+      fetchImpl,
+      token
+    );
+    const hit = (comments || []).find(
+      (c) => c && Number(c.id) === id && (c.nodeId || c.node_id)
+    );
+    if (hit) return String(hit.nodeId || hit.node_id);
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+/**
+ * Reply to an existing pull request review comment.
+ *
+ * mode:
+ * - `comment` (default): publish immediately when no pending review; if a
+ *   PENDING review exists, GitHub only allows attaching to it (shown as pending).
+ * - `pending` ("Start review" / "Add comment"): always attach to the viewer's
+ *   PENDING review, creating one if needed.
+ *
+ * REST POST /comments and /replies 422 when a pending review already exists:
+ * "user_id can only have one pending review per pull request".
+ *
+ * @param {object} [opts]
+ * @param {'comment'|'pending'} [opts.mode]
+ * @param {string} [opts.threadNodeId] GraphQL PRRT_… id
+ * @param {string} [opts.parentNodeId] GraphQL PRRC_… id of parent comment
+ * @param {string} [opts.commitId] head SHA when creating a new pending review
+ */
+async function replyToReviewComment(
+  owner,
+  repo,
+  pullNumber,
+  commentId,
+  body,
+  fetchImpl,
+  token,
+  opts = {}
+) {
+  const text = String(body || '').trim();
+  if (!text) throw new Error('Reply body is required');
+  const parentId = Number(commentId);
+  if (!Number.isFinite(parentId) || parentId <= 0) {
+    throw new Error('Invalid review comment id for reply');
+  }
+  const n = Number(pullNumber);
+  const mode = opts?.mode === 'pending' ? 'pending' : 'comment';
+  const threadNodeId = opts?.threadNodeId || null;
+  let parentNodeId = opts?.parentNodeId || null;
+  const fallback = {
+    body: text,
+    inReplyToId: Math.floor(parentId),
+    path: opts?.path || '',
+    line: opts?.line ?? null,
+    side: opts?.side || 'RIGHT',
+  };
+
+  /**
+   * Attach reply onto viewer's PENDING review via GraphQL.
+   * Prefer thread reply (PRRT_…) when available — works for pending threads and
+   * does not need the parent PRRC_ id (which REST cannot resolve for PENDING
+   * comments: GET /pulls/comments/{id} → 404).
+   * Uses ensureViewerPendingReview (create + 422 recover + dead-node re-GET).
+   */
+  async function attachReplyToPending({ createIfMissing }) {
+    const pending = await ensureViewerPendingReview(
+      owner,
+      repo,
+      n,
+      {
+        commitId: opts?.commitId || null,
+        createIfMissing: Boolean(createIfMissing),
+      },
+      fetchImpl,
+      token
+    );
+    if (!pending?.node_id && !threadNodeId) return null;
+
+    // 1) Thread reply — only needs pullRequestReviewThreadId
+    if (threadNodeId) {
+      try {
+        const raw = await replyViaThreadGraphql(
+          threadNodeId,
+          text,
+          fetchImpl,
+          token,
+          fallback
+        );
+        return {
+          ...raw,
+          pending: true,
+          pendingReviewId: raw.pendingReviewId || pending?.id || null,
+        };
+      } catch {
+        /* fall through to inReplyTo path */
+      }
+    }
+
+    if (!pending?.node_id) return null;
+
+    // 2) inReplyTo on the PENDING review — needs parent PRRC_ node id
+    parentNodeId = await resolveParentCommentNodeId(
+      owner,
+      repo,
+      parentId,
+      fetchImpl,
+      token,
+      parentNodeId,
+      n
+    );
+    if (!parentNodeId) {
+      throw new Error(
+        'Cannot reply while a pending review exists (missing parent comment node id).'
+      );
+    }
+    try {
+      const raw = await replyViaPendingReviewGraphql(
+        pending.node_id,
+        parentNodeId,
+        text,
+        fetchImpl,
+        token,
+        fallback
+      );
+      return { ...raw, pending: true, pendingReviewId: pending.id };
+    } catch (err) {
+      // Discarded/stale review node — create or re-find and retry once
+      const msg = String(err?.message || err || '');
+      if (
+        !/Could not resolve to a node|global id|NOT_FOUND|Could not find/i.test(msg)
+      ) {
+        throw err;
+      }
+      let next = null;
+      try {
+        const created = await createPendingPullReview(
+          owner,
+          repo,
+          n,
+          { commitId: opts?.commitId || null },
+          fetchImpl,
+          token
+        );
+        next = {
+          id: Number(created?.id),
+          node_id: created?.node_id || null,
+        };
+      } catch (createErr) {
+        if (
+          createErr?.status === 422 ||
+          /one pending review/i.test(String(createErr?.message || ''))
+        ) {
+          next = await ensureViewerPendingReview(
+            owner,
+            repo,
+            n,
+            { commitId: opts?.commitId || null, createIfMissing: false },
+            fetchImpl,
+            token
+          );
+        } else {
+          throw createErr;
+        }
+      }
+      if (!next?.node_id) throw err;
+      const raw = await replyViaPendingReviewGraphql(
+        next.node_id,
+        parentNodeId,
+        text,
+        fetchImpl,
+        token,
+        fallback
+      );
+      return { ...raw, pending: true, pendingReviewId: next.id };
+    }
+  }
+
+  // ── Start review / Add comment: always land on a PENDING review ──
+  if (mode === 'pending') {
+    const attached = await attachReplyToPending({ createIfMissing: true });
+    if (attached) return attached;
+    throw new Error(
+      'Could not start or find a pending review for this reply. Try Discard any leftover pending review, then retry.'
+    );
+  }
+
+  // ── Comment (immediate when possible) ──
+  // If a PENDING review already exists, REST replies 422 — attach via GraphQL.
+  const existingPending = await ensureViewerPendingReview(
+    owner,
+    repo,
+    n,
+    { createIfMissing: false },
+    fetchImpl,
+    token
+  );
+  if (existingPending?.node_id) {
+    const attached = await attachReplyToPending({ createIfMissing: false });
+    if (attached) return attached;
+  }
+
+  // Prefer GraphQL thread reply when we have the thread id (published path).
+  if (threadNodeId) {
+    try {
+      const raw = await replyViaThreadGraphql(
+        threadNodeId,
+        text,
+        fetchImpl,
+        token,
+        fallback
+      );
+      return { ...raw, pending: false };
+    } catch {
+      /* fall through to REST */
+    }
+  }
+
+  // No pending review: REST dedicated replies endpoint (published immediately)
+  try {
+    return await apiSend(
+      `https://api.github.com/repos/${owner}/${repo}/pulls/${n}/comments/${Math.floor(parentId)}/replies`,
+      fetchImpl,
+      token,
+      { method: 'POST', body: { body: text } }
+    );
+  } catch (err) {
+    // Race: PENDING appeared between find and REST POST
+    const msg = String(err?.message || err || '');
+    if (
+      err?.status === 422 ||
+      /one pending review/i.test(msg) ||
+      /Unprocessable Entity/i.test(msg)
+    ) {
+      const attached = await attachReplyToPending({ createIfMissing: false });
+      if (attached) return attached;
+    }
+    throw err;
+  }
+}
+
+/**
+ * Resolve or unresolve a pull request review thread via GraphQL.
+ * Uses apiGraphql so body.errors (HTTP 200) surface as thrown errors.
+ * @param {string} threadNodeId GraphQL id (PRRT_…)
+ * @param {boolean} [resolved=true]
+ */
+async function resolveReviewThread(threadNodeId, resolved, fetchImpl, token) {
+  if (!threadNodeId) throw new Error('threadNodeId required to resolve review thread');
+  const mutation = resolved
+    ? `mutation($id:ID!){ resolveReviewThread(input:{threadId:$id}){ thread { id isResolved } } }`
+    : `mutation($id:ID!){ unresolveReviewThread(input:{threadId:$id}){ thread { id isResolved } } }`;
+  return apiGraphql(
+    mutation,
+    { id: threadNodeId },
+    fetchImpl,
+    token
+  );
+}
+
+/**
+ * Close or reopen a pull request.
+ * @param {'open'|'closed'} state
+ */
+async function updatePullState(owner, repo, pullNumber, state, fetchImpl, token) {
+  const next = state === 'closed' ? 'closed' : 'open';
+  return apiSend(
+    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}`,
+    fetchImpl,
+    token,
+    { method: 'PATCH', body: { state: next } }
+  );
+}
+
+async function closePullRequest(owner, repo, pullNumber, fetchImpl, token) {
+  return updatePullState(owner, repo, pullNumber, 'closed', fetchImpl, token);
+}
+
+async function reopenPullRequest(owner, repo, pullNumber, fetchImpl, token) {
+  return updatePullState(owner, repo, pullNumber, 'open', fetchImpl, token);
+}
+
+/**
+ * Delete a pull request review comment (own comments only on GitHub).
+ * DELETE /repos/{owner}/{repo}/pulls/comments/{comment_id}
+ */
+async function deleteReviewComment(owner, repo, commentId, fetchImpl, token) {
+  return apiSend(
+    `https://api.github.com/repos/${owner}/${repo}/pulls/comments/${commentId}`,
+    fetchImpl,
+    token,
+    { method: 'DELETE' }
+  );
+}
+
+/**
+ * Delete an issue comment on the PR conversation.
+ * DELETE /repos/{owner}/{repo}/issues/comments/{comment_id}
+ */
+async function deleteIssueComment(owner, repo, commentId, fetchImpl, token) {
+  return apiSend(
+    `https://api.github.com/repos/${owner}/${repo}/issues/comments/${commentId}`,
+    fetchImpl,
+    token,
+    { method: 'DELETE' }
+  );
+}
+
+async function updatePullRequest(owner, repo, pullNumber, fields, fetchImpl, token) {
+  const body = {};
+  if (fields?.title != null) body.title = String(fields.title);
+  if (fields?.body != null) body.body = String(fields.body);
+  if (fields?.base != null) body.base = String(fields.base);
+  if (fields?.state != null) body.state = fields.state === 'closed' ? 'closed' : 'open';
+  return apiSend(
+    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}`,
+    fetchImpl,
+    token,
+    { method: 'PATCH', body }
+  );
+}
+
+async function editIssueComment(owner, repo, commentId, body, fetchImpl, token) {
+  return apiSend(
+    `https://api.github.com/repos/${owner}/${repo}/issues/comments/${commentId}`,
+    fetchImpl,
+    token,
+    { method: 'PATCH', body: { body: String(body || '') } }
+  );
+}
+
+async function editReviewComment(owner, repo, commentId, body, fetchImpl, token) {
+  return apiSend(
+    `https://api.github.com/repos/${owner}/${repo}/pulls/comments/${commentId}`,
+    fetchImpl,
+    token,
+    { method: 'PATCH', body: { body: String(body || '') } }
+  );
+}
+
+async function requestReviewers(
+  owner,
+  repo,
+  pullNumber,
+  { reviewers = [], teamReviewers = [] },
+  fetchImpl,
+  token
+) {
+  return apiSend(
+    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/requested_reviewers`,
+    fetchImpl,
+    token,
+    {
+      method: 'POST',
+      body: { reviewers, team_reviewers: teamReviewers },
+    }
+  );
+}
+
+async function removeReviewers(
+  owner,
+  repo,
+  pullNumber,
+  { reviewers = [], teamReviewers = [] },
+  fetchImpl,
+  token
+) {
+  return apiSend(
+    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/requested_reviewers`,
+    fetchImpl,
+    token,
+    {
+      method: 'DELETE',
+      body: { reviewers, team_reviewers: teamReviewers },
+    }
+  );
+}
+
+async function addAssignees(owner, repo, issueNumber, assignees, fetchImpl, token) {
+  return apiSend(
+    `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/assignees`,
+    fetchImpl,
+    token,
+    { method: 'POST', body: { assignees: assignees || [] } }
+  );
+}
+
+async function removeAssignees(owner, repo, issueNumber, assignees, fetchImpl, token) {
+  return apiSend(
+    `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/assignees`,
+    fetchImpl,
+    token,
+    { method: 'DELETE', body: { assignees: assignees || [] } }
+  );
+}
+
+async function setIssueLabels(owner, repo, issueNumber, labels, fetchImpl, token) {
+  return apiSend(
+    `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/labels`,
+    fetchImpl,
+    token,
+    { method: 'PUT', body: { labels: labels || [] } }
+  );
+}
+
+/**
+ * Apply a GitHub suggestion: replace lines on head branch via Contents API.
+ * @param {{ path: string, headRef: string, startLine: number, endLine: number, suggestion: string, message?: string }} opts
+ */
+async function mergePullRequest(
+  owner,
+  repo,
+  pullNumber,
+  { mergeMethod = 'merge', commitTitle, commitMessage } = {},
+  fetchImpl,
+  token
+) {
+  const body = { merge_method: mergeMethod };
+  if (commitTitle != null) body.commit_title = String(commitTitle);
+  if (commitMessage != null) body.commit_message = String(commitMessage);
+  return apiSend(
+    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/merge`,
+    fetchImpl,
+    token,
+    { method: 'PUT', body }
+  );
+}
+
+async function updatePullBranch(
+  owner,
+  repo,
+  pullNumber,
+  { expectedHeadSha } = {},
+  fetchImpl,
+  token
+) {
+  const body = {};
+  if (expectedHeadSha) body.expected_head_sha = String(expectedHeadSha);
+  return apiSend(
+    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/update-branch`,
+    fetchImpl,
+    token,
+    { method: 'PUT', body }
+  );
+}
+
+async function setIssueSubscription(
+  owner,
+  repo,
+  issueNumber,
+  { subscribed = true, ignored = false } = {},
+  fetchImpl,
+  token
+) {
+  return apiSend(
+    `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/subscription`,
+    fetchImpl,
+    token,
+    { method: 'PUT', body: { subscribed: Boolean(subscribed), ignored: Boolean(ignored) } }
+  );
+}
+
+async function deleteIssueSubscription(owner, repo, issueNumber, fetchImpl, token) {
+  return apiSend(
+    `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/subscription`,
+    fetchImpl,
+    token,
+    { method: 'DELETE' }
+  );
+}
+
+async function setIssueMilestone(owner, repo, issueNumber, milestoneNumber, fetchImpl, token) {
+  return apiSend(
+    `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}`,
+    fetchImpl,
+    token,
+    {
+      method: 'PATCH',
+      body: { milestone: milestoneNumber == null ? null : Number(milestoneNumber) },
+    }
+  );
+}
+
+/**
+ * Convert PR to draft or mark ready for review (GraphQL; needs PR node_id).
+ * @param {'draft'|'ready'} stage
+ */
+async function setPullRequestDraftStage(
+  owner,
+  repo,
+  pullNumber,
+  stage,
+  fetchImpl,
+  token,
+  nodeId = null
+) {
+  let id = nodeId;
+  if (!id) {
+    const pr = await apiJson(
+      `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}`,
+      fetchImpl,
+      token
+    );
+    id = pr?.node_id;
+  }
+  if (!id) throw new Error('PR node_id unavailable for draft stage change');
+  let buildFn = null;
+  try {
+    let mod =
+      typeof globalThis !== 'undefined' ? globalThis.PRModalPrEditApi : null;
+    if (!mod && typeof require === 'function') {
+      try {
+        mod = require('./modal/pure/pr-edit-api.js');
+      } catch {
+        mod = null;
+      }
+    }
+    buildFn = mod?.buildDraftStageGraphql;
+  } catch {
+    buildFn = null;
+  }
+  const gql = buildFn
+    ? buildFn(stage === 'ready' ? 'ready' : 'draft', id)
+    : stage === 'ready'
+      ? {
+          query: `mutation($id:ID!){markPullRequestReadyForReview(input:{pullRequestId:$id}){pullRequest{id isDraft}}}`,
+          variables: { id },
+        }
+      : {
+          query: `mutation($id:ID!){convertPullRequestToDraft(input:{pullRequestId:$id}){pullRequest{id isDraft}}}`,
+          variables: { id },
+        };
+  return apiGraphql(gql.query, gql.variables, fetchImpl, token);
+}
+
+
+/**
+ * Upload a binary/text file via Contents API (creates or overwrites path on branch).
+ * Used for comment attachments when PAT has repo contents write access.
+ * @returns {{ downloadUrl: string, htmlUrl: string, path: string, sha: string }}
+ */
+async function uploadRepoFile(
+  owner,
+  repo,
+  { path, contentBase64, message, branch },
+  fetchImpl,
+  token
+) {
+  if (!path || !contentBase64) throw new Error('path and contentBase64 required');
+  const encPath = String(path)
+    .split('/')
+    .map(encodeURIComponent)
+    .join('/');
+  // Try GET existing sha (overwrite path)
+  let sha;
+  try {
+    const meta = await apiJson(
+      `https://api.github.com/repos/${owner}/${repo}/contents/${encPath}${
+        branch ? `?ref=${encodeURIComponent(branch)}` : ''
+      }`,
+      fetchImpl,
+      token
+    );
+    sha = meta?.sha;
+  } catch {
+    sha = undefined;
+  }
+  const body = {
+    message: message || `Upload ${path}`,
+    content: String(contentBase64).replace(/\s+/g, ''),
+  };
+  if (branch) body.branch = branch;
+  if (sha) body.sha = sha;
+  const result = await apiSend(
+    `https://api.github.com/repos/${owner}/${repo}/contents/${encPath}`,
+    fetchImpl,
+    token,
+    { method: 'PUT', body }
+  );
+  const content = result?.content || result;
+  return {
+    downloadUrl: content?.download_url || content?.html_url || '',
+    htmlUrl: content?.html_url || content?.download_url || '',
+    path: content?.path || path,
+    sha: content?.sha || '',
+  };
+}
+
+async function applyReviewSuggestion(
+  owner,
+  repo,
+  { path, headRef, startLine, endLine, suggestion, message },
+  fetchImpl,
+  token
+) {
+  const ref = headRef || 'HEAD';
+  const meta = await apiJson(
+    `https://api.github.com/repos/${owner}/${repo}/contents/${path
+      .split('/')
+      .map(encodeURIComponent)
+      .join('/')}?ref=${encodeURIComponent(ref)}`,
+    fetchImpl,
+    token
+  );
+  const raw = meta?.content
+    ? decodeBase64Utf8(String(meta.content).replace(/\n/g, ''))
+    : '';
+  let applyFn = null;
+  try {
+    let mod =
+      typeof globalThis !== 'undefined' ? globalThis.PRModalPrEditApi : null;
+    if (!mod && typeof require === 'function') {
+      try {
+        mod = require('./modal/pure/pr-edit-api.js');
+      } catch {
+        mod = null;
+      }
+    }
+    applyFn = mod?.applySuggestionToFileContent;
+  } catch {
+    applyFn = null;
+  }
+  if (!applyFn) throw new Error('applySuggestionToFileContent unavailable');
+  const next = applyFn(raw, {
+    startLine,
+    endLine,
+    suggestion,
+  });
+  // base64 encode
+  let contentB64;
+  if (typeof Buffer !== 'undefined') {
+    contentB64 = Buffer.from(next, 'utf8').toString('base64');
+  } else {
+    contentB64 = btoa(unescape(encodeURIComponent(next)));
+  }
+  return apiSend(
+    `https://api.github.com/repos/${owner}/${repo}/contents/${path
+      .split('/')
+      .map(encodeURIComponent)
+      .join('/')}`,
+    fetchImpl,
+    token,
+    {
+      method: 'PUT',
+      body: {
+        message: message || `Apply suggestion to ${path}`,
+        content: contentB64,
+        branch: ref,
+        sha: meta.sha,
+      },
+    }
+  );
+}
+
+/**
+ * Current authenticated user (for "delete own" gating).
+ */
+async function fetchViewerLogin(fetchImpl, token) {
+  if (!token) return null;
+  try {
+    const me = await apiJson('https://api.github.com/user', fetchImpl, token);
+    return me?.login || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Map GitHub file list (+ optional gitattributes) to modal file rows with collapse hints.
+ * @param {Array} files raw API file objects
+ * @param {string} [gitattributesText]
+ */
+function mapAndAnnotateFiles(files, gitattributesText = '') {
+  const mappedFiles = (Array.isArray(files) ? files : []).map((f) => ({
+    filename: f.filename,
+    status: f.status,
+    additions: f.additions,
+    deletions: f.deletions,
+    changes: f.changes,
+    patch: f.patch || '',
+  }));
+
+  let filesOut;
+  try {
+    let collapse = typeof globalThis !== 'undefined' ? globalThis.PRModalCollapse : null;
+    if (!collapse && typeof require === 'function') {
+      try {
+        collapse = require('./modal/pure/collapse.js');
+      } catch {
+        collapse = null;
+      }
+    }
+    if (collapse?.annotateFilesForCollapse) {
+      filesOut = collapse.annotateFilesForCollapse(mappedFiles, gitattributesText);
+    }
+  } catch {
+    filesOut = null;
+  }
+  if (!filesOut) {
+    filesOut = mappedFiles.map((f) => ({
+      ...f,
+      defaultCollapsed:
+        !f.patch ||
+        (f.changes || 0) >= 500 ||
+        /package-lock\.json$|yarn\.lock$|\.min\.(js|css)$|\.bundle\.js$/i.test(
+          f.filename || ''
+        ),
+    }));
+  }
+  return filesOut;
+}
+
+/**
+ * Files+patches for a commit or commit range via GitHub compare API.
+ * Use base...head (triple-dot) for merge-base style PR commit diffs.
+ * @returns {Promise<{ files: Array, base: string, head: string, status?: string, aheadBy?: number, behindBy?: number, totalCommits?: number }>}
+ */
+async function fetchCompareFiles(owner, repo, base, head, fetchImpl, token = null, options = {}) {
+  const o = String(owner || '').trim();
+  const r = String(repo || '').trim();
+  const b = String(base || '').trim();
+  const h = String(head || '').trim();
+  if (!o || !r || !b || !h) {
+    throw new Error('owner, repo, base, and head are required for compare');
+  }
+  const gitattributesText = String(options.gitattributesText || '');
+  const url = `https://api.github.com/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/compare/${encodeURIComponent(b)}...${encodeURIComponent(h)}`;
+  const data = await apiJson(url, fetchImpl, token);
+  const files = mapAndAnnotateFiles(data?.files || [], gitattributesText);
+  return {
+    files,
+    base: b,
+    head: h,
+    status: data?.status || null,
+    aheadBy: data?.ahead_by ?? null,
+    behindBy: data?.behind_by ?? null,
+    totalCommits: data?.total_commits ?? (Array.isArray(data?.commits) ? data.commits.length : null),
+    truncated: Boolean(data?.files && data.files.length >= 300),
+  };
+}
+
+const fetchApi = {
+  mapApiPullRequest,
+  buildApiHeaders,
+  findDanglingPrNumbers,
+  mapWithConcurrency,
+  fetchOpenPullsPublic,
+  fetchPullByNumber,
+  fetchDanglingPulls,
+  fetchRepoAutolinks,
+  buildAutolinkUrl,
+  matchAutolinksInText,
+  prMatchText,
+  attachMagicLinks,
+  fetchOpenPulls,
+  fetchPrDetail,
+  fetchPrCommentsPage,
+  fetchCompareFiles,
+  mapAndAnnotateFiles,
+  fetchPullReviewThreads,
+  fetchPullReviewThreadsBundle,
+  fetchReviewThreadsPage,
+  mapGraphqlReviewCommentNode,
+  mergeReviewThreadsPageIntoDetail,
+  emptyReviewThreadsMeta,
+  postIssueComment,
+  submitPullReview,
+  postReviewComment,
+  replyToReviewComment,
+  findViewerPendingReview,
+  ensureViewerPendingReview,
+  pickViewerPendingFromReviews,
+  fetchViewerPendingReviewComments,
+  fetchViewerPendingReviewBundle,
+  createPendingPullReview,
+  submitPendingPullReview,
+  deletePendingPullReview,
+  mergePendingReviewComments,
+  resolveReviewThread,
+  updatePullState,
+  closePullRequest,
+  reopenPullRequest,
+  deleteReviewComment,
+  deleteIssueComment,
+  updatePullRequest,
+  editIssueComment,
+  editReviewComment,
+  requestReviewers,
+  removeReviewers,
+  addAssignees,
+  removeAssignees,
+  setIssueLabels,
+  mergePullRequest,
+  updatePullBranch,
+  setIssueSubscription,
+  deleteIssueSubscription,
+  setIssueMilestone,
+  setPullRequestDraftStage,
+  applyReviewSuggestion,
+  uploadRepoFile,
+  fetchViewerLogin,
+  apiJson,
+  apiSend,
+  apiGraphql,
+};
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = fetchApi;
+}
+if (typeof globalThis !== 'undefined') {
+  globalThis.PRTreeFetch = fetchApi;
+}
+})();
+
+
+/* ---- background.js ---- */
+
+/**
+ * Extension service worker — sole place that reads the PAT and calls GitHub API.
+ * Content scripts never receive the raw token.
+ *
+ * Messaging: return a Promise from onMessage (Chrome 110+) so the channel stays
+ * open until the handler settles. Avoid fire-and-forget async + sendResponse,
+ * which races SW suspension and surfaces:
+ *   "message channel closed before a response was received"
+ */
+
+/* deps inlined by scripts/build-sw.mjs */
+const MSG = {
+  TOKEN_STATUS: 'PR_TREE_TOKEN_STATUS',
+  TOKEN_SET: 'PR_TREE_TOKEN_SET',
+  TOKEN_CLEAR: 'PR_TREE_TOKEN_CLEAR',
+  TOKEN_CHANGED: 'PR_TREE_TOKEN_CHANGED',
+  FETCH_OPEN_PULLS: 'PR_TREE_FETCH_OPEN_PULLS',
+  FETCH_DANGLING: 'PR_TREE_FETCH_DANGLING',
+  FETCH_PR_DETAIL: 'PR_TREE_FETCH_PR_DETAIL',
+  FETCH_REVIEW_THREADS_PAGE: 'PR_TREE_FETCH_REVIEW_THREADS_PAGE',
+  FETCH_COMMENTS_PAGE: 'PR_TREE_FETCH_COMMENTS_PAGE',
+  FETCH_COMPARE_FILES: 'PR_TREE_FETCH_COMPARE_FILES',
+  POST_ISSUE_COMMENT: 'PR_TREE_POST_ISSUE_COMMENT',
+  SUBMIT_REVIEW: 'PR_TREE_SUBMIT_REVIEW',
+  SUBMIT_PENDING_REVIEW: 'PR_TREE_SUBMIT_PENDING_REVIEW',
+  DELETE_PENDING_REVIEW: 'PR_TREE_DELETE_PENDING_REVIEW',
+  POST_REVIEW_COMMENT: 'PR_TREE_POST_REVIEW_COMMENT',
+  REPLY_REVIEW_COMMENT: 'PR_TREE_REPLY_REVIEW_COMMENT',
+  RESOLVE_REVIEW_THREAD: 'PR_TREE_RESOLVE_REVIEW_THREAD',
+  UPDATE_PULL_STATE: 'PR_TREE_UPDATE_PULL_STATE',
+  DELETE_REVIEW_COMMENT: 'PR_TREE_DELETE_REVIEW_COMMENT',
+  DELETE_ISSUE_COMMENT: 'PR_TREE_DELETE_ISSUE_COMMENT',
+  UPDATE_PULL: 'PR_TREE_UPDATE_PULL',
+  EDIT_ISSUE_COMMENT: 'PR_TREE_EDIT_ISSUE_COMMENT',
+  EDIT_REVIEW_COMMENT: 'PR_TREE_EDIT_REVIEW_COMMENT',
+  REQUEST_REVIEWERS: 'PR_TREE_REQUEST_REVIEWERS',
+  REMOVE_REVIEWERS: 'PR_TREE_REMOVE_REVIEWERS',
+  ADD_ASSIGNEES: 'PR_TREE_ADD_ASSIGNEES',
+  REMOVE_ASSIGNEES: 'PR_TREE_REMOVE_ASSIGNEES',
+  SET_LABELS: 'PR_TREE_SET_LABELS',
+  APPLY_SUGGESTION: 'PR_TREE_APPLY_SUGGESTION',
+  MERGE_PULL: 'PR_TREE_MERGE_PULL',
+  UPDATE_BRANCH: 'PR_TREE_UPDATE_BRANCH',
+  SET_SUBSCRIPTION: 'PR_TREE_SET_SUBSCRIPTION',
+  DELETE_SUBSCRIPTION: 'PR_TREE_DELETE_SUBSCRIPTION',
+  SET_MILESTONE: 'PR_TREE_SET_MILESTONE',
+  SET_DRAFT_STAGE: 'PR_TREE_SET_DRAFT_STAGE',
+  UPLOAD_REPO_FILE: 'PR_TREE_UPLOAD_REPO_FILE',
+};
+
+/** Max time for one SW message (GitHub multi-request detail can be slow). */
+const MESSAGE_TIMEOUT_MS = 120_000;
+
+function broadcastTokenChanged() {
+  // Notify extension pages / open content scripts without sending the secret.
+  // sendMessage may not return a Promise on all runtimes — never assume .catch.
+  try {
+    chrome.runtime.sendMessage({ type: MSG.TOKEN_CHANGED }, () => {
+      void chrome.runtime.lastError; // no receivers is fine
+    });
+  } catch {
+    /* ignore */
+  }
+  try {
+    chrome.tabs.query({ url: ['https://github.com/*'] }, (tabs) => {
+      for (const tab of tabs || []) {
+        if (tab.id == null) continue;
+        try {
+          chrome.tabs.sendMessage(tab.id, { type: MSG.TOKEN_CHANGED }, () => {
+            void chrome.runtime.lastError;
+          });
+        } catch {
+          /* tab may not have content script */
+        }
+      }
+    });
+  } catch {
+    /* ignore */
+  }
+}
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== 'local' || !changes[PRTreeStorage.TOKEN_KEY]) return;
+  broadcastTokenChanged();
+});
+
+function fetchImpl() {
+  return globalThis.fetch.bind(globalThis);
+}
+
+/**
+ * Periodic chrome API call keeps the MV3 service worker alive during long
+ * GitHub fetches (otherwise SW can suspend mid-handler and close the channel).
+ */
+function withServiceWorkerKeepAlive(work) {
+  let tick = 0;
+  const id = setInterval(() => {
+    tick += 1;
+    try {
+      chrome.runtime.getPlatformInfo(() => {
+        void chrome.runtime.lastError;
+      });
+    } catch {
+      /* ignore */
+    }
+    // Also touch storage lightly every other tick
+    if (tick % 2 === 0) {
+      try {
+        chrome.storage.local.get('__prp_keepalive__', () => {
+          void chrome.runtime.lastError;
+        });
+      } catch {
+        /* ignore */
+      }
+    }
+  }, 15_000);
+
+  return Promise.resolve()
+    .then(work)
+    .finally(() => clearInterval(id));
+}
+
+function withTimeout(promise, ms, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      const err = new Error(
+        `${label || 'Request'} timed out after ${Math.round(ms / 1000)}s`
+      );
+      err.status = 408;
+      reject(err);
+    }, ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+async function handleMessage(message) {
+  switch (message.type) {
+    case MSG.TOKEN_STATUS: {
+      const status = await PRTreeStorage.getGithubTokenStatus();
+      return { ok: true, ...status };
+    }
+    case MSG.TOKEN_SET: {
+      await PRTreeStorage.setGithubToken(message.token || '');
+      const status = await PRTreeStorage.getGithubTokenStatus();
+      return { ok: true, ...status };
+    }
+    case MSG.TOKEN_CLEAR: {
+      await PRTreeStorage.setGithubToken('');
+      return { ok: true, configured: false, mask: '' };
+    }
+    case MSG.FETCH_OPEN_PULLS: {
+      const token = await PRTreeStorage.getGithubToken();
+      const prs = await PRTreeFetch.fetchOpenPulls(
+        message.owner,
+        message.repo,
+        fetchImpl(),
+        {
+          token,
+          pagePrNumbers: Array.isArray(message.pagePrNumbers)
+            ? message.pagePrNumbers
+            : [],
+        }
+      );
+      return { ok: true, prs };
+    }
+    case MSG.FETCH_DANGLING: {
+      const token = await PRTreeStorage.getGithubToken();
+      const prs = await PRTreeFetch.fetchDanglingPulls(
+        message.owner,
+        message.repo,
+        Array.isArray(message.numbers) ? message.numbers : [],
+        fetchImpl(),
+        token
+      );
+      return { ok: true, prs };
+    }
+    case MSG.FETCH_PR_DETAIL: {
+      const token = await PRTreeStorage.getGithubToken();
+      // Partial by default: core + first GraphQL threads page (not all pages)
+      const detail = await PRTreeFetch.fetchPrDetail(
+        message.owner,
+        message.repo,
+        message.number,
+        fetchImpl(),
+        token,
+        {
+          skipReviewThreads: Boolean(message.skipReviewThreads),
+          threadsMaxPages: message.threadsMaxPages != null ? Number(message.threadsMaxPages) : 1,
+        }
+      );
+      return { ok: true, detail };
+    }
+    case MSG.FETCH_REVIEW_THREADS_PAGE: {
+      const token = await PRTreeStorage.getGithubToken();
+      if (!token) {
+        return {
+          ok: true,
+          page: {
+            threads: [],
+            comments: [],
+            hasMore: false,
+            endCursor: null,
+            pageCount: 0,
+          },
+        };
+      }
+      const page = await PRTreeFetch.fetchReviewThreadsPage(
+        message.owner,
+        message.repo,
+        message.number,
+        {
+          direction: message.direction || 'newest',
+          cursor: message.cursor || null,
+          pageSize: message.pageSize != null ? Number(message.pageSize) : undefined,
+        },
+        fetchImpl(),
+        token
+      );
+      return { ok: true, page };
+    }
+    case MSG.FETCH_COMMENTS_PAGE: {
+      const token = await PRTreeStorage.getGithubToken();
+      const page = await PRTreeFetch.fetchPrCommentsPage(
+        message.owner,
+        message.repo,
+        message.number,
+        message.kind === 'review' ? 'review' : 'issue',
+        {
+          page: message.page,
+          perPage: message.perPage,
+          since: message.since || null,
+        },
+        fetchImpl(),
+        token
+      );
+      return { ok: true, page };
+    }
+    case MSG.FETCH_COMPARE_FILES: {
+      const token = await PRTreeStorage.getGithubToken();
+      const result = await PRTreeFetch.fetchCompareFiles(
+        message.owner,
+        message.repo,
+        message.base,
+        message.head,
+        fetchImpl(),
+        token,
+        { gitattributesText: message.gitattributesText || '' }
+      );
+      return { ok: true, result };
+    }
+    case MSG.POST_ISSUE_COMMENT: {
+      const token = await PRTreeStorage.getGithubToken();
+      if (!token) throw new Error('GitHub PAT required to post comments');
+      const result = await PRTreeFetch.postIssueComment(
+        message.owner,
+        message.repo,
+        message.number,
+        message.body,
+        fetchImpl(),
+        token
+      );
+      return { ok: true, result };
+    }
+    case MSG.SUBMIT_REVIEW: {
+      const token = await PRTreeStorage.getGithubToken();
+      if (!token) throw new Error('GitHub PAT required to submit reviews');
+      const result = await PRTreeFetch.submitPullReview(
+        message.owner,
+        message.repo,
+        message.number,
+        {
+          event: message.event,
+          body: message.body || '',
+          commitId: message.commitId,
+          comments: Array.isArray(message.comments) ? message.comments : undefined,
+        },
+        fetchImpl(),
+        token
+      );
+      return { ok: true, result };
+    }
+    case MSG.SUBMIT_PENDING_REVIEW: {
+      const token = await PRTreeStorage.getGithubToken();
+      if (!token) throw new Error('GitHub PAT required to submit pending reviews');
+      const result = await PRTreeFetch.submitPendingPullReview(
+        message.owner,
+        message.repo,
+        message.number,
+        message.reviewId,
+        { event: message.event || 'COMMENT', body: message.body || '' },
+        fetchImpl(),
+        token
+      );
+      return { ok: true, result };
+    }
+    case MSG.DELETE_PENDING_REVIEW: {
+      const token = await PRTreeStorage.getGithubToken();
+      if (!token) throw new Error('GitHub PAT required to discard pending reviews');
+      const result = await PRTreeFetch.deletePendingPullReview(
+        message.owner,
+        message.repo,
+        message.number,
+        message.reviewId,
+        fetchImpl(),
+        token
+      );
+      return { ok: true, result };
+    }
+    case MSG.POST_REVIEW_COMMENT: {
+      const token = await PRTreeStorage.getGithubToken();
+      if (!token) throw new Error('GitHub PAT required to post review comments');
+      const result = await PRTreeFetch.postReviewComment(
+        message.owner,
+        message.repo,
+        message.number,
+        {
+          body: message.body,
+          path: message.path,
+          line: message.line,
+          side: message.side || 'RIGHT',
+          commitId: message.commitId,
+          startLine: message.startLine,
+          startSide: message.startSide,
+          asPending: Boolean(message.asPending),
+        },
+        fetchImpl(),
+        token
+      );
+      return { ok: true, result };
+    }
+    case MSG.REPLY_REVIEW_COMMENT: {
+      const token = await PRTreeStorage.getGithubToken();
+      if (!token) throw new Error('GitHub PAT required to reply to review comments');
+      const result = await PRTreeFetch.replyToReviewComment(
+        message.owner,
+        message.repo,
+        message.number,
+        message.commentId,
+        message.body,
+        fetchImpl(),
+        token,
+        {
+          mode: message.mode || 'comment',
+          threadNodeId: message.threadNodeId || null,
+          parentNodeId: message.parentNodeId || null,
+          path: message.path || null,
+          line: message.line ?? null,
+          side: message.side || null,
+          commitId: message.commitId || null,
+        }
+      );
+      return { ok: true, result };
+    }
+    case MSG.RESOLVE_REVIEW_THREAD: {
+      const token = await PRTreeStorage.getGithubToken();
+      if (!token) throw new Error('GitHub PAT required to resolve review threads');
+      const result = await PRTreeFetch.resolveReviewThread(
+        message.threadNodeId,
+        message.resolved !== false,
+        fetchImpl(),
+        token
+      );
+      return { ok: true, result };
+    }
+    case MSG.UPDATE_PULL_STATE: {
+      const token = await PRTreeStorage.getGithubToken();
+      if (!token) throw new Error('GitHub PAT required to close or reopen pull requests');
+      const result = await PRTreeFetch.updatePullState(
+        message.owner,
+        message.repo,
+        message.number,
+        message.state === 'closed' ? 'closed' : 'open',
+        fetchImpl(),
+        token
+      );
+      return { ok: true, result };
+    }
+    case MSG.DELETE_REVIEW_COMMENT: {
+      const token = await PRTreeStorage.getGithubToken();
+      if (!token) throw new Error('GitHub PAT required to delete review comments');
+      const result = await PRTreeFetch.deleteReviewComment(
+        message.owner,
+        message.repo,
+        message.commentId,
+        fetchImpl(),
+        token
+      );
+      return { ok: true, result };
+    }
+    case MSG.DELETE_ISSUE_COMMENT: {
+      const token = await PRTreeStorage.getGithubToken();
+      if (!token) throw new Error('GitHub PAT required to delete comments');
+      const result = await PRTreeFetch.deleteIssueComment(
+        message.owner,
+        message.repo,
+        message.commentId,
+        fetchImpl(),
+        token
+      );
+      return { ok: true, result };
+    }
+    case MSG.UPDATE_PULL: {
+      const token = await PRTreeStorage.getGithubToken();
+      if (!token) throw new Error('GitHub PAT required to update pull request');
+      const result = await PRTreeFetch.updatePullRequest(
+        message.owner,
+        message.repo,
+        message.number,
+        message.fields || {},
+        fetchImpl(),
+        token
+      );
+      return { ok: true, result };
+    }
+    case MSG.EDIT_ISSUE_COMMENT: {
+      const token = await PRTreeStorage.getGithubToken();
+      if (!token) throw new Error('GitHub PAT required to edit comments');
+      const result = await PRTreeFetch.editIssueComment(
+        message.owner,
+        message.repo,
+        message.commentId,
+        message.body,
+        fetchImpl(),
+        token
+      );
+      return { ok: true, result };
+    }
+    case MSG.EDIT_REVIEW_COMMENT: {
+      const token = await PRTreeStorage.getGithubToken();
+      if (!token) throw new Error('GitHub PAT required to edit review comments');
+      const result = await PRTreeFetch.editReviewComment(
+        message.owner,
+        message.repo,
+        message.commentId,
+        message.body,
+        fetchImpl(),
+        token
+      );
+      return { ok: true, result };
+    }
+    case MSG.REQUEST_REVIEWERS: {
+      const token = await PRTreeStorage.getGithubToken();
+      if (!token) throw new Error('GitHub PAT required to request reviewers');
+      const result = await PRTreeFetch.requestReviewers(
+        message.owner,
+        message.repo,
+        message.number,
+        {
+          reviewers: message.reviewers || [],
+          teamReviewers: message.teamReviewers || [],
+        },
+        fetchImpl(),
+        token
+      );
+      return { ok: true, result };
+    }
+    case MSG.REMOVE_REVIEWERS: {
+      const token = await PRTreeStorage.getGithubToken();
+      if (!token) throw new Error('GitHub PAT required to remove reviewers');
+      const result = await PRTreeFetch.removeReviewers(
+        message.owner,
+        message.repo,
+        message.number,
+        {
+          reviewers: message.reviewers || [],
+          teamReviewers: message.teamReviewers || [],
+        },
+        fetchImpl(),
+        token
+      );
+      return { ok: true, result };
+    }
+    case MSG.ADD_ASSIGNEES: {
+      const token = await PRTreeStorage.getGithubToken();
+      if (!token) throw new Error('GitHub PAT required to add assignees');
+      const result = await PRTreeFetch.addAssignees(
+        message.owner,
+        message.repo,
+        message.number,
+        message.assignees || [],
+        fetchImpl(),
+        token
+      );
+      return { ok: true, result };
+    }
+    case MSG.REMOVE_ASSIGNEES: {
+      const token = await PRTreeStorage.getGithubToken();
+      if (!token) throw new Error('GitHub PAT required to remove assignees');
+      const result = await PRTreeFetch.removeAssignees(
+        message.owner,
+        message.repo,
+        message.number,
+        message.assignees || [],
+        fetchImpl(),
+        token
+      );
+      return { ok: true, result };
+    }
+    case MSG.SET_LABELS: {
+      const token = await PRTreeStorage.getGithubToken();
+      if (!token) throw new Error('GitHub PAT required to set labels');
+      const result = await PRTreeFetch.setIssueLabels(
+        message.owner,
+        message.repo,
+        message.number,
+        message.labels || [],
+        fetchImpl(),
+        token
+      );
+      return { ok: true, result };
+    }
+    case MSG.UPLOAD_REPO_FILE: {
+      const token = await PRTreeStorage.getGithubToken();
+      if (!token) throw new Error('GitHub PAT required to upload files');
+      const result = await PRTreeFetch.uploadRepoFile(
+        message.owner,
+        message.repo,
+        {
+          path: message.path,
+          contentBase64: message.contentBase64,
+          message: message.message,
+          branch: message.branch,
+        },
+        fetchImpl(),
+        token
+      );
+      return { ok: true, result };
+    }
+    case MSG.APPLY_SUGGESTION: {
+      const token = await PRTreeStorage.getGithubToken();
+      if (!token) throw new Error('GitHub PAT required to apply suggestions');
+      const result = await PRTreeFetch.applyReviewSuggestion(
+        message.owner,
+        message.repo,
+        {
+          path: message.path,
+          headRef: message.headRef,
+          startLine: message.startLine,
+          endLine: message.endLine,
+          suggestion: message.suggestion,
+          message: message.commitMessage,
+        },
+        fetchImpl(),
+        token
+      );
+      return { ok: true, result };
+    }
+    case MSG.MERGE_PULL: {
+      const token = await PRTreeStorage.getGithubToken();
+      if (!token) throw new Error('GitHub PAT required to merge');
+      const result = await PRTreeFetch.mergePullRequest(
+        message.owner,
+        message.repo,
+        message.number,
+        {
+          mergeMethod: message.mergeMethod || 'merge',
+          commitTitle: message.commitTitle,
+          commitMessage: message.commitMessage,
+        },
+        fetchImpl(),
+        token
+      );
+      return { ok: true, result };
+    }
+    case MSG.UPDATE_BRANCH: {
+      const token = await PRTreeStorage.getGithubToken();
+      if (!token) throw new Error('GitHub PAT required to update branch');
+      const result = await PRTreeFetch.updatePullBranch(
+        message.owner,
+        message.repo,
+        message.number,
+        { expectedHeadSha: message.expectedHeadSha },
+        fetchImpl(),
+        token
+      );
+      return { ok: true, result };
+    }
+    case MSG.SET_SUBSCRIPTION: {
+      const token = await PRTreeStorage.getGithubToken();
+      if (!token) throw new Error('GitHub PAT required for notifications');
+      const result = await PRTreeFetch.setIssueSubscription(
+        message.owner,
+        message.repo,
+        message.number,
+        {
+          subscribed: message.subscribed !== false,
+          ignored: Boolean(message.ignored),
+        },
+        fetchImpl(),
+        token
+      );
+      return { ok: true, result };
+    }
+    case MSG.DELETE_SUBSCRIPTION: {
+      const token = await PRTreeStorage.getGithubToken();
+      if (!token) throw new Error('GitHub PAT required for notifications');
+      const result = await PRTreeFetch.deleteIssueSubscription(
+        message.owner,
+        message.repo,
+        message.number,
+        fetchImpl(),
+        token
+      );
+      return { ok: true, result };
+    }
+    case MSG.SET_MILESTONE: {
+      const token = await PRTreeStorage.getGithubToken();
+      if (!token) throw new Error('GitHub PAT required to set milestone');
+      const result = await PRTreeFetch.setIssueMilestone(
+        message.owner,
+        message.repo,
+        message.number,
+        message.milestone,
+        fetchImpl(),
+        token
+      );
+      return { ok: true, result };
+    }
+    case MSG.SET_DRAFT_STAGE: {
+      const token = await PRTreeStorage.getGithubToken();
+      if (!token) throw new Error('GitHub PAT required to change draft stage');
+      const result = await PRTreeFetch.setPullRequestDraftStage(
+        message.owner,
+        message.repo,
+        message.number,
+        message.stage === 'ready' ? 'ready' : 'draft',
+        fetchImpl(),
+        token,
+        message.nodeId || null
+      );
+      return { ok: true, result };
+    }
+    default:
+      return { ok: false, error: `unknown type: ${message.type}` };
+  }
+}
+
+chrome.runtime.onMessage.addListener((message, _sender) => {
+  // Fire-and-forget broadcasts: content scripts listen; no reply expected.
+  if (message?.type === MSG.TOKEN_CHANGED) {
+    return false;
+  }
+
+  if (!message || typeof message.type !== 'string') {
+    return Promise.resolve({ ok: false, error: 'invalid message' });
+  }
+
+  // Return a Promise so Chrome keeps the message port open until settle
+  // (preferred over return true + sendResponse, which races SW sleep).
+  return withServiceWorkerKeepAlive(() =>
+    withTimeout(
+      handleMessage(message),
+      MESSAGE_TIMEOUT_MS,
+      message.type
+    ).catch((err) => ({
+      ok: false,
+      error: err?.message || String(err),
+      status: err?.status,
+    }))
+  );
+});

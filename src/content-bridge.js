@@ -64,6 +64,124 @@
     return dangling;
   }
 
+  function emptyReviewThreadsMetaLocal() {
+    return {
+      totalCount: 0,
+      hiddenCount: 0,
+      loadedThreadCount: 0,
+      loadedCommentCount: 0,
+      pagesLoaded: 0,
+      newestStartCursor: null,
+      newestEndCursor: null,
+      hasOlder: false,
+      oldestStartCursor: null,
+      oldestEndCursor: null,
+      hasNewerFromOldest: false,
+      newestThreadIds: [],
+      oldestThreadIds: [],
+      hasMore: false,
+      endCursor: null,
+    };
+  }
+
+  /**
+   * Dual-window merge (mirrors fetch-pulls.mergeReviewThreadsPageIntoDetail).
+   * Keeps newest/oldest id sets + cursors so middle Load more can expand either end.
+   */
+  function mergeReviewThreadsPageIntoDetailLocal(detail, page, direction = 'older') {
+    if (!detail) return detail;
+    const dir = String(direction || page?.direction || 'older');
+    const prevMeta = detail.reviewThreadsMeta || emptyReviewThreadsMetaLocal();
+    const prevRc = Array.isArray(detail.reviewComments) ? detail.reviewComments : [];
+    const prevTh = Array.isArray(detail.reviewThreads) ? detail.reviewThreads : [];
+
+    const byId = new Map(prevRc.map((c) => [String(c.id), c]));
+    for (const c of page?.comments || []) {
+      if (c?.id != null) {
+        byId.set(String(c.id), { ...(byId.get(String(c.id)) || {}), ...c });
+      }
+    }
+    const thById = new Map();
+    for (const t of prevTh) {
+      if (t?.threadNodeId) thById.set(String(t.threadNodeId), t);
+    }
+    for (const t of page?.threads || []) {
+      if (t?.threadNodeId) {
+        thById.set(String(t.threadNodeId), {
+          ...(thById.get(String(t.threadNodeId)) || {}),
+          ...t,
+        });
+      }
+    }
+    const reviewThreads = [...thById.values()];
+    const reviewComments = [...byId.values()];
+
+    const newestIds = new Set((prevMeta.newestThreadIds || []).map(String));
+    const oldestIds = new Set((prevMeta.oldestThreadIds || []).map(String));
+    const pageIds = (page?.threads || [])
+      .map((t) => t.threadNodeId)
+      .filter(Boolean)
+      .map(String);
+
+    let newestStartCursor = prevMeta.newestStartCursor;
+    let newestEndCursor = prevMeta.newestEndCursor;
+    let hasOlder = prevMeta.hasOlder;
+    let oldestStartCursor = prevMeta.oldestStartCursor;
+    let oldestEndCursor = prevMeta.oldestEndCursor;
+    let hasNewerFromOldest = prevMeta.hasNewerFromOldest;
+
+    if (dir === 'newest' || dir === 'older') {
+      for (const id of pageIds) newestIds.add(id);
+      if (page?.startCursor) newestStartCursor = page.startCursor;
+      if (dir === 'newest' && page?.endCursor) newestEndCursor = page.endCursor;
+      hasOlder = Boolean(page?.hasPreviousPage);
+    } else {
+      for (const id of pageIds) oldestIds.add(id);
+      if (page?.endCursor) oldestEndCursor = page.endCursor;
+      if (dir === 'oldest' && page?.startCursor) oldestStartCursor = page.startCursor;
+      hasNewerFromOldest = Boolean(page?.hasNextPage);
+    }
+
+    const totalCount =
+      typeof page?.totalCount === 'number'
+        ? page.totalCount
+        : Number(prevMeta.totalCount) || reviewThreads.length;
+    const loadedThreadCount = reviewThreads.length;
+    const hiddenCount = Math.max(0, totalCount - loadedThreadCount);
+    for (const id of newestIds) oldestIds.delete(id);
+
+    const meta = {
+      ...prevMeta,
+      totalCount,
+      hiddenCount,
+      loadedThreadCount,
+      loadedCommentCount: reviewComments.length,
+      pagesLoaded: (Number(prevMeta.pagesLoaded) || 0) + (page?.pageCount || 1),
+      newestStartCursor,
+      newestEndCursor,
+      hasOlder: hiddenCount > 0 && hasOlder,
+      oldestStartCursor,
+      oldestEndCursor,
+      hasNewerFromOldest: hiddenCount > 0 && hasNewerFromOldest,
+      newestThreadIds: [...newestIds],
+      oldestThreadIds: [...oldestIds],
+      hasMore: hiddenCount > 0,
+      endCursor: newestStartCursor,
+    };
+
+    return {
+      ...detail,
+      reviewComments,
+      reviewThreads,
+      reviewCommentsMeta: {
+        ...(detail.reviewCommentsMeta || {}),
+        loadedCount: reviewComments.length,
+        hasMore: meta.hasMore,
+      },
+      reviewThreadsMeta: meta,
+    };
+  }
+
   const PRTreeFetch = {
     findDanglingPrNumbers,
     async fetchOpenPulls(owner, repo, _fetchImpl, options = {}) {
@@ -94,12 +212,17 @@
       }
       return res.prs || [];
     },
-    async fetchPrDetail(owner, repo, number) {
+    /**
+     * @param {{ skipReviewThreads?: boolean, threadsMaxPages?: number }} [opts]
+     */
+    async fetchPrDetail(owner, repo, number, opts = {}) {
       const res = await send({
         type: 'PR_TREE_FETCH_PR_DETAIL',
         owner,
         repo,
         number,
+        skipReviewThreads: Boolean(opts.skipReviewThreads),
+        threadsMaxPages: opts.threadsMaxPages,
       });
       if (!res?.ok) {
         const err = new Error(res?.error || 'Failed to fetch PR detail');
@@ -107,6 +230,61 @@
         throw err;
       }
       return res.detail;
+    },
+    /**
+     * Lazy GraphQL page of review threads (+ comments with diffHunk).
+     * Dual-window directions:
+     *   newest | older  → last:N (before cursor for older)
+     *   oldest | newer  → first:N (after cursor for newer)
+     * @param {{ direction?: string, cursor?: string|null, pageSize?: number }} [opts]
+     */
+    async fetchReviewThreadsPage(owner, repo, number, opts = {}) {
+      const res = await send({
+        type: 'PR_TREE_FETCH_REVIEW_THREADS_PAGE',
+        owner,
+        repo,
+        number,
+        direction: opts.direction || 'newest',
+        cursor: opts.cursor || null,
+        pageSize: opts.pageSize,
+      });
+      if (!res?.ok) {
+        const err = new Error(res?.error || 'Failed to fetch review threads page');
+        err.status = res?.status;
+        throw err;
+      }
+      return res.page;
+    },
+    /**
+     * Pure merge of a dual-window review-threads page into detail (no network).
+     * @param {object} detail
+     * @param {object} page
+     * @param {string} [direction]
+     */
+    mergeReviewThreadsPageIntoDetail(detail, page, direction) {
+      return mergeReviewThreadsPageIntoDetailLocal(detail, page, direction);
+    },
+    /**
+     * Lazy page of issue or review comments (offset page or since= window).
+     * @param {{ kind?: 'issue'|'review', page?: number, perPage?: number, since?: string }} [opts]
+     */
+    async fetchPrCommentsPage(owner, repo, number, opts = {}) {
+      const res = await send({
+        type: 'PR_TREE_FETCH_COMMENTS_PAGE',
+        owner,
+        repo,
+        number,
+        kind: opts.kind === 'review' ? 'review' : 'issue',
+        page: opts.page,
+        perPage: opts.perPage,
+        since: opts.since || null,
+      });
+      if (!res?.ok) {
+        const err = new Error(res?.error || 'Failed to fetch comments page');
+        err.status = res?.status;
+        throw err;
+      }
+      return res.page;
     },
     async fetchCompareFiles(owner, repo, base, head, options = {}) {
       const res = await send({
@@ -175,6 +353,38 @@
       }
       return res.result;
     },
+    async submitPendingPullReview(owner, repo, number, reviewId, { event, body } = {}) {
+      const res = await send({
+        type: 'PR_TREE_SUBMIT_PENDING_REVIEW',
+        owner,
+        repo,
+        number,
+        reviewId,
+        event,
+        body,
+      });
+      if (!res?.ok) {
+        const err = new Error(res?.error || 'Failed to submit pending review');
+        err.status = res?.status;
+        throw err;
+      }
+      return res.result;
+    },
+    async deletePendingPullReview(owner, repo, number, reviewId) {
+      const res = await send({
+        type: 'PR_TREE_DELETE_PENDING_REVIEW',
+        owner,
+        repo,
+        number,
+        reviewId,
+      });
+      if (!res?.ok) {
+        const err = new Error(res?.error || 'Failed to discard pending review');
+        err.status = res?.status;
+        throw err;
+      }
+      return res.result;
+    },
     async postReviewComment(owner, repo, number, payload) {
       const res = await send({
         type: 'PR_TREE_POST_REVIEW_COMMENT',
@@ -188,6 +398,7 @@
         commitId: payload.commitId,
         startLine: payload.startLine ?? payload.start_line,
         startSide: payload.startSide ?? payload.start_side,
+        asPending: Boolean(payload.asPending),
       });
       if (!res?.ok) {
         const err = new Error(res?.error || 'Failed to post review comment');
@@ -196,7 +407,7 @@
       }
       return res.result;
     },
-    async replyToReviewComment(owner, repo, number, commentId, body) {
+    async replyToReviewComment(owner, repo, number, commentId, body, opts = {}) {
       const res = await send({
         type: 'PR_TREE_REPLY_REVIEW_COMMENT',
         owner,
@@ -204,6 +415,13 @@
         number,
         commentId,
         body,
+        mode: opts?.mode || 'comment',
+        threadNodeId: opts?.threadNodeId || null,
+        parentNodeId: opts?.parentNodeId || null,
+        path: opts?.path || null,
+        line: opts?.line ?? null,
+        side: opts?.side || null,
+        commitId: opts?.commitId || null,
       });
       if (!res?.ok) {
         const err = new Error(res?.error || 'Failed to reply to review comment');

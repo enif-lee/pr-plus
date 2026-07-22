@@ -98,6 +98,9 @@ const root = path.join(__dirname, '..');
   assert.ok(css.includes('.prp-shell--modal') || css.includes('prp-shell--sheet'));
   assert.ok(css.includes('.prp-shell-toggle'));
   assert.ok(css.includes('justify-content: flex-end'));
+  // Side sheet must not leave a page scrollbar under the docked panel
+  assert.ok(css.includes('prp-scroll-lock') || css.includes('html.prp-scroll-lock'));
+  assert.ok(css.includes('overscroll-behavior'));
 }
 
 // normalize used by App restore
