@@ -751,8 +751,7 @@ function ConversationViewImpl(props: any) {
             </div>
           ) : null}
           {(paged.bottomItems || []).map((item: any) => {
-            // Reuse same card renderer path via recursive-style inline:
-            // oldest-window threads only (partition already filtered).
+            // Oldest dual-window slice — same search anchors/marks as newest window.
             const isIssue = item.kind === 'issue-comment';
             const isReviewThread =
               item.kind === 'review-thread' || item.kind === 'review-comment';
@@ -770,6 +769,7 @@ function ConversationViewImpl(props: any) {
 
             if (isReviewThread) {
               const threadId = item.id;
+              const rootAnchor = `review-comment:${threadId}`;
               const draft =
                 replyDrafts && threadId != null
                   ? replyDrafts[String(threadId)] || ''
@@ -792,11 +792,22 @@ function ConversationViewImpl(props: any) {
                   : line != null
                     ? `${filePath}:${line}`
                     : filePath);
+              const threadHit =
+                isAnchorHit(rootAnchor) ||
+                reviewReplies.some((r: any) => isAnchorHit(`review-comment:${r.id}`));
+              const threadCurrent =
+                isAnchorCurrent(rootAnchor) ||
+                reviewReplies.some((r: any) =>
+                  isAnchorCurrent(`review-comment:${r.id}`)
+                );
 
               return (
                 <Card
                   key={`old-${String(item.id || item.key)}`}
-                  className="prp-card--timeline prp-card--timeline-review-thread"
+                  className={`prp-card--timeline prp-card--timeline-review-thread${
+                    threadHit ? ' prp-card--search-match' : ''
+                  }${threadCurrent ? ' prp-card--search-current' : ''}`}
+                  data-search-anchor={rootAnchor}
                 >
                   {fileLoc ? (
                     <div className="prp-review-thread__file-header" title={fileLoc}>
@@ -830,12 +841,22 @@ function ConversationViewImpl(props: any) {
                         idx === threadItems.length - 1 && !canReply;
                       const r = row;
                       const isPending = Boolean(r.pending || (isRoot && item.pending));
+                      const replyAnchor = `review-comment:${r.id}`;
                       return (
                         <li
                           key={String(r.id || idx)}
                           className={`prp-review-thread__item${
                             isLast ? ' prp-review-thread__item--last' : ''
-                          }${isPending ? ' prp-review-thread__item--pending' : ''}`}
+                          }${isPending ? ' prp-review-thread__item--pending' : ''}${
+                            isAnchorHit(replyAnchor)
+                              ? ' prp-review-thread__item--search-match'
+                              : ''
+                          }${
+                            isAnchorCurrent(replyAnchor)
+                              ? ' prp-review-thread__item--search-current'
+                              : ''
+                          }`}
+                          data-search-anchor={replyAnchor}
                         >
                           <Avatar
                             login={r.author}
@@ -884,7 +905,8 @@ function ConversationViewImpl(props: any) {
                                 path: item.path,
                                 line: item.line,
                               },
-                              editKind || 'review'
+                              editKind || 'review',
+                              replyAnchor
                             )}
                           </div>
                         </li>
@@ -970,10 +992,19 @@ function ConversationViewImpl(props: any) {
               );
             }
 
+            const itemAnchor = isIssue
+              ? `issue-comment:${item.id}`
+              : isReviewEvent
+                ? `review:${item.id}`
+                : `item:${item.id}`;
             return (
               <Card
                 key={`old-${String(item.id || item.key)}`}
-                className={`prp-card--timeline prp-card--timeline-${item.kind || 'item'}`}
+                className={searchCardClass(
+                  itemAnchor,
+                  `prp-card--timeline prp-card--timeline-${item.kind || 'item'}`
+                )}
+                data-search-anchor={itemAnchor}
               >
                 <div className="prp-conversation-feed__meta">
                   <Avatar login={item.author} avatarUrl={item.avatarUrl} size="sm" />
@@ -990,13 +1021,9 @@ function ConversationViewImpl(props: any) {
                   {commentActions(editKind, item.id, Boolean(item.canDelete), item.body)}
                 </div>
                 {editKind ? (
-                  renderTimelineBody(item, editKind)
+                  renderTimelineBody(item, editKind, itemAnchor)
                 ) : (
-                  <MarkdownView
-                    source={item.body || ''}
-                    className="prp-md--compact"
-                    linkCtx={linkCtx}
-                  />
+                  renderSearchableBody(item.body || '', itemAnchor, true)
                 )}
               </Card>
             );

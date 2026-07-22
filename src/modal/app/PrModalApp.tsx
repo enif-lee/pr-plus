@@ -193,6 +193,8 @@ export function PrModalApp({
   }, [detailProp]);
   // Prefer optimistic local copy for all rendering / virtual rows / threads
   const detail = localDetail || detailProp;
+  const detailRef = useRef(detail);
+  detailRef.current = detail;
 
   /** Diff files scoped to a commit or commit range (null = full PR files). */
   const [diffCommitFilter, setDiffCommitFilter] = useState<DiffCommitFilterState>({
@@ -744,10 +746,12 @@ export function PrModalApp({
       const isCancelled = () => cancelled || gen !== searchGenRef.current;
       try {
         let st: any = null;
+        // Use searchDocs snapshot only — do not depend on `detail` object identity
+        // (host re-renders with new detail refs during thread load and would restart search forever).
         const sortOpts = {
           isCancelled,
           mode: searchMode === 'full' ? 'diff' : 'conversation',
-          detail,
+          detail: detailRef.current,
         };
         if (typeof resolveQuerySearchStateAsync === 'function') {
           st = await resolveQuerySearchStateAsync(searchDocs, q, sortOpts);
@@ -795,7 +799,7 @@ export function PrModalApp({
     return () => {
       cancelled = true;
     };
-  }, [searchQuery, searchDocs, setSearchHitsStore, jumpToSearchHit, searchMode, detail]);
+  }, [searchQuery, searchDocs, setSearchHitsStore, jumpToSearchHit, searchMode]);
 
   // Diff enter → drain all remaining review threads once (idempotent if complete)
   const diffFullLoadGenRef = useRef(0);

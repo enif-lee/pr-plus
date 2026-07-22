@@ -373,6 +373,31 @@ assert.ok(
     'utf8'
   );
   assert.ok(inline.includes('searchQuery'), 'InlineThread passes search to MarkdownView');
+
+  // Dual-window oldest slice must wire the same search anchors as newest
+  const bottomMapIdx = conv.indexOf('(paged.bottomItems || []).map');
+  assert.ok(bottomMapIdx > 0, 'Conversation maps dual-window bottomItems');
+  const bottomSlice = conv.slice(bottomMapIdx, bottomMapIdx + 9000);
+  assert.ok(
+    bottomSlice.includes('data-search-anchor={replyAnchor}') ||
+      bottomSlice.includes('data-search-anchor={rootAnchor}'),
+    'bottomItems review threads set data-search-anchor'
+  );
+  assert.ok(
+    bottomSlice.includes('replyAnchor'),
+    'bottomItems define replyAnchor for thread bodies'
+  );
+  assert.ok(
+    bottomSlice.includes('searchCardClass') || bottomSlice.includes('prp-card--search-match'),
+    'bottomItems apply search match chrome'
+  );
+  // Third arg to renderTimelineBody must be present (anchor) for review rows
+  assert.ok(
+    /renderTimelineBody\([\s\S]*?editKind \|\| 'review',\s*replyAnchor\s*\)/.test(
+      bottomSlice
+    ),
+    'bottomItems pass replyAnchor as third arg to renderTimelineBody'
+  );
 }
 
 const virtSrc = fs.readFileSync(
