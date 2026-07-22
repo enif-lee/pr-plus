@@ -3435,29 +3435,65 @@ button.prp-branch-tag:focus-visible {
 /* ── Merge box (conversation main, above comment) ── */
 .prp-merge-box {
   margin: 12px 0 4px;
-  padding: 12px 14px;
+  padding: 14px 16px;
   border-radius: 12px;
-  border: 1px solid var(--prp-border);
-  background: color-mix(in srgb, var(--prp-ok) 6%, var(--prp-bg));
+  border: 1px solid color-mix(in srgb, var(--prp-ok) 28%, var(--prp-border));
+  background: color-mix(in srgb, var(--prp-ok) 8%, var(--prp-bg));
   display: flex;
   flex-direction: column;
   gap: 10px;
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--prp-ok) 12%, transparent);
+}
+.prp-merge-box--ok {
+  border-color: color-mix(in srgb, var(--prp-ok) 32%, var(--prp-border));
 }
 .prp-merge-box--warn {
-  background: color-mix(in srgb, var(--prp-warn) 8%, var(--prp-bg));
+  background: color-mix(in srgb, var(--prp-warn) 10%, var(--prp-bg));
+  border-color: color-mix(in srgb, var(--prp-warn) 35%, var(--prp-border));
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--prp-warn) 12%, transparent);
 }
 .prp-merge-box--muted {
   background: var(--prp-bg-muted);
+  border-color: var(--prp-border);
+  box-shadow: none;
+}
+.prp-merge-box__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 12px;
 }
 .prp-merge-box__title {
   font-size: 13px;
-  font-weight: 650;
+  font-weight: 700;
   margin: 0;
+  letter-spacing: 0.01em;
+}
+.prp-merge-box__badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.prp-merge-box__badge {
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  text-transform: none;
+}
+.prp-merge-box__badge--lg {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-weight: 700;
 }
 .prp-merge-box__status {
   font-size: 12px;
   color: var(--prp-fg-muted);
   margin: 0;
+  line-height: 1.45;
 }
 .prp-merge-box__actions {
   display: flex;

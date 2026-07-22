@@ -383,20 +383,80 @@ function ConversationViewImpl(props: any) {
               ? ' prp-merge-box--muted'
               : detail.mergeable === false || detail.draft
                 ? ' prp-merge-box--warn'
-                : ''
+                : ' prp-merge-box--ok'
           }`}
         >
-          <h3 className="prp-merge-box__title">
-            {detail.merged ? 'Merged' : detail.draft ? 'Draft pull request' : 'Merge'}
-          </h3>
+          <div className="prp-merge-box__head">
+            <h3 className="prp-merge-box__title">
+              {detail.merged ? 'Merged' : detail.draft ? 'Draft pull request' : 'Merge status'}
+            </h3>
+            <div className="prp-merge-box__badges" role="status" aria-label="Merge status">
+              {detail.merged ? (
+                <Badge tone="ok" className="prp-merge-box__badge prp-merge-box__badge--lg">
+                  Merged
+                </Badge>
+              ) : null}
+              {detail.draft && !detail.merged ? (
+                <Badge tone="draft" className="prp-merge-box__badge prp-merge-box__badge--lg">
+                  Draft
+                </Badge>
+              ) : null}
+              {!detail.merged && detail.mergeable === false ? (
+                <Badge tone="danger" className="prp-merge-box__badge prp-merge-box__badge--lg">
+                  Not mergeable
+                </Badge>
+              ) : null}
+              {!detail.merged && detail.mergeable !== false && !detail.draft ? (
+                <Badge tone="ok" className="prp-merge-box__badge prp-merge-box__badge--lg">
+                  Able to merge
+                </Badge>
+              ) : null}
+              {detail.mergeableState && !detail.merged ? (
+                <Badge
+                  tone={
+                    detail.mergeableState === 'clean' || detail.mergeableState === 'unstable'
+                      ? detail.mergeableState === 'clean'
+                        ? 'ok'
+                        : 'warn'
+                      : detail.mergeable === false
+                        ? 'danger'
+                        : 'muted'
+                  }
+                  className="prp-merge-box__badge"
+                  title="mergeable_state"
+                >
+                  {String(detail.mergeableState)}
+                </Badge>
+              ) : null}
+              {detail.checks?.state ? (
+                <Badge
+                  tone={
+                    detail.checks.state === 'success'
+                      ? 'ok'
+                      : detail.checks.state === 'failure' || detail.checks.state === 'error'
+                        ? 'danger'
+                        : 'warn'
+                  }
+                  className="prp-merge-box__badge"
+                >
+                  checks: {detail.checks.state}
+                </Badge>
+              ) : null}
+              {detail.mergeable === false && !detail.merged ? (
+                <Badge tone="warn" className="prp-merge-box__badge">
+                  Conflicts / blocked
+                </Badge>
+              ) : null}
+            </div>
+          </div>
           <p className="prp-merge-box__status">
             {detail.merged
               ? 'This pull request has been merged.'
               : detail.draft
-                ? 'Draft — mark ready for review before merging.'
+                ? 'Mark ready for review before merging.'
                 : detail.mergeable === false
-                  ? 'Not mergeable (conflicts or checks).'
-                  : `Able to merge · ${detail.mergeableState || 'clean'}`}
+                  ? 'Resolve conflicts or failing checks before merging.'
+                  : 'This branch has no conflicts with the base branch.'}
           </p>
           {showChecks ? (
             <div className="prp-merge-box__checks">
