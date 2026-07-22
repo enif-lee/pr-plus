@@ -41,23 +41,31 @@ export function AsideCommitsTimeline({ commits }: any) {
   }
   return (
     <>
-      <ol className="prp-commit-timeline">
-        {items.map((c) => (
-          <li key={c.key} className="prp-commit-timeline__item">
-            <span className="prp-commit-timeline__dot" aria-hidden="true" />
-            <div className="prp-commit-timeline__body">
-              <div className="prp-commit-timeline__msg" title={c.fullMessage || c.message}>
-                {c.message}
+      {/* Scroll on outer wrapper so the rail (::before) spans full content height */}
+      <div className="prp-commit-timeline-scroll">
+        <ol className="prp-commit-timeline">
+          {items.map((c, idx) => (
+            <li
+              key={c.key}
+              className={`prp-commit-timeline__item${
+                idx === items.length - 1 ? ' prp-commit-timeline__item--last' : ''
+              }`}
+            >
+              <span className="prp-commit-timeline__dot" aria-hidden="true" />
+              <div className="prp-commit-timeline__body">
+                <div className="prp-commit-timeline__msg" title={c.fullMessage || c.message}>
+                  {c.message}
+                </div>
+                <div className="prp-commit-timeline__meta">
+                  <code className="prp-commit-timeline__sha">{c.shortSha}</code>
+                  {c.author ? <span>{c.author}</span> : null}
+                  {c.at ? <span>{formatWhen(c.at)}</span> : null}
+                </div>
               </div>
-              <div className="prp-commit-timeline__meta">
-                <code className="prp-commit-timeline__sha">{c.shortSha}</code>
-                {c.author ? <span>{c.author}</span> : null}
-                {c.at ? <span>{formatWhen(c.at)}</span> : null}
-              </div>
-            </div>
-          </li>
-        ))}
-      </ol>
+            </li>
+          ))}
+        </ol>
+      </div>
       {truncated > 0 ? (
         <div className="prp-aside-overflow">
           +{truncated} more · {total} commits total

@@ -1157,7 +1157,15 @@
   font-size: 13px;
 }
 
-/* Compact commit timeline (aside) — rail + dots share one center axis */
+/* Compact commit timeline (aside) — rail + dots share one center axis.
+   Scroll lives on an outer wrapper so the absolute rail tracks full content height
+   (overflow:auto on the same element as ::before only covers the viewport). */
+.prp-commit-timeline-scroll {
+  max-height: 280px;
+  overflow: auto;
+  min-height: 0;
+}
+
 .prp-commit-timeline {
   --prp-tl-gutter: 16px;
   --prp-tl-dot: 10px;
@@ -1167,22 +1175,36 @@
   display: flex;
   flex-direction: column;
   position: relative;
-  max-height: 280px;
-  overflow: auto;
 }
 
+/* Full-height rail through all commits (not just visible scrollport) */
 .prp-commit-timeline::before {
   content: '';
   position: absolute;
-  /* Center of gutter column */
   left: calc(var(--prp-tl-gutter) / 2);
-  top: 10px;
-  bottom: 10px;
+  top: calc(6px + 3px + var(--prp-tl-dot) / 2);
+  bottom: calc(10px + 3px + var(--prp-tl-dot) / 2);
   width: 2px;
   transform: translateX(-50%);
   background: var(--prp-border-muted);
   border-radius: 1px;
   pointer-events: none;
+  z-index: 0;
+}
+
+/* Per-item segment as backup (covers multi-line gaps between dots) */
+.prp-commit-timeline__item:not(.prp-commit-timeline__item--last)::after {
+  content: '';
+  position: absolute;
+  left: calc(var(--prp-tl-gutter) / 2);
+  top: calc(6px + 3px + var(--prp-tl-dot));
+  bottom: 0;
+  width: 2px;
+  transform: translateX(-50%);
+  background: var(--prp-border-muted);
+  border-radius: 1px;
+  pointer-events: none;
+  z-index: 0;
 }
 
 .prp-commit-timeline__item {
@@ -1207,6 +1229,7 @@
   z-index: 1;
   justify-self: center;
   align-self: start;
+  position: relative;
 }
 
 .prp-commit-timeline__body {
