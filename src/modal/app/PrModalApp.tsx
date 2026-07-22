@@ -86,6 +86,7 @@ import {
   COMMENT_ROW_HEIGHT,
   averageRowHeight,
   rowHeightFor,
+  rowOffsets,
 } from '@common/utils';
 
 export function PrModalApp({
@@ -306,6 +307,10 @@ export function PrModalApp({
 
   const fileStarts = useMemo(() => fileStartIndexMap(virtualRows), [virtualRows]);
   const avgH = useMemo(() => averageRowHeight(virtualRows), [virtualRows]);
+  const rowOffsetList = useMemo(
+    () => (typeof rowOffsets === 'function' ? rowOffsets(virtualRows) : null),
+    [virtualRows]
+  );
 
   const mappedComments = useMemo(() => {
     if (typeof mapCommentsToRowIndices !== 'function') return [];
@@ -341,7 +346,8 @@ export function PrModalApp({
           st.activeHit.rowIndex,
           avgH,
           viewportHeight,
-          virtualRows.length
+          virtualRows.length,
+          rowOffsetList
         );
         setScrollTop(top);
         if (listRef.current) listRef.current.scrollTop = top;
@@ -359,7 +365,8 @@ export function PrModalApp({
           st.active.rowIndex,
           avgH,
           viewportHeight,
-          virtualRows.length
+          virtualRows.length,
+          rowOffsetList
         );
         setScrollTop(top);
         if (listRef.current) listRef.current.scrollTop = top;
@@ -450,7 +457,8 @@ export function PrModalApp({
         row.rowIndex,
         avgH,
         viewportHeight,
-        virtualRows.length
+        virtualRows.length,
+        rowOffsetList
       );
       setScrollTop(top);
       requestAnimationFrame(() => {
@@ -715,7 +723,13 @@ export function PrModalApp({
     });
     const idx = fileStarts.get(path);
     if (typeof idx === 'number') {
-      const top = scrollTopForIndex(idx, avgH, viewportHeight, virtualRows.length);
+      const top = scrollTopForIndex(
+        idx,
+        avgH,
+        viewportHeight,
+        virtualRows.length,
+        rowOffsetList
+      );
       setScrollTop(top);
       if (listRef.current) listRef.current.scrollTop = top;
     }
@@ -2367,6 +2381,9 @@ export function PrModalApp({
                 virtualRows={virtualRows}
                 scrollTop={scrollTop}
                 viewportHeight={viewportHeight}
+                onViewportHeight={(h: number) => {
+                  if (h > 0 && h !== viewportHeight) setViewportHeight(h);
+                }}
                 listRef={listRef}
                 highlightRowIndex={
                   hit?.rowIndex ??

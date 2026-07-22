@@ -1,8 +1,9 @@
-import React, { useMemo, memo } from 'react';
+import React, { useLayoutEffect, useMemo, memo, useState } from 'react';
 import {
   ROW_HEIGHT,
   COMMENT_ROW_HEIGHT,
   averageRowHeight,
+  rowOffsets,
   highlightCode,
   escapeHtml,
 } from '@common/utils';
@@ -21,6 +22,7 @@ function VirtualDiffImpl(props: any) {
     scrollTop,
     viewportHeight,
     onScroll,
+    onViewportHeight,
     highlightRowIndex,
     listRef,
     selection,
@@ -49,13 +51,45 @@ function VirtualDiffImpl(props: any) {
     onToggleThreadCollapse,
   } = props;
 
+  const [measuredH, setMeasuredH] = useState(() =>
+    Math.max(120, Number(viewportHeight) || 520)
+  );
+
   const avgH = useMemo(() => averageRowHeight(virtualRows), [virtualRows]);
+  const offsets = useMemo(() => rowOffsets(virtualRows), [virtualRows]);
+
+  // Measure the flex-allocated list height so the bottom of the pane is scrollable
+  useLayoutEffect(() => {
+    const el = listRef?.current as HTMLElement | null;
+    if (!el) return undefined;
+    const apply = () => {
+      const h = Math.floor(el.clientHeight || 0);
+      if (h > 0) {
+        setMeasuredH((prev) => (prev === h ? prev : h));
+        if (typeof onViewportHeight === 'function') onViewportHeight(h);
+      }
+    };
+    apply();
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(() => apply());
+      ro.observe(el);
+    }
+    window.addEventListener('resize', apply);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener('resize', apply);
+    };
+  }, [listRef, onViewportHeight, virtualRows?.length]);
+
+  const vp = Math.max(120, measuredH || Number(viewportHeight) || 520);
   const range = calculateVisibleRange({
     totalRows: virtualRows?.length || 0,
     rowHeight: avgH,
-    viewportHeight,
+    viewportHeight: vp,
     scrollTop,
-    overscan: 10,
+    overscan: 12,
+    offsets,
   });
 
   const slice =
@@ -70,7 +104,6 @@ function VirtualDiffImpl(props: any) {
       onMouseLeave={(e) => {
         if (selecting) onSelectionEnd?.({ x: e.clientX, y: e.clientY });
       }}
-      style={{ height: viewportHeight }}
     >
       <div className="prp-vlist__spacer" style={{ height: range.totalHeight }}>
         <div className="prp-vlist__window" style={{ transform: `translateY(${range.offsetY}px)` }}>
