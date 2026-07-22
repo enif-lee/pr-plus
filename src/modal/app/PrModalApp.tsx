@@ -1031,7 +1031,13 @@ export function PrModalApp({
     const exclude = detail.requestedReviewers || [];
     const logins = collectPeopleLogins(exclude);
     const options =
-      typeof buildPeopleOptions === 'function' ? buildPeopleOptions(logins) : logins.map((id) => ({ id, label: id }));
+      typeof buildPeopleOptions === 'function'
+        ? buildPeopleOptions(logins, {}, detail.avatarUrls || {})
+        : logins.map((id) => ({
+            id,
+            label: id,
+            meta: { login: id, kind: 'user', avatarUrl: detail.avatarUrls?.[String(id).toLowerCase()] || '' },
+          }));
     pickerAnchorRef.current = reviewerAddRef.current;
     setPicker({
       type: 'reviewer',
@@ -1094,7 +1100,13 @@ export function PrModalApp({
     const exclude = detail.assignees || [];
     const logins = collectPeopleLogins(exclude);
     const options =
-      typeof buildPeopleOptions === 'function' ? buildPeopleOptions(logins) : logins.map((id) => ({ id, label: id }));
+      typeof buildPeopleOptions === 'function'
+        ? buildPeopleOptions(logins, {}, detail.avatarUrls || {})
+        : logins.map((id) => ({
+            id,
+            label: id,
+            meta: { login: id, kind: 'user', avatarUrl: detail.avatarUrls?.[String(id).toLowerCase()] || '' },
+          }));
     pickerAnchorRef.current = assigneeAddRef.current;
     setPicker({
       type: 'assignee',

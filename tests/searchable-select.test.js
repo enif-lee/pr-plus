@@ -20,11 +20,16 @@ function ok(msg) {
 }
 
 {
-  const people = ss.buildPeopleOptions(['alice', 'Bob', 'alice'], {
-    alice: 'APPROVED',
-  });
+  const people = ss.buildPeopleOptions(
+    ['alice', 'Bob', 'alice'],
+    { alice: 'APPROVED' },
+    { alice: 'https://example.com/a.png' }
+  );
   assert.equal(people.length, 2);
   assert.equal(people[0].meta.status, 'APPROVED');
+  assert.equal(people[0].meta.kind, 'user');
+  assert.equal(people[0].meta.avatarUrl, 'https://example.com/a.png');
+  assert.equal(people[1].meta.kind, 'user');
   ok('buildPeopleOptions');
 }
 
@@ -32,6 +37,11 @@ function ok(msg) {
   const labels = ss.buildLabelOptions([{ name: 'bug', color: 'f00' }, 'enhancement', 'bug']);
   assert.equal(labels.length, 2);
   assert.equal(labels[0].id, 'bug');
+  assert.equal(labels[0].meta.kind, 'label');
+  assert.equal(labels[0].meta.color, 'f00');
+  assert.equal(ss.labelColorCss('f00'), '#f00');
+  assert.equal(ss.labelColorCss('#a2eeef'), '#a2eeef');
+  assert.equal(ss.labelColorCss(''), '');
   ok('buildLabelOptions');
 }
 

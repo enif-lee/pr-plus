@@ -40,9 +40,10 @@ function filterSelectOptions(options, query, opts = {}) {
  * @param {Record<string, string>} [statusByLogin]
  * @returns {SelectOption[]}
  */
-function buildPeopleOptions(logins, statusByLogin = {}) {
+function buildPeopleOptions(logins, statusByLogin = {}, avatarByLogin = {}) {
   const seen = new Set();
   const out = [];
+  const avatars = avatarByLogin && typeof avatarByLogin === 'object' ? avatarByLogin : {};
   for (const login of logins || []) {
     const raw = String(login || '').trim();
     if (!raw) continue;
@@ -50,14 +51,23 @@ function buildPeopleOptions(logins, statusByLogin = {}) {
     if (seen.has(key)) continue;
     seen.add(key);
     const status = statusByLogin[key] || statusByLogin[raw] || '';
+    const avatarUrl = avatars[key] || avatars[raw] || '';
     out.push({
       id: raw,
       label: raw,
       keywords: [raw, status].filter(Boolean),
-      meta: { status, login: raw },
+      meta: { status, login: raw, avatarUrl, kind: 'user' },
     });
   }
   return out;
+}
+
+function labelColorCss(color) {
+  const raw = String(color || '')
+    .trim()
+    .replace(/^#/, '');
+  if (!/^[0-9a-fA-F]{3,8}$/.test(raw)) return '';
+  return `#${raw}`;
 }
 
 /**
@@ -72,11 +82,15 @@ function buildLabelOptions(labels) {
     const raw = String(name || '').trim();
     if (!raw || seen.has(raw.toLowerCase())) continue;
     seen.add(raw.toLowerCase());
+    const color = typeof l === 'object' && l ? String(l.color || '').trim() : '';
     out.push({
       id: raw,
       label: raw,
       keywords: [raw],
-      meta: typeof l === 'object' ? l : { name: raw },
+      meta:
+        typeof l === 'object' && l
+          ? { ...l, name: raw, color, kind: 'label' }
+          : { name: raw, color: '', kind: 'label' },
     });
   }
   return out;
@@ -145,6 +159,7 @@ const api = {
   filterSelectOptions,
   buildPeopleOptions,
   buildLabelOptions,
+  labelColorCss,
   buildBranchOptions,
   buildUnifiedReviewerRows,
 };

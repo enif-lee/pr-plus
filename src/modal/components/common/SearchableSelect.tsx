@@ -1,5 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { filterSelectOptions } from '@lib/searchable-select';
+import { filterSelectOptions, labelColorCss } from '@lib/searchable-select';
+import { Avatar } from './Avatar';
 
 /**
  * Anchored popover searchable select (opens above trigger by default).
@@ -126,16 +127,47 @@ export function SearchableSelect({
             {allowFreeText && free ? `Press Enter to use “${free}”` : emptyLabel}
           </li>
         ) : (
-          filtered.map((o: any) => (
-            <li key={String(o.id)}>
-              <button type="button" className="prp-sselect-item" onClick={() => onPick?.(o)}>
-                <span className="prp-sselect-item__label">{o.label}</span>
-                {o.meta?.status ? (
-                  <span className="prp-sselect-item__meta">{String(o.meta.status)}</span>
-                ) : null}
-              </button>
-            </li>
-          ))
+          filtered.map((o: any) => {
+            const meta = o.meta || {};
+            const kind = String(meta.kind || '');
+            const colorCss =
+              typeof labelColorCss === 'function'
+                ? labelColorCss(meta.color)
+                : meta.color
+                  ? `#${String(meta.color).replace(/^#/, '')}`
+                  : '';
+            const showLabelSwatch = kind === 'label' || (kind !== 'user' && Boolean(meta.color));
+            const showAvatar =
+              kind === 'user' ||
+              (!showLabelSwatch && (Boolean(meta.login) || Boolean(meta.avatarUrl)));
+            return (
+              <li key={String(o.id)}>
+                <button type="button" className="prp-sselect-item" onClick={() => onPick?.(o)}>
+                  {showLabelSwatch ? (
+                    <span
+                      className="prp-sselect-item__swatch"
+                      style={{
+                        backgroundColor: colorCss || 'var(--prp-bg-muted)',
+                      }}
+                      aria-hidden="true"
+                      title={colorCss || 'label'}
+                    />
+                  ) : showAvatar ? (
+                    <Avatar
+                      login={meta.login || o.id || o.label}
+                      avatarUrl={meta.avatarUrl || meta.avatar_url || ''}
+                      size="sm"
+                      className="prp-sselect-item__avatar"
+                    />
+                  ) : null}
+                  <span className="prp-sselect-item__label">{o.label}</span>
+                  {meta.status ? (
+                    <span className="prp-sselect-item__meta">{String(meta.status)}</span>
+                  ) : null}
+                </button>
+              </li>
+            );
+          })
         )}
       </ul>
     </div>

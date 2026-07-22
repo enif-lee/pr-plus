@@ -36,14 +36,16 @@ export function filterSelectOptions(options, query, opts: any = {}) {
 }
 
 /**
- * Build people options from logins + optional status map.
+ * Build people options from logins + optional status / avatar maps.
  * @param {string[]} logins
  * @param {Record<string, string>} [statusByLogin]
+ * @param {Record<string, string>} [avatarByLogin] login → avatar URL
  * @returns {SelectOption[]}
  */
-export function buildPeopleOptions(logins, statusByLogin: any = {}) {
+export function buildPeopleOptions(logins, statusByLogin: any = {}, avatarByLogin: any = {}) {
   const seen = new Set();
   const out = [];
+  const avatars = avatarByLogin && typeof avatarByLogin === 'object' ? avatarByLogin : {};
   for (const login of logins || []) {
     const raw = String(login || '').trim();
     if (!raw) continue;
@@ -51,14 +53,24 @@ export function buildPeopleOptions(logins, statusByLogin: any = {}) {
     if (seen.has(key)) continue;
     seen.add(key);
     const status = statusByLogin[key] || statusByLogin[raw] || '';
+    const avatarUrl = avatars[key] || avatars[raw] || '';
     out.push({
       id: raw,
       label: raw,
       keywords: [raw, status].filter(Boolean),
-      meta: { status, login: raw },
+      meta: { status, login: raw, avatarUrl, kind: 'user' },
     });
   }
   return out;
+}
+
+/**
+ * Normalize GitHub label color (6-hex without #) to CSS color.
+ */
+export function labelColorCss(color: unknown): string {
+  const raw = String(color || '').trim().replace(/^#/, '');
+  if (!/^[0-9a-fA-F]{3,8}$/.test(raw)) return '';
+  return `#${raw}`;
 }
 
 /**
@@ -73,11 +85,16 @@ export function buildLabelOptions(labels) {
     const raw = String(name || '').trim();
     if (!raw || seen.has(raw.toLowerCase())) continue;
     seen.add(raw.toLowerCase());
+    const color =
+      typeof l === 'object' && l ? String((l as any).color || '').trim() : '';
     out.push({
       id: raw,
       label: raw,
       keywords: [raw],
-      meta: typeof l === 'object' ? l : { name: raw },
+      meta:
+        typeof l === 'object' && l
+          ? { ...l, name: raw, color, kind: 'label' }
+          : { name: raw, color: '', kind: 'label' },
     });
   }
   return out;
