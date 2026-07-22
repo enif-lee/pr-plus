@@ -9,4 +9,5 @@ export { MermaidBlock } from './MermaidBlock';
 export { SuggestionBlock } from './SuggestionBlock';
 export { UserLink } from './UserLink';
 export { LabelLink } from './LabelLink';
+export { Avatar } from './Avatar';
 export * from './utils';

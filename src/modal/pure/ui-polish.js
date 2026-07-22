@@ -34,6 +34,16 @@ function uniqueReviewsByAuthor(reviews) {
   return [...by.values()];
 }
 
+function githubAvatarUrl(login, size) {
+  const u = String(login || '')
+    .trim()
+    .replace(/^@/, '');
+  if (!u) return '';
+  const s = Number(size);
+  const px = Number.isFinite(s) && s > 0 ? Math.min(460, Math.floor(s)) : 40;
+  return `https://github.com/${encodeURIComponent(u)}.png?size=${px}`;
+}
+
 function githubUserUrl(login) {
   const u = String(login || '')
     .trim()
@@ -236,6 +246,7 @@ function buildStackStrip(prs, currentNumber) {
 const api = {
   uniqueLogins,
   uniqueReviewsByAuthor,
+  githubAvatarUrl,
   githubUserUrl,
   githubLabelUrl,
   githubIssueUrl,

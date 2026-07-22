@@ -35,6 +35,20 @@ export function uniqueReviewsByAuthor(reviews) {
   return [...by.values()];
 }
 
+/**
+ * Public GitHub avatar URL for a login (no API required).
+ * size is the requested pixel width (GitHub serves a square PNG).
+ */
+export function githubAvatarUrl(login, size = 40) {
+  const u = String(login || '')
+    .trim()
+    .replace(/^@/, '');
+  if (!u) return '';
+  const s = Number(size);
+  const px = Number.isFinite(s) && s > 0 ? Math.min(460, Math.floor(s)) : 40;
+  return `https://github.com/${encodeURIComponent(u)}.png?size=${px}`;
+}
+
 export function githubUserUrl(login) {
   const u = String(login || '')
     .trim()

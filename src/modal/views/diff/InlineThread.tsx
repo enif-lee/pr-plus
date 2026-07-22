@@ -4,7 +4,8 @@ import { Badge } from '@common/Badge';
 import { MarkdownView } from '@common/MarkdownView';
 import { UserLink } from '@common/UserLink';
 import { MarkdownComposer } from '@common/MarkdownComposer';
-import { avatarInitials, formatWhen } from '@common/utils';
+import { formatWhen } from '@common/utils';
+import { Avatar } from '@common/Avatar';
 
 function InlineThreadImpl(props: any) {
   const {
@@ -157,9 +158,12 @@ function InlineThreadImpl(props: any) {
             {useTimeline ? (
               <ul className="prp-review-thread">
                 <li className="prp-review-thread__item">
-                  <span className="prp-avatar prp-review-thread__avatar" aria-hidden="true">
-                    {avatarInitials(author)}
-                  </span>
+                  <Avatar
+                    login={author}
+                    avatarUrl={row?.avatarUrl || thread?.root?.avatarUrl}
+                    size="md"
+                    className="prp-review-thread__avatar"
+                  />
                   <div className="prp-review-thread__content">
                     <div className="prp-review-thread__meta">
                       <strong>
@@ -185,12 +189,12 @@ function InlineThreadImpl(props: any) {
                         isLast ? ' prp-review-thread__item--last' : ''
                       }`}
                     >
-                      <span
-                        className="prp-avatar prp-avatar--sm prp-review-thread__avatar"
-                        aria-hidden="true"
-                      >
-                        {avatarInitials(r.author)}
-                      </span>
+                      <Avatar
+                        login={r.author}
+                        avatarUrl={r.avatarUrl}
+                        size="sm"
+                        className="prp-review-thread__avatar"
+                      />
                       <div className="prp-review-thread__content">
                         <div className="prp-review-thread__meta">
                           <strong>
@@ -210,9 +214,11 @@ function InlineThreadImpl(props: any) {
             ) : (
               <div className="prp-inline-thread__single">
                 <div className="prp-inline-thread__head prp-inline-thread__head--flat">
-                  <span className="prp-avatar" aria-hidden="true">
-                    {avatarInitials(author)}
-                  </span>
+                  <Avatar
+                    login={author}
+                    avatarUrl={row?.avatarUrl || thread?.root?.avatarUrl}
+                    size="md"
+                  />
                   <div className="prp-inline-thread__head-text">
                     <div className="prp-inline-thread__title-row">
                       <strong>

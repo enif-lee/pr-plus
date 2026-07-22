@@ -2755,12 +2755,29 @@
   font-size: 11px;
   font-weight: 700;
   flex: 0 0 auto;
+  overflow: hidden;
+  vertical-align: middle;
 }
 
 .prp-avatar--sm {
   width: 22px;
   height: 22px;
   font-size: 9px;
+}
+
+.prp-avatar--img {
+  padding: 0;
+  background: var(--prp-bg-muted);
+  border: 1px solid var(--prp-border-muted);
+  color: transparent;
+}
+
+.prp-avatar--img img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  border-radius: inherit;
 }
 
 .prp-branch-pill--block {

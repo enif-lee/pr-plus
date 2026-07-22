@@ -572,6 +572,7 @@ async function fetchPrDetail(owner, repo, pullNumber, fetchImpl, token = null) {
     state: pr.state,
     draft: Boolean(pr.draft),
     author: pr.user?.login || '',
+    authorAvatarUrl: pr.user?.avatar_url || '',
     viewerLogin: viewerLogin || null,
     baseRef: pr.base?.ref || '',
     headRef: pr.head?.ref || '',
@@ -597,6 +598,22 @@ async function fetchPrDetail(owner, repo, pullNumber, fetchImpl, token = null) {
     assignees: Array.isArray(pr.assignees)
       ? pr.assignees.map((u) => u.login || u).filter(Boolean)
       : [],
+    /** login → avatar_url for people chips when API provided them */
+    avatarUrls: (() => {
+      const map = {};
+      const putUser = (u) => {
+        const login = u?.login || (typeof u === 'string' ? u : '');
+        const url = u?.avatar_url || '';
+        if (login && url) map[String(login).toLowerCase()] = url;
+      };
+      putUser(pr.user);
+      for (const u of pr.assignees || []) putUser(u);
+      for (const u of pr.requested_reviewers || []) putUser(u);
+      for (const c of comments || []) putUser(c?.user);
+      for (const r of reviews || []) putUser(r?.user);
+      for (const c of reviewComments || []) putUser(c?.user);
+      return map;
+    })(),
     requestedReviewers: Array.isArray(pr.requested_reviewers)
       ? pr.requested_reviewers.map((u) => u.login || u).filter(Boolean)
       : [],
@@ -619,12 +636,14 @@ async function fetchPrDetail(owner, repo, pullNumber, fetchImpl, token = null) {
     comments: (Array.isArray(comments) ? comments : []).map((c) => ({
       id: c.id,
       author: c.user?.login || '',
+      avatarUrl: c.user?.avatar_url || '',
       body: c.body || '',
       createdAt: c.created_at,
     })),
     reviews: (Array.isArray(reviews) ? reviews : []).map((r) => ({
       id: r.id,
       author: r.user?.login || '',
+      avatarUrl: r.user?.avatar_url || '',
       state: r.state || '',
       body: r.body || '',
       submittedAt: r.submitted_at,
@@ -634,6 +653,7 @@ async function fetchPrDetail(owner, repo, pullNumber, fetchImpl, token = null) {
         (c) => ({
           id: c.id,
           author: c.user?.login || '',
+          avatarUrl: c.user?.avatar_url || '',
           body: c.body || '',
           path: c.path || '',
           line: c.line ?? c.original_line ?? null,

@@ -3,7 +3,8 @@ import { Button } from '@common/Button';
 import { Badge } from '@common/Badge';
 import { Card } from '@common/Card';
 import { UserLink } from '@common/UserLink';
-import { avatarInitials, reviewStatusTone } from '@common/utils';
+import { reviewStatusTone } from '@common/utils';
+import { Avatar } from '@common/Avatar';
 
 export function MetaList({
   title,
@@ -15,9 +16,11 @@ export function MetaList({
   actionBusy,
   renderStatus,
   addButtonRef,
+  avatarUrls,
 }: any) {
   const localRef = useRef<HTMLButtonElement | null>(null);
   const list = Array.isArray(rows) ? rows : [];
+  const avatars = avatarUrls && typeof avatarUrls === 'object' ? avatarUrls : {};
   return (
     <Card title={title}>
       <ul className="prp-list prp-people-list">
@@ -28,11 +31,13 @@ export function MetaList({
             const login = typeof row === 'string' ? row : row?.login;
             if (!login) return null;
             const status = typeof row === 'object' ? row.status : null;
+            const avatarUrl =
+              (typeof row === 'object' && (row.avatarUrl || row.avatar_url)) ||
+              avatars[String(login).toLowerCase()] ||
+              null;
             return (
               <li key={String(login).toLowerCase()} className="prp-people-chip">
-                <span className="prp-avatar" aria-hidden="true">
-                  {avatarInitials(login)}
-                </span>
+                <Avatar login={login} avatarUrl={avatarUrl} size="md" />
                 <span className="prp-people-chip__name">
                   <UserLink login={login} />
                 </span>

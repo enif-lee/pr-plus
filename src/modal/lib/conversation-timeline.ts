@@ -28,6 +28,7 @@ export function buildConversationTimeline(detail, opts: any = {}) {
       kind: 'review',
       id: r.id,
       author: r.author,
+      avatarUrl: r.avatarUrl || r.avatar_url || null,
       state: r.state,
       body: r.body || '',
       at: r.submittedAt,
@@ -41,6 +42,7 @@ export function buildConversationTimeline(detail, opts: any = {}) {
       kind: 'issue-comment',
       id: c.id,
       author: c.author,
+      avatarUrl: c.avatarUrl || c.avatar_url || null,
       body: c.body || '',
       at: c.createdAt,
       canDelete: Boolean(
@@ -78,6 +80,7 @@ export function buildConversationTimeline(detail, opts: any = {}) {
       .map((r) => ({
         id: r.id,
         author: r.author,
+        avatarUrl: r.avatarUrl || r.avatar_url || null,
         body: r.body || '',
         at: r.createdAt,
         canDelete: Boolean(
@@ -100,6 +103,7 @@ export function buildConversationTimeline(detail, opts: any = {}) {
       kind: 'review-thread',
       id: c.id,
       author: c.author,
+      avatarUrl: c.avatarUrl || c.avatar_url || null,
       body: c.body || '',
       at: c.createdAt,
       path: c.path,

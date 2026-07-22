@@ -6,7 +6,8 @@ import { MarkdownComposer } from '@common/MarkdownComposer';
 import { MarkdownView } from '@common/MarkdownView';
 import { UserLink } from '@common/UserLink';
 import { LabelLink } from '@common/LabelLink';
-import { avatarInitials, formatWhen } from '@common/utils';
+import { formatWhen } from '@common/utils';
+import { Avatar } from '@common/Avatar';
 import { buildUnifiedReviewerRows } from '@lib/searchable-select';
 import { buildConversationTimeline, pageTimelineItems } from '@lib/conversation-timeline';
 import { snippetForComment } from '@lib/diff-snippet';
@@ -250,12 +251,12 @@ function ConversationViewImpl(props: any) {
                       {useReviewReplyTimeline ? (
                         <ul className="prp-review-thread">
                           <li className="prp-review-thread__item">
-                            <span
-                              className="prp-avatar prp-avatar--sm prp-review-thread__avatar"
-                              aria-hidden="true"
-                            >
-                              {avatarInitials(item.author)}
-                            </span>
+                            <Avatar
+                              login={item.author}
+                              avatarUrl={item.avatarUrl}
+                              size="sm"
+                              className="prp-review-thread__avatar"
+                            />
                             <div className="prp-review-thread__content">
                               <div className="prp-review-thread__meta">
                                 <strong>
@@ -280,12 +281,12 @@ function ConversationViewImpl(props: any) {
                                   : ''
                               }`}
                             >
-                              <span
-                                className="prp-avatar prp-avatar--sm prp-review-thread__avatar"
-                                aria-hidden="true"
-                              >
-                                {avatarInitials(r.author)}
-                              </span>
+                              <Avatar
+                                login={r.author}
+                                avatarUrl={r.avatarUrl}
+                                size="sm"
+                                className="prp-review-thread__avatar"
+                              />
                               <div className="prp-review-thread__content">
                                 <div className="prp-review-thread__meta">
                                   <strong>
@@ -314,9 +315,7 @@ function ConversationViewImpl(props: any) {
                       ) : (
                         <>
                           <div className="prp-conversation-feed__meta">
-                            <span className="prp-avatar prp-avatar--sm" aria-hidden="true">
-                              {avatarInitials(item.author)}
-                            </span>
+                            <Avatar login={item.author} avatarUrl={item.avatarUrl} size="sm" />
                             <strong>
                               <UserLink login={item.author || 'user'} />
                             </strong>
@@ -521,6 +520,7 @@ function ConversationViewImpl(props: any) {
           addLabel="Add reviewer…"
           actionBusy={actionBusy}
           addButtonRef={reviewerAddRef}
+          avatarUrls={detail.avatarUrls}
         />
         <MetaList
           title="Assignees"
@@ -531,6 +531,7 @@ function ConversationViewImpl(props: any) {
           addLabel="Add assignee…"
           actionBusy={actionBusy}
           addButtonRef={assigneeAddRef}
+          avatarUrls={detail.avatarUrls}
         />
         <Card title="Labels">
           <div className="prp-label-row">

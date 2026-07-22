@@ -136,6 +136,7 @@ export function flattenFilesToVirtualRows(files, mode = 'unified', options: any 
             text: `${c.author || 'user'}: ${c.body || ''}`,
             body: c.body || '',
             author: c.author || '',
+            avatarUrl: c.avatarUrl || c.avatar_url || '',
             commentId: c.id,
             threadNodeId: c.threadNodeId || null,
             resolved: Boolean(c.resolved),

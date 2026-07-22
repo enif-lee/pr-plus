@@ -310,6 +310,7 @@ export function mapRestReviewComment(raw, fallback: any = {}) {
   return {
     id: r.id ?? fallback.id ?? null,
     author: r.user?.login || fallback.author || '',
+    avatarUrl: r.user?.avatar_url || fallback.avatarUrl || '',
     body: r.body || fallback.body || '',
     path: r.path || fallback.path || '',
     line: r.line ?? r.original_line ?? fallback.line ?? null,
@@ -335,6 +336,7 @@ export function mapRestIssueComment(raw, fallback: any = {}) {
   return {
     id: r.id ?? fallback.id ?? null,
     author: r.user?.login || fallback.author || '',
+    avatarUrl: r.user?.avatar_url || fallback.avatarUrl || '',
     body: r.body || fallback.body || '',
     createdAt: r.created_at || fallback.createdAt || null,
     htmlUrl: r.html_url || null,
