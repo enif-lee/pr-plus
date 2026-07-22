@@ -2092,6 +2092,7 @@ export function PrModalApp({
       tabIndex={-1}
       data-color-mode={theme.mode}
       data-shell={shellMode}
+      data-layout={layoutMode === LAYOUT_DIFF ? 'diff' : 'conversation'}
     >
       <div className="prp-backdrop" onClick={onClose} />
       <div

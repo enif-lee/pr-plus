@@ -188,13 +188,35 @@
   max-height: 100vh;
 }
 
+/*
+ * Diff while in side-sheet preference: expand to full viewport like modal Diff
+ * (conversation stays a right-docked sheet; Diff uses the whole window).
+ */
+.prp-overlay.prp-shell--sheet:has(.prp-modal--diff),
+.prp-overlay.prp-shell--sheet[data-layout='diff'] {
+  justify-content: stretch;
+  align-items: stretch;
+}
+
+.prp-overlay.prp-shell--sheet:has(.prp-modal--diff) .prp-backdrop,
+.prp-overlay.prp-shell--sheet[data-layout='diff'] .prp-backdrop {
+  --prp-backdrop-alpha: 0.28;
+}
+
+.prp-overlay.prp-shell--sheet.prp-theme-dark:has(.prp-modal--diff) .prp-backdrop,
+.prp-overlay.prp-shell--sheet[data-color-mode='dark'][data-layout='diff'] .prp-backdrop {
+  --prp-backdrop-alpha: 0.42;
+}
+
 .prp-overlay.prp-shell--sheet .prp-modal--diff {
-  /* Wider sheet for files + virtualized diff, still docked */
-  width: min(78vw, 100vw);
+  width: 100vw;
   max-width: 100vw;
   height: 100vh;
   max-height: 100vh;
   border-radius: 0;
+  border: 0;
+  box-shadow: none;
+  animation: none;
 }
 
 @keyframes prp-sheet-in {
