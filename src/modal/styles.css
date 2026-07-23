@@ -5496,11 +5496,11 @@ a.prp-label:hover {
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
-  gap: 6px 4px;
-  padding: 8px 16px;
+  gap: 4px 3px;
+  padding: 5px 12px;
   border-bottom: 1px solid var(--prp-border-muted);
   background: var(--prp-bg-muted);
-  font-size: 12px;
+  font-size: 11px;
   overflow-x: auto;
   overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
@@ -5509,31 +5509,60 @@ a.prp-label:hover {
   min-width: 0;
 }
 .prp-stack-strip::-webkit-scrollbar {
-  height: 6px;
+  height: 5px;
 }
 .prp-stack-strip::-webkit-scrollbar-thumb {
   background: color-mix(in srgb, var(--prp-fg-muted) 35%, transparent);
   border-radius: 999px;
 }
+/*
+ * Sticky “Stack” label: solid strip background + right-edge fade so chips
+ * scroll underneath and dissolve. margin-right ≈ fade width so the first
+ * chip is fully visible at rest (fade only covers the reserved gutter).
+ */
 .prp-stack-strip__label {
-  color: var(--prp-fg-muted);
-  font-weight: 600;
-  margin-right: 4px;
-  flex: 0 0 auto;
+  --prp-stack-label-fade: 18px;
   position: sticky;
   left: 0;
-  z-index: 1;
+  z-index: 2;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  align-self: stretch;
+  /* cover left strip pad; reserve fade gutter so chip #1 isn’t covered */
+  margin: -5px var(--prp-stack-label-fade) -5px -12px;
+  padding: 5px 8px 5px 12px;
+  color: var(--prp-fg-muted);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
   background: var(--prp-bg-muted);
-  padding-right: 4px;
+  box-shadow: none;
+  pointer-events: none; /* don’t block chip clicks under the fade */
+}
+.prp-stack-strip__label::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 100%;
+  width: var(--prp-stack-label-fade);
+  background: linear-gradient(
+    to right,
+    var(--prp-bg-muted) 0%,
+    color-mix(in srgb, var(--prp-bg-muted) 75%, transparent) 45%,
+    transparent 100%
+  );
+  pointer-events: none;
 }
 .prp-stack-strip__item {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  max-width: 180px;
+  gap: 4px;
+  max-width: 168px;
   min-width: 0;
   flex: 0 0 auto;
-  padding: 4px 10px;
+  padding: 2px 8px;
   border-radius: 999px;
   border: 1px solid var(--prp-border);
   background: var(--prp-bg);
@@ -5560,7 +5589,7 @@ a.prp-label:hover {
 }
 .prp-stack-strip__num {
   font-family: var(--prp-mono);
-  font-size: 11px;
+  font-size: 10px;
   flex: 0 0 auto;
 }
 /* Title truncates with ellipsis; full title remains on chip title= tooltip */
@@ -5573,7 +5602,7 @@ a.prp-label:hover {
 }
 .prp-stack-strip__item--fork {
   cursor: pointer;
-  padding-right: 8px;
+  padding-right: 6px;
 }
 .prp-stack-strip__item--picker-open {
   border-color: var(--prp-accent);
