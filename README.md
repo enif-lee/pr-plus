@@ -23,10 +23,12 @@
 
 | Value | What you get |
 |-------|----------------|
-| **Review without page navigation** | Click a PR on `/pulls` → open a full **modal overlay**. Stay on the list; no full PR page hop. |
-| **Ultra-fast review surface** | Concurrent detail fetch, soft-revalidate cache, **virtualized** diffs, session restore of layout/scroll after soft refresh. |
-| **Stack visibility** | List reorders into a base/head **stack tree**; the modal shows a **stacked PR strip** at the top for the current chain. |
-| **Review workflow in one place** | Conversation, files/diff, leave review, line comments, suggestions, metadata, merge—without bouncing through github.com tabs. |
+| **Review without page navigation** | Click a PR on `/pulls` → full **modal** or **side sheet**. Stay on the list; no full PR page hop. |
+| **Ultra-fast, progressive open** | **List sketch → durable cache → live network** so the shell paints in milliseconds, then **incremental** fills refine the data. |
+| **Cache-first, soft revalidate** | Memory + **IndexedDB** cache with background refresh—writes stay snappy without cold remounts. |
+| **Butter-smooth Diff** | **Range-gated virtualization**, syntax-highlight **cache**, and zero per-pixel app re-renders while you scroll. |
+| **Stack visibility** | List reorders into a base/head **stack tree**; the modal shows a **stacked PR strip** for the current chain. |
+| **Review workflow in one place** | Conversation, Diff, leave review, line comments, suggestions, filters, subscribe, merge—without bouncing GitHub tabs. |
 
 GitHub’s default PR list is flat. Stacked PRs (base = another PR’s head) are hard to see, and opening each PR is a full navigation. **pr+** keeps you on the pulls list and layers a high-performance review UI on top.
 
@@ -68,6 +70,7 @@ Assets: [`conversation`](./screenshots/pr-view-conversation-1280x800.png) · [`d
 | **Magic links (list)** | Repo autolink rules on title/branch/body → external ticket shortcuts on the list |
 | **Private repos** | Optional GitHub PAT in the popup |
 | **SPA support** | Re-applies tree/meta after Turbo soft-nav and DOM refresh |
+| **Instant list → modal handoff** | Title, labels, assignees, and milestone from the **list sketch** seed the modal before the network returns |
 
 Meta line example:
 
@@ -75,46 +78,66 @@ Meta line example:
 #13927  opened 2 hours ago by alice  ·  Review required  ·  ENG-42  ·  trunk ← feat/foo
 ```
 
-### 2. In-page PR modal (no full-page navigation)
+### 2. In-page PR review (no full-page navigation)
 
-Open a PR title from the list → modal on the **same** `/pulls` page.
+Open a PR title from the list → **centered modal** or **side sheet** on the **same** `/pulls` page.
 
-#### Speed & UX foundation
+#### Speed, cache & progressive load
 
 | Feature | Description |
 |---------|-------------|
-| **Modal over the list** | No navigation to `/pull/N`; close returns to the list state you left |
-| **Concurrent detail load** | PR, files, comments, reviews, commits, threads, checks, subscription in parallel |
-| **Soft revalidate** | Cache + background refresh; write actions invalidate then reload without cold remount |
-| **Virtualized diffs** | Large file diffs stay scrollable without rendering every line in the DOM |
-| **Session restore** | Layout (conversation/diff), collapse, viewed files, active file restored after soft refresh |
+| **Progressive open** | **List sketch → IndexedDB cache → live API**—paint the shell **fast**, then **incrementally** refine body, threads, and files |
+| **Parallel fetch** | PR core, files, comments, reviews, commits, checks, and subscription load **concurrently** (not waterfall) |
+| **Multi-layer cache** | In-memory SWR + **durable IndexedDB** so reopen is near-instant; patches revalidated on demand |
+| **Soft revalidate / incremental update** | Background refresh after open and after writes—no cold remount, no full-page spinner |
+| **Thin top loading bar** | Lightweight progress cue while metadata and threads stream in |
+| **Dual-window review threads** | Newest + oldest thread windows load **incrementally**; **Load more / Load all** when you need the full set |
+| **Virtualized Conversation** | Long timelines stay **fast** with variable-height virtual rows |
+| **Butter-smooth Diff scroll** | **Range-gated virtualization** (React only when the visible window changes), **highlight cache**, no per-pixel global store thrash |
+| **Session restore** | Layout (conversation/diff), shell (modal/sheet), collapse, viewed files, scroll restored after soft refresh |
+| **Deep-link routing** | `pr+page` / `pr+number` (and position) so shareable open state survives reloads |
 | **Theme-aware UI** | Follows GitHub light/dark color mode |
+
+#### Shells & chrome
+
+| Feature | Description |
+|---------|-------------|
+| **Centered modal** | Full-focus overlay for deep review |
+| **Side sheet** | Docked panel—**keep the PR list visible** while you review |
+| **Stacked PR strip** | Jump the stack chain without leaving the shell |
+| **Header tips & actions** | Compact actions, subscribe, refresh, layout toggles with lightweight tooltips |
 
 #### Conversation
 
 | Feature | Description |
 |---------|-------------|
 | **Description** | Markdown body with write/preview edit |
-| **Timeline** | Reviews, issue comments, review threads with code snippets; pagination (newer/older) |
+| **Timeline** | Reviews, issue comments, review threads with code snippets; dual-window pagination |
 | **Entity links** | Authors, `@mentions`, labels, `#issue` refs → GitHub URLs |
 | **Magic links (modal)** | Autolink keys from title/body/branch linked in description & comments |
 | **Unified leave-review** | **Comment** / **Approve** / **Request changes** on one form (pending line comments attach on submit) |
 | **Edit / delete own comments** | Issue and review comments (including thread replies) |
-| **Stacked PR strip** | Top-of-modal chain for related stack members; open another stack PR in the modal |
+| **Merge box status** | Clear merge readiness with badges and conflict/checks context |
+| **Profile avatars** | GitHub profile images for authors and pickers |
 
 #### Diff & code review
 
 | Feature | Description |
 |---------|-------------|
-| **Files tree** | Nested dirs, filter, collapse, mark-as-viewed (local session) |
+| **Files tree** | Nested dirs, extension filters, collapse, mark-as-viewed (session) |
+| **Collapsible / resizable file nav** | Focus the hunk pane when you need width |
 | **Unified / split** | Diff modes |
-| **Line selection** | Single click or multi-line drag; yellow continuous selection block |
-| **Line comments** | Immediate post or add to **pending review** batch |
-| **Inline threads** | Reply, resolve/unresolve, edit/delete own, polish thread UI |
-| **Suggestions** | Render ````suggestion` blocks; **Apply suggestion** (commit to head via Contents API) |
-| **Diff chrome** | Checks summary + labels on the files view |
-| **Search** | Find in PR/diff (`⌘F`), including off-screen virtual rows |
-| **Comment nav** | Jump prev/next inline review comments |
+| **Expand omitted context** | Grow gaps between hunks (chunk / all) without reloading the PR |
+| **Commit-range filter** | Single commit or inclusive range—**fast** compare without leaving Diff |
+| **Review filters** | **Unresolved / Resolved / Pending** counts and file-set filtering for triage |
+| **Line selection** | Single click or multi-line drag; continuous selection block |
+| **Line comments** | Immediate post or **pending review** batch |
+| **Inline threads** | Reply, resolve/unresolve, edit/delete; collapse-aware virtual heights |
+| **Suggestions** | Render ````suggestion` blocks; **Apply suggestion** (commit to head) |
+| **View-scoped Find (`⌘F`)** | Search **only the active surface**—Conversation corpus *or* Diff rows—no cross-view noise |
+| **Markdown-preserving marks** | Search highlights keep code/markdown structure (no plain-text wipe) |
+| **Async chunked search** | Large corpora scan **incrementally** so typing stays responsive |
+| **Comment nav** | Jump prev/next inline review comments without layout thrash |
 
 #### Metadata & lifecycle
 
@@ -122,13 +145,14 @@ Open a PR title from the list → modal on the **same** `/pulls` page.
 |---------|-------------|
 | **Title / body / base** | Edit title, description, change base branch |
 | **Draft stage** | Convert to draft / mark ready for review (GraphQL) |
-| **Reviewers / assignees / labels** | Add/remove; unique reviewer logins; re-request review |
+| **Reviewers / assignees / labels** | Searchable pickers with avatars & label colors; re-request review |
 | **Milestone** | Set / clear |
 | **Linked issues** | Detected from body (`#N`, closing keywords) |
-| **Notifications** | Subscribe / unsubscribe |
+| **Subscribe** | Optimistic GraphQL subscription toggle + header tip states |
 | **Close / reopen** | PR state |
 | **Merge** | Merge / squash / rebase (when allowed) |
 | **Update branch** | Sync head with base |
+| **Clear local cache** | Settings path to wipe **IndexedDB** detail cache when you need a hard reset |
 
 #### Command palette & shortcuts
 
