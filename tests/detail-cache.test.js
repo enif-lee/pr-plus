@@ -11,7 +11,9 @@ const key = cache.cacheKey('Owner', 'Repo', 42);
 assert.equal(key, 'owner/repo#42');
 
 assert.equal(cache.get(key), null);
-assert.deepEqual(cache.peek(key), { value: null, fresh: false, stale: false });
+assert.equal(cache.peek(key).value, null);
+assert.equal(cache.peek(key).fresh, false);
+assert.equal(cache.peek(key).stale, false);
 
 const detail = { number: 42, title: 'cached' };
 cache.set(key, detail);

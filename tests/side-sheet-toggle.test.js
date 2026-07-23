@@ -73,8 +73,21 @@ const root = path.join(__dirname, '..');
     'side sheet label'
   );
   assert.ok(header.includes('data-shell'), 'data-shell attribute');
-  // Must be icon button, not text "Side sheet" primary CTA
-  assert.ok(header.includes('className="prp-shell-toggle"'));
+  // Icon control; conversation-only (hidden on Diff layout)
+  assert.ok(
+    /prp-header__icon-btn prp-shell-toggle|prp-shell-toggle/.test(header),
+    'shell toggle icon class'
+  );
+  assert.ok(
+    header.includes('effectiveLayout !== LAYOUT_DIFF') ||
+      header.includes('LAYOUT_DIFF'),
+    'shell toggle gated to conversation view'
+  );
+  // Iconified header actions
+  assert.ok(header.includes('Subscribe to notifications'), 'subscribe via icon label');
+  assert.ok(header.includes('Close pull request'), 'close PR via icon label');
+  assert.ok(header.includes('Open on GitHub'), 'open GitHub via icon label');
+  assert.ok(header.includes('prp-header__icon-btn'), 'shared icon button class');
 }
 
 // --- App wires persist + restore + classes ---

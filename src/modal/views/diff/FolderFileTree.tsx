@@ -4,11 +4,14 @@ import {
   flattenVisibleTree,
   listFileExtensions,
   filterFilesByExtensions,
+  filterFilesUnreadOnly,
   toggleFileExtension,
   formatFileExtensionLabel,
   collectDirPaths,
 } from '@lib/file-tree';
 import { filterFilesByQuery, isPathViewed } from '@lib/review-threads';
+import { isPathCollapsed } from '@lib/collapse';
+import { IconDisclosure } from '@common/icons';
 
 /** Cap extension chips so the search row stays usable on narrow nav. */
 const MAX_EXT_CHIPS = 10;
@@ -22,35 +25,65 @@ function FolderFileTreeImpl(props: any) {
     activePath,
     onSelect,
     collapsedFiles,
-    onToggleFileCollapse,
     fileQuery,
     onFileQuery,
     threadCounts,
     viewedPaths,
     onToggleViewed,
     navCollapsed = false,
+    /** When provided, parent owns filter state (shared with review nav). */
+    selectedExts: selectedExtsProp = null,
+    onSelectedExts = null,
+    unreadOnly: unreadOnlyProp = null,
+    onUnreadOnly = null,
   } = props;
 
-  const [selectedExts, setSelectedExts] = useState(() => new Set<string>());
+  const [selectedExtsLocal, setSelectedExtsLocal] = useState(() => new Set<string>());
+  const [unreadOnlyLocal, setUnreadOnlyLocal] = useState(false);
+  const selectedExts =
+    selectedExtsProp instanceof Set ? selectedExtsProp : selectedExtsLocal;
+  const unreadOnly =
+    typeof unreadOnlyProp === 'boolean' ? unreadOnlyProp : unreadOnlyLocal;
+  const setSelectedExts =
+    typeof onSelectedExts === 'function' ? onSelectedExts : setSelectedExtsLocal;
+  const setUnreadOnly =
+    typeof onUnreadOnly === 'function' ? onUnreadOnly : setUnreadOnlyLocal;
 
   const extOptions = useMemo(
     () => listFileExtensions(files || [], { max: MAX_EXT_CHIPS }),
     [files]
   );
 
+  // Parent App already applies review + name/ext/unread filters when controlled.
+  // Re-apply here only for local (uncontrolled) mode, or when parent passes unfiltered files.
+  const parentFiltersFiles = selectedExtsProp instanceof Set;
   const filteredTree = useMemo(() => {
     let list = Array.isArray(files) ? files : [];
-    if (typeof filterFilesByQuery === 'function') {
-      list = filterFilesByQuery(list, fileQuery);
+    if (!parentFiltersFiles) {
+      if (typeof filterFilesByQuery === 'function') {
+        list = filterFilesByQuery(list, fileQuery);
+      }
+      list = filterFilesByExtensions(list, selectedExts);
+      list = filterFilesUnreadOnly(list, viewedPaths, unreadOnly);
     }
-    list = filterFilesByExtensions(list, selectedExts);
     if (typeof buildNestedFileTree === 'function') {
       return buildNestedFileTree(list);
     }
     return treeProp || [];
-  }, [files, fileQuery, selectedExts, treeProp]);
+  }, [
+    files,
+    fileQuery,
+    selectedExts,
+    unreadOnly,
+    viewedPaths,
+    treeProp,
+    parentFiltersFiles,
+  ]);
 
-  const filtering = Boolean(String(fileQuery || '').trim()) || selectedExts.size > 0;
+  const filtering =
+    Boolean(String(fileQuery || '').trim()) ||
+    selectedExts.size > 0 ||
+    unreadOnly;
 
   const effectiveExpanded = useMemo(() => {
     if (!filtering) return expandedDirs;
@@ -89,38 +122,53 @@ function FolderFileTreeImpl(props: any) {
           onChange={(e) => onFileQuery?.(e.target.value)}
           aria-label="Filter files"
         />
-        {extOptions.length > 0 ? (
-          <div
-            className="prp-filetree__exts"
-            role="group"
-            aria-label="Filter by extension"
+        <div
+          className="prp-filetree__filters"
+          role="group"
+          aria-label="File list filters"
+        >
+          <button
+            type="button"
+            className={
+              unreadOnly
+                ? 'prp-filetree__ext prp-filetree__ext--on'
+                : 'prp-filetree__ext'
+            }
+            aria-pressed={unreadOnly}
+            title={
+              unreadOnly
+                ? 'Show all files (clear unread filter)'
+                : 'Show only unread (not viewed) files'
+            }
+            onClick={() => setUnreadOnly((v) => !v)}
           >
-            {extOptions.map((ext) => {
-              const on = selectedExts.has(ext);
-              const label = formatFileExtensionLabel(ext);
-              return (
-                <button
-                  key={ext || '__none__'}
-                  type="button"
-                  className={
-                    on
-                      ? 'prp-filetree__ext prp-filetree__ext--on'
-                      : 'prp-filetree__ext'
-                  }
-                  aria-pressed={on}
-                  title={
-                    on
-                      ? `Clear filter ${label}`
-                      : `Show only ${label} files`
-                  }
-                  onClick={() => onToggleExt(ext)}
-                >
-                  {label}
-                </button>
-              );
-            })}
-          </div>
-        ) : null}
+            Unread
+          </button>
+          {extOptions.map((ext) => {
+            const on = selectedExts.has(ext);
+            const label = formatFileExtensionLabel(ext);
+            return (
+              <button
+                key={ext || '__none__'}
+                type="button"
+                className={
+                  on
+                    ? 'prp-filetree__ext prp-filetree__ext--on'
+                    : 'prp-filetree__ext'
+                }
+                aria-pressed={on}
+                title={
+                  on
+                    ? `Clear filter ${label}`
+                    : `Show only ${label} files`
+                }
+                onClick={() => onToggleExt(ext)}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
       </div>
       <ul className="prp-filetree__list">
         {visible.map((node: any) => {
@@ -137,14 +185,22 @@ function FolderFileTreeImpl(props: any) {
                   className="prp-filetree__item prp-filetree__dir"
                   onClick={() => onToggleDir?.(node.path)}
                 >
-                  <span className="prp-filetree__chev">{open ? '▼' : '▶'}</span>
+                  <span className="prp-filetree__chev" aria-hidden="true">
+                    <IconDisclosure open={open} size={12} />
+                  </span>
                   <span className="prp-filetree__name">{node.name}/</span>
                 </button>
               </li>
             );
           }
           const f = node.file || {};
-          const isCollapsed = collapsedFiles?.has?.(node.path);
+          const isCollapsed = isPathCollapsed(
+            node.path,
+            collapsedFiles,
+            Boolean(f.defaultCollapsed),
+            false,
+            viewedPaths
+          );
           const threads = threadCounts?.get?.(node.path) || threadCounts?.[node.path] || 0;
           const viewed = isPathViewed ? isPathViewed(viewedPaths, node.path) : false;
           return (
@@ -184,19 +240,6 @@ function FolderFileTreeImpl(props: any) {
                   <span className="prp-stat-del">−{f.deletions ?? 0}</span>
                 </span>
               </button>
-              {f.defaultCollapsed || isCollapsed ? (
-                <button
-                  type="button"
-                  className="prp-filetree__collapse"
-                  title={isCollapsed ? 'Expand file' : 'Collapse file'}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onToggleFileCollapse?.(node.path);
-                  }}
-                >
-                  {isCollapsed ? '▸' : '▾'}
-                </button>
-              ) : null}
             </li>
           );
         })}

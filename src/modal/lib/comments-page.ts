@@ -15,13 +15,14 @@ export const DEFAULT_COMMENT_PAGE_SIZE = 50;
  * @param {string|null|undefined} linkHeader
  * @returns {number|null}
  */
-export function parseLinkNextPage(linkHeader) {
+function parseLinkRelPage(linkHeader, rel) {
   const raw = String(linkHeader || '');
   if (!raw) return null;
+  const re = new RegExp(`rel="?${rel}"?`, 'i');
   // <https://api.github.com/...?page=2>; rel="next"
   const parts = raw.split(',');
   for (const part of parts) {
-    if (!/rel="?next"?/i.test(part)) continue;
+    if (!re.test(part)) continue;
     const m = part.match(/[?&]page=(\d+)/i);
     if (m) {
       const n = Number(m[1]);
@@ -29,6 +30,18 @@ export function parseLinkNextPage(linkHeader) {
     }
   }
   return null;
+}
+
+export function parseLinkNextPage(linkHeader) {
+  return parseLinkRelPage(linkHeader, 'next');
+}
+
+/**
+ * Last page number from GitHub Link header (rel="last").
+ * Used to fetch newest issue comments first (API is ascending-only).
+ */
+export function parseLinkLastPage(linkHeader) {
+  return parseLinkRelPage(linkHeader, 'last');
 }
 
 /**
@@ -78,13 +91,32 @@ export function clampPerPage(n, max = 100) {
  * @param {Array} existing
  * @param {Array} incoming
  */
-export function mergeCommentsById(existing, incoming) {
+/**
+ * @param {Array} existing
+ * @param {Array} incoming
+ * @param {Set<string>|string[]|null|undefined} [excludeIds] tombstoned (deleted) ids
+ */
+export function mergeCommentsById(existing, incoming, excludeIds = null) {
+  const ban =
+    excludeIds instanceof Set
+      ? excludeIds
+      : excludeIds
+        ? new Set(
+            (Array.isArray(excludeIds) ? excludeIds : []).map((x) => String(x))
+          )
+        : null;
   const map = new Map();
   for (const c of Array.isArray(existing) ? existing : []) {
-    if (c && c.id != null) map.set(String(c.id), c);
+    if (!c || c.id == null) continue;
+    const key = String(c.id);
+    if (ban && ban.has(key)) continue;
+    map.set(key, c);
   }
   for (const c of Array.isArray(incoming) ? incoming : []) {
-    if (c && c.id != null) map.set(String(c.id), c);
+    if (!c || c.id == null) continue;
+    const key = String(c.id);
+    if (ban && ban.has(key)) continue;
+    map.set(key, c);
   }
   return [...map.values()].sort((a, b) => {
     const ta = String(a.createdAt || a.created_at || '');
@@ -103,11 +135,9 @@ export function buildCommentsPageMeta(items, opts: any = {}) {
   const list = Array.isArray(items) ? items : [];
   const page = Math.max(1, Number(opts.page) || 1);
   const perPage = clampPerPage(opts.perPage);
-  const nextPage = parseLinkNextPage(opts.linkHeader);
-  const hasMore =
-    nextPage != null ||
-    // If no Link header (mocks), treat full page as maybe-more
-    (opts.linkHeader == null && list.length >= perPage);
+  /** 'from-end': issue comments loaded newest-first by walking pages downward */
+  const order = opts.order === 'from-end' ? 'from-end' : opts.order || 'asc';
+
   let oldest = null;
   let newest = null;
   let maxId = null;
@@ -122,11 +152,35 @@ export function buildCommentsPageMeta(items, opts: any = {}) {
       if (Number.isFinite(id) && (maxId == null || id > maxId)) maxId = id;
     }
   }
+
+  if (order === 'from-end') {
+    // Page N was the last (newest) page; older content is on page N-1, N-2, …
+    const hasMore = page > 1;
+    return {
+      page,
+      perPage,
+      hasMore,
+      nextPage: hasMore ? page - 1 : null,
+      order: 'from-end',
+      since: opts.since || null,
+      oldestCreatedAt: oldest,
+      newestCreatedAt: newest,
+      maxId,
+      loadedCount: list.length,
+    };
+  }
+
+  const nextPage = parseLinkNextPage(opts.linkHeader);
+  const hasMore =
+    nextPage != null ||
+    // If no Link header (mocks), treat full page as maybe-more
+    (opts.linkHeader == null && list.length >= perPage);
   return {
     page,
     perPage,
     hasMore: Boolean(hasMore),
     nextPage: nextPage ?? (hasMore ? page + 1 : null),
+    order,
     since: opts.since || null,
     oldestCreatedAt: oldest,
     newestCreatedAt: newest,
@@ -146,6 +200,7 @@ export function advanceCommentsMeta(prevMeta, pageMeta, totalLoaded) {
     perPage: page.perPage ?? prev.perPage ?? DEFAULT_COMMENT_PAGE_SIZE,
     hasMore: Boolean(page.hasMore),
     nextPage: page.hasMore ? page.nextPage : null,
+    order: page.order || prev.order || 'asc',
     since: prev.since || null,
     oldestCreatedAt: minIso(prev.oldestCreatedAt, page.oldestCreatedAt),
     newestCreatedAt: maxIso(prev.newestCreatedAt, page.newestCreatedAt),

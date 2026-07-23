@@ -132,8 +132,11 @@ export const useModalStore = create<ModalUiState>((set, get) => ({
   setLayoutMode: (m) => set({ layoutMode: m }),
   toggleDiffLayout: () =>
     set((s) => ({
-      layoutMode: s.layoutMode === LAYOUT_DIFF ? (LAYOUT_CENTERED as LayoutMode) : (LAYOUT_DIFF as LayoutMode),
-      animClass: s.layoutMode === LAYOUT_DIFF ? 'prp-anim-collapse' : 'prp-anim-expand',
+      layoutMode:
+        s.layoutMode === LAYOUT_DIFF
+          ? (LAYOUT_CENTERED as LayoutMode)
+          : (LAYOUT_DIFF as LayoutMode),
+      animClass: '',
     })),
   setDiffMode: (m) => set({ diffMode: m, scrollTop: 0 }),
   setScrollTop: (n) => set({ scrollTop: n }),

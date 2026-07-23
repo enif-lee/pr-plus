@@ -118,6 +118,69 @@ package-lock.json linguist-generated=true
     'collapsed headers must not include the word collapsed'
   );
   assert.ok(!rowsCollapsed.some((r) => r.filePath === 'blob.bin' && r.kind === 'diff-line'));
+
+  // Empty collapsedPaths → defaultCollapsed files are closed
+  const rowsDefault = diffRows.flattenFilesToVirtualRows(annotated, 'unified', {
+    collapsedPaths: new Set(),
+  });
+  const defaultClosed = rowsDefault.filter((r) => r.kind === 'file-header' && r.collapsed);
+  assert.ok(
+    defaultClosed.some((r) => r.filePath === 'blob.bin'),
+    'empty set still collapses defaultCollapsed files'
+  );
+  assert.ok(
+    rowsDefault.some((r) => r.filePath === 'src/app.js' && r.kind === 'diff-line'),
+    'normal files stay open with empty collapsed set'
+  );
+
+  // Materialize defaults then expand one path — others stay collapsed
+  const materialized = collapse.materializeCollapsedPaths(new Set(), annotated);
+  assert.ok(materialized.has('blob.bin'));
+  assert.ok(materialized.has('huge.js'));
+  assert.equal(materialized.has('src/app.js'), false);
+  materialized.delete('blob.bin');
+  assert.equal(
+    collapse.isPathCollapsed('blob.bin', materialized, true),
+    false,
+    'expanded path opens after materialize+delete'
+  );
+  assert.equal(
+    collapse.isPathCollapsed('huge.js', materialized, true),
+    true,
+    'other defaults stay closed after materialize'
+  );
+  assert.equal(
+    collapse.isPathCollapsed('src/app.js', new Set(), false),
+    false
+  );
+  assert.equal(
+    collapse.isPathCollapsed('blob.bin', new Set(), true),
+    true,
+    'empty set + defaultCollapsed → collapsed'
+  );
+
+  // Viewed paths collapse by default (empty collapsed set)
+  assert.equal(
+    collapse.isPathCollapsed('src/app.js', new Set(), false, false, new Set(['src/app.js'])),
+    true,
+    'viewed path collapses when collapsed set is empty'
+  );
+  const rowsViewed = diffRows.flattenFilesToVirtualRows(
+    [{ filename: 'src/app.js', patch: '@@\n+x\n', additions: 1, deletions: 0, defaultCollapsed: false }],
+    'unified',
+    { collapsedPaths: new Set(), viewedPaths: new Set(['src/app.js']) }
+  );
+  assert.ok(
+    rowsViewed.some((r) => r.kind === 'file-header' && r.filePath === 'src/app.js' && r.collapsed),
+    'viewed file header is collapsed'
+  );
+  assert.ok(
+    !rowsViewed.some((r) => r.filePath === 'src/app.js' && r.kind === 'diff-line'),
+    'viewed file has no diff lines'
+  );
+  const matViewed = collapse.materializeCollapsedPaths(new Set(), annotated, new Set(['src/app.js']));
+  assert.ok(matViewed.has('src/app.js'), 'materialize includes viewed paths');
+  assert.ok(matViewed.has('blob.bin'), 'materialize still includes defaultCollapsed');
   lines.push('collapse: defaults ok');
   lines.push('collapse: linguist-generated=true on foo.pb.go ok');
 }

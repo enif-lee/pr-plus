@@ -55,17 +55,110 @@
     }
   }
 
+  function isContextDeadError(err) {
+    const msg = String(err?.message || err || '');
+    const bridge = globalThis.PRTreeBridge;
+    if (typeof bridge?.isExtensionContextAlive === 'function') {
+      if (!bridge.isExtensionContextAlive()) return true;
+    }
+    if (typeof bridge?.isContextInvalidated === 'function') {
+      return bridge.isContextInvalidated(msg);
+    }
+    return /Extension context invalidated|Extension was reloaded/i.test(msg);
+  }
+
+  /** One-shot banner: extension reloaded while this tab still ran the old content script. */
+  function showReloadBanner(message) {
+    try {
+      if (document.getElementById('prp-reload-banner')) return;
+      const el = document.createElement('div');
+      el.id = 'prp-reload-banner';
+      el.setAttribute('role', 'status');
+      el.style.cssText = [
+        'position:fixed',
+        'z-index:100000',
+        'left:50%',
+        'bottom:20px',
+        'transform:translateX(-50%)',
+        'max-width:min(480px,92vw)',
+        'padding:12px 14px',
+        'border-radius:10px',
+        'border:1px solid #d0d7de',
+        'background:#fff8c5',
+        'color:#1f2328',
+        'font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif',
+        'box-shadow:0 8px 24px rgba(1,4,9,.18)',
+        'display:flex',
+        'align-items:flex-start',
+        'gap:10px',
+      ].join(';');
+      const text = document.createElement('div');
+      text.style.flex = '1 1 auto';
+      text.textContent =
+        message ||
+        'pr+ was reloaded. Refresh this GitHub tab (⌘R / Ctrl+R) to reconnect.';
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = 'Refresh';
+      btn.style.cssText =
+        'flex:0 0 auto;appearance:none;border:1px solid #d0d7de;background:#f6f8fa;border-radius:6px;padding:4px 10px;font:inherit;cursor:pointer;font-weight:600';
+      btn.onclick = () => {
+        try {
+          location.reload();
+        } catch {
+          /* ignore */
+        }
+      };
+      const close = document.createElement('button');
+      close.type = 'button';
+      close.setAttribute('aria-label', 'Dismiss');
+      close.textContent = '×';
+      close.style.cssText =
+        'flex:0 0 auto;appearance:none;border:0;background:transparent;font-size:18px;line-height:1;cursor:pointer;color:#656d76;padding:0 2px';
+      close.onclick = () => el.remove();
+      el.appendChild(text);
+      el.appendChild(btn);
+      el.appendChild(close);
+      (document.body || document.documentElement).appendChild(el);
+    } catch {
+      /* ignore DOM failures */
+    }
+  }
+
   async function afterStackReady() {
     // Let the list paint stack indents, then restore modal + view session
     await new Promise((r) => window.setTimeout(r, 0));
     try {
+      // Skip restore when this tab's content script was orphaned by extension reload
+      if (
+        globalThis.PRTreeBridge &&
+        typeof globalThis.PRTreeBridge.isExtensionContextAlive === 'function' &&
+        !globalThis.PRTreeBridge.isExtensionContextAlive()
+      ) {
+        showReloadBanner(globalThis.PRTreeBridge.RELOAD_REFRESH_MSG);
+        return { ok: false, reason: 'context-invalidated' };
+      }
       const res = await globalThis.PRModalHost?.tryRestoreOpenModal?.();
       if (res?.ok) {
         // Diff/centered restored inside modal App via session view key for that PR
         return res;
       }
+      if (res?.reason === 'context-invalidated') {
+        showReloadBanner(res.message);
+        return res;
+      }
     } catch (err) {
-      console.warn('[pr+] modal restore failed', err);
+      if (isContextDeadError(err)) {
+        showReloadBanner(
+          err?.message || globalThis.PRTreeBridge?.RELOAD_REFRESH_MSG
+        );
+        // Expected after chrome://extensions → Reload; not a product bug
+        console.info(
+          '[pr+] modal restore skipped (extension context invalidated — refresh this tab)'
+        );
+      } else {
+        console.warn('[pr+] modal restore failed', err);
+      }
     }
     return null;
   }

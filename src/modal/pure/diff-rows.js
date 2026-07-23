@@ -15,6 +15,7 @@ function flattenFilesToVirtualRows(files, mode = 'unified', options = {}) {
   if (!Array.isArray(files)) return rows;
   const split = mode === 'split';
   const collapsedSet = toSet(options.collapsedPaths);
+  const viewedSet = toSet(options.viewedPaths);
   const commentsByKey = groupComments(options.reviewComments || []);
 
   let index = 0;
@@ -25,7 +26,8 @@ function flattenFilesToVirtualRows(files, mode = 'unified', options = {}) {
     const isCollapsed =
       !options.expandAll &&
       (collapsedSet.has(path) ||
-        (collapsedSet.size === 0 && file.defaultCollapsed === true));
+        (collapsedSet.size === 0 &&
+          (file.defaultCollapsed === true || viewedSet.has(path))));
 
     const additions = Number(file.additions) || 0;
     const deletions = Number(file.deletions) || 0;

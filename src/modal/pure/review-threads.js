@@ -43,6 +43,9 @@
         replies,
         resolved: Boolean(root.resolved ?? root.isResolved),
         outdated: Boolean(root.outdated),
+        pending: Boolean(
+          root.pending || replies.some(function (r) { return r && r.pending; })
+        ),
         threadNodeId: root.threadNodeId || root.thread_id || root.pullRequestReviewThreadId || null,
         count: 1 + replies.length,
       };
@@ -122,6 +125,67 @@
       map.set(p, (map.get(p) || 0) + 1);
     }
     return map;
+  }
+
+  function countUnresolvedReviewThreadsByPath(comments) {
+    const threads = groupReviewThreads(comments);
+    const map = new Map();
+    for (const t of threads) {
+      if (t.resolved) continue;
+      const p = t.path || '';
+      if (!p) continue;
+      map.set(p, (map.get(p) || 0) + 1);
+    }
+    return map;
+  }
+
+  function countPendingReviewThreadsByPath(comments) {
+    const map = new Map();
+    const threads = groupReviewThreads(comments);
+    for (const t of threads) {
+      if (!t.pending) continue;
+      const p = t.path || '';
+      if (!p) continue;
+      map.set(p, (map.get(p) || 0) + 1);
+    }
+    for (const c of Array.isArray(comments) ? comments : []) {
+      if (!c || !c.pending) continue;
+      const p = c.path || '';
+      if (!p || map.has(p)) continue;
+      map.set(p, 1);
+    }
+    return map;
+  }
+
+  function countReviewThreadTotals(comments, opts) {
+    const o = opts && typeof opts === 'object' ? opts : {};
+    const pathSet =
+      o.allowedPaths instanceof Set
+        ? o.allowedPaths
+        : o.allowedPaths
+          ? new Set(
+              Array.isArray(o.allowedPaths)
+                ? o.allowedPaths.map(String).filter(Boolean)
+                : []
+            )
+          : null;
+    const excludeOutdated = Boolean(o.excludeOutdated);
+    const threads = groupReviewThreads(comments);
+    let total = 0;
+    let unresolved = 0;
+    let resolved = 0;
+    let pendingThreads = 0;
+    for (const t of threads) {
+      const p = t.path || '';
+      if (!p) continue;
+      if (pathSet && !pathSet.has(p)) continue;
+      if (excludeOutdated && t.outdated) continue;
+      total += 1;
+      if (t.pending) pendingThreads += 1;
+      if (t.resolved) resolved += 1;
+      else if (!t.pending) unresolved += 1;
+    }
+    return { total, unresolved, resolved, pendingThreads };
   }
 
   function normalizeReviewCommentId(raw) {
@@ -256,6 +320,9 @@
     mergeReviewThreadMeta,
     mapGraphqlReviewThreads,
     countReviewThreadsByPath,
+    countUnresolvedReviewThreadsByPath,
+    countPendingReviewThreadsByPath,
+    countReviewThreadTotals,
     normalizeReviewCommentId,
     resolveRootReviewCommentId,
     buildReplyReviewThreadGraphql,

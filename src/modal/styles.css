@@ -171,6 +171,44 @@ html.prp-scroll-lock body {
   animation: prp-fade-out 260ms ease-out forwards;
 }
 
+/* ── Diff ↔ Conversation keep-alive body panels (instant show/hide) ── */
+.prp-body-panels {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.prp-body-panel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  /* Instant show/hide — keep-alive without fade */
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+.prp-body-panel--active {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  z-index: 1;
+}
+.prp-body-panel > .prp-conversation,
+.prp-body-panel > .prp-diff-layout,
+.prp-body-panel > .prp-skeleton,
+.prp-body-panel > .prp-skeleton-diff {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+}
+
 /* ── Shell: modal (default centered) vs right side sheet ── */
 .prp-overlay.prp-shell--modal {
   align-items: center;
@@ -322,7 +360,32 @@ html.prp-scroll-lock body {
   }
 }
 
-/* Header shell toggle icon button */
+/* GitHub Octicons (inline SVG) */
+.prp-octicon {
+  display: inline-block;
+  vertical-align: text-bottom;
+  fill: currentColor;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+.prp-octicon--disclosure {
+  vertical-align: middle;
+}
+.prp-header__icon-btn .prp-octicon,
+.prp-icon-btn .prp-octicon,
+.prp-shell-toggle .prp-octicon,
+.prp-header__more-btn .prp-octicon,
+.prp-branch-tag__copy-btn .prp-octicon,
+.prp-branch-tag__edit-btn .prp-octicon,
+.prp-diff-toolbar__nav-toggle .prp-octicon,
+.prp-filetree__collapse .prp-octicon,
+.prp-file-header__collapse .prp-octicon,
+.prp-thread-toggle__icon .prp-octicon {
+  display: block;
+}
+
+/* Header icon actions (shell / subscribe / close PR / open GitHub) */
+.prp-header__icon-btn,
 .prp-shell-toggle {
   appearance: none;
   display: inline-flex;
@@ -339,11 +402,15 @@ html.prp-scroll-lock body {
   line-height: 1;
   cursor: pointer;
   flex-shrink: 0;
+  text-decoration: none;
+  box-sizing: border-box;
   transition:
     color 120ms ease,
     border-color 120ms ease,
     background 120ms ease;
 }
+.prp-header__icon-btn:hover,
+.prp-header__icon-btn:focus-visible,
 .prp-shell-toggle:hover,
 .prp-shell-toggle:focus-visible {
   color: var(--prp-accent);
@@ -351,9 +418,34 @@ html.prp-scroll-lock body {
   background: color-mix(in srgb, var(--prp-accent) 10%, var(--prp-bg));
   outline: none;
 }
+.prp-header__icon-btn--on,
+.prp-header__icon-btn[aria-pressed='true'],
 .prp-shell-toggle[aria-pressed='true'] {
   color: var(--prp-accent);
   border-color: color-mix(in srgb, var(--prp-accent) 45%, var(--prp-border));
+  background: color-mix(in srgb, var(--prp-accent) 10%, var(--prp-bg));
+}
+.prp-header__icon-btn--danger:hover,
+.prp-header__icon-btn--danger:focus-visible {
+  color: var(--prp-danger, #cf222e);
+  border-color: color-mix(in srgb, var(--prp-danger, #cf222e) 55%, var(--prp-border));
+  background: color-mix(in srgb, var(--prp-danger, #cf222e) 10%, var(--prp-bg));
+}
+.prp-header__icon-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+.prp-header__refresh-btn .prp-octicon {
+  display: block;
+}
+.prp-header__refresh-btn:not(:disabled):active .prp-octicon {
+  animation: prp-spin 0.65s linear;
+}
+@keyframes prp-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @keyframes prp-scale-in {
@@ -834,7 +926,7 @@ html.prp-scroll-lock body {
   background: color-mix(in srgb, var(--prp-danger) 8%, var(--prp-bg));
 }
 
-/* Soft revalidate / partial load / find: top-edge progress overlay */
+/* Soft revalidate / partial load / find — floating overlays (no layout shift) */
 .prp-top-loading-bar {
   position: absolute;
   top: 0;
@@ -846,66 +938,85 @@ html.prp-scroll-lock body {
   overflow: hidden;
   border-radius: inherit;
   opacity: 1;
-  transform: translateY(0);
-  /* Transition for hide — more reliable than restarting keyframes on class toggle */
+  transform: translateY(0) scaleY(1);
+  transform-origin: top center;
+  /* Prefer transition for leave; enter uses one-shot keyframes without fill:both */
   transition:
-    opacity 260ms ease,
-    transform 260ms ease;
-  animation: prp-top-loading-in 180ms ease-out both;
+    opacity 360ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 360ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.prp-top-loading-bar:not(.prp-top-loading-bar--leaving) {
+  animation: prp-top-loading-in 200ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 .prp-top-loading-bar--leaving {
   opacity: 0;
-  transform: translateY(-2px);
-  /* Keep shimmer from fighting the fade-out */
+  transform: translateY(-3px) scaleY(0.6);
+  /* Keep transition; stop enter keyframes so leave is driven by transition only */
   animation: none;
 }
 .prp-top-loading-bar--leaving::after {
-  animation: none !important;
-  opacity: 0.5;
+  transition: opacity 280ms ease;
+  opacity: 0;
 }
 @keyframes prp-top-loading-in {
   from {
     opacity: 0;
-    transform: translateY(-2px);
+    transform: translateY(-3px) scaleY(0.6);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: translateY(0) scaleY(1);
   }
 }
 
-/* Human-readable load stage under the bar (initial + progressive threads) */
+/* Floating stage pill — out of document flow so show/hide never shifts header/body */
 .prp-load-stage {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  z-index: 81;
   display: flex;
   align-items: center;
   gap: 8px;
   flex: 0 0 auto;
-  padding: 6px 16px;
+  width: max-content;
+  max-width: min(92%, 440px);
+  margin: 0;
+  padding: 7px 14px;
   font-size: 12px;
+  line-height: 1.3;
   color: var(--prp-fg-muted);
-  background: color-mix(in srgb, var(--prp-accent, #0969da) 6%, var(--prp-bg));
-  border-bottom: 1px solid var(--prp-border-muted);
+  background: color-mix(in srgb, var(--prp-bg) 92%, var(--prp-accent, #0969da));
+  border: 1px solid color-mix(in srgb, var(--prp-accent, #0969da) 28%, var(--prp-border));
+  border-radius: 999px;
+  box-shadow: 0 6px 20px rgba(1, 4, 9, 0.12);
   overflow: hidden;
+  pointer-events: none;
   opacity: 1;
-  max-height: 40px;
+  transform: translateX(-50%) translateY(0) scale(1);
   transition:
-    opacity 260ms ease,
-    max-height 260ms ease,
-    padding 260ms ease,
-    border-color 260ms ease;
-  animation: prp-load-stage-in 220ms ease-out both;
+    opacity 380ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 380ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 380ms ease;
+  will-change: opacity, transform;
+}
+.prp-load-stage:not(.prp-load-stage--leaving) {
+  animation: prp-load-stage-in 220ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 .prp-load-stage--busy {
   color: var(--prp-fg);
 }
 .prp-load-stage--leaving {
   opacity: 0;
-  max-height: 0;
-  padding-top: 0;
-  padding-bottom: 0;
-  border-bottom-color: transparent;
+  transform: translateX(-50%) translateY(-10px) scale(0.96);
+  box-shadow: 0 2px 8px rgba(1, 4, 9, 0.04);
   pointer-events: none;
   animation: none;
+}
+.prp-load-stage--leaving .prp-load-stage__spinner {
+  animation: none;
+  opacity: 0.35;
+  transition: opacity 280ms ease;
 }
 .prp-load-stage__label {
   min-width: 0;
@@ -930,16 +1041,11 @@ html.prp-scroll-lock body {
 @keyframes prp-load-stage-in {
   from {
     opacity: 0;
-    max-height: 0;
-    padding-top: 0;
-    padding-bottom: 0;
-    border-bottom-color: transparent;
+    transform: translateX(-50%) translateY(-10px) scale(0.96);
   }
   to {
     opacity: 1;
-    max-height: 40px;
-    padding-top: 6px;
-    padding-bottom: 6px;
+    transform: translateX(-50%) translateY(0) scale(1);
   }
 }
 
@@ -1360,23 +1466,30 @@ html.prp-scroll-lock body {
   }
 }
 
-/* Conversation layout — GitHub PR overview */
+/* Conversation layout — GitHub PR overview.
+ * Columns scroll independently so the right rail stays sticky in view. */
 .prp-conversation {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 280px;
   gap: var(--prp-gap-stack);
-  overflow: auto;
+  overflow: hidden;
   flex: 1 1 auto;
   min-height: 0;
   padding: var(--prp-pad-body);
   background: var(--prp-bg);
-  /* Keep wheel scroll inside the panel (no page scroll under side sheet) */
   overscroll-behavior: contain;
 }
 
 @media (max-width: 840px) {
   .prp-conversation {
     grid-template-columns: 1fr;
+    overflow: auto;
+  }
+
+  .prp-conversation__main,
+  .prp-conversation__aside {
+    overflow: visible;
+    max-height: none;
   }
 
   .prp-skeleton__grid,
@@ -1396,15 +1509,208 @@ html.prp-scroll-lock body {
 .prp-conversation__main {
   display: flex;
   flex-direction: column;
-  gap: var(--prp-gap-stack);
+  gap: 0;
   min-width: 0;
+  min-height: 0;
+  /* Single virtual scroller owns the entire left panel */
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+/* Full left-panel virtual list (description + composer/merge + timeline) */
+.prp-conversation-virtual {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: block;
+  /* Thumb only — no track / gutter fill in the center panel */
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--prp-fg-muted) 40%, transparent) transparent;
+}
+.prp-conversation-virtual::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+  background: transparent;
+}
+.prp-conversation-virtual::-webkit-scrollbar-track,
+.prp-conversation-virtual::-webkit-scrollbar-track-piece,
+.prp-conversation-virtual::-webkit-scrollbar-corner {
+  background: transparent;
+}
+.prp-conversation-virtual::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--prp-fg-muted) 40%, transparent);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.prp-conversation-virtual::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--prp-fg-muted) 55%, transparent);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+}
+.prp-conversation-virtual__spacer {
+  width: 100%;
+  position: relative;
+}
+.prp-conversation-virtual__window {
+  display: flex;
+  flex-direction: column;
+  /* No flex gap — spacing is padding on each row so ResizeObserver includes it */
+  gap: 0;
+  width: 100%;
+  box-sizing: border-box;
+  padding-bottom: 2px;
+}
+.prp-conversation-virtual__row {
+  flex: 0 0 auto;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  /* Matches former column gap; counted in measured row height */
+  padding-bottom: var(--prp-gap-stack);
+}
+.prp-conversation-virtual__row > .prp-card,
+.prp-conversation-virtual__row > .prp-timeline-gap,
+.prp-conversation-virtual__row > .prp-merge-box,
+.prp-conversation-virtual__row > .prp-pagination,
+.prp-conversation-virtual__row > .prp-conversation-empty {
+  width: 100%;
+}
+/* Description is a virtual row — full body height (no separate inner scroll) */
+.prp-conversation-virtual .prp-card--desc .prp-card__body {
+  max-height: none;
+  overflow: visible;
 }
 
 .prp-conversation__aside {
   display: flex;
   flex-direction: column;
-  gap: var(--prp-gap-aside);
+  gap: 0;
   min-width: 0;
+  min-height: 0;
+  /* Sticky right rail: same height as conversation panel, independent scroll */
+  position: sticky;
+  top: 0;
+  align-self: stretch;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* GitHub-like flat meta rail — no card chrome */
+  padding: 0 2px;
+}
+
+/* Flat sidebar sections (Reviewers / Assignees / Labels / …) */
+.prp-aside-section {
+  margin: 0;
+  padding: 12px 0;
+  border: 0;
+  border-bottom: 1px solid var(--prp-border-muted);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+}
+.prp-aside-section:last-child {
+  border-bottom: 0;
+}
+.prp-aside-section--collapsed {
+  padding-bottom: 10px;
+}
+.prp-aside-section--collapsed .prp-aside-section__head {
+  margin-bottom: 0;
+}
+.prp-aside-section__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 6px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+}
+.prp-aside-section__toggle {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.prp-aside-section__toggle:hover .prp-aside-section__title,
+.prp-aside-section__toggle:focus-visible .prp-aside-section__title,
+.prp-aside-section__toggle:hover .prp-aside-section__chev,
+.prp-aside-section__toggle:focus-visible .prp-aside-section__chev {
+  color: var(--prp-accent);
+  outline: none;
+}
+.prp-aside-section__chev {
+  flex: 0 0 auto;
+  width: 12px;
+  color: var(--prp-fg-muted);
+  font-size: 11px;
+  line-height: 1;
+  text-align: center;
+}
+.prp-aside-section__title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--prp-fg);
+  line-height: 1.3;
+}
+.prp-aside-section__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.prp-aside-section__body {
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+/* Compact controls inside the right rail */
+.prp-conversation__aside .prp-icon-btn {
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  min-height: 18px;
+  padding: 0;
+  margin: 0;
+  border-radius: 4px;
+  font-size: 11px;
+}
+.prp-conversation__aside .prp-people-chip__rerequest {
+  width: 18px;
+  height: 18px;
+  font-size: 12px;
+}
+.prp-conversation__aside .prp-add-link {
+  margin-top: 4px;
+  padding: 0;
+  font-size: 12px;
+}
+.prp-conversation__aside .prp-badge {
+  font-size: 10px;
+  padding: 0 5px;
+  line-height: 16px;
+  min-height: 16px;
+}
+.prp-conversation__aside .prp-meta-row {
+  min-height: 20px;
+  gap: 6px;
 }
 
 .prp-card {
@@ -1438,6 +1744,16 @@ html.prp-scroll-lock body {
 
 .prp-card--desc .prp-card__body {
   max-height: none;
+  /* Description body inherits GitHub-like markdown size */
+  font-size: 14px;
+  line-height: 1.5;
+}
+.prp-card--desc .prp-md,
+.prp-card--timeline .prp-md,
+.prp-review-thread .prp-md,
+.prp-inline-thread .prp-md {
+  font-size: 14px;
+  line-height: 1.5;
 }
 
 /* Timeline items sit as top-level cards in .prp-conversation__main (no outer
@@ -1673,7 +1989,9 @@ html.prp-scroll-lock body {
 
 .prp-aside-tree__chev {
   width: 12px;
-  font-size: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: var(--prp-fg-muted);
   flex: 0 0 auto;
 }
@@ -1702,7 +2020,8 @@ html.prp-scroll-lock body {
   border-radius: 8px;
   padding: 10px 12px;
   font: inherit;
-  font-size: 13px;
+  font-size: 14px;
+  line-height: 1.5;
   resize: vertical;
   min-height: 72px;
   background: var(--prp-bg);
@@ -1737,20 +2056,30 @@ html.prp-scroll-lock body {
   margin-bottom: 10px;
 }
 
-/* Markdown */
+/* Markdown — match GitHub body text (~14px / 1.5) */
 .prp-md {
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.5;
+  /* break-word only — "anywhere" was soft-wrapping long tokens inside fenced code */
   word-wrap: break-word;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  color: var(--prp-fg);
+  min-width: 0;
+  max-width: 100%;
 }
 
+/* Compact = denser vertical rhythm only (same font size as body) */
 .prp-md--compact {
-  font-size: 12px;
+  font-size: 14px;
+  line-height: 1.5;
 }
 
 .prp-md p {
-  margin: 0 0 0.6em;
+  margin: 0 0 0.75em;
+}
+
+.prp-md--compact p {
+  margin: 0 0 0.55em;
 }
 
 .prp-md p:last-child {
@@ -1761,59 +2090,80 @@ html.prp-scroll-lock body {
 .prp-md h2,
 .prp-md h3,
 .prp-md h4 {
-  margin: 0.8em 0 0.4em;
+  margin: 1em 0 0.5em;
   line-height: 1.25;
+  font-weight: 600;
 }
 
 .prp-md h1 {
-  font-size: 1.35em;
+  font-size: 1.5em;
 }
 .prp-md h2 {
-  font-size: 1.2em;
+  font-size: 1.25em;
   border-bottom: 1px solid var(--prp-border-muted);
-  padding-bottom: 0.2em;
+  padding-bottom: 0.3em;
 }
 .prp-md h3 {
-  font-size: 1.05em;
+  font-size: 1.1em;
 }
 
 .prp-md ul,
 .prp-md ol {
-  margin: 0.4em 0 0.6em;
-  padding-left: 1.4em;
+  margin: 0.5em 0 0.75em;
+  padding-left: 2em;
 }
 
 /* Inline codespan — light chip (not a full code box) */
-.prp-md code {
+.prp-md :not(pre) > code {
   font-family: var(--prp-mono);
-  font-size: 0.9em;
-  padding: 0.12em 0.35em;
-  border-radius: 4px;
+  font-size: 0.875em;
+  padding: 0.15em 0.4em;
+  border-radius: 6px;
   background: color-mix(in srgb, var(--prp-fg-muted) 12%, var(--prp-bg));
   border: 0;
   display: inline;
   white-space: break-spaces;
   word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
-/* Fenced / indented block code — the “box” chrome */
+/* Fenced / indented block code — preserve newlines; scroll horizontally */
 .prp-md pre {
-  overflow: auto;
-  padding: 10px 12px;
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 12px 14px;
   border-radius: 6px;
   background: var(--prp-bg-muted);
   border: 1px solid var(--prp-border-muted);
-  margin: 0.5em 0;
+  margin: 0.6em 0;
   display: block;
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre;
+  word-break: normal;
+  overflow-wrap: normal;
+  word-wrap: normal;
+  tab-size: 2;
 }
 
 .prp-md pre code {
-  border: 0;
-  padding: 0;
-  background: transparent;
-  display: inline;
-  white-space: pre;
-  word-break: normal;
+  border: 0 !important;
+  padding: 0 !important;
+  margin: 0;
+  background: transparent !important;
+  display: block;
+  width: max-content;
+  min-width: 100%;
+  white-space: pre !important;
+  word-break: normal !important;
+  overflow-wrap: normal !important;
+  word-wrap: normal !important;
+  font-size: inherit;
+  font-family: var(--prp-mono);
+  line-height: inherit;
 }
 
 .prp-md a {
@@ -1821,23 +2171,23 @@ html.prp-scroll-lock body {
 }
 
 .prp-md blockquote {
-  margin: 0.5em 0;
-  padding: 0 0.8em;
-  border-left: 3px solid var(--prp-border);
+  margin: 0.6em 0;
+  padding: 0 1em;
+  border-left: 0.25em solid var(--prp-border);
   color: var(--prp-fg-muted);
 }
 
 .prp-md table {
   border-collapse: collapse;
   width: 100%;
-  margin: 0.5em 0;
-  font-size: 12px;
+  margin: 0.6em 0;
+  font-size: 14px;
 }
 
 .prp-md th,
 .prp-md td {
   border: 1px solid var(--prp-border);
-  padding: 4px 8px;
+  padding: 6px 13px;
 }
 
 /* Diff layout — fills modal shell (viewport-sized)
@@ -1851,8 +2201,9 @@ html.prp-scroll-lock body {
   flex: 1 1 auto;
   min-height: 0;
   width: 100%;
+  height: 100%;
   overflow: hidden;
-  animation: prp-fade-in 200ms ease-out;
+  /* Panel fade handles enter; avoid double animation on keep-alive remount */
 }
 
 .prp-diff-layout--nav-collapsed {
@@ -1993,7 +2344,8 @@ html.prp-scroll-lock body {
   color: var(--prp-fg);
 }
 
-/* Extension tags always sit under the name filter (never inline beside it) */
+/* Filter chips (Unread + extensions) sit under the name filter */
+.prp-filetree__filters,
 .prp-filetree__exts {
   display: flex;
   flex-wrap: wrap;
@@ -2121,7 +2473,9 @@ html.prp-scroll-lock body {
 
 .prp-filetree__chev {
   width: 12px;
-  font-size: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: var(--prp-fg-muted);
   flex: 0 0 auto;
 }
@@ -2145,10 +2499,25 @@ html.prp-scroll-lock body {
   appearance: none;
   border: 0;
   background: transparent;
-  color: var(--prp-fg-muted);
+  color: var(--prp-fg);
   cursor: pointer;
-  padding: 2px 6px;
-  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  padding: 0;
+  border-radius: 6px;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
+}
+.prp-filetree__collapse:hover,
+.prp-filetree__collapse:focus-visible {
+  color: var(--prp-accent);
+  background: transparent;
+  outline: none;
 }
 
 .prp-diff-pane {
@@ -2194,6 +2563,32 @@ html.prp-scroll-lock body {
   /* Bottom padding so last lines/comments clear the fold */
   scrollbar-gutter: stable;
   overscroll-behavior: contain;
+  /* Isolate layout/paint without size containment (size breaks flex scroll) */
+  contain: layout style paint;
+  /* Thumb only — transparent track in the center diff panel */
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--prp-fg-muted) 40%, transparent) transparent;
+}
+.prp-vlist::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+  background: transparent;
+}
+.prp-vlist::-webkit-scrollbar-track,
+.prp-vlist::-webkit-scrollbar-track-piece,
+.prp-vlist::-webkit-scrollbar-corner {
+  background: transparent;
+}
+.prp-vlist::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--prp-fg-muted) 40%, transparent);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.prp-vlist::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--prp-fg-muted) 55%, transparent);
+  background-clip: padding-box;
+  border: 2px solid transparent;
 }
 
 .prp-vlist__spacer {
@@ -2207,6 +2602,9 @@ html.prp-scroll-lock body {
   right: 0;
   top: 0;
   will-change: transform;
+  contain: layout style;
+  /* GPU-friendly layer for translate3d window moves */
+  backface-visibility: hidden;
 }
 
 .prp-vline {
@@ -2216,6 +2614,8 @@ html.prp-scroll-lock body {
   overflow: hidden;
   border-left: 3px solid transparent;
   box-sizing: border-box;
+  /* Fixed-height code rows: skip layout/paint work when offscreen in parent */
+  contain: layout style paint;
 }
 
 .prp-vline--selectable {
@@ -2459,6 +2859,7 @@ html.prp-scroll-lock body {
   flex-direction: column;
 }
 
+/* Row layout may use normal; code cells must preserve tabs/spaces (pre). */
 .prp-vline--split {
   white-space: normal;
 }
@@ -2488,6 +2889,16 @@ html.prp-scroll-lock body {
   color: var(--prp-fg-muted);
   font-variant-numeric: tabular-nums;
   user-select: none;
+  white-space: pre;
+}
+
+/* white-space:normal on the row collapses tabs unless code forces pre */
+.prp-split-cols code,
+.prp-split-cols .prp-code {
+  white-space: pre;
+  tab-size: 4;
+  word-break: normal;
+  overflow-wrap: normal;
 }
 
 .prp-file-header__viewed {
@@ -2501,11 +2912,27 @@ html.prp-scroll-lock body {
   appearance: none;
   border: 0;
   background: transparent;
-  color: var(--prp-fg-muted);
+  color: var(--prp-fg);
   cursor: pointer;
-  padding: 0 6px;
-  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  padding: 0;
+  margin: 0 2px 0 0;
+  border-radius: 6px;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
   flex: 0 0 auto;
+}
+.prp-file-header__collapse:hover,
+.prp-file-header__collapse:focus-visible {
+  color: var(--prp-accent);
+  background: transparent;
+  outline: none;
 }
 
 .prp-pagination {
@@ -2538,6 +2965,13 @@ html.prp-scroll-lock body {
   gap: 2px;
   flex: 0 0 auto;
   text-align: center;
+}
+.prp-timeline-gap__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
 }
 
 .prp-timeline-gap__count {
@@ -2774,14 +3208,114 @@ html.prp-scroll-lock body {
   gap: 6px;
 }
 
+/* Expand controls on the right of @@ hunk rows (not separate rows).
+   Grid keeps the @@ text from collapsing to 0 width next to the expand rail. */
+.prp-vline--hunk {
+  display: grid !important;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 0;
+  min-width: 0;
+  width: 100%;
+  background: var(--prp-hunk-bg);
+  color: var(--prp-accent);
+}
+.prp-vline--hunk > .prp-line-gutter {
+  grid-column: 1;
+  width: 22px;
+}
+.prp-vline--hunk > .prp-code,
+.prp-vline--hunk > .prp-hunk-text {
+  grid-column: 2;
+  display: block;
+  width: auto !important;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre;
+  color: inherit;
+  line-height: 22px;
+}
+.prp-vline--hunk > .prp-hunk-expand-rail {
+  grid-column: 3;
+  justify-self: end;
+}
+.prp-hunk-expand-rail {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px 0 6px;
+  font-family: var(--prp-font);
+  flex-shrink: 0;
+}
+.prp-hunk-expand {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.prp-hunk-expand__btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 0 6px;
+  min-height: 18px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--prp-accent);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.prp-hunk-expand__btn:hover:not(:disabled),
+.prp-hunk-expand__btn:focus-visible:not(:disabled) {
+  background: color-mix(in srgb, var(--prp-accent) 12%, transparent);
+  outline: none;
+}
+.prp-hunk-expand__btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.prp-hunk-expand__btn--all {
+  font-weight: 700;
+}
+
 .prp-vline--comment {
   height: auto !important;
-  min-height: 96px;
+  min-height: 0;
   white-space: normal;
   /* Diff list is mono for code; comments/reviews use UI font like conversation */
   font-family: var(--prp-font);
   font-size: 14px;
   line-height: 1.5;
+  box-sizing: border-box;
+  padding-bottom: 2px;
+  /* Variable-height threads: no paint containment (clips) */
+  contain: layout style;
+}
+.prp-vline--comment-collapsed,
+.prp-vline--comment[data-collapsed='1'] {
+  min-height: 0 !important;
+  padding-bottom: 2px;
+}
+/* Pending review threads on Diff — warn chrome only (same spacing as other comments) */
+.prp-inline-thread--pending .prp-inline-thread__card {
+  border-color: color-mix(in srgb, var(--prp-warn) 42%, var(--prp-border));
+  background: color-mix(in srgb, var(--prp-warn) 6%, var(--prp-bg));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--prp-warn) 12%, transparent);
+}
+.prp-inline-thread--pending .prp-inline-thread__filebar {
+  background: color-mix(in srgb, var(--prp-warn) 10%, var(--prp-bg-muted));
+  border-bottom-color: color-mix(in srgb, var(--prp-warn) 22%, var(--prp-border-muted));
+}
+.prp-inline-thread--pending .prp-inline-thread__composer {
+  background: color-mix(in srgb, var(--prp-warn) 4%, var(--prp-bg));
 }
 
 .prp-vline--comment .prp-inline-thread,
@@ -2796,6 +3330,17 @@ html.prp-scroll-lock body {
 .prp-vline--comment .prp-mono,
 .prp-vline--comment .prp-inline-thread__loc {
   font-family: var(--prp-mono);
+}
+
+/* Code fences inside diff inline threads must not inherit list mono wrap quirks */
+.prp-vline--comment .prp-md pre,
+.prp-vline--comment .prp-md pre code,
+.prp-inline-thread .prp-md pre,
+.prp-inline-thread .prp-md pre code {
+  font-family: var(--prp-mono);
+  white-space: pre !important;
+  word-break: normal !important;
+  overflow-wrap: normal !important;
 }
 
 .prp-vline--header {
@@ -2909,10 +3454,7 @@ html.prp-scroll-lock body {
   color: var(--prp-danger);
 }
 
-.prp-vline--hunk {
-  background: var(--prp-hunk-bg);
-  color: var(--prp-accent);
-}
+/* .prp-vline--hunk colors live with hunk expand layout above */
 
 .prp-vline--add {
   background: var(--prp-add-bg);
@@ -3289,8 +3831,26 @@ html.prp-scroll-lock body {
   font-size: 12px;
   line-height: 1.45;
   background: var(--prp-add-bg);
-  overflow: auto;
+  overflow-x: auto;
+  overflow-y: hidden;
   white-space: pre;
+  word-break: normal;
+  overflow-wrap: normal;
+  word-wrap: normal;
+  max-width: 100%;
+}
+.prp-suggestion__code code {
+  display: block;
+  width: max-content;
+  min-width: 100%;
+  white-space: pre;
+  word-break: normal;
+  overflow-wrap: normal;
+  font-family: inherit;
+  font-size: inherit;
+  background: transparent;
+  padding: 0;
+  border: 0;
 }
 
 /* Command palette (Linear-style) */
@@ -3453,15 +4013,16 @@ html.prp-scroll-lock body {
 
 /* People chips / meta aside */
 .prp-people-list {
-  gap: 4px;
+  gap: 2px;
 }
 
 .prp-people-chip {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 0;
+  padding: 2px 0;
   min-width: 0;
+  min-height: 22px;
 }
 
 .prp-people-chip__name {
@@ -3509,6 +4070,14 @@ html.prp-scroll-lock body {
   width: 22px;
   height: 22px;
   font-size: 9px;
+}
+
+/* Aside people list stays compact — review comments keep the sizes above */
+.prp-people-chip .prp-avatar,
+.prp-people-chip .prp-avatar--sm {
+  width: 16px;
+  height: 16px;
+  font-size: 8px;
 }
 
 .prp-avatar--img {
@@ -3646,11 +4215,15 @@ html.prp-scroll-lock body {
 /* Polished inline review threads on diff */
 .prp-inline-thread {
   width: 100%;
-  padding: 8px 12px 12px;
+  max-width: min(720px, 100%);
+  padding: 6px 10px 8px;
   box-sizing: border-box;
   font-family: var(--prp-font);
   font-size: 14px;
   line-height: 1.5;
+}
+.prp-inline-thread--collapsed {
+  padding-bottom: 4px;
 }
 
 .prp-inline-thread__card {
@@ -3659,17 +4232,26 @@ html.prp-scroll-lock body {
   background: var(--prp-bg);
   box-shadow: 0 2px 8px rgba(1, 4, 9, 0.06);
   overflow: hidden;
+  max-width: 100%;
 }
 
 .prp-inline-thread__filebar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 8px 12px;
+  justify-content: flex-start;
+  gap: 6px;
+  padding: 4px 10px;
   background: var(--prp-bg-muted);
   border-bottom: 1px solid var(--prp-border-muted);
-  font-size: 12px;
+  font-size: 11px;
+  min-height: 22px;
+  line-height: 1.2;
+}
+/* Shared compact path header (Diff + Conversation) */
+.prp-inline-thread__filebar.prp-review-thread__file-header {
+  margin: 0;
+  padding: 3px 10px;
+  min-height: 20px;
 }
 
 .prp-inline-thread__loc {
@@ -3678,6 +4260,272 @@ html.prp-scroll-lock body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: left;
+}
+
+/* GitHub-style multi-file review group */
+.prp-card--timeline-review-group .prp-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.prp-card--timeline-review-group--pending {
+  border-color: color-mix(in srgb, var(--prp-warn) 40%, var(--prp-border));
+  background: color-mix(in srgb, var(--prp-warn) 6%, var(--prp-bg));
+}
+.prp-review-group__action {
+  font-size: 12px;
+}
+.prp-review-group__empty {
+  margin: 0 0 4px;
+  font-size: 13px;
+}
+.prp-review-group__pending-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--prp-warn) 22%, var(--prp-border-muted));
+}
+.prp-review-group__pending-hint {
+  flex: 1 1 auto;
+  font-size: 12px;
+  min-width: 0;
+}
+.prp-review-group__row--pending {
+  border-color: color-mix(in srgb, var(--prp-warn) 28%, var(--prp-border-muted));
+}
+.prp-review-group__body {
+  margin: 0 0 4px;
+  font-size: 13px;
+}
+.prp-review-group__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.prp-review-group__row {
+  border: 1px solid var(--prp-border-muted);
+  border-radius: 0;
+  background: var(--prp-bg-muted);
+  overflow: hidden;
+}
+.prp-review-group__row--open {
+  background: var(--prp-bg);
+}
+.prp-review-group__row-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+.prp-review-group__row-btn {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  padding: 8px 8px 8px 10px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  min-height: 36px;
+}
+.prp-review-group__row-btn:hover,
+.prp-review-group__row-btn:focus-visible {
+  background: color-mix(in srgb, var(--prp-accent) 6%, transparent);
+  outline: none;
+}
+.prp-review-group__chev {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  color: var(--prp-fg-muted);
+  line-height: 1;
+}
+.prp-review-group__chev .prp-octicon {
+  display: block;
+}
+.prp-review-group__path {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--prp-fg);
+}
+.prp-review-group__jump {
+  flex: 0 0 auto;
+  margin-right: 6px;
+  color: var(--prp-fg-muted);
+}
+.prp-review-group__jump:hover,
+.prp-review-group__jump:focus-visible {
+  color: var(--prp-accent);
+}
+
+/* Standalone conversation thread 1-level path header */
+.prp-conversation-thread-header {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px 6px 6px 8px;
+  border-bottom: 1px solid var(--prp-border-muted);
+  background: var(--prp-bg-muted);
+  border-radius: 0;
+}
+.prp-conversation-thread-header__toggle {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  min-height: 32px;
+}
+.prp-conversation-thread-header__toggle:hover,
+.prp-conversation-thread-header__toggle:focus-visible {
+  background: color-mix(in srgb, var(--prp-accent) 6%, transparent);
+  outline: none;
+}
+.prp-conversation-thread-header__chev {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  color: var(--prp-fg-muted);
+}
+.prp-conversation-thread-header__path {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--prp-fg);
+}
+.prp-conversation-thread-header__jump {
+  flex: 0 0 auto;
+  margin-right: 2px;
+  color: var(--prp-fg-muted);
+}
+.prp-conversation-thread-header__jump:hover,
+.prp-conversation-thread-header__jump:focus-visible {
+  color: var(--prp-accent);
+}
+.prp-conversation-inline-thread .prp-inline-thread--conversation .prp-inline-thread__card {
+  border: 0;
+}
+.prp-review-group__badge {
+  flex-shrink: 0;
+}
+.prp-review-group__row-hint {
+  flex: 0 0 auto;
+  margin-left: auto;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.prp-review-group__thread {
+  border-top: 1px solid var(--prp-border-muted);
+  padding: 0;
+}
+.prp-review-group__thread .prp-conversation-inline-thread {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+}
+.prp-review-group__thread .prp-inline-thread__hunk,
+.prp-review-group__thread .prp-inline-thread__card {
+  border-radius: 0;
+}
+.prp-review-group__show-resolved {
+  appearance: none;
+  align-self: flex-start;
+  margin: 2px 0 0;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--prp-accent);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.prp-review-group__show-resolved:hover,
+.prp-review-group__show-resolved:focus-visible {
+  text-decoration: underline;
+  outline: none;
+}
+
+.prp-conversation-inline-thread {
+  margin: 0 0 var(--prp-gap-stack, 14px);
+  border: 1px solid var(--prp-border);
+  border-radius: 0;
+  background: var(--prp-bg);
+  overflow: hidden;
+}
+.prp-conversation-inline-thread .prp-inline-thread {
+  margin: 0;
+  max-width: 100%;
+  padding: 0;
+}
+.prp-conversation-inline-thread .prp-inline-thread__card {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+/* Hunk sits under file header, above comments (GitHub conversation style) */
+.prp-inline-thread__hunk {
+  border-bottom: 1px solid var(--prp-border-muted);
+  background: var(--prp-bg);
+  overflow: auto;
+  border-radius: 0;
+}
+.prp-inline-thread__hunk .prp-diff-snippet {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  max-height: min(280px, 40vh);
+}
+.prp-conversation-inline-thread .prp-diff-snippet,
+.prp-conversation-inline-thread .prp-inline-thread__hunk {
+  border-bottom: 1px solid var(--prp-border-muted);
+  border-radius: 0 !important;
+}
+/* Conversation review-thread diff snippet: sharp corners (no rounded chip) */
+.prp-conversation-inline-thread .prp-diff-snippet,
+.prp-conversation-inline-thread .prp-diff-snippet--scroll,
+.prp-conversation-inline-thread .prp-diff-snippet__block,
+.prp-review-group__thread .prp-diff-snippet,
+.prp-review-group__thread .prp-diff-snippet--scroll,
+.prp-review-group__thread .prp-diff-snippet__block {
+  border-radius: 0 !important;
 }
 
 /* Single root comment: no vertical timeline */
@@ -3734,7 +4582,7 @@ html.prp-scroll-lock body {
   align-items: start;
 }
 
-/* Connector line from this avatar down to the next — not drawn on the last comment */
+/* Connector line from this avatar down to the next — never on the last comment */
 .prp-review-thread__item:not(.prp-review-thread__item--last)::after {
   content: '';
   position: absolute;
@@ -3750,6 +4598,10 @@ html.prp-scroll-lock body {
 
 .prp-review-thread__item--last {
   padding-bottom: 8px;
+}
+.prp-review-thread__item--last::after {
+  content: none;
+  display: none;
 }
 
 .prp-review-thread__item--pending .prp-review-thread__content {
@@ -3770,7 +4622,16 @@ html.prp-scroll-lock body {
 
 .prp-review-thread__content {
   min-width: 0;
+  max-width: 100%;
   padding-top: 2px;
+  font-size: 14px;
+  line-height: 1.5;
+  overflow: hidden; /* keep fenced code scroll inside the column */
+}
+.prp-review-thread__content .prp-md,
+.prp-review-thread__content .prp-md > div {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .prp-review-thread__meta {
@@ -3779,7 +4640,7 @@ html.prp-scroll-lock body {
   align-items: center;
   gap: 6px 8px;
   margin-bottom: 6px;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .prp-inline-thread__composer {
@@ -3791,11 +4652,11 @@ html.prp-scroll-lock body {
   background: var(--prp-bg);
 }
 
-.prp-vline--comment {
-  min-height: 280px !important;
+/* Expanded comment row: content-sized (do not force large min-height) */
+.prp-vline--comment:not(.prp-vline--comment-collapsed):not([data-collapsed='1']) {
+  min-height: 0 !important;
   height: auto !important;
   box-sizing: border-box;
-  padding-bottom: 8px;
 }
 
 /* Entity links */
@@ -4065,17 +4926,77 @@ button.prp-stack-strip__item {
   flex-wrap: wrap;
   align-items: center;
   gap: 6px 8px;
+  /* Sits after thread-tools; alone still pins right via its own margin-left */
   margin-left: auto;
 }
-.prp-diff-toolbar__pending-label {
-  font-size: 12px;
-  white-space: nowrap;
+/* Review filter + thread navigator — pin to the right of the toolbar */
+.prp-diff-toolbar__thread-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+  margin-left: auto;
+  flex-shrink: 0;
 }
-
+/* When both thread-tools and pending are present, only the first margin-left:auto
+   absorbs free space — they stay grouped on the right. */
+.prp-diff-toolbar__thread-tools + .prp-diff-toolbar__pending {
+  margin-left: 0;
+}
 .prp-diff-toolbar__comments {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+/* Unresolved | All — deselectable segment, UI font (not mono ext chips) */
+.prp-review-filter {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--prp-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--prp-bg);
+  flex: 0 0 auto;
+}
+.prp-review-filter__btn {
+  appearance: none;
+  margin: 0;
+  border: 0;
+  border-right: 1px solid var(--prp-border);
+  background: transparent;
+  color: var(--prp-fg-muted);
+  font: inherit;
+  font-family: var(--prp-font);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.3;
+  padding: 5px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 120ms ease, color 120ms ease;
+}
+.prp-review-filter__btn:last-child {
+  border-right: 0;
+}
+.prp-review-filter__btn:hover,
+.prp-review-filter__btn:focus-visible {
+  color: var(--prp-accent);
+  background: color-mix(in srgb, var(--prp-accent) 8%, transparent);
+  outline: none;
+}
+.prp-review-filter__btn--on,
+.prp-review-filter__btn[aria-pressed='true'] {
+  color: var(--prp-accent);
+  background: color-mix(in srgb, var(--prp-accent) 14%, var(--prp-bg));
+  box-shadow: inset 0 -2px 0 var(--prp-accent);
+}
+.prp-review-filter__count {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+  margin-left: 0.2em;
+  font-weight: 600;
 }
 
 .prp-diff-toolbar__range-hint,
@@ -4091,28 +5012,96 @@ button.prp-stack-strip__item {
   padding-bottom: 0;
 }
 
-/* Thin file:line header for file-anchored review threads */
+/* Compact file:line header — path left, meta right */
 .prp-review-thread__file-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin: -2px 0 8px;
-  padding: 4px 2px 8px;
+  justify-content: flex-start;
+  gap: 6px;
+  margin: 0 0 4px;
+  padding: 0 0 3px;
   border-bottom: 1px solid var(--prp-border-muted);
   min-width: 0;
+  min-height: 18px;
+  line-height: 1.2;
+}
+
+.prp-review-thread__file-header-main {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: flex-start;
+}
+
+.prp-review-thread__file-header-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  margin-left: auto;
 }
 
 .prp-review-thread__file-loc {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 11px;
   font-weight: 500;
-  line-height: 1.3;
+  line-height: 1.2;
   color: var(--prp-fg-muted);
-  opacity: 0.92;
+  opacity: 0.95;
+  text-align: left;
+}
+button.prp-review-thread__file-loc--link {
+  appearance: none;
+  display: inline-block;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.2;
+  text-align: left;
+  color: var(--prp-accent);
+  opacity: 1;
+  cursor: pointer;
+  text-decoration: none;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+button.prp-review-thread__file-loc--link:hover,
+button.prp-review-thread__file-loc--link:focus-visible {
+  text-decoration: underline;
+  outline: none;
+}
+.prp-thread-toggle--icon-only {
+  flex: 0 0 auto !important;
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  padding: 0;
+  gap: 0;
+}
+.prp-thread-toggle--icon-only .prp-thread-toggle__icon {
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  border-radius: 6px;
+  font-size: 16px;
+}
+.prp-thread-toggle--icon-only .prp-octicon--disclosure {
+  width: 16px;
+  height: 16px;
 }
 
 .prp-review-thread__file-side {
@@ -4121,12 +5110,22 @@ button.prp-stack-strip__item {
   font-weight: 600;
   letter-spacing: 0.02em;
   text-transform: uppercase;
+  line-height: 1.2;
+}
+
+.prp-review-thread__file-header .prp-thread-toggle__count {
+  font-size: 10px;
+  line-height: 1.2;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .prp-review-thread__file-header .prp-badge {
   flex-shrink: 0;
-  font-size: 10px;
-  padding: 1px 6px;
+  font-size: 9px;
+  padding: 0 5px;
+  line-height: 1.35;
+  min-height: 0;
 }
 
 .prp-conversation-thread {
@@ -4140,6 +5139,54 @@ button.prp-stack-strip__item {
   margin: 0 -2px 0;
   padding: 12px 2px 14px;
   border-top: 1px solid var(--prp-border-muted);
+}
+.prp-conversation-thread__collapsed-preview {
+  padding: 6px 2px 4px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+.prp-conversation-thread__collapsed-preview:hover,
+.prp-conversation-thread__collapsed-preview:focus-visible {
+  background: color-mix(in srgb, var(--prp-fg-muted) 8%, transparent);
+  outline: none;
+}
+/* Markdown preview clamped to a few lines when the thread is folded */
+.prp-md--collapsed-preview {
+  font-size: 14px;
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  color: var(--prp-fg-muted);
+}
+.prp-md--collapsed-preview p {
+  margin: 0 0 0.35em;
+}
+.prp-md--collapsed-preview p:last-child {
+  margin-bottom: 0;
+}
+.prp-md--collapsed-preview pre,
+.prp-md--collapsed-preview table,
+.prp-md--collapsed-preview .prp-mermaid {
+  display: none;
+}
+.prp-md--collapsed-preview img {
+  max-height: 1.4em;
+  width: auto;
+  vertical-align: middle;
+}
+.prp-card--timeline-review-thread--collapsed .prp-review-thread__file-header {
+  margin-bottom: 0;
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+.prp-thread-toggle--static {
+  cursor: default;
+}
+.prp-thread-toggle--static:hover .prp-review-thread__file-loc,
+.prp-thread-toggle--static:focus-visible .prp-review-thread__file-loc {
+  color: inherit;
 }
 
 .prp-diff-chrome {
@@ -4160,41 +5207,116 @@ button.prp-stack-strip__item {
   align-items: center;
 }
 
-/* ── Button shortcut popover (hover/focus only) ── */
-.prp-btn {
+/* ── Hover/focus tip popover (buttons + header icon actions) ── */
+.prp-btn,
+.prp-header__icon-btn,
+.prp-header__more-btn,
+.prp-icon-btn,
+.prp-shell-toggle {
   position: relative;
 }
+.prp-has-tip,
+.prp-btn--has-tip,
 .prp-btn--has-shortcut {
   /* reserve nothing permanently; tooltip overlays */
 }
+.prp-tip-pop,
+.prp-btn__tip-pop,
 .prp-btn__shortcut-pop {
   position: absolute;
   left: 50%;
   bottom: calc(100% + 6px);
   transform: translateX(-50%) translateY(4px);
-  padding: 3px 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: min(260px, 70vw);
+  padding: 4px 8px;
   border-radius: 6px;
   border: 1px solid var(--prp-border);
   background: var(--prp-bg);
-  color: var(--prp-fg-muted);
-  font-family: var(--prp-mono);
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 1.3;
+  color: var(--prp-fg);
+  font-family: var(--prp-font);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.35;
   white-space: nowrap;
-  box-shadow: 0 6px 16px rgba(1, 4, 9, 0.12);
+  box-shadow: 0 6px 16px rgba(1, 4, 9, 0.14);
   opacity: 0;
   pointer-events: none;
   transition: opacity 120ms ease, transform 140ms cubic-bezier(0.22, 1, 0.36, 1);
-  z-index: 20;
+  z-index: 40;
 }
+.prp-tip-pop__label,
+.prp-btn__tip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.prp-tip-pop__kbd,
+.prp-btn__tip-kbd {
+  font-family: var(--prp-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--prp-fg-muted);
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid var(--prp-border-muted);
+  background: var(--prp-bg-muted);
+}
+.prp-btn:hover .prp-tip-pop,
+.prp-btn:focus-visible .prp-tip-pop,
+.prp-btn:hover .prp-btn__tip-pop,
+.prp-btn:focus-visible .prp-btn__tip-pop,
 .prp-btn:hover .prp-btn__shortcut-pop,
-.prp-btn:focus-visible .prp-btn__shortcut-pop {
+.prp-btn:focus-visible .prp-btn__shortcut-pop,
+.prp-header__icon-btn:hover .prp-tip-pop,
+.prp-header__icon-btn:focus-visible .prp-tip-pop,
+.prp-header__more-btn:hover .prp-tip-pop,
+.prp-header__more-btn:focus-visible .prp-tip-pop,
+.prp-icon-btn:hover .prp-tip-pop,
+.prp-icon-btn:focus-visible .prp-tip-pop,
+.prp-shell-toggle:hover .prp-tip-pop,
+.prp-shell-toggle:focus-visible .prp-tip-pop,
+.prp-has-tip:hover .prp-tip-pop,
+.prp-has-tip:focus-visible .prp-tip-pop {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
 }
+.prp-btn:disabled:hover .prp-tip-pop,
+.prp-btn:disabled:focus-visible .prp-tip-pop,
+.prp-header__icon-btn:disabled:hover .prp-tip-pop,
+.prp-icon-btn:disabled:hover .prp-tip-pop {
+  opacity: 0.85;
+}
 .prp-btn__kbd {
   display: none; /* legacy permanent badges off */
+}
+
+/* Subscribe: muted/slash when on; normal outline bell when off */
+.prp-header__icon-btn--subscribed,
+.prp-header__icon-btn--subscribed[aria-pressed='true'] {
+  color: var(--prp-fg-muted);
+  border-color: var(--prp-border);
+  background: var(--prp-bg-muted);
+}
+.prp-header__icon-btn--subscribed:hover,
+.prp-header__icon-btn--subscribed:focus-visible {
+  color: var(--prp-fg);
+  border-color: var(--prp-border);
+  background: color-mix(in srgb, var(--prp-fg-muted) 8%, var(--prp-bg));
+}
+
+/* Diff ↔ Conversation layout toggle — accent like former primary button */
+.prp-header__icon-btn--layout {
+  color: var(--prp-accent);
+  border-color: color-mix(in srgb, var(--prp-accent) 40%, var(--prp-border));
+  background: color-mix(in srgb, var(--prp-accent) 12%, var(--prp-bg));
+}
+.prp-header__icon-btn--layout:hover,
+.prp-header__icon-btn--layout:focus-visible {
+  color: var(--prp-accent);
+  border-color: var(--prp-accent);
+  background: color-mix(in srgb, var(--prp-accent) 18%, var(--prp-bg));
 }
 
 /* ── Searchable select ── */
@@ -4568,15 +5690,16 @@ a.prp-branch-tag__text:focus-visible {
 
 .prp-people-chip__rerequest {
   /* icon-sized control; inherits .prp-icon-btn */
-  width: 22px;
-  height: 22px;
-  font-size: 14px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  margin: 0;
+  font-size: 12px;
 }
 
 .prp-people-chip__rerequest-icon {
   display: block;
   line-height: 1;
-  transform: scaleX(-1); /* clockwise refresh feel */
 }
 
 .prp-branch-tag__edit-btn {
@@ -4636,6 +5759,16 @@ a.prp-branch-tag__text:focus-visible {
 }
 .prp-people-chip__status {
   margin-left: auto;
+  flex-shrink: 0;
+  max-width: 42%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* When status + action buttons share the row, keep status tight */
+.prp-people-chip:has(.prp-people-chip__actions:not(:empty)) .prp-people-chip__status {
+  margin-left: 4px;
+  max-width: 36%;
 }
 .prp-mt-2 {
   margin-top: 8px;
@@ -4808,12 +5941,27 @@ a.prp-branch-tag__text:focus-visible {
   align-items: stretch;
   border-radius: 8px;
   overflow: hidden;
-  box-shadow: 0 1px 0 rgba(27, 31, 36, 0.04);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--prp-ok) 25%, transparent);
+  border: 1px solid color-mix(in srgb, var(--prp-ok) 70%, #000);
+  background: var(--prp-ok);
 }
-.prp-merge-method__primary {
+/* Inverted vs merge-box soft fill: solid ok bg + light text */
+.prp-merge-method__primary.prp-btn,
+.prp-merge-box .prp-merge-method__primary {
   border-top-right-radius: 0 !important;
   border-bottom-right-radius: 0 !important;
-  border-right: 0 !important;
+  border: 0 !important;
+  border-right: 1px solid color-mix(in srgb, #fff 22%, var(--prp-ok)) !important;
+  background: var(--prp-ok) !important;
+  color: #fff !important;
+  font-weight: 600;
+  box-shadow: none;
+}
+.prp-merge-method__primary.prp-btn:hover:not(:disabled),
+.prp-merge-box .prp-merge-method__primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--prp-ok) 88%, #000) !important;
+  color: #fff !important;
+  filter: none;
 }
 .prp-merge-method__caret {
   appearance: none;
@@ -4822,9 +5970,9 @@ a.prp-branch-tag__text:focus-visible {
   justify-content: center;
   min-width: 34px;
   padding: 0 10px;
-  border: 1px solid color-mix(in srgb, var(--prp-ok) 55%, var(--prp-border));
-  border-left: 1px solid color-mix(in srgb, var(--prp-ok) 35%, var(--prp-border));
-  background: color-mix(in srgb, var(--prp-ok) 88%, #000);
+  border: 0;
+  border-left: 0;
+  background: var(--prp-ok);
   color: #fff;
   font: inherit;
   font-size: 12px;
@@ -4833,7 +5981,9 @@ a.prp-branch-tag__text:focus-visible {
   border-bottom-right-radius: 8px;
 }
 .prp-merge-method__caret:hover:not(:disabled) {
-  filter: brightness(1.05);
+  background: color-mix(in srgb, var(--prp-ok) 88%, #000);
+  color: #fff;
+  filter: none;
 }
 .prp-merge-method__caret:disabled {
   opacity: 0.55;
@@ -5112,14 +6262,15 @@ a.prp-branch-tag__text:focus-visible {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 22px;
+  height: 22px;
+  margin: 0;
   padding: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: 4px;
   background: transparent;
   color: var(--prp-fg-muted);
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1;
   cursor: pointer;
   opacity: 0.7;
@@ -5188,7 +6339,7 @@ a.prp-commit-timeline__sha code {
   appearance: none;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   flex: 1;
   min-width: 0;
   padding: 0;
@@ -5200,18 +6351,33 @@ a.prp-commit-timeline__sha code {
   text-align: left;
 }
 .prp-thread-toggle:hover .prp-inline-thread__loc,
-.prp-thread-toggle:focus-visible .prp-inline-thread__loc {
+.prp-thread-toggle:focus-visible .prp-inline-thread__loc,
+.prp-thread-toggle:hover .prp-review-thread__file-loc,
+.prp-thread-toggle:focus-visible .prp-review-thread__file-loc {
   color: var(--prp-accent);
+}
+.prp-thread-toggle:hover .prp-thread-toggle__icon,
+.prp-thread-toggle:focus-visible .prp-thread-toggle__icon {
+  color: var(--prp-accent);
+  background: transparent;
 }
 .prp-thread-toggle__icon {
   display: inline-flex;
-  width: 14px;
-  color: var(--prp-fg-muted);
-  font-size: 11px;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  border-radius: 6px;
+  color: var(--prp-fg);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
   flex-shrink: 0;
+  background: transparent;
 }
 .prp-thread-toggle__count {
-  font-size: 11px;
+  font-size: 12px;
   white-space: nowrap;
 }
 .prp-inline-thread__filebar {
@@ -5221,12 +6387,21 @@ a.prp-commit-timeline__sha code {
   justify-content: space-between;
 }
 .prp-inline-thread__collapsed-preview {
-  padding: 8px 12px 12px;
-  font-size: 12px;
-  line-height: 1.4;
+  padding: 6px 10px 8px;
+  cursor: pointer;
+  border-radius: 0 0 8px 8px;
+}
+.prp-inline-thread__collapsed-preview:hover,
+.prp-inline-thread__collapsed-preview:focus-visible {
+  background: color-mix(in srgb, var(--prp-fg-muted) 8%, transparent);
+  outline: none;
 }
 .prp-inline-thread--collapsed .prp-inline-thread__card {
-  opacity: 0.92;
+  opacity: 0.96;
+}
+.prp-inline-thread--collapsed .prp-inline-thread__filebar {
+  margin: 0;
+  padding: 6px 8px;
 }
 
 /* ── Merge box checks detail ── */

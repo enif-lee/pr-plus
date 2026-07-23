@@ -6,8 +6,19 @@ import { UserLink } from '@common/UserLink';
 import { MarkdownComposer } from '@common/MarkdownComposer';
 import { formatWhen } from '@common/utils';
 import { Avatar } from '@common/Avatar';
+import { IconDisclosure, IconPencil, IconTrash } from '@common/icons';
 import { BodyEditor } from '../composers/BodyEditor';
+import { DiffSnippetView } from '../conversation/DiffSnippetView';
 
+/**
+ * Inline review thread card (Diff + Conversation).
+ *
+ * @param {boolean} [showHunk=false] When true, render code context under the
+ *   file header (Conversation). Diff view keeps this off — lines already live
+ *   in the virtual diff.
+ * @param {object|null} [snippet] Diff snippet from buildConversationTimeline
+ *   (lines + path). Only used when showHunk is true.
+ */
 function InlineThreadImpl(props: any) {
   const {
     row,
@@ -36,6 +47,14 @@ function InlineThreadImpl(props: any) {
     activeSearchHit = null,
     searchHits = null,
     searchHitIndex = -1,
+    /** Conversation: embed code hunk under file header. Diff: leave false. */
+    showHunk = false,
+    snippet = null,
+    /**
+     * Diff: show path filebar. Conversation uses its own 1-level path header
+     * (review-group row or conversation thread header) — hide duplicate bar.
+     */
+    showFileHeader = true,
   } = props;
 
   const qSearch = String(searchQuery || '').trim();
@@ -64,15 +83,26 @@ function InlineThreadImpl(props: any) {
     return null;
   }
 
-  const [localCollapsed, setLocalCollapsed] = useState(false);
+  const defaultCollapsed = Boolean(
+    thread?.resolved || row?.resolved || thread?.root?.resolved
+  );
+  /** null = follow default (resolved → collapsed) */
+  const [localCollapsed, setLocalCollapsed] = useState<boolean | null>(null);
   const controlled = typeof collapsedProp === 'boolean';
-  const collapsed = controlled ? collapsedProp : localCollapsed;
+  const collapsed = controlled
+    ? collapsedProp
+    : localCollapsed != null
+      ? localCollapsed
+      : defaultCollapsed;
 
   function toggleCollapse() {
     if (controlled) {
       onToggleCollapse?.();
     } else {
-      setLocalCollapsed((c) => !c);
+      setLocalCollapsed((c) => {
+        const currently = c != null ? c : defaultCollapsed;
+        return !currently;
+      });
     }
   }
 
@@ -107,13 +137,18 @@ function InlineThreadImpl(props: any) {
     !rootPending &&
     !hasPendingReplies;
 
-  const locLabel = `${path}${
-    startLine != null && line != null && startLine !== line
-      ? `:${startLine}–${line}`
+  const fileLoc =
+    path &&
+    (startLine != null && line != null && startLine !== line
+      ? `${path}:${startLine}–${line}`
       : line != null
-        ? `:${line}`
-        : ''
-  }${side ? ` · ${side}` : ''}`;
+        ? `${path}:${line}`
+        : path);
+  const locLabel = fileLoc
+    ? `${fileLoc}${side ? ` · ${String(side).toUpperCase()}` : ''}`
+    : 'Review thread';
+  const commentCount = 1 + replyCount;
+  const rootId = row?.commentId ?? thread?.id ?? thread?.root?.id;
 
   function isEditingId(id: any) {
     return editingCommentId != null && String(editingCommentId) === String(id);
@@ -131,7 +166,7 @@ function InlineThreadImpl(props: any) {
           aria-label="Edit comment"
           onClick={() => onEdit?.(id, commentBody)}
         >
-          ✎
+          <IconPencil size={13} />
         </button>
         <button
           type="button"
@@ -141,7 +176,7 @@ function InlineThreadImpl(props: any) {
           aria-label="Delete comment"
           onClick={() => onDelete?.(id)}
         >
-          🗑
+          <IconTrash size={13} />
         </button>
       </div>
     );
@@ -198,38 +233,89 @@ function InlineThreadImpl(props: any) {
     <div
       className={`prp-inline-thread${
         useTimeline ? ' prp-inline-thread--threaded' : ' prp-inline-thread--single'
-      }${collapsed ? ' prp-inline-thread--collapsed' : ''}`}
+      }${collapsed ? ' prp-inline-thread--collapsed' : ''}${
+        rootPending ? ' prp-inline-thread--pending' : ''
+      }${props.className ? ` ${props.className}` : ''}`}
+      data-search-anchor={
+        rootId != null ? `review-comment:${rootId}` : undefined
+      }
+      data-pending={rootPending ? '1' : undefined}
     >
       <div className="prp-inline-thread__card">
-        <div className="prp-inline-thread__filebar">
-          <button
-            type="button"
-            className="prp-thread-toggle"
-            onClick={toggleCollapse}
-            aria-expanded={!collapsed}
-            title={collapsed ? 'Expand thread' : 'Collapse thread'}
-          >
-            <span className="prp-thread-toggle__icon" aria-hidden="true">
-              {collapsed ? '▸' : '▾'}
-            </span>
-            <span className="prp-mono prp-inline-thread__loc">{locLabel}</span>
-            {replyCount > 0 ? (
-              <span className="prp-muted prp-thread-toggle__count">
-                {replyCount + 1} comment{replyCount + 1 === 1 ? '' : 's'}
-              </span>
-            ) : null}
-          </button>
-          {thread?.root?.outdated || row?.outdated || thread?.outdated ? (
-            <Badge tone="muted" title="No longer applies to the latest revision">
-              outdated
-            </Badge>
-          ) : null}
-          {thread?.resolved || row?.resolved ? (
-            <Badge tone="ok">resolved</Badge>
-          ) : (
-            <Badge tone="warn">open</Badge>
-          )}
-        </div>
+        {showFileHeader ? (
+          <div className="prp-inline-thread__filebar prp-review-thread__file-header">
+            <div className="prp-review-thread__file-header-main">
+              <button
+                type="button"
+                className="prp-thread-toggle prp-thread-toggle--icon-only"
+                onClick={toggleCollapse}
+                aria-expanded={!collapsed}
+                title={collapsed ? 'Expand thread' : 'Collapse thread'}
+                aria-label={collapsed ? 'Expand thread' : 'Collapse thread'}
+              >
+                <span className="prp-thread-toggle__icon" aria-hidden="true">
+                  <IconDisclosure open={!collapsed} size={16} />
+                </span>
+              </button>
+              {typeof props.onJumpToFile === 'function' && fileLoc ? (
+                <button
+                  type="button"
+                  className="prp-mono prp-inline-thread__loc prp-review-thread__file-loc prp-review-thread__file-loc--link"
+                  title={`View in Diff · ${fileLoc}`}
+                  onClick={() =>
+                    props.onJumpToFile({
+                      id: rootId,
+                      path,
+                      line,
+                      startLine,
+                      side,
+                      outdated: Boolean(
+                        thread?.root?.outdated || row?.outdated || thread?.outdated
+                      ),
+                    })
+                  }
+                >
+                  {fileLoc}
+                </button>
+              ) : (
+                <span className="prp-mono prp-inline-thread__loc prp-review-thread__file-loc">
+                  {locLabel}
+                </span>
+              )}
+            </div>
+            <div className="prp-review-thread__file-header-meta">
+              <span className="prp-muted prp-thread-toggle__count">{commentCount}</span>
+              {side && fileLoc ? (
+                <span className="prp-muted prp-review-thread__file-side">
+                  {String(side).toUpperCase()}
+                </span>
+              ) : null}
+              {rootPending ? (
+                <Badge tone="warn" title="Part of an unsubmitted pending review">
+                  Pending
+                </Badge>
+              ) : null}
+              {thread?.root?.outdated || row?.outdated || thread?.outdated ? (
+                <Badge tone="muted" title="No longer applies to the latest revision">
+                  outdated
+                </Badge>
+              ) : null}
+              {thread?.resolved || row?.resolved ? (
+                <Badge tone="ok">resolved</Badge>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+
+        {/* Code context under header (Conversation only — Diff already has lines) */}
+        {showHunk && !collapsed && snippet?.lines?.length ? (
+          <div className="prp-inline-thread__hunk">
+            <DiffSnippetView
+              snippet={snippet}
+              filePath={snippet.path || path}
+            />
+          </div>
+        ) : null}
 
         {!collapsed ? (
           <>
@@ -273,7 +359,7 @@ function InlineThreadImpl(props: any) {
                       <Avatar
                         login={r.author}
                         avatarUrl={r.avatarUrl}
-                        size="sm"
+                        size="md"
                         className="prp-review-thread__avatar"
                       />
                       <div className="prp-review-thread__content">
@@ -315,6 +401,11 @@ function InlineThreadImpl(props: any) {
                       <strong>
                         <UserLink login={author} />
                       </strong>
+                      {rootPending ? (
+                        <Badge tone="warn" title="Part of an unsubmitted pending review">
+                          Pending
+                        </Badge>
+                      ) : null}
                       {rootAt ? <span className="prp-muted">{formatWhen(rootAt)}</span> : null}
                       {canOwn ? <Badge tone="muted">you</Badge> : null}
                     </div>
@@ -390,9 +481,24 @@ function InlineThreadImpl(props: any) {
             </div>
           </>
         ) : (
-          <div className="prp-inline-thread__collapsed-preview prp-muted">
-            {String(body || '').slice(0, 120)}
-            {String(body || '').length > 120 ? '…' : ''}
+          <div
+            className="prp-inline-thread__collapsed-preview"
+            title="Expand to read full thread"
+            onClick={toggleCollapse}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                toggleCollapse();
+              }
+            }}
+            role="button"
+            tabIndex={0}
+          >
+            <MarkdownView
+              source={String(body || '') || '_No description_'}
+              className="prp-md--compact prp-md--collapsed-preview"
+              linkCtx={linkCtx}
+            />
           </div>
         )}
       </div>

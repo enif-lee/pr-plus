@@ -1,17 +1,18 @@
 /**
  * Pure helpers for paginated / incremental GitHub comment fetches.
- * REST: page+per_page (Link rel=next) and since=ISO8601 incremental windows.
+ * REST: page+per_page (Link rel=next/last) and since=ISO8601 incremental windows.
  */
 (function () {
 
 const DEFAULT_COMMENT_PAGE_SIZE = 50;
 
-function parseLinkNextPage(linkHeader) {
+function parseLinkRelPage(linkHeader, rel) {
   const raw = String(linkHeader || '');
   if (!raw) return null;
+  const re = new RegExp('rel="?' + rel + '"?', 'i');
   const parts = raw.split(',');
   for (const part of parts) {
-    if (!/rel="?next"?/i.test(part)) continue;
+    if (!re.test(part)) continue;
     const m = part.match(/[?&]page=(\d+)/i);
     if (m) {
       const n = Number(m[1]);
@@ -19,6 +20,14 @@ function parseLinkNextPage(linkHeader) {
     }
   }
   return null;
+}
+
+function parseLinkNextPage(linkHeader) {
+  return parseLinkRelPage(linkHeader, 'next');
+}
+
+function parseLinkLastPage(linkHeader) {
+  return parseLinkRelPage(linkHeader, 'last');
 }
 
 function linkHasMore(linkHeader) {
@@ -70,9 +79,8 @@ function buildCommentsPageMeta(items, opts = {}) {
   const list = Array.isArray(items) ? items : [];
   const page = Math.max(1, Number(opts.page) || 1);
   const perPage = clampPerPage(opts.perPage);
-  const nextPage = parseLinkNextPage(opts.linkHeader);
-  const hasMore =
-    nextPage != null || (opts.linkHeader == null && list.length >= perPage);
+  const order = opts.order === 'from-end' ? 'from-end' : opts.order || 'asc';
+
   let oldest = null;
   let newest = null;
   let maxId = null;
@@ -87,11 +95,32 @@ function buildCommentsPageMeta(items, opts = {}) {
       if (Number.isFinite(id) && (maxId == null || id > maxId)) maxId = id;
     }
   }
+
+  if (order === 'from-end') {
+    const hasMore = page > 1;
+    return {
+      page,
+      perPage,
+      hasMore,
+      nextPage: hasMore ? page - 1 : null,
+      order: 'from-end',
+      since: opts.since || null,
+      oldestCreatedAt: oldest,
+      newestCreatedAt: newest,
+      maxId,
+      loadedCount: list.length,
+    };
+  }
+
+  const nextPage = parseLinkNextPage(opts.linkHeader);
+  const hasMore =
+    nextPage != null || (opts.linkHeader == null && list.length >= perPage);
   return {
     page,
     perPage,
     hasMore: Boolean(hasMore),
     nextPage: nextPage ?? (hasMore ? page + 1 : null),
+    order,
     since: opts.since || null,
     oldestCreatedAt: oldest,
     newestCreatedAt: newest,
@@ -120,6 +149,7 @@ function advanceCommentsMeta(prevMeta, pageMeta, totalLoaded) {
     perPage: page.perPage ?? prev.perPage ?? DEFAULT_COMMENT_PAGE_SIZE,
     hasMore: Boolean(page.hasMore),
     nextPage: page.hasMore ? page.nextPage : null,
+    order: page.order || prev.order || 'asc',
     since: prev.since || null,
     oldestCreatedAt: minIso(prev.oldestCreatedAt, page.oldestCreatedAt),
     newestCreatedAt: maxIso(prev.newestCreatedAt, page.newestCreatedAt),
@@ -139,6 +169,7 @@ function sinceCursorFromMeta(meta) {
 const api = {
   DEFAULT_COMMENT_PAGE_SIZE,
   parseLinkNextPage,
+  parseLinkLastPage,
   linkHasMore,
   buildCommentsListUrl,
   clampPerPage,

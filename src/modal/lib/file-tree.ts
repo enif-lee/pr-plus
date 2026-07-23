@@ -184,6 +184,142 @@ export function formatFileExtensionLabel(ext) {
   return e ? `.${e}` : '∅';
 }
 
+/** Diff review filter: off | unresolved | resolved | pending */
+export type DiffReviewFilterMode =
+  | null
+  | 'unresolved'
+  | 'resolved'
+  | 'pending';
+
+/**
+ * True when threadCounts has at least one path with count > 0.
+ * @param {Map<string, number>|Record<string, number>|null|undefined} threadCounts
+ */
+export function hasAnyReviewThreads(threadCounts) {
+  if (!threadCounts) return false;
+  if (threadCounts instanceof Map) {
+    for (const n of threadCounts.values()) {
+      if (Number(n) > 0) return true;
+    }
+    return false;
+  }
+  if (typeof threadCounts === 'object') {
+    for (const k of Object.keys(threadCounts)) {
+      if (Number((threadCounts as any)[k]) > 0) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Sum all path counts in a Map / record.
+ * @param {Map<string, number>|Record<string, number>|null|undefined} threadCounts
+ * @returns {number}
+ */
+export function sumThreadCounts(threadCounts) {
+  if (!threadCounts) return 0;
+  let n = 0;
+  if (threadCounts instanceof Map) {
+    for (const v of threadCounts.values()) n += Number(v) || 0;
+    return n;
+  }
+  if (typeof threadCounts === 'object') {
+    for (const k of Object.keys(threadCounts)) {
+      n += Number((threadCounts as any)[k]) || 0;
+    }
+  }
+  return n;
+}
+
+function countOnPath(
+  threadCounts: Map<string, number> | Record<string, number> | null | undefined,
+  path: string
+) {
+  if (!path || !threadCounts) return 0;
+  if (threadCounts instanceof Map) return Number(threadCounts.get(path)) || 0;
+  return Number((threadCounts as any)[path]) || 0;
+}
+
+/**
+ * Filter files by review-thread mode.
+ * - null: no filter
+ * - 'unresolved': paths with submitted unresolved (non-pending) threads
+ * - 'resolved': paths with at least one resolved thread
+ * - 'pending': paths with at least one pending (unsubmitted) thread
+ * - 'all' (legacy): paths with any review thread
+ *
+ * When `pendingCounts` is provided, unresolved is max(0, unresolved − pending)
+ * so draft threads are not double-counted with the Pending filter.
+ *
+ * @param {Array<{ filename?: string, path?: string }>} files
+ * @param {Map<string, number>|Record<string, number>|null|undefined} allCounts
+ * @param {Map<string, number>|Record<string, number>|null|undefined} unresolvedCounts
+ * @param {DiffReviewFilterMode | 'all' | boolean | null | undefined} mode
+ * @param {Map<string, number>|Record<string, number>|null|undefined} [pendingCounts]
+ */
+export function filterFilesByReviewMode(
+  files,
+  allCounts,
+  unresolvedCounts,
+  mode,
+  pendingCounts: any = null
+) {
+  const list = Array.isArray(files) ? files : [];
+  let m: any = mode;
+  if (m === true) m = 'all'; // back-compat
+  if (
+    m !== 'all' &&
+    m !== 'unresolved' &&
+    m !== 'resolved' &&
+    m !== 'pending'
+  ) {
+    return list.slice();
+  }
+  return list.filter((f) => {
+    const path = f?.filename || f?.path || '';
+    const total = countOnPath(allCounts, path);
+    const unresolved = countOnPath(unresolvedCounts, path);
+    const pending = countOnPath(pendingCounts, path);
+    if (m === 'pending') return pending > 0;
+    if (m === 'unresolved') {
+      // Submitted open threads only when pendingCounts is known
+      if (pendingCounts != null) return Math.max(0, unresolved - pending) > 0;
+      return unresolved > 0;
+    }
+    if (m === 'resolved') return total > unresolved; // at least one resolved
+    return total > 0; // 'all'
+  });
+}
+
+/** @deprecated use filterFilesByReviewMode */
+export function filterFilesWithReviewThreads(files, threadCounts, reviewOnly) {
+  return filterFilesByReviewMode(
+    files,
+    threadCounts,
+    threadCounts,
+    reviewOnly ? 'all' : null
+  );
+}
+
+/**
+ * Keep only paths not marked viewed (unread). Off when unreadOnly is false.
+ * @param {Array<{ filename?: string, path?: string }>} files
+ * @param {Set<string>|string[]|null|undefined} viewedPaths
+ * @param {boolean} unreadOnly
+ */
+export function filterFilesUnreadOnly(files, viewedPaths, unreadOnly) {
+  const list = Array.isArray(files) ? files : [];
+  if (!unreadOnly) return list.slice();
+  const viewed =
+    viewedPaths instanceof Set
+      ? viewedPaths
+      : new Set(Array.isArray(viewedPaths) ? viewedPaths : []);
+  return list.filter((f) => {
+    const path = f?.filename || f?.path || '';
+    return path ? !viewed.has(path) : false;
+  });
+}
+
 /**
  * Collect every dir path in a nested tree (for auto-expand while filtering).
  * @param {TreeNode[]} nodes

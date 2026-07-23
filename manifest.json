@@ -24,6 +24,8 @@
         "src/content-bridge.js",
         "src/content-bootstrap.js",
         "src/content.js",
+        "src/modal/pure/detail-idb-cache.js",
+        "src/modal/pure/detail-cache.js",
         "src/modal/dist/pr-modal.bundle.js",
         "src/pr-modal-host.js"
       ],

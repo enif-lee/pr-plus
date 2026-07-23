@@ -15,10 +15,13 @@ const appSrc = [
   fs.readFileSync(path.join(__dirname, '../src/modal/views/conversation/ConversationView.tsx'), 'utf8'),
 ].join('\n');
 
-// Host refresh must invalidate cache then re-fetch (real write→reload path)
+// Host soft-refresh revalidates via fetchPrDetail and writes detailCache.set
+// (SWR: keep prior threads until thread phase; no hard invalidate wipe)
 assert.ok(
-  hostSrc.includes('detailCache.invalidate') && hostSrc.includes('fetchPrDetail'),
-  'onRefresh must invalidate cache before fetchPrDetail'
+  hostSrc.includes('onRefresh:') &&
+    hostSrc.includes('fetchPrDetail') &&
+    hostSrc.includes('detailCache.set'),
+  'onRefresh must re-fetch PR detail and update detailCache'
 );
 // Soft refresh must NOT flip loading=true mid-flight (that clobbered optimistic
 // assignees/labels). openModal still sets loading for the initial open path.
@@ -57,10 +60,37 @@ assert.ok(
   (appSrc.match(/await onRefresh\?\.\(\)/g) || []).length >= 5,
   'multiple write paths must await onRefresh'
 );
-// Meta writes patch local+host immediately, then debounced single soft-refresh
-// (detailFetchGen drops older in-flight fetches so stale meta cannot win).
+// Meta writes (labels/assignees/reviewers/milestone) patch local+host only —
+// no full PR detail re-fetch after a successful write API.
 assert.ok(appSrc.includes('commitMetaPatch'), 'meta writes patch local+host detail');
-assert.ok(appSrc.includes('scheduleMetaRefresh'), 'meta writes schedule debounced refresh');
+assert.ok(
+  !appSrc.includes('scheduleMetaRefresh'),
+  'meta writes must not schedule full soft-refresh'
+);
+
+function extractFn(src, name) {
+  const m = src.match(
+    new RegExp(
+      `(?:async\\s+)?function\\s+${name}\\b[\\s\\S]*?(?=\\n  (?:async\\s+)?function\\s+|\\n  const\\s+[a-zA-Z]+\\s*=)`,
+      'm'
+    )
+  );
+  return m ? m[0] : '';
+}
+for (const name of [
+  'applyAddReviewer',
+  'onRemoveReviewer',
+  'applyAddAssignees',
+  'onRemoveAssignee',
+  'applySetLabels',
+  'applyMilestoneNumber',
+  'applyRerequestReviewers',
+]) {
+  const body = extractFn(appSrc, name);
+  assert.ok(body, `handler ${name} exists`);
+  assert.ok(body.includes('commitMetaPatch'), `${name} commits local meta patch`);
+  assert.ok(!/await\s+onRefresh\s*\?/.test(body), `${name} must not full-refresh after success`);
+}
 
 // Per-region skeleton markers — must be wired to real loading flags
 assert.ok(appSrc.includes('prp-section-skeleton') || appSrc.includes('LoadingSkeleton'));
@@ -74,20 +104,25 @@ assert.ok(
   appSrc.includes('loading && !detail') || appSrc.includes('Boolean(loading && !detail)'),
   'isInitialLoad derived from loading && !detail'
 );
-// Pagination labels match newest-first paging
-assert.ok(appSrc.includes('>Newer<') || appSrc.includes('Newer'));
-assert.ok(appSrc.includes('>Older<') || appSrc.includes('Older'));
+// Conversation uses virtual list + dual-window gap (Load more / Load all),
+// not client-side Newer/Older page buttons.
 assert.ok(
-  appSrc.includes('hasNewer') || appSrc.includes('hasOlder'),
-  'pagination uses hasNewer/hasOlder from pure pager'
+  appSrc.includes('Load more') || appSrc.includes('Load more…'),
+  'dual-window gap exposes Load more'
+);
+assert.ok(appSrc.includes('Load all'), 'dual-window gap exposes Load all');
+assert.ok(
+  appSrc.includes('onLoadMoreReviewThreads') ||
+    appSrc.includes('VirtualConversationList'),
+  'conversation wires virtual list / thread window loader'
 );
 
 const log = [
   'refresh-loading.test.js: ok',
-  'host-invalidate=true',
+  'host-revalidate=true',
   `onRefresh-calls=${(appSrc.match(/await onRefresh\?\.\(\)/g) || []).length}`,
   'sectionLoading=isInitialLoad',
-  'pagination-newer-older=true',
+  'pagination-load-more-all=true',
 ].join('\n');
 fs.writeFileSync(path.join(SCRATCH, 'refresh-loading-test.log'), log + '\n');
 console.log(log);

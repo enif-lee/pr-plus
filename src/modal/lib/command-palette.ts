@@ -250,8 +250,16 @@ export function buildPaletteCommands(detail: any) {
     },
   ];
 
-  // Dynamic reviewer/assignee chips from detail
+  // Dynamic reviewer/assignee chips from detail (skip bots — not removable)
+  const isBotLogin = (login: string) => {
+    const key = String(login || '').toLowerCase();
+    if (d.actorIsBot && typeof d.actorIsBot === 'object') {
+      if (d.actorIsBot[key]) return true;
+    }
+    return /\[bot\]$/i.test(String(login || ''));
+  };
   for (const login of d.requestedReviewers || []) {
+    if (isBotLogin(login)) continue;
     cmds.push({
       id: `rm-rev-${login}`,
       title: `Remove reviewer ${login}`,
@@ -262,6 +270,7 @@ export function buildPaletteCommands(detail: any) {
     });
   }
   for (const login of d.assignees || []) {
+    if (isBotLogin(login)) continue;
     cmds.push({
       id: `rm-asg-${login}`,
       title: `Unassign ${login}`,

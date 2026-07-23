@@ -24,6 +24,8 @@ const tests = [
   'fetch-pulls.test.js',
   'fetch-pr-detail.test.js',
   'detail-cache.test.js',
+  'detail-idb-cache.test.js',
+  'review-threads-revalidate.test.js',
   'aside-lists.test.js',
   'line-selection.test.js',
   'comment-nav.test.js',
@@ -41,6 +43,7 @@ const tests = [
   'ui-chrome-goal.test.js',
   'branch-rerequest.test.js',
   'merge-box.test.js',
+  'checks.test.js',
   'narrow-chrome.test.js',
   'file-nav-layout.test.js',
   'file-nav-ui.test.js',
@@ -48,6 +51,7 @@ const tests = [
   'uri-route.test.js',
   'uri-route-host.test.js',
   'diff-snippet.test.js',
+  'diff-expand-gap.test.js',
   'pr-edit-api.test.js',
   'searchable-select.test.js',
   'diff-thread-refresh.test.js',
@@ -67,6 +71,7 @@ const tests = [
   'pr-modal-search.test.js',
   'refactor-memo-store.test.js',
   'memo-render-count.test.js',
+  'diff-scroll-perf.test.js',
   'verify-manifest.js',
 ];
 

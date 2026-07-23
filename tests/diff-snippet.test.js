@@ -100,8 +100,46 @@ const reviewComments = [
   },
 ];
 const grouped = groupComments(reviewComments);
-assert.equal(grouped.get('a.js:2').length, 1, 'only root in groupComments');
+assert.equal(grouped.get('a.js:2').length, 1, 'only root in groupComments (legacy key)');
+assert.equal(grouped.get('a.js:RIGHT:2').length, 1, 'RIGHT side key');
 assert.equal(grouped.get('a.js:2')[0].id, 10);
+
+// LEFT-side + outdated (originalLine only) still produce navigable inline rows
+const sideRows = flattenFilesToVirtualRows(
+  [
+    {
+      filename: 'b.js',
+      status: 'modified',
+      additions: 1,
+      deletions: 1,
+      patch: '@@ -1,3 +1,3 @@\n keep\n-old\n+new\n keep2\n',
+    },
+  ],
+  'unified',
+  {
+    reviewComments: [
+      { id: 20, path: 'b.js', line: 2, side: 'LEFT', body: 'on deletion' },
+      {
+        id: 21,
+        path: 'b.js',
+        line: null,
+        originalLine: 900,
+        side: 'RIGHT',
+        body: 'outdated orphan',
+        outdated: true,
+      },
+    ],
+  }
+);
+const sideInline = sideRows.filter((r) => r.kind === 'inline-comment');
+assert.ok(
+  sideInline.some((r) => r.commentId === 20 && r.side === 'LEFT'),
+  'LEFT-side comment anchored on oldLine'
+);
+assert.ok(
+  sideInline.some((r) => r.commentId === 21),
+  'outdated / missing-line comment kept as file orphan for Diff nav'
+);
 
 const threadRows = flattenFilesToVirtualRows(
   [

@@ -95,6 +95,206 @@ assert.ok(!items.some((i) => i.author === 'b' && i.kind === 'review'));
 const times = items.map((i) => i.at);
 assert.deepEqual(times, [...times].sort().reverse());
 
+// Multi-file threads under the same pull_request_review → review-group
+{
+  const multi = buildConversationTimeline(
+    {
+      viewerLogin: 'alice',
+      files: [],
+      reviews: [
+        {
+          id: 900,
+          author: 'coderabbitai[bot]',
+          state: 'COMMENTED',
+          body: '## Walkthrough\nLooks good overall.',
+          submittedAt: '2026-03-01T12:00:00Z',
+          isBot: true,
+        },
+      ],
+      comments: [],
+      reviewComments: [
+        {
+          id: 101,
+          author: 'coderabbitai[bot]',
+          body: 'note a',
+          path: 'a.ts',
+          line: 10,
+          reviewId: 900,
+          threadNodeId: 'PRRT_a',
+          createdAt: '2026-03-01T12:00:01Z',
+          resolved: false,
+        },
+        {
+          id: 102,
+          author: 'coderabbitai[bot]',
+          body: 'note b',
+          path: 'b.ts',
+          line: 20,
+          reviewId: 900,
+          threadNodeId: 'PRRT_b',
+          createdAt: '2026-03-01T12:00:02Z',
+          resolved: true,
+        },
+        {
+          id: 103,
+          author: 'coderabbitai[bot]',
+          body: 'note c',
+          path: 'c.ts',
+          line: 5,
+          reviewId: 900,
+          threadNodeId: 'PRRT_c',
+          createdAt: '2026-03-01T12:00:03Z',
+          resolved: false,
+        },
+      ],
+    },
+    { snippetForComment }
+  );
+  const groups = multi.filter((i) => i.kind === 'review-group');
+  assert.equal(groups.length, 1, 'one review-group for multi-file review');
+  const g = groups[0];
+  assert.equal(g.id, 900);
+  assert.equal(g.threadCount, 3);
+  assert.equal(g.resolvedCount, 1);
+  assert.equal(g.threads.length, 3);
+  // Sorted by path then line
+  assert.deepEqual(
+    g.threads.map((t) => t.path),
+    ['a.ts', 'b.ts', 'c.ts']
+  );
+  assert.ok(g.isBot, 'bot flag from review');
+  assert.ok(String(g.body).includes('Walkthrough'));
+  // Standalone review event not duplicated for grouped review
+  assert.ok(!multi.some((i) => i.kind === 'review' && i.id === 900));
+  // No flat review-thread for those comments
+  assert.ok(
+    !multi.some(
+      (i) =>
+        i.kind === 'review-thread' && [101, 102, 103].includes(Number(i.id))
+    )
+  );
+}
+
+// Single COMMENTED thread without review body stays flat (not grouped)
+{
+  const flat = buildConversationTimeline(
+    {
+      viewerLogin: 'alice',
+      files: [],
+      reviews: [
+        {
+          id: 50,
+          author: 'bob',
+          state: 'COMMENTED',
+          body: '',
+          submittedAt: '2026-03-02T00:00:00Z',
+        },
+      ],
+      comments: [],
+      reviewComments: [
+        {
+          id: 51,
+          author: 'bob',
+          body: 'one liner',
+          path: 'solo.ts',
+          line: 1,
+          reviewId: 50,
+          createdAt: '2026-03-02T00:00:01Z',
+        },
+      ],
+    },
+    { snippetForComment }
+  );
+  assert.ok(
+    flat.some((i) => i.kind === 'review-thread' && i.id === 51),
+    'single empty-body COMMENTED review stays as review-thread'
+  );
+  assert.ok(!flat.some((i) => i.kind === 'review-group'));
+}
+
+// Single thread under a review with body → still group (GitHub-style card)
+{
+  const withBody = buildConversationTimeline(
+    {
+      viewerLogin: 'alice',
+      files: [],
+      reviews: [
+        {
+          id: 60,
+          author: 'carol',
+          state: 'COMMENTED',
+          body: 'Please check this.',
+          submittedAt: '2026-03-03T00:00:00Z',
+        },
+      ],
+      comments: [],
+      reviewComments: [
+        {
+          id: 61,
+          author: 'carol',
+          body: 'here',
+          path: 'x.ts',
+          line: 3,
+          reviewId: 60,
+          createdAt: '2026-03-03T00:00:01Z',
+        },
+      ],
+    },
+    { snippetForComment }
+  );
+  const g = withBody.find((i) => i.kind === 'review-group');
+  assert.ok(g, 'review body causes grouping even for one thread');
+  assert.equal(g.threadCount, 1);
+  assert.equal(g.body, 'Please check this.');
+}
+
+// Pending review comments embed as review-group (not flat badge-only)
+{
+  const pendingTl = buildConversationTimeline(
+    {
+      viewerLogin: 'alice',
+      files: [],
+      reviews: [],
+      viewerPendingReview: { id: 777, author: 'alice' },
+      comments: [],
+      reviewComments: [
+        {
+          id: 701,
+          author: 'alice',
+          body: 'pending note a',
+          path: 'p1.ts',
+          line: 1,
+          pending: true,
+          pendingReviewId: 777,
+          reviewId: 777,
+          createdAt: '2026-04-01T00:00:00Z',
+        },
+        {
+          id: 702,
+          author: 'alice',
+          body: 'pending note b',
+          path: 'p2.ts',
+          line: 2,
+          pending: true,
+          pendingReviewId: 777,
+          reviewId: 777,
+          createdAt: '2026-04-01T00:00:01Z',
+        },
+      ],
+    },
+    { snippetForComment }
+  );
+  const pg = pendingTl.filter((i) => i.kind === 'review-group');
+  assert.equal(pg.length, 1, 'pending threads share one review-group');
+  assert.equal(pg[0].state, 'PENDING');
+  assert.equal(pg[0].pending, true);
+  assert.equal(pg[0].threadCount, 2);
+  assert.ok(
+    !pendingTl.some((i) => i.kind === 'review-thread' && [701, 702].includes(i.id)),
+    'pending not left as flat review-threads'
+  );
+}
+
 const many = Array.from({ length: 40 }, (_, i) => ({
   key: `k${i}`,
   kind: 'issue-comment',

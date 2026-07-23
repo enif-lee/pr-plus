@@ -1,9 +1,25 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Button } from '@common/Button';
 import { Badge } from '@common/Badge';
+import { TipPopover } from '@common/TipPopover';
 import { UserLink } from '@common/UserLink';
 import { RefLink } from '@common/RefLink';
-import { PenIcon } from '@common/PenIcon';
+import {
+  IconArrowLeft,
+  IconCheck,
+  IconCircleSlash,
+  IconCopy,
+  IconKebab,
+  IconLinkExternal,
+  IconPencil,
+  IconShellMode,
+  IconX,
+  IconBell,
+  IconBellSlash,
+  IconSync,
+  IconFileDiff,
+  IconConversation,
+} from '@common/icons';
 import { LAYOUT_DIFF } from '@lib/layout-mode';
 import { branchRefCopyText, copyTextToClipboard } from '@lib/copy-to-clipboard';
 import { hasChecksData } from '../conversation/ChecksPanel';
@@ -29,6 +45,7 @@ export function Header(props: any) {
     sectionLoading,
     shortcutMod,
     onSubscribe,
+    onRefresh = null,
     shellMode = 'modal',
     onToggleShell,
     titleEditSignal = 0,
@@ -206,9 +223,8 @@ export function Header(props: any) {
             />
             <button
               type="button"
-              className="prp-icon-btn prp-header__title-action"
+              className="prp-icon-btn prp-header__title-action prp-has-tip"
               disabled={actionBusy || !String(titleDraft || '').trim()}
-              title="Save title"
               aria-label="Save title"
               onMouseDown={(e) => {
                 e.preventDefault();
@@ -216,13 +232,13 @@ export function Header(props: any) {
               }}
               onClick={() => void commitEditTitle()}
             >
-              ✓
+              <IconCheck size={14} />
+              <TipPopover title="Save title" />
             </button>
             <button
               type="button"
-              className="prp-icon-btn prp-header__title-action"
+              className="prp-icon-btn prp-header__title-action prp-has-tip"
               disabled={actionBusy}
-              title="Cancel"
               aria-label="Cancel title edit"
               onMouseDown={(e) => {
                 e.preventDefault();
@@ -230,7 +246,8 @@ export function Header(props: any) {
               }}
               onClick={cancelEditTitle}
             >
-              ✕
+              <IconX size={14} />
+              <TipPopover title="Cancel" />
             </button>
           </div>
         ) : (
@@ -239,13 +256,13 @@ export function Header(props: any) {
             {typeof onEditTitle === 'function' ? (
               <button
                 type="button"
-                className="prp-icon-btn prp-header__title-edit-btn"
+                className="prp-icon-btn prp-header__title-edit-btn prp-has-tip"
                 disabled={actionBusy}
-                title="Edit title"
                 aria-label="Edit title"
                 onClick={beginEditTitle}
               >
-                <PenIcon />
+                <IconPencil size={14} />
+                <TipPopover title="Edit title" />
               </button>
             ) : null}
           </>
@@ -302,7 +319,11 @@ export function Header(props: any) {
                 }
                 aria-label={`Copy base branch ${detail.baseRef || ''}`}
               >
-                <span aria-hidden="true">{copiedRef === 'base' ? '✓' : '⎘'}</span>
+                {copiedRef === 'base' ? (
+                  <IconCheck size={12} aria-hidden="true" />
+                ) : (
+                  <IconCopy size={12} aria-hidden="true" />
+                )}
               </button>
               <button
                 type="button"
@@ -316,11 +337,11 @@ export function Header(props: any) {
                   if (baseBranchRef) baseBranchRef.current = el;
                 }}
               >
-                <PenIcon className="prp-branch-tag__edit" size={12} />
+                <IconPencil className="prp-branch-tag__edit" size={12} />
               </button>
             </span>
             <span className="prp-branch-split__arrow" aria-hidden="true">
-              ←
+              <IconArrowLeft size={12} />
             </span>
             <span className="prp-branch-tag prp-branch-tag--head">
               <RefLink
@@ -343,7 +364,11 @@ export function Header(props: any) {
                 }
                 aria-label={`Copy head branch ${detail.headRef || ''}`}
               >
-                <span aria-hidden="true">{copiedRef === 'head' ? '✓' : '⎘'}</span>
+                {copiedRef === 'head' ? (
+                  <IconCheck size={12} aria-hidden="true" />
+                ) : (
+                  <IconCopy size={12} aria-hidden="true" />
+                )}
               </button>
             </span>
           </span>
@@ -358,81 +383,167 @@ export function Header(props: any) {
         <div className="prp-header__actions">
           {/* Wide: inline actions. Narrow: hidden via CSS; use overflow menu. */}
           <div className="prp-header__actions-inline">
-            {typeof onToggleShell === 'function' ? (
+            {/* Shell toggle only on conversation — side sheet is not used for Diff */}
+            {typeof onToggleShell === 'function' &&
+            effectiveLayout !== LAYOUT_DIFF ? (
               <button
                 type="button"
-                className="prp-shell-toggle"
+                className="prp-header__icon-btn prp-shell-toggle prp-has-tip"
                 onClick={onToggleShell}
                 aria-label={
-                  shellMode === 'sheet' ? 'Switch to modal view' : 'Switch to side sheet view'
-                }
-                title={
-                  shellMode === 'sheet' ? 'Switch to modal view' : 'Switch to side sheet view'
+                  shellMode === 'sheet'
+                    ? 'Switch to modal view'
+                    : 'Switch to side sheet view'
                 }
                 aria-pressed={shellMode === 'sheet'}
                 data-shell={shellMode}
               >
-                <span aria-hidden="true">{shellMode === 'sheet' ? '▢' : '◨'}</span>
+                <IconShellMode sheet={shellMode === 'sheet'} size={16} />
+                <TipPopover
+                  title={
+                    shellMode === 'sheet'
+                      ? 'Switch to modal view'
+                      : 'Switch to side sheet view'
+                  }
+                />
               </button>
             ) : null}
             {typeof onSubscribe === 'function' ? (
-              <Button
-                size="sm"
+              <button
+                type="button"
+                className={`prp-header__icon-btn prp-has-tip${
+                  subscribed ? ' prp-header__icon-btn--subscribed' : ''
+                }`}
                 disabled={actionBusy}
                 onClick={() => onSubscribe(!subscribed)}
-                title={subscribed ? 'Unsubscribe from notifications' : 'Subscribe to notifications'}
+                aria-label={
+                  subscribed
+                    ? 'Unsubscribe from notifications'
+                    : 'Subscribe to notifications'
+                }
+                aria-pressed={subscribed}
               >
-                {subscribed ? 'Unsubscribe' : 'Subscribe'}
-              </Button>
+                {/* Subscribed → muted (slash); not subscribed → normal bell */}
+                {subscribed ? (
+                  <IconBellSlash size={16} aria-hidden="true" />
+                ) : (
+                  <IconBell size={16} aria-hidden="true" />
+                )}
+                <TipPopover
+                  title={
+                    subscribed
+                      ? 'Unsubscribe from notifications'
+                      : 'Subscribe to notifications'
+                  }
+                />
+              </button>
             ) : null}
-            <Button
-              variant="primary"
+            {typeof onRefresh === 'function' ? (
+              <button
+                type="button"
+                className="prp-header__icon-btn prp-header__refresh-btn prp-has-tip"
+                disabled={actionBusy || sectionLoading}
+                onClick={() => onRefresh()}
+                aria-label={
+                  effectiveLayout === LAYOUT_DIFF
+                    ? 'Refresh metadata and all review threads'
+                    : 'Refresh metadata and visible review threads'
+                }
+              >
+                <IconSync size={16} aria-hidden="true" />
+                <TipPopover
+                  title={
+                    effectiveLayout === LAYOUT_DIFF
+                      ? 'Refresh (metadata + all threads)'
+                      : 'Refresh (metadata + visible threads)'
+                  }
+                />
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="prp-header__icon-btn prp-header__icon-btn--layout prp-has-tip"
               onClick={onToggleDiff}
-              shortcut={shortcutMod ? `${shortcutMod}.` : undefined}
+              aria-label={
+                effectiveLayout === LAYOUT_DIFF
+                  ? 'Show conversation'
+                  : 'Show file diff'
+              }
+              data-layout={
+                effectiveLayout === LAYOUT_DIFF ? 'diff' : 'conversation'
+              }
             >
-              {effectiveLayout === LAYOUT_DIFF ? 'Conversation' : 'Diff'}
-            </Button>
+              {effectiveLayout === LAYOUT_DIFF ? (
+                <IconConversation size={16} aria-hidden="true" />
+              ) : (
+                <IconFileDiff size={16} aria-hidden="true" />
+              )}
+              <TipPopover
+                title={
+                  effectiveLayout === LAYOUT_DIFF
+                    ? 'Show conversation'
+                    : 'Show file diff'
+                }
+                shortcut={shortcutMod ? `${shortcutMod}.` : null}
+              />
+            </button>
             {canClose ? (
-              <Button size="sm" variant="danger" disabled={actionBusy} onClick={onClosePr}>
-                Close
-              </Button>
+              <button
+                type="button"
+                className="prp-header__icon-btn prp-header__icon-btn--danger prp-has-tip"
+                disabled={actionBusy}
+                onClick={onClosePr}
+                aria-label="Close pull request"
+              >
+                <IconCircleSlash size={16} aria-hidden="true" />
+                <TipPopover title="Close pull request" />
+              </button>
             ) : null}
             {canReopen ? (
-              <Button size="sm" variant="ok" disabled={actionBusy} onClick={onReopenPr}>
+              <Button
+                size="sm"
+                variant="ok"
+                disabled={actionBusy}
+                onClick={onReopenPr}
+                title="Reopen pull request"
+              >
                 Reopen PR
               </Button>
             ) : null}
             {detail.htmlUrl ? (
               <a
-                className="prp-btn prp-btn--default prp-btn--size-default"
+                className="prp-header__icon-btn prp-has-tip"
                 href={detail.htmlUrl}
                 target="_blank"
                 rel="noreferrer"
+                aria-label="Open on GitHub"
               >
-                Open on GitHub
+                <IconLinkExternal size={16} aria-hidden="true" />
+                <TipPopover title="Open on GitHub" />
               </a>
             ) : null}
-            <Button onClick={onClose} aria-label="Close" shortcut="Esc">
-              ✕
+            <Button onClick={onClose} title="Close" shortcut="Esc">
+              <IconX size={14} />
             </Button>
           </div>
 
-          {/* Narrow: ⋯ overflow menu (same handlers as inline row) */}
+          {/* Narrow: overflow menu (same handlers as inline row) */}
           <div className="prp-header__actions-more" ref={overflowRef}>
             <button
               type="button"
-              className="prp-header__more-btn"
+              className="prp-header__more-btn prp-has-tip"
               aria-haspopup="menu"
               aria-expanded={overflowOpen}
               aria-label="More actions"
-              title="More actions"
               onClick={() => setOverflowOpen((o) => !o)}
             >
-              ⋯
+              <IconKebab size={16} />
+              <TipPopover title="More actions" />
             </button>
             {overflowOpen ? (
               <ul className="prp-header__more-menu" role="menu">
-                {typeof onToggleShell === 'function' ? (
+                {typeof onToggleShell === 'function' &&
+                effectiveLayout !== LAYOUT_DIFF ? (
                   <li role="none">
                     <button
                       type="button"
@@ -443,7 +554,9 @@ export function Header(props: any) {
                         onToggleShell();
                       }}
                     >
-                      {shellMode === 'sheet' ? 'Switch to modal view' : 'Switch to side sheet'}
+                      {shellMode === 'sheet'
+                        ? 'Switch to modal view'
+                        : 'Switch to side sheet'}
                     </button>
                   </li>
                 ) : null}
@@ -460,6 +573,24 @@ export function Header(props: any) {
                       }}
                     >
                       {subscribed ? 'Unsubscribe' : 'Subscribe'}
+                    </button>
+                  </li>
+                ) : null}
+                {typeof onRefresh === 'function' ? (
+                  <li role="none">
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="prp-header__more-item"
+                      disabled={actionBusy || sectionLoading}
+                      onClick={() => {
+                        setOverflowOpen(false);
+                        onRefresh();
+                      }}
+                    >
+                      {effectiveLayout === LAYOUT_DIFF
+                        ? 'Refresh (all threads)'
+                        : 'Refresh (visible threads)'}
                     </button>
                   </li>
                 ) : null}

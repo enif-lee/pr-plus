@@ -12,6 +12,10 @@ const {
   formatFileExtensionLabel,
   collectDirPaths,
   buildNestedFileTree,
+  hasAnyReviewThreads,
+  filterFilesByReviewMode,
+  filterFilesWithReviewThreads,
+  filterFilesUnreadOnly,
 } = require('../src/modal/lib/file-tree.ts');
 
 assert.equal(fileExtensionFromPath('src/a.ts'), 'ts');
@@ -67,6 +71,94 @@ assert.ok(dirs.has('docs'));
   assert.ok(app.includes('fileTreeExpandKeyRef'), 'expand once per PR');
 }
 
+// Review filter modes (Unresolved / Resolved / Pending / off; legacy 'all')
+{
+  const allCounts = new Map([
+    ['src/a.ts', 2],
+    ['src/b.ts', 0],
+    ['docs/README.md', 1],
+  ]);
+  const unresolved = new Map([
+    ['src/a.ts', 1],
+    // README only resolved threads (1 total, 0 unresolved)
+  ]);
+  assert.equal(hasAnyReviewThreads(allCounts), true);
+  assert.equal(hasAnyReviewThreads(new Map()), false);
+  const allMode = filterFilesByReviewMode(files, allCounts, unresolved, 'all');
+  assert.deepEqual(
+    allMode.map((f) => f.filename).sort(),
+    ['docs/README.md', 'src/a.ts']
+  );
+  const unres = filterFilesByReviewMode(files, allCounts, unresolved, 'unresolved');
+  assert.deepEqual(
+    unres.map((f) => f.filename),
+    ['src/a.ts']
+  );
+  const resolved = filterFilesByReviewMode(files, allCounts, unresolved, 'resolved');
+  assert.deepEqual(
+    resolved.map((f) => f.filename).sort(),
+    ['docs/README.md', 'src/a.ts'],
+    'resolved: files with at least one resolved thread'
+  );
+  assert.equal(
+    filterFilesByReviewMode(files, allCounts, unresolved, null).length,
+    5
+  );
+  // back-compat boolean helper
+  assert.equal(filterFilesWithReviewThreads(files, allCounts, true).length, 2);
+
+  // Pending filter + unresolved excludes pending-only paths
+  const pendingCounts = new Map([
+    ['src/a.ts', 1], // all open threads on a.ts are pending drafts
+    ['src/c.tsx', 1],
+  ]);
+  const unresolvedWithPending = new Map([
+    ['src/a.ts', 1],
+    ['src/c.tsx', 1],
+  ]);
+  const allWithPending = new Map([
+    ['src/a.ts', 2],
+    ['src/c.tsx', 1],
+    ['docs/README.md', 1],
+  ]);
+  const pendingOnly = filterFilesByReviewMode(
+    files,
+    allWithPending,
+    unresolvedWithPending,
+    'pending',
+    pendingCounts
+  );
+  assert.deepEqual(
+    pendingOnly.map((f) => f.filename).sort(),
+    ['src/a.ts', 'src/c.tsx'],
+    'pending: paths with pending threads'
+  );
+  const unresExPending = filterFilesByReviewMode(
+    files,
+    allWithPending,
+    unresolvedWithPending,
+    'unresolved',
+    pendingCounts
+  );
+  assert.deepEqual(
+    unresExPending.map((f) => f.filename),
+    [],
+    'unresolved excludes pending-only open threads when pendingCounts provided'
+  );
+}
+
+// Unread-only filter (not viewed checkbox paths)
+{
+  const viewed = new Set(['src/a.ts', 'docs/README.md']);
+  const unread = filterFilesUnreadOnly(files, viewed, true);
+  assert.deepEqual(
+    unread.map((f) => f.filename).sort(),
+    ['Makefile', 'src/b.ts', 'src/c.tsx']
+  );
+  assert.equal(filterFilesUnreadOnly(files, viewed, false).length, 5);
+  assert.equal(filterFilesUnreadOnly(files, [], true).length, 5);
+}
+
 // UI wiring: no Files header; extension chips next to search
 const treeUi = fs.readFileSync(
   path.join(__dirname, '../src/modal/views/diff/FolderFileTree.tsx'),
@@ -77,6 +169,35 @@ assert.ok(!/head-label|>Files</.test(treeUi), 'no Files label');
 assert.ok(treeUi.includes('prp-filetree__ext'), 'extension chips');
 assert.ok(treeUi.includes('listFileExtensions'), 'uses extension list helper');
 assert.ok(treeUi.includes('filterFilesByExtensions'), 'filters by extension');
+assert.ok(treeUi.includes('filterFilesUnreadOnly'), 'unread-only filter helper');
+assert.ok(treeUi.includes('Unread'), 'Unread chip in files navigator');
+assert.ok(
+  !treeUi.includes('Review only'),
+  'review filter moved out of files navigator'
+);
+const toolbar = fs.readFileSync(
+  path.join(__dirname, '../src/modal/views/chrome/DiffToolbar.tsx'),
+  'utf8'
+);
+assert.ok(toolbar.includes('Unresolved'), 'Unresolved toggle in Diff toolbar');
+assert.ok(toolbar.includes('Resolved'), 'Resolved toggle in Diff toolbar');
+assert.ok(toolbar.includes("reviewFilter === 'resolved'"), 'Resolved mode wiring');
+assert.ok(toolbar.includes("reviewFilter === 'pending'"), 'Pending mode wiring');
+assert.ok(toolbar.includes('prp-review-filter__count'), 'filter counts on toggles');
+assert.ok(!toolbar.includes('{pending} pending'), 'pending N badge removed');
+assert.ok(!toolbar.includes('>All<'), 'All toggle removed');
+assert.ok(toolbar.includes('prp-review-filter'), 'distinct review filter chrome');
+const appSrc = fs.readFileSync(
+  path.join(__dirname, '../src/modal/app/PrModalApp.tsx'),
+  'utf8'
+);
+assert.ok(appSrc.includes('filterFilesByReviewMode'), 'App filters files for nav+diff');
+assert.ok(appSrc.includes('displayFiles'), 'shared filtered list for nav+diff');
+assert.ok(appSrc.includes('filterReviewRootsForNav'), 'nav roots respect review filter');
+assert.ok(appSrc.includes('fileExtFilter'), 'file ext filter owned by App');
+assert.ok(appSrc.includes('pendingThreadCounts'), 'pending path counts for filter');
+assert.ok(appSrc.includes('unresolvedCount'), 'passes unresolved count to toolbar');
+assert.ok(appSrc.includes('resolvedCount'), 'passes resolved count to toolbar');
 
 const css = fs.readFileSync(
   path.join(__dirname, '../src/modal/styles.css'),

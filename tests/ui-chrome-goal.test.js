@@ -20,7 +20,6 @@ const conv = read('src/modal/views/conversation/ConversationView.tsx');
 const app = read('src/modal/app/PrModalApp.tsx');
 const toolbar = read('src/modal/views/chrome/DiffToolbar.tsx');
 const commitFilter = read('src/modal/views/diff/DiffCommitFilter.tsx');
-const pen = read('src/modal/components/common/PenIcon.tsx');
 const css = read('src/modal/styles.css');
 const bundle = read('src/modal/dist/pr-modal.bundle.js');
 
@@ -32,6 +31,30 @@ assert.ok(
     conv.includes('timeline-review-thread'),
   'reply composer lives inside thread box'
 );
+const inlineThread = read('src/modal/views/diff/InlineThread.tsx');
+assert.ok(
+  conv.includes('threadCollapseOverrides') &&
+    conv.includes('isReviewThreadCollapsed') &&
+    conv.includes('toggleThreadCollapse') &&
+    conv.includes('onToggleCollapse') &&
+    (inlineThread.includes('Expand thread') ||
+      inlineThread.includes('Collapse thread')),
+  'review threads collapse (resolved by default; open threads also toggleable)'
+);
+assert.ok(
+  (inlineThread.includes('prp-md--collapsed-preview') ||
+    conv.includes('prp-md--collapsed-preview')) &&
+    (inlineThread.includes('MarkdownView') || conv.includes('MarkdownView')),
+  'collapsed thread preview renders markdown'
+);
+assert.ok(conv.includes('reverseComments'), 'supports reverse comments layout pref');
+assert.ok(
+  conv.includes("onLoadMoreReviewThreads?.('all')") ||
+    conv.includes('onLoadMoreReviewThreads?.("all")') ||
+    /onLoadMoreReviewThreads\?\.\(['"]all['"]\)/.test(conv),
+  'Load all drains remaining review threads'
+);
+assert.ok(conv.includes('Load all'), 'Load all control next to Load more');
 assert.ok(app.includes('onReplyToThread={onReplyToThread}'), 'App wires reply to ConversationView');
 assert.ok(app.includes('replyToReviewComment'), 'uses review reply API');
 assert.ok(
@@ -63,9 +86,16 @@ assert.ok(statsLive > primaryLive && statsLive < secondaryLive, 'stats on primar
 assert.ok(!header.includes('if (shellMode ==='), 'no shell mode layout fork');
 assert.ok(header.includes('data-shell={shellMode}'), 'shell attr only for styling hooks');
 
-// --- (c) pen icon not ✎ on header edits ---
-assert.ok(pen.includes('prp-pen-icon') || pen.includes('viewBox'), 'PenIcon component');
-assert.ok(header.includes('PenIcon'), 'Header uses PenIcon');
+// --- (c) edit icons use GitHub Octicons (not ✎ glyph) ---
+const icons = fs.readFileSync(path.join(root, 'src/modal/components/common/icons.tsx'), 'utf8');
+assert.ok(
+  icons.includes('@primer/octicons-react') && icons.includes('PencilIcon'),
+  'shared Octicons module with PencilIcon'
+);
+assert.ok(
+  header.includes('IconPencil') || header.includes('PenIcon'),
+  'Header uses pencil octicon'
+);
 assert.ok(!header.includes('✎'), 'Header has no ✎ glyph');
 
 // --- (d) Diff toolbar consolidates controls, no checks ---

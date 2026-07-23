@@ -189,6 +189,52 @@
     });
   }
 
+  function toPathSet(paths) {
+    if (!paths) return new Set();
+    if (paths instanceof Set) return paths;
+    return new Set(Array.isArray(paths) ? paths : []);
+  }
+
+  function isPathCollapsed(
+    path,
+    collapsedPaths,
+    defaultCollapsed,
+    expandAll,
+    viewedPaths
+  ) {
+    if (expandAll || !path) return false;
+    const set = toPathSet(collapsedPaths);
+    if (set.has(path)) return true;
+    if (set.size === 0) {
+      if (defaultCollapsed === true) return true;
+      if (toPathSet(viewedPaths).has(path)) return true;
+    }
+    return false;
+  }
+
+  function defaultCollapsedPathSet(files, viewedPaths) {
+    const out = new Set();
+    for (const f of Array.isArray(files) ? files : []) {
+      if (!f || !f.defaultCollapsed) continue;
+      const p = f.filename || f.path;
+      if (p) out.add(p);
+    }
+    for (const p of toPathSet(viewedPaths)) {
+      if (p) out.add(p);
+    }
+    return out;
+  }
+
+  function materializeCollapsedPaths(collapsedPaths, files, viewedPaths) {
+    if (collapsedPaths instanceof Set && collapsedPaths.size > 0) {
+      return new Set(collapsedPaths);
+    }
+    if (Array.isArray(collapsedPaths) && collapsedPaths.length > 0) {
+      return new Set(collapsedPaths);
+    }
+    return defaultCollapsedPathSet(files, viewedPaths);
+  }
+
   const api = {
     parseGitattributes,
     matchAttrPattern,
@@ -196,6 +242,9 @@
     isAttrEnabled,
     shouldCollapseFile,
     annotateFilesForCollapse,
+    isPathCollapsed,
+    defaultCollapsedPathSet,
+    materializeCollapsedPaths,
     DEFAULT_LARGE_CHANGES,
     DEFAULT_LARGE_PATCH_CHARS,
   };

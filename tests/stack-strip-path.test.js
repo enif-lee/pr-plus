@@ -109,6 +109,41 @@ const prs = [
   ok('StackStrip source: hover floating select + click navigate');
 }
 
+// Stack hop preserves current Diff/Conversation view (host + App contract)
+{
+  const app = fs.readFileSync(
+    path.join(__dirname, '../src/modal/app/PrModalApp.tsx'),
+    'utf8'
+  );
+  const host = fs.readFileSync(
+    path.join(__dirname, '../src/pr-modal-host.js'),
+    'utf8'
+  );
+  assert.ok(
+    app.includes("onOpenStackPr(n, { page })") ||
+      app.includes('onOpenStackPr(n, { page:') ||
+      /onOpenStackPr\(\s*n\s*,\s*\{\s*page/.test(app),
+    'App passes current layout page when opening stack PR'
+  );
+  assert.ok(
+    app.includes('routePage') &&
+      (app.includes('routePage wins') ||
+        app.includes('Host/stack nav page wins') ||
+        /if\s*\(\s*routePage\s*\)/.test(app)),
+    'App prefers route page over target session layoutMode'
+  );
+  assert.ok(
+    host.includes('onOpenStackPr') && host.includes('page'),
+    'host openModal receives page for stack navigation'
+  );
+  assert.ok(
+    host.includes('resolvedPage') ||
+      host.includes('current.routePage'),
+    'host preserves routePage when stack-opening without explicit page'
+  );
+  ok('stack hop preserves current view state');
+}
+
 // SearchableSelect measures from anchorKey / anchorRef
 {
   const ss = fs.readFileSync(
@@ -117,7 +152,9 @@ const prs = [
   );
   assert.match(ss, /anchorKey/);
   assert.match(ss, /getBoundingClientRect/);
-  assert.match(ss, /placement === 'bottom'/);
+  // Prefer open below; flip above only when bottom side cannot fit
+  assert.match(ss, /preferBottom|placement !== 'top'|placement === 'bottom'/);
+  assert.match(ss, /fitsBelow|fitsAbove/);
   ok('SearchableSelect remeasures on anchorKey');
 }
 

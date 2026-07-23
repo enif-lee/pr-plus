@@ -61,31 +61,58 @@ import {
   resolveFileNavStorage,
   type FileNavPref,
 } from '../lib/file-nav-layout';
-import { annotateFilesForCollapse } from '../lib/collapse';
+import {
+  annotateFilesForCollapse,
+  materializeCollapsedPaths,
+  isPathCollapsed,
+} from '../lib/collapse';
 import {
   filterFilesByQuery,
   countReviewThreadsByPath,
+  countUnresolvedReviewThreadsByPath,
+  countPendingReviewThreadsByPath,
+  countReviewThreadTotals,
   groupReviewThreads,
   toggleViewedPath,
   isPathViewed,
   resolveRootReviewCommentId,
   normalizeReviewCommentId,
 } from '../lib/review-threads';
-import { flattenFilesToVirtualRows, fileStartIndexMap } from '../lib/diff-rows';
-import { buildNestedFileTree, flattenVisibleTree, collectDirPaths } from '../lib/file-tree';
+import {
+  flattenFilesToVirtualRows,
+  fileStartIndexMap,
+  mergeLineRanges,
+  resolveExpandRange,
+} from '../lib/diff-rows';
+import {
+  buildNestedFileTree,
+  flattenVisibleTree,
+  collectDirPaths,
+  filterFilesByReviewMode,
+  filterFilesByExtensions,
+  filterFilesUnreadOnly,
+  hasAnyReviewThreads,
+  type DiffReviewFilterMode,
+} from '../lib/file-tree';
 import {
   sortThreadRootComments,
   mapCommentsToRowIndices,
   resolveCommentNav,
+  filterReviewCommentsForNav,
+  filterReviewRootsForNav,
+  buildPathOrderMap,
 } from '../lib/comment-nav';
 import {
   buildSearchIndex,
   resolveQuerySearchState,
   resolveQuerySearchStateAsync,
   resolveNavSearchState,
+  resolveNavSearchStateForLayout,
   searchHitRowIndexSet,
   occurrenceIndexAmongRowHits,
   isNavigableSearchHit,
+  isSearchHitVisibleInLayout,
+  searchHitHasRowIndex,
 } from '../lib/search-index';
 import { calculateVisibleRange, scrollTopForIndex } from '../lib/virtual-range';
 import {
@@ -110,12 +137,14 @@ import {
   DEFAULT_COMMENT_PAGE_SIZE,
 } from '../lib/comments-page';
 import {
-  filterSelectOptions, buildPeopleOptions, buildLabelOptions, buildBranchOptions, buildUnifiedReviewerRows,
+  filterSelectOptions, buildPeopleOptions, buildLabelOptions, buildBranchOptions, buildUnifiedReviewerRows, isBotAccount,
 } from '../lib/searchable-select';
 import { loadSessionView, saveSessionView } from '../lib/session-view';
 import {
   mergeDetailPreserveOptimistic,
   stripPendingReviewFromDetail,
+  removeReviewCommentFromDetail,
+  removeIssueCommentFromDetail,
   buildAssetRepoPath,
 } from '../lib/composer-attach';
 import {
@@ -149,7 +178,9 @@ export function PrModalApp({
   onFetchCompareFiles = null,
   initialRoute = null,
   onRouteChange = null,
+  prefs = null,
 }: any) {
+  const reverseComments = prefs?.reverseComments !== false;
   const [localDetail, setLocalDetail] = useState(detailProp);
   /**
    * After discard/submit, host refresh can race and re-merge stale pending rows
@@ -226,6 +257,10 @@ export function PrModalApp({
     compareFetchGenRef.current += 1;
     setStackPathSelections({});
     commentPrefetchGenRef.current += 1;
+    setDiffThreadCollapse(new Map());
+    setDiffReviewFilter(null);
+    setFileExtFilter(new Set());
+    setFileUnreadOnly(false);
   }, [prIdentity]);
 
   // Lazy-load remaining comment / review-comment pages (offset) then since-refresh.
@@ -251,11 +286,22 @@ export function PrModalApp({
             kind,
             page: meta.nextPage,
             perPage: meta.perPage || DEFAULT_COMMENT_PAGE_SIZE,
+            // Continue newest→older walks (issue from-end / review desc)
+            order: meta.order || undefined,
+            preferNewest: false,
           });
           if (cancelled || gen !== commentPrefetchGenRef.current) return;
           setLocalDetail((prev) => {
             if (!prev || Number(prev.number) !== Number(snap.number)) return prev;
-            const merged = mergeCommentsById(prev[listKey] || [], page?.items || []);
+            const tomb =
+              listKey === 'reviewComments'
+                ? prev._deletedReviewCommentIds
+                : prev._deletedIssueCommentIds;
+            const merged = mergeCommentsById(
+              prev[listKey] || [],
+              page?.items || [],
+              tomb
+            );
             return {
               ...prev,
               [listKey]: merged,
@@ -294,7 +340,15 @@ export function PrModalApp({
             if (!page?.items?.length) continue;
             setLocalDetail((prev) => {
               if (!prev || Number(prev.number) !== Number(snap.number)) return prev;
-              const merged = mergeCommentsById(prev[listKey] || [], page.items);
+              const tomb =
+                listKey === 'reviewComments'
+                  ? prev._deletedReviewCommentIds
+                  : prev._deletedIssueCommentIds;
+              const merged = mergeCommentsById(
+                prev[listKey] || [],
+                page.items,
+                tomb
+              );
               return {
                 ...prev,
                 [listKey]: merged,
@@ -395,7 +449,29 @@ export function PrModalApp({
   const [theme, setTheme] = useState(() =>
     resolveGithubTheme(typeof document !== 'undefined' ? document : null, typeof window !== 'undefined' ? window : null)
   );
-  const [collapsedThreads, setCollapsedThreads] = useState(() => new Set<string>());
+  /**
+   * Diff inline-thread collapse overrides (commentId → collapsed).
+   * Default: resolved threads start collapsed; open threads start expanded.
+   */
+  const [diffThreadCollapse, setDiffThreadCollapse] = useState(
+    () => new Map<string, boolean>()
+  );
+  /**
+   * Diff “expand gap” (context between hunks): path → head file lines,
+   * path → merged 1-based new-line ranges already expanded.
+   */
+  const [diffFileLines, setDiffFileLines] = useState(
+    () => new Map<string, string[]>()
+  );
+  const [diffExpandedRanges, setDiffExpandedRanges] = useState(
+    () => new Map<string, Array<{ start: number; end: number }>>()
+  );
+  const [diffExpandBusyKey, setDiffExpandBusyKey] = useState<string | null>(null);
+  /** Diff toolbar: Unresolved | Resolved | off (null). Filters files + review nav. */
+  const [diffReviewFilter, setDiffReviewFilter] = useState<DiffReviewFilterMode>(null);
+  /** Files-nav filters (shared with Diff review nav counts). */
+  const [fileExtFilter, setFileExtFilter] = useState(() => new Set<string>());
+  const [fileUnreadOnly, setFileUnreadOnly] = useState(false);
   /** Outer shell: modal (default) vs side sheet — persisted preference. */
   const [shellMode, setShellMode] = useState<ShellMode>(() => {
     try {
@@ -425,6 +501,8 @@ export function PrModalApp({
   const [titleEditSignal, setTitleEditSignal] = useState(0);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const listRef = useRef<any>(null);
+  /** Conversation viewport: GraphQL PRRT_… ids currently on screen */
+  const visibleConvThreadNodeIdsRef = useRef<string[]>([]);
   const searchInputRef = useRef<any>(null);
   const shellRef = useRef<any>(null);
   const commentBoxRef = useRef<any>(null);
@@ -528,19 +606,161 @@ export function PrModalApp({
     [detail, onFetchCompareFiles, setScrollTop]
   );
 
-  const navFiles = useMemo(() => {
-    if (typeof filterFilesByQuery === 'function') {
-      return filterFilesByQuery(annotatedFiles, fileQuery);
-    }
-    return annotatedFiles;
-  }, [annotatedFiles, fileQuery]);
-
   const threadCounts = useMemo(() => {
     if (typeof countReviewThreadsByPath === 'function') {
       return countReviewThreadsByPath(detail?.reviewComments || []);
     }
     return new Map();
   }, [detail?.reviewComments]);
+
+  const unresolvedThreadCounts = useMemo(() => {
+    if (typeof countUnresolvedReviewThreadsByPath === 'function') {
+      return countUnresolvedReviewThreadsByPath(detail?.reviewComments || []);
+    }
+    return new Map();
+  }, [detail?.reviewComments]);
+
+  const pendingThreadCounts = useMemo(() => {
+    if (typeof countPendingReviewThreadsByPath === 'function') {
+      return countPendingReviewThreadsByPath(detail?.reviewComments || []);
+    }
+    return new Map();
+  }, [detail?.reviewComments]);
+
+  /**
+   * Filter-toggle badges — same universe as Diff comment nav (0/N):
+   * thread roots on paths in the current file list. Prefer counting the same
+   * roots filterReviewRootsForNav uses so pending/path rules match nav.
+   */
+  const reviewThreadTotals = useMemo(() => {
+    const pathSet = new Set<string>();
+    for (const f of annotatedFiles || []) {
+      const p = f?.filename || f?.path;
+      if (p) pathSet.add(String(p));
+    }
+    const all = detail?.reviewComments || [];
+    // Same root selection as comment nav with no resolution filter
+    if (typeof filterReviewRootsForNav === 'function') {
+      const roots = filterReviewRootsForNav(all, null, pathSet);
+      let unresolved = 0;
+      let resolved = 0;
+      let pendingThreads = 0;
+      for (const c of roots) {
+        if (!c) continue;
+        const pending = Boolean(c.pending);
+        // Match filterReviewRootsForNav pending-mode (replies may mark pending)
+        // via a second pass: roots already include reply-pending via rootIsPending
+        // only when mode is pending/unresolved. For null mode all roots return.
+        // Re-check pending like unresolved mode would: use pending flag on root
+        // and any pending reply in the full list.
+        let isPending = pending;
+        if (!isPending && c.id != null) {
+          const rid = String(c.id);
+          for (const r of all) {
+            if (!r?.pending) continue;
+            const parent = r.inReplyToId ?? r.in_reply_to_id ?? null;
+            if (parent != null && String(parent) === rid) {
+              isPending = true;
+              break;
+            }
+          }
+        }
+        if (isPending) pendingThreads += 1;
+        if (c.resolved) resolved += 1;
+        else if (!isPending) unresolved += 1;
+      }
+      return {
+        total: roots.length,
+        unresolved,
+        resolved,
+        pendingThreads,
+      };
+    }
+    if (typeof countReviewThreadTotals === 'function') {
+      return countReviewThreadTotals(all, { allowedPaths: pathSet });
+    }
+    return { total: 0, unresolved: 0, resolved: 0, pendingThreads: 0 };
+  }, [detail?.reviewComments, annotatedFiles]);
+
+  /**
+   * Files after Unresolved/Resolved/Pending + name/ext/unread filters.
+   * Shared by files nav, virtual diff, and review-thread nav counts.
+   */
+  const displayFiles = useMemo(() => {
+    let list = filterFilesByReviewMode(
+      annotatedFiles,
+      threadCounts,
+      unresolvedThreadCounts,
+      diffReviewFilter,
+      pendingThreadCounts
+    );
+    if (typeof filterFilesByQuery === 'function') {
+      list = filterFilesByQuery(list, fileQuery);
+    }
+    list = filterFilesByExtensions(list, fileExtFilter);
+    list = filterFilesUnreadOnly(list, viewedPaths, fileUnreadOnly);
+    return list;
+  }, [
+    annotatedFiles,
+    threadCounts,
+    unresolvedThreadCounts,
+    pendingThreadCounts,
+    diffReviewFilter,
+    fileQuery,
+    fileExtFilter,
+    viewedPaths,
+    fileUnreadOnly,
+  ]);
+
+  /** @deprecated alias — keep names used below / tests */
+  const reviewFilteredFiles = displayFiles;
+  const navFiles = displayFiles;
+
+  const displayPathSet = useMemo(() => {
+    const s = new Set<string>();
+    for (const f of displayFiles) {
+      const p = f?.filename || f?.path;
+      if (p) s.add(p);
+    }
+    return s;
+  }, [displayFiles]);
+
+  /**
+   * Review comments limited by thread resolution + current file set.
+   * When no review filter is active, keep every comment on visible files
+   * (including pending) so Diff inline cards always render.
+   */
+  const navReviewComments = useMemo(() => {
+    const all = detail?.reviewComments || [];
+    if (!diffReviewFilter && displayPathSet.size === annotatedFiles.length) {
+      // Fast path: no review mode and no file filters that shrink the set
+      const unfiltered =
+        !String(fileQuery || '').trim() &&
+        fileExtFilter.size === 0 &&
+        !fileUnreadOnly;
+      if (unfiltered) return all;
+    }
+    // Path-only filter when review mode is off — never drop pending by mode
+    if (!diffReviewFilter) {
+      if (!displayPathSet.size) return all;
+      return all.filter((c: any) => {
+        if (!c) return false;
+        const path = c.path || '';
+        return !path || displayPathSet.has(path);
+      });
+    }
+    return typeof filterReviewCommentsForNav === 'function'
+      ? filterReviewCommentsForNav(all, diffReviewFilter, displayPathSet)
+      : all;
+  }, [
+    detail?.reviewComments,
+    diffReviewFilter,
+    displayPathSet,
+    annotatedFiles.length,
+    fileQuery,
+    fileExtFilter,
+    fileUnreadOnly,
+  ]);
 
   const threads = useMemo(() => {
     if (typeof groupReviewThreads === 'function') {
@@ -588,29 +808,97 @@ export function PrModalApp({
 
   const virtualRows = useMemo(
     () =>
-      flattenFilesToVirtualRows(annotatedFiles, diffMode, {
+      flattenFilesToVirtualRows(displayFiles, diffMode, {
         collapsedPaths: collapsedFiles,
-        reviewComments: detail?.reviewComments || [],
+        viewedPaths,
+        reviewComments: navReviewComments,
+        expandedRanges: diffExpandedRanges,
+        fileLineTexts: diffFileLines,
       }),
-    [annotatedFiles, diffMode, collapsedFiles, detail?.reviewComments]
+    [
+      displayFiles,
+      diffMode,
+      collapsedFiles,
+      viewedPaths,
+      navReviewComments,
+      diffExpandedRanges,
+      diffFileLines,
+    ]
   );
 
   const fileStarts = useMemo(() => fileStartIndexMap(virtualRows), [virtualRows]);
-  const avgH = useMemo(() => averageRowHeight(virtualRows), [virtualRows]);
-  const rowOffsetList = useMemo(
-    () => (typeof rowOffsets === 'function' ? rowOffsets(virtualRows) : null),
-    [virtualRows]
+
+  const isDiffCommentCollapsed = useCallback(
+    (rowOrId: any, resolvedHint?: boolean) => {
+      if (rowOrId && typeof rowOrId === 'object' && rowOrId.kind === 'inline-comment') {
+        const id = rowOrId.commentId;
+        const thread = threadsByCommentId?.get?.(String(id));
+        const resolved = Boolean(thread?.resolved ?? rowOrId.resolved);
+        return isDiffThreadCollapsed(id, resolved);
+      }
+      return isDiffThreadCollapsed(rowOrId, Boolean(resolvedHint));
+    },
+    [diffThreadCollapse, threadsByCommentId]
   );
 
-  // Diff comment navigator: one stop per review **thread** (roots only; replies excluded).
+  const commentHeightOpts = useMemo(
+    () => ({
+      isCollapsed: (row: any) => isDiffCommentCollapsed(row),
+    }),
+    [isDiffCommentCollapsed]
+  );
+
+  const avgH = useMemo(
+    () => averageRowHeight(virtualRows, commentHeightOpts),
+    [virtualRows, commentHeightOpts]
+  );
+  const rowOffsetList = useMemo(
+    () =>
+      typeof rowOffsets === 'function' ? rowOffsets(virtualRows, commentHeightOpts) : null,
+    [virtualRows, commentHeightOpts]
+  );
+
+  // Diff comment navigator: filtered roots, top → bottom (file list + row order).
   const mappedComments = useMemo(() => {
     if (typeof mapCommentsToRowIndices !== 'function') return [];
+    const pathOrder =
+      typeof buildPathOrderMap === 'function'
+        ? buildPathOrderMap(displayFiles)
+        : null;
     const roots =
-      typeof sortThreadRootComments === 'function'
-        ? sortThreadRootComments(detail?.reviewComments || [])
-        : detail?.reviewComments || [];
-    return mapCommentsToRowIndices(roots, virtualRows);
-  }, [detail?.reviewComments, virtualRows]);
+      typeof filterReviewRootsForNav === 'function'
+        ? sortThreadRootComments(
+            filterReviewRootsForNav(
+              detail?.reviewComments || [],
+              diffReviewFilter,
+              displayPathSet
+            ),
+            pathOrder
+          )
+        : typeof sortThreadRootComments === 'function'
+          ? sortThreadRootComments(navReviewComments, pathOrder)
+          : navReviewComments;
+    return mapCommentsToRowIndices(roots, virtualRows, { pathOrder });
+  }, [
+    detail?.reviewComments,
+    virtualRows,
+    diffReviewFilter,
+    displayPathSet,
+    displayFiles,
+    navReviewComments,
+  ]);
+
+  // Keep commentIndex inside the filtered list when filters change
+  useEffect(() => {
+    if (commentIndex < 0) return;
+    if (!mappedComments.length) {
+      setCommentIndex(-1);
+      return;
+    }
+    if (commentIndex >= mappedComments.length) {
+      setCommentIndex(mappedComments.length - 1);
+    }
+  }, [mappedComments, commentIndex, setCommentIndex]);
 
   // Conversation = body/comments/reviews/replies only. Diff = conversation + rows.
   const searchMode =
@@ -634,6 +922,13 @@ export function PrModalApp({
   useEffect(() => {
     setSearchHasRun(false);
   }, [prIdentity]);
+
+  // Fresh PR → drop expanded hunk context cache
+  useEffect(() => {
+    setDiffFileLines(new Map());
+    setDiffExpandedRanges(new Map());
+    setDiffExpandBusyKey(null);
+  }, [prIdentity]);
   // Jump geometry via ref so resize/scroll does not re-trigger search.
   const searchJumpRef = useRef({
     avgH,
@@ -652,11 +947,59 @@ export function PrModalApp({
     (hit: any) => {
       if (!hit) return;
 
-      // Conversation anchors (body / comments / reviews / replies)
+      /**
+       * Prefer Diff row targets first. Review-comment docs often carry BOTH
+       * anchorId and rowIndex — old code checked anchorId first and forced
+       * Conversation, so Search prev/next "jumped back" into Conversation.
+       */
+      if (searchHitHasRowIndex(hit)) {
+        if (layoutMode !== LAYOUT_DIFF) {
+          setLayoutMode(LAYOUT_DIFF);
+        }
+        const j = searchJumpRef.current;
+        const top = scrollTopForIndex(
+          hit.rowIndex,
+          j.avgH,
+          j.viewportHeight,
+          j.rowCount,
+          j.rowOffsetList
+        );
+        setScrollTop(top);
+        const applyDomScroll = () => {
+          const list = listRef.current as HTMLElement | null;
+          if (list) list.scrollTop = top;
+          const rowEl = list?.querySelector?.(
+            `[data-row-index="${hit.rowIndex}"]`
+          ) as HTMLElement | null;
+          if (rowEl) {
+            try {
+              const mark = rowEl.querySelector(
+                '.prp-search-mark--current'
+              ) as HTMLElement | null;
+              (mark || rowEl).scrollIntoView({
+                block: 'center',
+                inline: 'nearest',
+              });
+            } catch {
+              /* ignore */
+            }
+          }
+        };
+        applyDomScroll();
+        requestAnimationFrame(() => {
+          applyDomScroll();
+          requestAnimationFrame(applyDomScroll);
+        });
+        return;
+      }
+
+      // Conversation-only anchors (body / issue comments / review events)
       if (hit.anchorId) {
+        // Never yank Diff → Conversation during search navigation.
+        // navSearch skips these while layout is Diff; if we still land here,
+        // no-op rather than flipping the shell.
         if (layoutMode === LAYOUT_DIFF) {
-          // Stay in conversation for conversation-only hits when possible
-          setLayoutMode(LAYOUT_CENTERED);
+          return;
         }
         const apply = () => {
           try {
@@ -678,47 +1021,7 @@ export function PrModalApp({
           apply();
           requestAnimationFrame(apply);
         });
-        return;
       }
-
-      if (hit.rowIndex == null || !Number.isFinite(Number(hit.rowIndex))) {
-        return;
-      }
-      // Diff row jump
-      if (layoutMode !== LAYOUT_DIFF) {
-        setLayoutMode(LAYOUT_DIFF);
-      }
-      const j = searchJumpRef.current;
-      const top = scrollTopForIndex(
-        hit.rowIndex,
-        j.avgH,
-        j.viewportHeight,
-        j.rowCount,
-        j.rowOffsetList
-      );
-      setScrollTop(top);
-      const applyDomScroll = () => {
-        const list = listRef.current as HTMLElement | null;
-        if (list) list.scrollTop = top;
-        const rowEl = list?.querySelector?.(
-          `[data-row-index="${hit.rowIndex}"]`
-        ) as HTMLElement | null;
-        if (rowEl) {
-          try {
-            const mark = rowEl.querySelector(
-              '.prp-search-mark--current'
-            ) as HTMLElement | null;
-            (mark || rowEl).scrollIntoView({ block: 'center', inline: 'nearest' });
-          } catch {
-            /* ignore */
-          }
-        }
-      };
-      applyDomScroll();
-      requestAnimationFrame(() => {
-        applyDomScroll();
-        requestAnimationFrame(applyDomScroll);
-      });
     },
     [layoutMode, setLayoutMode, setScrollTop]
   );
@@ -778,10 +1081,14 @@ export function PrModalApp({
         setSearchHitsStore(hits, hitIndex);
         // Conversation stays on conversation; only jump to diff rows when already in Diff
         // or when the active hit is a pure diff-row hit without conversation anchor.
+        // Only auto-jump when the hit is visible in the *current* layout.
+        // Avoid Diff → Conversation on first body/anchor match.
         if (
           st.shouldJump &&
           activeHit &&
-          isNavigableSearchHit(activeHit)
+          isNavigableSearchHit(activeHit) &&
+          (typeof isSearchHitVisibleInLayout !== 'function' ||
+            isSearchHitVisibleInLayout(activeHit, layoutMode))
         ) {
           queueMicrotask(() => {
             if (isCancelled()) return;
@@ -799,7 +1106,14 @@ export function PrModalApp({
     return () => {
       cancelled = true;
     };
-  }, [searchQuery, searchDocs, setSearchHitsStore, jumpToSearchHit, searchMode]);
+  }, [
+    searchQuery,
+    searchDocs,
+    setSearchHitsStore,
+    jumpToSearchHit,
+    searchMode,
+    layoutMode,
+  ]);
 
   // Diff enter → drain all remaining review threads once (idempotent if complete)
   const diffFullLoadGenRef = useRef(0);
@@ -850,24 +1164,39 @@ export function PrModalApp({
   const navSearch = useCallback(
     (delta: number) => {
       if (!searchHits.length) return;
-      if (typeof resolveNavSearchState !== 'function') return;
-      let st = resolveNavSearchState(searchHits, searchHitIndex, delta);
-      let guard = 0;
-      while (
+      // Layout-aware next/prev: skip conversation-only hits while in Diff so
+      // "previous" never flips the shell to Conversation mid-nav.
+      const st =
+        typeof resolveNavSearchStateForLayout === 'function'
+          ? resolveNavSearchStateForLayout(
+              searchHits,
+              searchHitIndex,
+              delta,
+              layoutMode
+            )
+          : typeof resolveNavSearchState === 'function'
+            ? resolveNavSearchState(searchHits, searchHitIndex, delta)
+            : null;
+      if (!st) return;
+      if (
         st.activeHit &&
-        !isNavigableSearchHit(st.activeHit) &&
-        guard < searchHits.length
+        typeof isSearchHitVisibleInLayout === 'function' &&
+        !isSearchHitVisibleInLayout(st.activeHit, layoutMode)
       ) {
-        st = resolveNavSearchState(searchHits, st.hitIndex, delta);
-        guard += 1;
-        if (st.hitIndex === searchHitIndex) break;
+        return;
       }
       setSearchHitIndex(st.hitIndex);
       if (st.shouldJump && st.activeHit) {
         jumpToSearchHit(st.activeHit);
       }
     },
-    [searchHits, searchHitIndex, setSearchHitIndex, jumpToSearchHit]
+    [
+      searchHits,
+      searchHitIndex,
+      setSearchHitIndex,
+      jumpToSearchHit,
+      layoutMode,
+    ]
   );
 
   const onSearchQueryCommit = useCallback(
@@ -919,25 +1248,213 @@ export function PrModalApp({
     [searchHits, searchHitIndex]
   );
 
+  /**
+   * After expand / filter clear, remappedComments gains a real rowIndex — finish scroll.
+   * Stores comment id (+ optional path) while virtual rows rebuild.
+   */
+  const pendingCommentJumpRef = useRef<{
+    commentId: string | number;
+    path?: string;
+  } | null>(null);
+
+  const expandFileForJump = useCallback(
+    (path: string) => {
+      if (!path) return;
+      setActiveFilePath(path);
+      setCollapsedFiles((prev) => {
+        const file = annotatedFiles.find(
+          (f: any) => (f.filename || f.path) === path
+        );
+        if (
+          !isPathCollapsed(
+            path,
+            prev,
+            Boolean(file?.defaultCollapsed),
+            false,
+            viewedPaths
+          )
+        ) {
+          return prev;
+        }
+        const n = materializeCollapsedPaths(prev, annotatedFiles, viewedPaths);
+        n.delete(path);
+        return n;
+      });
+    },
+    [annotatedFiles, setActiveFilePath, setCollapsedFiles, viewedPaths]
+  );
+
+  const scrollMappedCommentIntoView = useCallback(
+    (active: { rowIndex?: number | null } | null | undefined) => {
+      if (active?.rowIndex == null) return false;
+      const top = scrollTopForIndex(
+        active.rowIndex,
+        avgH,
+        viewportHeight,
+        virtualRows.length,
+        rowOffsetList
+      );
+      setScrollTop(top);
+      if (listRef.current) listRef.current.scrollTop = top;
+      requestAnimationFrame(() => {
+        if (listRef.current) listRef.current.scrollTop = top;
+      });
+      return true;
+    },
+    [avgH, viewportHeight, virtualRows.length, rowOffsetList, setScrollTop]
+  );
+
+  /** Open Diff, expand file, scroll to thread root (or queue until rows re-map). */
+  const jumpToReviewComment = useCallback(
+    (target: {
+      id?: string | number | null;
+      path?: string | null;
+      line?: number | null;
+      side?: string | null;
+    }) => {
+      if (layoutMode !== LAYOUT_DIFF) setLayoutMode(LAYOUT_DIFF);
+
+      // Clear thread filter if it hides the target file
+      const path = target.path ? String(target.path) : '';
+      if (
+        path &&
+        diffReviewFilter &&
+        !reviewFilteredFiles.some(
+          (f: any) => (f.filename || f.path) === path
+        )
+      ) {
+        setDiffReviewFilter(null);
+      }
+
+      if (path) expandFileForJump(path);
+
+      const id = target.id;
+      let idx = -1;
+      if (id != null) {
+        idx = mappedComments.findIndex((c) => String(c.id) === String(id));
+      }
+      if (idx < 0 && path) {
+        const line =
+          target.line != null && Number.isFinite(Number(target.line))
+            ? Number(target.line)
+            : null;
+        const side =
+          String(target.side || 'RIGHT').toUpperCase() === 'LEFT'
+            ? 'LEFT'
+            : 'RIGHT';
+        idx = mappedComments.findIndex((c) => {
+          if (c.path !== path) return false;
+          if (line == null) return true;
+          const cl =
+            c.line != null
+              ? Number(c.line)
+              : c.originalLine != null
+                ? Number(c.originalLine)
+                : null;
+          if (cl !== line) return false;
+          const cs =
+            String(c.side || 'RIGHT').toUpperCase() === 'LEFT' ? 'LEFT' : 'RIGHT';
+          return cs === side;
+        });
+      }
+
+      if (idx < 0) {
+        // Still open Diff at file; comment may load later via Load more
+        if (path) {
+          expandFileForJump(path);
+          const fileIdx = fileStarts.get(path);
+          if (typeof fileIdx === 'number') {
+            scrollMappedCommentIntoView({ rowIndex: fileIdx });
+          }
+        }
+        return;
+      }
+
+      setCommentIndex(idx);
+      const active = mappedComments[idx];
+      // Prefer exact inline row; if only header (collapsed) or missing, re-try after expand
+      const onlyHeader =
+        active?.rowIndex != null &&
+        virtualRows[active.rowIndex]?.kind === 'file-header' &&
+        virtualRows[active.rowIndex]?.collapsed;
+      if (active?.rowIndex != null && !onlyHeader) {
+        pendingCommentJumpRef.current = null;
+        scrollMappedCommentIntoView(active);
+      } else {
+        pendingCommentJumpRef.current = {
+          commentId: active?.id ?? id ?? idx,
+          path: path || active?.path,
+        };
+        // Header fallback while waiting for expand remount
+        scrollMappedCommentIntoView(active);
+      }
+    },
+    [
+      layoutMode,
+      setLayoutMode,
+      diffReviewFilter,
+      reviewFilteredFiles,
+      expandFileForJump,
+      mappedComments,
+      virtualRows,
+      setCommentIndex,
+      scrollMappedCommentIntoView,
+      fileStarts,
+    ]
+  );
+
+  // Finish jump after collapse expand / filter clear rebuilds virtual rows
+  useEffect(() => {
+    const pending = pendingCommentJumpRef.current;
+    if (!pending || !mappedComments.length) return;
+    const idx = mappedComments.findIndex(
+      (c) => String(c.id) === String(pending.commentId)
+    );
+    if (idx < 0) return;
+    const active = mappedComments[idx];
+    if (active?.rowIndex == null) return;
+    const row = virtualRows[active.rowIndex];
+    // Wait until we have more than a collapsed header when possible
+    if (row?.kind === 'file-header' && row.collapsed) return;
+    pendingCommentJumpRef.current = null;
+    setCommentIndex(idx);
+    scrollMappedCommentIntoView(active);
+  }, [
+    mappedComments,
+    virtualRows,
+    setCommentIndex,
+    scrollMappedCommentIntoView,
+  ]);
+
   function navComment(delta: number) {
     if (!mappedComments.length) return;
     if (typeof resolveCommentNav === 'function') {
       const st = resolveCommentNav(mappedComments, commentIndex, delta);
-      setCommentIndex(st.commentIndex);
-      if (st.active?.rowIndex != null) {
-        const top = scrollTopForIndex(
-          st.active.rowIndex,
-          avgH,
-          viewportHeight,
-          virtualRows.length,
-          rowOffsetList
-        );
-        setScrollTop(top);
-        if (listRef.current) listRef.current.scrollTop = top;
+      const active = st.active;
+      if (active) {
+        jumpToReviewComment({
+          id: active.id,
+          path: active.path,
+          line: active.line ?? active.originalLine ?? null,
+          side: active.side,
+        });
+      } else {
+        setCommentIndex(st.commentIndex);
       }
     } else {
-      const next = (commentIndex + delta + mappedComments.length) % mappedComments.length;
-      setCommentIndex(next);
+      const next =
+        (commentIndex + delta + mappedComments.length) % mappedComments.length;
+      const active = mappedComments[next];
+      if (active) {
+        jumpToReviewComment({
+          id: active.id,
+          path: active.path,
+          line: active.line ?? active.originalLine ?? null,
+          side: active.side,
+        });
+      } else {
+        setCommentIndex(next);
+      }
     }
   }
 
@@ -961,9 +1478,21 @@ export function PrModalApp({
       stored = null;
     }
 
+    // Host/stack nav page wins so Diff↔Conversation is preserved when switching
+    // stacked PRs (do not clobber with the target PR's stored session layout).
+    const routePage = normalizePage(initialRoute?.page);
+    if (routePage) {
+      setLayoutMode(routePage === 'diff' ? LAYOUT_DIFF : LAYOUT_CENTERED);
+    }
+
     if (stored) {
-      if (stored.layoutMode === 'diff' || stored.layoutMode === 'centered') {
-        setLayoutMode(stored.layoutMode === 'diff' ? LAYOUT_DIFF : LAYOUT_CENTERED);
+      if (
+        !routePage &&
+        (stored.layoutMode === 'diff' || stored.layoutMode === 'centered')
+      ) {
+        setLayoutMode(
+          stored.layoutMode === 'diff' ? LAYOUT_DIFF : LAYOUT_CENTERED
+        );
       }
       if (stored.diffMode === 'split' || stored.diffMode === 'unified') {
         setDiffMode(stored.diffMode);
@@ -975,12 +1504,6 @@ export function PrModalApp({
         setViewedPaths(new Set(stored.viewedPaths));
       }
       if (stored.activeFilePath) setActiveFilePath(stored.activeFilePath);
-    }
-
-    // session view layout > URI/host page (only when session had no layoutMode)
-    const routePage = normalizePage(initialRoute?.page);
-    if (!stored?.layoutMode && routePage) {
-      setLayoutMode(routePage === 'diff' ? LAYOUT_DIFF : LAYOUT_CENTERED);
     }
 
     // Allow URI writes after restore paints
@@ -1121,24 +1644,16 @@ export function PrModalApp({
     return undefined;
   }, [open]);
 
+  /** Instant layout swap — keep-alive panels, no fade/scale on Diff ↔ Conversation. */
   function expandDiff(after?: any) {
-    setAnimClass('prp-modal--animating');
+    setAnimClass('');
     setLayoutMode(LAYOUT_DIFF);
-    requestAnimationFrame(() => {
-      setAnimClass('prp-modal--animating prp-modal--anim-in');
-      setTimeout(() => {
-        setAnimClass('');
-        after?.();
-      }, 280);
-    });
+    after?.();
   }
 
   function collapseDiff() {
-    setAnimClass('prp-modal--animating prp-modal--anim-out');
-    setTimeout(() => {
-      setLayoutMode(LAYOUT_CENTERED);
-      setAnimClass('');
-    }, 280);
+    setAnimClass('');
+    setLayoutMode(LAYOUT_CENTERED);
   }
 
   function onToggleDiff() {
@@ -1292,10 +1807,23 @@ export function PrModalApp({
 
   function onSelectFile(path: any) {
     setActiveFilePath(path);
-    // Auto-expand collapsed file when selected from tree
+    // Auto-expand collapsed file when selected from tree (including defaults/viewed).
     setCollapsedFiles((prev) => {
-      if (!prev.has(path)) return prev;
-      const n = new Set(prev);
+      const file = annotatedFiles.find(
+        (f: any) => (f.filename || f.path) === path
+      );
+      if (
+        !isPathCollapsed(
+          path,
+          prev,
+          Boolean(file?.defaultCollapsed),
+          false,
+          viewedPaths
+        )
+      ) {
+        return prev;
+      }
+      const n = materializeCollapsedPaths(prev, annotatedFiles, viewedPaths);
       n.delete(path);
       return n;
     });
@@ -1323,8 +1851,10 @@ export function PrModalApp({
   }
 
   function onToggleFileCollapse(path: any) {
+    // Materialize defaults first so toggling one path does not open every
+    // other binary/huge/generated/viewed file that only collapsed via defaults.
     setCollapsedFiles((prev) => {
-      const n = new Set(prev);
+      const n = materializeCollapsedPaths(prev, annotatedFiles, viewedPaths);
       if (n.has(path)) n.delete(path);
       else n.add(path);
       return n;
@@ -1402,8 +1932,33 @@ export function PrModalApp({
   /** @deprecated alias — all UI uses server pending only */
   const totalPendingCount = pendingCount || (serverPendingReviewId ? 1 : 0);
 
+  // Clear review filter when the active mode has nothing left.
+  // Use path counts + comment count so a brief host refresh race (pending
+  // rows stripped then restored) does not wipe the Pending toggle mid-click.
+  useEffect(() => {
+    if (!diffReviewFilter) return;
+    if (diffReviewFilter === 'pending') {
+      const hasPendingPaths = hasAnyReviewThreads(pendingThreadCounts);
+      if (totalPendingCount === 0 && !hasPendingPaths) {
+        setDiffReviewFilter(null);
+      }
+      return;
+    }
+    if (!hasAnyReviewThreads(threadCounts) && totalPendingCount === 0) {
+      setDiffReviewFilter(null);
+    }
+  }, [threadCounts, pendingThreadCounts, diffReviewFilter, totalPendingCount]);
+
   async function onLeaveReviewAction(kind: any) {
     if (!detail) return;
+    // Always bind fetch bridge first — never reference bare `api`
+    const fetchApi = globalThis.PRTreeFetch;
+    if (!fetchApi) {
+      setActionMsg(
+        'Extension bridge unavailable (PRTreeFetch). Refresh this GitHub tab after reloading pr+.'
+      );
+      return;
+    }
     const body = commentText.trim();
     // Explicit issue-comment (Conversation "Comment" tab) — never submit PENDING
     const forceIssueComment =
@@ -1428,9 +1983,8 @@ export function PrModalApp({
       setActionBusy(true);
       setActionMsg('');
       try {
-        const api = globalThis.PRTreeFetch;
-        if (!api?.postIssueComment) throw new Error('Comment API unavailable');
-        const raw = await api.postIssueComment(
+        if (!fetchApi.postIssueComment) throw new Error('Comment API unavailable');
+        const raw = await fetchApi.postIssueComment(
           detail.owner,
           detail.repo,
           detail.number,
@@ -1453,7 +2007,7 @@ export function PrModalApp({
         setCommentText('');
         setActionMsg('Comment posted.');
         await onRefresh?.();
-      } catch (err) {
+      } catch (err: any) {
         setActionMsg(err?.message || String(err));
       } finally {
         setActionBusy(false);
@@ -1469,21 +2023,37 @@ export function PrModalApp({
       focusCommentBox();
       return;
     }
+
+    // Resolve PENDING review id (viewerPendingReview or any pending comment)
+    const pendingReviewId =
+      serverPendingReviewId ||
+      detail?.viewerPendingReview?.id ||
+      serverPendingComments.find((c: any) => c?.pendingReviewId != null)
+        ?.pendingReviewId ||
+      null;
+
     setActionBusy(true);
     setActionMsg('');
     try {
-      const api = globalThis.PRTreeFetch;
-      if (hasServerPending && serverPendingReviewId && api?.submitPendingPullReview) {
-        await api.submitPendingPullReview(
+      if (hasServerPending || pendingReviewId) {
+        if (!pendingReviewId) {
+          throw new Error(
+            'Pending review comments exist but no review id is available. Refresh and try again.'
+          );
+        }
+        if (!fetchApi.submitPendingPullReview) {
+          throw new Error('Submit pending review API unavailable');
+        }
+        await fetchApi.submitPendingPullReview(
           detail.owner,
           detail.repo,
           detail.number,
-          serverPendingReviewId,
+          pendingReviewId,
           { event, body }
         );
-      } else if (api?.submitPullReview) {
+      } else if (fetchApi.submitPullReview) {
         // No PENDING review: one-shot Approve / Request changes / Comment review
-        await api.submitPullReview(detail.owner, detail.repo, detail.number, {
+        await fetchApi.submitPullReview(detail.owner, detail.repo, detail.number, {
           event,
           body,
           commitId: detail.headSha,
@@ -1512,12 +2082,12 @@ export function PrModalApp({
           ? 'Approved.'
           : event === 'REQUEST_CHANGES'
             ? 'Requested changes.'
-            : hasServerPending
+            : hasServerPending || pendingReviewId
               ? 'Pending review submitted.'
               : 'Review submitted.'
       );
       await onRefresh?.();
-    } catch (err) {
+    } catch (err: any) {
       setActionMsg(err?.message || String(err));
     } finally {
       setActionBusy(false);
@@ -1619,15 +2189,27 @@ export function PrModalApp({
     try {
       const api = globalThis.PRTreeFetch;
       if (!api?.requestReviewers) throw new Error('Request reviewers API unavailable');
-      await api.requestReviewers(detail.owner, detail.repo, detail.number, [name]);
-      setLocalDetail((prev) => {
-        if (!prev) return prev;
-        const existing = prev.requestedReviewers || [];
-        if (existing.some((x) => String(x).toLowerCase() === name.toLowerCase())) return prev;
-        return { ...prev, requestedReviewers: [...existing, name] };
+      const result = await api.requestReviewers(
+        detail.owner,
+        detail.repo,
+        detail.number,
+        [name]
+      );
+      // Prefer API payload when present; otherwise optimistic merge.
+      const fromApi = mapRequestedReviewersFromApi(result, []);
+      const existing = Array.isArray(detail.requestedReviewers)
+        ? detail.requestedReviewers.slice()
+        : [];
+      const merged = [...existing];
+      if (!merged.some((x) => String(x).toLowerCase() === name.toLowerCase())) {
+        merged.push(name);
+      }
+      const requestedReviewers = fromApi.length ? fromApi : merged;
+      commitMetaPatch({
+        requestedReviewers,
+        avatarUrls: mergeAvatarUrls(detail, result, requestedReviewers),
       });
       setActionMsg(`Requested review from ${name}.`);
-      await onRefresh?.();
     } catch (err) {
       setActionMsg(err?.message || String(err));
     } finally {
@@ -1663,20 +2245,55 @@ export function PrModalApp({
 
   async function onRemoveReviewer(login: any) {
     if (!detail || !login) return;
+    if (
+      typeof isBotAccount === 'function'
+        ? isBotAccount(login, detail)
+        : /\[bot\]$/i.test(String(login || ''))
+    ) {
+      setActionMsg(`Cannot remove bot reviewer ${login}.`);
+      return;
+    }
     if (!window.confirm(`Remove reviewer ${login}?`)) return;
     setActionBusy(true);
     setActionMsg('');
     try {
       const api = globalThis.PRTreeFetch;
       if (!api?.removeReviewers) throw new Error('Remove reviewers API unavailable');
-      await api.removeReviewers(detail.owner, detail.repo, detail.number, [login]);
+      const result = await api.removeReviewers(
+        detail.owner,
+        detail.repo,
+        detail.number,
+        [login]
+      );
+      const fromApi = mapRequestedReviewersFromApi(result, []);
+      const requestedReviewers = fromApi.length
+        ? fromApi
+        : (detail.requestedReviewers || []).filter(
+            (x) => String(x).toLowerCase() !== String(login).toLowerCase()
+          );
+      commitMetaPatch({ requestedReviewers });
       setActionMsg(`Removed reviewer ${login}.`);
-      await onRefresh?.();
     } catch (err) {
       setActionMsg(err?.message || String(err));
     } finally {
       setActionBusy(false);
     }
+  }
+
+  function mapRequestedReviewersFromApi(result: any, fallback: string[] = []) {
+    // POST/DELETE requested_reviewers → { users: User[], teams: Team[] }
+    const users = Array.isArray(result?.users)
+      ? result.users
+      : Array.isArray(result?.requested_reviewers)
+        ? result.requested_reviewers
+        : Array.isArray(result)
+          ? result
+          : null;
+    if (!users) return fallback;
+    return users
+      .map((u: any) => (typeof u === 'string' ? u : u?.login || ''))
+      .map((s: string) => String(s).trim())
+      .filter(Boolean);
   }
 
   function mapAssigneesFromApi(result: any, fallback: string[] = []) {
@@ -1725,6 +2342,10 @@ export function PrModalApp({
       const login = u?.login || '';
       if (login && u?.avatar_url) map[String(login).toLowerCase()] = u.avatar_url;
     }
+    for (const u of result?.users || []) {
+      const login = u?.login || '';
+      if (login && u?.avatar_url) map[String(login).toLowerCase()] = u.avatar_url;
+    }
     for (const login of logins) {
       const key = String(login).toLowerCase();
       if (!map[key] && prev?.avatarUrls?.[key]) map[key] = prev.avatarUrls[key];
@@ -1732,25 +2353,10 @@ export function PrModalApp({
     return map;
   }
 
-  const metaRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  function scheduleMetaRefresh() {
-    // One debounced full refresh after the last meta write. Host detailFetchGen
-    // drops any older in-flight fetches so we do not resurrect pre-write meta.
-    if (metaRefreshTimerRef.current) clearTimeout(metaRefreshTimerRef.current);
-    metaRefreshTimerRef.current = setTimeout(() => {
-      metaRefreshTimerRef.current = null;
-      try {
-        const p = onRefresh?.();
-        if (p && typeof (p as Promise<void>).catch === 'function') {
-          void (p as Promise<void>).catch(() => {});
-        }
-      } catch {
-        /* ignore */
-      }
-    }, 450);
-  }
-
+  /**
+   * After a successful meta write (labels / assignees / reviewers / milestone),
+   * update local + host cache only — never re-fetch full PR detail.
+   */
   function commitMetaPatch(patch: Record<string, unknown>) {
     const base = detail;
     if (!base) return;
@@ -1769,17 +2375,18 @@ export function PrModalApp({
     };
     setLocalDetail(next);
     try {
-      const { _metaSeq: _drop, ...forHost } = next;
+      const { _metaSeq: _drop, ...forHost } = next as any;
       onPatchDetail?.({
         ...forHost,
         assignees: next.assignees,
         labels: next.labels,
+        requestedReviewers: next.requestedReviewers,
+        milestone: next.milestone,
         avatarUrls: next.avatarUrls,
       });
     } catch {
       /* host optional */
     }
-    scheduleMetaRefresh();
   }
 
   async function applyAddAssignees(logins: any) {
@@ -2597,9 +3204,18 @@ export function PrModalApp({
   }
 
   function onToggleViewed(path: any) {
+    if (!path) return;
+    const markingViewed = !isPathViewed(viewedPaths, path);
     setViewedPaths((prev) =>
       typeof toggleViewedPath === 'function' ? toggleViewedPath(prev, path) : prev
     );
+    // Viewed → collapse; uncheck → expand so the file can be re-read.
+    setCollapsedFiles((prev) => {
+      const n = materializeCollapsedPaths(prev, annotatedFiles, viewedPaths);
+      if (markingViewed) n.add(path);
+      else n.delete(path);
+      return n;
+    });
   }
 
   async function onClosePr() {
@@ -2756,35 +3372,82 @@ export function PrModalApp({
 
   async function onSubscribe(want: any) {
     if (!detail) return;
+    const nextSubscribed = Boolean(want);
+    const prevSubscribed = detail.subscribed;
+    // Optimistic UI — swap icon immediately; revert on failure
+    setLocalDetail((prev) =>
+      prev ? { ...prev, subscribed: nextSubscribed } : prev
+    );
+    try {
+      onPatchDetail?.({ subscribed: nextSubscribed });
+    } catch {
+      /* host optional */
+    }
     setActionBusy(true);
     setActionMsg('');
     try {
       const api = globalThis.PRTreeFetch;
-      if (want) {
+      const nodeId = detail.nodeId || null;
+      if (nextSubscribed) {
         if (!api?.setIssueSubscription) throw new Error('Subscribe API unavailable');
-        await api.setIssueSubscription(detail.owner, detail.repo, detail.number, {
-          subscribed: true,
-          ignored: false,
-        });
-        setLocalDetail((prev) => (prev ? { ...prev, subscribed: true } : prev));
-        setActionMsg('Subscribed to notifications.');
+        const result = await api.setIssueSubscription(
+          detail.owner,
+          detail.repo,
+          detail.number,
+          { subscribed: true, ignored: false, nodeId }
+        );
+        if (result && typeof result.subscribed === 'boolean') {
+          setLocalDetail((prev) =>
+            prev ? { ...prev, subscribed: result.subscribed } : prev
+          );
+        }
       } else {
         if (!api?.deleteIssueSubscription && !api?.setIssueSubscription) {
           throw new Error('Unsubscribe API unavailable');
         }
+        let result = null;
         if (api.deleteIssueSubscription) {
-          await api.deleteIssueSubscription(detail.owner, detail.repo, detail.number);
+          result = await api.deleteIssueSubscription(
+            detail.owner,
+            detail.repo,
+            detail.number,
+            nodeId
+          );
         } else {
-          await api.setIssueSubscription(detail.owner, detail.repo, detail.number, {
-            subscribed: false,
-            ignored: true,
-          });
+          result = await api.setIssueSubscription(
+            detail.owner,
+            detail.repo,
+            detail.number,
+            { subscribed: false, ignored: false, nodeId }
+          );
         }
-        setLocalDetail((prev) => (prev ? { ...prev, subscribed: false } : prev));
-        setActionMsg('Unsubscribed.');
+        if (result && typeof result.subscribed === 'boolean') {
+          setLocalDetail((prev) =>
+            prev ? { ...prev, subscribed: result.subscribed } : prev
+          );
+        }
       }
-      await onRefresh?.();
+      // Icon state is enough feedback — no success toast
+      setActionMsg('');
+      // Keep optimistic value — skip full refresh (stale subscription can clobber UI)
     } catch (err) {
+      setLocalDetail((prev) =>
+        prev
+          ? {
+              ...prev,
+              subscribed:
+                typeof prevSubscribed === 'boolean' ? prevSubscribed : !nextSubscribed,
+            }
+          : prev
+      );
+      try {
+        onPatchDetail?.({
+          subscribed:
+            typeof prevSubscribed === 'boolean' ? prevSubscribed : !nextSubscribed,
+        });
+      } catch {
+        /* ignore */
+      }
       setActionMsg(err?.message || String(err));
     } finally {
       setActionBusy(false);
@@ -2798,23 +3461,29 @@ export function PrModalApp({
     try {
       const api = globalThis.PRTreeFetch;
       if (!api?.setIssueMilestone) throw new Error('Milestone API unavailable');
-      await api.setIssueMilestone(detail.owner, detail.repo, detail.number, milestone);
-      setLocalDetail((prev) =>
-        prev
-          ? {
-              ...prev,
-              milestone:
-                milestone == null
-                  ? null
-                  : {
-                      number: milestone,
-                      title: prev.milestone?.title || `Milestone ${milestone}`,
-                    },
-            }
-          : prev
+      const result = await api.setIssueMilestone(
+        detail.owner,
+        detail.repo,
+        detail.number,
+        milestone
       );
+      // PATCH /issues returns the issue (with milestone object) when successful.
+      let nextMilestone: any = null;
+      if (milestone == null) {
+        nextMilestone = null;
+      } else if (result?.milestone && typeof result.milestone === 'object') {
+        nextMilestone = {
+          number: Number(result.milestone.number) || milestone,
+          title: result.milestone.title || `Milestone ${milestone}`,
+        };
+      } else {
+        nextMilestone = {
+          number: milestone,
+          title: detail.milestone?.title || `Milestone ${milestone}`,
+        };
+      }
+      commitMetaPatch({ milestone: nextMilestone });
       setActionMsg(milestone == null ? 'Milestone cleared.' : `Milestone set to #${milestone}.`);
-      await onRefresh?.();
     } catch (err) {
       setActionMsg(err?.message || String(err));
     } finally {
@@ -2875,12 +3544,64 @@ export function PrModalApp({
     openMilestonePicker();
   }
 
-  function onToggleThreadCollapse(commentId: any) {
-    const key = String(commentId);
-    setCollapsedThreads((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
+  /**
+   * Expand omitted context between diff hunks (GitHub-style middle expand).
+   * Fetches head file text once per path, then merges the requested line range.
+   * @param {'all'|'up'|'down'} direction
+   */
+  async function onExpandDiffGap(row: any, direction: 'all' | 'up' | 'down' = 'all') {
+    if (!detail || !row?.filePath) return;
+    const range = resolveExpandRange(direction, row);
+    if (!range) return;
+    const path = String(row.filePath);
+    const busyKey = `${path}:${range.start}-${range.end}:${direction}`;
+    setDiffExpandBusyKey(busyKey);
+    try {
+      let lines = diffFileLines.get(path);
+      if (!lines) {
+        const api = globalThis.PRTreeFetch;
+        if (!api?.getRepoFileText) {
+          throw new Error('File read API unavailable');
+        }
+        const res = await api.getRepoFileText(detail.owner, detail.repo, {
+          path,
+          ref: detail.headSha || detail.headRef,
+        });
+        lines = String(res?.text ?? '').split('\n');
+        // split keeps a trailing empty entry when file ends with \n — matches editors
+        setDiffFileLines((prev) => {
+          const next = new Map(prev);
+          next.set(path, lines as string[]);
+          return next;
+        });
+      }
+      setDiffExpandedRanges((prev) => {
+        const next = new Map(prev);
+        next.set(path, mergeLineRanges(prev.get(path) || [], range.start, range.end));
+        return next;
+      });
+    } catch (e: any) {
+      setActionMsg(e?.message || 'Failed to expand diff context');
+    } finally {
+      setDiffExpandBusyKey((k) => (k === busyKey ? null : k));
+    }
+  }
+
+  function isDiffThreadCollapsed(commentId: any, resolved: boolean) {
+    const key = String(commentId ?? '');
+    if (diffThreadCollapse.has(key)) return Boolean(diffThreadCollapse.get(key));
+    return Boolean(resolved);
+  }
+
+  function onToggleThreadCollapse(commentId: any, resolved?: boolean) {
+    const key = String(commentId ?? '');
+    if (!key) return;
+    setDiffThreadCollapse((prev) => {
+      const currently = prev.has(key)
+        ? Boolean(prev.get(key))
+        : Boolean(resolved);
+      const next = new Map(prev);
+      next.set(key, !currently);
       return next;
     });
   }
@@ -2933,9 +3654,28 @@ export function PrModalApp({
     try {
       const api = globalThis.PRTreeFetch;
       if (!api?.requestReviewers) throw new Error('Request reviewers API unavailable');
-      await api.requestReviewers(detail.owner, detail.repo, detail.number, logins);
+      const result = await api.requestReviewers(
+        detail.owner,
+        detail.repo,
+        detail.number,
+        logins
+      );
+      const fromApi = mapRequestedReviewersFromApi(result, []);
+      const existing = Array.isArray(detail.requestedReviewers)
+        ? detail.requestedReviewers.slice()
+        : [];
+      const merged = [...existing];
+      for (const name of logins) {
+        if (!merged.some((x) => String(x).toLowerCase() === String(name).toLowerCase())) {
+          merged.push(name);
+        }
+      }
+      const requestedReviewers = fromApi.length ? fromApi : merged;
+      commitMetaPatch({
+        requestedReviewers,
+        avatarUrls: mergeAvatarUrls(detail, result, requestedReviewers),
+      });
       setActionMsg(`Re-requested review from ${logins.join(', ')}.`);
-      await onRefresh?.();
     } catch (err) {
       setActionMsg(err?.message || String(err));
     } finally {
@@ -3016,6 +3756,15 @@ export function PrModalApp({
     if (!detail) return;
     const name = String(login || '').trim();
     if (!name) return;
+    // GitHub Apps / bots cannot be re-requested via REST request_reviewers
+    if (
+      typeof isBotAccount === 'function'
+        ? isBotAccount(name, detail)
+        : /\[bot\]$/i.test(name)
+    ) {
+      setActionMsg(`Cannot re-request review from bot ${name}.`);
+      return;
+    }
     const alreadyPending = (detail.requestedReviewers || []).some(
       (r: any) => String(r || '').toLowerCase() === name.toLowerCase()
     );
@@ -3026,19 +3775,65 @@ export function PrModalApp({
     await applyRerequestReviewers([name]);
   }
 
+  /**
+   * Apply local detail mutation + host cache patch (no full soft-refresh).
+   * Strips local-only tombstone/meta fields that must not poison IDB permanently
+   * beyond this session — but keeps comments/threads lists on the host.
+   */
+  function commitCommentListPatch(next: any) {
+    if (!next) return;
+    setLocalDetail(next);
+    try {
+      const {
+        _metaSeq: _m,
+        _dropPending: _d,
+        _deletedReviewCommentIds: _dr,
+        _deletedIssueCommentIds: _di,
+        ...forHost
+      } = next;
+      onPatchDetail?.({
+        ...forHost,
+        reviewComments: next.reviewComments,
+        comments: next.comments,
+        reviewThreads: next.reviewThreads,
+        viewerPendingReview: next.viewerPendingReview ?? null,
+      });
+    } catch {
+      /* host optional */
+    }
+  }
+
   async function onDeleteReviewComment(commentId: any) {
     if (!detail || commentId == null) return;
     if (!window.confirm('Delete this review comment?')) return;
     setActionBusy(true);
     setActionMsg('');
+    // Drop from local + host immediately so revalidate bulk-fetch and merge
+    // cannot target / resurrect the deleted id.
+    const stripped =
+      typeof removeReviewCommentFromDetail === 'function'
+        ? removeReviewCommentFromDetail(detail, commentId)
+        : {
+            ...detail,
+            reviewComments: (detail.reviewComments || []).filter(
+              (c: any) => c && String(c.id) !== String(commentId)
+            ),
+          };
+    commitCommentListPatch(stripped);
     try {
       const api = globalThis.PRTreeFetch;
       if (!api?.deleteReviewComment) throw new Error('Delete review comment API unavailable');
       await api.deleteReviewComment(detail.owner, detail.repo, commentId);
       setActionMsg('Review comment deleted.');
-      await onRefresh?.();
+      // No full onRefresh — soft revalidate was re-fetching deleted PRRT ids and failing.
     } catch (err) {
       setActionMsg(err?.message || String(err));
+      // Restore truth from host only on failure
+      try {
+        await onRefresh?.();
+      } catch {
+        /* ignore secondary errors */
+      }
     } finally {
       setActionBusy(false);
     }
@@ -3049,14 +3844,28 @@ export function PrModalApp({
     if (!window.confirm('Delete this comment?')) return;
     setActionBusy(true);
     setActionMsg('');
+    const stripped =
+      typeof removeIssueCommentFromDetail === 'function'
+        ? removeIssueCommentFromDetail(detail, commentId)
+        : {
+            ...detail,
+            comments: (detail.comments || []).filter(
+              (c: any) => c && String(c.id) !== String(commentId)
+            ),
+          };
+    commitCommentListPatch(stripped);
     try {
       const api = globalThis.PRTreeFetch;
       if (!api?.deleteIssueComment) throw new Error('Delete comment API unavailable');
       await api.deleteIssueComment(detail.owner, detail.repo, commentId);
       setActionMsg('Comment deleted.');
-      await onRefresh?.();
     } catch (err) {
       setActionMsg(err?.message || String(err));
+      try {
+        await onRefresh?.();
+      } catch {
+        /* ignore */
+      }
     } finally {
       setActionBusy(false);
     }
@@ -3216,9 +4025,9 @@ export function PrModalApp({
       searchBusy
   );
 
-  // Keep bar/stage mounted through exit so hide transitions can finish.
-  // Use CSS transitions (not only keyframes) — more reliable when class toggles.
-  const LOAD_BAR_EXIT_MS = 280;
+  // Keep bar/stage mounted through exit so CSS leave transitions can finish.
+  // Must be ≥ CSS transition duration on --leaving (see styles.css ~360–380ms).
+  const LOAD_BAR_EXIT_MS = 400;
   const [topBarMounted, setTopBarMounted] = useState(false);
   const [topBarLeaving, setTopBarLeaving] = useState(false);
   const topBarTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -3236,14 +4045,20 @@ export function PrModalApp({
         topBarTimerRef.current = null;
       }
       topBarVisibleRef.current = true;
-      setTopBarLeaving(false);
+      // Double rAF so the browser paints mounted+visible before any leave class
       setTopBarMounted(true);
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => setTopBarLeaving(false));
+      });
       return undefined;
     }
     // Exit path: only once per hide cycle
     if (!topBarVisibleRef.current || !topBarMounted) return undefined;
     topBarVisibleRef.current = false;
-    setTopBarLeaving(true);
+    // Ensure leave class applies after a paint with the visible state
+    requestAnimationFrame(() => {
+      setTopBarLeaving(true);
+    });
     topBarTimerRef.current = setTimeout(() => {
       setTopBarMounted(false);
       setTopBarLeaving(false);
@@ -3260,13 +4075,17 @@ export function PrModalApp({
       }
       stageVisibleRef.current = true;
       setStageDisplayLabel(stageLabel);
-      setStageLeaving(false);
       setStageMounted(true);
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => setStageLeaving(false));
+      });
       return undefined;
     }
     if (!stageVisibleRef.current || !stageMounted) return undefined;
     stageVisibleRef.current = false;
-    setStageLeaving(true);
+    requestAnimationFrame(() => {
+      setStageLeaving(true);
+    });
     stageTimerRef.current = setTimeout(() => {
       setStageMounted(false);
       setStageLeaving(false);
@@ -3347,12 +4166,34 @@ export function PrModalApp({
           shellMode={shellMode}
           onToggleShell={onToggleShell}
           onSubscribe={onSubscribe}
+          onRefresh={
+            typeof onRefresh === 'function'
+              ? () =>
+                  onRefresh({
+                    mode:
+                      layoutMode === LAYOUT_DIFF
+                        ? 'full-threads'
+                        : 'visible-threads',
+                    threadNodeIds:
+                      layoutMode === LAYOUT_DIFF
+                        ? undefined
+                        : visibleConvThreadNodeIdsRef.current.slice(),
+                  })
+              : null
+          }
         />
         <StackStrip
           items={stackItems}
           branches={stackPath.branches}
           resetKey={prIdentity}
-          onOpenPr={onOpenStackPr}
+          onOpenPr={(n: number) => {
+            // Preserve current Diff / Conversation when hopping stacked PRs
+            const page =
+              layoutMode === LAYOUT_DIFF ? 'diff' : 'conversation';
+            if (typeof onOpenStackPr === 'function') {
+              onOpenStackPr(n, { page });
+            }
+          }}
           onPathChange={(parentHeadRef, childNumber) => {
             setStackPathSelections((prev) => ({
               ...prev,
@@ -3376,11 +4217,19 @@ export function PrModalApp({
           onPrev={onSearchPrev}
         />
         {error ? <div className="prp-status prp-status--error">{error}</div> : null}
-        {/* Diff layout initial load uses full-body skeleton; conversation uses per-region skeletons */}
-        {isInitialLoad && layoutMode === LAYOUT_DIFF ? (
-          <LoadingSkeleton variant="diff" />
-        ) : null}
-        {(detail || isInitialLoad) && layoutMode === LAYOUT_CENTERED ? (
+        {/*
+          Keep-alive panels: Conversation (and Diff once detail exists) stay mounted
+          so layout toggles are hide/show + opacity fade — not remount.
+        */}
+        <div className="prp-body-panels">
+        {(detail || isInitialLoad) ? (
+          <div
+            className={`prp-body-panel prp-body-panel--conversation${
+              layoutMode === LAYOUT_CENTERED ? ' prp-body-panel--active' : ''
+            }`}
+            data-active={layoutMode === LAYOUT_CENTERED ? '1' : '0'}
+            aria-hidden={layoutMode !== LAYOUT_CENTERED}
+          >
           <ConversationView
             detail={
               detail
@@ -3402,8 +4251,6 @@ export function PrModalApp({
             actionMsg={actionMsg}
             onLeaveReviewAction={onLeaveReviewAction}
             onDiscardPending={onDiscardPendingReview}
-            timelinePage={timelinePage}
-            onTimelinePage={setTimelinePage}
             sectionLoading={isInitialLoad}
             onDeleteIssueComment={onDeleteIssueComment}
             onDeleteReviewComment={onDeleteReviewComment}
@@ -3419,6 +4266,13 @@ export function PrModalApp({
             onSaveEditComment={onSaveEditComment}
             pendingCount={totalPendingCount}
             onLoadMoreReviewThreads={onLoadMoreReviewThreads}
+            onJumpToReviewThread={jumpToReviewComment}
+            onVisibleThreadNodeIds={(ids: string[]) => {
+              visibleConvThreadNodeIdsRef.current = Array.isArray(ids)
+                ? ids
+                : [];
+            }}
+            reverseComments={reverseComments}
             reviewThreadsMeta={detail?.reviewThreadsMeta || null}
             searchQuery={(searchQuery || '').trim()}
             searchHits={searchHits}
@@ -3459,8 +4313,16 @@ export function PrModalApp({
             onReplyToThread={onReplyToThread}
             onResolveThread={onResolveThread}
           />
+          </div>
         ) : null}
-        {detail && layoutMode === LAYOUT_DIFF ? (
+        {detail ? (
+          <div
+            className={`prp-body-panel prp-body-panel--diff${
+              layoutMode === LAYOUT_DIFF ? ' prp-body-panel--active' : ''
+            }`}
+            data-active={layoutMode === LAYOUT_DIFF ? '1' : '0'}
+            aria-hidden={layoutMode !== LAYOUT_DIFF}
+          >
           <div
             className={`prp-diff-layout${
               fileNav.collapsed ? ' prp-diff-layout--nav-collapsed' : ''
@@ -3484,7 +4346,7 @@ export function PrModalApp({
               is purely CSS (0-width tracks / flex basis); do not unmount.
             */}
             <FolderFileTree
-              files={annotatedFiles}
+              files={displayFiles}
               tree={fileTree}
               expandedDirs={expandedDirs}
               onToggleDir={onToggleDir}
@@ -3494,6 +4356,10 @@ export function PrModalApp({
               onToggleFileCollapse={onToggleFileCollapse}
               fileQuery={fileQuery}
               onFileQuery={setFileQuery}
+              selectedExts={fileExtFilter}
+              onSelectedExts={setFileExtFilter}
+              unreadOnly={fileUnreadOnly}
+              onUnreadOnly={setFileUnreadOnly}
               threadCounts={threadCounts}
               viewedPaths={viewedPaths}
               onToggleViewed={onToggleViewed}
@@ -3517,10 +4383,23 @@ export function PrModalApp({
                 detail={detail}
                 fileNavCollapsed={fileNav.collapsed}
                 onToggleFileNav={onToggleFileNavCollapse}
-                annotatedFileCount={annotatedFiles.length}
+                annotatedFileCount={displayFiles.length}
                 rowCount={virtualRows.length}
-                filtered={Boolean(diffFilesOverride)}
+                filtered={
+                  Boolean(diffFilesOverride) ||
+                  Boolean(diffReviewFilter) ||
+                  Boolean(String(fileQuery || '').trim()) ||
+                  fileExtFilter.size > 0 ||
+                  fileUnreadOnly
+                }
                 diffMode={diffMode}
+                reviewFilter={diffReviewFilter}
+                onReviewFilter={setDiffReviewFilter}
+                showReviewFilter={
+                  hasAnyReviewThreads(threadCounts) || totalPendingCount > 0
+                }
+                unresolvedCount={reviewThreadTotals.unresolved}
+                resolvedCount={reviewThreadTotals.resolved}
                 onDiffMode={(mode: string) => {
                   setDiffMode(mode);
                   setScrollTop(0);
@@ -3547,10 +4426,16 @@ export function PrModalApp({
               />
               <VirtualDiff
                 virtualRows={virtualRows}
+                /* scroll is owned inside VirtualDiff (rAF + local state).
+                 * Only pass scrollTop for programmatic jumps so App never
+                 * re-renders the whole modal on every wheel/pixel. */
                 scrollTop={scrollTop}
                 viewportHeight={viewportHeight}
                 onViewportHeight={(h: number) => {
-                  if (h > 0 && h !== viewportHeight) setViewportHeight(h);
+                  // Threshold avoids App re-render on scrollbar/sub-pixel noise
+                  if (h > 0 && Math.abs(h - viewportHeight) >= 4) {
+                    setViewportHeight(h);
+                  }
                 }}
                 listRef={listRef}
                 highlightRowIndex={
@@ -3563,13 +4448,15 @@ export function PrModalApp({
                 activeSearchOccurrence={activeSearchOccurrence}
                 searchHits={searchHits}
                 searchHitIndex={searchHitIndex}
-                onScroll={(top) => setScrollTop(top)}
+                onScroll={undefined}
                 selection={lineSelection}
                 selecting={selecting}
                 onSelectionStart={onSelectionStart}
                 onSelectionExtend={onSelectionExtend}
                 onSelectionEnd={onSelectionEnd}
                 onToggleCollapse={onToggleFileCollapse}
+                onExpandGap={onExpandDiffGap}
+                expandBusyKey={diffExpandBusyKey}
                 viewedPaths={viewedPaths}
                 onToggleViewed={onToggleViewed}
                 threadsByCommentId={threadsByCommentId}
@@ -3610,8 +4497,9 @@ export function PrModalApp({
                         )?.magicLinks || [],
                 }}
                 onUploadFile={onUploadFile}
-                collapsedThreads={collapsedThreads}
+                isThreadCollapsed={isDiffCommentCollapsed}
                 onToggleThreadCollapse={onToggleThreadCollapse}
+                commentHeightOpts={commentHeightOpts}
               />
               {(showSelectionComposer || selectionIslandLeaving) && lineSelection ? (
                 <SelectionCommentBar
@@ -3635,7 +4523,17 @@ export function PrModalApp({
               ) : null}
             </div>
           </div>
+          </div>
         ) : null}
+        {isInitialLoad && layoutMode === LAYOUT_DIFF && !detail ? (
+          <div
+            className="prp-body-panel prp-body-panel--diff prp-body-panel--active"
+            data-active="1"
+          >
+            <LoadingSkeleton variant="diff" />
+          </div>
+        ) : null}
+        </div>
         <CommandPalette
           open={paletteOpen}
           query={paletteQuery}
@@ -3662,7 +4560,7 @@ export function PrModalApp({
           }
           confirmLabel={picker?.confirmLabel || 'Apply'}
           anchorRef={pickerAnchorRef}
-          placement="top"
+          placement="bottom"
           placeholder={
             picker?.placeholder ||
             (picker?.type === 'base'

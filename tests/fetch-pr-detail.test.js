@@ -155,15 +155,57 @@ async function main() {
         ok: true,
         json: async () => ({
           state: 'success',
-          total_count: 1,
+          total_count: 2,
+          // Same context twice (re-push / re-status) — only latest should survive
           statuses: [
-            { context: 'ci', state: 'success', description: 'ok', target_url: '' },
+            {
+              context: 'ci',
+              state: 'failure',
+              description: 'old',
+              target_url: '',
+              created_at: '2024-01-01T00:00:00Z',
+              updated_at: '2024-01-01T00:00:00Z',
+            },
+            {
+              context: 'ci',
+              state: 'success',
+              description: 'ok',
+              target_url: '',
+              created_at: '2024-01-02T00:00:00Z',
+              updated_at: '2024-01-02T00:00:00Z',
+            },
           ],
         }),
       };
     }
     if (url.includes('/check-runs')) {
-      return { ok: true, json: async () => ({ check_runs: [] }) };
+      return {
+        ok: true,
+        json: async () => ({
+          check_runs: [
+            {
+              id: 1,
+              name: 'build',
+              status: 'completed',
+              conclusion: 'failure',
+              html_url: 'https://example/1',
+              started_at: '2024-01-01T00:00:00Z',
+              completed_at: '2024-01-01T00:05:00Z',
+              app: { slug: 'github-actions', name: 'GitHub Actions' },
+            },
+            {
+              id: 9,
+              name: 'build',
+              status: 'completed',
+              conclusion: 'success',
+              html_url: 'https://example/9',
+              started_at: '2024-01-02T00:00:00Z',
+              completed_at: '2024-01-02T00:05:00Z',
+              app: { slug: 'github-actions', name: 'GitHub Actions' },
+            },
+          ],
+        }),
+      };
     }
     if (url.includes('/contents/.gitattributes')) {
       return {
@@ -221,6 +263,13 @@ async function main() {
   assert.equal(detail.baseSha, 'basebeef');
   assert.equal(detail.headSha, 'deadbeef');
   assert.equal(detail.checks.state, 'success');
+  // Distinct latest-only: one status context + one check-run name
+  assert.equal(detail.checks.statuses.length, 1);
+  assert.equal(detail.checks.statuses[0].state, 'success');
+  assert.equal(detail.checks.checkRuns.length, 1);
+  assert.equal(detail.checks.checkRuns[0].id, 9);
+  assert.equal(detail.checks.checkRuns[0].conclusion, 'success');
+  assert.equal(detail.checks.totalCount, 2);
   assert.equal(detail.reviewComments.length, 1);
   assert.ok(calls.some((c) => c.url.includes('/pulls/9/files')));
   assert.ok(

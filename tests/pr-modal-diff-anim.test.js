@@ -80,7 +80,12 @@ assert.ok(
   'unified/split via App or DiffToolbar'
 );
 assert.ok(appSrc.includes('DiffToolbar') || appSrc.includes('prp-diff-toolbar'), 'unified Diff toolbar');
-assert.ok(appSrc.includes("flattenFilesToVirtualRows(annotatedFiles, diffMode"));
+assert.ok(
+  appSrc.includes('flattenFilesToVirtualRows(') &&
+    (appSrc.includes('displayFiles') || appSrc.includes('annotatedFiles')) &&
+    appSrc.includes('diffMode'),
+  'virtual rows built from filtered display/annotated files'
+);
 assert.ok(appSrc.includes('Filter files') || appSrc.includes('fileQuery'));
 assert.ok(appSrc.includes('onToggleViewed') || appSrc.includes('viewedPaths'));
 assert.ok(appSrc.includes('prp-stat-add') || css.includes('prp-stat-add'));
@@ -118,9 +123,20 @@ assert.ok(appSrc.includes('prp-header__stats') || appSrc.includes('header__stats
 assert.ok(appSrc.includes('addPendingComment') || appSrc.includes('Start review'));
 assert.ok(appSrc.includes('discardPendingReview') || appSrc.includes('Discard'));
 assert.ok(appSrc.includes('buildConversationTimeline') || appSrc.includes('review-thread'));
-assert.ok(appSrc.includes('pageTimelineItems') || appSrc.includes('prp-pagination'));
+assert.ok(
+  appSrc.includes('pageTimelineItems') ||
+    appSrc.includes('VirtualConversationList') ||
+    appSrc.includes('prp-pagination') ||
+    appSrc.includes('Load more'),
+  'conversation timeline paging or virtual list'
+);
 assert.ok(appSrc.includes('loadSessionView') || appSrc.includes('saveSessionView'));
-assert.ok(appSrc.includes('DiffSnippetView') || appSrc.includes('prp-diff-snippet'));
+assert.ok(
+  appSrc.includes('showHunk') ||
+    appSrc.includes('DiffSnippetView') ||
+    appSrc.includes('prp-diff-snippet'),
+  'conversation embeds code hunk via showHunk / DiffSnippetView'
+);
 assert.ok(appSrc.includes('Start review') && appSrc.includes('Add comment'));
 assert.ok(!appSrc.includes('Start review + add comment'));
 assert.ok(appSrc.includes('deleteReviewComment') || appSrc.includes('onDeleteReviewComment'));

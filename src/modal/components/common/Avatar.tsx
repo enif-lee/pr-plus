@@ -20,12 +20,14 @@ export function Avatar({
 }) {
   const [failed, setFailed] = useState(false);
   const name = String(login || '').trim().replace(/^@/, '');
+  // Fetch 2× display size for retina; CSS: sm 22px / md 28px (aside people chips override smaller)
   const px = size === 'sm' ? 44 : 56;
   const src =
     (avatarUrl && String(avatarUrl).trim()) ||
     (name && typeof githubAvatarUrl === 'function' ? githubAvatarUrl(name, px) : '');
   const sizeClass = size === 'sm' ? ' prp-avatar--sm' : '';
   const initials = avatarInitials(name || '?');
+  const displayPx = size === 'sm' ? 22 : 28;
 
   if (!name && !src) {
     return (
@@ -60,8 +62,8 @@ export function Avatar({
       <img
         src={src}
         alt=""
-        width={size === 'sm' ? 22 : 28}
-        height={size === 'sm' ? 22 : 28}
+        width={displayPx}
+        height={displayPx}
         loading="lazy"
         decoding="async"
         referrerPolicy="no-referrer"

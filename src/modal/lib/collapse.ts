@@ -187,3 +187,76 @@ export function annotateFilesForCollapse(files, gitattributesText) {
     };
   });
 }
+
+function toPathSet(paths) {
+  if (!paths) return new Set();
+  if (paths instanceof Set) return paths;
+  return new Set(Array.isArray(paths) ? paths : []);
+}
+
+/**
+ * Effective collapsed state for a path.
+ * Empty `collapsedPaths` means "use defaults": binary/huge/generated + viewed.
+ * Non-empty means an explicit set of collapsed paths only.
+ *
+ * @param {string} path
+ * @param {Set<string>|string[]|null|undefined} collapsedPaths
+ * @param {boolean} [defaultCollapsed]
+ * @param {boolean} [expandAll]
+ * @param {Set<string>|string[]|null|undefined} [viewedPaths]
+ */
+export function isPathCollapsed(
+  path,
+  collapsedPaths,
+  defaultCollapsed = false,
+  expandAll = false,
+  viewedPaths = null
+) {
+  if (expandAll || !path) return false;
+  const set = toPathSet(collapsedPaths);
+  if (set.has(path)) return true;
+  if (set.size === 0) {
+    if (defaultCollapsed === true) return true;
+    if (toPathSet(viewedPaths).has(path)) return true;
+  }
+  return false;
+}
+
+/**
+ * Paths that start collapsed by default (for materializing on first toggle).
+ * Includes defaultCollapsed files and viewed paths.
+ * @param {Array<{ filename?: string, path?: string, defaultCollapsed?: boolean }>} files
+ * @param {Set<string>|string[]|null|undefined} [viewedPaths]
+ * @returns {Set<string>}
+ */
+export function defaultCollapsedPathSet(files, viewedPaths = null) {
+  const out = new Set();
+  for (const f of Array.isArray(files) ? files : []) {
+    if (!f?.defaultCollapsed) continue;
+    const p = f.filename || f.path;
+    if (p) out.add(p);
+  }
+  for (const p of toPathSet(viewedPaths)) {
+    if (p) out.add(p);
+  }
+  return out;
+}
+
+/**
+ * Materialize implicit defaults into an explicit collapsed set.
+ * First user expand/collapse must not open every other default-collapsed file.
+ *
+ * @param {Set<string>|string[]|null|undefined} collapsedPaths
+ * @param {Array<{ filename?: string, path?: string, defaultCollapsed?: boolean }>} files
+ * @param {Set<string>|string[]|null|undefined} [viewedPaths]
+ * @returns {Set<string>}
+ */
+export function materializeCollapsedPaths(collapsedPaths, files, viewedPaths = null) {
+  if (collapsedPaths instanceof Set && collapsedPaths.size > 0) {
+    return new Set(collapsedPaths);
+  }
+  if (Array.isArray(collapsedPaths) && collapsedPaths.length > 0) {
+    return new Set(collapsedPaths);
+  }
+  return defaultCollapsedPathSet(files, viewedPaths);
+}

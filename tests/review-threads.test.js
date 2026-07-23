@@ -4,6 +4,8 @@ const {
   mergeReviewThreadMeta,
   mapGraphqlReviewThreads,
   countReviewThreadsByPath,
+  countPendingReviewThreadsByPath,
+  countReviewThreadTotals,
   buildReplyReviewCommentRequest,
   buildResolveThreadGraphql,
   filterFilesByQuery,
@@ -49,6 +51,39 @@ assert.equal(t1.threadNodeId, 'PRRT_1');
 const counts = countReviewThreadsByPath(comments);
 assert.equal(counts.get('a.js'), 1);
 assert.equal(counts.get('b.js'), 1);
+
+// Pending / totals for Diff filter labels
+{
+  const mixed = [
+    { id: 1, path: 'a.js', line: 1, resolved: false, pending: true },
+    { id: 2, path: 'a.js', line: 2, resolved: false, pending: false },
+    { id: 3, path: 'b.js', line: 1, resolved: true, pending: false },
+    { id: 4, path: 'a.js', line: 1, resolved: false, pending: true, inReplyToId: 1 },
+  ];
+  const pendingByPath = countPendingReviewThreadsByPath(mixed);
+  assert.equal(pendingByPath.get('a.js'), 1);
+  assert.equal(pendingByPath.get('b.js'), undefined);
+  const totals = countReviewThreadTotals(mixed);
+  assert.equal(totals.total, 3);
+  assert.equal(totals.pendingThreads, 1);
+  assert.equal(totals.unresolved, 1, 'submitted open only');
+  assert.equal(totals.resolved, 1);
+
+  // Path-limited totals match Diff nav file set (ignore threads off the file list)
+  const onA = countReviewThreadTotals(mixed, { allowedPaths: new Set(['a.js']) });
+  assert.equal(onA.total, 2, 'a.js only: pending root + open');
+  assert.equal(onA.pendingThreads, 1);
+  assert.equal(onA.unresolved, 1);
+  assert.equal(onA.resolved, 0);
+  const emptyPath = countReviewThreadTotals(
+    [
+      ...mixed,
+      { id: 99, path: '', line: 1, resolved: false },
+    ],
+    { allowedPaths: new Set(['a.js', 'b.js']) }
+  );
+  assert.equal(emptyPath.total, 3, 'empty path skipped');
+}
 
 const replyReq = buildReplyReviewCommentRequest('o', 'r', 9, 1, 'hi');
 assert.equal(replyReq.method, 'POST');

@@ -23,6 +23,19 @@ assert.ok(code.length > 10_000, 'bundle should include React');
 
   const { window } = dom;
   window.requestAnimationFrame = (cb) => setTimeout(cb, 0);
+  // VirtualConversationList (and similar) use ResizeObserver; jsdom lacks it.
+  if (typeof window.ResizeObserver !== 'function') {
+    window.ResizeObserver = class {
+      constructor(cb) {
+        this._cb = cb;
+      }
+      observe() {
+        /* no-op in unit tests */
+      }
+      unobserve() {}
+      disconnect() {}
+    };
+  }
 
   window.eval(code);
 

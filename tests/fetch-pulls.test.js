@@ -17,7 +17,7 @@ async function main() {
     assert.equal(buildApiHeaders(null).Authorization, undefined);
   }
 
-  // mapApiPullRequest (body kept for magic-link matching on description)
+  // mapApiPullRequest (body + labels/assignees/milestone for progressive sketch)
   {
     const mapped = mapApiPullRequest({
       number: 7,
@@ -25,20 +25,44 @@ async function main() {
       body: 'Closes ENG-99',
       head: { ref: 'feat-x' },
       base: { ref: 'main' },
-      user: { login: 'dev' },
+      user: { login: 'dev', avatar_url: 'https://avatars.example/dev' },
       draft: true,
       html_url: 'https://github.com/o/r/pull/7',
+      labels: [{ name: 'bug', color: 'd73a4a', description: 'something wrong' }],
+      assignees: [{ login: 'alice', avatar_url: 'https://avatars.example/alice' }],
+      requested_reviewers: [{ login: 'bob', avatar_url: 'https://avatars.example/bob' }],
+      milestone: {
+        number: 3,
+        title: 'v1',
+        state: 'open',
+        due_on: '2026-08-01T00:00:00Z',
+      },
+      node_id: 'PR_kwDO_test',
     });
-    assert.deepEqual(mapped, {
-      number: 7,
-      title: 'Feat',
-      body: 'Closes ENG-99',
-      headRef: 'feat-x',
-      baseRef: 'main',
-      author: 'dev',
-      draft: true,
-      htmlUrl: 'https://github.com/o/r/pull/7',
+    assert.equal(mapped.number, 7);
+    assert.equal(mapped.title, 'Feat');
+    assert.equal(mapped.body, 'Closes ENG-99');
+    assert.equal(mapped.headRef, 'feat-x');
+    assert.equal(mapped.baseRef, 'main');
+    assert.equal(mapped.author, 'dev');
+    assert.equal(mapped.authorAvatarUrl, 'https://avatars.example/dev');
+    assert.equal(mapped.draft, true);
+    assert.equal(mapped.htmlUrl, 'https://github.com/o/r/pull/7');
+    assert.deepEqual(mapped.labels, [
+      { name: 'bug', color: 'd73a4a', description: 'something wrong' },
+    ]);
+    assert.deepEqual(mapped.assignees, ['alice']);
+    assert.deepEqual(mapped.requestedReviewers, ['bob']);
+    assert.deepEqual(mapped.milestone, {
+      number: 3,
+      title: 'v1',
+      state: 'open',
+      dueOn: '2026-08-01T00:00:00Z',
     });
+    assert.equal(mapped.avatarUrls.dev, 'https://avatars.example/dev');
+    assert.equal(mapped.avatarUrls.alice, 'https://avatars.example/alice');
+    assert.equal(mapped.avatarUrls.bob, 'https://avatars.example/bob');
+    assert.equal(mapped.nodeId, 'PR_kwDO_test');
   }
 
   // findDanglingPrNumbers

@@ -42,6 +42,9 @@ export function groupReviewThreads(comments) {
       replies,
       resolved: Boolean(root.resolved ?? root.isResolved),
       outdated: Boolean(root.outdated),
+      pending: Boolean(
+        root.pending || replies.some((r) => r && r.pending)
+      ),
       threadNodeId: root.threadNodeId || root.thread_id || root.pullRequestReviewThreadId || null,
       count: 1 + replies.length,
     };
@@ -121,6 +124,97 @@ export function countReviewThreadsByPath(comments) {
     map.set(p, (map.get(p) || 0) + 1);
   }
   return map;
+}
+
+/**
+ * Count **unresolved** review threads per file path.
+ * @param {Array} comments
+ * @returns {Map<string, number>}
+ */
+export function countUnresolvedReviewThreadsByPath(comments) {
+  const threads = groupReviewThreads(comments);
+  const map = new Map();
+  for (const t of threads) {
+    if (t.resolved) continue;
+    const p = t.path || '';
+    if (!p) continue;
+    map.set(p, (map.get(p) || 0) + 1);
+  }
+  return map;
+}
+
+/**
+ * Count **pending** (unsubmitted) review threads per file path.
+ * A thread is pending when the root or any reply is still PENDING.
+ * Also counts any comment with `pending: true` by path so optimistic /
+ * reply-only drafts still drive the Diff file filter.
+ * @param {Array} comments
+ * @returns {Map<string, number>}
+ */
+export function countPendingReviewThreadsByPath(comments) {
+  const map = new Map();
+  const threads = groupReviewThreads(comments);
+  for (const t of threads) {
+    if (!t.pending) continue;
+    const p = t.path || '';
+    if (!p) continue;
+    map.set(p, (map.get(p) || 0) + 1);
+  }
+  // Ensure every pending comment path is represented (root-less / optimistic)
+  for (const c of Array.isArray(comments) ? comments : []) {
+    if (!c?.pending) continue;
+    const p = c.path || '';
+    if (!p || map.has(p)) continue;
+    map.set(p, 1);
+  }
+  return map;
+}
+
+/**
+ * Aggregate thread totals for Diff review filter labels.
+ * Aligns with Diff comment nav: thread **roots** only, optionally limited to
+ * paths present in the current file list (so badge counts match 0/N nav).
+ *
+ * - unresolved: open submitted threads (excludes pending drafts)
+ * - resolved: resolved threads
+ * - pendingThreads: pending threads
+ *
+ * @param {Array} comments
+ * @param {{
+ *   allowedPaths?: Set<string>|string[]|null,
+ *   excludeOutdated?: boolean,
+ * }} [opts]
+ * @returns {{ total: number, unresolved: number, resolved: number, pendingThreads: number }}
+ */
+export function countReviewThreadTotals(comments, opts: any = {}) {
+  const pathSet =
+    opts?.allowedPaths instanceof Set
+      ? opts.allowedPaths
+      : opts?.allowedPaths
+        ? new Set(
+            Array.isArray(opts.allowedPaths)
+              ? opts.allowedPaths.map(String).filter(Boolean)
+              : []
+          )
+        : null;
+  const excludeOutdated = Boolean(opts?.excludeOutdated);
+  const threads = groupReviewThreads(comments);
+  let total = 0;
+  let unresolved = 0;
+  let resolved = 0;
+  let pendingThreads = 0;
+  for (const t of threads) {
+    const p = t.path || '';
+    // No path → not placeable on Diff; skip so counts match nav
+    if (!p) continue;
+    if (pathSet && !pathSet.has(p)) continue;
+    if (excludeOutdated && t.outdated) continue;
+    total += 1;
+    if (t.pending) pendingThreads += 1;
+    if (t.resolved) resolved += 1;
+    else if (!t.pending) unresolved += 1;
+  }
+  return { total, unresolved, resolved, pendingThreads };
 }
 
 /**

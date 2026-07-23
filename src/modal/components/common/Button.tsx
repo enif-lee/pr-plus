@@ -1,5 +1,10 @@
 import React from 'react';
+import { TipPopover, hasTipContent } from './TipPopover';
 
+/**
+ * Shared button. Optional `title` / `shortcut` render a hover/focus popover
+ * (native browser tooltips are disabled when a popover is shown).
+ */
 export function Button({
   children,
   variant = 'default',
@@ -17,22 +22,25 @@ export function Button({
   title?: string;
   [key: string]: any;
 }) {
+  const tipLabel = title ? String(title).trim() : '';
+  const tipKbd = shortcut ? String(shortcut).trim() : '';
+  const hasTip = hasTipContent(title, shortcut);
+  const { 'aria-label': ariaLabelProp, ...btnRest } = rest;
   return (
     <button
       type="button"
       className={`prp-btn prp-btn--${variant} prp-btn--size-${size}${
-        shortcut ? ' prp-btn--has-shortcut' : ''
-      } ${className}`.trim()}
-      title={title || undefined}
-      data-shortcut={shortcut || undefined}
-      {...rest}
+        hasTip ? ' prp-has-tip' : ''
+      }${tipKbd ? ' prp-btn--has-shortcut' : ''} ${className}`.trim()}
+      title={undefined}
+      aria-label={
+        ariaLabelProp != null ? ariaLabelProp : tipLabel || undefined
+      }
+      data-shortcut={tipKbd || undefined}
+      {...btnRest}
     >
       {children}
-      {shortcut ? (
-        <span className="prp-btn__shortcut-pop" role="tooltip">
-          {shortcut}
-        </span>
-      ) : null}
+      <TipPopover title={tipLabel || null} shortcut={tipKbd || null} />
     </button>
   );
 }

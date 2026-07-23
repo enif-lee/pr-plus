@@ -198,6 +198,52 @@
     });
   }
 
+  function toPathSet(paths) {
+    if (!paths) return new Set();
+    if (paths instanceof Set) return paths;
+    return new Set(Array.isArray(paths) ? paths : []);
+  }
+
+  function isPathCollapsed(
+    path,
+    collapsedPaths,
+    defaultCollapsed,
+    expandAll,
+    viewedPaths
+  ) {
+    if (expandAll || !path) return false;
+    const set = toPathSet(collapsedPaths);
+    if (set.has(path)) return true;
+    if (set.size === 0) {
+      if (defaultCollapsed === true) return true;
+      if (toPathSet(viewedPaths).has(path)) return true;
+    }
+    return false;
+  }
+
+  function defaultCollapsedPathSet(files, viewedPaths) {
+    const out = new Set();
+    for (const f of Array.isArray(files) ? files : []) {
+      if (!f || !f.defaultCollapsed) continue;
+      const p = f.filename || f.path;
+      if (p) out.add(p);
+    }
+    for (const p of toPathSet(viewedPaths)) {
+      if (p) out.add(p);
+    }
+    return out;
+  }
+
+  function materializeCollapsedPaths(collapsedPaths, files, viewedPaths) {
+    if (collapsedPaths instanceof Set && collapsedPaths.size > 0) {
+      return new Set(collapsedPaths);
+    }
+    if (Array.isArray(collapsedPaths) && collapsedPaths.length > 0) {
+      return new Set(collapsedPaths);
+    }
+    return defaultCollapsedPathSet(files, viewedPaths);
+  }
+
   const api = {
     parseGitattributes,
     matchAttrPattern,
@@ -205,6 +251,9 @@
     isAttrEnabled,
     shouldCollapseFile,
     annotateFilesForCollapse,
+    isPathCollapsed,
+    defaultCollapsedPathSet,
+    materializeCollapsedPaths,
     DEFAULT_LARGE_CHANGES,
     DEFAULT_LARGE_PATCH_CHARS,
   };
@@ -222,18 +271,19 @@
 
 /**
  * Pure helpers for paginated / incremental GitHub comment fetches.
- * REST: page+per_page (Link rel=next) and since=ISO8601 incremental windows.
+ * REST: page+per_page (Link rel=next/last) and since=ISO8601 incremental windows.
  */
 (function () {
 
 const DEFAULT_COMMENT_PAGE_SIZE = 50;
 
-function parseLinkNextPage(linkHeader) {
+function parseLinkRelPage(linkHeader, rel) {
   const raw = String(linkHeader || '');
   if (!raw) return null;
+  const re = new RegExp('rel="?' + rel + '"?', 'i');
   const parts = raw.split(',');
   for (const part of parts) {
-    if (!/rel="?next"?/i.test(part)) continue;
+    if (!re.test(part)) continue;
     const m = part.match(/[?&]page=(\d+)/i);
     if (m) {
       const n = Number(m[1]);
@@ -241,6 +291,14 @@ function parseLinkNextPage(linkHeader) {
     }
   }
   return null;
+}
+
+function parseLinkNextPage(linkHeader) {
+  return parseLinkRelPage(linkHeader, 'next');
+}
+
+function parseLinkLastPage(linkHeader) {
+  return parseLinkRelPage(linkHeader, 'last');
 }
 
 function linkHasMore(linkHeader) {
@@ -292,9 +350,8 @@ function buildCommentsPageMeta(items, opts = {}) {
   const list = Array.isArray(items) ? items : [];
   const page = Math.max(1, Number(opts.page) || 1);
   const perPage = clampPerPage(opts.perPage);
-  const nextPage = parseLinkNextPage(opts.linkHeader);
-  const hasMore =
-    nextPage != null || (opts.linkHeader == null && list.length >= perPage);
+  const order = opts.order === 'from-end' ? 'from-end' : opts.order || 'asc';
+
   let oldest = null;
   let newest = null;
   let maxId = null;
@@ -309,11 +366,32 @@ function buildCommentsPageMeta(items, opts = {}) {
       if (Number.isFinite(id) && (maxId == null || id > maxId)) maxId = id;
     }
   }
+
+  if (order === 'from-end') {
+    const hasMore = page > 1;
+    return {
+      page,
+      perPage,
+      hasMore,
+      nextPage: hasMore ? page - 1 : null,
+      order: 'from-end',
+      since: opts.since || null,
+      oldestCreatedAt: oldest,
+      newestCreatedAt: newest,
+      maxId,
+      loadedCount: list.length,
+    };
+  }
+
+  const nextPage = parseLinkNextPage(opts.linkHeader);
+  const hasMore =
+    nextPage != null || (opts.linkHeader == null && list.length >= perPage);
   return {
     page,
     perPage,
     hasMore: Boolean(hasMore),
     nextPage: nextPage ?? (hasMore ? page + 1 : null),
+    order,
     since: opts.since || null,
     oldestCreatedAt: oldest,
     newestCreatedAt: newest,
@@ -342,6 +420,7 @@ function advanceCommentsMeta(prevMeta, pageMeta, totalLoaded) {
     perPage: page.perPage ?? prev.perPage ?? DEFAULT_COMMENT_PAGE_SIZE,
     hasMore: Boolean(page.hasMore),
     nextPage: page.hasMore ? page.nextPage : null,
+    order: page.order || prev.order || 'asc',
     since: prev.since || null,
     oldestCreatedAt: minIso(prev.oldestCreatedAt, page.oldestCreatedAt),
     newestCreatedAt: maxIso(prev.newestCreatedAt, page.newestCreatedAt),
@@ -361,6 +440,7 @@ function sinceCursorFromMeta(meta) {
 const api = {
   DEFAULT_COMMENT_PAGE_SIZE,
   parseLinkNextPage,
+  parseLinkLastPage,
   linkHasMore,
   buildCommentsListUrl,
   clampPerPage,
@@ -426,6 +506,9 @@ if (typeof globalThis !== 'undefined') {
         replies,
         resolved: Boolean(root.resolved ?? root.isResolved),
         outdated: Boolean(root.outdated),
+        pending: Boolean(
+          root.pending || replies.some(function (r) { return r && r.pending; })
+        ),
         threadNodeId: root.threadNodeId || root.thread_id || root.pullRequestReviewThreadId || null,
         count: 1 + replies.length,
       };
@@ -505,6 +588,67 @@ if (typeof globalThis !== 'undefined') {
       map.set(p, (map.get(p) || 0) + 1);
     }
     return map;
+  }
+
+  function countUnresolvedReviewThreadsByPath(comments) {
+    const threads = groupReviewThreads(comments);
+    const map = new Map();
+    for (const t of threads) {
+      if (t.resolved) continue;
+      const p = t.path || '';
+      if (!p) continue;
+      map.set(p, (map.get(p) || 0) + 1);
+    }
+    return map;
+  }
+
+  function countPendingReviewThreadsByPath(comments) {
+    const map = new Map();
+    const threads = groupReviewThreads(comments);
+    for (const t of threads) {
+      if (!t.pending) continue;
+      const p = t.path || '';
+      if (!p) continue;
+      map.set(p, (map.get(p) || 0) + 1);
+    }
+    for (const c of Array.isArray(comments) ? comments : []) {
+      if (!c || !c.pending) continue;
+      const p = c.path || '';
+      if (!p || map.has(p)) continue;
+      map.set(p, 1);
+    }
+    return map;
+  }
+
+  function countReviewThreadTotals(comments, opts) {
+    const o = opts && typeof opts === 'object' ? opts : {};
+    const pathSet =
+      o.allowedPaths instanceof Set
+        ? o.allowedPaths
+        : o.allowedPaths
+          ? new Set(
+              Array.isArray(o.allowedPaths)
+                ? o.allowedPaths.map(String).filter(Boolean)
+                : []
+            )
+          : null;
+    const excludeOutdated = Boolean(o.excludeOutdated);
+    const threads = groupReviewThreads(comments);
+    let total = 0;
+    let unresolved = 0;
+    let resolved = 0;
+    let pendingThreads = 0;
+    for (const t of threads) {
+      const p = t.path || '';
+      if (!p) continue;
+      if (pathSet && !pathSet.has(p)) continue;
+      if (excludeOutdated && t.outdated) continue;
+      total += 1;
+      if (t.pending) pendingThreads += 1;
+      if (t.resolved) resolved += 1;
+      else if (!t.pending) unresolved += 1;
+    }
+    return { total, unresolved, resolved, pendingThreads };
   }
 
   function normalizeReviewCommentId(raw) {
@@ -639,6 +783,9 @@ if (typeof globalThis !== 'undefined') {
     mergeReviewThreadMeta,
     mapGraphqlReviewThreads,
     countReviewThreadsByPath,
+    countUnresolvedReviewThreadsByPath,
+    countPendingReviewThreadsByPath,
+    countReviewThreadTotals,
     normalizeReviewCommentId,
     resolveRootReviewCommentId,
     buildReplyReviewThreadGraphql,
@@ -895,21 +1042,43 @@ function buildUpdateBranch(owner, repo, pullNumber, { expectedHeadSha } = {}) {
   };
 }
 
-/** Issue/PR subscription (notifications). */
-function buildSetSubscription(owner, repo, issueNumber, { subscribed = true, ignored = false } = {}) {
+/**
+ * Issue/PR subscription via GraphQL updateSubscription
+ * (REST /issues/{n}/subscription is 404 / removed for many tokens).
+ */
+function buildSetSubscription(
+  owner,
+  repo,
+  issueNumber,
+  { subscribed = true, ignored = false, nodeId = null } = {}
+) {
+  const state = ignored ? 'IGNORED' : subscribed ? 'SUBSCRIBED' : 'UNSUBSCRIBED';
   return {
-    method: 'PUT',
-    url: `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/subscription`,
-    body: { subscribed: Boolean(subscribed), ignored: Boolean(ignored) },
+    method: 'POST',
+    url: 'https://api.github.com/graphql',
+    body: {
+      query: `mutation($id:ID!,$state:SubscriptionState!){
+  updateSubscription(input:{subscribableId:$id, state:$state}) {
+    subscribable {
+      ... on PullRequest { id viewerSubscription }
+      ... on Issue { id viewerSubscription }
+    }
+  }
+}`,
+      variables: {
+        id: String(nodeId || ''),
+        state,
+      },
+    },
   };
 }
 
-function buildDeleteSubscription(owner, repo, issueNumber) {
-  return {
-    method: 'DELETE',
-    url: `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/subscription`,
-    body: null,
-  };
+function buildDeleteSubscription(owner, repo, issueNumber, nodeId = null) {
+  return buildSetSubscription(owner, repo, issueNumber, {
+    subscribed: false,
+    ignored: false,
+    nodeId,
+  });
 }
 
 /** Set or clear milestone on the PR issue. */
@@ -983,19 +1152,33 @@ function buildRerequestReviewerLogins(detail) {
   const out = [];
   const seen = new Set();
 
-  function consider(login) {
+  function isBotLogin(login, review) {
+    if (review && (review.isBot === true || String(review.type || '').toLowerCase() === 'bot')) {
+      return true;
+    }
+    const key = String(login || '').toLowerCase();
+    if (d.actorIsBot && typeof d.actorIsBot === 'object') {
+      if (d.actorIsBot instanceof Map) {
+        if (d.actorIsBot.get(key)) return true;
+      } else if (d.actorIsBot[key]) return true;
+    }
+    return /\[bot\]$/i.test(String(login || ''));
+  }
+
+  function consider(login, review) {
     const raw = String(login || '').trim();
     if (!raw) return;
     const key = raw.toLowerCase();
     if (author && key === author) return;
     if (pending.has(key)) return; // already requested → would 422
+    if (isBotLogin(raw, review)) return; // bots cannot be re-requested
     if (seen.has(key)) return;
     seen.add(key);
     out.push(raw);
   }
 
   for (const r of d.reviews || []) {
-    consider(r?.author);
+    consider(r?.author, r);
   }
   for (const login of d.extraLogins || []) {
     consider(login);
@@ -1122,6 +1305,12 @@ function mapRestReviewComment(raw, fallback = {}) {
     inReplyToId: r.in_reply_to_id ?? fallback.inReplyToId ?? null,
     nodeId: r.node_id || null,
     threadNodeId: r.threadNodeId || fallback.threadNodeId || null,
+    reviewId:
+      r.pull_request_review_id != null
+        ? Number(r.pull_request_review_id)
+        : fallback.reviewId != null
+          ? Number(fallback.reviewId)
+          : null,
     resolved: false,
     pending: Boolean(r.pending ?? fallback.pending),
     pendingReviewId: r.pendingReviewId ?? fallback.pendingReviewId ?? null,
@@ -1194,6 +1383,206 @@ if (typeof globalThis !== 'undefined') {
 })();
 
 
+/* ---- modal/pure/checks.js ---- */
+
+/* sw-iife */
+(function () {
+  /**
+   * Normalize GitHub commit checks: keep only the latest entry per identity.
+   * Commit status contexts and Check Runs can accumulate re-runs / duplicates;
+   * GitHub's PR UI surfaces the most recent action list only.
+   */
+
+  function parseTime(value) {
+    if (value == null || value === '') return 0;
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    const n = Date.parse(String(value));
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function statusKey(s) {
+    const ctx = String(s?.context || '')
+      .trim()
+      .toLowerCase();
+    if (ctx) return ctx;
+    const desc = String(s?.description || '')
+      .trim()
+      .toLowerCase();
+    if (desc) return `desc:${desc}`;
+    return '';
+  }
+
+  function statusTime(s) {
+    return (
+      parseTime(s?.updatedAt ?? s?.updated_at) ||
+      parseTime(s?.createdAt ?? s?.created_at) ||
+      0
+    );
+  }
+
+  /**
+   * Keep the latest status object per context.
+   * @param {Array} statuses
+   * @returns {Array}
+   */
+  function distinctStatuses(statuses) {
+    const list = Array.isArray(statuses) ? statuses : [];
+    /** @type {Map<string, any>} */
+    const byKey = new Map();
+    let anon = 0;
+    for (const s of list) {
+      if (!s || typeof s !== 'object') continue;
+      let key = statusKey(s);
+      if (!key) key = `__anon_status_${anon++}`;
+      const prev = byKey.get(key);
+      if (!prev || statusTime(s) >= statusTime(prev)) {
+        byKey.set(key, s);
+      }
+    }
+    return [...byKey.values()];
+  }
+
+  function checkRunKey(r) {
+    const name = String(r?.name || '')
+      .trim()
+      .toLowerCase();
+    const app = String(
+      r?.appSlug || r?.app_slug || r?.app?.slug || r?.app?.name || ''
+    )
+      .trim()
+      .toLowerCase();
+    if (!name) return '';
+    // Same-named jobs from different apps stay separate
+    return app ? `${app}::${name}` : name;
+  }
+
+  function checkRunTime(r) {
+    return (
+      parseTime(r?.completedAt ?? r?.completed_at) ||
+      parseTime(r?.startedAt ?? r?.started_at) ||
+      // Prefer higher numeric id as recency proxy when timestamps missing
+      (Number.isFinite(Number(r?.id)) ? Number(r.id) : 0)
+    );
+  }
+
+  /**
+   * Keep the latest check run per name (+ app).
+   * @param {Array} runs
+   * @returns {Array}
+   */
+  function distinctCheckRuns(runs) {
+    const list = Array.isArray(runs) ? runs : [];
+    /** @type {Map<string, any>} */
+    const byKey = new Map();
+    let anon = 0;
+    for (const r of list) {
+      if (!r || typeof r !== 'object') continue;
+      let key = checkRunKey(r);
+      if (!key) key = `__anon_run_${anon++}`;
+      const prev = byKey.get(key);
+      if (!prev) {
+        byKey.set(key, r);
+        continue;
+      }
+      const tNew = checkRunTime(r);
+      const tOld = checkRunTime(prev);
+      if (
+        tNew > tOld ||
+        (tNew === tOld && Number(r.id || 0) > Number(prev.id || 0))
+      ) {
+        byKey.set(key, r);
+      }
+    }
+    return [...byKey.values()];
+  }
+
+  /**
+   * Derive overall state from statuses + check runs (after distinct).
+   * @param {Array} statuses
+   * @param {Array} checkRuns
+   * @param {string} [fallback]
+   */
+  function deriveChecksState(statuses, checkRuns, fallback = 'unknown') {
+    const st = Array.isArray(statuses) ? statuses : [];
+    const runs = Array.isArray(checkRuns) ? checkRuns : [];
+    const statusStates = st.map((s) => String(s?.state || '').toLowerCase());
+    const conclusions = runs.map((r) => String(r?.conclusion || '').toLowerCase());
+    const runStatuses = runs.map((r) => String(r?.status || '').toLowerCase());
+
+    const anyFailure =
+      statusStates.some((s) => s === 'failure' || s === 'error') ||
+      conclusions.some(
+        (c) =>
+          c === 'failure' ||
+          c === 'timed_out' ||
+          c === 'startup_failure' ||
+          c === 'cancelled'
+      );
+    if (anyFailure) return 'failure';
+
+    const anyPending =
+      statusStates.some((s) => s === 'pending') ||
+      runStatuses.some(
+        (s) => s === 'queued' || s === 'in_progress' || s === 'waiting'
+      ) ||
+      conclusions.some((c) => c === '' || c === 'null' || c === 'action_required');
+    if (anyPending) return 'pending';
+
+    if (st.length || runs.length) {
+      const anySuccess =
+        statusStates.some((s) => s === 'success') ||
+        conclusions.some(
+          (c) => c === 'success' || c === 'neutral' || c === 'skipped'
+        );
+      if (anySuccess) return 'success';
+    }
+
+    return fallback || 'unknown';
+  }
+
+  /**
+   * Normalize a checks payload: distinct latest statuses + check runs, recompute counts/state.
+   * @param {object|null|undefined} checks
+   * @returns {{ state: string, totalCount: number, statuses: Array, checkRuns: Array }}
+   */
+  function normalizeChecks(checks) {
+    const raw = checks && typeof checks === 'object' ? checks : {};
+    const statuses = distinctStatuses(raw.statuses);
+    const checkRuns = distinctCheckRuns(raw.checkRuns || raw.check_runs);
+    const state = deriveChecksState(
+      statuses,
+      checkRuns,
+      String(raw.state || 'unknown')
+    );
+    return {
+      state,
+      totalCount: statuses.length + checkRuns.length,
+      statuses,
+      checkRuns,
+    };
+  }
+
+  const api = {
+    parseTime,
+    statusKey,
+    statusTime,
+    distinctStatuses,
+    checkRunKey,
+    checkRunTime,
+    distinctCheckRuns,
+    deriveChecksState,
+    normalizeChecks,
+  };
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = api;
+  }
+  if (typeof globalThis !== 'undefined') {
+    globalThis.PRModalChecks = api;
+  }
+})();
+
+
 /* ---- storage.js ---- */
 
 ;(function(){
@@ -1210,9 +1599,96 @@ if (typeof globalThis !== 'undefined') {
  */
 
 const TOKEN_KEY = 'githubToken';
+/** User prefs in chrome.storage.local (non-secret). */
+const PREFS_KEY = 'extensionPrefs';
+
+/**
+ * Default extension preferences.
+ * - fastReview: progressive dual-window load (core first, threads on demand)
+ * - reverseComments: composer → merge box → conversation (latest-first timeline)
+ */
+const DEFAULT_PREFS = {
+  fastReview: true,
+  reverseComments: true,
+};
 
 function getStorageArea(storageApi = globalThis.chrome?.storage?.local) {
   return storageApi || null;
+}
+
+/**
+ * Normalize prefs object; unknown keys dropped, missing keys filled from defaults.
+ * @param {unknown} raw
+ * @returns {{ fastReview: boolean, reverseComments: boolean }}
+ */
+function normalizePrefs(raw) {
+  const src = raw && typeof raw === 'object' ? raw : {};
+  return {
+    fastReview:
+      typeof src.fastReview === 'boolean'
+        ? src.fastReview
+        : DEFAULT_PREFS.fastReview,
+    reverseComments:
+      typeof src.reverseComments === 'boolean'
+        ? src.reverseComments
+        : DEFAULT_PREFS.reverseComments,
+  };
+}
+
+/**
+ * @param {unknown} [storageApi]
+ * @returns {Promise<{ fastReview: boolean, reverseComments: boolean }>}
+ */
+function getExtensionPrefs(storageApi) {
+  const area = getStorageArea(storageApi);
+  if (!area) return Promise.resolve({ ...DEFAULT_PREFS });
+
+  return new Promise((resolve) => {
+    area.get([PREFS_KEY], (result) => {
+      resolve(normalizePrefs(result?.[PREFS_KEY]));
+    });
+  });
+}
+
+/**
+ * Merge patch into stored prefs and return the full next prefs.
+ * @param {Partial<{ fastReview: boolean, reverseComments: boolean }>} patch
+ * @param {unknown} [storageApi]
+ */
+async function setExtensionPrefs(patch, storageApi) {
+  const area = getStorageArea(storageApi);
+  if (!area) return Promise.reject(new Error('chrome.storage unavailable'));
+
+  const prev = await getExtensionPrefs(area);
+  const next = normalizePrefs({
+    ...prev,
+    ...(patch && typeof patch === 'object' ? patch : {}),
+  });
+
+  return new Promise((resolve, reject) => {
+    area.set({ [PREFS_KEY]: next }, () => {
+      const err = globalThis.chrome?.runtime?.lastError;
+      if (err) reject(err);
+      else resolve(next);
+    });
+  });
+}
+
+/**
+ * Watch prefs changes (local area only).
+ * @param {(prefs: { fastReview: boolean, reverseComments: boolean }) => void} onChange
+ * @param {unknown} [storageApi]
+ */
+function watchExtensionPrefs(onChange, storageApi = globalThis.chrome?.storage) {
+  if (!storageApi?.onChanged || typeof onChange !== 'function') return () => {};
+
+  const listener = (changes, areaName) => {
+    if (areaName !== 'local' || !changes[PREFS_KEY]) return;
+    onChange(normalizePrefs(changes[PREFS_KEY].newValue));
+  };
+
+  storageApi.onChanged.addListener(listener);
+  return () => storageApi.onChanged.removeListener(listener);
 }
 
 /** Mask for UI — keep only last 4 chars (no usable prefix leak). */
@@ -1306,12 +1782,18 @@ function watchGithubToken(onChange, storageApi = globalThis.chrome?.storage) {
 
 const storageApi = {
   TOKEN_KEY,
+  PREFS_KEY,
+  DEFAULT_PREFS,
+  normalizePrefs,
   maskGithubToken,
   looksLikeGithubToken,
   getGithubToken,
   getGithubTokenStatus,
   setGithubToken,
   watchGithubToken,
+  getExtensionPrefs,
+  setExtensionPrefs,
+  watchExtensionPrefs,
 };
 
 if (typeof module !== 'undefined' && module.exports) {
@@ -1331,17 +1813,68 @@ if (typeof globalThis !== 'undefined') {
  * List up to 100 open PRs, then fill page-visible dangling PRs via single-PR gets.
  */
 
+/**
+ * Map REST pull list/item payload → app list row.
+ * Includes labels / assignees / milestone so progressive modal sketch can paint
+ * sidebar meta without waiting for full fetchPrDetail.
+ */
 function mapApiPullRequest(pr) {
+  const author = pr.user?.login || '';
+  const authorAvatarUrl = pr.user?.avatar_url || '';
+  const labels = Array.isArray(pr.labels)
+    ? pr.labels.map((l) => ({
+        name: l?.name || String(l || ''),
+        color: l?.color || '',
+        description: l?.description || '',
+      })).filter((l) => l.name)
+    : [];
+  const assignees = Array.isArray(pr.assignees)
+    ? pr.assignees.map((u) => u?.login || u).filter(Boolean)
+    : [];
+  const requestedReviewers = Array.isArray(pr.requested_reviewers)
+    ? pr.requested_reviewers.map((u) => u?.login || u).filter(Boolean)
+    : [];
+  /** login → avatar_url for people chips */
+  const avatarUrls = {};
+  const putUser = (u) => {
+    const login = u?.login || (typeof u === 'string' ? u : '');
+    const url = u?.avatar_url || '';
+    if (login && url) avatarUrls[String(login).toLowerCase()] = url;
+  };
+  putUser(pr.user);
+  for (const u of pr.assignees || []) putUser(u);
+  for (const u of pr.requested_reviewers || []) putUser(u);
+
+  const milestone = pr.milestone
+    ? {
+        number: pr.milestone.number,
+        title: pr.milestone.title || '',
+        state: pr.milestone.state || '',
+        dueOn: pr.milestone.due_on || null,
+      }
+    : null;
+
   return {
     number: pr.number,
     title: pr.title,
     // Body required so attachMagicLinks/prMatchText can match description tokens
     body: pr.body || '',
-    headRef: pr.head.ref,
-    baseRef: pr.base.ref,
-    author: pr.user?.login || '',
+    headRef: pr.head?.ref || '',
+    baseRef: pr.base?.ref || '',
+    author,
+    authorAvatarUrl,
     draft: Boolean(pr.draft),
     htmlUrl: pr.html_url,
+    labels,
+    assignees,
+    requestedReviewers,
+    milestone,
+    avatarUrls,
+    // Optional stats when present on full list items
+    additions: pr.additions ?? null,
+    deletions: pr.deletions ?? null,
+    changedFiles: pr.changed_files ?? null,
+    nodeId: pr.node_id || null,
   };
 }
 
@@ -1686,6 +2219,13 @@ function mapReviewComment(c, extra = {}) {
     inReplyToId: c.in_reply_to_id ?? null,
     nodeId: c.node_id || null,
     threadNodeId: extra.threadNodeId ?? null,
+    /** Pull request review id (groups file threads under one review event). */
+    reviewId:
+      c.pull_request_review_id != null
+        ? Number(c.pull_request_review_id)
+        : extra.reviewId != null
+          ? Number(extra.reviewId)
+          : null,
     resolved: Boolean(extra.resolved),
     outdated,
     /** True when part of a not-yet-submitted PENDING review (hidden from main list). */
@@ -1703,6 +2243,10 @@ function mapGraphqlReviewCommentNode(node, threadMeta = {}) {
   if (id == null) return null;
   const reviewState = String(node.pullRequestReview?.state || '').toUpperCase();
   const pending = reviewState === 'PENDING';
+  const reviewDbId =
+    node.pullRequestReview?.databaseId != null
+      ? Number(node.pullRequestReview.databaseId)
+      : null;
   const line =
     node.line != null
       ? Number(node.line)
@@ -1727,12 +2271,11 @@ function mapGraphqlReviewCommentNode(node, threadMeta = {}) {
     inReplyToId: node.replyTo?.databaseId ?? null,
     nodeId: node.id || null,
     threadNodeId: threadMeta.threadNodeId || null,
+    reviewId: reviewDbId,
     resolved: Boolean(threadMeta.resolved),
     outdated: Boolean(node.outdated ?? threadMeta.isOutdated),
     pending,
-    pendingReviewId: pending
-      ? node.pullRequestReview?.databaseId ?? null
-      : null,
+    pendingReviewId: pending ? reviewDbId : null,
   };
 }
 
@@ -1969,49 +2512,150 @@ async function fetchPrCommentsPage(
   const perPage =
     helpers?.clampPerPage?.(opts?.perPage) ||
     Math.min(100, Number(opts?.perPage) || COMMENT_PAGE_SIZE);
-  const page = Math.max(1, Number(opts?.page) || 1);
+  let page = Math.max(1, Number(opts?.page) || 1);
   const since = opts?.since || null;
-  const url = helpers?.buildCommentsListUrl
-    ? helpers.buildCommentsListUrl(kind, owner, repo, pullNumber, {
-        page,
-        perPage,
-        since,
-        sort: kind === 'review' ? 'created' : undefined,
-        direction: kind === 'review' ? 'asc' : undefined,
-      })
-    : (() => {
-        const base =
-          kind === 'review'
-            ? `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/comments`
-            : `https://api.github.com/repos/${owner}/${repo}/issues/${pullNumber}/comments`;
-        const q = new URLSearchParams({
-          per_page: String(perPage),
-          page: String(page),
-        });
-        if (since) q.set('since', since);
-        return `${base}?${q}`;
-      })();
+  // Prefer newest-first: review API supports direction=desc; issue comments
+  // are ascending-only so we jump to Link rel=last on the first preferNewest fetch.
+  const preferNewest = Boolean(opts?.preferNewest) && !since;
+  const orderHint = opts?.order || null;
 
-  const { data, link } = await apiJsonWithLink(url, fetchImpl, token);
-  const raw = Array.isArray(data) ? data : [];
-  const items =
-    kind === 'review' ? raw.map(mapReviewComment) : raw.map(mapIssueComment);
+  async function fetchPage(pageNum, listOpts = {}) {
+    const sort =
+      listOpts.sort != null
+        ? listOpts.sort
+        : kind === 'review'
+          ? 'created'
+          : undefined;
+    const direction =
+      listOpts.direction != null
+        ? listOpts.direction
+        : kind === 'review'
+          ? preferNewest || orderHint === 'desc'
+            ? 'desc'
+            : 'asc'
+          : undefined;
+    const url = helpers?.buildCommentsListUrl
+      ? helpers.buildCommentsListUrl(kind, owner, repo, pullNumber, {
+          page: pageNum,
+          perPage,
+          since,
+          sort,
+          direction,
+        })
+      : (() => {
+          const base =
+            kind === 'review'
+              ? `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/comments`
+              : `https://api.github.com/repos/${owner}/${repo}/issues/${pullNumber}/comments`;
+          const q = new URLSearchParams({
+            per_page: String(perPage),
+            page: String(pageNum),
+          });
+          if (since) q.set('since', since);
+          if (sort) q.set('sort', sort);
+          if (direction) q.set('direction', direction);
+          return `${base}?${q}`;
+        })();
+    const { data, link } = await apiJsonWithLink(url, fetchImpl, token);
+    const raw = Array.isArray(data) ? data : [];
+    const items =
+      kind === 'review' ? raw.map(mapReviewComment) : raw.map(mapIssueComment);
+    return { items, raw, link, pageNum };
+  }
+
+  // Issue comments: ascending only → first paint from last page (newest), then page-1…
+  if (kind === 'issue' && preferNewest && page === 1 && !orderHint) {
+    const probe = await fetchPage(1);
+    const lastPage =
+      (helpers?.parseLinkLastPage && helpers.parseLinkLastPage(probe.link)) ||
+      null;
+    if (lastPage != null && lastPage > 1) {
+      const newest = await fetchPage(lastPage);
+      const meta = helpers?.buildCommentsPageMeta
+        ? helpers.buildCommentsPageMeta(newest.items, {
+            page: lastPage,
+            perPage,
+            linkHeader: newest.link,
+            since,
+            order: 'from-end',
+          })
+        : {
+            page: lastPage,
+            perPage,
+            hasMore: lastPage > 1,
+            nextPage: lastPage > 1 ? lastPage - 1 : null,
+            order: 'from-end',
+            since,
+            loadedCount: newest.items.length,
+          };
+      return { items: newest.items, meta, kind };
+    }
+    // Only one page — already the full set (oldest=newest window)
+    const meta = helpers?.buildCommentsPageMeta
+      ? helpers.buildCommentsPageMeta(probe.items, {
+          page: 1,
+          perPage,
+          linkHeader: probe.link,
+          since,
+          order: 'from-end',
+        })
+      : {
+          page: 1,
+          perPage,
+          hasMore: false,
+          nextPage: null,
+          order: 'from-end',
+          since,
+          loadedCount: probe.items.length,
+        };
+    return { items: probe.items, meta, kind };
+  }
+
+  // Continuing from-end (older pages) for issue comments
+  if (kind === 'issue' && (orderHint === 'from-end' || opts?.order === 'from-end')) {
+    const res = await fetchPage(page);
+    const meta = helpers?.buildCommentsPageMeta
+      ? helpers.buildCommentsPageMeta(res.items, {
+          page,
+          perPage,
+          linkHeader: res.link,
+          since,
+          order: 'from-end',
+        })
+      : {
+          page,
+          perPage,
+          hasMore: page > 1,
+          nextPage: page > 1 ? page - 1 : null,
+          order: 'from-end',
+          since,
+          loadedCount: res.items.length,
+        };
+    return { items: res.items, meta, kind };
+  }
+
+  // Review comments (and default issue): page 1 = newest when preferNewest
+  const res = await fetchPage(page, {
+    direction: kind === 'review' ? (preferNewest || orderHint === 'desc' ? 'desc' : 'asc') : undefined,
+    sort: kind === 'review' ? 'created' : undefined,
+  });
   const meta = helpers?.buildCommentsPageMeta
-    ? helpers.buildCommentsPageMeta(items, {
+    ? helpers.buildCommentsPageMeta(res.items, {
         page,
         perPage,
-        linkHeader: link,
+        linkHeader: res.link,
         since,
+        order: kind === 'review' && (preferNewest || orderHint === 'desc') ? 'desc' : 'asc',
       })
     : {
         page,
         perPage,
-        hasMore: raw.length >= perPage,
-        nextPage: raw.length >= perPage ? page + 1 : null,
+        hasMore: res.raw.length >= perPage,
+        nextPage: res.raw.length >= perPage ? page + 1 : null,
         since,
-        loadedCount: items.length,
+        loadedCount: res.items.length,
       };
-  return { items, meta, kind };
+  return { items: res.items, meta, kind };
 }
 
 async function apiSend(url, fetchImpl, token, { method = 'GET', body } = {}) {
@@ -2135,8 +2779,10 @@ query($owner:String!,$name:String!,$number:Int!,$n:Int!,$cursor:String){
   }
 }`;
 
-/** Default page size for dual-window thread loading. */
-const REVIEW_THREADS_PAGE_SIZE = 40;
+/** GraphQL connection / nodes(ids) hard cap. */
+const REVIEW_THREADS_API_MAX = 100;
+/** Default page size for dual-window expand (Load more / Load all). Matches API max. */
+const REVIEW_THREADS_PAGE_SIZE = REVIEW_THREADS_API_MAX;
 
 /**
  * Map GraphQL reviewThreads.nodes → { threads, comments }.
@@ -2209,7 +2855,10 @@ async function fetchReviewThreadsPage(
   if (!token) return empty;
   const n = Number(pullNumber);
   if (!Number.isFinite(n)) return empty;
-  const size = Math.max(1, Math.min(100, Number(pageSize) || REVIEW_THREADS_PAGE_SIZE));
+  const size = Math.max(
+    1,
+    Math.min(REVIEW_THREADS_API_MAX, Number(pageSize) || REVIEW_THREADS_PAGE_SIZE)
+  );
   const dir = String(direction || 'newest');
   const useLast = dir === 'newest' || dir === 'older';
   const query = useLast ? REVIEW_THREADS_LAST_QUERY : REVIEW_THREADS_FIRST_QUERY;
@@ -2260,8 +2909,229 @@ async function fetchReviewThreadsPage(
 }
 
 /**
- * Initial dual-window load: newest (last) + oldest (first) when total is large.
- * Small PRs load a single newest window covering everything.
+ * Collect GraphQL thread node ids (PRRT_…) that are unresolved in a detail snapshot.
+ * Used for cache revalidate bulk refresh.
+ * @param {object|null} detail
+ * @returns {string[]}
+ */
+function collectUnresolvedThreadNodeIds(detail) {
+  const dropped =
+    detail?._droppedThreadNodeIds instanceof Set
+      ? detail._droppedThreadNodeIds
+      : new Set(
+          Array.isArray(detail?._droppedThreadNodeIds)
+            ? detail._droppedThreadNodeIds.map(String)
+            : []
+        );
+  const ids = new Set();
+  for (const t of Array.isArray(detail?.reviewThreads) ? detail.reviewThreads : []) {
+    if (!t?.threadNodeId || t.resolved) continue;
+    const id = String(t.threadNodeId);
+    if (dropped.has(id)) continue;
+    ids.add(id);
+  }
+  const list = Array.isArray(detail?.reviewComments) ? detail.reviewComments : [];
+  const byId = new Map();
+  for (const c of list) {
+    if (c && c.id != null) byId.set(String(c.id), c);
+  }
+  for (const c of list) {
+    if (!c?.threadNodeId || c.resolved) continue;
+    const id = String(c.threadNodeId);
+    if (dropped.has(id)) continue;
+    const parentId = c.inReplyToId ?? c.in_reply_to_id ?? null;
+    // Prefer roots (or orphans) — replies inherit resolved from thread meta anyway
+    if (parentId != null && byId.has(String(parentId))) continue;
+    ids.add(id);
+  }
+  return [...ids];
+}
+
+/**
+ * Fetch specific review threads by GraphQL global ids (PRRT_…).
+ * Batches in chunks of REVIEW_THREADS_API_MAX (100).
+ * @param {string[]} threadNodeIds
+ * @param {typeof fetch} fetchImpl
+ * @param {string} token
+ */
+async function fetchReviewThreadsByIds(threadNodeIds, fetchImpl, token) {
+  const empty = {
+    threads: [],
+    comments: [],
+    pageCount: 0,
+    direction: 'refresh',
+    totalCount: null,
+    hasPreviousPage: false,
+    hasNextPage: false,
+    requestedThreadIds: [],
+    missingThreadIds: [],
+  };
+  if (!token) return empty;
+  const ids = [
+    ...new Set(
+      (Array.isArray(threadNodeIds) ? threadNodeIds : [])
+        .map((id) => String(id || '').trim())
+        .filter(Boolean)
+    ),
+  ];
+  if (!ids.length) return empty;
+
+  const query = `
+query($ids:[ID!]!){
+  nodes(ids:$ids){
+    ... on PullRequestReviewThread {
+      ${REVIEW_THREAD_NODE_FIELDS}
+    }
+  }
+}`;
+
+  const allThreads = [];
+  const allComments = [];
+  const foundIds = new Set();
+  let pages = 0;
+  for (let i = 0; i < ids.length; i += REVIEW_THREADS_API_MAX) {
+    const chunk = ids.slice(i, i + REVIEW_THREADS_API_MAX);
+    try {
+      const data = await apiGraphql(query, { ids: chunk }, fetchImpl, token);
+      // nodes[] is parallel to requested ids; deleted/not-found → null
+      const rawNodes = Array.isArray(data?.nodes) ? data.nodes : [];
+      const nodes = rawNodes.filter(Boolean);
+      const mapped = mapReviewThreadNodes(nodes);
+      for (const t of mapped.threads) {
+        t.loadWindow = t.loadWindow || 'refresh';
+        if (t.threadNodeId) foundIds.add(String(t.threadNodeId));
+      }
+      // Also mark any non-null node id from raw (even if mapping skipped)
+      for (const n of nodes) {
+        if (n?.id) foundIds.add(String(n.id));
+      }
+      allThreads.push(...mapped.threads);
+      allComments.push(...mapped.comments);
+      pages += 1;
+    } catch (err) {
+      // One bad chunk must not block the rest — treat whole chunk as unknown
+      // (not missing) so we don't mass-drop on transient GraphQL errors.
+      console.warn(
+        '[pr-plus] fetchReviewThreadsByIds chunk failed',
+        err?.message || err
+      );
+    }
+  }
+  const missingThreadIds = ids.filter((id) => !foundIds.has(String(id)));
+  return {
+    threads: allThreads,
+    comments: allComments,
+    pageCount: pages,
+    direction: 'refresh',
+    totalCount: null,
+    hasPreviousPage: false,
+    hasNextPage: false,
+    requestedThreadIds: ids,
+    missingThreadIds,
+  };
+}
+
+/**
+ * Drop review threads (and their comments) that no longer exist remotely.
+ * Records comment id tombstones so App mergeDetailPreserveOptimistic cannot
+ * resurrect them across a racey host→local merge.
+ *
+ * @param {object|null} detail
+ * @param {Iterable<string>|string[]|null|undefined} threadNodeIds
+ * @returns {object|null}
+ */
+function dropReviewThreadsFromDetail(detail, threadNodeIds) {
+  if (!detail) return detail;
+  const drop = new Set(
+    [...(threadNodeIds || [])]
+      .map((id) => String(id || '').trim())
+      .filter(Boolean)
+  );
+  if (!drop.size) return detail;
+
+  const prevRc = Array.isArray(detail.reviewComments) ? detail.reviewComments : [];
+  const prevTh = Array.isArray(detail.reviewThreads) ? detail.reviewThreads : [];
+  const droppedCommentIds = [];
+  const reviewComments = prevRc.filter((c) => {
+    if (!c) return false;
+    const tid = c.threadNodeId ? String(c.threadNodeId) : '';
+    if (tid && drop.has(tid)) {
+      if (c.id != null) droppedCommentIds.push(String(c.id));
+      return false;
+    }
+    return true;
+  });
+  const reviewThreads = prevTh.filter(
+    (t) => !t?.threadNodeId || !drop.has(String(t.threadNodeId))
+  );
+
+  const deleted = new Set(
+    [
+      ...(detail._deletedReviewCommentIds instanceof Set
+        ? detail._deletedReviewCommentIds
+        : Array.isArray(detail._deletedReviewCommentIds)
+          ? detail._deletedReviewCommentIds
+          : []),
+      ...droppedCommentIds,
+    ].map(String)
+  );
+
+  const prevMeta = detail.reviewThreadsMeta || emptyReviewThreadsMeta();
+  const filterIdList = (list) =>
+    (Array.isArray(list) ? list : [])
+      .map(String)
+      .filter((id) => id && !drop.has(id));
+  const loadedThreadCount = reviewThreads.length;
+  const totalCount = Math.max(
+    0,
+    Number(prevMeta.totalCount) || loadedThreadCount
+  );
+  // Prefer shrinking total when we know threads vanished (never inflate)
+  const nextTotal =
+    Number.isFinite(Number(prevMeta.totalCount)) &&
+    Number(prevMeta.totalCount) >= drop.size
+      ? Math.max(loadedThreadCount, Number(prevMeta.totalCount) - drop.size)
+      : totalCount;
+  const hiddenCount = Math.max(0, nextTotal - loadedThreadCount);
+
+  const prevDroppedThreads =
+    detail._droppedThreadNodeIds instanceof Set
+      ? detail._droppedThreadNodeIds
+      : Array.isArray(detail._droppedThreadNodeIds)
+        ? detail._droppedThreadNodeIds
+        : [];
+  const droppedThreads = new Set([...prevDroppedThreads, ...drop].map(String));
+
+  return {
+    ...detail,
+    reviewComments,
+    reviewThreads,
+    reviewCommentsMeta: {
+      ...(detail.reviewCommentsMeta || {}),
+      loadedCount: reviewComments.length,
+    },
+    reviewThreadsMeta: {
+      ...prevMeta,
+      totalCount: nextTotal,
+      hiddenCount,
+      loadedThreadCount,
+      loadedCommentCount: reviewComments.length,
+      newestThreadIds: filterIdList(prevMeta.newestThreadIds),
+      oldestThreadIds: filterIdList(prevMeta.oldestThreadIds),
+      hasMore: hiddenCount > 0,
+      hasOlder: hiddenCount > 0 && Boolean(prevMeta.hasOlder),
+      hasNewerFromOldest:
+        hiddenCount > 0 && Boolean(prevMeta.hasNewerFromOldest),
+    },
+    _deletedReviewCommentIds: deleted.size ? deleted : detail._deletedReviewCommentIds,
+    // Never re-request these PRRT ids in collectUnresolvedThreadNodeIds
+    _droppedThreadNodeIds: droppedThreads,
+  };
+}
+
+/**
+ * Initial dual-window load: last:100 first, then start:20 only when total ≥ 100.
+ * Small PRs (total < 100) load a single last window covering everything.
  */
 async function fetchPullReviewThreadsBundle(
   owner,
@@ -2283,21 +3153,27 @@ async function fetchPullReviewThreadsBundle(
       reviewThreadsMeta: emptyReviewThreadsMeta(),
     };
   }
-  const pageSize =
-    Number(opts.pageSize) || REVIEW_THREADS_PAGE_SIZE;
-  // Newest first page
+  const lastPageSize = Math.min(
+    REVIEW_THREADS_API_MAX,
+    Number(opts.pageSize) || REVIEW_THREADS_API_MAX
+  );
+  const startPageSize = Math.min(
+    20,
+    Number(opts.startPageSize) || 20
+  );
+  // Last (newest) first
   const newest = await fetchReviewThreadsPage(
     owner,
     repo,
     pullNumber,
-    { direction: 'newest', cursor: null, pageSize },
+    { direction: 'newest', cursor: null, pageSize: lastPageSize },
     fetchImpl,
     token
   );
   const totalCount = Number(newest.totalCount) || newest.threads.length;
   let oldest = null;
-  // If more than one page, also seed oldest window for dual-end fold
-  if (totalCount > pageSize && newest.hasPreviousPage) {
+  // total < 100 → last page already covers all; skip start window
+  if (totalCount >= REVIEW_THREADS_API_MAX && newest.hasPreviousPage) {
     try {
       oldest = await fetchReviewThreadsPage(
         owner,
@@ -2306,7 +3182,7 @@ async function fetchPullReviewThreadsBundle(
         {
           direction: 'oldest',
           cursor: null,
-          pageSize: Math.min(20, pageSize),
+          pageSize: startPageSize,
         },
         fetchImpl,
         token
@@ -2387,8 +3263,9 @@ function emptyReviewThreadsMeta() {
 }
 
 /**
- * Merge a dual-window page into detail.reviewThreadsMeta + comments.
- * @param {'older'|'newer'|'newest'|'oldest'} direction
+ * Merge a dual-window page (or bulk refresh) into detail.reviewThreadsMeta + comments.
+ * @param {'older'|'newer'|'newest'|'oldest'|'refresh'} direction
+ *   - refresh: update thread/comment bodies only; keep dual-window cursors/id sets
  */
 function mergeReviewThreadsPageIntoDetail(detail, page, direction = 'older') {
   if (!detail) return detail;
@@ -2397,7 +3274,59 @@ function mergeReviewThreadsPageIntoDetail(detail, page, direction = 'older') {
   const prevRc = Array.isArray(detail.reviewComments) ? detail.reviewComments : [];
   const prevTh = Array.isArray(detail.reviewThreads) ? detail.reviewThreads : [];
 
-  const reviewComments = mergePendingReviewComments(prevRc, page?.comments || []);
+  // Explicit missing list from nodes(ids:) bulk fetch (remote-deleted threads)
+  const explicitMissing = Array.isArray(page?.missingThreadIds)
+    ? page.missingThreadIds.map(String).filter(Boolean)
+    : [];
+  // Or derive: requested − returned
+  const requested = Array.isArray(page?.requestedThreadIds)
+    ? page.requestedThreadIds.map(String).filter(Boolean)
+    : [];
+  const returnedIds = new Set(
+    (page?.threads || [])
+      .map((t) => (t?.threadNodeId ? String(t.threadNodeId) : ''))
+      .filter(Boolean)
+  );
+  const derivedMissing =
+    requested.length > 0
+      ? requested.filter((id) => !returnedIds.has(id))
+      : [];
+  const missingIds = [
+    ...new Set([...explicitMissing, ...derivedMissing]),
+  ];
+
+  // refresh/ids: replace comments for updated threads so new replies land and deleted ones drop
+  let baseRc = prevRc;
+  if ((dir === 'refresh' || dir === 'ids') && (page?.threads || []).length) {
+    const refreshed = new Set(
+      (page.threads || [])
+        .map((t) => (t?.threadNodeId ? String(t.threadNodeId) : ''))
+        .filter(Boolean)
+    );
+    if (refreshed.size) {
+      baseRc = prevRc.filter(
+        (c) => !c?.threadNodeId || !refreshed.has(String(c.threadNodeId))
+      );
+    }
+  }
+  const reviewComments = mergePendingReviewComments(baseRc, page?.comments || []);
+  // When GraphQL thread meta updates resolved, stamp onto all comments in those threads
+  const resolvedByThread = new Map();
+  for (const t of page?.threads || []) {
+    if (t?.threadNodeId) {
+      resolvedByThread.set(String(t.threadNodeId), Boolean(t.resolved));
+    }
+  }
+  const stampedComments =
+    resolvedByThread.size === 0
+      ? reviewComments
+      : reviewComments.map((c) => {
+          if (!c?.threadNodeId) return c;
+          const key = String(c.threadNodeId);
+          if (!resolvedByThread.has(key)) return c;
+          return { ...c, resolved: resolvedByThread.get(key) };
+        });
+
   const thById = new Map(
     prevTh.map((t) => [String(t.threadNodeId), t]).filter(([k]) => k && k !== 'undefined')
   );
@@ -2425,7 +3354,9 @@ function mergeReviewThreadsPageIntoDetail(detail, page, direction = 'older') {
   let oldestEndCursor = prevMeta.oldestEndCursor;
   let hasNewerFromOldest = prevMeta.hasNewerFromOldest;
 
-  if (dir === 'newest' || dir === 'older') {
+  if (dir === 'refresh' || dir === 'ids') {
+    // Bulk / targeted revalidate — preserve dual-window pagination state
+  } else if (dir === 'newest' || dir === 'older') {
     for (const id of pageIds) newestIds.add(id);
     // Expanding older moves the "start" of newest window further back
     if (page?.startCursor) newestStartCursor = page.startCursor;
@@ -2455,8 +3386,11 @@ function mergeReviewThreadsPageIntoDetail(detail, page, direction = 'older') {
     totalCount,
     hiddenCount,
     loadedThreadCount,
-    loadedCommentCount: reviewComments.length,
-    pagesLoaded: (Number(prevMeta.pagesLoaded) || 0) + (page?.pageCount || 1),
+    loadedCommentCount: stampedComments.length,
+    pagesLoaded:
+      dir === 'refresh' || dir === 'ids'
+        ? Number(prevMeta.pagesLoaded) || 0
+        : (Number(prevMeta.pagesLoaded) || 0) + (page?.pageCount || 1),
     newestStartCursor,
     newestEndCursor,
     hasOlder: hiddenCount > 0 && hasOlder,
@@ -2469,17 +3403,24 @@ function mergeReviewThreadsPageIntoDetail(detail, page, direction = 'older') {
     endCursor: newestStartCursor,
   };
 
-  return {
+  let next = {
     ...detail,
-    reviewComments,
+    reviewComments: stampedComments,
     reviewThreads,
     reviewCommentsMeta: {
       ...(detail.reviewCommentsMeta || {}),
-      loadedCount: reviewComments.length,
+      loadedCount: stampedComments.length,
       hasMore: meta.hasMore,
     },
     reviewThreadsMeta: meta,
   };
+
+  // Remote-deleted threads: GraphQL nodes(ids:) returns null — strip local zombies
+  // so revalidate does not keep re-requesting dead PRRT ids forever.
+  if ((dir === 'refresh' || dir === 'ids') && missingIds.length) {
+    next = dropReviewThreadsFromDetail(next, missingIds);
+  }
+  return next;
 }
 
 /**
@@ -2511,6 +3452,117 @@ async function fetchPullReviewThreads(owner, repo, pullNumber, fetchImpl, token)
  *
  * @param {{ skipReviewThreads?: boolean, threadsMaxPages?: number, threadsCursor?: string|null }} [opts]
  */
+function fetchNowMs() {
+  return typeof performance !== 'undefined' && typeof performance.now === 'function'
+    ? performance.now()
+    : Date.now();
+}
+
+/**
+ * Time an async fetch and record ms into `timings[name]`.
+ * Always logs to console for SW / page debugging.
+ *
+ * When `opts.batchStart` is set (ms from fetchNowMs), also records
+ * `timings[name_start]` = offset from batch start (for parallel REST fan-out).
+ *
+ * @template T
+ * @param {Record<string, number|string>} timings
+ * @param {string} name
+ * @param {Promise<T>} promise
+ * @param {(result: T) => string} [extra]
+ * @param {{ batchStart?: number }} [opts]
+ * @returns {Promise<T>}
+ */
+async function timedFetch(timings, name, promise, extra, opts = {}) {
+  const t0 = fetchNowMs();
+  const batchStart =
+    opts && Number.isFinite(opts.batchStart) ? Number(opts.batchStart) : null;
+  if (batchStart != null) {
+    timings[`${name}_start`] = Math.round(t0 - batchStart);
+  }
+  try {
+    const result = await promise;
+    const ms = Math.round(fetchNowMs() - t0);
+    timings[name] = ms;
+    let suffix = '';
+    try {
+      if (typeof extra === 'function') suffix = extra(result) || '';
+    } catch {
+      /* ignore extra formatting errors */
+    }
+    const startLabel =
+      batchStart != null && timings[`${name}_start`] != null
+        ? ` t+${timings[`${name}_start`]}ms`
+        : '';
+    console.log(
+      `[pr-plus] fetchPrDetail ${name}: ${ms}ms${startLabel}${
+        suffix ? ` ${suffix}` : ''
+      }`
+    );
+    return result;
+  } catch (err) {
+    const ms = Math.round(fetchNowMs() - t0);
+    timings[name] = ms;
+    const msg = err?.message || String(err);
+    timings[`${name}_error`] = msg;
+    const startLabel =
+      batchStart != null && timings[`${name}_start`] != null
+        ? ` t+${timings[`${name}_start`]}ms`
+        : '';
+    console.log(
+      `[pr-plus] fetchPrDetail ${name}: ${ms}ms${startLabel} ERROR ${msg}`
+    );
+    throw err;
+  }
+}
+
+/**
+ * Pretty-print parallel REST timings after Promise.all settles.
+ * @param {Record<string, number|string>} timings
+ * @param {string[]} names keys that participated in the batch
+ * @param {number} wallMs wall-clock for Promise.all
+ */
+function logParallelRestSummary(timings, names, wallMs) {
+  const rows = (Array.isArray(names) ? names : [])
+    .map((name) => {
+      const ms = Number(timings[name]);
+      const start = Number(timings[`${name}_start`]);
+      const err = timings[`${name}_error`];
+      return {
+        name,
+        ms: Number.isFinite(ms) ? ms : null,
+        start: Number.isFinite(start) ? start : null,
+        error: err ? String(err) : null,
+      };
+    })
+    .filter((r) => r.ms != null);
+  rows.sort((a, b) => (b.ms || 0) - (a.ms || 0));
+  const slowest = rows[0];
+  const sum = rows.reduce((s, r) => s + (r.ms || 0), 0);
+  const lines = rows.map((r) => {
+    const bar =
+      wallMs > 0 && r.ms != null
+        ? '█'.repeat(Math.max(1, Math.round((r.ms / wallMs) * 20)))
+        : '';
+    const start = r.start != null ? `+${r.start}ms`.padStart(7) : '   n/a';
+    const dur = r.ms != null ? `${r.ms}ms`.padStart(6) : '   n/a';
+    const err = r.error ? ` ERR:${r.error.slice(0, 40)}` : '';
+    return `  ${r.name.padEnd(16)} start${start}  dur${dur}  ${bar}${err}`;
+  });
+  console.log(
+    `[pr-plus] fetchPrDetail parallel REST summary\n` +
+      `  wall=${Math.round(wallMs)}ms  sum=${sum}ms  ` +
+      `slowest=${slowest ? `${slowest.name}@${slowest.ms}ms` : 'n/a'}\n` +
+      (lines.length ? lines.join('\n') : '  (no rows)')
+  );
+  timings.coreParallel = {
+    wallMs: Math.round(wallMs),
+    sumMs: sum,
+    slowest: slowest ? { name: slowest.name, ms: slowest.ms } : null,
+    byName: Object.fromEntries(rows.map((r) => [r.name, r.ms])),
+  };
+}
+
 async function fetchPrDetail(
   owner,
   repo,
@@ -2525,29 +3577,119 @@ async function fetchPrDetail(
   const threadsMaxPages = skipReviewThreads
     ? 0
     : Math.max(1, Math.min(20, Number(opts.threadsMaxPages) || 1));
+  /** @type {Record<string, number|string>} */
+  const timings = {};
+  const tTotal0 = fetchNowMs();
+  console.log(
+    `[pr-plus] fetchPrDetail start ${owner}/${repo}#${n}` +
+      ` skipReviewThreads=${skipReviewThreads} threadsMaxPages=${threadsMaxPages}`
+  );
 
   // Core PR payload (no full thread dump) — parallel REST + light helpers
-  const [pr, files, commentsPage, reviews, commits, viewerLogin, subscription, autolinks] =
+  const PARALLEL_REST_KEYS = [
+    'pull',
+    'files',
+    'issueComments',
+    'reviews',
+    'commits',
+    'viewerLogin',
+    'autolinks',
+  ];
+  const tParallel0 = fetchNowMs();
+  const batchOpt = { batchStart: tParallel0 };
+  const [pr, files, commentsPage, reviews, commits, viewerLogin, autolinks] =
     await Promise.all([
-      apiJson(`${base}/pulls/${n}`, fetchImpl, token),
-      apiJson(`${base}/pulls/${n}/files?per_page=100`, fetchImpl, token),
-      fetchPrCommentsPage(owner, repo, n, 'issue', { page: 1, perPage: COMMENT_PAGE_SIZE }, fetchImpl, token).catch(
-        () => ({ items: [], meta: { page: 1, perPage: COMMENT_PAGE_SIZE, hasMore: false, nextPage: null, loadedCount: 0 } })
+      timedFetch(
+        timings,
+        'pull',
+        apiJson(`${base}/pulls/${n}`, fetchImpl, token),
+        null,
+        batchOpt
       ),
-      apiJson(`${base}/pulls/${n}/reviews?per_page=100`, fetchImpl, token).catch(
-        () => []
+      timedFetch(
+        timings,
+        'files',
+        apiJson(`${base}/pulls/${n}/files?per_page=100`, fetchImpl, token),
+        (r) => `(${Array.isArray(r) ? r.length : 0} files)`,
+        batchOpt
       ),
-      apiJson(`${base}/pulls/${n}/commits?per_page=100`, fetchImpl, token).catch(
-        () => []
+      timedFetch(
+        timings,
+        'issueComments',
+        fetchPrCommentsPage(
+          owner,
+          repo,
+          n,
+          'issue',
+          { page: 1, perPage: COMMENT_PAGE_SIZE, preferNewest: true },
+          fetchImpl,
+          token
+        ).catch(() => ({
+          items: [],
+          meta: {
+            page: 1,
+            perPage: COMMENT_PAGE_SIZE,
+            hasMore: false,
+            nextPage: null,
+            order: 'from-end',
+            loadedCount: 0,
+          },
+        })),
+        (r) => `(${(r?.items || []).length} comments, newest-first)`,
+        batchOpt
       ),
-      fetchViewerLogin(fetchImpl, token),
-      // Notifications subscription (auth required; null when unavailable)
-      token
-        ? apiJson(`${base}/issues/${n}/subscription`, fetchImpl, token).catch(() => null)
-        : Promise.resolve(null),
-      // Repo autolinks for magic-link matching on title/body/branches
-      fetchRepoAutolinks(owner, repo, fetchImpl, token),
+      timedFetch(
+        timings,
+        'reviews',
+        apiJson(`${base}/pulls/${n}/reviews?per_page=100`, fetchImpl, token).catch(
+          () => []
+        ),
+        (r) => `(${Array.isArray(r) ? r.length : 0} reviews)`,
+        batchOpt
+      ),
+      timedFetch(
+        timings,
+        'commits',
+        apiJson(`${base}/pulls/${n}/commits?per_page=100`, fetchImpl, token).catch(
+          () => []
+        ),
+        (r) => `(${Array.isArray(r) ? r.length : 0} commits)`,
+        batchOpt
+      ),
+      timedFetch(
+        timings,
+        'viewerLogin',
+        fetchViewerLogin(fetchImpl, token),
+        null,
+        batchOpt
+      ),
+      timedFetch(
+        timings,
+        'autolinks',
+        fetchRepoAutolinks(owner, repo, fetchImpl, token),
+        (r) => `(${Array.isArray(r) ? r.length : 0} links)`,
+        batchOpt
+      ),
     ]);
+  const parallelWall = fetchNowMs() - tParallel0;
+  timings.coreParallelWall = Math.round(parallelWall);
+  logParallelRestSummary(timings, PARALLEL_REST_KEYS, parallelWall);
+
+  // GraphQL viewerSubscription (REST issues/.../subscription is 404 / dead)
+  const subscription = await timedFetch(
+    timings,
+    'subscription',
+    token
+      ? fetchPullRequestSubscription(
+          owner,
+          repo,
+          n,
+          fetchImpl,
+          token,
+          pr?.node_id || null
+        )
+      : Promise.resolve(null)
+  );
   const comments = commentsPage?.items || [];
 
   // First page (or zero) of review threads — not the full 500+ dump
@@ -2559,31 +3701,42 @@ async function fetchPrDetail(
     pageCount: 0,
   };
   if (token && threadsMaxPages > 0) {
-    reviewThreadBundle = await fetchPullReviewThreadsBundle(
-      owner,
-      repo,
-      n,
-      fetchImpl,
-      token,
-      {
+    reviewThreadBundle = await timedFetch(
+      timings,
+      'reviewThreads',
+      fetchPullReviewThreadsBundle(owner, repo, n, fetchImpl, token, {
         cursor: opts.threadsCursor || null,
         maxPages: threadsMaxPages,
-      }
-    ).catch(() => reviewThreadBundle);
+      }).catch(() => reviewThreadBundle),
+      (b) =>
+        `(${(b?.threads || []).length} threads, ${(b?.comments || []).length} comments)`
+    );
+  } else {
+    timings.reviewThreads = 0;
+    console.log(
+      `[pr-plus] fetchPrDetail reviewThreads: skipped (token=${Boolean(
+        token
+      )} maxPages=${threadsMaxPages})`
+    );
   }
 
   const reviewThreads = reviewThreadBundle?.threads || [];
   // PENDING-only REST rows when GraphQL misses them
-  const pendingBundle = token
-    ? await fetchViewerPendingReviewBundle(
-        owner,
-        repo,
-        n,
-        fetchImpl,
-        token,
-        { reviews, login: viewerLogin }
-      ).catch(() => ({ comments: [], review: null }))
-    : { comments: [], review: null };
+  let pendingBundle = { comments: [], review: null };
+  if (token) {
+    pendingBundle = await timedFetch(
+      timings,
+      'pendingReview',
+      fetchViewerPendingReviewBundle(owner, repo, n, fetchImpl, token, {
+        reviews,
+        login: viewerLogin,
+      }).catch(() => ({ comments: [], review: null })),
+      (b) => `(${(b?.comments || []).length} pending comments)`
+    );
+  } else {
+    timings.pendingReview = 0;
+    console.log('[pr-plus] fetchPrDetail pendingReview: skipped (no token)');
+  }
   const pendingReviewComments = pendingBundle.comments || [];
   const reviewComments = mergePendingReviewComments(
     reviewThreadBundle?.comments || [],
@@ -2614,64 +3767,112 @@ async function fetchPrDetail(
       };
 
   const headSha = pr.head?.sha || '';
-  let checks = { state: 'unknown', totalCount: 0, statuses: [] };
+  let checks = { state: 'unknown', totalCount: 0, statuses: [], checkRuns: [] };
   if (headSha) {
     try {
-      const status = await apiJson(
-        `${base}/commits/${headSha}/status`,
-        fetchImpl,
-        token
+      const status = await timedFetch(
+        timings,
+        'commitStatus',
+        apiJson(`${base}/commits/${headSha}/status`, fetchImpl, token),
+        (s) => `(state=${s?.state || '?'}, ${s?.total_count || 0} statuses)`
       );
       checks = {
         state: status.state || 'unknown',
         totalCount: status.total_count || 0,
-        statuses: (status.statuses || []).slice(0, 40).map((s) => ({
+        statuses: (status.statuses || []).map((s) => ({
           context: s.context || '',
           state: s.state || '',
           description: s.description || '',
           targetUrl: s.target_url || '',
+          createdAt: s.created_at || '',
+          updatedAt: s.updated_at || '',
         })),
+        checkRuns: [],
       };
     } catch {
-      /* ignore */
+      /* timedFetch already logged */
     }
     try {
-      const runs = await apiJson(
-        `${base}/commits/${headSha}/check-runs?per_page=40`,
-        fetchImpl,
-        token
+      // filter=latest: most recent check runs per suite (still de-dupe by name below)
+      const runs = await timedFetch(
+        timings,
+        'checkRuns',
+        apiJson(
+          `${base}/commits/${headSha}/check-runs?per_page=100&filter=latest`,
+          fetchImpl,
+          token
+        ),
+        (r) => `(${(r?.check_runs || []).length} runs)`
       );
       const list = runs.check_runs || [];
       if (list.length) {
         checks.checkRuns = list.map((r) => ({
+          id: r.id,
           name: r.name || '',
           status: r.status || '',
           conclusion: r.conclusion || '',
           htmlUrl: r.html_url || '',
+          startedAt: r.started_at || '',
+          completedAt: r.completed_at || '',
+          appSlug: r.app?.slug || '',
+          appName: r.app?.name || '',
         }));
-        if (checks.state === 'unknown') {
-          const failed = list.some(
-            (r) => r.conclusion === 'failure' || r.conclusion === 'timed_out'
-          );
-          const pending = list.some(
-            (r) => r.status === 'queued' || r.status === 'in_progress'
-          );
-          checks.state = failed ? 'failure' : pending ? 'pending' : 'success';
-        }
       }
     } catch {
-      /* ignore */
+      /* timedFetch already logged */
     }
+    // Keep only the latest status per context / check run per name (GitHub UI shape)
+    const normalize =
+      (typeof globalThis !== 'undefined' &&
+        globalThis.PRModalChecks?.normalizeChecks) ||
+      null;
+    if (typeof normalize === 'function') {
+      checks = normalize(checks);
+    } else {
+      // Fallback if pure helper not loaded (e.g. incomplete SW bundle)
+      const byCtx = new Map();
+      for (const s of checks.statuses || []) {
+        const k = String(s.context || '').toLowerCase();
+        if (!k) continue;
+        const prev = byCtx.get(k);
+        const t = Date.parse(s.updatedAt || s.createdAt || '') || 0;
+        const pt = prev ? Date.parse(prev.updatedAt || prev.createdAt || '') || 0 : -1;
+        if (!prev || t >= pt) byCtx.set(k, s);
+      }
+      const byName = new Map();
+      for (const r of checks.checkRuns || []) {
+        const k = String(r.name || '').toLowerCase();
+        if (!k) continue;
+        const prev = byName.get(k);
+        const t = Date.parse(r.completedAt || r.startedAt || '') || Number(r.id) || 0;
+        const pt = prev
+          ? Date.parse(prev.completedAt || prev.startedAt || '') || Number(prev.id) || 0
+          : -1;
+        if (!prev || t >= pt) byName.set(k, r);
+      }
+      checks.statuses = [...byCtx.values()];
+      checks.checkRuns = [...byName.values()];
+      checks.totalCount = checks.statuses.length + checks.checkRuns.length;
+    }
+  } else {
+    timings.commitStatus = 0;
+    timings.checkRuns = 0;
+    console.log('[pr-plus] fetchPrDetail checks: skipped (no headSha)');
   }
 
   // Optional .gitattributes for linguist-generated / binary collapse defaults
   let gitattributesText = '';
   try {
     const ref = headSha || pr.head?.ref || 'HEAD';
-    const attr = await apiJson(
-      `${base}/contents/.gitattributes?ref=${encodeURIComponent(ref)}`,
-      fetchImpl,
-      token
+    const attr = await timedFetch(
+      timings,
+      'gitattributes',
+      apiJson(
+        `${base}/contents/.gitattributes?ref=${encodeURIComponent(ref)}`,
+        fetchImpl,
+        token
+      ),
+      (a) => (a?.content ? '(found)' : '(empty)')
     );
     if (attr?.content && attr.encoding === 'base64') {
       gitattributesText = decodeBase64Utf8(attr.content.replace(/\n/g, ''));
@@ -2680,9 +3881,18 @@ async function fetchPrDetail(
     }
   } catch {
     gitattributesText = '';
+    if (timings.gitattributes == null) {
+      timings.gitattributes = 0;
+      console.log('[pr-plus] fetchPrDetail gitattributes: missing/skipped');
+    }
   }
 
+  const tMap0 = fetchNowMs();
   const filesOut = mapAndAnnotateFiles(files, gitattributesText);
+  timings.mapAnnotateFiles = Math.round(fetchNowMs() - tMap0);
+  console.log(
+    `[pr-plus] fetchPrDetail mapAnnotateFiles: ${timings.mapAnnotateFiles}ms`
+  );
 
   // Linked issue numbers from body (closing keywords / #N) — display only unless set via body edit
   let linkedIssues = [];
@@ -2707,6 +3917,7 @@ async function fetchPrDetail(
     subscription && typeof subscription.subscribed === 'boolean'
       ? Boolean(subscription.subscribed)
       : null;
+  // subscription.viewerSubscription kept for debugging / future UI (IGNORED)
 
   // Magic links from title/body/branch (body-only tokens e.g. ENG-99 must match)
   const magicLinks = matchAutolinksInText(
@@ -2719,6 +3930,19 @@ async function fetchPrDetail(
     }),
     Array.isArray(autolinks) ? autolinks : []
   );
+
+  timings.total = Math.round(fetchNowMs() - tTotal0);
+  console.log(
+    `[pr-plus] fetchPrDetail total: ${timings.total}ms`,
+    JSON.stringify(timings)
+  );
+  if (typeof console.table === 'function') {
+    try {
+      console.table(timings);
+    } catch {
+      /* ignore */
+    }
+  }
 
   return {
     owner,
@@ -2779,6 +4003,26 @@ async function fetchPrDetail(
       for (const c of reviewComments || []) putUser(c?.user);
       return map;
     })(),
+    /**
+     * login (lower) → true when GitHub user.type is Bot (or [bot] login).
+     * Used to hide re-request / remove for bot reviewers & assignees.
+     */
+    actorIsBot: (() => {
+      const map = {};
+      const put = (u) => {
+        const login = u?.login || (typeof u === 'string' ? u : '');
+        if (!login) return;
+        const key = String(login).toLowerCase();
+        const type = String(u?.type || '').toLowerCase();
+        if (type === 'bot' || /\[bot\]$/i.test(String(login))) map[key] = true;
+      };
+      for (const u of pr.assignees || []) put(u);
+      for (const u of pr.requested_reviewers || []) put(u);
+      for (const r of reviews || []) put(r?.user);
+      for (const c of comments || []) put(c?.user);
+      for (const c of reviewComments || []) put(c?.user);
+      return map;
+    })(),
     requestedReviewers: Array.isArray(pr.requested_reviewers)
       ? pr.requested_reviewers.map((u) => u.login || u).filter(Boolean)
       : [],
@@ -2810,6 +4054,10 @@ async function fetchPrDetail(
       id: r.id,
       author: r.user?.login || '',
       avatarUrl: r.user?.avatar_url || '',
+      type: r.user?.type || '',
+      isBot:
+        String(r.user?.type || '').toLowerCase() === 'bot' ||
+        /\[bot\]$/i.test(String(r.user?.login || '')),
       state: r.state || '',
       body: r.body || '',
       submittedAt: r.submitted_at,
@@ -2831,6 +4079,8 @@ async function fetchPrDetail(
       date: c.commit?.author?.date || c.commit?.committer?.date || '',
     })),
     checks,
+    /** Debug: per-request ms from this fetchPrDetail call */
+    _fetchTimings: timings,
   };
 }
 
@@ -3822,29 +5072,171 @@ async function updatePullBranch(
   );
 }
 
+/**
+ * Resolve GraphQL node id for a pull request (PR_…).
+ * Prefer REST `node_id` when available; otherwise look up via GraphQL.
+ */
+async function resolvePullRequestNodeId(
+  owner,
+  repo,
+  pullNumber,
+  fetchImpl,
+  token,
+  nodeId = null
+) {
+  if (nodeId) return String(nodeId);
+  const n = Number(pullNumber);
+  if (!token || !owner || !repo || !Number.isFinite(n) || n <= 0) return null;
+  try {
+    // Prefer REST node_id (cheap, same id GraphQL expects)
+    const pr = await apiJson(
+      `https://api.github.com/repos/${owner}/${repo}/pulls/${n}`,
+      fetchImpl,
+      token
+    );
+    if (pr?.node_id) return String(pr.node_id);
+  } catch {
+    /* fall through */
+  }
+  try {
+    const data = await apiGraphql(
+      `query($owner:String!,$name:String!,$number:Int!){
+  repository(owner:$owner, name:$name) {
+    pullRequest(number:$number) { id }
+  }
+}`,
+      { owner: String(owner), name: String(repo), number: n },
+      fetchImpl,
+      token
+    );
+    const id = data?.repository?.pullRequest?.id;
+    return id ? String(id) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Map GraphQL SubscriptionState → app shape.
+ * @param {string|null|undefined} state SUBSCRIBED | UNSUBSCRIBED | IGNORED
+ */
+function mapViewerSubscription(state) {
+  const s = String(state || '').toUpperCase();
+  if (s === 'SUBSCRIBED') return { subscribed: true, ignored: false, viewerSubscription: s };
+  if (s === 'IGNORED') return { subscribed: false, ignored: true, viewerSubscription: s };
+  if (s === 'UNSUBSCRIBED') {
+    return { subscribed: false, ignored: false, viewerSubscription: s };
+  }
+  return { subscribed: null, ignored: false, viewerSubscription: s || null };
+}
+
+/**
+ * Issue/PR thread subscription via GraphQL updateSubscription.
+ * REST `/issues/{n}/subscription` is gone / 404 for many tokens — use GraphQL.
+ *
+ * @param {object} [opts]
+ * @param {boolean} [opts.subscribed=true]
+ * @param {boolean} [opts.ignored=false]
+ * @param {string|null} [opts.nodeId] PR GraphQL id (detail.nodeId)
+ */
 async function setIssueSubscription(
   owner,
   repo,
   issueNumber,
-  { subscribed = true, ignored = false } = {},
+  { subscribed = true, ignored = false, nodeId = null } = {},
   fetchImpl,
   token
 ) {
-  return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/subscription`,
+  if (!token) throw new Error('GitHub PAT required for notifications');
+  const id = await resolvePullRequestNodeId(
+    owner,
+    repo,
+    issueNumber,
     fetchImpl,
     token,
-    { method: 'PUT', body: { subscribed: Boolean(subscribed), ignored: Boolean(ignored) } }
+    nodeId
+  );
+  if (!id) {
+    throw new Error(
+      'Could not resolve pull request id for subscription. Refresh and try again.'
+    );
+  }
+  const state = ignored ? 'IGNORED' : subscribed ? 'SUBSCRIBED' : 'UNSUBSCRIBED';
+  const data = await apiGraphql(
+    `mutation($id:ID!,$state:SubscriptionState!){
+  updateSubscription(input:{subscribableId:$id, state:$state}) {
+    subscribable {
+      ... on PullRequest { id viewerSubscription }
+      ... on Issue { id viewerSubscription }
+    }
+  }
+}`,
+    { id: String(id), state },
+    fetchImpl,
+    token
+  );
+  const vs = data?.updateSubscription?.subscribable?.viewerSubscription;
+  return mapViewerSubscription(vs);
+}
+
+/** Unsubscribe from PR notifications (GraphQL state UNSUBSCRIBED). */
+async function deleteIssueSubscription(
+  owner,
+  repo,
+  issueNumber,
+  fetchImpl,
+  token,
+  nodeId = null
+) {
+  return setIssueSubscription(
+    owner,
+    repo,
+    issueNumber,
+    { subscribed: false, ignored: false, nodeId },
+    fetchImpl,
+    token
   );
 }
 
-async function deleteIssueSubscription(owner, repo, issueNumber, fetchImpl, token) {
-  return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/subscription`,
-    fetchImpl,
-    token,
-    { method: 'DELETE' }
-  );
+/**
+ * Read viewer subscription for a PR (GraphQL). Returns null on failure.
+ */
+async function fetchPullRequestSubscription(
+  owner,
+  repo,
+  pullNumber,
+  fetchImpl,
+  token,
+  nodeId = null
+) {
+  if (!token) return null;
+  try {
+    const id = await resolvePullRequestNodeId(
+      owner,
+      repo,
+      pullNumber,
+      fetchImpl,
+      token,
+      nodeId
+    );
+    if (!id) return null;
+    const data = await apiGraphql(
+      `query($id:ID!){
+  node(id:$id) {
+    ... on PullRequest { viewerSubscription viewerCanSubscribe }
+    ... on Issue { viewerSubscription viewerCanSubscribe }
+  }
+}`,
+      { id: String(id) },
+      fetchImpl,
+      token
+    );
+    const vs = data?.node?.viewerSubscription;
+    if (!vs) return null;
+    return mapViewerSubscription(vs);
+  } catch {
+    return null;
+  }
 }
 
 async function setIssueMilestone(owner, repo, issueNumber, milestoneNumber, fetchImpl, token) {
@@ -3964,6 +5356,51 @@ async function uploadRepoFile(
   };
 }
 
+/**
+ * Fetch a file's text content at a ref (branch or SHA).
+ * @returns {{ path: string, ref: string, text: string, sha: string, size: number }}
+ */
+async function getRepoFileText(owner, repo, { path, ref }, fetchImpl, token) {
+  if (!path) throw new Error('path required');
+  const rev = ref || 'HEAD';
+  const encPath = String(path)
+    .split('/')
+    .map(encodeURIComponent)
+    .join('/');
+  const meta = await apiJson(
+    `https://api.github.com/repos/${owner}/${repo}/contents/${encPath}?ref=${encodeURIComponent(rev)}`,
+    fetchImpl,
+    token
+  );
+  if (meta?.type && meta.type !== 'file') {
+    throw new Error(`Not a file: ${path}`);
+  }
+  // Large files may omit content and only provide download_url
+  let raw = '';
+  if (meta?.content && meta?.encoding === 'base64') {
+    raw = decodeBase64Utf8(String(meta.content).replace(/\n/g, ''));
+  } else if (meta?.download_url) {
+    const res = await fetchImpl(meta.download_url, {
+      headers: buildApiHeaders(token),
+    });
+    if (!res.ok) {
+      const err = new Error(`GitHub download ${res.status}: ${res.statusText}`);
+      err.status = res.status;
+      throw err;
+    }
+    raw = await res.text();
+  } else if (meta?.content) {
+    raw = decodeBase64Utf8(String(meta.content).replace(/\n/g, ''));
+  }
+  return {
+    path: meta?.path || path,
+    ref: rev,
+    text: raw,
+    sha: meta?.sha || '',
+    size: Number(meta?.size) || raw.length,
+  };
+}
+
 async function applyReviewSuggestion(
   owner,
   repo,
@@ -3972,17 +5409,14 @@ async function applyReviewSuggestion(
   token
 ) {
   const ref = headRef || 'HEAD';
-  const meta = await apiJson(
-    `https://api.github.com/repos/${owner}/${repo}/contents/${path
-      .split('/')
-      .map(encodeURIComponent)
-      .join('/')}?ref=${encodeURIComponent(ref)}`,
+  const file = await getRepoFileText(
+    owner,
+    repo,
+    { path, ref },
     fetchImpl,
     token
   );
-  const raw = meta?.content
-    ? decodeBase64Utf8(String(meta.content).replace(/\n/g, ''))
-    : '';
+  const raw = file.text || '';
   let applyFn = null;
   try {
     let mod =
@@ -4024,7 +5458,7 @@ async function applyReviewSuggestion(
         message: message || `Apply suggestion to ${path}`,
         content: contentB64,
         branch: ref,
-        sha: meta.sha,
+        sha: file.sha,
       },
     }
   );
@@ -4138,9 +5572,14 @@ const fetchApi = {
   fetchPullReviewThreads,
   fetchPullReviewThreadsBundle,
   fetchReviewThreadsPage,
+  fetchReviewThreadsByIds,
+  collectUnresolvedThreadNodeIds,
+  dropReviewThreadsFromDetail,
   mapGraphqlReviewCommentNode,
   mergeReviewThreadsPageIntoDetail,
   emptyReviewThreadsMeta,
+  REVIEW_THREADS_API_MAX,
+  REVIEW_THREADS_PAGE_SIZE,
   postIssueComment,
   submitPullReview,
   postReviewComment,
@@ -4172,9 +5611,12 @@ const fetchApi = {
   updatePullBranch,
   setIssueSubscription,
   deleteIssueSubscription,
+  fetchPullRequestSubscription,
+  resolvePullRequestNodeId,
   setIssueMilestone,
   setPullRequestDraftStage,
   applyReviewSuggestion,
+  getRepoFileText,
   uploadRepoFile,
   fetchViewerLogin,
   apiJson,
@@ -4205,14 +5647,22 @@ if (typeof globalThis !== 'undefined') {
 
 /* deps inlined by scripts/build-sw.mjs */
 const MSG = {
+  /** Lightweight wake / health check (content scripts retry against this). */
+  PING: 'PR_TREE_PING',
   TOKEN_STATUS: 'PR_TREE_TOKEN_STATUS',
   TOKEN_SET: 'PR_TREE_TOKEN_SET',
   TOKEN_CLEAR: 'PR_TREE_TOKEN_CLEAR',
   TOKEN_CHANGED: 'PR_TREE_TOKEN_CHANGED',
+  PREFS_GET: 'PR_TREE_PREFS_GET',
+  PREFS_SET: 'PR_TREE_PREFS_SET',
+  PREFS_CHANGED: 'PR_TREE_PREFS_CHANGED',
+  /** Clear PR detail memory + IndexedDB cache on open github.com tabs. */
+  CLEAR_DETAIL_CACHE: 'PR_TREE_CLEAR_DETAIL_CACHE',
   FETCH_OPEN_PULLS: 'PR_TREE_FETCH_OPEN_PULLS',
   FETCH_DANGLING: 'PR_TREE_FETCH_DANGLING',
   FETCH_PR_DETAIL: 'PR_TREE_FETCH_PR_DETAIL',
   FETCH_REVIEW_THREADS_PAGE: 'PR_TREE_FETCH_REVIEW_THREADS_PAGE',
+  FETCH_REVIEW_THREADS_BY_IDS: 'PR_TREE_FETCH_REVIEW_THREADS_BY_IDS',
   FETCH_COMMENTS_PAGE: 'PR_TREE_FETCH_COMMENTS_PAGE',
   FETCH_COMPARE_FILES: 'PR_TREE_FETCH_COMPARE_FILES',
   POST_ISSUE_COMMENT: 'PR_TREE_POST_ISSUE_COMMENT',
@@ -4234,6 +5684,7 @@ const MSG = {
   REMOVE_ASSIGNEES: 'PR_TREE_REMOVE_ASSIGNEES',
   SET_LABELS: 'PR_TREE_SET_LABELS',
   APPLY_SUGGESTION: 'PR_TREE_APPLY_SUGGESTION',
+  GET_REPO_FILE_TEXT: 'PR_TREE_GET_REPO_FILE_TEXT',
   MERGE_PULL: 'PR_TREE_MERGE_PULL',
   UPDATE_BRANCH: 'PR_TREE_UPDATE_BRANCH',
   SET_SUBSCRIPTION: 'PR_TREE_SET_SUBSCRIPTION',
@@ -4246,11 +5697,11 @@ const MSG = {
 /** Max time for one SW message (GitHub multi-request detail can be slow). */
 const MESSAGE_TIMEOUT_MS = 120_000;
 
-function broadcastTokenChanged() {
-  // Notify extension pages / open content scripts without sending the secret.
+function broadcastToGithubTabs(message) {
+  // Notify extension pages / open content scripts without sending secrets.
   // sendMessage may not return a Promise on all runtimes — never assume .catch.
   try {
-    chrome.runtime.sendMessage({ type: MSG.TOKEN_CHANGED }, () => {
+    chrome.runtime.sendMessage(message, () => {
       void chrome.runtime.lastError; // no receivers is fine
     });
   } catch {
@@ -4261,7 +5712,7 @@ function broadcastTokenChanged() {
       for (const tab of tabs || []) {
         if (tab.id == null) continue;
         try {
-          chrome.tabs.sendMessage(tab.id, { type: MSG.TOKEN_CHANGED }, () => {
+          chrome.tabs.sendMessage(tab.id, message, () => {
             void chrome.runtime.lastError;
           });
         } catch {
@@ -4274,9 +5725,74 @@ function broadcastTokenChanged() {
   }
 }
 
+function broadcastTokenChanged() {
+  broadcastToGithubTabs({ type: MSG.TOKEN_CHANGED });
+}
+
+function broadcastPrefsChanged(prefs) {
+  broadcastToGithubTabs({ type: MSG.PREFS_CHANGED, prefs });
+}
+
+/**
+ * Ask every open github.com tab to wipe PR detail memory + IndexedDB.
+ * Content scripts own the page-origin IDB (`pr-plus-detail-cache`).
+ * @returns {Promise<{ tabs: number, cleared: number, failed: number }>}
+ */
+function clearDetailCacheOnGithubTabs() {
+  return new Promise((resolve) => {
+    try {
+      chrome.tabs.query({ url: ['https://github.com/*'] }, (tabs) => {
+        void chrome.runtime.lastError;
+        const list = Array.isArray(tabs) ? tabs : [];
+        if (!list.length) {
+          resolve({ tabs: 0, cleared: 0, failed: 0 });
+          return;
+        }
+        let pending = 0;
+        let cleared = 0;
+        let failed = 0;
+        const done = () => {
+          if (pending > 0) return;
+          resolve({ tabs: list.length, cleared, failed });
+        };
+        for (const tab of list) {
+          if (tab?.id == null) continue;
+          pending += 1;
+          try {
+            chrome.tabs.sendMessage(
+              tab.id,
+              { type: MSG.CLEAR_DETAIL_CACHE },
+              (res) => {
+                const err = chrome.runtime.lastError;
+                if (err || !res?.ok) failed += 1;
+                else cleared += 1;
+                pending -= 1;
+                done();
+              }
+            );
+          } catch {
+            failed += 1;
+            pending -= 1;
+          }
+        }
+        if (pending === 0) done();
+      });
+    } catch {
+      resolve({ tabs: 0, cleared: 0, failed: 0 });
+    }
+  });
+}
+
 chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName !== 'local' || !changes[PRTreeStorage.TOKEN_KEY]) return;
-  broadcastTokenChanged();
+  if (areaName !== 'local') return;
+  if (changes[PRTreeStorage.TOKEN_KEY]) {
+    broadcastTokenChanged();
+  }
+  if (changes[PRTreeStorage.PREFS_KEY]) {
+    broadcastPrefsChanged(
+      PRTreeStorage.normalizePrefs(changes[PRTreeStorage.PREFS_KEY].newValue)
+    );
+  }
 });
 
 function fetchImpl() {
@@ -4331,6 +5847,14 @@ function withTimeout(promise, ms, label) {
 
 async function handleMessage(message) {
   switch (message.type) {
+    case MSG.PING: {
+      return {
+        ok: true,
+        pong: true,
+        hasFetch: typeof PRTreeFetch?.fetchPrDetail === 'function',
+        hasStorage: typeof PRTreeStorage?.getGithubTokenStatus === 'function',
+      };
+    }
     case MSG.TOKEN_STATUS: {
       const status = await PRTreeStorage.getGithubTokenStatus();
       return { ok: true, ...status };
@@ -4343,6 +5867,18 @@ async function handleMessage(message) {
     case MSG.TOKEN_CLEAR: {
       await PRTreeStorage.setGithubToken('');
       return { ok: true, configured: false, mask: '' };
+    }
+    case MSG.PREFS_GET: {
+      const prefs = await PRTreeStorage.getExtensionPrefs();
+      return { ok: true, prefs };
+    }
+    case MSG.PREFS_SET: {
+      const prefs = await PRTreeStorage.setExtensionPrefs(message.prefs || message.patch || {});
+      return { ok: true, prefs };
+    }
+    case MSG.CLEAR_DETAIL_CACHE: {
+      const result = await clearDetailCacheOnGithubTabs();
+      return { ok: true, ...result };
     }
     case MSG.FETCH_OPEN_PULLS: {
       const token = await PRTreeStorage.getGithubToken();
@@ -4409,6 +5945,21 @@ async function handleMessage(message) {
           cursor: message.cursor || null,
           pageSize: message.pageSize != null ? Number(message.pageSize) : undefined,
         },
+        fetchImpl(),
+        token
+      );
+      return { ok: true, page };
+    }
+    case MSG.FETCH_REVIEW_THREADS_BY_IDS: {
+      const token = await PRTreeStorage.getGithubToken();
+      if (!token) {
+        return {
+          ok: true,
+          page: { threads: [], comments: [], pageCount: 0, direction: 'refresh' },
+        };
+      }
+      const page = await PRTreeFetch.fetchReviewThreadsByIds(
+        message.threadNodeIds || message.ids || [],
         fetchImpl(),
         token
       );
@@ -4741,6 +6292,21 @@ async function handleMessage(message) {
       );
       return { ok: true, result };
     }
+    case MSG.GET_REPO_FILE_TEXT: {
+      const token = await PRTreeStorage.getGithubToken();
+      if (!token) throw new Error('GitHub PAT required to read files');
+      const result = await PRTreeFetch.getRepoFileText(
+        message.owner,
+        message.repo,
+        {
+          path: message.path,
+          ref: message.ref || message.headRef || message.headSha,
+        },
+        fetchImpl(),
+        token
+      );
+      return { ok: true, result };
+    }
     case MSG.MERGE_PULL: {
       const token = await PRTreeStorage.getGithubToken();
       if (!token) throw new Error('GitHub PAT required to merge');
@@ -4781,6 +6347,7 @@ async function handleMessage(message) {
         {
           subscribed: message.subscribed !== false,
           ignored: Boolean(message.ignored),
+          nodeId: message.nodeId || null,
         },
         fetchImpl(),
         token
@@ -4795,7 +6362,8 @@ async function handleMessage(message) {
         message.repo,
         message.number,
         fetchImpl(),
-        token
+        token,
+        message.nodeId || null
       );
       return { ok: true, result };
     }

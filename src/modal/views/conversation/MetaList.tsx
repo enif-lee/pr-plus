@@ -1,9 +1,10 @@
 import React, { useRef } from 'react';
 import { Badge } from '@common/Badge';
-import { Card } from '@common/Card';
+import { AsideSection } from '@common/AsideSection';
 import { UserLink } from '@common/UserLink';
 import { reviewStatusTone } from '@common/utils';
 import { Avatar } from '@common/Avatar';
+import { IconSync, IconX } from '@common/icons';
 
 export function MetaList({
   title,
@@ -23,7 +24,7 @@ export function MetaList({
   const list = Array.isArray(rows) ? rows : [];
   const avatars = avatarUrls && typeof avatarUrls === 'object' ? avatarUrls : {};
   return (
-    <Card title={title}>
+    <AsideSection title={title}>
       <ul className="prp-list prp-people-list">
         {list.length === 0 ? (
           <li className="prp-muted">{emptyLabel || 'None'}</li>
@@ -32,16 +33,29 @@ export function MetaList({
             const login = typeof row === 'string' ? row : row?.login;
             if (!login) return null;
             const status = typeof row === 'object' ? row.status : null;
+            const isBot =
+              typeof row === 'object' &&
+              (row?.isBot === true || row?.type === 'Bot' || row?.bot === true);
+            // Bots cannot be re-requested or removed via the people chip actions.
             const canRerequest =
               typeof onRerequest === 'function' &&
+              !isBot &&
               (typeof row !== 'object' || row?.canRerequest !== false);
+            const canRemove =
+              typeof onRemove === 'function' &&
+              !isBot &&
+              (typeof row !== 'object' || row?.canRemove !== false);
             const avatarUrl =
               (typeof row === 'object' && (row.avatarUrl || row.avatar_url)) ||
               avatars[String(login).toLowerCase()] ||
               null;
             return (
-              <li key={String(login).toLowerCase()} className="prp-people-chip">
-                <Avatar login={login} avatarUrl={avatarUrl} size="md" />
+              <li
+                key={String(login).toLowerCase()}
+                className={`prp-people-chip${isBot ? ' prp-people-chip--bot' : ''}`}
+                data-bot={isBot ? '1' : undefined}
+              >
+                <Avatar login={login} avatarUrl={avatarUrl} size="sm" />
                 <span className="prp-people-chip__name" title={login}>
                   <UserLink login={login} />
                 </span>
@@ -57,6 +71,11 @@ export function MetaList({
                         </Badge>
                       )
                   : null}
+                {isBot ? (
+                  <Badge tone="muted" className="prp-people-chip__status" title="Bot account">
+                    bot
+                  </Badge>
+                ) : null}
                 <span className="prp-people-chip__actions">
                   {canRerequest ? (
                     <button
@@ -67,12 +86,14 @@ export function MetaList({
                       title={`Re-request review from ${login}`}
                       aria-label={`Re-request review from ${login}`}
                     >
-                      <span className="prp-people-chip__rerequest-icon" aria-hidden="true">
-                        ↻
-                      </span>
+                      <IconSync
+                        className="prp-people-chip__rerequest-icon"
+                        size={12}
+                        aria-hidden="true"
+                      />
                     </button>
                   ) : null}
-                  {onRemove ? (
+                  {canRemove ? (
                     <button
                       type="button"
                       className="prp-icon-btn"
@@ -81,7 +102,7 @@ export function MetaList({
                       title={`Remove ${login}`}
                       aria-label={`Remove ${login}`}
                     >
-                      ✕
+                      <IconX size={12} />
                     </button>
                   ) : null}
                 </span>
@@ -104,7 +125,7 @@ export function MetaList({
           {addLabel || 'Add…'}
         </button>
       ) : null}
-    </Card>
+    </AsideSection>
   );
 }
 

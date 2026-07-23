@@ -1,6 +1,7 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { filterSelectOptions, labelColorCss } from '@lib/searchable-select';
 import { Avatar } from './Avatar';
+import { IconCheck, IconX } from './icons';
 
 /**
  * Anchored popover searchable select.
@@ -20,7 +21,12 @@ export function SearchableSelect({
   allowFreeText = true,
   anchorRef,
   anchorKey = null,
-  placement = 'top',
+  /**
+   * Preferred open direction.
+   * - bottom (default): open below the anchor; flip above only when space is insufficient
+   * - top: open above; flip below only when space is insufficient
+   */
+  placement = 'bottom',
   multi = false,
   /** Initial selected ids when multi opens */
   initialSelectedIds = null,
@@ -56,19 +62,46 @@ export function SearchableSelect({
       const r = el.getBoundingClientRect();
       if (!r.width && !r.height && r.top === 0 && r.left === 0) return;
 
+      const gap = 6;
+      const edge = 8;
       const width = Math.max(220, Math.min(320, Math.max(r.width, 200)));
-      let left = Math.min(Math.max(8, r.left), window.innerWidth - width - 8);
-      let top = placement === 'bottom' ? r.bottom + 6 : Math.max(8, r.top - 8);
+      const left = Math.min(Math.max(edge, r.left), window.innerWidth - width - edge);
       const h = panelRef.current?.offsetHeight || 0;
-      if (placement === 'top' && h > 0) {
-        top = r.top - h - 6;
-        if (top < 8) top = r.bottom + 6;
-      } else if (placement === 'bottom' && h > 0) {
-        if (r.bottom + 6 + h > window.innerHeight - 8) {
-          top = Math.max(8, r.top - h - 6);
+      const preferBottom = placement !== 'top';
+
+      // Preferred side first; flip only when the preferred side cannot fit the panel.
+      let top = preferBottom ? r.bottom + gap : Math.max(edge, r.top - gap);
+      if (h > 0) {
+        const belowTop = r.bottom + gap;
+        const aboveTop = r.top - h - gap;
+        const fitsBelow = belowTop + h <= window.innerHeight - edge;
+        const fitsAbove = aboveTop >= edge;
+
+        if (preferBottom) {
+          if (fitsBelow) {
+            top = belowTop;
+          } else if (fitsAbove) {
+            top = aboveTop;
+          } else {
+            // Neither fits fully — pick the side with more free space
+            const spaceBelow = window.innerHeight - r.bottom - edge;
+            const spaceAbove = r.top - edge;
+            top = spaceAbove > spaceBelow ? Math.max(edge, aboveTop) : belowTop;
+          }
+        } else {
+          // placement === 'top'
+          if (fitsAbove) {
+            top = aboveTop;
+          } else if (fitsBelow) {
+            top = belowTop;
+          } else {
+            const spaceBelow = window.innerHeight - r.bottom - edge;
+            const spaceAbove = r.top - edge;
+            top = spaceBelow > spaceAbove ? belowTop : Math.max(edge, aboveTop);
+          }
         }
       }
-      setPos({ top: Math.max(8, top), left, width });
+      setPos({ top: Math.max(edge, top), left, width });
     }
 
     measure();
@@ -193,7 +226,7 @@ export function SearchableSelect({
             >
               <span className="prp-sselect-chip__label">{id}</span>
               <span className="prp-sselect-chip__x" aria-hidden="true">
-                ×
+                <IconX size={12} />
               </span>
             </button>
           ))}
@@ -261,7 +294,7 @@ export function SearchableSelect({
                       className={`prp-sselect-check${isOn ? ' prp-sselect-check--on' : ''}`}
                       aria-hidden="true"
                     >
-                      {isOn ? '✓' : ''}
+                      {isOn ? <IconCheck size={12} /> : null}
                     </span>
                   ) : null}
                   {showLabelSwatch ? (

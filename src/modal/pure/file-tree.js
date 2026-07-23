@@ -159,6 +159,106 @@ function formatFileExtensionLabel(ext) {
   return e ? `.${e}` : '∅';
 }
 
+function hasAnyReviewThreads(threadCounts) {
+  if (!threadCounts) return false;
+  if (threadCounts instanceof Map) {
+    for (const n of threadCounts.values()) {
+      if (Number(n) > 0) return true;
+    }
+    return false;
+  }
+  if (typeof threadCounts === 'object') {
+    for (const k of Object.keys(threadCounts)) {
+      if (Number(threadCounts[k]) > 0) return true;
+    }
+  }
+  return false;
+}
+
+function sumThreadCounts(threadCounts) {
+  if (!threadCounts) return 0;
+  let n = 0;
+  if (threadCounts instanceof Map) {
+    for (const v of threadCounts.values()) n += Number(v) || 0;
+    return n;
+  }
+  if (typeof threadCounts === 'object') {
+    for (const k of Object.keys(threadCounts)) {
+      n += Number(threadCounts[k]) || 0;
+    }
+  }
+  return n;
+}
+
+function countOnPath(threadCounts, path) {
+  if (!path || !threadCounts) return 0;
+  if (threadCounts instanceof Map) return Number(threadCounts.get(path)) || 0;
+  return Number(threadCounts[path]) || 0;
+}
+
+/**
+ * @param {'all'|'unresolved'|'resolved'|'pending'|null|boolean} mode
+ *   boolean true treated as 'all' for back-compat
+ * @param {Map|Record|null} [pendingCounts]
+ */
+function filterFilesByReviewMode(
+  files,
+  allCounts,
+  unresolvedCounts,
+  mode,
+  pendingCounts
+) {
+  const list = Array.isArray(files) ? files : [];
+  let m = mode;
+  if (m === true) m = 'all';
+  if (
+    m !== 'all' &&
+    m !== 'unresolved' &&
+    m !== 'resolved' &&
+    m !== 'pending'
+  ) {
+    return list.slice();
+  }
+  return list.filter((f) => {
+    const path = (f && (f.filename || f.path)) || '';
+    const total = countOnPath(allCounts, path);
+    const unresolved = countOnPath(unresolvedCounts, path);
+    const pending = countOnPath(pendingCounts, path);
+    if (m === 'pending') return pending > 0;
+    if (m === 'unresolved') {
+      if (pendingCounts != null) return Math.max(0, unresolved - pending) > 0;
+      return unresolved > 0;
+    }
+    if (m === 'resolved') return total > unresolved;
+    return total > 0;
+  });
+}
+
+function filterFilesWithReviewThreads(files, threadCounts, reviewOnly) {
+  return filterFilesByReviewMode(
+    files,
+    threadCounts,
+    threadCounts,
+    reviewOnly ? 'all' : null
+  );
+}
+
+/**
+ * Keep only paths not marked viewed (unread). Off when unreadOnly is false.
+ */
+function filterFilesUnreadOnly(files, viewedPaths, unreadOnly) {
+  const list = Array.isArray(files) ? files : [];
+  if (!unreadOnly) return list.slice();
+  const viewed =
+    viewedPaths instanceof Set
+      ? viewedPaths
+      : new Set(Array.isArray(viewedPaths) ? viewedPaths : []);
+  return list.filter((f) => {
+    const path = (f && (f.filename || f.path)) || '';
+    return path ? !viewed.has(path) : false;
+  });
+}
+
 function collectDirPaths(nodes) {
   const out = new Set();
   function walk(list) {
@@ -182,6 +282,11 @@ const api = {
   filterFilesByExtensions,
   toggleFileExtension,
   formatFileExtensionLabel,
+  hasAnyReviewThreads,
+  sumThreadCounts,
+  filterFilesByReviewMode,
+  filterFilesWithReviewThreads,
+  filterFilesUnreadOnly,
   collectDirPaths,
 };
 

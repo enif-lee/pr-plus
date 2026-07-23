@@ -2,7 +2,7 @@
  * Content-script host: intercept PR list clicks, mount React modal overlay.
  * Bundle + CSS are extension-local (no remote code).
  * Host updates reuse the same React root so Diff/search/scroll state survives refresh.
- * PR detail uses a short-lived cache for stale-while-revalidate opens.
+ * PR detail uses memory + IndexedDB cache (stale-while-revalidate / React Query style).
  */
 
 (function initPrModalHost() {
@@ -15,6 +15,14 @@
    * writes used to complete out of order and resurrect stale assignees/labels.
    */
   let detailFetchGen = 0;
+  const DEFAULT_PREFS = {
+    fastReview: true,
+    reverseComments: true,
+  };
+
+  let prefs = { ...DEFAULT_PREFS };
+  let prefsWatchUnsub = null;
+
   let current = {
     open: false,
     loading: false,
@@ -34,6 +42,37 @@
     loadStage: null,
   };
 
+  async function refreshPrefs() {
+    try {
+      const next = await globalThis.PRTreeStorage?.getExtensionPrefs?.();
+      if (next && typeof next === 'object') {
+        prefs = {
+          fastReview: next.fastReview !== false,
+          reverseComments: next.reverseComments !== false,
+        };
+      }
+    } catch {
+      prefs = { ...DEFAULT_PREFS };
+    }
+    return prefs;
+  }
+
+  function ensurePrefsWatch() {
+    if (prefsWatchUnsub) return;
+    try {
+      prefsWatchUnsub =
+        globalThis.PRTreeStorage?.watchExtensionPrefs?.((next) => {
+          prefs = {
+            fastReview: next?.fastReview !== false,
+            reverseComments: next?.reverseComments !== false,
+          };
+          if (current.open) render();
+        }) || null;
+    } catch {
+      prefsWatchUnsub = null;
+    }
+  }
+
   function setLoadStage(phase, label, busy = true) {
     current.loadStage =
       phase || label
@@ -45,7 +84,19 @@
     current.loadStage = null;
   }
 
+  /**
+   * Memory SWR (60s fresh) + IndexedDB durable layer (7d / 24 PRs).
+   * Page reload → peekAsync hydrates IDB → paint → network revalidate.
+   */
   const detailCache =
+    globalThis.PRModalDetailCache?.createPersistedDetailCache?.({
+      ttlMs: 60_000,
+      createIdb: () =>
+        globalThis.PRModalDetailIdb?.createDetailIdb?.({
+          maxEntries: 24,
+          maxAgeMs: 7 * 24 * 60 * 60 * 1000,
+        }) || null,
+    }) ||
     globalThis.PRModalDetailCache?.createDetailCache?.({ ttlMs: 60_000 }) ||
     createFallbackCache();
 
@@ -66,9 +117,12 @@
       },
       peek(key) {
         const e = store.get(key);
-        if (!e) return { value: null, fresh: false, stale: false };
+        if (!e) return { value: null, fresh: false, stale: false, source: null };
         const fresh = e.expiresAt > Date.now();
-        return { value: e.value, fresh, stale: !fresh };
+        return { value: e.value, fresh, stale: !fresh, source: 'memory' };
+      },
+      async peekAsync(key) {
+        return this.peek(key);
       },
       get(key) {
         const p = this.peek(key);
@@ -81,6 +135,39 @@
         store.delete(key);
       },
     };
+  }
+
+  function emptyPeek() {
+    return { value: null, fresh: false, stale: false, source: null };
+  }
+
+  /** Sync memory only — never blocks paint. */
+  function peekDetailMemory(key) {
+    try {
+      return detailCache.peek?.(key) || emptyPeek();
+    } catch {
+      return emptyPeek();
+    }
+  }
+
+  /**
+   * IDB hydrate with hard timeout so a large/slow read cannot freeze openModal.
+   * @param {string} key
+   * @param {number} [ms]
+   */
+  async function peekDetailIdb(key, ms = 400) {
+    if (typeof detailCache.peekAsync !== 'function') return emptyPeek();
+    try {
+      const result = await Promise.race([
+        detailCache.peekAsync(key),
+        new Promise((resolve) => {
+          setTimeout(() => resolve(emptyPeek()), ms);
+        }),
+      ]);
+      return result && typeof result === 'object' ? result : emptyPeek();
+    } catch {
+      return emptyPeek();
+    }
   }
 
   function ensureAssets() {
@@ -119,6 +206,134 @@
     return [];
   }
 
+  /** Find a PR already loaded by the pulls-list stack (no extra network). */
+  function findListPr(owner, repo, number) {
+    const n = Number(number);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    const o = String(owner || '').toLowerCase();
+    const r = String(repo || '').toLowerCase();
+    for (const p of resolveOpenPulls()) {
+      if (!p || Number(p.number) !== n) continue;
+      // List rows are for the current repo page; match number primarily
+      if (p.owner && o && String(p.owner).toLowerCase() !== o) continue;
+      if (p.repo && r && String(p.repo).toLowerCase() !== r) continue;
+      return p;
+    }
+    return null;
+  }
+
+  /**
+   * Minimal detail from list API row so header/title/body paint immediately.
+   * Marked `_sketch: true` so later cache/network can upgrade freely.
+   */
+  function detailSketchFromList(listPr, owner, repo, number) {
+    const n = Number(number);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    const title =
+      (listPr && String(listPr.title || '').trim()) || `Pull Request #${n}`;
+    const body = listPr && listPr.body != null ? String(listPr.body) : '';
+    const author = (listPr && listPr.author) || '';
+    // Labels: normalize to { name, color, description }
+    const labels = Array.isArray(listPr?.labels)
+      ? listPr.labels
+          .map((l) =>
+            typeof l === 'string'
+              ? { name: l, color: '', description: '' }
+              : {
+                  name: l?.name || '',
+                  color: l?.color || '',
+                  description: l?.description || '',
+                }
+          )
+          .filter((l) => l.name)
+      : [];
+    // Assignees: login strings (MetaList shape)
+    const assignees = Array.isArray(listPr?.assignees)
+      ? listPr.assignees
+          .map((u) => (typeof u === 'string' ? u : u?.login || ''))
+          .filter(Boolean)
+      : [];
+    const requestedReviewers = Array.isArray(listPr?.requestedReviewers)
+      ? listPr.requestedReviewers
+          .map((u) => (typeof u === 'string' ? u : u?.login || ''))
+          .filter(Boolean)
+      : [];
+    // Milestone: { number, title, state, dueOn }
+    let milestone = null;
+    if (listPr?.milestone && typeof listPr.milestone === 'object') {
+      const m = listPr.milestone;
+      if (m.number != null || m.title) {
+        milestone = {
+          number: m.number != null ? Number(m.number) : null,
+          title: m.title || '',
+          state: m.state || '',
+          dueOn: m.dueOn || m.due_on || null,
+        };
+      }
+    }
+    const avatarUrls =
+      listPr?.avatarUrls && typeof listPr.avatarUrls === 'object'
+        ? { ...listPr.avatarUrls }
+        : {};
+    if (author && listPr?.authorAvatarUrl) {
+      avatarUrls[String(author).toLowerCase()] = listPr.authorAvatarUrl;
+    }
+    return {
+      owner: String(owner || ''),
+      repo: String(repo || ''),
+      number: n,
+      nodeId: listPr?.nodeId || listPr?.node_id || null,
+      title,
+      body,
+      state: 'open',
+      draft: Boolean(listPr?.draft),
+      author,
+      authorAvatarUrl: listPr?.authorAvatarUrl || listPr?.avatarUrl || '',
+      baseRef: listPr?.baseRef || '',
+      headRef: listPr?.headRef || '',
+      htmlUrl:
+        listPr?.htmlUrl ||
+        `https://github.com/${owner}/${repo}/pull/${n}`,
+      merged: false,
+      mergeable: null,
+      labels,
+      assignees,
+      requestedReviewers,
+      milestone,
+      avatarUrls,
+      files: [],
+      comments: [],
+      reviews: [],
+      reviewComments: [],
+      reviewThreads: [],
+      commits: [],
+      checks: { state: 'unknown', totalCount: 0, statuses: [], checkRuns: [] },
+      additions: listPr?.additions ?? null,
+      deletions: listPr?.deletions ?? null,
+      changedFiles: listPr?.changedFiles ?? null,
+      subscribed: null,
+      _sketch: true,
+      _source: 'list',
+    };
+  }
+
+  /**
+   * Rank detail completeness for progressive upgrade decisions.
+   * 0 empty · 1 list sketch · 2 core (no threads) · 3 cached/full with threads/files
+   */
+  function detailRank(d) {
+    if (!d || typeof d !== 'object') return 0;
+    if (d._sketch) return 1;
+    const hasThreads =
+      (Array.isArray(d.reviewComments) && d.reviewComments.length > 0) ||
+      (Array.isArray(d.reviewThreads) && d.reviewThreads.length > 0);
+    const hasFiles = Array.isArray(d.files) && d.files.length > 0;
+    if (hasThreads || hasFiles) return 3;
+    // Has real title body from network/cache without sketch flag
+    if (d.title != null && !d._sketch) return 2;
+    return 1;
+  }
+
   function buildProps() {
     const owner = current.owner;
     const repo = current.repo;
@@ -131,6 +346,7 @@
       detail: current.detail,
       loadStage: current.loadStage,
       openPulls,
+      prefs: { ...prefs },
       // Deep-link restore (page/position); App also writes URI on focus changes
       initialRoute: {
         page: current.routePage,
@@ -139,47 +355,314 @@
       },
       onRouteChange: persistRouteState,
       onClose: closeModal,
-      onOpenStackPr: (n) => {
+      /**
+       * Stack strip navigation — preserve current Diff/Conversation view when
+       * opts.page is omitted by falling back to current.routePage.
+       * @param {number} n
+       * @param {{ page?: 'diff'|'conversation'|null }} [opts]
+       */
+      onOpenStackPr: (n, opts = {}) => {
         if (!owner || !repo || n == null) return;
-        void openModal({ owner, repo, number: Number(n) });
+        const page =
+          opts?.page === 'diff' || opts?.page === 'conversation'
+            ? opts.page
+            : current.routePage === 'diff' || current.routePage === 'conversation'
+              ? current.routePage
+              : null;
+        void openModal({
+          owner,
+          repo,
+          number: Number(n),
+          page,
+        });
       },
-      onRefresh: async () => {
+      /**
+       * Header / post-mutation refresh.
+       * @param {{
+       *   mode?: 'revalidate'|'full-threads'|'visible-threads',
+       *   threadNodeIds?: string[],
+       * }} [opts]
+       *   - visible-threads (conversation header): core + bulk only on-screen threads
+       *   - full-threads (diff header): core + last:100 + start:20 + Load all
+       *   - revalidate (mutations / default): core + last:100 + remaining unresolved bulk
+       */
+      onRefresh: async (opts = {}) => {
         if (!owner || !repo || !number) return;
         if (!globalThis.PRTreeFetch?.fetchPrDetail) return;
+        const modeRaw = String(opts?.mode || 'revalidate');
+        const mode =
+          modeRaw === 'full-threads'
+            ? 'full-threads'
+            : modeRaw === 'visible-threads'
+              ? 'visible-threads'
+              : 'revalidate';
+        const visibleIds = [
+          ...new Set(
+            (Array.isArray(opts?.threadNodeIds) ? opts.threadNodeIds : [])
+              .map((id) => String(id || '').trim())
+              .filter(Boolean)
+          ),
+        ];
         const key = detailKey(owner, repo, number);
         const gen = ++detailFetchGen;
-        detailCache.invalidate?.(key);
+        const prevDetail = current.detail;
         current.error = null;
-        setLoadStage('refresh', 'Refreshing pull request…', true);
+        setLoadStage(
+          'refresh',
+          mode === 'full-threads'
+            ? 'Refreshing pull request & all threads…'
+            : mode === 'visible-threads'
+              ? 'Refreshing metadata & visible threads…'
+              : 'Refreshing pull request…',
+          true
+        );
         render();
+
+        const stillOpen = () =>
+          gen === detailFetchGen &&
+          current.open &&
+          current.owner === owner &&
+          current.repo === repo &&
+          Number(current.number) === Number(number);
+
+        const mergeFn =
+          globalThis.PRTreeFetch.mergeReviewThreadsPageIntoDetail || null;
+        const apiMax = 100;
+        const nowMs = () =>
+          typeof performance !== 'undefined' && performance.now
+            ? performance.now()
+            : Date.now();
+
         try {
-          // Soft refresh: core + first threads page only (same as open)
-          const detail = await globalThis.PRTreeFetch.fetchPrDetail(
+          // 1) Core metadata (no threads) — keep prior threads until thread phase
+          setLoadStage('refresh', 'Refreshing metadata…', true);
+          render();
+          let detail = await globalThis.PRTreeFetch.fetchPrDetail(
             owner,
             repo,
             number,
-            { threadsMaxPages: 1 }
+            { skipReviewThreads: true }
           );
-          if (gen !== detailFetchGen) return;
+          if (!stillOpen()) return;
           if (
-            current.open &&
-            current.owner === owner &&
-            current.repo === repo &&
-            Number(current.number) === Number(number)
+            prevDetail &&
+            Array.isArray(prevDetail.reviewComments) &&
+            prevDetail.reviewComments.length &&
+            (!Array.isArray(detail.reviewComments) ||
+              !detail.reviewComments.length)
           ) {
-            current.loading = false;
-            current.detail = detail;
-            current.error = null;
+            detail = {
+              ...detail,
+              reviewComments: prevDetail.reviewComments,
+              reviewThreads: prevDetail.reviewThreads || detail.reviewThreads,
+              reviewThreadsMeta:
+                prevDetail.reviewThreadsMeta || detail.reviewThreadsMeta,
+              reviewCommentsMeta:
+                prevDetail.reviewCommentsMeta || detail.reviewCommentsMeta,
+            };
+          }
+          current.loading = false;
+          current.detail = detail;
+          current.error = null;
+          detailCache.set(key, detail);
+          render();
+
+          // —— Conversation header: only bulk-refresh threads currently on screen ——
+          if (mode === 'visible-threads') {
+            if (
+              visibleIds.length &&
+              typeof globalThis.PRTreeFetch.fetchReviewThreadsByIds ===
+                'function' &&
+              typeof mergeFn === 'function'
+            ) {
+              setLoadStage(
+                'threads',
+                `Updating ${visibleIds.length} visible thread${
+                  visibleIds.length === 1 ? '' : 's'
+                }…`,
+                true
+              );
+              render();
+              const tBulk = nowMs();
+              const bulk =
+                await globalThis.PRTreeFetch.fetchReviewThreadsByIds(
+                  visibleIds
+                );
+              const missingN = (bulk?.missingThreadIds || []).length;
+              console.log(
+                `[pr-plus] onRefresh visible-threads ${owner}/${repo}#${number}: ${Math.round(
+                  nowMs() - tBulk
+                )}ms (${bulk?.threads?.length || 0}/${visibleIds.length}` +
+                  (missingN ? `, dropped ${missingN} remote-missing` : '') +
+                  ')'
+              );
+              if (!stillOpen()) return;
+              if (bulk) {
+                const next = mergeFn(current.detail, bulk, 'refresh');
+                current.detail = next;
+                detailCache.set(key, next);
+              }
+            } else {
+              console.log(
+                `[pr-plus] onRefresh visible-threads ${owner}/${repo}#${number}: metadata only (0 visible PRRT ids)`
+              );
+            }
+            if (stillOpen()) {
+              clearLoadStage();
+              render();
+            }
+            return;
+          }
+
+          if (!globalThis.PRTreeFetch.fetchReviewThreadsPage) {
             clearLoadStage();
-            detailCache.set(key, detail);
             render();
+            return;
+          }
+
+          // 2a) last:100 (full-threads + mutation revalidate)
+          setLoadStage('threads', 'Updating review threads…', true);
+          render();
+          const t0 = nowMs();
+          const newest = await globalThis.PRTreeFetch.fetchReviewThreadsPage(
+            owner,
+            repo,
+            number,
+            { direction: 'newest', cursor: null, pageSize: apiMax }
+          );
+          if (!stillOpen()) return;
+          console.log(
+            `[pr-plus] onRefresh last ${owner}/${repo}#${number}: ${Math.round(
+              nowMs() - t0
+            )}ms (${newest?.threads?.length || 0}) mode=${mode}`
+          );
+          let next =
+            typeof mergeFn === 'function'
+              ? mergeFn(current.detail, newest, 'newest')
+              : current.detail;
+          current.detail = next;
+          detailCache.set(key, next);
+          render();
+
+          const updatedIdSet = new Set(
+            (newest?.threads || [])
+              .map((t) => (t?.threadNodeId ? String(t.threadNodeId) : ''))
+              .filter(Boolean)
+          );
+          const totalCount =
+            typeof newest.totalCount === 'number'
+              ? newest.totalCount
+              : newest.threads?.length || 0;
+
+          if (mode === 'full-threads') {
+            // Diff: seed start window then drain all remaining pages
+            if (totalCount >= apiMax && newest.hasPreviousPage) {
+              try {
+                setLoadStage('threads', 'Loading earlier review threads…', true);
+                render();
+                const oldest =
+                  await globalThis.PRTreeFetch.fetchReviewThreadsPage(
+                    owner,
+                    repo,
+                    number,
+                    { direction: 'oldest', cursor: null, pageSize: 20 }
+                  );
+                if (!stillOpen()) return;
+                if (typeof mergeFn === 'function') {
+                  next = mergeFn(next, oldest, 'oldest');
+                  current.detail = next;
+                  detailCache.set(key, next);
+                  render();
+                }
+              } catch {
+                /* keep last-only */
+              }
+            }
+            if (stillOpen() && next?.reviewThreadsMeta?.hasMore) {
+              const props = buildProps();
+              if (typeof props.onLoadMoreReviewThreads === 'function') {
+                await props.onLoadMoreReviewThreads('all');
+              }
+            } else if (stillOpen()) {
+              clearLoadStage();
+              render();
+            }
+          } else {
+            // Mutation revalidate: unresolved bulk for threads not in last:100
+            const collectIds =
+              globalThis.PRTreeFetch.collectUnresolvedThreadNodeIds ||
+              ((d) => {
+                const ids = new Set();
+                for (const t of d?.reviewThreads || []) {
+                  if (t?.threadNodeId && !t.resolved) {
+                    ids.add(String(t.threadNodeId));
+                  }
+                }
+                return [...ids];
+              });
+            // Bulk revalidate unresolved threads; drop remote-missing and re-check once
+            // so a local zombie PRRT cannot block refresh forever.
+            let unresolvedPass = 0;
+            const knownMissing = new Set();
+            while (
+              unresolvedPass < 2 &&
+              typeof globalThis.PRTreeFetch.fetchReviewThreadsByIds ===
+                'function' &&
+              typeof mergeFn === 'function'
+            ) {
+              unresolvedPass += 1;
+              const remainingUnresolvedIds = collectIds(next).filter((id) => {
+                const s = String(id);
+                return !updatedIdSet.has(s) && !knownMissing.has(s);
+              });
+              if (!remainingUnresolvedIds.length) break;
+              setLoadStage('threads', 'Updating unresolved threads…', true);
+              render();
+              const tBulk = nowMs();
+              const bulk =
+                await globalThis.PRTreeFetch.fetchReviewThreadsByIds(
+                  remainingUnresolvedIds
+                );
+              const missingList = Array.isArray(bulk?.missingThreadIds)
+                ? bulk.missingThreadIds
+                : [];
+              for (const id of missingList) knownMissing.add(String(id));
+              const missingN = missingList.length;
+              console.log(
+                `[pr-plus] onRefresh unresolved-remaining ${owner}/${repo}#${number}: ${Math.round(
+                  nowMs() - tBulk
+                )}ms (${bulk?.threads?.length || 0}/${remainingUnresolvedIds.length}` +
+                  (missingN ? `, dropped ${missingN} remote-missing` : '') +
+                  `, pass ${unresolvedPass})`
+              );
+              if (!stillOpen()) return;
+              if (bulk) {
+                next = mergeFn(next, bulk, 'refresh');
+              }
+              // Only retry when we actually pruned zombies (otherwise stop)
+              if (!missingN) break;
+            }
+            if (stillOpen()) {
+              current.detail = next;
+              detailCache.set(key, next);
+              clearLoadStage();
+              render();
+            }
           }
         } catch (err) {
           if (gen !== detailFetchGen) return;
           if (current.open) {
             current.loading = false;
-            current.error = err?.message || String(err);
-            clearLoadStage();
+            // Keep previous detail on soft-refresh failure
+            if (!current.detail) {
+              current.error = err?.message || String(err);
+            } else {
+              setLoadStage(
+                'refresh',
+                err?.message || 'Refresh failed',
+                false
+              );
+            }
             render();
           }
         }
@@ -240,7 +723,7 @@
             owner,
             repo,
             number,
-            { direction: dir, cursor }
+            { direction: dir, cursor, pageSize: 100 }
           );
           if (gen !== detailFetchGen) return { detail: null, progressed: false };
           let next = detailSnap;
@@ -357,12 +840,20 @@
           // Meta lock is React-local only; never stick it in the SWR cache.
           _metaSeq: 0,
         };
-        // Explicit empty arrays must win (spread alone is fine; keep intent clear)
+        // Explicit empty arrays / null milestone must win (spread alone is fine)
         if (Object.prototype.hasOwnProperty.call(patch, 'assignees')) {
           next.assignees = Array.isArray(patch.assignees) ? patch.assignees : [];
         }
         if (Object.prototype.hasOwnProperty.call(patch, 'labels')) {
           next.labels = Array.isArray(patch.labels) ? patch.labels : [];
+        }
+        if (Object.prototype.hasOwnProperty.call(patch, 'requestedReviewers')) {
+          next.requestedReviewers = Array.isArray(patch.requestedReviewers)
+            ? patch.requestedReviewers
+            : [];
+        }
+        if (Object.prototype.hasOwnProperty.call(patch, 'milestone')) {
+          next.milestone = patch.milestone == null ? null : patch.milestone;
         }
         current.detail = next;
         try {
@@ -508,30 +999,122 @@
 
   async function openModal({ owner, repo, number, page = null, position = null }) {
     if (!hostEnabled) return;
+    await refreshPrefs();
+    ensurePrefsWatch();
     const key = detailKey(owner, repo, number);
-    const peeked = detailCache.peek(key);
-    const cached = peeked.value;
     const gen = ++detailFetchGen;
+
+    // Progressive sources (fast → slow):
+    //   1) list sketch (pulls page cache — title/body already available)
+    //   2) memory cache
+    //   3) IDB (async, non-blocking)
+    //   4) network core + threads
+    const listPr = findListPr(owner, repo, number);
+    const listSketch = detailSketchFromList(listPr, owner, repo, number);
+
+    // 1) Sync memory paint first (never block on IDB)
+    let peeked = peekDetailMemory(key);
+    let cached = peeked.value || null;
+    let fromCache = Boolean(cached);
+    const fromList = !fromCache && Boolean(listSketch);
+    // Prefer real cache over list sketch; else sketch; else empty
+    let initialDetail = cached || listSketch || null;
+
+    // Explicit page (stack nav) > keep current view when already open > default conversation
+    const resolvedPage =
+      page === 'diff' || page === 'conversation'
+        ? page
+        : current.open &&
+            (current.routePage === 'diff' || current.routePage === 'conversation')
+          ? current.routePage
+          : page || null;
 
     current = {
       open: true,
-      loading: !cached,
+      // Only block whole UI when we have nothing to show yet
+      loading: !initialDetail,
       error: null,
-      detail: cached || null,
+      detail: initialDetail,
       owner,
       repo,
       number,
-      routePage: page || null,
+      routePage: resolvedPage,
       routePosition: position || null,
       loadStage: {
-        phase: 'core',
-        label: cached ? 'Refreshing pull request…' : 'Loading pull request…',
+        phase: fromCache ? 'revalidate' : fromList ? 'core' : 'core',
+        label: fromCache
+          ? 'Updating pull request…'
+          : fromList
+            ? 'Loading full details…'
+            : 'Loading pull request…',
         busy: true,
       },
     };
-    persistOpenModal(owner, repo, number, { page, position });
-    writeUriRoute({ page: page || 'conversation', number, position });
+    persistOpenModal(owner, repo, number, {
+      page: resolvedPage,
+      position,
+    });
+    writeUriRoute({
+      page: resolvedPage || 'conversation',
+      number,
+      position,
+    });
     render();
+
+    if (fromCache) {
+      console.log(
+        `[pr-plus] openModal cache-hit ${owner}/${repo}#${number} ` +
+          `source=${peeked.source || 'memory'} fresh=${Boolean(peeked.fresh)}`
+      );
+    } else if (fromList) {
+      console.log(
+        `[pr-plus] openModal list-sketch ${owner}/${repo}#${number} ` +
+          `title=${JSON.stringify(String(listSketch.title || '').slice(0, 60))}`
+      );
+    }
+
+    // 2) Background IDB hydrate (timeout) — only if memory miss
+    //    Upgrades list-sketch → IDB snapshot; must not delay network.
+    const idbHydrateP = !fromCache
+      ? peekDetailIdb(key, 400).then((idbPeek) => {
+          if (gen !== detailFetchGen) return null;
+          if (
+            !(
+              current.open &&
+              current.owner === owner &&
+              current.repo === repo &&
+              Number(current.number) === Number(number)
+            )
+          ) {
+            return null;
+          }
+          const v = idbPeek?.value || null;
+          if (!v) return null;
+          const curRank = detailRank(current.detail);
+          const idbRank = detailRank(v);
+          // Network already delivered richer data — keep IDB only for thread preserve
+          if (curRank >= 2 && !current.detail?._sketch) {
+            return v;
+          }
+          // Upgrade empty / list-sketch → IDB
+          if (idbRank > curRank || (current.detail?._sketch && idbRank >= 2)) {
+            cached = v;
+            fromCache = true;
+            peeked = idbPeek;
+            current.detail = v;
+            current.loading = false;
+            current.error = null;
+            setLoadStage('revalidate', 'Updating pull request…', true);
+            render();
+            console.log(
+              `[pr-plus] openModal cache-hit ${owner}/${repo}#${number} source=idb (upgraded from ${
+                curRank <= 1 ? 'list/empty' : 'partial'
+              })`
+            );
+          }
+          return v;
+        })
+      : Promise.resolve(cached);
 
     try {
       if (!globalThis.PRTreeFetch?.fetchPrDetail) {
@@ -551,9 +1134,15 @@
           } catch (err) {
             lastErr = err;
             const msg = String(err?.message || err || '');
+            // Context invalidation cannot be fixed by retry — page refresh required
+            if (
+              /Extension context invalidated|Extension was reloaded/i.test(msg)
+            ) {
+              throw err;
+            }
             if (
               attempt === 0 &&
-              /message channel closed|Receiving end does not exist|Background worker offline|Extension context invalidated/i.test(
+              /message channel closed|Receiving end does not exist|Background worker offline/i.test(
                 msg
               )
             ) {
@@ -566,10 +1155,49 @@
         throw lastErr || new Error('Failed to fetch PR detail');
       }
 
-      // Phase 1: core PR (no threads) — paint header / description / issue comments fast
-      setLoadStage('core', 'Loading pull request…', true);
-      render();
+      // Prefs drive progressive vs full thread load
+      await refreshPrefs();
+      ensurePrefsWatch();
+      const fastReview = prefs.fastReview !== false;
+
+      // Phase 1: core PR (no threads) — start network immediately (parallel with IDB)
+      if (!fromCache && !fromList) {
+        setLoadStage('core', 'Loading pull request…', true);
+        render();
+      } else if (!fromCache && fromList) {
+        setLoadStage('core', 'Loading full details…', true);
+        render();
+      } else {
+        setLoadStage('revalidate', 'Updating pull request…', true);
+        render();
+      }
+      const tCore0 =
+        typeof performance !== 'undefined' && performance.now
+          ? performance.now()
+          : Date.now();
+      // Let IDB finish (or time out) without blocking core fetch
+      void idbHydrateP;
       let detail = await fetchDetailOnce({ skipReviewThreads: true });
+      // Prefer whatever IDB provided for thread preserve below
+      try {
+        const idbVal = await idbHydrateP;
+        if (idbVal && !cached) cached = idbVal;
+        // If we still only had a list sketch when IDB finished after network race, keep idb for preserve
+        if (idbVal && detailRank(cached) < detailRank(idbVal)) cached = idbVal;
+      } catch {
+        /* ignore */
+      }
+      const coreMs = Math.round(
+        (typeof performance !== 'undefined' && performance.now
+          ? performance.now()
+          : Date.now()) - tCore0
+      );
+      console.log(
+        `[pr-plus] openModal phase=core ${owner}/${repo}#${number}: ${coreMs}ms ` +
+          (detail?._fetchTimings
+            ? JSON.stringify(detail._fetchTimings)
+            : '(no per-request timings)')
+      );
       if (gen !== detailFetchGen) return;
       if (
         !(
@@ -581,72 +1209,296 @@
       ) {
         return;
       }
+      // SWR: keep cached review threads visible until fresh thread pages land
+      // so core-only responses do not blank conversation / Diff comments.
+      if (
+        cached &&
+        Array.isArray(cached.reviewComments) &&
+        cached.reviewComments.length &&
+        (!Array.isArray(detail.reviewComments) || !detail.reviewComments.length)
+      ) {
+        detail = {
+          ...detail,
+          reviewComments: cached.reviewComments,
+          reviewThreads: cached.reviewThreads || detail.reviewThreads,
+          reviewThreadsMeta: cached.reviewThreadsMeta || detail.reviewThreadsMeta,
+          reviewCommentsMeta:
+            cached.reviewCommentsMeta || detail.reviewCommentsMeta,
+          comments:
+            Array.isArray(detail.comments) && detail.comments.length
+              ? detail.comments
+              : cached.comments || detail.comments,
+        };
+      }
+      // Network core is authoritative — drop sketch flags
+      if (detail && typeof detail === 'object') {
+        detail = { ...detail, _sketch: undefined, _source: 'network' };
+      }
       current.loading = false;
       current.detail = detail;
       current.error = null;
-      setLoadStage('threads', 'Loading review threads…', true);
+      setLoadStage(
+        'threads',
+        fromCache || detailRank(cached) >= 3
+          ? 'Updating review threads…'
+          : 'Loading review threads…',
+        true
+      );
       detailCache.set(key, detail);
       render();
+      console.log(
+        `[pr-plus] openModal phase=core-paint ${owner}/${repo}#${number} ` +
+          `(prior=${fromCache ? 'cache' : fromList ? 'list' : 'empty'})`
+      );
 
-      // Phase 2: dual-window GraphQL threads — newest (last) + oldest (first) when large
+      // Phase 2: review threads
+      // - Cold open: dual-window (newest last:N + oldest first:20)
+      // - Cache revalidate: newest last:100 + bulk unresolved by PRRT ids (no oldest;
+      //   start window is stable when ordered, so skip)
       if (globalThis.PRTreeFetch.fetchReviewThreadsPage) {
         try {
           const mergeFn =
             globalThis.PRTreeFetch.mergeReviewThreadsPageIntoDetail || null;
-          const newest = await globalThis.PRTreeFetch.fetchReviewThreadsPage(
-            owner,
-            repo,
-            number,
-            { direction: 'newest', cursor: null }
-          );
-          if (gen !== detailFetchGen) return;
-          if (
-            !(
-              current.open &&
-              Number(current.number) === Number(number) &&
-              current.detail
-            )
-          ) {
-            return;
-          }
-          let next =
-            typeof mergeFn === 'function'
-              ? mergeFn(current.detail, newest, 'newest')
-              : current.detail;
-          // Seed oldest end when more than one window of threads
-          const totalCount =
-            typeof newest.totalCount === 'number'
-              ? newest.totalCount
-              : newest.threads?.length || 0;
-          const pageLen = newest.threads?.length || 0;
-          if (totalCount > pageLen && newest.hasPreviousPage) {
-            try {
-              const oldest = await globalThis.PRTreeFetch.fetchReviewThreadsPage(
-                owner,
-                repo,
-                number,
-                { direction: 'oldest', cursor: null, pageSize: 20 }
-              );
-              if (gen === detailFetchGen && typeof mergeFn === 'function') {
-                next = mergeFn(next, oldest, 'oldest');
-              }
-            } catch {
-              /* keep newest-only window */
+          const nowMs = () =>
+            typeof performance !== 'undefined' && performance.now
+              ? performance.now()
+              : Date.now();
+          const tThreads0 = nowMs();
+          const apiMax = 100;
+          // Revalidate path when we had durable cache (memory/IDB), not mere list sketch
+          const useRevalidatePath = fromCache || detailRank(cached) >= 3;
+
+          if (useRevalidatePath) {
+            // —— Incremental revalidate ——
+            // 1) last:100 first (always freshest activity window)
+            // 2) then bulk-refresh only unresolved among threads NOT updated in step 1
+            //    (oldest/start window skipped — stable when ordered)
+            setLoadStage('threads', 'Updating review threads…', true);
+            render();
+
+            // Step 1: last N (API max 100)
+            const tNewest0 = nowMs();
+            const newest = await globalThis.PRTreeFetch.fetchReviewThreadsPage(
+              owner,
+              repo,
+              number,
+              { direction: 'newest', cursor: null, pageSize: apiMax }
+            );
+            console.log(
+              `[pr-plus] openModal phase=threads.last ${owner}/${repo}#${number}: ${Math.round(
+                nowMs() - tNewest0
+              )}ms (${newest?.threads?.length || 0} threads)`
+            );
+            if (gen !== detailFetchGen) return;
+            if (
+              !(
+                current.open &&
+                Number(current.number) === Number(number) &&
+                current.detail
+              )
+            ) {
+              return;
             }
-          }
-          if (gen !== detailFetchGen) return;
-          if (
-            current.open &&
-            Number(current.number) === Number(number) &&
-            current.detail
-          ) {
+
+            const updatedIdSet = new Set(
+              (newest?.threads || [])
+                .map((t) => (t?.threadNodeId ? String(t.threadNodeId) : ''))
+                .filter(Boolean)
+            );
+
+            let next =
+              typeof mergeFn === 'function'
+                ? mergeFn(current.detail, newest, 'newest')
+                : current.detail;
+
+            // Paint last-100 merge before unresolved bulk
             detail = next;
             current.detail = detail;
             detailCache.set(key, detail);
-            // Initial dual-window load done — hide top bar / stage caption.
-            // Remaining threads use the Conversation "Load more…" gap, not the bar.
-            clearLoadStage();
+            setLoadStage('threads', 'Updating unresolved threads…', true);
             render();
+
+            // Step 2: remaining unresolved not in last-100; drop remote-missing zombies
+            const collectIds =
+              globalThis.PRTreeFetch.collectUnresolvedThreadNodeIds ||
+              ((d) => {
+                const ids = new Set();
+                for (const t of d?.reviewThreads || []) {
+                  if (t?.threadNodeId && !t.resolved) {
+                    ids.add(String(t.threadNodeId));
+                  }
+                }
+                return [...ids];
+              });
+            let unresolvedPass = 0;
+            /** PRRT ids confirmed remote-missing this open — never re-fetch. */
+            const knownMissing = new Set();
+            while (
+              unresolvedPass < 2 &&
+              typeof globalThis.PRTreeFetch.fetchReviewThreadsByIds === 'function'
+            ) {
+              unresolvedPass += 1;
+              const remainingUnresolvedIds = collectIds(next).filter((id) => {
+                const s = String(id);
+                return !updatedIdSet.has(s) && !knownMissing.has(s);
+              });
+              if (!remainingUnresolvedIds.length) {
+                if (unresolvedPass === 1) {
+                  console.log(
+                    `[pr-plus] openModal phase=threads.unresolved-remaining ${owner}/${repo}#${number}: skipped (0 remaining, last=${updatedIdSet.size})`
+                  );
+                }
+                break;
+              }
+              const tBulk0 = nowMs();
+              const bulk = await globalThis.PRTreeFetch.fetchReviewThreadsByIds(
+                remainingUnresolvedIds
+              );
+              const missingList = Array.isArray(bulk?.missingThreadIds)
+                ? bulk.missingThreadIds
+                : [];
+              for (const id of missingList) knownMissing.add(String(id));
+              const missingN = missingList.length;
+              console.log(
+                `[pr-plus] openModal phase=threads.unresolved-remaining ${owner}/${repo}#${number}: ${Math.round(
+                  nowMs() - tBulk0
+                )}ms (${bulk?.threads?.length || 0}/${remainingUnresolvedIds.length} ids, skipped last=${updatedIdSet.size}` +
+                  (missingN ? `, dropped ${missingN} remote-missing` : '') +
+                  `, pass ${unresolvedPass})`
+              );
+              if (gen !== detailFetchGen) return;
+              if (
+                current.open &&
+                Number(current.number) === Number(number) &&
+                typeof mergeFn === 'function' &&
+                bulk
+              ) {
+                next = mergeFn(next, bulk, 'refresh');
+              }
+              if (!missingN) break;
+            }
+
+            console.log(
+              `[pr-plus] openModal phase=threads(revalidate) ${owner}/${repo}#${number}: ${Math.round(
+                nowMs() - tThreads0
+              )}ms total`
+            );
+            if (gen !== detailFetchGen) return;
+            if (
+              current.open &&
+              Number(current.number) === Number(number) &&
+              current.detail
+            ) {
+              detail = next;
+              current.detail = detail;
+              detailCache.set(key, detail);
+              clearLoadStage();
+              render();
+            }
+          } else {
+            // —— Cold open: last:100 first, then start:20 only if total ≥ 100 ——
+            const tNewest0 = nowMs();
+            const newest = await globalThis.PRTreeFetch.fetchReviewThreadsPage(
+              owner,
+              repo,
+              number,
+              { direction: 'newest', cursor: null, pageSize: apiMax }
+            );
+            console.log(
+              `[pr-plus] openModal phase=threads.last ${owner}/${repo}#${number}: ${Math.round(
+                nowMs() - tNewest0
+              )}ms (${newest?.threads?.length || 0} threads)`
+            );
+            if (gen !== detailFetchGen) return;
+            if (
+              !(
+                current.open &&
+                Number(current.number) === Number(number) &&
+                current.detail
+              )
+            ) {
+              return;
+            }
+            let next =
+              typeof mergeFn === 'function'
+                ? mergeFn(current.detail, newest, 'newest')
+                : current.detail;
+
+            // Paint last-100 before optional start window
+            detail = next;
+            current.detail = detail;
+            detailCache.set(key, detail);
+            render();
+
+            const totalCount =
+              typeof newest.totalCount === 'number'
+                ? newest.totalCount
+                : newest.threads?.length || 0;
+            // total < 100 → last page already covers everything; skip start
+            const needStartWindow =
+              totalCount >= apiMax && Boolean(newest.hasPreviousPage);
+            if (needStartWindow) {
+              try {
+                setLoadStage('threads', 'Loading earlier review threads…', true);
+                render();
+                const tOldest0 = nowMs();
+                const oldest =
+                  await globalThis.PRTreeFetch.fetchReviewThreadsPage(
+                    owner,
+                    repo,
+                    number,
+                    { direction: 'oldest', cursor: null, pageSize: 20 }
+                  );
+                console.log(
+                  `[pr-plus] openModal phase=threads.start ${owner}/${repo}#${number}: ${Math.round(
+                    nowMs() - tOldest0
+                  )}ms (${oldest?.threads?.length || 0} threads, total=${totalCount})`
+                );
+                if (gen === detailFetchGen && typeof mergeFn === 'function') {
+                  next = mergeFn(next, oldest, 'oldest');
+                }
+              } catch {
+                /* keep last-only window */
+              }
+            } else {
+              console.log(
+                `[pr-plus] openModal phase=threads.start ${owner}/${repo}#${number}: skipped (total=${totalCount} < ${apiMax})`
+              );
+            }
+            console.log(
+              `[pr-plus] openModal phase=threads ${owner}/${repo}#${number}: ${Math.round(
+                nowMs() - tThreads0
+              )}ms total`
+            );
+            if (gen !== detailFetchGen) return;
+            if (
+              current.open &&
+              Number(current.number) === Number(number) &&
+              current.detail
+            ) {
+              detail = next;
+              current.detail = detail;
+              detailCache.set(key, detail);
+              clearLoadStage();
+              render();
+            }
+
+            // Full load when "가볍고 빠른 PR 검토" is off — drain remaining pages
+            if (
+              !fastReview &&
+              gen === detailFetchGen &&
+              current.open &&
+              current.detail?.reviewThreadsMeta?.hasMore
+            ) {
+              try {
+                const props = buildProps();
+                if (typeof props.onLoadMoreReviewThreads === 'function') {
+                  await props.onLoadMoreReviewThreads('all');
+                }
+              } catch {
+                /* stage error already surfaced */
+              }
+            }
           }
         } catch (threadErr) {
           // Core already painted — keep it; surface soft stage error
@@ -685,6 +1537,21 @@
     if (!hostEnabled) return { ok: false, reason: 'disabled' };
     if (!isPullsListPage()) return { ok: false, reason: 'not-pulls' };
     if (current.open) return { ok: true, reason: 'already-open' };
+
+    // Extension reload leaves orphan content scripts; restore needs a tab refresh
+    const bridge = globalThis.PRTreeBridge;
+    if (
+      typeof bridge?.isExtensionContextAlive === 'function' &&
+      !bridge.isExtensionContextAlive()
+    ) {
+      return {
+        ok: false,
+        reason: 'context-invalidated',
+        message:
+          bridge.RELOAD_REFRESH_MSG ||
+          'Extension was reloaded. Refresh this GitHub tab to reconnect pr+.',
+      };
+    }
 
     const path = location.pathname || '';
     const m = path.match(/^\/([^/]+)\/([^/]+)\/pulls/);
@@ -746,13 +1613,27 @@
       }
     }
 
-    await openModal({
-      owner: resolved.open.owner,
-      repo: resolved.open.repo,
-      number: resolved.open.number,
-      page: resolved.page,
-      position: resolved.position,
-    });
+    try {
+      await openModal({
+        owner: resolved.open.owner,
+        repo: resolved.open.repo,
+        number: resolved.open.number,
+        page: resolved.page,
+        position: resolved.position,
+      });
+    } catch (err) {
+      const msg = String(err?.message || err || '');
+      if (
+        /Extension context invalidated|Extension was reloaded/i.test(msg)
+      ) {
+        return {
+          ok: false,
+          reason: 'context-invalidated',
+          message: msg,
+        };
+      }
+      throw err;
+    }
     return {
       ok: true,
       owner: resolved.open.owner,
@@ -864,11 +1745,75 @@
       if (!event?.persisted) return;
       if (!hostEnabled || !current.open) return;
       if (!current.owner || !current.repo || current.number == null) return;
+      const bridge = globalThis.PRTreeBridge;
+      if (
+        typeof bridge?.isExtensionContextAlive === 'function' &&
+        !bridge.isExtensionContextAlive()
+      ) {
+        return;
+      }
       const props = buildProps();
       if (typeof props.onRefresh === 'function') {
-        void props.onRefresh();
+        void props.onRefresh().catch((err) => {
+          const msg = String(err?.message || err || '');
+          if (/Extension context invalidated|Extension was reloaded/i.test(msg)) {
+            return;
+          }
+          console.warn('[pr+] pageshow refresh failed', err);
+        });
       }
     });
+  }
+
+  /**
+   * Wipe in-memory SWR + page-origin IndexedDB PR detail cache.
+   * Invoked from popup settings via PR_TREE_CLEAR_DETAIL_CACHE.
+   */
+  async function clearDetailCache() {
+    try {
+      const r = detailCache.clear?.();
+      if (r && typeof r.then === 'function') await r;
+    } catch (err) {
+      console.warn('[pr+] detailCache.clear failed', err);
+    }
+    // Fresh handle in case the singleton cache missed IDB (tests / fallback)
+    try {
+      const idb = globalThis.PRModalDetailIdb?.createDetailIdb?.();
+      if (idb?.clear) await idb.clear();
+    } catch (err) {
+      console.warn('[pr+] IDB clear failed', err);
+    }
+    return { ok: true };
+  }
+
+  function listenClearDetailCache() {
+    try {
+      chrome.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
+        if (message?.type !== 'PR_TREE_CLEAR_DETAIL_CACHE') return false;
+        void clearDetailCache()
+          .then((res) => {
+            try {
+              sendResponse(res || { ok: true });
+            } catch {
+              /* channel closed */
+            }
+          })
+          .catch((err) => {
+            try {
+              sendResponse({
+                ok: false,
+                error: err?.message || String(err),
+              });
+            } catch {
+              /* ignore */
+            }
+          });
+        // Keep channel open for async sendResponse
+        return true;
+      });
+    } catch {
+      /* ignore */
+    }
   }
 
   globalThis.PRModalHost = {
@@ -881,9 +1826,11 @@
     isEnabled: () => hostEnabled,
     parsePrFromAnchor,
     isPullsListPage,
+    clearDetailCache,
     _getState: () => ({ ...current, hostEnabled }),
     _detailCache: detailCache,
   };
 
+  listenClearDetailCache();
   install();
 })();

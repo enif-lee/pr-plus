@@ -5,6 +5,8 @@ const {
   guessContentType,
   mergeDetailPreserveOptimistic,
   stripPendingReviewFromDetail,
+  removeReviewCommentFromDetail,
+  removeIssueCommentFromDetail,
   buildAssetRepoPath,
 } = require('../src/modal/lib/composer-attach.ts');
 
@@ -293,5 +295,85 @@ assert.ok(
   keepOptimisticPending.reviewComments.some((c) => String(c.id) === '50'),
   'optimistic pending kept while host still has pending review'
 );
+
+// removeReviewCommentFromDetail: cascade replies + tombstone + scrub threads
+{
+  const before = {
+    number: 1,
+    owner: 'o',
+    repo: 'r',
+    viewerPendingReview: { id: 9, commentCount: 1 },
+    reviewComments: [
+      { id: 10, body: 'root', pending: true, threadNodeId: 'PRRT_X' },
+      { id: 11, body: 'reply', pending: true, inReplyToId: 10, threadNodeId: 'PRRT_X' },
+      { id: 20, body: 'other', pending: false, threadNodeId: 'PRRT_Y' },
+    ],
+    reviewThreads: [
+      { threadNodeId: 'PRRT_X', resolved: false, commentIds: [10, 11] },
+      { threadNodeId: 'PRRT_Y', resolved: false, commentIds: [20] },
+    ],
+  };
+  const removed = removeReviewCommentFromDetail(before, 10);
+  assert.deepEqual(
+    removed.reviewComments.map((c) => c.id),
+    [20],
+    'drops root + reply tree'
+  );
+  assert.equal(removed.viewerPendingReview, null, 'clears pending review when last pending gone');
+  assert.ok(removed._deletedReviewCommentIds.has('10'));
+  assert.ok(removed._deletedReviewCommentIds.has('11'));
+  assert.ok(
+    !removed.reviewThreads.some((t) => t.threadNodeId === 'PRRT_X'),
+    'empty thread dropped from revalidate targets'
+  );
+  assert.ok(removed.reviewThreads.some((t) => t.threadNodeId === 'PRRT_Y'));
+
+  // Stale host still listing deleted id must not resurrect after merge
+  const resurrect = mergeDetailPreserveOptimistic(removed, {
+    number: 1,
+    owner: 'o',
+    repo: 'r',
+    reviewComments: [
+      { id: 10, body: 'stale root', pending: true },
+      { id: 20, body: 'other', pending: false },
+    ],
+    reviewThreads: [
+      { threadNodeId: 'PRRT_X', resolved: false, commentIds: [10, 11] },
+    ],
+  });
+  assert.ok(
+    !resurrect.reviewComments.some((c) => String(c.id) === '10'),
+    'tombstone blocks host resurrection'
+  );
+  assert.ok(resurrect.reviewComments.some((c) => String(c.id) === '20'));
+}
+
+// removeIssueCommentFromDetail tombstone
+{
+  const before = {
+    number: 2,
+    owner: 'o',
+    repo: 'r',
+    comments: [
+      { id: 1, body: 'keep' },
+      { id: 2, body: 'bye' },
+    ],
+  };
+  const removed = removeIssueCommentFromDetail(before, 2);
+  assert.deepEqual(
+    removed.comments.map((c) => c.id),
+    [1]
+  );
+  const m = mergeDetailPreserveOptimistic(removed, {
+    number: 2,
+    owner: 'o',
+    repo: 'r',
+    comments: [
+      { id: 1, body: 'keep' },
+      { id: 2, body: 'stale' },
+    ],
+  });
+  assert.ok(!m.comments.some((c) => String(c.id) === '2'));
+}
 
 console.log('composer-attach.test.js: all assertions passed');

@@ -1,7 +1,87 @@
 /**
- * Build GitHub-like conversation timeline + pagination for review comments.
- * Review threads are individual timeline entries with nested replies + optional code snippet.
+ * Build GitHub-like conversation timeline (pure).
  */
+
+/**
+ * Build GitHub-like conversation timeline + pagination for review comments.
+ * Multiple file threads from the same Pull Request Review are grouped under
+ * a single review-group entry (GitHub conversation UI).
+ */
+
+
+function buildThreadEntry(c, children, snippetFn, files, viewerLogin, i) {
+  const replies = (children.get(String(c.id)) || [])
+    .slice()
+    .sort((a, b) =>
+      String(a.createdAt || '').localeCompare(String(b.createdAt || ''))
+    )
+    .map((r) => ({
+      id: r.id,
+      author: r.author,
+      avatarUrl: r.avatarUrl || null,
+      body: r.body || '',
+      at: r.createdAt,
+      createdAt: r.createdAt,
+      pending: Boolean(r.pending),
+      nodeId: r.nodeId || r.node_id || null,
+      canDelete: Boolean(
+        viewerLogin && r.author && r.author === viewerLogin && !r.pending
+      ),
+    }));
+  const snippet = snippetFn
+    ? snippetFn(
+        {
+          path: c.path,
+          line: c.line,
+          originalLine: c.originalLine ?? c.original_line,
+          startLine: c.startLine ?? c.start_line,
+          side: c.side,
+          diffHunk: c.diffHunk || c.diff_hunk || '',
+        },
+        files
+      )
+    : null;
+  const displayLine =
+    c.line != null
+      ? Number(c.line)
+      : c.originalLine != null
+        ? Number(c.originalLine)
+        : c.original_line != null
+          ? Number(c.original_line)
+          : null;
+  const reviewId =
+    c.reviewId != null
+      ? Number(c.reviewId)
+      : c.pendingReviewId != null
+        ? Number(c.pendingReviewId)
+        : c.pull_request_review_id != null
+          ? Number(c.pull_request_review_id)
+          : null;
+  return {
+    key: `thread-${c.id || i}`,
+    kind: 'review-thread',
+    id: c.id,
+    author: c.author,
+    avatarUrl: c.avatarUrl || c.avatar_url || null,
+    body: c.body || '',
+    at: c.createdAt,
+    path: c.path,
+    line: displayLine,
+    startLine: c.startLine ?? c.start_line ?? null,
+    side: c.side || 'RIGHT',
+    resolved: Boolean(c.resolved),
+    outdated: Boolean(c.outdated),
+    threadNodeId: c.threadNodeId || null,
+    nodeId: c.nodeId || c.node_id || null,
+    reviewId: Number.isFinite(reviewId) ? reviewId : null,
+    pending: Boolean(c.pending),
+    replies,
+    snippet,
+    canDelete: Boolean(
+      viewerLogin && c.author && c.author === viewerLogin && !c.pending
+    ),
+  };
+}
 
 /**
  * @param {object} detail
@@ -19,36 +99,47 @@ function buildConversationTimeline(detail, opts = {}) {
         ? globalThis.PRModalDiffSnippet.snippetForComment
         : null;
   const files = detail.files || [];
+  const viewerLogin = detail.viewerLogin;
 
-  (detail.reviews || []).forEach((r, i) => {
-    if (!r.body && (!r.state || r.state === 'COMMENTED' || r.state === 'PENDING')) return;
-    items.push({
-      key: `rev-${r.id || i}`,
-      kind: 'review',
-      id: r.id,
-      author: r.author,
-      state: r.state,
-      body: r.body || '',
-      at: r.submittedAt,
-      canDelete: false,
+  // Index submitted reviews for group headers (+ viewer's PENDING review)
+  const reviewById = new Map();
+  for (const r of detail.reviews || []) {
+    if (r && r.id != null) reviewById.set(String(r.id), r);
+  }
+  const vpr = detail.viewerPendingReview;
+  if (vpr?.id != null && !reviewById.has(String(vpr.id))) {
+    reviewById.set(String(vpr.id), {
+      id: vpr.id,
+      author: vpr.author || detail.viewerLogin || '',
+      avatarUrl: vpr.avatarUrl || vpr.avatar_url || null,
+      state: 'PENDING',
+      body: vpr.body || '',
+      submittedAt: vpr.submittedAt || vpr.createdAt || null,
+      isBot: false,
     });
-  });
+  }
+  const viewerPendingId =
+    vpr?.id != null
+      ? String(vpr.id)
+      : null;
 
+  // Issue comments stay flat
   (detail.comments || []).forEach((c, i) => {
     items.push({
       key: `c-${c.id || i}`,
       kind: 'issue-comment',
       id: c.id,
       author: c.author,
+      avatarUrl: c.avatarUrl || c.avatar_url || null,
       body: c.body || '',
       at: c.createdAt,
       canDelete: Boolean(
-        detail.viewerLogin && c.author && c.author === detail.viewerLogin
+        viewerLogin && c.author && c.author === viewerLogin
       ),
     });
   });
 
-  // Full review threads (root + replies) as nested timeline entries
+  // Build root threads + replies
   const allRc = Array.isArray(detail.reviewComments) ? detail.reviewComments : [];
   const byId = new Map();
   for (const c of allRc) {
@@ -68,76 +159,133 @@ function buildConversationTimeline(detail, opts = {}) {
     }
   }
 
+  const threadsByReviewId = new Map();
+  const orphanThreads = [];
   roots.forEach((c, i) => {
-    const replies = (children.get(String(c.id)) || [])
-      .slice()
-      .sort((a, b) =>
-        String(a.createdAt || '').localeCompare(String(b.createdAt || ''))
-      )
-      .map((r) => ({
-        id: r.id,
-        author: r.author,
-        body: r.body || '',
-        at: r.createdAt,
-        pending: Boolean(r.pending),
-        nodeId: r.nodeId || r.node_id || null,
-        canDelete: Boolean(
-          detail.viewerLogin &&
-            r.author &&
-            r.author === detail.viewerLogin &&
-            !r.pending
-        ),
-      }));
-    const snippet = snippetFn
-      ? snippetFn(
-          {
-            path: c.path,
-            line: c.line,
-            originalLine: c.originalLine ?? c.original_line,
-            startLine: c.startLine ?? c.start_line,
-            side: c.side,
-            diffHunk: c.diffHunk || c.diff_hunk || '',
-          },
-          files
-        )
-      : null;
-    const displayLine =
-      c.line != null
-        ? Number(c.line)
-        : c.originalLine != null
-          ? Number(c.originalLine)
-          : c.original_line != null
-            ? Number(c.original_line)
+    const thread = buildThreadEntry(
+      c,
+      children,
+      snippetFn,
+      files,
+      viewerLogin,
+      i
+    );
+    // Pending comments without reviewId → viewer's pending review bucket
+    let groupKey =
+      thread.reviewId != null
+        ? String(thread.reviewId)
+        : thread.pending && viewerPendingId
+          ? viewerPendingId
+          : thread.pending
+            ? 'viewer-pending'
             : null;
+    if (groupKey != null) {
+      if (!threadsByReviewId.has(groupKey)) threadsByReviewId.set(groupKey, []);
+      threadsByReviewId.get(groupKey).push(thread);
+    } else {
+      orphanThreads.push(thread);
+    }
+  });
+
+  const usedReviewIds = new Set();
+
+  for (const [rid, threads] of threadsByReviewId) {
+    const review = reviewById.get(rid);
+    const reviewBody = String(review?.body || '').trim();
+    const anyPending =
+      threads.some((t) => t.pending) ||
+      String(review?.state || '').toUpperCase() === 'PENDING' ||
+      rid === 'viewer-pending' ||
+      (viewerPendingId != null && rid === viewerPendingId);
+    const state = anyPending
+      ? 'PENDING'
+      : String(review?.state || 'COMMENTED').toUpperCase();
+    // Group multi-file / body / non-comment reviews; always embed PENDING as a group
+    const shouldGroup =
+      anyPending ||
+      threads.length >= 2 ||
+      (threads.length >= 1 && Boolean(reviewBody)) ||
+      (threads.length >= 1 &&
+        state &&
+        state !== 'COMMENTED' &&
+        state !== 'PENDING');
+
+    threads.sort((a, b) => {
+      const pa = a.path || '';
+      const pb = b.path || '';
+      if (pa !== pb) return pa.localeCompare(pb);
+      return (Number(a.line) || 0) - (Number(b.line) || 0);
+    });
+
+    if (shouldGroup) {
+      usedReviewIds.add(rid);
+      const latestThreadAt = threads.reduce(
+        (max, t) => (String(t.at || '') > max ? String(t.at || '') : max),
+        ''
+      );
+      const at =
+        review?.submittedAt || latestThreadAt || threads[0]?.at || null;
+      const author =
+        review?.author ||
+        threads[0]?.author ||
+        (anyPending ? viewerLogin : '') ||
+        '';
+      items.push({
+        key: `rev-group-${rid}`,
+        kind: 'review-group',
+        id: Number(rid) || rid,
+        author,
+        avatarUrl:
+          review?.avatarUrl ||
+          review?.avatar_url ||
+          threads[0]?.avatarUrl ||
+          null,
+        state,
+        body: reviewBody,
+        at,
+        isBot:
+          Boolean(review?.isBot) ||
+          /\[bot\]$/i.test(author) ||
+          String(review?.type || '').toLowerCase() === 'bot',
+        pending: anyPending,
+        threads,
+        threadCount: threads.length,
+        resolvedCount: threads.filter((t) => t.resolved).length,
+        canDelete: false,
+      });
+    } else {
+      for (const t of threads) orphanThreads.push(t);
+    }
+  }
+
+  // Standalone review events (no grouped threads, or body-only approvals)
+  (detail.reviews || []).forEach((r, i) => {
+    if (r?.id != null && usedReviewIds.has(String(r.id))) return;
+    if (!r.body && (!r.state || r.state === 'COMMENTED' || r.state === 'PENDING')) {
+      return;
+    }
     items.push({
-      key: `thread-${c.id || i}`,
-      kind: 'review-thread',
-      id: c.id,
-      author: c.author,
-      body: c.body || '',
-      at: c.createdAt,
-      path: c.path,
-      line: displayLine,
-      startLine: c.startLine ?? c.start_line ?? null,
-      side: c.side || 'RIGHT',
-      resolved: Boolean(c.resolved),
-      outdated: Boolean(c.outdated),
-      threadNodeId: c.threadNodeId || null,
-      // PRRC_… needed for pending-review GraphQL replies (REST GET 404s on PENDING)
-      nodeId: c.nodeId || c.node_id || null,
-      pending: Boolean(c.pending),
-      replies,
-      snippet,
-      canDelete: Boolean(
-        detail.viewerLogin &&
-          c.author &&
-          c.author === detail.viewerLogin &&
-          !c.pending
-      ),
+      key: `rev-${r.id || i}`,
+      kind: 'review',
+      id: r.id,
+      author: r.author,
+      avatarUrl: r.avatarUrl || r.avatar_url || null,
+      state: r.state,
+      body: r.body || '',
+      at: r.submittedAt,
+      isBot:
+        Boolean(r.isBot) ||
+        /\[bot\]$/i.test(String(r.author || '')) ||
+        String(r.type || '').toLowerCase() === 'bot',
+      canDelete: false,
     });
   });
 
-  // Newest first so page 1 is latest activity; Older → higher pages, Newer → lower pages
+  for (const t of orphanThreads) {
+    items.push(t);
+  }
+
+  // Newest first
   items.sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
   return items;
 }
@@ -150,8 +298,11 @@ function buildConversationTimeline(detail, opts = {}) {
 function pageTimelineItems(items, opts = {}) {
   const list = Array.isArray(items) ? items : [];
   const pageSize =
-    Number.isFinite(opts.pageSize) && opts.pageSize > 0 ? Math.floor(opts.pageSize) : 20;
-  const page = Number.isFinite(opts.page) && opts.page > 0 ? Math.floor(opts.page) : 1;
+    Number.isFinite(opts.pageSize) && opts.pageSize > 0
+      ? Math.floor(opts.pageSize)
+      : 20;
+  const page =
+    Number.isFinite(opts.page) && opts.page > 0 ? Math.floor(opts.page) : 1;
   const total = list.length;
   const totalPages = Math.max(1, Math.ceil(total / pageSize) || 1);
   const safePage = Math.min(page, totalPages);
@@ -183,39 +334,62 @@ function partitionTimelineWithThreadGap(items, meta = null) {
   const oldestIds = new Set(
     (meta?.oldestThreadIds || []).map(String).filter(Boolean)
   );
-  const showGap = Boolean(meta?.hasMore) && hiddenCount > 0;
+  const wantsGap = Boolean(meta?.hasMore) && hiddenCount > 0;
 
-  if (!showGap || oldestIds.size === 0) {
+  if (!wantsGap || oldestIds.size === 0) {
     return {
       top: list,
       bottom: [],
       hiddenCount,
-      showGap,
+      showGap: wantsGap,
     };
+  }
+
+  function inOldestWindow(item) {
+    if (!item) return false;
+    if (item.kind === 'review-group') {
+      return (item.threads || []).some(
+        (t) =>
+          t?.threadNodeId != null && oldestIds.has(String(t.threadNodeId))
+      );
+    }
+    const tid =
+      item.threadNodeId != null
+        ? String(item.threadNodeId)
+        : item.thread_node_id != null
+          ? String(item.thread_node_id)
+          : null;
+    return (
+      (item.kind === 'review-thread' || item.kind === 'review-comment') &&
+      tid &&
+      oldestIds.has(tid)
+    );
   }
 
   const top = [];
   const bottom = [];
   for (const item of list) {
-    const tid = item?.threadNodeId != null ? String(item.threadNodeId) : null;
-    if (
-      (item?.kind === 'review-thread' || item?.kind === 'review-comment') &&
-      tid &&
-      oldestIds.has(tid)
-    ) {
-      bottom.push(item);
-    } else {
-      top.push(item);
-    }
+    if (inOldestWindow(item)) bottom.push(item);
+    else top.push(item);
+  }
+
+  if (bottom.length === 0) {
+    return {
+      top: list,
+      bottom: [],
+      hiddenCount,
+      showGap: wantsGap,
+    };
   }
 
   return {
     top,
     bottom,
     hiddenCount,
-    showGap: showGap && bottom.length > 0,
+    showGap: true,
   };
 }
+
 
 const api = {
   buildConversationTimeline,

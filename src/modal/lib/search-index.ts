@@ -304,24 +304,128 @@ export function nextHitIndex(current, total, delta) {
  * @param {string} query
  * @returns {{ hits: SearchHit[], hitIndex: number, activeHit: SearchHit|null, shouldJump: boolean }}
  */
+/** True when hit maps to a virtualized Diff row. */
+export function searchHitHasRowIndex(hit) {
+  return hit?.rowIndex != null && Number.isFinite(Number(hit.rowIndex));
+}
+
 /**
- * Prefer a hit we can navigate to: conversation anchorId, else diff rowIndex.
+ * Prefer a hit we can navigate to.
+ * In Diff/full mode, prefer rowIndex first so we do not open Conversation on
+ * the first body/issue match when code hits also exist.
+ *
+ * @param {SearchHit[]} hits
+ * @param {{ preferDiff?: boolean, mode?: string }} [opts]
  */
-export function firstNavigableHitIndex(hits) {
+export function firstNavigableHitIndex(hits, opts: any = {}) {
   const list = Array.isArray(hits) ? hits : [];
+  const mode = String(opts.mode || '');
+  const preferDiff =
+    opts.preferDiff === true || mode === 'diff' || mode === 'full';
+
+  if (preferDiff) {
+    for (let i = 0; i < list.length; i++) {
+      if (searchHitHasRowIndex(list[i])) return i;
+    }
+  }
   for (let i = 0; i < list.length; i++) {
     const h = list[i];
     if (h?.anchorId) return i;
-    if (h?.rowIndex != null && Number.isFinite(Number(h.rowIndex))) return i;
+    if (searchHitHasRowIndex(h)) return i;
   }
   return list.length ? 0 : -1;
 }
 
-/** True if hit can be jumped to in the active layout. */
+/** True if hit can be jumped to in some layout. */
 export function isNavigableSearchHit(hit) {
   if (!hit) return false;
   if (hit.anchorId) return true;
-  return hit.rowIndex != null && Number.isFinite(Number(hit.rowIndex));
+  return searchHitHasRowIndex(hit);
+}
+
+/**
+ * Whether the hit can be shown without an unexpected layout flip.
+ * Diff: code / inline review rows only (rowIndex). Conversation-only anchors
+ * (body, issue comments, review summaries) stay out of Diff next/prev so
+ * "previous" never yanks the shell to Conversation.
+ * Conversation: anchors, or rows (may open Diff).
+ *
+ * @param {SearchHit|null|undefined} hit
+ * @param {string} layoutMode 'diff' | 'centered' | …
+ */
+export function isSearchHitVisibleInLayout(hit, layoutMode) {
+  if (!hit) return false;
+  const inDiff =
+    layoutMode === 'diff' ||
+    layoutMode === 'LAYOUT_DIFF' ||
+    String(layoutMode).toLowerCase() === 'diff';
+
+  if (inDiff) {
+    // Inline review threads and code lines live in the Diff virtual list.
+    if (searchHitHasRowIndex(hit)) return true;
+    // review-comment without mapped row can still be opened via expand/jump,
+    // but pure body / issue-comment / review events must not force Conversation.
+    const aid = String(hit.anchorId || '');
+    const kind = String(hit.kind || '');
+    if (
+      aid.startsWith('review-comment:') ||
+      kind === 'review-comment' ||
+      kind === 'review-reply'
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  // Conversation (or unknown): any navigable hit
+  return isNavigableSearchHit(hit);
+}
+
+/**
+ * Advance hitIndex by delta, skipping hits that are not showable in layoutMode.
+ * Wraps at most once through the list.
+ *
+ * @param {SearchHit[]} hits
+ * @param {number} hitIndex
+ * @param {number} delta
+ * @param {string} [layoutMode]
+ */
+export function resolveNavSearchStateForLayout(
+  hits,
+  hitIndex,
+  delta,
+  layoutMode = 'centered'
+) {
+  const list = Array.isArray(hits) ? hits : [];
+  if (!list.length) {
+    return { hits: list, hitIndex: -1, activeHit: null, shouldJump: false };
+  }
+  let st = resolveNavSearchState(list, hitIndex, delta);
+  let guard = 0;
+  const start = st.hitIndex;
+  while (
+    st.activeHit &&
+    (!isNavigableSearchHit(st.activeHit) ||
+      !isSearchHitVisibleInLayout(st.activeHit, layoutMode)) &&
+    guard < list.length
+  ) {
+    st = resolveNavSearchState(list, st.hitIndex, delta);
+    guard += 1;
+    if (st.hitIndex === start && guard > 0) break;
+  }
+  // If nothing in this layout is navigable, do not jump / thrash layout
+  if (
+    st.activeHit &&
+    !isSearchHitVisibleInLayout(st.activeHit, layoutMode)
+  ) {
+    return {
+      hits: list,
+      hitIndex: Number.isFinite(hitIndex) ? hitIndex : -1,
+      activeHit: list[hitIndex] || null,
+      shouldJump: false,
+    };
+  }
+  return st;
 }
 
 /**
@@ -337,7 +441,7 @@ export function resolveQuerySearchState(docs, query, opts: any = {}) {
   if (!hits.length) {
     return { hits, hitIndex: -1, activeHit: null, shouldJump: false };
   }
-  const hitIndex = firstNavigableHitIndex(hits);
+  const hitIndex = firstNavigableHitIndex(hits, { mode: opts.mode });
   return {
     hits,
     hitIndex,
@@ -363,7 +467,7 @@ export async function resolveQuerySearchStateAsync(docs, query, opts: any = {}) 
   if (!hits.length) {
     return { hits, hitIndex: -1, activeHit: null, shouldJump: false, cancelled: false };
   }
-  const hitIndex = firstNavigableHitIndex(hits);
+  const hitIndex = firstNavigableHitIndex(hits, { mode: opts.mode });
   return {
     hits,
     hitIndex,

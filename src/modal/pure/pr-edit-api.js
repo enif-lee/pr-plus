@@ -102,21 +102,43 @@ function buildUpdateBranch(owner, repo, pullNumber, { expectedHeadSha } = {}) {
   };
 }
 
-/** Issue/PR subscription (notifications). */
-function buildSetSubscription(owner, repo, issueNumber, { subscribed = true, ignored = false } = {}) {
+/**
+ * Issue/PR subscription via GraphQL updateSubscription
+ * (REST /issues/{n}/subscription is 404 / removed for many tokens).
+ */
+function buildSetSubscription(
+  owner,
+  repo,
+  issueNumber,
+  { subscribed = true, ignored = false, nodeId = null } = {}
+) {
+  const state = ignored ? 'IGNORED' : subscribed ? 'SUBSCRIBED' : 'UNSUBSCRIBED';
   return {
-    method: 'PUT',
-    url: `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/subscription`,
-    body: { subscribed: Boolean(subscribed), ignored: Boolean(ignored) },
+    method: 'POST',
+    url: 'https://api.github.com/graphql',
+    body: {
+      query: `mutation($id:ID!,$state:SubscriptionState!){
+  updateSubscription(input:{subscribableId:$id, state:$state}) {
+    subscribable {
+      ... on PullRequest { id viewerSubscription }
+      ... on Issue { id viewerSubscription }
+    }
+  }
+}`,
+      variables: {
+        id: String(nodeId || ''),
+        state,
+      },
+    },
   };
 }
 
-function buildDeleteSubscription(owner, repo, issueNumber) {
-  return {
-    method: 'DELETE',
-    url: `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/subscription`,
-    body: null,
-  };
+function buildDeleteSubscription(owner, repo, issueNumber, nodeId = null) {
+  return buildSetSubscription(owner, repo, issueNumber, {
+    subscribed: false,
+    ignored: false,
+    nodeId,
+  });
 }
 
 /** Set or clear milestone on the PR issue. */
@@ -190,19 +212,33 @@ function buildRerequestReviewerLogins(detail) {
   const out = [];
   const seen = new Set();
 
-  function consider(login) {
+  function isBotLogin(login, review) {
+    if (review && (review.isBot === true || String(review.type || '').toLowerCase() === 'bot')) {
+      return true;
+    }
+    const key = String(login || '').toLowerCase();
+    if (d.actorIsBot && typeof d.actorIsBot === 'object') {
+      if (d.actorIsBot instanceof Map) {
+        if (d.actorIsBot.get(key)) return true;
+      } else if (d.actorIsBot[key]) return true;
+    }
+    return /\[bot\]$/i.test(String(login || ''));
+  }
+
+  function consider(login, review) {
     const raw = String(login || '').trim();
     if (!raw) return;
     const key = raw.toLowerCase();
     if (author && key === author) return;
     if (pending.has(key)) return; // already requested → would 422
+    if (isBotLogin(raw, review)) return; // bots cannot be re-requested
     if (seen.has(key)) return;
     seen.add(key);
     out.push(raw);
   }
 
   for (const r of d.reviews || []) {
-    consider(r?.author);
+    consider(r?.author, r);
   }
   for (const login of d.extraLogins || []) {
     consider(login);
@@ -329,6 +365,12 @@ function mapRestReviewComment(raw, fallback = {}) {
     inReplyToId: r.in_reply_to_id ?? fallback.inReplyToId ?? null,
     nodeId: r.node_id || null,
     threadNodeId: r.threadNodeId || fallback.threadNodeId || null,
+    reviewId:
+      r.pull_request_review_id != null
+        ? Number(r.pull_request_review_id)
+        : fallback.reviewId != null
+          ? Number(fallback.reviewId)
+          : null,
     resolved: false,
     pending: Boolean(r.pending ?? fallback.pending),
     pendingReviewId: r.pendingReviewId ?? fallback.pendingReviewId ?? null,

@@ -128,32 +128,84 @@ export function buildBranchOptions(prs, ctx: any = {}) {
 }
 
 /**
+ * Whether a login / user object is a GitHub App / bot (not re-requestable / removable).
+ * Prefers API `type: "Bot"` / `isBot` when present; falls back to `[bot]` login suffix.
+ *
+ * @param {string|{ login?: string, type?: string, isBot?: boolean, bot?: boolean }|null|undefined} userOrLogin
+ * @param {{ actorIsBot?: Record<string, boolean>|Map<string, boolean>|null }|null} [detail]
+ */
+export function isBotAccount(userOrLogin, detail = null) {
+  if (userOrLogin == null) return false;
+  if (typeof userOrLogin === 'object') {
+    if (userOrLogin.isBot === true || userOrLogin.bot === true) return true;
+    const type = String(userOrLogin.type || userOrLogin.userType || '').toLowerCase();
+    if (type === 'bot') return true;
+    const login = userOrLogin.login || userOrLogin.author || '';
+    if (login && isBotAccount(login, detail)) return true;
+    return false;
+  }
+  const login = String(userOrLogin || '').trim();
+  if (!login) return false;
+  const key = login.toLowerCase();
+  const map = detail?.actorIsBot;
+  if (map instanceof Map && map.has(key)) return Boolean(map.get(key));
+  if (map && typeof map === 'object' && Object.prototype.hasOwnProperty.call(map, key)) {
+    return Boolean((map as any)[key]);
+  }
+  // GitHub Apps appear as app-name[bot]
+  if (/\[bot\]$/i.test(login)) return true;
+  return false;
+}
+
+/**
  * Merge reviewer logins + latest review state into display rows.
- * @returns {Array<{ login: string, status: string }>}
+ * PR author is never listed as a reviewer (even if present in reviews /
+ * requested_reviewers). Bots are flagged via isBot.
+ * @returns {Array<{ login: string, status: string, isBot: boolean }>}
  */
 export function buildUnifiedReviewerRows(detail) {
   const d = detail || {};
+  const authorKey = String(d.author || '')
+    .trim()
+    .toLowerCase();
   const statusBy = new Map();
+  const botBy = new Map();
   for (const r of d.reviews || []) {
     if (!r?.author) continue;
-    statusBy.set(String(r.author).toLowerCase(), String(r.state || 'COMMENTED'));
+    const key = String(r.author).toLowerCase();
+    if (authorKey && key === authorKey) continue; // author cannot be a reviewer
+    statusBy.set(key, String(r.state || 'COMMENTED'));
+    if (isBotAccount(r, d) || isBotAccount(r.author, d)) botBy.set(key, true);
   }
   const rows = new Map();
   for (const login of d.requestedReviewers || []) {
     const raw = String(login || '').trim();
     if (!raw) continue;
     const key = raw.toLowerCase();
-    rows.set(key, { login: raw, status: statusBy.get(key) || 'PENDING' });
+    if (authorKey && key === authorKey) continue;
+    const bot = botBy.get(key) || isBotAccount(raw, d);
+    rows.set(key, {
+      login: raw,
+      status: statusBy.get(key) || 'PENDING',
+      isBot: bot,
+    });
   }
   for (const [key, state] of statusBy) {
+    if (authorKey && key === authorKey) continue;
     if (rows.has(key)) {
-      rows.get(key).status = state;
+      const row = rows.get(key);
+      row.status = state;
+      if (botBy.get(key)) row.isBot = true;
     } else {
       // use original casing from reviews
       const rev = (d.reviews || []).find(
         (r) => String(r.author || '').toLowerCase() === key
       );
-      rows.set(key, { login: rev?.author || key, status: state });
+      rows.set(key, {
+        login: rev?.author || key,
+        status: state,
+        isBot: botBy.get(key) || isBotAccount(rev, d) || isBotAccount(rev?.author || key, d),
+      });
     }
   }
   return [...rows.values()].sort((a, b) => a.login.localeCompare(b.login));

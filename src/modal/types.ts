@@ -114,7 +114,11 @@ export interface PrModalHostProps {
   openPulls?: Array<Record<string, unknown>>;
   onClose?: () => void;
   onRefresh?: () => void | Promise<void>;
-  onOpenStackPr?: (n: number) => void;
+  /** Stack PR hop; pass page to keep Diff/Conversation. */
+  onOpenStackPr?: (
+    n: number,
+    opts?: { page?: 'diff' | 'conversation' | null }
+  ) => void;
   /** GitHub compare files for a commit / range (base...head). */
   onFetchCompareFiles?: (
     base: string,

@@ -1,6 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { Button } from '@common/Button';
-import { Badge } from '@common/Badge';
 import { SearchableSelect } from '@common/SearchableSelect';
 import {
   buildCommitFilterOptions,
@@ -11,6 +10,7 @@ import {
   truncateCommitLabel,
 } from '@lib/diff-commit-filter';
 import { pendingReviewCount } from '@lib/pending-review';
+import { IconChevronDown, IconFileNavToggle } from '@common/icons';
 
 /**
  * Unified Diff top chrome: files, multi-checkbox commits, stats,
@@ -37,6 +37,13 @@ export function DiffToolbar(props: any) {
     commentIndex = -1,
     onPrevComment,
     onNextComment,
+    /** null | 'unresolved' | 'resolved' | 'pending' — deselectable segment control */
+    reviewFilter = null,
+    onReviewFilter = null,
+    showReviewFilter = false,
+    /** Thread totals for filter button labels */
+    unresolvedCount = 0,
+    resolvedCount = 0,
     pendingBatch,
     pendingServerCount = 0,
     totalPendingCount = null,
@@ -54,6 +61,8 @@ export function DiffToolbar(props: any) {
     totalPendingCount != null
       ? Number(totalPendingCount)
       : Number(pendingServerCount || 0) || localPending;
+  const unresN = Number(unresolvedCount) || 0;
+  const resN = Number(resolvedCount) || 0;
   const fileCount = detail?.changedFiles ?? annotatedFileCount;
   const additions = detail?.additions ?? 0;
   const deletions = detail?.deletions ?? 0;
@@ -118,9 +127,32 @@ export function DiffToolbar(props: any) {
           aria-label={fileNavCollapsed ? 'Show files navigator' : 'Hide files navigator'}
           title={fileNavCollapsed ? 'Show files' : 'Hide files'}
         >
-          <span aria-hidden="true">{fileNavCollapsed ? '☰' : '◀'}</span>
+          <IconFileNavToggle collapsed={fileNavCollapsed} size={14} />
           <span className="prp-diff-toolbar__nav-label">Files</span>
         </button>
+
+        <div className="prp-diff-mode" role="radiogroup" aria-label="Diff view mode">
+          <label className="prp-diff-mode__opt">
+            <input
+              type="radio"
+              name="prp-diff-mode"
+              value="unified"
+              checked={diffMode === 'unified'}
+              onChange={() => onDiffMode?.('unified')}
+            />
+            Unified
+          </label>
+          <label className="prp-diff-mode__opt">
+            <input
+              type="radio"
+              name="prp-diff-mode"
+              value="split"
+              checked={diffMode === 'split'}
+              onChange={() => onDiffMode?.('split')}
+            />
+            Split
+          </label>
+        </div>
 
         <div className="prp-diff-toolbar__commits">
           <button
@@ -135,7 +167,7 @@ export function DiffToolbar(props: any) {
           >
             {commitLoading ? 'Loading…' : triggerLabel}
             <span className="prp-diff-toolbar__chevron" aria-hidden="true">
-              ▾
+              <IconChevronDown size={12} />
             </span>
           </button>
           <SearchableSelect
@@ -169,67 +201,123 @@ export function DiffToolbar(props: any) {
           </span>
         </div>
 
-        <div className="prp-diff-mode" role="radiogroup" aria-label="Diff view mode">
-          <label className="prp-diff-mode__opt">
-            <input
-              type="radio"
-              name="prp-diff-mode"
-              value="unified"
-              checked={diffMode === 'unified'}
-              onChange={() => onDiffMode?.('unified')}
-            />
-            Unified
-          </label>
-          <label className="prp-diff-mode__opt">
-            <input
-              type="radio"
-              name="prp-diff-mode"
-              value="split"
-              checked={diffMode === 'split'}
-              onChange={() => onDiffMode?.('split')}
-            />
-            Split
-          </label>
-        </div>
-
-        {comments?.length ? (
-          <div
-            className="prp-btn-group prp-comment-nav prp-diff-toolbar__comments"
-            role="group"
-            aria-label="Review threads"
-          >
-            <span className="prp-btn-group__meta prp-muted" title="Review threads (replies excluded)">
-              {commentIndex >= 0 ? commentIndex + 1 : 0}/{comments.length}
-            </span>
-            <button
-              type="button"
-              className="prp-btn-group__btn"
-              onClick={onPrevComment}
-              title="Previous thread"
-              aria-label="Previous review thread"
-            >
-              ‹
-            </button>
-            <button
-              type="button"
-              className="prp-btn-group__btn"
-              onClick={onNextComment}
-              title="Next thread"
-              aria-label="Next review thread"
-            >
-              ›
-            </button>
+        {showReviewFilter || comments?.length ? (
+          <div className="prp-diff-toolbar__thread-tools">
+            {showReviewFilter ? (
+              <div
+                className="prp-review-filter"
+                role="group"
+                aria-label="Filter files by review threads"
+              >
+                <button
+                  type="button"
+                  className={
+                    reviewFilter === 'unresolved'
+                      ? 'prp-review-filter__btn prp-review-filter__btn--on'
+                      : 'prp-review-filter__btn'
+                  }
+                  aria-pressed={reviewFilter === 'unresolved'}
+                  title={
+                    reviewFilter === 'unresolved'
+                      ? 'Clear filter — show all review threads'
+                      : `Show only unresolved review threads (${unresN})`
+                  }
+                  onClick={() =>
+                    onReviewFilter?.(
+                      reviewFilter === 'unresolved' ? null : 'unresolved'
+                    )
+                  }
+                >
+                  Unresolved <span className="prp-review-filter__count">{unresN}</span>
+                </button>
+                <button
+                  type="button"
+                  className={
+                    reviewFilter === 'resolved'
+                      ? 'prp-review-filter__btn prp-review-filter__btn--on'
+                      : 'prp-review-filter__btn'
+                  }
+                  aria-pressed={reviewFilter === 'resolved'}
+                  title={
+                    reviewFilter === 'resolved'
+                      ? 'Clear filter — show all review threads'
+                      : `Show only resolved review threads (${resN})`
+                  }
+                  onClick={() =>
+                    onReviewFilter?.(
+                      reviewFilter === 'resolved' ? null : 'resolved'
+                    )
+                  }
+                >
+                  Resolved <span className="prp-review-filter__count">{resN}</span>
+                </button>
+                {pending > 0 || reviewFilter === 'pending' ? (
+                  <button
+                    type="button"
+                    className={
+                      reviewFilter === 'pending'
+                        ? 'prp-review-filter__btn prp-review-filter__btn--on'
+                        : 'prp-review-filter__btn'
+                    }
+                    aria-pressed={reviewFilter === 'pending'}
+                    title={
+                      reviewFilter === 'pending'
+                        ? 'Clear filter — show all review threads'
+                        : `Show only pending (unsubmitted) comments (${pending})`
+                    }
+                    onClick={() =>
+                      onReviewFilter?.(
+                        reviewFilter === 'pending' ? null : 'pending'
+                      )
+                    }
+                  >
+                    Pending{' '}
+                    <span className="prp-review-filter__count">{pending}</span>
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+            {comments?.length ? (
+              <div
+                className="prp-btn-group prp-comment-nav prp-diff-toolbar__comments"
+                role="group"
+                aria-label="Review threads"
+              >
+                <span
+                  className="prp-btn-group__meta prp-muted"
+                  title={
+                    reviewFilter
+                      ? `Filtered review threads (${reviewFilter}; replies excluded)`
+                      : 'Review threads (replies excluded)'
+                  }
+                >
+                  {commentIndex >= 0 ? commentIndex + 1 : 0}/{comments.length}
+                </span>
+                <button
+                  type="button"
+                  className="prp-btn-group__btn"
+                  onClick={onPrevComment}
+                  title="Previous thread"
+                  aria-label="Previous review thread"
+                >
+                  ‹
+                </button>
+                <button
+                  type="button"
+                  className="prp-btn-group__btn"
+                  onClick={onNextComment}
+                  title="Next thread"
+                  aria-label="Next review thread"
+                >
+                  ›
+                </button>
+              </div>
+            ) : null}
           </div>
         ) : null}
 
         {pending > 0 ? (
           <div className="prp-diff-toolbar__pending" role="status">
-            <Badge tone="warn" title="Not submitted yet">
-              {pending} pending
-            </Badge>
-            <span className="prp-diff-toolbar__pending-label prp-muted">
-              Pending review — not submitted
-            </span>
             <Button
               size="sm"
               variant="primary"
@@ -244,6 +332,7 @@ export function DiffToolbar(props: any) {
               variant="ok"
               disabled={actionBusy}
               onClick={() => onLeaveReviewAction?.('approve')}
+              title="Approve pull request"
             >
               Approve
             </Button>
@@ -252,10 +341,17 @@ export function DiffToolbar(props: any) {
               variant="warn"
               disabled={actionBusy}
               onClick={() => onLeaveReviewAction?.('request_changes')}
+              title="Request changes"
             >
               Request changes
             </Button>
-            <Button size="sm" variant="danger" disabled={actionBusy} onClick={onDiscardPending}>
+            <Button
+              size="sm"
+              variant="danger"
+              disabled={actionBusy}
+              onClick={onDiscardPending}
+              title="Discard pending review"
+            >
               Discard
             </Button>
           </div>

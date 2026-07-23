@@ -19,19 +19,28 @@ importScripts(
   'modal/pure/review-threads.js',
   'modal/pure/pending-review.js',
   'modal/pure/pr-edit-api.js',
+  'modal/pure/checks.js',
   'storage.js',
   'fetch-pulls.js'
 );
 
 const MSG = {
+  /** Lightweight wake / health check (content scripts retry against this). */
+  PING: 'PR_TREE_PING',
   TOKEN_STATUS: 'PR_TREE_TOKEN_STATUS',
   TOKEN_SET: 'PR_TREE_TOKEN_SET',
   TOKEN_CLEAR: 'PR_TREE_TOKEN_CLEAR',
   TOKEN_CHANGED: 'PR_TREE_TOKEN_CHANGED',
+  PREFS_GET: 'PR_TREE_PREFS_GET',
+  PREFS_SET: 'PR_TREE_PREFS_SET',
+  PREFS_CHANGED: 'PR_TREE_PREFS_CHANGED',
+  /** Clear PR detail memory + IndexedDB cache on open github.com tabs. */
+  CLEAR_DETAIL_CACHE: 'PR_TREE_CLEAR_DETAIL_CACHE',
   FETCH_OPEN_PULLS: 'PR_TREE_FETCH_OPEN_PULLS',
   FETCH_DANGLING: 'PR_TREE_FETCH_DANGLING',
   FETCH_PR_DETAIL: 'PR_TREE_FETCH_PR_DETAIL',
   FETCH_REVIEW_THREADS_PAGE: 'PR_TREE_FETCH_REVIEW_THREADS_PAGE',
+  FETCH_REVIEW_THREADS_BY_IDS: 'PR_TREE_FETCH_REVIEW_THREADS_BY_IDS',
   FETCH_COMMENTS_PAGE: 'PR_TREE_FETCH_COMMENTS_PAGE',
   FETCH_COMPARE_FILES: 'PR_TREE_FETCH_COMPARE_FILES',
   POST_ISSUE_COMMENT: 'PR_TREE_POST_ISSUE_COMMENT',
@@ -53,6 +62,7 @@ const MSG = {
   REMOVE_ASSIGNEES: 'PR_TREE_REMOVE_ASSIGNEES',
   SET_LABELS: 'PR_TREE_SET_LABELS',
   APPLY_SUGGESTION: 'PR_TREE_APPLY_SUGGESTION',
+  GET_REPO_FILE_TEXT: 'PR_TREE_GET_REPO_FILE_TEXT',
   MERGE_PULL: 'PR_TREE_MERGE_PULL',
   UPDATE_BRANCH: 'PR_TREE_UPDATE_BRANCH',
   SET_SUBSCRIPTION: 'PR_TREE_SET_SUBSCRIPTION',
@@ -65,11 +75,11 @@ const MSG = {
 /** Max time for one SW message (GitHub multi-request detail can be slow). */
 const MESSAGE_TIMEOUT_MS = 120_000;
 
-function broadcastTokenChanged() {
-  // Notify extension pages / open content scripts without sending the secret.
+function broadcastToGithubTabs(message) {
+  // Notify extension pages / open content scripts without sending secrets.
   // sendMessage may not return a Promise on all runtimes — never assume .catch.
   try {
-    chrome.runtime.sendMessage({ type: MSG.TOKEN_CHANGED }, () => {
+    chrome.runtime.sendMessage(message, () => {
       void chrome.runtime.lastError; // no receivers is fine
     });
   } catch {
@@ -80,7 +90,7 @@ function broadcastTokenChanged() {
       for (const tab of tabs || []) {
         if (tab.id == null) continue;
         try {
-          chrome.tabs.sendMessage(tab.id, { type: MSG.TOKEN_CHANGED }, () => {
+          chrome.tabs.sendMessage(tab.id, message, () => {
             void chrome.runtime.lastError;
           });
         } catch {
@@ -93,9 +103,74 @@ function broadcastTokenChanged() {
   }
 }
 
+function broadcastTokenChanged() {
+  broadcastToGithubTabs({ type: MSG.TOKEN_CHANGED });
+}
+
+function broadcastPrefsChanged(prefs) {
+  broadcastToGithubTabs({ type: MSG.PREFS_CHANGED, prefs });
+}
+
+/**
+ * Ask every open github.com tab to wipe PR detail memory + IndexedDB.
+ * Content scripts own the page-origin IDB (`pr-plus-detail-cache`).
+ * @returns {Promise<{ tabs: number, cleared: number, failed: number }>}
+ */
+function clearDetailCacheOnGithubTabs() {
+  return new Promise((resolve) => {
+    try {
+      chrome.tabs.query({ url: ['https://github.com/*'] }, (tabs) => {
+        void chrome.runtime.lastError;
+        const list = Array.isArray(tabs) ? tabs : [];
+        if (!list.length) {
+          resolve({ tabs: 0, cleared: 0, failed: 0 });
+          return;
+        }
+        let pending = 0;
+        let cleared = 0;
+        let failed = 0;
+        const done = () => {
+          if (pending > 0) return;
+          resolve({ tabs: list.length, cleared, failed });
+        };
+        for (const tab of list) {
+          if (tab?.id == null) continue;
+          pending += 1;
+          try {
+            chrome.tabs.sendMessage(
+              tab.id,
+              { type: MSG.CLEAR_DETAIL_CACHE },
+              (res) => {
+                const err = chrome.runtime.lastError;
+                if (err || !res?.ok) failed += 1;
+                else cleared += 1;
+                pending -= 1;
+                done();
+              }
+            );
+          } catch {
+            failed += 1;
+            pending -= 1;
+          }
+        }
+        if (pending === 0) done();
+      });
+    } catch {
+      resolve({ tabs: 0, cleared: 0, failed: 0 });
+    }
+  });
+}
+
 chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName !== 'local' || !changes[PRTreeStorage.TOKEN_KEY]) return;
-  broadcastTokenChanged();
+  if (areaName !== 'local') return;
+  if (changes[PRTreeStorage.TOKEN_KEY]) {
+    broadcastTokenChanged();
+  }
+  if (changes[PRTreeStorage.PREFS_KEY]) {
+    broadcastPrefsChanged(
+      PRTreeStorage.normalizePrefs(changes[PRTreeStorage.PREFS_KEY].newValue)
+    );
+  }
 });
 
 function fetchImpl() {
@@ -150,6 +225,14 @@ function withTimeout(promise, ms, label) {
 
 async function handleMessage(message) {
   switch (message.type) {
+    case MSG.PING: {
+      return {
+        ok: true,
+        pong: true,
+        hasFetch: typeof PRTreeFetch?.fetchPrDetail === 'function',
+        hasStorage: typeof PRTreeStorage?.getGithubTokenStatus === 'function',
+      };
+    }
     case MSG.TOKEN_STATUS: {
       const status = await PRTreeStorage.getGithubTokenStatus();
       return { ok: true, ...status };
@@ -162,6 +245,18 @@ async function handleMessage(message) {
     case MSG.TOKEN_CLEAR: {
       await PRTreeStorage.setGithubToken('');
       return { ok: true, configured: false, mask: '' };
+    }
+    case MSG.PREFS_GET: {
+      const prefs = await PRTreeStorage.getExtensionPrefs();
+      return { ok: true, prefs };
+    }
+    case MSG.PREFS_SET: {
+      const prefs = await PRTreeStorage.setExtensionPrefs(message.prefs || message.patch || {});
+      return { ok: true, prefs };
+    }
+    case MSG.CLEAR_DETAIL_CACHE: {
+      const result = await clearDetailCacheOnGithubTabs();
+      return { ok: true, ...result };
     }
     case MSG.FETCH_OPEN_PULLS: {
       const token = await PRTreeStorage.getGithubToken();
@@ -228,6 +323,21 @@ async function handleMessage(message) {
           cursor: message.cursor || null,
           pageSize: message.pageSize != null ? Number(message.pageSize) : undefined,
         },
+        fetchImpl(),
+        token
+      );
+      return { ok: true, page };
+    }
+    case MSG.FETCH_REVIEW_THREADS_BY_IDS: {
+      const token = await PRTreeStorage.getGithubToken();
+      if (!token) {
+        return {
+          ok: true,
+          page: { threads: [], comments: [], pageCount: 0, direction: 'refresh' },
+        };
+      }
+      const page = await PRTreeFetch.fetchReviewThreadsByIds(
+        message.threadNodeIds || message.ids || [],
         fetchImpl(),
         token
       );
@@ -560,6 +670,21 @@ async function handleMessage(message) {
       );
       return { ok: true, result };
     }
+    case MSG.GET_REPO_FILE_TEXT: {
+      const token = await PRTreeStorage.getGithubToken();
+      if (!token) throw new Error('GitHub PAT required to read files');
+      const result = await PRTreeFetch.getRepoFileText(
+        message.owner,
+        message.repo,
+        {
+          path: message.path,
+          ref: message.ref || message.headRef || message.headSha,
+        },
+        fetchImpl(),
+        token
+      );
+      return { ok: true, result };
+    }
     case MSG.MERGE_PULL: {
       const token = await PRTreeStorage.getGithubToken();
       if (!token) throw new Error('GitHub PAT required to merge');
@@ -600,6 +725,7 @@ async function handleMessage(message) {
         {
           subscribed: message.subscribed !== false,
           ignored: Boolean(message.ignored),
+          nodeId: message.nodeId || null,
         },
         fetchImpl(),
         token
@@ -614,7 +740,8 @@ async function handleMessage(message) {
         message.repo,
         message.number,
         fetchImpl(),
-        token
+        token,
+        message.nodeId || null
       );
       return { ok: true, result };
     }

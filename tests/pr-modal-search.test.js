@@ -374,29 +374,147 @@ assert.ok(
   );
   assert.ok(inline.includes('searchQuery'), 'InlineThread passes search to MarkdownView');
 
-  // Dual-window oldest slice must wire the same search anchors as newest
-  const bottomMapIdx = conv.indexOf('(paged.bottomItems || []).map');
-  assert.ok(bottomMapIdx > 0, 'Conversation maps dual-window bottomItems');
-  const bottomSlice = conv.slice(bottomMapIdx, bottomMapIdx + 9000);
-  assert.ok(
-    bottomSlice.includes('data-search-anchor={replyAnchor}') ||
-      bottomSlice.includes('data-search-anchor={rootAnchor}'),
-    'bottomItems review threads set data-search-anchor'
+  // Diff search nav must not force Conversation on prev (anchor-before-row bug)
+{
+  assert.equal(
+    typeof search.isSearchHitVisibleInLayout,
+    'function',
+    'layout visibility helper exported'
   );
-  assert.ok(
-    bottomSlice.includes('replyAnchor'),
-    'bottomItems define replyAnchor for thread bodies'
-  );
-  assert.ok(
-    bottomSlice.includes('searchCardClass') || bottomSlice.includes('prp-card--search-match'),
-    'bottomItems apply search match chrome'
-  );
-  // Third arg to renderTimelineBody must be present (anchor) for review rows
-  assert.ok(
-    /renderTimelineBody\([\s\S]*?editKind \|\| 'review',\s*replyAnchor\s*\)/.test(
-      bottomSlice
+  assert.equal(typeof search.resolveNavSearchStateForLayout, 'function');
+  assert.equal(typeof search.searchHitHasRowIndex, 'function');
+
+  // Body anchor is NOT visible in Diff
+  assert.equal(
+    search.isSearchHitVisibleInLayout(
+      { anchorId: 'body', kind: 'body', start: 0 },
+      'diff'
     ),
-    'bottomItems pass replyAnchor as third arg to renderTimelineBody'
+    false,
+    'body hit hidden from Diff nav'
+  );
+  // Code row IS visible in Diff
+  assert.equal(
+    search.isSearchHitVisibleInLayout({ rowIndex: 12, start: 0 }, 'diff'),
+    true
+  );
+  // Review comment with row stays in Diff
+  assert.equal(
+    search.isSearchHitVisibleInLayout(
+      {
+        anchorId: 'review-comment:9',
+        kind: 'review-comment',
+        rowIndex: 40,
+        start: 0,
+      },
+      'diff'
+    ),
+    true
+  );
+  // Same without row still allowed (expand path) but jump prefers row first
+  assert.equal(
+    search.isSearchHitVisibleInLayout(
+      { anchorId: 'review-comment:9', kind: 'review-comment', start: 0 },
+      'diff'
+    ),
+    true
+  );
+
+  // Mixed hit list: Diff prev from a code hit must skip body, land on earlier row
+  const mixed = [
+    { anchorId: 'body', kind: 'body', start: 0 },
+    { rowIndex: 5, kind: 'diff', start: 0 },
+    { anchorId: 'body', kind: 'body', start: 4 }, // second body occ
+    { rowIndex: 20, kind: 'diff', start: 0 },
+    { anchorId: 'issue-comment:1', kind: 'issue-comment', start: 0 },
+  ];
+  // From index 3 (row 20), go prev → should land on row 5 (index 1), not body
+  const prev = search.resolveNavSearchStateForLayout(mixed, 3, -1, 'diff');
+  assert.equal(prev.shouldJump, true);
+  assert.equal(prev.hitIndex, 1, 'prev skips conversation-only body');
+  assert.equal(prev.activeHit.rowIndex, 5);
+
+  // From index 1, prev wraps; skip body → land on row 20
+  const wrap = search.resolveNavSearchStateForLayout(mixed, 1, -1, 'diff');
+  assert.equal(wrap.shouldJump, true);
+  assert.equal(wrap.activeHit.rowIndex, 20);
+
+  // full-mode first hit prefers row over body
+  const fullDocs = search.buildSearchIndex(
+    {
+      body: 'needle in body',
+      comments: [],
+      reviews: [],
+      reviewComments: [],
+    },
+    [
+      { kind: 'diff-line', rowIndex: 0, text: 'context', filePath: 'a.ts' },
+      { kind: 'diff-line', rowIndex: 1, text: '+needle in code', filePath: 'a.ts' },
+    ],
+    { mode: 'full' }
+  );
+  const fullState = search.resolveQuerySearchState(fullDocs, 'needle', {
+    mode: 'full',
+  });
+  assert.ok(fullState.hits.length >= 2);
+  assert.ok(
+    search.searchHitHasRowIndex(fullState.activeHit),
+    'full query initial hit prefers Diff row, not body anchor'
+  );
+
+  // App contract: jumpToSearchHit prefers row / no Diff→Conversation flip
+  const appSrcNav = fs.readFileSync(
+    path.join(__dirname, '../src/modal/app/PrModalApp.tsx'),
+    'utf8'
+  );
+  assert.ok(
+    appSrcNav.includes('searchHitHasRowIndex') ||
+      appSrcNav.includes('Prefer Diff row'),
+    'jumpToSearchHit prefers rowIndex over anchorId'
+  );
+  assert.ok(
+    appSrcNav.includes('resolveNavSearchStateForLayout'),
+    'navSearch is layout-aware'
+  );
+  assert.ok(
+    appSrcNav.includes('Never yank Diff') ||
+      appSrcNav.includes('layoutMode === LAYOUT_DIFF'),
+    'does not force Conversation from Diff on anchor-only hits'
+  );
+}
+
+// Dual-window oldest + newest share VirtualConversationList + keyPrefix
+  assert.ok(
+    conv.includes('bottomItems') &&
+      (conv.includes('VirtualConversationList') ||
+        conv.includes('partitionTimelineWithThreadGap')),
+    'Conversation dual-window bottomItems via partition + virtual list'
+  );
+  assert.ok(
+    conv.includes('keyPrefix') &&
+      (conv.includes('renderReviewThreadCard') ||
+        conv.includes('renderTimelineItemCard')),
+    'virtual rows pass keyPrefix into shared review-thread renderer'
+  );
+  assert.ok(
+    conv.includes('data-search-anchor={rootAnchor}') ||
+      conv.includes('data-search-anchor={itemAnchor}') ||
+      conv.includes('data-search-anchor={groupAnchor}'),
+    'review threads/groups set data-search-anchor'
+  );
+  assert.ok(
+    conv.includes('rootAnchor') || conv.includes('itemAnchor'),
+    'timeline cards define search anchors'
+  );
+  assert.ok(
+    conv.includes('searchCardClass') || conv.includes('prp-card--search-match'),
+    'timeline applies search match chrome'
+  );
+  assert.ok(
+    conv.includes('renderSearchableBody') ||
+      conv.includes('renderTimelineBody') ||
+      inline.includes('searchQuery'),
+    'thread bodies support search highlight path'
   );
 }
 
