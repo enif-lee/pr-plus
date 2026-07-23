@@ -73,6 +73,14 @@ const root = path.join(__dirname, '..');
     'side sheet label'
   );
   assert.ok(header.includes('data-shell'), 'data-shell attribute');
+  // Fullscreen icon toggle (mod+shift+f companion control)
+  assert.ok(header.includes('prp-fullscreen-toggle'), 'fullscreen icon button');
+  assert.ok(header.includes('onToggleFullscreen'), 'fullscreen handler prop');
+  assert.ok(header.includes('shellFullscreen'), 'fullscreen state prop');
+  assert.ok(
+    header.includes('Enter fullscreen') || header.includes('Exit fullscreen'),
+    'fullscreen labels'
+  );
   // Icon control; conversation-only (hidden on Diff layout)
   assert.ok(
     /prp-header__icon-btn prp-shell-toggle|prp-shell-toggle/.test(header),
@@ -99,6 +107,8 @@ const root = path.join(__dirname, '..');
   assert.ok(app.includes('shellClassName'));
   assert.ok(app.includes('data-shell'));
   assert.ok(app.includes('resolveShellStorage'));
+  assert.ok(app.includes('onToggleFullscreen') || app.includes('onToggleShellFullscreen'));
+  assert.ok(app.includes('shellFullscreen'));
   // Restore on open
   assert.ok(app.includes('[open]'));
   assert.ok(/setShellMode/.test(app));

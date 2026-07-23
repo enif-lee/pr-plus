@@ -522,16 +522,23 @@ export function fileStartIndexMap(virtualRows) {
 }
 
 /**
- * Guess highlight language from path.
+ * Guess highlight.js language id from path (must match registered langs in main.tsx).
  * @param {string} filePath
  */
 export function languageFromPath(filePath) {
   const p = (filePath || '').toLowerCase();
   const base = p.split('/').pop() || '';
-  if (base === 'dockerfile') return 'dockerfile';
-  if (base === 'makefile') return 'makefile';
+  // Bare / special filenames
+  if (base === 'dockerfile' || base.startsWith('dockerfile.')) return 'dockerfile';
+  if (base === 'makefile' || base === 'gnumakefile') return 'makefile';
+  if (base === 'cmakelists.txt') return 'cmake';
+  if (base.endsWith('.gradle.kts')) return 'kotlin';
+  if (base.endsWith('.gradle')) return 'gradle';
+  // multi-dot extensions
+  if (base.endsWith('.d.ts')) return 'typescript';
   const ext = base.includes('.') ? base.split('.').pop() : '';
-  const map = {
+  const map: Record<string, string> = {
+    // Web
     js: 'javascript',
     jsx: 'javascript',
     mjs: 'javascript',
@@ -539,27 +546,79 @@ export function languageFromPath(filePath) {
     ts: 'typescript',
     tsx: 'typescript',
     json: 'json',
+    jsonc: 'json',
     md: 'markdown',
+    mdx: 'markdown',
     css: 'css',
     scss: 'scss',
+    sass: 'scss',
+    less: 'less',
     html: 'xml',
     htm: 'xml',
+    xhtml: 'xml',
     xml: 'xml',
+    svg: 'xml',
+    vue: 'xml',
+    svelte: 'xml',
+    // Data / config
     yml: 'yaml',
     yaml: 'yaml',
+    toml: 'ini',
+    ini: 'ini',
+    cfg: 'ini',
+    conf: 'ini',
+    env: 'bash',
+    // Scripting
     py: 'python',
+    pyi: 'python',
+    pyw: 'python',
     rb: 'ruby',
-    go: 'go',
-    rs: 'rust',
-    java: 'java',
-    kt: 'kotlin',
+    rake: 'ruby',
+    php: 'php',
+    phtml: 'php',
+    pl: 'perl',
+    pm: 'perl',
+    lua: 'lua',
+    r: 'r',
+    // Shell
     sh: 'bash',
     bash: 'bash',
     zsh: 'bash',
+    fish: 'bash',
+    ps1: 'powershell',
+    psm1: 'powershell',
+    psd1: 'powershell',
+    // Systems
+    c: 'c',
+    h: 'c',
+    cc: 'cpp',
+    cpp: 'cpp',
+    cxx: 'cpp',
+    hpp: 'cpp',
+    hh: 'cpp',
+    hxx: 'cpp',
+    mm: 'objectivec',
+    m: 'objectivec',
+    // JVM / mobile
+    java: 'java',
+    kt: 'kotlin',
+    kts: 'kotlin',
+    scala: 'scala',
+    sc: 'scala',
+    go: 'go',
+    rs: 'rust',
+    cs: 'csharp',
+    fs: 'fsharp',
+    swift: 'swift',
+    dart: 'dart',
+    // Data / API
     sql: 'sql',
     graphql: 'graphql',
-    vue: 'xml',
-    svelte: 'xml',
+    gql: 'graphql',
+    proto: 'protobuf',
+    // Diff / patch
+    diff: 'diff',
+    patch: 'diff',
   };
-  return map[ext] || 'plaintext';
+  return map[ext || ''] || 'plaintext';
 }

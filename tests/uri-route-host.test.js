@@ -127,13 +127,18 @@ async function main() {
       number: 7,
       page: 'conversation',
     });
-    assert.ok(window.location.search.includes('7') || window.location.href.includes('pr'));
+    assert.ok(
+      window.location.search.includes('7') ||
+        window.location.href.includes('prp_') ||
+        window.location.href.includes('pr+')
+    );
     window.PRModalHost.closeModal();
     const search = window.location.search || '';
     assert.ok(
       search.includes('q=is') || search.includes('is%3Aopen') || search.includes('is:open'),
       `expected unrelated q param kept, got ${search}`
     );
+    assert.ok(!search.includes('prp_number') && !search.includes('pr+number'));
     const route = uriRoute.parseLocationRoute(window.location);
     assert.equal(route.number, null);
     assert.equal(route.page, null);
@@ -141,7 +146,7 @@ async function main() {
 
   // --- unencoded residual keys: clear must not leave open-able route ---
   {
-    // Simulate hand-typed URL before open (keys become "pr page" etc.)
+    // Simulate hand-typed legacy URL before open
     const window = makeDom(
       'https://github.com/octo/repo/pulls?pr+page=diff&pr+number=88&pr+position=c:1&q=is%3Aopen'
     );

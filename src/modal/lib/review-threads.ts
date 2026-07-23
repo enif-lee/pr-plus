@@ -144,6 +144,21 @@ export function countUnresolvedReviewThreadsByPath(comments) {
 }
 
 /**
+ * Count **pending review threads** (root units), not individual replies.
+ * A thread counts once when its root or any reply is still PENDING.
+ * @param {Array} comments
+ * @returns {number}
+ */
+export function countPendingReviewThreads(comments) {
+  const threads = groupReviewThreads(comments);
+  let n = 0;
+  for (const t of threads) {
+    if (t.pending) n += 1;
+  }
+  return n;
+}
+
+/**
  * Count **pending** (unsubmitted) review threads per file path.
  * A thread is pending when the root or any reply is still PENDING.
  * Also counts any comment with `pending: true` by path so optimistic /

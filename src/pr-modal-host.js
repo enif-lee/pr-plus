@@ -37,7 +37,7 @@
     routePosition: null,
     /**
      * Progressive load UI: { busy: boolean, label: string|null, phase: string|null }
-     * Shown as top bar + stage caption during initial/partial loads.
+     * Shown in the header diff-stat badge during loads.
      */
     loadStage: null,
   };
@@ -78,6 +78,77 @@
       phase || label
         ? { phase: phase || null, label: label || null, busy: Boolean(busy) }
         : null;
+  }
+
+  /**
+   * Short, near-constant-width load copy for the header stats badge.
+   * Keeps morph animation stable (avoids long first phrase → shrink thrash).
+   * Target ~22–26 glyphs including ellipsis.
+   *
+   * @param {string} kind
+   * @param {{ count?: number, loaded?: number, total?: number, message?: string }|null} [extra]
+   */
+  function loadStageLabel(kind, extra = null) {
+    const n = Number(extra?.count);
+    const loaded = Number(extra?.loaded);
+    const total = Number(extra?.total);
+    switch (String(kind || '')) {
+      case 'core':
+        return 'Loading pull request…';
+      case 'core-full':
+        return 'Loading full details…';
+      case 'revalidate':
+        return 'Updating pull request…';
+      case 'refresh':
+        return 'Refreshing pull request…';
+      case 'refresh-meta':
+        return 'Refreshing metadata…';
+      case 'refresh-visible':
+        return 'Refreshing visible…';
+      case 'refresh-all':
+        return 'Refreshing threads…';
+      case 'threads-load':
+        return 'Loading review threads…';
+      case 'threads-update':
+        return 'Updating review threads…';
+      case 'threads-earlier':
+        return 'Loading earlier threads…';
+      case 'threads-unresolved':
+        return 'Updating open threads…';
+      case 'threads-visible': {
+        const c = Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+        // Fixed shape: "Updating ## threads…" (~22)
+        const num = String(Math.min(c, 99)).padStart(2, '0');
+        return `Updating ${num} threads…`;
+      }
+      case 'threads-more':
+        return 'Loading more threads…';
+      case 'threads-all': {
+        if (Number.isFinite(loaded) && loaded >= 0 && Number.isFinite(total) && total > 0) {
+          const a = String(Math.min(Math.floor(loaded), 999)).padStart(3, ' ');
+          const b = String(Math.min(Math.floor(total), 999)).padStart(3, ' ');
+          return `Loading comments${a}/${b}`;
+        }
+        if (Number.isFinite(loaded) && loaded >= 0) {
+          const a = String(Math.min(Math.floor(loaded), 999)).padStart(3, ' ');
+          return `Loading comments ·${a}`;
+        }
+        return 'Loading all comments…';
+      }
+      case 'refresh-failed':
+        return 'Refresh failed';
+      case 'threads-failed':
+        return 'Threads failed to load';
+      case 'threads-more-failed':
+        return 'Load more failed';
+      case 'threads-all-failed':
+        return 'Load all failed';
+      default: {
+        const msg = String(extra?.message || kind || 'Loading…').trim();
+        // Hard cap so unexpected API errors don't explode the badge
+        return msg.length > 26 ? `${msg.slice(0, 24)}…` : msg || 'Loading…';
+      }
+    }
   }
 
   function clearLoadStage() {
@@ -410,10 +481,10 @@
         setLoadStage(
           'refresh',
           mode === 'full-threads'
-            ? 'Refreshing pull request & all threads…'
+            ? loadStageLabel('refresh-all')
             : mode === 'visible-threads'
-              ? 'Refreshing metadata & visible threads…'
-              : 'Refreshing pull request…',
+              ? loadStageLabel('refresh-visible')
+              : loadStageLabel('refresh'),
           true
         );
         render();
@@ -435,7 +506,7 @@
 
         try {
           // 1) Core metadata (no threads) — keep prior threads until thread phase
-          setLoadStage('refresh', 'Refreshing metadata…', true);
+          setLoadStage('refresh', loadStageLabel('refresh-meta'), true);
           render();
           let detail = await globalThis.PRTreeFetch.fetchPrDetail(
             owner,
@@ -477,9 +548,7 @@
             ) {
               setLoadStage(
                 'threads',
-                `Updating ${visibleIds.length} visible thread${
-                  visibleIds.length === 1 ? '' : 's'
-                }…`,
+                loadStageLabel('threads-visible', { count: visibleIds.length }),
                 true
               );
               render();
@@ -521,7 +590,7 @@
           }
 
           // 2a) last:100 (full-threads + mutation revalidate)
-          setLoadStage('threads', 'Updating review threads…', true);
+          setLoadStage('threads', loadStageLabel('threads-update'), true);
           render();
           const t0 = nowMs();
           const newest = await globalThis.PRTreeFetch.fetchReviewThreadsPage(
@@ -558,7 +627,7 @@
             // Diff: seed start window then drain all remaining pages
             if (totalCount >= apiMax && newest.hasPreviousPage) {
               try {
-                setLoadStage('threads', 'Loading earlier review threads…', true);
+                setLoadStage('threads', loadStageLabel('threads-earlier'), true);
                 render();
                 const oldest =
                   await globalThis.PRTreeFetch.fetchReviewThreadsPage(
@@ -616,7 +685,7 @@
                 return !updatedIdSet.has(s) && !knownMissing.has(s);
               });
               if (!remainingUnresolvedIds.length) break;
-              setLoadStage('threads', 'Updating unresolved threads…', true);
+              setLoadStage('threads', loadStageLabel('threads-unresolved'), true);
               render();
               const tBulk = nowMs();
               const bulk =
@@ -659,7 +728,7 @@
             } else {
               setLoadStage(
                 'refresh',
-                err?.message || 'Refresh failed',
+                loadStageLabel('refresh-failed', { message: err?.message }),
                 false
               );
             }
@@ -746,10 +815,11 @@
         setLoadStage(
           'threads',
           loadAll
-            ? `Loading all review comments… (${hidden0 || '?'} remaining)`
-            : hidden0 > 0
-              ? `Loading more review threads… (${hidden0} still hidden)`
-              : `Loading more review threads… (${meta0.loadedThreadCount || 0} loaded)`,
+            ? loadStageLabel('threads-all', {
+                loaded: meta0.loadedThreadCount || 0,
+                total: totalHint || 0,
+              })
+            : loadStageLabel('threads-more'),
           true
         );
         render();
@@ -767,11 +837,10 @@
             if (loadAll) {
               setLoadStage(
                 'threads',
-                totalHint > 0
-                  ? `Loading all review comments… ${loaded}/${totalHint}`
-                  : `Loading all review comments… ${loaded} loaded${
-                      hidden > 0 ? `, ${hidden} remaining` : ''
-                    }`,
+                loadStageLabel('threads-all', {
+                  loaded,
+                  total: totalHint || 0,
+                }),
                 true
               );
               render();
@@ -797,10 +866,10 @@
           if (current.open) {
             setLoadStage(
               'threads',
-              err?.message ||
-                (loadAll
-                  ? 'Failed to load all comments'
-                  : 'Failed to load more threads'),
+              loadStageLabel(
+                loadAll ? 'threads-all-failed' : 'threads-more-failed',
+                { message: err?.message }
+              ),
               false
             );
             render();
@@ -1043,10 +1112,10 @@
       loadStage: {
         phase: fromCache ? 'revalidate' : fromList ? 'core' : 'core',
         label: fromCache
-          ? 'Updating pull request…'
+          ? loadStageLabel('revalidate')
           : fromList
-            ? 'Loading full details…'
-            : 'Loading pull request…',
+            ? loadStageLabel('core-full')
+            : loadStageLabel('core'),
         busy: true,
       },
     };
@@ -1104,7 +1173,7 @@
             current.detail = v;
             current.loading = false;
             current.error = null;
-            setLoadStage('revalidate', 'Updating pull request…', true);
+            setLoadStage('revalidate', loadStageLabel('revalidate'), true);
             render();
             console.log(
               `[pr-plus] openModal cache-hit ${owner}/${repo}#${number} source=idb (upgraded from ${
@@ -1162,13 +1231,13 @@
 
       // Phase 1: core PR (no threads) — start network immediately (parallel with IDB)
       if (!fromCache && !fromList) {
-        setLoadStage('core', 'Loading pull request…', true);
+        setLoadStage('core', loadStageLabel('core'), true);
         render();
       } else if (!fromCache && fromList) {
-        setLoadStage('core', 'Loading full details…', true);
+        setLoadStage('core', loadStageLabel('core-full'), true);
         render();
       } else {
-        setLoadStage('revalidate', 'Updating pull request…', true);
+        setLoadStage('revalidate', loadStageLabel('revalidate'), true);
         render();
       }
       const tCore0 =
@@ -1240,8 +1309,8 @@
       setLoadStage(
         'threads',
         fromCache || detailRank(cached) >= 3
-          ? 'Updating review threads…'
-          : 'Loading review threads…',
+          ? loadStageLabel('threads-update')
+          : loadStageLabel('threads-load'),
         true
       );
       detailCache.set(key, detail);
@@ -1273,7 +1342,7 @@
             // 1) last:100 first (always freshest activity window)
             // 2) then bulk-refresh only unresolved among threads NOT updated in step 1
             //    (oldest/start window skipped — stable when ordered)
-            setLoadStage('threads', 'Updating review threads…', true);
+            setLoadStage('threads', loadStageLabel('threads-update'), true);
             render();
 
             // Step 1: last N (API max 100)
@@ -1315,7 +1384,7 @@
             detail = next;
             current.detail = detail;
             detailCache.set(key, detail);
-            setLoadStage('threads', 'Updating unresolved threads…', true);
+            setLoadStage('threads', loadStageLabel('threads-unresolved'), true);
             render();
 
             // Step 2: remaining unresolved not in last-100; drop remote-missing zombies
@@ -1439,7 +1508,7 @@
               totalCount >= apiMax && Boolean(newest.hasPreviousPage);
             if (needStartWindow) {
               try {
-                setLoadStage('threads', 'Loading earlier review threads…', true);
+                setLoadStage('threads', loadStageLabel('threads-earlier'), true);
                 render();
                 const tOldest0 = nowMs();
                 const oldest =
@@ -1505,7 +1574,7 @@
           if (gen === detailFetchGen && current.open) {
             setLoadStage(
               'threads',
-              threadErr?.message || 'Review threads failed to load',
+              loadStageLabel('threads-failed', { message: threadErr?.message }),
               false
             );
             render();
@@ -1729,7 +1798,9 @@
     if (typeof event.stopImmediatePropagation === 'function') {
       event.stopImmediatePropagation();
     }
-    void openModal(parsed);
+    // List entry always opens Conversation — do not restore prior Diff/session page.
+    // Stack hops / refresh restore may still pass an explicit page.
+    void openModal({ ...parsed, page: 'conversation' });
   }
 
   function install() {

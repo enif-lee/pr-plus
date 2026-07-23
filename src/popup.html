@@ -7,7 +7,7 @@
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      width: 300px;
+      width: 340px;
       padding: 12px;
       font: 13px/1.4 -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
       color: #1f2328;
@@ -130,11 +130,64 @@
     .pref--action button {
       margin: 0;
     }
+    .perm-list {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      border: 1px solid #d0d7de;
+      border-radius: 8px;
+      overflow: hidden;
+      background: #fff;
+    }
+    .perm-list li {
+      display: grid;
+      grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.35fr);
+      gap: 8px 10px;
+      padding: 8px 10px;
+      border-top: 1px solid #d8dee4;
+      font-size: 11px;
+      line-height: 1.4;
+    }
+    .perm-list li:first-child {
+      border-top: 0;
+    }
+    .perm-list code,
+    .perm-list .perm-key {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 10.5px;
+      font-weight: 600;
+      color: #1f2328;
+      word-break: break-all;
+    }
+    .perm-list .perm-why {
+      color: #656d76;
+    }
+    .perm-note {
+      margin: 8px 0 0;
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid #d0d7de;
+      background: #f6f8fa;
+      font-size: 11px;
+      color: #656d76;
+      line-height: 1.4;
+    }
+    .perm-note strong {
+      color: #1f2328;
+      font-weight: 600;
+    }
+    .perm-note ul {
+      margin: 6px 0 0;
+      padding-left: 1.15em;
+    }
+    .perm-note li {
+      margin: 2px 0;
+    }
   </style>
 </head>
 <body>
   <h1>pr+</h1>
-  <label for="token">API token (private repo)</label>
+  <label for="token">GitHub PAT (required)</label>
   <input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="ghp_… / github_pat_…" />
   <p id="token-saved" class="saved" hidden>Saved: <code id="token-mask"></code></p>
   <div class="row">
@@ -144,9 +197,52 @@
   </div>
   <p class="hint">
     <a href="https://github.com/settings/tokens" target="_blank" rel="noreferrer">Create token</a>
-    · classic: <code>repo</code> (+ <code>notifications</code> for subscribe)
-    · stored only in this extension’s local storage (not synced)
+    · 토큰이 없으면 확장이 비활성(네이티브 GitHub만 동작)합니다.
+    · 확장 <code>storage</code>에만 저장(동기화 안 함).
   </p>
+
+  <h2>Required permissions</h2>
+  <p class="hint" style="margin-top: 0">
+    사용에 필요한 Chrome 권한과 GitHub 토큰 스코프입니다.
+  </p>
+  <ul class="perm-list" aria-label="Chrome extension permissions">
+    <li>
+      <span class="perm-key">storage</span>
+      <span class="perm-why">PAT·옵션 로컬 저장 (<code>chrome.storage.local</code>)</span>
+    </li>
+    <li>
+      <span class="perm-key">https://github.com/*</span>
+      <span class="perm-why">PR 리스트 DOM, 모달 호스트(콘텐츠 스크립트)</span>
+    </li>
+    <li>
+      <span class="perm-key">https://api.github.com/*</span>
+      <span class="perm-why">PR 상세·리뷰·코멘트·머지·GraphQL 스레드 API</span>
+    </li>
+  </ul>
+
+  <div class="perm-note">
+    <strong>GitHub PAT scopes</strong>
+    <ul>
+      <li>
+        <strong>Classic:</strong>
+        <code>repo</code>
+        (프라이빗 포함 전체 PR 기능).
+        구독(Subscribe) 쓰려면
+        <code>notifications</code>
+        추가.
+      </li>
+      <li>
+        <strong>Fine-grained:</strong>
+        대상 저장소에
+        <code>Pull requests</code>
+        Read &amp; Write.
+        제안(suggestion) 적용·파일 업로드는
+        <code>Contents</code>
+        Read &amp; Write.
+      </li>
+    </ul>
+    토큰은 서비스 워커에서만 사용되며 content script에는 노출되지 않습니다.
+  </div>
 
   <h2>Options</h2>
   <label class="pref" for="pref-fast-review">

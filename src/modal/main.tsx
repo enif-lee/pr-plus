@@ -5,43 +5,35 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import hljs from 'highlight.js/lib/core';
-import javascript from 'highlight.js/lib/languages/javascript';
-import typescript from 'highlight.js/lib/languages/typescript';
-import json from 'highlight.js/lib/languages/json';
-import xml from 'highlight.js/lib/languages/xml';
-import css from 'highlight.js/lib/languages/css';
-import markdown from 'highlight.js/lib/languages/markdown';
-import bash from 'highlight.js/lib/languages/bash';
-import python from 'highlight.js/lib/languages/python';
-import yaml from 'highlight.js/lib/languages/yaml';
+/**
+ * Language grammars are lazy-loaded ESM chunks (dist/hljs-langs/<id>.js)
+ * via ensureHljsLanguage() — not registered here (keeps the main IIFE small).
+ */
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
-import mermaid from 'mermaid';
 
 import './styles.css';
 import { PrModalApp } from './app/PrModalApp';
 import { mountPrModal } from './app/mountPrModal';
 import * as sessionViewApi from './lib/session-view';
 import * as uriRouteApi from './lib/uri-route';
+import * as hljsLazy from './lib/hljs-lazy';
+import * as mermaidLazy from './lib/mermaid-lazy';
+import { configureMarkedCodeHighlight } from './components/common/utils';
 
-hljs.registerLanguage('javascript', javascript);
-hljs.registerLanguage('typescript', typescript);
-hljs.registerLanguage('json', json);
-hljs.registerLanguage('xml', xml);
-hljs.registerLanguage('css', css);
-hljs.registerLanguage('markdown', markdown);
-hljs.registerLanguage('bash', bash);
-hljs.registerLanguage('python', python);
-hljs.registerLanguage('yaml', yaml);
 marked.setOptions({ gfm: true, breaks: true });
+// Fenced ```lang blocks use the same lazy hljs pipeline as Diff lines
+configureMarkedCodeHighlight(marked);
 
 // Expose for pure render helpers that still look at globals
 (globalThis as any).hljs = hljs;
 (globalThis as any).marked = marked;
 (globalThis as any).DOMPurify = DOMPurify;
-(globalThis as any).mermaid = mermaid;
+// Mermaid loads on first ```mermaid fence (dist/mermaid.esm.js) — not inlined
+(globalThis as any).PRPMermaidLazy = mermaidLazy;
 (globalThis as any).React = React;
 (globalThis as any).ReactDOM = { createRoot };
+(globalThis as any).PRPHljsLazy = hljsLazy;
 
 (globalThis as any).PRModalApp = PrModalApp;
 (globalThis as any).mountPrModal = mountPrModal;

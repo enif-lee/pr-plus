@@ -26,8 +26,11 @@ import {
   FileDiffIcon,
   LinkExternalIcon,
   PencilIcon,
+  ScreenFullIcon,
+  ScreenNormalIcon,
   SidebarCollapseIcon,
   SidebarExpandIcon,
+  SkipIcon,
   SyncIcon,
   ThreeBarsIcon,
   TrashIcon,
@@ -89,6 +92,7 @@ export const IconSidebarCollapse = wrap(SidebarCollapseIcon);
 export const IconThreeBars = wrap(ThreeBarsIcon);
 export const IconCheckCircleFill = wrap(CheckCircleFillIcon);
 export const IconXCircleFill = wrap(XCircleFillIcon);
+export const IconSkip = wrap(SkipIcon);
 export const IconGitMerge = wrap(GitMergeIcon);
 export const IconGitPullRequestDraft = wrap(GitPullRequestDraftIcon);
 export const IconDotFill = wrap(DotFillIcon);
@@ -127,6 +131,26 @@ export function IconShellMode({
 }) {
   // Sheet active → collapse to modal; modal → expand to sheet
   const Icon = sheet ? SidebarCollapseIcon : SidebarExpandIcon;
+  return (
+    <Icon
+      size={size}
+      className={['prp-octicon', className].filter(Boolean).join(' ')}
+      aria-hidden="true"
+    />
+  );
+}
+
+/** Fullscreen shell toggle: enter (full) ↔ exit (normal). */
+export function IconFullscreen({
+  active,
+  size = 16,
+  className = '',
+}: {
+  active: boolean;
+  size?: Size;
+  className?: string;
+}) {
+  const Icon = active ? ScreenNormalIcon : ScreenFullIcon;
   return (
     <Icon
       size={size}

@@ -4,6 +4,7 @@ const {
   mergeReviewThreadMeta,
   mapGraphqlReviewThreads,
   countReviewThreadsByPath,
+  countPendingReviewThreads,
   countPendingReviewThreadsByPath,
   countReviewThreadTotals,
   buildReplyReviewCommentRequest,
@@ -63,6 +64,8 @@ assert.equal(counts.get('b.js'), 1);
   const pendingByPath = countPendingReviewThreadsByPath(mixed);
   assert.equal(pendingByPath.get('a.js'), 1);
   assert.equal(pendingByPath.get('b.js'), undefined);
+  // Thread count (not reply count): root 1 pending + reply 4 pending under same thread = 1
+  assert.equal(countPendingReviewThreads(mixed), 1, 'pending counted by thread not reply');
   const totals = countReviewThreadTotals(mixed);
   assert.equal(totals.total, 3);
   assert.equal(totals.pendingThreads, 1);

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "pr+",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Display GitHub pull requests as a tree based on base/head branch relationships.",
   "permissions": ["storage"],
   "host_permissions": [
@@ -37,9 +37,13 @@
     {
       "resources": [
         "src/modal/dist/pr-modal.css",
-        "src/modal/dist/pr-modal.bundle.js"
+        "src/modal/dist/pr-modal.bundle.js",
+        "src/modal/dist/mermaid.esm.js",
+        "src/modal/dist/hljs-langs/*",
+        "src/modal/dist/hljs-langs/*.js"
       ],
-      "matches": ["https://github.com/*"]
+      "matches": ["https://github.com/*"],
+      "use_dynamic_url": true
     }
   ]
 }

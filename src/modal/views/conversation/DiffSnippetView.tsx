@@ -1,12 +1,27 @@
-import React from 'react';
-import { highlightCode } from '@common/utils';
+import React, { useEffect, useState } from 'react';
+import { clearHighlightCodeCache, highlightCode } from '@common/utils';
+import {
+  ensureHljsLanguageForPath,
+  onHljsLanguagesChanged,
+} from '@lib/hljs-lazy';
 
 /** Code context under conversation items — hljs when path known. */
 export function DiffSnippetView({ snippet, filePath }: any) {
+  const path = filePath || snippet?.path || snippet?.filePath || '';
+  const [hljsEpoch, setHljsEpoch] = useState(0);
+  useEffect(() => {
+    if (path) void ensureHljsLanguageForPath(path);
+    return onHljsLanguagesChanged(() => {
+      clearHighlightCodeCache();
+      setHljsEpoch((n) => n + 1);
+    });
+  }, [path]);
+
   if (!snippet?.lines?.length) return null;
   const lines = snippet.lines;
   const scroll = lines.length > 30;
-  const path = filePath || snippet.path || snippet.filePath || '';
+  // hljsEpoch forces re-highlight after lazy grammar load
+  void hljsEpoch;
   return (
     <pre
       className={`prp-diff-snippet${scroll ? ' prp-diff-snippet--scroll' : ''}`}

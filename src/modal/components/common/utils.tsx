@@ -1,4 +1,5 @@
 import { languageFromPath } from '../../lib/diff-rows';
+import { ensureHljsLanguage } from '../../lib/hljs-lazy';
 import { enhanceMarkdownHtml } from '../../lib/ui-polish';
 
 export const ROW_HEIGHT = 22;
@@ -87,14 +88,113 @@ export function highlightCodeCacheSize() {
   return highlightCache.size;
 }
 
-export function highlightCode(code, filePath) {
+/**
+ * Map markdown fence info strings (```ts, ```c++, ```shell) to registered hljs ids.
+ * Empty string = plain escape (no grammar).
+ */
+export function normalizeFenceLang(info: unknown): string {
+  const raw = String(info || '')
+    .trim()
+    .toLowerCase()
+    // ```ts{...} or ```js title="x" — take first token
+    .split(/[\s,{:=]+/)[0]
+    .replace(/^language-/, '');
+  if (!raw || raw === 'text' || raw === 'plain' || raw === 'plaintext' || raw === 'none') {
+    return '';
+  }
+  const aliases: Record<string, string> = {
+    js: 'javascript',
+    jsx: 'javascript',
+    mjs: 'javascript',
+    cjs: 'javascript',
+    node: 'javascript',
+    ts: 'typescript',
+    tsx: 'typescript',
+    py: 'python',
+    python3: 'python',
+    rb: 'ruby',
+    rs: 'rust',
+    sh: 'bash',
+    shell: 'bash',
+    zsh: 'bash',
+    fish: 'bash',
+    console: 'bash',
+    yml: 'yaml',
+    html: 'xml',
+    htm: 'xml',
+    xhtml: 'xml',
+    svg: 'xml',
+    vue: 'xml',
+    svelte: 'xml',
+    'c++': 'cpp',
+    cc: 'cpp',
+    cxx: 'cpp',
+    hpp: 'cpp',
+    h: 'c',
+    'c#': 'csharp',
+    cs: 'csharp',
+    fs: 'fsharp',
+    fsharp: 'fsharp',
+    objc: 'objectivec',
+    'objective-c': 'objectivec',
+    'objectivec': 'objectivec',
+    kt: 'kotlin',
+    kts: 'kotlin',
+    golang: 'go',
+    ps1: 'powershell',
+    pwsh: 'powershell',
+    powershell: 'powershell',
+    docker: 'dockerfile',
+    make: 'makefile',
+    mk: 'makefile',
+    gql: 'graphql',
+    proto: 'protobuf',
+    md: 'markdown',
+    patch: 'diff',
+    toml: 'ini',
+    conf: 'ini',
+    properties: 'ini',
+  };
+  return aliases[raw] || raw;
+}
+
+/**
+ * Sync highlight for a line or fenced block.
+ * @param filePath used when opts.language is omitted (diff lines)
+ * @param opts.language explicit fence / language id (markdown code blocks)
+ *
+ * If the grammar is not yet loaded, returns escaped HTML and kicks off a lazy
+ * load — listeners re-render when the grammar arrives.
+ */
+export function highlightCode(
+  code: unknown,
+  filePath?: unknown,
+  opts: { language?: string } = {}
+) {
   const text = code == null ? '' : String(code);
   if (!text) return '';
   try {
     const eng = (globalThis as any).hljs;
     if (!eng) return escapeHtml(text);
-    const lang = languageFromPath(filePath) || '';
-    const cacheKey = `${lang}\0${text}`;
+    const explicit =
+      opts.language != null && String(opts.language).trim() !== ''
+        ? normalizeFenceLang(opts.language)
+        : '';
+    const lang =
+      explicit ||
+      (filePath != null && filePath !== ''
+        ? languageFromPath(filePath as string) || ''
+        : '');
+    const langKey = lang === 'plaintext' ? '' : lang;
+    // Request grammar if missing (no-op when already registered / unknown id)
+    if (
+      langKey &&
+      typeof eng.getLanguage === 'function' &&
+      !eng.getLanguage(langKey)
+    ) {
+      void ensureHljsLanguage(langKey);
+    }
+    const cacheKey = `${langKey}\0${text}`;
     const cached = highlightCache.get(cacheKey);
     if (cached != null) {
       // LRU-ish: re-insert so hot lines stay during scroll
@@ -103,15 +203,12 @@ export function highlightCode(code, filePath) {
       return cached;
     }
     let html: string;
-    if (lang && eng.getLanguage?.(lang)) {
-      html = eng.highlight(text, { language: lang, ignoreIllegals: true }).value;
+    if (langKey && eng.getLanguage?.(langKey)) {
+      html = eng.highlight(text, { language: langKey, ignoreIllegals: true }).value;
     } else {
-      // Avoid highlightAuto on every empty/tiny line — escape is enough
-      if (text.length < 2 || !/\S/.test(text)) {
-        html = escapeHtml(text);
-      } else {
-        html = eng.highlightAuto(text).value;
-      }
+      // Grammar still loading or unknown: plain escape (no highlightAuto —
+      // auto needs many langs resident; we load on demand instead).
+      html = escapeHtml(text);
     }
     if (highlightCache.size >= HIGHLIGHT_CACHE_MAX) {
       // Drop oldest ~12.5%
@@ -129,15 +226,71 @@ export function highlightCode(code, filePath) {
   }
 }
 
+/**
+ * Highlight a markdown fenced code body (multi-line). Same cache as highlightCode.
+ */
+export function highlightFenceCode(code: unknown, fenceInfo: unknown): string {
+  return highlightCode(code, null, { language: normalizeFenceLang(fenceInfo) });
+}
+
+/** Wire marked's fenced-code renderer once (idempotent). */
+export function configureMarkedCodeHighlight(mdEngine?: any): boolean {
+  const md = mdEngine || (globalThis as any).marked;
+  if (!md || typeof md.use !== 'function') return false;
+  if (md.__prpHljsCodeConfigured) return true;
+  md.__prpHljsCodeConfigured = true;
+  md.use({
+    renderer: {
+      code(token: any) {
+        // marked v9+: { text, lang, escaped }; older: (code, infostring)
+        let text: string;
+        let lang: string;
+        if (token && typeof token === 'object' && 'text' in token) {
+          text = String(token.text ?? '');
+          lang = String(token.lang ?? '');
+        } else {
+          text = String(token ?? '');
+          lang = String(arguments[1] ?? '');
+        }
+        const id = normalizeFenceLang(lang);
+        const body = highlightFenceCode(text, id || lang);
+        const safeId = id ? escapeHtml(id) : '';
+        const cls = id ? `hljs language-${safeId} prp-code` : 'prp-code';
+        const langAttr = safeId ? ` data-lang="${safeId}"` : '';
+        return `<pre class="prp-md-code"${langAttr}><code class="${cls}">${body}</code></pre>\n`;
+      },
+    },
+  });
+  return true;
+}
+
+/** Drop cache entries for one language after its grammar loads (or clear all). */
+export function clearHighlightCodeCacheForLang(lang: unknown) {
+  const id = String(lang || '');
+  if (!id) {
+    highlightCache.clear();
+    return;
+  }
+  const prefix = `${id}\0`;
+  for (const k of [...highlightCache.keys()]) {
+    if (k.startsWith(prefix)) highlightCache.delete(k);
+  }
+}
+
 export function renderMdHtml(raw, linkCtx) {
   try {
     const md = (globalThis as any).marked;
     const purify = (globalThis as any).DOMPurify;
     if (!md) return escapeHtml(raw).replace(/\n/g, '<br/>');
+    configureMarkedCodeHighlight(md);
     let parsed =
       typeof md.parse === 'function' ? md.parse(raw) : typeof md === 'function' ? md(raw) : raw;
     const html = typeof parsed === 'string' ? parsed : String(parsed);
-    const clean = purify?.sanitize ? purify.sanitize(html) : html;
+    // Keep hljs class names on pre/code (default purify already allows class;
+    // be explicit for extension builds that tighten ALLOWED_ATTR).
+    const clean = purify?.sanitize
+      ? purify.sanitize(html, { ADD_ATTR: ['class', 'data-lang'] })
+      : html;
     if (typeof enhanceMarkdownHtml === 'function') {
       return enhanceMarkdownHtml(clean, linkCtx || {});
     }

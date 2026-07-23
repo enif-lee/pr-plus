@@ -15,6 +15,7 @@ import {
   indexForConversationAnchor,
   type ConversationVirtualRow,
 } from '@lib/conversation-virtual';
+import { FloatingScrollbar } from '../../components/common/FloatingScrollbar';
 
 /**
  * Variable-height virtual list for the full conversation left panel
@@ -114,8 +115,16 @@ function VirtualConversationListImpl(props: any) {
     return () => ro.disconnect();
   }, []);
 
+  const scrollHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
-    setScrollTop((e.target as HTMLDivElement).scrollTop);
+    const el = e.target as HTMLDivElement;
+    setScrollTop(el.scrollTop);
+    el.classList.add('prp-is-scrolling');
+    if (scrollHideTimer.current) clearTimeout(scrollHideTimer.current);
+    scrollHideTimer.current = setTimeout(() => {
+      el.classList.remove('prp-is-scrolling');
+      scrollHideTimer.current = null;
+    }, 700);
   }, []);
 
   const reportHeight = useCallback((key: string, height: number) => {
@@ -201,44 +210,52 @@ function VirtualConversationListImpl(props: any) {
 
   return (
     <div
-      className={`prp-conversation-virtual ${className}`.trim()}
-      ref={scrollerRef}
-      onScroll={onScroll}
-      data-virtual-count={rows.length}
-      data-virtual-start={Number.isFinite(start) ? start : 0}
-      data-virtual-end={Number.isFinite(end) ? end : -1}
-      data-virtual-panel="full"
+      className={`prp-scroll-float-host prp-edge-fade prp-conversation-virtual-host ${className}`.trim()}
     >
       <div
-        className="prp-conversation-virtual__spacer"
-        style={{ height: Math.max(range.totalHeight, 1), position: 'relative' }}
+        className="prp-conversation-virtual prp-scroll-float"
+        ref={scrollerRef}
+        onScroll={onScroll}
+        data-virtual-count={rows.length}
+        data-virtual-start={Number.isFinite(start) ? start : 0}
+        data-virtual-end={Number.isFinite(end) ? end : -1}
+        data-virtual-panel="full"
       >
         <div
-          className="prp-conversation-virtual__window"
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            transform: `translateY(${range.offsetY || 0}px)`,
-            willChange: 'transform',
-          }}
+          className="prp-conversation-virtual__spacer"
+          style={{ height: Math.max(range.totalHeight, 1), position: 'relative' }}
         >
-          {visible.map((row) => {
-            const h = conversationRowHeight(row, heightMap, heightOpts);
-            return (
-              <VirtualRowShell
-                key={row.key}
-                rowKey={row.key}
-                estimatedHeight={h}
-                onHeight={reportHeight}
-              >
-                {typeof renderRow === 'function' ? renderRow(row) : null}
-              </VirtualRowShell>
-            );
-          })}
+          <div
+            className="prp-conversation-virtual__window"
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              transform: `translateY(${range.offsetY || 0}px)`,
+              willChange: 'transform',
+            }}
+          >
+            {visible.map((row) => {
+              const h = conversationRowHeight(row, heightMap, heightOpts);
+              return (
+                <VirtualRowShell
+                  key={row.key}
+                  rowKey={row.key}
+                  estimatedHeight={h}
+                  onHeight={reportHeight}
+                >
+                  {typeof renderRow === 'function' ? renderRow(row) : null}
+                </VirtualRowShell>
+              );
+            })}
+          </div>
         </div>
       </div>
+      <FloatingScrollbar
+        scrollerRef={scrollerRef}
+        contentKey={`${rows.length}:${range.totalHeight}`}
+      />
     </div>
   );
 }

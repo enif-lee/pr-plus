@@ -56,7 +56,8 @@ function splitMarkdownSegments(source) {
   const text = source == null ? '' : String(source);
   if (!text) return [{ type: 'md', content: '' }];
   const segments = [];
-  const re = /```(?:mermaid|MERMAID)[ \t]*\r?\n([\s\S]*?)```/g;
+  // ```mermaid / ``` mermaid / optional info string; body until closing fence
+  const re = /```[ \t]*(?:mermaid|MERMAID)[^\n]*\r?\n([\s\S]*?)```/g;
   let last = 0;
   let m;
   while ((m = re.exec(text)) !== null) {

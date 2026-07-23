@@ -251,6 +251,19 @@ package-lock.json linguist-generated=true
 // language helper
 assert.equal(diffRows.languageFromPath('src/App.tsx'), 'typescript');
 assert.equal(diffRows.languageFromPath('x.py'), 'python');
+// SO / systems stack extension map
+assert.equal(diffRows.languageFromPath('Main.kt'), 'kotlin');
+assert.equal(diffRows.languageFromPath('App.java'), 'java');
+assert.equal(diffRows.languageFromPath('cmd/main.go'), 'go');
+assert.equal(diffRows.languageFromPath('src/lib.rs'), 'rust');
+assert.equal(diffRows.languageFromPath('core.c'), 'c');
+assert.equal(diffRows.languageFromPath('engine.cpp'), 'cpp');
+assert.equal(diffRows.languageFromPath('engine.hpp'), 'cpp');
+assert.equal(diffRows.languageFromPath('Service.cs'), 'csharp');
+assert.equal(diffRows.languageFromPath('query.sql'), 'sql');
+assert.equal(diffRows.languageFromPath('schema.graphql'), 'graphql');
+assert.equal(diffRows.languageFromPath('Dockerfile'), 'dockerfile');
+assert.equal(diffRows.languageFromPath('build.gradle.kts'), 'kotlin');
 
 const log = ['modal-modern-pure.test.js: all assertions passed', ...lines].join('\n');
 fs.writeFileSync(path.join(SCRATCH, 'pure-modern-modal.log'), log + '\n');

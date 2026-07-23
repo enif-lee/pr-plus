@@ -80,6 +80,7 @@ const conv = read('src/modal/views/conversation/ConversationView.tsx');
 assert.ok(conv.includes('buildMergeBoxStatus'), 'uses pure status helper');
 assert.ok(conv.includes('prp-merge-box__headline'), 'headline markup');
 assert.ok(conv.includes('prp-merge-box__helper'), 'helper markup');
+assert.ok(conv.includes('MergeBoxChecks'), 'GitHub-style checks in merge box');
 assert.ok(conv.includes('prp-merge-method'), 'merge method control');
 assert.ok(conv.includes('MERGE_METHODS'), 'all methods listed');
 assert.ok(conv.includes("onMergePr?.(normalizeMergeMethod(mergeMethod))") || conv.includes('onMergePr?.('));
@@ -106,12 +107,23 @@ assert.ok(app.includes('mergeMethod') || app.includes("method = 'merge'"));
 const css = read('src/modal/styles.css');
 assert.ok(css.includes('prp-merge-method__menu'));
 assert.ok(css.includes('prp-merge-box__headline'));
+assert.ok(css.includes('prp-merge-checks__group'), 'merge checks group styles');
+assert.ok(css.includes('prp-merge-checks__item'), 'merge checks item styles');
+
+// MergeBoxChecks component present
+const mbc = read('src/modal/views/conversation/MergeBoxChecks.tsx');
+assert.ok(mbc.includes('buildMergeBoxCheckGroups'));
+assert.ok(mbc.includes('failing') || mbc.includes('group-toggle'));
 
 // Bundle
 const bundle = read('src/modal/dist/pr-modal.bundle.js');
 assert.ok(
   bundle.includes('prp-merge-method') || bundle.includes('Squash and merge'),
   'bundle has merge method UI'
+);
+assert.ok(
+  bundle.includes('prp-merge-checks') || bundle.includes('Some checks were not successful'),
+  'bundle has merge-box checks UI'
 );
 
 console.log('merge-box.test.js: all assertions passed');

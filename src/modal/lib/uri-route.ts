@@ -1,12 +1,19 @@
 /**
  * Pure deep-link helpers for PR modal page/number/position.
- * Query keys: pr+page, pr+number, pr+position (also accepted from hash).
+ * Query keys: prp_page, prp_number, prp_position (also accepted from hash).
+ * Legacy pr+page / pr+number / pr+position (and spaced "pr page" form) still
+ * parse and are stripped on write/clear so old links keep working once.
  * No chrome.* / auth dependencies — works in fixtures and content scripts.
  */
 
-export const URI_PARAM_PAGE = 'pr+page';
-export const URI_PARAM_NUMBER = 'pr+number';
-export const URI_PARAM_POSITION = 'pr+position';
+export const URI_PARAM_PAGE = 'prp_page';
+export const URI_PARAM_NUMBER = 'prp_number';
+export const URI_PARAM_POSITION = 'prp_position';
+
+/** Older keys written before the prp_ rename (URLSearchParams turns + into space). */
+export const URI_PARAM_PAGE_LEGACY = ['pr+page', 'pr page'] as const;
+export const URI_PARAM_NUMBER_LEGACY = ['pr+number', 'pr number'] as const;
+export const URI_PARAM_POSITION_LEGACY = ['pr+position', 'pr position'] as const;
 
 export type RoutePage = 'conversation' | 'diff';
 
@@ -79,7 +86,7 @@ function readParamsFromSearch(search: string): URLSearchParams {
 }
 
 /**
- * Hash may be `#pr+page=diff&pr+number=1` or `#foo&pr+number=1` or legacy `#c:12`.
+ * Hash may be `#prp_page=diff&prp_number=1` or `#foo&prp_number=1` or legacy `#c:12`.
  */
 function readParamsFromHash(hash: string): URLSearchParams {
   let h = String(hash || '');
@@ -95,45 +102,66 @@ function readParamsFromHash(hash: string): URLSearchParams {
 }
 
 /**
- * URLSearchParams treats bare `+` as space, so hand-written `pr+page`
- * becomes key `pr page`. We write with %2B (params.set + toString) and
- * accept both forms on read. Always strip both forms before write/clear.
+ * All key forms for a logical param: current prp_* plus legacy pr+* / "pr *".
  */
-function keyVariants(key: string): string[] {
-  const spaced = key.replace(/\+/g, ' ');
-  return spaced !== key ? [key, spaced] : [key];
+function keyVariants(
+  key: string,
+  legacy: readonly string[] = []
+): string[] {
+  const out = [key, ...legacy];
+  // Also expand any remaining + → space for safety
+  const expanded: string[] = [];
+  for (const k of out) {
+    expanded.push(k);
+    const spaced = k.replace(/\+/g, ' ');
+    if (spaced !== k) expanded.push(spaced);
+  }
+  return [...new Set(expanded)];
 }
 
-function paramGet(params: URLSearchParams, key: string): string | null {
-  for (const k of keyVariants(key)) {
+function paramGet(
+  params: URLSearchParams,
+  key: string,
+  legacy: readonly string[] = []
+): string | null {
+  for (const k of keyVariants(key, legacy)) {
     if (params.has(k)) return params.get(k);
   }
   return null;
 }
 
-/** Delete both `pr+page` and `pr page` (and any multi-value leftovers). */
-function paramDeleteAll(params: URLSearchParams, key: string): void {
-  for (const k of keyVariants(key)) {
-    // URLSearchParams may hold multiple values; loop until gone
+/** Delete current + legacy key forms (and any multi-value leftovers). */
+function paramDeleteAll(
+  params: URLSearchParams,
+  key: string,
+  legacy: readonly string[] = []
+): void {
+  for (const k of keyVariants(key, legacy)) {
     while (params.has(k)) params.delete(k);
   }
 }
 
 function stripAllRouteKeys(params: URLSearchParams): void {
-  paramDeleteAll(params, URI_PARAM_PAGE);
-  paramDeleteAll(params, URI_PARAM_NUMBER);
-  paramDeleteAll(params, URI_PARAM_POSITION);
+  paramDeleteAll(params, URI_PARAM_PAGE, URI_PARAM_PAGE_LEGACY);
+  paramDeleteAll(params, URI_PARAM_NUMBER, URI_PARAM_NUMBER_LEGACY);
+  paramDeleteAll(params, URI_PARAM_POSITION, URI_PARAM_POSITION_LEGACY);
 }
 
 function routeFromParams(params: URLSearchParams): ModalRoute {
-  const page = normalizePage(paramGet(params, URI_PARAM_PAGE));
-  const numRaw = paramGet(params, URI_PARAM_NUMBER);
+  const page = normalizePage(
+    paramGet(params, URI_PARAM_PAGE, URI_PARAM_PAGE_LEGACY)
+  );
+  const numRaw = paramGet(params, URI_PARAM_NUMBER, URI_PARAM_NUMBER_LEGACY);
   let number: number | null = null;
   if (numRaw != null && numRaw !== '') {
     const n = Number(numRaw);
     if (Number.isFinite(n) && n > 0) number = Math.floor(n);
   }
-  const positionRaw = paramGet(params, URI_PARAM_POSITION);
+  const positionRaw = paramGet(
+    params,
+    URI_PARAM_POSITION,
+    URI_PARAM_POSITION_LEGACY
+  );
   const position =
     positionRaw != null && String(positionRaw).trim()
       ? String(positionRaw).trim()
@@ -179,7 +207,7 @@ export function parseLocationRoute(location: { search?: string; hash?: string } 
  */
 export function serializeRouteToSearch(route: ModalRoute | null | undefined, existingSearch = ''): string {
   const params = readParamsFromSearch(existingSearch);
-  // Clear both pr+foo and "pr foo" forms so unencoded leftovers never duplicate
+  // Clear prp_* and legacy pr+* / "pr *" so leftovers never duplicate
   stripAllRouteKeys(params);
   if (route) {
     const page = normalizePage(route.page);
@@ -198,7 +226,7 @@ export function clearRouteFromSearch(existingSearch = ''): string {
 }
 
 /**
- * Strip pr+ keys from hash when they were used; leave unrelated hash fragments.
+ * Strip prp_* / legacy pr+* keys from hash when they were used; leave unrelated fragments.
  */
 export function clearRouteFromHash(existingHash = ''): string {
   let h = String(existingHash || '');

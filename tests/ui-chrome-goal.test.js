@@ -49,6 +49,17 @@ assert.ok(
 );
 assert.ok(conv.includes('reverseComments'), 'supports reverse comments layout pref');
 assert.ok(
+  conv.includes('prp-composer__pending-threads') &&
+    conv.includes('pendingReviewGroup') &&
+    conv.includes('timelineItems'),
+  'pending review threads embed in Review submit form, not timeline'
+);
+assert.ok(
+  app.includes('countPendingReviewThreads') ||
+    /pendingCount.*thread|countPendingReviewThreads/.test(app),
+  'pending badge uses thread-level count'
+);
+assert.ok(
   conv.includes("onLoadMoreReviewThreads?.('all')") ||
     conv.includes('onLoadMoreReviewThreads?.("all")') ||
     /onLoadMoreReviewThreads\?\.\(['"]all['"]\)/.test(conv),
@@ -70,6 +81,13 @@ assert.ok(header.includes('prp-header__number'), 'number on header');
 assert.ok(header.includes('prp-header__title'), 'title on header');
 assert.ok(header.includes('prp-header__checks') || header.includes('checks:'), 'checks on header');
 assert.ok(header.includes('prp-header__stats'), 'stats on header');
+// Progressive load stage is the same stats pill (size morph, not dual fade / floating)
+assert.ok(header.includes('loadStage'), 'Header accepts loadStage prop');
+assert.ok(header.includes('HeaderStatsBadge') || header.includes('prp-header__stats-inner'), 'stats badge component');
+assert.ok(header.includes('prp-header__stats--busy'), 'busy tone on stats pill');
+assert.ok(header.includes('data-stats-mode'), 'metrics vs stage mode attr');
+assert.ok(!header.includes('prp-load-stage'), 'no floating load-stage in Header');
+assert.ok(!header.includes('prp-header__stats-stage'), 'no dual-layer stage fade');
 assert.ok(header.includes('prp-branch-split'), 'branch on header');
 assert.ok(header.includes('prp-header__actions'), 'actions on header');
 // Live (non-skeleton) block: primary row holds checks + stats before secondary
@@ -78,7 +96,10 @@ const live = liveStart >= 0 ? header.slice(liveStart) : header;
 const primaryLive = live.indexOf('prp-header__row--primary');
 const secondaryLive = live.indexOf('prp-header__row--secondary');
 const checksLive = live.indexOf('prp-header__checks');
-const statsLive = live.indexOf('prp-header__stats');
+const statsLive = Math.max(
+  live.indexOf('prp-header__stats'),
+  live.indexOf('HeaderStatsBadge')
+);
 assert.ok(primaryLive >= 0 && secondaryLive > primaryLive, 'primary before secondary in live header');
 assert.ok(checksLive > primaryLive && checksLive < secondaryLive, 'checks on primary row');
 assert.ok(statsLive > primaryLive && statsLive < secondaryLive, 'stats on primary row');

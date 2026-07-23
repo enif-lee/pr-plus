@@ -13,7 +13,13 @@ import {
   rowOffsets,
   highlightCode,
   escapeHtml,
+  clearHighlightCodeCache,
 } from '@common/utils';
+import {
+  ensureHljsLanguageForPath,
+  onHljsLanguagesChanged,
+  prefetchHljsLanguages,
+} from '@lib/hljs-lazy';
 import { calculateVisibleRange } from '@lib/virtual-range';
 import {
   isRowInSelection,
@@ -172,6 +178,8 @@ type DiffCodeLineProps = {
   expandBusyKey: any;
   /** false while user is actively scrolling — plain escapeHtml (cheap) */
   useSyntax: boolean;
+  /** Bumps when a lazy language grammar loads so memoized rows re-highlight */
+  hljsEpoch: number;
 };
 
 /**
@@ -193,6 +201,7 @@ const DiffCodeLine = memo(function DiffCodeLine({
   onExpandGap,
   expandBusyKey,
   useSyntax,
+  hljsEpoch: _hljsEpoch,
 }: DiffCodeLineProps) {
   const isCode =
     row.kind === 'diff-line' &&
@@ -469,6 +478,31 @@ function VirtualDiffImpl(props: any) {
     })
   );
 
+  /**
+   * Bumped when a lazy hljs grammar finishes loading so visible lines re-highlight.
+   * Included in DiffLineRow keys via render path (parent re-render is enough).
+   */
+  const [hljsEpoch, setHljsEpoch] = useState(0);
+  useLayoutEffect(() => {
+    return onHljsLanguagesChanged(() => {
+      clearHighlightCodeCache();
+      setHljsEpoch((n) => n + 1);
+    });
+  }, []);
+
+  // Prefetch grammars for every path in the current diff (deduped inside helper).
+  useLayoutEffect(() => {
+    if (!Array.isArray(virtualRows) || !virtualRows.length) return;
+    const paths: string[] = [];
+    for (const row of virtualRows) {
+      if (row?.kind === 'file-header' || row?.kind === 'diff-line') {
+        const p = row.filePath || row.path;
+        if (p) paths.push(String(p));
+      }
+    }
+    if (paths.length) prefetchHljsLanguages(paths, { fromPath: true });
+  }, [virtualRows]);
+
   const scrollRafRef = useRef(0);
   const pendingScrollRef = useRef(initialTop);
   const rangeRef = useRef(range);
@@ -515,7 +549,7 @@ function VirtualDiffImpl(props: any) {
     return true;
   }, []);
 
-  /** Prefetch hljs for rows about to enter the viewport (idle). */
+  /** Prefetch hljs grammars + warm line cache for rows about to enter the viewport. */
   const warmHighlightAhead = useCallback((end: number) => {
     const rows = metricsRef.current.virtualRows;
     if (!Array.isArray(rows)) return;
@@ -528,6 +562,7 @@ function VirtualDiffImpl(props: any) {
         if (!row || row.kind !== 'diff-line') continue;
         const lt = row.lineType;
         if (lt !== 'add' && lt !== 'del' && lt !== 'context') continue;
+        void ensureHljsLanguageForPath(row.filePath);
         if (row.split) {
           highlightCode(row.leftCode ?? '', row.filePath);
           highlightCode(row.rightCode ?? '', row.filePath);
@@ -830,6 +865,7 @@ function VirtualDiffImpl(props: any) {
                 onExpandGap={onExpandGap}
                 expandBusyKey={expandBusyKey}
                 useSyntax
+                hljsEpoch={hljsEpoch}
               />
             );
           })}
