@@ -30,13 +30,27 @@
 
 GitHub’s default PR list is flat. Stacked PRs (base = another PR’s head) are hard to see, and opening each PR is a full navigation. **pr+** keeps you on the pulls list and layers a high-performance review UI on top.
 
-### Screenshot
+### Screenshots
 
-Example pull request list with stack tree, review badges, and `base ← head` branch chips.
+#### Pulls list — stack tree
+
+Example list with stack indent, review badges, and `base ← head` branch chips.
 
 <p align="center">
   <img src="assets/screenshot-stack-demo.jpeg" alt="pr+ stack tree demo on GitHub pull requests list" width="720" />
 </p>
+
+#### PR review surfaces (1280×800)
+
+Captured on [`enif-lee/pr-plus`](https://github.com/enif-lee/pr-plus/pulls) **PR #1** — open a title from `/pulls` without leaving the page.
+
+| Layout | Description | Preview |
+|--------|-------------|---------|
+| **Conversation** | Centered modal: description, leave-review, merge box, timeline | <img src="screenshots/pr-view-conversation-1280x800.png" alt="Conversation modal at 1280×800" width="380" /> |
+| **Diff** | Files tree + unified/split hunks in the same modal shell | <img src="screenshots/pr-view-diff-1280x800.png" alt="Diff modal at 1280×800" width="380" /> |
+| **Side sheet** | Docked right-hand panel; pulls list stays visible on the left | <img src="screenshots/pr-view-side-sheet-1280x800.png" alt="Side sheet at 1280×800" width="380" /> |
+
+Assets: [`conversation`](./screenshots/pr-view-conversation-1280x800.png) · [`diff`](./screenshots/pr-view-diff-1280x800.png) · [`side sheet`](./screenshots/pr-view-side-sheet-1280x800.png)
 
 ---
 
@@ -175,7 +189,8 @@ Unzip and **Load unpacked**. (`dist/` is not committed.)
 3. Toggle **Show default order / Show stack tree** near the header.
 4. **Review:** click a PR title → **modal** opens (no navigation away from `/pulls`).
 5. Use Conversation / Diff, leave review, edit metadata, or `⌘K` for the command palette.
-6. Esc / close returns to the list. **Refresh while the modal is open** restores the modal (and Diff layout) after the stack list re-applies.
+6. Optional: switch **side sheet** from the header (list stays visible beside the panel). See [screenshots](#screenshots) above.
+7. Esc / close returns to the list. **Refresh while the modal is open** restores the modal (and Diff layout) after the stack list re-applies.
 
 ---
 
