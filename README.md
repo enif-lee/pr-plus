@@ -14,7 +14,6 @@
 <p align="center">
   <a href="https://github.com/enif-lee/pr-plus"><img alt="repo" src="https://img.shields.io/badge/github-enif--lee%2Fpr--plus-181717?logo=github" /></a>
   <img alt="manifest" src="https://img.shields.io/badge/manifest-v3-blue" />
-  <img alt="version" src="https://img.shields.io/badge/version-1.3.0-informational" />
 </p>
 
 ---
@@ -24,7 +23,7 @@
 | Value | What you get |
 |-------|----------------|
 | **Review without page navigation** | Click a PR on `/pulls` → full **modal** or **side sheet**. Stay on the list; no full PR page hop. |
-| **Ultra-fast, progressive open** | **List sketch → durable cache → live network** so the shell paints in milliseconds, then **incremental** fills refine the data. |
+| **Ultra-fast, progressive open** | **List sketch → durable cache → live network** so the shell paints quickly, then **incremental** fills refine the data. |
 | **Cache-first, soft revalidate** | Memory + **IndexedDB** cache with background refresh—writes stay snappy without cold remounts. |
 | **Butter-smooth Diff** | **Range-gated virtualization**, syntax-highlight **cache**, and zero per-pixel app re-renders while you scroll. |
 | **Stack visibility** | List reorders into a base/head **stack tree**; the modal shows a **stacked PR strip** for the current chain. |
@@ -42,15 +41,15 @@ Example list with stack indent, review badges, and `base ← head` branch chips.
   <img src="assets/screenshot-stack-demo.jpeg" alt="pr+ stack tree demo on GitHub pull requests list" width="720" />
 </p>
 
-#### PR review surfaces (1280×800)
+#### PR review surfaces
 
-Captured on [`enif-lee/pr-plus`](https://github.com/enif-lee/pr-plus/pulls) **PR #1** — open a title from `/pulls` without leaving the page.
+Open a title from `/pulls` without leaving the page.
 
 | Layout | Description | Preview |
 |--------|-------------|---------|
-| **Conversation** | Centered modal: description, leave-review, merge box, timeline | <img src="screenshots/pr-view-conversation-1280x800.png" alt="Conversation modal at 1280×800" width="380" /> |
-| **Diff** | Files tree + unified/split hunks in the same modal shell | <img src="screenshots/pr-view-diff-1280x800.png" alt="Diff modal at 1280×800" width="380" /> |
-| **Side sheet** | Docked right-hand panel; pulls list stays visible on the left | <img src="screenshots/pr-view-side-sheet-1280x800.png" alt="Side sheet at 1280×800" width="380" /> |
+| **Conversation** | Centered modal: description, leave-review, merge box, timeline | <img src="screenshots/pr-view-conversation-1280x800.png" alt="Conversation modal" width="380" /> |
+| **Diff** | Files tree + unified/split hunks in the same modal shell | <img src="screenshots/pr-view-diff-1280x800.png" alt="Diff modal" width="380" /> |
+| **Side sheet** | Docked right-hand panel; pulls list stays visible on the left | <img src="screenshots/pr-view-side-sheet-1280x800.png" alt="Side sheet" width="380" /> |
 
 Assets: [`conversation`](./screenshots/pr-view-conversation-1280x800.png) · [`diff`](./screenshots/pr-view-diff-1280x800.png) · [`side sheet`](./screenshots/pr-view-side-sheet-1280x800.png)
 
@@ -68,7 +67,7 @@ Assets: [`conversation`](./screenshots/pr-view-conversation-1280x800.png) · [`d
 | **Draft / review badges** | Draft pill; review states (`Review required`, `Changes requested`, `Approved`, …) |
 | **Branch badge** | `base ← head` chip |
 | **Magic links (list)** | Repo autolink rules on title/branch/body → external ticket shortcuts on the list |
-| **Private repos** | Optional GitHub PAT in the popup |
+| **Private repos** | GitHub PAT in the popup (required to activate the extension) |
 | **SPA support** | Re-applies tree/meta after Turbo soft-nav and DOM refresh |
 | **Instant list → modal handoff** | Title, labels, assignees, and milestone from the **list sketch** seed the modal before the network returns |
 
@@ -90,22 +89,25 @@ Open a PR title from the list → **centered modal** or **side sheet** on the **
 | **Parallel fetch** | PR core, files, comments, reviews, commits, checks, and subscription load **concurrently** (not waterfall) |
 | **Multi-layer cache** | In-memory SWR + **durable IndexedDB** so reopen is near-instant; patches revalidated on demand |
 | **Soft revalidate / incremental update** | Background refresh after open and after writes—no cold remount, no full-page spinner |
-| **Thin top loading bar** | Lightweight progress cue while metadata and threads stream in |
+| **Load status in header stats** | The **+add / −del / files** badge morphs to short progress labels while metadata and threads stream in (no floating pill / top bar) |
 | **Dual-window review threads** | Newest + oldest thread windows load **incrementally**; **Load more / Load all** when you need the full set |
 | **Virtualized Conversation** | Long timelines stay **fast** with variable-height virtual rows |
 | **Butter-smooth Diff scroll** | **Range-gated virtualization** (React only when the visible window changes), **highlight cache**, no per-pixel global store thrash |
 | **Session restore** | Layout (conversation/diff), shell (modal/sheet), collapse, viewed files, scroll restored after soft refresh |
-| **Deep-link routing** | `pr+page` / `pr+number` (and position) so shareable open state survives reloads |
+| **Deep-link routing** | `prp_page` / `prp_number` (and position) so shareable open state survives reloads; cleared on close |
 | **Theme-aware UI** | Follows GitHub light/dark color mode |
 
 #### Shells & chrome
 
 | Feature | Description |
 |---------|-------------|
-| **Centered modal** | Full-focus overlay for deep review |
-| **Side sheet** | Docked panel—**keep the PR list visible** while you review |
+| **Centered modal** | Full-focus overlay for deep review; **resizable** (corner drag, viewport-aware clamps) |
+| **Side sheet** | Docked panel—**keep the PR list visible** while you review; **resizable** width |
+| **Fullscreen shell** | Expand the panel to the viewport (header control + shortcut) |
 | **Stacked PR strip** | Jump the stack chain without leaving the shell |
-| **Header tips & actions** | Compact actions, subscribe, refresh, layout toggles with lightweight tooltips |
+| **Floating scrollbars** | Overlay thumbs on conversation / aside / diff panes; idle-hide, no classic gutter |
+| **Soft edge fade** | Scroll content dissolves at the panel edges instead of a hard clip |
+| **Header tips & actions** | Compact actions, subscribe, refresh, layout toggles; **Close PR** uses a clear danger style |
 
 #### Conversation
 
@@ -113,11 +115,16 @@ Open a PR title from the list → **centered modal** or **side sheet** on the **
 |---------|-------------|
 | **Description** | Markdown body with write/preview edit |
 | **Timeline** | Reviews, issue comments, review threads with code snippets; dual-window pagination |
+| **Mermaid diagrams** | `` ```mermaid `` `` fences render inline (lazy engine); **handDrawn** look; light **neutral** / shell **dark** theme |
+| **Diagram fullscreen** | **자세히 보기** / double-click → fit-to-stage viewer; **scroll or pinch zoom**, **drag pan**; Esc closes the viewer only |
+| **Syntax highlight** | Fenced code blocks via **lazy highlight.js** language chunks (including Dockerfile and common langs) |
 | **Entity links** | Authors, `@mentions`, labels, `#issue` refs → GitHub URLs |
 | **Magic links (modal)** | Autolink keys from title/body/branch linked in description & comments |
 | **Unified leave-review** | **Comment** / **Approve** / **Request changes** on one form (pending line comments attach on submit) |
 | **Edit / delete own comments** | Issue and review comments (including thread replies) |
-| **Merge box status** | Clear merge readiness with badges and conflict/checks context |
+| **Reply composer focus** | Thread reply actions appear when the reply field is focused (or draft text remains) |
+| **Merge box status** | Clear merge readiness; **GitHub-style check groups** (required / optional) with expandable lists |
+| **Compact meta rail** | Collapsed right rail: reviewers / assignees / checks / labels as avatar stacks and status chips; hover tips open over the conversation (not clipped by the splitter) |
 | **Profile avatars** | GitHub profile images for authors and pickers |
 
 #### Diff & code review
@@ -149,10 +156,10 @@ Open a PR title from the list → **centered modal** or **side sheet** on the **
 | **Milestone** | Set / clear |
 | **Linked issues** | Detected from body (`#N`, closing keywords) |
 | **Subscribe** | Optimistic GraphQL subscription toggle + header tip states |
-| **Close / reopen** | PR state |
+| **Close / reopen** | PR state (close control uses danger styling) |
 | **Merge** | Merge / squash / rebase (when allowed) |
 | **Update branch** | Sync head with base |
-| **Clear local cache** | Settings path to wipe **IndexedDB** detail cache when you need a hard reset |
+| **Clear local cache** | Popup action to wipe **IndexedDB** detail cache when you need a hard reset |
 
 #### Command palette & shortcuts
 
@@ -171,7 +178,7 @@ Deep matrix of GitHub PR-view vs modal: **[docs/github-pr-parity.md](./docs/gith
 ### Developer mode (local)
 
 1. Clone this repository.
-2. `npm install && npm run build` (builds the modal bundle under `src/modal/dist/`).
+2. `npm install && npm run build` (builds the modal bundle, CSS, Mermaid chunk, and hljs language packs under `src/modal/dist/`).
 3. Open Chrome or Edge → `chrome://extensions` (or `edge://extensions`).
 4. Enable **Developer mode**.
 5. **Load unpacked** → select this repository root (folder that contains `manifest.json`).
@@ -179,12 +186,11 @@ Deep matrix of GitHub PR-view vs modal: **[docs/github-pr-parity.md](./docs/gith
 ### Packaged ZIP
 
 ```bash
-npm install && npm run build
-mkdir -p dist/pr-plus && cp manifest.json dist/pr-plus/ && cp -R src dist/pr-plus/
-cd dist && zip -r pr-plus.zip pr-plus
+npm install && npm run package
+# → dist/pr-plus-<version>/ and dist/pr-plus-<version>.zip
 ```
 
-Unzip and **Load unpacked**. (`dist/` is not committed.)
+Unzip and **Load unpacked**, or point **Load unpacked** at the unpacked folder under `dist/`.
 
 ---
 
@@ -196,12 +202,15 @@ Unzip and **Load unpacked**. (`dist/` is not committed.)
 2. Paste a GitHub PAT → **Save**  
 3. Refresh the pulls page (features enable automatically)  
 
+The popup also lists **Chrome permissions** and recommended **PAT scopes** (classic `repo` / fine-grained Pull requests ± Contents).
+
 | Item | Details |
 |------|---------|
 | Storage | `chrome.storage.local` (extension-only, not synced) |
 | Access | **Service worker only** holds the raw token — never exposed to content scripts |
 | UI | After save, only a mask is shown (`••••` + last 4 chars) |
-| Recommended | Fine-grained: read/write on **Pull requests** (and Contents if applying suggestions) for target repos |
+| Classic scopes | `repo` for full PR features; add `notifications` for Subscribe |
+| Fine-grained | **Pull requests** Read & Write on target repos; **Contents** Read & Write if applying suggestions or attaching files |
 
 ---
 
@@ -213,16 +222,19 @@ Unzip and **Load unpacked**. (`dist/` is not committed.)
 3. Toggle **Show default order / Show stack tree** near the header.
 4. **Review:** click a PR title → **modal** opens (no navigation away from `/pulls`).
 5. Use Conversation / Diff, leave review, edit metadata, or `⌘K` for the command palette.
-6. Optional: switch **side sheet** from the header (list stays visible beside the panel). See [screenshots](#screenshots) above.
+6. Optional: switch **side sheet** or **fullscreen** from the header. See [screenshots](#screenshots) above.
 7. Esc / close returns to the list. **Refresh while the modal is open** restores the modal (and Diff layout) after the stack list re-applies.
+8. Diagrams: mermaid fences render in comments; open fullscreen for pan/zoom. Code fences pick up lazy language highlighting as needed.
 
 ---
 
 ## Permissions
 
+Declared in the extension manifest (also summarized in the popup settings UI):
+
 | Permission | Purpose |
 |------------|---------|
-| `storage` | Store the PAT locally |
+| `storage` | Store the PAT and options locally |
 | `https://github.com/*` | PR list DOM overlay + modal host |
 | `https://api.github.com/*` | List, detail, reviews, comments, merge, autolinks, GraphQL threads |
 
@@ -232,30 +244,33 @@ Unzip and **Load unpacked**. (`dist/` is not committed.)
 
 ```bash
 npm install
-npm run build    # modal bundle + CSS
-npm test         # build + unit suite
+npm run build      # service worker + modal bundle, CSS, mermaid, hljs langs
+npm run package    # versioned zip under dist/
+npm test           # build + unit suite
+npm run test:unit  # unit suite with tsx (no full package zip)
 ```
 
 ### Layout (summary)
 
 ```text
 src/
-  background.js            # PAT + GitHub API (service worker only)
-  content-bridge.js        # content ↔ background (no token in page)
-  content-bootstrap.js     # list bootstrap / SPA watch
-  content.js               # content entry
-  dom.js                   # list rows, indent, meta badges
-  fetch-pulls.js           # list / detail / writes / autolinks
-  storage.js               # chrome.storage.local helpers
-  tree.js                  # pure stack forest
-  pr-modal-host.js         # intercept PR click → mount modal
-  popup.html / popup.js    # PAT UI
-  styles.css               # list overlay styles
+  background.js / background.bundle.js   # PAT + GitHub API (service worker only)
+  content-bridge.js                      # content ↔ background (no token in page)
+  content-bootstrap.js                   # list bootstrap / SPA watch
+  content.js                             # content entry
+  dom.js                                 # list rows, indent, meta badges
+  fetch-pulls.js                         # list / detail / writes / autolinks
+  storage.js                             # chrome.storage.local helpers
+  tree.js                                # pure stack forest
+  pr-modal-host.js                       # intercept PR click → mount modal; load stage labels
+  popup.html / popup.js                  # PAT, options, permissions copy, cache clear
+  styles.css                             # list overlay styles
   modal/
-    App.jsx                # React modal UI
-    styles.css             # modal theme + layout
-    pure/                  # unit-tested pure helpers
-    dist/                  # built pr-modal.bundle.js + pr-modal.css
+    app/                                 # React modal root
+    views/                               # conversation, diff, chrome
+    components/                          # shared UI (markdown, mermaid, scrollbars, …)
+    lib/ + pure/                         # helpers (unit-tested pure paths)
+    dist/                                # pr-modal.bundle.js, CSS, mermaid.esm.js, hljs-langs/
 ```
 
 ---

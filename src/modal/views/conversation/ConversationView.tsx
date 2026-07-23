@@ -1189,6 +1189,7 @@ function ConversationViewImpl(props: any) {
               {detail.state === 'open' && !detail.merged ? (
                 <Button
                   size="sm"
+                  variant="danger"
                   disabled={actionBusy}
                   onClick={onClosePr}
                   title="Close pull request"
@@ -1276,9 +1277,7 @@ function ConversationViewImpl(props: any) {
             0
         );
       case 'empty':
-        return (
-          <p className="prp-muted prp-conversation-empty">No conversation yet.</p>
-        );
+        return null;
       case 'item':
         return renderTimelineItemCard(row.item, row.keyPrefix || '');
       default:

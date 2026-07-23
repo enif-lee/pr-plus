@@ -541,11 +541,18 @@ html.prp-scroll-lock body {
   border-color: color-mix(in srgb, var(--prp-accent) 45%, var(--prp-border));
   background: color-mix(in srgb, var(--prp-accent) 10%, var(--prp-bg));
 }
+/* Close PR — light red fill, strong red border (always, not only hover) */
+.prp-header__icon-btn--danger {
+  color: var(--prp-danger, #cf222e);
+  border-color: color-mix(in srgb, var(--prp-danger, #cf222e) 72%, var(--prp-border));
+  background: color-mix(in srgb, var(--prp-danger, #cf222e) 12%, var(--prp-bg));
+}
 .prp-header__icon-btn--danger:hover,
 .prp-header__icon-btn--danger:focus-visible {
   color: var(--prp-danger, #cf222e);
-  border-color: color-mix(in srgb, var(--prp-danger, #cf222e) 55%, var(--prp-border));
-  background: color-mix(in srgb, var(--prp-danger, #cf222e) 10%, var(--prp-bg));
+  border-color: var(--prp-danger, #cf222e);
+  background: color-mix(in srgb, var(--prp-danger, #cf222e) 18%, var(--prp-bg));
+  outline: none;
 }
 .prp-header__icon-btn:disabled {
   opacity: 0.45;
@@ -889,6 +896,14 @@ html.prp-scroll-lock body {
 
 .prp-header__more-item--danger {
   color: var(--prp-danger);
+  border: 1px solid color-mix(in srgb, var(--prp-danger) 55%, transparent);
+  background: color-mix(in srgb, var(--prp-danger) 10%, var(--prp-bg));
+  border-radius: 6px;
+}
+.prp-header__more-item--danger:hover,
+.prp-header__more-item--danger:focus-visible {
+  background: color-mix(in srgb, var(--prp-danger) 16%, var(--prp-bg));
+  border-color: var(--prp-danger);
 }
 
 /*
@@ -988,7 +1003,14 @@ html.prp-scroll-lock body {
 
 .prp-btn--danger {
   color: var(--prp-danger);
-  border-color: color-mix(in srgb, var(--prp-danger) 40%, var(--prp-border));
+  border-color: color-mix(in srgb, var(--prp-danger) 72%, var(--prp-border));
+  background: color-mix(in srgb, var(--prp-danger) 12%, var(--prp-bg));
+}
+.prp-btn--danger:hover,
+.prp-btn--danger:focus-visible {
+  color: var(--prp-danger);
+  border-color: var(--prp-danger);
+  background: color-mix(in srgb, var(--prp-danger) 18%, var(--prp-bg));
 }
 
 .prp-btn--ghost {
