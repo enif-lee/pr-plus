@@ -1,8 +1,8 @@
 'use strict';
 
 /**
- * After a successful merge, the PR shell (centered modal or side sheet) must
- * auto-close so the user lands back on the pulls list.
+ * After a successful close or merge, the PR shell (centered modal or side sheet)
+ * must auto-close so the user lands back on the pulls list.
  */
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -13,10 +13,8 @@ const appSrc = fs.readFileSync(
   'utf8'
 );
 
-assert.ok(
-  /async function onMergePr/.test(appSrc),
-  'onMergePr present'
-);
+assert.ok(/async function onMergePr/.test(appSrc), 'onMergePr present');
+assert.ok(/async function onClosePr/.test(appSrc), 'onClosePr present');
 
 // Successful merge path marks local detail + requestClose
 const mergeFn = appSrc.slice(appSrc.indexOf('async function onMergePr'));
@@ -30,16 +28,32 @@ assert.ok(
   'onMergePr marks detail.merged locally before close'
 );
 
-// Transition effect: open PR that becomes merged mid-session closes shell
+// Successful close path same contract
+const closeFn = appSrc.slice(appSrc.indexOf('async function onClosePr'));
+const closeBody = closeFn.slice(0, closeFn.indexOf('\n  async function onReopenPr'));
 assert.ok(
-  appSrc.includes('mergeCloseWasMergedRef') ||
-    appSrc.includes('mergeClosePrKeyRef'),
-  'tracks merged transition while open'
+  closeBody.includes('requestClose()') || closeBody.includes('requestClose('),
+  'onClosePr must call requestClose after successful close'
 );
 assert.ok(
-  /isMerged && mergeCloseWasMergedRef\.current === false/.test(appSrc) ||
-    /mergedSeenRef|wasMergedRef/.test(appSrc),
-  'closes only on false→true merged transition (not already-merged open)'
+  /state:\s*['"]closed['"]/.test(closeBody),
+  'onClosePr marks detail.state closed locally before close'
+);
+
+// Transition effect: open PR that becomes closed/merged mid-session closes shell
+assert.ok(
+  appSrc.includes('terminalCloseWasTerminalRef') ||
+    appSrc.includes('terminalClosePrKeyRef'),
+  'tracks terminal (closed/merged) transition while open'
+);
+assert.ok(
+  /isTerminal && terminalCloseWasTerminalRef\.current === false/.test(appSrc),
+  'closes only on open→terminal transition (not already-closed open)'
+);
+assert.ok(
+  appSrc.includes("toLowerCase() === 'closed'") &&
+    appSrc.includes('detail.merged'),
+  'terminal state includes closed and merged'
 );
 
 // requestClose is shared for modal + sheet exit animation
@@ -54,6 +68,7 @@ console.log('merge-auto-close.test.js: all assertions passed');
 console.log(
   JSON.stringify({
     mergeCallsRequestClose: true,
+    closeCallsRequestClose: true,
     transitionGuard: true,
     shellShared: true,
   })

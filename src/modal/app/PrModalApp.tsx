@@ -1688,32 +1688,34 @@ export function PrModalApp({
   }, [open, onClose, shellMode, layoutMode, setAnimClass]);
 
   /**
-   * After a successful merge (or soft-revalidate that flips `merged`), auto-close
-   * the centered modal or side sheet so the user returns to the pulls list.
-   * Does not close when opening an already-merged PR.
+   * After close or merge (or soft-revalidate that flips state), auto-close the
+   * centered modal or side sheet so the user returns to the pulls list.
+   * Does not close when opening an already-closed/merged PR.
    */
-  const mergeClosePrKeyRef = useRef('');
-  const mergeCloseWasMergedRef = useRef<boolean | null>(null);
+  const terminalClosePrKeyRef = useRef('');
+  const terminalCloseWasTerminalRef = useRef<boolean | null>(null);
   useEffect(() => {
     if (!open) {
-      mergeClosePrKeyRef.current = '';
-      mergeCloseWasMergedRef.current = null;
+      terminalClosePrKeyRef.current = '';
+      terminalCloseWasTerminalRef.current = null;
       return;
     }
     if (!detail) return;
     const key = `${detail.owner || ''}/${detail.repo || ''}#${detail.number}`;
-    const isMerged = Boolean(detail.merged);
-    if (mergeClosePrKeyRef.current !== key) {
-      mergeClosePrKeyRef.current = key;
-      mergeCloseWasMergedRef.current = isMerged;
+    const isTerminal =
+      Boolean(detail.merged) ||
+      String(detail.state || '').toLowerCase() === 'closed';
+    if (terminalClosePrKeyRef.current !== key) {
+      terminalClosePrKeyRef.current = key;
+      terminalCloseWasTerminalRef.current = isTerminal;
       return;
     }
-    if (isMerged && mergeCloseWasMergedRef.current === false) {
-      mergeCloseWasMergedRef.current = true;
+    if (isTerminal && terminalCloseWasTerminalRef.current === false) {
+      terminalCloseWasTerminalRef.current = true;
       requestClose();
       return;
     }
-    mergeCloseWasMergedRef.current = isMerged;
+    terminalCloseWasTerminalRef.current = isTerminal;
   }, [open, detail, requestClose]);
 
   // Reset close animation if host forces open again mid-exit / after unmount
@@ -3265,7 +3267,23 @@ export function PrModalApp({
         await api.updatePullState(detail.owner, detail.repo, detail.number, 'closed');
       }
       setActionMsg('Pull request closed.');
-      await onRefresh?.();
+      // Mark closed locally so UI + auto-close effect agree before host refresh.
+      setLocalDetail((d) =>
+        d
+          ? {
+              ...d,
+              state: 'closed',
+              mergeable: false,
+            }
+          : d
+      );
+      // Return to the pulls list (centered modal and side sheet).
+      requestClose();
+      try {
+        await onRefresh?.();
+      } catch {
+        /* list refresh is best-effort after close */
+      }
     } catch (err) {
       setActionMsg(err?.message || String(err));
     } finally {
