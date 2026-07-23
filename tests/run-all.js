@@ -43,6 +43,7 @@ const tests = [
   'ui-chrome-goal.test.js',
   'branch-rerequest.test.js',
   'merge-box.test.js',
+  'merge-auto-close.test.js',
   'checks.test.js',
   'narrow-chrome.test.js',
   'file-nav-layout.test.js',
