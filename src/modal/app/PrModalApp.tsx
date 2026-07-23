@@ -900,9 +900,10 @@ export function PrModalApp({
     }
   }, [mappedComments, commentIndex, setCommentIndex]);
 
-  // Conversation = body/comments/reviews/replies only. Diff = conversation + rows.
+  // Search is view-scoped: Conversation corpus vs Diff virtual rows only.
+  // Never mix the two so Find does not surface off-screen content.
   const searchMode =
-    layoutMode === LAYOUT_DIFF ? 'full' : 'conversation';
+    layoutMode === LAYOUT_DIFF ? 'diff' : 'conversation';
 
   // Build index only while find is open — not on every keystroke.
   const searchDocs = useMemo(() => {
@@ -1053,7 +1054,8 @@ export function PrModalApp({
         // (host re-renders with new detail refs during thread load and would restart search forever).
         const sortOpts = {
           isCancelled,
-          mode: searchMode === 'full' ? 'diff' : 'conversation',
+          // Match sort order to the active view corpus
+          mode: searchMode === 'diff' ? 'diff' : 'conversation',
           detail: detailRef.current,
         };
         if (typeof resolveQuerySearchStateAsync === 'function') {

@@ -374,8 +374,9 @@ assert.ok(
   );
   assert.ok(inline.includes('searchQuery'), 'InlineThread passes search to MarkdownView');
 
-  // Diff search nav must not force Conversation on prev (anchor-before-row bug)
+  // View-scoped search: Conversation corpus vs Diff rows only
 {
+  assert.equal(typeof search.buildDiffSearchIndex, 'function');
   assert.equal(
     typeof search.isSearchHitVisibleInLayout,
     'function',
@@ -383,6 +384,92 @@ assert.ok(
   );
   assert.equal(typeof search.resolveNavSearchStateForLayout, 'function');
   assert.equal(typeof search.searchHitHasRowIndex, 'function');
+
+  const detail = {
+    body: 'needle only in PR description body',
+    comments: [{ id: 1, body: 'needle in issue comment' }],
+    reviews: [{ id: 2, body: 'needle in review summary', state: 'COMMENTED' }],
+    reviewComments: [
+      {
+        id: 10,
+        body: 'needle in review thread',
+        path: 'a.ts',
+        line: 2,
+      },
+    ],
+  };
+  const rows = [
+    {
+      kind: 'file-header',
+      rowIndex: 0,
+      filePath: 'a.ts',
+      text: 'modified a.ts +1 −0',
+    },
+    {
+      kind: 'diff-line',
+      rowIndex: 1,
+      filePath: 'a.ts',
+      text: '+const needle_in_code = 1',
+      code: 'const needle_in_code = 1',
+    },
+    {
+      kind: 'inline-comment',
+      rowIndex: 2,
+      filePath: 'a.ts',
+      commentId: 10,
+      body: 'needle in review thread',
+      text: 'user: needle in review thread',
+    },
+  ];
+
+  const convOnly = search.buildSearchIndex(detail, rows, { mode: 'conversation' });
+  assert.ok(convOnly.every((d) => d.kind !== 'diff-line' && d.kind !== 'file-header'));
+  assert.ok(convOnly.some((d) => d.anchorId === 'body'));
+  const convHits = search.searchIndex(convOnly, 'needle');
+  assert.ok(convHits.length >= 1);
+  assert.ok(
+    convHits.every((h) => h.rowIndex == null || h.anchorId),
+    'conversation hits are anchors (not pure code rows)'
+  );
+  assert.ok(
+    !convHits.some((h) => h.kind === 'diff-line'),
+    'conversation search never returns code lines'
+  );
+
+  const diffOnly = search.buildSearchIndex(detail, rows, { mode: 'diff' });
+  assert.ok(
+    diffOnly.every((d) => d.rowIndex != null),
+    'diff corpus is virtual-row only'
+  );
+  assert.ok(
+    !diffOnly.some((d) => d.kind === 'body' || d.kind === 'issue-comment'),
+    'diff corpus excludes conversation-only docs'
+  );
+  const diffHits = search.searchIndex(diffOnly, 'needle');
+  assert.ok(diffHits.length >= 1);
+  assert.ok(
+    diffHits.every((h) => h.rowIndex != null),
+    'diff hits always have rowIndex'
+  );
+  assert.ok(
+    !diffHits.some((h) => h.anchorId === 'body'),
+    'diff search never returns PR body'
+  );
+  // Code + inline thread on Diff are findable
+  assert.ok(diffHits.some((h) => Number(h.rowIndex) === 1));
+  assert.ok(diffHits.some((h) => Number(h.rowIndex) === 2));
+
+  // Body-only query: conversation finds it, diff does not
+  const bodyOnlyDiff = search.searchIndex(diffOnly, 'description body');
+  assert.equal(bodyOnlyDiff.length, 0, 'diff cannot find PR description text');
+  const bodyOnlyConv = search.searchIndex(convOnly, 'description body');
+  assert.ok(bodyOnlyConv.length >= 1, 'conversation finds description');
+
+  // Code-only query: diff finds it, conversation does not
+  const codeOnlyConv = search.searchIndex(convOnly, 'needle_in_code');
+  assert.equal(codeOnlyConv.length, 0, 'conversation cannot find code text');
+  const codeOnlyDiff = search.searchIndex(diffOnly, 'needle_in_code');
+  assert.ok(codeOnlyDiff.length >= 1, 'diff finds code text');
 
   // Body anchor is NOT visible in Diff
   assert.equal(
@@ -393,79 +480,49 @@ assert.ok(
     false,
     'body hit hidden from Diff nav'
   );
-  // Code row IS visible in Diff
   assert.equal(
     search.isSearchHitVisibleInLayout({ rowIndex: 12, start: 0 }, 'diff'),
     true
   );
-  // Review comment with row stays in Diff
-  assert.equal(
-    search.isSearchHitVisibleInLayout(
-      {
-        anchorId: 'review-comment:9',
-        kind: 'review-comment',
-        rowIndex: 40,
-        start: 0,
-      },
-      'diff'
-    ),
-    true
-  );
-  // Same without row still allowed (expand path) but jump prefers row first
+  // Diff-only: review-comment without row is not navigable in Diff view
   assert.equal(
     search.isSearchHitVisibleInLayout(
       { anchorId: 'review-comment:9', kind: 'review-comment', start: 0 },
       'diff'
     ),
-    true
+    false
   );
 
-  // Mixed hit list: Diff prev from a code hit must skip body, land on earlier row
+  // Mixed hit list: Diff prev skips body → earlier row
   const mixed = [
     { anchorId: 'body', kind: 'body', start: 0 },
     { rowIndex: 5, kind: 'diff', start: 0 },
-    { anchorId: 'body', kind: 'body', start: 4 }, // second body occ
+    { anchorId: 'body', kind: 'body', start: 4 },
     { rowIndex: 20, kind: 'diff', start: 0 },
     { anchorId: 'issue-comment:1', kind: 'issue-comment', start: 0 },
   ];
-  // From index 3 (row 20), go prev → should land on row 5 (index 1), not body
   const prev = search.resolveNavSearchStateForLayout(mixed, 3, -1, 'diff');
   assert.equal(prev.shouldJump, true);
   assert.equal(prev.hitIndex, 1, 'prev skips conversation-only body');
   assert.equal(prev.activeHit.rowIndex, 5);
 
-  // From index 1, prev wraps; skip body → land on row 20
   const wrap = search.resolveNavSearchStateForLayout(mixed, 1, -1, 'diff');
   assert.equal(wrap.shouldJump, true);
   assert.equal(wrap.activeHit.rowIndex, 20);
 
-  // full-mode first hit prefers row over body
-  const fullDocs = search.buildSearchIndex(
-    {
-      body: 'needle in body',
-      comments: [],
-      reviews: [],
-      reviewComments: [],
-    },
-    [
-      { kind: 'diff-line', rowIndex: 0, text: 'context', filePath: 'a.ts' },
-      { kind: 'diff-line', rowIndex: 1, text: '+needle in code', filePath: 'a.ts' },
-    ],
-    { mode: 'full' }
-  );
-  const fullState = search.resolveQuerySearchState(fullDocs, 'needle', {
-    mode: 'full',
-  });
-  assert.ok(fullState.hits.length >= 2);
-  assert.ok(
-    search.searchHitHasRowIndex(fullState.activeHit),
-    'full query initial hit prefers Diff row, not body anchor'
-  );
-
-  // App contract: jumpToSearchHit prefers row / no Diff→Conversation flip
+  // App: Diff uses mode 'diff', not 'full'
   const appSrcNav = fs.readFileSync(
     path.join(__dirname, '../src/modal/app/PrModalApp.tsx'),
     'utf8'
+  );
+  assert.ok(
+    /searchMode[\s\S]*LAYOUT_DIFF[\s\S]*'diff'/.test(appSrcNav) ||
+      appSrcNav.includes("layoutMode === LAYOUT_DIFF ? 'diff'"),
+    'App Diff search mode is view-scoped diff'
+  );
+  assert.ok(
+    !/LAYOUT_DIFF \? 'full'/.test(appSrcNav),
+    'App must not use full corpus while on Diff'
   );
   assert.ok(
     appSrcNav.includes('searchHitHasRowIndex') ||
@@ -475,11 +532,6 @@ assert.ok(
   assert.ok(
     appSrcNav.includes('resolveNavSearchStateForLayout'),
     'navSearch is layout-aware'
-  );
-  assert.ok(
-    appSrcNav.includes('Never yank Diff') ||
-      appSrcNav.includes('layoutMode === LAYOUT_DIFF'),
-    'does not force Conversation from Diff on anchor-only hits'
   );
 }
 

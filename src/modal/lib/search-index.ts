@@ -86,21 +86,66 @@ export function buildConversationSearchIndex(prDetail) {
 }
 
 /**
- * Build docs from PR detail payload + flattened virtual rows (Diff / full corpus).
+ * Diff view corpus only: what the virtual list currently renders
+ * (file headers, hunk/code lines, inline review threads). No PR description,
+ * issue comments, or review summaries that live only in Conversation.
+ *
+ * @param {Array<{ kind?: string, filePath?: string, text?: string, body?: string, code?: string, rowIndex?: number, commentId?: string|number }>} virtualRows
+ * @returns {SearchDoc[]}
+ */
+export function buildDiffSearchIndex(virtualRows) {
+  const docs = [];
+  if (!Array.isArray(virtualRows)) return docs;
+
+  for (const row of virtualRows) {
+    if (!row || row.rowIndex == null) continue;
+    const kind = row.kind || 'diff';
+    // Prefer comment body for inline threads; otherwise row.text / code.
+    let text = '';
+    if (kind === 'inline-comment') {
+      text = row.body || row.text || '';
+    } else if (kind === 'file-header') {
+      text = row.filePath || row.text || '';
+    } else {
+      text = row.text || row.code || '';
+    }
+    const isInline = kind === 'inline-comment' && row.commentId != null;
+    pushDoc(docs, `row-${row.rowIndex}`, kind, text, {
+      filePath: row.filePath,
+      rowIndex: row.rowIndex,
+      commentId: isInline ? row.commentId : undefined,
+      anchorId: isInline ? `review-comment:${row.commentId}` : undefined,
+    });
+  }
+
+  return docs;
+}
+
+/**
+ * Build search docs for the **active view** only.
+ * - `conversation`: description, issue comments, reviews, review threads
+ * - `diff`: virtualized Diff rows currently on that screen
+ * - `full` (legacy): conversation + diff rows (tests / tooling only)
+ *
  * @param {object} prDetail
  * @param {Array<{ kind: string, filePath?: string, text: string, rowIndex: number }>} virtualRows
- * @param {{ mode?: 'full'|'conversation' }} [opts]
+ * @param {{ mode?: 'full'|'conversation'|'diff' }} [opts]
  * @returns {SearchDoc[]}
  */
 export function buildSearchIndex(prDetail, virtualRows, opts: any = {}) {
-  if (opts.mode === 'conversation') {
+  // UI always passes 'conversation' | 'diff'. Omit → full for legacy callers/tests.
+  const mode = opts.mode || 'full';
+  if (mode === 'conversation') {
     return buildConversationSearchIndex(prDetail);
   }
+  if (mode === 'diff') {
+    return buildDiffSearchIndex(virtualRows);
+  }
 
+  // Legacy full corpus (not used by the modal UI)
   const docs = [];
   const pr = prDetail || {};
 
-  // Full mode still includes conversation fields + diff rows
   pushDoc(docs, 'body', 'body', pr.body, { anchorId: 'body' });
 
   if (Array.isArray(pr.comments)) {
@@ -142,13 +187,8 @@ export function buildSearchIndex(prDetail, virtualRows, opts: any = {}) {
     });
   }
 
-  if (Array.isArray(virtualRows)) {
-    for (const row of virtualRows) {
-      pushDoc(docs, `row-${row.rowIndex}`, row.kind || 'diff', row.text, {
-        filePath: row.filePath,
-        rowIndex: row.rowIndex,
-      });
-    }
+  for (const d of buildDiffSearchIndex(virtualRows)) {
+    docs.push(d);
   }
 
   return docs;
@@ -361,20 +401,8 @@ export function isSearchHitVisibleInLayout(hit, layoutMode) {
     String(layoutMode).toLowerCase() === 'diff';
 
   if (inDiff) {
-    // Inline review threads and code lines live in the Diff virtual list.
-    if (searchHitHasRowIndex(hit)) return true;
-    // review-comment without mapped row can still be opened via expand/jump,
-    // but pure body / issue-comment / review events must not force Conversation.
-    const aid = String(hit.anchorId || '');
-    const kind = String(hit.kind || '');
-    if (
-      aid.startsWith('review-comment:') ||
-      kind === 'review-comment' ||
-      kind === 'review-reply'
-    ) {
-      return true;
-    }
-    return false;
+    // Diff search is row-only; conversation anchors are never in this view's index.
+    return searchHitHasRowIndex(hit);
   }
 
   // Conversation (or unknown): any navigable hit

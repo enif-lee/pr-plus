@@ -14,7 +14,7 @@
 <p align="center">
   <a href="https://github.com/enif-lee/pr-plus"><img alt="repo" src="https://img.shields.io/badge/github-enif--lee%2Fpr--plus-181717?logo=github" /></a>
   <img alt="manifest" src="https://img.shields.io/badge/manifest-v3-blue" />
-  <img alt="version" src="https://img.shields.io/badge/version-1.2.0-informational" />
+  <img alt="version" src="https://img.shields.io/badge/version-1.3.0-informational" />
 </p>
 
 ---
