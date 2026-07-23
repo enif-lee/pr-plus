@@ -12,7 +12,7 @@ pr+ enhances the GitHub pull request list by showing stacked pull requests as a 
 
 - **Publisher / developer:** enif-lee  
 - **Repository:** https://github.com/enif-lee/pr-plus  
-- **Contact email:** ed@rtzr.ai  
+- **Contact email:** enif.lee@gmail.com  
 
 For privacy questions or data-deletion requests related to the Extension, contact the email above.
 
@@ -167,5 +167,5 @@ For Chrome Web Store privacy practices:
 
 ## 13. Contact
 
-Questions about this Privacy Policy: **ed@rtzr.ai**  
+Questions about this Privacy Policy: **enif.lee@gmail.com**  
 Project homepage: https://github.com/enif-lee/pr-plus  

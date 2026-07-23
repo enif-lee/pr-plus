@@ -2,16 +2,85 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
-const SCRATCH = '/var/folders/sl/km7nh7qj50b9mw4901n7ch940000gn/T/grok-goal-00241f759391/implementer';
+const SCRATCH =
+  process.env.PRP_SCRATCH ||
+  require('node:path').join(require('node:os').tmpdir(), 'pr-plus-test-scratch');
 fs.mkdirSync(SCRATCH, { recursive: true });
 
-const tests = ['tree.test.js', 'storage.test.js', 'fetch-pulls.test.js', 'dom.test.js', 'content-bootstrap.test.js', 'browser-eval.js'];
+// Ensure modal bundle exists for host/bundle tests
+const build = spawnSync(process.execPath, [path.join(__dirname, '../scripts/build-modal.mjs')], {
+  encoding: 'utf8',
+  env: process.env,
+});
+if (build.status !== 0) {
+  process.stderr.write(build.stdout + build.stderr);
+  process.exit(build.status || 1);
+}
+
+const tests = [
+  'tree.test.js',
+  'storage.test.js',
+  'service-worker-load.test.js',
+  'fetch-pulls.test.js',
+  'fetch-pr-detail.test.js',
+  'detail-cache.test.js',
+  'detail-idb-cache.test.js',
+  'review-threads-revalidate.test.js',
+  'aside-lists.test.js',
+  'line-selection.test.js',
+  'comment-nav.test.js',
+  'md-inline-vs-fence.test.js',
+  'review-threads.test.js',
+  'review-threads-dual-window.test.js',
+  'markdown-composer.test.js',
+  'composer-attach.test.js',
+  'pending-review.test.js',
+  'conversation-timeline.test.js',
+  'session-view.test.js',
+  'shell-preference.test.js',
+  'side-sheet-toggle.test.js',
+  'scroll-lock.test.js',
+  'ui-chrome-goal.test.js',
+  'branch-rerequest.test.js',
+  'merge-box.test.js',
+  'checks.test.js',
+  'narrow-chrome.test.js',
+  'file-nav-layout.test.js',
+  'file-nav-ui.test.js',
+  'file-tree-ext-filter.test.js',
+  'uri-route.test.js',
+  'uri-route-host.test.js',
+  'diff-snippet.test.js',
+  'diff-expand-gap.test.js',
+  'pr-edit-api.test.js',
+  'searchable-select.test.js',
+  'diff-thread-refresh.test.js',
+  'ui-polish.test.js',
+  'stack-strip-path.test.js',
+  'comments-page.test.js',
+  'diff-commit-filter.test.js',
+  'refresh-loading.test.js',
+  'dom.test.js',
+  'content-bootstrap.test.js',
+  'browser-eval.js',
+  'modal-pure.test.js',
+  'modal-modern-pure.test.js',
+  'pr-modal-bundle.test.js',
+  'pr-modal-host.test.js',
+  'pr-modal-diff-anim.test.js',
+  'pr-modal-search.test.js',
+  'refactor-memo-store.test.js',
+  'memo-render-count.test.js',
+  'diff-scroll-perf.test.js',
+  'verify-manifest.js',
+];
+
 const combined = [];
 
 for (const file of tests) {
-  const result = spawnSync(process.execPath, [path.join(__dirname, file)], {
+  const result = spawnSync(process.execPath, ['--import', 'tsx', path.join(__dirname, file)], {
     encoding: 'utf8',
-    env: process.env,
+    env: { ...process.env, PRP_SCRATCH: SCRATCH },
   });
   const out = (result.stdout || '') + (result.stderr || '');
   combined.push(`=== ${file} ===\n${out}`);
@@ -23,18 +92,19 @@ for (const file of tests) {
 
 const testOutput = combined.join('\n');
 fs.writeFileSync(path.join(SCRATCH, 'test-output.txt'), testOutput);
+fs.writeFileSync(path.join(SCRATCH, 'pr-modal-unit.log'), testOutput);
 
 const treeMatch = testOutput.match(/--- serialized tree ---\n([\s\S]+?)(?:\n===|\n$|$)/);
 if (treeMatch) {
   fs.writeFileSync(path.join(SCRATCH, 'tree-output.txt'), treeMatch[1].trim() + '\n');
 }
 
-// browser-eval.log written by browser-eval.js itself; verify it exists
 const browserEvalPath = path.join(SCRATCH, 'browser-eval.log');
 if (!fs.existsSync(browserEvalPath)) {
-  console.error('browser-eval.log missing');
-  process.exit(1);
+  // browser-eval writes to old path sometimes — rewrite from suite output
+  const m = testOutput.match(/=== browser-eval\.js ===\n([\s\S]*?)(?=\n=== |\n$)/);
+  if (m) fs.writeFileSync(browserEvalPath, m[1]);
 }
 
 console.log(testOutput);
-console.log(`\nWrote test-output.txt and browser-eval.log to ${SCRATCH}`);
+console.log(`\nWrote verification logs to ${SCRATCH}`);

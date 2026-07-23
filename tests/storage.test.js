@@ -5,6 +5,11 @@ const {
   setGithubToken,
   watchGithubToken,
   maskGithubToken,
+  getExtensionPrefs,
+  setExtensionPrefs,
+  normalizePrefs,
+  DEFAULT_PREFS,
+  PREFS_KEY,
 } = require('../src/storage.js');
 
 function mockStorage(initial = {}) {
@@ -90,6 +95,32 @@ async function main() {
     api._emit({ githubToken: { newValue: 'ghp_abc' } });
     assert.equal(seen, 'ghp_abc');
     unwatch();
+  }
+
+  {
+    assert.equal(DEFAULT_PREFS.fastReview, true);
+    assert.equal(DEFAULT_PREFS.reverseComments, true);
+    assert.deepEqual(normalizePrefs(null), DEFAULT_PREFS);
+    assert.deepEqual(normalizePrefs({ fastReview: false }), {
+      fastReview: false,
+      reverseComments: true,
+    });
+  }
+
+  {
+    const { area, data } = mockStorage();
+    const defaults = await getExtensionPrefs(area);
+    assert.equal(defaults.fastReview, true);
+    assert.equal(defaults.reverseComments, true);
+
+    const next = await setExtensionPrefs({ reverseComments: false }, area);
+    assert.equal(next.fastReview, true);
+    assert.equal(next.reverseComments, false);
+    assert.ok(data[PREFS_KEY]);
+    assert.equal(data[PREFS_KEY].reverseComments, false);
+
+    const again = await setExtensionPrefs({ fastReview: false }, area);
+    assert.deepEqual(again, { fastReview: false, reverseComments: false });
   }
 
   console.log('storage.test.js: all assertions passed');

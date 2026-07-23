@@ -11,9 +11,96 @@
  */
 
 const TOKEN_KEY = 'githubToken';
+/** User prefs in chrome.storage.local (non-secret). */
+const PREFS_KEY = 'extensionPrefs';
+
+/**
+ * Default extension preferences.
+ * - fastReview: progressive dual-window load (core first, threads on demand)
+ * - reverseComments: composer → merge box → conversation (latest-first timeline)
+ */
+const DEFAULT_PREFS = {
+  fastReview: true,
+  reverseComments: true,
+};
 
 function getStorageArea(storageApi = globalThis.chrome?.storage?.local) {
   return storageApi || null;
+}
+
+/**
+ * Normalize prefs object; unknown keys dropped, missing keys filled from defaults.
+ * @param {unknown} raw
+ * @returns {{ fastReview: boolean, reverseComments: boolean }}
+ */
+function normalizePrefs(raw) {
+  const src = raw && typeof raw === 'object' ? raw : {};
+  return {
+    fastReview:
+      typeof src.fastReview === 'boolean'
+        ? src.fastReview
+        : DEFAULT_PREFS.fastReview,
+    reverseComments:
+      typeof src.reverseComments === 'boolean'
+        ? src.reverseComments
+        : DEFAULT_PREFS.reverseComments,
+  };
+}
+
+/**
+ * @param {unknown} [storageApi]
+ * @returns {Promise<{ fastReview: boolean, reverseComments: boolean }>}
+ */
+function getExtensionPrefs(storageApi) {
+  const area = getStorageArea(storageApi);
+  if (!area) return Promise.resolve({ ...DEFAULT_PREFS });
+
+  return new Promise((resolve) => {
+    area.get([PREFS_KEY], (result) => {
+      resolve(normalizePrefs(result?.[PREFS_KEY]));
+    });
+  });
+}
+
+/**
+ * Merge patch into stored prefs and return the full next prefs.
+ * @param {Partial<{ fastReview: boolean, reverseComments: boolean }>} patch
+ * @param {unknown} [storageApi]
+ */
+async function setExtensionPrefs(patch, storageApi) {
+  const area = getStorageArea(storageApi);
+  if (!area) return Promise.reject(new Error('chrome.storage unavailable'));
+
+  const prev = await getExtensionPrefs(area);
+  const next = normalizePrefs({
+    ...prev,
+    ...(patch && typeof patch === 'object' ? patch : {}),
+  });
+
+  return new Promise((resolve, reject) => {
+    area.set({ [PREFS_KEY]: next }, () => {
+      const err = globalThis.chrome?.runtime?.lastError;
+      if (err) reject(err);
+      else resolve(next);
+    });
+  });
+}
+
+/**
+ * Watch prefs changes (local area only).
+ * @param {(prefs: { fastReview: boolean, reverseComments: boolean }) => void} onChange
+ * @param {unknown} [storageApi]
+ */
+function watchExtensionPrefs(onChange, storageApi = globalThis.chrome?.storage) {
+  if (!storageApi?.onChanged || typeof onChange !== 'function') return () => {};
+
+  const listener = (changes, areaName) => {
+    if (areaName !== 'local' || !changes[PREFS_KEY]) return;
+    onChange(normalizePrefs(changes[PREFS_KEY].newValue));
+  };
+
+  storageApi.onChanged.addListener(listener);
+  return () => storageApi.onChanged.removeListener(listener);
 }
 
 /** Mask for UI — keep only last 4 chars (no usable prefix leak). */
@@ -32,9 +119,11 @@ function maskGithubToken(token) {
 function looksLikeGithubToken(token) {
   if (typeof token !== 'string') return false;
   const t = token.trim();
-  if (t.length < 20 || t.length > 300) return false;
+  // Classic PATs ~40+, fine-grained often 80–255; allow a wide band.
+  if (t.length < 20 || t.length > 400) return false;
   if (/\s/.test(t)) return false;
-  return /^(gh[pours]|github_pat_)[A-Za-z0-9_]+$/.test(t);
+  // ghp_/gho_/ghu_/ghs_/ghr_ classic; github_pat_ fine-grained
+  return /^(gh[pours]_|github_pat_)[A-Za-z0-9_]+$/.test(t);
 }
 
 function getGithubToken(storageApi) {
@@ -105,12 +194,18 @@ function watchGithubToken(onChange, storageApi = globalThis.chrome?.storage) {
 
 const storageApi = {
   TOKEN_KEY,
+  PREFS_KEY,
+  DEFAULT_PREFS,
+  normalizePrefs,
   maskGithubToken,
   looksLikeGithubToken,
   getGithubToken,
   getGithubTokenStatus,
   setGithubToken,
   watchGithubToken,
+  getExtensionPrefs,
+  setExtensionPrefs,
+  watchExtensionPrefs,
 };
 
 if (typeof module !== 'undefined' && module.exports) {

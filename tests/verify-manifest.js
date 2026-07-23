@@ -21,6 +21,18 @@ const swPath = path.join(__dirname, '..', manifest.background.service_worker);
 if (!fs.existsSync(swPath)) {
   throw new Error(`Service worker missing: ${manifest.background.service_worker}`);
 }
+const swSrc = fs.readFileSync(swPath, 'utf8');
+// Prefer single-file SW bundle (no multi importScripts — avoids Chrome status 15).
+if (manifest.background.service_worker.endsWith('background.bundle.js')) {
+  if (!swSrc.includes('PRModalCollapse') && !swSrc.includes('annotateFilesForCollapse')) {
+    throw new Error('background.bundle.js must include collapse helpers');
+  }
+  if (swSrc.includes('importScripts(')) {
+    throw new Error('background.bundle.js must not call importScripts (deps inlined)');
+  }
+} else if (!swSrc.includes('modal/pure/collapse.js')) {
+  throw new Error('service worker must importScripts collapse pure helper for gitattributes');
+}
 
 if (!manifest.action?.default_popup) {
   throw new Error('action.default_popup required for API token settings');
@@ -41,7 +53,6 @@ if (!script.matches.some((m) => m.includes('github.com/*') || m === 'https://git
   throw new Error('Content script must match https://github.com/* for SPA navigation');
 }
 
-// Content scripts must not load storage.js / fetch-pulls.js (they hold/use the PAT).
 const forbiddenInContent = ['src/storage.js', 'src/fetch-pulls.js', 'src/background.js'];
 for (const f of forbiddenInContent) {
   if (script.js.includes(f)) {
@@ -55,9 +66,18 @@ const requiredJs = [
   'src/content-bridge.js',
   'src/content-bootstrap.js',
   'src/content.js',
+  'src/modal/dist/pr-modal.bundle.js',
+  'src/pr-modal-host.js',
 ];
 for (const f of requiredJs) {
   if (!script.js.includes(f)) throw new Error(`Missing ${f} in content_scripts`);
+  const abs = path.join(__dirname, '..', f);
+  if (!fs.existsSync(abs)) throw new Error(`Missing file on disk: ${f}`);
 }
 
-console.log('verify-manifest.js: manifest v3 OK, PAT isolated in service worker');
+const war = manifest.web_accessible_resources?.[0];
+if (!war?.resources?.includes('src/modal/dist/pr-modal.css')) {
+  throw new Error('web_accessible_resources must expose pr-modal.css');
+}
+
+console.log('verify-manifest.js: manifest v3 OK, modal bundle wired, PAT isolated');

@@ -347,6 +347,18 @@ function createPrTreeApp(deps) {
 
       lastSyncedPath = path;
       lastPageSignature = pageSignature(pagePrNumbers);
+
+      // Notify modal host that stack list is ready (refresh restore can open modal)
+      try {
+        window.dispatchEvent(
+          new CustomEvent('pr-plus-stack-ready', {
+            detail: { owner: repoInfo.owner, repo: repoInfo.repo, prCount: cachedPrs.length },
+          })
+        );
+      } catch {
+        /* ignore */
+      }
+
       return {
         ok: true,
         prCount: cachedPrs.length,

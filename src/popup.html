@@ -7,7 +7,7 @@
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      width: 280px;
+      width: 300px;
       padding: 12px;
       font: 13px/1.4 -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
       color: #1f2328;
@@ -17,13 +17,22 @@
       font-size: 13px;
       font-weight: 600;
     }
+    h2 {
+      margin: 14px 0 6px;
+      font-size: 11px;
+      font-weight: 600;
+      color: #656d76;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
     label {
       display: block;
       margin-bottom: 4px;
       font-size: 12px;
       color: #656d76;
     }
-    input {
+    input[type="password"],
+    input[type="text"] {
       width: 100%;
       padding: 6px 8px;
       border: 1px solid #d0d7de;
@@ -78,6 +87,49 @@
     }
     a { color: #0969da; text-decoration: none; }
     a:hover { text-decoration: underline; }
+    .pref {
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+      margin: 0 0 8px;
+      padding: 8px;
+      border: 1px solid #d0d7de;
+      border-radius: 8px;
+      background: #f6f8fa;
+      cursor: pointer;
+    }
+    .pref:hover { border-color: #0969da66; }
+    .pref input {
+      margin: 2px 0 0;
+      flex-shrink: 0;
+    }
+    .pref__body {
+      min-width: 0;
+      flex: 1;
+    }
+    .pref__title {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: #1f2328;
+      margin-bottom: 2px;
+    }
+    .pref__desc {
+      display: block;
+      font-size: 11px;
+      color: #656d76;
+      line-height: 1.35;
+    }
+    .pref--action {
+      cursor: default;
+      flex-direction: column;
+    }
+    .pref--action:hover {
+      border-color: #d0d7de;
+    }
+    .pref--action button {
+      margin: 0;
+    }
   </style>
 </head>
 <body>
@@ -92,8 +144,39 @@
   </div>
   <p class="hint">
     <a href="https://github.com/settings/tokens" target="_blank" rel="noreferrer">Create token</a>
-    · repo / PR read · stored only in this extension’s local storage (not synced)
+    · classic: <code>repo</code> (+ <code>notifications</code> for subscribe)
+    · stored only in this extension’s local storage (not synced)
   </p>
+
+  <h2>Options</h2>
+  <label class="pref" for="pref-fast-review">
+    <input id="pref-fast-review" type="checkbox" />
+    <span class="pref__body">
+      <span class="pref__title">가볍고 빠른 PR 검토</span>
+      <span class="pref__desc">핵심 정보 먼저 표시하고 리뷰 스레드는 점진적으로 불러옵니다. 끄면 열 때 전체 스레드를 모두 로드합니다.</span>
+    </span>
+  </label>
+  <label class="pref" for="pref-reverse-comments">
+    <input id="pref-reverse-comments" type="checkbox" />
+    <span class="pref__body">
+      <span class="pref__title">PR Comments 역순 정렬</span>
+      <span class="pref__desc">코멘트 작성란 → Merge box → Conversation(최신 우선) 순으로 배치합니다.</span>
+    </span>
+  </label>
+
+  <h2>Storage</h2>
+  <div class="pref pref--action">
+    <span class="pref__body">
+      <span class="pref__title">PR detail cache (IndexedDB)</span>
+      <span class="pref__desc">
+        GitHub 탭에 저장된 PR 상세 캐시(메모리 + IndexedDB)를 지웁니다.
+        다음 PR 열 때 네트워크에서 다시 불러옵니다. 열려 있는 github.com 탭이 필요합니다.
+      </span>
+      <div class="row" style="margin-top: 8px">
+        <button id="clear-idb" type="button">Clear IndexedDB cache</button>
+      </div>
+    </span>
+  </div>
 
   <script src="popup.js"></script>
 </body>

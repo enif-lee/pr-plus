@@ -2,7 +2,7 @@
 node_modules/
 
 # Packaged extension builds (zip / unpacked release trees)
-dist/
+/dist/
 
 # Local agent-browser profile, screenshots, session junk
 .browser/
@@ -26,3 +26,6 @@ npm-debug.log*
 .turbo/
 coverage/
 tmp/
+
+# Packaged/signed extension artifacts
+*.crx
