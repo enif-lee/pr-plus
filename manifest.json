@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "pr+",
   "version": "1.4.1",
-  "description": "Display GitHub pull requests as a tree based on base/head branch relationships.",
+  "description": "GitHub PR stack tree on /pulls plus a fast in-page review shell: Conversation, Diff, Mermaid, progressive load, merge, and deep links without leaving the list.",
   "permissions": ["storage"],
   "host_permissions": [
     "https://github.com/*",
