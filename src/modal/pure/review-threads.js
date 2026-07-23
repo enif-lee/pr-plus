@@ -139,6 +139,15 @@
     return map;
   }
 
+  function countPendingReviewThreads(comments) {
+    const threads = groupReviewThreads(comments);
+    let n = 0;
+    for (const t of threads) {
+      if (t.pending) n += 1;
+    }
+    return n;
+  }
+
   function countPendingReviewThreadsByPath(comments) {
     const map = new Map();
     const threads = groupReviewThreads(comments);
@@ -321,6 +330,7 @@
     mapGraphqlReviewThreads,
     countReviewThreadsByPath,
     countUnresolvedReviewThreadsByPath,
+    countPendingReviewThreads,
     countPendingReviewThreadsByPath,
     countReviewThreadTotals,
     normalizeReviewCommentId,

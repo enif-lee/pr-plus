@@ -211,5 +211,9 @@ assert.equal(
   policy.resolveModalShortcutAction({ mod: true, shift: false, key: 'f' }),
   'openSearch'
 );
+assert.equal(
+  policy.resolveModalShortcutAction({ mod: true, shift: true, key: 'f' }),
+  'toggleFullscreen'
+);
 
 console.log('comment-nav.test.js: all assertions passed');

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Button } from '@common/Button';
 import { Badge } from '@common/Badge';
 import { TipPopover } from '@common/TipPopover';
@@ -13,6 +13,7 @@ import {
   IconLinkExternal,
   IconPencil,
   IconShellMode,
+  IconFullscreen,
   IconX,
   IconBell,
   IconBellSlash,
@@ -26,9 +27,104 @@ import { hasChecksData } from '../conversation/ChecksPanel';
 import { useModalStore } from '../../store/modal-store';
 
 /**
+ * Diff-stat badge that morphs size when content switches (metrics ↔ load stage).
+ * Same pill element; width/height animate via FLIP, no dual-layer fade.
+ */
+function HeaderStatsBadge({
+  loadStage = null,
+  skeleton = false,
+  additions = 0,
+  deletions = 0,
+  fileCount = 0,
+}: {
+  loadStage?: { label?: string | null; busy?: boolean; phase?: string | null } | null;
+  skeleton?: boolean;
+  additions?: number;
+  deletions?: number;
+  fileCount?: number;
+}) {
+  const stageLabel = loadStage?.label ? String(loadStage.label) : '';
+  const stageBusy = Boolean(loadStage?.busy);
+  const showStage = Boolean(stageLabel);
+  const badgeRef = useRef<HTMLDivElement | null>(null);
+  const sizeRef = useRef({ w: 0, h: 0 });
+  const contentKey = showStage
+    ? `stage:${stageLabel}:${stageBusy ? 1 : 0}`
+    : skeleton
+      ? 'metrics:skeleton'
+      : `metrics:${additions}:${deletions}:${fileCount}`;
+
+  useLayoutEffect(() => {
+    const el = badgeRef.current;
+    if (!el) return;
+    const prevW = sizeRef.current.w;
+    const prevH = sizeRef.current.h;
+    // Measure natural size for current content
+    el.style.width = 'auto';
+    el.style.height = 'auto';
+    const rect = el.getBoundingClientRect();
+    const w = Math.max(1, Math.ceil(rect.width));
+    const h = Math.max(1, Math.ceil(rect.height));
+    if (prevW > 0 && prevH > 0 && (prevW !== w || prevH !== h)) {
+      // FLIP: hold previous size, then animate to natural size
+      el.style.width = `${prevW}px`;
+      el.style.height = `${prevH}px`;
+      void el.offsetWidth;
+      el.style.width = `${w}px`;
+      el.style.height = `${h}px`;
+    } else {
+      el.style.width = `${w}px`;
+      el.style.height = `${h}px`;
+    }
+    sizeRef.current = { w, h };
+  }, [contentKey]);
+
+  return (
+    <div
+      ref={badgeRef}
+      className={[
+        'prp-header__stats',
+        skeleton ? 'prp-header__stats--skeleton' : '',
+        showStage ? 'prp-header__stats--busy' : '',
+      ]
+        .filter(Boolean)
+        .join(' ')}
+      data-stats-mode={showStage ? 'stage' : 'metrics'}
+      data-content-key={contentKey}
+      title={showStage ? stageLabel : skeleton ? undefined : 'Files changed'}
+      role={showStage ? 'status' : undefined}
+      aria-live={showStage ? 'polite' : undefined}
+      aria-busy={showStage && stageBusy ? true : undefined}
+    >
+      <span key={contentKey} className="prp-header__stats-inner">
+        {showStage ? (
+          <>
+            {stageBusy ? (
+              <span className="prp-header__stats-spinner" aria-hidden="true" />
+            ) : null}
+            <span className="prp-header__stats-label">{stageLabel}</span>
+          </>
+        ) : skeleton ? (
+          <span className="prp-skeleton__chip prp-skeleton__chip--stat" />
+        ) : (
+          <>
+            <span className="prp-stat-add">+{additions}</span>
+            <span className="prp-stat-del">−{deletions}</span>
+            <span className="prp-muted">{fileCount} files</span>
+          </>
+        )}
+      </span>
+    </div>
+  );
+}
+
+/**
  * Shared PR header for modal + side sheet shells.
  * Row 1: #number · title · draft (only) · checks (when present) · diff stats
  * Row 2: branch direction · author · action toggles
+ *
+ * Progressive `loadStage` is integrated into the diff-stat badge (same pill;
+ * size morphs when content changes — not a floating popup / dual fade).
  */
 export function Header(props: any) {
   const {
@@ -48,7 +144,10 @@ export function Header(props: any) {
     onRefresh = null,
     shellMode = 'modal',
     onToggleShell,
+    shellFullscreen = false,
+    onToggleFullscreen,
     titleEditSignal = 0,
+    loadStage = null,
   } = props;
 
   const localBaseRef = useRef<HTMLButtonElement | null>(null);
@@ -159,16 +258,20 @@ export function Header(props: any) {
           <span className="prp-header__number prp-skeleton__chip prp-skeleton__chip--num" />
           <span className="prp-skeleton__row prp-skeleton__row--lg prp-skeleton__row--w45" />
           <span className="prp-skeleton__chip" />
-          <span className="prp-header__stats prp-header__stats--skeleton">
-            <span className="prp-skeleton__chip prp-skeleton__chip--stat" />
-          </span>
+          <HeaderStatsBadge loadStage={loadStage} skeleton />
         </div>
         <div className="prp-header__row prp-header__row--secondary">
           <span className="prp-skeleton__chip prp-skeleton__chip--branch" />
           <div className="prp-header__actions">
-            <Button onClick={onClose} aria-label="Close" shortcut="Esc">
-              ✕
-            </Button>
+            <button
+              type="button"
+              className="prp-header__icon-btn prp-has-tip"
+              onClick={onClose}
+              aria-label="Close"
+            >
+              <IconX size={16} aria-hidden="true" />
+              <TipPopover title="Close" shortcut="Esc" />
+            </button>
           </div>
         </div>
       </header>
@@ -287,11 +390,12 @@ export function Header(props: any) {
             checks: {detail.checks.state || 'unknown'}
           </Badge>
         ) : null}
-        <div className="prp-header__stats" title="Files changed">
-          <span className="prp-stat-add">+{detail.additions ?? 0}</span>
-          <span className="prp-stat-del">−{detail.deletions ?? 0}</span>
-          <span className="prp-muted">{fileCount} files</span>
-        </div>
+        <HeaderStatsBadge
+          loadStage={loadStage}
+          additions={detail.additions ?? 0}
+          deletions={detail.deletions ?? 0}
+          fileCount={fileCount}
+        />
       </div>
 
       {/* Row 2: branches + actions */}
@@ -405,6 +509,26 @@ export function Header(props: any) {
                       ? 'Switch to modal view'
                       : 'Switch to side sheet view'
                   }
+                />
+              </button>
+            ) : null}
+            {typeof onToggleFullscreen === 'function' ? (
+              <button
+                type="button"
+                className="prp-header__icon-btn prp-fullscreen-toggle prp-has-tip"
+                onClick={onToggleFullscreen}
+                aria-label={
+                  shellFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'
+                }
+                aria-pressed={Boolean(shellFullscreen)}
+                data-fullscreen={shellFullscreen ? '1' : '0'}
+              >
+                <IconFullscreen active={Boolean(shellFullscreen)} size={16} />
+                <TipPopover
+                  title={
+                    shellFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'
+                  }
+                  shortcut={shortcutMod ? `${shortcutMod}Shift+F` : null}
                 />
               </button>
             ) : null}
@@ -522,9 +646,15 @@ export function Header(props: any) {
                 <TipPopover title="Open on GitHub" />
               </a>
             ) : null}
-            <Button onClick={onClose} title="Close" shortcut="Esc">
-              <IconX size={14} />
-            </Button>
+            <button
+              type="button"
+              className="prp-header__icon-btn prp-has-tip"
+              onClick={onClose}
+              aria-label="Close"
+            >
+              <IconX size={16} aria-hidden="true" />
+              <TipPopover title="Close" shortcut="Esc" />
+            </button>
           </div>
 
           {/* Narrow: overflow menu (same handlers as inline row) */}
@@ -557,6 +687,21 @@ export function Header(props: any) {
                       {shellMode === 'sheet'
                         ? 'Switch to modal view'
                         : 'Switch to side sheet'}
+                    </button>
+                  </li>
+                ) : null}
+                {typeof onToggleFullscreen === 'function' ? (
+                  <li role="none">
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="prp-header__more-item"
+                      onClick={() => {
+                        setOverflowOpen(false);
+                        onToggleFullscreen();
+                      }}
+                    >
+                      {shellFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
                     </button>
                   </li>
                 ) : null}

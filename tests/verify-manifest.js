@@ -79,5 +79,35 @@ const war = manifest.web_accessible_resources?.[0];
 if (!war?.resources?.includes('src/modal/dist/pr-modal.css')) {
   throw new Error('web_accessible_resources must expose pr-modal.css');
 }
+if (
+  !war?.resources?.some(
+    (r) => r === 'src/modal/dist/hljs-langs/*' || r.includes('hljs-langs')
+  )
+) {
+  throw new Error('web_accessible_resources must expose hljs-langs/* for lazy syntax');
+}
+if (
+  !war?.resources?.some(
+    (r) => r === 'src/modal/dist/mermaid.esm.js' || r.includes('mermaid.esm')
+  )
+) {
+  throw new Error('web_accessible_resources must expose mermaid.esm.js for diagrams');
+}
+
+const langsDir = path.join(__dirname, '..', 'src/modal/dist/hljs-langs');
+if (!fs.existsSync(langsDir)) {
+  throw new Error('Missing src/modal/dist/hljs-langs — run npm run build:modal');
+}
+const langChunks = fs.readdirSync(langsDir).filter((f) => f.endsWith('.js'));
+if (langChunks.length < 10) {
+  throw new Error(`Expected hljs language chunks, found ${langChunks.length}`);
+}
+
+const mermaidChunk = path.join(__dirname, '..', 'src/modal/dist/mermaid.esm.js');
+if (!fs.existsSync(mermaidChunk)) {
+  throw new Error('Missing src/modal/dist/mermaid.esm.js — run npm run build:modal');
+}
 
 console.log('verify-manifest.js: manifest v3 OK, modal bundle wired, PAT isolated');
+console.log(`hljs-langs-chunks=${langChunks.length}`);
+console.log(`mermaid-chunk-bytes=${fs.statSync(mermaidChunk).size}`);

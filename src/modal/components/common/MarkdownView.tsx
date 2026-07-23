@@ -1,11 +1,12 @@
-import React, { useMemo, memo } from 'react';
+import React, { useMemo, memo, useEffect, useState } from 'react';
 // memo for render isolation
 import { parseSuggestionFences } from '@lib/pr-edit-api';
 import { splitMarkdownSegments } from '@lib/markdown-composer';
 import { markSearchInHtml } from '@lib/search-index';
+import { onHljsLanguagesChanged } from '@lib/hljs-lazy';
 import { MermaidBlock } from './MermaidBlock';
 import { SuggestionBlock } from './SuggestionBlock';
-import { renderMdHtml } from './utils';
+import { clearHighlightCodeCache, renderMdHtml } from './utils';
 
 function MarkdownViewImpl({
   source,
@@ -23,6 +24,14 @@ function MarkdownViewImpl({
   searchOccurrenceIndex = null,
 }: any) {
   const raw = source == null || source === '' ? '_No content_' : String(source);
+  /** Re-render fenced blocks when a lazy grammar finishes loading */
+  const [hljsEpoch, setHljsEpoch] = useState(0);
+  useEffect(() => {
+    return onHljsLanguagesChanged(() => {
+      clearHighlightCodeCache();
+      setHljsEpoch((n) => n + 1);
+    });
+  }, []);
   const suggestions =
     typeof parseSuggestionFences === 'function' ? parseSuggestionFences(raw) : [];
   const segments = useMemo(() => {
@@ -72,6 +81,8 @@ function MarkdownViewImpl({
             />
           );
         }
+        // hljsEpoch invalidates after lazy language load so fences re-highlight
+        void hljsEpoch;
         let html = renderMdHtml(seg.content || '', linkCtx);
         if (q && typeof markSearchInHtml === 'function') {
           html = markSearchInHtml(html, q, {
@@ -81,7 +92,7 @@ function MarkdownViewImpl({
         }
         return (
           <div
-            key={`h-${i}`}
+            key={`h-${i}-${hljsEpoch}`}
             dangerouslySetInnerHTML={{
               __html: html,
             }}

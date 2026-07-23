@@ -432,7 +432,14 @@ function InlineThreadImpl(props: any) {
                 onUploadFile={onUploadFile}
                 linkCtx={linkCtx}
               />
-              <div className="prp-composer__row">
+              {/* Actions only after Reply field is focused (or draft text remains) */}
+              <div
+                className={`prp-composer__row prp-inline-thread__composer-actions${
+                  String(replyText || '').trim()
+                    ? ' prp-inline-thread__composer-actions--open'
+                    : ''
+                }`}
+              >
                 <Button
                   size="sm"
                   variant="primary"

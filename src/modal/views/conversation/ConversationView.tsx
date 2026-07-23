@@ -1,15 +1,18 @@
-import React, { useEffect, useMemo, useRef, useState, memo } from 'react';
+import React, { useEffect, useMemo, useRef, useState, memo, useCallback } from 'react';
 import { Button } from '@common/Button';
 import { Badge } from '@common/Badge';
 import { Card } from '@common/Card';
 import { AsideSection } from '@common/AsideSection';
 import { MarkdownComposer } from '@common/MarkdownComposer';
 import { MarkdownView } from '@common/MarkdownView';
+import { TipPopover } from '@common/TipPopover';
 import { UserLink } from '@common/UserLink';
 import { LabelLink } from '@common/LabelLink';
 import { formatWhen } from '@common/utils';
 import { Avatar } from '@common/Avatar';
 import {
+  IconChevronLeft,
+  IconChevronRight,
   IconDisclosure,
   IconFileDiff,
   IconMergeStatus,
@@ -17,6 +20,14 @@ import {
   IconTrash,
 } from '@common/icons';
 import { buildUnifiedReviewerRows, isBotAccount } from '@lib/searchable-select';
+import {
+  conversationAsideWidthPx,
+  loadAsidePref,
+  resolveAsideStorage,
+  saveAsidePref,
+  toggleAsideCollapsed,
+} from '@lib/aside-layout';
+import { AsideCompactRail } from './AsideCompactRail';
 import {
   buildConversationTimeline,
   partitionTimelineWithThreadGap,
@@ -34,9 +45,11 @@ import { MetaList } from './MetaList';
 import { AsideCommitsTimeline } from './AsideCommitsTimeline';
 import { AsideFilesTree } from './AsideFilesTree';
 import { ChecksPanel, hasChecksData } from './ChecksPanel';
+import { MergeBoxChecks } from './MergeBoxChecks';
 import { LoadingSkeleton } from '../chrome/LoadingSkeleton';
 import { VirtualConversationList } from './VirtualConversationList';
 import { InlineThread } from '../diff/InlineThread';
+import { FloatingScrollbar } from '../../components/common/FloatingScrollbar';
 
 function ConversationViewImpl(props: any) {
   const {
@@ -104,6 +117,7 @@ function ConversationViewImpl(props: any) {
   const [mergeMethod, setMergeMethod] = useState<MergeMethod>('merge');
   const [mergeMenuOpen, setMergeMenuOpen] = useState(false);
   const mergeMenuRef = useRef<HTMLDivElement | null>(null);
+  const asideScrollRef = useRef<HTMLAsideElement | null>(null);
   /** Conversation footer: Comment (issue) vs Review (pending + review events). */
   const [composerMode, setComposerMode] = useState<'comment' | 'review'>(() =>
     Number(pendingCount) > 0 ? 'review' : 'comment'
@@ -124,6 +138,30 @@ function ConversationViewImpl(props: any) {
   const [groupThreadOpenOverrides, setGroupThreadOpenOverrides] = useState(
     () => new Map<string, boolean>()
   );
+  /** Right metadata rail collapse (compact avatars / checks). */
+  const [asideCollapsed, setAsideCollapsed] = useState(() => {
+    try {
+      if (typeof window === 'undefined') return false;
+      return loadAsidePref(resolveAsideStorage(window)).collapsed;
+    } catch {
+      return false;
+    }
+  });
+
+  const onToggleAside = useCallback(() => {
+    setAsideCollapsed((prev) => {
+      const next = toggleAsideCollapsed(prev);
+      try {
+        if (typeof window !== 'undefined') {
+          saveAsidePref(resolveAsideStorage(window), { collapsed: next });
+        }
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }, []);
+
   // When a pending review appears, surface Review controls
   useEffect(() => {
     if (Number(pendingCount) > 0) setComposerMode('review');
@@ -144,6 +182,21 @@ function ConversationViewImpl(props: any) {
     }
     return [];
   }, [detail]);
+
+  /** Pending review-group is embedded in the Review submit form (not the timeline). */
+  const pendingReviewGroup = useMemo(() => {
+    return (
+      allItems.find(
+        (i: any) => i && i.kind === 'review-group' && i.pending
+      ) || null
+    );
+  }, [allItems]);
+
+  const timelineItems = useMemo(() => {
+    return allItems.filter(
+      (i: any) => !(i && i.kind === 'review-group' && i.pending)
+    );
+  }, [allItems]);
 
   const qSearch = String(searchQuery || '').trim();
   const hitAnchorSet = useMemo(() => {
@@ -168,14 +221,14 @@ function ConversationViewImpl(props: any) {
   const threadGap: any = useMemo(() => {
     if (typeof partitionTimelineWithThreadGap !== 'function') {
       return {
-        top: allItems,
+        top: timelineItems,
         bottom: [],
         hiddenCount: 0,
         showGap: false,
       };
     }
-    return partitionTimelineWithThreadGap(allItems, reviewThreadsMeta);
-  }, [allItems, reviewThreadsMeta]);
+    return partitionTimelineWithThreadGap(timelineItems, reviewThreadsMeta);
+  }, [timelineItems, reviewThreadsMeta]);
 
   // Search jump is handled inside VirtualConversationList (scrollToAnchor).
   // No client-side pagination — virtual list shows all loaded items; remaining
@@ -192,20 +245,20 @@ function ConversationViewImpl(props: any) {
       return {
         items: threadGap.top,
         bottomItems: threadGap.bottom,
-        total: allItems.length,
+        total: timelineItems.length,
         showThreadGap: true,
         hiddenCount: hidden || threadGap.hiddenCount,
       };
     }
     // Single window (or dual without matched oldest): fold after all loaded items
     return {
-      items: allItems,
+      items: timelineItems,
       bottomItems: [],
-      total: allItems.length,
+      total: timelineItems.length,
       showThreadGap: hasMore && hidden > 0,
       hiddenCount: hidden,
     };
-  }, [allItems, threadGap, reviewThreadsMeta]);
+  }, [timelineItems, threadGap, reviewThreadsMeta]);
 
   const mergeStatus = useMemo(
     () => (typeof buildMergeBoxStatus === 'function' ? buildMergeBoxStatus(detail) : null),
@@ -437,6 +490,110 @@ function ConversationViewImpl(props: any) {
     });
   }
 
+  /** Shared pending/submitted thread list rows (file:line + expand). */
+  function renderReviewGroupThreadList(
+    item: any,
+    keyPrefix = '',
+    opts: { compact?: boolean } = {}
+  ) {
+    const reviewId = item.id;
+    const allThreads = Array.isArray(item.threads) ? item.threads : [];
+    if (!allThreads.length) {
+      return opts.compact ? (
+        <p className="prp-muted prp-review-group__empty prp-composer__pending-empty">
+          No pending file comments yet.
+        </p>
+      ) : null;
+    }
+    return (
+      <ul
+        className={`prp-review-group__list${
+          opts.compact ? ' prp-review-group__list--in-composer' : ''
+        }`}
+      >
+        {allThreads.map((t: any) => {
+          const open = isGroupThreadOpen(reviewId, t);
+          const fileLoc = formatThreadFileLoc(t);
+          return (
+            <li
+              key={String(t.id)}
+              className={`prp-review-group__row${
+                open ? ' prp-review-group__row--open' : ''
+              }${t.resolved ? ' prp-review-group__row--resolved' : ''}${
+                t.pending ? ' prp-review-group__row--pending' : ''
+              }`}
+            >
+              <div className="prp-review-group__row-head">
+                <button
+                  type="button"
+                  className="prp-review-group__row-btn"
+                  onClick={() => toggleGroupThread(reviewId, t)}
+                  aria-expanded={open}
+                >
+                  <span className="prp-review-group__chev" aria-hidden="true">
+                    <IconDisclosure open={open} size={16} />
+                  </span>
+                  <span
+                    className="prp-mono prp-review-group__path"
+                    title={fileLoc || ''}
+                  >
+                    {fileLoc || t.path || 'thread'}
+                  </span>
+                  {/* In composer: pending is shown via row header tint, not a badge */}
+                  {t.pending && !opts.compact ? (
+                    <Badge tone="warn" className="prp-review-group__badge">
+                      Pending
+                    </Badge>
+                  ) : null}
+                  {t.outdated ? (
+                    <Badge tone="muted" className="prp-review-group__badge">
+                      Outdated
+                    </Badge>
+                  ) : null}
+                  {t.resolved && !t.pending ? (
+                    <Badge tone="ok" className="prp-review-group__badge">
+                      Resolved
+                    </Badge>
+                  ) : null}
+                </button>
+                {typeof onJumpToReviewThread === 'function' && t.path ? (
+                  <button
+                    type="button"
+                    className="prp-icon-btn prp-review-group__jump"
+                    title={`View in Diff · ${fileLoc || t.path}`}
+                    aria-label={`View ${fileLoc || t.path} in Diff`}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onJumpToReviewThread({
+                        id: t.id,
+                        path: t.path,
+                        line: t.line,
+                        startLine: t.startLine ?? t.line,
+                        side: t.side || 'RIGHT',
+                        outdated: Boolean(t.outdated),
+                      });
+                    }}
+                  >
+                    <IconFileDiff size={16} />
+                  </button>
+                ) : null}
+              </div>
+              {open ? (
+                <div className="prp-review-group__thread">
+                  {renderReviewThreadCard(t, `${keyPrefix}g${reviewId}-`, {
+                    forceExpanded: true,
+                    hideOuterHeader: true,
+                  })}
+                </div>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+    );
+  }
+
   function renderReviewGroupCard(item: any, keyPrefix = '') {
     const reviewId = item.id;
     const allThreads = Array.isArray(item.threads) ? item.threads : [];
@@ -445,14 +602,14 @@ function ConversationViewImpl(props: any) {
       Boolean(item.pending) ||
       state === 'PENDING' ||
       allThreads.some((t: any) => t.pending);
+    // Pending groups are shown inside the Review composer — never the timeline
+    if (isPending) return null;
     const stateLabel =
       state === 'APPROVED'
         ? 'approved'
         : state === 'CHANGES_REQUESTED'
           ? 'requested changes'
-          : isPending
-            ? 'started a review'
-            : 'left a comment';
+          : 'left a comment';
     const groupAnchor = `review-group:${reviewId}`;
 
     return (
@@ -460,12 +617,9 @@ function ConversationViewImpl(props: any) {
         key={`${keyPrefix}${String(item.key || item.id)}`}
         className={searchCardClass(
           groupAnchor,
-          `prp-card--timeline prp-card--timeline-review-group${
-            isPending ? ' prp-card--timeline-review-group--pending' : ''
-          }`
+          'prp-card--timeline prp-card--timeline-review-group'
         )}
         data-search-anchor={groupAnchor}
-        data-pending={isPending ? '1' : undefined}
       >
         <div className="prp-conversation-feed__meta">
           <Avatar login={item.author} avatarUrl={item.avatarUrl} size="md" />
@@ -473,126 +627,17 @@ function ConversationViewImpl(props: any) {
             <UserLink login={item.author || 'user'} />
           </strong>
           {item.isBot ? <Badge tone="muted">Bot</Badge> : null}
-          {isPending ? (
-            <Badge tone="warn" title="Not yet submitted">
-              Pending
-            </Badge>
-          ) : null}
           <span className="prp-muted prp-review-group__action">{stateLabel}</span>
-          {item.at && !isPending ? (
+          {item.at ? (
             <span className="prp-muted">{formatWhen(item.at)}</span>
-          ) : isPending ? (
-            <span className="prp-muted">not submitted</span>
           ) : null}
         </div>
         {item.body ? (
           <div className="prp-review-group__body">
             {renderSearchableBody(item.body, `review:${reviewId}`, true)}
           </div>
-        ) : isPending && allThreads.length === 0 ? (
-          <p className="prp-muted prp-review-group__empty">
-            Pending review with no file comments yet.
-          </p>
         ) : null}
-        <ul className="prp-review-group__list">
-          {allThreads.map((t: any) => {
-            const open = isGroupThreadOpen(reviewId, t);
-            const fileLoc = formatThreadFileLoc(t);
-            return (
-              <li
-                key={String(t.id)}
-                className={`prp-review-group__row${
-                  open ? ' prp-review-group__row--open' : ''
-                }${t.resolved ? ' prp-review-group__row--resolved' : ''}${
-                  t.pending ? ' prp-review-group__row--pending' : ''
-                }`}
-              >
-                <div className="prp-review-group__row-head">
-                  <button
-                    type="button"
-                    className="prp-review-group__row-btn"
-                    onClick={() => toggleGroupThread(reviewId, t)}
-                    aria-expanded={open}
-                  >
-                    <span className="prp-review-group__chev" aria-hidden="true">
-                      <IconDisclosure open={open} size={16} />
-                    </span>
-                    <span
-                      className="prp-mono prp-review-group__path"
-                      title={fileLoc || ''}
-                    >
-                      {fileLoc || t.path || 'thread'}
-                    </span>
-                    {t.pending ? (
-                      <Badge tone="warn" className="prp-review-group__badge">
-                        Pending
-                      </Badge>
-                    ) : null}
-                    {t.outdated ? (
-                      <Badge tone="muted" className="prp-review-group__badge">
-                        Outdated
-                      </Badge>
-                    ) : null}
-                    {t.resolved ? (
-                      <Badge tone="ok" className="prp-review-group__badge">
-                        Resolved
-                      </Badge>
-                    ) : null}
-                  </button>
-                  {typeof onJumpToReviewThread === 'function' && t.path ? (
-                    <button
-                      type="button"
-                      className="prp-icon-btn prp-review-group__jump"
-                      title={`View in Diff · ${fileLoc || t.path}`}
-                      aria-label={`View ${fileLoc || t.path} in Diff`}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        onJumpToReviewThread({
-                          id: t.id,
-                          path: t.path,
-                          line: t.line,
-                          startLine: t.startLine ?? t.line,
-                          side: t.side || 'RIGHT',
-                          outdated: Boolean(t.outdated),
-                        });
-                      }}
-                    >
-                      <IconFileDiff size={16} />
-                    </button>
-                  ) : null}
-                </div>
-                {open ? (
-                  <div className="prp-review-group__thread">
-                    {renderReviewThreadCard(t, `${keyPrefix}g${reviewId}-`, {
-                      forceExpanded: true,
-                      hideOuterHeader: true,
-                    })}
-                  </div>
-                ) : null}
-              </li>
-            );
-          })}
-        </ul>
-        {isPending ? (
-          <div className="prp-review-group__pending-actions">
-            <span className="prp-muted prp-review-group__pending-hint">
-              {allThreads.length} pending comment
-              {allThreads.length === 1 ? '' : 's'} — submit from the form below
-            </span>
-            {typeof onDiscardPending === 'function' ? (
-              <Button
-                size="sm"
-                variant="danger"
-                disabled={actionBusy}
-                onClick={() => onDiscardPending?.()}
-                title="Discard pending review"
-              >
-                Discard
-              </Button>
-            ) : null}
-          </div>
-        ) : null}
+        {renderReviewGroupThreadList(item, keyPrefix)}
       </Card>
     );
   }
@@ -944,11 +989,14 @@ function ConversationViewImpl(props: any) {
           <div className="prp-merge-box__copy">
             <h3 className="prp-merge-box__headline">{ms.headline}</h3>
             <p className="prp-merge-box__helper">{ms.helper}</p>
-            {ms.checksLine ? (
-              <p className="prp-merge-box__checks-line prp-muted">{ms.checksLine}</p>
-            ) : null}
           </div>
         </div>
+
+        {hasChecksData(detail.checks) ? (
+          <MergeBoxChecks checks={detail.checks} />
+        ) : ms.checksLine ? (
+          <p className="prp-merge-box__checks-line prp-muted">{ms.checksLine}</p>
+        ) : null}
 
         {detail.state === 'open' && !detail.merged ? (
           <div className="prp-merge-box__actions">
@@ -1072,12 +1120,52 @@ function ConversationViewImpl(props: any) {
         }
       >
         <div className="prp-composer prp-composer--review" ref={commentBoxRef}>
+          {/* Pending file threads live at the top of the Review form (not timeline) */}
+          {composerMode === 'review' && pendingReviewGroup ? (
+            <div
+              className="prp-composer__pending-threads"
+              data-pending-threads={
+                Array.isArray(pendingReviewGroup.threads)
+                  ? pendingReviewGroup.threads.length
+                  : 0
+              }
+            >
+              <div className="prp-composer__pending-head">
+                <span className="prp-composer__pending-title">
+                  Pending review
+                </span>
+                <Badge tone="warn" title="Not yet submitted">
+                  {Array.isArray(pendingReviewGroup.threads)
+                    ? pendingReviewGroup.threads.length
+                    : pendingCount}{' '}
+                  thread
+                  {(Array.isArray(pendingReviewGroup.threads)
+                    ? pendingReviewGroup.threads.length
+                    : pendingCount) === 1
+                    ? ''
+                    : 's'}
+                </Badge>
+              </div>
+              {pendingReviewGroup.body ? (
+                <div className="prp-review-group__body prp-composer__pending-body">
+                  {renderSearchableBody(
+                    pendingReviewGroup.body,
+                    `review:${pendingReviewGroup.id}`,
+                    true
+                  )}
+                </div>
+              ) : null}
+              {renderReviewGroupThreadList(pendingReviewGroup, 'composer-', {
+                compact: true,
+              })}
+            </div>
+          ) : null}
           <MarkdownComposer
             value={commentText}
             onChange={setCommentText}
             placeholder={
               composerMode === 'review'
-                ? 'Leave a review comment (optional with pending items)…'
+                ? 'Leave a review summary (optional with pending threads)…'
                 : 'Write a comment…'
             }
             compact
@@ -1101,6 +1189,7 @@ function ConversationViewImpl(props: any) {
               {detail.state === 'open' && !detail.merged ? (
                 <Button
                   size="sm"
+                  variant="danger"
                   disabled={actionBusy}
                   onClick={onClosePr}
                   title="Close pull request"
@@ -1188,9 +1277,7 @@ function ConversationViewImpl(props: any) {
             0
         );
       case 'empty':
-        return (
-          <p className="prp-muted prp-conversation-empty">No conversation yet.</p>
-        );
+        return null;
       case 'item':
         return renderTimelineItemCard(row.item, row.keyPrefix || '');
       default:
@@ -1199,7 +1286,15 @@ function ConversationViewImpl(props: any) {
   }
 
   return (
-    <div className="prp-conversation">
+    <div
+      className={`prp-conversation${asideCollapsed ? ' prp-conversation--aside-collapsed' : ''}`}
+      style={
+        {
+          ['--prp-aside-w' as string]: `${conversationAsideWidthPx(asideCollapsed)}px`,
+        } as React.CSSProperties
+      }
+      data-aside-collapsed={asideCollapsed ? '1' : '0'}
+    >
       <div className="prp-conversation__main">
         {sectionLoading && !detail ? (
           <div className="prp-section-skeleton" />
@@ -1221,7 +1316,65 @@ function ConversationViewImpl(props: any) {
         )}
       </div>
 
-      <aside className="prp-conversation__aside">
+      {/* Vertical splitter between main and meta; hosts compact toggle */}
+      <div
+        className="prp-conversation__splitter"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Panel splitter"
+      >
+        <button
+          type="button"
+          className="prp-aside-collapse-btn prp-has-tip"
+          onClick={onToggleAside}
+          aria-label={
+            asideCollapsed ? 'Expand metadata panel' : 'Collapse metadata panel'
+          }
+          aria-expanded={!asideCollapsed}
+        >
+          {asideCollapsed ? (
+            <IconChevronLeft size={14} aria-hidden="true" />
+          ) : (
+            <IconChevronRight size={14} aria-hidden="true" />
+          )}
+          <TipPopover
+            title={
+              asideCollapsed
+                ? 'Expand metadata panel'
+                : 'Collapse metadata panel'
+            }
+          />
+        </button>
+      </div>
+      <div
+        className={`prp-scroll-float-host prp-edge-fade prp-conversation__aside-host${
+          asideCollapsed ? ' prp-conversation__aside-host--collapsed' : ''
+        }`}
+      >
+      <aside
+        ref={asideScrollRef}
+        className={`prp-conversation__aside prp-scroll-float${
+          asideCollapsed ? ' prp-conversation__aside--collapsed' : ''
+        }`}
+        aria-label={
+          asideCollapsed
+            ? 'Pull request metadata (collapsed)'
+            : 'Pull request metadata'
+        }
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          el.classList.add('prp-is-scrolling');
+          const t = (el as any).__prpScrollHide;
+          if (t) clearTimeout(t);
+          (el as any).__prpScrollHide = setTimeout(() => {
+            el.classList.remove('prp-is-scrolling');
+          }, 700);
+        }}
+      >
+        {asideCollapsed ? (
+          <AsideCompactRail detail={detail} />
+        ) : (
+          <>
         <MetaList
           title="Reviewers"
           rows={
@@ -1404,7 +1557,14 @@ function ConversationViewImpl(props: any) {
           <AsideFilesTree files={detail.files || []} />
         </AsideSection>
         {actionMsg ? <div className="prp-action-msg">{actionMsg}</div> : null}
+          </>
+        )}
       </aside>
+      <FloatingScrollbar
+        scrollerRef={asideScrollRef}
+        contentKey={asideCollapsed ? 'collapsed' : 'expanded'}
+      />
+      </div>
     </div>
   );
 }

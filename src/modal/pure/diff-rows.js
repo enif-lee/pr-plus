@@ -206,8 +206,12 @@ function fileStartIndexMap(virtualRows) {
 function languageFromPath(filePath) {
   const p = (filePath || '').toLowerCase();
   const base = p.split('/').pop() || '';
-  if (base === 'dockerfile') return 'dockerfile';
-  if (base === 'makefile') return 'makefile';
+  if (base === 'dockerfile' || base.startsWith('dockerfile.')) return 'dockerfile';
+  if (base === 'makefile' || base === 'gnumakefile') return 'makefile';
+  if (base === 'cmakelists.txt') return 'cmake';
+  if (base.endsWith('.gradle.kts')) return 'kotlin';
+  if (base.endsWith('.gradle')) return 'gradle';
+  if (base.endsWith('.d.ts')) return 'typescript';
   const ext = base.includes('.') ? base.split('.').pop() : '';
   const map = {
     js: 'javascript',
@@ -217,29 +221,74 @@ function languageFromPath(filePath) {
     ts: 'typescript',
     tsx: 'typescript',
     json: 'json',
+    jsonc: 'json',
     md: 'markdown',
+    mdx: 'markdown',
     css: 'css',
     scss: 'scss',
+    sass: 'scss',
+    less: 'less',
     html: 'xml',
     htm: 'xml',
+    xhtml: 'xml',
     xml: 'xml',
+    svg: 'xml',
+    vue: 'xml',
+    svelte: 'xml',
     yml: 'yaml',
     yaml: 'yaml',
+    toml: 'ini',
+    ini: 'ini',
+    cfg: 'ini',
+    conf: 'ini',
+    env: 'bash',
     py: 'python',
+    pyi: 'python',
+    pyw: 'python',
     rb: 'ruby',
-    go: 'go',
-    rs: 'rust',
-    java: 'java',
-    kt: 'kotlin',
+    rake: 'ruby',
+    php: 'php',
+    phtml: 'php',
+    pl: 'perl',
+    pm: 'perl',
+    lua: 'lua',
+    r: 'r',
     sh: 'bash',
     bash: 'bash',
     zsh: 'bash',
+    fish: 'bash',
+    ps1: 'powershell',
+    psm1: 'powershell',
+    psd1: 'powershell',
+    c: 'c',
+    h: 'c',
+    cc: 'cpp',
+    cpp: 'cpp',
+    cxx: 'cpp',
+    hpp: 'cpp',
+    hh: 'cpp',
+    hxx: 'cpp',
+    mm: 'objectivec',
+    m: 'objectivec',
+    java: 'java',
+    kt: 'kotlin',
+    kts: 'kotlin',
+    scala: 'scala',
+    sc: 'scala',
+    go: 'go',
+    rs: 'rust',
+    cs: 'csharp',
+    fs: 'fsharp',
+    swift: 'swift',
+    dart: 'dart',
     sql: 'sql',
     graphql: 'graphql',
-    vue: 'xml',
-    svelte: 'xml',
+    gql: 'graphql',
+    proto: 'protobuf',
+    diff: 'diff',
+    patch: 'diff',
   };
-  return map[ext] || 'plaintext';
+  return map[ext || ''] || 'plaintext';
 }
 
 const api = {

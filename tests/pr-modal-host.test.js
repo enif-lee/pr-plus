@@ -157,7 +157,15 @@ function flush() {
   assert.equal(after.open, true);
   assert.equal(after.loading, false);
   assert.equal(after.detail?.number, 101);
+  // List click must open Conversation (not restore prior Diff session page)
+  assert.equal(after.routePage, 'conversation');
   assert.ok(document.getElementById('prp-modal-host'));
+  // Source wiring: list intercept forces page conversation
+  assert.ok(
+    hostSrc.includes("page: 'conversation'") &&
+      hostSrc.includes('List entry always opens Conversation'),
+    'list click forces conversation page'
+  );
 
   // expand path is pure + App level; assert layout helpers used by shipped pure module
   const layout = require('../src/modal/lib/layout-mode.ts');

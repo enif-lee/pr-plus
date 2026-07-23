@@ -148,8 +148,8 @@ assert.ok(
   'committed search query must go through startTransition (not every keystroke)'
 );
 assert.ok(
-  appSrc.includes('searchBusy') && appSrc.includes('showTopLoadBar'),
-  'search busy must drive the top loading bar'
+  appSrc.includes('searchBusy') && appSrc.includes('searching={searchBusy}'),
+  'search busy must drive SearchBar loading UI (header stats owns progressive load)'
 );
 assert.ok(
   appSrc.includes('jumpToSearchHit') || appSrc.includes('scrollIntoView'),

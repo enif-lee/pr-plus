@@ -28,7 +28,12 @@ function resolveModalShortcutAction(opts = {}) {
     return 'escapeNav';
   }
 
-  if (!mod || shift) return null;
+  if (!mod) return null;
+
+  // ⌘⇧F / Ctrl+Shift+F → fullscreen shell toggle
+  if (shift && key === 'f') return 'toggleFullscreen';
+
+  if (shift) return null;
 
   // ⌘K / Ctrl+K → command palette (also suppresses GH palette)
   if (key === 'k') return 'openPalette';
@@ -36,7 +41,7 @@ function resolveModalShortcutAction(opts = {}) {
   // ⌘. / Ctrl+. → toggle Diff ↔ Conversation
   if (key === '.' || key === 'period') return 'toggleDiff';
 
-  // ⌘F / Ctrl+F → in-modal search (PR body / comments / diff rows)
+  // ⌘F / Ctrl+F → in-modal search (Find)
   if (key === 'f') return 'openSearch';
 
   return null;

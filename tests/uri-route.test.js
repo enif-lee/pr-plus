@@ -19,6 +19,11 @@ const {
   findCommentIndexByPosition,
 } = require('../src/modal/lib/uri-route.ts');
 
+// Canonical prefix is prp_
+assert.equal(URI_PARAM_PAGE, 'prp_page');
+assert.equal(URI_PARAM_NUMBER, 'prp_number');
+assert.equal(URI_PARAM_POSITION, 'prp_position');
+
 // --- normalize / position ---
 assert.equal(normalizePage('diff'), 'diff');
 assert.equal(normalizePage('centered'), 'conversation');
@@ -34,10 +39,11 @@ assert.deepEqual(parsePosition('#c:99'), { kind: 'comment', id: '99' });
 assert.deepEqual(parsePosition('100'), { kind: 'comment', id: '100' });
 assert.equal(parsePosition('tmp-1'), null);
 
-// --- parse search / hash ---
+// --- parse search / hash (prp_) ---
 {
-  const r = parseRouteFromSearch('?foo=1&pr%2Bpage=diff&pr%2Bnumber=42&pr%2Bposition=c%3A900');
-  // URLSearchParams accepts pr+page when encoded; also try unencoded builder
+  const r = parseRouteFromSearch(
+    '?foo=1&prp_page=diff&prp_number=42&prp_position=c%3A900'
+  );
   assert.equal(r.number, 42);
   assert.equal(r.page, 'diff');
   assert.equal(r.position, 'c:900');
@@ -45,9 +51,13 @@ assert.equal(parsePosition('tmp-1'), null);
 
 {
   // Build via serialize then parse (canonical path)
-  const qs = serializeRouteToSearch({ page: 'diff', number: 7, position: 'c:3' }, '?tab=open');
+  const qs = serializeRouteToSearch(
+    { page: 'diff', number: 7, position: 'c:3' },
+    '?tab=open'
+  );
   assert.ok(qs.includes('tab=open'), 'preserves unrelated params');
-  assert.ok(qs.includes(encodeURIComponent(URI_PARAM_PAGE).replace(/%2B/g, '%2B') || URI_PARAM_PAGE) || qs.includes('pr%2Bpage') || qs.includes('pr+page'));
+  assert.ok(qs.includes('prp_page') || qs.includes(URI_PARAM_PAGE));
+  assert.ok(!qs.includes('pr+page') && !qs.includes('pr%2Bpage'));
   const r = parseRouteFromSearch(qs);
   assert.equal(r.page, 'diff');
   assert.equal(r.number, 7);
@@ -55,7 +65,7 @@ assert.equal(parsePosition('tmp-1'), null);
 }
 
 {
-  const r = parseRouteFromHash('#pr%2Bpage=conversation&pr%2Bnumber=5');
+  const r = parseRouteFromHash('#prp_page=conversation&prp_number=5');
   assert.equal(r.page, 'conversation');
   assert.equal(r.number, 5);
 }
@@ -85,28 +95,24 @@ assert.equal(parsePosition('tmp-1'), null);
   assert.equal(onlyNum.position, null);
 }
 
-// Unencoded user-shaped pr+page (URLSearchParams key becomes "pr page")
+// Legacy pr+* still parses; clear/write migrate away
 {
-  // Hand-written query as users might type: + becomes space in form-urlencoded
   const unencoded = '?pr+page=diff&pr+number=42&pr+position=c:900&tab=open';
   const parsed = parseRouteFromSearch(unencoded);
-  assert.equal(parsed.page, 'diff', 'parse unencoded pr+page');
-  assert.equal(parsed.number, 42, 'parse unencoded pr+number');
-  assert.equal(parsed.position, 'c:900', 'parse unencoded pr+position');
+  assert.equal(parsed.page, 'diff', 'parse legacy pr+page');
+  assert.equal(parsed.number, 42, 'parse legacy pr+number');
+  assert.equal(parsed.position, 'c:900', 'parse legacy pr+position');
 
-  // clear must strip spaced keys so nothing reopens
   const cleared = clearRouteFromSearch(unencoded);
   const afterClear = parseRouteFromSearch(cleared);
   assert.equal(afterClear.page, null);
   assert.equal(afterClear.number, null);
   assert.equal(afterClear.position, null);
   assert.ok(cleared.includes('tab=open'), 'keeps unrelated tab');
-  // no residual pr keys of either form
-  assert.ok(!/pr[\+ ]page/i.test(cleared.replace(/\+/g, ' ')));
+  assert.ok(!/pr[\+_ ]page/i.test(cleared.replace(/\+/g, ' ')));
   assert.ok(!cleared.includes('pr%2Bpage') && !cleared.includes('pr+page'));
-  assert.ok(!cleared.includes('42') || cleared.includes('tab')); // number gone unless in unrelated
+  assert.ok(!cleared.includes('prp_page'));
 
-  // resolveRestore with cleared location must not open
   const noReopen = resolveRestore({
     sessionOpen: null,
     uri: afterClear,
@@ -116,7 +122,7 @@ assert.equal(parsePosition('tmp-1'), null);
   assert.equal(noReopen.source, 'none');
   assert.equal(noReopen.open, null);
 
-  // serialize on top of unencoded must not leave duplicate spaced + %2B pairs
+  // serialize on top of legacy rewrites to prp_*
   const rewritten = serializeRouteToSearch(
     { page: 'conversation', number: 7, position: 'c:1' },
     unencoded
@@ -125,11 +131,9 @@ assert.equal(parsePosition('tmp-1'), null);
   assert.equal(r2.page, 'conversation');
   assert.equal(r2.number, 7);
   assert.equal(r2.position, 'c:1');
-  // Only one encoding of page key in string (encoded form from toString)
-  const pageHits = (rewritten.match(/pr(%2B|\+)page|pr\spage/gi) || []).length;
-  assert.ok(pageHits <= 2, `no duplicate page keys, got ${pageHits} in ${rewritten}`);
-  // Spaced key must not remain as literal "pr page="
+  assert.ok(rewritten.includes('prp_page') || rewritten.includes(URI_PARAM_PAGE));
   assert.ok(!rewritten.includes('pr page='));
+  assert.ok(!rewritten.includes('pr+page'));
 }
 
 // clear preserves others
@@ -138,7 +142,8 @@ assert.equal(parsePosition('tmp-1'), null);
     serializeRouteToSearch({ page: 'diff', number: 1 }, '?x=1')
   );
   assert.ok(cleared.includes('x=1'));
-  assert.ok(!cleared.includes('pr'));
+  assert.ok(!cleared.includes('prp_'));
+  assert.ok(!cleared.includes('pr+'));
 }
 
 // mergeRoutes
@@ -179,87 +184,73 @@ assert.equal(parsePosition('tmp-1'), null);
   });
   assert.equal(r.source, 'session');
   assert.equal(r.page, 'diff');
-  assert.equal(r.position, 'c:8', 'URI position fills when session has none');
+  assert.equal(r.position, 'c:8');
 }
 
 {
-  // No session → URI with path owner/repo
+  // URI-only restore needs path owner/repo
   const r = resolveRestore({
     sessionOpen: null,
-    uri: { number: 12, page: 'diff', position: 'c:4' },
-    pathOwner: 'enif-lee',
-    pathRepo: 'pr-plus',
+    uri: { number: 11, page: 'conversation', position: 'c:2' },
+    pathOwner: 'octo',
+    pathRepo: 'hello',
   });
   assert.equal(r.source, 'uri');
-  assert.deepEqual(r.open, { owner: 'enif-lee', repo: 'pr-plus', number: 12 });
-  assert.equal(r.page, 'diff');
-  assert.equal(r.position, 'c:4');
+  assert.equal(r.open.number, 11);
+  assert.equal(r.open.owner, 'octo');
+  assert.equal(r.page, 'conversation');
 }
 
 {
-  // URI number without path → cannot open
-  const r = resolveRestore({
+  const none = resolveRestore({
     sessionOpen: null,
-    uri: { number: 1, page: 'diff' },
+    uri: { number: 11 },
+    pathOwner: '',
+    pathRepo: '',
   });
-  assert.equal(r.source, 'none');
-  assert.equal(r.open, null);
-}
-
-// --- replaceState thin wrapper ---
-{
-  let replaced = null;
-  const historyApi = {
-    state: { a: 1 },
-    replaceState(state, title, url) {
-      replaced = { state, title, url };
-    },
-  };
-  const locationApi = {
-    pathname: '/acme/widgets/pulls',
-    search: '?q=is%3Aopen',
-    hash: '',
-  };
-  const ok = replaceLocationRoute(historyApi, locationApi, {
-    page: 'diff',
-    number: 42,
-    position: 'c:900',
-  });
-  assert.equal(ok, true);
-  assert.ok(replaced.url.includes('/acme/widgets/pulls'));
-  assert.ok(replaced.url.includes('q=is%3Aopen') || replaced.url.includes('q=is:open'));
-  assert.ok(replaced.url.includes('42'));
-  assert.ok(replaced.url.includes('diff'));
-  assert.ok(replaced.url.includes('c%3A900') || replaced.url.includes('c:900'));
-
-  // clear
-  locationApi.search = replaced.url.includes('?')
-    ? '?' + replaced.url.split('?')[1].split('#')[0]
-    : '';
-  clearLocationRoute(historyApi, locationApi);
-  assert.ok(replaced.url.includes('q=is'));
-  assert.ok(!String(replaced.url).includes('pr%2Bnumber') && !String(replaced.url).includes('pr+number'));
+  assert.equal(none.source, 'none');
 }
 
 // findCommentIndexByPosition
 {
-  const mapped = [
-    { commentId: 10, rowIndex: 1 },
-    { commentId: 900, rowIndex: 5 },
-  ];
-  assert.equal(findCommentIndexByPosition(mapped, 'c:900'), 1);
-  assert.equal(findCommentIndexByPosition(mapped, 'c:1'), -1);
+  const list = [{ id: 1 }, { commentId: 42 }, { id: 'x' }];
+  assert.equal(findCommentIndexByPosition(list, 'c:42'), 1);
+  assert.equal(findCommentIndexByPosition(list, 'c:99'), -1);
 }
 
-// buildUrlWithRoute
+// replace / clear location
+{
+  const hist = {
+    state: null,
+    replaceState(state, _t, url) {
+      this.state = state;
+      this.url = url;
+    },
+  };
+  const loc = { pathname: '/o/r/pulls', search: '?q=1', hash: '' };
+  assert.equal(
+    replaceLocationRoute(hist, loc, { page: 'diff', number: 9, position: 'c:1' }),
+    true
+  );
+  assert.ok(String(hist.url).includes('prp_page=diff'));
+  assert.ok(String(hist.url).includes('prp_number=9'));
+  loc.search = hist.url.includes('?') ? `?${hist.url.split('?')[1]}` : '';
+  assert.equal(clearLocationRoute(hist, loc), true);
+  assert.ok(!String(hist.url).includes('prp_'));
+  assert.ok(String(hist.url).includes('q=1') || String(hist.url).endsWith('/pulls'));
+}
+
 {
   const url = buildUrlWithRoute(
-    { pathname: '/o/r/pulls', search: '?x=1', hash: '#frag' },
-    { page: 'conversation', number: 2 }
+    { pathname: '/a/b/pulls', search: '?x=1', hash: '#y' },
+    { page: 'conversation', number: 2 },
+    {}
   );
-  assert.ok(url.startsWith('/o/r/pulls?'));
+  assert.ok(url.includes('prp_page=conversation'));
+  assert.ok(url.includes('prp_number=2'));
   assert.ok(url.includes('x=1'));
-  assert.ok(url.includes('2'));
 }
 
 console.log('uri-route.test.js: all assertions passed');
+console.log('uri-prefix-prp_=true');
+console.log('uri-legacy-pr-plus-clears=true');

@@ -10,4 +10,10 @@ export {
   normalizeChecks,
   statusKey,
   checkRunKey,
+  classifyCheckOutcome,
+  formatDurationMs,
+  formatRelativeAgo,
+  formatCheckSummary,
+  buildMergeBoxCheckGroups,
+  mergeBoxChecksHeadline,
 } from '../pure/checks.js';

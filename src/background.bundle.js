@@ -602,6 +602,15 @@ if (typeof globalThis !== 'undefined') {
     return map;
   }
 
+  function countPendingReviewThreads(comments) {
+    const threads = groupReviewThreads(comments);
+    let n = 0;
+    for (const t of threads) {
+      if (t.pending) n += 1;
+    }
+    return n;
+  }
+
   function countPendingReviewThreadsByPath(comments) {
     const map = new Map();
     const threads = groupReviewThreads(comments);
@@ -784,6 +793,7 @@ if (typeof globalThis !== 'undefined') {
     mapGraphqlReviewThreads,
     countReviewThreadsByPath,
     countUnresolvedReviewThreadsByPath,
+    countPendingReviewThreads,
     countPendingReviewThreadsByPath,
     countReviewThreadTotals,
     normalizeReviewCommentId,
@@ -1562,6 +1572,224 @@ if (typeof globalThis !== 'undefined') {
     };
   }
 
+  /**
+   * GitHub merge-box bucket for one check item.
+   * @returns {'failure'|'pending'|'skipped'|'success'}
+   */
+  function classifyCheckOutcome(item) {
+    if (!item || typeof item !== 'object') return 'pending';
+    if (item.kind === 'status' || item.state != null) {
+      const st = String(item.state || '').toLowerCase();
+      if (st === 'failure' || st === 'error') return 'failure';
+      if (st === 'success') return 'success';
+      if (st === 'pending') return 'pending';
+      // expected / unknown → pending
+      return 'pending';
+    }
+    const conclusion = String(item.conclusion || '').toLowerCase();
+    const status = String(item.status || '').toLowerCase();
+    if (
+      conclusion === 'failure' ||
+      conclusion === 'timed_out' ||
+      conclusion === 'startup_failure' ||
+      conclusion === 'cancelled'
+    ) {
+      return 'failure';
+    }
+    if (conclusion === 'skipped') return 'skipped';
+    if (conclusion === 'success' || conclusion === 'neutral') return 'success';
+    if (
+      status === 'queued' ||
+      status === 'in_progress' ||
+      status === 'waiting' ||
+      status === 'requested' ||
+      status === 'pending' ||
+      conclusion === '' ||
+      conclusion === 'null' ||
+      conclusion === 'action_required'
+    ) {
+      return 'pending';
+    }
+    return 'pending';
+  }
+
+  /** Compact duration: 9m, 22s, 1h 2m */
+  function formatDurationMs(ms) {
+    const n = Number(ms);
+    if (!Number.isFinite(n) || n < 0) return '';
+    if (n < 1000) return '<1s';
+    const sec = Math.round(n / 1000);
+    if (sec < 60) return `${sec}s`;
+    const min = Math.floor(sec / 60);
+    const remSec = sec % 60;
+    if (min < 60) return remSec ? `${min}m ${remSec}s` : `${min}m`;
+    const hr = Math.floor(min / 60);
+    const remMin = min % 60;
+    return remMin ? `${hr}h ${remMin}m` : `${hr}h`;
+  }
+
+  /** Relative time for “Skipped 20 minutes ago” */
+  function formatRelativeAgo(iso, nowMs) {
+    const t = parseTime(iso);
+    if (!t) return '';
+    const now = Number.isFinite(nowMs) ? nowMs : Date.now();
+    let sec = Math.max(0, Math.round((now - t) / 1000));
+    if (sec < 60) return 'just now';
+    const min = Math.floor(sec / 60);
+    if (min < 60) return `${min} minute${min === 1 ? '' : 's'} ago`;
+    const hr = Math.floor(min / 60);
+    if (hr < 48) return `${hr} hour${hr === 1 ? '' : 's'} ago`;
+    const day = Math.floor(hr / 24);
+    return `${day} day${day === 1 ? '' : 's'} ago`;
+  }
+
+  /**
+   * Human summary next to the check name (GitHub merge-box style).
+   * @param {{ outcome: string, description?: string, startedAt?: string, completedAt?: string, updatedAt?: string }} item
+   * @param {number} [nowMs]
+   */
+  function formatCheckSummary(item, nowMs) {
+    if (!item) return '';
+    const desc = String(item.description || '').trim();
+    const start = parseTime(item.startedAt);
+    const end = parseTime(item.completedAt) || parseTime(item.updatedAt);
+    const duration =
+      start && end && end >= start
+        ? formatDurationMs(end - start)
+        : start && !end
+          ? formatDurationMs((Number.isFinite(nowMs) ? nowMs : Date.now()) - start)
+          : '';
+    const outcome = item.outcome || classifyCheckOutcome(item);
+
+    if (outcome === 'failure') {
+      if (duration) return `Failing after ${duration}`;
+      return desc || 'Failing';
+    }
+    if (outcome === 'success') {
+      if (duration) return `Successful in ${duration}`;
+      return desc || 'Successful';
+    }
+    if (outcome === 'skipped') {
+      const when = formatRelativeAgo(item.completedAt || item.updatedAt, nowMs);
+      if (when) return `Skipped ${when}`;
+      return desc || 'Skipped';
+    }
+    // pending
+    if (statusIsInProgress(item)) {
+      return duration ? `In progress — ${duration}` : desc || 'In progress';
+    }
+    return desc || 'Expected — Waiting for status to be reported';
+  }
+
+  function statusIsInProgress(item) {
+    const status = String(item?.status || '').toLowerCase();
+    return status === 'in_progress' || status === 'queued' || status === 'waiting';
+  }
+
+  /**
+   * Flatten statuses + check runs into display rows for the merge box.
+   * @param {object|null|undefined} checks
+   * @param {{ nowMs?: number }} [opts]
+   * @returns {{ state: string, totalCount: number, groups: Array<{ key: string, label: string, outcome: string, items: Array }> }}
+   */
+  function buildMergeBoxCheckGroups(checks, opts) {
+    const nowMs =
+      opts && Number.isFinite(opts.nowMs) ? opts.nowMs : Date.now();
+    const n = normalizeChecks(checks);
+    /** @type {Array<any>} */
+    const rows = [];
+
+    for (const s of n.statuses || []) {
+      const outcome = classifyCheckOutcome({ kind: 'status', state: s.state });
+      const row = {
+        id: `status:${s.context || rows.length}`,
+        kind: 'status',
+        name: s.context || s.description || 'status',
+        outcome,
+        description: s.description || '',
+        url: s.targetUrl || s.target_url || '',
+        startedAt: s.createdAt || s.created_at || '',
+        completedAt: s.updatedAt || s.updated_at || '',
+        updatedAt: s.updatedAt || s.updated_at || '',
+        required: Boolean(s.required),
+      };
+      row.summary = formatCheckSummary(row, nowMs);
+      rows.push(row);
+    }
+
+    for (const r of n.checkRuns || []) {
+      const outcome = classifyCheckOutcome(r);
+      const app = String(r.appName || r.app?.name || '').trim();
+      const name = String(r.name || 'check').trim() || 'check';
+      // Prefer raw job name; app prefix only when it adds context (not already in name)
+      const displayName =
+        app && !name.toLowerCase().startsWith(app.toLowerCase())
+          ? `${app} / ${name}`
+          : name;
+      const row = {
+        id: `run:${r.id || name}`,
+        kind: 'run',
+        name: displayName,
+        outcome,
+        description: '',
+        url: r.htmlUrl || r.html_url || r.detailsUrl || r.details_url || '',
+        startedAt: r.startedAt || r.started_at || '',
+        completedAt: r.completedAt || r.completed_at || '',
+        updatedAt: r.completedAt || r.completed_at || r.startedAt || '',
+        required: Boolean(r.required),
+      };
+      row.summary = formatCheckSummary(row, nowMs);
+      rows.push(row);
+    }
+
+    const buckets = {
+      failure: [],
+      pending: [],
+      skipped: [],
+      success: [],
+    };
+    for (const row of rows) {
+      const b = buckets[row.outcome] || buckets.pending;
+      b.push(row);
+    }
+
+    /** @type {Array<{ key: string, label: string, outcome: string, items: Array }>} */
+    const groups = [];
+    const pushGroup = (key, outcome, singular, plural, items) => {
+      if (!items.length) return;
+      const label =
+        items.length === 1 ? `1 ${singular}` : `${items.length} ${plural}`;
+      groups.push({ key, label, outcome, items });
+    };
+    // GitHub order: failing → expected/pending → skipped → successful
+    pushGroup('failure', 'failure', 'failing check', 'failing checks', buckets.failure);
+    pushGroup('pending', 'pending', 'expected check', 'expected checks', buckets.pending);
+    pushGroup('skipped', 'skipped', 'skipped check', 'skipped checks', buckets.skipped);
+    pushGroup(
+      'success',
+      'success',
+      'successful check',
+      'successful checks',
+      buckets.success
+    );
+
+    return {
+      state: n.state,
+      totalCount: rows.length,
+      groups,
+    };
+  }
+
+  /** Headline under merge-box checks section (GitHub copy). */
+  function mergeBoxChecksHeadline(state, totalCount) {
+    const st = String(state || '').toLowerCase();
+    if (!totalCount) return null;
+    if (st === 'failure' || st === 'error') return 'Some checks were not successful';
+    if (st === 'pending') return 'Some checks haven’t completed yet';
+    if (st === 'success') return 'All checks have passed';
+    return 'Checks';
+  }
+
   const api = {
     parseTime,
     statusKey,
@@ -1572,6 +1800,12 @@ if (typeof globalThis !== 'undefined') {
     distinctCheckRuns,
     deriveChecksState,
     normalizeChecks,
+    classifyCheckOutcome,
+    formatDurationMs,
+    formatRelativeAgo,
+    formatCheckSummary,
+    buildMergeBoxCheckGroups,
+    mergeBoxChecksHeadline,
   };
 
   if (typeof module !== 'undefined' && module.exports) {

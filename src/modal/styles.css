@@ -36,6 +36,8 @@ html.prp-scroll-lock body {
   --prp-pad-card: 14px 16px;
   --prp-pad-card-head: 12px 16px;
   --prp-pad-body: 16px 18px;
+  /* Soft top/bottom fade where scroll content meets the shell (not a hard clip) */
+  --prp-edge-fade-size: 18px;
   --prp-gap-stack: 16px;
   --prp-gap-aside: 14px;
   /* Soft dim only — no solid wash; page remains visible under the panel */
@@ -137,12 +139,22 @@ html.prp-scroll-lock body {
     box-shadow 280ms ease;
 }
 
+/* Live drag must not lag behind the pointer */
+.prp-modal.prp-modal--resizing {
+  transition: none;
+}
+
 .prp-modal--centered {
-  /* Viewport-relative only — no artificial pixel max-width ceiling */
-  width: 92vw;
-  height: 90vh;
+  /*
+   * User-resizable shell size via --prp-shell-w / --prp-shell-h
+   * (set inline from persisted + clamped prefs). Fallbacks match prior defaults.
+   */
+  width: var(--prp-shell-w, 92vw);
+  height: var(--prp-shell-h, 90vh);
   max-width: 100vw;
   max-height: 100vh;
+  min-width: min(640px, 100vw);
+  min-height: min(420px, 100vh);
 }
 
 .prp-modal--diff {
@@ -258,18 +270,12 @@ html.prp-scroll-lock body {
 
 .prp-overlay.prp-shell--sheet .prp-modal--centered {
   /*
-   * Side sheet bounds (conversation):
-   * - min ≥ 800px (or full viewport if the window is narrower)
-   * - preferred ~56vw
-   * - max 1200px (capped by viewport)
+   * Side sheet: width from --prp-shell-w (persisted + clamped in JS).
+   * Hard CSS guards keep layout from collapsing on narrow viewports.
    */
-  --prp-sheet-min: 950px;
+  --prp-sheet-min: 480px;
   --prp-sheet-max: 1200px;
-  width: clamp(
-    min(var(--prp-sheet-min), 100vw),
-    56vw,
-    min(var(--prp-sheet-max), 100vw)
-  );
+  width: var(--prp-shell-w, min(900px, 100vw));
   min-width: min(var(--prp-sheet-min), 100vw);
   max-width: min(var(--prp-sheet-max), 100vw);
   height: 100vh;
@@ -277,18 +283,124 @@ html.prp-scroll-lock body {
 }
 
 /*
- * Diff while in side-sheet preference: expand to full viewport like modal Diff
- * (conversation stays a right-docked sheet; Diff uses the whole window).
+ * Fullscreen shell: fill viewport; overrides custom size without wiping prefs.
+ *
+ * Side sheet stays right-docked (flex-end) so width animates leftward into the
+ * remaining margin — not left-stick-then-expand. Centered modal keeps center.
+ */
+.prp-overlay.prp-shell--fullscreen.prp-shell--modal {
+  align-items: center;
+  justify-content: center;
+}
+
+.prp-overlay.prp-shell--fullscreen.prp-shell--sheet {
+  align-items: stretch;
+  /* Keep right anchor while width grows to 100vw (left edge eats free space) */
+  justify-content: flex-end;
+}
+
+.prp-overlay.prp-shell--fullscreen .prp-modal,
+.prp-modal.prp-shell--fullscreen {
+  width: 100vw !important;
+  max-width: 100vw !important;
+  min-width: 0 !important;
+  height: 100vh !important;
+  max-height: 100vh !important;
+  min-height: 0 !important;
+  border-radius: 0;
+}
+
+/* Sheet fullscreen: pin to right edge during the width transition */
+.prp-overlay.prp-shell--sheet.prp-shell--fullscreen .prp-modal,
+.prp-overlay.prp-shell--sheet .prp-modal.prp-shell--fullscreen {
+  margin-left: auto;
+  margin-right: 0;
+  /* Prefer right origin if any transform-based polish is added later */
+  transform-origin: right center;
+}
+
+/* Shell panel resizers (side sheet left edge / modal SE corner) */
+.prp-shell-resizer {
+  position: absolute;
+  z-index: 30;
+  touch-action: none;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  outline: none;
+}
+
+.prp-shell-resizer--sheet {
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 6px;
+  cursor: col-resize;
+}
+
+.prp-shell-resizer--sheet::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 2px;
+  background: transparent;
+  transition: background 120ms ease;
+}
+
+.prp-shell-resizer--sheet:hover::after,
+.prp-shell-resizer--sheet:focus-visible::after {
+  background: var(--prp-accent);
+}
+
+.prp-shell-resizer--modal {
+  right: 0;
+  bottom: 0;
+  width: 18px;
+  height: 18px;
+  cursor: nwse-resize;
+}
+
+.prp-shell-resizer--modal::after {
+  content: '';
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 10px;
+  height: 10px;
+  border-right: 2px solid var(--prp-border-muted);
+  border-bottom: 2px solid var(--prp-border-muted);
+  border-radius: 0 0 2px 0;
+  opacity: 0.7;
+  transition: border-color 120ms ease, opacity 120ms ease;
+}
+
+.prp-shell-resizer--modal:hover::after,
+.prp-shell-resizer--modal:focus-visible::after {
+  border-color: var(--prp-accent);
+  opacity: 1;
+}
+
+.prp-overlay.prp-shell--fullscreen .prp-shell-resizer {
+  display: none;
+}
+
+/*
+ * Diff while in side-sheet preference: expand to full viewport.
+ * Keep right dock (flex-end) so width grows leftward into free space —
+ * same motion as sheet fullscreen (not left-stick-then-expand).
  */
 .prp-overlay.prp-shell--sheet:has(.prp-modal--diff),
 .prp-overlay.prp-shell--sheet[data-layout='diff'] {
-  justify-content: stretch;
+  justify-content: flex-end;
   align-items: stretch;
 }
 
 .prp-overlay.prp-shell--sheet:has(.prp-modal--diff) .prp-backdrop,
 .prp-overlay.prp-shell--sheet[data-layout='diff'] .prp-backdrop {
-  /* Fullscreen Diff: same soft dim (panel covers most of the page) */
+  /* Full-width Diff: same soft dim (panel covers most of the page) */
   background: rgba(1, 4, 9, var(--prp-backdrop-alpha, 0.14)) !important;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
@@ -310,6 +422,10 @@ html.prp-scroll-lock body {
   border: 0;
   box-shadow: none;
   animation: none;
+  /* Right-anchored while width transitions conversation sheet → full Diff */
+  margin-left: auto;
+  margin-right: 0;
+  transform-origin: right center;
 }
 
 @keyframes prp-sheet-in {
@@ -425,11 +541,18 @@ html.prp-scroll-lock body {
   border-color: color-mix(in srgb, var(--prp-accent) 45%, var(--prp-border));
   background: color-mix(in srgb, var(--prp-accent) 10%, var(--prp-bg));
 }
+/* Close PR — light red fill, strong red border (always, not only hover) */
+.prp-header__icon-btn--danger {
+  color: var(--prp-danger, #cf222e);
+  border-color: color-mix(in srgb, var(--prp-danger, #cf222e) 72%, var(--prp-border));
+  background: color-mix(in srgb, var(--prp-danger, #cf222e) 12%, var(--prp-bg));
+}
 .prp-header__icon-btn--danger:hover,
 .prp-header__icon-btn--danger:focus-visible {
   color: var(--prp-danger, #cf222e);
-  border-color: color-mix(in srgb, var(--prp-danger, #cf222e) 55%, var(--prp-border));
-  background: color-mix(in srgb, var(--prp-danger, #cf222e) 10%, var(--prp-bg));
+  border-color: var(--prp-danger, #cf222e);
+  background: color-mix(in srgb, var(--prp-danger, #cf222e) 18%, var(--prp-bg));
+  outline: none;
 }
 .prp-header__icon-btn:disabled {
   opacity: 0.45;
@@ -616,9 +739,11 @@ html.prp-scroll-lock body {
 }
 
 .prp-header__stats {
+  /* Single pill: metrics and load stage swap content; width/height morph via FLIP */
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
+  box-sizing: border-box;
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   padding: 4px 10px;
@@ -627,6 +752,63 @@ html.prp-scroll-lock body {
   background: var(--prp-bg);
   margin-left: auto;
   flex-shrink: 0;
+  min-height: 28px;
+  max-width: min(52vw, 360px);
+  overflow: hidden;
+  white-space: nowrap;
+  transition:
+    width 320ms cubic-bezier(0.22, 1, 0.36, 1),
+    height 320ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    background 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 280ms ease,
+    color 280ms ease;
+  will-change: width, height;
+}
+.prp-header__stats-inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  /* Content swap: brief scale settle (not dual-layer fade) */
+  animation: prp-header-stats-content-in 280ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.prp-header__stats-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prp-header__stats--busy {
+  color: var(--prp-fg);
+  border-color: color-mix(in srgb, var(--prp-accent, #0969da) 34%, var(--prp-border));
+  background: color-mix(in srgb, var(--prp-bg) 88%, var(--prp-accent, #0969da));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--prp-accent, #0969da) 12%, transparent);
+  /* Hold near-constant width while load phrases swap (~22ch copy) */
+  min-width: 22ch;
+}
+.prp-header__stats-spinner {
+  width: 11px;
+  height: 11px;
+  border: 2px solid color-mix(in srgb, var(--prp-accent, #0969da) 28%, transparent);
+  border-top-color: var(--prp-accent, #0969da);
+  border-radius: 50%;
+  flex-shrink: 0;
+  animation: prp-header-stats-spin 0.7s linear infinite;
+}
+@keyframes prp-header-stats-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes prp-header-stats-content-in {
+  from {
+    transform: scale(0.96);
+  }
+  to {
+    transform: scale(1);
+  }
 }
 
 .prp-header__actions {
@@ -714,6 +896,14 @@ html.prp-scroll-lock body {
 
 .prp-header__more-item--danger {
   color: var(--prp-danger);
+  border: 1px solid color-mix(in srgb, var(--prp-danger) 55%, transparent);
+  background: color-mix(in srgb, var(--prp-danger) 10%, var(--prp-bg));
+  border-radius: 6px;
+}
+.prp-header__more-item--danger:hover,
+.prp-header__more-item--danger:focus-visible {
+  background: color-mix(in srgb, var(--prp-danger) 16%, var(--prp-bg));
+  border-color: var(--prp-danger);
 }
 
 /*
@@ -813,7 +1003,14 @@ html.prp-scroll-lock body {
 
 .prp-btn--danger {
   color: var(--prp-danger);
-  border-color: color-mix(in srgb, var(--prp-danger) 40%, var(--prp-border));
+  border-color: color-mix(in srgb, var(--prp-danger) 72%, var(--prp-border));
+  background: color-mix(in srgb, var(--prp-danger) 12%, var(--prp-bg));
+}
+.prp-btn--danger:hover,
+.prp-btn--danger:focus-visible {
+  color: var(--prp-danger);
+  border-color: var(--prp-danger);
+  background: color-mix(in srgb, var(--prp-danger) 18%, var(--prp-bg));
 }
 
 .prp-btn--ghost {
@@ -926,180 +1123,16 @@ html.prp-scroll-lock body {
   background: color-mix(in srgb, var(--prp-danger) 8%, var(--prp-bg));
 }
 
-/* Soft revalidate / partial load / find — floating overlays (no layout shift) */
-.prp-top-loading-bar {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 3px;
-  z-index: 80;
-  pointer-events: none;
-  overflow: hidden;
-  border-radius: inherit;
-  opacity: 1;
-  transform: translateY(0) scaleY(1);
-  transform-origin: top center;
-  /* Prefer transition for leave; enter uses one-shot keyframes without fill:both */
-  transition:
-    opacity 360ms cubic-bezier(0.22, 1, 0.36, 1),
-    transform 360ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-.prp-top-loading-bar:not(.prp-top-loading-bar--leaving) {
-  animation: prp-top-loading-in 200ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-.prp-top-loading-bar--leaving {
-  opacity: 0;
-  transform: translateY(-3px) scaleY(0.6);
-  /* Keep transition; stop enter keyframes so leave is driven by transition only */
-  animation: none;
-}
-.prp-top-loading-bar--leaving::after {
-  transition: opacity 280ms ease;
-  opacity: 0;
-}
-@keyframes prp-top-loading-in {
-  from {
-    opacity: 0;
-    transform: translateY(-3px) scaleY(0.6);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scaleY(1);
-  }
-}
-
-/* Floating stage pill — out of document flow so show/hide never shifts header/body */
-.prp-load-stage {
-  position: absolute;
-  top: 10px;
-  left: 50%;
-  z-index: 81;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: 0 0 auto;
-  width: max-content;
-  max-width: min(92%, 440px);
-  margin: 0;
-  padding: 7px 14px;
-  font-size: 12px;
-  line-height: 1.3;
-  color: var(--prp-fg-muted);
-  background: color-mix(in srgb, var(--prp-bg) 92%, var(--prp-accent, #0969da));
-  border: 1px solid color-mix(in srgb, var(--prp-accent, #0969da) 28%, var(--prp-border));
-  border-radius: 999px;
-  box-shadow: 0 6px 20px rgba(1, 4, 9, 0.12);
-  overflow: hidden;
-  pointer-events: none;
-  opacity: 1;
-  transform: translateX(-50%) translateY(0) scale(1);
-  transition:
-    opacity 380ms cubic-bezier(0.22, 1, 0.36, 1),
-    transform 380ms cubic-bezier(0.22, 1, 0.36, 1),
-    box-shadow 380ms ease;
-  will-change: opacity, transform;
-}
-.prp-load-stage:not(.prp-load-stage--leaving) {
-  animation: prp-load-stage-in 220ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-.prp-load-stage--busy {
-  color: var(--prp-fg);
-}
-.prp-load-stage--leaving {
-  opacity: 0;
-  transform: translateX(-50%) translateY(-10px) scale(0.96);
-  box-shadow: 0 2px 8px rgba(1, 4, 9, 0.04);
-  pointer-events: none;
-  animation: none;
-}
-.prp-load-stage--leaving .prp-load-stage__spinner {
-  animation: none;
-  opacity: 0.35;
-  transition: opacity 280ms ease;
-}
-.prp-load-stage__label {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.prp-load-stage__spinner {
-  width: 12px;
-  height: 12px;
-  border: 2px solid color-mix(in srgb, var(--prp-accent, #0969da) 30%, transparent);
-  border-top-color: var(--prp-accent, #0969da);
-  border-radius: 50%;
-  flex-shrink: 0;
-  animation: prp-load-stage-spin 0.7s linear infinite;
-}
-@keyframes prp-load-stage-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-@keyframes prp-load-stage-in {
-  from {
-    opacity: 0;
-    transform: translateX(-50%) translateY(-10px) scale(0.96);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(-50%) translateY(0) scale(1);
-  }
-}
-
-.prp-top-loading-bar::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: color-mix(in srgb, var(--prp-accent, #0969da) 40%, transparent);
-}
-.prp-top-loading-bar::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 42%;
-  border-radius: 0 2px 2px 0;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    var(--prp-accent, #0969da) 30%,
-    var(--prp-accent-bg, #1f6feb) 65%,
-    transparent 100%
-  );
-  animation: prp-top-loading-slide 0.95s ease-in-out infinite;
-  will-change: transform;
-}
-@keyframes prp-top-loading-slide {
-  0% {
-    transform: translateX(-130%);
-  }
-  100% {
-    transform: translateX(280%);
-  }
-}
+/* Load stage lives in .prp-header__stats only (no top indeterminate bar). */
 @media (prefers-reduced-motion: reduce) {
-  .prp-top-loading-bar,
-  .prp-load-stage {
+  .prp-header__stats,
+  .prp-header__stats-inner {
     animation: none;
     transition: none;
   }
-  .prp-top-loading-bar--leaving,
-  .prp-load-stage--leaving {
-    opacity: 0;
-  }
-  .prp-load-stage__spinner {
+  .prp-header__stats-spinner {
     animation: none;
     opacity: 0.7;
-  }
-  .prp-top-loading-bar::after {
-    animation: none;
-    width: 100%;
-    opacity: 0.9;
-    background: var(--prp-accent, #0969da);
-    transform: none;
   }
 }
 
@@ -1469,27 +1502,40 @@ html.prp-scroll-lock body {
 /* Conversation layout — GitHub PR overview.
  * Columns scroll independently so the right rail stays sticky in view. */
 .prp-conversation {
+  --prp-aside-w: 280px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 280px;
-  gap: var(--prp-gap-stack);
+  /* main | splitter (28px for collapse ctrl) | aside — aside width via --prp-aside-w */
+  grid-template-columns: minmax(0, 1fr) 28px var(--prp-aside-w);
+  gap: 0;
   overflow: hidden;
   flex: 1 1 auto;
   min-height: 0;
-  padding: var(--prp-pad-body);
+  /* Left inset only — vertical inset lives in scrollers + edge-fade overlays
+   * so content soft-fades instead of hard-clipping at a 16px pad edge. */
+  padding: 0 0 0 18px;
   background: var(--prp-bg);
   overscroll-behavior: contain;
+  transition: grid-template-columns 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.prp-conversation--aside-collapsed {
+  /* --prp-aside-w set inline to compact width */
 }
 
 @media (max-width: 840px) {
   .prp-conversation {
     grid-template-columns: 1fr;
     overflow: auto;
+    padding-right: 18px; /* no aside column — restore outer right pad */
   }
 
   .prp-conversation__main,
   .prp-conversation__aside {
     overflow: visible;
     max-height: none;
+  }
+  .prp-conversation__aside {
+    padding-right: 0; /* already on container */
   }
 
   .prp-skeleton__grid,
@@ -1512,44 +1558,128 @@ html.prp-scroll-lock body {
   gap: 0;
   min-width: 0;
   min-height: 0;
-  /* Single virtual scroller owns the entire left panel */
+  margin: 0;
+  padding: 0;
+  /* Single virtual scroller owns the entire left panel — flush to splitter */
   overflow: hidden;
   overscroll-behavior: contain;
 }
-/* Full left-panel virtual list (description + composer/merge + timeline) */
-.prp-conversation-virtual {
+/*
+ * Floating (overlay) scrollbars — native bar is fully hidden so Chrome cannot
+ * reserve a classic gutter; a custom thumb paints over content instead.
+ */
+.prp-scroll-float-host {
+  position: relative;
   flex: 1 1 auto;
   min-height: 0;
   min-width: 0;
   height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+/*
+ * Soft edge fade: content dissolves into the shell background over
+ * --prp-edge-fade-size instead of hard-stopping at a padding box.
+ * Pair with vertical padding on the scroller so resting content sits clear.
+ */
+.prp-scroll-float-host.prp-edge-fade::before,
+.prp-scroll-float-host.prp-edge-fade::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: var(--prp-edge-fade-size, 18px);
+  z-index: 3;
+  pointer-events: none;
+}
+.prp-scroll-float-host.prp-edge-fade::before {
+  top: 0;
+  background: linear-gradient(
+    to bottom,
+    var(--prp-bg) 0%,
+    color-mix(in srgb, var(--prp-bg) 88%, transparent) 28%,
+    color-mix(in srgb, var(--prp-bg) 45%, transparent) 62%,
+    transparent 100%
+  );
+}
+.prp-scroll-float-host.prp-edge-fade::after {
+  bottom: 0;
+  background: linear-gradient(
+    to top,
+    var(--prp-bg) 0%,
+    color-mix(in srgb, var(--prp-bg) 88%, transparent) 28%,
+    color-mix(in srgb, var(--prp-bg) 45%, transparent) 62%,
+    transparent 100%
+  );
+}
+.prp-scroll-float {
+  /* Kill native scrollbar width in every engine */
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* legacy Edge */
+  scrollbar-gutter: unset;
+}
+.prp-scroll-float::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+  display: none !important;
+  background: transparent;
+}
+
+/* Custom overlay thumb — flush to the panel edge (no track inset).
+ * Shown only with .prp-float-sb--active (scrolling/dragging); auto-hides after
+ * idle (see FLOATING_SCROLLBAR_IDLE_MS). Hover alone does not keep it visible. */
+.prp-float-sb {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 6px;
+  z-index: 5;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms ease;
+}
+.prp-float-sb--active {
+  opacity: 1;
+  pointer-events: auto;
+}
+.prp-float-sb__thumb {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  width: 100%;
+  min-height: 28px;
+  border-radius: 999px;
+  /* Softer / fainter than default chrome scrollbars */
+  background: color-mix(in srgb, var(--prp-fg-muted) 26%, transparent);
+  box-shadow: none;
+  cursor: default;
+  will-change: transform;
+  touch-action: none;
+}
+.prp-float-sb--active .prp-float-sb__thumb {
+  background: color-mix(in srgb, var(--prp-fg-muted) 40%, transparent);
+}
+
+/* Full left-panel virtual list (description + composer/merge + timeline) */
+.prp-conversation-virtual-host {
+  /* sizing comes from .prp-scroll-float-host */
+}
+.prp-conversation-virtual {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+  /* Vertical inset scrolls with content under the edge-fade overlays */
+  padding: 16px 0;
+  box-sizing: border-box;
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
   display: block;
-  /* Thumb only — no track / gutter fill in the center panel */
-  scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--prp-fg-muted) 40%, transparent) transparent;
-}
-.prp-conversation-virtual::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-  background: transparent;
-}
-.prp-conversation-virtual::-webkit-scrollbar-track,
-.prp-conversation-virtual::-webkit-scrollbar-track-piece,
-.prp-conversation-virtual::-webkit-scrollbar-corner {
-  background: transparent;
-}
-.prp-conversation-virtual::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--prp-fg-muted) 40%, transparent);
-  border-radius: 999px;
-  border: 2px solid transparent;
-  background-clip: padding-box;
-}
-.prp-conversation-virtual::-webkit-scrollbar-thumb:hover {
-  background: color-mix(in srgb, var(--prp-fg-muted) 55%, transparent);
-  background-clip: padding-box;
-  border: 2px solid transparent;
+  min-height: 0;
+  min-width: 0;
 }
 .prp-conversation-virtual__spacer {
   width: 100%;
@@ -1585,21 +1715,373 @@ html.prp-scroll-lock body {
   overflow: visible;
 }
 
+/* Vertical splitter between main and aside (hosts collapse control) */
+.prp-conversation__splitter {
+  position: relative;
+  z-index: 12; /* above edge-fade / scroll content so collapse tip is not clipped under */
+  align-self: stretch;
+  min-width: 0;
+  width: 100%;
+  background: transparent;
+  overflow: visible;
+}
+/* 1px hairline centered in the 28px track */
+.prp-conversation__splitter::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: var(--prp-border-muted);
+  pointer-events: none;
+}
+
+/* Host wraps aside so floating thumb can overlay flush on the panel edge */
+.prp-conversation__aside-host {
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  /* No host padding — float bar sits on the right edge; content pads inside scroller */
+  padding: 0;
+  box-sizing: border-box;
+}
 .prp-conversation__aside {
   display: flex;
   flex-direction: column;
   gap: 0;
   min-width: 0;
   min-height: 0;
-  /* Sticky right rail: same height as conversation panel, independent scroll */
-  position: sticky;
-  top: 0;
-  align-self: stretch;
+  height: 100%;
+  width: 100%;
+  flex: 1 1 auto;
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
-  /* GitHub-like flat meta rail — no card chrome */
-  padding: 0 2px;
+  /* Vertical inset under edge-fade + right inset for meta content */
+  padding: 16px 18px 16px 0;
+  box-sizing: border-box;
+}
+.prp-conversation__aside-host.prp-conversation__aside-host--collapsed {
+  padding: 0;
+}
+.prp-conversation__aside-host--collapsed .prp-conversation__aside {
+  /* compact rail padding lives on the scroller itself */
+  padding: 12px 4px 8px;
+}
+
+/* Circular fold control centered on the vertical splitter */
+.prp-aside-collapse-btn {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  z-index: 14;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--prp-border);
+  border-radius: 999px;
+  background: var(--prp-bg);
+  color: var(--prp-fg-muted);
+  box-shadow: 0 1px 4px rgba(1, 4, 9, 0.14);
+  cursor: pointer;
+  appearance: none;
+  transition:
+    background 120ms ease,
+    color 120ms ease,
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+  /* Tip anchors here; overflow visible so popover is not clipped by the button box */
+  overflow: visible;
+}
+.prp-aside-collapse-btn:hover,
+.prp-aside-collapse-btn:focus-visible {
+  color: var(--prp-accent);
+  border-color: var(--prp-accent);
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--prp-accent) 22%, transparent);
+}
+/*
+ * Default tip is above the control, but this button sits under the header —
+ * body overflow clips upward tips. Anchor below the chevron instead.
+ */
+.prp-aside-collapse-btn .prp-tip-pop {
+  top: calc(100% + 8px);
+  bottom: auto;
+  left: 50%;
+  right: auto;
+  transform: translateX(-50%) translateY(-4px);
+  z-index: 50;
+  white-space: nowrap;
+}
+.prp-aside-collapse-btn:hover .prp-tip-pop,
+.prp-aside-collapse-btn:focus-visible .prp-tip-pop {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* Compact rail */
+.prp-conversation__aside--collapsed {
+  align-items: stretch;
+  /* Allow hover tips to paint into the main column (not clipped by the rail) */
+  overflow: visible;
+}
+.prp-conversation__aside-host--collapsed {
+  padding: 0;
+  /* Host is a scroll-float wrapper (overflow:hidden by default) — open it when
+   * compact so TipPopover can escape left of the rail without being cut off. */
+  overflow: visible;
+  /*
+   * Stack above the splitter (12) and collapse toggle (14) so left-opening
+   * tips paint over them instead of sliding underneath.
+   */
+  z-index: 20;
+}
+.prp-conversation__aside-host--collapsed .prp-aside-compact .prp-tip-pop {
+  /* Extra insurance inside the raised host stacking context */
+  z-index: 30;
+}
+.prp-conversation__aside-host--collapsed .prp-conversation__aside {
+  overflow: visible;
+}
+.prp-aside-compact {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  padding: 2px 0 8px;
+  box-sizing: border-box;
+}
+.prp-aside-compact__group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+}
+.prp-aside-compact__label {
+  margin: 0;
+  padding: 0;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  color: var(--prp-fg-muted);
+  line-height: 1.2;
+  user-select: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+/* Horizontal overlapping avatar stack */
+.prp-aside-compact__stack {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0;
+  min-height: 22px;
+  max-width: 100%;
+}
+.prp-aside-compact__stack--empty {
+  opacity: 0.55;
+}
+.prp-aside-compact__empty-dot {
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  border: 1px dashed var(--prp-border-muted);
+  background: transparent;
+  display: block;
+}
+.prp-aside-compact__avatar-wrap {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-left: -6px;
+  border-radius: 999px;
+  /* ring: bg gap + status color */
+  box-shadow:
+    0 0 0 1.5px var(--prp-bg),
+    0 0 0 2.5px var(--prp-border-muted);
+  line-height: 0;
+}
+.prp-aside-compact__avatar-wrap:first-child {
+  margin-left: 0;
+}
+.prp-aside-compact__avatar-wrap--ok {
+  box-shadow:
+    0 0 0 1.5px var(--prp-bg),
+    0 0 0 2.5px var(--prp-ok);
+}
+.prp-aside-compact__avatar-wrap--danger {
+  box-shadow:
+    0 0 0 1.5px var(--prp-bg),
+    0 0 0 2.5px var(--prp-danger);
+}
+.prp-aside-compact__avatar-wrap--warn {
+  box-shadow:
+    0 0 0 1.5px var(--prp-bg),
+    0 0 0 2.5px var(--prp-warn);
+}
+.prp-aside-compact__avatar-wrap--muted {
+  box-shadow:
+    0 0 0 1.5px var(--prp-bg),
+    0 0 0 2.5px var(--prp-fg-muted);
+}
+.prp-aside-compact__avatar-wrap .prp-avatar,
+.prp-aside-compact__avatar-wrap .prp-avatar--sm {
+  width: 20px !important;
+  height: 20px !important;
+  font-size: 9px;
+  border-radius: 999px;
+}
+/* +N overflow circle (from 5th person onward) */
+.prp-aside-compact__more-circle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  margin-left: -6px;
+  border-radius: 999px;
+  background: var(--prp-bg-muted);
+  border: 1.5px solid var(--prp-border);
+  box-shadow: 0 0 0 1.5px var(--prp-bg);
+  color: var(--prp-fg-muted);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: default;
+  user-select: none;
+}
+.prp-aside-compact__more-circle__txt {
+  transform: translateY(0.5px);
+}
+.prp-aside-compact__more {
+  position: relative;
+  flex-shrink: 0;
+  margin-left: 4px;
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--prp-fg-muted);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.prp-aside-compact__check {
+  position: relative;
+  display: inline-flex;
+  max-width: 100%;
+}
+.prp-aside-compact__check-badge {
+  font-size: 10px !important;
+  padding: 0 6px !important;
+  line-height: 18px !important;
+  min-height: 18px !important;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.prp-aside-compact__labels {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 4px;
+  max-width: 100%;
+}
+.prp-aside-compact__label-dot {
+  position: relative;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px rgba(1, 4, 9, 0.12);
+  flex-shrink: 0;
+}
+.prp-aside-compact__pill {
+  position: relative;
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--prp-fg-muted);
+  line-height: 1.2;
+}
+.prp-aside-compact__group--counts {
+  gap: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--prp-border-muted);
+}
+.prp-aside-compact__count {
+  position: relative;
+  display: block;
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--prp-fg-muted);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+}
+.prp-aside-compact__count-unit {
+  font-weight: 500;
+  opacity: 0.9;
+}
+
+/*
+ * Compact tip: open to the LEFT into the conversation pane.
+ * Centered-above tips were half-clipped by the narrow rail + overflow.
+ */
+.prp-aside-compact .prp-has-tip {
+  position: relative;
+}
+.prp-aside-compact .prp-tip-pop {
+  top: 50%;
+  bottom: auto;
+  left: auto;
+  right: calc(100% + 8px);
+  transform: translateY(-50%) translateX(4px);
+  white-space: pre-line;
+  max-width: min(240px, 42vw);
+  text-align: left;
+  z-index: 60;
+}
+.prp-aside-compact .prp-has-tip:hover .prp-tip-pop,
+.prp-aside-compact .prp-has-tip:focus-visible .prp-tip-pop {
+  opacity: 1;
+  transform: translateY(-50%) translateX(0);
+}
+.prp-aside-compact .prp-tip-pop__label {
+  overflow: visible;
+  text-overflow: unset;
+  white-space: pre-line;
+}
+
+@media (max-width: 840px) {
+  .prp-conversation__splitter {
+    display: none;
+  }
+  .prp-aside-collapse-btn {
+    /* Stacked layout: pin control to the top-right of the rail */
+    position: absolute;
+    left: auto;
+    right: 8px;
+    top: 8px;
+    transform: none;
+  }
+  .prp-conversation__aside {
+    position: relative;
+  }
 }
 
 /* Flat sidebar sections (Reviewers / Assignees / Labels / …) */
@@ -2149,7 +2631,8 @@ html.prp-scroll-lock body {
   tab-size: 2;
 }
 
-.prp-md pre code {
+.prp-md pre code,
+.prp-md pre.prp-md-code code {
   border: 0 !important;
   padding: 0 !important;
   margin: 0;
@@ -2164,6 +2647,11 @@ html.prp-scroll-lock body {
   font-size: inherit;
   font-family: var(--prp-mono);
   line-height: inherit;
+}
+
+/* Fenced blocks with syntax highlight (hljs token spans) */
+.prp-md pre.prp-md-code code.hljs {
+  color: inherit;
 }
 
 .prp-md a {
@@ -3163,18 +3651,246 @@ html.prp-scroll-lock body {
   font-size: 11px;
 }
 
-.prp-mermaid {
+.prp-mermaid-wrap {
   margin: 0.6em 0;
-  padding: 10px;
   border: 1px solid var(--prp-border-muted);
   border-radius: 8px;
-  background: var(--prp-bg-muted);
-  overflow: auto;
+  background: color-mix(in srgb, var(--prp-bg-muted) 88%, var(--prp-fg-muted) 4%);
+  overflow: hidden;
 }
-
+.prp-mermaid__chrome {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-bottom: 1px solid color-mix(in srgb, var(--prp-border-muted) 80%, transparent);
+  background: color-mix(in srgb, var(--prp-bg) 70%, var(--prp-bg-muted));
+}
+.prp-mermaid__expand {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0;
+  padding: 3px 8px;
+  border: 1px solid var(--prp-border-muted);
+  border-radius: 6px;
+  background: var(--prp-bg);
+  color: var(--prp-fg-muted);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+}
+.prp-mermaid__expand:hover,
+.prp-mermaid__expand:focus-visible {
+  color: var(--prp-accent);
+  border-color: color-mix(in srgb, var(--prp-accent) 40%, var(--prp-border));
+  outline: none;
+}
+.prp-mermaid {
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  min-height: 48px;
+  /* Keep tall sequence/flow diagrams from dominating conversation comments */
+  max-height: 720px;
+  cursor: zoom-in;
+}
+.prp-mermaid svg {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  /* Soften any residual color mermaid injects */
+  filter: grayscale(0.15);
+}
+.prp-mermaid--loading {
+  display: flex;
+  align-items: center;
+  min-height: 48px;
+  margin: 0.6em 0;
+  padding: 12px;
+  border: 1px solid var(--prp-border-muted);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--prp-bg-muted) 88%, var(--prp-fg-muted) 4%);
+}
+.prp-mermaid__loading {
+  font-size: 12px;
+}
 .prp-mermaid--error {
   white-space: pre-wrap;
   font-size: 12px;
+  margin: 0.6em 0;
+}
+.prp-mermaid--error code {
+  display: block;
+  margin-bottom: 6px;
+  font-family: var(--prp-mono);
+  font-size: 11px;
+}
+
+/*
+ * Fullscreen Mermaid diagram viewer.
+ * Portaled into .prp-overlay (z-index 100000) so it stacks above .prp-modal.
+ * Own z-index within that context; if body-portaled, still beat page chrome.
+ */
+.prp-mermaid-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 100010; /* > .prp-overlay (100000) when on body; top of overlay when inside it */
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: stretch;
+  font-family: var(--prp-font);
+  font-size: 14px;
+  line-height: 1.5;
+  /* Self-contained light theme tokens (don't rely on parent inheritance) */
+  --prp-fg: #1f2328;
+  --prp-fg-muted: #656d76;
+  --prp-bg: #ffffff;
+  --prp-bg-muted: #f6f8fa;
+  --prp-border: #d0d7de;
+  --prp-border-muted: #d8dee4;
+  --prp-accent: #0969da;
+  /* Strong dark veil — still slightly translucent so modal context peeks through */
+  --prp-backdrop-alpha: 0.72;
+  --prp-backdrop-color: rgba(1, 4, 9, var(--prp-backdrop-alpha));
+  color: var(--prp-fg);
+  /* Root stays clear; dim is only on .prp-mermaid-viewer__backdrop */
+  background: transparent;
+  isolation: isolate;
+  pointer-events: auto;
+}
+.prp-mermaid-viewer[data-color-mode='dark'] {
+  --prp-fg: #e6edf3;
+  --prp-fg-muted: #8b949e;
+  --prp-bg: #0d1117;
+  --prp-bg-muted: #161b22;
+  --prp-border: #30363d;
+  --prp-border-muted: #21262d;
+  --prp-accent: #2f81f7;
+  --prp-backdrop-alpha: 0.82;
+  --prp-backdrop-color: rgba(1, 4, 9, var(--prp-backdrop-alpha));
+  color-scheme: dark;
+}
+.prp-mermaid-viewer__backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: var(--prp-backdrop-color, rgba(1, 4, 9, 0.72));
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.prp-mermaid-viewer__chrome {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  background: transparent;
+}
+.prp-mermaid-viewer__bar {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--prp-border-muted);
+  background: var(--prp-bg-muted);
+  color: var(--prp-fg);
+}
+.prp-mermaid-viewer__title {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--prp-fg);
+}
+.prp-mermaid-viewer__hint {
+  font-size: 11px;
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--prp-fg-muted);
+}
+.prp-mermaid-viewer__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.prp-mermaid-viewer__close {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--prp-border);
+  border-radius: 6px;
+  opacity: 1;
+  color: var(--prp-fg-muted);
+  background: var(--prp-bg);
+}
+.prp-mermaid-viewer__stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  position: relative;
+  overflow: hidden;
+  /* Default grab hand — drag pans without Ctrl/⌘ */
+  cursor: grab;
+  /* Transparent so the shared dark veil + PR modal show through */
+  background: transparent;
+  touch-action: none;
+  user-select: none;
+}
+.prp-mermaid-viewer__stage--panning {
+  cursor: grabbing;
+}
+.prp-mermaid-viewer__canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+  /* scale/translate from JS fit + pan/zoom; origin top-left of content */
+  transform-origin: 0 0;
+  will-change: transform;
+  padding: 0;
+  box-sizing: border-box;
+  /* Vector SVG — no max-width so fit scale can enlarge crisply */
+  line-height: 0;
+  cursor: inherit;
+  pointer-events: none; /* stage owns drag/zoom; SVG is visual only */
+}
+.prp-mermaid-viewer__canvas svg {
+  max-width: none !important;
+  max-height: none !important;
+  width: auto !important;
+  height: auto !important;
+  display: block;
+  /* Keep intrinsic viewBox resolution; CSS scale handles display size */
+  shape-rendering: geometricPrecision;
+  text-rendering: geometricPrecision;
+  filter: grayscale(0.1);
+  background: var(--prp-bg);
+  border-radius: 10px;
+  padding: 20px;
+  border: 1px solid var(--prp-border-muted);
+  box-shadow: 0 12px 40px rgba(1, 4, 9, 0.14);
+  cursor: inherit;
+  pointer-events: none;
+}
+.prp-mermaid-viewer[data-color-mode='dark'] .prp-mermaid-viewer__canvas svg {
+  box-shadow: 0 8px 28px rgba(1, 4, 9, 0.45);
+}
+
+/* Inline mermaid block also follows shell theme via CSS vars */
+.prp-mermaid-wrap {
+  background: var(--prp-bg-muted);
+}
+.prp-overlay[data-color-mode='dark'] .prp-mermaid-wrap,
+.prp-overlay.prp-theme-dark .prp-mermaid-wrap {
+  background: color-mix(in srgb, var(--prp-bg-muted) 90%, var(--prp-fg-muted) 6%);
 }
 
 .prp-inline-comment {
@@ -3696,7 +4412,8 @@ html.prp-scroll-lock body {
 
 /* highlight.js — light + dark via GitHub theme vars */
 .prp-code.hljs,
-.prp-vline .hljs {
+.prp-vline .hljs,
+.prp-md pre code.hljs {
   background: transparent;
   color: var(--prp-fg);
   padding: 0;
@@ -4124,6 +4841,36 @@ html.prp-scroll-lock body {
   border-top: 0;
 }
 
+/* Pending threads embedded at top of Review submit form */
+.prp-composer__pending-threads {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 4px;
+  padding: 0 0 10px;
+  border-bottom: 1px solid var(--prp-border-muted);
+}
+.prp-composer__pending-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.prp-composer__pending-title {
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--prp-fg-muted);
+}
+.prp-composer__pending-body {
+  margin: 0;
+}
+/* (composer list rules live after .prp-review-group__list so gap overrides win) */
+.prp-composer__pending-empty {
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
 .prp-composer__label {
   display: flex;
   align-items: center;
@@ -4301,13 +5048,62 @@ html.prp-scroll-lock body {
   margin: 0 0 4px;
   font-size: 13px;
 }
+/* Shared list chrome: review form (composer) + timeline review groups */
 .prp-review-group__list {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 0; /* no gap between path rows — form-style stacked list */
+  border: 1px solid var(--prp-border-muted);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--prp-bg);
+}
+.prp-review-group__list .prp-review-group__row {
+  border-radius: 0;
+  border: 0;
+  border-bottom: 1px solid var(--prp-border-muted);
+  background: var(--prp-bg);
+  margin: 0;
+  box-shadow: none;
+  overflow: hidden;
+}
+.prp-review-group__list .prp-review-group__row:last-child {
+  border-bottom: 0;
+}
+.prp-review-group__list .prp-review-group__row--open {
+  background: var(--prp-bg);
+}
+.prp-review-group__list .prp-review-group__row-btn {
+  min-height: 32px;
+  padding: 6px 8px 6px 10px;
+}
+.prp-review-group__list .prp-review-group__thread {
+  border-top: 1px solid var(--prp-border-muted);
+  margin: 0;
+  padding: 0;
+}
+/* Composer pending tint (only while unsubmitted) */
+.prp-review-group__list.prp-review-group__list--in-composer
+  .prp-review-group__row--pending
+  > .prp-review-group__row-head {
+  background: color-mix(in srgb, var(--prp-warn) 14%, var(--prp-bg));
+}
+.prp-review-group__list.prp-review-group__list--in-composer
+  .prp-review-group__row--pending
+  > .prp-review-group__row-head
+  .prp-review-group__row-btn:hover,
+.prp-review-group__list.prp-review-group__list--in-composer
+  .prp-review-group__row--pending
+  > .prp-review-group__row-head
+  .prp-review-group__row-btn:focus-visible {
+  background: color-mix(in srgb, var(--prp-warn) 20%, var(--prp-bg));
+}
+.prp-review-group__list.prp-review-group__list--in-composer
+  .prp-review-group__thread {
+  border-top-color: color-mix(in srgb, var(--prp-warn) 16%, var(--prp-border-muted));
 }
 .prp-review-group__row {
   border: 1px solid var(--prp-border-muted);
@@ -4368,11 +5164,17 @@ html.prp-scroll-lock body {
   font-size: 12px;
   color: var(--prp-fg);
 }
+/* Goto-diff: both sides inset (beats .prp-icon-btn { margin: 0 } later in file) */
+.prp-icon-btn.prp-review-group__jump,
 .prp-review-group__jump {
   flex: 0 0 auto;
-  margin-right: 6px;
+  flex-shrink: 0;
+  margin-left: 4px;
+  margin-right: 4px;
   color: var(--prp-fg-muted);
 }
+.prp-icon-btn.prp-review-group__jump:hover,
+.prp-icon-btn.prp-review-group__jump:focus-visible,
 .prp-review-group__jump:hover,
 .prp-review-group__jump:focus-visible {
   color: var(--prp-accent);
@@ -4430,9 +5232,12 @@ html.prp-scroll-lock body {
   font-size: 12px;
   color: var(--prp-fg);
 }
+/* Same inset as .prp-review-group__jump (shared path-row chrome) */
 .prp-conversation-thread-header__jump {
   flex: 0 0 auto;
-  margin-right: 2px;
+  flex-shrink: 0;
+  margin-left: 4px;
+  margin-right: 4px;
   color: var(--prp-fg-muted);
 }
 .prp-conversation-thread-header__jump:hover,
@@ -4652,6 +5457,15 @@ html.prp-scroll-lock body {
   background: var(--prp-bg);
 }
 
+/* Comment / Start review (and Resolve) stay hidden until Reply is focused or has draft text */
+.prp-inline-thread__composer-actions {
+  display: none;
+}
+.prp-inline-thread__composer:focus-within .prp-inline-thread__composer-actions,
+.prp-inline-thread__composer-actions--open {
+  display: flex;
+}
+
 /* Expanded comment row: content-sized (do not force large min-height) */
 .prp-vline--comment:not(.prp-vline--comment-collapsed):not([data-collapsed='1']) {
   min-height: 0 !important;
@@ -4682,11 +5496,11 @@ a.prp-label:hover {
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
-  gap: 6px 4px;
-  padding: 8px 16px;
+  gap: 4px 3px;
+  padding: 5px 12px;
   border-bottom: 1px solid var(--prp-border-muted);
   background: var(--prp-bg-muted);
-  font-size: 12px;
+  font-size: 11px;
   overflow-x: auto;
   overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
@@ -4695,31 +5509,60 @@ a.prp-label:hover {
   min-width: 0;
 }
 .prp-stack-strip::-webkit-scrollbar {
-  height: 6px;
+  height: 5px;
 }
 .prp-stack-strip::-webkit-scrollbar-thumb {
   background: color-mix(in srgb, var(--prp-fg-muted) 35%, transparent);
   border-radius: 999px;
 }
+/*
+ * Sticky “Stack” label: solid strip background + right-edge fade so chips
+ * scroll underneath and dissolve. margin-right ≈ fade width so the first
+ * chip is fully visible at rest (fade only covers the reserved gutter).
+ */
 .prp-stack-strip__label {
-  color: var(--prp-fg-muted);
-  font-weight: 600;
-  margin-right: 4px;
-  flex: 0 0 auto;
+  --prp-stack-label-fade: 18px;
   position: sticky;
   left: 0;
-  z-index: 1;
+  z-index: 2;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  align-self: stretch;
+  /* cover left strip pad; reserve fade gutter so chip #1 isn’t covered */
+  margin: -5px var(--prp-stack-label-fade) -5px -12px;
+  padding: 5px 8px 5px 12px;
+  color: var(--prp-fg-muted);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
   background: var(--prp-bg-muted);
-  padding-right: 4px;
+  box-shadow: none;
+  pointer-events: none; /* don’t block chip clicks under the fade */
+}
+.prp-stack-strip__label::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 100%;
+  width: var(--prp-stack-label-fade);
+  background: linear-gradient(
+    to right,
+    var(--prp-bg-muted) 0%,
+    color-mix(in srgb, var(--prp-bg-muted) 75%, transparent) 45%,
+    transparent 100%
+  );
+  pointer-events: none;
 }
 .prp-stack-strip__item {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  max-width: 180px;
+  gap: 4px;
+  max-width: 168px;
   min-width: 0;
   flex: 0 0 auto;
-  padding: 4px 10px;
+  padding: 2px 8px;
   border-radius: 999px;
   border: 1px solid var(--prp-border);
   background: var(--prp-bg);
@@ -4746,7 +5589,7 @@ a.prp-label:hover {
 }
 .prp-stack-strip__num {
   font-family: var(--prp-mono);
-  font-size: 11px;
+  font-size: 10px;
   flex: 0 0 auto;
 }
 /* Title truncates with ellipsis; full title remains on chip title= tooltip */
@@ -4759,7 +5602,7 @@ a.prp-label:hover {
 }
 .prp-stack-strip__item--fork {
   cursor: pointer;
-  padding-right: 8px;
+  padding-right: 6px;
 }
 .prp-stack-strip__item--picker-open {
   border-color: var(--prp-accent);
@@ -6276,6 +7119,11 @@ a.prp-branch-tag__text:focus-visible {
   opacity: 0.7;
   transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
 }
+/* Keep review-group goto-diff horizontal inset after base icon-btn margin:0 */
+.prp-icon-btn.prp-review-group__jump {
+  margin-left: 4px;
+  margin-right: 4px;
+}
 .prp-icon-btn:hover,
 .prp-icon-btn:focus-visible {
   opacity: 1;
@@ -6412,6 +7260,147 @@ a.prp-commit-timeline__sha code {
   border: 1px solid var(--prp-border-muted);
   background: var(--prp-bg-muted);
 }
+
+/* GitHub-style merge-box check groups (failing / skipped / successful) */
+.prp-merge-checks {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.prp-merge-checks__headline {
+  display: flex;
+  align-items: flex-start;
+  min-width: 0;
+}
+.prp-merge-checks__headline-copy {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.prp-merge-checks__title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.35;
+  color: var(--prp-fg);
+}
+.prp-merge-checks__subtitle {
+  margin: 2px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.prp-merge-checks__panel {
+  border: 1px solid var(--prp-border-muted);
+  border-radius: 8px;
+  background: var(--prp-bg);
+  overflow: hidden;
+}
+.prp-merge-checks__group + .prp-merge-checks__group {
+  border-top: 1px solid var(--prp-border-muted);
+}
+.prp-merge-checks__group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin: 0;
+  padding: 8px 12px;
+  border: 0;
+  background: transparent;
+  color: var(--prp-fg-muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.prp-merge-checks__group-toggle:hover {
+  background: color-mix(in srgb, var(--prp-bg-muted) 70%, var(--prp-bg));
+  color: var(--prp-fg);
+}
+.prp-merge-checks__group-label {
+  min-width: 0;
+}
+.prp-merge-checks__group-glyph {
+  color: var(--prp-fg-muted);
+  flex: 0 0 auto;
+}
+.prp-merge-checks__list {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 6px;
+}
+.prp-merge-checks__item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 12px 6px 14px;
+  min-width: 0;
+}
+.prp-merge-checks__item + .prp-merge-checks__item {
+  border-top: 1px solid color-mix(in srgb, var(--prp-border-muted) 70%, transparent);
+}
+.prp-merge-checks__item-status {
+  flex: 0 0 auto;
+  display: inline-flex;
+  margin-top: 1px;
+  line-height: 0;
+}
+.prp-merge-checks__item-icon--failure {
+  color: var(--prp-danger);
+}
+.prp-merge-checks__item-icon--success {
+  color: var(--prp-ok);
+}
+.prp-merge-checks__item-icon--skipped {
+  color: var(--prp-fg-muted);
+}
+.prp-merge-checks__item-icon--pending {
+  color: var(--prp-warn);
+}
+.prp-merge-checks__item-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.prp-merge-checks__item-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.prp-merge-checks__item-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--prp-fg);
+  text-decoration: none;
+  word-break: break-word;
+}
+a.prp-merge-checks__item-name:hover {
+  color: var(--prp-accent);
+  text-decoration: underline;
+}
+.prp-merge-checks__item-summary {
+  font-size: 12px;
+  line-height: 1.35;
+}
+.prp-merge-checks__required {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 3px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--prp-border);
+  color: var(--prp-fg-muted);
+  background: var(--prp-bg-muted);
+}
+
 .prp-checks--compact .prp-checks-list {
   max-height: 140px;
   overflow: auto;

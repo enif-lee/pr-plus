@@ -45,6 +45,29 @@ import {
   type ShellMode,
 } from '../lib/shell-preference';
 import {
+  SHEET_DEFAULT_WIDTH,
+  MODAL_DEFAULT_WIDTH,
+  MODAL_DEFAULT_HEIGHT,
+  SHEET_MIN_WIDTH,
+  SHEET_MAX_WIDTH,
+  MODAL_MIN_WIDTH,
+  MODAL_MAX_WIDTH,
+  MODAL_MIN_HEIGHT,
+  MODAL_MAX_HEIGHT,
+  clampSheetWidth,
+  clampModalSize,
+  nextSheetWidthFromDrag,
+  nextModalSizeFromDrag,
+  loadSheetWidth,
+  saveSheetWidth,
+  loadModalSize,
+  saveModalSize,
+  resolveShellSizeStorage,
+  toggleShellFullscreen,
+  shellFullscreenClassName,
+  type ModalShellSize,
+} from '../lib/shell-size';
+import {
   applyScrollLock,
   measureScrollbarWidth,
   restoreScrollLock,
@@ -70,6 +93,7 @@ import {
   filterFilesByQuery,
   countReviewThreadsByPath,
   countUnresolvedReviewThreadsByPath,
+  countPendingReviewThreads,
   countPendingReviewThreadsByPath,
   countReviewThreadTotals,
   groupReviewThreads,
@@ -481,6 +505,40 @@ export function PrModalApp({
       return SHELL_MODAL;
     }
   });
+  /** Side-sheet width (px) — persisted, viewport-clamped on apply. */
+  const [sheetWidth, setSheetWidth] = useState<number>(() => {
+    try {
+      if (typeof window === 'undefined') return SHEET_DEFAULT_WIDTH;
+      return loadSheetWidth(resolveShellSizeStorage(window), {
+        viewportWidth: window.innerWidth,
+      });
+    } catch {
+      return SHEET_DEFAULT_WIDTH;
+    }
+  });
+  /** Centered modal width/height (px) — persisted. */
+  const [modalSize, setModalSize] = useState<ModalShellSize>(() => {
+    try {
+      if (typeof window === 'undefined') {
+        return { width: MODAL_DEFAULT_WIDTH, height: MODAL_DEFAULT_HEIGHT };
+      }
+      return loadModalSize(resolveShellSizeStorage(window), {
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+      });
+    } catch {
+      return { width: MODAL_DEFAULT_WIDTH, height: MODAL_DEFAULT_HEIGHT };
+    }
+  });
+  /** Fullscreen shell — session-only; does not wipe stored sizes. */
+  const [shellFullscreen, setShellFullscreen] = useState(false);
+  /** True while the user is dragging a shell resizer (disables size CSS transition). */
+  const [shellResizing, setShellResizing] = useState(false);
+  const shellResizeDragRef = useRef<
+    | { kind: 'sheet'; startX: number; startWidth: number }
+    | { kind: 'modal'; startX: number; startY: number; start: ModalShellSize }
+    | null
+  >(null);
   /** Diff files navigator: collapsed + width (persisted). */
   const [fileNav, setFileNav] = useState<FileNavPref>(() => {
     try {
@@ -1597,13 +1655,26 @@ export function PrModalApp({
     routeWriteReady,
   ]);
 
-  // Sync URI (pr+page / pr+number / pr+position) + host session open snap
+  // Sync URI (prp_page / prp_number / prp_position) + host session open snap.
+  // On close (open true → false), strip route params from the address bar.
+  const uriWasOpenRef = useRef(false);
   useEffect(() => {
     if (!open || !detail?.number) {
+      if (uriWasOpenRef.current) {
+        uriWasOpenRef.current = false;
+        try {
+          if (typeof history !== 'undefined' && typeof location !== 'undefined') {
+            clearLocationRoute(history, location);
+          }
+        } catch {
+          /* ignore */
+        }
+      }
       return;
     }
     if (!routeWriteReady) return;
 
+    uriWasOpenRef.current = true;
     const page =
       layoutMode === LAYOUT_DIFF ? 'diff' : ('conversation' as const);
     let position: string | null = null;
@@ -1668,6 +1739,15 @@ export function PrModalApp({
     if (closingRef.current || !open) return;
     closingRef.current = true;
     setClosing(true);
+    // Drop deep-link params as soon as close starts (don't wait for anim end)
+    try {
+      if (typeof history !== 'undefined' && typeof location !== 'undefined') {
+        clearLocationRoute(history, location);
+      }
+    } catch {
+      /* ignore */
+    }
+    uriWasOpenRef.current = false;
     // Docked sheet slides out; fullscreen Diff / modal scale-fades out
     const sheetSlide =
       shellMode === SHELL_SHEET && layoutMode !== LAYOUT_DIFF;
@@ -1825,7 +1905,142 @@ export function PrModalApp({
     window.addEventListener('pointercancel', onUp);
   }
 
-  // Re-apply saved shell + file nav when modal opens (next PR / reopen)
+  function viewportSize() {
+    if (typeof window === 'undefined') {
+      return { viewportWidth: undefined as number | undefined, viewportHeight: undefined as number | undefined };
+    }
+    return { viewportWidth: window.innerWidth, viewportHeight: window.innerHeight };
+  }
+
+  function persistSheetWidth(w: number) {
+    try {
+      if (typeof window !== 'undefined') {
+        saveSheetWidth(resolveShellSizeStorage(window), w);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function persistModalSize(size: ModalShellSize) {
+    try {
+      if (typeof window !== 'undefined') {
+        saveModalSize(resolveShellSizeStorage(window), size);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function onToggleShellFullscreen() {
+    setShellFullscreen((prev) => toggleShellFullscreen(prev));
+  }
+
+  function onSheetResizeStart(e: React.PointerEvent) {
+    if (shellFullscreen || shellMode !== SHELL_SHEET) return;
+    if (layoutMode === LAYOUT_DIFF) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const { viewportWidth } = viewportSize();
+    const startWidth = clampSheetWidth(sheetWidth, { viewportWidth });
+    shellResizeDragRef.current = { kind: 'sheet', startX, startWidth };
+    setShellResizing(true);
+    const target = e.currentTarget as HTMLElement;
+    try {
+      target.setPointerCapture?.(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+    const onMove = (ev: PointerEvent) => {
+      const drag = shellResizeDragRef.current;
+      if (!drag || drag.kind !== 'sheet') return;
+      const nextW = nextSheetWidthFromDrag(drag.startWidth, drag.startX, ev.clientX, {
+        viewportWidth: typeof window !== 'undefined' ? window.innerWidth : undefined,
+      });
+      setSheetWidth(nextW);
+    };
+    const onUp = (ev: PointerEvent) => {
+      shellResizeDragRef.current = null;
+      setShellResizing(false);
+      try {
+        target.releasePointerCapture?.(ev.pointerId);
+      } catch {
+        /* ignore */
+      }
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      setSheetWidth((prev) => {
+        const next = clampSheetWidth(prev, {
+          viewportWidth: typeof window !== 'undefined' ? window.innerWidth : undefined,
+        });
+        persistSheetWidth(next);
+        return next;
+      });
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  }
+
+  function onModalResizeStart(e: React.PointerEvent) {
+    if (shellFullscreen || shellMode !== SHELL_MODAL) return;
+    if (layoutMode === LAYOUT_DIFF) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const { viewportWidth, viewportHeight } = viewportSize();
+    const start = clampModalSize(modalSize, { viewportWidth, viewportHeight });
+    shellResizeDragRef.current = { kind: 'modal', startX, startY, start };
+    setShellResizing(true);
+    const target = e.currentTarget as HTMLElement;
+    try {
+      target.setPointerCapture?.(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+    const onMove = (ev: PointerEvent) => {
+      const drag = shellResizeDragRef.current;
+      if (!drag || drag.kind !== 'modal') return;
+      const next = nextModalSizeFromDrag(
+        drag.start,
+        ev.clientX - drag.startX,
+        ev.clientY - drag.startY,
+        {
+          viewportWidth: typeof window !== 'undefined' ? window.innerWidth : undefined,
+          viewportHeight: typeof window !== 'undefined' ? window.innerHeight : undefined,
+        }
+      );
+      setModalSize(next);
+    };
+    const onUp = (ev: PointerEvent) => {
+      shellResizeDragRef.current = null;
+      setShellResizing(false);
+      try {
+        target.releasePointerCapture?.(ev.pointerId);
+      } catch {
+        /* ignore */
+      }
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      setModalSize((prev) => {
+        const next = clampModalSize(prev, {
+          viewportWidth: typeof window !== 'undefined' ? window.innerWidth : undefined,
+          viewportHeight: typeof window !== 'undefined' ? window.innerHeight : undefined,
+        });
+        persistModalSize(next);
+        return next;
+      });
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  }
+
+  // Re-apply saved shell + sizes + file nav when modal opens (next PR / reopen)
   useEffect(() => {
     if (!open) return;
     try {
@@ -1833,6 +2048,18 @@ export function PrModalApp({
       const stored = loadShellPref(resolveShellStorage(window));
       setShellMode(normalizeShell(stored));
       setFileNav(loadFileNavPref(resolveFileNavStorage(window)));
+      const sizeStore = resolveShellSizeStorage(window);
+      setSheetWidth(
+        loadSheetWidth(sizeStore, { viewportWidth: window.innerWidth })
+      );
+      setModalSize(
+        loadModalSize(sizeStore, {
+          viewportWidth: window.innerWidth,
+          viewportHeight: window.innerHeight,
+        })
+      );
+      // Fullscreen is session-only; reset on each open for a predictable shell.
+      setShellFullscreen(false);
     } catch {
       /* ignore */
     }
@@ -1950,20 +2177,35 @@ export function PrModalApp({
 
   /**
    * Unified pending model: only GitHub PENDING review (no separate local batch).
-   * Count + submit/discard all target detail.viewerPendingReview / pending comments.
+   * Count is **thread** units (roots), not individual pending replies.
    */
   const serverPendingComments = useMemo(() => {
     const list = detail?.reviewComments || [];
     return list.filter((c: any) => c && c.pending);
   }, [detail?.reviewComments]);
-  const pendingCount = serverPendingComments.length;
+  const pendingCount = useMemo(() => {
+    if (typeof countPendingReviewThreads === 'function') {
+      return countPendingReviewThreads(detail?.reviewComments || []);
+    }
+    // Fallback: roots only (no parent in the set)
+    const list = detail?.reviewComments || [];
+    const byId = new Map(
+      list.filter((c: any) => c?.id != null).map((c: any) => [String(c.id), c])
+    );
+    return list.filter((c: any) => {
+      if (!c?.pending) return false;
+      const parentId = c.inReplyToId ?? c.in_reply_to_id ?? null;
+      if (parentId != null && byId.has(String(parentId))) return false;
+      return true;
+    }).length;
+  }, [detail?.reviewComments]);
   const serverPendingReviewId =
     detail?.viewerPendingReview?.id ||
     serverPendingComments.find((c: any) => c.pendingReviewId)?.pendingReviewId ||
     null;
   const hasServerPending = Boolean(serverPendingReviewId) || pendingCount > 0;
-  /** @deprecated alias — all UI uses server pending only */
-  const totalPendingCount = pendingCount || (serverPendingReviewId ? 1 : 0);
+  /** Thread-level pending count (same as pendingCount; kept for Diff toolbar props). */
+  const totalPendingCount = pendingCount;
 
   // Clear review filter when the active mode has nothing left.
   // Use path counts + comment count so a brief host refresh race (pending
@@ -2718,6 +2960,9 @@ export function PrModalApp({
             /* ignore */
           }
         });
+        break;
+      case 'toggleFullscreen':
+        onToggleShellFullscreen();
         break;
       case 'editTitle':
         setTitleEditSignal((n) => n + 1);
@@ -3966,6 +4211,13 @@ export function PrModalApp({
       // Escape: dismiss nested UI first, otherwise close the whole modal
       // (including from Diff — do not shrink back to conversation).
       if (e.key === 'Escape') {
+        // Mermaid fullscreen viewer owns Escape — close viewer only, keep modal
+        if (
+          typeof document !== 'undefined' &&
+          document.querySelector('[data-prp-mermaid-viewer="1"]')
+        ) {
+          return;
+        }
         // Inline title editor owns Escape (cancel) while focused
         const ae = typeof document !== 'undefined' ? document.activeElement : null;
         if (
@@ -4045,6 +4297,9 @@ export function PrModalApp({
             }
           });
           break;
+        case 'toggleFullscreen':
+          setShellFullscreen((prev) => toggleShellFullscreen(prev));
+          break;
         default:
           break;
       }
@@ -4080,101 +4335,51 @@ export function PrModalApp({
   const stackItems = stackPath.items;
 
   // Independent section loading: initial (no detail yet) vs soft revalidate (detail present)
+  // Progressive load status is shown only in the header stats badge (no top bar).
   const isInitialLoad = Boolean(loading && !detailProp);
-  const isRevalidating = Boolean(loading && detailProp);
-  const stageBusy = Boolean(loadStage?.busy);
-  const stageLabel = loadStage?.label ? String(loadStage.label) : '';
-  const showTopLoadBar = Boolean(
-    isRevalidating ||
-      stageBusy ||
-      (isInitialLoad && !detailProp) ||
-      searchBusy
-  );
-
-  // Keep bar/stage mounted through exit so CSS leave transitions can finish.
-  // Must be ≥ CSS transition duration on --leaving (see styles.css ~360–380ms).
-  const LOAD_BAR_EXIT_MS = 400;
-  const [topBarMounted, setTopBarMounted] = useState(false);
-  const [topBarLeaving, setTopBarLeaving] = useState(false);
-  const topBarTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const topBarVisibleRef = useRef(false);
-  const [stageMounted, setStageMounted] = useState(false);
-  const [stageLeaving, setStageLeaving] = useState(false);
-  const [stageDisplayLabel, setStageDisplayLabel] = useState('');
-  const stageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const stageVisibleRef = useRef(false);
-
-  useEffect(() => {
-    if (showTopLoadBar) {
-      if (topBarTimerRef.current) {
-        clearTimeout(topBarTimerRef.current);
-        topBarTimerRef.current = null;
-      }
-      topBarVisibleRef.current = true;
-      // Double rAF so the browser paints mounted+visible before any leave class
-      setTopBarMounted(true);
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => setTopBarLeaving(false));
-      });
-      return undefined;
-    }
-    // Exit path: only once per hide cycle
-    if (!topBarVisibleRef.current || !topBarMounted) return undefined;
-    topBarVisibleRef.current = false;
-    // Ensure leave class applies after a paint with the visible state
-    requestAnimationFrame(() => {
-      setTopBarLeaving(true);
-    });
-    topBarTimerRef.current = setTimeout(() => {
-      setTopBarMounted(false);
-      setTopBarLeaving(false);
-      topBarTimerRef.current = null;
-    }, LOAD_BAR_EXIT_MS);
-    return undefined;
-  }, [showTopLoadBar, topBarMounted]);
-
-  useEffect(() => {
-    if (stageLabel) {
-      if (stageTimerRef.current) {
-        clearTimeout(stageTimerRef.current);
-        stageTimerRef.current = null;
-      }
-      stageVisibleRef.current = true;
-      setStageDisplayLabel(stageLabel);
-      setStageMounted(true);
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => setStageLeaving(false));
-      });
-      return undefined;
-    }
-    if (!stageVisibleRef.current || !stageMounted) return undefined;
-    stageVisibleRef.current = false;
-    requestAnimationFrame(() => {
-      setStageLeaving(true);
-    });
-    stageTimerRef.current = setTimeout(() => {
-      setStageMounted(false);
-      setStageLeaving(false);
-      setStageDisplayLabel('');
-      stageTimerRef.current = null;
-    }, LOAD_BAR_EXIT_MS);
-    return undefined;
-  }, [stageLabel, stageMounted]);
 
   if (!open) return null;
 
   const hit = activeSearchHit;
+  const fsCls = shellFullscreenClassName(shellFullscreen);
   const cls =
-    `${layoutClassName(layoutMode)} ${shellClassName(shellMode)} ${animClass} ${theme.className}`.trim();
+    `${layoutClassName(layoutMode)} ${shellClassName(shellMode)} ${fsCls}${
+      shellResizing ? ' prp-modal--resizing' : ''
+    } ${animClass} ${theme.className}`.trim();
+  const { viewportWidth: vwNow, viewportHeight: vhNow } = viewportSize();
+  const appliedSheetWidth = clampSheetWidth(sheetWidth, { viewportWidth: vwNow });
+  const appliedModalSize = clampModalSize(modalSize, {
+    viewportWidth: vwNow,
+    viewportHeight: vhNow,
+  });
+  const showSheetResizer =
+    !shellFullscreen && shellMode === SHELL_SHEET && layoutMode !== LAYOUT_DIFF;
+  const showModalResizer =
+    !shellFullscreen && shellMode === SHELL_MODAL && layoutMode !== LAYOUT_DIFF;
+  const shellSizeStyle: React.CSSProperties = shellFullscreen
+    ? ({
+        ['--prp-shell-w' as any]: '100vw',
+        ['--prp-shell-h' as any]: '100vh',
+      } as React.CSSProperties)
+    : shellMode === SHELL_SHEET
+      ? ({
+          ['--prp-shell-w' as any]: `${appliedSheetWidth}px`,
+          ['--prp-shell-h' as any]: '100vh',
+        } as React.CSSProperties)
+      : ({
+          ['--prp-shell-w' as any]: `${appliedModalSize.width}px`,
+          ['--prp-shell-h' as any]: `${appliedModalSize.height}px`,
+        } as React.CSSProperties);
 
   return (
     <div
-      className={`prp-overlay ${shellClassName(shellMode)} ${theme.className}${
+      className={`prp-overlay ${shellClassName(shellMode)} ${fsCls} ${theme.className}${
         closing ? ' prp-overlay--leaving' : ''
       }`.trim()}
       tabIndex={-1}
       data-color-mode={theme.mode}
       data-shell={shellMode}
+      data-fullscreen={shellFullscreen ? '1' : '0'}
       data-layout={layoutMode === LAYOUT_DIFF ? 'diff' : 'conversation'}
       data-leaving={closing ? '1' : '0'}
     >
@@ -4187,33 +4392,38 @@ export function PrModalApp({
         aria-label={detail ? `Pull request #${detail.number}` : 'Pull request'}
         data-color-mode={theme.mode}
         data-shell={shellMode}
+        data-fullscreen={shellFullscreen ? '1' : '0'}
+        data-sheet-width={appliedSheetWidth}
+        data-modal-width={appliedModalSize.width}
+        data-modal-height={appliedModalSize.height}
+        style={shellSizeStyle}
       >
-        {topBarMounted ? (
+        {showSheetResizer ? (
           <div
-            className={`prp-top-loading-bar${topBarLeaving ? ' prp-top-loading-bar--leaving' : ''}`}
-            role="progressbar"
-            aria-label={
-              stageDisplayLabel ||
-              (isRevalidating ? 'Refreshing pull request' : 'Loading pull request')
-            }
-            aria-busy={!topBarLeaving}
-            aria-hidden={topBarLeaving ? true : undefined}
+            className="prp-shell-resizer prp-shell-resizer--sheet"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize side panel"
+            aria-valuemin={SHEET_MIN_WIDTH}
+            aria-valuemax={SHEET_MAX_WIDTH}
+            aria-valuenow={appliedSheetWidth}
+            tabIndex={0}
+            onPointerDown={onSheetResizeStart}
           />
         ) : null}
-        {stageMounted && stageDisplayLabel ? (
+        {showModalResizer ? (
           <div
-            className={`prp-load-stage${stageBusy && !stageLeaving ? ' prp-load-stage--busy' : ''}${
-              stageLeaving ? ' prp-load-stage--leaving' : ''
-            }`}
-            role="status"
-            aria-live="polite"
-            aria-hidden={stageLeaving ? true : undefined}
-          >
-            {stageBusy && !stageLeaving ? (
-              <span className="prp-load-stage__spinner" aria-hidden="true" />
-            ) : null}
-            <span className="prp-load-stage__label">{stageDisplayLabel}</span>
-          </div>
+            className="prp-shell-resizer prp-shell-resizer--modal"
+            role="separator"
+            aria-label="Resize modal panel"
+            aria-valuemin={MODAL_MIN_WIDTH}
+            aria-valuemax={MODAL_MAX_WIDTH}
+            aria-orientation="horizontal"
+            tabIndex={0}
+            data-modal-min-h={MODAL_MIN_HEIGHT}
+            data-modal-max-h={MODAL_MAX_HEIGHT}
+            onPointerDown={onModalResizeStart}
+          />
         ) : null}
         <Header
           detail={detail}
@@ -4231,7 +4441,10 @@ export function PrModalApp({
           shortcutMod={shortcutMod}
           shellMode={shellMode}
           onToggleShell={onToggleShell}
+          shellFullscreen={shellFullscreen}
+          onToggleFullscreen={onToggleShellFullscreen}
           onSubscribe={onSubscribe}
+          loadStage={loadStage}
           onRefresh={
             typeof onRefresh === 'function'
               ? () =>

@@ -244,7 +244,7 @@ function mockRecorder() {
     }),
     'toggleDiff'
   );
-  // ⌘F / Ctrl+F opens in-modal Find
+  // ⌘F / Ctrl+F opens in-modal Find; fullscreen is mod+shift+f
   assert.equal(
     sp.resolveModalShortcutAction({
       mod: true,
@@ -253,6 +253,15 @@ function mockRecorder() {
       paletteOpen: false,
     }),
     'openSearch'
+  );
+  assert.equal(
+    sp.resolveModalShortcutAction({
+      mod: true,
+      shift: true,
+      key: 'f',
+      paletteOpen: false,
+    }),
+    'toggleFullscreen'
   );
   // Leave-review chords intentionally disabled
   assert.equal(
@@ -479,10 +488,16 @@ async function runFetchWriteTests() {
     ok('pure buildUpdateBranch');
   }
   {
-    const r = pure.buildSetSubscription('acme', 'app', 9, { subscribed: true });
-    assert.equal(r.method, 'PUT');
-    assert.match(r.url, /subscription$/);
-    assert.deepEqual(r.body, { subscribed: true, ignored: false });
+    const r = pure.buildSetSubscription('acme', 'app', 9, {
+      subscribed: true,
+      nodeId: 'PR_node_1',
+    });
+    // GraphQL updateSubscription (POST), not REST /subscription
+    assert.equal(r.method, 'POST');
+    assert.match(r.url, /graphql$/);
+    assert.match(r.body.query, /updateSubscription/);
+    assert.equal(r.body.variables.state, 'SUBSCRIBED');
+    assert.equal(r.body.variables.id, 'PR_node_1');
     ok('pure buildSetSubscription');
   }
   {
@@ -573,8 +588,26 @@ async function runFetchWriteTests() {
   }
   {
     const fetchImpl = mockRecorder();
-    await fetchApi.setIssueSubscription('acme', 'app', 9, { subscribed: true }, fetchImpl, token);
-    assert.equal(fetchImpl.calls[0].method, 'PUT');
+    // GraphQL updateSubscription — pass nodeId so no REST id resolve is needed
+    fetchImpl.queue.push({
+      json: {
+        data: {
+          updateSubscription: {
+            subscribable: { id: 'PR_node', viewerSubscription: 'SUBSCRIBED' },
+          },
+        },
+      },
+    });
+    await fetchApi.setIssueSubscription(
+      'acme',
+      'app',
+      9,
+      { subscribed: true, nodeId: 'PR_node' },
+      fetchImpl,
+      token
+    );
+    assert.equal(fetchImpl.calls[0].method, 'POST');
+    assert.match(fetchImpl.calls[0].url, /graphql/);
     ok('fetch setIssueSubscription');
   }
   {

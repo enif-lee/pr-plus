@@ -41,6 +41,14 @@ export function buildPaletteCommands(detail: any) {
       action: 'openSearch',
     },
     {
+      id: 'toggle-fullscreen',
+      title: 'Toggle fullscreen',
+      section: 'Navigate',
+      keywords: ['fullscreen', 'maximize', 'expand', 'shell'],
+      shortcut: 'mod+shift+f',
+      action: 'toggleFullscreen',
+    },
+    {
       id: 'edit-title',
       title: 'Edit PR title…',
       section: 'PR',
