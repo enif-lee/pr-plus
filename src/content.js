@@ -11,6 +11,20 @@
     return;
   }
 
+  // Only run on GitHub.com / Enterprise web UI (not arbitrary HTTPS sites).
+  try {
+    const ep = globalThis.PRGithubEndpoints;
+    if (
+      ep &&
+      typeof ep.isGithubWebDocument === 'function' &&
+      !ep.isGithubWebDocument(document, window.location)
+    ) {
+      return;
+    }
+  } catch {
+    /* continue — static github.com match still valid */
+  }
+
   const { createPrTreeApp } = globalThis.PRTreeBootstrap;
   if (typeof createPrTreeApp !== 'function') {
     console.warn('[pr+] PRTreeBootstrap missing');
@@ -163,6 +177,25 @@
     return null;
   }
 
+  /**
+   * Idle after list paint: finish modal CSS + prefs so the next PR click
+   * does not wait on those. Bundle JS is already content_scripts-injected.
+   */
+  function warmModalAfterListPaint() {
+    try {
+      const warm = globalThis.PRModalHost?.warmUp;
+      if (typeof warm !== 'function') return;
+      // Double rAF: after stack indents + browser paint
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          void warm.call(globalThis.PRModalHost);
+        });
+      });
+    } catch {
+      /* ignore */
+    }
+  }
+
   async function enableFeatures() {
     if (featuresEnabled) {
       app.scheduleSync?.(0);
@@ -183,8 +216,12 @@
     const result = await app.bootstrap();
     if (!result?.ok) {
       app.scheduleSync(150);
+      // Still warm modal assets even if stack bootstrap soft-failed
+      warmModalAfterListPaint();
     } else {
       await afterStackReady();
+      // After list (and optional session restore) is done — preload for next click
+      warmModalAfterListPaint();
     }
     app.scheduleSync(400);
     app.scheduleSync(1200);

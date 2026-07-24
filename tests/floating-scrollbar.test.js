@@ -67,6 +67,37 @@ const conv = fs.readFileSync(
 assert.ok(conv.includes('FloatingScrollbar'));
 assert.ok(conv.includes('prp-conversation__aside-host'));
 
+// Diff virtual list + file tree + stack strip
+const vdiff = fs.readFileSync(
+  path.join(root, 'src/modal/views/diff/VirtualDiff.tsx'),
+  'utf8'
+);
+assert.ok(vdiff.includes('FloatingScrollbar'));
+assert.ok(vdiff.includes('prp-scroll-float'));
+
+const tree = fs.readFileSync(
+  path.join(root, 'src/modal/views/diff/FolderFileTree.tsx'),
+  'utf8'
+);
+assert.ok(tree.includes('FloatingScrollbar'));
+assert.ok(tree.includes('prp-filetree__list-host'));
+
+const stack = fs.readFileSync(
+  path.join(root, 'src/modal/views/chrome/StackStrip.tsx'),
+  'utf8'
+);
+assert.ok(stack.includes('FloatingScrollbar'));
+assert.ok(stack.includes("orientation=\"horizontal\"") || stack.includes("orientation='horizontal'"));
+
+const floatComp = fs.readFileSync(
+  path.join(root, 'src/modal/components/common/FloatingScrollbar.tsx'),
+  'utf8'
+);
+assert.ok(floatComp.includes("orientation"));
+assert.ok(floatComp.includes('horizontal'));
+assert.ok(css.includes('prp-float-sb--horizontal'));
+
 console.log('floating-scrollbar.test.js: all assertions passed');
 console.log('float-metrics=true');
 console.log('native-scrollbar-hidden=true');
+console.log('diff-stack-float=true');

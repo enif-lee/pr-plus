@@ -3,7 +3,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const SCRATCH =
-  process.env.PRP_SCRATCH || '/var/folders/px/qw6l220x5glb_gxf44lws9p80000gn/T/grok-goal-5a6d37e1751e/implementer';
+  process.env.PRP_SCRATCH ||
+  require('node:path').join(require('node:os').tmpdir(), 'pr-plus-test-scratch');
 fs.mkdirSync(SCRATCH, { recursive: true });
 
 const fileTree = require('../src/modal/lib/file-tree.ts');
@@ -46,9 +47,9 @@ package-lock.json linguist-generated=true
       {
         filename: 'huge.js',
         patch: 'x'.repeat(100),
-        additions: 600,
+        additions: 5000,
         deletions: 0,
-        changes: 600,
+        changes: 5000,
       },
       {
         filename: 'package-lock.json',

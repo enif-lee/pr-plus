@@ -10,6 +10,7 @@ export function BodyEditor({
   onRegisterSave,
   onUploadFile,
   linkCtx,
+  mentionCandidates = [],
   rows = 10,
   compact = false,
   placeholder = 'Write a description…',
@@ -37,6 +38,7 @@ export function BodyEditor({
         showTabs
         onUploadFile={onUploadFile}
         linkCtx={linkCtx}
+        mentionCandidates={mentionCandidates}
         className="prp-body-editor__wysi"
       />
       <div className="prp-composer__row">

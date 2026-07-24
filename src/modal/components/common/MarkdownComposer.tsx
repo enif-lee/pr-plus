@@ -5,10 +5,19 @@ import {
   insertMarkdownAtCursor,
   guessContentType,
 } from '@lib/composer-attach';
+import {
+  detectMentionTrigger,
+  detectSlashTrigger,
+  filterMentions,
+  filterSlashCommands,
+  applyMentionInsertion,
+  applySlashInsertion,
+  SLASH_COMMANDS,
+} from '@lib/markdown-composer';
 
 /**
  * Write / Preview markdown composer (no B/I/code toolbar).
- * Supports paste & drag-drop attachment via onUploadFile.
+ * Supports paste & drag-drop attachment, @mentions, and /slash commands.
  */
 export function MarkdownComposer({
   value,
@@ -22,14 +31,21 @@ export function MarkdownComposer({
   showTabs = true,
   onUploadFile,
   linkCtx,
+  /** Logins for @mention typeahead (author, reviewers, assignees, …). */
+  mentionCandidates = [],
 }: any) {
   const [focused, setFocused] = useState(false);
   const [tab, setTab] = useState<'write' | 'preview'>('write');
   const [dragging, setDragging] = useState(false);
   const [uploadMsg, setUploadMsg] = useState('');
+  /** @type {null | { kind: 'mention'|'slash', items: any[], trigger: any }} */
+  const [menu, setMenu] = useState<any>(null);
+  const [menuIndex, setMenuIndex] = useState(0);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const blurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** When kind+query stays the same, keep menuIndex (arrow keys must not reset). */
+  const menuKeyRef = useRef('');
   // Keep open on Preview even when empty — do not collapse while tab is preview.
   const open =
     forceOpen || focused || Boolean(String(value || '').trim()) || tab === 'preview';
@@ -80,9 +96,131 @@ export function MarkdownComposer({
     clearBlurTimer();
     setTab(next);
     setFocused(true);
+    setMenu(null);
+    menuKeyRef.current = '';
+    setMenuIndex(0);
     if (next === 'write') {
       requestAnimationFrame(() => taRef.current?.focus());
     }
+  }
+
+  function openMenu(
+    kind: 'mention' | 'slash',
+    items: any[],
+    trigger: any,
+    queryKey: string
+  ) {
+    const key = `${kind}:${queryKey}`;
+    setMenu({ kind, items, trigger });
+    if (menuKeyRef.current !== key) {
+      menuKeyRef.current = key;
+      setMenuIndex(0);
+    } else {
+      // Same menu session (e.g. ArrowUp/Down keyup re-sync) — keep highlight,
+      // only clamp if the filtered list shrank.
+      setMenuIndex((i) => {
+        if (!items.length) return 0;
+        return Math.min(i, items.length - 1);
+      });
+    }
+  }
+
+  function syncMenus(text: string, cursor: number) {
+    if (disabled) {
+      setMenu(null);
+      menuKeyRef.current = '';
+      return;
+    }
+    if (typeof detectMentionTrigger === 'function') {
+      const mTrig = detectMentionTrigger(text, cursor);
+      if (mTrig) {
+        const items = filterMentions(mTrig.query, mentionCandidates);
+        openMenu('mention', items, mTrig, String(mTrig.query || ''));
+        return;
+      }
+    }
+    if (typeof detectSlashTrigger === 'function') {
+      const sTrig = detectSlashTrigger(text, cursor);
+      if (sTrig) {
+        const items = filterSlashCommands(sTrig.query);
+        openMenu('slash', items, sTrig, String(sTrig.query || ''));
+        return;
+      }
+    }
+    setMenu(null);
+    menuKeyRef.current = '';
+  }
+
+  function applyMenuItem(item: any) {
+    if (!menu || !item) return;
+    // Prefer live textarea value (controlled parent may lag one frame).
+    const text = taRef.current?.value ?? value ?? '';
+    let next;
+    if (menu.kind === 'mention') {
+      next = applyMentionInsertion(text, menu.trigger, item);
+    } else if (menu.kind === 'slash') {
+      next = applySlashInsertion(text, menu.trigger, item);
+    } else {
+      return;
+    }
+    onChange?.(next.text);
+    setMenu(null);
+    menuKeyRef.current = '';
+    setMenuIndex(0);
+    requestAnimationFrame(() => {
+      const ta = taRef.current;
+      if (ta) {
+        ta.focus();
+        ta.setSelectionRange(next.cursor, next.cursor);
+        // Keep suggestion state in sync after caret move.
+        syncMenus(next.text, next.cursor);
+      }
+    });
+  }
+
+  function onComposerKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (!menu?.items?.length) return;
+    const n = menu.items.length;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      setMenu(null);
+      menuKeyRef.current = '';
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      e.stopPropagation();
+      setMenuIndex((i) => (i + 1) % n);
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      e.stopPropagation();
+      setMenuIndex((i) => (i - 1 + n) % n);
+      return;
+    }
+    if (e.key === 'Enter' || e.key === 'Tab') {
+      // Only intercept when a menu is open so normal newlines still work.
+      e.preventDefault();
+      e.stopPropagation();
+      const item = menu.items[menuIndex] ?? menu.items[0];
+      applyMenuItem(item);
+    }
+  }
+
+  function onComposerKeyUp(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    // Arrow keys only move the highlight — do not re-sync (would reset index).
+    if (
+      e.key === 'ArrowDown' ||
+      e.key === 'ArrowUp' ||
+      e.key === 'Enter' ||
+      e.key === 'Tab' ||
+      e.key === 'Escape'
+    ) {
+      return;
+    }
+    syncMenus(e.currentTarget.value, e.currentTarget.selectionStart);
   }
 
   async function handleFiles(fileList: FileList | File[] | null) {
@@ -206,18 +344,58 @@ export function MarkdownComposer({
         </div>
       ) : null}
       {tab === 'write' ? (
-        <textarea
-          ref={taRef}
-          className="prp-mdc__ta prp-textarea"
-          rows={compact ? Math.max(2, rows - 1) : rows}
-          placeholder={placeholder}
-          value={value || ''}
-          disabled={disabled}
-          onFocus={onTaFocus}
-          onBlur={onTaBlur}
-          onChange={(e) => onChange?.(e.target.value)}
-          onPaste={onPaste}
-        />
+        <div className="prp-mdc__write">
+          <textarea
+            ref={taRef}
+            className="prp-mdc__ta prp-textarea"
+            rows={compact ? Math.max(2, rows - 1) : rows}
+            placeholder={placeholder}
+            value={value || ''}
+            disabled={disabled}
+            onFocus={onTaFocus}
+            onBlur={onTaBlur}
+            onChange={(e) => {
+              onChange?.(e.target.value);
+              syncMenus(e.target.value, e.target.selectionStart);
+            }}
+            onKeyUp={onComposerKeyUp}
+            onClick={(e) =>
+              syncMenus(e.currentTarget.value, e.currentTarget.selectionStart)
+            }
+            onKeyDown={onComposerKeyDown}
+            onPaste={onPaste}
+          />
+          {menu?.items?.length ? (
+            <ul className="prp-composer-menu" role="listbox" aria-label="Composer suggestions">
+              {menu.items.map((item: any, idx: number) => {
+                const label =
+                  menu.kind === 'mention'
+                    ? `@${item}`
+                    : item.label || item.id;
+                const desc = menu.kind === 'slash' ? item.description : null;
+                return (
+                  <li key={String(label)} role="option" aria-selected={idx === menuIndex}>
+                    <button
+                      type="button"
+                      className={`prp-composer-menu__item${
+                        idx === menuIndex ? ' prp-composer-menu__item--active' : ''
+                      }`}
+                      onMouseDown={(ev) => {
+                        // Keep focus in textarea; apply before blur collapses menu.
+                        ev.preventDefault();
+                        applyMenuItem(item);
+                      }}
+                      onMouseEnter={() => setMenuIndex(idx)}
+                    >
+                      <strong>{label}</strong>
+                      {desc ? <span className="prp-muted"> {desc}</span> : null}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
+        </div>
       ) : (
         <div
           className="prp-mdc__preview"
@@ -234,9 +412,11 @@ export function MarkdownComposer({
         <div className="prp-mdc__drop-hint">Drop files to attach</div>
       ) : null}
       {uploadMsg ? <div className="prp-mdc__upload-msg prp-muted">{uploadMsg}</div> : null}
-      {onUploadFile && tab === 'write' ? (
+      {tab === 'write' ? (
         <div className="prp-mdc__hint prp-muted">
-          Paste or drop images/files · markdown · ``` fences
+          {onUploadFile ? 'Paste or drop images/files · ' : ''}
+          markdown · @mention · /commands (
+          {(SLASH_COMMANDS || []).map((c) => c.label).join(' ')})
         </div>
       ) : null}
     </div>

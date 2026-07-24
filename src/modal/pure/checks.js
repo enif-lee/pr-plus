@@ -393,6 +393,125 @@
     return 'Checks';
   }
 
+  /**
+   * Count outcomes over normalized statuses + check runs for summary icons/popover.
+   * @param {object|null|undefined} checks
+   * @returns {{ total: number, success: number, failure: number, pending: number, skipped: number, state: string }}
+   */
+  function summarizeCheckCounts(checks) {
+    const n = normalizeChecks(checks);
+    let success = 0;
+    let failure = 0;
+    let pending = 0;
+    let skipped = 0;
+    for (const s of n.statuses || []) {
+      const o = classifyCheckOutcome({ kind: 'status', state: s?.state });
+      if (o === 'failure') failure += 1;
+      else if (o === 'success') success += 1;
+      else if (o === 'skipped') skipped += 1;
+      else pending += 1;
+    }
+    for (const r of n.checkRuns || []) {
+      const o = classifyCheckOutcome(r);
+      if (o === 'failure') failure += 1;
+      else if (o === 'success') success += 1;
+      else if (o === 'skipped') skipped += 1;
+      else pending += 1;
+    }
+    const total = success + failure + pending + skipped;
+    return {
+      total,
+      success,
+      failure,
+      pending,
+      skipped,
+      state: n.state || 'unknown',
+    };
+  }
+
+  /**
+   * Human popover / aria copy for check counts.
+   * @param {{ total?: number, success?: number, failure?: number, pending?: number, skipped?: number, state?: string }|null|undefined} summary
+   */
+  function formatChecksCountLabel(summary) {
+    const s = summary && typeof summary === 'object' ? summary : {};
+    const total = Number(s.total) || 0;
+    const success = Number(s.success) || 0;
+    const failure = Number(s.failure) || 0;
+    const pending = Number(s.pending) || 0;
+    const skipped = Number(s.skipped) || 0;
+    if (!total) {
+      const st = String(s.state || 'unknown');
+      return st && st !== 'unknown' ? `Checks: ${st}` : 'No checks';
+    }
+    const parts = [
+      `${total} check${total === 1 ? '' : 's'}`,
+      `${success} succeeded`,
+      `${failure} failed`,
+      `${pending} in progress`,
+    ];
+    if (skipped > 0) parts.push(`${skipped} skipped`);
+    return parts.join(' · ');
+  }
+
+  /**
+   * Names of individual checks bucketed by outcome (for stacked-icon tips).
+   * @returns {{ failure: string[], pending: string[], success: string[], skipped: string[], state: string }}
+   */
+  function listCheckNamesByOutcome(checks) {
+    const n = normalizeChecks(checks);
+    /** @type {{ failure: string[], pending: string[], success: string[], skipped: string[] }} */
+    const groups = { failure: [], pending: [], success: [], skipped: [] };
+    for (const s of n.statuses || []) {
+      const o = classifyCheckOutcome({ kind: 'status', state: s?.state });
+      const name = String(s?.context || s?.description || 'status').trim() || 'status';
+      const bucket = groups[o] || groups.pending;
+      bucket.push(name);
+    }
+    for (const r of n.checkRuns || []) {
+      const o = classifyCheckOutcome(r);
+      const app = String(r?.appName || r?.app?.name || '').trim();
+      const job = String(r?.name || 'check').trim() || 'check';
+      const name =
+        app && !job.toLowerCase().startsWith(app.toLowerCase())
+          ? `${app} / ${job}`
+          : job;
+      const bucket = groups[o] || groups.pending;
+      bucket.push(name);
+    }
+    return {
+      failure: groups.failure,
+      pending: groups.pending,
+      success: groups.success,
+      skipped: groups.skipped,
+      state: n.state || 'unknown',
+    };
+  }
+
+  /**
+   * Popover text for one outcome group (e.g. failed checks).
+   * @param {'failure'|'pending'|'success'|'skipped'} outcome
+   * @param {string[]} names
+   */
+  function formatCheckGroupTip(outcome, names) {
+    const list = Array.isArray(names) ? names.filter(Boolean) : [];
+    const n = list.length;
+    const headings = {
+      failure: n === 1 ? '1 failed' : `${n} failed`,
+      pending: n === 1 ? '1 in progress' : `${n} in progress`,
+      success: n === 1 ? '1 succeeded' : `${n} succeeded`,
+      skipped: n === 1 ? '1 skipped' : `${n} skipped`,
+    };
+    const head = headings[outcome] || `${n} checks`;
+    if (!n) return head;
+    // Cap long lists so tips stay readable
+    const max = 12;
+    const shown = list.slice(0, max);
+    const more = n - shown.length;
+    const body = shown.map((name) => `· ${name}`).join('\n');
+    return more > 0 ? `${head}\n${body}\n· +${more} more` : `${head}\n${body}`;
+  }
+
   const api = {
     parseTime,
     statusKey,
@@ -409,6 +528,10 @@
     formatCheckSummary,
     buildMergeBoxCheckGroups,
     mergeBoxChecksHeadline,
+    summarizeCheckCounts,
+    formatChecksCountLabel,
+    listCheckNamesByOutcome,
+    formatCheckGroupTip,
   };
 
   if (typeof module !== 'undefined' && module.exports) {

@@ -28,12 +28,186 @@ import {
 } from '@lib/line-selection';
 import { isPathViewed } from '@lib/review-threads';
 import {
+  stickyFileHeaderForScroll,
+  resolveStickyFileHeaderLayout,
+  rowTopY,
+} from '@lib/diff-rows';
+import {
   markSearchInText,
   markSearchInHtml,
   resolveActiveMarkStart,
 } from '@lib/search-index';
 import { IconDisclosure } from '@common/icons';
+import { FloatingScrollbar } from '../../components/common/FloatingScrollbar';
+import { ImageViewer } from '@common/ImageViewer';
 import { InlineThread } from './InlineThread';
+import { SelectionCommentBar } from './SelectionCommentBar';
+
+function fileHeaderTone(row: any) {
+  const status = String(row?.status || 'modified').toLowerCase();
+  const adds = row?.additions ?? 0;
+  const dels = row?.deletions ?? 0;
+  if (status === 'added' || status === 'add') return 'add';
+  if (status === 'removed' || status === 'deleted' || status === 'del') return 'del';
+  if (status === 'renamed') return 'rename';
+  if (adds > 0 && dels === 0) return 'add';
+  if (dels > 0 && adds === 0) return 'del';
+  return 'mod';
+}
+
+/** Shared chrome for inline + sticky file headers (identical markup either way). */
+function FileHeaderRow(props: {
+  row: any;
+  viewedPaths: any;
+  onToggleViewed: any;
+  onToggleCollapse: any;
+  onFileComment: any;
+  searchRowClass?: string;
+  isSearchMatch?: boolean;
+  isActiveHit?: boolean;
+  activeHitForMarks?: any;
+  occ?: number;
+  searchQuery?: string;
+  /** When true, omit rowIndex so virtual list hits don't collide; visuals identical. */
+  sticky?: boolean;
+  style?: React.CSSProperties;
+  /** File-level selection composer docked under this header */
+  selectionIsland?: React.ReactNode;
+}) {
+  const {
+    row,
+    viewedPaths,
+    onToggleViewed,
+    onToggleCollapse,
+    onFileComment,
+    searchRowClass = '',
+    isSearchMatch = false,
+    isActiveHit = false,
+    activeHitForMarks = null,
+    occ = 0,
+    searchQuery = '',
+    sticky = false,
+    style,
+    selectionIsland = null,
+  } = props;
+  const viewed = isPathViewed ? isPathViewed(viewedPaths, row.filePath) : false;
+  const collapsed = Boolean(row.collapsed);
+  const openable = row.openable !== false;
+  const status = String(row.status || 'modified').toLowerCase();
+  const adds = row.additions ?? 0;
+  const dels = row.deletions ?? 0;
+  const headerTone = fileHeaderTone(row);
+  const hasIsland = Boolean(selectionIsland);
+
+  const headerEl = (
+    <div
+      className={`prp-vline prp-vline--header prp-vline--header-${headerTone}${
+        !openable ? ' prp-vline--header-binary' : ''
+      }${searchRowClass}`}
+      style={{ height: ROW_HEIGHT, ...style }}
+      data-row-index={sticky ? undefined : row.rowIndex}
+      data-file-path={row.filePath || ''}
+      data-file-status={status}
+      data-openable={openable ? '1' : '0'}
+      data-file-kind={row.fileKind || undefined}
+      data-sticky={sticky ? '1' : undefined}
+      data-search-current={isActiveHit ? '1' : undefined}
+    >
+      <label className="prp-file-header__viewed" title="Mark as viewed">
+        <input
+          type="checkbox"
+          checked={viewed}
+          onChange={() => onToggleViewed?.(row.filePath)}
+          onClick={(e) => e.stopPropagation()}
+        />
+      </label>
+      {openable ? (
+        <button
+          type="button"
+          className="prp-file-header__collapse"
+          title={collapsed ? 'Expand file' : 'Collapse file'}
+          onClick={() => onToggleCollapse?.(row.filePath)}
+        >
+          <IconDisclosure open={!collapsed} size={12} />
+        </button>
+      ) : (
+        <span
+          className="prp-file-header__collapse prp-file-header__collapse--locked"
+          title="Binary file — cannot open as text"
+          aria-hidden="true"
+        >
+          <IconDisclosure open={false} size={12} />
+        </span>
+      )}
+      <button
+        type="button"
+        className="prp-file-header-btn"
+        onClick={() => {
+          if (openable) onToggleCollapse?.(row.filePath);
+        }}
+        disabled={!openable}
+        title={openable ? undefined : 'Binary file — cannot open in diff view'}
+      >
+        <span className={`prp-file-header__status prp-file-header__status--${headerTone}`}>
+          {status}
+        </span>
+        <code
+          className="prp-file-header__path"
+          dangerouslySetInnerHTML={{
+            __html: isSearchMatch
+              ? markSearchInText(row.filePath || '', searchQuery, {
+                  currentStart: isActiveHit
+                    ? resolveActiveMarkStart(
+                        row.filePath || '',
+                        searchQuery,
+                        row,
+                        activeHitForMarks,
+                        occ,
+                        'text'
+                      )
+                    : null,
+                })
+              : escapeHtml(row.filePath || ''),
+          }}
+        />
+        {!openable ? (
+          <span className="prp-file-header__binary-badge">binary</span>
+        ) : null}
+        <span className="prp-file-header__stats" aria-label={`+${adds} −${dels}`}>
+          <span className="prp-stat-add">+{adds}</span>
+          <span className="prp-stat-del">−{dels}</span>
+        </span>
+      </button>
+      {typeof onFileComment === 'function' ? (
+        <button
+          type="button"
+          className="prp-file-header__comment"
+          title="Comment on entire file"
+          onClick={(e) => {
+            e.stopPropagation();
+            onFileComment(row.filePath, row);
+          }}
+        >
+          Comment
+        </button>
+      ) : null}
+    </div>
+  );
+
+  if (!hasIsland) return headerEl;
+
+  return (
+    <div
+      className="prp-sel-dock-host prp-sel-dock-host--header"
+      style={{ height: ROW_HEIGHT }}
+      data-row-index={sticky ? undefined : row.rowIndex}
+      data-file-path={row.filePath || ''}
+    >
+      {headerEl}
+      {selectionIsland}
+    </div>
+  );
+}
 
 /**
  * Diff line HTML: optional syntax highlight, then inject search marks into the
@@ -71,7 +245,18 @@ function renderSearchableHtml(
   return markSearchInText(displayText ?? '', q, { currentStart });
 }
 
-/** Compact expand controls for the right side of an @@ hunk row. */
+/**
+ * Compact expand controls on an @@ hunk row edge of an omitted gap.
+ *
+ * placement:
+ * - `above` → control sits at the **back** of the gap (before this hunk):
+ *   primary ▲ loads from the gap end (toward this hunk).
+ * - `below` → control sits at the **front** of the gap (after this hunk):
+ *   primary ▼ loads from the gap start (after this hunk).
+ *
+ * When the gap is larger than one chunk, both edge buttons are shown so the
+ * user can grow the visible region from either end independently.
+ */
 function HunkExpandControls({
   gap,
   filePath,
@@ -83,7 +268,7 @@ function HunkExpandControls({
   filePath: string;
   onExpandGap: any;
   expandBusyKey: any;
-  /** above = gap before this hunk; below = trailing after last hunk */
+  /** above = gap before this hunk (back edge); below = gap after this hunk (front edge) */
   placement: 'above' | 'below';
 }) {
   if (!gap) return null;
@@ -104,60 +289,77 @@ function HunkExpandControls({
         ? `Expand ${count}`
         : `Expand all ${count}`;
 
+  // fromStart = front of gap (after previous section); fromEnd = back (before next)
+  const fromStartBtn = showSides ? (
+    <button
+      type="button"
+      className="prp-hunk-expand__btn"
+      disabled={busy || !onExpandGap}
+      title={`Show next ${sideN} lines after previous section (front of gap)`}
+      onClick={() => onExpandGap?.(payload, 'fromStart')}
+    >
+      ▼{sideN}
+    </button>
+  ) : null;
+
+  const fromEndBtn = showSides ? (
+    <button
+      type="button"
+      className="prp-hunk-expand__btn"
+      disabled={busy || !onExpandGap}
+      title={`Show previous ${sideN} lines before next section (back of gap)`}
+      onClick={() => onExpandGap?.(payload, 'fromEnd')}
+    >
+      ▲{sideN}
+    </button>
+  ) : null;
+
+  const allBtn = (
+    <button
+      type="button"
+      className="prp-hunk-expand__btn prp-hunk-expand__btn--all"
+      disabled={busy || !onExpandGap}
+      title={
+        count
+          ? `Show all ${count} omitted lines`
+          : 'Expand omitted lines'
+      }
+      onClick={() => onExpandGap?.(payload, 'all')}
+    >
+      {labelAll}
+    </button>
+  );
+
+  // Order: edge-primary first. Front edge (below) → ▼ first; back edge (above) → ▲ first.
+  const buttons =
+    placement === 'below'
+      ? (
+          <>
+            {fromStartBtn}
+            {allBtn}
+            {fromEndBtn}
+          </>
+        )
+      : (
+          <>
+            {fromEndBtn}
+            {allBtn}
+            {fromStartBtn}
+          </>
+        );
+
   return (
     <div
       className={`prp-hunk-expand prp-hunk-expand--${placement}`}
       role="group"
       aria-label={
         placement === 'above'
-          ? 'Expand omitted lines above this hunk'
-          : 'Expand omitted lines below this hunk'
+          ? 'Expand omitted lines above this hunk (back of gap)'
+          : 'Expand omitted lines below this hunk (front of gap)'
       }
       onMouseDown={(e) => e.stopPropagation()}
     >
-      {showSides ? (
-        <button
-          type="button"
-          className="prp-hunk-expand__btn"
-          disabled={busy || !onExpandGap}
-          title={
-            placement === 'above'
-              ? `Show next ${sideN} lines after previous section`
-              : `Show next ${sideN} lines after this hunk`
-          }
-          onClick={() => onExpandGap?.(payload, 'down')}
-        >
-          ▼{sideN}
-        </button>
-      ) : null}
-      <button
-        type="button"
-        className="prp-hunk-expand__btn prp-hunk-expand__btn--all"
-        disabled={busy || !onExpandGap}
-        title={
-          count
-            ? `Show all ${count} omitted lines`
-            : 'Expand omitted lines'
-        }
-        onClick={() => onExpandGap?.(payload, 'all')}
-      >
-        {labelAll}
-      </button>
-      {showSides ? (
-        <button
-          type="button"
-          className="prp-hunk-expand__btn"
-          disabled={busy || !onExpandGap}
-          title={
-            placement === 'above'
-              ? `Show previous ${sideN} lines before this hunk`
-              : `Show previous ${sideN} lines from end of file`
-          }
-          onClick={() => onExpandGap?.(payload, 'up')}
-        >
-          ▲{sideN}
-        </button>
-      ) : null}
+      {buttons}
     </div>
   );
 }
@@ -180,6 +382,8 @@ type DiffCodeLineProps = {
   useSyntax: boolean;
   /** Bumps when a lazy language grammar loads so memoized rows re-highlight */
   hljsEpoch: number;
+  /** Selection action/composer docked under selection end row */
+  selectionIsland?: React.ReactNode;
 };
 
 /**
@@ -202,6 +406,7 @@ const DiffCodeLine = memo(function DiffCodeLine({
   expandBusyKey,
   useSyntax,
   hljsEpoch: _hljsEpoch,
+  selectionIsland = null,
 }: DiffCodeLineProps) {
   const isCode =
     row.kind === 'diff-line' &&
@@ -226,8 +431,14 @@ const DiffCodeLine = memo(function DiffCodeLine({
   const isSplit = Boolean(row.split);
   const hideHunkText = Boolean(isHunk && row.hidden);
   const qForRow = isSearchMatch ? searchQuery : '';
+  // Single-line selection is role "only"; multi ends with "end"
+  const dockHere = Boolean(
+    selectionIsland && (selRole === 'end' || selRole === 'only')
+  );
 
-  return (
+  // Line chrome only — dock mounts on a host *outside* .prp-vline because
+  // .prp-vline uses contain:paint which clips absolute children to ROW_HEIGHT.
+  const lineEl = (
     <div
       className={`prp-vline prp-vline--${row.lineType || row.kind}${
         isSplit ? ' prp-vline--split' : ''
@@ -248,12 +459,16 @@ const DiffCodeLine = memo(function DiffCodeLine({
       data-search-current={isActiveHit ? '1' : undefined}
       data-hunk-hidden={hideHunkText ? '1' : undefined}
       title={
-        selectable ? 'Click = single line · Drag = multi-line comment' : undefined
+        selectable
+          ? 'Click = single line · Shift+click or drag = multi-line comment'
+          : undefined
       }
       onMouseDown={(e) => {
         if (e.button !== 0 || !selectable) return;
         e.preventDefault();
-        onSelectionStart?.(row, { x: e.clientX, y: e.clientY });
+        onSelectionStart?.(row, { x: e.clientX, y: e.clientY }, {
+          shiftKey: Boolean(e.shiftKey),
+        });
       }}
       onMouseEnter={() => {
         if (selecting) onSelectionExtend?.(row);
@@ -375,6 +590,19 @@ const DiffCodeLine = memo(function DiffCodeLine({
       )}
     </div>
   );
+
+  if (!dockHere) return lineEl;
+
+  return (
+    <div
+      className="prp-sel-dock-host"
+      style={{ height: ROW_HEIGHT }}
+      data-row-index={row.rowIndex}
+    >
+      {lineEl}
+      {selectionIsland}
+    </div>
+  );
 });
 
 function VirtualDiffImpl(props: any) {
@@ -416,6 +644,7 @@ function VirtualDiffImpl(props: any) {
     prOpen,
     linkCtx,
     onUploadFile,
+    mentionCandidates = [],
     /** (row|commentId, resolved?) => boolean — resolved defaults collapsed */
     isThreadCollapsed = null,
     onToggleThreadCollapse,
@@ -428,7 +657,18 @@ function VirtualDiffImpl(props: any) {
     activeSearchOccurrence = 0,
     searchHits = null,
     searchHitIndex = -1,
+    /** Open file-level comment composer for path */
+    onFileComment = null,
+    /**
+     * When set, selection actions / composer mount under the selection-end
+     * row (or file header) so they scroll/unmount with the virtual list.
+     */
+    selectionIsland = null,
   } = props;
+
+  const showSelectionIsland = Boolean(selectionIsland);
+  const isFileSelection =
+    selection?.kind === 'file' || selection?.subjectType === 'file';
 
   const matchRowSet = useMemo(() => {
     if (searchMatchRows instanceof Set) return searchMatchRows;
@@ -477,12 +717,31 @@ function VirtualDiffImpl(props: any) {
       overscan: 8,
     })
   );
+  /**
+   * Sticky file header: React state only when path/show changes.
+   * translateY is applied via DOM for per-frame push without re-rendering the list.
+   */
+  const [stickyMeta, setStickyMeta] = useState<{
+    row: any;
+    show: boolean;
+  } | null>(null);
+  const stickyMetaRef = useRef<{ path: string; show: boolean }>({
+    path: '',
+    show: false,
+  });
+  const stickyElRef = useRef<HTMLDivElement | null>(null);
+  /** Match sticky width to scroller clientWidth (excludes scrollbar). */
+  const [stickyWidth, setStickyWidth] = useState<number | null>(null);
 
   /**
    * Bumped when a lazy hljs grammar finishes loading so visible lines re-highlight.
    * Included in DiffLineRow keys via render path (parent re-render is enough).
    */
   const [hljsEpoch, setHljsEpoch] = useState(0);
+  const [imageViewer, setImageViewer] = useState<{
+    src: string;
+    alt: string;
+  } | null>(null);
   useLayoutEffect(() => {
     return onHljsLanguagesChanged(() => {
       clearHighlightCodeCache();
@@ -526,15 +785,67 @@ function VirtualDiffImpl(props: any) {
 
   const applyScrollTop = useCallback((scrollTop: number, overscan = 8) => {
     const m = metricsRef.current;
+    const top = Math.max(0, scrollTop);
     const next = calculateVisibleRange({
       totalRows: m.totalRows,
       rowHeight: m.avgH,
       viewportHeight: m.vp,
-      scrollTop: Math.max(0, scrollTop),
+      scrollTop: top,
       overscan,
       offsets: m.offsets,
     });
-    pendingScrollRef.current = scrollTop;
+    pendingScrollRef.current = top;
+    // Sticky header: seamless handoff + push-by-next (DOM transform, path via React)
+    if (typeof resolveStickyFileHeaderLayout === 'function') {
+      const layout = resolveStickyFileHeaderLayout(
+        m.virtualRows,
+        m.offsets,
+        top,
+        ROW_HEIGHT
+      );
+      const header = layout?.header || null;
+      const show = Boolean(layout?.show && header);
+      const path = header?.filePath ? String(header.filePath) : '';
+      const ty = show ? Number(layout?.translateY) || 0 : 0;
+      const prevSticky = stickyMetaRef.current;
+      if (path !== prevSticky.path || show !== prevSticky.show) {
+        stickyMetaRef.current = { path, show };
+        setStickyMeta(show && header ? { row: header, show: true } : null);
+      } else if (show && header && stickyMetaRef.current.path === path) {
+        setStickyMeta((cur) =>
+          cur?.row === header ? cur : { row: header, show: true }
+        );
+      }
+      // Per-frame push without list re-render (avoids jump / jank)
+      const el = stickyElRef.current;
+      if (el) {
+        el.style.transform = `translate3d(0, ${ty}px, 0)`;
+        el.style.visibility = show ? 'visible' : 'hidden';
+        el.style.pointerEvents = show ? 'auto' : 'none';
+      }
+    } else if (typeof stickyFileHeaderForScroll === 'function') {
+      // Fallback if layout helper missing
+      const header = stickyFileHeaderForScroll(
+        m.virtualRows,
+        m.offsets,
+        top,
+        ROW_HEIGHT
+      );
+      const hy = header
+        ? rowTopY(
+            m.offsets,
+            header.rowIndex != null ? Number(header.rowIndex) : 0,
+            ROW_HEIGHT
+          )
+        : 0;
+      const show = Boolean(header && top >= hy);
+      const path = header?.filePath ? String(header.filePath) : '';
+      const prevSticky = stickyMetaRef.current;
+      if (path !== prevSticky.path || show !== prevSticky.show) {
+        stickyMetaRef.current = { path, show };
+        setStickyMeta(show && header ? { row: header, show: true } : null);
+      }
+    }
     const prev = rangeRef.current;
     if (
       prev.start === next.start &&
@@ -674,16 +985,106 @@ function VirtualDiffImpl(props: any) {
       ? virtualRows.slice(range.start, range.end + 1)
       : [];
 
+  // Keep sticky header row fields in sync when virtualRows rebuild (collapse/viewed)
+  useLayoutEffect(() => {
+    const path = stickyMetaRef.current.path;
+    const show = stickyMetaRef.current.show;
+    if (!show || !path || !Array.isArray(virtualRows)) return;
+    const row = virtualRows.find(
+      (r: any) => r?.kind === 'file-header' && r.filePath === path
+    );
+    if (row) setStickyMeta({ row, show: true });
+  }, [virtualRows]);
+
+  // After sticky mounts/changes, sync transform from current scroll (ref not ready mid-RAF)
+  useLayoutEffect(() => {
+    if (!stickyMeta?.row || typeof resolveStickyFileHeaderLayout !== 'function') {
+      return;
+    }
+    const layout = resolveStickyFileHeaderLayout(
+      virtualRows,
+      offsets,
+      pendingScrollRef.current,
+      ROW_HEIGHT
+    );
+    const el = stickyElRef.current;
+    if (!el || !layout) return;
+    const show = Boolean(layout.show);
+    el.style.transform = `translate3d(0, ${Number(layout.translateY) || 0}px, 0)`;
+    el.style.visibility = show ? 'visible' : 'hidden';
+    el.style.pointerEvents = show ? 'auto' : 'none';
+  }, [stickyMeta?.row, stickyMeta?.show, virtualRows, offsets]);
+
+  // Sticky width = scroller clientWidth so it matches in-list rows (not scrollbar track)
+  useLayoutEffect(() => {
+    const el = listRef?.current as HTMLElement | null;
+    if (!el) return undefined;
+    const measure = () => {
+      const w = Math.floor(el.clientWidth || 0);
+      if (w > 0) setStickyWidth((prev) => (prev === w ? prev : w));
+    };
+    measure();
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(() => measure());
+      ro.observe(el);
+    }
+    window.addEventListener('resize', measure);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [listRef, virtualRows?.length, measuredH]);
+
   return (
-    <div
-      className="prp-vlist"
-      ref={listRef}
-      onScroll={handleScroll}
-      onMouseUp={(e) => onSelectionEnd?.({ x: e.clientX, y: e.clientY })}
-      onMouseLeave={(e) => {
-        if (selecting) onSelectionEnd?.({ x: e.clientX, y: e.clientY });
-      }}
-    >
+    <div className="prp-vlist-host">
+      {/*
+        Sticky is a SIBLING of the scrollport (not inside overflow/contain).
+        Absolute top of host pins it; width matches vlist.clientWidth for parity.
+      */}
+      {/*
+        Keep mounted while we have a sticky path so transform updates don't remount.
+        visibility/transform driven from scroll RAF for smooth push (no layout jump).
+      */}
+      {stickyMeta?.row ? (
+        <div
+          ref={stickyElRef}
+          className="prp-file-header-sticky"
+          role="presentation"
+          style={{
+            width:
+              stickyWidth != null && stickyWidth > 0 ? stickyWidth : undefined,
+            visibility: stickyMeta.show ? 'visible' : 'hidden',
+            pointerEvents: stickyMeta.show ? 'auto' : 'none',
+          }}
+        >
+          <FileHeaderRow
+            row={stickyMeta.row}
+            viewedPaths={viewedPaths}
+            onToggleViewed={onToggleViewed}
+            onToggleCollapse={onToggleCollapse}
+            onFileComment={onFileComment}
+            sticky
+            selectionIsland={
+              showSelectionIsland &&
+              isFileSelection &&
+              String(selection?.filePath || '') ===
+                String(stickyMeta.row?.filePath || '')
+                ? selectionIsland
+                : null
+            }
+          />
+        </div>
+      ) : null}
+      <div
+        className="prp-vlist prp-scroll-float"
+        ref={listRef}
+        onScroll={handleScroll}
+        onMouseUp={(e) => onSelectionEnd?.({ x: e.clientX, y: e.clientY })}
+        onMouseLeave={(e) => {
+          if (selecting) onSelectionEnd?.({ x: e.clientX, y: e.clientY });
+        }}
+      >
       <div className="prp-vlist__spacer" style={{ height: range.totalHeight }}>
         <div
           className="prp-vlist__window"
@@ -745,6 +1146,7 @@ function VirtualDiffImpl(props: any) {
                     viewerLogin={viewerLogin}
                     prOpen={prOpen}
                     linkCtx={linkCtx}
+                    mentionCandidates={mentionCandidates}
                     onUploadFile={onUploadFile}
                     collapsed={collapsed}
                     onToggleCollapse={() =>
@@ -761,89 +1163,126 @@ function VirtualDiffImpl(props: any) {
               );
             }
             if (row.kind === 'file-header') {
-              const viewed = isPathViewed
-                ? isPathViewed(viewedPaths, row.filePath)
-                : false;
-              const collapsed = Boolean(row.collapsed);
+              // Prefer sticky dock when that file is sticky (avoid double form)
+              const stickyOwnsFile =
+                stickyMeta?.show &&
+                String(stickyMeta.row?.filePath || '') ===
+                  String(row.filePath || '');
+              const dockFile =
+                showSelectionIsland &&
+                isFileSelection &&
+                !stickyOwnsFile &&
+                String(selection?.filePath || '') === String(row.filePath || '');
+              return (
+                <FileHeaderRow
+                  key={row.rowIndex}
+                  row={row}
+                  viewedPaths={viewedPaths}
+                  onToggleViewed={onToggleViewed}
+                  onToggleCollapse={onToggleCollapse}
+                  onFileComment={onFileComment}
+                  searchRowClass={searchRowClass}
+                  isSearchMatch={Boolean(isSearchMatch)}
+                  isActiveHit={Boolean(isActiveHit)}
+                  activeHitForMarks={activeHitForMarks}
+                  occ={occ}
+                  searchQuery={qActive ? searchQuery : ''}
+                  selectionIsland={dockFile ? selectionIsland : null}
+                />
+              );
+            }
+
+            if (row.kind === 'diff-image') {
               const status = String(row.status || 'modified').toLowerCase();
-              const adds = row.additions ?? 0;
-              const dels = row.deletions ?? 0;
-              const headerTone =
-                status === 'added' || status === 'add'
-                  ? 'add'
-                  : status === 'removed' ||
-                      status === 'deleted' ||
-                      status === 'del'
-                    ? 'del'
-                    : status === 'renamed'
-                      ? 'rename'
-                      : adds > 0 && dels === 0
-                        ? 'add'
-                        : dels > 0 && adds === 0
-                          ? 'del'
-                          : 'mod';
+              const showBase = Boolean(row.baseUrl);
+              const showHead =
+                Boolean(row.headUrl) &&
+                status !== 'removed' &&
+                status !== 'deleted';
               return (
                 <div
                   key={row.rowIndex}
-                  className={`prp-vline prp-vline--header prp-vline--header-${headerTone}${searchRowClass}`}
-                  style={{ height: ROW_HEIGHT }}
+                  className={`prp-vline prp-vline--image${searchRowClass}`}
                   data-row-index={row.rowIndex}
-                  data-file-status={status}
                   data-search-current={isActiveHit ? '1' : undefined}
                 >
-                  <label className="prp-file-header__viewed" title="Mark as viewed">
-                    <input
-                      type="checkbox"
-                      checked={viewed}
-                      onChange={() => onToggleViewed?.(row.filePath)}
-                      onClick={(e) => e.stopPropagation()}
-                    />
-                  </label>
-                  <button
-                    type="button"
-                    className="prp-file-header__collapse"
-                    title={collapsed ? 'Expand file' : 'Collapse file'}
-                    onClick={() => onToggleCollapse?.(row.filePath)}
-                  >
-                    <IconDisclosure open={!collapsed} size={12} />
-                  </button>
-                  <button
-                    type="button"
-                    className="prp-file-header-btn"
-                    onClick={() => onToggleCollapse?.(row.filePath)}
-                  >
-                    <span
-                      className={`prp-file-header__status prp-file-header__status--${headerTone}`}
-                    >
-                      {status}
-                    </span>
-                    <code
-                      className="prp-file-header__path"
-                      dangerouslySetInnerHTML={{
-                        __html: isSearchMatch
-                          ? markSearchInText(row.filePath || '', searchQuery, {
-                              currentStart: isActiveHit
-                                ? resolveActiveMarkStart(
-                                    row.filePath || '',
-                                    searchQuery,
-                                    row,
-                                    activeHitForMarks,
-                                    occ,
-                                    'text'
-                                  )
-                                : null,
+                  <div className="prp-diff-image">
+                    {showBase ? (
+                      <figure className="prp-diff-image__pane prp-diff-image__pane--base">
+                        <figcaption className="prp-diff-image__label">
+                          {status === 'removed' || status === 'deleted'
+                            ? 'Removed'
+                            : 'Before'}
+                        </figcaption>
+                        <img
+                          className="prp-diff-image__img"
+                          src={row.baseUrl}
+                          alt={`${row.filePath || 'image'} (before)`}
+                          loading="lazy"
+                          referrerPolicy="no-referrer-when-downgrade"
+                          title="Click to expand"
+                          onClick={() =>
+                            setImageViewer({
+                              src: String(row.baseUrl),
+                              alt: `${row.filePath || 'image'} (before)`,
                             })
-                          : escapeHtml(row.filePath || ''),
-                      }}
-                    />
-                    <span
-                      className="prp-file-header__stats"
-                      aria-label={`+${adds} −${dels}`}
-                    >
-                      <span className="prp-stat-add">+{adds}</span>
-                      <span className="prp-stat-del">−{dels}</span>
-                    </span>
-                  </button>
+                          }
+                          onError={(e) => {
+                            (e.currentTarget as HTMLImageElement).style.display =
+                              'none';
+                          }}
+                        />
+                      </figure>
+                    ) : null}
+                    {showHead ? (
+                      <figure className="prp-diff-image__pane prp-diff-image__pane--head">
+                        <figcaption className="prp-diff-image__label">
+                          {status === 'added' || status === 'add'
+                            ? 'Added'
+                            : 'After'}
+                        </figcaption>
+                        <img
+                          className="prp-diff-image__img"
+                          src={row.headUrl}
+                          alt={`${row.filePath || 'image'} (after)`}
+                          loading="lazy"
+                          referrerPolicy="no-referrer-when-downgrade"
+                          title="Click to expand"
+                          onClick={() =>
+                            setImageViewer({
+                              src: String(row.headUrl),
+                              alt: `${row.filePath || 'image'} (after)`,
+                            })
+                          }
+                          onError={(e) => {
+                            (e.currentTarget as HTMLImageElement).style.display =
+                              'none';
+                          }}
+                        />
+                      </figure>
+                    ) : null}
+                    {!showBase && !showHead ? (
+                      <p className="prp-diff-image__empty">
+                        Image preview unavailable
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            }
+
+            if (row.kind === 'diff-meta') {
+              return (
+                <div
+                  key={row.rowIndex}
+                  className={`prp-vline prp-vline--meta${searchRowClass}`}
+                  style={{ height: ROW_HEIGHT }}
+                  data-row-index={row.rowIndex}
+                  data-search-current={isActiveHit ? '1' : undefined}
+                >
+                  <span className="prp-diff-meta-text">
+                    {row.text || 'Binary file — not shown'}
+                  </span>
                 </div>
               );
             }
@@ -866,11 +1305,29 @@ function VirtualDiffImpl(props: any) {
                 expandBusyKey={expandBusyKey}
                 useSyntax
                 hljsEpoch={hljsEpoch}
+                selectionIsland={
+                  showSelectionIsland && !isFileSelection
+                    ? selectionIsland
+                    : null
+                }
               />
             );
           })}
         </div>
       </div>
+      </div>
+      <FloatingScrollbar
+        scrollerRef={listRef}
+        contentKey={`${totalRows}:${range.totalHeight}:${Math.round(vp)}`}
+      />
+      {imageViewer ? (
+        <ImageViewer
+          src={imageViewer.src}
+          alt={imageViewer.alt}
+          title={imageViewer.alt || 'Image'}
+          onClose={() => setImageViewer(null)}
+        />
+      ) : null}
     </div>
   );
 }

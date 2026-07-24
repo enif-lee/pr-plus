@@ -35,7 +35,80 @@
    * Retries with backoff while the service worker wakes from idle.
    * After extension reload, only a full page refresh can re-bind content scripts.
    */
-  async function send(message, { retries = 4 } = {}) {
+  /** Page origin context for GitHub Enterprise endpoint resolution. */
+  function pageEndpointContext() {
+    try {
+      const host = String(globalThis.location?.hostname || '').toLowerCase();
+      const origin = String(globalThis.location?.origin || '');
+      return { webHost: host, webOrigin: origin };
+    } catch {
+      return { webHost: '', webOrigin: '' };
+    }
+  }
+
+  function makeAbortError() {
+    const err = new Error('The operation was aborted.');
+    err.name = 'AbortError';
+    return err;
+  }
+
+  function isAbortError(err) {
+    return (
+      err?.name === 'AbortError' ||
+      /aborted|AbortError/i.test(String(err?.message || err || ''))
+    );
+  }
+
+  let requestSeq = 0;
+  function nextRequestId() {
+    requestSeq += 1;
+    return `prp-req-${Date.now().toString(36)}-${requestSeq}`;
+  }
+
+  /**
+   * Ask the service worker to abort GitHub fetches for the given ids.
+   * Fire-and-forget; safe if SW is already gone.
+   * @param {string[]|string|null} requestIds
+   * @param {{ cancelAll?: boolean }} [opts] cancelAll aborts every active SW GitHub fetch
+   */
+  function cancelFetches(requestIds, opts = {}) {
+    const ids = Array.isArray(requestIds)
+      ? requestIds.map(String).filter(Boolean)
+      : requestIds != null
+        ? [String(requestIds)]
+        : [];
+    const cancelAll = Boolean(opts?.cancelAll);
+    if ((!ids.length && !cancelAll) || !isExtensionContextAlive()) {
+      return Promise.resolve({ ok: false });
+    }
+    return chrome.runtime
+      .sendMessage({
+        type: 'PR_TREE_CANCEL_FETCH',
+        requestIds: ids,
+        ...(cancelAll ? { cancelAll: true } : null),
+      })
+      .catch(() => ({ ok: false }));
+  }
+
+  /** Reject when AbortSignal fires (unblocks await sendMessage on sheet close). */
+  function whenAborted(signal) {
+    return new Promise((_, reject) => {
+      if (!signal) return;
+      if (signal.aborted) {
+        reject(makeAbortError());
+        return;
+      }
+      signal.addEventListener(
+        'abort',
+        () => {
+          reject(makeAbortError());
+        },
+        { once: true }
+      );
+    });
+  }
+
+  async function send(message, { retries = 4, signal = null } = {}) {
     if (!globalThis.chrome?.runtime?.sendMessage) {
       throw new Error('chrome.runtime unavailable');
     }
@@ -43,39 +116,91 @@
     if (!isExtensionContextAlive()) {
       throw new Error(RELOAD_REFRESH_MSG);
     }
+    if (signal?.aborted) throw makeAbortError();
 
-    let lastErr;
-    for (let attempt = 0; attempt <= retries; attempt++) {
-      try {
-        // No callback → Chrome returns a Promise and keeps the channel open
-        // for the full SW handler lifetime.
-        const response = await chrome.runtime.sendMessage(message);
-        return response;
-      } catch (e) {
-        const msg = e?.message || String(e);
-        lastErr = new Error(msg);
-        if (isContextInvalidated(msg) || !isExtensionContextAlive()) {
-          throw new Error(RELOAD_REFRESH_MSG);
-        }
-        if (attempt < retries && isTransientChannelError(msg)) {
-          // Wake SW: light PING then retry (idle SW common after minutes unused)
-          try {
-            await chrome.runtime.sendMessage({ type: 'PR_TREE_PING' });
-          } catch {
-            /* ignore — next attempt is the real message */
+    const page = pageEndpointContext();
+    const requestId =
+      (message && message.requestId) ||
+      (signal ? nextRequestId() : null);
+    const payload =
+      message && typeof message === 'object'
+        ? {
+            ...message,
+            ...(requestId ? { requestId } : null),
+            webHost: message.webHost || page.webHost,
+            webOrigin: message.webOrigin || page.webOrigin,
           }
-          await sleep(80 + attempt * 160);
-          continue;
-        }
-        if (/Receiving end does not exist|Could not establish connection/i.test(msg)) {
-          throw new Error(
-            'Background worker offline. Open chrome://extensions → pr+ → Reload, then refresh this page (⌘R).'
-          );
-        }
-        throw lastErr;
+        : message;
+
+    // Track ids so host can bulk-cancel without relying only on signal listeners
+    if (requestId && signal) {
+      try {
+        if (!signal.__prpRequestIds) signal.__prpRequestIds = new Set();
+        signal.__prpRequestIds.add(requestId);
+      } catch {
+        /* ignore */
       }
     }
-    throw lastErr || new Error('Failed to message background worker');
+
+    const onAbort = () => {
+      if (requestId) void cancelFetches([requestId]);
+    };
+    if (signal) {
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
+
+    let lastErr;
+    try {
+      for (let attempt = 0; attempt <= retries; attempt++) {
+        if (signal?.aborted) throw makeAbortError();
+        try {
+          // Race: sheet close must not wait for SW to finish the full fetch.
+          // CANCEL_FETCH runs immediately in SW (outside exclusive queue) and
+          // aborts the underlying GitHub HTTP; race unblocks the content side.
+          const sendP = chrome.runtime.sendMessage(payload);
+          const response = signal
+            ? await Promise.race([sendP, whenAborted(signal)])
+            : await sendP;
+          if (signal?.aborted) throw makeAbortError();
+          if (response?.aborted) throw makeAbortError();
+          return response;
+        } catch (e) {
+          if (isAbortError(e)) throw e;
+          const msg = e?.message || String(e);
+          lastErr = new Error(msg);
+          if (isContextInvalidated(msg) || !isExtensionContextAlive()) {
+            throw new Error(RELOAD_REFRESH_MSG);
+          }
+          // Do not retry after abort / sheet close
+          if (signal?.aborted) throw makeAbortError();
+          if (attempt < retries && isTransientChannelError(msg)) {
+            // Wake SW: light PING then retry (idle SW common after minutes unused)
+            try {
+              await chrome.runtime.sendMessage({ type: 'PR_TREE_PING' });
+            } catch {
+              /* ignore — next attempt is the real message */
+            }
+            await sleep(80 + attempt * 160);
+            continue;
+          }
+          if (/Receiving end does not exist|Could not establish connection/i.test(msg)) {
+            throw new Error(
+              'Background worker offline. Open chrome://extensions → pr+ → Reload, then refresh this page (⌘R).'
+            );
+          }
+          throw lastErr;
+        }
+      }
+      throw lastErr || new Error('Failed to message background worker');
+    } finally {
+      if (signal) {
+        try {
+          signal.removeEventListener('abort', onAbort);
+        } catch {
+          /* ignore */
+        }
+      }
+    }
   }
 
   /** Pure helper (no network / no token). */
@@ -390,13 +515,17 @@
   const PRTreeFetch = {
     findDanglingPrNumbers,
     async fetchOpenPulls(owner, repo, _fetchImpl, options = {}) {
-      const res = await send({
-        type: 'PR_TREE_FETCH_OPEN_PULLS',
-        owner,
-        repo,
-        pagePrNumbers: options.pagePrNumbers || [],
-      });
+      const res = await send(
+        {
+          type: 'PR_TREE_FETCH_OPEN_PULLS',
+          owner,
+          repo,
+          pagePrNumbers: options.pagePrNumbers || [],
+        },
+        { signal: options.signal || null }
+      );
       if (!res?.ok) {
+        if (res?.aborted) throw makeAbortError();
         const err = new Error(res?.error || 'Failed to fetch pull requests');
         err.status = res?.status;
         throw err;
@@ -425,20 +554,24 @@
         typeof performance !== 'undefined' && performance.now
           ? performance.now()
           : Date.now();
-      const res = await send({
-        type: 'PR_TREE_FETCH_PR_DETAIL',
-        owner,
-        repo,
-        number,
-        skipReviewThreads: Boolean(opts.skipReviewThreads),
-        threadsMaxPages: opts.threadsMaxPages,
-      });
+      const res = await send(
+        {
+          type: 'PR_TREE_FETCH_PR_DETAIL',
+          owner,
+          repo,
+          number,
+          skipReviewThreads: Boolean(opts.skipReviewThreads),
+          threadsMaxPages: opts.threadsMaxPages,
+        },
+        { signal: opts.signal || null }
+      );
       const roundTrip = Math.round(
         (typeof performance !== 'undefined' && performance.now
           ? performance.now()
           : Date.now()) - t0
       );
       if (!res?.ok) {
+        if (res?.aborted) throw makeAbortError();
         console.log(
           `[pr-plus] fetchPrDetail page round-trip ${owner}/${repo}#${number}: ${roundTrip}ms ERROR`,
           res?.error
@@ -463,16 +596,20 @@
      * @param {{ direction?: string, cursor?: string|null, pageSize?: number }} [opts]
      */
     async fetchReviewThreadsPage(owner, repo, number, opts = {}) {
-      const res = await send({
-        type: 'PR_TREE_FETCH_REVIEW_THREADS_PAGE',
-        owner,
-        repo,
-        number,
-        direction: opts.direction || 'newest',
-        cursor: opts.cursor || null,
-        pageSize: opts.pageSize,
-      });
+      const res = await send(
+        {
+          type: 'PR_TREE_FETCH_REVIEW_THREADS_PAGE',
+          owner,
+          repo,
+          number,
+          direction: opts.direction || 'newest',
+          cursor: opts.cursor || null,
+          pageSize: opts.pageSize,
+        },
+        { signal: opts.signal || null }
+      );
       if (!res?.ok) {
+        if (res?.aborted) throw makeAbortError();
         const err = new Error(res?.error || 'Failed to fetch review threads page');
         err.status = res?.status;
         throw err;
@@ -482,13 +619,18 @@
     /**
      * Bulk-fetch review threads by GraphQL PRRT_… ids (chunks of 100).
      * @param {string[]} threadNodeIds
+     * @param {{ signal?: AbortSignal }} [opts]
      */
-    async fetchReviewThreadsByIds(threadNodeIds) {
-      const res = await send({
-        type: 'PR_TREE_FETCH_REVIEW_THREADS_BY_IDS',
-        threadNodeIds: Array.isArray(threadNodeIds) ? threadNodeIds : [],
-      });
+    async fetchReviewThreadsByIds(threadNodeIds, opts = {}) {
+      const res = await send(
+        {
+          type: 'PR_TREE_FETCH_REVIEW_THREADS_BY_IDS',
+          threadNodeIds: Array.isArray(threadNodeIds) ? threadNodeIds : [],
+        },
+        { signal: opts.signal || null }
+      );
       if (!res?.ok) {
+        if (res?.aborted) throw makeAbortError();
         const err = new Error(res?.error || 'Failed to fetch review threads by ids');
         err.status = res?.status;
         throw err;
@@ -512,17 +654,21 @@
      * @param {{ kind?: 'issue'|'review', page?: number, perPage?: number, since?: string }} [opts]
      */
     async fetchPrCommentsPage(owner, repo, number, opts = {}) {
-      const res = await send({
-        type: 'PR_TREE_FETCH_COMMENTS_PAGE',
-        owner,
-        repo,
-        number,
-        kind: opts.kind === 'review' ? 'review' : 'issue',
-        page: opts.page,
-        perPage: opts.perPage,
-        since: opts.since || null,
-      });
+      const res = await send(
+        {
+          type: 'PR_TREE_FETCH_COMMENTS_PAGE',
+          owner,
+          repo,
+          number,
+          kind: opts.kind === 'review' ? 'review' : 'issue',
+          page: opts.page,
+          perPage: opts.perPage,
+          since: opts.since || null,
+        },
+        { signal: opts.signal || null }
+      );
       if (!res?.ok) {
+        if (res?.aborted) throw makeAbortError();
         const err = new Error(res?.error || 'Failed to fetch comments page');
         err.status = res?.status;
         throw err;
@@ -530,21 +676,27 @@
       return res.page;
     },
     async fetchCompareFiles(owner, repo, base, head, options = {}) {
-      const res = await send({
-        type: 'PR_TREE_FETCH_COMPARE_FILES',
-        owner,
-        repo,
-        base,
-        head,
-        gitattributesText: options.gitattributesText || '',
-      });
+      const res = await send(
+        {
+          type: 'PR_TREE_FETCH_COMPARE_FILES',
+          owner,
+          repo,
+          base,
+          head,
+          gitattributesText: options.gitattributesText || '',
+        },
+        { signal: options.signal || null }
+      );
       if (!res?.ok) {
+        if (res?.aborted) throw makeAbortError();
         const err = new Error(res?.error || 'Failed to fetch compare files');
         err.status = res?.status;
         throw err;
       }
       return res.result;
     },
+    /** Abort SW-tracked GitHub fetches (sheet closed / superseded open). */
+    cancelFetches,
 
     async uploadRepoFile(owner, repo, { path, contentBase64, message, branch }) {
       const res = await send({
@@ -642,6 +794,7 @@
         startLine: payload.startLine ?? payload.start_line,
         startSide: payload.startSide ?? payload.start_side,
         asPending: Boolean(payload.asPending),
+        subjectType: payload.subjectType ?? payload.subject_type ?? 'line',
       });
       if (!res?.ok) {
         const err = new Error(res?.error || 'Failed to post review comment');
@@ -856,6 +1009,30 @@
         throw err;
       }
       return res.result;
+    },
+    /**
+     * List repo labels (name/color/description) for the set-labels picker.
+     * @param {string} owner
+     * @param {string} repo
+     * @param {{ maxPages?: number, signal?: AbortSignal }} [opts]
+     */
+    async fetchRepoLabels(owner, repo, opts = {}) {
+      const res = await send(
+        {
+          type: 'PR_TREE_FETCH_REPO_LABELS',
+          owner,
+          repo,
+          maxPages: opts.maxPages,
+        },
+        { signal: opts.signal || null }
+      );
+      if (!res?.ok) {
+        if (res?.aborted) throw makeAbortError();
+        const err = new Error(res?.error || 'Failed to fetch repo labels');
+        err.status = res?.status;
+        throw err;
+      }
+      return Array.isArray(res.labels) ? res.labels : [];
     },
     async applyReviewSuggestion(owner, repo, payload) {
       const res = await send({

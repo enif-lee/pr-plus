@@ -6,6 +6,7 @@ import {
   buildStackBranchSelectOptions,
   reduceStackPathHover,
 } from '@lib/ui-polish';
+import { FloatingScrollbar } from '../../components/common/FloatingScrollbar';
 
 /**
  * Stack path strip.
@@ -142,6 +143,29 @@ export function StackStrip({
   const list = Array.isArray(items) ? items : [];
   const show = list.length >= 2;
   const pickerOpen = Boolean(openKey && openBranch && anchorEl);
+  const stripScrollRef = useRef<HTMLDivElement | null>(null);
+
+  // Non-passive wheel: vertical wheel → horizontal scroll (must stay before early return)
+  useEffect(() => {
+    if (!show) return undefined;
+    const el = stripScrollRef.current;
+    if (!el) return undefined;
+    const onWheel = (e: WheelEvent) => {
+      const max = el.scrollWidth - el.clientWidth;
+      if (max <= 1) return;
+      const dx =
+        Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      if (!dx) return;
+      const prev = el.scrollLeft;
+      const next = Math.max(0, Math.min(max, prev + dx));
+      if (next !== prev) {
+        e.preventDefault();
+        el.scrollLeft = next;
+      }
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [list.length, show]);
 
   function navigateTo(num: number, e?: React.SyntheticEvent) {
     e?.preventDefault?.();
@@ -162,79 +186,90 @@ export function StackStrip({
   if (!show) return null;
 
   return (
-    <div className="prp-stack-strip" role="navigation" aria-label="Stacked pull requests">
-      <span className="prp-stack-strip__label">Stack</span>
-      {list.map((it: any, i: number) => {
-        const levelNum = Number(it.number);
-        const branch = branchByLevel.get(levelNum) || null;
-        const hasPicker = stackBranchHasPathPicker(branch);
-        const chipKey = `level-${levelNum}`;
-        const title = it.title || `#${it.number}`;
-        const isOpenLevel = openKey === chipKey;
-        const className = `prp-stack-strip__item${
-          it.current ? ' prp-stack-strip__item--current' : ''
-        }${hasPicker ? ' prp-stack-strip__item--fork' : ''}${
-          isOpenLevel ? ' prp-stack-strip__item--picker-open' : ''
-        }`;
+    <div className="prp-scroll-float-host prp-stack-strip-host">
+      <div
+        ref={stripScrollRef}
+        className="prp-stack-strip prp-scroll-float"
+        role="navigation"
+        aria-label="Stacked pull requests"
+      >
+        <span className="prp-stack-strip__label">Stack</span>
+        {list.map((it: any, i: number) => {
+          const levelNum = Number(it.number);
+          const branch = branchByLevel.get(levelNum) || null;
+          const hasPicker = stackBranchHasPathPicker(branch);
+          const chipKey = `level-${levelNum}`;
+          const title = it.title || `#${it.number}`;
+          const isOpenLevel = openKey === chipKey;
+          const className = `prp-stack-strip__item${
+            it.current ? ' prp-stack-strip__item--current' : ''
+          }${hasPicker ? ' prp-stack-strip__item--fork' : ''}${
+            isOpenLevel ? ' prp-stack-strip__item--picker-open' : ''
+          }`;
 
-        return (
-          <React.Fragment key={it.number}>
-            {i > 0 ? (
-              <span className="prp-stack-strip__sep" aria-hidden="true">
-                →
-              </span>
-            ) : null}
-            <button
-              type="button"
-              ref={(el) => {
-                if (el) anchorRefs.current.set(chipKey, el);
-                else anchorRefs.current.delete(chipKey);
-                // Only sync when this chip is the open anchor and element identity changed
-                if (openKey === chipKey && el && openAnchorRef.current !== el) {
-                  setAnchorEl(el);
-                }
-              }}
-              className={className}
-              title={
-                hasPicker
-                  ? `${title} · click to open · hover for other paths at this level`
-                  : `${title} · click to open`
-              }
-              aria-current={it.current ? 'page' : undefined}
-              aria-expanded={isOpenLevel || undefined}
-              aria-haspopup={hasPicker ? 'listbox' : undefined}
-              data-stack-level={levelNum}
-              data-stack-fork={hasPicker ? '1' : '0'}
-              data-pr-number={levelNum}
-              onClick={(e) => navigateTo(levelNum, e)}
-              onMouseEnter={() => onChipEnter(chipKey, hasPicker)}
-              onMouseLeave={(e) => onChipLeave(e, chipKey)}
-              onContextMenu={(e) => {
-                if (!hasPicker) return;
-                e.preventDefault();
-                openPickerAt(chipKey);
-              }}
-            >
-              <span className="prp-stack-strip__num">#{it.number}</span>
-              <span className="prp-stack-strip__title">
-                {it.title
-                  ? String(it.title)
-                  : it.headRef || (it.current ? 'current' : `PR ${it.number}`)}
-              </span>
-              {hasPicker ? (
-                <span
-                  className="prp-stack-strip__fork"
-                  title="Other paths at this level"
-                  aria-hidden="true"
-                >
-                  ▾
+          return (
+            <React.Fragment key={it.number}>
+              {i > 0 ? (
+                <span className="prp-stack-strip__sep" aria-hidden="true">
+                  →
                 </span>
               ) : null}
-            </button>
-          </React.Fragment>
-        );
-      })}
-
+              <button
+                type="button"
+                ref={(el) => {
+                  if (el) anchorRefs.current.set(chipKey, el);
+                  else anchorRefs.current.delete(chipKey);
+                  if (openKey === chipKey && el && openAnchorRef.current !== el) {
+                    setAnchorEl(el);
+                  }
+                }}
+                className={className}
+                title={
+                  hasPicker
+                    ? `${title} · click to open · hover for other paths at this level`
+                    : `${title} · click to open`
+                }
+                aria-current={it.current ? 'page' : undefined}
+                aria-expanded={isOpenLevel || undefined}
+                aria-haspopup={hasPicker ? 'listbox' : undefined}
+                data-stack-level={levelNum}
+                data-stack-fork={hasPicker ? '1' : '0'}
+                data-pr-number={levelNum}
+                onClick={(e) => navigateTo(levelNum, e)}
+                onMouseEnter={() => onChipEnter(chipKey, hasPicker)}
+                onMouseLeave={(e) => onChipLeave(e, chipKey)}
+                onContextMenu={(e) => {
+                  if (!hasPicker) return;
+                  e.preventDefault();
+                  openPickerAt(chipKey);
+                }}
+              >
+                <span className="prp-stack-strip__num">#{it.number}</span>
+                <span className="prp-stack-strip__title">
+                  {it.title
+                    ? String(it.title)
+                    : it.headRef || (it.current ? 'current' : `PR ${it.number}`)}
+                </span>
+                {hasPicker ? (
+                  <span
+                    className="prp-stack-strip__fork"
+                    title="Other paths at this level"
+                    aria-hidden="true"
+                  >
+                    ▾
+                  </span>
+                ) : null}
+              </button>
+            </React.Fragment>
+          );
+        })}
+      </div>
+      <FloatingScrollbar
+        scrollerRef={stripScrollRef}
+        orientation="horizontal"
+        contentKey={`${list.length}:${list.map((x: any) => x.number).join(',')}`}
+      />
+      {/* Outside scroller so it never affects min-content width / overflow */}
       <SearchableSelect
         open={pickerOpen}
         title="Paths at this level"

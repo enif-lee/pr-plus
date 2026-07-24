@@ -14,6 +14,7 @@ import React, {
 } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Button } from '@common/Button';
+import { ActionToast } from '@common/ActionToast';
 import { SearchableSelect } from '@common/SearchableSelect';
 import { Header } from '../views/chrome/Header';
 import { StackStrip } from '../views/chrome/StackStrip';
@@ -45,11 +46,19 @@ import {
   type ShellMode,
 } from '../lib/shell-preference';
 import {
+  isEmbedPresentation,
+  presentationClassName,
+  shouldShowEmbedChrome,
+  resolveEmbedShortcutAction,
+} from '../lib/page-embed';
+import {
   SHEET_DEFAULT_WIDTH,
   MODAL_DEFAULT_WIDTH,
   MODAL_DEFAULT_HEIGHT,
   SHEET_MIN_WIDTH,
-  SHEET_MAX_WIDTH,
+  SHELL_FULLSCREEN_EDGE_PX,
+  sheetWidthHitsFullscreen,
+  modalSizeHitsFullscreen,
   MODAL_MIN_WIDTH,
   MODAL_MAX_WIDTH,
   MODAL_MIN_HEIGHT,
@@ -140,9 +149,20 @@ import {
 } from '../lib/search-index';
 import { calculateVisibleRange, scrollTopForIndex } from '../lib/virtual-range';
 import {
-  beginLineSelection, extendLineSelection, normalizeSelection, selectionToCommentPayload,
-  finalizeSelection, selectionGestureMode, isRowInSelection, isSelectableDiffRow, selectionBlockRole,
+  beginLineSelection,
+  extendLineSelection,
+  applySelectionPointerDown,
+  normalizeSelection,
+  selectionToCommentPayload,
+  finalizeSelection,
+  selectionGestureMode,
+  isRowInSelection,
+  isSelectableDiffRow,
+  selectionBlockRole,
+  extractSelectedCodeText,
+  githubBlobLinePermalink,
 } from '../lib/line-selection';
+import { copyTextToClipboard } from '../lib/copy-to-clipboard';
 import {
   discardPendingReview,
 } from '../lib/pending-review';
@@ -151,7 +171,11 @@ import {
   buildRerequestReviewerLogins, mapRestReviewComment, mapRestIssueComment, appendOptimisticReviewComment,
 } from '../lib/pr-edit-api';
 import { buildPaletteCommands, filterPaletteCommands } from '../lib/command-palette';
-import { resolveModalShortcutAction } from '../lib/shortcut-policy';
+import {
+  resolveModalShortcutAction,
+  pickConversationCommentFocusTarget,
+} from '../lib/shortcut-policy';
+import { buildConversationTimeline } from '../lib/conversation-timeline';
 import { resolveGithubTheme } from '../lib/theme';
 import { buildStackStrip, buildStackPathModel } from '../lib/ui-polish';
 import {
@@ -178,6 +202,14 @@ import {
   replaceLocationRoute,
   clearLocationRoute,
 } from '../lib/uri-route';
+import {
+  replaceGithubPrLocation,
+  githubCommitsFromFilter,
+  githubSelectionFields,
+  commitFilterFromGithubRoute,
+  findFilePathByDiffKey,
+  githubDiffFileKey,
+} from '../lib/github-pr-route';
 import { useModalStore } from '../store/modal-store';
 import {
   ROW_HEIGHT,
@@ -200,11 +232,33 @@ export function PrModalApp({
   onPatchDetail = null,
   onOpenStackPr,
   onFetchCompareFiles = null,
+  onFetchAllPrCommits = null,
+  onFetchAllPrFiles = null,
   initialRoute = null,
   onRouteChange = null,
   prefs = null,
+  /** 'modal' overlay (default) | 'embed' in-page under GitHub header */
+  presentation = 'modal',
+  shellChrome = null,
+  /** Embed: tear down replace mode and show original GH PR UI */
+  onRestoreNative = null,
 }: any) {
   const reverseComments = prefs?.reverseComments !== false;
+  const isEmbed = isEmbedPresentation(presentation);
+  const embedChrome = shellChrome && typeof shellChrome === 'object' ? shellChrome : null;
+  const showCloseChrome =
+    !isEmbed &&
+    (embedChrome?.showClose !== false) &&
+    typeof onClose === 'function' &&
+    shouldShowEmbedChrome(presentation, 'close');
+  const showShellToggleChrome =
+    !isEmbed && shouldShowEmbedChrome(presentation, 'shellToggle');
+  const showFullscreenChrome =
+    !isEmbed && shouldShowEmbedChrome(presentation, 'fullscreen');
+  const showRestoreNativeChrome =
+    isEmbed &&
+    shouldShowEmbedChrome(presentation, 'restoreNative') &&
+    typeof onRestoreNative === 'function';
   const [localDetail, setLocalDetail] = useState(detailProp);
   /**
    * After discard/submit, host refresh can race and re-merge stale pending rows
@@ -270,6 +324,10 @@ export function PrModalApp({
     {}
   );
   const commentPrefetchGenRef = useRef(0);
+  /** Dedup GH commit-filter restore from inbound /changes/{sha}|{a}..{b}. */
+  const ghCommitRouteAppliedRef = useRef<string | null>(null);
+  /** Dedup GH #diff- selection restore / clear. */
+  const ghSelectionAppliedRef = useRef<string | null>(null);
 
   useEffect(() => {
     setDiffCommitFilter({ mode: 'all' });
@@ -285,6 +343,12 @@ export function PrModalApp({
     setDiffReviewFilter(null);
     setFileExtFilter(new Set());
     setFileUnreadOnly(false);
+    // Zustand selection survives remount — clear so we never write another PR's #diff-
+    // Use getState() so this effect can run before setLineSelection is declared below
+    // (avoids TDZ: Cannot access 'setLineSelection' before initialization).
+    useModalStore.getState().setLineSelection(null);
+    ghSelectionAppliedRef.current = null;
+    ghCommitRouteAppliedRef.current = null;
   }, [prIdentity]);
 
   // Lazy-load remaining comment / review-comment pages (offset) then since-refresh.
@@ -426,6 +490,7 @@ export function PrModalApp({
   const actionBusy = useModalStore((s) => s.actionBusy);
   const setActionBusy = useModalStore((s) => s.setActionBusy);
   const actionMsg = useModalStore((s) => s.actionMsg);
+  const actionMsgSeq = useModalStore((s) => s.actionMsgSeq);
   const setActionMsg = useModalStore((s) => s.setActionMsg);
   const collapsedFiles = useModalStore((s) => s.collapsedFiles);
   const setCollapsedFiles = useModalStore((s) => s.setCollapsedFiles);
@@ -440,6 +505,10 @@ export function PrModalApp({
   const selectionDraft = useModalStore((s) => s.selectionDraft);
   const setSelectionDraft = useModalStore((s) => s.setSelectionDraft);
   const showSelectionComposer = useModalStore((s) => s.showSelectionComposer);
+  /** Selection island: action chips first, then comment composer. */
+  const [selectionIslandPhase, setSelectionIslandPhase] = useState<
+    'actions' | 'comment'
+  >('actions');
   const setShowSelectionComposer = useModalStore((s) => s.setShowSelectionComposer);
   const selectionIslandLeaving = useModalStore((s) => s.selectionIslandLeaving);
   const setSelectionIslandLeaving = useModalStore((s) => s.setSelectionIslandLeaving);
@@ -532,6 +601,8 @@ export function PrModalApp({
   });
   /** Fullscreen shell — session-only; does not wipe stored sizes. */
   const [shellFullscreen, setShellFullscreen] = useState(false);
+  /** Blue dimmer while resizing into the ~50px fullscreen snap zone (not yet committed). */
+  const [shellFullscreenHint, setShellFullscreenHint] = useState(false);
   /** True while the user is dragging a shell resizer (disables size CSS transition). */
   const [shellResizing, setShellResizing] = useState(false);
   const shellResizeDragRef = useRef<
@@ -564,9 +635,26 @@ export function PrModalApp({
   const searchInputRef = useRef<any>(null);
   const shellRef = useRef<any>(null);
   const commentBoxRef = useRef<any>(null);
+  /**
+   * Keyboard focus on a conversation timeline comment/review (⌘⇧C).
+   * Null when not focused; re-pressing the chord clears it.
+   */
+  const [conversationCommentFocus, setConversationCommentFocus] = useState<{
+    id: string;
+    kind: string;
+    anchor: string;
+  } | null>(null);
+  const conversationCommentFocusRef = useRef(conversationCommentFocus);
+  conversationCommentFocusRef.current = conversationCommentFocus;
+  // Drop keyboard focus when switching PRs
+  useEffect(() => {
+    setConversationCommentFocus(null);
+  }, [prIdentity]);
   const collapseInitRef = useRef<any>(null);
   const selectingRef = useRef<boolean>(false);
   const pointerStartRef = useRef<any>(null);
+  /** Shift-click range: finalize as multi (do not collapse head to anchor). */
+  const shiftRangeRef = useRef<boolean>(false);
   /** Latest UI flags for capture-phase keydown (avoid stale closures). */
   const uiRef = useRef<any>({});
   /** Latest action handlers for capture-phase keydown. */
@@ -603,6 +691,71 @@ export function PrModalApp({
     if (!sourceFiles?.length) return [];
     return annotateFilesForCollapse(sourceFiles, detail?.gitattributesText || '');
   }, [sourceFiles, detail?.gitattributesText]);
+
+  /** True after we paged through every commit/file for this PR open. */
+  const commitsFullyLoadedRef = useRef(false);
+  const filesFullyLoadedRef = useRef(false);
+  const [commitListLoading, setCommitListLoading] = useState(false);
+  const [fileListLoading, setFileListLoading] = useState(false);
+
+  useEffect(() => {
+    commitsFullyLoadedRef.current = false;
+    filesFullyLoadedRef.current = false;
+  }, [prIdentity]);
+
+  const ensureAllCommits = useCallback(async () => {
+    if (!detail || typeof onFetchAllPrCommits !== 'function') return;
+    if (commitsFullyLoadedRef.current) return;
+    setCommitListLoading(true);
+    try {
+      const all = await onFetchAllPrCommits();
+      if (!Array.isArray(all)) return;
+      commitsFullyLoadedRef.current = true;
+      setLocalDetail((prev: any) =>
+        prev ? { ...prev, commits: all } : prev
+      );
+      try {
+        onPatchDetail?.({ commits: all });
+      } catch {
+        /* ignore */
+      }
+    } catch (err: any) {
+      setDiffCommitError(err?.message || String(err));
+    } finally {
+      setCommitListLoading(false);
+    }
+  }, [detail, onFetchAllPrCommits, onPatchDetail]);
+
+  const ensureAllFiles = useCallback(async () => {
+    if (!detail || typeof onFetchAllPrFiles !== 'function') return;
+    if (filesFullyLoadedRef.current) return;
+    // Don't clobber a commit-range override with full PR files mid-filter.
+    if (diffFilesOverride) {
+      filesFullyLoadedRef.current = true;
+      return;
+    }
+    setFileListLoading(true);
+    try {
+      const all = await onFetchAllPrFiles({
+        gitattributesText: detail.gitattributesText || '',
+      });
+      if (!Array.isArray(all) || !all.length) {
+        filesFullyLoadedRef.current = true;
+        return;
+      }
+      filesFullyLoadedRef.current = true;
+      setLocalDetail((prev: any) => (prev ? { ...prev, files: all } : prev));
+      try {
+        onPatchDetail?.({ files: all, changedFiles: all.length });
+      } catch {
+        /* ignore */
+      }
+    } catch {
+      /* soft-fail: keep partial file list */
+    } finally {
+      setFileListLoading(false);
+    }
+  }, [detail, onFetchAllPrFiles, onPatchDetail, diffFilesOverride]);
 
   const applyDiffCommitFilter = useCallback(
     async (nextRaw: DiffCommitFilterState) => {
@@ -741,17 +894,34 @@ export function PrModalApp({
   }, [detail?.reviewComments, annotatedFiles]);
 
   /**
-   * Files after Unresolved/Resolved/Pending + name/ext/unread filters.
-   * Shared by files nav, virtual diff, and review-thread nav counts.
+   * Resolve-status (Unresolved/Resolved/Pending) filter only.
+   * Extension chips are derived from this list so selecting one ext does not
+   * hide other ext chips / drop multi-select — only review mode reshapes them.
    */
-  const displayFiles = useMemo(() => {
-    let list = filterFilesByReviewMode(
+  const reviewScopedFiles = useMemo(
+    () =>
+      filterFilesByReviewMode(
+        annotatedFiles,
+        threadCounts,
+        unresolvedThreadCounts,
+        diffReviewFilter,
+        pendingThreadCounts
+      ),
+    [
       annotatedFiles,
       threadCounts,
       unresolvedThreadCounts,
+      pendingThreadCounts,
       diffReviewFilter,
-      pendingThreadCounts
-    );
+    ]
+  );
+
+  /**
+   * Files after resolve-status + name/ext/unread filters.
+   * Shared by files nav, virtual diff, and review-thread nav counts.
+   */
+  const displayFiles = useMemo(() => {
+    let list = reviewScopedFiles;
     if (typeof filterFilesByQuery === 'function') {
       list = filterFilesByQuery(list, fileQuery);
     }
@@ -759,11 +929,7 @@ export function PrModalApp({
     list = filterFilesUnreadOnly(list, viewedPaths, fileUnreadOnly);
     return list;
   }, [
-    annotatedFiles,
-    threadCounts,
-    unresolvedThreadCounts,
-    pendingThreadCounts,
-    diffReviewFilter,
+    reviewScopedFiles,
     fileQuery,
     fileExtFilter,
     viewedPaths,
@@ -837,10 +1003,17 @@ export function PrModalApp({
 
   const mentionCandidates = useMemo(() => {
     const names = new Set();
-    if (detail?.author) names.add(detail.author);
-    for (const r of detail?.reviews || []) if (r.author) names.add(r.author);
-    for (const c of detail?.comments || []) if (c.author) names.add(c.author);
-    for (const c of detail?.reviewComments || []) if (c.author) names.add(c.author);
+    const add = (v: unknown) => {
+      const s = typeof v === 'string' ? v : (v as any)?.login || (v as any)?.name || '';
+      if (s) names.add(String(s).replace(/^@/, ''));
+    };
+    if (detail?.author) add(detail.author);
+    if (detail?.viewerLogin) add(detail.viewerLogin);
+    for (const r of detail?.reviews || []) add(r.author);
+    for (const c of detail?.comments || []) add(c.author);
+    for (const c of detail?.reviewComments || []) add(c.author);
+    for (const a of detail?.assignees || []) add(a);
+    for (const r of detail?.requestedReviewers || []) add(r);
     return [...names];
   }, [detail]);
 
@@ -872,6 +1045,15 @@ export function PrModalApp({
         reviewComments: navReviewComments,
         expandedRanges: diffExpandedRanges,
         fileLineTexts: diffFileLines,
+        // Image preview URLs for binary-less image files (added/replaced)
+        owner: detail?.owner,
+        repo: detail?.repo,
+        baseSha: detail?.baseSha,
+        headSha: detail?.headSha,
+        baseRef: detail?.baseRef,
+        headRef: detail?.headRef,
+        webOrigin:
+          typeof location !== 'undefined' ? location.origin : 'https://github.com',
       }),
     [
       displayFiles,
@@ -881,6 +1063,12 @@ export function PrModalApp({
       navReviewComments,
       diffExpandedRanges,
       diffFileLines,
+      detail?.owner,
+      detail?.repo,
+      detail?.baseSha,
+      detail?.headSha,
+      detail?.baseRef,
+      detail?.headRef,
     ]
   );
 
@@ -1545,6 +1733,9 @@ export function PrModalApp({
       setLayoutMode(routePage === 'diff' ? LAYOUT_DIFF : LAYOUT_CENTERED);
     }
 
+    // Commit filter restore runs via applyDiffCommitFilter effect below
+    // (needs detail.commits for compare range). Do not half-set state here.
+
     if (stored) {
       if (
         !routePage &&
@@ -1582,6 +1773,100 @@ export function PrModalApp({
     setViewedPaths,
     setActiveFilePath,
     setCommentIndex,
+  ]);
+
+  // Inbound /changes/{sha}|{a}..{b} → full applyDiffCommitFilter (compare files + label)
+  useEffect(() => {
+    if (!open || !detail?.number) return;
+    const filter = commitFilterFromGithubRoute(initialRoute || null);
+    const key = `${detail.number}:${filter.mode}:${filter.sha || ''}:${filter.endSha || ''}`;
+    if (ghCommitRouteAppliedRef.current === key) return;
+    // Single/range need commits list to resolve compare base...head
+    if (
+      filter.mode !== 'all' &&
+      (!Array.isArray(detail.commits) || detail.commits.length === 0)
+    ) {
+      return;
+    }
+    ghCommitRouteAppliedRef.current = key;
+    void applyDiffCommitFilter(filter);
+  }, [
+    open,
+    detail?.number,
+    detail?.commits,
+    initialRoute?.commitSha,
+    initialRoute?.commitEndSha,
+    applyDiffCommitFilter,
+  ]);
+
+  // Restore #diff-{key}R… line selection once files are available.
+  // When inbound URL has no #diff-, clear zustand selection so URI write
+  // does not re-emit a stale hash after soft-nav remount.
+  useEffect(() => {
+    if (!open || !detail?.number) return;
+    const fileKey = initialRoute?.fileKey || null;
+    const filePathHint = initialRoute?.filePath || null;
+    const startLine = initialRoute?.startLine ?? null;
+    const applyKey = `${detail.number}:${fileKey || ''}:${filePathHint || ''}:${startLine}:${initialRoute?.endLine ?? ''}`;
+    if (ghSelectionAppliedRef.current === applyKey) return;
+
+    if (!fileKey && !filePathHint) {
+      ghSelectionAppliedRef.current = applyKey;
+      setLineSelection(null);
+      return;
+    }
+
+    const files =
+      (Array.isArray(diffFilesOverride) && diffFilesOverride) ||
+      (Array.isArray(detail.files) && detail.files) ||
+      [];
+    if (!files.length && !filePathHint) return;
+
+    const path =
+      (filePathHint && String(filePathHint)) ||
+      findFilePathByDiffKey(files, fileKey) ||
+      null;
+    if (!path) return;
+
+    ghSelectionAppliedRef.current = applyKey;
+    setActiveFilePath(path);
+    if (layoutMode !== LAYOUT_DIFF) setLayoutMode(LAYOUT_DIFF);
+
+    if (startLine != null && Number(startLine) >= 1) {
+      const end =
+        initialRoute?.endLine != null &&
+        Number(initialRoute.endLine) >= Number(startLine)
+          ? Math.floor(Number(initialRoute.endLine))
+          : Math.floor(Number(startLine));
+      const side =
+        String(initialRoute?.side || 'RIGHT').toUpperCase() === 'LEFT'
+          ? 'LEFT'
+          : 'RIGHT';
+      setLineSelection({
+        filePath: path,
+        anchorLine: Math.floor(Number(startLine)),
+        headLine: end,
+        anchorSide: side,
+        headSide: side,
+      });
+    } else {
+      // File-level #diff-{key} without lines — clear line range selection
+      setLineSelection(null);
+    }
+  }, [
+    open,
+    detail?.number,
+    detail?.files,
+    diffFilesOverride,
+    initialRoute?.fileKey,
+    initialRoute?.filePath,
+    initialRoute?.startLine,
+    initialRoute?.endLine,
+    initialRoute?.side,
+    layoutMode,
+    setActiveFilePath,
+    setLayoutMode,
+    setLineSelection,
   ]);
 
   // Focus review comment/thread from URI/session position once comments map
@@ -1655,19 +1940,23 @@ export function PrModalApp({
     routeWriteReady,
   ]);
 
-  // Sync URI (prp_page / prp_number / prp_position) + host session open snap.
-  // On close (open true → false), strip route params from the address bar.
+  // Sync URI + host session open snap.
+  // Embed: GitHub /pull/N/changes[/{sha}|/{a}..{b}]#diff-…R…
+  // List modal: legacy prp_* query params.
+  // On close (open true → false), strip prp_* only for modal presentation.
   const uriWasOpenRef = useRef(false);
   useEffect(() => {
     if (!open || !detail?.number) {
       if (uriWasOpenRef.current) {
         uriWasOpenRef.current = false;
-        try {
-          if (typeof history !== 'undefined' && typeof location !== 'undefined') {
-            clearLocationRoute(history, location);
+        if (!isEmbed) {
+          try {
+            if (typeof history !== 'undefined' && typeof location !== 'undefined') {
+              clearLocationRoute(history, location);
+            }
+          } catch {
+            /* ignore */
           }
-        } catch {
-          /* ignore */
         }
       }
       return;
@@ -1682,30 +1971,75 @@ export function PrModalApp({
       position = buildPositionFromComment(mappedComments[commentIndex]);
     }
 
+    const commits = githubCommitsFromFilter(diffCommitFilter);
+    const sel =
+      page === 'diff' ? githubSelectionFields(lineSelection) : {
+        filePath: null,
+        startLine: null,
+        endLine: null,
+        side: null as 'LEFT' | 'RIGHT' | null,
+      };
+    const fileKey =
+      page === 'diff' && sel.filePath ? githubDiffFileKey(sel.filePath) : null;
+
+    const routePayload = {
+      page,
+      position,
+      number: detail.number,
+      commitSha: page === 'diff' ? commits.commitSha : null,
+      commitEndSha: page === 'diff' ? commits.commitEndSha : null,
+      filePath: sel.filePath,
+      fileKey,
+      startLine: sel.startLine,
+      endLine: sel.endLine,
+      side: sel.side,
+    };
+
     // Fixture / non-extension: write location directly (no chrome.*)
     try {
       if (typeof history !== 'undefined' && typeof location !== 'undefined') {
-        replaceLocationRoute(history, location, {
-          page,
-          number: detail.number,
-          position,
-        });
+        if (isEmbed && detail.owner && detail.repo) {
+          replaceGithubPrLocation(history, location, {
+            owner: detail.owner,
+            repo: detail.repo,
+            number: detail.number,
+            page,
+            commitSha: routePayload.commitSha,
+            commitEndSha: routePayload.commitEndSha,
+            filePath: routePayload.filePath,
+            fileKey: routePayload.fileKey,
+            startLine: routePayload.startLine,
+            endLine: routePayload.endLine,
+            side: routePayload.side,
+          });
+        } else {
+          replaceLocationRoute(history, location, {
+            page,
+            number: detail.number,
+            position,
+          });
+        }
       }
     } catch {
       /* ignore */
     }
 
     if (typeof onRouteChange === 'function') {
-      onRouteChange({ page, position, number: detail.number });
+      onRouteChange(routePayload);
     }
   }, [
     open,
     detail?.number,
+    detail?.owner,
+    detail?.repo,
     layoutMode,
     commentIndex,
     mappedComments,
     onRouteChange,
     routeWriteReady,
+    isEmbed,
+    diffCommitFilter,
+    lineSelection,
   ]);
 
   // Reset route restore markers when modal closes
@@ -1736,6 +2070,8 @@ export function PrModalApp({
 
   /** Play exit animation, then notify host to unmount (modal + side sheet). */
   const requestClose = useCallback(() => {
+    // Embed has no exit chrome — ignore close (Escape stays no-op for shell).
+    if (isEmbed) return;
     if (closingRef.current || !open) return;
     closingRef.current = true;
     setClosing(true);
@@ -1765,7 +2101,7 @@ export function PrModalApp({
       setAnimClass('');
       onClose?.();
     }, duration);
-  }, [open, onClose, shellMode, layoutMode, setAnimClass]);
+  }, [open, onClose, shellMode, layoutMode, setAnimClass, isEmbed]);
 
   /**
    * After close or merge (or soft-revalidate that flips state), auto-close the
@@ -1798,7 +2134,12 @@ export function PrModalApp({
     terminalCloseWasTerminalRef.current = isTerminal;
   }, [open, detail, requestClose]);
 
-  // Reset close animation if host forces open again mid-exit / after unmount
+  /**
+   * One-shot enter animation when the shell opens.
+   * Depends only on `open` (not loading/loadStage/detail) so progressive host
+   * re-renders during fetch must not re-fire sheet/modal enter motion.
+   */
+  const enterAnimTokenRef = useRef(0);
   useEffect(() => {
     if (!open) {
       if (closeTimerRef.current) {
@@ -1807,18 +2148,40 @@ export function PrModalApp({
       }
       closingRef.current = false;
       setClosing(false);
+      enterAnimTokenRef.current += 1;
       return;
     }
-    // Opening: clear residual exit classes
-    if (!closingRef.current) {
-      setAnimClass('');
+    if (isEmbed) {
+      // Embed has no enter chrome animation
+      if (!closingRef.current) setAnimClass('');
+      return;
     }
-  }, [open, setAnimClass]);
+    if (closingRef.current) return;
+
+    const token = ++enterAnimTokenRef.current;
+    // Capture shell at open — preference is already hydrated via useState init
+    const sheetSlide =
+      shellMode === SHELL_SHEET && layoutMode !== LAYOUT_DIFF;
+    const enterClass = sheetSlide
+      ? 'prp-modal--sheet-in'
+      : 'prp-modal--animating prp-modal--anim-in';
+    const duration = sheetSlide ? 250 : 290;
+    setAnimClass(enterClass);
+    const t = window.setTimeout(() => {
+      if (enterAnimTokenRef.current !== token) return;
+      if (!closingRef.current) setAnimClass('');
+    }, duration);
+    return () => {
+      window.clearTimeout(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- open-only; avoid load re-entry
+  }, [open, isEmbed, setAnimClass]);
 
   // Lock document scroll while overlay is open so only the panel scrolls
   // (side sheet otherwise leaves a global scrollbar + nested scroll).
+  // Embed fills GH main — leave document scroll alone.
   useEffect(() => {
-    if (!open || typeof document === 'undefined') return undefined;
+    if (!open || isEmbed || typeof document === 'undefined') return undefined;
     const sbw =
       typeof window !== 'undefined' ? measureScrollbarWidth(window) : 0;
     const snap: ScrollLockSnapshot | null = applyScrollLock(document, {
@@ -1827,7 +2190,7 @@ export function PrModalApp({
     return () => {
       restoreScrollLock(document, snap);
     };
-  }, [open]);
+  }, [open, isEmbed]);
 
   function onToggleShell() {
     setShellMode((prev) => {
@@ -1855,9 +2218,14 @@ export function PrModalApp({
 
   function onToggleFileNavCollapse() {
     setFileNav((prev) => {
+      const nextCollapsed = toggleFileNavCollapsed(prev.collapsed);
+      // Expanding the files panel: load remaining file pages for search.
+      if (prev.collapsed && !nextCollapsed) {
+        void ensureAllFiles();
+      }
       const next = {
         ...prev,
-        collapsed: toggleFileNavCollapsed(prev.collapsed),
+        collapsed: nextCollapsed,
         width: clampFileNavWidth(prev.width),
       };
       persistFileNav(next);
@@ -1937,13 +2305,26 @@ export function PrModalApp({
   }
 
   function onSheetResizeStart(e: React.PointerEvent) {
-    if (shellFullscreen || shellMode !== SHELL_SHEET) return;
+    if (shellMode !== SHELL_SHEET) return;
     if (layoutMode === LAYOUT_DIFF) return;
     e.preventDefault();
     e.stopPropagation();
     const startX = e.clientX;
     const { viewportWidth } = viewportSize();
-    const startWidth = clampSheetWidth(sheetWidth, { viewportWidth });
+    // Fullscreen → windowed: start at full viewport width so the left edge
+    // tracks the handle immediately (natural shrink from full-bleed).
+    const fromFs = Boolean(shellFullscreen);
+    const startWidth = clampSheetWidth(
+      fromFs ? viewportWidth : sheetWidth,
+      { viewportWidth }
+    );
+    if (fromFs) {
+      setShellFullscreen(false);
+      setSheetWidth(startWidth);
+      setShellFullscreenHint(true);
+    }
+    // Persistable width to keep if we re-enter fullscreen on release
+    const widthBeforeGesture = clampSheetWidth(sheetWidth, { viewportWidth });
     shellResizeDragRef.current = { kind: 'sheet', startX, startWidth };
     setShellResizing(true);
     const target = e.currentTarget as HTMLElement;
@@ -1952,29 +2333,51 @@ export function PrModalApp({
     } catch {
       /* ignore */
     }
-    const onMove = (ev: PointerEvent) => {
-      const drag = shellResizeDragRef.current;
-      if (!drag || drag.kind !== 'sheet') return;
-      const nextW = nextSheetWidthFromDrag(drag.startWidth, drag.startX, ev.clientX, {
-        viewportWidth: typeof window !== 'undefined' ? window.innerWidth : undefined,
-      });
-      setSheetWidth(nextW);
-    };
-    const onUp = (ev: PointerEvent) => {
+    const endDrag = (ev?: PointerEvent) => {
       shellResizeDragRef.current = null;
       setShellResizing(false);
-      try {
-        target.releasePointerCapture?.(ev.pointerId);
-      } catch {
-        /* ignore */
+      setShellFullscreenHint(false);
+      if (ev) {
+        try {
+          target.releasePointerCapture?.(ev.pointerId);
+        } catch {
+          /* ignore */
+        }
       }
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onUp);
+    };
+    const onMove = (ev: PointerEvent) => {
+      const drag = shellResizeDragRef.current;
+      if (!drag || drag.kind !== 'sheet') return;
+      const vw = typeof window !== 'undefined' ? window.innerWidth : viewportWidth;
+      // During drag only resize — fullscreen waits until pointerup (handle release).
+      const nextW = nextSheetWidthFromDrag(drag.startWidth, drag.startX, ev.clientX, {
+        viewportWidth: vw,
+      });
+      setSheetWidth(nextW);
+      setShellFullscreenHint(
+        typeof sheetWidthHitsFullscreen === 'function' &&
+          sheetWidthHitsFullscreen(nextW, vw, SHELL_FULLSCREEN_EDGE_PX)
+      );
+    };
+    const onUp = (ev: PointerEvent) => {
+      endDrag(ev);
       setSheetWidth((prev) => {
-        const next = clampSheetWidth(prev, {
-          viewportWidth: typeof window !== 'undefined' ? window.innerWidth : undefined,
-        });
+        const vw = typeof window !== 'undefined' ? window.innerWidth : undefined;
+        const next = clampSheetWidth(prev, { viewportWidth: vw });
+        // Promote to fullscreen only when the handle is released in the snap zone.
+        // Keep a usable windowed width for the next exit (pre-gesture, not full vw).
+        if (
+          typeof sheetWidthHitsFullscreen === 'function' &&
+          sheetWidthHitsFullscreen(next, vw, SHELL_FULLSCREEN_EDGE_PX)
+        ) {
+          setShellFullscreen(true);
+          const keep = fromFs ? widthBeforeGesture : startWidth;
+          persistSheetWidth(keep);
+          return keep;
+        }
         persistSheetWidth(next);
         return next;
       });
@@ -1985,52 +2388,93 @@ export function PrModalApp({
   }
 
   function onModalResizeStart(e: React.PointerEvent) {
-    if (shellFullscreen || shellMode !== SHELL_MODAL) return;
+    if (shellMode !== SHELL_MODAL) return;
     if (layoutMode === LAYOUT_DIFF) return;
     e.preventDefault();
     e.stopPropagation();
     const startX = e.clientX;
     const startY = e.clientY;
     const { viewportWidth, viewportHeight } = viewportSize();
-    const start = clampModalSize(modalSize, { viewportWidth, viewportHeight });
+    // Fullscreen → windowed: start at full viewport so SE corner tracks the handle.
+    const fromFs = Boolean(shellFullscreen);
+    const start = clampModalSize(
+      fromFs
+        ? { width: viewportWidth, height: viewportHeight }
+        : modalSize,
+      { viewportWidth, viewportHeight }
+    );
+    const sizeBeforeGesture = clampModalSize(modalSize, {
+      viewportWidth,
+      viewportHeight,
+    });
+    if (fromFs) {
+      setShellFullscreen(false);
+      setModalSize(start);
+      setShellFullscreenHint(true);
+    }
     shellResizeDragRef.current = { kind: 'modal', startX, startY, start };
     setShellResizing(true);
+    if (!fromFs) setShellFullscreenHint(false);
     const target = e.currentTarget as HTMLElement;
     try {
       target.setPointerCapture?.(e.pointerId);
     } catch {
       /* ignore */
     }
+    const endDrag = (ev?: PointerEvent) => {
+      shellResizeDragRef.current = null;
+      setShellResizing(false);
+      setShellFullscreenHint(false);
+      if (ev) {
+        try {
+          target.releasePointerCapture?.(ev.pointerId);
+        } catch {
+          /* ignore */
+        }
+      }
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+    };
     const onMove = (ev: PointerEvent) => {
       const drag = shellResizeDragRef.current;
       if (!drag || drag.kind !== 'modal') return;
+      const vw = typeof window !== 'undefined' ? window.innerWidth : viewportWidth;
+      const vh = typeof window !== 'undefined' ? window.innerHeight : viewportHeight;
       const next = nextModalSizeFromDrag(
         drag.start,
         ev.clientX - drag.startX,
         ev.clientY - drag.startY,
         {
-          viewportWidth: typeof window !== 'undefined' ? window.innerWidth : undefined,
-          viewportHeight: typeof window !== 'undefined' ? window.innerHeight : undefined,
+          viewportWidth: vw,
+          viewportHeight: vh,
         }
       );
       setModalSize(next);
+      setShellFullscreenHint(
+        typeof modalSizeHitsFullscreen === 'function' &&
+          modalSizeHitsFullscreen(next, vw, vh, SHELL_FULLSCREEN_EDGE_PX)
+      );
     };
     const onUp = (ev: PointerEvent) => {
-      shellResizeDragRef.current = null;
-      setShellResizing(false);
-      try {
-        target.releasePointerCapture?.(ev.pointerId);
-      } catch {
-        /* ignore */
-      }
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onUp);
+      endDrag(ev);
       setModalSize((prev) => {
+        const vw = typeof window !== 'undefined' ? window.innerWidth : undefined;
+        const vh = typeof window !== 'undefined' ? window.innerHeight : undefined;
         const next = clampModalSize(prev, {
-          viewportWidth: typeof window !== 'undefined' ? window.innerWidth : undefined,
-          viewportHeight: typeof window !== 'undefined' ? window.innerHeight : undefined,
+          viewportWidth: vw,
+          viewportHeight: vh,
         });
+        // Release in snap zone → fullscreen; keep a windowed size for next exit.
+        if (
+          typeof modalSizeHitsFullscreen === 'function' &&
+          modalSizeHitsFullscreen(next, vw, vh, SHELL_FULLSCREEN_EDGE_PX)
+        ) {
+          setShellFullscreen(true);
+          const keep = fromFs ? sizeBeforeGesture : start;
+          persistModalSize(keep);
+          return keep;
+        }
         persistModalSize(next);
         return next;
       });
@@ -2060,6 +2504,7 @@ export function PrModalApp({
       );
       // Fullscreen is session-only; reset on each open for a predictable shell.
       setShellFullscreen(false);
+      setShellFullscreenHint(false);
     } catch {
       /* ignore */
     }
@@ -2139,15 +2584,103 @@ export function PrModalApp({
     }
   }
 
+  function isEditableKeyboardTarget(el: EventTarget | null) {
+    if (!el || typeof el !== 'object') return false;
+    const node = el as HTMLElement;
+    const tag = String(node.tagName || '').toUpperCase();
+    if (tag === 'TEXTAREA' || tag === 'INPUT' || tag === 'SELECT') return true;
+    if (node.isContentEditable) return true;
+    return Boolean(node.closest?.('textarea, input, select, [contenteditable="true"]'));
+  }
+
+  function focusConversationCommentItem() {
+    // Always land on conversation layout so the timeline is visible.
+    // Scroll itself is owned by VirtualConversationList via scrollToAnchor
+    // (indexForConversationAnchor + scroller.scrollTop) after React commit —
+    // not a one-shot querySelector (virtualized off-window rows are not in DOM,
+    // and Diff→Conversation keep-alive panel may still be inactive mid-microtask).
+    if (layoutMode === LAYOUT_DIFF) collapseDiff();
+    const items =
+      typeof buildConversationTimeline === 'function' && detail
+        ? buildConversationTimeline(detail)
+        : [];
+    // Skip pending review-group (lives in composer, not timeline)
+    const timeline = (Array.isArray(items) ? items : []).filter(
+      (i: any) => !(i && i.kind === 'review-group' && i.pending)
+    );
+    // reverseComments default: newest first — pick first displayed comment/review
+    const ordered = reverseComments ? timeline : [...timeline].reverse();
+    const target =
+      typeof pickConversationCommentFocusTarget === 'function'
+        ? pickConversationCommentFocusTarget(ordered)
+        : null;
+    if (!target) {
+      setConversationCommentFocus(null);
+      return;
+    }
+    setConversationCommentFocus(target);
+  }
+
+  function clearConversationCommentFocus() {
+    setConversationCommentFocus(null);
+  }
+
   function dismissSelectionIsland(after?: any) {
     setSelectionIslandLeaving(true);
     setTimeout(() => {
       setShowSelectionComposer(false);
       setLineSelection(null);
       setSelectionDraft('');
+      setSelectionIslandPhase('actions');
       setSelectionIslandLeaving(false);
       after?.();
     }, 200);
+  }
+
+  async function copySelectionCode() {
+    const sel = useModalStore.getState().lineSelection;
+    if (!sel) return false;
+    const text =
+      typeof extractSelectedCodeText === 'function'
+        ? extractSelectedCodeText(virtualRows, sel)
+        : '';
+    if (!text) {
+      setActionMsg('No code in selection');
+      return false;
+    }
+    const ok = await copyTextToClipboard(text);
+    setActionMsg(ok ? 'Code copied' : 'Copy failed');
+    return ok;
+  }
+
+  async function copySelectionUrl() {
+    const sel = useModalStore.getState().lineSelection;
+    if (!sel || !detail) return false;
+    const norm =
+      typeof normalizeSelection === 'function' ? normalizeSelection(sel) : null;
+    if (!norm) return false;
+    const url =
+      typeof githubBlobLinePermalink === 'function'
+        ? githubBlobLinePermalink({
+            owner: detail.owner,
+            repo: detail.repo,
+            path: norm.filePath,
+            startLine: norm.startLine,
+            endLine: norm.endLine,
+            side: norm.endSide,
+            headSha: detail.headSha,
+            headRef: detail.headRef,
+            baseSha: detail.baseSha,
+            baseRef: detail.baseRef,
+          })
+        : '';
+    if (!url) {
+      setActionMsg('Could not build URL');
+      return false;
+    }
+    const ok = await copyTextToClipboard(url);
+    setActionMsg(ok ? 'URL copied' : 'Copy failed');
+    return ok;
   }
 
   function closePicker() {
@@ -2823,10 +3356,11 @@ export function PrModalApp({
     }
   }
 
-  function openLabelPicker() {
+  async function openLabelPicker() {
     if (!detail) return;
-    const currentNames = (detail.labels || []).map((l) => String(l.name || l).trim());
-    const current = new Set(currentNames.map((n) => n.toLowerCase()));
+    const currentNames = (detail.labels || []).map((l) =>
+      String(l.name || l).trim()
+    );
     const common = [
       'bug',
       'enhancement',
@@ -2838,23 +3372,33 @@ export function PrModalApp({
       'duplicate',
       'invalid',
     ];
+
+    // Prefer repo label catalog (real colors). Fall back to PR labels + defaults.
+    let repoLabels: Array<{ name?: string; color?: string; description?: string }> =
+      [];
+    try {
+      const api = globalThis.PRTreeFetch;
+      if (typeof api?.fetchRepoLabels === 'function') {
+        repoLabels = (await api.fetchRepoLabels(detail.owner, detail.repo)) || [];
+      }
+    } catch {
+      /* offline / no token — still open with PR labels + default colors */
+    }
+
     const pool = [
+      ...repoLabels,
       ...(detail.labels || []),
-      ...common.filter((n) => !current.has(n.toLowerCase())),
+      ...common.map((n) => ({ name: n })),
     ];
-    // Multi-select: include current labels as pre-selected so user can add more
     const options =
       typeof buildLabelOptions === 'function'
-        ? buildLabelOptions([
-            ...pool,
-            ...common.map((n) => ({ name: n })),
-          ])
+        ? buildLabelOptions(pool)
         : [...new Set([...currentNames, ...common])].map((id) => ({
             id,
             label: id,
             meta: { kind: 'label', name: id },
           }));
-    // de-dupe options by id
+    // de-dupe options by id (buildLabelOptions already does; keep belt)
     const seen = new Set();
     const uniqueOpts = [];
     for (const o of options) {
@@ -3109,14 +3653,42 @@ export function PrModalApp({
     }
   }
 
-  function onSelectionStart(row, point) {
-    if (typeof beginLineSelection !== 'function') return;
-    const sel = beginLineSelection(row);
-    if (!sel) return;
+  function onSelectionStart(row, point, opts: any = {}) {
+    const shiftKey = Boolean(opts?.shiftKey);
+    const prev = useModalStore.getState().lineSelection;
+    let next = null;
+    let keepRange = false;
+    if (typeof applySelectionPointerDown === 'function') {
+      const result = applySelectionPointerDown(prev, row, { shiftKey });
+      if (result.mode === 'ignore') {
+        shiftRangeRef.current = false;
+        return;
+      }
+      next = result.selection;
+      keepRange = Boolean(result.keepRange);
+    } else if (typeof beginLineSelection === 'function') {
+      if (
+        shiftKey &&
+        prev &&
+        row?.filePath === prev.filePath &&
+        typeof extendLineSelection === 'function'
+      ) {
+        next = extendLineSelection(prev, row) || prev;
+        keepRange = true;
+      } else {
+        next = beginLineSelection(row);
+        keepRange = false;
+      }
+    }
+    if (!next) {
+      shiftRangeRef.current = false;
+      return;
+    }
+    shiftRangeRef.current = keepRange;
     selectingRef.current = true;
     pointerStartRef.current = point || null;
     setSelecting(true);
-    setLineSelection(sel);
+    setLineSelection(next);
     setShowSelectionComposer(false);
   }
 
@@ -3129,11 +3701,18 @@ export function PrModalApp({
     if (!selectingRef.current && forcedMode !== 'click') return;
     selectingRef.current = false;
     setSelecting(false);
+    const keepShiftRange = shiftRangeRef.current;
+    shiftRangeRef.current = false;
     const mode =
-      forcedMode ||
-      (typeof selectionGestureMode === 'function'
-        ? selectionGestureMode(pointerStartRef.current, point || pointerStartRef.current)
-        : 'click');
+      keepShiftRange
+        ? 'shift'
+        : forcedMode ||
+          (typeof selectionGestureMode === 'function'
+            ? selectionGestureMode(
+                pointerStartRef.current,
+                point || pointerStartRef.current
+              )
+            : 'click');
     setLineSelection((prev) => {
       if (!prev) return prev;
       if (typeof finalizeSelection === 'function') return finalizeSelection(prev, mode);
@@ -3141,6 +3720,7 @@ export function PrModalApp({
     });
     pointerStartRef.current = null;
     setSelectionIslandLeaving(false);
+    setSelectionIslandPhase('actions');
     setShowSelectionComposer(true);
   }
 
@@ -3148,34 +3728,50 @@ export function PrModalApp({
    * Post a selection line comment.
    * @param asPending Start review / Add comment — always GitHub PENDING review
    */
+  function onFileHeaderComment(filePath: string) {
+    const path = String(filePath || '').trim();
+    if (!path) return;
+    // Dismiss line selection if any; open file-level composer
+    setSelecting(false);
+    selectingRef.current = false;
+    setSelectionIslandLeaving(false);
+    setLineSelection({ kind: 'file', filePath: path, subjectType: 'file' });
+    setSelectionDraft('');
+    setSelectionIslandPhase('comment');
+    setShowSelectionComposer(true);
+  }
+
   async function postSelectionLineComment(payload: any, { asPending = false } = {}) {
     const api = globalThis.PRTreeFetch;
     if (!api?.postReviewComment) throw new Error('Line comment API unavailable');
     // New pending activity cancels a prior discard force-drop so host PENDING
     // from this post is not immediately stripped on the next refresh merge.
     if (asPending) forceDropPendingRef.current = false;
+    const isFile = payload.subject_type === 'file' || payload.subjectType === 'file';
     const raw = await api.postReviewComment(detail.owner, detail.repo, detail.number, {
       body: payload.body,
       path: payload.path,
-      line: payload.line,
+      line: isFile ? null : payload.line,
       side: payload.side,
       commitId: payload.commit_id || detail.headSha,
-      startLine: payload.start_line,
-      startSide: payload.start_side,
+      startLine: isFile ? null : payload.start_line,
+      startSide: isFile ? null : payload.start_side,
       asPending: Boolean(asPending),
+      subjectType: isFile ? 'file' : 'line',
     });
     const isPending = Boolean(raw?.pending || asPending || serverPendingReviewId);
     if (isPending) forceDropPendingRef.current = false;
     const optimistic = mapRestReviewComment(raw, {
       body: payload.body,
       path: payload.path,
-      line: payload.line,
-      startLine: payload.start_line,
+      line: isFile ? null : payload.line,
+      startLine: isFile ? null : payload.start_line,
       side: payload.side,
       author: detail.viewerLogin || '',
       pending: isPending,
       pendingReviewId: raw?.pendingReviewId || serverPendingReviewId || null,
       threadNodeId: raw?.threadNodeId || null,
+      subjectType: isFile ? 'file' : 'line',
     });
     if (optimistic) {
       setLocalDetail((prev) => {
@@ -3220,6 +3816,22 @@ export function PrModalApp({
     return { raw, isPending };
   }
 
+  function selectionActionMessage(payload: any, isPending: boolean) {
+    if (payload.subject_type === 'file' || payload.subjectType === 'file') {
+      return isPending
+        ? `Added file comment to pending review on ${payload.path}.`
+        : `File comment posted on ${payload.path}.`;
+    }
+    if (isPending) {
+      return payload.start_line != null
+        ? `Added to pending review on ${payload.path}:${payload.start_line}–${payload.line}.`
+        : `Added to pending review on ${payload.path}:${payload.line}.`;
+    }
+    return payload.start_line != null
+      ? `Comment posted on ${payload.path}:${payload.start_line}–${payload.line}.`
+      : `Comment posted on ${payload.path}:${payload.line}.`;
+  }
+
   async function onSubmitSelectionCommentImmediate() {
     if (!detail || !lineSelection || typeof selectionToCommentPayload !== 'function') return;
     const payload: any = selectionToCommentPayload(lineSelection, {
@@ -3232,15 +3844,7 @@ export function PrModalApp({
     try {
       // If a PENDING review already exists, GitHub forces attach — shown as pending
       const { isPending } = await postSelectionLineComment(payload, { asPending: false });
-      setActionMsg(
-        isPending
-          ? payload.start_line != null
-            ? `Added to pending review on ${payload.path}:${payload.start_line}–${payload.line}.`
-            : `Added to pending review on ${payload.path}:${payload.line}.`
-          : payload.start_line != null
-            ? `Comment posted on ${payload.path}:${payload.start_line}–${payload.line}.`
-            : `Comment posted on ${payload.path}:${payload.line}.`
-      );
+      setActionMsg(selectionActionMessage(payload, isPending));
       dismissSelectionIsland();
       await onRefresh?.();
     } catch (err) {
@@ -3262,11 +3866,19 @@ export function PrModalApp({
     try {
       // Unified: always create/attach GitHub PENDING review (no local-only batch)
       await postSelectionLineComment(payload, { asPending: true });
-      setActionMsg(
-        hasServerPending
-          ? `Added to pending review on ${payload.path}:${payload.line}.`
-          : `Started pending review on ${payload.path}:${payload.line}.`
-      );
+      if (payload.subject_type === 'file' || payload.subjectType === 'file') {
+        setActionMsg(
+          hasServerPending
+            ? `Added file comment to pending review on ${payload.path}.`
+            : `Started pending review with file comment on ${payload.path}.`
+        );
+      } else {
+        setActionMsg(
+          hasServerPending
+            ? `Added to pending review on ${payload.path}:${payload.line}.`
+            : `Started pending review on ${payload.path}:${payload.line}.`
+        );
+      }
       dismissSelectionIsland();
       await onRefresh?.();
     } catch (err: any) {
@@ -3860,8 +4472,12 @@ export function PrModalApp({
    * Fetches head file text once per path, then merges the requested line range.
    * @param {'all'|'up'|'down'} direction
    */
-  async function onExpandDiffGap(row: any, direction: 'all' | 'up' | 'down' = 'all') {
+  async function onExpandDiffGap(
+    row: any,
+    direction: 'all' | 'up' | 'down' | 'fromStart' | 'fromEnd' = 'all'
+  ) {
     if (!detail || !row?.filePath) return;
+    // fromStart/fromEnd = front/back of the remaining gap; up/down kept as aliases
     const range = resolveExpandRange(direction, row);
     if (!range) return;
     const path = String(row.filePath);
@@ -4192,29 +4808,78 @@ export function PrModalApp({
     editingComment,
     pickerOpen: Boolean(picker),
     showSelectionComposer,
+    selectionIslandPhase,
+    conversationCommentFocused: Boolean(conversationCommentFocus),
+    hasLineSelection: Boolean(lineSelection),
   };
   actionsRef.current = {
     onClose: requestClose,
     onToggleDiff,
     collapseDiff,
     closePicker,
+    focusConversationCommentItem,
+    clearConversationCommentFocus,
+    openSelectionComment: () => setSelectionIslandPhase('comment'),
+    openSelectionActions: () => setSelectionIslandPhase('actions'),
+    copySelectionCode,
+    copySelectionUrl,
+    navSearch,
+    navComment,
   };
 
   useEffect(() => {
     if (!open) return undefined;
     const onKey = (e) => {
       const mod = e.metaKey || e.ctrlKey;
+      const alt = Boolean(e.altKey);
       const key = String(e.key || '').toLowerCase();
       const ui = uiRef.current || {};
       const act = actionsRef.current || {};
 
+      // Diff selection shortcuts (only when not typing in an editable field)
+      const ae = typeof document !== 'undefined' ? document.activeElement : null;
+      const typing =
+        ae &&
+        (ae === document.body
+          ? false
+          : (ae as HTMLElement).isContentEditable ||
+            /^(INPUT|TEXTAREA|SELECT)$/i.test((ae as HTMLElement).tagName || ''));
+      if (
+        !typing &&
+        ui.layoutMode === LAYOUT_DIFF &&
+        ui.showSelectionComposer &&
+        ui.hasLineSelection &&
+        key === 'c'
+      ) {
+        // ⌥C → Comment · ⌘C → Copy code · ⌘⌥C → Copy URL
+        if (mod && alt) {
+          e.preventDefault();
+          e.stopPropagation();
+          void act.copySelectionUrl?.();
+          return;
+        }
+        if (mod && !alt) {
+          e.preventDefault();
+          e.stopPropagation();
+          void act.copySelectionCode?.();
+          return;
+        }
+        if (!mod && alt) {
+          e.preventDefault();
+          e.stopPropagation();
+          act.openSelectionComment?.();
+          return;
+        }
+      }
+
       // Escape: dismiss nested UI first, otherwise close the whole modal
       // (including from Diff — do not shrink back to conversation).
       if (e.key === 'Escape') {
-        // Mermaid fullscreen viewer owns Escape — close viewer only, keep modal
+        // Mermaid / image fullscreen viewers own Escape — close viewer only, keep modal
         if (
           typeof document !== 'undefined' &&
-          document.querySelector('[data-prp-mermaid-viewer="1"]')
+          (document.querySelector('[data-prp-mermaid-viewer="1"]') ||
+            document.querySelector('[data-prp-image-viewer="1"]'))
         ) {
           return;
         }
@@ -4245,7 +4910,12 @@ export function PrModalApp({
         }
         if (ui.showSelectionComposer) {
           e.preventDefault();
-          dismissSelectionIsland();
+          // Comment phase → back to action chips; actions → dismiss island
+          if (ui.selectionIslandPhase === 'comment') {
+            act.openSelectionActions?.();
+          } else {
+            dismissSelectionIsland();
+          }
           return;
         }
         if (ui.editingBody || ui.editingComment) {
@@ -4260,17 +4930,43 @@ export function PrModalApp({
         return;
       }
 
-      const action =
+      const editable = isEditableKeyboardTarget(e.target);
+      let action =
         typeof resolveModalShortcutAction === 'function'
           ? resolveModalShortcutAction({
               mod: mod && !e.altKey,
               shift: Boolean(e.shiftKey),
+              alt: Boolean(e.altKey) && !mod,
               key,
+              code: e.code,
               editingBody: ui.editingBody,
               editingComment: ui.editingComment,
               paletteOpen: ui.paletteOpen,
+              editableTarget: editable,
+              searchOpen: Boolean(ui.searchOpen),
+              layoutMode: ui.layoutMode,
+              conversationCommentFocused: Boolean(
+                ui.conversationCommentFocused ?? conversationCommentFocusRef.current
+              ),
+              presentation: isEmbed ? 'embed' : 'modal',
+              isEmbed,
             })
           : null;
+
+      // Embed restore (also via pure page-embed helper)
+      if (
+        !action &&
+        isEmbed &&
+        typeof resolveEmbedShortcutAction === 'function'
+      ) {
+        action = resolveEmbedShortcutAction({
+          mod: mod && !e.altKey,
+          shift: Boolean(e.shiftKey),
+          key,
+          presentation: 'embed',
+          editableTarget: editable,
+        });
+      }
 
       if (!action) return;
 
@@ -4298,7 +4994,36 @@ export function PrModalApp({
           });
           break;
         case 'toggleFullscreen':
-          setShellFullscreen((prev) => toggleShellFullscreen(prev));
+          if (!isEmbed) {
+            setShellFullscreen((prev) => toggleShellFullscreen(prev));
+          }
+          break;
+        case 'focusConversationComment':
+          act.focusConversationCommentItem?.();
+          break;
+        case 'clearConversationCommentFocus':
+          act.clearConversationCommentFocus?.();
+          break;
+        case 'restoreNativeView':
+          if (isEmbed && typeof onRestoreNative === 'function') {
+            onRestoreNative();
+          }
+          break;
+        case 'stepNavPrev':
+          // Find open → hit prev; else Diff thread prev (⌥K)
+          if (ui.searchOpen) {
+            act.navSearch?.(-1);
+          } else if (ui.layoutMode === LAYOUT_DIFF) {
+            act.navComment?.(-1);
+          }
+          break;
+        case 'stepNavNext':
+          // Find open → hit next; else Diff thread next (⌥J)
+          if (ui.searchOpen) {
+            act.navSearch?.(1);
+          } else if (ui.layoutMode === LAYOUT_DIFF) {
+            act.navComment?.(1);
+          }
           break;
         default:
           break;
@@ -4306,7 +5031,7 @@ export function PrModalApp({
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [open]);
+  }, [open, isEmbed, onRestoreNative]);
 
   const stackPath = useMemo(() => {
     if (!detail?.number) return { items: [], branches: [] };
@@ -4341,10 +5066,15 @@ export function PrModalApp({
   if (!open) return null;
 
   const hit = activeSearchHit;
-  const fsCls = shellFullscreenClassName(shellFullscreen);
+  const fsCls = isEmbed ? '' : shellFullscreenClassName(shellFullscreen);
+  const presentCls = presentationClassName(presentation);
   const cls =
-    `${layoutClassName(layoutMode)} ${shellClassName(shellMode)} ${fsCls}${
-      shellResizing ? ' prp-modal--resizing' : ''
+    `${layoutClassName(layoutMode)} ${
+      isEmbed ? 'prp-shell--embed' : shellClassName(shellMode)
+    } ${fsCls}${
+      !isEmbed && shellResizing ? ' prp-modal--resizing' : ''
+    }${
+      !isEmbed && shellFullscreenHint ? ' prp-shell--fs-hint' : ''
     } ${animClass} ${theme.className}`.trim();
   const { viewportWidth: vwNow, viewportHeight: vhNow } = viewportSize();
   const appliedSheetWidth = clampSheetWidth(sheetWidth, { viewportWidth: vwNow });
@@ -4352,47 +5082,61 @@ export function PrModalApp({
     viewportWidth: vwNow,
     viewportHeight: vhNow,
   });
+  // Keep handles in fullscreen so users can drag back to a windowed shell.
+  // Embed fills GH main — no resize chrome.
   const showSheetResizer =
-    !shellFullscreen && shellMode === SHELL_SHEET && layoutMode !== LAYOUT_DIFF;
+    !isEmbed && shellMode === SHELL_SHEET && layoutMode !== LAYOUT_DIFF;
   const showModalResizer =
-    !shellFullscreen && shellMode === SHELL_MODAL && layoutMode !== LAYOUT_DIFF;
-  const shellSizeStyle: React.CSSProperties = shellFullscreen
+    !isEmbed && shellMode === SHELL_MODAL && layoutMode !== LAYOUT_DIFF;
+  const shellSizeStyle: React.CSSProperties = isEmbed
     ? ({
-        ['--prp-shell-w' as any]: '100vw',
-        ['--prp-shell-h' as any]: '100vh',
+        ['--prp-shell-w' as any]: '100%',
+        ['--prp-shell-h' as any]: '100%',
       } as React.CSSProperties)
-    : shellMode === SHELL_SHEET
+    : shellFullscreen
       ? ({
-          ['--prp-shell-w' as any]: `${appliedSheetWidth}px`,
+          ['--prp-shell-w' as any]: '100vw',
           ['--prp-shell-h' as any]: '100vh',
         } as React.CSSProperties)
-      : ({
-          ['--prp-shell-w' as any]: `${appliedModalSize.width}px`,
-          ['--prp-shell-h' as any]: `${appliedModalSize.height}px`,
-        } as React.CSSProperties);
+      : shellMode === SHELL_SHEET
+        ? ({
+            ['--prp-shell-w' as any]: `${appliedSheetWidth}px`,
+            ['--prp-shell-h' as any]: '100vh',
+          } as React.CSSProperties)
+        : ({
+            ['--prp-shell-w' as any]: `${appliedModalSize.width}px`,
+            ['--prp-shell-h' as any]: `${appliedModalSize.height}px`,
+          } as React.CSSProperties);
 
   return (
     <div
-      className={`prp-overlay ${shellClassName(shellMode)} ${fsCls} ${theme.className}${
-        closing ? ' prp-overlay--leaving' : ''
-      }`.trim()}
+      className={`prp-overlay ${
+        isEmbed ? 'prp-shell--embed' : shellClassName(shellMode)
+      } ${fsCls}${
+        !isEmbed && shellFullscreenHint ? ' prp-shell--fs-hint' : ''
+      } ${theme.className}${closing ? ' prp-overlay--leaving' : ''} ${presentCls}`.trim()}
       tabIndex={-1}
       data-color-mode={theme.mode}
+      data-presentation={isEmbed ? 'embed' : 'modal'}
       data-shell={shellMode}
       data-fullscreen={shellFullscreen ? '1' : '0'}
+      data-fs-hint={shellFullscreenHint ? '1' : '0'}
       data-layout={layoutMode === LAYOUT_DIFF ? 'diff' : 'conversation'}
       data-leaving={closing ? '1' : '0'}
     >
-      <div className="prp-backdrop" onClick={requestClose} />
+      {!isEmbed ? (
+        <div className="prp-backdrop" onClick={requestClose} />
+      ) : null}
       <div
         className={cls}
         ref={shellRef}
-        role="dialog"
-        aria-modal="true"
+        role={isEmbed ? 'region' : 'dialog'}
+        aria-modal={isEmbed ? undefined : 'true'}
         aria-label={detail ? `Pull request #${detail.number}` : 'Pull request'}
         data-color-mode={theme.mode}
-        data-shell={shellMode}
-        data-fullscreen={shellFullscreen ? '1' : '0'}
+        data-shell={isEmbed ? 'embed' : shellMode}
+        data-presentation={isEmbed ? 'embed' : 'modal'}
+        data-fullscreen={isEmbed ? '0' : shellFullscreen ? '1' : '0'}
         data-sheet-width={appliedSheetWidth}
         data-modal-width={appliedModalSize.width}
         data-modal-height={appliedModalSize.height}
@@ -4405,7 +5149,7 @@ export function PrModalApp({
             aria-orientation="vertical"
             aria-label="Resize side panel"
             aria-valuemin={SHEET_MIN_WIDTH}
-            aria-valuemax={SHEET_MAX_WIDTH}
+            aria-valuemax={vwNow || undefined}
             aria-valuenow={appliedSheetWidth}
             tabIndex={0}
             onPointerDown={onSheetResizeStart}
@@ -4417,17 +5161,25 @@ export function PrModalApp({
             role="separator"
             aria-label="Resize modal panel"
             aria-valuemin={MODAL_MIN_WIDTH}
-            aria-valuemax={MODAL_MAX_WIDTH}
+            aria-valuemax={vwNow || undefined}
             aria-orientation="horizontal"
             tabIndex={0}
             data-modal-min-h={MODAL_MIN_HEIGHT}
-            data-modal-max-h={MODAL_MAX_HEIGHT}
+            data-modal-max-h={vhNow || undefined}
             onPointerDown={onModalResizeStart}
           />
         ) : null}
+        <ActionToast
+          key={actionMsgSeq || 0}
+          message={actionMsg}
+          onDismiss={() => {
+            // Clear store after exit animation so the same message can re-fire
+            if (useModalStore.getState().actionMsg) setActionMsg('');
+          }}
+        />
         <Header
           detail={detail}
-          onClose={requestClose}
+          onClose={showCloseChrome ? requestClose : undefined}
           onToggleDiff={onToggleDiff}
           layoutMode={layoutMode}
           actionBusy={actionBusy}
@@ -4440,11 +5192,18 @@ export function PrModalApp({
           sectionLoading={isInitialLoad}
           shortcutMod={shortcutMod}
           shellMode={shellMode}
-          onToggleShell={onToggleShell}
+          onToggleShell={showShellToggleChrome ? onToggleShell : undefined}
           shellFullscreen={shellFullscreen}
-          onToggleFullscreen={onToggleShellFullscreen}
+          onToggleFullscreen={
+            showFullscreenChrome ? onToggleShellFullscreen : undefined
+          }
+          presentation={isEmbed ? 'embed' : 'modal'}
+          onRestoreNative={
+            showRestoreNativeChrome ? () => onRestoreNative?.() : undefined
+          }
           onSubscribe={onSubscribe}
           loadStage={loadStage}
+          onActionMsg={setActionMsg}
           onRefresh={
             typeof onRefresh === 'function'
               ? () =>
@@ -4480,8 +5239,10 @@ export function PrModalApp({
             }));
           }}
         />
+        {/* Conversation: full-width find bar under header.
+            Diff: search is inlined in DiffToolbar (replaces review filters). */}
         <SearchBar
-          open={searchOpen}
+          open={searchOpen && layoutMode !== LAYOUT_DIFF}
           query={searchQuery}
           hits={searchHits}
           hitIndex={searchHitIndex}
@@ -4510,6 +5271,7 @@ export function PrModalApp({
             aria-hidden={layoutMode !== LAYOUT_CENTERED}
           >
           <ConversationView
+            presentation={isEmbed ? 'embed' : 'modal'}
             detail={
               detail
                 ? {
@@ -4524,6 +5286,8 @@ export function PrModalApp({
                   }
                 : null
             }
+            mentionCandidates={mentionCandidates}
+            focusedConversationAnchor={conversationCommentFocus?.anchor || null}
             commentText={commentText}
             setCommentText={setCommentText}
             actionBusy={actionBusy}
@@ -4626,6 +5390,8 @@ export function PrModalApp({
             */}
             <FolderFileTree
               files={displayFiles}
+              /** Resolve-status-scoped only — not shrunk by ext/query multi-select */
+              extSourceFiles={reviewScopedFiles}
               tree={fileTree}
               expandedDirs={expandedDirs}
               onToggleDir={onToggleDir}
@@ -4635,6 +5401,10 @@ export function PrModalApp({
               onToggleFileCollapse={onToggleFileCollapse}
               fileQuery={fileQuery}
               onFileQuery={setFileQuery}
+              onSearchFocus={() => {
+                void ensureAllFiles();
+              }}
+              filesLoading={fileListLoading}
               selectedExts={fileExtFilter}
               onSelectedExts={setFileExtFilter}
               unreadOnly={fileUnreadOnly}
@@ -4687,7 +5457,10 @@ export function PrModalApp({
                 commits={detail.commits || []}
                 commitFilter={diffCommitFilter}
                 onCommitFilter={applyDiffCommitFilter}
-                commitLoading={diffCommitLoading}
+                onOpenCommitPicker={() => {
+                  void ensureAllCommits();
+                }}
+                commitLoading={diffCommitLoading || commitListLoading}
                 commitError={diffCommitError}
                 commitLabel={diffCommitLabel}
                 commitDisabled={!onFetchCompareFiles}
@@ -4702,6 +5475,21 @@ export function PrModalApp({
                 onLeaveReviewAction={onLeaveReviewAction}
                 actionBusy={actionBusy}
                 actionMsg={actionMsg}
+                searchOpen={searchOpen && layoutMode === LAYOUT_DIFF}
+                searchQuery={searchQuery}
+                searchHits={searchHits}
+                searchHitIndex={searchHitIndex}
+                searchInputRef={searchInputRef}
+                searchBusy={searchBusy}
+                showSearchLoadComments={showLoadComments}
+                onSearchLoadComments={onSearchLoadComments}
+                searchLoadCommentsBusy={Boolean(
+                  loadStage?.busy && loadStage?.phase === 'threads'
+                )}
+                onSearchChange={onSearchQueryCommit}
+                onSearchClose={onSearchClose}
+                onSearchNext={onSearchNext}
+                onSearchPrev={onSearchPrev}
               />
               <VirtualDiff
                 virtualRows={virtualRows}
@@ -4733,6 +5521,7 @@ export function PrModalApp({
                 onSelectionStart={onSelectionStart}
                 onSelectionExtend={onSelectionExtend}
                 onSelectionEnd={onSelectionEnd}
+                onFileComment={onFileHeaderComment}
                 onToggleCollapse={onToggleFileCollapse}
                 onExpandGap={onExpandDiffGap}
                 expandBusyKey={diffExpandBusyKey}
@@ -4776,30 +5565,42 @@ export function PrModalApp({
                         )?.magicLinks || [],
                 }}
                 onUploadFile={onUploadFile}
+                mentionCandidates={mentionCandidates}
                 isThreadCollapsed={isDiffCommentCollapsed}
                 onToggleThreadCollapse={onToggleThreadCollapse}
                 commentHeightOpts={commentHeightOpts}
+                selectionIsland={
+                  (showSelectionComposer || selectionIslandLeaving) &&
+                  lineSelection ? (
+                    <SelectionCommentBar
+                      selection={lineSelection}
+                      draft={selectionDraft}
+                      onDraft={setSelectionDraft}
+                      onSubmitImmediate={onSubmitSelectionCommentImmediate}
+                      onSubmitPending={onSubmitSelectionCommentPending}
+                      onCancel={() => dismissSelectionIsland()}
+                      actionBusy={actionBusy}
+                      leaving={selectionIslandLeaving}
+                      pendingCount={totalPendingCount}
+                      onUploadFile={onUploadFile}
+                      mentionCandidates={mentionCandidates}
+                      virtualRows={virtualRows}
+                      detail={detail}
+                      phase={selectionIslandPhase}
+                      onPhaseChange={setSelectionIslandPhase}
+                      onCopyFeedback={(msg: string) =>
+                        setActionMsg(String(msg || ''))
+                      }
+                      linkCtx={{
+                        owner: detail.owner,
+                        repo: detail.repo,
+                        magicLinks: detail.magicLinks || [],
+                      }}
+                    />
+                  ) : null
+                }
               />
-              {(showSelectionComposer || selectionIslandLeaving) && lineSelection ? (
-                <SelectionCommentBar
-                  selection={lineSelection}
-                  draft={selectionDraft}
-                  onDraft={setSelectionDraft}
-                  onSubmitImmediate={onSubmitSelectionCommentImmediate}
-                  onSubmitPending={onSubmitSelectionCommentPending}
-                  onCancel={() => dismissSelectionIsland()}
-                  actionBusy={actionBusy}
-                  listRef={listRef}
-                  leaving={selectionIslandLeaving}
-                  pendingCount={totalPendingCount}
-                  onUploadFile={onUploadFile}
-                  linkCtx={{
-                    owner: detail.owner,
-                    repo: detail.repo,
-                    magicLinks: detail.magicLinks || [],
-                  }}
-                />
-              ) : null}
+
             </div>
           </div>
           </div>

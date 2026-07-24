@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@common/Button';
-import { Badge } from '@common/Badge';
 import { Card } from '@common/Card';
 import { WysiwygComposer } from '@common/WysiwygComposer';
 import { MarkdownView } from '@common/MarkdownView';
@@ -30,27 +29,20 @@ import { languageFromPath } from '@lib/diff-rows';
 import { pendingReviewCount } from '@lib/pending-review';
 import { InlineThread } from '../diff/InlineThread';
 import { MarkdownView as Md } from '@common/MarkdownView';
+import { hasChecksData } from '../conversation/ChecksPanel';
+import { ChecksSummary } from '../conversation/ChecksSummary';
 
 export function DiffChrome({ detail }: any) {
   if (!detail) return null;
   const labels = detail.labels || [];
   const checks = detail.checks;
   const hasLabels = labels.length > 0;
-  const hasChecks = Boolean(checks?.state);
+  const hasChecks = hasChecksData(checks);
   if (!hasLabels && !hasChecks) return null;
   return (
     <div className="prp-diff-chrome">
       {hasChecks ? (
-        <span>
-          Checks:{' '}
-          <Badge
-            tone={
-              checks.state === 'success' ? 'ok' : checks.state === 'failure' ? 'danger' : 'warn'
-            }
-          >
-            {checks.state}
-          </Badge>
-        </span>
+        <ChecksSummary checks={checks} label="Checks" className="prp-diff-chrome__checks" />
       ) : null}
       {hasLabels ? (
         <div className="prp-diff-chrome__labels">

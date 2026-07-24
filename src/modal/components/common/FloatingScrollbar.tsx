@@ -8,11 +8,13 @@ import {
 type Props = {
   /** Element that actually scrolls (overflow auto/scroll). */
   scrollerRef: React.RefObject<HTMLElement | null>;
-  /** Recompute when virtual content height changes. */
+  /** Recompute when virtual content size changes. */
   contentKey?: string | number;
   className?: string;
   /** Idle hide delay (ms). Default FLOATING_SCROLLBAR_IDLE_MS. */
   idleMs?: number;
+  /** Vertical (default) or horizontal overlay thumb. */
+  orientation?: 'vertical' | 'horizontal';
 };
 
 /**
@@ -25,7 +27,9 @@ export function FloatingScrollbar({
   contentKey,
   className = '',
   idleMs = FLOATING_SCROLLBAR_IDLE_MS,
+  orientation = 'vertical',
 }: Props) {
+  const horizontal = orientation === 'horizontal';
   const trackRef = useRef<HTMLDivElement | null>(null);
   const [metrics, setMetrics] = useState(() => floatingScrollbarMetrics(0, 0, 0));
   const [active, setActive] = useState(false);
@@ -33,8 +37,8 @@ export function FloatingScrollbar({
   const dragging = useRef(false);
   const dragRef = useRef<{
     pointerId: number;
-    startY: number;
-    startScrollTop: number;
+    startPos: number;
+    startScroll: number;
   } | null>(null);
 
   const clearHideTimer = useCallback(() => {
@@ -46,7 +50,6 @@ export function FloatingScrollbar({
 
   const scheduleHide = useCallback(() => {
     clearHideTimer();
-    // Keep visible while the user is dragging the thumb
     if (dragging.current) return;
     hideTimer.current = setTimeout(() => {
       setActive(false);
@@ -54,7 +57,6 @@ export function FloatingScrollbar({
     }, idleMs);
   }, [clearHideTimer, idleMs]);
 
-  /** Show bar and restart idle timer (scroll / track click). */
   const markMoving = useCallback(() => {
     setActive(true);
     scheduleHide();
@@ -66,10 +68,16 @@ export function FloatingScrollbar({
       setMetrics(floatingScrollbarMetrics(0, 0, 0));
       return;
     }
-    setMetrics(
-      floatingScrollbarMetrics(el.scrollTop, el.clientHeight, el.scrollHeight)
-    );
-  }, [scrollerRef]);
+    if (horizontal) {
+      setMetrics(
+        floatingScrollbarMetrics(el.scrollLeft, el.clientWidth, el.scrollWidth)
+      );
+    } else {
+      setMetrics(
+        floatingScrollbarMetrics(el.scrollTop, el.clientHeight, el.scrollHeight)
+      );
+    }
+  }, [scrollerRef, horizontal]);
 
   useLayoutEffect(() => {
     recompute();
@@ -87,7 +95,6 @@ export function FloatingScrollbar({
 
     let ro: ResizeObserver | null = null;
     if (typeof ResizeObserver === 'function') {
-      // Size only — do not flash (virtual list remeasures constantly)
       ro = new ResizeObserver(() => recompute());
       ro.observe(el);
     }
@@ -108,7 +115,7 @@ export function FloatingScrollbar({
       cancelAnimationFrame(raf);
       clearHideTimer();
     };
-  }, [scrollerRef, recompute, markMoving, clearHideTimer, contentKey]);
+  }, [scrollerRef, recompute, markMoving, clearHideTimer, contentKey, horizontal]);
 
   const onThumbPointerDown = (e: React.PointerEvent) => {
     const el = scrollerRef.current;
@@ -121,8 +128,8 @@ export function FloatingScrollbar({
     setActive(true);
     dragRef.current = {
       pointerId: e.pointerId,
-      startY: e.clientY,
-      startScrollTop: el.scrollTop,
+      startPos: horizontal ? e.clientX : e.clientY,
+      startScroll: horizontal ? el.scrollLeft : el.scrollTop,
     };
   };
 
@@ -130,15 +137,16 @@ export function FloatingScrollbar({
     const drag = dragRef.current;
     const el = scrollerRef.current;
     if (!drag || !el || drag.pointerId !== e.pointerId) return;
-    const ch = el.clientHeight;
-    const sh = el.scrollHeight;
-    const maxScroll = sh - ch;
+    const client = horizontal ? el.clientWidth : el.clientHeight;
+    const scroll = horizontal ? el.scrollWidth : el.scrollHeight;
+    const maxScroll = scroll - client;
     if (maxScroll <= 0) return;
-    const maxTop = Math.max(1, ch - metrics.thumbHeight);
-    const dy = e.clientY - drag.startY;
-    const next = drag.startScrollTop + (dy / maxTop) * maxScroll;
-    el.scrollTop = Math.max(0, Math.min(maxScroll, next));
-    // scroll handler also markMoving; keep active while drag continues
+    const maxOffset = Math.max(1, client - metrics.thumbSize);
+    const d = (horizontal ? e.clientX : e.clientY) - drag.startPos;
+    const next = drag.startScroll + (d / maxOffset) * maxScroll;
+    const clamped = Math.max(0, Math.min(maxScroll, next));
+    if (horizontal) el.scrollLeft = clamped;
+    else el.scrollTop = clamped;
     setActive(true);
   };
 
@@ -146,7 +154,6 @@ export function FloatingScrollbar({
     if (dragRef.current?.pointerId !== e.pointerId) return;
     dragRef.current = null;
     dragging.current = false;
-    // Idle clock starts when the thumb is released
     markMoving();
   };
 
@@ -156,13 +163,15 @@ export function FloatingScrollbar({
     if (!el || !track || !metrics.needed) return;
     if ((e.target as HTMLElement).closest('.prp-float-sb__thumb')) return;
     const rect = track.getBoundingClientRect();
-    const y = e.clientY - rect.top;
-    el.scrollTop = scrollTopFromThumbDrag(
-      y,
-      metrics.thumbHeight,
-      el.clientHeight,
-      el.scrollHeight
+    const pos = horizontal ? e.clientX - rect.left : e.clientY - rect.top;
+    const next = scrollTopFromThumbDrag(
+      pos,
+      metrics.thumbSize,
+      horizontal ? el.clientWidth : el.clientHeight,
+      horizontal ? el.scrollWidth : el.scrollHeight
     );
+    if (horizontal) el.scrollLeft = next;
+    else el.scrollTop = next;
     markMoving();
   };
 
@@ -171,18 +180,26 @@ export function FloatingScrollbar({
   return (
     <div
       ref={trackRef}
-      className={`prp-float-sb${active ? ' prp-float-sb--active' : ''}${
-        className ? ` ${className}` : ''
-      }`}
+      className={`prp-float-sb${horizontal ? ' prp-float-sb--horizontal' : ''}${
+        active ? ' prp-float-sb--active' : ''
+      }${className ? ` ${className}` : ''}`}
       aria-hidden="true"
       onPointerDown={onTrackPointerDown}
     >
       <div
         className="prp-float-sb__thumb"
-        style={{
-          height: metrics.thumbHeight,
-          transform: `translateY(${metrics.thumbTop}px)`,
-        }}
+        style={
+          horizontal
+            ? {
+                width: metrics.thumbSize,
+                height: '100%',
+                transform: `translateX(${metrics.thumbOffset}px)`,
+              }
+            : {
+                height: metrics.thumbSize,
+                transform: `translateY(${metrics.thumbOffset}px)`,
+              }
+        }
         onPointerDown={onThumbPointerDown}
         onPointerMove={onThumbPointerMove}
         onPointerUp={onThumbPointerUp}

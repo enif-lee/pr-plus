@@ -32,6 +32,8 @@ export interface ModalUiState {
   commentText: string;
   actionBusy: boolean;
   actionMsg: string;
+  /** Bumps on each non-empty setActionMsg so identical toasts re-fire. */
+  actionMsgSeq: number;
   collapsedFiles: Set<string>;
   expandedDirs: Set<string>;
   commentIndex: number;
@@ -109,6 +111,7 @@ export const useModalStore = create<ModalUiState>((set, get) => ({
   commentText: '',
   actionBusy: false,
   actionMsg: '',
+  actionMsgSeq: 0,
   collapsedFiles: new Set(),
   expandedDirs: new Set(),
   commentIndex: -1,
@@ -153,7 +156,12 @@ export const useModalStore = create<ModalUiState>((set, get) => ({
   setAnimClass: (c) => set({ animClass: c }),
   setCommentText: (t) => set({ commentText: t }),
   setActionBusy: (v) => set({ actionBusy: v }),
-  setActionMsg: (m) => set({ actionMsg: m }),
+  setActionMsg: (m) =>
+    set((s) => {
+      const msg = m == null ? '' : String(m);
+      if (!msg) return { actionMsg: '' };
+      return { actionMsg: msg, actionMsgSeq: (s.actionMsgSeq || 0) + 1 };
+    }),
   setCollapsedFiles: (fn) =>
     set((s) => ({
       collapsedFiles: typeof fn === 'function' ? (fn as any)(s.collapsedFiles) : (fn as Set<string>),

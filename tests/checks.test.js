@@ -10,6 +10,10 @@ const {
   formatCheckSummary,
   buildMergeBoxCheckGroups,
   mergeBoxChecksHeadline,
+  summarizeCheckCounts,
+  formatChecksCountLabel,
+  listCheckNamesByOutcome,
+  formatCheckGroupTip,
 } = require('../src/modal/pure/checks.js');
 
 // Statuses: same context → keep latest updatedAt
@@ -225,4 +229,111 @@ assert.ok(
   assert.equal(mergeBoxChecksHeadline('success', 3), 'All checks have passed');
 }
 
+// summarizeCheckCounts: success-only
+{
+  const s = summarizeCheckCounts({
+    checkRuns: [
+      { id: 1, name: 'a', status: 'completed', conclusion: 'success' },
+      { id: 2, name: 'b', status: 'completed', conclusion: 'success' },
+      { id: 3, name: 'c', status: 'completed', conclusion: 'skipped' },
+    ],
+    statuses: [],
+  });
+  assert.equal(s.total, 3);
+  assert.equal(s.success, 2);
+  assert.equal(s.failure, 0);
+  assert.equal(s.pending, 0);
+  assert.equal(s.skipped, 1);
+  assert.equal(s.state, 'success');
+  const label = formatChecksCountLabel(s);
+  assert.match(label, /3 checks/);
+  assert.match(label, /2 succeeded/);
+  assert.match(label, /0 failed/);
+  assert.match(label, /0 in progress/);
+  assert.match(label, /1 skipped/);
+}
+
+// summarizeCheckCounts: mixed fail + pending
+{
+  const s = summarizeCheckCounts({
+    statuses: [{ context: 'deploy', state: 'pending' }],
+    checkRuns: [
+      { id: 1, name: 'build', status: 'completed', conclusion: 'failure' },
+      { id: 2, name: 'lint', status: 'in_progress', conclusion: '' },
+      { id: 3, name: 'unit', status: 'completed', conclusion: 'success' },
+    ],
+  });
+  assert.equal(s.total, 4);
+  assert.equal(s.success, 1);
+  assert.equal(s.failure, 1);
+  assert.equal(s.pending, 2);
+  assert.equal(s.state, 'failure');
+  const label = formatChecksCountLabel(s);
+  assert.match(label, /4 checks/);
+  assert.match(label, /1 succeeded/);
+  assert.match(label, /1 failed/);
+  assert.match(label, /2 in progress/);
+}
+
+// summarizeCheckCounts: pending-only
+{
+  const s = summarizeCheckCounts({
+    statuses: [{ context: 'ci', state: 'pending' }],
+    checkRuns: [{ id: 9, name: 'job', status: 'queued', conclusion: null }],
+  });
+  assert.equal(s.total, 2);
+  assert.equal(s.success, 0);
+  assert.equal(s.failure, 0);
+  assert.equal(s.pending, 2);
+  assert.equal(s.state, 'pending');
+}
+
+// listCheckNamesByOutcome + group tip for stacked icons
+{
+  const by = listCheckNamesByOutcome({
+    statuses: [{ context: 'deploy/prod', state: 'pending' }],
+    checkRuns: [
+      { id: 1, name: 'CI / test', status: 'completed', conclusion: 'failure' },
+      { id: 2, name: 'lint', status: 'completed', conclusion: 'success' },
+      { id: 3, name: 'docs', status: 'completed', conclusion: 'skipped' },
+    ],
+  });
+  assert.deepEqual(by.failure, ['CI / test']);
+  assert.deepEqual(by.pending, ['deploy/prod']);
+  assert.deepEqual(by.success, ['lint']);
+  assert.deepEqual(by.skipped, ['docs']);
+  const tip = formatCheckGroupTip('failure', by.failure);
+  assert.match(tip, /1 failed/);
+  assert.match(tip, /CI \/ test/);
+}
+
+// UI wiring: details as icon, stacked group icons (static source)
+{
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const panel = fs.readFileSync(
+    path.join(__dirname, '../src/modal/views/conversation/ChecksPanel.tsx'),
+    'utf8'
+  );
+  assert.ok(!/>\s*details\s*</.test(panel), 'ChecksPanel must not use details text link');
+  assert.ok(panel.includes('IconLinkExternal'), 'ChecksPanel uses external-link icon');
+  assert.ok(panel.includes('ChecksSummary'), 'ChecksPanel uses compact ChecksSummary');
+  const summaryUi = fs.readFileSync(
+    path.join(__dirname, '../src/modal/views/conversation/ChecksSummary.tsx'),
+    'utf8'
+  );
+  assert.ok(summaryUi.includes('TipPopover'), 'ChecksSummary has hover popover');
+  assert.ok(summaryUi.includes('prp-checks-summary-stack'), 'stacked outcome icons');
+  assert.ok(summaryUi.includes('listCheckNamesByOutcome'), 'names per outcome for tips');
+  assert.ok(summaryUi.includes('formatCheckGroupTip'), 'group tip lists check names');
+  assert.ok(summaryUi.includes('prp-checks-summary-icon--spin'), 'pending animates');
+  const header = fs.readFileSync(
+    path.join(__dirname, '../src/modal/views/chrome/Header.tsx'),
+    'utf8'
+  );
+  assert.ok(!/checks:\s*\{/.test(header), 'Header must not print checks: {state}');
+  assert.ok(header.includes('ChecksSummary'), 'Header uses ChecksSummary');
+}
+
 console.log('checks.test.js: all assertions passed');
+console.log('checks-summary-counts=true');

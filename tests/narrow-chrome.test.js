@@ -23,31 +23,91 @@ const tree = read('src/modal/views/diff/FolderFileTree.tsx');
 const toolbar = read('src/modal/views/chrome/DiffToolbar.tsx');
 const commitFilterUi = read('src/modal/views/diff/DiffCommitFilter.tsx');
 
-// --- (a) overflow menu — based on panel/header width, not window ---
-assert.ok(header.includes('prp-header__actions-more'), 'overflow more container');
-assert.ok(header.includes('prp-header__more-btn') || header.includes('⋯'), '⋯ button');
-assert.ok(header.includes('prp-header__more-menu'), 'overflow menu');
-assert.ok(header.includes('prp-header__actions-inline'), 'wide inline actions');
-assert.ok(css.includes('prp-header__actions-more'));
+// --- (a) no width-based chrome collapse — title shrinks, actions stay inline ---
+assert.ok(header.includes('prp-header__actions-inline'), 'inline actions always present');
 assert.ok(
   css.includes('container-type: inline-size') || css.includes('container-type:inline-size'),
-  'header is a size container (panel width, not window)'
+  'panel is a size container (cqi for title scale)'
 );
 assert.ok(
-  /@container\s+prp-header\s*\(\s*max-width:\s*760px\s*\)/.test(css) ||
-    css.includes('@container prp-header (max-width: 760px)'),
-  'compact actions use ~760px container query (wrap point ~700–800)'
+  css.includes('container-name: prp-panel') || css.includes('container-name:prp-panel'),
+  'size container is named prp-panel on .prp-modal'
+);
+// No actions → ⋯ collapse by width
+assert.ok(
+  !/@container\s+prp-panel\s*\(\s*max-width:\s*760px\s*\)/.test(css) &&
+    !css.includes('@container prp-panel (max-width: 760px)'),
+  'no 760px actions-overflow container query'
+);
+assert.ok(
+  !/@container\s+prp-panel\s*\(\s*max-width:\s*960px\s*\)/.test(css) &&
+    !css.includes('@container prp-panel (max-width: 960px)'),
+  'no 960px dense-header container query'
+);
+assert.ok(
+  /actions-more[\s\S]{0,80}display:\s*none\s*!important/.test(css) ||
+    css.includes('.prp-header__actions-more') && css.includes('display: none !important'),
+  'overflow ⋯ menu stays hidden'
+);
+// Title fluid shrink + ellipsis (layout pressure → title, not icons)
+assert.ok(
+  /prp-header__title[\s\S]{0,200}clamp\(/.test(css),
+  'title uses clamp() fluid font-size'
+);
+assert.ok(
+  /prp-header__title[\s\S]{0,200}text-overflow:\s*ellipsis/.test(css),
+  'title ellipsizes when row is tight'
+);
+assert.ok(
+  !header.includes('headerWidthPx') && !header.includes('ResizeObserver'),
+  'Header does not measure width for densify'
+);
+assert.ok(header.includes('prp-header__branch-meta'), 'branch meta cluster');
+assert.ok(
+  !header.includes('prp-header__row--secondary') ||
+    css.includes('.prp-header__row--secondary'),
+  'secondary row no longer required for layout (clusters are direct children)'
 );
 assert.ok(!/@media\s*\(\s*max-width:\s*1100px\s*\)/.test(css), 'no window 1100px media for actions');
 const {
   HEADER_COMPACT_MAX_PX,
+  HEADER_DENSE_MAX_PX,
   headerActionsCompact,
+  headerDenseLayout,
+  headerReviewCompact,
 } = require('../src/modal/lib/header-layout.ts');
-assert.equal(HEADER_COMPACT_MAX_PX, 760);
+assert.equal(HEADER_COMPACT_MAX_PX, 0, 'actions overflow disabled');
+assert.equal(HEADER_DENSE_MAX_PX, 0, 'width densify disabled');
 assert.equal(headerActionsCompact(900), false);
-assert.equal(headerActionsCompact(760), true);
-assert.equal(headerActionsCompact(700), true);
-assert.equal(headerActionsCompact(0), false);
+assert.equal(headerActionsCompact(760), false);
+assert.equal(headerActionsCompact(500), false);
+assert.equal(headerDenseLayout(800), false);
+// Review compact: Diff only — never by panel width
+assert.equal(
+  headerReviewCompact({ layoutMode: 'diff', widthPx: 1400 }),
+  true,
+  'Diff layout always uses review compact header'
+);
+assert.equal(
+  headerReviewCompact({ layoutMode: 'conversation', widthPx: 1400 }),
+  false,
+  'wide conversation keeps two-row header'
+);
+assert.equal(
+  headerReviewCompact({ layoutMode: 'conversation', widthPx: 500 }),
+  false,
+  'narrow conversation also keeps two-row header (no width densify)'
+);
+assert.ok(
+  header.includes('prp-header--review-compact') ||
+    header.includes('data-review-compact'),
+  'Header applies review-compact class/attr for Diff'
+);
+assert.ok(
+  css.includes('prp-header--review-compact') ||
+    css.includes("data-review-compact='1'"),
+  'CSS targets review-compact header'
+);
 
 // --- (b) no collapsed file-tree expand chrome (nav stays mounted for anim) ---
 assert.ok(
@@ -59,10 +119,22 @@ assert.ok(!tree.includes('prp-filetree__rail-toggle'), 'no rail expand toggle');
 assert.ok(!tree.includes('Expand files navigator'), 'no expand affordance in tree column');
 assert.ok(toolbar.includes('Files') || toolbar.includes('onToggleFileNav'), 'toolbar Files remains');
 
-// --- (c) comment nav button group ---
-assert.ok(toolbar.includes('prp-btn-group'), 'btn group class');
-assert.ok(css.includes('prp-btn-group'), 'btn group CSS');
-assert.ok(toolbar.includes('Previous comment') || toolbar.includes('onPrevComment'));
+// --- (c) thread / finder share StepNav ---
+assert.ok(
+  toolbar.includes('StepNav') || toolbar.includes('prp-step-nav'),
+  'DiffToolbar uses shared StepNav for thread navigation'
+);
+assert.ok(css.includes('prp-step-nav'), 'StepNav CSS');
+assert.ok(
+  css.includes('.prp-step-nav__btn') && /width:\s*28px/.test(css),
+  'prev/next share equal fixed width'
+);
+assert.ok(toolbar.includes('onPrevComment'));
+const searchBar = read('src/modal/views/chrome/SearchBar.tsx');
+assert.ok(
+  searchBar.includes('StepNav') || searchBar.includes('prp-step-nav'),
+  'SearchBar finder nav uses shared StepNav'
+);
 
 // --- (d) multi-checkbox commit → all/single/range ---
 const commits = [
@@ -108,7 +180,12 @@ assert.ok(
   'multi Apply not disabled when selection empty (needed for all-commits restore)'
 );
 assert.ok(
-  /empty\s*=\s*all/i.test(toolbar) || /empty\s*=\s*all/i.test(commitFilterUi),
+  /empty\s*=\s*all/i.test(toolbar) ||
+    /empty\s*=\s*all/i.test(commitFilterUi) ||
+    /emptyLabel/i.test(toolbar) ||
+    /emptyLabel/i.test(commitFilterUi) ||
+    /all commits/i.test(toolbar) ||
+    /all commits/i.test(commitFilterUi),
   'UI hints empty selection = all commits'
 );
 assert.ok(css.includes('max-width: 220px') || css.includes('max-width:220px'), 'commit trigger max-width');
@@ -152,7 +229,13 @@ assert.ok(
 // Bundle
 const bundle = read('src/modal/dist/pr-modal.bundle.js');
 assert.ok(bundle.includes('prp-header__more-btn') || bundle.includes('More actions'));
-assert.ok(bundle.includes('prp-btn-group') || bundle.includes('btn-group'));
+assert.ok(
+  bundle.includes('prp-btn-group') ||
+    bundle.includes('btn-group') ||
+    bundle.includes('prp-step-nav') ||
+    bundle.includes('StepNav'),
+  'thread/finder step nav in bundle'
+);
 assert.ok(bundle.includes('selectionToDiffCommitFilter') || bundle.includes('endSha'));
 
 console.log('narrow-chrome.test.js: all assertions passed');

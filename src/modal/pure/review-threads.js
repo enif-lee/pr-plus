@@ -1,5 +1,25 @@
 /* sw-iife */
 (function () {
+
+function githubRestUrl(path) {
+  try {
+    if (globalThis.PRGithubEndpoints && typeof globalThis.PRGithubEndpoints.githubRestUrl === 'function') {
+      return globalThis.PRGithubEndpoints.githubRestUrl(path);
+    }
+  } catch (_) {}
+  const p = String(path || '');
+  return 'https://api.github.com' + (p.startsWith('/') ? p : '/' + p);
+}
+function githubGraphqlUrl() {
+  try {
+    if (globalThis.PRGithubEndpoints && typeof globalThis.PRGithubEndpoints.githubGraphqlUrl === 'function') {
+      return globalThis.PRGithubEndpoints.githubGraphqlUrl();
+    }
+  } catch (_) {}
+  return 'https://api.github.com/graphql';
+}
+
+
   /**
    * Pure review-thread grouping, counts, resolve/reply request builders.
    */
@@ -239,7 +259,7 @@
   function buildReplyReviewThreadGraphql(threadNodeId, body) {
     return {
       method: 'POST',
-      url: 'https://api.github.com/graphql',
+      url: githubGraphqlUrl(),
       body: {
         query: `mutation($id:ID!,$body:String!){
   addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$id,body:$body}){
@@ -263,7 +283,7 @@
     const text = String(body || '').trim();
     return {
       method: 'POST',
-      url: `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/comments/${parentId ?? commentId}/replies`,
+      url: githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/comments/${parentId ?? commentId}/replies`),
       body: { body: text },
     };
   }
@@ -279,7 +299,7 @@
       : `mutation($id:ID!){ unresolveReviewThread(input:{threadId:$id}){ thread { id isResolved } } }`;
     return {
       method: 'POST',
-      url: 'https://api.github.com/graphql',
+      url: githubGraphqlUrl(),
       body: {
         query: mutation,
         variables: { id: threadNodeId },

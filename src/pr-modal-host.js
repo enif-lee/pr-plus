@@ -8,13 +8,25 @@
 (function initPrModalHost() {
   const HOST_ID = 'prp-modal-host';
   let reactRoot = null;
+  /** DOM node the current reactRoot is bound to (soft-nav may replace it). */
+  let reactRootHost = null;
   /** When false (no PAT), click intercept is idle — native GitHub navigation works. */
   let hostEnabled = false;
+  /** Soft-nav poll / listeners for PR page embed */
+  let embedWatchInstalled = false;
+  let lastEmbedPath = null;
   /**
    * Monotonic generation for detail fetches. Parallel soft-refreshes after meta
    * writes used to complete out of order and resurrect stale assignees/labels.
+   * Also bumps when the sheet closes so late responses are ignored.
    */
   let detailFetchGen = 0;
+  /**
+   * AbortController for the current open-session network work.
+   * Aborted on closeModal / new open so SW cancels in-flight GitHub fetches.
+   * @type {AbortController|null}
+   */
+  let openFetchAbort = null;
   const DEFAULT_PREFS = {
     fastReview: true,
     reverseComments: true,
@@ -35,12 +47,414 @@
     routePage: null,
     /** @type {string|null} */
     routePosition: null,
+    /** GH /changes/{sha} or range start */
+    routeCommitSha: null,
+    /** GH /changes/{a}..{b} end */
+    routeCommitEndSha: null,
+    routeFilePath: null,
+    routeFileKey: null,
+    routeStartLine: null,
+    routeEndLine: null,
+    routeSide: null,
     /**
      * Progressive load UI: { busy: boolean, label: string|null, phase: string|null }
      * Shown in the header diff-stat badge during loads.
      */
     loadStage: null,
+    /**
+     * Presentation: 'modal' (overlay from pulls list) | 'embed' (in-page under GH header).
+     * @type {'modal'|'embed'}
+     */
+    presentation: 'modal',
   };
+
+  function pageEmbedApi() {
+    return globalThis.PRModalPageEmbed || null;
+  }
+
+  function githubRouteApi() {
+    return globalThis.PRModalGithubPrRoute || null;
+  }
+
+  function isEmbedPresentation(value) {
+    const api = pageEmbedApi();
+    if (api?.isEmbedPresentation) return api.isEmbedPresentation(value);
+    return String(value || '').toLowerCase() === 'embed';
+  }
+
+  function parsePrPagePath(pathname) {
+    const api = pageEmbedApi();
+    if (typeof api?.parsePrPagePath === 'function') {
+      return api.parsePrPagePath(pathname);
+    }
+    // Fallback if pure module missing (files|changes|sha|a..b)
+    const path = String(pathname || '')
+      .split('?')[0]
+      .split('#')[0];
+    const m = path.match(
+      /^\/([^/]+)\/([^/]+)\/pull\/(\d+)(?:\/(files|changes)(?:\/([^/]+))?)?\/?$/i
+    );
+    if (!m) return null;
+    const tab = String(m[4] || '')
+      .trim()
+      .toLowerCase();
+    if (tab && tab !== 'files' && tab !== 'changes') return null;
+    const rest = String(m[5] || '').trim();
+    let commitSha = null;
+    let commitEndSha = null;
+    if (rest) {
+      const range = rest.match(/^([0-9a-f]{7,40})\.\.([0-9a-f]{7,40})$/i);
+      if (range) {
+        commitSha = range[1].toLowerCase();
+        commitEndSha = range[2].toLowerCase();
+      } else if (/^[0-9a-f]{7,40}$/i.test(rest)) {
+        commitSha = rest.toLowerCase();
+      }
+    }
+    return {
+      owner: m[1],
+      repo: m[2],
+      number: Number(m[3]),
+      page: tab === 'files' || tab === 'changes' ? 'diff' : 'conversation',
+      tab: tab || 'conversation',
+      commitSha,
+      commitEndSha,
+    };
+  }
+
+  /** Path + hash for embed soft-nav identity (commit/range + #diff-). */
+  function embedLocationKey() {
+    if (typeof location === 'undefined') return '';
+    return `${location.pathname || ''}${location.hash || ''}`;
+  }
+
+  /**
+   * Parse full GH PR location (path + #diff-) when github route API available.
+   */
+  function parseGithubLocation() {
+    const gh = githubRouteApi();
+    if (typeof gh?.parseGithubPrLocation === 'function' && typeof location !== 'undefined') {
+      return gh.parseGithubPrLocation({
+        pathname: location.pathname,
+        hash: location.hash,
+      });
+    }
+    const pathTarget = parsePrPagePath(
+      typeof location !== 'undefined' ? location.pathname : ''
+    );
+    if (!pathTarget) return null;
+    return pathTarget;
+  }
+
+  /**
+   * Apply path/hash route fields onto current. Always assign selection + commit
+   * fields (null when absent) so soft-nav to /pull/N or /changes without #diff-
+   * clears stale fileKey/startLine from a prior deep link.
+   */
+  function applyRouteFieldsFromTarget(target) {
+    if (!target) return;
+    if (target.page === 'diff' || target.page === 'conversation') {
+      current.routePage = target.page;
+    }
+    current.routeCommitSha = target.commitSha || null;
+    current.routeCommitEndSha = target.commitEndSha || null;
+    current.routeFilePath = target.filePath || null;
+    current.routeFileKey = target.fileKey || null;
+    current.routeStartLine =
+      target.startLine != null && Number.isFinite(Number(target.startLine))
+        ? Number(target.startLine)
+        : null;
+    current.routeEndLine =
+      target.endLine != null && Number.isFinite(Number(target.endLine))
+        ? Number(target.endLine)
+        : null;
+    current.routeSide = target.side || null;
+  }
+
+  function embedHostId() {
+    return pageEmbedApi()?.PAGE_EMBED_HOST_ID || 'prp-page-embed';
+  }
+
+  function embedActiveClass() {
+    return pageEmbedApi()?.PAGE_EMBED_ACTIVE_CLASS || 'prp-embed-active';
+  }
+
+  /** Resilient selectors for GitHub main content under the global header. */
+  function findGithubMainRegion(doc = document) {
+    const selectors = [
+      '.application-main',
+      'main#js-repo-pjax-container',
+      '#js-repo-pjax-container',
+      '[data-turbo-body] main',
+      'main[data-pjax-container]',
+      'main',
+    ];
+    for (const sel of selectors) {
+      try {
+        const el = doc.querySelector(sel);
+        if (el) return el;
+      } catch {
+        /* ignore */
+      }
+    }
+    return null;
+  }
+
+  function hideNativeMainChildren(main, embedEl) {
+    if (!main) return;
+    for (const child of [...main.children]) {
+      if (child === embedEl) continue;
+      if (child.getAttribute('data-prp-native-hidden') === '1') continue;
+      child.setAttribute('data-prp-native-hidden', '1');
+      child.style.setProperty('display', 'none', 'important');
+    }
+    main.classList.add('prp-embed-main');
+  }
+
+  function hideGithubFooter() {
+    const api = pageEmbedApi();
+    if (typeof api?.applyFooterHide === 'function') {
+      try {
+        return api.applyFooterHide(document);
+      } catch {
+        /* ignore */
+      }
+    }
+    return 0;
+  }
+
+  function restoreGithubFooter() {
+    const api = pageEmbedApi();
+    if (typeof api?.restoreFooters === 'function') {
+      try {
+        return api.restoreFooters(document);
+      } catch {
+        /* ignore */
+      }
+    }
+    // Fallback if pure module missing
+    try {
+      document
+        .querySelectorAll('[data-prp-footer-hidden="1"]')
+        .forEach((el) => {
+          el.removeAttribute('data-prp-footer-hidden');
+          el.style?.removeProperty?.('display');
+        });
+    } catch {
+      /* ignore */
+    }
+    return 0;
+  }
+
+  function restoreNativeMain() {
+    try {
+      document.documentElement.classList.remove(embedActiveClass());
+      document.body?.classList?.remove(embedActiveClass());
+    } catch {
+      /* ignore */
+    }
+    try {
+      document.querySelectorAll('[data-prp-native-hidden="1"]').forEach((el) => {
+        el.removeAttribute('data-prp-native-hidden');
+        el.style.removeProperty('display');
+      });
+      document.querySelectorAll('.prp-embed-main').forEach((el) => {
+        el.classList.remove('prp-embed-main');
+      });
+    } catch {
+      /* ignore */
+    }
+    restoreGithubFooter();
+    try {
+      const host = document.getElementById(embedHostId());
+      if (host) host.remove();
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /**
+   * Full-window embed host.
+   * Mount on document.body (NOT inside .application-main): GH ancestors often
+   * use transform/filter which make position:fixed relative to a zero-height
+   * box and the panel disappears. Still hide native main + footer.
+   */
+  function ensureEmbedHost() {
+    void ensureAssets();
+    const id = embedHostId();
+    const mountParent = document.body || document.documentElement;
+    let host = document.getElementById(id);
+    if (!host) {
+      host = document.createElement('div');
+      host.id = id;
+      host.className = 'prp-page-embed';
+      host.setAttribute('data-prp-embed', '1');
+      mountParent.appendChild(host);
+    } else if (host.parentElement !== mountParent) {
+      // Soft-nav / old code may have left host under main — reparent to body
+      try {
+        mountParent.appendChild(host);
+      } catch {
+        /* ignore */
+      }
+    }
+    stampHostCssReady(host);
+    const main = findGithubMainRegion();
+    if (main) hideNativeMainChildren(main, host);
+    document.documentElement.classList.add(embedActiveClass());
+    try {
+      document.body?.classList?.add(embedActiveClass());
+    } catch {
+      /* ignore */
+    }
+    hideGithubFooter();
+    return host;
+  }
+
+  /** Tear down embed and show original GitHub PR UI (same tab). */
+  function restoreNativeView() {
+    if (!isEmbedPresentation(current.presentation) && !document.getElementById(embedHostId())) {
+      return { ok: false, reason: 'not-embed' };
+    }
+    closeModal();
+    // Native GH PR chrome is visible again — offer pr+ re-entry toggle
+    try {
+      ensureGithubPrToggle();
+    } catch {
+      /* ignore */
+    }
+    return { ok: true };
+  }
+
+  const GH_PR_TOGGLE_ID = 'prp-gh-open-toggle';
+
+  /**
+   * Find a mount point next to the native GitHub PR header actions / title row.
+   */
+  function findGithubPrHeaderMount(doc = document) {
+    const selectors = [
+      '.gh-header-actions',
+      '.gh-header .gh-header-actions',
+      '[data-testid="pull-request-header"] .gh-header-actions',
+      '.js-pull-header-details .gh-header-actions',
+      // React PR header action clusters
+      '[data-component="PH_Actions"]',
+      '.gh-header-meta',
+      '.gh-header-show .gh-header-actions',
+      // Fallback: conversation tab nav row
+      'nav.js-repo-nav, nav[aria-label="Pull request tabs"]',
+      '.UnderlineNav-body',
+    ];
+    for (const sel of selectors) {
+      try {
+        const el = doc.querySelector(sel);
+        if (el) return el;
+      } catch {
+        /* ignore */
+      }
+    }
+    // Last resort: PR title heading parent
+    try {
+      const h1 =
+        doc.querySelector('.js-issue-title') ||
+        doc.querySelector('h1.gh-header-title') ||
+        doc.querySelector('[data-testid="issue-title"]');
+      if (h1?.parentElement) return h1.parentElement;
+    } catch {
+      /* ignore */
+    }
+    return null;
+  }
+
+  function removeGithubPrToggle() {
+    try {
+      document.getElementById(GH_PR_TOGGLE_ID)?.remove();
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /**
+   * On native GH PR pages (when pr+ embed is off), show a toggle next to the
+   * PR header to open the pr+ in-page view.
+   */
+  function ensureGithubPrToggle() {
+    if (!hostEnabled) {
+      removeGithubPrToggle();
+      return { ok: false, reason: 'disabled' };
+    }
+    const path =
+      typeof location !== 'undefined' ? location.pathname : '';
+    const target = parsePrPagePath(path);
+    if (!target) {
+      removeGithubPrToggle();
+      return { ok: false, reason: 'not-pr-page' };
+    }
+    // Embed already open — restore control lives in pr+ header
+    if (
+      current.open &&
+      isEmbedPresentation(current.presentation)
+    ) {
+      removeGithubPrToggle();
+      return { ok: false, reason: 'embed-open' };
+    }
+
+    let btn = document.getElementById(GH_PR_TOGGLE_ID);
+    if (!btn) {
+      btn = document.createElement('button');
+      btn.id = GH_PR_TOGGLE_ID;
+      btn.type = 'button';
+      // Match Primer PR header actions (32px / 14px / parent gap) — see styles.css
+      btn.className = 'prp-gh-open-toggle';
+      btn.setAttribute('data-prp-gh-toggle', '1');
+      btn.setAttribute('aria-label', 'Open with pr+');
+      btn.title = 'Open with pr+';
+      btn.textContent = 'pr+';
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const t = parsePrPagePath(
+          typeof location !== 'undefined' ? location.pathname : ''
+        );
+        if (!t) return;
+        removeGithubPrToggle();
+        void openModal({
+          owner: t.owner,
+          repo: t.repo,
+          number: t.number,
+          page: t.page,
+          presentation: 'embed',
+        });
+      });
+    }
+
+    const mount = findGithubPrHeaderMount();
+    if (!mount) {
+      // Keep button if already mounted; otherwise nothing to attach to yet
+      if (!btn.isConnected) {
+        return { ok: false, reason: 'no-mount' };
+      }
+      return { ok: true, reason: 'already-mounted' };
+    }
+    if (btn.parentElement !== mount) {
+      // Prefer end of actions cluster (right side of PR header)
+      try {
+        mount.appendChild(btn);
+      } catch {
+        try {
+          mount.insertBefore(btn, mount.firstChild);
+        } catch {
+          return { ok: false, reason: 'append-failed' };
+        }
+      }
+    }
+    return { ok: true, owner: target.owner, repo: target.repo, number: target.number };
+  }
+
+  /** True after at least one successful prefs read (open can skip blocking wait). */
+  let prefsReady = false;
+  let prefsWarmP = null;
+  let warmUpP = null;
 
   async function refreshPrefs() {
     try {
@@ -51,10 +465,68 @@
           reverseComments: next.reverseComments !== false,
         };
       }
+      prefsReady = true;
     } catch {
       prefs = { ...DEFAULT_PREFS };
+      prefsReady = true;
     }
     return prefs;
+  }
+
+  /**
+   * Non-blocking prefs read used after list paint. Dedupes concurrent callers.
+   * @returns {Promise<object>}
+   */
+  function warmPrefs() {
+    if (prefsReady) return Promise.resolve(prefs);
+    if (prefsWarmP) return prefsWarmP;
+    prefsWarmP = refreshPrefs().finally(() => {
+      prefsWarmP = null;
+    });
+    return prefsWarmP;
+  }
+
+  /**
+   * After pulls list paints: finish modal CSS + prefs so click → first paint
+   * does not wait on storage/network for those. Bundle JS is already injected
+   * via content_scripts (not loaded on click).
+   * @returns {Promise<{ css: boolean, prefs: boolean }>}
+   */
+  function warmUp() {
+    if (warmUpP) return warmUpP;
+    warmUpP = (async () => {
+      const out = { css: false, prefs: false };
+      try {
+        await ensureAssets();
+        out.css = Boolean(modalCssReady);
+      } catch {
+        /* ignore */
+      }
+      try {
+        await warmPrefs();
+        out.prefs = prefsReady;
+      } catch {
+        /* ignore */
+      }
+      // Pre-create list overlay host (hidden until open) so ensureHost is free
+      try {
+        if (!document.getElementById(HOST_ID) && !current.open) {
+          const host = document.createElement('div');
+          host.id = HOST_ID;
+          document.documentElement.appendChild(host);
+          stampHostCssReady(host);
+        } else {
+          stampHostCssReady(document.getElementById(HOST_ID));
+        }
+      } catch {
+        /* ignore */
+      }
+      return out;
+    })().finally(() => {
+      // Allow a later re-warm after long idle if needed
+      warmUpP = null;
+    });
+    return warmUpP;
   }
 
   function ensurePrefsWatch() {
@@ -241,30 +713,112 @@
     }
   }
 
-  function ensureAssets() {
-    if (!document.getElementById('prp-modal-css')) {
-      const link = document.createElement('link');
-      link.id = 'prp-modal-css';
-      link.rel = 'stylesheet';
-      link.href = chrome.runtime.getURL('src/modal/dist/pr-modal.css');
-      (document.head || document.documentElement).appendChild(link);
+  /**
+   * Modal CSS readiness. Prefer content_scripts injection of pr-modal.css
+   * (available before any click). Optional dynamic <link> is a backup only.
+   * Hosts use data-prp-css-ready so FOUC gate does not hide a ready shell.
+   */
+  let modalCssReady = false;
+  let modalCssReadyP = null;
+
+  function markHostsCssReady() {
+    modalCssReady = true;
+    try {
+      const ids = [HOST_ID, embedHostId()];
+      for (const id of ids) {
+        const el = document.getElementById(id);
+        if (el) el.setAttribute('data-prp-css-ready', '1');
+      }
+    } catch {
+      /* ignore */
     }
   }
 
-  function ensureHost() {
-    ensureAssets();
-    let host = document.getElementById(HOST_ID);
-    if (!host) {
-      host = document.createElement('div');
-      host.id = HOST_ID;
-      document.documentElement.appendChild(host);
+  function stampHostCssReady(host) {
+    if (!host) return host;
+    // Manifest content_scripts CSS is present at document_idle — stamp ready so
+    // list sketch first paint is never delayed by the FOUC opacity gate.
+    try {
+      host.setAttribute('data-prp-css-ready', '1');
+    } catch {
+      /* ignore */
     }
+    modalCssReady = true;
     return host;
+  }
+
+  /**
+   * Ensure modal CSS is available. Does not block openModal first paint.
+   * @returns {Promise<boolean>}
+   */
+  function ensureAssets() {
+    // Content-script CSS (manifest) already applied before JS — mark ready now.
+    if (!modalCssReady) markHostsCssReady();
+    if (document.getElementById('prp-modal-css')) {
+      return Promise.resolve(true);
+    }
+    if (modalCssReadyP) return modalCssReadyP;
+
+    modalCssReadyP = new Promise((resolve) => {
+      let settled = false;
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        markHostsCssReady();
+        resolve(true);
+      };
+
+      try {
+        const link = document.createElement('link');
+        link.id = 'prp-modal-css';
+        link.rel = 'stylesheet';
+        link.setAttribute('data-prp-asset', 'modal-css');
+        link.href = chrome.runtime.getURL('src/modal/dist/pr-modal.css');
+        link.addEventListener('load', done, { once: true });
+        link.addEventListener('error', done, { once: true });
+        (document.head || document.documentElement).appendChild(link);
+        try {
+          if (link.sheet) done();
+        } catch {
+          /* ignore */
+        }
+        setTimeout(done, 0);
+      } catch {
+        done();
+      }
+    });
+    return modalCssReadyP;
+  }
+
+  function ensureHost() {
+    // In-page embed mounts under GH main; list overlay uses documentElement host.
+    if (isEmbedPresentation(current.presentation)) {
+      return ensureEmbedHost();
+    }
+    void ensureAssets();
+    let host = document.getElementById(HOST_ID);
+    if (host) return stampHostCssReady(host);
+    host = document.createElement('div');
+    host.id = HOST_ID;
+    document.documentElement.appendChild(host);
+    return stampHostCssReady(host);
   }
 
   function detailKey(owner, repo, number) {
     return detailCache.cacheKey(owner, repo, number);
   }
+
+  /**
+   * Open-PR list for stack strip / branch picker.
+   * Prefer the pulls-page tree cache; when opening from a PR page (embed) that
+   * cache is empty, use a host-fetched list so Stack matches fullscreen.
+   * @type {Array|null}
+   */
+  let openPullsFetched = null;
+  /** @type {string} owner/repo key for openPullsFetched */
+  let openPullsFetchedKey = '';
+  /** @type {Promise<Array>|null} */
+  let openPullsFetchP = null;
 
   function resolveOpenPulls() {
     try {
@@ -274,7 +828,67 @@
     } catch {
       /* ignore */
     }
+    if (Array.isArray(openPullsFetched) && openPullsFetched.length) {
+      return openPullsFetched;
+    }
     return [];
+  }
+
+  /**
+   * Ensure we have open PRs for stack strip when the list page never painted
+   * (embed / direct PR URL / cold tab). Non-blocking; re-renders when ready.
+   * @param {string} owner
+   * @param {string} repo
+   * @param {{ signal?: AbortSignal }} [opts]
+   */
+  function ensureOpenPullsForStack(owner, repo, opts = {}) {
+    const o = String(owner || '').trim();
+    const r = String(repo || '').trim();
+    if (!o || !r) return Promise.resolve([]);
+    const key = `${o.toLowerCase()}/${r.toLowerCase()}`;
+    const cached = resolveOpenPulls();
+    // Already have enough rows to build a stack (or any list for branch picker)
+    if (cached.length >= 2) return Promise.resolve(cached);
+    if (
+      openPullsFetchedKey === key &&
+      Array.isArray(openPullsFetched) &&
+      openPullsFetched.length
+    ) {
+      return Promise.resolve(openPullsFetched);
+    }
+    if (openPullsFetchP) return openPullsFetchP;
+    if (!globalThis.PRTreeFetch?.fetchOpenPulls) {
+      return Promise.resolve(cached);
+    }
+    const signal = opts.signal || null;
+    openPullsFetchP = (async () => {
+      try {
+        if (signal?.aborted) return cached;
+        const prs = await globalThis.PRTreeFetch.fetchOpenPulls(o, r, null, {
+          signal,
+        });
+        if (signal?.aborted) return cached;
+        if (Array.isArray(prs) && prs.length) {
+          openPullsFetched = prs;
+          openPullsFetchedKey = key;
+          // Stack strip depends on openPulls — re-render if modal still open
+          if (
+            current.open &&
+            String(current.owner || '').toLowerCase() === o.toLowerCase() &&
+            String(current.repo || '').toLowerCase() === r.toLowerCase()
+          ) {
+            render();
+          }
+          return prs;
+        }
+        return cached;
+      } catch {
+        return cached;
+      } finally {
+        openPullsFetchP = null;
+      }
+    })();
+    return openPullsFetchP;
   }
 
   /** Find a PR already loaded by the pulls-list stack (no extra network). */
@@ -410,6 +1024,19 @@
     const repo = current.repo;
     const number = current.number;
     const openPulls = resolveOpenPulls();
+    const presentation = isEmbedPresentation(current.presentation)
+      ? 'embed'
+      : 'modal';
+    const chrome =
+      presentation === 'embed' && pageEmbedApi()?.embedShellChromeFlags
+        ? pageEmbedApi().embedShellChromeFlags()
+        : {
+            presentation: 'modal',
+            showClose: true,
+            showShellToggle: true,
+            showFullscreen: true,
+            showExit: true,
+          };
     return {
       open: current.open,
       loading: current.loading,
@@ -418,14 +1045,25 @@
       loadStage: current.loadStage,
       openPulls,
       prefs: { ...prefs },
-      // Deep-link restore (page/position); App also writes URI on focus changes
+      presentation,
+      shellChrome: chrome,
+      // Deep-link restore (page/position + GH commit/selection); App also writes URI
       initialRoute: {
         page: current.routePage,
         position: current.routePosition,
         number: current.number,
+        commitSha: current.routeCommitSha,
+        commitEndSha: current.routeCommitEndSha,
+        filePath: current.routeFilePath,
+        fileKey: current.routeFileKey,
+        startLine: current.routeStartLine,
+        endLine: current.routeEndLine,
+        side: current.routeSide,
       },
       onRouteChange: persistRouteState,
-      onClose: closeModal,
+      onClose: presentation === 'embed' ? () => {} : closeModal,
+      onRestoreNative:
+        presentation === 'embed' ? () => restoreNativeView() : undefined,
       /**
        * Stack strip navigation — preserve current Diff/Conversation view when
        * opts.page is omitted by falling back to current.routePage.
@@ -475,7 +1113,8 @@
           ),
         ];
         const key = detailKey(owner, repo, number);
-        const gen = ++detailFetchGen;
+        // Cancel prior open/refresh fetches; new cancelable session
+        const { gen, signal } = beginOpenFetchSession();
         const prevDetail = current.detail;
         current.error = null;
         setLoadStage(
@@ -491,6 +1130,7 @@
 
         const stillOpen = () =>
           gen === detailFetchGen &&
+          !signal.aborted &&
           current.open &&
           current.owner === owner &&
           current.repo === repo &&
@@ -512,7 +1152,7 @@
             owner,
             repo,
             number,
-            { skipReviewThreads: true }
+            { skipReviewThreads: true, signal }
           );
           if (!stillOpen()) return;
           if (
@@ -555,7 +1195,8 @@
               const tBulk = nowMs();
               const bulk =
                 await globalThis.PRTreeFetch.fetchReviewThreadsByIds(
-                  visibleIds
+                  visibleIds,
+                  { signal }
                 );
               const missingN = (bulk?.missingThreadIds || []).length;
               console.log(
@@ -597,7 +1238,12 @@
             owner,
             repo,
             number,
-            { direction: 'newest', cursor: null, pageSize: apiMax }
+            {
+              direction: 'newest',
+              cursor: null,
+              pageSize: apiMax,
+              signal,
+            }
           );
           if (!stillOpen()) return;
           console.log(
@@ -634,7 +1280,12 @@
                     owner,
                     repo,
                     number,
-                    { direction: 'oldest', cursor: null, pageSize: 20 }
+                    {
+                      direction: 'oldest',
+                      cursor: null,
+                      pageSize: 20,
+                      signal,
+                    }
                   );
                 if (!stillOpen()) return;
                 if (typeof mergeFn === 'function') {
@@ -690,7 +1341,8 @@
               const tBulk = nowMs();
               const bulk =
                 await globalThis.PRTreeFetch.fetchReviewThreadsByIds(
-                  remainingUnresolvedIds
+                  remainingUnresolvedIds,
+                  { signal }
                 );
               const missingList = Array.isArray(bulk?.missingThreadIds)
                 ? bulk.missingThreadIds
@@ -792,7 +1444,12 @@
             owner,
             repo,
             number,
-            { direction: dir, cursor, pageSize: 100 }
+            {
+              direction: dir,
+              cursor,
+              pageSize: 100,
+              signal: openFetchAbort?.signal || null,
+            }
           );
           if (gen !== detailFetchGen) return { detail: null, progressed: false };
           let next = detailSnap;
@@ -946,9 +1603,86 @@
             options.gitattributesText ||
             current.detail?.gitattributesText ||
             '',
+          signal: openFetchAbort?.signal || null,
+        });
+      },
+      /** Remaining PR commits beyond the initial page (for searchable picker). */
+      onFetchAllPrCommits: async () => {
+        if (!owner || !repo || !current.number) {
+          throw new Error('No open pull request for commits');
+        }
+        if (!globalThis.PRTreeFetch?.fetchAllPrCommits) {
+          throw new Error('Full commits fetch unavailable');
+        }
+        return globalThis.PRTreeFetch.fetchAllPrCommits(
+          owner,
+          repo,
+          current.number
+        );
+      },
+      /** Remaining PR files beyond the initial page (for searchable files nav). */
+      onFetchAllPrFiles: async (options = {}) => {
+        if (!owner || !repo || !current.number) {
+          throw new Error('No open pull request for files');
+        }
+        if (!globalThis.PRTreeFetch?.fetchAllPrFiles) {
+          throw new Error('Full files fetch unavailable');
+        }
+        return globalThis.PRTreeFetch.fetchAllPrFiles(owner, repo, current.number, {
+          gitattributesText:
+            options.gitattributesText ||
+            current.detail?.gitattributesText ||
+            '',
         });
       },
     };
+  }
+
+  /**
+   * True when reactRoot is still bound to a live host element.
+   * Soft-nav / Turbo often replace #prp-page-embed; reusing a detached root
+   * paints into nothing while natives stay display:none.
+   *
+   * Note: mountPrModal stamps host.__prpReactRoot = createRoot(...), but
+   * returns a {render,unmount} *wrapper*. Never compare stamp === reactRoot.
+   */
+  function isReactRootLiveOn(host) {
+    if (!reactRoot || !host) return false;
+    if (typeof reactRoot.render !== 'function') return false;
+    if (reactRootHost !== host) return false;
+    // Node may be detached after Turbo swap
+    if (host.isConnected === false) return false;
+    // createRoot stamp must still be present (wrapper unmount deletes it)
+    if (!host.__prpReactRoot) return false;
+    return true;
+  }
+
+  function dropReactRoot() {
+    if (reactRoot) {
+      try {
+        reactRoot.unmount();
+      } catch {
+        /* ignore */
+      }
+    }
+    // If wrapper unmount failed / partial, clear createRoot stamp on old host
+    if (reactRootHost) {
+      try {
+        if (reactRootHost.__prpReactRoot) {
+          try {
+            // Real createRoot has .unmount(); stub may not
+            reactRootHost.__prpReactRoot.unmount?.();
+          } catch {
+            /* ignore */
+          }
+          delete reactRootHost.__prpReactRoot;
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    reactRoot = null;
+    reactRootHost = null;
   }
 
   function render() {
@@ -956,28 +1690,64 @@
       console.warn('[pr+] modal bundle not loaded (mountPrModal missing)');
       return;
     }
-    const host = ensureHost();
 
     if (!current.open) {
-      if (reactRoot) {
-        try {
-          reactRoot.unmount();
-        } catch {
-          /* ignore */
-        }
-        reactRoot = null;
-        host.replaceChildren();
+      dropReactRoot();
+      // Tear down both hosts when closed
+      try {
+        const overlay = document.getElementById(HOST_ID);
+        if (overlay) overlay.replaceChildren();
+      } catch {
+        /* ignore */
+      }
+      if (
+        isEmbedPresentation(current.presentation) ||
+        document.getElementById(embedHostId())
+      ) {
+        restoreNativeMain();
       }
       return;
     }
 
+    // Keep CSS warming; host stays invisible (styles.css FOUC gate) until ready.
+    // React may mount while hidden — when the sheet loads we flip data-prp-css-ready
+    // so the first visible frame is already styled.
+    void ensureAssets();
+
+    const host = ensureHost();
+    stampHostCssReady(host);
     const props = buildProps();
-    if (reactRoot && typeof reactRoot.render === 'function') {
-      // Reuse root — preserves Diff layout, scrollTop, and search UI state.
-      reactRoot.render(props);
-      return;
+
+    if (isReactRootLiveOn(host)) {
+      try {
+        // Reuse root — preserves Diff layout, scrollTop, and search UI state.
+        reactRoot.render(props);
+        return;
+      } catch (err) {
+        console.warn('[pr+] root.render failed; remounting', err);
+        dropReactRoot();
+      }
+    } else if (reactRoot) {
+      // Host recreated or detached — unmount orphan and bind to the new node
+      dropReactRoot();
     }
+
+    // Stale createRoot stamp on this host (orphan after lost wrapper) — clear first
+    try {
+      if (host.__prpReactRoot) {
+        try {
+          host.__prpReactRoot.unmount?.();
+        } catch {
+          /* ignore */
+        }
+        delete host.__prpReactRoot;
+      }
+    } catch {
+      /* ignore */
+    }
+
     reactRoot = globalThis.mountPrModal(host, props);
+    reactRootHost = host;
   }
 
   function persistOpenModal(owner, repo, number, extra = {}) {
@@ -998,7 +1768,64 @@
     api.clearOpenModal(sessionStorage);
   }
 
-  function writeUriRoute({ page, number, position } = {}) {
+  /**
+   * Write location. Embed / in-page PR shell uses GitHub-native
+   * /pull/N[/changes[/{sha}|/{a}..{b}]]#diff-… ; list modal keeps prp_* query.
+   */
+  function writeUriRoute(route = {}) {
+    const page = route.page ?? current.routePage ?? null;
+    const number = route.number ?? current.number ?? null;
+    const position = route.position !== undefined ? route.position : current.routePosition;
+
+    const gh = githubRouteApi();
+    const useGithubPath =
+      isEmbedPresentation(current.presentation) &&
+      current.owner &&
+      current.repo &&
+      number != null &&
+      typeof gh?.replaceGithubPrLocation === 'function';
+
+    if (useGithubPath) {
+      try {
+        const commitSha =
+          route.commitSha !== undefined ? route.commitSha : current.routeCommitSha;
+        const commitEndSha =
+          route.commitEndSha !== undefined
+            ? route.commitEndSha
+            : current.routeCommitEndSha;
+        const filePath =
+          route.filePath !== undefined ? route.filePath : current.routeFilePath;
+        const fileKey =
+          route.fileKey !== undefined ? route.fileKey : current.routeFileKey;
+        const startLine =
+          route.startLine !== undefined ? route.startLine : current.routeStartLine;
+        const endLine =
+          route.endLine !== undefined ? route.endLine : current.routeEndLine;
+        const side = route.side !== undefined ? route.side : current.routeSide;
+        gh.replaceGithubPrLocation(
+          typeof history !== 'undefined' ? history : null,
+          typeof location !== 'undefined' ? location : null,
+          {
+            owner: current.owner,
+            repo: current.repo,
+            number,
+            page: page === 'diff' ? 'diff' : 'conversation',
+            commitSha: commitSha || null,
+            commitEndSha: commitEndSha || null,
+            filePath: filePath || null,
+            fileKey: fileKey || null,
+            startLine: startLine ?? null,
+            endLine: endLine ?? null,
+            side: side || null,
+          }
+        );
+        lastEmbedPath = embedLocationKey();
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+
     const api = uriApi();
     if (!api?.replaceLocationRoute) return;
     try {
@@ -1006,9 +1833,9 @@
         typeof history !== 'undefined' ? history : null,
         typeof location !== 'undefined' ? location : null,
         {
-          page: page ?? current.routePage ?? null,
-          number: number ?? current.number ?? null,
-          position: position ?? current.routePosition ?? null,
+          page: page ?? null,
+          number: number ?? null,
+          position: position ?? null,
         }
       );
     } catch {
@@ -1030,13 +1857,24 @@
   }
 
   /**
-   * Called from modal when layout/comment focus changes.
+   * Called from modal when layout / selection / commit filter changes.
    * Keeps session + URI in sync (replaceState only).
    */
   function persistRouteState(route = {}) {
     if (!current.open || !current.owner || !current.repo || !current.number) return;
     if (route.page != null) current.routePage = route.page;
     if (route.position !== undefined) current.routePosition = route.position || null;
+    if (route.commitSha !== undefined) {
+      current.routeCommitSha = route.commitSha || null;
+    }
+    if (route.commitEndSha !== undefined) {
+      current.routeCommitEndSha = route.commitEndSha || null;
+    }
+    if (route.filePath !== undefined) current.routeFilePath = route.filePath || null;
+    if (route.fileKey !== undefined) current.routeFileKey = route.fileKey || null;
+    if (route.startLine !== undefined) current.routeStartLine = route.startLine ?? null;
+    if (route.endLine !== undefined) current.routeEndLine = route.endLine ?? null;
+    if (route.side !== undefined) current.routeSide = route.side || null;
     persistOpenModal(current.owner, current.repo, current.number, {
       page: current.routePage,
       position: current.routePosition,
@@ -1045,12 +1883,67 @@
       page: current.routePage,
       number: current.number,
       position: current.routePosition,
+      commitSha: current.routeCommitSha,
+      commitEndSha: current.routeCommitEndSha,
+      filePath: current.routeFilePath,
+      fileKey: current.routeFileKey,
+      startLine: current.routeStartLine,
+      endLine: current.routeEndLine,
+      side: current.routeSide,
     });
   }
 
+  /**
+   * Cancel all in-flight open-session fetches (content → SW → GitHub).
+   * Safe to call when nothing is running.
+   */
+  function abortOpenFetches(reason = 'sheet-closed') {
+    detailFetchGen += 1;
+    const ac = openFetchAbort;
+    openFetchAbort = null;
+    // Bulk-cancel: known requestIds + every active SW GitHub fetch.
+    // cancelAll covers the race where a FETCH is mid-flight before its id
+    // is registered on the signal (or exclusive-queue pre-cancel misses).
+    try {
+      const ids = ac?.signal?.__prpRequestIds
+        ? [...ac.signal.__prpRequestIds]
+        : [];
+      if (globalThis.PRTreeFetch?.cancelFetches) {
+        void globalThis.PRTreeFetch.cancelFetches(ids, { cancelAll: true });
+      }
+    } catch {
+      /* ignore */
+    }
+    if (ac) {
+      try {
+        ac.abort(reason);
+      } catch {
+        try {
+          ac.abort();
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  }
+
+  function beginOpenFetchSession() {
+    // Supersede any previous open's network work immediately
+    abortOpenFetches('superseded');
+    openFetchAbort = new AbortController();
+    // gen already bumped in abortOpenFetches; capture current for this session
+    return {
+      gen: detailFetchGen,
+      signal: openFetchAbort.signal,
+    };
+  }
+
   function closeModal() {
+    abortOpenFetches('sheet-closed');
+    const wasEmbed = isEmbedPresentation(current.presentation);
     clearPersistedOpenModal();
-    clearUriRoute();
+    // Keep native PR URL clean when embed closes (no prp_* strip needed if we never wrote)
+    if (!wasEmbed) clearUriRoute();
     current = {
       open: false,
       loading: false,
@@ -1061,17 +1954,92 @@
       number: null,
       routePage: null,
       routePosition: null,
+      routeCommitSha: null,
+      routeCommitEndSha: null,
+      routeFilePath: null,
+      routeFileKey: null,
+      routeStartLine: null,
+      routeEndLine: null,
+      routeSide: null,
       loadStage: null,
+      presentation: 'modal',
     };
     render();
+    if (wasEmbed) restoreNativeMain();
+    // After leaving embed (or closing overlay), re-offer native GH → pr+ toggle
+    try {
+      ensureGithubPrToggle();
+    } catch {
+      /* ignore */
+    }
   }
 
-  async function openModal({ owner, repo, number, page = null, position = null }) {
-    if (!hostEnabled) return;
-    await refreshPrefs();
+  /**
+   * Open PR shell. **First paint is synchronous** (list sketch / memory / skeleton).
+   * Never await storage or network before that paint — network core upgrades after.
+   * Returns a Promise for the background fetch chain (callers may void it).
+   */
+  function openModal({
+    owner,
+    repo,
+    number,
+    page = null,
+    position = null,
+    presentation = null,
+    commitSha = null,
+    commitEndSha = null,
+    filePath = null,
+    fileKey = null,
+    startLine = null,
+    endLine = null,
+    side = null,
+  }) {
+    if (!hostEnabled) return Promise.resolve({ ok: false, reason: 'disabled' });
+    // Prefs/CSS never block first paint (defaults + content_scripts CSS).
+    void refreshPrefs();
     ensurePrefsWatch();
+    void ensureAssets();
     const key = detailKey(owner, repo, number);
-    const gen = ++detailFetchGen;
+    // Abort any previous open's fetches, start a new cancelable session
+    const { gen, signal } = beginOpenFetchSession();
+
+    // Stack strip needs open PR list. List page has it cached; PR-page embed does
+    // not — fetch in background so Stack/header parity matches fullscreen.
+    void ensureOpenPullsForStack(owner, repo, { signal });
+
+    // Resolve presentation: explicit > path-based embed > keep current if same PR > modal
+    const pathTarget = parsePrPagePath(
+      typeof location !== 'undefined' ? location.pathname : ''
+    );
+    let resolvedPresentation = 'modal';
+    if (presentation === 'embed' || presentation === 'modal') {
+      resolvedPresentation = presentation;
+    } else if (
+      pathTarget &&
+      String(pathTarget.owner).toLowerCase() === String(owner).toLowerCase() &&
+      String(pathTarget.repo).toLowerCase() === String(repo).toLowerCase() &&
+      Number(pathTarget.number) === Number(number)
+    ) {
+      resolvedPresentation = 'embed';
+    } else if (
+      current.open &&
+      isEmbedPresentation(current.presentation) &&
+      String(current.owner).toLowerCase() === String(owner).toLowerCase() &&
+      String(current.repo).toLowerCase() === String(repo).toLowerCase() &&
+      Number(current.number) === Number(number)
+    ) {
+      resolvedPresentation = 'embed';
+    }
+    // Switching overlay ↔ embed needs a clean host + fresh React root
+    if (
+      current.open &&
+      isEmbedPresentation(current.presentation) !==
+        isEmbedPresentation(resolvedPresentation)
+    ) {
+      dropReactRoot();
+      if (isEmbedPresentation(current.presentation)) restoreNativeMain();
+    }
+    current.presentation = resolvedPresentation;
 
     // Progressive sources (fast → slow):
     //   1) list sketch (pulls page cache — title/body already available)
@@ -1089,14 +2057,49 @@
     // Prefer real cache over list sketch; else sketch; else empty
     let initialDetail = cached || listSketch || null;
 
-    // Explicit page (stack nav) > keep current view when already open > default conversation
+    // Explicit page (stack nav) > path tab (embed) > keep current view > default conversation
+    const ghLoc =
+      isEmbedPresentation(resolvedPresentation) ||
+      (pathTarget &&
+        String(pathTarget.owner).toLowerCase() === String(owner).toLowerCase() &&
+        String(pathTarget.repo).toLowerCase() === String(repo).toLowerCase() &&
+        Number(pathTarget.number) === Number(number))
+        ? parseGithubLocation()
+        : null;
     const resolvedPage =
       page === 'diff' || page === 'conversation'
         ? page
-        : current.open &&
-            (current.routePage === 'diff' || current.routePage === 'conversation')
-          ? current.routePage
-          : page || null;
+        : pathTarget &&
+            isEmbedPresentation(resolvedPresentation) &&
+            (pathTarget.page === 'diff' || pathTarget.page === 'conversation')
+          ? pathTarget.page
+          : current.open &&
+              (current.routePage === 'diff' || current.routePage === 'conversation')
+            ? current.routePage
+            : page || null;
+
+    const resolvedCommitSha =
+      commitSha != null
+        ? commitSha
+        : ghLoc?.commitSha != null
+          ? ghLoc.commitSha
+          : pathTarget?.commitSha != null
+            ? pathTarget.commitSha
+            : null;
+    const resolvedCommitEndSha =
+      commitEndSha != null
+        ? commitEndSha
+        : ghLoc?.commitEndSha != null
+          ? ghLoc.commitEndSha
+          : pathTarget?.commitEndSha != null
+            ? pathTarget.commitEndSha
+            : null;
+    const resolvedFilePath = filePath != null ? filePath : ghLoc?.filePath || null;
+    const resolvedFileKey = fileKey != null ? fileKey : ghLoc?.fileKey || null;
+    const resolvedStartLine =
+      startLine != null ? startLine : ghLoc?.startLine ?? null;
+    const resolvedEndLine = endLine != null ? endLine : ghLoc?.endLine ?? null;
+    const resolvedSide = side != null ? side : ghLoc?.side || null;
 
     current = {
       open: true,
@@ -1109,6 +2112,14 @@
       number,
       routePage: resolvedPage,
       routePosition: position || null,
+      routeCommitSha: resolvedCommitSha,
+      routeCommitEndSha: resolvedCommitEndSha,
+      routeFilePath: resolvedFilePath,
+      routeFileKey: resolvedFileKey,
+      routeStartLine: resolvedStartLine,
+      routeEndLine: resolvedEndLine,
+      routeSide: resolvedSide,
+      presentation: resolvedPresentation,
       loadStage: {
         phase: fromCache ? 'revalidate' : fromList ? 'core' : 'core',
         label: fromCache
@@ -1127,6 +2138,13 @@
       page: resolvedPage || 'conversation',
       number,
       position,
+      commitSha: resolvedCommitSha,
+      commitEndSha: resolvedCommitEndSha,
+      filePath: resolvedFilePath,
+      fileKey: resolvedFileKey,
+      startLine: resolvedStartLine,
+      endLine: resolvedEndLine,
+      side: resolvedSide,
     });
     render();
 
@@ -1141,6 +2159,9 @@
           `title=${JSON.stringify(String(listSketch.title || '').slice(0, 60))}`
       );
     }
+
+    // ── First paint is done (list sketch / cache / empty skeleton). ──
+    // Everything below upgrades asynchronously and must not delay click→visible.
 
     // 2) Background IDB hydrate (timeout) — only if memory miss
     //    Upgrades list-sketch → IDB snapshot; must not delay network.
@@ -1185,22 +2206,34 @@
         })
       : Promise.resolve(cached);
 
+    return (async () => {
     try {
       if (!globalThis.PRTreeFetch?.fetchPrDetail) {
         throw new Error('PR detail bridge unavailable');
       }
 
+      function isAbortErr(err) {
+        return (
+          err?.name === 'AbortError' ||
+          /aborted|AbortError/i.test(String(err?.message || err || ''))
+        );
+      }
+
       async function fetchDetailOnce(opts) {
         let lastErr;
         for (let attempt = 0; attempt < 2; attempt++) {
+          if (signal.aborted || gen !== detailFetchGen) {
+            const e = new Error('The operation was aborted.');
+            e.name = 'AbortError';
+            throw e;
+          }
           try {
-            return await globalThis.PRTreeFetch.fetchPrDetail(
-              owner,
-              repo,
-              number,
-              opts
-            );
+            return await globalThis.PRTreeFetch.fetchPrDetail(owner, repo, number, {
+              ...opts,
+              signal,
+            });
           } catch (err) {
+            if (isAbortErr(err)) throw err;
             lastErr = err;
             const msg = String(err?.message || err || '');
             // Context invalidation cannot be fixed by retry — page refresh required
@@ -1224,8 +2257,8 @@
         throw lastErr || new Error('Failed to fetch PR detail');
       }
 
-      // Prefs drive progressive vs full thread load
-      await refreshPrefs();
+      // Prefs may still be warming; do not re-await for first network phase
+      if (!prefsReady) await refreshPrefs();
       ensurePrefsWatch();
       const fastReview = prefs.fastReview !== false;
 
@@ -1351,7 +2384,7 @@
               owner,
               repo,
               number,
-              { direction: 'newest', cursor: null, pageSize: apiMax }
+              { direction: 'newest', cursor: null, pageSize: apiMax, signal }
             );
             console.log(
               `[pr-plus] openModal phase=threads.last ${owner}/${repo}#${number}: ${Math.round(
@@ -1421,7 +2454,8 @@
               }
               const tBulk0 = nowMs();
               const bulk = await globalThis.PRTreeFetch.fetchReviewThreadsByIds(
-                remainingUnresolvedIds
+                remainingUnresolvedIds,
+                { signal }
               );
               const missingList = Array.isArray(bulk?.missingThreadIds)
                 ? bulk.missingThreadIds
@@ -1471,7 +2505,7 @@
               owner,
               repo,
               number,
-              { direction: 'newest', cursor: null, pageSize: apiMax }
+              { direction: 'newest', cursor: null, pageSize: apiMax, signal }
             );
             console.log(
               `[pr-plus] openModal phase=threads.last ${owner}/${repo}#${number}: ${Math.round(
@@ -1516,7 +2550,12 @@
                     owner,
                     repo,
                     number,
-                    { direction: 'oldest', cursor: null, pageSize: 20 }
+                    {
+                      direction: 'oldest',
+                      cursor: null,
+                      pageSize: 20,
+                      signal,
+                    }
                   );
                 console.log(
                   `[pr-plus] openModal phase=threads.start ${owner}/${repo}#${number}: ${Math.round(
@@ -1585,7 +2624,14 @@
         render();
       }
     } catch (err) {
-      if (gen !== detailFetchGen) return;
+      if (
+        gen !== detailFetchGen ||
+        signal.aborted ||
+        err?.name === 'AbortError' ||
+        /aborted|AbortError/i.test(String(err?.message || err || ''))
+      ) {
+        return;
+      }
       if (current.open) {
         current.loading = false;
         if (!current.detail) {
@@ -1595,6 +2641,7 @@
         render();
       }
     }
+    })(); // end background upgrade after sync first paint
   }
 
   /**
@@ -1714,12 +2761,140 @@
     };
   }
 
+  /**
+   * On PR conversation/files/changes routes, mount pr+ as in-page embed under GH header.
+   * Soft-nav re-entry when path / commit / #diff- changes.
+   */
+  function tryEmbedFromLocation() {
+    if (!hostEnabled) return { ok: false, reason: 'disabled' };
+    const locKey = embedLocationKey();
+    const path = typeof location !== 'undefined' ? location.pathname : '';
+    const target = parseGithubLocation() || parsePrPagePath(path);
+    if (!target) {
+      if (isEmbedPresentation(current.presentation) && current.open) {
+        closeModal();
+      }
+      lastEmbedPath = locKey;
+      removeGithubPrToggle();
+      return { ok: false, reason: 'not-pr-page' };
+    }
+    const samePr =
+      current.open &&
+      isEmbedPresentation(current.presentation) &&
+      String(current.owner).toLowerCase() === String(target.owner).toLowerCase() &&
+      String(current.repo).toLowerCase() === String(target.repo).toLowerCase() &&
+      Number(current.number) === Number(target.number);
+    const sameSurface =
+      samePr &&
+      current.routePage === target.page &&
+      String(current.routeCommitSha || '') === String(target.commitSha || '') &&
+      String(current.routeCommitEndSha || '') === String(target.commitEndSha || '') &&
+      String(current.routeFileKey || '') === String(target.fileKey || '') &&
+      Number(current.routeStartLine || 0) === Number(target.startLine || 0) &&
+      Number(current.routeEndLine || 0) === Number(target.endLine || 0);
+    lastEmbedPath = locKey;
+    if (sameSurface) {
+      // Re-hide native if Turbo re-injected content, and remount if host was destroyed
+      ensureEmbedHost();
+      render();
+      removeGithubPrToggle();
+      return { ok: true, reason: 'already-open' };
+    }
+    if (samePr) {
+      // Same PR, path/hash changed — remount so App re-applies commit/selection
+      applyRouteFieldsFromTarget(target);
+      dropReactRoot();
+      ensureEmbedHost();
+      render();
+      removeGithubPrToggle();
+      return { ok: true, reason: 'route-updated', page: target.page };
+    }
+    // Auto-open embed on PR routes (can also be opened via GH header toggle)
+    void openModal({
+      owner: target.owner,
+      repo: target.repo,
+      number: target.number,
+      page: target.page,
+      presentation: 'embed',
+      commitSha: target.commitSha || null,
+      commitEndSha: target.commitEndSha || null,
+      filePath: target.filePath || null,
+      fileKey: target.fileKey || null,
+      startLine: target.startLine ?? null,
+      endLine: target.endLine ?? null,
+      side: target.side || null,
+    });
+    removeGithubPrToggle();
+    return {
+      ok: true,
+      owner: target.owner,
+      repo: target.repo,
+      number: target.number,
+      page: target.page,
+    };
+  }
+
+  function installEmbedWatch() {
+    if (embedWatchInstalled) return;
+    embedWatchInstalled = true;
+    const onNav = () => {
+      if (!hostEnabled) return;
+      const locKey = embedLocationKey();
+      if (
+        locKey === lastEmbedPath &&
+        current.open &&
+        isEmbedPresentation(current.presentation)
+      ) {
+        // Same path+hash: Turbo may have replaced #prp-page-embed — rebind React root
+        try {
+          ensureEmbedHost();
+          render();
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
+      tryEmbedFromLocation();
+      try {
+        ensureGithubPrToggle();
+      } catch {
+        /* ignore */
+      }
+    };
+    window.addEventListener('popstate', onNav);
+    window.addEventListener('turbo:load', onNav);
+    window.addEventListener('turbo:render', onNav);
+    window.addEventListener('pjax:end', onNav);
+    // GitHub soft navigations sometimes only mutate DOM
+    document.addEventListener('soft-nav:end', onNav);
+    // Fallback poll for missed events (pathname + hash)
+    const pollId = window.setInterval(() => {
+      if (!hostEnabled) return;
+      if (embedLocationKey() !== lastEmbedPath) onNav();
+    }, 800);
+    // Allow Node test processes to exit (browser ignores unref)
+    try {
+      if (typeof pollId === 'object' && typeof pollId.unref === 'function') {
+        pollId.unref();
+      } else if (
+        typeof pollId === 'number' &&
+        typeof window.clearInterval === 'function'
+      ) {
+        /* browser timer id */
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
   function setEnabled(enabled) {
     hostEnabled = Boolean(enabled);
     if (!hostEnabled) {
       // Tear down modal + stop intercepting so GitHub is fully native
+      removeGithubPrToggle();
       if (current.open) {
         clearUriRoute();
+        const wasEmbed = isEmbedPresentation(current.presentation);
         current = {
           open: false,
           loading: false,
@@ -1730,10 +2905,31 @@
           number: null,
           routePage: null,
           routePosition: null,
+          routeCommitSha: null,
+          routeCommitEndSha: null,
+          routeFilePath: null,
+          routeFileKey: null,
+          routeStartLine: null,
+          routeEndLine: null,
+          routeSide: null,
           loadStage: null,
+          presentation: 'modal',
         };
         render();
+        if (wasEmbed) restoreNativeMain();
+      } else {
+        restoreNativeMain();
       }
+      return;
+    }
+    // Light preload only — full warmUp runs after list paint (content.js)
+    void ensureAssets();
+    installEmbedWatch();
+    tryEmbedFromLocation();
+    try {
+      ensureGithubPrToggle();
+    } catch {
+      /* ignore */
     }
   }
 
@@ -1892,16 +3088,33 @@
     openModal,
     closeModal,
     tryRestoreOpenModal,
+    tryEmbedFromLocation,
+    restoreNativeView,
+    ensureGithubPrToggle,
     persistRouteState,
     setEnabled,
+    /** After list paint: CSS + prefs so click is not cold. */
+    warmUp,
     isEnabled: () => hostEnabled,
     parsePrFromAnchor,
+    parsePrPagePath,
     isPullsListPage,
     clearDetailCache,
-    _getState: () => ({ ...current, hostEnabled }),
+    _getState: () => ({
+      ...current,
+      hostEnabled,
+      prefsReady,
+      modalCssReady,
+    }),
     _detailCache: detailCache,
   };
 
   listenClearDetailCache();
   install();
+  // Preload modal CSS as soon as the content script boots (before clicks)
+  try {
+    void ensureAssets();
+  } catch {
+    /* ignore */
+  }
 })();

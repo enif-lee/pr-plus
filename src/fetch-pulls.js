@@ -3,6 +3,24 @@
  * List up to 100 open PRs, then fill page-visible dangling PRs via single-PR gets.
  */
 
+
+function githubRestUrl(path) {
+  try {
+    if (globalThis.PRGithubEndpoints && typeof globalThis.PRGithubEndpoints.githubRestUrl === 'function') {
+      return globalThis.PRGithubEndpoints.githubRestUrl(path);
+    }
+  } catch (_) {}
+  const p = String(path || '');
+  return 'https://api.github.com' + (p.startsWith('/') ? p : '/' + p);
+}
+function githubGraphqlUrl() {
+  try {
+    if (globalThis.PRGithubEndpoints && typeof globalThis.PRGithubEndpoints.githubGraphqlUrl === 'function') {
+      return globalThis.PRGithubEndpoints.githubGraphqlUrl();
+    }
+  } catch (_) {}
+  return 'https://api.github.com/graphql';
+}
 /**
  * Map REST pull list/item payload → app list row.
  * Includes labels / assignees / milestone so progressive modal sketch can paint
@@ -111,7 +129,7 @@ async function mapWithConcurrency(items, limit, worker) {
 }
 
 async function fetchOpenPullsPublic(owner, repo, fetchImpl, token = null) {
-  const url = `https://api.github.com/repos/${owner}/${repo}/pulls?state=open&per_page=100`;
+  const url = githubRestUrl(`/repos/${owner}/${repo}/pulls?state=open&per_page=100`);
   const res = await fetchImpl(url, {
     headers: buildApiHeaders(token),
   });
@@ -125,7 +143,7 @@ async function fetchOpenPullsPublic(owner, repo, fetchImpl, token = null) {
 }
 
 async function fetchPullByNumber(owner, repo, pullNumber, fetchImpl, token = null) {
-  const url = `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}`;
+  const url = githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}`);
   const res = await fetchImpl(url, {
     headers: buildApiHeaders(token),
   });
@@ -166,7 +184,7 @@ async function fetchDanglingPulls(owner, repo, numbers, fetchImpl, token = null)
  * @returns {Promise<Array<{key_prefix:string,url_template:string,is_alphanumeric:boolean}>>}
  */
 async function fetchRepoAutolinks(owner, repo, fetchImpl, token = null) {
-  const url = `https://api.github.com/repos/${owner}/${repo}/autolinks`;
+  const url = githubRestUrl(`/repos/${owner}/${repo}/autolinks`);
   try {
     const res = await fetchImpl(url, { headers: buildApiHeaders(token) });
     if (!res.ok) return [];
@@ -349,6 +367,94 @@ async function apiJsonWithLink(url, fetchImpl, token) {
   return { data, link };
 }
 
+/** Absolute URL for Link header rel=next (or null). */
+function parseLinkNextUrl(linkHeader) {
+  if (!linkHeader) return null;
+  const parts = String(linkHeader).split(',');
+  for (const p of parts) {
+    const m = p.match(/<([^>]+)>\s*;\s*rel="?next"?/i);
+    if (m) return m[1].trim();
+  }
+  return null;
+}
+
+/**
+ * Walk REST list endpoints via Link rel=next until exhausted.
+ * @param {string} firstUrl
+ * @param {function} fetchImpl
+ * @param {string|null} token
+ * @param {{ maxPages?: number }} [opts]
+ * @returns {Promise<Array>}
+ */
+async function fetchRestCollectionAll(firstUrl, fetchImpl, token, opts = {}) {
+  const maxPages =
+    Number.isFinite(opts.maxPages) && opts.maxPages > 0
+      ? Math.floor(opts.maxPages)
+      : 50;
+  const all = [];
+  let url = firstUrl;
+  let pages = 0;
+  while (url && pages < maxPages) {
+    pages += 1;
+    const { data, link } = await apiJsonWithLink(url, fetchImpl, token);
+    if (!Array.isArray(data)) break;
+    all.push(...data);
+    if (data.length === 0) break;
+    url = parseLinkNextUrl(link);
+  }
+  return all;
+}
+
+function mapPrCommitRow(c) {
+  return {
+    sha: c?.sha || '',
+    message: c?.commit?.message || c?.message || '',
+    author: c?.commit?.author?.name || c?.author?.login || c?.author || '',
+    date: c?.commit?.author?.date || c?.commit?.committer?.date || c?.date || '',
+  };
+}
+
+/**
+ * All PR commits (paginated). GitHub returns oldest-first.
+ */
+async function fetchAllPrCommits(owner, repo, number, fetchImpl, token = null) {
+  const o = String(owner || '').trim();
+  const r = String(repo || '').trim();
+  const n = Number(number);
+  if (!o || !r || !Number.isFinite(n)) {
+    throw new Error('owner, repo, and number are required for commits');
+  }
+  const first = githubRestUrl(
+    `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/pulls/${n}/commits?per_page=100`
+  );
+  const raw = await fetchRestCollectionAll(first, fetchImpl, token);
+  return raw.map(mapPrCommitRow).filter((c) => c.sha);
+}
+
+/**
+ * All PR files (paginated) with collapse/annotation applied.
+ */
+async function fetchAllPrFiles(
+  owner,
+  repo,
+  number,
+  fetchImpl,
+  token = null,
+  options = {}
+) {
+  const o = String(owner || '').trim();
+  const r = String(repo || '').trim();
+  const n = Number(number);
+  if (!o || !r || !Number.isFinite(n)) {
+    throw new Error('owner, repo, and number are required for files');
+  }
+  const first = githubRestUrl(
+    `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/pulls/${n}/files?per_page=100`
+  );
+  const raw = await fetchRestCollectionAll(first, fetchImpl, token);
+  return mapAndAnnotateFiles(raw, options.gitattributesText || '');
+}
+
 const COMMENT_PAGE_SIZE = 50;
 
 function commentsPageHelpers() {
@@ -379,20 +485,32 @@ function mapIssueComment(c) {
 }
 
 function mapReviewComment(c, extra = {}) {
+  const subjectTypeRaw = String(
+    extra.subjectType || c.subject_type || c.subjectType || ''
+  ).toLowerCase();
+  const isFileSubject = subjectTypeRaw === 'file';
   // Pending-review comments often omit line and only have position/original_line
-  const line =
-    c.line ??
-    c.original_line ??
-    (c.position != null && Number.isFinite(Number(c.position))
-      ? Number(c.position)
-      : null);
+  // File-level comments intentionally have no line.
+  const line = isFileSubject
+    ? null
+    : c.line ??
+      c.original_line ??
+      (c.position != null && Number.isFinite(Number(c.position))
+        ? Number(c.position)
+        : null);
   // REST has no outdated flag — infer when line is gone but original_line remains
   const outdated =
     extra.outdated != null
       ? Boolean(extra.outdated)
       : c.outdated != null
         ? Boolean(c.outdated)
-        : c.line == null && c.original_line != null;
+        : !isFileSubject && c.line == null && c.original_line != null;
+  // Prefer explicit subject_type; otherwise path-only (no line) → file
+  const subjectType =
+    isFileSubject ||
+    (line == null && !c.original_line && c.path && subjectTypeRaw !== 'line')
+      ? 'file'
+      : 'line';
   return {
     id: c.id,
     author: c.user?.login || '',
@@ -400,8 +518,8 @@ function mapReviewComment(c, extra = {}) {
     body: c.body || '',
     path: c.path || '',
     line: line != null ? Number(line) : null,
-    originalLine: c.original_line ?? null,
-    startLine: c.start_line ?? null,
+    originalLine: subjectType === 'file' ? null : c.original_line ?? null,
+    startLine: subjectType === 'file' ? null : c.start_line ?? null,
     side: c.side || 'RIGHT',
     startSide: c.start_side || null,
     diffHunk: c.diff_hunk || c.diffHunk || '',
@@ -421,6 +539,8 @@ function mapReviewComment(c, extra = {}) {
     /** True when part of a not-yet-submitted PENDING review (hidden from main list). */
     pending: Boolean(extra.pending || c.pending),
     pendingReviewId: extra.pendingReviewId ?? c.pendingReviewId ?? null,
+    /** `file` | `line` — file-level comments have no line anchor. */
+    subjectType,
   };
 }
 
@@ -437,8 +557,13 @@ function mapGraphqlReviewCommentNode(node, threadMeta = {}) {
     node.pullRequestReview?.databaseId != null
       ? Number(node.pullRequestReview.databaseId)
       : null;
-  const line =
-    node.line != null
+  const subjectTypeRaw = String(
+    threadMeta.subjectType || node.subjectType || ''
+  ).toUpperCase();
+  const isFile = subjectTypeRaw === 'FILE';
+  const line = isFile
+    ? null
+    : node.line != null
       ? Number(node.line)
       : node.originalLine != null
         ? Number(node.originalLine)
@@ -452,8 +577,8 @@ function mapGraphqlReviewCommentNode(node, threadMeta = {}) {
     body: node.body || '',
     path: node.path || threadMeta.path || '',
     line,
-    originalLine: node.originalLine ?? null,
-    startLine: node.startLine ?? node.originalStartLine ?? null,
+    originalLine: isFile ? null : node.originalLine ?? null,
+    startLine: isFile ? null : node.startLine ?? node.originalStartLine ?? null,
     side,
     startSide: threadMeta.startDiffSide || null,
     diffHunk: node.diffHunk || '',
@@ -466,6 +591,7 @@ function mapGraphqlReviewCommentNode(node, threadMeta = {}) {
     outdated: Boolean(node.outdated ?? threadMeta.isOutdated),
     pending,
     pendingReviewId: pending ? reviewDbId : null,
+    subjectType: isFile ? 'file' : 'line',
   };
 }
 
@@ -560,7 +686,7 @@ async function fetchViewerPendingReviewBundle(
   try {
     const n = Number(pullNumber);
     const raw = await apiJson(
-      `https://api.github.com/repos/${owner}/${repo}/pulls/${n}/reviews/${pending.id}/comments?per_page=100`,
+      githubRestUrl(`/repos/${owner}/${repo}/pulls/${n}/reviews/${pending.id}/comments?per_page=100`),
       fetchImpl,
       token
     );
@@ -622,7 +748,7 @@ async function createPendingPullReview(
   const body = {};
   if (commitId) body.commit_id = commitId;
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`,
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`),
     fetchImpl,
     token,
     { method: 'POST', body }
@@ -651,7 +777,7 @@ async function submitPendingPullReview(
     throw new Error('Invalid review event');
   }
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${id}/events`,
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${id}/events`),
     fetchImpl,
     token,
     { method: 'POST', body: { event: ev, body: body || '' } }
@@ -675,7 +801,7 @@ async function deletePendingPullReview(
     throw new Error('Invalid pending review id');
   }
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${id}`,
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${id}`),
     fetchImpl,
     token,
     { method: 'DELETE' }
@@ -735,8 +861,8 @@ async function fetchPrCommentsPage(
       : (() => {
           const base =
             kind === 'review'
-              ? `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/comments`
-              : `https://api.github.com/repos/${owner}/${repo}/issues/${pullNumber}/comments`;
+              ? githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/comments`)
+              : githubRestUrl(`/repos/${owner}/${repo}/issues/${pullNumber}/comments`);
           const q = new URLSearchParams({
             per_page: String(perPage),
             page: String(pageNum),
@@ -891,7 +1017,7 @@ async function apiSend(url, fetchImpl, token, { method = 'GET', body } = {}) {
  */
 async function apiGraphql(query, variables, fetchImpl, token) {
   const json = await apiSend(
-    'https://api.github.com/graphql',
+    githubGraphqlUrl(),
     fetchImpl,
     token,
     { method: 'POST', body: { query, variables: variables || {} } }
@@ -921,6 +1047,7 @@ const REVIEW_THREAD_NODE_FIELDS = `
   originalStartLine
   diffSide
   startDiffSide
+  subjectType
   comments(first:100){
     nodes{
       id
@@ -992,6 +1119,7 @@ function mapReviewThreadNodes(allNodes) {
       line: t.line ?? null,
       originalLine: t.originalLine ?? null,
       startLine: t.startLine ?? t.originalStartLine ?? null,
+      subjectType: t.subjectType || null,
     };
     const commentIds = [];
     for (const node of t.comments?.nodes || []) {
@@ -1761,7 +1889,7 @@ async function fetchPrDetail(
   token = null,
   opts = {}
 ) {
-  const base = `https://api.github.com/repos/${owner}/${repo}`;
+  const base = githubRestUrl(`/repos/${owner}/${repo}`);
   const n = Number(pullNumber);
   const skipReviewThreads = Boolean(opts.skipReviewThreads);
   const threadsMaxPages = skipReviewThreads
@@ -1814,17 +1942,23 @@ async function fetchPrDetail(
           { page: 1, perPage: COMMENT_PAGE_SIZE, preferNewest: true },
           fetchImpl,
           token
-        ).catch(() => ({
-          items: [],
-          meta: {
-            page: 1,
-            perPage: COMMENT_PAGE_SIZE,
-            hasMore: false,
-            nextPage: null,
-            order: 'from-end',
-            loadedCount: 0,
-          },
-        })),
+        ).catch((err) => {
+          // Never swallow abort — sheet close must stop the whole detail fetch
+          if (err?.name === 'AbortError' || /aborted|AbortError/i.test(String(err?.message || ''))) {
+            throw err;
+          }
+          return {
+            items: [],
+            meta: {
+              page: 1,
+              perPage: COMMENT_PAGE_SIZE,
+              hasMore: false,
+              nextPage: null,
+              order: 'from-end',
+              loadedCount: 0,
+            },
+          };
+        }),
         (r) => `(${(r?.items || []).length} comments, newest-first)`,
         batchOpt
       ),
@@ -1832,7 +1966,12 @@ async function fetchPrDetail(
         timings,
         'reviews',
         apiJson(`${base}/pulls/${n}/reviews?per_page=100`, fetchImpl, token).catch(
-          () => []
+          (err) => {
+            if (err?.name === 'AbortError' || /aborted|AbortError/i.test(String(err?.message || ''))) {
+              throw err;
+            }
+            return [];
+          }
         ),
         (r) => `(${Array.isArray(r) ? r.length : 0} reviews)`,
         batchOpt
@@ -1841,7 +1980,12 @@ async function fetchPrDetail(
         timings,
         'commits',
         apiJson(`${base}/pulls/${n}/commits?per_page=100`, fetchImpl, token).catch(
-          () => []
+          (err) => {
+            if (err?.name === 'AbortError' || /aborted|AbortError/i.test(String(err?.message || ''))) {
+              throw err;
+            }
+            return [];
+          }
         ),
         (r) => `(${Array.isArray(r) ? r.length : 0} commits)`,
         batchOpt
@@ -1897,7 +2041,12 @@ async function fetchPrDetail(
       fetchPullReviewThreadsBundle(owner, repo, n, fetchImpl, token, {
         cursor: opts.threadsCursor || null,
         maxPages: threadsMaxPages,
-      }).catch(() => reviewThreadBundle),
+      }).catch((err) => {
+        if (err?.name === 'AbortError' || /aborted|AbortError/i.test(String(err?.message || ''))) {
+          throw err;
+        }
+        return reviewThreadBundle;
+      }),
       (b) =>
         `(${(b?.threads || []).length} threads, ${(b?.comments || []).length} comments)`
     );
@@ -1920,7 +2069,12 @@ async function fetchPrDetail(
       fetchViewerPendingReviewBundle(owner, repo, n, fetchImpl, token, {
         reviews,
         login: viewerLogin,
-      }).catch(() => ({ comments: [], review: null })),
+      }).catch((err) => {
+        if (err?.name === 'AbortError' || /aborted|AbortError/i.test(String(err?.message || ''))) {
+          throw err;
+        }
+        return { comments: [], review: null };
+      }),
       (b) => `(${(b?.comments || []).length} pending comments)`
     );
   } else {
@@ -2276,7 +2430,7 @@ async function fetchPrDetail(
 
 async function postIssueComment(owner, repo, issueNumber, body, fetchImpl, token) {
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/comments`,
+    githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/comments`),
     fetchImpl,
     token,
     { method: 'POST', body: { body } }
@@ -2316,7 +2470,7 @@ async function submitPullReview(
     });
   }
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`,
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`),
     fetchImpl,
     token,
     { method: 'POST', body: payload }
@@ -2324,16 +2478,18 @@ async function submitPullReview(
 }
 
 /**
- * GraphQL: add a new review *thread* (line comment) onto an existing PENDING review.
+ * GraphQL: add a new review *thread* (line or file comment) onto an existing PENDING review.
  * REST POST /comments creates a second pending review → 422.
  */
 async function postReviewCommentViaPendingGraphql(
   pendingReviewNodeId,
-  { body, path, line, side = 'RIGHT', startLine, startSide },
+  { body, path, line, side = 'RIGHT', startLine, startSide, subjectType = 'line' },
   fetchImpl,
   token
 ) {
+  const isFile = String(subjectType || '').toLowerCase() === 'file';
   const hasRange =
+    !isFile &&
     startLine != null &&
     Number.isFinite(Number(startLine)) &&
     Number(startLine) !== Number(line);
@@ -2341,11 +2497,36 @@ async function postReviewCommentViaPendingGraphql(
     review: String(pendingReviewNodeId),
     body: String(body || '').trim(),
     path: String(path || ''),
-    line: Number(line),
-    side: String(side || 'RIGHT').toUpperCase() === 'LEFT' ? 'LEFT' : 'RIGHT',
   };
   let query;
-  if (hasRange) {
+  if (isFile) {
+    query = `mutation($review:ID!,$body:String!,$path:String!){
+      addPullRequestReviewThread(input:{
+        pullRequestReviewId:$review
+        body:$body
+        path:$path
+        subjectType:FILE
+      }){
+        thread {
+          id
+          comments(first:1){
+            nodes{
+              id
+              databaseId
+              body
+              path
+              createdAt
+              author { login avatarUrl }
+              pullRequestReview { databaseId }
+            }
+          }
+        }
+      }
+    }`;
+  } else if (hasRange) {
+    variables.line = Number(line);
+    variables.side =
+      String(side || 'RIGHT').toUpperCase() === 'LEFT' ? 'LEFT' : 'RIGHT';
     variables.startLine = Number(startLine);
     variables.startSide =
       String(startSide || side || 'RIGHT').toUpperCase() === 'LEFT' ? 'LEFT' : 'RIGHT';
@@ -2376,6 +2557,9 @@ async function postReviewCommentViaPendingGraphql(
       }
     }`;
   } else {
+    variables.line = Number(line);
+    variables.side =
+      String(side || 'RIGHT').toUpperCase() === 'LEFT' ? 'LEFT' : 'RIGHT';
     query = `mutation($review:ID!,$body:String!,$path:String!,$line:Int!,$side:DiffSide!){
       addPullRequestReviewThread(input:{
         pullRequestReviewId:$review
@@ -2406,15 +2590,17 @@ async function postReviewCommentViaPendingGraphql(
   const node = thread?.comments?.nodes?.[0];
   if (!node) {
     throw new Error(
-      `Could not add pending comment on ${path}:${line} (${side || 'RIGHT'}). ` +
-        `The line may be outside the diff or on the wrong side.`
+      isFile
+        ? `Could not add pending file comment on ${path}.`
+        : `Could not add pending comment on ${path}:${line} (${side || 'RIGHT'}). ` +
+            `The line may be outside the diff or on the wrong side.`
     );
   }
   const threadNodeId = thread?.id || null;
   const rest = mapGraphqlReviewCommentToRest(node, {
     body,
     path,
-    line,
+    line: isFile ? null : line,
     startLine: hasRange ? Number(startLine) : null,
     side,
     inReplyToId: null,
@@ -2422,11 +2608,12 @@ async function postReviewCommentViaPendingGraphql(
   return {
     ...rest,
     // GraphQL/REST often omit line on pending comments — keep selection line for UI
-    line: rest.line ?? Number(line),
+    line: isFile ? null : rest.line ?? Number(line),
     path: rest.path || path,
     side: side || 'RIGHT',
     start_line: hasRange ? Number(startLine) : null,
     start_side: hasRange ? startSide || side || 'RIGHT' : null,
+    subject_type: isFile ? 'file' : 'line',
     pending: true,
     pendingReviewId: node.pullRequestReview?.databaseId ?? null,
     threadNodeId,
@@ -2452,7 +2639,7 @@ async function ensureViewerPendingReview(
     if (!pending?.id) return null;
     try {
       const full = await apiJson(
-        `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${pending.id}`,
+        githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${pending.id}`),
         fetchImpl,
         token
       );
@@ -2522,8 +2709,9 @@ async function ensureViewerPendingReview(
 }
 
 /**
- * Line-level review comment on a PR file.
+ * Review comment on a PR file (line-level or file-level).
  * Prefer commit_id + path + line (side RIGHT). Multi-line uses start_line/start_side.
+ * File-level: subject_type: 'file' (line omitted).
  *
  * Unified pending model (single GitHub PENDING review):
  * - asPending: true → create PENDING review if needed, always attach via GraphQL
@@ -2532,18 +2720,31 @@ async function ensureViewerPendingReview(
  *
  * @param {object} fields
  * @param {boolean} [fields.asPending] Start review / Add comment — always pending
+ * @param {'line'|'file'} [fields.subjectType]
  */
 async function postReviewComment(
   owner,
   repo,
   pullNumber,
-  { body, path, line, side = 'RIGHT', commitId, startLine, startSide, asPending = false },
+  {
+    body,
+    path,
+    line,
+    side = 'RIGHT',
+    commitId,
+    startLine,
+    startSide,
+    asPending = false,
+    subjectType = 'line',
+  },
   fetchImpl,
   token
 ) {
   const text = String(body || '').trim();
   if (!text) throw new Error('Comment body is required');
-  if (!path || line == null) throw new Error('path and line are required');
+  if (!path) throw new Error('path is required');
+  const isFile = String(subjectType || '').toLowerCase() === 'file';
+  if (!isFile && line == null) throw new Error('path and line are required');
 
   // Unified PENDING: attach to existing, or create (asPending). Recover from 422.
   let pending = await ensureViewerPendingReview(
@@ -2559,12 +2760,22 @@ async function postReviewComment(
     token
   );
 
+  const gqlFields = {
+    body: text,
+    path,
+    line: isFile ? null : line,
+    side,
+    startLine: isFile ? null : startLine,
+    startSide: isFile ? null : startSide,
+    subjectType: isFile ? 'file' : 'line',
+  };
+
   // Existing PENDING (or just created) → always GraphQL attach (REST 422s)
   if (pending?.node_id) {
     try {
       const raw = await postReviewCommentViaPendingGraphql(
         pending.node_id,
-        { body: text, path, line, side, startLine, startSide },
+        gqlFields,
         fetchImpl,
         token
       );
@@ -2614,7 +2825,7 @@ async function postReviewComment(
         if (pending?.node_id) {
           const raw = await postReviewCommentViaPendingGraphql(
             pending.node_id,
-            { body: text, path, line, side, startLine, startSide },
+            gqlFields,
             fetchImpl,
             token
           );
@@ -2637,14 +2848,16 @@ async function postReviewComment(
   }
 
   // Published single comment (no PENDING review)
-  const payload = { body: text, path, line, side };
+  const payload = isFile
+    ? { body: text, path, subject_type: 'file' }
+    : { body: text, path, line, side };
   if (commitId) payload.commit_id = commitId;
-  if (startLine != null && Number(startLine) !== Number(line)) {
+  if (!isFile && startLine != null && Number(startLine) !== Number(line)) {
     payload.start_line = Number(startLine);
     payload.start_side = startSide || side || 'RIGHT';
   }
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/comments`,
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/comments`),
     fetchImpl,
     token,
     { method: 'POST', body: payload }
@@ -2664,7 +2877,7 @@ async function findViewerPendingReview(owner, repo, pullNumber, fetchImpl, token
   try {
     const [reviews, login] = await Promise.all([
       apiJson(
-        `https://api.github.com/repos/${owner}/${repo}/pulls/${n}/reviews?per_page=100`,
+        githubRestUrl(`/repos/${owner}/${repo}/pulls/${n}/reviews?per_page=100`),
         fetchImpl,
         token
       ).catch(() => []),
@@ -2801,7 +3014,7 @@ async function resolveParentCommentNodeId(
   if (!Number.isFinite(id) || id <= 0) return null;
   try {
     const parent = await apiJson(
-      `https://api.github.com/repos/${owner}/${repo}/pulls/comments/${id}`,
+      githubRestUrl(`/repos/${owner}/${repo}/pulls/comments/${id}`),
       fetchImpl,
       token
     );
@@ -3037,7 +3250,7 @@ async function replyToReviewComment(
   // No pending review: REST dedicated replies endpoint (published immediately)
   try {
     return await apiSend(
-      `https://api.github.com/repos/${owner}/${repo}/pulls/${n}/comments/${Math.floor(parentId)}/replies`,
+      githubRestUrl(`/repos/${owner}/${repo}/pulls/${n}/comments/${Math.floor(parentId)}/replies`),
       fetchImpl,
       token,
       { method: 'POST', body: { body: text } }
@@ -3083,7 +3296,7 @@ async function resolveReviewThread(threadNodeId, resolved, fetchImpl, token) {
 async function updatePullState(owner, repo, pullNumber, state, fetchImpl, token) {
   const next = state === 'closed' ? 'closed' : 'open';
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}`,
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}`),
     fetchImpl,
     token,
     { method: 'PATCH', body: { state: next } }
@@ -3104,7 +3317,7 @@ async function reopenPullRequest(owner, repo, pullNumber, fetchImpl, token) {
  */
 async function deleteReviewComment(owner, repo, commentId, fetchImpl, token) {
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/comments/${commentId}`,
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/comments/${commentId}`),
     fetchImpl,
     token,
     { method: 'DELETE' }
@@ -3117,7 +3330,7 @@ async function deleteReviewComment(owner, repo, commentId, fetchImpl, token) {
  */
 async function deleteIssueComment(owner, repo, commentId, fetchImpl, token) {
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/issues/comments/${commentId}`,
+    githubRestUrl(`/repos/${owner}/${repo}/issues/comments/${commentId}`),
     fetchImpl,
     token,
     { method: 'DELETE' }
@@ -3131,7 +3344,7 @@ async function updatePullRequest(owner, repo, pullNumber, fields, fetchImpl, tok
   if (fields?.base != null) body.base = String(fields.base);
   if (fields?.state != null) body.state = fields.state === 'closed' ? 'closed' : 'open';
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}`,
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}`),
     fetchImpl,
     token,
     { method: 'PATCH', body }
@@ -3140,7 +3353,7 @@ async function updatePullRequest(owner, repo, pullNumber, fields, fetchImpl, tok
 
 async function editIssueComment(owner, repo, commentId, body, fetchImpl, token) {
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/issues/comments/${commentId}`,
+    githubRestUrl(`/repos/${owner}/${repo}/issues/comments/${commentId}`),
     fetchImpl,
     token,
     { method: 'PATCH', body: { body: String(body || '') } }
@@ -3149,7 +3362,7 @@ async function editIssueComment(owner, repo, commentId, body, fetchImpl, token) 
 
 async function editReviewComment(owner, repo, commentId, body, fetchImpl, token) {
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/comments/${commentId}`,
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/comments/${commentId}`),
     fetchImpl,
     token,
     { method: 'PATCH', body: { body: String(body || '') } }
@@ -3165,7 +3378,7 @@ async function requestReviewers(
   token
 ) {
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/requested_reviewers`,
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/requested_reviewers`),
     fetchImpl,
     token,
     {
@@ -3184,7 +3397,7 @@ async function removeReviewers(
   token
 ) {
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/requested_reviewers`,
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/requested_reviewers`),
     fetchImpl,
     token,
     {
@@ -3196,7 +3409,7 @@ async function removeReviewers(
 
 async function addAssignees(owner, repo, issueNumber, assignees, fetchImpl, token) {
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/assignees`,
+    githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/assignees`),
     fetchImpl,
     token,
     { method: 'POST', body: { assignees: assignees || [] } }
@@ -3205,7 +3418,7 @@ async function addAssignees(owner, repo, issueNumber, assignees, fetchImpl, toke
 
 async function removeAssignees(owner, repo, issueNumber, assignees, fetchImpl, token) {
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/assignees`,
+    githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/assignees`),
     fetchImpl,
     token,
     { method: 'DELETE', body: { assignees: assignees || [] } }
@@ -3214,11 +3427,42 @@ async function removeAssignees(owner, repo, issueNumber, assignees, fetchImpl, t
 
 async function setIssueLabels(owner, repo, issueNumber, labels, fetchImpl, token) {
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/labels`,
+    githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/labels`),
     fetchImpl,
     token,
     { method: 'PUT', body: { labels: labels || [] } }
   );
+}
+
+/**
+ * List repository labels (name + color + description) for the label picker.
+ * Paginates up to maxPages × 100.
+ * @returns {Promise<Array<{ name: string, color: string, description: string }>>}
+ */
+async function fetchRepoLabels(owner, repo, fetchImpl, token = null, opts = {}) {
+  const perPage = 100;
+  const maxPages = Math.max(1, Math.min(10, Number(opts.maxPages) || 5));
+  const out = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const url = githubRestUrl(
+      `/repos/${owner}/${repo}/labels?per_page=${perPage}&page=${page}`
+    );
+    const batch = await apiJson(url, fetchImpl, token);
+    if (!Array.isArray(batch) || !batch.length) break;
+    for (const l of batch) {
+      const name = String(l?.name || '').trim();
+      if (!name) continue;
+      out.push({
+        name,
+        color: String(l?.color || '')
+          .trim()
+          .replace(/^#/, ''),
+        description: String(l?.description || ''),
+      });
+    }
+    if (batch.length < perPage) break;
+  }
+  return out;
 }
 
 /**
@@ -3237,7 +3481,7 @@ async function mergePullRequest(
   if (commitTitle != null) body.commit_title = String(commitTitle);
   if (commitMessage != null) body.commit_message = String(commitMessage);
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/merge`,
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/merge`),
     fetchImpl,
     token,
     { method: 'PUT', body }
@@ -3255,7 +3499,7 @@ async function updatePullBranch(
   const body = {};
   if (expectedHeadSha) body.expected_head_sha = String(expectedHeadSha);
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/update-branch`,
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/update-branch`),
     fetchImpl,
     token,
     { method: 'PUT', body }
@@ -3280,7 +3524,7 @@ async function resolvePullRequestNodeId(
   try {
     // Prefer REST node_id (cheap, same id GraphQL expects)
     const pr = await apiJson(
-      `https://api.github.com/repos/${owner}/${repo}/pulls/${n}`,
+      githubRestUrl(`/repos/${owner}/${repo}/pulls/${n}`),
       fetchImpl,
       token
     );
@@ -3431,7 +3675,7 @@ async function fetchPullRequestSubscription(
 
 async function setIssueMilestone(owner, repo, issueNumber, milestoneNumber, fetchImpl, token) {
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}`,
+    githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}`),
     fetchImpl,
     token,
     {
@@ -3457,7 +3701,7 @@ async function setPullRequestDraftStage(
   let id = nodeId;
   if (!id) {
     const pr = await apiJson(
-      `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}`,
+      githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}`),
       fetchImpl,
       token
     );
@@ -3515,9 +3759,11 @@ async function uploadRepoFile(
   let sha;
   try {
     const meta = await apiJson(
-      `https://api.github.com/repos/${owner}/${repo}/contents/${encPath}${
-        branch ? `?ref=${encodeURIComponent(branch)}` : ''
-      }`,
+      githubRestUrl(
+        `/repos/${owner}/${repo}/contents/${encPath}${
+          branch ? `?ref=${encodeURIComponent(branch)}` : ''
+        }`
+      ),
       fetchImpl,
       token
     );
@@ -3532,7 +3778,7 @@ async function uploadRepoFile(
   if (branch) body.branch = branch;
   if (sha) body.sha = sha;
   const result = await apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/contents/${encPath}`,
+    githubRestUrl(`/repos/${owner}/${repo}/contents/${encPath}`),
     fetchImpl,
     token,
     { method: 'PUT', body }
@@ -3558,7 +3804,7 @@ async function getRepoFileText(owner, repo, { path, ref }, fetchImpl, token) {
     .map(encodeURIComponent)
     .join('/');
   const meta = await apiJson(
-    `https://api.github.com/repos/${owner}/${repo}/contents/${encPath}?ref=${encodeURIComponent(rev)}`,
+    githubRestUrl(`/repos/${owner}/${repo}/contents/${encPath}?ref=${encodeURIComponent(rev)}`),
     fetchImpl,
     token
   );
@@ -3636,10 +3882,10 @@ async function applyReviewSuggestion(
     contentB64 = btoa(unescape(encodeURIComponent(next)));
   }
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/contents/${path
+    githubRestUrl(`/repos/${owner}/${repo}/contents/${path
       .split('/')
       .map(encodeURIComponent)
-      .join('/')}`,
+      .join('/')}`),
     fetchImpl,
     token,
     {
@@ -3660,7 +3906,7 @@ async function applyReviewSuggestion(
 async function fetchViewerLogin(fetchImpl, token) {
   if (!token) return null;
   try {
-    const me = await apiJson('https://api.github.com/user', fetchImpl, token);
+    const me = await apiJson(githubRestUrl('/user'), fetchImpl, token);
     return me?.login || null;
   } catch {
     return null;
@@ -3680,6 +3926,12 @@ function mapAndAnnotateFiles(files, gitattributesText = '') {
     deletions: f.deletions,
     changes: f.changes,
     patch: f.patch || '',
+    // Preserve media URLs for image preview / binary classification
+    raw_url: f.raw_url || f.rawUrl || '',
+    blob_url: f.blob_url || f.blobUrl || '',
+    contents_url: f.contents_url || f.contentsUrl || '',
+    sha: f.sha || '',
+    previous_filename: f.previous_filename || f.previousFilename || '',
   }));
 
   let filesOut;
@@ -3699,15 +3951,26 @@ function mapAndAnnotateFiles(files, gitattributesText = '') {
     filesOut = null;
   }
   if (!filesOut) {
-    filesOut = mappedFiles.map((f) => ({
-      ...f,
-      defaultCollapsed:
-        !f.patch ||
-        (f.changes || 0) >= 500 ||
-        /package-lock\.json$|yarn\.lock$|\.min\.(js|css)$|\.bundle\.js$/i.test(
-          f.filename || ''
-        ),
-    }));
+    const LARGE = 5000;
+    filesOut = mappedFiles.map((f) => {
+      const path = f.filename || '';
+      const isImage =
+        /\.(png|jpe?g|gif|webp|bmp|svg|ico|avif)$/i.test(path);
+      const hasPatch = Boolean(f.patch);
+      const kind = isImage ? 'image' : hasPatch ? 'text' : 'binary';
+      return {
+        ...f,
+        fileKind: kind,
+        openableAsText: kind === 'text',
+        renderImage: kind === 'image',
+        defaultCollapsed:
+          kind === 'binary' ||
+          (f.changes || 0) >= LARGE ||
+          /package-lock\.json$|yarn\.lock$|\.min\.(js|css)$|\.bundle\.js$/i.test(
+            path
+          ),
+      };
+    });
   }
   return filesOut;
 }
@@ -3726,7 +3989,7 @@ async function fetchCompareFiles(owner, repo, base, head, fetchImpl, token = nul
     throw new Error('owner, repo, base, and head are required for compare');
   }
   const gitattributesText = String(options.gitattributesText || '');
-  const url = `https://api.github.com/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/compare/${encodeURIComponent(b)}...${encodeURIComponent(h)}`;
+  const url = githubRestUrl(`/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/compare/${encodeURIComponent(b)}...${encodeURIComponent(h)}`);
   const data = await apiJson(url, fetchImpl, token);
   const files = mapAndAnnotateFiles(data?.files || [], gitattributesText);
   return {
@@ -3757,6 +4020,8 @@ const fetchApi = {
   fetchOpenPulls,
   fetchPrDetail,
   fetchPrCommentsPage,
+  fetchAllPrCommits,
+  fetchAllPrFiles,
   fetchCompareFiles,
   mapAndAnnotateFiles,
   fetchPullReviewThreads,
@@ -3797,6 +4062,7 @@ const fetchApi = {
   addAssignees,
   removeAssignees,
   setIssueLabels,
+  fetchRepoLabels,
   mergePullRequest,
   updatePullBranch,
   setIssueSubscription,

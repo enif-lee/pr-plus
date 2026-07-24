@@ -183,11 +183,48 @@
     .perm-note li {
       margin: 2px 0;
     }
+    .host-list {
+      list-style: none;
+      margin: 0 0 8px;
+      padding: 0;
+    }
+    .host-list:empty {
+      display: none;
+    }
+    .host-list li {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px;
+      margin: 0 0 4px;
+      border: 1px solid #d0d7de;
+      border-radius: 6px;
+      background: #f6f8fa;
+      font-size: 12px;
+    }
+    .host-list .host-name {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-weight: 600;
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .host-list .host-mask {
+      color: #656d76;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+    }
+    .host-list button {
+      flex-shrink: 0;
+      padding: 2px 8px;
+      font-size: 11px;
+    }
   </style>
 </head>
 <body>
   <h1>pr+</h1>
-  <label for="token">GitHub PAT (required)</label>
+  <label for="token">github.com PAT (public cloud)</label>
   <input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="ghp_… / github_pat_…" />
   <p id="token-saved" class="saved" hidden>Saved: <code id="token-mask"></code></p>
   <div class="row">
@@ -197,7 +234,7 @@
   </div>
   <p class="hint">
     <a href="https://github.com/settings/tokens" target="_blank" rel="noreferrer">Create token</a>
-    · 토큰이 없으면 확장이 비활성(네이티브 GitHub만 동작)합니다.
+    · github.com 전용. Enterprise 호스트는 아래 페어로 별도 PAT를 등록하세요.
     · 확장 <code>storage</code>에만 저장(동기화 안 함).
   </p>
 
@@ -211,12 +248,20 @@
       <span class="perm-why">PAT·옵션 로컬 저장 (<code>chrome.storage.local</code>)</span>
     </li>
     <li>
+      <span class="perm-key">scripting</span>
+      <span class="perm-why">Enterprise 호스트에 content script 등록</span>
+    </li>
+    <li>
       <span class="perm-key">https://github.com/*</span>
-      <span class="perm-why">PR 리스트 DOM, 모달 호스트(콘텐츠 스크립트)</span>
+      <span class="perm-why">github.com PR 리스트·모달 (기본)</span>
     </li>
     <li>
       <span class="perm-key">https://api.github.com/*</span>
-      <span class="perm-why">PR 상세·리뷰·코멘트·머지·GraphQL 스레드 API</span>
+      <span class="perm-why">github.com REST / GraphQL API</span>
+    </li>
+    <li>
+      <span class="perm-key">optional https://*/*</span>
+      <span class="perm-why">Enterprise 웹/API 호스트 (설정에서 허용 요청)</span>
     </li>
   </ul>
 
@@ -259,6 +304,39 @@
       <span class="pref__desc">코멘트 작성란 → Merge box → Conversation(최신 우선) 순으로 배치합니다.</span>
     </span>
   </label>
+
+  <h2>GitHub Enterprise (host + PAT)</h2>
+  <p class="hint" style="margin-top: 0">
+    호스트마다 PAT를 함께 등록합니다 (최대 3개).
+    <code>*.ghe.com</code> 포함, 수동 등록한 호스트만 활성화됩니다. 기본 PAT는 사용하지 않습니다.
+  </p>
+  <ul id="host-accounts-list" class="host-list" aria-label="Registered enterprise hosts"></ul>
+  <p id="host-accounts-empty" class="hint" style="margin: 4px 0 8px">등록된 Enterprise 호스트 없음</p>
+  <label for="enterprise-host">Web host</label>
+  <input
+    id="enterprise-host"
+    type="text"
+    autocomplete="off"
+    spellcheck="false"
+    placeholder="github.mycorp.com or octocorp.ghe.com"
+  />
+  <label for="enterprise-token" style="margin-top: 8px">PAT for this host</label>
+  <input
+    id="enterprise-token"
+    type="password"
+    autocomplete="off"
+    spellcheck="false"
+    placeholder="ghp_… / github_pat_…"
+  />
+  <p class="hint">
+    API 자동: GHES → <code>https://{host}/api/v3</code> ·
+    <code>*.ghe.com</code> → <code>https://api.{host}</code>
+  </p>
+  <div class="row" style="margin-top: 8px">
+    <button id="add-host-account" class="primary" type="button">Add host &amp; grant access</button>
+    <span id="enterprise-status" class="hint" style="margin: 0; flex: 1"></span>
+  </div>
+  <p id="endpoint-preview" class="hint" style="margin-top: 6px"></p>
 
   <h2>Storage</h2>
   <div class="pref pref--action">

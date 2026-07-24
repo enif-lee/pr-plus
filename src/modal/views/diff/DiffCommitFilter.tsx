@@ -18,10 +18,13 @@ type Props = {
   error?: string | null;
   label?: string | null;
   disabled?: boolean;
+  /** Fetch remaining commit pages when the picker opens. */
+  onOpen?: (() => void) | null;
 };
 
 /**
  * Multi-checkbox SearchableSelect: 1 commit = single, 2 = range, 0 = all.
+ * Options are newest-first (see buildCommitFilterOptions).
  */
 export function DiffCommitFilter({
   commits,
@@ -31,6 +34,7 @@ export function DiffCommitFilter({
   error = null,
   label = null,
   disabled = false,
+  onOpen = null,
 }: Props) {
   const options = useMemo(() => buildCommitFilterOptions(commits), [commits]);
   const f = normalizeDiffCommitFilter(filter);
@@ -38,7 +42,7 @@ export function DiffCommitFilter({
   const [query, setQuery] = useState('');
   const btnRef = useRef<HTMLButtonElement | null>(null);
 
-  if (!options.length) return null;
+  if (!options.length && !loading) return null;
 
   const busy = Boolean(loading || disabled);
   const selectOptions = useMemo(
@@ -77,18 +81,24 @@ export function DiffCommitFilter({
         type="button"
         ref={btnRef}
         className="prp-commit-filter__trigger"
-        disabled={busy}
-        onClick={() => setOpen((v) => !v)}
+        disabled={busy && !options.length}
+        onClick={() => {
+          setOpen((v) => {
+            const next = !v;
+            if (next) void onOpen?.();
+            return next;
+          });
+        }}
         aria-haspopup="dialog"
         aria-expanded={open}
         title="Check 1 commit for single diff, or 2 for a range"
       >
-        {loading ? 'Loading…' : trigger}
+        {loading && !options.length ? 'Loading…' : trigger}
         <span aria-hidden="true"> ▾</span>
       </button>
       <SearchableSelect
         open={open}
-        title="Commits — check 1 or 2"
+        title={loading ? 'Commits — loading all…' : 'Commits — check 1 or 2'}
         options={selectOptions}
         query={query}
         onQuery={setQuery}
@@ -108,7 +118,8 @@ export function DiffCommitFilter({
         multi
         initialSelectedIds={initialSelectedIds}
         confirmLabel="Apply selection"
-        placeholder="Filter commits… (empty = all)"
+        placeholder="Search commits by message or sha…"
+        emptyLabel={loading ? 'Loading remaining commits…' : 'No matches'}
       />
       {error ? (
         <span className="prp-commit-filter__error" role="alert">

@@ -40,6 +40,7 @@ function InlineThreadImpl(props: any) {
     prOpen,
     linkCtx,
     onUploadFile,
+    mentionCandidates = [],
     collapsed: collapsedProp,
     onToggleCollapse,
     pendingCount = 0,
@@ -137,15 +138,24 @@ function InlineThreadImpl(props: any) {
     !rootPending &&
     !hasPendingReplies;
 
+  const isFileComment =
+    row?.subjectType === 'file' ||
+    thread?.root?.subjectType === 'file' ||
+    thread?.root?.subject_type === 'file' ||
+    (path && line == null && !thread?.root?.originalLine);
   const fileLoc =
     path &&
-    (startLine != null && line != null && startLine !== line
-      ? `${path}:${startLine}–${line}`
-      : line != null
-        ? `${path}:${line}`
-        : path);
+    (isFileComment
+      ? path
+      : startLine != null && line != null && startLine !== line
+        ? `${path}:${startLine}–${line}`
+        : line != null
+          ? `${path}:${line}`
+          : path);
   const locLabel = fileLoc
-    ? `${fileLoc}${side ? ` · ${String(side).toUpperCase()}` : ''}`
+    ? isFileComment
+      ? `${fileLoc} · file`
+      : `${fileLoc}${side ? ` · ${String(side).toUpperCase()}` : ''}`
     : 'Review thread';
   const commentCount = 1 + replyCount;
   const rootId = row?.commentId ?? thread?.id ?? thread?.root?.id;
@@ -200,6 +210,7 @@ function InlineThreadImpl(props: any) {
           onRegisterSave={onRegisterEditorSave}
           onUploadFile={onUploadFile}
           linkCtx={linkCtx}
+          mentionCandidates={mentionCandidates}
         />
       );
     }
@@ -431,6 +442,7 @@ function InlineThreadImpl(props: any) {
                 showTabs
                 onUploadFile={onUploadFile}
                 linkCtx={linkCtx}
+                mentionCandidates={mentionCandidates}
               />
               {/* Actions only after Reply field is focused (or draft text remains) */}
               <div
@@ -505,6 +517,9 @@ function InlineThreadImpl(props: any) {
               source={String(body || '') || '_No description_'}
               className="prp-md--compact prp-md--collapsed-preview"
               linkCtx={linkCtx}
+              searchQuery={qSearch}
+              searchCurrentStart={commentCurrentStart(rootId)}
+              searchOccurrenceIndex={commentOcc(rootId)}
             />
           </div>
         )}

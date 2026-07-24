@@ -36,13 +36,22 @@ const files = [
     !rows.some((r) => r.kind === 'expand-gap'),
     'no separate expand-gap rows'
   );
-  // First @@ is -1,3 +1,3 (symmetric) → hidden/omitted; second is asymmetric + gap
-  const hunks = rows.filter((r) => r.lineType === 'hunk');
-  assert.equal(hunks.length, 1, 'only asymmetric second hunk is listed');
-  assert.ok(hunks[0].expandAbove, 'second hunk carries expandAbove');
-  assert.equal(hunks[0].expandAbove.gapStartNew, 4);
-  assert.equal(hunks[0].expandAbove.gapEndNew, 19);
-  assert.equal(hunks[0].expandAbove.hiddenCount, 16);
+  // First @@ is -1,3 +1,3 (symmetric) → header omitted unless it needs expand UI.
+  // Middle gap attaches to BOTH edges: previous expandBelow + next expandAbove.
+  const withBelow = rows.filter((r) => r.expandBelow);
+  const withAbove = rows.filter((r) => r.expandAbove);
+  assert.ok(withBelow.length >= 1, 'previous edge has expandBelow (front of gap)');
+  assert.ok(withAbove.length >= 1, 'next hunk has expandAbove (back of gap)');
+  const gapAbove = withAbove[0].expandAbove;
+  const gapBelow = withBelow[0].expandBelow;
+  assert.equal(gapAbove.gapStartNew, 4);
+  assert.equal(gapAbove.gapEndNew, 19);
+  assert.equal(gapAbove.hiddenCount, 16);
+  assert.equal(gapBelow.gapStartNew, 4);
+  assert.equal(gapBelow.gapEndNew, 19);
+  // Same remaining gap object range at both edges
+  assert.equal(gapAbove.gapStartNew, gapBelow.gapStartNew);
+  assert.equal(gapAbove.gapEndNew, gapBelow.gapEndNew);
 }
 
 // Expanding a range materializes context; expandAbove shrinks/goes away
@@ -70,13 +79,33 @@ const files = [
   assert.equal(ctx[0].code, 'line-4');
 }
 
-// resolveExpandRange directions
+// resolveExpandRange directions — front vs back of gap must differ
 {
   const gap = { gapStartNew: 10, gapEndNew: 40, expandChunk: 20 };
   assert.deepEqual(resolveExpandRange('all', gap), { start: 10, end: 40 });
   assert.deepEqual(resolveExpandRange('down', gap), { start: 10, end: 29 });
   assert.deepEqual(resolveExpandRange('up', gap), { start: 21, end: 40 });
+  assert.deepEqual(resolveExpandRange('fromStart', gap), { start: 10, end: 29 });
+  assert.deepEqual(resolveExpandRange('fromEnd', gap), { start: 21, end: 40 });
+  assert.notDeepEqual(
+    resolveExpandRange('fromStart', gap),
+    resolveExpandRange('fromEnd', gap),
+    'front and back of gap must load different line ranges'
+  );
   assert.equal(DIFF_EXPAND_CHUNK, 20);
+}
+
+// Sequential expand from opposite ends leaves the middle remaining
+{
+  const gap = { gapStartNew: 3, gapEndNew: 49, expandChunk: 10 };
+  const front = resolveExpandRange('fromStart', gap);
+  const back = resolveExpandRange('fromEnd', gap);
+  assert.deepEqual(front, { start: 3, end: 12 });
+  assert.deepEqual(back, { start: 40, end: 49 });
+  // After expanding front, remaining gap's back edge still targets the file end
+  const rem = { gapStartNew: 13, gapEndNew: 49, expandChunk: 10 };
+  assert.deepEqual(resolveExpandRange('fromEnd', rem), { start: 40, end: 49 });
+  assert.deepEqual(resolveExpandRange('fromStart', rem), { start: 13, end: 22 });
 }
 
 // mergeLineRanges coalesces
@@ -150,6 +179,8 @@ const files = [
   );
   assert.ok(virt.includes('HunkExpandControls') || virt.includes('prp-hunk-expand'));
   assert.ok(virt.includes('expandAbove'));
+  assert.ok(virt.includes('expandBelow'));
+  assert.ok(virt.includes('fromStart') && virt.includes('fromEnd'));
   assert.ok(!virt.includes("kind === 'expand-gap'"));
   const css = fs.readFileSync(
     path.join(__dirname, '../src/modal/styles.css'),

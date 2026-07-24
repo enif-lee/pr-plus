@@ -9,8 +9,156 @@
   color: var(--fgColor-default, #1f2328);
 }
 
+/*
+ * FOUC gate: content-script styles.css is present before pr-modal.css loads.
+ * Hosts stay invisible until host sets data-prp-css-ready after the modal sheet
+ * applies — so the first paint is already styled (no unstyled flash).
+ */
+#prp-modal-host:not([data-prp-css-ready='1']),
+#prp-page-embed:not([data-prp-css-ready='1']) {
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+#prp-modal-host[data-prp-css-ready='1'],
+#prp-page-embed[data-prp-css-ready='1'] {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/*
+ * In-page PR embed host: full window size, covers GitHub global header.
+ * Must mount on document.body (host JS) — fixed inside .application-main is
+ * often clipped by GH transform/filter containing blocks (panel vanishes).
+ */
+#prp-page-embed.prp-page-embed,
+.prp-page-embed {
+  position: fixed !important;
+  inset: 0 !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  width: 100% !important;
+  width: 100vw !important;
+  /* Prefer dynamic viewport when available (mobile browser chrome) */
+  height: 100% !important;
+  height: 100vh !important;
+  height: 100dvh !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  max-width: none !important;
+  max-height: none !important;
+  box-sizing: border-box !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  /* Above GH AppHeader / sticky chrome */
+  z-index: 100000 !important;
+  background: var(--bgColor-default, #ffffff) !important;
+  /* Avoid GH parent opacity/visibility inheritance tricks */
+  opacity: 1 !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
+  transform: none !important;
+  filter: none !important;
+  contain: none !important;
+}
+#prp-page-embed.prp-page-embed > .prp-overlay,
+.prp-page-embed > .prp-overlay {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+html.prp-embed-active,
+html.prp-embed-active body {
+  /* Panel owns scroll — no document scroll under fixed fullscreen embed */
+  overflow: hidden !important;
+}
+html.prp-embed-active [data-prp-native-hidden='1'] {
+  display: none !important;
+}
+/* Covered by fixed embed; hide to avoid focus/tab into buried header chrome */
+html.prp-embed-active .AppHeader,
+html.prp-embed-active header.AppHeader,
+html.prp-embed-active .js-header-wrapper,
+html.prp-embed-active [data-target='app-header'] {
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+/* GitHub site footer while pr+ in-page replace is active */
+html.prp-embed-active [data-prp-footer-hidden='1'],
+html.prp-embed-active footer.footer,
+html.prp-embed-active footer.Footer,
+html.prp-embed-active #footer {
+  display: none !important;
+}
+
 .pr-tree-toggle:hover {
   background: var(--button-default-bgColor-hover, #eef1f4);
+}
+
+/*
+ * Native GitHub PR header “pr+” toggle.
+ * Match neighboring Primer actions (measured: 32px tall, 0 12px pad, 14px/500,
+ * parent flex gap 8px → no extra margin on the button).
+ */
+.prp-gh-open-toggle {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  margin: 0 !important;
+  vertical-align: middle;
+  height: 32px;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  /* Accent blue (not --button-primary: that is green for merge CTAs) */
+  background: var(--bgColor-accent-emphasis, #0969da);
+  color: var(--fgColor-onEmphasis, #fff);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: normal;
+  line-height: 20px;
+  cursor: pointer;
+  white-space: nowrap;
+  appearance: none;
+  -webkit-appearance: none;
+  transition: background-color 80ms cubic-bezier(0.33, 1, 0.68, 1),
+    border-color 80ms cubic-bezier(0.33, 1, 0.68, 1);
+}
+.prp-gh-open-toggle:hover {
+  /* Darker accent — not --bgColor-accent-muted (reads washed / wrong) */
+  background: color-mix(
+    in srgb,
+    var(--bgColor-accent-emphasis, #0969da) 86%,
+    #000
+  );
+  border-color: transparent;
+  color: var(--fgColor-onEmphasis, #fff);
+  filter: none;
+  text-decoration: none;
+}
+.prp-gh-open-toggle:active {
+  background: color-mix(
+    in srgb,
+    var(--bgColor-accent-emphasis, #0969da) 72%,
+    #000
+  );
+}
+.prp-gh-open-toggle:focus-visible {
+  outline: 2px solid var(--focus-outlineColor, #0969da);
+  outline-offset: 2px;
+}
+/* Hide native toggle while pr+ embed covers the page */
+html.prp-embed-active .prp-gh-open-toggle {
+  display: none !important;
 }
 
 .js-issue-row.pr-tree-indented,

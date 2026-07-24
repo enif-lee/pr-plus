@@ -23,10 +23,11 @@
 | Value | What you get |
 |-------|----------------|
 | **Review without page navigation** | Click a PR on `/pulls` → full **modal** or **side sheet**. Stay on the list; no full PR page hop. |
-| **Ultra-fast, progressive open** | **List sketch → durable cache → live network** so the shell paints quickly, then **incremental** fills refine the data. |
+| **PR page embed** | On `/pull/N`, replace the native PR body with the **same pr+ shell** (full window); restore GitHub UI anytime. |
+| **Ultra-fast, progressive open** | **List sketch → durable cache → live network** so the shell paints **synchronously** on click, then **incremental** fills refine the data. |
 | **Cache-first, soft revalidate** | Memory + **IndexedDB** cache with background refresh—writes stay snappy without cold remounts. |
 | **Butter-smooth Diff** | **Range-gated virtualization**, syntax-highlight **cache**, and zero per-pixel app re-renders while you scroll. |
-| **Stack visibility** | List reorders into a base/head **stack tree**; the modal shows a **stacked PR strip** for the current chain. |
+| **Stack visibility** | List reorders into a base/head **stack tree**; the shell shows a **stacked PR strip** (horizontal scroll) for the current chain. |
 | **Review workflow in one place** | Conversation, Diff, leave review, line comments, suggestions, filters, subscribe, merge—without bouncing GitHub tabs. |
 
 GitHub’s default PR list is flat. Stacked PRs (base = another PR’s head) are hard to see, and opening each PR is a full navigation. **pr+** keeps you on the pulls list and layers a high-performance review UI on top.
@@ -104,10 +105,16 @@ Open a PR title from the list → **centered modal** or **side sheet** on the **
 | **Centered modal** | Full-focus overlay for deep review; **resizable** (corner drag, viewport-aware clamps) |
 | **Side sheet** | Docked panel—**keep the PR list visible** while you review; **resizable** width |
 | **Fullscreen shell** | Expand the panel to the viewport (header control + shortcut) |
-| **Stacked PR strip** | Jump the stack chain without leaving the shell |
-| **Floating scrollbars** | Overlay thumbs on conversation / aside / diff panes; idle-hide, no classic gutter |
+| **PR-page embed** | On a GitHub PR URL, mount pr+ **full-window** under (and covering) the native PR main; **Open pr+** chip on the GH header when embed is off |
+| **Restore native PR** | Leave embed and show stock GitHub PR UI again (header control) |
+| **Stacked PR strip** | Horizontal stack path strip; **wheel → scroll**, floating thumb, sticky **Stack** label |
+| **Floating scrollbars** | Overlay thumbs on conversation, aside, **file tree**, **diff list**, and **stack strip**; idle-hide, no classic gutter |
 | **Soft edge fade** | Scroll content dissolves at the panel edges instead of a hard clip |
-| **Header tips & actions** | Compact actions, subscribe, refresh, layout toggles; **Close PR** uses a clear danger style |
+| **Header (conversation)** | Two-row chrome: title cluster (edit hugs title), branch + stats, actions always inline (title shrinks when narrow—no ⋯ collapse) |
+| **Header (Diff compact)** | Dense strip: title · **reviewer avatars + check icons** (one continuous left-on-top stack) · branch · diff stats · actions |
+| **Cancel in-flight load** | Closing the sheet / superseding open **aborts** pending GitHub fetches (content + service worker) |
+| **FOUC-safe paint** | Content CSS gated until styles are ready—no unstyled flash on first open |
+| **List warm-up** | After pulls list paint, warm prefs/CSS/host so the next open’s first paint stays sync |
 
 #### Conversation
 
@@ -131,19 +138,22 @@ Open a PR title from the list → **centered modal** or **side sheet** on the **
 
 | Feature | Description |
 |---------|-------------|
-| **Files tree** | Nested dirs, extension filters, collapse, mark-as-viewed (session) |
+| **Files tree** | Nested dirs, extension multi-select, unread filter, collapse, mark-as-viewed (session); **floating scrollbar** |
 | **Collapsible / resizable file nav** | Focus the hunk pane when you need width |
 | **Unified / split** | Diff modes |
 | **Expand omitted context** | Grow gaps between hunks (chunk / all) without reloading the PR |
 | **Commit-range filter** | Single commit or inclusive range—**fast** compare without leaving Diff |
 | **Review filters** | **Unresolved / Resolved / Pending** counts and file-set filtering for triage |
-| **Line selection** | Single click or multi-line drag; continuous selection block |
+| **Line selection** | Single click, multi-line drag, or **Shift-click range** in the same file |
+| **Selection island** | Comment / start review actions docked to the selection without leaving Diff |
 | **Line comments** | Immediate post or **pending review** batch |
 | **Inline threads** | Reply, resolve/unresolve, edit/delete; collapse-aware virtual heights |
+| **Image / binary diffs** | Images render in-diff; non-text binaries stay header-only; huge files can start collapsed |
 | **Suggestions** | Render ````suggestion` blocks; **Apply suggestion** (commit to head) |
 | **View-scoped Find (`⌘F`)** | Search **only the active surface**—Conversation corpus *or* Diff rows—no cross-view noise |
 | **Markdown-preserving marks** | Search highlights keep code/markdown structure (no plain-text wipe) |
 | **Async chunked search** | Large corpora scan **incrementally** so typing stays responsive |
+| **Shared StepNav** | Prev/next for **threads** and **finder** hits (including **⌥J / ⌥K** where enabled) |
 | **Comment nav** | Jump prev/next inline review comments without layout thrash |
 
 #### Metadata & lifecycle
@@ -152,7 +162,7 @@ Open a PR title from the list → **centered modal** or **side sheet** on the **
 |---------|-------------|
 | **Title / body / base** | Edit title, description, change base branch |
 | **Draft stage** | Convert to draft / mark ready for review (GraphQL) |
-| **Reviewers / assignees / labels** | Searchable pickers with avatars & label colors; re-request review |
+| **Reviewers / assignees / labels** | Searchable pickers with avatars; **repo label catalog + colors** in the label picker; re-request review |
 | **Milestone** | Set / clear |
 | **Linked issues** | Detected from body (`#N`, closing keywords) |
 | **Subscribe** | Optimistic GraphQL subscription toggle + header tip states |
@@ -168,6 +178,7 @@ Open a PR title from the list → **centered modal** or **side sheet** on the **
 | **Linear-style palette** | `⌘K` / `Ctrl+K` inside the modal (GitHub’s site palette is suppressed while open) |
 | **Shared actions** | Labels, assignees, reviewers, base, review submit, merge, open GitHub, focus comment, … |
 | **Button shortcuts** | Primary actions show kbd hints (e.g. `⌘.` toggle diff, `⌘⇧M` merge) |
+| **Multi-host PAT** | Default token for **github.com** only; up to **3 enterprise host↔PAT** pairs (no accidental enterprise use of the default PAT) |
 
 Deep matrix of GitHub PR-view vs modal: **[docs/github-pr-parity.md](./docs/github-pr-parity.md)**.
 
@@ -235,8 +246,25 @@ Declared in the extension manifest (also summarized in the popup settings UI):
 | Permission | Purpose |
 |------------|---------|
 | `storage` | Store the PAT and options locally |
-| `https://github.com/*` | PR list DOM overlay + modal host |
-| `https://api.github.com/*` | List, detail, reviews, comments, merge, autolinks, GraphQL threads |
+| `scripting` | Register content scripts on enterprise web hosts |
+| `https://github.com/*` | github.com list overlay + modal host |
+| `https://api.github.com/*` | github.com REST / GraphQL |
+| optional `https://*/*` | Self-hosted / Enterprise hosts (granted from the popup) |
+
+### GitHub Enterprise / self-hosted (multi-account)
+
+pr+ uses a **default PAT for github.com only**. Each enterprise host needs its **own host↔PAT pair** (max **3** hosts). Unregistered hosts — including `*.ghe.com` — do **not** use the default PAT.
+
+1. Open the **pr+** popup.
+2. Save the **github.com PAT** (public cloud) if you use github.com.
+3. Under **GitHub Enterprise (host + PAT)**, enter both the **web host** and a **PAT for that host**, then **Add host & grant access**.
+4. Accept the Chrome permission prompt; reload the enterprise tab.
+5. API is **auto-derived** from the web host:
+   - **github.com** → `https://api.github.com` (+ `/graphql`)
+   - **GHES** → `https://{host}/api/v3` + `https://{host}/api/graphql`
+   - **GHE Cloud** (`subdomain.ghe.com`) → `https://api.subdomain.ghe.com` (+ `/graphql`)
+
+Content scripts run on github.com (manifest) and on **registered** enterprise hosts only.
 
 ---
 

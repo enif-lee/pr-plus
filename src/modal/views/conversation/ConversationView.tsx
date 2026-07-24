@@ -50,6 +50,10 @@ import { LoadingSkeleton } from '../chrome/LoadingSkeleton';
 import { VirtualConversationList } from './VirtualConversationList';
 import { InlineThread } from '../diff/InlineThread';
 import { FloatingScrollbar } from '../../components/common/FloatingScrollbar';
+import {
+  applyEmbedWheelScroll,
+  isEmbedPresentation,
+} from '@lib/page-embed';
 
 function ConversationViewImpl(props: any) {
   const {
@@ -61,6 +65,8 @@ function ConversationViewImpl(props: any) {
     onLeaveReviewAction,
     onDiscardPending = null,
     sectionLoading,
+    /** 'embed' enables global-then-panel wheel chaining */
+    presentation = 'modal',
     onDeleteIssueComment,
     onDeleteReviewComment,
     editingBody,
@@ -112,12 +118,67 @@ function ConversationViewImpl(props: any) {
     searchHits = null,
     searchHitIndex = -1,
     activeSearchHit = null,
+    mentionCandidates = [],
+    /** Keyboard-focus anchor (⌘⇧C) for a conversation comment/review row */
+    focusedConversationAnchor = null,
   } = props;
 
+  const embedScrollChain = isEmbedPresentation(presentation);
+  const convRootRef = useRef<HTMLDivElement | null>(null);
   const [mergeMethod, setMergeMethod] = useState<MergeMethod>('merge');
   const [mergeMenuOpen, setMergeMenuOpen] = useState(false);
   const mergeMenuRef = useRef<HTMLDivElement | null>(null);
   const asideScrollRef = useRef<HTMLAsideElement | null>(null);
+
+  /**
+   * Embed only: wheel over conversation main → document scroll first (so GH
+   * header can collapse), then remaining delta into the panel scroller.
+   */
+  useEffect(() => {
+    if (!embedScrollChain) return undefined;
+    const root = convRootRef.current;
+    if (!root) return undefined;
+    const main =
+      (root.querySelector('.prp-conversation__main') as HTMLElement | null) ||
+      root;
+
+    const onWheel = (e: WheelEvent) => {
+      // Don't steal from nested form fields / aside
+      const t = e.target as Node | null;
+      if (t && (t as HTMLElement).closest?.('textarea, input, select, [contenteditable="true"]')) {
+        return;
+      }
+      const panel = root.querySelector(
+        '.prp-conversation-virtual'
+      ) as HTMLElement | null;
+      if (!panel) return;
+      // Only when pointer is over the main conversation column
+      if (!main.contains(t as Node)) return;
+
+      const globalEl =
+        (typeof document !== 'undefined' &&
+          (document.scrollingElement ||
+            document.documentElement ||
+            document.body)) ||
+        null;
+      if (!globalEl) return;
+
+      const routed = applyEmbedWheelScroll({
+        deltaY: e.deltaY,
+        globalEl: globalEl as HTMLElement,
+        panelEl: panel,
+      });
+      if (routed.preventDefault) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+
+    main.addEventListener('wheel', onWheel, { passive: false, capture: true });
+    return () => {
+      main.removeEventListener('wheel', onWheel, true);
+    };
+  }, [embedScrollChain, detail?.number]);
   /** Conversation footer: Comment (issue) vs Review (pending + review events). */
   const [composerMode, setComposerMode] = useState<'comment' | 'review'>(() =>
     Number(pendingCount) > 0 ? 'review' : 'comment'
@@ -350,6 +411,12 @@ function ConversationViewImpl(props: any) {
     let c = base;
     if (isAnchorHit(anchorId)) c += ' prp-card--search-match';
     if (isAnchorCurrent(anchorId)) c += ' prp-card--search-current';
+    if (
+      focusedConversationAnchor &&
+      String(focusedConversationAnchor) === String(anchorId)
+    ) {
+      c += ' prp-card--kb-focus';
+    }
     return c.trim();
   }
 
@@ -368,6 +435,7 @@ function ConversationViewImpl(props: any) {
           onRegisterSave={onRegisterEditorSave}
           onUploadFile={onUploadFile}
           linkCtx={linkCtx}
+          mentionCandidates={mentionCandidates}
         />
       );
     }
@@ -620,6 +688,12 @@ function ConversationViewImpl(props: any) {
           'prp-card--timeline prp-card--timeline-review-group'
         )}
         data-search-anchor={groupAnchor}
+        tabIndex={
+          focusedConversationAnchor &&
+          String(focusedConversationAnchor) === groupAnchor
+            ? -1
+            : undefined
+        }
       >
         <div className="prp-conversation-feed__meta">
           <Avatar login={item.author} avatarUrl={item.avatarUrl} size="md" />
@@ -670,6 +744,12 @@ function ConversationViewImpl(props: any) {
           `prp-card--timeline prp-card--timeline-${item.kind || 'item'}`
         )}
         data-search-anchor={itemAnchor}
+        tabIndex={
+          focusedConversationAnchor &&
+          String(focusedConversationAnchor) === itemAnchor
+            ? -1
+            : undefined
+        }
       >
         <div className="prp-conversation-feed__meta">
           <Avatar login={item.author} avatarUrl={item.avatarUrl} size="md" />
@@ -821,8 +901,19 @@ function ConversationViewImpl(props: any) {
           collapsed ? ' prp-card--timeline-review-thread--collapsed' : ''
         }${threadHit ? ' prp-card--search-match' : ''}${
           threadCurrent ? ' prp-card--search-current' : ''
+        }${
+          focusedConversationAnchor &&
+          String(focusedConversationAnchor) === rootAnchor
+            ? ' prp-card--kb-focus'
+            : ''
         }`}
         data-search-anchor={rootAnchor}
+        tabIndex={
+          focusedConversationAnchor &&
+          String(focusedConversationAnchor) === rootAnchor
+            ? -1
+            : undefined
+        }
       >
         {showOuterHeader ? (
           <div className="prp-conversation-thread-header">
@@ -912,6 +1003,7 @@ function ConversationViewImpl(props: any) {
           prOpen={detail.state === 'open'}
           linkCtx={linkCtx}
           onUploadFile={onUploadFile}
+          mentionCandidates={mentionCandidates}
           collapsed={collapsed}
           onToggleCollapse={() => toggleThreadCollapse(item)}
           pendingCount={pendingCount}
@@ -959,6 +1051,7 @@ function ConversationViewImpl(props: any) {
             onRegisterSave={onRegisterEditorSave}
             onUploadFile={onUploadFile}
             linkCtx={linkCtx}
+            mentionCandidates={mentionCandidates}
           />
         ) : (
           renderSearchableBody(
@@ -1001,23 +1094,39 @@ function ConversationViewImpl(props: any) {
         {detail.state === 'open' && !detail.merged ? (
           <div className="prp-merge-box__actions">
             {ms.showMerge ? (
-              <div className="prp-merge-method" ref={mergeMenuRef}>
+              <div
+                className={`prp-merge-method prp-merge-method--${ms.ctaVariant || 'default'}${
+                  ms.forceMerge ? ' prp-merge-method--force' : ''
+                }`}
+                ref={mergeMenuRef}
+                data-cta-variant={ms.ctaVariant || 'default'}
+                data-force-merge={ms.forceMerge ? '1' : '0'}
+                data-can-merge={ms.canMerge ? '1' : '0'}
+              >
                 <div className="prp-merge-method__split">
                   <Button
-                    className="prp-merge-method__primary"
-                    variant="ok"
+                    className={`prp-merge-method__primary prp-merge-method__primary--${
+                      ms.ctaVariant || 'default'
+                    }`}
+                    variant={ms.ctaVariant || (ms.canMerge ? 'ok' : 'default')}
                     disabled={actionBusy || !ms.canMerge}
                     onClick={() => onMergePr?.(normalizeMergeMethod(mergeMethod))}
                     title={
-                      MERGE_METHODS.find((m) => m.id === mergeMethod)?.description ||
-                      'Merge pull request'
+                      ms.forceMerge
+                        ? 'Force merge — bypasses failing checks / branch protection if your token has permission'
+                        : MERGE_METHODS.find((m) => m.id === mergeMethod)?.description ||
+                          'Merge pull request'
                     }
                   >
-                    {mergeMethodButtonLabel(mergeMethod)}
+                    {mergeMethodButtonLabel(mergeMethod, {
+                      force: Boolean(ms.forceMerge),
+                    })}
                   </Button>
                   <button
                     type="button"
-                    className="prp-merge-method__caret"
+                    className={`prp-merge-method__caret prp-merge-method__caret--${
+                      ms.ctaVariant || 'default'
+                    }`}
                     disabled={actionBusy || !ms.canMerge}
                     aria-haspopup="menu"
                     aria-expanded={mergeMenuOpen}
@@ -1174,6 +1283,7 @@ function ConversationViewImpl(props: any) {
             showTabs
             onUploadFile={onUploadFile}
             linkCtx={linkCtx}
+            mentionCandidates={mentionCandidates}
           />
           {composerMode === 'comment' ? (
             <div className="prp-composer__row prp-composer__row--review">
@@ -1257,7 +1367,7 @@ function ConversationViewImpl(props: any) {
               ) : null}
             </div>
           )}
-          {actionMsg ? <p className="prp-muted prp-composer-hint">{actionMsg}</p> : null}
+
         </div>
       </Card>
     );
@@ -1287,13 +1397,17 @@ function ConversationViewImpl(props: any) {
 
   return (
     <div
-      className={`prp-conversation${asideCollapsed ? ' prp-conversation--aside-collapsed' : ''}`}
+      ref={convRootRef}
+      className={`prp-conversation${asideCollapsed ? ' prp-conversation--aside-collapsed' : ''}${
+        embedScrollChain ? ' prp-conversation--embed-scroll' : ''
+      }`}
       style={
         {
           ['--prp-aside-w' as string]: `${conversationAsideWidthPx(asideCollapsed)}px`,
         } as React.CSSProperties
       }
       data-aside-collapsed={asideCollapsed ? '1' : '0'}
+      data-embed-scroll={embedScrollChain ? '1' : undefined}
     >
       <div className="prp-conversation__main">
         {sectionLoading && !detail ? (
@@ -1309,7 +1423,10 @@ function ConversationViewImpl(props: any) {
             isGroupThreadExpanded={(groupItem: any, thread: any) =>
               isGroupThreadOpen(groupItem?.id, thread)
             }
-            scrollToAnchor={activeAnchor}
+            // Keyboard focus (⌘⇧C) takes priority over search current hit;
+            // VCL scrolls via indexForConversationAnchor + scroller.scrollTop
+            // so off-window virtualized rows still land correctly.
+            scrollToAnchor={focusedConversationAnchor || activeAnchor}
             renderRow={renderPanelRow}
             onVisibleThreadNodeIds={onVisibleThreadNodeIds}
           />
@@ -1556,14 +1673,17 @@ function ConversationViewImpl(props: any) {
         >
           <AsideFilesTree files={detail.files || []} />
         </AsideSection>
-        {actionMsg ? <div className="prp-action-msg">{actionMsg}</div> : null}
+
           </>
         )}
       </aside>
-      <FloatingScrollbar
-        scrollerRef={asideScrollRef}
-        contentKey={asideCollapsed ? 'collapsed' : 'expanded'}
-      />
+      {/* Compact rail is too narrow for a scrollbar chrome; hide entirely. */}
+      {!asideCollapsed ? (
+        <FloatingScrollbar
+          scrollerRef={asideScrollRef}
+          contentKey="expanded"
+        />
+      ) : null}
       </div>
     </div>
   );

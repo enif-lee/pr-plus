@@ -5,8 +5,30 @@
  * Supports default-collapsed files and inline review comments.
  */
 
+import { classifyDiffFile } from './collapse';
+
 /** Default chunk when expanding from one edge of a gap (GitHub uses 20). */
 export const DIFF_EXPAND_CHUNK = 20;
+
+/**
+ * Build a raw content URL for GitHub / GHE web UI.
+ * @param {{ webOrigin?: string, owner?: string, repo?: string, ref?: string, path?: string }} opts
+ */
+export function buildGithubRawUrl(opts: any = {}) {
+  const owner = String(opts.owner || '').trim();
+  const repo = String(opts.repo || '').trim();
+  const ref = String(opts.ref || '').trim();
+  const path = String(opts.path || '').replace(/^\/+/, '');
+  if (!owner || !repo || !ref || !path) return '';
+  const origin = String(opts.webOrigin || 'https://github.com')
+    .trim()
+    .replace(/\/+$/, '');
+  const encPath = path
+    .split('/')
+    .map((seg) => encodeURIComponent(seg))
+    .join('/');
+  return `${origin}/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/raw/${encodeURIComponent(ref)}/${encPath}`;
+}
 
 /**
  * @param {Array<{ filename: string, status?: string, additions?: number, deletions?: number, patch?: string, defaultCollapsed?: boolean }>} files
@@ -61,19 +83,39 @@ export function flattenFilesToVirtualRows(files, mode = 'unified', options: any 
       newLine: n,
       oldLine: o,
       side: String(c.side || 'RIGHT').toUpperCase() === 'LEFT' ? 'LEFT' : 'RIGHT',
+      subjectType: isFileLevelComment(c) ? 'file' : 'line',
     });
   };
+
+  const pushFileLevelComments = (path) => {
+    for (const c of rootsByPath.get(path) || []) {
+      if (isFileLevelComment(c)) pushInline(path, c, null, null);
+    }
+  };
+
   for (const file of files) {
     const path = file.filename || file.path || 'unknown';
     const status = file.status || 'modified';
     const stats = `+${file.additions ?? 0} −${file.deletions ?? 0}`;
+    const classified =
+      file.fileKind && typeof file.openableAsText === 'boolean'
+        ? {
+            kind: file.fileKind,
+            openableAsText: file.openableAsText,
+            renderImage: Boolean(file.renderImage),
+          }
+        : classifyDiffFile(file);
+    // Non-image binary never expands a text body (header-only, not toggle-openable).
+    const openable = classified.kind === 'text' || classified.renderImage;
     // Empty collapsedSet → honor defaultCollapsed + viewed.
     // Non-empty → explicit list only (after first toggle materializes defaults).
-    const isCollapsed =
-      !options.expandAll &&
-      (collapsedSet.has(path) ||
-        (collapsedSet.size === 0 &&
-          (file.defaultCollapsed === true || viewedSet.has(path))));
+    // Binary non-openable files stay header-only regardless of expandAll.
+    const isCollapsed = !openable
+      ? true
+      : !options.expandAll &&
+        (collapsedSet.has(path) ||
+          (collapsedSet.size === 0 &&
+            (file.defaultCollapsed === true || viewedSet.has(path))));
 
     const additions = Number(file.additions) || 0;
     const deletions = Number(file.deletions) || 0;
@@ -88,23 +130,81 @@ export function flattenFilesToVirtualRows(files, mode = 'unified', options: any 
       rowIndex: index++,
       lineType: 'header',
       collapsed: isCollapsed,
+      openable,
+      fileKind: classified.kind,
+      renderImage: classified.renderImage,
     });
 
-    // Collapsed files expose only the header (toggle to expand) — no meta row.
-    if (isCollapsed) {
+    // File-level threads sit under the header (even when collapsed).
+    pushFileLevelComments(path);
+
+    // Collapsed / non-openable: header + file comments only (binary never opens as text).
+    if (isCollapsed || !openable) {
+      // Non-openable binaries still surface line threads so Diff nav can land on them.
+      if (!openable) {
+        for (const c of rootsByPath.get(path) || []) {
+          if (!isFileLevelComment(c)) {
+            pushInline(path, c, c.line ?? null, c.originalLine ?? null);
+          }
+        }
+      }
       continue;
     }
 
     const patch = file.patch || '';
     if (!patch) {
-      rows.push({
-        kind: 'diff-meta',
-        filePath: path,
-        text: '(no textual patch — binary or too large)',
-        rowIndex: index++,
-        lineType: 'meta',
-      });
-      // Still surface review threads so Diff nav can land on them.
+      if (classified.renderImage) {
+        const headUrl =
+          file.raw_url ||
+          file.rawUrl ||
+          file.headRawUrl ||
+          buildGithubRawUrl({
+            webOrigin: options.webOrigin,
+            owner: options.owner,
+            repo: options.repo,
+            ref: options.headSha || options.headRef,
+            path,
+          });
+        const prevPath = file.previous_filename || file.previousFilename || path;
+        const statusLower = String(status).toLowerCase();
+        const showBase =
+          statusLower === 'modified' ||
+          statusLower === 'renamed' ||
+          statusLower === 'changed' ||
+          statusLower === 'removed' ||
+          statusLower === 'deleted';
+        const baseUrl = showBase
+          ? file.baseRawUrl ||
+            file.previous_raw_url ||
+            buildGithubRawUrl({
+              webOrigin: options.webOrigin,
+              owner: options.owner,
+              repo: options.repo,
+              ref: options.baseSha || options.baseRef,
+              path: prevPath,
+            })
+          : '';
+        rows.push({
+          kind: 'diff-image',
+          filePath: path,
+          status,
+          headUrl: headUrl || '',
+          baseUrl: baseUrl || '',
+          text: `image ${path}`,
+          rowIndex: index++,
+          lineType: 'image',
+        });
+      } else {
+        // Should not reach for binary (openable=false), but keep a non-open meta.
+        rows.push({
+          kind: 'diff-meta',
+          filePath: path,
+          text: 'Binary file — not shown',
+          rowIndex: index++,
+          lineType: 'meta',
+          openable: false,
+        });
+      }
       for (const c of rootsByPath.get(path) || []) {
         pushInline(path, c, c.line ?? null, c.originalLine ?? null);
       }
@@ -246,8 +346,36 @@ export function flattenFilesToVirtualRows(files, mode = 'unified', options: any 
             }
             seenHunk = true;
           } else if (newLine > 0 && nextNew > newLine) {
-            // Middle gap → expand controls live on the following @@ row
-            expandAbove = materializeGap(newLine, nextNew - 1, oldLine);
+            // Middle gap: attach to BOTH edges so ▲/▼ expand from opposite ends.
+            // - previous hunk.expandBelow → front of gap (after previous section)
+            // - this hunk.expandAbove → back of gap (before this hunk)
+            const middleGap = materializeGap(newLine, nextNew - 1, oldLine);
+            if (middleGap && lastHunkRow) {
+              lastHunkRow.expandBelow = middleGap;
+              // Previous @@ may have been omitted (symmetric/hidden); insert a
+              // marker row after its body so the lower-edge control can render.
+              if (!rows.includes(lastHunkRow)) {
+                if (lastHunkRow.hidden) {
+                  rows.push({
+                    kind: 'diff-line',
+                    filePath: path,
+                    text: '',
+                    code: '',
+                    split: false,
+                    raw: '',
+                    rowIndex: index++,
+                    lineType: 'hunk',
+                    oldLine: null,
+                    newLine: null,
+                    hidden: true,
+                    expandBelow: middleGap,
+                  });
+                } else {
+                  rows.push(lastHunkRow);
+                }
+              }
+            }
+            expandAbove = middleGap;
           }
           oldLine = nextOld;
           newLine = nextNew;
@@ -358,7 +486,15 @@ export function mergeLineRanges(ranges, start, end) {
 
 /**
  * Resolve which inclusive new-file lines to expand for a gap control click.
- * @param {'all'|'down'|'up'} direction
+ *
+ * Directions are relative to the **gap** (not the file):
+ * - `down` / `fromStart` → next chunk from the front of the remaining gap
+ *   (after the previous visible section)
+ * - `up` / `fromEnd` → next chunk from the back of the remaining gap
+ *   (before the following visible section)
+ * - `all` → entire remaining gap
+ *
+ * @param {'all'|'down'|'up'|'fromStart'|'fromEnd'} direction
  * @param {{ gapStartNew: number, gapEndNew: number, expandChunk?: number }} gap
  */
 export function resolveExpandRange(direction, gap) {
@@ -372,10 +508,11 @@ export function resolveExpandRange(direction, gap) {
       ? Math.floor(gap.expandChunk)
       : DIFF_EXPAND_CHUNK;
   const dir = String(direction || 'all');
-  if (dir === 'down') {
+  // fromStart = front of gap (after previous hunk); fromEnd = back (before next)
+  if (dir === 'down' || dir === 'fromStart') {
     return { start, end: Math.min(end, start + chunk - 1) };
   }
-  if (dir === 'up') {
+  if (dir === 'up' || dir === 'fromEnd') {
     return { start: Math.max(start, end - chunk + 1), end };
   }
   return { start, end };
@@ -445,6 +582,7 @@ function commentSide(c) {
  */
 function commentAnchorLine(c) {
   if (c == null) return null;
+  if (isFileLevelComment(c)) return null;
   if (c.line != null && Number.isFinite(Number(c.line))) return Number(c.line);
   if (c.originalLine != null && Number.isFinite(Number(c.originalLine))) {
     return Number(c.originalLine);
@@ -453,6 +591,213 @@ function commentAnchorLine(c) {
     return Number(c.original_line);
   }
   return null;
+}
+
+/**
+ * GitHub file-level review comment (subject_type: file) — no line anchor.
+ */
+export function isFileLevelComment(c) {
+  if (!c || !c.path) return false;
+  const st = String(c.subjectType || c.subject_type || '').toLowerCase();
+  if (st === 'file') return true;
+  if (st === 'line') return false;
+  // Heuristic: path-only comments with no line/original_line
+  const hasLine =
+    (c.line != null && Number.isFinite(Number(c.line))) ||
+    (c.originalLine != null && Number.isFinite(Number(c.originalLine))) ||
+    (c.original_line != null && Number.isFinite(Number(c.original_line)));
+  return !hasLine;
+}
+
+/**
+ * Top Y of virtual row `i` (prefix offsets or uniform rowHeight).
+ */
+export function rowTopY(offsets, i, rowHeight = 22) {
+  if (Array.isArray(offsets) && offsets.length > 0) {
+    const y = Number(offsets[i]);
+    if (Number.isFinite(y)) return y;
+  }
+  return Math.max(0, Number(i) || 0) * (Number(rowHeight) || 22);
+}
+
+/**
+ * File-header row that should stick at the top for the current scroll offset.
+ * Returns the last file-header whose top is at or above scrollTop.
+ *
+ * @param {Array} virtualRows
+ * @param {number[]|null} offsets rowOffsets() result (length rows+1)
+ * @param {number} scrollTop
+ * @param {number} [rowHeight=22] fallback when offsets missing
+ * @returns {object|null}
+ */
+export function stickyFileHeaderForScroll(
+  virtualRows,
+  offsets,
+  scrollTop,
+  rowHeight = 22
+) {
+  if (!Array.isArray(virtualRows) || !virtualRows.length) return null;
+  const top = Math.max(0, Number(scrollTop) || 0);
+  // Prefer the file of the row under the sticky edge (scrollTop), then map to header.
+  // More reliable than scanning headers when intermediate row kinds vary.
+  let probeIdx = 0;
+  if (Array.isArray(offsets) && offsets.length === virtualRows.length + 1) {
+    let lo = 0;
+    let hi = virtualRows.length - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (Number(offsets[mid + 1]) <= top) lo = mid + 1;
+      else hi = mid - 1;
+    }
+    probeIdx = Math.max(0, Math.min(virtualRows.length - 1, lo));
+  } else {
+    probeIdx = Math.max(
+      0,
+      Math.min(
+        virtualRows.length - 1,
+        Math.floor(top / Math.max(1, Number(rowHeight) || 22))
+      )
+    );
+  }
+  const probe = virtualRows[probeIdx];
+  const path = probe?.filePath || probe?.path || null;
+  if (path) {
+    // Walk backward to the file-header for this path
+    for (let i = probeIdx; i >= 0; i--) {
+      const row = virtualRows[i];
+      if (row?.kind === 'file-header' && (row.filePath || row.path) === path) {
+        return row;
+      }
+    }
+  }
+  // Fallback: last header whose top is at/above scrollTop
+  let best = null;
+  for (let i = 0; i < virtualRows.length; i++) {
+    const row = virtualRows[i];
+    if (!row || row.kind !== 'file-header') continue;
+    const y = rowTopY(offsets, i, rowHeight);
+    if (y <= top + 0.5) best = row;
+    else break;
+  }
+  return best;
+}
+
+/**
+ * Whether the sticky clone should be painted (natural header at/above scrollport top).
+ * @param {object|null} header file-header row
+ * @param {number[]|null} offsets
+ * @param {number} scrollTop
+ * @param {number} [rowHeight=22]
+ */
+export function shouldShowStickyFileHeader(
+  header,
+  offsets,
+  scrollTop,
+  rowHeight = 22,
+  virtualRows = null
+) {
+  const layout = resolveStickyFileHeaderLayout(
+    virtualRows,
+    offsets,
+    scrollTop,
+    rowHeight,
+    header
+  );
+  return Boolean(layout?.show);
+}
+
+/**
+ * Array index of a file-header row in virtualRows (prefer identity, then path).
+ * Prefer this over row.rowIndex — those can skip when intermediate rows are omitted.
+ */
+export function fileHeaderArrayIndex(virtualRows, header) {
+  if (!header || !Array.isArray(virtualRows)) return -1;
+  const byRef = virtualRows.indexOf(header);
+  if (byRef >= 0) return byRef;
+  const path = header.filePath || header.path;
+  if (!path) return -1;
+  return virtualRows.findIndex(
+    (r) => r?.kind === 'file-header' && (r.filePath || r.path) === path
+  );
+}
+
+/**
+ * Sticky layout for smooth handoff with the natural file-header row.
+ *
+ * - Hidden while natural header is still fully below the top (use the real row).
+ * - Appears at translateY=0 once natural header scrolls past the top (no jump).
+ * - Pushed upward by the next file-header as it approaches (GitHub-style).
+ *
+ * Offsets are always keyed by **array index**, never row.rowIndex (can desync).
+ *
+ * @param {Array|null} virtualRows used to find the next file-header
+ * @param {number[]|null} offsets
+ * @param {number} scrollTop
+ * @param {number} [rowHeight=22]
+ * @param {object|null} [header] precomputed sticky header (optional)
+ * @returns {{
+ *   header: object,
+ *   show: boolean,
+ *   translateY: number,
+ *   headerY: number,
+ *   nextHeaderY: number|null,
+ * }|null}
+ */
+export function resolveStickyFileHeaderLayout(
+  virtualRows,
+  offsets,
+  scrollTop,
+  rowHeight = 22,
+  header = null
+) {
+  const top = Math.max(0, Number(scrollTop) || 0);
+  const list = Array.isArray(virtualRows) ? virtualRows : null;
+  const h =
+    header ||
+    (list ? stickyFileHeaderForScroll(list, offsets, top, rowHeight) : null);
+  if (!h) return null;
+
+  const idx = fileHeaderArrayIndex(list, h);
+  const headerY = idx >= 0 ? rowTopY(offsets, idx, rowHeight) : 0;
+  const headerH = Number(rowHeight) || 22;
+
+  // Natural header still at/below the top edge → use the real row only.
+  // (Strict `>` avoids a permanent sticky clone when the first file is at rest.)
+  if (top <= headerY) {
+    return {
+      header: h,
+      show: false,
+      translateY: 0,
+      headerY,
+      nextHeaderY: null,
+    };
+  }
+
+  // Next file-header after this one (for push-up)
+  let nextHeaderY = null;
+  if (list && idx >= 0) {
+    for (let i = idx + 1; i < list.length; i++) {
+      const row = list[i];
+      if (row?.kind === 'file-header') {
+        nextHeaderY = rowTopY(offsets, i, rowHeight);
+        break;
+      }
+    }
+  }
+
+  // Stick at 0; next header pushes this one up as it approaches
+  let translateY = 0;
+  if (nextHeaderY != null && Number.isFinite(nextHeaderY)) {
+    translateY = Math.min(0, nextHeaderY - top - headerH);
+  }
+
+  return {
+    header: h,
+    show: true,
+    translateY,
+    headerY,
+    nextHeaderY,
+  };
 }
 
 function isReplyComment(c, byId) {

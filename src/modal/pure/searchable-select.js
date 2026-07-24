@@ -62,38 +62,89 @@ function buildPeopleOptions(logins, statusByLogin = {}, avatarByLogin = {}) {
   return out;
 }
 
-function labelColorCss(color) {
+/** GitHub default label colors (hex without #) when API color is missing. */
+const GITHUB_DEFAULT_LABEL_COLORS = {
+  bug: 'd73a4a',
+  documentation: '0075ca',
+  duplicate: 'cfd3d7',
+  enhancement: 'a2eeef',
+  'good first issue': '7057ff',
+  'help wanted': '008672',
+  invalid: 'e4e669',
+  question: 'd876e3',
+  wontfix: 'ffffff',
+};
+
+/**
+ * Normalize GitHub label color to CSS hex; fall back to defaults by name.
+ * @param {unknown} color
+ * @param {unknown} [name]
+ */
+function labelColorCss(color, name) {
   const raw = String(color || '')
     .trim()
     .replace(/^#/, '');
-  if (!/^[0-9a-fA-F]{3,8}$/.test(raw)) return '';
-  return `#${raw}`;
+  if (/^[0-9a-fA-F]{3,8}$/.test(raw)) return `#${raw}`;
+  const key = String(name || '')
+    .trim()
+    .toLowerCase();
+  const fallback = key ? GITHUB_DEFAULT_LABEL_COLORS[key] : '';
+  return fallback ? `#${fallback}` : '';
+}
+
+function resolveLabelColor(color, name) {
+  const css = labelColorCss(color, name);
+  return css ? css.replace(/^#/, '') : '';
 }
 
 /**
  * Build label options from label objects or strings.
+ * Later entries with a color upgrade earlier colorless ones (same name).
  * @param {Array<string|{name:string,color?:string}>} labels
  */
 function buildLabelOptions(labels) {
-  const out = [];
-  const seen = new Set();
+  const byKey = new Map();
   for (const l of labels || []) {
     const name = typeof l === 'string' ? l : l?.name;
     const raw = String(name || '').trim();
-    if (!raw || seen.has(raw.toLowerCase())) continue;
-    seen.add(raw.toLowerCase());
-    const color = typeof l === 'object' && l ? String(l.color || '').trim() : '';
-    out.push({
+    if (!raw) continue;
+    const key = raw.toLowerCase();
+    const fromObj =
+      typeof l === 'object' && l
+        ? String(l.color || '')
+            .trim()
+            .replace(/^#/, '')
+        : '';
+    const color = resolveLabelColor(fromObj, raw);
+    const next = {
       id: raw,
       label: raw,
-      keywords: [raw],
+      keywords: [raw, l?.description].filter(Boolean),
       meta:
         typeof l === 'object' && l
           ? { ...l, name: raw, color, kind: 'label' }
-          : { name: raw, color: '', kind: 'label' },
-    });
+          : { name: raw, color, kind: 'label' },
+    };
+    const prev = byKey.get(key);
+    if (!prev) {
+      byKey.set(key, next);
+      continue;
+    }
+    if (!prev.meta?.color && next.meta?.color) {
+      byKey.set(key, next);
+    } else if (
+      prev.meta?.color &&
+      next.meta?.color &&
+      !prev.meta?.description &&
+      next.meta?.description
+    ) {
+      byKey.set(key, {
+        ...prev,
+        meta: { ...prev.meta, description: next.meta.description },
+      });
+    }
   }
-  return out;
+  return [...byKey.values()];
 }
 
 /**
@@ -206,6 +257,8 @@ const api = {
   buildPeopleOptions,
   buildLabelOptions,
   labelColorCss,
+  resolveLabelColor,
+  GITHUB_DEFAULT_LABEL_COLORS,
   buildBranchOptions,
   isBotAccount,
   buildUnifiedReviewerRows,
