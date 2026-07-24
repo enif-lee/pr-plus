@@ -359,25 +359,32 @@ function mapLeaveReviewAction(action) {
  * @param {object} [fallback] path/line/body when raw is partial
  */
 function mapRestReviewComment(raw, fallback = {}) {
-  if (!raw && !fallback.body && fallback.line == null) return null;
+  if (!raw && !String(fallback.body || '').trim()) return null;
   const r = raw || {};
+  const subjectRaw = String(
+    r.subject_type || r.subjectType || fallback.subjectType || fallback.subject_type || ''
+  ).toLowerCase();
+  const isFile =
+    subjectRaw === 'file' ||
+    (fallback.subjectType === 'file' && subjectRaw !== 'line');
   // PENDING comments often omit line and only have position / original_line
-  const lineRaw =
-    r.line ??
-    r.original_line ??
-    (r.position != null && Number.isFinite(Number(r.position))
-      ? Number(r.position)
-      : null) ??
-    fallback.line ??
-    null;
+  const lineRaw = isFile
+    ? null
+    : r.line ??
+      r.original_line ??
+      (r.position != null && Number.isFinite(Number(r.position))
+        ? Number(r.position)
+        : null) ??
+      fallback.line ??
+      null;
   return {
     id: r.id ?? fallback.id ?? null,
     author: r.user?.login || fallback.author || '',
     body: r.body || fallback.body || '',
     path: r.path || fallback.path || '',
     line: lineRaw != null ? Number(lineRaw) : null,
-    originalLine: r.original_line ?? null,
-    startLine: r.start_line ?? fallback.startLine ?? null,
+    originalLine: isFile ? null : r.original_line ?? null,
+    startLine: isFile ? null : r.start_line ?? fallback.startLine ?? null,
     side: r.side || fallback.side || 'RIGHT',
     startSide: r.start_side || null,
     diffHunk: r.diff_hunk || '',
@@ -394,6 +401,7 @@ function mapRestReviewComment(raw, fallback = {}) {
     resolved: false,
     pending: Boolean(r.pending ?? fallback.pending),
     pendingReviewId: r.pendingReviewId ?? fallback.pendingReviewId ?? null,
+    subjectType: isFile ? 'file' : 'line',
   };
 }
 

@@ -22,6 +22,7 @@ import {
   IconConversation,
 } from '@common/icons';
 import { LAYOUT_DIFF } from '@lib/layout-mode';
+import { headerReviewCompact } from '@lib/header-layout';
 import { branchRefCopyText, copyTextToClipboard } from '@lib/copy-to-clipboard';
 import { hasChecksData } from '../conversation/ChecksPanel';
 import { ChecksSummary } from '../conversation/ChecksSummary';
@@ -58,16 +59,22 @@ function HeaderStatsBadge({
   useLayoutEffect(() => {
     const el = badgeRef.current;
     if (!el) return;
+    // Metrics pill: natural intrinsic size only. Fixed FLIP widths clip long
+    // "+NNNN −NNNN NN files" strings when the header reflows (conversation).
+    if (!showStage) {
+      el.style.width = '';
+      el.style.height = '';
+      sizeRef.current = { w: 0, h: 0 };
+      return;
+    }
     const prevW = sizeRef.current.w;
     const prevH = sizeRef.current.h;
-    // Measure natural size for current content
     el.style.width = 'auto';
     el.style.height = 'auto';
     const rect = el.getBoundingClientRect();
     const w = Math.max(1, Math.ceil(rect.width));
     const h = Math.max(1, Math.ceil(rect.height));
     if (prevW > 0 && prevH > 0 && (prevW !== w || prevH !== h)) {
-      // FLIP: hold previous size, then animate to natural size
       el.style.width = `${prevW}px`;
       el.style.height = `${prevH}px`;
       void el.offsetWidth;
@@ -78,7 +85,7 @@ function HeaderStatsBadge({
       el.style.height = `${h}px`;
     }
     sizeRef.current = { w, h };
-  }, [contentKey]);
+  }, [contentKey, showStage]);
 
   return (
     <div
@@ -111,7 +118,7 @@ function HeaderStatsBadge({
           <>
             <span className="prp-stat-add">+{additions}</span>
             <span className="prp-stat-del">−{deletions}</span>
-            <span className="prp-muted">{fileCount} files</span>
+            <span className="prp-muted prp-header__stats-files">{fileCount} files</span>
           </>
         )}
       </span>
@@ -121,8 +128,14 @@ function HeaderStatsBadge({
 
 /**
  * Shared PR header for modal + side sheet shells.
- * Row 1: #number · title · draft (only) · checks (when present) · diff stats
- * Row 2: branch direction · author · action toggles
+ *
+ * Conversation + wide panel:
+ *   Row 1 — #number · title · draft · checks · stats
+ *   Row 2 — branch direction · author | action toggles
+ *
+ * Review compact (Diff layout always, or narrow panel via container query):
+ *   Single line — identity + branch + actions (maximize review surface).
+ *   ≤ HEADER_COMPACT_MAX_PX still collapses actions to ⋯ menu.
  *
  * Progressive `loadStage` is integrated into the diff-stat badge (same pill;
  * size morphs when content changes — not a floating popup / dual fade).
@@ -149,6 +162,8 @@ export function Header(props: any) {
     onToggleFullscreen,
     titleEditSignal = 0,
     loadStage = null,
+    /** Surface short result copy via modal top pill toast */
+    onActionMsg = null,
   } = props;
 
   const localBaseRef = useRef<HTMLButtonElement | null>(null);
@@ -168,6 +183,9 @@ export function Header(props: any) {
     const text = branchRefCopyText(refName);
     if (!text) return;
     const ok = await copyTextToClipboard(text);
+    if (typeof onActionMsg === 'function') {
+      onActionMsg(ok ? 'Branch copied' : 'Copy failed');
+    }
     if (!ok) return;
     setCopiedRef(kind);
     if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
@@ -248,32 +266,45 @@ export function Header(props: any) {
     setTitleDraft('');
   }, [detail?.owner, detail?.repo, detail?.number]);
 
+  const reviewCompact =
+    typeof headerReviewCompact === 'function'
+      ? headerReviewCompact({ layoutMode: effectiveLayout })
+      : effectiveLayout === LAYOUT_DIFF;
+
   if (!detail) {
     return (
       <header
-        className="prp-header prp-header--unified"
+        className={`prp-header prp-header--unified${
+          reviewCompact ? ' prp-header--review-compact' : ''
+        }`}
         data-section-loading={sectionLoading ? '1' : '0'}
         data-shell={shellMode}
+        data-layout={
+          effectiveLayout === LAYOUT_DIFF ? 'diff' : 'conversation'
+        }
+        data-review-compact={reviewCompact ? '1' : '0'}
       >
         <div className="prp-header__row prp-header__row--primary">
-          <span className="prp-header__number prp-skeleton__chip prp-skeleton__chip--num" />
-          <span className="prp-skeleton__row prp-skeleton__row--lg prp-skeleton__row--w45" />
-          <span className="prp-skeleton__chip" />
+          <div className="prp-header__identity">
+            <span className="prp-header__number prp-skeleton__chip prp-skeleton__chip--num" />
+            <span className="prp-skeleton__row prp-skeleton__row--lg prp-skeleton__row--w45" />
+            <span className="prp-skeleton__chip" />
+          </div>
           <HeaderStatsBadge loadStage={loadStage} skeleton />
         </div>
-        <div className="prp-header__row prp-header__row--secondary">
+        <div className="prp-header__branch-meta">
           <span className="prp-skeleton__chip prp-skeleton__chip--branch" />
-          <div className="prp-header__actions">
-            <button
-              type="button"
-              className="prp-header__icon-btn prp-has-tip"
-              onClick={onClose}
-              aria-label="Close"
-            >
-              <IconX size={16} aria-hidden="true" />
-              <TipPopover title="Close" shortcut="Esc" />
-            </button>
-          </div>
+        </div>
+        <div className="prp-header__actions">
+          <button
+            type="button"
+            className="prp-header__icon-btn prp-has-tip"
+            onClick={onClose}
+            aria-label="Close"
+          >
+            <IconX size={16} aria-hidden="true" />
+            <TipPopover title="Close" shortcut="Esc" />
+          </button>
         </div>
       </header>
     );
@@ -285,105 +316,114 @@ export function Header(props: any) {
   const subscribed = detail.subscribed === true;
 
   return (
-    <header className="prp-header prp-header--unified" data-shell={shellMode}>
-      {/* Row 1: identity + status + checks + stats */}
+    <header
+      className={`prp-header prp-header--unified${
+        reviewCompact ? ' prp-header--review-compact' : ''
+      }`}
+      data-shell={shellMode}
+      data-layout={effectiveLayout === LAYOUT_DIFF ? 'diff' : 'conversation'}
+      data-review-compact={reviewCompact ? '1' : '0'}
+    >
+      {/* Row 1: identity (title/checks) left · stats pill right (never wraps under) */}
       <div className="prp-header__row prp-header__row--primary">
-        <span className="prp-header__number">#{detail.number}</span>
-        {editingTitle ? (
-          <div className="prp-header__title-edit">
-            <input
-              ref={titleInputRef}
-              className="prp-header__title-input"
-              type="text"
-              value={titleDraft}
-              disabled={actionBusy}
-              aria-label="Pull request title"
-              maxLength={256}
-              onChange={(e) => setTitleDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  void commitEditTitle();
-                } else if (e.key === 'Escape') {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  cancelEditTitle();
-                }
-              }}
-              onBlur={() => {
-                if (skipBlurSaveRef.current) {
-                  skipBlurSaveRef.current = false;
-                  return;
-                }
-                window.setTimeout(() => {
+        <div className="prp-header__identity">
+          <span className="prp-header__number">#{detail.number}</span>
+          {editingTitle ? (
+            <div className="prp-header__title-edit">
+              <input
+                ref={titleInputRef}
+                className="prp-header__title-input"
+                type="text"
+                value={titleDraft}
+                disabled={actionBusy}
+                aria-label="Pull request title"
+                maxLength={256}
+                onChange={(e) => setTitleDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    void commitEditTitle();
+                  } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    cancelEditTitle();
+                  }
+                }}
+                onBlur={() => {
                   if (skipBlurSaveRef.current) {
                     skipBlurSaveRef.current = false;
                     return;
                   }
-                  void commitEditTitle();
-                }, 0);
-              }}
-            />
-            <button
-              type="button"
-              className="prp-icon-btn prp-header__title-action prp-has-tip"
-              disabled={actionBusy || !String(titleDraft || '').trim()}
-              aria-label="Save title"
-              onMouseDown={(e) => {
-                e.preventDefault();
-                skipBlurSaveRef.current = true;
-              }}
-              onClick={() => void commitEditTitle()}
-            >
-              <IconCheck size={14} />
-              <TipPopover title="Save title" />
-            </button>
-            <button
-              type="button"
-              className="prp-icon-btn prp-header__title-action prp-has-tip"
-              disabled={actionBusy}
-              aria-label="Cancel title edit"
-              onMouseDown={(e) => {
-                e.preventDefault();
-                skipBlurSaveRef.current = true;
-              }}
-              onClick={cancelEditTitle}
-            >
-              <IconX size={14} />
-              <TipPopover title="Cancel" />
-            </button>
-          </div>
-        ) : (
-          <>
-            <h2 className="prp-header__title">{detail.title}</h2>
-            {typeof onEditTitle === 'function' ? (
+                  window.setTimeout(() => {
+                    if (skipBlurSaveRef.current) {
+                      skipBlurSaveRef.current = false;
+                      return;
+                    }
+                    void commitEditTitle();
+                  }, 0);
+                }}
+              />
               <button
                 type="button"
-                className="prp-icon-btn prp-header__title-edit-btn prp-has-tip"
-                disabled={actionBusy}
-                aria-label="Edit title"
-                onClick={beginEditTitle}
+                className="prp-icon-btn prp-header__title-action prp-has-tip"
+                disabled={actionBusy || !String(titleDraft || '').trim()}
+                aria-label="Save title"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  skipBlurSaveRef.current = true;
+                }}
+                onClick={() => void commitEditTitle()}
               >
-                <IconPencil size={14} />
-                <TipPopover title="Edit title" />
+                <IconCheck size={14} />
+                <TipPopover title="Save title" />
               </button>
-            ) : null}
-          </>
-        )}
-        {/* Status: draft only (no open badge). Closed still labeled when not merged. */}
-        {detail.draft ? <Badge tone="draft">Draft</Badge> : null}
-        {!detail.draft && detail.state === 'closed' && !detail.merged ? (
-          <Badge tone="muted">closed</Badge>
-        ) : null}
-        {hasChecksData(detail.checks) ? (
-          <ChecksSummary
-            checks={detail.checks}
-            label="Checks"
-            className="prp-header__checks"
-            size={14}
-          />
-        ) : null}
+              <button
+                type="button"
+                className="prp-icon-btn prp-header__title-action prp-has-tip"
+                disabled={actionBusy}
+                aria-label="Cancel title edit"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  skipBlurSaveRef.current = true;
+                }}
+                onClick={cancelEditTitle}
+              >
+                <IconX size={14} />
+                <TipPopover title="Cancel" />
+              </button>
+            </div>
+          ) : (
+            <>
+              <h2 className="prp-header__title">{detail.title}</h2>
+              {typeof onEditTitle === 'function' ? (
+                <button
+                  type="button"
+                  className="prp-icon-btn prp-header__title-edit-btn prp-has-tip"
+                  disabled={actionBusy}
+                  aria-label="Edit title"
+                  onClick={beginEditTitle}
+                >
+                  <IconPencil size={14} />
+                  <TipPopover title="Edit title" />
+                </button>
+              ) : null}
+            </>
+          )}
+          {/* Status: draft only (no open badge). Closed still labeled when not merged. */}
+          {detail.draft ? <Badge tone="draft">Draft</Badge> : null}
+          {!detail.draft && detail.state === 'closed' && !detail.merged ? (
+            <Badge tone="muted">closed</Badge>
+          ) : null}
+          {hasChecksData(detail.checks) ? (
+            <ChecksSummary
+              checks={detail.checks}
+              label="Checks"
+              className="prp-header__checks"
+              size={14}
+            />
+          ) : null}
+        </div>
         <HeaderStatsBadge
           loadStage={loadStage}
           additions={detail.additions ?? 0}
@@ -392,93 +432,93 @@ export function Header(props: any) {
         />
       </div>
 
-      {/* Row 2: branches + actions */}
-      <div className="prp-header__row prp-header__row--secondary">
-        <div className="prp-header__branch-meta">
-          <span className="prp-branch-split" title="Base ← head">
-            <span className="prp-branch-tag prp-branch-tag--base">
-              <RefLink
-                className="prp-branch-tag__text"
-                owner={detail.baseOwner || detail.owner}
-                repo={detail.baseRepo || detail.repo}
-                refName={detail.baseRef}
-              />
-              <button
-                type="button"
-                className={`prp-branch-tag__copy-btn${
-                  copiedRef === 'base' ? ' prp-branch-tag__copy-btn--done' : ''
-                }`}
-                disabled={!detail.baseRef}
-                onClick={() => void copyBranchRef('base', detail.baseRef)}
-                title={
-                  copiedRef === 'base'
-                    ? 'Copied!'
-                    : `Copy base branch “${detail.baseRef || ''}”`
-                }
-                aria-label={`Copy base branch ${detail.baseRef || ''}`}
-              >
-                {copiedRef === 'base' ? (
-                  <IconCheck size={12} aria-hidden="true" />
-                ) : (
-                  <IconCopy size={12} aria-hidden="true" />
-                )}
-              </button>
-              <button
-                type="button"
-                className="prp-branch-tag__edit-btn"
-                disabled={actionBusy || !onChangeBase}
-                onClick={onChangeBase}
-                title="Change base branch"
-                aria-label="Change base branch"
-                ref={(el) => {
-                  localBaseRef.current = el;
-                  if (baseBranchRef) baseBranchRef.current = el;
-                }}
-              >
-                <IconPencil className="prp-branch-tag__edit" size={12} />
-              </button>
-            </span>
-            <span className="prp-branch-split__arrow" aria-hidden="true">
-              <IconArrowLeft size={12} />
-            </span>
-            <span className="prp-branch-tag prp-branch-tag--head">
-              <RefLink
-                className="prp-branch-tag__text"
-                owner={detail.headOwner || detail.owner}
-                repo={detail.headRepo || detail.repo}
-                refName={detail.headRef}
-              />
-              <button
-                type="button"
-                className={`prp-branch-tag__copy-btn${
-                  copiedRef === 'head' ? ' prp-branch-tag__copy-btn--done' : ''
-                }`}
-                disabled={!detail.headRef}
-                onClick={() => void copyBranchRef('head', detail.headRef)}
-                title={
-                  copiedRef === 'head'
-                    ? 'Copied!'
-                    : `Copy head branch “${detail.headRef || ''}”`
-                }
-                aria-label={`Copy head branch ${detail.headRef || ''}`}
-              >
-                {copiedRef === 'head' ? (
-                  <IconCheck size={12} aria-hidden="true" />
-                ) : (
-                  <IconCopy size={12} aria-hidden="true" />
-                )}
-              </button>
-            </span>
+      {/* Branch meta — second row when wide; same line as identity when compact */}
+      <div className="prp-header__branch-meta">
+        <span className="prp-branch-split" title="Base ← head">
+          <span className="prp-branch-tag prp-branch-tag--base">
+            <RefLink
+              className="prp-branch-tag__text"
+              owner={detail.baseOwner || detail.owner}
+              repo={detail.baseRepo || detail.repo}
+              refName={detail.baseRef}
+            />
+            <button
+              type="button"
+              className={`prp-branch-tag__copy-btn${
+                copiedRef === 'base' ? ' prp-branch-tag__copy-btn--done' : ''
+              }`}
+              disabled={!detail.baseRef}
+              onClick={() => void copyBranchRef('base', detail.baseRef)}
+              title={
+                copiedRef === 'base'
+                  ? 'Copied!'
+                  : `Copy base branch “${detail.baseRef || ''}”`
+              }
+              aria-label={`Copy base branch ${detail.baseRef || ''}`}
+            >
+              {copiedRef === 'base' ? (
+                <IconCheck size={12} aria-hidden="true" />
+              ) : (
+                <IconCopy size={12} aria-hidden="true" />
+              )}
+            </button>
+            <button
+              type="button"
+              className="prp-branch-tag__edit-btn"
+              disabled={actionBusy || !onChangeBase}
+              onClick={onChangeBase}
+              title="Change base branch"
+              aria-label="Change base branch"
+              ref={(el) => {
+                localBaseRef.current = el;
+                if (baseBranchRef) baseBranchRef.current = el;
+              }}
+            >
+              <IconPencil className="prp-branch-tag__edit" size={12} />
+            </button>
           </span>
-          {detail.author ? (
-            <span className="prp-muted">
-              by <UserLink login={detail.author} />
-            </span>
-          ) : null}
-          {/* Merge status lives only in the conversation merge box — not the header */}
-        </div>
+          <span className="prp-branch-split__arrow" aria-hidden="true">
+            <IconArrowLeft size={12} />
+          </span>
+          <span className="prp-branch-tag prp-branch-tag--head">
+            <RefLink
+              className="prp-branch-tag__text"
+              owner={detail.headOwner || detail.owner}
+              repo={detail.headRepo || detail.repo}
+              refName={detail.headRef}
+            />
+            <button
+              type="button"
+              className={`prp-branch-tag__copy-btn${
+                copiedRef === 'head' ? ' prp-branch-tag__copy-btn--done' : ''
+              }`}
+              disabled={!detail.headRef}
+              onClick={() => void copyBranchRef('head', detail.headRef)}
+              title={
+                copiedRef === 'head'
+                  ? 'Copied!'
+                  : `Copy head branch “${detail.headRef || ''}”`
+              }
+              aria-label={`Copy head branch ${detail.headRef || ''}`}
+            >
+              {copiedRef === 'head' ? (
+                <IconCheck size={12} aria-hidden="true" />
+              ) : (
+                <IconCopy size={12} aria-hidden="true" />
+              )}
+            </button>
+          </span>
+        </span>
+        {detail.author ? (
+          <span className="prp-muted prp-header__author">
+            by <UserLink login={detail.author} />
+          </span>
+        ) : null}
+        {/* Merge status lives only in the conversation merge box — not the header */}
+      </div>
 
-        <div className="prp-header__actions">
+      {/* Actions — second row when wide; same line when compact */}
+      <div className="prp-header__actions">
           {/* Wide: inline actions. Narrow: hidden via CSS; use overflow menu. */}
           <div className="prp-header__actions-inline">
             {/* Shell toggle only on conversation — side sheet is not used for Diff */}
@@ -506,7 +546,9 @@ export function Header(props: any) {
                 />
               </button>
             ) : null}
-            {typeof onToggleFullscreen === 'function' ? (
+            {/* Diff is always fullscreen — no shell fullscreen toggle */}
+            {typeof onToggleFullscreen === 'function' &&
+            effectiveLayout !== LAYOUT_DIFF ? (
               <button
                 type="button"
                 className="prp-header__icon-btn prp-fullscreen-toggle prp-has-tip"
@@ -684,7 +726,8 @@ export function Header(props: any) {
                     </button>
                   </li>
                 ) : null}
-                {typeof onToggleFullscreen === 'function' ? (
+                {typeof onToggleFullscreen === 'function' &&
+                effectiveLayout !== LAYOUT_DIFF ? (
                   <li role="none">
                     <button
                       type="button"
@@ -809,7 +852,6 @@ export function Header(props: any) {
               </ul>
             ) : null}
           </div>
-        </div>
       </div>
     </header>
   );

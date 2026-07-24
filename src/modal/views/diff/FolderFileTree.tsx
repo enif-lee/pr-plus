@@ -33,6 +33,9 @@ function FolderFileTreeImpl(props: any) {
     collapsedFiles,
     fileQuery,
     onFileQuery,
+    /** Called when the name filter is focused (fetch remaining file pages). */
+    onSearchFocus = null,
+    filesLoading = false,
     threadCounts,
     viewedPaths,
     onToggleViewed,
@@ -131,10 +134,16 @@ function FolderFileTreeImpl(props: any) {
       <div className="prp-filetree__search">
         <input
           className="prp-filetree__search-input"
-          placeholder="Filter files…"
+          placeholder={
+            filesLoading ? 'Loading all files…' : 'Search files by path…'
+          }
           value={fileQuery || ''}
           onChange={(e) => onFileQuery?.(e.target.value)}
-          aria-label="Filter files"
+          onFocus={() => {
+            void onSearchFocus?.();
+          }}
+          aria-label="Search files"
+          aria-busy={filesLoading ? true : undefined}
         />
         <div
           className="prp-filetree__filters"
@@ -217,11 +226,21 @@ function FolderFileTreeImpl(props: any) {
           );
           const threads = threadCounts?.get?.(node.path) || threadCounts?.[node.path] || 0;
           const viewed = isPathViewed ? isPathViewed(viewedPaths, node.path) : false;
+          const status = String(f.status || '').toLowerCase();
+          const statusTone =
+            status === 'added' || status === 'add'
+              ? 'add'
+              : status === 'removed' || status === 'deleted' || status === 'del'
+                ? 'del'
+                : status === 'renamed'
+                  ? 'rename'
+                  : '';
           return (
             <li
               key={`f-${node.path}`}
               className="prp-filetree__row"
               style={{ paddingLeft: 4 + (node.depth || 0) * 12 }}
+              data-file-status={status || undefined}
             >
               <label className="prp-filetree__viewed" title="Mark as viewed">
                 <input
@@ -233,14 +252,25 @@ function FolderFileTreeImpl(props: any) {
               </label>
               <button
                 type="button"
-                className={
-                  node.path === activePath
-                    ? 'prp-filetree__item prp-filetree__item--active'
-                    : 'prp-filetree__item'
-                }
+                className={[
+                  'prp-filetree__item',
+                  node.path === activePath ? 'prp-filetree__item--active' : '',
+                  statusTone ? `prp-filetree__item--${statusTone}` : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
                 onClick={() => onSelect?.(node.path)}
+                data-file-status={status || undefined}
               >
-                <span className="prp-filetree__name" title={node.path}>
+                <span
+                  className={[
+                    'prp-filetree__name',
+                    statusTone ? `prp-filetree__name--${statusTone}` : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
+                  title={node.path}
+                >
                   {node.name}
                   {isCollapsed ? ' ·' : ''}
                 </span>

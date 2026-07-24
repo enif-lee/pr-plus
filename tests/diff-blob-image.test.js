@@ -315,3 +315,119 @@ assert.equal(isImagePath('src/app.js'), false);
 
 console.log('diff-blob-image.test.js: all assertions passed');
 console.log('diff-blob-image=true');
+
+// --- Sticky file header + file-level comments ---
+{
+  const {
+    stickyFileHeaderForScroll,
+    shouldShowStickyFileHeader,
+    resolveStickyFileHeaderLayout,
+    isFileLevelComment,
+    flattenFilesToVirtualRows: flatten,
+  } = require('../src/modal/lib/diff-rows.ts');
+  const { rowOffsets } = require('../src/modal/components/common/utils.tsx');
+
+  assert.equal(
+    isFileLevelComment({ path: 'a.ts', subjectType: 'file' }),
+    true
+  );
+  assert.equal(
+    isFileLevelComment({ path: 'a.ts', line: 3, subjectType: 'line' }),
+    false
+  );
+  assert.equal(
+    isFileLevelComment({ path: 'a.ts', body: 'x' }),
+    true,
+    'path-only comment is file-level'
+  );
+
+  const files = [
+    {
+      filename: 'one.ts',
+      status: 'modified',
+      additions: 1,
+      deletions: 0,
+      patch: '@@ -1 +1 @@\n+a\n',
+    },
+    {
+      filename: 'two.ts',
+      status: 'added',
+      additions: 1,
+      deletions: 0,
+      patch: '@@ -0,0 +1 @@\n+b\n',
+    },
+  ];
+  const rows = flatten(files, 'unified', {
+    expandAll: true,
+    reviewComments: [
+      {
+        id: 99,
+        path: 'one.ts',
+        body: 'whole file',
+        author: 'ed',
+        subjectType: 'file',
+      },
+    ],
+  });
+  const headerOne = rows.find((r) => r.kind === 'file-header' && r.filePath === 'one.ts');
+  const fileComment = rows.find((r) => r.kind === 'inline-comment' && r.commentId === 99);
+  assert.ok(headerOne);
+  assert.ok(fileComment, 'file comment row present');
+  assert.equal(fileComment.subjectType, 'file');
+  assert.equal(
+    rows.indexOf(fileComment),
+    rows.indexOf(headerOne) + 1,
+    'file comment sits under header'
+  );
+
+  const offs = rowOffsets(rows);
+  const headerTwo = rows.find((r) => r.kind === 'file-header' && r.filePath === 'two.ts');
+  assert.equal(
+    stickyFileHeaderForScroll(rows, offs, 0)?.filePath,
+    'one.ts'
+  );
+  assert.equal(
+    shouldShowStickyFileHeader(
+      stickyFileHeaderForScroll(rows, offs, 0),
+      offs,
+      0,
+      22,
+      rows
+    ),
+    false,
+    'at rest, natural header is in view — no sticky clone'
+  );
+  {
+    const atEdge = resolveStickyFileHeaderLayout(rows, offs, 0, 22);
+    assert.equal(atEdge?.show, false);
+    const past = resolveStickyFileHeaderLayout(rows, offs, 8, 22);
+    assert.equal(past?.show, true);
+    assert.equal(past?.header?.filePath, 'one.ts');
+    assert.equal(past?.translateY, 0, 'far from next file — pinned at 0');
+  }
+  // Near next file header: sticky is pushed up (use array index for Y, not rowIndex)
+  {
+    const twoArrIdx = rows.findIndex(
+      (r) => r.kind === 'file-header' && r.filePath === 'two.ts'
+    );
+    const nextY = offs[twoArrIdx];
+    const nearTop = nextY - 10;
+    const near = resolveStickyFileHeaderLayout(rows, offs, nearTop, 22);
+    assert.equal(near?.show, true);
+    assert.equal(near?.header?.filePath, 'one.ts');
+    assert.ok(
+      near.translateY < 0,
+      `next header pushes sticky up (got translateY=${near?.translateY})`
+    );
+  }
+  {
+    const twoArrIdx = rows.findIndex(
+      (r) => r.kind === 'file-header' && r.filePath === 'two.ts'
+    );
+    assert.equal(
+      stickyFileHeaderForScroll(rows, offs, offs[twoArrIdx] + 2)?.filePath,
+      'two.ts'
+    );
+  }
+  console.log('ok - sticky header + file-level comments');
+}

@@ -454,6 +454,64 @@
     return parts.join(' · ');
   }
 
+  /**
+   * Names of individual checks bucketed by outcome (for stacked-icon tips).
+   * @returns {{ failure: string[], pending: string[], success: string[], skipped: string[], state: string }}
+   */
+  function listCheckNamesByOutcome(checks) {
+    const n = normalizeChecks(checks);
+    /** @type {{ failure: string[], pending: string[], success: string[], skipped: string[] }} */
+    const groups = { failure: [], pending: [], success: [], skipped: [] };
+    for (const s of n.statuses || []) {
+      const o = classifyCheckOutcome({ kind: 'status', state: s?.state });
+      const name = String(s?.context || s?.description || 'status').trim() || 'status';
+      const bucket = groups[o] || groups.pending;
+      bucket.push(name);
+    }
+    for (const r of n.checkRuns || []) {
+      const o = classifyCheckOutcome(r);
+      const app = String(r?.appName || r?.app?.name || '').trim();
+      const job = String(r?.name || 'check').trim() || 'check';
+      const name =
+        app && !job.toLowerCase().startsWith(app.toLowerCase())
+          ? `${app} / ${job}`
+          : job;
+      const bucket = groups[o] || groups.pending;
+      bucket.push(name);
+    }
+    return {
+      failure: groups.failure,
+      pending: groups.pending,
+      success: groups.success,
+      skipped: groups.skipped,
+      state: n.state || 'unknown',
+    };
+  }
+
+  /**
+   * Popover text for one outcome group (e.g. failed checks).
+   * @param {'failure'|'pending'|'success'|'skipped'} outcome
+   * @param {string[]} names
+   */
+  function formatCheckGroupTip(outcome, names) {
+    const list = Array.isArray(names) ? names.filter(Boolean) : [];
+    const n = list.length;
+    const headings = {
+      failure: n === 1 ? '1 failed' : `${n} failed`,
+      pending: n === 1 ? '1 in progress' : `${n} in progress`,
+      success: n === 1 ? '1 succeeded' : `${n} succeeded`,
+      skipped: n === 1 ? '1 skipped' : `${n} skipped`,
+    };
+    const head = headings[outcome] || `${n} checks`;
+    if (!n) return head;
+    // Cap long lists so tips stay readable
+    const max = 12;
+    const shown = list.slice(0, max);
+    const more = n - shown.length;
+    const body = shown.map((name) => `· ${name}`).join('\n');
+    return more > 0 ? `${head}\n${body}\n· +${more} more` : `${head}\n${body}`;
+  }
+
   const api = {
     parseTime,
     statusKey,
@@ -472,6 +530,8 @@
     mergeBoxChecksHeadline,
     summarizeCheckCounts,
     formatChecksCountLabel,
+    listCheckNamesByOutcome,
+    formatCheckGroupTip,
   };
 
   if (typeof module !== 'undefined' && module.exports) {

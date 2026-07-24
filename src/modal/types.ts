@@ -28,6 +28,9 @@ export interface PickerState {
 }
 
 export interface LineSelection {
+  /** `file` = file-level comment target (no line range). */
+  kind?: 'line' | 'file';
+  subjectType?: 'line' | 'file';
   filePath?: string;
   startLine?: number;
   endLine?: number;

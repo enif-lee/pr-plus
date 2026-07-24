@@ -1309,7 +1309,7 @@ function ConversationViewImpl(props: any) {
               ) : null}
             </div>
           )}
-          {actionMsg ? <p className="prp-muted prp-composer-hint">{actionMsg}</p> : null}
+
         </div>
       </Card>
     );
@@ -1611,14 +1611,17 @@ function ConversationViewImpl(props: any) {
         >
           <AsideFilesTree files={detail.files || []} />
         </AsideSection>
-        {actionMsg ? <div className="prp-action-msg">{actionMsg}</div> : null}
+
           </>
         )}
       </aside>
-      <FloatingScrollbar
-        scrollerRef={asideScrollRef}
-        contentKey={asideCollapsed ? 'collapsed' : 'expanded'}
-      />
+      {/* Compact rail is too narrow for a scrollbar chrome; hide entirely. */}
+      {!asideCollapsed ? (
+        <FloatingScrollbar
+          scrollerRef={asideScrollRef}
+          contentKey="expanded"
+        />
+      ) : null}
       </div>
     </div>
   );

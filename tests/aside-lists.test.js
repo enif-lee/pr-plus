@@ -21,7 +21,9 @@ assert.equal(tl.items.length, 12);
 assert.equal(tl.total, 20);
 assert.equal(tl.truncated, 8);
 assert.equal(tl.items[0].shortSha.length, 7);
-assert.equal(tl.items[0].message, 'Commit message 0');
+// Newest-first: last array element is shown first
+assert.equal(tl.items[0].message, 'Commit message 19');
+assert.equal(tl.items[1].message, 'Commit message 18');
 assert.ok(!tl.items[0].message.includes('\n'));
 
 const empty = takeCommitsForTimeline([], 12);

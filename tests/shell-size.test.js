@@ -6,7 +6,11 @@ const assert = require('node:assert/strict');
 const {
   SHEET_MIN_WIDTH,
   SHEET_MAX_WIDTH,
+  SHELL_FULLSCREEN_EDGE_PX,
+  SHEET_FULLSCREEN_EDGE_PX,
   SHEET_DEFAULT_WIDTH,
+  sheetWidthHitsFullscreen,
+  modalSizeHitsFullscreen,
   MODAL_MIN_WIDTH,
   MODAL_MAX_WIDTH,
   MODAL_DEFAULT_WIDTH,
@@ -43,7 +47,9 @@ const {
 // --- clamp bounds ---
 assert.equal(clampSheetWidth(700), 700);
 assert.equal(clampSheetWidth(10), SHEET_MIN_WIDTH);
-assert.equal(clampSheetWidth(99999), SHEET_MAX_WIDTH);
+// No artificial 1200 max: huge widths keep (unless viewport provided)
+assert.equal(clampSheetWidth(99999), 99999);
+assert.ok(SHEET_MAX_WIDTH > 10000, 'legacy SHEET_MAX_WIDTH is no longer a 1200 hard cap');
 assert.equal(clampSheetWidth(NaN), SHEET_DEFAULT_WIDTH);
 assert.equal(clampSheetWidth(null), SHEET_DEFAULT_WIDTH);
 assert.equal(clampSheetWidth(undefined), SHEET_DEFAULT_WIDTH);
@@ -57,16 +63,41 @@ assert.equal(clampSheetWidth(2000, { viewportWidth: 1000 }), 1000);
 // narrow window: min > vw → pin to vw
 assert.equal(clampSheetWidth(SHEET_MIN_WIDTH, { viewportWidth: 400 }), 400);
 
+// Edge drag → fullscreen threshold (~50px)
+assert.equal(SHELL_FULLSCREEN_EDGE_PX, 50);
+assert.equal(SHEET_FULLSCREEN_EDGE_PX, 50);
+assert.equal(sheetWidthHitsFullscreen(1000, 1000), true);
+assert.equal(sheetWidthHitsFullscreen(1000 - SHELL_FULLSCREEN_EDGE_PX, 1000), true);
+assert.equal(sheetWidthHitsFullscreen(1000 - SHELL_FULLSCREEN_EDGE_PX - 1, 1000), false);
+assert.equal(sheetWidthHitsFullscreen(500, 1000), false);
+assert.equal(sheetWidthHitsFullscreen(NaN, 1000), false);
+// Modal needs both axes in the snap zone
+assert.equal(
+  modalSizeHitsFullscreen({ width: 950, height: 950 }, 1000, 1000),
+  true
+);
+assert.equal(
+  modalSizeHitsFullscreen({ width: 900, height: 950 }, 1000, 1000),
+  false
+);
+assert.equal(
+  modalSizeHitsFullscreen({ width: 1000, height: 900 }, 1000, 1000),
+  false
+);
+
 assert.equal(clampModalWidth(800), 800);
 assert.equal(clampModalWidth(10), MODAL_MIN_WIDTH);
-assert.equal(clampModalWidth(99999), MODAL_MAX_WIDTH);
+// No artificial 1600/1200 max without viewport
+assert.equal(clampModalWidth(99999), 99999);
 assert.equal(clampModalHeight(500), 500);
 assert.equal(clampModalHeight(10), MODAL_MIN_HEIGHT);
-assert.equal(clampModalHeight(99999), MODAL_MAX_HEIGHT);
+assert.equal(clampModalHeight(99999), 99999);
+assert.equal(clampModalWidth(2000, { viewportWidth: 1400 }), 1400);
+assert.equal(clampModalHeight(2000, { viewportHeight: 900 }), 900);
 
 const ms = clampModalSize({ width: 50, height: 99999 });
 assert.equal(ms.width, MODAL_MIN_WIDTH);
-assert.equal(ms.height, MODAL_MAX_HEIGHT);
+assert.equal(ms.height, 99999);
 
 // Generic clamp with custom min/max
 assert.equal(clampShellSize(5, { min: 10, max: 20, fallback: 15 }), 10);
@@ -77,11 +108,23 @@ assert.equal(clampShellSize(NaN, { min: 10, max: 20, fallback: 15 }), 15);
 assert.equal(nextSheetWidthFromDrag(700, 100, 50), 750); // moved left 50
 assert.equal(nextSheetWidthFromDrag(700, 100, 150), 650); // moved right 50
 assert.equal(nextSheetWidthFromDrag(700, 100, 10000), SHEET_MIN_WIDTH);
-assert.equal(nextSheetWidthFromDrag(700, 100, -10000), SHEET_MAX_WIDTH);
+// No fixed max without viewport — widen freely
+assert.equal(nextSheetWidthFromDrag(700, 100, -10000), 700 + 10100);
 assert.equal(nextSheetWidthFromDrag(700, NaN, 50), 700);
 assert.equal(
   nextSheetWidthFromDrag(700, 100, 0, { viewportWidth: 720 }),
   720 // 700+100 clamped to viewport
+);
+// Viewport is the only max during drag
+assert.equal(
+  nextSheetWidthFromDrag(700, 100, -5000, { viewportWidth: 1400 }),
+  1400
+);
+assert.ok(
+  sheetWidthHitsFullscreen(
+    nextSheetWidthFromDrag(700, 100, -5000, { viewportWidth: 1400 }),
+    1400
+  )
 );
 
 // --- drag: modal SE (2× delta: centered panel, edge follows pointer) ---
@@ -96,9 +139,20 @@ assert.equal(
   assert.equal(next.height, MODAL_MIN_HEIGHT);
 }
 {
+  const next = nextModalSizeFromDrag(
+    { width: 800, height: 600 },
+    100000,
+    100000,
+    { viewportWidth: 1600, viewportHeight: 1000 }
+  );
+  assert.equal(next.width, 1600);
+  assert.equal(next.height, 1000);
+}
+{
   const next = nextModalSizeFromDrag({ width: 800, height: 600 }, 100000, 100000);
-  assert.equal(next.width, MODAL_MAX_WIDTH);
-  assert.equal(next.height, MODAL_MAX_HEIGHT);
+  // Without viewport, no fixed 1600/1200 ceiling
+  assert.ok(next.width > 800);
+  assert.ok(next.height > 600);
 }
 {
   const next = nextModalSizeFromDrag({ width: 800, height: 600 }, NaN, 20);
@@ -149,7 +203,7 @@ assert.equal(loadSheetWidth(mem), 850);
 assert.equal(saveSheetWidth(mem, 50), true);
 assert.equal(loadSheetWidth(mem), SHEET_MIN_WIDTH);
 assert.equal(saveSheetWidth(mem, 99999), true);
-assert.equal(loadSheetWidth(mem), SHEET_MAX_WIDTH);
+assert.equal(loadSheetWidth(mem), 99999);
 
 assert.equal(saveModalSize(mem, { width: 1024, height: 768 }), true);
 assert.ok(mem.data[SHELL_MODAL_SIZE_KEY]);

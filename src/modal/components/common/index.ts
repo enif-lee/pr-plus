@@ -1,5 +1,15 @@
 export { Button } from './Button';
-export { TipPopover, hasTipContent } from './TipPopover';
+export {
+  TipPopover,
+  hasTipContent,
+  resolveTipPlacement,
+  inferPreferredPlacement,
+} from './TipPopover';
+export type { TipPlacement } from './TipPopover';
+export { ActionToast, actionToastTone } from './ActionToast';
+export type { ActionToastTone } from './ActionToast';
+export { StepNav } from './StepNav';
+export type { StepNavProps } from './StepNav';
 export { Badge } from './Badge';
 export { Card } from './Card';
 export { AsideSection } from './AsideSection';
@@ -8,6 +18,7 @@ export { WysiwygComposer } from './WysiwygComposer';
 export { MarkdownComposer } from './MarkdownComposer';
 export { MarkdownView } from './MarkdownView';
 export { MermaidBlock } from './MermaidBlock';
+export { ImageViewer } from './ImageViewer';
 export { SuggestionBlock } from './SuggestionBlock';
 export { UserLink } from './UserLink';
 export { LabelLink } from './LabelLink';

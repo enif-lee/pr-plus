@@ -44,6 +44,8 @@ export function MarkdownComposer({
   const taRef = useRef<HTMLTextAreaElement | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const blurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** When kind+query stays the same, keep menuIndex (arrow keys must not reset). */
+  const menuKeyRef = useRef('');
   // Keep open on Preview even when empty — do not collapse while tab is preview.
   const open =
     forceOpen || focused || Boolean(String(value || '').trim()) || tab === 'preview';
@@ -95,22 +97,45 @@ export function MarkdownComposer({
     setTab(next);
     setFocused(true);
     setMenu(null);
+    menuKeyRef.current = '';
+    setMenuIndex(0);
     if (next === 'write') {
       requestAnimationFrame(() => taRef.current?.focus());
+    }
+  }
+
+  function openMenu(
+    kind: 'mention' | 'slash',
+    items: any[],
+    trigger: any,
+    queryKey: string
+  ) {
+    const key = `${kind}:${queryKey}`;
+    setMenu({ kind, items, trigger });
+    if (menuKeyRef.current !== key) {
+      menuKeyRef.current = key;
+      setMenuIndex(0);
+    } else {
+      // Same menu session (e.g. ArrowUp/Down keyup re-sync) — keep highlight,
+      // only clamp if the filtered list shrank.
+      setMenuIndex((i) => {
+        if (!items.length) return 0;
+        return Math.min(i, items.length - 1);
+      });
     }
   }
 
   function syncMenus(text: string, cursor: number) {
     if (disabled) {
       setMenu(null);
+      menuKeyRef.current = '';
       return;
     }
     if (typeof detectMentionTrigger === 'function') {
       const mTrig = detectMentionTrigger(text, cursor);
       if (mTrig) {
         const items = filterMentions(mTrig.query, mentionCandidates);
-        setMenu({ kind: 'mention', items, trigger: mTrig });
-        setMenuIndex(0);
+        openMenu('mention', items, mTrig, String(mTrig.query || ''));
         return;
       }
     }
@@ -118,12 +143,12 @@ export function MarkdownComposer({
       const sTrig = detectSlashTrigger(text, cursor);
       if (sTrig) {
         const items = filterSlashCommands(sTrig.query);
-        setMenu({ kind: 'slash', items, trigger: sTrig });
-        setMenuIndex(0);
+        openMenu('slash', items, sTrig, String(sTrig.query || ''));
         return;
       }
     }
     setMenu(null);
+    menuKeyRef.current = '';
   }
 
   function applyMenuItem(item: any) {
@@ -140,6 +165,7 @@ export function MarkdownComposer({
     }
     onChange?.(next.text);
     setMenu(null);
+    menuKeyRef.current = '';
     setMenuIndex(0);
     requestAnimationFrame(() => {
       const ta = taRef.current;
@@ -157,25 +183,44 @@ export function MarkdownComposer({
     const n = menu.items.length;
     if (e.key === 'Escape') {
       e.preventDefault();
+      e.stopPropagation();
       setMenu(null);
+      menuKeyRef.current = '';
       return;
     }
     if (e.key === 'ArrowDown') {
       e.preventDefault();
+      e.stopPropagation();
       setMenuIndex((i) => (i + 1) % n);
       return;
     }
     if (e.key === 'ArrowUp') {
       e.preventDefault();
+      e.stopPropagation();
       setMenuIndex((i) => (i - 1 + n) % n);
       return;
     }
     if (e.key === 'Enter' || e.key === 'Tab') {
       // Only intercept when a menu is open so normal newlines still work.
       e.preventDefault();
+      e.stopPropagation();
       const item = menu.items[menuIndex] ?? menu.items[0];
       applyMenuItem(item);
     }
+  }
+
+  function onComposerKeyUp(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    // Arrow keys only move the highlight — do not re-sync (would reset index).
+    if (
+      e.key === 'ArrowDown' ||
+      e.key === 'ArrowUp' ||
+      e.key === 'Enter' ||
+      e.key === 'Tab' ||
+      e.key === 'Escape'
+    ) {
+      return;
+    }
+    syncMenus(e.currentTarget.value, e.currentTarget.selectionStart);
   }
 
   async function handleFiles(fileList: FileList | File[] | null) {
@@ -313,9 +358,7 @@ export function MarkdownComposer({
               onChange?.(e.target.value);
               syncMenus(e.target.value, e.target.selectionStart);
             }}
-            onKeyUp={(e) =>
-              syncMenus(e.currentTarget.value, e.currentTarget.selectionStart)
-            }
+            onKeyUp={onComposerKeyUp}
             onClick={(e) =>
               syncMenus(e.currentTarget.value, e.currentTarget.selectionStart)
             }

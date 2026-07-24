@@ -10,6 +10,8 @@ const {
   selectionGestureMode,
   isRowInSelection,
   selectionBlockRole,
+  extractSelectedCodeText,
+  githubBlobLinePermalink,
 } = require('../src/modal/lib/line-selection.ts');
 
 const row = (overrides) => ({
@@ -59,9 +61,16 @@ const single = selectionToCommentPayload(start, { body: 'one line' });
 assert.equal(single.start_line, undefined);
 assert.equal(single.line, 5);
 
-assert.equal(isRowInSelection(multi, row({ newLine: 6 })), true);
-assert.equal(isRowInSelection(multi, row({ newLine: 20 })), false);
-assert.equal(isRowInSelection(multi, row({ filePath: 'other.js', newLine: 6 })), false);
+assert.equal(isRowInSelection(multi, row({ newLine: 6, rowIndex: 11 })), true);
+assert.equal(
+  isRowInSelection(multi, row({ newLine: 20, rowIndex: 99 })),
+  false,
+  'rowIndex outside range is not selected (even if line number is unrelated)'
+);
+assert.equal(
+  isRowInSelection(multi, row({ filePath: 'other.js', newLine: 6, rowIndex: 11 })),
+  false
+);
 
 assert.equal(selectionToCommentPayload(start, { body: '   ' }), null);
 
@@ -80,14 +89,14 @@ const asDrag = finalizeSelection(dragged, 'drag');
 assert.equal(normalizeSelection(asDrag).multi, true);
 assert.equal(normalizeSelection(asDrag).endLine, 6);
 
-// Continuous selection block roles for yellow multi-line UI
-assert.equal(selectionBlockRole(start, row({ newLine: 5 })), 'only');
-assert.equal(selectionBlockRole(multi, row({ newLine: 5 })), 'start');
-assert.equal(selectionBlockRole(multi, row({ newLine: 6 })), 'middle');
-assert.equal(selectionBlockRole(multi, row({ newLine: 7 })), 'middle');
-assert.equal(selectionBlockRole(multi, row({ newLine: 8 })), 'end');
-assert.equal(selectionBlockRole(multi, row({ newLine: 99 })), null);
-assert.equal(selectionBlockRole(null, row({ newLine: 5 })), null);
+// Continuous selection block roles for yellow multi-line UI (by rowIndex)
+assert.equal(selectionBlockRole(start, row({ newLine: 5, rowIndex: 10 })), 'only');
+assert.equal(selectionBlockRole(multi, row({ newLine: 5, rowIndex: 10 })), 'start');
+assert.equal(selectionBlockRole(multi, row({ newLine: 6, rowIndex: 11 })), 'middle');
+assert.equal(selectionBlockRole(multi, row({ newLine: 7, rowIndex: 12 })), 'middle');
+assert.equal(selectionBlockRole(multi, row({ newLine: 8, rowIndex: 13 })), 'end');
+assert.equal(selectionBlockRole(multi, row({ newLine: 99, rowIndex: 99 })), null);
+assert.equal(selectionBlockRole(null, row({ newLine: 5, rowIndex: 10 })), null);
 
 // --- Click then Shift-click → multi range (anchor fixed) ---
 {
@@ -167,3 +176,165 @@ assert.equal(selectionBlockRole(null, row({ newLine: 5 })), null);
 console.log('line-selection.test.js: all assertions passed');
 console.log('diff-shift-select=true');
 
+
+// extractSelectedCodeText + githubBlobLinePermalink
+{
+  const rows = [
+    {
+      kind: 'diff-line',
+      filePath: 'a.ts',
+      lineType: 'add',
+      newLine: 1,
+      oldLine: null,
+      code: 'const x = 1;',
+      raw: '+const x = 1;',
+      rowIndex: 1,
+    },
+    {
+      kind: 'diff-line',
+      filePath: 'a.ts',
+      lineType: 'add',
+      newLine: 2,
+      oldLine: null,
+      code: 'const y = 2;',
+      raw: '+const y = 2;',
+      rowIndex: 2,
+    },
+  ];
+  const s = beginLineSelection(rows[0]);
+  const m = extendLineSelection(s, rows[1]);
+  assert.equal(extractSelectedCodeText(rows, m), 'const x = 1;\nconst y = 2;');
+  assert.equal(extractSelectedCodeText(rows, null), '');
+  assert.equal(
+    githubBlobLinePermalink({
+      owner: 'acme',
+      repo: 'app',
+      path: 'src/a.ts',
+      startLine: 10,
+      endLine: 12,
+      side: 'RIGHT',
+      headSha: 'deadbeef',
+    }),
+    'https://github.com/acme/app/blob/deadbeef/src/a.ts#L10-L12'
+  );
+  assert.equal(
+    githubBlobLinePermalink({
+      owner: 'acme',
+      repo: 'app',
+      path: 'src/a.ts',
+      startLine: 5,
+      side: 'LEFT',
+      baseSha: 'cafebabe',
+    }),
+    'https://github.com/acme/app/blob/cafebabe/src/a.ts#L5'
+  );
+  assert.equal(githubBlobLinePermalink({ owner: 'a', repo: 'b' }), '');
+  // Path segments encoded; line range omitted when single line
+  assert.equal(
+    githubBlobLinePermalink({
+      owner: 'o',
+      repo: 'r',
+      path: 'src/foo bar.ts',
+      startLine: 3,
+      endLine: 3,
+      headRef: 'main',
+    }),
+    'https://github.com/o/r/blob/main/src/foo%20bar.ts#L3'
+  );
+  console.log('ok - extract code + permalink');
+}
+
+// File-level selection → comment payload
+{
+  const fileSel = { kind: 'file', filePath: 'src/a.ts', subjectType: 'file' };
+  const norm = normalizeSelection(fileSel);
+  assert.equal(norm.subjectType, 'file');
+  assert.equal(norm.filePath, 'src/a.ts');
+  assert.equal(norm.startLine, null);
+  const payload = selectionToCommentPayload(fileSel, {
+    body: 'nits on this file',
+    commitId: 'deadbeef',
+  });
+  assert.ok(payload);
+  assert.equal(payload.path, 'src/a.ts');
+  assert.equal(payload.subject_type, 'file');
+  assert.equal(payload.line, undefined);
+  assert.equal(payload.commit_id, 'deadbeef');
+  assert.equal(
+    selectionToCommentPayload(fileSel, { body: '  ' }),
+    null,
+    'empty body rejected'
+  );
+  console.log('ok - file-level selection payload');
+}
+
+// Interleaved add/del: selection highlights by rowIndex (no line-number jump)
+{
+  const del = (oldLine, rowIndex) =>
+    row({
+      lineType: 'del',
+      newLine: null,
+      oldLine,
+      rowIndex,
+    });
+  const add = (newLine, rowIndex) =>
+    row({
+      lineType: 'add',
+      newLine,
+      oldLine: null,
+      rowIndex,
+    });
+  // Unified-style interleave: -5, +5, -6, +6
+  const r0 = del(5, 10);
+  const r1 = add(5, 11);
+  const r2 = del(6, 12);
+  const r3 = add(6, 13);
+  const r4 = add(7, 14);
+
+  // Drag from add L5 through del L6 to add L7
+  let sel = beginLineSelection(r1);
+  assert.equal(sel.anchorSide, 'RIGHT');
+  sel = extendLineSelection(sel, r2); // del — LEFT line 6, but visual headRowIndex advances
+  assert.equal(sel.headRowIndex, 12);
+  assert.equal(sel.headSide, 'LEFT');
+  sel = extendLineSelection(sel, r3);
+  sel = extendLineSelection(sel, r4);
+  assert.equal(sel.headRowIndex, 14);
+  assert.equal(sel.headLine, 7);
+  assert.equal(sel.headSide, 'RIGHT');
+
+  // All rows between anchor and head are selected (continuous visual block)
+  assert.equal(isRowInSelection(sel, r1), true, 'anchor add selected');
+  assert.equal(isRowInSelection(sel, r2), true, 'interleaved del selected');
+  assert.equal(isRowInSelection(sel, r3), true, 'interleaved add selected');
+  assert.equal(isRowInSelection(sel, r4), true, 'head add selected');
+  assert.equal(isRowInSelection(sel, r0), false, 'row before anchor not selected');
+
+  assert.equal(selectionBlockRole(sel, r1), 'start');
+  assert.equal(selectionBlockRole(sel, r2), 'middle');
+  assert.equal(selectionBlockRole(sel, r4), 'end');
+
+  // Payload ends ordered by visual rowIndex (start=anchor RIGHT5, end=head RIGHT7)
+  const p = selectionToCommentPayload(sel, { body: 'range' });
+  assert.equal(p.start_line, 5);
+  assert.equal(p.start_side, 'RIGHT');
+  assert.equal(p.line, 7);
+  assert.equal(p.side, 'RIGHT');
+
+  // Drag reverse: from del up through adds — still continuous by rowIndex
+  let rev = beginLineSelection(r2);
+  assert.equal(rev.anchorSide, 'LEFT');
+  rev = extendLineSelection(rev, r1);
+  rev = extendLineSelection(rev, r0);
+  assert.equal(isRowInSelection(rev, r0), true);
+  assert.equal(isRowInSelection(rev, r1), true);
+  assert.equal(isRowInSelection(rev, r2), true);
+  assert.equal(isRowInSelection(rev, r3), false);
+  const revP = selectionToCommentPayload(rev, { body: 'rev' });
+  // Visual start is r0 (del LEFT5), visual end is r2 (del LEFT6)
+  assert.equal(revP.start_line, 5);
+  assert.equal(revP.start_side, 'LEFT');
+  assert.equal(revP.line, 6);
+  assert.equal(revP.side, 'LEFT');
+  console.log('ok - interleaved add/del selection by rowIndex');
+}

@@ -214,24 +214,7 @@ export function SearchableSelect({
       style={pos ? style : undefined}
     >
       {title ? <div className="prp-sselect-title">{title}</div> : null}
-      {multi && selected.length ? (
-        <div className="prp-sselect-selected" aria-label="Selected">
-          {selected.map((id) => (
-            <button
-              key={id}
-              type="button"
-              className="prp-sselect-chip"
-              onClick={() => toggleId(id)}
-              title={`Remove ${id}`}
-            >
-              <span className="prp-sselect-chip__label">{id}</span>
-              <span className="prp-sselect-chip__x" aria-hidden="true">
-                <IconX size={12} />
-              </span>
-            </button>
-          ))}
-        </div>
-      ) : null}
+      {/* Search first so commit/file pickers open with filter ready */}
       <input
         className="prp-sselect-input"
         autoFocus
@@ -252,6 +235,24 @@ export function SearchableSelect({
           }
         }}
       />
+      {multi && selected.length ? (
+        <div className="prp-sselect-selected" aria-label="Selected">
+          {selected.map((id) => (
+            <button
+              key={id}
+              type="button"
+              className="prp-sselect-chip"
+              onClick={() => toggleId(id)}
+              title={`Remove ${id}`}
+            >
+              <span className="prp-sselect-chip__label">{id}</span>
+              <span className="prp-sselect-chip__x" aria-hidden="true">
+                <IconX size={12} />
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : null}
       <ul className="prp-sselect-list">
         {filtered.length === 0 ? (
           <li className="prp-sselect-empty prp-muted">

@@ -673,6 +673,7 @@ async function handleMessage(message) {
           startLine: message.startLine,
           startSide: message.startSide,
           asPending: Boolean(message.asPending),
+          subjectType: message.subjectType || message.subject_type || 'line',
         },
         fetchImpl(),
         token

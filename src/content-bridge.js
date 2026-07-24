@@ -663,6 +663,7 @@
         startLine: payload.startLine ?? payload.start_line,
         startSide: payload.startSide ?? payload.start_side,
         asPending: Boolean(payload.asPending),
+        subjectType: payload.subjectType ?? payload.subject_type ?? 'line',
       });
       if (!res?.ok) {
         const err = new Error(res?.error || 'Failed to post review comment');

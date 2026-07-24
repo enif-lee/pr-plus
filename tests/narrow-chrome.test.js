@@ -38,16 +38,67 @@ assert.ok(
     css.includes('@container prp-header (max-width: 760px)'),
   'compact actions use ~760px container query (wrap point ~700–800)'
 );
+assert.ok(
+  /@container\s+prp-header\s*\(\s*max-width:\s*960px\s*\)/.test(css) ||
+    css.includes('@container prp-header (max-width: 960px)'),
+  'dense single-line header uses ~960px container query'
+);
+assert.ok(
+  css.includes("grid-template-areas: 'primary branch actions'") ||
+    css.includes('grid-template-areas: "primary branch actions"') ||
+    /grid-template-areas:\s*['"]primary branch actions['"]/.test(css),
+  'dense mode places branch + actions on the primary line'
+);
+assert.ok(header.includes('prp-header__branch-meta'), 'branch meta cluster');
+assert.ok(
+  !header.includes('prp-header__row--secondary') ||
+    css.includes('.prp-header__row--secondary'),
+  'secondary row no longer required for layout (clusters are direct children)'
+);
 assert.ok(!/@media\s*\(\s*max-width:\s*1100px\s*\)/.test(css), 'no window 1100px media for actions');
 const {
   HEADER_COMPACT_MAX_PX,
+  HEADER_DENSE_MAX_PX,
   headerActionsCompact,
+  headerDenseLayout,
+  headerReviewCompact,
 } = require('../src/modal/lib/header-layout.ts');
 assert.equal(HEADER_COMPACT_MAX_PX, 760);
+assert.equal(HEADER_DENSE_MAX_PX, 960);
 assert.equal(headerActionsCompact(900), false);
 assert.equal(headerActionsCompact(760), true);
 assert.equal(headerActionsCompact(700), true);
 assert.equal(headerActionsCompact(0), false);
+assert.equal(headerDenseLayout(1000), false);
+assert.equal(headerDenseLayout(960), true);
+assert.equal(headerDenseLayout(800), true);
+assert.equal(headerDenseLayout(0), false);
+// Review compact: always in Diff, width-only in conversation
+assert.equal(
+  headerReviewCompact({ layoutMode: 'diff', widthPx: 1400 }),
+  true,
+  'Diff layout always uses review compact header'
+);
+assert.equal(
+  headerReviewCompact({ layoutMode: 'conversation', widthPx: 1400 }),
+  false,
+  'wide conversation keeps two-row header'
+);
+assert.equal(
+  headerReviewCompact({ layoutMode: 'conversation', widthPx: 900 }),
+  true,
+  'narrow conversation also densifies by width'
+);
+assert.ok(
+  header.includes('prp-header--review-compact') ||
+    header.includes('data-review-compact'),
+  'Header applies review-compact class/attr for Diff'
+);
+assert.ok(
+  css.includes('prp-header--review-compact') ||
+    css.includes("data-review-compact='1'"),
+  'CSS targets review-compact header'
+);
 
 // --- (b) no collapsed file-tree expand chrome (nav stays mounted for anim) ---
 assert.ok(
@@ -59,10 +110,22 @@ assert.ok(!tree.includes('prp-filetree__rail-toggle'), 'no rail expand toggle');
 assert.ok(!tree.includes('Expand files navigator'), 'no expand affordance in tree column');
 assert.ok(toolbar.includes('Files') || toolbar.includes('onToggleFileNav'), 'toolbar Files remains');
 
-// --- (c) comment nav button group ---
-assert.ok(toolbar.includes('prp-btn-group'), 'btn group class');
-assert.ok(css.includes('prp-btn-group'), 'btn group CSS');
-assert.ok(toolbar.includes('Previous comment') || toolbar.includes('onPrevComment'));
+// --- (c) thread / finder share StepNav ---
+assert.ok(
+  toolbar.includes('StepNav') || toolbar.includes('prp-step-nav'),
+  'DiffToolbar uses shared StepNav for thread navigation'
+);
+assert.ok(css.includes('prp-step-nav'), 'StepNav CSS');
+assert.ok(
+  css.includes('.prp-step-nav__btn') && /width:\s*28px/.test(css),
+  'prev/next share equal fixed width'
+);
+assert.ok(toolbar.includes('onPrevComment'));
+const searchBar = read('src/modal/views/chrome/SearchBar.tsx');
+assert.ok(
+  searchBar.includes('StepNav') || searchBar.includes('prp-step-nav'),
+  'SearchBar finder nav uses shared StepNav'
+);
 
 // --- (d) multi-checkbox commit → all/single/range ---
 const commits = [

@@ -1,5 +1,6 @@
 import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@common/Button';
+import { StepNav } from '@common/StepNav';
 
 /** Default pause after last keystroke before parent/search runs. */
 export const SEARCH_INPUT_DEBOUNCE_MS = 320;
@@ -23,6 +24,12 @@ export const SearchBar = memo(function SearchBar({
   showLoadComments = false,
   onLoadComments = null,
   loadCommentsBusy = false,
+  /**
+   * `bar` — full-width row under header (conversation).
+   * `toolbar` — inline slot in DiffToolbar (replaces review filters).
+   */
+  variant = 'bar',
+  placeholder = null,
 }: any) {
   const [draft, setDraft] = useState(() => String(query || ''));
   const draftRef = useRef(draft);
@@ -79,17 +86,28 @@ export const SearchBar = memo(function SearchBar({
   const busy = Boolean(searching || (pendingCommit && draftTrim));
   const hitCount = Array.isArray(hits) ? hits.length : 0;
 
+  const isToolbar = variant === 'toolbar';
+  const ph =
+    placeholder != null
+      ? String(placeholder)
+      : isToolbar
+        ? 'Find in diff…'
+        : 'Find in description, comments, reviews…';
+
   return (
     <div
-      className={`prp-search${busy ? ' prp-search--busy' : ''}`}
+      className={`prp-search${busy ? ' prp-search--busy' : ''}${
+        isToolbar ? ' prp-search--toolbar' : ''
+      }`}
       role="search"
       aria-busy={busy || undefined}
+      data-variant={isToolbar ? 'toolbar' : 'bar'}
     >
       <input
         ref={inputRef}
         className="prp-search__input"
         value={draft}
-        placeholder="Find in description, comments, reviews…"
+        placeholder={ph}
         autoComplete="off"
         spellCheck={false}
         onChange={(e) => {
@@ -138,8 +156,14 @@ export const SearchBar = memo(function SearchBar({
           <span className="prp-search__loading-label">Searching…</span>
         </span>
       ) : (
-        <span
-          className="prp-search__count"
+        <StepNav
+          className="prp-search__step-nav"
+          index={hitIndex}
+          total={hitCount}
+          onPrev={() => onPrev?.()}
+          onNext={() => onNext?.()}
+          disabled={!hitCount}
+          label="Search hits"
           title={
             hitCount
               ? undefined
@@ -147,16 +171,10 @@ export const SearchBar = memo(function SearchBar({
                 ? 'No matches'
                 : undefined
           }
-        >
-          {hitCount ? `${(hitIndex ?? 0) + 1}/${hitCount}` : '0/0'}
-        </span>
+          prevTitle="Previous match"
+          nextTitle="Next match"
+        />
       )}
-      <Button size="sm" onClick={() => onPrev?.()} disabled={busy || !hitCount}>
-        ↑
-      </Button>
-      <Button size="sm" onClick={() => onNext?.()} disabled={busy || !hitCount}>
-        ↓
-      </Button>
       <Button size="sm" onClick={() => onClose?.()}>
         Esc
       </Button>

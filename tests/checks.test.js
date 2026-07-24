@@ -12,6 +12,8 @@ const {
   mergeBoxChecksHeadline,
   summarizeCheckCounts,
   formatChecksCountLabel,
+  listCheckNamesByOutcome,
+  formatCheckGroupTip,
 } = require('../src/modal/pure/checks.js');
 
 // Statuses: same context → keep latest updatedAt
@@ -286,7 +288,26 @@ assert.ok(
   assert.equal(s.state, 'pending');
 }
 
-// UI wiring: details as icon, summary icons (static source)
+// listCheckNamesByOutcome + group tip for stacked icons
+{
+  const by = listCheckNamesByOutcome({
+    statuses: [{ context: 'deploy/prod', state: 'pending' }],
+    checkRuns: [
+      { id: 1, name: 'CI / test', status: 'completed', conclusion: 'failure' },
+      { id: 2, name: 'lint', status: 'completed', conclusion: 'success' },
+      { id: 3, name: 'docs', status: 'completed', conclusion: 'skipped' },
+    ],
+  });
+  assert.deepEqual(by.failure, ['CI / test']);
+  assert.deepEqual(by.pending, ['deploy/prod']);
+  assert.deepEqual(by.success, ['lint']);
+  assert.deepEqual(by.skipped, ['docs']);
+  const tip = formatCheckGroupTip('failure', by.failure);
+  assert.match(tip, /1 failed/);
+  assert.match(tip, /CI \/ test/);
+}
+
+// UI wiring: details as icon, stacked group icons (static source)
 {
   const fs = require('node:fs');
   const path = require('node:path');
@@ -302,8 +323,10 @@ assert.ok(
     'utf8'
   );
   assert.ok(summaryUi.includes('TipPopover'), 'ChecksSummary has hover popover');
-  assert.ok(summaryUi.includes('prp-checks-summary-icon--spin'), 'ChecksSummary animates loading');
-  assert.ok(summaryUi.includes('formatChecksCountLabel'), 'popover uses count label');
+  assert.ok(summaryUi.includes('prp-checks-summary-stack'), 'stacked outcome icons');
+  assert.ok(summaryUi.includes('listCheckNamesByOutcome'), 'names per outcome for tips');
+  assert.ok(summaryUi.includes('formatCheckGroupTip'), 'group tip lists check names');
+  assert.ok(summaryUi.includes('prp-checks-summary-icon--spin'), 'pending animates');
   const header = fs.readFileSync(
     path.join(__dirname, '../src/modal/views/chrome/Header.tsx'),
     'utf8'

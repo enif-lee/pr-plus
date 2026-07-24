@@ -4,17 +4,31 @@
  * Storage is injected (local/session) — no chrome.* dependency.
  */
 
-/** Side sheet width bounds (px). Effective min/max also respect viewport. */
+/** Side sheet width bounds (px). Max is viewport only — no artificial ceiling. */
 export const SHEET_MIN_WIDTH = 480;
-export const SHEET_MAX_WIDTH = 1200;
+/**
+ * Legacy soft constant kept for callers/tests that still import the name.
+ * Sheet resize no longer clamps to this value; viewport width is the only max.
+ */
+export const SHEET_MAX_WIDTH = Number.MAX_SAFE_INTEGER;
 export const SHEET_DEFAULT_WIDTH = 900;
+/**
+ * Distance (px) from the viewport edge that counts as “fullscreen zone”.
+ * Used for blue dimmer while dragging and for fullscreen on handle release.
+ */
+export const SHELL_FULLSCREEN_EDGE_PX = 50;
+/** @deprecated use SHELL_FULLSCREEN_EDGE_PX */
+export const SHEET_FULLSCREEN_EDGE_PX = SHELL_FULLSCREEN_EDGE_PX;
 
-/** Centered modal size bounds (px). */
+/** Centered modal size bounds (px). Max is viewport only when viewport is known. */
 export const MODAL_MIN_WIDTH = 640;
-export const MODAL_MAX_WIDTH = 1600;
+/**
+ * Legacy soft ceiling when viewport is unknown (no longer a hard drag max).
+ */
+export const MODAL_MAX_WIDTH = Number.MAX_SAFE_INTEGER;
 export const MODAL_DEFAULT_WIDTH = 1100;
 export const MODAL_MIN_HEIGHT = 420;
-export const MODAL_MAX_HEIGHT = 1200;
+export const MODAL_MAX_HEIGHT = Number.MAX_SAFE_INTEGER;
 export const MODAL_DEFAULT_HEIGHT = 800;
 
 export const SHELL_SHEET_WIDTH_KEY = 'prp:shell-sheet-width';
@@ -79,21 +93,80 @@ export function clampSheetWidth(
   width: unknown,
   opts: { viewportWidth?: number; min?: number; max?: number; fallback?: number } = {}
 ): number {
+  // Prefer viewport as the only hard max when provided; otherwise no fixed 1200 cap.
+  const viewportMax =
+    Number.isFinite(opts.viewportWidth as number) && (opts.viewportWidth as number) > 0
+      ? (opts.viewportWidth as number)
+      : undefined;
+  const max =
+    opts.max != null && Number.isFinite(opts.max as number)
+      ? (opts.max as number)
+      : viewportMax != null
+        ? viewportMax
+        : SHEET_MAX_WIDTH;
   return clampShellSize(width, {
     min: opts.min ?? SHEET_MIN_WIDTH,
-    max: opts.max ?? SHEET_MAX_WIDTH,
+    max,
     fallback: opts.fallback ?? SHEET_DEFAULT_WIDTH,
     viewport: opts.viewportWidth,
   });
+}
+
+/**
+ * True when a side-sheet width is within `edgePx` of the viewport width.
+ * Used for blue dimmer while dragging and fullscreen on handle release.
+ */
+export function sheetWidthHitsFullscreen(
+  width: unknown,
+  viewportWidth: unknown,
+  edgePx: unknown = SHELL_FULLSCREEN_EDGE_PX
+): boolean {
+  const w = Number(width);
+  const vw = Number(viewportWidth);
+  const edge = Number.isFinite(Number(edgePx))
+    ? Math.max(0, Number(edgePx))
+    : SHELL_FULLSCREEN_EDGE_PX;
+  if (!(w > 0) || !(vw > 0)) return false;
+  return w >= vw - edge;
+}
+
+/**
+ * True when a centered modal nearly fills the viewport (both axes within edge).
+ */
+export function modalSizeHitsFullscreen(
+  size: Partial<ModalShellSize> | null | undefined,
+  viewportWidth: unknown,
+  viewportHeight: unknown,
+  edgePx: unknown = SHELL_FULLSCREEN_EDGE_PX
+): boolean {
+  const w = Number(size?.width);
+  const h = Number(size?.height);
+  const vw = Number(viewportWidth);
+  const vh = Number(viewportHeight);
+  const edge = Number.isFinite(Number(edgePx))
+    ? Math.max(0, Number(edgePx))
+    : SHELL_FULLSCREEN_EDGE_PX;
+  if (!(w > 0) || !(h > 0) || !(vw > 0) || !(vh > 0)) return false;
+  return w >= vw - edge && h >= vh - edge;
 }
 
 export function clampModalWidth(
   width: unknown,
   opts: { viewportWidth?: number; min?: number; max?: number; fallback?: number } = {}
 ): number {
+  const viewportMax =
+    Number.isFinite(opts.viewportWidth as number) && (opts.viewportWidth as number) > 0
+      ? (opts.viewportWidth as number)
+      : undefined;
+  const max =
+    opts.max != null && Number.isFinite(opts.max as number)
+      ? (opts.max as number)
+      : viewportMax != null
+        ? viewportMax
+        : MODAL_MAX_WIDTH;
   return clampShellSize(width, {
     min: opts.min ?? MODAL_MIN_WIDTH,
-    max: opts.max ?? MODAL_MAX_WIDTH,
+    max,
     fallback: opts.fallback ?? MODAL_DEFAULT_WIDTH,
     viewport: opts.viewportWidth,
   });
@@ -103,9 +176,19 @@ export function clampModalHeight(
   height: unknown,
   opts: { viewportHeight?: number; min?: number; max?: number; fallback?: number } = {}
 ): number {
+  const viewportMax =
+    Number.isFinite(opts.viewportHeight as number) && (opts.viewportHeight as number) > 0
+      ? (opts.viewportHeight as number)
+      : undefined;
+  const max =
+    opts.max != null && Number.isFinite(opts.max as number)
+      ? (opts.max as number)
+      : viewportMax != null
+        ? viewportMax
+        : MODAL_MAX_HEIGHT;
   return clampShellSize(height, {
     min: opts.min ?? MODAL_MIN_HEIGHT,
-    max: opts.max ?? MODAL_MAX_HEIGHT,
+    max,
     fallback: opts.fallback ?? MODAL_DEFAULT_HEIGHT,
     viewport: opts.viewportHeight,
   });

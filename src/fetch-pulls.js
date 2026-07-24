@@ -367,6 +367,94 @@ async function apiJsonWithLink(url, fetchImpl, token) {
   return { data, link };
 }
 
+/** Absolute URL for Link header rel=next (or null). */
+function parseLinkNextUrl(linkHeader) {
+  if (!linkHeader) return null;
+  const parts = String(linkHeader).split(',');
+  for (const p of parts) {
+    const m = p.match(/<([^>]+)>\s*;\s*rel="?next"?/i);
+    if (m) return m[1].trim();
+  }
+  return null;
+}
+
+/**
+ * Walk REST list endpoints via Link rel=next until exhausted.
+ * @param {string} firstUrl
+ * @param {function} fetchImpl
+ * @param {string|null} token
+ * @param {{ maxPages?: number }} [opts]
+ * @returns {Promise<Array>}
+ */
+async function fetchRestCollectionAll(firstUrl, fetchImpl, token, opts = {}) {
+  const maxPages =
+    Number.isFinite(opts.maxPages) && opts.maxPages > 0
+      ? Math.floor(opts.maxPages)
+      : 50;
+  const all = [];
+  let url = firstUrl;
+  let pages = 0;
+  while (url && pages < maxPages) {
+    pages += 1;
+    const { data, link } = await apiJsonWithLink(url, fetchImpl, token);
+    if (!Array.isArray(data)) break;
+    all.push(...data);
+    if (data.length === 0) break;
+    url = parseLinkNextUrl(link);
+  }
+  return all;
+}
+
+function mapPrCommitRow(c) {
+  return {
+    sha: c?.sha || '',
+    message: c?.commit?.message || c?.message || '',
+    author: c?.commit?.author?.name || c?.author?.login || c?.author || '',
+    date: c?.commit?.author?.date || c?.commit?.committer?.date || c?.date || '',
+  };
+}
+
+/**
+ * All PR commits (paginated). GitHub returns oldest-first.
+ */
+async function fetchAllPrCommits(owner, repo, number, fetchImpl, token = null) {
+  const o = String(owner || '').trim();
+  const r = String(repo || '').trim();
+  const n = Number(number);
+  if (!o || !r || !Number.isFinite(n)) {
+    throw new Error('owner, repo, and number are required for commits');
+  }
+  const first = githubRestUrl(
+    `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/pulls/${n}/commits?per_page=100`
+  );
+  const raw = await fetchRestCollectionAll(first, fetchImpl, token);
+  return raw.map(mapPrCommitRow).filter((c) => c.sha);
+}
+
+/**
+ * All PR files (paginated) with collapse/annotation applied.
+ */
+async function fetchAllPrFiles(
+  owner,
+  repo,
+  number,
+  fetchImpl,
+  token = null,
+  options = {}
+) {
+  const o = String(owner || '').trim();
+  const r = String(repo || '').trim();
+  const n = Number(number);
+  if (!o || !r || !Number.isFinite(n)) {
+    throw new Error('owner, repo, and number are required for files');
+  }
+  const first = githubRestUrl(
+    `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/pulls/${n}/files?per_page=100`
+  );
+  const raw = await fetchRestCollectionAll(first, fetchImpl, token);
+  return mapAndAnnotateFiles(raw, options.gitattributesText || '');
+}
+
 const COMMENT_PAGE_SIZE = 50;
 
 function commentsPageHelpers() {
@@ -397,20 +485,32 @@ function mapIssueComment(c) {
 }
 
 function mapReviewComment(c, extra = {}) {
+  const subjectTypeRaw = String(
+    extra.subjectType || c.subject_type || c.subjectType || ''
+  ).toLowerCase();
+  const isFileSubject = subjectTypeRaw === 'file';
   // Pending-review comments often omit line and only have position/original_line
-  const line =
-    c.line ??
-    c.original_line ??
-    (c.position != null && Number.isFinite(Number(c.position))
-      ? Number(c.position)
-      : null);
+  // File-level comments intentionally have no line.
+  const line = isFileSubject
+    ? null
+    : c.line ??
+      c.original_line ??
+      (c.position != null && Number.isFinite(Number(c.position))
+        ? Number(c.position)
+        : null);
   // REST has no outdated flag — infer when line is gone but original_line remains
   const outdated =
     extra.outdated != null
       ? Boolean(extra.outdated)
       : c.outdated != null
         ? Boolean(c.outdated)
-        : c.line == null && c.original_line != null;
+        : !isFileSubject && c.line == null && c.original_line != null;
+  // Prefer explicit subject_type; otherwise path-only (no line) → file
+  const subjectType =
+    isFileSubject ||
+    (line == null && !c.original_line && c.path && subjectTypeRaw !== 'line')
+      ? 'file'
+      : 'line';
   return {
     id: c.id,
     author: c.user?.login || '',
@@ -418,8 +518,8 @@ function mapReviewComment(c, extra = {}) {
     body: c.body || '',
     path: c.path || '',
     line: line != null ? Number(line) : null,
-    originalLine: c.original_line ?? null,
-    startLine: c.start_line ?? null,
+    originalLine: subjectType === 'file' ? null : c.original_line ?? null,
+    startLine: subjectType === 'file' ? null : c.start_line ?? null,
     side: c.side || 'RIGHT',
     startSide: c.start_side || null,
     diffHunk: c.diff_hunk || c.diffHunk || '',
@@ -439,6 +539,8 @@ function mapReviewComment(c, extra = {}) {
     /** True when part of a not-yet-submitted PENDING review (hidden from main list). */
     pending: Boolean(extra.pending || c.pending),
     pendingReviewId: extra.pendingReviewId ?? c.pendingReviewId ?? null,
+    /** `file` | `line` — file-level comments have no line anchor. */
+    subjectType,
   };
 }
 
@@ -455,8 +557,13 @@ function mapGraphqlReviewCommentNode(node, threadMeta = {}) {
     node.pullRequestReview?.databaseId != null
       ? Number(node.pullRequestReview.databaseId)
       : null;
-  const line =
-    node.line != null
+  const subjectTypeRaw = String(
+    threadMeta.subjectType || node.subjectType || ''
+  ).toUpperCase();
+  const isFile = subjectTypeRaw === 'FILE';
+  const line = isFile
+    ? null
+    : node.line != null
       ? Number(node.line)
       : node.originalLine != null
         ? Number(node.originalLine)
@@ -470,8 +577,8 @@ function mapGraphqlReviewCommentNode(node, threadMeta = {}) {
     body: node.body || '',
     path: node.path || threadMeta.path || '',
     line,
-    originalLine: node.originalLine ?? null,
-    startLine: node.startLine ?? node.originalStartLine ?? null,
+    originalLine: isFile ? null : node.originalLine ?? null,
+    startLine: isFile ? null : node.startLine ?? node.originalStartLine ?? null,
     side,
     startSide: threadMeta.startDiffSide || null,
     diffHunk: node.diffHunk || '',
@@ -484,6 +591,7 @@ function mapGraphqlReviewCommentNode(node, threadMeta = {}) {
     outdated: Boolean(node.outdated ?? threadMeta.isOutdated),
     pending,
     pendingReviewId: pending ? reviewDbId : null,
+    subjectType: isFile ? 'file' : 'line',
   };
 }
 
@@ -939,6 +1047,7 @@ const REVIEW_THREAD_NODE_FIELDS = `
   originalStartLine
   diffSide
   startDiffSide
+  subjectType
   comments(first:100){
     nodes{
       id
@@ -1010,6 +1119,7 @@ function mapReviewThreadNodes(allNodes) {
       line: t.line ?? null,
       originalLine: t.originalLine ?? null,
       startLine: t.startLine ?? t.originalStartLine ?? null,
+      subjectType: t.subjectType || null,
     };
     const commentIds = [];
     for (const node of t.comments?.nodes || []) {
@@ -2342,16 +2452,18 @@ async function submitPullReview(
 }
 
 /**
- * GraphQL: add a new review *thread* (line comment) onto an existing PENDING review.
+ * GraphQL: add a new review *thread* (line or file comment) onto an existing PENDING review.
  * REST POST /comments creates a second pending review → 422.
  */
 async function postReviewCommentViaPendingGraphql(
   pendingReviewNodeId,
-  { body, path, line, side = 'RIGHT', startLine, startSide },
+  { body, path, line, side = 'RIGHT', startLine, startSide, subjectType = 'line' },
   fetchImpl,
   token
 ) {
+  const isFile = String(subjectType || '').toLowerCase() === 'file';
   const hasRange =
+    !isFile &&
     startLine != null &&
     Number.isFinite(Number(startLine)) &&
     Number(startLine) !== Number(line);
@@ -2359,11 +2471,36 @@ async function postReviewCommentViaPendingGraphql(
     review: String(pendingReviewNodeId),
     body: String(body || '').trim(),
     path: String(path || ''),
-    line: Number(line),
-    side: String(side || 'RIGHT').toUpperCase() === 'LEFT' ? 'LEFT' : 'RIGHT',
   };
   let query;
-  if (hasRange) {
+  if (isFile) {
+    query = `mutation($review:ID!,$body:String!,$path:String!){
+      addPullRequestReviewThread(input:{
+        pullRequestReviewId:$review
+        body:$body
+        path:$path
+        subjectType:FILE
+      }){
+        thread {
+          id
+          comments(first:1){
+            nodes{
+              id
+              databaseId
+              body
+              path
+              createdAt
+              author { login avatarUrl }
+              pullRequestReview { databaseId }
+            }
+          }
+        }
+      }
+    }`;
+  } else if (hasRange) {
+    variables.line = Number(line);
+    variables.side =
+      String(side || 'RIGHT').toUpperCase() === 'LEFT' ? 'LEFT' : 'RIGHT';
     variables.startLine = Number(startLine);
     variables.startSide =
       String(startSide || side || 'RIGHT').toUpperCase() === 'LEFT' ? 'LEFT' : 'RIGHT';
@@ -2394,6 +2531,9 @@ async function postReviewCommentViaPendingGraphql(
       }
     }`;
   } else {
+    variables.line = Number(line);
+    variables.side =
+      String(side || 'RIGHT').toUpperCase() === 'LEFT' ? 'LEFT' : 'RIGHT';
     query = `mutation($review:ID!,$body:String!,$path:String!,$line:Int!,$side:DiffSide!){
       addPullRequestReviewThread(input:{
         pullRequestReviewId:$review
@@ -2424,15 +2564,17 @@ async function postReviewCommentViaPendingGraphql(
   const node = thread?.comments?.nodes?.[0];
   if (!node) {
     throw new Error(
-      `Could not add pending comment on ${path}:${line} (${side || 'RIGHT'}). ` +
-        `The line may be outside the diff or on the wrong side.`
+      isFile
+        ? `Could not add pending file comment on ${path}.`
+        : `Could not add pending comment on ${path}:${line} (${side || 'RIGHT'}). ` +
+            `The line may be outside the diff or on the wrong side.`
     );
   }
   const threadNodeId = thread?.id || null;
   const rest = mapGraphqlReviewCommentToRest(node, {
     body,
     path,
-    line,
+    line: isFile ? null : line,
     startLine: hasRange ? Number(startLine) : null,
     side,
     inReplyToId: null,
@@ -2440,11 +2582,12 @@ async function postReviewCommentViaPendingGraphql(
   return {
     ...rest,
     // GraphQL/REST often omit line on pending comments — keep selection line for UI
-    line: rest.line ?? Number(line),
+    line: isFile ? null : rest.line ?? Number(line),
     path: rest.path || path,
     side: side || 'RIGHT',
     start_line: hasRange ? Number(startLine) : null,
     start_side: hasRange ? startSide || side || 'RIGHT' : null,
+    subject_type: isFile ? 'file' : 'line',
     pending: true,
     pendingReviewId: node.pullRequestReview?.databaseId ?? null,
     threadNodeId,
@@ -2540,8 +2683,9 @@ async function ensureViewerPendingReview(
 }
 
 /**
- * Line-level review comment on a PR file.
+ * Review comment on a PR file (line-level or file-level).
  * Prefer commit_id + path + line (side RIGHT). Multi-line uses start_line/start_side.
+ * File-level: subject_type: 'file' (line omitted).
  *
  * Unified pending model (single GitHub PENDING review):
  * - asPending: true → create PENDING review if needed, always attach via GraphQL
@@ -2550,18 +2694,31 @@ async function ensureViewerPendingReview(
  *
  * @param {object} fields
  * @param {boolean} [fields.asPending] Start review / Add comment — always pending
+ * @param {'line'|'file'} [fields.subjectType]
  */
 async function postReviewComment(
   owner,
   repo,
   pullNumber,
-  { body, path, line, side = 'RIGHT', commitId, startLine, startSide, asPending = false },
+  {
+    body,
+    path,
+    line,
+    side = 'RIGHT',
+    commitId,
+    startLine,
+    startSide,
+    asPending = false,
+    subjectType = 'line',
+  },
   fetchImpl,
   token
 ) {
   const text = String(body || '').trim();
   if (!text) throw new Error('Comment body is required');
-  if (!path || line == null) throw new Error('path and line are required');
+  if (!path) throw new Error('path is required');
+  const isFile = String(subjectType || '').toLowerCase() === 'file';
+  if (!isFile && line == null) throw new Error('path and line are required');
 
   // Unified PENDING: attach to existing, or create (asPending). Recover from 422.
   let pending = await ensureViewerPendingReview(
@@ -2577,12 +2734,22 @@ async function postReviewComment(
     token
   );
 
+  const gqlFields = {
+    body: text,
+    path,
+    line: isFile ? null : line,
+    side,
+    startLine: isFile ? null : startLine,
+    startSide: isFile ? null : startSide,
+    subjectType: isFile ? 'file' : 'line',
+  };
+
   // Existing PENDING (or just created) → always GraphQL attach (REST 422s)
   if (pending?.node_id) {
     try {
       const raw = await postReviewCommentViaPendingGraphql(
         pending.node_id,
-        { body: text, path, line, side, startLine, startSide },
+        gqlFields,
         fetchImpl,
         token
       );
@@ -2632,7 +2799,7 @@ async function postReviewComment(
         if (pending?.node_id) {
           const raw = await postReviewCommentViaPendingGraphql(
             pending.node_id,
-            { body: text, path, line, side, startLine, startSide },
+            gqlFields,
             fetchImpl,
             token
           );
@@ -2655,9 +2822,11 @@ async function postReviewComment(
   }
 
   // Published single comment (no PENDING review)
-  const payload = { body: text, path, line, side };
+  const payload = isFile
+    ? { body: text, path, subject_type: 'file' }
+    : { body: text, path, line, side };
   if (commitId) payload.commit_id = commitId;
-  if (startLine != null && Number(startLine) !== Number(line)) {
+  if (!isFile && startLine != null && Number(startLine) !== Number(line)) {
     payload.start_line = Number(startLine);
     payload.start_side = startSide || side || 'RIGHT';
   }
@@ -3794,6 +3963,8 @@ const fetchApi = {
   fetchOpenPulls,
   fetchPrDetail,
   fetchPrCommentsPage,
+  fetchAllPrCommits,
+  fetchAllPrFiles,
   fetchCompareFiles,
   mapAndAnnotateFiles,
   fetchPullReviewThreads,

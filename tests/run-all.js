@@ -31,6 +31,8 @@ const tests = [
   'aside-layout.test.js',
   'floating-scrollbar.test.js',
   'line-selection.test.js',
+  'tip-popover-placement.test.js',
+  'action-toast.test.js',
   'comment-nav.test.js',
   'md-inline-vs-fence.test.js',
   'review-threads.test.js',

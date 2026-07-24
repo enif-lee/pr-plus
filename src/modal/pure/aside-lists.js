@@ -8,7 +8,8 @@
  * @param {number} [max=12]
  */
 function takeCommitsForTimeline(commits, max = 12) {
-  const list = Array.isArray(commits) ? commits : [];
+  // Newest-first for display (GitHub PR commits payload is oldest-first).
+  const list = Array.isArray(commits) ? commits.slice().reverse() : [];
   const limit = Number.isFinite(max) && max > 0 ? Math.floor(max) : 12;
   const items = list.slice(0, limit).map((c, i) => {
     const fullMsg = String(c.message || '').trim();

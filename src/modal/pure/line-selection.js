@@ -44,11 +44,13 @@ function beginLineSelection(row) {
 
 /**
  * Extend selection to another row (same file only).
+ * Always updates headRowIndex (visual range). Line/side track the row for the API.
  */
 function extendLineSelection(selection, row) {
   if (!selection || !isSelectableDiffRow(row)) return selection;
   if (row.filePath !== selection.filePath) return selection;
-  const pos = lineForSide(row, selection.anchorSide || 'RIGHT');
+  const preferred = selection.anchorSide || 'RIGHT';
+  const pos = lineForSide(row, preferred);
   if (!pos) return selection;
   return {
     ...selection,
@@ -92,27 +94,76 @@ function applySelectionPointerDown(currentSelection, row, opts = {}) {
   };
 }
 
-function normalizeSelection(selection) {
-  if (!selection) return null;
+/**
+ * Order selection ends by visual rowIndex when available.
+ */
+function orderedSelectionEnds(selection) {
+  const aIdx = Number(selection.anchorRowIndex);
+  const hIdx = Number(selection.headRowIndex);
+  const hasRows = Number.isFinite(aIdx) && Number.isFinite(hIdx);
+  if (hasRows) {
+    const anchorFirst = aIdx <= hIdx;
+    return {
+      startLine: anchorFirst ? selection.anchorLine : selection.headLine,
+      endLine: anchorFirst ? selection.headLine : selection.anchorLine,
+      startSide: (anchorFirst ? selection.anchorSide : selection.headSide) || 'RIGHT',
+      endSide: (anchorFirst ? selection.headSide : selection.anchorSide) || 'RIGHT',
+      startRowIndex: anchorFirst ? aIdx : hIdx,
+      endRowIndex: anchorFirst ? hIdx : aIdx,
+      multi: aIdx !== hIdx,
+    };
+  }
   const startLine = Math.min(selection.anchorLine, selection.headLine);
   const endLine = Math.max(selection.anchorLine, selection.headLine);
-  const startSide =
-    selection.anchorLine <= selection.headLine
-      ? selection.anchorSide
-      : selection.headSide;
-  const endSide =
-    selection.anchorLine <= selection.headLine
-      ? selection.headSide
-      : selection.anchorSide;
+  return {
+    startLine: startLine,
+    endLine: endLine,
+    startSide:
+      (selection.anchorLine <= selection.headLine
+        ? selection.anchorSide
+        : selection.headSide) || 'RIGHT',
+    endSide:
+      (selection.anchorLine <= selection.headLine
+        ? selection.headSide
+        : selection.anchorSide) || 'RIGHT',
+    startRowIndex: null,
+    endRowIndex: null,
+    multi: startLine !== endLine,
+  };
+}
+
+function normalizeSelection(selection) {
+  if (!selection) return null;
+  if (selection.kind === 'file' || selection.subjectType === 'file') {
+    const filePath = selection.filePath || selection.path;
+    if (!filePath) return null;
+    return {
+      filePath: filePath,
+      startLine: null,
+      endLine: null,
+      startSide: 'RIGHT',
+      endSide: 'RIGHT',
+      multi: false,
+      subjectType: 'file',
+      anchorRowIndex: selection.anchorRowIndex != null ? selection.anchorRowIndex : null,
+      headRowIndex: selection.headRowIndex != null ? selection.headRowIndex : null,
+      startRowIndex: null,
+      endRowIndex: null,
+    };
+  }
+  const ends = orderedSelectionEnds(selection);
   return {
     filePath: selection.filePath,
-    startLine,
-    endLine,
-    startSide: startSide || 'RIGHT',
-    endSide: endSide || 'RIGHT',
-    multi: startLine !== endLine,
+    startLine: ends.startLine,
+    endLine: ends.endLine,
+    startSide: ends.startSide,
+    endSide: ends.endSide,
+    multi: ends.multi,
+    subjectType: 'line',
     anchorRowIndex: selection.anchorRowIndex,
     headRowIndex: selection.headRowIndex,
+    startRowIndex: ends.startRowIndex,
+    endRowIndex: ends.endRowIndex,
   };
 }
 
@@ -124,6 +175,16 @@ function normalizeSelection(selection) {
 function selectionToCommentPayload(selection, opts = {}) {
   const norm = normalizeSelection(selection);
   if (!norm || !opts.body || !String(opts.body).trim()) return null;
+  if (norm.subjectType === 'file') {
+    const payload = {
+      body: String(opts.body).trim(),
+      path: norm.filePath,
+      subject_type: 'file',
+      subjectType: 'file',
+    };
+    if (opts.commitId) payload.commit_id = opts.commitId;
+    return payload;
+  }
   const payload = {
     body: String(opts.body).trim(),
     path: norm.filePath,
@@ -175,15 +236,26 @@ function selectionGestureMode(start, end, thresholdPx = 4) {
 
 /**
  * Whether a virtual row is highlighted by the active selection.
+ * Prefer rowIndex range so interleaved add/del form one continuous block.
  */
 function isRowInSelection(selection, row) {
   if (!selection || !row || row.filePath !== selection.filePath) return false;
   if (row.kind !== 'diff-line') return false;
+  if (!isSelectableDiffRow(row)) return false;
+
+  const a = Number(selection.anchorRowIndex);
+  const h = Number(selection.headRowIndex);
+  const ri = Number(row.rowIndex);
+  if (Number.isFinite(a) && Number.isFinite(h) && Number.isFinite(ri)) {
+    const lo = Math.min(a, h);
+    const hi = Math.max(a, h);
+    return ri >= lo && ri <= hi;
+  }
+
   const norm = normalizeSelection(selection);
-  if (!norm) return false;
+  if (!norm || norm.subjectType === 'file') return false;
   const line = row.newLine != null ? Number(row.newLine) : Number(row.oldLine);
   if (!Number.isFinite(line)) return false;
-  // Only highlight rows on the same primary side as the selection end
   if (norm.endSide === 'RIGHT' && row.newLine == null) return false;
   if (norm.endSide === 'LEFT' && row.oldLine == null) return false;
   return line >= norm.startLine && line <= norm.endLine;
@@ -195,6 +267,18 @@ function isRowInSelection(selection, row) {
  */
 function selectionBlockRole(selection, row) {
   if (!isRowInSelection(selection, row)) return null;
+  const a = Number(selection.anchorRowIndex);
+  const h = Number(selection.headRowIndex);
+  const ri = Number(row.rowIndex);
+  if (Number.isFinite(a) && Number.isFinite(h) && Number.isFinite(ri)) {
+    const lo = Math.min(a, h);
+    const hi = Math.max(a, h);
+    if (lo === hi) return 'only';
+    if (ri === lo) return 'start';
+    if (ri === hi) return 'end';
+    if (ri > lo && ri < hi) return 'middle';
+    return 'only';
+  }
   const norm = normalizeSelection(selection);
   if (!norm) return null;
   const line = row.newLine != null ? Number(row.newLine) : Number(row.oldLine);
@@ -204,6 +288,77 @@ function selectionBlockRole(selection, row) {
   if (line === norm.endLine) return 'end';
   if (line > norm.startLine && line < norm.endLine) return 'middle';
   return 'only';
+}
+
+function extractSelectedCodeText(virtualRows, selection) {
+  const norm = normalizeSelection(selection);
+  if (!norm) return '';
+  const list = Array.isArray(virtualRows) ? virtualRows : [];
+  const lines = [];
+  const preferRight = (norm.endSide || 'RIGHT') === 'RIGHT';
+  for (const row of list) {
+    if (!isRowInSelection(selection, row)) continue;
+    let code = '';
+    if (preferRight) {
+      code =
+        row.rightCode != null
+          ? String(row.rightCode)
+          : row.code != null
+            ? String(row.code)
+            : String(row.text || '').replace(/^[-+ ]/, '');
+    } else {
+      code =
+        row.leftCode != null
+          ? String(row.leftCode)
+          : row.code != null
+            ? String(row.code)
+            : String(row.text || '').replace(/^[-+ ]/, '');
+    }
+    if (row.raw && /^[-+]/.test(String(row.raw)) && code === String(row.raw)) {
+      code = String(row.raw).slice(1);
+    }
+    lines.push(code);
+  }
+  return lines.join('\n');
+}
+
+function githubBlobLinePermalink(opts) {
+  opts = opts || {};
+  const owner = String(opts.owner || '').trim();
+  const repo = String(opts.repo || '').trim();
+  const path = String(opts.path || opts.filePath || '').replace(/^\/+/, '');
+  const side = String(opts.side || opts.endSide || 'RIGHT').toUpperCase();
+  const ref =
+    side === 'LEFT'
+      ? String(opts.baseSha || opts.baseRef || opts.ref || '').trim()
+      : String(opts.headSha || opts.headRef || opts.ref || '').trim();
+  if (!owner || !repo || !path || !ref) return '';
+  const start = Number(opts.startLine != null ? opts.startLine : opts.line);
+  const end = Number(
+    opts.endLine != null ? opts.endLine : opts.startLine != null ? opts.startLine : opts.line
+  );
+  if (!Number.isFinite(start) || start < 1) return '';
+  const origin = String(opts.webOrigin || 'https://github.com')
+    .trim()
+    .replace(/\/+$/, '');
+  const encPath = path
+    .split('/')
+    .map(function (seg) {
+      return encodeURIComponent(seg);
+    })
+    .join('/');
+  const base =
+    origin +
+    '/' +
+    encodeURIComponent(owner) +
+    '/' +
+    encodeURIComponent(repo) +
+    '/blob/' +
+    encodeURIComponent(ref) +
+    '/' +
+    encPath;
+  if (Number.isFinite(end) && end > start) return base + '#L' + start + '-L' + end;
+  return base + '#L' + start;
 }
 
 const api = {
@@ -218,6 +373,8 @@ const api = {
   selectionGestureMode,
   isRowInSelection,
   selectionBlockRole,
+  extractSelectedCodeText,
+  githubBlobLinePermalink,
 };
 
 if (typeof module !== 'undefined' && module.exports) {

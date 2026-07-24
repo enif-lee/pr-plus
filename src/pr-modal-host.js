@@ -948,6 +948,35 @@
             '',
         });
       },
+      /** Remaining PR commits beyond the initial page (for searchable picker). */
+      onFetchAllPrCommits: async () => {
+        if (!owner || !repo || !current.number) {
+          throw new Error('No open pull request for commits');
+        }
+        if (!globalThis.PRTreeFetch?.fetchAllPrCommits) {
+          throw new Error('Full commits fetch unavailable');
+        }
+        return globalThis.PRTreeFetch.fetchAllPrCommits(
+          owner,
+          repo,
+          current.number
+        );
+      },
+      /** Remaining PR files beyond the initial page (for searchable files nav). */
+      onFetchAllPrFiles: async (options = {}) => {
+        if (!owner || !repo || !current.number) {
+          throw new Error('No open pull request for files');
+        }
+        if (!globalThis.PRTreeFetch?.fetchAllPrFiles) {
+          throw new Error('Full files fetch unavailable');
+        }
+        return globalThis.PRTreeFetch.fetchAllPrFiles(owner, repo, current.number, {
+          gitattributesText:
+            options.gitattributesText ||
+            current.detail?.gitattributesText ||
+            '',
+        });
+      },
     };
   }
 

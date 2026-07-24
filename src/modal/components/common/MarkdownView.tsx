@@ -1,4 +1,4 @@
-import React, { useMemo, memo, useEffect, useState } from 'react';
+import React, { useMemo, memo, useEffect, useState, useCallback } from 'react';
 // memo for render isolation
 import { parseSuggestionFences } from '@lib/pr-edit-api';
 import { splitMarkdownSegments } from '@lib/markdown-composer';
@@ -6,6 +6,7 @@ import { markSearchInHtml } from '@lib/search-index';
 import { onHljsLanguagesChanged } from '@lib/hljs-lazy';
 import { MermaidBlock } from './MermaidBlock';
 import { SuggestionBlock } from './SuggestionBlock';
+import { ImageViewer } from './ImageViewer';
 import { clearHighlightCodeCache, renderMdHtml } from './utils';
 
 function MarkdownViewImpl({
@@ -26,12 +27,34 @@ function MarkdownViewImpl({
   const raw = source == null || source === '' ? '_No content_' : String(source);
   /** Re-render fenced blocks when a lazy grammar finishes loading */
   const [hljsEpoch, setHljsEpoch] = useState(0);
+  const [imageViewer, setImageViewer] = useState<{
+    src: string;
+    alt: string;
+  } | null>(null);
+
   useEffect(() => {
     return onHljsLanguagesChanged(() => {
       clearHighlightCodeCache();
       setHljsEpoch((n) => n + 1);
     });
   }, []);
+
+  const openImageFromEvent = useCallback((e: React.MouseEvent | React.KeyboardEvent) => {
+    const t = e.target as HTMLElement | null;
+    if (!t || t.tagName !== 'IMG') return;
+    const img = t as HTMLImageElement;
+    // Skip avatars / chrome that might nest under .prp-md accidentally
+    if (img.closest?.('.prp-avatar, .prp-icon-btn, a.prp-user-link')) return;
+    const src = String(img.currentSrc || img.src || '').trim();
+    if (!src) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setImageViewer({
+      src,
+      alt: String(img.alt || img.getAttribute('title') || 'Image'),
+    });
+  }, []);
+
   const suggestions =
     typeof parseSuggestionFences === 'function' ? parseSuggestionFences(raw) : [];
   const segments = useMemo(() => {
@@ -64,7 +87,11 @@ function MarkdownViewImpl({
   const q = String(searchQuery || '').trim();
 
   return (
-    <div className={`prp-md ${className}`.trim()}>
+    <div
+      className={`prp-md ${className}`.trim()}
+      onClick={openImageFromEvent}
+      onDoubleClick={openImageFromEvent}
+    >
       {segments.map((seg, i) => {
         if (seg.type === 'mermaid') {
           return <MermaidBlock key={`m-${i}`} code={seg.content} />;
@@ -99,6 +126,14 @@ function MarkdownViewImpl({
           />
         );
       })}
+      {imageViewer ? (
+        <ImageViewer
+          src={imageViewer.src}
+          alt={imageViewer.alt}
+          title={imageViewer.alt || 'Image'}
+          onClose={() => setImageViewer(null)}
+        />
+      ) : null}
     </div>
   );
 }
