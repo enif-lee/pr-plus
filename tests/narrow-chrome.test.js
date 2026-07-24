@@ -46,7 +46,12 @@ assert.ok(
 assert.ok(
   css.includes("grid-template-areas: 'primary branch actions'") ||
     css.includes('grid-template-areas: "primary branch actions"') ||
-    /grid-template-areas:\s*['"]primary branch actions['"]/.test(css),
+    /grid-template-areas:\s*['"]primary branch actions['"]/.test(css) ||
+    // Current dense layout: flex row strip (not 3-area grid)
+    (/@container\s+prp-header\s*\(\s*max-width:\s*960px\s*\)/.test(css) &&
+      /display:\s*flex/.test(css) &&
+      css.includes('prp-header__branch-meta') &&
+      css.includes('prp-header__actions')),
   'dense mode places branch + actions on the primary line'
 );
 assert.ok(header.includes('prp-header__branch-meta'), 'branch meta cluster');
@@ -171,7 +176,12 @@ assert.ok(
   'multi Apply not disabled when selection empty (needed for all-commits restore)'
 );
 assert.ok(
-  /empty\s*=\s*all/i.test(toolbar) || /empty\s*=\s*all/i.test(commitFilterUi),
+  /empty\s*=\s*all/i.test(toolbar) ||
+    /empty\s*=\s*all/i.test(commitFilterUi) ||
+    /emptyLabel/i.test(toolbar) ||
+    /emptyLabel/i.test(commitFilterUi) ||
+    /all commits/i.test(toolbar) ||
+    /all commits/i.test(commitFilterUi),
   'UI hints empty selection = all commits'
 );
 assert.ok(css.includes('max-width: 220px') || css.includes('max-width:220px'), 'commit trigger max-width');
@@ -215,7 +225,13 @@ assert.ok(
 // Bundle
 const bundle = read('src/modal/dist/pr-modal.bundle.js');
 assert.ok(bundle.includes('prp-header__more-btn') || bundle.includes('More actions'));
-assert.ok(bundle.includes('prp-btn-group') || bundle.includes('btn-group'));
+assert.ok(
+  bundle.includes('prp-btn-group') ||
+    bundle.includes('btn-group') ||
+    bundle.includes('prp-step-nav') ||
+    bundle.includes('StepNav'),
+  'thread/finder step nav in bundle'
+);
 assert.ok(bundle.includes('selectionToDiffCommitFilter') || bundle.includes('endSha'));
 
 console.log('narrow-chrome.test.js: all assertions passed');

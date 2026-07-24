@@ -50,6 +50,10 @@ import { LoadingSkeleton } from '../chrome/LoadingSkeleton';
 import { VirtualConversationList } from './VirtualConversationList';
 import { InlineThread } from '../diff/InlineThread';
 import { FloatingScrollbar } from '../../components/common/FloatingScrollbar';
+import {
+  applyEmbedWheelScroll,
+  isEmbedPresentation,
+} from '@lib/page-embed';
 
 function ConversationViewImpl(props: any) {
   const {
@@ -61,6 +65,8 @@ function ConversationViewImpl(props: any) {
     onLeaveReviewAction,
     onDiscardPending = null,
     sectionLoading,
+    /** 'embed' enables global-then-panel wheel chaining */
+    presentation = 'modal',
     onDeleteIssueComment,
     onDeleteReviewComment,
     editingBody,
@@ -117,10 +123,62 @@ function ConversationViewImpl(props: any) {
     focusedConversationAnchor = null,
   } = props;
 
+  const embedScrollChain = isEmbedPresentation(presentation);
+  const convRootRef = useRef<HTMLDivElement | null>(null);
   const [mergeMethod, setMergeMethod] = useState<MergeMethod>('merge');
   const [mergeMenuOpen, setMergeMenuOpen] = useState(false);
   const mergeMenuRef = useRef<HTMLDivElement | null>(null);
   const asideScrollRef = useRef<HTMLAsideElement | null>(null);
+
+  /**
+   * Embed only: wheel over conversation main → document scroll first (so GH
+   * header can collapse), then remaining delta into the panel scroller.
+   */
+  useEffect(() => {
+    if (!embedScrollChain) return undefined;
+    const root = convRootRef.current;
+    if (!root) return undefined;
+    const main =
+      (root.querySelector('.prp-conversation__main') as HTMLElement | null) ||
+      root;
+
+    const onWheel = (e: WheelEvent) => {
+      // Don't steal from nested form fields / aside
+      const t = e.target as Node | null;
+      if (t && (t as HTMLElement).closest?.('textarea, input, select, [contenteditable="true"]')) {
+        return;
+      }
+      const panel = root.querySelector(
+        '.prp-conversation-virtual'
+      ) as HTMLElement | null;
+      if (!panel) return;
+      // Only when pointer is over the main conversation column
+      if (!main.contains(t as Node)) return;
+
+      const globalEl =
+        (typeof document !== 'undefined' &&
+          (document.scrollingElement ||
+            document.documentElement ||
+            document.body)) ||
+        null;
+      if (!globalEl) return;
+
+      const routed = applyEmbedWheelScroll({
+        deltaY: e.deltaY,
+        globalEl: globalEl as HTMLElement,
+        panelEl: panel,
+      });
+      if (routed.preventDefault) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+
+    main.addEventListener('wheel', onWheel, { passive: false, capture: true });
+    return () => {
+      main.removeEventListener('wheel', onWheel, true);
+    };
+  }, [embedScrollChain, detail?.number]);
   /** Conversation footer: Comment (issue) vs Review (pending + review events). */
   const [composerMode, setComposerMode] = useState<'comment' | 'review'>(() =>
     Number(pendingCount) > 0 ? 'review' : 'comment'
@@ -1339,13 +1397,17 @@ function ConversationViewImpl(props: any) {
 
   return (
     <div
-      className={`prp-conversation${asideCollapsed ? ' prp-conversation--aside-collapsed' : ''}`}
+      ref={convRootRef}
+      className={`prp-conversation${asideCollapsed ? ' prp-conversation--aside-collapsed' : ''}${
+        embedScrollChain ? ' prp-conversation--embed-scroll' : ''
+      }`}
       style={
         {
           ['--prp-aside-w' as string]: `${conversationAsideWidthPx(asideCollapsed)}px`,
         } as React.CSSProperties
       }
       data-aside-collapsed={asideCollapsed ? '1' : '0'}
+      data-embed-scroll={embedScrollChain ? '1' : undefined}
     >
       <div className="prp-conversation__main">
         {sectionLoading && !detail ? (

@@ -67,6 +67,92 @@ html.prp-scroll-lock body {
   overflow: hidden;
 }
 
+/*
+ * In-page embed: fills GH main under the global header (not a full-viewport overlay).
+ * Host root is #prp-page-embed inside .application-main / main.
+ */
+.prp-overlay.prp-shell--embed,
+.prp-overlay[data-presentation='embed'] {
+  position: relative;
+  inset: auto;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  min-height: min(100vh, 100%);
+  max-height: none;
+  align-items: stretch;
+  justify-content: stretch;
+  overflow: hidden;
+  background: var(--prp-bg);
+  overscroll-behavior: contain;
+}
+.prp-overlay.prp-shell--embed .prp-backdrop,
+.prp-overlay[data-presentation='embed'] .prp-backdrop {
+  display: none !important;
+}
+.prp-overlay.prp-shell--embed .prp-modal,
+.prp-overlay.prp-shell--embed .prp-modal--centered,
+.prp-overlay.prp-shell--embed .prp-modal--diff,
+.prp-overlay[data-presentation='embed'] .prp-modal,
+.prp-overlay[data-presentation='embed'] .prp-modal--centered,
+.prp-overlay[data-presentation='embed'] .prp-modal--diff {
+  width: 100% !important;
+  height: 100% !important;
+  max-width: none !important;
+  max-height: none !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  border-radius: 0 !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  flex: 1 1 auto;
+}
+.prp-overlay.prp-shell--embed .prp-shell-resizer,
+.prp-overlay[data-presentation='embed'] .prp-shell-resizer {
+  display: none !important;
+}
+
+/*
+ * Page host for embed: 100vh so document scrollMax ≈ header offset after
+ * footer hide (headerOffset + 100vh − 100vh). Do not use 100vh − header —
+ * that zeros global capacity and blocks GH header collapse.
+ */
+#prp-page-embed.prp-page-embed,
+.prp-page-embed {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: 100vh;
+  height: 100vh;
+  max-height: none;
+  flex: 1 1 auto;
+  background: var(--bgColor-default, var(--prp-bg, #fff));
+  box-sizing: border-box;
+}
+.prp-page-embed > .prp-overlay {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+html.prp-embed-active,
+html.prp-embed-active body {
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+html.prp-embed-active body {
+  min-height: calc(100vh + var(--prp-embed-header-offset, 64px));
+}
+html.prp-embed-active .application-main.prp-embed-main,
+html.prp-embed-active main.prp-embed-main {
+  display: flex !important;
+  flex-direction: column;
+  min-height: 100vh;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+html.prp-embed-active [data-prp-footer-hidden='1'] {
+  display: none !important;
+}
+
 .prp-overlay.prp-theme-dark,
 .prp-overlay[data-color-mode='dark'] {
   --prp-fg: var(--fgColor-default, #e6edf3);

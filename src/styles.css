@@ -9,6 +9,50 @@
   color: var(--fgColor-default, #1f2328);
 }
 
+/*
+ * In-page PR embed host (under GitHub global header).
+ * Host is 100vh so document content = headerOffset + 100vh > viewport —
+ * global scrollMax ≈ header height so GH header can collapse before panel scroll.
+ */
+#prp-page-embed.prp-page-embed,
+.prp-page-embed {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: 100vh;
+  height: 100vh;
+  box-sizing: border-box;
+  background: var(--bgColor-default, #ffffff);
+}
+html.prp-embed-active,
+html.prp-embed-active body {
+  /* Document must remain scrollable (header collapse room) */
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+html.prp-embed-active body {
+  /* headerOffset + embed 100vh — guarantees scrollMax >= headerOffset after footer hide */
+  min-height: calc(100vh + var(--prp-embed-header-offset, 64px));
+}
+html.prp-embed-active .application-main.prp-embed-main,
+html.prp-embed-active main.prp-embed-main {
+  display: flex !important;
+  flex-direction: column;
+  min-height: 100vh;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+html.prp-embed-active [data-prp-native-hidden='1'] {
+  display: none !important;
+}
+/* GitHub site footer while pr+ in-page replace is active */
+html.prp-embed-active [data-prp-footer-hidden='1'],
+html.prp-embed-active footer.footer,
+html.prp-embed-active footer.Footer,
+html.prp-embed-active #footer {
+  display: none !important;
+}
+
 .pr-tree-toggle:hover {
   background: var(--button-default-bgColor-hover, #eef1f4);
 }

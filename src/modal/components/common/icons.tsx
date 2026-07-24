@@ -25,6 +25,7 @@ import {
   KebabHorizontalIcon,
   FileDiffIcon,
   LinkExternalIcon,
+  MarkGithubIcon,
   PencilIcon,
   ScreenFullIcon,
   ScreenNormalIcon,
@@ -79,6 +80,8 @@ export const IconBellFill = wrap(BellFillIcon);
 export const IconBellSlash = wrap(BellSlashIcon);
 export const IconCircleSlash = wrap(CircleSlashIcon);
 export const IconLinkExternal = wrap(LinkExternalIcon);
+/** GitHub mark — restore native PR UI from embed */
+export const IconMarkGithub = wrap(MarkGithubIcon);
 export const IconFileDiff = wrap(FileDiffIcon);
 /** Conversation / discussion threads view */
 export const IconConversation = wrap(CommentDiscussionIcon);

@@ -46,6 +46,12 @@ import {
   type ShellMode,
 } from '../lib/shell-preference';
 import {
+  isEmbedPresentation,
+  presentationClassName,
+  shouldShowEmbedChrome,
+  resolveEmbedShortcutAction,
+} from '../lib/page-embed';
+import {
   SHEET_DEFAULT_WIDTH,
   MODAL_DEFAULT_WIDTH,
   MODAL_DEFAULT_HEIGHT,
@@ -223,8 +229,28 @@ export function PrModalApp({
   initialRoute = null,
   onRouteChange = null,
   prefs = null,
+  /** 'modal' overlay (default) | 'embed' in-page under GitHub header */
+  presentation = 'modal',
+  shellChrome = null,
+  /** Embed: tear down replace mode and show original GH PR UI */
+  onRestoreNative = null,
 }: any) {
   const reverseComments = prefs?.reverseComments !== false;
+  const isEmbed = isEmbedPresentation(presentation);
+  const embedChrome = shellChrome && typeof shellChrome === 'object' ? shellChrome : null;
+  const showCloseChrome =
+    !isEmbed &&
+    (embedChrome?.showClose !== false) &&
+    typeof onClose === 'function' &&
+    shouldShowEmbedChrome(presentation, 'close');
+  const showShellToggleChrome =
+    !isEmbed && shouldShowEmbedChrome(presentation, 'shellToggle');
+  const showFullscreenChrome =
+    !isEmbed && shouldShowEmbedChrome(presentation, 'fullscreen');
+  const showRestoreNativeChrome =
+    isEmbed &&
+    shouldShowEmbedChrome(presentation, 'restoreNative') &&
+    typeof onRestoreNative === 'function';
   const [localDetail, setLocalDetail] = useState(detailProp);
   /**
    * After discard/submit, host refresh can race and re-merge stale pending rows
@@ -1880,6 +1906,8 @@ export function PrModalApp({
 
   /** Play exit animation, then notify host to unmount (modal + side sheet). */
   const requestClose = useCallback(() => {
+    // Embed has no exit chrome — ignore close (Escape stays no-op for shell).
+    if (isEmbed) return;
     if (closingRef.current || !open) return;
     closingRef.current = true;
     setClosing(true);
@@ -1909,7 +1937,7 @@ export function PrModalApp({
       setAnimClass('');
       onClose?.();
     }, duration);
-  }, [open, onClose, shellMode, layoutMode, setAnimClass]);
+  }, [open, onClose, shellMode, layoutMode, setAnimClass, isEmbed]);
 
   /**
    * After close or merge (or soft-revalidate that flips state), auto-close the
@@ -1961,8 +1989,9 @@ export function PrModalApp({
 
   // Lock document scroll while overlay is open so only the panel scrolls
   // (side sheet otherwise leaves a global scrollbar + nested scroll).
+  // Embed fills GH main — leave document scroll alone.
   useEffect(() => {
-    if (!open || typeof document === 'undefined') return undefined;
+    if (!open || isEmbed || typeof document === 'undefined') return undefined;
     const sbw =
       typeof window !== 'undefined' ? measureScrollbarWidth(window) : 0;
     const snap: ScrollLockSnapshot | null = applyScrollLock(document, {
@@ -1971,7 +2000,7 @@ export function PrModalApp({
     return () => {
       restoreScrollLock(document, snap);
     };
-  }, [open]);
+  }, [open, isEmbed]);
 
   function onToggleShell() {
     setShellMode((prev) => {
@@ -4698,7 +4727,8 @@ export function PrModalApp({
         return;
       }
 
-      const action =
+      const editable = isEditableKeyboardTarget(e.target);
+      let action =
         typeof resolveModalShortcutAction === 'function'
           ? resolveModalShortcutAction({
               mod: mod && !e.altKey,
@@ -4707,12 +4737,29 @@ export function PrModalApp({
               editingBody: ui.editingBody,
               editingComment: ui.editingComment,
               paletteOpen: ui.paletteOpen,
-              editableTarget: isEditableKeyboardTarget(e.target),
+              editableTarget: editable,
               conversationCommentFocused: Boolean(
                 ui.conversationCommentFocused ?? conversationCommentFocusRef.current
               ),
+              presentation: isEmbed ? 'embed' : 'modal',
+              isEmbed,
             })
           : null;
+
+      // Embed restore (also via pure page-embed helper)
+      if (
+        !action &&
+        isEmbed &&
+        typeof resolveEmbedShortcutAction === 'function'
+      ) {
+        action = resolveEmbedShortcutAction({
+          mod: mod && !e.altKey,
+          shift: Boolean(e.shiftKey),
+          key,
+          presentation: 'embed',
+          editableTarget: editable,
+        });
+      }
 
       if (!action) return;
 
@@ -4740,7 +4787,9 @@ export function PrModalApp({
           });
           break;
         case 'toggleFullscreen':
-          setShellFullscreen((prev) => toggleShellFullscreen(prev));
+          if (!isEmbed) {
+            setShellFullscreen((prev) => toggleShellFullscreen(prev));
+          }
           break;
         case 'focusConversationComment':
           act.focusConversationCommentItem?.();
@@ -4748,13 +4797,18 @@ export function PrModalApp({
         case 'clearConversationCommentFocus':
           act.clearConversationCommentFocus?.();
           break;
+        case 'restoreNativeView':
+          if (isEmbed && typeof onRestoreNative === 'function') {
+            onRestoreNative();
+          }
+          break;
         default:
           break;
       }
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [open]);
+  }, [open, isEmbed, onRestoreNative]);
 
   const stackPath = useMemo(() => {
     if (!detail?.number) return { items: [], branches: [] };
@@ -4789,11 +4843,16 @@ export function PrModalApp({
   if (!open) return null;
 
   const hit = activeSearchHit;
-  const fsCls = shellFullscreenClassName(shellFullscreen);
+  const fsCls = isEmbed ? '' : shellFullscreenClassName(shellFullscreen);
+  const presentCls = presentationClassName(presentation);
   const cls =
-    `${layoutClassName(layoutMode)} ${shellClassName(shellMode)} ${fsCls}${
-      shellResizing ? ' prp-modal--resizing' : ''
-    }${shellFullscreenHint ? ' prp-shell--fs-hint' : ''} ${animClass} ${theme.className}`.trim();
+    `${layoutClassName(layoutMode)} ${
+      isEmbed ? 'prp-shell--embed' : shellClassName(shellMode)
+    } ${fsCls}${
+      !isEmbed && shellResizing ? ' prp-modal--resizing' : ''
+    }${
+      !isEmbed && shellFullscreenHint ? ' prp-shell--fs-hint' : ''
+    } ${animClass} ${theme.className}`.trim();
   const { viewportWidth: vwNow, viewportHeight: vhNow } = viewportSize();
   const appliedSheetWidth = clampSheetWidth(sheetWidth, { viewportWidth: vwNow });
   const appliedModalSize = clampModalSize(modalSize, {
@@ -4801,48 +4860,60 @@ export function PrModalApp({
     viewportHeight: vhNow,
   });
   // Keep handles in fullscreen so users can drag back to a windowed shell.
+  // Embed fills GH main — no resize chrome.
   const showSheetResizer =
-    shellMode === SHELL_SHEET && layoutMode !== LAYOUT_DIFF;
+    !isEmbed && shellMode === SHELL_SHEET && layoutMode !== LAYOUT_DIFF;
   const showModalResizer =
-    shellMode === SHELL_MODAL && layoutMode !== LAYOUT_DIFF;
-  const shellSizeStyle: React.CSSProperties = shellFullscreen
+    !isEmbed && shellMode === SHELL_MODAL && layoutMode !== LAYOUT_DIFF;
+  const shellSizeStyle: React.CSSProperties = isEmbed
     ? ({
-        ['--prp-shell-w' as any]: '100vw',
-        ['--prp-shell-h' as any]: '100vh',
+        ['--prp-shell-w' as any]: '100%',
+        ['--prp-shell-h' as any]: '100%',
       } as React.CSSProperties)
-    : shellMode === SHELL_SHEET
+    : shellFullscreen
       ? ({
-          ['--prp-shell-w' as any]: `${appliedSheetWidth}px`,
+          ['--prp-shell-w' as any]: '100vw',
           ['--prp-shell-h' as any]: '100vh',
         } as React.CSSProperties)
-      : ({
-          ['--prp-shell-w' as any]: `${appliedModalSize.width}px`,
-          ['--prp-shell-h' as any]: `${appliedModalSize.height}px`,
-        } as React.CSSProperties);
+      : shellMode === SHELL_SHEET
+        ? ({
+            ['--prp-shell-w' as any]: `${appliedSheetWidth}px`,
+            ['--prp-shell-h' as any]: '100vh',
+          } as React.CSSProperties)
+        : ({
+            ['--prp-shell-w' as any]: `${appliedModalSize.width}px`,
+            ['--prp-shell-h' as any]: `${appliedModalSize.height}px`,
+          } as React.CSSProperties);
 
   return (
     <div
-      className={`prp-overlay ${shellClassName(shellMode)} ${fsCls}${
-        shellFullscreenHint ? ' prp-shell--fs-hint' : ''
-      } ${theme.className}${closing ? ' prp-overlay--leaving' : ''}`.trim()}
+      className={`prp-overlay ${
+        isEmbed ? 'prp-shell--embed' : shellClassName(shellMode)
+      } ${fsCls}${
+        !isEmbed && shellFullscreenHint ? ' prp-shell--fs-hint' : ''
+      } ${theme.className}${closing ? ' prp-overlay--leaving' : ''} ${presentCls}`.trim()}
       tabIndex={-1}
       data-color-mode={theme.mode}
+      data-presentation={isEmbed ? 'embed' : 'modal'}
       data-shell={shellMode}
       data-fullscreen={shellFullscreen ? '1' : '0'}
       data-fs-hint={shellFullscreenHint ? '1' : '0'}
       data-layout={layoutMode === LAYOUT_DIFF ? 'diff' : 'conversation'}
       data-leaving={closing ? '1' : '0'}
     >
-      <div className="prp-backdrop" onClick={requestClose} />
+      {!isEmbed ? (
+        <div className="prp-backdrop" onClick={requestClose} />
+      ) : null}
       <div
         className={cls}
         ref={shellRef}
-        role="dialog"
-        aria-modal="true"
+        role={isEmbed ? 'region' : 'dialog'}
+        aria-modal={isEmbed ? undefined : 'true'}
         aria-label={detail ? `Pull request #${detail.number}` : 'Pull request'}
         data-color-mode={theme.mode}
-        data-shell={shellMode}
-        data-fullscreen={shellFullscreen ? '1' : '0'}
+        data-shell={isEmbed ? 'embed' : shellMode}
+        data-presentation={isEmbed ? 'embed' : 'modal'}
+        data-fullscreen={isEmbed ? '0' : shellFullscreen ? '1' : '0'}
         data-sheet-width={appliedSheetWidth}
         data-modal-width={appliedModalSize.width}
         data-modal-height={appliedModalSize.height}
@@ -4885,7 +4956,7 @@ export function PrModalApp({
         />
         <Header
           detail={detail}
-          onClose={requestClose}
+          onClose={showCloseChrome ? requestClose : undefined}
           onToggleDiff={onToggleDiff}
           layoutMode={layoutMode}
           actionBusy={actionBusy}
@@ -4898,9 +4969,15 @@ export function PrModalApp({
           sectionLoading={isInitialLoad}
           shortcutMod={shortcutMod}
           shellMode={shellMode}
-          onToggleShell={onToggleShell}
+          onToggleShell={showShellToggleChrome ? onToggleShell : undefined}
           shellFullscreen={shellFullscreen}
-          onToggleFullscreen={onToggleShellFullscreen}
+          onToggleFullscreen={
+            showFullscreenChrome ? onToggleShellFullscreen : undefined
+          }
+          presentation={isEmbed ? 'embed' : 'modal'}
+          onRestoreNative={
+            showRestoreNativeChrome ? () => onRestoreNative?.() : undefined
+          }
           onSubscribe={onSubscribe}
           loadStage={loadStage}
           onActionMsg={setActionMsg}
@@ -4971,6 +5048,7 @@ export function PrModalApp({
             aria-hidden={layoutMode !== LAYOUT_CENTERED}
           >
           <ConversationView
+            presentation={isEmbed ? 'embed' : 'modal'}
             detail={
               detail
                 ? {

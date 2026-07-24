@@ -45,6 +45,12 @@ export function resolveModalShortcutAction(opts: any = {}) {
     return 'focusConversationComment';
   }
 
+  // ⌘⇧E / Ctrl+Shift+E → restore native GitHub UI (embed only; not a browser default)
+  if (shift && key === 'e') {
+    if (opts.presentation === 'embed' || opts.isEmbed) return 'restoreNativeView';
+    return null;
+  }
+
   if (shift) return null;
 
   // ⌘K / Ctrl+K → command palette (also suppresses GH palette)

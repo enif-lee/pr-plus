@@ -11,6 +11,7 @@ import {
   IconCopy,
   IconKebab,
   IconLinkExternal,
+  IconMarkGithub,
   IconPencil,
   IconShellMode,
   IconFullscreen,
@@ -21,6 +22,7 @@ import {
   IconFileDiff,
   IconConversation,
 } from '@common/icons';
+import { EMBED_RESTORE_SHORTCUT } from '@lib/page-embed';
 import { LAYOUT_DIFF } from '@lib/layout-mode';
 import { headerReviewCompact } from '@lib/header-layout';
 import { branchRefCopyText, copyTextToClipboard } from '@lib/copy-to-clipboard';
@@ -164,7 +166,28 @@ export function Header(props: any) {
     loadStage = null,
     /** Surface short result copy via modal top pill toast */
     onActionMsg = null,
+    /** 'modal' | 'embed' — embed hides close / shell / fullscreen chrome */
+    presentation = 'modal',
+    /** Embed: restore original GitHub PR UI */
+    onRestoreNative = null,
   } = props;
+  const isEmbed =
+    String(presentation || '').toLowerCase() === 'embed' ||
+    shellMode === 'embed';
+  const showClose = !isEmbed && typeof onClose === 'function';
+  const showShellToggle =
+    !isEmbed &&
+    typeof onToggleShell === 'function' &&
+    // Diff layout never uses side sheet
+    true;
+  const showFullscreenToggle =
+    !isEmbed && typeof onToggleFullscreen === 'function';
+  const showRestoreNative =
+    isEmbed && typeof onRestoreNative === 'function';
+  const restoreShortcut =
+    shortcutMod === '⌘'
+      ? EMBED_RESTORE_SHORTCUT.label
+      : EMBED_RESTORE_SHORTCUT.labelWin;
 
   const localBaseRef = useRef<HTMLButtonElement | null>(null);
   const titleInputRef = useRef<HTMLInputElement | null>(null);
@@ -279,6 +302,7 @@ export function Header(props: any) {
         }`}
         data-section-loading={sectionLoading ? '1' : '0'}
         data-shell={shellMode}
+        data-presentation={isEmbed ? 'embed' : 'modal'}
         data-layout={
           effectiveLayout === LAYOUT_DIFF ? 'diff' : 'conversation'
         }
@@ -295,17 +319,19 @@ export function Header(props: any) {
         <div className="prp-header__branch-meta">
           <span className="prp-skeleton__chip prp-skeleton__chip--branch" />
         </div>
-        <div className="prp-header__actions">
-          <button
-            type="button"
-            className="prp-header__icon-btn prp-has-tip"
-            onClick={onClose}
-            aria-label="Close"
-          >
-            <IconX size={16} aria-hidden="true" />
-            <TipPopover title="Close" shortcut="Esc" />
-          </button>
-        </div>
+        {showClose ? (
+          <div className="prp-header__actions">
+            <button
+              type="button"
+              className="prp-header__icon-btn prp-has-tip"
+              onClick={onClose}
+              aria-label="Close"
+            >
+              <IconX size={16} aria-hidden="true" />
+              <TipPopover title="Close" shortcut="Esc" />
+            </button>
+          </div>
+        ) : null}
       </header>
     );
   }
@@ -321,6 +347,7 @@ export function Header(props: any) {
         reviewCompact ? ' prp-header--review-compact' : ''
       }`}
       data-shell={shellMode}
+      data-presentation={isEmbed ? 'embed' : 'modal'}
       data-layout={effectiveLayout === LAYOUT_DIFF ? 'diff' : 'conversation'}
       data-review-compact={reviewCompact ? '1' : '0'}
     >
@@ -521,9 +548,8 @@ export function Header(props: any) {
       <div className="prp-header__actions">
           {/* Wide: inline actions. Narrow: hidden via CSS; use overflow menu. */}
           <div className="prp-header__actions-inline">
-            {/* Shell toggle only on conversation — side sheet is not used for Diff */}
-            {typeof onToggleShell === 'function' &&
-            effectiveLayout !== LAYOUT_DIFF ? (
+            {/* Shell toggle only on conversation — side sheet is not used for Diff / embed */}
+            {showShellToggle && effectiveLayout !== LAYOUT_DIFF ? (
               <button
                 type="button"
                 className="prp-header__icon-btn prp-shell-toggle prp-has-tip"
@@ -546,9 +572,8 @@ export function Header(props: any) {
                 />
               </button>
             ) : null}
-            {/* Diff is always fullscreen — no shell fullscreen toggle */}
-            {typeof onToggleFullscreen === 'function' &&
-            effectiveLayout !== LAYOUT_DIFF ? (
+            {/* Diff is always fullscreen — no shell fullscreen toggle; embed has none */}
+            {showFullscreenToggle && effectiveLayout !== LAYOUT_DIFF ? (
               <button
                 type="button"
                 className="prp-header__icon-btn prp-fullscreen-toggle prp-has-tip"
@@ -682,15 +707,32 @@ export function Header(props: any) {
                 <TipPopover title="Open on GitHub" />
               </a>
             ) : null}
-            <button
-              type="button"
-              className="prp-header__icon-btn prp-has-tip"
-              onClick={onClose}
-              aria-label="Close"
-            >
-              <IconX size={16} aria-hidden="true" />
-              <TipPopover title="Close" shortcut="Esc" />
-            </button>
+            {showRestoreNative ? (
+              <button
+                type="button"
+                className="prp-header__icon-btn prp-restore-native prp-has-tip"
+                onClick={() => onRestoreNative?.()}
+                aria-label="Show GitHub PR page"
+                data-action="restore-native"
+              >
+                <IconMarkGithub size={16} aria-hidden="true" />
+                <TipPopover
+                  title="Show GitHub PR page"
+                  shortcut={restoreShortcut}
+                />
+              </button>
+            ) : null}
+            {showClose ? (
+              <button
+                type="button"
+                className="prp-header__icon-btn prp-has-tip"
+                onClick={onClose}
+                aria-label="Close"
+              >
+                <IconX size={16} aria-hidden="true" />
+                <TipPopover title="Close" shortcut="Esc" />
+              </button>
+            ) : null}
           </div>
 
           {/* Narrow: overflow menu (same handlers as inline row) */}
@@ -708,8 +750,7 @@ export function Header(props: any) {
             </button>
             {overflowOpen ? (
               <ul className="prp-header__more-menu" role="menu">
-                {typeof onToggleShell === 'function' &&
-                effectiveLayout !== LAYOUT_DIFF ? (
+                {showShellToggle && effectiveLayout !== LAYOUT_DIFF ? (
                   <li role="none">
                     <button
                       type="button"
@@ -726,8 +767,7 @@ export function Header(props: any) {
                     </button>
                   </li>
                 ) : null}
-                {typeof onToggleFullscreen === 'function' &&
-                effectiveLayout !== LAYOUT_DIFF ? (
+                {showFullscreenToggle && effectiveLayout !== LAYOUT_DIFF ? (
                   <li role="none">
                     <button
                       type="button"
@@ -836,19 +876,38 @@ export function Header(props: any) {
                     </a>
                   </li>
                 ) : null}
-                <li role="none">
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="prp-header__more-item"
-                    onClick={() => {
-                      setOverflowOpen(false);
-                      onClose?.();
-                    }}
-                  >
-                    Close modal
-                  </button>
-                </li>
+                {showRestoreNative ? (
+                  <li role="none">
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="prp-header__more-item"
+                      data-action="restore-native"
+                      onClick={() => {
+                        setOverflowOpen(false);
+                        onRestoreNative?.();
+                      }}
+                    >
+                      Show GitHub PR page
+                      {restoreShortcut ? ` (${restoreShortcut})` : ''}
+                    </button>
+                  </li>
+                ) : null}
+                {showClose ? (
+                  <li role="none">
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="prp-header__more-item"
+                      onClick={() => {
+                        setOverflowOpen(false);
+                        onClose?.();
+                      }}
+                    >
+                      Close modal
+                    </button>
+                  </li>
+                ) : null}
               </ul>
             ) : null}
           </div>

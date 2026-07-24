@@ -8,8 +8,13 @@
 (function initPrModalHost() {
   const HOST_ID = 'prp-modal-host';
   let reactRoot = null;
+  /** DOM node the current reactRoot is bound to (soft-nav may replace it). */
+  let reactRootHost = null;
   /** When false (no PAT), click intercept is idle — native GitHub navigation works. */
   let hostEnabled = false;
+  /** Soft-nav poll / listeners for PR page embed */
+  let embedWatchInstalled = false;
+  let lastEmbedPath = null;
   /**
    * Monotonic generation for detail fetches. Parallel soft-refreshes after meta
    * writes used to complete out of order and resurrect stale assignees/labels.
@@ -40,7 +45,191 @@
      * Shown in the header diff-stat badge during loads.
      */
     loadStage: null,
+    /**
+     * Presentation: 'modal' (overlay from pulls list) | 'embed' (in-page under GH header).
+     * @type {'modal'|'embed'}
+     */
+    presentation: 'modal',
   };
+
+  function pageEmbedApi() {
+    return globalThis.PRModalPageEmbed || null;
+  }
+
+  function isEmbedPresentation(value) {
+    const api = pageEmbedApi();
+    if (api?.isEmbedPresentation) return api.isEmbedPresentation(value);
+    return String(value || '').toLowerCase() === 'embed';
+  }
+
+  function parsePrPagePath(pathname) {
+    const api = pageEmbedApi();
+    if (typeof api?.parsePrPagePath === 'function') {
+      return api.parsePrPagePath(pathname);
+    }
+    // Fallback if pure module missing
+    const path = String(pathname || '')
+      .split('?')[0]
+      .split('#')[0];
+    const m = path.match(
+      /^\/([^/]+)\/([^/]+)\/pull\/(\d+)(?:\/([^/]+))?\/?$/i
+    );
+    if (!m) return null;
+    const tab = String(m[4] || '')
+      .trim()
+      .toLowerCase();
+    if (tab && tab !== 'files' && tab !== 'changes') return null;
+    return {
+      owner: m[1],
+      repo: m[2],
+      number: Number(m[3]),
+      page: tab === 'files' || tab === 'changes' ? 'diff' : 'conversation',
+      tab: tab || 'conversation',
+    };
+  }
+
+  function embedHostId() {
+    return pageEmbedApi()?.PAGE_EMBED_HOST_ID || 'prp-page-embed';
+  }
+
+  function embedActiveClass() {
+    return pageEmbedApi()?.PAGE_EMBED_ACTIVE_CLASS || 'prp-embed-active';
+  }
+
+  /** Resilient selectors for GitHub main content under the global header. */
+  function findGithubMainRegion(doc = document) {
+    const selectors = [
+      '.application-main',
+      'main#js-repo-pjax-container',
+      '#js-repo-pjax-container',
+      '[data-turbo-body] main',
+      'main[data-pjax-container]',
+      'main',
+    ];
+    for (const sel of selectors) {
+      try {
+        const el = doc.querySelector(sel);
+        if (el) return el;
+      } catch {
+        /* ignore */
+      }
+    }
+    return null;
+  }
+
+  function hideNativeMainChildren(main, embedEl) {
+    if (!main) return;
+    for (const child of [...main.children]) {
+      if (child === embedEl) continue;
+      if (child.getAttribute('data-prp-native-hidden') === '1') continue;
+      child.setAttribute('data-prp-native-hidden', '1');
+      child.style.setProperty('display', 'none', 'important');
+    }
+    main.classList.add('prp-embed-main');
+  }
+
+  function hideGithubFooter() {
+    const api = pageEmbedApi();
+    if (typeof api?.applyFooterHide === 'function') {
+      try {
+        return api.applyFooterHide(document);
+      } catch {
+        /* ignore */
+      }
+    }
+    return 0;
+  }
+
+  function restoreGithubFooter() {
+    const api = pageEmbedApi();
+    if (typeof api?.restoreFooters === 'function') {
+      try {
+        return api.restoreFooters(document);
+      } catch {
+        /* ignore */
+      }
+    }
+    // Fallback if pure module missing
+    try {
+      document
+        .querySelectorAll('[data-prp-footer-hidden="1"]')
+        .forEach((el) => {
+          el.removeAttribute('data-prp-footer-hidden');
+          el.style?.removeProperty?.('display');
+        });
+    } catch {
+      /* ignore */
+    }
+    return 0;
+  }
+
+  function restoreNativeMain() {
+    try {
+      document.documentElement.classList.remove(embedActiveClass());
+      document.body?.classList?.remove(embedActiveClass());
+    } catch {
+      /* ignore */
+    }
+    try {
+      document.querySelectorAll('[data-prp-native-hidden="1"]').forEach((el) => {
+        el.removeAttribute('data-prp-native-hidden');
+        el.style.removeProperty('display');
+      });
+      document.querySelectorAll('.prp-embed-main').forEach((el) => {
+        el.classList.remove('prp-embed-main');
+      });
+    } catch {
+      /* ignore */
+    }
+    restoreGithubFooter();
+    try {
+      const host = document.getElementById(embedHostId());
+      if (host) host.remove();
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function ensureEmbedHost() {
+    ensureAssets();
+    const id = embedHostId();
+    let host = document.getElementById(id);
+    if (host) {
+      const main = findGithubMainRegion();
+      if (main && host.parentElement !== main) {
+        hideNativeMainChildren(main, host);
+        main.appendChild(host);
+      } else if (main) {
+        hideNativeMainChildren(main, host);
+      }
+      document.documentElement.classList.add(embedActiveClass());
+      hideGithubFooter();
+      return host;
+    }
+    host = document.createElement('div');
+    host.id = id;
+    host.className = 'prp-page-embed';
+    host.setAttribute('data-prp-embed', '1');
+    const main = findGithubMainRegion();
+    if (main) {
+      hideNativeMainChildren(main, host);
+      main.appendChild(host);
+    } else {
+      (document.body || document.documentElement).appendChild(host);
+    }
+    document.documentElement.classList.add(embedActiveClass());
+    hideGithubFooter();
+    return host;
+  }
+
+  /** Tear down embed and show original GitHub PR UI (same tab). */
+  function restoreNativeView() {
+    if (!isEmbedPresentation(current.presentation) && !document.getElementById(embedHostId())) {
+      return { ok: false, reason: 'not-embed' };
+    }
+    closeModal();
+    return { ok: true };
+  }
 
   async function refreshPrefs() {
     try {
@@ -252,13 +441,16 @@
   }
 
   function ensureHost() {
+    // In-page embed mounts under GH main; list overlay uses documentElement host.
+    if (isEmbedPresentation(current.presentation)) {
+      return ensureEmbedHost();
+    }
     ensureAssets();
     let host = document.getElementById(HOST_ID);
-    if (!host) {
-      host = document.createElement('div');
-      host.id = HOST_ID;
-      document.documentElement.appendChild(host);
-    }
+    if (host) return host;
+    host = document.createElement('div');
+    host.id = HOST_ID;
+    document.documentElement.appendChild(host);
     return host;
   }
 
@@ -410,6 +602,19 @@
     const repo = current.repo;
     const number = current.number;
     const openPulls = resolveOpenPulls();
+    const presentation = isEmbedPresentation(current.presentation)
+      ? 'embed'
+      : 'modal';
+    const chrome =
+      presentation === 'embed' && pageEmbedApi()?.embedShellChromeFlags
+        ? pageEmbedApi().embedShellChromeFlags()
+        : {
+            presentation: 'modal',
+            showClose: true,
+            showShellToggle: true,
+            showFullscreen: true,
+            showExit: true,
+          };
     return {
       open: current.open,
       loading: current.loading,
@@ -418,6 +623,8 @@
       loadStage: current.loadStage,
       openPulls,
       prefs: { ...prefs },
+      presentation,
+      shellChrome: chrome,
       // Deep-link restore (page/position); App also writes URI on focus changes
       initialRoute: {
         page: current.routePage,
@@ -425,7 +632,9 @@
         number: current.number,
       },
       onRouteChange: persistRouteState,
-      onClose: closeModal,
+      onClose: presentation === 'embed' ? () => {} : closeModal,
+      onRestoreNative:
+        presentation === 'embed' ? () => restoreNativeView() : undefined,
       /**
        * Stack strip navigation — preserve current Diff/Conversation view when
        * opts.page is omitted by falling back to current.routePage.
@@ -980,33 +1189,110 @@
     };
   }
 
+  /**
+   * True when reactRoot is still bound to a live host element.
+   * Soft-nav / Turbo often replace #prp-page-embed; reusing a detached root
+   * paints into nothing while natives stay display:none.
+   *
+   * Note: mountPrModal stamps host.__prpReactRoot = createRoot(...), but
+   * returns a {render,unmount} *wrapper*. Never compare stamp === reactRoot.
+   */
+  function isReactRootLiveOn(host) {
+    if (!reactRoot || !host) return false;
+    if (typeof reactRoot.render !== 'function') return false;
+    if (reactRootHost !== host) return false;
+    // Node may be detached after Turbo swap
+    if (host.isConnected === false) return false;
+    // createRoot stamp must still be present (wrapper unmount deletes it)
+    if (!host.__prpReactRoot) return false;
+    return true;
+  }
+
+  function dropReactRoot() {
+    if (reactRoot) {
+      try {
+        reactRoot.unmount();
+      } catch {
+        /* ignore */
+      }
+    }
+    // If wrapper unmount failed / partial, clear createRoot stamp on old host
+    if (reactRootHost) {
+      try {
+        if (reactRootHost.__prpReactRoot) {
+          try {
+            // Real createRoot has .unmount(); stub may not
+            reactRootHost.__prpReactRoot.unmount?.();
+          } catch {
+            /* ignore */
+          }
+          delete reactRootHost.__prpReactRoot;
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    reactRoot = null;
+    reactRootHost = null;
+  }
+
   function render() {
     if (typeof globalThis.mountPrModal !== 'function') {
       console.warn('[pr+] modal bundle not loaded (mountPrModal missing)');
       return;
     }
-    const host = ensureHost();
 
     if (!current.open) {
-      if (reactRoot) {
-        try {
-          reactRoot.unmount();
-        } catch {
-          /* ignore */
-        }
-        reactRoot = null;
-        host.replaceChildren();
+      dropReactRoot();
+      // Tear down both hosts when closed
+      try {
+        const overlay = document.getElementById(HOST_ID);
+        if (overlay) overlay.replaceChildren();
+      } catch {
+        /* ignore */
+      }
+      if (
+        isEmbedPresentation(current.presentation) ||
+        document.getElementById(embedHostId())
+      ) {
+        restoreNativeMain();
       }
       return;
     }
 
+    const host = ensureHost();
     const props = buildProps();
-    if (reactRoot && typeof reactRoot.render === 'function') {
-      // Reuse root — preserves Diff layout, scrollTop, and search UI state.
-      reactRoot.render(props);
-      return;
+
+    if (isReactRootLiveOn(host)) {
+      try {
+        // Reuse root — preserves Diff layout, scrollTop, and search UI state.
+        reactRoot.render(props);
+        return;
+      } catch (err) {
+        console.warn('[pr+] root.render failed; remounting', err);
+        dropReactRoot();
+      }
+    } else if (reactRoot) {
+      // Host recreated or detached — unmount orphan and bind to the new node
+      dropReactRoot();
     }
+
+    // Stale createRoot stamp on this host (orphan after lost wrapper) — clear first
+    try {
+      if (host.__prpReactRoot) {
+        try {
+          host.__prpReactRoot.unmount?.();
+        } catch {
+          /* ignore */
+        }
+        delete host.__prpReactRoot;
+      }
+    } catch {
+      /* ignore */
+    }
+
     reactRoot = globalThis.mountPrModal(host, props);
+    reactRootHost = host;
   }
 
   function persistOpenModal(owner, repo, number, extra = {}) {
@@ -1078,8 +1364,10 @@
   }
 
   function closeModal() {
+    const wasEmbed = isEmbedPresentation(current.presentation);
     clearPersistedOpenModal();
-    clearUriRoute();
+    // Keep native PR URL clean when embed closes (no prp_* strip needed if we never wrote)
+    if (!wasEmbed) clearUriRoute();
     current = {
       open: false,
       loading: false,
@@ -1091,16 +1379,59 @@
       routePage: null,
       routePosition: null,
       loadStage: null,
+      presentation: 'modal',
     };
     render();
+    if (wasEmbed) restoreNativeMain();
   }
 
-  async function openModal({ owner, repo, number, page = null, position = null }) {
+  async function openModal({
+    owner,
+    repo,
+    number,
+    page = null,
+    position = null,
+    presentation = null,
+  }) {
     if (!hostEnabled) return;
     await refreshPrefs();
     ensurePrefsWatch();
     const key = detailKey(owner, repo, number);
     const gen = ++detailFetchGen;
+
+    // Resolve presentation: explicit > path-based embed > keep current if same PR > modal
+    const pathTarget = parsePrPagePath(
+      typeof location !== 'undefined' ? location.pathname : ''
+    );
+    let resolvedPresentation = 'modal';
+    if (presentation === 'embed' || presentation === 'modal') {
+      resolvedPresentation = presentation;
+    } else if (
+      pathTarget &&
+      String(pathTarget.owner).toLowerCase() === String(owner).toLowerCase() &&
+      String(pathTarget.repo).toLowerCase() === String(repo).toLowerCase() &&
+      Number(pathTarget.number) === Number(number)
+    ) {
+      resolvedPresentation = 'embed';
+    } else if (
+      current.open &&
+      isEmbedPresentation(current.presentation) &&
+      String(current.owner).toLowerCase() === String(owner).toLowerCase() &&
+      String(current.repo).toLowerCase() === String(repo).toLowerCase() &&
+      Number(current.number) === Number(number)
+    ) {
+      resolvedPresentation = 'embed';
+    }
+    // Switching overlay ↔ embed needs a clean host + fresh React root
+    if (
+      current.open &&
+      isEmbedPresentation(current.presentation) !==
+        isEmbedPresentation(resolvedPresentation)
+    ) {
+      dropReactRoot();
+      if (isEmbedPresentation(current.presentation)) restoreNativeMain();
+    }
+    current.presentation = resolvedPresentation;
 
     // Progressive sources (fast → slow):
     //   1) list sketch (pulls page cache — title/body already available)
@@ -1118,14 +1449,18 @@
     // Prefer real cache over list sketch; else sketch; else empty
     let initialDetail = cached || listSketch || null;
 
-    // Explicit page (stack nav) > keep current view when already open > default conversation
+    // Explicit page (stack nav) > path tab (embed) > keep current view > default conversation
     const resolvedPage =
       page === 'diff' || page === 'conversation'
         ? page
-        : current.open &&
-            (current.routePage === 'diff' || current.routePage === 'conversation')
-          ? current.routePage
-          : page || null;
+        : pathTarget &&
+            isEmbedPresentation(resolvedPresentation) &&
+            (pathTarget.page === 'diff' || pathTarget.page === 'conversation')
+          ? pathTarget.page
+          : current.open &&
+              (current.routePage === 'diff' || current.routePage === 'conversation')
+            ? current.routePage
+            : page || null;
 
     current = {
       open: true,
@@ -1138,6 +1473,7 @@
       number,
       routePage: resolvedPage,
       routePosition: position || null,
+      presentation: resolvedPresentation,
       loadStage: {
         phase: fromCache ? 'revalidate' : fromList ? 'core' : 'core',
         label: fromCache
@@ -1743,12 +2079,107 @@
     };
   }
 
+  /**
+   * On PR conversation/files routes, mount pr+ as in-page embed under GH header.
+   * Soft-nav re-entry when path changes.
+   */
+  function tryEmbedFromLocation() {
+    if (!hostEnabled) return { ok: false, reason: 'disabled' };
+    const path = typeof location !== 'undefined' ? location.pathname : '';
+    const target = parsePrPagePath(path);
+    if (!target) {
+      if (isEmbedPresentation(current.presentation) && current.open) {
+        closeModal();
+      }
+      lastEmbedPath = path;
+      return { ok: false, reason: 'not-pr-page' };
+    }
+    const same =
+      current.open &&
+      isEmbedPresentation(current.presentation) &&
+      String(current.owner).toLowerCase() === String(target.owner).toLowerCase() &&
+      String(current.repo).toLowerCase() === String(target.repo).toLowerCase() &&
+      Number(current.number) === Number(target.number) &&
+      current.routePage === target.page;
+    lastEmbedPath = path;
+    if (same) {
+      // Re-hide native if Turbo re-injected content, and remount if host was destroyed
+      ensureEmbedHost();
+      render();
+      return { ok: true, reason: 'already-open' };
+    }
+    void openModal({
+      owner: target.owner,
+      repo: target.repo,
+      number: target.number,
+      page: target.page,
+      presentation: 'embed',
+    });
+    return {
+      ok: true,
+      owner: target.owner,
+      repo: target.repo,
+      number: target.number,
+      page: target.page,
+    };
+  }
+
+  function installEmbedWatch() {
+    if (embedWatchInstalled) return;
+    embedWatchInstalled = true;
+    const onNav = () => {
+      if (!hostEnabled) return;
+      const path = typeof location !== 'undefined' ? location.pathname : '';
+      if (
+        path === lastEmbedPath &&
+        current.open &&
+        isEmbedPresentation(current.presentation)
+      ) {
+        // Same path: Turbo may have replaced #prp-page-embed — rebind React root
+        try {
+          ensureEmbedHost();
+          render();
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
+      tryEmbedFromLocation();
+    };
+    window.addEventListener('popstate', onNav);
+    window.addEventListener('turbo:load', onNav);
+    window.addEventListener('turbo:render', onNav);
+    window.addEventListener('pjax:end', onNav);
+    // GitHub soft navigations sometimes only mutate DOM
+    document.addEventListener('soft-nav:end', onNav);
+    // Fallback poll for missed events (cheap path string compare)
+    const pollId = window.setInterval(() => {
+      if (!hostEnabled) return;
+      const path = typeof location !== 'undefined' ? location.pathname : '';
+      if (path !== lastEmbedPath) onNav();
+    }, 800);
+    // Allow Node test processes to exit (browser ignores unref)
+    try {
+      if (typeof pollId === 'object' && typeof pollId.unref === 'function') {
+        pollId.unref();
+      } else if (
+        typeof pollId === 'number' &&
+        typeof window.clearInterval === 'function'
+      ) {
+        /* browser timer id */
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
   function setEnabled(enabled) {
     hostEnabled = Boolean(enabled);
     if (!hostEnabled) {
       // Tear down modal + stop intercepting so GitHub is fully native
       if (current.open) {
         clearUriRoute();
+        const wasEmbed = isEmbedPresentation(current.presentation);
         current = {
           open: false,
           loading: false,
@@ -1760,10 +2191,17 @@
           routePage: null,
           routePosition: null,
           loadStage: null,
+          presentation: 'modal',
         };
         render();
+        if (wasEmbed) restoreNativeMain();
+      } else {
+        restoreNativeMain();
       }
+      return;
     }
+    installEmbedWatch();
+    tryEmbedFromLocation();
   }
 
   function parsePrFromAnchor(anchor) {
@@ -1921,10 +2359,13 @@
     openModal,
     closeModal,
     tryRestoreOpenModal,
+    tryEmbedFromLocation,
+    restoreNativeView,
     persistRouteState,
     setEnabled,
     isEnabled: () => hostEnabled,
     parsePrFromAnchor,
+    parsePrPagePath,
     isPullsListPage,
     clearDetailCache,
     _getState: () => ({ ...current, hostEnabled }),
