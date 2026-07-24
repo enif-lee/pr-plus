@@ -101,33 +101,56 @@ html.prp-embed-active #footer {
   background: var(--button-default-bgColor-hover, #eef1f4);
 }
 
-/* Native GitHub PR header: compact blue pr+ chip (same height as GH btn-sm) */
+/*
+ * Native GitHub PR header “pr+” toggle.
+ * Match neighboring Primer actions (measured: 32px tall, 0 12px pad, 14px/500,
+ * parent flex gap 8px → no extra margin on the button).
+ */
 .prp-gh-open-toggle {
   display: inline-flex !important;
   align-items: center;
   justify-content: center;
   box-sizing: border-box;
-  margin-left: 8px;
+  margin: 0 !important;
   vertical-align: middle;
-  height: 28px;
-  min-height: 28px;
-  padding: 0 10px;
-  border: none;
+  height: 32px;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid transparent;
   border-radius: 6px;
-  background: var(--bgColor-accent-emphasis, #1f6feb);
-  color: #fff;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  line-height: 1;
+  /* Accent blue (not --button-primary: that is green for merge CTAs) */
+  background: var(--bgColor-accent-emphasis, #0969da);
+  color: var(--fgColor-onEmphasis, #fff);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: normal;
+  line-height: 20px;
   cursor: pointer;
   white-space: nowrap;
   appearance: none;
   -webkit-appearance: none;
+  transition: background-color 80ms cubic-bezier(0.33, 1, 0.68, 1),
+    border-color 80ms cubic-bezier(0.33, 1, 0.68, 1);
 }
 .prp-gh-open-toggle:hover {
-  background: var(--bgColor-accent-muted, #1158c7);
-  filter: brightness(1.05);
+  /* Darker accent — not --bgColor-accent-muted (reads washed / wrong) */
+  background: color-mix(
+    in srgb,
+    var(--bgColor-accent-emphasis, #0969da) 86%,
+    #000
+  );
+  border-color: transparent;
+  color: var(--fgColor-onEmphasis, #fff);
+  filter: none;
+  text-decoration: none;
+}
+.prp-gh-open-toggle:active {
+  background: color-mix(
+    in srgb,
+    var(--bgColor-accent-emphasis, #0969da) 72%,
+    #000
+  );
 }
 .prp-gh-open-toggle:focus-visible {
   outline: 2px solid var(--focus-outlineColor, #0969da);

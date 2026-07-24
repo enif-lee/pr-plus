@@ -404,7 +404,7 @@
       btn = document.createElement('button');
       btn.id = GH_PR_TOGGLE_ID;
       btn.type = 'button';
-      // Blue pr+ mark only — same height as neighboring GH btn-sm actions
+      // Match Primer PR header actions (32px / 14px / parent gap) — see styles.css
       btn.className = 'prp-gh-open-toggle';
       btn.setAttribute('data-prp-gh-toggle', '1');
       btn.setAttribute('aria-label', 'Open with pr+');
