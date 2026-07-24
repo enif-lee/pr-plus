@@ -1,16 +1,23 @@
 /**
  * Pure metrics for an overlay (floating) scrollbar thumb.
  * Native scrollbars are hidden; this paints a bar over content without layout width.
+ * Same math for vertical (scrollTop/height) and horizontal (scrollLeft/width).
  */
 
 export type FloatingScrollbarMetrics = {
   /** Whether content overflows enough to show a bar */
   needed: boolean;
-  /** Thumb height in px */
+  /** Thumb length along the scroll axis (height vertical, width horizontal) */
+  thumbSize: number;
+  /** Thumb offset along the track (top vertical, left horizontal) */
+  thumbOffset: number;
+  /** Track / viewport size on the scroll axis */
+  trackSize: number;
+  /** @deprecated use thumbSize — kept for callers/tests */
   thumbHeight: number;
-  /** Thumb offset from top of track in px */
+  /** @deprecated use thumbOffset */
   thumbTop: number;
-  /** Track / viewport height */
+  /** @deprecated use trackSize */
   trackHeight: number;
 };
 
@@ -20,50 +27,69 @@ const MIN_THUMB = 28;
 export const FLOATING_SCROLLBAR_IDLE_MS = 1000;
 
 /**
- * @param scrollTop
- * @param clientHeight viewport height
- * @param scrollHeight full content height
+ * @param scrollPos scrollTop or scrollLeft
+ * @param clientSize viewport height or width
+ * @param scrollSize full content height or width
  */
 export function floatingScrollbarMetrics(
-  scrollTop: unknown,
-  clientHeight: unknown,
-  scrollHeight: unknown
+  scrollPos: unknown,
+  clientSize: unknown,
+  scrollSize: unknown
 ): FloatingScrollbarMetrics {
-  const st = Number(scrollTop) || 0;
-  const ch = Number(clientHeight) || 0;
-  const sh = Number(scrollHeight) || 0;
+  const st = Number(scrollPos) || 0;
+  const ch = Number(clientSize) || 0;
+  const sh = Number(scrollSize) || 0;
   if (!(ch > 0) || !(sh > ch + 1)) {
-    return { needed: false, thumbHeight: 0, thumbTop: 0, trackHeight: Math.max(0, ch) };
+    const empty = {
+      needed: false,
+      thumbSize: 0,
+      thumbOffset: 0,
+      trackSize: Math.max(0, ch),
+      thumbHeight: 0,
+      thumbTop: 0,
+      trackHeight: Math.max(0, ch),
+    };
+    return empty;
   }
-  const thumbHeight = Math.max(MIN_THUMB, Math.round((ch / sh) * ch));
+  const thumbSize = Math.max(MIN_THUMB, Math.round((ch / sh) * ch));
   const maxScroll = sh - ch;
-  const maxTop = ch - thumbHeight;
-  const thumbTop =
-    maxScroll <= 0 ? 0 : Math.round((Math.min(st, maxScroll) / maxScroll) * maxTop);
+  const maxOffset = ch - thumbSize;
+  const thumbOffset =
+    maxScroll <= 0
+      ? 0
+      : Math.round((Math.min(st, maxScroll) / maxScroll) * maxOffset);
+  const clamped = Math.max(0, Math.min(maxOffset, thumbOffset));
   return {
     needed: true,
-    thumbHeight,
-    thumbTop: Math.max(0, Math.min(maxTop, thumbTop)),
+    thumbSize,
+    thumbOffset: clamped,
+    trackSize: ch,
+    thumbHeight: thumbSize,
+    thumbTop: clamped,
     trackHeight: ch,
   };
 }
 
 /**
- * Map a pointer Y (relative to track top) to scrollTop for drag.
+ * Map a pointer position (relative to track start) to scroll position for drag/click.
+ * Works for both axes.
  */
 export function scrollTopFromThumbDrag(
-  pointerYInTrack: unknown,
-  thumbHeight: unknown,
-  clientHeight: unknown,
-  scrollHeight: unknown
+  pointerInTrack: unknown,
+  thumbSize: unknown,
+  clientSize: unknown,
+  scrollSize: unknown
 ): number {
-  const y = Number(pointerYInTrack);
-  const th = Number(thumbHeight);
-  const ch = Number(clientHeight);
-  const sh = Number(scrollHeight);
+  const y = Number(pointerInTrack);
+  const th = Number(thumbSize);
+  const ch = Number(clientSize);
+  const sh = Number(scrollSize);
   if (!Number.isFinite(y) || !(ch > 0) || !(sh > ch)) return 0;
   const maxTop = Math.max(1, ch - Math.max(MIN_THUMB, th || MIN_THUMB));
   const maxScroll = sh - ch;
   const top = Math.max(0, Math.min(maxTop, y - (th || MIN_THUMB) / 2));
   return Math.round((top / maxTop) * maxScroll);
 }
+
+/** Alias for horizontal clarity */
+export const scrollPosFromThumbDrag = scrollTopFromThumbDrag;

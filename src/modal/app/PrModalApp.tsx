@@ -202,6 +202,14 @@ import {
   replaceLocationRoute,
   clearLocationRoute,
 } from '../lib/uri-route';
+import {
+  replaceGithubPrLocation,
+  githubCommitsFromFilter,
+  githubSelectionFields,
+  commitFilterFromGithubRoute,
+  findFilePathByDiffKey,
+  githubDiffFileKey,
+} from '../lib/github-pr-route';
 import { useModalStore } from '../store/modal-store';
 import {
   ROW_HEIGHT,
@@ -316,6 +324,10 @@ export function PrModalApp({
     {}
   );
   const commentPrefetchGenRef = useRef(0);
+  /** Dedup GH commit-filter restore from inbound /changes/{sha}|{a}..{b}. */
+  const ghCommitRouteAppliedRef = useRef<string | null>(null);
+  /** Dedup GH #diff- selection restore / clear. */
+  const ghSelectionAppliedRef = useRef<string | null>(null);
 
   useEffect(() => {
     setDiffCommitFilter({ mode: 'all' });
@@ -331,6 +343,12 @@ export function PrModalApp({
     setDiffReviewFilter(null);
     setFileExtFilter(new Set());
     setFileUnreadOnly(false);
+    // Zustand selection survives remount — clear so we never write another PR's #diff-
+    // Use getState() so this effect can run before setLineSelection is declared below
+    // (avoids TDZ: Cannot access 'setLineSelection' before initialization).
+    useModalStore.getState().setLineSelection(null);
+    ghSelectionAppliedRef.current = null;
+    ghCommitRouteAppliedRef.current = null;
   }, [prIdentity]);
 
   // Lazy-load remaining comment / review-comment pages (offset) then since-refresh.
@@ -1715,6 +1733,9 @@ export function PrModalApp({
       setLayoutMode(routePage === 'diff' ? LAYOUT_DIFF : LAYOUT_CENTERED);
     }
 
+    // Commit filter restore runs via applyDiffCommitFilter effect below
+    // (needs detail.commits for compare range). Do not half-set state here.
+
     if (stored) {
       if (
         !routePage &&
@@ -1752,6 +1773,100 @@ export function PrModalApp({
     setViewedPaths,
     setActiveFilePath,
     setCommentIndex,
+  ]);
+
+  // Inbound /changes/{sha}|{a}..{b} → full applyDiffCommitFilter (compare files + label)
+  useEffect(() => {
+    if (!open || !detail?.number) return;
+    const filter = commitFilterFromGithubRoute(initialRoute || null);
+    const key = `${detail.number}:${filter.mode}:${filter.sha || ''}:${filter.endSha || ''}`;
+    if (ghCommitRouteAppliedRef.current === key) return;
+    // Single/range need commits list to resolve compare base...head
+    if (
+      filter.mode !== 'all' &&
+      (!Array.isArray(detail.commits) || detail.commits.length === 0)
+    ) {
+      return;
+    }
+    ghCommitRouteAppliedRef.current = key;
+    void applyDiffCommitFilter(filter);
+  }, [
+    open,
+    detail?.number,
+    detail?.commits,
+    initialRoute?.commitSha,
+    initialRoute?.commitEndSha,
+    applyDiffCommitFilter,
+  ]);
+
+  // Restore #diff-{key}R… line selection once files are available.
+  // When inbound URL has no #diff-, clear zustand selection so URI write
+  // does not re-emit a stale hash after soft-nav remount.
+  useEffect(() => {
+    if (!open || !detail?.number) return;
+    const fileKey = initialRoute?.fileKey || null;
+    const filePathHint = initialRoute?.filePath || null;
+    const startLine = initialRoute?.startLine ?? null;
+    const applyKey = `${detail.number}:${fileKey || ''}:${filePathHint || ''}:${startLine}:${initialRoute?.endLine ?? ''}`;
+    if (ghSelectionAppliedRef.current === applyKey) return;
+
+    if (!fileKey && !filePathHint) {
+      ghSelectionAppliedRef.current = applyKey;
+      setLineSelection(null);
+      return;
+    }
+
+    const files =
+      (Array.isArray(diffFilesOverride) && diffFilesOverride) ||
+      (Array.isArray(detail.files) && detail.files) ||
+      [];
+    if (!files.length && !filePathHint) return;
+
+    const path =
+      (filePathHint && String(filePathHint)) ||
+      findFilePathByDiffKey(files, fileKey) ||
+      null;
+    if (!path) return;
+
+    ghSelectionAppliedRef.current = applyKey;
+    setActiveFilePath(path);
+    if (layoutMode !== LAYOUT_DIFF) setLayoutMode(LAYOUT_DIFF);
+
+    if (startLine != null && Number(startLine) >= 1) {
+      const end =
+        initialRoute?.endLine != null &&
+        Number(initialRoute.endLine) >= Number(startLine)
+          ? Math.floor(Number(initialRoute.endLine))
+          : Math.floor(Number(startLine));
+      const side =
+        String(initialRoute?.side || 'RIGHT').toUpperCase() === 'LEFT'
+          ? 'LEFT'
+          : 'RIGHT';
+      setLineSelection({
+        filePath: path,
+        anchorLine: Math.floor(Number(startLine)),
+        headLine: end,
+        anchorSide: side,
+        headSide: side,
+      });
+    } else {
+      // File-level #diff-{key} without lines — clear line range selection
+      setLineSelection(null);
+    }
+  }, [
+    open,
+    detail?.number,
+    detail?.files,
+    diffFilesOverride,
+    initialRoute?.fileKey,
+    initialRoute?.filePath,
+    initialRoute?.startLine,
+    initialRoute?.endLine,
+    initialRoute?.side,
+    layoutMode,
+    setActiveFilePath,
+    setLayoutMode,
+    setLineSelection,
   ]);
 
   // Focus review comment/thread from URI/session position once comments map
@@ -1825,19 +1940,23 @@ export function PrModalApp({
     routeWriteReady,
   ]);
 
-  // Sync URI (prp_page / prp_number / prp_position) + host session open snap.
-  // On close (open true → false), strip route params from the address bar.
+  // Sync URI + host session open snap.
+  // Embed: GitHub /pull/N/changes[/{sha}|/{a}..{b}]#diff-…R…
+  // List modal: legacy prp_* query params.
+  // On close (open true → false), strip prp_* only for modal presentation.
   const uriWasOpenRef = useRef(false);
   useEffect(() => {
     if (!open || !detail?.number) {
       if (uriWasOpenRef.current) {
         uriWasOpenRef.current = false;
-        try {
-          if (typeof history !== 'undefined' && typeof location !== 'undefined') {
-            clearLocationRoute(history, location);
+        if (!isEmbed) {
+          try {
+            if (typeof history !== 'undefined' && typeof location !== 'undefined') {
+              clearLocationRoute(history, location);
+            }
+          } catch {
+            /* ignore */
           }
-        } catch {
-          /* ignore */
         }
       }
       return;
@@ -1852,30 +1971,75 @@ export function PrModalApp({
       position = buildPositionFromComment(mappedComments[commentIndex]);
     }
 
+    const commits = githubCommitsFromFilter(diffCommitFilter);
+    const sel =
+      page === 'diff' ? githubSelectionFields(lineSelection) : {
+        filePath: null,
+        startLine: null,
+        endLine: null,
+        side: null as 'LEFT' | 'RIGHT' | null,
+      };
+    const fileKey =
+      page === 'diff' && sel.filePath ? githubDiffFileKey(sel.filePath) : null;
+
+    const routePayload = {
+      page,
+      position,
+      number: detail.number,
+      commitSha: page === 'diff' ? commits.commitSha : null,
+      commitEndSha: page === 'diff' ? commits.commitEndSha : null,
+      filePath: sel.filePath,
+      fileKey,
+      startLine: sel.startLine,
+      endLine: sel.endLine,
+      side: sel.side,
+    };
+
     // Fixture / non-extension: write location directly (no chrome.*)
     try {
       if (typeof history !== 'undefined' && typeof location !== 'undefined') {
-        replaceLocationRoute(history, location, {
-          page,
-          number: detail.number,
-          position,
-        });
+        if (isEmbed && detail.owner && detail.repo) {
+          replaceGithubPrLocation(history, location, {
+            owner: detail.owner,
+            repo: detail.repo,
+            number: detail.number,
+            page,
+            commitSha: routePayload.commitSha,
+            commitEndSha: routePayload.commitEndSha,
+            filePath: routePayload.filePath,
+            fileKey: routePayload.fileKey,
+            startLine: routePayload.startLine,
+            endLine: routePayload.endLine,
+            side: routePayload.side,
+          });
+        } else {
+          replaceLocationRoute(history, location, {
+            page,
+            number: detail.number,
+            position,
+          });
+        }
       }
     } catch {
       /* ignore */
     }
 
     if (typeof onRouteChange === 'function') {
-      onRouteChange({ page, position, number: detail.number });
+      onRouteChange(routePayload);
     }
   }, [
     open,
     detail?.number,
+    detail?.owner,
+    detail?.repo,
     layoutMode,
     commentIndex,
     mappedComments,
     onRouteChange,
     routeWriteReady,
+    isEmbed,
+    diffCommitFilter,
+    lineSelection,
   ]);
 
   // Reset route restore markers when modal closes
@@ -1970,7 +2134,12 @@ export function PrModalApp({
     terminalCloseWasTerminalRef.current = isTerminal;
   }, [open, detail, requestClose]);
 
-  // Reset close animation if host forces open again mid-exit / after unmount
+  /**
+   * One-shot enter animation when the shell opens.
+   * Depends only on `open` (not loading/loadStage/detail) so progressive host
+   * re-renders during fetch must not re-fire sheet/modal enter motion.
+   */
+  const enterAnimTokenRef = useRef(0);
   useEffect(() => {
     if (!open) {
       if (closeTimerRef.current) {
@@ -1979,13 +2148,34 @@ export function PrModalApp({
       }
       closingRef.current = false;
       setClosing(false);
+      enterAnimTokenRef.current += 1;
       return;
     }
-    // Opening: clear residual exit classes
-    if (!closingRef.current) {
-      setAnimClass('');
+    if (isEmbed) {
+      // Embed has no enter chrome animation
+      if (!closingRef.current) setAnimClass('');
+      return;
     }
-  }, [open, setAnimClass]);
+    if (closingRef.current) return;
+
+    const token = ++enterAnimTokenRef.current;
+    // Capture shell at open — preference is already hydrated via useState init
+    const sheetSlide =
+      shellMode === SHELL_SHEET && layoutMode !== LAYOUT_DIFF;
+    const enterClass = sheetSlide
+      ? 'prp-modal--sheet-in'
+      : 'prp-modal--animating prp-modal--anim-in';
+    const duration = sheetSlide ? 250 : 290;
+    setAnimClass(enterClass);
+    const t = window.setTimeout(() => {
+      if (enterAnimTokenRef.current !== token) return;
+      if (!closingRef.current) setAnimClass('');
+    }, duration);
+    return () => {
+      window.clearTimeout(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- open-only; avoid load re-entry
+  }, [open, isEmbed, setAnimClass]);
 
   // Lock document scroll while overlay is open so only the panel scrolls
   // (side sheet otherwise leaves a global scrollbar + nested scroll).
@@ -3166,10 +3356,11 @@ export function PrModalApp({
     }
   }
 
-  function openLabelPicker() {
+  async function openLabelPicker() {
     if (!detail) return;
-    const currentNames = (detail.labels || []).map((l) => String(l.name || l).trim());
-    const current = new Set(currentNames.map((n) => n.toLowerCase()));
+    const currentNames = (detail.labels || []).map((l) =>
+      String(l.name || l).trim()
+    );
     const common = [
       'bug',
       'enhancement',
@@ -3181,23 +3372,33 @@ export function PrModalApp({
       'duplicate',
       'invalid',
     ];
+
+    // Prefer repo label catalog (real colors). Fall back to PR labels + defaults.
+    let repoLabels: Array<{ name?: string; color?: string; description?: string }> =
+      [];
+    try {
+      const api = globalThis.PRTreeFetch;
+      if (typeof api?.fetchRepoLabels === 'function') {
+        repoLabels = (await api.fetchRepoLabels(detail.owner, detail.repo)) || [];
+      }
+    } catch {
+      /* offline / no token — still open with PR labels + default colors */
+    }
+
     const pool = [
+      ...repoLabels,
       ...(detail.labels || []),
-      ...common.filter((n) => !current.has(n.toLowerCase())),
+      ...common.map((n) => ({ name: n })),
     ];
-    // Multi-select: include current labels as pre-selected so user can add more
     const options =
       typeof buildLabelOptions === 'function'
-        ? buildLabelOptions([
-            ...pool,
-            ...common.map((n) => ({ name: n })),
-          ])
+        ? buildLabelOptions(pool)
         : [...new Set([...currentNames, ...common])].map((id) => ({
             id,
             label: id,
             meta: { kind: 'label', name: id },
           }));
-    // de-dupe options by id
+    // de-dupe options by id (buildLabelOptions already does; keep belt)
     const seen = new Set();
     const uniqueOpts = [];
     for (const o of options) {
@@ -4622,6 +4823,8 @@ export function PrModalApp({
     openSelectionActions: () => setSelectionIslandPhase('actions'),
     copySelectionCode,
     copySelectionUrl,
+    navSearch,
+    navComment,
   };
 
   useEffect(() => {
@@ -4733,11 +4936,15 @@ export function PrModalApp({
           ? resolveModalShortcutAction({
               mod: mod && !e.altKey,
               shift: Boolean(e.shiftKey),
+              alt: Boolean(e.altKey) && !mod,
               key,
+              code: e.code,
               editingBody: ui.editingBody,
               editingComment: ui.editingComment,
               paletteOpen: ui.paletteOpen,
               editableTarget: editable,
+              searchOpen: Boolean(ui.searchOpen),
+              layoutMode: ui.layoutMode,
               conversationCommentFocused: Boolean(
                 ui.conversationCommentFocused ?? conversationCommentFocusRef.current
               ),
@@ -4800,6 +5007,22 @@ export function PrModalApp({
         case 'restoreNativeView':
           if (isEmbed && typeof onRestoreNative === 'function') {
             onRestoreNative();
+          }
+          break;
+        case 'stepNavPrev':
+          // Find open → hit prev; else Diff thread prev (⌥K)
+          if (ui.searchOpen) {
+            act.navSearch?.(-1);
+          } else if (ui.layoutMode === LAYOUT_DIFF) {
+            act.navComment?.(-1);
+          }
+          break;
+        case 'stepNavNext':
+          // Find open → hit next; else Diff thread next (⌥J)
+          if (ui.searchOpen) {
+            act.navSearch?.(1);
+          } else if (ui.layoutMode === LAYOUT_DIFF) {
+            act.navComment?.(1);
           }
           break;
         default:

@@ -68,23 +68,26 @@ html.prp-scroll-lock body {
 }
 
 /*
- * In-page embed: fills GH main under the global header (not a full-viewport overlay).
- * Host root is #prp-page-embed inside .application-main / main.
+ * In-page embed: full window (covers GH global header).
+ * Host mounts on document.body (see pr-modal-host ensureEmbedHost).
  */
 .prp-overlay.prp-shell--embed,
 .prp-overlay[data-presentation='embed'] {
-  position: relative;
-  inset: auto;
+  position: relative !important;
+  inset: auto !important;
   z-index: 1;
-  width: 100%;
-  height: 100%;
-  min-height: min(100vh, 100%);
-  max-height: none;
-  align-items: stretch;
-  justify-content: stretch;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  align-items: stretch !important;
+  justify-content: stretch !important;
   overflow: hidden;
   background: var(--prp-bg);
   overscroll-behavior: contain;
+  /* Reset base .prp-overlay fixed fullscreen when nested in embed host */
+  display: flex !important;
+  flex-direction: column !important;
 }
 .prp-overlay.prp-shell--embed .prp-backdrop,
 .prp-overlay[data-presentation='embed'] .prp-backdrop {
@@ -105,7 +108,8 @@ html.prp-scroll-lock body {
   border-radius: 0 !important;
   border: 0 !important;
   box-shadow: none !important;
-  flex: 1 1 auto;
+  flex: 1 1 auto !important;
+  position: relative !important;
 }
 .prp-overlay.prp-shell--embed .prp-shell-resizer,
 .prp-overlay[data-presentation='embed'] .prp-shell-resizer {
@@ -113,44 +117,60 @@ html.prp-scroll-lock body {
 }
 
 /*
- * Page host for embed: 100vh so document scrollMax ≈ header offset after
- * footer hide (headerOffset + 100vh − 100vh). Do not use 100vh − header —
- * that zeros global capacity and blocks GH header collapse.
+ * Page host: match window size and cover GH header (fixed full-viewport).
+ * Keep in sync with src/styles.css (content-script sheet).
  */
 #prp-page-embed.prp-page-embed,
 .prp-page-embed {
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  min-height: 100vh;
-  height: 100vh;
-  max-height: none;
-  flex: 1 1 auto;
-  background: var(--bgColor-default, var(--prp-bg, #fff));
-  box-sizing: border-box;
+  position: fixed !important;
+  inset: 0 !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  width: 100% !important;
+  width: 100vw !important;
+  height: 100% !important;
+  height: 100vh !important;
+  height: 100dvh !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  max-width: none !important;
+  max-height: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  z-index: 100000 !important;
+  flex: none !important;
+  background: var(--bgColor-default, var(--prp-bg, #fff)) !important;
+  box-sizing: border-box !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
+  transform: none !important;
+  filter: none !important;
+  contain: none !important;
 }
 .prp-page-embed > .prp-overlay {
-  flex: 1 1 auto;
-  min-height: 0;
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
 }
 html.prp-embed-active,
 html.prp-embed-active body {
-  overflow-x: hidden;
-  overflow-y: auto;
-}
-html.prp-embed-active body {
-  min-height: calc(100vh + var(--prp-embed-header-offset, 64px));
-}
-html.prp-embed-active .application-main.prp-embed-main,
-html.prp-embed-active main.prp-embed-main {
-  display: flex !important;
-  flex-direction: column;
-  min-height: 100vh;
-  padding: 0 !important;
-  margin: 0 !important;
+  overflow: hidden !important;
 }
 html.prp-embed-active [data-prp-footer-hidden='1'] {
   display: none !important;
+}
+html.prp-embed-active .AppHeader,
+html.prp-embed-active header.AppHeader,
+html.prp-embed-active .js-header-wrapper,
+html.prp-embed-active [data-target='app-header'] {
+  visibility: hidden !important;
+  pointer-events: none !important;
 }
 
 .prp-overlay.prp-theme-dark,
@@ -216,6 +236,10 @@ html.prp-embed-active [data-prp-footer-hidden='1'] {
   overflow: hidden;
   overscroll-behavior: contain;
   color: var(--prp-fg);
+  /* Panel is the size container — @container rules style .prp-header (descendant).
+     (A container cannot style itself; previous header-as-container densify never ran.) */
+  container-type: inline-size;
+  container-name: prp-panel;
   transition:
     width 280ms cubic-bezier(0.22, 1, 0.36, 1),
     height 280ms cubic-bezier(0.22, 1, 0.36, 1),
@@ -371,7 +395,11 @@ html.prp-embed-active [data-prp-footer-hidden='1'] {
   /* No left border — the 6px resizer paints the leading edge (avoids 1px gap). */
   border-left: 0;
   box-shadow: -12px 0 40px rgba(1, 4, 9, 0.18);
-  animation: prp-sheet-in 240ms cubic-bezier(0.22, 1, 0.36, 1);
+  /*
+   * Enter motion is one-shot via .prp-modal--sheet-in (App adds on open only).
+   * Do NOT put animation here permanently — progressive load re-renders would
+   * re-apply the property and re-run the slide-in on every loading stage.
+   */
 }
 
 .prp-overlay.prp-shell--sheet .prp-modal--centered {
@@ -560,6 +588,12 @@ html.prp-embed-active [data-prp-footer-hidden='1'] {
   }
 }
 
+/* One-shot enter (App sets class on open; clears after duration) */
+.prp-modal--sheet-in,
+.prp-overlay.prp-shell--sheet .prp-modal.prp-modal--sheet-in {
+  animation: prp-sheet-in 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
 .prp-modal--sheet-out,
 .prp-overlay.prp-shell--sheet .prp-modal.prp-modal--sheet-out {
   animation: prp-sheet-out 240ms cubic-bezier(0.4, 0, 1, 1) forwards;
@@ -575,11 +609,11 @@ html.prp-embed-active [data-prp-footer-hidden='1'] {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .prp-overlay.prp-shell--sheet .prp-modal {
-    animation: none;
-  }
+  .prp-modal--sheet-in,
+  .prp-overlay.prp-shell--sheet .prp-modal.prp-modal--sheet-in,
   .prp-modal--sheet-out,
   .prp-overlay.prp-shell--sheet .prp-modal.prp-modal--sheet-out,
+  .prp-modal--anim-in,
   .prp-modal--anim-out,
   .prp-overlay--leaving .prp-backdrop {
     animation: none !important;
@@ -704,12 +738,11 @@ html.prp-embed-active [data-prp-footer-hidden='1'] {
 }
 
 /* Header — same component for modal + side sheet.
-   Wide: 2 rows (identity / branch+actions). Compact: one dense line.
-   Container queries use the panel (modal/sheet) width, not the window. */
+   Wide: 2 rows (identity / branch+actions). Diff: denser strip.
+   Narrow: same structure + all action icons; title fluid-shrinks (cqi).
+   Container (cqi) is .prp-modal named prp-panel. */
 .prp-header,
 .prp-header--unified {
-  --prp-header-dense-max: 960px; /* single-line compact; HEADER_DENSE_MAX_PX */
-  --prp-header-compact-max: 760px; /* actions → ⋯; HEADER_COMPACT_MAX_PX */
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   grid-template-areas:
@@ -722,10 +755,11 @@ html.prp-embed-active [data-prp-footer-hidden='1'] {
   border-bottom: 1px solid var(--prp-border-muted);
   background: var(--prp-bg-muted);
   flex: 0 0 auto;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
   /* Checks stacked avatars paint box-shadow rings outside their box */
   overflow: visible;
-  container-type: inline-size;
-  container-name: prp-header;
   transition:
     row-gap 200ms cubic-bezier(0.22, 1, 0.36, 1),
     padding 200ms cubic-bezier(0.22, 1, 0.36, 1);
@@ -751,15 +785,32 @@ html.prp-embed-active [data-prp-footer-hidden='1'] {
   width: 100%;
 }
 
-/* Title / badges / checks — can shrink; stats stays end-aligned */
+/* Title / badges / checks — title cluster is the flex sacrifice; stats/actions never shrink */
 .prp-header__identity {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 8px 10px;
   min-width: 0;
   flex: 1 1 auto;
+  /* visible so check-avatar rings are not clipped top/bottom */
   overflow: visible;
+}
+/*
+ * Title text + edit pencil glued.
+ * Cluster must NOT grow (flex-grow: 0) — otherwise the pencil sits at the far
+ * end of leftover space instead of immediately after the title glyphs.
+ * Under pressure: cluster shrinks, only the <h2> ellipsizes.
+ */
+.prp-header__title-cluster {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  /* grow:0 → pencil hugs title; shrink:1 → ellipsis when row is tight */
+  flex: 0 1 auto;
+  max-width: 100%;
+  overflow: hidden;
 }
 .prp-header__checks {
   flex-shrink: 0;
@@ -767,6 +818,115 @@ html.prp-embed-active [data-prp-footer-hidden='1'] {
   /* ring box-shadow on stacked check avatars (~2.5px) */
   padding: 3px 2px;
   margin: -3px 0;
+}
+
+/*
+ * Diff compact: one flat overlapping stack (reviewers then checks).
+ * Every sibling is a .prp-header__meta-stack__item with −6px overlap.
+ * z-index is set inline: leftmost highest.
+ */
+.prp-header__meta-stack {
+  display: inline-flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0;
+  flex-shrink: 0;
+  line-height: 0;
+  min-height: 20px;
+  overflow: visible;
+  padding: 4px 2px;
+  margin: -4px 0;
+  isolation: isolate; /* contain z-index stack */
+}
+.prp-header__meta-stack__item {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  margin-left: -6px;
+  border-radius: 999px;
+  background: var(--prp-bg);
+  box-shadow:
+    0 0 0 1.5px var(--prp-bg),
+    0 0 0 2.5px var(--prp-border-muted);
+  line-height: 0;
+  cursor: default;
+}
+.prp-header__meta-stack__item:first-child {
+  margin-left: 0;
+}
+.prp-header__meta-stack__item--ok {
+  box-shadow:
+    0 0 0 1.5px var(--prp-bg),
+    0 0 0 2.5px var(--prp-ok);
+}
+.prp-header__meta-stack__item--danger {
+  box-shadow:
+    0 0 0 1.5px var(--prp-bg),
+    0 0 0 2.5px var(--prp-danger);
+}
+.prp-header__meta-stack__item--warn {
+  box-shadow:
+    0 0 0 1.5px var(--prp-bg),
+    0 0 0 2.5px var(--prp-warn);
+}
+.prp-header__meta-stack__item--muted {
+  box-shadow:
+    0 0 0 1.5px var(--prp-bg),
+    0 0 0 2.5px var(--prp-fg-muted);
+}
+/* Check outcome rings (same tones as .prp-checks-summary-stack__item--) */
+.prp-header__meta-stack__item--check-failure {
+  box-shadow:
+    0 0 0 1.5px var(--prp-bg),
+    0 0 0 2.5px var(--prp-danger);
+}
+.prp-header__meta-stack__item--check-success {
+  box-shadow:
+    0 0 0 1.5px var(--prp-bg),
+    0 0 0 2.5px var(--prp-ok);
+}
+.prp-header__meta-stack__item--check-pending {
+  box-shadow:
+    0 0 0 1.5px var(--prp-bg),
+    0 0 0 2.5px var(--prp-warn);
+}
+.prp-header__meta-stack__item--check-skipped {
+  box-shadow:
+    0 0 0 1.5px var(--prp-bg),
+    0 0 0 2.5px var(--prp-fg-muted);
+}
+.prp-header__meta-stack__item .prp-avatar,
+.prp-header__meta-stack__item .prp-avatar--sm {
+  width: 20px !important;
+  height: 20px !important;
+  font-size: 9px;
+  border-radius: 999px;
+}
+.prp-header__meta-stack__item .prp-checks-summary-icon,
+.prp-header__meta-stack__item .prp-octicon {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+.prp-header__meta-stack__item--more {
+  background: var(--prp-bg-muted);
+  color: var(--prp-fg-muted);
+  font-size: 9px;
+  font-weight: 700;
+}
+.prp-header__meta-stack__more-txt {
+  line-height: 1;
+  pointer-events: none;
+}
+.prp-header__meta-stack__item .prp-tip-pop__label {
+  white-space: pre-line;
+  max-width: min(280px, 70vw);
+  text-align: left;
 }
 
 /* Legacy secondary row (removed from DOM; keep for safety if reintroduced) */
@@ -777,13 +937,25 @@ html.prp-embed-active [data-prp-footer-hidden='1'] {
 .prp-header__branch-meta {
   grid-area: branch;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 10px 14px;
   min-width: 0;
   color: var(--prp-fg-muted);
   font-size: 13px;
   transition: font-size 160ms ease, gap 160ms ease;
+  overflow: hidden;
+}
+.prp-header__branch-meta .prp-branch-tag {
+  min-width: 0;
+  max-width: min(28cqi, 12rem);
+  overflow: hidden;
+}
+.prp-header__branch-meta .prp-branch-tag__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 .prp-header__main {
@@ -807,23 +979,36 @@ html.prp-embed-active [data-prp-footer-hidden='1'] {
   color: var(--prp-accent);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
-  font-size: 15px;
+  /* Track title scale slightly so #N stays proportional when title shrinks */
+  font-size: clamp(12px, 0.9cqi + 10px, 15px);
+  flex-shrink: 0;
 }
 
 .prp-header__title {
   margin: 0;
-  font-size: 17px;
+  /* Narrow panel: shrink title (not icons) so the 2-row layout stays intact */
+  font-size: clamp(12px, 1.35cqi + 10px, 17px);
   font-weight: 650;
   line-height: 1.3;
   min-width: 0;
+  /* grow:0 — never pad empty space between text and edit button */
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prp-header__title-edit-btn,
+.prp-header__title-action {
+  flex: 0 0 auto;
+  flex-shrink: 0;
 }
 
 .prp-header__title-edit {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  flex: 1 1 220px;
-  min-width: min(100%, 180px);
+  flex: 0 1 auto;
+  min-width: 0;
   max-width: 100%;
 }
 
@@ -978,6 +1163,7 @@ html.prp-embed-active [data-prp-footer-hidden='1'] {
   flex-wrap: nowrap;
   gap: 8px;
   flex: 0 0 auto;
+  flex-shrink: 0;
   align-items: center;
   justify-content: flex-end;
   min-width: 0;
@@ -988,10 +1174,12 @@ html.prp-embed-active [data-prp-footer-hidden='1'] {
   flex-wrap: nowrap;
   gap: 8px;
   align-items: center;
+  flex-shrink: 0;
 }
 
+/* Overflow ⋯ menu retired — always show inline actions; keep DOM for a11y cleanup later */
 .prp-header__actions-more {
-  display: none;
+  display: none !important;
   position: relative;
 }
 
@@ -1068,9 +1256,9 @@ html.prp-embed-active [data-prp-footer-hidden='1'] {
 }
 
 /*
- * Review compact header — Diff layout (class) or narrow panel (@container).
- * Single horizontal strip: identity | checks/stats | base←head | actions
- * Use flex (not 3-col grid) so middle clusters don't wrap into a broken column.
+ * Review compact (Diff layout): single strip
+ *   # · title ✎ · Checks icons · base←head · +/− files · actions
+ * Stats sits after branch (not between title and branch).
  */
 .prp-header--review-compact,
 .prp-header[data-review-compact='1'] {
@@ -1078,24 +1266,17 @@ html.prp-embed-active [data-prp-footer-hidden='1'] {
   flex-direction: row;
   flex-wrap: nowrap;
   align-items: center;
-  gap: 8px 10px;
-  /* +8px total height vs prior 8px vertical pad (12 top/bottom) */
-  padding: 12px 14px;
+  column-gap: 8px;
+  row-gap: 0;
+  padding: 10px 14px;
   /* clear grid areas from wide mode */
   grid-template-columns: none;
   grid-template-areas: none;
 }
+/* Flatten primary so identity / stats order independently in the strip */
 .prp-header--review-compact .prp-header__row--primary,
 .prp-header[data-review-compact='1'] .prp-header__row--primary {
-  display: flex;
-  flex: 1 1 auto;
-  flex-wrap: nowrap;
-  align-items: center;
-  gap: 6px 8px;
-  width: auto;
-  min-width: 0;
-  grid-area: unset;
-  overflow: visible;
+  display: contents;
 }
 .prp-header--review-compact .prp-header__identity,
 .prp-header[data-review-compact='1'] .prp-header__identity {
@@ -1105,42 +1286,78 @@ html.prp-embed-active [data-prp-footer-hidden='1'] {
   gap: 6px 8px;
   min-width: 0;
   flex: 1 1 auto;
-  /* visible: Checks stack uses outer box-shadow rings that clip under overflow:hidden */
+  order: 1;
+  /* never clip check avatar rings */
   overflow: visible;
+}
+.prp-header--review-compact .prp-header__title-cluster,
+.prp-header[data-review-compact='1'] .prp-header__title-cluster {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  flex: 0 1 auto;
+  max-width: 100%;
+  overflow: hidden;
 }
 .prp-header--review-compact .prp-header__number,
 .prp-header[data-review-compact='1'] .prp-header__number {
   flex-shrink: 0;
-  font-size: 14px;
+  font-size: clamp(11px, 0.8cqi + 9px, 14px);
 }
 .prp-header--review-compact .prp-header__title,
 .prp-header[data-review-compact='1'] .prp-header__title {
-  font-size: 14px;
+  font-size: clamp(11px, 1.1cqi + 9px, 14px);
   font-weight: 650;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   flex: 0 1 auto;
   min-width: 0;
-  max-width: min(36vw, 420px);
+  max-width: none;
 }
 .prp-header--review-compact .prp-header__title-edit-btn,
-.prp-header[data-review-compact='1'] .prp-header__title-edit-btn {
+.prp-header--review-compact .prp-header__title-action,
+.prp-header[data-review-compact='1'] .prp-header__title-edit-btn,
+.prp-header[data-review-compact='1'] .prp-header__title-action {
+  flex: 0 0 auto;
+}
+.prp-header--review-compact .prp-header__meta-stack,
+.prp-header[data-review-compact='1'] .prp-header__meta-stack {
   flex-shrink: 0;
+  overflow: visible;
 }
 .prp-header--review-compact .prp-header__checks,
 .prp-header[data-review-compact='1'] .prp-header__checks {
   flex-shrink: 0;
   overflow: visible;
-  /* room for stacked-avatar ring (box-shadow ~2.5px) so it isn't clipped by neighbors */
-  padding: 3px 2px;
-  margin: -3px 0;
+  padding: 0;
+  margin: 0;
+}
+/* Header never shows the "Checks" word — icons only (Diff compact) */
+.prp-header .prp-checks-summary-ctrl__label {
+  display: none;
 }
 .prp-header--review-compact .prp-checks-summary-stack,
 .prp-header[data-review-compact='1'] .prp-checks-summary-stack,
 .prp-header--review-compact .prp-checks-summary-ctrl,
 .prp-header[data-review-compact='1'] .prp-checks-summary-ctrl {
   overflow: visible;
+}
+/* Branch then stats (user: stats to the right of branch direction) */
+.prp-header--review-compact .prp-header__branch-meta,
+.prp-header[data-review-compact='1'] .prp-header__branch-meta {
+  display: inline-flex;
+  flex: 0 1 auto;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: min(36cqi, 18rem);
+  overflow: hidden;
+  font-size: 12px;
+  grid-area: unset;
+  order: 2;
 }
 .prp-header--review-compact .prp-header__stats,
 .prp-header[data-review-compact='1'] .prp-header__stats {
@@ -1150,19 +1367,7 @@ html.prp-embed-active [data-prp-footer-hidden='1'] {
   padding: 2px 8px;
   min-height: 24px;
   max-width: none;
-}
-.prp-header--review-compact .prp-header__branch-meta,
-.prp-header[data-review-compact='1'] .prp-header__branch-meta {
-  display: inline-flex;
-  flex: 0 1 auto;
-  flex-wrap: nowrap;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  max-width: min(34vw, 340px);
-  overflow: hidden;
-  font-size: 12px;
-  grid-area: unset;
+  order: 3;
 }
 .prp-header--review-compact .prp-header__author,
 .prp-header[data-review-compact='1'] .prp-header__author {
@@ -1180,7 +1385,7 @@ html.prp-embed-active [data-prp-footer-hidden='1'] {
 }
 .prp-header--review-compact .prp-branch-tag,
 .prp-header[data-review-compact='1'] .prp-branch-tag {
-  max-width: 140px;
+  max-width: min(18cqi, 9rem);
   min-width: 0;
   padding: 1px 6px;
   font-size: 11px;
@@ -1205,7 +1410,9 @@ html.prp-embed-active [data-prp-footer-hidden='1'] {
   flex-wrap: nowrap;
   gap: 4px;
   margin-left: auto;
+  justify-content: flex-end;
   grid-area: unset;
+  order: 4;
 }
 .prp-header--review-compact .prp-header__actions-inline,
 .prp-header[data-review-compact='1'] .prp-header__actions-inline {
@@ -1217,110 +1424,6 @@ html.prp-embed-active [data-prp-footer-hidden='1'] {
 .prp-header[data-review-compact='1'] .prp-header__more-btn {
   width: 28px;
   height: 28px;
-}
-
-/* Conversation + narrow panel: same dense single-line chrome by width */
-@container prp-header (max-width: 960px) {
-  .prp-header:not(.prp-header--review-compact),
-  .prp-header--unified:not(.prp-header--review-compact):not([data-review-compact='1']) {
-    display: flex;
-    flex-direction: row;
-    flex-wrap: nowrap;
-    align-items: center;
-    gap: 8px 10px;
-    padding: 8px 14px;
-    grid-template-columns: none;
-    grid-template-areas: none;
-  }
-  .prp-header:not(.prp-header--review-compact) .prp-header__row--primary,
-  .prp-header--unified:not(.prp-header--review-compact):not([data-review-compact='1'])
-    .prp-header__row--primary {
-    display: flex;
-    flex: 1 1 auto;
-    flex-wrap: nowrap;
-    width: auto;
-    min-width: 0;
-    grid-area: unset;
-  }
-  .prp-header:not(.prp-header--review-compact) .prp-header__title,
-  .prp-header--unified:not(.prp-header--review-compact):not([data-review-compact='1'])
-    .prp-header__title {
-    font-size: 14px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: min(36vw, 420px);
-    min-width: 0;
-  }
-  .prp-header:not(.prp-header--review-compact) .prp-header__stats,
-  .prp-header--unified:not(.prp-header--review-compact):not([data-review-compact='1'])
-    .prp-header__stats {
-    margin-left: 0;
-    font-size: 11px;
-    padding: 2px 8px;
-    min-height: 24px;
-  }
-  .prp-header:not(.prp-header--review-compact) .prp-header__branch-meta,
-  .prp-header--unified:not(.prp-header--review-compact):not([data-review-compact='1'])
-    .prp-header__branch-meta {
-    display: inline-flex;
-    flex-wrap: nowrap;
-    gap: 6px;
-    max-width: min(34vw, 340px);
-    overflow: hidden;
-    font-size: 12px;
-    grid-area: unset;
-  }
-  .prp-header:not(.prp-header--review-compact) .prp-header__author,
-  .prp-header--unified:not(.prp-header--review-compact):not([data-review-compact='1'])
-    .prp-header__author {
-    display: none;
-  }
-  .prp-header:not(.prp-header--review-compact) .prp-branch-split,
-  .prp-header--unified:not(.prp-header--review-compact):not([data-review-compact='1'])
-    .prp-branch-split {
-    flex-wrap: nowrap;
-    max-width: 100%;
-    overflow: hidden;
-  }
-  .prp-header:not(.prp-header--review-compact) .prp-branch-tag,
-  .prp-header--unified:not(.prp-header--review-compact):not([data-review-compact='1'])
-    .prp-branch-tag {
-    max-width: 140px;
-    font-size: 11px;
-  }
-  .prp-header:not(.prp-header--review-compact) .prp-header__actions,
-  .prp-header--unified:not(.prp-header--review-compact):not([data-review-compact='1'])
-    .prp-header__actions {
-    margin-left: auto;
-    gap: 4px;
-    grid-area: unset;
-  }
-  .prp-header:not(.prp-header--review-compact) .prp-header__icon-btn,
-  .prp-header:not(.prp-header--review-compact) .prp-header__more-btn,
-  .prp-header--unified:not(.prp-header--review-compact):not([data-review-compact='1'])
-    .prp-header__icon-btn,
-  .prp-header--unified:not(.prp-header--review-compact):not([data-review-compact='1'])
-    .prp-header__more-btn {
-    width: 28px;
-    height: 28px;
-  }
-}
-
-/*
- * Compact actions: panel narrower still (≈700–800px wrap) → ⋯ menu.
- * Side sheet at 56vw on a large display can stay wide enough for inline icons.
- */
-@container prp-header (max-width: 760px) {
-  .prp-header__actions-inline {
-    display: none !important;
-  }
-  .prp-header__actions-more {
-    display: inline-flex;
-  }
-  .prp-header__branch-meta {
-    max-width: min(40vw, 260px);
-  }
 }
 
 .prp-label {
@@ -2057,6 +2160,28 @@ html.prp-embed-active [data-prp-footer-hidden='1'] {
 }
 .prp-float-sb--active .prp-float-sb__thumb {
   background: color-mix(in srgb, var(--prp-fg-muted) 40%, transparent);
+}
+
+/* Horizontal overlay (stack strip, etc.) — flush bottom edge */
+.prp-float-sb--horizontal {
+  top: auto;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: auto;
+  height: 6px;
+}
+.prp-float-sb--horizontal .prp-float-sb__thumb {
+  /* Override vertical thumb (width:100% / right:0) for X-axis sizing */
+  top: 0;
+  left: 0;
+  right: auto;
+  bottom: 0;
+  width: auto; /* set inline from metrics.thumbSize */
+  height: 100%;
+  min-height: 0;
+  min-width: 28px;
+  max-height: none;
 }
 
 /* Full left-panel virtual list (description + composer/merge + timeline) */
@@ -3418,12 +3543,21 @@ html.prp-embed-active [data-prp-footer-hidden='1'] {
   color: var(--prp-danger);
 }
 
+.prp-filetree__list-host {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  /* Host already position:relative via .prp-scroll-float-host */
+}
 .prp-filetree__list {
   list-style: none;
   margin: 0;
   padding: 4px 0;
   overflow: auto;
   flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  overscroll-behavior: contain;
 }
 
 .prp-filetree__list > li {
@@ -3594,35 +3728,21 @@ html.prp-embed-active [data-prp-footer-hidden='1'] {
   font-family: inherit;
   font-size: inherit;
   line-height: inherit;
-  /* Bottom padding so last lines/comments clear the fold */
-  scrollbar-gutter: stable;
   overscroll-behavior: contain;
   /* Isolate layout/paint without size containment (size breaks flex scroll) */
   contain: layout style paint;
-  /* Thumb only — transparent track in the center diff panel */
-  scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--prp-fg-muted) 40%, transparent) transparent;
+  /* Native bar hidden via .prp-scroll-float; overlay is FloatingScrollbar */
+  scrollbar-gutter: unset;
 }
-.prp-vlist::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-  background: transparent;
+/* When float class missing (tests/legacy), still hide native gutter */
+.prp-vlist.prp-scroll-float {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
-.prp-vlist::-webkit-scrollbar-track,
-.prp-vlist::-webkit-scrollbar-track-piece,
-.prp-vlist::-webkit-scrollbar-corner {
-  background: transparent;
-}
-.prp-vlist::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--prp-fg-muted) 40%, transparent);
-  border-radius: 999px;
-  border: 2px solid transparent;
-  background-clip: padding-box;
-}
-.prp-vlist::-webkit-scrollbar-thumb:hover {
-  background: color-mix(in srgb, var(--prp-fg-muted) 55%, transparent);
-  background-clip: padding-box;
-  border: 2px solid transparent;
+.prp-vlist.prp-scroll-float::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+  display: none !important;
 }
 
 .prp-vlist__spacer {
@@ -6394,55 +6514,78 @@ a.prp-label:hover {
   filter: brightness(0.97);
 }
 
-/* Stacked PR strip (top of modal) — single row + horizontal scroll when long */
+/*
+ * Stack strip host: must be width-constrained so the inner row can overflow-x.
+ * (Flex column children default min-width:auto → grow to chip content → no scroll.)
+ */
+.prp-stack-strip-host.prp-scroll-float-host,
+.prp-stack-strip-host {
+  flex: 0 0 auto !important;
+  align-self: stretch;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0 !important;
+  height: auto !important;
+  min-height: 0;
+  overflow: hidden; /* clip; scroll lives on .prp-stack-strip */
+  border-bottom: 1px solid var(--prp-border-muted);
+  background: var(--prp-bg-muted);
+  box-sizing: border-box;
+}
+.prp-stack-strip-host .prp-float-sb--horizontal {
+  z-index: 3;
+}
+/* Inner scroller: fixed to host width; chips may exceed → scrollWidth > clientWidth */
 .prp-stack-strip {
-  flex: 0 0 auto;
+  --prp-stack-label-fade: 12px;
   display: flex;
+  flex-direction: row;
   flex-wrap: nowrap;
   align-items: center;
   gap: 4px 3px;
-  padding: 5px 12px;
-  border-bottom: 1px solid var(--prp-border-muted);
-  background: var(--prp-bg-muted);
+  box-sizing: border-box;
+  padding: 5px 12px 5px 0;
+  border-bottom: 0;
+  background: transparent;
   font-size: 11px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: thin;
+  /* Critical: bound width so overflow-x can engage */
+  width: 100%;
   max-width: 100%;
   min-width: 0;
-}
-.prp-stack-strip::-webkit-scrollbar {
-  height: 5px;
-}
-.prp-stack-strip::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--prp-fg-muted) 35%, transparent);
-  border-radius: 999px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
 }
 /*
- * Sticky “Stack” label: solid strip background + right-edge fade so chips
- * scroll underneath and dissolve. margin-right ≈ fade width so the first
- * chip is fully visible at rest (fade only covers the reserved gutter).
+ * Sticky “Stack” label — left margin 20px, content-sized.
+ * Right-edge fade only softens chips that scroll *under* the label.
  */
 .prp-stack-strip__label {
-  --prp-stack-label-fade: 18px;
   position: sticky;
-  left: 0;
+  left: 20px; /* keep 20px inset while sticky-scrolling */
   z-index: 2;
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
+  justify-content: flex-start;
   align-self: stretch;
-  /* cover left strip pad; reserve fade gutter so chip #1 isn’t covered */
-  margin: -5px var(--prp-stack-label-fade) -5px -12px;
-  padding: 5px 8px 5px 12px;
+  box-sizing: border-box;
+  margin: -5px 0 -5px 20px;
+  padding: 5px 0;
+  width: fit-content;
+  max-width: none;
+  min-width: 0;
   color: var(--prp-fg-muted);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 650;
-  letter-spacing: 0.01em;
+  letter-spacing: 0;
+  line-height: 1;
+  text-align: left;
+  white-space: nowrap;
   background: var(--prp-bg-muted);
   box-shadow: none;
-  pointer-events: none; /* don’t block chip clicks under the fade */
+  pointer-events: none;
 }
 .prp-stack-strip__label::after {
   content: '';
@@ -6454,18 +6597,24 @@ a.prp-label:hover {
   background: linear-gradient(
     to right,
     var(--prp-bg-muted) 0%,
-    color-mix(in srgb, var(--prp-bg-muted) 75%, transparent) 45%,
+    color-mix(in srgb, var(--prp-bg-muted) 65%, transparent) 55%,
     transparent 100%
   );
   pointer-events: none;
+}
+/* First chip: 8px gap after label */
+.prp-stack-strip__label + .prp-stack-strip__item {
+  margin-left: 8px;
 }
 .prp-stack-strip__item {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   max-width: 168px;
-  min-width: 0;
+  /* Never shrink chips — force horizontal overflow of the strip instead */
   flex: 0 0 auto;
+  flex-shrink: 0;
+  min-width: auto;
   padding: 2px 8px;
   border-radius: 999px;
   border: 1px solid var(--prp-border);
@@ -6489,6 +6638,7 @@ a.prp-label:hover {
 .prp-stack-strip__sep {
   color: var(--prp-fg-muted);
   flex: 0 0 auto;
+  flex-shrink: 0;
   user-select: none;
 }
 .prp-stack-strip__num {
@@ -7471,8 +7621,10 @@ button.prp-review-thread__file-loc--link:focus-visible {
   height: 14px;
   border-radius: 50%;
   flex-shrink: 0;
-  border: 1px solid color-mix(in srgb, var(--prp-border) 70%, transparent);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  /* Outer ring so light label colors (e.g. wontfix white) stay visible */
+  border: 1px solid color-mix(in srgb, var(--prp-fg) 22%, var(--prp-border));
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+  background-clip: padding-box;
 }
 .prp-sselect-item__avatar {
   flex-shrink: 0;

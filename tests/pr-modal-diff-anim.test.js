@@ -3,7 +3,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const SCRATCH =
-  process.env.PRP_SCRATCH || '/var/folders/px/qw6l220x5glb_gxf44lws9p80000gn/T/grok-goal-5a6d37e1751e/implementer';
+  process.env.PRP_SCRATCH ||
+  path.join(require('node:os').tmpdir(), 'pr-plus-test-scratch');
 fs.mkdirSync(SCRATCH, { recursive: true });
 
 const layout = require('../src/modal/lib/layout-mode.ts');
@@ -35,6 +36,32 @@ assert.ok(css.includes('transition:'), 'css transitions present');
 assert.ok(css.includes('prp-modal--diff'), 'diff layout class');
 assert.ok(css.includes('prp-modal--centered'), 'centered layout class');
 assert.ok(/280ms|cubic-bezier/.test(css), 'timing curve for expand/collapse');
+
+// Side sheet enter is one-shot (.prp-modal--sheet-in), not permanent on .prp-shell--sheet .prp-modal
+// (permanent animation re-fires on every progressive load re-render)
+{
+  const baseSheetBlock = css.match(
+    /\.prp-overlay\.prp-shell--sheet\s+\.prp-modal\s*\{[^}]*\}/
+  );
+  assert.ok(baseSheetBlock, 'base sheet modal rule exists');
+  assert.ok(
+    !/animation\s*:\s*prp-sheet-in/.test(baseSheetBlock[0]),
+    'base sheet rule must NOT permanently attach prp-sheet-in'
+  );
+  assert.ok(
+    css.includes('prp-modal--sheet-in') &&
+      /prp-modal--sheet-in[\s\S]{0,120}prp-sheet-in/.test(css),
+    'enter uses one-shot .prp-modal--sheet-in class'
+  );
+  assert.ok(
+    appSrc.includes('prp-modal--sheet-in'),
+    'App applies sheet-in enter class'
+  );
+  assert.ok(
+    /enterAnimTokenRef|One-shot enter animation/.test(appSrc),
+    'App gates enter anim on open only'
+  );
+}
 
 // Diff shell is viewport-relative with no artificial pixel max-width ceiling
 assert.ok(!/min\(\s*1520px/.test(css), 'no 1520px max-width cap on diff');

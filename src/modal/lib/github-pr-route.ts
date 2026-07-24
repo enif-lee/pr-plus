@@ -193,7 +193,7 @@ export function parseGithubPrPath(pathname: unknown): GithubPrRoute | null {
 
 /**
  * Build pathname only (no search/hash).
- * Diff surface always writes **/changes** (not /files).
+ * Diff surface always writes /changes (not /files).
  */
 export function buildGithubPrPath(route: {
   owner: string;
@@ -303,9 +303,20 @@ export function parseGithubPrLocation(location: {
   const base = parseGithubPrPath(location.pathname || '');
   if (!base) return null;
   const frag = parseGithubDiffHash(location.hash || '');
-  if (!frag) return base;
+  // Always normalize selection fields so soft-nav without #diff- clears stale keys
+  if (!frag) {
+    return {
+      ...base,
+      filePath: null,
+      fileKey: null,
+      startLine: null,
+      endLine: null,
+      side: null,
+    };
+  }
   return {
     ...base,
+    filePath: null,
     fileKey: frag.fileKey,
     startLine: frag.startLine,
     endLine: frag.endLine,

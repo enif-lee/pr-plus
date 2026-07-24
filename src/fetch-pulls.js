@@ -1942,17 +1942,23 @@ async function fetchPrDetail(
           { page: 1, perPage: COMMENT_PAGE_SIZE, preferNewest: true },
           fetchImpl,
           token
-        ).catch(() => ({
-          items: [],
-          meta: {
-            page: 1,
-            perPage: COMMENT_PAGE_SIZE,
-            hasMore: false,
-            nextPage: null,
-            order: 'from-end',
-            loadedCount: 0,
-          },
-        })),
+        ).catch((err) => {
+          // Never swallow abort — sheet close must stop the whole detail fetch
+          if (err?.name === 'AbortError' || /aborted|AbortError/i.test(String(err?.message || ''))) {
+            throw err;
+          }
+          return {
+            items: [],
+            meta: {
+              page: 1,
+              perPage: COMMENT_PAGE_SIZE,
+              hasMore: false,
+              nextPage: null,
+              order: 'from-end',
+              loadedCount: 0,
+            },
+          };
+        }),
         (r) => `(${(r?.items || []).length} comments, newest-first)`,
         batchOpt
       ),
@@ -1960,7 +1966,12 @@ async function fetchPrDetail(
         timings,
         'reviews',
         apiJson(`${base}/pulls/${n}/reviews?per_page=100`, fetchImpl, token).catch(
-          () => []
+          (err) => {
+            if (err?.name === 'AbortError' || /aborted|AbortError/i.test(String(err?.message || ''))) {
+              throw err;
+            }
+            return [];
+          }
         ),
         (r) => `(${Array.isArray(r) ? r.length : 0} reviews)`,
         batchOpt
@@ -1969,7 +1980,12 @@ async function fetchPrDetail(
         timings,
         'commits',
         apiJson(`${base}/pulls/${n}/commits?per_page=100`, fetchImpl, token).catch(
-          () => []
+          (err) => {
+            if (err?.name === 'AbortError' || /aborted|AbortError/i.test(String(err?.message || ''))) {
+              throw err;
+            }
+            return [];
+          }
         ),
         (r) => `(${Array.isArray(r) ? r.length : 0} commits)`,
         batchOpt
@@ -2025,7 +2041,12 @@ async function fetchPrDetail(
       fetchPullReviewThreadsBundle(owner, repo, n, fetchImpl, token, {
         cursor: opts.threadsCursor || null,
         maxPages: threadsMaxPages,
-      }).catch(() => reviewThreadBundle),
+      }).catch((err) => {
+        if (err?.name === 'AbortError' || /aborted|AbortError/i.test(String(err?.message || ''))) {
+          throw err;
+        }
+        return reviewThreadBundle;
+      }),
       (b) =>
         `(${(b?.threads || []).length} threads, ${(b?.comments || []).length} comments)`
     );
@@ -2048,7 +2069,12 @@ async function fetchPrDetail(
       fetchViewerPendingReviewBundle(owner, repo, n, fetchImpl, token, {
         reviews,
         login: viewerLogin,
-      }).catch(() => ({ comments: [], review: null })),
+      }).catch((err) => {
+        if (err?.name === 'AbortError' || /aborted|AbortError/i.test(String(err?.message || ''))) {
+          throw err;
+        }
+        return { comments: [], review: null };
+      }),
       (b) => `(${(b?.comments || []).length} pending comments)`
     );
   } else {
@@ -3409,6 +3435,37 @@ async function setIssueLabels(owner, repo, issueNumber, labels, fetchImpl, token
 }
 
 /**
+ * List repository labels (name + color + description) for the label picker.
+ * Paginates up to maxPages × 100.
+ * @returns {Promise<Array<{ name: string, color: string, description: string }>>}
+ */
+async function fetchRepoLabels(owner, repo, fetchImpl, token = null, opts = {}) {
+  const perPage = 100;
+  const maxPages = Math.max(1, Math.min(10, Number(opts.maxPages) || 5));
+  const out = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const url = githubRestUrl(
+      `/repos/${owner}/${repo}/labels?per_page=${perPage}&page=${page}`
+    );
+    const batch = await apiJson(url, fetchImpl, token);
+    if (!Array.isArray(batch) || !batch.length) break;
+    for (const l of batch) {
+      const name = String(l?.name || '').trim();
+      if (!name) continue;
+      out.push({
+        name,
+        color: String(l?.color || '')
+          .trim()
+          .replace(/^#/, ''),
+        description: String(l?.description || ''),
+      });
+    }
+    if (batch.length < perPage) break;
+  }
+  return out;
+}
+
+/**
  * Apply a GitHub suggestion: replace lines on head branch via Contents API.
  * @param {{ path: string, headRef: string, startLine: number, endLine: number, suggestion: string, message?: string }} opts
  */
@@ -4005,6 +4062,7 @@ const fetchApi = {
   addAssignees,
   removeAssignees,
   setIssueLabels,
+  fetchRepoLabels,
   mergePullRequest,
   updatePullBranch,
   setIssueSubscription,

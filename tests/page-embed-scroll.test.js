@@ -110,30 +110,40 @@ assert.equal(isEmbedPresentation('embed'), true);
 // Modal must not use embed scroll policy implicitly
 assert.equal(isEmbedPresentation('modal'), false);
 
-// --- layout: shipped CSS (embed 100vh + header offset) leaves global room ---
+// --- layout: full-window cover (height = viewport; GH header covered) ---
 assert.equal(PAGE_EMBED_HOST_HEIGHT_CSS, '100vh');
 assert.equal(PAGE_EMBED_HEADER_OFFSET_PX, 64);
 {
-  // Old bug: embed height = 100vh - 64 → scrollMax 0 after footer hide
+  // Shipped policy: fixed full-window cover → no document scroll room
+  const covered = embedGlobalScrollMax({
+    viewportHeight: 800,
+    headerOffset: 64,
+    embedHeight: 800,
+    footerHeight: 0,
+  });
+  assert.equal(covered, 0, 'cover-header layout has global scrollMax 0');
+
+  // Legacy flow (coverHeader:false) still computable for tests
+  const legacy = embedGlobalScrollMax({
+    viewportHeight: 800,
+    headerOffset: PAGE_EMBED_HEADER_OFFSET_PX,
+    footerHeight: 0,
+    coverHeader: false,
+  });
+  assert.equal(legacy, PAGE_EMBED_HEADER_OFFSET_PX);
+
+  // calc(100vh - header) still zeros when coverHeader false
   const broken = embedGlobalScrollMax({
     viewportHeight: 800,
     headerOffset: 64,
     embedHeight: 800 - 64,
     footerHeight: 0,
+    coverHeader: false,
   });
   assert.equal(broken, 0, 'legacy calc(100vh-header) zeros global max');
-
-  // Shipped: embed height = 100vh
-  const room = embedGlobalScrollMax({
-    viewportHeight: 800,
-    headerOffset: PAGE_EMBED_HEADER_OFFSET_PX,
-    footerHeight: 0,
-  });
-  assert.ok(room > 0, 'embed 100vh leaves global scroll room');
-  assert.equal(room, PAGE_EMBED_HEADER_OFFSET_PX);
 }
 
-// Fixture: header + embed 100vh + footer hide → first wheel hits global
+// Fixture: fixed cover → panel owns first wheel (global max 0)
 {
   const VH = 900;
   const HEADER = PAGE_EMBED_HEADER_OFFSET_PX;
@@ -151,24 +161,23 @@ assert.equal(PAGE_EMBED_HEADER_OFFSET_PX, 64);
     { pretendToBeVisual: true }
   );
   const doc = dom.window.document;
-  // Model document scroll metrics from layout policy (jsdom doesn't layout)
   const gMax = embedGlobalScrollMax({
     viewportHeight: VH,
     headerOffset: HEADER,
-    embedHeight: VH, // 100vh
-    footerHeight: 0, // after hide
+    embedHeight: VH,
+    footerHeight: 0,
   });
-  assert.ok(gMax > 0, 'fixture global max > 0 after footer hide');
+  assert.equal(gMax, 0, 'full-window cover: no global scroll room');
 
   const hidden = applyFooterHide(doc);
   assert.ok(hidden >= 1);
   const footer = doc.getElementById('footer');
   assert.equal(footer.getAttribute(PAGE_EMBED_FOOTER_HIDDEN_ATTR), '1');
 
-  // First wheel from top — global must receive delta (header collapse path)
+  // First wheel from top — panel receives all delta (header covered, not scrolled)
   const globalEl = {
     scrollTop: 0,
-    scrollHeight: VH + gMax,
+    scrollHeight: VH,
     clientHeight: VH,
   };
   const panelEl = {
@@ -181,14 +190,10 @@ assert.equal(PAGE_EMBED_HEADER_OFFSET_PX, 64);
     globalEl,
     panelEl,
   });
-  assert.ok(
-    r.globalDelta > 0,
-    `first wheel from top must move global (got globalDelta=${r.globalDelta})`
-  );
-  assert.equal(r.panelDelta, 0, 'panel waits until global capacity used');
-  assert.equal(globalEl.scrollTop, r.globalDelta);
+  assert.equal(r.globalDelta, 0, 'global unused under full-window cover');
+  assert.equal(r.panelDelta, 40, 'panel takes first wheel');
+  assert.equal(panelEl.scrollTop, 40);
 
-  // CSS source still ships 100vh host (not 100vh - header)
   const contentCss = fs.readFileSync(
     path.join(__dirname, '../src/styles.css'),
     'utf8'
@@ -198,9 +203,28 @@ assert.equal(PAGE_EMBED_HEADER_OFFSET_PX, 64);
     'utf8'
   );
   assert.ok(
-    /#prp-page-embed[\s\S]{0,200}height:\s*100vh/.test(contentCss) ||
-      /\.prp-page-embed[\s\S]{0,200}height:\s*100vh/.test(contentCss),
+    /position:\s*fixed/.test(contentCss) && contentCss.includes('prp-page-embed'),
+    'content CSS embed host is position:fixed'
+  );
+  // Host must not require mounting inside application-main (transform trap)
+  const hostSrc = fs.readFileSync(
+    path.join(__dirname, '../src/pr-modal-host.js'),
+    'utf8'
+  );
+  assert.ok(
+    hostSrc.includes('document.body') &&
+      hostSrc.includes('ensureEmbedHost') &&
+      /mountParent\s*=\s*document\.body/.test(hostSrc),
+    'ensureEmbedHost mounts on document.body (avoids GH transform trap)'
+  );
+  assert.ok(
+    /#prp-page-embed[\s\S]{0,400}height:\s*100vh/.test(contentCss) ||
+      /\.prp-page-embed[\s\S]{0,400}height:\s*100vh/.test(contentCss),
     'content CSS embed height 100vh'
+  );
+  assert.ok(
+    /height:\s*100dvh/.test(contentCss) && contentCss.includes('prp-page-embed'),
+    'content CSS also sets 100dvh for mobile viewport'
   );
   assert.ok(
     !/#prp-page-embed[\s\S]{0,120}height:\s*calc\(\s*100vh\s*-\s*var\(--prp-embed-header-offset/.test(
@@ -209,13 +233,18 @@ assert.equal(PAGE_EMBED_HEADER_OFFSET_PX, 64);
     'content CSS must not use calc(100vh - header) for embed host'
   );
   assert.ok(
-    /height:\s*100vh/.test(modalCss) && modalCss.includes('prp-page-embed'),
-    'modal CSS embed host 100vh'
+    /position:\s*fixed/.test(modalCss) && modalCss.includes('prp-page-embed'),
+    'modal CSS embed host is position:fixed'
   );
   assert.ok(
-    contentCss.includes('100vh + var(--prp-embed-header-offset') ||
-      contentCss.includes('100vh + var(--prp-embed-header-offset, 64px)'),
-    'body min-height leaves header collapse room'
+    contentCss.includes('AppHeader') &&
+      contentCss.includes('visibility: hidden'),
+    'content CSS hides GH AppHeader under cover'
+  );
+  assert.ok(
+    /overflow:\s*hidden\s*!important/.test(contentCss) &&
+      contentCss.includes('prp-embed-active'),
+    'document scroll locked while embed covers window'
   );
 }
 

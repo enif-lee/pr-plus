@@ -1,26 +1,78 @@
 (function(){
 /**
  * Pure policy for PR modal global shortcuts.
- * Diff toggle, command palette, Find (⌘F), conversation comment focus, and Esc navigation.
+ * Diff toggle, command palette, Find (⌘F), conversation comment focus,
+ * Option+J/K step nav (find hits / review threads), and Esc navigation.
  */
+
+const STEP_NAV_SHORTCUT = {
+  prev: {
+    key: 'k',
+    code: 'KeyK',
+    action: 'stepNavPrev',
+    chord: 'opt+k',
+    labelMac: '⌥K',
+    labelWin: 'Alt+K',
+  },
+  next: {
+    key: 'j',
+    code: 'KeyJ',
+    action: 'stepNavNext',
+    chord: 'opt+j',
+    labelMac: '⌥J',
+    labelWin: 'Alt+J',
+  },
+};
+
+/**
+ * @param {{ key?: string, code?: string, alt?: boolean }} opts
+ * @returns {string}
+ */
+function normalizeShortcutKey(opts = {}) {
+  const alt = Boolean(opts.alt);
+  const code = String(opts.code || '');
+  if (alt) {
+    if (code === 'KeyJ' || code === 'keyj') return 'j';
+    if (code === 'KeyK' || code === 'keyk') return 'k';
+  }
+  return String(opts.key || '').toLowerCase();
+}
+
+/**
+ * @param {'prev'|'next'} which
+ * @param {boolean} [isMac]
+ */
+function stepNavShortcutLabel(which, isMac = false) {
+  const s = STEP_NAV_SHORTCUT[which] || STEP_NAV_SHORTCUT.next;
+  return isMac ? s.labelMac : s.labelWin;
+}
 
 /**
  * @param {{
  *   mod: boolean,
  *   shift: boolean,
+ *   alt?: boolean,
  *   key: string,
+ *   code?: string,
  *   editingBody?: boolean,
  *   editingComment?: boolean|object|null,
  *   paletteOpen?: boolean,
  *   editableTarget?: boolean,
  *   conversationCommentFocused?: boolean,
+ *   searchOpen?: boolean,
+ *   layoutMode?: string,
  * }} opts
  * @returns {string|null}
  */
 function resolveModalShortcutAction(opts = {}) {
   const mod = Boolean(opts.mod);
   const shift = Boolean(opts.shift);
-  const key = String(opts.key || '').toLowerCase();
+  const alt = Boolean(opts.alt);
+  const key = normalizeShortcutKey({
+    key: opts.key,
+    code: opts.code,
+    alt,
+  });
   const paletteOpen = Boolean(opts.paletteOpen);
 
   // Esc is handled in App with layout context (palette / search / edit / diff / close)
@@ -30,9 +82,20 @@ function resolveModalShortcutAction(opts = {}) {
     return 'escapeNav';
   }
 
-  // Do not steal keys while typing in inputs/textareas/contenteditable,
-  // or while the command palette owns the keyboard.
-  if (opts.editableTarget || paletteOpen) return null;
+  if (paletteOpen) return null;
+
+  // ⌥J / ⌥K (Alt+J/K): step prev/next for Find hits or review threads
+  if (alt && !mod && !shift && (key === 'j' || key === 'k')) {
+    if (opts.editableTarget && !opts.searchOpen) return null;
+    const layout = String(opts.layoutMode || '');
+    if (!opts.searchOpen && layout !== 'diff') return null;
+    return key === 'k'
+      ? STEP_NAV_SHORTCUT.prev.action
+      : STEP_NAV_SHORTCUT.next.action;
+  }
+
+  // Do not steal keys while typing in inputs/textareas/contenteditable
+  if (opts.editableTarget) return null;
 
   if (!mod) return null;
 
@@ -104,6 +167,9 @@ function pickConversationCommentFocusTarget(items) {
 }
 
 const api = {
+  STEP_NAV_SHORTCUT,
+  normalizeShortcutKey,
+  stepNavShortcutLabel,
   resolveModalShortcutAction,
   conversationCommentFocusAnchor,
   pickConversationCommentFocusTarget,

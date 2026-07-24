@@ -1,4 +1,5 @@
 import React, { memo } from 'react';
+import { TipPopover } from '@common/TipPopover';
 
 export type StepNavProps = {
   /** 0-based current hit/thread index; negative means none selected */
@@ -21,6 +22,10 @@ export type StepNavProps = {
   nextGlyph?: string;
   prevTitle?: string;
   nextTitle?: string;
+  /** Keyboard chord shown in tip (e.g. ⌥K / Alt+K) */
+  prevShortcut?: string | null;
+  /** Keyboard chord shown in tip (e.g. ⌥J / Alt+J) */
+  nextShortcut?: string | null;
 };
 
 /**
@@ -29,6 +34,7 @@ export type StepNavProps = {
  * - Find-in-PR / find-in-diff hit navigator
  *
  * Order: n/m · ↑ · ↓. Prev and next share the same fixed width.
+ * Tips show description + shortcut when provided.
  */
 export const StepNav = memo(function StepNav({
   index = -1,
@@ -45,6 +51,8 @@ export const StepNav = memo(function StepNav({
   nextGlyph = '↓',
   prevTitle = 'Previous',
   nextTitle = 'Next',
+  prevShortcut = null,
+  nextShortcut = null,
 }: StepNavProps) {
   const n = Math.max(0, Number(total) || 0);
   const i = Number(index);
@@ -52,6 +60,8 @@ export const StepNav = memo(function StepNav({
     ? `${Number.isFinite(i) && i >= 0 ? i + 1 : 0}/${n}`
     : '0/0';
   const navDisabled = Boolean(disabled || busy || n <= 0);
+  const prevTip = prevTitle || 'Previous';
+  const nextTip = nextTitle || 'Next';
 
   return (
     <div
@@ -78,23 +88,33 @@ export const StepNav = memo(function StepNav({
       </span>
       <button
         type="button"
-        className="prp-step-nav__btn"
+        className="prp-step-nav__btn prp-has-tip"
         onClick={() => onPrev?.()}
         disabled={navDisabled}
-        title={prevTitle}
-        aria-label={prevTitle}
+        title={
+          prevShortcut ? `${prevTip} (${prevShortcut})` : prevTip
+        }
+        aria-label={
+          prevShortcut ? `${prevTip} (${prevShortcut})` : prevTip
+        }
       >
         {prevGlyph}
+        <TipPopover title={prevTip} shortcut={prevShortcut || undefined} />
       </button>
       <button
         type="button"
-        className="prp-step-nav__btn"
+        className="prp-step-nav__btn prp-has-tip"
         onClick={() => onNext?.()}
         disabled={navDisabled}
-        title={nextTitle}
-        aria-label={nextTitle}
+        title={
+          nextShortcut ? `${nextTip} (${nextShortcut})` : nextTip
+        }
+        aria-label={
+          nextShortcut ? `${nextTip} (${nextShortcut})` : nextTip
+        }
       >
         {nextGlyph}
+        <TipPopover title={nextTip} shortcut={nextShortcut || undefined} />
       </button>
     </div>
   );

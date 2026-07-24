@@ -12,6 +12,7 @@ import {
 import { pendingReviewCount } from '@lib/pending-review';
 import { IconChevronDown, IconFileNavToggle } from '@common/icons';
 import { StepNav } from '@common/StepNav';
+import { stepNavShortcutLabel } from '@lib/shortcut-policy';
 import { SearchBar } from './SearchBar';
 
 /**
@@ -87,6 +88,11 @@ export function DiffToolbar(props: any) {
   const fileCount = detail?.changedFiles ?? annotatedFileCount;
   const additions = detail?.additions ?? 0;
   const deletions = detail?.deletions ?? 0;
+  const isMac =
+    typeof navigator !== 'undefined' &&
+    /Mac|iPhone|iPad/.test(navigator.platform || '');
+  const threadPrevShortcut = stepNavShortcutLabel('prev', isMac);
+  const threadNextShortcut = stepNavShortcutLabel('next', isMac);
 
   const commitOpts = useMemo(() => buildCommitFilterOptions(commits), [commits]);
   const f = normalizeDiffCommitFilter(commitFilter);
@@ -351,6 +357,8 @@ export function DiffToolbar(props: any) {
                 }
                 prevTitle="Previous review thread"
                 nextTitle="Next review thread"
+                prevShortcut={threadPrevShortcut}
+                nextShortcut={threadNextShortcut}
               />
             ) : null}
           </div>

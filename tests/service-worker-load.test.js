@@ -13,8 +13,16 @@ const { spawnSync } = require('node:child_process');
 const root = path.join(__dirname, '..');
 const bundlePath = path.join(root, 'src', 'background.bundle.js');
 
-// Ensure bundle exists
-if (!fs.existsSync(bundlePath)) {
+// Ensure bundle exists and is not older than background.js / fetch-pulls sources
+const bgPath = path.join(root, 'src', 'background.js');
+const fetchPath = path.join(root, 'src', 'fetch-pulls.js');
+const bundleStale =
+  !fs.existsSync(bundlePath) ||
+  (fs.existsSync(bgPath) &&
+    fs.statSync(bundlePath).mtimeMs < fs.statSync(bgPath).mtimeMs) ||
+  (fs.existsSync(fetchPath) &&
+    fs.statSync(bundlePath).mtimeMs < fs.statSync(fetchPath).mtimeMs);
+if (bundleStale) {
   const build = spawnSync(process.execPath, [path.join(root, 'scripts/build-sw.mjs')], {
     encoding: 'utf8',
   });

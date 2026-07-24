@@ -326,6 +326,7 @@ function formatShortcut(shortcut, isMac = false) {
   return String(shortcut)
     .replace(/mod\+/gi, isMac ? '⌘' : 'Ctrl+')
     .replace(/shift\+/gi, isMac ? '⇧' : 'Shift+')
+    .replace(/opt\+|alt\+/gi, isMac ? '⌥' : 'Alt+')
     .replace(/enter/gi, '↵');
 }
 

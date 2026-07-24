@@ -38,6 +38,7 @@ import {
   resolveActiveMarkStart,
 } from '@lib/search-index';
 import { IconDisclosure } from '@common/icons';
+import { FloatingScrollbar } from '../../components/common/FloatingScrollbar';
 import { ImageViewer } from '@common/ImageViewer';
 import { InlineThread } from './InlineThread';
 import { SelectionCommentBar } from './SelectionCommentBar';
@@ -1076,7 +1077,7 @@ function VirtualDiffImpl(props: any) {
         </div>
       ) : null}
       <div
-        className="prp-vlist"
+        className="prp-vlist prp-scroll-float"
         ref={listRef}
         onScroll={handleScroll}
         onMouseUp={(e) => onSelectionEnd?.({ x: e.clientX, y: e.clientY })}
@@ -1315,6 +1316,10 @@ function VirtualDiffImpl(props: any) {
         </div>
       </div>
       </div>
+      <FloatingScrollbar
+        scrollerRef={listRef}
+        contentKey={`${totalRows}:${range.totalHeight}:${Math.round(vp)}`}
+      />
       {imageViewer ? (
         <ImageViewer
           src={imageViewer.src}

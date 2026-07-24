@@ -1,26 +1,88 @@
 /** @module modal/lib/shortcut-policy */
 /**
  * Pure policy for PR modal global shortcuts.
- * Diff toggle, command palette, Find (⌘F), conversation comment focus, and Esc navigation.
+ * Diff toggle, command palette, Find (⌘F), conversation comment focus,
+ * Option+J/K step nav (find hits / review threads), and Esc navigation.
  */
+
+/** Option/Alt + J/K — step prev/next (find hits or review threads). */
+export const STEP_NAV_SHORTCUT = {
+  /** Physical K → previous (↑) */
+  prev: {
+    key: 'k',
+    code: 'KeyK',
+    action: 'stepNavPrev' as const,
+    /** Canonical token for formatShortcut */
+    chord: 'opt+k',
+    labelMac: '⌥K',
+    labelWin: 'Alt+K',
+  },
+  /** Physical J → next (↓) */
+  next: {
+    key: 'j',
+    code: 'KeyJ',
+    action: 'stepNavNext' as const,
+    chord: 'opt+j',
+    labelMac: '⌥J',
+    labelWin: 'Alt+J',
+  },
+};
+
+/**
+ * Normalize key for Option/Alt combos: browsers emit special glyphs
+ * (e.g. ⌥J → "∆") so prefer KeyboardEvent.code KeyJ/KeyK when alt is held.
+ */
+export function normalizeShortcutKey(opts: {
+  key?: string;
+  code?: string;
+  alt?: boolean;
+} = {}): string {
+  const alt = Boolean(opts.alt);
+  const code = String(opts.code || '');
+  if (alt) {
+    if (code === 'KeyJ' || code === 'keyj') return 'j';
+    if (code === 'KeyK' || code === 'keyk') return 'k';
+  }
+  return String(opts.key || '').toLowerCase();
+}
+
+/**
+ * Display label for step-nav shortcuts (platform-aware).
+ */
+export function stepNavShortcutLabel(
+  which: 'prev' | 'next',
+  isMac = false
+): string {
+  const s = STEP_NAV_SHORTCUT[which];
+  return isMac ? s.labelMac : s.labelWin;
+}
 
 /**
  * @param {{
  *   mod: boolean,
  *   shift: boolean,
+ *   alt?: boolean,
  *   key: string,
+ *   code?: string,
  *   editingBody?: boolean,
  *   editingComment?: boolean|object|null,
  *   paletteOpen?: boolean,
  *   editableTarget?: boolean,
  *   conversationCommentFocused?: boolean,
+ *   searchOpen?: boolean,
+ *   layoutMode?: string,
  * }} opts
  * @returns {string|null}
  */
 export function resolveModalShortcutAction(opts: any = {}) {
   const mod = Boolean(opts.mod);
   const shift = Boolean(opts.shift);
-  const key = String(opts.key || '').toLowerCase();
+  const alt = Boolean(opts.alt);
+  const key = normalizeShortcutKey({
+    key: opts.key,
+    code: opts.code,
+    alt,
+  });
   const paletteOpen = Boolean(opts.paletteOpen);
 
   // Esc is handled in App with layout context (palette / search / edit / diff / close)
@@ -30,9 +92,21 @@ export function resolveModalShortcutAction(opts: any = {}) {
     return 'escapeNav';
   }
 
-  // Do not steal keys while typing in inputs/textareas/contenteditable,
-  // or while the command palette owns the keyboard.
-  if (opts.editableTarget || paletteOpen) return null;
+  // Command palette owns the keyboard entirely
+  if (paletteOpen) return null;
+
+  // ⌥J / ⌥K (Alt+J/K): step prev/next for Find hits or review threads.
+  // Allowed while Find input is focused (searchOpen); blocked for other editables.
+  if (alt && !mod && !shift && (key === 'j' || key === 'k')) {
+    if (opts.editableTarget && !opts.searchOpen) return null;
+    // Only when Find is open or Diff surface (thread nav lives on Diff toolbar)
+    const layout = String(opts.layoutMode || '');
+    if (!opts.searchOpen && layout !== 'diff') return null;
+    return key === 'k' ? STEP_NAV_SHORTCUT.prev.action : STEP_NAV_SHORTCUT.next.action;
+  }
+
+  // Do not steal keys while typing in inputs/textareas/contenteditable
+  if (opts.editableTarget) return null;
 
   if (!mod) return null;
 

@@ -1,5 +1,5 @@
 /**
- * Pure helpers for in-page PR embed (replace GitHub main content under header).
+ * Pure helpers for in-page PR embed (full-window replace covering GH header).
  * Orthogonal to overlay modal/sheet shells. No React dependency.
  */
 
@@ -16,8 +16,12 @@ export type PrPageTarget = {
   number: number;
   /** Content layout: conversation vs files/diff */
   page: 'conversation' | 'diff';
-  /** Path tab segment (empty | files | …) */
+  /** Path tab segment (empty | files | changes | …) */
   tab: string;
+  /** Single commit or range start under /changes/{sha} */
+  commitSha?: string | null;
+  /** Range end under /changes/{a}..{b} */
+  commitEndSha?: string | null;
 };
 
 /** Host root id for in-page embed (distinct from overlay #prp-modal-host). */
@@ -26,15 +30,20 @@ export const PAGE_EMBED_HOST_ID = 'prp-page-embed';
 /** html/body class while embed is active */
 export const PAGE_EMBED_ACTIVE_CLASS = 'prp-embed-active';
 
-/** Default GH global header height used for embed layout (px). */
+/**
+ * Legacy GH header height token (px). Kept for scroll helpers / tests;
+ * embed host is now fixed full-viewport and covers the header.
+ */
 export const PAGE_EMBED_HEADER_OFFSET_PX = 64;
 
 /**
- * Embed host CSS height policy: full viewport so
- * document content height = headerOffset + 100vh > 100vh → global scroll room
- * equals headerOffset (header can collapse before panel takes wheel).
+ * Embed host CSS height policy: full window (covers GH header).
+ * Prefer 100dvh in CSS when supported; logical height remains 100vh.
  */
 export const PAGE_EMBED_HOST_HEIGHT_CSS = '100vh';
+
+/** Host stacking: above GH AppHeader so official chrome is covered. */
+export const PAGE_EMBED_HOST_Z_INDEX = 100000;
 
 /** Mark applied to GitHub footer nodes while embed is active */
 export const PAGE_EMBED_FOOTER_HIDDEN_ATTR = 'data-prp-footer-hidden';
@@ -67,18 +76,24 @@ export const EMBED_RESTORE_SHORTCUT = {
   labelWin: 'Ctrl+Shift+E',
 };
 
+const SHA_RE = /^[0-9a-f]{7,40}$/i;
+const RANGE_RE = /^([0-9a-f]{7,40})\.\.([0-9a-f]{7,40})$/i;
+
 /**
- * Parse a GitHub PR conversation or files URL path.
+ * Parse a GitHub PR conversation or files/changes URL path.
  * Matches:
  *   /owner/repo/pull/123
  *   /owner/repo/pull/123/
  *   /owner/repo/pull/123/files
+ *   /owner/repo/pull/123/changes
+ *   /owner/repo/pull/123/changes/{sha}
+ *   /owner/repo/pull/123/changes/{a}..{b}
  * Does not match commits/checks/other sub-tabs (not embed targets).
  */
 export function parsePrPagePath(pathname: unknown): PrPageTarget | null {
   const path = String(pathname || '').split('?')[0].split('#')[0];
   const m = path.match(
-    /^\/([^/]+)\/([^/]+)\/pull\/(\d+)(?:\/([^/]+))?\/?$/i
+    /^\/([^/]+)\/([^/]+)\/pull\/(\d+)(?:\/(files|changes)(?:\/([^/]+))?)?\/?$/i
   );
   if (!m) return null;
   const owner = m[1];
@@ -92,12 +107,26 @@ export function parsePrPagePath(pathname: unknown): PrPageTarget | null {
   if (tab && tab !== 'files' && tab !== 'changes') return null;
   const page: 'conversation' | 'diff' =
     tab === 'files' || tab === 'changes' ? 'diff' : 'conversation';
+  const rest = String(m[5] || '').trim();
+  let commitSha: string | null = null;
+  let commitEndSha: string | null = null;
+  if (rest) {
+    const range = rest.match(RANGE_RE);
+    if (range) {
+      commitSha = range[1].toLowerCase();
+      commitEndSha = range[2].toLowerCase();
+    } else if (SHA_RE.test(rest)) {
+      commitSha = rest.toLowerCase();
+    }
+  }
   return {
     owner,
     repo,
     number,
     page,
     tab: tab || 'conversation',
+    commitSha,
+    commitEndSha,
   };
 }
 
@@ -176,11 +205,12 @@ function clamp(n: number, lo: number, hi: number): number {
 }
 
 /**
- * Document scroll room when embed is active and footer is hidden.
- * Shipped layout: header (in flow) + embed host height 100vh →
- * content = headerOffset + viewport → scrollMax = headerOffset.
+ * Document scroll room when embed is active.
+ * Full-window fixed embed covers GH header and locks document scroll →
+ * global max is 0 (panel owns the wheel). Callers may still pass layout
+ * metrics for tests of alternate policies.
  *
- * @returns max global scrollTop (px). Must be > 0 so first wheel can hit global.
+ * @returns max global scrollTop (px).
  */
 export function embedGlobalScrollMax(opts: {
   viewportHeight: number;
@@ -189,7 +219,16 @@ export function embedGlobalScrollMax(opts: {
   embedHeight?: number;
   /** Footer contribution after hide (should be 0) */
   footerHeight?: number;
+  /**
+   * When true (default), fixed full-window cover → no document scroll room.
+   * Set false to compute legacy header+embed flow layout capacity.
+   */
+  coverHeader?: boolean;
 }): number {
+  const cover =
+    opts.coverHeader !== false; /* shipped: cover GH header */
+  if (cover) return 0;
+
   const vh = Math.max(0, Number(opts.viewportHeight) || 0);
   const header =
     opts.headerOffset != null && Number.isFinite(Number(opts.headerOffset))

@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const {
   resolveTipPlacement,
   inferPreferredPlacement,
+  clampTipCoords,
 } = require('../src/modal/components/common/TipPopover.tsx');
 
 function rect(top, left, width, height) {
@@ -84,6 +85,29 @@ const tip = { offsetHeight: 40, offsetWidth: 120 };
     },
   };
   assert.equal(inferPreferredPlacement(collapse), 'bottom');
+  const headerBtn = {
+    closest(sel) {
+      if (sel === '.prp-header__actions') return {};
+      return null;
+    },
+  };
+  assert.equal(inferPreferredPlacement(headerBtn), 'bottom');
+}
+
+// Clamp top tip near right edge so it does not overflow viewport
+{
+  const bounds = { top: 0, left: 0, right: 800, bottom: 600 };
+  // center would be 790 → tip extends past 800
+  const c = clampTipCoords('top', { top: 40, left: 790 }, 120, 32, bounds, 8);
+  assert.ok(c.left <= 800 - 8 - 60, `left clamped: ${c.left}`);
+  assert.ok(c.left >= 8 + 60, `left not past left edge: ${c.left}`);
+}
+
+// Clamp right tip near right edge
+{
+  const bounds = { top: 0, left: 0, right: 800, bottom: 600 };
+  const c = clampTipCoords('right', { top: 100, left: 780 }, 120, 32, bounds, 8);
+  assert.ok(c.left <= 800 - 8 - 120, `right tip left clamped: ${c.left}`);
 }
 
 console.log('tip-popover-placement.test.js: all assertions passed');

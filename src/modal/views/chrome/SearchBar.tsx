@@ -1,6 +1,7 @@
 import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@common/Button';
 import { StepNav } from '@common/StepNav';
+import { stepNavShortcutLabel } from '@lib/shortcut-policy';
 
 /** Default pause after last keystroke before parent/search runs. */
 export const SEARCH_INPUT_DEBOUNCE_MS = 320;
@@ -36,6 +37,11 @@ export const SearchBar = memo(function SearchBar({
   const onChangeRef = useRef(onChange);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wasOpenRef = useRef(false);
+  const isMac =
+    typeof navigator !== 'undefined' &&
+    /Mac|iPhone|iPad/.test(navigator.platform || '');
+  const prevShortcut = stepNavShortcutLabel('prev', isMac);
+  const nextShortcut = stepNavShortcutLabel('next', isMac);
 
   draftRef.current = draft;
   onChangeRef.current = onChange;
@@ -173,6 +179,8 @@ export const SearchBar = memo(function SearchBar({
           }
           prevTitle="Previous match"
           nextTitle="Next match"
+          prevShortcut={prevShortcut}
+          nextShortcut={nextShortcut}
         />
       )}
       <Button size="sm" onClick={() => onClose?.()}>

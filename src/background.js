@@ -149,6 +149,8 @@ const MSG = {
   HOST_ACCOUNTS_CHANGED: 'PR_TREE_HOST_ACCOUNTS_CHANGED',
   /** Clear PR detail memory + IndexedDB cache on open github.com tabs. */
   CLEAR_DETAIL_CACHE: 'PR_TREE_CLEAR_DETAIL_CACHE',
+  /** Abort in-flight GitHub fetches by requestId (sheet closed / superseded open). */
+  CANCEL_FETCH: 'PR_TREE_CANCEL_FETCH',
   FETCH_OPEN_PULLS: 'PR_TREE_FETCH_OPEN_PULLS',
   FETCH_DANGLING: 'PR_TREE_FETCH_DANGLING',
   FETCH_PR_DETAIL: 'PR_TREE_FETCH_PR_DETAIL',
@@ -174,6 +176,7 @@ const MSG = {
   ADD_ASSIGNEES: 'PR_TREE_ADD_ASSIGNEES',
   REMOVE_ASSIGNEES: 'PR_TREE_REMOVE_ASSIGNEES',
   SET_LABELS: 'PR_TREE_SET_LABELS',
+  FETCH_REPO_LABELS: 'PR_TREE_FETCH_REPO_LABELS',
   APPLY_SUGGESTION: 'PR_TREE_APPLY_SUGGESTION',
   GET_REPO_FILE_TEXT: 'PR_TREE_GET_REPO_FILE_TEXT',
   MERGE_PULL: 'PR_TREE_MERGE_PULL',
@@ -302,6 +305,138 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 
 function fetchImpl() {
   return globalThis.fetch.bind(globalThis);
+}
+
+/**
+ * In-flight GitHub fetches keyed by content-script requestId.
+ * Abort when the modal/sheet closes so network work stops immediately.
+ * @type {Map<string, AbortController>}
+ */
+const activeFetchControllers = new Map();
+/**
+ * requestIds cancelled before beginTrackedFetch ran (still queued behind
+ * exclusive API lock). beginTrackedFetch honors these and starts aborted.
+ * @type {Set<string>}
+ */
+const preCancelledFetchIds = new Set();
+
+function makeAbortError() {
+  const err = new Error('The operation was aborted.');
+  err.name = 'AbortError';
+  return err;
+}
+
+function wrapFetchWithSignal(baseFetch, signal) {
+  return (url, init = {}) => {
+    if (signal.aborted) return Promise.reject(makeAbortError());
+    let nextSignal = signal;
+    if (init.signal && init.signal !== signal) {
+      if (
+        typeof AbortSignal !== 'undefined' &&
+        typeof AbortSignal.any === 'function'
+      ) {
+        nextSignal = AbortSignal.any([init.signal, signal]);
+      }
+    }
+    return baseFetch(url, { ...init, signal: nextSignal });
+  };
+}
+
+function beginTrackedFetch(requestId) {
+  // Always track: missing requestId still gets a synthetic id so cancelAll
+  // can abort mid-flight work (list fetches, older call sites, etc.).
+  const id =
+    requestId != null && String(requestId)
+      ? String(requestId)
+      : `auto-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
+
+  // Cancel arrived before this handler acquired the exclusive lock
+  if (preCancelledFetchIds.has(id)) {
+    preCancelledFetchIds.delete(id);
+    const controller = new AbortController();
+    try {
+      controller.abort();
+    } catch {
+      /* ignore */
+    }
+    return {
+      requestId: id,
+      controller,
+      fetch: wrapFetchWithSignal(fetchImpl(), controller.signal),
+    };
+  }
+
+  // Supersede any prior controller for the same id
+  const prev = activeFetchControllers.get(id);
+  if (prev) {
+    try {
+      prev.abort();
+    } catch {
+      /* ignore */
+    }
+  }
+  const controller = new AbortController();
+  activeFetchControllers.set(id, controller);
+  return {
+    requestId: id,
+    controller,
+    fetch: wrapFetchWithSignal(fetchImpl(), controller.signal),
+  };
+}
+
+function endTrackedFetch(requestId) {
+  const id = requestId != null ? String(requestId) : '';
+  if (!id) return;
+  activeFetchControllers.delete(id);
+  preCancelledFetchIds.delete(id);
+}
+
+function cancelTrackedFetch(requestId) {
+  const id = requestId != null ? String(requestId) : '';
+  if (!id) return false;
+  // Mark pre-cancelled so a still-queued FETCH_* starts aborted
+  preCancelledFetchIds.add(id);
+  try {
+    setTimeout(() => preCancelledFetchIds.delete(id), 60_000);
+  } catch {
+    /* ignore */
+  }
+  const ac = activeFetchControllers.get(id);
+  if (ac) {
+    try {
+      ac.abort();
+    } catch {
+      /* ignore */
+    }
+    activeFetchControllers.delete(id);
+  }
+  return true;
+}
+
+function cancelTrackedFetches(requestIds) {
+  const ids = Array.isArray(requestIds) ? requestIds : [];
+  let n = 0;
+  for (const id of ids) {
+    if (cancelTrackedFetch(id)) n += 1;
+  }
+  return n;
+}
+
+/** Abort every in-flight tracked GitHub fetch (sheet close belt-and-suspenders). */
+function cancelAllTrackedFetches() {
+  const ids = [...activeFetchControllers.keys()];
+  let n = 0;
+  for (const id of ids) {
+    if (cancelTrackedFetch(id)) n += 1;
+  }
+  return n;
+}
+
+function isAbortError(err) {
+  return (
+    err?.name === 'AbortError' ||
+    /aborted|AbortError/i.test(String(err?.message || err || ''))
+  );
 }
 
 /**
@@ -485,119 +620,188 @@ async function handleMessage(message) {
       return { ok: true, ...result };
     }
     case MSG.FETCH_OPEN_PULLS: {
-      const token = await tokenForMessage(message);
-      const prs = await PRTreeFetch.fetchOpenPulls(
-        message.owner,
-        message.repo,
-        fetchImpl(),
-        {
-          token,
-          pagePrNumbers: Array.isArray(message.pagePrNumbers)
-            ? message.pagePrNumbers
-            : [],
-        }
-      );
-      return { ok: true, prs };
+      const tracked = beginTrackedFetch(message.requestId);
+      try {
+        const token = await tokenForMessage(message);
+        const prs = await PRTreeFetch.fetchOpenPulls(
+          message.owner,
+          message.repo,
+          tracked.fetch,
+          {
+            token,
+            pagePrNumbers: Array.isArray(message.pagePrNumbers)
+              ? message.pagePrNumbers
+              : [],
+          }
+        );
+        return { ok: true, prs };
+      } catch (err) {
+        if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
+      }
     }
     case MSG.FETCH_DANGLING: {
-      const token = await tokenForMessage(message);
-      const prs = await PRTreeFetch.fetchDanglingPulls(
-        message.owner,
-        message.repo,
-        Array.isArray(message.numbers) ? message.numbers : [],
-        fetchImpl(),
-        token
-      );
-      return { ok: true, prs };
+      const tracked = beginTrackedFetch(message.requestId);
+      try {
+        const token = await tokenForMessage(message);
+        const prs = await PRTreeFetch.fetchDanglingPulls(
+          message.owner,
+          message.repo,
+          Array.isArray(message.numbers) ? message.numbers : [],
+          tracked.fetch,
+          token
+        );
+        return { ok: true, prs };
+      } catch (err) {
+        if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
+      }
+    }
+    case MSG.CANCEL_FETCH: {
+      const ids = Array.isArray(message.requestIds)
+        ? message.requestIds
+        : message.requestId != null
+          ? [message.requestId]
+          : [];
+      // cancelAll: kill whatever is mid-GitHub-fetch even if requestId tracking missed
+      const cancelled =
+        (message.cancelAll ? cancelAllTrackedFetches() : 0) +
+        cancelTrackedFetches(ids);
+      return { ok: true, cancelled };
     }
     case MSG.FETCH_PR_DETAIL: {
-      const token = await tokenForMessage(message);
-      // Partial by default: core + first GraphQL threads page (not all pages)
-      const detail = await PRTreeFetch.fetchPrDetail(
-        message.owner,
-        message.repo,
-        message.number,
-        fetchImpl(),
-        token,
-        {
-          skipReviewThreads: Boolean(message.skipReviewThreads),
-          threadsMaxPages: message.threadsMaxPages != null ? Number(message.threadsMaxPages) : 1,
-        }
-      );
-      return { ok: true, detail };
+      const tracked = beginTrackedFetch(message.requestId);
+      try {
+        const token = await tokenForMessage(message);
+        // Partial by default: core + first GraphQL threads page (not all pages)
+        const detail = await PRTreeFetch.fetchPrDetail(
+          message.owner,
+          message.repo,
+          message.number,
+          tracked.fetch,
+          token,
+          {
+            skipReviewThreads: Boolean(message.skipReviewThreads),
+            threadsMaxPages:
+              message.threadsMaxPages != null ? Number(message.threadsMaxPages) : 1,
+          }
+        );
+        return { ok: true, detail };
+      } catch (err) {
+        if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
+      }
     }
     case MSG.FETCH_REVIEW_THREADS_PAGE: {
-      const token = await tokenForMessage(message);
-      if (!token) {
-        return {
-          ok: true,
-          page: {
-            threads: [],
-            comments: [],
-            hasMore: false,
-            endCursor: null,
-            pageCount: 0,
+      const tracked = beginTrackedFetch(message.requestId);
+      try {
+        const token = await tokenForMessage(message);
+        if (!token) {
+          return {
+            ok: true,
+            page: {
+              threads: [],
+              comments: [],
+              hasMore: false,
+              endCursor: null,
+              pageCount: 0,
+            },
+          };
+        }
+        const page = await PRTreeFetch.fetchReviewThreadsPage(
+          message.owner,
+          message.repo,
+          message.number,
+          {
+            direction: message.direction || 'newest',
+            cursor: message.cursor || null,
+            pageSize: message.pageSize != null ? Number(message.pageSize) : undefined,
           },
-        };
+          tracked.fetch,
+          token
+        );
+        return { ok: true, page };
+      } catch (err) {
+        if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
       }
-      const page = await PRTreeFetch.fetchReviewThreadsPage(
-        message.owner,
-        message.repo,
-        message.number,
-        {
-          direction: message.direction || 'newest',
-          cursor: message.cursor || null,
-          pageSize: message.pageSize != null ? Number(message.pageSize) : undefined,
-        },
-        fetchImpl(),
-        token
-      );
-      return { ok: true, page };
     }
     case MSG.FETCH_REVIEW_THREADS_BY_IDS: {
-      const token = await tokenForMessage(message);
-      if (!token) {
-        return {
-          ok: true,
-          page: { threads: [], comments: [], pageCount: 0, direction: 'refresh' },
-        };
+      const tracked = beginTrackedFetch(message.requestId);
+      try {
+        const token = await tokenForMessage(message);
+        if (!token) {
+          return {
+            ok: true,
+            page: { threads: [], comments: [], pageCount: 0, direction: 'refresh' },
+          };
+        }
+        const page = await PRTreeFetch.fetchReviewThreadsByIds(
+          message.threadNodeIds || message.ids || [],
+          tracked.fetch,
+          token
+        );
+        return { ok: true, page };
+      } catch (err) {
+        if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
       }
-      const page = await PRTreeFetch.fetchReviewThreadsByIds(
-        message.threadNodeIds || message.ids || [],
-        fetchImpl(),
-        token
-      );
-      return { ok: true, page };
     }
     case MSG.FETCH_COMMENTS_PAGE: {
-      const token = await tokenForMessage(message);
-      const page = await PRTreeFetch.fetchPrCommentsPage(
-        message.owner,
-        message.repo,
-        message.number,
-        message.kind === 'review' ? 'review' : 'issue',
-        {
-          page: message.page,
-          perPage: message.perPage,
-          since: message.since || null,
-        },
-        fetchImpl(),
-        token
-      );
-      return { ok: true, page };
+      const tracked = beginTrackedFetch(message.requestId);
+      try {
+        const token = await tokenForMessage(message);
+        const page = await PRTreeFetch.fetchPrCommentsPage(
+          message.owner,
+          message.repo,
+          message.number,
+          message.kind === 'review' ? 'review' : 'issue',
+          {
+            page: message.page,
+            perPage: message.perPage,
+            since: message.since || null,
+          },
+          tracked.fetch,
+          token
+        );
+        return { ok: true, page };
+      } catch (err) {
+        if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
+      }
     }
     case MSG.FETCH_COMPARE_FILES: {
-      const token = await tokenForMessage(message);
-      const result = await PRTreeFetch.fetchCompareFiles(
-        message.owner,
-        message.repo,
-        message.base,
-        message.head,
-        fetchImpl(),
-        token,
-        { gitattributesText: message.gitattributesText || '' }
-      );
-      return { ok: true, result };
+      const tracked = beginTrackedFetch(message.requestId);
+      try {
+        const token = await tokenForMessage(message);
+        const result = await PRTreeFetch.fetchCompareFiles(
+          message.owner,
+          message.repo,
+          message.base,
+          message.head,
+          tracked.fetch,
+          token,
+          { gitattributesText: message.gitattributesText || '' }
+        );
+        return { ok: true, result };
+      } catch (err) {
+        if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
+      }
     }
     case MSG.POST_ISSUE_COMMENT: {
       const token = await tokenForMessage(message);
@@ -861,6 +1065,28 @@ async function handleMessage(message) {
       );
       return { ok: true, result };
     }
+    case MSG.FETCH_REPO_LABELS: {
+      const tracked = beginTrackedFetch(message.requestId);
+      try {
+        const token = await tokenForMessage(message);
+        const labels = await PRTreeFetch.fetchRepoLabels(
+          message.owner,
+          message.repo,
+          tracked.fetch,
+          token,
+          {
+            maxPages:
+              message.maxPages != null ? Number(message.maxPages) : undefined,
+          }
+        );
+        return { ok: true, labels };
+      } catch (err) {
+        if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
+      }
+    }
     case MSG.UPLOAD_REPO_FILE: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error('GitHub PAT required to upload files');
@@ -1014,6 +1240,23 @@ chrome.runtime.onMessage.addListener((message, _sender) => {
     return Promise.resolve({ ok: false, error: 'invalid message' });
   }
 
+  /**
+   * CANCEL_FETCH (and PING) must NOT wait on the exclusive GitHub API queue.
+   * Otherwise cancel is serialized behind the in-flight fetch it should abort.
+   */
+  if (
+    message.type === MSG.CANCEL_FETCH ||
+    message.type === MSG.PING
+  ) {
+    return Promise.resolve()
+      .then(() => handleMessage(message))
+      .catch((err) => ({
+        ok: false,
+        error: err?.message || String(err),
+        status: err?.status,
+      }));
+  }
+
   // Return a Promise so Chrome keeps the message port open until settle
   // (preferred over return true + sendResponse, which races SW sleep).
   // Exclusive queue: API base is global; one host's handler must not interleave
@@ -1027,6 +1270,7 @@ chrome.runtime.onMessage.addListener((message, _sender) => {
       ok: false,
       error: err?.message || String(err),
       status: err?.status,
+      aborted: isAbortError(err) || undefined,
     }))
   );
 });

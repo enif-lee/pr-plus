@@ -18,6 +18,7 @@ import { mountPrModal } from './app/mountPrModal';
 import * as sessionViewApi from './lib/session-view';
 import * as uriRouteApi from './lib/uri-route';
 import * as pageEmbedApi from './lib/page-embed';
+import * as githubPrRouteApi from './lib/github-pr-route';
 import * as hljsLazy from './lib/hljs-lazy';
 import * as mermaidLazy from './lib/mermaid-lazy';
 import { configureMarkedCodeHighlight } from './components/common/utils';
@@ -42,5 +43,6 @@ configureMarkedCodeHighlight(marked);
 (globalThis as any).PRModalSessionView = sessionViewApi;
 (globalThis as any).PRModalUriRoute = uriRouteApi;
 (globalThis as any).PRModalPageEmbed = pageEmbedApi;
+(globalThis as any).PRModalGithubPrRoute = githubPrRouteApi;
 
 export { PrModalApp, mountPrModal };

@@ -39,9 +39,20 @@ function ok(msg) {
   assert.equal(labels[0].id, 'bug');
   assert.equal(labels[0].meta.kind, 'label');
   assert.equal(labels[0].meta.color, 'f00');
+  // Default GH color when only the name is known
+  assert.equal(labels[1].id, 'enhancement');
+  assert.equal(labels[1].meta.color, 'a2eeef');
   assert.equal(ss.labelColorCss('f00'), '#f00');
   assert.equal(ss.labelColorCss('#a2eeef'), '#a2eeef');
+  assert.equal(ss.labelColorCss('', 'bug'), '#d73a4a');
   assert.equal(ss.labelColorCss(''), '');
+  // Colorless first entry is upgraded by a later colored entry
+  const upgraded = ss.buildLabelOptions([
+    'bug',
+    { name: 'bug', color: 'd73a4a' },
+  ]);
+  assert.equal(upgraded.length, 1);
+  assert.equal(upgraded[0].meta.color, 'd73a4a');
   ok('buildLabelOptions');
 }
 

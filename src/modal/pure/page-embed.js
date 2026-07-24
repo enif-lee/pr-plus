@@ -9,6 +9,7 @@
   const PAGE_EMBED_ACTIVE_CLASS = 'prp-embed-active';
   const PAGE_EMBED_HEADER_OFFSET_PX = 64;
   const PAGE_EMBED_HOST_HEIGHT_CSS = '100vh';
+  const PAGE_EMBED_HOST_Z_INDEX = 100000;
   const PAGE_EMBED_FOOTER_HIDDEN_ATTR = 'data-prp-footer-hidden';
   const GH_FOOTER_SELECTORS = [
     'footer.footer',
@@ -29,12 +30,16 @@
     labelWin: 'Ctrl+Shift+E',
   };
 
+  const SHA_RE = /^[0-9a-f]{7,40}$/i;
+  const RANGE_RE = /^([0-9a-f]{7,40})\.\.([0-9a-f]{7,40})$/i;
+
   function parsePrPagePath(pathname) {
     const path = String(pathname || '')
       .split('?')[0]
       .split('#')[0];
+    // conversation | files | changes | changes/{sha} | changes/{a}..{b}
     const m = path.match(
-      /^\/([^/]+)\/([^/]+)\/pull\/(\d+)(?:\/([^/]+))?\/?$/i
+      /^\/([^/]+)\/([^/]+)\/pull\/(\d+)(?:\/(files|changes)(?:\/([^/]+))?)?\/?$/i
     );
     if (!m) return null;
     const owner = m[1];
@@ -47,12 +52,26 @@
     if (tab && tab !== 'files' && tab !== 'changes') return null;
     const page =
       tab === 'files' || tab === 'changes' ? 'diff' : 'conversation';
+    const rest = String(m[5] || '').trim();
+    let commitSha = null;
+    let commitEndSha = null;
+    if (rest) {
+      const range = rest.match(RANGE_RE);
+      if (range) {
+        commitSha = range[1].toLowerCase();
+        commitEndSha = range[2].toLowerCase();
+      } else if (SHA_RE.test(rest)) {
+        commitSha = rest.toLowerCase();
+      }
+    }
     return {
       owner,
       repo,
       number,
       page,
       tab: tab || 'conversation',
+      commitSha,
+      commitEndSha,
     };
   }
 
@@ -110,6 +129,8 @@
   }
 
   function embedGlobalScrollMax(opts) {
+    // Full-window fixed embed covers GH header → no document scroll room
+    if (opts?.coverHeader !== false) return 0;
     const vh = Math.max(0, Number(opts?.viewportHeight) || 0);
     const header =
       opts?.headerOffset != null && Number.isFinite(Number(opts.headerOffset))
@@ -254,6 +275,7 @@
     PAGE_EMBED_ACTIVE_CLASS,
     PAGE_EMBED_HEADER_OFFSET_PX,
     PAGE_EMBED_HOST_HEIGHT_CSS,
+    PAGE_EMBED_HOST_Z_INDEX,
     PAGE_EMBED_FOOTER_HIDDEN_ATTR,
     GH_FOOTER_SELECTORS,
     EMBED_RESTORE_SHORTCUT,

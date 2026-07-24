@@ -66,6 +66,16 @@ export function TipPopover({
     setPlacement((prev) => (prev === next ? prev : next));
 
     const hostRect = host.getBoundingClientRect();
+    const tipW = Math.max(
+      Number(tipBox.offsetWidth) || 0,
+      tipBox.getBoundingClientRect?.()?.width || 0,
+      80
+    );
+    const tipH = Math.max(
+      Number(tipBox.offsetHeight) || 0,
+      tipBox.getBoundingClientRect?.()?.height || 0,
+      28
+    );
     const gap = 8;
     const cx = hostRect.left + hostRect.width / 2;
     const cy = hostRect.top + hostRect.height / 2;
@@ -84,7 +94,15 @@ export function TipPopover({
       top = cy;
       left = hostRect.right + gap;
     }
-    setCoords({ top, left });
+    // Keep tip fully on-screen (header actions sit at the far right)
+    const clamped = clampTipCoords(
+      next,
+      { top, left },
+      tipW,
+      tipH,
+      viewportBounds()
+    );
+    setCoords(clamped);
   }, [getHost, preferredPlacement]);
 
   useEffect(() => {
@@ -184,7 +202,79 @@ export function inferPreferredPlacement(host: HTMLElement | null): TipPlacement 
   if (host.closest('.prp-aside-collapse-btn')) return 'bottom';
   // Floating selection group often sits near bottom of viewport
   if (host.closest('.prp-selection-group')) return 'top';
+  // Header action cluster is top-right — prefer below so tips stay on-screen
+  if (
+    host.closest('.prp-header__actions') ||
+    host.closest('.prp-header__actions-more') ||
+    host.closest('.prp-header__icon-btn')
+  ) {
+    return 'bottom';
+  }
   return 'top';
+}
+
+/** Viewport bounds (client coordinates). */
+export function viewportBounds(): {
+  top: number;
+  left: number;
+  right: number;
+  bottom: number;
+} {
+  const vw = typeof window !== 'undefined' ? window.innerWidth : 1200;
+  const vh = typeof window !== 'undefined' ? window.innerHeight : 800;
+  return { top: 0, left: 0, right: vw, bottom: vh };
+}
+
+/**
+ * Clamp fixed-position tip anchor so the tip box stays inside bounds.
+ * Accounts for CSS transforms:
+ *   top/bottom → translate(-50%, …)  (center on left)
+ *   left       → translate(-100%, -50%)
+ *   right      → translate(0, -50%)
+ */
+export function clampTipCoords(
+  placement: TipPlacement,
+  coords: { top: number; left: number },
+  tipW: number,
+  tipH: number,
+  bounds: { top: number; left: number; right: number; bottom: number },
+  pad = 8
+): { top: number; left: number } {
+  const w = Math.max(1, Number(tipW) || 80);
+  const h = Math.max(1, Number(tipH) || 28);
+  let { top, left } = coords;
+  const b = bounds || viewportBounds();
+
+  if (placement === 'top' || placement === 'bottom') {
+    // Horizontal center on `left`
+    const half = w / 2;
+    const minL = b.left + pad + half;
+    const maxL = b.right - pad - half;
+    left = minL > maxL ? (b.left + b.right) / 2 : Math.min(maxL, Math.max(minL, left));
+    if (placement === 'top') {
+      // tip sits above `top` (bottom of tip at top)
+      const minT = b.top + pad + h;
+      top = Math.max(minT, top);
+    } else {
+      const maxT = b.bottom - pad - h;
+      top = Math.min(maxT, top);
+    }
+  } else if (placement === 'left') {
+    // tip fully to the left of `left`
+    left = Math.max(b.left + pad + w, left);
+    const half = h / 2;
+    const minT = b.top + pad + half;
+    const maxT = b.bottom - pad - half;
+    top = minT > maxT ? (b.top + b.bottom) / 2 : Math.min(maxT, Math.max(minT, top));
+  } else {
+    // right: tip extends right from `left`
+    left = Math.min(b.right - pad - w, left);
+    const half = h / 2;
+    const minT = b.top + pad + half;
+    const maxT = b.bottom - pad - half;
+    top = minT > maxT ? (b.top + b.bottom) / 2 : Math.min(maxT, Math.max(minT, top));
+  }
+  return { top, left };
 }
 
 /**

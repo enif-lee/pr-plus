@@ -270,12 +270,13 @@ export function SearchableSelect({
             const isOn = selectedSet.has(id.toLowerCase());
             const colorCss =
               typeof labelColorCss === 'function'
-                ? labelColorCss(meta.color)
+                ? labelColorCss(meta.color, meta.name || id)
                 : meta.color
                   ? `#${String(meta.color).replace(/^#/, '')}`
                   : '';
             const showLabelSwatch =
-              kind === 'label' || (kind !== 'user' && Boolean(meta.color));
+              kind === 'label' ||
+              (kind !== 'user' && Boolean(colorCss || meta.color));
             const showAvatar =
               kind === 'user' ||
               (!showLabelSwatch && (Boolean(meta.login) || Boolean(meta.avatarUrl)));

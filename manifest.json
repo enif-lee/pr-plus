@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "pr+",
-  "version": "1.4.1",
-  "description": "GitHub PR stack tree on /pulls plus a fast in-page review shell: Conversation, Diff, Mermaid, progressive load, merge, and deep links without leaving the list.",
+  "version": "1.5.0",
+  "description": "GitHub PR stack tree on /pulls plus a fast in-page review shell: list modal/side sheet, PR-page embed, progressive load, Diff virtualization, merge, and deep links.",
   "permissions": ["storage", "scripting"],
   "host_permissions": [
     "https://github.com/*",
@@ -35,7 +35,10 @@
         "src/modal/dist/pr-modal.bundle.js",
         "src/pr-modal-host.js"
       ],
-      "css": ["src/styles.css"],
+      "css": [
+        "src/styles.css",
+        "src/modal/dist/pr-modal.css"
+      ],
       "run_at": "document_idle"
     }
   ],

@@ -1,4 +1,4 @@
-import React, { useMemo, useState, memo, useCallback } from 'react';
+import React, { useMemo, useState, memo, useCallback, useRef } from 'react';
 import {
   buildNestedFileTree,
   flattenVisibleTree,
@@ -12,6 +12,7 @@ import {
 import { filterFilesByQuery, isPathViewed } from '@lib/review-threads';
 import { isPathCollapsed } from '@lib/collapse';
 import { IconDisclosure } from '@common/icons';
+import { FloatingScrollbar } from '../../components/common/FloatingScrollbar';
 
 /** Cap extension chips so the search row stays usable on narrow nav. */
 const MAX_EXT_CHIPS = 10;
@@ -123,6 +124,8 @@ function FolderFileTreeImpl(props: any) {
     setSelectedExts((prev) => toggleFileExtension(prev, ext));
   }, []);
 
+  const listScrollRef = useRef<HTMLUListElement | null>(null);
+
   // Stay mounted while collapsed so open/close width animation can run.
   // Expand/collapse is driven by Diff toolbar “Files” + layout CSS.
   return (
@@ -193,101 +196,117 @@ function FolderFileTreeImpl(props: any) {
           })}
         </div>
       </div>
-      <ul className="prp-filetree__list">
-        {visible.map((node: any) => {
-          if (node.type === 'dir') {
-            const open = effectiveExpanded?.has?.(node.path);
+      <div className="prp-scroll-float-host prp-filetree__list-host">
+        <ul className="prp-filetree__list prp-scroll-float" ref={listScrollRef}>
+          {visible.map((node: any) => {
+            if (node.type === 'dir') {
+              const open = effectiveExpanded?.has?.(node.path);
+              return (
+                <li
+                  key={`d-${node.path}`}
+                  className="prp-filetree__row"
+                  style={{ paddingLeft: 4 + (node.depth || 0) * 12 }}
+                >
+                  <button
+                    type="button"
+                    className="prp-filetree__item prp-filetree__dir"
+                    onClick={() => onToggleDir?.(node.path)}
+                  >
+                    <span className="prp-filetree__chev" aria-hidden="true">
+                      <IconDisclosure open={open} size={12} />
+                    </span>
+                    <span className="prp-filetree__name">{node.name}/</span>
+                  </button>
+                </li>
+              );
+            }
+            const f = node.file || {};
+            const isCollapsed = isPathCollapsed(
+              node.path,
+              collapsedFiles,
+              Boolean(f.defaultCollapsed),
+              false,
+              viewedPaths
+            );
+            const threads =
+              threadCounts?.get?.(node.path) || threadCounts?.[node.path] || 0;
+            const viewed = isPathViewed
+              ? isPathViewed(viewedPaths, node.path)
+              : false;
+            const status = String(f.status || '').toLowerCase();
+            const statusTone =
+              status === 'added' || status === 'add'
+                ? 'add'
+                : status === 'removed' ||
+                    status === 'deleted' ||
+                    status === 'del'
+                  ? 'del'
+                  : status === 'renamed'
+                    ? 'rename'
+                    : '';
             return (
               <li
-                key={`d-${node.path}`}
+                key={`f-${node.path}`}
                 className="prp-filetree__row"
                 style={{ paddingLeft: 4 + (node.depth || 0) * 12 }}
-              >
-                <button
-                  type="button"
-                  className="prp-filetree__item prp-filetree__dir"
-                  onClick={() => onToggleDir?.(node.path)}
-                >
-                  <span className="prp-filetree__chev" aria-hidden="true">
-                    <IconDisclosure open={open} size={12} />
-                  </span>
-                  <span className="prp-filetree__name">{node.name}/</span>
-                </button>
-              </li>
-            );
-          }
-          const f = node.file || {};
-          const isCollapsed = isPathCollapsed(
-            node.path,
-            collapsedFiles,
-            Boolean(f.defaultCollapsed),
-            false,
-            viewedPaths
-          );
-          const threads = threadCounts?.get?.(node.path) || threadCounts?.[node.path] || 0;
-          const viewed = isPathViewed ? isPathViewed(viewedPaths, node.path) : false;
-          const status = String(f.status || '').toLowerCase();
-          const statusTone =
-            status === 'added' || status === 'add'
-              ? 'add'
-              : status === 'removed' || status === 'deleted' || status === 'del'
-                ? 'del'
-                : status === 'renamed'
-                  ? 'rename'
-                  : '';
-          return (
-            <li
-              key={`f-${node.path}`}
-              className="prp-filetree__row"
-              style={{ paddingLeft: 4 + (node.depth || 0) * 12 }}
-              data-file-status={status || undefined}
-            >
-              <label className="prp-filetree__viewed" title="Mark as viewed">
-                <input
-                  type="checkbox"
-                  checked={viewed}
-                  onChange={() => onToggleViewed?.(node.path)}
-                  onClick={(e) => e.stopPropagation()}
-                />
-              </label>
-              <button
-                type="button"
-                className={[
-                  'prp-filetree__item',
-                  node.path === activePath ? 'prp-filetree__item--active' : '',
-                  statusTone ? `prp-filetree__item--${statusTone}` : '',
-                ]
-                  .filter(Boolean)
-                  .join(' ')}
-                onClick={() => onSelect?.(node.path)}
                 data-file-status={status || undefined}
               >
-                <span
+                <label className="prp-filetree__viewed" title="Mark as viewed">
+                  <input
+                    type="checkbox"
+                    checked={viewed}
+                    onChange={() => onToggleViewed?.(node.path)}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                </label>
+                <button
+                  type="button"
                   className={[
-                    'prp-filetree__name',
-                    statusTone ? `prp-filetree__name--${statusTone}` : '',
+                    'prp-filetree__item',
+                    node.path === activePath ? 'prp-filetree__item--active' : '',
+                    statusTone ? `prp-filetree__item--${statusTone}` : '',
                   ]
                     .filter(Boolean)
                     .join(' ')}
-                  title={node.path}
+                  onClick={() => onSelect?.(node.path)}
+                  data-file-status={status || undefined}
                 >
-                  {node.name}
-                  {isCollapsed ? ' ·' : ''}
-                </span>
-                {threads > 0 ? (
-                  <span className="prp-filetree__threads" title="Review threads">
-                    {threads}
+                  <span
+                    className={[
+                      'prp-filetree__name',
+                      statusTone ? `prp-filetree__name--${statusTone}` : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')}
+                    title={node.path}
+                  >
+                    {node.name}
+                    {isCollapsed ? ' ·' : ''}
                   </span>
-                ) : null}
-                <span className="prp-filetree__stat">
-                  <span className="prp-stat-add">+{f.additions ?? 0}</span>
-                  <span className="prp-stat-del">−{f.deletions ?? 0}</span>
-                </span>
-              </button>
-            </li>
-          );
-        })}
-      </ul>
+                  {threads > 0 ? (
+                    <span
+                      className="prp-filetree__threads"
+                      title="Review threads"
+                    >
+                      {threads}
+                    </span>
+                  ) : null}
+                  <span className="prp-filetree__stat">
+                    <span className="prp-stat-add">+{f.additions ?? 0}</span>
+                    <span className="prp-stat-del">−{f.deletions ?? 0}</span>
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+        {!navCollapsed ? (
+          <FloatingScrollbar
+            scrollerRef={listScrollRef}
+            contentKey={`${visible.length}:${filtering ? 'f' : 'a'}`}
+          />
+        ) : null}
+      </div>
     </aside>
   );
 }

@@ -65,39 +65,88 @@ export function buildPeopleOptions(logins, statusByLogin: any = {}, avatarByLogi
 }
 
 /**
- * Normalize GitHub label color (6-hex without #) to CSS color.
+ * GitHub default label colors (hex without #) used when API color is missing.
+ * https://docs.github.com/en/issues/using-labels-and-milestones-to-track-work/managing-labels
  */
-export function labelColorCss(color: unknown): string {
-  const raw = String(color || '').trim().replace(/^#/, '');
-  if (!/^[0-9a-fA-F]{3,8}$/.test(raw)) return '';
-  return `#${raw}`;
+export const GITHUB_DEFAULT_LABEL_COLORS: Record<string, string> = {
+  bug: 'd73a4a',
+  documentation: '0075ca',
+  duplicate: 'cfd3d7',
+  enhancement: 'a2eeef',
+  'good first issue': '7057ff',
+  'help wanted': '008672',
+  invalid: 'e4e669',
+  question: 'd876e3',
+  wontfix: 'ffffff',
+};
+
+/**
+ * Resolve a label color to a CSS hex, falling back to GitHub defaults by name.
+ */
+export function labelColorCss(color: unknown, name?: unknown): string {
+  const raw = String(color || '')
+    .trim()
+    .replace(/^#/, '');
+  if (/^[0-9a-fA-F]{3,8}$/.test(raw)) return `#${raw}`;
+  const key = String(name || '')
+    .trim()
+    .toLowerCase();
+  const fallback = key ? GITHUB_DEFAULT_LABEL_COLORS[key] : '';
+  return fallback ? `#${fallback}` : '';
+}
+
+/**
+ * Normalize raw color + name → hex-without-# for storage on meta.color.
+ */
+export function resolveLabelColor(color: unknown, name?: unknown): string {
+  const css = labelColorCss(color, name);
+  return css ? css.replace(/^#/, '') : '';
 }
 
 /**
  * Build label options from label objects or strings.
+ * Later entries with a color upgrade earlier colorless ones (same name).
  * @param {Array<string|{name:string,color?:string}>} labels
  */
 export function buildLabelOptions(labels) {
-  const out = [];
-  const seen = new Set();
+  const byKey = new Map<string, any>();
   for (const l of labels || []) {
-    const name = typeof l === 'string' ? l : l?.name;
+    const name = typeof l === 'string' ? l : (l as any)?.name;
     const raw = String(name || '').trim();
-    if (!raw || seen.has(raw.toLowerCase())) continue;
-    seen.add(raw.toLowerCase());
-    const color =
-      typeof l === 'object' && l ? String((l as any).color || '').trim() : '';
-    out.push({
+    if (!raw) continue;
+    const key = raw.toLowerCase();
+    const fromObj =
+      typeof l === 'object' && l
+        ? String((l as any).color || '').trim().replace(/^#/, '')
+        : '';
+    const color = resolveLabelColor(fromObj, raw);
+    const next = {
       id: raw,
       label: raw,
-      keywords: [raw],
+      keywords: [raw, (l as any)?.description].filter(Boolean),
       meta:
         typeof l === 'object' && l
-          ? { ...l, name: raw, color, kind: 'label' }
-          : { name: raw, color: '', kind: 'label' },
-    });
+          ? { ...(l as any), name: raw, color, kind: 'label' }
+          : { name: raw, color, kind: 'label' },
+    };
+    const prev = byKey.get(key);
+    if (!prev) {
+      byKey.set(key, next);
+      continue;
+    }
+    // Prefer entry that carries a real color / description
+    if (!prev.meta?.color && next.meta?.color) {
+      byKey.set(key, next);
+    } else if (
+      prev.meta?.color &&
+      next.meta?.color &&
+      !prev.meta?.description &&
+      next.meta?.description
+    ) {
+      byKey.set(key, { ...prev, meta: { ...prev.meta, description: next.meta.description } });
+    }
   }
-  return out;
+  return [...byKey.values()];
 }
 
 /**

@@ -1,9 +1,10 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@common/Button';
 import { Badge } from '@common/Badge';
 import { TipPopover } from '@common/TipPopover';
 import { UserLink } from '@common/UserLink';
 import { RefLink } from '@common/RefLink';
+import { Avatar } from '@common/Avatar';
 import {
   IconArrowLeft,
   IconCheck,
@@ -26,9 +27,183 @@ import { EMBED_RESTORE_SHORTCUT } from '@lib/page-embed';
 import { LAYOUT_DIFF } from '@lib/layout-mode';
 import { headerReviewCompact } from '@lib/header-layout';
 import { branchRefCopyText, copyTextToClipboard } from '@lib/copy-to-clipboard';
+import { buildUnifiedReviewerRows } from '@lib/searchable-select';
+import { reviewStatusTone } from '@common/utils';
 import { hasChecksData } from '../conversation/ChecksPanel';
-import { ChecksSummary } from '../conversation/ChecksSummary';
+import {
+  buildCheckStackGroups,
+  CheckOutcomeIcon,
+} from '../conversation/ChecksSummary';
 import { useModalStore } from '../../store/modal-store';
+
+/** 1–4 reviewers all shown; 5+ → first 3 + “+N” chip. */
+const HEADER_REVIEWER_MAX_FULL = 4;
+const HEADER_REVIEWER_MAX_OVERFLOW = 3;
+
+function formatReviewStatusTip(status: unknown): string {
+  const s = String(status || '')
+    .trim()
+    .toUpperCase()
+    .replace(/-/g, '_');
+  if (!s) return 'No review';
+  if (s === 'APPROVED') return 'Approved';
+  if (s === 'CHANGES_REQUESTED') return 'Changes requested';
+  if (s === 'PENDING' || s === 'REVIEW_REQUIRED') return 'Pending review';
+  if (s === 'COMMENTED') return 'Commented';
+  if (s === 'DISMISSED') return 'Dismissed';
+  return String(status);
+}
+
+/**
+ * Diff compact header: reviewer avatars + check icons as **one** continuous
+ * overlapping stack. Leftmost is topmost (highest z-index).
+ */
+function HeaderCompactMetaStack({ detail }: { detail: any }) {
+  const avatars =
+    detail?.avatarUrls && typeof detail.avatarUrls === 'object'
+      ? detail.avatarUrls
+      : {};
+
+  const reviewers = useMemo(() => {
+    const rows =
+      typeof buildUnifiedReviewerRows === 'function'
+        ? buildUnifiedReviewerRows(detail || {})
+        : (detail?.requestedReviewers || []).map((login: string) => ({
+            login,
+            status: 'PENDING',
+          }));
+    return (rows || [])
+      .map((row: any) => {
+        const login = typeof row === 'string' ? row : row?.login;
+        if (!login) return null;
+        const status = typeof row === 'object' ? row.status : null;
+        const avatarUrl =
+          (typeof row === 'object' && (row.avatarUrl || row.avatar_url)) ||
+          avatars[String(login).toLowerCase()] ||
+          null;
+        const statusLabel = formatReviewStatusTip(status);
+        return {
+          login: String(login),
+          avatarUrl,
+          status,
+          tone: reviewStatusTone(status),
+          tip: status ? `${login} · ${statusLabel}` : String(login),
+        };
+      })
+      .filter(Boolean) as Array<{
+      login: string;
+      avatarUrl: string | null;
+      status: string | null;
+      tone: string;
+      tip: string;
+    }>;
+  }, [detail, avatars]);
+
+  const checkGroups = useMemo(
+    () =>
+      hasChecksData(detail?.checks)
+        ? buildCheckStackGroups(detail.checks)
+        : [],
+    [detail?.checks]
+  );
+
+  if (!reviewers.length && !checkGroups.length) return null;
+
+  const showAll = reviewers.length <= HEADER_REVIEWER_MAX_FULL;
+  const shown = showAll
+    ? reviewers
+    : reviewers.slice(0, HEADER_REVIEWER_MAX_OVERFLOW);
+  const extra = reviewers.length - shown.length;
+  const moreSlot = extra > 0 ? 1 : 0;
+  // Single flat list for continuous −6px overlap + left-on-top z-index
+  const total = shown.length + moreSlot + checkGroups.length;
+
+  let slot = 0;
+  const nodes: React.ReactNode[] = [];
+
+  for (let i = 0; i < shown.length; i++) {
+    const u = shown[i];
+    const tone = u.tone || reviewStatusTone(u.status);
+    const z = total - slot;
+    slot += 1;
+    nodes.push(
+      <span
+        key={`r-${String(u.login).toLowerCase()}`}
+        className={[
+          'prp-header__meta-stack__item',
+          'prp-header__meta-stack__item--reviewer',
+          'prp-has-tip',
+          tone ? `prp-header__meta-stack__item--${tone}` : '',
+        ]
+          .filter(Boolean)
+          .join(' ')}
+        style={{ zIndex: z }}
+        role="listitem"
+        tabIndex={0}
+      >
+        <Avatar
+          login={u.login}
+          avatarUrl={u.avatarUrl}
+          size="sm"
+          title={undefined}
+        />
+        <TipPopover title={u.tip} />
+      </span>
+    );
+  }
+
+  if (extra > 0) {
+    const z = total - slot;
+    slot += 1;
+    nodes.push(
+      <span
+        key="r-more"
+        className="prp-header__meta-stack__item prp-header__meta-stack__item--more prp-has-tip"
+        style={{ zIndex: z }}
+        role="listitem"
+        tabIndex={0}
+        aria-label={`+${extra} more reviewers`}
+      >
+        <span className="prp-header__meta-stack__more-txt">+{extra}</span>
+        <TipPopover
+          title={reviewers
+            .slice(shown.length)
+            .map((p) => p.tip)
+            .join('\n')}
+        />
+      </span>
+    );
+  }
+
+  for (let i = 0; i < checkGroups.length; i++) {
+    const g = checkGroups[i];
+    const z = total - slot;
+    slot += 1;
+    nodes.push(
+      <span
+        key={`c-${g.key}`}
+        className={`prp-header__meta-stack__item prp-header__meta-stack__item--check prp-header__meta-stack__item--check-${g.key} prp-has-tip`}
+        style={{ zIndex: z }}
+        role="listitem"
+        tabIndex={0}
+        aria-label={g.tip.replace(/\n/g, ', ')}
+      >
+        <CheckOutcomeIcon outcome={g.key} size={14} />
+        <TipPopover title={g.tip} />
+      </span>
+    );
+  }
+
+  return (
+    <span
+      className="prp-header__meta-stack"
+      role="group"
+      aria-label="Reviewers and checks"
+    >
+      {nodes}
+    </span>
+  );
+}
 
 /**
  * Diff-stat badge that morphs size when content switches (metrics ↔ load stage).
@@ -131,13 +306,12 @@ function HeaderStatsBadge({
 /**
  * Shared PR header for modal + side sheet shells.
  *
- * Conversation + wide panel:
+ * Conversation (any width):
  *   Row 1 — #number · title · draft · checks · stats
  *   Row 2 — branch direction · author | action toggles
+ *   Narrow panels only collapse actions → ⋯ (no densify / single-line compact).
  *
- * Review compact (Diff layout always, or narrow panel via container query):
- *   Single line — identity + branch + actions (maximize review surface).
- *   ≤ HEADER_COMPACT_MAX_PX still collapses actions to ⋯ menu.
+ * Review compact (Diff layout only): denser strip for review surface.
  *
  * Progressive `loadStage` is integrated into the diff-stat badge (same pill;
  * size morphs when content changes — not a floating popup / dual fade).
@@ -289,6 +463,7 @@ export function Header(props: any) {
     setTitleDraft('');
   }, [detail?.owner, detail?.repo, detail?.number]);
 
+  // Diff only — conversation never densifies by panel width
   const reviewCompact =
     typeof headerReviewCompact === 'function'
       ? headerReviewCompact({ layoutMode: effectiveLayout })
@@ -355,101 +530,99 @@ export function Header(props: any) {
       <div className="prp-header__row prp-header__row--primary">
         <div className="prp-header__identity">
           <span className="prp-header__number">#{detail.number}</span>
-          {editingTitle ? (
-            <div className="prp-header__title-edit">
-              <input
-                ref={titleInputRef}
-                className="prp-header__title-input"
-                type="text"
-                value={titleDraft}
-                disabled={actionBusy}
-                aria-label="Pull request title"
-                maxLength={256}
-                onChange={(e) => setTitleDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    void commitEditTitle();
-                  } else if (e.key === 'Escape') {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    cancelEditTitle();
-                  }
-                }}
-                onBlur={() => {
-                  if (skipBlurSaveRef.current) {
-                    skipBlurSaveRef.current = false;
-                    return;
-                  }
-                  window.setTimeout(() => {
+          {/* Title + edit stay glued; only the title text ellipsizes under pressure */}
+          <div className="prp-header__title-cluster">
+            {editingTitle ? (
+              <div className="prp-header__title-edit">
+                <input
+                  ref={titleInputRef}
+                  className="prp-header__title-input"
+                  type="text"
+                  value={titleDraft}
+                  disabled={actionBusy}
+                  aria-label="Pull request title"
+                  maxLength={256}
+                  onChange={(e) => setTitleDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      void commitEditTitle();
+                    } else if (e.key === 'Escape') {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      cancelEditTitle();
+                    }
+                  }}
+                  onBlur={() => {
                     if (skipBlurSaveRef.current) {
                       skipBlurSaveRef.current = false;
                       return;
                     }
-                    void commitEditTitle();
-                  }, 0);
-                }}
-              />
-              <button
-                type="button"
-                className="prp-icon-btn prp-header__title-action prp-has-tip"
-                disabled={actionBusy || !String(titleDraft || '').trim()}
-                aria-label="Save title"
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  skipBlurSaveRef.current = true;
-                }}
-                onClick={() => void commitEditTitle()}
-              >
-                <IconCheck size={14} />
-                <TipPopover title="Save title" />
-              </button>
-              <button
-                type="button"
-                className="prp-icon-btn prp-header__title-action prp-has-tip"
-                disabled={actionBusy}
-                aria-label="Cancel title edit"
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  skipBlurSaveRef.current = true;
-                }}
-                onClick={cancelEditTitle}
-              >
-                <IconX size={14} />
-                <TipPopover title="Cancel" />
-              </button>
-            </div>
-          ) : (
-            <>
-              <h2 className="prp-header__title">{detail.title}</h2>
-              {typeof onEditTitle === 'function' ? (
+                    window.setTimeout(() => {
+                      if (skipBlurSaveRef.current) {
+                        skipBlurSaveRef.current = false;
+                        return;
+                      }
+                      void commitEditTitle();
+                    }, 0);
+                  }}
+                />
                 <button
                   type="button"
-                  className="prp-icon-btn prp-header__title-edit-btn prp-has-tip"
-                  disabled={actionBusy}
-                  aria-label="Edit title"
-                  onClick={beginEditTitle}
+                  className="prp-icon-btn prp-header__title-action prp-has-tip"
+                  disabled={actionBusy || !String(titleDraft || '').trim()}
+                  aria-label="Save title"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    skipBlurSaveRef.current = true;
+                  }}
+                  onClick={() => void commitEditTitle()}
                 >
-                  <IconPencil size={14} />
-                  <TipPopover title="Edit title" />
+                  <IconCheck size={14} />
+                  <TipPopover title="Save title" />
                 </button>
-              ) : null}
-            </>
-          )}
+                <button
+                  type="button"
+                  className="prp-icon-btn prp-header__title-action prp-has-tip"
+                  disabled={actionBusy}
+                  aria-label="Cancel title edit"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    skipBlurSaveRef.current = true;
+                  }}
+                  onClick={cancelEditTitle}
+                >
+                  <IconX size={14} />
+                  <TipPopover title="Cancel" />
+                </button>
+              </div>
+            ) : (
+              <>
+                <h2 className="prp-header__title">{detail.title}</h2>
+                {typeof onEditTitle === 'function' ? (
+                  <button
+                    type="button"
+                    className="prp-icon-btn prp-header__title-edit-btn prp-has-tip"
+                    disabled={actionBusy}
+                    aria-label="Edit title"
+                    onClick={beginEditTitle}
+                  >
+                    <IconPencil size={14} />
+                    <TipPopover title="Edit title" />
+                  </button>
+                ) : null}
+              </>
+            )}
+          </div>
           {/* Status: draft only (no open badge). Closed still labeled when not merged. */}
           {detail.draft ? <Badge tone="draft">Draft</Badge> : null}
           {!detail.draft && detail.state === 'closed' && !detail.merged ? (
             <Badge tone="muted">closed</Badge>
           ) : null}
-          {hasChecksData(detail.checks) ? (
-            <ChecksSummary
-              checks={detail.checks}
-              label="Checks"
-              className="prp-header__checks"
-              size={14}
-            />
-          ) : null}
+          {/* Conversation: reviewers/checks live in the right rail.
+              Diff compact: continuous overlapping stack — reviewers then checks. */}
+          {reviewCompact ? <HeaderCompactMetaStack detail={detail} /> : null}
         </div>
         <HeaderStatsBadge
           loadStage={loadStage}
@@ -719,6 +892,7 @@ export function Header(props: any) {
                 <TipPopover
                   title="Show GitHub PR page"
                   shortcut={restoreShortcut}
+                  preferredPlacement="bottom"
                 />
               </button>
             ) : null}

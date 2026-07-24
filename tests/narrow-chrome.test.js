@@ -23,36 +23,44 @@ const tree = read('src/modal/views/diff/FolderFileTree.tsx');
 const toolbar = read('src/modal/views/chrome/DiffToolbar.tsx');
 const commitFilterUi = read('src/modal/views/diff/DiffCommitFilter.tsx');
 
-// --- (a) overflow menu — based on panel/header width, not window ---
-assert.ok(header.includes('prp-header__actions-more'), 'overflow more container');
-assert.ok(header.includes('prp-header__more-btn') || header.includes('⋯'), '⋯ button');
-assert.ok(header.includes('prp-header__more-menu'), 'overflow menu');
-assert.ok(header.includes('prp-header__actions-inline'), 'wide inline actions');
-assert.ok(css.includes('prp-header__actions-more'));
+// --- (a) no width-based chrome collapse — title shrinks, actions stay inline ---
+assert.ok(header.includes('prp-header__actions-inline'), 'inline actions always present');
 assert.ok(
   css.includes('container-type: inline-size') || css.includes('container-type:inline-size'),
-  'header is a size container (panel width, not window)'
+  'panel is a size container (cqi for title scale)'
 );
 assert.ok(
-  /@container\s+prp-header\s*\(\s*max-width:\s*760px\s*\)/.test(css) ||
-    css.includes('@container prp-header (max-width: 760px)'),
-  'compact actions use ~760px container query (wrap point ~700–800)'
+  css.includes('container-name: prp-panel') || css.includes('container-name:prp-panel'),
+  'size container is named prp-panel on .prp-modal'
+);
+// No actions → ⋯ collapse by width
+assert.ok(
+  !/@container\s+prp-panel\s*\(\s*max-width:\s*760px\s*\)/.test(css) &&
+    !css.includes('@container prp-panel (max-width: 760px)'),
+  'no 760px actions-overflow container query'
 );
 assert.ok(
-  /@container\s+prp-header\s*\(\s*max-width:\s*960px\s*\)/.test(css) ||
-    css.includes('@container prp-header (max-width: 960px)'),
-  'dense single-line header uses ~960px container query'
+  !/@container\s+prp-panel\s*\(\s*max-width:\s*960px\s*\)/.test(css) &&
+    !css.includes('@container prp-panel (max-width: 960px)'),
+  'no 960px dense-header container query'
 );
 assert.ok(
-  css.includes("grid-template-areas: 'primary branch actions'") ||
-    css.includes('grid-template-areas: "primary branch actions"') ||
-    /grid-template-areas:\s*['"]primary branch actions['"]/.test(css) ||
-    // Current dense layout: flex row strip (not 3-area grid)
-    (/@container\s+prp-header\s*\(\s*max-width:\s*960px\s*\)/.test(css) &&
-      /display:\s*flex/.test(css) &&
-      css.includes('prp-header__branch-meta') &&
-      css.includes('prp-header__actions')),
-  'dense mode places branch + actions on the primary line'
+  /actions-more[\s\S]{0,80}display:\s*none\s*!important/.test(css) ||
+    css.includes('.prp-header__actions-more') && css.includes('display: none !important'),
+  'overflow ⋯ menu stays hidden'
+);
+// Title fluid shrink + ellipsis (layout pressure → title, not icons)
+assert.ok(
+  /prp-header__title[\s\S]{0,200}clamp\(/.test(css),
+  'title uses clamp() fluid font-size'
+);
+assert.ok(
+  /prp-header__title[\s\S]{0,200}text-overflow:\s*ellipsis/.test(css),
+  'title ellipsizes when row is tight'
+);
+assert.ok(
+  !header.includes('headerWidthPx') && !header.includes('ResizeObserver'),
+  'Header does not measure width for densify'
 );
 assert.ok(header.includes('prp-header__branch-meta'), 'branch meta cluster');
 assert.ok(
@@ -68,17 +76,13 @@ const {
   headerDenseLayout,
   headerReviewCompact,
 } = require('../src/modal/lib/header-layout.ts');
-assert.equal(HEADER_COMPACT_MAX_PX, 760);
-assert.equal(HEADER_DENSE_MAX_PX, 960);
+assert.equal(HEADER_COMPACT_MAX_PX, 0, 'actions overflow disabled');
+assert.equal(HEADER_DENSE_MAX_PX, 0, 'width densify disabled');
 assert.equal(headerActionsCompact(900), false);
-assert.equal(headerActionsCompact(760), true);
-assert.equal(headerActionsCompact(700), true);
-assert.equal(headerActionsCompact(0), false);
-assert.equal(headerDenseLayout(1000), false);
-assert.equal(headerDenseLayout(960), true);
-assert.equal(headerDenseLayout(800), true);
-assert.equal(headerDenseLayout(0), false);
-// Review compact: always in Diff, width-only in conversation
+assert.equal(headerActionsCompact(760), false);
+assert.equal(headerActionsCompact(500), false);
+assert.equal(headerDenseLayout(800), false);
+// Review compact: Diff only — never by panel width
 assert.equal(
   headerReviewCompact({ layoutMode: 'diff', widthPx: 1400 }),
   true,
@@ -90,9 +94,9 @@ assert.equal(
   'wide conversation keeps two-row header'
 );
 assert.equal(
-  headerReviewCompact({ layoutMode: 'conversation', widthPx: 900 }),
-  true,
-  'narrow conversation also densifies by width'
+  headerReviewCompact({ layoutMode: 'conversation', widthPx: 500 }),
+  false,
+  'narrow conversation also keeps two-row header (no width densify)'
 );
 assert.ok(
   header.includes('prp-header--review-compact') ||
