@@ -693,24 +693,24 @@ export function PrModalApp({
   }, [sourceFiles, detail?.gitattributesText]);
 
   /** True after we paged through every commit/file for this PR open. */
-  const commitsFullyLoadedRef = useRef(false);
-  const filesFullyLoadedRef = useRef(false);
+  const [commitsFullyLoaded, setCommitsFullyLoaded] = useState(false);
+  const [filesFullyLoaded, setFilesFullyLoaded] = useState(false);
   const [commitListLoading, setCommitListLoading] = useState(false);
   const [fileListLoading, setFileListLoading] = useState(false);
 
   useEffect(() => {
-    commitsFullyLoadedRef.current = false;
-    filesFullyLoadedRef.current = false;
+    setCommitsFullyLoaded(false);
+    setFilesFullyLoaded(false);
   }, [prIdentity]);
 
   const ensureAllCommits = useCallback(async () => {
     if (!detail || typeof onFetchAllPrCommits !== 'function') return;
-    if (commitsFullyLoadedRef.current) return;
+    if (commitsFullyLoaded) return;
     setCommitListLoading(true);
     try {
       const all = await onFetchAllPrCommits();
       if (!Array.isArray(all)) return;
-      commitsFullyLoadedRef.current = true;
+      setCommitsFullyLoaded(true);
       setLocalDetail((prev: any) =>
         prev ? { ...prev, commits: all } : prev
       );
@@ -724,14 +724,14 @@ export function PrModalApp({
     } finally {
       setCommitListLoading(false);
     }
-  }, [detail, onFetchAllPrCommits, onPatchDetail]);
+  }, [detail, onFetchAllPrCommits, onPatchDetail, commitsFullyLoaded]);
 
   const ensureAllFiles = useCallback(async () => {
     if (!detail || typeof onFetchAllPrFiles !== 'function') return;
-    if (filesFullyLoadedRef.current) return;
+    if (filesFullyLoaded) return;
     // Don't clobber a commit-range override with full PR files mid-filter.
     if (diffFilesOverride) {
-      filesFullyLoadedRef.current = true;
+      setFilesFullyLoaded(true);
       return;
     }
     setFileListLoading(true);
@@ -740,10 +740,10 @@ export function PrModalApp({
         gitattributesText: detail.gitattributesText || '',
       });
       if (!Array.isArray(all) || !all.length) {
-        filesFullyLoadedRef.current = true;
+        setFilesFullyLoaded(true);
         return;
       }
-      filesFullyLoadedRef.current = true;
+      setFilesFullyLoaded(true);
       setLocalDetail((prev: any) => (prev ? { ...prev, files: all } : prev));
       try {
         onPatchDetail?.({ files: all, changedFiles: all.length });
@@ -755,7 +755,7 @@ export function PrModalApp({
     } finally {
       setFileListLoading(false);
     }
-  }, [detail, onFetchAllPrFiles, onPatchDetail, diffFilesOverride]);
+  }, [detail, onFetchAllPrFiles, onPatchDetail, diffFilesOverride, filesFullyLoaded]);
 
   const applyDiffCommitFilter = useCallback(
     async (nextRaw: DiffCommitFilterState) => {
@@ -3414,23 +3414,72 @@ export function PrModalApp({
       options: uniqueOpts,
       query: '',
       allowFreeText: true,
+      enableCreateAndApply: true,
       multi: true,
       initialSelectedIds: currentNames,
       confirmLabel: 'Apply labels',
-      onConfirm: (ids: string[]) => {
+      onConfirm: (ids: string[], meta?: { createAndApply?: boolean; freeText?: string }) => {
         closePicker();
-        void applySetLabels(ids);
+        void (async () => {
+          const names = (Array.isArray(ids) ? ids : [])
+            .map((s) => String(s || '').trim())
+            .filter(Boolean);
+          if (meta?.createAndApply) {
+            const free = String(meta.freeText || '').trim();
+            const toCreate = free
+              ? [free]
+              : names.filter(
+                  (n) =>
+                    !uniqueOpts.some(
+                      (o: any) =>
+                        String(o.id || o.label || '').toLowerCase() ===
+                        n.toLowerCase()
+                    )
+                );
+            const api = globalThis.PRTreeFetch;
+            for (const n of toCreate) {
+              try {
+                if (typeof api?.createRepoLabel === 'function') {
+                  await api.createRepoLabel(detail.owner, detail.repo, {
+                    name: n,
+                  });
+                }
+              } catch (err: any) {
+                // 422 already exists is fine — still apply
+                if (err?.status && err.status !== 422) {
+                  setActionMsg(err?.message || String(err));
+                }
+              }
+            }
+          }
+          await applySetLabels(names);
+        })();
       },
       onPick: (opt) => {
-        // single fallback: add one
         closePicker();
         const name = String(opt?.id || opt?.label || '').trim();
         if (!name) return;
-        const names = currentNames.slice();
-        if (!names.some((n) => String(n).toLowerCase() === name.toLowerCase())) {
-          names.push(name);
-        }
-        void applySetLabels(names);
+        void (async () => {
+          if (opt?.meta?.createAndApply) {
+            try {
+              const api = globalThis.PRTreeFetch;
+              if (typeof api?.createRepoLabel === 'function') {
+                await api.createRepoLabel(detail.owner, detail.repo, {
+                  name,
+                });
+              }
+            } catch (err: any) {
+              if (err?.status && err.status !== 422) {
+                setActionMsg(err?.message || String(err));
+              }
+            }
+          }
+          const names = currentNames.slice();
+          if (!names.some((n) => String(n).toLowerCase() === name.toLowerCase())) {
+            names.push(name);
+          }
+          await applySetLabels(names);
+        })();
       },
     });
   }
@@ -4414,22 +4463,50 @@ export function PrModalApp({
     }
   }
 
-  function openMilestonePicker() {
+  async function openMilestonePicker() {
     if (!detail) return;
     const current = detail.milestone;
-    const pool = [
-      current
-        ? {
-            id: String(current.number),
-            label: `${current.title || 'Milestone'} (#${current.number})`,
-          }
-        : null,
-      { id: '1', label: 'Milestone #1' },
-      { id: '2', label: 'Milestone #2' },
-      { id: '3', label: 'Milestone #3' },
-      { id: '4', label: 'Milestone #4' },
-      { id: '5', label: 'Milestone #5' },
-    ].filter(Boolean);
+    let milestones: Array<{
+      number?: number;
+      title?: string;
+      state?: string;
+    }> = [];
+    try {
+      const api = globalThis.PRTreeFetch;
+      if (typeof api?.fetchRepoMilestones === 'function') {
+        milestones =
+          (await api.fetchRepoMilestones(detail.owner, detail.repo, {
+            state: 'open',
+          })) || [];
+      }
+    } catch {
+      /* still open with current only */
+    }
+    const pool: any[] = [];
+    if (current?.number != null) {
+      pool.push({
+        id: String(current.number),
+        label: `${current.title || 'Milestone'} (#${current.number})`,
+        meta: {
+          kind: 'milestone',
+          number: Number(current.number),
+          title: current.title || '',
+        },
+      });
+    }
+    for (const m of milestones) {
+      const n = Number(m?.number);
+      if (!Number.isFinite(n) || n <= 0) continue;
+      pool.push({
+        id: String(n),
+        label: `${m.title || 'Milestone'} (#${n})`,
+        meta: {
+          kind: 'milestone',
+          number: n,
+          title: m.title || '',
+        },
+      });
+    }
     const seen = new Set();
     const options = pool.filter((o: any) => {
       if (seen.has(o.id)) return false;
@@ -4443,16 +4520,63 @@ export function PrModalApp({
       options,
       query: '',
       allowFreeText: true,
-      placeholder: 'Filter or type a milestone number…',
+      enableCreateAndApply: true,
+      multi: false,
+      placeholder: 'Filter milestones or type a new title…',
+      confirmLabel: 'Set milestone',
       onPick: (opt) => {
         closePicker();
-        const raw = String(opt?.id || opt?.label || '').replace(/[^\d]/g, '');
-        const n = Number(raw);
-        if (!Number.isFinite(n) || n <= 0) {
-          setActionMsg('Invalid milestone number.');
-          return;
-        }
-        void applyMilestoneNumber(n);
+        void (async () => {
+          const create = Boolean(opt?.meta?.createAndApply);
+          const titleOrId = String(opt?.label || opt?.id || '').trim();
+          if (create) {
+            try {
+              const api = globalThis.PRTreeFetch;
+              if (typeof api?.createRepoMilestone !== 'function') {
+                throw new Error('Create milestone API unavailable');
+              }
+              const created = await api.createRepoMilestone(
+                detail.owner,
+                detail.repo,
+                { title: titleOrId }
+              );
+              const n = Number(created?.number);
+              if (!Number.isFinite(n) || n <= 0) {
+                throw new Error('Created milestone has no number');
+              }
+              await applyMilestoneNumber(n);
+              // Prefer API title after create
+              if (created?.title) {
+                commitMetaPatch({
+                  milestone: {
+                    number: n,
+                    title: String(created.title),
+                  },
+                });
+              }
+            } catch (err: any) {
+              setActionMsg(err?.message || String(err));
+            }
+            return;
+          }
+          const n = Number(
+            opt?.meta?.number ??
+              String(opt?.id || '').replace(/[^\d]/g, '')
+          );
+          if (!Number.isFinite(n) || n <= 0) {
+            setActionMsg('Invalid milestone.');
+            return;
+          }
+          await applyMilestoneNumber(n);
+          if (opt?.meta?.title) {
+            commitMetaPatch({
+              milestone: {
+                number: n,
+                title: String(opt.meta.title),
+              },
+            });
+          }
+        })();
       },
     });
   }
@@ -5343,6 +5467,12 @@ export function PrModalApp({
             onSetDraftStage={onSetDraftStage}
             onClosePr={onClosePr}
             onReopenPr={onReopenPr}
+            onEnsureAllCommits={ensureAllCommits}
+            onEnsureAllFiles={ensureAllFiles}
+            commitsFullyLoaded={commitsFullyLoaded}
+            filesFullyLoaded={filesFullyLoaded}
+            commitListLoading={commitListLoading}
+            fileListLoading={fileListLoading}
             commentBoxRef={commentBoxRef}
             onUploadFile={onUploadFile}
             reviewerAddRef={reviewerAddRef}
@@ -5631,11 +5761,16 @@ export function PrModalApp({
           onPick={(opt) => picker?.onPick?.(opt)}
           onClose={closePicker}
           allowFreeText={picker?.allowFreeText !== false}
+          enableCreateAndApply={
+            picker?.enableCreateAndApply != null
+              ? Boolean(picker.enableCreateAndApply)
+              : picker?.type === 'label' || picker?.type === 'milestone'
+          }
           multi={Boolean(picker?.multi)}
           initialSelectedIds={picker?.initialSelectedIds || null}
           onConfirm={
             picker?.onConfirm
-              ? (ids: string[]) => picker.onConfirm(ids)
+              ? (ids: string[], meta?: any) => picker.onConfirm(ids, meta)
               : null
           }
           confirmLabel={picker?.confirmLabel || 'Apply'}
@@ -5648,7 +5783,7 @@ export function PrModalApp({
               : picker?.type === 'label'
                 ? 'Filter or type labels…'
                 : picker?.type === 'milestone'
-                  ? 'Filter or type a milestone number…'
+                  ? 'Filter milestones or type a new title…'
                   : picker?.type === 'assignee'
                     ? 'Filter or type usernames…'
                     : 'Filter or type a username…')

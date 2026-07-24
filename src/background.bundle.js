@@ -6448,6 +6448,125 @@ async function fetchRepoLabels(owner, repo, fetchImpl, token = null, opts = {}) 
 }
 
 /**
+ * Create a repo label (minimal: name + optional color).
+ * @returns {Promise<{ name: string, color: string, description: string }>}
+ */
+async function createRepoLabel(owner, repo, { name, color, description } = {}, fetchImpl, token) {
+  const labelName = String(name || '').trim();
+  if (!labelName) throw new Error('Label name is required');
+  const hex = String(color || 'ededed')
+    .trim()
+    .replace(/^#/, '');
+  const body = {
+    name: labelName,
+    color: /^[0-9a-fA-F]{3,8}$/.test(hex) ? hex : 'ededed',
+  };
+  if (description != null && String(description).trim()) {
+    body.description = String(description).trim().slice(0, 100);
+  }
+  const created = await apiSend(
+    githubRestUrl(`/repos/${owner}/${repo}/labels`),
+    fetchImpl,
+    token,
+    { method: 'POST', body }
+  );
+  return {
+    name: String(created?.name || labelName),
+    color: String(created?.color || body.color).replace(/^#/, ''),
+    description: String(created?.description || ''),
+  };
+}
+
+/**
+ * List open milestones (title + number). Paginates.
+ * @returns {Promise<Array<{ number: number, title: string, state: string, description: string, dueOn: string|null }>>}
+ */
+async function fetchRepoMilestones(owner, repo, fetchImpl, token = null, opts = {}) {
+  const state = opts.state === 'all' || opts.state === 'closed' ? opts.state : 'open';
+  const perPage = 100;
+  const maxPages = Math.max(1, Math.min(10, Number(opts.maxPages) || 5));
+  const out = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const url = githubRestUrl(
+      `/repos/${owner}/${repo}/milestones?state=${encodeURIComponent(state)}&per_page=${perPage}&page=${page}&sort=due_on&direction=asc`
+    );
+    const batch = await apiJson(url, fetchImpl, token);
+    if (!Array.isArray(batch) || !batch.length) break;
+    for (const m of batch) {
+      const number = Number(m?.number);
+      if (!Number.isFinite(number) || number <= 0) continue;
+      out.push({
+        number,
+        title: String(m?.title || `Milestone ${number}`),
+        state: String(m?.state || 'open'),
+        description: String(m?.description || ''),
+        dueOn: m?.due_on || null,
+      });
+    }
+    if (batch.length < perPage) break;
+  }
+  return out;
+}
+
+/**
+ * Create an open milestone by title (minimal create-then-assign).
+ * @returns {Promise<{ number: number, title: string, state: string }>}
+ */
+async function createRepoMilestone(owner, repo, { title, description } = {}, fetchImpl, token) {
+  const t = String(title || '').trim();
+  if (!t) throw new Error('Milestone title is required');
+  const body = { title: t, state: 'open' };
+  if (description != null && String(description).trim()) {
+    body.description = String(description).trim();
+  }
+  const created = await apiSend(
+    githubRestUrl(`/repos/${owner}/${repo}/milestones`),
+    fetchImpl,
+    token,
+    { method: 'POST', body }
+  );
+  const number = Number(created?.number);
+  if (!Number.isFinite(number) || number <= 0) {
+    throw new Error('Milestone create returned no number');
+  }
+  return {
+    number,
+    title: String(created?.title || t),
+    state: String(created?.state || 'open'),
+  };
+}
+
+/**
+ * List repo tags (name + commit SHA). Paginates.
+ * @returns {Promise<Array<{ name: string, sha: string, zipballUrl: string, tarballUrl: string }>>}
+ */
+async function fetchRepoTags(owner, repo, fetchImpl, token = null, opts = {}) {
+  const perPage = 100;
+  const maxPages = Math.max(1, Math.min(20, Number(opts.maxPages) || 10));
+  const out = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const url = githubRestUrl(
+      `/repos/${owner}/${repo}/tags?per_page=${perPage}&page=${page}`
+    );
+    const batch = await apiJson(url, fetchImpl, token);
+    if (!Array.isArray(batch) || !batch.length) break;
+    for (const t of batch) {
+      const name = String(t?.name || '').trim();
+      const sha = String(t?.commit?.sha || '').trim();
+      if (!name || !sha) continue;
+      out.push({
+        name,
+        sha,
+        zipballUrl: String(t?.zipball_url || ''),
+        tarballUrl: String(t?.tarball_url || ''),
+      });
+    }
+    if (batch.length < perPage) break;
+  }
+  return out;
+}
+
+/**
  * Apply a GitHub suggestion: replace lines on head branch via Contents API.
  * @param {{ path: string, headRef: string, startLine: number, endLine: number, suggestion: string, message?: string }} opts
  */
@@ -7045,6 +7164,10 @@ const fetchApi = {
   removeAssignees,
   setIssueLabels,
   fetchRepoLabels,
+  createRepoLabel,
+  fetchRepoMilestones,
+  createRepoMilestone,
+  fetchRepoTags,
   mergePullRequest,
   updatePullBranch,
   setIssueSubscription,
@@ -7236,6 +7359,12 @@ const MSG = {
   REMOVE_ASSIGNEES: 'PR_TREE_REMOVE_ASSIGNEES',
   SET_LABELS: 'PR_TREE_SET_LABELS',
   FETCH_REPO_LABELS: 'PR_TREE_FETCH_REPO_LABELS',
+  CREATE_REPO_LABEL: 'PR_TREE_CREATE_REPO_LABEL',
+  FETCH_REPO_MILESTONES: 'PR_TREE_FETCH_REPO_MILESTONES',
+  CREATE_REPO_MILESTONE: 'PR_TREE_CREATE_REPO_MILESTONE',
+  FETCH_REPO_TAGS: 'PR_TREE_FETCH_REPO_TAGS',
+  FETCH_ALL_PR_COMMITS: 'PR_TREE_FETCH_ALL_PR_COMMITS',
+  FETCH_ALL_PR_FILES: 'PR_TREE_FETCH_ALL_PR_FILES',
   APPLY_SUGGESTION: 'PR_TREE_APPLY_SUGGESTION',
   GET_REPO_FILE_TEXT: 'PR_TREE_GET_REPO_FILE_TEXT',
   MERGE_PULL: 'PR_TREE_MERGE_PULL',
@@ -8139,6 +8268,134 @@ async function handleMessage(message) {
           }
         );
         return { ok: true, labels };
+      } catch (err) {
+        if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
+      }
+    }
+    case MSG.CREATE_REPO_LABEL: {
+      const tracked = beginTrackedFetch(message.requestId);
+      try {
+        const token = await tokenForMessage(message);
+        if (!token) throw new Error('GitHub PAT required to create labels');
+        const label = await PRTreeFetch.createRepoLabel(
+          message.owner,
+          message.repo,
+          {
+            name: message.name,
+            color: message.color,
+            description: message.description,
+          },
+          tracked.fetch,
+          token
+        );
+        return { ok: true, label };
+      } catch (err) {
+        if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
+      }
+    }
+    case MSG.FETCH_REPO_MILESTONES: {
+      const tracked = beginTrackedFetch(message.requestId);
+      try {
+        const token = await tokenForMessage(message);
+        const milestones = await PRTreeFetch.fetchRepoMilestones(
+          message.owner,
+          message.repo,
+          tracked.fetch,
+          token,
+          {
+            state: message.state,
+            maxPages:
+              message.maxPages != null ? Number(message.maxPages) : undefined,
+          }
+        );
+        return { ok: true, milestones };
+      } catch (err) {
+        if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
+      }
+    }
+    case MSG.CREATE_REPO_MILESTONE: {
+      const tracked = beginTrackedFetch(message.requestId);
+      try {
+        const token = await tokenForMessage(message);
+        if (!token) throw new Error('GitHub PAT required to create milestones');
+        const milestone = await PRTreeFetch.createRepoMilestone(
+          message.owner,
+          message.repo,
+          { title: message.title, description: message.description },
+          tracked.fetch,
+          token
+        );
+        return { ok: true, milestone };
+      } catch (err) {
+        if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
+      }
+    }
+    case MSG.FETCH_REPO_TAGS: {
+      const tracked = beginTrackedFetch(message.requestId);
+      try {
+        const token = await tokenForMessage(message);
+        const tags = await PRTreeFetch.fetchRepoTags(
+          message.owner,
+          message.repo,
+          tracked.fetch,
+          token,
+          {
+            maxPages:
+              message.maxPages != null ? Number(message.maxPages) : undefined,
+          }
+        );
+        return { ok: true, tags };
+      } catch (err) {
+        if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
+      }
+    }
+    case MSG.FETCH_ALL_PR_COMMITS: {
+      const tracked = beginTrackedFetch(message.requestId);
+      try {
+        const token = await tokenForMessage(message);
+        const commits = await PRTreeFetch.fetchAllPrCommits(
+          message.owner,
+          message.repo,
+          message.number,
+          tracked.fetch,
+          token
+        );
+        return { ok: true, commits };
+      } catch (err) {
+        if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
+      }
+    }
+    case MSG.FETCH_ALL_PR_FILES: {
+      const tracked = beginTrackedFetch(message.requestId);
+      try {
+        const token = await tokenForMessage(message);
+        const files = await PRTreeFetch.fetchAllPrFiles(
+          message.owner,
+          message.repo,
+          message.number,
+          tracked.fetch,
+          token,
+          { gitattributesText: message.gitattributesText || '' }
+        );
+        return { ok: true, files };
       } catch (err) {
         if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
         throw err;

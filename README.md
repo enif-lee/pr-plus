@@ -132,6 +132,7 @@ Open a PR title from the list → **centered modal** or **side sheet** on the **
 | **Reply composer focus** | Thread reply actions appear when the reply field is focused (or draft text remains) |
 | **Merge box status** | Clear merge readiness; **GitHub-style check groups** (required / optional) with expandable lists |
 | **Compact meta rail** | Collapsed right rail: reviewers / assignees / checks / labels as avatar stacks and status chips; hover tips open over the conversation (not clipped by the splitter) |
+| **Commits / Files search** | Expanded asides include search; **search** or **Load more** fully loads remaining pages then filters |
 | **Profile avatars** | GitHub profile images for authors and pickers |
 
 #### Diff & code review
@@ -162,8 +163,9 @@ Open a PR title from the list → **centered modal** or **side sheet** on the **
 |---------|-------------|
 | **Title / body / base** | Edit title, description, change base branch |
 | **Draft stage** | Convert to draft / mark ready for review (GraphQL) |
-| **Reviewers / assignees / labels** | Searchable pickers with avatars; **repo label catalog + colors** in the label picker; re-request review |
-| **Milestone** | Set / clear |
+| **Reviewers / assignees / labels** | Searchable pickers with avatars; **repo label catalog + colors**; **Create and apply** when search has no matches |
+| **Milestone** | Live open-milestone list (not a #1–5 stub); **Create and apply** for new titles; clear still works |
+| **Tags (aside)** | Lazy **Tags** section lists git tags that point at this PR’s commits |
 | **Linked issues** | Detected from body (`#N`, closing keywords) |
 | **Subscribe** | Optimistic GraphQL subscription toggle + header tip states |
 | **Close / reopen** | PR state (close control uses danger styling) |

@@ -73,6 +73,7 @@ const tests = [
   'diff-expand-gap.test.js',
   'pr-edit-api.test.js',
   'searchable-select.test.js',
+  'create-and-apply.test.js',
   'diff-thread-refresh.test.js',
   'ui-polish.test.js',
   'stack-strip-path.test.js',

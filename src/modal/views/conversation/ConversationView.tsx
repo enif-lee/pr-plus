@@ -44,6 +44,7 @@ import { BodyEditor } from '../composers/BodyEditor';
 import { MetaList } from './MetaList';
 import { AsideCommitsTimeline } from './AsideCommitsTimeline';
 import { AsideFilesTree } from './AsideFilesTree';
+import { AsideTags } from './AsideTags';
 import { ChecksPanel, hasChecksData } from './ChecksPanel';
 import { MergeBoxChecks } from './MergeBoxChecks';
 import { LoadingSkeleton } from '../chrome/LoadingSkeleton';
@@ -121,7 +122,16 @@ function ConversationViewImpl(props: any) {
     mentionCandidates = [],
     /** Keyboard-focus anchor (⌘⇧C) for a conversation comment/review row */
     focusedConversationAnchor = null,
+    /** Full corpus load for Commits/Files search & Load more */
+    onEnsureAllCommits = null,
+    onEnsureAllFiles = null,
+    commitsFullyLoaded = false,
+    filesFullyLoaded = false,
+    commitListLoading = false,
+    fileListLoading = false,
   } = props;
+
+  const [tagsSectionOpen, setTagsSectionOpen] = useState(false);
 
   const embedScrollChain = isEmbedPresentation(presentation);
   const convRootRef = useRef<HTMLDivElement | null>(null);
@@ -1656,6 +1666,21 @@ function ConversationViewImpl(props: any) {
           </AsideSection>
         ) : null}
         <AsideSection
+          title="Tags"
+          collapsible
+          defaultOpen={false}
+          onOpenChange={(open: boolean) => {
+            if (open) setTagsSectionOpen(true);
+          }}
+        >
+          <AsideTags
+            owner={detail.owner}
+            repo={detail.repo}
+            commits={detail.commits || []}
+            active={tagsSectionOpen}
+          />
+        </AsideSection>
+        <AsideSection
           title={`Commits${detail.commits?.length ? ` (${detail.commits.length})` : ''}`}
           collapsible
           defaultOpen={false}
@@ -1664,6 +1689,9 @@ function ConversationViewImpl(props: any) {
             commits={detail.commits || []}
             owner={detail.owner}
             repo={detail.repo}
+            onEnsureAllCommits={onEnsureAllCommits}
+            commitsFullyLoaded={Boolean(commitsFullyLoaded)}
+            loadingAll={Boolean(commitListLoading)}
           />
         </AsideSection>
         <AsideSection
@@ -1671,7 +1699,12 @@ function ConversationViewImpl(props: any) {
           collapsible
           defaultOpen={false}
         >
-          <AsideFilesTree files={detail.files || []} />
+          <AsideFilesTree
+            files={detail.files || []}
+            onEnsureAllFiles={onEnsureAllFiles}
+            filesFullyLoaded={Boolean(filesFullyLoaded)}
+            loadingAll={Boolean(fileListLoading)}
+          />
         </AsideSection>
 
           </>

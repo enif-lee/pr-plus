@@ -1,5 +1,10 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { filterSelectOptions, labelColorCss } from '@lib/searchable-select';
+import {
+  shouldOfferCreateAndApply,
+  resolveCreateAndApplyConfirmLabel,
+  mergeCreateAndApplyLabelIds,
+} from '@lib/create-and-apply';
 import { Avatar } from './Avatar';
 import { IconCheck, IconX } from './icons';
 
@@ -7,6 +12,7 @@ import { IconCheck, IconX } from './icons';
  * Anchored popover searchable select.
  * - Single: click option → onPick
  * - Multi: toggle options, free-text Enter adds to selection, Apply → onConfirm(ids)
+ * - When filtered list is empty + free text: footer **Create and apply** (multi or single)
  */
 export function SearchableSelect({
   open,
@@ -32,6 +38,11 @@ export function SearchableSelect({
   initialSelectedIds = null,
   onConfirm = null,
   confirmLabel = 'Apply',
+  /**
+   * When true (default if allowFreeText), empty filter + query offers Create and apply.
+   * Callers that should not create set this false.
+   */
+  enableCreateAndApply = null,
 }: any) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
@@ -152,6 +163,21 @@ export function SearchableSelect({
       ? filterSelectOptions(options, query)
       : (options || []).slice(0, 50);
   const free = String(query || '').trim();
+  const createEnabled =
+    enableCreateAndApply != null
+      ? Boolean(enableCreateAndApply)
+      : Boolean(allowFreeText);
+  const createMode =
+    createEnabled &&
+    (typeof shouldOfferCreateAndApply === 'function'
+      ? shouldOfferCreateAndApply(filtered.length, free)
+      : Boolean(free) && filtered.length === 0);
+  const primaryLabel =
+    typeof resolveCreateAndApplyConfirmLabel === 'function'
+      ? resolveCreateAndApplyConfirmLabel(filtered.length, free, confirmLabel)
+      : createMode
+        ? 'Create and apply'
+        : confirmLabel;
 
   function toggleId(id: string) {
     const raw = String(id || '').trim();
@@ -171,6 +197,11 @@ export function SearchableSelect({
         onQuery?.('');
         return;
       }
+      if (createMode && free) {
+        // Create and apply via confirm with selection ∪ free name
+        confirmMulti();
+        return;
+      }
       if (allowFreeText && free) {
         toggleId(free);
         onQuery?.('');
@@ -182,14 +213,24 @@ export function SearchableSelect({
       return;
     }
     if (allowFreeText && free) {
-      onPick?.({ id: free, label: free });
+      onPick?.({
+        id: free,
+        label: free,
+        meta: { createAndApply: createMode },
+      });
     }
   }
 
   function confirmMulti() {
-    const ids = selected.slice();
-    if (typeof onConfirm === 'function') onConfirm(ids);
-    else if (ids.length === 1) onPick?.({ id: ids[0], label: ids[0] });
+    const ids =
+      typeof mergeCreateAndApplyLabelIds === 'function'
+        ? mergeCreateAndApplyLabelIds(selected, free, createMode)
+        : selected.slice();
+    if (typeof onConfirm === 'function') {
+      onConfirm(ids, { createAndApply: createMode, freeText: free });
+    } else if (ids.length === 1) {
+      onPick?.({ id: ids[0], label: ids[0], meta: { createAndApply: createMode } });
+    }
   }
 
   const style: React.CSSProperties = pos
@@ -256,11 +297,13 @@ export function SearchableSelect({
       <ul className="prp-sselect-list">
         {filtered.length === 0 ? (
           <li className="prp-sselect-empty prp-muted">
-            {allowFreeText && free
-              ? multi
-                ? `Press Enter to add “${free}”`
-                : `Press Enter to use “${free}”`
-              : emptyLabel}
+            {createMode
+              ? `No matches — Create and apply “${free}”`
+              : allowFreeText && free
+                ? multi
+                  ? `Press Enter to add “${free}”`
+                  : `Press Enter to use “${free}”`
+                : emptyLabel}
           </li>
         ) : (
           filtered.map((o: any) => {
@@ -326,7 +369,7 @@ export function SearchableSelect({
           })
         )}
       </ul>
-      {multi ? (
+      {multi || createMode ? (
         <div className="prp-sselect-footer">
           <button type="button" className="prp-btn prp-btn--size-sm" onClick={onClose}>
             Cancel
@@ -335,10 +378,35 @@ export function SearchableSelect({
             type="button"
             className="prp-btn prp-btn--primary prp-btn--size-sm"
             // Empty selection is valid for some callers (e.g. commits → full PR diff).
-            onClick={confirmMulti}
+            // Create mode: free text alone is enough for single; multi merges query into ids.
+            disabled={
+              createMode
+                ? !free && !(multi && selected.length)
+                : multi
+                  ? false
+                  : !free
+            }
+            onClick={() => {
+              if (multi) {
+                confirmMulti();
+                return;
+              }
+              // Single-select Create and apply
+              if (createMode && free) {
+                onPick?.({
+                  id: free,
+                  label: free,
+                  meta: { createAndApply: true },
+                });
+              }
+            }}
           >
-            {confirmLabel}
-            {selected.length ? ` (${selected.length})` : ''}
+            {primaryLabel}
+            {multi && selected.length && !createMode
+              ? ` (${selected.length})`
+              : multi && createMode
+                ? ` (${Math.max(selected.length, free ? 1 : 0)})`
+                : ''}
           </button>
         </div>
       ) : null}

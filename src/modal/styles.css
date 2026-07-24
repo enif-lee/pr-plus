@@ -2946,6 +2946,55 @@ html.prp-embed-active [data-target='app-header'] {
   color: var(--prp-fg-muted);
 }
 
+/* Aside search (Commits / Files) + Tags list */
+.prp-aside-search {
+  margin: 0 0 8px;
+}
+.prp-aside-search__input {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--prp-border);
+  border-radius: 6px;
+  background: var(--prp-bg);
+  color: var(--prp-fg);
+  font: inherit;
+  font-size: 12px;
+}
+.prp-aside-search__input:focus {
+  outline: none;
+  border-color: var(--prp-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--prp-accent) 18%, transparent);
+}
+.prp-aside-tags {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.prp-aside-tags__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+.prp-aside-tags__name {
+  font-weight: 600;
+  font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prp-aside-tags__sha {
+  flex-shrink: 0;
+  font-size: 11px;
+}
+
 /* Nested file tree (aside, compact) */
 .prp-aside-tree {
   list-style: none;

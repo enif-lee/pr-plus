@@ -177,6 +177,12 @@ const MSG = {
   REMOVE_ASSIGNEES: 'PR_TREE_REMOVE_ASSIGNEES',
   SET_LABELS: 'PR_TREE_SET_LABELS',
   FETCH_REPO_LABELS: 'PR_TREE_FETCH_REPO_LABELS',
+  CREATE_REPO_LABEL: 'PR_TREE_CREATE_REPO_LABEL',
+  FETCH_REPO_MILESTONES: 'PR_TREE_FETCH_REPO_MILESTONES',
+  CREATE_REPO_MILESTONE: 'PR_TREE_CREATE_REPO_MILESTONE',
+  FETCH_REPO_TAGS: 'PR_TREE_FETCH_REPO_TAGS',
+  FETCH_ALL_PR_COMMITS: 'PR_TREE_FETCH_ALL_PR_COMMITS',
+  FETCH_ALL_PR_FILES: 'PR_TREE_FETCH_ALL_PR_FILES',
   APPLY_SUGGESTION: 'PR_TREE_APPLY_SUGGESTION',
   GET_REPO_FILE_TEXT: 'PR_TREE_GET_REPO_FILE_TEXT',
   MERGE_PULL: 'PR_TREE_MERGE_PULL',
@@ -1080,6 +1086,134 @@ async function handleMessage(message) {
           }
         );
         return { ok: true, labels };
+      } catch (err) {
+        if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
+      }
+    }
+    case MSG.CREATE_REPO_LABEL: {
+      const tracked = beginTrackedFetch(message.requestId);
+      try {
+        const token = await tokenForMessage(message);
+        if (!token) throw new Error('GitHub PAT required to create labels');
+        const label = await PRTreeFetch.createRepoLabel(
+          message.owner,
+          message.repo,
+          {
+            name: message.name,
+            color: message.color,
+            description: message.description,
+          },
+          tracked.fetch,
+          token
+        );
+        return { ok: true, label };
+      } catch (err) {
+        if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
+      }
+    }
+    case MSG.FETCH_REPO_MILESTONES: {
+      const tracked = beginTrackedFetch(message.requestId);
+      try {
+        const token = await tokenForMessage(message);
+        const milestones = await PRTreeFetch.fetchRepoMilestones(
+          message.owner,
+          message.repo,
+          tracked.fetch,
+          token,
+          {
+            state: message.state,
+            maxPages:
+              message.maxPages != null ? Number(message.maxPages) : undefined,
+          }
+        );
+        return { ok: true, milestones };
+      } catch (err) {
+        if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
+      }
+    }
+    case MSG.CREATE_REPO_MILESTONE: {
+      const tracked = beginTrackedFetch(message.requestId);
+      try {
+        const token = await tokenForMessage(message);
+        if (!token) throw new Error('GitHub PAT required to create milestones');
+        const milestone = await PRTreeFetch.createRepoMilestone(
+          message.owner,
+          message.repo,
+          { title: message.title, description: message.description },
+          tracked.fetch,
+          token
+        );
+        return { ok: true, milestone };
+      } catch (err) {
+        if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
+      }
+    }
+    case MSG.FETCH_REPO_TAGS: {
+      const tracked = beginTrackedFetch(message.requestId);
+      try {
+        const token = await tokenForMessage(message);
+        const tags = await PRTreeFetch.fetchRepoTags(
+          message.owner,
+          message.repo,
+          tracked.fetch,
+          token,
+          {
+            maxPages:
+              message.maxPages != null ? Number(message.maxPages) : undefined,
+          }
+        );
+        return { ok: true, tags };
+      } catch (err) {
+        if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
+      }
+    }
+    case MSG.FETCH_ALL_PR_COMMITS: {
+      const tracked = beginTrackedFetch(message.requestId);
+      try {
+        const token = await tokenForMessage(message);
+        const commits = await PRTreeFetch.fetchAllPrCommits(
+          message.owner,
+          message.repo,
+          message.number,
+          tracked.fetch,
+          token
+        );
+        return { ok: true, commits };
+      } catch (err) {
+        if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
+      }
+    }
+    case MSG.FETCH_ALL_PR_FILES: {
+      const tracked = beginTrackedFetch(message.requestId);
+      try {
+        const token = await tokenForMessage(message);
+        const files = await PRTreeFetch.fetchAllPrFiles(
+          message.owner,
+          message.repo,
+          message.number,
+          tracked.fetch,
+          token,
+          { gitattributesText: message.gitattributesText || '' }
+        );
+        return { ok: true, files };
       } catch (err) {
         if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
         throw err;

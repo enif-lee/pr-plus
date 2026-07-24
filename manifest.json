@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "pr+",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "GitHub PR stack tree on /pulls plus a fast in-page review shell: list modal/side sheet, PR-page embed, progressive load, Diff virtualization, merge, and deep links.",
   "permissions": ["storage", "scripting"],
   "host_permissions": [

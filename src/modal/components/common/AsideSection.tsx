@@ -13,6 +13,7 @@ export function AsideSection({
   className = '',
   collapsible = false,
   defaultOpen = true,
+  onOpenChange = null,
   ...rest
 }: {
   title?: any;
@@ -21,6 +22,8 @@ export function AsideSection({
   className?: string;
   collapsible?: boolean;
   defaultOpen?: boolean;
+  /** Fired when collapsible open state changes (lazy-load hooks). */
+  onOpenChange?: ((open: boolean) => void) | null;
   [key: string]: any;
 }) {
   const [open, setOpen] = useState(Boolean(defaultOpen));
@@ -28,6 +31,18 @@ export function AsideSection({
   const titleIsPlain =
     title == null || typeof title === 'string' || typeof title === 'number';
   const showBody = !collapsible || open;
+
+  function toggleOpen() {
+    setOpen((v) => {
+      const next = !v;
+      try {
+        onOpenChange?.(next);
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }
 
   return (
     <section
@@ -44,7 +59,7 @@ export function AsideSection({
             <button
               type="button"
               className="prp-aside-section__toggle"
-              onClick={() => setOpen((v) => !v)}
+              onClick={toggleOpen}
               aria-expanded={open}
               title={open ? `Collapse ${titleIsPlain ? title : 'section'}` : `Expand ${titleIsPlain ? title : 'section'}`}
             >
