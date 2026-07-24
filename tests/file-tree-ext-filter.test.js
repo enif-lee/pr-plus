@@ -193,11 +193,42 @@ const appSrc = fs.readFileSync(
 );
 assert.ok(appSrc.includes('filterFilesByReviewMode'), 'App filters files for nav+diff');
 assert.ok(appSrc.includes('displayFiles'), 'shared filtered list for nav+diff');
+assert.ok(appSrc.includes('reviewScopedFiles'), 'resolve-status-only list for ext chips');
+assert.ok(appSrc.includes('extSourceFiles'), 'passes ext source files to tree');
 assert.ok(appSrc.includes('filterReviewRootsForNav'), 'nav roots respect review filter');
 assert.ok(appSrc.includes('fileExtFilter'), 'file ext filter owned by App');
 assert.ok(appSrc.includes('pendingThreadCounts'), 'pending path counts for filter');
 assert.ok(appSrc.includes('unresolvedCount'), 'passes unresolved count to toolbar');
 assert.ok(appSrc.includes('resolvedCount'), 'passes resolved count to toolbar');
+
+// Extension multi-select: chips come from resolve-scoped source, not self-filtered display list
+assert.ok(
+  treeUi.includes('extSourceFiles'),
+  'FolderFileTree accepts extSourceFiles for chip listing'
+);
+assert.ok(
+  treeUi.includes('selectedExts') && treeUi.includes('toggleFileExtension'),
+  'extension chips toggle multi-select set'
+);
+// Selecting one ext must not rebuild options only from already-filtered `files`
+{
+  // Pure: multi-toggle keeps prior selections
+  let multi = new Set();
+  multi = toggleFileExtension(multi, 'ts');
+  multi = toggleFileExtension(multi, 'tsx');
+  multi = toggleFileExtension(multi, 'md');
+  assert.equal(multi.size, 3);
+  assert.ok(multi.has('ts') && multi.has('tsx') && multi.has('md'));
+  // Filtering by multi-select keeps any of the selected exts
+  const mixed = [
+    { filename: 'a.ts' },
+    { filename: 'b.tsx' },
+    { filename: 'c.md' },
+    { filename: 'd.js' },
+  ];
+  const kept = filterFilesByExtensions(mixed, multi).map((f) => f.filename).sort();
+  assert.deepEqual(kept, ['a.ts', 'b.tsx', 'c.md']);
+}
 
 const css = fs.readFileSync(
   path.join(__dirname, '../src/modal/styles.css'),

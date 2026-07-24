@@ -1,11 +1,10 @@
 import React, { useMemo } from 'react';
 import { Avatar } from '@common/Avatar';
-import { Badge } from '@common/Badge';
 import { TipPopover } from '@common/TipPopover';
-import { normalizeChecks } from '@lib/checks';
 import { buildUnifiedReviewerRows } from '@lib/searchable-select';
 import { reviewStatusTone } from '@common/utils';
 import { hasChecksData } from './ChecksPanel';
+import { ChecksSummary } from './ChecksSummary';
 
 /**
  * Avatar stack visibility:
@@ -165,25 +164,7 @@ export function AsideCompactRail({ detail }: { detail: any }) {
       .filter(Boolean) as StackPerson[];
   }, [detail?.assignees, avatars]);
 
-  const checks = useMemo(() => {
-    if (!detail?.checks) return null;
-    const n =
-      typeof normalizeChecks === 'function'
-        ? normalizeChecks(detail.checks)
-        : detail.checks;
-    if (!hasChecksData(n)) return null;
-    const state = String(n.state || 'unknown');
-    const tone =
-      state === 'success' || state === 'SUCCESS'
-        ? 'ok'
-        : state === 'failure' || state === 'FAILURE' || state === 'error'
-          ? 'danger'
-          : 'warn';
-    const count =
-      (n.statuses?.length || 0) +
-      (n.checkRuns?.length || n.check_runs?.length || 0);
-    return { state, tone, count };
-  }, [detail?.checks]);
+  const showChecks = hasChecksData(detail?.checks);
 
   const labels = Array.isArray(detail?.labels) ? detail.labels : [];
   const labelItems = labels.slice(0, 8).map((l: any, i: number) => {
@@ -214,26 +195,15 @@ export function AsideCompactRail({ detail }: { detail: any }) {
         <AvatarStack people={assignees} emptyLabel="No assignees" />
       </section>
 
-      {checks ? (
+      {showChecks ? (
         <section className="prp-aside-compact__group" aria-label="Checks">
           <h3 className="prp-aside-compact__label">Checks</h3>
-          <div
-            className={`prp-aside-compact__check prp-has-tip prp-aside-compact__check--${checks.tone}`}
-            tabIndex={0}
-          >
-            <Badge tone={checks.tone} className="prp-aside-compact__check-badge">
-              {checks.state}
-            </Badge>
-            <TipPopover
-              title={
-                checks.count
-                  ? `Checks: ${checks.state} · ${checks.count} context${
-                      checks.count === 1 ? '' : 's'
-                    }`
-                  : `Checks: ${checks.state}`
-              }
-            />
-          </div>
+          <ChecksSummary
+            checks={detail.checks}
+            showLabel={false}
+            className="prp-aside-compact__check"
+            size={16}
+          />
         </section>
       ) : null}
 

@@ -159,7 +159,11 @@ import {
   buildRerequestReviewerLogins, mapRestReviewComment, mapRestIssueComment, appendOptimisticReviewComment,
 } from '../lib/pr-edit-api';
 import { buildPaletteCommands, filterPaletteCommands } from '../lib/command-palette';
-import { resolveModalShortcutAction } from '../lib/shortcut-policy';
+import {
+  resolveModalShortcutAction,
+  pickConversationCommentFocusTarget,
+} from '../lib/shortcut-policy';
+import { buildConversationTimeline } from '../lib/conversation-timeline';
 import { resolveGithubTheme } from '../lib/theme';
 import { buildStackStrip, buildStackPathModel } from '../lib/ui-polish';
 import {
@@ -572,6 +576,21 @@ export function PrModalApp({
   const searchInputRef = useRef<any>(null);
   const shellRef = useRef<any>(null);
   const commentBoxRef = useRef<any>(null);
+  /**
+   * Keyboard focus on a conversation timeline comment/review (⌘⇧C).
+   * Null when not focused; re-pressing the chord clears it.
+   */
+  const [conversationCommentFocus, setConversationCommentFocus] = useState<{
+    id: string;
+    kind: string;
+    anchor: string;
+  } | null>(null);
+  const conversationCommentFocusRef = useRef(conversationCommentFocus);
+  conversationCommentFocusRef.current = conversationCommentFocus;
+  // Drop keyboard focus when switching PRs
+  useEffect(() => {
+    setConversationCommentFocus(null);
+  }, [prIdentity]);
   const collapseInitRef = useRef<any>(null);
   const selectingRef = useRef<boolean>(false);
   const pointerStartRef = useRef<any>(null);
@@ -751,17 +770,34 @@ export function PrModalApp({
   }, [detail?.reviewComments, annotatedFiles]);
 
   /**
-   * Files after Unresolved/Resolved/Pending + name/ext/unread filters.
-   * Shared by files nav, virtual diff, and review-thread nav counts.
+   * Resolve-status (Unresolved/Resolved/Pending) filter only.
+   * Extension chips are derived from this list so selecting one ext does not
+   * hide other ext chips / drop multi-select — only review mode reshapes them.
    */
-  const displayFiles = useMemo(() => {
-    let list = filterFilesByReviewMode(
+  const reviewScopedFiles = useMemo(
+    () =>
+      filterFilesByReviewMode(
+        annotatedFiles,
+        threadCounts,
+        unresolvedThreadCounts,
+        diffReviewFilter,
+        pendingThreadCounts
+      ),
+    [
       annotatedFiles,
       threadCounts,
       unresolvedThreadCounts,
+      pendingThreadCounts,
       diffReviewFilter,
-      pendingThreadCounts
-    );
+    ]
+  );
+
+  /**
+   * Files after resolve-status + name/ext/unread filters.
+   * Shared by files nav, virtual diff, and review-thread nav counts.
+   */
+  const displayFiles = useMemo(() => {
+    let list = reviewScopedFiles;
     if (typeof filterFilesByQuery === 'function') {
       list = filterFilesByQuery(list, fileQuery);
     }
@@ -769,11 +805,7 @@ export function PrModalApp({
     list = filterFilesUnreadOnly(list, viewedPaths, fileUnreadOnly);
     return list;
   }, [
-    annotatedFiles,
-    threadCounts,
-    unresolvedThreadCounts,
-    pendingThreadCounts,
-    diffReviewFilter,
+    reviewScopedFiles,
     fileQuery,
     fileExtFilter,
     viewedPaths,
@@ -847,10 +879,17 @@ export function PrModalApp({
 
   const mentionCandidates = useMemo(() => {
     const names = new Set();
-    if (detail?.author) names.add(detail.author);
-    for (const r of detail?.reviews || []) if (r.author) names.add(r.author);
-    for (const c of detail?.comments || []) if (c.author) names.add(c.author);
-    for (const c of detail?.reviewComments || []) if (c.author) names.add(c.author);
+    const add = (v: unknown) => {
+      const s = typeof v === 'string' ? v : (v as any)?.login || (v as any)?.name || '';
+      if (s) names.add(String(s).replace(/^@/, ''));
+    };
+    if (detail?.author) add(detail.author);
+    if (detail?.viewerLogin) add(detail.viewerLogin);
+    for (const r of detail?.reviews || []) add(r.author);
+    for (const c of detail?.comments || []) add(c.author);
+    for (const c of detail?.reviewComments || []) add(c.author);
+    for (const a of detail?.assignees || []) add(a);
+    for (const r of detail?.requestedReviewers || []) add(r);
     return [...names];
   }, [detail]);
 
@@ -2162,6 +2201,47 @@ export function PrModalApp({
     } catch {
       /* ignore */
     }
+  }
+
+  function isEditableKeyboardTarget(el: EventTarget | null) {
+    if (!el || typeof el !== 'object') return false;
+    const node = el as HTMLElement;
+    const tag = String(node.tagName || '').toUpperCase();
+    if (tag === 'TEXTAREA' || tag === 'INPUT' || tag === 'SELECT') return true;
+    if (node.isContentEditable) return true;
+    return Boolean(node.closest?.('textarea, input, select, [contenteditable="true"]'));
+  }
+
+  function focusConversationCommentItem() {
+    // Always land on conversation layout so the timeline is visible.
+    // Scroll itself is owned by VirtualConversationList via scrollToAnchor
+    // (indexForConversationAnchor + scroller.scrollTop) after React commit —
+    // not a one-shot querySelector (virtualized off-window rows are not in DOM,
+    // and Diff→Conversation keep-alive panel may still be inactive mid-microtask).
+    if (layoutMode === LAYOUT_DIFF) collapseDiff();
+    const items =
+      typeof buildConversationTimeline === 'function' && detail
+        ? buildConversationTimeline(detail)
+        : [];
+    // Skip pending review-group (lives in composer, not timeline)
+    const timeline = (Array.isArray(items) ? items : []).filter(
+      (i: any) => !(i && i.kind === 'review-group' && i.pending)
+    );
+    // reverseComments default: newest first — pick first displayed comment/review
+    const ordered = reverseComments ? timeline : [...timeline].reverse();
+    const target =
+      typeof pickConversationCommentFocusTarget === 'function'
+        ? pickConversationCommentFocusTarget(ordered)
+        : null;
+    if (!target) {
+      setConversationCommentFocus(null);
+      return;
+    }
+    setConversationCommentFocus(target);
+  }
+
+  function clearConversationCommentFocus() {
+    setConversationCommentFocus(null);
   }
 
   function dismissSelectionIsland(after?: any) {
@@ -3920,8 +4000,12 @@ export function PrModalApp({
    * Fetches head file text once per path, then merges the requested line range.
    * @param {'all'|'up'|'down'} direction
    */
-  async function onExpandDiffGap(row: any, direction: 'all' | 'up' | 'down' = 'all') {
+  async function onExpandDiffGap(
+    row: any,
+    direction: 'all' | 'up' | 'down' | 'fromStart' | 'fromEnd' = 'all'
+  ) {
     if (!detail || !row?.filePath) return;
+    // fromStart/fromEnd = front/back of the remaining gap; up/down kept as aliases
     const range = resolveExpandRange(direction, row);
     if (!range) return;
     const path = String(row.filePath);
@@ -4252,12 +4336,15 @@ export function PrModalApp({
     editingComment,
     pickerOpen: Boolean(picker),
     showSelectionComposer,
+    conversationCommentFocused: Boolean(conversationCommentFocus),
   };
   actionsRef.current = {
     onClose: requestClose,
     onToggleDiff,
     collapseDiff,
     closePicker,
+    focusConversationCommentItem,
+    clearConversationCommentFocus,
   };
 
   useEffect(() => {
@@ -4329,6 +4416,10 @@ export function PrModalApp({
               editingBody: ui.editingBody,
               editingComment: ui.editingComment,
               paletteOpen: ui.paletteOpen,
+              editableTarget: isEditableKeyboardTarget(e.target),
+              conversationCommentFocused: Boolean(
+                ui.conversationCommentFocused ?? conversationCommentFocusRef.current
+              ),
             })
           : null;
 
@@ -4359,6 +4450,12 @@ export function PrModalApp({
           break;
         case 'toggleFullscreen':
           setShellFullscreen((prev) => toggleShellFullscreen(prev));
+          break;
+        case 'focusConversationComment':
+          act.focusConversationCommentItem?.();
+          break;
+        case 'clearConversationCommentFocus':
+          act.clearConversationCommentFocus?.();
           break;
         default:
           break;
@@ -4584,6 +4681,8 @@ export function PrModalApp({
                   }
                 : null
             }
+            mentionCandidates={mentionCandidates}
+            focusedConversationAnchor={conversationCommentFocus?.anchor || null}
             commentText={commentText}
             setCommentText={setCommentText}
             actionBusy={actionBusy}
@@ -4686,6 +4785,8 @@ export function PrModalApp({
             */}
             <FolderFileTree
               files={displayFiles}
+              /** Resolve-status-scoped only — not shrunk by ext/query multi-select */
+              extSourceFiles={reviewScopedFiles}
               tree={fileTree}
               expandedDirs={expandedDirs}
               onToggleDir={onToggleDir}
@@ -4836,6 +4937,7 @@ export function PrModalApp({
                         )?.magicLinks || [],
                 }}
                 onUploadFile={onUploadFile}
+                mentionCandidates={mentionCandidates}
                 isThreadCollapsed={isDiffCommentCollapsed}
                 onToggleThreadCollapse={onToggleThreadCollapse}
                 commentHeightOpts={commentHeightOpts}
@@ -4853,6 +4955,7 @@ export function PrModalApp({
                   leaving={selectionIslandLeaving}
                   pendingCount={totalPendingCount}
                   onUploadFile={onUploadFile}
+                  mentionCandidates={mentionCandidates}
                   linkCtx={{
                     owner: detail.owner,
                     repo: detail.repo,

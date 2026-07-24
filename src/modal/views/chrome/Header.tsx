@@ -24,6 +24,7 @@ import {
 import { LAYOUT_DIFF } from '@lib/layout-mode';
 import { branchRefCopyText, copyTextToClipboard } from '@lib/copy-to-clipboard';
 import { hasChecksData } from '../conversation/ChecksPanel';
+import { ChecksSummary } from '../conversation/ChecksSummary';
 import { useModalStore } from '../../store/modal-store';
 
 /**
@@ -376,19 +377,12 @@ export function Header(props: any) {
           <Badge tone="muted">closed</Badge>
         ) : null}
         {hasChecksData(detail.checks) ? (
-          <Badge
+          <ChecksSummary
+            checks={detail.checks}
+            label="Checks"
             className="prp-header__checks"
-            tone={
-              detail.checks.state === 'success'
-                ? 'ok'
-                : detail.checks.state === 'failure' || detail.checks.state === 'error'
-                  ? 'danger'
-                  : 'warn'
-            }
-            title="CI / status checks"
-          >
-            checks: {detail.checks.state || 'unknown'}
-          </Badge>
+            size={14}
+          />
         ) : null}
         <HeaderStatsBadge
           loadStage={loadStage}

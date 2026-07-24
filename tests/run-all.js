@@ -44,6 +44,7 @@ const tests = [
   'session-view.test.js',
   'shell-preference.test.js',
   'shell-size.test.js',
+  'conversation-comment-shortcut.test.js',
   'shell-resize-ui.test.js',
   'side-sheet-toggle.test.js',
   'scroll-lock.test.js',

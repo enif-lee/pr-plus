@@ -40,6 +40,7 @@ function InlineThreadImpl(props: any) {
     prOpen,
     linkCtx,
     onUploadFile,
+    mentionCandidates = [],
     collapsed: collapsedProp,
     onToggleCollapse,
     pendingCount = 0,
@@ -200,6 +201,7 @@ function InlineThreadImpl(props: any) {
           onRegisterSave={onRegisterEditorSave}
           onUploadFile={onUploadFile}
           linkCtx={linkCtx}
+          mentionCandidates={mentionCandidates}
         />
       );
     }
@@ -431,6 +433,7 @@ function InlineThreadImpl(props: any) {
                 showTabs
                 onUploadFile={onUploadFile}
                 linkCtx={linkCtx}
+                mentionCandidates={mentionCandidates}
               />
               {/* Actions only after Reply field is focused (or draft text remains) */}
               <div

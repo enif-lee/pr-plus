@@ -2067,6 +2067,24 @@ html.prp-scroll-lock body {
   white-space: pre-line;
 }
 
+/*
+ * Checks count tips are longer ("6 checks · 5 succeeded · …") — keep one line
+ * and allow a wider bubble so mid-word wraps don't break the middle-dot list.
+ */
+.prp-checks-summary-ctrl .prp-tip-pop,
+.prp-aside-compact .prp-checks-summary-ctrl .prp-tip-pop {
+  max-width: min(480px, 72vw);
+  width: max-content;
+  white-space: nowrap;
+  text-align: left;
+}
+.prp-checks-summary-ctrl .prp-tip-pop__label,
+.prp-aside-compact .prp-checks-summary-ctrl .prp-tip-pop__label {
+  white-space: nowrap;
+  overflow: visible;
+  text-overflow: unset;
+}
+
 @media (max-width: 840px) {
   .prp-conversation__splitter {
     display: none;
@@ -3617,16 +3635,29 @@ html.prp-scroll-lock body {
   gap: 6px;
 }
 
+.prp-mdc__write {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+}
+
 .prp-composer-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% - 2px);
   list-style: none;
   margin: 0;
   padding: 4px;
   border: 1px solid var(--prp-border);
   border-radius: 8px;
   background: var(--prp-bg);
-  box-shadow: 0 8px 24px rgba(1, 4, 9, 0.12);
+  box-shadow: 0 8px 24px rgba(1, 4, 9, 0.16);
   max-height: 180px;
   overflow: auto;
+  z-index: 50;
 }
 
 .prp-composer-menu__item {
@@ -3643,7 +3674,8 @@ html.prp-scroll-lock body {
   font-size: 12px;
 }
 
-.prp-composer-menu__item:hover {
+.prp-composer-menu__item:hover,
+.prp-composer-menu__item--active {
   background: color-mix(in srgb, var(--prp-accent) 12%, transparent);
 }
 
@@ -4449,6 +4481,13 @@ html.prp-scroll-lock body {
   outline: 2px solid var(--prp-accent, #0969da);
   outline-offset: 1px;
   box-shadow: 0 0 0 3px color-mix(in srgb, #fbbf24 35%, transparent);
+}
+/* Keyboard focus (⌘⇧C) on a conversation comment / review row */
+.prp-card--kb-focus {
+  outline: 2px solid var(--prp-accent, #0969da);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--prp-accent, #0969da) 22%, transparent);
+  border-radius: 10px;
 }
 .prp-review-thread__item--search-match {
   background: color-mix(in srgb, #eab308 10%, transparent);
@@ -6872,39 +6911,59 @@ a.prp-branch-tag__text:focus-visible {
   align-items: center;
 }
 
-/* Split merge CTA + method menu (GitHub-style) */
+/* Split merge CTA + method menu (GitHub-style; tone follows merge-box status) */
 .prp-merge-method {
+  --prp-merge-cta: var(--prp-ok);
   position: relative;
   display: inline-flex;
   flex-direction: column;
   align-items: stretch;
+}
+.prp-merge-method--warn {
+  --prp-merge-cta: var(--prp-warn);
+}
+.prp-merge-method--danger {
+  --prp-merge-cta: var(--prp-danger);
+}
+.prp-merge-method--default {
+  --prp-merge-cta: var(--prp-fg-muted);
 }
 .prp-merge-method__split {
   display: inline-flex;
   align-items: stretch;
   border-radius: 8px;
   overflow: hidden;
-  box-shadow: 0 1px 0 color-mix(in srgb, var(--prp-ok) 25%, transparent);
-  border: 1px solid color-mix(in srgb, var(--prp-ok) 70%, #000);
-  background: var(--prp-ok);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--prp-merge-cta) 25%, transparent);
+  border: 1px solid color-mix(in srgb, var(--prp-merge-cta) 70%, #000);
+  background: var(--prp-merge-cta);
 }
-/* Inverted vs merge-box soft fill: solid ok bg + light text */
+/* Solid CTA bg + light text; color tracks --prp-merge-cta (ok / warn / danger) */
 .prp-merge-method__primary.prp-btn,
 .prp-merge-box .prp-merge-method__primary {
   border-top-right-radius: 0 !important;
   border-bottom-right-radius: 0 !important;
   border: 0 !important;
-  border-right: 1px solid color-mix(in srgb, #fff 22%, var(--prp-ok)) !important;
-  background: var(--prp-ok) !important;
+  border-right: 1px solid color-mix(in srgb, #fff 22%, var(--prp-merge-cta)) !important;
+  background: var(--prp-merge-cta) !important;
   color: #fff !important;
   font-weight: 600;
   box-shadow: none;
 }
 .prp-merge-method__primary.prp-btn:hover:not(:disabled),
 .prp-merge-box .prp-merge-method__primary:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--prp-ok) 88%, #000) !important;
+  background: color-mix(in srgb, var(--prp-merge-cta) 88%, #000) !important;
   color: #fff !important;
   filter: none;
+}
+.prp-merge-method__primary.prp-btn:disabled,
+.prp-merge-box .prp-merge-method__primary:disabled {
+  opacity: 0.72;
+  cursor: not-allowed;
+  filter: grayscale(0.15);
+}
+.prp-merge-method--force .prp-merge-method__primary {
+  /* Slight outline so force path reads as intentional override */
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #fff 35%, transparent);
 }
 .prp-merge-method__caret {
   appearance: none;
@@ -6915,7 +6974,7 @@ a.prp-branch-tag__text:focus-visible {
   padding: 0 10px;
   border: 0;
   border-left: 0;
-  background: var(--prp-ok);
+  background: var(--prp-merge-cta);
   color: #fff;
   font: inherit;
   font-size: 12px;
@@ -6924,7 +6983,7 @@ a.prp-branch-tag__text:focus-visible {
   border-bottom-right-radius: 8px;
 }
 .prp-merge-method__caret:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--prp-ok) 88%, #000);
+  background: color-mix(in srgb, var(--prp-merge-cta) 88%, #000);
   color: #fff;
   filter: none;
 }
@@ -7109,6 +7168,8 @@ a.prp-branch-tag__text:focus-visible {
   flex-direction: column;
   gap: 6px;
   position: relative;
+  /* Allow @mention /slash menus to paint above neighboring rows */
+  overflow: visible;
 }
 .prp-mdc__ghost {
   appearance: none;
@@ -7510,7 +7571,75 @@ a.prp-merge-checks__item-name:hover {
   margin-left: 6px;
   font-size: 11px;
 }
+.prp-checks-link--icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+  color: var(--prp-fg-muted);
+  text-decoration: none;
+  padding: 2px;
+  border-radius: 4px;
+  line-height: 0;
+}
+.prp-checks-link--icon:hover,
+.prp-checks-link--icon:focus-visible {
+  color: var(--prp-accent);
+  background: color-mix(in srgb, var(--prp-accent) 10%, transparent);
+  outline: none;
+}
+.prp-checks-link__icon {
+  display: block;
+}
 .prp-checks-summary {
   margin-bottom: 6px;
+  font-size: 12px;
+}
+
+/* Compact Checks: label + success/fail/loading icons + hover tip */
+.prp-checks-summary-ctrl {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  color: var(--prp-fg);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+  border-radius: 6px;
+  outline: none;
+  /* Tip is wider than the control; don't clip it */
+  overflow: visible;
+}
+.prp-checks-summary-ctrl:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--prp-accent) 45%, transparent);
+}
+.prp-checks-summary-ctrl__label {
+  color: var(--prp-fg-muted);
+  font-weight: 650;
+}
+.prp-checks-summary-icons {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  line-height: 0;
+}
+.prp-checks-summary-icon--success {
+  color: var(--prp-ok);
+}
+.prp-checks-summary-icon--failure {
+  color: var(--prp-danger);
+}
+.prp-checks-summary-icon--pending {
+  color: var(--prp-warn);
+}
+.prp-checks-summary-icon--spin {
+  animation: prp-spin 0.85s linear infinite;
+}
+.prp-header__checks {
+  margin-left: 2px;
+}
+.prp-diff-chrome__checks {
   font-size: 12px;
 }

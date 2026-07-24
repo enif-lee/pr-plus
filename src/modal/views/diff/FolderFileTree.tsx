@@ -19,6 +19,12 @@ const MAX_EXT_CHIPS = 10;
 function FolderFileTreeImpl(props: any) {
   const {
     files,
+    /**
+     * File list used only to populate extension chips.
+     * Should be resolve-status-scoped (not already filtered by selected exts),
+     * so multi-select chips stay visible when one extension is on.
+     */
+    extSourceFiles = null,
     tree: treeProp,
     expandedDirs,
     onToggleDir,
@@ -49,10 +55,18 @@ function FolderFileTreeImpl(props: any) {
   const setUnreadOnly =
     typeof onUnreadOnly === 'function' ? onUnreadOnly : setUnreadOnlyLocal;
 
-  const extOptions = useMemo(
-    () => listFileExtensions(files || [], { max: MAX_EXT_CHIPS }),
-    [files]
-  );
+  const extOptions = useMemo(() => {
+    // Prefer resolve-status-scoped source so selecting .ts does not remove .tsx/etc chips.
+    const source = Array.isArray(extSourceFiles) ? extSourceFiles : files;
+    const listed = listFileExtensions(source || [], { max: MAX_EXT_CHIPS });
+    // Keep any still-selected extensions visible even if outside the frequency cap.
+    if (!(selectedExts instanceof Set) || selectedExts.size === 0) return listed;
+    const out = listed.slice();
+    for (const ext of selectedExts) {
+      if (!out.includes(ext)) out.push(ext);
+    }
+    return out;
+  }, [extSourceFiles, files, selectedExts]);
 
   // Parent App already applies review + name/ext/unread filters when controlled.
   // Re-apply here only for local (uncontrolled) mode, or when parent passes unfiltered files.

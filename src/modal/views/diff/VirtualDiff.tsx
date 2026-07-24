@@ -71,7 +71,18 @@ function renderSearchableHtml(
   return markSearchInText(displayText ?? '', q, { currentStart });
 }
 
-/** Compact expand controls for the right side of an @@ hunk row. */
+/**
+ * Compact expand controls on an @@ hunk row edge of an omitted gap.
+ *
+ * placement:
+ * - `above` → control sits at the **back** of the gap (before this hunk):
+ *   primary ▲ loads from the gap end (toward this hunk).
+ * - `below` → control sits at the **front** of the gap (after this hunk):
+ *   primary ▼ loads from the gap start (after this hunk).
+ *
+ * When the gap is larger than one chunk, both edge buttons are shown so the
+ * user can grow the visible region from either end independently.
+ */
 function HunkExpandControls({
   gap,
   filePath,
@@ -83,7 +94,7 @@ function HunkExpandControls({
   filePath: string;
   onExpandGap: any;
   expandBusyKey: any;
-  /** above = gap before this hunk; below = trailing after last hunk */
+  /** above = gap before this hunk (back edge); below = gap after this hunk (front edge) */
   placement: 'above' | 'below';
 }) {
   if (!gap) return null;
@@ -104,60 +115,77 @@ function HunkExpandControls({
         ? `Expand ${count}`
         : `Expand all ${count}`;
 
+  // fromStart = front of gap (after previous section); fromEnd = back (before next)
+  const fromStartBtn = showSides ? (
+    <button
+      type="button"
+      className="prp-hunk-expand__btn"
+      disabled={busy || !onExpandGap}
+      title={`Show next ${sideN} lines after previous section (front of gap)`}
+      onClick={() => onExpandGap?.(payload, 'fromStart')}
+    >
+      ▼{sideN}
+    </button>
+  ) : null;
+
+  const fromEndBtn = showSides ? (
+    <button
+      type="button"
+      className="prp-hunk-expand__btn"
+      disabled={busy || !onExpandGap}
+      title={`Show previous ${sideN} lines before next section (back of gap)`}
+      onClick={() => onExpandGap?.(payload, 'fromEnd')}
+    >
+      ▲{sideN}
+    </button>
+  ) : null;
+
+  const allBtn = (
+    <button
+      type="button"
+      className="prp-hunk-expand__btn prp-hunk-expand__btn--all"
+      disabled={busy || !onExpandGap}
+      title={
+        count
+          ? `Show all ${count} omitted lines`
+          : 'Expand omitted lines'
+      }
+      onClick={() => onExpandGap?.(payload, 'all')}
+    >
+      {labelAll}
+    </button>
+  );
+
+  // Order: edge-primary first. Front edge (below) → ▼ first; back edge (above) → ▲ first.
+  const buttons =
+    placement === 'below'
+      ? (
+          <>
+            {fromStartBtn}
+            {allBtn}
+            {fromEndBtn}
+          </>
+        )
+      : (
+          <>
+            {fromEndBtn}
+            {allBtn}
+            {fromStartBtn}
+          </>
+        );
+
   return (
     <div
       className={`prp-hunk-expand prp-hunk-expand--${placement}`}
       role="group"
       aria-label={
         placement === 'above'
-          ? 'Expand omitted lines above this hunk'
-          : 'Expand omitted lines below this hunk'
+          ? 'Expand omitted lines above this hunk (back of gap)'
+          : 'Expand omitted lines below this hunk (front of gap)'
       }
       onMouseDown={(e) => e.stopPropagation()}
     >
-      {showSides ? (
-        <button
-          type="button"
-          className="prp-hunk-expand__btn"
-          disabled={busy || !onExpandGap}
-          title={
-            placement === 'above'
-              ? `Show next ${sideN} lines after previous section`
-              : `Show next ${sideN} lines after this hunk`
-          }
-          onClick={() => onExpandGap?.(payload, 'down')}
-        >
-          ▼{sideN}
-        </button>
-      ) : null}
-      <button
-        type="button"
-        className="prp-hunk-expand__btn prp-hunk-expand__btn--all"
-        disabled={busy || !onExpandGap}
-        title={
-          count
-            ? `Show all ${count} omitted lines`
-            : 'Expand omitted lines'
-        }
-        onClick={() => onExpandGap?.(payload, 'all')}
-      >
-        {labelAll}
-      </button>
-      {showSides ? (
-        <button
-          type="button"
-          className="prp-hunk-expand__btn"
-          disabled={busy || !onExpandGap}
-          title={
-            placement === 'above'
-              ? `Show previous ${sideN} lines before this hunk`
-              : `Show previous ${sideN} lines from end of file`
-          }
-          onClick={() => onExpandGap?.(payload, 'up')}
-        >
-          ▲{sideN}
-        </button>
-      ) : null}
+      {buttons}
     </div>
   );
 }
@@ -420,6 +448,7 @@ function VirtualDiffImpl(props: any) {
     prOpen,
     linkCtx,
     onUploadFile,
+    mentionCandidates = [],
     /** (row|commentId, resolved?) => boolean — resolved defaults collapsed */
     isThreadCollapsed = null,
     onToggleThreadCollapse,
@@ -749,6 +778,7 @@ function VirtualDiffImpl(props: any) {
                     viewerLogin={viewerLogin}
                     prOpen={prOpen}
                     linkCtx={linkCtx}
+                    mentionCandidates={mentionCandidates}
                     onUploadFile={onUploadFile}
                     collapsed={collapsed}
                     onToggleCollapse={() =>

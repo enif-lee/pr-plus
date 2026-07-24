@@ -393,6 +393,67 @@
     return 'Checks';
   }
 
+  /**
+   * Count outcomes over normalized statuses + check runs for summary icons/popover.
+   * @param {object|null|undefined} checks
+   * @returns {{ total: number, success: number, failure: number, pending: number, skipped: number, state: string }}
+   */
+  function summarizeCheckCounts(checks) {
+    const n = normalizeChecks(checks);
+    let success = 0;
+    let failure = 0;
+    let pending = 0;
+    let skipped = 0;
+    for (const s of n.statuses || []) {
+      const o = classifyCheckOutcome({ kind: 'status', state: s?.state });
+      if (o === 'failure') failure += 1;
+      else if (o === 'success') success += 1;
+      else if (o === 'skipped') skipped += 1;
+      else pending += 1;
+    }
+    for (const r of n.checkRuns || []) {
+      const o = classifyCheckOutcome(r);
+      if (o === 'failure') failure += 1;
+      else if (o === 'success') success += 1;
+      else if (o === 'skipped') skipped += 1;
+      else pending += 1;
+    }
+    const total = success + failure + pending + skipped;
+    return {
+      total,
+      success,
+      failure,
+      pending,
+      skipped,
+      state: n.state || 'unknown',
+    };
+  }
+
+  /**
+   * Human popover / aria copy for check counts.
+   * @param {{ total?: number, success?: number, failure?: number, pending?: number, skipped?: number, state?: string }|null|undefined} summary
+   */
+  function formatChecksCountLabel(summary) {
+    const s = summary && typeof summary === 'object' ? summary : {};
+    const total = Number(s.total) || 0;
+    const success = Number(s.success) || 0;
+    const failure = Number(s.failure) || 0;
+    const pending = Number(s.pending) || 0;
+    const skipped = Number(s.skipped) || 0;
+    if (!total) {
+      const st = String(s.state || 'unknown');
+      return st && st !== 'unknown' ? `Checks: ${st}` : 'No checks';
+    }
+    const parts = [
+      `${total} check${total === 1 ? '' : 's'}`,
+      `${success} succeeded`,
+      `${failure} failed`,
+      `${pending} in progress`,
+    ];
+    if (skipped > 0) parts.push(`${skipped} skipped`);
+    return parts.join(' · ');
+  }
+
   const api = {
     parseTime,
     statusKey,
@@ -409,6 +470,8 @@
     formatCheckSummary,
     buildMergeBoxCheckGroups,
     mergeBoxChecksHeadline,
+    summarizeCheckCounts,
+    formatChecksCountLabel,
   };
 
   if (typeof module !== 'undefined' && module.exports) {

@@ -17,6 +17,7 @@ export function SelectionCommentBar(props: any) {
     leaving = false,
     onUploadFile,
     linkCtx,
+    mentionCandidates = [],
   } = props;
 
   const barRef = useRef<HTMLDivElement | null>(null);
@@ -80,6 +81,7 @@ export function SelectionCommentBar(props: any) {
         showTabs
         onUploadFile={onUploadFile}
         linkCtx={linkCtx}
+        mentionCandidates={mentionCandidates}
       />
       <div className="prp-composer__row">
         <Button size="sm" variant="primary" disabled={!canSubmit} onClick={onSubmitImmediate}>

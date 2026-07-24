@@ -16,4 +16,6 @@ export {
   formatCheckSummary,
   buildMergeBoxCheckGroups,
   mergeBoxChecksHeadline,
+  summarizeCheckCounts,
+  formatChecksCountLabel,
 } from '../pure/checks.js';

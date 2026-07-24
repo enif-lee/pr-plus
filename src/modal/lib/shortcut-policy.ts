@@ -1,7 +1,7 @@
 /** @module modal/lib/shortcut-policy */
 /**
  * Pure policy for PR modal global shortcuts.
- * Diff toggle, command palette, Find (⌘F), and Esc-related navigation.
+ * Diff toggle, command palette, Find (⌘F), conversation comment focus, and Esc navigation.
  */
 
 /**
@@ -12,6 +12,8 @@
  *   editingBody?: boolean,
  *   editingComment?: boolean|object|null,
  *   paletteOpen?: boolean,
+ *   editableTarget?: boolean,
+ *   conversationCommentFocused?: boolean,
  * }} opts
  * @returns {string|null}
  */
@@ -28,10 +30,20 @@ export function resolveModalShortcutAction(opts: any = {}) {
     return 'escapeNav';
   }
 
+  // Do not steal keys while typing in inputs/textareas/contenteditable,
+  // or while the command palette owns the keyboard.
+  if (opts.editableTarget || paletteOpen) return null;
+
   if (!mod) return null;
 
   // ⌘⇧F / Ctrl+Shift+F → fullscreen shell toggle
   if (shift && key === 'f') return 'toggleFullscreen';
+
+  // ⌘⇧C / Ctrl+Shift+C → focus first conversation comment/review; re-press clears
+  if (shift && key === 'c') {
+    if (opts.conversationCommentFocused) return 'clearConversationCommentFocus';
+    return 'focusConversationComment';
+  }
 
   if (shift) return null;
 
@@ -44,5 +56,41 @@ export function resolveModalShortcutAction(opts: any = {}) {
   // ⌘F / Ctrl+F → in-modal search (Find)
   if (key === 'f') return 'openSearch';
 
+  return null;
+}
+
+/**
+ * Stable search-anchor for a conversation timeline comment/review row.
+ */
+export function conversationCommentFocusAnchor(item: any): string | null {
+  if (!item || item.id == null) return null;
+  const kind = String(item.kind || '');
+  const id = String(item.id);
+  if (kind === 'issue-comment') return `issue-comment:${id}`;
+  if (kind === 'review') return `review:${id}`;
+  if (kind === 'review-group') return `review-group:${id}`;
+  if (kind === 'review-thread' || kind === 'review-comment') {
+    return `review-comment:${id}`;
+  }
+  return null;
+}
+
+/**
+ * Pick the first focusable PR comment/review timeline entry (display order).
+ */
+export function pickConversationCommentFocusTarget(
+  items: any
+): { id: string; kind: string; anchor: string } | null {
+  const list = Array.isArray(items) ? items : [];
+  for (const item of list) {
+    if (!item || item.pending) continue;
+    const anchor = conversationCommentFocusAnchor(item);
+    if (!anchor) continue;
+    return {
+      id: String(item.id),
+      kind: String(item.kind || ''),
+      anchor,
+    };
+  }
   return null;
 }

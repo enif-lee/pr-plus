@@ -333,8 +333,36 @@ export function flattenFilesToVirtualRows(files, mode = 'unified', options: any 
             }
             seenHunk = true;
           } else if (newLine > 0 && nextNew > newLine) {
-            // Middle gap → expand controls live on the following @@ row
-            expandAbove = materializeGap(newLine, nextNew - 1, oldLine);
+            // Middle gap: attach to BOTH edges so ▲/▼ expand from opposite ends.
+            // - previous hunk.expandBelow → front of gap (after previous section)
+            // - this hunk.expandAbove → back of gap (before this hunk)
+            const middleGap = materializeGap(newLine, nextNew - 1, oldLine);
+            if (middleGap && lastHunkRow) {
+              lastHunkRow.expandBelow = middleGap;
+              // Previous @@ may have been omitted (symmetric/hidden); insert a
+              // marker row after its body so the lower-edge control can render.
+              if (!rows.includes(lastHunkRow)) {
+                if (lastHunkRow.hidden) {
+                  rows.push({
+                    kind: 'diff-line',
+                    filePath: path,
+                    text: '',
+                    code: '',
+                    split: false,
+                    raw: '',
+                    rowIndex: index++,
+                    lineType: 'hunk',
+                    oldLine: null,
+                    newLine: null,
+                    hidden: true,
+                    expandBelow: middleGap,
+                  });
+                } else {
+                  rows.push(lastHunkRow);
+                }
+              }
+            }
+            expandAbove = middleGap;
           }
           oldLine = nextOld;
           newLine = nextNew;
@@ -445,7 +473,15 @@ export function mergeLineRanges(ranges, start, end) {
 
 /**
  * Resolve which inclusive new-file lines to expand for a gap control click.
- * @param {'all'|'down'|'up'} direction
+ *
+ * Directions are relative to the **gap** (not the file):
+ * - `down` / `fromStart` → next chunk from the front of the remaining gap
+ *   (after the previous visible section)
+ * - `up` / `fromEnd` → next chunk from the back of the remaining gap
+ *   (before the following visible section)
+ * - `all` → entire remaining gap
+ *
+ * @param {'all'|'down'|'up'|'fromStart'|'fromEnd'} direction
  * @param {{ gapStartNew: number, gapEndNew: number, expandChunk?: number }} gap
  */
 export function resolveExpandRange(direction, gap) {
@@ -459,10 +495,11 @@ export function resolveExpandRange(direction, gap) {
       ? Math.floor(gap.expandChunk)
       : DIFF_EXPAND_CHUNK;
   const dir = String(direction || 'all');
-  if (dir === 'down') {
+  // fromStart = front of gap (after previous hunk); fromEnd = back (before next)
+  if (dir === 'down' || dir === 'fromStart') {
     return { start, end: Math.min(end, start + chunk - 1) };
   }
-  if (dir === 'up') {
+  if (dir === 'up' || dir === 'fromEnd') {
     return { start: Math.max(start, end - chunk + 1), end };
   }
   return { start, end };
