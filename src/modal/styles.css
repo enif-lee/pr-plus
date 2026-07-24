@@ -4185,6 +4185,106 @@ html.prp-scroll-lock body {
 .prp-vline--meta {
   color: var(--prp-fg-muted);
   font-style: italic;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+}
+
+.prp-diff-meta-text {
+  font-size: 12px;
+}
+
+.prp-file-header__binary-badge {
+  flex-shrink: 0;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--prp-fg-muted);
+  background: var(--prp-bg-muted);
+  border: 1px solid var(--prp-border-muted);
+}
+
+.prp-file-header__collapse--locked {
+  opacity: 0.35;
+  pointer-events: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.prp-file-header-btn:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.prp-vline--image {
+  height: auto;
+  min-height: 120px;
+  padding: 8px 12px 12px;
+  white-space: normal;
+  background: var(--prp-bg-muted);
+  border-left: 3px solid var(--prp-border);
+}
+
+.prp-diff-image {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.prp-diff-image__pane {
+  margin: 0;
+  min-width: 120px;
+  max-width: min(420px, 100%);
+  flex: 1 1 180px;
+}
+
+.prp-diff-image__label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--prp-fg-muted);
+  margin: 0 0 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.prp-diff-image__img {
+  display: block;
+  max-width: 100%;
+  max-height: 360px;
+  width: auto;
+  height: auto;
+  border-radius: 6px;
+  border: 1px solid var(--prp-border);
+  background:
+    linear-gradient(45deg, #d0d7de 25%, transparent 25%),
+    linear-gradient(-45deg, #d0d7de 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #d0d7de 75%),
+    linear-gradient(-45deg, transparent 75%, #d0d7de 75%);
+  background-size: 12px 12px;
+  background-position: 0 0, 0 6px, 6px -6px, -6px 0;
+  background-color: var(--prp-bg);
+  object-fit: contain;
+}
+
+.prp-diff-image__pane--base .prp-diff-image__img {
+  border-color: color-mix(in srgb, var(--prp-danger) 40%, var(--prp-border));
+}
+
+.prp-diff-image__pane--head .prp-diff-image__img {
+  border-color: color-mix(in srgb, var(--prp-ok) 40%, var(--prp-border));
+}
+
+.prp-diff-image__empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--prp-fg-muted);
+  font-style: italic;
 }
 
 .prp-vline--hit {

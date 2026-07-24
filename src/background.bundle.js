@@ -5,6 +5,454 @@
 /* eslint-disable */
 
 
+/* ---- github-endpoints.js ---- */
+
+/**
+ * GitHub.com + GitHub Enterprise (Server/Cloud) endpoint resolution.
+ *
+ * REST:
+ *   github.com  → https://api.github.com
+ *   GHE Server  → https://{host}/api/v3
+ * GraphQL:
+ *   github.com  → https://api.github.com/graphql
+ *   GHE Server  → https://{host}/api/graphql
+ *
+ * API bases are always derived from the web host (no custom API override).
+ */
+(function initGithubEndpoints(global) {
+  const DEFAULT_REST = 'https://api.github.com';
+  const DEFAULT_GRAPHQL = 'https://api.github.com/graphql';
+
+  /**
+   * @param {unknown} host
+   * @returns {string}
+   */
+  function normalizeHostname(host) {
+    let h = String(host || '')
+      .trim()
+      .toLowerCase()
+      .replace(/^https?:\/\//, '')
+      .replace(/\/.*$/, '')
+      .replace(/:\d+$/, '');
+    // strip credentials if pasted as user@host
+    if (h.includes('@')) h = h.slice(h.lastIndexOf('@') + 1);
+    return h;
+  }
+
+  /**
+   * Public GitHub.com cloud only (default PAT applies solely here).
+   * *.ghe.com is NOT public cloud — requires an explicit registered host pair.
+   * @param {unknown} host
+   */
+  function isPublicCloudWebHost(host) {
+    const h = normalizeHostname(host);
+    return h === 'github.com' || h === 'www.github.com';
+  }
+
+  /**
+   * Hostname is known github.com web (not enterprise).
+   * @param {unknown} host
+   */
+  function isKnownGithubHostname(host) {
+    const h = normalizeHostname(host);
+    if (!h) return false;
+    if (isPublicCloudWebHost(h)) return true;
+    // gist.github.com etc. — still github.com product surface, not multi-account enterprise
+    if (h.endsWith('.github.com')) return true;
+    // Do NOT auto-treat *.ghe.com as known — manual host registration required
+    return false;
+  }
+
+  /** Max non-github.com host↔PAT pairs. */
+  const MAX_HOST_ACCOUNTS = 3;
+
+  /**
+   * @typedef {{ host: string, token: string }} HostAccount
+   */
+
+  /**
+   * Normalize host↔PAT pairs (max MAX_HOST_ACCOUNTS, no github.com).
+   * @param {unknown} raw
+   * @returns {HostAccount[]}
+   */
+  function normalizeHostAccounts(raw) {
+    const list = Array.isArray(raw) ? raw : [];
+    const out = [];
+    const seen = new Set();
+    for (const row of list) {
+      if (!row || typeof row !== 'object') continue;
+      const host = normalizeHostname(row.host);
+      const token = typeof row.token === 'string' ? row.token.trim() : '';
+      if (!host || isPublicCloudWebHost(host) || host.endsWith('.github.com')) {
+        continue;
+      }
+      if (!token || seen.has(host)) continue;
+      seen.add(host);
+      out.push({ host, token });
+      if (out.length >= MAX_HOST_ACCOUNTS) break;
+    }
+    return out;
+  }
+
+  /**
+   * Hosts list derived from pairs (for content-script registration).
+   * @param {unknown} rawAccounts
+   */
+  function hostsFromAccounts(rawAccounts) {
+    return normalizeHostAccounts(rawAccounts).map((a) => a.host);
+  }
+
+  /**
+   * Select which PAT to use for API traffic for this web host.
+   * - github.com → defaultToken only
+   * - registered host → that host's token
+   * - unregistered non-github.com (incl. *.ghe.com) → no token
+   *
+   * @param {unknown} webHost
+   * @param {{ defaultToken?: string|null, hostAccounts?: unknown }} [opts]
+   * @returns {{ token: string|null, source: 'default'|'host'|null, host: string }}
+   */
+  function selectTokenForWebHost(webHost, opts = {}) {
+    const host = normalizeHostname(webHost) || 'github.com';
+    const defaultToken =
+      typeof opts.defaultToken === 'string' && opts.defaultToken.trim()
+        ? opts.defaultToken.trim()
+        : null;
+    const accounts = normalizeHostAccounts(opts.hostAccounts);
+
+    if (isPublicCloudWebHost(host) || host.endsWith('.github.com')) {
+      return {
+        token: defaultToken,
+        source: defaultToken ? 'default' : null,
+        host: isPublicCloudWebHost(host) ? 'github.com' : host,
+      };
+    }
+
+    const pair = accounts.find((a) => a.host === host);
+    if (pair) {
+      return { token: pair.token, source: 'host', host };
+    }
+    return { token: null, source: null, host };
+  }
+
+  /**
+   * Validate adding a host↔PAT pair.
+   * @param {unknown} existingAccounts
+   * @param {unknown} host
+   * @param {unknown} token
+   * @returns {{ ok: true, accounts: HostAccount[] } | { ok: false, error: string, accounts: HostAccount[] }}
+   */
+  function registerHostAccount(existingAccounts, host, token) {
+    const accounts = normalizeHostAccounts(existingAccounts);
+    const h = normalizeHostname(host);
+    const t = typeof token === 'string' ? token.trim() : '';
+    if (!h) {
+      return { ok: false, error: 'Host is required', accounts };
+    }
+    if (isPublicCloudWebHost(h) || h.endsWith('.github.com')) {
+      return {
+        ok: false,
+        error: 'github.com uses the default PAT — do not register it as enterprise',
+        accounts,
+      };
+    }
+    if (!t) {
+      return { ok: false, error: 'PAT is required for each enterprise host', accounts };
+    }
+    const idx = accounts.findIndex((a) => a.host === h);
+    if (idx >= 0) {
+      const next = accounts.slice();
+      next[idx] = { host: h, token: t };
+      return { ok: true, accounts: next };
+    }
+    if (accounts.length >= MAX_HOST_ACCOUNTS) {
+      return {
+        ok: false,
+        error: `At most ${MAX_HOST_ACCOUNTS} enterprise hosts`,
+        accounts,
+      };
+    }
+    return { ok: true, accounts: [...accounts, { host: h, token: t }] };
+  }
+
+  /**
+   * @param {unknown} existingAccounts
+   * @param {unknown} host
+   */
+  function unregisterHostAccount(existingAccounts, host) {
+    const accounts = normalizeHostAccounts(existingAccounts);
+    const h = normalizeHostname(host);
+    return {
+      ok: true,
+      accounts: accounts.filter((a) => a.host !== h),
+    };
+  }
+
+  /**
+   * Heuristic: is this document a GitHub / GHE web UI?
+   * @param {Document|null|undefined} doc
+   * @param {{ hostname?: string }|null|undefined} [loc]
+   */
+  function isGithubWebDocument(doc, loc) {
+    const host =
+      normalizeHostname(loc?.hostname) ||
+      normalizeHostname(
+        typeof global.location !== 'undefined' ? global.location.hostname : ''
+      );
+    if (isKnownGithubHostname(host)) return true;
+    if (!doc || typeof doc.querySelector !== 'function') return false;
+
+    // Strong GitHub UI markers (GHES + github.com)
+    if (doc.querySelector('meta[name="github-keyboard-shortcuts"]')) return true;
+    if (doc.querySelector('meta[name="octolytics-url"]')) return true;
+    if (doc.querySelector('meta[name="octolytics-dimension-request_id"]')) return true;
+    if (doc.querySelector('meta[name="route-controller"][content]')) {
+      // Many GHE pages expose route-controller; pair with soft signals
+      if (
+        doc.querySelector('meta[name="current-catalog-service"]') ||
+        doc.querySelector('link[rel="fluid-icon"]') ||
+        doc.querySelector('meta[name="theme-color"]')
+      ) {
+        return true;
+      }
+    }
+    const site = doc
+      .querySelector('meta[property="og:site_name"]')
+      ?.getAttribute('content');
+    if (site && /^GitHub\b/i.test(String(site).trim())) return true;
+
+    // Assets / turbo patterns
+    if (doc.querySelector('link[href*="githubassets.com"]')) return true;
+    if (doc.querySelector('script[src*="githubassets.com"]')) return true;
+
+    return false;
+  }
+
+  /**
+   * Strip trailing slashes from an origin/base URL.
+   * @param {unknown} url
+   */
+  function stripTrailingSlashes(url) {
+    return String(url || '').trim().replace(/\/+$/, '');
+  }
+
+  /**
+   * Derive GraphQL URL from a REST API base.
+   * @param {string} restBase
+   */
+  function graphqlUrlFromRestBase(restBase) {
+    const base = stripTrailingSlashes(restBase);
+    if (!base) return DEFAULT_GRAPHQL;
+    if (base === DEFAULT_REST || base === 'https://api.github.com') {
+      return DEFAULT_GRAPHQL;
+    }
+    // GHE classic: …/api/v3 → …/api/graphql
+    if (/\/api\/v3$/i.test(base)) {
+      return base.replace(/\/api\/v3$/i, '/api/graphql');
+    }
+    // …/api → …/api/graphql
+    if (/\/api$/i.test(base)) {
+      return `${base}/graphql`;
+    }
+    // Bare API host (api.github.example.com style)
+    return `${base}/graphql`;
+  }
+
+  /**
+   * Default endpoints for a web hostname (no custom override).
+   * @param {unknown} webHost
+   */
+  function defaultEndpointsForWebHost(webHost) {
+    const host = normalizeHostname(webHost);
+    if (!host || host === 'github.com' || host === 'www.github.com') {
+      return {
+        kind: 'dotcom',
+        webHost: 'github.com',
+        webOrigin: 'https://github.com',
+        restBase: DEFAULT_REST,
+        graphqlUrl: DEFAULT_GRAPHQL,
+      };
+    }
+    if (host.endsWith('.ghe.com') || host === 'ghe.com') {
+      // Enterprise Cloud (data residency): web SUBDOMAIN.ghe.com → API api.SUBDOMAIN.ghe.com
+      // Official docs: replace api.github.com with api.SUBDOMAIN.ghe.com (no /api/v3 path).
+      // See: docs.github.com/en/enterprise-cloud@latest/rest/*
+      const apiHost =
+        host === 'ghe.com' || host.startsWith('api.')
+          ? host === 'ghe.com'
+            ? 'api.ghe.com'
+            : host
+          : `api.${host}`;
+      return {
+        kind: 'ghe-cloud',
+        webHost: host,
+        webOrigin: `https://${host}`,
+        restBase: `https://${apiHost}`,
+        graphqlUrl: `https://${apiHost}/graphql`,
+      };
+    }
+    // Self-hosted Enterprise Server: https://HOSTNAME/api/v3 and /api/graphql
+    // Official: docs.github.com/en/enterprise-server@latest/rest/quickstart
+    return {
+      kind: 'ghes',
+      webHost: host,
+      webOrigin: `https://${host}`,
+      restBase: `https://${host}/api/v3`,
+      graphqlUrl: `https://${host}/api/graphql`,
+    };
+  }
+
+  /**
+   * Resolve REST + GraphQL endpoints for API calls from the web host only.
+   * @param {{ webHost?: string|null }} [opts]
+   * @returns {{
+   *   kind: string,
+   *   webHost: string,
+   *   webOrigin: string,
+   *   restBase: string,
+   *   graphqlUrl: string,
+   * }}
+   */
+  function resolveGithubEndpoints(opts = {}) {
+    return defaultEndpointsForWebHost(opts.webHost);
+  }
+
+  /**
+   * Apply resolved endpoints for pure builders / fetch-pulls in this global.
+   *
+   * WARNING: mutable process-global. Concurrent SW handlers MUST NOT interleave
+   * setGithubApiContext + githubRestUrl/githubGraphqlUrl without serialization.
+   * Prefer githubRestUrl(path, ctx) / githubGraphqlUrl(ctx) with an explicit ctx,
+   * or runWithGithubApiExclusive (promise chain) around each full API message.
+   *
+   * @param {{ restBase?: string, graphqlUrl?: string }|null|undefined} endpoints
+   */
+  function setGithubApiContext(endpoints) {
+    const restBase = stripTrailingSlashes(
+      endpoints?.restBase || DEFAULT_REST
+    ) || DEFAULT_REST;
+    const graphqlUrl =
+      stripTrailingSlashes(endpoints?.graphqlUrl || '') ||
+      graphqlUrlFromRestBase(restBase);
+    global.__PRP_GITHUB_API__ = { restBase, graphqlUrl };
+    return global.__PRP_GITHUB_API__;
+  }
+
+  /**
+   * Current API context (defaults to github.com).
+   */
+  function getGithubApiContext() {
+    const cur = global.__PRP_GITHUB_API__;
+    if (cur && cur.restBase && cur.graphqlUrl) {
+      return {
+        restBase: stripTrailingSlashes(cur.restBase),
+        graphqlUrl: stripTrailingSlashes(cur.graphqlUrl),
+      };
+    }
+    return { restBase: DEFAULT_REST, graphqlUrl: DEFAULT_GRAPHQL };
+  }
+
+  /**
+   * Serialize async work that mutates/reads the process-global API context.
+   * Prevents github.com + enterprise handlers from clobbering each other's REST base.
+   * @returns {(fn: () => any|Promise<any>) => Promise<any>}
+   */
+  function createGithubApiExclusiveRunner() {
+    let chain = Promise.resolve();
+    return function runWithGithubApiExclusive(fn) {
+      const run = chain.then(
+        () => fn(),
+        () => fn()
+      );
+      // Keep the queue alive even when fn rejects
+      chain = run.then(
+        () => undefined,
+        () => undefined
+      );
+      return run;
+    };
+  }
+
+  /** REST absolute URL: restBase + path (path must start with /). */
+  function githubRestUrl(path, ctx) {
+    const { restBase } = ctx || getGithubApiContext();
+    const base = stripTrailingSlashes(restBase) || DEFAULT_REST;
+    const p = String(path || '');
+    if (/^https?:\/\//i.test(p)) return p;
+    return `${base}${p.startsWith('/') ? p : `/${p}`}`;
+  }
+
+  function githubGraphqlUrl(ctx) {
+    const { graphqlUrl } = ctx || getGithubApiContext();
+    return stripTrailingSlashes(graphqlUrl) || DEFAULT_GRAPHQL;
+  }
+
+  /**
+   * Hosts that should receive content-script registration (enterprise).
+   * Always includes github.com patterns via static manifest matches.
+   * @param {unknown} rawHosts
+   * @returns {string[]}
+   */
+  function normalizeEnterpriseWebHosts(rawHosts) {
+    const list = Array.isArray(rawHosts)
+      ? rawHosts
+      : typeof rawHosts === 'string'
+        ? rawHosts.split(/[\s,]+/)
+        : [];
+    const out = [];
+    const seen = new Set();
+    for (const raw of list) {
+      const h = normalizeHostname(raw);
+      if (!h || h === 'github.com' || h === 'www.github.com') continue;
+      if (seen.has(h)) continue;
+      seen.add(h);
+      out.push(h);
+    }
+    return out;
+  }
+
+  /**
+   * Match patterns for chrome.scripting.registerContentScripts.
+   * @param {string[]} hosts
+   */
+  function contentScriptMatchesForHosts(hosts) {
+    return normalizeEnterpriseWebHosts(hosts).map(
+      (h) => `https://${h}/*`
+    );
+  }
+
+  const api = {
+    DEFAULT_REST,
+    DEFAULT_GRAPHQL,
+    MAX_HOST_ACCOUNTS,
+    normalizeHostname,
+    isPublicCloudWebHost,
+    isKnownGithubHostname,
+    isGithubWebDocument,
+    graphqlUrlFromRestBase,
+    defaultEndpointsForWebHost,
+    resolveGithubEndpoints,
+    setGithubApiContext,
+    getGithubApiContext,
+    createGithubApiExclusiveRunner,
+    githubRestUrl,
+    githubGraphqlUrl,
+    normalizeEnterpriseWebHosts,
+    contentScriptMatchesForHosts,
+    normalizeHostAccounts,
+    hostsFromAccounts,
+    selectTokenForWebHost,
+    registerHostAccount,
+    unregisterHostAccount,
+  };
+
+  global.PRGithubEndpoints = api;
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = api;
+  }
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+
 /* ---- modal/pure/collapse.js ---- */
 
 /* sw-iife */
@@ -14,8 +462,44 @@
    * Aligns with GitHub + linguist-style .gitattributes signals.
    */
 
-  const DEFAULT_LARGE_CHANGES = 500;
+  /** Files with this many change lines (additions+deletions) start collapsed. */
+  const DEFAULT_LARGE_CHANGES = 5000;
   const DEFAULT_LARGE_PATCH_CHARS = 80_000;
+
+  const IMAGE_EXT_RE =
+    /\.(png|jpe?g|gif|webp|bmp|svg|ico|avif|jfif|pjpeg|pjp|tif{1,2})$/i;
+
+  /**
+   * @param {unknown} path
+   * @returns {boolean}
+   */
+  function isImagePath(path) {
+    const p = String(path || '').split('?')[0].split('#')[0];
+    return IMAGE_EXT_RE.test(p);
+  }
+
+  /**
+   * Classify a PR file for diff presentation.
+   * @returns {{ kind: 'image'|'binary'|'text', openableAsText: boolean, renderImage: boolean }}
+   */
+  function classifyDiffFile(file) {
+    if (!file) {
+      return { kind: 'binary', openableAsText: false, renderImage: false };
+    }
+    const path = file.filename || file.path || '';
+    const patch = typeof file.patch === 'string' ? file.patch : '';
+    const hasPatch = patch.length > 0;
+    const media = String(file.mediaType || file.contentType || '').toLowerCase();
+    const image = isImagePath(path) || media.startsWith('image/');
+
+    if (image) {
+      return { kind: 'image', openableAsText: false, renderImage: true };
+    }
+    if (hasPatch) {
+      return { kind: 'text', openableAsText: true, renderImage: false };
+    }
+    return { kind: 'binary', openableAsText: false, renderImage: false };
+  }
 
   /**
    * Parse .gitattributes body into path-pattern → attributes map.
@@ -131,6 +615,7 @@
     const largeChanges = opts.largeChanges ?? DEFAULT_LARGE_CHANGES;
     const largePatchChars = opts.largePatchChars ?? DEFAULT_LARGE_PATCH_CHARS;
     const rules = opts.rules || [];
+    const classified = classifyDiffFile(file);
 
     const attrs = attributesForPath(path, rules);
     if (
@@ -146,10 +631,11 @@
     if (attrs.diff === false || String(attrs.diff || '').toLowerCase() === 'false') {
       return true;
     }
-    // GitHub omits patch for binary / too large
-    if (!patch) return true;
+    if (classified.kind === 'binary') return true;
     if (changes >= largeChanges) return true;
-    if (patch.length >= largePatchChars) return true;
+    if (patch && patch.length >= largePatchChars) return true;
+    if (classified.kind === 'image') return false;
+    if (!patch) return true;
 
     // Common generated / lockfile noise
     const lower = path.toLowerCase();
@@ -180,19 +666,21 @@
     return (Array.isArray(files) ? files : []).map((f) => {
       const path = f.filename || f.path || '';
       const attrs = attributesForPath(path, rules);
-      const collapsed = shouldCollapseFile(
-        {
-          ...f,
-          linguistGenerated:
-            isAttrEnabled(f.linguistGenerated) ||
-            isAttrEnabled(attrs['linguist-generated']),
-          binary: isAttrEnabled(f.binary) || isAttrEnabled(attrs.binary),
-        },
-        { rules }
-      );
+      const enriched = {
+        ...f,
+        linguistGenerated:
+          isAttrEnabled(f.linguistGenerated) ||
+          isAttrEnabled(attrs['linguist-generated']),
+        binary: isAttrEnabled(f.binary) || isAttrEnabled(attrs.binary),
+      };
+      const classified = classifyDiffFile(enriched);
+      const collapsed = shouldCollapseFile(enriched, { rules });
       return {
         ...f,
         attrs,
+        fileKind: classified.kind,
+        openableAsText: classified.openableAsText,
+        renderImage: classified.renderImage,
         defaultCollapsed: collapsed,
       };
     });
@@ -249,6 +737,8 @@
     matchAttrPattern,
     attributesForPath,
     isAttrEnabled,
+    isImagePath,
+    classifyDiffFile,
     shouldCollapseFile,
     annotateFilesForCollapse,
     isPathCollapsed,
@@ -274,6 +764,26 @@
  * REST: page+per_page (Link rel=next/last) and since=ISO8601 incremental windows.
  */
 (function () {
+
+function githubRestUrl(path) {
+  try {
+    if (globalThis.PRGithubEndpoints && typeof globalThis.PRGithubEndpoints.githubRestUrl === 'function') {
+      return globalThis.PRGithubEndpoints.githubRestUrl(path);
+    }
+  } catch (_) {}
+  const p = String(path || '');
+  return 'https://api.github.com' + (p.startsWith('/') ? p : '/' + p);
+}
+function githubGraphqlUrl() {
+  try {
+    if (globalThis.PRGithubEndpoints && typeof globalThis.PRGithubEndpoints.githubGraphqlUrl === 'function') {
+      return globalThis.PRGithubEndpoints.githubGraphqlUrl();
+    }
+  } catch (_) {}
+  return 'https://api.github.com/graphql';
+}
+
+
 
 const DEFAULT_COMMENT_PAGE_SIZE = 50;
 
@@ -319,8 +829,8 @@ function buildCommentsListUrl(kind, owner, repo, number, opts = {}) {
   const page = Math.max(1, Number(opts.page) || 1);
   const base =
     kind === 'review'
-      ? `https://api.github.com/repos/${o}/${r}/pulls/${n}/comments`
-      : `https://api.github.com/repos/${o}/${r}/issues/${n}/comments`;
+      ? githubRestUrl(`/repos/${o}/${r}/pulls/${n}/comments`)
+      : githubRestUrl(`/repos/${o}/${r}/issues/${n}/comments`);
   const params = new URLSearchParams();
   params.set('per_page', String(perPage));
   params.set('page', String(page));
@@ -463,6 +973,26 @@ if (typeof globalThis !== 'undefined') {
 
 /* sw-iife */
 (function () {
+
+function githubRestUrl(path) {
+  try {
+    if (globalThis.PRGithubEndpoints && typeof globalThis.PRGithubEndpoints.githubRestUrl === 'function') {
+      return globalThis.PRGithubEndpoints.githubRestUrl(path);
+    }
+  } catch (_) {}
+  const p = String(path || '');
+  return 'https://api.github.com' + (p.startsWith('/') ? p : '/' + p);
+}
+function githubGraphqlUrl() {
+  try {
+    if (globalThis.PRGithubEndpoints && typeof globalThis.PRGithubEndpoints.githubGraphqlUrl === 'function') {
+      return globalThis.PRGithubEndpoints.githubGraphqlUrl();
+    }
+  } catch (_) {}
+  return 'https://api.github.com/graphql';
+}
+
+
   /**
    * Pure review-thread grouping, counts, resolve/reply request builders.
    */
@@ -702,7 +1232,7 @@ if (typeof globalThis !== 'undefined') {
   function buildReplyReviewThreadGraphql(threadNodeId, body) {
     return {
       method: 'POST',
-      url: 'https://api.github.com/graphql',
+      url: githubGraphqlUrl(),
       body: {
         query: `mutation($id:ID!,$body:String!){
   addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$id,body:$body}){
@@ -726,7 +1256,7 @@ if (typeof globalThis !== 'undefined') {
     const text = String(body || '').trim();
     return {
       method: 'POST',
-      url: `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/comments/${parentId ?? commentId}/replies`,
+      url: githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/comments/${parentId ?? commentId}/replies`),
       body: { body: text },
     };
   }
@@ -742,7 +1272,7 @@ if (typeof globalThis !== 'undefined') {
       : `mutation($id:ID!){ unresolveReviewThread(input:{threadId:$id}){ thread { id isResolved } } }`;
     return {
       method: 'POST',
-      url: 'https://api.github.com/graphql',
+      url: githubGraphqlUrl(),
       body: {
         query: mutation,
         variables: { id: threadNodeId },
@@ -954,6 +1484,26 @@ if (typeof globalThis !== 'undefined') {
  */
 (function () {
 
+function githubRestUrl(path) {
+  try {
+    if (globalThis.PRGithubEndpoints && typeof globalThis.PRGithubEndpoints.githubRestUrl === 'function') {
+      return globalThis.PRGithubEndpoints.githubRestUrl(path);
+    }
+  } catch (_) {}
+  const p = String(path || '');
+  return 'https://api.github.com' + (p.startsWith('/') ? p : '/' + p);
+}
+function githubGraphqlUrl() {
+  try {
+    if (globalThis.PRGithubEndpoints && typeof globalThis.PRGithubEndpoints.githubGraphqlUrl === 'function') {
+      return globalThis.PRGithubEndpoints.githubGraphqlUrl();
+    }
+  } catch (_) {}
+  return 'https://api.github.com/graphql';
+}
+
+
+
 function buildUpdatePullRequest(owner, repo, pullNumber, fields = {}) {
   const body = {};
   if (fields.title != null) body.title = String(fields.title);
@@ -962,7 +1512,7 @@ function buildUpdatePullRequest(owner, repo, pullNumber, fields = {}) {
   if (fields.state != null) body.state = fields.state === 'closed' ? 'closed' : 'open';
   return {
     method: 'PATCH',
-    url: `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}`,
+    url: githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}`),
     body,
   };
 }
@@ -970,7 +1520,7 @@ function buildUpdatePullRequest(owner, repo, pullNumber, fields = {}) {
 function buildEditIssueComment(owner, repo, commentId, body) {
   return {
     method: 'PATCH',
-    url: `https://api.github.com/repos/${owner}/${repo}/issues/comments/${commentId}`,
+    url: githubRestUrl(`/repos/${owner}/${repo}/issues/comments/${commentId}`),
     body: { body: String(body || '') },
   };
 }
@@ -978,7 +1528,7 @@ function buildEditIssueComment(owner, repo, commentId, body) {
 function buildEditReviewComment(owner, repo, commentId, body) {
   return {
     method: 'PATCH',
-    url: `https://api.github.com/repos/${owner}/${repo}/pulls/comments/${commentId}`,
+    url: githubRestUrl(`/repos/${owner}/${repo}/pulls/comments/${commentId}`),
     body: { body: String(body || '') },
   };
 }
@@ -986,7 +1536,7 @@ function buildEditReviewComment(owner, repo, commentId, body) {
 function buildRequestReviewers(owner, repo, pullNumber, { reviewers = [], teamReviewers = [] } = {}) {
   return {
     method: 'POST',
-    url: `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/requested_reviewers`,
+    url: githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/requested_reviewers`),
     body: {
       reviewers: reviewers.slice(),
       team_reviewers: teamReviewers.slice(),
@@ -997,7 +1547,7 @@ function buildRequestReviewers(owner, repo, pullNumber, { reviewers = [], teamRe
 function buildRemoveReviewers(owner, repo, pullNumber, { reviewers = [], teamReviewers = [] } = {}) {
   return {
     method: 'DELETE',
-    url: `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/requested_reviewers`,
+    url: githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/requested_reviewers`),
     body: {
       reviewers: reviewers.slice(),
       team_reviewers: teamReviewers.slice(),
@@ -1008,7 +1558,7 @@ function buildRemoveReviewers(owner, repo, pullNumber, { reviewers = [], teamRev
 function buildSetAssignees(owner, repo, issueNumber, assignees) {
   return {
     method: 'POST',
-    url: `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/assignees`,
+    url: githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/assignees`),
     body: { assignees: (assignees || []).slice() },
   };
 }
@@ -1016,7 +1566,7 @@ function buildSetAssignees(owner, repo, issueNumber, assignees) {
 function buildRemoveAssignees(owner, repo, issueNumber, assignees) {
   return {
     method: 'DELETE',
-    url: `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/assignees`,
+    url: githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/assignees`),
     body: { assignees: (assignees || []).slice() },
   };
 }
@@ -1024,7 +1574,7 @@ function buildRemoveAssignees(owner, repo, issueNumber, assignees) {
 function buildSetLabels(owner, repo, issueNumber, labels) {
   return {
     method: 'PUT',
-    url: `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/labels`,
+    url: githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/labels`),
     body: { labels: (labels || []).slice() },
   };
 }
@@ -1036,7 +1586,7 @@ function buildMergePullRequest(owner, repo, pullNumber, { mergeMethod = 'merge',
   if (commitMessage != null) body.commit_message = String(commitMessage);
   return {
     method: 'PUT',
-    url: `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/merge`,
+    url: githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/merge`),
     body,
   };
 }
@@ -1047,7 +1597,7 @@ function buildUpdateBranch(owner, repo, pullNumber, { expectedHeadSha } = {}) {
   if (expectedHeadSha) body.expected_head_sha = String(expectedHeadSha);
   return {
     method: 'PUT',
-    url: `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/update-branch`,
+    url: githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/update-branch`),
     body,
   };
 }
@@ -1065,7 +1615,7 @@ function buildSetSubscription(
   const state = ignored ? 'IGNORED' : subscribed ? 'SUBSCRIBED' : 'UNSUBSCRIBED';
   return {
     method: 'POST',
-    url: 'https://api.github.com/graphql',
+    url: githubGraphqlUrl(),
     body: {
       query: `mutation($id:ID!,$state:SubscriptionState!){
   updateSubscription(input:{subscribableId:$id, state:$state}) {
@@ -1095,7 +1645,7 @@ function buildDeleteSubscription(owner, repo, issueNumber, nodeId = null) {
 function buildSetMilestone(owner, repo, issueNumber, milestoneNumber) {
   return {
     method: 'PATCH',
-    url: `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}`,
+    url: githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}`),
     body: { milestone: milestoneNumber == null ? null : Number(milestoneNumber) },
   };
 }
@@ -1255,10 +1805,10 @@ function buildApplySuggestionCommitRequest(
 ) {
   return {
     method: 'PUT',
-    url: `https://api.github.com/repos/${owner}/${repo}/contents/${path
+    url: githubRestUrl(`/repos/${owner}/${repo}/contents/${path
       .split('/')
       .map(encodeURIComponent)
-      .join('/')}`,
+      .join('/')}`),
     body: {
       message: message || `Apply suggestion to ${path}`,
       content: contentBase64,
@@ -1824,15 +2374,23 @@ if (typeof globalThis !== 'undefined') {
  * PAT storage helpers.
  *
  * Storage location: chrome.storage.local (extension-private, not page-accessible,
- * not synced to Google account). Key: "githubToken".
+ * not synced to Google account).
+ *
+ * Keys:
+ * - "githubToken"     — default PAT for github.com public cloud only
+ * - "hostAccounts"    — up to 3 enterprise host↔PAT pairs
+ * - "extensionPrefs"  — non-secret UI prefs (no tokens)
  *
  * Security notes:
- * - Prefer reading the token only from the extension service worker / popup.
- * - Content scripts must not call getGithubToken(); use background messaging.
+ * - Prefer reading tokens only from the extension service worker / popup.
+ * - Content scripts must not call getGithubToken() / getTokenForWebHost();
+ *   use background messaging.
  * - UI only ever displays a mask, never the full secret after save.
  */
 
 const TOKEN_KEY = 'githubToken';
+/** Enterprise host↔PAT pairs (secrets). */
+const HOST_ACCOUNTS_KEY = 'hostAccounts';
 /** User prefs in chrome.storage.local (non-secret). */
 const PREFS_KEY = 'extensionPrefs';
 
@@ -1840,6 +2398,9 @@ const PREFS_KEY = 'extensionPrefs';
  * Default extension preferences.
  * - fastReview: progressive dual-window load (core first, threads on demand)
  * - reverseComments: composer → merge box → conversation (latest-first timeline)
+ *
+ * Enterprise hosts are NOT in prefs — they live in HOST_ACCOUNTS_KEY with paired PATs.
+ * Legacy `enterpriseWebHosts` (hosts-only list) is dropped on normalize (re-register required).
  */
 const DEFAULT_PREFS = {
   fastReview: true,
@@ -1853,10 +2414,14 @@ function getStorageArea(storageApi = globalThis.chrome?.storage?.local) {
 /**
  * Normalize prefs object; unknown keys dropped, missing keys filled from defaults.
  * @param {unknown} raw
- * @returns {{ fastReview: boolean, reverseComments: boolean }}
+ * @returns {{
+ *   fastReview: boolean,
+ *   reverseComments: boolean,
+ * }}
  */
 function normalizePrefs(raw) {
   const src = raw && typeof raw === 'object' ? raw : {};
+
   return {
     fastReview:
       typeof src.fastReview === 'boolean'
@@ -1867,6 +2432,38 @@ function normalizePrefs(raw) {
         ? src.reverseComments
         : DEFAULT_PREFS.reverseComments,
   };
+}
+
+/**
+ * @param {unknown} raw
+ * @returns {{ host: string, token: string }[]}
+ */
+function normalizeHostAccounts(raw) {
+  if (globalThis.PRGithubEndpoints?.normalizeHostAccounts) {
+    return globalThis.PRGithubEndpoints.normalizeHostAccounts(raw);
+  }
+  // Fallback without endpoints module (tests may load storage alone).
+  const list = Array.isArray(raw) ? raw : [];
+  const out = [];
+  const seen = new Set();
+  for (const row of list) {
+    if (!row || typeof row !== 'object') continue;
+    let host = String(row.host || '')
+      .trim()
+      .toLowerCase()
+      .replace(/^https?:\/\//, '')
+      .replace(/\/.*$/, '')
+      .replace(/:\d+$/, '');
+    if (host.includes('@')) host = host.slice(host.lastIndexOf('@') + 1);
+    const token = typeof row.token === 'string' ? row.token.trim() : '';
+    if (!host || host === 'github.com' || host === 'www.github.com') continue;
+    if (host.endsWith('.github.com')) continue;
+    if (!token || seen.has(host)) continue;
+    seen.add(host);
+    out.push({ host, token });
+    if (out.length >= 3) break;
+  }
+  return out;
 }
 
 /**
@@ -2014,11 +2611,214 @@ function watchGithubToken(onChange, storageApi = globalThis.chrome?.storage) {
   return () => storageApi.onChanged.removeListener(listener);
 }
 
+/**
+ * @param {unknown} [storageApi]
+ * @returns {Promise<{ host: string, token: string }[]>}
+ */
+function getHostAccounts(storageApi) {
+  const area = getStorageArea(storageApi);
+  if (!area) return Promise.resolve([]);
+
+  return new Promise((resolve) => {
+    area.get([HOST_ACCOUNTS_KEY], (result) => {
+      resolve(normalizeHostAccounts(result?.[HOST_ACCOUNTS_KEY]));
+    });
+  });
+}
+
+/**
+ * Hostnames only (for content-script registration / tab query). Never tokens.
+ * @param {unknown} [storageApi]
+ * @returns {Promise<string[]>}
+ */
+async function getHostAccountHosts(storageApi) {
+  const accounts = await getHostAccounts(storageApi);
+  if (globalThis.PRGithubEndpoints?.hostsFromAccounts) {
+    return globalThis.PRGithubEndpoints.hostsFromAccounts(accounts);
+  }
+  return accounts.map((a) => a.host);
+}
+
+/**
+ * UI-safe list (host + mask only).
+ * @param {unknown} [storageApi]
+ * @returns {Promise<{ host: string, mask: string }[]>}
+ */
+async function getHostAccountsPublic(storageApi) {
+  const accounts = await getHostAccounts(storageApi);
+  return accounts.map((a) => ({
+    host: a.host,
+    mask: maskGithubToken(a.token),
+  }));
+}
+
+/**
+ * Replace full hostAccounts list (already validated/normalized).
+ * @param {unknown} accounts
+ * @param {unknown} [storageApi]
+ * @returns {Promise<{ host: string, token: string }[]>}
+ */
+async function setHostAccounts(accounts, storageApi) {
+  const area = getStorageArea(storageApi);
+  if (!area) return Promise.reject(new Error('chrome.storage unavailable'));
+
+  const next = normalizeHostAccounts(accounts);
+  return new Promise((resolve, reject) => {
+    if (!next.length) {
+      area.remove([HOST_ACCOUNTS_KEY], () => {
+        const err = globalThis.chrome?.runtime?.lastError;
+        if (err) reject(err);
+        else resolve([]);
+      });
+      return;
+    }
+    area.set({ [HOST_ACCOUNTS_KEY]: next }, () => {
+      const err = globalThis.chrome?.runtime?.lastError;
+      if (err) reject(err);
+      else resolve(next);
+    });
+  });
+}
+
+/**
+ * Add or update one host↔PAT pair (max 3).
+ * @param {unknown} host
+ * @param {unknown} token
+ * @param {unknown} [storageApi]
+ * @returns {Promise<{ ok: true, accounts: {host:string,token:string}[] } | { ok: false, error: string, accounts: {host:string,token:string}[] }>}
+ */
+async function registerHostAccount(host, token, storageApi) {
+  const existing = await getHostAccounts(storageApi);
+  const t = typeof token === 'string' ? token.trim() : '';
+  if (t && !looksLikeGithubToken(t)) {
+    return {
+      ok: false,
+      error: 'Invalid token format. Use a GitHub PAT (ghp_… / github_pat_…).',
+      accounts: existing,
+    };
+  }
+  let result;
+  if (globalThis.PRGithubEndpoints?.registerHostAccount) {
+    result = globalThis.PRGithubEndpoints.registerHostAccount(
+      existing,
+      host,
+      t
+    );
+  } else {
+    // Minimal fallback
+    const h = String(host || '')
+      .trim()
+      .toLowerCase()
+      .replace(/^https?:\/\//, '')
+      .replace(/\/.*$/, '');
+    if (!h || h === 'github.com') {
+      result = {
+        ok: false,
+        error: 'Host is required',
+        accounts: existing,
+      };
+    } else if (!t) {
+      result = {
+        ok: false,
+        error: 'PAT is required for each enterprise host',
+        accounts: existing,
+      };
+    } else if (
+      !existing.some((a) => a.host === h) &&
+      existing.length >= 3
+    ) {
+      result = {
+        ok: false,
+        error: 'At most 3 enterprise hosts',
+        accounts: existing,
+      };
+    } else {
+      const idx = existing.findIndex((a) => a.host === h);
+      const next =
+        idx >= 0
+          ? existing.map((a, i) => (i === idx ? { host: h, token: t } : a))
+          : [...existing, { host: h, token: t }];
+      result = { ok: true, accounts: next };
+    }
+  }
+  if (!result.ok) return result;
+  const saved = await setHostAccounts(result.accounts, storageApi);
+  return { ok: true, accounts: saved };
+}
+
+/**
+ * @param {unknown} host
+ * @param {unknown} [storageApi]
+ */
+async function unregisterHostAccount(host, storageApi) {
+  const existing = await getHostAccounts(storageApi);
+  let next;
+  if (globalThis.PRGithubEndpoints?.unregisterHostAccount) {
+    next = globalThis.PRGithubEndpoints.unregisterHostAccount(
+      existing,
+      host
+    ).accounts;
+  } else {
+    const h = String(host || '')
+      .trim()
+      .toLowerCase()
+      .replace(/^https?:\/\//, '')
+      .replace(/\/.*$/, '');
+    next = existing.filter((a) => a.host !== h);
+  }
+  const saved = await setHostAccounts(next, storageApi);
+  return { ok: true, accounts: saved };
+}
+
+/**
+ * Resolve which PAT to use for API traffic for this web host.
+ * - github.com → default githubToken only
+ * - registered enterprise host → that pair's token
+ * - unregistered non-github.com (incl. *.ghe.com) → null
+ *
+ * @param {unknown} webHost
+ * @param {unknown} [storageApi]
+ * @returns {Promise<{ token: string|null, source: 'default'|'host'|null, host: string }>}
+ */
+async function getTokenForWebHost(webHost, storageApi) {
+  const [defaultToken, hostAccounts] = await Promise.all([
+    getGithubToken(storageApi),
+    getHostAccounts(storageApi),
+  ]);
+  if (globalThis.PRGithubEndpoints?.selectTokenForWebHost) {
+    return globalThis.PRGithubEndpoints.selectTokenForWebHost(webHost, {
+      defaultToken,
+      hostAccounts,
+    });
+  }
+  // Fallback mirror of pure selection rules
+  let host = String(webHost || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .replace(/\/.*$/, '')
+    .replace(/:\d+$/, '');
+  if (!host) host = 'github.com';
+  if (host === 'www.github.com') host = 'github.com';
+  if (host === 'github.com' || host.endsWith('.github.com')) {
+    return {
+      token: defaultToken,
+      source: defaultToken ? 'default' : null,
+      host: host === 'github.com' || host === 'www.github.com' ? 'github.com' : host,
+    };
+  }
+  const pair = hostAccounts.find((a) => a.host === host);
+  if (pair) return { token: pair.token, source: 'host', host };
+  return { token: null, source: null, host };
+}
+
 const storageApi = {
   TOKEN_KEY,
+  HOST_ACCOUNTS_KEY,
   PREFS_KEY,
   DEFAULT_PREFS,
   normalizePrefs,
+  normalizeHostAccounts,
   maskGithubToken,
   looksLikeGithubToken,
   getGithubToken,
@@ -2028,6 +2828,13 @@ const storageApi = {
   getExtensionPrefs,
   setExtensionPrefs,
   watchExtensionPrefs,
+  getHostAccounts,
+  getHostAccountHosts,
+  getHostAccountsPublic,
+  setHostAccounts,
+  registerHostAccount,
+  unregisterHostAccount,
+  getTokenForWebHost,
 };
 
 if (typeof module !== 'undefined' && module.exports) {
@@ -2047,6 +2854,24 @@ if (typeof globalThis !== 'undefined') {
  * List up to 100 open PRs, then fill page-visible dangling PRs via single-PR gets.
  */
 
+
+function githubRestUrl(path) {
+  try {
+    if (globalThis.PRGithubEndpoints && typeof globalThis.PRGithubEndpoints.githubRestUrl === 'function') {
+      return globalThis.PRGithubEndpoints.githubRestUrl(path);
+    }
+  } catch (_) {}
+  const p = String(path || '');
+  return 'https://api.github.com' + (p.startsWith('/') ? p : '/' + p);
+}
+function githubGraphqlUrl() {
+  try {
+    if (globalThis.PRGithubEndpoints && typeof globalThis.PRGithubEndpoints.githubGraphqlUrl === 'function') {
+      return globalThis.PRGithubEndpoints.githubGraphqlUrl();
+    }
+  } catch (_) {}
+  return 'https://api.github.com/graphql';
+}
 /**
  * Map REST pull list/item payload → app list row.
  * Includes labels / assignees / milestone so progressive modal sketch can paint
@@ -2155,7 +2980,7 @@ async function mapWithConcurrency(items, limit, worker) {
 }
 
 async function fetchOpenPullsPublic(owner, repo, fetchImpl, token = null) {
-  const url = `https://api.github.com/repos/${owner}/${repo}/pulls?state=open&per_page=100`;
+  const url = githubRestUrl(`/repos/${owner}/${repo}/pulls?state=open&per_page=100`);
   const res = await fetchImpl(url, {
     headers: buildApiHeaders(token),
   });
@@ -2169,7 +2994,7 @@ async function fetchOpenPullsPublic(owner, repo, fetchImpl, token = null) {
 }
 
 async function fetchPullByNumber(owner, repo, pullNumber, fetchImpl, token = null) {
-  const url = `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}`;
+  const url = githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}`);
   const res = await fetchImpl(url, {
     headers: buildApiHeaders(token),
   });
@@ -2210,7 +3035,7 @@ async function fetchDanglingPulls(owner, repo, numbers, fetchImpl, token = null)
  * @returns {Promise<Array<{key_prefix:string,url_template:string,is_alphanumeric:boolean}>>}
  */
 async function fetchRepoAutolinks(owner, repo, fetchImpl, token = null) {
-  const url = `https://api.github.com/repos/${owner}/${repo}/autolinks`;
+  const url = githubRestUrl(`/repos/${owner}/${repo}/autolinks`);
   try {
     const res = await fetchImpl(url, { headers: buildApiHeaders(token) });
     if (!res.ok) return [];
@@ -2604,7 +3429,7 @@ async function fetchViewerPendingReviewBundle(
   try {
     const n = Number(pullNumber);
     const raw = await apiJson(
-      `https://api.github.com/repos/${owner}/${repo}/pulls/${n}/reviews/${pending.id}/comments?per_page=100`,
+      githubRestUrl(`/repos/${owner}/${repo}/pulls/${n}/reviews/${pending.id}/comments?per_page=100`),
       fetchImpl,
       token
     );
@@ -2666,7 +3491,7 @@ async function createPendingPullReview(
   const body = {};
   if (commitId) body.commit_id = commitId;
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`,
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`),
     fetchImpl,
     token,
     { method: 'POST', body }
@@ -2695,7 +3520,7 @@ async function submitPendingPullReview(
     throw new Error('Invalid review event');
   }
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${id}/events`,
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${id}/events`),
     fetchImpl,
     token,
     { method: 'POST', body: { event: ev, body: body || '' } }
@@ -2719,7 +3544,7 @@ async function deletePendingPullReview(
     throw new Error('Invalid pending review id');
   }
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${id}`,
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${id}`),
     fetchImpl,
     token,
     { method: 'DELETE' }
@@ -2779,8 +3604,8 @@ async function fetchPrCommentsPage(
       : (() => {
           const base =
             kind === 'review'
-              ? `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/comments`
-              : `https://api.github.com/repos/${owner}/${repo}/issues/${pullNumber}/comments`;
+              ? githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/comments`)
+              : githubRestUrl(`/repos/${owner}/${repo}/issues/${pullNumber}/comments`);
           const q = new URLSearchParams({
             per_page: String(perPage),
             page: String(pageNum),
@@ -2935,7 +3760,7 @@ async function apiSend(url, fetchImpl, token, { method = 'GET', body } = {}) {
  */
 async function apiGraphql(query, variables, fetchImpl, token) {
   const json = await apiSend(
-    'https://api.github.com/graphql',
+    githubGraphqlUrl(),
     fetchImpl,
     token,
     { method: 'POST', body: { query, variables: variables || {} } }
@@ -3805,7 +4630,7 @@ async function fetchPrDetail(
   token = null,
   opts = {}
 ) {
-  const base = `https://api.github.com/repos/${owner}/${repo}`;
+  const base = githubRestUrl(`/repos/${owner}/${repo}`);
   const n = Number(pullNumber);
   const skipReviewThreads = Boolean(opts.skipReviewThreads);
   const threadsMaxPages = skipReviewThreads
@@ -4320,7 +5145,7 @@ async function fetchPrDetail(
 
 async function postIssueComment(owner, repo, issueNumber, body, fetchImpl, token) {
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/comments`,
+    githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/comments`),
     fetchImpl,
     token,
     { method: 'POST', body: { body } }
@@ -4360,7 +5185,7 @@ async function submitPullReview(
     });
   }
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`,
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`),
     fetchImpl,
     token,
     { method: 'POST', body: payload }
@@ -4496,7 +5321,7 @@ async function ensureViewerPendingReview(
     if (!pending?.id) return null;
     try {
       const full = await apiJson(
-        `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${pending.id}`,
+        githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${pending.id}`),
         fetchImpl,
         token
       );
@@ -4688,7 +5513,7 @@ async function postReviewComment(
     payload.start_side = startSide || side || 'RIGHT';
   }
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/comments`,
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/comments`),
     fetchImpl,
     token,
     { method: 'POST', body: payload }
@@ -4708,7 +5533,7 @@ async function findViewerPendingReview(owner, repo, pullNumber, fetchImpl, token
   try {
     const [reviews, login] = await Promise.all([
       apiJson(
-        `https://api.github.com/repos/${owner}/${repo}/pulls/${n}/reviews?per_page=100`,
+        githubRestUrl(`/repos/${owner}/${repo}/pulls/${n}/reviews?per_page=100`),
         fetchImpl,
         token
       ).catch(() => []),
@@ -4845,7 +5670,7 @@ async function resolveParentCommentNodeId(
   if (!Number.isFinite(id) || id <= 0) return null;
   try {
     const parent = await apiJson(
-      `https://api.github.com/repos/${owner}/${repo}/pulls/comments/${id}`,
+      githubRestUrl(`/repos/${owner}/${repo}/pulls/comments/${id}`),
       fetchImpl,
       token
     );
@@ -5081,7 +5906,7 @@ async function replyToReviewComment(
   // No pending review: REST dedicated replies endpoint (published immediately)
   try {
     return await apiSend(
-      `https://api.github.com/repos/${owner}/${repo}/pulls/${n}/comments/${Math.floor(parentId)}/replies`,
+      githubRestUrl(`/repos/${owner}/${repo}/pulls/${n}/comments/${Math.floor(parentId)}/replies`),
       fetchImpl,
       token,
       { method: 'POST', body: { body: text } }
@@ -5127,7 +5952,7 @@ async function resolveReviewThread(threadNodeId, resolved, fetchImpl, token) {
 async function updatePullState(owner, repo, pullNumber, state, fetchImpl, token) {
   const next = state === 'closed' ? 'closed' : 'open';
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}`,
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}`),
     fetchImpl,
     token,
     { method: 'PATCH', body: { state: next } }
@@ -5148,7 +5973,7 @@ async function reopenPullRequest(owner, repo, pullNumber, fetchImpl, token) {
  */
 async function deleteReviewComment(owner, repo, commentId, fetchImpl, token) {
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/comments/${commentId}`,
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/comments/${commentId}`),
     fetchImpl,
     token,
     { method: 'DELETE' }
@@ -5161,7 +5986,7 @@ async function deleteReviewComment(owner, repo, commentId, fetchImpl, token) {
  */
 async function deleteIssueComment(owner, repo, commentId, fetchImpl, token) {
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/issues/comments/${commentId}`,
+    githubRestUrl(`/repos/${owner}/${repo}/issues/comments/${commentId}`),
     fetchImpl,
     token,
     { method: 'DELETE' }
@@ -5175,7 +6000,7 @@ async function updatePullRequest(owner, repo, pullNumber, fields, fetchImpl, tok
   if (fields?.base != null) body.base = String(fields.base);
   if (fields?.state != null) body.state = fields.state === 'closed' ? 'closed' : 'open';
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}`,
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}`),
     fetchImpl,
     token,
     { method: 'PATCH', body }
@@ -5184,7 +6009,7 @@ async function updatePullRequest(owner, repo, pullNumber, fields, fetchImpl, tok
 
 async function editIssueComment(owner, repo, commentId, body, fetchImpl, token) {
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/issues/comments/${commentId}`,
+    githubRestUrl(`/repos/${owner}/${repo}/issues/comments/${commentId}`),
     fetchImpl,
     token,
     { method: 'PATCH', body: { body: String(body || '') } }
@@ -5193,7 +6018,7 @@ async function editIssueComment(owner, repo, commentId, body, fetchImpl, token) 
 
 async function editReviewComment(owner, repo, commentId, body, fetchImpl, token) {
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/comments/${commentId}`,
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/comments/${commentId}`),
     fetchImpl,
     token,
     { method: 'PATCH', body: { body: String(body || '') } }
@@ -5209,7 +6034,7 @@ async function requestReviewers(
   token
 ) {
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/requested_reviewers`,
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/requested_reviewers`),
     fetchImpl,
     token,
     {
@@ -5228,7 +6053,7 @@ async function removeReviewers(
   token
 ) {
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/requested_reviewers`,
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/requested_reviewers`),
     fetchImpl,
     token,
     {
@@ -5240,7 +6065,7 @@ async function removeReviewers(
 
 async function addAssignees(owner, repo, issueNumber, assignees, fetchImpl, token) {
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/assignees`,
+    githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/assignees`),
     fetchImpl,
     token,
     { method: 'POST', body: { assignees: assignees || [] } }
@@ -5249,7 +6074,7 @@ async function addAssignees(owner, repo, issueNumber, assignees, fetchImpl, toke
 
 async function removeAssignees(owner, repo, issueNumber, assignees, fetchImpl, token) {
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/assignees`,
+    githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/assignees`),
     fetchImpl,
     token,
     { method: 'DELETE', body: { assignees: assignees || [] } }
@@ -5258,7 +6083,7 @@ async function removeAssignees(owner, repo, issueNumber, assignees, fetchImpl, t
 
 async function setIssueLabels(owner, repo, issueNumber, labels, fetchImpl, token) {
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/labels`,
+    githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/labels`),
     fetchImpl,
     token,
     { method: 'PUT', body: { labels: labels || [] } }
@@ -5281,7 +6106,7 @@ async function mergePullRequest(
   if (commitTitle != null) body.commit_title = String(commitTitle);
   if (commitMessage != null) body.commit_message = String(commitMessage);
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/merge`,
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/merge`),
     fetchImpl,
     token,
     { method: 'PUT', body }
@@ -5299,7 +6124,7 @@ async function updatePullBranch(
   const body = {};
   if (expectedHeadSha) body.expected_head_sha = String(expectedHeadSha);
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/update-branch`,
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/update-branch`),
     fetchImpl,
     token,
     { method: 'PUT', body }
@@ -5324,7 +6149,7 @@ async function resolvePullRequestNodeId(
   try {
     // Prefer REST node_id (cheap, same id GraphQL expects)
     const pr = await apiJson(
-      `https://api.github.com/repos/${owner}/${repo}/pulls/${n}`,
+      githubRestUrl(`/repos/${owner}/${repo}/pulls/${n}`),
       fetchImpl,
       token
     );
@@ -5475,7 +6300,7 @@ async function fetchPullRequestSubscription(
 
 async function setIssueMilestone(owner, repo, issueNumber, milestoneNumber, fetchImpl, token) {
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}`,
+    githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}`),
     fetchImpl,
     token,
     {
@@ -5501,7 +6326,7 @@ async function setPullRequestDraftStage(
   let id = nodeId;
   if (!id) {
     const pr = await apiJson(
-      `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}`,
+      githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}`),
       fetchImpl,
       token
     );
@@ -5559,9 +6384,11 @@ async function uploadRepoFile(
   let sha;
   try {
     const meta = await apiJson(
-      `https://api.github.com/repos/${owner}/${repo}/contents/${encPath}${
-        branch ? `?ref=${encodeURIComponent(branch)}` : ''
-      }`,
+      githubRestUrl(
+        `/repos/${owner}/${repo}/contents/${encPath}${
+          branch ? `?ref=${encodeURIComponent(branch)}` : ''
+        }`
+      ),
       fetchImpl,
       token
     );
@@ -5576,7 +6403,7 @@ async function uploadRepoFile(
   if (branch) body.branch = branch;
   if (sha) body.sha = sha;
   const result = await apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/contents/${encPath}`,
+    githubRestUrl(`/repos/${owner}/${repo}/contents/${encPath}`),
     fetchImpl,
     token,
     { method: 'PUT', body }
@@ -5602,7 +6429,7 @@ async function getRepoFileText(owner, repo, { path, ref }, fetchImpl, token) {
     .map(encodeURIComponent)
     .join('/');
   const meta = await apiJson(
-    `https://api.github.com/repos/${owner}/${repo}/contents/${encPath}?ref=${encodeURIComponent(rev)}`,
+    githubRestUrl(`/repos/${owner}/${repo}/contents/${encPath}?ref=${encodeURIComponent(rev)}`),
     fetchImpl,
     token
   );
@@ -5680,10 +6507,10 @@ async function applyReviewSuggestion(
     contentB64 = btoa(unescape(encodeURIComponent(next)));
   }
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/contents/${path
+    githubRestUrl(`/repos/${owner}/${repo}/contents/${path
       .split('/')
       .map(encodeURIComponent)
-      .join('/')}`,
+      .join('/')}`),
     fetchImpl,
     token,
     {
@@ -5704,7 +6531,7 @@ async function applyReviewSuggestion(
 async function fetchViewerLogin(fetchImpl, token) {
   if (!token) return null;
   try {
-    const me = await apiJson('https://api.github.com/user', fetchImpl, token);
+    const me = await apiJson(githubRestUrl('/user'), fetchImpl, token);
     return me?.login || null;
   } catch {
     return null;
@@ -5724,6 +6551,12 @@ function mapAndAnnotateFiles(files, gitattributesText = '') {
     deletions: f.deletions,
     changes: f.changes,
     patch: f.patch || '',
+    // Preserve media URLs for image preview / binary classification
+    raw_url: f.raw_url || f.rawUrl || '',
+    blob_url: f.blob_url || f.blobUrl || '',
+    contents_url: f.contents_url || f.contentsUrl || '',
+    sha: f.sha || '',
+    previous_filename: f.previous_filename || f.previousFilename || '',
   }));
 
   let filesOut;
@@ -5743,15 +6576,26 @@ function mapAndAnnotateFiles(files, gitattributesText = '') {
     filesOut = null;
   }
   if (!filesOut) {
-    filesOut = mappedFiles.map((f) => ({
-      ...f,
-      defaultCollapsed:
-        !f.patch ||
-        (f.changes || 0) >= 500 ||
-        /package-lock\.json$|yarn\.lock$|\.min\.(js|css)$|\.bundle\.js$/i.test(
-          f.filename || ''
-        ),
-    }));
+    const LARGE = 5000;
+    filesOut = mappedFiles.map((f) => {
+      const path = f.filename || '';
+      const isImage =
+        /\.(png|jpe?g|gif|webp|bmp|svg|ico|avif)$/i.test(path);
+      const hasPatch = Boolean(f.patch);
+      const kind = isImage ? 'image' : hasPatch ? 'text' : 'binary';
+      return {
+        ...f,
+        fileKind: kind,
+        openableAsText: kind === 'text',
+        renderImage: kind === 'image',
+        defaultCollapsed:
+          kind === 'binary' ||
+          (f.changes || 0) >= LARGE ||
+          /package-lock\.json$|yarn\.lock$|\.min\.(js|css)$|\.bundle\.js$/i.test(
+            path
+          ),
+      };
+    });
   }
   return filesOut;
 }
@@ -5770,7 +6614,7 @@ async function fetchCompareFiles(owner, repo, base, head, fetchImpl, token = nul
     throw new Error('owner, repo, base, and head are required for compare');
   }
   const gitattributesText = String(options.gitattributesText || '');
-  const url = `https://api.github.com/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/compare/${encodeURIComponent(b)}...${encodeURIComponent(h)}`;
+  const url = githubRestUrl(`/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/compare/${encodeURIComponent(b)}...${encodeURIComponent(h)}`);
   const data = await apiJson(url, fetchImpl, token);
   const files = mapAndAnnotateFiles(data?.files || [], gitattributesText);
   return {
@@ -5880,6 +6724,114 @@ if (typeof globalThis !== 'undefined') {
  */
 
 /* deps inlined by scripts/build-sw.mjs */
+const ENTERPRISE_CS_ID = 'prp-enterprise-hosts';
+const CONTENT_SCRIPT_JS = [
+  'src/tree.js',
+  'src/dom.js',
+  'src/github-endpoints.js',
+  'src/content-bridge.js',
+  'src/content-bootstrap.js',
+  'src/content.js',
+  'src/modal/pure/detail-idb-cache.js',
+  'src/modal/pure/detail-cache.js',
+  'src/modal/dist/pr-modal.bundle.js',
+  'src/pr-modal-host.js',
+];
+
+/**
+ * Serialize GitHub API work: REST/GraphQL base is process-global
+ * (__PRP_GITHUB_API__). Without a queue, concurrent handlers (github.com tab +
+ * enterprise tab) can clobber each other mid-request.
+ */
+const runWithGithubApiExclusive =
+  typeof PRGithubEndpoints.createGithubApiExclusiveRunner === 'function'
+    ? PRGithubEndpoints.createGithubApiExclusiveRunner()
+    : (fn) => Promise.resolve().then(fn);
+
+/**
+ * Resolve REST/GraphQL bases for this message from the page web host.
+ * Must only run inside runWithGithubApiExclusive for API-backed handlers.
+ */
+async function applyApiContextFromMessage(message) {
+  const endpoints = PRGithubEndpoints.resolveGithubEndpoints({
+    webHost: message?.webHost || message?.webOrigin || 'github.com',
+  });
+  PRGithubEndpoints.setGithubApiContext(endpoints);
+  return endpoints;
+}
+
+/**
+ * PAT for this message's web host.
+ * github.com → default token; registered enterprise → host pair; else null.
+ */
+async function tokenForMessage(message) {
+  const webHost = message?.webHost || message?.webOrigin || 'github.com';
+  const sel = await PRTreeStorage.getTokenForWebHost(webHost);
+  return sel.token;
+}
+
+/** Registered enterprise hostnames (no tokens) for tab query / content scripts. */
+async function registeredEnterpriseHosts() {
+  return PRTreeStorage.getHostAccountHosts();
+}
+
+function githubTabUrlPatterns(enterpriseHosts) {
+  const patterns = ['https://github.com/*', 'https://*.github.com/*'];
+  const hosts = PRGithubEndpoints.normalizeEnterpriseWebHosts(enterpriseHosts);
+  for (const h of hosts) {
+    patterns.push(`https://${h}/*`);
+  }
+  return patterns;
+}
+
+async function syncEnterpriseContentScripts(enterpriseHosts) {
+  if (!chrome.scripting?.registerContentScripts) return { registered: false };
+  const matches =
+    PRGithubEndpoints.contentScriptMatchesForHosts(enterpriseHosts);
+  try {
+    await chrome.scripting.unregisterContentScripts({
+      ids: [ENTERPRISE_CS_ID],
+    });
+  } catch {
+    /* not registered yet */
+  }
+  if (!matches.length) return { registered: false, matches: [] };
+  await chrome.scripting.registerContentScripts([
+    {
+      id: ENTERPRISE_CS_ID,
+      matches,
+      js: CONTENT_SCRIPT_JS,
+      css: ['src/styles.css'],
+      runAt: 'document_idle',
+      persistAcrossSessions: true,
+    },
+  ]);
+  return { registered: true, matches };
+}
+
+async function requestEnterprisePermissions(enterpriseHosts) {
+  if (!chrome.permissions?.request) {
+    return { granted: false, error: 'permissions API unavailable' };
+  }
+  const origins = new Set();
+  for (const h of PRGithubEndpoints.normalizeEnterpriseWebHosts(enterpriseHosts)) {
+    origins.add(`https://${h}/*`);
+    // GHE Cloud API lives on api.{webHost}
+    if (h.endsWith('.ghe.com') && !h.startsWith('api.')) {
+      origins.add(`https://api.${h}/*`);
+    }
+  }
+  const list = [...origins];
+  if (!list.length) return { granted: true, origins: [] };
+  return new Promise((resolve) => {
+    chrome.permissions.request({ origins: list }, (granted) => {
+      const err = chrome.runtime.lastError;
+      if (err) resolve({ granted: false, error: err.message, origins: list });
+      else resolve({ granted: Boolean(granted), origins: list });
+    });
+  });
+}
+
 const MSG = {
   /** Lightweight wake / health check (content scripts retry against this). */
   PING: 'PR_TREE_PING',
@@ -5890,6 +6842,10 @@ const MSG = {
   PREFS_GET: 'PR_TREE_PREFS_GET',
   PREFS_SET: 'PR_TREE_PREFS_SET',
   PREFS_CHANGED: 'PR_TREE_PREFS_CHANGED',
+  HOST_ACCOUNTS_LIST: 'PR_TREE_HOST_ACCOUNTS_LIST',
+  HOST_ACCOUNT_ADD: 'PR_TREE_HOST_ACCOUNT_ADD',
+  HOST_ACCOUNT_REMOVE: 'PR_TREE_HOST_ACCOUNT_REMOVE',
+  HOST_ACCOUNTS_CHANGED: 'PR_TREE_HOST_ACCOUNTS_CHANGED',
   /** Clear PR detail memory + IndexedDB cache on open github.com tabs. */
   CLEAR_DETAIL_CACHE: 'PR_TREE_CLEAR_DETAIL_CACHE',
   FETCH_OPEN_PULLS: 'PR_TREE_FETCH_OPEN_PULLS',
@@ -5942,17 +6898,20 @@ function broadcastToGithubTabs(message) {
     /* ignore */
   }
   try {
-    chrome.tabs.query({ url: ['https://github.com/*'] }, (tabs) => {
-      for (const tab of tabs || []) {
-        if (tab.id == null) continue;
-        try {
-          chrome.tabs.sendMessage(tab.id, message, () => {
-            void chrome.runtime.lastError;
-          });
-        } catch {
-          /* tab may not have content script */
+    registeredEnterpriseHosts().then((hosts) => {
+      const url = githubTabUrlPatterns(hosts);
+      chrome.tabs.query({ url }, (tabs) => {
+        for (const tab of tabs || []) {
+          if (tab.id == null) continue;
+          try {
+            chrome.tabs.sendMessage(tab.id, message, () => {
+              void chrome.runtime.lastError;
+            });
+          } catch {
+            /* tab may not have content script */
+          }
         }
-      }
+      });
     });
   } catch {
     /* ignore */
@@ -5975,41 +6934,44 @@ function broadcastPrefsChanged(prefs) {
 function clearDetailCacheOnGithubTabs() {
   return new Promise((resolve) => {
     try {
-      chrome.tabs.query({ url: ['https://github.com/*'] }, (tabs) => {
-        void chrome.runtime.lastError;
-        const list = Array.isArray(tabs) ? tabs : [];
-        if (!list.length) {
-          resolve({ tabs: 0, cleared: 0, failed: 0 });
-          return;
-        }
-        let pending = 0;
-        let cleared = 0;
-        let failed = 0;
-        const done = () => {
-          if (pending > 0) return;
-          resolve({ tabs: list.length, cleared, failed });
-        };
-        for (const tab of list) {
-          if (tab?.id == null) continue;
-          pending += 1;
-          try {
-            chrome.tabs.sendMessage(
-              tab.id,
-              { type: MSG.CLEAR_DETAIL_CACHE },
-              (res) => {
-                const err = chrome.runtime.lastError;
-                if (err || !res?.ok) failed += 1;
-                else cleared += 1;
-                pending -= 1;
-                done();
-              }
-            );
-          } catch {
-            failed += 1;
-            pending -= 1;
+      registeredEnterpriseHosts().then((hosts) => {
+        const url = githubTabUrlPatterns(hosts);
+        chrome.tabs.query({ url }, (tabs) => {
+          void chrome.runtime.lastError;
+          const list = Array.isArray(tabs) ? tabs : [];
+          if (!list.length) {
+            resolve({ tabs: 0, cleared: 0, failed: 0 });
+            return;
           }
-        }
-        if (pending === 0) done();
+          let pending = 0;
+          let cleared = 0;
+          let failed = 0;
+          const done = () => {
+            if (pending > 0) return;
+            resolve({ tabs: list.length, cleared, failed });
+          };
+          for (const tab of list) {
+            if (tab?.id == null) continue;
+            pending += 1;
+            try {
+              chrome.tabs.sendMessage(
+                tab.id,
+                { type: MSG.CLEAR_DETAIL_CACHE },
+                (res) => {
+                  const err = chrome.runtime.lastError;
+                  if (err || !res?.ok) failed += 1;
+                  else cleared += 1;
+                  pending -= 1;
+                  done();
+                }
+              );
+            } catch {
+              failed += 1;
+              pending -= 1;
+            }
+          }
+          if (pending === 0) done();
+        });
       });
     } catch {
       resolve({ tabs: 0, cleared: 0, failed: 0 });
@@ -6022,10 +6984,18 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   if (changes[PRTreeStorage.TOKEN_KEY]) {
     broadcastTokenChanged();
   }
-  if (changes[PRTreeStorage.PREFS_KEY]) {
-    broadcastPrefsChanged(
-      PRTreeStorage.normalizePrefs(changes[PRTreeStorage.PREFS_KEY].newValue)
+  if (changes[PRTreeStorage.HOST_ACCOUNTS_KEY]) {
+    broadcastToGithubTabs({ type: MSG.HOST_ACCOUNTS_CHANGED });
+    broadcastTokenChanged();
+    void registeredEnterpriseHosts().then((hosts) =>
+      syncEnterpriseContentScripts(hosts)
     );
+  }
+  if (changes[PRTreeStorage.PREFS_KEY]) {
+    const prefs = PRTreeStorage.normalizePrefs(
+      changes[PRTreeStorage.PREFS_KEY].newValue
+    );
+    broadcastPrefsChanged(prefs);
   }
 });
 
@@ -6080,6 +7050,21 @@ function withTimeout(promise, ms, label) {
 }
 
 async function handleMessage(message) {
+  // Bind REST/GraphQL bases for every API-backed message (incl. popup without webHost).
+  if (
+    message?.type &&
+    message.type !== MSG.PING &&
+    message.type !== MSG.TOKEN_STATUS &&
+    message.type !== MSG.TOKEN_SET &&
+    message.type !== MSG.TOKEN_CLEAR
+  ) {
+    try {
+      await applyApiContextFromMessage(message || {});
+    } catch {
+      /* keep previous / default context */
+    }
+  }
+
   switch (message.type) {
     case MSG.PING: {
       return {
@@ -6087,11 +7072,30 @@ async function handleMessage(message) {
         pong: true,
         hasFetch: typeof PRTreeFetch?.fetchPrDetail === 'function',
         hasStorage: typeof PRTreeStorage?.getGithubTokenStatus === 'function',
+        hasEndpoints: typeof PRGithubEndpoints?.resolveGithubEndpoints === 'function',
       };
     }
     case MSG.TOKEN_STATUS: {
-      const status = await PRTreeStorage.getGithubTokenStatus();
-      return { ok: true, ...status };
+      // Host-scoped: enterprise pages report configured when that host has a PAT.
+      // Popup (no webHost / github.com) reports the default github.com PAT only.
+      const webHost = message.webHost || message.webOrigin || 'github.com';
+      const sel = await PRTreeStorage.getTokenForWebHost(webHost);
+      if (!sel.token) {
+        return {
+          ok: true,
+          configured: false,
+          mask: '',
+          source: null,
+          host: sel.host,
+        };
+      }
+      return {
+        ok: true,
+        configured: true,
+        mask: PRTreeStorage.maskGithubToken(sel.token),
+        source: sel.source,
+        host: sel.host,
+      };
     }
     case MSG.TOKEN_SET: {
       await PRTreeStorage.setGithubToken(message.token || '');
@@ -6104,18 +7108,83 @@ async function handleMessage(message) {
     }
     case MSG.PREFS_GET: {
       const prefs = await PRTreeStorage.getExtensionPrefs();
-      return { ok: true, prefs };
+      const hostAccounts = await PRTreeStorage.getHostAccountsPublic();
+      let endpoints = null;
+      try {
+        endpoints = PRGithubEndpoints.resolveGithubEndpoints({
+          webHost: message.webHost || 'github.com',
+        });
+      } catch {
+        endpoints = null;
+      }
+      return { ok: true, prefs, hostAccounts, endpoints };
     }
     case MSG.PREFS_SET: {
-      const prefs = await PRTreeStorage.setExtensionPrefs(message.prefs || message.patch || {});
+      const patch = message.prefs || message.patch || {};
+      // Drop legacy host-list-only field; host+PAT pairs use HOST_ACCOUNT_* messages.
+      if (patch && typeof patch === 'object' && 'enterpriseWebHosts' in patch) {
+        delete patch.enterpriseWebHosts;
+      }
+      const prefs = await PRTreeStorage.setExtensionPrefs(patch);
       return { ok: true, prefs };
+    }
+    case MSG.HOST_ACCOUNTS_LIST: {
+      const accounts = await PRTreeStorage.getHostAccountsPublic();
+      return {
+        ok: true,
+        accounts,
+        max: PRGithubEndpoints.MAX_HOST_ACCOUNTS || 3,
+      };
+    }
+    case MSG.HOST_ACCOUNT_ADD: {
+      const result = await PRTreeStorage.registerHostAccount(
+        message.host,
+        message.token
+      );
+      if (!result.ok) {
+        return {
+          ok: false,
+          error: result.error,
+          accounts: (result.accounts || []).map((a) => ({
+            host: a.host,
+            mask: PRTreeStorage.maskGithubToken(a.token),
+          })),
+        };
+      }
+      const hosts = result.accounts.map((a) => a.host);
+      const permission = await requestEnterprisePermissions(hosts);
+      const contentScripts = await syncEnterpriseContentScripts(hosts);
+      return {
+        ok: true,
+        accounts: result.accounts.map((a) => ({
+          host: a.host,
+          mask: PRTreeStorage.maskGithubToken(a.token),
+        })),
+        permission,
+        contentScripts,
+        max: PRGithubEndpoints.MAX_HOST_ACCOUNTS || 3,
+      };
+    }
+    case MSG.HOST_ACCOUNT_REMOVE: {
+      const result = await PRTreeStorage.unregisterHostAccount(message.host);
+      const hosts = result.accounts.map((a) => a.host);
+      const contentScripts = await syncEnterpriseContentScripts(hosts);
+      return {
+        ok: true,
+        accounts: result.accounts.map((a) => ({
+          host: a.host,
+          mask: PRTreeStorage.maskGithubToken(a.token),
+        })),
+        contentScripts,
+        max: PRGithubEndpoints.MAX_HOST_ACCOUNTS || 3,
+      };
     }
     case MSG.CLEAR_DETAIL_CACHE: {
       const result = await clearDetailCacheOnGithubTabs();
       return { ok: true, ...result };
     }
     case MSG.FETCH_OPEN_PULLS: {
-      const token = await PRTreeStorage.getGithubToken();
+      const token = await tokenForMessage(message);
       const prs = await PRTreeFetch.fetchOpenPulls(
         message.owner,
         message.repo,
@@ -6130,7 +7199,7 @@ async function handleMessage(message) {
       return { ok: true, prs };
     }
     case MSG.FETCH_DANGLING: {
-      const token = await PRTreeStorage.getGithubToken();
+      const token = await tokenForMessage(message);
       const prs = await PRTreeFetch.fetchDanglingPulls(
         message.owner,
         message.repo,
@@ -6141,7 +7210,7 @@ async function handleMessage(message) {
       return { ok: true, prs };
     }
     case MSG.FETCH_PR_DETAIL: {
-      const token = await PRTreeStorage.getGithubToken();
+      const token = await tokenForMessage(message);
       // Partial by default: core + first GraphQL threads page (not all pages)
       const detail = await PRTreeFetch.fetchPrDetail(
         message.owner,
@@ -6157,7 +7226,7 @@ async function handleMessage(message) {
       return { ok: true, detail };
     }
     case MSG.FETCH_REVIEW_THREADS_PAGE: {
-      const token = await PRTreeStorage.getGithubToken();
+      const token = await tokenForMessage(message);
       if (!token) {
         return {
           ok: true,
@@ -6185,7 +7254,7 @@ async function handleMessage(message) {
       return { ok: true, page };
     }
     case MSG.FETCH_REVIEW_THREADS_BY_IDS: {
-      const token = await PRTreeStorage.getGithubToken();
+      const token = await tokenForMessage(message);
       if (!token) {
         return {
           ok: true,
@@ -6200,7 +7269,7 @@ async function handleMessage(message) {
       return { ok: true, page };
     }
     case MSG.FETCH_COMMENTS_PAGE: {
-      const token = await PRTreeStorage.getGithubToken();
+      const token = await tokenForMessage(message);
       const page = await PRTreeFetch.fetchPrCommentsPage(
         message.owner,
         message.repo,
@@ -6217,7 +7286,7 @@ async function handleMessage(message) {
       return { ok: true, page };
     }
     case MSG.FETCH_COMPARE_FILES: {
-      const token = await PRTreeStorage.getGithubToken();
+      const token = await tokenForMessage(message);
       const result = await PRTreeFetch.fetchCompareFiles(
         message.owner,
         message.repo,
@@ -6230,7 +7299,7 @@ async function handleMessage(message) {
       return { ok: true, result };
     }
     case MSG.POST_ISSUE_COMMENT: {
-      const token = await PRTreeStorage.getGithubToken();
+      const token = await tokenForMessage(message);
       if (!token) throw new Error('GitHub PAT required to post comments');
       const result = await PRTreeFetch.postIssueComment(
         message.owner,
@@ -6243,7 +7312,7 @@ async function handleMessage(message) {
       return { ok: true, result };
     }
     case MSG.SUBMIT_REVIEW: {
-      const token = await PRTreeStorage.getGithubToken();
+      const token = await tokenForMessage(message);
       if (!token) throw new Error('GitHub PAT required to submit reviews');
       const result = await PRTreeFetch.submitPullReview(
         message.owner,
@@ -6261,7 +7330,7 @@ async function handleMessage(message) {
       return { ok: true, result };
     }
     case MSG.SUBMIT_PENDING_REVIEW: {
-      const token = await PRTreeStorage.getGithubToken();
+      const token = await tokenForMessage(message);
       if (!token) throw new Error('GitHub PAT required to submit pending reviews');
       const result = await PRTreeFetch.submitPendingPullReview(
         message.owner,
@@ -6275,7 +7344,7 @@ async function handleMessage(message) {
       return { ok: true, result };
     }
     case MSG.DELETE_PENDING_REVIEW: {
-      const token = await PRTreeStorage.getGithubToken();
+      const token = await tokenForMessage(message);
       if (!token) throw new Error('GitHub PAT required to discard pending reviews');
       const result = await PRTreeFetch.deletePendingPullReview(
         message.owner,
@@ -6288,7 +7357,7 @@ async function handleMessage(message) {
       return { ok: true, result };
     }
     case MSG.POST_REVIEW_COMMENT: {
-      const token = await PRTreeStorage.getGithubToken();
+      const token = await tokenForMessage(message);
       if (!token) throw new Error('GitHub PAT required to post review comments');
       const result = await PRTreeFetch.postReviewComment(
         message.owner,
@@ -6310,7 +7379,7 @@ async function handleMessage(message) {
       return { ok: true, result };
     }
     case MSG.REPLY_REVIEW_COMMENT: {
-      const token = await PRTreeStorage.getGithubToken();
+      const token = await tokenForMessage(message);
       if (!token) throw new Error('GitHub PAT required to reply to review comments');
       const result = await PRTreeFetch.replyToReviewComment(
         message.owner,
@@ -6333,7 +7402,7 @@ async function handleMessage(message) {
       return { ok: true, result };
     }
     case MSG.RESOLVE_REVIEW_THREAD: {
-      const token = await PRTreeStorage.getGithubToken();
+      const token = await tokenForMessage(message);
       if (!token) throw new Error('GitHub PAT required to resolve review threads');
       const result = await PRTreeFetch.resolveReviewThread(
         message.threadNodeId,
@@ -6344,7 +7413,7 @@ async function handleMessage(message) {
       return { ok: true, result };
     }
     case MSG.UPDATE_PULL_STATE: {
-      const token = await PRTreeStorage.getGithubToken();
+      const token = await tokenForMessage(message);
       if (!token) throw new Error('GitHub PAT required to close or reopen pull requests');
       const result = await PRTreeFetch.updatePullState(
         message.owner,
@@ -6357,7 +7426,7 @@ async function handleMessage(message) {
       return { ok: true, result };
     }
     case MSG.DELETE_REVIEW_COMMENT: {
-      const token = await PRTreeStorage.getGithubToken();
+      const token = await tokenForMessage(message);
       if (!token) throw new Error('GitHub PAT required to delete review comments');
       const result = await PRTreeFetch.deleteReviewComment(
         message.owner,
@@ -6369,7 +7438,7 @@ async function handleMessage(message) {
       return { ok: true, result };
     }
     case MSG.DELETE_ISSUE_COMMENT: {
-      const token = await PRTreeStorage.getGithubToken();
+      const token = await tokenForMessage(message);
       if (!token) throw new Error('GitHub PAT required to delete comments');
       const result = await PRTreeFetch.deleteIssueComment(
         message.owner,
@@ -6381,7 +7450,7 @@ async function handleMessage(message) {
       return { ok: true, result };
     }
     case MSG.UPDATE_PULL: {
-      const token = await PRTreeStorage.getGithubToken();
+      const token = await tokenForMessage(message);
       if (!token) throw new Error('GitHub PAT required to update pull request');
       const result = await PRTreeFetch.updatePullRequest(
         message.owner,
@@ -6394,7 +7463,7 @@ async function handleMessage(message) {
       return { ok: true, result };
     }
     case MSG.EDIT_ISSUE_COMMENT: {
-      const token = await PRTreeStorage.getGithubToken();
+      const token = await tokenForMessage(message);
       if (!token) throw new Error('GitHub PAT required to edit comments');
       const result = await PRTreeFetch.editIssueComment(
         message.owner,
@@ -6407,7 +7476,7 @@ async function handleMessage(message) {
       return { ok: true, result };
     }
     case MSG.EDIT_REVIEW_COMMENT: {
-      const token = await PRTreeStorage.getGithubToken();
+      const token = await tokenForMessage(message);
       if (!token) throw new Error('GitHub PAT required to edit review comments');
       const result = await PRTreeFetch.editReviewComment(
         message.owner,
@@ -6420,7 +7489,7 @@ async function handleMessage(message) {
       return { ok: true, result };
     }
     case MSG.REQUEST_REVIEWERS: {
-      const token = await PRTreeStorage.getGithubToken();
+      const token = await tokenForMessage(message);
       if (!token) throw new Error('GitHub PAT required to request reviewers');
       const result = await PRTreeFetch.requestReviewers(
         message.owner,
@@ -6436,7 +7505,7 @@ async function handleMessage(message) {
       return { ok: true, result };
     }
     case MSG.REMOVE_REVIEWERS: {
-      const token = await PRTreeStorage.getGithubToken();
+      const token = await tokenForMessage(message);
       if (!token) throw new Error('GitHub PAT required to remove reviewers');
       const result = await PRTreeFetch.removeReviewers(
         message.owner,
@@ -6452,7 +7521,7 @@ async function handleMessage(message) {
       return { ok: true, result };
     }
     case MSG.ADD_ASSIGNEES: {
-      const token = await PRTreeStorage.getGithubToken();
+      const token = await tokenForMessage(message);
       if (!token) throw new Error('GitHub PAT required to add assignees');
       const result = await PRTreeFetch.addAssignees(
         message.owner,
@@ -6465,7 +7534,7 @@ async function handleMessage(message) {
       return { ok: true, result };
     }
     case MSG.REMOVE_ASSIGNEES: {
-      const token = await PRTreeStorage.getGithubToken();
+      const token = await tokenForMessage(message);
       if (!token) throw new Error('GitHub PAT required to remove assignees');
       const result = await PRTreeFetch.removeAssignees(
         message.owner,
@@ -6478,7 +7547,7 @@ async function handleMessage(message) {
       return { ok: true, result };
     }
     case MSG.SET_LABELS: {
-      const token = await PRTreeStorage.getGithubToken();
+      const token = await tokenForMessage(message);
       if (!token) throw new Error('GitHub PAT required to set labels');
       const result = await PRTreeFetch.setIssueLabels(
         message.owner,
@@ -6491,7 +7560,7 @@ async function handleMessage(message) {
       return { ok: true, result };
     }
     case MSG.UPLOAD_REPO_FILE: {
-      const token = await PRTreeStorage.getGithubToken();
+      const token = await tokenForMessage(message);
       if (!token) throw new Error('GitHub PAT required to upload files');
       const result = await PRTreeFetch.uploadRepoFile(
         message.owner,
@@ -6508,7 +7577,7 @@ async function handleMessage(message) {
       return { ok: true, result };
     }
     case MSG.APPLY_SUGGESTION: {
-      const token = await PRTreeStorage.getGithubToken();
+      const token = await tokenForMessage(message);
       if (!token) throw new Error('GitHub PAT required to apply suggestions');
       const result = await PRTreeFetch.applyReviewSuggestion(
         message.owner,
@@ -6527,7 +7596,7 @@ async function handleMessage(message) {
       return { ok: true, result };
     }
     case MSG.GET_REPO_FILE_TEXT: {
-      const token = await PRTreeStorage.getGithubToken();
+      const token = await tokenForMessage(message);
       if (!token) throw new Error('GitHub PAT required to read files');
       const result = await PRTreeFetch.getRepoFileText(
         message.owner,
@@ -6542,7 +7611,7 @@ async function handleMessage(message) {
       return { ok: true, result };
     }
     case MSG.MERGE_PULL: {
-      const token = await PRTreeStorage.getGithubToken();
+      const token = await tokenForMessage(message);
       if (!token) throw new Error('GitHub PAT required to merge');
       const result = await PRTreeFetch.mergePullRequest(
         message.owner,
@@ -6559,7 +7628,7 @@ async function handleMessage(message) {
       return { ok: true, result };
     }
     case MSG.UPDATE_BRANCH: {
-      const token = await PRTreeStorage.getGithubToken();
+      const token = await tokenForMessage(message);
       if (!token) throw new Error('GitHub PAT required to update branch');
       const result = await PRTreeFetch.updatePullBranch(
         message.owner,
@@ -6572,7 +7641,7 @@ async function handleMessage(message) {
       return { ok: true, result };
     }
     case MSG.SET_SUBSCRIPTION: {
-      const token = await PRTreeStorage.getGithubToken();
+      const token = await tokenForMessage(message);
       if (!token) throw new Error('GitHub PAT required for notifications');
       const result = await PRTreeFetch.setIssueSubscription(
         message.owner,
@@ -6589,7 +7658,7 @@ async function handleMessage(message) {
       return { ok: true, result };
     }
     case MSG.DELETE_SUBSCRIPTION: {
-      const token = await PRTreeStorage.getGithubToken();
+      const token = await tokenForMessage(message);
       if (!token) throw new Error('GitHub PAT required for notifications');
       const result = await PRTreeFetch.deleteIssueSubscription(
         message.owner,
@@ -6602,7 +7671,7 @@ async function handleMessage(message) {
       return { ok: true, result };
     }
     case MSG.SET_MILESTONE: {
-      const token = await PRTreeStorage.getGithubToken();
+      const token = await tokenForMessage(message);
       if (!token) throw new Error('GitHub PAT required to set milestone');
       const result = await PRTreeFetch.setIssueMilestone(
         message.owner,
@@ -6615,7 +7684,7 @@ async function handleMessage(message) {
       return { ok: true, result };
     }
     case MSG.SET_DRAFT_STAGE: {
-      const token = await PRTreeStorage.getGithubToken();
+      const token = await tokenForMessage(message);
       if (!token) throw new Error('GitHub PAT required to change draft stage');
       const result = await PRTreeFetch.setPullRequestDraftStage(
         message.owner,
@@ -6645,9 +7714,11 @@ chrome.runtime.onMessage.addListener((message, _sender) => {
 
   // Return a Promise so Chrome keeps the message port open until settle
   // (preferred over return true + sendResponse, which races SW sleep).
+  // Exclusive queue: API base is global; one host's handler must not interleave
+  // with another's setGithubApiContext / githubRestUrl calls.
   return withServiceWorkerKeepAlive(() =>
     withTimeout(
-      handleMessage(message),
+      runWithGithubApiExclusive(() => handleMessage(message)),
       MESSAGE_TIMEOUT_MS,
       message.type
     ).catch((err) => ({
@@ -6657,3 +7728,26 @@ chrome.runtime.onMessage.addListener((message, _sender) => {
     }))
   );
 });
+
+async function rehydrateEnterpriseScripts() {
+  try {
+    const hosts = await registeredEnterpriseHosts();
+    await syncEnterpriseContentScripts(hosts);
+  } catch (err) {
+    console.warn('[pr+] enterprise content scripts', err?.message || err);
+  }
+}
+
+try {
+  chrome.runtime.onInstalled.addListener(() => {
+    void rehydrateEnterpriseScripts();
+  });
+  chrome.runtime.onStartup.addListener(() => {
+    void rehydrateEnterpriseScripts();
+  });
+} catch {
+  /* ignore */
+}
+
+// Cold SW wake: re-register enterprise hosts from storage
+void rehydrateEnterpriseScripts();

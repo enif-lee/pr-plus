@@ -3,6 +3,24 @@
  * List up to 100 open PRs, then fill page-visible dangling PRs via single-PR gets.
  */
 
+
+function githubRestUrl(path) {
+  try {
+    if (globalThis.PRGithubEndpoints && typeof globalThis.PRGithubEndpoints.githubRestUrl === 'function') {
+      return globalThis.PRGithubEndpoints.githubRestUrl(path);
+    }
+  } catch (_) {}
+  const p = String(path || '');
+  return 'https://api.github.com' + (p.startsWith('/') ? p : '/' + p);
+}
+function githubGraphqlUrl() {
+  try {
+    if (globalThis.PRGithubEndpoints && typeof globalThis.PRGithubEndpoints.githubGraphqlUrl === 'function') {
+      return globalThis.PRGithubEndpoints.githubGraphqlUrl();
+    }
+  } catch (_) {}
+  return 'https://api.github.com/graphql';
+}
 /**
  * Map REST pull list/item payload → app list row.
  * Includes labels / assignees / milestone so progressive modal sketch can paint
@@ -111,7 +129,7 @@ async function mapWithConcurrency(items, limit, worker) {
 }
 
 async function fetchOpenPullsPublic(owner, repo, fetchImpl, token = null) {
-  const url = `https://api.github.com/repos/${owner}/${repo}/pulls?state=open&per_page=100`;
+  const url = githubRestUrl(`/repos/${owner}/${repo}/pulls?state=open&per_page=100`);
   const res = await fetchImpl(url, {
     headers: buildApiHeaders(token),
   });
@@ -125,7 +143,7 @@ async function fetchOpenPullsPublic(owner, repo, fetchImpl, token = null) {
 }
 
 async function fetchPullByNumber(owner, repo, pullNumber, fetchImpl, token = null) {
-  const url = `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}`;
+  const url = githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}`);
   const res = await fetchImpl(url, {
     headers: buildApiHeaders(token),
   });
@@ -166,7 +184,7 @@ async function fetchDanglingPulls(owner, repo, numbers, fetchImpl, token = null)
  * @returns {Promise<Array<{key_prefix:string,url_template:string,is_alphanumeric:boolean}>>}
  */
 async function fetchRepoAutolinks(owner, repo, fetchImpl, token = null) {
-  const url = `https://api.github.com/repos/${owner}/${repo}/autolinks`;
+  const url = githubRestUrl(`/repos/${owner}/${repo}/autolinks`);
   try {
     const res = await fetchImpl(url, { headers: buildApiHeaders(token) });
     if (!res.ok) return [];
@@ -560,7 +578,7 @@ async function fetchViewerPendingReviewBundle(
   try {
     const n = Number(pullNumber);
     const raw = await apiJson(
-      `https://api.github.com/repos/${owner}/${repo}/pulls/${n}/reviews/${pending.id}/comments?per_page=100`,
+      githubRestUrl(`/repos/${owner}/${repo}/pulls/${n}/reviews/${pending.id}/comments?per_page=100`),
       fetchImpl,
       token
     );
@@ -622,7 +640,7 @@ async function createPendingPullReview(
   const body = {};
   if (commitId) body.commit_id = commitId;
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`,
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`),
     fetchImpl,
     token,
     { method: 'POST', body }
@@ -651,7 +669,7 @@ async function submitPendingPullReview(
     throw new Error('Invalid review event');
   }
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${id}/events`,
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${id}/events`),
     fetchImpl,
     token,
     { method: 'POST', body: { event: ev, body: body || '' } }
@@ -675,7 +693,7 @@ async function deletePendingPullReview(
     throw new Error('Invalid pending review id');
   }
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${id}`,
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${id}`),
     fetchImpl,
     token,
     { method: 'DELETE' }
@@ -735,8 +753,8 @@ async function fetchPrCommentsPage(
       : (() => {
           const base =
             kind === 'review'
-              ? `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/comments`
-              : `https://api.github.com/repos/${owner}/${repo}/issues/${pullNumber}/comments`;
+              ? githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/comments`)
+              : githubRestUrl(`/repos/${owner}/${repo}/issues/${pullNumber}/comments`);
           const q = new URLSearchParams({
             per_page: String(perPage),
             page: String(pageNum),
@@ -891,7 +909,7 @@ async function apiSend(url, fetchImpl, token, { method = 'GET', body } = {}) {
  */
 async function apiGraphql(query, variables, fetchImpl, token) {
   const json = await apiSend(
-    'https://api.github.com/graphql',
+    githubGraphqlUrl(),
     fetchImpl,
     token,
     { method: 'POST', body: { query, variables: variables || {} } }
@@ -1761,7 +1779,7 @@ async function fetchPrDetail(
   token = null,
   opts = {}
 ) {
-  const base = `https://api.github.com/repos/${owner}/${repo}`;
+  const base = githubRestUrl(`/repos/${owner}/${repo}`);
   const n = Number(pullNumber);
   const skipReviewThreads = Boolean(opts.skipReviewThreads);
   const threadsMaxPages = skipReviewThreads
@@ -2276,7 +2294,7 @@ async function fetchPrDetail(
 
 async function postIssueComment(owner, repo, issueNumber, body, fetchImpl, token) {
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/comments`,
+    githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/comments`),
     fetchImpl,
     token,
     { method: 'POST', body: { body } }
@@ -2316,7 +2334,7 @@ async function submitPullReview(
     });
   }
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`,
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`),
     fetchImpl,
     token,
     { method: 'POST', body: payload }
@@ -2452,7 +2470,7 @@ async function ensureViewerPendingReview(
     if (!pending?.id) return null;
     try {
       const full = await apiJson(
-        `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${pending.id}`,
+        githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${pending.id}`),
         fetchImpl,
         token
       );
@@ -2644,7 +2662,7 @@ async function postReviewComment(
     payload.start_side = startSide || side || 'RIGHT';
   }
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/comments`,
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/comments`),
     fetchImpl,
     token,
     { method: 'POST', body: payload }
@@ -2664,7 +2682,7 @@ async function findViewerPendingReview(owner, repo, pullNumber, fetchImpl, token
   try {
     const [reviews, login] = await Promise.all([
       apiJson(
-        `https://api.github.com/repos/${owner}/${repo}/pulls/${n}/reviews?per_page=100`,
+        githubRestUrl(`/repos/${owner}/${repo}/pulls/${n}/reviews?per_page=100`),
         fetchImpl,
         token
       ).catch(() => []),
@@ -2801,7 +2819,7 @@ async function resolveParentCommentNodeId(
   if (!Number.isFinite(id) || id <= 0) return null;
   try {
     const parent = await apiJson(
-      `https://api.github.com/repos/${owner}/${repo}/pulls/comments/${id}`,
+      githubRestUrl(`/repos/${owner}/${repo}/pulls/comments/${id}`),
       fetchImpl,
       token
     );
@@ -3037,7 +3055,7 @@ async function replyToReviewComment(
   // No pending review: REST dedicated replies endpoint (published immediately)
   try {
     return await apiSend(
-      `https://api.github.com/repos/${owner}/${repo}/pulls/${n}/comments/${Math.floor(parentId)}/replies`,
+      githubRestUrl(`/repos/${owner}/${repo}/pulls/${n}/comments/${Math.floor(parentId)}/replies`),
       fetchImpl,
       token,
       { method: 'POST', body: { body: text } }
@@ -3083,7 +3101,7 @@ async function resolveReviewThread(threadNodeId, resolved, fetchImpl, token) {
 async function updatePullState(owner, repo, pullNumber, state, fetchImpl, token) {
   const next = state === 'closed' ? 'closed' : 'open';
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}`,
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}`),
     fetchImpl,
     token,
     { method: 'PATCH', body: { state: next } }
@@ -3104,7 +3122,7 @@ async function reopenPullRequest(owner, repo, pullNumber, fetchImpl, token) {
  */
 async function deleteReviewComment(owner, repo, commentId, fetchImpl, token) {
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/comments/${commentId}`,
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/comments/${commentId}`),
     fetchImpl,
     token,
     { method: 'DELETE' }
@@ -3117,7 +3135,7 @@ async function deleteReviewComment(owner, repo, commentId, fetchImpl, token) {
  */
 async function deleteIssueComment(owner, repo, commentId, fetchImpl, token) {
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/issues/comments/${commentId}`,
+    githubRestUrl(`/repos/${owner}/${repo}/issues/comments/${commentId}`),
     fetchImpl,
     token,
     { method: 'DELETE' }
@@ -3131,7 +3149,7 @@ async function updatePullRequest(owner, repo, pullNumber, fields, fetchImpl, tok
   if (fields?.base != null) body.base = String(fields.base);
   if (fields?.state != null) body.state = fields.state === 'closed' ? 'closed' : 'open';
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}`,
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}`),
     fetchImpl,
     token,
     { method: 'PATCH', body }
@@ -3140,7 +3158,7 @@ async function updatePullRequest(owner, repo, pullNumber, fields, fetchImpl, tok
 
 async function editIssueComment(owner, repo, commentId, body, fetchImpl, token) {
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/issues/comments/${commentId}`,
+    githubRestUrl(`/repos/${owner}/${repo}/issues/comments/${commentId}`),
     fetchImpl,
     token,
     { method: 'PATCH', body: { body: String(body || '') } }
@@ -3149,7 +3167,7 @@ async function editIssueComment(owner, repo, commentId, body, fetchImpl, token) 
 
 async function editReviewComment(owner, repo, commentId, body, fetchImpl, token) {
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/comments/${commentId}`,
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/comments/${commentId}`),
     fetchImpl,
     token,
     { method: 'PATCH', body: { body: String(body || '') } }
@@ -3165,7 +3183,7 @@ async function requestReviewers(
   token
 ) {
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/requested_reviewers`,
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/requested_reviewers`),
     fetchImpl,
     token,
     {
@@ -3184,7 +3202,7 @@ async function removeReviewers(
   token
 ) {
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/requested_reviewers`,
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/requested_reviewers`),
     fetchImpl,
     token,
     {
@@ -3196,7 +3214,7 @@ async function removeReviewers(
 
 async function addAssignees(owner, repo, issueNumber, assignees, fetchImpl, token) {
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/assignees`,
+    githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/assignees`),
     fetchImpl,
     token,
     { method: 'POST', body: { assignees: assignees || [] } }
@@ -3205,7 +3223,7 @@ async function addAssignees(owner, repo, issueNumber, assignees, fetchImpl, toke
 
 async function removeAssignees(owner, repo, issueNumber, assignees, fetchImpl, token) {
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/assignees`,
+    githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/assignees`),
     fetchImpl,
     token,
     { method: 'DELETE', body: { assignees: assignees || [] } }
@@ -3214,7 +3232,7 @@ async function removeAssignees(owner, repo, issueNumber, assignees, fetchImpl, t
 
 async function setIssueLabels(owner, repo, issueNumber, labels, fetchImpl, token) {
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/labels`,
+    githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/labels`),
     fetchImpl,
     token,
     { method: 'PUT', body: { labels: labels || [] } }
@@ -3237,7 +3255,7 @@ async function mergePullRequest(
   if (commitTitle != null) body.commit_title = String(commitTitle);
   if (commitMessage != null) body.commit_message = String(commitMessage);
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/merge`,
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/merge`),
     fetchImpl,
     token,
     { method: 'PUT', body }
@@ -3255,7 +3273,7 @@ async function updatePullBranch(
   const body = {};
   if (expectedHeadSha) body.expected_head_sha = String(expectedHeadSha);
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/update-branch`,
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/update-branch`),
     fetchImpl,
     token,
     { method: 'PUT', body }
@@ -3280,7 +3298,7 @@ async function resolvePullRequestNodeId(
   try {
     // Prefer REST node_id (cheap, same id GraphQL expects)
     const pr = await apiJson(
-      `https://api.github.com/repos/${owner}/${repo}/pulls/${n}`,
+      githubRestUrl(`/repos/${owner}/${repo}/pulls/${n}`),
       fetchImpl,
       token
     );
@@ -3431,7 +3449,7 @@ async function fetchPullRequestSubscription(
 
 async function setIssueMilestone(owner, repo, issueNumber, milestoneNumber, fetchImpl, token) {
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}`,
+    githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}`),
     fetchImpl,
     token,
     {
@@ -3457,7 +3475,7 @@ async function setPullRequestDraftStage(
   let id = nodeId;
   if (!id) {
     const pr = await apiJson(
-      `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}`,
+      githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}`),
       fetchImpl,
       token
     );
@@ -3515,9 +3533,11 @@ async function uploadRepoFile(
   let sha;
   try {
     const meta = await apiJson(
-      `https://api.github.com/repos/${owner}/${repo}/contents/${encPath}${
-        branch ? `?ref=${encodeURIComponent(branch)}` : ''
-      }`,
+      githubRestUrl(
+        `/repos/${owner}/${repo}/contents/${encPath}${
+          branch ? `?ref=${encodeURIComponent(branch)}` : ''
+        }`
+      ),
       fetchImpl,
       token
     );
@@ -3532,7 +3552,7 @@ async function uploadRepoFile(
   if (branch) body.branch = branch;
   if (sha) body.sha = sha;
   const result = await apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/contents/${encPath}`,
+    githubRestUrl(`/repos/${owner}/${repo}/contents/${encPath}`),
     fetchImpl,
     token,
     { method: 'PUT', body }
@@ -3558,7 +3578,7 @@ async function getRepoFileText(owner, repo, { path, ref }, fetchImpl, token) {
     .map(encodeURIComponent)
     .join('/');
   const meta = await apiJson(
-    `https://api.github.com/repos/${owner}/${repo}/contents/${encPath}?ref=${encodeURIComponent(rev)}`,
+    githubRestUrl(`/repos/${owner}/${repo}/contents/${encPath}?ref=${encodeURIComponent(rev)}`),
     fetchImpl,
     token
   );
@@ -3636,10 +3656,10 @@ async function applyReviewSuggestion(
     contentB64 = btoa(unescape(encodeURIComponent(next)));
   }
   return apiSend(
-    `https://api.github.com/repos/${owner}/${repo}/contents/${path
+    githubRestUrl(`/repos/${owner}/${repo}/contents/${path
       .split('/')
       .map(encodeURIComponent)
-      .join('/')}`,
+      .join('/')}`),
     fetchImpl,
     token,
     {
@@ -3660,7 +3680,7 @@ async function applyReviewSuggestion(
 async function fetchViewerLogin(fetchImpl, token) {
   if (!token) return null;
   try {
-    const me = await apiJson('https://api.github.com/user', fetchImpl, token);
+    const me = await apiJson(githubRestUrl('/user'), fetchImpl, token);
     return me?.login || null;
   } catch {
     return null;
@@ -3680,6 +3700,12 @@ function mapAndAnnotateFiles(files, gitattributesText = '') {
     deletions: f.deletions,
     changes: f.changes,
     patch: f.patch || '',
+    // Preserve media URLs for image preview / binary classification
+    raw_url: f.raw_url || f.rawUrl || '',
+    blob_url: f.blob_url || f.blobUrl || '',
+    contents_url: f.contents_url || f.contentsUrl || '',
+    sha: f.sha || '',
+    previous_filename: f.previous_filename || f.previousFilename || '',
   }));
 
   let filesOut;
@@ -3699,15 +3725,26 @@ function mapAndAnnotateFiles(files, gitattributesText = '') {
     filesOut = null;
   }
   if (!filesOut) {
-    filesOut = mappedFiles.map((f) => ({
-      ...f,
-      defaultCollapsed:
-        !f.patch ||
-        (f.changes || 0) >= 500 ||
-        /package-lock\.json$|yarn\.lock$|\.min\.(js|css)$|\.bundle\.js$/i.test(
-          f.filename || ''
-        ),
-    }));
+    const LARGE = 5000;
+    filesOut = mappedFiles.map((f) => {
+      const path = f.filename || '';
+      const isImage =
+        /\.(png|jpe?g|gif|webp|bmp|svg|ico|avif)$/i.test(path);
+      const hasPatch = Boolean(f.patch);
+      const kind = isImage ? 'image' : hasPatch ? 'text' : 'binary';
+      return {
+        ...f,
+        fileKind: kind,
+        openableAsText: kind === 'text',
+        renderImage: kind === 'image',
+        defaultCollapsed:
+          kind === 'binary' ||
+          (f.changes || 0) >= LARGE ||
+          /package-lock\.json$|yarn\.lock$|\.min\.(js|css)$|\.bundle\.js$/i.test(
+            path
+          ),
+      };
+    });
   }
   return filesOut;
 }
@@ -3726,7 +3763,7 @@ async function fetchCompareFiles(owner, repo, base, head, fetchImpl, token = nul
     throw new Error('owner, repo, base, and head are required for compare');
   }
   const gitattributesText = String(options.gitattributesText || '');
-  const url = `https://api.github.com/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/compare/${encodeURIComponent(b)}...${encodeURIComponent(h)}`;
+  const url = githubRestUrl(`/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/compare/${encodeURIComponent(b)}...${encodeURIComponent(h)}`);
   const data = await apiJson(url, fetchImpl, token);
   const files = mapAndAnnotateFiles(data?.files || [], gitattributesText);
   return {

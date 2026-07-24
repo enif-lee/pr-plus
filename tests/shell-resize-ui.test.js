@@ -49,14 +49,14 @@ const root = path.join(__dirname, '..');
   saveSheetWidth(mem, w);
   assert.equal(loadSheetWidth(mem), SHEET_MIN_WIDTH);
 
-  // Modal SE resize + persist
+  // Modal SE resize + persist (dx/dy doubled so centered edges track the pointer)
   let size = nextModalSizeFromDrag({ width: 900, height: 700 }, 50, 40);
-  assert.equal(size.width, 950);
-  assert.equal(size.height, 740);
+  assert.equal(size.width, 1000);
+  assert.equal(size.height, 780);
   assert.equal(saveModalSize(mem, size), true);
   const restored = loadModalSize(mem);
-  assert.equal(restored.width, 950);
-  assert.equal(restored.height, 740);
+  assert.equal(restored.width, 1000);
+  assert.equal(restored.height, 780);
 
   // Keys are separate
   assert.ok(mem.data[SHELL_SHEET_WIDTH_KEY]);
@@ -69,7 +69,7 @@ const root = path.join(__dirname, '..');
   assert.equal(fs, true);
   assert.equal(shellFullscreenClassName(fs), 'prp-shell--fullscreen');
   assert.equal(loadSheetWidth(mem), SHEET_MIN_WIDTH);
-  assert.equal(loadModalSize(mem).width, 950);
+  assert.equal(loadModalSize(mem).width, 1000);
   fs = toggleShellFullscreen(fs);
   assert.equal(fs, false);
   assert.equal(shellFullscreenClassName(fs), '');

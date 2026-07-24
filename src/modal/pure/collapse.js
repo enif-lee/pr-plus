@@ -5,8 +5,44 @@
    * Aligns with GitHub + linguist-style .gitattributes signals.
    */
 
-  const DEFAULT_LARGE_CHANGES = 500;
+  /** Files with this many change lines (additions+deletions) start collapsed. */
+  const DEFAULT_LARGE_CHANGES = 5000;
   const DEFAULT_LARGE_PATCH_CHARS = 80_000;
+
+  const IMAGE_EXT_RE =
+    /\.(png|jpe?g|gif|webp|bmp|svg|ico|avif|jfif|pjpeg|pjp|tif{1,2})$/i;
+
+  /**
+   * @param {unknown} path
+   * @returns {boolean}
+   */
+  function isImagePath(path) {
+    const p = String(path || '').split('?')[0].split('#')[0];
+    return IMAGE_EXT_RE.test(p);
+  }
+
+  /**
+   * Classify a PR file for diff presentation.
+   * @returns {{ kind: 'image'|'binary'|'text', openableAsText: boolean, renderImage: boolean }}
+   */
+  function classifyDiffFile(file) {
+    if (!file) {
+      return { kind: 'binary', openableAsText: false, renderImage: false };
+    }
+    const path = file.filename || file.path || '';
+    const patch = typeof file.patch === 'string' ? file.patch : '';
+    const hasPatch = patch.length > 0;
+    const media = String(file.mediaType || file.contentType || '').toLowerCase();
+    const image = isImagePath(path) || media.startsWith('image/');
+
+    if (image) {
+      return { kind: 'image', openableAsText: false, renderImage: true };
+    }
+    if (hasPatch) {
+      return { kind: 'text', openableAsText: true, renderImage: false };
+    }
+    return { kind: 'binary', openableAsText: false, renderImage: false };
+  }
 
   /**
    * Parse .gitattributes body into path-pattern → attributes map.
@@ -122,6 +158,7 @@
     const largeChanges = opts.largeChanges ?? DEFAULT_LARGE_CHANGES;
     const largePatchChars = opts.largePatchChars ?? DEFAULT_LARGE_PATCH_CHARS;
     const rules = opts.rules || [];
+    const classified = classifyDiffFile(file);
 
     const attrs = attributesForPath(path, rules);
     if (
@@ -137,10 +174,11 @@
     if (attrs.diff === false || String(attrs.diff || '').toLowerCase() === 'false') {
       return true;
     }
-    // GitHub omits patch for binary / too large
-    if (!patch) return true;
+    if (classified.kind === 'binary') return true;
     if (changes >= largeChanges) return true;
-    if (patch.length >= largePatchChars) return true;
+    if (patch && patch.length >= largePatchChars) return true;
+    if (classified.kind === 'image') return false;
+    if (!patch) return true;
 
     // Common generated / lockfile noise
     const lower = path.toLowerCase();
@@ -171,19 +209,21 @@
     return (Array.isArray(files) ? files : []).map((f) => {
       const path = f.filename || f.path || '';
       const attrs = attributesForPath(path, rules);
-      const collapsed = shouldCollapseFile(
-        {
-          ...f,
-          linguistGenerated:
-            isAttrEnabled(f.linguistGenerated) ||
-            isAttrEnabled(attrs['linguist-generated']),
-          binary: isAttrEnabled(f.binary) || isAttrEnabled(attrs.binary),
-        },
-        { rules }
-      );
+      const enriched = {
+        ...f,
+        linguistGenerated:
+          isAttrEnabled(f.linguistGenerated) ||
+          isAttrEnabled(attrs['linguist-generated']),
+        binary: isAttrEnabled(f.binary) || isAttrEnabled(attrs.binary),
+      };
+      const classified = classifyDiffFile(enriched);
+      const collapsed = shouldCollapseFile(enriched, { rules });
       return {
         ...f,
         attrs,
+        fileKind: classified.kind,
+        openableAsText: classified.openableAsText,
+        renderImage: classified.renderImage,
         defaultCollapsed: collapsed,
       };
     });
@@ -240,6 +280,8 @@
     matchAttrPattern,
     attributesForPath,
     isAttrEnabled,
+    isImagePath,
+    classifyDiffFile,
     shouldCollapseFile,
     annotateFilesForCollapse,
     isPathCollapsed,

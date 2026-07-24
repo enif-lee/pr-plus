@@ -16,6 +16,8 @@ export const COMMENT_ROW_HEIGHT = 220;
 export const COMMENT_ROW_HEIGHT_PENDING = COMMENT_ROW_HEIGHT;
 /** Collapsed thread chrome (filebar + 3-line preview) — keep tight to avoid dead space. */
 export const COMMENT_ROW_HEIGHT_COLLAPSED = 76;
+/** Estimated height for rendered image previews in the virtualized diff list. */
+export const IMAGE_ROW_HEIGHT = 220;
 
 /**
  * @param {any} row
@@ -29,6 +31,9 @@ export function rowHeightFor(row, opts: any = null) {
     // Pending and submitted threads share the same estimate so virtual offsets
     // match real card height (under-estimate clips bottom + breaks toggles).
     return COMMENT_ROW_HEIGHT;
+  }
+  if (row?.kind === 'diff-image') {
+    return IMAGE_ROW_HEIGHT;
   }
   // Symmetric @@ -N,M +N,M @@ headers are hidden unless they carry expand controls
   if (

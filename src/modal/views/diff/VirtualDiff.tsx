@@ -248,12 +248,16 @@ const DiffCodeLine = memo(function DiffCodeLine({
       data-search-current={isActiveHit ? '1' : undefined}
       data-hunk-hidden={hideHunkText ? '1' : undefined}
       title={
-        selectable ? 'Click = single line · Drag = multi-line comment' : undefined
+        selectable
+          ? 'Click = single line · Shift+click or drag = multi-line comment'
+          : undefined
       }
       onMouseDown={(e) => {
         if (e.button !== 0 || !selectable) return;
         e.preventDefault();
-        onSelectionStart?.(row, { x: e.clientX, y: e.clientY });
+        onSelectionStart?.(row, { x: e.clientX, y: e.clientY }, {
+          shiftKey: Boolean(e.shiftKey),
+        });
       }}
       onMouseEnter={() => {
         if (selecting) onSelectionExtend?.(row);
@@ -765,6 +769,7 @@ function VirtualDiffImpl(props: any) {
                 ? isPathViewed(viewedPaths, row.filePath)
                 : false;
               const collapsed = Boolean(row.collapsed);
+              const openable = row.openable !== false;
               const status = String(row.status || 'modified').toLowerCase();
               const adds = row.additions ?? 0;
               const dels = row.deletions ?? 0;
@@ -785,10 +790,14 @@ function VirtualDiffImpl(props: any) {
               return (
                 <div
                   key={row.rowIndex}
-                  className={`prp-vline prp-vline--header prp-vline--header-${headerTone}${searchRowClass}`}
+                  className={`prp-vline prp-vline--header prp-vline--header-${headerTone}${
+                    !openable ? ' prp-vline--header-binary' : ''
+                  }${searchRowClass}`}
                   style={{ height: ROW_HEIGHT }}
                   data-row-index={row.rowIndex}
                   data-file-status={status}
+                  data-openable={openable ? '1' : '0'}
+                  data-file-kind={row.fileKind || undefined}
                   data-search-current={isActiveHit ? '1' : undefined}
                 >
                   <label className="prp-file-header__viewed" title="Mark as viewed">
@@ -799,18 +808,36 @@ function VirtualDiffImpl(props: any) {
                       onClick={(e) => e.stopPropagation()}
                     />
                   </label>
-                  <button
-                    type="button"
-                    className="prp-file-header__collapse"
-                    title={collapsed ? 'Expand file' : 'Collapse file'}
-                    onClick={() => onToggleCollapse?.(row.filePath)}
-                  >
-                    <IconDisclosure open={!collapsed} size={12} />
-                  </button>
+                  {openable ? (
+                    <button
+                      type="button"
+                      className="prp-file-header__collapse"
+                      title={collapsed ? 'Expand file' : 'Collapse file'}
+                      onClick={() => onToggleCollapse?.(row.filePath)}
+                    >
+                      <IconDisclosure open={!collapsed} size={12} />
+                    </button>
+                  ) : (
+                    <span
+                      className="prp-file-header__collapse prp-file-header__collapse--locked"
+                      title="Binary file — cannot open as text"
+                      aria-hidden="true"
+                    >
+                      <IconDisclosure open={false} size={12} />
+                    </span>
+                  )}
                   <button
                     type="button"
                     className="prp-file-header-btn"
-                    onClick={() => onToggleCollapse?.(row.filePath)}
+                    onClick={() => {
+                      if (openable) onToggleCollapse?.(row.filePath);
+                    }}
+                    disabled={!openable}
+                    title={
+                      openable
+                        ? undefined
+                        : 'Binary file — cannot open in diff view'
+                    }
                   >
                     <span
                       className={`prp-file-header__status prp-file-header__status--${headerTone}`}
@@ -836,6 +863,9 @@ function VirtualDiffImpl(props: any) {
                           : escapeHtml(row.filePath || ''),
                       }}
                     />
+                    {!openable ? (
+                      <span className="prp-file-header__binary-badge">binary</span>
+                    ) : null}
                     <span
                       className="prp-file-header__stats"
                       aria-label={`+${adds} −${dels}`}
@@ -844,6 +874,87 @@ function VirtualDiffImpl(props: any) {
                       <span className="prp-stat-del">−{dels}</span>
                     </span>
                   </button>
+                </div>
+              );
+            }
+
+            if (row.kind === 'diff-image') {
+              const status = String(row.status || 'modified').toLowerCase();
+              const showBase = Boolean(row.baseUrl);
+              const showHead =
+                Boolean(row.headUrl) &&
+                status !== 'removed' &&
+                status !== 'deleted';
+              return (
+                <div
+                  key={row.rowIndex}
+                  className={`prp-vline prp-vline--image${searchRowClass}`}
+                  data-row-index={row.rowIndex}
+                  data-search-current={isActiveHit ? '1' : undefined}
+                >
+                  <div className="prp-diff-image">
+                    {showBase ? (
+                      <figure className="prp-diff-image__pane prp-diff-image__pane--base">
+                        <figcaption className="prp-diff-image__label">
+                          {status === 'removed' || status === 'deleted'
+                            ? 'Removed'
+                            : 'Before'}
+                        </figcaption>
+                        <img
+                          className="prp-diff-image__img"
+                          src={row.baseUrl}
+                          alt={`${row.filePath || 'image'} (before)`}
+                          loading="lazy"
+                          referrerPolicy="no-referrer-when-downgrade"
+                          onError={(e) => {
+                            (e.currentTarget as HTMLImageElement).style.display =
+                              'none';
+                          }}
+                        />
+                      </figure>
+                    ) : null}
+                    {showHead ? (
+                      <figure className="prp-diff-image__pane prp-diff-image__pane--head">
+                        <figcaption className="prp-diff-image__label">
+                          {status === 'added' || status === 'add'
+                            ? 'Added'
+                            : 'After'}
+                        </figcaption>
+                        <img
+                          className="prp-diff-image__img"
+                          src={row.headUrl}
+                          alt={`${row.filePath || 'image'} (after)`}
+                          loading="lazy"
+                          referrerPolicy="no-referrer-when-downgrade"
+                          onError={(e) => {
+                            (e.currentTarget as HTMLImageElement).style.display =
+                              'none';
+                          }}
+                        />
+                      </figure>
+                    ) : null}
+                    {!showBase && !showHead ? (
+                      <p className="prp-diff-image__empty">
+                        Image preview unavailable
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            }
+
+            if (row.kind === 'diff-meta') {
+              return (
+                <div
+                  key={row.rowIndex}
+                  className={`prp-vline prp-vline--meta${searchRowClass}`}
+                  style={{ height: ROW_HEIGHT }}
+                  data-row-index={row.rowIndex}
+                  data-search-current={isActiveHit ? '1' : undefined}
+                >
+                  <span className="prp-diff-meta-text">
+                    {row.text || 'Binary file — not shown'}
+                  </span>
                 </div>
               );
             }

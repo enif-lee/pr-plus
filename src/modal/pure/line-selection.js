@@ -58,6 +58,40 @@ function extendLineSelection(selection, row) {
   };
 }
 
+/**
+ * Pointer-down decision for click vs Shift-click.
+ * @returns {{ selection: object|null, mode: 'begin'|'extend'|'ignore', keepRange: boolean }}
+ */
+function applySelectionPointerDown(currentSelection, row, opts = {}) {
+  const shiftKey = Boolean(opts?.shiftKey);
+  if (!isSelectableDiffRow(row)) {
+    return {
+      selection: currentSelection || null,
+      mode: 'ignore',
+      keepRange: false,
+    };
+  }
+  if (
+    shiftKey &&
+    currentSelection &&
+    currentSelection.filePath &&
+    row.filePath === currentSelection.filePath
+  ) {
+    const extended = extendLineSelection(currentSelection, row);
+    return {
+      selection: extended || currentSelection,
+      mode: 'extend',
+      keepRange: true,
+    };
+  }
+  const started = beginLineSelection(row);
+  return {
+    selection: started,
+    mode: 'begin',
+    keepRange: false,
+  };
+}
+
 function normalizeSelection(selection) {
   if (!selection) return null;
   const startLine = Math.min(selection.anchorLine, selection.headLine);
@@ -106,14 +140,13 @@ function selectionToCommentPayload(selection, opts = {}) {
 
 /**
  * Finalize selection after pointer up.
- * click (no drag / no multi) → force single line at anchor.
- * drag (head moved) → keep multi-line range.
+ * click → single line at anchor; drag | shift → keep multi-line range.
  * @param {object|null} selection
- * @param {'click'|'drag'} mode
+ * @param {'click'|'drag'|'shift'} mode
  */
 function finalizeSelection(selection, mode) {
   if (!selection) return null;
-  if (mode === 'drag') {
+  if (mode === 'drag' || mode === 'shift') {
     return { ...selection };
   }
   // click = single line at anchor
@@ -178,6 +211,7 @@ const api = {
   lineForSide,
   beginLineSelection,
   extendLineSelection,
+  applySelectionPointerDown,
   normalizeSelection,
   selectionToCommentPayload,
   finalizeSelection,

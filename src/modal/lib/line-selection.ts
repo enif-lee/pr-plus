@@ -59,6 +59,53 @@ export function extendLineSelection(selection, row) {
   };
 }
 
+/**
+ * Pointer-down decision for click vs Shift-click.
+ * - Normal click → begin new single-line selection (new anchor)
+ * - Shift-click with same-file anchor → extend head only (range)
+ * - Shift-click with no prior selection or other file → begin new
+ * - Non-selectable row → leave selection unchanged
+ *
+ * @param {object|null} currentSelection
+ * @param {object} row
+ * @param {{ shiftKey?: boolean }} [opts]
+ * @returns {{
+ *   selection: object|null,
+ *   mode: 'begin'|'extend'|'ignore',
+ *   keepRange: boolean,
+ * }}
+ */
+export function applySelectionPointerDown(currentSelection, row, opts: any = {}) {
+  const shiftKey = Boolean(opts?.shiftKey);
+  if (!isSelectableDiffRow(row)) {
+    return {
+      selection: currentSelection || null,
+      mode: 'ignore',
+      keepRange: false,
+    };
+  }
+  if (
+    shiftKey &&
+    currentSelection &&
+    currentSelection.filePath &&
+    row.filePath === currentSelection.filePath
+  ) {
+    const extended = extendLineSelection(currentSelection, row);
+    return {
+      selection: extended || currentSelection,
+      mode: 'extend',
+      // Finalize as multi-line (do not collapse head back to anchor)
+      keepRange: true,
+    };
+  }
+  const started = beginLineSelection(row);
+  return {
+    selection: started,
+    mode: 'begin',
+    keepRange: false,
+  };
+}
+
 export function normalizeSelection(selection) {
   if (!selection) return null;
   const startLine = Math.min(selection.anchorLine, selection.headLine);
@@ -110,13 +157,13 @@ export function selectionToCommentPayload(selection, opts: any = {
 /**
  * Finalize selection after pointer up.
  * click (no drag / no multi) → force single line at anchor.
- * drag (head moved) → keep multi-line range.
+ * drag | shift (head moved / Shift-click range) → keep multi-line range.
  * @param {object|null} selection
- * @param {'click'|'drag'} mode
+ * @param {'click'|'drag'|'shift'} mode
  */
 export function finalizeSelection(selection, mode) {
   if (!selection) return null;
-  if (mode === 'drag') {
+  if (mode === 'drag' || mode === 'shift') {
     return { ...selection };
   }
   // click = single line at anchor

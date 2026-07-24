@@ -18,6 +18,7 @@ if (build.status !== 0) {
 }
 
 const tests = [
+  'github-endpoints.test.js',
   'tree.test.js',
   'storage.test.js',
   'service-worker-load.test.js',

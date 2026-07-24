@@ -3,10 +3,14 @@
   "name": "pr+",
   "version": "1.4.1",
   "description": "GitHub PR stack tree on /pulls plus a fast in-page review shell: Conversation, Diff, Mermaid, progressive load, merge, and deep links without leaving the list.",
-  "permissions": ["storage"],
+  "permissions": ["storage", "scripting"],
   "host_permissions": [
     "https://github.com/*",
     "https://api.github.com/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://*/*"
   ],
   "background": {
     "service_worker": "src/background.bundle.js"
@@ -21,6 +25,7 @@
       "js": [
         "src/tree.js",
         "src/dom.js",
+        "src/github-endpoints.js",
         "src/content-bridge.js",
         "src/content-bootstrap.js",
         "src/content.js",
@@ -42,7 +47,7 @@
         "src/modal/dist/hljs-langs/*",
         "src/modal/dist/hljs-langs/*.js"
       ],
-      "matches": ["https://github.com/*"],
+      "matches": ["https://*/*"],
       "use_dynamic_url": true
     }
   ]

@@ -140,8 +140,16 @@ import {
 } from '../lib/search-index';
 import { calculateVisibleRange, scrollTopForIndex } from '../lib/virtual-range';
 import {
-  beginLineSelection, extendLineSelection, normalizeSelection, selectionToCommentPayload,
-  finalizeSelection, selectionGestureMode, isRowInSelection, isSelectableDiffRow, selectionBlockRole,
+  beginLineSelection,
+  extendLineSelection,
+  applySelectionPointerDown,
+  normalizeSelection,
+  selectionToCommentPayload,
+  finalizeSelection,
+  selectionGestureMode,
+  isRowInSelection,
+  isSelectableDiffRow,
+  selectionBlockRole,
 } from '../lib/line-selection';
 import {
   discardPendingReview,
@@ -567,6 +575,8 @@ export function PrModalApp({
   const collapseInitRef = useRef<any>(null);
   const selectingRef = useRef<boolean>(false);
   const pointerStartRef = useRef<any>(null);
+  /** Shift-click range: finalize as multi (do not collapse head to anchor). */
+  const shiftRangeRef = useRef<boolean>(false);
   /** Latest UI flags for capture-phase keydown (avoid stale closures). */
   const uiRef = useRef<any>({});
   /** Latest action handlers for capture-phase keydown. */
@@ -872,6 +882,15 @@ export function PrModalApp({
         reviewComments: navReviewComments,
         expandedRanges: diffExpandedRanges,
         fileLineTexts: diffFileLines,
+        // Image preview URLs for binary-less image files (added/replaced)
+        owner: detail?.owner,
+        repo: detail?.repo,
+        baseSha: detail?.baseSha,
+        headSha: detail?.headSha,
+        baseRef: detail?.baseRef,
+        headRef: detail?.headRef,
+        webOrigin:
+          typeof location !== 'undefined' ? location.origin : 'https://github.com',
       }),
     [
       displayFiles,
@@ -881,6 +900,12 @@ export function PrModalApp({
       navReviewComments,
       diffExpandedRanges,
       diffFileLines,
+      detail?.owner,
+      detail?.repo,
+      detail?.baseSha,
+      detail?.headSha,
+      detail?.baseRef,
+      detail?.headRef,
     ]
   );
 
@@ -3109,14 +3134,42 @@ export function PrModalApp({
     }
   }
 
-  function onSelectionStart(row, point) {
-    if (typeof beginLineSelection !== 'function') return;
-    const sel = beginLineSelection(row);
-    if (!sel) return;
+  function onSelectionStart(row, point, opts: any = {}) {
+    const shiftKey = Boolean(opts?.shiftKey);
+    const prev = useModalStore.getState().lineSelection;
+    let next = null;
+    let keepRange = false;
+    if (typeof applySelectionPointerDown === 'function') {
+      const result = applySelectionPointerDown(prev, row, { shiftKey });
+      if (result.mode === 'ignore') {
+        shiftRangeRef.current = false;
+        return;
+      }
+      next = result.selection;
+      keepRange = Boolean(result.keepRange);
+    } else if (typeof beginLineSelection === 'function') {
+      if (
+        shiftKey &&
+        prev &&
+        row?.filePath === prev.filePath &&
+        typeof extendLineSelection === 'function'
+      ) {
+        next = extendLineSelection(prev, row) || prev;
+        keepRange = true;
+      } else {
+        next = beginLineSelection(row);
+        keepRange = false;
+      }
+    }
+    if (!next) {
+      shiftRangeRef.current = false;
+      return;
+    }
+    shiftRangeRef.current = keepRange;
     selectingRef.current = true;
     pointerStartRef.current = point || null;
     setSelecting(true);
-    setLineSelection(sel);
+    setLineSelection(next);
     setShowSelectionComposer(false);
   }
 
@@ -3129,11 +3182,18 @@ export function PrModalApp({
     if (!selectingRef.current && forcedMode !== 'click') return;
     selectingRef.current = false;
     setSelecting(false);
+    const keepShiftRange = shiftRangeRef.current;
+    shiftRangeRef.current = false;
     const mode =
-      forcedMode ||
-      (typeof selectionGestureMode === 'function'
-        ? selectionGestureMode(pointerStartRef.current, point || pointerStartRef.current)
-        : 'click');
+      keepShiftRange
+        ? 'shift'
+        : forcedMode ||
+          (typeof selectionGestureMode === 'function'
+            ? selectionGestureMode(
+                pointerStartRef.current,
+                point || pointerStartRef.current
+              )
+            : 'click');
     setLineSelection((prev) => {
       if (!prev) return prev;
       if (typeof finalizeSelection === 'function') return finalizeSelection(prev, mode);

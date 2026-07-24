@@ -11,6 +11,20 @@
     return;
   }
 
+  // Only run on GitHub.com / Enterprise web UI (not arbitrary HTTPS sites).
+  try {
+    const ep = globalThis.PRGithubEndpoints;
+    if (
+      ep &&
+      typeof ep.isGithubWebDocument === 'function' &&
+      !ep.isGithubWebDocument(document, window.location)
+    ) {
+      return;
+    }
+  } catch {
+    /* continue — static github.com match still valid */
+  }
+
   const { createPrTreeApp } = globalThis.PRTreeBootstrap;
   if (typeof createPrTreeApp !== 'function') {
     console.warn('[pr+] PRTreeBootstrap missing');

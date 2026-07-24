@@ -12,6 +12,7 @@ const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const src = path.join(root, 'src');
 
 const deps = [
+  'github-endpoints.js',
   'modal/pure/collapse.js',
   'modal/pure/comments-page.js',
   'modal/pure/review-threads.js',

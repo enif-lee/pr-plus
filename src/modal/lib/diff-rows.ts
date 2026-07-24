@@ -5,8 +5,30 @@
  * Supports default-collapsed files and inline review comments.
  */
 
+import { classifyDiffFile } from './collapse';
+
 /** Default chunk when expanding from one edge of a gap (GitHub uses 20). */
 export const DIFF_EXPAND_CHUNK = 20;
+
+/**
+ * Build a raw content URL for GitHub / GHE web UI.
+ * @param {{ webOrigin?: string, owner?: string, repo?: string, ref?: string, path?: string }} opts
+ */
+export function buildGithubRawUrl(opts: any = {}) {
+  const owner = String(opts.owner || '').trim();
+  const repo = String(opts.repo || '').trim();
+  const ref = String(opts.ref || '').trim();
+  const path = String(opts.path || '').replace(/^\/+/, '');
+  if (!owner || !repo || !ref || !path) return '';
+  const origin = String(opts.webOrigin || 'https://github.com')
+    .trim()
+    .replace(/\/+$/, '');
+  const encPath = path
+    .split('/')
+    .map((seg) => encodeURIComponent(seg))
+    .join('/');
+  return `${origin}/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/raw/${encodeURIComponent(ref)}/${encPath}`;
+}
 
 /**
  * @param {Array<{ filename: string, status?: string, additions?: number, deletions?: number, patch?: string, defaultCollapsed?: boolean }>} files
@@ -67,13 +89,25 @@ export function flattenFilesToVirtualRows(files, mode = 'unified', options: any 
     const path = file.filename || file.path || 'unknown';
     const status = file.status || 'modified';
     const stats = `+${file.additions ?? 0} −${file.deletions ?? 0}`;
+    const classified =
+      file.fileKind && typeof file.openableAsText === 'boolean'
+        ? {
+            kind: file.fileKind,
+            openableAsText: file.openableAsText,
+            renderImage: Boolean(file.renderImage),
+          }
+        : classifyDiffFile(file);
+    // Non-image binary never expands a text body (header-only, not toggle-openable).
+    const openable = classified.kind === 'text' || classified.renderImage;
     // Empty collapsedSet → honor defaultCollapsed + viewed.
     // Non-empty → explicit list only (after first toggle materializes defaults).
-    const isCollapsed =
-      !options.expandAll &&
-      (collapsedSet.has(path) ||
-        (collapsedSet.size === 0 &&
-          (file.defaultCollapsed === true || viewedSet.has(path))));
+    // Binary non-openable files stay header-only regardless of expandAll.
+    const isCollapsed = !openable
+      ? true
+      : !options.expandAll &&
+        (collapsedSet.has(path) ||
+          (collapsedSet.size === 0 &&
+            (file.defaultCollapsed === true || viewedSet.has(path))));
 
     const additions = Number(file.additions) || 0;
     const deletions = Number(file.deletions) || 0;
@@ -88,23 +122,76 @@ export function flattenFilesToVirtualRows(files, mode = 'unified', options: any 
       rowIndex: index++,
       lineType: 'header',
       collapsed: isCollapsed,
+      openable,
+      fileKind: classified.kind,
+      renderImage: classified.renderImage,
     });
 
-    // Collapsed files expose only the header (toggle to expand) — no meta row.
-    if (isCollapsed) {
+    // Collapsed / non-openable: header only (binary never opens as text).
+    if (isCollapsed || !openable) {
+      // Still surface review threads so Diff nav can land on them.
+      if (!openable) {
+        for (const c of rootsByPath.get(path) || []) {
+          pushInline(path, c, c.line ?? null, c.originalLine ?? null);
+        }
+      }
       continue;
     }
 
     const patch = file.patch || '';
     if (!patch) {
-      rows.push({
-        kind: 'diff-meta',
-        filePath: path,
-        text: '(no textual patch — binary or too large)',
-        rowIndex: index++,
-        lineType: 'meta',
-      });
-      // Still surface review threads so Diff nav can land on them.
+      if (classified.renderImage) {
+        const headUrl =
+          file.raw_url ||
+          file.rawUrl ||
+          file.headRawUrl ||
+          buildGithubRawUrl({
+            webOrigin: options.webOrigin,
+            owner: options.owner,
+            repo: options.repo,
+            ref: options.headSha || options.headRef,
+            path,
+          });
+        const prevPath = file.previous_filename || file.previousFilename || path;
+        const statusLower = String(status).toLowerCase();
+        const showBase =
+          statusLower === 'modified' ||
+          statusLower === 'renamed' ||
+          statusLower === 'changed' ||
+          statusLower === 'removed' ||
+          statusLower === 'deleted';
+        const baseUrl = showBase
+          ? file.baseRawUrl ||
+            file.previous_raw_url ||
+            buildGithubRawUrl({
+              webOrigin: options.webOrigin,
+              owner: options.owner,
+              repo: options.repo,
+              ref: options.baseSha || options.baseRef,
+              path: prevPath,
+            })
+          : '';
+        rows.push({
+          kind: 'diff-image',
+          filePath: path,
+          status,
+          headUrl: headUrl || '',
+          baseUrl: baseUrl || '',
+          text: `image ${path}`,
+          rowIndex: index++,
+          lineType: 'image',
+        });
+      } else {
+        // Should not reach for binary (openable=false), but keep a non-open meta.
+        rows.push({
+          kind: 'diff-meta',
+          filePath: path,
+          text: 'Binary file — not shown',
+          rowIndex: index++,
+          lineType: 'meta',
+          openable: false,
+        });
+      }
       for (const c of rootsByPath.get(path) || []) {
         pushInline(path, c, c.line ?? null, c.originalLine ?? null);
       }

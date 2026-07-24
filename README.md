@@ -235,8 +235,25 @@ Declared in the extension manifest (also summarized in the popup settings UI):
 | Permission | Purpose |
 |------------|---------|
 | `storage` | Store the PAT and options locally |
-| `https://github.com/*` | PR list DOM overlay + modal host |
-| `https://api.github.com/*` | List, detail, reviews, comments, merge, autolinks, GraphQL threads |
+| `scripting` | Register content scripts on enterprise web hosts |
+| `https://github.com/*` | github.com list overlay + modal host |
+| `https://api.github.com/*` | github.com REST / GraphQL |
+| optional `https://*/*` | Self-hosted / Enterprise hosts (granted from the popup) |
+
+### GitHub Enterprise / self-hosted (multi-account)
+
+pr+ uses a **default PAT for github.com only**. Each enterprise host needs its **own host↔PAT pair** (max **3** hosts). Unregistered hosts — including `*.ghe.com` — do **not** use the default PAT.
+
+1. Open the **pr+** popup.
+2. Save the **github.com PAT** (public cloud) if you use github.com.
+3. Under **GitHub Enterprise (host + PAT)**, enter both the **web host** and a **PAT for that host**, then **Add host & grant access**.
+4. Accept the Chrome permission prompt; reload the enterprise tab.
+5. API is **auto-derived** from the web host:
+   - **github.com** → `https://api.github.com` (+ `/graphql`)
+   - **GHES** → `https://{host}/api/v3` + `https://{host}/api/graphql`
+   - **GHE Cloud** (`subdomain.ghe.com`) → `https://api.subdomain.ghe.com` (+ `/graphql`)
+
+Content scripts run on github.com (manifest) and on **registered** enterprise hosts only.
 
 ---
 

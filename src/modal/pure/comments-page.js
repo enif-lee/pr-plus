@@ -4,6 +4,26 @@
  */
 (function () {
 
+function githubRestUrl(path) {
+  try {
+    if (globalThis.PRGithubEndpoints && typeof globalThis.PRGithubEndpoints.githubRestUrl === 'function') {
+      return globalThis.PRGithubEndpoints.githubRestUrl(path);
+    }
+  } catch (_) {}
+  const p = String(path || '');
+  return 'https://api.github.com' + (p.startsWith('/') ? p : '/' + p);
+}
+function githubGraphqlUrl() {
+  try {
+    if (globalThis.PRGithubEndpoints && typeof globalThis.PRGithubEndpoints.githubGraphqlUrl === 'function') {
+      return globalThis.PRGithubEndpoints.githubGraphqlUrl();
+    }
+  } catch (_) {}
+  return 'https://api.github.com/graphql';
+}
+
+
+
 const DEFAULT_COMMENT_PAGE_SIZE = 50;
 
 function parseLinkRelPage(linkHeader, rel) {
@@ -48,8 +68,8 @@ function buildCommentsListUrl(kind, owner, repo, number, opts = {}) {
   const page = Math.max(1, Number(opts.page) || 1);
   const base =
     kind === 'review'
-      ? `https://api.github.com/repos/${o}/${r}/pulls/${n}/comments`
-      : `https://api.github.com/repos/${o}/${r}/issues/${n}/comments`;
+      ? githubRestUrl(`/repos/${o}/${r}/pulls/${n}/comments`)
+      : githubRestUrl(`/repos/${o}/${r}/issues/${n}/comments`);
   const params = new URLSearchParams();
   params.set('per_page', String(perPage));
   params.set('page', String(page));

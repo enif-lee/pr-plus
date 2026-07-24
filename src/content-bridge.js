@@ -35,6 +35,17 @@
    * Retries with backoff while the service worker wakes from idle.
    * After extension reload, only a full page refresh can re-bind content scripts.
    */
+  /** Page origin context for GitHub Enterprise endpoint resolution. */
+  function pageEndpointContext() {
+    try {
+      const host = String(globalThis.location?.hostname || '').toLowerCase();
+      const origin = String(globalThis.location?.origin || '');
+      return { webHost: host, webOrigin: origin };
+    } catch {
+      return { webHost: '', webOrigin: '' };
+    }
+  }
+
   async function send(message, { retries = 4 } = {}) {
     if (!globalThis.chrome?.runtime?.sendMessage) {
       throw new Error('chrome.runtime unavailable');
@@ -44,12 +55,22 @@
       throw new Error(RELOAD_REFRESH_MSG);
     }
 
+    const page = pageEndpointContext();
+    const payload =
+      message && typeof message === 'object'
+        ? {
+            ...message,
+            webHost: message.webHost || page.webHost,
+            webOrigin: message.webOrigin || page.webOrigin,
+          }
+        : message;
+
     let lastErr;
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
         // No callback → Chrome returns a Promise and keeps the channel open
         // for the full SW handler lifetime.
-        const response = await chrome.runtime.sendMessage(message);
+        const response = await chrome.runtime.sendMessage(payload);
         return response;
       } catch (e) {
         const msg = e?.message || String(e);

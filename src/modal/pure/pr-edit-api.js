@@ -4,6 +4,26 @@
  */
 (function () {
 
+function githubRestUrl(path) {
+  try {
+    if (globalThis.PRGithubEndpoints && typeof globalThis.PRGithubEndpoints.githubRestUrl === 'function') {
+      return globalThis.PRGithubEndpoints.githubRestUrl(path);
+    }
+  } catch (_) {}
+  const p = String(path || '');
+  return 'https://api.github.com' + (p.startsWith('/') ? p : '/' + p);
+}
+function githubGraphqlUrl() {
+  try {
+    if (globalThis.PRGithubEndpoints && typeof globalThis.PRGithubEndpoints.githubGraphqlUrl === 'function') {
+      return globalThis.PRGithubEndpoints.githubGraphqlUrl();
+    }
+  } catch (_) {}
+  return 'https://api.github.com/graphql';
+}
+
+
+
 function buildUpdatePullRequest(owner, repo, pullNumber, fields = {}) {
   const body = {};
   if (fields.title != null) body.title = String(fields.title);
@@ -12,7 +32,7 @@ function buildUpdatePullRequest(owner, repo, pullNumber, fields = {}) {
   if (fields.state != null) body.state = fields.state === 'closed' ? 'closed' : 'open';
   return {
     method: 'PATCH',
-    url: `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}`,
+    url: githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}`),
     body,
   };
 }
@@ -20,7 +40,7 @@ function buildUpdatePullRequest(owner, repo, pullNumber, fields = {}) {
 function buildEditIssueComment(owner, repo, commentId, body) {
   return {
     method: 'PATCH',
-    url: `https://api.github.com/repos/${owner}/${repo}/issues/comments/${commentId}`,
+    url: githubRestUrl(`/repos/${owner}/${repo}/issues/comments/${commentId}`),
     body: { body: String(body || '') },
   };
 }
@@ -28,7 +48,7 @@ function buildEditIssueComment(owner, repo, commentId, body) {
 function buildEditReviewComment(owner, repo, commentId, body) {
   return {
     method: 'PATCH',
-    url: `https://api.github.com/repos/${owner}/${repo}/pulls/comments/${commentId}`,
+    url: githubRestUrl(`/repos/${owner}/${repo}/pulls/comments/${commentId}`),
     body: { body: String(body || '') },
   };
 }
@@ -36,7 +56,7 @@ function buildEditReviewComment(owner, repo, commentId, body) {
 function buildRequestReviewers(owner, repo, pullNumber, { reviewers = [], teamReviewers = [] } = {}) {
   return {
     method: 'POST',
-    url: `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/requested_reviewers`,
+    url: githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/requested_reviewers`),
     body: {
       reviewers: reviewers.slice(),
       team_reviewers: teamReviewers.slice(),
@@ -47,7 +67,7 @@ function buildRequestReviewers(owner, repo, pullNumber, { reviewers = [], teamRe
 function buildRemoveReviewers(owner, repo, pullNumber, { reviewers = [], teamReviewers = [] } = {}) {
   return {
     method: 'DELETE',
-    url: `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/requested_reviewers`,
+    url: githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/requested_reviewers`),
     body: {
       reviewers: reviewers.slice(),
       team_reviewers: teamReviewers.slice(),
@@ -58,7 +78,7 @@ function buildRemoveReviewers(owner, repo, pullNumber, { reviewers = [], teamRev
 function buildSetAssignees(owner, repo, issueNumber, assignees) {
   return {
     method: 'POST',
-    url: `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/assignees`,
+    url: githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/assignees`),
     body: { assignees: (assignees || []).slice() },
   };
 }
@@ -66,7 +86,7 @@ function buildSetAssignees(owner, repo, issueNumber, assignees) {
 function buildRemoveAssignees(owner, repo, issueNumber, assignees) {
   return {
     method: 'DELETE',
-    url: `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/assignees`,
+    url: githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/assignees`),
     body: { assignees: (assignees || []).slice() },
   };
 }
@@ -74,7 +94,7 @@ function buildRemoveAssignees(owner, repo, issueNumber, assignees) {
 function buildSetLabels(owner, repo, issueNumber, labels) {
   return {
     method: 'PUT',
-    url: `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/labels`,
+    url: githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/labels`),
     body: { labels: (labels || []).slice() },
   };
 }
@@ -86,7 +106,7 @@ function buildMergePullRequest(owner, repo, pullNumber, { mergeMethod = 'merge',
   if (commitMessage != null) body.commit_message = String(commitMessage);
   return {
     method: 'PUT',
-    url: `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/merge`,
+    url: githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/merge`),
     body,
   };
 }
@@ -97,7 +117,7 @@ function buildUpdateBranch(owner, repo, pullNumber, { expectedHeadSha } = {}) {
   if (expectedHeadSha) body.expected_head_sha = String(expectedHeadSha);
   return {
     method: 'PUT',
-    url: `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/update-branch`,
+    url: githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/update-branch`),
     body,
   };
 }
@@ -115,7 +135,7 @@ function buildSetSubscription(
   const state = ignored ? 'IGNORED' : subscribed ? 'SUBSCRIBED' : 'UNSUBSCRIBED';
   return {
     method: 'POST',
-    url: 'https://api.github.com/graphql',
+    url: githubGraphqlUrl(),
     body: {
       query: `mutation($id:ID!,$state:SubscriptionState!){
   updateSubscription(input:{subscribableId:$id, state:$state}) {
@@ -145,7 +165,7 @@ function buildDeleteSubscription(owner, repo, issueNumber, nodeId = null) {
 function buildSetMilestone(owner, repo, issueNumber, milestoneNumber) {
   return {
     method: 'PATCH',
-    url: `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}`,
+    url: githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}`),
     body: { milestone: milestoneNumber == null ? null : Number(milestoneNumber) },
   };
 }
@@ -305,10 +325,10 @@ function buildApplySuggestionCommitRequest(
 ) {
   return {
     method: 'PUT',
-    url: `https://api.github.com/repos/${owner}/${repo}/contents/${path
+    url: githubRestUrl(`/repos/${owner}/${repo}/contents/${path
       .split('/')
       .map(encodeURIComponent)
-      .join('/')}`,
+      .join('/')}`),
     body: {
       message: message || `Apply suggestion to ${path}`,
       content: contentBase64,
