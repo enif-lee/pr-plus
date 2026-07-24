@@ -2073,6 +2073,10 @@ if (typeof globalThis !== 'undefined') {
   function deriveChecksState(statuses, checkRuns, fallback = 'unknown') {
     const st = Array.isArray(statuses) ? statuses : [];
     const runs = Array.isArray(checkRuns) ? checkRuns : [];
+    // GitHub combined-status API returns state:"pending" with total_count:0 when
+    // the commit has no status contexts. That is not a real in-progress check.
+    if (!st.length && !runs.length) return 'unknown';
+
     const statusStates = st.map((s) => String(s?.state || '').toLowerCase());
     const conclusions = runs.map((r) => String(r?.conclusion || '').toLowerCase());
     const runStatuses = runs.map((r) => String(r?.status || '').toLowerCase());
@@ -2096,14 +2100,12 @@ if (typeof globalThis !== 'undefined') {
       conclusions.some((c) => c === '' || c === 'null' || c === 'action_required');
     if (anyPending) return 'pending';
 
-    if (st.length || runs.length) {
-      const anySuccess =
-        statusStates.some((s) => s === 'success') ||
-        conclusions.some(
-          (c) => c === 'success' || c === 'neutral' || c === 'skipped'
-        );
-      if (anySuccess) return 'success';
-    }
+    const anySuccess =
+      statusStates.some((s) => s === 'success') ||
+      conclusions.some(
+        (c) => c === 'success' || c === 'neutral' || c === 'skipped'
+      );
+    if (anySuccess) return 'success';
 
     return fallback || 'unknown';
   }
@@ -2117,11 +2119,12 @@ if (typeof globalThis !== 'undefined') {
     const raw = checks && typeof checks === 'object' ? checks : {};
     const statuses = distinctStatuses(raw.statuses);
     const checkRuns = distinctCheckRuns(raw.checkRuns || raw.check_runs);
-    const state = deriveChecksState(
-      statuses,
-      checkRuns,
-      String(raw.state || 'unknown')
-    );
+    // Never trust combined-status "pending" when there are zero contexts/runs.
+    const fallback =
+      statuses.length || checkRuns.length
+        ? String(raw.state || 'unknown')
+        : 'unknown';
+    const state = deriveChecksState(statuses, checkRuns, fallback);
     return {
       state,
       totalCount: statuses.length + checkRuns.length,
@@ -2396,8 +2399,8 @@ if (typeof globalThis !== 'undefined') {
     const pending = Number(s.pending) || 0;
     const skipped = Number(s.skipped) || 0;
     if (!total) {
-      const st = String(s.state || 'unknown');
-      return st && st !== 'unknown' ? `Checks: ${st}` : 'No checks';
+      // Empty payload — GitHub may still report combined state "pending"
+      return 'No checks';
     }
     const parts = [
       `${total} check${total === 1 ? '' : 's'}`,
@@ -2529,6 +2532,7 @@ const PREFS_KEY = 'extensionPrefs';
  * Default extension preferences.
  * - fastReview: progressive dual-window load (core first, threads on demand)
  * - reverseComments: composer → merge box → conversation (latest-first timeline)
+ * - autoOpenEmbed: on GitHub PR routes, open pr+ embed automatically (vs native + toggle)
  *
  * Enterprise hosts are NOT in prefs — they live in HOST_ACCOUNTS_KEY with paired PATs.
  * Legacy `enterpriseWebHosts` (hosts-only list) is dropped on normalize (re-register required).
@@ -2536,6 +2540,7 @@ const PREFS_KEY = 'extensionPrefs';
 const DEFAULT_PREFS = {
   fastReview: true,
   reverseComments: true,
+  autoOpenEmbed: true,
 };
 
 function getStorageArea(storageApi = globalThis.chrome?.storage?.local) {
@@ -2548,6 +2553,7 @@ function getStorageArea(storageApi = globalThis.chrome?.storage?.local) {
  * @returns {{
  *   fastReview: boolean,
  *   reverseComments: boolean,
+ *   autoOpenEmbed: boolean,
  * }}
  */
 function normalizePrefs(raw) {
@@ -2562,6 +2568,10 @@ function normalizePrefs(raw) {
       typeof src.reverseComments === 'boolean'
         ? src.reverseComments
         : DEFAULT_PREFS.reverseComments,
+    autoOpenEmbed:
+      typeof src.autoOpenEmbed === 'boolean'
+        ? src.autoOpenEmbed
+        : DEFAULT_PREFS.autoOpenEmbed,
   };
 }
 
@@ -2599,7 +2609,7 @@ function normalizeHostAccounts(raw) {
 
 /**
  * @param {unknown} [storageApi]
- * @returns {Promise<{ fastReview: boolean, reverseComments: boolean }>}
+ * @returns {Promise<{ fastReview: boolean, reverseComments: boolean, autoOpenEmbed: boolean }>}
  */
 function getExtensionPrefs(storageApi) {
   const area = getStorageArea(storageApi);
@@ -2614,7 +2624,7 @@ function getExtensionPrefs(storageApi) {
 
 /**
  * Merge patch into stored prefs and return the full next prefs.
- * @param {Partial<{ fastReview: boolean, reverseComments: boolean }>} patch
+ * @param {Partial<{ fastReview: boolean, reverseComments: boolean, autoOpenEmbed: boolean }>} patch
  * @param {unknown} [storageApi]
  */
 async function setExtensionPrefs(patch, storageApi) {
@@ -2638,7 +2648,7 @@ async function setExtensionPrefs(patch, storageApi) {
 
 /**
  * Watch prefs changes (local area only).
- * @param {(prefs: { fastReview: boolean, reverseComments: boolean }) => void} onChange
+ * @param {(prefs: { fastReview: boolean, reverseComments: boolean, autoOpenEmbed: boolean }) => void} onChange
  * @param {unknown} [storageApi]
  */
 function watchExtensionPrefs(onChange, storageApi = globalThis.chrome?.storage) {
@@ -3994,6 +4004,89 @@ async function apiSend(url, fetchImpl, token, { method = 'GET', body } = {}) {
 }
 
 /**
+ * Pull request sidebar meta for conversation rail:
+ * - ProjectV2 items (Projects section)
+ * - Closing-linked issues (Development section)
+ * Soft fields only — failures return empty arrays.
+ *
+ * @returns {Promise<{ projects: Array, developmentIssues: Array }>}
+ */
+async function fetchPrSidebarMeta(owner, repo, number, fetchImpl, token) {
+  const o = String(owner || '').trim();
+  const r = String(repo || '').trim();
+  const n = Number(number);
+  if (!o || !r || !Number.isFinite(n) || n <= 0 || !token) {
+    return { projects: [], developmentIssues: [] };
+  }
+  const query = `
+    query($owner:String!,$repo:String!,$number:Int!) {
+      repository(owner:$owner, name:$repo) {
+        pullRequest(number:$number) {
+          projectItems(first: 20) {
+            nodes {
+              id
+              project {
+                title
+                number
+                url
+              }
+            }
+          }
+          closingIssuesReferences(first: 20) {
+            nodes {
+              number
+              title
+              url
+              state
+            }
+          }
+        }
+      }
+    }
+  `;
+  try {
+    const data = await apiGraphql(
+      query,
+      { owner: o, repo: r, number: n },
+      fetchImpl,
+      token
+    );
+    const prNode = data?.repository?.pullRequest || null;
+    const projects = [];
+    for (const node of prNode?.projectItems?.nodes || []) {
+      const p = node?.project;
+      if (!p) continue;
+      const title = String(p.title || '').trim();
+      if (!title) continue;
+      projects.push({
+        id: String(node.id || `${p.number}:${title}`),
+        title,
+        number: p.number != null ? Number(p.number) : null,
+        url: String(p.url || '').trim(),
+      });
+    }
+    const developmentIssues = [];
+    for (const node of prNode?.closingIssuesReferences?.nodes || []) {
+      const num = Number(node?.number);
+      if (!Number.isFinite(num) || num <= 0) continue;
+      developmentIssues.push({
+        number: num,
+        title: String(node?.title || '').trim(),
+        url: String(node?.url || '').trim(),
+        state: String(node?.state || '').trim().toLowerCase(),
+      });
+    }
+    return { projects, developmentIssues };
+  } catch (err) {
+    // Soft: missing ProjectV2 scope / org policy / etc.
+    if (err?.name === 'AbortError' || /aborted|AbortError/i.test(String(err?.message || ''))) {
+      throw err;
+    }
+    return { projects: [], developmentIssues: [] };
+  }
+}
+
+/**
  * GraphQL client: HTTP 200 can still carry body.errors — treat those as failures.
  * @returns {Promise<object>} data field only
  */
@@ -5102,10 +5195,15 @@ async function fetchPrDetail(
         apiJson(`${base}/commits/${headSha}/status`, fetchImpl, token),
         (s) => `(state=${s?.state || '?'}, ${s?.total_count || 0} statuses)`
       );
+      const statusList = Array.isArray(status.statuses) ? status.statuses : [];
+      // Combined status is "pending" with total_count:0 when the commit has no
+      // status contexts — treat as empty, not in-progress.
+      const emptyCombined =
+        !statusList.length && !(Number(status.total_count) > 0);
       checks = {
-        state: status.state || 'unknown',
-        totalCount: status.total_count || 0,
-        statuses: (status.statuses || []).map((s) => ({
+        state: emptyCombined ? 'unknown' : status.state || 'unknown',
+        totalCount: emptyCombined ? 0 : status.total_count || statusList.length,
+        statuses: statusList.map((s) => ({
           context: s.context || '',
           state: s.state || '',
           description: s.description || '',
@@ -5220,8 +5318,11 @@ async function fetchPrDetail(
     `[pr-plus] fetchPrDetail mapAnnotateFiles: ${timings.mapAnnotateFiles}ms`
   );
 
-  // Linked issue numbers from body (closing keywords / #N) — display only unless set via body edit
+  // Development (closing-linked issues) + Projects (ProjectV2 items) for conversation aside.
+  // Soft-fail: empty arrays when GraphQL unavailable / no permission.
   let linkedIssues = [];
+  let developmentIssues = [];
+  let projects = [];
   try {
     let editApi =
       typeof globalThis !== 'undefined' ? globalThis.PRModalPrEditApi : null;
@@ -5237,6 +5338,46 @@ async function fetchPrDetail(
     }
   } catch {
     linkedIssues = [];
+  }
+  try {
+    const side = await timedFetch(
+      timings,
+      'sidebarMeta',
+      fetchPrSidebarMeta(owner, repo, n, fetchImpl, token),
+      (r) =>
+        `(${(r?.developmentIssues || []).length} dev, ${(r?.projects || []).length} projects)`
+    );
+    if (side && typeof side === 'object') {
+      if (Array.isArray(side.developmentIssues) && side.developmentIssues.length) {
+        developmentIssues = side.developmentIssues;
+        // Prefer GraphQL numbers for linkedIssues when available
+        const fromGql = developmentIssues
+          .map((x) => Number(x?.number))
+          .filter((x) => Number.isFinite(x) && x > 0);
+        if (fromGql.length) {
+          const set = new Set([...linkedIssues, ...fromGql]);
+          linkedIssues = [...set].sort((a, b) => a - b);
+        }
+      }
+      if (Array.isArray(side.projects)) projects = side.projects;
+    }
+  } catch (err) {
+    if (err?.name === 'AbortError' || /aborted|AbortError/i.test(String(err?.message || ''))) {
+      throw err;
+    }
+    console.log(
+      `[pr-plus] fetchPrDetail sidebarMeta: soft-fail ${err?.message || err}`
+    );
+  }
+  // Body-only #N → development rows when GraphQL returned nothing
+  if (!developmentIssues.length && linkedIssues.length) {
+    developmentIssues = linkedIssues.map((num) => ({
+      number: num,
+      title: '',
+      url: `https://github.com/${owner}/${repo}/issues/${num}`,
+      state: '',
+      source: 'body',
+    }));
   }
 
   const subscribed =
@@ -5303,6 +5444,8 @@ async function fetchPrDetail(
     additions: pr.additions,
     deletions: pr.deletions,
     changedFiles: pr.changed_files,
+    /** Total commits on the PR (REST field); may exceed first page of commits[]. */
+    commitsCount: pr.commits != null ? Number(pr.commits) : null,
     labels: Array.isArray(pr.labels)
       ? pr.labels.map((l) => ({
           name: l.name || '',
@@ -5364,6 +5507,10 @@ async function fetchPrDetail(
         }
       : null,
     linkedIssues,
+    /** Issues linked for Development (closing refs / body #N). */
+    developmentIssues,
+    /** ProjectV2 boards this PR is on. */
+    projects,
     subscribed,
     locked: Boolean(pr.locked),
     gitattributesText,
@@ -6447,6 +6594,175 @@ async function fetchRepoLabels(owner, repo, fetchImpl, token = null, opts = {}) 
   return out;
 }
 
+/** Stable-ish default color for newly created labels (hex without #). */
+function defaultNewLabelColor(name) {
+  const palette = [
+    'd73a4a',
+    '0075ca',
+    'a2eeef',
+    '7057ff',
+    '008672',
+    'e4e669',
+    'd876e3',
+    'fbca04',
+    '0e8a16',
+    '5319e7',
+  ];
+  const s = String(name || '');
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return palette[h % palette.length];
+}
+
+/**
+ * Create a repository label.
+ * @returns {Promise<{ name: string, color: string, description: string }>}
+ */
+async function createRepoLabel(
+  owner,
+  repo,
+  { name, color, description } = {},
+  fetchImpl,
+  token
+) {
+  const rawName = String(name || '').trim();
+  if (!rawName) throw new Error('Label name is required');
+  const body = {
+    name: rawName,
+    color: String(color || defaultNewLabelColor(rawName))
+      .trim()
+      .replace(/^#/, ''),
+  };
+  if (description != null) body.description = String(description);
+  const result = await apiSend(
+    githubRestUrl(`/repos/${owner}/${repo}/labels`),
+    fetchImpl,
+    token,
+    { method: 'POST', body }
+  );
+  return {
+    name: String(result?.name || rawName),
+    color: String(result?.color || body.color || '')
+      .trim()
+      .replace(/^#/, ''),
+    description: String(result?.description || description || ''),
+  };
+}
+
+/**
+ * List repository milestones (open + closed, limited pages).
+ * @returns {Promise<Array<{ number: number, title: string, state: string, description: string }>>}
+ */
+async function fetchRepoMilestones(owner, repo, fetchImpl, token = null, opts = {}) {
+  const perPage = 100;
+  const maxPages = Math.max(1, Math.min(10, Number(opts.maxPages) || 5));
+  const state = opts.state || 'all';
+  const out = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const url = githubRestUrl(
+      `/repos/${owner}/${repo}/milestones?state=${encodeURIComponent(state)}&per_page=${perPage}&page=${page}&sort=due_on&direction=desc`
+    );
+    const batch = await apiJson(url, fetchImpl, token);
+    if (!Array.isArray(batch) || !batch.length) break;
+    for (const m of batch) {
+      const number = Number(m?.number);
+      if (!Number.isFinite(number) || number <= 0) continue;
+      out.push({
+        number,
+        title: String(m?.title || `Milestone ${number}`),
+        state: String(m?.state || ''),
+        description: String(m?.description || ''),
+        dueOn: m?.due_on || null,
+      });
+    }
+    if (batch.length < perPage) break;
+  }
+  return out;
+}
+
+/**
+ * Create a repository milestone.
+ * @returns {Promise<{ number: number, title: string, state: string, description: string }>}
+ */
+async function createRepoMilestone(
+  owner,
+  repo,
+  { title, description, state } = {},
+  fetchImpl,
+  token
+) {
+  const rawTitle = String(title || '').trim();
+  if (!rawTitle) throw new Error('Milestone title is required');
+  const body = { title: rawTitle, state: state === 'closed' ? 'closed' : 'open' };
+  if (description != null) body.description = String(description);
+  const result = await apiSend(
+    githubRestUrl(`/repos/${owner}/${repo}/milestones`),
+    fetchImpl,
+    token,
+    { method: 'POST', body }
+  );
+  return {
+    number: Number(result?.number) || 0,
+    title: String(result?.title || rawTitle),
+    state: String(result?.state || body.state),
+    description: String(result?.description || description || ''),
+    dueOn: result?.due_on || null,
+  };
+}
+
+/**
+ * List repository tags (paginated). Used to surface tags related to a PR head/commits.
+ * @returns {Promise<Array<{ name: string, sha: string, zipballUrl?: string, tarballUrl?: string }>>}
+ */
+async function fetchRepoTags(owner, repo, fetchImpl, token = null, opts = {}) {
+  const perPage = 100;
+  const maxPages = Math.max(1, Math.min(20, Number(opts.maxPages) || 10));
+  const out = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const url = githubRestUrl(
+      `/repos/${owner}/${repo}/tags?per_page=${perPage}&page=${page}`
+    );
+    const batch = await apiJson(url, fetchImpl, token);
+    if (!Array.isArray(batch) || !batch.length) break;
+    for (const t of batch) {
+      const name = String(t?.name || '').trim();
+      const sha = String(t?.commit?.sha || t?.sha || '').trim();
+      if (!name) continue;
+      out.push({
+        name,
+        sha,
+        zipballUrl: t?.zipball_url || '',
+        tarballUrl: t?.tarball_url || '',
+      });
+    }
+    if (batch.length < perPage) break;
+  }
+  return out;
+}
+
+/**
+ * Tags whose commit sha is in `shaSet` (PR commits / head).
+ * @param {string[]} shas
+ * @returns {Promise<Array<{ name: string, sha: string }>>}
+ */
+async function fetchTagsForCommits(
+  owner,
+  repo,
+  shas,
+  fetchImpl,
+  token = null,
+  opts = {}
+) {
+  const want = new Set(
+    (shas || [])
+      .map((s) => String(s || '').trim().toLowerCase())
+      .filter(Boolean)
+  );
+  if (!want.size) return [];
+  const tags = await fetchRepoTags(owner, repo, fetchImpl, token, opts);
+  return tags.filter((t) => want.has(String(t.sha || '').toLowerCase()));
+}
+
 /**
  * Apply a GitHub suggestion: replace lines on head branch via Contents API.
  * @param {{ path: string, headRef: string, startLine: number, endLine: number, suggestion: string, message?: string }} opts
@@ -7004,6 +7320,7 @@ const fetchApi = {
   fetchPrCommentsPage,
   fetchAllPrCommits,
   fetchAllPrFiles,
+  fetchPrSidebarMeta,
   fetchCompareFiles,
   mapAndAnnotateFiles,
   fetchPullReviewThreads,
@@ -7045,6 +7362,12 @@ const fetchApi = {
   removeAssignees,
   setIssueLabels,
   fetchRepoLabels,
+  createRepoLabel,
+  fetchRepoMilestones,
+  createRepoMilestone,
+  fetchRepoTags,
+  fetchTagsForCommits,
+  defaultNewLabelColor,
   mergePullRequest,
   updatePullBranch,
   setIssueSubscription,
@@ -7144,28 +7467,91 @@ function githubTabUrlPatterns(enterpriseHosts) {
   return patterns;
 }
 
+/**
+ * Serialize enterprise content-script sync.
+ * HOST_ACCOUNT_ADD and storage.onChanged both call this; parallel
+ * registerContentScripts races cause:
+ *   "Duplicate script ID 'prp-enterprise-hosts'"
+ */
+let enterpriseCsSyncChain = Promise.resolve();
+
 async function syncEnterpriseContentScripts(enterpriseHosts) {
-  if (!chrome.scripting?.registerContentScripts) return { registered: false };
+  const run = () => syncEnterpriseContentScriptsImpl(enterpriseHosts);
+  // Always continue the chain even if a prior sync rejected
+  const next = enterpriseCsSyncChain.then(run, run);
+  enterpriseCsSyncChain = next.then(
+    () => undefined,
+    () => undefined
+  );
+  return next;
+}
+
+async function syncEnterpriseContentScriptsImpl(enterpriseHosts) {
+  if (!chrome.scripting?.registerContentScripts) {
+    return { registered: false };
+  }
   const matches =
     PRGithubEndpoints.contentScriptMatchesForHosts(enterpriseHosts);
+
+  // Drop existing registration if present (id may already be live).
   try {
-    await chrome.scripting.unregisterContentScripts({
-      ids: [ENTERPRISE_CS_ID],
-    });
+    if (typeof chrome.scripting.getRegisteredContentScripts === 'function') {
+      const existing = await chrome.scripting.getRegisteredContentScripts({
+        ids: [ENTERPRISE_CS_ID],
+      });
+      if (Array.isArray(existing) && existing.length > 0) {
+        await chrome.scripting.unregisterContentScripts({
+          ids: [ENTERPRISE_CS_ID],
+        });
+      }
+    } else {
+      await chrome.scripting.unregisterContentScripts({
+        ids: [ENTERPRISE_CS_ID],
+      });
+    }
   } catch {
-    /* not registered yet */
+    /* not registered yet — fine */
   }
+
   if (!matches.length) return { registered: false, matches: [] };
-  await chrome.scripting.registerContentScripts([
-    {
-      id: ENTERPRISE_CS_ID,
-      matches,
-      js: CONTENT_SCRIPT_JS,
-      css: ['src/styles.css'],
-      runAt: 'document_idle',
-      persistAcrossSessions: true,
-    },
-  ]);
+
+  const script = {
+    id: ENTERPRISE_CS_ID,
+    matches,
+    js: CONTENT_SCRIPT_JS,
+    css: ['src/styles.css'],
+    runAt: 'document_idle',
+    persistAcrossSessions: true,
+  };
+
+  // Prefer update when available (avoids delete/create race with other callers).
+  if (typeof chrome.scripting.updateContentScripts === 'function') {
+    try {
+      await chrome.scripting.updateContentScripts([script]);
+      return { registered: true, matches, updated: true };
+    } catch {
+      /* not registered — fall through to register */
+    }
+  }
+
+  try {
+    await chrome.scripting.registerContentScripts([script]);
+  } catch (err) {
+    // Last resort: if race left a registration, unregister + retry once.
+    const msg = String(err?.message || err || '');
+    if (/duplicate script id/i.test(msg)) {
+      try {
+        await chrome.scripting.unregisterContentScripts({
+          ids: [ENTERPRISE_CS_ID],
+        });
+      } catch {
+        /* ignore */
+      }
+      await chrome.scripting.registerContentScripts([script]);
+    } else {
+      throw err;
+    }
+  }
   return { registered: true, matches };
 }
 
@@ -7236,6 +7622,13 @@ const MSG = {
   REMOVE_ASSIGNEES: 'PR_TREE_REMOVE_ASSIGNEES',
   SET_LABELS: 'PR_TREE_SET_LABELS',
   FETCH_REPO_LABELS: 'PR_TREE_FETCH_REPO_LABELS',
+  CREATE_REPO_LABEL: 'PR_TREE_CREATE_REPO_LABEL',
+  FETCH_REPO_MILESTONES: 'PR_TREE_FETCH_REPO_MILESTONES',
+  CREATE_REPO_MILESTONE: 'PR_TREE_CREATE_REPO_MILESTONE',
+  FETCH_REPO_TAGS: 'PR_TREE_FETCH_REPO_TAGS',
+  FETCH_TAGS_FOR_COMMITS: 'PR_TREE_FETCH_TAGS_FOR_COMMITS',
+  FETCH_ALL_PR_COMMITS: 'PR_TREE_FETCH_ALL_PR_COMMITS',
+  FETCH_ALL_PR_FILES: 'PR_TREE_FETCH_ALL_PR_FILES',
   APPLY_SUGGESTION: 'PR_TREE_APPLY_SUGGESTION',
   GET_REPO_FILE_TEXT: 'PR_TREE_GET_REPO_FILE_TEXT',
   MERGE_PULL: 'PR_TREE_MERGE_PULL',
@@ -8139,6 +8532,145 @@ async function handleMessage(message) {
           }
         );
         return { ok: true, labels };
+      } catch (err) {
+        if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
+      }
+    }
+    case MSG.CREATE_REPO_LABEL: {
+      const token = await tokenForMessage(message);
+      if (!token) throw new Error('GitHub PAT required to create labels');
+      const result = await PRTreeFetch.createRepoLabel(
+        message.owner,
+        message.repo,
+        {
+          name: message.name,
+          color: message.color,
+          description: message.description,
+        },
+        fetchImpl(),
+        token
+      );
+      return { ok: true, result };
+    }
+    case MSG.FETCH_REPO_MILESTONES: {
+      const tracked = beginTrackedFetch(message.requestId);
+      try {
+        const token = await tokenForMessage(message);
+        const milestones = await PRTreeFetch.fetchRepoMilestones(
+          message.owner,
+          message.repo,
+          tracked.fetch,
+          token,
+          {
+            maxPages:
+              message.maxPages != null ? Number(message.maxPages) : undefined,
+            state: message.state || 'all',
+          }
+        );
+        return { ok: true, milestones };
+      } catch (err) {
+        if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
+      }
+    }
+    case MSG.CREATE_REPO_MILESTONE: {
+      const token = await tokenForMessage(message);
+      if (!token) throw new Error('GitHub PAT required to create milestones');
+      const result = await PRTreeFetch.createRepoMilestone(
+        message.owner,
+        message.repo,
+        {
+          title: message.title,
+          description: message.description,
+          state: message.state,
+        },
+        fetchImpl(),
+        token
+      );
+      return { ok: true, result };
+    }
+    case MSG.FETCH_REPO_TAGS: {
+      const tracked = beginTrackedFetch(message.requestId);
+      try {
+        const token = await tokenForMessage(message);
+        const tags = await PRTreeFetch.fetchRepoTags(
+          message.owner,
+          message.repo,
+          tracked.fetch,
+          token,
+          {
+            maxPages:
+              message.maxPages != null ? Number(message.maxPages) : undefined,
+          }
+        );
+        return { ok: true, tags };
+      } catch (err) {
+        if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
+      }
+    }
+    case MSG.FETCH_TAGS_FOR_COMMITS: {
+      const tracked = beginTrackedFetch(message.requestId);
+      try {
+        const token = await tokenForMessage(message);
+        const tags = await PRTreeFetch.fetchTagsForCommits(
+          message.owner,
+          message.repo,
+          message.shas || [],
+          tracked.fetch,
+          token,
+          {
+            maxPages:
+              message.maxPages != null ? Number(message.maxPages) : undefined,
+          }
+        );
+        return { ok: true, tags };
+      } catch (err) {
+        if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
+      }
+    }
+    case MSG.FETCH_ALL_PR_COMMITS: {
+      const tracked = beginTrackedFetch(message.requestId);
+      try {
+        const token = await tokenForMessage(message);
+        const commits = await PRTreeFetch.fetchAllPrCommits(
+          message.owner,
+          message.repo,
+          message.number,
+          tracked.fetch,
+          token
+        );
+        return { ok: true, commits };
+      } catch (err) {
+        if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
+      }
+    }
+    case MSG.FETCH_ALL_PR_FILES: {
+      const tracked = beginTrackedFetch(message.requestId);
+      try {
+        const token = await tokenForMessage(message);
+        const files = await PRTreeFetch.fetchAllPrFiles(
+          message.owner,
+          message.repo,
+          message.number,
+          tracked.fetch,
+          token,
+          { gitattributesText: message.gitattributesText || '' }
+        );
+        return { ok: true, files };
       } catch (err) {
         if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
         throw err;

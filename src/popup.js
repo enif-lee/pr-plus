@@ -4,6 +4,7 @@ const clearBtn = document.getElementById('clear');
 const statusEl = document.getElementById('status');
 const tokenSavedEl = document.getElementById('token-saved');
 const tokenMaskEl = document.getElementById('token-mask');
+const prefAutoOpenEmbed = document.getElementById('pref-auto-open-embed');
 const prefFastReview = document.getElementById('pref-fast-review');
 const prefReverseComments = document.getElementById('pref-reverse-comments');
 const clearIdbBtn = document.getElementById('clear-idb');
@@ -20,6 +21,7 @@ const MAX_HOST_ACCOUNTS = 3;
 const DEFAULT_PREFS = {
   fastReview: true,
   reverseComments: true,
+  autoOpenEmbed: true,
 };
 
 /** @type {{ host: string, mask: string }[]} */
@@ -44,6 +46,7 @@ function renderTokenStatus(status) {
 
 function renderPrefs(prefs) {
   const p = prefs || DEFAULT_PREFS;
+  if (prefAutoOpenEmbed) prefAutoOpenEmbed.checked = p.autoOpenEmbed !== false;
   prefFastReview.checked = p.fastReview !== false;
   prefReverseComments.checked = p.reverseComments !== false;
 }
@@ -214,6 +217,7 @@ async function load() {
 async function savePrefs() {
   try {
     const prefs = {
+      autoOpenEmbed: Boolean(prefAutoOpenEmbed?.checked),
       fastReview: Boolean(prefFastReview.checked),
       reverseComments: Boolean(prefReverseComments.checked),
     };
@@ -275,6 +279,7 @@ tokenInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') saveBtn.click();
 });
 
+prefAutoOpenEmbed?.addEventListener('change', () => void savePrefs());
 prefFastReview.addEventListener('change', () => void savePrefs());
 prefReverseComments.addEventListener('change', () => void savePrefs());
 

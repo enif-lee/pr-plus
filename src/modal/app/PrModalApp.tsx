@@ -185,7 +185,13 @@ import {
   DEFAULT_COMMENT_PAGE_SIZE,
 } from '../lib/comments-page';
 import {
-  filterSelectOptions, buildPeopleOptions, buildLabelOptions, buildBranchOptions, buildUnifiedReviewerRows, isBotAccount,
+  filterSelectOptions,
+  buildPeopleOptions,
+  buildLabelOptions,
+  buildMilestoneOptions,
+  buildBranchOptions,
+  buildUnifiedReviewerRows,
+  isBotAccount,
 } from '../lib/searchable-select';
 import { loadSessionView, saveSessionView } from '../lib/session-view';
 import {
@@ -697,11 +703,86 @@ export function PrModalApp({
   const filesFullyLoadedRef = useRef(false);
   const [commitListLoading, setCommitListLoading] = useState(false);
   const [fileListLoading, setFileListLoading] = useState(false);
+  const [prTags, setPrTags] = useState<Array<{ name: string; sha: string }> | null>(
+    null
+  );
+  const [prTagsLoading, setPrTagsLoading] = useState(false);
+  const [prTagsError, setPrTagsError] = useState<string | null>(null);
 
   useEffect(() => {
     commitsFullyLoadedRef.current = false;
     filesFullyLoadedRef.current = false;
+    setPrTags(null);
+    setPrTagsError(null);
   }, [prIdentity]);
+
+  // Tags that point at commits in this PR (or head sha).
+  useEffect(() => {
+    if (!detail?.owner || !detail?.repo) return;
+    const api = globalThis.PRTreeFetch;
+    let cancelled = false;
+    const shas = [
+      detail.headSha,
+      ...((detail.commits || []).map((c: any) => c?.sha).filter(Boolean) as string[]),
+    ];
+    const uniq = [...new Set(shas.map((s) => String(s).trim()).filter(Boolean))];
+    if (!uniq.length) {
+      setPrTags([]);
+      setPrTagsError(null);
+      return;
+    }
+    setPrTagsLoading(true);
+    setPrTagsError(null);
+    void (async () => {
+      try {
+        let tags: any[] = [];
+        if (typeof api?.fetchTagsForCommits === 'function') {
+          tags = await api.fetchTagsForCommits(detail.owner, detail.repo, uniq);
+        } else if (typeof api?.fetchRepoTags === 'function') {
+          // Stale SW without FETCH_TAGS_FOR_COMMITS — filter client-side.
+          const all = await api.fetchRepoTags(detail.owner, detail.repo);
+          const want = new Set(uniq.map((s) => String(s).toLowerCase()));
+          tags = (Array.isArray(all) ? all : []).filter((t: any) =>
+            want.has(String(t?.sha || '').toLowerCase())
+          );
+        }
+        if (cancelled) return;
+        setPrTags(Array.isArray(tags) ? tags : []);
+        setPrTagsError(null);
+      } catch (err: any) {
+        if (cancelled) return;
+        const msg = err?.message || String(err);
+        // Stale service worker after upgrade: don't surface as a hard error.
+        if (/unknown type:\s*PR_TREE_FETCH_TAGS/i.test(msg)) {
+          setPrTags([]);
+          setPrTagsError(null);
+          try {
+            console.warn(
+              '[pr+] Tags require reloading the extension (chrome://extensions → pr+ → Reload).',
+              msg
+            );
+          } catch {
+            /* ignore */
+          }
+        } else {
+          setPrTagsError(msg);
+          setPrTags([]);
+        }
+      } finally {
+        if (!cancelled) setPrTagsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    detail?.owner,
+    detail?.repo,
+    detail?.headSha,
+    // Re-run when commit list identity changes (page load / ensureAll).
+    detail?.commits?.length,
+    prIdentity,
+  ]);
 
   const ensureAllCommits = useCallback(async () => {
     if (!detail || typeof onFetchAllPrCommits !== 'function') return;
@@ -3400,7 +3481,7 @@ export function PrModalApp({
           }));
     // de-dupe options by id (buildLabelOptions already does; keep belt)
     const seen = new Set();
-    const uniqueOpts = [];
+    const uniqueOpts: any[] = [];
     for (const o of options) {
       const id = String(o.id || o.label || '').toLowerCase();
       if (!id || seen.has(id)) continue;
@@ -3408,15 +3489,68 @@ export function PrModalApp({
       uniqueOpts.push(o);
     }
     pickerAnchorRef.current = labelAddRef.current;
+
+    async function createAndSelectLabel(name: string) {
+      const raw = String(name || '').trim();
+      if (!raw) return '';
+      setPicker((prev: any) => (prev ? { ...prev, createBusy: true } : prev));
+      try {
+        const api = globalThis.PRTreeFetch;
+        let created: any = { name: raw, color: '' };
+        if (typeof api?.createRepoLabel === 'function') {
+          created = await api.createRepoLabel(detail.owner, detail.repo, {
+            name: raw,
+          });
+        }
+        const nextOpt =
+          typeof buildLabelOptions === 'function'
+            ? buildLabelOptions([created])[0]
+            : {
+                id: created.name || raw,
+                label: created.name || raw,
+                meta: {
+                  kind: 'label',
+                  name: created.name || raw,
+                  color: created.color || '',
+                },
+              };
+        setPicker((prev: any) => {
+          if (!prev) return prev;
+          const opts = Array.isArray(prev.options) ? prev.options.slice() : [];
+          const key = String(nextOpt.id || '').toLowerCase();
+          if (!opts.some((o: any) => String(o.id || '').toLowerCase() === key)) {
+            opts.unshift(nextOpt);
+          }
+          return {
+            ...prev,
+            options: opts,
+            query: '',
+            createBusy: false,
+          };
+        });
+        setActionMsg(`Created label “${nextOpt.id || raw}”.`);
+        return String(nextOpt.id || raw);
+      } catch (err: any) {
+        setPicker((prev: any) => (prev ? { ...prev, createBusy: false } : prev));
+        setActionMsg(err?.message || String(err));
+        throw err;
+      }
+    }
+
     setPicker({
       type: 'label',
       title: 'Set labels',
       options: uniqueOpts,
       query: '',
       allowFreeText: true,
+      allowCreate: true,
+      createBusy: false,
       multi: true,
       initialSelectedIds: currentNames,
       confirmLabel: 'Apply labels',
+      onCreate: (name: string) => {
+        void createAndSelectLabel(name);
+      },
       onConfirm: (ids: string[]) => {
         closePicker();
         void applySetLabels(ids);
@@ -4414,42 +4548,100 @@ export function PrModalApp({
     }
   }
 
-  function openMilestonePicker() {
+  async function openMilestonePicker() {
     if (!detail) return;
     const current = detail.milestone;
+
+    let repoMilestones: Array<{
+      number?: number;
+      title?: string;
+      state?: string;
+      description?: string;
+    }> = [];
+    try {
+      const api = globalThis.PRTreeFetch;
+      if (typeof api?.fetchRepoMilestones === 'function') {
+        repoMilestones =
+          (await api.fetchRepoMilestones(detail.owner, detail.repo)) || [];
+      }
+    } catch {
+      /* offline / no token — still open with current milestone */
+    }
+
     const pool = [
+      ...(repoMilestones || []),
       current
         ? {
-            id: String(current.number),
-            label: `${current.title || 'Milestone'} (#${current.number})`,
+            number: current.number,
+            title: current.title || `Milestone ${current.number}`,
+            state: current.state || '',
           }
         : null,
-      { id: '1', label: 'Milestone #1' },
-      { id: '2', label: 'Milestone #2' },
-      { id: '3', label: 'Milestone #3' },
-      { id: '4', label: 'Milestone #4' },
-      { id: '5', label: 'Milestone #5' },
     ].filter(Boolean);
-    const seen = new Set();
-    const options = pool.filter((o: any) => {
-      if (seen.has(o.id)) return false;
-      seen.add(o.id);
-      return true;
-    });
+    const options =
+      typeof buildMilestoneOptions === 'function'
+        ? buildMilestoneOptions(pool)
+        : pool.map((m: any) => ({
+            id: String(m.number),
+            label: `${m.title || 'Milestone'} (#${m.number})`,
+            meta: {
+              kind: 'milestone',
+              number: m.number,
+              title: m.title,
+            },
+          }));
+
     pickerAnchorRef.current = milestoneAddRef.current;
+
+    async function createAndSetMilestone(title: string) {
+      const raw = String(title || '').trim();
+      if (!raw) return;
+      setPicker((prev: any) => (prev ? { ...prev, createBusy: true } : prev));
+      try {
+        const api = globalThis.PRTreeFetch;
+        if (typeof api?.createRepoMilestone !== 'function') {
+          throw new Error('Create milestone API unavailable');
+        }
+        const created = await api.createRepoMilestone(detail.owner, detail.repo, {
+          title: raw,
+        });
+        const n = Number(created?.number);
+        if (!Number.isFinite(n) || n <= 0) {
+          throw new Error('Milestone created but number missing');
+        }
+        closePicker();
+        await applyMilestoneNumber(n);
+        setActionMsg(`Created milestone “${created.title || raw}” (#${n}).`);
+      } catch (err: any) {
+        setPicker((prev: any) => (prev ? { ...prev, createBusy: false } : prev));
+        setActionMsg(err?.message || String(err));
+      }
+    }
+
     setPicker({
       type: 'milestone',
       title: 'Set milestone',
       options,
       query: '',
       allowFreeText: true,
-      placeholder: 'Filter or type a milestone number…',
+      allowCreate: true,
+      createBusy: false,
+      placeholder: 'Filter milestones or type a new title…',
+      onCreate: (name: string) => {
+        void createAndSetMilestone(name);
+      },
       onPick: (opt) => {
         closePicker();
+        // Prefer meta.number; fall back to parsing id
+        const fromMeta = Number(opt?.meta?.number);
+        if (Number.isFinite(fromMeta) && fromMeta > 0) {
+          void applyMilestoneNumber(fromMeta);
+          return;
+        }
         const raw = String(opt?.id || opt?.label || '').replace(/[^\d]/g, '');
         const n = Number(raw);
         if (!Number.isFinite(n) || n <= 0) {
-          setActionMsg('Invalid milestone number.');
+          setActionMsg('Invalid milestone.');
           return;
         }
         void applyMilestoneNumber(n);
@@ -4464,7 +4656,7 @@ export function PrModalApp({
       await applyMilestoneNumber(null);
       return;
     }
-    openMilestonePicker();
+    void openMilestonePicker();
   }
 
   /**
@@ -5335,8 +5527,15 @@ export function PrModalApp({
               editorSaveRef.current = fn;
             }}
             onSetMilestone={onSetMilestone}
-            onOpenMilestonePicker={openMilestonePicker}
+            onOpenMilestonePicker={() => void openMilestonePicker()}
             onClearMilestone={() => void onSetMilestone(true)}
+            onEnsureAllCommits={ensureAllCommits}
+            onEnsureAllFiles={ensureAllFiles}
+            commitsLoading={commitListLoading}
+            filesLoading={fileListLoading}
+            prTags={prTags}
+            prTagsLoading={prTagsLoading}
+            prTagsError={prTagsError}
             onRerequestReviewer={onRerequestReviewer}
             onMergePr={onMergePr}
             onUpdateBranch={onUpdateBranch}
@@ -5631,6 +5830,13 @@ export function PrModalApp({
           onPick={(opt) => picker?.onPick?.(opt)}
           onClose={closePicker}
           allowFreeText={picker?.allowFreeText !== false}
+          allowCreate={Boolean(picker?.allowCreate)}
+          onCreate={
+            picker?.onCreate
+              ? (name: string) => picker.onCreate(name)
+              : null
+          }
+          createBusy={Boolean(picker?.createBusy)}
           multi={Boolean(picker?.multi)}
           initialSelectedIds={picker?.initialSelectedIds || null}
           onConfirm={
@@ -5648,7 +5854,7 @@ export function PrModalApp({
               : picker?.type === 'label'
                 ? 'Filter or type labels…'
                 : picker?.type === 'milestone'
-                  ? 'Filter or type a milestone number…'
+                  ? 'Filter milestones or type a new title…'
                   : picker?.type === 'assignee'
                     ? 'Filter or type usernames…'
                     : 'Filter or type a username…')

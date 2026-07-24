@@ -98,6 +98,20 @@ export interface PrDetail {
   commits?: Array<Record<string, unknown>>;
   checks?: { state?: string; contexts?: unknown[] };
   linkedIssues?: number[];
+  /** Issues linked for Development (closing refs / body #N). */
+  developmentIssues?: Array<{
+    number: number;
+    title?: string;
+    url?: string;
+    state?: string;
+  }>;
+  /** ProjectV2 boards this PR is on. */
+  projects?: Array<{
+    id?: string;
+    title?: string;
+    number?: number | null;
+    url?: string;
+  }>;
   milestone?: { title?: string; number?: number } | null;
   subscribed?: boolean | null;
   magicLinks?: unknown[];

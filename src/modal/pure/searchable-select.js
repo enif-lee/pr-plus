@@ -148,6 +148,59 @@ function buildLabelOptions(labels) {
 }
 
 /**
+ * Whether free-text query already matches an option id/label (exact, case-insensitive).
+ */
+function queryMatchesOption(options, query) {
+  const q = String(query || '')
+    .trim()
+    .toLowerCase();
+  if (!q) return false;
+  for (const o of options || []) {
+    if (!o) continue;
+    const id = String(o.id || '')
+      .trim()
+      .toLowerCase();
+    const label = String(o.label || '')
+      .trim()
+      .toLowerCase();
+    if (id === q || label === q) return true;
+    const title = String(o.meta?.title || '')
+      .trim()
+      .toLowerCase();
+    if (title && title === q) return true;
+  }
+  return false;
+}
+
+/**
+ * Build milestone options from API milestones (number + title).
+ */
+function buildMilestoneOptions(milestones) {
+  const byNum = new Map();
+  for (const m of milestones || []) {
+    const number = Number(m?.number);
+    if (!Number.isFinite(number) || number <= 0) continue;
+    const title = String(m?.title || `Milestone ${number}`).trim();
+    const id = String(number);
+    byNum.set(id, {
+      id,
+      label: `${title} (#${number})`,
+      keywords: [title, id, m?.description, m?.state].filter(Boolean),
+      meta: {
+        kind: 'milestone',
+        number,
+        title,
+        state: m?.state || '',
+        description: m?.description || '',
+      },
+    });
+  }
+  return [...byNum.values()].sort(
+    (a, b) => Number(b.meta.number) - Number(a.meta.number)
+  );
+}
+
+/**
  * Build branch options from open PR list + current base/head.
  * @param {Array<{ headRef?: string, baseRef?: string }>} prs
  * @param {{ baseRef?: string, headRef?: string, extra?: string[] }} [ctx]
@@ -259,6 +312,8 @@ const api = {
   labelColorCss,
   resolveLabelColor,
   GITHUB_DEFAULT_LABEL_COLORS,
+  queryMatchesOption,
+  buildMilestoneOptions,
   buildBranchOptions,
   isBotAccount,
   buildUnifiedReviewerRows,

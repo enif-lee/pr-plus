@@ -205,9 +205,16 @@ function HeaderCompactMetaStack({ detail }: { detail: any }) {
   );
 }
 
+/** Width/height morph duration — keep in sync with CSS transition on `.prp-header__stats`. */
+const STATS_MORPH_MS = 320;
+
 /**
- * Diff-stat badge that morphs size when content switches (metrics ↔ load stage).
- * Same pill element; width/height animate via FLIP, no dual-layer fade.
+ * Diff-stat badge that morphs size when content switches (metrics ↔ load stage,
+ * and stage label swaps). Same pill element; width/height animate via FLIP, no
+ * dual-layer fade.
+ *
+ * Metrics settle to intrinsic size after morph so long "+/− N files" strings
+ * are not clipped when the header reflows.
  */
 function HeaderStatsBadge({
   loadStage = null,
@@ -227,6 +234,7 @@ function HeaderStatsBadge({
   const showStage = Boolean(stageLabel);
   const badgeRef = useRef<HTMLDivElement | null>(null);
   const sizeRef = useRef({ w: 0, h: 0 });
+  const morphTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const contentKey = showStage
     ? `stage:${stageLabel}:${stageBusy ? 1 : 0}`
     : skeleton
@@ -236,32 +244,71 @@ function HeaderStatsBadge({
   useLayoutEffect(() => {
     const el = badgeRef.current;
     if (!el) return;
-    // Metrics pill: natural intrinsic size only. Fixed FLIP widths clip long
-    // "+NNNN −NNNN NN files" strings when the header reflows (conversation).
-    if (!showStage) {
-      el.style.width = '';
-      el.style.height = '';
-      sizeRef.current = { w: 0, h: 0 };
-      return;
+
+    if (morphTimerRef.current) {
+      clearTimeout(morphTimerRef.current);
+      morphTimerRef.current = null;
     }
+
     const prevW = sizeRef.current.w;
     const prevH = sizeRef.current.h;
+
+    // Measure natural size for the new content (CSS min-width applies when busy).
     el.style.width = 'auto';
     el.style.height = 'auto';
+    el.style.minWidth = '';
+    el.style.overflow = '';
     const rect = el.getBoundingClientRect();
     const w = Math.max(1, Math.ceil(rect.width));
     const h = Math.max(1, Math.ceil(rect.height));
+
     if (prevW > 0 && prevH > 0 && (prevW !== w || prevH !== h)) {
+      // FLIP: pin previous size → reflow → animate to measured size.
+      // min-width:0 so stage's 22ch floor does not block shrink/grow from metrics.
+      el.style.minWidth = '0';
+      el.style.overflow = 'hidden';
       el.style.width = `${prevW}px`;
       el.style.height = `${prevH}px`;
       void el.offsetWidth;
       el.style.width = `${w}px`;
       el.style.height = `${h}px`;
-    } else {
+
+      morphTimerRef.current = setTimeout(() => {
+        const node = badgeRef.current;
+        morphTimerRef.current = null;
+        if (!node) return;
+        if (!showStage) {
+          // Metrics: release fixed size so header reflow never clips stats.
+          node.style.width = '';
+          node.style.height = '';
+          node.style.minWidth = '';
+          node.style.overflow = '';
+        } else {
+          // Stage: keep pixel size; restore CSS min-width / overflow.
+          node.style.minWidth = '';
+          node.style.overflow = '';
+        }
+      }, STATS_MORPH_MS + 20);
+    } else if (showStage) {
       el.style.width = `${w}px`;
       el.style.height = `${h}px`;
+      el.style.minWidth = '';
+      el.style.overflow = '';
+    } else {
+      el.style.width = '';
+      el.style.height = '';
+      el.style.minWidth = '';
+      el.style.overflow = '';
     }
+
     sizeRef.current = { w, h };
+
+    return () => {
+      if (morphTimerRef.current) {
+        clearTimeout(morphTimerRef.current);
+        morphTimerRef.current = null;
+      }
+    };
   }, [contentKey, showStage]);
 
   return (

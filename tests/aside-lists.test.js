@@ -2,6 +2,11 @@ const assert = require('node:assert/strict');
 const {
   takeCommitsForTimeline,
   takeVisibleTreeNodes,
+  filterCommitsByQuery,
+  filterFilesByQuery,
+  mayHaveMoreCommits,
+  mayHaveMoreFiles,
+  filterTagsByQuery,
 } = require('../src/modal/lib/aside-lists.ts');
 const {
   buildNestedFileTree,
@@ -61,5 +66,35 @@ assert.equal(capped.truncated, visible.length - 3);
 const all = takeVisibleTreeNodes(visible, 100);
 assert.equal(all.truncated, 0);
 assert.equal(all.nodes.length, visible.length);
+
+// Search filters
+{
+  const bySha = filterCommitsByQuery(commits, 'sha0019abcdef');
+  assert.equal(bySha.length, 1);
+  assert.equal(bySha[0].sha, 'sha0019abcdef');
+  const byAuthor = filterCommitsByQuery(commits, 'dev7');
+  assert.equal(byAuthor.length, 1);
+  const none = filterCommitsByQuery(commits, 'zzzz-nope');
+  assert.equal(none.length, 0);
+}
+{
+  const hits = filterFilesByQuery(files, 'nested/c');
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].filename, 'src/nested/c.js');
+}
+{
+  assert.equal(mayHaveMoreCommits({ commits: new Array(100), commitsCount: 150 }), true);
+  assert.equal(mayHaveMoreCommits({ commits: new Array(5), commitsCount: 5 }), false);
+  assert.equal(mayHaveMoreFiles({ files: new Array(100), changedFiles: 120 }), true);
+  assert.equal(mayHaveMoreFiles({ files: new Array(3), changedFiles: 3 }), false);
+}
+{
+  const tags = [
+    { name: 'v1.0.0', sha: 'aaa' },
+    { name: 'release-2', sha: 'bbb' },
+  ];
+  assert.equal(filterTagsByQuery(tags, 'v1').length, 1);
+  assert.equal(filterTagsByQuery(tags, 'bbb')[0].name, 'release-2');
+}
 
 console.log('aside-lists.test.js: all assertions passed');

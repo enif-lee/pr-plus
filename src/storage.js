@@ -26,6 +26,7 @@ const PREFS_KEY = 'extensionPrefs';
  * Default extension preferences.
  * - fastReview: progressive dual-window load (core first, threads on demand)
  * - reverseComments: composer → merge box → conversation (latest-first timeline)
+ * - autoOpenEmbed: on GitHub PR routes, open pr+ embed automatically (vs native + toggle)
  *
  * Enterprise hosts are NOT in prefs — they live in HOST_ACCOUNTS_KEY with paired PATs.
  * Legacy `enterpriseWebHosts` (hosts-only list) is dropped on normalize (re-register required).
@@ -33,6 +34,7 @@ const PREFS_KEY = 'extensionPrefs';
 const DEFAULT_PREFS = {
   fastReview: true,
   reverseComments: true,
+  autoOpenEmbed: true,
 };
 
 function getStorageArea(storageApi = globalThis.chrome?.storage?.local) {
@@ -45,6 +47,7 @@ function getStorageArea(storageApi = globalThis.chrome?.storage?.local) {
  * @returns {{
  *   fastReview: boolean,
  *   reverseComments: boolean,
+ *   autoOpenEmbed: boolean,
  * }}
  */
 function normalizePrefs(raw) {
@@ -59,6 +62,10 @@ function normalizePrefs(raw) {
       typeof src.reverseComments === 'boolean'
         ? src.reverseComments
         : DEFAULT_PREFS.reverseComments,
+    autoOpenEmbed:
+      typeof src.autoOpenEmbed === 'boolean'
+        ? src.autoOpenEmbed
+        : DEFAULT_PREFS.autoOpenEmbed,
   };
 }
 
@@ -96,7 +103,7 @@ function normalizeHostAccounts(raw) {
 
 /**
  * @param {unknown} [storageApi]
- * @returns {Promise<{ fastReview: boolean, reverseComments: boolean }>}
+ * @returns {Promise<{ fastReview: boolean, reverseComments: boolean, autoOpenEmbed: boolean }>}
  */
 function getExtensionPrefs(storageApi) {
   const area = getStorageArea(storageApi);
@@ -111,7 +118,7 @@ function getExtensionPrefs(storageApi) {
 
 /**
  * Merge patch into stored prefs and return the full next prefs.
- * @param {Partial<{ fastReview: boolean, reverseComments: boolean }>} patch
+ * @param {Partial<{ fastReview: boolean, reverseComments: boolean, autoOpenEmbed: boolean }>} patch
  * @param {unknown} [storageApi]
  */
 async function setExtensionPrefs(patch, storageApi) {
@@ -135,7 +142,7 @@ async function setExtensionPrefs(patch, storageApi) {
 
 /**
  * Watch prefs changes (local area only).
- * @param {(prefs: { fastReview: boolean, reverseComments: boolean }) => void} onChange
+ * @param {(prefs: { fastReview: boolean, reverseComments: boolean, autoOpenEmbed: boolean }) => void} onChange
  * @param {unknown} [storageApi]
  */
 function watchExtensionPrefs(onChange, storageApi = globalThis.chrome?.storage) {

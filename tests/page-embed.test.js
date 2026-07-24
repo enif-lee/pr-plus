@@ -124,6 +124,21 @@ const css = fs.readFileSync(path.join(root, 'src/modal/styles.css'), 'utf8');
 const manifest = fs.readFileSync(path.join(root, 'manifest.json'), 'utf8');
 
 assert.ok(host.includes('tryEmbedFromLocation'), 'host exports embed entry');
+assert.ok(
+  host.includes('autoOpenEmbed') && host.includes('auto-open-disabled'),
+  'auto-open embed pref gates tryEmbedFromLocation'
+);
+// content-bridge must pass autoOpenEmbed through (host reads prefs via bridge)
+{
+  const bridge = fs.readFileSync(
+    path.join(root, 'src/content-bridge.js'),
+    'utf8'
+  );
+  assert.ok(
+    bridge.includes('autoOpenEmbed'),
+    'content-bridge normalizePrefs preserves autoOpenEmbed'
+  );
+}
 assert.ok(host.includes('ensureEmbedHost'), 'host creates embed root');
 assert.ok(host.includes('presentation'), 'host passes presentation');
 // PR-page embed has no pulls-list cache — must fetch open PRs so Stack matches fullscreen
@@ -141,8 +156,16 @@ assert.ok(
   'native GH PR header has pr+ toggle when embed off'
 );
 assert.ok(
-  !host.includes('Open pr+') || host.includes("aria-label', 'Open with pr+"),
+  host.includes("textContent = 'pr+'") || host.includes('textContent = "pr+"'),
   'toggle is blue pr+ chip only (no Open pr+ label text in markup)'
+);
+assert.ok(
+  host.includes('Open with pr+'),
+  'toggle aria/title includes Open with pr+ (with shortcut)'
+);
+assert.ok(
+  host.includes('openEmbedFromNativePr') && host.includes('ensureNativePrOpenShortcut'),
+  'native PR page can open embed via keyboard shortcut'
 );
 // Markup should be the chip itself, not nested mark + label spans
 assert.ok(

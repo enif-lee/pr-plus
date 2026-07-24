@@ -70,6 +70,23 @@ function ok(msg) {
 }
 
 {
+  const milestones = ss.buildMilestoneOptions([
+    { number: 2, title: 'Sprint 2', state: 'open' },
+    { number: 1, title: 'Sprint 1', state: 'closed' },
+    { number: 2, title: 'Sprint 2 dupe' },
+  ]);
+  assert.equal(milestones.length, 2);
+  assert.equal(milestones[0].id, '2'); // sorted desc by number
+  assert.equal(milestones[0].meta.kind, 'milestone');
+  // later same-number entry wins
+  assert.equal(milestones[0].meta.title, 'Sprint 2 dupe');
+  assert.equal(ss.queryMatchesOption(milestones, 'Sprint 2 dupe'), true);
+  assert.equal(ss.queryMatchesOption(milestones, 'brand-new'), false);
+  assert.equal(ss.queryMatchesOption(milestones, '2'), true);
+  ok('buildMilestoneOptions + queryMatchesOption');
+}
+
+{
   const rows = ss.buildUnifiedReviewerRows({
     requestedReviewers: ['alice', 'bob'],
     reviews: [

@@ -1012,6 +1012,89 @@ async function apiSend(url, fetchImpl, token, { method = 'GET', body } = {}) {
 }
 
 /**
+ * Pull request sidebar meta for conversation rail:
+ * - ProjectV2 items (Projects section)
+ * - Closing-linked issues (Development section)
+ * Soft fields only — failures return empty arrays.
+ *
+ * @returns {Promise<{ projects: Array, developmentIssues: Array }>}
+ */
+async function fetchPrSidebarMeta(owner, repo, number, fetchImpl, token) {
+  const o = String(owner || '').trim();
+  const r = String(repo || '').trim();
+  const n = Number(number);
+  if (!o || !r || !Number.isFinite(n) || n <= 0 || !token) {
+    return { projects: [], developmentIssues: [] };
+  }
+  const query = `
+    query($owner:String!,$repo:String!,$number:Int!) {
+      repository(owner:$owner, name:$repo) {
+        pullRequest(number:$number) {
+          projectItems(first: 20) {
+            nodes {
+              id
+              project {
+                title
+                number
+                url
+              }
+            }
+          }
+          closingIssuesReferences(first: 20) {
+            nodes {
+              number
+              title
+              url
+              state
+            }
+          }
+        }
+      }
+    }
+  `;
+  try {
+    const data = await apiGraphql(
+      query,
+      { owner: o, repo: r, number: n },
+      fetchImpl,
+      token
+    );
+    const prNode = data?.repository?.pullRequest || null;
+    const projects = [];
+    for (const node of prNode?.projectItems?.nodes || []) {
+      const p = node?.project;
+      if (!p) continue;
+      const title = String(p.title || '').trim();
+      if (!title) continue;
+      projects.push({
+        id: String(node.id || `${p.number}:${title}`),
+        title,
+        number: p.number != null ? Number(p.number) : null,
+        url: String(p.url || '').trim(),
+      });
+    }
+    const developmentIssues = [];
+    for (const node of prNode?.closingIssuesReferences?.nodes || []) {
+      const num = Number(node?.number);
+      if (!Number.isFinite(num) || num <= 0) continue;
+      developmentIssues.push({
+        number: num,
+        title: String(node?.title || '').trim(),
+        url: String(node?.url || '').trim(),
+        state: String(node?.state || '').trim().toLowerCase(),
+      });
+    }
+    return { projects, developmentIssues };
+  } catch (err) {
+    // Soft: missing ProjectV2 scope / org policy / etc.
+    if (err?.name === 'AbortError' || /aborted|AbortError/i.test(String(err?.message || ''))) {
+      throw err;
+    }
+    return { projects: [], developmentIssues: [] };
+  }
+}
+
+/**
  * GraphQL client: HTTP 200 can still carry body.errors — treat those as failures.
  * @returns {Promise<object>} data field only
  */
@@ -2120,10 +2203,15 @@ async function fetchPrDetail(
         apiJson(`${base}/commits/${headSha}/status`, fetchImpl, token),
         (s) => `(state=${s?.state || '?'}, ${s?.total_count || 0} statuses)`
       );
+      const statusList = Array.isArray(status.statuses) ? status.statuses : [];
+      // Combined status is "pending" with total_count:0 when the commit has no
+      // status contexts — treat as empty, not in-progress.
+      const emptyCombined =
+        !statusList.length && !(Number(status.total_count) > 0);
       checks = {
-        state: status.state || 'unknown',
-        totalCount: status.total_count || 0,
-        statuses: (status.statuses || []).map((s) => ({
+        state: emptyCombined ? 'unknown' : status.state || 'unknown',
+        totalCount: emptyCombined ? 0 : status.total_count || statusList.length,
+        statuses: statusList.map((s) => ({
           context: s.context || '',
           state: s.state || '',
           description: s.description || '',
@@ -2238,8 +2326,11 @@ async function fetchPrDetail(
     `[pr-plus] fetchPrDetail mapAnnotateFiles: ${timings.mapAnnotateFiles}ms`
   );
 
-  // Linked issue numbers from body (closing keywords / #N) — display only unless set via body edit
+  // Development (closing-linked issues) + Projects (ProjectV2 items) for conversation aside.
+  // Soft-fail: empty arrays when GraphQL unavailable / no permission.
   let linkedIssues = [];
+  let developmentIssues = [];
+  let projects = [];
   try {
     let editApi =
       typeof globalThis !== 'undefined' ? globalThis.PRModalPrEditApi : null;
@@ -2255,6 +2346,46 @@ async function fetchPrDetail(
     }
   } catch {
     linkedIssues = [];
+  }
+  try {
+    const side = await timedFetch(
+      timings,
+      'sidebarMeta',
+      fetchPrSidebarMeta(owner, repo, n, fetchImpl, token),
+      (r) =>
+        `(${(r?.developmentIssues || []).length} dev, ${(r?.projects || []).length} projects)`
+    );
+    if (side && typeof side === 'object') {
+      if (Array.isArray(side.developmentIssues) && side.developmentIssues.length) {
+        developmentIssues = side.developmentIssues;
+        // Prefer GraphQL numbers for linkedIssues when available
+        const fromGql = developmentIssues
+          .map((x) => Number(x?.number))
+          .filter((x) => Number.isFinite(x) && x > 0);
+        if (fromGql.length) {
+          const set = new Set([...linkedIssues, ...fromGql]);
+          linkedIssues = [...set].sort((a, b) => a - b);
+        }
+      }
+      if (Array.isArray(side.projects)) projects = side.projects;
+    }
+  } catch (err) {
+    if (err?.name === 'AbortError' || /aborted|AbortError/i.test(String(err?.message || ''))) {
+      throw err;
+    }
+    console.log(
+      `[pr-plus] fetchPrDetail sidebarMeta: soft-fail ${err?.message || err}`
+    );
+  }
+  // Body-only #N → development rows when GraphQL returned nothing
+  if (!developmentIssues.length && linkedIssues.length) {
+    developmentIssues = linkedIssues.map((num) => ({
+      number: num,
+      title: '',
+      url: `https://github.com/${owner}/${repo}/issues/${num}`,
+      state: '',
+      source: 'body',
+    }));
   }
 
   const subscribed =
@@ -2321,6 +2452,8 @@ async function fetchPrDetail(
     additions: pr.additions,
     deletions: pr.deletions,
     changedFiles: pr.changed_files,
+    /** Total commits on the PR (REST field); may exceed first page of commits[]. */
+    commitsCount: pr.commits != null ? Number(pr.commits) : null,
     labels: Array.isArray(pr.labels)
       ? pr.labels.map((l) => ({
           name: l.name || '',
@@ -2382,6 +2515,10 @@ async function fetchPrDetail(
         }
       : null,
     linkedIssues,
+    /** Issues linked for Development (closing refs / body #N). */
+    developmentIssues,
+    /** ProjectV2 boards this PR is on. */
+    projects,
     subscribed,
     locked: Boolean(pr.locked),
     gitattributesText,
@@ -3465,6 +3602,175 @@ async function fetchRepoLabels(owner, repo, fetchImpl, token = null, opts = {}) 
   return out;
 }
 
+/** Stable-ish default color for newly created labels (hex without #). */
+function defaultNewLabelColor(name) {
+  const palette = [
+    'd73a4a',
+    '0075ca',
+    'a2eeef',
+    '7057ff',
+    '008672',
+    'e4e669',
+    'd876e3',
+    'fbca04',
+    '0e8a16',
+    '5319e7',
+  ];
+  const s = String(name || '');
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return palette[h % palette.length];
+}
+
+/**
+ * Create a repository label.
+ * @returns {Promise<{ name: string, color: string, description: string }>}
+ */
+async function createRepoLabel(
+  owner,
+  repo,
+  { name, color, description } = {},
+  fetchImpl,
+  token
+) {
+  const rawName = String(name || '').trim();
+  if (!rawName) throw new Error('Label name is required');
+  const body = {
+    name: rawName,
+    color: String(color || defaultNewLabelColor(rawName))
+      .trim()
+      .replace(/^#/, ''),
+  };
+  if (description != null) body.description = String(description);
+  const result = await apiSend(
+    githubRestUrl(`/repos/${owner}/${repo}/labels`),
+    fetchImpl,
+    token,
+    { method: 'POST', body }
+  );
+  return {
+    name: String(result?.name || rawName),
+    color: String(result?.color || body.color || '')
+      .trim()
+      .replace(/^#/, ''),
+    description: String(result?.description || description || ''),
+  };
+}
+
+/**
+ * List repository milestones (open + closed, limited pages).
+ * @returns {Promise<Array<{ number: number, title: string, state: string, description: string }>>}
+ */
+async function fetchRepoMilestones(owner, repo, fetchImpl, token = null, opts = {}) {
+  const perPage = 100;
+  const maxPages = Math.max(1, Math.min(10, Number(opts.maxPages) || 5));
+  const state = opts.state || 'all';
+  const out = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const url = githubRestUrl(
+      `/repos/${owner}/${repo}/milestones?state=${encodeURIComponent(state)}&per_page=${perPage}&page=${page}&sort=due_on&direction=desc`
+    );
+    const batch = await apiJson(url, fetchImpl, token);
+    if (!Array.isArray(batch) || !batch.length) break;
+    for (const m of batch) {
+      const number = Number(m?.number);
+      if (!Number.isFinite(number) || number <= 0) continue;
+      out.push({
+        number,
+        title: String(m?.title || `Milestone ${number}`),
+        state: String(m?.state || ''),
+        description: String(m?.description || ''),
+        dueOn: m?.due_on || null,
+      });
+    }
+    if (batch.length < perPage) break;
+  }
+  return out;
+}
+
+/**
+ * Create a repository milestone.
+ * @returns {Promise<{ number: number, title: string, state: string, description: string }>}
+ */
+async function createRepoMilestone(
+  owner,
+  repo,
+  { title, description, state } = {},
+  fetchImpl,
+  token
+) {
+  const rawTitle = String(title || '').trim();
+  if (!rawTitle) throw new Error('Milestone title is required');
+  const body = { title: rawTitle, state: state === 'closed' ? 'closed' : 'open' };
+  if (description != null) body.description = String(description);
+  const result = await apiSend(
+    githubRestUrl(`/repos/${owner}/${repo}/milestones`),
+    fetchImpl,
+    token,
+    { method: 'POST', body }
+  );
+  return {
+    number: Number(result?.number) || 0,
+    title: String(result?.title || rawTitle),
+    state: String(result?.state || body.state),
+    description: String(result?.description || description || ''),
+    dueOn: result?.due_on || null,
+  };
+}
+
+/**
+ * List repository tags (paginated). Used to surface tags related to a PR head/commits.
+ * @returns {Promise<Array<{ name: string, sha: string, zipballUrl?: string, tarballUrl?: string }>>}
+ */
+async function fetchRepoTags(owner, repo, fetchImpl, token = null, opts = {}) {
+  const perPage = 100;
+  const maxPages = Math.max(1, Math.min(20, Number(opts.maxPages) || 10));
+  const out = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const url = githubRestUrl(
+      `/repos/${owner}/${repo}/tags?per_page=${perPage}&page=${page}`
+    );
+    const batch = await apiJson(url, fetchImpl, token);
+    if (!Array.isArray(batch) || !batch.length) break;
+    for (const t of batch) {
+      const name = String(t?.name || '').trim();
+      const sha = String(t?.commit?.sha || t?.sha || '').trim();
+      if (!name) continue;
+      out.push({
+        name,
+        sha,
+        zipballUrl: t?.zipball_url || '',
+        tarballUrl: t?.tarball_url || '',
+      });
+    }
+    if (batch.length < perPage) break;
+  }
+  return out;
+}
+
+/**
+ * Tags whose commit sha is in `shaSet` (PR commits / head).
+ * @param {string[]} shas
+ * @returns {Promise<Array<{ name: string, sha: string }>>}
+ */
+async function fetchTagsForCommits(
+  owner,
+  repo,
+  shas,
+  fetchImpl,
+  token = null,
+  opts = {}
+) {
+  const want = new Set(
+    (shas || [])
+      .map((s) => String(s || '').trim().toLowerCase())
+      .filter(Boolean)
+  );
+  if (!want.size) return [];
+  const tags = await fetchRepoTags(owner, repo, fetchImpl, token, opts);
+  return tags.filter((t) => want.has(String(t.sha || '').toLowerCase()));
+}
+
 /**
  * Apply a GitHub suggestion: replace lines on head branch via Contents API.
  * @param {{ path: string, headRef: string, startLine: number, endLine: number, suggestion: string, message?: string }} opts
@@ -4022,6 +4328,7 @@ const fetchApi = {
   fetchPrCommentsPage,
   fetchAllPrCommits,
   fetchAllPrFiles,
+  fetchPrSidebarMeta,
   fetchCompareFiles,
   mapAndAnnotateFiles,
   fetchPullReviewThreads,
@@ -4063,6 +4370,12 @@ const fetchApi = {
   removeAssignees,
   setIssueLabels,
   fetchRepoLabels,
+  createRepoLabel,
+  fetchRepoMilestones,
+  createRepoMilestone,
+  fetchRepoTags,
+  fetchTagsForCommits,
+  defaultNewLabelColor,
   mergePullRequest,
   updatePullBranch,
   setIssueSubscription,

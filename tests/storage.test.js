@@ -120,12 +120,15 @@ async function main() {
   {
     assert.equal(DEFAULT_PREFS.fastReview, true);
     assert.equal(DEFAULT_PREFS.reverseComments, true);
+    assert.equal(DEFAULT_PREFS.autoOpenEmbed, true);
     assert.equal('enterpriseWebHosts' in DEFAULT_PREFS, false);
     assert.deepEqual(normalizePrefs(null), DEFAULT_PREFS);
     assert.deepEqual(normalizePrefs({ fastReview: false }), {
       fastReview: false,
       reverseComments: true,
+      autoOpenEmbed: true,
     });
+    assert.equal(normalizePrefs({ autoOpenEmbed: false }).autoOpenEmbed, false);
     // Legacy hosts-only list is dropped (re-register with PAT required)
     const legacy = normalizePrefs({
       enterpriseWebHosts: ['ghe.corp.io'],
@@ -140,16 +143,22 @@ async function main() {
     const defaults = await getExtensionPrefs(area);
     assert.equal(defaults.fastReview, true);
     assert.equal(defaults.reverseComments, true);
+    assert.equal(defaults.autoOpenEmbed, true);
 
     const next = await setExtensionPrefs({ reverseComments: false }, area);
     assert.equal(next.fastReview, true);
     assert.equal(next.reverseComments, false);
+    assert.equal(next.autoOpenEmbed, true);
     assert.ok(data[PREFS_KEY]);
     assert.equal(data[PREFS_KEY].reverseComments, false);
 
     const again = await setExtensionPrefs({ fastReview: false }, area);
     assert.equal(again.fastReview, false);
     assert.equal(again.reverseComments, false);
+
+    const noAuto = await setExtensionPrefs({ autoOpenEmbed: false }, area);
+    assert.equal(noAuto.autoOpenEmbed, false);
+    assert.equal(noAuto.fastReview, false);
   }
 
   // --- Multi-account: pure selectTokenForWebHost ---

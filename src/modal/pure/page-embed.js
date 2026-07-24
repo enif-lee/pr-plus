@@ -30,6 +30,16 @@
     labelWin: 'Ctrl+Shift+E',
   };
 
+  /** Same chord; open pr+ from native GH PR chrome. */
+  const EMBED_OPEN_SHORTCUT = {
+    mod: true,
+    shift: true,
+    key: 'e',
+    action: 'openEmbedView',
+    label: EMBED_RESTORE_SHORTCUT.label,
+    labelWin: EMBED_RESTORE_SHORTCUT.labelWin,
+  };
+
   const SHA_RE = /^[0-9a-f]{7,40}$/i;
   const RANGE_RE = /^([0-9a-f]{7,40})\.\.([0-9a-f]{7,40})$/i;
 
@@ -260,11 +270,12 @@
   }
 
   function resolveEmbedShortcutAction(opts) {
-    if (!isEmbedPresentation(opts?.presentation)) return null;
     if (opts?.editableTarget) return null;
     if (!opts?.mod || !opts?.shift) return null;
     const key = String(opts?.key || '').toLowerCase();
-    if (key === EMBED_RESTORE_SHORTCUT.key) return 'restoreNativeView';
+    if (key !== EMBED_RESTORE_SHORTCUT.key) return null;
+    if (isEmbedPresentation(opts?.presentation)) return 'restoreNativeView';
+    if (opts?.onNativePrPage) return 'openEmbedView';
     return null;
   }
 
@@ -279,6 +290,7 @@
     PAGE_EMBED_FOOTER_HIDDEN_ATTR,
     GH_FOOTER_SELECTORS,
     EMBED_RESTORE_SHORTCUT,
+    EMBED_OPEN_SHORTCUT,
     parsePrPagePath,
     isPrEmbedTarget,
     normalizePresentation,

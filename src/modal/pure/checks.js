@@ -118,6 +118,10 @@
   function deriveChecksState(statuses, checkRuns, fallback = 'unknown') {
     const st = Array.isArray(statuses) ? statuses : [];
     const runs = Array.isArray(checkRuns) ? checkRuns : [];
+    // GitHub combined-status API returns state:"pending" with total_count:0 when
+    // the commit has no status contexts. That is not a real in-progress check.
+    if (!st.length && !runs.length) return 'unknown';
+
     const statusStates = st.map((s) => String(s?.state || '').toLowerCase());
     const conclusions = runs.map((r) => String(r?.conclusion || '').toLowerCase());
     const runStatuses = runs.map((r) => String(r?.status || '').toLowerCase());
@@ -141,14 +145,12 @@
       conclusions.some((c) => c === '' || c === 'null' || c === 'action_required');
     if (anyPending) return 'pending';
 
-    if (st.length || runs.length) {
-      const anySuccess =
-        statusStates.some((s) => s === 'success') ||
-        conclusions.some(
-          (c) => c === 'success' || c === 'neutral' || c === 'skipped'
-        );
-      if (anySuccess) return 'success';
-    }
+    const anySuccess =
+      statusStates.some((s) => s === 'success') ||
+      conclusions.some(
+        (c) => c === 'success' || c === 'neutral' || c === 'skipped'
+      );
+    if (anySuccess) return 'success';
 
     return fallback || 'unknown';
   }
@@ -162,11 +164,12 @@
     const raw = checks && typeof checks === 'object' ? checks : {};
     const statuses = distinctStatuses(raw.statuses);
     const checkRuns = distinctCheckRuns(raw.checkRuns || raw.check_runs);
-    const state = deriveChecksState(
-      statuses,
-      checkRuns,
-      String(raw.state || 'unknown')
-    );
+    // Never trust combined-status "pending" when there are zero contexts/runs.
+    const fallback =
+      statuses.length || checkRuns.length
+        ? String(raw.state || 'unknown')
+        : 'unknown';
+    const state = deriveChecksState(statuses, checkRuns, fallback);
     return {
       state,
       totalCount: statuses.length + checkRuns.length,
@@ -441,8 +444,8 @@
     const pending = Number(s.pending) || 0;
     const skipped = Number(s.skipped) || 0;
     if (!total) {
-      const st = String(s.state || 'unknown');
-      return st && st !== 'unknown' ? `Checks: ${st}` : 'No checks';
+      // Empty payload — GitHub may still report combined state "pending"
+      return 'No checks';
     }
     const parts = [
       `${total} check${total === 1 ? '' : 's'}`,

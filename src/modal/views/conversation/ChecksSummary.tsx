@@ -31,17 +31,6 @@ export type CheckStackGroup = {
 
 /** Pure: outcome groups for avatar-stack checks (shared with header meta stack). */
 export function buildCheckStackGroups(checks: any): CheckStackGroup[] {
-  const summary =
-    typeof summarizeCheckCounts === 'function'
-      ? summarizeCheckCounts(checks)
-      : {
-          total: 0,
-          success: 0,
-          failure: 0,
-          pending: 0,
-          skipped: 0,
-          state: 'unknown',
-        };
   const byOutcome =
     typeof listCheckNamesByOutcome === 'function'
       ? listCheckNamesByOutcome(checks)
@@ -50,12 +39,8 @@ export function buildCheckStackGroups(checks: any): CheckStackGroup[] {
           pending: [],
           success: [],
           skipped: [],
-          state: summary.state || 'unknown',
+          state: 'unknown',
         };
-  const overallTip =
-    typeof formatChecksCountLabel === 'function'
-      ? formatChecksCountLabel(summary)
-      : `Checks: ${summary.state || 'unknown'}`;
 
   const out: CheckStackGroup[] = [];
   for (const key of OUTCOME_ORDER) {
@@ -67,16 +52,8 @@ export function buildCheckStackGroups(checks: any): CheckStackGroup[] {
         : `${names.length} ${key}\n${names.map((n: string) => `· ${n}`).join('\n')}`;
     out.push({ key, names, tip });
   }
-  if (!out.length && summary.state && summary.state !== 'unknown') {
-    const st = String(summary.state).toLowerCase();
-    const key: OutcomeKey =
-      st === 'failure' || st === 'error'
-        ? 'failure'
-        : st === 'pending'
-          ? 'pending'
-          : 'success';
-    out.push({ key, names: [], tip: overallTip });
-  }
+  // Do not invent a phantom stack from combined-status state alone
+  // (GitHub reports state:"pending" with zero contexts on repos without checks).
   return out;
 }
 

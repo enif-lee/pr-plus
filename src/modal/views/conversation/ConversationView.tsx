@@ -43,6 +43,11 @@ import {
 import { BodyEditor } from '../composers/BodyEditor';
 import { MetaList } from './MetaList';
 import { AsideCommitsTimeline } from './AsideCommitsTimeline';
+import { AsideTagsList } from './AsideTagsList';
+import {
+  mayHaveMoreCommits,
+  mayHaveMoreFiles,
+} from '@lib/aside-lists';
 import { AsideFilesTree } from './AsideFilesTree';
 import { ChecksPanel, hasChecksData } from './ChecksPanel';
 import { MergeBoxChecks } from './MergeBoxChecks';
@@ -90,6 +95,13 @@ function ConversationViewImpl(props: any) {
     onSetMilestone,
     onOpenMilestonePicker,
     onClearMilestone,
+    onEnsureAllCommits = null,
+    onEnsureAllFiles = null,
+    commitsLoading = false,
+    filesLoading = false,
+    prTags = null,
+    prTagsLoading = false,
+    prTagsError = null,
     onRerequestReviewer = null,
     onMergePr,
     onUpdateBranch,
@@ -1489,7 +1501,7 @@ function ConversationViewImpl(props: any) {
         }}
       >
         {asideCollapsed ? (
-          <AsideCompactRail detail={detail} />
+          <AsideCompactRail detail={detail} tags={prTags} />
         ) : (
           <>
         <MetaList
@@ -1590,16 +1602,61 @@ function ConversationViewImpl(props: any) {
             </button>
           ) : null}
         </AsideSection>
+        <AsideSection title="Projects">
+          {(detail.projects || []).length ? (
+            <ul className="prp-list prp-aside-projects">
+              {(detail.projects || []).map((p: any) => {
+                const title = String(p?.title || '').trim() || 'Project';
+                const href = String(p?.url || '').trim();
+                const num = p?.number != null ? Number(p.number) : null;
+                return (
+                  <li key={String(p?.id || title)} className="prp-aside-projects__item">
+                    {href ? (
+                      <a
+                        className="prp-entity-link"
+                        href={href}
+                        target="_blank"
+                        rel="noreferrer"
+                        title={title}
+                      >
+                        {title}
+                      </a>
+                    ) : (
+                      <span title={title}>{title}</span>
+                    )}
+                    {Number.isFinite(num) ? (
+                      <span className="prp-muted prp-aside-projects__num">
+                        #{num}
+                      </span>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <span className="prp-muted">None yet</span>
+          )}
+        </AsideSection>
         <AsideSection title="Milestone">
-          <div className="prp-milestone">
-            {detail.milestone ? (
-              <div className="prp-meta-row">
-                <strong>{detail.milestone.title}</strong>
-                <span className="prp-muted"> #{detail.milestone.number}</span>
+          <div className="prp-label-row prp-milestone">
+            {!detail.milestone ? (
+              <span className="prp-muted prp-milestone__empty">No milestone</span>
+            ) : (
+              <span className="prp-label-chip prp-milestone-chip">
+                <span
+                  className="prp-milestone-chip__title"
+                  title={`#${detail.milestone.number}`}
+                >
+                  {detail.milestone.title ||
+                    `Milestone #${detail.milestone.number}`}
+                </span>
+                <span className="prp-muted prp-milestone-chip__num">
+                  #{detail.milestone.number}
+                </span>
                 {canEditMeta && onClearMilestone ? (
                   <button
                     type="button"
-                    className="prp-icon-btn"
+                    className="prp-label-chip__remove"
                     disabled={actionBusy}
                     title="Clear milestone"
                     aria-label="Clear milestone"
@@ -1608,43 +1665,82 @@ function ConversationViewImpl(props: any) {
                     ✕
                   </button>
                 ) : null}
-              </div>
-            ) : (
-              <span className="prp-muted prp-milestone__empty">No milestone</span>
+              </span>
             )}
-            {canEditMeta && (onOpenMilestonePicker || onSetMilestone) ? (
-              <button
-                type="button"
-                className="prp-add-link prp-milestone__action"
-                disabled={actionBusy}
-                onClick={() =>
-                  onOpenMilestonePicker ? onOpenMilestonePicker() : onSetMilestone?.(false)
-                }
-                ref={milestoneAddRef}
-              >
-                {detail.milestone ? 'Change milestone…' : 'Set milestone…'}
-              </button>
-            ) : null}
           </div>
+          {canEditMeta && (onOpenMilestonePicker || onSetMilestone) ? (
+            <button
+              type="button"
+              className="prp-add-link"
+              disabled={actionBusy}
+              onClick={() =>
+                onOpenMilestonePicker
+                  ? onOpenMilestonePicker()
+                  : onSetMilestone?.(false)
+              }
+              ref={milestoneAddRef}
+            >
+              {detail.milestone ? 'Change milestone…' : 'Set milestone…'}
+            </button>
+          ) : null}
         </AsideSection>
-        <AsideSection title="Linked issues">
-          {(detail.linkedIssues || []).length ? (
-            <ul className="prp-list">
-              {detail.linkedIssues.map((n: number) => (
-                <li key={n}>
-                  <a
-                    href={`https://github.com/${detail.owner}/${detail.repo}/issues/${n}`}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    #{n}
-                  </a>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <span className="prp-muted">None detected in body</span>
-          )}
+        <AsideSection title="Development">
+          {(() => {
+            const dev =
+              Array.isArray(detail.developmentIssues) &&
+              detail.developmentIssues.length
+                ? detail.developmentIssues
+                : (detail.linkedIssues || []).map((n: number) => ({
+                    number: n,
+                    title: '',
+                    url: `https://github.com/${detail.owner}/${detail.repo}/issues/${n}`,
+                    state: '',
+                  }));
+            if (!dev.length) {
+              return <span className="prp-muted">None yet</span>;
+            }
+            return (
+              <>
+                <p className="prp-muted prp-aside-dev__hint">
+                  Successfully merging this pull request may close these issues.
+                </p>
+                <ul className="prp-list prp-aside-dev">
+                  {dev.map((item: any) => {
+                    const num = Number(item?.number);
+                    if (!Number.isFinite(num) || num <= 0) return null;
+                    const title = String(item?.title || '').trim();
+                    const href =
+                      String(item?.url || '').trim() ||
+                      `https://github.com/${detail.owner}/${detail.repo}/issues/${num}`;
+                    const state = String(item?.state || '').toLowerCase();
+                    return (
+                      <li key={num} className="prp-aside-dev__item">
+                        <a
+                          className="prp-entity-link"
+                          href={href}
+                          target="_blank"
+                          rel="noreferrer"
+                          title={title || `#${num}`}
+                        >
+                          #{num}
+                          {title ? (
+                            <span className="prp-aside-dev__title"> {title}</span>
+                          ) : null}
+                        </a>
+                        {state ? (
+                          <span
+                            className={`prp-aside-dev__state prp-aside-dev__state--${state}`}
+                          >
+                            {state}
+                          </span>
+                        ) : null}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </>
+            );
+          })()}
         </AsideSection>
         {showChecks || sectionLoading ? (
           <AsideSection title="Checks">
@@ -1656,7 +1752,28 @@ function ConversationViewImpl(props: any) {
           </AsideSection>
         ) : null}
         <AsideSection
-          title={`Commits${detail.commits?.length ? ` (${detail.commits.length})` : ''}`}
+          title={`Tags${
+            Array.isArray(prTags) && prTags.length ? ` (${prTags.length})` : ''
+          }`}
+          collapsible
+          defaultOpen={false}
+        >
+          <AsideTagsList
+            tags={prTags || []}
+            owner={detail.owner}
+            repo={detail.repo}
+            loading={prTagsLoading}
+            error={prTagsError}
+          />
+        </AsideSection>
+        <AsideSection
+          title={`Commits${
+            detail.commitsCount != null
+              ? ` (${detail.commitsCount})`
+              : detail.commits?.length
+                ? ` (${detail.commits.length})`
+                : ''
+          }`}
           collapsible
           defaultOpen={false}
         >
@@ -1664,14 +1781,28 @@ function ConversationViewImpl(props: any) {
             commits={detail.commits || []}
             owner={detail.owner}
             repo={detail.repo}
+            mayHaveMore={mayHaveMoreCommits(detail)}
+            loadingMore={commitsLoading}
+            onEnsureAll={onEnsureAllCommits}
           />
         </AsideSection>
         <AsideSection
-          title={`Files${detail.files?.length ? ` (${detail.files.length})` : ''}`}
+          title={`Files${
+            detail.changedFiles != null
+              ? ` (${detail.changedFiles})`
+              : detail.files?.length
+                ? ` (${detail.files.length})`
+                : ''
+          }`}
           collapsible
           defaultOpen={false}
         >
-          <AsideFilesTree files={detail.files || []} />
+          <AsideFilesTree
+            files={detail.files || []}
+            mayHaveMore={mayHaveMoreFiles(detail)}
+            loadingMore={filesLoading}
+            onEnsureAll={onEnsureAllFiles}
+          />
         </AsideSection>
 
           </>

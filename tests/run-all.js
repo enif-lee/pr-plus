@@ -28,6 +28,7 @@ const tests = [
   'detail-idb-cache.test.js',
   'review-threads-revalidate.test.js',
   'aside-lists.test.js',
+  'conversation-aside-ux.test.js',
   'aside-layout.test.js',
   'floating-scrollbar.test.js',
   'line-selection.test.js',

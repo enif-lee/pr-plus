@@ -5,20 +5,60 @@
   <title>pr+</title>
   <style>
     * { box-sizing: border-box; }
+    /* Hard cap: Chrome grows the popup to the widest unwrapped content. */
+    html {
+      width: 380px;
+      max-width: 380px;
+      overflow-x: hidden;
+    }
     body {
       margin: 0;
-      width: 340px;
+      width: 380px;
+      max-width: 380px;
       padding: 12px;
+      overflow-x: hidden;
       font: 13px/1.4 -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
       color: #1f2328;
     }
     h1 {
-      margin: 0 0 8px;
-      font-size: 13px;
-      font-weight: 600;
+      margin: 0 0 10px;
+      font-size: 14px;
+      font-weight: 650;
     }
-    h2 {
-      margin: 14px 0 6px;
+    /* Top-level config sections */
+    .config {
+      margin: 0 0 12px;
+      padding: 10px;
+      border: 1px solid #d0d7de;
+      border-radius: 10px;
+      background: #fff;
+    }
+    .config:last-of-type {
+      margin-bottom: 0;
+    }
+    .config__title {
+      margin: 0 0 8px;
+      font-size: 12px;
+      font-weight: 650;
+      color: #1f2328;
+      letter-spacing: 0.01em;
+    }
+    .config__title-num {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 18px;
+      height: 18px;
+      margin-right: 6px;
+      border-radius: 999px;
+      background: #eef2f6;
+      color: #656d76;
+      font-size: 10px;
+      font-weight: 700;
+      vertical-align: middle;
+    }
+    h3 {
+      margin: 10px 0 6px;
       font-size: 11px;
       font-weight: 600;
       color: #656d76;
@@ -34,6 +74,8 @@
     input[type="password"],
     input[type="text"] {
       width: 100%;
+      max-width: 100%;
+      min-width: 0;
       padding: 6px 8px;
       border: 1px solid #d0d7de;
       border-radius: 6px;
@@ -87,6 +129,53 @@
     }
     a { color: #0969da; text-decoration: none; }
     a:hover { text-decoration: underline; }
+    /* Collapsible blocks (permissions, GE form) */
+    details.fold {
+      margin-top: 10px;
+      border: 1px solid #d8dee4;
+      border-radius: 8px;
+      background: #f6f8fa;
+      overflow: hidden;
+    }
+    details.fold > summary {
+      list-style: none;
+      cursor: pointer;
+      user-select: none;
+      padding: 8px 10px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #1f2328;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    details.fold > summary::-webkit-details-marker {
+      display: none;
+    }
+    details.fold > summary::before {
+      content: '';
+      width: 0;
+      height: 0;
+      border-left: 5px solid #656d76;
+      border-top: 4px solid transparent;
+      border-bottom: 4px solid transparent;
+      transition: transform 80ms ease;
+      flex-shrink: 0;
+    }
+    details.fold[open] > summary::before {
+      transform: rotate(90deg);
+    }
+    details.fold > summary:hover {
+      background: #eef1f4;
+    }
+    .fold__body {
+      padding: 0 10px 10px;
+      border-top: 1px solid #d8dee4;
+      background: #fff;
+    }
+    .fold__body > :first-child {
+      margin-top: 8px;
+    }
     .pref {
       display: flex;
       gap: 8px;
@@ -97,6 +186,9 @@
       border-radius: 8px;
       background: #f6f8fa;
       cursor: pointer;
+    }
+    .pref:last-child {
+      margin-bottom: 0;
     }
     .pref:hover { border-color: #0969da66; }
     .pref input {
@@ -141,12 +233,14 @@
     }
     .perm-list li {
       display: grid;
-      grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.35fr);
-      gap: 8px 10px;
+      grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.2fr);
+      gap: 6px 8px;
       padding: 8px 10px;
       border-top: 1px solid #d8dee4;
       font-size: 11px;
       line-height: 1.4;
+      min-width: 0;
+      max-width: 100%;
     }
     .perm-list li:first-child {
       border-top: 0;
@@ -158,9 +252,13 @@
       font-weight: 600;
       color: #1f2328;
       word-break: break-all;
+      overflow-wrap: anywhere;
+      min-width: 0;
     }
     .perm-list .perm-why {
       color: #656d76;
+      min-width: 0;
+      overflow-wrap: anywhere;
     }
     .perm-note {
       margin: 8px 0 0;
@@ -224,133 +322,168 @@
 </head>
 <body>
   <h1>pr+</h1>
-  <label for="token">github.com PAT (public cloud)</label>
-  <input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="ghp_… / github_pat_…" />
-  <p id="token-saved" class="saved" hidden>Saved: <code id="token-mask"></code></p>
-  <div class="row">
-    <button id="save" class="primary" type="button">Save</button>
-    <button id="clear" type="button">Clear</button>
-    <span id="status"></span>
-  </div>
-  <p class="hint">
-    <a href="https://github.com/settings/tokens" target="_blank" rel="noreferrer">Create token</a>
-    · github.com 전용. Enterprise 호스트는 아래 페어로 별도 PAT를 등록하세요.
-    · 확장 <code>storage</code>에만 저장(동기화 안 함).
-  </p>
 
-  <h2>Required permissions</h2>
-  <p class="hint" style="margin-top: 0">
-    사용에 필요한 Chrome 권한과 GitHub 토큰 스코프입니다.
-  </p>
-  <ul class="perm-list" aria-label="Chrome extension permissions">
-    <li>
-      <span class="perm-key">storage</span>
-      <span class="perm-why">PAT·옵션 로컬 저장 (<code>chrome.storage.local</code>)</span>
-    </li>
-    <li>
-      <span class="perm-key">scripting</span>
-      <span class="perm-why">Enterprise 호스트에 content script 등록</span>
-    </li>
-    <li>
-      <span class="perm-key">https://github.com/*</span>
-      <span class="perm-why">github.com PR 리스트·모달 (기본)</span>
-    </li>
-    <li>
-      <span class="perm-key">https://api.github.com/*</span>
-      <span class="perm-why">github.com REST / GraphQL API</span>
-    </li>
-    <li>
-      <span class="perm-key">optional https://*/*</span>
-      <span class="perm-why">Enterprise 웹/API 호스트 (설정에서 허용 요청)</span>
-    </li>
-  </ul>
+  <!-- 1. Default PAT -->
+  <section class="config" aria-labelledby="cfg-default-pat">
+    <h2 class="config__title" id="cfg-default-pat">
+      <span class="config__title-num" aria-hidden="true">1</span>Default PAT
+    </h2>
+    <label for="token">github.com PAT (public cloud)</label>
+    <input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="ghp_… / github_pat_…" />
+    <p id="token-saved" class="saved" hidden>Saved: <code id="token-mask"></code></p>
+    <div class="row">
+      <button id="save" class="primary" type="button">Save</button>
+      <button id="clear" type="button">Clear</button>
+      <span id="status"></span>
+    </div>
+    <p class="hint">
+      <a href="https://github.com/settings/tokens" target="_blank" rel="noreferrer">Create token</a>
+      · github.com 전용. Enterprise는 아래 섹션에 별도 등록.
+      · 확장 <code>storage</code>에만 저장(동기화 안 함).
+    </p>
 
-  <div class="perm-note">
-    <strong>GitHub PAT scopes</strong>
-    <ul>
-      <li>
-        <strong>Classic:</strong>
-        <code>repo</code>
-        (프라이빗 포함 전체 PR 기능).
-        구독(Subscribe) 쓰려면
-        <code>notifications</code>
-        추가.
-      </li>
-      <li>
-        <strong>Fine-grained:</strong>
-        대상 저장소에
-        <code>Pull requests</code>
-        Read &amp; Write.
-        제안(suggestion) 적용·파일 업로드는
-        <code>Contents</code>
-        Read &amp; Write.
-      </li>
-    </ul>
-    토큰은 서비스 워커에서만 사용되며 content script에는 노출되지 않습니다.
-  </div>
-
-  <h2>Options</h2>
-  <label class="pref" for="pref-fast-review">
-    <input id="pref-fast-review" type="checkbox" />
-    <span class="pref__body">
-      <span class="pref__title">가볍고 빠른 PR 검토</span>
-      <span class="pref__desc">핵심 정보 먼저 표시하고 리뷰 스레드는 점진적으로 불러옵니다. 끄면 열 때 전체 스레드를 모두 로드합니다.</span>
-    </span>
-  </label>
-  <label class="pref" for="pref-reverse-comments">
-    <input id="pref-reverse-comments" type="checkbox" />
-    <span class="pref__body">
-      <span class="pref__title">PR Comments 역순 정렬</span>
-      <span class="pref__desc">코멘트 작성란 → Merge box → Conversation(최신 우선) 순으로 배치합니다.</span>
-    </span>
-  </label>
-
-  <h2>GitHub Enterprise (host + PAT)</h2>
-  <p class="hint" style="margin-top: 0">
-    호스트마다 PAT를 함께 등록합니다 (최대 3개).
-    <code>*.ghe.com</code> 포함, 수동 등록한 호스트만 활성화됩니다. 기본 PAT는 사용하지 않습니다.
-  </p>
-  <ul id="host-accounts-list" class="host-list" aria-label="Registered enterprise hosts"></ul>
-  <p id="host-accounts-empty" class="hint" style="margin: 4px 0 8px">등록된 Enterprise 호스트 없음</p>
-  <label for="enterprise-host">Web host</label>
-  <input
-    id="enterprise-host"
-    type="text"
-    autocomplete="off"
-    spellcheck="false"
-    placeholder="github.mycorp.com or octocorp.ghe.com"
-  />
-  <label for="enterprise-token" style="margin-top: 8px">PAT for this host</label>
-  <input
-    id="enterprise-token"
-    type="password"
-    autocomplete="off"
-    spellcheck="false"
-    placeholder="ghp_… / github_pat_…"
-  />
-  <p class="hint">
-    API 자동: GHES → <code>https://{host}/api/v3</code> ·
-    <code>*.ghe.com</code> → <code>https://api.{host}</code>
-  </p>
-  <div class="row" style="margin-top: 8px">
-    <button id="add-host-account" class="primary" type="button">Add host &amp; grant access</button>
-    <span id="enterprise-status" class="hint" style="margin: 0; flex: 1"></span>
-  </div>
-  <p id="endpoint-preview" class="hint" style="margin-top: 6px"></p>
-
-  <h2>Storage</h2>
-  <div class="pref pref--action">
-    <span class="pref__body">
-      <span class="pref__title">PR detail cache (IndexedDB)</span>
-      <span class="pref__desc">
-        GitHub 탭에 저장된 PR 상세 캐시(메모리 + IndexedDB)를 지웁니다.
-        다음 PR 열 때 네트워크에서 다시 불러옵니다. 열려 있는 github.com 탭이 필요합니다.
-      </span>
-      <div class="row" style="margin-top: 8px">
-        <button id="clear-idb" type="button">Clear IndexedDB cache</button>
+    <details class="fold">
+      <summary>Required permissions</summary>
+      <div class="fold__body">
+        <p class="hint" style="margin-top: 0">
+          사용에 필요한 Chrome 권한과 GitHub 토큰 스코프입니다.
+        </p>
+        <ul class="perm-list" aria-label="Chrome extension permissions">
+          <li>
+            <span class="perm-key">storage</span>
+            <span class="perm-why">PAT·옵션 로컬 저장 (<code>chrome.storage.local</code>)</span>
+          </li>
+          <li>
+            <span class="perm-key">scripting</span>
+            <span class="perm-why">Enterprise 호스트에 content script 등록</span>
+          </li>
+          <li>
+            <span class="perm-key">https://github.com/*</span>
+            <span class="perm-why">github.com PR 리스트·모달 (기본)</span>
+          </li>
+          <li>
+            <span class="perm-key">https://api.github.com/*</span>
+            <span class="perm-why">github.com REST / GraphQL API</span>
+          </li>
+          <li>
+            <span class="perm-key">optional https://*/*</span>
+            <span class="perm-why">Enterprise 웹/API 호스트 (설정에서 허용 요청)</span>
+          </li>
+        </ul>
+        <div class="perm-note">
+          <strong>GitHub PAT scopes</strong>
+          <ul>
+            <li>
+              <strong>Classic:</strong>
+              <code>repo</code>
+              (프라이빗 포함 전체 PR 기능).
+              구독(Subscribe) 쓰려면
+              <code>notifications</code>
+              추가.
+            </li>
+            <li>
+              <strong>Fine-grained:</strong>
+              대상 저장소에
+              <code>Pull requests</code>
+              Read &amp; Write.
+              제안 적용·파일 업로드는
+              <code>Contents</code>
+              Read &amp; Write.
+            </li>
+          </ul>
+          토큰은 서비스 워커에서만 사용되며 content script에는 노출되지 않습니다.
+        </div>
       </div>
-    </span>
-  </div>
+    </details>
+  </section>
+
+  <!-- 2. GitHub Enterprise PAT -->
+  <section class="config" aria-labelledby="cfg-ghe-pat">
+    <h2 class="config__title" id="cfg-ghe-pat">
+      <span class="config__title-num" aria-hidden="true">2</span>GitHub Enterprise PAT
+    </h2>
+    <p class="hint" style="margin-top: 0">
+      호스트마다 PAT를 함께 등록합니다 (최대 3개).
+      수동 등록한 호스트만 활성화되며, Default PAT는 사용하지 않습니다.
+    </p>
+    <ul id="host-accounts-list" class="host-list" aria-label="Registered enterprise hosts"></ul>
+    <p id="host-accounts-empty" class="hint" style="margin: 4px 0 0">등록된 Enterprise 호스트 없음</p>
+
+    <details class="fold">
+      <summary>Add / update host &amp; PAT</summary>
+      <div class="fold__body">
+        <label for="enterprise-host">Web host</label>
+        <input
+          id="enterprise-host"
+          type="text"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="github.mycorp.com or octocorp.ghe.com"
+        />
+        <label for="enterprise-token" style="margin-top: 8px">PAT for this host</label>
+        <input
+          id="enterprise-token"
+          type="password"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="ghp_… / github_pat_…"
+        />
+        <p class="hint">
+          API 자동: GHES → <code>https://{host}/api/v3</code> ·
+          <code>*.ghe.com</code> → <code>https://api.{host}</code>
+        </p>
+        <div class="row" style="margin-top: 8px">
+          <button id="add-host-account" class="primary" type="button">Add host &amp; grant access</button>
+          <span id="enterprise-status" class="hint" style="margin: 0; flex: 1"></span>
+        </div>
+        <p id="endpoint-preview" class="hint" style="margin-top: 6px"></p>
+      </div>
+    </details>
+  </section>
+
+  <!-- 3. Config (Options + Storage) -->
+  <section class="config" aria-labelledby="cfg-options">
+    <h2 class="config__title" id="cfg-options">
+      <span class="config__title-num" aria-hidden="true">3</span>Config
+    </h2>
+
+    <h3>Options</h3>
+    <label class="pref" for="pref-auto-open-embed">
+      <input id="pref-auto-open-embed" type="checkbox" />
+      <span class="pref__body">
+        <span class="pref__title">PR 페이지에서 pr+ 뷰 자동 열기</span>
+        <span class="pref__desc">GitHub PR 페이지로 이동하면 기본 UI 대신 pr+ 뷰를 바로 엽니다. 끄면 기본 PR 화면이 유지되며 헤더 pr+ 버튼 또는 ⌘⇧E / Ctrl+Shift+E로 전환합니다.</span>
+      </span>
+    </label>
+    <label class="pref" for="pref-fast-review">
+      <input id="pref-fast-review" type="checkbox" />
+      <span class="pref__body">
+        <span class="pref__title">가볍고 빠른 PR 검토</span>
+        <span class="pref__desc">핵심 정보 먼저 표시하고 리뷰 스레드는 점진적으로 불러옵니다. 끄면 열 때 전체 스레드를 모두 로드합니다.</span>
+      </span>
+    </label>
+    <label class="pref" for="pref-reverse-comments">
+      <input id="pref-reverse-comments" type="checkbox" />
+      <span class="pref__body">
+        <span class="pref__title">PR Comments 역순 정렬</span>
+        <span class="pref__desc">코멘트 작성란 → Merge box → Conversation(최신 우선) 순으로 배치합니다.</span>
+      </span>
+    </label>
+
+    <h3>Storage</h3>
+    <div class="pref pref--action">
+      <span class="pref__body">
+        <span class="pref__title">PR detail cache (IndexedDB)</span>
+        <span class="pref__desc">
+          GitHub 탭에 저장된 PR 상세 캐시(메모리 + IndexedDB)를 지웁니다.
+          다음 PR 열 때 네트워크에서 다시 불러옵니다. 열려 있는 github.com 탭이 필요합니다.
+        </span>
+        <div class="row" style="margin-top: 8px">
+          <button id="clear-idb" type="button">Clear IndexedDB cache</button>
+        </div>
+      </span>
+    </div>
+  </section>
 
   <script src="popup.js"></script>
 </body>

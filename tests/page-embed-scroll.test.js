@@ -274,7 +274,7 @@ assert.equal(PAGE_EMBED_HEADER_OFFSET_PX, 64);
   assert.equal(ghFooter.getAttribute(PAGE_EMBED_FOOTER_HIDDEN_ATTR), null);
 }
 
-// --- shortcut ---
+// --- shortcut: ⌘⇧E toggles embed ↔ native ---
 assert.equal(
   resolveEmbedShortcutAction({
     mod: true,
@@ -290,6 +290,27 @@ assert.equal(
     shift: true,
     key: 'e',
     presentation: 'modal',
+  }),
+  null
+);
+assert.equal(
+  resolveEmbedShortcutAction({
+    mod: true,
+    shift: true,
+    key: 'e',
+    presentation: 'modal',
+    onNativePrPage: true,
+  }),
+  'openEmbedView'
+);
+assert.equal(
+  resolveEmbedShortcutAction({
+    mod: true,
+    shift: true,
+    key: 'e',
+    presentation: 'modal',
+    onNativePrPage: true,
+    editableTarget: true,
   }),
   null
 );
@@ -317,6 +338,11 @@ assert.equal(EMBED_RESTORE_SHORTCUT.key, 'e');
 // --- structural ---
 const root = path.join(__dirname, '..');
 const host = fs.readFileSync(path.join(root, 'src/pr-modal-host.js'), 'utf8');
+assert.ok(
+  host.includes('openEmbedFromNativePr') && host.includes('ensureNativePrOpenShortcut'),
+  'host wires native PR open shortcut'
+);
+assert.ok(host.includes('openEmbedView') || host.includes('onNativePrPage'), 'open action from resolve');
 const app = fs.readFileSync(
   path.join(root, 'src/modal/app/PrModalApp.tsx'),
   'utf8'

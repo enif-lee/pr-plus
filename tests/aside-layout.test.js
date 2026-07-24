@@ -52,7 +52,7 @@ assert.equal(
 );
 assert.equal(conversationAsideWidthPx(false), ASIDE_EXPANDED_WIDTH);
 assert.equal(conversationAsideWidthPx(true), ASIDE_COLLAPSED_WIDTH);
-assert.equal(ASIDE_COLLAPSED_WIDTH, 72);
+assert.equal(ASIDE_COLLAPSED_WIDTH, 80);
 
 // Round-trip serialize
 const snap = serializeAsidePref({ collapsed: true });
@@ -85,6 +85,19 @@ assert.ok(compact.includes('Checks'));
 assert.ok(compact.includes('TipPopover'));
 assert.ok(compact.includes('avatar-wrap--') || compact.includes('withStatusRing'));
 assert.ok(compact.includes('Avatar'));
+// Collapsed rail: omit empty groups (no empty-dot placeholders for reviewers/assignees)
+assert.ok(
+  compact.includes('reviewers.length') && compact.includes('assignees.length'),
+  'compact rail gates reviewers/assignees on non-empty'
+);
+assert.ok(
+  !compact.includes('No reviewers yet') && !compact.includes('No assignees'),
+  'compact rail does not show empty-state copy for people groups'
+);
+// Milestone + tags follow the same non-empty gate
+assert.ok(compact.includes('showMilestone') || compact.includes('Milestone'), 'milestone in compact');
+assert.ok(compact.includes('tagItems') || compact.includes('Tags'), 'tags in compact');
+assert.ok(compact.includes('tags') && compact.includes('prp-aside-compact__tag'), 'tag chips in compact');
 
 const css = fs.readFileSync(path.join(root, 'src/modal/styles.css'), 'utf8');
 assert.ok(css.includes('.prp-aside-collapse-btn'));
@@ -95,7 +108,7 @@ assert.ok(css.includes('.prp-aside-compact__avatar-wrap--ok'));
 assert.ok(css.includes('.prp-aside-compact__more-circle'));
 assert.ok(css.includes('.prp-conversation__aside--collapsed'));
 assert.ok(css.includes('prp-scroll-float') || css.includes('prp-float-sb'), 'floating scrollbar');
-assert.ok(ASIDE_COLLAPSED_WIDTH === 72, 'compact rail ~72px');
+assert.ok(ASIDE_COLLAPSED_WIDTH === 80, 'compact rail ~80px');
 assert.ok(
   conv.includes('prp-conversation__splitter'),
   'collapse control lives on vertical splitter'

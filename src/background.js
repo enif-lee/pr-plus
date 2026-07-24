@@ -85,28 +85,91 @@ function githubTabUrlPatterns(enterpriseHosts) {
   return patterns;
 }
 
+/**
+ * Serialize enterprise content-script sync.
+ * HOST_ACCOUNT_ADD and storage.onChanged both call this; parallel
+ * registerContentScripts races cause:
+ *   "Duplicate script ID 'prp-enterprise-hosts'"
+ */
+let enterpriseCsSyncChain = Promise.resolve();
+
 async function syncEnterpriseContentScripts(enterpriseHosts) {
-  if (!chrome.scripting?.registerContentScripts) return { registered: false };
+  const run = () => syncEnterpriseContentScriptsImpl(enterpriseHosts);
+  // Always continue the chain even if a prior sync rejected
+  const next = enterpriseCsSyncChain.then(run, run);
+  enterpriseCsSyncChain = next.then(
+    () => undefined,
+    () => undefined
+  );
+  return next;
+}
+
+async function syncEnterpriseContentScriptsImpl(enterpriseHosts) {
+  if (!chrome.scripting?.registerContentScripts) {
+    return { registered: false };
+  }
   const matches =
     PRGithubEndpoints.contentScriptMatchesForHosts(enterpriseHosts);
+
+  // Drop existing registration if present (id may already be live).
   try {
-    await chrome.scripting.unregisterContentScripts({
-      ids: [ENTERPRISE_CS_ID],
-    });
+    if (typeof chrome.scripting.getRegisteredContentScripts === 'function') {
+      const existing = await chrome.scripting.getRegisteredContentScripts({
+        ids: [ENTERPRISE_CS_ID],
+      });
+      if (Array.isArray(existing) && existing.length > 0) {
+        await chrome.scripting.unregisterContentScripts({
+          ids: [ENTERPRISE_CS_ID],
+        });
+      }
+    } else {
+      await chrome.scripting.unregisterContentScripts({
+        ids: [ENTERPRISE_CS_ID],
+      });
+    }
   } catch {
-    /* not registered yet */
+    /* not registered yet — fine */
   }
+
   if (!matches.length) return { registered: false, matches: [] };
-  await chrome.scripting.registerContentScripts([
-    {
-      id: ENTERPRISE_CS_ID,
-      matches,
-      js: CONTENT_SCRIPT_JS,
-      css: ['src/styles.css'],
-      runAt: 'document_idle',
-      persistAcrossSessions: true,
-    },
-  ]);
+
+  const script = {
+    id: ENTERPRISE_CS_ID,
+    matches,
+    js: CONTENT_SCRIPT_JS,
+    css: ['src/styles.css'],
+    runAt: 'document_idle',
+    persistAcrossSessions: true,
+  };
+
+  // Prefer update when available (avoids delete/create race with other callers).
+  if (typeof chrome.scripting.updateContentScripts === 'function') {
+    try {
+      await chrome.scripting.updateContentScripts([script]);
+      return { registered: true, matches, updated: true };
+    } catch {
+      /* not registered — fall through to register */
+    }
+  }
+
+  try {
+    await chrome.scripting.registerContentScripts([script]);
+  } catch (err) {
+    // Last resort: if race left a registration, unregister + retry once.
+    const msg = String(err?.message || err || '');
+    if (/duplicate script id/i.test(msg)) {
+      try {
+        await chrome.scripting.unregisterContentScripts({
+          ids: [ENTERPRISE_CS_ID],
+        });
+      } catch {
+        /* ignore */
+      }
+      await chrome.scripting.registerContentScripts([script]);
+    } else {
+      throw err;
+    }
+  }
   return { registered: true, matches };
 }
 
@@ -177,6 +240,13 @@ const MSG = {
   REMOVE_ASSIGNEES: 'PR_TREE_REMOVE_ASSIGNEES',
   SET_LABELS: 'PR_TREE_SET_LABELS',
   FETCH_REPO_LABELS: 'PR_TREE_FETCH_REPO_LABELS',
+  CREATE_REPO_LABEL: 'PR_TREE_CREATE_REPO_LABEL',
+  FETCH_REPO_MILESTONES: 'PR_TREE_FETCH_REPO_MILESTONES',
+  CREATE_REPO_MILESTONE: 'PR_TREE_CREATE_REPO_MILESTONE',
+  FETCH_REPO_TAGS: 'PR_TREE_FETCH_REPO_TAGS',
+  FETCH_TAGS_FOR_COMMITS: 'PR_TREE_FETCH_TAGS_FOR_COMMITS',
+  FETCH_ALL_PR_COMMITS: 'PR_TREE_FETCH_ALL_PR_COMMITS',
+  FETCH_ALL_PR_FILES: 'PR_TREE_FETCH_ALL_PR_FILES',
   APPLY_SUGGESTION: 'PR_TREE_APPLY_SUGGESTION',
   GET_REPO_FILE_TEXT: 'PR_TREE_GET_REPO_FILE_TEXT',
   MERGE_PULL: 'PR_TREE_MERGE_PULL',
@@ -1080,6 +1150,145 @@ async function handleMessage(message) {
           }
         );
         return { ok: true, labels };
+      } catch (err) {
+        if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
+      }
+    }
+    case MSG.CREATE_REPO_LABEL: {
+      const token = await tokenForMessage(message);
+      if (!token) throw new Error('GitHub PAT required to create labels');
+      const result = await PRTreeFetch.createRepoLabel(
+        message.owner,
+        message.repo,
+        {
+          name: message.name,
+          color: message.color,
+          description: message.description,
+        },
+        fetchImpl(),
+        token
+      );
+      return { ok: true, result };
+    }
+    case MSG.FETCH_REPO_MILESTONES: {
+      const tracked = beginTrackedFetch(message.requestId);
+      try {
+        const token = await tokenForMessage(message);
+        const milestones = await PRTreeFetch.fetchRepoMilestones(
+          message.owner,
+          message.repo,
+          tracked.fetch,
+          token,
+          {
+            maxPages:
+              message.maxPages != null ? Number(message.maxPages) : undefined,
+            state: message.state || 'all',
+          }
+        );
+        return { ok: true, milestones };
+      } catch (err) {
+        if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
+      }
+    }
+    case MSG.CREATE_REPO_MILESTONE: {
+      const token = await tokenForMessage(message);
+      if (!token) throw new Error('GitHub PAT required to create milestones');
+      const result = await PRTreeFetch.createRepoMilestone(
+        message.owner,
+        message.repo,
+        {
+          title: message.title,
+          description: message.description,
+          state: message.state,
+        },
+        fetchImpl(),
+        token
+      );
+      return { ok: true, result };
+    }
+    case MSG.FETCH_REPO_TAGS: {
+      const tracked = beginTrackedFetch(message.requestId);
+      try {
+        const token = await tokenForMessage(message);
+        const tags = await PRTreeFetch.fetchRepoTags(
+          message.owner,
+          message.repo,
+          tracked.fetch,
+          token,
+          {
+            maxPages:
+              message.maxPages != null ? Number(message.maxPages) : undefined,
+          }
+        );
+        return { ok: true, tags };
+      } catch (err) {
+        if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
+      }
+    }
+    case MSG.FETCH_TAGS_FOR_COMMITS: {
+      const tracked = beginTrackedFetch(message.requestId);
+      try {
+        const token = await tokenForMessage(message);
+        const tags = await PRTreeFetch.fetchTagsForCommits(
+          message.owner,
+          message.repo,
+          message.shas || [],
+          tracked.fetch,
+          token,
+          {
+            maxPages:
+              message.maxPages != null ? Number(message.maxPages) : undefined,
+          }
+        );
+        return { ok: true, tags };
+      } catch (err) {
+        if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
+      }
+    }
+    case MSG.FETCH_ALL_PR_COMMITS: {
+      const tracked = beginTrackedFetch(message.requestId);
+      try {
+        const token = await tokenForMessage(message);
+        const commits = await PRTreeFetch.fetchAllPrCommits(
+          message.owner,
+          message.repo,
+          message.number,
+          tracked.fetch,
+          token
+        );
+        return { ok: true, commits };
+      } catch (err) {
+        if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
+      }
+    }
+    case MSG.FETCH_ALL_PR_FILES: {
+      const tracked = beginTrackedFetch(message.requestId);
+      try {
+        const token = await tokenForMessage(message);
+        const files = await PRTreeFetch.fetchAllPrFiles(
+          message.owner,
+          message.repo,
+          message.number,
+          tracked.fetch,
+          token,
+          { gitattributesText: message.gitattributesText || '' }
+        );
+        return { ok: true, files };
       } catch (err) {
         if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
         throw err;

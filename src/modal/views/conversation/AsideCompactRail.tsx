@@ -4,7 +4,7 @@ import { TipPopover } from '@common/TipPopover';
 import { buildUnifiedReviewerRows } from '@lib/searchable-select';
 import { reviewStatusTone } from '@common/utils';
 import { hasChecksData } from './ChecksPanel';
-import { ChecksSummary } from './ChecksSummary';
+import { buildCheckStackGroups, ChecksSummary } from './ChecksSummary';
 
 /**
  * Avatar stack visibility:
@@ -38,24 +38,12 @@ type StackPerson = {
 
 function AvatarStack({
   people,
-  emptyLabel,
   withStatusRing,
 }: {
   people: StackPerson[];
-  emptyLabel: string;
   withStatusRing?: boolean;
 }) {
-  if (!people.length) {
-    return (
-      <div
-        className="prp-aside-compact__stack prp-aside-compact__stack--empty prp-has-tip"
-        tabIndex={0}
-      >
-        <span className="prp-aside-compact__empty-dot" aria-hidden="true" />
-        <TipPopover title={emptyLabel} />
-      </div>
-    );
-  }
+  if (!people.length) return null;
   const showAll = people.length <= MAX_FULL_STACK;
   const shown = showAll
     ? people
@@ -112,11 +100,28 @@ function AvatarStack({
   );
 }
 
+const TAG_COMPACT_MAX = 4;
+
+function shortTagLabel(name: string, max = 10): string {
+  const raw = String(name || '').trim();
+  if (!raw) return 'tag';
+  if (raw.length <= max) return raw;
+  return `${raw.slice(0, Math.max(1, max - 1))}…`;
+}
+
 /**
  * Collapsed right-rail: full section labels + overlapping avatars / status.
- * Hover popovers show identity + review/check state.
+ * Hover popovers show identity + review/check/tag/milestone state.
+ * Empty groups are omitted (same as expanded rail empty states).
  */
-export function AsideCompactRail({ detail }: { detail: any }) {
+export function AsideCompactRail({
+  detail,
+  tags = null,
+}: {
+  detail: any;
+  /** PR-related git tags (sha matches PR commits / head). */
+  tags?: Array<{ name?: string; sha?: string }> | null;
+}) {
   const avatars =
     detail?.avatarUrls && typeof detail.avatarUrls === 'object'
       ? detail.avatarUrls
@@ -164,7 +169,15 @@ export function AsideCompactRail({ detail }: { detail: any }) {
       .filter(Boolean) as StackPerson[];
   }, [detail?.assignees, avatars]);
 
-  const showChecks = hasChecksData(detail?.checks);
+  // Only show Checks when there is a non-empty outcome stack (hide empty shell).
+  const checkGroups = useMemo(
+    () =>
+      hasChecksData(detail?.checks)
+        ? buildCheckStackGroups(detail.checks)
+        : [],
+    [detail?.checks]
+  );
+  const showChecks = checkGroups.length > 0;
 
   const labels = Array.isArray(detail?.labels) ? detail.labels : [];
   const labelItems = labels.slice(0, 8).map((l: any, i: number) => {
@@ -174,26 +187,133 @@ export function AsideCompactRail({ detail }: { detail: any }) {
     return { key: name || String(i), name, bg };
   });
 
+  const milestone = detail?.milestone || null;
+  const showMilestone = Boolean(
+    milestone && (milestone.number != null || milestone.title)
+  );
+
+  const projectItems = useMemo(() => {
+    const list = Array.isArray(detail?.projects) ? detail.projects : [];
+    return list
+      .map((p: any, i: number) => {
+        const title = String(p?.title || '').trim();
+        if (!title) return null;
+        return {
+          key: String(p?.id || title || i),
+          title,
+          short: shortTagLabel(title, 12),
+          tip:
+            p?.number != null
+              ? `${title} (#${p.number})`
+              : title,
+        };
+      })
+      .filter(Boolean) as Array<{
+      key: string;
+      title: string;
+      short: string;
+      tip: string;
+    }>;
+  }, [detail?.projects]);
+
+  const developmentItems = useMemo(() => {
+    const raw =
+      Array.isArray(detail?.developmentIssues) && detail.developmentIssues.length
+        ? detail.developmentIssues
+        : (detail?.linkedIssues || []).map((n: number) => ({
+            number: n,
+            title: '',
+          }));
+    return raw
+      .map((item: any) => {
+        const num = Number(item?.number);
+        if (!Number.isFinite(num) || num <= 0) return null;
+        const title = String(item?.title || '').trim();
+        return {
+          key: String(num),
+          number: num,
+          tip: title ? `#${num} · ${title}` : `#${num}`,
+          label: `#${num}`,
+        };
+      })
+      .filter(Boolean) as Array<{
+      key: string;
+      number: number;
+      tip: string;
+      label: string;
+    }>;
+  }, [detail?.developmentIssues, detail?.linkedIssues]);
+
+  const tagItems = useMemo(() => {
+    const list = Array.isArray(tags) ? tags : [];
+    return list
+      .map((t, i) => {
+        const name = String(t?.name || '').trim();
+        if (!name) return null;
+        const sha = String(t?.sha || '').trim();
+        const shortSha = sha ? sha.slice(0, 7) : '';
+        return {
+          key: name || String(i),
+          name,
+          short: shortTagLabel(name),
+          tip: shortSha ? `${name} · ${shortSha}` : name,
+        };
+      })
+      .filter(Boolean) as Array<{
+      key: string;
+      name: string;
+      short: string;
+      tip: string;
+    }>;
+  }, [tags]);
+
+  const tagShown = tagItems.slice(0, TAG_COMPACT_MAX);
+  const tagExtra = tagItems.length - tagShown.length;
+
   const commitN = Array.isArray(detail?.commits) ? detail.commits.length : 0;
   const fileN =
     detail?.changedFiles ??
     (Array.isArray(detail?.files) ? detail.files.length : 0);
 
+  const hasAnything =
+    reviewers.length > 0 ||
+    assignees.length > 0 ||
+    showChecks ||
+    labelItems.length > 0 ||
+    projectItems.length > 0 ||
+    showMilestone ||
+    developmentItems.length > 0 ||
+    tagItems.length > 0 ||
+    commitN > 0 ||
+    fileN > 0;
+
+  if (!hasAnything) {
+    return (
+      <div
+        className="prp-aside-compact prp-aside-compact--empty"
+        aria-label="Pull request metadata (compact)"
+      >
+        <span className="prp-muted prp-aside-compact__empty-msg">No meta</span>
+      </div>
+    );
+  }
+
   return (
     <div className="prp-aside-compact" aria-label="Pull request metadata (compact)">
-      <section className="prp-aside-compact__group" aria-label="Reviewers">
-        <h3 className="prp-aside-compact__label">Reviewers</h3>
-        <AvatarStack
-          people={reviewers}
-          emptyLabel="No reviewers yet"
-          withStatusRing
-        />
-      </section>
+      {/* Empty groups are omitted entirely when collapsed. */}
+      {reviewers.length ? (
+        <section className="prp-aside-compact__group" aria-label="Reviewers">
+          <h3 className="prp-aside-compact__label">Reviewers</h3>
+          <AvatarStack people={reviewers} withStatusRing />
+        </section>
+      ) : null}
 
-      <section className="prp-aside-compact__group" aria-label="Assignees">
-        <h3 className="prp-aside-compact__label">Assignees</h3>
-        <AvatarStack people={assignees} emptyLabel="No assignees" />
-      </section>
+      {assignees.length ? (
+        <section className="prp-aside-compact__group" aria-label="Assignees">
+          <h3 className="prp-aside-compact__label">Assignees</h3>
+          <AvatarStack people={assignees} />
+        </section>
+      ) : null}
 
       {showChecks ? (
         <section className="prp-aside-compact__group" aria-label="Checks">
@@ -225,26 +345,140 @@ export function AsideCompactRail({ detail }: { detail: any }) {
         </section>
       ) : null}
 
-      {detail?.milestone ? (
+      {projectItems.length ? (
+        <section className="prp-aside-compact__group" aria-label="Projects">
+          <h3 className="prp-aside-compact__label">Projects</h3>
+          <div className="prp-aside-compact__projects" role="list">
+            {projectItems.slice(0, 4).map((p) => (
+              <span
+                key={p.key}
+                className="prp-aside-compact__project-item prp-has-tip"
+                role="listitem"
+                tabIndex={0}
+              >
+                {p.short}
+                <TipPopover title={p.tip} />
+              </span>
+            ))}
+            {projectItems.length > 4 ? (
+              <span
+                className="prp-aside-compact__more-circle prp-has-tip"
+                tabIndex={0}
+                role="listitem"
+              >
+                <span className="prp-aside-compact__more-circle__txt">
+                  +{projectItems.length - 4}
+                </span>
+                <TipPopover
+                  title={projectItems
+                    .slice(4)
+                    .map((p) => p.tip)
+                    .join('\n')}
+                />
+              </span>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
+
+      {showMilestone ? (
         <section className="prp-aside-compact__group" aria-label="Milestone">
           <h3 className="prp-aside-compact__label">Milestone</h3>
-          <span
-            className="prp-aside-compact__pill prp-has-tip"
-            tabIndex={0}
-          >
-            #{detail.milestone.number ?? '—'}
+          <span className="prp-aside-compact__pill prp-has-tip" tabIndex={0}>
+            <span className="prp-aside-compact__pill-txt">
+              {milestone.title
+                ? shortTagLabel(String(milestone.title), 12)
+                : `#${milestone.number ?? '—'}`}
+            </span>
             <TipPopover
               title={
-                detail.milestone.title
-                  ? `${detail.milestone.title} (#${detail.milestone.number ?? '—'})`
-                  : `Milestone #${detail.milestone.number ?? '—'}`
+                milestone.title
+                  ? `${milestone.title}${
+                      milestone.number != null
+                        ? ` (#${milestone.number})`
+                        : ''
+                    }`
+                  : `Milestone #${milestone.number ?? '—'}`
               }
             />
           </span>
         </section>
       ) : null}
 
-      {(commitN > 0 || fileN > 0) && (
+      {developmentItems.length ? (
+        <section className="prp-aside-compact__group" aria-label="Development">
+          <h3 className="prp-aside-compact__label">Development</h3>
+          <div className="prp-aside-compact__dev" role="list">
+            {developmentItems.slice(0, 4).map((d) => (
+              <span
+                key={d.key}
+                className="prp-aside-compact__dev-item prp-has-tip"
+                role="listitem"
+                tabIndex={0}
+              >
+                {d.label}
+                <TipPopover title={d.tip} />
+              </span>
+            ))}
+            {developmentItems.length > 4 ? (
+              <span
+                className="prp-aside-compact__more-circle prp-has-tip"
+                tabIndex={0}
+                role="listitem"
+              >
+                <span className="prp-aside-compact__more-circle__txt">
+                  +{developmentItems.length - 4}
+                </span>
+                <TipPopover
+                  title={developmentItems
+                    .slice(4)
+                    .map((d) => d.tip)
+                    .join('\n')}
+                />
+              </span>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
+
+      {tagItems.length ? (
+        <section className="prp-aside-compact__group" aria-label="Tags">
+          <h3 className="prp-aside-compact__label">Tags</h3>
+          <div className="prp-aside-compact__tags" role="list">
+            {tagShown.map((t) => (
+              <span
+                key={t.key}
+                className="prp-aside-compact__tag prp-has-tip"
+                role="listitem"
+                tabIndex={0}
+              >
+                <code className="prp-aside-compact__tag-txt">{t.short}</code>
+                <TipPopover title={t.tip} />
+              </span>
+            ))}
+            {tagExtra > 0 ? (
+              <span
+                className="prp-aside-compact__more-circle prp-has-tip"
+                tabIndex={0}
+                role="listitem"
+                aria-label={`+${tagExtra} more tags`}
+              >
+                <span className="prp-aside-compact__more-circle__txt">
+                  +{tagExtra}
+                </span>
+                <TipPopover
+                  title={tagItems
+                    .slice(tagShown.length)
+                    .map((t) => t.tip)
+                    .join('\n')}
+                />
+              </span>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
+
+      {commitN > 0 || fileN > 0 ? (
         <section
           className="prp-aside-compact__group prp-aside-compact__group--counts"
           aria-label="Counts"
@@ -253,7 +487,9 @@ export function AsideCompactRail({ detail }: { detail: any }) {
             <span className="prp-aside-compact__count prp-has-tip" tabIndex={0}>
               {commitN}
               <span className="prp-aside-compact__count-unit"> commits</span>
-              <TipPopover title={`${commitN} commit${commitN === 1 ? '' : 's'}`} />
+              <TipPopover
+                title={`${commitN} commit${commitN === 1 ? '' : 's'}`}
+              />
             </span>
           ) : null}
           {fileN > 0 ? (
@@ -264,7 +500,7 @@ export function AsideCompactRail({ detail }: { detail: any }) {
             </span>
           ) : null}
         </section>
-      )}
+      ) : null}
     </div>
   );
 }

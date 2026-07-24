@@ -88,6 +88,20 @@ assert.ok(header.includes('prp-header__stats--busy'), 'busy tone on stats pill')
 assert.ok(header.includes('data-stats-mode'), 'metrics vs stage mode attr');
 assert.ok(!header.includes('prp-load-stage'), 'no floating load-stage in Header');
 assert.ok(!header.includes('prp-header__stats-stage'), 'no dual-layer stage fade');
+// Metrics ↔ stage morph: FLIP both ways (not stage-only); metrics release fixed size after morph
+assert.ok(header.includes('STATS_MORPH_MS'), 'morph duration constant for metrics↔stage FLIP');
+assert.ok(
+  header.includes('// Metrics: release fixed size'),
+  'FLIP runs for metrics↔stage (metrics release after morph)'
+);
+assert.ok(
+  /\.prp-header__stats\s*\{[^}]*width\s+320ms/s.test(css),
+  'base stats pill transitions width for metrics↔stage morph'
+);
+assert.ok(
+  /\.prp-header__stats-inner\s*\{[^}]*prp-header-stats-content-in/s.test(css),
+  'content-in animation on all stats content swaps (not busy-only)'
+);
 assert.ok(header.includes('prp-branch-split'), 'branch on header');
 assert.ok(header.includes('prp-header__actions'), 'actions on header');
 // Live (non-skeleton) block: primary row holds checks + stats before secondary

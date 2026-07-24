@@ -52,9 +52,83 @@ function takeVisibleTreeNodes(visibleNodes, max = 20) {
   };
 }
 
+/**
+ * Filter PR commits by free-text query (message, sha, author).
+ */
+function filterCommitsByQuery(commits, query) {
+  const list = Array.isArray(commits) ? commits : [];
+  const q = String(query || '')
+    .trim()
+    .toLowerCase();
+  if (!q) return list;
+  const words = q.split(/\s+/).filter(Boolean);
+  return list.filter((c) => {
+    const hay = [c?.sha, c?.message, c?.author, c?.date]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+    return words.every((w) => hay.includes(w));
+  });
+}
+
+/**
+ * Filter PR files by free-text query (path / status).
+ */
+function filterFilesByQuery(files, query) {
+  const list = Array.isArray(files) ? files : [];
+  const q = String(query || '')
+    .trim()
+    .toLowerCase();
+  if (!q) return list;
+  const words = q.split(/\s+/).filter(Boolean);
+  return list.filter((f) => {
+    const path = f?.filename || f?.path || f?.previous_filename || '';
+    const hay = [path, f?.status, f?.previous_filename]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+    return words.every((w) => hay.includes(w));
+  });
+}
+
+function mayHaveMoreCommits(detail) {
+  const loaded = Array.isArray(detail?.commits) ? detail.commits.length : 0;
+  const total = Number(detail?.commitsCount);
+  if (Number.isFinite(total) && total > loaded) return true;
+  return loaded >= 100;
+}
+
+function mayHaveMoreFiles(detail) {
+  const loaded = Array.isArray(detail?.files) ? detail.files.length : 0;
+  const total = Number(detail?.changedFiles);
+  if (Number.isFinite(total) && total > loaded) return true;
+  return loaded >= 100;
+}
+
+function filterTagsByQuery(tags, query) {
+  const list = Array.isArray(tags) ? tags : [];
+  const q = String(query || '')
+    .trim()
+    .toLowerCase();
+  if (!q) return list;
+  const words = q.split(/\s+/).filter(Boolean);
+  return list.filter((t) => {
+    const hay = [t?.name, t?.sha, t?.message]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+    return words.every((w) => hay.includes(w));
+  });
+}
+
 const api = {
   takeCommitsForTimeline,
   takeVisibleTreeNodes,
+  filterCommitsByQuery,
+  filterFilesByQuery,
+  mayHaveMoreCommits,
+  mayHaveMoreFiles,
+  filterTagsByQuery,
 };
 
 if (typeof module !== 'undefined' && module.exports) {

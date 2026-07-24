@@ -1034,6 +1034,152 @@
       }
       return Array.isArray(res.labels) ? res.labels : [];
     },
+    async createRepoLabel(owner, repo, { name, color, description } = {}) {
+      const res = await send({
+        type: 'PR_TREE_CREATE_REPO_LABEL',
+        owner,
+        repo,
+        name,
+        color,
+        description,
+      });
+      if (!res?.ok) {
+        const err = new Error(res?.error || 'Failed to create label');
+        err.status = res?.status;
+        throw err;
+      }
+      return res.result;
+    },
+    async fetchRepoMilestones(owner, repo, opts = {}) {
+      const res = await send(
+        {
+          type: 'PR_TREE_FETCH_REPO_MILESTONES',
+          owner,
+          repo,
+          maxPages: opts.maxPages,
+          state: opts.state || 'all',
+        },
+        { signal: opts.signal || null }
+      );
+      if (!res?.ok) {
+        if (res?.aborted) throw makeAbortError();
+        const err = new Error(res?.error || 'Failed to fetch milestones');
+        err.status = res?.status;
+        throw err;
+      }
+      return Array.isArray(res.milestones) ? res.milestones : [];
+    },
+    async createRepoMilestone(owner, repo, { title, description, state } = {}) {
+      const res = await send({
+        type: 'PR_TREE_CREATE_REPO_MILESTONE',
+        owner,
+        repo,
+        title,
+        description,
+        state,
+      });
+      if (!res?.ok) {
+        const err = new Error(res?.error || 'Failed to create milestone');
+        err.status = res?.status;
+        throw err;
+      }
+      return res.result;
+    },
+    async fetchRepoTags(owner, repo, opts = {}) {
+      const res = await send(
+        {
+          type: 'PR_TREE_FETCH_REPO_TAGS',
+          owner,
+          repo,
+          maxPages: opts.maxPages,
+        },
+        { signal: opts.signal || null }
+      );
+      if (!res?.ok) {
+        if (res?.aborted) throw makeAbortError();
+        const err = new Error(res?.error || 'Failed to fetch tags');
+        err.status = res?.status;
+        throw err;
+      }
+      return Array.isArray(res.tags) ? res.tags : [];
+    },
+    async fetchTagsForCommits(owner, repo, shas, opts = {}) {
+      const want = new Set(
+        (Array.isArray(shas) ? shas : [])
+          .map((s) => String(s || '').trim().toLowerCase())
+          .filter(Boolean)
+      );
+      const res = await send(
+        {
+          type: 'PR_TREE_FETCH_TAGS_FOR_COMMITS',
+          owner,
+          repo,
+          shas: Array.isArray(shas) ? shas : [],
+          maxPages: opts.maxPages,
+        },
+        { signal: opts.signal || null }
+      );
+      if (res?.ok) {
+        return Array.isArray(res.tags) ? res.tags : [];
+      }
+      if (res?.aborted) throw makeAbortError();
+      // Stale SW after upgrade may not know FETCH_TAGS_FOR_COMMITS yet —
+      // fall back to listing tags + client filter when possible.
+      if (
+        res?.error &&
+        /unknown type:\s*PR_TREE_FETCH_TAGS_FOR_COMMITS/i.test(String(res.error))
+      ) {
+        try {
+          const all = await this.fetchRepoTags(owner, repo, opts);
+          if (!want.size) return Array.isArray(all) ? all : [];
+          return (Array.isArray(all) ? all : []).filter((t) =>
+            want.has(String(t?.sha || '').toLowerCase())
+          );
+        } catch {
+          /* fall through */
+        }
+      }
+      const err = new Error(res?.error || 'Failed to fetch tags for commits');
+      err.status = res?.status;
+      throw err;
+    },
+    async fetchAllPrCommits(owner, repo, number, opts = {}) {
+      const res = await send(
+        {
+          type: 'PR_TREE_FETCH_ALL_PR_COMMITS',
+          owner,
+          repo,
+          number,
+        },
+        { signal: opts.signal || null }
+      );
+      if (!res?.ok) {
+        if (res?.aborted) throw makeAbortError();
+        const err = new Error(res?.error || 'Failed to fetch all commits');
+        err.status = res?.status;
+        throw err;
+      }
+      return Array.isArray(res.commits) ? res.commits : [];
+    },
+    async fetchAllPrFiles(owner, repo, number, options = {}) {
+      const res = await send(
+        {
+          type: 'PR_TREE_FETCH_ALL_PR_FILES',
+          owner,
+          repo,
+          number,
+          gitattributesText: options.gitattributesText || '',
+        },
+        { signal: options.signal || null }
+      );
+      if (!res?.ok) {
+        if (res?.aborted) throw makeAbortError();
+        const err = new Error(res?.error || 'Failed to fetch all files');
+        err.status = res?.status;
+        throw err;
+      }
+      return Array.isArray(res.files) ? res.files : [];
+    },
     async applyReviewSuggestion(owner, repo, payload) {
       const res = await send({
         type: 'PR_TREE_APPLY_SUGGESTION',
@@ -1168,6 +1314,7 @@
   const DEFAULT_PREFS = {
     fastReview: true,
     reverseComments: true,
+    autoOpenEmbed: true,
   };
 
   function normalizePrefsLocal(raw) {
@@ -1181,6 +1328,10 @@
         typeof src.reverseComments === 'boolean'
           ? src.reverseComments
           : DEFAULT_PREFS.reverseComments,
+      autoOpenEmbed:
+        typeof src.autoOpenEmbed === 'boolean'
+          ? src.autoOpenEmbed
+          : DEFAULT_PREFS.autoOpenEmbed,
     };
   }
 

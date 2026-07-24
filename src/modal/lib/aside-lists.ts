@@ -52,3 +52,82 @@ export function takeVisibleTreeNodes(visibleNodes, max = 20) {
     truncated: list.length - limit,
   };
 }
+
+/**
+ * Filter PR commits by free-text query (message, sha, author).
+ */
+export function filterCommitsByQuery(commits, query) {
+  const list = Array.isArray(commits) ? commits : [];
+  const q = String(query || '')
+    .trim()
+    .toLowerCase();
+  if (!q) return list;
+  const words = q.split(/\s+/).filter(Boolean);
+  return list.filter((c) => {
+    const hay = [c?.sha, c?.message, c?.author, c?.date]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+    return words.every((w) => hay.includes(w));
+  });
+}
+
+/**
+ * Filter PR files by free-text query (path / status).
+ */
+export function filterFilesByQuery(files, query) {
+  const list = Array.isArray(files) ? files : [];
+  const q = String(query || '')
+    .trim()
+    .toLowerCase();
+  if (!q) return list;
+  const words = q.split(/\s+/).filter(Boolean);
+  return list.filter((f) => {
+    const path = f?.filename || f?.path || f?.previous_filename || '';
+    const hay = [path, f?.status, f?.previous_filename]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+    return words.every((w) => hay.includes(w));
+  });
+}
+
+/**
+ * True when the detail may still have more commits than the loaded array
+ * (first page is 100; PR payload may include commits count).
+ */
+export function mayHaveMoreCommits(detail) {
+  const loaded = Array.isArray(detail?.commits) ? detail.commits.length : 0;
+  const total = Number(detail?.commitsCount);
+  if (Number.isFinite(total) && total > loaded) return true;
+  return loaded >= 100;
+}
+
+/**
+ * True when more files may exist than the loaded array (changedFiles / page size).
+ */
+export function mayHaveMoreFiles(detail) {
+  const loaded = Array.isArray(detail?.files) ? detail.files.length : 0;
+  const total = Number(detail?.changedFiles);
+  if (Number.isFinite(total) && total > loaded) return true;
+  return loaded >= 100;
+}
+
+/**
+ * Filter git tags related to a PR by query (name / sha).
+ */
+export function filterTagsByQuery(tags, query) {
+  const list = Array.isArray(tags) ? tags : [];
+  const q = String(query || '')
+    .trim()
+    .toLowerCase();
+  if (!q) return list;
+  const words = q.split(/\s+/).filter(Boolean);
+  return list.filter((t) => {
+    const hay = [t?.name, t?.sha, t?.message]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+    return words.every((w) => hay.includes(w));
+  });
+}

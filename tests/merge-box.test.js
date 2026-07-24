@@ -132,6 +132,22 @@ const SCRATCH =
 
 {
   // mergeable null (computing) — not green success
+  // Empty checks + GitHub combined state "pending" must not look in-progress
+  {
+    const emptyPending = buildMergeBoxStatus({
+      state: 'open',
+      draft: false,
+      merged: false,
+      mergeable: true,
+      mergeableState: 'clean',
+      checks: { state: 'pending', totalCount: 0, statuses: [], checkRuns: [] },
+    });
+    assert.equal(emptyPending.kind, 'clean');
+    assert.equal(emptyPending.tone, 'ok');
+    assert.equal(emptyPending.checksLine, null);
+    assert.ok(!/still running/i.test(emptyPending.headline));
+  }
+
   const pending = buildMergeBoxStatus({
     state: 'open',
     draft: false,

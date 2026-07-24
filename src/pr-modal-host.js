@@ -30,6 +30,7 @@
   const DEFAULT_PREFS = {
     fastReview: true,
     reverseComments: true,
+    autoOpenEmbed: true,
   };
 
   let prefs = { ...DEFAULT_PREFS };
@@ -374,11 +375,106 @@
     }
   }
 
+  function openEmbedShortcutLabel() {
+    try {
+      const pe = pageEmbedApi();
+      const sc = pe?.EMBED_OPEN_SHORTCUT || pe?.EMBED_RESTORE_SHORTCUT;
+      if (!sc) return '⌘⇧E';
+      const isMac =
+        typeof navigator !== 'undefined' &&
+        /Mac|iPhone|iPad/.test(navigator.platform || '');
+      return isMac ? sc.label || '⌘⇧E' : sc.labelWin || 'Ctrl+Shift+E';
+    } catch {
+      return '⌘⇧E';
+    }
+  }
+
+  /** Enter embed for the current native GH PR URL (header button + ⌘⇧E). */
+  function openEmbedFromNativePr() {
+    if (!hostEnabled) return { ok: false, reason: 'disabled' };
+    if (current.open && isEmbedPresentation(current.presentation)) {
+      return { ok: false, reason: 'embed-open' };
+    }
+    const t = parsePrPagePath(
+      typeof location !== 'undefined' ? location.pathname : ''
+    );
+    if (!t) return { ok: false, reason: 'not-pr-page' };
+    removeGithubPrToggle();
+    void openModal({
+      owner: t.owner,
+      repo: t.repo,
+      number: t.number,
+      page: t.page,
+      presentation: 'embed',
+    });
+    return { ok: true, owner: t.owner, repo: t.repo, number: t.number };
+  }
+
+  function isEditableKeyTarget(target) {
+    const el = target;
+    if (!el || typeof el !== 'object') return false;
+    try {
+      if (el.isContentEditable) return true;
+      const tag = String(el.tagName || '').toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') return true;
+      if (el.closest?.('input, textarea, select, [contenteditable="true"]')) {
+        return true;
+      }
+    } catch {
+      /* ignore */
+    }
+    return false;
+  }
+
+  /**
+   * Native GH PR page: ⌘⇧E / Ctrl+Shift+E opens pr+ (inverse of restore-native).
+   * Installed once; no-op when embed is already active (App handles restore).
+   */
+  let nativePrShortcutBound = false;
+  function ensureNativePrOpenShortcut() {
+    if (nativePrShortcutBound) return;
+    nativePrShortcutBound = true;
+    document.addEventListener(
+      'keydown',
+      (e) => {
+        if (!hostEnabled) return;
+        if (current.open && isEmbedPresentation(current.presentation)) return;
+        if (isEditableKeyTarget(e.target)) return;
+        const pe = pageEmbedApi();
+        const resolve =
+          pe?.resolveEmbedShortcutAction ||
+          (typeof globalThis !== 'undefined' &&
+            globalThis.PRModalPageEmbed?.resolveEmbedShortcutAction);
+        const action =
+          typeof resolve === 'function'
+            ? resolve({
+                mod: e.metaKey || e.ctrlKey,
+                shift: e.shiftKey,
+                key: e.key,
+                presentation: 'modal',
+                onNativePrPage: Boolean(
+                  parsePrPagePath(
+                    typeof location !== 'undefined' ? location.pathname : ''
+                  )
+                ),
+                editableTarget: false,
+              })
+            : null;
+        if (action !== 'openEmbedView') return;
+        e.preventDefault();
+        e.stopPropagation();
+        openEmbedFromNativePr();
+      },
+      true
+    );
+  }
+
   /**
    * On native GH PR pages (when pr+ embed is off), show a toggle next to the
    * PR header to open the pr+ in-page view.
    */
   function ensureGithubPrToggle() {
+    ensureNativePrOpenShortcut();
     if (!hostEnabled) {
       removeGithubPrToggle();
       return { ok: false, reason: 'disabled' };
@@ -399,6 +495,7 @@
       return { ok: false, reason: 'embed-open' };
     }
 
+    const scLabel = openEmbedShortcutLabel();
     let btn = document.getElementById(GH_PR_TOGGLE_ID);
     if (!btn) {
       btn = document.createElement('button');
@@ -407,25 +504,17 @@
       // Match Primer PR header actions (32px / 14px / parent gap) — see styles.css
       btn.className = 'prp-gh-open-toggle';
       btn.setAttribute('data-prp-gh-toggle', '1');
-      btn.setAttribute('aria-label', 'Open with pr+');
-      btn.title = 'Open with pr+';
+      btn.setAttribute('aria-label', `Open with pr+ (${scLabel})`);
+      btn.title = `Open with pr+ (${scLabel})`;
       btn.textContent = 'pr+';
       btn.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        const t = parsePrPagePath(
-          typeof location !== 'undefined' ? location.pathname : ''
-        );
-        if (!t) return;
-        removeGithubPrToggle();
-        void openModal({
-          owner: t.owner,
-          repo: t.repo,
-          number: t.number,
-          page: t.page,
-          presentation: 'embed',
-        });
+        openEmbedFromNativePr();
       });
+    } else {
+      btn.setAttribute('aria-label', `Open with pr+ (${scLabel})`);
+      btn.title = `Open with pr+ (${scLabel})`;
     }
 
     const mount = findGithubPrHeaderMount();
@@ -463,6 +552,7 @@
         prefs = {
           fastReview: next.fastReview !== false,
           reverseComments: next.reverseComments !== false,
+          autoOpenEmbed: next.autoOpenEmbed !== false,
         };
       }
       prefsReady = true;
@@ -534,11 +624,27 @@
     try {
       prefsWatchUnsub =
         globalThis.PRTreeStorage?.watchExtensionPrefs?.((next) => {
+          const prevAuto = prefs.autoOpenEmbed !== false;
           prefs = {
             fastReview: next?.fastReview !== false,
             reverseComments: next?.reverseComments !== false,
+            autoOpenEmbed: next?.autoOpenEmbed !== false,
           };
           if (current.open) render();
+          // Turning auto-open on while on a PR page: enter embed.
+          // Turning it off does not force-close an open embed.
+          if (!prevAuto && prefs.autoOpenEmbed) {
+            try {
+              tryEmbedFromLocation();
+            } catch {
+              /* ignore */
+            }
+          }
+          try {
+            ensureGithubPrToggle();
+          } catch {
+            /* ignore */
+          }
         }) || null;
     } catch {
       prefsWatchUnsub = null;
@@ -2809,7 +2915,15 @@
       removeGithubPrToggle();
       return { ok: true, reason: 'route-updated', page: target.page };
     }
-    // Auto-open embed on PR routes (can also be opened via GH header toggle)
+    // Auto-open only when pref allows (manual: header pr+ / ⌘⇧E)
+    if (prefs.autoOpenEmbed === false) {
+      try {
+        ensureGithubPrToggle();
+      } catch {
+        /* ignore */
+      }
+      return { ok: false, reason: 'auto-open-disabled' };
+    }
     void openModal({
       owner: target.owner,
       repo: target.repo,
@@ -2925,12 +3039,18 @@
     // Light preload only — full warmUp runs after list paint (content.js)
     void ensureAssets();
     installEmbedWatch();
-    tryEmbedFromLocation();
-    try {
-      ensureGithubPrToggle();
-    } catch {
-      /* ignore */
-    }
+    ensurePrefsWatch();
+    // Wait for prefs so autoOpenEmbed=false is respected before first open.
+    void warmPrefs()
+      .catch(() => prefs)
+      .then(() => {
+        tryEmbedFromLocation();
+        try {
+          ensureGithubPrToggle();
+        } catch {
+          /* ignore */
+        }
+      });
   }
 
   function parsePrFromAnchor(anchor) {

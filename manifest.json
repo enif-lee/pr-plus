@@ -1,8 +1,14 @@
 {
   "manifest_version": 3,
   "name": "pr+",
-  "version": "1.5.0",
-  "description": "GitHub PR stack tree on /pulls plus a fast in-page review shell: list modal/side sheet, PR-page embed, progressive load, Diff virtualization, merge, and deep links.",
+  "version": "1.5.1",
+  "description": "GitHub PR stack tree + fast in-page review shell for conversation, diff, and merge.",
+  "icons": {
+    "16": "assets/icons/icon16.png",
+    "32": "assets/icons/icon32.png",
+    "48": "assets/icons/icon48.png",
+    "128": "assets/icons/icon128.png"
+  },
   "permissions": ["storage", "scripting"],
   "host_permissions": [
     "https://github.com/*",
@@ -17,7 +23,13 @@
   },
   "action": {
     "default_title": "pr+",
-    "default_popup": "src/popup.html"
+    "default_popup": "src/popup.html",
+    "default_icon": {
+      "16": "assets/icons/icon16.png",
+      "32": "assets/icons/icon32.png",
+      "48": "assets/icons/icon48.png",
+      "128": "assets/icons/icon128.png"
+    }
   },
   "content_scripts": [
     {

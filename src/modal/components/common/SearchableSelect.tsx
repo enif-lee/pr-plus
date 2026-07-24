@@ -1,12 +1,17 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { filterSelectOptions, labelColorCss } from '@lib/searchable-select';
+import {
+  filterSelectOptions,
+  labelColorCss,
+  queryMatchesOption,
+} from '@lib/searchable-select';
 import { Avatar } from './Avatar';
-import { IconCheck, IconX } from './icons';
+import { IconCheck } from './icons';
 
 /**
  * Anchored popover searchable select.
  * - Single: click option → onPick
  * - Multi: toggle options, free-text Enter adds to selection, Apply → onConfirm(ids)
+ * - allowCreate: when free-text does not match any option, show Create… row
  */
 export function SearchableSelect({
   open,
@@ -19,6 +24,15 @@ export function SearchableSelect({
   placeholder = 'Type to filter…',
   emptyLabel = 'No matches',
   allowFreeText = true,
+  /**
+   * When true and the typed name does not match any option, show a Create… row.
+   * Click / Enter (with no filtered hits) calls onCreate(name) when provided,
+   * otherwise falls back to onPick({ id, label, create: true }).
+   */
+  allowCreate = false,
+  onCreate = null,
+  createLabel = null,
+  createBusy = false,
   anchorRef,
   anchorKey = null,
   /**
@@ -152,6 +166,47 @@ export function SearchableSelect({
       ? filterSelectOptions(options, query)
       : (options || []).slice(0, 50);
   const free = String(query || '').trim();
+  const exactMatch =
+    typeof queryMatchesOption === 'function'
+      ? queryMatchesOption(options, free)
+      : false;
+  const showCreate =
+    Boolean(allowCreate) && Boolean(free) && !exactMatch && !createBusy;
+  const createText =
+    typeof createLabel === 'function'
+      ? createLabel(free)
+      : createLabel
+        ? String(createLabel).replace(/\{name\}/g, free)
+        : `Create “${free}”`;
+
+  function runCreate() {
+    if (!showCreate || !free || createBusy) return;
+    const name = free;
+    if (typeof onCreate === 'function') {
+      const result = onCreate(name);
+      Promise.resolve(result)
+        .then((created: any) => {
+          const id =
+            typeof created === 'string'
+              ? created
+              : created?.name || created?.id || name;
+          if (multi) {
+            toggleId(String(id || name));
+            onQuery?.('');
+          }
+        })
+        .catch(() => {
+          /* parent surfaces error via action toast */
+        });
+      return;
+    }
+    if (multi) {
+      toggleId(name);
+      onQuery?.('');
+      return;
+    }
+    onPick?.({ id: name, label: name, create: true, meta: { create: true } });
+  }
 
   function toggleId(id: string) {
     const raw = String(id || '').trim();
@@ -171,6 +226,10 @@ export function SearchableSelect({
         onQuery?.('');
         return;
       }
+      if (showCreate) {
+        runCreate();
+        return;
+      }
       if (allowFreeText && free) {
         toggleId(free);
         onQuery?.('');
@@ -179,6 +238,10 @@ export function SearchableSelect({
     }
     if (filtered[0]) {
       onPick?.(filtered[0]);
+      return;
+    }
+    if (showCreate) {
+      runCreate();
       return;
     }
     if (allowFreeText && free) {
@@ -235,26 +298,8 @@ export function SearchableSelect({
           }
         }}
       />
-      {multi && selected.length ? (
-        <div className="prp-sselect-selected" aria-label="Selected">
-          {selected.map((id) => (
-            <button
-              key={id}
-              type="button"
-              className="prp-sselect-chip"
-              onClick={() => toggleId(id)}
-              title={`Remove ${id}`}
-            >
-              <span className="prp-sselect-chip__label">{id}</span>
-              <span className="prp-sselect-chip__x" aria-hidden="true">
-                <IconX size={12} />
-              </span>
-            </button>
-          ))}
-        </div>
-      ) : null}
       <ul className="prp-sselect-list">
-        {filtered.length === 0 ? (
+        {filtered.length === 0 && !showCreate ? (
           <li className="prp-sselect-empty prp-muted">
             {allowFreeText && free
               ? multi
@@ -276,10 +321,14 @@ export function SearchableSelect({
                   : '';
             const showLabelSwatch =
               kind === 'label' ||
-              (kind !== 'user' && Boolean(colorCss || meta.color));
+              (kind !== 'user' &&
+                kind !== 'milestone' &&
+                Boolean(colorCss || meta.color));
             const showAvatar =
               kind === 'user' ||
-              (!showLabelSwatch && (Boolean(meta.login) || Boolean(meta.avatarUrl)));
+              (!showLabelSwatch &&
+                kind !== 'milestone' &&
+                (Boolean(meta.login) || Boolean(meta.avatarUrl)));
             return (
               <li key={id}>
                 <button
@@ -319,12 +368,27 @@ export function SearchableSelect({
                   <span className="prp-sselect-item__label">{o.label}</span>
                   {meta.status ? (
                     <span className="prp-sselect-item__meta">{String(meta.status)}</span>
+                  ) : meta.state && kind === 'milestone' ? (
+                    <span className="prp-sselect-item__meta">{String(meta.state)}</span>
                   ) : null}
                 </button>
               </li>
             );
           })
         )}
+        {showCreate ? (
+          <li key="__create__">
+            <button
+              type="button"
+              className="prp-sselect-item prp-sselect-item--create"
+              disabled={createBusy}
+              onClick={() => runCreate()}
+            >
+              <span className="prp-sselect-item__label">{createText}</span>
+              <span className="prp-sselect-item__meta">new</span>
+            </button>
+          </li>
+        ) : null}
       </ul>
       {multi ? (
         <div className="prp-sselect-footer">

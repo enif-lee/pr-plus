@@ -288,6 +288,28 @@ assert.ok(
   assert.equal(s.state, 'pending');
 }
 
+// Empty combined status (GitHub default state:"pending", total_count:0) is not in-progress
+{
+  const n = normalizeChecks({
+    state: 'pending',
+    totalCount: 0,
+    statuses: [],
+    checkRuns: [],
+  });
+  assert.equal(n.state, 'unknown');
+  assert.equal(n.totalCount, 0);
+  assert.equal(deriveChecksState([], [], 'pending'), 'unknown');
+  const s = summarizeCheckCounts({
+    state: 'pending',
+    totalCount: 0,
+    statuses: [],
+    checkRuns: [],
+  });
+  assert.equal(s.total, 0);
+  assert.equal(s.state, 'unknown');
+  assert.equal(formatChecksCountLabel(s), 'No checks');
+}
+
 // listCheckNamesByOutcome + group tip for stacked icons
 {
   const by = listCheckNamesByOutcome({
@@ -317,7 +339,24 @@ assert.ok(
   );
   assert.ok(!/>\s*details\s*</.test(panel), 'ChecksPanel must not use details text link');
   assert.ok(panel.includes('IconLinkExternal'), 'ChecksPanel uses external-link icon');
-  assert.ok(panel.includes('ChecksSummary'), 'ChecksPanel uses compact ChecksSummary');
+  assert.ok(
+    panel.includes('CheckOutcomeIcon') && !panel.includes('Badge'),
+    'ChecksPanel uses outcome icons instead of success/skipped text badges'
+  );
+  // Expanded panel: no summary stack component usage (only icon import)
+  assert.ok(
+    !panel.includes('<ChecksSummary') && !panel.includes('jsx)(ChecksSummary'),
+    'ChecksPanel does not render summary stack'
+  );
+  // Compact rail still shows the summary stack when collapsed
+  const compact = fs.readFileSync(
+    path.join(__dirname, '../src/modal/views/conversation/AsideCompactRail.tsx'),
+    'utf8'
+  );
+  assert.ok(
+    compact.includes('ChecksSummary'),
+    'collapsed compact rail shows ChecksSummary stack'
+  );
   const summaryUi = fs.readFileSync(
     path.join(__dirname, '../src/modal/views/conversation/ChecksSummary.tsx'),
     'utf8'
