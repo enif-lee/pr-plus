@@ -1,5 +1,5 @@
 /**
- * Conversation-view ⌘⇧C / Ctrl+Shift+C: focus first PR comment/review,
+ * Conversation-view ⌥⇧C / Alt+Shift+C: focus first PR comment/review,
  * re-press clears focus. Pure policy + pick helpers + static wire.
  */
 const assert = require('node:assert/strict');
@@ -11,7 +11,7 @@ const {
   conversationCommentFocusAnchor,
 } = require('../src/modal/pure/shortcut-policy.js');
 
-const base = { mod: true, shift: true, key: 'c', paletteOpen: false };
+const base = { alt: true, mod: false, shift: true, key: 'c', paletteOpen: false };
 
 // Unfocused → focus action
 assert.equal(
@@ -57,9 +57,10 @@ assert.equal(
   null
 );
 
-// Chord is a mod(+shift) combo, not bare letter
+// Chord is an opt(+shift) combo, not bare letter / not cmd
 assert.equal(
   resolveModalShortcutAction({
+    alt: false,
     mod: false,
     shift: false,
     key: 'c',
@@ -67,22 +68,43 @@ assert.equal(
   }),
   null
 );
+assert.equal(
+  resolveModalShortcutAction({
+    alt: false,
+    mod: true,
+    shift: true,
+    key: 'c',
+    conversationCommentFocused: false,
+  }),
+  null,
+  '⌘⇧C no longer product chord'
+);
 
 // No collision with shipped combos
 assert.equal(
-  resolveModalShortcutAction({ mod: true, shift: false, key: 'k' }),
+  resolveModalShortcutAction({ alt: true, mod: false, shift: true, key: 'k' }),
   'openPalette'
 );
 assert.equal(
-  resolveModalShortcutAction({ mod: true, shift: false, key: '.' }),
+  resolveModalShortcutAction({ alt: true, mod: false, shift: false, key: 'k' }),
+  null,
+  'plain ⌥K is not openPalette'
+);
+assert.equal(
+  resolveModalShortcutAction({ alt: true, mod: false, shift: false, key: '.' }),
   'toggleDiff'
 );
 assert.equal(
-  resolveModalShortcutAction({ mod: true, shift: false, key: 'f' }),
+  resolveModalShortcutAction({ alt: false, mod: true, shift: false, key: 'f' }),
   'openSearch'
 );
 assert.equal(
-  resolveModalShortcutAction({ mod: true, shift: true, key: 'f' }),
+  resolveModalShortcutAction({ alt: true, mod: false, shift: false, key: 'f' }),
+  null,
+  '⌥F is not Find'
+);
+assert.equal(
+  resolveModalShortcutAction({ alt: true, mod: false, shift: true, key: 'f' }),
   'toggleFullscreen'
 );
 assert.notEqual(

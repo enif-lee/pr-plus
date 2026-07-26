@@ -351,6 +351,34 @@ function mapLeaveReviewAction(action) {
   return { kind: 'issue-comment', event: 'COMMENT' };
 }
 
+function normalizeGithubLogin(login) {
+  return String(login || '')
+    .trim()
+    .replace(/^@/, '')
+    .toLowerCase();
+}
+
+/**
+ * True when the signed-in viewer is the PR author.
+ * GitHub rejects APPROVE / REQUEST_CHANGES on your own PR (HTTP 422).
+ * @param {{ author?: string, viewerLogin?: string }|null|undefined} detail
+ */
+function isViewerPrAuthor(detail) {
+  const author = normalizeGithubLogin(detail?.author);
+  const viewer = normalizeGithubLogin(detail?.viewerLogin);
+  return Boolean(author && viewer && author === viewer);
+}
+
+/** Approve / Request changes only when viewer is not the author. */
+function canSubmitReviewVerdict(detail) {
+  return !isViewerPrAuthor(detail);
+}
+
+function isReviewVerdictKind(kind) {
+  const k = String(kind || '').toLowerCase();
+  return k === 'approve' || k === 'request_changes' || k === 'request-changes';
+}
+
 /**
  * Map GitHub REST review-comment payload → app shape (optimistic UI).
  * Used after postReviewComment / replyToReviewComment so diff virtual rows
@@ -457,6 +485,10 @@ const api = {
   applySuggestionToFileContent,
   buildApplySuggestionCommitRequest,
   mapLeaveReviewAction,
+  normalizeGithubLogin,
+  isViewerPrAuthor,
+  canSubmitReviewVerdict,
+  isReviewVerdictKind,
   mapRestReviewComment,
   mapRestIssueComment,
   appendOptimisticReviewComment,

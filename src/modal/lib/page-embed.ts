@@ -65,22 +65,22 @@ export const GH_FOOTER_SELECTORS: readonly string[] = [
 
 /**
  * Keyboard: toggle pr+ embed ↔ native GH PR UI.
- * ⌘⇧E / Ctrl+Shift+E — not used by common browser tab/window defaults.
+ * ⌥⇧E / Alt+Shift+E — migrated from ⌘⇧E (mod → opt).
  * - embed active → restoreNativeView
  * - native PR page → openEmbedView
  */
 export const EMBED_RESTORE_SHORTCUT = {
-  mod: true,
+  alt: true,
   shift: true,
   key: 'e',
   action: 'restoreNativeView' as const,
-  label: '⌘⇧E',
-  labelWin: 'Ctrl+Shift+E',
+  label: '⌥⇧E',
+  labelWin: 'Alt+Shift+E',
 };
 
 /** Same chord as EMBED_RESTORE_SHORTCUT; open pr+ from native PR chrome. */
 export const EMBED_OPEN_SHORTCUT = {
-  mod: true,
+  alt: true,
   shift: true,
   key: 'e',
   action: 'openEmbedView' as const,
@@ -424,26 +424,30 @@ export function restoreFooters(
 }
 
 /**
- * Pure shortcut policy for embed restore (mod+shift+e).
- * Returns 'restoreNativeView' or null.
- */
-/**
- * Resolve ⌘⇧E / Ctrl+Shift+E for embed ↔ native PR chrome.
+ * Resolve ⌥⇧E / Alt+Shift+E for embed ↔ native PR chrome (was ⌘⇧E).
  * @returns restoreNativeView | openEmbedView | null
  */
 export function resolveEmbedShortcutAction(opts: {
   mod?: boolean;
+  alt?: boolean;
   shift?: boolean;
   key?: string;
+  code?: string;
   presentation?: unknown;
   /** True when on a GH PR conversation/files URL and embed is not covering the page */
   onNativePrPage?: boolean;
   editableTarget?: boolean;
 } = {}): 'restoreNativeView' | 'openEmbedView' | null {
   if (opts.editableTarget) return null;
-  if (!opts.mod || !opts.shift) return null;
+  if (opts.mod) return null;
+  if (!opts.alt || !opts.shift) return null;
   const key = String(opts.key || '').toLowerCase();
-  if (key !== EMBED_RESTORE_SHORTCUT.key) return null;
+  const code = String(opts.code || '');
+  const isE =
+    key === EMBED_RESTORE_SHORTCUT.key ||
+    code === 'KeyE' ||
+    code === 'keye';
+  if (!isE) return null;
   if (isEmbedPresentation(opts.presentation)) return 'restoreNativeView';
   if (opts.onNativePrPage) return 'openEmbedView';
   return null;

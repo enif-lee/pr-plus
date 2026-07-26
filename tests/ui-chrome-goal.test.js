@@ -73,13 +73,18 @@ assert.ok(
   'reply supports pending vs comment modes'
 );
 
-// --- (b) Header two-row contract, same for shells ---
+// --- (b) Header contract: primary identity row + branch-meta strip ---
 assert.ok(header.includes('prp-header--unified') || header.includes('prp-header__row--primary'));
 assert.ok(header.includes('prp-header__row--primary'), 'row 1 primary');
-assert.ok(header.includes('prp-header__row--secondary'), 'row 2 secondary');
+assert.ok(header.includes('prp-header__branch-meta'), 'branch-meta strip under primary');
 assert.ok(header.includes('prp-header__number'), 'number on header');
 assert.ok(header.includes('prp-header__title'), 'title on header');
-assert.ok(header.includes('prp-header__checks') || header.includes('checks:'), 'checks on header');
+assert.ok(
+  header.includes('prp-header__meta-stack') ||
+    header.includes('ChecksSummary') ||
+    header.includes('buildCheckStackGroups'),
+  'checks on header (meta-stack / summary)'
+);
 assert.ok(header.includes('prp-header__stats'), 'stats on header');
 // Progressive load stage is the same stats pill (size morph, not dual fade / floating)
 assert.ok(header.includes('loadStage'), 'Header accepts loadStage prop');
@@ -104,19 +109,17 @@ assert.ok(
 );
 assert.ok(header.includes('prp-branch-split'), 'branch on header');
 assert.ok(header.includes('prp-header__actions'), 'actions on header');
-// Live (non-skeleton) block: primary row holds checks + stats before secondary
-const liveStart = header.indexOf('return (\n    <header className="prp-header prp-header--unified"');
-const live = liveStart >= 0 ? header.slice(liveStart) : header;
+// Live (non-skeleton): primary row then branch-meta strip
+const liveAnchor = header.indexOf('/* Row 1: identity');
+const live = liveAnchor >= 0 ? header.slice(liveAnchor) : header;
 const primaryLive = live.indexOf('prp-header__row--primary');
-const secondaryLive = live.indexOf('prp-header__row--secondary');
-const checksLive = live.indexOf('prp-header__checks');
+const branchMetaLive = live.indexOf('prp-header__branch-meta');
 const statsLive = Math.max(
   live.indexOf('prp-header__stats'),
   live.indexOf('HeaderStatsBadge')
 );
-assert.ok(primaryLive >= 0 && secondaryLive > primaryLive, 'primary before secondary in live header');
-assert.ok(checksLive > primaryLive && checksLive < secondaryLive, 'checks on primary row');
-assert.ok(statsLive > primaryLive && statsLive < secondaryLive, 'stats on primary row');
+assert.ok(primaryLive >= 0 && branchMetaLive > primaryLive, 'primary before branch-meta in live header');
+assert.ok(statsLive > primaryLive && statsLive < branchMetaLive, 'stats on primary row');
 // No shell-specific header fork
 assert.ok(!header.includes('if (shellMode ==='), 'no shell mode layout fork');
 assert.ok(header.includes('data-shell={shellMode}'), 'shell attr only for styling hooks');

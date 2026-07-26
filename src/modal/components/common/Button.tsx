@@ -1,5 +1,5 @@
 import React from 'react';
-import { TipPopover, hasTipContent } from './TipPopover';
+import { TipPopover, hasTipContent, type TipPlacement } from './TipPopover';
 
 /**
  * Shared button. Optional `title` / `shortcut` render a hover/focus popover
@@ -12,6 +12,7 @@ export function Button({
   className = '',
   shortcut,
   title,
+  tipPlacement,
   ...rest
 }: {
   children?: any;
@@ -20,6 +21,8 @@ export function Button({
   className?: string;
   shortcut?: string;
   title?: string;
+  /** Prefer tip side; falls back to TipPopover context inference when omitted */
+  tipPlacement?: TipPlacement;
   [key: string]: any;
 }) {
   const tipLabel = title ? String(title).trim() : '';
@@ -40,7 +43,11 @@ export function Button({
       {...btnRest}
     >
       {children}
-      <TipPopover title={tipLabel || null} shortcut={tipKbd || null} />
+      <TipPopover
+        title={tipLabel || null}
+        shortcut={tipKbd || null}
+        preferredPlacement={tipPlacement}
+      />
     </button>
   );
 }

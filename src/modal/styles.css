@@ -2350,11 +2350,11 @@ html.prp-embed-active [data-target='app-header'] {
 .prp-conversation__aside-host--collapsed {
   padding: 0;
   /* Host is a scroll-float wrapper (overflow:hidden by default) — open it when
-   * compact so TipPopover can escape left of the rail without being cut off. */
+   * compact so TipPopover can escape the rail without being cut off. */
   overflow: visible;
   /*
-   * Stack above the splitter (12) and collapse toggle (14) so left-opening
-   * tips paint over them instead of sliding underneath.
+   * Stack above the splitter (12) and collapse toggle (14) so right-opening
+   * tips paint over chrome instead of sliding underneath.
    */
   z-index: 20;
 }
@@ -2620,7 +2620,7 @@ html.prp-embed-active [data-target='app-header'] {
 }
 
 /*
- * Compact tip: open left into the conversation pane (JS prefers left + may flip right).
+ * Compact tip: open right toward the outer edge (JS prefers right + may flip left).
  * Placement classes on .prp-tip-pop handle left/right geometry.
  */
 .prp-aside-compact .prp-has-tip {
@@ -3107,6 +3107,108 @@ html.prp-embed-active [data-target='app-header'] {
 .prp-aside-dev__state--closed {
   color: var(--prp-fg-muted);
 }
+
+/* Development: badge list (#number title) + same-tab / new-tab actions */
+.prp-aside-dev--badges {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.prp-aside-dev__badge-item {
+  min-width: 0;
+  max-width: 100%;
+}
+.prp-aside-dev__badge {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px 4px 2px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--prp-border-muted);
+  background: var(--prp-bg-muted);
+  color: var(--prp-fg);
+  font-size: 12px;
+  line-height: 1.3;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.prp-aside-dev__badge:hover {
+  border-color: color-mix(in srgb, var(--prp-accent) 45%, var(--prp-border-muted));
+  background: color-mix(in srgb, var(--prp-accent) 8%, var(--prp-bg-muted));
+}
+.prp-aside-dev__badge--open {
+  color: var(--prp-ok, #1a7f37);
+  background: var(--prp-add-bg, #dafbe1);
+  border-color: color-mix(in srgb, var(--prp-ok, #1a7f37) 35%, transparent);
+}
+.prp-aside-dev__badge--open:hover {
+  border-color: color-mix(in srgb, var(--prp-ok, #1a7f37) 55%, transparent);
+  background: color-mix(in srgb, var(--prp-ok, #1a7f37) 14%, var(--prp-bg));
+}
+.prp-aside-dev__badge--muted {
+  color: var(--prp-fg-muted);
+}
+.prp-aside-dev__badge-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 auto;
+  padding: 2px 4px 2px 0;
+  color: inherit;
+  text-decoration: none;
+  overflow: hidden;
+}
+.prp-aside-dev__badge-main:hover {
+  text-decoration: none;
+}
+.prp-aside-dev__badge-num {
+  flex-shrink: 0;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--prp-accent, #0969da);
+}
+.prp-aside-dev__badge--open .prp-aside-dev__badge-num {
+  color: var(--prp-ok, #1a7f37);
+}
+.prp-aside-dev__badge-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+  color: var(--prp-fg);
+}
+.prp-aside-dev__badge--muted .prp-aside-dev__badge-title {
+  color: var(--prp-fg-muted);
+}
+.prp-aside-dev__badge-ext {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  color: var(--prp-fg-muted);
+  text-decoration: none;
+  line-height: 0;
+}
+.prp-aside-dev__badge-ext:hover,
+.prp-aside-dev__badge-ext:focus-visible {
+  color: var(--prp-accent);
+  background: color-mix(in srgb, var(--prp-accent) 12%, transparent);
+  outline: none;
+}
+.prp-aside-dev__badge-ext-icon {
+  display: block;
+}
+
 .prp-aside-compact__dev,
 .prp-aside-compact__projects {
   display: flex;
@@ -3122,8 +3224,8 @@ html.prp-embed-active [data-target='app-header'] {
   display: inline-flex;
   max-width: 100%;
   min-width: 0;
-  padding: 1px 5px;
-  border-radius: 4px;
+  padding: 2px 7px;
+  border-radius: 999px;
   border: 1px solid var(--prp-border-muted);
   background: var(--prp-bg-muted);
   font-size: 10px;
@@ -3587,6 +3689,8 @@ html.prp-embed-active [data-target='app-header'] {
 }
 
 .prp-filetree {
+  /* Match Diff toolbar control height (search, step-nav, filter chips) */
+  --prp-filetree-ctrl-h: var(--prp-diff-ctrl-h, 28px);
   flex: 0 0 var(--prp-file-nav-width, 260px);
   width: var(--prp-file-nav-width, 260px);
   border-right: 1px solid var(--prp-border-muted);
@@ -3662,18 +3766,42 @@ html.prp-embed-active [data-target='app-header'] {
   min-width: 0;
 }
 
+/* Search input + prev/next file StepNav on one row */
+.prp-filetree__search-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  width: 100%;
+}
+
 .prp-filetree__search-input {
   display: block;
-  width: 100%;
+  flex: 1 1 auto;
+  width: auto;
   min-width: 0;
   box-sizing: border-box;
+  height: var(--prp-filetree-ctrl-h, 28px);
+  min-height: var(--prp-filetree-ctrl-h, 28px);
   border: 1px solid var(--prp-border);
   border-radius: 6px;
-  padding: 6px 10px;
+  padding: 0 10px;
   font: inherit;
   font-size: 12px;
+  line-height: 1;
   background: var(--prp-bg);
   color: var(--prp-fg);
+}
+
+.prp-filetree__file-nav,
+.prp-filetree .prp-step-nav {
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  height: var(--prp-filetree-ctrl-h, 28px);
+  min-height: var(--prp-filetree-ctrl-h, 28px);
+  /* Compact so it fits beside a narrow explorer input */
+  font-size: 11px;
 }
 
 /* Filter chips (Unread + extensions) sit under the name filter */
@@ -3693,8 +3821,11 @@ html.prp-embed-active [data-target='app-header'] {
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
+  box-sizing: border-box;
+  height: var(--prp-filetree-ctrl-h, 28px);
+  min-height: var(--prp-filetree-ctrl-h, 28px);
   margin: 0;
-  padding: 2px 6px;
+  padding: 0 8px;
   border: 1px solid var(--prp-border);
   border-radius: 999px;
   background: var(--prp-bg);
@@ -3702,7 +3833,7 @@ html.prp-embed-active [data-target='app-header'] {
   font: inherit;
   font-size: 10px;
   font-family: var(--prp-mono);
-  line-height: 1.3;
+  line-height: 1;
   letter-spacing: 0.01em;
   cursor: pointer;
   white-space: nowrap;
@@ -3724,6 +3855,7 @@ html.prp-embed-active [data-target='app-header'] {
 .prp-filetree__viewed {
   display: inline-flex;
   align-items: center;
+  position: relative;
   padding: 0 2px 0 6px;
   flex: 0 0 auto;
   cursor: pointer;
@@ -3889,6 +4021,7 @@ html.prp-embed-active [data-target='app-header'] {
 }
 
 .prp-diff-pane {
+  position: relative;
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
@@ -3897,6 +4030,115 @@ html.prp-embed-active [data-target='app-header'] {
   height: 100%;
   overflow: hidden;
   background: var(--prp-bg);
+}
+
+/* Diff floating file/page controller — bottom-right of the hunk pane */
+.prp-diff-float-nav {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 24;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  padding: 2px;
+  border: 1px solid var(--prp-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--prp-bg) 92%, transparent);
+  box-shadow: 0 4px 16px rgba(1, 4, 9, 0.12);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  min-width: 0;
+}
+
+.prp-diff-float-nav__btns {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+}
+
+.prp-diff-float-nav__goto {
+  display: flex;
+  padding: 2px 2px 0;
+  min-width: 200px;
+}
+
+.prp-diff-float-nav__goto-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 28px;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0 8px;
+  border: 1px solid var(--prp-border);
+  border-radius: 8px;
+  background: var(--prp-bg);
+  color: var(--prp-fg);
+  font: inherit;
+  font-size: 12px;
+  font-family: var(--prp-mono);
+  line-height: 1;
+}
+
+.prp-diff-float-nav__goto-input:focus {
+  outline: none;
+  border-color: var(--prp-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--prp-accent) 22%, transparent);
+}
+
+.prp-diff-float-nav__btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 28px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--prp-fg);
+  cursor: pointer;
+}
+
+.prp-diff-float-nav__btn + .prp-diff-float-nav__btn {
+  border-left: 1px solid var(--prp-border-muted);
+  border-radius: 0;
+}
+
+.prp-diff-float-nav__btns .prp-diff-float-nav__btn:first-child {
+  border-radius: 8px 0 0 8px;
+}
+
+.prp-diff-float-nav__btns .prp-diff-float-nav__btn:last-child {
+  border-radius: 0 8px 8px 0;
+}
+
+.prp-diff-float-nav__btn--goto .prp-diff-float-nav__goto-label {
+  font-size: 14px;
+  font-weight: 700;
+  font-family: var(--prp-mono);
+  line-height: 1;
+}
+
+.prp-diff-float-nav__btn--on,
+.prp-diff-float-nav__btn--goto[aria-expanded='true'] {
+  background: color-mix(in srgb, var(--prp-accent) 14%, transparent);
+  color: var(--prp-accent);
+}
+
+.prp-diff-float-nav__btn:hover:not(:disabled),
+.prp-diff-float-nav__btn:focus-visible:not(:disabled) {
+  background: color-mix(in srgb, var(--prp-accent) 12%, transparent);
+  color: var(--prp-accent);
+  outline: none;
+}
+
+.prp-diff-float-nav__btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .prp-diff-pane__head {
@@ -4085,6 +4327,9 @@ html.prp-embed-active [data-target='app-header'] {
   display: inline-flex;
   align-items: center;
   gap: 2px;
+  box-sizing: border-box;
+  height: var(--prp-diff-ctrl-h, 28px);
+  min-height: var(--prp-diff-ctrl-h, 28px);
   padding: 2px;
   border: 1px solid var(--prp-border);
   border-radius: 8px;
@@ -4094,11 +4339,14 @@ html.prp-embed-active [data-target='app-header'] {
 .prp-diff-mode__opt {
   display: inline-flex;
   align-items: center;
+  box-sizing: border-box;
+  height: 100%;
   gap: 6px;
-  padding: 4px 10px;
+  padding: 0 10px;
   border-radius: 6px;
   font-size: 12px;
   font-weight: 500;
+  line-height: 1;
   color: var(--prp-fg);
   cursor: pointer;
   user-select: none;
@@ -5440,23 +5688,29 @@ html.prp-embed-active [data-target='app-header'] {
 }
 .prp-search--toolbar .prp-search__input {
   min-width: 120px;
-  padding: 4px 8px;
+  padding: 0 8px;
   font-size: 12px;
-  height: 28px;
+  height: var(--prp-diff-ctrl-h, 28px);
+  min-height: var(--prp-diff-ctrl-h, 28px);
   box-sizing: border-box;
+  line-height: 1;
 }
 .prp-search--toolbar .prp-search__loading {
   min-width: 36px;
   font-size: 11px;
 }
 .prp-search--toolbar .prp-step-nav {
-  height: 28px;
+  height: var(--prp-diff-ctrl-h, 28px);
+  min-height: var(--prp-diff-ctrl-h, 28px);
 }
 .prp-search--toolbar .prp-btn {
   flex: 0 0 auto;
-  padding: 3px 8px;
+  box-sizing: border-box;
+  height: var(--prp-diff-ctrl-h, 28px);
+  min-height: var(--prp-diff-ctrl-h, 28px);
+  padding: 0 8px;
   font-size: 11px;
-  min-height: 28px;
+  line-height: 1;
 }
 .prp-search__step-nav {
   flex: 0 0 auto;
@@ -5809,6 +6063,360 @@ html.prp-embed-active [data-target='app-header'] {
 }
 
 /* Command palette (Linear-style) */
+/* Opt-hold shortcut badges (stack chips) — matches list hotkeys */
+.prp-modal-hotkey,
+kbd.prp-modal-hotkey {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 6px;
+  padding: 0 5px;
+  min-width: 1.4em;
+  height: 18px;
+  box-sizing: border-box;
+  border-radius: 4px;
+  border: 1px solid var(--prp-border-muted, #d0d7de);
+  background: var(--prp-bg-muted, #f6f8fa);
+  color: var(--prp-fg-muted, #656d76);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  vertical-align: middle;
+  user-select: none;
+  pointer-events: none;
+  flex-shrink: 0;
+}
+/* Overlay on chip corner — never grows stack bar height */
+.prp-stack-strip__item {
+  position: relative;
+}
+.prp-stack-strip__item .prp-modal-hotkey {
+  position: absolute;
+  top: -5px;
+  right: -4px;
+  margin: 0;
+  height: 14px;
+  min-width: 1.25em;
+  padding: 0 3px;
+  font-size: 9.5px;
+  line-height: 1;
+  z-index: 2;
+  box-shadow: 0 1px 3px rgba(1, 4, 9, 0.12);
+  background: var(--prp-bg, #fff);
+}
+
+/* Opt-hold shortcut badge above a mapped control (not a floating dock).
+ * Badge is portaled fixed to body — also lift overflow on hosts while active. */
+.prp-opt-hint-host {
+  position: relative;
+}
+.prp-opt-btn-hint-anchor {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.prp-opt-btn-hint {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 4px;
+  border: 1px solid var(--prp-border-muted, #d0d7de);
+  background: var(--prp-bg, #fff);
+  box-shadow: 0 4px 12px rgba(1, 4, 9, 0.18);
+  color: var(--prp-fg-muted, #656d76);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: none;
+}
+/* Fixed portal — placement matches TipPopover transforms */
+.prp-opt-btn-hint--fixed {
+  position: fixed;
+  z-index: 100090;
+}
+.prp-opt-btn-hint--top {
+  transform: translate(-50%, -100%);
+}
+.prp-opt-btn-hint--bottom {
+  transform: translate(-50%, 0);
+}
+.prp-opt-btn-hint--left {
+  transform: translate(-100%, -50%);
+}
+.prp-opt-btn-hint--right {
+  transform: translate(0, -50%);
+}
+.prp-opt-btn-hint--top::after,
+.prp-opt-btn-hint--bottom::after,
+.prp-opt-btn-hint--left::after,
+.prp-opt-btn-hint--right::after {
+  content: '';
+  position: absolute;
+  border: 4px solid transparent;
+  filter: drop-shadow(0 1px 0 var(--prp-border-muted, #d0d7de));
+}
+.prp-opt-btn-hint--top::after {
+  top: 100%;
+  left: 50%;
+  margin-left: -4px;
+  border-top-color: var(--prp-bg, #fff);
+}
+.prp-opt-btn-hint--bottom::after {
+  bottom: 100%;
+  left: 50%;
+  margin-left: -4px;
+  border-bottom-color: var(--prp-bg, #fff);
+}
+.prp-opt-btn-hint--left::after {
+  left: 100%;
+  top: 50%;
+  margin-top: -4px;
+  border-left-color: var(--prp-bg, #fff);
+}
+.prp-opt-btn-hint--right::after {
+  right: 100%;
+  top: 50%;
+  margin-top: -4px;
+  border-right-color: var(--prp-bg, #fff);
+}
+/* While Opt/Opt+Shift hints are on, allow header/merge chrome to paint outside */
+.prp-overlay.prp-opt-hints-on .prp-header,
+.prp-overlay.prp-opt-hints-on .prp-header__row,
+.prp-overlay.prp-opt-hints-on .prp-header__actions,
+.prp-overlay.prp-opt-hints-on .prp-header__actions-inline,
+.prp-overlay.prp-opt-hints-on .prp-header__branch-meta,
+.prp-overlay.prp-opt-hints-on .prp-branch-tag,
+.prp-overlay.prp-opt-hints-on .prp-merge-box,
+.prp-overlay.prp-opt-hints-on .prp-merge-box__actions,
+.prp-overlay.prp-opt-hints-on .prp-merge-method,
+.prp-overlay.prp-opt-hints-on .prp-merge-method__split,
+.prp-overlay.prp-opt-hints-on .prp-body-panel,
+.prp-overlay.prp-opt-hints-on .prp-conversation {
+  overflow: visible !important;
+}
+/* Stack strip keeps fixed bar height (opt digit badges are absolute, not in-flow). */
+
+/* In-app confirm (replaces window.confirm) */
+@keyframes prp-confirm-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes prp-confirm-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+/*
+ * Confirm sits on document.body above all product chrome:
+ * overlay 100000 · tip-pop 100010 · palette 100060 · opt-hint 100090
+ * Tokens mirror .prp-overlay so .prp-btn variants paint correctly outside the shell.
+ */
+.prp-confirm-layer {
+  --prp-fg: var(--fgColor-default, #1f2328);
+  --prp-fg-muted: var(--fgColor-muted, #656d76);
+  --prp-bg: var(--bgColor-default, #ffffff);
+  --prp-bg-muted: var(--bgColor-muted, #f6f8fa);
+  --prp-border: var(--borderColor-default, #d0d7de);
+  --prp-border-muted: var(--borderColor-muted, #d8dee4);
+  --prp-accent: var(--fgColor-accent, #0969da);
+  --prp-accent-bg: var(--bgColor-accent-emphasis, #1f6feb);
+  --prp-danger: #cf222e;
+  --prp-ok: #1a7f37;
+  --prp-warn: #9a6700;
+  --prp-shadow: 0 16px 48px rgba(1, 4, 9, 0.28);
+  --prp-radius: 12px;
+  --prp-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  --prp-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+
+  position: fixed;
+  inset: 0;
+  z-index: 100100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  pointer-events: none;
+  font-family: var(--prp-font);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--prp-fg);
+  /* Must stay transparent: only .prp-confirm-backdrop dims (soft veil).
+     Never use data-color-mode here — GH `[data-color-mode]{background:canvas}`
+     would paint this full-screen layer solid white/black. */
+  background: transparent !important;
+  background-color: transparent !important;
+  color-scheme: light;
+}
+.prp-confirm-layer.prp-theme-dark,
+.prp-confirm-layer[data-prp-color-mode='dark'] {
+  --prp-fg: var(--fgColor-default, #e6edf3);
+  --prp-fg-muted: var(--fgColor-muted, #8b949e);
+  --prp-bg: var(--bgColor-default, #0d1117);
+  --prp-bg-muted: var(--bgColor-muted, #161b22);
+  --prp-border: var(--borderColor-default, #30363d);
+  --prp-border-muted: var(--borderColor-muted, #21262d);
+  --prp-accent: var(--fgColor-accent, #2f81f7);
+  --prp-accent-bg: var(--bgColor-accent-emphasis, #1f6feb);
+  --prp-danger: #f85149;
+  --prp-ok: #3fb950;
+  --prp-warn: #d29922;
+  --prp-shadow: 0 16px 48px rgba(1, 4, 9, 0.65);
+  color-scheme: dark;
+  background: transparent !important;
+  background-color: transparent !important;
+}
+/* Hide floating tips/opt badges under confirm (translucent backdrop would show them) */
+body:has([data-prp-confirm='1']) .prp-opt-btn-hint,
+body:has([data-prp-confirm='1']) .prp-tip-pop {
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+.prp-confirm-layer--enter {
+  animation: prp-confirm-fade-in 160ms ease-out both;
+}
+.prp-confirm-backdrop {
+  position: absolute;
+  inset: 0;
+  /* Soft veil — page/modal remain readable (blur washes light pages to solid) */
+  background: rgba(1, 4, 9, 0.28);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  pointer-events: auto;
+}
+.prp-confirm-layer--enter .prp-confirm-backdrop {
+  animation: prp-confirm-fade-in 180ms ease-out both;
+}
+.prp-confirm-panel {
+  position: relative;
+  z-index: 1;
+  width: min(420px, 94vw);
+  padding: 18px 18px 14px;
+  border-radius: var(--prp-radius, 12px);
+  border: 1px solid var(--prp-border);
+  background: var(--prp-bg);
+  box-shadow: var(--prp-shadow);
+  pointer-events: auto;
+  color: var(--prp-fg);
+}
+.prp-confirm-panel--enter {
+  animation: prp-confirm-panel-in 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .prp-confirm-layer--enter,
+  .prp-confirm-layer--enter .prp-confirm-backdrop,
+  .prp-confirm-panel--enter {
+    animation: none;
+  }
+}
+.prp-confirm-title {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--prp-fg);
+}
+.prp-confirm-msg {
+  margin: 0 0 16px;
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--prp-fg-muted);
+  white-space: pre-wrap;
+}
+.prp-confirm-msg--empty {
+  display: none;
+}
+.prp-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+/* Ensure shared .prp-btn tokens resolve inside body-portaled confirm */
+.prp-confirm-actions .prp-btn {
+  border-color: var(--prp-border);
+  background: var(--prp-bg-muted);
+  color: var(--prp-fg);
+}
+.prp-confirm-actions .prp-btn--primary {
+  background: var(--prp-accent-bg);
+  border-color: var(--prp-accent-bg);
+  color: #fff;
+}
+.prp-confirm-actions .prp-btn--ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--prp-fg-muted);
+}
+.prp-confirm-actions .prp-btn--ghost:hover:not(:disabled) {
+  background: var(--prp-bg-muted);
+  color: var(--prp-fg);
+}
+.prp-confirm-actions .prp-btn--danger {
+  color: #fff;
+  border-color: var(--prp-danger);
+  background: var(--prp-danger);
+}
+.prp-confirm-actions .prp-btn--danger:hover:not(:disabled),
+.prp-confirm-actions .prp-btn--danger:focus-visible:not(:disabled) {
+  color: #fff;
+  border-color: var(--prp-danger);
+  background: color-mix(in srgb, var(--prp-danger) 88%, #000);
+  filter: none;
+}
+.prp-confirm-layer.prp-theme-dark .prp-confirm-actions .prp-btn:hover:not(:disabled),
+.prp-confirm-layer[data-prp-color-mode='dark'] .prp-confirm-actions .prp-btn:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+.prp-confirm-layer.prp-theme-dark .prp-confirm-actions .prp-btn--danger:hover:not(:disabled),
+.prp-confirm-layer[data-prp-color-mode='dark'] .prp-confirm-actions .prp-btn--danger:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+.prp-confirm--danger .prp-confirm-title {
+  color: var(--prp-danger);
+}
+.prp-pp-action-section {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fgColor-muted, #656d76);
+  flex-shrink: 0;
+}
+/* Modal command palette uses shared prp-pp shell; keep above modal chrome */
+.prp-pp-layer--modal {
+  z-index: 100060;
+  pointer-events: none;
+}
+.prp-pp-layer--modal .prp-pp-backdrop,
+.prp-pp-layer--modal .prp-pp-panel {
+  pointer-events: auto;
+}
+/*
+ * Modal already has soft .prp-backdrop (α≈0.14). Palette dim must stay light
+ * so stacked layers do not read as a solid black overlay.
+ */
+.prp-pp-layer--modal .prp-pp-backdrop {
+  background: rgba(1, 4, 9, 0.16);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
 .prp-cmd-layer {
   position: absolute;
   inset: 0;
@@ -6741,7 +7349,8 @@ a.prp-label:hover {
   min-width: 0 !important;
   height: auto !important;
   min-height: 0;
-  overflow: hidden; /* clip; scroll lives on .prp-stack-strip */
+  /* Always clip — do not lift overflow on opt-hold (bar height must stay stable) */
+  overflow: hidden !important;
   border-bottom: 1px solid var(--prp-border-muted);
   background: var(--prp-bg-muted);
   box-sizing: border-box;
@@ -6829,7 +7438,10 @@ a.prp-label:hover {
   flex: 0 0 auto;
   flex-shrink: 0;
   min-width: auto;
-  padding: 2px 8px;
+  /* Stable chip height with or without opt digit badge (badge is absolute) */
+  height: 22px;
+  box-sizing: border-box;
+  padding: 0 8px;
   border-radius: 999px;
   border: 1px solid var(--prp-border);
   background: var(--prp-bg);
@@ -6837,7 +7449,7 @@ a.prp-label:hover {
   text-decoration: none;
   font-weight: 500;
   white-space: nowrap;
-  overflow: hidden;
+  overflow: visible; /* allow corner opt badge; bar host still clips */
 }
 .prp-stack-strip__item:hover {
   border-color: var(--prp-accent);
@@ -6867,6 +7479,7 @@ a.prp-label:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  line-height: 1.2;
 }
 .prp-stack-strip__item--fork {
   cursor: pointer;
@@ -6910,6 +7523,8 @@ button.prp-stack-strip__item {
 /* Diff chrome (checks + labels) */
 /* Unified Diff top toolbar */
 .prp-diff-toolbar {
+  /* Shared control height: Files toggle, commits select, mode, filters, step-nav, CTAs */
+  --prp-diff-ctrl-h: 28px;
   flex: 0 0 auto;
   border-bottom: 1px solid var(--prp-border-muted);
   background: var(--prp-bg-muted);
@@ -6929,7 +7544,9 @@ button.prp-stack-strip__item {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 30px;
+  box-sizing: border-box;
+  height: var(--prp-diff-ctrl-h);
+  min-height: var(--prp-diff-ctrl-h);
   padding: 0 10px;
   border: 1px solid var(--prp-border);
   border-radius: 8px;
@@ -6938,6 +7555,7 @@ button.prp-stack-strip__item {
   font: inherit;
   font-size: 12px;
   font-weight: 600;
+  line-height: 1;
   cursor: pointer;
 }
 
@@ -6961,7 +7579,9 @@ button.prp-stack-strip__item {
   /* Hard cap — long commit messages must not stretch the toolbar */
   max-width: 220px;
   width: auto;
-  height: 30px;
+  box-sizing: border-box;
+  height: var(--prp-diff-ctrl-h, 28px);
+  min-height: var(--prp-diff-ctrl-h, 28px);
   padding: 0 10px;
   border: 1px solid var(--prp-border);
   border-radius: 8px;
@@ -6969,10 +7589,49 @@ button.prp-stack-strip__item {
   color: var(--prp-fg);
   font: inherit;
   font-size: 12px;
+  line-height: 1;
   cursor: pointer;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Keep select / toggle / mode / filter / navigator at the same height */
+.prp-diff-toolbar .prp-diff-mode {
+  box-sizing: border-box;
+  height: var(--prp-diff-ctrl-h);
+  min-height: var(--prp-diff-ctrl-h);
+  align-items: stretch;
+  padding: 2px;
+}
+.prp-diff-toolbar .prp-diff-mode__opt {
+  box-sizing: border-box;
+  height: 100%;
+  padding: 0 10px;
+  line-height: 1;
+}
+.prp-diff-toolbar .prp-step-nav,
+.prp-diff-toolbar .prp-review-filter {
+  box-sizing: border-box;
+  height: var(--prp-diff-ctrl-h);
+  min-height: var(--prp-diff-ctrl-h);
+}
+.prp-diff-toolbar .prp-review-filter__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  height: 100%;
+  padding: 0 10px;
+  line-height: 1;
+}
+.prp-diff-toolbar .prp-btn--size-sm {
+  box-sizing: border-box;
+  height: var(--prp-diff-ctrl-h);
+  min-height: var(--prp-diff-ctrl-h);
+  padding-top: 0;
+  padding-bottom: 0;
+  line-height: 1;
 }
 
 /* Grouped review-comment navigator */
@@ -7027,7 +7686,9 @@ button.prp-stack-strip__item {
   background: var(--prp-bg);
   flex: 0 0 auto;
   flex-shrink: 0;
-  height: 28px;
+  box-sizing: border-box;
+  height: var(--prp-diff-ctrl-h, 28px);
+  min-height: var(--prp-diff-ctrl-h, 28px);
 }
 .prp-step-nav__btn {
   appearance: none;
@@ -7135,9 +7796,15 @@ button.prp-stack-strip__item {
   overflow: hidden;
   background: var(--prp-bg);
   flex: 0 0 auto;
+  box-sizing: border-box;
+  height: var(--prp-diff-ctrl-h, 28px);
+  min-height: var(--prp-diff-ctrl-h, 28px);
 }
 .prp-review-filter__btn {
   appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   margin: 0;
   border: 0;
   border-right: 1px solid var(--prp-border);
@@ -7147,8 +7814,10 @@ button.prp-stack-strip__item {
   font-family: var(--prp-font);
   font-size: 11px;
   font-weight: 600;
-  line-height: 1.3;
-  padding: 5px 10px;
+  line-height: 1;
+  box-sizing: border-box;
+  height: 100%;
+  padding: 0 10px;
   cursor: pointer;
   white-space: nowrap;
   transition: background 120ms ease, color 120ms ease;

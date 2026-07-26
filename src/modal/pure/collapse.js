@@ -275,6 +275,19 @@
     return defaultCollapsedPathSet(files, viewedPaths);
   }
 
+  const COLLAPSED_SET_EXPLICIT_EMPTY = '\0prp-collapsed-explicit';
+
+  function expandPathInCollapsedSet(collapsedPaths, path, files, viewedPaths) {
+    const p = String(path || '').trim();
+    const n = materializeCollapsedPaths(collapsedPaths, files, viewedPaths);
+    if (p) n.delete(p);
+    n.delete(COLLAPSED_SET_EXPLICIT_EMPTY);
+    if (n.size === 0) {
+      n.add(COLLAPSED_SET_EXPLICIT_EMPTY);
+    }
+    return n;
+  }
+
   const api = {
     parseGitattributes,
     matchAttrPattern,
@@ -287,6 +300,8 @@
     isPathCollapsed,
     defaultCollapsedPathSet,
     materializeCollapsedPaths,
+    COLLAPSED_SET_EXPLICIT_EMPTY,
+    expandPathInCollapsedSet,
     DEFAULT_LARGE_CHANGES,
     DEFAULT_LARGE_PATCH_CHARS,
   };

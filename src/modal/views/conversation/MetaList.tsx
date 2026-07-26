@@ -5,6 +5,7 @@ import { UserLink } from '@common/UserLink';
 import { reviewStatusTone } from '@common/utils';
 import { Avatar } from '@common/Avatar';
 import { IconSync, IconX } from '@common/icons';
+import { OptBtnHint } from '@common/OptBtnHint';
 
 export function MetaList({
   title,
@@ -19,6 +20,10 @@ export function MetaList({
   renderStatus,
   addButtonRef,
   avatarUrls,
+  /** Option-hold: show shortcut badge above Add… */
+  showOptHints = false,
+  /** e.g. ⌥⇧R / ⌥⇧A */
+  addShortcut = null,
 }: any) {
   const localRef = useRef<HTMLButtonElement | null>(null);
   const list = Array.isArray(rows) ? rows : [];
@@ -114,14 +119,24 @@ export function MetaList({
       {onAdd ? (
         <button
           type="button"
-          className="prp-add-link"
+          className={`prp-add-link${addShortcut ? ' prp-opt-hint-host' : ''}`}
           disabled={actionBusy}
           onClick={onAdd}
+          title={
+            addShortcut
+              ? `${addLabel || 'Add…'} (${addShortcut})`
+              : addLabel || 'Add…'
+          }
           ref={(el) => {
             localRef.current = el;
             if (addButtonRef) addButtonRef.current = el;
           }}
         >
+          <OptBtnHint
+            show={Boolean(showOptHints && addShortcut)}
+            label={addShortcut}
+            preferredPlacement="right"
+          />
           {addLabel || 'Add…'}
         </button>
       ) : null}

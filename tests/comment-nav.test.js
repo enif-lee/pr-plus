@@ -207,13 +207,19 @@ assert.ok(app.includes("case 'openSearch'"), 'App wires openSearch');
 }
 
 const policy = require('../src/modal/lib/shortcut-policy.ts');
+// ⌘F / Ctrl+F opens Find
 assert.equal(
-  policy.resolveModalShortcutAction({ mod: true, shift: false, key: 'f' }),
+  policy.resolveModalShortcutAction({ mod: true, alt: false, shift: false, key: 'f' }),
   'openSearch'
 );
 assert.equal(
-  policy.resolveModalShortcutAction({ mod: true, shift: true, key: 'f' }),
+  policy.resolveModalShortcutAction({ alt: true, mod: false, shift: true, key: 'f' }),
   'toggleFullscreen'
+);
+// ⌥F is not Find (opt+f removed)
+assert.equal(
+  policy.resolveModalShortcutAction({ alt: true, mod: false, shift: false, key: 'f' }),
+  null
 );
 
 console.log('comment-nav.test.js: all assertions passed');

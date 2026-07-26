@@ -122,7 +122,8 @@ const prs = [
   assert.ok(
     app.includes("onOpenStackPr(n, { page })") ||
       app.includes('onOpenStackPr(n, { page:') ||
-      /onOpenStackPr\(\s*n\s*,\s*\{\s*page/.test(app),
+      app.includes('onOpenStackPr(num, { page })') ||
+      /onOpenStackPr\(\s*(n|num)\s*,\s*\{\s*page/.test(app),
     'App passes current layout page when opening stack PR'
   );
   assert.ok(
@@ -292,6 +293,32 @@ const prs = [
   });
   assert.equal(opened.length, before + allBtns.length);
   ok('every level chip click navigates');
+}
+
+// Opt-hold must not grow stack bar height (badge absolute; host keeps overflow clip)
+{
+  const css = fs.readFileSync(
+    path.join(__dirname, '../src/modal/styles.css'),
+    'utf8'
+  );
+  assert.ok(
+    /\.prp-stack-strip__item \.prp-modal-hotkey\s*\{[^}]*position:\s*absolute/s.test(
+      css
+    ),
+    'stack opt digit is absolute (no bar height jump)'
+  );
+  assert.ok(
+    !/\.prp-overlay\.prp-opt-hints-on[^{]*\.prp-stack-strip-host/.test(css) ||
+      !/prp-opt-hints-on[\s\S]{0,400}prp-stack-strip-host[\s\S]{0,80}overflow:\s*visible/.test(
+        css
+      ),
+    'opt-hints-on does not force stack host overflow:visible'
+  );
+  assert.ok(
+    /\.prp-stack-strip__item\s*\{[^}]*height:\s*22px/s.test(css),
+    'stack chip has fixed height'
+  );
+  ok('opt-hold stack bar height contract');
 }
 
 const out = log.join('\n') + '\n';

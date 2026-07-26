@@ -229,11 +229,16 @@ export function AsideCompactRail({
         const num = Number(item?.number);
         if (!Number.isFinite(num) || num <= 0) return null;
         const title = String(item?.title || '').trim();
+        const shortTitle = title
+          ? title.length > 28
+            ? `${title.slice(0, 27)}…`
+            : title
+          : '';
         return {
           key: String(num),
           number: num,
           tip: title ? `#${num} · ${title}` : `#${num}`,
-          label: `#${num}`,
+          label: shortTitle ? `#${num} ${shortTitle}` : `#${num}`,
         };
       })
       .filter(Boolean) as Array<{

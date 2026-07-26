@@ -244,13 +244,25 @@ assert.deepEqual(loadModalSize(mem), { width: 960, height: 720 });
   assert.equal(resolveShellSizeStorage(null), null);
 }
 
-// --- shortcut policy: mod+f → openSearch; mod+shift+f → toggleFullscreen ---
+// --- shortcut policy: mod+f → openSearch; opt+shift+f → toggleFullscreen ---
 assert.equal(
-  resolveModalShortcutAction({ mod: true, shift: false, key: 'f' }),
+  resolveModalShortcutAction({
+    mod: true,
+    shift: false,
+    alt: false,
+    key: 'f',
+    code: 'KeyF',
+  }),
   'openSearch'
 );
 assert.equal(
-  resolveModalShortcutAction({ mod: true, shift: true, key: 'f' }),
+  resolveModalShortcutAction({
+    mod: false,
+    shift: true,
+    alt: true,
+    key: 'f',
+    code: 'KeyF',
+  }),
   'toggleFullscreen'
 );
 // Fullscreen class from pure helper matches expected shell state

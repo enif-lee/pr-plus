@@ -1095,6 +1095,82 @@ async function fetchPrSidebarMeta(owner, repo, number, fetchImpl, token) {
 }
 
 /**
+ * Resolve title/url/state for issue or PR numbers (body-linked Development rows).
+ * Soft-fail: empty Map when GraphQL unavailable.
+ *
+ * @param {string} owner
+ * @param {string} repo
+ * @param {number[]} numbers
+ * @param {typeof fetch} fetchImpl
+ * @param {string} token
+ * @returns {Promise<Map<number, { number: number, title: string, url: string, state: string, kind: string }>>}
+ */
+async function fetchIssueOrPrSummaries(owner, repo, numbers, fetchImpl, token) {
+  const o = String(owner || '').trim();
+  const r = String(repo || '').trim();
+  const nums = [
+    ...new Set(
+      (Array.isArray(numbers) ? numbers : [])
+        .map((n) => Number(n))
+        .filter((n) => Number.isFinite(n) && n > 0)
+    ),
+  ].slice(0, 30);
+  /** @type {Map<number, { number: number, title: string, url: string, state: string, kind: string }>} */
+  const out = new Map();
+  if (!o || !r || !nums.length || !token) return out;
+
+  // Alias each number — GraphQL has no list-of-numbers helper for issueOrPullRequest.
+  const fields = nums
+    .map(
+      (n, i) => `
+      n${i}: issueOrPullRequest(number: ${n}) {
+        __typename
+        ... on Issue { number title url state }
+        ... on PullRequest { number title url state }
+      }`
+    )
+    .join('\n');
+  const query = `
+    query($owner:String!,$repo:String!) {
+      repository(owner:$owner, name:$repo) {
+        ${fields}
+      }
+    }
+  `;
+  try {
+    const data = await apiGraphql(
+      query,
+      { owner: o, repo: r },
+      fetchImpl,
+      token
+    );
+    const repoNode = data?.repository || {};
+    for (let i = 0; i < nums.length; i++) {
+      const node = repoNode[`n${i}`];
+      if (!node || node.number == null) continue;
+      const num = Number(node.number);
+      if (!Number.isFinite(num) || num <= 0) continue;
+      out.set(num, {
+        number: num,
+        title: String(node.title || '').trim(),
+        url: String(node.url || '').trim(),
+        state: String(node.state || '').trim().toLowerCase(),
+        kind: node.__typename === 'PullRequest' ? 'pull' : 'issue',
+      });
+    }
+  } catch (err) {
+    if (
+      err?.name === 'AbortError' ||
+      /aborted|AbortError/i.test(String(err?.message || ''))
+    ) {
+      throw err;
+    }
+    // Soft-fail: keep empty map
+  }
+  return out;
+}
+
+/**
  * GraphQL client: HTTP 200 can still carry body.errors — treat those as failures.
  * @returns {Promise<object>} data field only
  */
@@ -2377,15 +2453,72 @@ async function fetchPrDetail(
       `[pr-plus] fetchPrDetail sidebarMeta: soft-fail ${err?.message || err}`
     );
   }
-  // Body-only #N → development rows when GraphQL returned nothing
-  if (!developmentIssues.length && linkedIssues.length) {
-    developmentIssues = linkedIssues.map((num) => ({
-      number: num,
-      title: '',
-      url: `https://github.com/${owner}/${repo}/issues/${num}`,
-      state: '',
-      source: 'body',
-    }));
+  // Union closing-linked + body #N into Development rows (prefer GraphQL fields).
+  {
+    const byNum = new Map();
+    for (const item of developmentIssues) {
+      const num = Number(item?.number);
+      if (!Number.isFinite(num) || num <= 0) continue;
+      byNum.set(num, {
+        number: num,
+        title: String(item?.title || '').trim(),
+        url: String(item?.url || '').trim(),
+        state: String(item?.state || '').trim().toLowerCase(),
+        source: item?.source || 'closing',
+        kind: item?.kind || '',
+      });
+    }
+    for (const raw of linkedIssues) {
+      const num = Number(raw);
+      if (!Number.isFinite(num) || num <= 0 || byNum.has(num)) continue;
+      byNum.set(num, {
+        number: num,
+        title: '',
+        url: `https://github.com/${owner}/${repo}/issues/${num}`,
+        state: '',
+        source: 'body',
+        kind: '',
+      });
+    }
+    developmentIssues = [...byNum.values()].sort((a, b) => a.number - b.number);
+  }
+
+  // Body-parsed #N has no title — resolve via issueOrPullRequest (Issue or PR).
+  const needTitles = developmentIssues
+    .filter((x) => !String(x?.title || '').trim())
+    .map((x) => x.number);
+  if (needTitles.length && token) {
+    try {
+      const summaries = await timedFetch(
+        timings,
+        'devIssueTitles',
+        fetchIssueOrPrSummaries(owner, repo, needTitles, fetchImpl, token),
+        (m) => `${m?.size ?? 0} resolved`
+      );
+      if (summaries && summaries.size) {
+        developmentIssues = developmentIssues.map((item) => {
+          const s = summaries.get(item.number);
+          if (!s) return item;
+          return {
+            ...item,
+            title: item.title || s.title,
+            url: s.url || item.url,
+            state: item.state || s.state,
+            kind: s.kind || item.kind || '',
+          };
+        });
+      }
+    } catch (err) {
+      if (
+        err?.name === 'AbortError' ||
+        /aborted|AbortError/i.test(String(err?.message || ''))
+      ) {
+        throw err;
+      }
+      console.log(
+        `[pr-plus] fetchPrDetail devIssueTitles: soft-fail ${err?.message || err}`
+      );
+    }
   }
 
   const subscribed =
@@ -4329,6 +4462,7 @@ const fetchApi = {
   fetchAllPrCommits,
   fetchAllPrFiles,
   fetchPrSidebarMeta,
+  fetchIssueOrPrSummaries,
   fetchCompareFiles,
   mapAndAnnotateFiles,
   fetchPullReviewThreads,

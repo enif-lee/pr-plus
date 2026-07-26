@@ -1315,6 +1315,7 @@
     fastReview: true,
     reverseComments: true,
     autoOpenEmbed: true,
+    singleFileMode: false,
   };
 
   function normalizePrefsLocal(raw) {
@@ -1332,6 +1333,10 @@
         typeof src.autoOpenEmbed === 'boolean'
           ? src.autoOpenEmbed
           : DEFAULT_PREFS.autoOpenEmbed,
+      singleFileMode:
+        typeof src.singleFileMode === 'boolean'
+          ? src.singleFileMode
+          : DEFAULT_PREFS.singleFileMode,
     };
   }
 

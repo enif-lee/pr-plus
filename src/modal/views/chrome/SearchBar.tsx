@@ -31,6 +31,8 @@ export const SearchBar = memo(function SearchBar({
    */
   variant = 'bar',
   placeholder = null,
+  /** Option-hold badges on hit step-nav */
+  showOptHints = false,
 }: any) {
   const [draft, setDraft] = useState(() => String(query || ''));
   const draftRef = useRef(draft);
@@ -181,6 +183,7 @@ export const SearchBar = memo(function SearchBar({
           nextTitle="Next match"
           prevShortcut={prevShortcut}
           nextShortcut={nextShortcut}
+          showOptHints={showOptHints}
         />
       )}
       <Button size="sm" onClick={() => onClose?.()}>

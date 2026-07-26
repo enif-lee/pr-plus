@@ -121,14 +121,17 @@ async function main() {
     assert.equal(DEFAULT_PREFS.fastReview, true);
     assert.equal(DEFAULT_PREFS.reverseComments, true);
     assert.equal(DEFAULT_PREFS.autoOpenEmbed, true);
+    assert.equal(DEFAULT_PREFS.singleFileMode, false);
     assert.equal('enterpriseWebHosts' in DEFAULT_PREFS, false);
     assert.deepEqual(normalizePrefs(null), DEFAULT_PREFS);
     assert.deepEqual(normalizePrefs({ fastReview: false }), {
       fastReview: false,
       reverseComments: true,
       autoOpenEmbed: true,
+      singleFileMode: false,
     });
     assert.equal(normalizePrefs({ autoOpenEmbed: false }).autoOpenEmbed, false);
+    assert.equal(normalizePrefs({ singleFileMode: true }).singleFileMode, true);
     // Legacy hosts-only list is dropped (re-register with PAT required)
     const legacy = normalizePrefs({
       enterpriseWebHosts: ['ghe.corp.io'],
@@ -144,11 +147,13 @@ async function main() {
     assert.equal(defaults.fastReview, true);
     assert.equal(defaults.reverseComments, true);
     assert.equal(defaults.autoOpenEmbed, true);
+    assert.equal(defaults.singleFileMode, false);
 
     const next = await setExtensionPrefs({ reverseComments: false }, area);
     assert.equal(next.fastReview, true);
     assert.equal(next.reverseComments, false);
     assert.equal(next.autoOpenEmbed, true);
+    assert.equal(next.singleFileMode, false);
     assert.ok(data[PREFS_KEY]);
     assert.equal(data[PREFS_KEY].reverseComments, false);
 

@@ -2,6 +2,7 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 're
 import { Button } from '@common/Button';
 import { Badge } from '@common/Badge';
 import { TipPopover } from '@common/TipPopover';
+import { OptBtnHint } from '@common/OptBtnHint';
 import { UserLink } from '@common/UserLink';
 import { RefLink } from '@common/RefLink';
 import { Avatar } from '@common/Avatar';
@@ -377,6 +378,8 @@ export function Header(props: any) {
     baseBranchRef,
     sectionLoading,
     shortcutMod,
+    /** Option held: show shortcut badges above mapped buttons */
+    showOptHints = false,
     onSubscribe,
     onRefresh = null,
     shellMode = 'modal',
@@ -650,13 +653,14 @@ export function Header(props: any) {
                 {typeof onEditTitle === 'function' ? (
                   <button
                     type="button"
-                    className="prp-icon-btn prp-header__title-edit-btn prp-has-tip"
+                    className="prp-icon-btn prp-header__title-edit-btn prp-has-tip prp-opt-hint-host"
                     disabled={actionBusy}
                     aria-label="Edit title"
                     onClick={beginEditTitle}
                   >
+                    <OptBtnHint show={showOptHints} label="⌥⇧T" />
                     <IconPencil size={14} />
-                    <TipPopover title="Edit title" />
+                    <TipPopover title="Edit title" shortcut="⌥⇧T" />
                   </button>
                 ) : null}
               </>
@@ -711,7 +715,7 @@ export function Header(props: any) {
             </button>
             <button
               type="button"
-              className="prp-branch-tag__edit-btn"
+              className="prp-branch-tag__edit-btn prp-opt-hint-host"
               disabled={actionBusy || !onChangeBase}
               onClick={onChangeBase}
               title="Change base branch"
@@ -721,6 +725,7 @@ export function Header(props: any) {
                 if (baseBranchRef) baseBranchRef.current = el;
               }}
             >
+              <OptBtnHint show={showOptHints} label="⌥⇧B" />
               <IconPencil className="prp-branch-tag__edit" size={12} />
             </button>
           </span>
@@ -796,7 +801,7 @@ export function Header(props: any) {
             {showFullscreenToggle && effectiveLayout !== LAYOUT_DIFF ? (
               <button
                 type="button"
-                className="prp-header__icon-btn prp-fullscreen-toggle prp-has-tip"
+                className="prp-header__icon-btn prp-fullscreen-toggle prp-has-tip prp-opt-hint-host"
                 onClick={onToggleFullscreen}
                 aria-label={
                   shellFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'
@@ -804,12 +809,13 @@ export function Header(props: any) {
                 aria-pressed={Boolean(shellFullscreen)}
                 data-fullscreen={shellFullscreen ? '1' : '0'}
               >
+                <OptBtnHint show={showOptHints} label="⌥⇧F" />
                 <IconFullscreen active={Boolean(shellFullscreen)} size={16} />
                 <TipPopover
                   title={
                     shellFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'
                   }
-                  shortcut={shortcutMod ? `${shortcutMod}Shift+F` : null}
+                  shortcut="⌥⇧F"
                 />
               </button>
             ) : null}
@@ -867,7 +873,7 @@ export function Header(props: any) {
             ) : null}
             <button
               type="button"
-              className="prp-header__icon-btn prp-header__icon-btn--layout prp-has-tip"
+              className="prp-header__icon-btn prp-header__icon-btn--layout prp-has-tip prp-opt-hint-host"
               onClick={onToggleDiff}
               aria-label={
                 effectiveLayout === LAYOUT_DIFF
@@ -878,6 +884,7 @@ export function Header(props: any) {
                 effectiveLayout === LAYOUT_DIFF ? 'diff' : 'conversation'
               }
             >
+              <OptBtnHint show={showOptHints} label="⌥." />
               {effectiveLayout === LAYOUT_DIFF ? (
                 <IconConversation size={16} aria-hidden="true" />
               ) : (
@@ -889,7 +896,7 @@ export function Header(props: any) {
                     ? 'Show conversation'
                     : 'Show file diff'
                 }
-                shortcut={shortcutMod ? `${shortcutMod}.` : null}
+                shortcut="⌥."
               />
             </button>
             {canClose ? (

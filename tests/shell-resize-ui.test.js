@@ -83,14 +83,42 @@ const root = path.join(__dirname, '..');
   assert.equal(shellFullscreenClassName(fs), '');
 }
 
-// --- shortcut policy: Ctrl+F search; Ctrl+Shift+F fullscreen ---
+// --- shortcut policy: ⌘F search; ⌥⇧F fullscreen ---
 assert.equal(
-  resolveModalShortcutAction({ mod: true, shift: false, key: 'f' }),
+  resolveModalShortcutAction({
+    mod: true,
+    shift: false,
+    alt: false,
+    key: 'f',
+    code: 'KeyF',
+  }),
   'openSearch'
 );
 assert.equal(
-  resolveModalShortcutAction({ mod: true, shift: true, key: 'f' }),
+  resolveModalShortcutAction({
+    mod: false,
+    shift: true,
+    alt: true,
+    key: 'f',
+    code: 'KeyF',
+  }),
   'toggleFullscreen'
+);
+assert.equal(
+  resolveModalShortcutAction({ mod: true, shift: true, alt: false, key: 'f' }),
+  null,
+  '⌘⇧F no longer product shortcut'
+);
+assert.equal(
+  resolveModalShortcutAction({
+    mod: false,
+    shift: false,
+    alt: true,
+    key: 'f',
+    code: 'KeyF',
+  }),
+  null,
+  '⌥F is not Find'
 );
 
 // --- App wiring ---
@@ -177,7 +205,11 @@ assert.equal(
   assert.ok(pal.includes("action: 'openSearch'"));
   assert.ok(pal.includes("action: 'toggleFullscreen'"));
   assert.ok(pal.includes("shortcut: 'mod+f'") || pal.includes('mod+f'));
-  assert.ok(pal.includes('mod+shift+f') || pal.includes("shortcut: 'mod+shift+f'"));
+  assert.ok(
+    pal.includes('opt+shift+f') ||
+      pal.includes("shortcut: 'opt+shift+f'") ||
+      pal.includes('opt+shift+f')
+  );
 }
 
 // clamp with viewport after "resize" beyond bounds

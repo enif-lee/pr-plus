@@ -139,22 +139,29 @@ Open a PR title from the list → **centered modal** or **side sheet** on the **
 | Feature | Description |
 |---------|-------------|
 | **Files tree** | Nested dirs, extension multi-select, unread filter, collapse, mark-as-viewed (session); **floating scrollbar** |
+| **File step nav** | Prev/next file from the **current** file (`⌥⇧[` / `⌥⇧]`) beside the tree search; list focus scrolls into view |
 | **Collapsible / resizable file nav** | Focus the hunk pane when you need width |
+| **Single-file Diff mode** | Optional preference: hunk list shows **only the active file** (tree + next/prev still cover the full set). **Off by default** |
 | **Unified / split** | Diff modes |
 | **Expand omitted context** | Grow gaps between hunks (chunk / all) without reloading the PR |
 | **Commit-range filter** | Single commit or inclusive range—**fast** compare without leaving Diff |
-| **Review filters** | **Unresolved / Resolved / Pending** counts and file-set filtering for triage |
-| **Line selection** | Single click, multi-line drag, or **Shift-click range** in the same file |
+| **Review filters** | **Unresolved / Resolved / Pending** counts and file-set filtering for triage (`⌥U` / `⌥R` / `⌥P` toggle on Diff) |
+| **Floating Diff controller** | Bottom-right icon strip: prev/next file, page scroll, **Goto** `path:line[:line]` (or bare `line[:line]` on the current file) |
+| **Keyboard page scroll** | `⌥⇧↑` / `⌥⇧↓` move the Diff list by about one viewport |
+| **Line selection** | Single click, multi-line drag, or **Shift-click range** in the same file; arrows move the caret, **Shift+arrows** extend (plain arrows collapse back to single-line) |
 | **Selection island** | Comment / start review actions docked to the selection without leaving Diff |
 | **Line comments** | Immediate post or **pending review** batch |
+| **Pending review CTAs** | Diff toolbar Submit / Approve / Request changes; **Approve & Request changes hidden on your own PR** (GitHub rejects self-review) |
+| **Viewed toggle** | Mark the active file viewed/unread (`⌥⇧R` on Diff); checkbox tip only on the focused file |
 | **Inline threads** | Reply, resolve/unresolve, edit/delete; collapse-aware virtual heights |
 | **Image / binary diffs** | Images render in-diff; non-text binaries stay header-only; huge files can start collapsed |
 | **Suggestions** | Render ````suggestion` blocks; **Apply suggestion** (commit to head) |
-| **View-scoped Find (`⌘F`)** | Search **only the active surface**—Conversation corpus *or* Diff rows—no cross-view noise |
+| **View-scoped Find (`⌘F` / `Ctrl+F`)** | Search **only the active surface**—Conversation corpus *or* Diff rows—no cross-view noise |
 | **Markdown-preserving marks** | Search highlights keep code/markdown structure (no plain-text wipe) |
 | **Async chunked search** | Large corpora scan **incrementally** so typing stays responsive |
 | **Shared StepNav** | Prev/next for **threads** and **finder** hits (including **⌥J / ⌥K** where enabled) |
 | **Comment nav** | Jump prev/next inline review comments without layout thrash |
+| **Opt-hold tips** | Hold **⌥** for shortcut badges; tips **clear as soon as a chord fires** (until you release Opt) |
 
 #### Metadata & lifecycle
 
@@ -175,10 +182,27 @@ Open a PR title from the list → **centered modal** or **side sheet** on the **
 
 | Feature | Description |
 |---------|-------------|
-| **Linear-style palette** | `⌘K` / `Ctrl+K` inside the modal (GitHub’s site palette is suppressed while open) |
+| **Linear-style palette** | `⌥⇧K` for the pr+ palette (GitHub’s site `⌘K` / `Ctrl+K` is left to GitHub; Escape there no longer closes the pr+ shell) |
 | **Shared actions** | Labels, assignees, reviewers, base, review submit, merge, open GitHub, focus comment, … |
-| **Button shortcuts** | Primary actions show kbd hints (e.g. `⌘.` toggle diff, `⌘⇧M` merge) |
+| **Diff review filters** | `⌥U` / `⌥R` / `⌥P` — Unresolved / Resolved / Pending (toggle off with the same key) |
+| **Diff navigation** | File `⌥⇧[` `⌥⇧]`, page `⌥⇧↑` `⌥⇧↓`, viewed `⌥⇧R`, Goto via floating **:** control |
+| **Button shortcuts** | Primary actions show kbd hints; Opt-hold badges hide right after a chord fires |
 | **Multi-host PAT** | Default token for **github.com** only; up to **3 enterprise host↔PAT** pairs (no accidental enterprise use of the default PAT) |
+| **Popup options** | Auto-open embed, fast review load, reverse comments, **single-file Diff mode** |
+
+### Diff keyboard quick reference (modal)
+
+| Chord | Action |
+|-------|--------|
+| `⌘F` / `Ctrl+F` | Find in the active surface |
+| `⌥.` | Toggle Conversation ↔ Diff |
+| `⌥J` / `⌥K` | Next / previous review thread (or Find hit when Find is open) |
+| `⌥⇧[` / `⌥⇧]` | Previous / next file (from current file) |
+| `⌥⇧↑` / `⌥⇧↓` | Diff list previous / next page |
+| `⌥U` / `⌥R` / `⌥P` | Toggle Unresolved / Resolved / Pending file filter |
+| `⌥⇧R` | Toggle viewed on the **current** Diff file |
+| `↑` / `↓` | Move line selection (when a selection exists) |
+| `⇧↑` / `⇧↓` | Extend line selection range |
 
 Deep matrix of GitHub PR-view vs modal: **[docs/github-pr-parity.md](./docs/github-pr-parity.md)**.
 

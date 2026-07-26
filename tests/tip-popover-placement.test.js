@@ -77,7 +77,14 @@ const tip = { offsetHeight: 40, offsetWidth: 120 };
       return null;
     },
   };
-  assert.equal(inferPreferredPlacement(host), 'left');
+  assert.equal(inferPreferredPlacement(host), 'right');
+  const aside = {
+    closest(sel) {
+      if (sel === '.prp-conversation__aside') return {};
+      return null;
+    },
+  };
+  assert.equal(inferPreferredPlacement(aside), 'right');
   const collapse = {
     closest(sel) {
       if (sel === '.prp-aside-collapse-btn') return {};
@@ -92,6 +99,24 @@ const tip = { offsetHeight: 40, offsetWidth: 120 };
     },
   };
   assert.equal(inferPreferredPlacement(headerBtn), 'bottom');
+  const diffToolbar = {
+    closest(sel) {
+      if (sel === '.prp-diff-toolbar') return {};
+      return null;
+    },
+  };
+  assert.equal(
+    inferPreferredPlacement(diffToolbar),
+    'top',
+    'diff review chrome tips open upward'
+  );
+  const stepNav = {
+    closest(sel) {
+      if (sel === '.prp-step-nav') return {};
+      return null;
+    },
+  };
+  assert.equal(inferPreferredPlacement(stepNav), 'top');
 }
 
 // Clamp top tip near right edge so it does not overflow viewport

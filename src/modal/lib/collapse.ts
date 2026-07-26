@@ -325,3 +325,31 @@ export function materializeCollapsedPaths(collapsedPaths, files, viewedPaths = n
   }
   return defaultCollapsedPathSet(files, viewedPaths);
 }
+
+/**
+ * Sentinel so an explicit collapsed set can be non-empty after expanding the
+ * only collapsed path. Empty set re-enables implicit viewed/default collapse
+ * in {@link isPathCollapsed}.
+ */
+export const COLLAPSED_SET_EXPLICIT_EMPTY = '\0prp-collapsed-explicit';
+
+/**
+ * Expand one path in the collapsed set (materialize defaults first).
+ * Guarantees the path is not treated as collapsed afterward, even when it was
+ * the sole viewed/default-collapsed file (empty-set implicit collapse).
+ */
+export function expandPathInCollapsedSet(
+  collapsedPaths,
+  path,
+  files,
+  viewedPaths = null
+) {
+  const p = String(path || '').trim();
+  const n = materializeCollapsedPaths(collapsedPaths, files, viewedPaths);
+  if (p) n.delete(p);
+  n.delete(COLLAPSED_SET_EXPLICIT_EMPTY);
+  if (n.size === 0) {
+    n.add(COLLAPSED_SET_EXPLICIT_EMPTY);
+  }
+  return n;
+}

@@ -31,9 +31,17 @@ import { pendingReviewCount } from '@lib/pending-review';
 import { InlineThread } from '../diff/InlineThread';
 import { MarkdownView as Md } from '@common/MarkdownView';
 
-export function PendingReviewBar({ batch, onDiscard, onLeaveReviewAction, actionBusy }: any) {
+export function PendingReviewBar({
+  batch,
+  onDiscard,
+  onLeaveReviewAction,
+  actionBusy,
+  /** When false, hide Approve / Request changes (own PR). Default true. */
+  canSubmitReviewVerdict = true,
+}: any) {
   const count = typeof pendingReviewCount === 'function' ? pendingReviewCount(batch) : 0;
   if (!count) return null;
+  const showVerdict = canSubmitReviewVerdict !== false;
   return (
     <div className="prp-pending-bar">
       <span>
@@ -49,22 +57,26 @@ export function PendingReviewBar({ batch, onDiscard, onLeaveReviewAction, action
         >
           Submit as comment
         </Button>
-        <Button
-          size="sm"
-          variant="ok"
-          disabled={actionBusy}
-          onClick={() => onLeaveReviewAction?.('approve')}
-        >
-          Approve
-        </Button>
-        <Button
-          size="sm"
-          variant="warn"
-          disabled={actionBusy}
-          onClick={() => onLeaveReviewAction?.('request_changes')}
-        >
-          Request changes
-        </Button>
+        {showVerdict ? (
+          <Button
+            size="sm"
+            variant="ok"
+            disabled={actionBusy}
+            onClick={() => onLeaveReviewAction?.('approve')}
+          >
+            Approve
+          </Button>
+        ) : null}
+        {showVerdict ? (
+          <Button
+            size="sm"
+            variant="warn"
+            disabled={actionBusy}
+            onClick={() => onLeaveReviewAction?.('request_changes')}
+          >
+            Request changes
+          </Button>
+        ) : null}
         <Button size="sm" variant="danger" disabled={actionBusy} onClick={onDiscard}>
           Discard
         </Button>

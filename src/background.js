@@ -29,6 +29,8 @@ const ENTERPRISE_CS_ID = 'prp-enterprise-hosts';
 const CONTENT_SCRIPT_JS = [
   'src/tree.js',
   'src/dom.js',
+  'src/pr-list-focus.js',
+  'src/pulls-palette.js',
   'src/github-endpoints.js',
   'src/content-bridge.js',
   'src/content-bootstrap.js',

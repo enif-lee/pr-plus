@@ -22,6 +22,10 @@ export function StackStrip({
   hoverDelayMs = STACK_PATH_HOVER_MS,
   /** Changes when the open PR changes — resets picker state. */
   resetKey = null,
+  /** Option held: show ⌥1–9 badges on stack chips */
+  showOptHotkeys = false,
+  /** Open PR number — authoritative for current chip focus */
+  currentNumber = null,
 }: any) {
   const branchByLevel = useMemo(() => {
     const m = new Map<number, any>();
@@ -141,9 +145,25 @@ export function StackStrip({
   );
 
   const list = Array.isArray(items) ? items : [];
+  const curNum = Number(currentNumber);
   const show = list.length >= 2;
   const pickerOpen = Boolean(openKey && openBranch && anchorEl);
   const stripScrollRef = useRef<HTMLDivElement | null>(null);
+
+  // Ensure the current stack chip is scrolled into view after adjacent nav
+  useEffect(() => {
+    if (!show || !Number.isFinite(curNum) || curNum <= 0) return;
+    const host = stripScrollRef.current;
+    if (!host) return;
+    const chip = host.querySelector(
+      `[data-pr-number="${curNum}"]`
+    ) as HTMLElement | null;
+    try {
+      chip?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    } catch {
+      /* ignore */
+    }
+  }, [show, curNum, list.length, resetKey]);
 
   // Non-passive wheel: vertical wheel → horizontal scroll (must stay before early return)
   useEffect(() => {
@@ -201,8 +221,13 @@ export function StackStrip({
           const chipKey = `level-${levelNum}`;
           const title = it.title || `#${it.number}`;
           const isOpenLevel = openKey === chipKey;
+          const digit = i < 9 ? i + 1 : null;
+          const isCurrent =
+            (Number.isFinite(curNum) && curNum > 0
+              ? levelNum === curNum
+              : Boolean(it.current));
           const className = `prp-stack-strip__item${
-            it.current ? ' prp-stack-strip__item--current' : ''
+            isCurrent ? ' prp-stack-strip__item--current' : ''
           }${hasPicker ? ' prp-stack-strip__item--fork' : ''}${
             isOpenLevel ? ' prp-stack-strip__item--picker-open' : ''
           }`;
@@ -226,15 +251,18 @@ export function StackStrip({
                 className={className}
                 title={
                   hasPicker
-                    ? `${title} · click to open · hover for other paths at this level`
-                    : `${title} · click to open`
+                    ? `${title} · click to open · hover for other paths at this level${
+                        digit != null ? ` · ⌥${digit}` : ''
+                      }`
+                    : `${title} · click to open${digit != null ? ` · ⌥${digit}` : ''}`
                 }
-                aria-current={it.current ? 'page' : undefined}
+                aria-current={isCurrent ? 'page' : undefined}
                 aria-expanded={isOpenLevel || undefined}
                 aria-haspopup={hasPicker ? 'listbox' : undefined}
                 data-stack-level={levelNum}
                 data-stack-fork={hasPicker ? '1' : '0'}
                 data-pr-number={levelNum}
+                data-prp-opt-digit={digit != null ? String(digit) : undefined}
                 onClick={(e) => navigateTo(levelNum, e)}
                 onMouseEnter={() => onChipEnter(chipKey, hasPicker)}
                 onMouseLeave={(e) => onChipLeave(e, chipKey)}
@@ -258,6 +286,11 @@ export function StackStrip({
                   >
                     ▾
                   </span>
+                ) : null}
+                {showOptHotkeys && digit != null ? (
+                  <kbd className="prp-modal-hotkey" aria-hidden="true">
+                    ⌥{digit}
+                  </kbd>
                 ) : null}
               </button>
             </React.Fragment>

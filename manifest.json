@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "pr+",
-  "version": "1.5.1",
+  "version": "1.6.0",
   "description": "GitHub PR stack tree + fast in-page review shell for conversation, diff, and merge.",
   "icons": {
     "16": "assets/icons/icon16.png",
@@ -37,6 +37,8 @@
       "js": [
         "src/tree.js",
         "src/dom.js",
+        "src/pr-list-focus.js",
+        "src/pulls-palette.js",
         "src/github-endpoints.js",
         "src/content-bridge.js",
         "src/content-bootstrap.js",
@@ -44,6 +46,7 @@
         "src/modal/pure/detail-idb-cache.js",
         "src/modal/pure/detail-cache.js",
         "src/modal/pure/page-embed.js",
+        "src/modal/pure/floating-scrollbar.js",
         "src/modal/dist/pr-modal.bundle.js",
         "src/pr-modal-host.js"
       ],

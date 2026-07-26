@@ -12,6 +12,12 @@ import {
 import { filterFilesByQuery, isPathViewed } from '@lib/review-threads';
 import { isPathCollapsed } from '@lib/collapse';
 import { IconDisclosure } from '@common/icons';
+import { TipPopover } from '@common/TipPopover';
+import { StepNav } from '@common/StepNav';
+import {
+  fileNavShortcutLabel,
+  TOGGLE_VIEWED_SHORTCUT,
+} from '@lib/shortcut-policy';
 import { FloatingScrollbar } from '../../components/common/FloatingScrollbar';
 
 /** Cap extension chips so the search row stays usable on narrow nav. */
@@ -46,7 +52,29 @@ function FolderFileTreeImpl(props: any) {
     onSelectedExts = null,
     unreadOnly: unreadOnlyProp = null,
     onUnreadOnly = null,
+    /** Visible file list index for prev/next (0-based; -1 if unknown) */
+    fileIndex = -1,
+    fileTotal = 0,
+    onPrevFile = null,
+    onNextFile = null,
+    showOptHints = false,
   } = props;
+
+  const isMac =
+    typeof navigator !== 'undefined' &&
+    /Mac|iPhone|iPad/.test(navigator.platform || '');
+  const filePrevShortcut =
+    typeof fileNavShortcutLabel === 'function'
+      ? fileNavShortcutLabel('prev', isMac)
+      : isMac
+        ? '⌥⇧['
+        : 'Alt+Shift+[';
+  const fileNextShortcut =
+    typeof fileNavShortcutLabel === 'function'
+      ? fileNavShortcutLabel('next', isMac)
+      : isMac
+        ? '⌥⇧]'
+        : 'Alt+Shift+]';
 
   const [selectedExtsLocal, setSelectedExtsLocal] = useState(() => new Set<string>());
   const [unreadOnlyLocal, setUnreadOnlyLocal] = useState(false);
@@ -135,19 +163,37 @@ function FolderFileTreeImpl(props: any) {
       aria-hidden={navCollapsed ? true : undefined}
     >
       <div className="prp-filetree__search">
-        <input
-          className="prp-filetree__search-input"
-          placeholder={
-            filesLoading ? 'Loading all files…' : 'Search files by path…'
-          }
-          value={fileQuery || ''}
-          onChange={(e) => onFileQuery?.(e.target.value)}
-          onFocus={() => {
-            void onSearchFocus?.();
-          }}
-          aria-label="Search files"
-          aria-busy={filesLoading ? true : undefined}
-        />
+        <div className="prp-filetree__search-row">
+          <input
+            className="prp-filetree__search-input"
+            placeholder={
+              filesLoading ? 'Loading all files…' : 'Search files by path…'
+            }
+            value={fileQuery || ''}
+            onChange={(e) => onFileQuery?.(e.target.value)}
+            onFocus={() => {
+              void onSearchFocus?.();
+            }}
+            aria-label="Search files"
+            aria-busy={filesLoading ? true : undefined}
+          />
+          {Number(fileTotal) > 0 && (onPrevFile || onNextFile) ? (
+            <StepNav
+              className="prp-filetree__file-nav"
+              index={fileIndex}
+              total={fileTotal}
+              onPrev={onPrevFile}
+              onNext={onNextFile}
+              label="Files"
+              title="Previous / next file (from current file)"
+              prevTitle="Previous file"
+              nextTitle="Next file"
+              prevShortcut={filePrevShortcut}
+              nextShortcut={fileNextShortcut}
+              showOptHints={showOptHints}
+            />
+          ) : null}
+        </div>
         <div
           className="prp-filetree__filters"
           role="group"
@@ -251,13 +297,33 @@ function FolderFileTreeImpl(props: any) {
                 style={{ paddingLeft: 4 + (node.depth || 0) * 12 }}
                 data-file-status={status || undefined}
               >
-                <label className="prp-filetree__viewed" title="Mark as viewed">
+                <label
+                  className={`prp-filetree__viewed${
+                    node.path === activePath ? ' prp-has-tip' : ''
+                  }`}
+                  title={node.path === activePath ? undefined : 'Mark as viewed'}
+                >
                   <input
                     type="checkbox"
                     checked={viewed}
                     onChange={() => onToggleViewed?.(node.path)}
                     onClick={(e) => e.stopPropagation()}
+                    aria-label={
+                      viewed ? 'Mark as unread' : 'Mark as viewed'
+                    }
                   />
+                  {node.path === activePath ? (
+                    <TipPopover
+                      title={viewed ? 'Mark as unread' : 'Mark as viewed'}
+                      shortcut={
+                        typeof navigator !== 'undefined' &&
+                        /Mac|iPhone|iPad/.test(navigator.platform || '')
+                          ? TOGGLE_VIEWED_SHORTCUT.labelMac
+                          : TOGGLE_VIEWED_SHORTCUT.labelWin
+                      }
+                      preferredPlacement="right"
+                    />
+                  ) : null}
                 </label>
                 <button
                   type="button"
@@ -270,6 +336,7 @@ function FolderFileTreeImpl(props: any) {
                     .join(' ')}
                   onClick={() => onSelect?.(node.path)}
                   data-file-status={status || undefined}
+                  data-file-path={node.path}
                 >
                   <span
                     className={[

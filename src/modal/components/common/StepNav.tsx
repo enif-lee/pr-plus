@@ -1,5 +1,6 @@
 import React, { memo } from 'react';
 import { TipPopover } from '@common/TipPopover';
+import { OptBtnHint } from '@common/OptBtnHint';
 
 export type StepNavProps = {
   /** 0-based current hit/thread index; negative means none selected */
@@ -26,6 +27,8 @@ export type StepNavProps = {
   prevShortcut?: string | null;
   /** Keyboard chord shown in tip (e.g. ⌥J / Alt+J) */
   nextShortcut?: string | null;
+  /** Option-hold: show shortcut badges on prev/next */
+  showOptHints?: boolean;
 };
 
 /**
@@ -53,6 +56,7 @@ export const StepNav = memo(function StepNav({
   nextTitle = 'Next',
   prevShortcut = null,
   nextShortcut = null,
+  showOptHints = false,
 }: StepNavProps) {
   const n = Math.max(0, Number(total) || 0);
   const i = Number(index);
@@ -62,6 +66,8 @@ export const StepNav = memo(function StepNav({
   const navDisabled = Boolean(disabled || busy || n <= 0);
   const prevTip = prevTitle || 'Previous';
   const nextTip = nextTitle || 'Next';
+  const prevKbd = prevShortcut ? String(prevShortcut).trim() : '';
+  const nextKbd = nextShortcut ? String(nextShortcut).trim() : '';
 
   return (
     <div
@@ -88,33 +94,49 @@ export const StepNav = memo(function StepNav({
       </span>
       <button
         type="button"
-        className="prp-step-nav__btn prp-has-tip"
+        className={`prp-step-nav__btn prp-has-tip${
+          prevKbd ? ' prp-opt-hint-host' : ''
+        }`}
         onClick={() => onPrev?.()}
         disabled={navDisabled}
-        title={
-          prevShortcut ? `${prevTip} (${prevShortcut})` : prevTip
-        }
-        aria-label={
-          prevShortcut ? `${prevTip} (${prevShortcut})` : prevTip
-        }
+        aria-label={prevKbd ? `${prevTip} (${prevKbd})` : prevTip}
       >
+        {prevKbd ? (
+          <OptBtnHint
+            show={Boolean(showOptHints && prevKbd)}
+            label={prevKbd}
+            preferredPlacement="top"
+          />
+        ) : null}
         {prevGlyph}
-        <TipPopover title={prevTip} shortcut={prevShortcut || undefined} />
+        <TipPopover
+          title={prevTip}
+          shortcut={prevKbd || undefined}
+          preferredPlacement="top"
+        />
       </button>
       <button
         type="button"
-        className="prp-step-nav__btn prp-has-tip"
+        className={`prp-step-nav__btn prp-has-tip${
+          nextKbd ? ' prp-opt-hint-host' : ''
+        }`}
         onClick={() => onNext?.()}
         disabled={navDisabled}
-        title={
-          nextShortcut ? `${nextTip} (${nextShortcut})` : nextTip
-        }
-        aria-label={
-          nextShortcut ? `${nextTip} (${nextShortcut})` : nextTip
-        }
+        aria-label={nextKbd ? `${nextTip} (${nextKbd})` : nextTip}
       >
+        {nextKbd ? (
+          <OptBtnHint
+            show={Boolean(showOptHints && nextKbd)}
+            label={nextKbd}
+            preferredPlacement="top"
+          />
+        ) : null}
         {nextGlyph}
-        <TipPopover title={nextTip} shortcut={nextShortcut || undefined} />
+        <TipPopover
+          title={nextTip}
+          shortcut={nextKbd || undefined}
+          preferredPlacement="top"
+        />
       </button>
     </div>
   );

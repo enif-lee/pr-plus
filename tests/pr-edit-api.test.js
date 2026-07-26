@@ -228,9 +228,11 @@ function mockRecorder() {
   const sp = shortcutPolicy;
   assert.equal(
     sp.resolveModalShortcutAction({
-      mod: true,
-      shift: false,
+      mod: false,
+      shift: true,
+      alt: true,
       key: 'k',
+      code: 'KeyK',
       paletteOpen: false,
     }),
     'openPalette'
@@ -238,30 +240,80 @@ function mockRecorder() {
   assert.equal(
     sp.resolveModalShortcutAction({
       mod: true,
-      shift: false,
-      key: '.',
+      shift: true,
+      alt: false,
+      key: 'k',
       paletteOpen: false,
     }),
-    'toggleDiff'
+    null,
+    '⌘⇧K no longer product palette'
   );
-  // ⌘F / Ctrl+F opens in-modal Find; fullscreen is mod+shift+f
   assert.equal(
     sp.resolveModalShortcutAction({
       mod: true,
       shift: false,
+      key: 'k',
+      paletteOpen: false,
+    }),
+    null,
+    '⌘K left for GitHub native palette'
+  );
+  assert.equal(
+    sp.resolveModalShortcutAction({
+      mod: false,
+      shift: false,
+      alt: true,
+      key: '.',
+      code: 'Period',
+      paletteOpen: false,
+    }),
+    'toggleDiff'
+  );
+  // ⌘F Find; ⌥⇧F fullscreen
+  assert.equal(
+    sp.resolveModalShortcutAction({
+      mod: true,
+      shift: false,
+      alt: false,
       key: 'f',
+      code: 'KeyF',
       paletteOpen: false,
     }),
     'openSearch'
   );
   assert.equal(
     sp.resolveModalShortcutAction({
-      mod: true,
+      mod: false,
       shift: true,
+      alt: true,
       key: 'f',
+      code: 'KeyF',
       paletteOpen: false,
     }),
     'toggleFullscreen'
+  );
+  assert.equal(
+    sp.resolveModalShortcutAction({
+      mod: false,
+      shift: false,
+      alt: true,
+      key: 'f',
+      code: 'KeyF',
+      paletteOpen: false,
+    }),
+    null,
+    '⌥F is not Find'
+  );
+  assert.equal(
+    sp.resolveModalShortcutAction({
+      mod: true,
+      shift: true,
+      alt: false,
+      key: 'f',
+      paletteOpen: false,
+    }),
+    null,
+    '⌘⇧F no longer product shortcut'
   );
   // Leave-review chords intentionally disabled
   assert.equal(

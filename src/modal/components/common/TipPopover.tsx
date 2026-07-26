@@ -198,10 +198,32 @@ export function hasTipContent(title?: string | null, shortcut?: string | null) {
 /** Context-based preferred side when prop is omitted. */
 export function inferPreferredPlacement(host: HTMLElement | null): TipPlacement {
   if (!host || typeof host.closest !== 'function') return 'top';
-  if (host.closest('.prp-aside-compact')) return 'left';
+  // Right conversation rail (expanded or compact): open toward the right edge
+  if (
+    host.closest('.prp-aside-compact') ||
+    host.closest('.prp-conversation__aside') ||
+    host.closest('.prp-conversation__aside-host')
+  ) {
+    return 'right';
+  }
   if (host.closest('.prp-aside-collapse-btn')) return 'bottom';
   // Floating selection group often sits near bottom of viewport
   if (host.closest('.prp-selection-group')) return 'top';
+  // Diff review chrome (thread nav, leave-review CTAs) — open above the toolbar
+  if (
+    host.closest('.prp-diff-toolbar') ||
+    host.closest('.prp-diff-toolbar__pending') ||
+    host.closest('.prp-diff-toolbar__thread-tools')
+  ) {
+    return 'top';
+  }
+  // File explorer step-nav (beside search) — open above so it stays readable
+  if (
+    host.closest('.prp-filetree__file-nav') ||
+    host.closest('.prp-filetree__search-row')
+  ) {
+    return 'top';
+  }
   // Header action cluster is top-right — prefer below so tips stay on-screen
   if (
     host.closest('.prp-header__actions') ||

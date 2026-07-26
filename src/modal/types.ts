@@ -98,12 +98,15 @@ export interface PrDetail {
   commits?: Array<Record<string, unknown>>;
   checks?: { state?: string; contexts?: unknown[] };
   linkedIssues?: number[];
-  /** Issues linked for Development (closing refs / body #N). */
+  /** Issues/PRs linked for Development (closing refs / body #N). */
   developmentIssues?: Array<{
     number: number;
     title?: string;
     url?: string;
     state?: string;
+    /** 'issue' | 'pull' when resolved via GraphQL. */
+    kind?: string;
+    source?: string;
   }>;
   /** ProjectV2 boards this PR is on. */
   projects?: Array<{

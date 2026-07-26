@@ -44,6 +44,245 @@ export function beginLineSelection(row) {
 }
 
 /**
+ * Parse Goto query: `path:line`, `path:line:line`, `line`, or `line:line`.
+ * Bare line forms leave path null (caller uses current file).
+ * Parses line numbers from the right so paths with colons stay intact.
+ */
+export function parseGotoQuery(raw: unknown): {
+  path: string | null;
+  startLine: number;
+  endLine: number | null;
+} | null {
+  const s = String(raw ?? '').trim();
+  if (!s) return null;
+
+  const parts = s.split(':');
+  if (parts.length === 1) {
+    if (!/^\d+$/.test(parts[0])) return null;
+    const startLine = Number(parts[0]);
+    if (!Number.isFinite(startLine) || startLine < 1) return null;
+    return { path: null, startLine, endLine: null };
+  }
+
+  const last = parts[parts.length - 1];
+  if (!/^\d+$/.test(last)) return null;
+  const lastN = Number(last);
+  if (!Number.isFinite(lastN) || lastN < 1) return null;
+
+  const secondLast = parts[parts.length - 2];
+  if (/^\d+$/.test(secondLast)) {
+    const secondN = Number(secondLast);
+    if (!Number.isFinite(secondN) || secondN < 1) return null;
+    if (parts.length === 2) {
+      // line:line
+      return {
+        path: null,
+        startLine: secondN,
+        endLine: lastN !== secondN ? lastN : null,
+      };
+    }
+    // path:line:line
+    const path = parts.slice(0, -2).join(':').trim();
+    if (!path) return null;
+    return {
+      path,
+      startLine: secondN,
+      endLine: lastN !== secondN ? lastN : null,
+    };
+  }
+
+  // path:line
+  const path = parts.slice(0, -1).join(':').trim();
+  if (!path) return null;
+  return { path, startLine: lastN, endLine: null };
+}
+
+/**
+ * Find a selectable diff-line row for path + line (prefer RIGHT/newLine).
+ */
+export function findSelectableRowForLine(
+  virtualRows: any[] | null | undefined,
+  filePath: unknown,
+  line: unknown,
+  preferredSide = 'RIGHT'
+) {
+  const list = Array.isArray(virtualRows) ? virtualRows : [];
+  const path = String(filePath || '').trim();
+  const ln = Number(line);
+  if (!path || !Number.isFinite(ln) || ln < 1) return null;
+  const preferLeft = preferredSide === 'LEFT';
+  let fallback = null;
+  for (const row of list) {
+    if (!row || row.filePath !== path || !isSelectableDiffRow(row)) continue;
+    if (preferLeft) {
+      if (row.oldLine != null && Number(row.oldLine) === ln) return row;
+      if (row.newLine != null && Number(row.newLine) === ln) fallback = fallback || row;
+    } else {
+      if (row.newLine != null && Number(row.newLine) === ln) return row;
+      if (row.oldLine != null && Number(row.oldLine) === ln) fallback = fallback || row;
+    }
+  }
+  return fallback;
+}
+
+/**
+ * Build selection from path + start/end lines using virtual rows.
+ * Single line when endLine is null or equals startLine.
+ */
+export function selectionFromGoto(
+  virtualRows: any[] | null | undefined,
+  filePath: unknown,
+  startLine: unknown,
+  endLine: unknown = null
+) {
+  const startRow = findSelectableRowForLine(virtualRows, filePath, startLine, 'RIGHT');
+  if (!startRow) return null;
+  const endLn =
+    endLine == null || endLine === '' ? null : Number(endLine);
+  if (endLn == null || !Number.isFinite(endLn) || endLn === Number(startLine)) {
+    return beginLineSelection(startRow);
+  }
+  const endRow = findSelectableRowForLine(virtualRows, filePath, endLn, 'RIGHT');
+  if (!endRow) return beginLineSelection(startRow);
+  const started = beginLineSelection(startRow);
+  return extendLineSelection(started, endRow) || started;
+}
+
+/**
+ * Whether a file is still collapsed in the virtual list (only header / collapsed flag).
+ * Used by Goto to wait for expand before selecting lines.
+ */
+export function isFileCollapsedInVirtualRows(
+  virtualRows: any[] | null | undefined,
+  filePath: unknown
+): boolean {
+  const path = String(filePath || '').trim();
+  if (!path) return false;
+  const list = Array.isArray(virtualRows) ? virtualRows : [];
+  const header = list.find(
+    (r) =>
+      r &&
+      r.kind === 'file-header' &&
+      (r.filePath === path || r.path === path)
+  );
+  if (header && header.collapsed) return true;
+  // Collapsed files often omit body rows — only a single file-header for that path
+  const pathRows = list.filter(
+    (r) => r && (r.filePath === path || r.path === path)
+  );
+  if (
+    pathRows.length === 1 &&
+    pathRows[0].kind === 'file-header'
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Resolve a pending Goto against current virtual rows.
+ * - ready: selection can be applied now
+ * - waiting: file still collapsed / rows not rebuilt yet
+ * - missing: expanded (or no collapse signal) but line not found
+ */
+export function resolvePendingGotoSelection(
+  virtualRows: any[] | null | undefined,
+  pending: {
+    path?: unknown;
+    startLine?: unknown;
+    endLine?: unknown;
+  } | null
+):
+  | { status: 'idle' }
+  | { status: 'ready'; selection: any }
+  | { status: 'waiting' }
+  | { status: 'missing' } {
+  if (!pending || !String(pending.path || '').trim()) return { status: 'idle' };
+  const path = String(pending.path).trim();
+  const sel = selectionFromGoto(
+    virtualRows,
+    path,
+    pending.startLine,
+    pending.endLine
+  );
+  if (sel) return { status: 'ready', selection: sel };
+  if (isFileCollapsedInVirtualRows(virtualRows, path)) {
+    return { status: 'waiting' };
+  }
+  return { status: 'missing' };
+}
+
+/**
+ * Resolve Goto path against a file list (exact, then suffix match).
+ * Empty path → activePath.
+ */
+export function resolveGotoPathAmongFiles(
+  queryPath: unknown,
+  activePath: unknown,
+  files: any[] | null | undefined
+): string | null {
+  let path = String(queryPath || '').trim();
+  if (!path) {
+    path = String(activePath || '').trim();
+    return path || null;
+  }
+  const list = Array.isArray(files) ? files : [];
+  const exact = list.find((f) => {
+    const p = String(f?.filename || f?.path || '').trim();
+    return p === path;
+  });
+  if (exact) return String(exact.filename || exact.path || path).trim();
+  const suffix = list.find((f) => {
+    const p = String(f?.filename || f?.path || '');
+    return p === path || p.endsWith('/' + path) || p.endsWith(path);
+  });
+  if (suffix) return String(suffix.filename || suffix.path || path).trim();
+  // Allow navigating even if not in filtered list (path as typed)
+  return path;
+}
+
+/**
+ * Move or extend an active line selection by one selectable row in the same file.
+ * - shift=false → new single-line selection at adjacent row
+ * - shift=true → extend head (range); keeps anchor
+ */
+export function moveLineSelection(
+  selection: any,
+  virtualRows: any[] | null | undefined,
+  delta: number,
+  opts: { shift?: boolean } = {}
+) {
+  if (!selection || selection.kind === 'file' || selection.subjectType === 'file') {
+    return selection;
+  }
+  const list = Array.isArray(virtualRows) ? virtualRows : [];
+  if (!list.length) return selection;
+  const headIdx = Number(selection.headRowIndex);
+  if (!Number.isFinite(headIdx)) return selection;
+  const d = delta < 0 ? -1 : 1;
+  const path = String(selection.filePath || '');
+  let i = headIdx + d;
+  while (i >= 0 && i < list.length) {
+    const row = list[i];
+    if (!row) {
+      i += d;
+      continue;
+    }
+    // Stop when leaving this file
+    if (row.filePath && row.filePath !== path) break;
+    if (row.kind === 'file-header' && row.filePath && row.filePath !== path) break;
+    if (isSelectableDiffRow(row) && row.filePath === path) {
+      if (opts.shift) {
+        return extendLineSelection(selection, row) || selection;
+      }
+      return beginLineSelection(row) || selection;
+    }
+    i += d;
+  }
+  return selection;
+}
+
+/**
  * Extend selection to another row (same file only).
  * Always updates headRowIndex (visual range). Line/side track the row for the API.
  *

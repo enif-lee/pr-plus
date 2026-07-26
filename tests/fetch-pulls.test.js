@@ -8,6 +8,7 @@ async function main() {
     mapApiPullRequest,
     findDanglingPrNumbers,
     fetchPullByNumber,
+    fetchIssueOrPrSummaries,
   } = require('../src/fetch-pulls.js');
 
   // buildApiHeaders with token
@@ -370,6 +371,51 @@ async function main() {
     const prs = await fetchOpenPulls('o', 'r', mockFetch, { token: null });
     assert.equal(prs[0].magicLinks[0].key, 'ENG-88');
     assert.equal(prs[0].magicLinks[0].url, 'https://ex.test/ENG-88');
+  }
+
+  // fetchIssueOrPrSummaries resolves titles for Development rows
+  {
+    const mockFetch = async (url, init) => {
+      assert.match(String(url), /graphql/i);
+      const body = JSON.parse(init?.body || '{}');
+      assert.match(String(body.query || ''), /issueOrPullRequest/);
+      return {
+        ok: true,
+        json: async () => ({
+          data: {
+            repository: {
+              n0: {
+                __typename: 'Issue',
+                number: 12,
+                title: 'Fix login crash',
+                url: 'https://github.com/o/r/issues/12',
+                state: 'OPEN',
+              },
+              n1: {
+                __typename: 'PullRequest',
+                number: 34,
+                title: 'Depends on stack base',
+                url: 'https://github.com/o/r/pull/34',
+                state: 'OPEN',
+              },
+            },
+          },
+        }),
+      };
+    };
+    const map = await fetchIssueOrPrSummaries(
+      'o',
+      'r',
+      [12, 34],
+      mockFetch,
+      'tok'
+    );
+    assert.equal(map.size, 2);
+    assert.equal(map.get(12)?.title, 'Fix login crash');
+    assert.equal(map.get(12)?.kind, 'issue');
+    assert.equal(map.get(34)?.title, 'Depends on stack base');
+    assert.equal(map.get(34)?.kind, 'pull');
+    assert.equal(map.get(34)?.url, 'https://github.com/o/r/pull/34');
   }
 
   console.log('fetch-pulls.test.js: all assertions passed');

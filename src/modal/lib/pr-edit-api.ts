@@ -333,6 +333,42 @@ export function mapLeaveReviewAction(action) {
   return { kind: 'issue-comment', event: 'COMMENT' };
 }
 
+/** Normalize GitHub login for equality (case-insensitive). */
+export function normalizeGithubLogin(login: unknown): string {
+  return String(login || '')
+    .trim()
+    .replace(/^@/, '')
+    .toLowerCase();
+}
+
+/**
+ * True when the signed-in viewer is the PR author.
+ * GitHub rejects APPROVE / REQUEST_CHANGES on your own PR (HTTP 422).
+ */
+export function isViewerPrAuthor(
+  detail: { author?: unknown; viewerLogin?: unknown } | null | undefined
+): boolean {
+  const author = normalizeGithubLogin(detail?.author);
+  const viewer = normalizeGithubLogin(detail?.viewerLogin);
+  return Boolean(author && viewer && author === viewer);
+}
+
+/**
+ * Approve / Request changes are only valid when the viewer is not the author.
+ * Submit-as-comment remains allowed on own PRs.
+ */
+export function canSubmitReviewVerdict(
+  detail: { author?: unknown; viewerLogin?: unknown } | null | undefined
+): boolean {
+  return !isViewerPrAuthor(detail);
+}
+
+/** True for leave-review kinds that require a non-author reviewer. */
+export function isReviewVerdictKind(kind: unknown): boolean {
+  const k = String(kind || '').toLowerCase();
+  return k === 'approve' || k === 'request_changes' || k === 'request-changes';
+}
+
 /**
  * Map GitHub REST review-comment payload → app shape (optimistic UI).
  * Used after postReviewComment / replyToReviewComment so diff virtual rows

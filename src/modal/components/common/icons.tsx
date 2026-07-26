@@ -16,6 +16,7 @@ import {
   ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  ChevronUpIcon,
   CircleSlashIcon,
   CommentDiscussionIcon,
   CopyIcon,
@@ -87,6 +88,7 @@ export const IconFileDiff = wrap(FileDiffIcon);
 export const IconConversation = wrap(CommentDiscussionIcon);
 export const IconKebab = wrap(KebabHorizontalIcon);
 export const IconChevronDown = wrap(ChevronDownIcon);
+export const IconChevronUp = wrap(ChevronUpIcon);
 export const IconChevronRight = wrap(ChevronRightIcon);
 export const IconChevronLeft = wrap(ChevronLeftIcon);
 export const IconArrowLeft = wrap(ArrowLeftIcon);

@@ -15,6 +15,7 @@ import {
   IconChevronRight,
   IconDisclosure,
   IconFileDiff,
+  IconLinkExternal,
   IconMergeStatus,
   IconPencil,
   IconTrash,
@@ -59,6 +60,9 @@ import {
   applyEmbedWheelScroll,
   isEmbedPresentation,
 } from '@lib/page-embed';
+import { resolveDevelopmentMainOpen } from '@lib/command-palette';
+import { canSubmitReviewVerdict } from '@lib/pr-edit-api';
+import { OptBtnHint } from '@common/OptBtnHint';
 
 function ConversationViewImpl(props: any) {
   const {
@@ -108,6 +112,12 @@ function ConversationViewImpl(props: any) {
     onSetDraftStage,
     onClosePr,
     onReopenPr,
+    /** Open another PR in-modal/sheet (Development links). */
+    onOpenLinkedPr = null,
+    /** Known open PR numbers (same repo) for Development in-modal routing. */
+    knownPullNumbers = null,
+    /** Option held: shortcut badges above mapped buttons */
+    showOptHints = false,
     commentBoxRef,
     onUploadFile,
     reviewerAddRef,
@@ -362,6 +372,11 @@ function ConversationViewImpl(props: any) {
   if (!detail) return null;
 
   const canEditMeta = Boolean(detail.viewerLogin);
+  // GitHub rejects APPROVE / REQUEST_CHANGES on your own PR
+  const showReviewVerdict =
+    typeof canSubmitReviewVerdict === 'function'
+      ? canSubmitReviewVerdict(detail)
+      : true;
   const linkCtx = {
     owner: detail.owner,
     repo: detail.repo,
@@ -1115,7 +1130,8 @@ function ConversationViewImpl(props: any) {
                 data-force-merge={ms.forceMerge ? '1' : '0'}
                 data-can-merge={ms.canMerge ? '1' : '0'}
               >
-                <div className="prp-merge-method__split">
+                <div className="prp-merge-method__split prp-opt-hint-host">
+                  <OptBtnHint show={showOptHints} label="⌥⇧M" />
                   <Button
                     className={`prp-merge-method__primary prp-merge-method__primary--${
                       ms.ctaVariant || 'default'
@@ -1129,6 +1145,7 @@ function ConversationViewImpl(props: any) {
                         : MERGE_METHODS.find((m) => m.id === mergeMethod)?.description ||
                           'Merge pull request'
                     }
+                    shortcut="⌥⇧M"
                   >
                     {mergeMethodButtonLabel(mergeMethod, {
                       force: Boolean(ms.forceMerge),
@@ -1178,25 +1195,40 @@ function ConversationViewImpl(props: any) {
             ) : null}
 
             {ms.showUpdateBranch ? (
-              <Button size="sm" disabled={actionBusy} onClick={onUpdateBranch}>
-                Update branch
-              </Button>
+              <span className="prp-opt-hint-host">
+                <OptBtnHint show={showOptHints} label="⌥⇧U" />
+                <Button size="sm" disabled={actionBusy} onClick={onUpdateBranch} shortcut="⌥⇧U">
+                  Update branch
+                </Button>
+              </span>
             ) : null}
 
             {ms.draftToggle === 'ready' ? (
-              <Button
-                size="sm"
-                variant="primary"
-                disabled={actionBusy}
-                onClick={() => onSetDraftStage?.('ready')}
-              >
-                Ready for review
-              </Button>
+              <span className="prp-opt-hint-host">
+                <OptBtnHint show={showOptHints} label="⌥⇧D" />
+                <Button
+                  size="sm"
+                  variant="primary"
+                  disabled={actionBusy}
+                  onClick={() => onSetDraftStage?.('ready')}
+                  shortcut="⌥⇧D"
+                >
+                  Ready for review
+                </Button>
+              </span>
             ) : null}
             {ms.draftToggle === 'draft' ? (
-              <Button size="sm" disabled={actionBusy} onClick={() => onSetDraftStage?.('draft')}>
-                Convert to draft
-              </Button>
+              <span className="prp-opt-hint-host">
+                <OptBtnHint show={showOptHints} label="⌥⇧D" />
+                <Button
+                  size="sm"
+                  disabled={actionBusy}
+                  onClick={() => onSetDraftStage?.('draft')}
+                  shortcut="⌥⇧D"
+                >
+                  Convert to draft
+                </Button>
+              </span>
             ) : null}
           </div>
         ) : null}
@@ -1348,24 +1380,28 @@ function ConversationViewImpl(props: any) {
               >
                 Submit review
               </Button>
-              <Button
-                size="sm"
-                variant="ok"
-                disabled={actionBusy}
-                onClick={() => onLeaveReviewAction?.('approve')}
-                title="Approve pull request"
-              >
-                Approve
-              </Button>
-              <Button
-                size="sm"
-                variant="warn"
-                disabled={actionBusy}
-                onClick={() => onLeaveReviewAction?.('request_changes')}
-                title="Request changes"
-              >
-                Request changes
-              </Button>
+              {showReviewVerdict ? (
+                <>
+                  <Button
+                    size="sm"
+                    variant="ok"
+                    disabled={actionBusy}
+                    onClick={() => onLeaveReviewAction?.('approve')}
+                    title="Approve pull request"
+                  >
+                    Approve
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="warn"
+                    disabled={actionBusy}
+                    onClick={() => onLeaveReviewAction?.('request_changes')}
+                    title="Request changes"
+                  >
+                    Request changes
+                  </Button>
+                </>
+              ) : null}
               {pendingCount > 0 && typeof onDiscardPending === 'function' ? (
                 <Button
                   size="sm"
@@ -1550,6 +1586,8 @@ function ConversationViewImpl(props: any) {
           actionBusy={actionBusy}
           addButtonRef={reviewerAddRef}
           avatarUrls={detail.avatarUrls}
+          showOptHints={showOptHints}
+          addShortcut="⌥⇧R"
         />
         <MetaList
           title="Assignees"
@@ -1567,6 +1605,8 @@ function ConversationViewImpl(props: any) {
           actionBusy={actionBusy}
           addButtonRef={assigneeAddRef}
           avatarUrls={detail.avatarUrls}
+          showOptHints={showOptHints}
+          addShortcut="⌥⇧A"
         />
         <AsideSection title="Labels">
           <div className="prp-label-row">
@@ -1593,11 +1633,17 @@ function ConversationViewImpl(props: any) {
           {canEditMeta && onAddLabel ? (
             <button
               type="button"
-              className="prp-add-link"
+              className="prp-add-link prp-opt-hint-host"
               disabled={actionBusy}
               onClick={onAddLabel}
               ref={labelAddRef}
+              title="Add label… (⌥⇧L)"
             >
+              <OptBtnHint
+                show={showOptHints}
+                label="⌥⇧L"
+                preferredPlacement="right"
+              />
               Add label…
             </button>
           ) : null}
@@ -1671,7 +1717,7 @@ function ConversationViewImpl(props: any) {
           {canEditMeta && (onOpenMilestonePicker || onSetMilestone) ? (
             <button
               type="button"
-              className="prp-add-link"
+              className="prp-add-link prp-opt-hint-host"
               disabled={actionBusy}
               onClick={() =>
                 onOpenMilestonePicker
@@ -1679,7 +1725,13 @@ function ConversationViewImpl(props: any) {
                   : onSetMilestone?.(false)
               }
               ref={milestoneAddRef}
+              title={`${detail.milestone ? 'Change' : 'Set'} milestone… (⌥⇧P)`}
             >
+              <OptBtnHint
+                show={showOptHints}
+                label="⌥⇧P"
+                preferredPlacement="right"
+              />
               {detail.milestone ? 'Change milestone…' : 'Set milestone…'}
             </button>
           ) : null}
@@ -1704,7 +1756,7 @@ function ConversationViewImpl(props: any) {
                 <p className="prp-muted prp-aside-dev__hint">
                   Successfully merging this pull request may close these issues.
                 </p>
-                <ul className="prp-list prp-aside-dev">
+                <ul className="prp-aside-dev prp-aside-dev--badges" role="list">
                   {dev.map((item: any) => {
                     const num = Number(item?.number);
                     if (!Number.isFinite(num) || num <= 0) return null;
@@ -1713,27 +1765,68 @@ function ConversationViewImpl(props: any) {
                       String(item?.url || '').trim() ||
                       `https://github.com/${detail.owner}/${detail.repo}/issues/${num}`;
                     const state = String(item?.state || '').toLowerCase();
+                    const tone =
+                      state === 'open'
+                        ? 'open'
+                        : state === 'closed'
+                          ? 'muted'
+                          : 'muted';
+                    const label = title ? `#${num} ${title}` : `#${num}`;
+                    const openMode =
+                      typeof resolveDevelopmentMainOpen === 'function'
+                        ? resolveDevelopmentMainOpen(item, {
+                            owner: detail.owner,
+                            repo: detail.repo,
+                            knownPullNumbers: Array.isArray(knownPullNumbers)
+                              ? knownPullNumbers
+                              : [],
+                          })
+                        : { mode: 'navigate', number: num, href };
+                    const canInModal =
+                      openMode.mode === 'inModal' &&
+                      typeof onOpenLinkedPr === 'function';
                     return (
-                      <li key={num} className="prp-aside-dev__item">
-                        <a
-                          className="prp-entity-link"
-                          href={href}
-                          target="_blank"
-                          rel="noreferrer"
-                          title={title || `#${num}`}
+                      <li key={num} className="prp-aside-dev__badge-item">
+                        <div
+                          className={`prp-aside-dev__badge prp-aside-dev__badge--${tone}`}
                         >
-                          #{num}
-                          {title ? (
-                            <span className="prp-aside-dev__title"> {title}</span>
-                          ) : null}
-                        </a>
-                        {state ? (
-                          <span
-                            className={`prp-aside-dev__state prp-aside-dev__state--${state}`}
+                          <a
+                            className="prp-aside-dev__badge-main"
+                            href={openMode.href || href}
+                            title={
+                              canInModal
+                                ? `${label} · open in this view`
+                                : label
+                            }
+                            onClick={(e) => {
+                              if (!canInModal) return; // same-tab page navigate
+                              e.preventDefault();
+                              e.stopPropagation();
+                              onOpenLinkedPr(Number(openMode.number || num));
+                            }}
                           >
-                            {state}
-                          </span>
-                        ) : null}
+                            <span className="prp-aside-dev__badge-num">#{num}</span>
+                            {title ? (
+                              <span className="prp-aside-dev__badge-title">
+                                {title}
+                              </span>
+                            ) : null}
+                          </a>
+                          <a
+                            className="prp-aside-dev__badge-ext"
+                            href={openMode.href || href}
+                            target="_blank"
+                            rel="noreferrer"
+                            title="Open in new tab"
+                            aria-label={`Open #${num} in new tab`}
+                          >
+                            <IconLinkExternal
+                              size={12}
+                              className="prp-aside-dev__badge-ext-icon"
+                              aria-hidden="true"
+                            />
+                          </a>
+                        </div>
                       </li>
                     );
                   })}

@@ -1,5 +1,6 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { Button } from '@common/Button';
+import { OptBtnHint } from '@common/OptBtnHint';
 import { SearchableSelect } from '@common/SearchableSelect';
 import {
   buildCommitFilterOptions,
@@ -10,6 +11,7 @@ import {
   truncateCommitLabel,
 } from '@lib/diff-commit-filter';
 import { pendingReviewCount } from '@lib/pending-review';
+import { canSubmitReviewVerdict } from '@lib/pr-edit-api';
 import { IconChevronDown, IconFileNavToggle } from '@common/icons';
 import { StepNav } from '@common/StepNav';
 import { stepNavShortcutLabel } from '@lib/shortcut-policy';
@@ -73,6 +75,8 @@ export function DiffToolbar(props: any) {
     onSearchClose = null,
     onSearchNext = null,
     onSearchPrev = null,
+    /** Option-hold shortcut badges on step-nav / review CTAs */
+    showOptHints = false,
   } = props;
 
   // Unified: GitHub PENDING review only (totalPendingCount from App).
@@ -93,6 +97,21 @@ export function DiffToolbar(props: any) {
     /Mac|iPhone|iPad/.test(navigator.platform || '');
   const threadPrevShortcut = stepNavShortcutLabel('prev', isMac);
   const threadNextShortcut = stepNavShortcutLabel('next', isMac);
+  // GitHub rejects APPROVE / REQUEST_CHANGES on your own PR
+  const showReviewVerdict =
+    typeof canSubmitReviewVerdict === 'function'
+      ? canSubmitReviewVerdict(detail)
+      : (() => {
+          const a = String(detail?.author || '')
+            .trim()
+            .replace(/^@/, '')
+            .toLowerCase();
+          const v = String(detail?.viewerLogin || '')
+            .trim()
+            .replace(/^@/, '')
+            .toLowerCase();
+          return !(a && v && a === v);
+        })();
 
   const commitOpts = useMemo(() => buildCommitFilterOptions(commits), [commits]);
   const f = normalizeDiffCommitFilter(commitFilter);
@@ -266,6 +285,7 @@ export function DiffToolbar(props: any) {
                 onNext={onSearchNext}
                 onPrev={onSearchPrev}
                 placeholder="Find in diff, comments…"
+                showOptHints={showOptHints}
               />
             ) : showReviewFilter ? (
               <div
@@ -359,6 +379,7 @@ export function DiffToolbar(props: any) {
                 nextTitle="Next review thread"
                 prevShortcut={threadPrevShortcut}
                 nextShortcut={threadNextShortcut}
+                showOptHints={showOptHints}
               />
             ) : null}
           </div>
@@ -366,39 +387,71 @@ export function DiffToolbar(props: any) {
 
         {pending > 0 ? (
           <div className="prp-diff-toolbar__pending" role="status">
-            <Button
-              size="sm"
-              variant="primary"
-              disabled={actionBusy}
-              onClick={() => onLeaveReviewAction?.('comment')}
-              title="Submit pending review as comment"
-            >
-              Submit review
-            </Button>
-            <Button
-              size="sm"
-              variant="ok"
-              disabled={actionBusy}
-              onClick={() => onLeaveReviewAction?.('approve')}
-              title="Approve pull request"
-            >
-              Approve
-            </Button>
-            <Button
-              size="sm"
-              variant="warn"
-              disabled={actionBusy}
-              onClick={() => onLeaveReviewAction?.('request_changes')}
-              title="Request changes"
-            >
-              Request changes
-            </Button>
+            <span className="prp-opt-hint-host">
+              <OptBtnHint
+                show={showOptHints}
+                label={isMac ? '⌥↵' : 'Alt+Enter'}
+                preferredPlacement="top"
+              />
+              <Button
+                size="sm"
+                variant="primary"
+                disabled={actionBusy}
+                onClick={() => onLeaveReviewAction?.('comment')}
+                title="Submit pending review as comment"
+                shortcut={isMac ? '⌥↵' : 'Alt+Enter'}
+                tipPlacement="top"
+              >
+                Submit review
+              </Button>
+            </span>
+            {showReviewVerdict ? (
+              <span className="prp-opt-hint-host">
+                <OptBtnHint
+                  show={showOptHints}
+                  label={isMac ? '⌥⇧↵' : 'Alt+Shift+Enter'}
+                  preferredPlacement="top"
+                />
+                <Button
+                  size="sm"
+                  variant="ok"
+                  disabled={actionBusy}
+                  onClick={() => onLeaveReviewAction?.('approve')}
+                  title="Approve pull request"
+                  shortcut={isMac ? '⌥⇧↵' : 'Alt+Shift+Enter'}
+                  tipPlacement="top"
+                >
+                  Approve
+                </Button>
+              </span>
+            ) : null}
+            {showReviewVerdict ? (
+              <span className="prp-opt-hint-host">
+                <OptBtnHint
+                  show={showOptHints}
+                  label={isMac ? '⌥⇧X' : 'Alt+Shift+X'}
+                  preferredPlacement="top"
+                />
+                <Button
+                  size="sm"
+                  variant="warn"
+                  disabled={actionBusy}
+                  onClick={() => onLeaveReviewAction?.('request_changes')}
+                  title="Request changes"
+                  shortcut={isMac ? '⌥⇧X' : 'Alt+Shift+X'}
+                  tipPlacement="top"
+                >
+                  Request changes
+                </Button>
+              </span>
+            ) : null}
             <Button
               size="sm"
               variant="danger"
               disabled={actionBusy}
               onClick={onDiscardPending}
               title="Discard pending review"
+              tipPlacement="top"
             >
               Discard
             </Button>

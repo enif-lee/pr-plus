@@ -274,10 +274,11 @@ assert.equal(PAGE_EMBED_HEADER_OFFSET_PX, 64);
   assert.equal(ghFooter.getAttribute(PAGE_EMBED_FOOTER_HIDDEN_ATTR), null);
 }
 
-// --- shortcut: ⌘⇧E toggles embed ↔ native ---
+// --- shortcut: ⌥⇧E toggles embed ↔ native ---
 assert.equal(
   resolveEmbedShortcutAction({
-    mod: true,
+    alt: true,
+    mod: false,
     shift: true,
     key: 'e',
     presentation: 'embed',
@@ -286,7 +287,8 @@ assert.equal(
 );
 assert.equal(
   resolveEmbedShortcutAction({
-    mod: true,
+    alt: true,
+    mod: false,
     shift: true,
     key: 'e',
     presentation: 'modal',
@@ -295,7 +297,8 @@ assert.equal(
 );
 assert.equal(
   resolveEmbedShortcutAction({
-    mod: true,
+    alt: true,
+    mod: false,
     shift: true,
     key: 'e',
     presentation: 'modal',
@@ -305,7 +308,8 @@ assert.equal(
 );
 assert.equal(
   resolveEmbedShortcutAction({
-    mod: true,
+    alt: true,
+    mod: false,
     shift: true,
     key: 'e',
     presentation: 'modal',
@@ -314,9 +318,20 @@ assert.equal(
   }),
   null
 );
+// ⌘⇧E is no longer the product chord
+assert.equal(
+  resolveEmbedShortcutAction({
+    mod: true,
+    shift: true,
+    key: 'e',
+    presentation: 'embed',
+  }),
+  null
+);
 assert.equal(
   resolveModalShortcutAction({
-    mod: true,
+    alt: true,
+    mod: false,
     shift: true,
     key: 'e',
     presentation: 'embed',
@@ -326,7 +341,8 @@ assert.equal(
 );
 assert.equal(
   resolveModalShortcutAction({
-    mod: true,
+    alt: true,
+    mod: false,
     shift: true,
     key: 'e',
     presentation: 'modal',

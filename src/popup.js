@@ -7,6 +7,7 @@ const tokenMaskEl = document.getElementById('token-mask');
 const prefAutoOpenEmbed = document.getElementById('pref-auto-open-embed');
 const prefFastReview = document.getElementById('pref-fast-review');
 const prefReverseComments = document.getElementById('pref-reverse-comments');
+const prefSingleFileMode = document.getElementById('pref-single-file-mode');
 const clearIdbBtn = document.getElementById('clear-idb');
 const enterpriseHostInput = document.getElementById('enterprise-host');
 const enterpriseTokenInput = document.getElementById('enterprise-token');
@@ -22,6 +23,7 @@ const DEFAULT_PREFS = {
   fastReview: true,
   reverseComments: true,
   autoOpenEmbed: true,
+  singleFileMode: false,
 };
 
 /** @type {{ host: string, mask: string }[]} */
@@ -49,6 +51,7 @@ function renderPrefs(prefs) {
   if (prefAutoOpenEmbed) prefAutoOpenEmbed.checked = p.autoOpenEmbed !== false;
   prefFastReview.checked = p.fastReview !== false;
   prefReverseComments.checked = p.reverseComments !== false;
+  if (prefSingleFileMode) prefSingleFileMode.checked = p.singleFileMode === true;
 }
 
 function normalizeHostInput(raw) {
@@ -220,6 +223,7 @@ async function savePrefs() {
       autoOpenEmbed: Boolean(prefAutoOpenEmbed?.checked),
       fastReview: Boolean(prefFastReview.checked),
       reverseComments: Boolean(prefReverseComments.checked),
+      singleFileMode: Boolean(prefSingleFileMode?.checked),
     };
     const res = await send({ type: 'PR_TREE_PREFS_SET', prefs });
     if (!res?.ok && res?.error) {
@@ -282,6 +286,7 @@ tokenInput.addEventListener('keydown', (e) => {
 prefAutoOpenEmbed?.addEventListener('change', () => void savePrefs());
 prefFastReview.addEventListener('change', () => void savePrefs());
 prefReverseComments.addEventListener('change', () => void savePrefs());
+prefSingleFileMode?.addEventListener('change', () => void savePrefs());
 
 enterpriseHostInput?.addEventListener('input', () => {
   updateEndpointPreview(enterpriseHostInput.value);

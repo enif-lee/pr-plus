@@ -15,28 +15,262 @@
  * }} PaletteCommand
  */
 
+/** PR detail Option chords (former mod/⌘ → opt/⌥). */
+const PR_MODAL_OPT_ACTIONS = [
+  { id: 'opt-toggle-diff', action: 'toggleDiff', title: 'Toggle Diff / Conversation', key: '.', code: 'Period', shift: false, labelMac: '⌥.', labelWin: 'Alt+.', section: 'Navigate' },
+  { id: 'opt-fullscreen', action: 'toggleFullscreen', title: 'Toggle fullscreen', key: 'f', code: 'KeyF', shift: true, labelMac: '⌥⇧F', labelWin: 'Alt+Shift+F', section: 'Navigate' },
+  { id: 'opt-edit-title', action: 'editTitle', title: 'Edit PR title…', key: 't', code: 'KeyT', shift: true, labelMac: '⌥⇧T', labelWin: 'Alt+Shift+T', section: 'PR' },
+  { id: 'opt-edit-body', action: 'editBody', title: 'Edit PR description', key: 'e', code: 'KeyE', shift: false, labelMac: '⌥E', labelWin: 'Alt+E', section: 'PR' },
+  { id: 'opt-base', action: 'promptBase', title: 'Change base branch…', key: 'b', code: 'KeyB', shift: true, labelMac: '⌥⇧B', labelWin: 'Alt+Shift+B', section: 'PR' },
+  { id: 'opt-labels', action: 'promptLabels', title: 'Set labels…', key: 'l', code: 'KeyL', shift: true, labelMac: '⌥⇧L', labelWin: 'Alt+Shift+L', section: 'PR' },
+  { id: 'opt-milestone', action: 'promptMilestone', title: 'Set milestone…', key: 'p', code: 'KeyP', shift: true, labelMac: '⌥⇧P', labelWin: 'Alt+Shift+P', section: 'PR' },
+  { id: 'opt-draft-stage', action: 'toggleDraftStage', title: 'Convert to draft / Ready for review', key: 'd', code: 'KeyD', shift: true, labelMac: '⌥⇧D', labelWin: 'Alt+Shift+D', section: 'PR' },
+  { id: 'opt-merge', action: 'mergePr', title: 'Merge pull request…', key: 'm', code: 'KeyM', shift: true, labelMac: '⌥⇧M', labelWin: 'Alt+Shift+M', section: 'Merge', payload: { method: 'merge' } },
+  { id: 'opt-update-branch', action: 'updateBranch', title: 'Update branch from base', key: 'u', code: 'KeyU', shift: true, labelMac: '⌥⇧U', labelWin: 'Alt+Shift+U', section: 'Merge' },
+  { id: 'opt-reviewer', action: 'promptAddReviewer', title: 'Add reviewer…', key: 'r', code: 'KeyR', shift: true, labelMac: '⌥⇧R', labelWin: 'Alt+Shift+R', section: 'People' },
+  { id: 'opt-assignee', action: 'promptAddAssignee', title: 'Add assignee…', key: 'a', code: 'KeyA', shift: true, labelMac: '⌥⇧A', labelWin: 'Alt+Shift+A', section: 'People' },
+  { id: 'opt-review-comment', action: 'leaveReview', title: 'Submit review: Comment', key: 'Enter', code: 'Enter', shift: false, labelMac: '⌥↵', labelWin: 'Alt+Enter', section: 'Review', payload: { kind: 'comment' } },
+  { id: 'opt-review-approve', action: 'leaveReview', title: 'Submit review: Approve', key: 'Enter', code: 'Enter', shift: true, labelMac: '⌥⇧↵', labelWin: 'Alt+Shift+Enter', section: 'Review', payload: { kind: 'approve' } },
+  { id: 'opt-review-changes', action: 'leaveReview', title: 'Submit review: Request changes', key: 'x', code: 'KeyX', shift: true, labelMac: '⌥⇧X', labelWin: 'Alt+Shift+X', section: 'Review', payload: { kind: 'request_changes' } },
+  { id: 'opt-apply-suggestion', action: 'applySuggestion', title: 'Apply focused suggestion', key: 's', code: 'KeyS', shift: true, labelMac: '⌥⇧S', labelWin: 'Alt+Shift+S', section: 'Review' },
+];
+
+function resolvePrModalOptAction(opts = {}) {
+  if (!opts.alt || opts.mod) return null;
+  const code = String(opts.code || '');
+  const shift = Boolean(opts.shift);
+  if (
+    /^(Shift|Alt|Meta|Control)(Left|Right)?$/i.test(code) ||
+    /^(Shift|Alt|Meta|Control)$/i.test(String(opts.key || ''))
+  ) {
+    return null;
+  }
+  function pack(def) {
+    return {
+      id: def.id,
+      action: def.action,
+      title: def.title,
+      payload: def.payload || {},
+      key: def.key,
+      labelMac: def.labelMac,
+      shift: Boolean(def.shift),
+    };
+  }
+  for (const def of PR_MODAL_OPT_ACTIONS) {
+    if (Boolean(def.shift) !== shift) continue;
+    if (code === def.code || code.toLowerCase() === String(def.code).toLowerCase()) {
+      return pack(def);
+    }
+    if (def.code === 'Enter' && (code === 'NumpadEnter' || code === 'Enter')) {
+      return pack(def);
+    }
+  }
+  const rawKey = String(opts.key || '');
+  let letter = '';
+  if (rawKey === '.' || rawKey === 'Period') letter = '.';
+  else if (rawKey === 'Enter') letter = 'Enter';
+  else if (/^[a-zA-Z0-9]$/.test(rawKey)) letter = rawKey.toLowerCase();
+  else return null;
+  for (const def of PR_MODAL_OPT_ACTIONS) {
+    if (Boolean(def.shift) !== shift) continue;
+    if (def.key === letter || String(def.key).toLowerCase() === letter) return pack(def);
+  }
+  return null;
+}
+
+function buildPrModalOptHoldSlots(opts = {}) {
+  const isMac = opts.isMac !== false;
+  return PR_MODAL_OPT_ACTIONS.map((d) => ({
+    id: d.id,
+    title: d.title,
+    label: isMac ? d.labelMac : d.labelWin,
+    key: d.key,
+    action: d.action,
+    payload: d.payload || {},
+    section: d.section,
+    shift: Boolean(d.shift),
+  }));
+}
+
+function optShortcutForCommandId(commandId) {
+  const map = {
+    'toggle-diff': 'opt+.',
+    'find-in-pr': 'mod+f',
+    'toggle-fullscreen': 'opt+shift+f',
+    'edit-title': 'opt+shift+t',
+    'edit-body': 'opt+e',
+    'set-base': 'opt+shift+b',
+    'set-labels': 'opt+shift+l',
+    'set-milestone': 'opt+shift+p',
+    'convert-draft': 'opt+shift+d',
+    'ready-review': 'opt+shift+d',
+    'merge-pr': 'opt+shift+m',
+    'update-branch': 'opt+shift+u',
+    'add-reviewer': 'opt+shift+r',
+    'set-assignee': 'opt+shift+a',
+    'review-comment': 'opt+enter',
+    'review-approve': 'opt+shift+enter',
+    'review-changes': 'opt+shift+x',
+    'apply-suggestion': 'opt+shift+s',
+  };
+  return map[String(commandId || '')] || null;
+}
+
+/**
+ * Resolve Development main-link open mode for modal/sheet.
+ * @returns {{ mode: 'inModal'|'navigate'|'none', number: number|null, href: string }}
+ */
+function resolveDevelopmentMainOpen(item, ctx = {}) {
+  const num = Number(item?.number);
+  const href = String(item?.url || item?.href || '').trim();
+  const kind = String(item?.kind || '').toLowerCase();
+  const owner = String(ctx?.owner || '').trim();
+  const repo = String(ctx?.repo || '').trim();
+  const fallbackHref =
+    href ||
+    (Number.isFinite(num) && num > 0 && owner && repo
+      ? `https://github.com/${owner}/${repo}/issues/${num}`
+      : '');
+
+  if (!Number.isFinite(num) || num <= 0) {
+    return { mode: 'none', number: null, href: fallbackHref };
+  }
+
+  const urlIsPull = /\/pull\/\d+/i.test(href);
+  const urlIsIssue = /\/issues\/\d+/i.test(href);
+  const knownPulls = Array.isArray(ctx?.knownPullNumbers)
+    ? ctx.knownPullNumbers.map(Number).filter((n) => Number.isFinite(n) && n > 0)
+    : [];
+  const knownAsPull = knownPulls.includes(num);
+  const isPull =
+    kind === 'pull' ||
+    kind === 'pullrequest' ||
+    urlIsPull ||
+    knownAsPull ||
+    (Boolean(ctx?.preferInModal) && !urlIsIssue && kind !== 'issue');
+
+  if (isPull) {
+    return {
+      mode: 'inModal',
+      number: num,
+      href:
+        href ||
+        (owner && repo
+          ? `https://github.com/${owner}/${repo}/pull/${num}`
+          : fallbackHref),
+    };
+  }
+  return {
+    mode: 'navigate',
+    number: num,
+    href: fallbackHref,
+  };
+}
+
+/**
+ * Stack path digit slot (1–9) → PR number, or null.
+ */
+function stackDigitSlotNumber(digit, stackItems) {
+  const d = Number(digit);
+  if (!Number.isFinite(d) || d < 1 || d > 9) return null;
+  const list = Array.isArray(stackItems) ? stackItems : [];
+  const item = list[d - 1];
+  const n = Number(item?.number);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * Previous/next PR: prefer stack path when stacked (≥2), else open pulls list order.
+ * @param {{ direction?: string, currentNumber?: number, stackItems?: any[], openPulls?: any[] }} opts
+ */
+function resolveAdjacentPrNumber(opts = {}) {
+  const dir = String(opts.direction || '').toLowerCase() === 'prev' ? -1 : 1;
+  const current = Number(opts.currentNumber);
+  if (!Number.isFinite(current) || current <= 0) return null;
+
+  const stack = (Array.isArray(opts.stackItems) ? opts.stackItems : [])
+    .map((x) => Number(x?.number))
+    .filter((n) => Number.isFinite(n) && n > 0);
+  if (stack.length >= 2) {
+    const idx = stack.indexOf(current);
+    if (idx < 0) return null;
+    const next = stack[idx + dir];
+    return next != null && Number.isFinite(next) ? next : null;
+  }
+
+  const pulls = (Array.isArray(opts.openPulls) ? opts.openPulls : [])
+    .map((x) => Number(x?.number ?? x))
+    .filter((n) => Number.isFinite(n) && n > 0);
+  const seen = new Set();
+  const list = [];
+  for (const n of pulls) {
+    if (seen.has(n)) continue;
+    seen.add(n);
+    list.push(n);
+  }
+  if (list.length < 2) return null;
+  const idx = list.indexOf(current);
+  if (idx < 0) return null;
+  const next = list[idx + dir];
+  return next != null && Number.isFinite(next) ? next : null;
+}
+
 /**
  * Build default command list from PR detail snapshot.
  * @param {object} detail
+ * @param {{ stackItems?: any[], openPulls?: any[] }} [opts]
  * @returns {PaletteCommand[]}
  */
-function buildPaletteCommands(detail) {
+function buildPaletteCommands(detail, opts = {}) {
   const d = detail || {};
+  const stackItems = Array.isArray(opts.stackItems) ? opts.stackItems : [];
+  const openPulls = Array.isArray(opts.openPulls) ? opts.openPulls : [];
+  const stacked = stackItems.length >= 2;
+  const allowReviewVerdict =
+    opts.canSubmitReviewVerdict != null
+      ? Boolean(opts.canSubmitReviewVerdict)
+      : (() => {
+          const a = String(d.author || '')
+            .trim()
+            .replace(/^@/, '')
+            .toLowerCase();
+          const v = String(d.viewerLogin || '')
+            .trim()
+            .replace(/^@/, '')
+            .toLowerCase();
+          return !(a && v && a === v);
+        })();
   const cmds = [
     {
       id: 'toggle-diff',
       title: 'Toggle Diff / Conversation',
       section: 'Navigate',
       keywords: ['diff', 'files', 'conversation'],
-      shortcut: 'mod+.',
+      shortcut: optShortcutForCommandId('toggle-diff') || 'opt+.',
       action: 'toggleDiff',
+    },
+    {
+      id: 'find-in-pr',
+      title: 'Find in PR…',
+      section: 'Navigate',
+      keywords: ['search', 'find', 'filter', 'query'],
+      shortcut: optShortcutForCommandId('find-in-pr') || 'mod+f',
+      action: 'openSearch',
+    },
+    {
+      id: 'toggle-fullscreen',
+      title: 'Toggle fullscreen',
+      section: 'Navigate',
+      keywords: ['fullscreen', 'maximize', 'expand', 'shell'],
+      shortcut: optShortcutForCommandId('toggle-fullscreen') || 'opt+shift+f',
+      action: 'toggleFullscreen',
     },
     {
       id: 'edit-title',
       title: 'Edit PR title…',
       section: 'PR',
       keywords: ['title', 'rename', 'edit'],
-      shortcut: 'mod+shift+t',
+      shortcut: optShortcutForCommandId('edit-title') || 'opt+shift+t',
       action: 'editTitle',
     },
     {
@@ -44,7 +278,7 @@ function buildPaletteCommands(detail) {
       title: 'Edit PR description',
       section: 'PR',
       keywords: ['body', 'description', 'edit'],
-      shortcut: 'mod+e',
+      shortcut: optShortcutForCommandId('edit-body') || 'opt+e',
       action: 'editBody',
     },
     {
@@ -52,7 +286,7 @@ function buildPaletteCommands(detail) {
       title: 'Change base branch…',
       section: 'PR',
       keywords: ['base', 'branch', 'target'],
-      shortcut: 'mod+shift+b',
+      shortcut: optShortcutForCommandId('set-base') || 'opt+shift+b',
       action: 'promptBase',
     },
     {
@@ -60,6 +294,7 @@ function buildPaletteCommands(detail) {
       title: 'Convert to draft',
       section: 'PR',
       keywords: ['draft', 'wip'],
+      shortcut: optShortcutForCommandId('convert-draft') || 'opt+shift+d',
       action: 'convertDraft',
     },
     {
@@ -67,6 +302,7 @@ function buildPaletteCommands(detail) {
       title: 'Mark ready for review',
       section: 'PR',
       keywords: ['ready', 'draft', 'review'],
+      shortcut: optShortcutForCommandId('ready-review') || 'opt+shift+d',
       action: 'readyForReview',
     },
     {
@@ -74,7 +310,7 @@ function buildPaletteCommands(detail) {
       title: 'Merge pull request…',
       section: 'Merge',
       keywords: ['merge', 'ship', 'land'],
-      shortcut: 'mod+shift+m',
+      shortcut: optShortcutForCommandId('merge-pr') || 'opt+shift+m',
       action: 'mergePr',
       payload: { method: 'merge' },
     },
@@ -99,7 +335,7 @@ function buildPaletteCommands(detail) {
       title: 'Update branch from base',
       section: 'Merge',
       keywords: ['update', 'branch', 'rebase', 'sync'],
-      shortcut: 'mod+shift+u',
+      shortcut: optShortcutForCommandId('update-branch') || 'opt+shift+u',
       action: 'updateBranch',
     },
     {
@@ -121,6 +357,7 @@ function buildPaletteCommands(detail) {
       title: 'Set milestone…',
       section: 'PR',
       keywords: ['milestone', 'release'],
+      shortcut: optShortcutForCommandId('set-milestone') || 'opt+shift+p',
       action: 'promptMilestone',
     },
     {
@@ -142,7 +379,7 @@ function buildPaletteCommands(detail) {
       title: 'Add reviewer…',
       section: 'People',
       keywords: ['reviewer', 'review'],
-      shortcut: 'mod+shift+r',
+      shortcut: optShortcutForCommandId('add-reviewer') || 'opt+shift+r',
       action: 'promptAddReviewer',
     },
     {
@@ -157,7 +394,7 @@ function buildPaletteCommands(detail) {
       title: 'Add assignee…',
       section: 'People',
       keywords: ['assignee', 'assign'],
-      shortcut: 'mod+shift+a',
+      shortcut: optShortcutForCommandId('set-assignee') || 'opt+shift+a',
       action: 'promptAddAssignee',
     },
     {
@@ -172,7 +409,7 @@ function buildPaletteCommands(detail) {
       title: 'Set labels…',
       section: 'PR',
       keywords: ['label', 'labels', 'tag'],
-      shortcut: 'mod+shift+l',
+      shortcut: optShortcutForCommandId('set-labels') || 'opt+shift+l',
       action: 'promptLabels',
     },
     {
@@ -180,28 +417,32 @@ function buildPaletteCommands(detail) {
       title: 'Submit review: Comment',
       section: 'Review',
       keywords: ['review', 'comment'],
-      shortcut: 'mod+enter',
+      shortcut: optShortcutForCommandId('review-comment') || 'opt+enter',
       action: 'leaveReview',
       payload: { kind: 'comment' },
     },
-    {
-      id: 'review-approve',
-      title: 'Submit review: Approve',
-      section: 'Review',
-      keywords: ['review', 'approve', 'lgtm'],
-      shortcut: 'mod+shift+enter',
-      action: 'leaveReview',
-      payload: { kind: 'approve' },
-    },
-    {
-      id: 'review-changes',
-      title: 'Submit review: Request changes',
-      section: 'Review',
-      keywords: ['review', 'request', 'changes'],
-      shortcut: 'mod+shift+x',
-      action: 'leaveReview',
-      payload: { kind: 'request_changes' },
-    },
+    ...(allowReviewVerdict
+      ? [
+          {
+            id: 'review-approve',
+            title: 'Submit review: Approve',
+            section: 'Review',
+            keywords: ['review', 'approve', 'lgtm'],
+            shortcut: optShortcutForCommandId('review-approve') || 'opt+shift+enter',
+            action: 'leaveReview',
+            payload: { kind: 'approve' },
+          },
+          {
+            id: 'review-changes',
+            title: 'Submit review: Request changes',
+            section: 'Review',
+            keywords: ['review', 'request', 'changes'],
+            shortcut: optShortcutForCommandId('review-changes') || 'opt+shift+x',
+            action: 'leaveReview',
+            payload: { kind: 'request_changes' },
+          },
+        ]
+      : []),
     {
       id: 'close-pr',
       title: 'Close pull request',
@@ -228,7 +469,6 @@ function buildPaletteCommands(detail) {
       title: 'Focus comment box',
       section: 'Navigate',
       keywords: ['comment', 'write'],
-      shortcut: 'c',
       action: 'focusComment',
     },
     {
@@ -236,7 +476,7 @@ function buildPaletteCommands(detail) {
       title: 'Apply focused suggestion',
       section: 'Review',
       keywords: ['suggestion', 'apply', 'patch'],
-      shortcut: 'mod+shift+s',
+      shortcut: optShortcutForCommandId('apply-suggestion') || 'opt+shift+s',
       action: 'applySuggestion',
     },
   ];
@@ -293,6 +533,47 @@ function buildPaletteCommands(detail) {
     });
   }
 
+  const slotCount = Math.min(stackItems.length, 9);
+  for (let i = 0; i < slotCount; i++) {
+    const it = stackItems[i] || {};
+    const num = Number(it.number);
+    if (!Number.isFinite(num) || num <= 0) continue;
+    const title = String(it.title || '').trim();
+    cmds.push({
+      id: `stack-slot-${i + 1}`,
+      title: title ? `Stack #${num}: ${title}` : `Open stack PR #${num}`,
+      section: 'Stack',
+      keywords: ['stack', 'opt', String(i + 1), `#${num}`, 'path'],
+      shortcut: `opt+${i + 1}`,
+      description: it.current ? 'Current in stack' : 'Jump to stacked PR',
+      action: 'openStackPr',
+      payload: { number: num, digit: i + 1 },
+    });
+  }
+
+  cmds.push({
+    id: 'nav-adjacent-prev',
+    title: stacked ? 'Previous stack PR' : 'Previous pull request',
+    section: 'Navigate',
+    keywords: ['prev', 'previous', 'stack', 'list', 'back', '['],
+    shortcut: 'opt+[',
+    description: stacked
+      ? 'Move up the stack path'
+      : 'Open previous PR in the pulls list',
+    action: 'navAdjacentPrev',
+  });
+  cmds.push({
+    id: 'nav-adjacent-next',
+    title: stacked ? 'Next stack PR' : 'Next pull request',
+    section: 'Navigate',
+    keywords: ['next', 'stack', 'list', 'forward', ']'],
+    shortcut: 'opt+]',
+    description: stacked
+      ? 'Move down the stack path'
+      : 'Open next PR in the pulls list',
+    action: 'navAdjacentNext',
+  });
+
   return cmds;
 }
 
@@ -334,6 +615,13 @@ const api = {
   buildPaletteCommands,
   filterPaletteCommands,
   formatShortcut,
+  resolveDevelopmentMainOpen,
+  stackDigitSlotNumber,
+  resolveAdjacentPrNumber,
+  PR_MODAL_OPT_ACTIONS,
+  resolvePrModalOptAction,
+  buildPrModalOptHoldSlots,
+  optShortcutForCommandId,
 };
 
 if (typeof module !== 'undefined' && module.exports) {

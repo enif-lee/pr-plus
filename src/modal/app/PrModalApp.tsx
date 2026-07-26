@@ -20,7 +20,12 @@ import { Header } from '../views/chrome/Header';
 import { StackStrip } from '../views/chrome/StackStrip';
 import { SearchBar } from '../views/chrome/SearchBar';
 import { CommandPalette } from '../views/chrome/CommandPalette';
+import { ConfirmDialog } from '../components/common/ConfirmDialog';
 import { LoadingSkeleton } from '../views/chrome/LoadingSkeleton';
+import {
+  buildMergeConfirmRequest,
+  confirmGateProceed,
+} from '../lib/confirm-gate';
 import { DiffToolbar } from '../views/chrome/DiffToolbar';
 import { ConversationView } from '../views/conversation/ConversationView';
 import { FolderFileTree } from '../views/diff/FolderFileTree';
@@ -96,6 +101,7 @@ import {
 import {
   annotateFilesForCollapse,
   materializeCollapsedPaths,
+  expandPathInCollapsedSet,
   isPathCollapsed,
 } from '../lib/collapse';
 import {
@@ -161,6 +167,11 @@ import {
   selectionBlockRole,
   extractSelectedCodeText,
   githubBlobLinePermalink,
+  parseGotoQuery,
+  selectionFromGoto,
+  moveLineSelection,
+  resolvePendingGotoSelection,
+  resolveGotoPathAmongFiles,
 } from '../lib/line-selection';
 import { copyTextToClipboard } from '../lib/copy-to-clipboard';
 import {
@@ -168,13 +179,30 @@ import {
 } from '../lib/pending-review';
 import {
   parseSuggestionFences, applySuggestionToFileContent, mapLeaveReviewAction,
+  isViewerPrAuthor, canSubmitReviewVerdict, isReviewVerdictKind,
   buildRerequestReviewerLogins, mapRestReviewComment, mapRestIssueComment, appendOptimisticReviewComment,
 } from '../lib/pr-edit-api';
-import { buildPaletteCommands, filterPaletteCommands } from '../lib/command-palette';
+import {
+  buildPaletteCommands,
+  filterPaletteCommands,
+  resolveAdjacentPrNumber,
+  stackDigitSlotNumber,
+  resolvePrModalOptAction,
+} from '../lib/command-palette';
 import {
   resolveModalShortcutAction,
   pickConversationCommentFocusTarget,
+  activeFileNavIndex,
+  resolveAdjacentFileNav,
+  isGithubCommandPaletteOpen,
+  touchGithubCommandPaletteOpen,
+  shouldIgnoreModalEscapeForGithubPalette,
+  findGithubCommandPaletteDialog,
+  nextScrollTopByPage,
+  toggleReviewFilter,
 } from '../lib/shortcut-policy';
+import { resolveDiffDisplayFiles } from '../lib/single-file-mode';
+import { DiffFloatingController } from '../views/diff/DiffFloatingController';
 import { buildConversationTimeline } from '../lib/conversation-timeline';
 import { resolveGithubTheme } from '../lib/theme';
 import { buildStackStrip, buildStackPathModel } from '../lib/ui-polish';
@@ -250,6 +278,8 @@ export function PrModalApp({
   onRestoreNative = null,
 }: any) {
   const reverseComments = prefs?.reverseComments !== false;
+  /** Diff hunk list shows only the active file; file tree still lists all. */
+  const singleFileMode = prefs?.singleFileMode === true;
   const isEmbed = isEmbedPresentation(presentation);
   const embedChrome = shellChrome && typeof shellChrome === 'object' ? shellChrome : null;
   const showCloseChrome =
@@ -329,6 +359,47 @@ export function PrModalApp({
   const [stackPathSelections, setStackPathSelections] = useState<Record<string, number>>(
     {}
   );
+  /** Option/Alt held — show in-PR shortcut badges (stack digits). */
+  const [optHeld, setOptHeld] = useState(false);
+  /** After a chord fires under Opt-hold, hide tips until Alt is released. */
+  const [optHintsSuppressed, setOptHintsSuppressed] = useState(false);
+  /** In-app confirm dialog (replaces window.confirm). */
+  const [confirmState, setConfirmState] = useState<null | {
+    title: string;
+    message: string;
+    confirmLabel?: string;
+    cancelLabel?: string;
+    tone?: 'danger' | 'warn' | 'default';
+    resolve: (ok: boolean) => void;
+  }>(null);
+
+  const requestConfirm = useCallback(
+    (opts: {
+      title: string;
+      message: string;
+      confirmLabel?: string;
+      cancelLabel?: string;
+      tone?: 'danger' | 'warn' | 'default';
+    }) =>
+      new Promise<boolean>((resolve) => {
+        setConfirmState({
+          title: opts.title,
+          message: opts.message,
+          confirmLabel: opts.confirmLabel || 'Confirm',
+          cancelLabel: opts.cancelLabel || 'Cancel',
+          tone: opts.tone || 'default',
+          resolve,
+        });
+      }),
+    []
+  );
+
+  const closeConfirm = useCallback((ok: boolean) => {
+    setConfirmState((prev) => {
+      if (prev?.resolve) prev.resolve(ok);
+      return null;
+    });
+  }, []);
   const commentPrefetchGenRef = useRef(0);
   /** Dedup GH commit-filter restore from inbound /changes/{sha}|{a}..{b}. */
   const ghCommitRouteAppliedRef = useRef<string | null>(null);
@@ -999,7 +1070,7 @@ export function PrModalApp({
 
   /**
    * Files after resolve-status + name/ext/unread filters.
-   * Shared by files nav, virtual diff, and review-thread nav counts.
+   * Shared by files nav, review-thread nav counts, and (unless single-file mode) Diff.
    */
   const displayFiles = useMemo(() => {
     let list = reviewScopedFiles;
@@ -1016,6 +1087,18 @@ export function PrModalApp({
     viewedPaths,
     fileUnreadOnly,
   ]);
+
+  /**
+   * Diff virtual list source. In single-file mode only the active (or first)
+   * file is flattened to rows; the left tree still uses displayFiles.
+   */
+  const diffDisplayFiles = useMemo(
+    () =>
+      typeof resolveDiffDisplayFiles === 'function'
+        ? resolveDiffDisplayFiles(displayFiles, activeFilePath, singleFileMode)
+        : displayFiles,
+    [singleFileMode, displayFiles, activeFilePath]
+  );
 
   /** @deprecated alias — keep names used below / tests */
   const reviewFilteredFiles = displayFiles;
@@ -1120,7 +1203,7 @@ export function PrModalApp({
 
   const virtualRows = useMemo(
     () =>
-      flattenFilesToVirtualRows(displayFiles, diffMode, {
+      flattenFilesToVirtualRows(diffDisplayFiles, diffMode, {
         collapsedPaths: collapsedFiles,
         viewedPaths,
         reviewComments: navReviewComments,
@@ -1137,7 +1220,7 @@ export function PrModalApp({
           typeof location !== 'undefined' ? location.origin : 'https://github.com',
       }),
     [
-      displayFiles,
+      diffDisplayFiles,
       diffMode,
       collapsedFiles,
       viewedPaths,
@@ -1755,6 +1838,58 @@ export function PrModalApp({
     scrollMappedCommentIntoView,
   ]);
 
+  /** Pending Goto after expand: path + lines until virtualRows rebuild. */
+  const pendingGotoRef = useRef<{
+    path: string;
+    startLine: number;
+    endLine: number | null;
+  } | null>(null);
+
+  function scrollSelectionIntoView(sel: any) {
+    const headIdx = Number(sel?.headRowIndex);
+    if (!Number.isFinite(headIdx) || headIdx < 0) return;
+    const top = scrollTopForIndex(
+      headIdx,
+      avgH,
+      viewportHeight,
+      virtualRows.length,
+      rowOffsetList
+    );
+    setScrollTop(top);
+    if (listRef.current) listRef.current.scrollTop = top;
+  }
+
+  // Finish Goto once expand rebuilds selectable rows for the target file
+  useEffect(() => {
+    const pending = pendingGotoRef.current;
+    if (!pending) return;
+    const result =
+      typeof resolvePendingGotoSelection === 'function'
+        ? resolvePendingGotoSelection(virtualRows, pending)
+        : { status: 'idle' as const };
+    if (result.status === 'waiting' || result.status === 'idle') return;
+    pendingGotoRef.current = null;
+    if (result.status === 'ready' && result.selection) {
+      setLineSelection(result.selection);
+      scrollSelectionIntoView(result.selection);
+      setActionMsg('');
+      return;
+    }
+    if (result.status === 'missing') {
+      setActionMsg(
+        `No selectable line ${pending.startLine} in ${pending.path}.`
+      );
+    }
+  }, [
+    virtualRows,
+    avgH,
+    viewportHeight,
+    rowOffsetList,
+    setLineSelection,
+    setScrollTop,
+    setActionMsg,
+  ]);
+
   function navComment(delta: number) {
     if (!mappedComments.length) return;
     if (typeof resolveCommentNav === 'function') {
@@ -1785,6 +1920,209 @@ export function PrModalApp({
         setCommentIndex(next);
       }
     }
+  }
+
+  /** Scroll left file-nav so the active file row is visible when off-screen. */
+  function scrollFileNavRowIntoView(path: string) {
+    const p = String(path || '').trim();
+    if (!p) return;
+    requestAnimationFrame(() => {
+      try {
+        const root =
+          typeof document !== 'undefined'
+            ? document.querySelector('.prp-filetree')
+            : null;
+        if (!root) return;
+        const esc =
+          typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+            ? CSS.escape(p)
+            : p.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        const row =
+          (root.querySelector(
+            `.prp-filetree__item--active[data-file-path="${esc}"]`
+          ) as HTMLElement | null) ||
+          (root.querySelector(
+            `[data-file-path="${esc}"]`
+          ) as HTMLElement | null);
+        row?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+      } catch {
+        /* ignore */
+      }
+    });
+  }
+
+  /** Diff file list step — relative to the currently viewed file (displayFiles). */
+  function navFile(delta: number) {
+    if (typeof resolveAdjacentFileNav !== 'function') return;
+    const st = resolveAdjacentFileNav(displayFiles, activeFilePath, delta);
+    if (st.path) onSelectFile(st.path);
+  }
+
+  /** Scroll Diff virtual list by ~one viewport page. */
+  function scrollDiffPage(delta: number) {
+    const el = listRef.current as HTMLElement | null;
+    if (!el) return;
+    const next =
+      typeof nextScrollTopByPage === 'function'
+        ? nextScrollTopByPage(
+            el.scrollTop,
+            el.clientHeight,
+            el.scrollHeight,
+            delta
+          )
+        : Math.max(
+            0,
+            Math.min(
+              el.scrollHeight - el.clientHeight,
+              el.scrollTop + (delta < 0 ? -1 : 1) * el.clientHeight * 0.9
+            )
+          );
+    el.scrollTop = next;
+    setScrollTop(next);
+  }
+
+  function toggleViewedActiveFile() {
+    const path = String(activeFilePath || '').trim();
+    if (!path) return;
+    onToggleViewed(path);
+  }
+
+  /** Apply Diff review-filter toggle (⌥U/R/P). */
+  function applyReviewFilterToggle(
+    target: 'unresolved' | 'resolved' | 'pending'
+  ) {
+    setDiffReviewFilter((prev) =>
+      typeof toggleReviewFilter === 'function'
+        ? toggleReviewFilter(prev, target)
+        : prev === target
+          ? null
+          : target
+    );
+  }
+
+  /**
+   * Goto path:line[:line] or bare line[:line] — select file + line range.
+   * Expands collapsed files first; if rows are not ready, queues pendingGotoRef
+   * and re-applies after virtualRows rebuild (same pattern as comment jump).
+   * @returns false when parse/apply failed (keep Goto open)
+   */
+  function applyGotoQuery(query: string): boolean {
+    if (typeof parseGotoQuery !== 'function') return false;
+    const parsed = parseGotoQuery(query);
+    if (!parsed) {
+      setActionMsg('Invalid Goto query. Use path:line[:line] or line[:line].');
+      return false;
+    }
+    const path =
+      typeof resolveGotoPathAmongFiles === 'function'
+        ? resolveGotoPathAmongFiles(
+            parsed.path,
+            activeFilePath,
+            displayFiles
+          )
+        : String(parsed.path || activeFilePath || '').trim() || null;
+    if (!path) {
+      setActionMsg('No file for Goto — open a file or include a path.');
+      return false;
+    }
+    // Force-expand collapsed/viewed/default-collapsed so selectable rows rebuild
+    setCollapsedFiles((prev) =>
+      typeof expandPathInCollapsedSet === 'function'
+        ? expandPathInCollapsedSet(prev, path, annotatedFiles, viewedPaths)
+        : (() => {
+            const n = materializeCollapsedPaths(
+              prev,
+              annotatedFiles,
+              viewedPaths
+            );
+            n.delete(path);
+            return n;
+          })()
+    );
+    // Expand + activate file (may rebuild virtualRows async)
+    onSelectFile(path);
+
+    const pending = {
+      path,
+      startLine: parsed.startLine,
+      endLine: parsed.endLine,
+    };
+    const result =
+      typeof resolvePendingGotoSelection === 'function'
+        ? resolvePendingGotoSelection(virtualRows, pending)
+        : { status: 'missing' as const };
+
+    if (result.status === 'ready' && result.selection) {
+      pendingGotoRef.current = null;
+      setLineSelection(result.selection);
+      scrollSelectionIntoView(result.selection);
+      setActionMsg('');
+      return true;
+    }
+
+    if (result.status === 'waiting') {
+      // File still collapsed / body not in virtualRows yet — re-apply after expand
+      pendingGotoRef.current = pending;
+      setActionMsg('');
+      return true;
+    }
+
+    // Expanded but no selectable line, or unknown — still queue once so a
+    // concurrent expand that lands next frame can succeed; effect fails cleanly.
+    pendingGotoRef.current = pending;
+    setActionMsg('');
+    // Microtask: if rows already final and still missing, effect runs on next paint
+    queueMicrotask(() => {
+      try {
+        const p = pendingGotoRef.current;
+        if (!p || p.path !== path) return;
+        const again =
+          typeof resolvePendingGotoSelection === 'function'
+            ? resolvePendingGotoSelection(
+                // use latest store-driven rows from this render; effect handles later
+                virtualRows,
+                p
+              )
+            : { status: 'missing' as const };
+        if (again.status === 'ready' && again.selection) {
+          pendingGotoRef.current = null;
+          setLineSelection(again.selection);
+          scrollSelectionIntoView(again.selection);
+        } else if (again.status === 'missing') {
+          pendingGotoRef.current = null;
+          setActionMsg(`No selectable line ${p.startLine} in ${p.path}.`);
+        }
+      } catch {
+        /* ignore */
+      }
+    });
+    return true;
+  }
+
+  function applySelectionKeyboardMove(delta: number, shift: boolean) {
+    setLineSelection((prev) => {
+      if (!prev || typeof moveLineSelection !== 'function') return prev;
+      return moveLineSelection(prev, virtualRows, delta, { shift }) || prev;
+    });
+    // Scroll new head into view after state commits
+    queueMicrotask(() => {
+      try {
+        const sel = useModalStore.getState().lineSelection;
+        const headIdx = Number(sel?.headRowIndex);
+        if (!Number.isFinite(headIdx) || headIdx < 0) return;
+        const top = scrollTopForIndex(
+          headIdx,
+          avgH,
+          viewportHeight,
+          virtualRows.length,
+          rowOffsetList
+        );
+        setScrollTop(top);
+        if (listRef.current) listRef.current.scrollTop = top;
+      } catch {
+        /* ignore */
+      }
+    });
   }
 
   // Initialize / restore view state once per PR number (sessionStorage + initialRoute)
@@ -2594,6 +2932,8 @@ export function PrModalApp({
   function onSelectFile(path: any) {
     setActiveFilePath(path);
     // Auto-expand collapsed file when selected from tree (including defaults/viewed).
+    // Use expandPathInCollapsedSet so emptying the set does not re-collapse
+    // the path via isPathCollapsed's empty-set + viewedPaths branch.
     setCollapsedFiles((prev) => {
       const file = annotatedFiles.find(
         (f: any) => (f.filename || f.path) === path
@@ -2608,6 +2948,14 @@ export function PrModalApp({
         )
       ) {
         return prev;
+      }
+      if (typeof expandPathInCollapsedSet === 'function') {
+        return expandPathInCollapsedSet(
+          prev,
+          path,
+          annotatedFiles,
+          viewedPaths
+        );
       }
       const n = materializeCollapsedPaths(prev, annotatedFiles, viewedPaths);
       n.delete(path);
@@ -2625,6 +2973,8 @@ export function PrModalApp({
       setScrollTop(top);
       if (listRef.current) listRef.current.scrollTop = top;
     }
+    // Keep left nav focus visible when stepping to an off-screen file
+    scrollFileNavRowIntoView(String(path || ''));
   }
 
   function onToggleDir(path: any) {
@@ -2846,6 +3196,16 @@ export function PrModalApp({
       setActionMsg(
         'Extension bridge unavailable (PRTreeFetch). Refresh this GitHub tab after reloading pr+.'
       );
+      return;
+    }
+    // Own PR: GitHub 422s APPROVE / REQUEST_CHANGES — hide + hard-block
+    if (
+      typeof isReviewVerdictKind === 'function' &&
+      isReviewVerdictKind(kind) &&
+      typeof isViewerPrAuthor === 'function' &&
+      isViewerPrAuthor(detail)
+    ) {
+      setActionMsg('Cannot approve or request changes on your own pull request.');
       return;
     }
     const body = commentText.trim();
@@ -3142,7 +3502,18 @@ export function PrModalApp({
       setActionMsg(`Cannot remove bot reviewer ${login}.`);
       return;
     }
-    if (!window.confirm(`Remove reviewer ${login}?`)) return;
+    if (
+      !confirmGateProceed(
+        await requestConfirm({
+          title: 'Remove reviewer?',
+          message: `Remove reviewer ${login}?`,
+          confirmLabel: 'Remove',
+          tone: 'danger',
+        })
+      )
+    ) {
+      return;
+    }
     setActionBusy(true);
     setActionMsg('');
     try {
@@ -3359,7 +3730,18 @@ export function PrModalApp({
 
   async function onRemoveAssignee(login: any) {
     if (!detail || !login) return;
-    if (!window.confirm(`Unassign ${login}?`)) return;
+    if (
+      !confirmGateProceed(
+        await requestConfirm({
+          title: 'Unassign?',
+          message: `Unassign ${login}?`,
+          confirmLabel: 'Unassign',
+          tone: 'danger',
+        })
+      )
+    ) {
+      return;
+    }
     setActionBusy(true);
     setActionMsg('');
     try {
@@ -3580,8 +3962,13 @@ export function PrModalApp({
   async function onApplySuggestion(payload: any) {
     if (!detail || !payload?.path || payload.endLine == null) return;
     if (
-      !window.confirm(
-        `Apply suggestion to ${payload.path}:${payload.startLine || payload.endLine}–${payload.endLine} on ${detail.headRef}?`
+      !confirmGateProceed(
+        await requestConfirm({
+          title: 'Apply suggestion?',
+          message: `Apply suggestion to ${payload.path}:${payload.startLine || payload.endLine}–${payload.endLine} on ${detail.headRef}?`,
+          confirmLabel: 'Apply',
+          tone: 'warn',
+        })
       )
     ) {
       return;
@@ -3613,10 +4000,75 @@ export function PrModalApp({
     setEditingComment({ kind: 'review', id });
   }
 
+  const stackPath = useMemo(() => {
+    if (!detail?.number) return { items: [], branches: [] };
+    const list = Array.isArray(openPulls) ? openPulls : [];
+    const merged = list.some((p) => Number(p.number) === Number(detail.number))
+      ? list
+      : [
+          ...list,
+          {
+            number: detail.number,
+            title: detail.title,
+            headRef: detail.headRef,
+            baseRef: detail.baseRef,
+            htmlUrl: detail.htmlUrl,
+            draft: detail.draft,
+          },
+        ];
+    if (typeof buildStackPathModel === 'function') {
+      return buildStackPathModel(merged, detail.number, stackPathSelections);
+    }
+    if (typeof buildStackStrip === 'function') {
+      return {
+        items: buildStackStrip(merged, detail.number, stackPathSelections),
+        branches: [],
+      };
+    }
+    return { items: [], branches: [] };
+  }, [openPulls, detail, stackPathSelections]);
+  const stackItems = stackPath.items;
+
+  const openStackOrListPr = useCallback(
+    (n: number) => {
+      const num = Number(n);
+      if (!Number.isFinite(num) || num <= 0) return;
+      // Reset path selections so the opened PR becomes the focused stack current
+      setStackPathSelections({});
+      const page = layoutMode === LAYOUT_DIFF ? 'diff' : 'conversation';
+      if (typeof onOpenStackPr === 'function') {
+        onOpenStackPr(num, { page });
+      }
+    },
+    [layoutMode, onOpenStackPr]
+  );
+
+  const navigateAdjacentPr = useCallback(
+    (direction: 'prev' | 'next') => {
+      if (typeof resolveAdjacentPrNumber !== 'function') return;
+      const next = resolveAdjacentPrNumber({
+        direction,
+        currentNumber: detail?.number,
+        stackItems,
+        openPulls: Array.isArray(openPulls) ? openPulls : [],
+      });
+      if (next != null) openStackOrListPr(next);
+    },
+    [detail?.number, stackItems, openPulls, openStackOrListPr]
+  );
+
   const paletteCommands = useMemo(() => {
     if (typeof buildPaletteCommands !== 'function') return [];
-    return buildPaletteCommands(detail || {});
-  }, [detail]);
+    const canVerdict =
+      typeof canSubmitReviewVerdict === 'function'
+        ? canSubmitReviewVerdict(detail)
+        : true;
+    return buildPaletteCommands(detail || {}, {
+      stackItems,
+      openPulls: Array.isArray(openPulls) ? openPulls : [],
+      canSubmitReviewVerdict: canVerdict,
+    });
+  }, [detail, stackItems, openPulls]);
 
   function runPaletteCommand(cmd: any) {
     if (!cmd) return;
@@ -3625,6 +4077,17 @@ export function PrModalApp({
     const action = cmd.action;
     const p = cmd.payload || {};
     switch (action) {
+      case 'openStackPr': {
+        const n = Number(p.number);
+        if (Number.isFinite(n) && n > 0) openStackOrListPr(n);
+        break;
+      }
+      case 'navAdjacentPrev':
+        navigateAdjacentPr('prev');
+        break;
+      case 'navAdjacentNext':
+        navigateAdjacentPr('next');
+        break;
       case 'toggleDiff':
         onToggleDiff();
         break;
@@ -3656,6 +4119,10 @@ export function PrModalApp({
         break;
       case 'readyForReview':
         void onSetDraftStage('ready');
+        break;
+      case 'toggleDraftStage':
+        // ⌥⇧D: draft → ready, open PR → convert to draft
+        void onSetDraftStage(detail?.draft ? 'ready' : 'draft');
         break;
       case 'mergePr':
         void onMergePr(p.method || 'merge');
@@ -3739,9 +4206,20 @@ export function PrModalApp({
       case 'promptLabels':
         openLabelPicker();
         break;
-      case 'leaveReview':
-        void onLeaveReviewAction(p.kind || 'comment');
+      case 'leaveReview': {
+        const kind = p.kind || 'comment';
+        if (
+          typeof isReviewVerdictKind === 'function' &&
+          isReviewVerdictKind(kind) &&
+          typeof isViewerPrAuthor === 'function' &&
+          isViewerPrAuthor(detail)
+        ) {
+          setActionMsg('Cannot approve or request changes on your own pull request.');
+          break;
+        }
+        void onLeaveReviewAction(kind);
         break;
+      }
       case 'closePr':
         void onClosePr();
         break;
@@ -4244,7 +4722,18 @@ export function PrModalApp({
 
   async function onClosePr() {
     if (!detail) return;
-    if (!window.confirm(`Close pull request #${detail.number}?`)) return;
+    if (
+      !confirmGateProceed(
+        await requestConfirm({
+          title: 'Close pull request?',
+          message: `Close pull request #${detail.number}?`,
+          confirmLabel: 'Close PR',
+          tone: 'danger',
+        })
+      )
+    ) {
+      return;
+    }
     setActionBusy(true);
     setActionMsg('');
     try {
@@ -4333,7 +4822,18 @@ export function PrModalApp({
   async function onSetDraftStage(stage: any) {
     if (!detail) return;
     const label = stage === 'ready' ? 'Mark ready for review' : 'Convert to draft';
-    if (!window.confirm(`${label}?`)) return;
+    if (
+      !confirmGateProceed(
+        await requestConfirm({
+          title: `${label}?`,
+          message: `${label} for #${detail.number}?`,
+          confirmLabel: label,
+          tone: 'default',
+        })
+      )
+    ) {
+      return;
+    }
     setActionBusy(true);
     setActionMsg('');
     try {
@@ -4366,7 +4866,16 @@ export function PrModalApp({
       return;
     }
     const m = ['merge', 'squash', 'rebase'].includes(method) ? method : 'merge';
-    if (!window.confirm(`${m === 'squash' ? 'Squash and merge' : m === 'rebase' ? 'Rebase and merge' : 'Merge'} PR #${detail.number}?`)) {
+    const mergeReq =
+      typeof buildMergeConfirmRequest === 'function'
+        ? buildMergeConfirmRequest(m, detail.number)
+        : {
+            title: 'Merge?',
+            message: `Merge PR #${detail.number}?`,
+            confirmLabel: 'Merge',
+            tone: 'danger' as const,
+          };
+    if (!confirmGateProceed(await requestConfirm(mergeReq))) {
       return;
     }
     setActionBusy(true);
@@ -4406,7 +4915,18 @@ export function PrModalApp({
 
   async function onUpdateBranch() {
     if (!detail) return;
-    if (!window.confirm(`Update branch ${detail.headRef} with latest ${detail.baseRef}?`)) return;
+    if (
+      !confirmGateProceed(
+        await requestConfirm({
+          title: 'Update branch?',
+          message: `Update branch ${detail.headRef} with latest ${detail.baseRef}?`,
+          confirmLabel: 'Update branch',
+          tone: 'warn',
+        })
+      )
+    ) {
+      return;
+    }
     setActionBusy(true);
     setActionMsg('');
     try {
@@ -4652,7 +5172,18 @@ export function PrModalApp({
   async function onSetMilestone(clear = false) {
     if (!detail) return;
     if (clear) {
-      if (!window.confirm('Clear milestone?')) return;
+      if (
+        !confirmGateProceed(
+          await requestConfirm({
+            title: 'Clear milestone?',
+            message: 'Remove the milestone from this pull request?',
+            confirmLabel: 'Clear',
+            tone: 'warn',
+          })
+        )
+      ) {
+        return;
+      }
       await applyMilestoneNumber(null);
       return;
     }
@@ -4864,7 +5395,16 @@ export function PrModalApp({
       openRerequestReviewerPicker();
       return;
     }
-    if (!window.confirm(`Re-request review from: ${logins.join(', ')}?`)) {
+    if (
+      !confirmGateProceed(
+        await requestConfirm({
+          title: 'Re-request review?',
+          message: `Re-request review from: ${logins.join(', ')}?`,
+          confirmLabel: 'Re-request',
+          tone: 'default',
+        })
+      )
+    ) {
       return;
     }
     await applyRerequestReviewers(logins);
@@ -4924,7 +5464,18 @@ export function PrModalApp({
 
   async function onDeleteReviewComment(commentId: any) {
     if (!detail || commentId == null) return;
-    if (!window.confirm('Delete this review comment?')) return;
+    if (
+      !confirmGateProceed(
+        await requestConfirm({
+          title: 'Delete review comment?',
+          message: 'Delete this review comment? This cannot be undone.',
+          confirmLabel: 'Delete',
+          tone: 'danger',
+        })
+      )
+    ) {
+      return;
+    }
     setActionBusy(true);
     setActionMsg('');
     // Drop from local + host immediately so revalidate bulk-fetch and merge
@@ -4960,7 +5511,18 @@ export function PrModalApp({
 
   async function onDeleteIssueComment(commentId: any) {
     if (!detail || commentId == null) return;
-    if (!window.confirm('Delete this comment?')) return;
+    if (
+      !confirmGateProceed(
+        await requestConfirm({
+          title: 'Delete comment?',
+          message: 'Delete this comment? This cannot be undone.',
+          confirmLabel: 'Delete',
+          tone: 'danger',
+        })
+      )
+    ) {
+      return;
+    }
     setActionBusy(true);
     setActionMsg('');
     const stripped =
@@ -4999,6 +5561,7 @@ export function PrModalApp({
     editingBody,
     editingComment,
     pickerOpen: Boolean(picker),
+    confirmOpen: Boolean(confirmState),
     showSelectionComposer,
     selectionIslandPhase,
     conversationCommentFocused: Boolean(conversationCommentFocus),
@@ -5017,7 +5580,104 @@ export function PrModalApp({
     copySelectionUrl,
     navSearch,
     navComment,
+    navFile,
+    scrollDiffPage,
+    toggleViewedActiveFile,
+    applyReviewFilterToggle,
+    applyGotoQuery,
+    applySelectionKeyboardMove,
+    openStackOrListPr,
+    navigateAdjacentPr,
+    stackItems,
+    openPulls,
+    runPaletteCommand,
   };
+
+  // Track Option/Alt hold for shortcut badges (works with Opt alone and Opt+Shift)
+  useEffect(() => {
+    if (!open) {
+      setOptHeld(false);
+      setOptHintsSuppressed(false);
+      return undefined;
+    }
+    const sync = (e: KeyboardEvent) => {
+      const held = Boolean(e.altKey);
+      setOptHeld(held);
+      // Releasing Opt clears tip suppression so the next hold shows badges again
+      if (!held) setOptHintsSuppressed(false);
+    };
+    const clear = () => {
+      setOptHeld(false);
+      setOptHintsSuppressed(false);
+    };
+    window.addEventListener('keydown', sync, true);
+    window.addEventListener('keyup', sync, true);
+    window.addEventListener('blur', clear);
+    // If user tabs away mid-hold
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) clear();
+    });
+    return () => {
+      window.removeEventListener('keydown', sync, true);
+      window.removeEventListener('keyup', sync, true);
+      window.removeEventListener('blur', clear);
+    };
+  }, [open]);
+
+  // Watch GH ⌘K palette open state so Escape race (GH closes first) still skips pr+ close
+  useEffect(() => {
+    if (!open) return undefined;
+    const doc = typeof document !== 'undefined' ? document : null;
+    if (!doc) return undefined;
+
+    const touch = () => {
+      try {
+        if (typeof touchGithubCommandPaletteOpen === 'function') {
+          touchGithubCommandPaletteOpen(doc);
+        } else {
+          globalThis.PRListFocus?.touchGithubCommandPaletteOpen?.(doc);
+        }
+      } catch {
+        /* ignore */
+      }
+    };
+    touch();
+
+    const mo = new MutationObserver(() => touch());
+    try {
+      const dlg = typeof findGithubCommandPaletteDialog === 'function'
+        ? findGithubCommandPaletteDialog(doc)
+        : doc.getElementById('command-palette-pjax-container');
+      if (dlg) {
+        mo.observe(dlg, {
+          attributes: true,
+          attributeFilter: ['open', 'class', 'style', 'hidden', 'aria-hidden'],
+        });
+      }
+      // Palette host may mount after open — watch body for dialog insert
+      if (doc.body) {
+        mo.observe(doc.body, { childList: true, subtree: true });
+      }
+    } catch {
+      /* ignore */
+    }
+
+    // After ⌘K / Ctrl+K GH opens palette asynchronously
+    const onMaybeOpen = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && String(e.key || '').toLowerCase() === 'k') {
+        queueMicrotask(touch);
+        requestAnimationFrame(touch);
+        setTimeout(touch, 50);
+        setTimeout(touch, 200);
+      }
+    };
+    window.addEventListener('keydown', onMaybeOpen, true);
+
+    return () => {
+      mo.disconnect();
+      window.removeEventListener('keydown', onMaybeOpen, true);
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -5027,6 +5687,56 @@ export function PrModalApp({
       const key = String(e.key || '').toLowerCase();
       const ui = uiRef.current || {};
       const act = actionsRef.current || {};
+      const doc = typeof document !== 'undefined' ? document : null;
+
+      // Keep sticky "was open" timestamp current while typing in GH palette
+      let ghOpenNow = false;
+      try {
+        ghOpenNow =
+          typeof touchGithubCommandPaletteOpen === 'function'
+            ? touchGithubCommandPaletteOpen(doc)
+            : Boolean(
+                globalThis.PRListFocus?.touchGithubCommandPaletteOpen?.(doc) ||
+                  globalThis.PRListFocus?.isGithubCommandPaletteOpen?.(doc) ||
+                  (typeof isGithubCommandPaletteOpen === 'function' &&
+                    isGithubCommandPaletteOpen(doc))
+              );
+      } catch {
+        try {
+          ghOpenNow =
+            typeof isGithubCommandPaletteOpen === 'function' &&
+            isGithubCommandPaletteOpen(doc);
+        } catch {
+          ghOpenNow = false;
+        }
+      }
+
+      // While GH palette is open: never steal chords (let GH handle).
+      // On Escape after GH already closed the dialog on this same keydown:
+      // short grace suppresses pr+ shell close only — then shortcuts resume.
+      if (ghOpenNow) {
+        return;
+      }
+      if (e.key === 'Escape') {
+        const ignoreEsc =
+          typeof shouldIgnoreModalEscapeForGithubPalette === 'function'
+            ? shouldIgnoreModalEscapeForGithubPalette(doc, { target: e.target })
+            : Boolean(
+                globalThis.PRListFocus?.shouldIgnoreModalEscapeForGithubPalette?.(
+                  doc,
+                  { target: e.target }
+                )
+              );
+        if (ignoreEsc) {
+          // GH may leave <dialog> stuck in the CSS top layer after close
+          try {
+            globalThis.PRListFocus?.recoverGithubCommandPaletteTopLayer?.(doc);
+          } catch {
+            /* ignore */
+          }
+          return;
+        }
+      }
 
       // Diff selection shortcuts (only when not typing in an editable field)
       const ae = typeof document !== 'undefined' ? document.activeElement : null;
@@ -5067,6 +5777,12 @@ export function PrModalApp({
       // Escape: dismiss nested UI first, otherwise close the whole modal
       // (including from Diff — do not shrink back to conversation).
       if (e.key === 'Escape') {
+        // Confirm owns Escape (cancel) — do not close the PR shell
+        if (ui.confirmOpen) {
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
         // Mermaid / image fullscreen viewers own Escape — close viewer only, keep modal
         if (
           typeof document !== 'undefined' &&
@@ -5123,19 +5839,67 @@ export function PrModalApp({
       }
 
       const editable = isEditableKeyboardTarget(e.target);
+      const altOnly = Boolean(e.altKey) && !mod;
+      const shift = Boolean(e.shiftKey);
+
+      // Option / Option+Shift command actions (former mod → opt; no mod back-compat)
+      if (
+        altOnly &&
+        !editable &&
+        !ui.paletteOpen &&
+        typeof resolvePrModalOptAction === 'function'
+      ) {
+        const peer = resolvePrModalOptAction({
+          alt: true,
+          shift,
+          mod: false,
+          key,
+          code: e.code,
+        });
+        // Diff owns ⌥⇧R for viewed-toggle — do not steal for Add reviewer
+        const skipPeerForDiffViewed =
+          ui.layoutMode === LAYOUT_DIFF &&
+          shift &&
+          (String(e.code || '') === 'KeyR' ||
+            String(key || '').toLowerCase() === 'r') &&
+          (peer?.action === 'promptAddReviewer' ||
+            peer?.id === 'opt-reviewer' ||
+            peer?.id === 'add-reviewer');
+        if (peer?.action && !skipPeerForDiffViewed) {
+          e.preventDefault();
+          e.stopPropagation();
+          setOptHintsSuppressed(true);
+          if (peer.action === 'openPalette') {
+            setPaletteOpen(true);
+            setPaletteQuery('');
+            return;
+          }
+          // Route through palette runner (merge confirm, etc.)
+          act.runPaletteCommand?.({
+            action: peer.action,
+            payload: peer.payload || {},
+            id: peer.id,
+            title: peer.title,
+          });
+          return;
+        }
+      }
+
       let action =
         typeof resolveModalShortcutAction === 'function'
           ? resolveModalShortcutAction({
               mod: mod && !e.altKey,
-              shift: Boolean(e.shiftKey),
-              alt: Boolean(e.altKey) && !mod,
+              shift,
+              alt: altOnly,
               key,
               code: e.code,
               editingBody: ui.editingBody,
               editingComment: ui.editingComment,
               paletteOpen: ui.paletteOpen,
+              githubPaletteOpen: false, // already bailed above when open
               editableTarget: editable,
               searchOpen: Boolean(ui.searchOpen),
+              hasLineSelection: Boolean(ui.hasLineSelection),
               layoutMode: ui.layoutMode,
               conversationCommentFocused: Boolean(
                 ui.conversationCommentFocused ?? conversationCommentFocusRef.current
@@ -5153,8 +5917,10 @@ export function PrModalApp({
       ) {
         action = resolveEmbedShortcutAction({
           mod: mod && !e.altKey,
-          shift: Boolean(e.shiftKey),
+          alt: altOnly,
+          shift,
           key,
+          code: e.code,
           presentation: 'embed',
           editableTarget: editable,
         });
@@ -5164,6 +5930,8 @@ export function PrModalApp({
 
       e.preventDefault();
       e.stopPropagation();
+      // Opt-hold tips vanish immediately after a chord fires (until Opt release)
+      if (e.altKey) setOptHintsSuppressed(true);
 
       switch (action) {
         case 'openPalette':
@@ -5217,39 +5985,83 @@ export function PrModalApp({
             act.navComment?.(1);
           }
           break;
-        default:
+        case 'navFilePrev':
+          if (ui.layoutMode === LAYOUT_DIFF) act.navFile?.(-1);
           break;
+        case 'navFileNext':
+          if (ui.layoutMode === LAYOUT_DIFF) act.navFile?.(1);
+          break;
+        case 'scrollDiffPagePrev':
+          if (ui.layoutMode === LAYOUT_DIFF) act.scrollDiffPage?.(-1);
+          break;
+        case 'scrollDiffPageNext':
+          if (ui.layoutMode === LAYOUT_DIFF) act.scrollDiffPage?.(1);
+          break;
+        case 'toggleViewedActiveFile':
+          if (ui.layoutMode === LAYOUT_DIFF) act.toggleViewedActiveFile?.();
+          break;
+        case 'toggleReviewFilterUnresolved':
+          if (ui.layoutMode === LAYOUT_DIFF) {
+            act.applyReviewFilterToggle?.('unresolved');
+          }
+          break;
+        case 'toggleReviewFilterResolved':
+          if (ui.layoutMode === LAYOUT_DIFF) {
+            act.applyReviewFilterToggle?.('resolved');
+          }
+          break;
+        case 'toggleReviewFilterPending':
+          if (ui.layoutMode === LAYOUT_DIFF) {
+            act.applyReviewFilterToggle?.('pending');
+          }
+          break;
+        case 'moveSelectionUp':
+          if (ui.layoutMode === LAYOUT_DIFF) {
+            act.applySelectionKeyboardMove?.(-1, false);
+          }
+          break;
+        case 'moveSelectionDown':
+          if (ui.layoutMode === LAYOUT_DIFF) {
+            act.applySelectionKeyboardMove?.(1, false);
+          }
+          break;
+        case 'extendSelectionUp':
+          if (ui.layoutMode === LAYOUT_DIFF) {
+            act.applySelectionKeyboardMove?.(-1, true);
+          }
+          break;
+        case 'extendSelectionDown':
+          if (ui.layoutMode === LAYOUT_DIFF) {
+            act.applySelectionKeyboardMove?.(1, true);
+          }
+          break;
+        case 'navAdjacentPrev':
+          act.navigateAdjacentPr?.('prev');
+          break;
+        case 'navAdjacentNext':
+          act.navigateAdjacentPr?.('next');
+          break;
+        default: {
+          // navStackDigit1 … navStackDigit9
+          const m = String(action || '').match(/^navStackDigit([1-9])$/);
+          if (m) {
+            const digit = Number(m[1]);
+            const items = act.stackItems || [];
+            const num =
+              typeof stackDigitSlotNumber === 'function'
+                ? stackDigitSlotNumber(digit, items)
+                : Number(items[digit - 1]?.number);
+            if (num != null && Number.isFinite(num) && num > 0) {
+              act.openStackOrListPr?.(num);
+            }
+          }
+          break;
+        }
       }
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
   }, [open, isEmbed, onRestoreNative]);
-
-  const stackPath = useMemo(() => {
-    if (!detail?.number) return { items: [], branches: [] };
-    const list = Array.isArray(openPulls) ? openPulls : [];
-    const merged = list.some((p) => Number(p.number) === Number(detail.number))
-      ? list
-      : [
-          ...list,
-          {
-            number: detail.number,
-            title: detail.title,
-            headRef: detail.headRef,
-            baseRef: detail.baseRef,
-            htmlUrl: detail.htmlUrl,
-            draft: detail.draft,
-          },
-        ];
-    if (typeof buildStackPathModel === 'function') {
-      return buildStackPathModel(merged, detail.number, stackPathSelections);
-    }
-    if (typeof buildStackStrip === 'function') {
-      return { items: buildStackStrip(merged, detail.number, stackPathSelections), branches: [] };
-    }
-    return { items: [], branches: [] };
-  }, [openPulls, detail, stackPathSelections]);
-  const stackItems = stackPath.items;
 
   // Independent section loading: initial (no detail yet) vs soft revalidate (detail present)
   // Progressive load status is shown only in the header stats badge (no top bar).
@@ -5306,7 +6118,11 @@ export function PrModalApp({
         isEmbed ? 'prp-shell--embed' : shellClassName(shellMode)
       } ${fsCls}${
         !isEmbed && shellFullscreenHint ? ' prp-shell--fs-hint' : ''
-      } ${theme.className}${closing ? ' prp-overlay--leaving' : ''} ${presentCls}`.trim()}
+      } ${theme.className}${closing ? ' prp-overlay--leaving' : ''} ${presentCls}${
+        optHeld && !optHintsSuppressed && !paletteOpen && !confirmState
+          ? ' prp-opt-hints-on'
+          : ''
+      }`.trim()}
       tabIndex={-1}
       data-color-mode={theme.mode}
       data-presentation={isEmbed ? 'embed' : 'modal'}
@@ -5315,6 +6131,11 @@ export function PrModalApp({
       data-fs-hint={shellFullscreenHint ? '1' : '0'}
       data-layout={layoutMode === LAYOUT_DIFF ? 'diff' : 'conversation'}
       data-leaving={closing ? '1' : '0'}
+      data-opt-hints={
+        optHeld && !optHintsSuppressed && !paletteOpen && !confirmState
+          ? '1'
+          : '0'
+      }
     >
       {!isEmbed ? (
         <div className="prp-backdrop" onClick={requestClose} />
@@ -5383,6 +6204,9 @@ export function PrModalApp({
           baseBranchRef={baseBranchRef}
           sectionLoading={isInitialLoad}
           shortcutMod={shortcutMod}
+          showOptHints={
+            optHeld && !optHintsSuppressed && !paletteOpen && !confirmState
+          }
           shellMode={shellMode}
           onToggleShell={showShellToggleChrome ? onToggleShell : undefined}
           shellFullscreen={shellFullscreen}
@@ -5416,13 +6240,11 @@ export function PrModalApp({
           items={stackItems}
           branches={stackPath.branches}
           resetKey={prIdentity}
+          currentNumber={detail?.number ?? null}
+          showOptHotkeys={optHeld && !optHintsSuppressed && !paletteOpen}
           onOpenPr={(n: number) => {
             // Preserve current Diff / Conversation when hopping stacked PRs
-            const page =
-              layoutMode === LAYOUT_DIFF ? 'diff' : 'conversation';
-            if (typeof onOpenStackPr === 'function') {
-              onOpenStackPr(n, { page });
-            }
+            openStackOrListPr(n);
           }}
           onPathChange={(parentHeadRef, childNumber) => {
             setStackPathSelections((prev) => ({
@@ -5447,6 +6269,13 @@ export function PrModalApp({
           onClose={onSearchClose}
           onNext={onSearchNext}
           onPrev={onSearchPrev}
+          showOptHints={
+            layoutMode !== LAYOUT_DIFF &&
+            optHeld &&
+            !optHintsSuppressed &&
+            !paletteOpen &&
+            !confirmState
+          }
         />
         {error ? <div className="prp-status prp-status--error">{error}</div> : null}
         {/*
@@ -5554,6 +6383,19 @@ export function PrModalApp({
             }
             onReplyToThread={onReplyToThread}
             onResolveThread={onResolveThread}
+            onOpenLinkedPr={(n: number) => openStackOrListPr(n)}
+            knownPullNumbers={(Array.isArray(openPulls) ? openPulls : [])
+              .map((p: any) => Number(p?.number))
+              .filter((n: number) => Number.isFinite(n) && n > 0)}
+            /* Keep-alive conversation panel is still mounted in Diff — never
+               portal Opt hints for a hidden panel (would paint over Diff). */
+            showOptHints={
+              layoutMode === LAYOUT_CENTERED &&
+              optHeld &&
+              !optHintsSuppressed &&
+              !paletteOpen &&
+              !confirmState
+            }
           />
           </div>
         ) : null}
@@ -5613,6 +6455,21 @@ export function PrModalApp({
               onToggleViewed={onToggleViewed}
               navCollapsed={fileNav.collapsed}
               onToggleNavCollapse={onToggleFileNavCollapse}
+              fileIndex={
+                typeof activeFileNavIndex === 'function'
+                  ? activeFileNavIndex(displayFiles, activeFilePath)
+                  : -1
+              }
+              fileTotal={displayFiles.length}
+              onPrevFile={() => navFile(-1)}
+              onNextFile={() => navFile(1)}
+              showOptHints={
+                layoutMode === LAYOUT_DIFF &&
+                optHeld &&
+                !optHintsSuppressed &&
+                !paletteOpen &&
+                !confirmState
+              }
             />
             <div
               className="prp-file-nav-resizer"
@@ -5689,6 +6546,24 @@ export function PrModalApp({
                 onSearchClose={onSearchClose}
                 onSearchNext={onSearchNext}
                 onSearchPrev={onSearchPrev}
+                showOptHints={
+                  layoutMode === LAYOUT_DIFF &&
+                  optHeld &&
+                  !optHintsSuppressed &&
+                  !paletteOpen &&
+                  !confirmState
+                }
+              />
+              <DiffFloatingController
+                onPrevFile={() => navFile(-1)}
+                onNextFile={() => navFile(1)}
+                onPrevPage={() => scrollDiffPage(-1)}
+                onNextPage={() => scrollDiffPage(1)}
+                onGoto={(q: string) => applyGotoQuery(q)}
+                isMac={
+                  typeof navigator !== 'undefined' &&
+                  /Mac|iPhone|iPad/.test(navigator.platform || '')
+                }
               />
               <VirtualDiff
                 virtualRows={virtualRows}
@@ -5820,6 +6695,17 @@ export function PrModalApp({
           commands={paletteCommands}
           onRun={runPaletteCommand}
           onClose={() => setPaletteOpen(false)}
+        />
+        <ConfirmDialog
+          open={Boolean(confirmState)}
+          title={confirmState?.title}
+          message={confirmState?.message}
+          confirmLabel={confirmState?.confirmLabel}
+          cancelLabel={confirmState?.cancelLabel}
+          tone={confirmState?.tone}
+          colorMode={theme.mode}
+          onConfirm={() => closeConfirm(true)}
+          onCancel={() => closeConfirm(false)}
         />
         <SearchableSelect
           open={!!picker}

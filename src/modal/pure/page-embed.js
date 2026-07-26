@@ -22,17 +22,17 @@
     'footer',
   ];
   const EMBED_RESTORE_SHORTCUT = {
-    mod: true,
+    alt: true,
     shift: true,
     key: 'e',
     action: 'restoreNativeView',
-    label: '⌘⇧E',
-    labelWin: 'Ctrl+Shift+E',
+    label: '⌥⇧E',
+    labelWin: 'Alt+Shift+E',
   };
 
   /** Same chord; open pr+ from native GH PR chrome. */
   const EMBED_OPEN_SHORTCUT = {
-    mod: true,
+    alt: true,
     shift: true,
     key: 'e',
     action: 'openEmbedView',
@@ -271,9 +271,15 @@
 
   function resolveEmbedShortcutAction(opts) {
     if (opts?.editableTarget) return null;
-    if (!opts?.mod || !opts?.shift) return null;
+    if (opts?.mod) return null;
+    if (!opts?.alt || !opts?.shift) return null;
     const key = String(opts?.key || '').toLowerCase();
-    if (key !== EMBED_RESTORE_SHORTCUT.key) return null;
+    const code = String(opts?.code || '');
+    const isE =
+      key === EMBED_RESTORE_SHORTCUT.key ||
+      code === 'KeyE' ||
+      code === 'keye';
+    if (!isE) return null;
     if (isEmbedPresentation(opts?.presentation)) return 'restoreNativeView';
     if (opts?.onNativePrPage) return 'openEmbedView';
     return null;

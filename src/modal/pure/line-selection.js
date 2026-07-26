@@ -43,6 +43,167 @@ function beginLineSelection(row) {
 }
 
 /**
+ * Parse Goto query: path:line[:line] or bare line[:line].
+ * Parses line numbers from the right so paths stay intact.
+ */
+function parseGotoQuery(raw) {
+  const s = String(raw ?? '').trim();
+  if (!s) return null;
+  const parts = s.split(':');
+  if (parts.length === 1) {
+    if (!/^\d+$/.test(parts[0])) return null;
+    const startLine = Number(parts[0]);
+    if (!Number.isFinite(startLine) || startLine < 1) return null;
+    return { path: null, startLine, endLine: null };
+  }
+  const last = parts[parts.length - 1];
+  if (!/^\d+$/.test(last)) return null;
+  const lastN = Number(last);
+  if (!Number.isFinite(lastN) || lastN < 1) return null;
+  const secondLast = parts[parts.length - 2];
+  if (/^\d+$/.test(secondLast)) {
+    const secondN = Number(secondLast);
+    if (!Number.isFinite(secondN) || secondN < 1) return null;
+    if (parts.length === 2) {
+      return {
+        path: null,
+        startLine: secondN,
+        endLine: lastN !== secondN ? lastN : null,
+      };
+    }
+    const path = parts.slice(0, -2).join(':').trim();
+    if (!path) return null;
+    return {
+      path,
+      startLine: secondN,
+      endLine: lastN !== secondN ? lastN : null,
+    };
+  }
+  const path = parts.slice(0, -1).join(':').trim();
+  if (!path) return null;
+  return { path, startLine: lastN, endLine: null };
+}
+
+function findSelectableRowForLine(virtualRows, filePath, line, preferredSide = 'RIGHT') {
+  const list = Array.isArray(virtualRows) ? virtualRows : [];
+  const path = String(filePath || '').trim();
+  const ln = Number(line);
+  if (!path || !Number.isFinite(ln) || ln < 1) return null;
+  const preferLeft = preferredSide === 'LEFT';
+  let fallback = null;
+  for (const row of list) {
+    if (!row || row.filePath !== path || !isSelectableDiffRow(row)) continue;
+    if (preferLeft) {
+      if (row.oldLine != null && Number(row.oldLine) === ln) return row;
+      if (row.newLine != null && Number(row.newLine) === ln) fallback = fallback || row;
+    } else {
+      if (row.newLine != null && Number(row.newLine) === ln) return row;
+      if (row.oldLine != null && Number(row.oldLine) === ln) fallback = fallback || row;
+    }
+  }
+  return fallback;
+}
+
+function selectionFromGoto(virtualRows, filePath, startLine, endLine = null) {
+  const startRow = findSelectableRowForLine(virtualRows, filePath, startLine, 'RIGHT');
+  if (!startRow) return null;
+  const endLn = endLine == null || endLine === '' ? null : Number(endLine);
+  if (endLn == null || !Number.isFinite(endLn) || endLn === Number(startLine)) {
+    return beginLineSelection(startRow);
+  }
+  const endRow = findSelectableRowForLine(virtualRows, filePath, endLn, 'RIGHT');
+  if (!endRow) return beginLineSelection(startRow);
+  const started = beginLineSelection(startRow);
+  return extendLineSelection(started, endRow) || started;
+}
+
+function isFileCollapsedInVirtualRows(virtualRows, filePath) {
+  const path = String(filePath || '').trim();
+  if (!path) return false;
+  const list = Array.isArray(virtualRows) ? virtualRows : [];
+  const header = list.find(
+    (r) =>
+      r &&
+      r.kind === 'file-header' &&
+      (r.filePath === path || r.path === path)
+  );
+  if (header && header.collapsed) return true;
+  const pathRows = list.filter(
+    (r) => r && (r.filePath === path || r.path === path)
+  );
+  if (pathRows.length === 1 && pathRows[0].kind === 'file-header') {
+    return true;
+  }
+  return false;
+}
+
+function resolvePendingGotoSelection(virtualRows, pending) {
+  if (!pending || !String(pending.path || '').trim()) return { status: 'idle' };
+  const path = String(pending.path).trim();
+  const sel = selectionFromGoto(
+    virtualRows,
+    path,
+    pending.startLine,
+    pending.endLine
+  );
+  if (sel) return { status: 'ready', selection: sel };
+  if (isFileCollapsedInVirtualRows(virtualRows, path)) {
+    return { status: 'waiting' };
+  }
+  return { status: 'missing' };
+}
+
+function resolveGotoPathAmongFiles(queryPath, activePath, files) {
+  let path = String(queryPath || '').trim();
+  if (!path) {
+    path = String(activePath || '').trim();
+    return path || null;
+  }
+  const list = Array.isArray(files) ? files : [];
+  const exact = list.find((f) => {
+    const p = String(f?.filename || f?.path || '').trim();
+    return p === path;
+  });
+  if (exact) return String(exact.filename || exact.path || path).trim();
+  const suffix = list.find((f) => {
+    const p = String(f?.filename || f?.path || '');
+    return p === path || p.endsWith('/' + path) || p.endsWith(path);
+  });
+  if (suffix) return String(suffix.filename || suffix.path || path).trim();
+  return path;
+}
+
+function moveLineSelection(selection, virtualRows, delta, opts = {}) {
+  if (!selection || selection.kind === 'file' || selection.subjectType === 'file') {
+    return selection;
+  }
+  const list = Array.isArray(virtualRows) ? virtualRows : [];
+  if (!list.length) return selection;
+  const headIdx = Number(selection.headRowIndex);
+  if (!Number.isFinite(headIdx)) return selection;
+  const d = delta < 0 ? -1 : 1;
+  const path = String(selection.filePath || '');
+  let i = headIdx + d;
+  while (i >= 0 && i < list.length) {
+    const row = list[i];
+    if (!row) {
+      i += d;
+      continue;
+    }
+    if (row.filePath && row.filePath !== path) break;
+    if (row.kind === 'file-header' && row.filePath && row.filePath !== path) break;
+    if (isSelectableDiffRow(row) && row.filePath === path) {
+      if (opts.shift) {
+        return extendLineSelection(selection, row) || selection;
+      }
+      return beginLineSelection(row) || selection;
+    }
+    i += d;
+  }
+  return selection;
+}
+
+/**
  * Extend selection to another row (same file only).
  * Always updates headRowIndex (visual range). Line/side track the row for the API.
  */
@@ -366,6 +527,13 @@ const api = {
   lineForSide,
   beginLineSelection,
   extendLineSelection,
+  parseGotoQuery,
+  findSelectableRowForLine,
+  selectionFromGoto,
+  isFileCollapsedInVirtualRows,
+  resolvePendingGotoSelection,
+  resolveGotoPathAmongFiles,
+  moveLineSelection,
   applySelectionPointerDown,
   normalizeSelection,
   selectionToCommentPayload,

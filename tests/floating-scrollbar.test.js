@@ -97,7 +97,41 @@ assert.ok(floatComp.includes("orientation"));
 assert.ok(floatComp.includes('horizontal'));
 assert.ok(css.includes('prp-float-sb--horizontal'));
 
+// Command palette (modal + pulls shell) uses floating scrollbar
+const palette = fs.readFileSync(
+  path.join(root, 'src/modal/views/chrome/CommandPalette.tsx'),
+  'utf8'
+);
+assert.ok(palette.includes('FloatingScrollbar'), 'modal CommandPalette uses FloatingScrollbar');
+assert.ok(palette.includes('prp-scroll-float-host'), 'palette list host');
+assert.ok(palette.includes('prp-pp-list-host'), 'palette list host class');
+
+const styles = fs.readFileSync(path.join(root, 'src/styles.css'), 'utf8');
+assert.ok(styles.includes('prp-pp-list-host'), 'content styles define palette list host');
+assert.ok(
+  styles.includes('prp-pp-list.prp-scroll-float') ||
+    styles.includes('.prp-pp-list.prp-scroll-float'),
+  'palette list hides native bar'
+);
+
+const pureFloat = require('../src/modal/pure/floating-scrollbar.js');
+assert.equal(typeof pureFloat.attachFloatingScrollbar, 'function');
+assert.equal(typeof pureFloat.floatingScrollbarMetrics, 'function');
+const m2 = pureFloat.floatingScrollbarMetrics(0, 400, 800);
+assert.equal(m2.needed, true);
+
+const host = fs.readFileSync(path.join(root, 'src/pr-modal-host.js'), 'utf8');
+assert.ok(host.includes('attachFloatingScrollbar'), 'pulls palette attaches float sb');
+assert.ok(host.includes('prp-pp-list-host'), 'pulls palette list host markup');
+
+const manifest = fs.readFileSync(path.join(root, 'manifest.json'), 'utf8');
+assert.ok(
+  manifest.includes('floating-scrollbar.js'),
+  'pure floating-scrollbar loaded before host'
+);
+
 console.log('floating-scrollbar.test.js: all assertions passed');
 console.log('float-metrics=true');
 console.log('native-scrollbar-hidden=true');
 console.log('diff-stack-float=true');
+console.log('palette-float=true');
