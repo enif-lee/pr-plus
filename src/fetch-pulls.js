@@ -1,4 +1,7 @@
 /**
+ * AUTO-ASSEMBLED from src/fetch/parts/* — run: npm run build:fetch
+ */
+/**
  * Fetch open PR branch metadata via GitHub REST API.
  * List up to 100 open PRs, then fill page-visible dangling PRs via single-PR gets.
  */
@@ -1216,6 +1219,7 @@ async function fetchViewerPendingReviewBundle(
 /**
  * @returns {Promise<Array>}
  */
+
 async function fetchViewerPendingReviewComments(
   owner,
   repo,
@@ -2421,6 +2425,7 @@ function mergeReviewThreadsPageIntoDetail(detail, page, direction = 'older') {
  * Fetch PR review threads (ids + isResolved) for resolve UI / legacy callers.
  * Returns [] on failure so REST detail still loads.
  */
+
 async function fetchPullReviewThreads(owner, repo, pullNumber, fetchImpl, token) {
   try {
     const bundle = await fetchPullReviewThreadsBundle(
@@ -3602,6 +3607,7 @@ async function findViewerPendingReview(owner, repo, pullNumber, fetchImpl, token
 /**
  * Map GraphQL review-comment payload → REST-like shape (mapRestReviewComment).
  */
+
 function mapGraphqlReviewCommentToRest(c, fallback = {}) {
   if (!c) return null;
   return {

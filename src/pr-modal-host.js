@@ -1,11 +1,10 @@
 /**
  * Content-script host: intercept PR list clicks, mount React modal overlay.
+ * AUTO-ASSEMBLED from src/host/parts/* — edit parts, run: npm run build:host
  * Bundle + CSS are extension-local (no remote code).
- * Host updates reuse the same React root so Diff/search/scroll state survives refresh.
- * PR detail uses memory + IndexedDB cache (stale-while-revalidate / React Query style).
  */
-
 (function initPrModalHost() {
+
   const HOST_ID = 'prp-modal-host';
   let reactRoot = null;
   /** DOM node the current reactRoot is bound to (soft-nav may replace it). */
@@ -1495,6 +1494,7 @@
                   });
                   return dev;
                 })
+
                 .catch((err) => {
                   failSide('development', err);
                   return null;
@@ -2986,6 +2986,7 @@
    * Note: mountPrModal stamps host.__prpReactRoot = createRoot(...), but
    * returns a {render,unmount} *wrapper*. Never compare stamp === reactRoot.
    */
+
   function isReactRootLiveOn(host) {
     if (!reactRoot || !host) return false;
     if (typeof reactRoot.render !== 'function') return false;
@@ -4247,6 +4248,7 @@
    * Priority: sessionStorage open snap > URI (pr+number / page / position).
    * Diff/conversation layout also restored inside App via loadSessionView + initialRoute.
    */
+
   async function tryRestoreOpenModal() {
     if (!hostEnabled) return { ok: false, reason: 'disabled' };
     if (!isPullsListPage()) return { ok: false, reason: 'not-pulls' };
@@ -5717,6 +5719,7 @@
   }
 
   /** Navigate the real tab (filters / create) so the pulls list page changes. */
+
   function navigatePage(href) {
     const raw = String(href || '').trim();
     if (!raw) return false;

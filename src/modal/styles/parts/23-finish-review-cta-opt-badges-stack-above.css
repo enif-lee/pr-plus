@@ -1,0 +1,371 @@
+/* Finish-review CTA Opt badges stack above the popover */
+.prp-opt-btn-hint--finish {
+  z-index: 100110;
+}
+/* Review filter + thread navigator — pin to the right of the toolbar */
+.prp-diff-toolbar__thread-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+/* When both thread-tools and pending are present, only the first margin-left:auto
+   absorbs free space — they stay grouped on the right. */
+.prp-diff-toolbar__thread-tools + .prp-diff-toolbar__pending {
+  margin-left: 0;
+}
+.prp-diff-toolbar__comments {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Unresolved | All — deselectable segment, UI font (not mono ext chips) */
+.prp-review-filter {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--prp-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--prp-bg);
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  height: var(--prp-diff-ctrl-h, 28px);
+  min-height: var(--prp-diff-ctrl-h, 28px);
+}
+.prp-review-filter__btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  border: 0;
+  border-right: 1px solid var(--prp-border);
+  background: transparent;
+  color: var(--prp-fg-muted);
+  font: inherit;
+  font-family: var(--prp-font);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  box-sizing: border-box;
+  height: 100%;
+  padding: 0 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 120ms ease, color 120ms ease;
+}
+.prp-review-filter__btn:last-child {
+  border-right: 0;
+}
+.prp-review-filter__btn:hover,
+.prp-review-filter__btn:focus-visible {
+  color: var(--prp-accent);
+  background: color-mix(in srgb, var(--prp-accent) 8%, transparent);
+  outline: none;
+}
+.prp-review-filter__btn--on,
+.prp-review-filter__btn[aria-pressed='true'] {
+  color: var(--prp-accent);
+  background: color-mix(in srgb, var(--prp-accent) 14%, var(--prp-bg));
+  box-shadow: inset 0 -2px 0 var(--prp-accent);
+}
+.prp-review-filter__count {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+  margin-left: 0.2em;
+  font-weight: 600;
+}
+
+.prp-diff-toolbar__range-hint,
+.prp-commit-filter__status {
+  font-size: 11px;
+}
+
+/* Thread box: nested replies + reply composer inside one card */
+.prp-card--timeline-review-thread .prp-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding-bottom: 0;
+}
+
+/* Compact file:line header — path left, meta right */
+.prp-review-thread__file-header {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  margin: 0 0 4px;
+  padding: 0 0 3px;
+  border-bottom: 1px solid var(--prp-border-muted);
+  min-width: 0;
+  min-height: 18px;
+  line-height: 1.2;
+}
+
+.prp-review-thread__file-header-main {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: flex-start;
+}
+
+.prp-review-thread__file-header-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.prp-review-thread__file-loc {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.2;
+  color: var(--prp-fg-muted);
+  opacity: 0.95;
+  text-align: left;
+}
+button.prp-review-thread__file-loc--link {
+  appearance: none;
+  display: inline-block;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.2;
+  text-align: left;
+  color: var(--prp-accent);
+  opacity: 1;
+  cursor: pointer;
+  text-decoration: none;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+button.prp-review-thread__file-loc--link:hover,
+button.prp-review-thread__file-loc--link:focus-visible {
+  text-decoration: underline;
+  outline: none;
+}
+.prp-thread-toggle--icon-only {
+  flex: 0 0 auto !important;
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  padding: 0;
+  gap: 0;
+}
+.prp-thread-toggle--icon-only .prp-thread-toggle__icon {
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  border-radius: 6px;
+  font-size: 16px;
+}
+.prp-thread-toggle--icon-only .prp-octicon--disclosure {
+  width: 16px;
+  height: 16px;
+}
+
+.prp-review-thread__file-side {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  line-height: 1.2;
+}
+
+.prp-review-thread__file-header .prp-thread-toggle__count {
+  font-size: 10px;
+  line-height: 1.2;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.prp-review-thread__file-header .prp-badge {
+  flex-shrink: 0;
+  font-size: 9px;
+  padding: 0 5px;
+  line-height: 1.35;
+  min-height: 0;
+}
+
+.prp-conversation-thread {
+  margin: 0;
+  padding: 4px 0 0;
+}
+.prp-conversation-thread__composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 -2px 0;
+  padding: 12px 2px 14px;
+  border-top: 1px solid var(--prp-border-muted);
+}
+.prp-conversation-thread__collapsed-preview {
+  padding: 6px 2px 4px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+.prp-conversation-thread__collapsed-preview:hover,
+.prp-conversation-thread__collapsed-preview:focus-visible {
+  background: color-mix(in srgb, var(--prp-fg-muted) 8%, transparent);
+  outline: none;
+}
+/*
+ * Folded-thread markdown preview only (.prp-md--collapsed-preview).
+ * Expanded threads use plain .prp-md / .prp-md--compact and render fully
+ * (images, fences, mermaid, suggestions). These rules must stay scoped
+ * to this class so open state is never affected.
+ *
+ * Flatten nested blocks to inline flow so -webkit-line-clamp works, and
+ * hide non-text chrome (images / pre / mermaid / suggestion). Max 2 lines.
+ */
+.prp-md--collapsed-preview {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--prp-fg-muted);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+/* Flatten MarkdownView segment wrappers + block tags into one text stream */
+.prp-md--collapsed-preview > div,
+.prp-md--collapsed-preview p,
+.prp-md--collapsed-preview h1,
+.prp-md--collapsed-preview h2,
+.prp-md--collapsed-preview h3,
+.prp-md--collapsed-preview h4,
+.prp-md--collapsed-preview ul,
+.prp-md--collapsed-preview ol,
+.prp-md--collapsed-preview li,
+.prp-md--collapsed-preview blockquote,
+.prp-md--collapsed-preview dl,
+.prp-md--collapsed-preview dt,
+.prp-md--collapsed-preview dd {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  background: transparent;
+  max-width: none;
+}
+/* Paragraph / heading breaks → single space so lines don't glue together */
+.prp-md--collapsed-preview p::after,
+.prp-md--collapsed-preview h1::after,
+.prp-md--collapsed-preview h2::after,
+.prp-md--collapsed-preview h3::after,
+.prp-md--collapsed-preview h4::after,
+.prp-md--collapsed-preview li::after,
+.prp-md--collapsed-preview blockquote::after {
+  content: ' ';
+}
+.prp-md--collapsed-preview strong,
+.prp-md--collapsed-preview b {
+  font-weight: 600;
+  color: var(--prp-fg);
+}
+.prp-md--collapsed-preview a {
+  color: inherit;
+  text-decoration: none;
+  pointer-events: none;
+}
+/* Drop visual chrome that breaks the clamp (P1/P2 badge imgs, fences, …) */
+.prp-md--collapsed-preview img,
+.prp-md--collapsed-preview pre,
+.prp-md--collapsed-preview table,
+.prp-md--collapsed-preview hr,
+.prp-md--collapsed-preview video,
+.prp-md--collapsed-preview iframe,
+.prp-md--collapsed-preview svg,
+.prp-md--collapsed-preview .prp-mermaid,
+.prp-md--collapsed-preview .prp-mermaid-wrap,
+.prp-md--collapsed-preview .prp-suggestion {
+  display: none !important;
+}
+/* Inline code: keep mono cue, drop heavy chip padding */
+.prp-md--collapsed-preview :not(pre) > code {
+  display: inline;
+  font-family: var(--prp-mono);
+  font-size: 0.92em;
+  padding: 0 0.2em;
+  border-radius: 3px;
+  border: 0;
+  background: color-mix(in srgb, var(--prp-fg-muted) 10%, var(--prp-bg));
+  white-space: normal;
+  word-break: break-word;
+}
+.prp-md--collapsed-preview .prp-search-mark {
+  display: inline;
+  color: var(--prp-fg);
+  /* keep default .prp-search-mark background from global rule */
+}
+.prp-card--timeline-review-thread--collapsed .prp-review-thread__file-header {
+  margin-bottom: 0;
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+.prp-thread-toggle--static {
+  cursor: default;
+}
+.prp-thread-toggle--static:hover .prp-review-thread__file-loc,
+.prp-thread-toggle--static:focus-visible .prp-review-thread__file-loc {
+  color: inherit;
+}
+
+.prp-diff-chrome {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--prp-border-muted);
+  background: var(--prp-bg);
+  font-size: 12px;
+}
+.prp-diff-chrome__labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+/* ── Hover/focus tip popover (buttons + header icon actions) ── */
+.prp-btn,
+.prp-header__icon-btn,
+.prp-header__more-btn,
+.prp-icon-btn,
+.prp-shell-toggle {
+  position: relative;
+}
+.prp-has-tip,
+.prp-btn--has-tip,
+.prp-btn--has-shortcut {
+  /* reserve nothing permanently; tooltip overlays */
+}

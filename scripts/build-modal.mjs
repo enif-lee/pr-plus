@@ -13,6 +13,10 @@ import * as esbuild from 'esbuild';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import postcss from 'postcss';
+import postcssImport from 'postcss-import';
+import tailwindcss from 'tailwindcss';
+import autoprefixer from 'autoprefixer';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const outDir = path.join(root, 'src', 'modal', 'dist');
@@ -25,6 +29,7 @@ const cssOut = path.join(outDir, 'pr-modal.css');
 const mermaidOut = path.join(outDir, 'mermaid.esm.js');
 const mermaidEntry = path.join(root, 'scripts/mermaid-entry.mjs');
 const langCatalog = path.join(root, 'src/modal/hljs-languages.json');
+const cssEntry = path.join(root, 'src/modal/styles/index.css');
 
 // Clean dist (recreate)
 for (const f of fs.readdirSync(outDir)) {
@@ -33,6 +38,17 @@ for (const f of fs.readdirSync(outDir)) {
 }
 fs.mkdirSync(outDir, { recursive: true });
 fs.mkdirSync(langsDir, { recursive: true });
+
+// CSS is processed separately (Tailwind + residual imports). Strip CSS from JS bundle.
+const externalCssPlugin = {
+  name: 'external-css',
+  setup(build) {
+    build.onLoad({ filter: /\.css$/ }, () => ({
+      contents: '/* styles emitted via postcss → pr-modal.css */',
+      loader: 'js',
+    }));
+  },
+};
 
 await esbuild.build({
   absWorkingDir: root,
@@ -46,6 +62,7 @@ await esbuild.build({
   jsx: 'automatic',
   jsxImportSource: 'react',
   loader: { '.tsx': 'tsx', '.ts': 'ts', '.css': 'css', '.jsx': 'jsx', '.json': 'json' },
+  plugins: [externalCssPlugin],
   alias: {
     '@modal': path.join(root, 'src/modal'),
     '@lib': path.join(root, 'src/modal/lib'),
@@ -60,10 +77,21 @@ await esbuild.build({
   logLevel: 'info',
 });
 
-const sideCss = path.join(outDir, 'pr-modal.bundle.css');
-const stylesSrc = path.join(root, 'src/modal/styles.css');
-if (fs.existsSync(sideCss)) fs.renameSync(sideCss, cssOut);
-else if (fs.existsSync(stylesSrc)) fs.copyFileSync(stylesSrc, cssOut);
+// Tailwind base + residual design system CSS
+{
+  const cssIn = fs.readFileSync(cssEntry, 'utf8');
+  const result = await postcss([
+    postcssImport(),
+    tailwindcss({ config: path.join(root, 'tailwind.config.js') }),
+    autoprefixer(),
+  ]).process(cssIn, { from: cssEntry, to: cssOut });
+  fs.writeFileSync(cssOut, result.css);
+  console.log(
+    'Built',
+    path.relative(root, cssOut),
+    `(${Buffer.byteLength(result.css)} bytes, tailwind+residual)`
+  );
+}
 
 // Pure-ASCII JS for Chromium content-script encoding checks
 let text = fs.readFileSync(outfile, 'utf8');

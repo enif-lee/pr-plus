@@ -1,0 +1,329 @@
+/* Standalone conversation thread 1-level path header */
+.prp-conversation-thread-header {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px 6px 6px 8px;
+  border-bottom: 1px solid var(--prp-border-muted);
+  background: var(--prp-bg-muted);
+  border-radius: 0;
+}
+.prp-conversation-thread-header__toggle {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  min-height: 32px;
+}
+.prp-conversation-thread-header__toggle:hover,
+.prp-conversation-thread-header__toggle:focus-visible {
+  background: color-mix(in srgb, var(--prp-accent) 6%, transparent);
+  outline: none;
+}
+.prp-conversation-thread-header__chev {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  color: var(--prp-fg-muted);
+}
+.prp-conversation-thread-header__path {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--prp-fg);
+}
+/* Same inset as .prp-review-group__jump (shared path-row chrome) */
+.prp-conversation-thread-header__jump {
+  flex: 0 0 auto;
+  flex-shrink: 0;
+  margin-left: 4px;
+  margin-right: 4px;
+  color: var(--prp-fg-muted);
+}
+.prp-conversation-thread-header__jump:hover,
+.prp-conversation-thread-header__jump:focus-visible {
+  color: var(--prp-accent);
+}
+.prp-conversation-inline-thread .prp-inline-thread--conversation .prp-inline-thread__card {
+  border: 0;
+}
+.prp-review-group__badge {
+  flex-shrink: 0;
+}
+.prp-review-group__row-hint {
+  flex: 0 0 auto;
+  margin-left: auto;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.prp-review-group__thread {
+  border-top: 1px solid var(--prp-border-muted);
+  padding: 0;
+}
+.prp-review-group__thread .prp-conversation-inline-thread {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+}
+.prp-review-group__thread .prp-inline-thread__hunk,
+.prp-review-group__thread .prp-inline-thread__card {
+  border-radius: 0;
+}
+.prp-review-group__show-resolved {
+  appearance: none;
+  align-self: flex-start;
+  margin: 2px 0 0;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--prp-accent);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.prp-review-group__show-resolved:hover,
+.prp-review-group__show-resolved:focus-visible {
+  text-decoration: underline;
+  outline: none;
+}
+
+.prp-conversation-inline-thread {
+  margin: 0 0 var(--prp-gap-stack, 14px);
+  border: 1px solid var(--prp-border);
+  border-radius: 0;
+  background: var(--prp-bg);
+  overflow: hidden;
+}
+.prp-conversation-inline-thread .prp-inline-thread {
+  margin: 0;
+  max-width: 100%;
+  padding: 0;
+}
+.prp-conversation-inline-thread .prp-inline-thread__card {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+/* Hunk sits under file header, above comments (GitHub conversation style) */
+.prp-inline-thread__hunk {
+  border-bottom: 1px solid var(--prp-border-muted);
+  background: var(--prp-bg);
+  overflow: auto;
+  border-radius: 0;
+}
+.prp-inline-thread__hunk .prp-diff-snippet {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  max-height: min(280px, 40vh);
+}
+.prp-conversation-inline-thread .prp-diff-snippet,
+.prp-conversation-inline-thread .prp-inline-thread__hunk {
+  border-bottom: 1px solid var(--prp-border-muted);
+  border-radius: 0 !important;
+}
+/* Conversation review-thread diff snippet: sharp corners (no rounded chip) */
+.prp-conversation-inline-thread .prp-diff-snippet,
+.prp-conversation-inline-thread .prp-diff-snippet--scroll,
+.prp-conversation-inline-thread .prp-diff-snippet__block,
+.prp-review-group__thread .prp-diff-snippet,
+.prp-review-group__thread .prp-diff-snippet--scroll,
+.prp-review-group__thread .prp-diff-snippet__block {
+  border-radius: 0 !important;
+}
+
+/* Single root comment: no vertical timeline */
+.prp-inline-thread--single .prp-inline-thread__head--flat {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px 0;
+  background: transparent;
+  border-bottom: 0;
+}
+
+.prp-inline-thread__head-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.prp-inline-thread__title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.prp-inline-thread__body {
+  padding: 8px 12px 10px;
+}
+
+.prp-inline-thread__comment-actions {
+  display: flex;
+  gap: 4px;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+/* Multi-comment: vertical rail between avatars; stops before last item */
+.prp-review-thread {
+  --prp-rt-gutter: 32px;
+  list-style: none;
+  margin: 0;
+  padding: 10px 12px 4px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.prp-review-thread__item {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--prp-rt-gutter) minmax(0, 1fr);
+  column-gap: 10px;
+  padding: 0 0 14px;
+  align-items: start;
+}
+
+/* Connector line from this avatar down to the next — never on the last comment */
+.prp-review-thread__item:not(.prp-review-thread__item--last)::after {
+  content: '';
+  position: absolute;
+  left: calc(var(--prp-rt-gutter) / 2);
+  top: 30px;
+  bottom: 0;
+  width: 2px;
+  transform: translateX(-50%);
+  background: var(--prp-border-muted);
+  border-radius: 1px;
+  pointer-events: none;
+}
+
+.prp-review-thread__item--last {
+  padding-bottom: 8px;
+}
+.prp-review-thread__item--last::after {
+  content: none;
+  display: none;
+}
+
+.prp-review-thread__item--pending .prp-review-thread__content {
+  opacity: 0.92;
+}
+.prp-review-thread__item--pending .prp-md {
+  border-left: 2px solid color-mix(in srgb, var(--prp-warn) 55%, var(--prp-border));
+  padding-left: 8px;
+}
+
+.prp-review-thread__avatar {
+  justify-self: center;
+  z-index: 1;
+  position: relative;
+  background: var(--prp-bg);
+  box-shadow: 0 0 0 2px var(--prp-bg);
+}
+
+.prp-review-thread__content {
+  min-width: 0;
+  max-width: 100%;
+  padding-top: 2px;
+  font-size: 14px;
+  line-height: 1.5;
+  overflow: hidden; /* keep fenced code scroll inside the column */
+}
+.prp-review-thread__content .prp-md,
+.prp-review-thread__content .prp-md > div {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.prp-review-thread__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+
+.prp-inline-thread__composer {
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--prp-border-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--prp-bg);
+}
+
+/* Field wrapper keeps border chrome separate from opt-hint hosts */
+.prp-inline-thread__composer-field {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+/* Ensure reply input keeps a visible border (ghost + open textarea) */
+.prp-inline-thread__composer .prp-mdc__ghost {
+  border: 1px solid var(--prp-border);
+  border-radius: 8px;
+  background: var(--prp-bg-muted);
+}
+.prp-inline-thread__composer .prp-mdc__ta.prp-textarea,
+.prp-inline-thread__composer textarea.prp-mdc__ta {
+  border: 1px solid var(--prp-border);
+  border-radius: 8px;
+  background: var(--prp-bg);
+  color: var(--prp-fg);
+}
+.prp-inline-thread__composer .prp-mdc__ta:focus,
+.prp-inline-thread__composer .prp-mdc__ta:focus-visible {
+  border-color: var(--prp-accent);
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--prp-accent) 18%, transparent);
+}
+/*
+ * OptBtnHint measures host getBoundingClientRect — must be non-zero size
+ * (width/height 0 made hostIsLive fail and tips never portal).
+ */
+.prp-inline-thread__context-hint {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* Comment / Start review (and Resolve) stay hidden until Reply is focused or has draft text */
+.prp-inline-thread__composer-actions {
+  display: none;
+}
+.prp-inline-thread__composer:focus-within .prp-inline-thread__composer-actions,
+.prp-inline-thread__composer-actions--open {
+  display: flex;
+}
+
+/* Expanded comment row: content-sized (do not force large min-height) */
+.prp-vline--comment:not(.prp-vline--comment-collapsed):not([data-collapsed='1']) {
+  min-height: 0 !important;
+  height: auto !important;
+  box-sizing: border-box;
+}
+

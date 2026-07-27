@@ -1,0 +1,113 @@
+/* Unified Diff top toolbar */
+.prp-diff-toolbar {
+  /* Shared control height: Files toggle, commits select, mode, filters, step-nav, CTAs */
+  --prp-diff-ctrl-h: 28px;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--prp-border-muted);
+  background: var(--prp-bg-muted);
+  padding: 8px 12px;
+}
+
+.prp-diff-toolbar__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  min-width: 0;
+}
+
+.prp-diff-toolbar__nav-toggle {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  height: var(--prp-diff-ctrl-h);
+  min-height: var(--prp-diff-ctrl-h);
+  padding: 0 10px;
+  border: 1px solid var(--prp-border);
+  border-radius: 8px;
+  background: var(--prp-bg);
+  color: var(--prp-fg);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.prp-diff-toolbar__nav-toggle:hover {
+  background: var(--prp-bg-muted);
+}
+
+.prp-diff-toolbar__commits {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.prp-diff-toolbar__commit-btn,
+.prp-commit-filter__trigger {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  /* Hard cap — long commit messages must not stretch the toolbar */
+  max-width: 220px;
+  width: auto;
+  box-sizing: border-box;
+  height: var(--prp-diff-ctrl-h, 28px);
+  min-height: var(--prp-diff-ctrl-h, 28px);
+  padding: 0 10px;
+  border: 1px solid var(--prp-border);
+  border-radius: 8px;
+  background: var(--prp-bg);
+  color: var(--prp-fg);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Keep select / toggle / mode / filter / navigator at the same height */
+.prp-diff-toolbar .prp-diff-mode {
+  box-sizing: border-box;
+  height: var(--prp-diff-ctrl-h);
+  min-height: var(--prp-diff-ctrl-h);
+  align-items: stretch;
+  padding: 2px;
+}
+.prp-diff-toolbar .prp-diff-mode__opt {
+  box-sizing: border-box;
+  height: 100%;
+  padding: 0 10px;
+  line-height: 1;
+}
+.prp-diff-toolbar .prp-step-nav,
+.prp-diff-toolbar .prp-review-filter {
+  box-sizing: border-box;
+  height: var(--prp-diff-ctrl-h);
+  min-height: var(--prp-diff-ctrl-h);
+}
+.prp-diff-toolbar .prp-review-filter__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  height: 100%;
+  padding: 0 10px;
+  line-height: 1;
+}
+.prp-diff-toolbar .prp-btn--size-sm {
+  box-sizing: border-box;
+  height: var(--prp-diff-ctrl-h);
+  min-height: var(--prp-diff-ctrl-h);
+  padding-top: 0;
+  padding-bottom: 0;
+  line-height: 1;
+}
+

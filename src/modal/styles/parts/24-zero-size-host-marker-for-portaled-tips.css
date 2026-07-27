@@ -1,0 +1,1283 @@
+/* Zero-size host marker for portaled tips */
+.prp-tip-anchor {
+  position: absolute;
+  width: 0;
+  height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0;
+}
+.prp-tip-pop,
+.prp-btn__tip-pop,
+.prp-btn__shortcut-pop {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: min(280px, 72vw);
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--prp-border);
+  background: var(--prp-bg);
+  color: var(--prp-fg);
+  font-family: var(--prp-font);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.35;
+  white-space: nowrap;
+  box-shadow: 0 8px 20px rgba(1, 4, 9, 0.16);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease, transform 140ms cubic-bezier(0.22, 1, 0.36, 1);
+  /*
+   * Above overlay chrome / modal panels. Portaled tips use fixed + this layer
+   * so overflow:hidden ancestors never clip them.
+   */
+  z-index: 100020;
+}
+/* Portaled tips (default path): fixed coords from JS, high stacking */
+.prp-tip-pop--portal {
+  position: fixed !important;
+  right: auto !important;
+  bottom: auto !important;
+  margin: 0;
+  /* Above ActionToast (80), selection group (30), SearchableSelect panels */
+  z-index: 100020;
+}
+.prp-tip-pop--portal.prp-tip-pop--top,
+.prp-tip-pop--portal[data-placement='top'] {
+  transform: translate(-50%, calc(-100% - 0px)) translateY(4px);
+}
+.prp-tip-pop--portal.prp-tip-pop--bottom,
+.prp-tip-pop--portal[data-placement='bottom'] {
+  transform: translate(-50%, 0) translateY(-4px);
+}
+.prp-tip-pop--portal.prp-tip-pop--left,
+.prp-tip-pop--portal[data-placement='left'] {
+  transform: translate(calc(-100% - 0px), -50%) translateX(4px);
+}
+.prp-tip-pop--portal.prp-tip-pop--right,
+.prp-tip-pop--portal[data-placement='right'] {
+  transform: translate(0, -50%) translateX(-4px);
+}
+.prp-tip-pop--portal.prp-tip-pop--visible {
+  opacity: 1;
+}
+.prp-tip-pop--portal.prp-tip-pop--visible.prp-tip-pop--top,
+.prp-tip-pop--portal.prp-tip-pop--visible[data-placement='top'] {
+  transform: translate(-50%, -100%);
+}
+.prp-tip-pop--portal.prp-tip-pop--visible.prp-tip-pop--bottom,
+.prp-tip-pop--portal.prp-tip-pop--visible[data-placement='bottom'] {
+  transform: translate(-50%, 0);
+}
+.prp-tip-pop--portal.prp-tip-pop--visible.prp-tip-pop--left,
+.prp-tip-pop--portal.prp-tip-pop--visible[data-placement='left'] {
+  transform: translate(-100%, -50%);
+}
+.prp-tip-pop--portal.prp-tip-pop--visible.prp-tip-pop--right,
+.prp-tip-pop--portal.prp-tip-pop--visible[data-placement='right'] {
+  transform: translate(0, -50%);
+}
+/* Legacy in-tree absolute tips (fallback if not portaled) */
+.prp-tip-pop:not(.prp-tip-pop--portal),
+.prp-btn__tip-pop,
+.prp-btn__shortcut-pop {
+  position: absolute;
+  left: 50%;
+  right: auto;
+  bottom: calc(100% + 6px);
+  top: auto;
+  transform: translateX(-50%) translateY(4px);
+  z-index: 100020;
+}
+.prp-tip-pop:not(.prp-tip-pop--portal).prp-tip-pop--bottom,
+.prp-tip-pop:not(.prp-tip-pop--portal)[data-placement='bottom'] {
+  top: calc(100% + 6px);
+  bottom: auto;
+  left: 50%;
+  right: auto;
+  transform: translateX(-50%) translateY(-4px);
+}
+.prp-tip-pop:not(.prp-tip-pop--portal).prp-tip-pop--left,
+.prp-tip-pop:not(.prp-tip-pop--portal)[data-placement='left'] {
+  top: 50%;
+  bottom: auto;
+  left: auto;
+  right: calc(100% + 8px);
+  transform: translateY(-50%) translateX(4px);
+}
+.prp-tip-pop:not(.prp-tip-pop--portal).prp-tip-pop--right,
+.prp-tip-pop:not(.prp-tip-pop--portal)[data-placement='right'] {
+  top: 50%;
+  bottom: auto;
+  left: calc(100% + 8px);
+  right: auto;
+  transform: translateY(-50%) translateX(-4px);
+}
+.prp-tip-pop__label,
+.prp-btn__tip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.prp-tip-pop__kbd,
+.prp-btn__tip-kbd {
+  font-family: var(--prp-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--prp-fg-muted);
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid var(--prp-border-muted);
+  background: var(--prp-bg-muted);
+}
+:is(
+  .prp-btn,
+  .prp-has-tip,
+  .prp-header__icon-btn,
+  .prp-header__more-btn,
+  .prp-icon-btn,
+  .prp-shell-toggle
+):is(:hover, :focus-visible)
+  .prp-tip-pop,
+:is(.prp-btn):is(:hover, :focus-visible) .prp-btn__tip-pop,
+:is(.prp-btn):is(:hover, :focus-visible) .prp-btn__shortcut-pop {
+  opacity: 1;
+}
+/* Rest transform (direction-aware) once visible */
+:is(
+  .prp-btn,
+  .prp-has-tip,
+  .prp-header__icon-btn,
+  .prp-header__more-btn,
+  .prp-icon-btn,
+  .prp-shell-toggle
+):is(:hover, :focus-visible)
+  .prp-tip-pop--top,
+:is(
+  .prp-btn,
+  .prp-has-tip,
+  .prp-header__icon-btn,
+  .prp-header__more-btn,
+  .prp-icon-btn,
+  .prp-shell-toggle
+):is(:hover, :focus-visible)
+  .prp-tip-pop[data-placement='top'] {
+  transform: translateX(-50%) translateY(0);
+}
+:is(
+  .prp-btn,
+  .prp-has-tip,
+  .prp-header__icon-btn,
+  .prp-header__more-btn,
+  .prp-icon-btn,
+  .prp-shell-toggle
+):is(:hover, :focus-visible)
+  .prp-tip-pop--bottom,
+:is(
+  .prp-btn,
+  .prp-has-tip,
+  .prp-header__icon-btn,
+  .prp-header__more-btn,
+  .prp-icon-btn,
+  .prp-shell-toggle
+):is(:hover, :focus-visible)
+  .prp-tip-pop[data-placement='bottom'] {
+  transform: translateX(-50%) translateY(0);
+}
+:is(
+  .prp-btn,
+  .prp-has-tip,
+  .prp-header__icon-btn,
+  .prp-header__more-btn,
+  .prp-icon-btn,
+  .prp-shell-toggle
+):is(:hover, :focus-visible)
+  .prp-tip-pop--left,
+:is(
+  .prp-btn,
+  .prp-has-tip,
+  .prp-header__icon-btn,
+  .prp-header__more-btn,
+  .prp-icon-btn,
+  .prp-shell-toggle
+):is(:hover, :focus-visible)
+  .prp-tip-pop[data-placement='left'] {
+  transform: translateY(-50%) translateX(0);
+}
+:is(
+  .prp-btn,
+  .prp-has-tip,
+  .prp-header__icon-btn,
+  .prp-header__more-btn,
+  .prp-icon-btn,
+  .prp-shell-toggle
+):is(:hover, :focus-visible)
+  .prp-tip-pop--right,
+:is(
+  .prp-btn,
+  .prp-has-tip,
+  .prp-header__icon-btn,
+  .prp-header__more-btn,
+  .prp-icon-btn,
+  .prp-shell-toggle
+):is(:hover, :focus-visible)
+  .prp-tip-pop[data-placement='right'] {
+  transform: translateY(-50%) translateX(0);
+}
+.prp-btn:disabled:hover .prp-tip-pop,
+.prp-btn:disabled:focus-visible .prp-tip-pop,
+.prp-header__icon-btn:disabled:hover .prp-tip-pop,
+.prp-icon-btn:disabled:hover .prp-tip-pop {
+  opacity: 0.85;
+}
+.prp-btn__kbd {
+  display: none; /* legacy permanent badges off */
+}
+
+/* Subscribe: muted/slash when on; normal outline bell when off */
+.prp-header__icon-btn--subscribed,
+.prp-header__icon-btn--subscribed[aria-pressed='true'] {
+  color: var(--prp-fg-muted);
+  border-color: var(--prp-border);
+  background: var(--prp-bg-muted);
+}
+.prp-header__icon-btn--subscribed:hover,
+.prp-header__icon-btn--subscribed:focus-visible {
+  color: var(--prp-fg);
+  border-color: var(--prp-border);
+  background: color-mix(in srgb, var(--prp-fg-muted) 8%, var(--prp-bg));
+}
+
+/* Diff ↔ Conversation layout toggle — accent like former primary button */
+.prp-header__icon-btn--layout {
+  color: var(--prp-accent);
+  border-color: color-mix(in srgb, var(--prp-accent) 40%, var(--prp-border));
+  background: color-mix(in srgb, var(--prp-accent) 12%, var(--prp-bg));
+}
+.prp-header__icon-btn--layout:hover,
+.prp-header__icon-btn--layout:focus-visible {
+  color: var(--prp-accent);
+  border-color: var(--prp-accent);
+  background: color-mix(in srgb, var(--prp-accent) 18%, var(--prp-bg));
+}
+
+/* ── Searchable select ── */
+.prp-sselect-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: min(18vh, 120px);
+  pointer-events: none;
+}
+.prp-sselect-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(1, 4, 9, 0.28);
+  pointer-events: auto;
+  animation: prp-fade-in 140ms ease-out both;
+}
+.prp-sselect-panel {
+  position: relative;
+  z-index: 1;
+  width: min(420px, 92%);
+  max-height: min(60vh, 420px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid var(--prp-border);
+  background: var(--prp-bg);
+  box-shadow: 0 16px 48px rgba(1, 4, 9, 0.18);
+  pointer-events: auto;
+  animation: prp-float-up 200ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.prp-sselect-title {
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--prp-fg-muted);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.prp-sselect-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--prp-border);
+  background: var(--prp-bg-muted);
+  color: var(--prp-fg);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+.prp-sselect-input:focus {
+  border-color: var(--prp-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--prp-accent) 22%, transparent);
+}
+.prp-sselect-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  max-height: 280px;
+}
+.prp-sselect-item {
+  appearance: none;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+}
+.prp-sselect-item:hover,
+.prp-sselect-item:focus-visible {
+  background: color-mix(in srgb, var(--prp-accent) 12%, var(--prp-bg-muted));
+  outline: none;
+}
+.prp-sselect-item__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prp-sselect-item__meta {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--prp-fg-muted);
+  font-family: var(--prp-mono);
+  flex-shrink: 0;
+}
+.prp-sselect-item__swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  /* Outer ring so light label colors (e.g. wontfix white) stay visible */
+  border: 1px solid color-mix(in srgb, var(--prp-fg) 22%, var(--prp-border));
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+  background-clip: padding-box;
+}
+.prp-sselect-item__avatar {
+  flex-shrink: 0;
+}
+/* Commit multi-select: fixed panel width so long messages don't grow the popover */
+.prp-sselect-panel--multi {
+  max-width: min(320px, calc(100vw - 24px));
+  width: min(320px, calc(100vw - 24px));
+}
+.prp-sselect-panel--multi .prp-sselect-item__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 240px;
+}
+
+/* Commit multi-select: fixed panel width so long messages don't grow the popover */
+.prp-sselect-panel--multi {
+  max-width: min(320px, calc(100vw - 24px));
+  width: min(320px, calc(100vw - 24px));
+}
+.prp-sselect-panel--multi .prp-sselect-item__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 240px;
+}
+
+.prp-sselect-check {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  border: 1.5px solid var(--prp-border);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  line-height: 1;
+  color: #fff;
+  background: var(--prp-bg);
+  box-sizing: border-box;
+}
+.prp-sselect-check--on {
+  background: var(--prp-accent-bg);
+  border-color: var(--prp-accent-bg);
+}
+.prp-sselect-item--selected {
+  background: color-mix(in srgb, var(--prp-accent) 10%, var(--prp-bg));
+}
+.prp-sselect-selected {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 0 8px;
+  max-height: 72px;
+  overflow: auto;
+}
+.prp-sselect-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 2px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--prp-border);
+  background: var(--prp-bg-muted);
+  color: var(--prp-fg);
+  font-size: 11px;
+  cursor: pointer;
+}
+.prp-sselect-chip__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prp-sselect-chip__x {
+  color: var(--prp-fg-muted);
+  font-size: 12px;
+}
+.prp-sselect-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 8px;
+  margin-top: 4px;
+  border-top: 1px solid var(--prp-border-muted);
+}
+.prp-sselect-empty {
+  padding: 12px 10px;
+  font-size: 12px;
+}
+
+/* ── WYSIWYG composer (ghost → open) ── */
+.prp-wysi {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-radius: 10px;
+  transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+.prp-wysi--ghost {
+  border: 0;
+  background: transparent;
+}
+.prp-wysi--open {
+  border: 1px solid var(--prp-border);
+  background: var(--prp-bg);
+  padding: 8px;
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--prp-border) 50%, transparent);
+}
+.prp-wysi__ghost {
+  appearance: none;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: var(--prp-fg-muted);
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 2px;
+  cursor: text;
+  opacity: 0.55;
+  transition: opacity 140ms ease, color 140ms ease;
+}
+.prp-wysi__ghost:hover,
+.prp-wysi__ghost:focus-visible {
+  opacity: 0.9;
+  color: var(--prp-fg);
+  outline: none;
+}
+.prp-wysi__toolbar {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.prp-wysi__tb {
+  appearance: none;
+  border: 1px solid var(--prp-border-muted);
+  background: var(--prp-bg-muted);
+  color: var(--prp-fg);
+  border-radius: 6px;
+  min-width: 28px;
+  height: 26px;
+  padding: 0 6px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  line-height: 1;
+}
+.prp-wysi__tb:hover {
+  border-color: var(--prp-accent);
+  color: var(--prp-accent);
+}
+.prp-wysi__editor {
+  min-height: 40px;
+  max-height: 280px;
+  overflow: auto;
+  padding: 6px 4px;
+  font-size: 13px;
+  line-height: 1.5;
+  outline: none;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.prp-wysi__editor:empty::before {
+  content: attr(data-placeholder);
+  color: var(--prp-fg-muted);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+/* ── Branch split tags ── */
+.prp-branch-split {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.prp-branch-tag {
+  display: inline-flex;
+  align-items: center;
+  max-width: 220px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--prp-border);
+  background: var(--prp-bg-muted);
+  font-family: var(--prp-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--prp-fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-decoration: none;
+  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+}
+a.prp-branch-tag:hover,
+a.prp-branch-tag:focus-visible {
+  border-color: var(--prp-accent);
+  color: var(--prp-accent);
+  background: color-mix(in srgb, var(--prp-accent) 10%, var(--prp-bg));
+  outline: none;
+  text-decoration: none;
+}
+.prp-branch-tag__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: inherit;
+  text-decoration: none;
+  font: inherit;
+}
+a.prp-branch-tag__text:hover,
+a.prp-branch-tag__text:focus-visible {
+  color: var(--prp-accent);
+  text-decoration: underline;
+  outline: none;
+}
+.prp-branch-tag__copy-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--prp-fg-muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+  opacity: 0.55;
+}
+
+.prp-branch-tag:hover .prp-branch-tag__copy-btn,
+.prp-branch-tag__copy-btn:focus-visible,
+.prp-branch-tag__copy-btn--done {
+  opacity: 1;
+}
+
+.prp-branch-tag__copy-btn:hover:not(:disabled),
+.prp-branch-tag__copy-btn:focus-visible:not(:disabled) {
+  background: var(--prp-bg-muted);
+  color: var(--prp-fg);
+}
+
+.prp-branch-tag__copy-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.prp-branch-tag__copy-btn--done {
+  color: var(--prp-ok);
+}
+
+.prp-people-chip__rerequest {
+  /* icon-sized control; inherits .prp-icon-btn */
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  margin: 0;
+  font-size: 12px;
+}
+
+.prp-people-chip__rerequest-icon {
+  display: block;
+  line-height: 1;
+}
+
+.prp-branch-tag__edit-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 0 0 0 2px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.prp-branch-tag__edit-btn:hover:not(:disabled),
+.prp-branch-tag__edit-btn:focus-visible:not(:disabled) {
+  color: var(--prp-accent);
+  outline: none;
+}
+.prp-branch-tag__edit-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.prp-branch-tag--head {
+  border-style: dashed;
+}
+.prp-branch-arrow,
+.prp-branch-split__arrow {
+  color: var(--prp-fg-muted);
+  font-size: 12px;
+  user-select: none;
+}
+
+.prp-label-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+}
+.prp-label-chip__remove {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--prp-fg-muted);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  padding: 0 2px;
+  opacity: 0.65;
+}
+.prp-label-chip__remove:hover {
+  opacity: 1;
+  color: var(--prp-danger);
+}
+.prp-people-chip__status {
+  margin-left: auto;
+  flex-shrink: 0;
+  max-width: 42%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* When status + action buttons share the row, keep status tight */
+.prp-people-chip:has(.prp-people-chip__actions:not(:empty)) .prp-people-chip__status {
+  margin-left: 4px;
+  max-width: 36%;
+}
+.prp-mt-2 {
+  margin-top: 8px;
+}
+/*
+ * Selection dock host — wraps the fixed-height row + floating UI.
+ * Must NOT use contain:paint (that's on .prp-vline and was clipping the dock).
+ * Host keeps virtual height = ROW_HEIGHT; dock overflows below and scrolls away.
+ */
+.prp-sel-dock-host {
+  position: relative;
+  z-index: 28;
+  height: var(--prp-row-height, 22px);
+  overflow: visible;
+  /* no contain — absolute dock must paint outside host box */
+}
+.prp-sel-dock-host > .prp-vline {
+  width: 100%;
+}
+.prp-selection-dock {
+  position: absolute;
+  top: 100%;
+  left: 28px;
+  margin-top: 6px;
+  z-index: 30;
+  pointer-events: auto;
+  white-space: normal;
+  /* Reset .prp-vlist-host mono metrics — UI chrome uses body font */
+  font-family: var(--prp-font);
+  font-size: 14px;
+  line-height: 1.5;
+  font-weight: 400;
+  color: var(--prp-fg);
+}
+.prp-selection-dock.prp-selection-island {
+  left: 28px;
+  right: 16px;
+  width: auto;
+  max-width: 560px;
+  min-width: min(320px, 100%);
+  margin-top: 8px;
+}
+.prp-selection-dock .prp-mdc,
+.prp-selection-dock .prp-mdc__ta,
+.prp-selection-dock .prp-mdc__tabs,
+.prp-selection-dock .prp-mdc__hint,
+.prp-selection-dock .prp-btn,
+.prp-selection-dock .prp-composer__row {
+  font-family: inherit;
+}
+
+/* Floating segmented selection actions (no card, no filename) */
+.prp-selection-group {
+  z-index: 30;
+  display: inline-flex;
+  align-items: stretch;
+  flex-wrap: nowrap;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--prp-border);
+  border-radius: 10px;
+  background: var(--prp-bg);
+  box-shadow:
+    0 8px 24px rgba(1, 4, 9, 0.14),
+    0 1px 0 color-mix(in srgb, var(--prp-border) 50%, transparent);
+  overflow: visible;
+  pointer-events: auto;
+  font-family: var(--prp-font);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.prp-selection-dock.prp-selection-group {
+  position: absolute;
+}
+.prp-selection-group--in {
+  animation: prp-island-in 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.prp-selection-group--out {
+  animation: prp-island-out 140ms cubic-bezier(0.4, 0, 1, 1) both;
+  pointer-events: none;
+}
+.prp-selection-group__btn {
+  appearance: none;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 7px 12px;
+  border: 0;
+  border-right: 1px solid var(--prp-border-muted);
+  border-radius: 0;
+  background: transparent;
+  color: var(--prp-fg);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.prp-selection-group__btn:first-child {
+  border-top-left-radius: 9px;
+  border-bottom-left-radius: 9px;
+}
+.prp-selection-group__btn:last-child {
+  border-right: 0;
+  border-top-right-radius: 9px;
+  border-bottom-right-radius: 9px;
+}
+.prp-selection-group__btn:hover:not(:disabled),
+.prp-selection-group__btn:focus-visible:not(:disabled) {
+  color: var(--prp-accent);
+  background: color-mix(in srgb, var(--prp-accent) 10%, var(--prp-bg));
+  outline: none;
+  z-index: 1;
+}
+.prp-selection-group__btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.prp-selection-group__btn--icon {
+  padding: 7px 9px;
+  color: var(--prp-fg-muted);
+  min-width: 32px;
+}
+/* Opt-hold: leave room so portal badges don't sit under the bar */
+.prp-selection-group--opt-hints {
+  /* hints portal above; keep stacking context for hosts */
+  isolation: isolate;
+}
+.prp-selection-group .prp-opt-hint-host {
+  position: relative;
+}
+
+.prp-selection-group__btn--icon:hover:not(:disabled),
+.prp-selection-group__btn--icon:focus-visible:not(:disabled) {
+  color: var(--prp-fg);
+  background: var(--prp-bg-muted);
+}
+/* legacy class names (unused) */
+.prp-selection-island__meta,
+.prp-selection-island__flash,
+.prp-selection-island--actions,
+.prp-selection-actions {
+  display: none;
+}
+
+/* ── Gray add links ── */
+.prp-add-link {
+  appearance: none;
+  display: inline-flex;
+  margin-top: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--prp-fg-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0.75;
+  transition: opacity 120ms ease, color 120ms ease;
+}
+.prp-add-link:hover,
+.prp-add-link:focus-visible {
+  opacity: 1;
+  color: var(--prp-accent);
+  outline: none;
+}
+.prp-add-link:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── Reviewer status row ── */
+.prp-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+}
+.prp-meta-row__status {
+  margin-left: auto;
+  font-size: 11px;
+}
+
+/* Milestone aside: status on first line, set/change action below */
+.prp-milestone {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+.prp-milestone__empty {
+  display: block;
+  line-height: 1.4;
+}
+.prp-milestone__action {
+  display: inline-block;
+  margin-top: 0;
+}
+
+/* ── Merge box (GitHub-like: status + primary merge + secondary actions) ── */
+.prp-merge-box {
+  margin: 12px 0 4px;
+  padding: 16px 18px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--prp-ok) 28%, var(--prp-border));
+  background: color-mix(in srgb, var(--prp-ok) 8%, var(--prp-bg));
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--prp-ok) 12%, transparent);
+}
+.prp-merge-box--ok {
+  border-color: color-mix(in srgb, var(--prp-ok) 32%, var(--prp-border));
+}
+.prp-merge-box--warn {
+  background: color-mix(in srgb, var(--prp-warn) 10%, var(--prp-bg));
+  border-color: color-mix(in srgb, var(--prp-warn) 35%, var(--prp-border));
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--prp-warn) 12%, transparent);
+}
+.prp-merge-box--danger {
+  background: color-mix(in srgb, var(--prp-danger) 8%, var(--prp-bg));
+  border-color: color-mix(in srgb, var(--prp-danger) 32%, var(--prp-border));
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--prp-danger) 10%, transparent);
+}
+.prp-merge-box--muted {
+  background: var(--prp-bg-muted);
+  border-color: var(--prp-border);
+  box-shadow: none;
+}
+
+.prp-merge-box__status-block {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  min-width: 0;
+}
+.prp-merge-box__resolve {
+  flex: 0 0 auto;
+  margin-left: auto;
+  align-self: flex-start;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.prp-merge-box__conflict-files {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.prp-merge-box__conflict-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13px;
+  font-family: var(--prp-mono);
+  color: var(--prp-fg);
+  line-height: 1.35;
+}
+.prp-merge-box__conflict-file .prp-octicon {
+  flex: 0 0 auto;
+  color: var(--prp-fg-muted);
+}
+.prp-merge-box__conflict-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prp-merge-box__icon {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  background: color-mix(in srgb, var(--prp-ok) 18%, var(--prp-bg));
+  color: var(--prp-ok);
+  margin-top: 1px;
+}
+.prp-merge-box__icon--warn,
+.prp-merge-box__icon--draft {
+  background: color-mix(in srgb, var(--prp-warn) 18%, var(--prp-bg));
+  color: var(--prp-warn);
+}
+.prp-merge-box__icon--danger {
+  background: color-mix(in srgb, var(--prp-danger) 16%, var(--prp-bg));
+  color: var(--prp-danger);
+}
+.prp-merge-box__icon--muted {
+  background: var(--prp-bg-muted);
+  color: var(--prp-fg-muted);
+}
+.prp-merge-box__copy {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.prp-merge-box__headline {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.35;
+  color: var(--prp-fg);
+}
+.prp-merge-box__helper {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--prp-fg-muted);
+}
+.prp-merge-box__checks-line {
+  margin: 6px 0 0;
+  font-size: 12px;
+}
+.prp-merge-box__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+/* Split merge CTA + method menu (GitHub-style; tone follows merge-box status) */
+.prp-merge-method {
+  --prp-merge-cta: var(--prp-ok);
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+.prp-merge-method--warn {
+  --prp-merge-cta: var(--prp-warn);
+}
+.prp-merge-method--danger {
+  --prp-merge-cta: var(--prp-danger);
+}
+.prp-merge-method--default {
+  --prp-merge-cta: var(--prp-fg-muted);
+}
+.prp-merge-method__split {
+  display: inline-flex;
+  align-items: stretch;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--prp-merge-cta) 25%, transparent);
+  border: 1px solid color-mix(in srgb, var(--prp-merge-cta) 70%, #000);
+  background: var(--prp-merge-cta);
+}
+/* Solid CTA bg + light text; color tracks --prp-merge-cta (ok / warn / danger) */
+.prp-merge-method__primary.prp-btn,
+.prp-merge-box .prp-merge-method__primary {
+  border-top-right-radius: 0 !important;
+  border-bottom-right-radius: 0 !important;
+  border: 0 !important;
+  border-right: 1px solid color-mix(in srgb, #fff 22%, var(--prp-merge-cta)) !important;
+  background: var(--prp-merge-cta) !important;
+  color: #fff !important;
+  font-weight: 600;
+  box-shadow: none;
+}
+.prp-merge-method__primary.prp-btn:hover:not(:disabled),
+.prp-merge-box .prp-merge-method__primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--prp-merge-cta) 88%, #000) !important;
+  color: #fff !important;
+  filter: none;
+}
+.prp-merge-method__primary.prp-btn:disabled,
+.prp-merge-box .prp-merge-method__primary:disabled {
+  opacity: 0.72;
+  cursor: not-allowed;
+  filter: grayscale(0.15);
+}
+.prp-merge-method--force .prp-merge-method__primary {
+  /* Slight outline so force path reads as intentional override */
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #fff 35%, transparent);
+}
+.prp-merge-method__caret {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-left: 0;
+  background: var(--prp-merge-cta);
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  border-top-right-radius: 8px;
+  border-bottom-right-radius: 8px;
+}
+.prp-merge-method__caret:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--prp-merge-cta) 88%, #000);
+  color: #fff;
+  filter: none;
+}
+.prp-merge-method__caret:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.prp-merge-method__menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+  min-width: min(360px, 92vw);
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  border: 1px solid var(--prp-border);
+  border-radius: 10px;
+  background: var(--prp-bg);
+  box-shadow: 0 12px 32px rgba(1, 4, 9, 0.16);
+}
+.prp-merge-method__item {
+  appearance: none;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  padding: 10px 12px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font: inherit;
+}
+.prp-merge-method__item:hover,
+.prp-merge-method__item--active {
+  background: var(--prp-bg-muted);
+}
+.prp-merge-method__item-label {
+  font-size: 13px;
+  font-weight: 650;
+}
+.prp-merge-method__item-desc {
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+/* legacy aliases kept for older markup/tests */
+.prp-merge-box__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+}
+.prp-merge-box__title {
+  font-size: 13px;
+  font-weight: 700;
+  margin: 0;
+}
+.prp-merge-box__status {
+  font-size: 12px;
+  color: var(--prp-fg-muted);
+  margin: 0;
+  line-height: 1.45;
+}
+
+/* ── Conversation snippet: continuous yellow (no line borders), scroll only if long ── */
+.prp-diff-snippet {
+  margin: 8px 0 10px;
+  padding: 0;
+  border-radius: 8px;
+  border: 0;
+  background: transparent;
+  font-family: var(--prp-mono);
+  font-size: 11px;
+  line-height: 1.45;
+  overflow: visible;
+  max-height: none;
+  white-space: pre;
+}
+.prp-diff-snippet--scroll {
+  max-height: 30em;
+  overflow: auto;
+  border-radius: 8px;
+}
+.prp-diff-snippet__block {
+  display: block;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--prp-sel-bg, color-mix(in srgb, #eac54f 22%, transparent));
+  box-shadow: inset 0 0 0 1px var(--prp-sel-border, color-mix(in srgb, #eac54f 45%, transparent));
+}
+.prp-diff-snippet__line {
+  padding: 0 10px;
+  border: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
+}
+.prp-diff-snippet__line--add {
+  background: color-mix(in srgb, var(--prp-add-bg) 70%, transparent) !important;
+}
+.prp-diff-snippet__line--del {
+  background: color-mix(in srgb, var(--prp-del-bg) 70%, transparent) !important;
+}
+.prp-diff-snippet__line--hit {
+  background: color-mix(in srgb, #eac54f 35%, transparent) !important;
+  outline: none;
+}
+
+/* ── Selection island (docked under selected lines) ── */
+.prp-diff-pane {
+  position: relative;
+}
+.prp-selection-island {
+  z-index: 8;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid var(--prp-border);
+  background: var(--prp-bg);
+  box-shadow:
+    0 12px 40px rgba(1, 4, 9, 0.16),
+    0 2px 0 color-mix(in srgb, var(--prp-border) 60%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: auto;
+  box-sizing: border-box;
+}
+.prp-selection-dock.prp-selection-island {
+  position: absolute;
+}
+.prp-selection-island--in {
+  animation: prp-island-in 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.prp-selection-island--out {
+  animation: prp-island-out 180ms cubic-bezier(0.4, 0, 1, 1) both;
+  pointer-events: none;
+}
+@keyframes prp-island-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes prp-island-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(6px) scale(0.97);
+  }
+}
+

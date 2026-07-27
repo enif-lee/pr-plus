@@ -1,0 +1,13 @@
+/**
+ * Modal styles entry.
+ * - Residual design system is split under styles/parts/* (≤~1500 lines each).
+ * - Tailwind utilities for new component-local styling.
+ * Prefer Tailwind in TSX; only add sibling .css files next to components when
+ * utilities cannot express the rule.
+ */
+
+@import './parts.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
