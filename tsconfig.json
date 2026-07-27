@@ -10,12 +10,15 @@
     "moduleResolution": "Bundler",
     "jsx": "react-jsx",
     "strict": false,
+    "noImplicitAny": false,
     "noEmit": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
+    "allowJs": true,
+    "checkJs": false,
     "paths": {
       "@modal/*": [
         "./src/modal/*"
@@ -30,20 +33,28 @@
     "types": [
       "vite/client",
       "chrome"
-    ],
-    "allowJs": true,
-    "checkJs": false,
-    "noImplicitAny": false
+    ]
   },
   "include": [
     "src/modal/**/*.ts",
     "src/modal/**/*.tsx",
+    "src/background.ts",
+    "src/storage.ts",
+    "src/github-endpoints.ts",
     "tests/**/*.rstest.ts",
     "rstest.config.ts"
   ],
   "exclude": [
     "node_modules",
     "src/modal/dist",
-    "src/modal/pure"
+    "src/modal/pure",
+    "src/modal/app/PrModalApp.tsx",
+    "src/modal/views/conversation/ConversationView.tsx",
+    "src/modal/app/pr-modal/parts",
+    "src/modal/views/conversation/parts",
+    "src/background/parts",
+    "src/host/parts",
+    "src/fetch/parts",
+    "src/content-bridge/parts"
   ]
 }

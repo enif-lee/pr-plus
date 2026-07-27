@@ -143,9 +143,12 @@ export function fileExtensionFromPath(pathOrName) {
  * @param {{ max?: number }} [opts]
  * @returns {string[]} extension tokens (no leading dot; '' for no-extension)
  */
-export function listFileExtensions(files, opts = {}) {
+export function listFileExtensions(
+  files: Array<{ filename?: string; path?: string }> | null | undefined,
+  opts: { max?: number } = {}
+) {
   const list = Array.isArray(files) ? files : [];
-  const counts = new Map();
+  const counts = new Map<string, number>();
   for (const f of list) {
     const path = f?.filename || f?.path || '';
     if (!path) continue;
@@ -159,9 +162,10 @@ export function listFileExtensions(files, opts = {}) {
     if (b[0] === '') return -1;
     return a[0].localeCompare(b[0]);
   });
+  const optsMax = Number(opts?.max);
   const max =
-    Number.isFinite(opts.max) && (opts.max as number) > 0
-      ? Math.floor(opts.max as number)
+    Number.isFinite(optsMax) && optsMax > 0
+      ? Math.floor(optsMax)
       : sorted.length;
   return sorted.slice(0, max).map(([ext]) => ext);
 }

@@ -22,7 +22,10 @@ function calculateVisibleRange(opts) {
   const rowHeight = Math.max(1, Number(opts.rowHeight) || 1);
   const viewportHeight = Math.max(0, Number(opts.viewportHeight) || 0);
   const scrollTop = Math.max(0, Number(opts.scrollTop) || 0);
-  const overscan = Math.max(0, Number(opts.overscan) ?? 5);
+  const overscan = Math.max(
+    0,
+    Number(opts.overscan != null ? opts.overscan : 5) || 0
+  );
 
   const totalHeight = totalRows * rowHeight;
   if (totalRows === 0) {

@@ -97,9 +97,9 @@ export function cloneStore(store) {
   return store ? JSON.parse(JSON.stringify(store)) : createEmptyStore();
 }
 
-export function pickMeta(flat) {
+export function pickMeta(flat: Record<string, any> | null | undefined): Record<string, any> {
   if (!flat || typeof flat !== 'object') return {};
-  const out = {};
+  const out: Record<string, any> = {};
   for (const k of META_KEYS) {
     if (Object.prototype.hasOwnProperty.call(flat, k)) {
       out[k] = flat[k];

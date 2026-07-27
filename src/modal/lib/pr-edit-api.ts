@@ -244,7 +244,7 @@ export function buildRerequestReviewerLogins(detail) {
     return /\[bot\]$/i.test(String(login || ''));
   }
 
-  function consider(login, review) {
+  function consider(login: any, review: any = null) {
     const raw = String(login || '').trim();
     if (!raw) return;
     const key = raw.toLowerCase();
@@ -260,7 +260,7 @@ export function buildRerequestReviewerLogins(detail) {
     consider(r?.author, r);
   }
   for (const login of d.extraLogins || []) {
-    consider(login);
+    consider(login, null);
   }
   return out;
 }

@@ -238,7 +238,11 @@ export function filterReviewCommentsForNav(comments, mode = null, allowedPaths =
  * @param {Array<{ kind: string, filePath?: string, newLine?: number|null, rowIndex: number }>} virtualRows
  * @param {{ pathOrder?: Map<string, number>|Array|null }} [opts]
  */
-export function mapCommentsToRowIndices(comments, virtualRows, opts = {}) {
+export function mapCommentsToRowIndices(
+  comments: any,
+  virtualRows: any,
+  opts: { pathOrder?: Map<string, number> | Array<unknown> | null } = {}
+) {
   const pathOrder = opts?.pathOrder ?? null;
   const sorted = sortInlineComments(comments, pathOrder);
   if (!Array.isArray(virtualRows)) {

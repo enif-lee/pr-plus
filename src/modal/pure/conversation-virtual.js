@@ -102,7 +102,7 @@
             ? Boolean(expandFn(item, t))
             : t && t.pending
               ? false
-              : !Boolean(t && t.resolved);
+              : !(t && t.resolved);
         if (!open) continue;
         const replies = Array.isArray(t.replies) ? t.replies.length : 0;
         h += CONV_EST_THREAD_BASE + replies * CONV_EST_REPLY;

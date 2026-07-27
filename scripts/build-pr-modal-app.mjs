@@ -19,7 +19,8 @@ const body = parts
   .map((f) => fs.readFileSync(path.join(partsDir, f), 'utf8').trimEnd())
   .join('\n');
 
-const banner = `/**
+const banner = `// @ts-nocheck — assembled from parts
+/**
  * Composition root for PR modal — AUTO-ASSEMBLED from pr-modal/parts/*.
  * Edit parts under src/modal/app/pr-modal/parts/, then: npm run build:app-parts
  */

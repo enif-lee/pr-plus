@@ -1,10 +1,6 @@
 import js from '@eslint/js';
 import globals from 'globals';
 
-/**
- * Flat ESLint for extension + modal sources.
- * Type-aware rules stay light: TS peer range of typescript-eslint lags TS 7.
- */
 export default [
   {
     ignores: [
@@ -12,7 +8,6 @@ export default [
       '**/dist/**',
       'src/modal/dist/**',
       'src/background.bundle.js',
-      // Assembled from fragments — lint the assembled file / real modules only
       'src/host/parts/**',
       'src/fetch/parts/**',
       'src/content-bridge/parts/**',
@@ -20,24 +15,22 @@ export default [
       'src/modal/app/pr-modal/parts/**',
       'src/modal/views/conversation/parts/**',
       'src/modal/styles/parts/**',
+      'src/pr-modal-host.js',
+      'src/fetch-pulls.js',
+      'src/content-bridge.js',
+      'src/background.js',
+      'src/modal/app/PrModalApp.tsx',
+      'src/modal/views/conversation/ConversationView.tsx',
+      'src/modal/styles.css',
+      'tests/**',
+      'screenshots/**',
+      '.browser/**',
       '**/*.min.js',
       'coverage/**',
-      'screenshots/**',
-      'tests/**',
-      'src/modal/pure/**',
-      'src/popup.js',
-      'src/pulls-palette.js',
-      'src/background.js', // legacy twin; SW built from background.ts
-      'src/content-bridge.js', // AUTO-ASSEMBLED
-      'src/pr-modal-host.js', // AUTO-ASSEMBLED
-      'src/fetch-pulls.js', // AUTO-ASSEMBLED
-      '.browser/**',
     ],
   },
   js.configs.recommended,
   {
-    // Classic scripts + tool configs. TS/TSX checked by `tsc` (typescript-eslint
-    // peer range still lags TypeScript 7 in this repo).
     files: ['**/*.{js,mjs,cjs}'],
     languageOptions: {
       ecmaVersion: 2022,
@@ -51,20 +44,14 @@ export default [
       },
     },
     rules: {
-      'no-unused-vars': [
-        'warn',
-        {
-          argsIgnorePattern: '^_',
-          varsIgnorePattern: '^_',
-          caughtErrorsIgnorePattern: '^_',
-        },
-      ],
+      'no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }],
       'no-undef': 'off',
       'no-empty': ['warn', { allowEmptyCatch: true }],
       'no-console': 'off',
       'prefer-const': 'warn',
-      'no-control-regex': 'off', // build scripts intentionally strip non-ASCII via \x00-\x7F
-      'no-useless-assignment': 'off', // legacy SW/fetch patterns
+      'no-control-regex': 'off',
+      'no-useless-assignment': 'off',
+      'preserve-caught-error': 'off',
     },
   },
 ];

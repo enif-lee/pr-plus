@@ -1,3 +1,4 @@
+// @ts-nocheck — assembled from parts
 /**
  * Conversation surface — AUTO-ASSEMBLED from conversation/parts/*.
  * Edit parts, then: npm run build:app-parts

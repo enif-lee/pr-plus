@@ -479,7 +479,7 @@ function prMatchesFilter(pr, filterId, viewerLogin) {
   const id = String(filterId || '').toLowerCase();
   // Draft / ready / reset do not need a signed-in viewer
   if (id === 'df') return Boolean(pr?.draft);
-  if (id === 'rd') return !Boolean(pr?.draft);
+  if (id === 'rd') return !pr?.draft;
   if (id === 'rs') return true;
 
   const me = normLogin(viewerLogin);

@@ -364,7 +364,7 @@ function isOptionGlyphKey(key) {
   const k = String(key || '');
   if (!k) return false;
   if (/^[a-zA-Z0-9]$/.test(k)) return false;
-  if (/^[\[\].,\/\\;'`=\-]$/.test(k)) return false;
+  if (/^[[\].,/\\;'`=-]$/.test(k)) return false;
   if (
     /^(escape|enter|tab|backspace|delete|arrowup|arrowdown|arrowleft|arrowright| |space)$/i.test(
       k

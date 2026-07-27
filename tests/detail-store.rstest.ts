@@ -107,7 +107,7 @@ describe('detail-store isolation', () => {
       files: [{ x: 1 }],
       reviews: [{ y: 1 }],
       requestedReviewers: ['a'],
-    });
+    }) as Record<string, unknown>;
     expect(m.title).toBe('t');
     expect(m.requestedReviewers).toEqual(['a']);
     expect(m.files).toBeUndefined();
