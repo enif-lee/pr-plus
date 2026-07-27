@@ -173,35 +173,122 @@ function resolveGotoPathAmongFiles(queryPath, activePath, files) {
   return path;
 }
 
-function moveLineSelection(selection, virtualRows, delta, opts = {}) {
-  if (!selection || selection.kind === 'file' || selection.subjectType === 'file') {
-    return selection;
-  }
+function firstSelectableRowInFile(virtualRows, filePath) {
+  const path = String(filePath || '').trim();
+  if (!path) return null;
   const list = Array.isArray(virtualRows) ? virtualRows : [];
-  if (!list.length) return selection;
+  for (let i = 0; i < list.length; i++) {
+    const row = list[i];
+    if (row && row.filePath === path && isSelectableDiffRow(row)) return row;
+  }
+  return null;
+}
+
+function lastSelectableRowInFile(virtualRows, filePath) {
+  const path = String(filePath || '').trim();
+  if (!path) return null;
+  const list = Array.isArray(virtualRows) ? virtualRows : [];
+  for (let i = list.length - 1; i >= 0; i--) {
+    const row = list[i];
+    if (row && row.filePath === path && isSelectableDiffRow(row)) return row;
+  }
+  return null;
+}
+
+function selectionNeedsSeed(selection, activeFilePath) {
+  if (!selection) return true;
+  if (selection.kind === 'file' || selection.subjectType === 'file') return true;
+  if (!Number.isFinite(Number(selection.headRowIndex))) return true;
+  if (activeFilePath && String(selection.filePath || '') !== activeFilePath) {
+    return true;
+  }
+  return false;
+}
+
+function findSelectableRowNSteps(selection, list, d, steps, opts) {
+  if (!selection || selection.kind === 'file' || selection.subjectType === 'file') {
+    return null;
+  }
   const headIdx = Number(selection.headRowIndex);
-  if (!Number.isFinite(headIdx)) return selection;
-  const d = delta < 0 ? -1 : 1;
+  if (!Number.isFinite(headIdx)) return null;
   const path = String(selection.filePath || '');
+  const sameFileOnly = Boolean(opts && opts.shift);
+  const need = Math.max(1, Math.floor(steps) || 1);
+  let found = 0;
+  let last = null;
   let i = headIdx + d;
-  while (i >= 0 && i < list.length) {
+  while (i >= 0 && i < list.length && found < need) {
     const row = list[i];
     if (!row) {
       i += d;
       continue;
     }
-    if (row.filePath && row.filePath !== path) break;
-    if (row.kind === 'file-header' && row.filePath && row.filePath !== path) break;
-    if (isSelectableDiffRow(row) && row.filePath === path) {
-      if (opts.shift) {
-        return extendLineSelection(selection, row) || selection;
+    if (sameFileOnly) {
+      if (row.filePath && row.filePath !== path) break;
+      if (row.kind === 'file-header' && row.filePath && row.filePath !== path) break;
+      if (isSelectableDiffRow(row) && row.filePath === path) {
+        found += 1;
+        last = row;
       }
-      return beginLineSelection(row) || selection;
+    } else if (isSelectableDiffRow(row)) {
+      found += 1;
+      last = row;
     }
     i += d;
   }
-  return selection;
+  return last;
 }
+
+function moveLineSelection(selection, virtualRows, delta, opts = {}) {
+  const list = Array.isArray(virtualRows) ? virtualRows : [];
+  if (!list.length) return selection;
+
+  const d = delta < 0 ? -1 : 1;
+  let steps = Math.max(1, Math.abs(Number(delta)) || 1);
+  if (steps > 48) steps = 48;
+  const activePath = String(opts.activeFilePath || '').trim();
+  let cur = selection;
+
+  if (selectionNeedsSeed(cur, activePath)) {
+    const seedPath = activePath || String(cur && cur.filePath ? cur.filePath : '').trim();
+    if (!seedPath) return selection;
+    const seedRow = firstSelectableRowInFile(list, seedPath);
+    if (!seedRow) return selection;
+    cur = beginLineSelection(seedRow) || selection;
+    steps -= 1;
+  }
+
+  if (!cur || cur.kind === 'file' || cur.subjectType === 'file') {
+    return cur;
+  }
+  if (steps <= 0) return cur;
+
+  const target = findSelectableRowNSteps(cur, list, d, steps, opts);
+  if (!target) return cur;
+  if (Number(target.rowIndex) === Number(cur.headRowIndex)) return cur;
+  if (opts.shift) return extendLineSelection(cur, target) || cur;
+  return beginLineSelection(target) || cur;
+}
+
+function isSelectionAtFileEdge(selection, virtualRows, delta) {
+  if (!selection || selection.kind === 'file' || selection.subjectType === 'file') {
+    return false;
+  }
+  const list = Array.isArray(virtualRows) ? virtualRows : [];
+  if (!list.length) return false;
+  const path = String(selection.filePath || '');
+  const headIdx = Number(selection.headRowIndex);
+  if (!path || !Number.isFinite(headIdx)) return false;
+  const d = delta < 0 ? -1 : 1;
+  if (d > 0) {
+    const last = lastSelectableRowInFile(list, path);
+    return last != null && Number(last.rowIndex) === headIdx;
+  }
+  const first = firstSelectableRowInFile(list, path);
+  return first != null && Number(first.rowIndex) === headIdx;
+}
+
+const SELECTION_ACTIONS_REVEAL_MS = 300;
 
 /**
  * Extend selection to another row (same file only).
@@ -426,6 +513,36 @@ function isRowInSelection(selection, row) {
  * Position of a selected row inside a multi-line selection block for CSS edges.
  * @returns {null|'only'|'start'|'middle'|'end'}
  */
+/**
+ * Stable string for a row's selection chrome (Zustand selector result).
+ * @returns {''|'only'|'start'|'middle'|'end'}
+ */
+function rowSelectionVisualKey(selection, row) {
+  if (!selection || !row) return '';
+  if (selection.kind === 'file' || selection.subjectType === 'file') return '';
+  if (row.filePath !== selection.filePath) return '';
+  if (typeof isSelectableDiffRow === 'function' && !isSelectableDiffRow(row)) {
+    return '';
+  }
+  const a = Number(selection.anchorRowIndex);
+  const h = Number(selection.headRowIndex);
+  const ri = Number(row.rowIndex);
+  if (Number.isFinite(a) && Number.isFinite(h) && Number.isFinite(ri)) {
+    const lo = Math.min(a, h);
+    const hi = Math.max(a, h);
+    if (ri < lo || ri > hi) return '';
+    if (lo === hi) return 'only';
+    if (ri === lo) return 'start';
+    if (ri === hi) return 'end';
+    return 'middle';
+  }
+  const role =
+    typeof selectionBlockRole === 'function'
+      ? selectionBlockRole(selection, row)
+      : null;
+  return role || '';
+}
+
 function selectionBlockRole(selection, row) {
   if (!isRowInSelection(selection, row)) return null;
   const a = Number(selection.anchorRowIndex);
@@ -533,7 +650,11 @@ const api = {
   isFileCollapsedInVirtualRows,
   resolvePendingGotoSelection,
   resolveGotoPathAmongFiles,
+  firstSelectableRowInFile,
+  lastSelectableRowInFile,
   moveLineSelection,
+  isSelectionAtFileEdge,
+  SELECTION_ACTIONS_REVEAL_MS,
   applySelectionPointerDown,
   normalizeSelection,
   selectionToCommentPayload,
@@ -541,6 +662,7 @@ const api = {
   selectionGestureMode,
   isRowInSelection,
   selectionBlockRole,
+  rowSelectionVisualKey,
   extractSelectedCodeText,
   githubBlobLinePermalink,
 };

@@ -47,14 +47,72 @@ function isIndexVisible(index, range) {
 }
 
 /**
- * ScrollTop needed so that `index` is near the top of the viewport (with padding).
+ * ScrollTop so that `index` is in the viewport.
+ * opts.align: 'start' | 'quarter' (default quarter).
  */
-function scrollTopForIndex(index, rowHeight, viewportHeight, totalRows) {
+function scrollTopForIndex(index, rowHeight, viewportHeight, totalRows, opts) {
   const rh = Math.max(1, rowHeight);
   const total = Math.max(0, totalRows);
   const i = clamp(Number(index) || 0, 0, Math.max(0, total - 1));
   const maxScroll = Math.max(0, total * rh - viewportHeight);
-  return clamp(i * rh - Math.floor(viewportHeight / 4), 0, maxScroll);
+  const align =
+    opts && typeof opts === 'object' && opts.align === 'start'
+      ? 'start'
+      : 'quarter';
+  const pad =
+    align === 'start' ? 0 : Math.floor(Math.max(0, Number(viewportHeight) || 0) / 4);
+  return clamp(i * rh - pad, 0, maxScroll);
+}
+
+function rowBoundsForIndex(index, rowHeight, totalRows, offsets) {
+  const total = Math.max(0, Number(totalRows) || 0);
+  const i = clamp(Number(index) || 0, 0, Math.max(0, total - 1));
+  if (Array.isArray(offsets) && offsets.length === total + 1) {
+    const y = Number(offsets[i]) || 0;
+    const next = Number(offsets[i + 1]) || y;
+    return {
+      y: y,
+      h: Math.max(1, next - y),
+      totalHeight: Math.max(0, Number(offsets[total]) || 0),
+    };
+  }
+  const rh = Math.max(1, Number(rowHeight) || 1);
+  return { y: i * rh, h: rh, totalHeight: total * rh };
+}
+
+/** Minimal scroll so index is visible; keep current if already in view. */
+function scrollTopToRevealIndex(
+  index,
+  currentScrollTop,
+  rowHeight,
+  viewportHeight,
+  totalRows,
+  offsets,
+  opts
+) {
+  const vp = Math.max(0, Number(viewportHeight) || 0);
+  if (vp <= 0) return Math.max(0, Number(currentScrollTop) || 0);
+  const bounds = rowBoundsForIndex(index, rowHeight, totalRows, offsets);
+  const maxScroll = Math.max(0, bounds.totalHeight - vp);
+  const cur = clamp(Number(currentScrollTop) || 0, 0, maxScroll);
+  const padBoth = Math.max(0, Number(opts && opts.pad) || 0);
+  const padTop = Math.max(
+    0,
+    opts && opts.padTop != null ? Number(opts.padTop) : padBoth
+  );
+  const padBottom = Math.max(
+    0,
+    opts && opts.padBottom != null ? Number(opts.padBottom) : padBoth
+  );
+  const maxInset = Math.max(0, Math.floor(vp / 2) - 1);
+  const topInset = Math.min(padTop, maxInset);
+  const bottomInset = Math.min(padBottom, maxInset);
+  const viewTop = cur + topInset;
+  const viewBottom = cur + vp - bottomInset;
+  const rowBottom = bounds.y + bounds.h;
+  if (bounds.y >= viewTop && rowBottom <= viewBottom) return cur;
+  if (bounds.y < viewTop) return clamp(bounds.y - topInset, 0, maxScroll);
+  return clamp(rowBottom - vp + bottomInset, 0, maxScroll);
 }
 
 const api = {
@@ -62,6 +120,8 @@ const api = {
   calculateVisibleRange,
   isIndexVisible,
   scrollTopForIndex,
+  rowBoundsForIndex,
+  scrollTopToRevealIndex,
 };
 
 if (typeof module !== 'undefined' && module.exports) {

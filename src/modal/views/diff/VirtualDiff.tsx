@@ -1,5 +1,6 @@
 import React, {
   useLayoutEffect,
+  useEffect,
   useMemo,
   useCallback,
   useRef,
@@ -15,6 +16,7 @@ import {
   escapeHtml,
   clearHighlightCodeCache,
 } from '@common/utils';
+import { useModalStore } from '../../store/modal-store';
 import {
   ensureHljsLanguageForPath,
   onHljsLanguagesChanged,
@@ -22,9 +24,8 @@ import {
 } from '@lib/hljs-lazy';
 import { calculateVisibleRange } from '@lib/virtual-range';
 import {
-  isRowInSelection,
   isSelectableDiffRow,
-  selectionBlockRole,
+  rowSelectionVisualKey,
 } from '@lib/line-selection';
 import { isPathViewed } from '@lib/review-threads';
 import {
@@ -70,6 +71,8 @@ function FileHeaderRow(props: {
   searchQuery?: string;
   /** When true, omit rowIndex so virtual list hits don't collide; visuals identical. */
   sticky?: boolean;
+  /** Active file from tree / prev-next — focus chrome on this header */
+  focused?: boolean;
   style?: React.CSSProperties;
   /** File-level selection composer docked under this header */
   selectionIsland?: React.ReactNode;
@@ -87,6 +90,7 @@ function FileHeaderRow(props: {
     occ = 0,
     searchQuery = '',
     sticky = false,
+    focused = false,
     style,
     selectionIsland = null,
   } = props;
@@ -103,7 +107,7 @@ function FileHeaderRow(props: {
     <div
       className={`prp-vline prp-vline--header prp-vline--header-${headerTone}${
         !openable ? ' prp-vline--header-binary' : ''
-      }${searchRowClass}`}
+      }${focused ? ' prp-vline--header-focus' : ''}${searchRowClass}`}
       style={{ height: ROW_HEIGHT, ...style }}
       data-row-index={sticky ? undefined : row.rowIndex}
       data-file-path={row.filePath || ''}
@@ -111,6 +115,7 @@ function FileHeaderRow(props: {
       data-openable={openable ? '1' : '0'}
       data-file-kind={row.fileKind || undefined}
       data-sticky={sticky ? '1' : undefined}
+      data-file-focus={focused ? '1' : undefined}
       data-search-current={isActiveHit ? '1' : undefined}
     >
       <label className="prp-file-header__viewed" title="Mark as viewed">
@@ -372,7 +377,11 @@ type DiffCodeLineProps = {
   activeHitForMarks: any;
   occ: number;
   searchQuery: string;
-  selection: any;
+  /**
+   * Test/override path only. Live Diff leaves this undefined so each row
+   * subscribes to the store — VirtualDiff does not re-render on caret moves.
+   */
+  selectionOverride?: any;
   selecting: boolean;
   onSelectionStart: any;
   onSelectionExtend: any;
@@ -386,9 +395,165 @@ type DiffCodeLineProps = {
   selectionIsland?: React.ReactNode;
 };
 
+type DiffCodeLineBodyProps = {
+  row: any;
+  isCode: boolean;
+  isHunk: boolean;
+  isSplit: boolean;
+  hideHunkText: boolean;
+  expandAbove: any;
+  expandBelow: any;
+  qForRow: string;
+  activeHitForMarks: any;
+  occ: number;
+  useSyntax: boolean;
+  onExpandGap: any;
+  expandBusyKey: any;
+};
+
 /**
- * Memoized code/hunk row: when the virtual window slides, overlapping lines keep
- * the same props and skip re-render (highlight HTML stays cached too).
+ * Syntax / hunk content — intentionally ignores selection flags so key-hold
+ * class updates on the shell do not re-highlight every edge row.
+ */
+const DiffCodeLineBody = memo(function DiffCodeLineBody({
+  row,
+  isCode,
+  isHunk,
+  isSplit,
+  hideHunkText,
+  expandAbove,
+  expandBelow,
+  qForRow,
+  activeHitForMarks,
+  occ,
+  useSyntax,
+  onExpandGap,
+  expandBusyKey,
+}: DiffCodeLineBodyProps) {
+  if (isHunk) {
+    return (
+      <>
+        {!hideHunkText ? (
+          <code
+            className="prp-code prp-hunk-text"
+            dangerouslySetInnerHTML={{
+              __html: renderSearchableHtml(
+                row.text || row.raw || row.code || '',
+                row.filePath,
+                qForRow,
+                row,
+                activeHitForMarks,
+                occ,
+                'text',
+                false
+              ),
+            }}
+          />
+        ) : (
+          <span className="prp-hunk-text prp-hunk-text--empty" />
+        )}
+        {expandAbove || expandBelow ? (
+          <div className="prp-hunk-expand-rail">
+            {expandAbove ? (
+              <HunkExpandControls
+                gap={expandAbove}
+                filePath={row.filePath || ''}
+                onExpandGap={onExpandGap}
+                expandBusyKey={expandBusyKey}
+                placement="above"
+              />
+            ) : null}
+            {expandBelow ? (
+              <HunkExpandControls
+                gap={expandBelow}
+                filePath={row.filePath || ''}
+                onExpandGap={onExpandGap}
+                expandBusyKey={expandBusyKey}
+                placement="below"
+              />
+            ) : null}
+          </div>
+        ) : (
+          <span className="prp-hunk-expand-rail" aria-hidden="true" />
+        )}
+      </>
+    );
+  }
+  if (isSplit && isCode) {
+    return (
+      <div className="prp-split-cols">
+        <div className="prp-split-cols__left">
+          <span className="prp-split-cols__ln">{row.oldLine ?? ''}</span>
+          <code
+            className={useSyntax ? 'hljs prp-code' : 'prp-code'}
+            dangerouslySetInnerHTML={{
+              __html: renderSearchableHtml(
+                row.leftCode ?? '',
+                row.filePath,
+                qForRow,
+                row,
+                activeHitForMarks,
+                occ,
+                'left',
+                useSyntax
+              ),
+            }}
+          />
+        </div>
+        <div className="prp-split-cols__right">
+          <span className="prp-split-cols__ln">{row.newLine ?? ''}</span>
+          <code
+            className={useSyntax ? 'hljs prp-code' : 'prp-code'}
+            dangerouslySetInnerHTML={{
+              __html: renderSearchableHtml(
+                row.rightCode ?? '',
+                row.filePath,
+                qForRow,
+                row,
+                activeHitForMarks,
+                occ,
+                'right',
+                useSyntax
+              ),
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+  return (
+    <code
+      className={isCode && useSyntax ? 'hljs prp-code' : 'prp-code'}
+      dangerouslySetInnerHTML={{
+        __html: isCode
+          ? renderSearchableHtml(
+              row.code ?? row.text,
+              row.filePath,
+              qForRow,
+              row,
+              activeHitForMarks,
+              occ,
+              'code',
+              useSyntax
+            )
+          : renderSearchableHtml(
+              row.text || '',
+              row.filePath,
+              qForRow,
+              row,
+              activeHitForMarks,
+              occ,
+              'text',
+              false
+            ),
+      }}
+    />
+  );
+});
+
+/**
+ * Shell re-renders on this row's visual key only (store leaf subscription).
+ * Body is memoized so selection class toggles never re-run hljs.
  */
 const DiffCodeLine = memo(function DiffCodeLine({
   row,
@@ -398,7 +563,7 @@ const DiffCodeLine = memo(function DiffCodeLine({
   activeHitForMarks,
   occ,
   searchQuery,
-  selection,
+  selectionOverride,
   selecting,
   onSelectionStart,
   onSelectionExtend,
@@ -410,7 +575,9 @@ const DiffCodeLine = memo(function DiffCodeLine({
 }: DiffCodeLineProps) {
   const isCode =
     row.kind === 'diff-line' &&
-    (row.lineType === 'add' || row.lineType === 'del' || row.lineType === 'context');
+    (row.lineType === 'add' ||
+      row.lineType === 'del' ||
+      row.lineType === 'context');
   const isHunk = row.kind === 'diff-line' && row.lineType === 'hunk';
   const expandAbove = isHunk ? row.expandAbove : null;
   const expandBelow = isHunk ? row.expandBelow : null;
@@ -418,19 +585,29 @@ const DiffCodeLine = memo(function DiffCodeLine({
   if (isHunk && row.hidden && !hasHunkExpand) {
     return null;
   }
-  const selected =
-    selection && typeof isRowInSelection === 'function'
-      ? isRowInSelection(selection, row)
-      : false;
-  const selRole =
-    selected && typeof selectionBlockRole === 'function'
-      ? selectionBlockRole(selection, row)
-      : null;
   const selectable =
     typeof isSelectableDiffRow === 'function' ? isSelectableDiffRow(row) : false;
   const isSplit = Boolean(row.split);
   const hideHunkText = Boolean(isHunk && row.hidden);
   const qForRow = isSearchMatch ? searchQuery : '';
+
+  // Leaf store subscription: only this row re-renders when its key changes.
+  // Middles stay "middle" under multi extend → no re-render. Override for tests.
+  const storeVisualKey = useModalStore((s) =>
+    selectionOverride !== undefined
+      ? ''
+      : typeof rowSelectionVisualKey === 'function'
+        ? rowSelectionVisualKey(s.lineSelection, row)
+        : ''
+  );
+  const visualKey =
+    selectionOverride !== undefined
+      ? typeof rowSelectionVisualKey === 'function'
+        ? rowSelectionVisualKey(selectionOverride, row)
+        : ''
+      : storeVisualKey;
+  const selected = visualKey !== '';
+  const selRole = visualKey || null;
   // Single-line selection is role "only"; multi ends with "end"
   const dockHere = Boolean(
     selectionIsland && (selRole === 'end' || selRole === 'only')
@@ -475,119 +652,21 @@ const DiffCodeLine = memo(function DiffCodeLine({
       }}
     >
       <span className="prp-line-gutter" />
-      {isHunk ? (
-        <>
-          {!hideHunkText ? (
-            <code
-              className="prp-code prp-hunk-text"
-              dangerouslySetInnerHTML={{
-                __html: renderSearchableHtml(
-                  row.text || row.raw || row.code || '',
-                  row.filePath,
-                  qForRow,
-                  row,
-                  activeHitForMarks,
-                  occ,
-                  'text',
-                  false
-                ),
-              }}
-            />
-          ) : (
-            <span className="prp-hunk-text prp-hunk-text--empty" />
-          )}
-          {expandAbove || expandBelow ? (
-            <div className="prp-hunk-expand-rail">
-              {expandAbove ? (
-                <HunkExpandControls
-                  gap={expandAbove}
-                  filePath={row.filePath || ''}
-                  onExpandGap={onExpandGap}
-                  expandBusyKey={expandBusyKey}
-                  placement="above"
-                />
-              ) : null}
-              {expandBelow ? (
-                <HunkExpandControls
-                  gap={expandBelow}
-                  filePath={row.filePath || ''}
-                  onExpandGap={onExpandGap}
-                  expandBusyKey={expandBusyKey}
-                  placement="below"
-                />
-              ) : null}
-            </div>
-          ) : (
-            <span className="prp-hunk-expand-rail" aria-hidden="true" />
-          )}
-        </>
-      ) : isSplit && isCode ? (
-        <div className="prp-split-cols">
-          <div className="prp-split-cols__left">
-            <span className="prp-split-cols__ln">{row.oldLine ?? ''}</span>
-            <code
-              className={useSyntax ? 'hljs prp-code' : 'prp-code'}
-              dangerouslySetInnerHTML={{
-                __html: renderSearchableHtml(
-                  row.leftCode ?? '',
-                  row.filePath,
-                  qForRow,
-                  row,
-                  activeHitForMarks,
-                  occ,
-                  'left',
-                  useSyntax
-                ),
-              }}
-            />
-          </div>
-          <div className="prp-split-cols__right">
-            <span className="prp-split-cols__ln">{row.newLine ?? ''}</span>
-            <code
-              className={useSyntax ? 'hljs prp-code' : 'prp-code'}
-              dangerouslySetInnerHTML={{
-                __html: renderSearchableHtml(
-                  row.rightCode ?? '',
-                  row.filePath,
-                  qForRow,
-                  row,
-                  activeHitForMarks,
-                  occ,
-                  'right',
-                  useSyntax
-                ),
-              }}
-            />
-          </div>
-        </div>
-      ) : (
-        <code
-          className={isCode && useSyntax ? 'hljs prp-code' : 'prp-code'}
-          dangerouslySetInnerHTML={{
-            __html: isCode
-              ? renderSearchableHtml(
-                  row.code ?? row.text,
-                  row.filePath,
-                  qForRow,
-                  row,
-                  activeHitForMarks,
-                  occ,
-                  'code',
-                  useSyntax
-                )
-              : renderSearchableHtml(
-                  row.text || '',
-                  row.filePath,
-                  qForRow,
-                  row,
-                  activeHitForMarks,
-                  occ,
-                  'text',
-                  false
-                ),
-          }}
-        />
-      )}
+      <DiffCodeLineBody
+        row={row}
+        isCode={isCode}
+        isHunk={isHunk}
+        isSplit={isSplit}
+        hideHunkText={hideHunkText}
+        expandAbove={expandAbove}
+        expandBelow={expandBelow}
+        qForRow={qForRow}
+        activeHitForMarks={activeHitForMarks}
+        occ={occ}
+        useSyntax={useSyntax}
+        onExpandGap={onExpandGap}
+        expandBusyKey={expandBusyKey}
+      />
     </div>
   );
 
@@ -615,8 +694,9 @@ function VirtualDiffImpl(props: any) {
     onViewportHeight,
     highlightRowIndex,
     listRef,
-    selection,
-    selecting,
+    /** Optional prop override (tests); live Diff uses modal store */
+    selection: selectionProp = undefined,
+    selecting: selectingProp = undefined,
     onSelectionStart,
     onSelectionExtend,
     onSelectionEnd,
@@ -627,8 +707,6 @@ function VirtualDiffImpl(props: any) {
     viewedPaths,
     onToggleViewed,
     threadsByCommentId,
-    replyDrafts,
-    onReplyDraft,
     onReply,
     onResolve,
     onDeleteReviewComment,
@@ -664,11 +742,56 @@ function VirtualDiffImpl(props: any) {
      * row (or file header) so they scroll/unmount with the virtual list.
      */
     selectionIsland = null,
+    /** Path of the active file (tree / prev-next) — focus ring on its header */
+    activeFilePath = null,
   } = props;
 
+  // Do NOT subscribe to full lineSelection here — that re-renders every visible
+  // row on key-hold. DiffCodeLine leaf-subscribes for its own visual key.
+  // Only file-target path needs list-level re-render (header island dock).
+  const storeFileSelectionPath = useModalStore((s) => {
+    const sel = s.lineSelection;
+    if (sel && (sel.kind === 'file' || sel.subjectType === 'file')) {
+      return String(sel.filePath || '');
+    }
+    return '';
+  });
+  const storeSelecting = useModalStore((s) => s.selecting);
+  const selecting =
+    selectingProp !== undefined ? selectingProp : storeSelecting;
+  // Tests pass selection prop; live path uses leaf store in DiffCodeLine.
+  const selectionOverride =
+    selectionProp !== undefined ? selectionProp : undefined;
+  const fileSelectionPath =
+    selectionOverride !== undefined
+      ? selectionOverride &&
+        (selectionOverride.kind === 'file' ||
+          selectionOverride.subjectType === 'file')
+        ? String(selectionOverride.filePath || '')
+        : ''
+      : storeFileSelectionPath;
+  const isFileSelection = Boolean(fileSelectionPath);
+
+  const activePathNorm = String(activeFilePath || '').trim();
+
+  // Stable handler identities → DiffCodeLine memo works across selection moves
+  const onSelectionStartRef = useRef(onSelectionStart);
+  const onSelectionExtendRef = useRef(onSelectionExtend);
+  const onExpandGapRef = useRef(onExpandGap);
+  onSelectionStartRef.current = onSelectionStart;
+  onSelectionExtendRef.current = onSelectionExtend;
+  onExpandGapRef.current = onExpandGap;
+  const stableSelectionStart = useCallback((row: any, point: any, opts?: any) => {
+    onSelectionStartRef.current?.(row, point, opts);
+  }, []);
+  const stableSelectionExtend = useCallback((row: any) => {
+    onSelectionExtendRef.current?.(row);
+  }, []);
+  const stableExpandGap = useCallback((...args: any[]) => {
+    return onExpandGapRef.current?.(...args);
+  }, []);
+
   const showSelectionIsland = Boolean(selectionIsland);
-  const isFileSelection =
-    selection?.kind === 'file' || selection?.subjectType === 'file';
 
   const matchRowSet = useMemo(() => {
     if (searchMatchRows instanceof Set) return searchMatchRows;
@@ -913,17 +1036,66 @@ function VirtualDiffImpl(props: any) {
     [flushPendingScroll]
   );
 
+  /** Detect App programmatic jumps (⌥J/K thread nav) vs user wheel. */
+  const prevScrollTopPropRef = useRef(scrollTopProp);
+  /** Hold last programmatic target so row rebuild after expand reuses it once. */
+  const programmaticTopRef = useRef<number | null>(null);
+
   // Rows / viewport / external jump → recompute window (no-op if unchanged)
   useLayoutEffect(() => {
     const el = listRef?.current as HTMLElement | null;
+    const propTop =
+      scrollTopProp != null && Number.isFinite(Number(scrollTopProp))
+        ? Math.max(0, Number(scrollTopProp))
+        : null;
+    const propChanged = scrollTopProp !== prevScrollTopPropRef.current;
+    prevScrollTopPropRef.current = scrollTopProp;
+
+    // Programmatic jump from App: force DOM scrollTop then recompute window.
+    if (propChanged && propTop != null) {
+      programmaticTopRef.current = propTop;
+      if (el) el.scrollTop = propTop;
+      pendingScrollRef.current = propTop;
+      applyScrollTop(propTop);
+      return;
+    }
+
+    // After file expand rebuilds rows, re-apply held jump once if DOM reset.
+    if (
+      programmaticTopRef.current != null &&
+      el &&
+      Math.abs(el.scrollTop - programmaticTopRef.current) > 4
+    ) {
+      const held = programmaticTopRef.current;
+      el.scrollTop = held;
+      pendingScrollRef.current = held;
+      applyScrollTop(held);
+      return;
+    }
+
     const top =
       el && typeof el.scrollTop === 'number'
         ? el.scrollTop
-        : scrollTopProp != null && Number.isFinite(Number(scrollTopProp))
-          ? Math.max(0, Number(scrollTopProp))
+        : propTop != null
+          ? propTop
           : pendingScrollRef.current;
     applyScrollTop(top);
   }, [virtualRows, offsets, vp, scrollTopProp, listRef, applyScrollTop]);
+
+  // Clear held jump after user scrolls (wheel)
+  useEffect(() => {
+    const el = listRef?.current as HTMLElement | null;
+    if (!el) return undefined;
+    const onUserScroll = () => {
+      // Only clear if movement is not our programmatic write
+      const held = programmaticTopRef.current;
+      if (held != null && Math.abs(el.scrollTop - held) > 8) {
+        programmaticTopRef.current = null;
+      }
+    };
+    el.addEventListener('scroll', onUserScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onUserScroll);
+  }, [listRef]);
 
   useLayoutEffect(() => {
     return () => {
@@ -961,8 +1133,11 @@ function VirtualDiffImpl(props: any) {
     };
   }, [listRef, onViewportHeight, virtualRows?.length]);
 
-  // After jump, ensure current mark is in view
+  // Search hit only: fine-tune current mark into view.
+  // Thread nav (⌥J/K) already set scrollTop via App — do not scrollIntoView
+  // again or the list shakes as two scroll targets fight.
   useLayoutEffect(() => {
+    if (!activeSearchHit) return;
     if (highlightRowIndex == null || !listRef?.current) return;
     const root = listRef.current as HTMLElement;
     const rowEl = root.querySelector?.(
@@ -1065,11 +1240,14 @@ function VirtualDiffImpl(props: any) {
             onToggleCollapse={onToggleCollapse}
             onFileComment={onFileComment}
             sticky
+            focused={
+              Boolean(activePathNorm) &&
+              String(stickyMeta.row?.filePath || '') === activePathNorm
+            }
             selectionIsland={
               showSelectionIsland &&
               isFileSelection &&
-              String(selection?.filePath || '') ===
-                String(stickyMeta.row?.filePath || '')
+              fileSelectionPath === String(stickyMeta.row?.filePath || '')
                 ? selectionIsland
                 : null
             }
@@ -1126,12 +1304,11 @@ function VirtualDiffImpl(props: any) {
                   data-pending={pending ? '1' : undefined}
                   data-search-current={isActiveHit ? '1' : undefined}
                   data-search-anchor={commentAnchor || undefined}
+                  data-thread-focus-anchor={commentAnchor || undefined}
                 >
                   <InlineThread
                     row={row}
                     thread={thread}
-                    replyText={replyDrafts?.[String(row.commentId)] || ''}
-                    onReplyText={(t: string) => onReplyDraft?.(row.commentId, t)}
                     onReply={onReply}
                     onResolve={onResolve}
                     onDelete={onDeleteReviewComment}
@@ -1172,7 +1349,7 @@ function VirtualDiffImpl(props: any) {
                 showSelectionIsland &&
                 isFileSelection &&
                 !stickyOwnsFile &&
-                String(selection?.filePath || '') === String(row.filePath || '');
+                fileSelectionPath === String(row.filePath || '');
               return (
                 <FileHeaderRow
                   key={row.rowIndex}
@@ -1187,6 +1364,10 @@ function VirtualDiffImpl(props: any) {
                   activeHitForMarks={activeHitForMarks}
                   occ={occ}
                   searchQuery={qActive ? searchQuery : ''}
+                  focused={
+                    Boolean(activePathNorm) &&
+                    String(row.filePath || '') === activePathNorm
+                  }
                   selectionIsland={dockFile ? selectionIsland : null}
                 />
               );
@@ -1297,11 +1478,11 @@ function VirtualDiffImpl(props: any) {
                 activeHitForMarks={activeHitForMarks}
                 occ={occ}
                 searchQuery={qActive ? searchQuery : ''}
-                selection={selection}
-                selecting={selecting}
-                onSelectionStart={onSelectionStart}
-                onSelectionExtend={onSelectionExtend}
-                onExpandGap={onExpandGap}
+                selectionOverride={selectionOverride}
+                selecting={Boolean(selecting)}
+                onSelectionStart={stableSelectionStart}
+                onSelectionExtend={stableSelectionExtend}
+                onExpandGap={stableExpandGap}
                 expandBusyKey={expandBusyKey}
                 useSyntax
                 hljsEpoch={hljsEpoch}

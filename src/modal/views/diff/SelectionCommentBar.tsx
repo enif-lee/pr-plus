@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Button } from '@common/Button';
 import { MarkdownComposer } from '@common/MarkdownComposer';
 import { TipPopover } from '@common/TipPopover';
+import { OptBtnHint } from '@common/OptBtnHint';
 import { IconX } from '@common/icons';
 import {
   extractSelectedCodeText,
@@ -9,6 +10,7 @@ import {
   normalizeSelection,
 } from '@lib/line-selection';
 import { copyTextToClipboard } from '@lib/copy-to-clipboard';
+import { useModalStore } from '../../store/modal-store';
 
 export type SelectionIslandPhase = 'actions' | 'comment';
 
@@ -19,7 +21,7 @@ export type SelectionIslandPhase = 'actions' | 'comment';
  */
 export function SelectionCommentBar(props: any) {
   const {
-    selection,
+    selection: selectionProp = null,
     draft,
     onDraft,
     onSubmitImmediate,
@@ -36,7 +38,14 @@ export function SelectionCommentBar(props: any) {
     phase: phaseProp = null,
     onPhaseChange = null,
     onCopyFeedback = null,
+    /** Opt-hold: show shortcut badges on action buttons */
+
   } = props;
+
+  // Prefer store so App need not re-render on every caret move
+  const storeSelection = useModalStore((s) => s.lineSelection);
+  const showOptHints = useModalStore((s) => s.optHintsActive);
+  const selection = selectionProp ?? storeSelection;
 
   const [phaseLocal, setPhaseLocal] = useState<SelectionIslandPhase>('actions');
 
@@ -139,51 +148,71 @@ export function SelectionCommentBar(props: any) {
 
   // ── Actions: floating segmented group only (no card, no filename) ──
   if (phase === 'actions' && !isFileTarget) {
+    const kbdComment = `${opt}C`;
+    const kbdCopyCode = `${mod}C`;
+    const kbdCopyUrl = `${mod}${opt}C`;
     return (
       <div
         className={`prp-selection-dock prp-selection-group${
           leaving ? ' prp-selection-group--out' : ' prp-selection-group--in'
-        }`}
+        }${showOptHints ? ' prp-selection-group--opt-hints' : ''}`}
         role="toolbar"
         aria-label="Selection actions"
         data-phase="actions"
+        data-opt-hints={showOptHints ? '1' : undefined}
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => e.stopPropagation()}
       >
         <button
           type="button"
-          className="prp-selection-group__btn prp-has-tip"
+          className="prp-selection-group__btn prp-has-tip prp-opt-hint-host"
           disabled={actionBusy}
           onClick={() => setPhase('comment')}
         >
+          <OptBtnHint
+            label={kbdComment}
+            preferredPlacement="top"
+          />
           Comment
-          <TipPopover title="Add review comment" shortcut={`${opt}C`} />
+          <TipPopover title="Add review comment" shortcut={kbdComment} />
         </button>
         <button
           type="button"
-          className="prp-selection-group__btn prp-has-tip"
+          className="prp-selection-group__btn prp-has-tip prp-opt-hint-host"
           disabled={actionBusy}
           onClick={() => void copyCode()}
         >
+          <OptBtnHint
+            label={kbdCopyCode}
+            preferredPlacement="top"
+          />
           Copy code
-          <TipPopover title="Copy selected code" shortcut={`${mod}C`} />
+          <TipPopover title="Copy selected code" shortcut={kbdCopyCode} />
         </button>
         <button
           type="button"
-          className="prp-selection-group__btn prp-has-tip"
+          className="prp-selection-group__btn prp-has-tip prp-opt-hint-host"
           disabled={actionBusy}
           onClick={() => void copyUrl()}
         >
+          <OptBtnHint
+            label={kbdCopyUrl}
+            preferredPlacement="top"
+          />
           Copy URL
-          <TipPopover title="Copy GitHub line link" shortcut={`${mod}${opt}C`} />
+          <TipPopover title="Copy GitHub line link" shortcut={kbdCopyUrl} />
         </button>
         <button
           type="button"
-          className="prp-selection-group__btn prp-selection-group__btn--icon prp-has-tip"
+          className="prp-selection-group__btn prp-selection-group__btn--icon prp-has-tip prp-opt-hint-host"
           disabled={actionBusy}
           onClick={onCancel}
           aria-label="Dismiss selection"
         >
+          <OptBtnHint
+            label="Esc"
+            preferredPlacement="top"
+          />
           <IconX size={14} />
           <TipPopover title="Dismiss" shortcut="Esc" />
         </button>

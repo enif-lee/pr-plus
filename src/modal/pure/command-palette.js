@@ -95,6 +95,7 @@ function buildPrModalOptHoldSlots(opts = {}) {
 function optShortcutForCommandId(commandId) {
   const map = {
     'toggle-diff': 'opt+.',
+    'toggle-side-panel': 'opt+b',
     'find-in-pr': 'mod+f',
     'toggle-fullscreen': 'opt+shift+f',
     'edit-title': 'opt+shift+t',
@@ -226,6 +227,8 @@ function buildPaletteCommands(detail, opts = {}) {
   const stackItems = Array.isArray(opts.stackItems) ? opts.stackItems : [];
   const openPulls = Array.isArray(opts.openPulls) ? opts.openPulls : [];
   const stacked = stackItems.length >= 2;
+  const layoutMode = String(opts.layoutMode || opts.page || '').toLowerCase();
+  const isDiffLayout = layoutMode === 'diff';
   const allowReviewVerdict =
     opts.canSubmitReviewVerdict != null
       ? Boolean(opts.canSubmitReviewVerdict)
@@ -248,6 +251,23 @@ function buildPaletteCommands(detail, opts = {}) {
       keywords: ['diff', 'files', 'conversation'],
       shortcut: optShortcutForCommandId('toggle-diff') || 'opt+.',
       action: 'toggleDiff',
+    },
+    {
+      id: 'toggle-side-panel',
+      title: isDiffLayout ? 'Toggle files panel' : 'Toggle metadata panel',
+      section: 'Navigate',
+      keywords: [
+        'panel',
+        'sidebar',
+        'collapse',
+        'files',
+        'metadata',
+        'aside',
+        'rail',
+        'hide',
+      ],
+      shortcut: optShortcutForCommandId('toggle-side-panel') || 'opt+b',
+      action: 'toggleSidePanel',
     },
     {
       id: 'find-in-pr',

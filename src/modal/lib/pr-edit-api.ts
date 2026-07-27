@@ -171,6 +171,23 @@ export function buildDraftStageGraphql(stage, pullRequestId) {
 }
 
 /**
+ * Read isDraft from markReady / convertToDraft GraphQL data payload.
+ * @returns {boolean|null} null when the field is missing
+ */
+export function draftFromStageGraphqlData(data: any): boolean | null {
+  if (!data || typeof data !== 'object') return null;
+  const pr =
+    data.markPullRequestReadyForReview?.pullRequest ||
+    data.convertPullRequestToDraft?.pullRequest ||
+    data.pullRequest ||
+    null;
+  if (!pr || typeof pr !== 'object') return null;
+  if (typeof pr.isDraft === 'boolean') return pr.isDraft;
+  if (typeof pr.draft === 'boolean') return pr.draft;
+  return null;
+}
+
+/**
  * Extract linked issue numbers from PR body (closes/fixes/refs #N and bare #N).
  * @returns {number[]}
  */

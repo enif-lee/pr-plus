@@ -75,8 +75,21 @@ assert.equal(
     layoutMode: 'conversation',
     editableTarget: false,
   }),
-  null,
-  'page scroll only on Diff'
+  'scrollConversationPageNext',
+  'conversation page scroll on centered/conversation layout'
+);
+assert.equal(
+  resolveModalShortcutAction({
+    mod: false,
+    alt: true,
+    shift: false,
+    key: 'ArrowUp',
+    code: 'ArrowUp',
+    layoutMode: 'centered',
+    editableTarget: false,
+  }),
+  'scrollConversationOptPrev',
+  'conversation opt-arrow scroll'
 );
 assert.equal(
   resolveModalShortcutAction({
@@ -170,8 +183,15 @@ const css = fs.readFileSync(path.join(root, 'src/modal/styles.css'), 'utf8');
 assert.ok(app.includes("case 'scrollDiffPagePrev'"));
 assert.ok(app.includes("case 'scrollDiffPageNext'"));
 assert.ok(app.includes("case 'toggleViewedActiveFile'"));
-assert.ok(app.includes('setOptHintsSuppressed'));
-assert.ok(app.includes('optHintsSuppressed'));
+// Opt-hold suppress is a ref + store write (no App setState for badge tree)
+assert.ok(
+  app.includes('optHintsSuppressedRef') || app.includes('optHintsSuppressed'),
+  'opt hints suppress via ref (no full-tree re-render)'
+);
+assert.ok(
+  app.includes('setOptHintsActive') || app.includes('optHintsActive'),
+  'opt hints active driven through modal store'
+);
 assert.ok(app.includes('scrollFileNavRowIntoView'));
 assert.ok(app.includes('DiffFloatingController'));
 assert.ok(app.includes('scrollDiffPage'));

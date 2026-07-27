@@ -16,6 +16,11 @@ import {
   type ConversationVirtualRow,
 } from '@lib/conversation-virtual';
 import { FloatingScrollbar } from '../../components/common/FloatingScrollbar';
+import { useModalStore } from '../../store/modal-store';
+import {
+  queryAnchorInScroller,
+  scrollChildToScrollerTop,
+} from '@lib/context-thread-dom';
 
 /**
  * Variable-height virtual list for the full conversation left panel
@@ -139,6 +144,7 @@ function VirtualConversationListImpl(props: any) {
     });
   }, []);
 
+  /** Search hit jump — set scrollTop by row index first so virtual window mounts. */
   useEffect(() => {
     if (!scrollToAnchor || !rows.length) return undefined;
     const idx = indexForConversationAnchor(rows, scrollToAnchor);
@@ -170,6 +176,94 @@ function VirtualConversationListImpl(props: any) {
     }, 48);
     return () => window.clearTimeout(t);
   }, [scrollToAnchor, rows, offsets, viewportHeight]);
+
+  /**
+   * ⌥J/K keyboard focus: single scroll jump per target (no multi-pass thrash).
+   * - Depend only on pendingNavAnchor so heightMap/offset remeasure does not
+   *   re-evaluate scroll mid-nav.
+   * - Read rows/offsets from refs for latest layout without re-running.
+   * - No scrollIntoView (fights index-based scrollTop).
+   */
+  const pendingNavAnchor = useModalStore((s) => s.pendingConversationNavAnchor);
+  const navLayoutRef = useRef({
+    rows,
+    offsets,
+    viewportHeight,
+  });
+  navLayoutRef.current = { rows, offsets, viewportHeight };
+
+  useLayoutEffect(() => {
+    const a = String(pendingNavAnchor || '').trim();
+    if (!a) return undefined;
+
+    let cancelled = false;
+    let settleT = 0;
+
+    const jumpToAnchor = () => {
+      const { rows: r, offsets: off, viewportHeight: vh } = navLayoutRef.current;
+      if (!r.length) return false;
+      const idx = indexForConversationAnchor(r, a);
+      const el = scrollerRef.current;
+      if (idx < 0 || !el) return false;
+      // 1) Virtual row jump (group + standalone threads share this index)
+      //    24px inset so focus ring sits consistently below the scroller edge.
+      const top = scrollTopForIndex(idx, 120, vh, r.length, off, {
+        align: 'start',
+        pad: 24,
+      });
+      if (Math.abs((el.scrollTop || 0) - top) > 1) {
+        el.scrollTop = top;
+        setScrollTop(top);
+      }
+      // 2) Within-row refine: review-group threads all map to the same row
+      //    index — pin the specific thread node to the same 24px top band.
+      const node = queryAnchorInScroller(el, a);
+      if (node) {
+        const applied = scrollChildToScrollerTop(el, node, { pad: 24 });
+        if (Math.abs(applied) > 1) {
+          setScrollTop(el.scrollTop);
+        }
+      }
+      return true;
+    };
+
+    const promote = () => {
+      if (cancelled) return;
+      const st = useModalStore.getState();
+      if (st.pendingConversationNavAnchor !== a) return;
+      st.setFocusedConversationAnchor(a);
+      useModalStore.setState({ pendingConversationNavAnchor: null });
+    };
+
+    // 1) Immediate scroll before paint
+    const ok = jumpToAnchor();
+    if (!ok) {
+      // Row missing this frame (virtual list not ready) — one short retry
+      settleT = window.setTimeout(() => {
+        if (cancelled) return;
+        jumpToAnchor();
+        promote();
+      }, 48);
+      return () => {
+        cancelled = true;
+        window.clearTimeout(settleT);
+      };
+    }
+
+    // 2) One settle pass after expand (ConversationKbFocusScroller) without
+    //    re-binding to offset changes (avoids shake on height measure).
+    settleT = window.setTimeout(() => {
+      if (cancelled) return;
+      if (useModalStore.getState().pendingConversationNavAnchor !== a) return;
+      jumpToAnchor();
+      promote();
+    }, 72);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(settleT);
+    };
+  }, [pendingNavAnchor]);
 
   const start = range.start;
   const end = range.end;

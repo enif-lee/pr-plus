@@ -95,6 +95,39 @@ assert.equal(
   'toggleDiff'
 );
 assert.equal(
+  resolveModalShortcutAction({ alt: true, mod: false, shift: false, key: 'b' }),
+  'toggleSidePanel',
+  '⌥B toggles side panel'
+);
+// macOS Option+B emits key "∫" — must resolve via KeyboardEvent.code
+assert.equal(
+  resolveModalShortcutAction({
+    alt: true,
+    mod: false,
+    shift: false,
+    key: '∫',
+    code: 'KeyB',
+  }),
+  'toggleSidePanel',
+  '⌥B with macOS glyph key still toggles via code'
+);
+assert.equal(
+  resolveModalShortcutAction({ alt: true, mod: false, shift: true, key: 'b' }),
+  null,
+  '⌥⇧B is not side panel (Change base uses opt peer)'
+);
+assert.equal(
+  resolveModalShortcutAction({
+    alt: true,
+    mod: false,
+    shift: false,
+    key: 'b',
+    editableTarget: true,
+  }),
+  null,
+  '⌥B blocked while typing'
+);
+assert.equal(
   resolveModalShortcutAction({ alt: false, mod: true, shift: false, key: 'f' }),
   'openSearch'
 );
@@ -171,8 +204,10 @@ assert.notEqual(
     'App defines focusConversationCommentItem'
   );
   assert.ok(
-    app.includes('setConversationCommentFocus(target)'),
-    'App sets focused anchor state for ConversationView/VCL'
+    app.includes('requestConversationNav') ||
+      app.includes('setFocusedConversationAnchor') ||
+      app.includes('focusedConversationAnchor'),
+    'App drives focus via store for leaf subscription (partial re-render)'
   );
   // Must NOT one-shot querySelector-scroll from App (virtual list off-window miss)
   const focusFn = app.slice(
@@ -201,8 +236,9 @@ assert.notEqual(
     'App passes focused flag into policy'
   );
   assert.ok(
-    app.includes('focusedConversationAnchor'),
-    'App passes focused anchor to ConversationView'
+    app.includes('focusedConversationAnchor') ||
+      app.includes('setFocusedConversationAnchor'),
+    'App writes focused anchor to store (not prop-drilled through ConversationView)'
   );
   assert.ok(
     app.includes('editableTarget'),
@@ -213,17 +249,19 @@ assert.notEqual(
     'utf8'
   );
   assert.ok(
-    conv.includes('prp-card--kb-focus'),
-    'ConversationView marks keyboard-focused row'
+    conv.includes('ConversationKbFocusHost') ||
+      conv.includes('ConversationKbFocusClassName') ||
+      conv.includes('useIsConversationKbFocused'),
+    'ConversationView uses leaf focus subscription (partial re-render)'
   );
   assert.ok(
-    conv.includes('focusedConversationAnchor'),
-    'ConversationView accepts focusedConversationAnchor'
+    !/focusedConversationAnchor\s*=/.test(conv),
+    'ConversationView does not take focusedConversationAnchor prop'
   );
   assert.ok(
-    conv.includes('focusedConversationAnchor || activeAnchor') ||
-      conv.includes('focusedConversationAnchor||activeAnchor'),
-    'ConversationView wires focused anchor into VCL scrollToAnchor'
+    conv.includes('ConversationKbFocusScroller') ||
+      conv.includes('scrollToAnchor'),
+    'ConversationView wires focus scroll via leaf scroller / VCL'
   );
   const vcl = fs.readFileSync(
     path.join(__dirname, '../src/modal/views/conversation/VirtualConversationList.tsx'),

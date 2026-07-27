@@ -188,6 +188,22 @@ function buildDraftStageGraphql(stage, pullRequestId) {
   };
 }
 
+/** @returns {boolean|null} */
+function draftFromStageGraphqlData(data) {
+  if (!data || typeof data !== 'object') return null;
+  const pr =
+    (data.markPullRequestReadyForReview &&
+      data.markPullRequestReadyForReview.pullRequest) ||
+    (data.convertPullRequestToDraft &&
+      data.convertPullRequestToDraft.pullRequest) ||
+    data.pullRequest ||
+    null;
+  if (!pr || typeof pr !== 'object') return null;
+  if (typeof pr.isDraft === 'boolean') return pr.isDraft;
+  if (typeof pr.draft === 'boolean') return pr.draft;
+  return null;
+}
+
 /**
  * Extract linked issue numbers from PR body (closes/fixes/refs #N and bare #N).
  * @returns {number[]}
@@ -479,6 +495,7 @@ const api = {
   buildDeleteSubscription,
   buildSetMilestone,
   buildDraftStageGraphql,
+  draftFromStageGraphqlData,
   parseLinkedIssueNumbers,
   buildRerequestReviewerLogins,
   parseSuggestionFences,

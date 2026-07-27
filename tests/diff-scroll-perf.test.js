@@ -154,7 +154,12 @@ TestRenderer.act(() => {
   );
 });
 
-const instance = root.root.findByProps({ className: 'prp-vlist' });
+const instance = root.root.find(
+  (n) =>
+    typeof n.props?.className === 'string' &&
+    n.props.className.split(/\s+/).includes('prp-vlist') &&
+    !n.props.className.includes('host')
+);
 const fakeEvent = (top) => ({ currentTarget: { scrollTop: top } });
 
 // Sub-pixel / same-window scrolls should not report parent every event
@@ -198,7 +203,12 @@ TestRenderer.act(() => {
   );
 });
 TestRenderer.act(() => {
-  const vlist = root.root.findByProps({ className: 'prp-vlist' });
+  const vlist = root.root.find(
+    (n) =>
+      typeof n.props?.className === 'string' &&
+      n.props.className.split(/\s+/).includes('prp-vlist') &&
+      !n.props.className.includes('host')
+  );
   vlist.props.onScroll(fakeEvent(50));
   flushRaf();
 });

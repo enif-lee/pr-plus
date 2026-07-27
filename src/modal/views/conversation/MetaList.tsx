@@ -20,9 +20,7 @@ export function MetaList({
   renderStatus,
   addButtonRef,
   avatarUrls,
-  /** Option-hold: show shortcut badge above Add… */
-  showOptHints = false,
-  /** e.g. ⌥⇧R / ⌥⇧A */
+  /** e.g. ⌥⇧R / ⌥⇧A — OptBtnHint uses store optHintsActive */
   addShortcut = null,
 }: any) {
   const localRef = useRef<HTMLButtonElement | null>(null);
@@ -133,7 +131,6 @@ export function MetaList({
           }}
         >
           <OptBtnHint
-            show={Boolean(showOptHints && addShortcut)}
             label={addShortcut}
             preferredPlacement="right"
           />

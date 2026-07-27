@@ -206,8 +206,22 @@ assert.equal(
     hasLineSelection: false,
     editableTarget: false,
   }),
+  'moveSelectionDown',
+  'arrows seed first line when no selection (after file nav)'
+);
+assert.equal(
+  resolveModalShortcutAction({
+    mod: false,
+    alt: false,
+    shift: false,
+    key: 'ArrowDown',
+    code: 'ArrowDown',
+    layoutMode: 'diff',
+    hasLineSelection: false,
+    editableTarget: true,
+  }),
   null,
-  'no steal arrows without selection'
+  'no steal arrows while typing'
 );
 
 // --- Goto across collapsed → expanded virtual rows (App apply pattern) ---

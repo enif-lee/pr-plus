@@ -237,7 +237,10 @@ function main() {
     );
     assert.ok(app.includes('navAdjacentPrev'));
     assert.ok(app.includes('navStackDigit'));
-    assert.ok(app.includes('showOptHotkeys'));
+    assert.ok(
+      app.includes('setOptHintsActive') || app.includes('optHintsActive'),
+      'stack opt hotkeys driven by store (StackStrip leaf-subscribes)'
+    );
     assert.ok(app.includes('onOpenLinkedPr'));
     assert.ok(app.includes('openStackOrListPr'));
 

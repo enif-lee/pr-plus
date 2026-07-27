@@ -4,11 +4,14 @@ import { Badge } from '@common/Badge';
 import { MarkdownView } from '@common/MarkdownView';
 import { UserLink } from '@common/UserLink';
 import { MarkdownComposer } from '@common/MarkdownComposer';
+import { OptBtnHint } from '@common/OptBtnHint';
 import { formatWhen } from '@common/utils';
 import { Avatar } from '@common/Avatar';
 import { IconDisclosure, IconPencil, IconTrash } from '@common/icons';
 import { BodyEditor } from '../composers/BodyEditor';
 import { DiffSnippetView } from '../conversation/DiffSnippetView';
+import { useModalStore } from '../../store/modal-store';
+import { isContextThreadCommentActive } from '@lib/context-thread-dom';
 
 /**
  * Inline review thread card (Diff + Conversation).
@@ -23,7 +26,8 @@ function InlineThreadImpl(props: any) {
   const {
     row,
     thread,
-    replyText,
+    /** Optional override (tests). Default: leaf-subscribe store draft by comment id. */
+    replyText: replyTextProp,
     onReplyText,
     onReply,
     onResolve,
@@ -95,6 +99,35 @@ function InlineThreadImpl(props: any) {
     : localCollapsed != null
       ? localCollapsed
       : defaultCollapsed;
+
+  const rootCommentId = row?.commentId ?? thread?.id ?? thread?.root?.id;
+  const draftKey =
+    rootCommentId == null || rootCommentId === ''
+      ? ''
+      : String(rootCommentId);
+  /**
+   * Per-thread draft from store — only this leaf re-renders on typing.
+   * Do not pass replyDrafts through App → Conversation/Diff (full-tree lag).
+   */
+  const storeDraft = useModalStore((s) =>
+    draftKey ? s.replyDrafts[draftKey] || '' : ''
+  );
+  const setReplyDraft = useModalStore((s) => s.setReplyDraft);
+  const replyText =
+    replyTextProp !== undefined && replyTextProp !== null
+      ? String(replyTextProp)
+      : storeDraft;
+  /** Context tips only on the active keyboard / Diff-nav thread */
+  const contextActive = useModalStore((s) =>
+    isContextThreadCommentActive(rootCommentId, s)
+  );
+  /** Resolve tip only while reply input is focused (not on idle threads) */
+  const [replyFocused, setReplyFocused] = useState(false);
+
+  function onReplyTextChange(t: string) {
+    if (draftKey) setReplyDraft(draftKey, t);
+    onReplyText?.(t);
+  }
 
   function toggleCollapse() {
     if (controlled) {
@@ -258,12 +291,25 @@ function InlineThreadImpl(props: any) {
             <div className="prp-review-thread__file-header-main">
               <button
                 type="button"
-                className="prp-thread-toggle prp-thread-toggle--icon-only"
+                className={`prp-thread-toggle prp-thread-toggle--icon-only${
+                  contextActive ? ' prp-opt-hint-host' : ''
+                }`}
                 onClick={toggleCollapse}
                 aria-expanded={!collapsed}
-                title={collapsed ? 'Expand thread' : 'Collapse thread'}
+                title={
+                  contextActive
+                    ? collapsed
+                      ? 'Expand thread (⌥F)'
+                      : 'Collapse thread (⌥F)'
+                    : collapsed
+                      ? 'Expand thread'
+                      : 'Collapse thread'
+                }
                 aria-label={collapsed ? 'Expand thread' : 'Collapse thread'}
               >
+                {contextActive ? (
+                  <OptBtnHint label="⌥F" preferredPlacement="top" />
+                ) : null}
                 <span className="prp-thread-toggle__icon" aria-hidden="true">
                   <IconDisclosure open={!collapsed} size={16} />
                 </span>
@@ -431,39 +477,78 @@ function InlineThreadImpl(props: any) {
               </div>
             )}
 
-            <div className="prp-inline-thread__composer">
-              <MarkdownComposer
-                value={replyText || ''}
-                onChange={onReplyText}
-                placeholder="Reply"
-                compact
-                rows={2}
-                disabled={actionBusy}
-                showTabs
-                onUploadFile={onUploadFile}
-                linkCtx={linkCtx}
-                mentionCandidates={mentionCandidates}
-              />
-              {/* Actions only after Reply field is focused (or draft text remains) */}
+            <div
+              className="prp-inline-thread__composer"
+              data-context-reply="1"
+              data-context-active={contextActive ? '1' : undefined}
+              onFocusCapture={() => setReplyFocused(true)}
+              onBlurCapture={(e) => {
+                const next = e.relatedTarget as Node | null;
+                if (next && e.currentTarget.contains(next)) return;
+                setReplyFocused(false);
+              }}
+            >
+              <div className="prp-inline-thread__composer-field">
+                <MarkdownComposer
+                  value={replyText || ''}
+                  onChange={onReplyTextChange}
+                  placeholder="Reply"
+                  compact
+                  rows={2}
+                  disabled={actionBusy}
+                  showTabs
+                  onUploadFile={onUploadFile}
+                  linkCtx={linkCtx}
+                  mentionCandidates={mentionCandidates}
+                />
+                {/* 1st ⌥C: focus reply — tip over the input field */}
+                {contextActive && !replyFocused ? (
+                  <span className="prp-opt-hint-host prp-inline-thread__context-hint">
+                    <OptBtnHint label="⌥C" preferredPlacement="top" />
+                  </span>
+                ) : null}
+              </div>
+              {/* Actions after Reply focused or draft text remains */}
               <div
                 className={`prp-composer__row prp-inline-thread__composer-actions${
-                  String(replyText || '').trim()
+                  String(replyText || '').trim() || replyFocused
                     ? ' prp-inline-thread__composer-actions--open'
                     : ''
                 }`}
               >
-                <Button
-                  size="sm"
-                  variant="primary"
-                  disabled={actionBusy || !String(replyText || '').trim()}
-                  onClick={() =>
-                    onReply?.(thread || { id: row?.commentId, root: row }, {
-                      mode: 'comment',
-                    })
-                  }
-                >
-                  Comment
-                </Button>
+                {contextActive && replyFocused ? (
+                  <span className="prp-opt-hint-host">
+                    {/* 2nd ⌥C: submit — tip over Comment button */}
+                    <OptBtnHint label="⌥C" preferredPlacement="top" />
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      disabled={actionBusy || !String(replyText || '').trim()}
+                      onClick={() =>
+                        onReply?.(thread || { id: row?.commentId, root: row }, {
+                          mode: 'comment',
+                        })
+                      }
+                      title="Comment (⌥C)"
+                    >
+                      Comment
+                    </Button>
+                  </span>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    disabled={actionBusy || !String(replyText || '').trim()}
+                    onClick={() =>
+                      onReply?.(thread || { id: row?.commentId, root: row }, {
+                        mode: 'comment',
+                      })
+                    }
+                    title="Comment"
+                  >
+                    Comment
+                  </Button>
+                )}
                 <Button
                   size="sm"
                   disabled={actionBusy || !String(replyText || '').trim()}
@@ -481,20 +566,41 @@ function InlineThreadImpl(props: any) {
                   {pendingCount > 0 || hasPendingReplies ? 'Add comment' : 'Start review'}
                 </Button>
                 {canResolveThread ? (
-                  <Button
-                    size="sm"
-                    disabled={actionBusy}
-                    onClick={() =>
-                      onResolve?.(
-                        thread?.threadNodeId || row?.threadNodeId,
-                        !(thread?.resolved || row?.resolved)
-                      )
-                    }
-                  >
-                    {thread?.resolved || row?.resolved
-                      ? 'Unresolve conversation'
-                      : 'Resolve conversation'}
-                  </Button>
+                  contextActive && replyFocused ? (
+                    <span className="prp-opt-hint-host">
+                      <OptBtnHint label="⌥⌃R" preferredPlacement="top" />
+                      <Button
+                        size="sm"
+                        disabled={actionBusy}
+                        onClick={() =>
+                          onResolve?.(
+                            thread?.threadNodeId || row?.threadNodeId,
+                            !(thread?.resolved || row?.resolved)
+                          )
+                        }
+                        title="Resolve / unresolve (⌥⌃R)"
+                      >
+                        {thread?.resolved || row?.resolved
+                          ? 'Unresolve conversation'
+                          : 'Resolve conversation'}
+                      </Button>
+                    </span>
+                  ) : (
+                    <Button
+                      size="sm"
+                      disabled={actionBusy}
+                      onClick={() =>
+                        onResolve?.(
+                          thread?.threadNodeId || row?.threadNodeId,
+                          !(thread?.resolved || row?.resolved)
+                        )
+                      }
+                    >
+                      {thread?.resolved || row?.resolved
+                        ? 'Unresolve conversation'
+                        : 'Resolve conversation'}
+                    </Button>
+                  )
                 ) : null}
               </div>
             </div>

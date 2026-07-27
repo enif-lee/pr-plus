@@ -6,7 +6,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const {
   buildMergeBoxStatus,
+  buildResolveConflictsUrl,
+  isMergeConflictState,
   mergeMethodButtonLabel,
+  normalizeConflictFiles,
   normalizeMergeMethod,
   viewerMayForceMerge,
   MERGE_METHODS,
@@ -49,22 +52,25 @@ const SCRATCH =
 }
 
 {
-  // Blocked / conflicts without force permission → not a green enabled CTA
-  const blocked = buildMergeBoxStatus({
+  // mergeable=false without mergeable_state → treat as conflicts (not force-merge)
+  const conf = buildMergeBoxStatus({
     state: 'open',
     draft: false,
     merged: false,
     mergeable: false,
     checks: { state: 'failure' },
+    htmlUrl: 'https://github.com/o/r/pull/1',
   });
-  assert.equal(blocked.kind, 'blocked');
-  assert.equal(blocked.tone, 'danger');
-  assert.equal(blocked.ctaVariant, 'danger');
-  assert.equal(blocked.canMerge, false);
-  assert.equal(blocked.forceMerge, false);
-  assert.equal(blocked.showMerge, true);
-  assert.ok(blocked.showUpdateBranch);
-  assert.notEqual(blocked.ctaVariant, 'ok');
+  assert.equal(conf.kind, 'conflicts');
+  assert.equal(conf.tone, 'danger');
+  assert.equal(conf.ctaVariant, 'danger');
+  assert.equal(conf.canMerge, false);
+  assert.equal(conf.forceMerge, false);
+  assert.equal(conf.showMerge, false);
+  assert.equal(conf.showResolveConflicts, true);
+  assert.ok(conf.showUpdateBranch);
+  assert.notEqual(conf.ctaVariant, 'ok');
+  assert.ok(/conflict/i.test(conf.headline));
 }
 
 {
@@ -98,17 +104,38 @@ const SCRATCH =
     mergeableState: 'dirty',
     viewerCanMergeAsAdmin: true,
     canForceMerge: true,
+    owner: 'acme',
+    repo: 'app',
+    number: 42,
+    conflictFiles: ['src/a.ts', 'src/b.ts'],
   });
-  assert.equal(dirtyAdmin.kind, 'blocked');
+  assert.equal(dirtyAdmin.kind, 'conflicts');
   assert.equal(dirtyAdmin.ctaVariant, 'danger');
   assert.equal(dirtyAdmin.canMerge, false, 'conflicts cannot be force-merged');
   assert.equal(dirtyAdmin.forceMerge, false);
+  assert.equal(dirtyAdmin.showMerge, false, 'hide merge CTA while conflicting');
+  assert.equal(dirtyAdmin.showResolveConflicts, true);
+  assert.deepEqual(dirtyAdmin.conflictFiles, ['src/a.ts', 'src/b.ts']);
+  assert.equal(
+    dirtyAdmin.resolveConflictsUrl,
+    'https://github.com/acme/app/pull/42/conflicts'
+  );
   assert.ok(/conflict/i.test(dirtyAdmin.headline));
   assert.ok(!/force/i.test(dirtyAdmin.helper));
   assert.ok(
     !/force/i.test(
       mergeMethodButtonLabel('merge', { force: dirtyAdmin.forceMerge })
     )
+  );
+  assert.equal(isMergeConflictState({ mergeableState: 'dirty' }), true);
+  assert.equal(isMergeConflictState({ mergeable: false, mergeableState: 'blocked' }), false);
+  assert.deepEqual(normalizeConflictFiles({ conflictFiles: ['a', 'a', 'b'] }), [
+    'a',
+    'b',
+  ]);
+  assert.equal(
+    buildResolveConflictsUrl({ htmlUrl: 'https://github.com/o/r/pull/9' }),
+    'https://github.com/o/r/pull/9/conflicts'
   );
 }
 
@@ -214,6 +241,12 @@ assert.ok(MERGE_METHODS.some((m) => m.id === 'rebase'));
 assert.ok(MERGE_METHODS.some((m) => m.id === 'merge'));
 assert.ok(conv.includes('Update branch'));
 assert.ok(conv.includes('Ready for review') || conv.includes('Convert to draft'));
+assert.ok(conv.includes('Resolve conflicts'), 'conflict resolve CTA');
+assert.ok(
+  conv.includes('prp-merge-box__conflict-files') ||
+    conv.includes('conflictFiles'),
+  'conflict file list'
+);
 const mergeStart = conv.indexOf('prp-merge-box');
 const mergeEnd = conv.indexOf('prp-card--composer', mergeStart);
 const mergeSlice = conv.slice(mergeStart, mergeEnd > 0 ? mergeEnd : mergeStart + 5000);
@@ -233,6 +266,7 @@ assert.ok(css.includes('--prp-merge-cta') || css.includes('prp-merge-method--dan
 assert.ok(css.includes('prp-merge-method--warn'));
 assert.ok(css.includes('prp-merge-checks__group'), 'merge checks group styles');
 assert.ok(css.includes('prp-merge-checks__item'), 'merge checks item styles');
+assert.ok(css.includes('prp-merge-box__conflict-files'), 'conflict files styles');
 
 // MergeBoxChecks component present
 const mbc = read('src/modal/views/conversation/MergeBoxChecks.tsx');

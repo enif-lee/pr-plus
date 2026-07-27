@@ -54,6 +54,27 @@ export interface ModalUiState {
   picker: PickerState | null;
   /** Optimistic overlay; null means use host detail prop */
   localDetail: PrDetail | null;
+  /**
+   * Conversation keyboard focus anchor (issue-comment:… / review-group:… /
+   * review-comment:…). Visual ring only — set after scroll lands.
+   * Stored so ⌥J/K does not re-render the whole conversation.
+   */
+  focusedConversationAnchor: string | null;
+  /**
+   * Pending ⌥J/K / seed target: scroller expands + scrolls first, then
+   * promotes this into focusedConversationAnchor (ring).
+   */
+  pendingConversationNavAnchor: string | null;
+  /**
+   * Option-hold shortcut badges active. OptBtnHint subscribes; App toggles
+   * overlay class via DOM so the conversation tree does not re-render.
+   */
+  optHintsActive: boolean;
+  /**
+   * Diff review-thread nav target (root comment id). Context tips only render
+   * on the matching InlineThread — not every thread.
+   */
+  activeDiffCommentId: string | number | null;
 
   setLayoutMode: (m: LayoutMode) => void;
   toggleDiffLayout: () => void;
@@ -88,6 +109,14 @@ export interface ModalUiState {
   setPaletteQuery: (q: string) => void;
   setPicker: (p: any) => void;
   setLocalDetail: (d: PrDetail | null | ((prev: PrDetail | null) => PrDetail | null)) => void;
+  setFocusedConversationAnchor: (a: string | null) => void;
+  /**
+   * Scroll-then-focus: clear visual ring, queue pending anchor for scroller.
+   * Pass null to clear both pending and focus.
+   */
+  requestConversationNav: (a: string | null) => void;
+  setOptHintsActive: (v: boolean) => void;
+  setActiveDiffCommentId: (id: string | number | null) => void;
   resetForClose: () => void;
   hydrateLocalDetail: (detail: PrDetail | null | undefined) => void;
 }
@@ -131,6 +160,10 @@ export const useModalStore = create<ModalUiState>((set, get) => ({
   paletteQuery: '',
   picker: null,
   localDetail: null,
+  focusedConversationAnchor: null,
+  pendingConversationNavAnchor: null,
+  optHintsActive: false,
+  activeDiffCommentId: null,
 
   setLayoutMode: (m) => set({ layoutMode: m }),
   toggleDiffLayout: () =>
@@ -184,8 +217,12 @@ export const useModalStore = create<ModalUiState>((set, get) => ({
     set((s) => ({
       viewedPaths: typeof fn === 'function' ? (fn as any)(s.viewedPaths) : (fn as Set<string>),
     })),
-  setReplyDraft: (id, text) =>
-    set((s) => ({ replyDrafts: { ...s.replyDrafts, [String(id)]: text } })),
+  setReplyDraft: (id, text) => {
+    const k = String(id);
+    const next = text == null ? '' : String(text);
+    if (get().replyDrafts[k] === next) return;
+    set((s) => ({ replyDrafts: { ...s.replyDrafts, [k]: next } }));
+  },
   setPendingReview: (b) =>
     set((s) => ({
       pendingReview: typeof b === 'function' ? b(s.pendingReview) : b,
@@ -201,6 +238,37 @@ export const useModalStore = create<ModalUiState>((set, get) => ({
     set((s) => ({
       localDetail: typeof d === 'function' ? d(s.localDetail) : d,
     })),
+  setFocusedConversationAnchor: (a) => {
+    const next = a == null || a === '' ? null : String(a);
+    const cur = get().focusedConversationAnchor;
+    if (cur === next) return;
+    set({ focusedConversationAnchor: next });
+  },
+  requestConversationNav: (a) => {
+    const next = a == null || a === '' ? null : String(a);
+    if (!next) {
+      set({
+        focusedConversationAnchor: null,
+        pendingConversationNavAnchor: null,
+      });
+      return;
+    }
+    // Drop ring while scrolling; scroller promotes pending → focused.
+    set({
+      focusedConversationAnchor: null,
+      pendingConversationNavAnchor: next,
+    });
+  },
+  setOptHintsActive: (v) => {
+    const next = Boolean(v);
+    if (get().optHintsActive === next) return;
+    set({ optHintsActive: next });
+  },
+  setActiveDiffCommentId: (id) => {
+    const next = id == null || id === '' ? null : id;
+    if (get().activeDiffCommentId === next) return;
+    set({ activeDiffCommentId: next });
+  },
   hydrateLocalDetail: (detail) => {
     if (detail) set({ localDetail: detail });
   },
@@ -217,6 +285,11 @@ export const useModalStore = create<ModalUiState>((set, get) => ({
       commentText: '',
       actionMsg: '',
       pendingReview: emptyPending(),
+      focusedConversationAnchor: null,
+      pendingConversationNavAnchor: null,
+      optHintsActive: false,
+      activeDiffCommentId: null,
+      commentIndex: -1,
     }),
 }));
 

@@ -14,7 +14,11 @@ import { pendingReviewCount } from '@lib/pending-review';
 import { canSubmitReviewVerdict } from '@lib/pr-edit-api';
 import { IconChevronDown, IconFileNavToggle } from '@common/icons';
 import { StepNav } from '@common/StepNav';
-import { stepNavShortcutLabel } from '@lib/shortcut-policy';
+import {
+  sidePanelShortcutLabel,
+  stepNavShortcutLabel,
+} from '@lib/shortcut-policy';
+import { TipPopover } from '@common/TipPopover';
 import { SearchBar } from './SearchBar';
 
 /**
@@ -75,8 +79,6 @@ export function DiffToolbar(props: any) {
     onSearchClose = null,
     onSearchNext = null,
     onSearchPrev = null,
-    /** Option-hold shortcut badges on step-nav / review CTAs */
-    showOptHints = false,
   } = props;
 
   // Unified: GitHub PENDING review only (totalPendingCount from App).
@@ -97,6 +99,12 @@ export function DiffToolbar(props: any) {
     /Mac|iPhone|iPad/.test(navigator.platform || '');
   const threadPrevShortcut = stepNavShortcutLabel('prev', isMac);
   const threadNextShortcut = stepNavShortcutLabel('next', isMac);
+  const filesPanelShortcut =
+    typeof sidePanelShortcutLabel === 'function'
+      ? sidePanelShortcutLabel(isMac)
+      : isMac
+        ? '⌥B'
+        : 'Alt+B';
   // GitHub rejects APPROVE / REQUEST_CHANGES on your own PR
   const showReviewVerdict =
     typeof canSubmitReviewVerdict === 'function'
@@ -167,14 +175,25 @@ export function DiffToolbar(props: any) {
       <div className="prp-diff-toolbar__row prp-diff-toolbar__row--primary">
         <button
           type="button"
-          className="prp-diff-toolbar__nav-toggle"
+          className="prp-diff-toolbar__nav-toggle prp-has-tip prp-opt-hint-host"
           onClick={onToggleFileNav}
           aria-pressed={!fileNavCollapsed}
-          aria-label={fileNavCollapsed ? 'Show files navigator' : 'Hide files navigator'}
-          title={fileNavCollapsed ? 'Show files' : 'Hide files'}
+          aria-label={
+            fileNavCollapsed ? 'Show files navigator' : 'Hide files navigator'
+          }
         >
+          <OptBtnHint
+            label={filesPanelShortcut}
+            preferredPlacement="bottom"
+          />
           <IconFileNavToggle collapsed={fileNavCollapsed} size={14} />
           <span className="prp-diff-toolbar__nav-label">Files</span>
+          <TipPopover
+            title={
+              fileNavCollapsed ? 'Show files panel' : 'Hide files panel'
+            }
+            shortcut={filesPanelShortcut}
+          />
         </button>
 
         <div className="prp-diff-mode" role="radiogroup" aria-label="Diff view mode">
@@ -285,7 +304,6 @@ export function DiffToolbar(props: any) {
                 onNext={onSearchNext}
                 onPrev={onSearchPrev}
                 placeholder="Find in diff, comments…"
-                showOptHints={showOptHints}
               />
             ) : showReviewFilter ? (
               <div
@@ -379,7 +397,6 @@ export function DiffToolbar(props: any) {
                 nextTitle="Next review thread"
                 prevShortcut={threadPrevShortcut}
                 nextShortcut={threadNextShortcut}
-                showOptHints={showOptHints}
               />
             ) : null}
           </div>
@@ -389,7 +406,6 @@ export function DiffToolbar(props: any) {
           <div className="prp-diff-toolbar__pending" role="status">
             <span className="prp-opt-hint-host">
               <OptBtnHint
-                show={showOptHints}
                 label={isMac ? '⌥↵' : 'Alt+Enter'}
                 preferredPlacement="top"
               />
@@ -408,7 +424,6 @@ export function DiffToolbar(props: any) {
             {showReviewVerdict ? (
               <span className="prp-opt-hint-host">
                 <OptBtnHint
-                  show={showOptHints}
                   label={isMac ? '⌥⇧↵' : 'Alt+Shift+Enter'}
                   preferredPlacement="top"
                 />
@@ -428,7 +443,6 @@ export function DiffToolbar(props: any) {
             {showReviewVerdict ? (
               <span className="prp-opt-hint-host">
                 <OptBtnHint
-                  show={showOptHints}
                   label={isMac ? '⌥⇧X' : 'Alt+Shift+X'}
                   preferredPlacement="top"
                 />

@@ -28,6 +28,7 @@ import {
   saveAsidePref,
   toggleAsideCollapsed,
 } from '@lib/aside-layout';
+import { sidePanelShortcutLabel } from '@lib/shortcut-policy';
 import { AsideCompactRail } from './AsideCompactRail';
 import {
   buildConversationTimeline,
@@ -63,6 +64,103 @@ import {
 import { resolveDevelopmentMainOpen } from '@lib/command-palette';
 import { canSubmitReviewVerdict } from '@lib/pr-edit-api';
 import { OptBtnHint } from '@common/OptBtnHint';
+import { useModalStore } from '../../store/modal-store';
+import {
+  focusContextThreadReplyAfterPaint,
+  isContextThreadReplyFocused,
+  queryContextThreadHost,
+} from '@lib/context-thread-dom';
+import {
+  ConversationKbFocusClassName,
+  ConversationKbEnterExpand,
+  ConversationKbFocusHost,
+  ConversationKbFocusScroller,
+  useIsConversationKbFocused,
+} from '@common/ConversationKbFocus';
+
+/** Group path-row fold control — ⌥F tip only when this thread is context-focused. */
+function GroupThreadFoldBtn({
+  anchor,
+  open,
+  onToggle,
+  fileLoc,
+  path,
+  pendingBadge,
+  outdatedBadge,
+  resolvedBadge,
+}: {
+  anchor: string;
+  open: boolean;
+  onToggle: () => void;
+  fileLoc: string;
+  path?: string;
+  pendingBadge?: React.ReactNode;
+  outdatedBadge?: React.ReactNode;
+  resolvedBadge?: React.ReactNode;
+}) {
+  const focused = useIsConversationKbFocused(anchor);
+  return (
+    <button
+      type="button"
+      className={`prp-review-group__row-btn${focused ? ' prp-opt-hint-host' : ''}`}
+      onClick={onToggle}
+      aria-expanded={open}
+      title={
+        focused
+          ? open
+            ? 'Collapse thread (⌥F)'
+            : 'Expand thread (⌥F)'
+          : undefined
+      }
+    >
+      {focused ? <OptBtnHint label="⌥F" preferredPlacement="top" /> : null}
+      <span className="prp-review-group__chev" aria-hidden="true">
+        <IconDisclosure open={open} size={16} />
+      </span>
+      <span className="prp-mono prp-review-group__path" title={fileLoc || ''}>
+        {fileLoc || path || 'thread'}
+      </span>
+      {pendingBadge}
+      {outdatedBadge}
+      {resolvedBadge}
+    </button>
+  );
+}
+
+/** Group jump-to-diff control — ⌥D tip only when context-focused. */
+function GroupThreadJumpBtn({
+  anchor,
+  fileLoc,
+  onJump,
+}: {
+  anchor: string;
+  fileLoc: string;
+  onJump: () => void;
+}) {
+  const focused = useIsConversationKbFocused(anchor);
+  return (
+    <button
+      type="button"
+      className={`prp-icon-btn prp-review-group__jump${
+        focused ? ' prp-opt-hint-host' : ''
+      }`}
+      title={
+        focused
+          ? `View in Diff · ${fileLoc} (⌥D)`
+          : `View in Diff · ${fileLoc}`
+      }
+      aria-label={`View ${fileLoc} in Diff`}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onJump();
+      }}
+    >
+      {focused ? <OptBtnHint label="⌥D" preferredPlacement="top" /> : null}
+      <IconFileDiff size={16} />
+    </button>
+  );
+}
 
 function ConversationViewImpl(props: any) {
   const {
@@ -116,16 +214,19 @@ function ConversationViewImpl(props: any) {
     onOpenLinkedPr = null,
     /** Known open PR numbers (same repo) for Development in-modal routing. */
     knownPullNumbers = null,
-    /** Option held: shortcut badges above mapped buttons */
-    showOptHints = false,
+    /** App registers toggle so ⌥B can collapse the metadata rail */
+    onRegisterAsideToggle = null,
+    /**
+     * Context-thread shortcuts (⌥F/D/C · ⌥⌃R). Conversation registers
+     * fold/goto/comment/resolve for the focused review thread unit.
+     */
+    onRegisterContextThreadActions = null,
     commentBoxRef,
     onUploadFile,
     reviewerAddRef,
     assigneeAddRef,
     labelAddRef,
     milestoneAddRef,
-    replyDrafts = null,
-    onReplyDraft = null,
     onReplyToThread = null,
     onResolveThread = null,
     onLoadMoreReviewThreads = null,
@@ -141,8 +242,6 @@ function ConversationViewImpl(props: any) {
     searchHitIndex = -1,
     activeSearchHit = null,
     mentionCandidates = [],
-    /** Keyboard-focus anchor (⌘⇧C) for a conversation comment/review row */
-    focusedConversationAnchor = null,
   } = props;
 
   const embedScrollChain = isEmbedPresentation(presentation);
@@ -244,6 +343,24 @@ function ConversationViewImpl(props: any) {
       return next;
     });
   }, []);
+
+  useEffect(() => {
+    if (typeof onRegisterAsideToggle !== 'function') return undefined;
+    onRegisterAsideToggle(onToggleAside);
+    return () => {
+      onRegisterAsideToggle(null);
+    };
+  }, [onRegisterAsideToggle, onToggleAside]);
+
+  const isMac =
+    typeof navigator !== 'undefined' &&
+    /Mac|iPhone|iPad/.test(navigator.platform || '');
+  const sidePanelKbd =
+    typeof sidePanelShortcutLabel === 'function'
+      ? sidePanelShortcutLabel(isMac)
+      : isMac
+        ? '⌥B'
+        : 'Alt+B';
 
   // When a pending review appears, surface Review controls
   useEffect(() => {
@@ -438,12 +555,7 @@ function ConversationViewImpl(props: any) {
     let c = base;
     if (isAnchorHit(anchorId)) c += ' prp-card--search-match';
     if (isAnchorCurrent(anchorId)) c += ' prp-card--search-current';
-    if (
-      focusedConversationAnchor &&
-      String(focusedConversationAnchor) === String(anchorId)
-    ) {
-      c += ' prp-card--kb-focus';
-    }
+    // kb-focus via ConversationKbFocusHost / useIsConversationKbFocused (leaf)
     return c.trim();
   }
 
@@ -585,6 +697,213 @@ function ConversationViewImpl(props: any) {
     });
   }
 
+  /**
+   * Find a timeline thread (standalone or inside a review-group) by root id.
+   */
+  function findTimelineThreadById(commentId: string): {
+    thread: any;
+    reviewGroupId: any | null;
+  } | null {
+    for (const item of timelineItems) {
+      if (item?.kind === 'review-thread' || item?.kind === 'review-comment') {
+        if (String(item.id) === commentId) {
+          return { thread: item, reviewGroupId: null };
+        }
+      }
+      if (item?.kind === 'review-group') {
+        for (const t of item.threads || []) {
+          if (String(t?.id) === commentId) {
+            return { thread: t, reviewGroupId: item.id };
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  /** Expand a focused thread unit (standalone or group path row). */
+  function expandFocusedThread(commentId: string) {
+    const found = findTimelineThreadById(commentId);
+    if (!found?.thread) return;
+    const { thread, reviewGroupId } = found;
+    if (reviewGroupId != null) {
+      const k = groupThreadKey(reviewGroupId, thread.id);
+      setGroupThreadOpenOverrides((prev) => {
+        const next = new Map(prev);
+        next.set(k, true);
+        return next;
+      });
+      return;
+    }
+    const key = String(thread.id);
+    setThreadCollapseOverrides((prev) => {
+      const next = new Map(prev);
+      next.set(key, false); // false = expanded
+      return next;
+    });
+  }
+
+  /**
+   * Leaf-only side effects for keyboard focus (store subscribe).
+   * Parent ConversationView does not re-render on ⌥J/K.
+   */
+  const onKbFocusThread = useCallback(
+    (commentId: string) => {
+      const found = findTimelineThreadById(commentId);
+      if (!found?.thread) return;
+      // Resolved / pending: header-only focus — do not expand
+      if (found.thread.resolved || found.thread.pending) return;
+      if (found.reviewGroupId == null) return;
+      // Unresolved group path row: open so thread body is visible
+      const k = groupThreadKey(found.reviewGroupId, found.thread.id);
+      setGroupThreadOpenOverrides((prev) => {
+        const open = prev.has(k)
+          ? Boolean(prev.get(k))
+          : defaultGroupThreadOpen(found.thread);
+        if (open) return prev;
+        const next = new Map(prev);
+        next.set(k, true);
+        return next;
+      });
+    },
+    // findTimelineThreadById closes over timelineItems
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [timelineItems]
+  );
+
+  /**
+   * Context-thread shortcuts for Conversation (registered with App).
+   * Unregister while Diff is active — keep-alive mount must not own handlers.
+   */
+  const layoutModeLive = useModalStore((s) => s.layoutMode);
+  useEffect(() => {
+    if (typeof onRegisterContextThreadActions !== 'function') return undefined;
+    if (layoutModeLive === 'diff') {
+      onRegisterContextThreadActions(null);
+      return undefined;
+    }
+
+    function currentAnchor(): string {
+      const st = useModalStore.getState();
+      return String(
+        st.focusedConversationAnchor || st.pendingConversationNavAnchor || ''
+      ).trim();
+    }
+
+    function threadFromAnchor(anchor: string): {
+      thread: any;
+      reviewGroupId: any | null;
+    } | null {
+      if (!anchor.startsWith('review-comment:')) return null;
+      const id = anchor.slice('review-comment:'.length);
+      if (!id) return null;
+      return findTimelineThreadById(id);
+    }
+
+    const api = {
+      fold: () => {
+        const a = currentAnchor();
+        const found = threadFromAnchor(a);
+        if (!found?.thread) return false;
+        if (found.reviewGroupId != null) {
+          toggleGroupThread(found.reviewGroupId, found.thread);
+          return true;
+        }
+        toggleThreadCollapse(found.thread);
+        return true;
+      },
+      gotoDiff: () => {
+        const a = currentAnchor();
+        const found = threadFromAnchor(a);
+        if (!found?.thread || typeof onJumpToReviewThread !== 'function') {
+          return false;
+        }
+        const t = found.thread;
+        if (!t.path) return false;
+        onJumpToReviewThread({
+          id: t.id,
+          path: t.path,
+          line: t.line,
+          startLine: t.startLine ?? t.line,
+          side: t.side || 'RIGHT',
+          outdated: Boolean(t.outdated),
+        });
+        return true;
+      },
+      comment: () => {
+        const a = currentAnchor();
+        const found = threadFromAnchor(a);
+        if (!found?.thread) return false;
+        const t = found.thread;
+        const draftKey = t.id;
+        // Second stage: reply focused → submit Comment
+        if (isContextThreadReplyFocused(a)) {
+          const drafts = useModalStore.getState().replyDrafts || {};
+          const body = String(
+            (draftKey != null ? drafts[String(draftKey)] || '' : '') || ''
+          ).trim();
+          if (!body || typeof onReplyToThread !== 'function') return false;
+          onReplyToThread(
+            {
+              id: draftKey,
+              path: t.path,
+              line: t.line,
+              side: t.side || 'RIGHT',
+              threadNodeId: t.threadNodeId || null,
+              root: t,
+            },
+            { mode: 'comment' }
+          );
+          return true;
+        }
+        // First stage: expand if needed, then focus reply input
+        expandFocusedThread(String(t.id));
+        // Host may be group row — ensure open so InlineThread mounts
+        if (found.reviewGroupId != null) {
+          const k = groupThreadKey(found.reviewGroupId, t.id);
+          setGroupThreadOpenOverrides((prev) => {
+            const next = new Map(prev);
+            next.set(k, true);
+            return next;
+          });
+        }
+        // If host exists but collapsed standalone, expand already queued
+        if (!queryContextThreadHost(a)) {
+          /* virtual list may mount after expand; still retry focus */
+        }
+        focusContextThreadReplyAfterPaint(a);
+        return true;
+      },
+      resolve: () => {
+        const a = currentAnchor();
+        const found = threadFromAnchor(a);
+        if (!found?.thread || typeof onResolveThread !== 'function') return false;
+        const t = found.thread;
+        const nodeId = t.threadNodeId || null;
+        if (!nodeId) return false;
+        if (t.pending) return false;
+        onResolveThread(nodeId, !Boolean(t.resolved));
+        return true;
+      },
+    };
+
+    onRegisterContextThreadActions(api);
+    return () => {
+      onRegisterContextThreadActions(null);
+    };
+    // Closures use latest timeline / handlers; drafts read via getState()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    onRegisterContextThreadActions,
+    layoutModeLive,
+    timelineItems,
+    threadCollapseOverrides,
+    groupThreadOpenOverrides,
+    onJumpToReviewThread,
+    onReplyToThread,
+    onResolveThread,
+  ]);
+
   /** Shared pending/submitted thread list rows (file:line + expand). */
   function renderReviewGroupThreadList(
     item: any,
@@ -609,57 +928,57 @@ function ConversationViewImpl(props: any) {
         {allThreads.map((t: any) => {
           const open = isGroupThreadOpen(reviewId, t);
           const fileLoc = formatThreadFileLoc(t);
+          const threadAnchor =
+            t?.id != null ? `review-comment:${t.id}` : '';
+          const baseRowClass = `prp-review-group__row${
+            open ? ' prp-review-group__row--open' : ''
+          }${t.resolved ? ' prp-review-group__row--resolved' : ''}${
+            t.pending ? ' prp-review-group__row--pending' : ''
+          }`;
           return (
-            <li
+            <ConversationKbFocusHost
               key={String(t.id)}
-              className={`prp-review-group__row${
-                open ? ' prp-review-group__row--open' : ''
-              }${t.resolved ? ' prp-review-group__row--resolved' : ''}${
-                t.pending ? ' prp-review-group__row--pending' : ''
-              }`}
+              as="li"
+              anchor={threadAnchor}
+              className={baseRowClass}
+              focusClassName="prp-review-group__row--kb-focus"
+              data-thread-focus-anchor={threadAnchor || undefined}
+              data-search-anchor={threadAnchor || undefined}
             >
               <div className="prp-review-group__row-head">
-                <button
-                  type="button"
-                  className="prp-review-group__row-btn"
-                  onClick={() => toggleGroupThread(reviewId, t)}
-                  aria-expanded={open}
-                >
-                  <span className="prp-review-group__chev" aria-hidden="true">
-                    <IconDisclosure open={open} size={16} />
-                  </span>
-                  <span
-                    className="prp-mono prp-review-group__path"
-                    title={fileLoc || ''}
-                  >
-                    {fileLoc || t.path || 'thread'}
-                  </span>
-                  {/* In composer: pending is shown via row header tint, not a badge */}
-                  {t.pending && !opts.compact ? (
-                    <Badge tone="warn" className="prp-review-group__badge">
-                      Pending
-                    </Badge>
-                  ) : null}
-                  {t.outdated ? (
-                    <Badge tone="muted" className="prp-review-group__badge">
-                      Outdated
-                    </Badge>
-                  ) : null}
-                  {t.resolved && !t.pending ? (
-                    <Badge tone="ok" className="prp-review-group__badge">
-                      Resolved
-                    </Badge>
-                  ) : null}
-                </button>
+                <GroupThreadFoldBtn
+                  anchor={threadAnchor}
+                  open={open}
+                  onToggle={() => toggleGroupThread(reviewId, t)}
+                  fileLoc={fileLoc || ''}
+                  path={t.path}
+                  pendingBadge={
+                    t.pending && !opts.compact ? (
+                      <Badge tone="warn" className="prp-review-group__badge">
+                        Pending
+                      </Badge>
+                    ) : null
+                  }
+                  outdatedBadge={
+                    t.outdated ? (
+                      <Badge tone="muted" className="prp-review-group__badge">
+                        Outdated
+                      </Badge>
+                    ) : null
+                  }
+                  resolvedBadge={
+                    t.resolved && !t.pending ? (
+                      <Badge tone="ok" className="prp-review-group__badge">
+                        Resolved
+                      </Badge>
+                    ) : null
+                  }
+                />
                 {typeof onJumpToReviewThread === 'function' && t.path ? (
-                  <button
-                    type="button"
-                    className="prp-icon-btn prp-review-group__jump"
-                    title={`View in Diff · ${fileLoc || t.path}`}
-                    aria-label={`View ${fileLoc || t.path} in Diff`}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
+                  <GroupThreadJumpBtn
+                    anchor={threadAnchor}
+                    fileLoc={fileLoc || t.path}
+                    onJump={() =>
                       onJumpToReviewThread({
                         id: t.id,
                         path: t.path,
@@ -667,11 +986,9 @@ function ConversationViewImpl(props: any) {
                         startLine: t.startLine ?? t.line,
                         side: t.side || 'RIGHT',
                         outdated: Boolean(t.outdated),
-                      });
-                    }}
-                  >
-                    <IconFileDiff size={16} />
-                  </button>
+                      })
+                    }
+                  />
                 ) : null}
               </div>
               {open ? (
@@ -682,7 +999,7 @@ function ConversationViewImpl(props: any) {
                   })}
                 </div>
               ) : null}
-            </li>
+            </ConversationKbFocusHost>
           );
         })}
       </ul>
@@ -706,40 +1023,43 @@ function ConversationViewImpl(props: any) {
           ? 'requested changes'
           : 'left a comment';
     const groupAnchor = `review-group:${reviewId}`;
+    const baseClass = searchCardClass(
+      groupAnchor,
+      'prp-card--timeline prp-card--timeline-review-group'
+    );
 
     return (
-      <Card
+      <ConversationKbFocusClassName
         key={`${keyPrefix}${String(item.key || item.id)}`}
-        className={searchCardClass(
-          groupAnchor,
-          'prp-card--timeline prp-card--timeline-review-group'
-        )}
-        data-search-anchor={groupAnchor}
-        tabIndex={
-          focusedConversationAnchor &&
-          String(focusedConversationAnchor) === groupAnchor
-            ? -1
-            : undefined
-        }
+        anchor={groupAnchor}
+        baseClass={baseClass}
       >
-        <div className="prp-conversation-feed__meta">
-          <Avatar login={item.author} avatarUrl={item.avatarUrl} size="md" />
-          <strong>
-            <UserLink login={item.author || 'user'} />
-          </strong>
-          {item.isBot ? <Badge tone="muted">Bot</Badge> : null}
-          <span className="prp-muted prp-review-group__action">{stateLabel}</span>
-          {item.at ? (
-            <span className="prp-muted">{formatWhen(item.at)}</span>
-          ) : null}
-        </div>
-        {item.body ? (
-          <div className="prp-review-group__body">
-            {renderSearchableBody(item.body, `review:${reviewId}`, true)}
-          </div>
-        ) : null}
-        {renderReviewGroupThreadList(item, keyPrefix)}
-      </Card>
+        {(className, focused) => (
+          <Card
+            className={className}
+            data-search-anchor={groupAnchor}
+            tabIndex={focused ? -1 : undefined}
+          >
+            <div className="prp-conversation-feed__meta">
+              <Avatar login={item.author} avatarUrl={item.avatarUrl} size="md" />
+              <strong>
+                <UserLink login={item.author || 'user'} />
+              </strong>
+              {item.isBot ? <Badge tone="muted">Bot</Badge> : null}
+              <span className="prp-muted prp-review-group__action">{stateLabel}</span>
+              {item.at ? (
+                <span className="prp-muted">{formatWhen(item.at)}</span>
+              ) : null}
+            </div>
+            {item.body ? (
+              <div className="prp-review-group__body">
+                {renderSearchableBody(item.body, `review:${reviewId}`, true)}
+              </div>
+            ) : null}
+            {renderReviewGroupThreadList(item, keyPrefix)}
+          </Card>
+        )}
+      </ConversationKbFocusClassName>
     );
   }
 
@@ -763,41 +1083,44 @@ function ConversationViewImpl(props: any) {
       : isReviewEvent
         ? `review:${item.id}`
         : `item:${item.id}`;
+    const baseClass = searchCardClass(
+      itemAnchor,
+      `prp-card--timeline prp-card--timeline-${item.kind || 'item'}`
+    );
     return (
-      <Card
+      <ConversationKbFocusClassName
         key={`${keyPrefix}${String(item.id || item.key)}`}
-        className={searchCardClass(
-          itemAnchor,
-          `prp-card--timeline prp-card--timeline-${item.kind || 'item'}`
-        )}
-        data-search-anchor={itemAnchor}
-        tabIndex={
-          focusedConversationAnchor &&
-          String(focusedConversationAnchor) === itemAnchor
-            ? -1
-            : undefined
-        }
+        anchor={itemAnchor}
+        baseClass={baseClass}
       >
-        <div className="prp-conversation-feed__meta">
-          <Avatar login={item.author} avatarUrl={item.avatarUrl} size="md" />
-          <strong>
-            <UserLink login={item.author || 'user'} />
-          </strong>
-          <Badge tone="muted">{kindLabelFor(item.kind || 'item')}</Badge>
-          {item.state ? (
-            <Badge tone={String(item.state).toLowerCase()}>{item.state}</Badge>
-          ) : null}
-          {item.at ? (
-            <span className="prp-muted">{formatWhen(item.at)}</span>
-          ) : null}
-          {commentActions(editKind, item.id, Boolean(item.canDelete), item.body)}
-        </div>
-        {editKind ? (
-          renderTimelineBody(item, editKind, itemAnchor)
-        ) : (
-          renderSearchableBody(item.body || '', itemAnchor, true)
+        {(className, focused) => (
+          <Card
+            className={className}
+            data-search-anchor={itemAnchor}
+            tabIndex={focused ? -1 : undefined}
+          >
+            <div className="prp-conversation-feed__meta">
+              <Avatar login={item.author} avatarUrl={item.avatarUrl} size="md" />
+              <strong>
+                <UserLink login={item.author || 'user'} />
+              </strong>
+              <Badge tone="muted">{kindLabelFor(item.kind || 'item')}</Badge>
+              {item.state ? (
+                <Badge tone={String(item.state).toLowerCase()}>{item.state}</Badge>
+              ) : null}
+              {item.at ? (
+                <span className="prp-muted">{formatWhen(item.at)}</span>
+              ) : null}
+              {commentActions(editKind, item.id, Boolean(item.canDelete), item.body)}
+            </div>
+            {editKind ? (
+              renderTimelineBody(item, editKind, itemAnchor)
+            ) : (
+              renderSearchableBody(item.body || '', itemAnchor, true)
+            )}
+          </Card>
         )}
-      </Card>
+      </ConversationKbFocusClassName>
     );
   }
 
@@ -861,8 +1184,6 @@ function ConversationViewImpl(props: any) {
   ) {
     const threadId = item.id;
     const rootAnchor = `review-comment:${threadId}`;
-    const draft =
-      replyDrafts && threadId != null ? replyDrafts[String(threadId)] || '' : '';
     const reviewReplies = (item.replies || []).map((r: any) => ({
       ...r,
       createdAt: r.createdAt || r.at || null,
@@ -921,37 +1242,48 @@ function ConversationViewImpl(props: any) {
       pending: Boolean(item.pending),
     };
 
+    const threadBaseClass = `prp-card prp-card--timeline prp-card--timeline-review-thread prp-conversation-inline-thread${
+      collapsed ? ' prp-card--timeline-review-thread--collapsed' : ''
+    }${threadHit ? ' prp-card--search-match' : ''}${
+      threadCurrent ? ' prp-card--search-current' : ''
+    }`;
+
     return (
-      <div
+      <ConversationKbFocusClassName
         key={`${keyPrefix}${String(item.id || item.key)}`}
-        className={`prp-card prp-card--timeline prp-card--timeline-review-thread prp-conversation-inline-thread${
-          collapsed ? ' prp-card--timeline-review-thread--collapsed' : ''
-        }${threadHit ? ' prp-card--search-match' : ''}${
-          threadCurrent ? ' prp-card--search-current' : ''
-        }${
-          focusedConversationAnchor &&
-          String(focusedConversationAnchor) === rootAnchor
-            ? ' prp-card--kb-focus'
-            : ''
-        }`}
+        anchor={rootAnchor}
+        baseClass={threadBaseClass}
+      >
+        {(className, focused) => (
+      <div
+        className={className}
         data-search-anchor={rootAnchor}
-        tabIndex={
-          focusedConversationAnchor &&
-          String(focusedConversationAnchor) === rootAnchor
-            ? -1
-            : undefined
-        }
+        data-thread-focus-anchor={rootAnchor}
+        tabIndex={focused ? -1 : undefined}
       >
         {showOuterHeader ? (
           <div className="prp-conversation-thread-header">
             <button
               type="button"
-              className="prp-conversation-thread-header__toggle"
+              className={`prp-conversation-thread-header__toggle${
+                focused ? ' prp-opt-hint-host' : ''
+              }`}
               onClick={() => toggleThreadCollapse(item)}
               aria-expanded={!collapsed}
-              title={collapsed ? 'Expand thread' : 'Collapse thread'}
+              title={
+                focused
+                  ? collapsed
+                    ? 'Expand thread (⌥F)'
+                    : 'Collapse thread (⌥F)'
+                  : collapsed
+                    ? 'Expand thread'
+                    : 'Collapse thread'
+              }
               aria-label={collapsed ? 'Expand thread' : 'Collapse thread'}
             >
+              {focused ? (
+                <OptBtnHint label="⌥F" preferredPlacement="top" />
+              ) : null}
               <span className="prp-conversation-thread-header__chev" aria-hidden="true">
                 <IconDisclosure open={!collapsed} size={16} />
               </span>
@@ -972,8 +1304,14 @@ function ConversationViewImpl(props: any) {
             {typeof onJumpToReviewThread === 'function' && item.path ? (
               <button
                 type="button"
-                className="prp-icon-btn prp-conversation-thread-header__jump"
-                title={`View in Diff · ${fileLoc || item.path}`}
+                className={`prp-icon-btn prp-conversation-thread-header__jump${
+                  focused ? ' prp-opt-hint-host' : ''
+                }`}
+                title={
+                  focused
+                    ? `View in Diff · ${fileLoc || item.path} (⌥D)`
+                    : `View in Diff · ${fileLoc || item.path}`
+                }
                 aria-label={`View ${fileLoc || item.path} in Diff`}
                 onClick={() =>
                   onJumpToReviewThread({
@@ -986,6 +1324,9 @@ function ConversationViewImpl(props: any) {
                   })
                 }
               >
+                {focused ? (
+                  <OptBtnHint label="⌥D" preferredPlacement="top" />
+                ) : null}
                 <IconFileDiff size={16} />
               </button>
             ) : null}
@@ -995,8 +1336,6 @@ function ConversationViewImpl(props: any) {
           className="prp-inline-thread--conversation"
           row={row}
           thread={thread}
-          replyText={draft}
-          onReplyText={(t: string) => onReplyDraft?.(threadId, t)}
           onReply={(th: any, opts: any) =>
             onReplyToThread?.(
               {
@@ -1043,6 +1382,8 @@ function ConversationViewImpl(props: any) {
           snippet={item.snippet || null}
         />
       </div>
+        )}
+      </ConversationKbFocusClassName>
     );
   }
 
@@ -1092,6 +1433,9 @@ function ConversationViewImpl(props: any) {
   }
 
   function renderMergeBox() {
+    const conflictFiles = Array.isArray(ms.conflictFiles) ? ms.conflictFiles : [];
+    const resolveUrl = ms.resolveConflictsUrl || null;
+
     return (
       <div
         className={`prp-merge-box prp-merge-box--${boxTone}`}
@@ -1108,9 +1452,52 @@ function ConversationViewImpl(props: any) {
           </span>
           <div className="prp-merge-box__copy">
             <h3 className="prp-merge-box__headline">{ms.headline}</h3>
-            <p className="prp-merge-box__helper">{ms.helper}</p>
+            <p className="prp-merge-box__helper">
+              {ms.kind === 'conflicts' ? (
+                <>
+                  Use the{' '}
+                  {resolveUrl ? (
+                    <a
+                      href={resolveUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      web editor
+                    </a>
+                  ) : (
+                    'web editor'
+                  )}{' '}
+                  or the command line to resolve conflicts before continuing.
+                </>
+              ) : (
+                ms.helper
+              )}
+            </p>
           </div>
+          {ms.showResolveConflicts && resolveUrl ? (
+            <a
+              className="prp-btn prp-btn--default prp-merge-box__resolve"
+              href={resolveUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Resolve conflicts
+            </a>
+          ) : null}
         </div>
+
+        {ms.kind === 'conflicts' && conflictFiles.length > 0 ? (
+          <ul className="prp-merge-box__conflict-files" aria-label="Conflicting files">
+            {conflictFiles.map((path: string) => (
+              <li key={path} className="prp-merge-box__conflict-file">
+                <IconFileDiff size={14} aria-hidden="true" />
+                <span className="prp-merge-box__conflict-path" title={path}>
+                  {path}
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
 
         {hasChecksData(detail.checks) ? (
           <MergeBoxChecks checks={detail.checks} />
@@ -1131,7 +1518,7 @@ function ConversationViewImpl(props: any) {
                 data-can-merge={ms.canMerge ? '1' : '0'}
               >
                 <div className="prp-merge-method__split prp-opt-hint-host">
-                  <OptBtnHint show={showOptHints} label="⌥⇧M" />
+                  <OptBtnHint label="⌥⇧M" />
                   <Button
                     className={`prp-merge-method__primary prp-merge-method__primary--${
                       ms.ctaVariant || 'default'
@@ -1196,7 +1583,7 @@ function ConversationViewImpl(props: any) {
 
             {ms.showUpdateBranch ? (
               <span className="prp-opt-hint-host">
-                <OptBtnHint show={showOptHints} label="⌥⇧U" />
+                <OptBtnHint label="⌥⇧U" />
                 <Button size="sm" disabled={actionBusy} onClick={onUpdateBranch} shortcut="⌥⇧U">
                   Update branch
                 </Button>
@@ -1205,7 +1592,7 @@ function ConversationViewImpl(props: any) {
 
             {ms.draftToggle === 'ready' ? (
               <span className="prp-opt-hint-host">
-                <OptBtnHint show={showOptHints} label="⌥⇧D" />
+                <OptBtnHint label="⌥⇧D" />
                 <Button
                   size="sm"
                   variant="primary"
@@ -1219,7 +1606,7 @@ function ConversationViewImpl(props: any) {
             ) : null}
             {ms.draftToggle === 'draft' ? (
               <span className="prp-opt-hint-host">
-                <OptBtnHint show={showOptHints} label="⌥⇧D" />
+                <OptBtnHint label="⌥⇧D" />
                 <Button
                   size="sm"
                   disabled={actionBusy}
@@ -1443,6 +1830,19 @@ function ConversationViewImpl(props: any) {
     }
   }
 
+  const isFocusedThreadCollapsed = useCallback(
+    (commentId: string) => {
+      const found = findTimelineThreadById(commentId);
+      if (!found?.thread) return false;
+      if (found.reviewGroupId != null) {
+        return !isGroupThreadOpen(found.reviewGroupId, found.thread);
+      }
+      return isReviewThreadCollapsed(found.thread);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [timelineItems, groupThreadOpenOverrides, threadCollapseOverrides]
+  );
+
   return (
     <div
       ref={convRootRef}
@@ -1457,6 +1857,12 @@ function ConversationViewImpl(props: any) {
       data-aside-collapsed={asideCollapsed ? '1' : '0'}
       data-embed-scroll={embedScrollChain ? '1' : undefined}
     >
+      {/* Leaf store subscribers — do not re-render this tree on ⌥J/K or Opt-hold */}
+      <ConversationKbFocusScroller onFocusThread={onKbFocusThread} />
+      <ConversationKbEnterExpand
+        onExpand={expandFocusedThread}
+        isCollapsed={isFocusedThreadCollapsed}
+      />
       <div className="prp-conversation__main">
         {sectionLoading && !detail ? (
           <div className="prp-section-skeleton" />
@@ -1471,10 +1877,8 @@ function ConversationViewImpl(props: any) {
             isGroupThreadExpanded={(groupItem: any, thread: any) =>
               isGroupThreadOpen(groupItem?.id, thread)
             }
-            // Keyboard focus (⌘⇧C) takes priority over search current hit;
-            // VCL scrolls via indexForConversationAnchor + scroller.scrollTop
-            // so off-window virtualized rows still land correctly.
-            scrollToAnchor={focusedConversationAnchor || activeAnchor}
+            // Search hit scroll; keyboard focus uses store pendingNav in VCL
+            scrollToAnchor={activeAnchor}
             renderRow={renderPanelRow}
             onVisibleThreadNodeIds={onVisibleThreadNodeIds}
           />
@@ -1490,13 +1894,16 @@ function ConversationViewImpl(props: any) {
       >
         <button
           type="button"
-          className="prp-aside-collapse-btn prp-has-tip"
+          className="prp-aside-collapse-btn prp-has-tip prp-opt-hint-host"
           onClick={onToggleAside}
           aria-label={
             asideCollapsed ? 'Expand metadata panel' : 'Collapse metadata panel'
           }
           aria-expanded={!asideCollapsed}
         >
+          <OptBtnHint label={sidePanelKbd}
+            preferredPlacement="bottom"
+          />
           {asideCollapsed ? (
             <IconChevronLeft size={14} aria-hidden="true" />
           ) : (
@@ -1508,6 +1915,7 @@ function ConversationViewImpl(props: any) {
                 ? 'Expand metadata panel'
                 : 'Collapse metadata panel'
             }
+            shortcut={sidePanelKbd}
           />
         </button>
       </div>
@@ -1586,7 +1994,7 @@ function ConversationViewImpl(props: any) {
           actionBusy={actionBusy}
           addButtonRef={reviewerAddRef}
           avatarUrls={detail.avatarUrls}
-          showOptHints={showOptHints}
+          
           addShortcut="⌥⇧R"
         />
         <MetaList
@@ -1605,7 +2013,7 @@ function ConversationViewImpl(props: any) {
           actionBusy={actionBusy}
           addButtonRef={assigneeAddRef}
           avatarUrls={detail.avatarUrls}
-          showOptHints={showOptHints}
+          
           addShortcut="⌥⇧A"
         />
         <AsideSection title="Labels">
@@ -1639,9 +2047,7 @@ function ConversationViewImpl(props: any) {
               ref={labelAddRef}
               title="Add label… (⌥⇧L)"
             >
-              <OptBtnHint
-                show={showOptHints}
-                label="⌥⇧L"
+              <OptBtnHint label="⌥⇧L"
                 preferredPlacement="right"
               />
               Add label…
@@ -1727,9 +2133,7 @@ function ConversationViewImpl(props: any) {
               ref={milestoneAddRef}
               title={`${detail.milestone ? 'Change' : 'Set'} milestone… (⌥⇧P)`}
             >
-              <OptBtnHint
-                show={showOptHints}
-                label="⌥⇧P"
+              <OptBtnHint label="⌥⇧P"
                 preferredPlacement="right"
               />
               {detail.milestone ? 'Change milestone…' : 'Set milestone…'}

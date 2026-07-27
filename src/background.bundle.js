@@ -1683,6 +1683,22 @@ function buildDraftStageGraphql(stage, pullRequestId) {
   };
 }
 
+/** @returns {boolean|null} */
+function draftFromStageGraphqlData(data) {
+  if (!data || typeof data !== 'object') return null;
+  const pr =
+    (data.markPullRequestReadyForReview &&
+      data.markPullRequestReadyForReview.pullRequest) ||
+    (data.convertPullRequestToDraft &&
+      data.convertPullRequestToDraft.pullRequest) ||
+    data.pullRequest ||
+    null;
+  if (!pr || typeof pr !== 'object') return null;
+  if (typeof pr.isDraft === 'boolean') return pr.isDraft;
+  if (typeof pr.draft === 'boolean') return pr.draft;
+  return null;
+}
+
 /**
  * Extract linked issue numbers from PR body (closes/fixes/refs #N and bare #N).
  * @returns {number[]}
@@ -1974,6 +1990,7 @@ const api = {
   buildDeleteSubscription,
   buildSetMilestone,
   buildDraftStageGraphql,
+  draftFromStageGraphqlData,
   parseLinkedIssueNumbers,
   buildRerequestReviewerLogins,
   parseSuggestionFences,
@@ -5086,6 +5103,177 @@ function logParallelRestSummary(timings, names, wallMs) {
   };
 }
 
+/**
+ * Sleep helper for mergeability re-fetch (GitHub starts compute on first GET).
+ * @param {number} ms
+ */
+function sleepMs(ms) {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms || 0)));
+}
+
+/**
+ * Dual-modified paths since merge-base (base tip ∩ head) ≈ conflict file list.
+ * Uses current base-branch tip (not stale pr.base.sha) so behind PRs work.
+ * Soft-fails to [] on any error.
+ *
+ * @returns {Promise<string[]>}
+ */
+async function fetchConflictFilePaths(
+  owner,
+  repo,
+  baseRef,
+  headSha,
+  fetchImpl,
+  token
+) {
+  const o = String(owner || '').trim();
+  const r = String(repo || '').trim();
+  const ref = String(baseRef || '').trim();
+  const head = String(headSha || '').trim();
+  if (!o || !r || !ref || !head) return [];
+  try {
+    const baseUrl = githubRestUrl(`/repos/${o}/${r}`);
+    const refJson = await apiJson(
+      `${baseUrl}/git/ref/heads/${encodeURIComponent(ref)}`,
+      fetchImpl,
+      token
+    );
+    const baseTip = String(refJson?.object?.sha || '').trim();
+    if (!baseTip) return [];
+    const headVsBase = await apiJson(
+      `${baseUrl}/compare/${encodeURIComponent(baseTip)}...${encodeURIComponent(head)}`,
+      fetchImpl,
+      token
+    );
+    const mergeBase = String(headVsBase?.merge_base_commit?.sha || '').trim();
+    if (!mergeBase) return [];
+    const [baseSide, headSide] = await Promise.all([
+      apiJson(
+        `${baseUrl}/compare/${encodeURIComponent(mergeBase)}...${encodeURIComponent(baseTip)}?per_page=100`,
+        fetchImpl,
+        token
+      ),
+      apiJson(
+        `${baseUrl}/compare/${encodeURIComponent(mergeBase)}...${encodeURIComponent(head)}?per_page=100`,
+        fetchImpl,
+        token
+      ),
+    ]);
+    const onBase = new Set(
+      (Array.isArray(baseSide?.files) ? baseSide.files : [])
+        .map((f) => String(f?.filename || f?.previous_filename || '').trim())
+        .filter(Boolean)
+    );
+    const conflicts = [];
+    for (const f of Array.isArray(headSide?.files) ? headSide.files : []) {
+      const path = String(f?.filename || '').trim();
+      if (path && onBase.has(path)) conflicts.push(path);
+    }
+    return conflicts;
+  } catch (err) {
+    if (
+      err?.name === 'AbortError' ||
+      /aborted|AbortError/i.test(String(err?.message || ''))
+    ) {
+      throw err;
+    }
+    console.log(
+      `[pr-plus] fetchConflictFilePaths: soft-fail ${err?.message || err}`
+    );
+    return [];
+  }
+}
+
+/**
+ * Ensure mergeable/mergeable_state are computed; when dirty, attach conflict paths.
+ * @returns {Promise<object>} pr with optional `_conflictFiles`
+ */
+async function resolvePrMergeability(
+  pr,
+  base,
+  pullNumber,
+  fetchImpl,
+  token,
+  timings,
+  ctx = {}
+) {
+  if (!pr || typeof pr !== 'object') return pr;
+  let out = pr;
+  const needsCompute =
+    out.mergeable == null ||
+    out.mergeable === undefined ||
+    !String(out.mergeable_state || '').trim() ||
+    String(out.mergeable_state || '').toLowerCase() === 'unknown';
+
+  if (needsCompute) {
+    try {
+      // Brief pause so GitHub's background job can finish after the first GET
+      await sleepMs(350);
+      const again = await timedFetch(
+        timings,
+        'pullMergeable',
+        apiJson(`${base}/pulls/${pullNumber}`, fetchImpl, token),
+        (p) =>
+          `(mergeable=${p?.mergeable} state=${p?.mergeable_state || '?'})`
+      );
+      if (again && typeof again === 'object') {
+        out = {
+          ...out,
+          mergeable: again.mergeable,
+          mergeable_state: again.mergeable_state,
+          rebaseable:
+            again.rebaseable != null ? again.rebaseable : out.rebaseable,
+          merge_commit_sha: again.merge_commit_sha || out.merge_commit_sha,
+        };
+      }
+    } catch (err) {
+      if (
+        err?.name === 'AbortError' ||
+        /aborted|AbortError/i.test(String(err?.message || ''))
+      ) {
+        throw err;
+      }
+      console.log(
+        `[pr-plus] resolvePrMergeability re-fetch: soft-fail ${err?.message || err}`
+      );
+    }
+  }
+
+  const state = String(out.mergeable_state || '').toLowerCase();
+  const isDirty =
+    state === 'dirty' ||
+    (out.mergeable === false && state !== 'blocked' && state !== 'clean');
+
+  if (isDirty) {
+    const baseOwner =
+      out.base?.repo?.owner?.login ||
+      String(ctx.owner || '').trim() ||
+      null;
+    const baseRepo =
+      out.base?.repo?.name || String(ctx.repo || '').trim() || null;
+    const conflictFiles = await timedFetch(
+      timings,
+      'conflictFiles',
+      fetchConflictFilePaths(
+        baseOwner,
+        baseRepo,
+        out.base?.ref || '',
+        out.head?.sha || '',
+        fetchImpl,
+        token
+      ).catch(() => []),
+      (list) => `(${Array.isArray(list) ? list.length : 0} paths)`
+    );
+    out = {
+      ...out,
+      _conflictFiles: Array.isArray(conflictFiles) ? conflictFiles : [],
+    };
+  } else {
+    out = { ...out, _conflictFiles: [] };
+  }
+  return out;
+}
+
 async function fetchPrDetail(
   owner,
   repo,
@@ -5120,7 +5308,7 @@ async function fetchPrDetail(
   ];
   const tParallel0 = fetchNowMs();
   const batchOpt = { batchStart: tParallel0 };
-  const [pr, files, commentsPage, reviews, commits, viewerLogin, autolinks] =
+  let [pr, files, commentsPage, reviews, commits, viewerLogin, autolinks] =
     await Promise.all([
       timedFetch(
         timings,
@@ -5213,6 +5401,13 @@ async function fetchPrDetail(
   const parallelWall = fetchNowMs() - tParallel0;
   timings.coreParallelWall = Math.round(parallelWall);
   logParallelRestSummary(timings, PARALLEL_REST_KEYS, parallelWall);
+
+  // GitHub computes mergeable async on first GET (often null/unknown).
+  // Re-fetch once so conflict (dirty) is not mislabeled as "still calculating".
+  pr = await resolvePrMergeability(pr, base, n, fetchImpl, token, timings, {
+    owner,
+    repo,
+  });
 
   // GraphQL viewerSubscription (REST issues/.../subscription is 404 / dead)
   const subscription = await timedFetch(
@@ -5625,6 +5820,8 @@ async function fetchPrDetail(
     merged: Boolean(pr.merged),
     mergeable: pr.mergeable,
     mergeableState: pr.mergeable_state || null,
+    /** Paths that appear modified on both base tip and head (conflict candidates). */
+    conflictFiles: Array.isArray(pr._conflictFiles) ? pr._conflictFiles : [],
     rebaseable: pr.rebaseable ?? null,
     createdAt: pr.created_at,
     updatedAt: pr.updated_at,
@@ -7219,7 +7416,37 @@ async function setPullRequestDraftStage(
           query: `mutation($id:ID!){convertPullRequestToDraft(input:{pullRequestId:$id}){pullRequest{id isDraft}}}`,
           variables: { id },
         };
-  return apiGraphql(gql.query, gql.variables, fetchImpl, token);
+  const data = await apiGraphql(gql.query, gql.variables, fetchImpl, token);
+  let parseFn = null;
+  try {
+    let mod =
+      typeof globalThis !== 'undefined' ? globalThis.PRModalPrEditApi : null;
+    if (!mod && typeof require === 'function') {
+      try {
+        mod = require('./modal/pure/pr-edit-api.js');
+      } catch {
+        mod = null;
+      }
+    }
+    parseFn = mod?.draftFromStageGraphqlData;
+  } catch {
+    parseFn = null;
+  }
+  let draft = null;
+  if (typeof parseFn === 'function') {
+    draft = parseFn(data);
+  } else if (data && typeof data === 'object') {
+    const pr =
+      data.markPullRequestReadyForReview?.pullRequest ||
+      data.convertPullRequestToDraft?.pullRequest ||
+      null;
+    if (pr && typeof pr.isDraft === 'boolean') draft = pr.isDraft;
+  }
+  // Fall back to the requested stage so callers always get a boolean draft flag
+  if (typeof draft !== 'boolean') {
+    draft = stage !== 'ready';
+  }
+  return { draft: Boolean(draft), data };
 }
 
 

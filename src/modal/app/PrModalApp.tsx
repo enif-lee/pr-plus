@@ -15,6 +15,7 @@ import React, {
 import { createRoot } from 'react-dom/client';
 import { Button } from '@common/Button';
 import { ActionToast } from '@common/ActionToast';
+import { ShortcutMonitor } from '@common/ShortcutMonitor';
 import { SearchableSelect } from '@common/SearchableSelect';
 import { Header } from '../views/chrome/Header';
 import { StackStrip } from '../views/chrome/StackStrip';
@@ -125,6 +126,7 @@ import {
 } from '../lib/diff-rows';
 import {
   buildNestedFileTree,
+  filesInTreeOrder,
   flattenVisibleTree,
   collectDirPaths,
   filterFilesByReviewMode,
@@ -153,7 +155,11 @@ import {
   isSearchHitVisibleInLayout,
   searchHitHasRowIndex,
 } from '../lib/search-index';
-import { calculateVisibleRange, scrollTopForIndex } from '../lib/virtual-range';
+import {
+  calculateVisibleRange,
+  scrollTopForIndex,
+  scrollTopToRevealIndex,
+} from '../lib/virtual-range';
 import {
   beginLineSelection,
   extendLineSelection,
@@ -170,6 +176,10 @@ import {
   parseGotoQuery,
   selectionFromGoto,
   moveLineSelection,
+  firstSelectableRowInFile,
+  lastSelectableRowInFile,
+  isSelectionAtFileEdge,
+  SELECTION_ACTIONS_REVEAL_MS,
   resolvePendingGotoSelection,
   resolveGotoPathAmongFiles,
 } from '../lib/line-selection';
@@ -190,8 +200,15 @@ import {
   resolvePrModalOptAction,
 } from '../lib/command-palette';
 import {
+  buildShortcutMonitorFire,
+  buildShortcutMonitorFireFromParts,
+  SHORTCUT_MONITOR_DISMISS_MS,
+} from '../lib/shortcut-monitor';
+import { publishShortcutMonitorFire } from '../lib/shortcut-monitor-bus';
+import {
   resolveModalShortcutAction,
   pickConversationCommentFocusTarget,
+  stepConversationCommentFocus,
   activeFileNavIndex,
   resolveAdjacentFileNav,
   isGithubCommandPaletteOpen,
@@ -199,11 +216,23 @@ import {
   shouldIgnoreModalEscapeForGithubPalette,
   findGithubCommandPaletteDialog,
   nextScrollTopByPage,
+  DIFF_OPT_ARROW_SHORTCUT,
+  optArrowScrollDeltaPx,
+  applyScrollerDelta,
   toggleReviewFilter,
+  shortcutKeyFromEvent,
+  normalizeShortcutKey,
 } from '../lib/shortcut-policy';
+import {
+  focusContextThreadReplyAfterPaint,
+  isContextThreadReplyFocused,
+} from '../lib/context-thread-dom';
 import { resolveDiffDisplayFiles } from '../lib/single-file-mode';
 import { DiffFloatingController } from '../views/diff/DiffFloatingController';
-import { buildConversationTimeline } from '../lib/conversation-timeline';
+import {
+  buildConversationTimeline,
+  partitionTimelineWithThreadGap,
+} from '../lib/conversation-timeline';
 import { resolveGithubTheme } from '../lib/theme';
 import { buildStackStrip, buildStackPathModel } from '../lib/ui-polish';
 import {
@@ -245,6 +274,7 @@ import {
   githubDiffFileKey,
 } from '../lib/github-pr-route';
 import { useModalStore } from '../store/modal-store';
+import { OptHintsOverlayClass } from '../components/common/ConversationKbFocus';
 import {
   ROW_HEIGHT,
   COMMENT_ROW_HEIGHT,
@@ -359,10 +389,12 @@ export function PrModalApp({
   const [stackPathSelections, setStackPathSelections] = useState<Record<string, number>>(
     {}
   );
-  /** Option/Alt held — show in-PR shortcut badges (stack digits). */
-  const [optHeld, setOptHeld] = useState(false);
-  /** After a chord fires under Opt-hold, hide tips until Alt is released. */
-  const [optHintsSuppressed, setOptHintsSuppressed] = useState(false);
+  /**
+   * Opt-hold badges live in the store (OptBtnHint leaf-subscribes).
+   * Refs track physical hold/suppress without re-rendering App/Conversation.
+   */
+  const optHeldRef = useRef(false);
+  const optHintsSuppressedRef = useRef(false);
   /** In-app confirm dialog (replaces window.confirm). */
   const [confirmState, setConfirmState] = useState<null | {
     title: string;
@@ -575,9 +607,9 @@ export function PrModalApp({
   const setExpandedDirs = useModalStore((s) => s.setExpandedDirs);
   const commentIndex = useModalStore((s) => s.commentIndex);
   const setCommentIndex = useModalStore((s) => s.setCommentIndex);
-  const lineSelection = useModalStore((s) => s.lineSelection);
+  // Do NOT subscribe to lineSelection/selecting for render — key-hold would
+  // re-render the whole modal. VirtualDiff + SelectionCommentBar read the store.
   const setLineSelection = useModalStore((s) => s.setLineSelection);
-  const selecting = useModalStore((s) => s.selecting);
   const setSelecting = useModalStore((s) => s.setSelecting);
   const selectionDraft = useModalStore((s) => s.selectionDraft);
   const setSelectionDraft = useModalStore((s) => s.setSelectionDraft);
@@ -593,13 +625,16 @@ export function PrModalApp({
   const setFileQuery = useModalStore((s) => s.setFileQuery);
   const viewedPaths = useModalStore((s) => s.viewedPaths);
   const setViewedPaths = useModalStore((s) => s.setViewedPaths);
-  const replyDrafts = useModalStore((s) => s.replyDrafts);
-  const setReplyDraft = useModalStore((s) => s.setReplyDraft);
+  // Do NOT subscribe to replyDrafts for render — each keystroke would re-render
+  // the whole modal. InlineThread leaf-subscribes to its own draft id.
   const setReplyDrafts = (fn: any) => {
     // bridge object-style updates used by existing call sites
     if (typeof fn === 'function') {
-      const next = fn(useModalStore.getState().replyDrafts);
-      Object.entries(next || {}).forEach(([k, v]) => setReplyDraft(k, v as string));
+      const prev = useModalStore.getState().replyDrafts;
+      const next = fn(prev) || {};
+      if (next && typeof next === 'object') {
+        useModalStore.setState({ replyDrafts: { ...next } });
+      }
     }
   };
   const pendingReview = useModalStore((s) => s.pendingReview);
@@ -711,27 +746,47 @@ export function PrModalApp({
   const visibleConvThreadNodeIdsRef = useRef<string[]>([]);
   const searchInputRef = useRef<any>(null);
   const shellRef = useRef<any>(null);
+  const overlayRef = useRef<HTMLDivElement | null>(null);
   const commentBoxRef = useRef<any>(null);
   /**
-   * Keyboard focus on a conversation timeline comment/review (⌘⇧C).
-   * Null when not focused; re-pressing the chord clears it.
+   * Conversation keyboard focus — store only (leaf cards subscribe).
+   * Ref mirrors last target for step nav without App re-render.
    */
-  const [conversationCommentFocus, setConversationCommentFocus] = useState<{
+  const conversationCommentFocusRef = useRef<{
     id: string;
     kind: string;
     anchor: string;
   } | null>(null);
-  const conversationCommentFocusRef = useRef(conversationCommentFocus);
-  conversationCommentFocusRef.current = conversationCommentFocus;
   // Drop keyboard focus when switching PRs
   useEffect(() => {
-    setConversationCommentFocus(null);
+    conversationCommentFocusRef.current = null;
+    useModalStore.getState().requestConversationNav(null);
   }, [prIdentity]);
   const collapseInitRef = useRef<any>(null);
   const selectingRef = useRef<boolean>(false);
   const pointerStartRef = useRef<any>(null);
   /** Shift-click range: finalize as multi (do not collapse head to anchor). */
   const shiftRangeRef = useRef<boolean>(false);
+  /**
+   * Delay selection action toggles after line select/move so key-hold does not
+   * remount the island (TipPopover layout) every keydown.
+   */
+  const selectionActionsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
+  /** Coalesce key-repeat line moves to one React update per animation frame. */
+  const selectionMoveRafRef = useRef(0);
+  const pendingSelectionMoveRef = useRef<{ delta: number; shift: boolean } | null>(
+    null
+  );
+  /**
+   * Single-file mode: hop to adjacent file at EOF/BOF, then seed first/last
+   * selectable line once virtualRows rebuild for that path.
+   */
+  const pendingCrossFileSeedRef = useRef<{
+    path: string;
+    edge: 'first' | 'last';
+  } | null>(null);
   /** Latest UI flags for capture-phase keydown (avoid stale closures). */
   const uiRef = useRef<any>({});
   /** Latest action handlers for capture-phase keydown. */
@@ -1069,8 +1124,9 @@ export function PrModalApp({
   );
 
   /**
-   * Files after resolve-status + name/ext/unread filters.
-   * Shared by files nav, review-thread nav counts, and (unless single-file mode) Diff.
+   * Files after resolve-status + name/ext/unread filters, then **DFS tree
+   * order** (dirs-first + name sort — same as left file explorer).
+   * Shared by Diff virtual list, file tree, prev/next file nav, and pathOrder.
    */
   const displayFiles = useMemo(() => {
     let list = reviewScopedFiles;
@@ -1079,6 +1135,10 @@ export function PrModalApp({
     }
     list = filterFilesByExtensions(list, fileExtFilter);
     list = filterFilesUnreadOnly(list, viewedPaths, fileUnreadOnly);
+    // One order for Diff + explorer + step-nav (not GitHub files[] API order)
+    if (typeof filesInTreeOrder === 'function') {
+      list = filesInTreeOrder(list);
+    }
     return list;
   }, [
     reviewScopedFiles,
@@ -1090,7 +1150,8 @@ export function PrModalApp({
 
   /**
    * Diff virtual list source. In single-file mode only the active (or first)
-   * file is flattened to rows; the left tree still uses displayFiles.
+   * file is flattened to rows; the left tree still uses full displayFiles.
+   * Order is already DFS via displayFiles.
    */
   const diffDisplayFiles = useMemo(
     () =>
@@ -1309,6 +1370,18 @@ export function PrModalApp({
       setCommentIndex(mappedComments.length - 1);
     }
   }, [mappedComments, commentIndex, setCommentIndex]);
+
+  // Sync Diff context-thread id for tips / shortcuts (leaf-subscribe in InlineThread)
+  useEffect(() => {
+    if (layoutMode !== LAYOUT_DIFF || commentIndex < 0) {
+      useModalStore.getState().setActiveDiffCommentId(null);
+      return;
+    }
+    const id = mappedComments[commentIndex]?.id;
+    useModalStore
+      .getState()
+      .setActiveDiffCommentId(id != null ? id : null);
+  }, [layoutMode, commentIndex, mappedComments]);
 
   // Search is view-scoped: Conversation corpus vs Diff virtual rows only.
   // Never mix the two so Find does not surface off-screen content.
@@ -1699,18 +1772,25 @@ export function PrModalApp({
   const scrollMappedCommentIntoView = useCallback(
     (active: { rowIndex?: number | null } | null | undefined) => {
       if (active?.rowIndex == null) return false;
+      // ⌥J/K thread nav on Diff: pin active comment near 1/3 viewport height
       const top = scrollTopForIndex(
         active.rowIndex,
         avgH,
         viewportHeight,
         virtualRows.length,
-        rowOffsetList
+        rowOffsetList,
+        { align: 'third' }
       );
-      setScrollTop(top);
-      if (listRef.current) listRef.current.scrollTop = top;
-      requestAnimationFrame(() => {
-        if (listRef.current) listRef.current.scrollTop = top;
-      });
+      // Single write path: DOM + store. VirtualDiff applies prop change once.
+      // Extra rAF/scrollIntoView stacks cause visible shake on ⌥J/K.
+      const el = listRef.current;
+      if (el && Math.abs((el.scrollTop || 0) - top) > 1) {
+        el.scrollTop = top;
+      }
+      const prevTop = Number(useModalStore.getState().scrollTop) || 0;
+      if (Math.abs(prevTop - top) > 1) {
+        setScrollTop(top);
+      }
       return true;
     },
     [avgH, viewportHeight, virtualRows.length, rowOffsetList, setScrollTop]
@@ -1784,6 +1864,9 @@ export function PrModalApp({
 
       setCommentIndex(idx);
       const active = mappedComments[idx];
+      useModalStore
+        .getState()
+        .setActiveDiffCommentId(active?.id ?? id ?? null);
       // Prefer exact inline row; if only header (collapsed) or missing, re-try after expand
       const onlyHeader =
         active?.rowIndex != null &&
@@ -1858,6 +1941,44 @@ export function PrModalApp({
     setScrollTop(top);
     if (listRef.current) listRef.current.scrollTop = top;
   }
+
+  // Single-file mode: seed first/last line after cross-file hop rebuilds rows
+  useEffect(() => {
+    const pending = pendingCrossFileSeedRef.current;
+    if (!pending) return;
+    const path = String(pending.path || '').trim();
+    if (!path) {
+      pendingCrossFileSeedRef.current = null;
+      return;
+    }
+    const row =
+      pending.edge === 'last'
+        ? typeof lastSelectableRowInFile === 'function'
+          ? lastSelectableRowInFile(virtualRows, path)
+          : null
+        : typeof firstSelectableRowInFile === 'function'
+          ? firstSelectableRowInFile(virtualRows, path)
+          : null;
+    if (!row) {
+      // Still collapsed / not in rows yet — keep waiting
+      return;
+    }
+    pendingCrossFileSeedRef.current = null;
+    const sel =
+      typeof beginLineSelection === 'function' ? beginLineSelection(row) : null;
+    if (sel) {
+      setLineSelection(sel);
+      setSelectionIslandLeaving(false);
+      scheduleSelectionActionsReveal();
+      queueMicrotask(() => {
+        try {
+          scrollSelectionHeadDomOnly(sel);
+        } catch {
+          /* ignore */
+        }
+      });
+    }
+  }, [virtualRows, singleFileMode]);
 
   // Finish Goto once expand rebuilds selectable rows for the target file
   useEffect(() => {
@@ -1951,7 +2072,7 @@ export function PrModalApp({
     });
   }
 
-  /** Diff file list step — relative to the currently viewed file (displayFiles). */
+  /** Diff file step — same DFS order as explorer + Diff list (displayFiles). */
   function navFile(delta: number) {
     if (typeof resolveAdjacentFileNav !== 'function') return;
     const st = resolveAdjacentFileNav(displayFiles, activeFilePath, delta);
@@ -1979,6 +2100,131 @@ export function PrModalApp({
           );
     el.scrollTop = next;
     setScrollTop(next);
+  }
+
+  /**
+   * ⌥↑ / ⌥↓ on Diff: override browser default — multi-step selection jump.
+   * Scroll is handled once by selection reveal (no second scroll path — that
+   * double-setState was a key-hold lag source).
+   */
+  function optArrowScrollSelect(delta: number) {
+    if (layoutMode !== LAYOUT_DIFF) return;
+    const dir = delta < 0 ? -1 : 1;
+    const steps =
+      (typeof DIFF_OPT_ARROW_SHORTCUT !== 'undefined' &&
+        Number(DIFF_OPT_ARROW_SHORTCUT.selectionSteps)) ||
+      8;
+    applySelectionKeyboardMove(dir * steps, false);
+  }
+
+  /** Conversation timeline scroller (virtual list). */
+  function conversationScrollerEl(): HTMLElement | null {
+    try {
+      if (typeof document === 'undefined') return null;
+      return document.querySelector(
+        '.prp-conversation-virtual.prp-scroll-float'
+      ) as HTMLElement | null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * ⌥↑ / ⌥↓ on Conversation: scroll the timeline panel (not selection).
+   * ⌥⇧↑ / ⌥⇧↓: ~one viewport page.
+   */
+  function scrollConversationPanel(delta: number, page = false) {
+    if (layoutMode === LAYOUT_DIFF) return;
+    const el = conversationScrollerEl();
+    if (!el) return;
+    if (page) {
+      const next =
+        typeof nextScrollTopByPage === 'function'
+          ? nextScrollTopByPage(
+              el.scrollTop,
+              el.clientHeight,
+              el.scrollHeight,
+              delta
+            )
+          : Math.max(
+              0,
+              Math.min(
+                el.scrollHeight - el.clientHeight,
+                el.scrollTop + (delta < 0 ? -1 : 1) * el.clientHeight * 0.9
+              )
+            );
+      el.scrollTop = next;
+      return;
+    }
+    const dir = delta < 0 ? -1 : 1;
+    const rh =
+      (typeof DIFF_OPT_ARROW_SHORTCUT !== 'undefined' &&
+        Number((DIFF_OPT_ARROW_SHORTCUT as any).conversationRowHeight)) ||
+      48;
+    const dy =
+      typeof optArrowScrollDeltaPx === 'function'
+        ? optArrowScrollDeltaPx(dir, rh, el.clientHeight)
+        : dir * rh * 8;
+    if (typeof applyScrollerDelta === 'function') {
+      applyScrollerDelta(el, dy);
+    } else {
+      el.scrollTop = Math.max(
+        0,
+        Math.min(el.scrollHeight - el.clientHeight, el.scrollTop + dy)
+      );
+    }
+  }
+
+  /**
+   * Timeline items in **page visual order** (same as VirtualConversationList):
+   * newest window (top) → oldest window (bottom). reverseComments only moves
+   * composer/merge, not item order — do not reverse the list here.
+   */
+  function conversationCommentPageOrder() {
+    const items =
+      typeof buildConversationTimeline === 'function' && detail
+        ? buildConversationTimeline(detail)
+        : [];
+    const timeline = (Array.isArray(items) ? items : []).filter(
+      (i: any) => !(i && i.kind === 'review-group' && i.pending)
+    );
+    if (typeof partitionTimelineWithThreadGap === 'function') {
+      const gap = partitionTimelineWithThreadGap(
+        timeline,
+        detail?.reviewThreadsMeta || null
+      );
+      if (gap?.showGap && Array.isArray(gap.bottom) && gap.bottom.length > 0) {
+        return [...(gap.top || []), ...gap.bottom];
+      }
+    }
+    return timeline;
+  }
+
+  /**
+   * ⌥J / ⌥K on Conversation: step next/prev in page order (wraps).
+   * Seeds on first press; focuses conversation layout if needed.
+   */
+  function navConversationComment(delta: number) {
+    if (layoutMode === LAYOUT_DIFF) collapseDiff();
+    const ordered = conversationCommentPageOrder();
+    const cur =
+      conversationCommentFocusRef.current?.anchor ||
+      useModalStore.getState().focusedConversationAnchor ||
+      null;
+    const next =
+      typeof stepConversationCommentFocus === 'function'
+        ? stepConversationCommentFocus(ordered, cur, delta)
+        : typeof pickConversationCommentFocusTarget === 'function'
+          ? pickConversationCommentFocusTarget(ordered)
+          : null;
+    if (!next) {
+      conversationCommentFocusRef.current = null;
+      useModalStore.getState().requestConversationNav(null);
+      return;
+    }
+    conversationCommentFocusRef.current = next;
+    // Scroll first; leaf scroller promotes focus ring after scroll.
+    useModalStore.getState().requestConversationNav(next.anchor);
   }
 
   function toggleViewedActiveFile() {
@@ -2099,29 +2345,234 @@ export function PrModalApp({
     return true;
   }
 
-  function applySelectionKeyboardMove(delta: number, shift: boolean) {
-    setLineSelection((prev) => {
-      if (!prev || typeof moveLineSelection !== 'function') return prev;
-      return moveLineSelection(prev, virtualRows, delta, { shift }) || prev;
+  function clearSelectionActionsTimer() {
+    if (selectionActionsTimerRef.current != null) {
+      clearTimeout(selectionActionsTimerRef.current);
+      selectionActionsTimerRef.current = null;
+    }
+  }
+
+  /**
+   * Hide action toggles immediately; re-show after idle so key-hold stays light.
+   * File-target composer stays immediate (caller sets show + phase).
+   */
+  function scheduleSelectionActionsReveal() {
+    clearSelectionActionsTimer();
+    if (useModalStore.getState().showSelectionComposer) {
+      setShowSelectionComposer(false);
+    }
+    const delay =
+      typeof SELECTION_ACTIONS_REVEAL_MS === 'number'
+        ? SELECTION_ACTIONS_REVEAL_MS
+        : 300;
+    selectionActionsTimerRef.current = setTimeout(() => {
+      selectionActionsTimerRef.current = null;
+      const st = useModalStore.getState();
+      if (!st.lineSelection || st.selecting) return;
+      // File-level composer is shown explicitly; do not override phase here
+      if (
+        st.lineSelection.kind === 'file' ||
+        st.lineSelection.subjectType === 'file'
+      ) {
+        return;
+      }
+      setSelectionIslandLeaving(false);
+      setSelectionIslandPhase('actions');
+      setShowSelectionComposer(true);
+    }, delay);
+  }
+
+  /**
+   * Keep selection head visible with **minimal** scroll — do not re-center.
+   * Forcing scrollTopForIndex (quarter align) on every arrow key jumps the Diff
+   * upward after file-nav pin and suddenly reveals the previous file.
+   */
+  function scrollSelectionHeadDomOnly(sel: any) {
+    const headIdx = Number(sel?.headRowIndex);
+    if (!Number.isFinite(headIdx) || headIdx < 0) return;
+    try {
+      const el = listRef.current as HTMLElement | null;
+      const cur =
+        el && typeof el.scrollTop === 'number'
+          ? el.scrollTop
+          : Number(useModalStore.getState().scrollTop) || 0;
+      const vp =
+        el && el.clientHeight > 0
+          ? el.clientHeight
+          : viewportHeight;
+      // Sticky file header overlays the top of the Diff list (~ROW_HEIGHT).
+      // Without padTop, ArrowUp pins the caret under that fixed bar.
+      const stickyTop =
+        typeof ROW_HEIGHT === 'number' && ROW_HEIGHT > 0 ? ROW_HEIGHT : avgH;
+      const top =
+        typeof scrollTopToRevealIndex === 'function'
+          ? scrollTopToRevealIndex(
+              headIdx,
+              cur,
+              avgH,
+              vp,
+              virtualRows.length,
+              rowOffsetList,
+              { padTop: stickyTop + 2, padBottom: 2 }
+            )
+          : cur;
+      if (Math.abs(top - cur) < 0.5) return;
+      if (el) el.scrollTop = top;
+      // Only sync store on real jumps so App does not re-render every key
+      const prev = Number(useModalStore.getState().scrollTop) || 0;
+      if (Math.abs(prev - top) >= Math.max(24, avgH * 2)) {
+        setScrollTop(top);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /** Expand a path if collapsed so selectable lines exist after cross-file hop. */
+  function ensureFileExpandedForSelection(path: string) {
+    const p = String(path || '').trim();
+    if (!p) return;
+    setCollapsedFiles((prev) => {
+      const file = annotatedFiles.find(
+        (f: any) => (f.filename || f.path) === p
+      );
+      if (
+        !isPathCollapsed(
+          p,
+          prev,
+          Boolean(file?.defaultCollapsed),
+          false,
+          viewedPaths
+        )
+      ) {
+        return prev;
+      }
+      if (typeof expandPathInCollapsedSet === 'function') {
+        return expandPathInCollapsedSet(
+          prev,
+          p,
+          annotatedFiles,
+          viewedPaths
+        );
+      }
+      const n = materializeCollapsedPaths(prev, annotatedFiles, viewedPaths);
+      n.delete(p);
+      return n;
     });
-    // Scroll new head into view after state commits
+  }
+
+  /**
+   * Sync tree active path when caret crosses files (do NOT call onSelectFile —
+   * that clears selection and re-pins scroll to file start).
+   */
+  function syncActiveFileFromSelection(sel: any) {
+    const path = String(sel?.filePath || '').trim();
+    if (!path) return;
+    const cur = String(useModalStore.getState().activeFilePath || '').trim();
+    if (path === cur) return;
+    setActiveFilePath(path);
+    ensureFileExpandedForSelection(path);
+    scrollFileNavRowIntoView(path);
+  }
+
+  function flushSelectionKeyboardMove(delta: number, shift: boolean) {
+    if (typeof moveLineSelection !== 'function') return;
+    const st = useModalStore.getState();
+    const activePath = String(st.activeFilePath || '').trim();
+    const prevSel = st.lineSelection;
+    const nextSel =
+      moveLineSelection(prevSel, virtualRows, delta, {
+        shift,
+        activeFilePath: activePath,
+      }) || prevSel;
+
+    // No-op: skip React / scroll work under key-hold against an edge
+    const unchanged =
+      nextSel === prevSel ||
+      (prevSel &&
+        nextSel &&
+        Number(nextSel.headRowIndex) === Number(prevSel.headRowIndex) &&
+        Number(nextSel.anchorRowIndex) === Number(prevSel.anchorRowIndex) &&
+        String(nextSel.filePath || '') === String(prevSel.filePath || ''));
+
+    // Single-file mode hop at EOF/BOF (not multi-line extend)
+    if (
+      unchanged &&
+      !shift &&
+      singleFileMode &&
+      typeof resolveAdjacentFileNav === 'function'
+    ) {
+      const atEdge =
+        typeof isSelectionAtFileEdge === 'function'
+          ? isSelectionAtFileEdge(prevSel || nextSel, virtualRows, delta)
+          : true;
+      if (atEdge) {
+        const d = delta < 0 ? -1 : 1;
+        const adj = resolveAdjacentFileNav(displayFiles, activePath, d);
+        if (adj.path && adj.path !== activePath) {
+          pendingCrossFileSeedRef.current = {
+            path: adj.path,
+            edge: d > 0 ? 'first' : 'last',
+          };
+          setActiveFilePath(adj.path);
+          ensureFileExpandedForSelection(adj.path);
+          scrollFileNavRowIntoView(adj.path);
+          setLineSelection(null);
+          scheduleSelectionActionsReveal();
+          return;
+        }
+      }
+    }
+
+    if (unchanged) {
+      // Still keep actions hidden while holding against edge
+      scheduleSelectionActionsReveal();
+      return;
+    }
+
+    setLineSelection(nextSel);
+    // Avoid setSelectionIslandLeaving every frame if already false
+    if (useModalStore.getState().selectionIslandLeaving) {
+      setSelectionIslandLeaving(false);
+    }
+    scheduleSelectionActionsReveal();
+    // DOM scroll + light path sync after paint (not another React commit)
     queueMicrotask(() => {
       try {
-        const sel = useModalStore.getState().lineSelection;
-        const headIdx = Number(sel?.headRowIndex);
-        if (!Number.isFinite(headIdx) || headIdx < 0) return;
-        const top = scrollTopForIndex(
-          headIdx,
-          avgH,
-          viewportHeight,
-          virtualRows.length,
-          rowOffsetList
-        );
-        setScrollTop(top);
-        if (listRef.current) listRef.current.scrollTop = top;
+        const sel = useModalStore.getState().lineSelection || nextSel;
+        const prevPath = String(activePath || '');
+        const nextPath = String(sel?.filePath || '');
+        if (nextPath && nextPath !== prevPath) {
+          syncActiveFileFromSelection(sel);
+        }
+        scrollSelectionHeadDomOnly(sel);
       } catch {
         /* ignore */
       }
+    });
+  }
+
+  /**
+   * Keyboard line move — rAF-coalesced under key-repeat so held arrows do not
+   * thrash React with one update per OS keydown.
+   */
+  function applySelectionKeyboardMove(delta: number, shift: boolean) {
+    const pending = pendingSelectionMoveRef.current;
+    if (pending && pending.shift === Boolean(shift)) {
+      pending.delta += delta;
+    } else {
+      pendingSelectionMoveRef.current = {
+        delta,
+        shift: Boolean(shift),
+      };
+    }
+    if (selectionMoveRafRef.current) return;
+    selectionMoveRafRef.current = requestAnimationFrame(() => {
+      selectionMoveRafRef.current = 0;
+      const p = pendingSelectionMoveRef.current;
+      pendingSelectionMoveRef.current = null;
+      if (!p || !p.delta) return;
+      flushSelectionKeyboardMove(p.delta, p.shift);
     });
   }
 
@@ -2392,12 +2843,14 @@ export function PrModalApp({
 
     const commits = githubCommitsFromFilter(diffCommitFilter);
     const sel =
-      page === 'diff' ? githubSelectionFields(lineSelection) : {
-        filePath: null,
-        startLine: null,
-        endLine: null,
-        side: null as 'LEFT' | 'RIGHT' | null,
-      };
+      page === 'diff'
+        ? githubSelectionFields(useModalStore.getState().lineSelection)
+        : {
+            filePath: null,
+            startLine: null,
+            endLine: null,
+            side: null as 'LEFT' | 'RIGHT' | null,
+          };
     const fileKey =
       page === 'diff' && sel.filePath ? githubDiffFileKey(sel.filePath) : null;
 
@@ -2458,8 +2911,49 @@ export function PrModalApp({
     routeWriteReady,
     isEmbed,
     diffCommitFilter,
-    lineSelection,
   ]);
+
+  // Debounced URI/hash update when selection moves (no App re-render per caret)
+  useEffect(() => {
+    if (!open || !routeWriteReady || !detail?.number) return undefined;
+    let timer = 0;
+    const unsub = useModalStore.subscribe((state, prev) => {
+      if (state.lineSelection === prev.lineSelection) return;
+      if (state.layoutMode !== LAYOUT_DIFF) return;
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        try {
+          const sel = githubSelectionFields(
+            useModalStore.getState().lineSelection
+          );
+          const commits = githubCommitsFromFilter(diffCommitFilter);
+          const fileKey = sel.filePath
+            ? githubDiffFileKey(sel.filePath)
+            : null;
+          if (typeof onRouteChange === 'function') {
+            onRouteChange({
+              page: 'diff',
+              position: null,
+              number: detail.number,
+              commitSha: commits.commitSha,
+              commitEndSha: commits.commitEndSha,
+              filePath: sel.filePath,
+              fileKey,
+              startLine: sel.startLine,
+              endLine: sel.endLine,
+              side: sel.side,
+            });
+          }
+        } catch {
+          /* ignore */
+        }
+      }, 280);
+    });
+    return () => {
+      unsub();
+      window.clearTimeout(timer);
+    };
+  }, [open, routeWriteReady, detail?.number, onRouteChange, diffCommitFilter]);
 
   // Reset route restore markers when modal closes
   useEffect(() => {
@@ -2650,6 +3144,174 @@ export function PrModalApp({
       persistFileNav(next);
       return next;
     });
+  }
+
+  /** Conversation metadata-rail toggle (registered by ConversationView). */
+  const asideToggleRef = useRef<(() => void) | null>(null);
+  const onRegisterAsideToggle = useCallback((fn: (() => void) | null) => {
+    asideToggleRef.current = typeof fn === 'function' ? fn : null;
+  }, []);
+
+  /**
+   * Context-thread actions from ConversationView (fold/goto/comment/resolve).
+   * Diff path is handled in App via commentIndex + mappedComments.
+   */
+  const contextThreadActionsRef = useRef<{
+    fold: () => boolean;
+    gotoDiff: () => boolean;
+    comment: () => boolean;
+    resolve: () => boolean;
+  } | null>(null);
+  const onRegisterContextThreadActions = useCallback(
+    (
+      api: {
+        fold: () => boolean;
+        gotoDiff: () => boolean;
+        comment: () => boolean;
+        resolve: () => boolean;
+      } | null
+    ) => {
+      contextThreadActionsRef.current =
+        api && typeof api.fold === 'function' ? api : null;
+    },
+    []
+  );
+
+  /**
+   * ⌥B — Diff: files navigator; Conversation: metadata rail.
+   */
+  function toggleSidePanel() {
+    if (layoutMode === LAYOUT_DIFF) {
+      onToggleFileNavCollapse();
+      return;
+    }
+    try {
+      asideToggleRef.current?.();
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /** Active Diff review-thread unit (⌥J/K nav index) — always read live store. */
+  function getActiveDiffContextThread(): any | null {
+    const st = useModalStore.getState();
+    if (st.layoutMode !== LAYOUT_DIFF) return null;
+    const list = mappedComments;
+    if (!list.length) return null;
+    let idx = Number(st.commentIndex);
+    if (!(idx >= 0 && idx < list.length) && st.activeDiffCommentId != null) {
+      idx = list.findIndex(
+        (c: any) => String(c?.id) === String(st.activeDiffCommentId)
+      );
+    }
+    if (!(idx >= 0 && idx < list.length)) return null;
+    return list[idx] || null;
+  }
+
+  /**
+   * Ensure Diff has a context thread before fold/comment/resolve.
+   * Seeds index 0 when user has not yet pressed ⌥J/K.
+   */
+  function ensureDiffContextThread(): any | null {
+    let c = getActiveDiffContextThread();
+    if (c) return c;
+    const st = useModalStore.getState();
+    if (st.layoutMode !== LAYOUT_DIFF || !mappedComments.length) return null;
+    const first = mappedComments[0];
+    if (!first || first.id == null) return null;
+    setCommentIndex(0);
+    useModalStore.getState().setActiveDiffCommentId(first.id);
+    return first;
+  }
+
+  function runDiffContextThreadAction(
+    kind: 'fold' | 'gotoDiff' | 'comment' | 'resolve'
+  ): boolean {
+    const c = ensureDiffContextThread();
+    if (!c || c.id == null) return false;
+    const id = c.id;
+    const anchor = `review-comment:${id}`;
+    const thread = threadsByCommentId?.get?.(String(id)) || null;
+    const resolved = Boolean(thread?.resolved ?? c.resolved);
+    const pending = Boolean(
+      c.pending || thread?.pending || thread?.root?.pending
+    );
+    const threadNodeId =
+      thread?.threadNodeId ||
+      c.threadNodeId ||
+      thread?.root?.threadNodeId ||
+      null;
+
+    if (kind === 'fold') {
+      onToggleThreadCollapse(id, resolved);
+      return true;
+    }
+    if (kind === 'gotoDiff') {
+      // Already on Diff — re-reveal the active thread (scroll + expand file).
+      jumpToReviewComment({
+        id,
+        path: c.path || thread?.root?.path || thread?.path,
+        line: c.line ?? c.originalLine ?? thread?.root?.line ?? null,
+        side: c.side || thread?.root?.side || 'RIGHT',
+      });
+      return true;
+    }
+    if (kind === 'comment') {
+      if (isContextThreadReplyFocused(anchor)) {
+        const drafts = useModalStore.getState().replyDrafts || {};
+        const body = String(
+          drafts[String(id)] ||
+            (id != null ? drafts[String(Number(id))] : '') ||
+            ''
+        ).trim();
+        if (!body) return false;
+        void onReplyToThread(
+          {
+            id,
+            path: c.path || thread?.root?.path,
+            line: c.line ?? thread?.root?.line ?? null,
+            side: c.side || thread?.root?.side || 'RIGHT',
+            threadNodeId,
+            root: thread?.root || c,
+          },
+          { mode: 'comment' }
+        );
+        return true;
+      }
+      // Ensure thread row is mounted/visible, expand, then focus reply.
+      jumpToReviewComment({
+        id,
+        path: c.path || thread?.root?.path || thread?.path,
+        line: c.line ?? c.originalLine ?? thread?.root?.line ?? null,
+        side: c.side || thread?.root?.side || 'RIGHT',
+      });
+      if (isDiffThreadCollapsed(id, resolved)) {
+        onToggleThreadCollapse(id, resolved);
+      }
+      focusContextThreadReplyAfterPaint(anchor);
+      return true;
+    }
+    if (kind === 'resolve') {
+      if (!threadNodeId || pending) return false;
+      void onResolveThread(threadNodeId, !resolved);
+      return true;
+    }
+    return false;
+  }
+
+  function runContextThreadAction(
+    kind: 'fold' | 'gotoDiff' | 'comment' | 'resolve'
+  ): boolean {
+    // Prefer live store layout — keep-alive Conversation stays mounted on Diff.
+    const liveLayout = useModalStore.getState().layoutMode;
+    if (liveLayout === LAYOUT_DIFF) {
+      return runDiffContextThreadAction(kind);
+    }
+    try {
+      return Boolean(contextThreadActionsRef.current?.[kind]?.());
+    } catch {
+      return false;
+    }
   }
 
   function onFileNavResizeStart(e: React.PointerEvent) {
@@ -2931,6 +3593,20 @@ export function PrModalApp({
 
   function onSelectFile(path: any) {
     setActiveFilePath(path);
+    // Drop prior-file line selection so the next Arrow seeds the first
+    // selectable (displayed) line of this file.
+    clearSelectionActionsTimer();
+    if (selectionMoveRafRef.current) {
+      cancelAnimationFrame(selectionMoveRafRef.current);
+      selectionMoveRafRef.current = 0;
+    }
+    pendingSelectionMoveRef.current = null;
+    selectingRef.current = false;
+    setSelecting(false);
+    setLineSelection(null);
+    setShowSelectionComposer(false);
+    setSelectionIslandLeaving(false);
+    setSelectionIslandPhase('actions');
     // Auto-expand collapsed file when selected from tree (including defaults/viewed).
     // Use expandPathInCollapsedSet so emptying the set does not re-collapse
     // the path via isPathCollapsed's empty-set + viewedPaths branch.
@@ -2963,12 +3639,14 @@ export function PrModalApp({
     });
     const idx = fileStarts.get(path);
     if (typeof idx === 'number') {
+      // Pin file header to the first line of the Diff scrollport
       const top = scrollTopForIndex(
         idx,
         avgH,
         viewportHeight,
         virtualRows.length,
-        rowOffsetList
+        rowOffsetList,
+        { align: 'start' }
       );
       setScrollTop(top);
       if (listRef.current) listRef.current.scrollTop = top;
@@ -3026,37 +3704,29 @@ export function PrModalApp({
 
   function focusConversationCommentItem() {
     // Always land on conversation layout so the timeline is visible.
-    // Scroll itself is owned by VirtualConversationList via scrollToAnchor
-    // (indexForConversationAnchor + scroller.scrollTop) after React commit —
-    // not a one-shot querySelector (virtualized off-window rows are not in DOM,
-    // and Diff→Conversation keep-alive panel may still be inactive mid-microtask).
+    // Scroll then focus via ConversationKbFocusScroller (leaf store sub).
     if (layoutMode === LAYOUT_DIFF) collapseDiff();
-    const items =
-      typeof buildConversationTimeline === 'function' && detail
-        ? buildConversationTimeline(detail)
-        : [];
-    // Skip pending review-group (lives in composer, not timeline)
-    const timeline = (Array.isArray(items) ? items : []).filter(
-      (i: any) => !(i && i.kind === 'review-group' && i.pending)
-    );
-    // reverseComments default: newest first — pick first displayed comment/review
-    const ordered = reverseComments ? timeline : [...timeline].reverse();
+    const ordered = conversationCommentPageOrder();
     const target =
       typeof pickConversationCommentFocusTarget === 'function'
         ? pickConversationCommentFocusTarget(ordered)
         : null;
     if (!target) {
-      setConversationCommentFocus(null);
+      conversationCommentFocusRef.current = null;
+      useModalStore.getState().requestConversationNav(null);
       return;
     }
-    setConversationCommentFocus(target);
+    conversationCommentFocusRef.current = target;
+    useModalStore.getState().requestConversationNav(target.anchor);
   }
 
   function clearConversationCommentFocus() {
-    setConversationCommentFocus(null);
+    conversationCommentFocusRef.current = null;
+    useModalStore.getState().requestConversationNav(null);
   }
 
   function dismissSelectionIsland(after?: any) {
+    clearSelectionActionsTimer();
     setSelectionIslandLeaving(true);
     setTimeout(() => {
       setShowSelectionComposer(false);
@@ -4067,8 +4737,10 @@ export function PrModalApp({
       stackItems,
       openPulls: Array.isArray(openPulls) ? openPulls : [],
       canSubmitReviewVerdict: canVerdict,
+      // Diff-only commands (file nav, selection, filters, viewed…)
+      layoutMode: layoutMode === LAYOUT_DIFF ? 'diff' : 'centered',
     });
-  }, [detail, stackItems, openPulls]);
+  }, [detail, stackItems, openPulls, layoutMode]);
 
   function runPaletteCommand(cmd: any) {
     if (!cmd) return;
@@ -4088,8 +4760,102 @@ export function PrModalApp({
       case 'navAdjacentNext':
         navigateAdjacentPr('next');
         break;
+      // Diff view actions (also reachable via keyboard; palette when layout=diff)
+      case 'navFilePrev':
+        navFile(-1);
+        break;
+      case 'navFileNext':
+        navFile(1);
+        break;
+      case 'scrollDiffPagePrev':
+        scrollDiffPage(-1);
+        break;
+      case 'scrollDiffPageNext':
+        scrollDiffPage(1);
+        break;
+      case 'optArrowScrollSelectPrev':
+        optArrowScrollSelect(-1);
+        break;
+      case 'optArrowScrollSelectNext':
+        optArrowScrollSelect(1);
+        break;
+      case 'toggleViewedActiveFile':
+        toggleViewedActiveFile();
+        break;
+      case 'stepNavPrev':
+        if (searchOpen) navSearch(-1);
+        else if (layoutMode === LAYOUT_DIFF) navComment(-1);
+        else navConversationComment(-1);
+        break;
+      case 'stepNavNext':
+        if (searchOpen) navSearch(1);
+        else if (layoutMode === LAYOUT_DIFF) navComment(1);
+        else navConversationComment(1);
+        break;
+      case 'scrollConversationOptPrev':
+        scrollConversationPanel(-1, false);
+        break;
+      case 'scrollConversationOptNext':
+        scrollConversationPanel(1, false);
+        break;
+      case 'scrollConversationPagePrev':
+        scrollConversationPanel(-1, true);
+        break;
+      case 'scrollConversationPageNext':
+        scrollConversationPanel(1, true);
+        break;
+      case 'contextThreadFold':
+      case 'focusedThreadFold':
+        runContextThreadAction('fold');
+        break;
+      case 'contextThreadGotoDiff':
+      case 'focusedThreadGotoDiff':
+        runContextThreadAction('gotoDiff');
+        break;
+      case 'contextThreadComment':
+      case 'focusedThreadComment':
+        runContextThreadAction('comment');
+        break;
+      case 'contextThreadResolve':
+      case 'focusedThreadResolve':
+        runContextThreadAction('resolve');
+        break;
+      case 'toggleReviewFilterUnresolved':
+        applyReviewFilterToggle('unresolved');
+        break;
+      case 'toggleReviewFilterResolved':
+        applyReviewFilterToggle('resolved');
+        break;
+      case 'toggleReviewFilterPending':
+        applyReviewFilterToggle('pending');
+        break;
+      case 'moveSelectionUp':
+        applySelectionKeyboardMove(-1, false);
+        break;
+      case 'moveSelectionDown':
+        applySelectionKeyboardMove(1, false);
+        break;
+      case 'extendSelectionUp':
+        applySelectionKeyboardMove(-1, true);
+        break;
+      case 'extendSelectionDown':
+        applySelectionKeyboardMove(1, true);
+        break;
+      case 'openSelectionComment':
+        setSelectionIslandPhase('comment');
+        setShowSelectionComposer(true);
+        break;
+      case 'copySelectionCode':
+        void copySelectionCode();
+        break;
+      case 'copySelectionUrl':
+        void copySelectionUrl();
+        break;
       case 'toggleDiff':
         onToggleDiff();
+        break;
+      case 'toggleSidePanel':
+        toggleSidePanel();
         break;
       case 'openSearch':
         setSearchOpen(true);
@@ -4301,6 +5067,8 @@ export function PrModalApp({
     pointerStartRef.current = point || null;
     setSelecting(true);
     setLineSelection(next);
+    // Hide island while dragging; reveal after pointer-up idle delay
+    clearSelectionActionsTimer();
     setShowSelectionComposer(false);
   }
 
@@ -4333,7 +5101,8 @@ export function PrModalApp({
     pointerStartRef.current = null;
     setSelectionIslandLeaving(false);
     setSelectionIslandPhase('actions');
-    setShowSelectionComposer(true);
+    // Delay action toggles so rapid re-clicks / key chords stay cheap
+    scheduleSelectionActionsReveal();
   }
 
   /**
@@ -4445,6 +5214,7 @@ export function PrModalApp({
   }
 
   async function onSubmitSelectionCommentImmediate() {
+    const lineSelection = useModalStore.getState().lineSelection;
     if (!detail || !lineSelection || typeof selectionToCommentPayload !== 'function') return;
     const payload: any = selectionToCommentPayload(lineSelection, {
       body: selectionDraft,
@@ -4467,6 +5237,7 @@ export function PrModalApp({
   }
 
   async function onSubmitSelectionCommentPending() {
+    const lineSelection = useModalStore.getState().lineSelection;
     if (!detail || !lineSelection || typeof selectionToCommentPayload !== 'function') return;
     const payload: any = selectionToCommentPayload(lineSelection, {
       body: selectionDraft,
@@ -4557,9 +5328,10 @@ export function PrModalApp({
       thread?.root?.id ??
       thread?.commentId ??
       thread?.root?.commentId;
+    const drafts = useModalStore.getState().replyDrafts || {};
     const body = (
-      replyDrafts[String(draftKey)] ||
-      (draftKey != null ? replyDrafts[String(Number(draftKey))] : '') ||
+      drafts[String(draftKey)] ||
+      (draftKey != null ? drafts[String(Number(draftKey))] : '') ||
       ''
     ).trim();
     if (!detail || draftKey == null || !body) return;
@@ -4821,7 +5593,10 @@ export function PrModalApp({
 
   async function onSetDraftStage(stage: any) {
     if (!detail) return;
-    const label = stage === 'ready' ? 'Mark ready for review' : 'Convert to draft';
+    const wantReady = stage === 'ready';
+    const nextDraft = !wantReady;
+    const prevDraft = Boolean(detail.draft);
+    const label = wantReady ? 'Mark ready for review' : 'Convert to draft';
     if (
       !confirmGateProceed(
         await requestConfirm({
@@ -4834,21 +5609,49 @@ export function PrModalApp({
     ) {
       return;
     }
+    // Optimistic + host cache so merge box / header flip immediately and a
+    // remount does not resurrect the pre-write draft flag from SWR/IDB.
+    const applyDraft = (draft: boolean) => {
+      setLocalDetail((prev) => (prev ? { ...prev, draft: Boolean(draft) } : prev));
+      try {
+        onPatchDetail?.({ draft: Boolean(draft) });
+      } catch {
+        /* host optional */
+      }
+    };
+    applyDraft(nextDraft);
     setActionBusy(true);
     setActionMsg('');
     try {
       const api = globalThis.PRTreeFetch;
       if (!api?.setPullRequestDraftStage) throw new Error('Draft stage API unavailable');
-      await api.setPullRequestDraftStage(
+      const result = await api.setPullRequestDraftStage(
         detail.owner,
         detail.repo,
         detail.number,
-        stage === 'ready' ? 'ready' : 'draft',
+        wantReady ? 'ready' : 'draft',
         detail.nodeId
       );
-      setActionMsg(stage === 'ready' ? 'Marked ready for review.' : 'Converted to draft.');
-      await onRefresh?.();
+      const confirmed =
+        result && typeof result.draft === 'boolean'
+          ? result.draft
+          : nextDraft;
+      applyDraft(confirmed);
+      setActionMsg(
+        confirmed
+          ? 'Converted to draft.'
+          : 'Marked ready for review.'
+      );
+      try {
+        await onRefresh?.();
+      } catch {
+        /* best-effort — draft already patched */
+      }
+      // Re-assert after refresh: REST/cache can briefly lag GraphQL and
+      // clobber optimistic draft via mergeDetailPreserveOptimistic.
+      applyDraft(confirmed);
     } catch (err) {
+      applyDraft(prevDraft);
       setActionMsg(err?.message || String(err));
     } finally {
       setActionBusy(false);
@@ -5564,8 +6367,19 @@ export function PrModalApp({
     confirmOpen: Boolean(confirmState),
     showSelectionComposer,
     selectionIslandPhase,
-    conversationCommentFocused: Boolean(conversationCommentFocus),
-    hasLineSelection: Boolean(lineSelection),
+    conversationCommentFocused: Boolean(
+      conversationCommentFocusRef.current ||
+        useModalStore.getState().focusedConversationAnchor ||
+        useModalStore.getState().pendingConversationNavAnchor
+    ),
+    contextThreadActive: Boolean(
+      layoutMode === LAYOUT_DIFF
+        ? commentIndex >= 0 && mappedComments[commentIndex]
+        : conversationCommentFocusRef.current ||
+            useModalStore.getState().focusedConversationAnchor ||
+            useModalStore.getState().pendingConversationNavAnchor
+    ),
+    hasLineSelection: Boolean(useModalStore.getState().lineSelection),
   };
   actionsRef.current = {
     onClose: requestClose,
@@ -5574,18 +6388,29 @@ export function PrModalApp({
     closePicker,
     focusConversationCommentItem,
     clearConversationCommentFocus,
-    openSelectionComment: () => setSelectionIslandPhase('comment'),
-    openSelectionActions: () => setSelectionIslandPhase('actions'),
+    runContextThreadAction,
+    openSelectionComment: () => {
+      setSelectionIslandPhase('comment');
+      setShowSelectionComposer(true);
+    },
+    openSelectionActions: () => {
+      setSelectionIslandPhase('actions');
+      setShowSelectionComposer(true);
+    },
     copySelectionCode,
     copySelectionUrl,
     navSearch,
     navComment,
+    navConversationComment,
     navFile,
     scrollDiffPage,
+    optArrowScrollSelect,
+    scrollConversationPanel,
     toggleViewedActiveFile,
     applyReviewFilterToggle,
     applyGotoQuery,
     applySelectionKeyboardMove,
+    toggleSidePanel,
     openStackOrListPr,
     navigateAdjacentPr,
     stackItems,
@@ -5593,27 +6418,84 @@ export function PrModalApp({
     runPaletteCommand,
   };
 
-  // Track Option/Alt hold for shortcut badges (works with Opt alone and Opt+Shift)
+  // Clear selection action delay / move rAF when modal closes
+  useEffect(() => {
+    if (open) return undefined;
+    clearSelectionActionsTimer();
+    if (selectionMoveRafRef.current) {
+      cancelAnimationFrame(selectionMoveRafRef.current);
+      selectionMoveRafRef.current = 0;
+    }
+    pendingSelectionMoveRef.current = null;
+    try {
+      publishShortcutMonitorFire(null);
+    } catch {
+      /* ignore */
+    }
+    return undefined;
+  }, [open]);
+
+  /** Report a fired product shortcut to the isolated monitor HUD (no App setState). */
+  function reportShortcutMonitor(fire: any) {
+    if (!fire || !fire.text) return;
+    try {
+      publishShortcutMonitorFire({ ...fire, at: fire.at || Date.now() });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function reportShortcutAction(action: string) {
+    if (!action || typeof buildShortcutMonitorFire !== 'function') return;
+    reportShortcutMonitor(buildShortcutMonitorFire(action, isMac));
+  }
+
+  /**
+   * Opt-hold → store only (no App setState). Leaf OptBtnHint + overlay class bridge
+   * re-render; ConversationView tree stays memoized.
+   */
+  function syncOptHintsActive() {
+    const ui = uiRef.current || {};
+    const active =
+      Boolean(optHeldRef.current) &&
+      !optHintsSuppressedRef.current &&
+      !ui.paletteOpen &&
+      !ui.confirmOpen;
+    useModalStore.getState().setOptHintsActive(active);
+  }
+
   useEffect(() => {
     if (!open) {
-      setOptHeld(false);
-      setOptHintsSuppressed(false);
+      optHeldRef.current = false;
+      optHintsSuppressedRef.current = false;
+      useModalStore.getState().setOptHintsActive(false);
       return undefined;
     }
+    let lastHeld = false;
     const sync = (e: KeyboardEvent) => {
       const held = Boolean(e.altKey);
-      setOptHeld(held);
-      // Releasing Opt clears tip suppression so the next hold shows badges again
-      if (!held) setOptHintsSuppressed(false);
+      if (held === lastHeld) {
+        if (!held) {
+          optHintsSuppressedRef.current = false;
+          syncOptHintsActive();
+        }
+        return;
+      }
+      lastHeld = held;
+      optHeldRef.current = held;
+      if (!held) optHintsSuppressedRef.current = false;
+      syncOptHintsActive();
     };
     const clear = () => {
-      setOptHeld(false);
-      setOptHintsSuppressed(false);
+      if (!lastHeld) return;
+      lastHeld = false;
+      optHeldRef.current = false;
+      optHintsSuppressedRef.current = false;
+      useModalStore.getState().setOptHintsActive(false);
     };
     window.addEventListener('keydown', sync, true);
     window.addEventListener('keyup', sync, true);
     window.addEventListener('blur', clear);
-    // If user tabs away mid-hold
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) clear();
     });
@@ -5623,6 +6505,11 @@ export function PrModalApp({
       window.removeEventListener('blur', clear);
     };
   }, [open]);
+
+  // Palette / confirm open while Opt held — hide badges without App optHeld state
+  useEffect(() => {
+    syncOptHintsActive();
+  }, [paletteOpen, confirmState, open]);
 
   // Watch GH ⌘K palette open state so Escape race (GH closes first) still skips pr+ close
   useEffect(() => {
@@ -5684,7 +6571,17 @@ export function PrModalApp({
     const onKey = (e) => {
       const mod = e.metaKey || e.ctrlKey;
       const alt = Boolean(e.altKey);
-      const key = String(e.key || '').toLowerCase();
+      // Physical-key token — never use raw e.key for product chords (macOS ⌥ glyphs)
+      const key =
+        typeof shortcutKeyFromEvent === 'function'
+          ? shortcutKeyFromEvent(e)
+          : typeof normalizeShortcutKey === 'function'
+            ? normalizeShortcutKey({
+                key: e.key,
+                code: e.code,
+                alt,
+              })
+            : String(e.key || '').toLowerCase();
       const ui = uiRef.current || {};
       const act = actionsRef.current || {};
       const doc = typeof document !== 'undefined' ? document : null;
@@ -5738,7 +6635,8 @@ export function PrModalApp({
         }
       }
 
-      // Diff selection shortcuts (only when not typing in an editable field)
+      // Diff selection shortcuts (only when not typing in an editable field).
+      // `key` is already code-normalized (⌥C → "c" even when e.key is "ç").
       const ae = typeof document !== 'undefined' ? document.activeElement : null;
       const typing =
         ae &&
@@ -5746,29 +6644,34 @@ export function PrModalApp({
           ? false
           : (ae as HTMLElement).isContentEditable ||
             /^(INPUT|TEXTAREA|SELECT)$/i.test((ae as HTMLElement).tagName || ''));
+      // Live store — App may not re-render on every selection change
+      const hasSel = Boolean(useModalStore.getState().lineSelection);
       if (
         !typing &&
         ui.layoutMode === LAYOUT_DIFF &&
         ui.showSelectionComposer &&
-        ui.hasLineSelection &&
+        hasSel &&
         key === 'c'
       ) {
         // ⌥C → Comment · ⌘C → Copy code · ⌘⌥C → Copy URL
         if (mod && alt) {
           e.preventDefault();
           e.stopPropagation();
+          reportShortcutAction('copySelectionUrl');
           void act.copySelectionUrl?.();
           return;
         }
         if (mod && !alt) {
           e.preventDefault();
           e.stopPropagation();
+          reportShortcutAction('copySelectionCode');
           void act.copySelectionCode?.();
           return;
         }
-        if (!mod && alt) {
+        if (!mod && alt && !e.shiftKey) {
           e.preventDefault();
           e.stopPropagation();
+          reportShortcutAction('openSelectionComment');
           act.openSelectionComment?.();
           return;
         }
@@ -5833,13 +6736,33 @@ export function PrModalApp({
           editorSaveRef.current = null;
           return;
         }
+        // Reply / other inputs: Esc blurs only — never close sheet or Diff.
+        {
+          const focusEl =
+            (typeof document !== 'undefined'
+              ? (document.activeElement as HTMLElement | null)
+              : null) || (e.target as HTMLElement | null);
+          if (isEditableKeyboardTarget(focusEl) || isEditableKeyboardTarget(e.target)) {
+            e.preventDefault();
+            e.stopPropagation();
+            try {
+              focusEl?.blur?.();
+            } catch {
+              /* ignore */
+            }
+            return;
+          }
+        }
         e.preventDefault();
         act.onClose?.();
         return;
       }
 
       const editable = isEditableKeyboardTarget(e.target);
-      const altOnly = Boolean(e.altKey) && !mod;
+      // Option product chords: allow Control+Option (⌥⌃R) but not ⌘+Option.
+      // `alt` already from e.altKey above (physical-key normalize).
+      const ctrlKey = Boolean(e.ctrlKey);
+      const altOnly = alt && !e.metaKey && !ctrlKey;
       const shift = Boolean(e.shiftKey);
 
       // Option / Option+Shift command actions (former mod → opt; no mod back-compat)
@@ -5860,15 +6783,30 @@ export function PrModalApp({
         const skipPeerForDiffViewed =
           ui.layoutMode === LAYOUT_DIFF &&
           shift &&
-          (String(e.code || '') === 'KeyR' ||
-            String(key || '').toLowerCase() === 'r') &&
+          key === 'r' &&
           (peer?.action === 'promptAddReviewer' ||
             peer?.id === 'opt-reviewer' ||
             peer?.id === 'add-reviewer');
         if (peer?.action && !skipPeerForDiffViewed) {
           e.preventDefault();
           e.stopPropagation();
-          setOptHintsSuppressed(true);
+          optHintsSuppressedRef.current = true;
+          syncOptHintsActive();
+          // Shortcut monitor: opt peer already has title + chord labels
+          if (typeof buildShortcutMonitorFireFromParts === 'function') {
+            const chord = isMac
+              ? peer.labelMac || peer.label
+              : peer.labelWin || peer.labelMac || peer.label;
+            reportShortcutMonitor(
+              buildShortcutMonitorFireFromParts(
+                String(chord || '?'),
+                String(peer.title || peer.action),
+                String(peer.action || '')
+              )
+            );
+          } else {
+            reportShortcutAction(String(peer.action));
+          }
           if (peer.action === 'openPalette') {
             setPaletteOpen(true);
             setPaletteQuery('');
@@ -5885,12 +6823,30 @@ export function PrModalApp({
         }
       }
 
+      // Live context — App often does not re-render on ⌥J/K focus (store leaf only),
+      // so uiRef.contextThreadActive can stay stale false and block ⌥C/F/D/⌃R.
+      const storeUi = useModalStore.getState();
+      const liveConvFocus = Boolean(
+        conversationCommentFocusRef.current ||
+          storeUi.focusedConversationAnchor ||
+          storeUi.pendingConversationNavAnchor
+      );
+      const onDiff =
+        ui.layoutMode === LAYOUT_DIFF || storeUi.layoutMode === LAYOUT_DIFF;
+      // Diff always exposes context chords; handlers seed commentIndex 0 if needed
+      // and no-op when there are no review threads.
+      // Conversation keep-alive focus must not win on Diff (hidden panel).
+      const liveContextThread = onDiff ? true : liveConvFocus;
+
       let action =
         typeof resolveModalShortcutAction === 'function'
           ? resolveModalShortcutAction({
-              mod: mod && !e.altKey,
+              // When Option is held, do not treat Ctrl/⌘ as "mod" — Ctrl pairs with ⌥ for resolve.
+              mod: mod && !alt,
               shift,
-              alt: altOnly,
+              alt: alt && !e.metaKey,
+              /** Physical Control (⌥⌃R resolve) — not ⌘/meta */
+              ctrl: ctrlKey,
               key,
               code: e.code,
               editingBody: ui.editingBody,
@@ -5901,9 +6857,8 @@ export function PrModalApp({
               searchOpen: Boolean(ui.searchOpen),
               hasLineSelection: Boolean(ui.hasLineSelection),
               layoutMode: ui.layoutMode,
-              conversationCommentFocused: Boolean(
-                ui.conversationCommentFocused ?? conversationCommentFocusRef.current
-              ),
+              conversationCommentFocused: liveConvFocus,
+              contextThreadActive: liveContextThread,
               presentation: isEmbed ? 'embed' : 'modal',
               isEmbed,
             })
@@ -5931,7 +6886,12 @@ export function PrModalApp({
       e.preventDefault();
       e.stopPropagation();
       // Opt-hold tips vanish immediately after a chord fires (until Opt release)
-      if (e.altKey) setOptHintsSuppressed(true);
+      if (e.altKey) {
+        optHintsSuppressedRef.current = true;
+        syncOptHintsActive();
+      }
+      // Bottom-right monitor — only real fires (resolved + about to run)
+      reportShortcutAction(String(action));
 
       switch (action) {
         case 'openPalette':
@@ -5940,6 +6900,9 @@ export function PrModalApp({
           break;
         case 'toggleDiff':
           act.onToggleDiff?.();
+          break;
+        case 'toggleSidePanel':
+          act.toggleSidePanel?.();
           break;
         case 'openSearch':
           setSearchOpen(true);
@@ -5964,25 +6927,45 @@ export function PrModalApp({
         case 'clearConversationCommentFocus':
           act.clearConversationCommentFocus?.();
           break;
+        case 'contextThreadFold':
+        case 'focusedThreadFold':
+          act.runContextThreadAction?.('fold');
+          break;
+        case 'contextThreadGotoDiff':
+        case 'focusedThreadGotoDiff':
+          act.runContextThreadAction?.('gotoDiff');
+          break;
+        case 'contextThreadComment':
+        case 'focusedThreadComment':
+          act.runContextThreadAction?.('comment');
+          break;
+        case 'contextThreadResolve':
+        case 'focusedThreadResolve':
+          act.runContextThreadAction?.('resolve');
+          break;
         case 'restoreNativeView':
           if (isEmbed && typeof onRestoreNative === 'function') {
             onRestoreNative();
           }
           break;
         case 'stepNavPrev':
-          // Find open → hit prev; else Diff thread prev (⌥K)
+          // Find → Diff threads → Conversation comments (⌥K)
           if (ui.searchOpen) {
             act.navSearch?.(-1);
           } else if (ui.layoutMode === LAYOUT_DIFF) {
             act.navComment?.(-1);
+          } else {
+            act.navConversationComment?.(-1);
           }
           break;
         case 'stepNavNext':
-          // Find open → hit next; else Diff thread next (⌥J)
+          // Find → Diff threads → Conversation comments (⌥J)
           if (ui.searchOpen) {
             act.navSearch?.(1);
           } else if (ui.layoutMode === LAYOUT_DIFF) {
             act.navComment?.(1);
+          } else {
+            act.navConversationComment?.(1);
           }
           break;
         case 'navFilePrev':
@@ -5996,6 +6979,32 @@ export function PrModalApp({
           break;
         case 'scrollDiffPageNext':
           if (ui.layoutMode === LAYOUT_DIFF) act.scrollDiffPage?.(1);
+          break;
+        case 'optArrowScrollSelectPrev':
+          if (ui.layoutMode === LAYOUT_DIFF) act.optArrowScrollSelect?.(-1);
+          break;
+        case 'optArrowScrollSelectNext':
+          if (ui.layoutMode === LAYOUT_DIFF) act.optArrowScrollSelect?.(1);
+          break;
+        case 'scrollConversationOptPrev':
+          if (ui.layoutMode !== LAYOUT_DIFF) {
+            act.scrollConversationPanel?.(-1, false);
+          }
+          break;
+        case 'scrollConversationOptNext':
+          if (ui.layoutMode !== LAYOUT_DIFF) {
+            act.scrollConversationPanel?.(1, false);
+          }
+          break;
+        case 'scrollConversationPagePrev':
+          if (ui.layoutMode !== LAYOUT_DIFF) {
+            act.scrollConversationPanel?.(-1, true);
+          }
+          break;
+        case 'scrollConversationPageNext':
+          if (ui.layoutMode !== LAYOUT_DIFF) {
+            act.scrollConversationPanel?.(1, true);
+          }
           break;
         case 'toggleViewedActiveFile':
           if (ui.layoutMode === LAYOUT_DIFF) act.toggleViewedActiveFile?.();
@@ -6114,15 +7123,12 @@ export function PrModalApp({
 
   return (
     <div
+      ref={overlayRef}
       className={`prp-overlay ${
         isEmbed ? 'prp-shell--embed' : shellClassName(shellMode)
       } ${fsCls}${
         !isEmbed && shellFullscreenHint ? ' prp-shell--fs-hint' : ''
-      } ${theme.className}${closing ? ' prp-overlay--leaving' : ''} ${presentCls}${
-        optHeld && !optHintsSuppressed && !paletteOpen && !confirmState
-          ? ' prp-opt-hints-on'
-          : ''
-      }`.trim()}
+      } ${theme.className}${closing ? ' prp-overlay--leaving' : ''} ${presentCls}`.trim()}
       tabIndex={-1}
       data-color-mode={theme.mode}
       data-presentation={isEmbed ? 'embed' : 'modal'}
@@ -6131,12 +7137,8 @@ export function PrModalApp({
       data-fs-hint={shellFullscreenHint ? '1' : '0'}
       data-layout={layoutMode === LAYOUT_DIFF ? 'diff' : 'conversation'}
       data-leaving={closing ? '1' : '0'}
-      data-opt-hints={
-        optHeld && !optHintsSuppressed && !paletteOpen && !confirmState
-          ? '1'
-          : '0'
-      }
     >
+      <OptHintsOverlayClass targetRef={overlayRef} />
       {!isEmbed ? (
         <div className="prp-backdrop" onClick={requestClose} />
       ) : null}
@@ -6190,6 +7192,11 @@ export function PrModalApp({
             if (useModalStore.getState().actionMsg) setActionMsg('');
           }}
         />
+        <ShortcutMonitor
+          enabled={open}
+          isMac={isMac}
+          dismissMs={SHORTCUT_MONITOR_DISMISS_MS}
+        />
         <Header
           detail={detail}
           onClose={showCloseChrome ? requestClose : undefined}
@@ -6204,9 +7211,6 @@ export function PrModalApp({
           baseBranchRef={baseBranchRef}
           sectionLoading={isInitialLoad}
           shortcutMod={shortcutMod}
-          showOptHints={
-            optHeld && !optHintsSuppressed && !paletteOpen && !confirmState
-          }
           shellMode={shellMode}
           onToggleShell={showShellToggleChrome ? onToggleShell : undefined}
           shellFullscreen={shellFullscreen}
@@ -6241,7 +7245,6 @@ export function PrModalApp({
           branches={stackPath.branches}
           resetKey={prIdentity}
           currentNumber={detail?.number ?? null}
-          showOptHotkeys={optHeld && !optHintsSuppressed && !paletteOpen}
           onOpenPr={(n: number) => {
             // Preserve current Diff / Conversation when hopping stacked PRs
             openStackOrListPr(n);
@@ -6269,13 +7272,6 @@ export function PrModalApp({
           onClose={onSearchClose}
           onNext={onSearchNext}
           onPrev={onSearchPrev}
-          showOptHints={
-            layoutMode !== LAYOUT_DIFF &&
-            optHeld &&
-            !optHintsSuppressed &&
-            !paletteOpen &&
-            !confirmState
-          }
         />
         {error ? <div className="prp-status prp-status--error">{error}</div> : null}
         {/*
@@ -6307,8 +7303,9 @@ export function PrModalApp({
                   }
                 : null
             }
+            onRegisterAsideToggle={onRegisterAsideToggle}
+            onRegisterContextThreadActions={onRegisterContextThreadActions}
             mentionCandidates={mentionCandidates}
-            focusedConversationAnchor={conversationCommentFocus?.anchor || null}
             commentText={commentText}
             setCommentText={setCommentText}
             actionBusy={actionBusy}
@@ -6377,10 +7374,6 @@ export function PrModalApp({
             assigneeAddRef={assigneeAddRef}
             labelAddRef={labelAddRef}
             milestoneAddRef={milestoneAddRef}
-            replyDrafts={replyDrafts}
-            onReplyDraft={(id: any, text: string) =>
-              setReplyDrafts((prev: any) => ({ ...prev, [String(id)]: text }))
-            }
             onReplyToThread={onReplyToThread}
             onResolveThread={onResolveThread}
             onOpenLinkedPr={(n: number) => openStackOrListPr(n)}
@@ -6389,13 +7382,6 @@ export function PrModalApp({
               .filter((n: number) => Number.isFinite(n) && n > 0)}
             /* Keep-alive conversation panel is still mounted in Diff — never
                portal Opt hints for a hidden panel (would paint over Diff). */
-            showOptHints={
-              layoutMode === LAYOUT_CENTERED &&
-              optHeld &&
-              !optHintsSuppressed &&
-              !paletteOpen &&
-              !confirmState
-            }
           />
           </div>
         ) : null}
@@ -6463,13 +7449,6 @@ export function PrModalApp({
               fileTotal={displayFiles.length}
               onPrevFile={() => navFile(-1)}
               onNextFile={() => navFile(1)}
-              showOptHints={
-                layoutMode === LAYOUT_DIFF &&
-                optHeld &&
-                !optHintsSuppressed &&
-                !paletteOpen &&
-                !confirmState
-              }
             />
             <div
               className="prp-file-nav-resizer"
@@ -6546,13 +7525,6 @@ export function PrModalApp({
                 onSearchClose={onSearchClose}
                 onSearchNext={onSearchNext}
                 onSearchPrev={onSearchPrev}
-                showOptHints={
-                  layoutMode === LAYOUT_DIFF &&
-                  optHeld &&
-                  !optHintsSuppressed &&
-                  !paletteOpen &&
-                  !confirmState
-                }
               />
               <DiffFloatingController
                 onPrevFile={() => navFile(-1)}
@@ -6579,6 +7551,7 @@ export function PrModalApp({
                   }
                 }}
                 listRef={listRef}
+                activeFilePath={activeFilePath}
                 highlightRowIndex={
                   hit?.rowIndex ??
                   (commentIndex >= 0 ? mappedComments[commentIndex]?.rowIndex : undefined)
@@ -6590,8 +7563,6 @@ export function PrModalApp({
                 searchHits={searchHits}
                 searchHitIndex={searchHitIndex}
                 onScroll={undefined}
-                selection={lineSelection}
-                selecting={selecting}
                 onSelectionStart={onSelectionStart}
                 onSelectionExtend={onSelectionExtend}
                 onSelectionEnd={onSelectionEnd}
@@ -6602,10 +7573,6 @@ export function PrModalApp({
                 viewedPaths={viewedPaths}
                 onToggleViewed={onToggleViewed}
                 threadsByCommentId={threadsByCommentId}
-                replyDrafts={replyDrafts}
-                onReplyDraft={(id, text) =>
-                  setReplyDrafts((prev) => ({ ...prev, [String(id)]: text }))
-                }
                 onReply={onReplyToThread}
                 pendingCount={totalPendingCount}
                 onResolve={onResolveThread}
@@ -6644,10 +7611,8 @@ export function PrModalApp({
                 onToggleThreadCollapse={onToggleThreadCollapse}
                 commentHeightOpts={commentHeightOpts}
                 selectionIsland={
-                  (showSelectionComposer || selectionIslandLeaving) &&
-                  lineSelection ? (
+                  showSelectionComposer || selectionIslandLeaving ? (
                     <SelectionCommentBar
-                      selection={lineSelection}
                       draft={selectionDraft}
                       onDraft={setSelectionDraft}
                       onSubmitImmediate={onSubmitSelectionCommentImmediate}

@@ -77,6 +77,8 @@ export interface PrDetail {
   merged?: boolean;
   mergeable?: boolean | null;
   mergeableState?: string | null;
+  /** Dual-modified paths (conflict candidates) when mergeable_state is dirty. */
+  conflictFiles?: string[];
   baseRef?: string;
   headRef?: string;
   baseSha?: string;

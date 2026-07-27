@@ -27,8 +27,6 @@ export type StepNavProps = {
   prevShortcut?: string | null;
   /** Keyboard chord shown in tip (e.g. ⌥J / Alt+J) */
   nextShortcut?: string | null;
-  /** Option-hold: show shortcut badges on prev/next */
-  showOptHints?: boolean;
 };
 
 /**
@@ -38,6 +36,7 @@ export type StepNavProps = {
  *
  * Order: n/m · ↑ · ↓. Prev and next share the same fixed width.
  * Tips show description + shortcut when provided.
+ * Opt-hold badges: OptBtnHint leaf-subscribes to modal store.
  */
 export const StepNav = memo(function StepNav({
   index = -1,
@@ -56,7 +55,6 @@ export const StepNav = memo(function StepNav({
   nextTitle = 'Next',
   prevShortcut = null,
   nextShortcut = null,
-  showOptHints = false,
 }: StepNavProps) {
   const n = Math.max(0, Number(total) || 0);
   const i = Number(index);
@@ -102,11 +100,7 @@ export const StepNav = memo(function StepNav({
         aria-label={prevKbd ? `${prevTip} (${prevKbd})` : prevTip}
       >
         {prevKbd ? (
-          <OptBtnHint
-            show={Boolean(showOptHints && prevKbd)}
-            label={prevKbd}
-            preferredPlacement="top"
-          />
+          <OptBtnHint label={prevKbd} preferredPlacement="top" />
         ) : null}
         {prevGlyph}
         <TipPopover
@@ -125,11 +119,7 @@ export const StepNav = memo(function StepNav({
         aria-label={nextKbd ? `${nextTip} (${nextKbd})` : nextTip}
       >
         {nextKbd ? (
-          <OptBtnHint
-            show={Boolean(showOptHints && nextKbd)}
-            label={nextKbd}
-            preferredPlacement="top"
-          />
+          <OptBtnHint label={nextKbd} preferredPlacement="top" />
         ) : null}
         {nextGlyph}
         <TipPopover

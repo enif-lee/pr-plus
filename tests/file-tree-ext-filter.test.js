@@ -12,11 +12,15 @@ const {
   formatFileExtensionLabel,
   collectDirPaths,
   buildNestedFileTree,
+  filesInTreeOrder,
   hasAnyReviewThreads,
   filterFilesByReviewMode,
   filterFilesWithReviewThreads,
   filterFilesUnreadOnly,
 } = require('../src/modal/lib/file-tree.ts');
+const {
+  resolveAdjacentFileNav,
+} = require('../src/modal/lib/shortcut-policy.ts');
 
 assert.equal(fileExtensionFromPath('src/a.ts'), 'ts');
 assert.equal(fileExtensionFromPath('README.md'), 'md');
@@ -56,6 +60,50 @@ const tree = buildNestedFileTree(files);
 const dirs = collectDirPaths(tree);
 assert.ok(dirs.has('src'));
 assert.ok(dirs.has('docs'));
+
+// Explorer order: dirs-first + name sort DFS (not API insertion order)
+{
+  // API-ish order: root file first, then nested mixed
+  const apiOrder = [
+    { filename: 'z-root.ts' },
+    { filename: 'src/b.ts' },
+    { filename: 'a-dir/x.ts' },
+    { filename: 'src/a.ts' },
+    { filename: 'README.md' },
+  ];
+  const ordered = filesInTreeOrder(apiOrder);
+  assert.deepEqual(
+    ordered.map((f) => f.filename),
+    [
+      'a-dir/x.ts', // dirs first: a-dir before src, before root files
+      'src/a.ts', // within src: a before b
+      'src/b.ts',
+      'README.md', // root files alpha after dirs
+      'z-root.ts',
+    ],
+    'filesInTreeOrder matches left explorer sort'
+  );
+  // Tree next: a-dir/x → src/a
+  assert.equal(
+    resolveAdjacentFileNav(ordered, 'a-dir/x.ts', 1).path,
+    'src/a.ts'
+  );
+  // API next from z-root differs from tree (tree: last → wrap to a-dir)
+  assert.equal(
+    resolveAdjacentFileNav(apiOrder, 'z-root.ts', 1).path,
+    'src/b.ts',
+    'API order next from z-root is src/b'
+  );
+  assert.equal(
+    resolveAdjacentFileNav(ordered, 'z-root.ts', 1).path,
+    'a-dir/x.ts',
+    'tree order: z-root is last → next wraps to first (a-dir/x)'
+  );
+  assert.equal(
+    resolveAdjacentFileNav(ordered, 'src/b.ts', 1).path,
+    'README.md'
+  );
+}
 
 // Default: all dirs expanded when PR files first load
 {
@@ -193,6 +241,23 @@ const appSrc = fs.readFileSync(
 );
 assert.ok(appSrc.includes('filterFilesByReviewMode'), 'App filters files for nav+diff');
 assert.ok(appSrc.includes('displayFiles'), 'shared filtered list for nav+diff');
+assert.ok(
+  /displayFiles\s*=\s*useMemo[\s\S]*filesInTreeOrder/.test(appSrc) ||
+    (appSrc.includes('filesInTreeOrder') &&
+      appSrc.includes('displayFiles') &&
+      /filesInTreeOrder\(list\)/.test(appSrc)),
+  'displayFiles is DFS tree-ordered (Diff + explorer + prev/next share it)'
+);
+assert.ok(
+  /resolveAdjacentFileNav\(\s*displayFiles/.test(appSrc) ||
+    /resolveAdjacentFileNav\(displayFiles/.test(appSrc),
+  'prev/next uses displayFiles (DFS)'
+);
+assert.ok(
+  appSrc.includes('flattenFilesToVirtualRows(diffDisplayFiles') ||
+    appSrc.includes('flattenFilesToVirtualRows(diffDisplayFiles,'),
+  'Diff virtual rows come from diffDisplayFiles ← displayFiles DFS'
+);
 assert.ok(appSrc.includes('reviewScopedFiles'), 'resolve-status-only list for ext chips');
 assert.ok(appSrc.includes('extSourceFiles'), 'passes ext source files to tree');
 assert.ok(appSrc.includes('filterReviewRootsForNav'), 'nav roots respect review filter');
@@ -240,8 +305,9 @@ assert.ok(
   'search stack is column (input full-width, tags below)'
 );
 assert.ok(
-  /prp-filetree__search-input[\s\S]{0,200}width:\s*100%/.test(css),
-  'name filter input stretches full width'
+  /prp-filetree__search-input[\s\S]{0,120}flex:\s*1\s+1\s+auto/.test(css) ||
+    /prp-filetree__search-input[\s\S]{0,200}width:\s*100%/.test(css),
+  'name filter input stretches in search row (flex or width 100%)'
 );
 
 console.log('file-tree-ext-filter.test.js: all assertions passed');

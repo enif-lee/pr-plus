@@ -62,6 +62,70 @@ const DIFF_PAGE_SCROLL_SHORTCUT = {
   },
 };
 
+/** Option+Arrow (no Shift): Diff selection jump / Conversation panel scroll. */
+const DIFF_OPT_ARROW_SHORTCUT = {
+  selectionSteps: 8,
+  scrollStepScale: 1,
+  conversationRowHeight: 48,
+  prev: {
+    key: 'arrowup',
+    code: 'ArrowUp',
+    action: 'optArrowScrollSelectPrev',
+    chord: 'opt+arrowup',
+    labelMac: '⌥↑',
+    labelWin: 'Alt+↑',
+  },
+  next: {
+    key: 'arrowdown',
+    code: 'ArrowDown',
+    action: 'optArrowScrollSelectNext',
+    chord: 'opt+arrowdown',
+    labelMac: '⌥↓',
+    labelWin: 'Alt+↓',
+  },
+};
+
+const CONVERSATION_SCROLL_SHORTCUT = {
+  optPrev: {
+    action: 'scrollConversationOptPrev',
+    chord: 'opt+arrowup',
+    labelMac: '⌥↑',
+    labelWin: 'Alt+↑',
+  },
+  optNext: {
+    action: 'scrollConversationOptNext',
+    chord: 'opt+arrowdown',
+    labelMac: '⌥↓',
+    labelWin: 'Alt+↓',
+  },
+  pagePrev: {
+    action: 'scrollConversationPagePrev',
+    chord: 'opt+shift+arrowup',
+    labelMac: '⌥⇧↑',
+    labelWin: 'Alt+Shift+↑',
+  },
+  pageNext: {
+    action: 'scrollConversationPageNext',
+    chord: 'opt+shift+arrowdown',
+    labelMac: '⌥⇧↓',
+    labelWin: 'Alt+Shift+↓',
+  },
+};
+
+function optArrowScrollDeltaPx(dir, rowHeight, viewportHeight) {
+  const d = dir < 0 ? -1 : 1;
+  const rh = Math.max(1, Number(rowHeight) || 22);
+  const steps = Number(DIFF_OPT_ARROW_SHORTCUT.selectionSteps) || 8;
+  const scale = Number(DIFF_OPT_ARROW_SHORTCUT.scrollStepScale) || 1;
+  let dy = d * steps * rh * scale;
+  const vp = Math.max(0, Number(viewportHeight) || 0);
+  if (vp > 0) {
+    const cap = Math.floor(vp * 0.5);
+    if (Math.abs(dy) > cap) dy = d * cap;
+  }
+  return dy;
+}
+
 const TOGGLE_VIEWED_SHORTCUT = {
   key: 'r',
   code: 'KeyR',
@@ -69,6 +133,16 @@ const TOGGLE_VIEWED_SHORTCUT = {
   chord: 'opt+shift+r',
   labelMac: '⌥⇧R',
   labelWin: 'Alt+Shift+R',
+};
+
+/** Option+B — Diff files nav / Conversation metadata rail. */
+const TOGGLE_SIDE_PANEL_SHORTCUT = {
+  key: 'b',
+  code: 'KeyB',
+  action: 'toggleSidePanel',
+  chord: 'opt+b',
+  labelMac: '⌥B',
+  labelWin: 'Alt+B',
 };
 
 const REVIEW_FILTER_SHORTCUT = {
@@ -226,32 +300,102 @@ function __resetGithubPaletteWatchForTests() {
 }
 
 /**
+ * Map KeyboardEvent.code → canonical shortcut token (physical layout).
+ * @param {unknown} code
+ * @returns {string|null}
+ */
+function keyTokenFromCode(code) {
+  const c = String(code || '');
+  if (!c) return null;
+  const letter = c.match(/^Key([A-Z])$/i);
+  if (letter) return letter[1].toLowerCase();
+  const digit = c.match(/^Digit([0-9])$/i) || c.match(/^Numpad([0-9])$/i);
+  if (digit) return digit[1];
+  switch (c) {
+    case 'BracketLeft':
+      return '[';
+    case 'BracketRight':
+      return ']';
+    case 'Period':
+      return '.';
+    case 'Comma':
+      return ',';
+    case 'Slash':
+      return '/';
+    case 'Backslash':
+      return '\\';
+    case 'Minus':
+      return '-';
+    case 'Equal':
+      return '=';
+    case 'Semicolon':
+      return ';';
+    case 'Quote':
+      return "'";
+    case 'Backquote':
+      return '`';
+    case 'Enter':
+    case 'NumpadEnter':
+      return 'enter';
+    case 'Escape':
+      return 'escape';
+    case 'Space':
+      return ' ';
+    case 'Tab':
+      return 'tab';
+    case 'Backspace':
+      return 'backspace';
+    case 'Delete':
+      return 'delete';
+    case 'ArrowUp':
+      return 'arrowup';
+    case 'ArrowDown':
+      return 'arrowdown';
+    case 'ArrowLeft':
+      return 'arrowleft';
+    case 'ArrowRight':
+      return 'arrowright';
+    default:
+      return null;
+  }
+}
+
+function isOptionGlyphKey(key) {
+  const k = String(key || '');
+  if (!k) return false;
+  if (/^[a-zA-Z0-9]$/.test(k)) return false;
+  if (/^[\[\].,\/\\;'`=\-]$/.test(k)) return false;
+  if (
+    /^(escape|enter|tab|backspace|delete|arrowup|arrowdown|arrowleft|arrowright| |space)$/i.test(
+      k
+    )
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Normalize key for shortcut matching — always prefers KeyboardEvent.code.
  * @param {{ key?: string, code?: string, alt?: boolean }} opts
  * @returns {string}
  */
 function normalizeShortcutKey(opts = {}) {
-  const alt = Boolean(opts.alt);
-  const code = String(opts.code || '');
-  if (alt) {
-    if (code === 'KeyJ' || code === 'keyj') return 'j';
-    if (code === 'KeyK' || code === 'keyk') return 'k';
-    if (code === 'KeyR' || code === 'keyr') return 'r';
-    if (code === 'KeyU' || code === 'keyu') return 'u';
-    if (code === 'KeyP' || code === 'keyp') return 'p';
-    if (code === 'BracketLeft') return '[';
-    if (code === 'BracketRight') return ']';
-    if (code === 'Period') return '.';
-    if (code === 'Enter' || code === 'NumpadEnter') return 'enter';
-    if (code === 'ArrowUp') return 'arrowup';
-    if (code === 'ArrowDown') return 'arrowdown';
-    const dm = code.match(/^Digit([1-9])$/i) || code.match(/^Numpad([1-9])$/i);
-    if (dm) return dm[1];
-  }
-  if (code === 'Period') return '.';
-  if (code === 'Enter' || code === 'NumpadEnter') return 'enter';
-  if (code === 'ArrowUp') return 'arrowup';
-  if (code === 'ArrowDown') return 'arrowdown';
-  return String(opts.key || '').toLowerCase();
+  const fromCode = keyTokenFromCode(opts.code);
+  if (fromCode != null) return fromCode;
+  const raw = String(opts.key || '');
+  if (isOptionGlyphKey(raw)) return raw.toLowerCase();
+  if (raw === ' ') return ' ';
+  return raw.toLowerCase();
+}
+
+function shortcutKeyFromEvent(e) {
+  if (!e) return '';
+  return normalizeShortcutKey({
+    key: e.key,
+    code: e.code,
+    alt: Boolean(e.altKey),
+  });
 }
 
 /**
@@ -360,13 +504,38 @@ function resolveModalShortcutAction(opts = {}) {
       : FILE_NAV_SHORTCUT.next.action;
   }
 
-  // ⌥⇧↑ / ⌥⇧↓: scroll Diff by roughly one viewport page
+  // ⌥⇧↑ / ⌥⇧↓: page-scroll Diff or Conversation panel
   if (alt && !mod && shift && (key === 'arrowup' || key === 'arrowdown')) {
     if (opts.editableTarget) return null;
-    if (String(opts.layoutMode || '') !== 'diff') return null;
-    return key === 'arrowup'
-      ? DIFF_PAGE_SCROLL_SHORTCUT.prev.action
-      : DIFF_PAGE_SCROLL_SHORTCUT.next.action;
+    const layout = String(opts.layoutMode || '');
+    if (layout === 'diff') {
+      return key === 'arrowup'
+        ? DIFF_PAGE_SCROLL_SHORTCUT.prev.action
+        : DIFF_PAGE_SCROLL_SHORTCUT.next.action;
+    }
+    if (layout === 'centered' || layout === 'conversation') {
+      return key === 'arrowup'
+        ? CONVERSATION_SCROLL_SHORTCUT.pagePrev.action
+        : CONVERSATION_SCROLL_SHORTCUT.pageNext.action;
+    }
+    return null;
+  }
+
+  // ⌥↑ / ⌥↓: Diff selection jump or Conversation panel scroll
+  if (alt && !mod && !shift && (key === 'arrowup' || key === 'arrowdown')) {
+    if (opts.editableTarget) return null;
+    const layout = String(opts.layoutMode || '');
+    if (layout === 'diff') {
+      return key === 'arrowup'
+        ? DIFF_OPT_ARROW_SHORTCUT.prev.action
+        : DIFF_OPT_ARROW_SHORTCUT.next.action;
+    }
+    if (layout === 'centered' || layout === 'conversation') {
+      return key === 'arrowup'
+        ? CONVERSATION_SCROLL_SHORTCUT.optPrev.action
+        : CONVERSATION_SCROLL_SHORTCUT.optNext.action;
+    }
+    return null;
   }
 
   // ⌥⇧R: toggle viewed/unread for the active Diff file
@@ -376,11 +545,18 @@ function resolveModalShortcutAction(opts = {}) {
     return TOGGLE_VIEWED_SHORTCUT.action;
   }
 
-  // ⌥J / ⌥K (Alt+J/K): step prev/next for Find hits or review threads
+  // ⌥J / ⌥K: Find hits, Diff threads, or Conversation comments
   if (alt && !mod && !shift && (key === 'j' || key === 'k')) {
     if (opts.editableTarget && !opts.searchOpen) return null;
     const layout = String(opts.layoutMode || '');
-    if (!opts.searchOpen && layout !== 'diff') return null;
+    if (
+      !opts.searchOpen &&
+      layout !== 'diff' &&
+      layout !== 'centered' &&
+      layout !== 'conversation'
+    ) {
+      return null;
+    }
     return key === 'k'
       ? STEP_NAV_SHORTCUT.prev.action
       : STEP_NAV_SHORTCUT.next.action;
@@ -402,13 +578,12 @@ function resolveModalShortcutAction(opts = {}) {
     if (/^[1-9]$/.test(key)) return `navStackDigit${key}`;
   }
 
-  // Diff line-selection move when selection active
+  // Diff line-selection move — seed first file line when no selection yet
   if (
     !alt &&
     !mod &&
     (key === 'arrowup' || key === 'arrowdown') &&
-    String(opts.layoutMode || '') === 'diff' &&
-    opts.hasLineSelection
+    String(opts.layoutMode || '') === 'diff'
   ) {
     if (opts.editableTarget) return null;
     if (shift) {
@@ -446,10 +621,19 @@ function resolveModalShortcutAction(opts = {}) {
 
   if (shift) return null;
 
+  // ⌥B → toggle Diff files nav / Conversation metadata rail
+  if (key === 'b') return TOGGLE_SIDE_PANEL_SHORTCUT.action;
+
   // ⌥. → toggle Diff
   if (key === '.' || key === 'period') return 'toggleDiff';
 
   return null;
+}
+
+function sidePanelShortcutLabel(isMac = false) {
+  return isMac
+    ? TOGGLE_SIDE_PANEL_SHORTCUT.labelMac
+    : TOGGLE_SIDE_PANEL_SHORTCUT.labelWin;
 }
 
 /**
@@ -490,14 +674,95 @@ function pickConversationCommentFocusTarget(items) {
   return null;
 }
 
+/** One navigable stop per thread (root only — not per-reply). */
+function pushThreadFocusTarget(out, thread) {
+  if (!thread || thread.id == null) return;
+  out.push({
+    id: String(thread.id),
+    kind: 'review-thread',
+    anchor: 'review-comment:' + thread.id,
+  });
+}
+
+/**
+ * Page order: review-group → each included thread unit → standalone threads.
+ * Does not step into individual replies.
+ */
+function listConversationCommentFocusTargets(items) {
+  const list = Array.isArray(items) ? items : [];
+  const out = [];
+  for (const item of list) {
+    if (!item) continue;
+    if (item.kind === 'review-group' && item.pending) continue;
+
+    if (item.kind === 'review-group') {
+      out.push({
+        id: String(item.id),
+        kind: 'review-group',
+        anchor: 'review-group:' + item.id,
+      });
+      for (const t of item.threads || []) {
+        pushThreadFocusTarget(out, t);
+      }
+      continue;
+    }
+
+    if (item.kind === 'review-thread' || item.kind === 'review-comment') {
+      pushThreadFocusTarget(out, item);
+      continue;
+    }
+
+    const anchor = conversationCommentFocusAnchor(item);
+    if (!anchor) continue;
+    out.push({
+      id: String(item.id),
+      kind: String(item.kind || ''),
+      anchor: anchor,
+    });
+  }
+  return out;
+}
+
+function stepConversationCommentFocus(items, currentAnchor, delta) {
+  const targets = listConversationCommentFocusTargets(items);
+  if (!targets.length) return null;
+  const d = delta < 0 ? -1 : 1;
+  const cur = String(currentAnchor || '').trim();
+  let idx = cur ? targets.findIndex((t) => t.anchor === cur) : -1;
+  if (idx < 0) {
+    return d > 0 ? targets[0] : targets[targets.length - 1];
+  }
+  const next = ((idx + d) % targets.length + targets.length) % targets.length;
+  return targets[next];
+}
+
+function applyScrollerDelta(el, deltaPx) {
+  if (!el || typeof el.scrollTop !== 'number') return 0;
+  const top = Math.max(0, Number(el.scrollTop) || 0);
+  const vh = Math.max(0, Number(el.clientHeight) || 0);
+  const sh = Math.max(0, Number(el.scrollHeight) || 0);
+  const max = Math.max(0, sh - vh);
+  const next = Math.min(max, Math.max(0, top + (Number(deltaPx) || 0)));
+  el.scrollTop = next;
+  return next;
+}
+
 const api = {
   STEP_NAV_SHORTCUT,
   FILE_NAV_SHORTCUT,
   DIFF_PAGE_SCROLL_SHORTCUT,
+  DIFF_OPT_ARROW_SHORTCUT,
+  CONVERSATION_SCROLL_SHORTCUT,
+  optArrowScrollDeltaPx,
   TOGGLE_VIEWED_SHORTCUT,
+  TOGGLE_SIDE_PANEL_SHORTCUT,
+  sidePanelShortcutLabel,
   REVIEW_FILTER_SHORTCUT,
   toggleReviewFilter,
   nextScrollTopByPage,
+  listConversationCommentFocusTargets,
+  stepConversationCommentFocus,
+  applyScrollerDelta,
   GITHUB_COMMAND_PALETTE_SELECTOR,
   GITHUB_PALETTE_ESCAPE_GRACE_MS,
   findGithubCommandPaletteDialog,
@@ -506,7 +771,10 @@ const api = {
   touchGithubCommandPaletteOpen,
   shouldIgnoreModalEscapeForGithubPalette,
   __resetGithubPaletteWatchForTests,
+  keyTokenFromCode,
+  isOptionGlyphKey,
   normalizeShortcutKey,
+  shortcutKeyFromEvent,
   stepNavShortcutLabel,
   fileNavShortcutLabel,
   activeFileNavIndex,

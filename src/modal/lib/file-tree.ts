@@ -60,6 +60,35 @@ export function buildNestedFileTree(files) {
 }
 
 /**
+ * Files in explorer / Diff / step-nav order: nested tree, dirs-first + name
+ * sort at each level, DFS walk. Prefer this over raw GitHub `files[]` order so
+ * Diff virtual list, left file tree, and prev/next file all agree.
+ *
+ * @param {Array<{ filename?: string, path?: string }>} files
+ * @returns {Array<{ filename?: string, path?: string }>}
+ */
+export function filesInTreeOrder(files) {
+  const list = Array.isArray(files) ? files : [];
+  if (!list.length) return [];
+  const tree = buildNestedFileTree(list);
+  const out = [];
+  function walk(nodes) {
+    if (!Array.isArray(nodes)) return;
+    for (const n of nodes) {
+      if (!n) continue;
+      if (n.type === 'file') {
+        if (n.file) out.push(n.file);
+        else if (n.path) out.push({ filename: n.path, path: n.path });
+        continue;
+      }
+      if (n.type === 'dir' && n.children) walk(n.children);
+    }
+  }
+  walk(tree);
+  return out;
+}
+
+/**
  * Flatten tree for rendering with depth.
  * @param {TreeNode[]} nodes
  * @param {Set<string>|Map} [expandedDirs] dirs currently expanded (paths)

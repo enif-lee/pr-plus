@@ -199,7 +199,7 @@ export function IconMergeStatus({
   if (kind === 'merged') return <GitMergeIcon size={size} className={cls} aria-hidden="true" />;
   if (kind === 'clean')
     return <CheckCircleFillIcon size={size} className={cls} aria-hidden="true" />;
-  if (kind === 'blocked')
+  if (kind === 'blocked' || kind === 'conflicts')
     return <XCircleFillIcon size={size} className={cls} aria-hidden="true" />;
   if (kind === 'draft')
     return <GitPullRequestDraftIcon size={size} className={cls} aria-hidden="true" />;

@@ -11,7 +11,14 @@ export type MergeCtaVariant = 'ok' | 'warn' | 'danger' | 'default';
 export type MergeMethod = 'merge' | 'squash' | 'rebase';
 
 export interface MergeBoxStatus {
-  kind: 'merged' | 'draft' | 'blocked' | 'clean' | 'unstable' | 'unknown';
+  kind:
+    | 'merged'
+    | 'draft'
+    | 'blocked'
+    | 'conflicts'
+    | 'clean'
+    | 'unstable'
+    | 'unknown';
   tone: MergeBoxTone;
   /** Primary status line (GitHub-like). */
   headline: string;
@@ -33,6 +40,84 @@ export interface MergeBoxStatus {
   showUpdateBranch: boolean;
   /** 'ready' | 'draft' | null when toggle not shown */
   draftToggle: 'ready' | 'draft' | null;
+  /** Merge conflicts with base — show Resolve conflicts CTA (not force-merge). */
+  showResolveConflicts: boolean;
+  /** Paths that conflict (may be empty while still dirty). */
+  conflictFiles: string[];
+  /** Absolute URL to GitHub's web conflict editor, or null. */
+  resolveConflictsUrl: string | null;
+}
+
+function emptyConflictFields(): Pick<
+  MergeBoxStatus,
+  'showResolveConflicts' | 'conflictFiles' | 'resolveConflictsUrl'
+> {
+  return {
+    showResolveConflicts: false,
+    conflictFiles: [],
+    resolveConflictsUrl: null,
+  };
+}
+
+/**
+ * Normalize conflict file paths from a detail snapshot.
+ */
+export function normalizeConflictFiles(detail: any): string[] {
+  const raw =
+    detail?.conflictFiles ??
+    detail?.conflict_files ??
+    detail?.conflictingFiles ??
+    null;
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    const p =
+      typeof item === 'string'
+        ? item.trim()
+        : String(item?.path || item?.filename || item?.filePath || '').trim();
+    if (!p || seen.has(p)) continue;
+    seen.add(p);
+    out.push(p);
+  }
+  return out;
+}
+
+/**
+ * GitHub web UI conflict editor for this PR.
+ * https://github.com/{owner}/{repo}/pull/{n}/conflicts
+ */
+export function buildResolveConflictsUrl(detail: any): string | null {
+  const d = detail || {};
+  const html = String(d.htmlUrl || d.html_url || '').trim().replace(/\/+$/, '');
+  if (html && /\/pull\/\d+/i.test(html)) {
+    return `${html}/conflicts`;
+  }
+  const owner = String(d.owner || '').trim();
+  const repo = String(d.repo || '').trim();
+  const num = Number(d.number);
+  if (!owner || !repo || !Number.isFinite(num) || num <= 0) return null;
+  return `https://github.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pull/${num}/conflicts`;
+}
+
+/**
+ * True when GitHub reports merge conflicts (dirty / mergeable=false not policy-blocked).
+ */
+export function isMergeConflictState(detail: any): boolean {
+  const d = detail || {};
+  const mergeableState = String(d.mergeableState || d.mergeable_state || '')
+    .trim()
+    .toLowerCase();
+  if (mergeableState === 'dirty') return true;
+  if (d.mergeable === false && mergeableState !== 'blocked') return true;
+  // GraphQL-style string enums sometimes stored on detail
+  const gq = String(d.mergeable || '').toUpperCase();
+  if (gq === 'CONFLICTING') return true;
+  const mss = String(d.mergeStateStatus || d.merge_state_status || '')
+    .trim()
+    .toUpperCase();
+  if (mss === 'DIRTY') return true;
+  return false;
 }
 
 export const MERGE_METHODS: Array<{ id: MergeMethod; label: string; description: string }> = [
@@ -158,6 +243,7 @@ export function buildMergeBoxStatus(detail: any): MergeBoxStatus {
       ctaVariant: 'default',
       showUpdateBranch: false,
       draftToggle: null,
+      ...emptyConflictFields(),
     };
   }
 
@@ -175,6 +261,7 @@ export function buildMergeBoxStatus(detail: any): MergeBoxStatus {
       ctaVariant: 'default',
       showUpdateBranch: false,
       draftToggle: null,
+      ...emptyConflictFields(),
     };
   }
 
@@ -192,31 +279,39 @@ export function buildMergeBoxStatus(detail: any): MergeBoxStatus {
       ctaVariant: 'default',
       showUpdateBranch: true,
       draftToggle: 'ready',
+      ...emptyConflictFields(),
     };
   }
 
   // Conflicts (dirty / mergeable=false without policy "blocked") cannot be
   // force-merged via the API — only resolve conflicts. Force CTA is only for
   // policy-blocked PRs when the viewer may bypass rules (admin).
-  const isDirty =
-    mergeableState === 'dirty' ||
-    (d.mergeable === false && mergeableState !== 'blocked');
+  const isDirty = isMergeConflictState(d);
   const isPolicyBlocked = mergeableState === 'blocked';
+  const conflictFiles = normalizeConflictFiles(d);
+  const resolveConflictsUrl = buildResolveConflictsUrl(d);
 
   if (isDirty) {
+    const n = conflictFiles.length;
+    const helper =
+      n > 0
+        ? `Use the web editor or the command line to resolve conflicts before continuing. ${n} conflicting file${n === 1 ? '' : 's'} listed below.`
+        : 'Use the web editor or the command line to resolve conflicts before continuing.';
     return {
-      kind: 'blocked',
+      kind: 'conflicts',
       tone: 'danger',
       headline: 'This branch has conflicts that must be resolved',
-      helper:
-        'You can resolve conflicts via the command line or GitHub web UI, then update this branch.',
+      helper,
       checksLine,
-      showMerge: true,
+      showMerge: false,
       canMerge: false,
       forceMerge: false,
       ctaVariant: 'danger',
       showUpdateBranch: true,
       draftToggle: 'draft',
+      showResolveConflicts: true,
+      conflictFiles,
+      resolveConflictsUrl,
     };
   }
 
@@ -237,6 +332,7 @@ export function buildMergeBoxStatus(detail: any): MergeBoxStatus {
       ctaVariant: 'danger',
       showUpdateBranch: true,
       draftToggle: 'draft',
+      ...emptyConflictFields(),
     };
   }
 
@@ -254,6 +350,7 @@ export function buildMergeBoxStatus(detail: any): MergeBoxStatus {
       ctaVariant: 'default',
       showUpdateBranch: true,
       draftToggle: 'draft',
+      ...emptyConflictFields(),
     };
   }
 
@@ -283,6 +380,7 @@ export function buildMergeBoxStatus(detail: any): MergeBoxStatus {
       ctaVariant: 'warn',
       showUpdateBranch: true,
       draftToggle: 'draft',
+      ...emptyConflictFields(),
     };
   }
 
@@ -299,5 +397,6 @@ export function buildMergeBoxStatus(detail: any): MergeBoxStatus {
     ctaVariant: 'ok',
     showUpdateBranch: true,
     draftToggle: 'draft',
+    ...emptyConflictFields(),
   };
 }

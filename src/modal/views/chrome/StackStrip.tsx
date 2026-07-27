@@ -7,6 +7,7 @@ import {
   reduceStackPathHover,
 } from '@lib/ui-polish';
 import { FloatingScrollbar } from '../../components/common/FloatingScrollbar';
+import { useModalStore } from '../../store/modal-store';
 
 /**
  * Stack path strip.
@@ -27,6 +28,8 @@ export function StackStrip({
   /** Open PR number — authoritative for current chip focus */
   currentNumber = null,
 }: any) {
+  const storeOptHints = useModalStore((s) => s.optHintsActive);
+  const showHotkeys = showOptHotkeys || storeOptHints;
   const branchByLevel = useMemo(() => {
     const m = new Map<number, any>();
     for (const b of Array.isArray(branches) ? branches : []) {
@@ -287,7 +290,7 @@ export function StackStrip({
                     ▾
                   </span>
                 ) : null}
-                {showOptHotkeys && digit != null ? (
+                {showHotkeys && digit != null ? (
                   <kbd className="prp-modal-hotkey" aria-hidden="true">
                     ⌥{digit}
                   </kbd>

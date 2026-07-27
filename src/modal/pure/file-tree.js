@@ -59,6 +59,31 @@ function buildNestedFileTree(files) {
 }
 
 /**
+ * Explorer / Diff / step-nav order (dirs-first + name sort DFS).
+ * Prefer over raw PR files[] so Diff list, tree, and prev/next agree.
+ */
+function filesInTreeOrder(files) {
+  const list = Array.isArray(files) ? files : [];
+  if (!list.length) return [];
+  const tree = buildNestedFileTree(list);
+  const out = [];
+  function walk(nodes) {
+    if (!Array.isArray(nodes)) return;
+    for (const n of nodes) {
+      if (!n) continue;
+      if (n.type === 'file') {
+        if (n.file) out.push(n.file);
+        else if (n.path) out.push({ filename: n.path, path: n.path });
+        continue;
+      }
+      if (n.type === 'dir' && n.children) walk(n.children);
+    }
+  }
+  walk(tree);
+  return out;
+}
+
+/**
  * Flatten tree for rendering with depth.
  * @param {TreeNode[]} nodes
  * @param {Set<string>|Map} [expandedDirs] dirs currently expanded (paths)
@@ -276,6 +301,7 @@ function collectDirPaths(nodes) {
 
 const api = {
   buildNestedFileTree,
+  filesInTreeOrder,
   flattenVisibleTree,
   fileExtensionFromPath,
   listFileExtensions,

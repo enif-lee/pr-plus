@@ -240,6 +240,7 @@ export function resolvePrModalOptAction(opts: {
     payload: (def as any).payload || {},
     key: def.key,
     labelMac: def.labelMac,
+    labelWin: def.labelWin,
     shift: Boolean(def.shift),
   });
 
@@ -258,13 +259,17 @@ export function resolvePrModalOptAction(opts: {
     }
   }
 
-  // Fallback: single-char key or period
+  // Fallback when code missing: ASCII letter/digit/. only (glyphs need code)
   const rawKey = String(opts.key || '');
   let letter = '';
   if (rawKey === '.' || rawKey === 'Period') letter = '.';
   else if (rawKey === 'Enter') letter = 'Enter';
   else if (/^[a-zA-Z0-9]$/.test(rawKey)) letter = rawKey.toLowerCase();
-  else return null;
+  else {
+    // code-based recovery if caller passed a macOS Option glyph as key
+    // but forgot code — cannot map glyph alone
+    return null;
+  }
 
   for (const def of PR_MODAL_OPT_ACTIONS) {
     if (Boolean(def.shift) !== shift) continue;
@@ -311,8 +316,199 @@ export function optShortcutForCommandId(commandId: string): string | null {
     'review-approve': 'opt+shift+enter',
     'review-changes': 'opt+shift+x',
     'apply-suggestion': 'opt+shift+s',
+    // Diff view
+    'diff-prev-file': 'opt+shift+[',
+    'diff-next-file': 'opt+shift+]',
+    'diff-page-up': 'opt+shift+arrowup',
+    'diff-page-down': 'opt+shift+arrowdown',
+    'diff-opt-arrow-up': 'opt+arrowup',
+    'diff-opt-arrow-down': 'opt+arrowdown',
+    'diff-toggle-viewed': 'opt+shift+r',
+    'diff-step-prev': 'opt+k',
+    'diff-step-next': 'opt+j',
+    'diff-filter-unresolved': 'opt+u',
+    'diff-filter-resolved': 'opt+r',
+    'diff-filter-pending': 'opt+p',
+    'diff-sel-up': 'arrowup',
+    'diff-sel-down': 'arrowdown',
+    'diff-sel-extend-up': 'shift+arrowup',
+    'diff-sel-extend-down': 'shift+arrowdown',
+    'diff-sel-comment': 'opt+c',
+    'diff-sel-copy-code': 'mod+c',
+    'diff-sel-copy-url': 'mod+opt+c',
+    'nav-adjacent-prev': 'opt+[',
+    'nav-adjacent-next': 'opt+]',
+    'toggle-side-panel': 'opt+b',
+    'conv-comment-prev': 'opt+k',
+    'conv-comment-next': 'opt+j',
+    'conv-scroll-up': 'opt+arrowup',
+    'conv-scroll-down': 'opt+arrowdown',
+    'conv-page-up': 'opt+shift+arrowup',
+    'conv-page-down': 'opt+shift+arrowdown',
   };
   return map[String(commandId || '')] || null;
+}
+
+/**
+ * Diff-view-only palette commands (file nav, page scroll, selection, filters…).
+ * Shown when layoutMode === 'diff'.
+ */
+export function buildDiffPaletteCommands(): any[] {
+  return [
+    {
+      id: 'diff-prev-file',
+      title: 'Previous file',
+      section: 'Diff',
+      keywords: ['file', 'prev', 'previous', 'nav', 'tree'],
+      shortcut: optShortcutForCommandId('diff-prev-file') || 'opt+shift+[',
+      action: 'navFilePrev',
+    },
+    {
+      id: 'diff-next-file',
+      title: 'Next file',
+      section: 'Diff',
+      keywords: ['file', 'next', 'nav', 'tree'],
+      shortcut: optShortcutForCommandId('diff-next-file') || 'opt+shift+]',
+      action: 'navFileNext',
+    },
+    {
+      id: 'diff-page-up',
+      title: 'Scroll Diff page up',
+      section: 'Diff',
+      keywords: ['scroll', 'page', 'up'],
+      shortcut: optShortcutForCommandId('diff-page-up') || 'opt+shift+arrowup',
+      action: 'scrollDiffPagePrev',
+    },
+    {
+      id: 'diff-page-down',
+      title: 'Scroll Diff page down',
+      section: 'Diff',
+      keywords: ['scroll', 'page', 'down'],
+      shortcut: optShortcutForCommandId('diff-page-down') || 'opt+shift+arrowdown',
+      action: 'scrollDiffPageNext',
+    },
+    {
+      id: 'diff-opt-arrow-up',
+      title: 'Jump selection up + scroll',
+      section: 'Diff',
+      keywords: ['selection', 'scroll', 'jump', 'opt', 'arrow', 'up'],
+      shortcut: optShortcutForCommandId('diff-opt-arrow-up') || 'opt+arrowup',
+      action: 'optArrowScrollSelectPrev',
+    },
+    {
+      id: 'diff-opt-arrow-down',
+      title: 'Jump selection down + scroll',
+      section: 'Diff',
+      keywords: ['selection', 'scroll', 'jump', 'opt', 'arrow', 'down'],
+      shortcut: optShortcutForCommandId('diff-opt-arrow-down') || 'opt+arrowdown',
+      action: 'optArrowScrollSelectNext',
+    },
+    {
+      id: 'diff-toggle-viewed',
+      title: 'Toggle file viewed / unread',
+      section: 'Diff',
+      keywords: ['viewed', 'read', 'unread', 'mark'],
+      shortcut: optShortcutForCommandId('diff-toggle-viewed') || 'opt+shift+r',
+      action: 'toggleViewedActiveFile',
+    },
+    {
+      id: 'diff-step-prev',
+      title: 'Previous review thread / find hit',
+      section: 'Diff',
+      keywords: ['thread', 'comment', 'prev', 'step', 'find'],
+      shortcut: optShortcutForCommandId('diff-step-prev') || 'opt+k',
+      action: 'stepNavPrev',
+    },
+    {
+      id: 'diff-step-next',
+      title: 'Next review thread / find hit',
+      section: 'Diff',
+      keywords: ['thread', 'comment', 'next', 'step', 'find'],
+      shortcut: optShortcutForCommandId('diff-step-next') || 'opt+j',
+      action: 'stepNavNext',
+    },
+    {
+      id: 'diff-filter-unresolved',
+      title: 'Filter: unresolved threads',
+      section: 'Diff',
+      keywords: ['filter', 'unresolved', 'review'],
+      shortcut: optShortcutForCommandId('diff-filter-unresolved') || 'opt+u',
+      action: 'toggleReviewFilterUnresolved',
+    },
+    {
+      id: 'diff-filter-resolved',
+      title: 'Filter: resolved threads',
+      section: 'Diff',
+      keywords: ['filter', 'resolved', 'review'],
+      shortcut: optShortcutForCommandId('diff-filter-resolved') || 'opt+r',
+      action: 'toggleReviewFilterResolved',
+    },
+    {
+      id: 'diff-filter-pending',
+      title: 'Filter: pending comments',
+      section: 'Diff',
+      keywords: ['filter', 'pending', 'review'],
+      shortcut: optShortcutForCommandId('diff-filter-pending') || 'opt+p',
+      action: 'toggleReviewFilterPending',
+    },
+    {
+      id: 'diff-sel-up',
+      title: 'Move line selection up',
+      section: 'Diff',
+      keywords: ['selection', 'cursor', 'line', 'up', 'arrow'],
+      shortcut: optShortcutForCommandId('diff-sel-up') || 'arrowup',
+      action: 'moveSelectionUp',
+    },
+    {
+      id: 'diff-sel-down',
+      title: 'Move line selection down',
+      section: 'Diff',
+      keywords: ['selection', 'cursor', 'line', 'down', 'arrow'],
+      shortcut: optShortcutForCommandId('diff-sel-down') || 'arrowdown',
+      action: 'moveSelectionDown',
+    },
+    {
+      id: 'diff-sel-extend-up',
+      title: 'Extend line selection up',
+      section: 'Diff',
+      keywords: ['selection', 'multi', 'extend', 'range', 'up'],
+      shortcut: optShortcutForCommandId('diff-sel-extend-up') || 'shift+arrowup',
+      action: 'extendSelectionUp',
+    },
+    {
+      id: 'diff-sel-extend-down',
+      title: 'Extend line selection down',
+      section: 'Diff',
+      keywords: ['selection', 'multi', 'extend', 'range', 'down'],
+      shortcut:
+        optShortcutForCommandId('diff-sel-extend-down') || 'shift+arrowdown',
+      action: 'extendSelectionDown',
+    },
+    {
+      id: 'diff-sel-comment',
+      title: 'Comment on selection',
+      section: 'Diff',
+      keywords: ['selection', 'comment', 'review'],
+      shortcut: optShortcutForCommandId('diff-sel-comment') || 'opt+c',
+      action: 'openSelectionComment',
+    },
+    {
+      id: 'diff-sel-copy-code',
+      title: 'Copy selection code',
+      section: 'Diff',
+      keywords: ['selection', 'copy', 'code'],
+      shortcut: optShortcutForCommandId('diff-sel-copy-code') || 'mod+c',
+      action: 'copySelectionCode',
+    },
+    {
+      id: 'diff-sel-copy-url',
+      title: 'Copy selection URL',
+      section: 'Diff',
+      keywords: ['selection', 'copy', 'url', 'permalink'],
+      shortcut: optShortcutForCommandId('diff-sel-copy-url') || 'mod+opt+c',
+      action: 'copySelectionUrl',
+    },
+  ];
 }
 
 /**
@@ -424,7 +620,12 @@ export function resolveAdjacentPrNumber(opts: {
 /**
  * Build default command list from PR detail snapshot.
  * @param {object} detail
- * @param {{ stackItems?: any[], openPulls?: any[] }} [opts]
+ * @param {{
+ *   stackItems?: any[],
+ *   openPulls?: any[],
+ *   layoutMode?: string,
+ *   canSubmitReviewVerdict?: boolean,
+ * }} [opts]
  * @returns {PaletteCommand[]}
  */
 export function buildPaletteCommands(detail: any, opts: any = {}) {
@@ -432,6 +633,8 @@ export function buildPaletteCommands(detail: any, opts: any = {}) {
   const stackItems = Array.isArray(opts.stackItems) ? opts.stackItems : [];
   const openPulls = Array.isArray(opts.openPulls) ? opts.openPulls : [];
   const stacked = stackItems.length >= 2;
+  const layoutMode = String(opts.layoutMode || opts.page || '').toLowerCase();
+  const isDiffLayout = layoutMode === 'diff';
   // Prefer explicit opt; else compare author/viewer (GitHub blocks self-review verdicts)
   const allowReviewVerdict =
     opts.canSubmitReviewVerdict != null
@@ -456,6 +659,114 @@ export function buildPaletteCommands(detail: any, opts: any = {}) {
       shortcut: optShortcutForCommandId('toggle-diff') || 'opt+.',
       action: 'toggleDiff',
     },
+    {
+      id: 'toggle-side-panel',
+      title: isDiffLayout
+        ? 'Toggle files panel'
+        : 'Toggle metadata panel',
+      section: 'Navigate',
+      keywords: [
+        'panel',
+        'sidebar',
+        'collapse',
+        'files',
+        'metadata',
+        'aside',
+        'rail',
+        'hide',
+      ],
+      shortcut: optShortcutForCommandId('toggle-side-panel') || 'opt+b',
+      action: 'toggleSidePanel',
+    },
+    // Context-thread actions (active review unit on Conversation or Diff)
+    {
+      id: 'context-thread-fold',
+      title: 'Fold / expand focused thread',
+      section: 'Review',
+      keywords: ['fold', 'collapse', 'expand', 'thread', 'context'],
+      shortcut: 'opt+f',
+      action: 'contextThreadFold',
+    },
+    {
+      id: 'context-thread-diff',
+      title: isDiffLayout
+        ? 'Reveal focused thread in Diff'
+        : 'Go to Diff for focused thread',
+      section: 'Review',
+      keywords: ['diff', 'jump', 'file', 'thread', 'context'],
+      shortcut: 'opt+d',
+      action: 'contextThreadGotoDiff',
+    },
+    {
+      id: 'context-thread-comment',
+      title: 'Comment on focused thread (focus / submit)',
+      section: 'Review',
+      keywords: ['comment', 'reply', 'submit', 'thread', 'context'],
+      shortcut: 'opt+c',
+      action: 'contextThreadComment',
+    },
+    {
+      id: 'context-thread-resolve',
+      title: 'Resolve / unresolve focused thread',
+      section: 'Review',
+      keywords: ['resolve', 'unresolve', 'thread', 'context'],
+      shortcut: 'opt+ctrl+r',
+      action: 'contextThreadResolve',
+    },
+    ...(!isDiffLayout
+      ? [
+          {
+            id: 'conv-comment-prev',
+            title: 'Previous conversation comment',
+            section: 'Conversation',
+            keywords: ['comment', 'prev', 'previous', 'thread', 'timeline'],
+            shortcut: optShortcutForCommandId('conv-comment-prev') || 'opt+k',
+            action: 'stepNavPrev',
+          },
+          {
+            id: 'conv-comment-next',
+            title: 'Next conversation comment',
+            section: 'Conversation',
+            keywords: ['comment', 'next', 'thread', 'timeline'],
+            shortcut: optShortcutForCommandId('conv-comment-next') || 'opt+j',
+            action: 'stepNavNext',
+          },
+          {
+            id: 'conv-scroll-up',
+            title: 'Scroll conversation up',
+            section: 'Conversation',
+            keywords: ['scroll', 'up', 'timeline'],
+            shortcut: optShortcutForCommandId('conv-scroll-up') || 'opt+arrowup',
+            action: 'scrollConversationOptPrev',
+          },
+          {
+            id: 'conv-scroll-down',
+            title: 'Scroll conversation down',
+            section: 'Conversation',
+            keywords: ['scroll', 'down', 'timeline'],
+            shortcut:
+              optShortcutForCommandId('conv-scroll-down') || 'opt+arrowdown',
+            action: 'scrollConversationOptNext',
+          },
+          {
+            id: 'conv-page-up',
+            title: 'Scroll conversation page up',
+            section: 'Conversation',
+            keywords: ['scroll', 'page', 'up'],
+            shortcut: optShortcutForCommandId('conv-page-up') || 'opt+shift+arrowup',
+            action: 'scrollConversationPagePrev',
+          },
+          {
+            id: 'conv-page-down',
+            title: 'Scroll conversation page down',
+            section: 'Conversation',
+            keywords: ['scroll', 'page', 'down'],
+            shortcut:
+              optShortcutForCommandId('conv-page-down') || 'opt+shift+arrowdown',
+            action: 'scrollConversationPageNext',
+          },
+        ]
+      : []),
     {
       id: 'find-in-pr',
       title: 'Find in PR…',
@@ -762,7 +1073,7 @@ export function buildPaletteCommands(detail: any, opts: any = {}) {
     title: stacked ? 'Previous stack PR' : 'Previous pull request',
     section: 'Navigate',
     keywords: ['prev', 'previous', 'stack', 'list', 'back', '['],
-    shortcut: 'opt+[',
+    shortcut: optShortcutForCommandId('nav-adjacent-prev') || 'opt+[',
     description: stacked
       ? 'Move up the stack path'
       : 'Open previous PR in the pulls list',
@@ -773,12 +1084,17 @@ export function buildPaletteCommands(detail: any, opts: any = {}) {
     title: stacked ? 'Next stack PR' : 'Next pull request',
     section: 'Navigate',
     keywords: ['next', 'stack', 'list', 'forward', ']'],
-    shortcut: 'opt+]',
+    shortcut: optShortcutForCommandId('nav-adjacent-next') || 'opt+]',
     description: stacked
       ? 'Move down the stack path'
       : 'Open next PR in the pulls list',
     action: 'navAdjacentNext',
   });
+
+  // Diff layout: file nav, page scroll, selection, filters, viewed toggle
+  if (isDiffLayout) {
+    for (const c of buildDiffPaletteCommands()) cmds.push(c);
+  }
 
   return cmds;
 }

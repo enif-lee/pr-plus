@@ -314,7 +314,7 @@ assert.equal(
   'stepNavPrev'
 );
 
-// Conversation (no find) → no step nav
+// Conversation (no find) → step timeline comments
 assert.equal(
   resolveModalShortcutAction({
     mod: false,
@@ -325,7 +325,7 @@ assert.equal(
     searchOpen: false,
     layoutMode: 'centered',
   }),
-  null
+  'stepNavNext'
 );
 
 // Typing in non-search editable → no
@@ -444,7 +444,10 @@ assert.ok(app.includes('searchOpen:'));
 
 assert.ok(stepNav.includes('TipPopover'), 'StepNav shows TipPopover');
 assert.ok(stepNav.includes('OptBtnHint'), 'StepNav supports Opt-hold badges');
-assert.ok(stepNav.includes('showOptHints'), 'StepNav accepts showOptHints');
+assert.ok(
+  !stepNav.includes('showOptHints'),
+  'StepNav Opt badges use store (no showOptHints prop)'
+);
 assert.ok(stepNav.includes('prevShortcut'));
 assert.ok(stepNav.includes('nextShortcut'));
 assert.ok(
@@ -456,10 +459,16 @@ assert.ok(
 
 assert.ok(toolbar.includes('stepNavShortcutLabel'));
 assert.ok(toolbar.includes('prevShortcut={threadPrevShortcut}'));
-assert.ok(toolbar.includes('showOptHints={showOptHints}'));
+assert.ok(
+  !toolbar.includes('showOptHints={showOptHints}'),
+  'DiffToolbar does not prop-drill showOptHints'
+);
 assert.ok(searchBar.includes('stepNavShortcutLabel'));
 assert.ok(searchBar.includes('prevShortcut={prevShortcut}'));
-assert.ok(searchBar.includes('showOptHints={showOptHints}'));
+assert.ok(
+  !searchBar.includes('showOptHints={showOptHints}'),
+  'SearchBar does not prop-drill showOptHints'
+);
 
 // File step-nav lives in file explorer (beside search input), not Diff toolbar
 const fileTree = fs.readFileSync(

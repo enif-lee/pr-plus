@@ -242,45 +242,175 @@ export function resolveGotoPathAmongFiles(
 }
 
 /**
- * Move or extend an active line selection by one selectable row in the same file.
- * - shift=false → new single-line selection at adjacent row
- * - shift=true → extend head (range); keeps anchor
+ * First selectable diff-line for a file in virtual order (top of file body).
+ * Used after file nav so ArrowUp/Down seed the first displayed line.
  */
-export function moveLineSelection(
-  selection: any,
+export function firstSelectableRowInFile(
   virtualRows: any[] | null | undefined,
-  delta: number,
+  filePath: string | null | undefined
+) {
+  const path = String(filePath || '').trim();
+  if (!path) return null;
+  const list = Array.isArray(virtualRows) ? virtualRows : [];
+  for (let i = 0; i < list.length; i++) {
+    const row = list[i];
+    if (row && row.filePath === path && isSelectableDiffRow(row)) return row;
+  }
+  return null;
+}
+
+/** Last selectable diff-line for a file (bottom of file body). */
+export function lastSelectableRowInFile(
+  virtualRows: any[] | null | undefined,
+  filePath: string | null | undefined
+) {
+  const path = String(filePath || '').trim();
+  if (!path) return null;
+  const list = Array.isArray(virtualRows) ? virtualRows : [];
+  for (let i = list.length - 1; i >= 0; i--) {
+    const row = list[i];
+    if (row && row.filePath === path && isSelectableDiffRow(row)) return row;
+  }
+  return null;
+}
+
+function selectionNeedsSeed(
+  selection: any,
+  activeFilePath: string
+): boolean {
+  if (!selection) return true;
+  if (selection.kind === 'file' || selection.subjectType === 'file') return true;
+  if (!Number.isFinite(Number(selection.headRowIndex))) return true;
+  if (activeFilePath && String(selection.filePath || '') !== activeFilePath) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Find the N-th selectable row in direction `d` from head (single pass).
+ * - shift: stay in same file only
+ * - plain: may cross files
+ * @returns target row or null if none
+ */
+function findSelectableRowNSteps(
+  selection: any,
+  list: any[],
+  d: number,
+  steps: number,
   opts: { shift?: boolean } = {}
 ) {
   if (!selection || selection.kind === 'file' || selection.subjectType === 'file') {
-    return selection;
+    return null;
   }
-  const list = Array.isArray(virtualRows) ? virtualRows : [];
-  if (!list.length) return selection;
   const headIdx = Number(selection.headRowIndex);
-  if (!Number.isFinite(headIdx)) return selection;
-  const d = delta < 0 ? -1 : 1;
+  if (!Number.isFinite(headIdx)) return null;
   const path = String(selection.filePath || '');
+  const sameFileOnly = Boolean(opts.shift);
+  const need = Math.max(1, Math.floor(steps) || 1);
+  let found = 0;
+  let last: any = null;
   let i = headIdx + d;
-  while (i >= 0 && i < list.length) {
+  while (i >= 0 && i < list.length && found < need) {
     const row = list[i];
     if (!row) {
       i += d;
       continue;
     }
-    // Stop when leaving this file
-    if (row.filePath && row.filePath !== path) break;
-    if (row.kind === 'file-header' && row.filePath && row.filePath !== path) break;
-    if (isSelectableDiffRow(row) && row.filePath === path) {
-      if (opts.shift) {
-        return extendLineSelection(selection, row) || selection;
+    if (sameFileOnly) {
+      if (row.filePath && row.filePath !== path) break;
+      if (row.kind === 'file-header' && row.filePath && row.filePath !== path) {
+        break;
       }
-      return beginLineSelection(row) || selection;
+      if (isSelectableDiffRow(row) && row.filePath === path) {
+        found += 1;
+        last = row;
+      }
+    } else if (isSelectableDiffRow(row)) {
+      found += 1;
+      last = row;
     }
     i += d;
   }
-  return selection;
+  return last;
 }
+
+/**
+ * Move or extend an active line selection by selectable rows.
+ * - shift=false → single-line caret; continues into next/prev file at EOF/BOF
+ * - shift=true → multi-line extend; blocked at file boundary
+ * - no selection / wrong file + activeFilePath → seed first selectable line
+ * - |delta| > 1: **one scan** to the N-th selectable (key-hold / ⌥↑↓ coalesce)
+ */
+export function moveLineSelection(
+  selection: any,
+  virtualRows: any[] | null | undefined,
+  delta: number,
+  opts: { shift?: boolean; activeFilePath?: string | null } = {}
+) {
+  const list = Array.isArray(virtualRows) ? virtualRows : [];
+  if (!list.length) return selection;
+
+  const d = delta < 0 ? -1 : 1;
+  let steps = Math.max(1, Math.abs(Number(delta)) || 1);
+  // Cap extreme key-hold coalesces so a frame stays cheap
+  if (steps > 48) steps = 48;
+  const activePath = String(opts.activeFilePath || '').trim();
+  let cur = selection;
+
+  if (selectionNeedsSeed(cur, activePath)) {
+    const seedPath = activePath || String(cur?.filePath || '').trim();
+    if (!seedPath) return selection;
+    // ArrowUp with no selection still seeds first line (file-nav contract);
+    // crossing into prev file uses lastSelectable via normal steps after seed.
+    const seedRow = firstSelectableRowInFile(list, seedPath);
+    if (!seedRow) return selection;
+    cur = beginLineSelection(seedRow) || selection;
+    steps -= 1; // this keypress only placed the caret
+  }
+
+  if (!cur || cur.kind === 'file' || cur.subjectType === 'file') {
+    return cur;
+  }
+  if (steps <= 0) return cur;
+
+  const target = findSelectableRowNSteps(cur, list, d, steps, opts);
+  if (!target) return cur;
+  if (Number(target.rowIndex) === Number(cur.headRowIndex)) return cur;
+
+  if (opts.shift) {
+    return extendLineSelection(cur, target) || cur;
+  }
+  return beginLineSelection(target) || cur;
+}
+
+/**
+ * Whether a keyboard move was stuck at a file edge (for single-file mode hop).
+ */
+export function isSelectionAtFileEdge(
+  selection: any,
+  virtualRows: any[] | null | undefined,
+  delta: number
+): boolean {
+  if (!selection || selection.kind === 'file' || selection.subjectType === 'file') {
+    return false;
+  }
+  const list = Array.isArray(virtualRows) ? virtualRows : [];
+  if (!list.length) return false;
+  const path = String(selection.filePath || '');
+  const headIdx = Number(selection.headRowIndex);
+  if (!path || !Number.isFinite(headIdx)) return false;
+  const d = delta < 0 ? -1 : 1;
+  if (d > 0) {
+    const last = lastSelectableRowInFile(list, path);
+    return last != null && Number(last.rowIndex) === headIdx;
+  }
+  const first = firstSelectableRowInFile(list, path);
+  return first != null && Number(first.rowIndex) === headIdx;
+}
+
+/** Delay before selection action toggles appear (hides island during key-hold). */
+export const SELECTION_ACTIONS_REVEAL_MS = 300;
 
 /**
  * Extend selection to another row (same file only).
@@ -554,6 +684,37 @@ export function selectionBlockRole(selection, row) {
   if (line === norm.endLine) return 'end';
   if (line > norm.startLine && line < norm.endLine) return 'middle';
   return 'only';
+}
+
+/**
+ * Stable string for a row's selection chrome — used as a Zustand selector result
+ * so only edge rows re-render when multi-line range moves under key-hold.
+ * @returns {''|'only'|'start'|'middle'|'end'}
+ */
+export function rowSelectionVisualKey(selection: any, row: any): string {
+  if (!selection || !row) return '';
+  if (selection.kind === 'file' || selection.subjectType === 'file') return '';
+  if (row.filePath !== selection.filePath) return '';
+  if (typeof isSelectableDiffRow === 'function' && !isSelectableDiffRow(row)) {
+    return '';
+  }
+  const a = Number(selection.anchorRowIndex);
+  const h = Number(selection.headRowIndex);
+  const ri = Number(row.rowIndex);
+  if (Number.isFinite(a) && Number.isFinite(h) && Number.isFinite(ri)) {
+    const lo = Math.min(a, h);
+    const hi = Math.max(a, h);
+    if (ri < lo || ri > hi) return '';
+    if (lo === hi) return 'only';
+    if (ri === lo) return 'start';
+    if (ri === hi) return 'end';
+    return 'middle';
+  }
+  const role =
+    typeof selectionBlockRole === 'function'
+      ? selectionBlockRole(selection, row)
+      : null;
+  return role || '';
 }
 
 /**

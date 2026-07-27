@@ -9,6 +9,7 @@ export type { TipPlacement } from './TipPopover';
 export { OptBtnHint } from './OptBtnHint';
 export { ActionToast, actionToastTone } from './ActionToast';
 export type { ActionToastTone } from './ActionToast';
+export { ShortcutMonitor } from './ShortcutMonitor';
 export { StepNav } from './StepNav';
 export type { StepNavProps } from './StepNav';
 export { Badge } from './Badge';

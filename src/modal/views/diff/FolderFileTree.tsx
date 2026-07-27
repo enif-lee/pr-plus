@@ -57,7 +57,6 @@ function FolderFileTreeImpl(props: any) {
     fileTotal = 0,
     onPrevFile = null,
     onNextFile = null,
-    showOptHints = false,
   } = props;
 
   const isMac =
@@ -190,7 +189,6 @@ function FolderFileTreeImpl(props: any) {
               nextTitle="Next file"
               prevShortcut={filePrevShortcut}
               nextShortcut={fileNextShortcut}
-              showOptHints={showOptHints}
             />
           ) : null}
         </div>

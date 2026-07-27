@@ -6,15 +6,19 @@ import {
   viewportBounds,
   type TipPlacement,
 } from './TipPopover';
+import { useModalStore } from '../../store/modal-store';
 
 /**
  * Option-hold shortcut badge above a control.
  * Uses the same placement + flip + viewport clamp helpers as TipPopover so
  * overflow:hidden parents never clip and off-screen edges flip to the opposite side.
  * Place inside an element with class `prp-opt-hint-host`.
+ *
+ * `show` optional override (tests). Default: store `optHintsActive` so parents
+ * need not re-render on Opt press — only this leaf subscribes.
  */
 export function OptBtnHint({
-  show,
+  show: showProp,
   label,
   className = '',
   preferredPlacement = 'top',
@@ -24,6 +28,8 @@ export function OptBtnHint({
   className?: string;
   preferredPlacement?: TipPlacement;
 }) {
+  const storeShow = useModalStore((s) => s.optHintsActive);
+  const show = showProp !== undefined ? Boolean(showProp) : storeShow;
   const anchorRef = useRef<HTMLSpanElement | null>(null);
   const tipRef = useRef<HTMLSpanElement | null>(null);
   const [placement, setPlacement] = useState<TipPlacement>(preferredPlacement);
@@ -45,12 +51,26 @@ export function OptBtnHint({
       return undefined;
     }
 
+    /**
+     * Measure against a box with real size. Zero-size hosts (absolute
+     * width/height:0 tip slots) climb to a sized ancestor.
+     */
+    const measureHost = (): HTMLElement | null => {
+      let el: HTMLElement | null = host;
+      for (let i = 0; i < 4 && el; i++) {
+        const r = el.getBoundingClientRect();
+        if (r.width > 0 && r.height > 0) return el;
+        el = el.parentElement;
+      }
+      return host;
+    };
+
     /** Hosts in keep-alive inactive panels still layout — never portal over them. */
-    const hostIsLive = () => {
-      if (typeof host.checkVisibility === 'function') {
+    const hostIsLive = (box: HTMLElement) => {
+      if (typeof box.checkVisibility === 'function') {
         try {
           if (
-            !host.checkVisibility({
+            !box.checkVisibility({
               checkOpacity: true,
               checkVisibilityCSS: true,
             } as any)
@@ -61,20 +81,21 @@ export function OptBtnHint({
           /* older engines */
         }
       }
-      const panel = host.closest?.('.prp-body-panel') as HTMLElement | null;
+      const panel = box.closest?.('.prp-body-panel') as HTMLElement | null;
       if (panel && !panel.classList.contains('prp-body-panel--active')) {
         return false;
       }
-      const cs = getComputedStyle(host);
+      const cs = getComputedStyle(box);
       if (cs.visibility === 'hidden' || cs.display === 'none' || Number(cs.opacity) === 0) {
         return false;
       }
-      const r = host.getBoundingClientRect();
+      const r = box.getBoundingClientRect();
       return r.width > 0 && r.height > 0;
     };
 
     const update = () => {
-      if (!hostIsLive()) {
+      const box = measureHost();
+      if (!box || !hostIsLive(box)) {
         setCoords(null);
         return;
       }
@@ -87,10 +108,10 @@ export function OptBtnHint({
           }
         : { offsetHeight: 20, offsetWidth: 48 };
 
-      const next = resolveTipPlacement(host, tipBox, preferredPlacement);
+      const next = resolveTipPlacement(box, tipBox, preferredPlacement);
       setPlacement((prev) => (prev === next ? prev : next));
 
-      const hostRect = host.getBoundingClientRect();
+      const hostRect = box.getBoundingClientRect();
       const tipW = Math.max(
         Number(tipBox.offsetWidth) || 0,
         tipBox.getBoundingClientRect?.()?.width || 0,

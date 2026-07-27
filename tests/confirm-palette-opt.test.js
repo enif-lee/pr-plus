@@ -279,7 +279,10 @@ function main() {
 
     assert.ok(!app.includes('prp-modal-opt-rail'));
     assert.ok(!app.includes('prp-modal-opt-dock'));
-    assert.ok(app.includes('showOptHints'));
+    assert.ok(
+      app.includes('setOptHintsActive') || app.includes('optHintsActive'),
+      'App drives opt hints via store (not showOptHints prop tree)'
+    );
 
     const header = fs.readFileSync(
       path.join(__dirname, '../src/modal/views/chrome/Header.tsx'),
@@ -352,11 +355,10 @@ function main() {
     assert.ok(conv.includes('label="⌥⇧D"'), 'draft stage opt hint');
     assert.ok(conv.includes('Convert to draft'), 'convert to draft button');
 
-    // Diff keep-alive must not show conversation opt popovers
+    // Opt badges leaf-subscribe; inactive panels gated inside OptBtnHint
     assert.ok(
-      app.includes('layoutMode === LAYOUT_CENTERED') &&
-        app.includes('showOptHints={'),
-      'conversation showOptHints gated by layout'
+      app.includes('setOptHintsActive') || app.includes('optHintsActive'),
+      'opt hints store-driven (layout gating in OptBtnHint hostIsLive)'
     );
     assert.ok(
       hint.includes('prp-body-panel--active') || hint.includes('hostIsLive'),

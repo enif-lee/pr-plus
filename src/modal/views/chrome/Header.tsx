@@ -378,8 +378,6 @@ export function Header(props: any) {
     baseBranchRef,
     sectionLoading,
     shortcutMod,
-    /** Option held: show shortcut badges above mapped buttons */
-    showOptHints = false,
     onSubscribe,
     onRefresh = null,
     shellMode = 'modal',
@@ -658,7 +656,7 @@ export function Header(props: any) {
                     aria-label="Edit title"
                     onClick={beginEditTitle}
                   >
-                    <OptBtnHint show={showOptHints} label="⌥⇧T" />
+                    <OptBtnHint label="⌥⇧T" />
                     <IconPencil size={14} />
                     <TipPopover title="Edit title" shortcut="⌥⇧T" />
                   </button>
@@ -725,7 +723,7 @@ export function Header(props: any) {
                 if (baseBranchRef) baseBranchRef.current = el;
               }}
             >
-              <OptBtnHint show={showOptHints} label="⌥⇧B" />
+              <OptBtnHint label="⌥⇧B" />
               <IconPencil className="prp-branch-tag__edit" size={12} />
             </button>
           </span>
@@ -809,7 +807,7 @@ export function Header(props: any) {
                 aria-pressed={Boolean(shellFullscreen)}
                 data-fullscreen={shellFullscreen ? '1' : '0'}
               >
-                <OptBtnHint show={showOptHints} label="⌥⇧F" />
+                <OptBtnHint label="⌥⇧F" />
                 <IconFullscreen active={Boolean(shellFullscreen)} size={16} />
                 <TipPopover
                   title={
@@ -884,7 +882,7 @@ export function Header(props: any) {
                 effectiveLayout === LAYOUT_DIFF ? 'diff' : 'conversation'
               }
             >
-              <OptBtnHint show={showOptHints} label="⌥." />
+              <OptBtnHint label="⌥." />
               {effectiveLayout === LAYOUT_DIFF ? (
                 <IconConversation size={16} aria-hidden="true" />
               ) : (
