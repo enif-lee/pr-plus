@@ -12,6 +12,14 @@ export default [
       '**/dist/**',
       'src/modal/dist/**',
       'src/background.bundle.js',
+      // Assembled from fragments — lint the assembled file / real modules only
+      'src/host/parts/**',
+      'src/fetch/parts/**',
+      'src/content-bridge/parts/**',
+      'src/background/parts/**',
+      'src/modal/app/pr-modal/parts/**',
+      'src/modal/views/conversation/parts/**',
+      'src/modal/styles/parts/**',
       '**/*.min.js',
       'coverage/**',
       'screenshots/**',
@@ -47,6 +55,8 @@ export default [
       'no-empty': ['warn', { allowEmptyCatch: true }],
       'no-console': 'off',
       'prefer-const': 'warn',
+      'no-control-regex': 'off', // build scripts intentionally strip non-ASCII via \x00-\x7F
+      'no-useless-assignment': 'off', // legacy SW/fetch patterns
     },
   },
 ];
