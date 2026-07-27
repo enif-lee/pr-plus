@@ -23,6 +23,14 @@ export default [
       '**/*.min.js',
       'coverage/**',
       'screenshots/**',
+      'tests/**',
+      'src/modal/pure/**',
+      'src/popup.js',
+      'src/pulls-palette.js',
+      'src/background.js', // legacy twin; SW built from background.ts
+      'src/content-bridge.js', // AUTO-ASSEMBLED
+      'src/pr-modal-host.js', // AUTO-ASSEMBLED
+      'src/fetch-pulls.js', // AUTO-ASSEMBLED
       '.browser/**',
     ],
   },
