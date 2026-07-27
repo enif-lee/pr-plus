@@ -201,6 +201,8 @@ function ConversationViewImpl(props: any) {
     onEnsureAllFiles = null,
     commitsLoading = false,
     filesLoading = false,
+    /** Side panels loading without cache: { commits, checks, development } */
+    sidePending = null,
     prTags = null,
     prTagsLoading = false,
     prTagsError = null,
@@ -501,6 +503,12 @@ function ConversationViewImpl(props: any) {
   };
   // Aside Checks card (not merge-box badge farm)
   const showChecks = hasChecksData(detail.checks);
+  // Skeletons only when that panel is still loading *and* has no settled cache
+  // Title-spinner only (no body skeletons). Cache-settled panels skip pending.
+  const pendingCommits = Boolean(sidePending?.commits);
+  const pendingChecks = Boolean(sidePending?.checks);
+  const pendingDevelopment = Boolean(sidePending?.development);
+  const pendingFiles = Boolean(sidePending?.files);
   const ms = mergeStatus || buildMergeBoxStatus(detail);
   const boxTone =
     ms.tone === 'ok'
@@ -1408,9 +1416,7 @@ function ConversationViewImpl(props: any) {
           ) : null
         }
       >
-        {sectionLoading ? (
-          <div className="prp-section-skeleton prp-section-skeleton--sm" />
-        ) : editingBody ? (
+        {editingBody ? (
           <BodyEditor
             value={detail.body || ''}
             actionBusy={actionBusy}
@@ -1865,7 +1871,7 @@ function ConversationViewImpl(props: any) {
       />
       <div className="prp-conversation__main">
         {sectionLoading && !detail ? (
-          <div className="prp-section-skeleton" />
+          <LoadingSkeleton variant="conversation" />
         ) : (
           <VirtualConversationList
             paged={paged}
@@ -2140,7 +2146,7 @@ function ConversationViewImpl(props: any) {
             </button>
           ) : null}
         </AsideSection>
-        <AsideSection title="Development">
+        <AsideSection title="Development" loading={pendingDevelopment}>
           {(() => {
             const dev =
               Array.isArray(detail.developmentIssues) &&
@@ -2153,7 +2159,9 @@ function ConversationViewImpl(props: any) {
                     state: '',
                   }));
             if (!dev.length) {
-              return <span className="prp-muted">None yet</span>;
+              return pendingDevelopment ? null : (
+                <span className="prp-muted">None yet</span>
+              );
             }
             return (
               <>
@@ -2209,7 +2217,9 @@ function ConversationViewImpl(props: any) {
                               onOpenLinkedPr(Number(openMode.number || num));
                             }}
                           >
-                            <span className="prp-aside-dev__badge-num">#{num}</span>
+                            <span className="prp-aside-dev__badge-num">
+                              #{num}
+                            </span>
                             {title ? (
                               <span className="prp-aside-dev__badge-title">
                                 {title}
@@ -2239,13 +2249,9 @@ function ConversationViewImpl(props: any) {
             );
           })()}
         </AsideSection>
-        {showChecks || sectionLoading ? (
-          <AsideSection title="Checks">
-            {sectionLoading ? (
-              <div className="prp-section-skeleton prp-section-skeleton--sm" />
-            ) : (
-              <ChecksPanel checks={detail.checks} />
-            )}
+        {showChecks || pendingChecks ? (
+          <AsideSection title="Checks" loading={pendingChecks && !showChecks}>
+            {showChecks ? <ChecksPanel checks={detail.checks} /> : null}
           </AsideSection>
         ) : null}
         <AsideSection
@@ -2254,6 +2260,9 @@ function ConversationViewImpl(props: any) {
           }`}
           collapsible
           defaultOpen={false}
+          loading={
+            Boolean(prTagsLoading) && !(Array.isArray(prTags) && prTags.length)
+          }
         >
           <AsideTagsList
             tags={prTags || []}
@@ -2273,6 +2282,10 @@ function ConversationViewImpl(props: any) {
           }`}
           collapsible
           defaultOpen={false}
+          loading={
+            pendingCommits &&
+            !(Array.isArray(detail.commits) && detail.commits.length)
+          }
         >
           <AsideCommitsTimeline
             commits={detail.commits || []}
@@ -2293,6 +2306,10 @@ function ConversationViewImpl(props: any) {
           }`}
           collapsible
           defaultOpen={false}
+          loading={
+            (pendingFiles || filesLoading) &&
+            !(Array.isArray(detail.files) && detail.files.length)
+          }
         >
           <AsideFilesTree
             files={detail.files || []}

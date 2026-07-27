@@ -93,19 +93,55 @@ assert.ok(header.includes('prp-header__stats--busy'), 'busy tone on stats pill')
 assert.ok(header.includes('data-stats-mode'), 'metrics vs stage mode attr');
 assert.ok(!header.includes('prp-load-stage'), 'no floating load-stage in Header');
 assert.ok(!header.includes('prp-header__stats-stage'), 'no dual-layer stage fade');
-// Metrics ↔ stage morph: FLIP both ways (not stage-only); metrics release fixed size after morph
+// Metrics ↔ stage morph: FLIP into metrics; stage mode uses fixed CSS width (no phrase jitter)
 assert.ok(header.includes('STATS_MORPH_MS'), 'morph duration constant for metrics↔stage FLIP');
 assert.ok(
-  header.includes('// Metrics: release fixed size'),
-  'FLIP runs for metrics↔stage (metrics release after morph)'
+  header.includes('Hand size back to CSS') ||
+    header.includes('// Metrics: release fixed size'),
+  'FLIP runs for metrics↔stage (release inline size after morph)'
 );
 assert.ok(
-  /\.prp-header__stats\s*\{[^}]*width\s+320ms/s.test(css),
+  header.includes("stage:${stageBusy") ||
+    header.includes('stage:${stageBusy') ||
+    /stage:\$\{stageBusy/.test(header) ||
+    header.includes("stage:busy") ||
+    header.includes('stage:${stageBusy ?'),
+  'stage contentKey omits label (stable while phrases swap)'
+);
+assert.ok(
+  header.includes('Symmetric FLIP both ways') ||
+    header.includes('stage ↔ metrics'),
+  'FLIP runs both stage↔metrics directions'
+);
+assert.ok(
+  /\.prp-header__stats\s*\{[^}]*width\s+280ms/s.test(css),
   'base stats pill transitions width for metrics↔stage morph'
 );
 assert.ok(
-  /\.prp-header__stats-inner\s*\{[^}]*prp-header-stats-content-in/s.test(css),
-  'content-in animation on all stats content swaps (not busy-only)'
+  /\.prp-header__stats--busy\s*\{[^}]*width:\s*calc\(34ch\s*-\s*24px\)/s.test(
+    css
+  ),
+  'busy stage uses fixed width (34ch - 24px)'
+);
+assert.ok(
+  css.includes('prp-header-stats-fade-in') ||
+    css.includes('prp-header-stats-content-in'),
+  'content uses fade (not scale bounce) on mode swap'
+);
+assert.ok(
+  !/label:\s*['"]Ready['"]/.test(
+    require('node:fs').readFileSync(
+      require('node:path').join(__dirname, '../src/pr-modal-host.js'),
+      'utf8'
+    )
+  ),
+  'no Ready settle label on load complete'
+);
+assert.ok(
+  /\.prp-header__stats-inner\s*\{[^}]*(prp-header-stats-fade-in|prp-header-stats-content-in)/s.test(
+    css
+  ),
+  'fade-in animation on stats mode swaps'
 );
 assert.ok(header.includes('prp-branch-split'), 'branch on header');
 assert.ok(header.includes('prp-header__actions'), 'actions on header');

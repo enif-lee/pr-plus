@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "pr+",
-  "version": "1.6.1",
+  "version": "1.6.2",
   "description": "GitHub PR stack tree + fast in-page review shell for conversation, diff, and merge.",
   "icons": {
     "16": "assets/icons/icon16.png",
@@ -9,7 +9,10 @@
     "48": "assets/icons/icon48.png",
     "128": "assets/icons/icon128.png"
   },
-  "permissions": ["storage", "scripting"],
+  "permissions": [
+    "storage",
+    "scripting"
+  ],
   "host_permissions": [
     "https://github.com/*",
     "https://api.github.com/*"
@@ -33,7 +36,9 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://github.com/*"],
+      "matches": [
+        "https://github.com/*"
+      ],
       "js": [
         "src/tree.js",
         "src/dom.js",
@@ -45,6 +50,9 @@
         "src/content.js",
         "src/modal/pure/detail-idb-cache.js",
         "src/modal/pure/detail-cache.js",
+        "src/modal/pure/detail-merge.js",
+        "src/modal/pure/detail-store.js",
+        "src/modal/pure/load-progress.js",
         "src/modal/pure/page-embed.js",
         "src/modal/pure/floating-scrollbar.js",
         "src/modal/dist/pr-modal.bundle.js",
@@ -66,7 +74,9 @@
         "src/modal/dist/hljs-langs/*",
         "src/modal/dist/hljs-langs/*.js"
       ],
-      "matches": ["https://*/*"],
+      "matches": [
+        "https://*/*"
+      ],
       "use_dynamic_url": true
     }
   ]

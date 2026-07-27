@@ -123,6 +123,7 @@ import {
   fileStartIndexMap,
   mergeLineRanges,
   resolveExpandRange,
+  makeExpandBusyKey,
 } from '../lib/diff-rows';
 import {
   buildNestedFileTree,
@@ -287,6 +288,8 @@ export function PrModalApp({
   open,
   loading,
   loadStage = null,
+  /** Independent side panels still loading without settled cache */
+  sidePending = null,
   onLoadMoreReviewThreads = null,
   error,
   detail: detailProp,
@@ -3858,15 +3861,24 @@ export function PrModalApp({
     }
   }, [threadCounts, pendingThreadCounts, diffReviewFilter, totalPendingCount]);
 
-  async function onLeaveReviewAction(kind: any) {
-    if (!detail) return;
+  /**
+   * Leave a review (Diff Finish modal / Conversation Review tab / shortcuts).
+   * @param kind 'comment' | 'approve' | 'request_changes' | 'issue-comment'
+   * @param opts.body optional body override (Finish modal); else Conversation commentText
+   * @returns true when the action succeeded
+   */
+  async function onLeaveReviewAction(
+    kind: any,
+    opts?: { body?: string } | null
+  ): Promise<boolean> {
+    if (!detail) return false;
     // Always bind fetch bridge first — never reference bare `api`
     const fetchApi = globalThis.PRTreeFetch;
     if (!fetchApi) {
       setActionMsg(
         'Extension bridge unavailable (PRTreeFetch). Refresh this GitHub tab after reloading pr+.'
       );
-      return;
+      return false;
     }
     // Own PR: GitHub 422s APPROVE / REQUEST_CHANGES — hide + hard-block
     if (
@@ -3876,9 +3888,12 @@ export function PrModalApp({
       isViewerPrAuthor(detail)
     ) {
       setActionMsg('Cannot approve or request changes on your own pull request.');
-      return;
+      return false;
     }
-    const body = commentText.trim();
+    const body =
+      opts && opts.body != null
+        ? String(opts.body).trim()
+        : commentText.trim();
     // Explicit issue-comment (Conversation "Comment" tab) — never submit PENDING
     const forceIssueComment =
       kind === 'issue-comment' || kind === 'post-comment' || kind === 'comment-only';
@@ -3892,12 +3907,14 @@ export function PrModalApp({
             ? { kind: 'review', event: 'REQUEST_CHANGES' }
             : { kind: 'issue-comment', event: 'COMMENT' };
 
-    // Plain conversation comment (Comment tab, or no open PENDING review)
-    if (forceIssueComment || (mapped.kind === 'issue-comment' && !hasServerPending)) {
+    // Plain conversation comment — only when explicitly forced (Comment tab).
+    // Diff "Submit review" / Review-tab Comment always use the PR review path
+    // (submitPendingPullReview or one-shot submitPullReview), even with 0 pending.
+    if (forceIssueComment) {
       if (!body) {
         setActionMsg('Write a comment first.');
         focusCommentBox();
-        return;
+        return false;
       }
       setActionBusy(true);
       setActionMsg('');
@@ -3926,21 +3943,25 @@ export function PrModalApp({
         setCommentText('');
         setActionMsg('Comment posted.');
         await onRefresh?.();
+        return true;
       } catch (err: any) {
         setActionMsg(err?.message || String(err));
+        return false;
       } finally {
         setActionBusy(false);
       }
-      return;
     }
 
-    // Review path: submit existing PENDING review, or create one-shot review
+    // Review path: submit existing PENDING review, or create one-shot review.
+    // Empty body + no pending items → nothing to submit (Comment / Approve / RC).
     const event =
       mapped.kind === 'issue-comment' ? 'COMMENT' : mapped.event || 'COMMENT';
-    if (event === 'REQUEST_CHANGES' && !body && !hasServerPending) {
-      setActionMsg('Request changes requires a comment body or pending review items.');
+    if (!body && !hasServerPending) {
+      setActionMsg(
+        'Write a comment or add pending review comments before submitting.'
+      );
       focusCommentBox();
-      return;
+      return false;
     }
 
     // Resolve PENDING review id (viewerPendingReview or any pending comment)
@@ -3981,7 +4002,9 @@ export function PrModalApp({
       } else {
         throw new Error('Review API unavailable');
       }
-      setCommentText('');
+      if (!(opts && opts.body != null)) {
+        setCommentText('');
+      }
       // Clear any legacy local batch if present
       setPendingReview(
         typeof discardPendingReview === 'function'
@@ -4006,8 +4029,10 @@ export function PrModalApp({
               : 'Review submitted.'
       );
       await onRefresh?.();
+      return true;
     } catch (err: any) {
       setActionMsg(err?.message || String(err));
+      return false;
     } finally {
       setActionBusy(false);
     }
@@ -4983,6 +5008,42 @@ export function PrModalApp({
           setActionMsg('Cannot approve or request changes on your own pull request.');
           break;
         }
+        // Finish modal already open → its capture-phase Opt chords own submit.
+        // Do not fall through to one-shot submitPullReview (that skipped the modal).
+        if (
+          typeof document !== 'undefined' &&
+          document.querySelector('[data-prp-finish-review="1"]')
+        ) {
+          break;
+        }
+        // Diff: always open Finish-your-review (never direct-submit from shortcut).
+        // Read live store + DOM — render-closure layoutMode can lag behind uiRef.
+        const liveLayout =
+          useModalStore.getState().layoutMode ||
+          uiRef.current?.layoutMode ||
+          layoutMode;
+        const diffActive =
+          liveLayout === LAYOUT_DIFF ||
+          (typeof document !== 'undefined' &&
+            Boolean(
+              document.querySelector(
+                '.prp-body-panel--diff.prp-body-panel--active, .prp-modal--diff'
+              )
+            ));
+        if (diffActive) {
+          try {
+            window.dispatchEvent(
+              new CustomEvent('prp-open-finish-review', {
+                detail: { kind },
+              })
+            );
+          } catch {
+            /* open failed — do not silent-submit */
+            setActionMsg('Could not open Finish your review.');
+          }
+          break;
+        }
+        // Conversation Review tab / palette while not on Diff
         void onLeaveReviewAction(kind);
         break;
       }
@@ -6007,7 +6068,12 @@ export function PrModalApp({
     const range = resolveExpandRange(direction, row);
     if (!range) return;
     const path = String(row.filePath);
-    const busyKey = `${path}:${range.start}-${range.end}:${direction}`;
+    // Busy key uses **gap identity** (gapStart/End), not the expanded sub-range,
+    // so partial fromStart/fromEnd still disable matching edge controls.
+    const busyKey =
+      typeof makeExpandBusyKey === 'function'
+        ? makeExpandBusyKey(path, row, direction)
+        : `${path}:${row.gapStartNew}-${row.gapEndNew}:${direction}`;
     setDiffExpandBusyKey(busyKey);
     try {
       let lines = diffFileLines.get(path);
@@ -6812,6 +6878,36 @@ export function PrModalApp({
             setPaletteQuery('');
             return;
           }
+          // Diff leave-review chords: open Finish modal only (never one-shot submit).
+          // Finish modal (when open) owns the same chords for actual submit.
+          if (peer.action === 'leaveReview') {
+            const finishOpen = Boolean(
+              typeof document !== 'undefined' &&
+                document.querySelector('[data-prp-finish-review="1"]')
+            );
+            if (finishOpen) {
+              // Modal capture/bubble handler performs submit with modal body
+              return;
+            }
+            const liveLayout =
+              useModalStore.getState().layoutMode || ui.layoutMode;
+            const onDiff =
+              liveLayout === LAYOUT_DIFF ||
+              (typeof document !== 'undefined' &&
+                Boolean(document.querySelector('.prp-modal--diff')));
+            if (onDiff) {
+              try {
+                window.dispatchEvent(
+                  new CustomEvent('prp-open-finish-review', {
+                    detail: { kind: peer.payload?.kind || 'comment' },
+                  })
+                );
+              } catch {
+                /* ignore */
+              }
+              return;
+            }
+          }
           // Route through palette runner (merge confirm, etc.)
           act.runPaletteCommand?.({
             action: peer.action,
@@ -7359,6 +7455,7 @@ export function PrModalApp({
             onEnsureAllFiles={ensureAllFiles}
             commitsLoading={commitListLoading}
             filesLoading={fileListLoading}
+            sidePending={sidePending}
             prTags={prTags}
             prTagsLoading={prTagsLoading}
             prTagsError={prTagsError}
@@ -7510,6 +7607,19 @@ export function PrModalApp({
                 onLeaveReviewAction={onLeaveReviewAction}
                 actionBusy={actionBusy}
                 actionMsg={actionMsg}
+                colorMode={theme.mode}
+                onUploadFile={onUploadFile}
+                mentionCandidates={mentionCandidates}
+                linkCtx={{
+                  owner: detail.owner,
+                  repo: detail.repo,
+                  magicLinks:
+                    detail.magicLinks?.length
+                      ? detail.magicLinks
+                      : (openPulls || []).find(
+                          (p) => Number(p.number) === Number(detail.number)
+                        )?.magicLinks || [],
+                }}
                 searchOpen={searchOpen && layoutMode === LAYOUT_DIFF}
                 searchQuery={searchQuery}
                 searchHits={searchHits}

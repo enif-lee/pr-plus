@@ -309,72 +309,82 @@
   }
 
   /**
-   * Apply resolved endpoints for pure builders / fetch-pulls in this global.
+   * Normalize API context for pure URL builders.
+   * Stateless: never reads/writes process-global mutable state.
+   * Accepts full endpoints object, { webHost }, host string, or null → github.com.
    *
-   * WARNING: mutable process-global. Concurrent SW handlers MUST NOT interleave
-   * setGithubApiContext + githubRestUrl/githubGraphqlUrl without serialization.
-   * Prefer githubRestUrl(path, ctx) / githubGraphqlUrl(ctx) with an explicit ctx,
-   * or runWithGithubApiExclusive (promise chain) around each full API message.
-   *
-   * @param {{ restBase?: string, graphqlUrl?: string }|null|undefined} endpoints
+   * @param {object|string|null|undefined} ctx
    */
-  function setGithubApiContext(endpoints) {
-    const restBase = stripTrailingSlashes(
-      endpoints?.restBase || DEFAULT_REST
-    ) || DEFAULT_REST;
-    const graphqlUrl =
-      stripTrailingSlashes(endpoints?.graphqlUrl || '') ||
-      graphqlUrlFromRestBase(restBase);
-    global.__PRP_GITHUB_API__ = { restBase, graphqlUrl };
-    return global.__PRP_GITHUB_API__;
-  }
-
-  /**
-   * Current API context (defaults to github.com).
-   */
-  function getGithubApiContext() {
-    const cur = global.__PRP_GITHUB_API__;
-    if (cur && cur.restBase && cur.graphqlUrl) {
+  function normalizeApiCtx(ctx) {
+    if (ctx && typeof ctx === 'object' && (ctx.restBase || ctx.graphqlUrl)) {
+      const restBase =
+        stripTrailingSlashes(ctx.restBase || DEFAULT_REST) || DEFAULT_REST;
+      const graphqlUrl =
+        stripTrailingSlashes(ctx.graphqlUrl || '') ||
+        graphqlUrlFromRestBase(restBase);
       return {
-        restBase: stripTrailingSlashes(cur.restBase),
-        graphqlUrl: stripTrailingSlashes(cur.graphqlUrl),
+        kind: ctx.kind || 'custom',
+        webHost: normalizeHostname(ctx.webHost) || 'github.com',
+        webOrigin: ctx.webOrigin || '',
+        restBase,
+        graphqlUrl,
       };
     }
-    return { restBase: DEFAULT_REST, graphqlUrl: DEFAULT_GRAPHQL };
+    const webHost =
+      typeof ctx === 'string'
+        ? ctx
+        : ctx && typeof ctx === 'object'
+          ? ctx.webHost
+          : null;
+    return defaultEndpointsForWebHost(webHost || 'github.com');
   }
 
   /**
-   * Serialize async work that mutates/reads the process-global API context.
-   * Prevents github.com + enterprise handlers from clobbering each other's REST base.
+   * @deprecated Prefer resolveGithubEndpoints + explicit ctx propagation.
+   * No longer mutates process global — returns a normalized ctx only.
+   */
+  function setGithubApiContext(endpoints) {
+    return normalizeApiCtx(endpoints);
+  }
+
+  /**
+   * @deprecated Prefer explicit ctx from resolveGithubEndpoints / message.
+   * Always returns github.com defaults (stateless; no global store).
+   */
+  function getGithubApiContext() {
+    return defaultEndpointsForWebHost('github.com');
+  }
+
+  /**
+   * @deprecated Global exclusive queue is obsolete under stateless ctx RPC.
+   * Kept as a no-op pass-through for tests / old call sites.
    * @returns {(fn: () => any|Promise<any>) => Promise<any>}
    */
   function createGithubApiExclusiveRunner() {
-    let chain = Promise.resolve();
     return function runWithGithubApiExclusive(fn) {
-      const run = chain.then(
-        () => fn(),
-        () => fn()
-      );
-      // Keep the queue alive even when fn rejects
-      chain = run.then(
-        () => undefined,
-        () => undefined
-      );
-      return run;
+      return Promise.resolve().then(fn);
     };
   }
 
-  /** REST absolute URL: restBase + path (path must start with /). */
+  /**
+   * REST absolute URL from explicit ctx (required for multi-host safety).
+   * @param {string} path
+   * @param {object|string|null|undefined} [ctx]
+   */
   function githubRestUrl(path, ctx) {
-    const { restBase } = ctx || getGithubApiContext();
+    const { restBase } = normalizeApiCtx(ctx);
     const base = stripTrailingSlashes(restBase) || DEFAULT_REST;
     const p = String(path || '');
     if (/^https?:\/\//i.test(p)) return p;
     return `${base}${p.startsWith('/') ? p : `/${p}`}`;
   }
 
+  /**
+   * GraphQL absolute URL from explicit ctx.
+   * @param {object|string|null|undefined} [ctx]
+   */
   function githubGraphqlUrl(ctx) {
-    const { graphqlUrl } = ctx || getGithubApiContext();
+    const { graphqlUrl } = normalizeApiCtx(ctx);
     return stripTrailingSlashes(graphqlUrl) || DEFAULT_GRAPHQL;
   }
 
@@ -423,6 +433,7 @@
     graphqlUrlFromRestBase,
     defaultEndpointsForWebHost,
     resolveGithubEndpoints,
+    normalizeApiCtx,
     setGithubApiContext,
     getGithubApiContext,
     createGithubApiExclusiveRunner,

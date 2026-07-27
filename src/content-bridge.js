@@ -149,6 +149,28 @@
       signal.addEventListener('abort', onAbort, { once: true });
     }
 
+    const msgType = String(payload?.type || message?.type || '');
+    const logFetch =
+      /FETCH|DETAIL|THREADS|COMMITS|CHECKS|DEVELOPMENT|COMMENTS|REVIEWS|FILES|COMPARE/i.test(
+        msgType
+      ) && !/PING|CANCEL/i.test(msgType);
+    const tBridge0 =
+      typeof performance !== 'undefined' && performance.now
+        ? performance.now()
+        : Date.now();
+    if (logFetch) {
+      console.log(
+        `[pr-plus][bridge] start ${msgType}` +
+          (payload?.owner && payload?.repo
+            ? ` ${payload.owner}/${payload.repo}`
+            : '') +
+          (payload?.number != null ? `#${payload.number}` : '') +
+          (payload?.headSha
+            ? ` sha=${String(payload.headSha).slice(0, 7)}`
+            : '')
+      );
+    }
+
     let lastErr;
     try {
       for (let attempt = 0; attempt <= retries; attempt++) {
@@ -163,6 +185,19 @@
             : await sendP;
           if (signal?.aborted) throw makeAbortError();
           if (response?.aborted) throw makeAbortError();
+          if (logFetch) {
+            const ms = Math.round(
+              ((typeof performance !== 'undefined' && performance.now
+                ? performance.now()
+                : Date.now()) -
+                tBridge0)
+            );
+            const ok = response?.ok !== false;
+            console.log(
+              `[pr-plus][bridge] end ${msgType} ${ms}ms${ok ? ' ok' : ' fail'}` +
+                (response?.error ? ` err=${String(response.error).slice(0, 80)}` : '')
+            );
+          }
           return response;
         } catch (e) {
           if (isAbortError(e)) throw e;
@@ -182,6 +217,17 @@
             }
             await sleep(80 + attempt * 160);
             continue;
+          }
+          if (logFetch) {
+            const ms = Math.round(
+              ((typeof performance !== 'undefined' && performance.now
+                ? performance.now()
+                : Date.now()) -
+                tBridge0)
+            );
+            console.log(
+              `[pr-plus][bridge] end ${msgType} ${ms}ms fail err=${String(msg).slice(0, 100)}`
+            );
           }
           if (/Receiving end does not exist|Could not establish connection/i.test(msg)) {
             throw new Error(
@@ -1160,6 +1206,144 @@
         throw err;
       }
       return Array.isArray(res.commits) ? res.commits : [];
+    },
+    /** First page of PR commits — independent of fetchPrDetail. */
+    async fetchPrCommits(owner, repo, number, opts = {}) {
+      const res = await send(
+        {
+          type: 'PR_TREE_FETCH_PR_COMMITS',
+          owner,
+          repo,
+          number,
+        },
+        { signal: opts.signal || null }
+      );
+      if (!res?.ok) {
+        if (res?.aborted) throw makeAbortError();
+        const err = new Error(res?.error || 'Failed to fetch commits');
+        err.status = res?.status;
+        throw err;
+      }
+      return Array.isArray(res.commits) ? res.commits : [];
+    },
+    /** First page of PR files + optional gitattributes annotate. */
+    async fetchPrFiles(owner, repo, number, opts = {}) {
+      const res = await send(
+        {
+          type: 'PR_TREE_FETCH_PR_FILES',
+          owner,
+          repo,
+          number,
+          headSha: opts.headSha || null,
+          gitattributesText: opts.gitattributesText || '',
+        },
+        { signal: opts.signal || null }
+      );
+      if (!res?.ok) {
+        if (res?.aborted) throw makeAbortError();
+        const err = new Error(res?.error || 'Failed to fetch files');
+        err.status = res?.status;
+        throw err;
+      }
+      return {
+        files: Array.isArray(res.files) ? res.files : [],
+        gitattributesText:
+          typeof res.gitattributesText === 'string' ? res.gitattributesText : '',
+      };
+    },
+    /** Newest-first issue comments window. */
+    async fetchPrIssueComments(owner, repo, number, opts = {}) {
+      const res = await send(
+        {
+          type: 'PR_TREE_FETCH_PR_ISSUE_COMMENTS',
+          owner,
+          repo,
+          number,
+        },
+        { signal: opts.signal || null }
+      );
+      if (!res?.ok) {
+        if (res?.aborted) throw makeAbortError();
+        const err = new Error(res?.error || 'Failed to fetch issue comments');
+        err.status = res?.status;
+        throw err;
+      }
+      return (
+        res.page || {
+          items: [],
+          meta: {
+            page: 1,
+            perPage: 50,
+            hasMore: false,
+            nextPage: null,
+            loadedCount: 0,
+          },
+        }
+      );
+    },
+    /** Submitted PR reviews list. */
+    async fetchPrReviews(owner, repo, number, opts = {}) {
+      const res = await send(
+        {
+          type: 'PR_TREE_FETCH_PR_REVIEWS',
+          owner,
+          repo,
+          number,
+        },
+        { signal: opts.signal || null }
+      );
+      if (!res?.ok) {
+        if (res?.aborted) throw makeAbortError();
+        const err = new Error(res?.error || 'Failed to fetch reviews');
+        err.status = res?.status;
+        throw err;
+      }
+      return Array.isArray(res.reviews) ? res.reviews : [];
+    },
+    /** Commit status + check runs for head SHA. */
+    async fetchPrChecks(owner, repo, headSha, opts = {}) {
+      const res = await send(
+        {
+          type: 'PR_TREE_FETCH_PR_CHECKS',
+          owner,
+          repo,
+          headSha,
+        },
+        { signal: opts.signal || null }
+      );
+      if (!res?.ok) {
+        if (res?.aborted) throw makeAbortError();
+        const err = new Error(res?.error || 'Failed to fetch checks');
+        err.status = res?.status;
+        throw err;
+      }
+      return res.checks || { state: 'unknown', totalCount: 0, statuses: [], checkRuns: [] };
+    },
+    /** Development + Projects for conversation aside. */
+    async fetchPrDevelopment(owner, repo, number, opts = {}) {
+      const res = await send(
+        {
+          type: 'PR_TREE_FETCH_PR_DEVELOPMENT',
+          owner,
+          repo,
+          number,
+          body: opts.body || '',
+        },
+        { signal: opts.signal || null }
+      );
+      if (!res?.ok) {
+        if (res?.aborted) throw makeAbortError();
+        const err = new Error(res?.error || 'Failed to fetch development meta');
+        err.status = res?.status;
+        throw err;
+      }
+      return (
+        res.development || {
+          linkedIssues: [],
+          developmentIssues: [],
+          projects: [],
+        }
+      );
     },
     async fetchAllPrFiles(owner, repo, number, options = {}) {
       const res = await send(

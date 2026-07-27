@@ -65,12 +65,65 @@ function txDone(tx: IDBTransaction): Promise<void> {
   });
 }
 
+/** Soft cap on total patch text stored in IDB (bytes, UTF-16 length proxy). */
+export const MAX_FULL_CACHE_PATCH_CHARS = 3_500_000;
+
 /**
- * Strip ephemeral fields + slim bulky blobs for durable cache.
- * File patches dominate size and freeze the main thread on IDB get/set —
- * keep file metadata so the file tree paints; Diff revalidates patches from network.
+ * True when detail has finished loading files (with patches), commits, and is
+ * safe to promote into a durable full snapshot (not a progressive partial).
  */
-export function sanitizeDetailForCache(detail: any) {
+export function isDetailCompleteForFullCache(detail: any): boolean {
+  if (!detail || typeof detail !== 'object') return false;
+  if (detail._sketch) return false;
+  if (detail._cacheFull === true) return true;
+
+  const files = Array.isArray(detail.files) ? detail.files : [];
+  if (!files.length) return false;
+  // Slim snapshots mark omitted patches — never treat as full
+  if (files.some((f: any) => f && f._patchOmitted)) return false;
+
+  const commits = Array.isArray(detail.commits) ? detail.commits : [];
+  if (!commits.length) return false;
+
+  let patchChars = 0;
+  let anyPatch = false;
+  let allOkWithoutPatch = true;
+  for (const f of files) {
+    if (!f || typeof f !== 'object') continue;
+    const patch = typeof f.patch === 'string' ? f.patch : '';
+    if (patch.length) {
+      anyPatch = true;
+      patchChars += patch.length;
+      allOkWithoutPatch = false;
+    } else {
+      const st = String(f.status || f.changeType || '').toLowerCase();
+      const binary = Boolean(f.binary || f.isBinary);
+      const noChange = Number(f.changes) === 0 || (Number(f.additions) === 0 && Number(f.deletions) === 0);
+      if (!(binary || st === 'renamed' || st === 'removed' || st === 'deleted' || noChange)) {
+        allOkWithoutPatch = false;
+      }
+    }
+  }
+  if (!anyPatch && !allOkWithoutPatch) return false;
+  if (patchChars > MAX_FULL_CACHE_PATCH_CHARS) return false;
+  return true;
+}
+
+export type SanitizeDetailOptions = {
+  /**
+   * true → keep file patches + commits (full cache)
+   * false → always slim (omit patches)
+   * omit → auto: full when complete, else slim
+   */
+  full?: boolean;
+};
+
+/**
+ * Strip ephemeral fields for durable cache.
+ * Full mode keeps patches+commits when load is complete (and under size cap).
+ * Slim mode keeps file metadata only so Diff can revalidate patches.
+ */
+export function sanitizeDetailForCache(detail: any, opts: SanitizeDetailOptions = {}) {
   if (!detail || typeof detail !== 'object') return detail;
   const {
     _fetchTimings: _t,
@@ -80,29 +133,43 @@ export function sanitizeDetailForCache(detail: any) {
     ...rest
   } = detail;
 
-  const slimFiles = Array.isArray(files)
+  const wantFull =
+    opts.full === true
+      ? true
+      : opts.full === false
+        ? false
+        : isDetailCompleteForFullCache(detail);
+
+  const nextFiles = Array.isArray(files)
     ? files.map((f: any) => {
         if (!f || typeof f !== 'object') return f;
         const {
-          patch: _p,
           contents_url: _cu,
           raw_url: _ru,
           blob_url: _bu,
           ...meta
         } = f;
-        // Marker so UI can show “patches loading” if needed
-        return { ...meta, patch: '', _patchOmitted: true };
+        if (wantFull) {
+          const { _patchOmitted: _po, ...keep } = meta as any;
+          return {
+            ...keep,
+            patch: typeof f.patch === 'string' ? f.patch : f.patch || '',
+          };
+        }
+        const { patch: _p, ...slimMeta } = meta as any;
+        return { ...slimMeta, patch: '', _patchOmitted: true };
       })
     : files;
 
   return {
     ...rest,
-    files: slimFiles,
+    files: nextFiles,
     comments: Array.isArray(rest.comments) ? rest.comments : [],
     reviews: Array.isArray(rest.reviews) ? rest.reviews : [],
     reviewComments: Array.isArray(rest.reviewComments) ? rest.reviewComments : [],
     reviewThreads: Array.isArray(rest.reviewThreads) ? rest.reviewThreads : [],
     commits: Array.isArray(rest.commits) ? rest.commits : [],
+    _cacheFull: wantFull ? true : undefined,
   };
 }
 
@@ -204,6 +271,8 @@ export function createDetailIdb(options: DetailIdbOptions = {}) {
     const t = now();
     const row: DetailIdbRow = {
       key,
+      // set() receives already-sanitized value from createPersistedDetailCache,
+      // or raw detail — auto full/slim via completeness check.
       value: sanitizeDetailForCache(value),
       updatedAt: t,
       accessedAt: t,

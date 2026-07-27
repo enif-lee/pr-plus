@@ -42,7 +42,55 @@
     });
   }
 
-  function sanitizeDetailForCache(detail) {
+  const MAX_FULL_CACHE_PATCH_CHARS = 3_500_000;
+
+  function isDetailCompleteForFullCache(detail) {
+    if (!detail || typeof detail !== 'object') return false;
+    if (detail._sketch) return false;
+    if (detail._cacheFull === true) return true;
+
+    const files = Array.isArray(detail.files) ? detail.files : [];
+    if (!files.length) return false;
+    if (files.some((f) => f && f._patchOmitted)) return false;
+
+    const commits = Array.isArray(detail.commits) ? detail.commits : [];
+    if (!commits.length) return false;
+
+    let patchChars = 0;
+    let anyPatch = false;
+    let allOkWithoutPatch = true;
+    for (const f of files) {
+      if (!f || typeof f !== 'object') continue;
+      const patch = typeof f.patch === 'string' ? f.patch : '';
+      if (patch.length) {
+        anyPatch = true;
+        patchChars += patch.length;
+        allOkWithoutPatch = false;
+      } else {
+        const st = String(f.status || f.changeType || '').toLowerCase();
+        const binary = Boolean(f.binary || f.isBinary);
+        const noChange =
+          Number(f.changes) === 0 ||
+          (Number(f.additions) === 0 && Number(f.deletions) === 0);
+        if (
+          !(
+            binary ||
+            st === 'renamed' ||
+            st === 'removed' ||
+            st === 'deleted' ||
+            noChange
+          )
+        ) {
+          allOkWithoutPatch = false;
+        }
+      }
+    }
+    if (!anyPatch && !allOkWithoutPatch) return false;
+    if (patchChars > MAX_FULL_CACHE_PATCH_CHARS) return false;
+    return true;
+  }
+
+  function sanitizeDetailForCache(detail, opts = {}) {
     if (!detail || typeof detail !== 'object') return detail;
     const {
       _fetchTimings,
@@ -52,28 +100,43 @@
       ...rest
     } = detail;
 
-    const slimFiles = Array.isArray(files)
+    const wantFull =
+      opts.full === true
+        ? true
+        : opts.full === false
+          ? false
+          : isDetailCompleteForFullCache(detail);
+
+    const nextFiles = Array.isArray(files)
       ? files.map((f) => {
           if (!f || typeof f !== 'object') return f;
           const {
-            patch,
             contents_url,
             raw_url,
             blob_url,
             ...meta
           } = f;
-          return { ...meta, patch: '', _patchOmitted: true };
+          if (wantFull) {
+            const { _patchOmitted, ...keep } = meta;
+            return {
+              ...keep,
+              patch: typeof f.patch === 'string' ? f.patch : f.patch || '',
+            };
+          }
+          const { patch, ...slimMeta } = meta;
+          return { ...slimMeta, patch: '', _patchOmitted: true };
         })
       : files;
 
     return {
       ...rest,
-      files: slimFiles,
+      files: nextFiles,
       comments: Array.isArray(rest.comments) ? rest.comments : [],
       reviews: Array.isArray(rest.reviews) ? rest.reviews : [],
       reviewComments: Array.isArray(rest.reviewComments) ? rest.reviewComments : [],
       reviewThreads: Array.isArray(rest.reviewThreads) ? rest.reviewThreads : [],
       commits: Array.isArray(rest.commits) ? rest.commits : [],
+      _cacheFull: wantFull ? true : undefined,
     };
   }
 
@@ -229,7 +292,13 @@
     };
   }
 
-  const api = { createDetailIdb, sanitizeDetailForCache, normalizeDetailSnapshot };
+  const api = {
+    createDetailIdb,
+    sanitizeDetailForCache,
+    normalizeDetailSnapshot,
+    isDetailCompleteForFullCache,
+    MAX_FULL_CACHE_PATCH_CHARS,
+  };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (typeof globalThis !== 'undefined') globalThis.PRModalDetailIdb = api;
 })();

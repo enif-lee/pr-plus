@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@common/Button';
 import { OptBtnHint } from '@common/OptBtnHint';
 import { SearchableSelect } from '@common/SearchableSelect';
@@ -11,7 +11,6 @@ import {
   truncateCommitLabel,
 } from '@lib/diff-commit-filter';
 import { pendingReviewCount } from '@lib/pending-review';
-import { canSubmitReviewVerdict } from '@lib/pr-edit-api';
 import { IconChevronDown, IconFileNavToggle } from '@common/icons';
 import { StepNav } from '@common/StepNav';
 import {
@@ -20,10 +19,17 @@ import {
 } from '@lib/shortcut-policy';
 import { TipPopover } from '@common/TipPopover';
 import { SearchBar } from './SearchBar';
+import {
+  FinishReviewModal,
+  type FinishReviewEvent,
+} from './FinishReviewModal';
 
 /**
  * Unified Diff top chrome: files, multi-checkbox commits, stats,
  * unified/split, grouped comment nav, pending review — no checks.
+ *
+ * Leave-review CTAs live in FinishReviewModal (GitHub-style). Diff header
+ * only shows "Submit review" (always available, even with 0 pending).
  *
  * When find-in-diff is open, Unresolved/Resolved/Pending filters are replaced
  * by an inline search box (no extra header row).
@@ -65,6 +71,12 @@ export function DiffToolbar(props: any) {
     onLeaveReviewAction,
     actionBusy = false,
     actionMsg = null,
+    /** Shell color mode for portaled Finish review popover */
+    colorMode = null,
+    /** Shared with selection / conversation composers */
+    onUploadFile = null,
+    mentionCandidates = [],
+    linkCtx = null,
     /** Inline find-in-diff (replaces review filter when open) */
     searchOpen = false,
     searchQuery = '',
@@ -105,27 +117,38 @@ export function DiffToolbar(props: any) {
       : isMac
         ? '⌥B'
         : 'Alt+B';
-  // GitHub rejects APPROVE / REQUEST_CHANGES on your own PR
-  const showReviewVerdict =
-    typeof canSubmitReviewVerdict === 'function'
-      ? canSubmitReviewVerdict(detail)
-      : (() => {
-          const a = String(detail?.author || '')
-            .trim()
-            .replace(/^@/, '')
-            .toLowerCase();
-          const v = String(detail?.viewerLogin || '')
-            .trim()
-            .replace(/^@/, '')
-            .toLowerCase();
-          return !(a && v && a === v);
-        })();
 
   const commitOpts = useMemo(() => buildCommitFilterOptions(commits), [commits]);
   const f = normalizeDiffCommitFilter(commitFilter);
   const [commitPickerOpen, setCommitPickerOpen] = useState(false);
   const [commitQuery, setCommitQuery] = useState('');
   const commitBtnRef = useRef<HTMLButtonElement | null>(null);
+  const submitBtnRef = useRef<HTMLSpanElement | null>(null);
+  const [finishOpen, setFinishOpen] = useState(false);
+  const [finishInitial, setFinishInitial] =
+    useState<FinishReviewEvent>('comment');
+
+  // Global leave-review chords / palette on Diff → open this modal
+  // (event dispatched from PrModalApp leaveReview when layout is Diff).
+  // Keep a stable listener for the whole toolbar lifetime (both keep-alive panels).
+  useEffect(() => {
+    function onOpen(e: Event) {
+      const detail = (e as CustomEvent)?.detail || {};
+      const kind = String(detail.kind || 'comment').toLowerCase();
+      const next: FinishReviewEvent =
+        kind === 'approve'
+          ? 'approve'
+          : kind === 'request_changes' || kind === 'request-changes'
+            ? 'request_changes'
+            : 'comment';
+      setFinishInitial(next);
+      setFinishOpen(true);
+    }
+    window.addEventListener('prp-open-finish-review', onOpen as EventListener);
+    return () => {
+      window.removeEventListener('prp-open-finish-review', onOpen as EventListener);
+    };
+  }, []);
 
   const initialSelectedIds = useMemo(
     () => diffCommitFilterToSelection(f, commits),
@@ -402,75 +425,65 @@ export function DiffToolbar(props: any) {
           </div>
         ) : null}
 
-        {pending > 0 ? (
-          <div className="prp-diff-toolbar__pending" role="status">
-            <span className="prp-opt-hint-host">
-              <OptBtnHint
-                label={isMac ? '⌥↵' : 'Alt+Enter'}
-                preferredPlacement="top"
-              />
-              <Button
-                size="sm"
-                variant="primary"
-                disabled={actionBusy}
-                onClick={() => onLeaveReviewAction?.('comment')}
-                title="Submit pending review as comment"
-                shortcut={isMac ? '⌥↵' : 'Alt+Enter'}
-                tipPlacement="top"
-              >
-                Submit review
-              </Button>
-            </span>
-            {showReviewVerdict ? (
-              <span className="prp-opt-hint-host">
-                <OptBtnHint
-                  label={isMac ? '⌥⇧↵' : 'Alt+Shift+Enter'}
-                  preferredPlacement="top"
-                />
-                <Button
-                  size="sm"
-                  variant="ok"
-                  disabled={actionBusy}
-                  onClick={() => onLeaveReviewAction?.('approve')}
-                  title="Approve pull request"
-                  shortcut={isMac ? '⌥⇧↵' : 'Alt+Shift+Enter'}
-                  tipPlacement="top"
-                >
-                  Approve
-                </Button>
-              </span>
-            ) : null}
-            {showReviewVerdict ? (
-              <span className="prp-opt-hint-host">
-                <OptBtnHint
-                  label={isMac ? '⌥⇧X' : 'Alt+Shift+X'}
-                  preferredPlacement="top"
-                />
-                <Button
-                  size="sm"
-                  variant="warn"
-                  disabled={actionBusy}
-                  onClick={() => onLeaveReviewAction?.('request_changes')}
-                  title="Request changes"
-                  shortcut={isMac ? '⌥⇧X' : 'Alt+Shift+X'}
-                  tipPlacement="top"
-                >
-                  Request changes
-                </Button>
-              </span>
-            ) : null}
+        {/* Always available — event/body live in FinishReviewModal */}
+        <div className="prp-diff-toolbar__pending" role="group" aria-label="Leave a review">
+          <span className="prp-opt-hint-host" ref={submitBtnRef}>
+            <OptBtnHint
+              label={isMac ? '⌥↵' : 'Alt+Enter'}
+              preferredPlacement="top"
+            />
             <Button
               size="sm"
-              variant="danger"
+              variant="primary"
               disabled={actionBusy}
-              onClick={onDiscardPending}
-              title="Discard pending review"
+              aria-haspopup="dialog"
+              aria-expanded={finishOpen}
+              onClick={() => {
+                setFinishInitial('comment');
+                setFinishOpen(true);
+              }}
+              title={
+                pending > 0
+                  ? `Finish your review (${pending} pending)`
+                  : 'Finish your review'
+              }
+              shortcut={isMac ? '⌥↵' : 'Alt+Enter'}
               tipPlacement="top"
             >
-              Discard
+              Submit review
+              {pending > 0 ? (
+                <span className="prp-diff-toolbar__pending-count" aria-hidden="true">
+                  {pending}
+                </span>
+              ) : null}
             </Button>
-          </div>
-        ) : null}
+          </span>
+          <FinishReviewModal
+            open={finishOpen}
+            anchorRef={submitBtnRef}
+            pendingCount={pending}
+            detail={detail}
+            actionBusy={actionBusy}
+            colorMode={colorMode}
+            initialEvent={finishInitial}
+            onUploadFile={onUploadFile}
+            mentionCandidates={mentionCandidates}
+            linkCtx={linkCtx}
+            onClose={() => setFinishOpen(false)}
+            onDiscard={
+              pending > 0 && typeof onDiscardPending === 'function'
+                ? async () => {
+                    await onDiscardPending?.();
+                    setFinishOpen(false);
+                  }
+                : null
+            }
+            onSubmit={async (kind, body) => {
+              const ok = await onLeaveReviewAction?.(kind, { body });
+              if (ok !== false) setFinishOpen(false);
+            }}
+          />
+        </div>
 
         {commitError ? (
           <span className="prp-commit-filter__error" role="alert">

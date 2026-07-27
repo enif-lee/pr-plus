@@ -32,6 +32,8 @@ import {
   stickyFileHeaderForScroll,
   resolveStickyFileHeaderLayout,
   rowTopY,
+  expandControlKinds,
+  expandBusyMatches,
 } from '@lib/diff-rows';
 import {
   markSearchInText,
@@ -251,16 +253,12 @@ function renderSearchableHtml(
 }
 
 /**
- * Compact expand controls on an @@ hunk row edge of an omitted gap.
+ * GitHub-style expand chrome for one omitted gap on an @@ row:
+ *   ▼ (down / front) | Expand all | ▲ (up / back)
  *
- * placement:
- * - `above` → control sits at the **back** of the gap (before this hunk):
- *   primary ▲ loads from the gap end (toward this hunk).
- * - `below` → control sits at the **front** of the gap (after this hunk):
- *   primary ▼ loads from the gap start (after this hunk).
- *
- * When the gap is larger than one chunk, both edge buttons are shown so the
- * user can grow the visible region from either end independently.
+ * Side buttons load one chunk from that end; Expand all opens the entire
+ * remaining gap (both ends). Trailing gaps use placement `below`; leading /
+ * middle gaps use `above` (single mount per gap).
  */
 function HunkExpandControls({
   gap,
@@ -273,19 +271,29 @@ function HunkExpandControls({
   filePath: string;
   onExpandGap: any;
   expandBusyKey: any;
-  /** above = gap before this hunk (back edge); below = gap after this hunk (front edge) */
+  /** above = gap before this hunk; below = gap after this hunk (trailing) */
   placement: 'above' | 'below';
 }) {
   if (!gap) return null;
   const count = Math.max(0, Number(gap.hiddenCount) || 0);
   if (!count) return null;
   const chunk = Math.max(1, Number(gap.expandChunk) || 20);
-  const showSides = count > chunk;
   const sideN = Math.min(chunk, count);
-  const busyPrefix = `${filePath}:${gap.gapStartNew}-${gap.gapEndNew}:`;
-  const busy = Boolean(
-    expandBusyKey && String(expandBusyKey).startsWith(busyPrefix)
-  );
+  const kinds =
+    typeof expandControlKinds === 'function'
+      ? expandControlKinds(placement, gap)
+      : count > chunk
+        ? (['fromStart', 'all', 'fromEnd'] as const)
+        : (['all'] as const);
+  const busy =
+    typeof expandBusyMatches === 'function'
+      ? expandBusyMatches(expandBusyKey, filePath, gap)
+      : Boolean(
+          expandBusyKey &&
+            String(expandBusyKey).startsWith(
+              `${filePath}:${gap.gapStartNew}-${gap.gapEndNew}:`
+            )
+        );
   const payload = { ...gap, filePath };
   const labelAll =
     busy
@@ -294,74 +302,68 @@ function HunkExpandControls({
         ? `Expand ${count}`
         : `Expand all ${count}`;
 
-  // fromStart = front of gap (after previous section); fromEnd = back (before next)
-  const fromStartBtn = showSides ? (
-    <button
-      type="button"
-      className="prp-hunk-expand__btn"
-      disabled={busy || !onExpandGap}
-      title={`Show next ${sideN} lines after previous section (front of gap)`}
-      onClick={() => onExpandGap?.(payload, 'fromStart')}
-    >
-      ▼{sideN}
-    </button>
-  ) : null;
-
-  const fromEndBtn = showSides ? (
-    <button
-      type="button"
-      className="prp-hunk-expand__btn"
-      disabled={busy || !onExpandGap}
-      title={`Show previous ${sideN} lines before next section (back of gap)`}
-      onClick={() => onExpandGap?.(payload, 'fromEnd')}
-    >
-      ▲{sideN}
-    </button>
-  ) : null;
-
-  const allBtn = (
-    <button
-      type="button"
-      className="prp-hunk-expand__btn prp-hunk-expand__btn--all"
-      disabled={busy || !onExpandGap}
-      title={
-        count
-          ? `Show all ${count} omitted lines`
-          : 'Expand omitted lines'
-      }
-      onClick={() => onExpandGap?.(payload, 'all')}
-    >
-      {labelAll}
-    </button>
-  );
-
-  // Order: edge-primary first. Front edge (below) → ▼ first; back edge (above) → ▲ first.
-  const buttons =
-    placement === 'below'
-      ? (
-          <>
-            {fromStartBtn}
-            {allBtn}
-            {fromEndBtn}
-          </>
-        )
-      : (
-          <>
-            {fromEndBtn}
-            {allBtn}
-            {fromStartBtn}
-          </>
-        );
+  const buttons = kinds.map((kind) => {
+    if (kind === 'fromStart') {
+      return (
+        <button
+          key="fromStart"
+          type="button"
+          className="prp-hunk-expand__btn prp-hunk-expand__btn--dir"
+          data-expand-dir="fromStart"
+          disabled={busy || !onExpandGap}
+          title={`Expand ${sideN} lines downward (front of gap)`}
+          aria-label={`Expand ${sideN} lines down`}
+          onClick={() => onExpandGap?.(payload, 'fromStart')}
+        >
+          <span className="prp-hunk-expand__icon" aria-hidden="true">
+            ▼
+          </span>
+        </button>
+      );
+    }
+    if (kind === 'fromEnd') {
+      return (
+        <button
+          key="fromEnd"
+          type="button"
+          className="prp-hunk-expand__btn prp-hunk-expand__btn--dir"
+          data-expand-dir="fromEnd"
+          disabled={busy || !onExpandGap}
+          title={`Expand ${sideN} lines upward (back of gap)`}
+          aria-label={`Expand ${sideN} lines up`}
+          onClick={() => onExpandGap?.(payload, 'fromEnd')}
+        >
+          <span className="prp-hunk-expand__icon" aria-hidden="true">
+            ▲
+          </span>
+        </button>
+      );
+    }
+    return (
+      <button
+        key="all"
+        type="button"
+        className="prp-hunk-expand__btn prp-hunk-expand__btn--all"
+        data-expand-dir="all"
+        disabled={busy || !onExpandGap}
+        title={
+          count
+            ? `Expand all ${count} omitted lines (entire gap)`
+            : 'Expand omitted lines'
+        }
+        onClick={() => onExpandGap?.(payload, 'all')}
+      >
+        {labelAll}
+      </button>
+    );
+  });
 
   return (
     <div
       className={`prp-hunk-expand prp-hunk-expand--${placement}`}
       role="group"
-      aria-label={
-        placement === 'above'
-          ? 'Expand omitted lines above this hunk (back of gap)'
-          : 'Expand omitted lines below this hunk (front of gap)'
-      }
+      data-expand-placement={placement}
+      aria-label="Expand omitted lines: down, all, or up"
       onMouseDown={(e) => e.stopPropagation()}
     >
       {buttons}
@@ -521,12 +523,26 @@ const DiffCodeLineBody = memo(function DiffCodeLineBody({
       </div>
     );
   }
-  return (
-    <code
-      className={isCode && useSyntax ? 'hljs prp-code' : 'prp-code'}
-      dangerouslySetInnerHTML={{
-        __html: isCode
-          ? renderSearchableHtml(
+  // Unified: dual line-number gutter (old | new) + code — empty side blank for pure add/del
+  if (isCode) {
+    const oldLn =
+      row.oldLine != null && Number.isFinite(Number(row.oldLine))
+        ? String(row.oldLine)
+        : '';
+    const newLn =
+      row.newLine != null && Number.isFinite(Number(row.newLine))
+        ? String(row.newLine)
+        : '';
+    return (
+      <>
+        <span className="prp-unified-lns" aria-hidden="true">
+          <span className="prp-unified-ln prp-unified-ln--old">{oldLn}</span>
+          <span className="prp-unified-ln prp-unified-ln--new">{newLn}</span>
+        </span>
+        <code
+          className={useSyntax ? 'hljs prp-code' : 'prp-code'}
+          dangerouslySetInnerHTML={{
+            __html: renderSearchableHtml(
               row.code ?? row.text,
               row.filePath,
               qForRow,
@@ -535,17 +551,26 @@ const DiffCodeLineBody = memo(function DiffCodeLineBody({
               occ,
               'code',
               useSyntax
-            )
-          : renderSearchableHtml(
-              row.text || '',
-              row.filePath,
-              qForRow,
-              row,
-              activeHitForMarks,
-              occ,
-              'text',
-              false
             ),
+          }}
+        />
+      </>
+    );
+  }
+  return (
+    <code
+      className="prp-code"
+      dangerouslySetInnerHTML={{
+        __html: renderSearchableHtml(
+          row.text || '',
+          row.filePath,
+          qForRow,
+          row,
+          activeHitForMarks,
+          occ,
+          'text',
+          false
+        ),
       }}
     />
   );
@@ -629,6 +654,7 @@ const DiffCodeLine = memo(function DiffCodeLine({
       style={{ height: ROW_HEIGHT }}
       data-row-index={row.rowIndex}
       data-file-path={row.filePath || ''}
+      data-old-line={row.oldLine ?? ''}
       data-new-line={row.newLine ?? ''}
       data-sel-role={selRole || undefined}
       data-split={isSplit ? '1' : '0'}

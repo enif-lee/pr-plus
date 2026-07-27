@@ -1013,10 +1013,11 @@ html.prp-embed-active [data-target='app-header'] {
 }
 
 .prp-header__title-input {
-  flex: 1 1 auto;
-  min-width: 0;
-  width: 100%;
-  max-width: 520px;
+  /* Width is set inline from the rendered h2 title when edit starts */
+  flex: 0 1 auto;
+  min-width: 48px;
+  width: auto;
+  max-width: min(520px, 100%);
   height: 32px;
   margin: 0;
   padding: 4px 10px;
@@ -1025,9 +1026,11 @@ html.prp-embed-active [data-target='app-header'] {
   background: var(--prp-bg);
   color: var(--prp-fg);
   font: inherit;
-  font-size: 16px;
+  /* Match .prp-header__title scale so measured width transfers cleanly */
+  font-size: clamp(12px, 1.35cqi + 10px, 17px);
   font-weight: 650;
   line-height: 1.3;
+  box-sizing: border-box;
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--prp-accent) 18%, transparent);
 }
 
@@ -1071,9 +1074,9 @@ html.prp-embed-active [data-target='app-header'] {
 }
 
 .prp-header__stats {
-  /* Same pill for metrics + load stage. FLIP sets inline width/height for morph
-     (metrics ↔ stage and stage label swaps). Metrics release to intrinsic size
-     after morph so long "+/− N files" strings are not clipped on header reflow. */
+  /* Same pill for metrics + load stage. FLIP animates width both ways
+     (stage ↔ metrics). Right edge stays put (margin-left: auto). */
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1093,22 +1096,40 @@ html.prp-embed-active [data-target='app-header'] {
   overflow: visible;
   white-space: nowrap;
   transition:
-    width 320ms cubic-bezier(0.22, 1, 0.36, 1),
-    height 320ms cubic-bezier(0.22, 1, 0.36, 1),
-    border-color 280ms cubic-bezier(0.22, 1, 0.36, 1),
-    background 280ms cubic-bezier(0.22, 1, 0.36, 1),
-    box-shadow 280ms ease,
-    color 280ms ease;
-  will-change: width, height;
+    width 280ms cubic-bezier(0.33, 1, 0.36, 1),
+    border-color 220ms ease,
+    background 220ms ease,
+    box-shadow 220ms ease,
+    color 220ms ease;
+}
+.prp-header__stats-bar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--prp-accent, #0969da) 22%, transparent);
+  pointer-events: none;
+  z-index: 0;
+  transition: width 280ms cubic-bezier(0.33, 1, 0.36, 1);
+  opacity: 1;
+}
+.prp-header__stats:not(.prp-header__stats--busy) .prp-header__stats-bar {
+  opacity: 0;
+  transition: opacity 160ms ease, width 280ms cubic-bezier(0.33, 1, 0.36, 1);
 }
 .prp-header__stats-inner {
+  position: relative;
+  z-index: 1;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
   flex-shrink: 0;
   white-space: nowrap;
-  /* Remount on contentKey — soft pop for metrics ↔ stage and stage swaps */
-  animation: prp-header-stats-content-in 280ms cubic-bezier(0.22, 1, 0.36, 1);
+  /* Mode swap only (key=stage|metrics): soft fade, no scale bounce */
+  animation: prp-header-stats-fade-in 200ms ease both;
 }
 .prp-header__stats-files {
   white-space: nowrap;
@@ -1119,15 +1140,40 @@ html.prp-embed-active [data-target='app-header'] {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.prp-header__stats-pct {
+  flex: 0 0 auto;
+  min-width: 3.2ch;
+  text-align: right;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--prp-fg);
+  opacity: 0.92;
+}
 .prp-header__stats--busy {
   color: var(--prp-fg);
   border-color: color-mix(in srgb, var(--prp-accent, #0969da) 34%, var(--prp-border));
-  background: color-mix(in srgb, var(--prp-bg) 88%, var(--prp-accent, #0969da));
+  background: color-mix(in srgb, var(--prp-bg) 92%, var(--prp-accent, #0969da));
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--prp-accent, #0969da) 12%, transparent);
-  /* Hold near-constant width while load phrases swap (~22ch copy) */
-  min-width: 22ch;
-  max-width: min(52vw, 360px);
+  /*
+   * Fixed pill width while loading — phrases swap ("Loading commits…" →
+   * "Loading files…") without the badge growing/shrinking (no layout jitter).
+   * ~34ch minus 24px per product tweak.
+   */
+  /* Target size for stage mode (FLIP animates into/out of this) */
+  width: calc(34ch - 24px);
+  min-width: calc(34ch - 24px);
+  max-width: min(56vw, calc(34ch - 24px));
   overflow: hidden;
+}
+.prp-header__stats--busy .prp-header__stats-inner {
+  width: 100%;
+  min-width: 0;
+  /* Phrase swaps keep the same key=stage — no re-fade */
+  animation: none;
+}
+.prp-header__stats--busy .prp-header__stats-label {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 .prp-header__stats-spinner {
   width: 11px;
@@ -1143,12 +1189,21 @@ html.prp-embed-active [data-target='app-header'] {
     transform: rotate(360deg);
   }
 }
-@keyframes prp-header-stats-content-in {
+@keyframes prp-header-stats-fade-in {
   from {
-    transform: scale(0.96);
+    opacity: 0;
   }
   to {
-    transform: scale(1);
+    opacity: 1;
+  }
+}
+/* Back-compat name used by older tests / docs */
+@keyframes prp-header-stats-content-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
   }
 }
 
@@ -2750,6 +2805,29 @@ html.prp-embed-active [data-target='app-header'] {
   color: var(--prp-fg);
   line-height: 1.3;
 }
+/* Spinner to the right of toggle title when section is loading (esp. collapsed) */
+.prp-aside-section__loading {
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid color-mix(in srgb, var(--prp-fg-muted) 35%, transparent);
+  border-top-color: var(--prp-accent, #0969da);
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-left: 2px;
+  animation: prp-aside-section-spin 0.7s linear infinite;
+}
+@keyframes prp-aside-section-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .prp-aside-section__loading {
+    animation: none;
+    opacity: 0.7;
+    border-top-color: color-mix(in srgb, var(--prp-fg-muted) 55%, transparent);
+  }
+}
 .prp-aside-section__actions {
   display: inline-flex;
   align-items: center;
@@ -4339,6 +4417,47 @@ html.prp-embed-active [data-target='app-header'] {
   flex: 0 0 auto;
 }
 
+/* Unified dual line numbers (old | new) — GitHub-style gutter */
+.prp-unified-lns {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: stretch;
+  align-self: stretch;
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+  color: var(--prp-fg-muted);
+  border-right: 1px solid var(--prp-border-muted);
+  background: color-mix(in srgb, var(--prp-bg-muted, var(--prp-bg)) 55%, transparent);
+}
+.prp-unified-ln {
+  flex: 0 0 42px;
+  min-width: 42px;
+  text-align: right;
+  padding: 0 8px 0 4px;
+  line-height: 22px;
+  white-space: pre;
+  box-sizing: border-box;
+}
+.prp-unified-ln--old {
+  border-right: 1px solid color-mix(in srgb, var(--prp-border-muted) 70%, transparent);
+}
+.prp-vline--add .prp-unified-ln--old,
+.prp-vline--del .prp-unified-ln--new {
+  /* pure add/del: empty side stays blank */
+  color: transparent;
+}
+.prp-vline--add .prp-unified-ln--new {
+  color: color-mix(in srgb, var(--prp-add, #1a7f37) 55%, var(--prp-fg-muted));
+}
+.prp-vline--del .prp-unified-ln--old {
+  color: color-mix(in srgb, var(--prp-del, #cf222e) 55%, var(--prp-fg-muted));
+}
+/* Unified code cell shares row with dual LN */
+.prp-vline:not(.prp-vline--split):not(.prp-vline--hunk) > .prp-code {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .prp-line-comment-btn {
   appearance: none;
   width: 22px;
@@ -5289,15 +5408,24 @@ html.prp-embed-active [data-target='app-header'] {
 .prp-hunk-expand-rail {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
   padding: 0 8px 0 6px;
   font-family: var(--prp-font);
   flex-shrink: 0;
 }
+/* One gap group: ▼ | Expand all | ▲ */
 .prp-hunk-expand {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: 0;
+  border: 1px solid color-mix(in srgb, var(--prp-accent) 22%, var(--prp-border-muted));
+  border-radius: 6px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--prp-bg, #fff) 88%, var(--prp-accent));
+}
+/* Separate groups when a row has trailing + leading gaps for different ranges */
+.prp-hunk-expand + .prp-hunk-expand {
+  margin-left: 2px;
 }
 .prp-hunk-expand__btn {
   appearance: none;
@@ -5305,10 +5433,10 @@ html.prp-embed-active [data-target='app-header'] {
   align-items: center;
   justify-content: center;
   margin: 0;
-  padding: 0 6px;
-  min-height: 18px;
+  padding: 0 7px;
+  min-height: 20px;
   border: 0;
-  border-radius: 4px;
+  border-radius: 0;
   background: transparent;
   color: var(--prp-accent);
   font: inherit;
@@ -5317,6 +5445,19 @@ html.prp-embed-active [data-target='app-header'] {
   line-height: 1.2;
   white-space: nowrap;
   cursor: pointer;
+}
+.prp-hunk-expand__btn + .prp-hunk-expand__btn {
+  border-left: 1px solid color-mix(in srgb, var(--prp-accent) 18%, var(--prp-border-muted));
+}
+.prp-hunk-expand__btn--dir {
+  min-width: 22px;
+  padding: 0 5px;
+  font-size: 9px;
+}
+.prp-hunk-expand__icon {
+  display: block;
+  line-height: 1;
+  transform: scale(0.95);
 }
 .prp-hunk-expand__btn:hover:not(:disabled),
 .prp-hunk-expand__btn:focus-visible:not(:disabled) {
@@ -5329,6 +5470,7 @@ html.prp-embed-active [data-target='app-header'] {
 }
 .prp-hunk-expand__btn--all {
   font-weight: 700;
+  padding: 0 8px;
 }
 
 .prp-vline--comment {
@@ -7904,6 +8046,140 @@ button.prp-stack-strip__item {
   gap: 6px 8px;
   /* Sits after thread-tools; alone still pins right via its own margin-left */
   margin-left: auto;
+  flex-shrink: 0;
+}
+.prp-diff-toolbar__pending-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  background: rgba(255, 255, 255, 0.22);
+  color: inherit;
+}
+
+/* GitHub-style Finish your review popover (portaled into .prp-overlay or body).
+   Must stack above #prp-page-embed (z-index 100000) when body-portaled —
+   same band as ConfirmDialog (100100). */
+.prp-finish-review-layer {
+  --prp-fg: var(--fgColor-default, #1f2328);
+  --prp-fg-muted: var(--fgColor-muted, #656d76);
+  --prp-bg: var(--bgColor-default, #ffffff);
+  --prp-bg-muted: var(--bgColor-muted, #f6f8fa);
+  --prp-border: var(--borderColor-default, #d0d7de);
+  --prp-accent: var(--fgColor-accent, #0969da);
+  --prp-ok: #1a7f37;
+  --prp-warn: #9a6700;
+  --prp-danger: #cf222e;
+  --prp-radius: 12px;
+  --prp-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  position: fixed;
+  inset: 0;
+  z-index: 100100;
+  pointer-events: none;
+  font-family: var(--prp-font);
+  color: var(--prp-fg);
+}
+.prp-finish-review-layer.prp-theme-dark,
+.prp-finish-review-layer[data-prp-color-mode='dark'] {
+  --prp-fg: var(--fgColor-default, #e6edf3);
+  --prp-fg-muted: var(--fgColor-muted, #8b949e);
+  --prp-bg: var(--bgColor-default, #0d1117);
+  --prp-bg-muted: var(--bgColor-muted, #161b22);
+  --prp-border: var(--borderColor-default, #30363d);
+  --prp-accent: var(--fgColor-accent, #2f81f7);
+  --prp-ok: #3fb950;
+  --prp-warn: #d29922;
+  --prp-danger: #f85149;
+}
+.prp-finish-review {
+  position: fixed;
+  z-index: 1;
+  pointer-events: auto;
+  /* 1.5× prior 360px popover */
+  width: min(540px, calc(100vw - 24px));
+  max-height: min(520px, calc(100vh - 24px));
+  overflow: auto;
+  padding: 14px 16px 12px;
+  border: 1px solid var(--prp-border);
+  border-radius: var(--prp-radius);
+  background: var(--prp-bg);
+  box-shadow: 0 16px 48px rgba(1, 4, 9, 0.28);
+  color: var(--prp-fg);
+  box-sizing: border-box;
+  animation: prp-finish-review-in 160ms ease-out both;
+}
+@keyframes prp-finish-review-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.prp-finish-review__head {
+  margin: 0 0 12px;
+}
+.prp-finish-review__title {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.prp-finish-review__sub {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--prp-fg-muted);
+}
+/* Shared MarkdownComposer (Write / Preview) inside the popover */
+.prp-finish-review__composer {
+  margin: 0 0 12px;
+  min-width: 0;
+}
+.prp-finish-review__composer .prp-mdc {
+  width: 100%;
+}
+.prp-finish-review__composer .prp-mdc__ta {
+  min-height: 96px;
+}
+.prp-finish-review__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.prp-finish-review__actions-start {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.prp-finish-review__actions-end {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+/* Suppress background Opt / tip chrome while Finish review is open.
+   Modal CTA OptBtnHints use --finish and must stay visible on Opt-hold. */
+body:has([data-prp-finish-review='1']) .prp-opt-btn-hint:not(.prp-opt-btn-hint--finish),
+body:has([data-prp-finish-review='1']) .prp-tip-pop:not(.prp-tip-pop--finish) {
+  display: none !important;
+}
+/* Finish-review CTA Opt badges stack above the popover */
+.prp-opt-btn-hint--finish {
+  z-index: 100110;
 }
 /* Review filter + thread navigator — pin to the right of the toolbar */
 .prp-diff-toolbar__thread-tools {

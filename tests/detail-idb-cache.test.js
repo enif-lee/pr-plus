@@ -86,7 +86,8 @@ async function main() {
     assert.ok(row, 'IDB write-through');
     assert.equal(row.value.title, 'First');
     assert.equal(row.value.reviewComments.length, 1);
-    assert.equal(row.value.files[0].patch, '', 'IDB drops file patches');
+    // Incomplete (no commits) → slim; full snapshots tested in detail-cache-full.test.js
+    assert.equal(row.value.files[0].patch, '', 'incomplete IDB drops patches');
     assert.equal(row.value.files[0]._patchOmitted, true);
 
     // Simulate page reload: empty memory, hydrate from IDB

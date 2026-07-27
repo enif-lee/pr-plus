@@ -59,11 +59,18 @@
     return rest;
   }
 
-  function sanitizeDetailForCache(detail) {
+  function sanitizeDetailForCache(detail, opts) {
     if (globalThis.PRModalDetailIdb?.sanitizeDetailForCache) {
-      return globalThis.PRModalDetailIdb.sanitizeDetailForCache(detail);
+      return globalThis.PRModalDetailIdb.sanitizeDetailForCache(detail, opts);
     }
     return stripEphemeral(detail);
+  }
+
+  function isDetailCompleteForFullCache(detail) {
+    if (globalThis.PRModalDetailIdb?.isDetailCompleteForFullCache) {
+      return globalThis.PRModalDetailIdb.isDetailCompleteForFullCache(detail);
+    }
+    return false;
   }
 
   function normalizeDetailSnapshot(detail) {
@@ -148,8 +155,9 @@
       const live = stripEphemeral(value);
       memory.set(key, live, customTtlMs);
       if (idb) {
-        // IDB: slim (no patches) so reload hydrate stays snappy
-        const durable = sanitizeDetailForCache(value);
+        // IDB: full files/diff/commits when complete; otherwise slim (no patches)
+        const full = isDetailCompleteForFullCache(value);
+        const durable = sanitizeDetailForCache(value, { full });
         void Promise.resolve()
           .then(() => idb.set(key, durable))
           .catch(() => {});

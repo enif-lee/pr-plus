@@ -42,6 +42,8 @@
     loading: false,
     error: null,
     detail: null,
+    /** Isolated slice store; `detail` is a projection for React (toAppDetail). */
+    detailStore: null,
     owner: null,
     repo: null,
     number: null,
@@ -64,6 +66,27 @@
      */
     loadStage: null,
     /**
+     * Independent side panels still in flight.
+     * Skeleton UI only when pending && !settled (no cached data for that panel).
+     */
+    sidePending: {
+      commits: false,
+      checks: false,
+      development: false,
+      files: false,
+      comments: false,
+      reviews: false,
+    },
+    /** Side panel has real data (from cache or completed fetch). */
+    sideSettled: {
+      commits: false,
+      checks: false,
+      development: false,
+      files: false,
+      comments: false,
+      reviews: false,
+    },
+    /**
      * Presentation: 'modal' (overlay from pulls list) | 'embed' (in-page under GH header).
      * @type {'modal'|'embed'}
      */
@@ -76,6 +99,298 @@
 
   function githubRouteApi() {
     return globalThis.PRModalGithubPrRoute || null;
+  }
+
+  function detailStoreApi() {
+    return globalThis.PRModalDetailStore || null;
+  }
+
+  function mergeDetailProgressive(prev, next, opts = null) {
+    const api = globalThis.PRModalDetailMerge;
+    if (api && typeof api.mergeDetailProgressive === 'function') {
+      return api.mergeDetailProgressive(prev, next, opts || undefined);
+    }
+    if (!next) return prev || next;
+    if (!prev) return next;
+    return { ...prev, ...next };
+  }
+
+  /** Project isolated store → flat detail for React / cache. */
+  function publishDetailFromStore() {
+    const S = detailStoreApi();
+    if (!S || !current.detailStore) {
+      return current.detail;
+    }
+    current.detail = S.toAppDetail(current.detailStore);
+    // Mirror settled flags for existing sidePending UI
+    const settled = S.sideSettledFlags(current.detailStore);
+    const pending = S.sidePendingFlags(current.detailStore);
+    current.sideSettled = { ...emptySideFlags(), ...settled };
+    current.sidePending = {
+      commits: Boolean(pending.commits),
+      checks: Boolean(pending.checks),
+      development: Boolean(pending.development),
+      files: Boolean(pending.files),
+      comments: Boolean(pending.comments),
+      reviews: Boolean(pending.reviews),
+    };
+    return current.detail;
+  }
+
+  /** Ensure store exists; hydrate from flat seed when needed. */
+  function ensureDetailStore(seedFlat = null) {
+    const S = detailStoreApi();
+    if (!S) return null;
+    if (!current.detailStore) {
+      current.detailStore = seedFlat
+        ? S.fromAppDetail(seedFlat)
+        : S.createEmptyStore();
+    }
+    return current.detailStore;
+  }
+
+  /**
+   * Hydrate/replace store from a full flat snapshot (list sketch / cache open).
+   * Isolation starts after this; subsequent writes are slice-only.
+   */
+  function resetDetailStoreFromFlat(flat) {
+    const S = detailStoreApi();
+    if (!S) {
+      current.detail = flat;
+      current.detailStore = null;
+      return flat;
+    }
+    current.detailStore = S.fromAppDetail(flat);
+    return publishDetailFromStore();
+  }
+
+  /**
+   * Legacy progressive merge when store API missing; otherwise prefer isolation.
+   */
+  function setDetailProgressive(next, opts = null) {
+    if (!next || typeof next !== 'object') {
+      current.detail = next;
+      return current.detail;
+    }
+    const S = detailStoreApi();
+    if (S && current.detailStore) {
+      // Ambiguous full-object write: only apply meta (+ optional threads)
+      S.applyMeta(current.detailStore, S.pickMeta(next), {
+        source: next._source,
+        sketch: next._sketch ? true : false,
+        trustEmpty: Boolean(opts?.trustMetaEmpty),
+      });
+      if (
+        (Array.isArray(next.reviewThreads) && next.reviewThreads.length) ||
+        (Array.isArray(next.reviewComments) && next.reviewComments.length)
+      ) {
+        S.applyThreadsFromMergedDetail(current.detailStore, next);
+      }
+      return publishDetailFromStore();
+    }
+    current.detail = mergeDetailProgressive(current.detail, next, opts);
+    return current.detail;
+  }
+
+  function applyCoreToStore(coreFlat) {
+    const S = detailStoreApi();
+    if (!S) {
+      return setDetailProgressive(coreFlat);
+    }
+    ensureDetailStore(current.detail);
+    S.applyCorePayload(current.detailStore, coreFlat);
+    return publishDetailFromStore();
+  }
+
+  function applySideToStore(key, payload) {
+    const S = detailStoreApi();
+    if (!S || !current.detailStore) {
+      return setDetailProgressive({
+        ...payload,
+        _sideSettled: {
+          ...(current.detail?._sideSettled || {}),
+          [key]: true,
+        },
+      });
+    }
+    if (key === 'files') {
+      S.applyFiles(current.detailStore, payload.files, {
+        settled: true,
+        gitattributesText: payload.gitattributesText,
+      });
+    } else if (key === 'commits') {
+      S.applyCommits(current.detailStore, payload.commits, { settled: true });
+    } else if (key === 'comments') {
+      S.applyComments(current.detailStore, payload.comments, {
+        settled: true,
+        pageMeta: payload.commentsMeta,
+      });
+    } else if (key === 'reviews') {
+      S.applyReviews(current.detailStore, payload.reviews, { settled: true });
+    } else if (key === 'checks') {
+      S.applyChecks(current.detailStore, payload.checks, { settled: true });
+    } else if (key === 'development') {
+      S.applyDevelopment(current.detailStore, payload, { settled: true });
+    }
+    return publishDetailFromStore();
+  }
+
+  function applyThreadsToStore(mergedFlat) {
+    const S = detailStoreApi();
+    if (!S) {
+      // No store API: merge threads fields only when possible
+      if (current.detail && mergedFlat) {
+        current.detail = {
+          ...current.detail,
+          reviewThreads: mergedFlat.reviewThreads,
+          reviewComments: mergedFlat.reviewComments,
+          reviewThreadsMeta: mergedFlat.reviewThreadsMeta,
+          reviewCommentsMeta: mergedFlat.reviewCommentsMeta,
+          viewerPendingReview:
+            mergedFlat.viewerPendingReview !== undefined
+              ? mergedFlat.viewerPendingReview
+              : current.detail.viewerPendingReview,
+        };
+        return current.detail;
+      }
+      current.detail = mergedFlat;
+      return current.detail;
+    }
+    ensureDetailStore(current.detail || mergedFlat);
+    S.applyThreadsFromMergedDetail(current.detailStore, mergedFlat);
+    return publishDetailFromStore();
+  }
+
+  /**
+   * Structured open-session fetch timeline for performance analysis.
+   * - console: `[pr-plus][tl +Nms] start|end name …`
+   * - globalThis.__PRP_FETCH_TIMELINE__ (content world)
+   * - #prp-modal-host[data-prp-tl] JSON for page-world agent-browser eval
+   */
+  let activeFetchTimeline = null;
+
+  function nowMs() {
+    return typeof performance !== 'undefined' && performance.now
+      ? performance.now()
+      : Date.now();
+  }
+
+  function publishFetchTimeline(tl) {
+    if (!tl) return;
+    try {
+      globalThis.__PRP_FETCH_TIMELINE__ = {
+        label: tl.label,
+        t0: tl.t0,
+        elapsedMs: Math.round(nowMs() - tl.t0),
+        events: tl.events.slice(),
+      };
+    } catch {
+      /* ignore */
+    }
+    try {
+      const host = document.getElementById(HOST_ID);
+      if (host) {
+        // Cap payload size for attribute
+        const slim = tl.events.map((e) => ({
+          t: e.t,
+          p: e.phase,
+          n: e.name,
+          d: e.dur,
+          ok: e.ok,
+        }));
+        host.setAttribute(
+          'data-prp-tl',
+          JSON.stringify({
+            label: tl.label,
+            elapsedMs: Math.round(nowMs() - tl.t0),
+            events: slim,
+          })
+        );
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function beginFetchTimeline(label) {
+    const t0 = nowMs();
+    const events = [];
+    const tl = {
+      label: String(label || 'open'),
+      t0,
+      events,
+      now() {
+        return Math.round(nowMs() - t0);
+      },
+      mark(name, phase, extra = null) {
+        const e = {
+          t: Math.round(nowMs() - t0),
+          name: String(name || ''),
+          phase: String(phase || 'mark'),
+          ...(extra && typeof extra === 'object' ? extra : {}),
+        };
+        events.push(e);
+        const dur =
+          e.dur != null ? ` ${e.dur}ms` : e.phase === 'end' && e.dur != null ? ` ${e.dur}ms` : '';
+        const ok =
+          e.ok === false ? ' FAIL' : e.ok === true && e.phase === 'end' ? ' ok' : '';
+        console.log(
+          `[pr-plus][tl +${e.t}ms] ${e.phase} ${e.name}${dur}${ok}` +
+            (e.err ? ` err=${e.err}` : '') +
+            (e.note ? ` ${e.note}` : '')
+        );
+        publishFetchTimeline(tl);
+        return e;
+      },
+      /**
+       * Wrap a promise: logs start immediately, end/error when settled.
+       * @template T
+       * @param {string} name
+       * @param {Promise<T>|T} promise
+       * @param {object} [meta]
+       * @returns {Promise<T>}
+       */
+      span(name, promise, meta = null) {
+        const tStart = nowMs();
+        tl.mark(name, 'start', meta || undefined);
+        return Promise.resolve(promise).then(
+          (value) => {
+            const dur = Math.round(nowMs() - tStart);
+            tl.mark(name, 'end', {
+              ...(meta || {}),
+              ok: true,
+              dur,
+            });
+            return value;
+          },
+          (err) => {
+            const dur = Math.round(nowMs() - tStart);
+            tl.mark(name, 'error', {
+              ...(meta || {}),
+              ok: false,
+              dur,
+              err: String(err?.message || err || 'error').slice(0, 160),
+            });
+            throw err;
+          }
+        );
+      },
+      dump() {
+        publishFetchTimeline(tl);
+        return {
+          label: tl.label,
+          elapsedMs: Math.round(nowMs() - t0),
+          events: events.slice(),
+        };
+      },
+    };
+    activeFetchTimeline = tl;
+    tl.mark('session', 'begin', { note: label });
+    return tl;
+  }
+
+  function getFetchTimeline() {
+    return activeFetchTimeline;
   }
 
   function isEmbedPresentation(value) {
@@ -654,11 +969,640 @@
     }
   }
 
-  function setLoadStage(phase, label, busy = true) {
-    current.loadStage =
-      phase || label
-        ? { phase: phase || null, label: label || null, busy: Boolean(busy) }
-        : null;
+  function loadStagePercent(phase, busy = true, phaseFraction) {
+    const lp = globalThis.PRModalLoadProgress;
+    if (lp && typeof lp.percentFromStageProgress === 'function') {
+      return lp.percentFromStageProgress({
+        phase,
+        busy: Boolean(busy),
+        phaseFraction,
+      });
+    }
+    // Fallback weights if pure helper not injected
+    const map = {
+      start: 5,
+      core: 25,
+      'core-full': 25,
+      revalidate: 20,
+      threads: 70,
+      refresh: 70,
+      done: 100,
+    };
+    const base = map[String(phase || '')] ?? (busy ? 15 : 100);
+    return Math.min(100, Math.max(0, Math.round(base)));
+  }
+
+  function fetchUnitWeights() {
+    const lp = globalThis.PRModalLoadProgress;
+    return (
+      (lp && lp.FETCH_UNIT_WEIGHTS) || {
+        start: 4,
+        core: 18,
+        threadsNewest: 14,
+        threadsFollow: 6,
+        files: 12,
+        comments: 10,
+        reviews: 10,
+        commits: 10,
+        checks: 10,
+        development: 6,
+        threadsVisible: 20,
+      }
+    );
+  }
+
+  function openProgressKeys() {
+    const lp = globalThis.PRModalLoadProgress;
+    return (
+      (lp && lp.OPEN_PROGRESS_KEYS) || [
+        'start',
+        'core',
+        'threadsNewest',
+        'threadsFollow',
+        'files',
+        'comments',
+        'reviews',
+        'commits',
+        'checks',
+        'development',
+      ]
+    );
+  }
+
+  /** Active open/refresh progress — side fetches mark into this. */
+  let activeOpenProgress = null;
+
+  function markSideProgress(name, labelKind = 'panels') {
+    const prog = activeOpenProgress;
+    if (!prog || typeof prog.mark !== 'function') return;
+    const w = Number(prog.weights?.[name]) || 0;
+    if (w <= 0) return;
+    if (prog.tracker && typeof prog.tracker.has === 'function' && prog.tracker.has(name)) {
+      tryFinishOpenProgress(prog);
+      return;
+    }
+    prog.mark(
+      name,
+      w,
+      'panels',
+      loadStageLabel(labelKind, { panel: name })
+    );
+    tryFinishOpenProgress(prog);
+  }
+
+  /**
+   * Ready only when core+threads+all independent panels have been credited.
+   * (Percent is capped at 99 in mark(); clearLoadStage owns 100.)
+   */
+  function tryFinishOpenProgress(prog = activeOpenProgress) {
+    if (!prog?.tracker || typeof prog.tracker.has !== 'function') return false;
+    const has = (k) => prog.tracker.has(k);
+    const sides = [
+      'files',
+      'comments',
+      'reviews',
+      'commits',
+      'checks',
+      'development',
+    ];
+    const sidesDone = sides.every(has);
+    const openDone = openProgressKeys().every(has);
+    const threadsOk =
+      has('threadsVisible') ||
+      (has('threadsNewest') && has('threadsFollow'));
+    const refreshDone =
+      has('start') && has('core') && threadsOk && sidesDone;
+    if (!openDone && !refreshDone) return false;
+    clearLoadStage();
+    try {
+      render();
+    } catch {
+      /* ignore */
+    }
+    return true;
+  }
+
+  /**
+   * Per-open/refresh progress tracker. Each parallel fetch should call
+   * `mark(key, weight, phase, label)` when *that* promise resolves so the bar
+   * advances with real timing (not only when Promise.all settles).
+   */
+  function emptySideFlags() {
+    return {
+      commits: false,
+      checks: false,
+      development: false,
+      files: false,
+      comments: false,
+      reviews: false,
+    };
+  }
+
+  /**
+   * Infer which side panels already have durable data (cache / prior fetch).
+   * Prefer explicit `_sideSettled` (includes empty-but-loaded panels).
+   * Fall back to non-empty arrays so older cache without markers still works.
+   */
+  function sideSettledFromDetail(detail) {
+    const d = detail && typeof detail === 'object' ? detail : null;
+    if (!d || d._sketch) return emptySideFlags();
+    const marked =
+      d._sideSettled && typeof d._sideSettled === 'object' ? d._sideSettled : {};
+    const checks = d.checks;
+    const hasCheckItems =
+      checks &&
+      ((Array.isArray(checks.statuses) && checks.statuses.length > 0) ||
+        (Array.isArray(checks.checkRuns) && checks.checkRuns.length > 0) ||
+        (Array.isArray(checks.check_runs) && checks.check_runs.length > 0));
+    // Full cache snapshots always include files/commits pages — treat as settled
+    // even when empty arrays (PR with 0 commits is rare but valid).
+    const fullSnap = d._cacheFull === true;
+    return {
+      commits:
+        Boolean(marked.commits) ||
+        fullSnap ||
+        (Array.isArray(d.commits) && d.commits.length > 0),
+      checks: Boolean(marked.checks) || Boolean(hasCheckItems),
+      development:
+        Boolean(marked.development) ||
+        (Array.isArray(d.developmentIssues) && d.developmentIssues.length > 0) ||
+        (Array.isArray(d.linkedIssues) && d.linkedIssues.length > 0),
+      files:
+        Boolean(marked.files) ||
+        fullSnap ||
+        (Array.isArray(d.files) && d.files.length > 0),
+      comments:
+        Boolean(marked.comments) ||
+        (Array.isArray(d.comments) && d.comments.length > 0),
+      reviews:
+        Boolean(marked.reviews) ||
+        (Array.isArray(d.reviews) && d.reviews.length > 0),
+    };
+  }
+
+  /**
+   * @param {'commits'|'checks'|'development'|'files'|'comments'|'reviews'} key
+   * @param {{ pending?: boolean, settled?: boolean }} flags
+   * @param {{ render?: boolean }} [opts]
+   */
+  function setSideFlag(key, flags, opts = null) {
+    let changed = false;
+    if (flags && typeof flags.pending === 'boolean') {
+      const prev = Boolean(current.sidePending?.[key]);
+      if (prev !== flags.pending) {
+        current.sidePending = {
+          ...(current.sidePending || emptySideFlags()),
+          [key]: flags.pending,
+        };
+        changed = true;
+      }
+    }
+    if (flags && typeof flags.settled === 'boolean') {
+      const prev = Boolean(current.sideSettled?.[key]);
+      if (prev !== flags.settled) {
+        current.sideSettled = {
+          ...(current.sideSettled || emptySideFlags()),
+          [key]: flags.settled,
+        };
+        changed = true;
+      }
+    }
+    if (changed && opts?.render !== false) {
+      try {
+        render();
+      } catch {
+        /* ignore */
+      }
+    }
+    return changed;
+  }
+
+  /**
+   * Independent panel fetches (parallel, non-blocking for core paint):
+   * files, issue comments, reviews, commits, checks, development.
+   * Skeleton UI: pending only when that panel is not yet settled (no cache).
+   */
+  function kickIndependentSideFetches({
+    owner,
+    repo,
+    number,
+    headSha = null,
+    body = '',
+    gen,
+    stillOpenFn = null,
+    signal = null,
+  }) {
+    const alive = () => {
+      if (gen != null && gen !== detailFetchGen) return false;
+      if (typeof stillOpenFn === 'function' && !stillOpenFn()) return false;
+      return Boolean(current.open);
+    };
+    const settleSide = (key, partial) => {
+      if (!alive()) return;
+      if (partial && typeof partial === 'object') {
+        // Slice-only write — never spreads into other domains
+        applySideToStore(key, partial);
+        try {
+          const keyStr = detailKey(owner, repo, number);
+          detailCache.set(keyStr, current.detail);
+        } catch {
+          /* ignore */
+        }
+      }
+      setSideFlag(key, { pending: false, settled: true }, { render: true });
+      markSideProgress(key);
+      console.log(
+        `[pr-plus] side-fetch ${key} ${owner}/${repo}#${number} painted`
+      );
+    };
+    const failSide = (key, err) => {
+      if (
+        err?.name === 'AbortError' ||
+        /aborted|AbortError/i.test(String(err?.message || ''))
+      ) {
+        // Aborted open — leave flags; modal likely closed or superseded
+        return;
+      }
+      console.log(
+        `[pr-plus] side-fetch ${key} soft-fail ${err?.message || err}`
+      );
+      // Soft-fail: stop skeleton so empty state can show (no infinite shimmer)
+      if (alive()) {
+        setSideFlag(key, { pending: false, settled: true });
+        markSideProgress(key);
+      }
+    };
+    /** Credit progress when a panel is skipped (no API / no headSha). */
+    const creditSide = (key) => {
+      markSideProgress(key);
+    };
+
+    const api = globalThis.PRTreeFetch;
+    if (!api) {
+      for (const k of [
+        'files',
+        'comments',
+        'reviews',
+        'commits',
+        'checks',
+        'development',
+      ]) {
+        creditSide(k);
+      }
+      return {
+        filesP: null,
+        commentsP: null,
+        reviewsP: null,
+        commitsP: null,
+        checksP: null,
+        developmentP: null,
+      };
+    }
+
+    // Dedupe concurrent kicks for the same open gen (early kick + paintCoreNow)
+    if (!current._sideKickStarted || current._sideKickGen !== gen) {
+      current._sideKickStarted = new Set();
+      current._sideKickGen = gen;
+    }
+    const started = current._sideKickStarted;
+    const claim = (key) => {
+      if (started.has(key)) return false;
+      started.add(key);
+      return true;
+    };
+
+    // Mark pending only when panel has no settled cache — revalidate keeps content
+    const markPendingIfNeeded = (key, cond = true) => {
+      if (cond && !current.sideSettled?.[key]) {
+        setSideFlag(key, { pending: true }, { render: true });
+      }
+    };
+
+    let filesP = Promise.resolve(null);
+    let commentsP = Promise.resolve(null);
+    let reviewsP = Promise.resolve(null);
+    let commitsP = Promise.resolve(null);
+    let checksP = Promise.resolve(null);
+    let developmentP = Promise.resolve(null);
+
+    const tl = getFetchTimeline();
+    const wrap = (name, p, meta) =>
+      tl && typeof tl.span === 'function' ? tl.span(name, p, meta) : p;
+
+    if (claim('files')) {
+      markPendingIfNeeded('files');
+      filesP =
+        typeof api.fetchPrFiles === 'function'
+          ? wrap(
+              'side.files',
+              api
+                .fetchPrFiles(owner, repo, number, {
+                  signal,
+                  headSha: headSha || null,
+                  gitattributesText: current.detail?.gitattributesText || '',
+                })
+                .then((pack) => {
+                  const files = Array.isArray(pack?.files)
+                    ? pack.files
+                    : Array.isArray(pack)
+                      ? pack
+                      : [];
+                  const gitattributesText =
+                    typeof pack?.gitattributesText === 'string'
+                      ? pack.gitattributesText
+                      : current.detail?.gitattributesText || '';
+                  settleSide('files', { files, gitattributesText });
+                  return pack;
+                })
+                .catch((err) => {
+                  failSide('files', err);
+                  return null;
+                }),
+              { headSha: headSha ? String(headSha).slice(0, 7) : null }
+            )
+          : Promise.resolve(null).then(() => {
+              if (alive() && !current.sideSettled?.files) {
+                setSideFlag('files', { pending: false, settled: true });
+              }
+              creditSide('files');
+              return null;
+            });
+    }
+
+    if (claim('comments')) {
+      markPendingIfNeeded('comments');
+      commentsP =
+        typeof api.fetchPrIssueComments === 'function'
+          ? wrap(
+              'side.comments',
+              api
+                .fetchPrIssueComments(owner, repo, number, { signal })
+                .then((page) => {
+                  const items = Array.isArray(page?.items)
+                    ? page.items
+                    : Array.isArray(page)
+                      ? page
+                      : [];
+                  settleSide('comments', {
+                    comments: items,
+                    commentsMeta: page?.meta || {
+                      page: 1,
+                      perPage: items.length,
+                      hasMore: false,
+                      nextPage: null,
+                      loadedCount: items.length,
+                    },
+                  });
+                  return page;
+                })
+                .catch((err) => {
+                  failSide('comments', err);
+                  return null;
+                })
+            )
+          : Promise.resolve(null).then(() => {
+              if (alive() && !current.sideSettled?.comments) {
+                setSideFlag('comments', { pending: false, settled: true });
+              }
+              creditSide('comments');
+              return null;
+            });
+    }
+
+    if (claim('reviews')) {
+      markPendingIfNeeded('reviews');
+      reviewsP =
+        typeof api.fetchPrReviews === 'function'
+          ? wrap(
+              'side.reviews',
+              api
+                .fetchPrReviews(owner, repo, number, { signal })
+                .then((reviews) => {
+                  settleSide('reviews', {
+                    reviews: Array.isArray(reviews) ? reviews : [],
+                  });
+                  return reviews;
+                })
+                .catch((err) => {
+                  failSide('reviews', err);
+                  return null;
+                })
+            )
+          : Promise.resolve(null).then(() => {
+              if (alive() && !current.sideSettled?.reviews) {
+                setSideFlag('reviews', { pending: false, settled: true });
+              }
+              creditSide('reviews');
+              return null;
+            });
+    }
+
+    if (claim('commits')) {
+      markPendingIfNeeded('commits');
+      commitsP =
+        typeof api.fetchPrCommits === 'function'
+          ? wrap(
+              'side.commits',
+              api
+                .fetchPrCommits(owner, repo, number, { signal })
+                .then((commits) => {
+                  settleSide('commits', {
+                    commits: Array.isArray(commits) ? commits : [],
+                  });
+                  return commits;
+                })
+                .catch((err) => {
+                  failSide('commits', err);
+                  return null;
+                })
+            )
+          : Promise.resolve(null).then(() => {
+              if (alive() && !current.sideSettled?.commits) {
+                setSideFlag('commits', { pending: false, settled: true });
+              }
+              creditSide('commits');
+              return null;
+            });
+    }
+
+    // checks needs headSha — may be claimed later when core paints with sha
+    if (headSha && claim('checks')) {
+      markPendingIfNeeded('checks');
+      checksP =
+        typeof api.fetchPrChecks === 'function'
+          ? wrap(
+              'side.checks',
+              api
+                .fetchPrChecks(owner, repo, headSha, { signal })
+                .then((checks) => {
+                  settleSide('checks', {
+                    checks: checks || {
+                      state: 'unknown',
+                      totalCount: 0,
+                      statuses: [],
+                      checkRuns: [],
+                    },
+                  });
+                  return checks;
+                })
+                .catch((err) => {
+                  failSide('checks', err);
+                  return null;
+                }),
+              { headSha: String(headSha).slice(0, 7) }
+            )
+          : Promise.resolve(null).then(() => {
+              if (alive() && !current.sideSettled?.checks) {
+                setSideFlag('checks', { pending: false, settled: true });
+              }
+              creditSide('checks');
+              return null;
+            });
+    } else if (!headSha) {
+      // No head yet — do not credit checks until core paints headSha, unless
+      // this open will never get head (rare). Credit only if already settled.
+      if (current.sideSettled?.checks) creditSide('checks');
+    }
+
+    if (claim('development')) {
+      markPendingIfNeeded('development');
+      developmentP =
+        typeof api.fetchPrDevelopment === 'function'
+          ? wrap(
+              'side.development',
+              api
+                .fetchPrDevelopment(owner, repo, number, {
+                  signal,
+                  body: body || '',
+                })
+                .then((dev) => {
+                  if (!dev || typeof dev !== 'object') {
+                    settleSide('development', {
+                      linkedIssues: [],
+                      developmentIssues: [],
+                      projects: [],
+                    });
+                    return null;
+                  }
+                  settleSide('development', {
+                    linkedIssues: Array.isArray(dev.linkedIssues)
+                      ? dev.linkedIssues
+                      : [],
+                    developmentIssues: Array.isArray(dev.developmentIssues)
+                      ? dev.developmentIssues
+                      : [],
+                    projects: Array.isArray(dev.projects) ? dev.projects : [],
+                  });
+                  return dev;
+                })
+                .catch((err) => {
+                  failSide('development', err);
+                  return null;
+                })
+            )
+          : Promise.resolve(null).then(() => {
+              if (alive() && !current.sideSettled?.development) {
+                setSideFlag('development', { pending: false, settled: true });
+              }
+              creditSide('development');
+              return null;
+            });
+    }
+
+    return {
+      filesP,
+      commentsP,
+      reviewsP,
+      commitsP,
+      checksP,
+      developmentP,
+    };
+  }
+
+  function beginFetchProgress(gen, stillOpenFn = null) {
+    const lp = globalThis.PRModalLoadProgress;
+    const w = fetchUnitWeights();
+    const tracker =
+      lp && typeof lp.createWeightProgress === 'function'
+        ? lp.createWeightProgress({ total: 100, initial: 0 })
+        : {
+            complete(key, weight) {
+              this._c = Math.min(100, (this._c || 0) + Math.max(0, weight || 0));
+              this._keys = this._keys || new Set();
+              if (this._keys.has(key)) {
+                return { percent: this._c, added: false, completed: this._c };
+              }
+              this._keys.add(key);
+              return { percent: this._c, added: true, completed: this._c };
+            },
+            percent() {
+              return Math.min(100, Math.round(this._c || 0));
+            },
+            has(key) {
+              return (this._keys || new Set()).has(String(key || ''));
+            },
+            getKeys() {
+              return [...(this._keys || [])];
+            },
+            _c: 0,
+          };
+
+    function alive() {
+      if (gen != null && gen !== detailFetchGen) return false;
+      if (typeof stillOpenFn === 'function' && !stillOpenFn()) return false;
+      return Boolean(current.open);
+    }
+
+    function mark(key, weight, phase, label, opts = null) {
+      if (!alive()) return tracker.percent();
+      const res = tracker.complete(String(key), Number(weight) || 0);
+      // Cap at 99 while busy so clearLoadStage owns the 100 settle
+      const percent = Math.min(99, Math.max(0, res.percent));
+      setLoadStage(phase, label, true, {
+        percent,
+        ...(opts && typeof opts === 'object' ? opts : {}),
+      });
+      try {
+        render();
+      } catch {
+        /* ignore */
+      }
+      return percent;
+    }
+
+    const prog = { mark, percent: () => tracker.percent(), tracker, weights: w };
+    activeOpenProgress = prog;
+    return prog;
+  }
+
+  function setLoadStage(phase, label, busy = true, opts = null) {
+    if (!phase && !label) {
+      current.loadStage = null;
+      return;
+    }
+    const b = Boolean(busy);
+    const fraction =
+      opts && Number.isFinite(opts.phaseFraction) ? opts.phaseFraction : undefined;
+    // Prefer explicit percent from fetch-unit marks; else derive from phase
+    const percent =
+      opts && Number.isFinite(opts.percent)
+        ? Math.min(100, Math.max(0, Math.round(opts.percent)))
+        : loadStagePercent(phase, b, fraction);
+    // Never decrease percent during a busy session (parallel completions can race)
+    const prev =
+      current.loadStage && Number.isFinite(current.loadStage.percent)
+        ? Number(current.loadStage.percent)
+        : 0;
+    const nextPercent =
+      b && current.loadStage && current.loadStage.busy
+        ? Math.max(prev, percent)
+        : percent;
+    current.loadStage = {
+      phase: phase || null,
+      label: label || null,
+      busy: b,
+      percent: nextPercent,
+    };
   }
 
   /**
@@ -724,6 +1668,16 @@
         return 'Load more failed';
       case 'threads-all-failed':
         return 'Load all failed';
+      case 'panels': {
+        const panel = String(extra?.panel || '');
+        if (panel === 'files') return 'Loading files…';
+        if (panel === 'comments') return 'Loading comments…';
+        if (panel === 'reviews') return 'Loading reviews…';
+        if (panel === 'commits') return 'Loading commits…';
+        if (panel === 'checks') return 'Loading checks…';
+        if (panel === 'development') return 'Loading development…';
+        return 'Loading panels…';
+      }
       default: {
         const msg = String(extra?.message || kind || 'Loading…').trim();
         // Hard cap so unexpected API errors don't explode the badge
@@ -733,6 +1687,35 @@
   }
 
   function clearLoadStage() {
+    try {
+      const tl = getFetchTimeline();
+      if (tl) {
+        tl.mark('session', 'done', { note: 'load stage cleared' });
+        const dump = tl.dump();
+        console.log(
+          `[pr-plus][tl] SESSION DONE ${dump.label} elapsed=${dump.elapsedMs}ms events=${dump.events.length}`
+        );
+        const ends = dump.events.filter(
+          (e) => e.phase === 'end' || e.phase === 'error'
+        );
+        if (ends.length) {
+          console.log(
+            '[pr-plus][tl] fetch durations: ' +
+              ends
+                .map(
+                  (e) =>
+                    `${e.name}=${e.dur != null ? e.dur + 'ms' : '?'}${
+                      e.ok === false ? '!' : ''
+                    }`
+                )
+                .join(' ')
+          );
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    // Drop load pill immediately → metrics stats (no "Ready" settle flash).
     current.loadStage = null;
   }
 
@@ -1152,6 +2135,15 @@
       error: current.error,
       detail: current.detail,
       loadStage: current.loadStage,
+      /** Side panels loading without settled cache → section skeletons */
+      sidePending: {
+        commits: Boolean(current.sidePending?.commits),
+        checks: Boolean(current.sidePending?.checks),
+        development: Boolean(current.sidePending?.development),
+        files: Boolean(current.sidePending?.files),
+        comments: Boolean(current.sidePending?.comments),
+        reviews: Boolean(current.sidePending?.reviews),
+      },
       openPulls,
       prefs: { ...prefs },
       presentation,
@@ -1254,117 +2246,326 @@
             : Date.now();
 
         try {
-          // 1) Core metadata (no threads) — keep prior threads until thread phase
-          setLoadStage('refresh', loadStageLabel('refresh-meta'), true);
-          render();
+          // Kick independent network work in parallel (mirror openModal).
+          // Each fetch marks progress on *its own* completion (timing-accurate bar).
+          const prog = beginFetchProgress(gen, stillOpen);
+          const uw = prog.weights;
+          prog.mark('start', uw.start, 'refresh', loadStageLabel('refresh-meta'));
+
+          const canPageThreads = Boolean(
+            globalThis.PRTreeFetch.fetchReviewThreadsPage
+          );
+          const canBulkThreads = Boolean(
+            globalThis.PRTreeFetch.fetchReviewThreadsByIds
+          );
+
+          /** @type {any} */
+          let earlyRefreshThreadsPage = null;
+          /** @type {any} */
+          let earlyRefreshVisibleBulk = null;
+
+          /** Partial paint helper for refresh core (immediate on resolve). */
+          function paintRefreshCore(raw) {
+            if (!stillOpen() || !raw) return null;
+            let detail = raw;
+            // Prefer live on-screen threads (may include early-fetched newest)
+            // over stale prevDetail when network core has empty comments.
+            const threadSrc =
+              current.detail &&
+              Array.isArray(current.detail.reviewComments) &&
+              current.detail.reviewComments.length
+                ? current.detail
+                : prevDetail;
+            if (
+              threadSrc &&
+              Array.isArray(threadSrc.reviewComments) &&
+              threadSrc.reviewComments.length &&
+              (!Array.isArray(detail.reviewComments) ||
+                !detail.reviewComments.length)
+            ) {
+              detail = {
+                ...detail,
+                reviewComments: threadSrc.reviewComments,
+                reviewThreads: threadSrc.reviewThreads || detail.reviewThreads,
+                reviewThreadsMeta:
+                  threadSrc.reviewThreadsMeta || detail.reviewThreadsMeta,
+                reviewCommentsMeta:
+                  threadSrc.reviewCommentsMeta || detail.reviewCommentsMeta,
+              };
+            }
+            if (prevDetail && Array.isArray(prevDetail.files) && prevDetail.files.length) {
+              const netFiles = Array.isArray(detail.files) ? detail.files : [];
+              const cachedHasPatches = prevDetail.files.some(
+                (f) =>
+                  f &&
+                  typeof f.patch === 'string' &&
+                  f.patch.length > 0 &&
+                  !f._patchOmitted
+              );
+              const netHasPatches = netFiles.some(
+                (f) =>
+                  f &&
+                  typeof f.patch === 'string' &&
+                  f.patch.length > 0 &&
+                  !f._patchOmitted
+              );
+              if (cachedHasPatches && !netHasPatches) {
+                detail = { ...detail, files: prevDetail.files };
+              }
+            }
+            if (
+              prevDetail &&
+              Array.isArray(prevDetail.commits) &&
+              prevDetail.commits.length &&
+              (!Array.isArray(detail.commits) || !detail.commits.length)
+            ) {
+              detail = { ...detail, commits: prevDetail.commits };
+            }
+            current.loading = false;
+            // Core refresh: meta slice only (isolation)
+            ensureDetailStore(current.detail || prevDetail);
+            applyCoreToStore(detail);
+            current.error = null;
+            detailCache.set(key, current.detail);
+            setLoadStage(
+              'refresh',
+              loadStageLabel('refresh-meta'),
+              true,
+              { percent: prog.percent() }
+            );
+            render();
+            kickIndependentSideFetches({
+              owner,
+              repo,
+              number,
+              headSha: current.detail?.headSha || null,
+              body: current.detail?.body || '',
+              gen,
+              stillOpenFn: stillOpen,
+              signal,
+            });
+            // Re-apply early thread fetches after core shell is updated
+            if (earlyRefreshThreadsPage) {
+              paintRefreshThreadsNewest(earlyRefreshThreadsPage);
+            }
+            if (earlyRefreshVisibleBulk) {
+              paintRefreshVisibleBulk(earlyRefreshVisibleBulk);
+            }
+            return current.detail;
+          }
+
+          function paintRefreshThreadsNewest(page) {
+            if (!stillOpen() || !page || typeof mergeFn !== 'function') return false;
+            if (!current.detail) return false;
+            const next = mergeFn(current.detail, page, 'newest');
+            applyThreadsToStore(next);
+            detailCache.set(key, current.detail);
+            setLoadStage(
+              'threads',
+              loadStageLabel('threads-update'),
+              true,
+              { percent: prog.percent() }
+            );
+            render();
+            return true;
+          }
+
+          function paintRefreshVisibleBulk(bulk) {
+            if (!stillOpen() || !bulk || typeof mergeFn !== 'function') return false;
+            if (!current.detail) return false;
+            const next = mergeFn(current.detail, bulk, 'refresh');
+            applyThreadsToStore(next);
+            detailCache.set(key, current.detail);
+            setLoadStage(
+              'threads',
+              loadStageLabel('threads-visible', { count: visibleIds.length }),
+              true,
+              { percent: prog.percent() }
+            );
+            render();
+            return true;
+          }
+
+          // Parallel kickoff — paint as each fetch lands
+          const threadsNewestP =
+            mode !== 'visible-threads' && canPageThreads
+              ? globalThis.PRTreeFetch
+                  .fetchReviewThreadsPage(owner, repo, number, {
+                    direction: 'newest',
+                    cursor: null,
+                    pageSize: apiMax,
+                    signal,
+                  })
+                  .then((page) => {
+                    prog.mark(
+                      'threadsNewest',
+                      uw.threadsNewest,
+                      'threads',
+                      loadStageLabel('threads-update')
+                    );
+                    earlyRefreshThreadsPage = page;
+                    paintRefreshThreadsNewest(page);
+                    return { ok: true, page };
+                  })
+                  .catch((err) => {
+                    prog.mark(
+                      'threadsNewest',
+                      uw.threadsNewest,
+                      'threads',
+                      loadStageLabel('threads-failed', { message: err?.message })
+                    );
+                    return { ok: false, err };
+                  })
+              : Promise.resolve({ ok: false, skipped: true }).then((r) => {
+                  if (mode !== 'visible-threads') {
+                    prog.mark(
+                      'threadsNewest',
+                      uw.threadsNewest,
+                      'refresh',
+                      loadStageLabel('refresh-meta')
+                    );
+                  }
+                  return r;
+                });
+
+          const threadsVisibleP =
+            mode === 'visible-threads' &&
+            visibleIds.length &&
+            canBulkThreads
+              ? globalThis.PRTreeFetch
+                  .fetchReviewThreadsByIds(visibleIds, { signal })
+                  .then((bulk) => {
+                    prog.mark(
+                      'threadsVisible',
+                      uw.threadsVisible,
+                      'threads',
+                      loadStageLabel('threads-visible', {
+                        count: visibleIds.length,
+                      })
+                    );
+                    earlyRefreshVisibleBulk = bulk;
+                    paintRefreshVisibleBulk(bulk);
+                    return { ok: true, bulk };
+                  })
+                  .catch((err) => {
+                    prog.mark(
+                      'threadsVisible',
+                      uw.threadsVisible,
+                      'threads',
+                      loadStageLabel('threads-failed', { message: err?.message })
+                    );
+                    return { ok: false, err };
+                  })
+              : Promise.resolve({ ok: false, skipped: true });
+
           let detail = await globalThis.PRTreeFetch.fetchPrDetail(
             owner,
             repo,
             number,
             { skipReviewThreads: true, signal }
-          );
+          ).then((d) => {
+            prog.mark('core', uw.core, 'refresh', loadStageLabel('refresh-meta'));
+            paintRefreshCore(d);
+            return d;
+          });
           if (!stillOpen()) return;
-          if (
-            prevDetail &&
-            Array.isArray(prevDetail.reviewComments) &&
-            prevDetail.reviewComments.length &&
-            (!Array.isArray(detail.reviewComments) ||
-              !detail.reviewComments.length)
-          ) {
-            detail = {
-              ...detail,
-              reviewComments: prevDetail.reviewComments,
-              reviewThreads: prevDetail.reviewThreads || detail.reviewThreads,
-              reviewThreadsMeta:
-                prevDetail.reviewThreadsMeta || detail.reviewThreadsMeta,
-              reviewCommentsMeta:
-                prevDetail.reviewCommentsMeta || detail.reviewCommentsMeta,
-            };
-          }
-          current.loading = false;
-          current.detail = detail;
-          current.error = null;
-          detailCache.set(key, detail);
-          render();
+          detail = current.detail || detail;
 
           // —— Conversation header: only bulk-refresh threads currently on screen ——
           if (mode === 'visible-threads') {
             if (
               visibleIds.length &&
-              typeof globalThis.PRTreeFetch.fetchReviewThreadsByIds ===
-                'function' &&
+              canBulkThreads &&
               typeof mergeFn === 'function'
             ) {
               setLoadStage(
                 'threads',
                 loadStageLabel('threads-visible', { count: visibleIds.length }),
-                true
+                true,
+                { percent: prog.percent() }
               );
               render();
               const tBulk = nowMs();
-              const bulk =
-                await globalThis.PRTreeFetch.fetchReviewThreadsByIds(
-                  visibleIds,
-                  { signal }
-                );
+              const vis = await threadsVisibleP;
+              if (!vis.ok && !vis.skipped) throw vis.err;
+              const bulk = vis.bulk;
+              // threadsVisible weight already applied in promise .then
               const missingN = (bulk?.missingThreadIds || []).length;
               console.log(
                 `[pr-plus] onRefresh visible-threads ${owner}/${repo}#${number}: ${Math.round(
                   nowMs() - tBulk
                 )}ms (${bulk?.threads?.length || 0}/${visibleIds.length}` +
                   (missingN ? `, dropped ${missingN} remote-missing` : '') +
-                  ')'
+                  `, parallel-kickoff) pct=${prog.percent()}`
               );
               if (!stillOpen()) return;
               if (bulk) {
                 const next = mergeFn(current.detail, bulk, 'refresh');
-                current.detail = next;
-                detailCache.set(key, next);
+                // Threads slice only — do not replace other domains
+                applyThreadsToStore(next);
+                detailCache.set(key, current.detail);
               }
             } else {
+              // No visible ids — credit thread weight so settle is not stuck
+              prog.mark(
+                'threadsVisible',
+                uw.threadsVisible,
+                'refresh',
+                loadStageLabel('refresh-visible')
+              );
               console.log(
                 `[pr-plus] onRefresh visible-threads ${owner}/${repo}#${number}: metadata only (0 visible PRRT ids)`
               );
             }
             if (stillOpen()) {
-              clearLoadStage();
+              tryFinishOpenProgress(prog);
               render();
             }
             return;
           }
 
-          if (!globalThis.PRTreeFetch.fetchReviewThreadsPage) {
-            clearLoadStage();
+          if (!canPageThreads) {
+            prog.mark(
+              'threadsNewest',
+              uw.threadsNewest,
+              'refresh',
+              loadStageLabel('refresh')
+            );
+            prog.mark(
+              'threadsFollow',
+              uw.threadsFollow,
+              'refresh',
+              loadStageLabel('refresh')
+            );
+            tryFinishOpenProgress(prog);
             render();
             return;
           }
 
-          // 2a) last:100 (full-threads + mutation revalidate)
-          setLoadStage('threads', loadStageLabel('threads-update'), true);
+          // 2a) last:100 (full-threads + mutation revalidate) — await parallel kickoff
+          setLoadStage(
+            'threads',
+            loadStageLabel('threads-update'),
+            true,
+            { percent: prog.percent() }
+          );
           render();
           const t0 = nowMs();
-          const newest = await globalThis.PRTreeFetch.fetchReviewThreadsPage(
-            owner,
-            repo,
-            number,
-            {
-              direction: 'newest',
-              cursor: null,
-              pageSize: apiMax,
-              signal,
-            }
-          );
+          const kick = await threadsNewestP;
+          if (!kick.ok) throw kick.err || new Error('Threads fetch failed');
+          const newest = kick.page;
           if (!stillOpen()) return;
           console.log(
             `[pr-plus] onRefresh last ${owner}/${repo}#${number}: ${Math.round(
               nowMs() - t0
-            )}ms (${newest?.threads?.length || 0}) mode=${mode}`
+            )}ms (${newest?.threads?.length || 0}) mode=${mode} parallel-kickoff pct=${prog.percent()}`
           );
           let next =
             typeof mergeFn === 'function'
               ? mergeFn(current.detail, newest, 'newest')
               : current.detail;
-          current.detail = next;
+          applyThreadsToStore(next);
+          next = current.detail;
           detailCache.set(key, next);
           render();
 
@@ -1399,7 +2600,8 @@
                 if (!stillOpen()) return;
                 if (typeof mergeFn === 'function') {
                   next = mergeFn(next, oldest, 'oldest');
-                  current.detail = next;
+                  applyThreadsToStore(next);
+                  next = current.detail;
                   detailCache.set(key, next);
                   render();
                 }
@@ -1407,13 +2609,19 @@
                 /* keep last-only */
               }
             }
+            prog.mark(
+              'threadsFollow',
+              uw.threadsFollow,
+              'threads',
+              loadStageLabel('threads-earlier')
+            );
             if (stillOpen() && next?.reviewThreadsMeta?.hasMore) {
               const props = buildProps();
               if (typeof props.onLoadMoreReviewThreads === 'function') {
                 await props.onLoadMoreReviewThreads('all');
               }
             } else if (stillOpen()) {
-              clearLoadStage();
+              tryFinishOpenProgress(prog);
               render();
             }
           } else {
@@ -1445,7 +2653,12 @@
                 return !updatedIdSet.has(s) && !knownMissing.has(s);
               });
               if (!remainingUnresolvedIds.length) break;
-              setLoadStage('threads', loadStageLabel('threads-unresolved'), true);
+              setLoadStage(
+                'threads',
+                loadStageLabel('threads-unresolved'),
+                true,
+                { percent: prog.percent() }
+              );
               render();
               const tBulk = nowMs();
               const bulk =
@@ -1472,10 +2685,16 @@
               // Only retry when we actually pruned zombies (otherwise stop)
               if (!missingN) break;
             }
+            prog.mark(
+              'threadsFollow',
+              uw.threadsFollow,
+              'threads',
+              loadStageLabel('threads-unresolved')
+            );
             if (stillOpen()) {
-              current.detail = next;
-              detailCache.set(key, next);
-              clearLoadStage();
+              applyThreadsToStore(next);
+              detailCache.set(key, current.detail);
+              tryFinishOpenProgress(prog);
               render();
             }
           }
@@ -1617,8 +2836,8 @@
               return null;
             }
             if (!step.detail) return null;
-            next = step.detail;
-            current.detail = next;
+            applyThreadsToStore(step.detail);
+            next = current.detail;
             detailCache.set(detailKey(owner, repo, number), next);
             pages += 1;
             if (!loadAll) break;
@@ -1690,10 +2909,22 @@
         if (Object.prototype.hasOwnProperty.call(patch, 'milestone')) {
           next.milestone = patch.milestone == null ? null : patch.milestone;
         }
-        current.detail = next;
+        // User/meta mutations: write meta slice with trustEmpty so clears stick
+        const S = detailStoreApi();
+        if (S) {
+          ensureDetailStore(next);
+          S.applyMeta(current.detailStore, S.pickMeta(next), {
+            trustEmpty: true,
+            source: 'patch',
+            sketch: false,
+          });
+          publishDetailFromStore();
+        } else {
+          current.detail = next;
+        }
         try {
           const key = detailKey(current.owner, current.repo, current.number);
-          detailCache.set(key, next);
+          detailCache.set(key, current.detail);
         } catch {
           /* ignore */
         }
@@ -2058,6 +3289,7 @@
       loading: false,
       error: null,
       detail: null,
+      detailStore: null,
       owner: null,
       repo: null,
       number: null,
@@ -2071,6 +3303,8 @@
       routeEndLine: null,
       routeSide: null,
       loadStage: null,
+      sidePending: emptySideFlags(),
+      sideSettled: emptySideFlags(),
       presentation: 'modal',
     };
     render();
@@ -2216,12 +3450,28 @@
     const resolvedEndLine = endLine != null ? endLine : ghLoc?.endLine ?? null;
     const resolvedSide = side != null ? side : ghLoc?.side || null;
 
+    // Side panels: if we already have cached data, mark settled so revalidate
+    // does not flash section skeletons over real content.
+    const initialSideSettled = sideSettledFromDetail(initialDetail);
+    const fetchTl = beginFetchTimeline(
+      `open ${owner}/${repo}#${number}` +
+        (fromCache ? ' cache' : fromList ? ' list' : ' cold')
+    );
+    fetchTl.mark('first-paint-source', 'mark', {
+      note: fromCache
+        ? `cache:${peeked?.source || 'memory'}`
+        : fromList
+          ? 'list-sketch'
+          : 'empty',
+      hasDetail: Boolean(initialDetail),
+    });
     current = {
       open: true,
       // Only block whole UI when we have nothing to show yet
       loading: !initialDetail,
       error: null,
       detail: initialDetail,
+      detailStore: null,
       owner,
       repo,
       number,
@@ -2235,6 +3485,8 @@
       routeEndLine: resolvedEndLine,
       routeSide: resolvedSide,
       presentation: resolvedPresentation,
+      sidePending: emptySideFlags(),
+      sideSettled: initialSideSettled,
       loadStage: {
         phase: fromCache ? 'revalidate' : fromList ? 'core' : 'core',
         label: fromCache
@@ -2243,8 +3495,24 @@
             ? loadStageLabel('core-full')
             : loadStageLabel('core'),
         busy: true,
+        // Start at unit weight floor; parallel fetches mark up as each resolves
+        percent: fetchUnitWeights().start || 5,
       },
     };
+    // Isolated slice store — subsequent core/side/threads writes never clobber
+    // other domains. Flat `detail` is a projection for React.
+    if (initialDetail) {
+      resetDetailStoreFromFlat(initialDetail);
+      current.sideSettled = {
+        ...emptySideFlags(),
+        ...sideSettledFromDetail(current.detail),
+      };
+      current.sidePending = emptySideFlags();
+      // Pending = not yet settled
+      for (const k of Object.keys(current.sideSettled)) {
+        current.sidePending[k] = !current.sideSettled[k];
+      }
+    }
     persistOpenModal(owner, repo, number, {
       page: resolvedPage,
       position,
@@ -2306,7 +3574,7 @@
             cached = v;
             fromCache = true;
             peeked = idbPeek;
-            current.detail = v;
+            resetDetailStoreFromFlat(v);
             current.loading = false;
             current.error = null;
             setLoadStage('revalidate', loadStageLabel('revalidate'), true);
@@ -2377,33 +3645,287 @@
       ensurePrefsWatch();
       const fastReview = prefs.fastReview !== false;
 
-      // Phase 1: core PR (no threads) — start network immediately (parallel with IDB)
-      if (!fromCache && !fromList) {
-        setLoadStage('core', loadStageLabel('core'), true);
-        render();
-      } else if (!fromCache && fromList) {
-        setLoadStage('core', loadStageLabel('core-full'), true);
-        render();
-      } else {
-        setLoadStage('revalidate', loadStageLabel('revalidate'), true);
-        render();
-      }
+      // Phase 1+2 kickoff: core + threads in parallel. Progress bar advances
+      // inside each promise's completion (order-independent), not only at the end.
+      const openStill = () =>
+        gen === detailFetchGen &&
+        current.open &&
+        current.owner === owner &&
+        current.repo === repo &&
+        Number(current.number) === Number(number);
+      const prog = beginFetchProgress(gen, openStill);
+      const uw = prog.weights;
+      const corePhase = fromCache ? 'revalidate' : 'core';
+      const coreLabel = fromCache
+        ? loadStageLabel('revalidate')
+        : fromList
+          ? loadStageLabel('core-full')
+          : loadStageLabel('core');
+      prog.mark('start', uw.start, corePhase, coreLabel);
+
       const tCore0 =
         typeof performance !== 'undefined' && performance.now
           ? performance.now()
           : Date.now();
       // Let IDB finish (or time out) without blocking core fetch
       void idbHydrateP;
-      let detail = await fetchDetailOnce({ skipReviewThreads: true });
-      // Prefer whatever IDB provided for thread preserve below
-      try {
-        const idbVal = await idbHydrateP;
-        if (idbVal && !cached) cached = idbVal;
-        // If we still only had a list sketch when IDB finished after network race, keep idb for preserve
-        if (idbVal && detailRank(cached) < detailRank(idbVal)) cached = idbVal;
-      } catch {
-        /* ignore */
+
+      const apiMax = 100;
+      const canFetchThreads = Boolean(
+        globalThis.PRTreeFetch.fetchReviewThreadsPage
+      );
+      const mergeFn =
+        globalThis.PRTreeFetch.mergeReviewThreadsPageIntoDetail || null;
+      /** @type {any} */
+      let earlyThreadsPage = null;
+      let corePainted = false;
+      let threadsPaintedEarly = false;
+
+      /** Merge SWR preserve fields from cache into network core detail. */
+      function mergeCoreWithCache(raw, cacheSnap) {
+        let detail = raw;
+        if (
+          cacheSnap &&
+          Array.isArray(cacheSnap.reviewComments) &&
+          cacheSnap.reviewComments.length &&
+          (!Array.isArray(detail.reviewComments) || !detail.reviewComments.length)
+        ) {
+          detail = {
+            ...detail,
+            reviewComments: cacheSnap.reviewComments,
+            reviewThreads: cacheSnap.reviewThreads || detail.reviewThreads,
+            reviewThreadsMeta:
+              cacheSnap.reviewThreadsMeta || detail.reviewThreadsMeta,
+            reviewCommentsMeta:
+              cacheSnap.reviewCommentsMeta || detail.reviewCommentsMeta,
+            comments:
+              Array.isArray(detail.comments) && detail.comments.length
+                ? detail.comments
+                : cacheSnap.comments || detail.comments,
+          };
+        }
+        if (cacheSnap && Array.isArray(cacheSnap.files) && cacheSnap.files.length) {
+          const netFiles = Array.isArray(detail.files) ? detail.files : [];
+          const cachedHasPatches = cacheSnap.files.some(
+            (f) =>
+              f &&
+              typeof f.patch === 'string' &&
+              f.patch.length > 0 &&
+              !f._patchOmitted
+          );
+          const netHasPatches = netFiles.some(
+            (f) =>
+              f &&
+              typeof f.patch === 'string' &&
+              f.patch.length > 0 &&
+              !f._patchOmitted
+          );
+          if (cachedHasPatches && !netHasPatches) {
+            detail = { ...detail, files: cacheSnap.files };
+          }
+        }
+        if (
+          cacheSnap &&
+          Array.isArray(cacheSnap.commits) &&
+          cacheSnap.commits.length &&
+          (!Array.isArray(detail.commits) || !detail.commits.length)
+        ) {
+          detail = { ...detail, commits: cacheSnap.commits };
+        }
+        if (detail && typeof detail === 'object') {
+          detail = { ...detail, _sketch: undefined, _source: 'network' };
+        }
+        return detail;
       }
+
+      /** Immediate partial paint when core fetch resolves (do not wait for threads/IDB). */
+      function paintCoreNow(raw) {
+        if (!openStill() || !raw) return null;
+        // Core writes meta slice only (via applyCorePayload) — never empties
+        // files/commits/reviews that other fetches own.
+        const fromNetwork = mergeCoreWithCache(raw, cached);
+        ensureDetailStore(current.detail);
+        applyCoreToStore(fromNetwork);
+        current.loading = false;
+        current.error = null;
+        const detail = current.detail;
+        detailCache.set(key, detail);
+        corePainted = true;
+        setLoadStage(
+          'threads',
+          fromCache || detailRank(cached) >= 3
+            ? loadStageLabel('threads-update')
+            : loadStageLabel('threads-load'),
+          true,
+          { percent: prog.percent() }
+        );
+        render();
+        console.log(
+          `[pr-plus] openModal phase=core-paint ${owner}/${repo}#${number} ` +
+            `(prior=${fromCache ? 'cache' : fromList ? 'list' : 'empty'}) pct=${prog.percent()}`
+        );
+        // Independent panels — do not block conversation/threads
+        kickIndependentSideFetches({
+          owner,
+          repo,
+          number,
+          headSha: detail.headSha || null,
+          body: detail.body || '',
+          gen,
+          stillOpenFn: openStill,
+          signal,
+        });
+        // If threads already landed, merge immediately (partial progressive UI)
+        if (earlyThreadsPage && typeof mergeFn === 'function') {
+          paintThreadsNewestNow(earlyThreadsPage);
+        }
+        return detail;
+      }
+
+      /**
+       * Immediate partial paint when newest threads resolve — works against
+       * cache/list core already on screen, without waiting for network core.
+       */
+      function paintThreadsNewestNow(page) {
+        if (!openStill() || !page || typeof mergeFn !== 'function') return false;
+        const base = current.detail;
+        // Need a real detail shell (cache or core) — not empty
+        if (!base || typeof base !== 'object') return false;
+        // Allow merge into sketch only if it has identity; prefer non-empty host
+        const next = mergeFn(base, page, 'newest');
+        if (!next) return false;
+        current.loading = false;
+        // Threads merge only touches threads slice (via applyThreadsToStore)
+        applyThreadsToStore(next);
+        detailCache.set(key, current.detail);
+        threadsPaintedEarly = true;
+        setLoadStage(
+          'threads',
+          fromCache || detailRank(cached) >= 3
+            ? loadStageLabel('threads-update')
+            : loadStageLabel('threads-load'),
+          true,
+          { percent: prog.percent() }
+        );
+        render();
+        console.log(
+          `[pr-plus] openModal phase=threads.last-early-paint ${owner}/${repo}#${number} ` +
+            `(${page?.threads?.length || 0} threads) pct=${prog.percent()}`
+        );
+        return true;
+      }
+
+      const tl = getFetchTimeline();
+      const span =
+        tl && typeof tl.span === 'function'
+          ? (name, p, meta) => tl.span(name, p, meta)
+          : (_n, p) => p;
+
+      // Start threads in parallel with core — paint as soon as *this* fetch lands
+      const threadsKickoffP = canFetchThreads
+        ? span(
+            'fetch.threadsNewest',
+            globalThis.PRTreeFetch
+              .fetchReviewThreadsPage(owner, repo, number, {
+                direction: 'newest',
+                cursor: null,
+                pageSize: apiMax,
+                signal,
+              })
+              .then((page) => {
+                prog.mark(
+                  'threadsNewest',
+                  uw.threadsNewest,
+                  'threads',
+                  fromCache || detailRank(cached) >= 3
+                    ? loadStageLabel('threads-update')
+                    : loadStageLabel('threads-load')
+                );
+                earlyThreadsPage = page;
+                paintThreadsNewestNow(page);
+                tl?.mark?.('paint.threadsNewest', 'mark', {
+                  note: `${page?.threads?.length || 0} threads`,
+                });
+                return { ok: true, page, paintedEarly: threadsPaintedEarly };
+              })
+              .catch((err) => {
+                prog.mark(
+                  'threadsNewest',
+                  uw.threadsNewest,
+                  'threads',
+                  loadStageLabel('threads-failed', { message: err?.message })
+                );
+                return { ok: false, err };
+              }),
+            { pageSize: apiMax }
+          )
+        : Promise.resolve({ ok: false, err: null, skipped: true }).then((r) => {
+            prog.mark('threadsNewest', uw.threadsNewest, corePhase, coreLabel);
+            return r;
+          });
+
+      // Core fetch: mark + partial paint on resolve (may finish before or after threads)
+      const coreP = span(
+        'fetch.core',
+        fetchDetailOnce({ skipReviewThreads: true }).then((d) => {
+          prog.mark('core', uw.core, corePhase, coreLabel);
+          paintCoreNow(d);
+          tl?.mark?.('paint.core', 'mark', {
+            note: d?.title ? String(d.title).slice(0, 40) : 'core',
+            headSha: d?.headSha ? String(d.headSha).slice(0, 7) : null,
+          });
+          return d;
+        })
+      );
+
+      // Non-blocking IDB upgrade (must not delay core paint)
+      void idbHydrateP
+        .then((idbVal) => {
+          if (!openStill() || !idbVal) return;
+          if (!cached) cached = idbVal;
+          if (detailRank(cached) < detailRank(idbVal)) cached = idbVal;
+          // Upgrade sketch-only shell if network core not yet painted
+          if (
+            !corePainted &&
+            current.detail &&
+            (current.detail._sketch || detailRank(current.detail) < detailRank(idbVal))
+          ) {
+            resetDetailStoreFromFlat(idbVal);
+            current.loading = false;
+            render();
+            if (earlyThreadsPage) paintThreadsNewestNow(earlyThreadsPage);
+            // Side panels from cached headSha while core still in flight
+            kickIndependentSideFetches({
+              owner,
+              repo,
+              number,
+              headSha: idbVal.headSha || null,
+              body: idbVal.body || '',
+              gen,
+              stillOpenFn: openStill,
+              signal,
+            });
+          }
+        })
+        .catch(() => {});
+
+      // Kick independent panels ASAP (files/comments/reviews/commits/development).
+      // Do not wait for core — only checks needs headSha (re-kicked from paintCoreNow).
+      {
+        const seed = cached || listSketch || initialDetail || null;
+        kickIndependentSideFetches({
+          owner,
+          repo,
+          number,
+          headSha: seed?.headSha || null,
+          body: seed?.body || '',
+          gen,
+          stillOpenFn: openStill,
+          signal,
+        });
+      }
+
+      let detail = await coreP;
       const coreMs = Math.round(
         (typeof performance !== 'undefined' && performance.now
           ? performance.now()
@@ -2413,109 +3935,50 @@
         `[pr-plus] openModal phase=core ${owner}/${repo}#${number}: ${coreMs}ms ` +
           (detail?._fetchTimings
             ? JSON.stringify(detail._fetchTimings)
-            : '(no per-request timings)')
+            : '(no per-request timings)') +
+          ` pct=${prog.percent()} painted=${corePainted}`
       );
-      if (gen !== detailFetchGen) return;
-      if (
-        !(
-          current.open &&
-          current.owner === owner &&
-          current.repo === repo &&
-          Number(current.number) === Number(number)
-        )
-      ) {
-        return;
+      if (!openStill()) return;
+      // Ensure core is on screen (paintCoreNow should have run; re-apply if aborted mid-flight)
+      if (!corePainted && detail) {
+        detail = paintCoreNow(detail) || detail;
+      } else {
+        detail = current.detail || detail;
       }
-      // SWR: keep cached review threads visible until fresh thread pages land
-      // so core-only responses do not blank conversation / Diff comments.
-      if (
-        cached &&
-        Array.isArray(cached.reviewComments) &&
-        cached.reviewComments.length &&
-        (!Array.isArray(detail.reviewComments) || !detail.reviewComments.length)
-      ) {
-        detail = {
-          ...detail,
-          reviewComments: cached.reviewComments,
-          reviewThreads: cached.reviewThreads || detail.reviewThreads,
-          reviewThreadsMeta: cached.reviewThreadsMeta || detail.reviewThreadsMeta,
-          reviewCommentsMeta:
-            cached.reviewCommentsMeta || detail.reviewCommentsMeta,
-          comments:
-            Array.isArray(detail.comments) && detail.comments.length
-              ? detail.comments
-              : cached.comments || detail.comments,
-        };
-      }
-      // Network core is authoritative — drop sketch flags
-      if (detail && typeof detail === 'object') {
-        detail = { ...detail, _sketch: undefined, _source: 'network' };
-      }
-      current.loading = false;
-      current.detail = detail;
-      current.error = null;
-      setLoadStage(
-        'threads',
-        fromCache || detailRank(cached) >= 3
-          ? loadStageLabel('threads-update')
-          : loadStageLabel('threads-load'),
-        true
-      );
-      detailCache.set(key, detail);
-      render();
-      console.log(
-        `[pr-plus] openModal phase=core-paint ${owner}/${repo}#${number} ` +
-          `(prior=${fromCache ? 'cache' : fromList ? 'list' : 'empty'})`
-      );
 
-      // Phase 2: review threads
+      // Phase 2: await parallel threads kickoff (may already be painted early)
       // - Cold open: dual-window (newest last:N + oldest first:20)
-      // - Cache revalidate: newest last:100 + bulk unresolved by PRRT ids (no oldest;
-      //   start window is stable when ordered, so skip)
-      if (globalThis.PRTreeFetch.fetchReviewThreadsPage) {
+      // - Cache revalidate: newest last:100 + bulk unresolved by PRRT ids
+      if (canFetchThreads) {
         try {
-          const mergeFn =
-            globalThis.PRTreeFetch.mergeReviewThreadsPageIntoDetail || null;
           const nowMs = () =>
             typeof performance !== 'undefined' && performance.now
               ? performance.now()
               : Date.now();
           const tThreads0 = nowMs();
-          const apiMax = 100;
           // Revalidate path when we had durable cache (memory/IDB), not mere list sketch
           const useRevalidatePath = fromCache || detailRank(cached) >= 3;
 
           if (useRevalidatePath) {
             // —— Incremental revalidate ——
-            // 1) last:100 first (always freshest activity window)
-            // 2) then bulk-refresh only unresolved among threads NOT updated in step 1
-            //    (oldest/start window skipped — stable when ordered)
-            setLoadStage('threads', loadStageLabel('threads-update'), true);
+            setLoadStage(
+              'threads',
+              loadStageLabel('threads-update'),
+              true,
+              { percent: prog.percent() }
+            );
             render();
 
-            // Step 1: last N (API max 100)
             const tNewest0 = nowMs();
-            const newest = await globalThis.PRTreeFetch.fetchReviewThreadsPage(
-              owner,
-              repo,
-              number,
-              { direction: 'newest', cursor: null, pageSize: apiMax, signal }
-            );
+            const kick = await threadsKickoffP;
+            if (!kick.ok) throw kick.err || new Error('Threads fetch failed');
+            const newest = kick.page;
             console.log(
               `[pr-plus] openModal phase=threads.last ${owner}/${repo}#${number}: ${Math.round(
                 nowMs() - tNewest0
-              )}ms (${newest?.threads?.length || 0} threads)`
+              )}ms (${newest?.threads?.length || 0} threads, parallel-kickoff) pct=${prog.percent()} early=${Boolean(kick.paintedEarly || threadsPaintedEarly)}`
             );
-            if (gen !== detailFetchGen) return;
-            if (
-              !(
-                current.open &&
-                Number(current.number) === Number(number) &&
-                current.detail
-              )
-            ) {
-              return;
-            }
+            if (!openStill()) return;
 
             const updatedIdSet = new Set(
               (newest?.threads || [])
@@ -2523,16 +3986,21 @@
                 .filter(Boolean)
             );
 
+            // Re-merge if early paint raced before core, or not painted yet
             let next =
               typeof mergeFn === 'function'
                 ? mergeFn(current.detail, newest, 'newest')
                 : current.detail;
 
-            // Paint last-100 merge before unresolved bulk
-            detail = next;
-            current.detail = detail;
+            applyThreadsToStore(next);
+            detail = current.detail;
             detailCache.set(key, detail);
-            setLoadStage('threads', loadStageLabel('threads-unresolved'), true);
+            setLoadStage(
+              'threads',
+              loadStageLabel('threads-unresolved'),
+              true,
+              { percent: prog.percent() }
+            );
             render();
 
             // Step 2: remaining unresolved not in last-100; drop remote-missing zombies
@@ -2548,6 +4016,7 @@
                 return [...ids];
               });
             let unresolvedPass = 0;
+            let didUnresolvedFetch = false;
             /** PRRT ids confirmed remote-missing this open — never re-fetch. */
             const knownMissing = new Set();
             while (
@@ -2567,6 +4036,7 @@
                 }
                 break;
               }
+              didUnresolvedFetch = true;
               const tBulk0 = nowMs();
               const bulk = await globalThis.PRTreeFetch.fetchReviewThreadsByIds(
                 remainingUnresolvedIds,
@@ -2596,55 +4066,49 @@
               if (!missingN) break;
             }
 
+            // Credit follow-up weight when bulk finished or was skipped
+            prog.mark(
+              'threadsFollow',
+              uw.threadsFollow,
+              'threads',
+              didUnresolvedFetch
+                ? loadStageLabel('threads-unresolved')
+                : loadStageLabel('threads-update')
+            );
             console.log(
               `[pr-plus] openModal phase=threads(revalidate) ${owner}/${repo}#${number}: ${Math.round(
                 nowMs() - tThreads0
-              )}ms total`
+              )}ms total pct=${prog.percent()}`
             );
-            if (gen !== detailFetchGen) return;
-            if (
-              current.open &&
-              Number(current.number) === Number(number) &&
-              current.detail
-            ) {
-              detail = next;
-              current.detail = detail;
+            if (!openStill()) return;
+            if (current.detail) {
+              applyThreadsToStore(next);
+              detail = current.detail;
               detailCache.set(key, detail);
-              clearLoadStage();
+              tryFinishOpenProgress(prog);
               render();
             }
           } else {
-            // —— Cold open: last:100 first, then start:20 only if total ≥ 100 ——
+            // —— Cold open: last:100 (parallel kickoff) then start:20 if total ≥ 100 ——
             const tNewest0 = nowMs();
-            const newest = await globalThis.PRTreeFetch.fetchReviewThreadsPage(
-              owner,
-              repo,
-              number,
-              { direction: 'newest', cursor: null, pageSize: apiMax, signal }
-            );
+            const kick = await threadsKickoffP;
+            if (!kick.ok) throw kick.err || new Error('Threads fetch failed');
+            const newest = kick.page;
             console.log(
               `[pr-plus] openModal phase=threads.last ${owner}/${repo}#${number}: ${Math.round(
                 nowMs() - tNewest0
-              )}ms (${newest?.threads?.length || 0} threads)`
+              )}ms (${newest?.threads?.length || 0} threads, parallel-kickoff) pct=${prog.percent()} early=${Boolean(kick.paintedEarly || threadsPaintedEarly)}`
             );
-            if (gen !== detailFetchGen) return;
-            if (
-              !(
-                current.open &&
-                Number(current.number) === Number(number) &&
-                current.detail
-              )
-            ) {
-              return;
-            }
+            if (!openStill()) return;
+            // Re-merge after core (early paint may have used sketch/cache base)
             let next =
               typeof mergeFn === 'function'
                 ? mergeFn(current.detail, newest, 'newest')
                 : current.detail;
 
-            // Paint last-100 before optional start window
-            detail = next;
-            current.detail = detail;
+            applyThreadsToStore(next);
+            detail = current.detail;
+            next = detail;
             detailCache.set(key, detail);
             render();
 
@@ -2657,7 +4121,12 @@
               totalCount >= apiMax && Boolean(newest.hasPreviousPage);
             if (needStartWindow) {
               try {
-                setLoadStage('threads', loadStageLabel('threads-earlier'), true);
+                setLoadStage(
+                  'threads',
+                  loadStageLabel('threads-earlier'),
+                  true,
+                  { percent: prog.percent() }
+                );
                 render();
                 const tOldest0 = nowMs();
                 const oldest =
@@ -2677,7 +4146,7 @@
                     nowMs() - tOldest0
                   )}ms (${oldest?.threads?.length || 0} threads, total=${totalCount})`
                 );
-                if (gen === detailFetchGen && typeof mergeFn === 'function') {
+                if (openStill() && typeof mergeFn === 'function') {
                   next = mergeFn(next, oldest, 'oldest');
                 }
               } catch {
@@ -2688,21 +4157,24 @@
                 `[pr-plus] openModal phase=threads.start ${owner}/${repo}#${number}: skipped (total=${totalCount} < ${apiMax})`
               );
             }
+            // Follow-up weight after start window completes or is skipped
+            prog.mark(
+              'threadsFollow',
+              uw.threadsFollow,
+              'threads',
+              loadStageLabel('threads-load')
+            );
             console.log(
               `[pr-plus] openModal phase=threads ${owner}/${repo}#${number}: ${Math.round(
                 nowMs() - tThreads0
-              )}ms total`
+              )}ms total pct=${prog.percent()}`
             );
-            if (gen !== detailFetchGen) return;
-            if (
-              current.open &&
-              Number(current.number) === Number(number) &&
-              current.detail
-            ) {
-              detail = next;
-              current.detail = detail;
+            if (!openStill()) return;
+            if (current.detail) {
+              applyThreadsToStore(next);
+              detail = current.detail;
               detailCache.set(key, detail);
-              clearLoadStage();
+              tryFinishOpenProgress(prog);
               render();
             }
 
@@ -2725,17 +4197,28 @@
           }
         } catch (threadErr) {
           // Core already painted — keep it; surface soft stage error
-          if (gen === detailFetchGen && current.open) {
-            setLoadStage(
+          if (openStill()) {
+            prog.mark(
+              'threadsFollow',
+              uw.threadsFollow,
               'threads',
-              loadStageLabel('threads-failed', { message: threadErr?.message }),
-              false
+              loadStageLabel('threads-failed', { message: threadErr?.message })
             );
+            if (!tryFinishOpenProgress(prog)) {
+              setLoadStage(
+                'threads',
+                loadStageLabel('threads-failed', { message: threadErr?.message }),
+                true,
+                { percent: Math.min(99, prog.percent()) }
+              );
+            }
             render();
           }
         }
       } else {
-        clearLoadStage();
+        // No thread API — credit remaining units then settle
+        prog.mark('threadsFollow', uw.threadsFollow, corePhase, coreLabel);
+        tryFinishOpenProgress(prog);
         render();
       }
     } catch (err) {

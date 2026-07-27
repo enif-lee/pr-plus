@@ -346,35 +346,11 @@ export function flattenFilesToVirtualRows(files, mode = 'unified', options: any 
             }
             seenHunk = true;
           } else if (newLine > 0 && nextNew > newLine) {
-            // Middle gap: attach to BOTH edges so ▲/▼ expand from opposite ends.
-            // - previous hunk.expandBelow → front of gap (after previous section)
-            // - this hunk.expandAbove → back of gap (before this hunk)
+            // Middle gap: one chrome group on the next @@ (expandAbove) —
+            // GitHub-style ▼ | Expand all | ▲ (both directions + full gap).
+            // Do not dual-mount the same gap on prev.expandBelow (avoids
+            // duplicate Expand all / stacked control groups).
             const middleGap = materializeGap(newLine, nextNew - 1, oldLine);
-            if (middleGap && lastHunkRow) {
-              lastHunkRow.expandBelow = middleGap;
-              // Previous @@ may have been omitted (symmetric/hidden); insert a
-              // marker row after its body so the lower-edge control can render.
-              if (!rows.includes(lastHunkRow)) {
-                if (lastHunkRow.hidden) {
-                  rows.push({
-                    kind: 'diff-line',
-                    filePath: path,
-                    text: '',
-                    code: '',
-                    split: false,
-                    raw: '',
-                    rowIndex: index++,
-                    lineType: 'hunk',
-                    oldLine: null,
-                    newLine: null,
-                    hidden: true,
-                    expandBelow: middleGap,
-                  });
-                } else {
-                  rows.push(lastHunkRow);
-                }
-              }
-            }
             expandAbove = middleGap;
           }
           oldLine = nextOld;
@@ -516,6 +492,72 @@ export function resolveExpandRange(direction, gap) {
     return { start: Math.max(start, end - chunk + 1), end };
   }
   return { start, end };
+}
+
+/**
+ * Expand control kinds for one gap chrome group (GitHub-style):
+ *   ▼ (fromStart) | Expand all | ▲ (fromEnd)
+ *
+ * Expand all always covers the **entire remaining gap** (both ends).
+ * Partial side buttons only appear when hiddenCount > expandChunk.
+ *
+ * `placement` is accepted for call-site compatibility; both edges of the same
+ * gap share this composition when the UI mounts a full group once per gap.
+ *
+ * @param {'above'|'below'|string} [_placement]
+ * @param {{ hiddenCount?: number, expandChunk?: number }|null|undefined} gap
+ * @returns {Array<'fromStart'|'fromEnd'|'all'>}
+ */
+export function expandControlKinds(_placement, gap) {
+  const count = Math.max(0, Number(gap?.hiddenCount) || 0);
+  if (!count) return [];
+  const chunk =
+    Number.isFinite(gap?.expandChunk) && Number(gap.expandChunk) > 0
+      ? Math.floor(Number(gap.expandChunk))
+      : DIFF_EXPAND_CHUNK;
+  const showPartial = count > chunk;
+  // Sides = direction only; middle Expand all expands the whole remaining gap
+  return showPartial ? ['fromStart', 'all', 'fromEnd'] : ['all'];
+}
+
+/**
+ * Busy key keyed by **remaining gap identity**, not the expanded sub-range,
+ * so partial fromStart/fromEnd still disable the matching edge controls.
+ *
+ * Format: `${filePath}:${gapStartNew}-${gapEndNew}:${direction}`
+ *
+ * @param {string} filePath
+ * @param {{ gapStartNew?: number, gapEndNew?: number }|null|undefined} gap
+ * @param {string} [direction]
+ */
+export function makeExpandBusyKey(filePath, gap, direction = 'all') {
+  const path = String(filePath || '');
+  const a = Number(gap?.gapStartNew);
+  const b = Number(gap?.gapEndNew);
+  if (!path || !Number.isFinite(a) || !Number.isFinite(b)) return '';
+  const dir = direction == null || direction === '' ? 'all' : String(direction);
+  return `${path}:${a}-${b}:${dir}`;
+}
+
+/** Gap-identity prefix shared by all directions for the same remaining gap. */
+export function expandBusyPrefix(filePath, gap) {
+  const path = String(filePath || '');
+  const a = Number(gap?.gapStartNew);
+  const b = Number(gap?.gapEndNew);
+  if (!path || !Number.isFinite(a) || !Number.isFinite(b)) return '';
+  return `${path}:${a}-${b}:`;
+}
+
+/**
+ * @param {string|null|undefined} expandBusyKey
+ * @param {string} filePath
+ * @param {{ gapStartNew?: number, gapEndNew?: number }|null|undefined} gap
+ */
+export function expandBusyMatches(expandBusyKey, filePath, gap) {
+  if (!expandBusyKey) return false;
+  const prefix = expandBusyPrefix(filePath, gap);
+  if (!prefix) return false;
+  return String(expandBusyKey).startsWith(prefix);
 }
 
 function coveringRange(ranges, line) {

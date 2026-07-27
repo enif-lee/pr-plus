@@ -4,23 +4,78 @@
  */
 
 
-function githubRestUrl(path) {
+/**
+ * Stateless GitHub API context (REST/GraphQL bases).
+ * Prefer explicit ctx from SW message resolve; never use a process-global mutable base.
+ * @param {object|string|null|undefined} ctx endpoints object, webHost string, or null → github.com
+ */
+function normalizeApiCtx(ctx) {
+  if (ctx && typeof ctx === 'object' && (ctx.restBase || ctx.graphqlUrl)) {
+    return {
+      kind: ctx.kind || 'custom',
+      webHost: ctx.webHost || 'github.com',
+      webOrigin: ctx.webOrigin || '',
+      restBase: String(ctx.restBase || 'https://api.github.com').replace(/\/+$/, ''),
+      graphqlUrl: String(
+        ctx.graphqlUrl ||
+          (String(ctx.restBase || '').includes('api.github.com')
+            ? 'https://api.github.com/graphql'
+            : '')
+      ).replace(/\/+$/, '') || 'https://api.github.com/graphql',
+    };
+  }
+  const webHost =
+    typeof ctx === 'string'
+      ? ctx
+      : ctx && typeof ctx === 'object' && ctx.webHost
+        ? ctx.webHost
+        : 'github.com';
   try {
-    if (globalThis.PRGithubEndpoints && typeof globalThis.PRGithubEndpoints.githubRestUrl === 'function') {
-      return globalThis.PRGithubEndpoints.githubRestUrl(path);
+    if (
+      globalThis.PRGithubEndpoints &&
+      typeof globalThis.PRGithubEndpoints.resolveGithubEndpoints === 'function'
+    ) {
+      return globalThis.PRGithubEndpoints.resolveGithubEndpoints({ webHost });
+    }
+  } catch (_) {}
+  return {
+    kind: 'dotcom',
+    webHost: 'github.com',
+    webOrigin: 'https://github.com',
+    restBase: 'https://api.github.com',
+    graphqlUrl: 'https://api.github.com/graphql',
+  };
+}
+
+function githubRestUrl(path, ctx) {
+  const c = normalizeApiCtx(ctx);
+  try {
+    if (
+      globalThis.PRGithubEndpoints &&
+      typeof globalThis.PRGithubEndpoints.githubRestUrl === 'function'
+    ) {
+      return globalThis.PRGithubEndpoints.githubRestUrl(path, c);
     }
   } catch (_) {}
   const p = String(path || '');
-  return 'https://api.github.com' + (p.startsWith('/') ? p : '/' + p);
+  if (/^https?:\/\//i.test(p)) return p;
+  const base = String(c.restBase || 'https://api.github.com').replace(/\/+$/, '');
+  return base + (p.startsWith('/') ? p : '/' + p);
 }
-function githubGraphqlUrl() {
+function githubGraphqlUrl(ctx) {
+  const c = normalizeApiCtx(ctx);
   try {
-    if (globalThis.PRGithubEndpoints && typeof globalThis.PRGithubEndpoints.githubGraphqlUrl === 'function') {
-      return globalThis.PRGithubEndpoints.githubGraphqlUrl();
+    if (
+      globalThis.PRGithubEndpoints &&
+      typeof globalThis.PRGithubEndpoints.githubGraphqlUrl === 'function'
+    ) {
+      return globalThis.PRGithubEndpoints.githubGraphqlUrl(c);
     }
   } catch (_) {}
-  return 'https://api.github.com/graphql';
+  return String(c.graphqlUrl || 'https://api.github.com/graphql');
 }
+
+
 /**
  * Map REST pull list/item payload → app list row.
  * Includes labels / assignees / milestone so progressive modal sketch can paint
@@ -128,8 +183,9 @@ async function mapWithConcurrency(items, limit, worker) {
   return results;
 }
 
-async function fetchOpenPullsPublic(owner, repo, fetchImpl, token = null) {
-  const url = githubRestUrl(`/repos/${owner}/${repo}/pulls?state=open&per_page=100`);
+async function fetchOpenPullsPublic(owner, repo, fetchImpl, token = null, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
+  const url = githubRestUrl(`/repos/${owner}/${repo}/pulls?state=open&per_page=100`, ctx);
   const res = await fetchImpl(url, {
     headers: buildApiHeaders(token),
   });
@@ -142,8 +198,9 @@ async function fetchOpenPullsPublic(owner, repo, fetchImpl, token = null) {
   return data.map(mapApiPullRequest);
 }
 
-async function fetchPullByNumber(owner, repo, pullNumber, fetchImpl, token = null) {
-  const url = githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}`);
+async function fetchPullByNumber(owner, repo, pullNumber, fetchImpl, token = null, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
+  const url = githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}`, ctx);
   const res = await fetchImpl(url, {
     headers: buildApiHeaders(token),
   });
@@ -160,12 +217,13 @@ async function fetchPullByNumber(owner, repo, pullNumber, fetchImpl, token = nul
 /**
  * Fetch dangling page PRs by number. Auth errors rethrow; other failures are skipped.
  */
-async function fetchDanglingPulls(owner, repo, numbers, fetchImpl, token = null) {
+async function fetchDanglingPulls(owner, repo, numbers, fetchImpl, token = null, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   if (!numbers.length) return [];
 
   const settled = await mapWithConcurrency(numbers, 5, async (pullNumber) => {
     try {
-      return await fetchPullByNumber(owner, repo, pullNumber, fetchImpl, token);
+      return await fetchPullByNumber(owner, repo, pullNumber, fetchImpl, token, ctx);
     } catch (err) {
       if (err.status === 401 || err.status === 403) {
         throw err;
@@ -183,8 +241,9 @@ async function fetchDanglingPulls(owner, repo, numbers, fetchImpl, token = null)
  * Requires admin on the token for the API; returns [] on 403/404.
  * @returns {Promise<Array<{key_prefix:string,url_template:string,is_alphanumeric:boolean}>>}
  */
-async function fetchRepoAutolinks(owner, repo, fetchImpl, token = null) {
-  const url = githubRestUrl(`/repos/${owner}/${repo}/autolinks`);
+async function fetchRepoAutolinks(owner, repo, fetchImpl, token = null, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
+  const url = githubRestUrl(`/repos/${owner}/${repo}/autolinks`, ctx);
   try {
     const res = await fetchImpl(url, { headers: buildApiHeaders(token) });
     if (!res.ok) return [];
@@ -286,8 +345,9 @@ async function fetchOpenPulls(owner, repo, fetchImpl, options = {}) {
     pagePrNumbers = [],
     includeAutolinks = true,
   } = options;
+  const ctx = normalizeApiCtx(options?.ctx);
 
-  const listed = await fetchOpenPullsPublic(owner, repo, fetchImpl, token);
+  const listed = await fetchOpenPullsPublic(owner, repo, fetchImpl, token, ctx);
   const danglingNumbers = findDanglingPrNumbers(pagePrNumbers, listed);
 
   let prs = listed;
@@ -297,7 +357,8 @@ async function fetchOpenPulls(owner, repo, fetchImpl, options = {}) {
       repo,
       danglingNumbers,
       fetchImpl,
-      token
+      token,
+      ctx
     );
     if (extras.length > 0) {
       const byNumber = new Map(listed.map((pr) => [pr.number, pr]));
@@ -312,7 +373,7 @@ async function fetchOpenPulls(owner, repo, fetchImpl, options = {}) {
     return attachMagicLinks(prs, []);
   }
 
-  const autolinks = await fetchRepoAutolinks(owner, repo, fetchImpl, token);
+  const autolinks = await fetchRepoAutolinks(owner, repo, fetchImpl, token, ctx);
   return attachMagicLinks(prs, autolinks);
 }
 
@@ -415,9 +476,38 @@ function mapPrCommitRow(c) {
 }
 
 /**
+ * First page of PR commits (oldest-first, per_page=100). Independent of fetchPrDetail.
+ */
+async function fetchPrCommits(owner, repo, number, fetchImpl, token = null, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
+  const o = String(owner || '').trim();
+  const r = String(repo || '').trim();
+  const n = Number(number);
+  if (!o || !r || !Number.isFinite(n)) {
+    throw new Error('owner, repo, and number are required for commits');
+  }
+  const url = githubRestUrl(
+    `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/pulls/${n}/commits?per_page=100`
+  , ctx);
+  try {
+    const data = await apiJson(url, fetchImpl, token);
+    return (Array.isArray(data) ? data : []).map(mapPrCommitRow).filter((c) => c.sha);
+  } catch (err) {
+    if (
+      err?.name === 'AbortError' ||
+      /aborted|AbortError/i.test(String(err?.message || ''))
+    ) {
+      throw err;
+    }
+    return [];
+  }
+}
+
+/**
  * All PR commits (paginated). GitHub returns oldest-first.
  */
-async function fetchAllPrCommits(owner, repo, number, fetchImpl, token = null) {
+async function fetchAllPrCommits(owner, repo, number, fetchImpl, token = null, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   const o = String(owner || '').trim();
   const r = String(repo || '').trim();
   const n = Number(number);
@@ -426,9 +516,251 @@ async function fetchAllPrCommits(owner, repo, number, fetchImpl, token = null) {
   }
   const first = githubRestUrl(
     `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/pulls/${n}/commits?per_page=100`
-  );
+  , ctx);
   const raw = await fetchRestCollectionAll(first, fetchImpl, token);
   return raw.map(mapPrCommitRow).filter((c) => c.sha);
+}
+
+/**
+ * Commit status contexts + check runs for a head SHA. Independent of fetchPrDetail.
+ * @returns {Promise<{ state: string, totalCount: number, statuses: Array, checkRuns: Array }>}
+ */
+async function fetchPrChecks(owner, repo, headSha, fetchImpl, token = null, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
+  const o = String(owner || '').trim();
+  const r = String(repo || '').trim();
+  const sha = String(headSha || '').trim();
+  const empty = { state: 'unknown', totalCount: 0, statuses: [], checkRuns: [] };
+  if (!o || !r || !sha) return empty;
+  const base = githubRestUrl(`/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}`, ctx);
+  let checks = { ...empty };
+  try {
+    const status = await apiJson(`${base}/commits/${encodeURIComponent(sha)}/status`, fetchImpl, token);
+    const statusList = Array.isArray(status?.statuses) ? status.statuses : [];
+    const emptyCombined =
+      !statusList.length && !(Number(status?.total_count) > 0);
+    checks = {
+      state: emptyCombined ? 'unknown' : status.state || 'unknown',
+      totalCount: emptyCombined ? 0 : status.total_count || statusList.length,
+      statuses: statusList.map((s) => ({
+        context: s.context || '',
+        state: s.state || '',
+        description: s.description || '',
+        targetUrl: s.target_url || '',
+        createdAt: s.created_at || '',
+        updatedAt: s.updated_at || '',
+      })),
+      checkRuns: [],
+    };
+  } catch (err) {
+    if (
+      err?.name === 'AbortError' ||
+      /aborted|AbortError/i.test(String(err?.message || ''))
+    ) {
+      throw err;
+    }
+  }
+  try {
+    const runs = await apiJson(
+      `${base}/commits/${encodeURIComponent(sha)}/check-runs?per_page=100&filter=latest`,
+      fetchImpl,
+      token
+    );
+    const list = runs?.check_runs || [];
+    if (list.length) {
+      checks.checkRuns = list.map((r) => ({
+        id: r.id,
+        name: r.name || '',
+        status: r.status || '',
+        conclusion: r.conclusion || '',
+        htmlUrl: r.html_url || '',
+        startedAt: r.started_at || '',
+        completedAt: r.completed_at || '',
+        appSlug: r.app?.slug || '',
+        appName: r.app?.name || '',
+      }));
+    }
+  } catch (err) {
+    if (
+      err?.name === 'AbortError' ||
+      /aborted|AbortError/i.test(String(err?.message || ''))
+    ) {
+      throw err;
+    }
+  }
+  const normalize =
+    (typeof globalThis !== 'undefined' &&
+      globalThis.PRModalChecks?.normalizeChecks) ||
+    null;
+  if (typeof normalize === 'function') {
+    return normalize(checks);
+  }
+  // Fallback de-dupe
+  const byCtx = new Map();
+  for (const s of checks.statuses || []) {
+    const k = String(s.context || '').toLowerCase();
+    if (!k) continue;
+    const prev = byCtx.get(k);
+    const t = Date.parse(s.updatedAt || s.createdAt || '') || 0;
+    const pt = prev ? Date.parse(prev.updatedAt || prev.createdAt || '') || 0 : -1;
+    if (!prev || t >= pt) byCtx.set(k, s);
+  }
+  const byName = new Map();
+  for (const r of checks.checkRuns || []) {
+    const k = String(r.name || '').toLowerCase();
+    if (!k) continue;
+    const prev = byName.get(k);
+    const t = Date.parse(r.completedAt || r.startedAt || '') || Number(r.id) || 0;
+    const pt = prev
+      ? Date.parse(prev.completedAt || prev.startedAt || '') || Number(prev.id) || 0
+      : -1;
+    if (!prev || t >= pt) byName.set(k, r);
+  }
+  checks.statuses = [...byCtx.values()];
+  checks.checkRuns = [...byName.values()];
+  checks.totalCount = checks.statuses.length + checks.checkRuns.length;
+  return checks;
+}
+
+/**
+ * Development (linked issues) + Projects for conversation aside.
+ * Independent of fetchPrDetail. Soft-fails to empty arrays.
+ * @param {{ body?: string }} [opts] PR body for #N body links
+ */
+async function fetchPrDevelopment(
+  owner,
+  repo,
+  number,
+  fetchImpl,
+  token = null,
+  opts = {}
+) {
+  const ctx = normalizeApiCtx(opts?.ctx);
+  const o = String(owner || '').trim();
+  const r = String(repo || '').trim();
+  const n = Number(number);
+  const body = String(opts.body || '');
+  let linkedIssues = [];
+  try {
+    let editApi =
+      typeof globalThis !== 'undefined' ? globalThis.PRModalPrEditApi : null;
+    if (!editApi && typeof require === 'function') {
+      try {
+        editApi = require('./modal/pure/pr-edit-api.js');
+      } catch {
+        editApi = null;
+      }
+    }
+    if (editApi?.parseLinkedIssueNumbers) {
+      linkedIssues = editApi.parseLinkedIssueNumbers(body);
+    }
+  } catch {
+    linkedIssues = [];
+  }
+
+  let developmentIssues = [];
+  let projects = [];
+  try {
+    const side = await fetchPrSidebarMeta(o, r, n, fetchImpl, token, ctx);
+    if (side && typeof side === 'object') {
+      if (Array.isArray(side.developmentIssues) && side.developmentIssues.length) {
+        developmentIssues = side.developmentIssues.map((item) => ({
+          number: Number(item?.number),
+          title: String(item?.title || '').trim(),
+          url: String(item?.url || '').trim(),
+          state: String(item?.state || '').trim().toLowerCase(),
+          source: item?.source || 'closing',
+          kind: item?.kind || '',
+        }));
+        const fromGql = developmentIssues
+          .map((x) => Number(x?.number))
+          .filter((x) => Number.isFinite(x) && x > 0);
+        if (fromGql.length) {
+          const set = new Set([...linkedIssues, ...fromGql]);
+          linkedIssues = [...set].sort((a, b) => a - b);
+        }
+      }
+      if (Array.isArray(side.projects)) projects = side.projects;
+    }
+  } catch (err) {
+    if (
+      err?.name === 'AbortError' ||
+      /aborted|AbortError/i.test(String(err?.message || ''))
+    ) {
+      throw err;
+    }
+  }
+
+  // Union closing-linked + body #N
+  {
+    const byNum = new Map();
+    for (const item of developmentIssues) {
+      const num = Number(item?.number);
+      if (!Number.isFinite(num) || num <= 0) continue;
+      byNum.set(num, {
+        number: num,
+        title: String(item?.title || '').trim(),
+        url: String(item?.url || '').trim(),
+        state: String(item?.state || '').trim().toLowerCase(),
+        source: item?.source || 'closing',
+        kind: item?.kind || '',
+      });
+    }
+    for (const raw of linkedIssues) {
+      const num = Number(raw);
+      if (!Number.isFinite(num) || num <= 0 || byNum.has(num)) continue;
+      byNum.set(num, {
+        number: num,
+        title: '',
+        url: `https://github.com/${o}/${r}/issues/${num}`,
+        state: '',
+        source: 'body',
+        kind: '',
+      });
+    }
+    developmentIssues = [...byNum.values()].sort((a, b) => a.number - b.number);
+  }
+
+  const needTitles = developmentIssues
+    .filter((x) => !String(x?.title || '').trim())
+    .map((x) => x.number);
+  if (needTitles.length && token) {
+    try {
+      const summaries = await fetchIssueOrPrSummaries(
+        o,
+        r,
+        needTitles,
+        fetchImpl,
+        token
+      );
+      if (summaries && summaries.size) {
+        developmentIssues = developmentIssues.map((item) => {
+          const s = summaries.get(item.number);
+          if (!s) return item;
+          return {
+            ...item,
+            title: item.title || s.title,
+            url: s.url || item.url,
+            state: item.state || s.state,
+            kind: s.kind || item.kind || '',
+          };
+        });
+      }
+    } catch (err) {
+      if (
+        err?.name === 'AbortError' ||
+        /aborted|AbortError/i.test(String(err?.message || ''))
+      ) {
+        throw err;
+      }
+    }
+  }
+
+  return {
+    linkedIssues,
+    developmentIssues,
+    projects,
+  };
 }
 
 /**
@@ -442,6 +774,7 @@ async function fetchAllPrFiles(
   token = null,
   options = {}
 ) {
+  const ctx = normalizeApiCtx(options?.ctx);
   const o = String(owner || '').trim();
   const r = String(repo || '').trim();
   const n = Number(number);
@@ -450,9 +783,175 @@ async function fetchAllPrFiles(
   }
   const first = githubRestUrl(
     `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/pulls/${n}/files?per_page=100`
-  );
+  , ctx);
   const raw = await fetchRestCollectionAll(first, fetchImpl, token);
   return mapAndAnnotateFiles(raw, options.gitattributesText || '');
+}
+
+/**
+ * First page of PR files (per_page=100) + optional .gitattributes annotate.
+ * Independent of fetchPrDetail — progressive open paints core without waiting.
+ * @returns {Promise<{ files: Array, gitattributesText: string }>}
+ */
+async function fetchPrFiles(
+  owner,
+  repo,
+  number,
+  fetchImpl,
+  token = null,
+  options = {}
+) {
+  const ctx = normalizeApiCtx(options?.ctx);
+  const o = String(owner || '').trim();
+  const r = String(repo || '').trim();
+  const n = Number(number);
+  if (!o || !r || !Number.isFinite(n)) {
+    throw new Error('owner, repo, and number are required for files');
+  }
+  const base = githubRestUrl(
+    `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}`
+  , ctx);
+  let raw = [];
+  try {
+    const data = await apiJson(
+      `${base}/pulls/${n}/files?per_page=100`,
+      fetchImpl,
+      token
+    );
+    raw = Array.isArray(data) ? data : [];
+  } catch (err) {
+    if (
+      err?.name === 'AbortError' ||
+      /aborted|AbortError/i.test(String(err?.message || ''))
+    ) {
+      throw err;
+    }
+    raw = [];
+  }
+
+  let gitattributesText = String(options.gitattributesText || '');
+  if (!gitattributesText) {
+    try {
+      const ref =
+        String(options.headSha || options.ref || '').trim() || 'HEAD';
+      const attr = await apiJson(
+        `${base}/contents/.gitattributes?ref=${encodeURIComponent(ref)}`,
+        fetchImpl,
+        token
+      );
+      if (attr?.content && attr.encoding === 'base64') {
+        gitattributesText = decodeBase64Utf8(
+          String(attr.content).replace(/\n/g, '')
+        );
+      } else if (typeof attr?.content === 'string') {
+        gitattributesText = attr.content;
+      }
+    } catch (err) {
+      if (
+        err?.name === 'AbortError' ||
+        /aborted|AbortError/i.test(String(err?.message || ''))
+      ) {
+        throw err;
+      }
+      gitattributesText = '';
+    }
+  }
+
+  return {
+    files: mapAndAnnotateFiles(raw, gitattributesText),
+    gitattributesText,
+  };
+}
+
+/**
+ * Newest-first first window of issue comments (conversation). Independent of core.
+ * @returns {Promise<{ items: Array, meta: object }>}
+ */
+async function fetchPrIssueComments(
+  owner,
+  repo,
+  number,
+  fetchImpl,
+  token = null,
+  ctx = null
+) {
+  ctx = normalizeApiCtx(ctx);
+  const o = String(owner || '').trim();
+  const r = String(repo || '').trim();
+  const n = Number(number);
+  const empty = {
+    items: [],
+    meta: {
+      page: 1,
+      perPage: COMMENT_PAGE_SIZE,
+      hasMore: false,
+      nextPage: null,
+      order: 'from-end',
+      loadedCount: 0,
+    },
+  };
+  if (!o || !r || !Number.isFinite(n)) return empty;
+  try {
+    return await fetchPrCommentsPage(
+      o,
+      r,
+      n,
+      'issue',
+      { page: 1, perPage: COMMENT_PAGE_SIZE, preferNewest: true },
+      fetchImpl,
+      token,
+      ctx
+    );
+  } catch (err) {
+    if (
+      err?.name === 'AbortError' ||
+      /aborted|AbortError/i.test(String(err?.message || ''))
+    ) {
+      throw err;
+    }
+    return empty;
+  }
+}
+
+/**
+ * Submitted PR reviews list. Independent of fetchPrDetail.
+ * @returns {Promise<Array>}
+ */
+async function fetchPrReviews(owner, repo, number, fetchImpl, token = null, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
+  const o = String(owner || '').trim();
+  const r = String(repo || '').trim();
+  const n = Number(number);
+  if (!o || !r || !Number.isFinite(n)) return [];
+  try {
+    const data = await apiJson(
+      githubRestUrl(
+        `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/pulls/${n}/reviews?per_page=100`
+      , ctx),
+      fetchImpl,
+      token
+    );
+    return (Array.isArray(data) ? data : []).map((rev) => ({
+      id: rev.id,
+      author: rev.user?.login || '',
+      avatarUrl: rev.user?.avatar_url || '',
+      type: rev.user?.type || '',
+      isBot:
+        String(rev.user?.type || '').toLowerCase() === 'bot' ||
+        /\[bot\]$/i.test(String(rev.user?.login || '')),
+      state: rev.state || '',
+      body: rev.body || '',
+      submittedAt: rev.submitted_at,
+    }));
+  } catch (err) {
+    if (
+      err?.name === 'AbortError' ||
+      /aborted|AbortError/i.test(String(err?.message || ''))
+    ) {
+      throw err;
+    }
+    return [];
+  }
 }
 
 const COMMENT_PAGE_SIZE = 50;
@@ -664,7 +1163,8 @@ async function fetchViewerPendingReviewBundle(
   fetchImpl,
   token,
   preloaded = null
-) {
+, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   if (!token) return { comments: [], review: null };
   let pending = null;
   if (preloaded && (Array.isArray(preloaded.reviews) || preloaded.login != null)) {
@@ -686,7 +1186,7 @@ async function fetchViewerPendingReviewBundle(
   try {
     const n = Number(pullNumber);
     const raw = await apiJson(
-      githubRestUrl(`/repos/${owner}/${repo}/pulls/${n}/reviews/${pending.id}/comments?per_page=100`),
+      githubRestUrl(`/repos/${owner}/${repo}/pulls/${n}/reviews/${pending.id}/comments?per_page=100`, ctx),
       fetchImpl,
       token
     );
@@ -744,11 +1244,12 @@ async function createPendingPullReview(
   { commitId } = {},
   fetchImpl,
   token
-) {
+, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   const body = {};
   if (commitId) body.commit_id = commitId;
   return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`),
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`, ctx),
     fetchImpl,
     token,
     { method: 'POST', body }
@@ -767,7 +1268,8 @@ async function submitPendingPullReview(
   { event = 'COMMENT', body = '' } = {},
   fetchImpl,
   token
-) {
+, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   const id = Number(reviewId);
   if (!Number.isFinite(id) || id <= 0) {
     throw new Error('Invalid pending review id');
@@ -777,7 +1279,7 @@ async function submitPendingPullReview(
     throw new Error('Invalid review event');
   }
   return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${id}/events`),
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${id}/events`, ctx),
     fetchImpl,
     token,
     { method: 'POST', body: { event: ev, body: body || '' } }
@@ -795,13 +1297,14 @@ async function deletePendingPullReview(
   reviewId,
   fetchImpl,
   token
-) {
+, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   const id = Number(reviewId);
   if (!Number.isFinite(id) || id <= 0) {
     throw new Error('Invalid pending review id');
   }
   return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${id}`),
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${id}`, ctx),
     fetchImpl,
     token,
     { method: 'DELETE' }
@@ -823,7 +1326,8 @@ async function fetchPrCommentsPage(
   opts,
   fetchImpl,
   token
-) {
+, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   const helpers = commentsPageHelpers();
   const perPage =
     helpers?.clampPerPage?.(opts?.perPage) ||
@@ -835,7 +1339,8 @@ async function fetchPrCommentsPage(
   const preferNewest = Boolean(opts?.preferNewest) && !since;
   const orderHint = opts?.order || null;
 
-  async function fetchPage(pageNum, listOpts = {}) {
+  async function fetchPage(pageNum, listOpts = {}, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
     const sort =
       listOpts.sort != null
         ? listOpts.sort
@@ -861,8 +1366,8 @@ async function fetchPrCommentsPage(
       : (() => {
           const base =
             kind === 'review'
-              ? githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/comments`)
-              : githubRestUrl(`/repos/${owner}/${repo}/issues/${pullNumber}/comments`);
+              ? githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/comments`, ctx)
+              : githubRestUrl(`/repos/${owner}/${repo}/issues/${pullNumber}/comments`, ctx);
           const q = new URLSearchParams({
             per_page: String(perPage),
             page: String(pageNum),
@@ -1019,7 +1524,8 @@ async function apiSend(url, fetchImpl, token, { method = 'GET', body } = {}) {
  *
  * @returns {Promise<{ projects: Array, developmentIssues: Array }>}
  */
-async function fetchPrSidebarMeta(owner, repo, number, fetchImpl, token) {
+async function fetchPrSidebarMeta(owner, repo, number, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   const o = String(owner || '').trim();
   const r = String(repo || '').trim();
   const n = Number(number);
@@ -1057,7 +1563,8 @@ async function fetchPrSidebarMeta(owner, repo, number, fetchImpl, token) {
       query,
       { owner: o, repo: r, number: n },
       fetchImpl,
-      token
+      token,
+      ctx
     );
     const prNode = data?.repository?.pullRequest || null;
     const projects = [];
@@ -1105,7 +1612,8 @@ async function fetchPrSidebarMeta(owner, repo, number, fetchImpl, token) {
  * @param {string} token
  * @returns {Promise<Map<number, { number: number, title: string, url: string, state: string, kind: string }>>}
  */
-async function fetchIssueOrPrSummaries(owner, repo, numbers, fetchImpl, token) {
+async function fetchIssueOrPrSummaries(owner, repo, numbers, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   const o = String(owner || '').trim();
   const r = String(repo || '').trim();
   const nums = [
@@ -1142,7 +1650,8 @@ async function fetchIssueOrPrSummaries(owner, repo, numbers, fetchImpl, token) {
       query,
       { owner: o, repo: r },
       fetchImpl,
-      token
+      token,
+      ctx
     );
     const repoNode = data?.repository || {};
     for (let i = 0; i < nums.length; i++) {
@@ -1174,9 +1683,10 @@ async function fetchIssueOrPrSummaries(owner, repo, numbers, fetchImpl, token) {
  * GraphQL client: HTTP 200 can still carry body.errors — treat those as failures.
  * @returns {Promise<object>} data field only
  */
-async function apiGraphql(query, variables, fetchImpl, token) {
+async function apiGraphql(query, variables, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   const json = await apiSend(
-    githubGraphqlUrl(),
+    githubGraphqlUrl(ctx),
     fetchImpl,
     token,
     { method: 'POST', body: { query, variables: variables || {} } }
@@ -1315,8 +1825,10 @@ async function fetchReviewThreadsPage(
   pullNumber,
   { direction = 'newest', cursor = null, pageSize = REVIEW_THREADS_PAGE_SIZE } = {},
   fetchImpl,
-  token
+  token,
+  ctx = null
 ) {
+  ctx = normalizeApiCtx(ctx);
   const empty = {
     threads: [],
     comments: [],
@@ -1353,7 +1865,8 @@ async function fetchReviewThreadsPage(
       cursor: cursor || null,
     },
     fetchImpl,
-    token
+    token,
+    ctx
   );
   const conn = data?.repository?.pullRequest?.reviewThreads;
   const nodes = conn?.nodes || [];
@@ -1431,7 +1944,8 @@ function collectUnresolvedThreadNodeIds(detail) {
  * @param {typeof fetch} fetchImpl
  * @param {string} token
  */
-async function fetchReviewThreadsByIds(threadNodeIds, fetchImpl, token) {
+async function fetchReviewThreadsByIds(threadNodeIds, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   const empty = {
     threads: [],
     comments: [],
@@ -1469,7 +1983,7 @@ query($ids:[ID!]!){
   for (let i = 0; i < ids.length; i += REVIEW_THREADS_API_MAX) {
     const chunk = ids.slice(i, i + REVIEW_THREADS_API_MAX);
     try {
-      const data = await apiGraphql(query, { ids: chunk }, fetchImpl, token);
+      const data = await apiGraphql(query, { ids: chunk }, fetchImpl, token, ctx);
       // nodes[] is parallel to requested ids; deleted/not-found → null
       const rawNodes = Array.isArray(data?.nodes) ? data.nodes : [];
       const nodes = rawNodes.filter(Boolean);
@@ -1618,6 +2132,7 @@ async function fetchPullReviewThreadsBundle(
   token,
   opts = {}
 ) {
+  const ctx = normalizeApiCtx(opts?.ctx);
   if (!token) {
     return {
       threads: [],
@@ -1645,7 +2160,8 @@ async function fetchPullReviewThreadsBundle(
     pullNumber,
     { direction: 'newest', cursor: null, pageSize: lastPageSize },
     fetchImpl,
-    token
+    token,
+    ctx
   );
   const totalCount = Number(newest.totalCount) || newest.threads.length;
   let oldest = null;
@@ -1662,7 +2178,8 @@ async function fetchPullReviewThreadsBundle(
           pageSize: startPageSize,
         },
         fetchImpl,
-        token
+        token,
+        ctx
       );
     } catch {
       oldest = null;
@@ -2062,14 +2579,15 @@ async function fetchConflictFilePaths(
   headSha,
   fetchImpl,
   token
-) {
+, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   const o = String(owner || '').trim();
   const r = String(repo || '').trim();
   const ref = String(baseRef || '').trim();
   const head = String(headSha || '').trim();
   if (!o || !r || !ref || !head) return [];
   try {
-    const baseUrl = githubRestUrl(`/repos/${o}/${r}`);
+    const baseUrl = githubRestUrl(`/repos/${o}/${r}`, ctx);
     const refJson = await apiJson(
       `${baseUrl}/git/ref/heads/${encodeURIComponent(ref)}`,
       fetchImpl,
@@ -2132,10 +2650,12 @@ async function resolvePrMergeability(
   fetchImpl,
   token,
   timings,
-  ctx = {}
+  /** @type {{ owner?: string, repo?: string, apiCtx?: object }} */
+  meta = {}
 ) {
   if (!pr || typeof pr !== 'object') return pr;
   let out = pr;
+  const apiCtx = normalizeApiCtx(meta?.apiCtx || meta?.ctx);
   const needsCompute =
     out.mergeable == null ||
     out.mergeable === undefined ||
@@ -2184,10 +2704,10 @@ async function resolvePrMergeability(
   if (isDirty) {
     const baseOwner =
       out.base?.repo?.owner?.login ||
-      String(ctx.owner || '').trim() ||
+      String(meta.owner || '').trim() ||
       null;
     const baseRepo =
-      out.base?.repo?.name || String(ctx.repo || '').trim() || null;
+      out.base?.repo?.name || String(meta.repo || '').trim() || null;
     const conflictFiles = await timedFetch(
       timings,
       'conflictFiles',
@@ -2197,7 +2717,8 @@ async function resolvePrMergeability(
         out.base?.ref || '',
         out.head?.sha || '',
         fetchImpl,
-        token
+        token,
+        apiCtx
       ).catch(() => []),
       (list) => `(${Array.isArray(list) ? list.length : 0} paths)`
     );
@@ -2219,7 +2740,8 @@ async function fetchPrDetail(
   token = null,
   opts = {}
 ) {
-  const base = githubRestUrl(`/repos/${owner}/${repo}`);
+  const ctx = normalizeApiCtx(opts?.ctx);
+  const base = githubRestUrl(`/repos/${owner}/${repo}`, ctx);
   const n = Number(pullNumber);
   const skipReviewThreads = Boolean(opts.skipReviewThreads);
   const threadsMaxPages = skipReviewThreads
@@ -2233,117 +2755,69 @@ async function fetchPrDetail(
       ` skipReviewThreads=${skipReviewThreads} threadsMaxPages=${threadsMaxPages}`
   );
 
-  // Core PR payload (no full thread dump) — parallel REST + light helpers
-  const PARALLEL_REST_KEYS = [
-    'pull',
-    'files',
-    'issueComments',
-    'reviews',
-    'commits',
-    'viewerLogin',
-    'autolinks',
-  ];
+  // Lean core: pull identity + viewer + autolinks only.
+  // files / issue comments / reviews / commits / checks / development are
+  // independent host fetches (do not block header + description paint).
+  const PARALLEL_REST_KEYS = ['pull', 'viewerLogin', 'autolinks'];
   const tParallel0 = fetchNowMs();
   const batchOpt = { batchStart: tParallel0 };
-  let [pr, files, commentsPage, reviews, commits, viewerLogin, autolinks] =
-    await Promise.all([
-      timedFetch(
-        timings,
-        'pull',
-        apiJson(`${base}/pulls/${n}`, fetchImpl, token),
-        null,
-        batchOpt
-      ),
-      timedFetch(
-        timings,
-        'files',
-        apiJson(`${base}/pulls/${n}/files?per_page=100`, fetchImpl, token),
-        (r) => `(${Array.isArray(r) ? r.length : 0} files)`,
-        batchOpt
-      ),
-      timedFetch(
-        timings,
-        'issueComments',
-        fetchPrCommentsPage(
-          owner,
-          repo,
-          n,
-          'issue',
-          { page: 1, perPage: COMMENT_PAGE_SIZE, preferNewest: true },
-          fetchImpl,
-          token
-        ).catch((err) => {
-          // Never swallow abort — sheet close must stop the whole detail fetch
-          if (err?.name === 'AbortError' || /aborted|AbortError/i.test(String(err?.message || ''))) {
-            throw err;
-          }
-          return {
-            items: [],
-            meta: {
-              page: 1,
-              perPage: COMMENT_PAGE_SIZE,
-              hasMore: false,
-              nextPage: null,
-              order: 'from-end',
-              loadedCount: 0,
-            },
-          };
-        }),
-        (r) => `(${(r?.items || []).length} comments, newest-first)`,
-        batchOpt
-      ),
-      timedFetch(
-        timings,
-        'reviews',
-        apiJson(`${base}/pulls/${n}/reviews?per_page=100`, fetchImpl, token).catch(
-          (err) => {
-            if (err?.name === 'AbortError' || /aborted|AbortError/i.test(String(err?.message || ''))) {
-              throw err;
-            }
-            return [];
-          }
-        ),
-        (r) => `(${Array.isArray(r) ? r.length : 0} reviews)`,
-        batchOpt
-      ),
-      timedFetch(
-        timings,
-        'commits',
-        apiJson(`${base}/pulls/${n}/commits?per_page=100`, fetchImpl, token).catch(
-          (err) => {
-            if (err?.name === 'AbortError' || /aborted|AbortError/i.test(String(err?.message || ''))) {
-              throw err;
-            }
-            return [];
-          }
-        ),
-        (r) => `(${Array.isArray(r) ? r.length : 0} commits)`,
-        batchOpt
-      ),
-      timedFetch(
-        timings,
-        'viewerLogin',
-        fetchViewerLogin(fetchImpl, token),
-        null,
-        batchOpt
-      ),
-      timedFetch(
-        timings,
-        'autolinks',
-        fetchRepoAutolinks(owner, repo, fetchImpl, token),
-        (r) => `(${Array.isArray(r) ? r.length : 0} links)`,
-        batchOpt
-      ),
-    ]);
+  let [pr, viewerLogin, autolinks] = await Promise.all([
+    timedFetch(
+      timings,
+      'pull',
+      apiJson(`${base}/pulls/${n}`, fetchImpl, token),
+      null,
+      batchOpt
+    ),
+    timedFetch(
+      timings,
+      'viewerLogin',
+      fetchViewerLogin(fetchImpl, token, ctx),
+      null,
+      batchOpt
+    ),
+    timedFetch(
+      timings,
+      'autolinks',
+      fetchRepoAutolinks(owner, repo, fetchImpl, token, ctx),
+      (r) => `(${Array.isArray(r) ? r.length : 0} links)`,
+      batchOpt
+    ),
+  ]);
   const parallelWall = fetchNowMs() - tParallel0;
   timings.coreParallelWall = Math.round(parallelWall);
   logParallelRestSummary(timings, PARALLEL_REST_KEYS, parallelWall);
+  timings.files = 0;
+  timings.issueComments = 0;
+  timings.reviews = 0;
+  timings.commits = 0;
+  timings.commitStatus = 0;
+  timings.checkRuns = 0;
+  timings.sidebarMeta = 0;
+  timings.gitattributes = 0;
+  console.log(
+    '[pr-plus] fetchPrDetail files/comments/reviews/commits/checks/development: deferred (independent fetches)'
+  );
+  const files = [];
+  const commentsPage = {
+    items: [],
+    meta: {
+      page: 1,
+      perPage: COMMENT_PAGE_SIZE,
+      hasMore: false,
+      nextPage: null,
+      order: 'from-end',
+      loadedCount: 0,
+    },
+  };
+  const reviews = [];
 
   // GitHub computes mergeable async on first GET (often null/unknown).
   // Re-fetch once so conflict (dirty) is not mislabeled as "still calculating".
   pr = await resolvePrMergeability(pr, base, n, fetchImpl, token, timings, {
     owner,
     repo,
+    apiCtx: ctx,
   });
 
   // GraphQL viewerSubscription (REST issues/.../subscription is 404 / dead)
@@ -2357,7 +2831,8 @@ async function fetchPrDetail(
           n,
           fetchImpl,
           token,
-          pr?.node_id || null
+          pr?.node_id || null,
+          ctx
         )
       : Promise.resolve(null)
   );
@@ -2378,6 +2853,7 @@ async function fetchPrDetail(
       fetchPullReviewThreadsBundle(owner, repo, n, fetchImpl, token, {
         cursor: opts.threadsCursor || null,
         maxPages: threadsMaxPages,
+        ctx,
       }).catch((err) => {
         if (err?.name === 'AbortError' || /aborted|AbortError/i.test(String(err?.message || ''))) {
           throw err;
@@ -2397,16 +2873,25 @@ async function fetchPrDetail(
   }
 
   const reviewThreads = reviewThreadBundle?.threads || [];
-  // PENDING-only REST rows when GraphQL misses them
+  // PENDING-only REST rows when GraphQL misses them (reviews list is independent;
+  // pending bundle finds PENDING via its own lookup when preloaded reviews empty).
   let pendingBundle = { comments: [], review: null };
   if (token) {
     pendingBundle = await timedFetch(
       timings,
       'pendingReview',
-      fetchViewerPendingReviewBundle(owner, repo, n, fetchImpl, token, {
-        reviews,
-        login: viewerLogin,
-      }).catch((err) => {
+      fetchViewerPendingReviewBundle(
+        owner,
+        repo,
+        n,
+        fetchImpl,
+        token,
+        {
+          reviews: [],
+          login: viewerLogin,
+        },
+        ctx
+      ).catch((err) => {
         if (err?.name === 'AbortError' || /aborted|AbortError/i.test(String(err?.message || ''))) {
           throw err;
         }
@@ -2448,143 +2933,12 @@ async function fetchPrDetail(
       };
 
   const headSha = pr.head?.sha || '';
-  let checks = { state: 'unknown', totalCount: 0, statuses: [], checkRuns: [] };
-  if (headSha) {
-    try {
-      const status = await timedFetch(
-        timings,
-        'commitStatus',
-        apiJson(`${base}/commits/${headSha}/status`, fetchImpl, token),
-        (s) => `(state=${s?.state || '?'}, ${s?.total_count || 0} statuses)`
-      );
-      const statusList = Array.isArray(status.statuses) ? status.statuses : [];
-      // Combined status is "pending" with total_count:0 when the commit has no
-      // status contexts — treat as empty, not in-progress.
-      const emptyCombined =
-        !statusList.length && !(Number(status.total_count) > 0);
-      checks = {
-        state: emptyCombined ? 'unknown' : status.state || 'unknown',
-        totalCount: emptyCombined ? 0 : status.total_count || statusList.length,
-        statuses: statusList.map((s) => ({
-          context: s.context || '',
-          state: s.state || '',
-          description: s.description || '',
-          targetUrl: s.target_url || '',
-          createdAt: s.created_at || '',
-          updatedAt: s.updated_at || '',
-        })),
-        checkRuns: [],
-      };
-    } catch {
-      /* timedFetch already logged */
-    }
-    try {
-      // filter=latest: most recent check runs per suite (still de-dupe by name below)
-      const runs = await timedFetch(
-        timings,
-        'checkRuns',
-        apiJson(
-          `${base}/commits/${headSha}/check-runs?per_page=100&filter=latest`,
-          fetchImpl,
-          token
-        ),
-        (r) => `(${(r?.check_runs || []).length} runs)`
-      );
-      const list = runs.check_runs || [];
-      if (list.length) {
-        checks.checkRuns = list.map((r) => ({
-          id: r.id,
-          name: r.name || '',
-          status: r.status || '',
-          conclusion: r.conclusion || '',
-          htmlUrl: r.html_url || '',
-          startedAt: r.started_at || '',
-          completedAt: r.completed_at || '',
-          appSlug: r.app?.slug || '',
-          appName: r.app?.name || '',
-        }));
-      }
-    } catch {
-      /* timedFetch already logged */
-    }
-    // Keep only the latest status per context / check run per name (GitHub UI shape)
-    const normalize =
-      (typeof globalThis !== 'undefined' &&
-        globalThis.PRModalChecks?.normalizeChecks) ||
-      null;
-    if (typeof normalize === 'function') {
-      checks = normalize(checks);
-    } else {
-      // Fallback if pure helper not loaded (e.g. incomplete SW bundle)
-      const byCtx = new Map();
-      for (const s of checks.statuses || []) {
-        const k = String(s.context || '').toLowerCase();
-        if (!k) continue;
-        const prev = byCtx.get(k);
-        const t = Date.parse(s.updatedAt || s.createdAt || '') || 0;
-        const pt = prev ? Date.parse(prev.updatedAt || prev.createdAt || '') || 0 : -1;
-        if (!prev || t >= pt) byCtx.set(k, s);
-      }
-      const byName = new Map();
-      for (const r of checks.checkRuns || []) {
-        const k = String(r.name || '').toLowerCase();
-        if (!k) continue;
-        const prev = byName.get(k);
-        const t = Date.parse(r.completedAt || r.startedAt || '') || Number(r.id) || 0;
-        const pt = prev
-          ? Date.parse(prev.completedAt || prev.startedAt || '') || Number(prev.id) || 0
-          : -1;
-        if (!prev || t >= pt) byName.set(k, r);
-      }
-      checks.statuses = [...byCtx.values()];
-      checks.checkRuns = [...byName.values()];
-      checks.totalCount = checks.statuses.length + checks.checkRuns.length;
-    }
-  } else {
-    timings.commitStatus = 0;
-    timings.checkRuns = 0;
-    console.log('[pr-plus] fetchPrDetail checks: skipped (no headSha)');
-  }
-
-  // Optional .gitattributes for linguist-generated / binary collapse defaults
-  let gitattributesText = '';
-  try {
-    const ref = headSha || pr.head?.ref || 'HEAD';
-    const attr = await timedFetch(
-      timings,
-      'gitattributes',
-      apiJson(
-        `${base}/contents/.gitattributes?ref=${encodeURIComponent(ref)}`,
-        fetchImpl,
-        token
-      ),
-      (a) => (a?.content ? '(found)' : '(empty)')
-    );
-    if (attr?.content && attr.encoding === 'base64') {
-      gitattributesText = decodeBase64Utf8(attr.content.replace(/\n/g, ''));
-    } else if (typeof attr?.content === 'string') {
-      gitattributesText = attr.content;
-    }
-  } catch {
-    gitattributesText = '';
-    if (timings.gitattributes == null) {
-      timings.gitattributes = 0;
-      console.log('[pr-plus] fetchPrDetail gitattributes: missing/skipped');
-    }
-  }
-
-  const tMap0 = fetchNowMs();
-  const filesOut = mapAndAnnotateFiles(files, gitattributesText);
-  timings.mapAnnotateFiles = Math.round(fetchNowMs() - tMap0);
-  console.log(
-    `[pr-plus] fetchPrDetail mapAnnotateFiles: ${timings.mapAnnotateFiles}ms`
-  );
-
-  // Development (closing-linked issues) + Projects (ProjectV2 items) for conversation aside.
-  // Soft-fail: empty arrays when GraphQL unavailable / no permission.
+  // files / comments / reviews / checks / commits / development: independent host fetches
+  const checks = { state: 'unknown', totalCount: 0, statuses: [], checkRuns: [] };
+  const commits = [];
   let linkedIssues = [];
-  let developmentIssues = [];
-  let projects = [];
+  const developmentIssues = [];
+  const projects = [];
   try {
     let editApi =
       typeof globalThis !== 'undefined' ? globalThis.PRModalPrEditApi : null;
@@ -2595,109 +2949,18 @@ async function fetchPrDetail(
         editApi = null;
       }
     }
+    // Sync body #N only — GraphQL Development is independent (fetchPrDevelopment)
     if (editApi?.parseLinkedIssueNumbers) {
       linkedIssues = editApi.parseLinkedIssueNumbers(pr.body || '');
     }
   } catch {
     linkedIssues = [];
   }
-  try {
-    const side = await timedFetch(
-      timings,
-      'sidebarMeta',
-      fetchPrSidebarMeta(owner, repo, n, fetchImpl, token),
-      (r) =>
-        `(${(r?.developmentIssues || []).length} dev, ${(r?.projects || []).length} projects)`
-    );
-    if (side && typeof side === 'object') {
-      if (Array.isArray(side.developmentIssues) && side.developmentIssues.length) {
-        developmentIssues = side.developmentIssues;
-        // Prefer GraphQL numbers for linkedIssues when available
-        const fromGql = developmentIssues
-          .map((x) => Number(x?.number))
-          .filter((x) => Number.isFinite(x) && x > 0);
-        if (fromGql.length) {
-          const set = new Set([...linkedIssues, ...fromGql]);
-          linkedIssues = [...set].sort((a, b) => a - b);
-        }
-      }
-      if (Array.isArray(side.projects)) projects = side.projects;
-    }
-  } catch (err) {
-    if (err?.name === 'AbortError' || /aborted|AbortError/i.test(String(err?.message || ''))) {
-      throw err;
-    }
-    console.log(
-      `[pr-plus] fetchPrDetail sidebarMeta: soft-fail ${err?.message || err}`
-    );
-  }
-  // Union closing-linked + body #N into Development rows (prefer GraphQL fields).
-  {
-    const byNum = new Map();
-    for (const item of developmentIssues) {
-      const num = Number(item?.number);
-      if (!Number.isFinite(num) || num <= 0) continue;
-      byNum.set(num, {
-        number: num,
-        title: String(item?.title || '').trim(),
-        url: String(item?.url || '').trim(),
-        state: String(item?.state || '').trim().toLowerCase(),
-        source: item?.source || 'closing',
-        kind: item?.kind || '',
-      });
-    }
-    for (const raw of linkedIssues) {
-      const num = Number(raw);
-      if (!Number.isFinite(num) || num <= 0 || byNum.has(num)) continue;
-      byNum.set(num, {
-        number: num,
-        title: '',
-        url: `https://github.com/${owner}/${repo}/issues/${num}`,
-        state: '',
-        source: 'body',
-        kind: '',
-      });
-    }
-    developmentIssues = [...byNum.values()].sort((a, b) => a.number - b.number);
-  }
 
-  // Body-parsed #N has no title — resolve via issueOrPullRequest (Issue or PR).
-  const needTitles = developmentIssues
-    .filter((x) => !String(x?.title || '').trim())
-    .map((x) => x.number);
-  if (needTitles.length && token) {
-    try {
-      const summaries = await timedFetch(
-        timings,
-        'devIssueTitles',
-        fetchIssueOrPrSummaries(owner, repo, needTitles, fetchImpl, token),
-        (m) => `${m?.size ?? 0} resolved`
-      );
-      if (summaries && summaries.size) {
-        developmentIssues = developmentIssues.map((item) => {
-          const s = summaries.get(item.number);
-          if (!s) return item;
-          return {
-            ...item,
-            title: item.title || s.title,
-            url: s.url || item.url,
-            state: item.state || s.state,
-            kind: s.kind || item.kind || '',
-          };
-        });
-      }
-    } catch (err) {
-      if (
-        err?.name === 'AbortError' ||
-        /aborted|AbortError/i.test(String(err?.message || ''))
-      ) {
-        throw err;
-      }
-      console.log(
-        `[pr-plus] fetchPrDetail devIssueTitles: soft-fail ${err?.message || err}`
-      );
-    }
-  }
+  // gitattributes + file annotate moved to fetchPrFiles (independent)
+  const gitattributesText = '';
+  const filesOut = [];
+  timings.mapAnnotateFiles = 0;
 
   const subscribed =
     subscription && typeof subscription.subscribed === 'boolean'
@@ -2844,18 +3107,8 @@ async function fetchPrDetail(
       nextPage: null,
       loadedCount: Array.isArray(comments) ? comments.length : 0,
     },
-    reviews: (Array.isArray(reviews) ? reviews : []).map((r) => ({
-      id: r.id,
-      author: r.user?.login || '',
-      avatarUrl: r.user?.avatar_url || '',
-      type: r.user?.type || '',
-      isBot:
-        String(r.user?.type || '').toLowerCase() === 'bot' ||
-        /\[bot\]$/i.test(String(r.user?.login || '')),
-      state: r.state || '',
-      body: r.body || '',
-      submittedAt: r.submitted_at,
-    })),
+    // Populated by independent fetchPrReviews
+    reviews: Array.isArray(reviews) ? reviews : [],
     // GraphQL first page (or empty if skipReviewThreads) — more via fetchReviewThreadsPage
     reviewComments: Array.isArray(reviewComments) ? reviewComments : [],
     reviewCommentsMeta,
@@ -2866,21 +3119,18 @@ async function fetchPrDetail(
      * appear via GET /reviews/{id}/comments.
      */
     viewerPendingReview,
-    commits: (Array.isArray(commits) ? commits : []).map((c) => ({
-      sha: c.sha || '',
-      message: c.commit?.message || '',
-      author: c.commit?.author?.name || c.author?.login || '',
-      date: c.commit?.author?.date || c.commit?.committer?.date || '',
-    })),
+    // Populated by independent side fetches (host)
+    commits: Array.isArray(commits) ? commits : [],
     checks,
     /** Debug: per-request ms from this fetchPrDetail call */
     _fetchTimings: timings,
   };
 }
 
-async function postIssueComment(owner, repo, issueNumber, body, fetchImpl, token) {
+async function postIssueComment(owner, repo, issueNumber, body, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/comments`),
+    githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/comments`, ctx),
     fetchImpl,
     token,
     { method: 'POST', body: { body } }
@@ -2898,7 +3148,8 @@ async function submitPullReview(
   { event, body = '', commitId, comments },
   fetchImpl,
   token
-) {
+, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   const payload = { event, body: body || '' };
   if (commitId) payload.commit_id = commitId;
   if (Array.isArray(comments) && comments.length) {
@@ -2920,7 +3171,7 @@ async function submitPullReview(
     });
   }
   return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`),
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`, ctx),
     fetchImpl,
     token,
     { method: 'POST', body: payload }
@@ -2935,8 +3186,10 @@ async function postReviewCommentViaPendingGraphql(
   pendingReviewNodeId,
   { body, path, line, side = 'RIGHT', startLine, startSide, subjectType = 'line' },
   fetchImpl,
-  token
+  token,
+  ctx = null
 ) {
+  ctx = normalizeApiCtx(ctx);
   const isFile = String(subjectType || '').toLowerCase() === 'file';
   const hasRange =
     !isFile &&
@@ -3035,7 +3288,7 @@ async function postReviewCommentViaPendingGraphql(
       }
     }`;
   }
-  const data = await apiGraphql(query, variables, fetchImpl, token);
+  const data = await apiGraphql(query, variables, fetchImpl, token, ctx);
   const thread = data?.addPullRequestReviewThread?.thread;
   const node = thread?.comments?.nodes?.[0];
   if (!node) {
@@ -3083,13 +3336,14 @@ async function ensureViewerPendingReview(
   { commitId = null, createIfMissing = false } = {},
   fetchImpl,
   token
-) {
+, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   /** Re-fetch review; return null if missing or no longer PENDING. */
   const hydrateNodeId = async (pending) => {
     if (!pending?.id) return null;
     try {
       const full = await apiJson(
-        githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${pending.id}`),
+        githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${pending.id}`, ctx),
         fetchImpl,
         token
       );
@@ -3189,7 +3443,8 @@ async function postReviewComment(
   },
   fetchImpl,
   token
-) {
+, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   const text = String(body || '').trim();
   if (!text) throw new Error('Comment body is required');
   if (!path) throw new Error('path is required');
@@ -3227,7 +3482,8 @@ async function postReviewComment(
         pending.node_id,
         gqlFields,
         fetchImpl,
-        token
+        token,
+        ctx
       );
       return {
         ...raw,
@@ -3249,7 +3505,8 @@ async function postReviewComment(
             pullNumber,
             { commitId: commitId || null },
             fetchImpl,
-            token
+            token,
+            ctx
           );
           pending = {
             id: Number(created?.id),
@@ -3266,7 +3523,8 @@ async function postReviewComment(
               pullNumber,
               { commitId: commitId || null, createIfMissing: false },
               fetchImpl,
-              token
+              token,
+              ctx
             );
           } else {
             throw createErr;
@@ -3277,7 +3535,8 @@ async function postReviewComment(
             pending.node_id,
             gqlFields,
             fetchImpl,
-            token
+            token,
+            ctx
           );
           return {
             ...raw,
@@ -3307,7 +3566,7 @@ async function postReviewComment(
     payload.start_side = startSide || side || 'RIGHT';
   }
   return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/comments`),
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/comments`, ctx),
     fetchImpl,
     token,
     { method: 'POST', body: payload }
@@ -3320,14 +3579,15 @@ async function postReviewComment(
  * "user_id can only have one pending review per pull request".
  * @returns {Promise<{ id: number, node_id: string|null }|null>}
  */
-async function findViewerPendingReview(owner, repo, pullNumber, fetchImpl, token) {
+async function findViewerPendingReview(owner, repo, pullNumber, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   if (!token) return null;
   const n = Number(pullNumber);
   if (!Number.isFinite(n)) return null;
   try {
     const [reviews, login] = await Promise.all([
       apiJson(
-        githubRestUrl(`/repos/${owner}/${repo}/pulls/${n}/reviews?per_page=100`),
+        githubRestUrl(`/repos/${owner}/${repo}/pulls/${n}/reviews?per_page=100`, ctx),
         fetchImpl,
         token
       ).catch(() => []),
@@ -3374,7 +3634,8 @@ function mapGraphqlReviewCommentToRest(c, fallback = {}) {
  * GraphQL: addPullRequestReviewThreadReply — works with or without a pending
  * review (attaches to pending when one exists).
  */
-async function replyViaThreadGraphql(threadNodeId, body, fetchImpl, token, fallback = {}) {
+async function replyViaThreadGraphql(threadNodeId, body, fetchImpl, token, fallback = {}, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   const data = await apiGraphql(
     `mutation($id:ID!,$body:String!){
       addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$id,body:$body}){
@@ -3393,7 +3654,8 @@ async function replyViaThreadGraphql(threadNodeId, body, fetchImpl, token, fallb
     }`,
     { id: String(threadNodeId), body: String(body) },
     fetchImpl,
-    token
+    token,
+    ctx
   );
   const c = data?.addPullRequestReviewThreadReply?.comment;
   if (!c) throw new Error('GraphQL thread reply returned no comment');
@@ -3409,8 +3671,10 @@ async function replyViaPendingReviewGraphql(
   body,
   fetchImpl,
   token,
-  fallback = {}
+  fallback = {},
+  ctx = null
 ) {
+  ctx = normalizeApiCtx(ctx);
   const data = await apiGraphql(
     `mutation($review:ID!,$body:String!,$inReplyTo:ID!){
       addPullRequestReviewComment(input:{
@@ -3458,13 +3722,14 @@ async function resolveParentCommentNodeId(
   token,
   knownNodeId,
   pullNumber = null
-) {
+, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   if (knownNodeId) return String(knownNodeId);
   const id = Math.floor(Number(parentId));
   if (!Number.isFinite(id) || id <= 0) return null;
   try {
     const parent = await apiJson(
-      githubRestUrl(`/repos/${owner}/${repo}/pulls/comments/${id}`),
+      githubRestUrl(`/repos/${owner}/${repo}/pulls/comments/${id}`, ctx),
       fetchImpl,
       token
     );
@@ -3519,6 +3784,7 @@ async function replyToReviewComment(
   token,
   opts = {}
 ) {
+  const ctx = normalizeApiCtx(opts?.ctx);
   const text = String(body || '').trim();
   if (!text) throw new Error('Reply body is required');
   const parentId = Number(commentId);
@@ -3700,7 +3966,7 @@ async function replyToReviewComment(
   // No pending review: REST dedicated replies endpoint (published immediately)
   try {
     return await apiSend(
-      githubRestUrl(`/repos/${owner}/${repo}/pulls/${n}/comments/${Math.floor(parentId)}/replies`),
+      githubRestUrl(`/repos/${owner}/${repo}/pulls/${n}/comments/${Math.floor(parentId)}/replies`, ctx),
       fetchImpl,
       token,
       { method: 'POST', body: { body: text } }
@@ -3726,7 +3992,8 @@ async function replyToReviewComment(
  * @param {string} threadNodeId GraphQL id (PRRT_…)
  * @param {boolean} [resolved=true]
  */
-async function resolveReviewThread(threadNodeId, resolved, fetchImpl, token) {
+async function resolveReviewThread(threadNodeId, resolved, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   if (!threadNodeId) throw new Error('threadNodeId required to resolve review thread');
   const mutation = resolved
     ? `mutation($id:ID!){ resolveReviewThread(input:{threadId:$id}){ thread { id isResolved } } }`
@@ -3735,7 +4002,8 @@ async function resolveReviewThread(threadNodeId, resolved, fetchImpl, token) {
     mutation,
     { id: threadNodeId },
     fetchImpl,
-    token
+    token,
+    ctx
   );
 }
 
@@ -3743,10 +4011,11 @@ async function resolveReviewThread(threadNodeId, resolved, fetchImpl, token) {
  * Close or reopen a pull request.
  * @param {'open'|'closed'} state
  */
-async function updatePullState(owner, repo, pullNumber, state, fetchImpl, token) {
+async function updatePullState(owner, repo, pullNumber, state, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   const next = state === 'closed' ? 'closed' : 'open';
   return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}`),
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}`, ctx),
     fetchImpl,
     token,
     { method: 'PATCH', body: { state: next } }
@@ -3765,9 +4034,10 @@ async function reopenPullRequest(owner, repo, pullNumber, fetchImpl, token) {
  * Delete a pull request review comment (own comments only on GitHub).
  * DELETE /repos/{owner}/{repo}/pulls/comments/{comment_id}
  */
-async function deleteReviewComment(owner, repo, commentId, fetchImpl, token) {
+async function deleteReviewComment(owner, repo, commentId, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/pulls/comments/${commentId}`),
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/comments/${commentId}`, ctx),
     fetchImpl,
     token,
     { method: 'DELETE' }
@@ -3778,41 +4048,45 @@ async function deleteReviewComment(owner, repo, commentId, fetchImpl, token) {
  * Delete an issue comment on the PR conversation.
  * DELETE /repos/{owner}/{repo}/issues/comments/{comment_id}
  */
-async function deleteIssueComment(owner, repo, commentId, fetchImpl, token) {
+async function deleteIssueComment(owner, repo, commentId, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/issues/comments/${commentId}`),
+    githubRestUrl(`/repos/${owner}/${repo}/issues/comments/${commentId}`, ctx),
     fetchImpl,
     token,
     { method: 'DELETE' }
   );
 }
 
-async function updatePullRequest(owner, repo, pullNumber, fields, fetchImpl, token) {
+async function updatePullRequest(owner, repo, pullNumber, fields, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   const body = {};
   if (fields?.title != null) body.title = String(fields.title);
   if (fields?.body != null) body.body = String(fields.body);
   if (fields?.base != null) body.base = String(fields.base);
   if (fields?.state != null) body.state = fields.state === 'closed' ? 'closed' : 'open';
   return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}`),
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}`, ctx),
     fetchImpl,
     token,
     { method: 'PATCH', body }
   );
 }
 
-async function editIssueComment(owner, repo, commentId, body, fetchImpl, token) {
+async function editIssueComment(owner, repo, commentId, body, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/issues/comments/${commentId}`),
+    githubRestUrl(`/repos/${owner}/${repo}/issues/comments/${commentId}`, ctx),
     fetchImpl,
     token,
     { method: 'PATCH', body: { body: String(body || '') } }
   );
 }
 
-async function editReviewComment(owner, repo, commentId, body, fetchImpl, token) {
+async function editReviewComment(owner, repo, commentId, body, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/pulls/comments/${commentId}`),
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/comments/${commentId}`, ctx),
     fetchImpl,
     token,
     { method: 'PATCH', body: { body: String(body || '') } }
@@ -3826,9 +4100,10 @@ async function requestReviewers(
   { reviewers = [], teamReviewers = [] },
   fetchImpl,
   token
-) {
+, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/requested_reviewers`),
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/requested_reviewers`, ctx),
     fetchImpl,
     token,
     {
@@ -3845,9 +4120,10 @@ async function removeReviewers(
   { reviewers = [], teamReviewers = [] },
   fetchImpl,
   token
-) {
+, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/requested_reviewers`),
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/requested_reviewers`, ctx),
     fetchImpl,
     token,
     {
@@ -3857,27 +4133,30 @@ async function removeReviewers(
   );
 }
 
-async function addAssignees(owner, repo, issueNumber, assignees, fetchImpl, token) {
+async function addAssignees(owner, repo, issueNumber, assignees, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/assignees`),
+    githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/assignees`, ctx),
     fetchImpl,
     token,
     { method: 'POST', body: { assignees: assignees || [] } }
   );
 }
 
-async function removeAssignees(owner, repo, issueNumber, assignees, fetchImpl, token) {
+async function removeAssignees(owner, repo, issueNumber, assignees, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/assignees`),
+    githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/assignees`, ctx),
     fetchImpl,
     token,
     { method: 'DELETE', body: { assignees: assignees || [] } }
   );
 }
 
-async function setIssueLabels(owner, repo, issueNumber, labels, fetchImpl, token) {
+async function setIssueLabels(owner, repo, issueNumber, labels, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/labels`),
+    githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/labels`, ctx),
     fetchImpl,
     token,
     { method: 'PUT', body: { labels: labels || [] } }
@@ -3890,13 +4169,14 @@ async function setIssueLabels(owner, repo, issueNumber, labels, fetchImpl, token
  * @returns {Promise<Array<{ name: string, color: string, description: string }>>}
  */
 async function fetchRepoLabels(owner, repo, fetchImpl, token = null, opts = {}) {
+  const ctx = normalizeApiCtx(opts?.ctx);
   const perPage = 100;
   const maxPages = Math.max(1, Math.min(10, Number(opts.maxPages) || 5));
   const out = [];
   for (let page = 1; page <= maxPages; page++) {
     const url = githubRestUrl(
       `/repos/${owner}/${repo}/labels?per_page=${perPage}&page=${page}`
-    );
+    , ctx);
     const batch = await apiJson(url, fetchImpl, token);
     if (!Array.isArray(batch) || !batch.length) break;
     for (const l of batch) {
@@ -3945,7 +4225,8 @@ async function createRepoLabel(
   { name, color, description } = {},
   fetchImpl,
   token
-) {
+, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   const rawName = String(name || '').trim();
   if (!rawName) throw new Error('Label name is required');
   const body = {
@@ -3956,7 +4237,7 @@ async function createRepoLabel(
   };
   if (description != null) body.description = String(description);
   const result = await apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/labels`),
+    githubRestUrl(`/repos/${owner}/${repo}/labels`, ctx),
     fetchImpl,
     token,
     { method: 'POST', body }
@@ -3975,6 +4256,7 @@ async function createRepoLabel(
  * @returns {Promise<Array<{ number: number, title: string, state: string, description: string }>>}
  */
 async function fetchRepoMilestones(owner, repo, fetchImpl, token = null, opts = {}) {
+  const ctx = normalizeApiCtx(opts?.ctx);
   const perPage = 100;
   const maxPages = Math.max(1, Math.min(10, Number(opts.maxPages) || 5));
   const state = opts.state || 'all';
@@ -3982,7 +4264,7 @@ async function fetchRepoMilestones(owner, repo, fetchImpl, token = null, opts = 
   for (let page = 1; page <= maxPages; page++) {
     const url = githubRestUrl(
       `/repos/${owner}/${repo}/milestones?state=${encodeURIComponent(state)}&per_page=${perPage}&page=${page}&sort=due_on&direction=desc`
-    );
+    , ctx);
     const batch = await apiJson(url, fetchImpl, token);
     if (!Array.isArray(batch) || !batch.length) break;
     for (const m of batch) {
@@ -4011,13 +4293,14 @@ async function createRepoMilestone(
   { title, description, state } = {},
   fetchImpl,
   token
-) {
+, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   const rawTitle = String(title || '').trim();
   if (!rawTitle) throw new Error('Milestone title is required');
   const body = { title: rawTitle, state: state === 'closed' ? 'closed' : 'open' };
   if (description != null) body.description = String(description);
   const result = await apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/milestones`),
+    githubRestUrl(`/repos/${owner}/${repo}/milestones`, ctx),
     fetchImpl,
     token,
     { method: 'POST', body }
@@ -4036,13 +4319,14 @@ async function createRepoMilestone(
  * @returns {Promise<Array<{ name: string, sha: string, zipballUrl?: string, tarballUrl?: string }>>}
  */
 async function fetchRepoTags(owner, repo, fetchImpl, token = null, opts = {}) {
+  const ctx = normalizeApiCtx(opts?.ctx);
   const perPage = 100;
   const maxPages = Math.max(1, Math.min(20, Number(opts.maxPages) || 10));
   const out = [];
   for (let page = 1; page <= maxPages; page++) {
     const url = githubRestUrl(
       `/repos/${owner}/${repo}/tags?per_page=${perPage}&page=${page}`
-    );
+    , ctx);
     const batch = await apiJson(url, fetchImpl, token);
     if (!Array.isArray(batch) || !batch.length) break;
     for (const t of batch) {
@@ -4095,12 +4379,13 @@ async function mergePullRequest(
   { mergeMethod = 'merge', commitTitle, commitMessage } = {},
   fetchImpl,
   token
-) {
+, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   const body = { merge_method: mergeMethod };
   if (commitTitle != null) body.commit_title = String(commitTitle);
   if (commitMessage != null) body.commit_message = String(commitMessage);
   return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/merge`),
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/merge`, ctx),
     fetchImpl,
     token,
     { method: 'PUT', body }
@@ -4114,11 +4399,12 @@ async function updatePullBranch(
   { expectedHeadSha } = {},
   fetchImpl,
   token
-) {
+, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   const body = {};
   if (expectedHeadSha) body.expected_head_sha = String(expectedHeadSha);
   return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/update-branch`),
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/update-branch`, ctx),
     fetchImpl,
     token,
     { method: 'PUT', body }
@@ -4136,14 +4422,15 @@ async function resolvePullRequestNodeId(
   fetchImpl,
   token,
   nodeId = null
-) {
+, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   if (nodeId) return String(nodeId);
   const n = Number(pullNumber);
   if (!token || !owner || !repo || !Number.isFinite(n) || n <= 0) return null;
   try {
     // Prefer REST node_id (cheap, same id GraphQL expects)
     const pr = await apiJson(
-      githubRestUrl(`/repos/${owner}/${repo}/pulls/${n}`),
+      githubRestUrl(`/repos/${owner}/${repo}/pulls/${n}`, ctx),
       fetchImpl,
       token
     );
@@ -4160,7 +4447,8 @@ async function resolvePullRequestNodeId(
 }`,
       { owner: String(owner), name: String(repo), number: n },
       fetchImpl,
-      token
+      token,
+      ctx
     );
     const id = data?.repository?.pullRequest?.id;
     return id ? String(id) : null;
@@ -4198,8 +4486,10 @@ async function setIssueSubscription(
   issueNumber,
   { subscribed = true, ignored = false, nodeId = null } = {},
   fetchImpl,
-  token
+  token,
+  ctx = null
 ) {
+  ctx = normalizeApiCtx(ctx);
   if (!token) throw new Error('GitHub PAT required for notifications');
   const id = await resolvePullRequestNodeId(
     owner,
@@ -4207,7 +4497,8 @@ async function setIssueSubscription(
     issueNumber,
     fetchImpl,
     token,
-    nodeId
+    nodeId,
+    ctx
   );
   if (!id) {
     throw new Error(
@@ -4260,8 +4551,10 @@ async function fetchPullRequestSubscription(
   pullNumber,
   fetchImpl,
   token,
-  nodeId = null
+  nodeId = null,
+  ctx = null
 ) {
+  ctx = normalizeApiCtx(ctx);
   if (!token) return null;
   try {
     const id = await resolvePullRequestNodeId(
@@ -4270,7 +4563,8 @@ async function fetchPullRequestSubscription(
       pullNumber,
       fetchImpl,
       token,
-      nodeId
+      nodeId,
+      ctx
     );
     if (!id) return null;
     const data = await apiGraphql(
@@ -4282,7 +4576,8 @@ async function fetchPullRequestSubscription(
 }`,
       { id: String(id) },
       fetchImpl,
-      token
+      token,
+      ctx
     );
     const vs = data?.node?.viewerSubscription;
     if (!vs) return null;
@@ -4292,9 +4587,10 @@ async function fetchPullRequestSubscription(
   }
 }
 
-async function setIssueMilestone(owner, repo, issueNumber, milestoneNumber, fetchImpl, token) {
+async function setIssueMilestone(owner, repo, issueNumber, milestoneNumber, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}`),
+    githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}`, ctx),
     fetchImpl,
     token,
     {
@@ -4316,11 +4612,12 @@ async function setPullRequestDraftStage(
   fetchImpl,
   token,
   nodeId = null
-) {
+, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   let id = nodeId;
   if (!id) {
     const pr = await apiJson(
-      githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}`),
+      githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}`, ctx),
       fetchImpl,
       token
     );
@@ -4353,7 +4650,7 @@ async function setPullRequestDraftStage(
           query: `mutation($id:ID!){convertPullRequestToDraft(input:{pullRequestId:$id}){pullRequest{id isDraft}}}`,
           variables: { id },
         };
-  const data = await apiGraphql(gql.query, gql.variables, fetchImpl, token);
+  const data = await apiGraphql(gql.query, gql.variables, fetchImpl, token, ctx);
   let parseFn = null;
   try {
     let mod =
@@ -4398,7 +4695,8 @@ async function uploadRepoFile(
   { path, contentBase64, message, branch },
   fetchImpl,
   token
-) {
+, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   if (!path || !contentBase64) throw new Error('path and contentBase64 required');
   const encPath = String(path)
     .split('/')
@@ -4412,7 +4710,7 @@ async function uploadRepoFile(
         `/repos/${owner}/${repo}/contents/${encPath}${
           branch ? `?ref=${encodeURIComponent(branch)}` : ''
         }`
-      ),
+      , ctx),
       fetchImpl,
       token
     );
@@ -4427,7 +4725,7 @@ async function uploadRepoFile(
   if (branch) body.branch = branch;
   if (sha) body.sha = sha;
   const result = await apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/contents/${encPath}`),
+    githubRestUrl(`/repos/${owner}/${repo}/contents/${encPath}`, ctx),
     fetchImpl,
     token,
     { method: 'PUT', body }
@@ -4445,7 +4743,8 @@ async function uploadRepoFile(
  * Fetch a file's text content at a ref (branch or SHA).
  * @returns {{ path: string, ref: string, text: string, sha: string, size: number }}
  */
-async function getRepoFileText(owner, repo, { path, ref }, fetchImpl, token) {
+async function getRepoFileText(owner, repo, { path, ref }, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   if (!path) throw new Error('path required');
   const rev = ref || 'HEAD';
   const encPath = String(path)
@@ -4453,7 +4752,7 @@ async function getRepoFileText(owner, repo, { path, ref }, fetchImpl, token) {
     .map(encodeURIComponent)
     .join('/');
   const meta = await apiJson(
-    githubRestUrl(`/repos/${owner}/${repo}/contents/${encPath}?ref=${encodeURIComponent(rev)}`),
+    githubRestUrl(`/repos/${owner}/${repo}/contents/${encPath}?ref=${encodeURIComponent(rev)}`, ctx),
     fetchImpl,
     token
   );
@@ -4492,7 +4791,8 @@ async function applyReviewSuggestion(
   { path, headRef, startLine, endLine, suggestion, message },
   fetchImpl,
   token
-) {
+, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   const ref = headRef || 'HEAD';
   const file = await getRepoFileText(
     owner,
@@ -4534,7 +4834,7 @@ async function applyReviewSuggestion(
     githubRestUrl(`/repos/${owner}/${repo}/contents/${path
       .split('/')
       .map(encodeURIComponent)
-      .join('/')}`),
+      .join('/')}`, ctx),
     fetchImpl,
     token,
     {
@@ -4552,10 +4852,11 @@ async function applyReviewSuggestion(
 /**
  * Current authenticated user (for "delete own" gating).
  */
-async function fetchViewerLogin(fetchImpl, token) {
+async function fetchViewerLogin(fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   if (!token) return null;
   try {
-    const me = await apiJson(githubRestUrl('/user'), fetchImpl, token);
+    const me = await apiJson(githubRestUrl('/user', ctx), fetchImpl, token);
     return me?.login || null;
   } catch {
     return null;
@@ -4630,6 +4931,7 @@ function mapAndAnnotateFiles(files, gitattributesText = '') {
  * @returns {Promise<{ files: Array, base: string, head: string, status?: string, aheadBy?: number, behindBy?: number, totalCommits?: number }>}
  */
 async function fetchCompareFiles(owner, repo, base, head, fetchImpl, token = null, options = {}) {
+  const ctx = normalizeApiCtx(options?.ctx);
   const o = String(owner || '').trim();
   const r = String(repo || '').trim();
   const b = String(base || '').trim();
@@ -4638,7 +4940,7 @@ async function fetchCompareFiles(owner, repo, base, head, fetchImpl, token = nul
     throw new Error('owner, repo, base, and head are required for compare');
   }
   const gitattributesText = String(options.gitattributesText || '');
-  const url = githubRestUrl(`/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/compare/${encodeURIComponent(b)}...${encodeURIComponent(h)}`);
+  const url = githubRestUrl(`/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/compare/${encodeURIComponent(b)}...${encodeURIComponent(h)}`, ctx);
   const data = await apiJson(url, fetchImpl, token);
   const files = mapAndAnnotateFiles(data?.files || [], gitattributesText);
   return {
@@ -4654,6 +4956,7 @@ async function fetchCompareFiles(owner, repo, base, head, fetchImpl, token = nul
 }
 
 const fetchApi = {
+  normalizeApiCtx,
   mapApiPullRequest,
   buildApiHeaders,
   findDanglingPrNumbers,
@@ -4669,8 +4972,14 @@ const fetchApi = {
   fetchOpenPulls,
   fetchPrDetail,
   fetchPrCommentsPage,
+  fetchPrCommits,
   fetchAllPrCommits,
   fetchAllPrFiles,
+  fetchPrFiles,
+  fetchPrIssueComments,
+  fetchPrReviews,
+  fetchPrChecks,
+  fetchPrDevelopment,
   fetchPrSidebarMeta,
   fetchIssueOrPrSummaries,
   fetchCompareFiles,

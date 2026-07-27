@@ -206,8 +206,57 @@ function HeaderCompactMetaStack({ detail }: { detail: any }) {
   );
 }
 
-/** Width/height morph duration — keep in sync with CSS transition on `.prp-header__stats`. */
-const STATS_MORPH_MS = 320;
+/** Width morph duration — keep in sync with CSS transition on `.prp-header__stats`. */
+const STATS_MORPH_MS = 280;
+/** Digit tween duration for load percent counter. */
+const PERCENT_TWEEN_MS = 280;
+
+function clampPct(n: number): number {
+  if (!Number.isFinite(n)) return 0;
+  return Math.min(100, Math.max(0, Math.round(n)));
+}
+
+/**
+ * Animated integer counter (ease-out) for load percent 0–100.
+ */
+function useAnimatedPercent(target: number | null, active: boolean): number {
+  const goal = target == null ? 0 : clampPct(target);
+  const [display, setDisplay] = useState(goal);
+  const displayRef = useRef(display);
+  displayRef.current = display;
+
+  useEffect(() => {
+    if (!active) {
+      setDisplay(0);
+      displayRef.current = 0;
+      return undefined;
+    }
+    const from = displayRef.current;
+    const to = goal;
+    if (from === to) return undefined;
+    const t0 =
+      typeof performance !== 'undefined' && performance.now
+        ? performance.now()
+        : Date.now();
+    let raf = 0;
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - t0) / PERCENT_TWEEN_MS);
+      const e = 1 - Math.pow(1 - t, 3);
+      const v = Math.round(from + (to - from) * e);
+      setDisplay(v);
+      displayRef.current = v;
+      if (t < 1) raf = requestAnimationFrame(tick);
+      else {
+        setDisplay(to);
+        displayRef.current = to;
+      }
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [goal, active]);
+
+  return active ? display : 0;
+}
 
 /**
  * Diff-stat badge that morphs size when content switches (metrics ↔ load stage,
@@ -216,6 +265,8 @@ const STATS_MORPH_MS = 320;
  *
  * Metrics settle to intrinsic size after morph so long "+/− N files" strings
  * are not clipped when the header reflows.
+ *
+ * Load stage shows a percent fill bar + animated counter (0–100).
  */
 function HeaderStatsBadge({
   loadStage = null,
@@ -224,7 +275,12 @@ function HeaderStatsBadge({
   deletions = 0,
   fileCount = 0,
 }: {
-  loadStage?: { label?: string | null; busy?: boolean; phase?: string | null } | null;
+  loadStage?: {
+    label?: string | null;
+    busy?: boolean;
+    phase?: string | null;
+    percent?: number | null;
+  } | null;
   skeleton?: boolean;
   additions?: number;
   deletions?: number;
@@ -232,12 +288,32 @@ function HeaderStatsBadge({
 }) {
   const stageLabel = loadStage?.label ? String(loadStage.label) : '';
   const stageBusy = Boolean(loadStage?.busy);
-  const showStage = Boolean(stageLabel);
+  const stagePhase = loadStage?.phase != null ? String(loadStage.phase) : '';
+  const rawPercent =
+    loadStage && Number.isFinite(Number(loadStage.percent))
+      ? clampPct(Number(loadStage.percent))
+      : stageBusy
+        ? 8
+        : stageLabel || stagePhase === 'done'
+          ? 100
+          : null;
+  // Show stage chrome for labeled busy work, or a brief 100% settle (done).
+  const showStage =
+    Boolean(stageLabel) ||
+    (rawPercent != null && stageBusy) ||
+    (stagePhase === 'done' && rawPercent === 100);
+  const animPercent = useAnimatedPercent(
+    showStage ? rawPercent ?? 0 : null,
+    showStage
+  );
   const badgeRef = useRef<HTMLDivElement | null>(null);
   const sizeRef = useRef({ w: 0, h: 0 });
+  const modeRef = useRef<'stage' | 'metrics' | 'skeleton' | null>(null);
   const morphTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Mode key drives width morph; stage omits label so phrase swaps stay still.
+  const mode = showStage ? 'stage' : skeleton ? 'skeleton' : 'metrics';
   const contentKey = showStage
-    ? `stage:${stageLabel}:${stageBusy ? 1 : 0}`
+    ? `stage:${stageBusy ? 'busy' : 'idle'}`
     : skeleton
       ? 'metrics:skeleton'
       : `metrics:${additions}:${deletions}:${fileCount}`;
@@ -251,58 +327,69 @@ function HeaderStatsBadge({
       morphTimerRef.current = null;
     }
 
+    const prevMode = modeRef.current;
     const prevW = sizeRef.current.w;
-    const prevH = sizeRef.current.h;
+    const modeChanged = prevMode != null && prevMode !== mode;
 
-    // Measure natural size for the new content (CSS min-width applies when busy).
-    el.style.width = 'auto';
-    el.style.height = 'auto';
+    // Measure target size with current mode classes (busy = fixed CSS width).
+    // Clear only inline size so CSS --busy width / auto metrics can apply.
+    el.style.width = '';
+    el.style.height = '';
     el.style.minWidth = '';
+    el.style.maxWidth = '';
     el.style.overflow = '';
     const rect = el.getBoundingClientRect();
     const w = Math.max(1, Math.ceil(rect.width));
     const h = Math.max(1, Math.ceil(rect.height));
 
-    if (prevW > 0 && prevH > 0 && (prevW !== w || prevH !== h)) {
-      // FLIP: pin previous size → reflow → animate to measured size.
-      // min-width:0 so stage's 22ch floor does not block shrink/grow from metrics.
+    // Phrase-only updates inside stage: keep size, no FLIP.
+    if (mode === 'stage' && prevMode === 'stage') {
+      sizeRef.current = { w, h };
+      modeRef.current = mode;
+      return;
+    }
+
+    // Metrics value changes (± lines) while already in metrics: no morph noise.
+    if (mode === 'metrics' && prevMode === 'metrics' && !modeChanged) {
+      sizeRef.current = { w, h };
+      modeRef.current = mode;
+      el.style.width = '';
+      el.style.height = '';
+      el.style.minWidth = '';
+      el.style.overflow = '';
+      return;
+    }
+
+    if (prevW > 0 && Math.abs(prevW - w) > 1) {
+      // Symmetric FLIP both ways (stage ↔ metrics). Right-anchored via margin-left:auto.
       el.style.minWidth = '0';
+      el.style.maxWidth = 'none';
       el.style.overflow = 'hidden';
       el.style.width = `${prevW}px`;
-      el.style.height = `${prevH}px`;
       void el.offsetWidth;
       el.style.width = `${w}px`;
-      el.style.height = `${h}px`;
 
       morphTimerRef.current = setTimeout(() => {
         const node = badgeRef.current;
         morphTimerRef.current = null;
         if (!node) return;
-        if (!showStage) {
-          // Metrics: release fixed size so header reflow never clips stats.
-          node.style.width = '';
-          node.style.height = '';
-          node.style.minWidth = '';
-          node.style.overflow = '';
-        } else {
-          // Stage: keep pixel size; restore CSS min-width / overflow.
-          node.style.minWidth = '';
-          node.style.overflow = '';
-        }
-      }, STATS_MORPH_MS + 20);
-    } else if (showStage) {
-      el.style.width = `${w}px`;
-      el.style.height = `${h}px`;
-      el.style.minWidth = '';
-      el.style.overflow = '';
+        // Hand size back to CSS (fixed stage width / intrinsic metrics).
+        node.style.width = '';
+        node.style.height = '';
+        node.style.minWidth = '';
+        node.style.maxWidth = '';
+        node.style.overflow = '';
+      }, STATS_MORPH_MS + 40);
     } else {
       el.style.width = '';
       el.style.height = '';
       el.style.minWidth = '';
+      el.style.maxWidth = '';
       el.style.overflow = '';
     }
 
     sizeRef.current = { w, h };
+    modeRef.current = mode;
 
     return () => {
       if (morphTimerRef.current) {
@@ -310,7 +397,7 @@ function HeaderStatsBadge({
         morphTimerRef.current = null;
       }
     };
-  }, [contentKey, showStage]);
+  }, [contentKey, mode]);
 
   return (
     <div
@@ -324,18 +411,41 @@ function HeaderStatsBadge({
         .join(' ')}
       data-stats-mode={showStage ? 'stage' : 'metrics'}
       data-content-key={contentKey}
-      title={showStage ? stageLabel : skeleton ? undefined : 'Files changed'}
+      data-load-percent={showStage ? String(animPercent) : undefined}
+      title={
+        showStage
+          ? `${stageLabel || 'Loading'}${rawPercent != null ? ` · ${animPercent}%` : ''}`
+          : skeleton
+            ? undefined
+            : 'Files changed'
+      }
       role={showStage ? 'status' : undefined}
       aria-live={showStage ? 'polite' : undefined}
       aria-busy={showStage && stageBusy ? true : undefined}
+      aria-valuemin={showStage ? 0 : undefined}
+      aria-valuemax={showStage ? 100 : undefined}
+      aria-valuenow={showStage ? animPercent : undefined}
     >
-      <span key={contentKey} className="prp-header__stats-inner">
+      {showStage ? (
+        <span
+          className="prp-header__stats-bar"
+          style={{ width: `${animPercent}%` }}
+          aria-hidden="true"
+        />
+      ) : null}
+      {/* Stable key within a mode — remount only on stage↔metrics for fade-in */}
+      <span key={mode} className="prp-header__stats-inner">
         {showStage ? (
           <>
             {stageBusy ? (
               <span className="prp-header__stats-spinner" aria-hidden="true" />
             ) : null}
-            <span className="prp-header__stats-label">{stageLabel}</span>
+            <span className="prp-header__stats-label">
+              {stageLabel || 'Loading…'}
+            </span>
+            <span className="prp-header__stats-pct" aria-hidden="true">
+              {animPercent}%
+            </span>
           </>
         ) : skeleton ? (
           <span className="prp-skeleton__chip prp-skeleton__chip--stat" />
@@ -413,8 +523,11 @@ export function Header(props: any) {
 
   const localBaseRef = useRef<HTMLButtonElement | null>(null);
   const titleInputRef = useRef<HTMLInputElement | null>(null);
+  const titleHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
+  /** Input width matched to the rendered h2 title (px) when edit starts. */
+  const [titleInputWidthPx, setTitleInputWidthPx] = useState<number | null>(null);
   /** Which branch chip last copied: 'base' | 'head' | null */
   const [copiedRef, setCopiedRef] = useState<string | null>(null);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -466,6 +579,20 @@ export function Header(props: any) {
 
   const beginEditTitle = () => {
     if (!detail || actionBusy) return;
+    // Size input to the currently rendered title width (h2 box, after layout).
+    const heading = titleHeadingRef.current;
+    if (heading) {
+      const rect = heading.getBoundingClientRect();
+      // scrollWidth covers full text if not ellipsized; clientWidth is visible.
+      const textW = Math.ceil(
+        Math.max(rect.width, heading.scrollWidth || 0, heading.offsetWidth || 0)
+      );
+      // input: padding 10+10 + border 1+1 (box-sizing: border-box)
+      const chrome = 22;
+      setTitleInputWidthPx(Math.max(48 + chrome, textW + chrome));
+    } else {
+      setTitleInputWidthPx(null);
+    }
     setTitleDraft(String(detail.title || ''));
     setEditingTitle(true);
     skipBlurSaveRef.current = false;
@@ -475,20 +602,24 @@ export function Header(props: any) {
     skipBlurSaveRef.current = true;
     setEditingTitle(false);
     setTitleDraft('');
+    setTitleInputWidthPx(null);
   };
 
   const commitEditTitle = async () => {
     if (!detail || typeof onEditTitle !== 'function') {
       setEditingTitle(false);
+      setTitleInputWidthPx(null);
       return;
     }
     const next = String(titleDraft || '').trim();
     if (!next || next === String(detail.title || '').trim()) {
       setEditingTitle(false);
+      setTitleInputWidthPx(null);
       return;
     }
     skipBlurSaveRef.current = true;
     setEditingTitle(false);
+    setTitleInputWidthPx(null);
     await onEditTitle(next);
   };
 
@@ -509,6 +640,7 @@ export function Header(props: any) {
   useEffect(() => {
     setEditingTitle(false);
     setTitleDraft('');
+    setTitleInputWidthPx(null);
   }, [detail?.owner, detail?.repo, detail?.number]);
 
   // Diff only — conversation never densifies by panel width
@@ -590,6 +722,14 @@ export function Header(props: any) {
                   disabled={actionBusy}
                   aria-label="Pull request title"
                   maxLength={256}
+                  style={
+                    titleInputWidthPx != null
+                      ? {
+                          width: titleInputWidthPx,
+                          flex: '0 0 auto',
+                        }
+                      : undefined
+                  }
                   onChange={(e) => setTitleDraft(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
@@ -647,7 +787,9 @@ export function Header(props: any) {
               </div>
             ) : (
               <>
-                <h2 className="prp-header__title">{detail.title}</h2>
+                <h2 ref={titleHeadingRef} className="prp-header__title">
+                  {detail.title}
+                </h2>
                 {typeof onEditTitle === 'function' ? (
                   <button
                     type="button"

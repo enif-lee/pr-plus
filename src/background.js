@@ -37,30 +37,31 @@ const CONTENT_SCRIPT_JS = [
   'src/content.js',
   'src/modal/pure/detail-idb-cache.js',
   'src/modal/pure/detail-cache.js',
+  'src/modal/pure/load-progress.js',
   'src/modal/dist/pr-modal.bundle.js',
   'src/pr-modal-host.js',
 ];
 
 /**
- * Serialize GitHub API work: REST/GraphQL base is process-global
- * (__PRP_GITHUB_API__). Without a queue, concurrent handlers (github.com tab +
- * enterprise tab) can clobber each other mid-request.
+ * Stateless API context from RPC message (webHost from content page).
+ * No process-global mutation — pass returned ctx into every PRTreeFetch call.
+ * @param {object|null|undefined} message
  */
-const runWithGithubApiExclusive =
-  typeof PRGithubEndpoints.createGithubApiExclusiveRunner === 'function'
-    ? PRGithubEndpoints.createGithubApiExclusiveRunner()
-    : (fn) => Promise.resolve().then(fn);
-
-/**
- * Resolve REST/GraphQL bases for this message from the page web host.
- * Must only run inside runWithGithubApiExclusive for API-backed handlers.
- */
-async function applyApiContextFromMessage(message) {
-  const endpoints = PRGithubEndpoints.resolveGithubEndpoints({
-    webHost: message?.webHost || message?.webOrigin || 'github.com',
-  });
-  PRGithubEndpoints.setGithubApiContext(endpoints);
-  return endpoints;
+function apiCtxFromMessage(message) {
+  const webHost = message?.webHost || message?.webOrigin || 'github.com';
+  if (typeof PRGithubEndpoints?.resolveGithubEndpoints === 'function') {
+    return PRGithubEndpoints.resolveGithubEndpoints({ webHost });
+  }
+  if (typeof PRGithubEndpoints?.normalizeApiCtx === 'function') {
+    return PRGithubEndpoints.normalizeApiCtx({ webHost });
+  }
+  return {
+    kind: 'dotcom',
+    webHost: 'github.com',
+    webOrigin: 'https://github.com',
+    restBase: 'https://api.github.com',
+    graphqlUrl: 'https://api.github.com/graphql',
+  };
 }
 
 /**
@@ -248,6 +249,12 @@ const MSG = {
   FETCH_REPO_TAGS: 'PR_TREE_FETCH_REPO_TAGS',
   FETCH_TAGS_FOR_COMMITS: 'PR_TREE_FETCH_TAGS_FOR_COMMITS',
   FETCH_ALL_PR_COMMITS: 'PR_TREE_FETCH_ALL_PR_COMMITS',
+  FETCH_PR_COMMITS: 'PR_TREE_FETCH_PR_COMMITS',
+  FETCH_PR_FILES: 'PR_TREE_FETCH_PR_FILES',
+  FETCH_PR_ISSUE_COMMENTS: 'PR_TREE_FETCH_PR_ISSUE_COMMENTS',
+  FETCH_PR_REVIEWS: 'PR_TREE_FETCH_PR_REVIEWS',
+  FETCH_PR_CHECKS: 'PR_TREE_FETCH_PR_CHECKS',
+  FETCH_PR_DEVELOPMENT: 'PR_TREE_FETCH_PR_DEVELOPMENT',
   FETCH_ALL_PR_FILES: 'PR_TREE_FETCH_ALL_PR_FILES',
   APPLY_SUGGESTION: 'PR_TREE_APPLY_SUGGESTION',
   GET_REPO_FILE_TEXT: 'PR_TREE_GET_REPO_FILE_TEXT',
@@ -386,8 +393,8 @@ function fetchImpl() {
  */
 const activeFetchControllers = new Map();
 /**
- * requestIds cancelled before beginTrackedFetch ran (still queued behind
- * exclusive API lock). beginTrackedFetch honors these and starts aborted.
+ * requestIds cancelled before beginTrackedFetch ran (still in microtask queue).
+ * beginTrackedFetch honors these and starts aborted.
  * @type {Set<string>}
  */
 const preCancelledFetchIds = new Set();
@@ -558,20 +565,8 @@ function withTimeout(promise, ms, label) {
 }
 
 async function handleMessage(message) {
-  // Bind REST/GraphQL bases for every API-backed message (incl. popup without webHost).
-  if (
-    message?.type &&
-    message.type !== MSG.PING &&
-    message.type !== MSG.TOKEN_STATUS &&
-    message.type !== MSG.TOKEN_SET &&
-    message.type !== MSG.TOKEN_CLEAR
-  ) {
-    try {
-      await applyApiContextFromMessage(message || {});
-    } catch {
-      /* keep previous / default context */
-    }
-  }
+  // Per-message API ctx (stateless). Propagate into PRTreeFetch*; never set global.
+  const apiCtx = apiCtxFromMessage(message || {});
 
   switch (message.type) {
     case MSG.PING: {
@@ -704,6 +699,7 @@ async function handleMessage(message) {
             pagePrNumbers: Array.isArray(message.pagePrNumbers)
               ? message.pagePrNumbers
               : [],
+            ctx: apiCtx,
           }
         );
         return { ok: true, prs };
@@ -723,8 +719,7 @@ async function handleMessage(message) {
           message.repo,
           Array.isArray(message.numbers) ? message.numbers : [],
           tracked.fetch,
-          token
-        );
+          token, apiCtx);
         return { ok: true, prs };
       } catch (err) {
         if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
@@ -745,8 +740,7 @@ async function handleMessage(message) {
         cancelTrackedFetches(ids);
       return { ok: true, cancelled };
     }
-    case MSG.FETCH_PR_DETAIL: {
-      const tracked = beginTrackedFetch(message.requestId);
+    case MSG.FETCH_PR_DETAIL: { const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
         // Partial by default: core + first GraphQL threads page (not all pages)
@@ -759,8 +753,7 @@ async function handleMessage(message) {
           {
             skipReviewThreads: Boolean(message.skipReviewThreads),
             threadsMaxPages:
-              message.threadsMaxPages != null ? Number(message.threadsMaxPages) : 1,
-          }
+              message.threadsMaxPages != null ? Number(message.threadsMaxPages) : 1, ctx: apiCtx }
         );
         return { ok: true, detail };
       } catch (err) {
@@ -796,7 +789,8 @@ async function handleMessage(message) {
             pageSize: message.pageSize != null ? Number(message.pageSize) : undefined,
           },
           tracked.fetch,
-          token
+          token,
+          apiCtx
         );
         return { ok: true, page };
       } catch (err) {
@@ -816,11 +810,7 @@ async function handleMessage(message) {
             page: { threads: [], comments: [], pageCount: 0, direction: 'refresh' },
           };
         }
-        const page = await PRTreeFetch.fetchReviewThreadsByIds(
-          message.threadNodeIds || message.ids || [],
-          tracked.fetch,
-          token
-        );
+        const page = await PRTreeFetch.fetchReviewThreadsByIds(message.threadNodeIds || message.ids || [], tracked.fetch, token, apiCtx);
         return { ok: true, page };
       } catch (err) {
         if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
@@ -844,7 +834,8 @@ async function handleMessage(message) {
             since: message.since || null,
           },
           tracked.fetch,
-          token
+          token,
+          apiCtx
         );
         return { ok: true, page };
       } catch (err) {
@@ -865,7 +856,7 @@ async function handleMessage(message) {
           message.head,
           tracked.fetch,
           token,
-          { gitattributesText: message.gitattributesText || '' }
+          { gitattributesText: message.gitattributesText || '', ctx: apiCtx }
         );
         return { ok: true, result };
       } catch (err) {
@@ -884,8 +875,7 @@ async function handleMessage(message) {
         message.number,
         message.body,
         fetchImpl(),
-        token
-      );
+        token, apiCtx);
       return { ok: true, result };
     }
     case MSG.SUBMIT_REVIEW: {
@@ -902,8 +892,7 @@ async function handleMessage(message) {
           comments: Array.isArray(message.comments) ? message.comments : undefined,
         },
         fetchImpl(),
-        token
-      );
+        token, apiCtx);
       return { ok: true, result };
     }
     case MSG.SUBMIT_PENDING_REVIEW: {
@@ -916,8 +905,7 @@ async function handleMessage(message) {
         message.reviewId,
         { event: message.event || 'COMMENT', body: message.body || '' },
         fetchImpl(),
-        token
-      );
+        token, apiCtx);
       return { ok: true, result };
     }
     case MSG.DELETE_PENDING_REVIEW: {
@@ -929,8 +917,7 @@ async function handleMessage(message) {
         message.number,
         message.reviewId,
         fetchImpl(),
-        token
-      );
+        token, apiCtx);
       return { ok: true, result };
     }
     case MSG.POST_REVIEW_COMMENT: {
@@ -952,8 +939,7 @@ async function handleMessage(message) {
           subjectType: message.subjectType || message.subject_type || 'line',
         },
         fetchImpl(),
-        token
-      );
+        token, apiCtx);
       return { ok: true, result };
     }
     case MSG.REPLY_REVIEW_COMMENT: {
@@ -975,19 +961,19 @@ async function handleMessage(message) {
           line: message.line ?? null,
           side: message.side || null,
           commitId: message.commitId || null,
-        }
+        },
+        apiCtx
       );
       return { ok: true, result };
     }
     case MSG.RESOLVE_REVIEW_THREAD: {
       const token = await tokenForMessage(message);
-      if (!token) throw new Error('GitHub PAT required to resolve review threads');
+      if (!token, apiCtx) throw new Error('GitHub PAT required to resolve review threads');
       const result = await PRTreeFetch.resolveReviewThread(
         message.threadNodeId,
         message.resolved !== false,
         fetchImpl(),
-        token
-      );
+        token, apiCtx);
       return { ok: true, result };
     }
     case MSG.UPDATE_PULL_STATE: {
@@ -999,8 +985,7 @@ async function handleMessage(message) {
         message.number,
         message.state === 'closed' ? 'closed' : 'open',
         fetchImpl(),
-        token
-      );
+        token, apiCtx);
       return { ok: true, result };
     }
     case MSG.DELETE_REVIEW_COMMENT: {
@@ -1011,8 +996,7 @@ async function handleMessage(message) {
         message.repo,
         message.commentId,
         fetchImpl(),
-        token
-      );
+        token, apiCtx);
       return { ok: true, result };
     }
     case MSG.DELETE_ISSUE_COMMENT: {
@@ -1023,8 +1007,7 @@ async function handleMessage(message) {
         message.repo,
         message.commentId,
         fetchImpl(),
-        token
-      );
+        token, apiCtx);
       return { ok: true, result };
     }
     case MSG.UPDATE_PULL: {
@@ -1036,8 +1019,7 @@ async function handleMessage(message) {
         message.number,
         message.fields || {},
         fetchImpl(),
-        token
-      );
+        token, apiCtx);
       return { ok: true, result };
     }
     case MSG.EDIT_ISSUE_COMMENT: {
@@ -1049,8 +1031,7 @@ async function handleMessage(message) {
         message.commentId,
         message.body,
         fetchImpl(),
-        token
-      );
+        token, apiCtx);
       return { ok: true, result };
     }
     case MSG.EDIT_REVIEW_COMMENT: {
@@ -1062,8 +1043,7 @@ async function handleMessage(message) {
         message.commentId,
         message.body,
         fetchImpl(),
-        token
-      );
+        token, apiCtx);
       return { ok: true, result };
     }
     case MSG.REQUEST_REVIEWERS: {
@@ -1078,8 +1058,7 @@ async function handleMessage(message) {
           teamReviewers: message.teamReviewers || [],
         },
         fetchImpl(),
-        token
-      );
+        token, apiCtx);
       return { ok: true, result };
     }
     case MSG.REMOVE_REVIEWERS: {
@@ -1094,8 +1073,7 @@ async function handleMessage(message) {
           teamReviewers: message.teamReviewers || [],
         },
         fetchImpl(),
-        token
-      );
+        token, apiCtx);
       return { ok: true, result };
     }
     case MSG.ADD_ASSIGNEES: {
@@ -1107,8 +1085,7 @@ async function handleMessage(message) {
         message.number,
         message.assignees || [],
         fetchImpl(),
-        token
-      );
+        token, apiCtx);
       return { ok: true, result };
     }
     case MSG.REMOVE_ASSIGNEES: {
@@ -1120,8 +1097,7 @@ async function handleMessage(message) {
         message.number,
         message.assignees || [],
         fetchImpl(),
-        token
-      );
+        token, apiCtx);
       return { ok: true, result };
     }
     case MSG.SET_LABELS: {
@@ -1133,8 +1109,7 @@ async function handleMessage(message) {
         message.number,
         message.labels || [],
         fetchImpl(),
-        token
-      );
+        token, apiCtx);
       return { ok: true, result };
     }
     case MSG.FETCH_REPO_LABELS: {
@@ -1149,6 +1124,7 @@ async function handleMessage(message) {
           {
             maxPages:
               message.maxPages != null ? Number(message.maxPages) : undefined,
+            ctx: apiCtx,
           }
         );
         return { ok: true, labels };
@@ -1161,7 +1137,7 @@ async function handleMessage(message) {
     }
     case MSG.CREATE_REPO_LABEL: {
       const token = await tokenForMessage(message);
-      if (!token) throw new Error('GitHub PAT required to create labels');
+      if (!token, apiCtx) throw new Error('GitHub PAT required to create labels');
       const result = await PRTreeFetch.createRepoLabel(
         message.owner,
         message.repo,
@@ -1171,8 +1147,7 @@ async function handleMessage(message) {
           description: message.description,
         },
         fetchImpl(),
-        token
-      );
+        token, apiCtx);
       return { ok: true, result };
     }
     case MSG.FETCH_REPO_MILESTONES: {
@@ -1188,6 +1163,7 @@ async function handleMessage(message) {
             maxPages:
               message.maxPages != null ? Number(message.maxPages) : undefined,
             state: message.state || 'all',
+            ctx: apiCtx,
           }
         );
         return { ok: true, milestones };
@@ -1200,7 +1176,7 @@ async function handleMessage(message) {
     }
     case MSG.CREATE_REPO_MILESTONE: {
       const token = await tokenForMessage(message);
-      if (!token) throw new Error('GitHub PAT required to create milestones');
+      if (!token, apiCtx) throw new Error('GitHub PAT required to create milestones');
       const result = await PRTreeFetch.createRepoMilestone(
         message.owner,
         message.repo,
@@ -1210,8 +1186,7 @@ async function handleMessage(message) {
           state: message.state,
         },
         fetchImpl(),
-        token
-      );
+        token, apiCtx);
       return { ok: true, result };
     }
     case MSG.FETCH_REPO_TAGS: {
@@ -1226,6 +1201,7 @@ async function handleMessage(message) {
           {
             maxPages:
               message.maxPages != null ? Number(message.maxPages) : undefined,
+            ctx: apiCtx,
           }
         );
         return { ok: true, tags };
@@ -1249,6 +1225,7 @@ async function handleMessage(message) {
           {
             maxPages:
               message.maxPages != null ? Number(message.maxPages) : undefined,
+            ctx: apiCtx,
           }
         );
         return { ok: true, tags };
@@ -1267,10 +1244,128 @@ async function handleMessage(message) {
           message.owner,
           message.repo,
           message.number,
-          tracked.fetch,
-          token
-        );
+          tracked.fetch, token, apiCtx);
         return { ok: true, commits };
+      } catch (err) {
+        if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
+      }
+    }
+    case MSG.FETCH_PR_COMMITS: {
+      const tracked = beginTrackedFetch(message.requestId);
+      try {
+        const token = await tokenForMessage(message);
+        const commits = await PRTreeFetch.fetchPrCommits(
+          message.owner,
+          message.repo,
+          message.number,
+          tracked.fetch, token, apiCtx);
+        return { ok: true, commits };
+      } catch (err) {
+        if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
+      }
+    }
+    case MSG.FETCH_PR_FILES: {
+      const tracked = beginTrackedFetch(message.requestId);
+      try {
+        const token = await tokenForMessage(message);
+        const pack = await PRTreeFetch.fetchPrFiles(
+          message.owner,
+          message.repo,
+          message.number,
+          tracked.fetch,
+          token,
+          {
+            headSha: message.headSha || null,
+            gitattributesText: message.gitattributesText || '', ctx: apiCtx }
+        );
+        return {
+          ok: true,
+          files: Array.isArray(pack?.files) ? pack.files : [],
+          gitattributesText:
+            typeof pack?.gitattributesText === 'string'
+              ? pack.gitattributesText
+              : '',
+        };
+      } catch (err) {
+        if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
+      }
+    }
+    case MSG.FETCH_PR_ISSUE_COMMENTS: {
+      const tracked = beginTrackedFetch(message.requestId);
+      try {
+        const token = await tokenForMessage(message);
+        const page = await PRTreeFetch.fetchPrIssueComments(
+          message.owner,
+          message.repo,
+          message.number,
+          tracked.fetch, token, apiCtx);
+        return { ok: true, page };
+      } catch (err) {
+        if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
+      }
+    }
+    case MSG.FETCH_PR_REVIEWS: {
+      const tracked = beginTrackedFetch(message.requestId);
+      try {
+        const token = await tokenForMessage(message);
+        const reviews = await PRTreeFetch.fetchPrReviews(
+          message.owner,
+          message.repo,
+          message.number,
+          tracked.fetch, token, apiCtx);
+        return { ok: true, reviews: Array.isArray(reviews) ? reviews : [] };
+      } catch (err) {
+        if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
+      }
+    }
+    case MSG.FETCH_PR_CHECKS: {
+      const tracked = beginTrackedFetch(message.requestId);
+      try {
+        const token = await tokenForMessage(message);
+        const checks = await PRTreeFetch.fetchPrChecks(
+          message.owner,
+          message.repo,
+          message.headSha,
+          tracked.fetch,
+          token,
+          apiCtx
+        );
+        return { ok: true, checks };
+      } catch (err) {
+        if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
+      }
+    }
+    case MSG.FETCH_PR_DEVELOPMENT: {
+      const tracked = beginTrackedFetch(message.requestId);
+      try {
+        const token = await tokenForMessage(message);
+        const development = await PRTreeFetch.fetchPrDevelopment(
+          message.owner,
+          message.repo,
+          message.number,
+          tracked.fetch,
+          token,
+          { body: message.body || '', ctx: apiCtx }
+        );
+        return { ok: true, development };
       } catch (err) {
         if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
         throw err;
@@ -1288,7 +1383,7 @@ async function handleMessage(message) {
           message.number,
           tracked.fetch,
           token,
-          { gitattributesText: message.gitattributesText || '' }
+          { gitattributesText: message.gitattributesText || '', ctx: apiCtx }
         );
         return { ok: true, files };
       } catch (err) {
@@ -1311,8 +1406,7 @@ async function handleMessage(message) {
           branch: message.branch,
         },
         fetchImpl(),
-        token
-      );
+        token, apiCtx);
       return { ok: true, result };
     }
     case MSG.APPLY_SUGGESTION: {
@@ -1330,8 +1424,7 @@ async function handleMessage(message) {
           message: message.commitMessage,
         },
         fetchImpl(),
-        token
-      );
+        token, apiCtx);
       return { ok: true, result };
     }
     case MSG.GET_REPO_FILE_TEXT: {
@@ -1345,8 +1438,7 @@ async function handleMessage(message) {
           ref: message.ref || message.headRef || message.headSha,
         },
         fetchImpl(),
-        token
-      );
+        token, apiCtx);
       return { ok: true, result };
     }
     case MSG.MERGE_PULL: {
@@ -1362,8 +1454,7 @@ async function handleMessage(message) {
           commitMessage: message.commitMessage,
         },
         fetchImpl(),
-        token
-      );
+        token, apiCtx);
       return { ok: true, result };
     }
     case MSG.UPDATE_BRANCH: {
@@ -1375,8 +1466,7 @@ async function handleMessage(message) {
         message.number,
         { expectedHeadSha: message.expectedHeadSha },
         fetchImpl(),
-        token
-      );
+        token, apiCtx);
       return { ok: true, result };
     }
     case MSG.SET_SUBSCRIPTION: {
@@ -1392,8 +1482,7 @@ async function handleMessage(message) {
           nodeId: message.nodeId || null,
         },
         fetchImpl(),
-        token
-      );
+        token, apiCtx);
       return { ok: true, result };
     }
     case MSG.DELETE_SUBSCRIPTION: {
@@ -1411,15 +1500,14 @@ async function handleMessage(message) {
     }
     case MSG.SET_MILESTONE: {
       const token = await tokenForMessage(message);
-      if (!token) throw new Error('GitHub PAT required to set milestone');
+      if (!token, apiCtx) throw new Error('GitHub PAT required to set milestone');
       const result = await PRTreeFetch.setIssueMilestone(
         message.owner,
         message.repo,
         message.number,
         message.milestone,
         fetchImpl(),
-        token
-      );
+        token, apiCtx);
       return { ok: true, result };
     }
     case MSG.SET_DRAFT_STAGE: {
@@ -1432,7 +1520,8 @@ async function handleMessage(message) {
         message.stage === 'ready' ? 'ready' : 'draft',
         fetchImpl(),
         token,
-        message.nodeId || null
+        message.nodeId || null,
+        apiCtx
       );
       return { ok: true, result };
     }
@@ -1452,8 +1541,8 @@ chrome.runtime.onMessage.addListener((message, _sender) => {
   }
 
   /**
-   * CANCEL_FETCH (and PING) must NOT wait on the exclusive GitHub API queue.
-   * Otherwise cancel is serialized behind the in-flight fetch it should abort.
+   * CANCEL_FETCH / PING: no long GitHub work — skip keep-alive timeout wrapper
+   * so cancel is never delayed behind unrelated timers.
    */
   if (
     message.type === MSG.CANCEL_FETCH ||
@@ -1468,13 +1557,11 @@ chrome.runtime.onMessage.addListener((message, _sender) => {
       }));
   }
 
-  // Return a Promise so Chrome keeps the message port open until settle
-  // (preferred over return true + sendResponse, which races SW sleep).
-  // Exclusive queue: API base is global; one host's handler must not interleave
-  // with another's setGithubApiContext / githubRestUrl calls.
+  // Stateless concurrent handlers: each message carries webHost → apiCtx,
+  // propagated into fetch-pulls (no exclusive global queue).
   return withServiceWorkerKeepAlive(() =>
     withTimeout(
-      runWithGithubApiExclusive(() => handleMessage(message)),
+      handleMessage(message),
       MESSAGE_TIMEOUT_MS,
       message.type
     ).catch((err) => ({

@@ -71,13 +71,15 @@ export function AsideCommitsTimeline({
         aria-label="Search commits"
       />
       {!items.length ? (
-        <div className="prp-muted">
-          {query.trim()
-            ? loadingMore
-              ? 'Loading commits…'
-              : 'No matching commits'
-            : 'No commits'}
-        </div>
+        loadingMore && !query.trim() ? null : (
+          <div className="prp-muted">
+            {query.trim()
+              ? loadingMore
+                ? 'Loading commits…'
+                : 'No matching commits'
+              : 'No commits'}
+          </div>
+        )
       ) : (
         <div className="prp-commit-timeline-scroll">
           <ol className="prp-commit-timeline">

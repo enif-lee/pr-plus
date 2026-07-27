@@ -1,6 +1,12 @@
 const assert = require('node:assert/strict');
 const {
   fetchPrDetail,
+  fetchPrCommits,
+  fetchPrChecks,
+  fetchPrDevelopment,
+  fetchPrFiles,
+  fetchPrIssueComments,
+  fetchPrReviews,
   postIssueComment,
   submitPullReview,
   postReviewComment,
@@ -236,42 +242,69 @@ async function main() {
 
   const detail = await fetchPrDetail('o', 'r', 9, mockFetch, 'tok');
   assert.equal(detail.number, 9);
-  assert.equal(detail.files.length, 2);
-  assert.equal(detail.files[0].patch.includes('+x'), true);
+  // files / comments / reviews deferred — core returns empty placeholders
+  assert.deepEqual(detail.files, []);
+  assert.deepEqual(detail.comments, []);
+  assert.deepEqual(detail.reviews, []);
+  assert.equal(detail.gitattributesText, '');
+  // commits / checks / development also deferred
+  assert.deepEqual(detail.commits, []);
+  assert.equal(detail.checks.state, 'unknown');
+  assert.equal(detail.baseSha, 'basebeef');
+  assert.equal(detail.headSha, 'deadbeef');
+
+  // Independent side fetches
+  const filePack = await fetchPrFiles('o', 'r', 9, mockFetch, 'tok', {
+    headSha: 'deadbeef',
+  });
+  assert.equal(filePack.files.length, 2);
+  assert.equal(filePack.files[0].patch.includes('+x'), true);
   assert.ok(
-    detail.gitattributesText.includes('*.pb.go linguist-generated=true'),
+    filePack.gitattributesText.includes('*.pb.go linguist-generated=true'),
     'gitattributesText must be decoded from contents API'
   );
-  const pb = detail.files.find((f) => f.filename === 'api/v1/foo.pb.go');
+  const pb = filePack.files.find((f) => f.filename === 'api/v1/foo.pb.go');
   assert.ok(pb, 'pb.go file present');
   assert.equal(
     pb.defaultCollapsed,
     true,
-    'fetchPrDetail must annotate collapse via gitattributes (not path hardcode)'
+    'fetchPrFiles must annotate collapse via gitattributes (not path hardcode)'
   );
-  assert.equal(detail.files.find((f) => f.filename === 'a.js').defaultCollapsed, false);
-  // Real App path: re-annotate always applies gitattributesText even if flags already set
+  assert.equal(
+    filePack.files.find((f) => f.filename === 'a.js').defaultCollapsed,
+    false
+  );
   const collapse = require('../src/modal/pure/collapse.js');
   const re = collapse.annotateFilesForCollapse(
-    detail.files.map((f) => ({ ...f, defaultCollapsed: false })),
-    detail.gitattributesText
+    filePack.files.map((f) => ({ ...f, defaultCollapsed: false })),
+    filePack.gitattributesText
   );
-  assert.equal(re.find((f) => f.filename === 'api/v1/foo.pb.go').defaultCollapsed, true);
-  assert.equal(detail.comments.length, 1);
-  assert.equal(detail.reviews[0].state, 'APPROVED');
-  assert.equal(detail.commits[0].sha, 'abcdef1');
-  assert.equal(detail.baseSha, 'basebeef');
-  assert.equal(detail.headSha, 'deadbeef');
-  assert.equal(detail.checks.state, 'success');
-  // Distinct latest-only: one status context + one check-run name
-  assert.equal(detail.checks.statuses.length, 1);
-  assert.equal(detail.checks.statuses[0].state, 'success');
-  assert.equal(detail.checks.checkRuns.length, 1);
-  assert.equal(detail.checks.checkRuns[0].id, 9);
-  assert.equal(detail.checks.checkRuns[0].conclusion, 'success');
-  assert.equal(detail.checks.totalCount, 2);
+  assert.equal(
+    re.find((f) => f.filename === 'api/v1/foo.pb.go').defaultCollapsed,
+    true
+  );
+
+  const issuePage = await fetchPrIssueComments('o', 'r', 9, mockFetch, 'tok');
+  assert.equal((issuePage.items || []).length, 1);
+  const reviews = await fetchPrReviews('o', 'r', 9, mockFetch, 'tok');
+  assert.equal(reviews[0].state, 'APPROVED');
+
+  const commits = await fetchPrCommits('o', 'r', 9, mockFetch, 'tok');
+  assert.equal(commits[0].sha, 'abcdef1');
+  const checks = await fetchPrChecks('o', 'r', 'deadbeef', mockFetch, 'tok');
+  assert.equal(checks.state, 'success');
+  assert.equal(checks.statuses.length, 1);
+  assert.equal(checks.statuses[0].state, 'success');
+  assert.equal(checks.checkRuns.length, 1);
+  assert.equal(checks.checkRuns[0].id, 9);
+  assert.equal(checks.checkRuns[0].conclusion, 'success');
+  assert.equal(checks.totalCount, 2);
+  assert.equal(typeof fetchPrDevelopment, 'function');
   assert.equal(detail.reviewComments.length, 1);
-  assert.ok(calls.some((c) => c.url.includes('/pulls/9/files')));
+  assert.ok(
+    calls.some((c) => c.url.includes('/pulls/9/files')),
+    'fetchPrFiles hits files endpoint'
+  );
   assert.ok(
     calls.some((c) => String(c.url).includes('api.github.com/graphql')),
     'fetchPrDetail must call GraphQL for review threads'

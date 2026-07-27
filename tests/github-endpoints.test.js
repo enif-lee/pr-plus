@@ -96,17 +96,31 @@ assert.equal(
   assert.equal(r.graphqlUrl, 'https://github.mycorp.com/api/graphql');
 }
 
-setGithubApiContext({
-  restBase: 'https://ghe.example.com/api/v3',
-  graphqlUrl: 'https://ghe.example.com/api/graphql',
-});
-assert.equal(
-  githubRestUrl('/repos/o/r/pulls'),
-  'https://ghe.example.com/api/v3/repos/o/r/pulls'
-);
-assert.equal(githubGraphqlUrl(), 'https://ghe.example.com/api/graphql');
-setGithubApiContext(null);
-assert.equal(getGithubApiContext().restBase, DEFAULT_REST);
+// Stateless URL builders — pass explicit ctx (no mutable global)
+{
+  const gheCtx = {
+    restBase: 'https://ghe.example.com/api/v3',
+    graphqlUrl: 'https://ghe.example.com/api/graphql',
+  };
+  assert.equal(
+    githubRestUrl('/repos/o/r/pulls', gheCtx),
+    'https://ghe.example.com/api/v3/repos/o/r/pulls'
+  );
+  assert.equal(
+    githubGraphqlUrl(gheCtx),
+    'https://ghe.example.com/api/graphql'
+  );
+  // Without ctx → github.com defaults (stateless)
+  assert.equal(
+    githubRestUrl('/repos/o/r/pulls'),
+    `${DEFAULT_REST}/repos/o/r/pulls`
+  );
+  assert.equal(githubGraphqlUrl(), DEFAULT_GRAPHQL);
+  // setGithubApiContext is deprecated no-op store — returns normalized ctx only
+  const fromSet = setGithubApiContext(gheCtx);
+  assert.equal(fromSet.restBase, gheCtx.restBase);
+  assert.equal(getGithubApiContext().restBase, DEFAULT_REST);
+}
 
 assert.deepEqual(
   normalizeEnterpriseWebHosts(['github.com', 'GHE.Corp.IO', 'ghe.corp.io', '']),
@@ -220,44 +234,23 @@ async function testExclusiveApiContext() {
     graphqlUrl: 'https://ghe.corp.io/api/graphql',
   };
 
-  // Without exclusive: interleaved await lets the other handler overwrite global mid-flight
-  let raced = null;
-  setGithubApiContext(cloudEndpoints);
-  const bareA = (async () => {
-    setGithubApiContext(cloudEndpoints);
-    await sleep(15);
-    raced = githubRestUrl('/repos/o/r');
-  })();
-  const bareB = (async () => {
-    await sleep(5);
-    setGithubApiContext(entEndpoints);
-  })();
-  await Promise.all([bareA, bareB]);
-  // After interleave, bareA often sees enterprise base (race). Document that hazard.
-  assert.ok(
-    raced === 'https://api.github.com/repos/o/r' ||
-      raced === 'https://ghe.corp.io/api/v3/repos/o/r',
-    `unexpected raced url: ${raced}`
-  );
-
-  // With exclusive: each handler sees only its own context for the full critical section
+  // Stateless concurrent handlers: each passes its own ctx — no race even when
+  // exclusive runner is a no-op pass-through.
   const urls = [];
   const jobCloud = exclusive(async () => {
-    setGithubApiContext(cloudEndpoints);
     await sleep(20);
-    urls.push(['cloud', githubRestUrl('/repos/o/r')]);
+    urls.push(['cloud', githubRestUrl('/repos/o/r', cloudEndpoints)]);
   });
   const jobEnt = exclusive(async () => {
-    setGithubApiContext(entEndpoints);
     await sleep(5);
-    urls.push(['ent', githubRestUrl('/repos/o/r')]);
+    urls.push(['ent', githubRestUrl('/repos/o/r', entEndpoints)]);
   });
   await Promise.all([jobCloud, jobEnt]);
-  assert.deepEqual(urls, [
-    ['cloud', 'https://api.github.com/repos/o/r'],
-    ['ent', 'https://ghe.corp.io/api/v3/repos/o/r'],
-  ]);
-  setGithubApiContext(null);
+  // Completion order may vary; membership must be correct
+  assert.equal(urls.length, 2);
+  const by = Object.fromEntries(urls);
+  assert.equal(by.cloud, 'https://api.github.com/repos/o/r');
+  assert.equal(by.ent, 'https://ghe.corp.io/api/v3/repos/o/r');
 }
 
 testExclusiveApiContext()

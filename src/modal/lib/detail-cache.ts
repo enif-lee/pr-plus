@@ -5,7 +5,10 @@
  * 2) Revalidate over the network and write through
  */
 
-import { sanitizeDetailForCache as sanitizeForIdb } from './detail-idb';
+import {
+  isDetailCompleteForFullCache,
+  sanitizeDetailForCache as sanitizeForIdb,
+} from './detail-idb';
 
 /** Optional durable store (IndexedDB adapter). */
 export type DetailIdbLike = {
@@ -154,7 +157,9 @@ export function createPersistedDetailCache(options: any = {}) {
     const live = stripEphemeral(value);
     memory.set(key, live, customTtlMs);
     if (idb) {
-      const durable = sanitizeForIdb(value);
+      // Full files/diff/commits when complete; slim otherwise (omit patches)
+      const full = isDetailCompleteForFullCache(value);
+      const durable = sanitizeForIdb(value, { full });
       void Promise.resolve()
         .then(() => idb!.set(key, durable))
         .catch(() => {

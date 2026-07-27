@@ -24,8 +24,9 @@ export function AsideTagsList({
     [tags, query]
   );
 
+  // Loading state is shown on AsideSection title spinner — keep body quiet.
   if (loading && !tags.length) {
-    return <div className="prp-muted">Loading tags…</div>;
+    return null;
   }
   if (error && !tags.length) {
     return <div className="prp-muted">{error}</div>;
