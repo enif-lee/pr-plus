@@ -20,6 +20,7 @@ export default [
       'src/content-bridge.js',
       'src/background.js',
       'src/modal/app/PrModalApp.tsx',
+      'src/modal/app/PrModalApp.generated.tsx',
       'src/modal/views/conversation/ConversationView.tsx',
       'src/modal/styles.css',
       'tests/**',

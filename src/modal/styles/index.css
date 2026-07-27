@@ -7,6 +7,8 @@
  */
 
 @import './parts.css';
+@import '../views/diff/unified-line-numbers.css';
+@import '../views/diff/HunkExpandControls.css';
 
 @tailwind base;
 @tailwind components;

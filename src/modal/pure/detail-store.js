@@ -1,4 +1,9 @@
 /**
+ * Content-script pure twin of src/modal/lib/detail-store.ts
+ * SOURCE OF TRUTH for logic: src/modal/lib/detail-store.ts
+ * Keep behavior in sync when editing; tests prefer the TS module.
+ */
+/**
  * Isolated progressive PR detail store.
  *
  * Each fetch domain owns a slice. Writes never touch other slices.

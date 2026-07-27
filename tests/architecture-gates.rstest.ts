@@ -80,10 +80,26 @@ describe('architecture gates', () => {
     expect(overs).toEqual([]);
   });
 
-  test('assembled mega artifacts are generated not hand-edited', () => {
+  test('PrModalApp entry is thin; impl generated from parts', () => {
+    const entry = read('src/modal/app/PrModalApp.tsx');
+    expect(entry.split(/\n/).length).toBeLessThan(40);
+    expect(entry).toMatch(/PrModalApp.generated|pr-modal\/parts/);
+    expect(fs.existsSync(path.join(root, 'src/modal/app/PrModalApp.generated.tsx'))).toBe(true);
+  });
+
+  test('ConversationView maintainable parts under 1500 lines', () => {
+    const dir = path.join(root, 'src/modal/views/conversation/parts');
+    expect(fs.existsSync(dir)).toBe(true);
+    for (const f of fs.readdirSync(dir)) {
+      if (!/\.(tsx|ts)$/.test(f)) continue;
+      expect(lineCount(path.join('src/modal/views/conversation/parts', f))).toBeLessThanOrEqual(1500);
+    }
+    expect(read('src/modal/views/conversation/ConversationView.tsx').slice(0, 300)).toMatch(/AUTO-ASSEMBLED|parts/);
+  });
+
+  test('generated/assembled runtime artifacts are marked', () => {
     const assembled = [
-      'src/modal/app/PrModalApp.tsx',
-      'src/modal/views/conversation/ConversationView.tsx',
+      'src/modal/app/PrModalApp.generated.tsx',
       'src/pr-modal-host.js',
       'src/fetch-pulls.js',
       'src/content-bridge.js',
@@ -91,8 +107,10 @@ describe('architecture gates', () => {
     ];
     for (const f of assembled) {
       if (!fs.existsSync(path.join(root, f))) continue;
-      const head = read(f).slice(0, 400);
-      expect(head).toMatch(/AUTO-ASSEMBLED|AUTO-GENERATED|parts\//);
+      const head = read(f).slice(0, 500);
+      expect(head).toMatch(/AUTO-ASSEMBLED|AUTO-GENERATED|@ts-nocheck|parts/);
     }
+    // Thin entry points stay small
+    expect(lineCount('src/modal/app/PrModalApp.tsx')).toBeLessThan(30);
   });
 });

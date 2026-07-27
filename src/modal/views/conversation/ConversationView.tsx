@@ -1,7 +1,7 @@
-// @ts-nocheck — assembled from parts
+// @ts-nocheck
 /**
  * Conversation surface — AUTO-ASSEMBLED from conversation/parts/*.
- * Edit parts, then: npm run build:app-parts
+ * Edit parts (each ≤1500 lines), then: npm run build:app-parts
  */
 import React, { useEffect, useMemo, useRef, useState, memo, useCallback } from 'react';
 import { Button } from '@common/Button';

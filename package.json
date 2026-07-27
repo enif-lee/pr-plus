@@ -5,7 +5,7 @@
   "scripts": {
     "build:modal": "node scripts/build-modal.mjs",
     "build:sw": "node scripts/build-sw.mjs",
-    "build": "npm run build:fetch && npm run build:background-src && npm run build:sw && npm run build:host && npm run build:content-bridge && npm run build:app-parts && npm run build:modal",
+    "build": "npm run build:pure && npm run build:fetch && npm run build:background-src && npm run build:sw && npm run build:host && npm run build:content-bridge && npm run build:app-parts && npm run build:modal",
     "package": "npm run build && node scripts/package-extension.mjs",
     "test": "npm run build && rstest run",
     "browser:login": "agent-browser close --all 2>/dev/null; agent-browser open https://github.com/login",
@@ -23,7 +23,8 @@
     "build:fetch": "node scripts/build-fetch.mjs",
     "build:app-parts": "node scripts/build-pr-modal-app.mjs && node scripts/build-conversation-view.mjs",
     "build:content-bridge": "node scripts/build-content-bridge.mjs",
-    "build:background-src": "node scripts/build-background-src.mjs"
+    "build:background-src": "node scripts/build-background-src.mjs",
+    "build:pure": "node scripts/build-pure.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

@@ -1,4 +1,9 @@
 /**
+ * Content-script pure twin of src/modal/lib/load-progress.ts
+ * SOURCE OF TRUTH for logic: src/modal/lib/load-progress.ts
+ * Keep behavior in sync when editing; tests prefer the TS module.
+ */
+/**
  * Pure helpers for percent-based PR open load stages + counter tween.
  */
 (function () {

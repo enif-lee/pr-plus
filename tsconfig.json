@@ -46,15 +46,15 @@
   ],
   "exclude": [
     "node_modules",
+    "src/background/parts",
+    "src/content-bridge/parts",
+    "src/fetch/parts",
+    "src/host/parts",
+    "src/modal/app/PrModalApp.generated.tsx",
+    "src/modal/app/pr-modal/parts",
     "src/modal/dist",
     "src/modal/pure",
-    "src/modal/app/PrModalApp.tsx",
     "src/modal/views/conversation/ConversationView.tsx",
-    "src/modal/app/pr-modal/parts",
-    "src/modal/views/conversation/parts",
-    "src/background/parts",
-    "src/host/parts",
-    "src/fetch/parts",
-    "src/content-bridge/parts"
+    "src/modal/views/conversation/parts"
   ]
 }

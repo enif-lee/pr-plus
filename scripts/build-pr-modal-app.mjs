@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const partsDir = path.join(root, 'src/modal/app/pr-modal/parts');
-const out = path.join(root, 'src/modal/app/PrModalApp.tsx');
+const out = path.join(root, 'src/modal/app/PrModalApp.generated.tsx');
 
 const parts = fs
   .readdirSync(partsDir)
@@ -28,7 +28,7 @@ const banner = `// @ts-nocheck — assembled from parts
 
 fs.writeFileSync(out, banner + body + '\n');
 console.log(
-  'Built PrModalApp.tsx',
+  'Built PrModalApp.generated.tsx',
   parts.length,
   'parts',
   (banner + body).split(/\n/).length,
