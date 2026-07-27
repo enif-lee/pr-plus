@@ -1,0 +1,10 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+const partsDir = path.join(root, 'src/content-bridge/parts');
+const out = path.join(root, 'src/content-bridge.js');
+const parts = fs.readdirSync(partsDir).filter((f) => f.endsWith('.js')).sort();
+const body = parts.map((f) => fs.readFileSync(path.join(partsDir, f), 'utf8').trimEnd()).join('\n\n');
+fs.writeFileSync(out, `/** AUTO-ASSEMBLED from content-bridge/parts — npm run build:content-bridge */\n${body}\n`);
+console.log('Built content-bridge.js', parts.map(f => f + ':' + fs.readFileSync(path.join(partsDir,f),'utf8').split('\n').length).join(' '));

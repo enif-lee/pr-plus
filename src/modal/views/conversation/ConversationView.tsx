@@ -1,3 +1,7 @@
+/**
+ * Conversation surface — AUTO-ASSEMBLED from conversation/parts/*.
+ * Edit parts, then: npm run build:app-parts
+ */
 import React, { useEffect, useMemo, useRef, useState, memo, useCallback } from 'react';
 import { Button } from '@common/Button';
 import { Badge } from '@common/Badge';

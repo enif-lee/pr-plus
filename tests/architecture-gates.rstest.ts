@@ -52,38 +52,47 @@ describe('architecture gates', () => {
     expect(store).toMatch(/create(?:<[^>]+>)?\(/);
   });
 
-  test('host/fetch/styles parts stay under 1500 lines', () => {
+  test('all maintainable source parts stay under 1500 lines', () => {
     const dirs = [
       'src/host/parts',
       'src/fetch/parts',
       'src/modal/styles/parts',
+      'src/modal/app/pr-modal/parts',
+      'src/modal/views/conversation/parts',
+      'src/content-bridge/parts',
+      'src/background/parts',
     ];
     const overs: string[] = [];
+    const all: string[] = [];
     for (const d of dirs) {
       const full = path.join(root, d);
       if (!fs.existsSync(full)) continue;
       for (const f of fs.readdirSync(full)) {
         if (!/\.(js|css|ts|tsx)$/.test(f)) continue;
-        const n = lineCount(path.join(d, f));
-        if (n > 1500) overs.push(`${d}/${f}:${n}`);
+        const rel = path.join(d, f);
+        const n = lineCount(rel);
+        all.push(`${rel}:${n}`);
+        if (n > 1500) overs.push(`${rel}:${n}`);
       }
     }
-    console.log('part-overs:', overs.join(', ') || 'none');
+    console.log('parts:', all.length, 'overs:', overs.join(', ') || 'none');
+    expect(all.length).toBeGreaterThan(20);
     expect(overs).toEqual([]);
   });
 
-  test('remaining hand-maintained mega modules are tracked', () => {
-    const remaining = [
+  test('assembled mega artifacts are generated not hand-edited', () => {
+    const assembled = [
       'src/modal/app/PrModalApp.tsx',
       'src/modal/views/conversation/ConversationView.tsx',
+      'src/pr-modal-host.js',
+      'src/fetch-pulls.js',
       'src/content-bridge.js',
       'src/background.ts',
-    ].filter((f) => fs.existsSync(path.join(root, f)) && lineCount(f) > 1500);
-    console.log(
-      'hand-mega:',
-      remaining.map((f) => `${f}:${lineCount(f)}`).join(', ')
-    );
-    // PrModalApp + ConversationView still above threshold — tracked until further extract
-    expect(remaining.length).toBeGreaterThan(0);
+    ];
+    for (const f of assembled) {
+      if (!fs.existsSync(path.join(root, f))) continue;
+      const head = read(f).slice(0, 400);
+      expect(head).toMatch(/AUTO-ASSEMBLED|AUTO-GENERATED|parts\//);
+    }
   });
 });

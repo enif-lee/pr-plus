@@ -1,4 +1,8 @@
 /**
+ * Composition root for PR modal — AUTO-ASSEMBLED from pr-modal/parts/*.
+ * Edit parts under src/modal/app/pr-modal/parts/, then: npm run build:app-parts
+ */
+/**
  * Composition root for PR modal — host props + UI orchestration.
  * View surfaces live under views/*; common UI under components/common.
  * Interactive UI state can also be read via zustand store (see store/modal-store).

@@ -1,0 +1,10 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+const partsDir = path.join(root, 'src/background/parts');
+const out = path.join(root, 'src/background.ts');
+const parts = fs.readdirSync(partsDir).filter((f) => f.endsWith('.ts')).sort();
+const body = parts.map((f) => fs.readFileSync(path.join(partsDir, f), 'utf8').trimEnd()).join('\n\n');
+fs.writeFileSync(out, `// @ts-nocheck\n/** AUTO-ASSEMBLED from background/parts — npm run build:background-src */\n${body}\n`);
+console.log('Built background.ts', parts.map(f => f+':'+fs.readFileSync(path.join(partsDir,f),'utf8').split('\n').length).join(' '));
