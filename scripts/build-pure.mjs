@@ -149,35 +149,59 @@ for (const [pureName, { lib, global: gname }] of Object.entries(MAP)) {
   src = src.replace(/^\/\/ @ts-nocheck.*$/m, '');
   // Drop trailing export { a, b } re-export lists that duplicate named exports
   src = src.replace(/\nexport\s*\{[\s\S]*?\};\s*$/m, '\n');
-  // Drop pure-relative imports that would become require() in cjs
-  if (/from\s+['"]\.\.\/pure\//.test(src) || /from\s+['"]\.\/.*['"]/.test(src)) {
-    // relative imports — try to inline only if single-file; else keep pure
-    const importLines = src.match(/^import\s+.+$/gm) || [];
-    const nonTypeImports = importLines.filter((l) => !l.includes('import type'));
-    if (nonTypeImports.length > 0) {
-      console.warn('skip (has relative imports):', pureName, nonTypeImports[0].slice(0, 80));
-      skipped++;
-      continue;
-    }
-  }
 
-  let transformed;
+  const hasRelativeImports =
+    /from\s+['"]\.\.\/pure\//.test(src) ||
+    /from\s+['"]\.\/[^'"]+['"]/.test(src);
+  const nonTypeImportLines = (src.match(/^import\s+.+$/gm) || []).filter(
+    (l) => !/\bimport\s+type\b/.test(l)
+  );
+  const needsBundle = hasRelativeImports && nonTypeImportLines.length > 0;
+
+  let transformedCode;
   try {
-    transformed = await esbuild.transform(src, {
-      loader: 'ts',
-      format: 'cjs',
-      target: 'es2020',
-      platform: 'neutral',
-    });
+    if (needsBundle) {
+      // Bundle relative lib imports into one content-script IIFE global
+      // (e.g. detail-cache.ts → detail-idb.ts). Do not leave require().
+      const result = await esbuild.build({
+        entryPoints: [libPath],
+        bundle: true,
+        write: false,
+        format: 'cjs',
+        platform: 'neutral',
+        target: 'es2020',
+        logLevel: 'silent',
+      });
+      transformedCode = result.outputFiles[0]?.text || '';
+      if (!transformedCode) {
+        throw new Error('empty bundle output');
+      }
+      // Strip esbuild's cjs wrapper noise if it introduced __require — reject
+      if (
+        /require\s*\(\s*['"][^./]/.test(transformedCode) ||
+        /__require/.test(transformedCode)
+      ) {
+        throw new Error('bundle still has external require');
+      }
+      console.log('pure←ts(bundle)', pureName);
+    } else {
+      const transformed = await esbuild.transform(src, {
+        loader: 'ts',
+        format: 'cjs',
+        target: 'es2020',
+        platform: 'neutral',
+      });
+      transformedCode = transformed.code;
+      if (/require\s*\(/.test(transformedCode)) {
+        console.warn('skip (emits require):', pureName);
+        skipped++;
+        continue;
+      }
+      console.log('pure←ts', pureName);
+    }
   } catch (err) {
     failures.push(`${pureName}: ${err.message?.slice(0, 160)}`);
     console.error('transform failed', pureName, err.message?.slice(0, 160));
-    skipped++;
-    continue;
-  }
-
-  if (/require\s*\(/.test(transformed.code)) {
-    console.warn('skip (emits require):', pureName);
     skipped++;
     continue;
   }
@@ -190,14 +214,13 @@ for (const [pureName, { lib, global: gname }] of Object.entries(MAP)) {
 (function (global) {
   var module = { exports: {} };
   var exports = module.exports;
-${transformed.code}
+${transformedCode}
 ${flattenApiAssign(gname)}
 })(typeof globalThis !== 'undefined' ? globalThis : typeof window !== 'undefined' ? window : this);
 `;
 
   fs.writeFileSync(purePath, file);
   built++;
-  console.log('pure←ts', pureName);
 }
 
 // always keep pure-only
