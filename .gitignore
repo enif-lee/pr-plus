@@ -1,11 +1,13 @@
 # Dependencies
 node_modules/
 
-# Packaged extension builds (zip / unpacked release trees)
+# Packaged extension builds (zip / unpacked release trees under repo root)
 /dist/
+/dist/**
 
 # Local agent-browser profile, screenshots, session junk
 .browser/
+screenshots/
 
 # OS / editor
 .DS_Store
@@ -26,13 +28,26 @@ npm-debug.log*
 .turbo/
 coverage/
 tmp/
+*.tsbuildinfo
 
 # Packaged/signed extension artifacts
 *.crx
+*.zip
 
 # ---------------------------------------------------------------------------
-# Generated JS (TypeScript / build SoT lives next to these; run `npm run build`)
+# Build / compile outputs (edit TypeScript SoT; run `npm run build`)
 # ---------------------------------------------------------------------------
+
+# Modal bundle + vendor chunks (build-modal.mjs)
+src/modal/dist/
+
+# Source maps / accidental tsc emit
+**/*.js.map
+**/*.css.map
+**/*.d.ts.map
+# tsc declaration emit if someone turns on declaration (ambient SoT d.ts are explicit paths below)
+# Do NOT use a blanket *.d.ts ignore — hand-written ambient contracts stay tracked:
+#   extension-globals.d.ts, host-context.d.ts, modal/globals.d.ts, *-shims.d.ts, etc.
 
 # pure modules emitted from src/modal/lib/*.ts via `npm run build:pure`
 # Keep hand-written pure SoT (lib re-exports these):
@@ -63,3 +78,8 @@ src/background.js
 
 # obsolete host part assemblies (SoT: src/host/modules/*.ts → pr-modal-host.js)
 src/host/parts/**
+# inventory dump from older part extractors (not runtime SoT)
+src/host/modules/MANIFEST.json
+
+# deprecated CSS stub (SoT: styles/index.css + sibling residual)
+src/modal/styles.css
