@@ -296,10 +296,11 @@ Content scripts run on github.com (manifest) and on **registered** enterprise ho
 
 ```bash
 npm install
-npm run build      # service worker + modal bundle, CSS, mermaid, hljs langs
+npm run build      # full extension build pipeline
 npm run package    # versioned zip under dist/
-npm test           # build + unit suite
-npm run test:unit  # unit suite with tsx (no full package zip)
+npm test           # build + rstest unit suite
+npm run test:unit  # rstest only (no rebuild)
+npm run check      # typecheck + lint + unit
 ```
 
 ### Layout (summary)

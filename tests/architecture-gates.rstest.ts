@@ -32,7 +32,7 @@ describe('architecture gates', () => {
     expect(fs.existsSync(path.join(root, 'postcss.config.js'))).toBe(true);
     const pkg = JSON.parse(read('package.json'));
     expect(pkg.devDependencies['@rstest/core']).toBeTruthy();
-    expect(pkg.scripts['test:rstest'] || pkg.scripts.test).toMatch(/rstest/);
+    expect(pkg.scripts['test:unit'] || pkg.scripts.test).toMatch(/rstest/);
     expect(pkg.scripts['build:content-ts']).toMatch(/build-content-ts/);
     expect(pkg.scripts['build:pure']).toMatch(/build-pure/);
     expect(pkg.scripts.build).toMatch(/build:content-ts/);

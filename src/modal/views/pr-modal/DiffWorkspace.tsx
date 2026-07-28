@@ -348,15 +348,6 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
           detail={detail}
           fileNavCollapsed={fileNav.collapsed}
           onToggleFileNav={onToggleFileNavCollapse}
-          annotatedFileCount={displayFiles.length}
-          rowCount={virtualRows.length}
-          filtered={
-            Boolean(diffFilesOverride) ||
-            Boolean(diffReviewFilter) ||
-            Boolean(String(fileQuery || '').trim()) ||
-            fileExtFilter.size > 0 ||
-            fileUnreadOnly
-          }
           diffMode={diffMode}
           reviewFilter={diffReviewFilter}
           onReviewFilter={setDiffReviewFilter}

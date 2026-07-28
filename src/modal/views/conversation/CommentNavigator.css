@@ -120,14 +120,6 @@
   flex-shrink: 0;
 }
 
-.prp-diff-toolbar__stats {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-}
-
 .prp-diff-toolbar__pending {
   display: inline-flex;
   flex-wrap: wrap;

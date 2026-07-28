@@ -193,21 +193,8 @@ Dispatches synthetic `KeyboardEvent`s with `altKey` / `metaKey` and measures DOM
 ## Unit gating (local)
 
 ```bash
-npx tsx tests/scroll-nav-offset-contract.test.js
-npx tsx tests/context-thread-dom.test.js
-npx tsx tests/context-thread-shortcut.test.js
-npx tsx tests/conversation-nav-shortcut.test.js
-npx tsx tests/conversation-comment-shortcut.test.js
-npx tsx tests/diff-opt-nav.test.js
-npx tsx tests/diff-opt-arrow.test.js
-npx tsx tests/shortcut-monitor.test.js
-npx tsx tests/line-selection.test.js
-npx tsx tests/line-selection-move-perf.test.js
-npx tsx tests/diff-scroll-perf.test.js
-npx tsx tests/diff-palette-commands.test.js
-npx tsx tests/file-nav-scroll-focus.test.js
-npx tsx tests/confirm-palette-opt.test.js
-npx tsx tests/opt-key-normalize.test.js
+npm run test:unit   # rstest — architecture gates, store, nav thrift, …
+npm run check       # typecheck + lint + unit
 ```
 
 ---

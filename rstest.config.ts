@@ -7,7 +7,6 @@ import path from 'node:path';
  */
 export default defineConfig({
   testEnvironment: 'node',
-  // Prefer rstest-native suites; legacy node assert files stay on test:legacy
   include: [
     'tests/**/*.rstest.ts',
     'tests/**/*.rstest.tsx',
@@ -17,8 +16,6 @@ export default defineConfig({
     '**/node_modules/**',
     '**/dist/**',
     'src/modal/dist/**',
-    'tests/run-all.js',
-    'tests/**/*.js',
   ],
   // Match modal path aliases used by the app
   resolve: {
