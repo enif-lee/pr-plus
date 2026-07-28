@@ -6,6 +6,7 @@ import { reviewStatusTone } from '@common/utils';
 import { Avatar } from '@common/Avatar';
 import { IconSync, IconX } from '@common/icons';
 import { OptBtnHint } from '@common/OptBtnHint';
+import './MetaList.css';
 
 export function MetaList({
   title,

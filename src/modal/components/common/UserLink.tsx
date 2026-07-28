@@ -1,5 +1,6 @@
 import React from 'react';
 import { githubUserUrl } from '@lib/ui-polish';
+import './EntityLinks.css';
 
 export function UserLink({ login, className = '' }: any) {
   if (!login) return null;

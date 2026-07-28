@@ -37,6 +37,7 @@ import {
 } from '../conversation/ChecksSummary';
 import { useModalStore } from '../../store/modal-store';
 import { useDetailUiStore } from '../../store/detail-ui-store';
+import './Header.css';
 
 /** 1–4 reviewers all shown; 5+ → first 3 + “+N” chip. */
 const HEADER_REVIEWER_MAX_FULL = 4;

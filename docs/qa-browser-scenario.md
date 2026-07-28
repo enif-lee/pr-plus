@@ -4,6 +4,11 @@
 **Extension:** local workspace via `agent-browser.json` (`extensions: ["."]`, profile `./.browser/profile`).  
 **Preferred PR for deep keyboard tests:** open demo with many threads (e.g. **#7** `[demo] g — stack root DEMO-300`).
 
+**Automated local e2e (not in `npm test`):** see `tests/e2e/README.md`  
+- `npm run test:e2e:features` — feature / style / layout scenario  
+- `npm run test:e2e:perf` — shortcut + scroll loop render budgets  
+- `npm run test:e2e` — both
+
 **Pass criteria (release gate):**
 
 - All **P0** green  

@@ -1,5 +1,6 @@
 import React from 'react';
 import { githubLabelUrl } from '@lib/ui-polish';
+import './EntityLinks.css';
 
 export function LabelLink({ owner, repo, label, className = '' }: any) {
   const name = label?.name || label;

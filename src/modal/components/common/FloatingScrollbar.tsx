@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import './FloatingScrollbar.css';
 import {
   FLOATING_SCROLLBAR_IDLE_MS,
   floatingScrollbarMetrics,

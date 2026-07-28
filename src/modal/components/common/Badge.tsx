@@ -1,4 +1,5 @@
 import React from 'react';
+import './Badge.css';
 
 function textFromChildren(children: unknown): string {
   if (children == null || children === false) return '';

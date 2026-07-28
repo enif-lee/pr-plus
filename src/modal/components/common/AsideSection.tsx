@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { IconDisclosure } from './icons';
+import './AsideSection.css';
 
 /**
  * Flat GitHub-style sidebar section (title + body, hairline separator).

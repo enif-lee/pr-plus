@@ -93,7 +93,10 @@ Open a PR title from the list → **centered modal** or **side sheet** on the **
 | **Load status in header stats** | The **+add / −del / files** badge morphs to short progress labels while metadata and threads stream in (no floating pill / top bar) |
 | **Dual-window review threads** | Newest + oldest thread windows load **incrementally**; **Load more / Load all** when you need the full set |
 | **Virtualized Conversation** | Long timelines stay **fast** with variable-height virtual rows |
+| **Thread step nav** | `⌥J` / `⌥K` steps timeline units (and Diff review threads); focus pin ~24px from scroller top |
+| **Conversation focus** | `⌥⇧C` seed / clear keyboard focus on a timeline unit for fold / reply / goto-diff context chords |
 | **Butter-smooth Diff scroll** | **Range-gated virtualization** (React only when the visible window changes), **highlight cache**, no per-pixel global store thrash |
+| **Key-hold thrift** | Held chords **coalesce** per animation frame: **file hops skip intermediate files**, page/comment scroll is **DOM-first**, selection moves rAF-batch |
 | **Session restore** | Layout (conversation/diff), shell (modal/sheet), collapse, viewed files, scroll restored after soft refresh |
 | **Deep-link routing** | `prp_page` / `prp_number` (and position) so shareable open state survives reloads; cleared on close |
 | **Theme-aware UI** | Follows GitHub light/dark color mode |
@@ -132,7 +135,10 @@ Open a PR title from the list → **centered modal** or **side sheet** on the **
 | **Reply composer focus** | Thread reply actions appear when the reply field is focused (or draft text remains) |
 | **Merge box status** | Clear merge readiness; **GitHub-style check groups** (required / optional) with expandable lists |
 | **Compact meta rail** | Collapsed right rail: reviewers / assignees / checks / labels as avatar stacks and status chips; hover tips open over the conversation (not clipped by the splitter) |
+| **Side panel toggle** | `⌥B` collapses / expands the Conversation meta rail (same chord collapses the Diff file tree) |
 | **Profile avatars** | GitHub profile images for authors and pickers |
+| **Context chords on focused thread** | With a focused timeline unit: `⌥F` fold/expand, `⌥D` open Diff at the thread (~⅓ viewport), `⌥C` focus reply composer |
+| **Conversation scroll chords** | `⌥↑` / `⌥↓` nudge the timeline; `⌥⇧↑` / `⌥⇧↓` page-scroll ~one viewport |
 
 #### Diff & code review
 
@@ -140,16 +146,18 @@ Open a PR title from the list → **centered modal** or **side sheet** on the **
 |---------|-------------|
 | **Files tree** | Nested dirs, extension multi-select, unread filter, collapse, mark-as-viewed (session); **floating scrollbar** |
 | **File step nav** | Prev/next file from the **current** file (`⌥⇧[` / `⌥⇧]`) beside the tree search; list focus scrolls into view |
-| **Collapsible / resizable file nav** | Focus the hunk pane when you need width |
+| **File hold coalesce** | Holding `⌥⇧[` / `⌥⇧]` **accumulates steps** and jumps multiple files in **one** update (no intermediate re-render storm) |
+| **Collapsible / resizable file nav** | Focus the hunk pane when you need width; `⌥B` collapses the tree |
 | **Single-file Diff mode** | Optional preference: hunk list shows **only the active file** (tree + next/prev still cover the full set). **Off by default** |
 | **Unified / split** | Diff modes |
 | **Expand omitted context** | Grow gaps between hunks (chunk / all) without reloading the PR |
 | **Commit-range filter** | Single commit or inclusive range—**fast** compare without leaving Diff |
 | **Review filters** | **Unresolved / Resolved / Pending** counts and file-set filtering for triage (`⌥U` / `⌥R` / `⌥P` toggle on Diff) |
 | **Floating Diff controller** | Bottom-right icon strip: prev/next file, page scroll, **Goto** `path:line[:line]` (or bare `line[:line]` on the current file) |
-| **Keyboard page scroll** | `⌥⇧↑` / `⌥⇧↓` move the Diff list by about one viewport |
+| **Keyboard page scroll** | `⌥⇧↑` / `⌥⇧↓` move the Diff list by about one viewport (**DOM-only** under key-hold—no DiffWorkspace re-render per hop) |
 | **Line selection** | Single click, multi-line drag, or **Shift-click range** in the same file; arrows move the caret, **Shift+arrows** extend (plain arrows collapse back to single-line) |
-| **Selection island** | Comment / start review actions docked to the selection without leaving Diff |
+| **Selection multi-jump** | `⌥↑` / `⌥↓` on Diff jump the caret by ~8 selectable lines (rAF-coalesced under hold) |
+| **Selection island** | Comment / copy / dismiss docked to the selection; Esc cascades comment → actions → dismiss (modal stays open) |
 | **Line comments** | Immediate post or **pending review** batch |
 | **Pending review CTAs** | Diff toolbar Submit / Approve / Request changes; **Approve & Request changes hidden on your own PR** (GitHub rejects self-review) |
 | **Viewed toggle** | Mark the active file viewed/unread (`⌥⇧R` on Diff); checkbox tip only on the focused file |
@@ -186,24 +194,33 @@ Open a PR title from the list → **centered modal** or **side sheet** on the **
 | **Shared actions** | Labels, assignees, reviewers, base, review submit, merge, open GitHub, focus comment, … |
 | **Diff review filters** | `⌥U` / `⌥R` / `⌥P` — Unresolved / Resolved / Pending (toggle off with the same key) |
 | **Diff navigation** | File `⌥⇧[` `⌥⇧]`, page `⌥⇧↑` `⌥⇧↓`, viewed `⌥⇧R`, Goto via floating **:** control |
+| **Conversation navigation** | Thread `⌥J` `⌥K`, seed/clear focus `⌥⇧C`, panel `⌥↑` `⌥↓`, page `⌥⇧↑` `⌥⇧↓` |
+| **Context on focused unit** | `⌥F` fold · `⌥D` goto Diff · `⌥C` reply (active panel only) |
 | **Button shortcuts** | Primary actions show kbd hints; Opt-hold badges hide right after a chord fires |
 | **Multi-host PAT** | Default token for **github.com** only; up to **3 enterprise host↔PAT** pairs (no accidental enterprise use of the default PAT) |
 | **Popup options** | Auto-open embed, fast review load, reverse comments, **single-file Diff mode** |
 
-### Diff keyboard quick reference (modal)
+### Keyboard quick reference (modal)
 
 | Chord | Action |
 |-------|--------|
-| `⌘F` / `Ctrl+F` | Find in the active surface |
+| `⌘F` / `Ctrl+F` | Find in the active surface (Conversation *or* Diff) |
 | `⌥.` | Toggle Conversation ↔ Diff |
-| `⌥J` / `⌥K` | Next / previous review thread (or Find hit when Find is open) |
-| `⌥⇧[` / `⌥⇧]` | Previous / next file (from current file) |
-| `⌥⇧↑` / `⌥⇧↓` | Diff list previous / next page |
+| `⌥J` / `⌥K` | Next / previous thread (or Find hit when Find is open) |
+| `⌥⇧C` | Seed / clear Conversation keyboard focus |
+| `⌥F` / `⌥D` / `⌥C` | Fold / goto Diff / reply on the **focused** unit |
+| `⌥↑` / `⌥↓` | Conversation: panel scroll · Diff: multi-line selection jump (~8 rows) |
+| `⌥⇧↑` / `⌥⇧↓` | Page scroll (~0.9 viewport) on the active list |
+| `⌥⇧[` / `⌥⇧]` | Previous / next file (from current file; **hold coalesces**) |
+| `⌥B` | Toggle side panel (Conversation rail / Diff file tree) |
 | `⌥U` / `⌥R` / `⌥P` | Toggle Unresolved / Resolved / Pending file filter |
 | `⌥⇧R` | Toggle viewed on the **current** Diff file |
-| `↑` / `↓` | Move line selection (when a selection exists) |
+| `↑` / `↓` | Move line selection (seeds first line of file if none) |
 | `⇧↑` / `⇧↓` | Extend line selection range |
+| `⌥⇧K` | pr+ command palette |
+| `Esc` | Nested UI → blur editable → close shell (hierarchy) |
 
+Full browser QA checklist: **[docs/qa-browser-scenario.md](./docs/qa-browser-scenario.md)**.  
 Deep matrix of GitHub PR-view vs modal: **[docs/github-pr-parity.md](./docs/github-pr-parity.md)**.
 
 ---
@@ -296,34 +313,49 @@ Content scripts run on github.com (manifest) and on **registered** enterprise ho
 
 ```bash
 npm install
-npm run build      # full extension build pipeline
-npm run package    # versioned zip under dist/
-npm test           # build + rstest unit suite
-npm run test:unit  # rstest only (no rebuild)
-npm run check      # typecheck + lint + unit
+npm run build              # full extension build pipeline
+npm run package            # versioned zip under dist/
+npm test                   # build + rstest unit suite
+npm run test:unit          # rstest only (no rebuild)
+npm run check              # typecheck + lint + unit
+npm run test:e2e           # local agent-browser e2e (features + key-hold perf) — not in CI
+npm run test:e2e:features  # feature / style / layout scenario
+npm run test:e2e:perf      # key-hold scroll + selection budgets
 ```
+
+Local e2e needs a logged-in browser profile (`npm run browser:login` once) and a built workspace. See **[tests/e2e/README.md](./tests/e2e/README.md)**.
+
+### Architecture notes (1.7)
+
+| Area | Approach |
+|------|----------|
+| **TypeScript SoT** | Fetch, content-bridge, service worker, host modules, content entries, and modal shells are complete TS sources (not mid-IIFE “parts” dumps) |
+| **Colocated CSS** | Domain styles live next to components (`import './Foo.css'`); `build-modal` collects the TSX graph → `pr-modal.css` (tokens + Tailwind via `styles/entry.css`) |
+| **Data-group stores** | Zustand leaf subscriptions so Diff scroll / selection / filters re-render only their consumers |
+| **Host modules** | Semantic host assembly order (detail store, embed/progress, open/render, lifecycle, …) |
 
 ### Layout (summary)
 
 ```text
 src/
-  background.js / background.bundle.js   # PAT + GitHub API (service worker only)
-  content-bridge.js                      # content ↔ background (no token in page)
-  content-bootstrap.js                   # list bootstrap / SPA watch
-  content.js                             # content entry
-  dom.js                                 # list rows, indent, meta badges
-  fetch-pulls.js                         # list / detail / writes / autolinks
-  storage.js                             # chrome.storage.local helpers
-  tree.js                                # pure stack forest
-  pr-modal-host.js                       # intercept PR click → mount modal; load stage labels
-  popup.html / popup.js                  # PAT, options, permissions copy, cache clear
-  styles.css                             # list overlay styles
+  background/sw-api.ts → background.bundle.js   # PAT + GitHub API (SW only)
+  content-bridge/       → content-bridge.js
+  host/modules/         → pr-modal-host.js      # intercept / mount / session
+  fetch/fetch-api.ts    → fetch-pulls.js
+  content*.ts / tree.ts / dom.ts / storage.ts   # list + pure stack
+  popup.html / popup.ts
+  styles.css                                    # list overlay styles
   modal/
-    app/                                 # React modal root
-    views/                               # conversation, diff, chrome
-    components/                          # shared UI (markdown, mermaid, scrollbars, …)
-    lib/ + pure/                         # helpers (unit-tested pure paths)
-    dist/                                # pr-modal.bundle.js, CSS, mermaid.esm.js, hljs-langs/
+    main.tsx                                    # entry; imports styles/entry.css
+    app/ PrModalApp.impl.tsx                    # composition root
+    views/  conversation | diff | chrome | pr-modal
+    components/common/                          # Button, Markdown, TipPopover, …
+    lib/ + pure/                                # helpers (rstest pure paths)
+    styles/ entry.css + tokens.css              # Tailwind + design tokens
+    dist/                                       # bundle, CSS, mermaid, hljs-langs
+tests/
+  *.rstest.ts                                   # unit + architecture gates
+  e2e/                                          # local agent-browser scenarios
 ```
 
 ---

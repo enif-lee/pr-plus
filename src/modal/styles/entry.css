@@ -1,0 +1,11 @@
+/**
+ * CSS pipeline entry (imported from main.tsx).
+ *
+ * Domain styles are pulled in via TSX `import './Foo.css'` and collected by
+ * build-modal into this graph. This file only owns tokens + Tailwind layers.
+ */
+@import './tokens.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;

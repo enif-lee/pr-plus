@@ -12,7 +12,10 @@ import {
   scrollTopForIndex,
   scrollTopToRevealIndex,
 } from '../src/modal/lib/virtual-range';
-import { nextScrollTopByPage as pageStep } from '../src/modal/lib/shortcut-policy';
+import {
+  nextScrollTopByPage as pageStep,
+  resolveAdjacentFileNav,
+} from '../src/modal/lib/shortcut-policy';
 
 const root = path.join(__dirname, '..');
 const appImpl = fs.readFileSync(
@@ -125,11 +128,45 @@ describe('App source contracts — thrift nav paths', () => {
     expect(appImpl).toMatch(/fileNavRafRef/);
     expect(appImpl).toMatch(/pendingPageScrollDirRef/);
     expect(appImpl).toMatch(/pendingFileNavDeltaRef/);
+    // File hold accumulates steps (skips intermediate onSelectFile renders)
+    expect(appImpl).toMatch(
+      /pendingFileNavDeltaRef\.current\s*\+=/
+    );
   });
 
   test('selection still rAF-coalesces keyboard move', () => {
     expect(appImpl).toMatch(/selectionMoveRafRef/);
     expect(appImpl).toMatch(/applySelectionKeyboardMove/);
+  });
+});
+
+describe('resolveAdjacentFileNav multi-step (key-hold coalesce)', () => {
+  const files = ['a.ts', 'b.ts', 'c.ts', 'd.ts', 'e.ts'].map((filename) => ({
+    filename,
+  }));
+
+  test('delta ±1 still steps one file', () => {
+    expect(resolveAdjacentFileNav(files, 'c.ts', 1).path).toBe('d.ts');
+    expect(resolveAdjacentFileNav(files, 'c.ts', -1).path).toBe('b.ts');
+  });
+
+  test('delta N jumps N files in one call (skips intermediates)', () => {
+    const r = resolveAdjacentFileNav(files, 'a.ts', 3);
+    expect(r.path).toBe('d.ts');
+    expect(r.index).toBe(3);
+    const back = resolveAdjacentFileNav(files, 'e.ts', -3);
+    expect(back.path).toBe('b.ts');
+  });
+
+  test('wraps multi-step at list ends', () => {
+    expect(resolveAdjacentFileNav(files, 'd.ts', 3).path).toBe('b.ts');
+    expect(resolveAdjacentFileNav(files, 'b.ts', -3).path).toBe('d.ts');
+  });
+
+  test('delta 0 is no-op on current path', () => {
+    const r = resolveAdjacentFileNav(files, 'c.ts', 0);
+    expect(r.path).toBe('c.ts');
+    expect(r.index).toBe(2);
   });
 });
 

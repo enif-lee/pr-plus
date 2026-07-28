@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { avatarInitials } from './utils';
 import { githubAvatarUrl } from '@lib/ui-polish';
+import './Avatar.css';
 
 /**
  * User avatar: GitHub profile image with initials fallback.

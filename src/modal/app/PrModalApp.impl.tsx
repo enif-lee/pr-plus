@@ -274,6 +274,8 @@ import {
 } from '../lib/github-pr-route';
 import { useModalStore } from '../store/modal-store';
 import { OptHintsOverlayClass } from '../components/common/ConversationKbFocus';
+import '../views/chrome/ShellLayout.css';
+import '../views/chrome/LoadingSkeleton.css';
 import {
   ROW_HEIGHT,
   COMMENT_ROW_HEIGHT,
@@ -2090,7 +2092,11 @@ export function PrModalApp({
     });
   }
 
-  /** rAF-coalesce file/page nav under key-repeat (selection already does this). */
+  /**
+   * rAF-coalesce file/page nav under key-repeat (selection already does this).
+   * File hops accumulate signed steps so a held ⌥⇧] collapses many OS keydowns
+   * into one multi-file jump + single onSelectFile (skips intermediate renders).
+   */
   const pendingFileNavDeltaRef = useRef(0);
   const fileNavRafRef = useRef(0);
   const pendingPageScrollDirRef = useRef(0);
@@ -2100,14 +2106,15 @@ export function PrModalApp({
   function navFile(delta: number) {
     if (typeof resolveAdjacentFileNav !== 'function') return;
     const d = delta < 0 ? -1 : 1;
-    pendingFileNavDeltaRef.current = d;
+    // Accumulate: N key-repeats in one frame → jump N files once (not N re-renders).
+    pendingFileNavDeltaRef.current += d;
     if (fileNavRafRef.current) return;
     fileNavRafRef.current = requestAnimationFrame(() => {
       fileNavRafRef.current = 0;
-      const step = pendingFileNavDeltaRef.current;
+      const steps = pendingFileNavDeltaRef.current;
       pendingFileNavDeltaRef.current = 0;
-      if (!step) return;
-      const st = resolveAdjacentFileNav(displayFiles, activeFilePath, step);
+      if (!steps) return;
+      const st = resolveAdjacentFileNav(displayFiles, activeFilePath, steps);
       if (st.path) onSelectFile(st.path);
     });
   }

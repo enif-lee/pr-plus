@@ -17,6 +17,7 @@ import {
   useSelectionIslandGroup,
 } from '../../store/data-groups';
 import { useModalStore } from '../../store/modal-store';
+import '../diff/DiffLayout.css';
 
 export type DiffWorkspaceProps = {
   fileNav: { collapsed: boolean; width: number };

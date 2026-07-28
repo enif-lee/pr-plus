@@ -76,6 +76,15 @@ import {
   isContextThreadReplyFocused,
   queryContextThreadHost,
 } from '@lib/context-thread-dom';
+import './ConversationShell.css';
+import './ConversationThread.css';
+import './AsideRail.css';
+import './ComposerTabs.css';
+import './PeopleChips.css';
+import './PendingThreads.css';
+import './ThreadFold.css';
+import './CommentNavigator.css';
+import './ChecksTips.css';
 import {
   ConversationKbFocusClassName,
   ConversationKbEnterExpand,

@@ -33,6 +33,15 @@ describe('architecture gates', () => {
     const pkg = JSON.parse(read('package.json'));
     expect(pkg.devDependencies['@rstest/core']).toBeTruthy();
     expect(pkg.scripts['test:unit'] || pkg.scripts.test).toMatch(/rstest/);
+    // Local browser e2e is opt-in (not wired into test / test:unit / check)
+    expect(pkg.scripts['test:e2e']).toMatch(/tests\/e2e\/run/);
+    expect(pkg.scripts['test:e2e:features']).toMatch(/feature-scenario/);
+    expect(pkg.scripts['test:e2e:perf']).toMatch(/perf-shortcut-loop/);
+    expect(String(pkg.scripts.test || '')).not.toMatch(/test:e2e/);
+    expect(String(pkg.scripts['test:unit'] || '')).not.toMatch(/e2e/);
+    expect(String(pkg.scripts.check || '')).not.toMatch(/e2e/);
+    expect(fs.existsSync(path.join(root, 'tests/e2e/feature-scenario.mjs'))).toBe(true);
+    expect(fs.existsSync(path.join(root, 'tests/e2e/perf-shortcut-loop.mjs'))).toBe(true);
     expect(pkg.scripts['build:content-ts']).toMatch(/build-content-ts/);
     expect(pkg.scripts['build:pure']).toMatch(/build-pure/);
     expect(pkg.scripts.build).toMatch(/build:content-ts/);
@@ -120,23 +129,20 @@ describe('architecture gates', () => {
     expect(ts).toMatch(/export function toAppDetail/);
   });
 
-  test('modal styles are Tailwind-first with colocated domain siblings only', () => {
-    const idx = read('src/modal/styles/index.css');
-    expect(idx).toMatch(/@tailwind base/);
-    expect(idx).toMatch(/@tailwind components/);
-    expect(idx).toMatch(/@tailwind utilities/);
-    expect(idx).toMatch(/Tailwind-first/);
-    // Mega parts/ or residual dump SoT must be gone
+  test('modal styles are Tailwind-first; domain CSS imported from TSX', () => {
+    const entry = read('src/modal/styles/entry.css');
+    expect(entry).toMatch(/@tailwind base/);
+    expect(entry).toMatch(/@tailwind components/);
+    expect(entry).toMatch(/@tailwind utilities/);
+    expect(entry).toMatch(/tokens\.css/);
+    expect(read('src/modal/main.tsx')).toMatch(/styles\/entry\.css/);
+    // Mega parts/ residual dump gone
     expect(fs.existsSync(path.join(root, 'src/modal/styles/parts'))).toBe(false);
-    expect(fs.existsSync(path.join(root, 'src/modal/styles/parts.css'))).toBe(false);
     expect(fs.existsSync(path.join(root, 'src/modal/styles/residual'))).toBe(false);
-    // styles.css is deprecated stub if present
-    if (fs.existsSync(path.join(root, 'src/modal/styles.css'))) {
-      expect(read('src/modal/styles.css')).toMatch(/DEPRECATED|not SoT/i);
-    }
     // Domain sibling CSS next to owners
     const siblings = [
       'src/modal/styles/tokens.css',
+      'src/modal/styles/entry.css',
       'src/modal/components/common/Button.css',
       'src/modal/components/common/AsideSection.css',
       'src/modal/components/common/Badge.css',
@@ -157,13 +163,19 @@ describe('architecture gates', () => {
     for (const f of siblings) {
       expect(fs.existsSync(path.join(root, f))).toBe(true);
     }
-    // index imports siblings only (no @import of mega parts/ residual dump)
-    expect(idx).not.toMatch(/@import\s+['\"].*parts\//);
-    expect(idx).not.toMatch(/@import\s+['\"]\.\/parts\.css['\"]/);
-    expect(idx).not.toMatch(/styles\/residual|\/residual\//);
-    expect(idx).toMatch(/components\/common\/Button\.css/);
-    expect(idx).toMatch(/views\/chrome\/ShellLayout\.css/);
-    expect(idx).toMatch(/views\/chrome\/Header\.css/);
+    // Components import their CSS
+    expect(read('src/modal/components/common/Button.tsx')).toMatch(
+      /import\s+['\"]\.\/Button\.css['\"]/
+    );
+    expect(read('src/modal/views/chrome/Header.tsx')).toMatch(
+      /import\s+['\"]\.\/Header\.css['\"]/
+    );
+    expect(read('src/modal/views/diff/VirtualDiff.tsx')).toMatch(
+      /import\s+['\"]\.\/DiffLayout\.css['\"]/
+    );
+    // build-modal collects CSS from the TSX graph
+    const buildModal = read('scripts/build-modal.mjs');
+    expect(buildModal).toMatch(/collect-css-from-tsx|cssImportOrder/);
     // Tailwind in common components
     expect(read('src/modal/components/common/Button.tsx')).toMatch(/inline-flex/);
     expect(read('src/modal/components/common/Badge.tsx')).toMatch(/rounded-full|inline-flex/);
@@ -311,10 +323,13 @@ describe('architecture gates', () => {
     const mergeTsx = read('src/modal/views/conversation/MergeBox.tsx');
     expect(mergeTsx).toMatch(/flex flex-col gap-3\.5|flex-col gap-3\.5/);
     expect(mergeTsx).toMatch(/rounded-xl|px-\[18px\]|py-4/);
-    // Styles index imports colocated siblings
-    const idx = read('src/modal/styles/index.css');
-    expect(idx).toMatch(/MergeBox\.css/);
-    expect(idx).toMatch(/ThreadGapBanner\.css/);
+    // Colocated CSS is imported from owning TSX (build-modal collects the graph)
+    expect(read('src/modal/views/conversation/MergeBox.tsx')).toMatch(
+      /import\s+['\"]\.\/MergeBox\.css['\"]/
+    );
+    expect(read('src/modal/views/conversation/ThreadGapBanner.tsx')).toMatch(
+      /import\s+['\"]\.\/ThreadGapBanner\.css['\"]/
+    );
     // Tailwind-first on extracted components
     expect(read('src/modal/views/conversation/ComposerCard.tsx')).toMatch(
       /inline-flex|flex-wrap|items-center/

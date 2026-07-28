@@ -1,4 +1,5 @@
 import React from 'react';
+import './LoadingSkeleton.css';
 
 /**
  * Layout-faithful loading placeholders.

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { formatWhen } from '@common/utils';
 import { githubCommitUrl } from '@lib/ui-polish';
+import './AsideCommitsTimeline.css';
 import {
   filterCommitsByQuery,
   takeCommitsForTimeline,

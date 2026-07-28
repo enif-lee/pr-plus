@@ -1,5 +1,6 @@
 import React from 'react';
 import { TipPopover, hasTipContent, type TipPlacement } from './TipPopover';
+import './Button.css';
 
 /**
  * Shared button. Optional `title` / `shortcut` render a hover/focus popover

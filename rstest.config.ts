@@ -16,6 +16,8 @@ export default defineConfig({
     '**/node_modules/**',
     '**/dist/**',
     'src/modal/dist/**',
+    // Local agent-browser e2e (npm run test:e2e) — not unit/CI suite
+    'tests/e2e/**',
   ],
   // Match modal path aliases used by the app
   resolve: {

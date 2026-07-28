@@ -4,6 +4,7 @@
  */
 import React from 'react';
 import { expandControlKinds, expandBusyMatches } from '@lib/diff-rows';
+import './HunkExpandControls.css';
 
 export function HunkExpandControls({
   gap,

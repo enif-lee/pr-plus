@@ -83,3 +83,5 @@ src/host/modules/MANIFEST.json
 
 # deprecated CSS stub (SoT: styles/index.css + sibling residual)
 src/modal/styles.css
+.bundle-entry.css
+dogfood-output/

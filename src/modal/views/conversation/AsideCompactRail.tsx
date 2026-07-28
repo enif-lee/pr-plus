@@ -5,6 +5,7 @@ import { buildUnifiedReviewerRows } from '@lib/searchable-select';
 import { reviewStatusTone } from '@common/utils';
 import { hasChecksData } from './ChecksPanel';
 import { buildCheckStackGroups, ChecksSummary } from './ChecksSummary';
+import '../../components/common/AvatarStack.css';
 
 /**
  * Avatar stack visibility:

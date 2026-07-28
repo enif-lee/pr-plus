@@ -19,6 +19,7 @@ import {
 } from '@lib/shortcut-policy';
 import { TipPopover } from '@common/TipPopover';
 import { SearchBar } from './SearchBar';
+import './DiffToolbar.css';
 import {
   FinishReviewModal,
   type FinishReviewEvent,

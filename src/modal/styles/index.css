@@ -1,63 +1,6 @@
 /**
- * Modal styles entry — Tailwind-first authoring model.
- *
- * 1. Prefer Tailwind utilities in component TSX.
- * 2. Domain rules live as sibling .css next to the owning module.
- * 3. No monolithic mega-bundle as SoT.
+ * DEPRECATED barrel — CSS is loaded via TSX imports + styles/entry.css.
+ * Kept only so old docs/tools that mention styles/index.css still resolve.
+ * Prefer: main.tsx → ./styles/entry.css and component `import './X.css'`.
  */
-
-@import './tokens.css';
-
-/* Common components */
-@import '../components/common/Button.css';
-@import '../components/common/AsideSection.css';
-@import '../components/common/Badge.css';
-@import '../components/common/Avatar.css';
-@import '../components/common/AvatarStack.css';
-@import '../components/common/MarkdownComposer.css';
-@import '../components/common/MarkdownView.css';
-@import '../components/common/MermaidBlock.css';
-@import '../components/common/EntityLinks.css';
-@import '../components/common/TipPopover.css';
-@import '../components/common/ActionToast.css';
-@import '../components/common/FloatingScrollbar.css';
-@import '../components/common/SearchableSelect.css';
-
-/* Chrome */
-@import '../views/chrome/ShellLayout.css';
-@import '../views/chrome/Header.css';
-@import '../views/chrome/LoadingSkeleton.css';
-@import '../views/chrome/SearchAndFileNav.css';
-@import '../views/chrome/DiffToolbar.css';
-@import '../views/chrome/FinishReview.css';
-
-/* Conversation */
-@import '../views/conversation/ThreadFold.css';
-@import '../views/conversation/AsideRail.css';
-@import '../views/conversation/AsideCommitsTimeline.css';
-@import '../views/conversation/ConversationShell.css';
-@import '../views/conversation/MetaList.css';
-@import '../views/conversation/PeopleChips.css';
-@import '../views/conversation/PendingThreads.css';
-@import '../views/conversation/ComposerTabs.css';
-@import '../views/conversation/ConversationThread.css';
-@import '../views/conversation/MergeBox.css';
-@import '../views/conversation/ThreadGapBanner.css';
-@import '../views/conversation/CommentNavigator.css';
-@import '../views/conversation/ChecksTips.css';
-
-/* Diff */
-@import '../views/diff/DiffLayout.css';
-@import '../views/diff/unified-line-numbers.css';
-@import '../views/diff/HunkExpandControls.css';
-@import '../views/diff/DiffActiveRow.css';
-@import '../views/diff/LineSelection.css';
-@import '../views/diff/CodeCell.css';
-@import '../views/diff/DiffSearchMarks.css';
-@import '../views/diff/InlineReviewThreads.css';
-@import '../views/diff/MultiFileReviewGroup.css';
-@import '../views/diff/LineCommentAffordance.css';
-
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import './entry.css';

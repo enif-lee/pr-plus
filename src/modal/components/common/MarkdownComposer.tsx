@@ -5,6 +5,7 @@ import {
   insertMarkdownAtCursor,
   guessContentType,
 } from '@lib/composer-attach';
+import './MarkdownComposer.css';
 import {
   detectMentionTrigger,
   detectSlashTrigger,

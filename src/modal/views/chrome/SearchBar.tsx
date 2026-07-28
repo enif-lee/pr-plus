@@ -2,6 +2,7 @@ import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@common/Button';
 import { StepNav } from '@common/StepNav';
 import { stepNavShortcutLabel } from '@lib/shortcut-policy';
+import './SearchAndFileNav.css';
 
 /** Default pause after last keystroke before parent/search runs. */
 export const SEARCH_INPUT_DEBOUNCE_MS = 320;

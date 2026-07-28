@@ -44,6 +44,16 @@ import { ImageViewer } from '@common/ImageViewer';
 import { InlineThread } from './InlineThread';
 import { SelectionCommentBar } from './SelectionCommentBar';
 import { HunkExpandControls } from './HunkExpandControls';
+import './CodeCell.css';
+import './DiffActiveRow.css';
+import './DiffLayout.css';
+import './DiffSearchMarks.css';
+import './HunkExpandControls.css';
+import './InlineReviewThreads.css';
+import './LineCommentAffordance.css';
+import './LineSelection.css';
+import './MultiFileReviewGroup.css';
+import './unified-line-numbers.css';
 
 function fileHeaderTone(row: any) {
   const status = String(row?.status || 'modified').toLowerCase();

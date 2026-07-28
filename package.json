@@ -1,6 +1,6 @@
 {
   "name": "pr-plus",
-  "version": "1.6.2",
+  "version": "1.7.0",
   "private": true,
   "scripts": {
     "build:modal": "node scripts/build-modal.mjs",
@@ -15,6 +15,9 @@
     "browser:snapshot": "agent-browser snapshot -i -c",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.host.json && tsc --noEmit -p tsconfig.fetch.json && tsc --noEmit -p tsconfig.bridge.json && node scripts/typecheck-entries.mjs",
     "test:unit": "rstest run",
+    "test:e2e": "node tests/e2e/run.mjs",
+    "test:e2e:features": "node tests/e2e/feature-scenario.mjs",
+    "test:e2e:perf": "node tests/e2e/perf-shortcut-loop.mjs",
     "lint": "eslint .",
     "check": "npm run typecheck && npm run lint && npm run test:unit",
     "build:host": "node scripts/build-host.mjs",
