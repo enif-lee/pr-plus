@@ -29,3 +29,37 @@ tmp/
 
 # Packaged/signed extension artifacts
 *.crx
+
+# ---------------------------------------------------------------------------
+# Generated JS (TypeScript / build SoT lives next to these; run `npm run build`)
+# ---------------------------------------------------------------------------
+
+# pure modules emitted from src/modal/lib/*.ts via `npm run build:pure`
+# Keep hand-written pure SoT (lib re-exports these):
+src/modal/pure/**
+!src/modal/pure/checks.js
+!src/modal/pure/detail-merge.js
+
+# content-script / popup entries compiled from src/*.ts (`build:content-ts`)
+src/tree.js
+src/dom.js
+src/pr-list-focus.js
+src/pulls-palette.js
+src/github-endpoints.js
+src/content-bootstrap.js
+src/content.js
+src/popup.js
+src/storage.js
+
+# other classic scripts compiled / assembled from TS SoT
+src/content-bridge.js
+src/fetch-pulls.js
+src/pr-modal-host.js
+src/background.bundle.js
+# intermediate emit from sw-api.ts (build:background-src); SW loads the bundle
+src/background.ts
+# legacy hand twin if present after migration
+src/background.js
+
+# obsolete host part assemblies (SoT: src/host/modules/*.ts → pr-modal-host.js)
+src/host/parts/**
