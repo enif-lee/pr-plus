@@ -1,7 +1,8 @@
 /**
- * Testable content-script bootstrap: fetch, tree build, DOM apply, toggle, SPA watch.
+ * AUTO-GENERATED from src/content-bootstrap.ts
+ * SOURCE OF TRUTH: src/content-bootstrap.ts — do not edit this .js
+ * Rebuild: node scripts/build-content-ts.mjs
  */
-
 function createPrTreeApp(deps) {
   const {
     document,
@@ -10,9 +11,8 @@ function createPrTreeApp(deps) {
     PRTreeDOM,
     PRTreeFetch,
     PRTreeStorage,
-    fetchImpl = globalThis.fetch,
+    fetchImpl = globalThis.fetch
   } = deps;
-
   const {
     parseRepoFromPathname,
     findPrListContainer,
@@ -28,14 +28,11 @@ function createPrTreeApp(deps) {
     createToggleButton,
     mountToggleNearHeader,
     PR_TREE_TOGGLE_ID,
-    PR_TREE_INDENT_CLASS,
+    PR_TREE_INDENT_CLASS
   } = PRTreeDOM;
-
   const { buildPrTree } = PRTree;
   const { fetchOpenPulls, fetchDanglingPulls, findDanglingPrNumbers } = PRTreeFetch;
-  // Content context: watchGithubToken is signal-only (never receives the secret).
   const { watchGithubToken } = PRTreeStorage;
-
   let cachedForest = null;
   let cachedPrs = null;
   let cachedRepoKey = null;
@@ -52,11 +49,9 @@ function createPrTreeApp(deps) {
   let lastLocationHref = null;
   let suppressObserverUntil = 0;
   let fillingDangling = false;
-
   function repoKey(owner, repo) {
     return `${owner}/${repo}`;
   }
-
   function clearCache() {
     cachedForest = null;
     cachedPrs = null;
@@ -64,34 +59,28 @@ function createPrTreeApp(deps) {
     lastSyncedPath = null;
     lastPageSignature = null;
   }
-
   function pageSignature(numbers) {
-    return numbers.slice().sort((a, b) => a - b).join(',');
+    return numbers.slice().sort((a, b) => a - b).join(",");
   }
-
   function currentPullsContext() {
     const path = window.location.pathname;
-    // Include search so filter/query changes re-sync.
-    const pathWithQuery = `${path}${window.location.search || ''}`;
-    if (!path.includes('/pulls')) return null;
+    const pathWithQuery = `${path}${window.location.search || ""}`;
+    if (!path.includes("/pulls")) return null;
     const repoInfo = parseRepoFromPathname(path);
     if (!repoInfo) return null;
     return {
       path: pathWithQuery,
       repoInfo,
-      key: repoKey(repoInfo.owner, repoInfo.repo),
+      key: repoKey(repoInfo.owner, repoInfo.repo)
     };
   }
-
   function clearReapplyTimers() {
     for (const id of reapplyTimers) window.clearTimeout(id);
     reapplyTimers = [];
   }
-
   function scheduleDeferredReapply() {
     clearReapplyTimers();
-    // GitHub React/Turbo often re-renders shortly after our DOM edits.
-    for (const delay of [50, 200, 600, 1500, 3000]) {
+    for (const delay of [50, 200, 600, 1500, 3e3]) {
       const id = window.setTimeout(() => {
         if (!currentPullsContext()) return;
         if (cachedPrs?.length) {
@@ -106,16 +95,13 @@ function createPrTreeApp(deps) {
       reapplyTimers.push(id);
     }
   }
-
   function applyDecorations() {
     if (!cachedPrs || cachedPrs.length === 0) return 0;
     suppressObserverUntil = Date.now() + 400;
     const n = applyListDecorations(document, cachedPrs);
-    // Review decisions often arrive via batch-deferred-content after paint.
     refreshReviewBadges(document, cachedPrs);
     return n;
   }
-
   function applyTreeView() {
     if (!cachedForest) return false;
     suppressObserverUntil = Date.now() + 400;
@@ -129,22 +115,18 @@ function createPrTreeApp(deps) {
     scheduleDeferredReapply();
     return true;
   }
-
   function restoreOriginalView() {
     clearReapplyTimers();
     suppressObserverUntil = Date.now() + 400;
     clearTreeIndents(document);
-    // Keep branch/draft badges in default order mode.
     applyDecorations();
     active = false;
     return true;
   }
-
   function ensureToggle() {
     const inDoc = document.getElementById(PR_TREE_TOGGLE_ID);
     if (inDoc && toggleButton === inDoc) return toggleButton;
     if (inDoc) inDoc.remove();
-
     toggleButton = createToggleButton(document, {
       onShowTree: () => {
         treeModeEnabled = true;
@@ -154,12 +136,11 @@ function createPrTreeApp(deps) {
         treeModeEnabled = false;
         restoreOriginalView();
       },
-      initialMode: treeModeEnabled ? 'tree' : 'original',
+      initialMode: treeModeEnabled ? "tree" : "original"
     });
     mountToggleNearHeader(document, toggleButton);
     return toggleButton;
   }
-
   function needsReapply() {
     if (!cachedPrs || cachedPrs.length === 0) return false;
     if (countMissingDecorations(document, cachedPrs) > 0) return true;
@@ -168,14 +149,12 @@ function createPrTreeApp(deps) {
     }
     return false;
   }
-
   function scheduleSync(delayMs = 200) {
     clearTimeout(syncTimer);
     syncTimer = window.setTimeout(() => {
       void handlePageChange();
     }, delayMs);
   }
-
   function mergePrs(base, extras) {
     const byNumber = new Map((base || []).map((pr) => [pr.number, pr]));
     for (const pr of extras || []) {
@@ -183,18 +162,14 @@ function createPrTreeApp(deps) {
     }
     return [...byNumber.values()];
   }
-
   async function fillDanglingForPage(pagePrNumbers) {
     if (!cachedPrs || !pagePrNumbers.length || fillingDangling) return false;
     const dangling = findDanglingPrNumbers(pagePrNumbers, cachedPrs);
     if (dangling.length === 0) return false;
-
     const ctx = currentPullsContext();
     if (!ctx) return false;
-
     fillingDangling = true;
     try {
-      // Token stays in the service worker; content only receives PR metadata.
       const extras = await fetchDanglingPulls(
         ctx.repoInfo.owner,
         ctx.repoInfo.repo,
@@ -209,23 +184,19 @@ function createPrTreeApp(deps) {
       fillingDangling = false;
     }
   }
-
   async function loadPrData(repoInfo, pagePrNumbers) {
-    // API auth is applied in the background service worker only.
     cachedPrs = await fetchOpenPulls(repoInfo.owner, repoInfo.repo, fetchImpl, {
-      pagePrNumbers,
+      pagePrNumbers
     });
     cachedForest = buildPrTree(cachedPrs);
     cachedRepoKey = repoKey(repoInfo.owner, repoInfo.repo);
   }
-
   async function handlePageChange() {
     const ctx = currentPullsContext();
     if (!ctx) {
       active = false;
       return;
     }
-
     const { path, repoInfo, key } = ctx;
     const pagePrNumbers = collectPagePrNumbers(document);
     const signature = pageSignature(pagePrNumbers);
@@ -233,63 +204,50 @@ function createPrTreeApp(deps) {
     const pathChanged = lastSyncedPath !== null && lastSyncedPath !== path;
     const pageChanged = lastPageSignature !== null && lastPageSignature !== signature;
     const needsFullLoad = !cachedForest || repoChanged;
-
     if (repoChanged) clearCache();
-
-    // Full bootstrap when no cache, repo change, or first paint for this path without data.
-    if (needsFullLoad || (pathChanged && !cachedForest)) {
+    if (needsFullLoad || pathChanged && !cachedForest) {
       const result = await bootstrap();
       if (result.ok) {
         lastSyncedPath = path;
         lastPageSignature = signature;
         syncAttempts = 0;
-      } else if (result.reason !== 'in-flight') {
+      } else if (result.reason !== "in-flight") {
         scheduleSync(Math.min(300 * (syncAttempts + 1), 2500));
         syncAttempts += 1;
       }
       return;
     }
-
-    // List wiped during SPA re-render — wait for rows to come back.
     if (pagePrNumbers.length === 0 || findOriginalPrRows(document).length === 0) {
       active = false;
       scheduleSync(Math.min(250 * (syncAttempts + 1), 2500));
       syncAttempts += 1;
       return;
     }
-
-    // Filter/query/list content changed: fill dangling metadata then re-apply.
     if (pathChanged || pageChanged || findDanglingPrNumbers(pagePrNumbers, cachedPrs || []).length > 0) {
       try {
         await fillDanglingForPage(pagePrNumbers);
       } catch (err) {
-        console.warn('[PR Tree] Dangling fill failed:', err);
+        console.warn("[PR Tree] Dangling fill failed:", err);
       }
       lastSyncedPath = path;
       lastPageSignature = signature;
     }
-
     ensureToggle();
-
     if (!treeModeEnabled) {
       if (countMissingDecorations(document, cachedPrs || []) > 0) {
         applyDecorations();
       }
       return;
     }
-
     if (needsReapply() || !active) {
       if (applyTreeView()) {
         syncAttempts = 0;
         return;
       }
-      // Rows present but apply failed (transient DOM) — retry.
       scheduleSync(Math.min(300 * (syncAttempts + 1), 2500));
       syncAttempts += 1;
       return;
     }
-
-    // Cache hit, styled, active — still remount toggle if SPA wiped it.
     if (!document.getElementById(PR_TREE_TOGGLE_ID)) {
       ensureToggle();
     }
@@ -297,77 +255,60 @@ function createPrTreeApp(deps) {
       applyDecorations();
     }
   }
-
   async function bootstrap() {
     if (bootstrapping) {
       bootstrapQueued = true;
-      return { ok: false, reason: 'in-flight' };
+      return { ok: false, reason: "in-flight" };
     }
-
     bootstrapping = true;
-
     try {
       const ctx = currentPullsContext();
-      if (!ctx) return { ok: false, reason: 'not-pulls-page' };
-
+      if (!ctx) return { ok: false, reason: "not-pulls-page" };
       const { repoInfo, key, path } = ctx;
-
-      // Soft-wait for list shell; GitHub often paints shell before rows.
       const container = findPrListContainer(document);
       if (!container) {
-        return { ok: false, reason: 'no-list-container' };
+        return { ok: false, reason: "no-list-container" };
       }
-
       const rows = findOriginalPrRows(document);
       const pagePrNumbers = collectPagePrNumbers(document);
       if (rows.length === 0 && pagePrNumbers.length === 0) {
-        return { ok: false, reason: 'no-rows' };
+        return { ok: false, reason: "no-rows" };
       }
-
       if (cachedRepoKey !== key || !cachedForest) {
         await loadPrData(repoInfo, pagePrNumbers);
       } else {
-        // Same repo cache: still fill any page-only PRs.
         await fillDanglingForPage(pagePrNumbers);
       }
-
-      if (!cachedPrs || (cachedForest.length === 0 && cachedPrs.length === 0)) {
-        return { ok: false, reason: 'no-prs' };
+      if (!cachedPrs || cachedForest.length === 0 && cachedPrs.length === 0) {
+        return { ok: false, reason: "no-prs" };
       }
-
       ensureToggle();
-
       if (treeModeEnabled) {
         if (!applyTreeView()) {
-          return { ok: false, reason: 'apply-failed' };
+          return { ok: false, reason: "apply-failed" };
         }
       } else {
         applyDecorations();
       }
-
       lastSyncedPath = path;
       lastPageSignature = pageSignature(pagePrNumbers);
-
-      // Notify modal host that stack list is ready (refresh restore can open modal)
       try {
         window.dispatchEvent(
-          new CustomEvent('pr-plus-stack-ready', {
-            detail: { owner: repoInfo.owner, repo: repoInfo.repo, prCount: cachedPrs.length },
+          new CustomEvent("pr-plus-stack-ready", {
+            detail: { owner: repoInfo.owner, repo: repoInfo.repo, prCount: cachedPrs.length }
           })
         );
       } catch {
-        /* ignore */
       }
-
       return {
         ok: true,
         prCount: cachedPrs.length,
         rootCount: cachedForest.length,
-        repo: repoInfo,
+        repo: repoInfo
       };
     } catch (err) {
-      console.warn('[PR Tree] Failed to load PR data:', err);
-      return { ok: false, reason: 'fetch-failed', error: err };
+      console.warn("[PR Tree] Failed to load PR data:", err);
+      return { ok: false, reason: "fetch-failed", error: err };
     } finally {
       bootstrapping = false;
       if (bootstrapQueued) {
@@ -376,18 +317,16 @@ function createPrTreeApp(deps) {
       }
     }
   }
-
   function patchHistoryNavigation() {
     const historyObj = window.history;
-    if (!historyObj || historyObj.__prTreePatched) return () => {};
-
-    const fire = () => {
-      window.dispatchEvent(new Event('pr-tree-location'));
+    if (!historyObj || historyObj.__prTreePatched) return () => {
     };
-
+    const fire = () => {
+      window.dispatchEvent(new Event("pr-tree-location"));
+    };
     const wrap = (method) => {
       const original = historyObj[method];
-      if (typeof original !== 'function') return null;
+      if (typeof original !== "function") return null;
       historyObj[method] = function prTreePatchedHistory(...args) {
         const ret = original.apply(this, args);
         fire();
@@ -395,52 +334,43 @@ function createPrTreeApp(deps) {
       };
       return original;
     };
-
-    const origPush = wrap('pushState');
-    const origReplace = wrap('replaceState');
+    const origPush = wrap("pushState");
+    const origReplace = wrap("replaceState");
     historyObj.__prTreePatched = true;
-
     return () => {
       if (origPush) historyObj.pushState = origPush;
       if (origReplace) historyObj.replaceState = origReplace;
       delete historyObj.__prTreePatched;
     };
   }
-
   function watchPullsPage() {
     const observer = new MutationObserver(() => {
       if (Date.now() < suppressObserverUntil) return;
       scheduleSync(200);
     });
-
     const root = document.documentElement || document.body;
     if (root) {
       observer.observe(root, { childList: true, subtree: true });
     }
-
     watchGithubToken(() => {
       clearCache();
       scheduleSync(0);
     });
-
     const onNav = () => scheduleSync(50);
-    window.addEventListener('popstate', onNav);
-    window.addEventListener('hashchange', onNav);
-    window.addEventListener('pr-tree-location', onNav);
-    window.addEventListener('turbo:load', onNav);
-    window.addEventListener('turbo:render', onNav);
-    window.addEventListener('turbo:frame-load', onNav);
-    window.addEventListener('turbo:before-render', onNav);
-    window.addEventListener('pjax:complete', onNav);
-    window.addEventListener('pjax:end', onNav);
-    window.addEventListener('pageshow', onNav);
-    window.addEventListener('focus', () => {
+    window.addEventListener("popstate", onNav);
+    window.addEventListener("hashchange", onNav);
+    window.addEventListener("pr-tree-location", onNav);
+    window.addEventListener("turbo:load", onNav);
+    window.addEventListener("turbo:render", onNav);
+    window.addEventListener("turbo:frame-load", onNav);
+    window.addEventListener("turbo:before-render", onNav);
+    window.addEventListener("pjax:complete", onNav);
+    window.addEventListener("pjax:end", onNav);
+    window.addEventListener("pageshow", onNav);
+    window.addEventListener("focus", () => {
       if (currentPullsContext() && (needsReapply() || !active)) scheduleSync(0);
     });
-
     const unpatchHistory = patchHistoryNavigation();
-
-    // Location polling catches Turbo/soft-nav that skip events.
     const hrefPoll = window.setInterval(() => {
       const href = window.location.href;
       if (href !== lastLocationHref) {
@@ -452,10 +382,8 @@ function createPrTreeApp(deps) {
       if (needsReapply() || !document.getElementById(PR_TREE_TOGGLE_ID)) {
         scheduleSync(0);
       }
-    }, 1000);
-
+    }, 1e3);
     lastLocationHref = window.location.href;
-
     return {
       observer,
       disconnect() {
@@ -464,10 +392,9 @@ function createPrTreeApp(deps) {
         window.clearInterval(hrefPoll);
         clearTimeout(syncTimer);
         clearReapplyTimers();
-      },
+      }
     };
   }
-
   return {
     bootstrap,
     applyTreeView,
@@ -482,15 +409,13 @@ function createPrTreeApp(deps) {
     getCachedPrs: () => cachedPrs,
     isActive: () => active,
     isTreeModeEnabled: () => treeModeEnabled,
-    getToggleButton: () => toggleButton,
+    getToggleButton: () => toggleButton
   };
 }
-
 const bootstrapApi = { createPrTreeApp };
-
-if (typeof module !== 'undefined' && module.exports) {
+if (typeof module !== "undefined" && module.exports) {
   module.exports = bootstrapApi;
 }
-if (typeof globalThis !== 'undefined') {
+if (typeof globalThis !== "undefined") {
   globalThis.PRTreeBootstrap = bootstrapApi;
 }

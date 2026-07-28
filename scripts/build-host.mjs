@@ -1,47 +1,68 @@
 /**
- * Assemble pr-modal-host.js from src/host/parts/* (architecture split).
- * Runtime remains one IIFE so closures over `current` / reactRoot stay shared.
- * Edit parts under src/host/parts/, then: npm run build:host
+ * Assemble pr-modal-host.js from TypeScript host modules (SoT).
+ * Modules cut only at top-level function boundaries.
+ * Edit src/host/modules/*.ts — then: npm run build:host
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { assembleTsParts } from './assemble-ts-parts.mjs';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const partsDir = path.join(root, 'src/host/parts');
+const modulesDir = path.join(root, 'src/host/modules');
 const out = path.join(root, 'src/pr-modal-host.js');
 
-if (!fs.existsSync(partsDir)) {
-  console.error('Missing src/host/parts — abort');
-  process.exit(1);
+// Validate starts (TS preferred)
+const files = fs
+  .readdirSync(modulesDir)
+  .filter((f) => /^\d+.*\.(ts|js)$/.test(f))
+  .sort();
+const byBase = new Map();
+for (const f of files) {
+  const base = f.replace(/\.(ts|js)$/, '');
+  if (!byBase.has(base) || f.endsWith('.ts')) byBase.set(base, f);
+}
+for (const f of [...byBase.values()].sort()) {
+  const body = fs.readFileSync(path.join(modulesDir, f), 'utf8');
+  const first = body
+    .split(/\n/)
+    .map((l) => l.trim())
+    .find(
+      (l) =>
+        l &&
+        !l.startsWith('//') &&
+        !l.startsWith('/*') &&
+        !l.startsWith('*')
+    );
+  if (
+    first &&
+    (/^[.)\]},]/.test(first) ||
+      first.startsWith('.catch') ||
+      first.startsWith('.then') ||
+      first.startsWith('catch') ||
+      first.startsWith('then('))
+  ) {
+    console.error('Invalid module start in', f, ':', first.slice(0, 60));
+    process.exit(1);
+  }
+  const n = body.split(/\n/).length;
+  if (n > 1500) console.warn('WARN', f, 'has', n, 'lines (>1500)');
 }
 
-const parts = fs
-  .readdirSync(partsDir)
-  .filter((f) => f.endsWith('.js'))
-  .sort();
-
-const body = parts
-  .map((f) => fs.readFileSync(path.join(partsDir, f), 'utf8').trimEnd())
-  .join('\n\n');
-
-const file = `/**
+const result = await assembleTsParts({
+  partsDir: modulesDir,
+  outFile: out,
+  banner: `/**
  * Content-script host: intercept PR list clicks, mount React modal overlay.
- * AUTO-ASSEMBLED from src/host/parts/* — edit parts, run: npm run build:host
- * Bundle + CSS are extension-local (no remote code).
- */
-(function initPrModalHost() {
-${body}
-})();
-`;
+ * AUTO-GENERATED from src/host/modules/*.ts (function-boundary modules).
+ * SOURCE OF TRUTH: TypeScript modules — npm run build:host
+ */`,
+  wrap: (body) => `(function initPrModalHost() {\n${body}\n})();`,
+});
 
-fs.writeFileSync(out, file);
 console.log(
   'Built',
   path.relative(root, out),
-  `(${parts.length} parts, ${file.split(/\n/).length} lines)`
+  `(${result.parts.length} modules, ${result.lines} lines)`
 );
-for (const f of parts) {
-  const n = fs.readFileSync(path.join(partsDir, f), 'utf8').split(/\n/).length;
-  console.log(`  ${f}: ${n} lines`);
-}
+for (const f of result.parts) console.log(`  ${f}`);

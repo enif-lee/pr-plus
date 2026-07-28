@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Isolated progressive PR detail store (TypeScript ESM).
  * Source of truth for slice isolation; content-script pure twin stays for MV3 order.
@@ -48,12 +47,24 @@ export const META_KEYS = [
   'gitattributesText',
 ];
 
-function emptyListSlice(items) {
+function emptyListSlice(items?: unknown) {
   return {
     items: Array.isArray(items) ? items.slice() : [],
     settled: false,
   };
 }
+
+type ApplyOpts = {
+  settled?: boolean;
+  trustEmpty?: boolean;
+  source?: string | null;
+  sketch?: boolean;
+  cacheFull?: boolean;
+  gitattributesText?: string | null;
+  pageMeta?: unknown;
+  avatarUrls?: Record<string, string> | null;
+  [key: string]: unknown;
+};
 
 export function createEmptyStore() {
   return {
@@ -207,14 +218,13 @@ export function fromAppDetail(flat) {
 
 /**
  * Project store → flat app-detail for React UI / cache (read model only).
+ * Always returns a projection for a valid store object so progressive open
+ * never nulls `current.detail` while side slices settle before meta identity.
+ * Returns null only for missing/invalid store arguments.
  */
 export function toAppDetail(store) {
   if (!store || typeof store !== 'object') return null;
-  const m = store.meta || {};
-  if (m.owner == null || m.repo == null || m.number == null) {
-    // incomplete identity
-    if (!m.number && !m.title) return null;
-  }
+  const m = store.meta && typeof store.meta === 'object' ? store.meta : {};
   const sideSettled = {
     files: Boolean(store.files?.settled),
     commits: Boolean(store.commits?.settled),
@@ -258,6 +268,8 @@ export function toAppDetail(store) {
     _sketch: store.flags?.sketch ? true : undefined,
     _source: store.flags?.source || undefined,
     _cacheFull: store.flags?.cacheFull ? true : undefined,
+    _incompleteIdentity:
+      m.owner == null || m.repo == null || m.number == null ? true : undefined,
   };
 }
 
@@ -297,7 +309,7 @@ export function sideSettledFlags(store) {
 // ── Slice writers (only touch their domain) ────────────────────────
 
 /** Core / list / cache meta. Never writes files/commits/reviews/threads. */
-export function applyMeta(store, metaPartial, opts = {}) {
+export function applyMeta(store, metaPartial, opts: ApplyOpts = {}) {
   if (!store || !metaPartial || typeof metaPartial !== 'object') return store;
   const next = { ...store.meta };
   for (const k of META_KEYS) {
@@ -337,7 +349,7 @@ export function applyMeta(store, metaPartial, opts = {}) {
   return store;
 }
 
-export function applyFiles(store, files, opts = {}) {
+export function applyFiles(store, files, opts: ApplyOpts = {}) {
   if (!store) return store;
   store.files = {
     items: Array.isArray(files) ? files.slice() : [],
@@ -352,7 +364,7 @@ export function applyFiles(store, files, opts = {}) {
   return store;
 }
 
-export function applyCommits(store, commits, opts = {}) {
+export function applyCommits(store, commits, opts: ApplyOpts = {}) {
   if (!store) return store;
   store.commits = {
     items: Array.isArray(commits) ? commits.slice() : [],
@@ -361,7 +373,7 @@ export function applyCommits(store, commits, opts = {}) {
   return store;
 }
 
-export function applyComments(store, comments, opts = {}) {
+export function applyComments(store, comments, opts: ApplyOpts = {}) {
   if (!store) return store;
   store.comments = {
     items: Array.isArray(comments) ? comments.slice() : [],
@@ -371,7 +383,7 @@ export function applyComments(store, comments, opts = {}) {
   return store;
 }
 
-export function applyReviews(store, reviews, opts = {}) {
+export function applyReviews(store, reviews, opts: ApplyOpts = {}) {
   if (!store) return store;
   store.reviews = {
     items: Array.isArray(reviews) ? reviews.slice() : [],
@@ -387,7 +399,7 @@ export function applyReviews(store, reviews, opts = {}) {
   return store;
 }
 
-export function applyChecks(store, checks, opts = {}) {
+export function applyChecks(store, checks, opts: ApplyOpts = {}) {
   if (!store) return store;
   store.checks = {
     data: checks || {
@@ -401,7 +413,7 @@ export function applyChecks(store, checks, opts = {}) {
   return store;
 }
 
-export function applyDevelopment(store, dev, opts = {}) {
+export function applyDevelopment(store, dev, opts: ApplyOpts = {}) {
   if (!store) return store;
   const d = dev && typeof dev === 'object' ? dev : {};
   store.development = {

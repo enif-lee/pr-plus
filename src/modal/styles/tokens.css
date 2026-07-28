@@ -1,0 +1,257 @@
+/**
+ * Residual CSS (cannot fully express via Tailwind utilities).
+ * Colocated next to owning domain; imported from styles/index.css.
+ * Migrated from styles/parts/00-tokens.css
+ */
+
+/* pr+ modal — GitHub-themed, shadcn-inspired, theme-aware (not forced dark) */
+
+/* Document scroll lock while modal open (see scroll-lock.ts) */
+html.prp-scroll-lock,
+html.prp-scroll-lock body {
+  overflow: hidden !important;
+  overscroll-behavior: none;
+}
+
+.prp-overlay {
+  --prp-fg: var(--fgColor-default, #1f2328);
+  --prp-fg-muted: var(--fgColor-muted, #656d76);
+  --prp-bg: var(--bgColor-default, #ffffff);
+  --prp-bg-muted: var(--bgColor-muted, #f6f8fa);
+  --prp-border: var(--borderColor-default, #d0d7de);
+  --prp-border-muted: var(--borderColor-muted, #d8dee4);
+  --prp-accent: var(--fgColor-accent, #0969da);
+  --prp-accent-bg: var(--bgColor-accent-emphasis, #1f6feb);
+  --prp-danger: #cf222e;
+  --prp-ok: #1a7f37;
+  --prp-warn: #9a6700;
+  --prp-add-bg: #dafbe1;
+  --prp-del-bg: #ffebe9;
+  --prp-hunk-bg: #ddf4ff;
+  --prp-shadow: 0 16px 48px rgba(1, 4, 9, 0.28);
+  --prp-radius: 12px;
+  --prp-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  --prp-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  /* Density tokens — ordinary reading spacing (not compact) */
+  --prp-space-1: 6px;
+  --prp-space-2: 10px;
+  --prp-space-3: 14px;
+  --prp-space-4: 18px;
+  --prp-space-5: 24px;
+  --prp-pad-header: 16px 20px;
+  --prp-pad-card: 14px 16px;
+  --prp-pad-card-head: 12px 16px;
+  --prp-pad-body: 16px 18px;
+  /* Soft top/bottom fade where scroll content meets the shell (not a hard clip) */
+  --prp-edge-fade-size: 18px;
+  --prp-gap-stack: 16px;
+  --prp-gap-aside: 14px;
+  /* Soft dim only — no solid wash; page remains visible under the panel */
+  --prp-backdrop-alpha: 0.14;
+  --prp-backdrop-color: rgba(1, 4, 9, var(--prp-backdrop-alpha));
+  /* Multi-line selection: amber/yellow block (not blue accent) */
+  --prp-sel-bg: color-mix(in srgb, #eab308 28%, transparent);
+  --prp-sel-bg-strong: color-mix(in srgb, #eab308 38%, transparent);
+  --prp-sel-edge: #ca8a04;
+  --prp-sel-border: color-mix(in srgb, #ca8a04 55%, transparent);
+
+  position: fixed;
+  inset: 0;
+  z-index: 100000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--prp-font);
+  font-size: 14px;
+  color: var(--prp-fg);
+  line-height: 1.5;
+  /* Overlay host is always transparent; only .prp-backdrop dims (or not) */
+  background: transparent;
+  color-scheme: light;
+  /* Do not chain wheel/touch scroll to the page under the overlay */
+  overscroll-behavior: none;
+  overflow: hidden;
+}
+
+/*
+ * In-page embed: full window (covers GH global header).
+ * Host mounts on document.body (see pr-modal-host ensureEmbedHost).
+ */
+.prp-overlay.prp-shell--embed,
+.prp-overlay[data-presentation='embed'] {
+  position: relative !important;
+  inset: auto !important;
+  z-index: 1;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  align-items: stretch !important;
+  justify-content: stretch !important;
+  overflow: hidden;
+  background: var(--prp-bg);
+  overscroll-behavior: contain;
+  /* Reset base .prp-overlay fixed fullscreen when nested in embed host */
+  display: flex !important;
+  flex-direction: column !important;
+}
+.prp-overlay.prp-shell--embed .prp-backdrop,
+.prp-overlay[data-presentation='embed'] .prp-backdrop {
+  display: none !important;
+}
+.prp-overlay.prp-shell--embed .prp-modal,
+.prp-overlay.prp-shell--embed .prp-modal--centered,
+.prp-overlay.prp-shell--embed .prp-modal--diff,
+.prp-overlay[data-presentation='embed'] .prp-modal,
+.prp-overlay[data-presentation='embed'] .prp-modal--centered,
+.prp-overlay[data-presentation='embed'] .prp-modal--diff {
+  width: 100% !important;
+  height: 100% !important;
+  max-width: none !important;
+  max-height: none !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  border-radius: 0 !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  flex: 1 1 auto !important;
+  position: relative !important;
+}
+.prp-overlay.prp-shell--embed .prp-shell-resizer,
+.prp-overlay[data-presentation='embed'] .prp-shell-resizer {
+  display: none !important;
+}
+
+/*
+ * Page host: match window size and cover GH header (fixed full-viewport).
+ * Keep in sync with src/styles.css (content-script sheet).
+ */
+#prp-page-embed.prp-page-embed,
+.prp-page-embed {
+  position: fixed !important;
+  inset: 0 !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  width: 100% !important;
+  width: 100vw !important;
+  height: 100% !important;
+  height: 100vh !important;
+  height: 100dvh !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  max-width: none !important;
+  max-height: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  z-index: 100000 !important;
+  flex: none !important;
+  background: var(--bgColor-default, var(--prp-bg, #fff)) !important;
+  box-sizing: border-box !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
+  transform: none !important;
+  filter: none !important;
+  contain: none !important;
+}
+.prp-page-embed > .prp-overlay {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+html.prp-embed-active,
+html.prp-embed-active body {
+  overflow: hidden !important;
+}
+html.prp-embed-active [data-prp-footer-hidden='1'] {
+  display: none !important;
+}
+html.prp-embed-active .AppHeader,
+html.prp-embed-active header.AppHeader,
+html.prp-embed-active .js-header-wrapper,
+html.prp-embed-active [data-target='app-header'] {
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+.prp-overlay.prp-theme-dark,
+.prp-overlay[data-color-mode='dark'] {
+  --prp-fg: var(--fgColor-default, #e6edf3);
+  --prp-fg-muted: var(--fgColor-muted, #8b949e);
+  --prp-bg: var(--bgColor-default, #0d1117);
+  --prp-bg-muted: var(--bgColor-muted, #161b22);
+  --prp-border: var(--borderColor-default, #30363d);
+  --prp-border-muted: var(--borderColor-muted, #21262d);
+  --prp-accent: var(--fgColor-accent, #2f81f7);
+  --prp-accent-bg: var(--bgColor-accent-emphasis, #1f6feb);
+  --prp-danger: #f85149;
+  --prp-ok: #3fb950;
+  --prp-warn: #d29922;
+  --prp-add-bg: rgba(46, 160, 67, 0.15);
+  --prp-del-bg: rgba(248, 81, 73, 0.15);
+  --prp-hunk-bg: rgba(56, 139, 253, 0.1);
+  --prp-shadow: 0 16px 48px rgba(1, 4, 9, 0.65);
+  --prp-backdrop-alpha: 0.22;
+  --prp-backdrop-color: rgba(1, 4, 9, var(--prp-backdrop-alpha));
+  --prp-sel-bg: color-mix(in srgb, #eab308 22%, transparent);
+  --prp-sel-bg-strong: color-mix(in srgb, #eab308 32%, transparent);
+  --prp-sel-edge: #fbbf24;
+  --prp-sel-border: color-mix(in srgb, #fbbf24 50%, transparent);
+  background: transparent;
+  color-scheme: dark;
+}
+
+.prp-backdrop {
+  position: absolute;
+  inset: 0;
+  /* Light dim; no blur (blur washed to white over light pages) */
+  background: var(--prp-backdrop-color);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  animation: prp-fade-in 180ms ease-out;
+}
+
+.prp-theme-dark .prp-backdrop,
+[data-color-mode='dark'] .prp-backdrop {
+  background: var(--prp-backdrop-color);
+}
+
+@keyframes prp-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.prp-modal {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  background: var(--prp-bg);
+  border: 1px solid var(--prp-border);
+  border-radius: var(--prp-radius);
+  box-shadow: var(--prp-shadow);
+  overflow: hidden;
+  overscroll-behavior: contain;
+  color: var(--prp-fg);
+  /* Panel is the size container — @container rules style .prp-header (descendant).
+     (A container cannot style itself; previous header-as-container densify never ran.) */
+  container-type: inline-size;
+  container-name: prp-panel;
+  transition:
+    width 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    height 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    max-width 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    max-height 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-radius 280ms ease,
+    box-shadow 280ms ease;
+}
+

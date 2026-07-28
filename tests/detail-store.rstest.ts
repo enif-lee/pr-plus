@@ -98,6 +98,18 @@ describe('detail-store isolation', () => {
     expect(sidePendingFlags(store).files).toBe(true);
   });
 
+  test('toAppDetail projects empty store (never null for valid store)', () => {
+    const store = createEmptyStore();
+    applyFiles(store, [{ filename: 'a.ts', patch: '+x' }], { settled: true });
+    const flat = toAppDetail(store);
+    expect(flat).not.toBeNull();
+    expect(flat!.files).toHaveLength(1);
+    expect(flat!._sideSettled.files).toBe(true);
+    expect(flat!._incompleteIdentity).toBe(true);
+    expect(toAppDetail(null)).toBeNull();
+    expect(toAppDetail(undefined)).toBeNull();
+  });
+
   test('pickMeta excludes side arrays', () => {
     const m = pickMeta({
       title: 't',

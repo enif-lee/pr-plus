@@ -1,6 +1,5 @@
 /**
- * PR modal composition root.
- * Implementation is assembled from pr-modal/parts/* → PrModalApp.generated.tsx
- * (each part ≤1500 lines). Edit parts, then run: npm run build:app-parts
+ * PR modal entry — re-exports complete implementation SoT.
+ * SoT: ./PrModalApp.impl.tsx
  */
-export { PrModalApp, default } from './PrModalApp.generated';
+export { PrModalApp, default } from './PrModalApp.impl';

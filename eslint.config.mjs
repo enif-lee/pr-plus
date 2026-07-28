@@ -23,6 +23,20 @@ export default [
       'src/modal/app/PrModalApp.generated.tsx',
       'src/modal/views/conversation/ConversationView.tsx',
       'src/modal/styles.css',
+      // Generated pure IIFEs (SoT is src/modal/lib/*.ts)
+      'src/modal/pure/**',
+      // Function-boundary host modules assembled into pr-modal-host.js
+      'src/host/modules/**',
+      // Content-script / entry JS emitted from TypeScript SoT
+      'src/tree.js',
+      'src/dom.js',
+      'src/content.js',
+      'src/content-bootstrap.js',
+      'src/pr-list-focus.js',
+      'src/pulls-palette.js',
+      'src/popup.js',
+      'src/storage.js',
+      'src/github-endpoints.js',
       'tests/**',
       'screenshots/**',
       '.browser/**',

@@ -1,41 +1,23 @@
 /**
- * Assemble PrModalApp.tsx from src/modal/app/pr-modal/parts/*
- * Parts are the maintainable source of truth (each ≤ ~1500 lines).
+ * PrModalApp is a complete TypeScript module (PrModalApp.impl.tsx).
+ * No mid-IIFE part assembly. This script only validates SoT presence.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const partsDir = path.join(root, 'src/modal/app/pr-modal/parts');
-const out = path.join(root, 'src/modal/app/PrModalApp.generated.tsx');
-
-const parts = fs
-  .readdirSync(partsDir)
-  .filter((f) => f.endsWith('.tsx') || f.endsWith('.ts'))
-  .sort();
-
-const body = parts
-  .map((f) => fs.readFileSync(path.join(partsDir, f), 'utf8').trimEnd())
-  .join('\n');
-
-const banner = `// @ts-nocheck — assembled from parts
-/**
- * Composition root for PR modal — AUTO-ASSEMBLED from pr-modal/parts/*.
- * Edit parts under src/modal/app/pr-modal/parts/, then: npm run build:app-parts
- */
-`;
-
-fs.writeFileSync(out, banner + body + '\n');
-console.log(
-  'Built PrModalApp.generated.tsx',
-  parts.length,
-  'parts',
-  (banner + body).split(/\n/).length,
-  'lines'
-);
-for (const f of parts) {
-  const n = fs.readFileSync(path.join(partsDir, f), 'utf8').split(/\n/).length;
-  const flag = n > 1500 ? ' OVER' : '';
-  console.log(`  ${f}: ${n}${flag}`);
+const impl = path.join(root, 'src/modal/app/PrModalApp.impl.tsx');
+const entry = path.join(root, 'src/modal/app/PrModalApp.tsx');
+if (!fs.existsSync(impl)) {
+  console.error('Missing SoT', impl);
+  process.exit(1);
+}
+if (!fs.existsSync(entry)) {
+  console.error('Missing entry', entry);
+  process.exit(1);
+}
+const n = fs.readFileSync(impl, 'utf8').split(/\n/).length;
+console.log('PrModalApp SoT OK:', path.relative(root, impl), n, 'lines (complete module, no part assemble)');
+if (n > 1500) {
+  console.warn('WARN: PrModalApp.impl.tsx exceeds 1500 lines — further hook extraction recommended');
 }

@@ -5,7 +5,7 @@
   "scripts": {
     "build:modal": "node scripts/build-modal.mjs",
     "build:sw": "node scripts/build-sw.mjs",
-    "build": "npm run build:pure && npm run build:fetch && npm run build:background-src && npm run build:sw && npm run build:host && npm run build:content-bridge && npm run build:app-parts && npm run build:modal",
+    "build": "npm run build:pure && npm run build:content-ts && npm run build:fetch && npm run build:background-src && npm run build:sw && npm run build:host && npm run build:content-bridge && npm run build:app-parts && npm run build:modal",
     "package": "npm run build && node scripts/package-extension.mjs",
     "test": "npm run build && rstest run",
     "browser:login": "agent-browser close --all 2>/dev/null; agent-browser open https://github.com/login",
@@ -13,7 +13,7 @@
     "browser:open": "agent-browser close --all 2>/dev/null; agent-browser open",
     "browser:close": "agent-browser close --all",
     "browser:snapshot": "agent-browser snapshot -i -c",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.host.json && tsc --noEmit -p tsconfig.fetch.json && tsc --noEmit -p tsconfig.bridge.json && node scripts/typecheck-entries.mjs",
     "test:unit": "rstest run",
     "test:rstest": "rstest run",
     "test:legacy": "node --import tsx tests/run-all.js",
@@ -24,7 +24,11 @@
     "build:app-parts": "node scripts/build-pr-modal-app.mjs && node scripts/build-conversation-view.mjs",
     "build:content-bridge": "node scripts/build-content-bridge.mjs",
     "build:background-src": "node scripts/build-background-src.mjs",
-    "build:pure": "node scripts/build-pure.mjs"
+    "build:pure": "node scripts/build-pure.mjs",
+    "build:content-ts": "node scripts/build-content-ts.mjs",
+    "typecheck:domain": "tsc --noEmit",
+    "typecheck:all-projects": "tsc --noEmit && tsc --noEmit -p tsconfig.host.json && tsc --noEmit -p tsconfig.fetch.json && tsc --noEmit -p tsconfig.bridge.json && tsc --noEmit -p tsconfig.entries.json",
+    "typecheck:entries": "node scripts/typecheck-entries.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

@@ -1,0 +1,75 @@
+/**
+ * Residual Button styles — variants / tokens that need CSS variables & complex
+ * :hover/:disabled states. Layout/sizing prefer Tailwind on the element.
+ * Loaded via styles/index.css import.
+ */
+
+.prp-btn {
+  font: inherit;
+  font-weight: 500;
+  border: 1px solid transparent;
+  cursor: pointer;
+  color: var(--prp-fg, #1f2328);
+  background: var(--prp-btn-bg, #f6f8fa);
+  border-color: var(--prp-border, #d0d7de);
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease,
+    color 0.12s ease,
+    box-shadow 0.12s ease;
+}
+
+.prp-btn:hover:not(:disabled) {
+  background: var(--prp-btn-hover, #eff2f5);
+}
+
+.prp-btn:focus-visible {
+  outline: 2px solid var(--prp-accent, #0969da);
+  outline-offset: 1px;
+}
+
+.prp-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.prp-btn--primary {
+  color: #fff;
+  background: var(--prp-accent, #1f883d);
+  border-color: var(--prp-accent, #1f883d);
+}
+
+.prp-btn--primary:hover:not(:disabled) {
+  background: var(--prp-accent-hover, #1a7f37);
+  border-color: var(--prp-accent-hover, #1a7f37);
+}
+
+.prp-btn--ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--prp-fg-muted, #656d76);
+}
+
+.prp-btn--ghost:hover:not(:disabled) {
+  background: var(--prp-btn-hover, rgba(175, 184, 193, 0.2));
+  color: var(--prp-fg, #1f2328);
+}
+
+.prp-btn--danger {
+  color: #fff;
+  background: var(--prp-danger, #cf222e);
+  border-color: var(--prp-danger, #cf222e);
+}
+
+.prp-btn--danger:hover:not(:disabled) {
+  background: #a40e26;
+  border-color: #a40e26;
+}
+
+.prp-btn--size-sm {
+  font-size: 12px;
+}
+
+.prp-btn--size-lg {
+  font-size: 14px;
+}

@@ -1,6 +1,7 @@
-// @ts-nocheck
-/** AUTO-ASSEMBLED from background/parts — npm run build:background-src */
-// @ts-nocheck — gradual TS migration of classic extension scripts
+/**
+ * AUTO-GENERATED from src/background/sw-api.ts
+ * SOURCE OF TRUTH: src/background/sw-api.ts — npm run build:background-src
+ */
 /**
  * Extension service worker — sole place that reads the PAT and calls GitHub API.
  * Content scripts never receive the raw token.
@@ -50,7 +51,7 @@ const CONTENT_SCRIPT_JS = [
  * No process-global mutation — pass returned ctx into every PRTreeFetch call.
  * @param {object|null|undefined} message
  */
-function apiCtxFromMessage(message) {
+function apiCtxFromMessage(message: any) {
   const webHost = message?.webHost || message?.webOrigin || 'github.com';
   if (typeof PRGithubEndpoints?.resolveGithubEndpoints === 'function') {
     return PRGithubEndpoints.resolveGithubEndpoints({ webHost });
@@ -71,7 +72,7 @@ function apiCtxFromMessage(message) {
  * PAT for this message's web host.
  * github.com → default token; registered enterprise → host pair; else null.
  */
-async function tokenForMessage(message) {
+async function tokenForMessage(message: any) {
   const webHost = message?.webHost || message?.webOrigin || 'github.com';
   const sel = await PRTreeStorage.getTokenForWebHost(webHost);
   return sel.token;
@@ -82,7 +83,7 @@ async function registeredEnterpriseHosts() {
   return PRTreeStorage.getHostAccountHosts();
 }
 
-function githubTabUrlPatterns(enterpriseHosts) {
+function githubTabUrlPatterns(enterpriseHosts: any) {
   const patterns = ['https://github.com/*', 'https://*.github.com/*'];
   const hosts = PRGithubEndpoints.normalizeEnterpriseWebHosts(enterpriseHosts);
   for (const h of hosts) {
@@ -99,7 +100,7 @@ function githubTabUrlPatterns(enterpriseHosts) {
  */
 let enterpriseCsSyncChain = Promise.resolve();
 
-async function syncEnterpriseContentScripts(enterpriseHosts) {
+async function syncEnterpriseContentScripts(enterpriseHosts: any) {
   const run = () => syncEnterpriseContentScriptsImpl(enterpriseHosts);
   // Always continue the chain even if a prior sync rejected
   const next = enterpriseCsSyncChain.then(run, run);
@@ -110,7 +111,7 @@ async function syncEnterpriseContentScripts(enterpriseHosts) {
   return next;
 }
 
-async function syncEnterpriseContentScriptsImpl(enterpriseHosts) {
+async function syncEnterpriseContentScriptsImpl(enterpriseHosts: any) {
   if (!chrome.scripting?.registerContentScripts) {
     return { registered: false };
   }
@@ -179,7 +180,7 @@ async function syncEnterpriseContentScriptsImpl(enterpriseHosts) {
   return { registered: true, matches };
 }
 
-async function requestEnterprisePermissions(enterpriseHosts) {
+async function requestEnterprisePermissions(enterpriseHosts: any) {
   if (!chrome.permissions?.request) {
     return { granted: false, error: 'permissions API unavailable' };
   }
@@ -191,7 +192,7 @@ async function requestEnterprisePermissions(enterpriseHosts) {
       origins.add(`https://api.${h}/*`);
     }
   }
-  const list = [...origins];
+  const list = [...(origins as any)];
   if (!list.length) return { granted: true, origins: [] };
   return new Promise((resolve) => {
     chrome.permissions.request({ origins: list }, (granted) => {
@@ -273,7 +274,7 @@ const MSG = {
 /** Max time for one SW message (GitHub multi-request detail can be slow). */
 const MESSAGE_TIMEOUT_MS = 120_000;
 
-function broadcastToGithubTabs(message) {
+function broadcastToGithubTabs(message: any) {
   // Notify extension pages / open content scripts without sending secrets.
   // sendMessage may not return a Promise on all runtimes — never assume .catch.
   try {
@@ -308,7 +309,7 @@ function broadcastTokenChanged() {
   broadcastToGithubTabs({ type: MSG.TOKEN_CHANGED });
 }
 
-function broadcastPrefsChanged(prefs) {
+function broadcastPrefsChanged(prefs: any) {
   broadcastToGithubTabs({ type: MSG.PREFS_CHANGED, prefs });
 }
 
@@ -408,8 +409,8 @@ function makeAbortError() {
   return err;
 }
 
-function wrapFetchWithSignal(baseFetch, signal) {
-  return (url, init = {}) => {
+function wrapFetchWithSignal(baseFetch: any, signal: any) {
+  return (url, init: any = {}) => {
     if (signal.aborted) return Promise.reject(makeAbortError());
     let nextSignal = signal;
     if (init.signal && init.signal !== signal) {
@@ -420,11 +421,11 @@ function wrapFetchWithSignal(baseFetch, signal) {
         nextSignal = AbortSignal.any([init.signal, signal]);
       }
     }
-    return baseFetch(url, { ...init, signal: nextSignal });
+    return baseFetch(url, { ...(init as any), signal: nextSignal });
   };
 }
 
-function beginTrackedFetch(requestId) {
+function beginTrackedFetch(requestId: any) {
   // Always track: missing requestId still gets a synthetic id so cancelAll
   // can abort mid-flight work (list fetches, older call sites, etc.).
   const id =
@@ -466,14 +467,14 @@ function beginTrackedFetch(requestId) {
   };
 }
 
-function endTrackedFetch(requestId) {
+function endTrackedFetch(requestId: any) {
   const id = requestId != null ? String(requestId) : '';
   if (!id) return;
   activeFetchControllers.delete(id);
   preCancelledFetchIds.delete(id);
 }
 
-function cancelTrackedFetch(requestId) {
+function cancelTrackedFetch(requestId: any) {
   const id = requestId != null ? String(requestId) : '';
   if (!id) return false;
   // Mark pre-cancelled so a still-queued FETCH_* starts aborted
@@ -495,7 +496,7 @@ function cancelTrackedFetch(requestId) {
   return true;
 }
 
-function cancelTrackedFetches(requestIds) {
+function cancelTrackedFetches(requestIds: any) {
   const ids = Array.isArray(requestIds) ? requestIds : [];
   let n = 0;
   for (const id of ids) {
@@ -514,7 +515,7 @@ function cancelAllTrackedFetches() {
   return n;
 }
 
-function isAbortError(err) {
+function isAbortError(err: any) {
   return (
     err?.name === 'AbortError' ||
     /aborted|AbortError/i.test(String(err?.message || err || ''))
@@ -525,7 +526,7 @@ function isAbortError(err) {
  * Periodic chrome API call keeps the MV3 service worker alive during long
  * GitHub fetches (otherwise SW can suspend mid-handler and close the channel).
  */
-function withServiceWorkerKeepAlive(work) {
+function withServiceWorkerKeepAlive(work: any) {
   let tick = 0;
   const id = setInterval(() => {
     tick += 1;
@@ -553,7 +554,7 @@ function withServiceWorkerKeepAlive(work) {
     .finally(() => clearInterval(id));
 }
 
-function withTimeout(promise, ms, label) {
+function withTimeout(promise: any, ms: any, label: any) {
   let timer;
   const timeout = new Promise((_, reject) => {
     timer = setTimeout(() => {
@@ -567,7 +568,7 @@ function withTimeout(promise, ms, label) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
-async function handleMessage(message) {
+async function handleMessage(message: any) {
   // Per-message API ctx (stateless). Propagate into PRTreeFetch*; never set global.
   const apiCtx = apiCtxFromMessage(message || {});
 
@@ -606,7 +607,7 @@ async function handleMessage(message) {
     case MSG.TOKEN_SET: {
       await PRTreeStorage.setGithubToken(message.token || '');
       const status = await PRTreeStorage.getGithubTokenStatus();
-      return { ok: true, ...status };
+      return { ok: true, ...(status as any) };
     }
     case MSG.TOKEN_CLEAR: {
       await PRTreeStorage.setGithubToken('');
@@ -687,7 +688,7 @@ async function handleMessage(message) {
     }
     case MSG.CLEAR_DETAIL_CACHE: {
       const result = await clearDetailCacheOnGithubTabs();
-      return { ok: true, ...result };
+      return { ok: true, ...(result as any) };
     }
     case MSG.FETCH_OPEN_PULLS: {
       const tracked = beginTrackedFetch(message.requestId);
@@ -972,7 +973,7 @@ async function handleMessage(message) {
     }
     case MSG.RESOLVE_REVIEW_THREAD: {
       const token = await tokenForMessage(message);
-      if (!token, apiCtx) throw new Error('GitHub PAT required to resolve review threads');
+      if (!token) throw new Error('GitHub PAT required to resolve review threads');
       const result = await PRTreeFetch.resolveReviewThread(
         message.threadNodeId,
         message.resolved !== false,
@@ -1141,7 +1142,7 @@ async function handleMessage(message) {
     }
     case MSG.CREATE_REPO_LABEL: {
       const token = await tokenForMessage(message);
-      if (!token, apiCtx) throw new Error('GitHub PAT required to create labels');
+      if (!token) throw new Error('GitHub PAT required to create labels');
       const result = await PRTreeFetch.createRepoLabel(
         message.owner,
         message.repo,
@@ -1180,7 +1181,7 @@ async function handleMessage(message) {
     }
     case MSG.CREATE_REPO_MILESTONE: {
       const token = await tokenForMessage(message);
-      if (!token, apiCtx) throw new Error('GitHub PAT required to create milestones');
+      if (!token) throw new Error('GitHub PAT required to create milestones');
       const result = await PRTreeFetch.createRepoMilestone(
         message.owner,
         message.repo,
@@ -1504,7 +1505,7 @@ async function handleMessage(message) {
     }
     case MSG.SET_MILESTONE: {
       const token = await tokenForMessage(message);
-      if (!token, apiCtx) throw new Error('GitHub PAT required to set milestone');
+      if (!token) throw new Error('GitHub PAT required to set milestone');
       const result = await PRTreeFetch.setIssueMilestone(
         message.owner,
         message.repo,
@@ -1599,3 +1600,5 @@ try {
 
 // Cold SW wake: re-register enterprise hosts from storage
 void rehydrateEnterpriseScripts();
+
+

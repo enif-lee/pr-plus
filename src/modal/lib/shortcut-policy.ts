@@ -536,7 +536,7 @@ export function isOptionGlyphKey(key: unknown): boolean {
   if (!k) return false;
   // Single ASCII letter/digit/common symbol — not a glyph
   if (/^[a-zA-Z0-9]$/.test(k)) return false;
-  if (/^[\[\].,\/\\;'`=\-]$/.test(k)) return false;
+  if (/^[[\]. ,/\\;'`=-]$/.test(k)) return false;
   // Escape/Enter/arrows reported as words
   if (
     /^(escape|enter|tab|backspace|delete|arrowup|arrowdown|arrowleft|arrowright| |space)$/i.test(

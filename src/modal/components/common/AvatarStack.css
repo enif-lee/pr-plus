@@ -1,0 +1,282 @@
+/**
+ * Residual CSS (cannot fully express via Tailwind utilities).
+ * Colocated next to owning domain; imported from styles/index.css.
+ * Migrated from styles/parts/04-horizontal-overlapping-avatar-stack.css
+ */
+
+/* Horizontal overlapping avatar stack */
+.prp-aside-compact__stack {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0;
+  min-height: 22px;
+  max-width: 100%;
+}
+.prp-aside-compact__stack--empty {
+  opacity: 0.55;
+}
+.prp-aside-compact--empty {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 8px;
+}
+.prp-aside-compact__empty-msg {
+  font-size: 11px;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  transform: rotate(180deg);
+  letter-spacing: 0.04em;
+  opacity: 0.7;
+}
+.prp-aside-compact__empty-dot {
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  border: 1px dashed var(--prp-border-muted);
+  background: transparent;
+  display: block;
+}
+.prp-aside-compact__avatar-wrap {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-left: -6px;
+  border-radius: 999px;
+  /* ring: bg gap + status color */
+  box-shadow:
+    0 0 0 1.5px var(--prp-bg),
+    0 0 0 2.5px var(--prp-border-muted);
+  line-height: 0;
+}
+.prp-aside-compact__avatar-wrap:first-child {
+  margin-left: 0;
+}
+.prp-aside-compact__avatar-wrap--ok {
+  box-shadow:
+    0 0 0 1.5px var(--prp-bg),
+    0 0 0 2.5px var(--prp-ok);
+}
+.prp-aside-compact__avatar-wrap--danger {
+  box-shadow:
+    0 0 0 1.5px var(--prp-bg),
+    0 0 0 2.5px var(--prp-danger);
+}
+.prp-aside-compact__avatar-wrap--warn {
+  box-shadow:
+    0 0 0 1.5px var(--prp-bg),
+    0 0 0 2.5px var(--prp-warn);
+}
+.prp-aside-compact__avatar-wrap--muted {
+  box-shadow:
+    0 0 0 1.5px var(--prp-bg),
+    0 0 0 2.5px var(--prp-fg-muted);
+}
+.prp-aside-compact__avatar-wrap .prp-avatar,
+.prp-aside-compact__avatar-wrap .prp-avatar--sm {
+  width: 20px !important;
+  height: 20px !important;
+  font-size: 9px;
+  border-radius: 999px;
+}
+/* +N overflow circle (from 5th person onward) */
+.prp-aside-compact__more-circle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  margin-left: -6px;
+  border-radius: 999px;
+  background: var(--prp-bg-muted);
+  border: 1.5px solid var(--prp-border);
+  box-shadow: 0 0 0 1.5px var(--prp-bg);
+  color: var(--prp-fg-muted);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: default;
+  user-select: none;
+}
+.prp-aside-compact__more-circle__txt {
+  transform: translateY(0.5px);
+}
+.prp-aside-compact__more {
+  position: relative;
+  flex-shrink: 0;
+  margin-left: 4px;
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--prp-fg-muted);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.prp-aside-compact__check {
+  position: relative;
+  display: inline-flex;
+  max-width: 100%;
+}
+.prp-aside-compact__check-badge {
+  font-size: 10px !important;
+  padding: 0 6px !important;
+  line-height: 18px !important;
+  min-height: 18px !important;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.prp-aside-compact__labels {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 4px;
+  max-width: 100%;
+}
+.prp-aside-compact__label-dot {
+  position: relative;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px rgba(1, 4, 9, 0.12);
+  flex-shrink: 0;
+}
+.prp-aside-compact__pill {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--prp-fg-muted);
+  line-height: 1.2;
+  padding: 2px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--prp-border-muted);
+  background: var(--prp-bg-muted);
+  cursor: default;
+}
+.prp-aside-compact__pill-txt {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prp-aside-compact__tags {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+.prp-aside-compact__tag {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-width: 0;
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid var(--prp-border-muted);
+  background: color-mix(
+    in srgb,
+    var(--prp-bg-muted) 88%,
+    var(--prp-accent, #0969da)
+  );
+  cursor: default;
+}
+.prp-aside-compact__tag-txt {
+  font-family: var(--prp-mono);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--prp-accent, #0969da);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prp-aside-compact__group--counts {
+  gap: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--prp-border-muted);
+}
+.prp-aside-compact__count {
+  position: relative;
+  display: block;
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--prp-fg-muted);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+}
+.prp-aside-compact__count-unit {
+  font-weight: 500;
+  opacity: 0.9;
+}
+
+/*
+ * Compact tip: open right toward the outer edge (JS prefers right + may flip left).
+ * Placement classes on .prp-tip-pop handle left/right geometry.
+ */
+.prp-aside-compact .prp-has-tip {
+  position: relative;
+}
+.prp-aside-compact .prp-tip-pop,
+.prp-aside-compact .prp-tip-pop--portal {
+  white-space: pre-line;
+  max-width: min(240px, 42vw);
+  text-align: left;
+}
+.prp-aside-compact .prp-tip-pop__label {
+  overflow: visible;
+  text-overflow: unset;
+  white-space: pre-line;
+}
+
+/*
+ * Stacked check-group tips list names (multi-line). Prefer pre-line over
+ * the older single-line count tip style.
+ */
+.prp-checks-summary-ctrl .prp-tip-pop,
+.prp-aside-compact .prp-checks-summary-ctrl .prp-tip-pop,
+.prp-checks-summary-stack__item .prp-tip-pop,
+.prp-aside-compact .prp-checks-summary-stack__item .prp-tip-pop {
+  max-width: min(300px, 72vw);
+  width: max-content;
+  white-space: pre-line;
+  text-align: left;
+}
+.prp-checks-summary-ctrl .prp-tip-pop__label,
+.prp-aside-compact .prp-checks-summary-ctrl .prp-tip-pop__label,
+.prp-checks-summary-stack__item .prp-tip-pop__label,
+.prp-aside-compact .prp-checks-summary-stack__item .prp-tip-pop__label {
+  white-space: pre-line;
+  overflow: visible;
+  text-overflow: unset;
+  line-height: 1.35;
+}
+
+@media (max-width: 840px) {
+  .prp-conversation__splitter {
+    display: none;
+  }
+  .prp-aside-collapse-btn {
+    /* Stacked layout: pin control to the top-right of the rail */
+    position: absolute;
+    left: auto;
+    right: 8px;
+    top: 8px;
+    transform: none;
+  }
+  .prp-conversation__aside {
+    position: relative;
+  }
+}
+
+/* AsideSection chrome moved to components/common/AsideSection.css (sibling residual). */

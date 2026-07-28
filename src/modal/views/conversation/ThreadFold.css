@@ -1,0 +1,119 @@
+/**
+ * Residual CSS (cannot fully express via Tailwind utilities).
+ * Colocated next to owning domain; imported from styles/index.css.
+ * Migrated from styles/parts/03-circular-fold-control-centered-on-the-ve.css
+ */
+
+/* Circular fold control centered on the vertical splitter */
+.prp-aside-collapse-btn {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  z-index: 14;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--prp-border);
+  border-radius: 999px;
+  background: var(--prp-bg);
+  color: var(--prp-fg-muted);
+  box-shadow: 0 1px 4px rgba(1, 4, 9, 0.14);
+  cursor: pointer;
+  appearance: none;
+  transition:
+    background 120ms ease,
+    color 120ms ease,
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+  /* Tip anchors here; overflow visible so popover is not clipped by the button box */
+  overflow: visible;
+}
+.prp-aside-collapse-btn:hover,
+.prp-aside-collapse-btn:focus-visible {
+  color: var(--prp-accent);
+  border-color: var(--prp-accent);
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--prp-accent) 22%, transparent);
+}
+/* Collapse chevron: TipPopover prefers bottom + flip; keep above stacking */
+.prp-aside-collapse-btn .prp-tip-pop {
+  white-space: nowrap;
+}
+
+/* Compact rail */
+.prp-conversation__aside--collapsed {
+  align-items: stretch;
+  /*
+   * Compact rail: no scroll chrome (FloatingScrollbar is not mounted).
+   * overflow visible so avatar/check tip popovers can paint into the main pane.
+   */
+  overflow: visible;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.prp-conversation__aside--collapsed::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+.prp-conversation__aside-host--collapsed {
+  padding: 0;
+  /* Host is a scroll-float wrapper (overflow:hidden by default) — open it when
+   * compact so TipPopover can escape the rail without being cut off. */
+  overflow: visible;
+  /*
+   * Stack above the splitter (12) and collapse toggle (14) so right-opening
+   * tips paint over chrome instead of sliding underneath.
+   */
+  z-index: 20;
+}
+.prp-conversation__aside-host--collapsed .prp-aside-compact .prp-tip-pop {
+  /* Portaled tips stack at 100020; keep compact label wrapping */
+}
+.prp-conversation__aside-host--collapsed .prp-conversation__aside {
+  overflow: visible;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.prp-conversation__aside-host--collapsed .prp-conversation__aside::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+.prp-aside-compact {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  padding: 2px 0 8px;
+  box-sizing: border-box;
+}
+.prp-aside-compact__group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+}
+.prp-aside-compact__label {
+  margin: 0;
+  padding: 0;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  color: var(--prp-fg-muted);
+  line-height: 1.2;
+  user-select: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}

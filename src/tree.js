@@ -1,33 +1,27 @@
 /**
- * Pure PR tree builder. Accepts flat PR descriptors, returns an ordered forest.
- * Each node: { pr, children: Node[] }
- *
- * Root rule: walk parent chain (base=head match); cycle members become roots.
- * Child rule: pr.baseRef === parent.headRef within the same acyclic component.
+ * AUTO-GENERATED from src/tree.ts
+ * SOURCE OF TRUTH: src/tree.ts — do not edit this .js
+ * Rebuild: node scripts/build-content-ts.mjs
  */
-
 function buildPrTree(prs) {
   if (!Array.isArray(prs) || prs.length === 0) {
     return [];
   }
-
-  const byHeadRef = new Map();
+  const byHeadRef = /* @__PURE__ */ new Map();
   for (const pr of prs) {
     byHeadRef.set(pr.headRef, pr);
   }
-
-  const parentOf = new Map();
+  const parentOf = /* @__PURE__ */ new Map();
   for (const pr of prs) {
     const parent = byHeadRef.get(pr.baseRef);
     if (parent && parent !== pr) {
       parentOf.set(pr, parent);
     }
   }
-
-  const rootCache = new Map();
+  const rootCache = /* @__PURE__ */ new Map();
   function resolveRoot(pr) {
     if (rootCache.has(pr)) return rootCache.get(pr);
-    const stack = new Set();
+    const stack = /* @__PURE__ */ new Set();
     let cur = pr;
     while (parentOf.has(cur)) {
       if (stack.has(cur)) {
@@ -40,9 +34,8 @@ function buildPrTree(prs) {
     rootCache.set(pr, cur);
     return cur;
   }
-
   const roots = [];
-  const seenRoots = new Set();
+  const seenRoots = /* @__PURE__ */ new Set();
   for (const pr of prs) {
     const root = resolveRoot(pr);
     if (!seenRoots.has(root)) {
@@ -50,8 +43,7 @@ function buildPrTree(prs) {
       roots.push(root);
     }
   }
-
-  const childrenByParentHead = new Map();
+  const childrenByParentHead = /* @__PURE__ */ new Map();
   for (const pr of prs) {
     const parent = parentOf.get(pr);
     if (!parent) continue;
@@ -61,21 +53,17 @@ function buildPrTree(prs) {
     }
     childrenByParentHead.get(parent.headRef).push(pr);
   }
-
   function buildNode(pr) {
     const childPrs = childrenByParentHead.get(pr.headRef) || [];
     childPrs.sort((a, b) => b.number - a.number);
     return {
       pr,
-      children: childPrs.map(buildNode),
+      children: childPrs.map(buildNode)
     };
   }
-
   roots.sort((a, b) => b.number - a.number);
   return roots.map(buildNode);
 }
-
-/** Flatten forest to depth-first order with depth for rendering. */
 function flattenPrTree(forest) {
   const result = [];
   function walk(node, depth) {
@@ -89,23 +77,17 @@ function flattenPrTree(forest) {
   }
   return result;
 }
-
-/** Serialize forest to indented text (for tests / debugging). */
 function serializePrTree(forest) {
-  return flattenPrTree(forest)
-    .map(({ pr, depth }) => {
-      const indent = '  '.repeat(depth);
-      const draft = pr.draft ? ' [draft]' : '';
-      return `${indent}#${pr.number} ${pr.title} (${pr.headRef} ← ${pr.baseRef})${draft}`;
-    })
-    .join('\n');
+  return flattenPrTree(forest).map(({ pr, depth }) => {
+    const indent = "  ".repeat(depth);
+    const draft = pr.draft ? " [draft]" : "";
+    return `${indent}#${pr.number} ${pr.title} (${pr.headRef} \u2190 ${pr.baseRef})${draft}`;
+  }).join("\n");
 }
-
 const treeApi = { buildPrTree, flattenPrTree, serializePrTree };
-
-if (typeof module !== 'undefined' && module.exports) {
+if (typeof module !== "undefined" && module.exports) {
   module.exports = treeApi;
 }
-if (typeof globalThis !== 'undefined') {
+if (typeof globalThis !== "undefined") {
   globalThis.PRTree = treeApi;
 }

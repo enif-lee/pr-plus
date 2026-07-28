@@ -1,7 +1,7 @@
-// @ts-nocheck
 /**
- * Conversation surface — AUTO-ASSEMBLED from conversation/parts/*.
- * Edit parts (each ≤1500 lines), then: npm run build:app-parts
+ * SOURCE OF TRUTH — Conversation surface.
+ * Complete TypeScript module (no mid-IIFE parts assembly).
+ * Domain tsc typechecks this file. Size exception: undivided React root.
  */
 import React, { useEffect, useMemo, useRef, useState, memo, useCallback } from 'react';
 import { Button } from '@common/Button';
@@ -21,10 +21,17 @@ import {
   IconDisclosure,
   IconFileDiff,
   IconLinkExternal,
-  IconMergeStatus,
   IconPencil,
   IconTrash,
 } from '@common/icons';
+import {
+  GroupThreadFoldBtn,
+  GroupThreadJumpBtn,
+} from './GroupThreadControls';
+import { ThreadGapBanner } from './ThreadGapBanner';
+import { MergeBox } from './MergeBox';
+import { DescriptionCard } from './DescriptionCard';
+import { ComposerCard } from './ComposerCard';
 import { buildUnifiedReviewerRows, isBotAccount } from '@lib/searchable-select';
 import {
   conversationAsideWidthPx,
@@ -40,13 +47,7 @@ import {
   partitionTimelineWithThreadGap,
 } from '@lib/conversation-timeline';
 import { snippetForComment } from '@lib/diff-snippet';
-import {
-  buildMergeBoxStatus,
-  mergeMethodButtonLabel,
-  MERGE_METHODS,
-  normalizeMergeMethod,
-  type MergeMethod,
-} from '@lib/merge-box-status';
+import { buildMergeBoxStatus } from '@lib/merge-box-status';
 import { BodyEditor } from '../composers/BodyEditor';
 import { MetaList } from './MetaList';
 import { AsideCommitsTimeline } from './AsideCommitsTimeline';
@@ -82,90 +83,6 @@ import {
   ConversationKbFocusScroller,
   useIsConversationKbFocused,
 } from '@common/ConversationKbFocus';
-
-/** Group path-row fold control — ⌥F tip only when this thread is context-focused. */
-function GroupThreadFoldBtn({
-  anchor,
-  open,
-  onToggle,
-  fileLoc,
-  path,
-  pendingBadge,
-  outdatedBadge,
-  resolvedBadge,
-}: {
-  anchor: string;
-  open: boolean;
-  onToggle: () => void;
-  fileLoc: string;
-  path?: string;
-  pendingBadge?: React.ReactNode;
-  outdatedBadge?: React.ReactNode;
-  resolvedBadge?: React.ReactNode;
-}) {
-  const focused = useIsConversationKbFocused(anchor);
-  return (
-    <button
-      type="button"
-      className={`prp-review-group__row-btn${focused ? ' prp-opt-hint-host' : ''}`}
-      onClick={onToggle}
-      aria-expanded={open}
-      title={
-        focused
-          ? open
-            ? 'Collapse thread (⌥F)'
-            : 'Expand thread (⌥F)'
-          : undefined
-      }
-    >
-      {focused ? <OptBtnHint label="⌥F" preferredPlacement="top" /> : null}
-      <span className="prp-review-group__chev" aria-hidden="true">
-        <IconDisclosure open={open} size={16} />
-      </span>
-      <span className="prp-mono prp-review-group__path" title={fileLoc || ''}>
-        {fileLoc || path || 'thread'}
-      </span>
-      {pendingBadge}
-      {outdatedBadge}
-      {resolvedBadge}
-    </button>
-  );
-}
-
-/** Group jump-to-diff control — ⌥D tip only when context-focused. */
-function GroupThreadJumpBtn({
-  anchor,
-  fileLoc,
-  onJump,
-}: {
-  anchor: string;
-  fileLoc: string;
-  onJump: () => void;
-}) {
-  const focused = useIsConversationKbFocused(anchor);
-  return (
-    <button
-      type="button"
-      className={`prp-icon-btn prp-review-group__jump${
-        focused ? ' prp-opt-hint-host' : ''
-      }`}
-      title={
-        focused
-          ? `View in Diff · ${fileLoc} (⌥D)`
-          : `View in Diff · ${fileLoc}`
-      }
-      aria-label={`View ${fileLoc} in Diff`}
-      onClick={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        onJump();
-      }}
-    >
-      {focused ? <OptBtnHint label="⌥D" preferredPlacement="top" /> : null}
-      <IconFileDiff size={16} />
-    </button>
-  );
-}
 
 function ConversationViewImpl(props: any) {
   const {
@@ -253,9 +170,7 @@ function ConversationViewImpl(props: any) {
 
   const embedScrollChain = isEmbedPresentation(presentation);
   const convRootRef = useRef<HTMLDivElement | null>(null);
-  const [mergeMethod, setMergeMethod] = useState<MergeMethod>('merge');
-  const [mergeMenuOpen, setMergeMenuOpen] = useState(false);
-  const mergeMenuRef = useRef<HTMLDivElement | null>(null);
+  // @ts-expect-error modal dynamic action/picker shapes
   const asideScrollRef = useRef<HTMLAsideElement | null>(null);
 
   /**
@@ -472,23 +387,6 @@ function ConversationViewImpl(props: any) {
     [detail]
   );
 
-  useEffect(() => {
-    if (!mergeMenuOpen) return undefined;
-    const onDoc = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (mergeMenuRef.current?.contains(t)) return;
-      setMergeMenuOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMergeMenuOpen(false);
-    };
-    document.addEventListener('mousedown', onDoc, true);
-    document.addEventListener('keydown', onKey, true);
-    return () => {
-      document.removeEventListener('mousedown', onDoc, true);
-      document.removeEventListener('keydown', onKey, true);
-    };
-  }, [mergeMenuOpen]);
 
   if (!detail && sectionLoading) {
     return <LoadingSkeleton variant="conversation" />;
@@ -1142,38 +1040,12 @@ function ConversationViewImpl(props: any) {
    * (same chrome for mid-list dual-window and end-of-list single window).
    */
   function renderThreadGap(hiddenCount: number) {
-    if (typeof onLoadMoreReviewThreads !== 'function') return null;
-    const n = Number(hiddenCount) || 0;
     return (
-      <div className="prp-timeline-gap" role="region" aria-label="Hidden review threads">
-        <div className="prp-timeline-gap__line" aria-hidden="true" />
-        <div className="prp-timeline-gap__body">
-          <span className="prp-timeline-gap__count">
-            {n > 0 ? `${n} hidden items` : 'More review threads'}
-          </span>
-          <div className="prp-timeline-gap__actions">
-            <button
-              type="button"
-              className="prp-timeline-gap__load"
-              disabled={actionBusy}
-              onClick={() => void onLoadMoreReviewThreads?.()}
-              title="Load more review threads between newest and oldest"
-            >
-              Load more…
-            </button>
-            <button
-              type="button"
-              className="prp-timeline-gap__load"
-              disabled={actionBusy}
-              onClick={() => void onLoadMoreReviewThreads?.('all')}
-              title="Load every remaining review thread"
-            >
-              Load all
-            </button>
-          </div>
-        </div>
-        <div className="prp-timeline-gap__line" aria-hidden="true" />
-      </div>
+      <ThreadGapBanner
+        hiddenCount={hiddenCount}
+        actionBusy={actionBusy}
+        onLoadMore={onLoadMoreReviewThreads}
+      />
     );
   }
 
@@ -1402,420 +1274,65 @@ function ConversationViewImpl(props: any) {
 
   function renderDescriptionCard() {
     return (
-      <Card
-        title="Description"
-        className={searchCardClass('body', 'prp-card--desc')}
-        data-search-anchor="body"
-        actions={
-          !sectionLoading && !editingBody ? (
-            <button
-              type="button"
-              className="prp-icon-btn"
-              disabled={actionBusy}
-              title="Edit description"
-              aria-label="Edit description"
-              onClick={onStartEditBody}
-            >
-              <IconPencil size={13} />
-            </button>
-          ) : null
+      <DescriptionCard
+        detail={detail}
+        sectionLoading={sectionLoading}
+        editingBody={editingBody}
+        actionBusy={actionBusy}
+        searchClassName={searchCardClass('body', 'prp-card--desc')}
+        onStartEditBody={onStartEditBody}
+        onCancelEditBody={onCancelEditBody}
+        onSaveBody={onSaveBody}
+        onRegisterEditorSave={onRegisterEditorSave}
+        onUploadFile={onUploadFile}
+        linkCtx={linkCtx}
+        mentionCandidates={mentionCandidates}
+        renderBody={(body, anchor, mark) =>
+          renderSearchableBody(body, anchor, mark)
         }
-      >
-        {editingBody ? (
-          <BodyEditor
-            value={detail.body || ''}
-            actionBusy={actionBusy}
-            onSave={onSaveBody}
-            onCancel={onCancelEditBody}
-            onRegisterSave={onRegisterEditorSave}
-            onUploadFile={onUploadFile}
-            linkCtx={linkCtx}
-            mentionCandidates={mentionCandidates}
-          />
-        ) : (
-          renderSearchableBody(
-            detail.body || '_No description provided._',
-            'body',
-            false
-          )
-        )}
-      </Card>
+      />
     );
   }
 
   function renderMergeBox() {
-    const conflictFiles = Array.isArray(ms.conflictFiles) ? ms.conflictFiles : [];
-    const resolveUrl = ms.resolveConflictsUrl || null;
-
     return (
-      <div
-        className={`prp-merge-box prp-merge-box--${boxTone}`}
-        data-merge-kind={ms.kind}
-        role="region"
-        aria-label="Merge status"
-      >
-        <div className="prp-merge-box__status-block">
-          <span
-            className={`prp-merge-box__icon prp-merge-box__icon--${ms.tone}`}
-            aria-hidden="true"
-          >
-            <IconMergeStatus kind={ms.kind} size={16} />
-          </span>
-          <div className="prp-merge-box__copy">
-            <h3 className="prp-merge-box__headline">{ms.headline}</h3>
-            <p className="prp-merge-box__helper">
-              {ms.kind === 'conflicts' ? (
-                <>
-                  Use the{' '}
-                  {resolveUrl ? (
-                    <a
-                      href={resolveUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      web editor
-                    </a>
-                  ) : (
-                    'web editor'
-                  )}{' '}
-                  or the command line to resolve conflicts before continuing.
-                </>
-              ) : (
-                ms.helper
-              )}
-            </p>
-          </div>
-          {ms.showResolveConflicts && resolveUrl ? (
-            <a
-              className="prp-btn prp-btn--default prp-merge-box__resolve"
-              href={resolveUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Resolve conflicts
-            </a>
-          ) : null}
-        </div>
-
-        {ms.kind === 'conflicts' && conflictFiles.length > 0 ? (
-          <ul className="prp-merge-box__conflict-files" aria-label="Conflicting files">
-            {conflictFiles.map((path: string) => (
-              <li key={path} className="prp-merge-box__conflict-file">
-                <IconFileDiff size={14} aria-hidden="true" />
-                <span className="prp-merge-box__conflict-path" title={path}>
-                  {path}
-                </span>
-              </li>
-            ))}
-          </ul>
-        ) : null}
-
-        {hasChecksData(detail.checks) ? (
-          <MergeBoxChecks checks={detail.checks} />
-        ) : ms.checksLine ? (
-          <p className="prp-merge-box__checks-line prp-muted">{ms.checksLine}</p>
-        ) : null}
-
-        {detail.state === 'open' && !detail.merged ? (
-          <div className="prp-merge-box__actions">
-            {ms.showMerge ? (
-              <div
-                className={`prp-merge-method prp-merge-method--${ms.ctaVariant || 'default'}${
-                  ms.forceMerge ? ' prp-merge-method--force' : ''
-                }`}
-                ref={mergeMenuRef}
-                data-cta-variant={ms.ctaVariant || 'default'}
-                data-force-merge={ms.forceMerge ? '1' : '0'}
-                data-can-merge={ms.canMerge ? '1' : '0'}
-              >
-                <div className="prp-merge-method__split prp-opt-hint-host">
-                  <OptBtnHint label="⌥⇧M" />
-                  <Button
-                    className={`prp-merge-method__primary prp-merge-method__primary--${
-                      ms.ctaVariant || 'default'
-                    }`}
-                    variant={ms.ctaVariant || (ms.canMerge ? 'ok' : 'default')}
-                    disabled={actionBusy || !ms.canMerge}
-                    onClick={() => onMergePr?.(normalizeMergeMethod(mergeMethod))}
-                    title={
-                      ms.forceMerge
-                        ? 'Force merge — bypasses failing checks / branch protection if your token has permission'
-                        : MERGE_METHODS.find((m) => m.id === mergeMethod)?.description ||
-                          'Merge pull request'
-                    }
-                    shortcut="⌥⇧M"
-                  >
-                    {mergeMethodButtonLabel(mergeMethod, {
-                      force: Boolean(ms.forceMerge),
-                    })}
-                  </Button>
-                  <button
-                    type="button"
-                    className={`prp-merge-method__caret prp-merge-method__caret--${
-                      ms.ctaVariant || 'default'
-                    }`}
-                    disabled={actionBusy || !ms.canMerge}
-                    aria-haspopup="menu"
-                    aria-expanded={mergeMenuOpen}
-                    aria-label="Select merge method"
-                    title="Select merge method"
-                    onClick={() => setMergeMenuOpen((o) => !o)}
-                  >
-                    ▾
-                  </button>
-                </div>
-                {mergeMenuOpen ? (
-                  <ul className="prp-merge-method__menu" role="menu">
-                    {MERGE_METHODS.map((m) => (
-                      <li key={m.id} role="none">
-                        <button
-                          type="button"
-                          role="menuitemradio"
-                          aria-checked={mergeMethod === m.id}
-                          className={`prp-merge-method__item${
-                            mergeMethod === m.id ? ' prp-merge-method__item--active' : ''
-                          }`}
-                          onClick={() => {
-                            setMergeMethod(m.id);
-                            setMergeMenuOpen(false);
-                          }}
-                        >
-                          <span className="prp-merge-method__item-label">{m.label}</span>
-                          <span className="prp-merge-method__item-desc prp-muted">
-                            {m.description}
-                          </span>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-              </div>
-            ) : null}
-
-            {ms.showUpdateBranch ? (
-              <span className="prp-opt-hint-host">
-                <OptBtnHint label="⌥⇧U" />
-                <Button size="sm" disabled={actionBusy} onClick={onUpdateBranch} shortcut="⌥⇧U">
-                  Update branch
-                </Button>
-              </span>
-            ) : null}
-
-            {ms.draftToggle === 'ready' ? (
-              <span className="prp-opt-hint-host">
-                <OptBtnHint label="⌥⇧D" />
-                <Button
-                  size="sm"
-                  variant="primary"
-                  disabled={actionBusy}
-                  onClick={() => onSetDraftStage?.('ready')}
-                  shortcut="⌥⇧D"
-                >
-                  Ready for review
-                </Button>
-              </span>
-            ) : null}
-            {ms.draftToggle === 'draft' ? (
-              <span className="prp-opt-hint-host">
-                <OptBtnHint label="⌥⇧D" />
-                <Button
-                  size="sm"
-                  disabled={actionBusy}
-                  onClick={() => onSetDraftStage?.('draft')}
-                  shortcut="⌥⇧D"
-                >
-                  Convert to draft
-                </Button>
-              </span>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
+      <MergeBox
+        detail={detail}
+        ms={ms}
+        boxTone={boxTone}
+        actionBusy={actionBusy}
+        onMergePr={onMergePr}
+        onUpdateBranch={onUpdateBranch}
+        onSetDraftStage={onSetDraftStage}
+      />
     );
   }
 
   function renderComposerCard() {
     return (
-      <Card
-        className="prp-card--composer"
-        title={
-          <div className="prp-composer-mode" role="tablist" aria-label="Comment or review">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={composerMode === 'comment'}
-              className={`prp-composer-mode__tab${
-                composerMode === 'comment' ? ' prp-composer-mode__tab--active' : ''
-              }`}
-              onClick={() => setComposerMode('comment')}
-            >
-              Comment
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={composerMode === 'review'}
-              className={`prp-composer-mode__tab${
-                composerMode === 'review' ? ' prp-composer-mode__tab--active' : ''
-              }`}
-              onClick={() => setComposerMode('review')}
-            >
-              Review
-              {pendingCount > 0 ? (
-                <span className="prp-composer-mode__badge" title="Pending review items">
-                  {pendingCount}
-                </span>
-              ) : null}
-            </button>
-          </div>
+      <ComposerCard
+        composerMode={composerMode}
+        setComposerMode={setComposerMode}
+        pendingCount={Number(pendingCount) || 0}
+        pendingReviewGroup={pendingReviewGroup}
+        commentText={commentText}
+        setCommentText={setCommentText}
+        actionBusy={actionBusy}
+        detail={detail}
+        commentBoxRef={commentBoxRef}
+        onUploadFile={onUploadFile}
+        linkCtx={linkCtx}
+        mentionCandidates={mentionCandidates}
+        onLeaveReviewAction={onLeaveReviewAction}
+        onDiscardPending={onDiscardPending}
+        onClosePr={onClosePr}
+        onReopenPr={onReopenPr}
+        showReviewVerdict={showReviewVerdict}
+        renderSearchableBody={(body, anchor, mark) =>
+          renderSearchableBody(body, anchor, mark)
         }
-      >
-        <div className="prp-composer prp-composer--review" ref={commentBoxRef}>
-          {/* Pending file threads live at the top of the Review form (not timeline) */}
-          {composerMode === 'review' && pendingReviewGroup ? (
-            <div
-              className="prp-composer__pending-threads"
-              data-pending-threads={
-                Array.isArray(pendingReviewGroup.threads)
-                  ? pendingReviewGroup.threads.length
-                  : 0
-              }
-            >
-              <div className="prp-composer__pending-head">
-                <span className="prp-composer__pending-title">
-                  Pending review
-                </span>
-                <Badge tone="warn" title="Not yet submitted">
-                  {Array.isArray(pendingReviewGroup.threads)
-                    ? pendingReviewGroup.threads.length
-                    : pendingCount}{' '}
-                  thread
-                  {(Array.isArray(pendingReviewGroup.threads)
-                    ? pendingReviewGroup.threads.length
-                    : pendingCount) === 1
-                    ? ''
-                    : 's'}
-                </Badge>
-              </div>
-              {pendingReviewGroup.body ? (
-                <div className="prp-review-group__body prp-composer__pending-body">
-                  {renderSearchableBody(
-                    pendingReviewGroup.body,
-                    `review:${pendingReviewGroup.id}`,
-                    true
-                  )}
-                </div>
-              ) : null}
-              {renderReviewGroupThreadList(pendingReviewGroup, 'composer-', {
-                compact: true,
-              })}
-            </div>
-          ) : null}
-          <MarkdownComposer
-            value={commentText}
-            onChange={setCommentText}
-            placeholder={
-              composerMode === 'review'
-                ? 'Leave a review summary (optional with pending threads)…'
-                : 'Write a comment…'
-            }
-            compact
-            rows={3}
-            disabled={actionBusy}
-            showTabs
-            onUploadFile={onUploadFile}
-            linkCtx={linkCtx}
-            mentionCandidates={mentionCandidates}
-          />
-          {composerMode === 'comment' ? (
-            <div className="prp-composer__row prp-composer__row--review">
-              <Button
-                variant="primary"
-                size="sm"
-                disabled={actionBusy || !String(commentText || '').trim()}
-                onClick={() => onLeaveReviewAction?.('issue-comment')}
-                title="Post conversation comment"
-              >
-                Submit
-              </Button>
-              {detail.state === 'open' && !detail.merged ? (
-                <Button
-                  size="sm"
-                  variant="danger"
-                  disabled={actionBusy}
-                  onClick={onClosePr}
-                  title="Close pull request"
-                >
-                  Close pull request
-                </Button>
-              ) : null}
-              {detail.state === 'closed' && !detail.merged ? (
-                <Button
-                  size="sm"
-                  variant="ok"
-                  disabled={actionBusy}
-                  onClick={onReopenPr}
-                  title="Reopen pull request"
-                >
-                  Reopen
-                </Button>
-              ) : null}
-            </div>
-          ) : (
-            <div className="prp-composer__row prp-composer__row--review">
-              <Button
-                variant="primary"
-                size="sm"
-                disabled={
-                  actionBusy || (!String(commentText || '').trim() && !pendingCount)
-                }
-                onClick={() => onLeaveReviewAction?.('comment')}
-                title={
-                  pendingCount > 0
-                    ? 'Submit pending review as comment'
-                    : 'Submit review as comment'
-                }
-              >
-                Submit review
-              </Button>
-              {showReviewVerdict ? (
-                <>
-                  <Button
-                    size="sm"
-                    variant="ok"
-                    disabled={actionBusy}
-                    onClick={() => onLeaveReviewAction?.('approve')}
-                    title="Approve pull request"
-                  >
-                    Approve
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="warn"
-                    disabled={actionBusy}
-                    onClick={() => onLeaveReviewAction?.('request_changes')}
-                    title="Request changes"
-                  >
-                    Request changes
-                  </Button>
-                </>
-              ) : null}
-              {pendingCount > 0 && typeof onDiscardPending === 'function' ? (
-                <Button
-                  size="sm"
-                  variant="danger"
-                  disabled={actionBusy}
-                  onClick={() => onDiscardPending?.()}
-                  title="Discard pending review"
-                >
-                  Discard
-                </Button>
-              ) : null}
-            </div>
-          )}
-
-        </div>
-      </Card>
+        renderPendingThreadList={renderReviewGroupThreadList}
+      />
     );
   }
 

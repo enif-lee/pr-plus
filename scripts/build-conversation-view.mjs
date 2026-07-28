@@ -1,34 +1,25 @@
 /**
- * Assemble ConversationView.tsx from conversation/parts/*
- * Each part is ≤1500 lines; assembled file is the runtime entry.
+ * ConversationView is a complete TypeScript module.
+ * No mid-IIFE part assembly. Validates SoT presence.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const partsDir = path.join(root, 'src/modal/views/conversation/parts');
-const out = path.join(root, 'src/modal/views/conversation/ConversationView.tsx');
-
-const parts = fs
-  .readdirSync(partsDir)
-  .filter((f) => f.endsWith('.tsx') || f.endsWith('.ts'))
-  .sort();
-
-const body = parts
-  .map((f) => fs.readFileSync(path.join(partsDir, f), 'utf8').trimEnd())
-  .join('\n');
-
-const banner = `// @ts-nocheck
-/**
- * Conversation surface — AUTO-ASSEMBLED from conversation/parts/*.
- * Edit parts (each ≤1500 lines), then: npm run build:app-parts
- */
-`;
-
-fs.writeFileSync(out, banner + body + '\n');
-console.log('Built ConversationView.tsx', parts.length, 'parts');
-for (const f of parts) {
-  const n = fs.readFileSync(path.join(partsDir, f), 'utf8').split(/\n/).length;
-  console.log(`  ${f}: ${n}${n > 1500 ? ' OVER' : ''}`);
+const sot = path.join(root, 'src/modal/views/conversation/ConversationView.tsx');
+if (!fs.existsSync(sot)) {
+  console.error('Missing SoT', sot);
+  process.exit(1);
 }
+const text = fs.readFileSync(sot, 'utf8');
+if (/@ts-nocheck/.test(text.slice(0, 200))) {
+  console.error('ConversationView must not use @ts-nocheck');
+  process.exit(1);
+}
+if (/AUTO-ASSEMBLED from conversation\/parts/.test(text.slice(0, 300))) {
+  console.error('ConversationView must not be mid-IIFE assembled');
+  process.exit(1);
+}
+const n = text.split(/\n/).length;
+console.log('ConversationView SoT OK:', n, 'lines (complete module, no part assemble)');
+if (n > 1500) console.warn('WARN: ConversationView exceeds 1500 lines — further extraction recommended');

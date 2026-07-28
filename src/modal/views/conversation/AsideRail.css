@@ -1,0 +1,130 @@
+/**
+ * Residual CSS (cannot fully express via Tailwind utilities).
+ * Colocated next to owning domain; imported from styles/index.css.
+ * Migrated from styles/parts/05-compact-controls-inside-the-right-rail.css
+ */
+
+/* Compact controls inside the right rail */
+.prp-conversation__aside .prp-icon-btn {
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  min-height: 18px;
+  padding: 0;
+  margin: 0;
+  border-radius: 4px;
+  font-size: 11px;
+}
+.prp-conversation__aside .prp-people-chip__rerequest {
+  width: 18px;
+  height: 18px;
+  font-size: 12px;
+}
+.prp-conversation__aside .prp-add-link {
+  margin-top: 4px;
+  padding: 0;
+  font-size: 12px;
+}
+.prp-conversation__aside .prp-badge {
+  font-size: 10px;
+  padding: 0 5px;
+  line-height: 16px;
+  min-height: 16px;
+}
+.prp-conversation__aside .prp-meta-row {
+  min-height: 20px;
+  gap: 6px;
+}
+
+.prp-card {
+  border: 1px solid var(--prp-border-muted);
+  border-radius: 10px;
+  background: var(--prp-bg);
+  overflow: hidden;
+  box-shadow: 0 1px 0 rgba(27, 31, 36, 0.04);
+}
+
+.prp-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: var(--prp-pad-card-head);
+  background: var(--prp-bg-muted);
+  border-bottom: 1px solid var(--prp-border-muted);
+}
+
+.prp-card__title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--prp-fg);
+}
+
+.prp-card__body {
+  padding: var(--prp-pad-card);
+}
+
+.prp-card--desc .prp-card__body {
+  max-height: none;
+  /* Description body inherits GitHub-like markdown size */
+  font-size: 14px;
+  line-height: 1.5;
+}
+.prp-card--desc .prp-md,
+.prp-card--timeline .prp-md,
+.prp-review-thread .prp-md,
+.prp-inline-thread .prp-md {
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* Timeline items sit as top-level cards in .prp-conversation__main (no outer
+   “Conversation” wrapper). Feed list wrappers kept for residual / tests. */
+.prp-conversation-feed {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--prp-space-3);
+}
+
+.prp-conversation-feed__item {
+  margin: 0;
+  padding: 0;
+}
+
+.prp-conversation-feed__card {
+  border: 1px solid var(--prp-border-muted);
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: var(--prp-bg);
+  min-width: 0;
+}
+
+.prp-conversation-feed__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+/* Top-level timeline cards (comment / review / thread / reply) */
+.prp-card--timeline .prp-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.prp-card--timeline-reply {
+  border-left: 3px solid var(--prp-border-muted);
+}
+
+.prp-conversation-empty {
+  margin: 0;
+  padding: 8px 2px;
+}
+

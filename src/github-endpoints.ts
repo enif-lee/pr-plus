@@ -1,4 +1,3 @@
-// @ts-nocheck — gradual TS migration of classic extension scripts
 /**
  * GitHub.com + GitHub Enterprise (Server/Cloud) endpoint resolution.
  *
@@ -11,7 +10,7 @@
  *
  * API bases are always derived from the web host (no custom API override).
  */
-(function initGithubEndpoints(global) {
+(function initGithubEndpoints(global: any) {
   const DEFAULT_REST = 'https://api.github.com';
   const DEFAULT_GRAPHQL = 'https://api.github.com/graphql';
 
@@ -19,7 +18,7 @@
    * @param {unknown} host
    * @returns {string}
    */
-  function normalizeHostname(host) {
+  function normalizeHostname(host: any) {
     let h = String(host || '')
       .trim()
       .toLowerCase()
@@ -36,7 +35,7 @@
    * *.ghe.com is NOT public cloud — requires an explicit registered host pair.
    * @param {unknown} host
    */
-  function isPublicCloudWebHost(host) {
+  function isPublicCloudWebHost(host: any) {
     const h = normalizeHostname(host);
     return h === 'github.com' || h === 'www.github.com';
   }
@@ -45,7 +44,7 @@
    * Hostname is known github.com web (not enterprise).
    * @param {unknown} host
    */
-  function isKnownGithubHostname(host) {
+  function isKnownGithubHostname(host: any) {
     const h = normalizeHostname(host);
     if (!h) return false;
     if (isPublicCloudWebHost(h)) return true;
@@ -67,7 +66,7 @@
    * @param {unknown} raw
    * @returns {HostAccount[]}
    */
-  function normalizeHostAccounts(raw) {
+  function normalizeHostAccounts(raw: any) {
     const list = Array.isArray(raw) ? raw : [];
     const out = [];
     const seen = new Set();
@@ -90,7 +89,7 @@
    * Hosts list derived from pairs (for content-script registration).
    * @param {unknown} rawAccounts
    */
-  function hostsFromAccounts(rawAccounts) {
+  function hostsFromAccounts(rawAccounts: any) {
     return normalizeHostAccounts(rawAccounts).map((a) => a.host);
   }
 
@@ -104,7 +103,7 @@
    * @param {{ defaultToken?: string|null, hostAccounts?: unknown }} [opts]
    * @returns {{ token: string|null, source: 'default'|'host'|null, host: string }}
    */
-  function selectTokenForWebHost(webHost, opts = {}) {
+  function selectTokenForWebHost(webHost, opts: any = {}) {
     const host = normalizeHostname(webHost) || 'github.com';
     const defaultToken =
       typeof opts.defaultToken === 'string' && opts.defaultToken.trim()
@@ -134,7 +133,7 @@
    * @param {unknown} token
    * @returns {{ ok: true, accounts: HostAccount[] } | { ok: false, error: string, accounts: HostAccount[] }}
    */
-  function registerHostAccount(existingAccounts, host, token) {
+  function registerHostAccount(existingAccounts: any, host: any, token: any) {
     const accounts = normalizeHostAccounts(existingAccounts);
     const h = normalizeHostname(host);
     const t = typeof token === 'string' ? token.trim() : '';
@@ -164,14 +163,14 @@
         accounts,
       };
     }
-    return { ok: true, accounts: [...accounts, { host: h, token: t }] };
+    return { ok: true, accounts: [...(accounts as any), { host: h, token: t }] };
   }
 
   /**
    * @param {unknown} existingAccounts
    * @param {unknown} host
    */
-  function unregisterHostAccount(existingAccounts, host) {
+  function unregisterHostAccount(existingAccounts: any, host: any) {
     const accounts = normalizeHostAccounts(existingAccounts);
     const h = normalizeHostname(host);
     return {
@@ -185,7 +184,7 @@
    * @param {Document|null|undefined} doc
    * @param {{ hostname?: string }|null|undefined} [loc]
    */
-  function isGithubWebDocument(doc, loc) {
+  function isGithubWebDocument(doc: any, loc: any) {
     const host =
       normalizeHostname(loc?.hostname) ||
       normalizeHostname(
@@ -224,7 +223,7 @@
    * Strip trailing slashes from an origin/base URL.
    * @param {unknown} url
    */
-  function stripTrailingSlashes(url) {
+  function stripTrailingSlashes(url: any) {
     return String(url || '').trim().replace(/\/+$/, '');
   }
 
@@ -232,7 +231,7 @@
    * Derive GraphQL URL from a REST API base.
    * @param {string} restBase
    */
-  function graphqlUrlFromRestBase(restBase) {
+  function graphqlUrlFromRestBase(restBase: any) {
     const base = stripTrailingSlashes(restBase);
     if (!base) return DEFAULT_GRAPHQL;
     if (base === DEFAULT_REST || base === 'https://api.github.com') {
@@ -254,7 +253,7 @@
    * Default endpoints for a web hostname (no custom override).
    * @param {unknown} webHost
    */
-  function defaultEndpointsForWebHost(webHost) {
+  function defaultEndpointsForWebHost(webHost: any) {
     const host = normalizeHostname(webHost);
     if (!host || host === 'github.com' || host === 'www.github.com') {
       return {
@@ -305,7 +304,7 @@
    *   graphqlUrl: string,
    * }}
    */
-  function resolveGithubEndpoints(opts = {}) {
+  function resolveGithubEndpoints(opts: any = {}) {
     return defaultEndpointsForWebHost(opts.webHost);
   }
 
@@ -316,7 +315,7 @@
    *
    * @param {object|string|null|undefined} ctx
    */
-  function normalizeApiCtx(ctx) {
+  function normalizeApiCtx(ctx: any) {
     if (ctx && typeof ctx === 'object' && (ctx.restBase || ctx.graphqlUrl)) {
       const restBase =
         stripTrailingSlashes(ctx.restBase || DEFAULT_REST) || DEFAULT_REST;
@@ -344,7 +343,7 @@
    * @deprecated Prefer resolveGithubEndpoints + explicit ctx propagation.
    * No longer mutates process global — returns a normalized ctx only.
    */
-  function setGithubApiContext(endpoints) {
+  function setGithubApiContext(endpoints: any) {
     return normalizeApiCtx(endpoints);
   }
 
@@ -362,7 +361,7 @@
    * @returns {(fn: () => any|Promise<any>) => Promise<any>}
    */
   function createGithubApiExclusiveRunner() {
-    return function runWithGithubApiExclusive(fn) {
+    return function runWithGithubApiExclusive(fn: any) {
       return Promise.resolve().then(fn);
     };
   }
@@ -372,7 +371,7 @@
    * @param {string} path
    * @param {object|string|null|undefined} [ctx]
    */
-  function githubRestUrl(path, ctx) {
+  function githubRestUrl(path: any, ctx: any) {
     const { restBase } = normalizeApiCtx(ctx);
     const base = stripTrailingSlashes(restBase) || DEFAULT_REST;
     const p = String(path || '');
@@ -384,7 +383,7 @@
    * GraphQL absolute URL from explicit ctx.
    * @param {object|string|null|undefined} [ctx]
    */
-  function githubGraphqlUrl(ctx) {
+  function githubGraphqlUrl(ctx: any) {
     const { graphqlUrl } = normalizeApiCtx(ctx);
     return stripTrailingSlashes(graphqlUrl) || DEFAULT_GRAPHQL;
   }
@@ -395,7 +394,7 @@
    * @param {unknown} rawHosts
    * @returns {string[]}
    */
-  function normalizeEnterpriseWebHosts(rawHosts) {
+  function normalizeEnterpriseWebHosts(rawHosts: any) {
     const list = Array.isArray(rawHosts)
       ? rawHosts
       : typeof rawHosts === 'string'
@@ -417,7 +416,7 @@
    * Match patterns for chrome.scripting.registerContentScripts.
    * @param {string[]} hosts
    */
-  function contentScriptMatchesForHosts(hosts) {
+  function contentScriptMatchesForHosts(hosts: any) {
     return normalizeEnterpriseWebHosts(hosts).map(
       (h) => `https://${h}/*`
     );

@@ -29,10 +29,16 @@ export function Button({
   const tipKbd = shortcut ? String(shortcut).trim() : '';
   const hasTip = hasTipContent(title, shortcut);
   const { 'aria-label': ariaLabelProp, ...btnRest } = rest;
+  const sizeTw =
+    size === 'sm'
+      ? 'h-7 px-2 text-xs gap-1'
+      : size === 'lg'
+        ? 'h-9 px-3 text-sm gap-1.5'
+        : 'h-8 px-2.5 text-xs gap-1';
   return (
     <button
       type="button"
-      className={`prp-btn prp-btn--${variant} prp-btn--size-${size}${
+      className={`prp-btn prp-btn--${variant} prp-btn--size-${size} inline-flex items-center justify-center rounded-md whitespace-nowrap select-none ${sizeTw}${
         hasTip ? ' prp-has-tip' : ''
       }${tipKbd ? ' prp-btn--has-shortcut' : ''} ${className}`.trim()}
       title={undefined}

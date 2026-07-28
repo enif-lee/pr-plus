@@ -36,6 +36,7 @@ import {
   CheckOutcomeIcon,
 } from '../conversation/ChecksSummary';
 import { useModalStore } from '../../store/modal-store';
+import { useDetailUiStore } from '../../store/detail-ui-store';
 
 /** 1–4 reviewers all shown; 5+ → first 3 + “+N” chip. */
 const HEADER_REVIEWER_MAX_FULL = 4;
@@ -286,12 +287,25 @@ function HeaderStatsBadge({
   deletions?: number;
   fileCount?: number;
 }) {
-  const stageLabel = loadStage?.label ? String(loadStage.label) : '';
-  const stageBusy = Boolean(loadStage?.busy);
-  const stagePhase = loadStage?.phase != null ? String(loadStage.phase) : '';
+  // Prefer host prop; fall back to Zustand progressive mirror (detail-ui-store).
+  const storePercent = useDetailUiStore((s) => s.loadPercent);
+  const storeLabel = useDetailUiStore((s) => s.loadLabel);
+  const storeBusy = useDetailUiStore((s) => s.loadBusy);
+  const effectiveStage =
+    loadStage ||
+    (storeBusy || storeLabel
+      ? {
+          percent: storePercent,
+          label: storeLabel,
+          busy: storeBusy,
+        }
+      : null);
+  const stageLabel = effectiveStage?.label ? String(effectiveStage.label) : '';
+  const stageBusy = Boolean(effectiveStage?.busy);
+  const stagePhase = effectiveStage?.phase != null ? String(effectiveStage.phase) : '';
   const rawPercent =
-    loadStage && Number.isFinite(Number(loadStage.percent))
-      ? clampPct(Number(loadStage.percent))
+    effectiveStage && Number.isFinite(Number(effectiveStage.percent))
+      ? clampPct(Number(effectiveStage.percent))
       : stageBusy
         ? 8
         : stageLabel || stagePhase === 'done'

@@ -1,0 +1,25 @@
+/**
+ * Residual CSS (cannot fully express via Tailwind utilities).
+ * Colocated next to owning domain; imported from styles/index.css.
+ * Migrated from styles/parts/26-multi-line-tips-for-check-name-lists.css
+ */
+
+/* Multi-line tips for check name lists */
+.prp-checks-summary-stack__item .prp-tip-pop__label,
+.prp-aside-compact .prp-checks-summary-stack__item .prp-tip-pop__label {
+  white-space: pre-line;
+  max-width: min(280px, 70vw);
+  text-align: left;
+}
+.prp-aside-compact .prp-checks-summary-stack__item .prp-tip-pop {
+  white-space: pre-line;
+  max-width: min(280px, 70vw);
+  width: max-content;
+}
+.prp-header__checks {
+  margin-left: 2px;
+}
+.prp-diff-chrome__checks {
+  font-size: 12px;
+}
+

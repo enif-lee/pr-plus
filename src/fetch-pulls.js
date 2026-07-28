@@ -1,132 +1,89 @@
 /**
- * AUTO-ASSEMBLED from src/fetch/parts/* — run: npm run build:fetch
- */
-/**
- * Fetch open PR branch metadata via GitHub REST API.
- * List up to 100 open PRs, then fill page-visible dangling PRs via single-PR gets.
- */
-
-
-/**
- * Stateless GitHub API context (REST/GraphQL bases).
- * Prefer explicit ctx from SW message resolve; never use a process-global mutable base.
- * @param {object|string|null|undefined} ctx endpoints object, webHost string, or null → github.com
+ * AUTO-GENERATED from src/fetch/fetch-api.ts
+ * SOURCE OF TRUTH: src/fetch/fetch-api.ts — npm run build:fetch
  */
 function normalizeApiCtx(ctx) {
-  if (ctx && typeof ctx === 'object' && (ctx.restBase || ctx.graphqlUrl)) {
+  if (ctx && typeof ctx === "object" && (ctx.restBase || ctx.graphqlUrl)) {
     return {
-      kind: ctx.kind || 'custom',
-      webHost: ctx.webHost || 'github.com',
-      webOrigin: ctx.webOrigin || '',
-      restBase: String(ctx.restBase || 'https://api.github.com').replace(/\/+$/, ''),
+      kind: ctx.kind || "custom",
+      webHost: ctx.webHost || "github.com",
+      webOrigin: ctx.webOrigin || "",
+      restBase: String(ctx.restBase || "https://api.github.com").replace(/\/+$/, ""),
       graphqlUrl: String(
-        ctx.graphqlUrl ||
-          (String(ctx.restBase || '').includes('api.github.com')
-            ? 'https://api.github.com/graphql'
-            : '')
-      ).replace(/\/+$/, '') || 'https://api.github.com/graphql',
+        ctx.graphqlUrl || (String(ctx.restBase || "").includes("api.github.com") ? "https://api.github.com/graphql" : "")
+      ).replace(/\/+$/, "") || "https://api.github.com/graphql"
     };
   }
-  const webHost =
-    typeof ctx === 'string'
-      ? ctx
-      : ctx && typeof ctx === 'object' && ctx.webHost
-        ? ctx.webHost
-        : 'github.com';
+  const webHost = typeof ctx === "string" ? ctx : ctx && typeof ctx === "object" && ctx.webHost ? ctx.webHost : "github.com";
   try {
-    if (
-      globalThis.PRGithubEndpoints &&
-      typeof globalThis.PRGithubEndpoints.resolveGithubEndpoints === 'function'
-    ) {
+    if (globalThis.PRGithubEndpoints && typeof globalThis.PRGithubEndpoints.resolveGithubEndpoints === "function") {
       return globalThis.PRGithubEndpoints.resolveGithubEndpoints({ webHost });
     }
-  } catch (_) {}
+  } catch (_) {
+  }
   return {
-    kind: 'dotcom',
-    webHost: 'github.com',
-    webOrigin: 'https://github.com',
-    restBase: 'https://api.github.com',
-    graphqlUrl: 'https://api.github.com/graphql',
+    kind: "dotcom",
+    webHost: "github.com",
+    webOrigin: "https://github.com",
+    restBase: "https://api.github.com",
+    graphqlUrl: "https://api.github.com/graphql"
   };
 }
-
 function githubRestUrl(path, ctx) {
   const c = normalizeApiCtx(ctx);
   try {
-    if (
-      globalThis.PRGithubEndpoints &&
-      typeof globalThis.PRGithubEndpoints.githubRestUrl === 'function'
-    ) {
+    if (globalThis.PRGithubEndpoints && typeof globalThis.PRGithubEndpoints.githubRestUrl === "function") {
       return globalThis.PRGithubEndpoints.githubRestUrl(path, c);
     }
-  } catch (_) {}
-  const p = String(path || '');
+  } catch (_) {
+  }
+  const p = String(path || "");
   if (/^https?:\/\//i.test(p)) return p;
-  const base = String(c.restBase || 'https://api.github.com').replace(/\/+$/, '');
-  return base + (p.startsWith('/') ? p : '/' + p);
+  const base = String(c.restBase || "https://api.github.com").replace(/\/+$/, "");
+  return base + (p.startsWith("/") ? p : "/" + p);
 }
 function githubGraphqlUrl(ctx) {
   const c = normalizeApiCtx(ctx);
   try {
-    if (
-      globalThis.PRGithubEndpoints &&
-      typeof globalThis.PRGithubEndpoints.githubGraphqlUrl === 'function'
-    ) {
+    if (globalThis.PRGithubEndpoints && typeof globalThis.PRGithubEndpoints.githubGraphqlUrl === "function") {
       return globalThis.PRGithubEndpoints.githubGraphqlUrl(c);
     }
-  } catch (_) {}
-  return String(c.graphqlUrl || 'https://api.github.com/graphql');
+  } catch (_) {
+  }
+  return String(c.graphqlUrl || "https://api.github.com/graphql");
 }
-
-
-/**
- * Map REST pull list/item payload → app list row.
- * Includes labels / assignees / milestone so progressive modal sketch can paint
- * sidebar meta without waiting for full fetchPrDetail.
- */
 function mapApiPullRequest(pr) {
-  const author = pr.user?.login || '';
-  const authorAvatarUrl = pr.user?.avatar_url || '';
-  const labels = Array.isArray(pr.labels)
-    ? pr.labels.map((l) => ({
-        name: l?.name || String(l || ''),
-        color: l?.color || '',
-        description: l?.description || '',
-      })).filter((l) => l.name)
-    : [];
-  const assignees = Array.isArray(pr.assignees)
-    ? pr.assignees.map((u) => u?.login || u).filter(Boolean)
-    : [];
-  const requestedReviewers = Array.isArray(pr.requested_reviewers)
-    ? pr.requested_reviewers.map((u) => u?.login || u).filter(Boolean)
-    : [];
-  /** login → avatar_url for people chips */
+  const author = pr.user?.login || "";
+  const authorAvatarUrl = pr.user?.avatar_url || "";
+  const labels = Array.isArray(pr.labels) ? pr.labels.map((l) => ({
+    name: l?.name || String(l || ""),
+    color: l?.color || "",
+    description: l?.description || ""
+  })).filter((l) => l.name) : [];
+  const assignees = Array.isArray(pr.assignees) ? pr.assignees.map((u) => u?.login || u).filter(Boolean) : [];
+  const requestedReviewers = Array.isArray(pr.requested_reviewers) ? pr.requested_reviewers.map((u) => u?.login || u).filter(Boolean) : [];
   const avatarUrls = {};
   const putUser = (u) => {
-    const login = u?.login || (typeof u === 'string' ? u : '');
-    const url = u?.avatar_url || '';
+    const login = u?.login || (typeof u === "string" ? u : "");
+    const url = u?.avatar_url || "";
     if (login && url) avatarUrls[String(login).toLowerCase()] = url;
   };
   putUser(pr.user);
   for (const u of pr.assignees || []) putUser(u);
   for (const u of pr.requested_reviewers || []) putUser(u);
-
-  const milestone = pr.milestone
-    ? {
-        number: pr.milestone.number,
-        title: pr.milestone.title || '',
-        state: pr.milestone.state || '',
-        dueOn: pr.milestone.due_on || null,
-      }
-    : null;
-
+  const milestone = pr.milestone ? {
+    number: pr.milestone.number,
+    title: pr.milestone.title || "",
+    state: pr.milestone.state || "",
+    dueOn: pr.milestone.due_on || null
+  } : null;
   return {
     number: pr.number,
     title: pr.title,
     // Body required so attachMagicLinks/prMatchText can match description tokens
-    body: pr.body || '',
-    headRef: pr.head?.ref || '',
-    baseRef: pr.base?.ref || '',
+    body: pr.body || "",
+    headRef: pr.head?.ref || "",
+    baseRef: pr.base?.ref || "",
     author,
     authorAvatarUrl,
     draft: Boolean(pr.draft),
@@ -140,26 +97,23 @@ function mapApiPullRequest(pr) {
     additions: pr.additions ?? null,
     deletions: pr.deletions ?? null,
     changedFiles: pr.changed_files ?? null,
-    nodeId: pr.node_id || null,
+    nodeId: pr.node_id || null
   };
 }
-
 function buildApiHeaders(token) {
-  const headers = { Accept: 'application/vnd.github+json' };
+  const headers = { Accept: "application/vnd.github+json" };
   if (token) {
     headers.Authorization = `Bearer ${token}`;
   }
   return headers;
 }
-
-/** Page PR numbers missing from the list-API result set. */
 function findDanglingPrNumbers(pagePrNumbers, prs) {
   if (!Array.isArray(pagePrNumbers) || pagePrNumbers.length === 0) {
     return [];
   }
   const have = new Set((prs || []).map((pr) => pr.number));
   const dangling = [];
-  const seen = new Set();
+  const seen = /* @__PURE__ */ new Set();
   for (const raw of pagePrNumbers) {
     const num = Number(raw);
     if (!Number.isFinite(num) || seen.has(num) || have.has(num)) continue;
@@ -168,29 +122,25 @@ function findDanglingPrNumbers(pagePrNumbers, prs) {
   }
   return dangling;
 }
-
 async function mapWithConcurrency(items, limit, worker) {
   if (!items.length) return [];
   const results = new Array(items.length);
   let index = 0;
-
   async function run() {
     while (index < items.length) {
       const i = index++;
       results[i] = await worker(items[i], i);
     }
   }
-
   const runners = Array.from({ length: Math.min(limit, items.length) }, run);
   await Promise.all(runners);
   return results;
 }
-
 async function fetchOpenPullsPublic(owner, repo, fetchImpl, token = null, ctx = null) {
   ctx = normalizeApiCtx(ctx);
   const url = githubRestUrl(`/repos/${owner}/${repo}/pulls?state=open&per_page=100`, ctx);
   const res = await fetchImpl(url, {
-    headers: buildApiHeaders(token),
+    headers: buildApiHeaders(token)
   });
   if (!res.ok) {
     const err = new Error(`GitHub API ${res.status}: ${res.statusText}`);
@@ -200,12 +150,11 @@ async function fetchOpenPullsPublic(owner, repo, fetchImpl, token = null, ctx = 
   const data = await res.json();
   return data.map(mapApiPullRequest);
 }
-
 async function fetchPullByNumber(owner, repo, pullNumber, fetchImpl, token = null, ctx = null) {
   ctx = normalizeApiCtx(ctx);
   const url = githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}`, ctx);
   const res = await fetchImpl(url, {
-    headers: buildApiHeaders(token),
+    headers: buildApiHeaders(token)
   });
   if (!res.ok) {
     const err = new Error(`GitHub API ${res.status}: ${res.statusText} (PR #${pullNumber})`);
@@ -216,14 +165,9 @@ async function fetchPullByNumber(owner, repo, pullNumber, fetchImpl, token = nul
   const data = await res.json();
   return mapApiPullRequest(data);
 }
-
-/**
- * Fetch dangling page PRs by number. Auth errors rethrow; other failures are skipped.
- */
 async function fetchDanglingPulls(owner, repo, numbers, fetchImpl, token = null, ctx = null) {
   ctx = normalizeApiCtx(ctx);
   if (!numbers.length) return [];
-
   const settled = await mapWithConcurrency(numbers, 5, async (pullNumber) => {
     try {
       return await fetchPullByNumber(owner, repo, pullNumber, fetchImpl, token, ctx);
@@ -235,15 +179,8 @@ async function fetchDanglingPulls(owner, repo, numbers, fetchImpl, token = null,
       return null;
     }
   });
-
   return settled.filter(Boolean);
 }
-
-/**
- * Repo autolink rules (GitHub "magic" external references).
- * Requires admin on the token for the API; returns [] on 403/404.
- * @returns {Promise<Array<{key_prefix:string,url_template:string,is_alphanumeric:boolean}>>}
- */
 async function fetchRepoAutolinks(owner, repo, fetchImpl, token = null, ctx = null) {
   ctx = normalizeApiCtx(ctx);
   const url = githubRestUrl(`/repos/${owner}/${repo}/autolinks`, ctx);
@@ -252,54 +189,32 @@ async function fetchRepoAutolinks(owner, repo, fetchImpl, token = null, ctx = nu
     if (!res.ok) return [];
     const data = await res.json();
     if (!Array.isArray(data)) return [];
-    return data
-      .filter((a) => a && typeof a.key_prefix === 'string' && typeof a.url_template === 'string')
-      .map((a) => ({
-        key_prefix: a.key_prefix,
-        url_template: a.url_template,
-        is_alphanumeric: a.is_alphanumeric !== false,
-      }));
+    return data.filter((a) => a && typeof a.key_prefix === "string" && typeof a.url_template === "string").map((a) => ({
+      key_prefix: a.key_prefix,
+      url_template: a.url_template,
+      is_alphanumeric: a.is_alphanumeric !== false
+    }));
   } catch {
     return [];
   }
 }
-
 function escapeRegExp(s) {
-  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
-
-/**
- * Build external magic-link URL from autolink rule + captured num.
- * Supports both `<num>` (GitHub) and `{num}` placeholders.
- */
 function buildAutolinkUrl(urlTemplate, num) {
-  return String(urlTemplate)
-    .replace(/<num>/gi, num)
-    .replace(/\{num\}/gi, num);
+  return String(urlTemplate).replace(/<num>/gi, num).replace(/\{num\}/gi, num);
 }
-
-/**
- * Find autolink matches in free text (title, branch, body).
- * @returns {Array<{key:string,url:string,prefix:string}>}
- */
 function matchAutolinksInText(text, autolinks) {
   if (!text || !Array.isArray(autolinks) || autolinks.length === 0) return [];
-
   const found = [];
-  const seen = new Set();
-
+  const seen = /* @__PURE__ */ new Set();
   for (const rule of autolinks) {
     const prefix = rule.key_prefix;
     if (!prefix) continue;
-    // Prefer pure digits after prefix (ENG-7 in feat/ENG-7-foo) before broader alnum ids.
-    const numClass =
-      rule.is_alphanumeric !== false
-        ? '(?:\\d+|[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*)'
-        : '\\d+';
-    // Word-ish boundary before prefix so we don't match mid-token noise.
+    const numClass = rule.is_alphanumeric !== false ? "(?:\\d+|[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*)" : "\\d+";
     const re = new RegExp(
       `(^|[^A-Za-z0-9_])(${escapeRegExp(prefix)})(${numClass})`,
-      'gi'
+      "gi"
     );
     let m;
     while ((m = re.exec(text)) !== null) {
@@ -310,21 +225,12 @@ function matchAutolinksInText(text, autolinks) {
       found.push({ key, url, prefix: m[2] });
     }
   }
-
   return found;
 }
-
-/** Collect matchable text for a PR descriptor. */
 function prMatchText(pr) {
-  if (!pr) return '';
-  return [pr.title, pr.headRef, pr.baseRef, pr.body, pr.author]
-    .filter(Boolean)
-    .join('\n');
+  if (!pr) return "";
+  return [pr.title, pr.headRef, pr.baseRef, pr.body, pr.author].filter(Boolean).join("\n");
 }
-
-/**
- * Attach `magicLinks` array onto each PR from repo autolink rules.
- */
 function attachMagicLinks(prs, autolinks) {
   if (!Array.isArray(prs)) return [];
   if (!Array.isArray(autolinks) || autolinks.length === 0) {
@@ -332,27 +238,18 @@ function attachMagicLinks(prs, autolinks) {
   }
   return prs.map((pr) => ({
     ...pr,
-    magicLinks: matchAutolinksInText(prMatchText(pr), autolinks),
+    magicLinks: matchAutolinksInText(prMatchText(pr), autolinks)
   }));
 }
-
-/**
- * @param {object} options
- * @param {string|null} [options.token]
- * @param {number[]} [options.pagePrNumbers] PR numbers visible on the pulls page
- * @param {boolean} [options.includeAutolinks=true]
- */
 async function fetchOpenPulls(owner, repo, fetchImpl, options = {}) {
   const {
     token = null,
     pagePrNumbers = [],
-    includeAutolinks = true,
+    includeAutolinks = true
   } = options;
   const ctx = normalizeApiCtx(options?.ctx);
-
   const listed = await fetchOpenPullsPublic(owner, repo, fetchImpl, token, ctx);
   const danglingNumbers = findDanglingPrNumbers(pagePrNumbers, listed);
-
   let prs = listed;
   if (danglingNumbers.length > 0) {
     const extras = await fetchDanglingPulls(
@@ -371,33 +268,28 @@ async function fetchOpenPulls(owner, repo, fetchImpl, options = {}) {
       prs = [...byNumber.values()];
     }
   }
-
   if (!includeAutolinks) {
     return attachMagicLinks(prs, []);
   }
-
   const autolinks = await fetchRepoAutolinks(owner, repo, fetchImpl, token, ctx);
   return attachMagicLinks(prs, autolinks);
 }
-
 function decodeBase64Utf8(b64) {
   try {
-    if (typeof Buffer !== 'undefined') {
-      return Buffer.from(b64, 'base64').toString('utf8');
+    if (typeof Buffer !== "undefined") {
+      return Buffer.from(b64, "base64").toString("utf8");
     }
   } catch {
-    /* fall through */
   }
   try {
     const bin = atob(b64);
     const bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    return new TextDecoder('utf-8').decode(bytes);
+    return new TextDecoder("utf-8").decode(bytes);
   } catch {
-    return '';
+    return "";
   }
 }
-
 async function apiJson(url, fetchImpl, token) {
   const res = await fetchImpl(url, { headers: buildApiHeaders(token) });
   if (!res.ok) {
@@ -407,11 +299,6 @@ async function apiJson(url, fetchImpl, token) {
   }
   return res.json();
 }
-
-/**
- * JSON GET that also returns Link header for pagination.
- * @returns {Promise<{ data: any, link: string }>}
- */
 async function apiJsonWithLink(url, fetchImpl, token) {
   const res = await fetchImpl(url, { headers: buildApiHeaders(token) });
   if (!res.ok) {
@@ -420,41 +307,27 @@ async function apiJsonWithLink(url, fetchImpl, token) {
     throw err;
   }
   const data = await res.json();
-  let link = '';
+  let link = "";
   try {
-    if (typeof res.headers?.get === 'function') {
-      link = res.headers.get('link') || res.headers.get('Link') || '';
+    if (typeof res.headers?.get === "function") {
+      link = res.headers.get("link") || res.headers.get("Link") || "";
     }
   } catch {
-    link = '';
+    link = "";
   }
   return { data, link };
 }
-
-/** Absolute URL for Link header rel=next (or null). */
 function parseLinkNextUrl(linkHeader) {
   if (!linkHeader) return null;
-  const parts = String(linkHeader).split(',');
+  const parts = String(linkHeader).split(",");
   for (const p of parts) {
     const m = p.match(/<([^>]+)>\s*;\s*rel="?next"?/i);
     if (m) return m[1].trim();
   }
   return null;
 }
-
-/**
- * Walk REST list endpoints via Link rel=next until exhausted.
- * @param {string} firstUrl
- * @param {function} fetchImpl
- * @param {string|null} token
- * @param {{ maxPages?: number }} [opts]
- * @returns {Promise<Array>}
- */
 async function fetchRestCollectionAll(firstUrl, fetchImpl, token, opts = {}) {
-  const maxPages =
-    Number.isFinite(opts.maxPages) && opts.maxPages > 0
-      ? Math.floor(opts.maxPages)
-      : 50;
+  const maxPages = Number.isFinite(opts.maxPages) && opts.maxPages > 0 ? Math.floor(opts.maxPages) : 50;
   const all = [];
   let url = firstUrl;
   let pages = 0;
@@ -468,98 +341,79 @@ async function fetchRestCollectionAll(firstUrl, fetchImpl, token, opts = {}) {
   }
   return all;
 }
-
 function mapPrCommitRow(c) {
   return {
-    sha: c?.sha || '',
-    message: c?.commit?.message || c?.message || '',
-    author: c?.commit?.author?.name || c?.author?.login || c?.author || '',
-    date: c?.commit?.author?.date || c?.commit?.committer?.date || c?.date || '',
+    sha: c?.sha || "",
+    message: c?.commit?.message || c?.message || "",
+    author: c?.commit?.author?.name || c?.author?.login || c?.author || "",
+    date: c?.commit?.author?.date || c?.commit?.committer?.date || c?.date || ""
   };
 }
-
-/**
- * First page of PR commits (oldest-first, per_page=100). Independent of fetchPrDetail.
- */
 async function fetchPrCommits(owner, repo, number, fetchImpl, token = null, ctx = null) {
   ctx = normalizeApiCtx(ctx);
-  const o = String(owner || '').trim();
-  const r = String(repo || '').trim();
+  const o = String(owner || "").trim();
+  const r = String(repo || "").trim();
   const n = Number(number);
   if (!o || !r || !Number.isFinite(n)) {
-    throw new Error('owner, repo, and number are required for commits');
+    throw new Error("owner, repo, and number are required for commits");
   }
   const url = githubRestUrl(
-    `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/pulls/${n}/commits?per_page=100`
-  , ctx);
+    `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/pulls/${n}/commits?per_page=100`,
+    ctx
+  );
   try {
     const data = await apiJson(url, fetchImpl, token);
     return (Array.isArray(data) ? data : []).map(mapPrCommitRow).filter((c) => c.sha);
   } catch (err) {
-    if (
-      err?.name === 'AbortError' ||
-      /aborted|AbortError/i.test(String(err?.message || ''))
-    ) {
+    if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
       throw err;
     }
     return [];
   }
 }
-
-/**
- * All PR commits (paginated). GitHub returns oldest-first.
- */
 async function fetchAllPrCommits(owner, repo, number, fetchImpl, token = null, ctx = null) {
   ctx = normalizeApiCtx(ctx);
-  const o = String(owner || '').trim();
-  const r = String(repo || '').trim();
+  const o = String(owner || "").trim();
+  const r = String(repo || "").trim();
   const n = Number(number);
   if (!o || !r || !Number.isFinite(n)) {
-    throw new Error('owner, repo, and number are required for commits');
+    throw new Error("owner, repo, and number are required for commits");
   }
   const first = githubRestUrl(
-    `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/pulls/${n}/commits?per_page=100`
-  , ctx);
+    `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/pulls/${n}/commits?per_page=100`,
+    ctx
+  );
   const raw = await fetchRestCollectionAll(first, fetchImpl, token);
   return raw.map(mapPrCommitRow).filter((c) => c.sha);
 }
-
-/**
- * Commit status contexts + check runs for a head SHA. Independent of fetchPrDetail.
- * @returns {Promise<{ state: string, totalCount: number, statuses: Array, checkRuns: Array }>}
- */
 async function fetchPrChecks(owner, repo, headSha, fetchImpl, token = null, ctx = null) {
   ctx = normalizeApiCtx(ctx);
-  const o = String(owner || '').trim();
-  const r = String(repo || '').trim();
-  const sha = String(headSha || '').trim();
-  const empty = { state: 'unknown', totalCount: 0, statuses: [], checkRuns: [] };
+  const o = String(owner || "").trim();
+  const r = String(repo || "").trim();
+  const sha = String(headSha || "").trim();
+  const empty = { state: "unknown", totalCount: 0, statuses: [], checkRuns: [] };
   if (!o || !r || !sha) return empty;
   const base = githubRestUrl(`/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}`, ctx);
   let checks = { ...empty };
   try {
     const status = await apiJson(`${base}/commits/${encodeURIComponent(sha)}/status`, fetchImpl, token);
     const statusList = Array.isArray(status?.statuses) ? status.statuses : [];
-    const emptyCombined =
-      !statusList.length && !(Number(status?.total_count) > 0);
+    const emptyCombined = !statusList.length && !(Number(status?.total_count) > 0);
     checks = {
-      state: emptyCombined ? 'unknown' : status.state || 'unknown',
+      state: emptyCombined ? "unknown" : status.state || "unknown",
       totalCount: emptyCombined ? 0 : status.total_count || statusList.length,
       statuses: statusList.map((s) => ({
-        context: s.context || '',
-        state: s.state || '',
-        description: s.description || '',
-        targetUrl: s.target_url || '',
-        createdAt: s.created_at || '',
-        updatedAt: s.updated_at || '',
+        context: s.context || "",
+        state: s.state || "",
+        description: s.description || "",
+        targetUrl: s.target_url || "",
+        createdAt: s.created_at || "",
+        updatedAt: s.updated_at || ""
       })),
-      checkRuns: [],
+      checkRuns: []
     };
   } catch (err) {
-    if (
-      err?.name === 'AbortError' ||
-      /aborted|AbortError/i.test(String(err?.message || ''))
-    ) {
+    if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
       throw err;
     }
   }
@@ -571,85 +425,62 @@ async function fetchPrChecks(owner, repo, headSha, fetchImpl, token = null, ctx 
     );
     const list = runs?.check_runs || [];
     if (list.length) {
-      checks.checkRuns = list.map((r) => ({
-        id: r.id,
-        name: r.name || '',
-        status: r.status || '',
-        conclusion: r.conclusion || '',
-        htmlUrl: r.html_url || '',
-        startedAt: r.started_at || '',
-        completedAt: r.completed_at || '',
-        appSlug: r.app?.slug || '',
-        appName: r.app?.name || '',
+      checks.checkRuns = list.map((r2) => ({
+        id: r2.id,
+        name: r2.name || "",
+        status: r2.status || "",
+        conclusion: r2.conclusion || "",
+        htmlUrl: r2.html_url || "",
+        startedAt: r2.started_at || "",
+        completedAt: r2.completed_at || "",
+        appSlug: r2.app?.slug || "",
+        appName: r2.app?.name || ""
       }));
     }
   } catch (err) {
-    if (
-      err?.name === 'AbortError' ||
-      /aborted|AbortError/i.test(String(err?.message || ''))
-    ) {
+    if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
       throw err;
     }
   }
-  const normalize =
-    (typeof globalThis !== 'undefined' &&
-      globalThis.PRModalChecks?.normalizeChecks) ||
-    null;
-  if (typeof normalize === 'function') {
+  const normalize = typeof globalThis !== "undefined" && globalThis.PRModalChecks?.normalizeChecks || null;
+  if (typeof normalize === "function") {
     return normalize(checks);
   }
-  // Fallback de-dupe
-  const byCtx = new Map();
+  const byCtx = /* @__PURE__ */ new Map();
   for (const s of checks.statuses || []) {
-    const k = String(s.context || '').toLowerCase();
+    const k = String(s.context || "").toLowerCase();
     if (!k) continue;
     const prev = byCtx.get(k);
-    const t = Date.parse(s.updatedAt || s.createdAt || '') || 0;
-    const pt = prev ? Date.parse(prev.updatedAt || prev.createdAt || '') || 0 : -1;
+    const t = Date.parse(s.updatedAt || s.createdAt || "") || 0;
+    const pt = prev ? Date.parse(prev.updatedAt || prev.createdAt || "") || 0 : -1;
     if (!prev || t >= pt) byCtx.set(k, s);
   }
-  const byName = new Map();
-  for (const r of checks.checkRuns || []) {
-    const k = String(r.name || '').toLowerCase();
+  const byName = /* @__PURE__ */ new Map();
+  for (const r2 of checks.checkRuns || []) {
+    const k = String(r2.name || "").toLowerCase();
     if (!k) continue;
     const prev = byName.get(k);
-    const t = Date.parse(r.completedAt || r.startedAt || '') || Number(r.id) || 0;
-    const pt = prev
-      ? Date.parse(prev.completedAt || prev.startedAt || '') || Number(prev.id) || 0
-      : -1;
-    if (!prev || t >= pt) byName.set(k, r);
+    const t = Date.parse(r2.completedAt || r2.startedAt || "") || Number(r2.id) || 0;
+    const pt = prev ? Date.parse(prev.completedAt || prev.startedAt || "") || Number(prev.id) || 0 : -1;
+    if (!prev || t >= pt) byName.set(k, r2);
   }
   checks.statuses = [...byCtx.values()];
   checks.checkRuns = [...byName.values()];
   checks.totalCount = checks.statuses.length + checks.checkRuns.length;
   return checks;
 }
-
-/**
- * Development (linked issues) + Projects for conversation aside.
- * Independent of fetchPrDetail. Soft-fails to empty arrays.
- * @param {{ body?: string }} [opts] PR body for #N body links
- */
-async function fetchPrDevelopment(
-  owner,
-  repo,
-  number,
-  fetchImpl,
-  token = null,
-  opts = {}
-) {
+async function fetchPrDevelopment(owner, repo, number, fetchImpl, token = null, opts = {}) {
   const ctx = normalizeApiCtx(opts?.ctx);
-  const o = String(owner || '').trim();
-  const r = String(repo || '').trim();
+  const o = String(owner || "").trim();
+  const r = String(repo || "").trim();
   const n = Number(number);
-  const body = String(opts.body || '');
+  const body = String(opts.body || "");
   let linkedIssues = [];
   try {
-    let editApi =
-      typeof globalThis !== 'undefined' ? globalThis.PRModalPrEditApi : null;
-    if (!editApi && typeof require === 'function') {
+    let editApi = typeof globalThis !== "undefined" ? globalThis.PRModalPrEditApi : null;
+    if (!editApi && typeof require === "function") {
       try {
-        editApi = require('./modal/pure/pr-edit-api.js');
+        editApi = require("./modal/pure/pr-edit-api.js");
       } catch {
         editApi = null;
       }
@@ -660,53 +491,45 @@ async function fetchPrDevelopment(
   } catch {
     linkedIssues = [];
   }
-
   let developmentIssues = [];
   let projects = [];
   try {
     const side = await fetchPrSidebarMeta(o, r, n, fetchImpl, token, ctx);
-    if (side && typeof side === 'object') {
+    if (side && typeof side === "object") {
       if (Array.isArray(side.developmentIssues) && side.developmentIssues.length) {
         developmentIssues = side.developmentIssues.map((item) => ({
           number: Number(item?.number),
-          title: String(item?.title || '').trim(),
-          url: String(item?.url || '').trim(),
-          state: String(item?.state || '').trim().toLowerCase(),
-          source: item?.source || 'closing',
-          kind: item?.kind || '',
+          title: String(item?.title || "").trim(),
+          url: String(item?.url || "").trim(),
+          state: String(item?.state || "").trim().toLowerCase(),
+          source: item?.source || "closing",
+          kind: item?.kind || ""
         }));
-        const fromGql = developmentIssues
-          .map((x) => Number(x?.number))
-          .filter((x) => Number.isFinite(x) && x > 0);
+        const fromGql = developmentIssues.map((x) => Number(x?.number)).filter((x) => Number.isFinite(x) && x > 0);
         if (fromGql.length) {
-          const set = new Set([...linkedIssues, ...fromGql]);
+          const set = /* @__PURE__ */ new Set([...linkedIssues, ...fromGql]);
           linkedIssues = [...set].sort((a, b) => a - b);
         }
       }
       if (Array.isArray(side.projects)) projects = side.projects;
     }
   } catch (err) {
-    if (
-      err?.name === 'AbortError' ||
-      /aborted|AbortError/i.test(String(err?.message || ''))
-    ) {
+    if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
       throw err;
     }
   }
-
-  // Union closing-linked + body #N
   {
-    const byNum = new Map();
+    const byNum = /* @__PURE__ */ new Map();
     for (const item of developmentIssues) {
       const num = Number(item?.number);
       if (!Number.isFinite(num) || num <= 0) continue;
       byNum.set(num, {
         number: num,
-        title: String(item?.title || '').trim(),
-        url: String(item?.url || '').trim(),
-        state: String(item?.state || '').trim().toLowerCase(),
-        source: item?.source || 'closing',
-        kind: item?.kind || '',
+        title: String(item?.title || "").trim(),
+        url: String(item?.url || "").trim(),
+        state: String(item?.state || "").trim().toLowerCase(),
+        source: item?.source || "closing",
+        kind: item?.kind || ""
       });
     }
     for (const raw of linkedIssues) {
@@ -714,19 +537,16 @@ async function fetchPrDevelopment(
       if (!Number.isFinite(num) || num <= 0 || byNum.has(num)) continue;
       byNum.set(num, {
         number: num,
-        title: '',
+        title: "",
         url: `https://github.com/${o}/${r}/issues/${num}`,
-        state: '',
-        source: 'body',
-        kind: '',
+        state: "",
+        source: "body",
+        kind: ""
       });
     }
     developmentIssues = [...byNum.values()].sort((a, b) => a.number - b.number);
   }
-
-  const needTitles = developmentIssues
-    .filter((x) => !String(x?.title || '').trim())
-    .map((x) => x.number);
+  const needTitles = developmentIssues.filter((x) => !String(x?.title || "").trim()).map((x) => x.number);
   if (needTitles.length && token) {
     try {
       const summaries = await fetchIssueOrPrSummaries(
@@ -745,75 +565,49 @@ async function fetchPrDevelopment(
             title: item.title || s.title,
             url: s.url || item.url,
             state: item.state || s.state,
-            kind: s.kind || item.kind || '',
+            kind: s.kind || item.kind || ""
           };
         });
       }
     } catch (err) {
-      if (
-        err?.name === 'AbortError' ||
-        /aborted|AbortError/i.test(String(err?.message || ''))
-      ) {
+      if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
         throw err;
       }
     }
   }
-
   return {
     linkedIssues,
     developmentIssues,
-    projects,
+    projects
   };
 }
-
-/**
- * All PR files (paginated) with collapse/annotation applied.
- */
-async function fetchAllPrFiles(
-  owner,
-  repo,
-  number,
-  fetchImpl,
-  token = null,
-  options = {}
-) {
+async function fetchAllPrFiles(owner, repo, number, fetchImpl, token = null, options = {}) {
   const ctx = normalizeApiCtx(options?.ctx);
-  const o = String(owner || '').trim();
-  const r = String(repo || '').trim();
+  const o = String(owner || "").trim();
+  const r = String(repo || "").trim();
   const n = Number(number);
   if (!o || !r || !Number.isFinite(n)) {
-    throw new Error('owner, repo, and number are required for files');
+    throw new Error("owner, repo, and number are required for files");
   }
   const first = githubRestUrl(
-    `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/pulls/${n}/files?per_page=100`
-  , ctx);
+    `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/pulls/${n}/files?per_page=100`,
+    ctx
+  );
   const raw = await fetchRestCollectionAll(first, fetchImpl, token);
-  return mapAndAnnotateFiles(raw, options.gitattributesText || '');
+  return mapAndAnnotateFiles(raw, options.gitattributesText || "");
 }
-
-/**
- * First page of PR files (per_page=100) + optional .gitattributes annotate.
- * Independent of fetchPrDetail — progressive open paints core without waiting.
- * @returns {Promise<{ files: Array, gitattributesText: string }>}
- */
-async function fetchPrFiles(
-  owner,
-  repo,
-  number,
-  fetchImpl,
-  token = null,
-  options = {}
-) {
+async function fetchPrFiles(owner, repo, number, fetchImpl, token = null, options = {}) {
   const ctx = normalizeApiCtx(options?.ctx);
-  const o = String(owner || '').trim();
-  const r = String(repo || '').trim();
+  const o = String(owner || "").trim();
+  const r = String(repo || "").trim();
   const n = Number(number);
   if (!o || !r || !Number.isFinite(n)) {
-    throw new Error('owner, repo, and number are required for files');
+    throw new Error("owner, repo, and number are required for files");
   }
   const base = githubRestUrl(
-    `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}`
-  , ctx);
+    `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}`,
+    ctx
+  );
   let raw = [];
   try {
     const data = await apiJson(
@@ -823,64 +617,43 @@ async function fetchPrFiles(
     );
     raw = Array.isArray(data) ? data : [];
   } catch (err) {
-    if (
-      err?.name === 'AbortError' ||
-      /aborted|AbortError/i.test(String(err?.message || ''))
-    ) {
+    if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
       throw err;
     }
     raw = [];
   }
-
-  let gitattributesText = String(options.gitattributesText || '');
+  let gitattributesText = String(options.gitattributesText || "");
   if (!gitattributesText) {
     try {
-      const ref =
-        String(options.headSha || options.ref || '').trim() || 'HEAD';
+      const ref = String(options.headSha || options.ref || "").trim() || "HEAD";
       const attr = await apiJson(
         `${base}/contents/.gitattributes?ref=${encodeURIComponent(ref)}`,
         fetchImpl,
         token
       );
-      if (attr?.content && attr.encoding === 'base64') {
+      if (attr?.content && attr.encoding === "base64") {
         gitattributesText = decodeBase64Utf8(
-          String(attr.content).replace(/\n/g, '')
+          String(attr.content).replace(/\n/g, "")
         );
-      } else if (typeof attr?.content === 'string') {
+      } else if (typeof attr?.content === "string") {
         gitattributesText = attr.content;
       }
     } catch (err) {
-      if (
-        err?.name === 'AbortError' ||
-        /aborted|AbortError/i.test(String(err?.message || ''))
-      ) {
+      if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
         throw err;
       }
-      gitattributesText = '';
+      gitattributesText = "";
     }
   }
-
   return {
     files: mapAndAnnotateFiles(raw, gitattributesText),
-    gitattributesText,
+    gitattributesText
   };
 }
-
-/**
- * Newest-first first window of issue comments (conversation). Independent of core.
- * @returns {Promise<{ items: Array, meta: object }>}
- */
-async function fetchPrIssueComments(
-  owner,
-  repo,
-  number,
-  fetchImpl,
-  token = null,
-  ctx = null
-) {
+async function fetchPrIssueComments(owner, repo, number, fetchImpl, token = null, ctx = null) {
   ctx = normalizeApiCtx(ctx);
-  const o = String(owner || '').trim();
-  const r = String(repo || '').trim();
+  const o = String(owner || "").trim();
+  const r = String(repo || "").trim();
   const n = Number(number);
   const empty = {
     items: [],
@@ -889,9 +662,9 @@ async function fetchPrIssueComments(
       perPage: COMMENT_PAGE_SIZE,
       hasMore: false,
       nextPage: null,
-      order: 'from-end',
-      loadedCount: 0,
-    },
+      order: "from-end",
+      loadedCount: 0
+    }
   };
   if (!o || !r || !Number.isFinite(n)) return empty;
   try {
@@ -899,73 +672,58 @@ async function fetchPrIssueComments(
       o,
       r,
       n,
-      'issue',
+      "issue",
       { page: 1, perPage: COMMENT_PAGE_SIZE, preferNewest: true },
       fetchImpl,
       token,
       ctx
     );
   } catch (err) {
-    if (
-      err?.name === 'AbortError' ||
-      /aborted|AbortError/i.test(String(err?.message || ''))
-    ) {
+    if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
       throw err;
     }
     return empty;
   }
 }
-
-/**
- * Submitted PR reviews list. Independent of fetchPrDetail.
- * @returns {Promise<Array>}
- */
 async function fetchPrReviews(owner, repo, number, fetchImpl, token = null, ctx = null) {
   ctx = normalizeApiCtx(ctx);
-  const o = String(owner || '').trim();
-  const r = String(repo || '').trim();
+  const o = String(owner || "").trim();
+  const r = String(repo || "").trim();
   const n = Number(number);
   if (!o || !r || !Number.isFinite(n)) return [];
   try {
     const data = await apiJson(
       githubRestUrl(
-        `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/pulls/${n}/reviews?per_page=100`
-      , ctx),
+        `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/pulls/${n}/reviews?per_page=100`,
+        ctx
+      ),
       fetchImpl,
       token
     );
     return (Array.isArray(data) ? data : []).map((rev) => ({
       id: rev.id,
-      author: rev.user?.login || '',
-      avatarUrl: rev.user?.avatar_url || '',
-      type: rev.user?.type || '',
-      isBot:
-        String(rev.user?.type || '').toLowerCase() === 'bot' ||
-        /\[bot\]$/i.test(String(rev.user?.login || '')),
-      state: rev.state || '',
-      body: rev.body || '',
-      submittedAt: rev.submitted_at,
+      author: rev.user?.login || "",
+      avatarUrl: rev.user?.avatar_url || "",
+      type: rev.user?.type || "",
+      isBot: String(rev.user?.type || "").toLowerCase() === "bot" || /\[bot\]$/i.test(String(rev.user?.login || "")),
+      state: rev.state || "",
+      body: rev.body || "",
+      submittedAt: rev.submitted_at
     }));
   } catch (err) {
-    if (
-      err?.name === 'AbortError' ||
-      /aborted|AbortError/i.test(String(err?.message || ''))
-    ) {
+    if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
       throw err;
     }
     return [];
   }
 }
-
 const COMMENT_PAGE_SIZE = 50;
-
 function commentsPageHelpers() {
   try {
-    let mod =
-      typeof globalThis !== 'undefined' ? globalThis.PRModalCommentsPage : null;
-    if (!mod && typeof require === 'function') {
+    let mod = typeof globalThis !== "undefined" ? globalThis.PRModalCommentsPage : null;
+    if (!mod && typeof require === "function") {
       try {
-        mod = require('./modal/pure/comments-page.js');
+        mod = require("./modal/pure/comments-page.js");
       } catch {
         mod = null;
       }
@@ -975,115 +733,76 @@ function commentsPageHelpers() {
     return null;
   }
 }
-
 function mapIssueComment(c) {
   return {
     id: c.id,
-    author: c.user?.login || '',
-    avatarUrl: c.user?.avatar_url || '',
-    body: c.body || '',
-    createdAt: c.created_at,
+    author: c.user?.login || "",
+    avatarUrl: c.user?.avatar_url || "",
+    body: c.body || "",
+    createdAt: c.created_at
   };
 }
-
 function mapReviewComment(c, extra = {}) {
   const subjectTypeRaw = String(
-    extra.subjectType || c.subject_type || c.subjectType || ''
+    extra.subjectType || c.subject_type || c.subjectType || ""
   ).toLowerCase();
-  const isFileSubject = subjectTypeRaw === 'file';
-  // Pending-review comments often omit line and only have position/original_line
-  // File-level comments intentionally have no line.
-  const line = isFileSubject
-    ? null
-    : c.line ??
-      c.original_line ??
-      (c.position != null && Number.isFinite(Number(c.position))
-        ? Number(c.position)
-        : null);
-  // REST has no outdated flag — infer when line is gone but original_line remains
-  const outdated =
-    extra.outdated != null
-      ? Boolean(extra.outdated)
-      : c.outdated != null
-        ? Boolean(c.outdated)
-        : !isFileSubject && c.line == null && c.original_line != null;
-  // Prefer explicit subject_type; otherwise path-only (no line) → file
-  const subjectType =
-    isFileSubject ||
-    (line == null && !c.original_line && c.path && subjectTypeRaw !== 'line')
-      ? 'file'
-      : 'line';
+  const isFileSubject = subjectTypeRaw === "file";
+  const line = isFileSubject ? null : c.line ?? c.original_line ?? (c.position != null && Number.isFinite(Number(c.position)) ? Number(c.position) : null);
+  const outdated = extra.outdated != null ? Boolean(extra.outdated) : c.outdated != null ? Boolean(c.outdated) : !isFileSubject && c.line == null && c.original_line != null;
+  const subjectType = isFileSubject || line == null && !c.original_line && c.path && subjectTypeRaw !== "line" ? "file" : "line";
   return {
     id: c.id,
-    author: c.user?.login || '',
-    avatarUrl: c.user?.avatar_url || '',
-    body: c.body || '',
-    path: c.path || '',
+    author: c.user?.login || "",
+    avatarUrl: c.user?.avatar_url || "",
+    body: c.body || "",
+    path: c.path || "",
     line: line != null ? Number(line) : null,
-    originalLine: subjectType === 'file' ? null : c.original_line ?? null,
-    startLine: subjectType === 'file' ? null : c.start_line ?? null,
-    side: c.side || 'RIGHT',
+    originalLine: subjectType === "file" ? null : c.original_line ?? null,
+    startLine: subjectType === "file" ? null : c.start_line ?? null,
+    side: c.side || "RIGHT",
     startSide: c.start_side || null,
-    diffHunk: c.diff_hunk || c.diffHunk || '',
+    diffHunk: c.diff_hunk || c.diffHunk || "",
     createdAt: c.created_at,
     inReplyToId: c.in_reply_to_id ?? null,
     nodeId: c.node_id || null,
     threadNodeId: extra.threadNodeId ?? null,
     /** Pull request review id (groups file threads under one review event). */
-    reviewId:
-      c.pull_request_review_id != null
-        ? Number(c.pull_request_review_id)
-        : extra.reviewId != null
-          ? Number(extra.reviewId)
-          : null,
+    reviewId: c.pull_request_review_id != null ? Number(c.pull_request_review_id) : extra.reviewId != null ? Number(extra.reviewId) : null,
     resolved: Boolean(extra.resolved),
     outdated,
     /** True when part of a not-yet-submitted PENDING review (hidden from main list). */
     pending: Boolean(extra.pending || c.pending),
     pendingReviewId: extra.pendingReviewId ?? c.pendingReviewId ?? null,
     /** `file` | `line` — file-level comments have no line anchor. */
-    subjectType,
+    subjectType
   };
 }
-
-/**
- * Map a GraphQL PullRequestReviewComment node (+ parent thread meta) → app shape.
- */
 function mapGraphqlReviewCommentNode(node, threadMeta = {}) {
   if (!node) return null;
   const id = node.databaseId ?? null;
   if (id == null) return null;
-  const reviewState = String(node.pullRequestReview?.state || '').toUpperCase();
-  const pending = reviewState === 'PENDING';
-  const reviewDbId =
-    node.pullRequestReview?.databaseId != null
-      ? Number(node.pullRequestReview.databaseId)
-      : null;
+  const reviewState = String(node.pullRequestReview?.state || "").toUpperCase();
+  const pending = reviewState === "PENDING";
+  const reviewDbId = node.pullRequestReview?.databaseId != null ? Number(node.pullRequestReview.databaseId) : null;
   const subjectTypeRaw = String(
-    threadMeta.subjectType || node.subjectType || ''
+    threadMeta.subjectType || node.subjectType || ""
   ).toUpperCase();
-  const isFile = subjectTypeRaw === 'FILE';
-  const line = isFile
-    ? null
-    : node.line != null
-      ? Number(node.line)
-      : node.originalLine != null
-        ? Number(node.originalLine)
-        : null;
-  const sideRaw = threadMeta.diffSide || threadMeta.side || 'RIGHT';
-  const side = String(sideRaw).toUpperCase() === 'LEFT' ? 'LEFT' : 'RIGHT';
+  const isFile = subjectTypeRaw === "FILE";
+  const line = isFile ? null : node.line != null ? Number(node.line) : node.originalLine != null ? Number(node.originalLine) : null;
+  const sideRaw = threadMeta.diffSide || threadMeta.side || "RIGHT";
+  const side = String(sideRaw).toUpperCase() === "LEFT" ? "LEFT" : "RIGHT";
   return {
     id: Number(id),
-    author: node.author?.login || '',
-    avatarUrl: node.author?.avatarUrl || '',
-    body: node.body || '',
-    path: node.path || threadMeta.path || '',
+    author: node.author?.login || "",
+    avatarUrl: node.author?.avatarUrl || "",
+    body: node.body || "",
+    path: node.path || threadMeta.path || "",
     line,
     originalLine: isFile ? null : node.originalLine ?? null,
     startLine: isFile ? null : node.startLine ?? node.originalStartLine ?? null,
     side,
     startSide: threadMeta.startDiffSide || null,
-    diffHunk: node.diffHunk || '',
+    diffHunk: node.diffHunk || "",
     createdAt: node.createdAt || null,
     inReplyToId: node.replyTo?.databaseId ?? null,
     nodeId: node.id || null,
@@ -1093,17 +812,12 @@ function mapGraphqlReviewCommentNode(node, threadMeta = {}) {
     outdated: Boolean(node.outdated ?? threadMeta.isOutdated),
     pending,
     pendingReviewId: pending ? reviewDbId : null,
-    subjectType: isFile ? 'file' : 'line',
+    subjectType: isFile ? "file" : "line"
   };
 }
-
-/**
- * Merge published / GraphQL review comments with PENDING-only rows.
- * GraphQL rows win for threadNodeId / outdated / diffHunk; pending flag merges in.
- */
 function mergePendingReviewComments(published, pendingList) {
   const list = Array.isArray(published) ? published.slice() : [];
-  const seen = new Set(list.map((c) => (c && c.id != null ? String(c.id) : '')).filter(Boolean));
+  const seen = new Set(list.map((c) => c && c.id != null ? String(c.id) : "").filter(Boolean));
   for (const p of Array.isArray(pendingList) ? pendingList : []) {
     if (!p || p.id == null) continue;
     const key = String(p.id);
@@ -1119,8 +833,8 @@ function mergePendingReviewComments(published, pendingList) {
         threadNodeId: host.threadNodeId || p.threadNodeId || null,
         nodeId: host.nodeId || p.nodeId || null,
         outdated: Boolean(host.outdated || p.outdated),
-        diffHunk: host.diffHunk || p.diffHunk || '',
-        resolved: Boolean(host.resolved || p.resolved),
+        diffHunk: host.diffHunk || p.diffHunk || "",
+        resolved: Boolean(host.resolved || p.resolved)
       };
       continue;
     }
@@ -1129,44 +843,21 @@ function mergePendingReviewComments(published, pendingList) {
   }
   return list;
 }
-
-/**
- * Pick the viewer's latest PENDING review from a reviews list payload.
- * @param {Array} reviews
- * @param {string|null} login
- * @returns {{ id: number, node_id: string|null }|null}
- */
 function pickViewerPendingFromReviews(reviews, login) {
   const list = Array.isArray(reviews) ? reviews : [];
-  const mine = list.filter((r) => {
-    if (!r || String(r.state || '').toUpperCase() !== 'PENDING') return false;
+  const mine = list.filter((r2) => {
+    if (!r2 || String(r2.state || "").toUpperCase() !== "PENDING") return false;
     if (!login) return true;
-    return (
-      String(r.user?.login || '').toLowerCase() === String(login).toLowerCase()
-    );
+    return String(r2.user?.login || "").toLowerCase() === String(login).toLowerCase();
   });
   if (!mine.length) return null;
   const r = mine[mine.length - 1];
   return {
     id: Number(r.id),
-    node_id: r.node_id || null,
+    node_id: r.node_id || null
   };
 }
-
-/**
- * Comments on the viewer's PENDING review (includes replies not in the main list).
- * Pass `preloaded` reviews + login from fetchPrDetail to avoid a second
- * GET /reviews (rate-limit / race) that can miss PENDING on hard reload.
- * @returns {Promise<{ comments: Array, review: { id: number, nodeId: string|null, commentCount: number }|null }>}
- */
-async function fetchViewerPendingReviewBundle(
-  owner,
-  repo,
-  pullNumber,
-  fetchImpl,
-  token,
-  preloaded = null
-, ctx = null) {
+async function fetchViewerPendingReviewBundle(owner, repo, pullNumber, fetchImpl, token, preloaded = null, ctx = null) {
   ctx = normalizeApiCtx(ctx);
   if (!token) return { comments: [], review: null };
   let pending = null;
@@ -1193,16 +884,16 @@ async function fetchViewerPendingReviewBundle(
       fetchImpl,
       token
     );
-    const comments = (Array.isArray(raw) ? raw : []).map((c) =>
-      mapReviewComment(c, { pending: true, pendingReviewId: pending.id })
+    const comments = (Array.isArray(raw) ? raw : []).map(
+      (c) => mapReviewComment(c, { pending: true, pendingReviewId: pending.id })
     );
     return {
       comments,
       review: {
         id: pending.id,
         nodeId: pending.node_id || null,
-        commentCount: comments.length,
-      },
+        commentCount: comments.length
+      }
     };
   } catch {
     return {
@@ -1210,23 +901,12 @@ async function fetchViewerPendingReviewBundle(
       review: {
         id: pending.id,
         nodeId: pending.node_id || null,
-        commentCount: 0,
-      },
+        commentCount: 0
+      }
     };
   }
 }
-
-/**
- * @returns {Promise<Array>}
- */
-
-async function fetchViewerPendingReviewComments(
-  owner,
-  repo,
-  pullNumber,
-  fetchImpl,
-  token
-) {
+async function fetchViewerPendingReviewComments(owner, repo, pullNumber, fetchImpl, token) {
   const { comments } = await fetchViewerPendingReviewBundle(
     owner,
     repo,
@@ -1236,19 +916,7 @@ async function fetchViewerPendingReviewComments(
   );
   return comments;
 }
-
-/**
- * Create an empty PENDING review (no event). Required before attaching
- * "Start review" replies when none exists yet.
- */
-async function createPendingPullReview(
-  owner,
-  repo,
-  pullNumber,
-  { commitId } = {},
-  fetchImpl,
-  token
-, ctx = null) {
+async function createPendingPullReview(owner, repo, pullNumber, { commitId } = {}, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
   const body = {};
   if (commitId) body.commit_id = commitId;
@@ -1256,261 +924,175 @@ async function createPendingPullReview(
     githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`, ctx),
     fetchImpl,
     token,
-    { method: 'POST', body }
+    { method: "POST", body }
   );
 }
-
-/**
- * Submit an existing PENDING review.
- * POST /repos/{owner}/{repo}/pulls/{pull}/reviews/{review_id}/events
- */
-async function submitPendingPullReview(
-  owner,
-  repo,
-  pullNumber,
-  reviewId,
-  { event = 'COMMENT', body = '' } = {},
-  fetchImpl,
-  token
-, ctx = null) {
+async function submitPendingPullReview(owner, repo, pullNumber, reviewId, { event = "COMMENT", body = "" } = {}, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
   const id = Number(reviewId);
   if (!Number.isFinite(id) || id <= 0) {
-    throw new Error('Invalid pending review id');
+    throw new Error("Invalid pending review id");
   }
-  const ev = String(event || 'COMMENT').toUpperCase();
-  if (!['COMMENT', 'APPROVE', 'REQUEST_CHANGES'].includes(ev)) {
-    throw new Error('Invalid review event');
+  const ev = String(event || "COMMENT").toUpperCase();
+  if (!["COMMENT", "APPROVE", "REQUEST_CHANGES"].includes(ev)) {
+    throw new Error("Invalid review event");
   }
   return apiSend(
     githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${id}/events`, ctx),
     fetchImpl,
     token,
-    { method: 'POST', body: { event: ev, body: body || '' } }
+    { method: "POST", body: { event: ev, body: body || "" } }
   );
 }
-
-/**
- * Delete a PENDING review (discards all pending comments/replies on it).
- * DELETE /repos/{owner}/{repo}/pulls/{pull}/reviews/{review_id}
- */
-async function deletePendingPullReview(
-  owner,
-  repo,
-  pullNumber,
-  reviewId,
-  fetchImpl,
-  token
-, ctx = null) {
+async function deletePendingPullReview(owner, repo, pullNumber, reviewId, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
   const id = Number(reviewId);
   if (!Number.isFinite(id) || id <= 0) {
-    throw new Error('Invalid pending review id');
+    throw new Error("Invalid pending review id");
   }
   return apiSend(
     githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${id}`, ctx),
     fetchImpl,
     token,
-    { method: 'DELETE' }
+    { method: "DELETE" }
   );
 }
-
-/**
- * Paginated issue or pull review comments.
- * Supports page/per_page offset and since= (ISO8601) incremental windows.
- *
- * @param {'issue'|'review'} kind
- * @param {{ page?: number, perPage?: number, since?: string|null }} [opts]
- */
-async function fetchPrCommentsPage(
-  owner,
-  repo,
-  pullNumber,
-  kind,
-  opts,
-  fetchImpl,
-  token
-, ctx = null) {
+async function fetchPrCommentsPage(owner, repo, pullNumber, kind, opts, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
   const helpers = commentsPageHelpers();
-  const perPage =
-    helpers?.clampPerPage?.(opts?.perPage) ||
-    Math.min(100, Number(opts?.perPage) || COMMENT_PAGE_SIZE);
+  const perPage = helpers?.clampPerPage?.(opts?.perPage) || Math.min(100, Number(opts?.perPage) || COMMENT_PAGE_SIZE);
   let page = Math.max(1, Number(opts?.page) || 1);
   const since = opts?.since || null;
-  // Prefer newest-first: review API supports direction=desc; issue comments
-  // are ascending-only so we jump to Link rel=last on the first preferNewest fetch.
   const preferNewest = Boolean(opts?.preferNewest) && !since;
   const orderHint = opts?.order || null;
-
-  async function fetchPage(pageNum, listOpts = {}, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-    const sort =
-      listOpts.sort != null
-        ? listOpts.sort
-        : kind === 'review'
-          ? 'created'
-          : undefined;
-    const direction =
-      listOpts.direction != null
-        ? listOpts.direction
-        : kind === 'review'
-          ? preferNewest || orderHint === 'desc'
-            ? 'desc'
-            : 'asc'
-          : undefined;
-    const url = helpers?.buildCommentsListUrl
-      ? helpers.buildCommentsListUrl(kind, owner, repo, pullNumber, {
-          page: pageNum,
-          perPage,
-          since,
-          sort,
-          direction,
-        })
-      : (() => {
-          const base =
-            kind === 'review'
-              ? githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/comments`, ctx)
-              : githubRestUrl(`/repos/${owner}/${repo}/issues/${pullNumber}/comments`, ctx);
-          const q = new URLSearchParams({
-            per_page: String(perPage),
-            page: String(pageNum),
-          });
-          if (since) q.set('since', since);
-          if (sort) q.set('sort', sort);
-          if (direction) q.set('direction', direction);
-          return `${base}?${q}`;
-        })();
+  async function fetchPage(pageNum, listOpts = {}, ctx2 = null) {
+    ctx2 = normalizeApiCtx(ctx2);
+    const sort = listOpts.sort != null ? listOpts.sort : kind === "review" ? "created" : void 0;
+    const direction = listOpts.direction != null ? listOpts.direction : kind === "review" ? preferNewest || orderHint === "desc" ? "desc" : "asc" : void 0;
+    const url = helpers?.buildCommentsListUrl ? helpers.buildCommentsListUrl(kind, owner, repo, pullNumber, {
+      page: pageNum,
+      perPage,
+      since,
+      sort,
+      direction
+    }) : (() => {
+      const base = kind === "review" ? githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/comments`, ctx2) : githubRestUrl(`/repos/${owner}/${repo}/issues/${pullNumber}/comments`, ctx2);
+      const q = new URLSearchParams({
+        per_page: String(perPage),
+        page: String(pageNum)
+      });
+      if (since) q.set("since", since);
+      if (sort) q.set("sort", sort);
+      if (direction) q.set("direction", direction);
+      return `${base}?${q}`;
+    })();
     const { data, link } = await apiJsonWithLink(url, fetchImpl, token);
     const raw = Array.isArray(data) ? data : [];
-    const items =
-      kind === 'review' ? raw.map(mapReviewComment) : raw.map(mapIssueComment);
+    const items = kind === "review" ? raw.map(mapReviewComment) : raw.map(mapIssueComment);
     return { items, raw, link, pageNum };
   }
-
-  // Issue comments: ascending only → first paint from last page (newest), then page-1…
-  if (kind === 'issue' && preferNewest && page === 1 && !orderHint) {
+  if (kind === "issue" && preferNewest && page === 1 && !orderHint) {
     const probe = await fetchPage(1);
-    const lastPage =
-      (helpers?.parseLinkLastPage && helpers.parseLinkLastPage(probe.link)) ||
-      null;
+    const lastPage = helpers?.parseLinkLastPage && helpers.parseLinkLastPage(probe.link) || null;
     if (lastPage != null && lastPage > 1) {
       const newest = await fetchPage(lastPage);
-      const meta = helpers?.buildCommentsPageMeta
-        ? helpers.buildCommentsPageMeta(newest.items, {
-            page: lastPage,
-            perPage,
-            linkHeader: newest.link,
-            since,
-            order: 'from-end',
-          })
-        : {
-            page: lastPage,
-            perPage,
-            hasMore: lastPage > 1,
-            nextPage: lastPage > 1 ? lastPage - 1 : null,
-            order: 'from-end',
-            since,
-            loadedCount: newest.items.length,
-          };
-      return { items: newest.items, meta, kind };
-    }
-    // Only one page — already the full set (oldest=newest window)
-    const meta = helpers?.buildCommentsPageMeta
-      ? helpers.buildCommentsPageMeta(probe.items, {
-          page: 1,
-          perPage,
-          linkHeader: probe.link,
-          since,
-          order: 'from-end',
-        })
-      : {
-          page: 1,
-          perPage,
-          hasMore: false,
-          nextPage: null,
-          order: 'from-end',
-          since,
-          loadedCount: probe.items.length,
-        };
-    return { items: probe.items, meta, kind };
-  }
-
-  // Continuing from-end (older pages) for issue comments
-  if (kind === 'issue' && (orderHint === 'from-end' || opts?.order === 'from-end')) {
-    const res = await fetchPage(page);
-    const meta = helpers?.buildCommentsPageMeta
-      ? helpers.buildCommentsPageMeta(res.items, {
-          page,
-          perPage,
-          linkHeader: res.link,
-          since,
-          order: 'from-end',
-        })
-      : {
-          page,
-          perPage,
-          hasMore: page > 1,
-          nextPage: page > 1 ? page - 1 : null,
-          order: 'from-end',
-          since,
-          loadedCount: res.items.length,
-        };
-    return { items: res.items, meta, kind };
-  }
-
-  // Review comments (and default issue): page 1 = newest when preferNewest
-  const res = await fetchPage(page, {
-    direction: kind === 'review' ? (preferNewest || orderHint === 'desc' ? 'desc' : 'asc') : undefined,
-    sort: kind === 'review' ? 'created' : undefined,
-  });
-  const meta = helpers?.buildCommentsPageMeta
-    ? helpers.buildCommentsPageMeta(res.items, {
-        page,
+      const meta3 = helpers?.buildCommentsPageMeta ? helpers.buildCommentsPageMeta(newest.items, {
+        page: lastPage,
         perPage,
-        linkHeader: res.link,
+        linkHeader: newest.link,
         since,
-        order: kind === 'review' && (preferNewest || orderHint === 'desc') ? 'desc' : 'asc',
-      })
-    : {
-        page,
+        order: "from-end"
+      }) : {
+        page: lastPage,
         perPage,
-        hasMore: res.raw.length >= perPage,
-        nextPage: res.raw.length >= perPage ? page + 1 : null,
+        hasMore: lastPage > 1,
+        nextPage: lastPage > 1 ? lastPage - 1 : null,
+        order: "from-end",
         since,
-        loadedCount: res.items.length,
+        loadedCount: newest.items.length
       };
+      return { items: newest.items, meta: meta3, kind };
+    }
+    const meta2 = helpers?.buildCommentsPageMeta ? helpers.buildCommentsPageMeta(probe.items, {
+      page: 1,
+      perPage,
+      linkHeader: probe.link,
+      since,
+      order: "from-end"
+    }) : {
+      page: 1,
+      perPage,
+      hasMore: false,
+      nextPage: null,
+      order: "from-end",
+      since,
+      loadedCount: probe.items.length
+    };
+    return { items: probe.items, meta: meta2, kind };
+  }
+  if (kind === "issue" && (orderHint === "from-end" || opts?.order === "from-end")) {
+    const res2 = await fetchPage(page);
+    const meta2 = helpers?.buildCommentsPageMeta ? helpers.buildCommentsPageMeta(res2.items, {
+      page,
+      perPage,
+      linkHeader: res2.link,
+      since,
+      order: "from-end"
+    }) : {
+      page,
+      perPage,
+      hasMore: page > 1,
+      nextPage: page > 1 ? page - 1 : null,
+      order: "from-end",
+      since,
+      loadedCount: res2.items.length
+    };
+    return { items: res2.items, meta: meta2, kind };
+  }
+  const res = await fetchPage(page, {
+    direction: kind === "review" ? preferNewest || orderHint === "desc" ? "desc" : "asc" : void 0,
+    sort: kind === "review" ? "created" : void 0
+  });
+  const meta = helpers?.buildCommentsPageMeta ? helpers.buildCommentsPageMeta(res.items, {
+    page,
+    perPage,
+    linkHeader: res.link,
+    since,
+    order: kind === "review" && (preferNewest || orderHint === "desc") ? "desc" : "asc"
+  }) : {
+    page,
+    perPage,
+    hasMore: res.raw.length >= perPage,
+    nextPage: res.raw.length >= perPage ? page + 1 : null,
+    since,
+    loadedCount: res.items.length
+  };
   return { items: res.items, meta, kind };
 }
-
-async function apiSend(url, fetchImpl, token, { method = 'GET', body } = {}) {
+async function apiSend(url, fetchImpl, token, { method = "GET", body } = {}) {
   const headers = buildApiHeaders(token);
-  if (body != null) headers['Content-Type'] = 'application/json';
+  if (body != null) headers["Content-Type"] = "application/json";
   const res = await fetchImpl(url, {
     method,
     headers,
-    body: body != null ? JSON.stringify(body) : undefined,
+    body: body != null ? JSON.stringify(body) : void 0
   });
   if (!res.ok) {
     let detail = res.statusText;
     try {
       const j = await res.json();
       if (j?.message) detail = j.message;
-      // Surface field-level validation (common on 422 replies / review comments)
       if (Array.isArray(j?.errors) && j.errors.length) {
-        const bits = j.errors
-          .map((e) => {
-            if (!e || typeof e !== 'object') return String(e);
-            if (e.message) return e.message;
-            const field = e.field || e.resource || '';
-            const code = e.code || '';
-            return [field, code].filter(Boolean).join(' ') || null;
-          })
-          .filter(Boolean);
-        if (bits.length) detail = `${detail}: ${bits.join('; ')}`;
+        const bits = j.errors.map((e) => {
+          if (!e || typeof e !== "object") return String(e);
+          if (e.message) return e.message;
+          const field = e.field || e.resource || "";
+          const code = e.code || "";
+          return [field, code].filter(Boolean).join(" ") || null;
+        }).filter(Boolean);
+        if (bits.length) detail = `${detail}: ${bits.join("; ")}`;
       }
     } catch {
-      /* ignore */
     }
     const err = new Error(`GitHub API ${res.status}: ${detail}`);
     err.status = res.status;
@@ -1519,19 +1101,10 @@ async function apiSend(url, fetchImpl, token, { method = 'GET', body } = {}) {
   if (res.status === 204) return null;
   return res.json();
 }
-
-/**
- * Pull request sidebar meta for conversation rail:
- * - ProjectV2 items (Projects section)
- * - Closing-linked issues (Development section)
- * Soft fields only — failures return empty arrays.
- *
- * @returns {Promise<{ projects: Array, developmentIssues: Array }>}
- */
 async function fetchPrSidebarMeta(owner, repo, number, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
-  const o = String(owner || '').trim();
-  const r = String(repo || '').trim();
+  const o = String(owner || "").trim();
+  const r = String(repo || "").trim();
   const n = Number(number);
   if (!o || !r || !Number.isFinite(n) || n <= 0 || !token) {
     return { projects: [], developmentIssues: [] };
@@ -1575,13 +1148,13 @@ async function fetchPrSidebarMeta(owner, repo, number, fetchImpl, token, ctx = n
     for (const node of prNode?.projectItems?.nodes || []) {
       const p = node?.project;
       if (!p) continue;
-      const title = String(p.title || '').trim();
+      const title = String(p.title || "").trim();
       if (!title) continue;
       projects.push({
         id: String(node.id || `${p.number}:${title}`),
         title,
         number: p.number != null ? Number(p.number) : null,
-        url: String(p.url || '').trim(),
+        url: String(p.url || "").trim()
       });
     }
     const developmentIssues = [];
@@ -1590,58 +1163,38 @@ async function fetchPrSidebarMeta(owner, repo, number, fetchImpl, token, ctx = n
       if (!Number.isFinite(num) || num <= 0) continue;
       developmentIssues.push({
         number: num,
-        title: String(node?.title || '').trim(),
-        url: String(node?.url || '').trim(),
-        state: String(node?.state || '').trim().toLowerCase(),
+        title: String(node?.title || "").trim(),
+        url: String(node?.url || "").trim(),
+        state: String(node?.state || "").trim().toLowerCase()
       });
     }
     return { projects, developmentIssues };
   } catch (err) {
-    // Soft: missing ProjectV2 scope / org policy / etc.
-    if (err?.name === 'AbortError' || /aborted|AbortError/i.test(String(err?.message || ''))) {
+    if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
       throw err;
     }
     return { projects: [], developmentIssues: [] };
   }
 }
-
-/**
- * Resolve title/url/state for issue or PR numbers (body-linked Development rows).
- * Soft-fail: empty Map when GraphQL unavailable.
- *
- * @param {string} owner
- * @param {string} repo
- * @param {number[]} numbers
- * @param {typeof fetch} fetchImpl
- * @param {string} token
- * @returns {Promise<Map<number, { number: number, title: string, url: string, state: string, kind: string }>>}
- */
 async function fetchIssueOrPrSummaries(owner, repo, numbers, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
-  const o = String(owner || '').trim();
-  const r = String(repo || '').trim();
+  const o = String(owner || "").trim();
+  const r = String(repo || "").trim();
   const nums = [
     ...new Set(
-      (Array.isArray(numbers) ? numbers : [])
-        .map((n) => Number(n))
-        .filter((n) => Number.isFinite(n) && n > 0)
-    ),
+      (Array.isArray(numbers) ? numbers : []).map((n) => Number(n)).filter((n) => Number.isFinite(n) && n > 0)
+    )
   ].slice(0, 30);
-  /** @type {Map<number, { number: number, title: string, url: string, state: string, kind: string }>} */
-  const out = new Map();
+  const out = /* @__PURE__ */ new Map();
   if (!o || !r || !nums.length || !token) return out;
-
-  // Alias each number — GraphQL has no list-of-numbers helper for issueOrPullRequest.
-  const fields = nums
-    .map(
-      (n, i) => `
+  const fields = nums.map(
+    (n, i) => `
       n${i}: issueOrPullRequest(number: ${n}) {
         __typename
         ... on Issue { number title url state }
         ... on PullRequest { number title url state }
       }`
-    )
-    .join('\n');
+  ).join("\n");
   const query = `
     query($owner:String!,$repo:String!) {
       repository(owner:$owner, name:$repo) {
@@ -1665,50 +1218,36 @@ async function fetchIssueOrPrSummaries(owner, repo, numbers, fetchImpl, token, c
       if (!Number.isFinite(num) || num <= 0) continue;
       out.set(num, {
         number: num,
-        title: String(node.title || '').trim(),
-        url: String(node.url || '').trim(),
-        state: String(node.state || '').trim().toLowerCase(),
-        kind: node.__typename === 'PullRequest' ? 'pull' : 'issue',
+        title: String(node.title || "").trim(),
+        url: String(node.url || "").trim(),
+        state: String(node.state || "").trim().toLowerCase(),
+        kind: node.__typename === "PullRequest" ? "pull" : "issue"
       });
     }
   } catch (err) {
-    if (
-      err?.name === 'AbortError' ||
-      /aborted|AbortError/i.test(String(err?.message || ''))
-    ) {
+    if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
       throw err;
     }
-    // Soft-fail: keep empty map
   }
   return out;
 }
-
-/**
- * GraphQL client: HTTP 200 can still carry body.errors — treat those as failures.
- * @returns {Promise<object>} data field only
- */
 async function apiGraphql(query, variables, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
   const json = await apiSend(
     githubGraphqlUrl(ctx),
     fetchImpl,
     token,
-    { method: 'POST', body: { query, variables: variables || {} } }
+    { method: "POST", body: { query, variables: variables || {} } }
   );
   if (json?.errors?.length) {
-    const msg = json.errors
-      .map((e) => e?.message || String(e))
-      .filter(Boolean)
-      .join('; ');
-    const err = new Error(`GitHub GraphQL: ${msg || 'unknown error'}`);
+    const msg = json.errors.map((e) => e?.message || String(e)).filter(Boolean).join("; ");
+    const err = new Error(`GitHub GraphQL: ${msg || "unknown error"}`);
     err.graphqlErrors = json.errors;
     err.status = 200;
     throw err;
   }
   return json?.data ?? null;
 }
-
-/** Thread node fields shared by first/last pagination queries. */
 const REVIEW_THREAD_NODE_FIELDS = `
   id
   isResolved
@@ -1740,8 +1279,6 @@ const REVIEW_THREAD_NODE_FIELDS = `
     }
   }
 `;
-
-/** Oldest → newer (forward). */
 const REVIEW_THREADS_FIRST_QUERY = `
 query($owner:String!,$name:String!,$number:Int!,$n:Int!,$cursor:String){
   repository(owner:$owner,name:$name){
@@ -1754,8 +1291,6 @@ query($owner:String!,$name:String!,$number:Int!,$n:Int!,$cursor:String){
     }
   }
 }`;
-
-/** Newest ← older (backward). */
 const REVIEW_THREADS_LAST_QUERY = `
 query($owner:String!,$name:String!,$number:Int!,$n:Int!,$cursor:String){
   repository(owner:$owner,name:$name){
@@ -1768,15 +1303,8 @@ query($owner:String!,$name:String!,$number:Int!,$n:Int!,$cursor:String){
     }
   }
 }`;
-
-/** GraphQL connection / nodes(ids) hard cap. */
 const REVIEW_THREADS_API_MAX = 100;
-/** Default page size for dual-window expand (Load more / Load all). Matches API max. */
 const REVIEW_THREADS_PAGE_SIZE = REVIEW_THREADS_API_MAX;
-
-/**
- * Map GraphQL reviewThreads.nodes → { threads, comments }.
- */
 function mapReviewThreadNodes(allNodes) {
   const threads = [];
   const comments = [];
@@ -1786,13 +1314,13 @@ function mapReviewThreadNodes(allNodes) {
       threadNodeId: t.id,
       resolved: Boolean(t.isResolved),
       isOutdated: Boolean(t.isOutdated),
-      path: t.path || '',
-      diffSide: t.diffSide || 'RIGHT',
+      path: t.path || "",
+      diffSide: t.diffSide || "RIGHT",
       startDiffSide: t.startDiffSide || null,
       line: t.line ?? null,
       originalLine: t.originalLine ?? null,
       startLine: t.startLine ?? t.originalStartLine ?? null,
-      subjectType: t.subjectType || null,
+      subjectType: t.subjectType || null
     };
     const commentIds = [];
     for (const node of t.comments?.nodes || []) {
@@ -1805,33 +1333,16 @@ function mapReviewThreadNodes(allNodes) {
       threadNodeId: t.id,
       resolved: Boolean(t.isResolved),
       outdated: Boolean(t.isOutdated),
-      path: t.path || '',
+      path: t.path || "",
       line: t.line ?? t.originalLine ?? null,
       startLine: t.startLine ?? t.originalStartLine ?? null,
-      side: t.diffSide || 'RIGHT',
-      commentIds,
+      side: t.diffSide || "RIGHT",
+      commentIds
     });
   }
   return { threads, comments };
 }
-
-/**
- * Single GraphQL page of review threads.
- * @param {'newest'|'older'|'oldest'|'newer'} direction
- *   - newest: last:N (connection end = most recent)
- *   - older:  last:N before startCursor (expand newest window into older)
- *   - oldest: first:N (connection start = earliest)
- *   - newer:  first:N after endCursor (expand oldest window into newer)
- */
-async function fetchReviewThreadsPage(
-  owner,
-  repo,
-  pullNumber,
-  { direction = 'newest', cursor = null, pageSize = REVIEW_THREADS_PAGE_SIZE } = {},
-  fetchImpl,
-  token,
-  ctx = null
-) {
+async function fetchReviewThreadsPage(owner, repo, pullNumber, { direction = "newest", cursor = null, pageSize = REVIEW_THREADS_PAGE_SIZE } = {}, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
   const empty = {
     threads: [],
@@ -1843,7 +1354,7 @@ async function fetchReviewThreadsPage(
     hasPreviousPage: false,
     totalCount: null,
     pageCount: 0,
-    direction,
+    direction
   };
   if (!token) return empty;
   const n = Number(pullNumber);
@@ -1852,13 +1363,9 @@ async function fetchReviewThreadsPage(
     1,
     Math.min(REVIEW_THREADS_API_MAX, Number(pageSize) || REVIEW_THREADS_PAGE_SIZE)
   );
-  const dir = String(direction || 'newest');
-  const useLast = dir === 'newest' || dir === 'older';
+  const dir = String(direction || "newest");
+  const useLast = dir === "newest" || dir === "older";
   const query = useLast ? REVIEW_THREADS_LAST_QUERY : REVIEW_THREADS_FIRST_QUERY;
-  // newest: last:N, cursor=null
-  // older:  last:N, before=cursor (start of current newest window)
-  // oldest: first:N, cursor=null
-  // newer:  first:N, after=cursor (end of current oldest window)
   const data = await apiGraphql(
     query,
     {
@@ -1866,7 +1373,7 @@ async function fetchReviewThreadsPage(
       name: repo,
       number: n,
       n: size,
-      cursor: cursor || null,
+      cursor: cursor || null
     },
     fetchImpl,
     token,
@@ -1876,48 +1383,30 @@ async function fetchReviewThreadsPage(
   const nodes = conn?.nodes || [];
   const pageInfo = conn?.pageInfo || {};
   const mapped = mapReviewThreadNodes(nodes);
-  // Tag threads with load window for UI gap split
-  const windowTag =
-    dir === 'newest' || dir === 'older' ? 'newest' : 'oldest';
+  const windowTag = dir === "newest" || dir === "older" ? "newest" : "oldest";
   for (const t of mapped.threads) {
     t.loadWindow = windowTag;
   }
   return {
     threads: mapped.threads,
     comments: mapped.comments,
-    totalCount:
-      typeof conn?.totalCount === 'number' ? conn.totalCount : null,
+    totalCount: typeof conn?.totalCount === "number" ? conn.totalCount : null,
     startCursor: pageInfo.startCursor || null,
     endCursor: pageInfo.endCursor || null,
     hasNextPage: Boolean(pageInfo.hasNextPage),
     hasPreviousPage: Boolean(pageInfo.hasPreviousPage),
     // Convenience for dual-window UI
-    hasMore:
-      useLast
-        ? Boolean(pageInfo.hasPreviousPage)
-        : Boolean(pageInfo.hasNextPage),
+    hasMore: useLast ? Boolean(pageInfo.hasPreviousPage) : Boolean(pageInfo.hasNextPage),
     pageCount: 1,
     direction: dir,
-    window: windowTag,
+    window: windowTag
   };
 }
-
-/**
- * Collect GraphQL thread node ids (PRRT_…) that are unresolved in a detail snapshot.
- * Used for cache revalidate bulk refresh.
- * @param {object|null} detail
- * @returns {string[]}
- */
 function collectUnresolvedThreadNodeIds(detail) {
-  const dropped =
-    detail?._droppedThreadNodeIds instanceof Set
-      ? detail._droppedThreadNodeIds
-      : new Set(
-          Array.isArray(detail?._droppedThreadNodeIds)
-            ? detail._droppedThreadNodeIds.map(String)
-            : []
-        );
-  const ids = new Set();
+  const dropped = detail?._droppedThreadNodeIds instanceof Set ? detail._droppedThreadNodeIds : new Set(
+    Array.isArray(detail?._droppedThreadNodeIds) ? detail._droppedThreadNodeIds.map(String) : []
+  );
+  const ids = /* @__PURE__ */ new Set();
   for (const t of Array.isArray(detail?.reviewThreads) ? detail.reviewThreads : []) {
     if (!t?.threadNodeId || t.resolved) continue;
     const id = String(t.threadNodeId);
@@ -1925,7 +1414,7 @@ function collectUnresolvedThreadNodeIds(detail) {
     ids.add(id);
   }
   const list = Array.isArray(detail?.reviewComments) ? detail.reviewComments : [];
-  const byId = new Map();
+  const byId = /* @__PURE__ */ new Map();
   for (const c of list) {
     if (c && c.id != null) byId.set(String(c.id), c);
   }
@@ -1934,43 +1423,31 @@ function collectUnresolvedThreadNodeIds(detail) {
     const id = String(c.threadNodeId);
     if (dropped.has(id)) continue;
     const parentId = c.inReplyToId ?? c.in_reply_to_id ?? null;
-    // Prefer roots (or orphans) — replies inherit resolved from thread meta anyway
     if (parentId != null && byId.has(String(parentId))) continue;
     ids.add(id);
   }
   return [...ids];
 }
-
-/**
- * Fetch specific review threads by GraphQL global ids (PRRT_…).
- * Batches in chunks of REVIEW_THREADS_API_MAX (100).
- * @param {string[]} threadNodeIds
- * @param {typeof fetch} fetchImpl
- * @param {string} token
- */
 async function fetchReviewThreadsByIds(threadNodeIds, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
   const empty = {
     threads: [],
     comments: [],
     pageCount: 0,
-    direction: 'refresh',
+    direction: "refresh",
     totalCount: null,
     hasPreviousPage: false,
     hasNextPage: false,
     requestedThreadIds: [],
-    missingThreadIds: [],
+    missingThreadIds: []
   };
   if (!token) return empty;
   const ids = [
     ...new Set(
-      (Array.isArray(threadNodeIds) ? threadNodeIds : [])
-        .map((id) => String(id || '').trim())
-        .filter(Boolean)
-    ),
+      (Array.isArray(threadNodeIds) ? threadNodeIds : []).map((id) => String(id || "").trim()).filter(Boolean)
+    )
   ];
   if (!ids.length) return empty;
-
   const query = `
 query($ids:[ID!]!){
   nodes(ids:$ids){
@@ -1979,24 +1456,21 @@ query($ids:[ID!]!){
     }
   }
 }`;
-
   const allThreads = [];
   const allComments = [];
-  const foundIds = new Set();
+  const foundIds = /* @__PURE__ */ new Set();
   let pages = 0;
   for (let i = 0; i < ids.length; i += REVIEW_THREADS_API_MAX) {
     const chunk = ids.slice(i, i + REVIEW_THREADS_API_MAX);
     try {
       const data = await apiGraphql(query, { ids: chunk }, fetchImpl, token, ctx);
-      // nodes[] is parallel to requested ids; deleted/not-found → null
       const rawNodes = Array.isArray(data?.nodes) ? data.nodes : [];
       const nodes = rawNodes.filter(Boolean);
       const mapped = mapReviewThreadNodes(nodes);
       for (const t of mapped.threads) {
-        t.loadWindow = t.loadWindow || 'refresh';
+        t.loadWindow = t.loadWindow || "refresh";
         if (t.threadNodeId) foundIds.add(String(t.threadNodeId));
       }
-      // Also mark any non-null node id from raw (even if mapping skipped)
       for (const n of nodes) {
         if (n?.id) foundIds.add(String(n.id));
       }
@@ -2004,10 +1478,8 @@ query($ids:[ID!]!){
       allComments.push(...mapped.comments);
       pages += 1;
     } catch (err) {
-      // One bad chunk must not block the rest — treat whole chunk as unknown
-      // (not missing) so we don't mass-drop on transient GraphQL errors.
       console.warn(
-        '[pr-plus] fetchReviewThreadsByIds chunk failed',
+        "[pr-plus] fetchReviewThreadsByIds chunk failed",
         err?.message || err
       );
     }
@@ -2017,39 +1489,26 @@ query($ids:[ID!]!){
     threads: allThreads,
     comments: allComments,
     pageCount: pages,
-    direction: 'refresh',
+    direction: "refresh",
     totalCount: null,
     hasPreviousPage: false,
     hasNextPage: false,
     requestedThreadIds: ids,
-    missingThreadIds,
+    missingThreadIds
   };
 }
-
-/**
- * Drop review threads (and their comments) that no longer exist remotely.
- * Records comment id tombstones so App mergeDetailPreserveOptimistic cannot
- * resurrect them across a racey host→local merge.
- *
- * @param {object|null} detail
- * @param {Iterable<string>|string[]|null|undefined} threadNodeIds
- * @returns {object|null}
- */
 function dropReviewThreadsFromDetail(detail, threadNodeIds) {
   if (!detail) return detail;
   const drop = new Set(
-    [...(threadNodeIds || [])]
-      .map((id) => String(id || '').trim())
-      .filter(Boolean)
+    [...threadNodeIds || []].map((id) => String(id || "").trim()).filter(Boolean)
   );
   if (!drop.size) return detail;
-
   const prevRc = Array.isArray(detail.reviewComments) ? detail.reviewComments : [];
   const prevTh = Array.isArray(detail.reviewThreads) ? detail.reviewThreads : [];
   const droppedCommentIds = [];
   const reviewComments = prevRc.filter((c) => {
     if (!c) return false;
-    const tid = c.threadNodeId ? String(c.threadNodeId) : '';
+    const tid = c.threadNodeId ? String(c.threadNodeId) : "";
     if (tid && drop.has(tid)) {
       if (c.id != null) droppedCommentIds.push(String(c.id));
       return false;
@@ -2059,51 +1518,30 @@ function dropReviewThreadsFromDetail(detail, threadNodeIds) {
   const reviewThreads = prevTh.filter(
     (t) => !t?.threadNodeId || !drop.has(String(t.threadNodeId))
   );
-
   const deleted = new Set(
     [
-      ...(detail._deletedReviewCommentIds instanceof Set
-        ? detail._deletedReviewCommentIds
-        : Array.isArray(detail._deletedReviewCommentIds)
-          ? detail._deletedReviewCommentIds
-          : []),
-      ...droppedCommentIds,
+      ...detail._deletedReviewCommentIds instanceof Set ? detail._deletedReviewCommentIds : Array.isArray(detail._deletedReviewCommentIds) ? detail._deletedReviewCommentIds : [],
+      ...droppedCommentIds
     ].map(String)
   );
-
   const prevMeta = detail.reviewThreadsMeta || emptyReviewThreadsMeta();
-  const filterIdList = (list) =>
-    (Array.isArray(list) ? list : [])
-      .map(String)
-      .filter((id) => id && !drop.has(id));
+  const filterIdList = (list) => (Array.isArray(list) ? list : []).map(String).filter((id) => id && !drop.has(id));
   const loadedThreadCount = reviewThreads.length;
   const totalCount = Math.max(
     0,
     Number(prevMeta.totalCount) || loadedThreadCount
   );
-  // Prefer shrinking total when we know threads vanished (never inflate)
-  const nextTotal =
-    Number.isFinite(Number(prevMeta.totalCount)) &&
-    Number(prevMeta.totalCount) >= drop.size
-      ? Math.max(loadedThreadCount, Number(prevMeta.totalCount) - drop.size)
-      : totalCount;
+  const nextTotal = Number.isFinite(Number(prevMeta.totalCount)) && Number(prevMeta.totalCount) >= drop.size ? Math.max(loadedThreadCount, Number(prevMeta.totalCount) - drop.size) : totalCount;
   const hiddenCount = Math.max(0, nextTotal - loadedThreadCount);
-
-  const prevDroppedThreads =
-    detail._droppedThreadNodeIds instanceof Set
-      ? detail._droppedThreadNodeIds
-      : Array.isArray(detail._droppedThreadNodeIds)
-        ? detail._droppedThreadNodeIds
-        : [];
+  const prevDroppedThreads = detail._droppedThreadNodeIds instanceof Set ? detail._droppedThreadNodeIds : Array.isArray(detail._droppedThreadNodeIds) ? detail._droppedThreadNodeIds : [];
   const droppedThreads = new Set([...prevDroppedThreads, ...drop].map(String));
-
   return {
     ...detail,
     reviewComments,
     reviewThreads,
     reviewCommentsMeta: {
-      ...(detail.reviewCommentsMeta || {}),
-      loadedCount: reviewComments.length,
+      ...detail.reviewCommentsMeta || {},
+      loadedCount: reviewComments.length
     },
     reviewThreadsMeta: {
       ...prevMeta,
@@ -2115,27 +1553,14 @@ function dropReviewThreadsFromDetail(detail, threadNodeIds) {
       oldestThreadIds: filterIdList(prevMeta.oldestThreadIds),
       hasMore: hiddenCount > 0,
       hasOlder: hiddenCount > 0 && Boolean(prevMeta.hasOlder),
-      hasNewerFromOldest:
-        hiddenCount > 0 && Boolean(prevMeta.hasNewerFromOldest),
+      hasNewerFromOldest: hiddenCount > 0 && Boolean(prevMeta.hasNewerFromOldest)
     },
     _deletedReviewCommentIds: deleted.size ? deleted : detail._deletedReviewCommentIds,
     // Never re-request these PRRT ids in collectUnresolvedThreadNodeIds
-    _droppedThreadNodeIds: droppedThreads,
+    _droppedThreadNodeIds: droppedThreads
   };
 }
-
-/**
- * Initial dual-window load: last:100 first, then start:20 only when total ≥ 100.
- * Small PRs (total < 100) load a single last window covering everything.
- */
-async function fetchPullReviewThreadsBundle(
-  owner,
-  repo,
-  pullNumber,
-  fetchImpl,
-  token,
-  opts = {}
-) {
+async function fetchPullReviewThreadsBundle(owner, repo, pullNumber, fetchImpl, token, opts = {}) {
   const ctx = normalizeApiCtx(opts?.ctx);
   if (!token) {
     return {
@@ -2146,7 +1571,7 @@ async function fetchPullReviewThreadsBundle(
       startCursor: null,
       pageCount: 0,
       totalCount: 0,
-      reviewThreadsMeta: emptyReviewThreadsMeta(),
+      reviewThreadsMeta: emptyReviewThreadsMeta()
     };
   }
   const lastPageSize = Math.min(
@@ -2157,19 +1582,17 @@ async function fetchPullReviewThreadsBundle(
     20,
     Number(opts.startPageSize) || 20
   );
-  // Last (newest) first
   const newest = await fetchReviewThreadsPage(
     owner,
     repo,
     pullNumber,
-    { direction: 'newest', cursor: null, pageSize: lastPageSize },
+    { direction: "newest", cursor: null, pageSize: lastPageSize },
     fetchImpl,
     token,
     ctx
   );
   const totalCount = Number(newest.totalCount) || newest.threads.length;
   let oldest = null;
-  // total < 100 → last page already covers all; skip start window
   if (totalCount >= REVIEW_THREADS_API_MAX && newest.hasPreviousPage) {
     try {
       oldest = await fetchReviewThreadsPage(
@@ -2177,9 +1600,9 @@ async function fetchPullReviewThreadsBundle(
         repo,
         pullNumber,
         {
-          direction: 'oldest',
+          direction: "oldest",
           cursor: null,
-          pageSize: startPageSize,
+          pageSize: startPageSize
         },
         fetchImpl,
         token,
@@ -2189,9 +1612,8 @@ async function fetchPullReviewThreadsBundle(
       oldest = null;
     }
   }
-
-  const threads = [...(newest.threads || [])];
-  const comments = [...(newest.comments || [])];
+  const threads = [...newest.threads || []];
+  const comments = [...newest.comments || []];
   const newestIds = newest.threads.map((t) => t.threadNodeId).filter(Boolean);
   const oldestIds = [];
   if (oldest) {
@@ -2205,7 +1627,6 @@ async function fetchPullReviewThreadsBundle(
       if (!comments.some((x) => String(x.id) === String(c.id))) comments.push(c);
     }
   }
-
   const loaded = threads.length;
   const hiddenCount = Math.max(0, totalCount - loaded);
   const meta = {
@@ -2225,9 +1646,9 @@ async function fetchPullReviewThreadsBundle(
     newestThreadIds: newestIds,
     oldestThreadIds: oldestIds,
     hasMore: hiddenCount > 0,
-    endCursor: newest.startCursor || null, // legacy: load-more-older
+    endCursor: newest.startCursor || null
+    // legacy: load-more-older
   };
-
   return {
     threads,
     comments,
@@ -2236,10 +1657,9 @@ async function fetchPullReviewThreadsBundle(
     startCursor: newest.startCursor || null,
     pageCount: meta.pagesLoaded,
     totalCount,
-    reviewThreadsMeta: meta,
+    reviewThreadsMeta: meta
   };
 }
-
 function emptyReviewThreadsMeta() {
   return {
     totalCount: 0,
@@ -2256,50 +1676,28 @@ function emptyReviewThreadsMeta() {
     newestThreadIds: [],
     oldestThreadIds: [],
     hasMore: false,
-    endCursor: null,
+    endCursor: null
   };
 }
-
-/**
- * Merge a dual-window page (or bulk refresh) into detail.reviewThreadsMeta + comments.
- * @param {'older'|'newer'|'newest'|'oldest'|'refresh'} direction
- *   - refresh: update thread/comment bodies only; keep dual-window cursors/id sets
- */
-function mergeReviewThreadsPageIntoDetail(detail, page, direction = 'older') {
+function mergeReviewThreadsPageIntoDetail(detail, page, direction = "older") {
   if (!detail) return detail;
-  const dir = String(direction || page?.direction || 'older');
+  const dir = String(direction || page?.direction || "older");
   const prevMeta = detail.reviewThreadsMeta || emptyReviewThreadsMeta();
   const prevRc = Array.isArray(detail.reviewComments) ? detail.reviewComments : [];
   const prevTh = Array.isArray(detail.reviewThreads) ? detail.reviewThreads : [];
-
-  // Explicit missing list from nodes(ids:) bulk fetch (remote-deleted threads)
-  const explicitMissing = Array.isArray(page?.missingThreadIds)
-    ? page.missingThreadIds.map(String).filter(Boolean)
-    : [];
-  // Or derive: requested − returned
-  const requested = Array.isArray(page?.requestedThreadIds)
-    ? page.requestedThreadIds.map(String).filter(Boolean)
-    : [];
+  const explicitMissing = Array.isArray(page?.missingThreadIds) ? page.missingThreadIds.map(String).filter(Boolean) : [];
+  const requested = Array.isArray(page?.requestedThreadIds) ? page.requestedThreadIds.map(String).filter(Boolean) : [];
   const returnedIds = new Set(
-    (page?.threads || [])
-      .map((t) => (t?.threadNodeId ? String(t.threadNodeId) : ''))
-      .filter(Boolean)
+    (page?.threads || []).map((t) => t?.threadNodeId ? String(t.threadNodeId) : "").filter(Boolean)
   );
-  const derivedMissing =
-    requested.length > 0
-      ? requested.filter((id) => !returnedIds.has(id))
-      : [];
+  const derivedMissing = requested.length > 0 ? requested.filter((id) => !returnedIds.has(id)) : [];
   const missingIds = [
-    ...new Set([...explicitMissing, ...derivedMissing]),
+    .../* @__PURE__ */ new Set([...explicitMissing, ...derivedMissing])
   ];
-
-  // refresh/ids: replace comments for updated threads so new replies land and deleted ones drop
   let baseRc = prevRc;
-  if ((dir === 'refresh' || dir === 'ids') && (page?.threads || []).length) {
+  if ((dir === "refresh" || dir === "ids") && (page?.threads || []).length) {
     const refreshed = new Set(
-      (page.threads || [])
-        .map((t) => (t?.threadNodeId ? String(t.threadNodeId) : ''))
-        .filter(Boolean)
+      (page.threads || []).map((t) => t?.threadNodeId ? String(t.threadNodeId) : "").filter(Boolean)
     );
     if (refreshed.size) {
       baseRc = prevRc.filter(
@@ -2308,87 +1706,62 @@ function mergeReviewThreadsPageIntoDetail(detail, page, direction = 'older') {
     }
   }
   const reviewComments = mergePendingReviewComments(baseRc, page?.comments || []);
-  // When GraphQL thread meta updates resolved, stamp onto all comments in those threads
-  const resolvedByThread = new Map();
+  const resolvedByThread = /* @__PURE__ */ new Map();
   for (const t of page?.threads || []) {
     if (t?.threadNodeId) {
       resolvedByThread.set(String(t.threadNodeId), Boolean(t.resolved));
     }
   }
-  const stampedComments =
-    resolvedByThread.size === 0
-      ? reviewComments
-      : reviewComments.map((c) => {
-          if (!c?.threadNodeId) return c;
-          const key = String(c.threadNodeId);
-          if (!resolvedByThread.has(key)) return c;
-          return { ...c, resolved: resolvedByThread.get(key) };
-        });
-
+  const stampedComments = resolvedByThread.size === 0 ? reviewComments : reviewComments.map((c) => {
+    if (!c?.threadNodeId) return c;
+    const key = String(c.threadNodeId);
+    if (!resolvedByThread.has(key)) return c;
+    return { ...c, resolved: resolvedByThread.get(key) };
+  });
   const thById = new Map(
-    prevTh.map((t) => [String(t.threadNodeId), t]).filter(([k]) => k && k !== 'undefined')
+    prevTh.map((t) => [String(t.threadNodeId), t]).filter(([k]) => k && k !== "undefined")
   );
   for (const t of page?.threads || []) {
     if (t?.threadNodeId) {
       thById.set(String(t.threadNodeId), {
-        ...(thById.get(String(t.threadNodeId)) || {}),
-        ...t,
+        ...thById.get(String(t.threadNodeId)) || {},
+        ...t
       });
     }
   }
   const reviewThreads = [...thById.values()];
-
   let newestIds = new Set((prevMeta.newestThreadIds || []).map(String));
   let oldestIds = new Set((prevMeta.oldestThreadIds || []).map(String));
-  const pageIds = (page?.threads || [])
-    .map((t) => t.threadNodeId)
-    .filter(Boolean)
-    .map(String);
-
+  const pageIds = (page?.threads || []).map((t) => t.threadNodeId).filter(Boolean).map(String);
   let newestStartCursor = prevMeta.newestStartCursor;
   let newestEndCursor = prevMeta.newestEndCursor;
   let hasOlder = prevMeta.hasOlder;
   let oldestStartCursor = prevMeta.oldestStartCursor;
   let oldestEndCursor = prevMeta.oldestEndCursor;
   let hasNewerFromOldest = prevMeta.hasNewerFromOldest;
-
-  if (dir === 'refresh' || dir === 'ids') {
-    // Bulk / targeted revalidate — preserve dual-window pagination state
-  } else if (dir === 'newest' || dir === 'older') {
+  if (dir === "refresh" || dir === "ids") {
+  } else if (dir === "newest" || dir === "older") {
     for (const id of pageIds) newestIds.add(id);
-    // Expanding older moves the "start" of newest window further back
     if (page?.startCursor) newestStartCursor = page.startCursor;
-    if (dir === 'newest' && page?.endCursor) newestEndCursor = page.endCursor;
+    if (dir === "newest" && page?.endCursor) newestEndCursor = page.endCursor;
     hasOlder = Boolean(page?.hasPreviousPage);
   } else {
-    // oldest | newer — expand oldest window toward the middle
     for (const id of pageIds) oldestIds.add(id);
     if (page?.endCursor) oldestEndCursor = page.endCursor;
-    if (dir === 'oldest' && page?.startCursor) oldestStartCursor = page.startCursor;
+    if (dir === "oldest" && page?.startCursor) oldestStartCursor = page.startCursor;
     hasNewerFromOldest = Boolean(page?.hasNextPage);
   }
-
-  // Windows meet when no hidden left or cursors exhausted both ways
-  const totalCount =
-    typeof page?.totalCount === 'number'
-      ? page.totalCount
-      : Number(prevMeta.totalCount) || reviewThreads.length;
+  const totalCount = typeof page?.totalCount === "number" ? page.totalCount : Number(prevMeta.totalCount) || reviewThreads.length;
   const loadedThreadCount = reviewThreads.length;
   const hiddenCount = Math.max(0, totalCount - loadedThreadCount);
-
-  // Drop ids from oldest that are now in newest (overlap)
   for (const id of newestIds) oldestIds.delete(id);
-
   const meta = {
     ...prevMeta,
     totalCount,
     hiddenCount,
     loadedThreadCount,
     loadedCommentCount: stampedComments.length,
-    pagesLoaded:
-      dir === 'refresh' || dir === 'ids'
-        ? Number(prevMeta.pagesLoaded) || 0
-        : (Number(prevMeta.pagesLoaded) || 0) + (page?.pageCount || 1),
+    pagesLoaded: dir === "refresh" || dir === "ids" ? Number(prevMeta.pagesLoaded) || 0 : (Number(prevMeta.pagesLoaded) || 0) + (page?.pageCount || 1),
     newestStartCursor,
     newestEndCursor,
     hasOlder: hiddenCount > 0 && hasOlder,
@@ -2398,34 +1771,24 @@ function mergeReviewThreadsPageIntoDetail(detail, page, direction = 'older') {
     newestThreadIds: [...newestIds],
     oldestThreadIds: [...oldestIds],
     hasMore: hiddenCount > 0,
-    endCursor: newestStartCursor,
+    endCursor: newestStartCursor
   };
-
   let next = {
     ...detail,
     reviewComments: stampedComments,
     reviewThreads,
     reviewCommentsMeta: {
-      ...(detail.reviewCommentsMeta || {}),
+      ...detail.reviewCommentsMeta || {},
       loadedCount: stampedComments.length,
-      hasMore: meta.hasMore,
+      hasMore: meta.hasMore
     },
-    reviewThreadsMeta: meta,
+    reviewThreadsMeta: meta
   };
-
-  // Remote-deleted threads: GraphQL nodes(ids:) returns null — strip local zombies
-  // so revalidate does not keep re-requesting dead PRRT ids forever.
-  if ((dir === 'refresh' || dir === 'ids') && missingIds.length) {
+  if ((dir === "refresh" || dir === "ids") && missingIds.length) {
     next = dropReviewThreadsFromDetail(next, missingIds);
   }
   return next;
 }
-
-/**
- * Fetch PR review threads (ids + isResolved) for resolve UI / legacy callers.
- * Returns [] on failure so REST detail still loads.
- */
-
 async function fetchPullReviewThreads(owner, repo, pullNumber, fetchImpl, token) {
   try {
     const bundle = await fetchPullReviewThreadsBundle(
@@ -2440,42 +1803,12 @@ async function fetchPullReviewThreads(owner, repo, pullNumber, fetchImpl, token)
     return [];
   }
 }
-
-/**
- * Full PR detail payload for the modal: header, body, files+patches,
- * issue comments, reviews, review comments, commits, checks.
- *
- * Partial by default: only the **first GraphQL page** of review threads
- * (see opts.threadsMaxPages / opts.skipReviewThreads). More pages load via
- * fetchReviewThreadsPage + mergeReviewThreadsPageIntoDetail.
- *
- * @param {{ skipReviewThreads?: boolean, threadsMaxPages?: number, threadsCursor?: string|null }} [opts]
- */
 function fetchNowMs() {
-  return typeof performance !== 'undefined' && typeof performance.now === 'function'
-    ? performance.now()
-    : Date.now();
+  return typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
 }
-
-/**
- * Time an async fetch and record ms into `timings[name]`.
- * Always logs to console for SW / page debugging.
- *
- * When `opts.batchStart` is set (ms from fetchNowMs), also records
- * `timings[name_start]` = offset from batch start (for parallel REST fan-out).
- *
- * @template T
- * @param {Record<string, number|string>} timings
- * @param {string} name
- * @param {Promise<T>} promise
- * @param {(result: T) => string} [extra]
- * @param {{ batchStart?: number }} [opts]
- * @returns {Promise<T>}
- */
-async function timedFetch(timings, name, promise, extra, opts = {}) {
+async function timedFetch(timings, name, promise, extra = void 0, opts = {}) {
   const t0 = fetchNowMs();
-  const batchStart =
-    opts && Number.isFinite(opts.batchStart) ? Number(opts.batchStart) : null;
+  const batchStart = opts && Number.isFinite(opts.batchStart) ? Number(opts.batchStart) : null;
   if (batchStart != null) {
     timings[`${name}_start`] = Math.round(t0 - batchStart);
   }
@@ -2483,20 +1816,14 @@ async function timedFetch(timings, name, promise, extra, opts = {}) {
     const result = await promise;
     const ms = Math.round(fetchNowMs() - t0);
     timings[name] = ms;
-    let suffix = '';
+    let suffix = "";
     try {
-      if (typeof extra === 'function') suffix = extra(result) || '';
+      if (typeof extra === "function") suffix = extra(result) || "";
     } catch {
-      /* ignore extra formatting errors */
     }
-    const startLabel =
-      batchStart != null && timings[`${name}_start`] != null
-        ? ` t+${timings[`${name}_start`]}ms`
-        : '';
+    const startLabel = batchStart != null && timings[`${name}_start`] != null ? ` t+${timings[`${name}_start`]}ms` : "";
     console.log(
-      `[pr-plus] fetchPrDetail ${name}: ${ms}ms${startLabel}${
-        suffix ? ` ${suffix}` : ''
-      }`
+      `[pr-plus] fetchPrDetail ${name}: ${ms}ms${startLabel}${suffix ? ` ${suffix}` : ""}`
     );
     return result;
   } catch (err) {
@@ -2504,92 +1831,56 @@ async function timedFetch(timings, name, promise, extra, opts = {}) {
     timings[name] = ms;
     const msg = err?.message || String(err);
     timings[`${name}_error`] = msg;
-    const startLabel =
-      batchStart != null && timings[`${name}_start`] != null
-        ? ` t+${timings[`${name}_start`]}ms`
-        : '';
+    const startLabel = batchStart != null && timings[`${name}_start`] != null ? ` t+${timings[`${name}_start`]}ms` : "";
     console.log(
       `[pr-plus] fetchPrDetail ${name}: ${ms}ms${startLabel} ERROR ${msg}`
     );
     throw err;
   }
 }
-
-/**
- * Pretty-print parallel REST timings after Promise.all settles.
- * @param {Record<string, number|string>} timings
- * @param {string[]} names keys that participated in the batch
- * @param {number} wallMs wall-clock for Promise.all
- */
 function logParallelRestSummary(timings, names, wallMs) {
-  const rows = (Array.isArray(names) ? names : [])
-    .map((name) => {
-      const ms = Number(timings[name]);
-      const start = Number(timings[`${name}_start`]);
-      const err = timings[`${name}_error`];
-      return {
-        name,
-        ms: Number.isFinite(ms) ? ms : null,
-        start: Number.isFinite(start) ? start : null,
-        error: err ? String(err) : null,
-      };
-    })
-    .filter((r) => r.ms != null);
+  const rows = (Array.isArray(names) ? names : []).map((name) => {
+    const ms = Number(timings[name]);
+    const start = Number(timings[`${name}_start`]);
+    const err = timings[`${name}_error`];
+    return {
+      name,
+      ms: Number.isFinite(ms) ? ms : null,
+      start: Number.isFinite(start) ? start : null,
+      error: err ? String(err) : null
+    };
+  }).filter((r) => r.ms != null);
   rows.sort((a, b) => (b.ms || 0) - (a.ms || 0));
   const slowest = rows[0];
   const sum = rows.reduce((s, r) => s + (r.ms || 0), 0);
   const lines = rows.map((r) => {
-    const bar =
-      wallMs > 0 && r.ms != null
-        ? '█'.repeat(Math.max(1, Math.round((r.ms / wallMs) * 20)))
-        : '';
-    const start = r.start != null ? `+${r.start}ms`.padStart(7) : '   n/a';
-    const dur = r.ms != null ? `${r.ms}ms`.padStart(6) : '   n/a';
-    const err = r.error ? ` ERR:${r.error.slice(0, 40)}` : '';
+    const bar = wallMs > 0 && r.ms != null ? "\u2588".repeat(Math.max(1, Math.round(r.ms / wallMs * 20))) : "";
+    const start = r.start != null ? `+${r.start}ms`.padStart(7) : "   n/a";
+    const dur = r.ms != null ? `${r.ms}ms`.padStart(6) : "   n/a";
+    const err = r.error ? ` ERR:${r.error.slice(0, 40)}` : "";
     return `  ${r.name.padEnd(16)} start${start}  dur${dur}  ${bar}${err}`;
   });
   console.log(
-    `[pr-plus] fetchPrDetail parallel REST summary\n` +
-      `  wall=${Math.round(wallMs)}ms  sum=${sum}ms  ` +
-      `slowest=${slowest ? `${slowest.name}@${slowest.ms}ms` : 'n/a'}\n` +
-      (lines.length ? lines.join('\n') : '  (no rows)')
+    `[pr-plus] fetchPrDetail parallel REST summary
+  wall=${Math.round(wallMs)}ms  sum=${sum}ms  slowest=${slowest ? `${slowest.name}@${slowest.ms}ms` : "n/a"}
+` + (lines.length ? lines.join("\n") : "  (no rows)")
   );
   timings.coreParallel = {
     wallMs: Math.round(wallMs),
     sumMs: sum,
     slowest: slowest ? { name: slowest.name, ms: slowest.ms } : null,
-    byName: Object.fromEntries(rows.map((r) => [r.name, r.ms])),
+    byName: Object.fromEntries(rows.map((r) => [r.name, r.ms]))
   };
 }
-
-/**
- * Sleep helper for mergeability re-fetch (GitHub starts compute on first GET).
- * @param {number} ms
- */
 function sleepMs(ms) {
   return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms || 0)));
 }
-
-/**
- * Dual-modified paths since merge-base (base tip ∩ head) ≈ conflict file list.
- * Uses current base-branch tip (not stale pr.base.sha) so behind PRs work.
- * Soft-fails to [] on any error.
- *
- * @returns {Promise<string[]>}
- */
-async function fetchConflictFilePaths(
-  owner,
-  repo,
-  baseRef,
-  headSha,
-  fetchImpl,
-  token
-, ctx = null) {
+async function fetchConflictFilePaths(owner, repo, baseRef, headSha, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
-  const o = String(owner || '').trim();
-  const r = String(repo || '').trim();
-  const ref = String(baseRef || '').trim();
-  const head = String(headSha || '').trim();
+  const o = String(owner || "").trim();
+  const r = String(repo || "").trim();
+  const ref = String(baseRef || "").trim();
+  const head = String(headSha || "").trim();
   if (!o || !r || !ref || !head) return [];
   try {
     const baseUrl = githubRestUrl(`/repos/${o}/${r}`, ctx);
@@ -2598,14 +1889,14 @@ async function fetchConflictFilePaths(
       fetchImpl,
       token
     );
-    const baseTip = String(refJson?.object?.sha || '').trim();
+    const baseTip = String(refJson?.object?.sha || "").trim();
     if (!baseTip) return [];
     const headVsBase = await apiJson(
       `${baseUrl}/compare/${encodeURIComponent(baseTip)}...${encodeURIComponent(head)}`,
       fetchImpl,
       token
     );
-    const mergeBase = String(headVsBase?.merge_base_commit?.sha || '').trim();
+    const mergeBase = String(headVsBase?.merge_base_commit?.sha || "").trim();
     if (!mergeBase) return [];
     const [baseSide, headSide] = await Promise.all([
       apiJson(
@@ -2617,24 +1908,19 @@ async function fetchConflictFilePaths(
         `${baseUrl}/compare/${encodeURIComponent(mergeBase)}...${encodeURIComponent(head)}?per_page=100`,
         fetchImpl,
         token
-      ),
+      )
     ]);
     const onBase = new Set(
-      (Array.isArray(baseSide?.files) ? baseSide.files : [])
-        .map((f) => String(f?.filename || f?.previous_filename || '').trim())
-        .filter(Boolean)
+      (Array.isArray(baseSide?.files) ? baseSide.files : []).map((f) => String(f?.filename || f?.previous_filename || "").trim()).filter(Boolean)
     );
     const conflicts = [];
     for (const f of Array.isArray(headSide?.files) ? headSide.files : []) {
-      const path = String(f?.filename || '').trim();
+      const path = String(f?.filename || "").trim();
       if (path && onBase.has(path)) conflicts.push(path);
     }
     return conflicts;
   } catch (err) {
-    if (
-      err?.name === 'AbortError' ||
-      /aborted|AbortError/i.test(String(err?.message || ''))
-    ) {
+    if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
       throw err;
     }
     console.log(
@@ -2643,56 +1929,31 @@ async function fetchConflictFilePaths(
     return [];
   }
 }
-
-/**
- * Ensure mergeable/mergeable_state are computed; when dirty, attach conflict paths.
- * @returns {Promise<object>} pr with optional `_conflictFiles`
- */
-async function resolvePrMergeability(
-  pr,
-  base,
-  pullNumber,
-  fetchImpl,
-  token,
-  timings,
-  /** @type {{ owner?: string, repo?: string, apiCtx?: object }} */
-  meta = {}
-) {
-  if (!pr || typeof pr !== 'object') return pr;
+async function resolvePrMergeability(pr, base, pullNumber, fetchImpl, token, timings, meta = {}) {
+  if (!pr || typeof pr !== "object") return pr;
   let out = pr;
   const apiCtx = normalizeApiCtx(meta?.apiCtx || meta?.ctx);
-  const needsCompute =
-    out.mergeable == null ||
-    out.mergeable === undefined ||
-    !String(out.mergeable_state || '').trim() ||
-    String(out.mergeable_state || '').toLowerCase() === 'unknown';
-
+  const needsCompute = out.mergeable == null || out.mergeable === void 0 || !String(out.mergeable_state || "").trim() || String(out.mergeable_state || "").toLowerCase() === "unknown";
   if (needsCompute) {
     try {
-      // Brief pause so GitHub's background job can finish after the first GET
       await sleepMs(350);
       const again = await timedFetch(
         timings,
-        'pullMergeable',
+        "pullMergeable",
         apiJson(`${base}/pulls/${pullNumber}`, fetchImpl, token),
-        (p) =>
-          `(mergeable=${p?.mergeable} state=${p?.mergeable_state || '?'})`
+        (p) => `(mergeable=${p?.mergeable} state=${p?.mergeable_state || "?"})`
       );
-      if (again && typeof again === 'object') {
+      if (again && typeof again === "object") {
         out = {
           ...out,
           mergeable: again.mergeable,
           mergeable_state: again.mergeable_state,
-          rebaseable:
-            again.rebaseable != null ? again.rebaseable : out.rebaseable,
-          merge_commit_sha: again.merge_commit_sha || out.merge_commit_sha,
+          rebaseable: again.rebaseable != null ? again.rebaseable : out.rebaseable,
+          merge_commit_sha: again.merge_commit_sha || out.merge_commit_sha
         };
       }
     } catch (err) {
-      if (
-        err?.name === 'AbortError' ||
-        /aborted|AbortError/i.test(String(err?.message || ''))
-      ) {
+      if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
         throw err;
       }
       console.log(
@@ -2700,27 +1961,19 @@ async function resolvePrMergeability(
       );
     }
   }
-
-  const state = String(out.mergeable_state || '').toLowerCase();
-  const isDirty =
-    state === 'dirty' ||
-    (out.mergeable === false && state !== 'blocked' && state !== 'clean');
-
+  const state = String(out.mergeable_state || "").toLowerCase();
+  const isDirty = state === "dirty" || out.mergeable === false && state !== "blocked" && state !== "clean";
   if (isDirty) {
-    const baseOwner =
-      out.base?.repo?.owner?.login ||
-      String(meta.owner || '').trim() ||
-      null;
-    const baseRepo =
-      out.base?.repo?.name || String(meta.repo || '').trim() || null;
+    const baseOwner = out.base?.repo?.owner?.login || String(meta.owner || "").trim() || null;
+    const baseRepo = out.base?.repo?.name || String(meta.repo || "").trim() || null;
     const conflictFiles = await timedFetch(
       timings,
-      'conflictFiles',
+      "conflictFiles",
       fetchConflictFilePaths(
         baseOwner,
         baseRepo,
-        out.base?.ref || '',
-        out.head?.sha || '',
+        out.base?.ref || "",
+        out.head?.sha || "",
         fetchImpl,
         token,
         apiCtx
@@ -2729,65 +1982,49 @@ async function resolvePrMergeability(
     );
     out = {
       ...out,
-      _conflictFiles: Array.isArray(conflictFiles) ? conflictFiles : [],
+      _conflictFiles: Array.isArray(conflictFiles) ? conflictFiles : []
     };
   } else {
     out = { ...out, _conflictFiles: [] };
   }
   return out;
 }
-
-async function fetchPrDetail(
-  owner,
-  repo,
-  pullNumber,
-  fetchImpl,
-  token = null,
-  opts = {}
-) {
+async function fetchPrDetail(owner, repo, pullNumber, fetchImpl, token = null, opts = {}) {
   const ctx = normalizeApiCtx(opts?.ctx);
   const base = githubRestUrl(`/repos/${owner}/${repo}`, ctx);
   const n = Number(pullNumber);
   const skipReviewThreads = Boolean(opts.skipReviewThreads);
-  const threadsMaxPages = skipReviewThreads
-    ? 0
-    : Math.max(1, Math.min(20, Number(opts.threadsMaxPages) || 1));
-  /** @type {Record<string, number|string>} */
+  const threadsMaxPages = skipReviewThreads ? 0 : Math.max(1, Math.min(20, Number(opts.threadsMaxPages) || 1));
   const timings = {};
   const tTotal0 = fetchNowMs();
   console.log(
-    `[pr-plus] fetchPrDetail start ${owner}/${repo}#${n}` +
-      ` skipReviewThreads=${skipReviewThreads} threadsMaxPages=${threadsMaxPages}`
+    `[pr-plus] fetchPrDetail start ${owner}/${repo}#${n} skipReviewThreads=${skipReviewThreads} threadsMaxPages=${threadsMaxPages}`
   );
-
-  // Lean core: pull identity + viewer + autolinks only.
-  // files / issue comments / reviews / commits / checks / development are
-  // independent host fetches (do not block header + description paint).
-  const PARALLEL_REST_KEYS = ['pull', 'viewerLogin', 'autolinks'];
+  const PARALLEL_REST_KEYS = ["pull", "viewerLogin", "autolinks"];
   const tParallel0 = fetchNowMs();
   const batchOpt = { batchStart: tParallel0 };
   let [pr, viewerLogin, autolinks] = await Promise.all([
     timedFetch(
       timings,
-      'pull',
+      "pull",
       apiJson(`${base}/pulls/${n}`, fetchImpl, token),
       null,
       batchOpt
     ),
     timedFetch(
       timings,
-      'viewerLogin',
+      "viewerLogin",
       fetchViewerLogin(fetchImpl, token, ctx),
       null,
       batchOpt
     ),
     timedFetch(
       timings,
-      'autolinks',
+      "autolinks",
       fetchRepoAutolinks(owner, repo, fetchImpl, token, ctx),
       (r) => `(${Array.isArray(r) ? r.length : 0} links)`,
       batchOpt
-    ),
+    )
   ]);
   const parallelWall = fetchNowMs() - tParallel0;
   timings.coreParallelWall = Math.round(parallelWall);
@@ -2801,7 +2038,7 @@ async function fetchPrDetail(
   timings.sidebarMeta = 0;
   timings.gitattributes = 0;
   console.log(
-    '[pr-plus] fetchPrDetail files/comments/reviews/commits/checks/development: deferred (independent fetches)'
+    "[pr-plus] fetchPrDetail files/comments/reviews/commits/checks/development: deferred (independent fetches)"
   );
   const files = [];
   const commentsPage = {
@@ -2811,62 +2048,52 @@ async function fetchPrDetail(
       perPage: COMMENT_PAGE_SIZE,
       hasMore: false,
       nextPage: null,
-      order: 'from-end',
-      loadedCount: 0,
-    },
+      order: "from-end",
+      loadedCount: 0
+    }
   };
   const reviews = [];
-
-  // GitHub computes mergeable async on first GET (often null/unknown).
-  // Re-fetch once so conflict (dirty) is not mislabeled as "still calculating".
   pr = await resolvePrMergeability(pr, base, n, fetchImpl, token, timings, {
     owner,
     repo,
-    apiCtx: ctx,
+    apiCtx: ctx
   });
-
-  // GraphQL viewerSubscription (REST issues/.../subscription is 404 / dead)
   const subscription = await timedFetch(
     timings,
-    'subscription',
-    token
-      ? fetchPullRequestSubscription(
-          owner,
-          repo,
-          n,
-          fetchImpl,
-          token,
-          pr?.node_id || null,
-          ctx
-        )
-      : Promise.resolve(null)
+    "subscription",
+    token ? fetchPullRequestSubscription(
+      owner,
+      repo,
+      n,
+      fetchImpl,
+      token,
+      pr?.node_id || null,
+      ctx
+    ) : Promise.resolve(null)
   );
   const comments = commentsPage?.items || [];
-
-  // First page (or zero) of review threads — not the full 500+ dump
   let reviewThreadBundle = {
     threads: [],
     comments: [],
     hasMore: false,
     endCursor: null,
-    pageCount: 0,
+    pageCount: 0
   };
   if (token && threadsMaxPages > 0) {
     reviewThreadBundle = await timedFetch(
       timings,
-      'reviewThreads',
+      "reviewThreads",
       fetchPullReviewThreadsBundle(owner, repo, n, fetchImpl, token, {
         cursor: opts.threadsCursor || null,
         maxPages: threadsMaxPages,
-        ctx,
+        ctx
       }).catch((err) => {
-        if (err?.name === 'AbortError' || /aborted|AbortError/i.test(String(err?.message || ''))) {
+        if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
           throw err;
         }
         return reviewThreadBundle;
       }),
-      (b) =>
-        `(${(b?.threads || []).length} threads, ${(b?.comments || []).length} comments)`
+      (b) => `(${(b?.threads || []).length} threads, ${(b?.comments || []).length} comments)`
     );
   } else {
     timings.reviewThreads = 0;
@@ -2876,15 +2103,12 @@ async function fetchPrDetail(
       )} maxPages=${threadsMaxPages})`
     );
   }
-
   const reviewThreads = reviewThreadBundle?.threads || [];
-  // PENDING-only REST rows when GraphQL misses them (reviews list is independent;
-  // pending bundle finds PENDING via its own lookup when preloaded reviews empty).
   let pendingBundle = { comments: [], review: null };
   if (token) {
     pendingBundle = await timedFetch(
       timings,
-      'pendingReview',
+      "pendingReview",
       fetchViewerPendingReviewBundle(
         owner,
         repo,
@@ -2893,11 +2117,11 @@ async function fetchPrDetail(
         token,
         {
           reviews: [],
-          login: viewerLogin,
+          login: viewerLogin
         },
         ctx
       ).catch((err) => {
-        if (err?.name === 'AbortError' || /aborted|AbortError/i.test(String(err?.message || ''))) {
+        if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
           throw err;
         }
         return { comments: [], review: null };
@@ -2906,7 +2130,7 @@ async function fetchPrDetail(
     );
   } else {
     timings.pendingReview = 0;
-    console.log('[pr-plus] fetchPrDetail pendingReview: skipped (no token)');
+    console.log("[pr-plus] fetchPrDetail pendingReview: skipped (no token)");
   }
   const pendingReviewComments = pendingBundle.comments || [];
   const reviewComments = mergePendingReviewComments(
@@ -2919,100 +2143,82 @@ async function fetchPrDetail(
     perPage: (reviewThreadBundle?.comments || []).length || COMMENT_PAGE_SIZE,
     hasMore: Boolean(reviewThreadBundle?.hasMore),
     nextPage: null,
-    loadedCount: (reviewComments || []).length,
+    loadedCount: (reviewComments || []).length
   };
-  const reviewThreadsMeta = reviewThreadBundle?.reviewThreadsMeta
-    ? { ...reviewThreadBundle.reviewThreadsMeta }
-    : {
-        ...emptyReviewThreadsMeta(),
-        hasMore: Boolean(reviewThreadBundle?.hasMore),
-        endCursor: reviewThreadBundle?.endCursor || null,
-        loadedThreadCount: (reviewThreads || []).length,
-        loadedCommentCount: (reviewThreadBundle?.comments || []).length,
-        pagesLoaded: reviewThreadBundle?.pageCount || (threadsMaxPages > 0 ? 1 : 0),
-        totalCount: Number(reviewThreadBundle?.totalCount) || (reviewThreads || []).length,
-        hiddenCount: Math.max(
-          0,
-          (Number(reviewThreadBundle?.totalCount) || 0) - (reviewThreads || []).length
-        ),
-      };
-
-  const headSha = pr.head?.sha || '';
-  // files / comments / reviews / checks / commits / development: independent host fetches
-  const checks = { state: 'unknown', totalCount: 0, statuses: [], checkRuns: [] };
+  const reviewThreadsMeta = reviewThreadBundle?.reviewThreadsMeta ? { ...reviewThreadBundle.reviewThreadsMeta } : {
+    ...emptyReviewThreadsMeta(),
+    hasMore: Boolean(reviewThreadBundle?.hasMore),
+    endCursor: reviewThreadBundle?.endCursor || null,
+    loadedThreadCount: (reviewThreads || []).length,
+    loadedCommentCount: (reviewThreadBundle?.comments || []).length,
+    pagesLoaded: reviewThreadBundle?.pageCount || (threadsMaxPages > 0 ? 1 : 0),
+    totalCount: Number(reviewThreadBundle?.totalCount) || (reviewThreads || []).length,
+    hiddenCount: Math.max(
+      0,
+      (Number(reviewThreadBundle?.totalCount) || 0) - (reviewThreads || []).length
+    )
+  };
+  const headSha = pr.head?.sha || "";
+  const checks = { state: "unknown", totalCount: 0, statuses: [], checkRuns: [] };
   const commits = [];
   let linkedIssues = [];
   const developmentIssues = [];
   const projects = [];
   try {
-    let editApi =
-      typeof globalThis !== 'undefined' ? globalThis.PRModalPrEditApi : null;
-    if (!editApi && typeof require === 'function') {
+    let editApi = typeof globalThis !== "undefined" ? globalThis.PRModalPrEditApi : null;
+    if (!editApi && typeof require === "function") {
       try {
-        editApi = require('./modal/pure/pr-edit-api.js');
+        editApi = require("./modal/pure/pr-edit-api.js");
       } catch {
         editApi = null;
       }
     }
-    // Sync body #N only — GraphQL Development is independent (fetchPrDevelopment)
     if (editApi?.parseLinkedIssueNumbers) {
-      linkedIssues = editApi.parseLinkedIssueNumbers(pr.body || '');
+      linkedIssues = editApi.parseLinkedIssueNumbers(pr.body || "");
     }
   } catch {
     linkedIssues = [];
   }
-
-  // gitattributes + file annotate moved to fetchPrFiles (independent)
-  const gitattributesText = '';
+  const gitattributesText = "";
   const filesOut = [];
   timings.mapAnnotateFiles = 0;
-
-  const subscribed =
-    subscription && typeof subscription.subscribed === 'boolean'
-      ? Boolean(subscription.subscribed)
-      : null;
-  // subscription.viewerSubscription kept for debugging / future UI (IGNORED)
-
-  // Magic links from title/body/branch (body-only tokens e.g. ENG-99 must match)
+  const subscribed = subscription && typeof subscription.subscribed === "boolean" ? Boolean(subscription.subscribed) : null;
   const magicLinks = matchAutolinksInText(
     prMatchText({
       title: pr.title,
-      body: pr.body || '',
-      headRef: pr.head?.ref || '',
-      baseRef: pr.base?.ref || '',
-      author: pr.user?.login || '',
+      body: pr.body || "",
+      headRef: pr.head?.ref || "",
+      baseRef: pr.base?.ref || "",
+      author: pr.user?.login || ""
     }),
     Array.isArray(autolinks) ? autolinks : []
   );
-
   timings.total = Math.round(fetchNowMs() - tTotal0);
   console.log(
     `[pr-plus] fetchPrDetail total: ${timings.total}ms`,
     JSON.stringify(timings)
   );
-  if (typeof console.table === 'function') {
+  if (typeof console.table === "function") {
     try {
       console.table(timings);
     } catch {
-      /* ignore */
     }
   }
-
   return {
     owner,
     repo,
     number: pr.number,
     nodeId: pr.node_id || null,
     title: pr.title,
-    body: pr.body || '',
+    body: pr.body || "",
     state: pr.state,
     draft: Boolean(pr.draft),
-    author: pr.user?.login || '',
-    authorAvatarUrl: pr.user?.avatar_url || '',
+    author: pr.user?.login || "",
+    authorAvatarUrl: pr.user?.avatar_url || "",
     viewerLogin: viewerLogin || null,
-    baseRef: pr.base?.ref || '',
-    headRef: pr.head?.ref || '',
-    baseSha: pr.base?.sha || '',
+    baseRef: pr.base?.ref || "",
+    headRef: pr.head?.ref || "",
+    baseSha: pr.base?.sha || "",
     /** Repo that owns the base ref (usually same as PR repo). */
     baseOwner: pr.base?.repo?.owner?.login || owner,
     baseRepo: pr.base?.repo?.name || repo,
@@ -3035,22 +2241,18 @@ async function fetchPrDetail(
     changedFiles: pr.changed_files,
     /** Total commits on the PR (REST field); may exceed first page of commits[]. */
     commitsCount: pr.commits != null ? Number(pr.commits) : null,
-    labels: Array.isArray(pr.labels)
-      ? pr.labels.map((l) => ({
-          name: l.name || '',
-          color: l.color || '',
-          description: l.description || '',
-        }))
-      : [],
-    assignees: Array.isArray(pr.assignees)
-      ? pr.assignees.map((u) => u.login || u).filter(Boolean)
-      : [],
+    labels: Array.isArray(pr.labels) ? pr.labels.map((l) => ({
+      name: l.name || "",
+      color: l.color || "",
+      description: l.description || ""
+    })) : [],
+    assignees: Array.isArray(pr.assignees) ? pr.assignees.map((u) => u.login || u).filter(Boolean) : [],
     /** login → avatar_url for people chips when API provided them */
     avatarUrls: (() => {
       const map = {};
       const putUser = (u) => {
-        const login = u?.login || (typeof u === 'string' ? u : '');
-        const url = u?.avatar_url || '';
+        const login = u?.login || (typeof u === "string" ? u : "");
+        const url = u?.avatar_url || "";
         if (login && url) map[String(login).toLowerCase()] = url;
       };
       putUser(pr.user);
@@ -3068,11 +2270,11 @@ async function fetchPrDetail(
     actorIsBot: (() => {
       const map = {};
       const put = (u) => {
-        const login = u?.login || (typeof u === 'string' ? u : '');
+        const login = u?.login || (typeof u === "string" ? u : "");
         if (!login) return;
         const key = String(login).toLowerCase();
-        const type = String(u?.type || '').toLowerCase();
-        if (type === 'bot' || /\[bot\]$/i.test(String(login))) map[key] = true;
+        const type = String(u?.type || "").toLowerCase();
+        if (type === "bot" || /\[bot\]$/i.test(String(login))) map[key] = true;
       };
       for (const u of pr.assignees || []) put(u);
       for (const u of pr.requested_reviewers || []) put(u);
@@ -3081,20 +2283,14 @@ async function fetchPrDetail(
       for (const c of reviewComments || []) put(c?.user);
       return map;
     })(),
-    requestedReviewers: Array.isArray(pr.requested_reviewers)
-      ? pr.requested_reviewers.map((u) => u.login || u).filter(Boolean)
-      : [],
-    requestedTeams: Array.isArray(pr.requested_teams)
-      ? pr.requested_teams.map((t) => t.slug || t.name).filter(Boolean)
-      : [],
-    milestone: pr.milestone
-      ? {
-          number: pr.milestone.number,
-          title: pr.milestone.title || '',
-          state: pr.milestone.state || '',
-          dueOn: pr.milestone.due_on || null,
-        }
-      : null,
+    requestedReviewers: Array.isArray(pr.requested_reviewers) ? pr.requested_reviewers.map((u) => u.login || u).filter(Boolean) : [],
+    requestedTeams: Array.isArray(pr.requested_teams) ? pr.requested_teams.map((t) => t.slug || t.name).filter(Boolean) : [],
+    milestone: pr.milestone ? {
+      number: pr.milestone.number,
+      title: pr.milestone.title || "",
+      state: pr.milestone.state || "",
+      dueOn: pr.milestone.due_on || null
+    } : null,
     linkedIssues,
     /** Issues linked for Development (closing refs / body #N). */
     developmentIssues,
@@ -3110,7 +2306,7 @@ async function fetchPrDetail(
       perPage: COMMENT_PAGE_SIZE,
       hasMore: false,
       nextPage: null,
-      loadedCount: Array.isArray(comments) ? comments.length : 0,
+      loadedCount: Array.isArray(comments) ? comments.length : 0
     },
     // Populated by independent fetchPrReviews
     reviews: Array.isArray(reviews) ? reviews : [],
@@ -3128,34 +2324,21 @@ async function fetchPrDetail(
     commits: Array.isArray(commits) ? commits : [],
     checks,
     /** Debug: per-request ms from this fetchPrDetail call */
-    _fetchTimings: timings,
+    _fetchTimings: timings
   };
 }
-
 async function postIssueComment(owner, repo, issueNumber, body, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
   return apiSend(
     githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/comments`, ctx),
     fetchImpl,
     token,
-    { method: 'POST', body: { body } }
+    { method: "POST", body: { body } }
   );
 }
-
-/**
- * @param {'APPROVE'|'REQUEST_CHANGES'|'COMMENT'} event
- * @param {Array} [comments] pending inline comments for bulk submit
- */
-async function submitPullReview(
-  owner,
-  repo,
-  pullNumber,
-  { event, body = '', commitId, comments },
-  fetchImpl,
-  token
-, ctx = null) {
+async function submitPullReview(owner, repo, pullNumber, { event, body = "", commitId, comments }, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
-  const payload = { event, body: body || '' };
+  const payload = { event, body: body || "" };
   if (commitId) payload.commit_id = commitId;
   if (Array.isArray(comments) && comments.length) {
     payload.comments = comments.map((c) => {
@@ -3163,13 +2346,13 @@ async function submitPullReview(
         path: c.path,
         body: c.body,
         line: c.line,
-        side: c.side || 'RIGHT',
+        side: c.side || "RIGHT"
       };
       if (c.start_line != null || c.startLine != null) {
         const sl = c.start_line != null ? c.start_line : c.startLine;
         if (Number(sl) !== Number(c.line)) {
           row.start_line = Number(sl);
-          row.start_side = c.start_side || c.startSide || c.side || 'RIGHT';
+          row.start_side = c.start_side || c.startSide || c.side || "RIGHT";
         }
       }
       return row;
@@ -3179,32 +2362,17 @@ async function submitPullReview(
     githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`, ctx),
     fetchImpl,
     token,
-    { method: 'POST', body: payload }
+    { method: "POST", body: payload }
   );
 }
-
-/**
- * GraphQL: add a new review *thread* (line or file comment) onto an existing PENDING review.
- * REST POST /comments creates a second pending review → 422.
- */
-async function postReviewCommentViaPendingGraphql(
-  pendingReviewNodeId,
-  { body, path, line, side = 'RIGHT', startLine, startSide, subjectType = 'line' },
-  fetchImpl,
-  token,
-  ctx = null
-) {
+async function postReviewCommentViaPendingGraphql(pendingReviewNodeId, { body, path, line, side = "RIGHT", startLine, startSide, subjectType = "line" }, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
-  const isFile = String(subjectType || '').toLowerCase() === 'file';
-  const hasRange =
-    !isFile &&
-    startLine != null &&
-    Number.isFinite(Number(startLine)) &&
-    Number(startLine) !== Number(line);
+  const isFile = String(subjectType || "").toLowerCase() === "file";
+  const hasRange = !isFile && startLine != null && Number.isFinite(Number(startLine)) && Number(startLine) !== Number(line);
   const variables = {
     review: String(pendingReviewNodeId),
-    body: String(body || '').trim(),
-    path: String(path || ''),
+    body: String(body || "").trim(),
+    path: String(path || "")
   };
   let query;
   if (isFile) {
@@ -3233,11 +2401,9 @@ async function postReviewCommentViaPendingGraphql(
     }`;
   } else if (hasRange) {
     variables.line = Number(line);
-    variables.side =
-      String(side || 'RIGHT').toUpperCase() === 'LEFT' ? 'LEFT' : 'RIGHT';
+    variables.side = String(side || "RIGHT").toUpperCase() === "LEFT" ? "LEFT" : "RIGHT";
     variables.startLine = Number(startLine);
-    variables.startSide =
-      String(startSide || side || 'RIGHT').toUpperCase() === 'LEFT' ? 'LEFT' : 'RIGHT';
+    variables.startSide = String(startSide || side || "RIGHT").toUpperCase() === "LEFT" ? "LEFT" : "RIGHT";
     query = `mutation($review:ID!,$body:String!,$path:String!,$line:Int!,$side:DiffSide!,$startLine:Int!,$startSide:DiffSide!){
       addPullRequestReviewThread(input:{
         pullRequestReviewId:$review
@@ -3266,8 +2432,7 @@ async function postReviewCommentViaPendingGraphql(
     }`;
   } else {
     variables.line = Number(line);
-    variables.side =
-      String(side || 'RIGHT').toUpperCase() === 'LEFT' ? 'LEFT' : 'RIGHT';
+    variables.side = String(side || "RIGHT").toUpperCase() === "LEFT" ? "LEFT" : "RIGHT";
     query = `mutation($review:ID!,$body:String!,$path:String!,$line:Int!,$side:DiffSide!){
       addPullRequestReviewThread(input:{
         pullRequestReviewId:$review
@@ -3298,10 +2463,7 @@ async function postReviewCommentViaPendingGraphql(
   const node = thread?.comments?.nodes?.[0];
   if (!node) {
     throw new Error(
-      isFile
-        ? `Could not add pending file comment on ${path}.`
-        : `Could not add pending comment on ${path}:${line} (${side || 'RIGHT'}). ` +
-            `The line may be outside the diff or on the wrong side.`
+      isFile ? `Could not add pending file comment on ${path}.` : `Could not add pending comment on ${path}:${line} (${side || "RIGHT"}). The line may be outside the diff or on the wrong side.`
     );
   }
   const threadNodeId = thread?.id || null;
@@ -3311,66 +2473,45 @@ async function postReviewCommentViaPendingGraphql(
     line: isFile ? null : line,
     startLine: hasRange ? Number(startLine) : null,
     side,
-    inReplyToId: null,
+    inReplyToId: null
   });
   return {
     ...rest,
     // GraphQL/REST often omit line on pending comments — keep selection line for UI
     line: isFile ? null : rest.line ?? Number(line),
     path: rest.path || path,
-    side: side || 'RIGHT',
+    side: side || "RIGHT",
     start_line: hasRange ? Number(startLine) : null,
-    start_side: hasRange ? startSide || side || 'RIGHT' : null,
-    subject_type: isFile ? 'file' : 'line',
+    start_side: hasRange ? startSide || side || "RIGHT" : null,
+    subject_type: isFile ? "file" : "line",
     pending: true,
     pendingReviewId: node.pullRequestReview?.databaseId ?? null,
-    threadNodeId,
+    threadNodeId
   };
 }
-
-/**
- * Resolve the viewer's PENDING review, creating one if needed (asPending).
- * Recovers from 422 "one pending review" by re-fetching the existing review.
- * Always re-GETs the review so discarded/stale list entries (with a dead
- * node_id) are not returned after Discard.
- */
-async function ensureViewerPendingReview(
-  owner,
-  repo,
-  pullNumber,
-  { commitId = null, createIfMissing = false } = {},
-  fetchImpl,
-  token
-, ctx = null) {
+async function ensureViewerPendingReview(owner, repo, pullNumber, { commitId = null, createIfMissing = false } = {}, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
-  /** Re-fetch review; return null if missing or no longer PENDING. */
-  const hydrateNodeId = async (pending) => {
-    if (!pending?.id) return null;
+  const hydrateNodeId = async (pending2) => {
+    if (!pending2?.id) return null;
     try {
       const full = await apiJson(
-        githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${pending.id}`, ctx),
+        githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${pending2.id}`, ctx),
         fetchImpl,
         token
       );
-      if (!full || String(full.state || '').toUpperCase() !== 'PENDING') {
+      if (!full || String(full.state || "").toUpperCase() !== "PENDING") {
         return null;
       }
       return {
-        id: Number(pending.id),
-        node_id: full.node_id || pending.node_id || null,
+        id: Number(pending2.id),
+        node_id: full.node_id || pending2.node_id || null
       };
     } catch (err) {
-      // 404 after discard — list can briefly still show the dead PENDING row
       if (err?.status === 404) return null;
-      // Keep list node_id only when re-GET is unavailable (network); prefer null
-      // over a known-dead id when status is 4xx.
       if (err?.status >= 400 && err?.status < 500) return null;
-      return pending?.node_id
-        ? { id: Number(pending.id), node_id: pending.node_id }
-        : null;
+      return pending2?.node_id ? { id: Number(pending2.id), node_id: pending2.node_id } : null;
     }
   };
-
   let pending = await findViewerPendingReview(
     owner,
     repo,
@@ -3381,7 +2522,6 @@ async function ensureViewerPendingReview(
   pending = await hydrateNodeId(pending);
   if (pending?.node_id) return pending;
   if (!createIfMissing) return pending;
-
   try {
     const created = await createPendingPullReview(
       owner,
@@ -3393,16 +2533,11 @@ async function ensureViewerPendingReview(
     );
     return {
       id: Number(created?.id),
-      node_id: created?.node_id || null,
+      node_id: created?.node_id || null
     };
   } catch (err) {
-    // Already have a PENDING review (race or find missed it) — attach to it
-    const msg = String(err?.message || err || '');
-    if (
-      err?.status === 422 ||
-      /one pending review/i.test(msg) ||
-      /Unprocessable Entity/i.test(msg)
-    ) {
+    const msg = String(err?.message || err || "");
+    if (err?.status === 422 || /one pending review/i.test(msg) || /Unprocessable Entity/i.test(msg)) {
       pending = await findViewerPendingReview(
         owner,
         repo,
@@ -3416,47 +2551,23 @@ async function ensureViewerPendingReview(
     throw err;
   }
 }
-
-/**
- * Review comment on a PR file (line-level or file-level).
- * Prefer commit_id + path + line (side RIGHT). Multi-line uses start_line/start_side.
- * File-level: subject_type: 'file' (line omitted).
- *
- * Unified pending model (single GitHub PENDING review):
- * - asPending: true → create PENDING review if needed, always attach via GraphQL
- * - existing PENDING (any path) → GraphQL attach (REST would 422)
- * - else → REST published single comment
- *
- * @param {object} fields
- * @param {boolean} [fields.asPending] Start review / Add comment — always pending
- * @param {'line'|'file'} [fields.subjectType]
- */
-async function postReviewComment(
-  owner,
-  repo,
-  pullNumber,
-  {
-    body,
-    path,
-    line,
-    side = 'RIGHT',
-    commitId,
-    startLine,
-    startSide,
-    asPending = false,
-    subjectType = 'line',
-  },
-  fetchImpl,
-  token
-, ctx = null) {
+async function postReviewComment(owner, repo, pullNumber, {
+  body,
+  path,
+  line,
+  side = "RIGHT",
+  commitId,
+  startLine,
+  startSide,
+  asPending = false,
+  subjectType = "line"
+}, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
-  const text = String(body || '').trim();
-  if (!text) throw new Error('Comment body is required');
-  if (!path) throw new Error('path is required');
-  const isFile = String(subjectType || '').toLowerCase() === 'file';
-  if (!isFile && line == null) throw new Error('path and line are required');
-
-  // Unified PENDING: attach to existing, or create (asPending). Recover from 422.
+  const text = String(body || "").trim();
+  if (!text) throw new Error("Comment body is required");
+  if (!path) throw new Error("path is required");
+  const isFile = String(subjectType || "").toLowerCase() === "file";
+  if (!isFile && line == null) throw new Error("path and line are required");
   let pending = await ensureViewerPendingReview(
     owner,
     repo,
@@ -3464,12 +2575,11 @@ async function postReviewComment(
     {
       commitId: commitId || null,
       // Create only when caller wants pending; also create path recovers on 422
-      createIfMissing: Boolean(asPending),
+      createIfMissing: Boolean(asPending)
     },
     fetchImpl,
     token
   );
-
   const gqlFields = {
     body: text,
     path,
@@ -3477,10 +2587,8 @@ async function postReviewComment(
     side,
     startLine: isFile ? null : startLine,
     startSide: isFile ? null : startSide,
-    subjectType: isFile ? 'file' : 'line',
+    subjectType: isFile ? "file" : "line"
   };
-
-  // Existing PENDING (or just created) → always GraphQL attach (REST 422s)
   if (pending?.node_id) {
     try {
       const raw = await postReviewCommentViaPendingGraphql(
@@ -3493,16 +2601,11 @@ async function postReviewComment(
       return {
         ...raw,
         pending: true,
-        pendingReviewId: raw.pendingReviewId || pending.id || null,
+        pendingReviewId: raw.pendingReviewId || pending.id || null
       };
     } catch (err) {
-      // Discarded review can linger in the list with a dead GraphQL node id.
-      const msg = String(err?.message || err || '');
-      if (
-        asPending &&
-        /Could not resolve to a node|global id|NOT_FOUND|Could not find/i.test(msg)
-      ) {
-        // Force a fresh PENDING review and retry once
+      const msg = String(err?.message || err || "");
+      if (asPending && /Could not resolve to a node|global id|NOT_FOUND|Could not find/i.test(msg)) {
         try {
           const created = await createPendingPullReview(
             owner,
@@ -3515,13 +2618,10 @@ async function postReviewComment(
           );
           pending = {
             id: Number(created?.id),
-            node_id: created?.node_id || null,
+            node_id: created?.node_id || null
           };
         } catch (createErr) {
-          if (
-            createErr?.status === 422 ||
-            /one pending review/i.test(String(createErr?.message || ''))
-          ) {
+          if (createErr?.status === 422 || /one pending review/i.test(String(createErr?.message || ""))) {
             pending = await ensureViewerPendingReview(
               owner,
               repo,
@@ -3546,44 +2646,31 @@ async function postReviewComment(
           return {
             ...raw,
             pending: true,
-            pendingReviewId: raw.pendingReviewId || pending.id || null,
+            pendingReviewId: raw.pendingReviewId || pending.id || null
           };
         }
       }
       throw err;
     }
   }
-
-  // asPending but still no node_id — cannot attach
   if (asPending) {
     throw new Error(
-      'Could not start or find a pending review. Try Discard any leftover pending review, then retry.'
+      "Could not start or find a pending review. Try Discard any leftover pending review, then retry."
     );
   }
-
-  // Published single comment (no PENDING review)
-  const payload = isFile
-    ? { body: text, path, subject_type: 'file' }
-    : { body: text, path, line, side };
+  const payload = isFile ? { body: text, path, subject_type: "file" } : { body: text, path, line, side };
   if (commitId) payload.commit_id = commitId;
   if (!isFile && startLine != null && Number(startLine) !== Number(line)) {
     payload.start_line = Number(startLine);
-    payload.start_side = startSide || side || 'RIGHT';
+    payload.start_side = startSide || side || "RIGHT";
   }
   return apiSend(
     githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/comments`, ctx),
     fetchImpl,
     token,
-    { method: 'POST', body: payload }
+    { method: "POST", body: payload }
   );
 }
-
-/**
- * Viewer's PENDING review on a PR (at most one). Used because REST
- * POST /comments and /replies 422 with:
- * "user_id can only have one pending review per pull request".
- * @returns {Promise<{ id: number, node_id: string|null }|null>}
- */
 async function findViewerPendingReview(owner, repo, pullNumber, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
   if (!token) return null;
@@ -3596,50 +2683,35 @@ async function findViewerPendingReview(owner, repo, pullNumber, fetchImpl, token
         fetchImpl,
         token
       ).catch(() => []),
-      fetchViewerLogin(fetchImpl, token).catch(() => null),
+      fetchViewerLogin(fetchImpl, token).catch(() => null)
     ]);
     return pickViewerPendingFromReviews(reviews, login);
   } catch {
     return null;
   }
 }
-
-/**
- * Map GraphQL review-comment payload → REST-like shape (mapRestReviewComment).
- */
-
 function mapGraphqlReviewCommentToRest(c, fallback = {}) {
   if (!c) return null;
   return {
     id: c.databaseId ?? fallback.id ?? null,
     node_id: c.id || null,
-    body: c.body || fallback.body || '',
-    path: c.path || fallback.path || '',
+    body: c.body || fallback.body || "",
+    path: c.path || fallback.path || "",
     line: c.line ?? fallback.line ?? null,
     original_line: c.originalLine ?? null,
     start_line: c.startLine ?? fallback.startLine ?? null,
-    side: c.side || fallback.side || 'RIGHT',
+    side: c.side || fallback.side || "RIGHT",
     start_side: c.startSide || null,
-    diff_hunk: c.diffHunk || '',
+    diff_hunk: c.diffHunk || "",
     created_at: c.createdAt || fallback.createdAt || null,
-    in_reply_to_id:
-      c.replyTo?.databaseId ??
-      c.replyTo?.id ??
-      fallback.inReplyToId ??
-      fallback.in_reply_to_id ??
-      null,
+    in_reply_to_id: c.replyTo?.databaseId ?? c.replyTo?.id ?? fallback.inReplyToId ?? fallback.in_reply_to_id ?? null,
     user: {
-      login: c.author?.login || fallback.author || '',
-      avatar_url: c.author?.avatarUrl || fallback.avatarUrl || '',
+      login: c.author?.login || fallback.author || "",
+      avatar_url: c.author?.avatarUrl || fallback.avatarUrl || ""
     },
-    pull_request_review_id: c.pullRequestReview?.databaseId ?? null,
+    pull_request_review_id: c.pullRequestReview?.databaseId ?? null
   };
 }
-
-/**
- * GraphQL: addPullRequestReviewThreadReply — works with or without a pending
- * review (attaches to pending when one exists).
- */
 async function replyViaThreadGraphql(threadNodeId, body, fetchImpl, token, fallback = {}, ctx = null) {
   ctx = normalizeApiCtx(ctx);
   const data = await apiGraphql(
@@ -3664,22 +2736,10 @@ async function replyViaThreadGraphql(threadNodeId, body, fetchImpl, token, fallb
     ctx
   );
   const c = data?.addPullRequestReviewThreadReply?.comment;
-  if (!c) throw new Error('GraphQL thread reply returned no comment');
+  if (!c) throw new Error("GraphQL thread reply returned no comment");
   return mapGraphqlReviewCommentToRest(c, fallback);
 }
-
-/**
- * GraphQL: addPullRequestReviewComment on an existing PENDING review.
- */
-async function replyViaPendingReviewGraphql(
-  pendingReviewNodeId,
-  parentCommentNodeId,
-  body,
-  fetchImpl,
-  token,
-  fallback = {},
-  ctx = null
-) {
+async function replyViaPendingReviewGraphql(pendingReviewNodeId, parentCommentNodeId, body, fetchImpl, token, fallback = {}, ctx = null) {
   ctx = normalizeApiCtx(ctx);
   const data = await apiGraphql(
     `mutation($review:ID!,$body:String!,$inReplyTo:ID!){
@@ -3704,31 +2764,16 @@ async function replyViaPendingReviewGraphql(
     {
       review: String(pendingReviewNodeId),
       body: String(body),
-      inReplyTo: String(parentCommentNodeId),
+      inReplyTo: String(parentCommentNodeId)
     },
     fetchImpl,
     token
   );
   const c = data?.addPullRequestReviewComment?.comment;
-  if (!c) throw new Error('GraphQL pending-review reply returned no comment');
+  if (!c) throw new Error("GraphQL pending-review reply returned no comment");
   return mapGraphqlReviewCommentToRest(c, fallback);
 }
-
-/**
- * Resolve parent comment GraphQL node id (PRRC_…) for pending-review replies.
- * Published comments: GET /pulls/comments/{id}.
- * PENDING comments are omitted from that endpoint (404) — fall back to the
- * viewer's pending-review comment list (or a known node id from UI state).
- */
-async function resolveParentCommentNodeId(
-  owner,
-  repo,
-  parentId,
-  fetchImpl,
-  token,
-  knownNodeId,
-  pullNumber = null
-, ctx = null) {
+async function resolveParentCommentNodeId(owner, repo, parentId, fetchImpl, token, knownNodeId, pullNumber = null, ctx = null) {
   ctx = normalizeApiCtx(ctx);
   if (knownNodeId) return String(knownNodeId);
   const id = Math.floor(Number(parentId));
@@ -3741,7 +2786,6 @@ async function resolveParentCommentNodeId(
     );
     if (parent?.node_id) return String(parent.node_id);
   } catch {
-    /* pending comments 404 here — try pending review bundle below */
   }
   if (pullNumber == null || !token) return null;
   try {
@@ -3757,65 +2801,28 @@ async function resolveParentCommentNodeId(
     );
     if (hit) return String(hit.nodeId || hit.node_id);
   } catch {
-    /* ignore */
   }
   return null;
 }
-
-/**
- * Reply to an existing pull request review comment.
- *
- * mode:
- * - `comment` (default): publish immediately when no pending review; if a
- *   PENDING review exists, GitHub only allows attaching to it (shown as pending).
- * - `pending` ("Start review" / "Add comment"): always attach to the viewer's
- *   PENDING review, creating one if needed.
- *
- * REST POST /comments and /replies 422 when a pending review already exists:
- * "user_id can only have one pending review per pull request".
- *
- * @param {object} [opts]
- * @param {'comment'|'pending'} [opts.mode]
- * @param {string} [opts.threadNodeId] GraphQL PRRT_… id
- * @param {string} [opts.parentNodeId] GraphQL PRRC_… id of parent comment
- * @param {string} [opts.commitId] head SHA when creating a new pending review
- */
-async function replyToReviewComment(
-  owner,
-  repo,
-  pullNumber,
-  commentId,
-  body,
-  fetchImpl,
-  token,
-  opts = {}
-) {
+async function replyToReviewComment(owner, repo, pullNumber, commentId, body, fetchImpl, token, opts = {}) {
   const ctx = normalizeApiCtx(opts?.ctx);
-  const text = String(body || '').trim();
-  if (!text) throw new Error('Reply body is required');
+  const text = String(body || "").trim();
+  if (!text) throw new Error("Reply body is required");
   const parentId = Number(commentId);
   if (!Number.isFinite(parentId) || parentId <= 0) {
-    throw new Error('Invalid review comment id for reply');
+    throw new Error("Invalid review comment id for reply");
   }
   const n = Number(pullNumber);
-  const mode = opts?.mode === 'pending' ? 'pending' : 'comment';
+  const mode = opts?.mode === "pending" ? "pending" : "comment";
   const threadNodeId = opts?.threadNodeId || null;
   let parentNodeId = opts?.parentNodeId || null;
   const fallback = {
     body: text,
     inReplyToId: Math.floor(parentId),
-    path: opts?.path || '',
+    path: opts?.path || "",
     line: opts?.line ?? null,
-    side: opts?.side || 'RIGHT',
+    side: opts?.side || "RIGHT"
   };
-
-  /**
-   * Attach reply onto viewer's PENDING review via GraphQL.
-   * Prefer thread reply (PRRT_…) when available — works for pending threads and
-   * does not need the parent PRRC_ id (which REST cannot resolve for PENDING
-   * comments: GET /pulls/comments/{id} → 404).
-   * Uses ensureViewerPendingReview (create + 422 recover + dead-node re-GET).
-   */
   async function attachReplyToPending({ createIfMissing }) {
     const pending = await ensureViewerPendingReview(
       owner,
@@ -3823,14 +2830,12 @@ async function replyToReviewComment(
       n,
       {
         commitId: opts?.commitId || null,
-        createIfMissing: Boolean(createIfMissing),
+        createIfMissing: Boolean(createIfMissing)
       },
       fetchImpl,
       token
     );
     if (!pending?.node_id && !threadNodeId) return null;
-
-    // 1) Thread reply — only needs pullRequestReviewThreadId
     if (threadNodeId) {
       try {
         const raw = await replyViaThreadGraphql(
@@ -3843,16 +2848,12 @@ async function replyToReviewComment(
         return {
           ...raw,
           pending: true,
-          pendingReviewId: raw.pendingReviewId || pending?.id || null,
+          pendingReviewId: raw.pendingReviewId || pending?.id || null
         };
       } catch {
-        /* fall through to inReplyTo path */
       }
     }
-
     if (!pending?.node_id) return null;
-
-    // 2) inReplyTo on the PENDING review — needs parent PRRC_ node id
     parentNodeId = await resolveParentCommentNodeId(
       owner,
       repo,
@@ -3864,7 +2865,7 @@ async function replyToReviewComment(
     );
     if (!parentNodeId) {
       throw new Error(
-        'Cannot reply while a pending review exists (missing parent comment node id).'
+        "Cannot reply while a pending review exists (missing parent comment node id)."
       );
     }
     try {
@@ -3878,11 +2879,8 @@ async function replyToReviewComment(
       );
       return { ...raw, pending: true, pendingReviewId: pending.id };
     } catch (err) {
-      // Discarded/stale review node — create or re-find and retry once
-      const msg = String(err?.message || err || '');
-      if (
-        !/Could not resolve to a node|global id|NOT_FOUND|Could not find/i.test(msg)
-      ) {
+      const msg = String(err?.message || err || "");
+      if (!/Could not resolve to a node|global id|NOT_FOUND|Could not find/i.test(msg)) {
         throw err;
       }
       let next = null;
@@ -3897,13 +2895,10 @@ async function replyToReviewComment(
         );
         next = {
           id: Number(created?.id),
-          node_id: created?.node_id || null,
+          node_id: created?.node_id || null
         };
       } catch (createErr) {
-        if (
-          createErr?.status === 422 ||
-          /one pending review/i.test(String(createErr?.message || ''))
-        ) {
+        if (createErr?.status === 422 || /one pending review/i.test(String(createErr?.message || ""))) {
           next = await ensureViewerPendingReview(
             owner,
             repo,
@@ -3928,18 +2923,13 @@ async function replyToReviewComment(
       return { ...raw, pending: true, pendingReviewId: next.id };
     }
   }
-
-  // ── Start review / Add comment: always land on a PENDING review ──
-  if (mode === 'pending') {
+  if (mode === "pending") {
     const attached = await attachReplyToPending({ createIfMissing: true });
     if (attached) return attached;
     throw new Error(
-      'Could not start or find a pending review for this reply. Try Discard any leftover pending review, then retry.'
+      "Could not start or find a pending review for this reply. Try Discard any leftover pending review, then retry."
     );
   }
-
-  // ── Comment (immediate when possible) ──
-  // If a PENDING review already exists, REST replies 422 — attach via GraphQL.
   const existingPending = await ensureViewerPendingReview(
     owner,
     repo,
@@ -3952,8 +2942,6 @@ async function replyToReviewComment(
     const attached = await attachReplyToPending({ createIfMissing: false });
     if (attached) return attached;
   }
-
-  // Prefer GraphQL thread reply when we have the thread id (published path).
   if (threadNodeId) {
     try {
       const raw = await replyViaThreadGraphql(
@@ -3965,45 +2953,28 @@ async function replyToReviewComment(
       );
       return { ...raw, pending: false };
     } catch {
-      /* fall through to REST */
     }
   }
-
-  // No pending review: REST dedicated replies endpoint (published immediately)
   try {
     return await apiSend(
       githubRestUrl(`/repos/${owner}/${repo}/pulls/${n}/comments/${Math.floor(parentId)}/replies`, ctx),
       fetchImpl,
       token,
-      { method: 'POST', body: { body: text } }
+      { method: "POST", body: { body: text } }
     );
   } catch (err) {
-    // Race: PENDING appeared between find and REST POST
-    const msg = String(err?.message || err || '');
-    if (
-      err?.status === 422 ||
-      /one pending review/i.test(msg) ||
-      /Unprocessable Entity/i.test(msg)
-    ) {
+    const msg = String(err?.message || err || "");
+    if (err?.status === 422 || /one pending review/i.test(msg) || /Unprocessable Entity/i.test(msg)) {
       const attached = await attachReplyToPending({ createIfMissing: false });
       if (attached) return attached;
     }
     throw err;
   }
 }
-
-/**
- * Resolve or unresolve a pull request review thread via GraphQL.
- * Uses apiGraphql so body.errors (HTTP 200) surface as thrown errors.
- * @param {string} threadNodeId GraphQL id (PRRT_…)
- * @param {boolean} [resolved=true]
- */
 async function resolveReviewThread(threadNodeId, resolved, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
-  if (!threadNodeId) throw new Error('threadNodeId required to resolve review thread');
-  const mutation = resolved
-    ? `mutation($id:ID!){ resolveReviewThread(input:{threadId:$id}){ thread { id isResolved } } }`
-    : `mutation($id:ID!){ unresolveReviewThread(input:{threadId:$id}){ thread { id isResolved } } }`;
+  if (!threadNodeId) throw new Error("threadNodeId required to resolve review thread");
+  const mutation = resolved ? `mutation($id:ID!){ resolveReviewThread(input:{threadId:$id}){ thread { id isResolved } } }` : `mutation($id:ID!){ unresolveReviewThread(input:{threadId:$id}){ thread { id isResolved } } }`;
   return apiGraphql(
     mutation,
     { id: threadNodeId },
@@ -4012,168 +2983,123 @@ async function resolveReviewThread(threadNodeId, resolved, fetchImpl, token, ctx
     ctx
   );
 }
-
-/**
- * Close or reopen a pull request.
- * @param {'open'|'closed'} state
- */
 async function updatePullState(owner, repo, pullNumber, state, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
-  const next = state === 'closed' ? 'closed' : 'open';
+  const next = state === "closed" ? "closed" : "open";
   return apiSend(
     githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}`, ctx),
     fetchImpl,
     token,
-    { method: 'PATCH', body: { state: next } }
+    { method: "PATCH", body: { state: next } }
   );
 }
-
 async function closePullRequest(owner, repo, pullNumber, fetchImpl, token) {
-  return updatePullState(owner, repo, pullNumber, 'closed', fetchImpl, token);
+  return updatePullState(owner, repo, pullNumber, "closed", fetchImpl, token);
 }
-
 async function reopenPullRequest(owner, repo, pullNumber, fetchImpl, token) {
-  return updatePullState(owner, repo, pullNumber, 'open', fetchImpl, token);
+  return updatePullState(owner, repo, pullNumber, "open", fetchImpl, token);
 }
-
-/**
- * Delete a pull request review comment (own comments only on GitHub).
- * DELETE /repos/{owner}/{repo}/pulls/comments/{comment_id}
- */
 async function deleteReviewComment(owner, repo, commentId, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
   return apiSend(
     githubRestUrl(`/repos/${owner}/${repo}/pulls/comments/${commentId}`, ctx),
     fetchImpl,
     token,
-    { method: 'DELETE' }
+    { method: "DELETE" }
   );
 }
-
-/**
- * Delete an issue comment on the PR conversation.
- * DELETE /repos/{owner}/{repo}/issues/comments/{comment_id}
- */
 async function deleteIssueComment(owner, repo, commentId, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
   return apiSend(
     githubRestUrl(`/repos/${owner}/${repo}/issues/comments/${commentId}`, ctx),
     fetchImpl,
     token,
-    { method: 'DELETE' }
+    { method: "DELETE" }
   );
 }
-
 async function updatePullRequest(owner, repo, pullNumber, fields, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
   const body = {};
   if (fields?.title != null) body.title = String(fields.title);
   if (fields?.body != null) body.body = String(fields.body);
   if (fields?.base != null) body.base = String(fields.base);
-  if (fields?.state != null) body.state = fields.state === 'closed' ? 'closed' : 'open';
+  if (fields?.state != null) body.state = fields.state === "closed" ? "closed" : "open";
   return apiSend(
     githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}`, ctx),
     fetchImpl,
     token,
-    { method: 'PATCH', body }
+    { method: "PATCH", body }
   );
 }
-
 async function editIssueComment(owner, repo, commentId, body, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
   return apiSend(
     githubRestUrl(`/repos/${owner}/${repo}/issues/comments/${commentId}`, ctx),
     fetchImpl,
     token,
-    { method: 'PATCH', body: { body: String(body || '') } }
+    { method: "PATCH", body: { body: String(body || "") } }
   );
 }
-
 async function editReviewComment(owner, repo, commentId, body, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
   return apiSend(
     githubRestUrl(`/repos/${owner}/${repo}/pulls/comments/${commentId}`, ctx),
     fetchImpl,
     token,
-    { method: 'PATCH', body: { body: String(body || '') } }
+    { method: "PATCH", body: { body: String(body || "") } }
   );
 }
-
-async function requestReviewers(
-  owner,
-  repo,
-  pullNumber,
-  { reviewers = [], teamReviewers = [] },
-  fetchImpl,
-  token
-, ctx = null) {
+async function requestReviewers(owner, repo, pullNumber, { reviewers = [], teamReviewers = [] }, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
   return apiSend(
     githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/requested_reviewers`, ctx),
     fetchImpl,
     token,
     {
-      method: 'POST',
-      body: { reviewers, team_reviewers: teamReviewers },
+      method: "POST",
+      body: { reviewers, team_reviewers: teamReviewers }
     }
   );
 }
-
-async function removeReviewers(
-  owner,
-  repo,
-  pullNumber,
-  { reviewers = [], teamReviewers = [] },
-  fetchImpl,
-  token
-, ctx = null) {
+async function removeReviewers(owner, repo, pullNumber, { reviewers = [], teamReviewers = [] }, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
   return apiSend(
     githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/requested_reviewers`, ctx),
     fetchImpl,
     token,
     {
-      method: 'DELETE',
-      body: { reviewers, team_reviewers: teamReviewers },
+      method: "DELETE",
+      body: { reviewers, team_reviewers: teamReviewers }
     }
   );
 }
-
 async function addAssignees(owner, repo, issueNumber, assignees, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
   return apiSend(
     githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/assignees`, ctx),
     fetchImpl,
     token,
-    { method: 'POST', body: { assignees: assignees || [] } }
+    { method: "POST", body: { assignees: assignees || [] } }
   );
 }
-
 async function removeAssignees(owner, repo, issueNumber, assignees, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
   return apiSend(
     githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/assignees`, ctx),
     fetchImpl,
     token,
-    { method: 'DELETE', body: { assignees: assignees || [] } }
+    { method: "DELETE", body: { assignees: assignees || [] } }
   );
 }
-
 async function setIssueLabels(owner, repo, issueNumber, labels, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
   return apiSend(
     githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/labels`, ctx),
     fetchImpl,
     token,
-    { method: 'PUT', body: { labels: labels || [] } }
+    { method: "PUT", body: { labels: labels || [] } }
   );
 }
-
-/**
- * List repository labels (name + color + description) for the label picker.
- * Paginates up to maxPages × 100.
- * @returns {Promise<Array<{ name: string, color: string, description: string }>>}
- */
 async function fetchRepoLabels(owner, repo, fetchImpl, token = null, opts = {}) {
   const ctx = normalizeApiCtx(opts?.ctx);
   const perPage = 100;
@@ -4181,96 +3107,74 @@ async function fetchRepoLabels(owner, repo, fetchImpl, token = null, opts = {}) 
   const out = [];
   for (let page = 1; page <= maxPages; page++) {
     const url = githubRestUrl(
-      `/repos/${owner}/${repo}/labels?per_page=${perPage}&page=${page}`
-    , ctx);
+      `/repos/${owner}/${repo}/labels?per_page=${perPage}&page=${page}`,
+      ctx
+    );
     const batch = await apiJson(url, fetchImpl, token);
     if (!Array.isArray(batch) || !batch.length) break;
     for (const l of batch) {
-      const name = String(l?.name || '').trim();
+      const name = String(l?.name || "").trim();
       if (!name) continue;
       out.push({
         name,
-        color: String(l?.color || '')
-          .trim()
-          .replace(/^#/, ''),
-        description: String(l?.description || ''),
+        color: String(l?.color || "").trim().replace(/^#/, ""),
+        description: String(l?.description || "")
       });
     }
     if (batch.length < perPage) break;
   }
   return out;
 }
-
-/** Stable-ish default color for newly created labels (hex without #). */
 function defaultNewLabelColor(name) {
   const palette = [
-    'd73a4a',
-    '0075ca',
-    'a2eeef',
-    '7057ff',
-    '008672',
-    'e4e669',
-    'd876e3',
-    'fbca04',
-    '0e8a16',
-    '5319e7',
+    "d73a4a",
+    "0075ca",
+    "a2eeef",
+    "7057ff",
+    "008672",
+    "e4e669",
+    "d876e3",
+    "fbca04",
+    "0e8a16",
+    "5319e7"
   ];
-  const s = String(name || '');
+  const s = String(name || "");
   let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  for (let i = 0; i < s.length; i++) h = h * 31 + s.charCodeAt(i) >>> 0;
   return palette[h % palette.length];
 }
-
-/**
- * Create a repository label.
- * @returns {Promise<{ name: string, color: string, description: string }>}
- */
-async function createRepoLabel(
-  owner,
-  repo,
-  { name, color, description } = {},
-  fetchImpl,
-  token
-, ctx = null) {
+async function createRepoLabel(owner, repo, { name, color, description } = {}, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
-  const rawName = String(name || '').trim();
-  if (!rawName) throw new Error('Label name is required');
+  const rawName = String(name || "").trim();
+  if (!rawName) throw new Error("Label name is required");
   const body = {
     name: rawName,
-    color: String(color || defaultNewLabelColor(rawName))
-      .trim()
-      .replace(/^#/, ''),
+    color: String(color || defaultNewLabelColor(rawName)).trim().replace(/^#/, "")
   };
   if (description != null) body.description = String(description);
   const result = await apiSend(
     githubRestUrl(`/repos/${owner}/${repo}/labels`, ctx),
     fetchImpl,
     token,
-    { method: 'POST', body }
+    { method: "POST", body }
   );
   return {
     name: String(result?.name || rawName),
-    color: String(result?.color || body.color || '')
-      .trim()
-      .replace(/^#/, ''),
-    description: String(result?.description || description || ''),
+    color: String(result?.color || body.color || "").trim().replace(/^#/, ""),
+    description: String(result?.description || description || "")
   };
 }
-
-/**
- * List repository milestones (open + closed, limited pages).
- * @returns {Promise<Array<{ number: number, title: string, state: string, description: string }>>}
- */
 async function fetchRepoMilestones(owner, repo, fetchImpl, token = null, opts = {}) {
   const ctx = normalizeApiCtx(opts?.ctx);
   const perPage = 100;
   const maxPages = Math.max(1, Math.min(10, Number(opts.maxPages) || 5));
-  const state = opts.state || 'all';
+  const state = opts.state || "all";
   const out = [];
   for (let page = 1; page <= maxPages; page++) {
     const url = githubRestUrl(
-      `/repos/${owner}/${repo}/milestones?state=${encodeURIComponent(state)}&per_page=${perPage}&page=${page}&sort=due_on&direction=desc`
-    , ctx);
+      `/repos/${owner}/${repo}/milestones?state=${encodeURIComponent(state)}&per_page=${perPage}&page=${page}&sort=due_on&direction=desc`,
+      ctx
+    );
     const batch = await apiJson(url, fetchImpl, token);
     if (!Array.isArray(batch) || !batch.length) break;
     for (const m of batch) {
@@ -4279,51 +3183,35 @@ async function fetchRepoMilestones(owner, repo, fetchImpl, token = null, opts = 
       out.push({
         number,
         title: String(m?.title || `Milestone ${number}`),
-        state: String(m?.state || ''),
-        description: String(m?.description || ''),
-        dueOn: m?.due_on || null,
+        state: String(m?.state || ""),
+        description: String(m?.description || ""),
+        dueOn: m?.due_on || null
       });
     }
     if (batch.length < perPage) break;
   }
   return out;
 }
-
-/**
- * Create a repository milestone.
- * @returns {Promise<{ number: number, title: string, state: string, description: string }>}
- */
-async function createRepoMilestone(
-  owner,
-  repo,
-  { title, description, state } = {},
-  fetchImpl,
-  token
-, ctx = null) {
+async function createRepoMilestone(owner, repo, { title, description, state } = {}, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
-  const rawTitle = String(title || '').trim();
-  if (!rawTitle) throw new Error('Milestone title is required');
-  const body = { title: rawTitle, state: state === 'closed' ? 'closed' : 'open' };
+  const rawTitle = String(title || "").trim();
+  if (!rawTitle) throw new Error("Milestone title is required");
+  const body = { title: rawTitle, state: state === "closed" ? "closed" : "open" };
   if (description != null) body.description = String(description);
   const result = await apiSend(
     githubRestUrl(`/repos/${owner}/${repo}/milestones`, ctx),
     fetchImpl,
     token,
-    { method: 'POST', body }
+    { method: "POST", body }
   );
   return {
     number: Number(result?.number) || 0,
     title: String(result?.title || rawTitle),
     state: String(result?.state || body.state),
-    description: String(result?.description || description || ''),
-    dueOn: result?.due_on || null,
+    description: String(result?.description || description || ""),
+    dueOn: result?.due_on || null
   };
 }
-
-/**
- * List repository tags (paginated). Used to surface tags related to a PR head/commits.
- * @returns {Promise<Array<{ name: string, sha: string, zipballUrl?: string, tarballUrl?: string }>>}
- */
 async function fetchRepoTags(owner, repo, fetchImpl, token = null, opts = {}) {
   const ctx = normalizeApiCtx(opts?.ctx);
   const perPage = 100;
@@ -4331,61 +3219,35 @@ async function fetchRepoTags(owner, repo, fetchImpl, token = null, opts = {}) {
   const out = [];
   for (let page = 1; page <= maxPages; page++) {
     const url = githubRestUrl(
-      `/repos/${owner}/${repo}/tags?per_page=${perPage}&page=${page}`
-    , ctx);
+      `/repos/${owner}/${repo}/tags?per_page=${perPage}&page=${page}`,
+      ctx
+    );
     const batch = await apiJson(url, fetchImpl, token);
     if (!Array.isArray(batch) || !batch.length) break;
     for (const t of batch) {
-      const name = String(t?.name || '').trim();
-      const sha = String(t?.commit?.sha || t?.sha || '').trim();
+      const name = String(t?.name || "").trim();
+      const sha = String(t?.commit?.sha || t?.sha || "").trim();
       if (!name) continue;
       out.push({
         name,
         sha,
-        zipballUrl: t?.zipball_url || '',
-        tarballUrl: t?.tarball_url || '',
+        zipballUrl: t?.zipball_url || "",
+        tarballUrl: t?.tarball_url || ""
       });
     }
     if (batch.length < perPage) break;
   }
   return out;
 }
-
-/**
- * Tags whose commit sha is in `shaSet` (PR commits / head).
- * @param {string[]} shas
- * @returns {Promise<Array<{ name: string, sha: string }>>}
- */
-async function fetchTagsForCommits(
-  owner,
-  repo,
-  shas,
-  fetchImpl,
-  token = null,
-  opts = {}
-) {
+async function fetchTagsForCommits(owner, repo, shas, fetchImpl, token = null, opts = {}) {
   const want = new Set(
-    (shas || [])
-      .map((s) => String(s || '').trim().toLowerCase())
-      .filter(Boolean)
+    (shas || []).map((s) => String(s || "").trim().toLowerCase()).filter(Boolean)
   );
   if (!want.size) return [];
   const tags = await fetchRepoTags(owner, repo, fetchImpl, token, opts);
-  return tags.filter((t) => want.has(String(t.sha || '').toLowerCase()));
+  return tags.filter((t) => want.has(String(t.sha || "").toLowerCase()));
 }
-
-/**
- * Apply a GitHub suggestion: replace lines on head branch via Contents API.
- * @param {{ path: string, headRef: string, startLine: number, endLine: number, suggestion: string, message?: string }} opts
- */
-async function mergePullRequest(
-  owner,
-  repo,
-  pullNumber,
-  { mergeMethod = 'merge', commitTitle, commitMessage } = {},
-  fetchImpl,
-  token
-, ctx = null) {
+async function mergePullRequest(owner, repo, pullNumber, { mergeMethod = "merge", commitTitle, commitMessage } = {}, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
   const body = { merge_method: mergeMethod };
   if (commitTitle != null) body.commit_title = String(commitTitle);
@@ -4394,18 +3256,10 @@ async function mergePullRequest(
     githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/merge`, ctx),
     fetchImpl,
     token,
-    { method: 'PUT', body }
+    { method: "PUT", body }
   );
 }
-
-async function updatePullBranch(
-  owner,
-  repo,
-  pullNumber,
-  { expectedHeadSha } = {},
-  fetchImpl,
-  token
-, ctx = null) {
+async function updatePullBranch(owner, repo, pullNumber, { expectedHeadSha } = {}, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
   const body = {};
   if (expectedHeadSha) body.expected_head_sha = String(expectedHeadSha);
@@ -4413,28 +3267,15 @@ async function updatePullBranch(
     githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/update-branch`, ctx),
     fetchImpl,
     token,
-    { method: 'PUT', body }
+    { method: "PUT", body }
   );
 }
-
-/**
- * Resolve GraphQL node id for a pull request (PR_…).
- * Prefer REST `node_id` when available; otherwise look up via GraphQL.
- */
-async function resolvePullRequestNodeId(
-  owner,
-  repo,
-  pullNumber,
-  fetchImpl,
-  token,
-  nodeId = null
-, ctx = null) {
+async function resolvePullRequestNodeId(owner, repo, pullNumber, fetchImpl, token, nodeId = null, ctx = null) {
   ctx = normalizeApiCtx(ctx);
   if (nodeId) return String(nodeId);
   const n = Number(pullNumber);
   if (!token || !owner || !repo || !Number.isFinite(n) || n <= 0) return null;
   try {
-    // Prefer REST node_id (cheap, same id GraphQL expects)
     const pr = await apiJson(
       githubRestUrl(`/repos/${owner}/${repo}/pulls/${n}`, ctx),
       fetchImpl,
@@ -4442,7 +3283,6 @@ async function resolvePullRequestNodeId(
     );
     if (pr?.node_id) return String(pr.node_id);
   } catch {
-    /* fall through */
   }
   try {
     const data = await apiGraphql(
@@ -4462,41 +3302,18 @@ async function resolvePullRequestNodeId(
     return null;
   }
 }
-
-/**
- * Map GraphQL SubscriptionState → app shape.
- * @param {string|null|undefined} state SUBSCRIBED | UNSUBSCRIBED | IGNORED
- */
 function mapViewerSubscription(state) {
-  const s = String(state || '').toUpperCase();
-  if (s === 'SUBSCRIBED') return { subscribed: true, ignored: false, viewerSubscription: s };
-  if (s === 'IGNORED') return { subscribed: false, ignored: true, viewerSubscription: s };
-  if (s === 'UNSUBSCRIBED') {
+  const s = String(state || "").toUpperCase();
+  if (s === "SUBSCRIBED") return { subscribed: true, ignored: false, viewerSubscription: s };
+  if (s === "IGNORED") return { subscribed: false, ignored: true, viewerSubscription: s };
+  if (s === "UNSUBSCRIBED") {
     return { subscribed: false, ignored: false, viewerSubscription: s };
   }
   return { subscribed: null, ignored: false, viewerSubscription: s || null };
 }
-
-/**
- * Issue/PR thread subscription via GraphQL updateSubscription.
- * REST `/issues/{n}/subscription` is gone / 404 for many tokens — use GraphQL.
- *
- * @param {object} [opts]
- * @param {boolean} [opts.subscribed=true]
- * @param {boolean} [opts.ignored=false]
- * @param {string|null} [opts.nodeId] PR GraphQL id (detail.nodeId)
- */
-async function setIssueSubscription(
-  owner,
-  repo,
-  issueNumber,
-  { subscribed = true, ignored = false, nodeId = null } = {},
-  fetchImpl,
-  token,
-  ctx = null
-) {
+async function setIssueSubscription(owner, repo, issueNumber, { subscribed = true, ignored = false, nodeId = null } = {}, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
-  if (!token) throw new Error('GitHub PAT required for notifications');
+  if (!token) throw new Error("GitHub PAT required for notifications");
   const id = await resolvePullRequestNodeId(
     owner,
     repo,
@@ -4508,10 +3325,10 @@ async function setIssueSubscription(
   );
   if (!id) {
     throw new Error(
-      'Could not resolve pull request id for subscription. Refresh and try again.'
+      "Could not resolve pull request id for subscription. Refresh and try again."
     );
   }
-  const state = ignored ? 'IGNORED' : subscribed ? 'SUBSCRIBED' : 'UNSUBSCRIBED';
+  const state = ignored ? "IGNORED" : subscribed ? "SUBSCRIBED" : "UNSUBSCRIBED";
   const data = await apiGraphql(
     `mutation($id:ID!,$state:SubscriptionState!){
   updateSubscription(input:{subscribableId:$id, state:$state}) {
@@ -4528,16 +3345,7 @@ async function setIssueSubscription(
   const vs = data?.updateSubscription?.subscribable?.viewerSubscription;
   return mapViewerSubscription(vs);
 }
-
-/** Unsubscribe from PR notifications (GraphQL state UNSUBSCRIBED). */
-async function deleteIssueSubscription(
-  owner,
-  repo,
-  issueNumber,
-  fetchImpl,
-  token,
-  nodeId = null
-) {
+async function deleteIssueSubscription(owner, repo, issueNumber, fetchImpl, token, nodeId = null) {
   return setIssueSubscription(
     owner,
     repo,
@@ -4547,19 +3355,7 @@ async function deleteIssueSubscription(
     token
   );
 }
-
-/**
- * Read viewer subscription for a PR (GraphQL). Returns null on failure.
- */
-async function fetchPullRequestSubscription(
-  owner,
-  repo,
-  pullNumber,
-  fetchImpl,
-  token,
-  nodeId = null,
-  ctx = null
-) {
+async function fetchPullRequestSubscription(owner, repo, pullNumber, fetchImpl, token, nodeId = null, ctx = null) {
   ctx = normalizeApiCtx(ctx);
   if (!token) return null;
   try {
@@ -4592,7 +3388,6 @@ async function fetchPullRequestSubscription(
     return null;
   }
 }
-
 async function setIssueMilestone(owner, repo, issueNumber, milestoneNumber, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
   return apiSend(
@@ -4600,25 +3395,12 @@ async function setIssueMilestone(owner, repo, issueNumber, milestoneNumber, fetc
     fetchImpl,
     token,
     {
-      method: 'PATCH',
-      body: { milestone: milestoneNumber == null ? null : Number(milestoneNumber) },
+      method: "PATCH",
+      body: { milestone: milestoneNumber == null ? null : Number(milestoneNumber) }
     }
   );
 }
-
-/**
- * Convert PR to draft or mark ready for review (GraphQL; needs PR node_id).
- * @param {'draft'|'ready'} stage
- */
-async function setPullRequestDraftStage(
-  owner,
-  repo,
-  pullNumber,
-  stage,
-  fetchImpl,
-  token,
-  nodeId = null
-, ctx = null) {
+async function setPullRequestDraftStage(owner, repo, pullNumber, stage, fetchImpl, token, nodeId = null, ctx = null) {
   ctx = normalizeApiCtx(ctx);
   let id = nodeId;
   if (!id) {
@@ -4629,14 +3411,13 @@ async function setPullRequestDraftStage(
     );
     id = pr?.node_id;
   }
-  if (!id) throw new Error('PR node_id unavailable for draft stage change');
+  if (!id) throw new Error("PR node_id unavailable for draft stage change");
   let buildFn = null;
   try {
-    let mod =
-      typeof globalThis !== 'undefined' ? globalThis.PRModalPrEditApi : null;
-    if (!mod && typeof require === 'function') {
+    let mod = typeof globalThis !== "undefined" ? globalThis.PRModalPrEditApi : null;
+    if (!mod && typeof require === "function") {
       try {
-        mod = require('./modal/pure/pr-edit-api.js');
+        mod = require("./modal/pure/pr-edit-api.js");
       } catch {
         mod = null;
       }
@@ -4645,25 +3426,20 @@ async function setPullRequestDraftStage(
   } catch {
     buildFn = null;
   }
-  const gql = buildFn
-    ? buildFn(stage === 'ready' ? 'ready' : 'draft', id)
-    : stage === 'ready'
-      ? {
-          query: `mutation($id:ID!){markPullRequestReadyForReview(input:{pullRequestId:$id}){pullRequest{id isDraft}}}`,
-          variables: { id },
-        }
-      : {
-          query: `mutation($id:ID!){convertPullRequestToDraft(input:{pullRequestId:$id}){pullRequest{id isDraft}}}`,
-          variables: { id },
-        };
+  const gql = buildFn ? buildFn(stage === "ready" ? "ready" : "draft", id) : stage === "ready" ? {
+    query: `mutation($id:ID!){markPullRequestReadyForReview(input:{pullRequestId:$id}){pullRequest{id isDraft}}}`,
+    variables: { id }
+  } : {
+    query: `mutation($id:ID!){convertPullRequestToDraft(input:{pullRequestId:$id}){pullRequest{id isDraft}}}`,
+    variables: { id }
+  };
   const data = await apiGraphql(gql.query, gql.variables, fetchImpl, token, ctx);
   let parseFn = null;
   try {
-    let mod =
-      typeof globalThis !== 'undefined' ? globalThis.PRModalPrEditApi : null;
-    if (!mod && typeof require === 'function') {
+    let mod = typeof globalThis !== "undefined" ? globalThis.PRModalPrEditApi : null;
+    if (!mod && typeof require === "function") {
       try {
-        mod = require('./modal/pure/pr-edit-api.js');
+        mod = require("./modal/pure/pr-edit-api.js");
       } catch {
         mod = null;
       }
@@ -4673,60 +3449,38 @@ async function setPullRequestDraftStage(
     parseFn = null;
   }
   let draft = null;
-  if (typeof parseFn === 'function') {
+  if (typeof parseFn === "function") {
     draft = parseFn(data);
-  } else if (data && typeof data === 'object') {
-    const pr =
-      data.markPullRequestReadyForReview?.pullRequest ||
-      data.convertPullRequestToDraft?.pullRequest ||
-      null;
-    if (pr && typeof pr.isDraft === 'boolean') draft = pr.isDraft;
+  } else if (data && typeof data === "object") {
+    const pr = data.markPullRequestReadyForReview?.pullRequest || data.convertPullRequestToDraft?.pullRequest || null;
+    if (pr && typeof pr.isDraft === "boolean") draft = pr.isDraft;
   }
-  // Fall back to the requested stage so callers always get a boolean draft flag
-  if (typeof draft !== 'boolean') {
-    draft = stage !== 'ready';
+  if (typeof draft !== "boolean") {
+    draft = stage !== "ready";
   }
   return { draft: Boolean(draft), data };
 }
-
-
-/**
- * Upload a binary/text file via Contents API (creates or overwrites path on branch).
- * Used for comment attachments when PAT has repo contents write access.
- * @returns {{ downloadUrl: string, htmlUrl: string, path: string, sha: string }}
- */
-async function uploadRepoFile(
-  owner,
-  repo,
-  { path, contentBase64, message, branch },
-  fetchImpl,
-  token
-, ctx = null) {
+async function uploadRepoFile(owner, repo, { path, contentBase64, message, branch }, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
-  if (!path || !contentBase64) throw new Error('path and contentBase64 required');
-  const encPath = String(path)
-    .split('/')
-    .map(encodeURIComponent)
-    .join('/');
-  // Try GET existing sha (overwrite path)
+  if (!path || !contentBase64) throw new Error("path and contentBase64 required");
+  const encPath = String(path).split("/").map(encodeURIComponent).join("/");
   let sha;
   try {
     const meta = await apiJson(
       githubRestUrl(
-        `/repos/${owner}/${repo}/contents/${encPath}${
-          branch ? `?ref=${encodeURIComponent(branch)}` : ''
-        }`
-      , ctx),
+        `/repos/${owner}/${repo}/contents/${encPath}${branch ? `?ref=${encodeURIComponent(branch)}` : ""}`,
+        ctx
+      ),
       fetchImpl,
       token
     );
     sha = meta?.sha;
   } catch {
-    sha = undefined;
+    sha = void 0;
   }
   const body = {
     message: message || `Upload ${path}`,
-    content: String(contentBase64).replace(/\s+/g, ''),
+    content: String(contentBase64).replace(/\s+/g, "")
   };
   if (branch) body.branch = branch;
   if (sha) body.sha = sha;
@@ -4734,44 +3488,35 @@ async function uploadRepoFile(
     githubRestUrl(`/repos/${owner}/${repo}/contents/${encPath}`, ctx),
     fetchImpl,
     token,
-    { method: 'PUT', body }
+    { method: "PUT", body }
   );
   const content = result?.content || result;
   return {
-    downloadUrl: content?.download_url || content?.html_url || '',
-    htmlUrl: content?.html_url || content?.download_url || '',
+    downloadUrl: content?.download_url || content?.html_url || "",
+    htmlUrl: content?.html_url || content?.download_url || "",
     path: content?.path || path,
-    sha: content?.sha || '',
+    sha: content?.sha || ""
   };
 }
-
-/**
- * Fetch a file's text content at a ref (branch or SHA).
- * @returns {{ path: string, ref: string, text: string, sha: string, size: number }}
- */
 async function getRepoFileText(owner, repo, { path, ref }, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
-  if (!path) throw new Error('path required');
-  const rev = ref || 'HEAD';
-  const encPath = String(path)
-    .split('/')
-    .map(encodeURIComponent)
-    .join('/');
+  if (!path) throw new Error("path required");
+  const rev = ref || "HEAD";
+  const encPath = String(path).split("/").map(encodeURIComponent).join("/");
   const meta = await apiJson(
     githubRestUrl(`/repos/${owner}/${repo}/contents/${encPath}?ref=${encodeURIComponent(rev)}`, ctx),
     fetchImpl,
     token
   );
-  if (meta?.type && meta.type !== 'file') {
+  if (meta?.type && meta.type !== "file") {
     throw new Error(`Not a file: ${path}`);
   }
-  // Large files may omit content and only provide download_url
-  let raw = '';
-  if (meta?.content && meta?.encoding === 'base64') {
-    raw = decodeBase64Utf8(String(meta.content).replace(/\n/g, ''));
+  let raw = "";
+  if (meta?.content && meta?.encoding === "base64") {
+    raw = decodeBase64Utf8(String(meta.content).replace(/\n/g, ""));
   } else if (meta?.download_url) {
     const res = await fetchImpl(meta.download_url, {
-      headers: buildApiHeaders(token),
+      headers: buildApiHeaders(token)
     });
     if (!res.ok) {
       const err = new Error(`GitHub download ${res.status}: ${res.statusText}`);
@@ -4780,26 +3525,19 @@ async function getRepoFileText(owner, repo, { path, ref }, fetchImpl, token, ctx
     }
     raw = await res.text();
   } else if (meta?.content) {
-    raw = decodeBase64Utf8(String(meta.content).replace(/\n/g, ''));
+    raw = decodeBase64Utf8(String(meta.content).replace(/\n/g, ""));
   }
   return {
     path: meta?.path || path,
     ref: rev,
     text: raw,
-    sha: meta?.sha || '',
-    size: Number(meta?.size) || raw.length,
+    sha: meta?.sha || "",
+    size: Number(meta?.size) || raw.length
   };
 }
-
-async function applyReviewSuggestion(
-  owner,
-  repo,
-  { path, headRef, startLine, endLine, suggestion, message },
-  fetchImpl,
-  token
-, ctx = null) {
+async function applyReviewSuggestion(owner, repo, { path, headRef, startLine, endLine, suggestion, message }, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
-  const ref = headRef || 'HEAD';
+  const ref = headRef || "HEAD";
   const file = await getRepoFileText(
     owner,
     repo,
@@ -4807,14 +3545,13 @@ async function applyReviewSuggestion(
     fetchImpl,
     token
   );
-  const raw = file.text || '';
+  const raw = file.text || "";
   let applyFn = null;
   try {
-    let mod =
-      typeof globalThis !== 'undefined' ? globalThis.PRModalPrEditApi : null;
-    if (!mod && typeof require === 'function') {
+    let mod = typeof globalThis !== "undefined" ? globalThis.PRModalPrEditApi : null;
+    if (!mod && typeof require === "function") {
       try {
-        mod = require('./modal/pure/pr-edit-api.js');
+        mod = require("./modal/pure/pr-edit-api.js");
       } catch {
         mod = null;
       }
@@ -4823,79 +3560,64 @@ async function applyReviewSuggestion(
   } catch {
     applyFn = null;
   }
-  if (!applyFn) throw new Error('applySuggestionToFileContent unavailable');
+  if (!applyFn) throw new Error("applySuggestionToFileContent unavailable");
   const next = applyFn(raw, {
     startLine,
     endLine,
-    suggestion,
+    suggestion
   });
-  // base64 encode
   let contentB64;
-  if (typeof Buffer !== 'undefined') {
-    contentB64 = Buffer.from(next, 'utf8').toString('base64');
+  if (typeof Buffer !== "undefined") {
+    contentB64 = Buffer.from(next, "utf8").toString("base64");
   } else {
     contentB64 = btoa(unescape(encodeURIComponent(next)));
   }
   return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/contents/${path
-      .split('/')
-      .map(encodeURIComponent)
-      .join('/')}`, ctx),
+    githubRestUrl(`/repos/${owner}/${repo}/contents/${path.split("/").map(encodeURIComponent).join("/")}`, ctx),
     fetchImpl,
     token,
     {
-      method: 'PUT',
+      method: "PUT",
       body: {
         message: message || `Apply suggestion to ${path}`,
         content: contentB64,
         branch: ref,
-        sha: file.sha,
-      },
+        sha: file.sha
+      }
     }
   );
 }
-
-/**
- * Current authenticated user (for "delete own" gating).
- */
 async function fetchViewerLogin(fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
   if (!token) return null;
   try {
-    const me = await apiJson(githubRestUrl('/user', ctx), fetchImpl, token);
+    const me = await apiJson(githubRestUrl("/user", ctx), fetchImpl, token);
     return me?.login || null;
   } catch {
     return null;
   }
 }
-
-/**
- * Map GitHub file list (+ optional gitattributes) to modal file rows with collapse hints.
- * @param {Array} files raw API file objects
- * @param {string} [gitattributesText]
- */
-function mapAndAnnotateFiles(files, gitattributesText = '') {
+function mapAndAnnotateFiles(files, gitattributesText = "") {
   const mappedFiles = (Array.isArray(files) ? files : []).map((f) => ({
     filename: f.filename,
     status: f.status,
     additions: f.additions,
     deletions: f.deletions,
     changes: f.changes,
-    patch: f.patch || '',
+    patch: f.patch || "",
     // Preserve media URLs for image preview / binary classification
-    raw_url: f.raw_url || f.rawUrl || '',
-    blob_url: f.blob_url || f.blobUrl || '',
-    contents_url: f.contents_url || f.contentsUrl || '',
-    sha: f.sha || '',
-    previous_filename: f.previous_filename || f.previousFilename || '',
+    raw_url: f.raw_url || f.rawUrl || "",
+    blob_url: f.blob_url || f.blobUrl || "",
+    contents_url: f.contents_url || f.contentsUrl || "",
+    sha: f.sha || "",
+    previous_filename: f.previous_filename || f.previousFilename || ""
   }));
-
   let filesOut;
   try {
-    let collapse = typeof globalThis !== 'undefined' ? globalThis.PRModalCollapse : null;
-    if (!collapse && typeof require === 'function') {
+    let collapse = typeof globalThis !== "undefined" ? globalThis.PRModalCollapse : null;
+    if (!collapse && typeof require === "function") {
       try {
-        collapse = require('./modal/pure/collapse.js');
+        collapse = require("./modal/pure/collapse.js");
       } catch {
         collapse = null;
       }
@@ -4907,45 +3629,35 @@ function mapAndAnnotateFiles(files, gitattributesText = '') {
     filesOut = null;
   }
   if (!filesOut) {
-    const LARGE = 5000;
+    const LARGE = 5e3;
     filesOut = mappedFiles.map((f) => {
-      const path = f.filename || '';
-      const isImage =
-        /\.(png|jpe?g|gif|webp|bmp|svg|ico|avif)$/i.test(path);
+      const path = f.filename || "";
+      const isImage = /\.(png|jpe?g|gif|webp|bmp|svg|ico|avif)$/i.test(path);
       const hasPatch = Boolean(f.patch);
-      const kind = isImage ? 'image' : hasPatch ? 'text' : 'binary';
+      const kind = isImage ? "image" : hasPatch ? "text" : "binary";
       return {
         ...f,
         fileKind: kind,
-        openableAsText: kind === 'text',
-        renderImage: kind === 'image',
-        defaultCollapsed:
-          kind === 'binary' ||
-          (f.changes || 0) >= LARGE ||
-          /package-lock\.json$|yarn\.lock$|\.min\.(js|css)$|\.bundle\.js$/i.test(
-            path
-          ),
+        openableAsText: kind === "text",
+        renderImage: kind === "image",
+        defaultCollapsed: kind === "binary" || (f.changes || 0) >= LARGE || /package-lock\.json$|yarn\.lock$|\.min\.(js|css)$|\.bundle\.js$/i.test(
+          path
+        )
       };
     });
   }
   return filesOut;
 }
-
-/**
- * Files+patches for a commit or commit range via GitHub compare API.
- * Use base...head (triple-dot) for merge-base style PR commit diffs.
- * @returns {Promise<{ files: Array, base: string, head: string, status?: string, aheadBy?: number, behindBy?: number, totalCommits?: number }>}
- */
 async function fetchCompareFiles(owner, repo, base, head, fetchImpl, token = null, options = {}) {
   const ctx = normalizeApiCtx(options?.ctx);
-  const o = String(owner || '').trim();
-  const r = String(repo || '').trim();
-  const b = String(base || '').trim();
-  const h = String(head || '').trim();
+  const o = String(owner || "").trim();
+  const r = String(repo || "").trim();
+  const b = String(base || "").trim();
+  const h = String(head || "").trim();
   if (!o || !r || !b || !h) {
-    throw new Error('owner, repo, base, and head are required for compare');
+    throw new Error("owner, repo, base, and head are required for compare");
   }
-  const gitattributesText = String(options.gitattributesText || '');
+  const gitattributesText = String(options.gitattributesText || "");
   const url = githubRestUrl(`/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/compare/${encodeURIComponent(b)}...${encodeURIComponent(h)}`, ctx);
   const data = await apiJson(url, fetchImpl, token);
   const files = mapAndAnnotateFiles(data?.files || [], gitattributesText);
@@ -4957,10 +3669,9 @@ async function fetchCompareFiles(owner, repo, base, head, fetchImpl, token = nul
     aheadBy: data?.ahead_by ?? null,
     behindBy: data?.behind_by ?? null,
     totalCommits: data?.total_commits ?? (Array.isArray(data?.commits) ? data.commits.length : null),
-    truncated: Boolean(data?.files && data.files.length >= 300),
+    truncated: Boolean(data?.files && data.files.length >= 300)
   };
 }
-
 const fetchApi = {
   normalizeApiCtx,
   mapApiPullRequest,
@@ -5049,12 +3760,12 @@ const fetchApi = {
   fetchViewerLogin,
   apiJson,
   apiSend,
-  apiGraphql,
+  apiGraphql
 };
-
-if (typeof module !== 'undefined' && module.exports) {
+if (typeof module !== "undefined" && module.exports) {
   module.exports = fetchApi;
 }
-if (typeof globalThis !== 'undefined') {
+if (typeof globalThis !== "undefined") {
   globalThis.PRTreeFetch = fetchApi;
 }
+

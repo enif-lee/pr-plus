@@ -1,0 +1,20 @@
+/**
+ * Residual ThreadGapBanner — flex line hairline needs border-top token.
+ * Layout/actions prefer Tailwind on ThreadGapBanner.tsx.
+ */
+
+.prp-timeline-gap__line {
+  flex: 1 1 auto;
+  height: 0;
+  border-top: 1px solid var(--prp-border-muted, var(--prp-border));
+  min-width: 24px;
+}
+
+.prp-timeline-gap__load:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.prp-timeline-gap__load:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}

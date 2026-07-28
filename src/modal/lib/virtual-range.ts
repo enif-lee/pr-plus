@@ -23,7 +23,11 @@ export function calculateVisibleRange(opts) {
   const rowHeight = Math.max(1, Number(opts.rowHeight) || 1);
   const viewportHeight = Math.max(0, Number(opts.viewportHeight) || 0);
   const scrollTop = Math.max(0, Number(opts.scrollTop) || 0);
-  const overscan = Math.max(0, Number(opts.overscan) ?? 5);
+  const overscanRaw = Number(opts.overscan);
+  const overscan = Math.max(
+    0,
+    Number.isFinite(overscanRaw) ? overscanRaw : 5
+  );
   const offsets = Array.isArray(opts.offsets) ? opts.offsets : null;
 
   // Variable-height path when prefix offsets provided (length totalRows+1)

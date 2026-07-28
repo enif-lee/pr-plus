@@ -1,0 +1,937 @@
+/**
+ * Residual CSS (cannot fully express via Tailwind utilities).
+ * Colocated next to owning domain; imported from styles/index.css.
+ * Migrated from styles/parts/06-legacy-class-aliases-used-by-commits-asi.css
+ */
+
+/* Legacy class aliases used by commits aside / residual markup */
+.prp-timeline__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+/* Compact commit timeline (aside) — rail + dots share one center axis.
+   Scroll lives on an outer wrapper so the absolute rail tracks full content height
+   (overflow:auto on the same element as ::before only covers the viewport). */
+.prp-commit-timeline-scroll {
+  max-height: 280px;
+  overflow: auto;
+  min-height: 0;
+}
+
+.prp-commit-timeline {
+  --prp-tl-gutter: 16px;
+  --prp-tl-dot: 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+/* Full-height rail through all commits (not just visible scrollport) */
+.prp-commit-timeline::before {
+  content: '';
+  position: absolute;
+  left: calc(var(--prp-tl-gutter) / 2);
+  top: calc(6px + 3px + var(--prp-tl-dot) / 2);
+  bottom: calc(10px + 3px + var(--prp-tl-dot) / 2);
+  width: 2px;
+  transform: translateX(-50%);
+  background: var(--prp-border-muted);
+  border-radius: 1px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Per-item segment as backup (covers multi-line gaps between dots) */
+.prp-commit-timeline__item:not(.prp-commit-timeline__item--last)::after {
+  content: '';
+  position: absolute;
+  left: calc(var(--prp-tl-gutter) / 2);
+  top: calc(6px + 3px + var(--prp-tl-dot));
+  bottom: 0;
+  width: 2px;
+  transform: translateX(-50%);
+  background: var(--prp-border-muted);
+  border-radius: 1px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.prp-commit-timeline__item {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--prp-tl-gutter) minmax(0, 1fr);
+  column-gap: 10px;
+  padding: 6px 0 10px;
+  font-size: 12px;
+  align-items: start;
+}
+
+.prp-commit-timeline__dot {
+  width: var(--prp-tl-dot);
+  height: var(--prp-tl-dot);
+  box-sizing: border-box;
+  /* Align with first text line (~12px * 1.35 ≈ 16px → center at 8px) */
+  margin: 3px 0 0;
+  border-radius: 50%;
+  background: var(--prp-bg);
+  border: 2px solid var(--prp-accent);
+  z-index: 1;
+  justify-self: center;
+  align-self: start;
+  position: relative;
+}
+
+.prp-commit-timeline__body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.prp-commit-timeline__msg {
+  color: var(--prp-fg);
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.prp-commit-timeline__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  color: var(--prp-fg-muted);
+  font-size: 11px;
+  align-items: center;
+}
+
+.prp-commit-timeline__sha {
+  font-family: var(--prp-mono);
+  color: var(--prp-accent);
+  font-size: 11px;
+}
+
+.prp-aside-overflow {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--prp-fg-muted);
+}
+.prp-aside-overflow--btn {
+  appearance: none;
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 11px;
+  color: var(--prp-accent);
+  text-align: left;
+  cursor: pointer;
+}
+.prp-aside-overflow--btn:hover:not(:disabled),
+.prp-aside-overflow--btn:focus-visible:not(:disabled) {
+  text-decoration: underline;
+}
+.prp-aside-overflow--btn:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+.prp-aside-search {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 8px;
+  padding: 5px 8px;
+  border: 1px solid var(--prp-border-muted);
+  border-radius: 6px;
+  background: var(--prp-bg);
+  color: var(--prp-fg);
+  font: inherit;
+  font-size: 12px;
+}
+.prp-aside-search:focus {
+  outline: none;
+  border-color: var(--prp-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--prp-accent) 18%, transparent);
+}
+.prp-aside-tags {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 220px;
+  overflow: auto;
+  font-size: 12px;
+}
+.prp-aside-tags__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 3px 0;
+}
+.prp-aside-tags__name {
+  font-family: var(--prp-mono);
+  font-size: 12px;
+  color: var(--prp-accent);
+}
+.prp-aside-tags__sha {
+  font-family: var(--prp-mono);
+  font-size: 11px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.prp-aside-projects__item,
+.prp-aside-dev__item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  padding: 2px 0;
+  font-size: 12px;
+}
+.prp-aside-projects__num {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.prp-aside-dev__hint {
+  margin: 0 0 8px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.prp-aside-dev__title {
+  color: var(--prp-fg);
+  font-weight: 400;
+}
+.prp-aside-dev__state {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--prp-fg-muted);
+}
+.prp-aside-dev__state--open {
+  color: var(--prp-ok, #1a7f37);
+}
+.prp-aside-dev__state--closed {
+  color: var(--prp-fg-muted);
+}
+
+/* Development: badge list (#number title) + same-tab / new-tab actions */
+.prp-aside-dev--badges {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.prp-aside-dev__badge-item {
+  min-width: 0;
+  max-width: 100%;
+}
+.prp-aside-dev__badge {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px 4px 2px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--prp-border-muted);
+  background: var(--prp-bg-muted);
+  color: var(--prp-fg);
+  font-size: 12px;
+  line-height: 1.3;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.prp-aside-dev__badge:hover {
+  border-color: color-mix(in srgb, var(--prp-accent) 45%, var(--prp-border-muted));
+  background: color-mix(in srgb, var(--prp-accent) 8%, var(--prp-bg-muted));
+}
+.prp-aside-dev__badge--open {
+  color: var(--prp-ok, #1a7f37);
+  background: var(--prp-add-bg, #dafbe1);
+  border-color: color-mix(in srgb, var(--prp-ok, #1a7f37) 35%, transparent);
+}
+.prp-aside-dev__badge--open:hover {
+  border-color: color-mix(in srgb, var(--prp-ok, #1a7f37) 55%, transparent);
+  background: color-mix(in srgb, var(--prp-ok, #1a7f37) 14%, var(--prp-bg));
+}
+.prp-aside-dev__badge--muted {
+  color: var(--prp-fg-muted);
+}
+.prp-aside-dev__badge-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 auto;
+  padding: 2px 4px 2px 0;
+  color: inherit;
+  text-decoration: none;
+  overflow: hidden;
+}
+.prp-aside-dev__badge-main:hover {
+  text-decoration: none;
+}
+.prp-aside-dev__badge-num {
+  flex-shrink: 0;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--prp-accent, #0969da);
+}
+.prp-aside-dev__badge--open .prp-aside-dev__badge-num {
+  color: var(--prp-ok, #1a7f37);
+}
+.prp-aside-dev__badge-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+  color: var(--prp-fg);
+}
+.prp-aside-dev__badge--muted .prp-aside-dev__badge-title {
+  color: var(--prp-fg-muted);
+}
+.prp-aside-dev__badge-ext {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  color: var(--prp-fg-muted);
+  text-decoration: none;
+  line-height: 0;
+}
+.prp-aside-dev__badge-ext:hover,
+.prp-aside-dev__badge-ext:focus-visible {
+  color: var(--prp-accent);
+  background: color-mix(in srgb, var(--prp-accent) 12%, transparent);
+  outline: none;
+}
+.prp-aside-dev__badge-ext-icon {
+  display: block;
+}
+
+.prp-aside-compact__dev,
+.prp-aside-compact__projects {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+.prp-aside-compact__dev-item,
+.prp-aside-compact__project-item {
+  position: relative;
+  display: inline-flex;
+  max-width: 100%;
+  min-width: 0;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--prp-border-muted);
+  background: var(--prp-bg-muted);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--prp-fg-muted);
+  cursor: default;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prp-sselect-item--create {
+  border-top: 1px solid var(--prp-border-muted);
+  color: var(--prp-accent);
+  font-weight: 600;
+}
+.prp-milestone-chip {
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--prp-border-muted);
+  background: var(--prp-bg-muted);
+  font-size: 12px;
+  max-width: 100%;
+}
+.prp-milestone-chip__title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.prp-milestone-chip__num {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Nested file tree (aside, compact) */
+.prp-aside-tree {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 260px;
+  overflow: auto;
+  font-size: 12px;
+}
+
+.prp-aside-tree__row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.prp-aside-tree__item {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  font-size: 12px;
+  cursor: default;
+  border-radius: 6px;
+  min-width: 0;
+}
+
+.prp-aside-tree__dir {
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.prp-aside-tree__dir:hover {
+  background: color-mix(in srgb, var(--prp-accent) 10%, transparent);
+}
+
+.prp-aside-tree__name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--prp-mono);
+  font-size: 11.5px;
+}
+
+.prp-aside-tree__stat {
+  flex: 0 0 auto;
+  color: var(--prp-fg-muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.prp-aside-tree__chev {
+  width: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--prp-fg-muted);
+  flex: 0 0 auto;
+}
+
+.prp-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.prp-composer {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.prp-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--prp-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  resize: vertical;
+  min-height: 72px;
+  background: var(--prp-bg);
+  color: var(--prp-fg);
+}
+
+.prp-composer__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Legacy inline action copy — kept for any residual class refs; prefer toast */
+.prp-action-msg,
+.prp-action-inline {
+  display: none;
+}
+
+/* Top-center pill toast for action results ("Code copied", …) */
+.prp-action-toast {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  z-index: 80;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  max-width: min(420px, calc(100% - 32px));
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--prp-border);
+  background: color-mix(in srgb, var(--prp-accent) 12%, var(--prp-bg));
+  color: var(--prp-fg);
+  font-family: var(--prp-font);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: 0.01em;
+  box-shadow: 0 6px 18px rgba(1, 4, 9, 0.12);
+  pointer-events: none;
+  transform: translateX(-50%) translateY(-6px);
+  opacity: 0;
+  transition:
+    opacity 160ms ease,
+    transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.prp-action-toast--in {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+.prp-action-toast--out {
+  opacity: 0;
+  transform: translateX(-50%) translateY(-6px);
+}
+.prp-action-toast__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prp-action-toast--ok {
+  border-color: color-mix(in srgb, var(--prp-ok) 35%, var(--prp-border));
+  background: color-mix(in srgb, var(--prp-ok) 14%, var(--prp-bg));
+  color: var(--prp-fg);
+}
+.prp-action-toast--error {
+  border-color: color-mix(in srgb, var(--prp-danger) 35%, var(--prp-border));
+  background: color-mix(in srgb, var(--prp-danger) 12%, var(--prp-bg));
+  color: var(--prp-fg);
+}
+.prp-action-toast--neutral {
+  border-color: var(--prp-border);
+  background: color-mix(in srgb, var(--prp-accent) 10%, var(--prp-bg));
+}
+
+/* Bottom-center floating HUD: black bg + white text (fire or Opt-alone held) */
+.prp-shortcut-monitor {
+  position: absolute;
+  left: 50%;
+  bottom: 20px;
+  z-index: 90;
+  max-width: min(360px, calc(100% - 28px));
+  pointer-events: none;
+  font-family: var(--prp-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  transform: translateX(-50%) translateY(6px);
+  opacity: 0;
+  transition:
+    opacity 200ms ease,
+    transform 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.prp-shortcut-monitor--in {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+.prp-shortcut-monitor--out {
+  opacity: 0;
+  transform: translateX(-50%) translateY(6px);
+}
+.prp-shortcut-monitor__line {
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: #0d1117;
+  color: #f0f6fc;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  box-shadow: 0 4px 16px rgba(1, 4, 9, 0.35);
+  border: 1px solid rgba(240, 246, 252, 0.12);
+}
+.prp-shortcut-monitor--held .prp-shortcut-monitor__line {
+  font-weight: 500;
+}
+.prp-shortcut-monitor--fire .prp-shortcut-monitor__line {
+  font-weight: 650;
+}
+
+.prp-mt-2 {
+  margin-top: 10px;
+}
+
+.prp-checks-summary {
+  margin-bottom: 10px;
+}
+
+/* Markdown — match GitHub body text (~14px / 1.5).
+ * Own formatting context so parent text-align/flex centering cannot
+ * reflow badges / paragraphs (priority imgs used to sit dead-center). */
+.prp-md {
+  font-size: 14px;
+  line-height: 1.5;
+  /* break-word only — "anywhere" was soft-wrapping long tokens inside fenced code */
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  color: var(--prp-fg);
+  min-width: 0;
+  max-width: 100%;
+  text-align: start;
+  /* Establish BFC — parent flex/grid alignment stops affecting inners */
+  display: flow-root;
+}
+
+/* Compact = denser vertical rhythm only (same font size as body) */
+.prp-md--compact {
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.prp-md p {
+  margin: 0 0 0.75em;
+  text-align: start;
+}
+
+.prp-md--compact p {
+  margin: 0 0 0.55em;
+}
+
+.prp-md p:last-child {
+  margin-bottom: 0;
+}
+
+/*
+ * Markdown images:
+ * - Default inline-block + start-aligned (P1/P2 priority badges, icons).
+ * - Never margin:auto — that centered every sole <p><img></p> badge.
+ * - Sole paragraph images still block for screenshots, but left-aligned.
+ * - Image + sibling text share a flex row so badge/text are vertically centered.
+ */
+.prp-md img {
+  display: inline-block;
+  vertical-align: middle;
+  max-width: 100%;
+  height: auto;
+  margin: 0.1em 0.35em 0.1em 0;
+  border-radius: 6px;
+  cursor: zoom-in;
+}
+/* Badge/icon + title/body on one line — true vertical center */
+.prp-md p:has(> img):has(> :not(img)),
+.prp-md p:has(> img):not(:has(> img:only-child)) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 0.4em;
+  row-gap: 0.15em;
+}
+.prp-md p:has(> img):has(> :not(img)) > img,
+.prp-md p:has(> img):not(:has(> img:only-child)) > img {
+  margin: 0;
+  flex: 0 0 auto;
+  align-self: center;
+}
+.prp-md p > img:only-child {
+  display: block;
+  margin: 0.5em 0;
+  /* keep start edge; do not center */
+  margin-inline: 0;
+  max-width: 100%;
+}
+
+
+.prp-md h1,
+.prp-md h2,
+.prp-md h3,
+.prp-md h4 {
+  margin: 1em 0 0.5em;
+  line-height: 1.25;
+  font-weight: 600;
+}
+
+.prp-md h1 {
+  font-size: 1.5em;
+}
+.prp-md h2 {
+  font-size: 1.25em;
+  border-bottom: 1px solid var(--prp-border-muted);
+  padding-bottom: 0.3em;
+}
+.prp-md h3 {
+  font-size: 1.1em;
+}
+
+.prp-md ul,
+.prp-md ol {
+  margin: 0.5em 0 0.75em;
+  padding-left: 2em;
+}
+
+/* Inline codespan — light chip (not a full code box) */
+.prp-md :not(pre) > code {
+  font-family: var(--prp-mono);
+  font-size: 0.875em;
+  padding: 0.15em 0.4em;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--prp-fg-muted) 12%, var(--prp-bg));
+  border: 0;
+  display: inline;
+  white-space: break-spaces;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+/* Fenced / indented block code — preserve newlines; scroll horizontally */
+.prp-md pre {
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 12px 14px;
+  border-radius: 6px;
+  background: var(--prp-bg-muted);
+  border: 1px solid var(--prp-border-muted);
+  margin: 0.6em 0;
+  display: block;
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre;
+  word-break: normal;
+  overflow-wrap: normal;
+  word-wrap: normal;
+  tab-size: 2;
+}
+
+.prp-md pre code,
+.prp-md pre.prp-md-code code {
+  border: 0 !important;
+  padding: 0 !important;
+  margin: 0;
+  background: transparent !important;
+  display: block;
+  width: max-content;
+  min-width: 100%;
+  white-space: pre !important;
+  word-break: normal !important;
+  overflow-wrap: normal !important;
+  word-wrap: normal !important;
+  font-size: inherit;
+  font-family: var(--prp-mono);
+  line-height: inherit;
+}
+
+/* Fenced blocks with syntax highlight (hljs token spans) */
+.prp-md pre.prp-md-code code.hljs {
+  color: inherit;
+}
+
+.prp-md a {
+  color: var(--prp-accent);
+}
+
+.prp-md blockquote {
+  margin: 0.6em 0;
+  padding: 0 1em;
+  border-left: 0.25em solid var(--prp-border);
+  color: var(--prp-fg-muted);
+}
+
+.prp-md table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.6em 0;
+  font-size: 14px;
+}
+
+.prp-md th,
+.prp-md td {
+  border: 1px solid var(--prp-border);
+  padding: 6px 13px;
+}
+
+/* Diff layout — fills modal shell (viewport-sized)
+   flex row: [file nav | resizer | pane]; open/close animates nav width */
+.prp-diff-layout {
+  --prp-file-nav-width: 260px;
+  --prp-file-nav-resizer: 4px;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  /* Panel fade handles enter; avoid double animation on keep-alive remount */
+}
+
+.prp-diff-layout--nav-collapsed {
+  /* width vars driven inline to 0; transitions live on children */
+}
+
+.prp-file-nav-resizer {
+  position: relative;
+  z-index: 2;
+  flex: 0 0 var(--prp-file-nav-resizer, 4px);
+  width: var(--prp-file-nav-resizer, 4px);
+  min-width: 0;
+  cursor: col-resize;
+  touch-action: none;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  outline: none;
+  opacity: 1;
+  transition:
+    flex-basis 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    width 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 160ms ease;
+}
+.prp-file-nav-resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: var(--prp-border-muted);
+  transition: opacity 160ms ease;
+}
+.prp-file-nav-resizer:hover::after,
+.prp-file-nav-resizer:focus-visible::after {
+  width: 2px;
+  background: var(--prp-accent);
+}
+.prp-file-nav-resizer[data-collapsed='1'] {
+  cursor: default;
+  pointer-events: none;
+  opacity: 0;
+}
+.prp-file-nav-resizer[data-collapsed='1']::after {
+  opacity: 0;
+}
+
+.prp-filetree {
+  /* Match Diff toolbar control height (search, step-nav, filter chips) */
+  --prp-filetree-ctrl-h: var(--prp-diff-ctrl-h, 28px);
+  flex: 0 0 var(--prp-file-nav-width, 260px);
+  width: var(--prp-file-nav-width, 260px);
+  border-right: 1px solid var(--prp-border-muted);
+  background: var(--prp-bg-muted);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  opacity: 1;
+  transition:
+    flex-basis 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    width 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 160ms ease,
+    border-color 160ms ease;
+}
+
+.prp-filetree--nav-collapsed,
+.prp-diff-layout--nav-collapsed .prp-filetree {
+  opacity: 0;
+  border-right-color: transparent;
+  pointer-events: none;
+}
+
+.prp-filetree--collapsed {
+  border-right: 1px solid var(--prp-border-muted);
+  align-items: center;
+  padding: 8px 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .prp-filetree,
+  .prp-file-nav-resizer {
+    transition: none;
+  }
+}
+
+.prp-filetree__rail-toggle,
+.prp-filetree__collapse-nav {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--prp-border);
+  border-radius: 6px;
+  background: var(--prp-bg);
+  color: var(--prp-fg-muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.prp-filetree__rail-toggle:hover,
+.prp-filetree__rail-toggle:focus-visible,
+.prp-filetree__collapse-nav:hover,
+.prp-filetree__collapse-nav:focus-visible {
+  color: var(--prp-accent);
+  border-color: var(--prp-accent);
+  outline: none;
+}
+
+.prp-filetree__search {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--prp-border-muted);
+  flex: 0 0 auto;
+  min-width: 0;
+}
+

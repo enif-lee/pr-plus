@@ -1,4 +1,3 @@
-// @ts-nocheck — gradual TS migration of classic extension scripts
 /**
  * PAT storage helpers.
  *
@@ -40,7 +39,7 @@ const DEFAULT_PREFS = {
   singleFileMode: false,
 };
 
-function getStorageArea(storageApi = globalThis.chrome?.storage?.local) {
+function getStorageArea(storageApi: any = (globalThis as any).chrome?.storage?.local) {
   return storageApi || null;
 }
 
@@ -54,7 +53,7 @@ function getStorageArea(storageApi = globalThis.chrome?.storage?.local) {
  *   singleFileMode: boolean,
  * }}
  */
-function normalizePrefs(raw) {
+function normalizePrefs(raw: any) {
   const src = raw && typeof raw === 'object' ? raw : {};
 
   return {
@@ -81,7 +80,7 @@ function normalizePrefs(raw) {
  * @param {unknown} raw
  * @returns {{ host: string, token: string }[]}
  */
-function normalizeHostAccounts(raw) {
+function normalizeHostAccounts(raw: any) {
   if (globalThis.PRGithubEndpoints?.normalizeHostAccounts) {
     return globalThis.PRGithubEndpoints.normalizeHostAccounts(raw);
   }
@@ -113,9 +112,9 @@ function normalizeHostAccounts(raw) {
  * @param {unknown} [storageApi]
  * @returns {Promise<{ fastReview: boolean, reverseComments: boolean, autoOpenEmbed: boolean, singleFileMode: boolean }>}
  */
-function getExtensionPrefs(storageApi) {
+function getExtensionPrefs(storageApi: any) {
   const area = getStorageArea(storageApi);
-  if (!area) return Promise.resolve({ ...DEFAULT_PREFS });
+  if (!area) return Promise.resolve({ ...(DEFAULT_PREFS as any) });
 
   return new Promise((resolve) => {
     area.get([PREFS_KEY], (result) => {
@@ -129,19 +128,19 @@ function getExtensionPrefs(storageApi) {
  * @param {Partial<{ fastReview: boolean, reverseComments: boolean, autoOpenEmbed: boolean, singleFileMode: boolean }>} patch
  * @param {unknown} [storageApi]
  */
-async function setExtensionPrefs(patch, storageApi) {
+async function setExtensionPrefs(patch: any, storageApi: any) {
   const area = getStorageArea(storageApi);
   if (!area) return Promise.reject(new Error('chrome.storage unavailable'));
 
   const prev = await getExtensionPrefs(area);
   const next = normalizePrefs({
-    ...prev,
+    ...(prev as any),
     ...(patch && typeof patch === 'object' ? patch : {}),
   });
 
   return new Promise((resolve, reject) => {
     area.set({ [PREFS_KEY]: next }, () => {
-      const err = globalThis.chrome?.runtime?.lastError;
+      const err = (globalThis as any).chrome?.runtime?.lastError;
       if (err) reject(err);
       else resolve(next);
     });
@@ -153,7 +152,7 @@ async function setExtensionPrefs(patch, storageApi) {
  * @param {(prefs: { fastReview: boolean, reverseComments: boolean, autoOpenEmbed: boolean, singleFileMode: boolean }) => void} onChange
  * @param {unknown} [storageApi]
  */
-function watchExtensionPrefs(onChange, storageApi = globalThis.chrome?.storage) {
+function watchExtensionPrefs(onChange: any, storageApi: any = (globalThis as any).chrome?.storage) {
   if (!storageApi?.onChanged || typeof onChange !== 'function') return () => {};
 
   const listener = (changes, areaName) => {
@@ -166,7 +165,7 @@ function watchExtensionPrefs(onChange, storageApi = globalThis.chrome?.storage) 
 }
 
 /** Mask for UI — keep only last 4 chars (no usable prefix leak). */
-function maskGithubToken(token) {
+function maskGithubToken(token: any) {
   if (!token || typeof token !== 'string') return '';
   const trimmed = token.trim();
   if (!trimmed) return '';
@@ -178,7 +177,7 @@ function maskGithubToken(token) {
  * Looks like a GitHub PAT (classic ghp_/gho_/… or fine-grained github_pat_).
  * Rejects obvious garbage; does not guarantee validity.
  */
-function looksLikeGithubToken(token) {
+function looksLikeGithubToken(token: any) {
   if (typeof token !== 'string') return false;
   const t = token.trim();
   // Classic PATs ~40+, fine-grained often 80–255; allow a wide band.
@@ -188,7 +187,7 @@ function looksLikeGithubToken(token) {
   return /^(gh[pours]_|github_pat_)[A-Za-z0-9_]+$/.test(t);
 }
 
-function getGithubToken(storageApi) {
+function getGithubToken(storageApi: any) {
   const area = getStorageArea(storageApi);
   if (!area) return Promise.resolve(null);
 
@@ -200,7 +199,7 @@ function getGithubToken(storageApi) {
   });
 }
 
-async function getGithubTokenStatus(storageApi) {
+async function getGithubTokenStatus(storageApi: any) {
   const token = await getGithubToken(storageApi);
   if (!token) {
     return { configured: false, mask: '' };
@@ -208,7 +207,7 @@ async function getGithubTokenStatus(storageApi) {
   return { configured: true, mask: maskGithubToken(token) };
 }
 
-function setGithubToken(token, storageApi) {
+function setGithubToken(token: any, storageApi: any) {
   const area = getStorageArea(storageApi);
   if (!area) return Promise.reject(new Error('chrome.storage unavailable'));
 
@@ -216,7 +215,7 @@ function setGithubToken(token, storageApi) {
   return new Promise((resolve, reject) => {
     if (!value) {
       area.remove([TOKEN_KEY], () => {
-        const err = globalThis.chrome?.runtime?.lastError;
+        const err = (globalThis as any).chrome?.runtime?.lastError;
         if (err) reject(err);
         else resolve(false);
       });
@@ -233,14 +232,14 @@ function setGithubToken(token, storageApi) {
     }
 
     area.set({ [TOKEN_KEY]: value }, () => {
-      const err = globalThis.chrome?.runtime?.lastError;
+      const err = (globalThis as any).chrome?.runtime?.lastError;
       if (err) reject(err);
       else resolve(true);
     });
   });
 }
 
-function watchGithubToken(onChange, storageApi = globalThis.chrome?.storage) {
+function watchGithubToken(onChange: any, storageApi: any = (globalThis as any).chrome?.storage) {
   if (!storageApi?.onChanged) return () => {};
 
   const listener = (changes, areaName) => {
@@ -258,7 +257,7 @@ function watchGithubToken(onChange, storageApi = globalThis.chrome?.storage) {
  * @param {unknown} [storageApi]
  * @returns {Promise<{ host: string, token: string }[]>}
  */
-function getHostAccounts(storageApi) {
+function getHostAccounts(storageApi: any) {
   const area = getStorageArea(storageApi);
   if (!area) return Promise.resolve([]);
 
@@ -274,11 +273,12 @@ function getHostAccounts(storageApi) {
  * @param {unknown} [storageApi]
  * @returns {Promise<string[]>}
  */
-async function getHostAccountHosts(storageApi) {
+async function getHostAccountHosts(storageApi: any) {
   const accounts = await getHostAccounts(storageApi);
   if (globalThis.PRGithubEndpoints?.hostsFromAccounts) {
     return globalThis.PRGithubEndpoints.hostsFromAccounts(accounts);
   }
+  // @ts-expect-error classic content-script dynamic shapes
   return accounts.map((a) => a.host);
 }
 
@@ -287,8 +287,9 @@ async function getHostAccountHosts(storageApi) {
  * @param {unknown} [storageApi]
  * @returns {Promise<{ host: string, mask: string }[]>}
  */
-async function getHostAccountsPublic(storageApi) {
+async function getHostAccountsPublic(storageApi: any) {
   const accounts = await getHostAccounts(storageApi);
+  // @ts-expect-error classic content-script dynamic shapes
   return accounts.map((a) => ({
     host: a.host,
     mask: maskGithubToken(a.token),
@@ -301,7 +302,7 @@ async function getHostAccountsPublic(storageApi) {
  * @param {unknown} [storageApi]
  * @returns {Promise<{ host: string, token: string }[]>}
  */
-async function setHostAccounts(accounts, storageApi) {
+async function setHostAccounts(accounts: any, storageApi: any) {
   const area = getStorageArea(storageApi);
   if (!area) return Promise.reject(new Error('chrome.storage unavailable'));
 
@@ -309,14 +310,14 @@ async function setHostAccounts(accounts, storageApi) {
   return new Promise((resolve, reject) => {
     if (!next.length) {
       area.remove([HOST_ACCOUNTS_KEY], () => {
-        const err = globalThis.chrome?.runtime?.lastError;
+        const err = (globalThis as any).chrome?.runtime?.lastError;
         if (err) reject(err);
         else resolve([]);
       });
       return;
     }
     area.set({ [HOST_ACCOUNTS_KEY]: next }, () => {
-      const err = globalThis.chrome?.runtime?.lastError;
+      const err = (globalThis as any).chrome?.runtime?.lastError;
       if (err) reject(err);
       else resolve(next);
     });
@@ -330,7 +331,7 @@ async function setHostAccounts(accounts, storageApi) {
  * @param {unknown} [storageApi]
  * @returns {Promise<{ ok: true, accounts: {host:string,token:string}[] } | { ok: false, error: string, accounts: {host:string,token:string}[] }>}
  */
-async function registerHostAccount(host, token, storageApi) {
+async function registerHostAccount(host: any, token: any, storageApi: any) {
   const existing = await getHostAccounts(storageApi);
   const t = typeof token === 'string' ? token.trim() : '';
   if (t && !looksLikeGithubToken(t)) {
@@ -367,7 +368,9 @@ async function registerHostAccount(host, token, storageApi) {
         accounts: existing,
       };
     } else if (
+  // @ts-expect-error classic content-script dynamic shapes
       !existing.some((a) => a.host === h) &&
+  // @ts-expect-error classic content-script dynamic shapes
       existing.length >= 3
     ) {
       result = {
@@ -376,11 +379,13 @@ async function registerHostAccount(host, token, storageApi) {
         accounts: existing,
       };
     } else {
+  // @ts-expect-error classic content-script dynamic shapes
       const idx = existing.findIndex((a) => a.host === h);
       const next =
         idx >= 0
+  // @ts-expect-error classic content-script dynamic shapes
           ? existing.map((a, i) => (i === idx ? { host: h, token: t } : a))
-          : [...existing, { host: h, token: t }];
+          : [...(existing as any), { host: h, token: t }];
       result = { ok: true, accounts: next };
     }
   }
@@ -393,7 +398,7 @@ async function registerHostAccount(host, token, storageApi) {
  * @param {unknown} host
  * @param {unknown} [storageApi]
  */
-async function unregisterHostAccount(host, storageApi) {
+async function unregisterHostAccount(host: any, storageApi: any) {
   const existing = await getHostAccounts(storageApi);
   let next;
   if (globalThis.PRGithubEndpoints?.unregisterHostAccount) {
@@ -407,6 +412,7 @@ async function unregisterHostAccount(host, storageApi) {
       .toLowerCase()
       .replace(/^https?:\/\//, '')
       .replace(/\/.*$/, '');
+  // @ts-expect-error classic content-script dynamic shapes
     next = existing.filter((a) => a.host !== h);
   }
   const saved = await setHostAccounts(next, storageApi);
@@ -423,7 +429,7 @@ async function unregisterHostAccount(host, storageApi) {
  * @param {unknown} [storageApi]
  * @returns {Promise<{ token: string|null, source: 'default'|'host'|null, host: string }>}
  */
-async function getTokenForWebHost(webHost, storageApi) {
+async function getTokenForWebHost(webHost: any, storageApi: any) {
   const [defaultToken, hostAccounts] = await Promise.all([
     getGithubToken(storageApi),
     getHostAccounts(storageApi),
@@ -450,6 +456,7 @@ async function getTokenForWebHost(webHost, storageApi) {
       host: host === 'github.com' || host === 'www.github.com' ? 'github.com' : host,
     };
   }
+  // @ts-expect-error classic content-script dynamic shapes
   const pair = hostAccounts.find((a) => a.host === host);
   if (pair) return { token: pair.token, source: 'host', host };
   return { token: null, source: null, host };
