@@ -87,7 +87,7 @@
 .prp-tip-pop--portal.prp-tip-pop--visible[data-placement='right'] {
   transform: translate(0, -50%);
 }
-/* Legacy in-tree absolute tips (fallback if not portaled) */
+/* In-tree absolute tips (fallback if not portaled) */
 .prp-tip-pop:not(.prp-tip-pop--portal),
 .prp-btn__tip-pop,
 .prp-btn__shortcut-pop {
@@ -240,7 +240,7 @@
   opacity: 0.85;
 }
 .prp-btn__kbd {
-  display: none; /* legacy permanent badges off */
+  display: none; /* permanent badges off */
 }
 
 /* Subscribe: muted/slash when on; normal outline bell when off */
@@ -863,7 +863,7 @@ a.prp-branch-tag__text:focus-visible {
   color: var(--prp-fg);
   background: var(--prp-bg-muted);
 }
-/* legacy class names (unused) */
+/* older class names (unused) */
 .prp-selection-island__meta,
 .prp-selection-island__flash,
 .prp-selection-island--actions,

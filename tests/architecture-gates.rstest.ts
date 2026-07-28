@@ -104,7 +104,7 @@ describe('architecture gates', () => {
       const js = path.join(root, `src/${name}.js`);
       if (!fs.existsSync(js)) continue;
       const head = read(`src/${name}.js`).slice(0, 400);
-      // Accept either generated header or legacy hand file during transition
+      // Accept generated header or transitional hand-authored content entry
       expect(
         /AUTO-GENERATED|SOURCE OF TRUTH|@ts-nocheck|Pure PR tree|Content script/.test(
           head

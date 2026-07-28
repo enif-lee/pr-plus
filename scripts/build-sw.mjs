@@ -2,7 +2,7 @@
  * Bundle the MV3 service worker into a single classic script.
  *
  * Prefers TypeScript sources (background.ts + deps) via esbuild; falls back
- * to legacy JS when a twin has not been migrated yet.
+ * to compiled JS when a twin has not been migrated yet.
  */
 import * as esbuild from 'esbuild';
 import fs from 'node:fs';

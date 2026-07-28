@@ -39,8 +39,9 @@
 @import '../views/diff/InlineReviewThreads.css';
 @import '../views/diff/MultiFileReviewGroup.css';
 @import '../views/diff/LineCommentAffordance.css';
-@import './legacy/back-compat-base.css';
-@import './legacy/class-aliases.css';
+/* Cross-cutting residual (not yet colocated with a single domain) */
+@import './residual/base.css';
+@import './residual/aliases.css';
 
 @tailwind base;
 @tailwind components;

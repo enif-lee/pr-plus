@@ -1,10 +1,9 @@
 /**
- * Residual CSS (cannot fully express via Tailwind utilities).
- * Colocated next to owning domain; imported from styles/index.css.
- * Migrated from styles/parts/06-legacy-class-aliases-used-by-commits-asi.css
+ * Residual class aliases for older class names still referenced in markup.
+ * Prefer new component sibling CSS / Tailwind utilities for new work.
  */
 
-/* Legacy class aliases used by commits aside / residual markup */
+/* Residual class aliases used by commits aside / residual markup */
 .prp-timeline__meta {
   display: flex;
   flex-wrap: wrap;
@@ -491,7 +490,7 @@
   gap: 8px;
 }
 
-/* Legacy inline action copy — kept for any residual class refs; prefer toast */
+/* Residual inline action copy — kept for any residual class refs; prefer toast */
 .prp-action-msg,
 .prp-action-inline {
   display: none;

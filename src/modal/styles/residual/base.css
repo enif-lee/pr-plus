@@ -1,10 +1,9 @@
 /**
- * Residual CSS (cannot fully express via Tailwind utilities).
- * Colocated next to owning domain; imported from styles/index.css.
- * Migrated from styles/parts/02-back-compat-name-used-by-older-tests-doc.css
+ * Residual modal base rules — shared layout chrome not yet colocated
+ * next to a single domain component. Prefer Tailwind + sibling CSS.
+ * SoT entry: styles/index.css imports this after domain siblings.
  */
 
-/* Back-compat name used by older tests / docs */
 @keyframes prp-header-stats-content-in {
   from {
     opacity: 0;
