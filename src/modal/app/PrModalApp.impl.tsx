@@ -27,6 +27,7 @@ import {
   buildMergeConfirmRequest,
   confirmGateProceed,
 } from '../lib/confirm-gate';
+import { canUpdateBranch } from '../lib/merge-box-status';
 import { ConversationView } from '../views/conversation/ConversationView';
 import { DiffWorkspace } from '../views/pr-modal/DiffWorkspace';
 import { ShellResizers } from '../views/pr-modal/ShellResizers';
@@ -5842,6 +5843,11 @@ export function PrModalApp({
 
   async function onUpdateBranch() {
     if (!detail) return;
+    // Same gate as MergeBox CTA / palette — only when head is behind base.
+    if (!canUpdateBranch(detail)) {
+      setActionMsg('Branch is already up to date with base.');
+      return;
+    }
     if (
       !confirmGateProceed(
         await requestConfirm({

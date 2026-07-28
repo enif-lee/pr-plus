@@ -2672,6 +2672,53 @@ async function resolvePrMergeability(
   }
 
   const state = String(out.mergeable_state || '').toLowerCase();
+  // Attach behind_by so the modal can hide "Update branch" when already current.
+  // - behind → known out-of-date (no extra network)
+  // - clean / unstable / has_hooks → current (no update)
+  // - blocked / dirty / unknown → compare base...head for behind_by only
+  try {
+    if (state === 'behind') {
+      out = { ...out, behind_by: Math.max(1, Number(out.behind_by) || 1) };
+    } else if (state === 'clean' || state === 'unstable' || state === 'has_hooks') {
+      out = { ...out, behind_by: 0 };
+    } else {
+      const baseOwner =
+        out.base?.repo?.owner?.login ||
+        String(meta.owner || '').trim() ||
+        '';
+      const baseRepo =
+        out.base?.repo?.name || String(meta.repo || '').trim() || '';
+      const baseRef = String(out.base?.ref || '').trim();
+      const headSha = String(out.head?.sha || '').trim();
+      if (baseOwner && baseRepo && baseRef && headSha) {
+        const cmpUrl = githubRestUrl(
+          `/repos/${encodeURIComponent(baseOwner)}/${encodeURIComponent(baseRepo)}/compare/${encodeURIComponent(baseRef)}...${encodeURIComponent(headSha)}`,
+          apiCtx
+        );
+        const cmp = await timedFetch(
+          timings,
+          'branchBehind',
+          apiJson(cmpUrl, fetchImpl, token),
+          (c) =>
+            `(behind=${c?.behind_by ?? '?'} status=${c?.status || '?'})`
+        );
+        if (cmp && typeof cmp === 'object' && cmp.behind_by != null) {
+          out = { ...out, behind_by: Number(cmp.behind_by) || 0 };
+        }
+      }
+    }
+  } catch (err) {
+    if (
+      err?.name === 'AbortError' ||
+      /aborted|AbortError/i.test(String(err?.message || ''))
+    ) {
+      throw err;
+    }
+    console.log(
+      `[pr-plus] resolvePrMergeability behind_by: soft-fail ${err?.message || err}`
+    );
+  }
+
   const isDirty =
     state === 'dirty' ||
     (out.mergeable === false && state !== 'blocked' && state !== 'clean');
@@ -2958,6 +3005,10 @@ async function fetchPrDetail(
       ? Boolean(subscription.subscribed)
       : null;
   // subscription.viewerSubscription kept for debugging / future UI (IGNORED)
+  const mergeStateStatus =
+    subscription && subscription.mergeStateStatus
+      ? String(subscription.mergeStateStatus)
+      : null;
 
   // Magic links from title/body/branch (body-only tokens e.g. ENG-99 must match)
   const magicLinks = matchAutolinksInText(
@@ -3013,6 +3064,16 @@ async function fetchPrDetail(
     merged: Boolean(pr.merged),
     mergeable: pr.mergeable,
     mergeableState: pr.mergeable_state || null,
+    /** GraphQL mergeStateStatus when available (BEHIND / CLEAN / BLOCKED / …). */
+    mergeStateStatus,
+    /**
+     * How many base commits the head is behind (0 = up to date).
+     * Used to show "Update branch" only when GitHub can actually update.
+     */
+    behindBy:
+      pr.behind_by != null && Number.isFinite(Number(pr.behind_by))
+        ? Number(pr.behind_by)
+        : null,
     /** Paths that appear modified on both base tip and head (conflict candidates). */
     conflictFiles: Array.isArray(pr._conflictFiles) ? pr._conflictFiles : [],
     rebaseable: pr.rebaseable ?? null,
@@ -4569,7 +4630,11 @@ async function fetchPullRequestSubscription(owner: any, repo: any, pullNumber: a
     const data = await apiGraphql(
       `query($id:ID!){
   node(id:$id) {
-    ... on PullRequest { viewerSubscription viewerCanSubscribe }
+    ... on PullRequest {
+      viewerSubscription
+      viewerCanSubscribe
+      mergeStateStatus
+    }
     ... on Issue { viewerSubscription viewerCanSubscribe }
   }
 }`,
@@ -4578,9 +4643,26 @@ async function fetchPullRequestSubscription(owner: any, repo: any, pullNumber: a
       token,
       ctx
     );
-    const vs = data?.node?.viewerSubscription;
-    if (!vs) return null;
-    return mapViewerSubscription(vs);
+    const node = data?.node || null;
+    const vs = node?.viewerSubscription;
+    if (!vs) {
+      // Still surface mergeStateStatus when present
+      if (node?.mergeStateStatus) {
+        return {
+          subscribed: null,
+          mergeStateStatus: String(node.mergeStateStatus || '') || null,
+        };
+      }
+      return null;
+    }
+    const mapped = mapViewerSubscription(vs);
+    if (node?.mergeStateStatus) {
+      return {
+        ...mapped,
+        mergeStateStatus: String(node.mergeStateStatus || '') || null,
+      };
+    }
+    return mapped;
   } catch {
     return null;
   }

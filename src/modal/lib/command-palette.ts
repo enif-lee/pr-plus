@@ -8,6 +8,7 @@
  *   mod+f        → mod+f (Find)
  *   mod+shift+X  → opt+shift+X
  */
+import { canUpdateBranch } from './merge-box-status';
 
 /**
  * @typedef {{
@@ -650,6 +651,7 @@ export function buildPaletteCommands(detail: any, opts: any = {}) {
             .toLowerCase();
           return !(a && v && a === v);
         })();
+  const updateBranchPossible = canUpdateBranch(d);
   const cmds: any[] = [
     {
       id: 'toggle-diff',
@@ -848,14 +850,18 @@ export function buildPaletteCommands(detail: any, opts: any = {}) {
       action: 'mergePr',
       payload: { method: 'rebase' },
     },
-    {
-      id: 'update-branch',
-      title: 'Update branch from base',
-      section: 'Merge',
-      keywords: ['update', 'branch', 'rebase', 'sync'],
-      shortcut: optShortcutForCommandId('update-branch') || 'opt+shift+u',
-      action: 'updateBranch',
-    },
+    ...(updateBranchPossible
+      ? [
+          {
+            id: 'update-branch',
+            title: 'Update branch from base',
+            section: 'Merge',
+            keywords: ['update', 'branch', 'rebase', 'sync'],
+            shortcut: optShortcutForCommandId('update-branch') || 'opt+shift+u',
+            action: 'updateBranch',
+          },
+        ]
+      : []),
     {
       id: 'subscribe',
       title: 'Subscribe to notifications',

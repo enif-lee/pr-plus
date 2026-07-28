@@ -77,6 +77,10 @@ export interface PrDetail {
   merged?: boolean;
   mergeable?: boolean | null;
   mergeableState?: string | null;
+  /** GraphQL mergeStateStatus (BEHIND / CLEAN / BLOCKED / …). */
+  mergeStateStatus?: string | null;
+  /** Base commits the head is behind (0 = current). Gates "Update branch". */
+  behindBy?: number | null;
   /** Dual-modified paths (conflict candidates) when mergeable_state is dirty. */
   conflictFiles?: string[];
   baseRef?: string;

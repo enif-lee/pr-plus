@@ -27,6 +27,8 @@ export const META_KEYS = [
   'merged',
   'mergeable',
   'mergeableState',
+  'mergeStateStatus',
+  'behindBy',
   'conflictFiles',
   'rebaseable',
   'createdAt',

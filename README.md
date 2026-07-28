@@ -183,7 +183,7 @@ Open a PR title from the list → **centered modal** or **side sheet** on the **
 | **Subscribe** | Optimistic GraphQL subscription toggle + header tip states |
 | **Close / reopen** | PR state (close control uses danger styling) |
 | **Merge** | Merge / squash / rebase (when allowed) |
-| **Update branch** | Sync head with base |
+| **Update branch** | Sync head with base — button only when head is **behind** base (`behindBy` / `mergeable_state: behind`) |
 | **Clear local cache** | Popup action to wipe **IndexedDB** detail cache when you need a hard reset |
 
 #### Command palette & shortcuts
