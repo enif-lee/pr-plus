@@ -64,15 +64,31 @@ describe('architecture gates', () => {
   });
 
   test('host/fetch/content-bridge maintainable SoT is TypeScript', () => {
+    const hostDir = path.join(root, 'src/host/modules');
     const hostTs = fs
-      .readdirSync(path.join(root, 'src/host/modules'))
-      .filter((f) => /^\d+.*\.ts$/.test(f));
+      .readdirSync(hostDir)
+      .filter((f) => f.endsWith('.ts') && !f.endsWith('.d.ts'));
+    // Semantic domain modules (no NN- only organization as primary)
     expect(hostTs.length).toBeGreaterThanOrEqual(6);
-    expect(
-      fs
-        .readdirSync(path.join(root, 'src/host/modules'))
-        .filter((f) => /^\d+.*\.js$/.test(f))
-    ).toEqual([]);
+    expect(hostTs.some((f) => /^\d{2}-/.test(f))).toBe(false);
+    expect(hostTs).toEqual(
+      expect.arrayContaining([
+        'host-core-detail-store.ts',
+        'side-fetch-progress-assets.ts',
+        'props-render-session.ts',
+        'open-modal.ts',
+        'restore-embed-list-focus.ts',
+        'list-row-lifecycle.ts',
+        'pulls-palette.ts',
+        'click-intercept.ts',
+      ])
+    );
+    expect(fs.readdirSync(hostDir).filter((f) => f.endsWith('.js'))).toEqual([]);
+    // build-host declares explicit domain order
+    const buildHost = read('scripts/build-host.mjs');
+    expect(buildHost).toMatch(/HOST_MODULE_ORDER/);
+    expect(buildHost).toMatch(/host-core-detail-store\.ts/);
+    expect(buildHost).not.toMatch(/01-state-detail-store/);
     expect(fs.existsSync(path.join(root, 'src/fetch/fetch-api.ts'))).toBe(true);
     expect(fs.existsSync(path.join(root, 'src/content-bridge/bridge-api.ts'))).toBe(true);
     expect(fs.existsSync(path.join(root, 'src/fetch/parts'))).toBe(false);
@@ -324,14 +340,17 @@ describe('architecture gates', () => {
     expect(fs.existsSync(dir)).toBe(true);
     const overs: string[] = [];
     const badStarts: string[] = [];
+    // Semantic domain *.ts modules (exclude ambient .d.ts)
     for (const f of fs
       .readdirSync(dir)
-      .filter((x) => /^\d+.*\.(ts|js)$/.test(x))
+      .filter((x) => x.endsWith('.ts') && !x.endsWith('.d.ts'))
       .sort()) {
       const rel = path.join('src/host/modules', f);
       const body = read(rel);
       const n = body.split(/\r?\n/).length;
       if (n > 1500) overs.push(`${rel}:${n}`);
+      // Numbered-only naming is not the primary organization
+      expect(/^\d{2}-/.test(f)).toBe(false);
       const first = firstCodeLine(body);
       if (
         first &&

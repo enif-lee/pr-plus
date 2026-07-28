@@ -85,10 +85,13 @@ import {
 } from '@common/ConversationKbFocus';
 
 function ConversationViewImpl(props: any) {
+  // Leaf: composer text — typing must not re-render PrModalApp.
+  const storeCommentText = useModalStore((s) => s.commentText);
+  const storeSetCommentText = useModalStore((s) => s.setCommentText);
   const {
     detail,
-    commentText,
-    setCommentText,
+    commentText: commentTextProp,
+    setCommentText: setCommentTextProp,
     actionBusy,
     actionMsg,
     onLeaveReviewAction,
@@ -167,6 +170,10 @@ function ConversationViewImpl(props: any) {
     activeSearchHit = null,
     mentionCandidates = [],
   } = props;
+
+  const commentText =
+    commentTextProp !== undefined ? commentTextProp : storeCommentText;
+  const setCommentText = setCommentTextProp || storeSetCommentText;
 
   const embedScrollChain = isEmbedPresentation(presentation);
   const convRootRef = useRef<HTMLDivElement | null>(null);

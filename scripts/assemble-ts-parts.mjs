@@ -14,22 +14,39 @@ export async function assembleTsParts({
   outFile,
   banner,
   wrap = (body) => body,
+  /** Explicit order of basenames or filenames (preferred for semantic modules). */
+  partsOrder = null,
+  /** Fallback: filter readdir when partsOrder is null. Default: numbered chunks. */
   fileRe = /^\d+.*\.(ts|js)$/,
 }) {
   if (!fs.existsSync(partsDir)) {
     throw new Error(`parts dir missing: ${partsDir}`);
   }
-  const names = fs
-    .readdirSync(partsDir)
-    .filter((f) => fileRe.test(f))
-    .sort();
 
-  const byBase = new Map();
-  for (const f of names) {
-    const base = f.replace(/\.(ts|js)$/, '');
-    if (!byBase.has(base) || f.endsWith('.ts')) byBase.set(base, f);
+  let parts;
+  if (Array.isArray(partsOrder) && partsOrder.length) {
+    parts = partsOrder.map((name) => {
+      const asIs = path.join(partsDir, name);
+      if (fs.existsSync(asIs)) return name;
+      const ts = name.endsWith('.ts') || name.endsWith('.js') ? null : `${name}.ts`;
+      const js = name.endsWith('.ts') || name.endsWith('.js') ? null : `${name}.js`;
+      if (ts && fs.existsSync(path.join(partsDir, ts))) return ts;
+      if (js && fs.existsSync(path.join(partsDir, js))) return js;
+      throw new Error(`partsOrder entry missing: ${name}`);
+    });
+  } else {
+    const names = fs
+      .readdirSync(partsDir)
+      .filter((f) => fileRe.test(f))
+      .sort();
+
+    const byBase = new Map();
+    for (const f of names) {
+      const base = f.replace(/\.(ts|js)$/, '');
+      if (!byBase.has(base) || f.endsWith('.ts')) byBase.set(base, f);
+    }
+    parts = [...byBase.values()].sort();
   }
-  const parts = [...byBase.values()].sort();
   if (!parts.length) throw new Error(`no parts in ${partsDir}`);
 
   const chunks = [];

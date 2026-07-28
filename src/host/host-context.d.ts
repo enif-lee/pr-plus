@@ -39,13 +39,16 @@ export interface HostCurrentSession {
 
 /**
  * Documented host module responsibilities (function-boundary starts only).
+ * Assembly order: scripts/build-host.mjs HOST_MODULE_ORDER.
  *
- * 01-state-detail-store — HOST_ID, current bag, detail-store writers, publish
- * 02-embed-route-progress — embed/route + kickIndependentSideFetches
- * 03-side-fetches-props — side fetch settle + buildProps
- * 04-open-render — openModal / render
- * 05-lifecycle — openPullsListRowAt + lifecycle
- * 06-part — onClickCapture entry
+ * host-core-detail-store — HOST_ID, current bag, detail-store writers, publish
+ * side-fetch-progress-assets — side fetches, progress, assets/cache
+ * props-render-session — buildProps, render, close/session
+ * open-modal — openModal
+ * restore-embed-list-focus — restore, embed watch, list focus
+ * list-row-lifecycle — pulls list open / hotkeys
+ * pulls-palette — pulls-page palette
+ * click-intercept — onClickCapture + install
  */
 export interface HostModuleBoundary {
   /** First non-comment statement must be a function declaration / const HOST_ID */

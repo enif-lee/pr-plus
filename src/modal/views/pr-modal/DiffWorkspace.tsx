@@ -12,6 +12,11 @@ import {
   clampFileNavWidth,
   fileNavGridTemplate,
 } from '../../lib/file-nav-layout';
+import {
+  useScrollMetricsGroup,
+  useSelectionIslandGroup,
+} from '../../store/data-groups';
+import { useModalStore } from '../../store/modal-store';
 
 export type DiffWorkspaceProps = {
   fileNav: { collapsed: boolean; width: number };
@@ -46,7 +51,7 @@ export type DiffWorkspaceProps = {
   diffReviewFilter: any;
   diffMode: string;
   setDiffMode: (m: string) => void;
-  setScrollTop: (n: number) => void;
+  setScrollTop?: (n: number) => void;
   listRef: React.RefObject<HTMLElement | null>;
   hasAnyReviewThreads: (c: any) => boolean;
   totalPendingCount: number;
@@ -89,9 +94,10 @@ export type DiffWorkspaceProps = {
   onSearchPrev: any;
   scrollDiffPage: (dir: number) => void;
   applyGotoQuery: (q: string) => void;
-  scrollTop: number;
-  viewportHeight: number;
-  setViewportHeight: (h: number) => void;
+  /** Optional overrides; default: leaf-subscribe useScrollMetricsGroup */
+  scrollTop?: number;
+  viewportHeight?: number;
+  setViewportHeight?: (h: number) => void;
   hit: any;
   searchMatchRows: any;
   activeSearchHit: any;
@@ -118,8 +124,9 @@ export type DiffWorkspaceProps = {
   commentHeightOpts: any;
   showSelectionComposer: boolean;
   selectionIslandLeaving: boolean;
-  selectionDraft: any;
-  setSelectionDraft: any;
+  /** Optional; default leaf-subscribe selection island group */
+  selectionDraft?: any;
+  setSelectionDraft?: any;
   onSubmitSelectionCommentImmediate: any;
   onSubmitSelectionCommentPending: any;
   dismissSelectionIsland: any;
@@ -129,6 +136,13 @@ export type DiffWorkspaceProps = {
 };
 
 export function DiffWorkspace(p: DiffWorkspaceProps) {
+  // Leaf data groups — typing / scroll metrics re-render this shell only, not PrModalApp.
+  const scrollMetrics = useScrollMetricsGroup();
+  const selectionIsland = useSelectionIslandGroup();
+  const setScrollTopStore = useModalStore((s) => s.setScrollTop);
+  const setViewportHeightStore = useModalStore((s) => s.setViewportHeight);
+  const setSelectionDraftStore = useModalStore((s) => s.setSelectionDraft);
+
   const {
     fileNav,
     displayFiles,
@@ -161,7 +175,7 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
     diffReviewFilter,
     diffMode,
     setDiffMode,
-    setScrollTop,
+    setScrollTop: setScrollTopProp,
     listRef,
     hasAnyReviewThreads,
     totalPendingCount,
@@ -204,9 +218,9 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
     onSearchPrev,
     scrollDiffPage,
     applyGotoQuery,
-    scrollTop,
-    viewportHeight,
-    setViewportHeight,
+    scrollTop: scrollTopProp,
+    viewportHeight: viewportHeightProp,
+    setViewportHeight: setViewportHeightProp,
     hit,
     searchMatchRows,
     activeSearchHit,
@@ -233,8 +247,8 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
     commentHeightOpts,
     showSelectionComposer,
     selectionIslandLeaving,
-    selectionDraft,
-    setSelectionDraft,
+    selectionDraft: selectionDraftProp,
+    setSelectionDraft: setSelectionDraftProp,
     onSubmitSelectionCommentImmediate,
     onSubmitSelectionCommentPending,
     dismissSelectionIsland,
@@ -242,6 +256,22 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
     setSelectionIslandPhase,
     setActionMsg,
   } = p;
+
+  const scrollTop =
+    scrollTopProp != null && Number.isFinite(Number(scrollTopProp))
+      ? Number(scrollTopProp)
+      : scrollMetrics.scrollTop;
+  const viewportHeight =
+    viewportHeightProp != null && Number.isFinite(Number(viewportHeightProp))
+      ? Number(viewportHeightProp)
+      : scrollMetrics.viewportHeight;
+  const setScrollTop = setScrollTopProp || setScrollTopStore;
+  const setViewportHeight = setViewportHeightProp || setViewportHeightStore;
+  const selectionDraft =
+    selectionDraftProp !== undefined
+      ? selectionDraftProp
+      : selectionIsland.selectionDraft;
+  const setSelectionDraft = setSelectionDraftProp || setSelectionDraftStore;
 
   const magicLinks =
     detail.magicLinks?.length

@@ -577,10 +577,26 @@ export function PrModalApp({
   const setLayoutMode = useModalStore((s) => s.setLayoutMode);
   const diffMode = useModalStore((s) => s.diffMode);
   const setDiffMode = useModalStore((s) => s.setDiffMode);
-  const scrollTop = useModalStore((s) => s.scrollTop);
+  const readViewportHeight = () =>
+    Number(useModalStore.getState().viewportHeight) || 520;
+  const readScrollTop = () => Number(useModalStore.getState().scrollTop) || 0;
+  // scrollTop / viewportHeight: DiffWorkspace leaf-subscribes (useScrollMetricsGroup).
+  // App only writes via setters / getState() so high-freq scroll jumps do not re-render root.
   const setScrollTop = useModalStore((s) => s.setScrollTop);
-  const viewportHeight = useModalStore((s) => s.viewportHeight);
   const setViewportHeight = useModalStore((s) => s.setViewportHeight);
+
+  /** Mirror high-freq scroll metrics without re-rendering the composition root. */
+  const viewportHeightRef = useRef(520);
+  const scrollTopRef = useRef(0);
+  useEffect(() => {
+    viewportHeightRef.current = Number(useModalStore.getState().viewportHeight) || 520;
+    scrollTopRef.current = Number(useModalStore.getState().scrollTop) || 0;
+    return useModalStore.subscribe((s) => {
+      viewportHeightRef.current = Number(s.viewportHeight) || 520;
+      scrollTopRef.current = Number(s.scrollTop) || 0;
+    });
+  }, []);
+
   const searchOpen = useModalStore((s) => s.searchOpen);
   const setSearchOpen = useModalStore((s) => s.setSearchOpen);
   const searchQuery = useModalStore((s) => s.searchQuery);
@@ -594,7 +610,7 @@ export function PrModalApp({
   const setActiveFilePath = useModalStore((s) => s.setActiveFilePath);
   const animClass = useModalStore((s) => s.animClass);
   const setAnimClass = useModalStore((s) => s.setAnimClass);
-  const commentText = useModalStore((s) => s.commentText);
+  // commentText: ConversationView leaf-subscribes; App reads getState on submit.
   const setCommentText = useModalStore((s) => s.setCommentText);
   const actionBusy = useModalStore((s) => s.actionBusy);
   const setActionBusy = useModalStore((s) => s.setActionBusy);
@@ -611,7 +627,7 @@ export function PrModalApp({
   // re-render the whole modal. VirtualDiff + SelectionCommentBar read the store.
   const setLineSelection = useModalStore((s) => s.setLineSelection);
   const setSelecting = useModalStore((s) => s.setSelecting);
-  const selectionDraft = useModalStore((s) => s.selectionDraft);
+  // selectionDraft: DiffWorkspace leaf-subscribes (selection island typing).
   const setSelectionDraft = useModalStore((s) => s.setSelectionDraft);
   const showSelectionComposer = useModalStore((s) => s.showSelectionComposer);
   /** Selection island: action chips first, then comment composer. */
@@ -647,7 +663,7 @@ export function PrModalApp({
   const setEditingComment = useModalStore((s) => s.setEditingComment);
   const paletteOpen = useModalStore((s) => s.paletteOpen);
   const setPaletteOpen = useModalStore((s) => s.setPaletteOpen);
-  const paletteQuery = useModalStore((s) => s.paletteQuery);
+  // paletteQuery: CommandPalette leaf-subscribes.
   const setPaletteQuery = useModalStore((s) => s.setPaletteQuery);
   const picker = useModalStore((s) => s.picker);
   const setPicker = useModalStore((s) => s.setPicker);
@@ -1416,13 +1432,13 @@ export function PrModalApp({
   // Jump geometry via ref so resize/scroll does not re-trigger search.
   const searchJumpRef = useRef({
     avgH,
-    viewportHeight,
+    viewportHeight: viewportHeightRef.current,
     rowCount: virtualRows.length,
     rowOffsetList,
   });
   searchJumpRef.current = {
     avgH,
-    viewportHeight,
+    viewportHeight: viewportHeightRef.current,
     rowCount: virtualRows.length,
     rowOffsetList,
   };
@@ -1776,7 +1792,7 @@ export function PrModalApp({
       const top = scrollTopForIndex(
         active.rowIndex,
         avgH,
-        viewportHeight,
+        viewportHeightRef.current,
         virtualRows.length,
         rowOffsetList,
         { align: 'third' }
@@ -1793,7 +1809,7 @@ export function PrModalApp({
       }
       return true;
     },
-    [avgH, viewportHeight, virtualRows.length, rowOffsetList, setScrollTop]
+    [avgH, /* vh-ref */, virtualRows.length, rowOffsetList, setScrollTop]
   );
 
   /** Open Diff, expand file, scroll to thread root (or queue until rows re-map). */
@@ -1934,7 +1950,7 @@ export function PrModalApp({
     const top = scrollTopForIndex(
       headIdx,
       avgH,
-      viewportHeight,
+      viewportHeightRef.current,
       virtualRows.length,
       rowOffsetList
     );
@@ -2004,7 +2020,7 @@ export function PrModalApp({
   }, [
     virtualRows,
     avgH,
-    viewportHeight,
+    viewportHeightRef.current,
     rowOffsetList,
     setLineSelection,
     setScrollTop,
@@ -2399,7 +2415,7 @@ export function PrModalApp({
       const vp =
         el && el.clientHeight > 0
           ? el.clientHeight
-          : viewportHeight;
+          : viewportHeightRef.current;
       // Sticky file header overlays the top of the Diff list (~ROW_HEIGHT).
       // Without padTop, ArrowUp pins the caret under that fixed bar.
       const stickyTop =
@@ -2758,7 +2774,7 @@ export function PrModalApp({
       const top = scrollTopForIndex(
         row.rowIndex,
         avgH,
-        viewportHeight,
+        viewportHeightRef.current,
         virtualRows.length,
         rowOffsetList
       );
@@ -2774,7 +2790,7 @@ export function PrModalApp({
     mappedComments,
     layoutMode,
     avgH,
-    viewportHeight,
+    viewportHeightRef.current,
     virtualRows.length,
     setLayoutMode,
     setCommentIndex,
@@ -3521,7 +3537,7 @@ export function PrModalApp({
       const drag = shellResizeDragRef.current;
       if (!drag || drag.kind !== 'modal') return;
       const vw = typeof window !== 'undefined' ? window.innerWidth : viewportWidth;
-      const vh = typeof window !== 'undefined' ? window.innerHeight : viewportHeight;
+      const vh = typeof window !== 'undefined' ? window.innerHeight : viewportHeightRef.current;
       const next = nextModalSizeFromDrag(
         drag.start,
         ev.clientX - drag.startX,
@@ -3643,7 +3659,7 @@ export function PrModalApp({
       const top = scrollTopForIndex(
         idx,
         avgH,
-        viewportHeight,
+        viewportHeightRef.current,
         virtualRows.length,
         rowOffsetList,
         { align: 'start' }
@@ -3890,7 +3906,7 @@ export function PrModalApp({
     const body =
       opts && opts.body != null
         ? String(opts.body).trim()
-        : commentText.trim();
+        : String(useModalStore.getState().commentText || '').trim();
     // Explicit issue-comment (Conversation "Comment" tab) — never submit PENDING
     const forceIssueComment =
       kind === 'issue-comment' || kind === 'post-comment' || kind === 'comment-only';
@@ -5275,7 +5291,7 @@ export function PrModalApp({
     const lineSelection = useModalStore.getState().lineSelection;
     if (!detail || !lineSelection || typeof selectionToCommentPayload !== 'function') return;
     const payload: any = selectionToCommentPayload(lineSelection, {
-      body: selectionDraft,
+      body: useModalStore.getState().selectionDraft,
       commitId: detail.headSha,
     });
     if (!payload) return;
@@ -5298,7 +5314,7 @@ export function PrModalApp({
     const lineSelection = useModalStore.getState().lineSelection;
     if (!detail || !lineSelection || typeof selectionToCommentPayload !== 'function') return;
     const payload: any = selectionToCommentPayload(lineSelection, {
-      body: selectionDraft,
+      body: useModalStore.getState().selectionDraft,
       commitId: detail.headSha,
     });
     if (!payload) return;
@@ -7386,7 +7402,7 @@ export function PrModalApp({
             onRegisterAsideToggle={onRegisterAsideToggle}
             onRegisterContextThreadActions={onRegisterContextThreadActions}
             mentionCandidates={mentionCandidates}
-            commentText={commentText}
+            commentText={undefined /* leaf store */}
             setCommentText={setCommentText}
             actionBusy={actionBusy}
             actionMsg={actionMsg}
@@ -7549,8 +7565,8 @@ export function PrModalApp({
               onSearchPrev={onSearchPrev}
               scrollDiffPage={scrollDiffPage}
               applyGotoQuery={applyGotoQuery}
-              scrollTop={scrollTop}
-              viewportHeight={viewportHeight}
+              scrollTop={undefined /* leaf store */}
+              viewportHeight={undefined /* leaf store */}
               setViewportHeight={setViewportHeight}
               hit={hit}
               searchMatchRows={searchMatchRows}
@@ -7578,7 +7594,7 @@ export function PrModalApp({
               commentHeightOpts={commentHeightOpts}
               showSelectionComposer={showSelectionComposer}
               selectionIslandLeaving={selectionIslandLeaving}
-              selectionDraft={selectionDraft}
+              selectionDraft={undefined /* leaf store */}
               setSelectionDraft={setSelectionDraft}
               onSubmitSelectionCommentImmediate={onSubmitSelectionCommentImmediate}
               onSubmitSelectionCommentPending={onSubmitSelectionCommentPending}
@@ -7600,7 +7616,7 @@ export function PrModalApp({
         </div>
         <CommandPalette
           open={paletteOpen}
-          query={paletteQuery}
+          query={undefined /* leaf store */}
           onQuery={setPaletteQuery}
           commands={paletteCommands}
           onRun={runPaletteCommand}
