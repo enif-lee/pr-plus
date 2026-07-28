@@ -128,8 +128,11 @@ describe('App source contracts — thrift nav paths', () => {
     expect(appImpl).toMatch(/fileNavRafRef/);
     expect(appImpl).toMatch(/pendingPageScrollDirRef/);
     expect(appImpl).toMatch(/pendingFileNavDeltaRef/);
-    // File hold accumulates steps (skips intermediate onSelectFile renders)
+    // Soft thrift: latest dir only (one hop/frame), not multi-file jump accumulate
     expect(appImpl).toMatch(
+      /pendingFileNavDeltaRef\.current\s*=\s*d/
+    );
+    expect(appImpl).not.toMatch(
       /pendingFileNavDeltaRef\.current\s*\+=/
     );
   });

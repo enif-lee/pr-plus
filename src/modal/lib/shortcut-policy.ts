@@ -316,8 +316,8 @@ export function activeFileNavIndex(
 
 /**
  * Adjacent file in the visible list, relative to the currently viewed file.
- * Wraps at ends. `delta` is the signed step count (e.g. +3 = three files forward)
- * so key-repeat can coalesce many OS keydowns into one multi-file jump.
+ * Wraps at ends. `delta` is the signed step count (e.g. +3 = three files forward).
+ * UI key-hold uses ±1 per frame; multi-step remains for callers that want a jump.
  * If active path is not in the list, positive steps start before first, negative after last.
  */
 export function resolveAdjacentFileNav(

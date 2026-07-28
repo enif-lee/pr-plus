@@ -2095,8 +2095,9 @@ export function PrModalApp({
 
   /**
    * rAF-coalesce file/page nav under key-repeat (selection already does this).
-   * File hops accumulate signed steps so a held ⌥⇧] collapses many OS keydowns
-   * into one multi-file jump + single onSelectFile (skips intermediate renders).
+   * Soft thrift: one file hop per frame. Held ⌥⇧] used to collapse N OS keydowns
+   * into a multi-file jump (felt sparse when React work delayed rAF); now only the
+   * latest direction is kept so intermediate files still appear under key-hold.
    */
   const pendingFileNavDeltaRef = useRef(0);
   const fileNavRafRef = useRef(0);
@@ -2107,8 +2108,8 @@ export function PrModalApp({
   function navFile(delta: number) {
     if (typeof resolveAdjacentFileNav !== 'function') return;
     const d = delta < 0 ? -1 : 1;
-    // Accumulate: N key-repeats in one frame → jump N files once (not N re-renders).
-    pendingFileNavDeltaRef.current += d;
+    // One hop per frame (like page scroll dir): do not multi-jump on key-hold.
+    pendingFileNavDeltaRef.current = d;
     if (fileNavRafRef.current) return;
     fileNavRafRef.current = requestAnimationFrame(() => {
       fileNavRafRef.current = 0;
