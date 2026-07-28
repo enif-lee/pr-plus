@@ -316,7 +316,9 @@ export function activeFileNavIndex(
 
 /**
  * Adjacent file in the visible list, relative to the currently viewed file.
- * Wraps at ends. If active path is not in the list, next → first, prev → last.
+ * Wraps at ends. `delta` is the signed step count (e.g. +3 = three files forward)
+ * so key-repeat can coalesce many OS keydowns into one multi-file jump.
+ * If active path is not in the list, positive steps start before first, negative after last.
  */
 export function resolveAdjacentFileNav(
   files: any[] | null | undefined,
@@ -326,13 +328,20 @@ export function resolveAdjacentFileNav(
   const list = Array.isArray(files) ? files : [];
   const total = list.length;
   if (total <= 0) return { index: -1, total: 0, path: null };
-  const d = delta < 0 ? -1 : 1;
+  let steps = Math.trunc(Number(delta));
+  if (!Number.isFinite(steps) || steps === 0) {
+    const cur = activeFileNavIndex(list, activePath);
+    if (cur >= 0) {
+      return { index: cur, total, path: filePathOf(list[cur]) || null };
+    }
+    return { index: -1, total, path: null };
+  }
   let idx = activeFileNavIndex(list, activePath);
   if (idx < 0) {
-    // Not in list: next starts at first, prev starts at last
-    idx = d > 0 ? -1 : 0;
+    // Not in list: positive starts before first, negative starts after last
+    idx = steps > 0 ? -1 : 0;
   }
-  const next = ((idx + d) % total + total) % total;
+  const next = ((idx + steps) % total + total) % total;
   const path = filePathOf(list[next]);
   return { index: next, total, path: path || null };
 }
@@ -536,7 +545,7 @@ export function isOptionGlyphKey(key: unknown): boolean {
   if (!k) return false;
   // Single ASCII letter/digit/common symbol — not a glyph
   if (/^[a-zA-Z0-9]$/.test(k)) return false;
-  if (/^[\[\].,\/\\;'`=\-]$/.test(k)) return false;
+  if (/^[[\]. ,/\\;'`=-]$/.test(k)) return false;
   // Escape/Enter/arrows reported as words
   if (
     /^(escape|enter|tab|backspace|delete|arrowup|arrowdown|arrowleft|arrowright| |space)$/i.test(

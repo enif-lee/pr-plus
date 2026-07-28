@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { IconLinkExternal } from '@common/icons';
 import { normalizeChecks } from '@lib/checks';
 import { CheckOutcomeIcon } from './ChecksSummary';
+import './ChecksTips.css';
 
 /** True when checks payload has something worth showing (real contexts/runs). */
 export function hasChecksData(checks: any): boolean {

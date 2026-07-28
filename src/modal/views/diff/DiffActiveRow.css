@@ -1,0 +1,258 @@
+/**
+ * Residual CSS (cannot fully express via Tailwind utilities).
+ * Colocated next to owning domain; imported from styles/index.css.
+ * Migrated from styles/parts/08-active-row-still-readable-over-status-co.css
+ */
+
+/* Active row still readable over status colors */
+.prp-filetree__item--active.prp-filetree__item--add .prp-filetree__name {
+  color: var(--prp-ok);
+}
+.prp-filetree__item--active.prp-filetree__item--del .prp-filetree__name {
+  color: var(--prp-danger);
+}
+
+.prp-filetree__stat {
+  flex: 0 0 auto;
+  color: var(--prp-fg-muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.prp-filetree__collapse {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--prp-fg);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  padding: 0;
+  border-radius: 6px;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
+}
+.prp-filetree__collapse:hover,
+.prp-filetree__collapse:focus-visible {
+  color: var(--prp-accent);
+  background: transparent;
+  outline: none;
+}
+
+.prp-diff-pane {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--prp-bg);
+}
+
+/* Diff floating file/page controller — bottom-right of the hunk pane */
+.prp-diff-float-nav {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 24;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  padding: 2px;
+  border: 1px solid var(--prp-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--prp-bg) 92%, transparent);
+  box-shadow: 0 4px 16px rgba(1, 4, 9, 0.12);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  min-width: 0;
+}
+
+.prp-diff-float-nav__btns {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+}
+
+.prp-diff-float-nav__goto {
+  display: flex;
+  padding: 2px 2px 0;
+  min-width: 200px;
+}
+
+.prp-diff-float-nav__goto-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 28px;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0 8px;
+  border: 1px solid var(--prp-border);
+  border-radius: 8px;
+  background: var(--prp-bg);
+  color: var(--prp-fg);
+  font: inherit;
+  font-size: 12px;
+  font-family: var(--prp-mono);
+  line-height: 1;
+}
+
+.prp-diff-float-nav__goto-input:focus {
+  outline: none;
+  border-color: var(--prp-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--prp-accent) 22%, transparent);
+}
+
+.prp-diff-float-nav__btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 28px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--prp-fg);
+  cursor: pointer;
+}
+
+.prp-diff-float-nav__btn + .prp-diff-float-nav__btn {
+  border-left: 1px solid var(--prp-border-muted);
+  border-radius: 0;
+}
+
+.prp-diff-float-nav__btns .prp-diff-float-nav__btn:first-child {
+  border-radius: 8px 0 0 8px;
+}
+
+.prp-diff-float-nav__btns .prp-diff-float-nav__btn:last-child {
+  border-radius: 0 8px 8px 0;
+}
+
+.prp-diff-float-nav__btn--goto .prp-diff-float-nav__goto-label {
+  font-size: 14px;
+  font-weight: 700;
+  font-family: var(--prp-mono);
+  line-height: 1;
+}
+
+.prp-diff-float-nav__btn--on,
+.prp-diff-float-nav__btn--goto[aria-expanded='true'] {
+  background: color-mix(in srgb, var(--prp-accent) 14%, transparent);
+  color: var(--prp-accent);
+}
+
+.prp-diff-float-nav__btn:hover:not(:disabled),
+.prp-diff-float-nav__btn:focus-visible:not(:disabled) {
+  background: color-mix(in srgb, var(--prp-accent) 12%, transparent);
+  color: var(--prp-accent);
+  outline: none;
+}
+
+.prp-diff-float-nav__btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.prp-diff-pane__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  padding: 10px 14px;
+  font-size: 12px;
+  color: var(--prp-fg-muted);
+  border-bottom: 1px solid var(--prp-border-muted);
+  background: var(--prp-bg-muted);
+  flex: 0 0 auto;
+}
+
+.prp-comment-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+/* Host wraps scroller + sticky file header (sticky is a sibling, not inside overflow) */
+.prp-vlist-host {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  /* Same type metrics as .prp-vlist so sticky sibling matches in-list rows */
+  font-family: var(--prp-mono);
+  font-size: 11.5px;
+  line-height: 22px;
+}
+.prp-vlist {
+  overflow: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  position: relative;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  overscroll-behavior: contain;
+  /* Isolate layout/paint without size containment (size breaks flex scroll) */
+  contain: layout style paint;
+  /* Native bar hidden via .prp-scroll-float; overlay is FloatingScrollbar */
+  scrollbar-gutter: unset;
+}
+/* When float class missing (tests/legacy), still hide native gutter */
+.prp-vlist.prp-scroll-float {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.prp-vlist.prp-scroll-float::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+  display: none !important;
+}
+
+.prp-vlist__spacer {
+  position: relative;
+  width: 100%;
+}
+
+.prp-vlist__window {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  will-change: transform;
+  contain: layout style;
+  /* GPU-friendly layer for translate3d window moves */
+  backface-visibility: hidden;
+}
+
+.prp-vline {
+  display: flex;
+  align-items: stretch;
+  white-space: pre;
+  overflow: hidden;
+  border-left: 3px solid transparent;
+  box-sizing: border-box;
+  /* Fixed-height code rows: skip layout/paint work when offscreen in parent */
+  contain: layout style paint;
+}
+
+.prp-vline--selectable {
+  cursor: default;
+}
+

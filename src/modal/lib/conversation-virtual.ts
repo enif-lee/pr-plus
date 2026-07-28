@@ -163,7 +163,7 @@ export function estimateConversationRowHeight(row, opts: any = {}) {
           ? Boolean(expandFn(item, t))
           : t?.pending
             ? false
-            : !Boolean(t?.resolved);
+            : !t?.resolved;
       if (!open) continue;
       const replies = Array.isArray(t.replies) ? t.replies.length : 0;
       h += CONV_EST_THREAD_BASE + replies * CONV_EST_REPLY;

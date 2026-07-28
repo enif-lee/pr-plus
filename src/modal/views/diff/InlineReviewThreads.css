@@ -1,0 +1,57 @@
+/**
+ * Residual CSS (cannot fully express via Tailwind utilities).
+ * Colocated next to owning domain; imported from styles/index.css.
+ * Migrated from styles/parts/17-polished-inline-review-threads-on-diff.css
+ */
+
+/* Polished inline review threads on diff */
+.prp-inline-thread {
+  width: 100%;
+  max-width: min(720px, 100%);
+  padding: 6px 10px 8px;
+  box-sizing: border-box;
+  font-family: var(--prp-font);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.prp-inline-thread--collapsed {
+  padding-bottom: 4px;
+}
+
+.prp-inline-thread__card {
+  border: 1px solid var(--prp-border);
+  border-radius: 10px;
+  background: var(--prp-bg);
+  box-shadow: 0 2px 8px rgba(1, 4, 9, 0.06);
+  overflow: hidden;
+  max-width: 100%;
+}
+
+.prp-inline-thread__filebar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--prp-bg-muted);
+  border-bottom: 1px solid var(--prp-border-muted);
+  font-size: 11px;
+  min-height: 22px;
+  line-height: 1.2;
+}
+/* Shared compact path header (Diff + Conversation) */
+.prp-inline-thread__filebar.prp-review-thread__file-header {
+  margin: 0;
+  padding: 3px 10px;
+  min-height: 20px;
+}
+
+.prp-inline-thread__loc {
+  font-size: 11px;
+  color: var(--prp-fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+

@@ -1,12 +1,10 @@
 import React, { useState } from 'react';
 import { IconDisclosure } from './icons';
+import './AsideSection.css';
 
 /**
  * Flat GitHub-style sidebar section (title + body, hairline separator).
- * Prefer over Card in the conversation right rail.
- * Set collapsible + defaultOpen={false} for sections that start folded.
- * `loading` shows a spinner next to the title (useful when collapsed so body
- * skeletons are not visible).
+ * Layout: Tailwind. Residual tokens/spinner: AsideSection.css
  */
 export function AsideSection({
   title,
@@ -24,7 +22,6 @@ export function AsideSection({
   className?: string;
   collapsible?: boolean;
   defaultOpen?: boolean;
-  /** Show spinning indicator to the right of the section title. */
   loading?: boolean;
   [key: string]: any;
 }) {
@@ -36,9 +33,13 @@ export function AsideSection({
   const busy = Boolean(loading);
 
   const titleNode = titleIsPlain ? (
-    <h3 className="prp-aside-section__title">{title}</h3>
+    <h3 className="prp-aside-section__title m-0 text-xs font-semibold leading-snug">
+      {title}
+    </h3>
   ) : (
-    <div className="prp-aside-section__title">{title}</div>
+    <div className="prp-aside-section__title m-0 text-xs font-semibold leading-snug">
+      {title}
+    </div>
   );
 
   const loadingSpin = busy ? (
@@ -61,11 +62,11 @@ export function AsideSection({
       {...rest}
     >
       {hasHead ? (
-        <div className="prp-aside-section__head">
+        <div className="prp-aside-section__head mb-1.5 flex items-center justify-between gap-2 p-0">
           {collapsible && title != null ? (
             <button
               type="button"
-              className="prp-aside-section__toggle"
+              className="prp-aside-section__toggle inline-flex min-w-0 flex-1 items-center gap-1.5 p-0"
               onClick={() => setOpen((v) => !v)}
               aria-expanded={open}
               title={
@@ -74,25 +75,30 @@ export function AsideSection({
                   : `Expand ${titleIsPlain ? title : 'section'}`
               }
             >
-              <span className="prp-aside-section__chev" aria-hidden="true">
+              <span
+                className="prp-aside-section__chev inline-flex w-3 shrink-0 items-center justify-center text-[11px] text-[color:var(--prp-fg-muted)]"
+                aria-hidden="true"
+              >
                 <IconDisclosure open={open} size={12} />
               </span>
               {titleNode}
               {loadingSpin}
             </button>
-          ) : title != null ? (
-            <>
+          ) : (
+            <div className="flex min-w-0 flex-1 items-center gap-1.5">
               {titleNode}
               {loadingSpin}
-            </>
-          ) : null}
-          {actions ? (
-            <div className="prp-aside-section__actions">{actions}</div>
+            </div>
+          )}
+          {actions != null ? (
+            <div className="prp-aside-section__actions inline-flex shrink-0 items-center gap-0.5">
+              {actions}
+            </div>
           ) : null}
         </div>
       ) : null}
       {showBody ? (
-        <div className="prp-aside-section__body">{children}</div>
+        <div className="prp-aside-section__body m-0 min-w-0 p-0">{children}</div>
       ) : null}
     </section>
   );

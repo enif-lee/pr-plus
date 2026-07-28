@@ -1,0 +1,35 @@
+/**
+ * Residual Badge tone tokens. Layout/sizing use Tailwind in Badge.tsx.
+ */
+.prp-badge {
+  border: 1px solid var(--prp-border-muted);
+  background: var(--prp-bg-muted);
+  color: var(--prp-fg-muted);
+  text-transform: none;
+  vertical-align: middle;
+}
+.prp-badge--ok,
+.prp-badge--approved,
+.prp-badge--success,
+.prp-badge--open {
+  color: var(--prp-ok);
+  background: var(--prp-add-bg);
+  border-color: color-mix(in srgb, var(--prp-ok) 35%, transparent);
+}
+.prp-badge--warn,
+.prp-badge--changes_requested,
+.prp-badge--pending {
+  color: var(--prp-warn);
+  background: color-mix(in srgb, var(--prp-warn) 12%, var(--prp-bg));
+  border-color: color-mix(in srgb, var(--prp-warn) 35%, transparent);
+}
+.prp-badge--danger,
+.prp-badge--failure {
+  color: var(--prp-danger);
+  background: var(--prp-del-bg);
+  border-color: color-mix(in srgb, var(--prp-danger) 35%, transparent);
+}
+.prp-badge--draft,
+.prp-badge--muted {
+  color: var(--prp-fg-muted);
+}

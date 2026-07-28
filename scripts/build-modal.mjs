@@ -1,22 +1,24 @@
 /**
  * Modal production build (TypeScript → Chromium content-script IIFE).
  *
- * - Entry: src/modal/main.tsx (views + zustand store + pure lib)
- * - Tooling: esbuild (charset:utf8, classic IIFE). Vite config remains for
- *   aliases/typecheck/dev; Edge mis-handles some multi-MB non-ASCII bundles.
- * - Mermaid is a separate ESM chunk (dist/mermaid.esm.js), lazy-imported on
- *   first ```mermaid fence via chrome.runtime.getURL (keeps main IIFE small).
- * - highlight.js language grammars are separate ESM chunks under
- *   dist/hljs-langs/<id>.js (lazy import via chrome.runtime.getURL).
+ * - Entry: src/modal/main.tsx
+ * - CSS: collected from TSX/TS `import './x.css'` in the esbuild graph,
+ *   then PostCSS (import + Tailwind + autoprefixer) → dist/pr-modal.css
+ * - Mermaid / hljs language packs: separate ESM chunks
  */
 import * as esbuild from 'esbuild';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import postcss from 'postcss';
+import postcssImport from 'postcss-import';
+import tailwindcss from 'tailwindcss';
+import autoprefixer from 'autoprefixer';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const outDir = path.join(root, 'src', 'modal', 'dist');
 const langsDir = path.join(outDir, 'hljs-langs');
+const stylesDir = path.join(root, 'src', 'modal', 'styles');
 fs.mkdirSync(outDir, { recursive: true });
 
 const entry = path.join(root, 'src/modal/main.tsx');
@@ -34,6 +36,28 @@ for (const f of fs.readdirSync(outDir)) {
 fs.mkdirSync(outDir, { recursive: true });
 fs.mkdirSync(langsDir, { recursive: true });
 
+/** Ordered CSS paths discovered via `import '…css'` from the JS graph. */
+const cssImportOrder = [];
+const cssImportSeen = new Set();
+
+const collectCssPlugin = {
+  name: 'collect-css-from-tsx',
+  setup(build) {
+    build.onLoad({ filter: /\.css$/ }, (args) => {
+      const abs = path.resolve(args.path);
+      if (!cssImportSeen.has(abs)) {
+        cssImportSeen.add(abs);
+        cssImportOrder.push(abs);
+      }
+      // Keep CSS out of the IIFE; styles ship as content_scripts CSS file.
+      return {
+        contents: '/* css collected → pr-modal.css */',
+        loader: 'js',
+      };
+    });
+  },
+};
+
 await esbuild.build({
   absWorkingDir: root,
   entryPoints: [entry],
@@ -45,13 +69,19 @@ await esbuild.build({
   target: ['chrome110', 'edge110'],
   jsx: 'automatic',
   jsxImportSource: 'react',
-  loader: { '.tsx': 'tsx', '.ts': 'ts', '.css': 'css', '.jsx': 'jsx', '.json': 'json' },
+  loader: {
+    '.tsx': 'tsx',
+    '.ts': 'ts',
+    '.css': 'css',
+    '.jsx': 'jsx',
+    '.json': 'json',
+  },
+  plugins: [collectCssPlugin],
   alias: {
     '@modal': path.join(root, 'src/modal'),
     '@lib': path.join(root, 'src/modal/lib'),
     '@common': path.join(root, 'src/modal/components/common'),
   },
-  // Mermaid must not enter the main IIFE — loaded as dist/mermaid.esm.js
   external: ['mermaid'],
   define: { 'process.env.NODE_ENV': '"production"' },
   minify: true,
@@ -60,10 +90,72 @@ await esbuild.build({
   logLevel: 'info',
 });
 
-const sideCss = path.join(outDir, 'pr-modal.bundle.css');
-const stylesSrc = path.join(root, 'src/modal/styles.css');
-if (fs.existsSync(sideCss)) fs.renameSync(sideCss, cssOut);
-else if (fs.existsSync(stylesSrc)) fs.copyFileSync(stylesSrc, cssOut);
+// --- Build pr-modal.css from TSX-discovered CSS graph ---
+{
+  if (!cssImportOrder.length) {
+    throw new Error(
+      'No CSS imports found from main.tsx graph — expected at least styles/entry.css'
+    );
+  }
+
+  // entry.css (tokens + @tailwind) first; other domain files follow discovery order
+  const entryCss = path.join(stylesDir, 'entry.css');
+  const ordered = [];
+  const seen = new Set();
+  const push = (abs) => {
+    const n = path.normalize(abs);
+    if (seen.has(n) || !fs.existsSync(n)) return;
+    seen.add(n);
+    ordered.push(n);
+  };
+  push(entryCss);
+  for (const abs of cssImportOrder) {
+    if (path.normalize(abs) === path.normalize(entryCss)) continue;
+    push(abs);
+  }
+
+  // Synthetic entry lives under styles/ so postcss-import resolves relatives
+  const synthetic = ordered
+    .map((abs) => {
+      let rel = path.relative(stylesDir, abs);
+      if (!rel.startsWith('.')) rel = `./${rel}`;
+      rel = rel.split(path.sep).join('/');
+      return `@import "${rel}";`;
+    })
+    .join('\n');
+
+  const syntheticPath = path.join(stylesDir, '.bundle-entry.css');
+  fs.writeFileSync(syntheticPath, `${synthetic}\n`, 'utf8');
+
+  let cssBytes = 0;
+  try {
+    const result = await postcss([
+      postcssImport(),
+      tailwindcss({ config: path.join(root, 'tailwind.config.js') }),
+      autoprefixer(),
+    ]).process(fs.readFileSync(syntheticPath, 'utf8'), {
+      from: syntheticPath,
+      to: cssOut,
+    });
+    fs.writeFileSync(cssOut, result.css);
+    cssBytes = Buffer.byteLength(result.css);
+  } finally {
+    try {
+      fs.unlinkSync(syntheticPath);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  console.log(
+    'Built',
+    path.relative(root, cssOut),
+    `(${cssBytes} bytes, ${ordered.length} css modules from TSX graph)`
+  );
+  for (const abs of ordered) {
+    console.log('  css:', path.relative(root, abs));
+  }
+}
 
 // Pure-ASCII JS for Chromium content-script encoding checks
 let text = fs.readFileSync(outfile, 'utf8');
@@ -91,7 +183,6 @@ fs.mkdirSync(langsDir, { recursive: true });
 const langEntryPoints = {};
 for (const id of langIds) {
   const name = String(id);
-  // Virtual entry: re-export the grammar as default for dynamic import()
   const entryFile = path.join(langsDir, `_${name}.entry.js`);
   fs.writeFileSync(
     entryFile,
@@ -116,7 +207,6 @@ await esbuild.build({
   logLevel: 'warning',
 });
 
-// Remove temporary entry stubs; keep only final <id>.js chunks
 for (const id of langIds) {
   const entryFile = path.join(langsDir, `_${id}.entry.js`);
   try {
@@ -135,7 +225,7 @@ if (builtLangs.length !== langIds.length) {
   );
 }
 
-// --- Lazy Mermaid ESM chunk (first ```mermaid fence triggers import) ---
+// --- Lazy Mermaid ESM chunk ---
 await esbuild.build({
   absWorkingDir: root,
   entryPoints: [mermaidEntry],
@@ -147,14 +237,11 @@ await esbuild.build({
   minify: true,
   charset: 'utf8',
   legalComments: 'none',
-  // mermaid pulls some node-ish optional deps; mark common ones external/empty
   logLevel: 'warning',
-  // Avoid "Dynamic require" blows; mermaid is ESM-friendly in modern builds
   mainFields: ['module', 'browser', 'main'],
   conditions: ['import', 'module', 'browser', 'default'],
 });
 
-// Pure-ASCII for mermaid chunk too (content-script / extension encoding)
 if (fs.existsSync(mermaidOut)) {
   let mText = fs.readFileSync(mermaidOut, 'utf8');
   if (/[^\x00-\x7F]/.test(mText)) {

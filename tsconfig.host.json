@@ -1,0 +1,48 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "lib": [
+      "ES2020",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "strict": false,
+    "noImplicitAny": false,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "types": [
+      "vite/client",
+      "chrome",
+      "node"
+    ],
+    "paths": {
+      "@modal/*": [
+        "./src/modal/*"
+      ],
+      "@lib/*": [
+        "./src/modal/lib/*"
+      ],
+      "@common/*": [
+        "./src/modal/components/common/*"
+      ]
+    },
+    "moduleDetection": "legacy"
+  },
+  "include": [
+    "src/extension-globals.d.ts",
+    "src/host/host-context.d.ts",
+    "src/host/modules/**/*.ts",
+    "src/host/modules/**/*.d.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "src/host/modules/globals.d.ts"
+  ]
+}

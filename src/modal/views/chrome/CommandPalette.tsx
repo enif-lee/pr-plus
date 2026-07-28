@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { filterPaletteCommands, formatShortcut } from '@lib/command-palette';
 import { FloatingScrollbar } from '../../components/common/FloatingScrollbar';
+import { useModalStore } from '../../store/modal-store';
 
 /**
  * Step focus index with wrap (shared with pulls palette behavior).
@@ -25,8 +26,16 @@ export function stepPaletteFocusIndex(
 /**
  * PR-view command palette — same `prp-pp-*` shell as pulls.
  * Focus moves via DOM class toggle only (no full list re-render).
+ * `query` may be omitted — leaf-subscribes paletteQuery so typing does not re-render App.
  */
-export function CommandPalette({ open, query, onQuery, commands, onRun, onClose }: any) {
+export function CommandPalette({ open, query: queryProp, onQuery, commands, onRun, onClose }: any) {
+  const storeQuery = useModalStore((s) => s.paletteQuery);
+  const storeSetQuery = useModalStore((s) => s.setPaletteQuery);
+  const query = queryProp !== undefined ? queryProp : storeQuery;
+  const handleQuery =
+    typeof onQuery === 'function'
+      ? onQuery
+      : (q: string) => storeSetQuery(q == null ? '' : String(q));
   const isMac =
     typeof navigator !== 'undefined' &&
     /Mac|iPhone|iPad/.test(navigator.platform || '');
@@ -203,7 +212,7 @@ export function CommandPalette({ open, query, onQuery, commands, onRun, onClose 
               spellCheck={false}
               placeholder="Type a command…  stack  merge  review"
               value={query}
-              onChange={(e) => onQuery?.(e.target.value)}
+              onChange={(e) => handleQuery(e.target.value)}
               onKeyDown={onKeyDown}
             />
             <div className="prp-pp-meta prp-muted" data-prp-pp-meta>

@@ -101,6 +101,44 @@ export function buildResolveConflictsUrl(detail: any): string | null {
 }
 
 /**
+ * Whether GitHub would offer "Update branch" (head is out of date with base).
+ * Prefer explicit behind signals; never show when clearly up-to-date (clean/unstable).
+ */
+export function canUpdateBranch(detail: any): boolean {
+  const d = detail || {};
+  if (d.merged) return false;
+  if (String(d.state || 'open').toLowerCase() !== 'open') return false;
+
+  const behindBy = Number(d.behindBy ?? d.behind_by);
+  if (Number.isFinite(behindBy)) return behindBy > 0;
+
+  const mss = String(d.mergeStateStatus || d.merge_state_status || '')
+    .trim()
+    .toUpperCase();
+  if (mss === 'BEHIND') return true;
+  // Up-to-date GraphQL statuses — no update
+  if (
+    mss === 'CLEAN' ||
+    mss === 'UNSTABLE' ||
+    mss === 'HAS_HOOKS' ||
+    mss === 'DRAFT'
+  ) {
+    return false;
+  }
+
+  const ms = String(d.mergeableState || d.mergeable_state || '')
+    .trim()
+    .toLowerCase();
+  if (ms === 'behind') return true;
+  // REST up-to-date
+  if (ms === 'clean' || ms === 'unstable' || ms === 'has_hooks') return false;
+
+  // blocked / dirty / unknown without a behind count — treat as not updateable
+  // so we never show a dead control on an already-current branch.
+  return false;
+}
+
+/**
  * True when GitHub reports merge conflicts (dirty / mergeable=false not policy-blocked).
  */
 export function isMergeConflictState(detail: any): boolean {
@@ -229,6 +267,7 @@ export function buildMergeBoxStatus(detail: any): MergeBoxStatus {
     .trim()
     .toLowerCase();
   const forceAllowed = viewerMayForceMerge(d);
+  const showUpdateBranch = canUpdateBranch(d);
 
   if (d.merged) {
     return {
@@ -277,7 +316,7 @@ export function buildMergeBoxStatus(detail: any): MergeBoxStatus {
       canMerge: false,
       forceMerge: false,
       ctaVariant: 'default',
-      showUpdateBranch: true,
+      showUpdateBranch,
       draftToggle: 'ready',
       ...emptyConflictFields(),
     };
@@ -307,7 +346,7 @@ export function buildMergeBoxStatus(detail: any): MergeBoxStatus {
       canMerge: false,
       forceMerge: false,
       ctaVariant: 'danger',
-      showUpdateBranch: true,
+      showUpdateBranch,
       draftToggle: 'draft',
       showResolveConflicts: true,
       conflictFiles,
@@ -330,7 +369,7 @@ export function buildMergeBoxStatus(detail: any): MergeBoxStatus {
       canMerge: canForce,
       forceMerge: canForce,
       ctaVariant: 'danger',
-      showUpdateBranch: true,
+      showUpdateBranch,
       draftToggle: 'draft',
       ...emptyConflictFields(),
     };
@@ -348,7 +387,7 @@ export function buildMergeBoxStatus(detail: any): MergeBoxStatus {
       canMerge: false,
       forceMerge: false,
       ctaVariant: 'default',
-      showUpdateBranch: true,
+      showUpdateBranch,
       draftToggle: 'draft',
       ...emptyConflictFields(),
     };
@@ -378,7 +417,7 @@ export function buildMergeBoxStatus(detail: any): MergeBoxStatus {
       canMerge: true,
       forceMerge: false,
       ctaVariant: 'warn',
-      showUpdateBranch: true,
+      showUpdateBranch,
       draftToggle: 'draft',
       ...emptyConflictFields(),
     };
@@ -395,7 +434,7 @@ export function buildMergeBoxStatus(detail: any): MergeBoxStatus {
     canMerge: true,
     forceMerge: false,
     ctaVariant: 'ok',
-    showUpdateBranch: true,
+    showUpdateBranch,
     draftToggle: 'draft',
     ...emptyConflictFields(),
   };

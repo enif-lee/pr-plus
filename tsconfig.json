@@ -1,11 +1,16 @@
 {
   "compilerOptions": {
     "target": "ES2020",
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2020",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "jsx": "react-jsx",
     "strict": false,
+    "noImplicitAny": false,
     "noEmit": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
@@ -13,12 +18,46 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "paths": {
-      "@modal/*": ["./src/modal/*"],
-      "@lib/*": ["./src/modal/lib/*"],
-      "@common/*": ["./src/modal/components/common/*"]
+      "@modal/*": [
+        "./src/modal/*"
+      ],
+      "@lib/*": [
+        "./src/modal/lib/*"
+      ],
+      "@common/*": [
+        "./src/modal/components/common/*"
+      ]
     },
-    "types": ["vite/client"]
+    "types": [
+      "vite/client",
+      "chrome"
+    ]
   },
-  "include": ["src/modal/**/*.ts", "src/modal/**/*.tsx", "vite.config.ts"],
-  "exclude": ["node_modules", "src/modal/dist", "src/modal/pure"]
+  "include": [
+    "src/extension-globals.d.ts",
+    "src/modal/lib/**/*.ts",
+    "src/modal/store/**/*.ts",
+    "src/modal/components/**/*.ts",
+    "src/modal/components/**/*.tsx",
+    "src/modal/views/**/*.ts",
+    "src/modal/views/**/*.tsx",
+    "src/modal/app/PrModalApp.tsx",
+    "src/modal/app/PrModalApp.impl.tsx",
+    "src/modal/main.tsx",
+    "src/modal/types.ts",
+    "src/modal/globals.d.ts",
+    "src/background/sw-api.ts",
+    "src/tree.ts",
+    "src/content-bridge.ts",
+    "src/host/host-context.d.ts",
+    "tests/**/*.rstest.ts",
+    "rstest.config.ts",
+    "src/background-shims.d.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "src/background.ts",
+    "src/modal/dist",
+    "src/modal/pure"
+  ]
 }

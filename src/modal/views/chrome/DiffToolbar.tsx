@@ -19,14 +19,16 @@ import {
 } from '@lib/shortcut-policy';
 import { TipPopover } from '@common/TipPopover';
 import { SearchBar } from './SearchBar';
+import './DiffToolbar.css';
 import {
   FinishReviewModal,
   type FinishReviewEvent,
 } from './FinishReviewModal';
 
 /**
- * Unified Diff top chrome: files, multi-checkbox commits, stats,
- * unified/split, grouped comment nav, pending review — no checks.
+ * Unified Diff top chrome: files, multi-checkbox commits, unified/split,
+ * grouped comment nav, pending review — no checks.
+ * (+/−/files stats live in the PR header only.)
  *
  * Leave-review CTAs live in FinishReviewModal (GitHub-style). Diff header
  * only shows "Submit review" (always available, even with 0 pending).
@@ -39,9 +41,6 @@ export function DiffToolbar(props: any) {
     detail,
     fileNavCollapsed,
     onToggleFileNav,
-    annotatedFileCount = 0,
-    rowCount = 0,
-    filtered = false,
     diffMode = 'unified',
     onDiffMode,
     commits = [],
@@ -103,9 +102,6 @@ export function DiffToolbar(props: any) {
       : Number(pendingServerCount || 0) || localPending;
   const unresN = Number(unresolvedCount) || 0;
   const resN = Number(resolvedCount) || 0;
-  const fileCount = detail?.changedFiles ?? annotatedFileCount;
-  const additions = detail?.additions ?? 0;
-  const deletions = detail?.deletions ?? 0;
   const isMac =
     typeof navigator !== 'undefined' &&
     /Mac|iPhone|iPad/.test(navigator.platform || '');
@@ -293,15 +289,6 @@ export function DiffToolbar(props: any) {
               commitLoading ? 'Loading remaining commits…' : 'No matches'
             }
           />
-        </div>
-
-        <div className="prp-diff-toolbar__stats" title="PR file stats">
-          <span className="prp-stat-add">+{additions}</span>
-          <span className="prp-stat-del">−{deletions}</span>
-          <span className="prp-muted">
-            {filtered ? `${annotatedFileCount}/${fileCount}` : fileCount} files
-            {rowCount ? ` · ${rowCount} rows` : ''}
-          </span>
         </div>
 
         {searchOpen || showReviewFilter || comments?.length ? (

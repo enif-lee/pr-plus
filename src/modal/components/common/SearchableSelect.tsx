@@ -6,6 +6,7 @@ import {
 } from '@lib/searchable-select';
 import { Avatar } from './Avatar';
 import { IconCheck } from './icons';
+import './SearchableSelect.css';
 
 /**
  * Anchored popover searchable select.

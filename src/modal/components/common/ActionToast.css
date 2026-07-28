@@ -1,0 +1,124 @@
+/**
+ * Action toast / shortcut monitor chrome.
+ */
+
+/* Residual inline action copy — kept for any residual class refs; prefer toast */
+.prp-action-msg,
+.prp-action-inline {
+  display: none;
+}
+
+
+/* Top-center pill toast for action results ("Code copied", …) */
+.prp-action-toast {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  z-index: 80;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  max-width: min(420px, calc(100% - 32px));
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--prp-border);
+  background: color-mix(in srgb, var(--prp-accent) 12%, var(--prp-bg));
+  color: var(--prp-fg);
+  font-family: var(--prp-font);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: 0.01em;
+  box-shadow: 0 6px 18px rgba(1, 4, 9, 0.12);
+  pointer-events: none;
+  transform: translateX(-50%) translateY(-6px);
+  opacity: 0;
+  transition:
+    opacity 160ms ease,
+    transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.prp-action-toast--in {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.prp-action-toast--out {
+  opacity: 0;
+  transform: translateX(-50%) translateY(-6px);
+}
+
+.prp-action-toast__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prp-action-toast--ok {
+  border-color: color-mix(in srgb, var(--prp-ok) 35%, var(--prp-border));
+  background: color-mix(in srgb, var(--prp-ok) 14%, var(--prp-bg));
+  color: var(--prp-fg);
+}
+
+.prp-action-toast--error {
+  border-color: color-mix(in srgb, var(--prp-danger) 35%, var(--prp-border));
+  background: color-mix(in srgb, var(--prp-danger) 12%, var(--prp-bg));
+  color: var(--prp-fg);
+}
+
+.prp-action-toast--neutral {
+  border-color: var(--prp-border);
+  background: color-mix(in srgb, var(--prp-accent) 10%, var(--prp-bg));
+}
+
+
+/* Bottom-center floating HUD: black bg + white text (fire or Opt-alone held) */
+.prp-shortcut-monitor {
+  position: absolute;
+  left: 50%;
+  bottom: 20px;
+  z-index: 90;
+  max-width: min(360px, calc(100% - 28px));
+  pointer-events: none;
+  font-family: var(--prp-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  transform: translateX(-50%) translateY(6px);
+  opacity: 0;
+  transition:
+    opacity 200ms ease,
+    transform 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.prp-shortcut-monitor--in {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.prp-shortcut-monitor--out {
+  opacity: 0;
+  transform: translateX(-50%) translateY(6px);
+}
+
+.prp-shortcut-monitor__line {
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: #0d1117;
+  color: #f0f6fc;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  box-shadow: 0 4px 16px rgba(1, 4, 9, 0.35);
+  border: 1px solid rgba(240, 246, 252, 0.12);
+}
+
+.prp-shortcut-monitor--held .prp-shortcut-monitor__line {
+  font-weight: 500;
+}
+
+.prp-shortcut-monitor--fire .prp-shortcut-monitor__line {
+  font-weight: 650;
+}

@@ -39,14 +39,18 @@ export function ConversationKbFocusHost({
   ...rest
 }: {
   anchor: string | null | undefined;
-  as?: keyof JSX.IntrinsicElements;
+  as?: keyof React.JSX.IntrinsicElements | React.ElementType;
   className?: string;
   focusClassName?: string;
   children?: React.ReactNode;
   [k: string]: any;
 }) {
   const cls = useConversationKbFocusClass(anchor, className, focusClassName);
-  return React.createElement(as, { ...rest, className: cls || undefined }, children);
+  return React.createElement(
+    as as React.ElementType,
+    { ...rest, className: cls || undefined },
+    children
+  );
 }
 
 /**

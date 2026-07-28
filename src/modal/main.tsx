@@ -12,7 +12,7 @@ import hljs from 'highlight.js/lib/core';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 
-import './styles.css';
+import './styles/entry.css';
 import { PrModalApp } from './app/PrModalApp';
 import { mountPrModal } from './app/mountPrModal';
 import * as sessionViewApi from './lib/session-view';

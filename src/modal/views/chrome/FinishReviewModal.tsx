@@ -4,6 +4,7 @@ import { Button } from '@common/Button';
 import { MarkdownComposer } from '@common/MarkdownComposer';
 import { OptBtnHint } from '@common/OptBtnHint';
 import { canSubmitReviewVerdict } from '@lib/pr-edit-api';
+import './FinishReview.css';
 
 export type FinishReviewEvent = 'comment' | 'approve' | 'request_changes';
 

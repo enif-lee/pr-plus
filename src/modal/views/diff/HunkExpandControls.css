@@ -1,0 +1,43 @@
+/** Sibling residual CSS for hunk expand chrome (component-local). */
+.prp-hunk-expand-rail {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px 0 6px;
+  font-family: var(--prp-font);
+  flex-shrink: 0;
+}
+.prp-hunk-expand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  border: 1px solid color-mix(in srgb, var(--prp-accent) 22%, var(--prp-border-muted));
+  border-radius: 6px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--prp-bg, #fff) 88%, var(--prp-accent));
+}
+.prp-hunk-expand__btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 0 7px;
+  min-height: 20px;
+  border: 0;
+  background: transparent;
+  color: var(--prp-accent);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.prp-hunk-expand__btn + .prp-hunk-expand__btn {
+  border-left: 1px solid color-mix(in srgb, var(--prp-accent) 18%, var(--prp-border-muted));
+}
+.prp-hunk-expand__btn--dir { min-width: 22px; padding: 0 5px; }
+.prp-hunk-expand__btn--all { font-weight: 700; padding: 0 8px; }
+.prp-hunk-expand__btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--prp-accent) 12%, transparent);
+}
+.prp-hunk-expand__btn:disabled { opacity: 0.55; cursor: default; }

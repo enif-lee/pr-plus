@@ -1,0 +1,6 @@
+/**
+ * DEPRECATED barrel — CSS is loaded via TSX imports + styles/entry.css.
+ * Kept only so old docs/tools that mention styles/index.css still resolve.
+ * Prefer: main.tsx → ./styles/entry.css and component `import './X.css'`.
+ */
+@import './entry.css';

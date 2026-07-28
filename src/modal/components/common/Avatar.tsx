@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { avatarInitials } from './utils';
 import { githubAvatarUrl } from '@lib/ui-polish';
+import './Avatar.css';
 
 /**
  * User avatar: GitHub profile image with initials fallback.
@@ -25,14 +26,15 @@ export function Avatar({
   const src =
     (avatarUrl && String(avatarUrl).trim()) ||
     (name && typeof githubAvatarUrl === 'function' ? githubAvatarUrl(name, px) : '');
-  const sizeClass = size === 'sm' ? ' prp-avatar--sm' : '';
+  const sizeTw = size === 'sm' ? 'h-[22px] w-[22px] text-[9px]' : 'h-7 w-7 text-[10px]';
   const initials = avatarInitials(name || '?');
   const displayPx = size === 'sm' ? 22 : 28;
+  const base = `prp-avatar ${sizeTw} ${className}`.trim();
 
   if (!name && !src) {
     return (
       <span
-        className={`prp-avatar${sizeClass} ${className}`.trim()}
+        className={base}
         aria-hidden="true"
         title={title}
       >
@@ -44,7 +46,7 @@ export function Avatar({
   if (!src || failed) {
     return (
       <span
-        className={`prp-avatar${sizeClass} ${className}`.trim()}
+        className={base}
         aria-hidden="true"
         title={title || name}
       >
@@ -55,7 +57,7 @@ export function Avatar({
 
   return (
     <span
-      className={`prp-avatar prp-avatar--img${sizeClass} ${className}`.trim()}
+      className={`prp-avatar prp-avatar--img ${sizeTw} ${className}`.trim()}
       aria-hidden="true"
       title={title || name}
     >

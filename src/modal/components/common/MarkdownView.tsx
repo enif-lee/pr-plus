@@ -8,6 +8,7 @@ import { MermaidBlock } from './MermaidBlock';
 import { SuggestionBlock } from './SuggestionBlock';
 import { ImageViewer } from './ImageViewer';
 import { clearHighlightCodeCache, renderMdHtml } from './utils';
+import './MarkdownView.css';
 
 function MarkdownViewImpl({
   source,

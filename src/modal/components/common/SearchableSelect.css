@@ -1,0 +1,18 @@
+/**
+ * SearchableSelect residual.
+ */
+/* Residual class aliases used by commits aside / residual markup */
+.prp-timeline__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.prp-sselect-item--create {
+  border-top: 1px solid var(--prp-border-muted);
+  color: var(--prp-accent);
+  font-weight: 600;
+}

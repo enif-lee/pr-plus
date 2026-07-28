@@ -1,0 +1,695 @@
+/**
+ * Residual CSS (cannot fully express via Tailwind utilities).
+ * Colocated next to owning domain; imported from styles/index.css.
+ * Migrated from styles/parts/11-review-comment-composer-is-bottom-anchor.css
+ */
+
+/* Review comment composer is bottom-anchored only */
+.prp-selection-bar--bottom {
+  order: 99;
+  margin-top: auto;
+  border-bottom: 0;
+  border-top: 1px solid var(--prp-border-muted);
+  box-shadow: 0 -8px 24px rgba(1, 4, 9, 0.08);
+  animation: prp-float-up 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.prp-pending-bar {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--prp-border-muted);
+  background: color-mix(in srgb, var(--prp-accent) 8%, var(--prp-bg-muted));
+  font-size: 12px;
+  animation: prp-float-down 200ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.prp-diff-pane {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Row layout may use normal; code cells must preserve tabs/spaces (pre). */
+.prp-vline--split {
+  white-space: normal;
+}
+
+.prp-split-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  gap: 0;
+  border-left: 1px solid var(--prp-border-muted);
+}
+
+.prp-split-cols__left,
+.prp-split-cols__right {
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
+  border-right: 1px solid var(--prp-border-muted);
+}
+
+.prp-split-cols__ln {
+  flex: 0 0 36px;
+  text-align: right;
+  padding: 0 6px;
+  color: var(--prp-fg-muted);
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+  white-space: pre;
+}
+
+/* white-space:normal on the row collapses tabs unless code forces pre */
+.prp-split-cols code,
+.prp-split-cols .prp-code {
+  white-space: pre;
+  tab-size: 4;
+  word-break: normal;
+  overflow-wrap: normal;
+}
+
+.prp-file-header__viewed {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 4px 0 8px;
+  flex: 0 0 auto;
+}
+
+.prp-file-header__collapse {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--prp-fg);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  padding: 0;
+  margin: 0 2px 0 0;
+  border-radius: 6px;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
+  flex: 0 0 auto;
+}
+.prp-file-header__collapse:hover,
+.prp-file-header__collapse:focus-visible {
+  color: var(--prp-accent);
+  background: transparent;
+  outline: none;
+}
+
+.prp-pagination {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0;
+}
+
+.prp-leave-review-hint {
+  margin: 0 0 10px;
+  font-size: 12px;
+}
+
+.prp-float-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  pointer-events: none;
+  animation: prp-fade-in 160ms ease-out both;
+}
+
+.prp-float-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(1, 4, 9, 0.25);
+  pointer-events: auto;
+  animation: prp-fade-in 180ms ease-out both;
+}
+
+.prp-float-panel {
+  position: relative;
+  z-index: 1;
+  width: min(560px, 92%);
+  margin: 0 0 24px;
+  padding: 16px;
+  border-radius: 12px;
+  border: 1px solid var(--prp-border);
+  background: var(--prp-bg);
+  box-shadow: var(--prp-shadow);
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  animation: prp-float-up 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.prp-float-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.prp-float-panel__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.prp-section-skeleton {
+  min-height: 72px;
+  border-radius: 10px;
+  border: 1px solid var(--prp-border-muted);
+  background: linear-gradient(
+    90deg,
+    var(--prp-bg-muted) 0%,
+    color-mix(in srgb, var(--prp-bg-muted) 40%, var(--prp-border-muted)) 50%,
+    var(--prp-bg-muted) 100%
+  );
+  background-size: 200% 100%;
+  animation: prp-shimmer 1.2s ease-in-out infinite;
+  box-sizing: border-box;
+}
+
+.prp-section-skeleton--sm {
+  min-height: 40px;
+}
+
+.prp-section-skeleton--aside {
+  min-height: 64px;
+}
+
+.prp-diff-snippet {
+  margin: 8px 0 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--prp-border-muted);
+  background: var(--prp-bg-muted);
+  font-family: var(--prp-mono);
+  font-size: 11px;
+  line-height: 1.45;
+  overflow: auto;
+  max-height: 180px;
+  white-space: pre;
+}
+
+.prp-diff-snippet__line--add {
+  background: var(--prp-add-bg);
+}
+
+.prp-diff-snippet__line--del {
+  background: var(--prp-del-bg);
+}
+
+.prp-diff-snippet__line--hunk {
+  color: var(--prp-accent);
+}
+
+.prp-diff-snippet__line--hit {
+  outline: 1px solid color-mix(in srgb, var(--prp-accent) 50%, transparent);
+  background: color-mix(in srgb, var(--prp-accent) 12%, transparent);
+}
+
+/* Review-thread nested replies use .prp-review-thread only (not issue conversation) */
+
+.prp-selection-bar__meta {
+  font-size: 12px;
+  color: var(--prp-fg);
+}
+
+.prp-selection-bar__meta code {
+  font-family: var(--prp-mono);
+  color: var(--prp-accent);
+}
+
+.prp-rich-composer {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.prp-mdc__write {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+}
+
+.prp-composer-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% - 2px);
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  border: 1px solid var(--prp-border);
+  border-radius: 8px;
+  background: var(--prp-bg);
+  box-shadow: 0 8px 24px rgba(1, 4, 9, 0.16);
+  max-height: 180px;
+  overflow: auto;
+  z-index: 50;
+}
+
+.prp-composer-menu__item {
+  appearance: none;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.prp-composer-menu__item:hover,
+.prp-composer-menu__item--active {
+  background: color-mix(in srgb, var(--prp-accent) 12%, transparent);
+}
+
+.prp-composer-hint {
+  font-size: 11px;
+}
+
+.prp-mermaid-wrap {
+  margin: 0.6em 0;
+  border: 1px solid var(--prp-border-muted);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--prp-bg-muted) 88%, var(--prp-fg-muted) 4%);
+  overflow: hidden;
+}
+.prp-mermaid__chrome {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-bottom: 1px solid color-mix(in srgb, var(--prp-border-muted) 80%, transparent);
+  background: color-mix(in srgb, var(--prp-bg) 70%, var(--prp-bg-muted));
+}
+.prp-mermaid__expand {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0;
+  padding: 3px 8px;
+  border: 1px solid var(--prp-border-muted);
+  border-radius: 6px;
+  background: var(--prp-bg);
+  color: var(--prp-fg-muted);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+}
+.prp-mermaid__expand:hover,
+.prp-mermaid__expand:focus-visible {
+  color: var(--prp-accent);
+  border-color: color-mix(in srgb, var(--prp-accent) 40%, var(--prp-border));
+  outline: none;
+}
+.prp-mermaid {
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  min-height: 48px;
+  /* Keep tall sequence/flow diagrams from dominating conversation comments */
+  max-height: 720px;
+  cursor: zoom-in;
+}
+.prp-mermaid svg {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  /* Soften any residual color mermaid injects */
+  filter: grayscale(0.15);
+}
+.prp-mermaid--loading {
+  display: flex;
+  align-items: center;
+  min-height: 48px;
+  margin: 0.6em 0;
+  padding: 12px;
+  border: 1px solid var(--prp-border-muted);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--prp-bg-muted) 88%, var(--prp-fg-muted) 4%);
+}
+.prp-mermaid__loading {
+  font-size: 12px;
+}
+.prp-mermaid--error {
+  white-space: pre-wrap;
+  font-size: 12px;
+  margin: 0.6em 0;
+}
+.prp-mermaid--error code {
+  display: block;
+  margin-bottom: 6px;
+  font-family: var(--prp-mono);
+  font-size: 11px;
+}
+
+/*
+ * Fullscreen Mermaid diagram viewer.
+ * Portaled into .prp-overlay (z-index 100000) so it stacks above .prp-modal.
+ * Own z-index within that context; if body-portaled, still beat page chrome.
+ */
+.prp-mermaid-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 100010; /* > .prp-overlay (100000) when on body; top of overlay when inside it */
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: stretch;
+  font-family: var(--prp-font);
+  font-size: 14px;
+  line-height: 1.5;
+  /* Self-contained light theme tokens (don't rely on parent inheritance) */
+  --prp-fg: #1f2328;
+  --prp-fg-muted: #656d76;
+  --prp-bg: #ffffff;
+  --prp-bg-muted: #f6f8fa;
+  --prp-border: #d0d7de;
+  --prp-border-muted: #d8dee4;
+  --prp-accent: #0969da;
+  /* Strong dark veil — still slightly translucent so modal context peeks through */
+  --prp-backdrop-alpha: 0.72;
+  --prp-backdrop-color: rgba(1, 4, 9, var(--prp-backdrop-alpha));
+  color: var(--prp-fg);
+  /* Root stays clear; dim is only on .prp-mermaid-viewer__backdrop */
+  background: transparent;
+  isolation: isolate;
+  pointer-events: auto;
+}
+.prp-mermaid-viewer[data-color-mode='dark'] {
+  --prp-fg: #e6edf3;
+  --prp-fg-muted: #8b949e;
+  --prp-bg: #0d1117;
+  --prp-bg-muted: #161b22;
+  --prp-border: #30363d;
+  --prp-border-muted: #21262d;
+  --prp-accent: #2f81f7;
+  --prp-backdrop-alpha: 0.82;
+  --prp-backdrop-color: rgba(1, 4, 9, var(--prp-backdrop-alpha));
+  color-scheme: dark;
+}
+.prp-mermaid-viewer__backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: var(--prp-backdrop-color, rgba(1, 4, 9, 0.72));
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.prp-mermaid-viewer__chrome {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  background: transparent;
+}
+.prp-mermaid-viewer__bar {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--prp-border-muted);
+  background: var(--prp-bg-muted);
+  color: var(--prp-fg);
+}
+.prp-mermaid-viewer__title {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--prp-fg);
+}
+.prp-mermaid-viewer__hint {
+  font-size: 11px;
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--prp-fg-muted);
+}
+.prp-mermaid-viewer__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.prp-mermaid-viewer__close {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--prp-border);
+  border-radius: 6px;
+  opacity: 1;
+  color: var(--prp-fg-muted);
+  background: var(--prp-bg);
+}
+.prp-mermaid-viewer__stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  position: relative;
+  overflow: hidden;
+  /* Default grab hand — drag pans without Ctrl/⌘ */
+  cursor: grab;
+  /* Transparent so the shared dark veil + PR modal show through */
+  background: transparent;
+  touch-action: none;
+  user-select: none;
+}
+.prp-mermaid-viewer__stage--panning {
+  cursor: grabbing;
+}
+.prp-mermaid-viewer__canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+  /* scale/translate from JS fit + pan/zoom; origin top-left of content */
+  transform-origin: 0 0;
+  will-change: transform;
+  padding: 0;
+  box-sizing: border-box;
+  /* Vector SVG — no max-width so fit scale can enlarge crisply */
+  line-height: 0;
+  cursor: inherit;
+  pointer-events: none; /* stage owns drag/zoom; SVG is visual only */
+}
+.prp-mermaid-viewer__canvas svg {
+  max-width: none !important;
+  max-height: none !important;
+  width: auto !important;
+  height: auto !important;
+  display: block;
+  /* Keep intrinsic viewBox resolution; CSS scale handles display size */
+  shape-rendering: geometricPrecision;
+  text-rendering: geometricPrecision;
+  filter: grayscale(0.1);
+  background: var(--prp-bg);
+  border-radius: 10px;
+  padding: 20px;
+  border: 1px solid var(--prp-border-muted);
+  box-shadow: 0 12px 40px rgba(1, 4, 9, 0.14);
+  cursor: inherit;
+  pointer-events: none;
+}
+.prp-mermaid-viewer[data-color-mode='dark'] .prp-mermaid-viewer__canvas svg {
+  box-shadow: 0 8px 28px rgba(1, 4, 9, 0.45);
+}
+
+/*
+ * Fullscreen image viewer (same shell as mermaid viewer).
+ * Portaled into .prp-overlay; Esc closes viewer only.
+ */
+.prp-image-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 100010;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: stretch;
+  font-family: var(--prp-font);
+  font-size: 14px;
+  line-height: 1.5;
+  --prp-fg: #1f2328;
+  --prp-fg-muted: #656d76;
+  --prp-bg: #ffffff;
+  --prp-bg-muted: #f6f8fa;
+  --prp-border: #d0d7de;
+  --prp-border-muted: #d8dee4;
+  --prp-accent: #0969da;
+  --prp-backdrop-alpha: 0.72;
+  --prp-backdrop-color: rgba(1, 4, 9, var(--prp-backdrop-alpha));
+  color: var(--prp-fg);
+  background: transparent;
+  isolation: isolate;
+  pointer-events: auto;
+}
+.prp-image-viewer[data-color-mode='dark'] {
+  --prp-fg: #e6edf3;
+  --prp-fg-muted: #8b949e;
+  --prp-bg: #0d1117;
+  --prp-bg-muted: #161b22;
+  --prp-border: #30363d;
+  --prp-border-muted: #21262d;
+  --prp-accent: #2f81f7;
+  --prp-backdrop-alpha: 0.82;
+  --prp-backdrop-color: rgba(1, 4, 9, var(--prp-backdrop-alpha));
+  color-scheme: dark;
+}
+.prp-image-viewer__backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: var(--prp-backdrop-color, rgba(1, 4, 9, 0.72));
+}
+.prp-image-viewer__chrome {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  background: transparent;
+}
+.prp-image-viewer__bar {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--prp-border-muted);
+  background: var(--prp-bg-muted);
+  color: var(--prp-fg);
+}
+.prp-image-viewer__title {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--prp-fg);
+  max-width: min(48vw, 420px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prp-image-viewer__hint {
+  font-size: 11px;
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--prp-fg-muted);
+}
+.prp-image-viewer__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.prp-image-viewer__close {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--prp-border);
+  border-radius: 6px;
+  opacity: 1;
+  color: var(--prp-fg-muted);
+  background: var(--prp-bg);
+}
+.prp-image-viewer__stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  position: relative;
+  overflow: hidden;
+  cursor: grab;
+  background: transparent;
+  touch-action: none;
+  user-select: none;
+}
+.prp-image-viewer__stage--panning {
+  cursor: grabbing;
+}
+.prp-image-viewer__canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+  line-height: 0;
+  cursor: inherit;
+  pointer-events: none;
+}
+.prp-image-viewer__img {
+  display: block;
+  max-width: none !important;
+  max-height: none !important;
+  width: auto;
+  height: auto;
+  border-radius: 8px;
+  box-shadow: 0 12px 40px rgba(1, 4, 9, 0.28);
+  background: var(--prp-bg);
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+
+/* Composer / textarea residual (from residual) */
+
+.prp-composer {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+
+.prp-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--prp-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  resize: vertical;
+  min-height: 72px;
+  background: var(--prp-bg);
+  color: var(--prp-fg);
+}
+
+
+.prp-composer__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}

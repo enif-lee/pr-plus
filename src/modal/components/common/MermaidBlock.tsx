@@ -6,6 +6,7 @@ import {
 } from '../../lib/mermaid-lazy';
 import { IconFullscreen } from './icons';
 import { MermaidViewer } from './MermaidViewer';
+import './MermaidBlock.css';
 
 /** Track PR modal shell light/dark so diagrams re-render when theme flips. */
 function useShellColorMode(): 'light' | 'dark' {
