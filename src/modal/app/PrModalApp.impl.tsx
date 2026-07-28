@@ -158,6 +158,7 @@ import {
   calculateVisibleRange,
   scrollTopForIndex,
   scrollTopToRevealIndex,
+  applyProgrammaticDiffScroll,
 } from '../lib/virtual-range';
 import {
   beginLineSelection,
@@ -1797,16 +1798,17 @@ export function PrModalApp({
         rowOffsetList,
         { align: 'third' }
       );
-      // Single write path: DOM + store. VirtualDiff applies prop change once.
-      // Extra rAF/scrollIntoView stacks cause visible shake on ⌥J/K.
-      const el = listRef.current;
-      if (el && Math.abs((el.scrollTop || 0) - top) > 1) {
-        el.scrollTop = top;
-      }
-      const prevTop = Number(useModalStore.getState().scrollTop) || 0;
-      if (Math.abs(prevTop - top) > 1) {
-        setScrollTop(top);
-      }
+      // DOM-first thrift (same class as selection): avoid setScrollTop every hop
+      // so DiffWorkspace leaf does not re-render on ⌥J/K key-repeat.
+      const el = listRef.current as HTMLElement | null;
+      applyProgrammaticDiffScroll(el, top, {
+        storeTop: useModalStore.getState().scrollTop,
+        setStoreTop: setScrollTop,
+        minDomDelta: 1,
+        // Sync store only on real jumps (rebuild hold); native scroll event
+        // still range-gates VirtualDiff between store updates.
+        minStoreDelta: Math.max(48, avgH * 3),
+      });
       return true;
     },
     [avgH, /* vh-ref */, virtualRows.length, rowOffsetList, setScrollTop]
@@ -2088,34 +2090,67 @@ export function PrModalApp({
     });
   }
 
+  /** rAF-coalesce file/page nav under key-repeat (selection already does this). */
+  const pendingFileNavDeltaRef = useRef(0);
+  const fileNavRafRef = useRef(0);
+  const pendingPageScrollDirRef = useRef(0);
+  const pageScrollRafRef = useRef(0);
+
   /** Diff file step — same DFS order as explorer + Diff list (displayFiles). */
   function navFile(delta: number) {
     if (typeof resolveAdjacentFileNav !== 'function') return;
-    const st = resolveAdjacentFileNav(displayFiles, activeFilePath, delta);
-    if (st.path) onSelectFile(st.path);
+    const d = delta < 0 ? -1 : 1;
+    pendingFileNavDeltaRef.current = d;
+    if (fileNavRafRef.current) return;
+    fileNavRafRef.current = requestAnimationFrame(() => {
+      fileNavRafRef.current = 0;
+      const step = pendingFileNavDeltaRef.current;
+      pendingFileNavDeltaRef.current = 0;
+      if (!step) return;
+      const st = resolveAdjacentFileNav(displayFiles, activeFilePath, step);
+      if (st.path) onSelectFile(st.path);
+    });
   }
 
-  /** Scroll Diff virtual list by ~one viewport page. */
+  /**
+   * Scroll Diff virtual list by ~one viewport page.
+   * DOM-only under key-hold: VirtualDiff range-gates via native scroll event.
+   * Never mirrors store per hop (was re-rendering whole DiffWorkspace).
+   */
   function scrollDiffPage(delta: number) {
-    const el = listRef.current as HTMLElement | null;
-    if (!el) return;
-    const next =
-      typeof nextScrollTopByPage === 'function'
-        ? nextScrollTopByPage(
-            el.scrollTop,
-            el.clientHeight,
-            el.scrollHeight,
-            delta
-          )
-        : Math.max(
-            0,
-            Math.min(
-              el.scrollHeight - el.clientHeight,
-              el.scrollTop + (delta < 0 ? -1 : 1) * el.clientHeight * 0.9
+    const dir = delta < 0 ? -1 : 1;
+    pendingPageScrollDirRef.current = dir;
+    if (pageScrollRafRef.current) return;
+    pageScrollRafRef.current = requestAnimationFrame(() => {
+      pageScrollRafRef.current = 0;
+      const d = pendingPageScrollDirRef.current;
+      pendingPageScrollDirRef.current = 0;
+      if (!d) return;
+      const el = listRef.current as HTMLElement | null;
+      if (!el) return;
+      const next =
+        typeof nextScrollTopByPage === 'function'
+          ? nextScrollTopByPage(
+              el.scrollTop,
+              el.clientHeight,
+              el.scrollHeight,
+              d
             )
-          );
-    el.scrollTop = next;
-    setScrollTop(next);
+          : Math.max(
+              0,
+              Math.min(
+                el.scrollHeight - el.clientHeight,
+                el.scrollTop + d * el.clientHeight * 0.9
+              )
+            );
+      // DOM-first; minStoreDelta = Infinity → never setScrollTop for page hops
+      applyProgrammaticDiffScroll(el, next, {
+        storeTop: useModalStore.getState().scrollTop,
+        setStoreTop: setScrollTop,
+        minDomDelta: 0.5,
+        minStoreDelta: Number.POSITIVE_INFINITY,
+      });
+    });
   }
 
   /**
@@ -2432,13 +2467,12 @@ export function PrModalApp({
               { padTop: stickyTop + 2, padBottom: 2 }
             )
           : cur;
-      if (Math.abs(top - cur) < 0.5) return;
-      if (el) el.scrollTop = top;
-      // Only sync store on real jumps so App does not re-render every key
-      const prev = Number(useModalStore.getState().scrollTop) || 0;
-      if (Math.abs(prev - top) >= Math.max(24, avgH * 2)) {
-        setScrollTop(top);
-      }
+      applyProgrammaticDiffScroll(el, top, {
+        storeTop: useModalStore.getState().scrollTop,
+        setStoreTop: setScrollTop,
+        minDomDelta: 0.5,
+        minStoreDelta: Math.max(24, avgH * 2),
+      });
     } catch {
       /* ignore */
     }
@@ -3655,7 +3689,9 @@ export function PrModalApp({
     });
     const idx = fileStarts.get(path);
     if (typeof idx === 'number') {
-      // Pin file header to the first line of the Diff scrollport
+      // Pin file header to the first line of the Diff scrollport — DOM first.
+      // Store sync thrifted so we don't stack an extra DiffWorkspace paint on
+      // top of activeFilePath (already batched in this handler).
       const top = scrollTopForIndex(
         idx,
         avgH,
@@ -3664,8 +3700,15 @@ export function PrModalApp({
         rowOffsetList,
         { align: 'start' }
       );
-      setScrollTop(top);
-      if (listRef.current) listRef.current.scrollTop = top;
+      const el = listRef.current as HTMLElement | null;
+      applyProgrammaticDiffScroll(el, top, {
+        storeTop: useModalStore.getState().scrollTop,
+        setStoreTop: setScrollTop,
+        minDomDelta: 0.5,
+        // File pin often needs store for post-expand rebuild hold — allow
+        // modest thrift still (skip no-op / sub-pixel).
+        minStoreDelta: 1,
+      });
     }
     // Keep left nav focus visible when stepping to an off-screen file
     scrollFileNavRowIntoView(String(path || ''));

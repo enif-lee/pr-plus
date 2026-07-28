@@ -243,3 +243,83 @@ export function scrollTopToRevealIndex(
   // Below viewport → pin row bottom to viewport bottom (- bottom inset)
   return clamp(rowBottom - vp + bottomInset, 0, maxScroll);
 }
+
+/**
+ * Plan a programmatic Diff-list scroll (file / page / comment / selection).
+ * DOM writes are preferred for every meaningful hop; store sync is thrifted so
+ * leaf DiffWorkspace does not re-render on every key-repeat frame.
+ *
+ * @param currentDomTop scroller.scrollTop
+ * @param currentStoreTop modal-store scrollTop (may be stale)
+ * @param nextTop desired scrollTop
+ * @param opts.minDomDelta min |Δ| to write DOM (default 0.5)
+ * @param opts.minStoreDelta min |Δ| vs store to call setScrollTop (default 24).
+ *   Pass Infinity / a huge value to never sync store (page scroll under hold).
+ */
+export function planProgrammaticScroll(
+  currentDomTop: unknown,
+  currentStoreTop: unknown,
+  nextTop: unknown,
+  opts?: { minDomDelta?: number; minStoreDelta?: number } | null
+): { top: number; applyDom: boolean; applyStore: boolean } {
+  const top = Math.max(0, Number(nextTop) || 0);
+  const dom = Math.max(0, Number(currentDomTop) || 0);
+  const store = Math.max(0, Number(currentStoreTop) || 0);
+  const minDomRaw = Number(opts?.minDomDelta);
+  const minDom = Number.isFinite(minDomRaw) ? Math.max(0, minDomRaw) : 0.5;
+  // Allow POSITIVE_INFINITY so page-scroll can skip store entirely
+  // (Number.isFinite(Infinity) is false — do not coerce to default 24).
+  const minStoreRaw =
+    opts?.minStoreDelta === undefined || opts?.minStoreDelta === null
+      ? 24
+      : Number(opts.minStoreDelta);
+  const minStore = Number.isNaN(minStoreRaw) ? 24 : minStoreRaw;
+  return {
+    top,
+    applyDom: Math.abs(top - dom) >= minDom,
+    // finiteΔ >= Infinity is always false → never applyStore for page hops
+    applyStore: Math.abs(top - store) >= minStore,
+  };
+}
+
+/**
+ * DOM-first programmatic scroll. Optionally sync store only when
+ * `planProgrammaticScroll` says so (selection-class thrift).
+ *
+ * @returns what was applied
+ */
+export function applyProgrammaticDiffScroll(
+  el: { scrollTop: number } | null | undefined,
+  nextTop: number,
+  opts?: {
+    storeTop?: number;
+    setStoreTop?: ((n: number) => void) | null;
+    minDomDelta?: number;
+    minStoreDelta?: number;
+  } | null
+): { appliedDom: boolean; appliedStore: boolean; top: number } {
+  const curDom =
+    el && typeof el.scrollTop === 'number' ? el.scrollTop : 0;
+  const storeTop =
+    opts?.storeTop != null && Number.isFinite(Number(opts.storeTop))
+      ? Number(opts.storeTop)
+      : curDom;
+  const plan = planProgrammaticScroll(curDom, storeTop, nextTop, {
+    minDomDelta: opts?.minDomDelta,
+    minStoreDelta: opts?.minStoreDelta,
+  });
+  let appliedDom = false;
+  let appliedStore = false;
+  if (plan.applyDom && el) {
+    el.scrollTop = plan.top;
+    appliedDom = true;
+  }
+  if (
+    plan.applyStore &&
+    typeof opts?.setStoreTop === 'function'
+  ) {
+    opts.setStoreTop(plan.top);
+    appliedStore = true;
+  }
+  return { appliedDom, appliedStore, top: plan.top };
+}
