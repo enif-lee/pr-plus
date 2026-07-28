@@ -73,7 +73,7 @@ export function createEmptyStore() {
     meta: {},
     files: emptyListSlice(),
     commits: emptyListSlice(),
-    comments: { items: [], pageMeta: null, settled: false },
+    comments: { items: [], pageMeta: null, timelineEvents: [], settled: false },
     reviews: emptyListSlice(),
     checks: {
       data: {
@@ -162,6 +162,9 @@ export function fromAppDetail(flat) {
   store.comments = {
     items: Array.isArray(flat.comments) ? flat.comments.slice() : [],
     pageMeta: flat.commentsMeta || null,
+    timelineEvents: Array.isArray(flat.timelineEvents)
+      ? flat.timelineEvents.slice()
+      : [],
     settled:
       Boolean(settled.comments) ||
       (Array.isArray(flat.comments) && flat.comments.length > 0),
@@ -241,6 +244,9 @@ export function toAppDetail(store) {
     commits: Array.isArray(store.commits?.items) ? store.commits.items : [],
     comments: Array.isArray(store.comments?.items) ? store.comments.items : [],
     commentsMeta: store.comments?.pageMeta || null,
+    timelineEvents: Array.isArray(store.comments?.timelineEvents)
+      ? store.comments.timelineEvents
+      : [],
     reviews: Array.isArray(store.reviews?.items) ? store.reviews.items : [],
     checks: store.checks?.data || {
       state: 'unknown',
@@ -377,9 +383,18 @@ export function applyCommits(store, commits, opts: ApplyOpts = {}) {
 
 export function applyComments(store, comments, opts: ApplyOpts = {}) {
   if (!store) return store;
+  const prevEvents = Array.isArray(store.comments?.timelineEvents)
+    ? store.comments.timelineEvents
+    : [];
   store.comments = {
     items: Array.isArray(comments) ? comments.slice() : [],
     pageMeta: opts.pageMeta != null ? opts.pageMeta : store.comments.pageMeta,
+    timelineEvents:
+      opts.timelineEvents != null
+        ? Array.isArray(opts.timelineEvents)
+          ? opts.timelineEvents.slice()
+          : []
+        : prevEvents,
     settled: opts.settled !== false,
   };
   return store;

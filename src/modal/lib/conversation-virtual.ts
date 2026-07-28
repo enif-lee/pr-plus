@@ -35,6 +35,8 @@ export const CONV_EST_COMPOSER = 168;
 export const CONV_EST_MERGE = 132;
 export const CONV_EST_PAGINATION = 48;
 export const CONV_EST_EMPTY = 40;
+/** Compact system event row (title rename, draft/ready, labels, …) */
+export const CONV_EST_TIMELINE_EVENT = 36;
 export const CONV_EST_MIN = 40;
 export const CONV_EST_MAX = 2400;
 /** Row bottom padding (= --prp-gap-stack) included in measured height */
@@ -185,6 +187,16 @@ export function estimateConversationRowHeight(row, opts: any = {}) {
     h += 96;
     return clampEst(h) + CONV_ROW_GAP;
   }
+  if (kind === 'timeline-event') {
+    // Single-line system narrative; wrap rarely for long titles
+    const parts = Array.isArray(item.parts) ? item.parts : [];
+    const textLen = parts.reduce(
+      (n: number, p: any) => n + String(p?.text || p?.name || p?.login || p?.title || '').length,
+      0
+    );
+    const lines = textLen > 90 ? 2 : 1;
+    return clampEst(CONV_EST_TIMELINE_EVENT * lines) + CONV_ROW_GAP;
+  }
   const bodyLen = String(item.body || '').length;
   let h = CONV_EST_COMMENT + Math.min(200, Math.floor(bodyLen / 3));
   if (kind === 'review' && item.state) h += 12;
@@ -222,6 +234,66 @@ export function conversationRowOffsets(rows, measured, opts: any = {}) {
       offsets[i] + conversationRowHeight(list[i], measured, opts);
   }
   return offsets;
+}
+
+/** Feed rows that participate in the conversation vertical timeline rail. */
+function isConversationFeedRow(row: any) {
+  if (!row || row.type !== 'item' || !row.item) return false;
+  const k = String(row.item.kind || '');
+  return (
+    k === 'timeline-event' ||
+    k === 'issue-comment' ||
+    k === 'review-thread' ||
+    k === 'review-comment' ||
+    k === 'review-group' ||
+    k === 'review'
+  );
+}
+
+/**
+ * Y anchor for the rail on a feed row (avatar center), relative to spacer top.
+ * System events: avatar is vertically centered on the compact row.
+ * Cards/threads: avatar sits near the top of the card.
+ */
+function feedRowRailAnchorY(row: any, rowTop: number, rowH: number) {
+  const kind = String(row?.item?.kind || '');
+  if (kind === 'timeline-event') {
+    return rowTop + rowH / 2;
+  }
+  // Card meta avatar ≈ 12–14px pad + ~16px radius; stay within content box
+  const contentH = Math.max(rowH - CONV_ROW_GAP, 1);
+  const avatarMid = 22;
+  return rowTop + Math.min(avatarMid, contentH / 2);
+}
+
+/**
+ * Continuous vertical-rail for conversation feed items (events / threads / comments).
+ * One unbroken segment from the **center** of the first feed row to the **center**
+ * of the last — so no stub line sticks out above the first item or below the last.
+ * Drawn on the virtual spacer so it survives window virtualization.
+ *
+ * @returns {{ top: number, height: number }[]}
+ */
+export function timelineEventRailSegments(rows, measured, opts: any = {}) {
+  const list = Array.isArray(rows) ? rows : [];
+  let firstAnchor: number | null = null;
+  let lastAnchor = 0;
+  let y = 0;
+  for (let i = 0; i < list.length; i++) {
+    const row = list[i];
+    const h = conversationRowHeight(row, measured, opts);
+    if (isConversationFeedRow(row)) {
+      const anchor = feedRowRailAnchorY(row, y, h);
+      if (firstAnchor == null) firstAnchor = anchor;
+      lastAnchor = anchor;
+    }
+    y += h;
+  }
+  if (firstAnchor == null) return [];
+  const height = lastAnchor - firstAnchor;
+  // Single feed item: no vertical bar (would only be a zero-length stub)
+  if (height < 1) return [];
+  return [{ top: firstAnchor, height }];
 }
 
 /**

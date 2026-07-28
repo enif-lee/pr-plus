@@ -8,6 +8,8 @@ const prefAutoOpenEmbed = document.getElementById('pref-auto-open-embed');
 const prefFastReview = document.getElementById('pref-fast-review');
 const prefReverseComments = document.getElementById('pref-reverse-comments');
 const prefSingleFileMode = document.getElementById('pref-single-file-mode');
+const prefTreeView = document.getElementById('pref-tree-view');
+const restartOnboardingBtn = document.getElementById('restart-onboarding');
 const clearIdbBtn = document.getElementById('clear-idb');
 const enterpriseHostInput = document.getElementById('enterprise-host');
 const enterpriseTokenInput = document.getElementById('enterprise-token');
@@ -24,6 +26,8 @@ const DEFAULT_PREFS = {
   reverseComments: true,
   autoOpenEmbed: true,
   singleFileMode: false,
+  treeView: true,
+  onboardingCompleted: false,
 };
 
 /** @type {{ host: string, mask: string }[]} */
@@ -58,6 +62,8 @@ function renderPrefs(prefs: any) {
   prefReverseComments.checked = p.reverseComments !== false;
   // @ts-expect-error classic content-script dynamic shapes
   if (prefSingleFileMode) prefSingleFileMode.checked = p.singleFileMode === true;
+  // @ts-expect-error classic content-script dynamic shapes
+  if (prefTreeView) prefTreeView.checked = p.treeView !== false;
 }
 
 function normalizeHostInput(raw: any) {
@@ -237,6 +243,8 @@ async function savePrefs() {
       reverseComments: Boolean(prefReverseComments.checked),
   // @ts-expect-error classic content-script dynamic shapes
       singleFileMode: Boolean(prefSingleFileMode?.checked),
+  // @ts-expect-error classic content-script dynamic shapes
+      treeView: Boolean(prefTreeView?.checked),
     };
     const res = await send({ type: 'PR_TREE_PREFS_SET', prefs });
     if (!res?.ok && res?.error) {
@@ -303,6 +311,7 @@ prefAutoOpenEmbed?.addEventListener('change', () => void savePrefs());
 prefFastReview.addEventListener('change', () => void savePrefs());
 prefReverseComments.addEventListener('change', () => void savePrefs());
 prefSingleFileMode?.addEventListener('change', () => void savePrefs());
+prefTreeView?.addEventListener('change', () => void savePrefs());
 
 enterpriseHostInput?.addEventListener('input', () => {
   // @ts-expect-error classic content-script dynamic shapes
@@ -377,6 +386,56 @@ addHostAccountBtn?.addEventListener('click', async () => {
 
 enterpriseTokenInput?.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') addHostAccountBtn?.click();
+});
+
+const INSTALL_PULLS_URL = 'https://github.com/enif-lee/pr-plus/pulls';
+/** Same demo PR as onboarding (multi-file + review threads). */
+const DEMO_PR_URL = 'https://github.com/enif-lee/pr-plus/pull/1';
+
+restartOnboardingBtn?.addEventListener('click', async () => {
+  // @ts-expect-error classic content-script dynamic shapes
+  restartOnboardingBtn.disabled = true;
+  try {
+    // Clear one-shot flag (dedicated key + prefs mirror)
+    const res = await send({
+      type: 'PR_TREE_ONBOARDING_SET',
+      completed: false,
+    });
+    if (!res?.ok && res?.error) {
+      throw new Error(res.error);
+    }
+    // Also notify open GitHub tabs so an active tour can remount
+    try {
+      const tabs = await chrome.tabs.query({
+        url: ['https://github.com/*', 'https://*.github.com/*'],
+      });
+      await Promise.all(
+        (tabs || []).map(
+          (tab) =>
+            tab.id != null &&
+            chrome.tabs
+              .sendMessage(tab.id, { type: 'PR_TREE_ONBOARDING_RESTART' })
+              .catch(() => null)
+        )
+      );
+    } catch {
+      /* optional */
+    }
+    // Open pulls so the tour can open demo PR #1 from the list
+    try {
+      await chrome.tabs.create({ url: INSTALL_PULLS_URL });
+    } catch {
+      chrome.tabs?.create?.({ url: INSTALL_PULLS_URL });
+    }
+    setStatus(
+      `Onboarding restarted — use demo PR #1 (${DEMO_PR_URL.split('/').slice(-2).join('/')})`
+    );
+  } catch (err) {
+    setStatus(err.message || 'Could not restart onboarding', true);
+  } finally {
+    // @ts-expect-error classic content-script dynamic shapes
+    restartOnboardingBtn.disabled = false;
+  }
 });
 
 clearIdbBtn?.addEventListener('click', async () => {

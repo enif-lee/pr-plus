@@ -140,6 +140,15 @@
       });
     }
 
+    // Timeline system events ride with the comments side-fetch
+    if (nextSettled.comments && Object.prototype.hasOwnProperty.call(next, 'timelineEvents')) {
+      out.timelineEvents = asArray(next.timelineEvents) || [];
+    } else {
+      out.timelineEvents = mergeListField(prev.timelineEvents, next.timelineEvents, {
+        trustEmpty: Boolean(nextSettled.comments),
+      });
+    }
+
     // checks
     if (nextSettled.checks && next.checks) {
       out.checks = next.checks;

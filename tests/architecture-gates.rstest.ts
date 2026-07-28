@@ -89,6 +89,7 @@ describe('architecture gates', () => {
         'restore-embed-list-focus.ts',
         'list-row-lifecycle.ts',
         'pulls-palette.ts',
+        'auto-refresh-watch.ts',
         'click-intercept.ts',
       ])
     );

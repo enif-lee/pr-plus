@@ -1282,6 +1282,58 @@ var PRTreeFetch = {
       }
     );
   },
+  /**
+   * Lightweight head SHA probe for auto-refresh staleness checks.
+   * @returns {Promise<{ headSha: string, baseSha: string, updatedAt: string|null, draft: boolean, state: string, number: number }>}
+   */
+  async fetchPrHeadProbe(owner, repo, number, opts: any = {}) {
+    const res = await send(
+      {
+        type: 'PR_TREE_FETCH_PR_HEAD_PROBE',
+        owner,
+        repo,
+        number,
+      },
+      { signal: opts.signal || null }
+    );
+    if (!res?.ok) {
+      if (res?.aborted) throw makeAbortError();
+      const err = new Error(res?.error || 'Failed to probe PR head');
+      err.status = res?.status;
+      throw err;
+    }
+    return (
+      res.probe || {
+        headSha: '',
+        baseSha: '',
+        updatedAt: null,
+        draft: false,
+        state: '',
+        number: Number(number) || 0,
+      }
+    );
+  },
+  /**
+   * PR conversation system events (title rename, draft/ready, labels, …).
+   * @returns {Promise<Array>}
+   */
+  async fetchPrTimelineEvents(owner, repo, number, opts: any = {}) {
+    const res = await send(
+      {
+        type: 'PR_TREE_FETCH_PR_TIMELINE_EVENTS',
+        owner,
+        repo,
+        number,
+      },
+      { signal: opts.signal || null }
+    );
+    if (!res?.ok) {
+      if (res?.aborted) throw makeAbortError();
+      // Soft-fail: conversation still works without system events
+      return [];
+    }
+    return Array.isArray(res.events) ? res.events : [];
+  },
   /** Submitted PR reviews list. */
   async fetchPrReviews(owner, repo, number, opts: any = {}) {
     const res = await send(
@@ -1501,6 +1553,8 @@ const DEFAULT_PREFS = {
   reverseComments: true,
   autoOpenEmbed: true,
   singleFileMode: false,
+  treeView: true,
+  onboardingCompleted: false,
 };
 
 function normalizePrefsLocal(raw) {
@@ -1522,6 +1576,12 @@ function normalizePrefsLocal(raw) {
       typeof src.singleFileMode === 'boolean'
         ? src.singleFileMode
         : DEFAULT_PREFS.singleFileMode,
+    treeView:
+      typeof src.treeView === 'boolean' ? src.treeView : DEFAULT_PREFS.treeView,
+    onboardingCompleted:
+      typeof src.onboardingCompleted === 'boolean'
+        ? src.onboardingCompleted
+        : DEFAULT_PREFS.onboardingCompleted,
   };
 }
 
@@ -1580,6 +1640,31 @@ var PRTreeStorage = {
       throw new Error(res?.error || 'Failed to save prefs');
     }
     return normalizePrefsLocal(res.prefs);
+  },
+  async getOnboardingCompleted() {
+    try {
+      const res = await send({ type: 'PR_TREE_ONBOARDING_GET' });
+      if (res?.ok) return Boolean(res.completed);
+    } catch {
+      /* fall through */
+    }
+    // Legacy: prefs field
+    try {
+      const prefs = await this.getExtensionPrefs();
+      return Boolean(prefs?.onboardingCompleted);
+    } catch {
+      return false;
+    }
+  },
+  async setOnboardingCompleted(completed) {
+    const res = await send({
+      type: 'PR_TREE_ONBOARDING_SET',
+      completed: Boolean(completed),
+    });
+    if (!res?.ok) {
+      throw new Error(res?.error || 'Failed to save onboarding state');
+    }
+    return Boolean(res.completed);
   },
   watchExtensionPrefs(onChange) {
     if (!(globalThis as any).chrome?.runtime?.onMessage || typeof onChange !== 'function') {

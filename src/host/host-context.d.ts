@@ -48,6 +48,7 @@ export interface HostCurrentSession {
  * restore-embed-list-focus — restore, embed watch, list focus
  * list-row-lifecycle — pulls list open / hotkeys
  * pulls-palette — pulls-page palette
+ * auto-refresh-watch — head.sha poll (modal + embed), activity gate
  * click-intercept — onClickCapture + install
  */
 export interface HostModuleBoundary {

@@ -34,12 +34,14 @@ function createPrTreeApp(deps: any) {
   const { buildPrTree } = PRTree;
   const { fetchOpenPulls, fetchDanglingPulls, findDanglingPrNumbers } = PRTreeFetch;
   // Content context: watchGithubToken is signal-only (never receives the secret).
-  const { watchGithubToken } = PRTreeStorage;
+  const { watchGithubToken, getExtensionPrefs, setExtensionPrefs, watchExtensionPrefs } =
+    PRTreeStorage || {};
 
   let cachedForest = null;
   let cachedPrs = null;
   let cachedRepoKey = null;
   let treeModeEnabled = true;
+  let prefsUnsub = null;
   let active = false;
   let toggleButton = null;
   let syncTimer = null;
@@ -140,6 +142,53 @@ function createPrTreeApp(deps: any) {
     return true;
   }
 
+  function setTreeModeEnabled(next: boolean, { persist = false } = {}) {
+    const enabled = Boolean(next);
+    if (treeModeEnabled === enabled && !persist) {
+      // Still sync label if toggle exists
+      if (toggleButton && typeof toggleButton.setMode === 'function') {
+        toggleButton.setMode(enabled ? 'tree' : 'original');
+      }
+      return;
+    }
+    treeModeEnabled = enabled;
+    if (currentPullsContext()) {
+      if (enabled) applyTreeView();
+      else restoreOriginalView();
+    }
+    if (toggleButton && typeof toggleButton.setMode === 'function') {
+      try {
+        toggleButton.setMode(enabled ? 'tree' : 'original');
+      } catch {
+        /* ignore */
+      }
+    }
+    if (persist && typeof setExtensionPrefs === 'function') {
+      void setExtensionPrefs({ treeView: enabled }).catch(() => {});
+    }
+  }
+
+  async function hydrateTreeViewPref() {
+    if (typeof getExtensionPrefs !== 'function') return;
+    try {
+      const prefs = await getExtensionPrefs();
+      if (prefs && typeof prefs.treeView === 'boolean') {
+        treeModeEnabled = prefs.treeView;
+      }
+    } catch {
+      /* keep default */
+    }
+  }
+
+  function ensurePrefsWatch() {
+    if (prefsUnsub || typeof watchExtensionPrefs !== 'function') return;
+    prefsUnsub = watchExtensionPrefs((prefs: any) => {
+      if (prefs && typeof prefs.treeView === 'boolean') {
+        setTreeModeEnabled(prefs.treeView, { persist: false });
+      }
+    });
+  }
+
   function ensureToggle() {
     const inDoc = document.getElementById(PR_TREE_TOGGLE_ID);
     if (inDoc && toggleButton === inDoc) return toggleButton;
@@ -147,12 +196,10 @@ function createPrTreeApp(deps: any) {
 
     toggleButton = createToggleButton(document, {
       onShowTree: () => {
-        treeModeEnabled = true;
-        applyTreeView();
+        setTreeModeEnabled(true, { persist: true });
       },
       onShowOriginal: () => {
-        treeModeEnabled = false;
-        restoreOriginalView();
+        setTreeModeEnabled(false, { persist: true });
       },
       initialMode: treeModeEnabled ? 'tree' : 'original',
     });
@@ -310,6 +357,9 @@ function createPrTreeApp(deps: any) {
       const ctx = currentPullsContext();
       if (!ctx) return { ok: false, reason: 'not-pulls-page' };
 
+      await hydrateTreeViewPref();
+      ensurePrefsWatch();
+
       const { repoInfo, key, path } = ctx;
 
       // Soft-wait for list shell; GitHub often paints shell before rows.
@@ -422,6 +472,8 @@ function createPrTreeApp(deps: any) {
       clearCache();
       scheduleSync(0);
     });
+    ensurePrefsWatch();
+    void hydrateTreeViewPref();
 
     const onNav = () => scheduleSync(50);
     window.addEventListener('popstate', onNav);

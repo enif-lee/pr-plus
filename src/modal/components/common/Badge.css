@@ -8,23 +8,30 @@
   text-transform: none;
   vertical-align: middle;
 }
+/* Non-bordered fill chip */
+.prp-badge--soft {
+  border-color: transparent;
+}
 .prp-badge--ok,
 .prp-badge--approved,
 .prp-badge--success,
-.prp-badge--open {
+.prp-badge--open,
+.prp-badge--ready {
   color: var(--prp-ok);
   background: var(--prp-add-bg);
   border-color: color-mix(in srgb, var(--prp-ok) 35%, transparent);
 }
 .prp-badge--warn,
 .prp-badge--changes_requested,
-.prp-badge--pending {
+.prp-badge--pending,
+.prp-badge--locked {
   color: var(--prp-warn);
   background: color-mix(in srgb, var(--prp-warn) 12%, var(--prp-bg));
   border-color: color-mix(in srgb, var(--prp-warn) 35%, transparent);
 }
 .prp-badge--danger,
-.prp-badge--failure {
+.prp-badge--failure,
+.prp-badge--closed {
   color: var(--prp-danger);
   background: var(--prp-del-bg);
   border-color: color-mix(in srgb, var(--prp-danger) 35%, transparent);
@@ -32,4 +39,34 @@
 .prp-badge--draft,
 .prp-badge--muted {
   color: var(--prp-fg-muted);
+}
+.prp-badge--accent,
+.prp-badge--reopened {
+  color: var(--prp-accent);
+  background: color-mix(in srgb, var(--prp-accent) 12%, var(--prp-bg));
+  border-color: color-mix(in srgb, var(--prp-accent) 35%, transparent);
+}
+.prp-badge--merged {
+  color: var(--prp-merged, #8250df);
+  background: color-mix(in srgb, var(--prp-merged, #8250df) 14%, var(--prp-bg));
+  border-color: color-mix(in srgb, var(--prp-merged, #8250df) 40%, transparent);
+}
+.prp-badge--soft.prp-badge--ok,
+.prp-badge--soft.prp-badge--approved,
+.prp-badge--soft.prp-badge--success,
+.prp-badge--soft.prp-badge--open,
+.prp-badge--soft.prp-badge--ready,
+.prp-badge--soft.prp-badge--warn,
+.prp-badge--soft.prp-badge--changes_requested,
+.prp-badge--soft.prp-badge--pending,
+.prp-badge--soft.prp-badge--locked,
+.prp-badge--soft.prp-badge--danger,
+.prp-badge--soft.prp-badge--failure,
+.prp-badge--soft.prp-badge--closed,
+.prp-badge--soft.prp-badge--accent,
+.prp-badge--soft.prp-badge--reopened,
+.prp-badge--soft.prp-badge--merged,
+.prp-badge--soft.prp-badge--draft,
+.prp-badge--soft.prp-badge--muted {
+  border-color: transparent;
 }

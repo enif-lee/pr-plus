@@ -9,6 +9,7 @@ import {
   applyFiles,
   applyReviews,
   applyCommits,
+  applyComments,
   applyDevelopment,
   createEmptyStore,
   applyMeta,
@@ -82,6 +83,41 @@ describe('detail-store isolation', () => {
     expect(flat.commits).toHaveLength(1);
     expect(flat._sideSettled.files).toBe(true);
     expect(flat._sideSettled.development).toBe(false);
+  });
+
+  test('comments side-write projects timelineEvents', () => {
+    const store = fromAppDetail({
+      owner: 'o',
+      repo: 'r',
+      number: 1,
+      title: 'T',
+    });
+    applyComments(
+      store,
+      [{ id: 1, author: 'a', body: 'hi', createdAt: '2026-01-01T00:00:00Z' }],
+      {
+        settled: true,
+        pageMeta: { hasMore: false },
+        timelineEvents: [
+          {
+            id: 9,
+            event: 'renamed',
+            actor: 'a',
+            at: '2026-01-01T00:00:00Z',
+            rename: { from: 'x', to: 'y' },
+          },
+        ],
+      }
+    );
+    const flat = toAppDetail(store)!;
+    expect(flat.comments).toHaveLength(1);
+    expect(flat.timelineEvents).toHaveLength(1);
+    expect(flat.timelineEvents[0].event).toBe('renamed');
+    expect(flat._sideSettled.comments).toBe(true);
+
+    // Re-hydrate preserves timelineEvents
+    const again = toAppDetail(fromAppDetail(flat))!;
+    expect(again.timelineEvents).toHaveLength(1);
   });
 
   test('development settle empty is ok', () => {

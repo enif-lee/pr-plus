@@ -21,6 +21,11 @@ const TOKEN_KEY = 'githubToken';
 const HOST_ACCOUNTS_KEY = 'hostAccounts';
 /** User prefs in chrome.storage.local (non-secret). */
 const PREFS_KEY = 'extensionPrefs';
+/**
+ * One-shot first-run tour flag (separate from extensionPrefs so feature-flag
+ * patches cannot drop or race the completion bit).
+ */
+const ONBOARDING_KEY = 'onboardingCompleted';
 
 /**
  * Default extension preferences.
@@ -28,6 +33,8 @@ const PREFS_KEY = 'extensionPrefs';
  * - reverseComments: composer → merge box → conversation (latest-first timeline)
  * - autoOpenEmbed: on GitHub PR routes, open pr+ embed automatically (vs native + toggle)
  * - singleFileMode: Diff virtual list shows only the active file (nav still lists all)
+ * - treeView: PR stack tree indent on /pulls list (toggle also in list header)
+ * - onboardingCompleted: first-run pulls-page tour finished (or skipped)
  *
  * Enterprise hosts are NOT in prefs — they live in HOST_ACCOUNTS_KEY with paired PATs.
  * Legacy `enterpriseWebHosts` (hosts-only list) is dropped on normalize (re-register required).
@@ -37,6 +44,8 @@ const DEFAULT_PREFS = {
   reverseComments: true,
   autoOpenEmbed: true,
   singleFileMode: false,
+  treeView: true,
+  onboardingCompleted: false,
 };
 
 function getStorageArea(storageApi: any = (globalThis as any).chrome?.storage?.local) {
@@ -51,6 +60,8 @@ function getStorageArea(storageApi: any = (globalThis as any).chrome?.storage?.l
  *   reverseComments: boolean,
  *   autoOpenEmbed: boolean,
  *   singleFileMode: boolean,
+ *   treeView: boolean,
+ *   onboardingCompleted: boolean,
  * }}
  */
 function normalizePrefs(raw: any) {
@@ -73,6 +84,12 @@ function normalizePrefs(raw: any) {
       typeof src.singleFileMode === 'boolean'
         ? src.singleFileMode
         : DEFAULT_PREFS.singleFileMode,
+    treeView:
+      typeof src.treeView === 'boolean' ? src.treeView : DEFAULT_PREFS.treeView,
+    onboardingCompleted:
+      typeof src.onboardingCompleted === 'boolean'
+        ? src.onboardingCompleted
+        : DEFAULT_PREFS.onboardingCompleted,
   };
 }
 
@@ -110,7 +127,14 @@ function normalizeHostAccounts(raw: any) {
 
 /**
  * @param {unknown} [storageApi]
- * @returns {Promise<{ fastReview: boolean, reverseComments: boolean, autoOpenEmbed: boolean, singleFileMode: boolean }>}
+ * @returns {Promise<{
+ *   fastReview: boolean,
+ *   reverseComments: boolean,
+ *   autoOpenEmbed: boolean,
+ *   singleFileMode: boolean,
+ *   treeView: boolean,
+ *   onboardingCompleted: boolean,
+ * }>}
  */
 function getExtensionPrefs(storageApi: any) {
   const area = getStorageArea(storageApi);
@@ -125,7 +149,14 @@ function getExtensionPrefs(storageApi: any) {
 
 /**
  * Merge patch into stored prefs and return the full next prefs.
- * @param {Partial<{ fastReview: boolean, reverseComments: boolean, autoOpenEmbed: boolean, singleFileMode: boolean }>} patch
+ * @param {Partial<{
+ *   fastReview: boolean,
+ *   reverseComments: boolean,
+ *   autoOpenEmbed: boolean,
+ *   singleFileMode: boolean,
+ *   treeView: boolean,
+ *   onboardingCompleted: boolean,
+ * }>} patch
  * @param {unknown} [storageApi]
  */
 async function setExtensionPrefs(patch: any, storageApi: any) {
@@ -149,7 +180,14 @@ async function setExtensionPrefs(patch: any, storageApi: any) {
 
 /**
  * Watch prefs changes (local area only).
- * @param {(prefs: { fastReview: boolean, reverseComments: boolean, autoOpenEmbed: boolean, singleFileMode: boolean }) => void} onChange
+ * @param {(prefs: {
+ *   fastReview: boolean,
+ *   reverseComments: boolean,
+ *   autoOpenEmbed: boolean,
+ *   singleFileMode: boolean,
+ *   treeView: boolean,
+ *   onboardingCompleted: boolean,
+ * }) => void} onChange
  * @param {unknown} [storageApi]
  */
 function watchExtensionPrefs(onChange: any, storageApi: any = (globalThis as any).chrome?.storage) {
@@ -162,6 +200,53 @@ function watchExtensionPrefs(onChange: any, storageApi: any = (globalThis as any
 
   storageApi.onChanged.addListener(listener);
   return () => storageApi.onChanged.removeListener(listener);
+}
+
+/**
+ * Whether the first-run pulls onboarding tour has been finished or skipped.
+ * @param {unknown} [storageApi]
+ * @returns {Promise<boolean>}
+ */
+function getOnboardingCompleted(storageApi: any) {
+  const area = getStorageArea(storageApi);
+  if (!area) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    area.get([ONBOARDING_KEY, PREFS_KEY], (result) => {
+      // Dedicated key wins; fall back to legacy prefs field for older installs
+      if (typeof result?.[ONBOARDING_KEY] === 'boolean') {
+        resolve(Boolean(result[ONBOARDING_KEY]));
+        return;
+      }
+      const prefs = normalizePrefs(result?.[PREFS_KEY]);
+      resolve(Boolean(prefs.onboardingCompleted));
+    });
+  });
+}
+
+/**
+ * Mark (or clear) the first-run tour as done.
+ * @param {boolean} completed
+ * @param {unknown} [storageApi]
+ * @returns {Promise<boolean>}
+ */
+async function setOnboardingCompleted(completed: any, storageApi: any) {
+  const area = getStorageArea(storageApi);
+  if (!area) return Promise.reject(new Error('chrome.storage unavailable'));
+  const value = Boolean(completed);
+  // Dedicated key first (source of truth), then mirror into prefs
+  await new Promise((resolve, reject) => {
+    area.set({ [ONBOARDING_KEY]: value }, () => {
+      const err = (globalThis as any).chrome?.runtime?.lastError;
+      if (err) reject(err);
+      else resolve(undefined);
+    });
+  });
+  try {
+    await setExtensionPrefs({ onboardingCompleted: value }, area);
+  } catch {
+    /* key already written */
+  }
+  return value;
 }
 
 /** Mask for UI — keep only last 4 chars (no usable prefix leak). */
@@ -466,6 +551,7 @@ const storageApi = {
   TOKEN_KEY,
   HOST_ACCOUNTS_KEY,
   PREFS_KEY,
+  ONBOARDING_KEY,
   DEFAULT_PREFS,
   normalizePrefs,
   normalizeHostAccounts,
@@ -478,6 +564,8 @@ const storageApi = {
   getExtensionPrefs,
   setExtensionPrefs,
   watchExtensionPrefs,
+  getOnboardingCompleted,
+  setOnboardingCompleted,
   getHostAccounts,
   getHostAccountHosts,
   getHostAccountsPublic,

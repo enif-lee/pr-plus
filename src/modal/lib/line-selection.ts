@@ -7,7 +7,8 @@
 export function isSelectableDiffRow(row) {
   if (!row || row.kind !== 'diff-line') return false;
   const t = row.lineType;
-  if (t !== 'add' && t !== 'del' && t !== 'context') return false;
+  // 'change' = split-mode paired del|add on one visual row
+  if (t !== 'add' && t !== 'del' && t !== 'change' && t !== 'context') return false;
   // Prefer RIGHT (new) line; allow LEFT-only deletes
   return row.newLine != null || row.oldLine != null;
 }
@@ -26,11 +27,15 @@ export function lineForSide(row, preferredSide = 'RIGHT') {
 
 /**
  * Start a selection on a selectable diff row.
+ * @param {object} row
+ * @param {'LEFT'|'RIGHT'} [preferredSide='RIGHT'] split pane click prefers that side
  * @returns {object|null}
  */
-export function beginLineSelection(row) {
+export function beginLineSelection(row, preferredSide = 'RIGHT') {
   if (!isSelectableDiffRow(row)) return null;
-  const pos = lineForSide(row, 'RIGHT');
+  const prefer =
+    String(preferredSide || 'RIGHT').toUpperCase() === 'LEFT' ? 'LEFT' : 'RIGHT';
+  const pos = lineForSide(row, prefer);
   if (!pos) return null;
   return {
     filePath: row.filePath,
@@ -452,6 +457,10 @@ export function extendLineSelection(selection, row) {
  */
 export function applySelectionPointerDown(currentSelection, row, opts: any = {}) {
   const shiftKey = Boolean(opts?.shiftKey);
+  const preferredSide =
+    String(opts?.preferredSide || 'RIGHT').toUpperCase() === 'LEFT'
+      ? 'LEFT'
+      : 'RIGHT';
   if (!isSelectableDiffRow(row)) {
     return {
       selection: currentSelection || null,
@@ -473,7 +482,7 @@ export function applySelectionPointerDown(currentSelection, row, opts: any = {})
       keepRange: true,
     };
   }
-  const started = beginLineSelection(row);
+  const started = beginLineSelection(row, preferredSide);
   return {
     selection: started,
     mode: 'begin',
@@ -748,7 +757,13 @@ export function extractSelectedCodeText(virtualRows, selection) {
     // Strip unified-diff prefix if still present
     if (row.raw && /^[-+]/.test(String(row.raw)) && code === String(row.raw)) {
       code = String(row.raw).slice(1);
-    } else if (/^[-+ ]/.test(code) && (row.lineType === 'add' || row.lineType === 'del' || row.lineType === 'context')) {
+    } else if (
+      /^[-+ ]/.test(code) &&
+      (row.lineType === 'add' ||
+        row.lineType === 'del' ||
+        row.lineType === 'change' ||
+        row.lineType === 'context')
+    ) {
       // only strip when it looks like a diff marker and lineType is known
       if (code.charAt(0) === '+' || code.charAt(0) === '-' || code.charAt(0) === ' ') {
         // Prefer row.code without marker when raw exists

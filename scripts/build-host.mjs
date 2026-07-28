@@ -26,6 +26,7 @@ export const HOST_MODULE_ORDER = [
   'restore-embed-list-focus.ts', // restore open, embed watch, list focus helpers
   'list-row-lifecycle.ts', // pulls list row open / filter hotkeys
   'pulls-palette.ts', // pulls-page command palette
+  'auto-refresh-watch.ts', // head-sha poll (modal + embed), activity gate
   'click-intercept.ts', // list click intercept + install
 ];
 

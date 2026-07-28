@@ -39,10 +39,16 @@ const CONTENT_SCRIPT_JS = [
   'src/github-endpoints.js',
   'src/content-bridge.js',
   'src/content-bootstrap.js',
+  'src/onboarding.js',
   'src/content.js',
   'src/modal/pure/detail-idb-cache.js',
   'src/modal/pure/detail-cache.js',
+  'src/modal/pure/detail-merge.js',
+  'src/modal/pure/detail-store.js',
   'src/modal/pure/load-progress.js',
+  'src/modal/pure/page-embed.js',
+  'src/modal/pure/floating-scrollbar.js',
+  'src/modal/pure/auto-refresh.js',
   'src/modal/dist/pr-modal.bundle.js',
   'src/pr-modal-host.js',
 ];
@@ -214,6 +220,8 @@ const MSG = {
   PREFS_GET: 'PR_TREE_PREFS_GET',
   PREFS_SET: 'PR_TREE_PREFS_SET',
   PREFS_CHANGED: 'PR_TREE_PREFS_CHANGED',
+  ONBOARDING_GET: 'PR_TREE_ONBOARDING_GET',
+  ONBOARDING_SET: 'PR_TREE_ONBOARDING_SET',
   HOST_ACCOUNTS_LIST: 'PR_TREE_HOST_ACCOUNTS_LIST',
   HOST_ACCOUNT_ADD: 'PR_TREE_HOST_ACCOUNT_ADD',
   HOST_ACCOUNT_REMOVE: 'PR_TREE_HOST_ACCOUNT_REMOVE',
@@ -257,6 +265,8 @@ const MSG = {
   FETCH_PR_COMMITS: 'PR_TREE_FETCH_PR_COMMITS',
   FETCH_PR_FILES: 'PR_TREE_FETCH_PR_FILES',
   FETCH_PR_ISSUE_COMMENTS: 'PR_TREE_FETCH_PR_ISSUE_COMMENTS',
+  FETCH_PR_TIMELINE_EVENTS: 'PR_TREE_FETCH_PR_TIMELINE_EVENTS',
+  FETCH_PR_HEAD_PROBE: 'PR_TREE_FETCH_PR_HEAD_PROBE',
   FETCH_PR_REVIEWS: 'PR_TREE_FETCH_PR_REVIEWS',
   FETCH_PR_CHECKS: 'PR_TREE_FETCH_PR_CHECKS',
   FETCH_PR_DEVELOPMENT: 'PR_TREE_FETCH_PR_DEVELOPMENT',
@@ -635,6 +645,16 @@ async function handleMessage(message: any) {
       }
       const prefs = await PRTreeStorage.setExtensionPrefs(patch);
       return { ok: true, prefs };
+    }
+    case MSG.ONBOARDING_GET: {
+      const completed = await PRTreeStorage.getOnboardingCompleted();
+      return { ok: true, completed: Boolean(completed) };
+    }
+    case MSG.ONBOARDING_SET: {
+      const completed = await PRTreeStorage.setOnboardingCompleted(
+        message.completed !== false && message.completed !== 0
+      );
+      return { ok: true, completed: Boolean(completed) };
     }
     case MSG.HOST_ACCOUNTS_LIST: {
       const accounts = await PRTreeStorage.getHostAccountsPublic();
@@ -1322,6 +1342,59 @@ async function handleMessage(message: any) {
         endTrackedFetch(tracked.requestId);
       }
     }
+    case MSG.FETCH_PR_TIMELINE_EVENTS: {
+      const tracked = beginTrackedFetch(message.requestId);
+      try {
+        const token = await tokenForMessage(message);
+        const events =
+          typeof PRTreeFetch.fetchPrTimelineEvents === 'function'
+            ? await PRTreeFetch.fetchPrTimelineEvents(
+                message.owner,
+                message.repo,
+                message.number,
+                tracked.fetch,
+                token,
+                apiCtx
+              )
+            : [];
+        return { ok: true, events: Array.isArray(events) ? events : [] };
+      } catch (err) {
+        if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
+      }
+    }
+    case MSG.FETCH_PR_HEAD_PROBE: {
+      const tracked = beginTrackedFetch(message.requestId);
+      try {
+        const token = await tokenForMessage(message);
+        const probe =
+          typeof PRTreeFetch.fetchPrHeadProbe === 'function'
+            ? await PRTreeFetch.fetchPrHeadProbe(
+                message.owner,
+                message.repo,
+                message.number,
+                tracked.fetch,
+                token,
+                apiCtx
+              )
+            : {
+                headSha: '',
+                baseSha: '',
+                updatedAt: null,
+                draft: false,
+                state: '',
+                number: Number(message.number) || 0,
+              };
+        return { ok: true, probe: probe || null };
+      } catch (err) {
+        if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
+      }
+    }
     case MSG.FETCH_PR_REVIEWS: {
       const tracked = beginTrackedFetch(message.requestId);
       try {
@@ -1588,9 +1661,20 @@ async function rehydrateEnterpriseScripts() {
   }
 }
 
+/** First-run destination after Chrome Web Store / sideload install (onboarding uses PR #1). */
+const INSTALL_PULLS_URL = 'https://github.com/enif-lee/pr-plus/pulls';
+
 try {
-  chrome.runtime.onInstalled.addListener(() => {
+  chrome.runtime.onInstalled.addListener((details) => {
     void rehydrateEnterpriseScripts();
+    // Fresh install only — not update / chrome.runtime.reload()
+    if (details?.reason === 'install') {
+      try {
+        chrome.tabs.create({ url: INSTALL_PULLS_URL });
+      } catch (err) {
+        console.warn('[pr+] open install pulls tab failed', err?.message || err);
+      }
+    }
   });
   chrome.runtime.onStartup.addListener(() => {
     void rehydrateEnterpriseScripts();

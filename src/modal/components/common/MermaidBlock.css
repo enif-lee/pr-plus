@@ -395,6 +395,12 @@
   border-left-color: var(--prp-danger);
 }
 
+/* Split paired del|add — no whole-row wash (panes use side classes) */
+.prp-vline--change {
+  background: transparent;
+  border-left-color: transparent;
+}
+
 .prp-vline--meta {
   color: var(--prp-fg-muted);
   font-style: italic;

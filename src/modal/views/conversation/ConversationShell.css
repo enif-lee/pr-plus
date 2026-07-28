@@ -112,6 +112,29 @@
   position: relative;
 }
 
+/*
+ * Continuous conversation timeline rail (first feed item → last).
+ * Ends clipped to item centers. Drawn under feed content so comments/threads
+ * stack on top of the line (포개짐) rather than sitting in a side gutter.
+ * X aligns with .prp-timeline-event__rail center (28px / 2).
+ */
+.prp-conversation-timeline-rail {
+  --prp-tl-rail: 28px;
+  --prp-tl-line: 2px;
+  position: absolute;
+  left: calc(var(--prp-tl-rail) / 2);
+  width: var(--prp-tl-line);
+  transform: translateX(-50%);
+  background: var(--prp-border-muted);
+  border-radius: 1px;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.prp-conversation-virtual--timeline-rail {
+  --prp-tl-rail: 28px;
+}
+
 .prp-conversation-virtual__window {
   display: flex;
   flex-direction: column;
@@ -120,6 +143,8 @@
   width: 100%;
   box-sizing: border-box;
   padding-bottom: 2px;
+  /* Stack above spacer rail; opaque children cover the line */
+  isolation: isolate;
 }
 
 .prp-conversation-virtual__row {
@@ -129,14 +154,42 @@
   box-sizing: border-box;
   /* Matches former column gap; counted in measured row height */
   padding-bottom: var(--prp-gap-stack);
+  position: relative;
+  z-index: 1;
 }
 
+/*
+ * Comments / threads / cards sit ON TOP of the vertical rail (overlap).
+ * Full width + opaque background so the line is covered under the card.
+ * System event rows stay transparent so the rail continues through them.
+ */
 .prp-conversation-virtual__row > .prp-card,
 .prp-conversation-virtual__row > .prp-timeline-gap,
 .prp-conversation-virtual__row > .prp-merge-box,
 .prp-conversation-virtual__row > .prp-pagination,
-.prp-conversation-virtual__row > .prp-conversation-empty {
+.prp-conversation-virtual__row > .prp-conversation-empty,
+.prp-conversation-virtual__row > .prp-conversation-inline-thread {
   width: 100%;
+  position: relative;
+  z-index: 2;
+  background: var(--prp-bg);
+  box-sizing: border-box;
+}
+
+/* Review thread shell may not inherit .prp-card bg — force opaque cover */
+.prp-conversation-virtual__row > .prp-conversation-inline-thread,
+.prp-conversation-virtual__row > .prp-card--timeline-review-thread {
+  background: var(--prp-bg);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+/* System events: transparent so rail shows; avatar ring masks the line */
+.prp-conversation-virtual__row > .prp-timeline-event {
+  width: 100%;
+  position: relative;
+  z-index: 2;
+  background: transparent;
 }
 
 /* Description is a virtual row — full body height (no separate inner scroll) */

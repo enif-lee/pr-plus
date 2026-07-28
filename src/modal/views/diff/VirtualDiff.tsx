@@ -372,9 +372,21 @@ const DiffCodeLineBody = memo(function DiffCodeLineBody({
     );
   }
   if (isSplit && isCode) {
+    // Per-side tone: del on left / add on right (paired change rows use both)
+    const leftTone =
+      row.leftType === 'del' || (row.lineType === 'del' && row.leftCode)
+        ? 'del'
+        : '';
+    const rightTone =
+      row.rightType === 'add' || (row.lineType === 'add' && row.rightCode)
+        ? 'add'
+        : '';
     return (
       <div className="prp-split-cols">
-        <div className="prp-split-cols__left">
+        <div
+          className={`prp-split-cols__left${leftTone ? ` prp-split-cols__left--${leftTone}` : ''}`}
+          data-side-type={leftTone || undefined}
+        >
           <span className="prp-split-cols__ln">{row.oldLine ?? ''}</span>
           <code
             className={useSyntax ? 'hljs prp-code' : 'prp-code'}
@@ -392,7 +404,10 @@ const DiffCodeLineBody = memo(function DiffCodeLineBody({
             }}
           />
         </div>
-        <div className="prp-split-cols__right">
+        <div
+          className={`prp-split-cols__right${rightTone ? ` prp-split-cols__right--${rightTone}` : ''}`}
+          data-side-type={rightTone || undefined}
+        >
           <span className="prp-split-cols__ln">{row.newLine ?? ''}</span>
           <code
             className={useSyntax ? 'hljs prp-code' : 'prp-code'}
@@ -492,6 +507,7 @@ const DiffCodeLine = memo(function DiffCodeLine({
     row.kind === 'diff-line' &&
     (row.lineType === 'add' ||
       row.lineType === 'del' ||
+      row.lineType === 'change' ||
       row.lineType === 'context');
   const isHunk = row.kind === 'diff-line' && row.lineType === 'hunk';
   const expandAbove = isHunk ? row.expandAbove : null;
@@ -508,13 +524,28 @@ const DiffCodeLine = memo(function DiffCodeLine({
 
   // Leaf store subscription: only this row re-renders when its key changes.
   // Middles stay "middle" under multi extend → no re-render. Override for tests.
-  const storeVisualKey = useModalStore((s) =>
-    selectionOverride !== undefined
-      ? ''
-      : typeof rowSelectionVisualKey === 'function'
+  // Pack visual role + dock side into one primitive so Object.is stays stable.
+  const storeLeafPacked = useModalStore((s) => {
+    if (selectionOverride !== undefined) return '\x1eRIGHT';
+    const visualKey =
+      typeof rowSelectionVisualKey === 'function'
         ? rowSelectionVisualKey(s.lineSelection, row)
-        : ''
-  );
+        : '';
+    const side =
+      String(
+        s.lineSelection?.headSide || s.lineSelection?.anchorSide || 'RIGHT'
+      ).toUpperCase() === 'LEFT'
+        ? 'LEFT'
+        : 'RIGHT';
+    return `${visualKey}\x1e${side}`;
+  });
+  const storeSep = storeLeafPacked.lastIndexOf('\x1e');
+  const storeVisualKey =
+    storeSep >= 0 ? storeLeafPacked.slice(0, storeSep) : storeLeafPacked;
+  const storeDockSide: 'LEFT' | 'RIGHT' =
+    storeSep >= 0 && storeLeafPacked.slice(storeSep + 1) === 'LEFT'
+      ? 'LEFT'
+      : 'RIGHT';
   const visualKey =
     selectionOverride !== undefined
       ? typeof rowSelectionVisualKey === 'function'
@@ -527,6 +558,16 @@ const DiffCodeLine = memo(function DiffCodeLine({
   const dockHere = Boolean(
     selectionIsland && (selRole === 'end' || selRole === 'only')
   );
+  const dockSide: 'LEFT' | 'RIGHT' =
+    selectionOverride !== undefined
+      ? String(
+          (selectionOverride as any)?.headSide ||
+            (selectionOverride as any)?.anchorSide ||
+            'RIGHT'
+        ).toUpperCase() === 'LEFT'
+        ? 'LEFT'
+        : 'RIGHT'
+      : storeDockSide;
 
   // Line chrome only — dock mounts on a host *outside* .prp-vline because
   // .prp-vline uses contain:paint which clips absolute children to ROW_HEIGHT.
@@ -559,8 +600,25 @@ const DiffCodeLine = memo(function DiffCodeLine({
       onMouseDown={(e) => {
         if (e.button !== 0 || !selectable) return;
         e.preventDefault();
+        // Split: pick LEFT/RIGHT from click X so comments land on that pane
+        let preferredSide: 'LEFT' | 'RIGHT' = 'RIGHT';
+        if (isSplit) {
+          const cols = (e.currentTarget as HTMLElement).querySelector(
+            '.prp-split-cols'
+          );
+          if (cols) {
+            const rect = cols.getBoundingClientRect();
+            const mid = rect.left + rect.width / 2;
+            preferredSide = e.clientX < mid ? 'LEFT' : 'RIGHT';
+          } else if (row.oldLine != null && row.newLine == null) {
+            preferredSide = 'LEFT';
+          }
+        } else if (row.oldLine != null && row.newLine == null) {
+          preferredSide = 'LEFT';
+        }
         onSelectionStart?.(row, { x: e.clientX, y: e.clientY }, {
           shiftKey: Boolean(e.shiftKey),
+          preferredSide,
         });
       }}
       onMouseEnter={() => {
@@ -588,11 +646,20 @@ const DiffCodeLine = memo(function DiffCodeLine({
 
   if (!dockHere) return lineEl;
 
+  // Split selection dock: pin under the LEFT or RIGHT pane of the code row
+  const splitDockClass =
+    isSplit && dockSide === 'LEFT'
+      ? ' prp-sel-dock-host--split-left'
+      : isSplit
+        ? ' prp-sel-dock-host--split-right'
+        : '';
+
   return (
     <div
-      className="prp-sel-dock-host"
+      className={`prp-sel-dock-host${splitDockClass}`}
       style={{ height: ROW_HEIGHT }}
       data-row-index={row.rowIndex}
+      data-dock-side={isSplit ? dockSide : undefined}
     >
       {lineEl}
       {selectionIsland}
@@ -911,7 +978,8 @@ function VirtualDiffImpl(props: any) {
         const row = rows[i];
         if (!row || row.kind !== 'diff-line') continue;
         const lt = row.lineType;
-        if (lt !== 'add' && lt !== 'del' && lt !== 'context') continue;
+        if (lt !== 'add' && lt !== 'del' && lt !== 'change' && lt !== 'context')
+          continue;
         void ensureHljsLanguageForPath(row.filePath);
         if (row.split) {
           highlightCode(row.leftCode ?? '', row.filePath);
@@ -1208,50 +1276,84 @@ function VirtualDiffImpl(props: any) {
               const commentAnchor =
                 row.commentId != null ? `review-comment:${row.commentId}` : null;
               const minH = collapsed ? COMMENT_ROW_HEIGHT_COLLAPSED : undefined;
+              const commentSide =
+                String(row.side || thread?.root?.side || 'RIGHT').toUpperCase() ===
+                'LEFT'
+                  ? 'LEFT'
+                  : 'RIGHT';
+              // Split line threads dock under the matching pane; file-level stays full width
+              const isSplitComment = Boolean(row.split);
+              const threadEl = (
+                <InlineThread
+                  row={row}
+                  thread={thread}
+                  onReply={onReply}
+                  onResolve={onResolve}
+                  onDelete={onDeleteReviewComment}
+                  onEdit={onEditReviewComment}
+                  onSaveEdit={onSaveEditReviewComment}
+                  onCancelEdit={onCancelEditReviewComment}
+                  editingCommentId={editingCommentId}
+                  onRegisterEditorSave={onRegisterEditorSave}
+                  onApplySuggestion={onApplySuggestion}
+                  onRegisterApply={onRegisterApply}
+                  actionBusy={actionBusy}
+                  viewerLogin={viewerLogin}
+                  prOpen={prOpen}
+                  linkCtx={linkCtx}
+                  mentionCandidates={mentionCandidates}
+                  onUploadFile={onUploadFile}
+                  collapsed={collapsed}
+                  onToggleCollapse={() =>
+                    onToggleThreadCollapse?.(row.commentId, resolved)
+                  }
+                  pendingCount={pendingCount}
+                  showHunk={false}
+                  searchQuery={qActive ? searchQuery : ''}
+                  activeSearchHit={activeSearchHit}
+                  searchHits={searchHits}
+                  searchHitIndex={searchHitIndex}
+                />
+              );
               return (
                 <div
                   key={row.rowIndex}
                   className={`prp-vline prp-vline--comment${
-                    collapsed ? ' prp-vline--comment-collapsed' : ''
-                  }${pending ? ' prp-vline--comment-pending' : ''}${searchRowClass}`}
+                    isSplitComment ? ' prp-vline--comment-split' : ''
+                  }${collapsed ? ' prp-vline--comment-collapsed' : ''}${
+                    pending ? ' prp-vline--comment-pending' : ''
+                  }${searchRowClass}`}
                   style={minH != null ? { minHeight: minH } : undefined}
                   data-row-index={row.rowIndex}
                   data-collapsed={collapsed ? '1' : '0'}
                   data-pending={pending ? '1' : undefined}
+                  data-side={commentSide}
+                  data-split={isSplitComment ? '1' : '0'}
                   data-search-current={isActiveHit ? '1' : undefined}
                   data-search-anchor={commentAnchor || undefined}
                   data-thread-focus-anchor={commentAnchor || undefined}
                 >
-                  <InlineThread
-                    row={row}
-                    thread={thread}
-                    onReply={onReply}
-                    onResolve={onResolve}
-                    onDelete={onDeleteReviewComment}
-                    onEdit={onEditReviewComment}
-                    onSaveEdit={onSaveEditReviewComment}
-                    onCancelEdit={onCancelEditReviewComment}
-                    editingCommentId={editingCommentId}
-                    onRegisterEditorSave={onRegisterEditorSave}
-                    onApplySuggestion={onApplySuggestion}
-                    onRegisterApply={onRegisterApply}
-                    actionBusy={actionBusy}
-                    viewerLogin={viewerLogin}
-                    prOpen={prOpen}
-                    linkCtx={linkCtx}
-                    mentionCandidates={mentionCandidates}
-                    onUploadFile={onUploadFile}
-                    collapsed={collapsed}
-                    onToggleCollapse={() =>
-                      onToggleThreadCollapse?.(row.commentId, resolved)
-                    }
-                    pendingCount={pendingCount}
-                    showHunk={false}
-                    searchQuery={qActive ? searchQuery : ''}
-                    activeSearchHit={activeSearchHit}
-                    searchHits={searchHits}
-                    searchHitIndex={searchHitIndex}
-                  />
+                  {isSplitComment ? (
+                    <>
+                      <span className="prp-line-gutter" aria-hidden="true" />
+                      <div className="prp-split-cols prp-split-cols--comment">
+                        <div
+                          className="prp-split-cols__left prp-split-cols__comment-pane"
+                          data-side="LEFT"
+                        >
+                          {commentSide === 'LEFT' ? threadEl : null}
+                        </div>
+                        <div
+                          className="prp-split-cols__right prp-split-cols__comment-pane"
+                          data-side="RIGHT"
+                        >
+                          {commentSide === 'RIGHT' ? threadEl : null}
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    threadEl
+                  )}
                 </div>
               );
             }

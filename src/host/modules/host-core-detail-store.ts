@@ -220,6 +220,7 @@
       S.applyComments(current.detailStore, payload.comments, {
         settled: true,
         pageMeta: payload.commentsMeta,
+        timelineEvents: payload.timelineEvents,
       });
     } else if (key === 'reviews') {
       S.applyReviews(current.detailStore, payload.reviews, { settled: true });

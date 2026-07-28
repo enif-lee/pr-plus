@@ -560,7 +560,208 @@ function ConversationViewImpl(props: any) {
     if (kind === 'issue-comment') return 'comment';
     if (kind === 'review-thread' || kind === 'review-comment') return 'review thread';
     if (kind === 'review') return 'review';
+    if (kind === 'timeline-event') return 'event';
     return kind || 'item';
+  }
+
+  /**
+   * Map event status tones → Badge tones.
+   * Status chips use bordered badges; titles use soft (non-bordered).
+   */
+  function timelineStatusBadgeTone(tone: string) {
+    switch (String(tone || '').toLowerCase()) {
+      case 'ready':
+        return 'ready';
+      case 'closed':
+        return 'closed';
+      case 'reopened':
+        return 'reopened';
+      case 'merged':
+        return 'merged';
+      case 'locked':
+        return 'locked';
+      case 'draft':
+        return 'draft';
+      default:
+        return 'muted';
+    }
+  }
+
+  /**
+   * Render structured narrative parts for a system timeline event
+   * (title rename, draft/ready, labels, assignees, …).
+   * Value params use Badge (soft or bordered) rather than raw tinted text.
+   */
+  function renderTimelineEventParts(parts: any[], owner: string, repo: string) {
+    if (!Array.isArray(parts) || !parts.length) return null;
+    return parts.map((p, i) => {
+      if (!p || typeof p !== 'object') return null;
+      const key = `p-${i}`;
+      switch (p.type) {
+        case 'user':
+          return p.login ? (
+            <Badge
+              key={key}
+              tone="accent"
+              variant="soft"
+              className="prp-timeline-event__param"
+              title={p.login}
+            >
+              <UserLink login={p.login} />
+            </Badge>
+          ) : null;
+        case 'label':
+          return p.name ? (
+            <LabelLink
+              key={key}
+              owner={owner}
+              repo={repo}
+              label={{ name: p.name, color: p.color || '' }}
+            />
+          ) : null;
+        case 'milestone':
+          return p.title ? (
+            <Badge
+              key={key}
+              tone="accent"
+              className="prp-timeline-event__param prp-timeline-event__param--wide"
+              title={p.title}
+            >
+              {p.title}
+            </Badge>
+          ) : null;
+        case 'title':
+          // Soft (non-bordered) badge — long PR titles need wider chip
+          return (
+            <Badge
+              key={key}
+              tone="muted"
+              variant="soft"
+              className="prp-timeline-event__param prp-timeline-event__param--title"
+              title={p.text}
+            >
+              {p.text}
+            </Badge>
+          );
+        case 'status': {
+          const tone = timelineStatusBadgeTone(p.tone || 'default');
+          return (
+            <Badge
+              key={key}
+              tone={tone}
+              className="prp-timeline-event__param"
+              title={p.text}
+            >
+              {p.text}
+            </Badge>
+          );
+        }
+        case 'strong':
+          return (
+            <Badge
+              key={key}
+              tone="muted"
+              variant="soft"
+              className="prp-timeline-event__param prp-timeline-event__param--wide"
+              title={p.text}
+            >
+              {p.text}
+            </Badge>
+          );
+        case 'commit':
+          return (
+            <Badge
+              key={key}
+              tone="accent"
+              className="prp-timeline-event__param prp-timeline-event__param--mono"
+              title={p.text}
+            >
+              <code className="prp-mono">{p.text}</code>
+            </Badge>
+          );
+        case 'branch':
+          return (
+            <Badge
+              key={key}
+              tone="accent"
+              variant="soft"
+              className="prp-timeline-event__param prp-timeline-event__param--mono prp-timeline-event__param--wide"
+              title={p.text}
+            >
+              <code className="prp-mono">{p.text}</code>
+            </Badge>
+          );
+        case 'code':
+          return (
+            <Badge
+              key={key}
+              tone="muted"
+              variant="soft"
+              className="prp-timeline-event__param prp-timeline-event__param--mono"
+              title={p.text}
+            >
+              <code className="prp-mono">{p.text}</code>
+            </Badge>
+          );
+        case 'text':
+        default:
+          return (
+            <span key={key} className="prp-timeline-event__text">
+              {p.text || ''}
+            </span>
+          );
+      }
+    });
+  }
+
+  function renderTimelineEventRow(item: any, keyPrefix = '') {
+    const owner = detail?.owner || '';
+    const repo = detail?.repo || '';
+    const itemAnchor = `timeline-event:${item.id}`;
+    return (
+      <ConversationKbFocusClassName
+        key={`${keyPrefix}${String(item.id || item.key)}`}
+        anchor={itemAnchor}
+        baseClass="prp-timeline-event"
+      >
+        {(className, focused) => (
+          <div
+            className={className}
+            data-search-anchor={itemAnchor}
+            data-timeline-event={item.event || ''}
+            tabIndex={focused ? -1 : undefined}
+          >
+            <div className="prp-timeline-event__rail" aria-hidden="true">
+              <span className="prp-timeline-event__rail-line" />
+              <span className="prp-timeline-event__rail-avatar">
+                <Avatar
+                  login={item.author}
+                  avatarUrl={item.avatarUrl}
+                  size="sm"
+                />
+              </span>
+            </div>
+            <div className="prp-timeline-event__body">
+              <span className="prp-timeline-event__narrative">
+                {item.author ? (
+                  <strong className="prp-timeline-event__actor">
+                    <UserLink login={item.author} />
+                  </strong>
+                ) : (
+                  <strong className="prp-timeline-event__actor">someone</strong>
+                )}{' '}
+                {renderTimelineEventParts(item.parts, owner, repo)}
+              </span>
+              {item.at ? (
+                <span className="prp-muted prp-timeline-event__when">
+                  {formatWhen(item.at)}
+                </span>
+              ) : null}
+            </div>
+          </div>
+        )}
+      </ConversationKbFocusClassName>
+    );
   }
 
   function defaultThreadCollapsed(item: any) {
@@ -996,8 +1197,12 @@ function ConversationViewImpl(props: any) {
       item.kind === 'review-thread' || item.kind === 'review-comment';
     const isReviewGroup = item.kind === 'review-group';
     const isReviewEvent = item.kind === 'review';
+    const isTimelineEvent = item.kind === 'timeline-event';
     const editKind = isIssue ? 'issue' : isReviewThread ? 'review' : null;
 
+    if (isTimelineEvent) {
+      return renderTimelineEventRow(item, keyPrefix);
+    }
     if (isReviewGroup) {
       return renderReviewGroupCard(item, keyPrefix);
     }

@@ -476,6 +476,27 @@
         <span class="pref__desc">Diff 본문에는 현재 선택한 파일만 표시합니다. 왼쪽 파일 목록·이전/다음 파일 이동은 그대로 동작합니다. 기본값: 꺼짐.</span>
       </span>
     </label>
+    <label class="pref" for="pref-tree-view">
+      <input id="pref-tree-view" type="checkbox" />
+      <span class="pref__body">
+        <span class="pref__title">PR 스택 Tree view</span>
+        <span class="pref__desc">/pulls 목록에서 스택 관계를 들여쓰기로 표시합니다. 헤더의 Tree / Original 토글과 동기화됩니다. 기본값: 켜짐.</span>
+      </span>
+    </label>
+
+    <h3>Onboarding</h3>
+    <div class="pref pref--action">
+      <span class="pref__body">
+        <span class="pref__title">Setup tour</span>
+        <span class="pref__desc">
+          첫 실행 온보딩을 다시 시작합니다 (PAT · Option · demo PR #1 · Diff 데모 · 코멘트 이동 · 팔레트 · 옵션).
+          pulls 페이지를 열고 우측 상단 카드를 표시합니다.
+        </span>
+        <div class="row" style="margin-top: 8px">
+          <button id="restart-onboarding" class="primary" type="button">Start onboarding</button>
+        </div>
+      </span>
+    </div>
 
     <h3>Storage</h3>
     <div class="pref pref--action">

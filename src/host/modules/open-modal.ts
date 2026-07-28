@@ -177,6 +177,12 @@
         percent: fetchUnitWeights().start || 5,
       },
     };
+    // Modal + full-page embed: reset activity clock and ensure head.sha poller
+    try {
+      armAutoRefreshForOpen();
+    } catch {
+      /* ignore */
+    }
     // Isolated slice store — subsequent core/side/threads writes never clobber
     // other domains. Flat `detail` is a projection for React.
     if (initialDetail) {

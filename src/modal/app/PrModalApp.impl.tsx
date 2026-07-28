@@ -5159,11 +5159,18 @@ export function PrModalApp({
 
   function onSelectionStart(row, point, opts: any = {}) {
     const shiftKey = Boolean(opts?.shiftKey);
+    const preferredSide =
+      String(opts?.preferredSide || 'RIGHT').toUpperCase() === 'LEFT'
+        ? 'LEFT'
+        : 'RIGHT';
     const prev = useModalStore.getState().lineSelection;
     let next = null;
     let keepRange = false;
     if (typeof applySelectionPointerDown === 'function') {
-      const result = applySelectionPointerDown(prev, row, { shiftKey });
+      const result = applySelectionPointerDown(prev, row, {
+        shiftKey,
+        preferredSide,
+      });
       if (result.mode === 'ignore') {
         shiftRangeRef.current = false;
         return;
@@ -5180,7 +5187,7 @@ export function PrModalApp({
         next = extendLineSelection(prev, row) || prev;
         keepRange = true;
       } else {
-        next = beginLineSelection(row);
+        next = beginLineSelection(row, preferredSide);
         keepRange = false;
       }
     }

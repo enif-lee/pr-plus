@@ -66,6 +66,7 @@ export function flattenFilesToVirtualRows(files, mode = 'unified', options: any 
     const id = String(c.id);
     if (placedIds.has(id)) return;
     placedIds.add(id);
+    const subjectType = isFileLevelComment(c) ? 'file' : 'line';
     rows.push({
       kind: 'inline-comment',
       filePath: path,
@@ -83,7 +84,9 @@ export function flattenFilesToVirtualRows(files, mode = 'unified', options: any 
       newLine: n,
       oldLine: o,
       side: String(c.side || 'RIGHT').toUpperCase() === 'LEFT' ? 'LEFT' : 'RIGHT',
-      subjectType: isFileLevelComment(c) ? 'file' : 'line',
+      subjectType,
+      // Line threads in split mode dock under the matching pane (file-level spans full)
+      split: Boolean(split && subjectType === 'line'),
     });
   };
 
@@ -220,44 +223,16 @@ export function flattenFilesToVirtualRows(files, mode = 'unified', options: any 
     const expandedRanges = expandedByPath.get(path) || [];
     const lines = patch.split('\n');
 
-    const pushDiffLine = (lineType, line, o, n) => {
-      if (split && (lineType === 'add' || lineType === 'del' || lineType === 'context')) {
-        const left =
-          lineType === 'add' ? '' : lineType === 'del' ? line.slice(1) : line.slice(1);
-        const right =
-          lineType === 'del' ? '' : lineType === 'add' ? line.slice(1) : line.slice(1);
-        const text = `${String(o ?? '').padStart(4)} │ ${left} │ ${String(n ?? '').padStart(4)} │ ${right}`;
-        rows.push({
-          kind: 'diff-line',
-          filePath: path,
-          text,
-          code: right || left || line.slice(1) || line,
-          leftCode: left,
-          rightCode: right,
-          split: true,
-          raw: line,
-          rowIndex: index++,
-          lineType,
-          oldLine: o,
-          newLine: n,
-        });
-      } else {
-        rows.push({
-          kind: 'diff-line',
-          filePath: path,
-          text: line,
-          code:
-            lineType === 'add' || lineType === 'del' || lineType === 'context'
-              ? line.slice(1)
-              : line,
-          split: false,
-          raw: line,
-          rowIndex: index++,
-          lineType,
-          oldLine: o,
-          newLine: n,
-        });
-      }
+    /**
+     * Split mode: buffer consecutive del/add runs, then pair them onto the
+     * same visual row (GitHub-style side-by-side). Context flushes first.
+     * @type {Array<{ line: string, o: number|null, n: number|null }>}
+     */
+    const pendingDels = [];
+    /** @type {Array<{ line: string, o: number|null, n: number|null }>} */
+    const pendingAdds = [];
+
+    const attachInlineComments = (o, n) => {
       if (n != null) {
         for (const c of commentsByKey.get(commentLineKey(path, 'RIGHT', n)) || []) {
           pushInline(path, c, n, o);
@@ -268,6 +243,95 @@ export function flattenFilesToVirtualRows(files, mode = 'unified', options: any 
           pushInline(path, c, n, o);
         }
       }
+    };
+
+    const emitSplitRow = (leftType, left, o, rightType, right, n, raw) => {
+      const text = `${String(o ?? '').padStart(4)} │ ${left} │ ${String(n ?? '').padStart(4)} │ ${right}`;
+      let lineType = 'context';
+      if (leftType === 'del' && rightType === 'add') lineType = 'change';
+      else if (leftType === 'del') lineType = 'del';
+      else if (rightType === 'add') lineType = 'add';
+      rows.push({
+        kind: 'diff-line',
+        filePath: path,
+        text,
+        code: right || left || '',
+        leftCode: left,
+        rightCode: right,
+        split: true,
+        raw: raw || '',
+        rowIndex: index++,
+        lineType,
+        leftType: leftType || null,
+        rightType: rightType || null,
+        oldLine: o,
+        newLine: n,
+      });
+      attachInlineComments(o, n);
+    };
+
+    /** Pair buffered dels with adds onto shared rows (max(len) rows). */
+    const flushSplitChangeGroup = () => {
+      if (!pendingDels.length && !pendingAdds.length) return;
+      const count = Math.max(pendingDels.length, pendingAdds.length);
+      for (let i = 0; i < count; i++) {
+        const d = pendingDels[i] || null;
+        const a = pendingAdds[i] || null;
+        const left = d ? d.line.slice(1) : '';
+        const right = a ? a.line.slice(1) : '';
+        const o = d ? d.o : null;
+        const n = a ? a.n : null;
+        emitSplitRow(
+          d ? 'del' : null,
+          left,
+          o,
+          a ? 'add' : null,
+          right,
+          n,
+          (d && d.line) || (a && a.line) || ''
+        );
+      }
+      pendingDels.length = 0;
+      pendingAdds.length = 0;
+    };
+
+    const pushDiffLine = (lineType, line, o, n) => {
+      // Split: buffer del/add so consecutive change runs share a row
+      if (split && (lineType === 'del' || lineType === 'add')) {
+        if (lineType === 'del') {
+          // del after add closes the previous change group
+          if (pendingAdds.length) flushSplitChangeGroup();
+          pendingDels.push({ line, o, n });
+        } else {
+          pendingAdds.push({ line, o, n });
+        }
+        return;
+      }
+
+      if (split) flushSplitChangeGroup();
+
+      if (split && lineType === 'context') {
+        const code = line.slice(1);
+        emitSplitRow('context', code, o, 'context', code, n, line);
+        return;
+      }
+
+      rows.push({
+        kind: 'diff-line',
+        filePath: path,
+        text: line,
+        code:
+          lineType === 'add' || lineType === 'del' || lineType === 'context'
+            ? line.slice(1)
+            : line,
+        split: false,
+        raw: line,
+        rowIndex: index++,
+        lineType,
+        oldLine: o,
+        newLine: n,
+      });
+      attachInlineComments(o, n);
     };
 
     /**
@@ -365,6 +429,8 @@ export function flattenFilesToVirtualRows(files, mode = 'unified', options: any 
       else if (line.startsWith('-')) lineType = 'del';
 
       if (lineType === 'hunk' || lineType === 'meta') {
+        // Close any open del/add pair before chrome rows
+        if (split) flushSplitChangeGroup();
         const row: any = {
           kind: 'diff-line',
           filePath: path,
@@ -404,6 +470,9 @@ export function flattenFilesToVirtualRows(files, mode = 'unified', options: any 
 
       pushDiffLine(lineType, line, o, n);
     }
+
+    // Flush trailing del/add pair at end of patch
+    if (split) flushSplitChangeGroup();
 
     // Trailing omitted context → expand on the last @@ row (right side)
     if (

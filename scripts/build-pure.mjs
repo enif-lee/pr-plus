@@ -16,6 +16,7 @@ const pureDir = path.join(root, 'src/modal/pure');
 /** pure basename → { libFile, globalName } */
 const MAP = {
   'aside-lists': { lib: 'aside-lists.ts', global: 'PRModalAsideLists' },
+  'auto-refresh': { lib: 'auto-refresh.ts', global: 'PRModalAutoRefresh' },
   collapse: { lib: 'collapse.ts', global: 'PRModalCollapse' },
   'command-palette': { lib: 'command-palette.ts', global: 'PRModalCommandPalette' },
   'comment-nav': { lib: 'comment-nav.ts', global: 'PRModalCommentNav' },

@@ -4,6 +4,172 @@
  * Migrated from styles/parts/19-standalone-conversation-thread-1-level-p.css
  */
 
+/* Compact GitHub-style system timeline rows (title rename, draft/ready, …)
+   Left rail: continuous vertical line with avatar centered on it. */
+.prp-timeline-event {
+  --prp-tl-rail: 28px;
+  --prp-tl-line: 2px;
+  display: flex;
+  align-items: center; /* avatar + body vertically centered */
+  gap: 10px;
+  min-width: 0;
+  min-height: 28px;
+  padding: 4px 4px 4px 0;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  color: var(--prp-fg-muted);
+  font-size: 13px;
+  line-height: 1.4;
+  position: relative;
+  /* Allow rail line to bridge into virtual-row gap */
+  overflow: visible;
+}
+.prp-timeline-event:focus-visible {
+  outline: 2px solid var(--prp-accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* Avatar column — continuous vertical line is drawn on the virtual spacer
+   (.prp-conversation-timeline-rail) so consecutive events share one stroke. */
+.prp-timeline-event__rail {
+  position: relative;
+  flex: 0 0 var(--prp-tl-rail);
+  width: var(--prp-tl-rail);
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100%;
+  z-index: 1;
+}
+/* Per-row stub removed; keep empty slot for layout only */
+.prp-timeline-event__rail-line {
+  display: none;
+}
+.prp-timeline-event__rail-avatar {
+  position: relative;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* Mask the continuous rail under the avatar */
+  box-shadow: 0 0 0 3px var(--prp-bg);
+  border-radius: 999px;
+  line-height: 0;
+  background: var(--prp-bg);
+}
+.prp-timeline-event__rail-avatar .prp-avatar {
+  flex: 0 0 auto;
+  opacity: 0.95;
+}
+
+.prp-timeline-event__body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center; /* narrative + time vertically centered */
+  gap: 4px 10px;
+  min-width: 0;
+  flex: 1 1 auto;
+  padding: 2px 0;
+}
+.prp-timeline-event__narrative {
+  min-width: 0;
+  color: var(--prp-fg-muted);
+  /* Inline pieces share one baseline / middle */
+  line-height: 1.4;
+}
+.prp-timeline-event__narrative > * {
+  vertical-align: middle;
+}
+.prp-timeline-event__actor {
+  color: var(--prp-fg);
+  font-weight: 600;
+}
+.prp-timeline-event__actor .prp-entity-link {
+  color: var(--prp-fg);
+  font-weight: 600;
+}
+.prp-timeline-event__actor .prp-entity-link:hover {
+  color: var(--prp-accent);
+}
+
+/* Value params = Badge chips (bordered / soft), not raw tinted text */
+.prp-timeline-event__narrative .prp-timeline-event__param,
+.prp-timeline-event__narrative .prp-badge {
+  margin: 0 2px;
+  vertical-align: middle;
+  position: relative;
+  top: -1px; /* optical center vs 13px narrative */
+}
+/* Long titles / branches: wider than default status chips */
+.prp-timeline-event__param--title {
+  max-width: min(320px, 100%) !important;
+  height: auto !important;
+  min-height: 1.25rem;
+  white-space: normal !important;
+  border-radius: 6px !important;
+  padding-top: 1px;
+  padding-bottom: 1px;
+  color: var(--prp-fg) !important;
+  background: var(--prp-bg-muted) !important;
+}
+.prp-timeline-event__param--title .prp-badge__text {
+  white-space: normal !important;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.3;
+}
+.prp-timeline-event__param--wide {
+  max-width: min(220px, 100%) !important;
+}
+.prp-timeline-event__param--mono {
+  font-family: var(--prp-mono);
+  font-weight: 500 !important;
+  letter-spacing: -0.01em;
+}
+.prp-timeline-event__param--mono code,
+.prp-timeline-event__param--mono .prp-mono {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  padding: 0;
+  border: 0;
+}
+/* User link inside soft badge inherits badge tone */
+.prp-timeline-event__param .prp-entity-link {
+  color: inherit;
+  font-weight: inherit;
+  text-decoration: none;
+}
+.prp-timeline-event__param .prp-entity-link:hover {
+  text-decoration: underline;
+}
+.prp-timeline-event__when {
+  flex: 0 0 auto;
+  font-size: 12px;
+  white-space: nowrap;
+  color: var(--prp-fg-muted);
+  opacity: 0.9;
+}
+/* Label chips inside system event narrative */
+.prp-timeline-event .prp-label-link,
+.prp-timeline-event a.prp-label {
+  vertical-align: middle;
+  display: inline-block;
+  margin: 0 2px;
+  position: relative;
+  top: -1px;
+}
+
+/* Let consecutive event rails connect across virtual-row padding */
+.prp-conversation-virtual__row:has(> .prp-timeline-event) {
+  overflow: visible;
+}
+
 /* Standalone conversation thread 1-level path header */
 .prp-conversation-thread-header {
   display: flex;

@@ -17,6 +17,266 @@
   );
 }
 
+/* ── First-run onboarding (top-right; above modal shell) ── */
+.prp-onboarding {
+  position: fixed;
+  z-index: 100100;
+  top: 16px;
+  right: 16px;
+  width: min(360px, calc(100vw - 24px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  font: 13px/1.45 -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial,
+    sans-serif;
+  color: var(--fgColor-default, #1f2328);
+  pointer-events: auto;
+}
+.prp-onboarding__card {
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 12px;
+  background: var(--bgColor-default, #fff);
+  box-shadow: 0 12px 40px rgba(1, 4, 9, 0.18);
+  padding: 12px 14px 12px;
+}
+.prp-onboarding__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.prp-onboarding__brand {
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  color: var(--fgColor-accent, #0969da);
+}
+.prp-onboarding__step {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fgColor-muted, #656d76);
+  font-variant-numeric: tabular-nums;
+}
+.prp-onboarding__close {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--fgColor-muted, #656d76);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+.prp-onboarding__title {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.3;
+}
+.prp-onboarding__body {
+  min-height: 72px;
+}
+.prp-onboarding__lead {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: var(--fgColor-default, #1f2328);
+}
+.prp-onboarding__hint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--fgColor-muted, #656d76);
+}
+.prp-onboarding__hint--pulse {
+  animation: prp-onboarding-pulse 1.4s ease-in-out infinite;
+}
+.prp-onboarding__demo-progress {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--fgColor-accent, #0969da);
+  font-variant-numeric: tabular-nums;
+}
+@keyframes prp-onboarding-pulse {
+  0%,
+  100% {
+    opacity: 0.65;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Demo PR #1 row highlight on /pulls (guidance only — user opens with ⌥N / click) */
+.prp-onboarding-target-pr,
+[data-prp-onboarding-target='1'] {
+  position: relative;
+  outline: 2px solid var(--fgColor-accent, #0969da) !important;
+  outline-offset: -2px;
+  border-radius: 8px;
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--fgColor-accent, #0969da) 22%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--fgColor-accent, #0969da) 45%, transparent) inset !important;
+  animation: prp-onboarding-target-pulse 1.8s ease-in-out infinite;
+  z-index: 1;
+}
+@keyframes prp-onboarding-target-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 3px color-mix(in srgb, var(--fgColor-accent, #0969da) 18%, transparent),
+      0 0 0 1px color-mix(in srgb, var(--fgColor-accent, #0969da) 40%, transparent) inset;
+  }
+  50% {
+    box-shadow:
+      0 0 0 5px color-mix(in srgb, var(--fgColor-accent, #0969da) 32%, transparent),
+      0 0 0 1px color-mix(in srgb, var(--fgColor-accent, #0969da) 55%, transparent) inset;
+  }
+}
+.prp-onboarding__label {
+  display: block;
+  margin: 8px 0 4px;
+  font-size: 12px;
+  color: var(--fgColor-muted, #656d76);
+}
+.prp-onboarding__input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 9px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  font: 12px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--bgColor-default, #fff);
+  color: inherit;
+}
+.prp-onboarding__input:focus {
+  outline: 2px solid color-mix(in srgb, #0969da 40%, transparent);
+  border-color: #0969da;
+}
+.prp-onboarding__link {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--fgColor-accent, #0969da);
+  text-decoration: none;
+}
+.prp-onboarding__link:hover {
+  text-decoration: underline;
+}
+.prp-onboarding__pref {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 0 0 6px;
+  padding: 8px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 8px;
+  background: var(--bgColor-muted, #f6f8fa);
+  cursor: pointer;
+}
+.prp-onboarding__pref:last-child {
+  margin-bottom: 0;
+}
+.prp-onboarding__pref input {
+  margin: 2px 0 0;
+  flex-shrink: 0;
+}
+.prp-onboarding__pref-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.prp-onboarding__pref-title {
+  font-size: 12px;
+  font-weight: 600;
+}
+.prp-onboarding__pref-desc {
+  font-size: 11px;
+  color: var(--fgColor-muted, #656d76);
+  line-height: 1.35;
+}
+.prp-onboarding__kbd-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--fgColor-muted, #656d76);
+}
+.prp-onboarding__kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  background: var(--bgColor-muted, #f6f8fa);
+  font: 600 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--fgColor-default, #1f2328);
+  box-shadow: 0 1px 0 rgba(31, 35, 40, 0.06);
+}
+.prp-onboarding__tips {
+  margin: 8px 0 0;
+  padding-left: 1.2em;
+  font-size: 12px;
+  color: var(--fgColor-muted, #656d76);
+}
+.prp-onboarding__tips li {
+  margin: 3px 0;
+}
+.prp-onboarding__status {
+  min-height: 1.2em;
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: var(--fgColor-muted, #656d76);
+}
+.prp-onboarding__status--err {
+  color: var(--fgColor-danger, #cf222e);
+}
+.prp-onboarding__footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-top: 12px;
+}
+.prp-onboarding__btn {
+  appearance: none;
+  padding: 5px 10px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  background: var(--button-default-bgColor-rest, #f6f8fa);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.prp-onboarding__btn:hover {
+  background: var(--button-default-bgColor-hover, #eef1f4);
+}
+.prp-onboarding__btn--primary {
+  margin-left: auto;
+  background: #0969da;
+  border-color: #0969da;
+  color: #fff;
+}
+.prp-onboarding__btn--primary:hover {
+  background: #0860ca;
+}
+.prp-onboarding__btn--ghost {
+  background: transparent;
+  font-weight: 500;
+  color: var(--fgColor-muted, #656d76);
+}
+.prp-onboarding__btn--back[hidden] {
+  display: none;
+}
+
 /*
  * FOUC gate: content-script styles.css is present before pr-modal.css loads.
  * Hosts stay invisible until host sets data-prp-css-ready after the modal sheet

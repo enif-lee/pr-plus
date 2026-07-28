@@ -14,18 +14,21 @@ function textFromChildren(children: unknown): string {
 
 /**
  * Status / label chip. Layout: Tailwind. Tone colors: Badge.css residual.
+ * @param {'bordered'|'soft'} [variant] bordered = outline chip; soft = fill only (no border)
  */
 export function Badge({
   children,
   tone = 'muted',
+  variant = 'bordered',
   className = '',
   title,
   ...rest
 }: any) {
   const autoTitle = textFromChildren(children);
+  const soft = variant === 'soft' || variant === 'plain';
   return (
     <span
-      className={`prp-badge prp-badge--${tone} inline-flex h-5 max-w-[min(160px,100%)] min-w-0 items-center overflow-hidden whitespace-nowrap rounded-full px-2 text-[11px] font-semibold ${className}`.trim()}
+      className={`prp-badge prp-badge--${tone}${soft ? ' prp-badge--soft' : ''} inline-flex h-5 max-w-[min(160px,100%)] min-w-0 items-center overflow-hidden whitespace-nowrap rounded-full px-2 text-[11px] font-semibold ${className}`.trim()}
       title={title != null ? title : autoTitle || undefined}
       {...rest}
     >

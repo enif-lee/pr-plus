@@ -153,9 +153,25 @@
         typeof api.fetchPrIssueComments === 'function'
           ? wrap(
               'side.comments',
-              api
-                .fetchPrIssueComments(owner, repo, number, { signal })
-                .then((page) => {
+              Promise.all([
+                api.fetchPrIssueComments(owner, repo, number, { signal }),
+                typeof api.fetchPrTimelineEvents === 'function'
+                  ? api
+                      .fetchPrTimelineEvents(owner, repo, number, { signal })
+                      .catch((err) => {
+                        if (
+                          err?.name === 'AbortError' ||
+                          /aborted|AbortError/i.test(
+                            String(err?.message || '')
+                          )
+                        ) {
+                          throw err;
+                        }
+                        return [];
+                      })
+                  : Promise.resolve([]),
+              ])
+                .then(([page, events]) => {
                   const items = Array.isArray(page?.items)
                     ? page.items
                     : Array.isArray(page)
@@ -170,6 +186,7 @@
                       nextPage: null,
                       loadedCount: items.length,
                     },
+                    timelineEvents: Array.isArray(events) ? events : [],
                   });
                   return page;
                 })
@@ -899,6 +916,7 @@
       avatarUrls,
       files: [],
       comments: [],
+      timelineEvents: [],
       reviews: [],
       reviewComments: [],
       reviewThreads: [],

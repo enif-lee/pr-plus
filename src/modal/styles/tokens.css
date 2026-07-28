@@ -25,6 +25,8 @@ html.prp-scroll-lock body {
   --prp-danger: #cf222e;
   --prp-ok: #1a7f37;
   --prp-warn: #9a6700;
+  /* PR merged purple (GitHub-like) */
+  --prp-merged: #8250df;
   --prp-add-bg: #dafbe1;
   --prp-del-bg: #ffebe9;
   --prp-hunk-bg: #ddf4ff;
@@ -192,6 +194,7 @@ html.prp-embed-active [data-target='app-header'] {
   --prp-danger: #f85149;
   --prp-ok: #3fb950;
   --prp-warn: #d29922;
+  --prp-merged: #a371f7;
   --prp-add-bg: rgba(46, 160, 67, 0.15);
   --prp-del-bg: rgba(248, 81, 73, 0.15);
   --prp-hunk-bg: rgba(56, 139, 253, 0.1);

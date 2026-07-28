@@ -63,6 +63,12 @@
   function install() {
     document.addEventListener('click', onClickCapture, true);
     ensurePullsListKeyboard();
+    // Modal + full-page embed: activity-gated head.sha auto-refresh
+    try {
+      ensureAutoRefreshWatch();
+    } catch {
+      /* ignore */
+    }
     // After stack tree bootstrap (or re-apply), restore open modal + session view
     window.addEventListener('pr-plus-stack-ready', () => {
       if (!hostEnabled) return;
@@ -80,6 +86,11 @@
         !bridge.isExtensionContextAlive()
       ) {
         return;
+      }
+      try {
+        noteAutoRefreshAction({ force: true });
+      } catch {
+        /* ignore */
       }
       const props = buildProps();
       if (typeof props.onRefresh === 'function') {

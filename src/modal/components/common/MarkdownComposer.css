@@ -56,6 +56,21 @@
   border-right: 1px solid var(--prp-border-muted);
 }
 
+/* Per-pane tone (paired change rows: red left + green right) */
+.prp-split-cols__left--del {
+  background: var(--prp-del-bg);
+}
+.prp-split-cols__right--add {
+  background: var(--prp-add-bg);
+}
+
+/* Whole-row add/del bg would wash both panes — tone comes from sides above */
+.prp-vline--split.prp-vline--add,
+.prp-vline--split.prp-vline--del,
+.prp-vline--split.prp-vline--change {
+  background: transparent;
+}
+
 .prp-split-cols__ln {
   flex: 0 0 36px;
   text-align: right;
@@ -73,6 +88,35 @@
   tab-size: 4;
   word-break: normal;
   overflow-wrap: normal;
+}
+
+/* Split-mode review threads: dock under LEFT or RIGHT pane */
+.prp-vline--comment-split {
+  align-items: stretch;
+  /* Match code-row gutter + two panes */
+  padding-left: 0;
+}
+.prp-split-cols--comment {
+  align-items: stretch;
+  border-left: 1px solid var(--prp-border-muted);
+}
+.prp-split-cols__comment-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: visible;
+  box-sizing: border-box;
+  padding: 4px 6px 6px;
+}
+.prp-split-cols__comment-pane:empty {
+  padding: 0;
+}
+.prp-vline--comment-split .prp-inline-thread {
+  width: 100%;
+  max-width: 100%;
+}
+.prp-vline--comment-split .prp-inline-thread__card {
+  max-width: 100%;
 }
 
 .prp-file-header__viewed {

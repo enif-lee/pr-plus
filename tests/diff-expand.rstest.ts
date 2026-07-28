@@ -69,6 +69,118 @@ describe('diff expand + unified line numbers', () => {
     expect(add?.oldLine).toBeNull();
   });
 
+  test('split mode pairs consecutive del+add on the same row', () => {
+    const rows = flattenFilesToVirtualRows(
+      [
+        {
+          filename: 's.js',
+          status: 'modified',
+          additions: 2,
+          deletions: 2,
+          patch: [
+            '@@ -10,5 +10,5 @@',
+            ' keep',
+            '-old1',
+            '-old2',
+            '+new1',
+            '+new2',
+            ' keep2',
+          ].join('\n'),
+        },
+      ],
+      'split',
+      { expandAll: true }
+    );
+    const codeRows = rows.filter((r: any) => r.kind === 'diff-line' && r.split);
+    // context + one paired change row for (old1|new1) + (old2|new2) + context
+    const changes = codeRows.filter((r: any) => r.lineType === 'change');
+    expect(changes).toHaveLength(2);
+    expect(changes[0].leftCode).toBe('old1');
+    expect(changes[0].rightCode).toBe('new1');
+    expect(changes[0].oldLine).toBe(11);
+    expect(changes[0].newLine).toBe(11);
+    expect(changes[1].leftCode).toBe('old2');
+    expect(changes[1].rightCode).toBe('new2');
+    // Pure del or pure add must not appear as separate unpaired rows for this hunk
+    expect(codeRows.some((r: any) => r.lineType === 'del')).toBe(false);
+    expect(codeRows.some((r: any) => r.lineType === 'add')).toBe(false);
+  });
+
+  test('split mode places line comments under the matching side pane', () => {
+    const rows = flattenFilesToVirtualRows(
+      [
+        {
+          filename: 'c.js',
+          status: 'modified',
+          additions: 1,
+          deletions: 1,
+          patch: ['@@ -1,3 +1,3 @@', ' a', '-b', '+B', ' c'].join('\n'),
+        },
+      ],
+      'split',
+      {
+        expandAll: true,
+        reviewComments: [
+          {
+            id: 1,
+            path: 'c.js',
+            side: 'LEFT',
+            line: 2,
+            body: 'left note',
+            author: 'alice',
+          },
+          {
+            id: 2,
+            path: 'c.js',
+            side: 'RIGHT',
+            line: 2,
+            body: 'right note',
+            author: 'bob',
+          },
+        ],
+      }
+    );
+    const comments = rows.filter((r: any) => r.kind === 'inline-comment');
+    expect(comments).toHaveLength(2);
+    const left = comments.find((r: any) => r.side === 'LEFT');
+    const right = comments.find((r: any) => r.side === 'RIGHT');
+    expect(left?.split).toBe(true);
+    expect(right?.split).toBe(true);
+    expect(left?.oldLine).toBe(2);
+    expect(right?.newLine).toBe(2);
+  });
+
+  test('split mode leaves unpaired dels/adds with empty opposite side', () => {
+    const rows = flattenFilesToVirtualRows(
+      [
+        {
+          filename: 'u2.js',
+          status: 'modified',
+          additions: 1,
+          deletions: 2,
+          patch: [
+            '@@ -1,4 +1,3 @@',
+            ' a',
+            '-b',
+            '-c',
+            '+B',
+            ' d',
+          ].join('\n'),
+        },
+      ],
+      'split',
+      { expandAll: true }
+    );
+    const codeRows = rows.filter((r: any) => r.kind === 'diff-line' && r.split);
+    const change = codeRows.find((r: any) => r.lineType === 'change');
+    const delOnly = codeRows.find((r: any) => r.lineType === 'del');
+    expect(change?.leftCode).toBe('b');
+    expect(change?.rightCode).toBe('B');
+    expect(delOnly?.leftCode).toBe('c');
+    expect(delOnly?.rightCode).toBe('');
+    expect(delOnly?.newLine).toBeNull();
+  });
+
   test('middle gap mounts once; sequential edge expand clears', () => {
     const lines = Array.from({ length: 53 }, (_, i) => `L${i + 1}`);
     const multi = [

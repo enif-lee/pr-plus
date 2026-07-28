@@ -273,17 +273,269 @@
     }
   }
 
+  // ── First-run onboarding (pulls page, top-right) ─────────────────────
+  let onboardingTour = null;
+
+  function isPullsListPath(pathname = window.location.pathname) {
+    const path = String(pathname || '');
+    if (!path.includes('/pulls')) return false;
+    if (/\/pull\/\d+/.test(path)) return false;
+    return true;
+  }
+
+  async function maybeStartOnboarding() {
+    try {
+      // Keep an in-progress tour alive when a PR modal opens over the list
+      if (onboardingTour?.isActive?.()) return;
+
+      if (!isPullsListPath()) {
+        onboardingTour?.dispose?.();
+        onboardingTour = null;
+        return;
+      }
+      const api = globalThis.PROnboarding;
+      if (!api || typeof api.createOnboardingTour !== 'function') return;
+      if (onboardingTour) return;
+
+      const storage = globalThis.PRTreeStorage;
+      const bridgeSend = async (message) => {
+        if (!globalThis.chrome?.runtime?.sendMessage) {
+          throw new Error('chrome.runtime unavailable');
+        }
+        return chrome.runtime.sendMessage(message);
+      };
+
+      const getPrefs = async () => {
+        if (typeof storage?.getExtensionPrefs !== 'function') {
+          throw new Error('prefs unavailable');
+        }
+        // Retry while SW wakes from idle (first paint after install/reload)
+        let lastErr: any = null;
+        for (let i = 0; i < 4; i++) {
+          try {
+            return await storage.getExtensionPrefs();
+          } catch (err) {
+            lastErr = err;
+            await new Promise((r) => setTimeout(r, 60 * (i + 1)));
+          }
+        }
+        throw lastErr || new Error('prefs unavailable');
+      };
+      const setPrefs = async (patch: any) => {
+        if (typeof storage?.setExtensionPrefs !== 'function') {
+          const res = await bridgeSend({
+            type: 'PR_TREE_PREFS_SET',
+            prefs: patch || {},
+          });
+          if (!res?.ok) throw new Error(res?.error || 'Failed to save prefs');
+          return res.prefs || patch;
+        }
+        return storage.setExtensionPrefs(patch);
+      };
+      /**
+       * Content scripts have `storage` permission — write the one-shot flag
+       * directly so we do not depend on a woken service worker for completion.
+       */
+      const ONBOARDING_KEY = 'onboardingCompleted';
+      const readOnboardingLocal = () =>
+        new Promise((resolve) => {
+          try {
+            const area = globalThis.chrome?.storage?.local;
+            if (!area?.get) {
+              resolve(null);
+              return;
+            }
+            area.get([ONBOARDING_KEY, 'extensionPrefs'], (result) => {
+              if (typeof result?.[ONBOARDING_KEY] === 'boolean') {
+                resolve(Boolean(result[ONBOARDING_KEY]));
+                return;
+              }
+              const prefs = result?.extensionPrefs;
+              if (prefs && typeof prefs.onboardingCompleted === 'boolean') {
+                resolve(Boolean(prefs.onboardingCompleted));
+                return;
+              }
+              resolve(null);
+            });
+          } catch {
+            resolve(null);
+          }
+        });
+      const writeOnboardingLocal = (completed) =>
+        new Promise((resolve) => {
+          try {
+            const area = globalThis.chrome?.storage?.local;
+            if (!area?.set) {
+              resolve(false);
+              return;
+            }
+            area.get(['extensionPrefs'], (cur) => {
+              const prev =
+                cur?.extensionPrefs && typeof cur.extensionPrefs === 'object'
+                  ? cur.extensionPrefs
+                  : {};
+              area.set(
+                {
+                  [ONBOARDING_KEY]: Boolean(completed),
+                  extensionPrefs: {
+                    ...prev,
+                    onboardingCompleted: Boolean(completed),
+                  },
+                },
+                () => {
+                  const err = globalThis.chrome?.runtime?.lastError;
+                  resolve(!err);
+                }
+              );
+            });
+          } catch {
+            resolve(false);
+          }
+        });
+
+      const isOnboardingDone = async () => {
+        const local = await readOnboardingLocal();
+        if (local != null) return Boolean(local);
+        if (typeof storage?.getOnboardingCompleted === 'function') {
+          try {
+            return Boolean(await storage.getOnboardingCompleted());
+          } catch {
+            /* fall through */
+          }
+        }
+        try {
+          const p = await getPrefs();
+          return Boolean(p?.onboardingCompleted);
+        } catch {
+          // Unknown → do not block first-run forever
+          return false;
+        }
+      };
+      const markOnboardingDone = async () => {
+        // 1) Direct storage write (reliable without SW)
+        if (await writeOnboardingLocal(true)) return true;
+        // 2) Bridge / SW path
+        try {
+          if (typeof storage?.setOnboardingCompleted === 'function') {
+            if (Boolean(await storage.setOnboardingCompleted(true))) return true;
+          }
+        } catch (err) {
+          console.warn('[pr+] setOnboardingCompleted failed', err);
+        }
+        try {
+          const res = await bridgeSend({
+            type: 'PR_TREE_ONBOARDING_SET',
+            completed: true,
+          });
+          if (res?.ok && res.completed) return true;
+        } catch {
+          /* continue */
+        }
+        try {
+          const next = await setPrefs({ onboardingCompleted: true });
+          return Boolean(next?.onboardingCompleted);
+        } catch {
+          return false;
+        }
+      };
+
+      onboardingTour = api.createOnboardingTour({
+        document,
+        window,
+        getPrefs,
+        setPrefs,
+        isOnboardingDone,
+        markOnboardingDone,
+        getTokenStatus: () =>
+          storage?.getGithubTokenStatus?.() ||
+          Promise.resolve({ configured: false, mask: '' }),
+        setToken: async (token) => {
+          const res = await bridgeSend({
+            type: 'PR_TREE_TOKEN_SET',
+            token: String(token || ''),
+          });
+          if (!res?.ok && res?.error) {
+            return { ok: false, error: res.error };
+          }
+          return {
+            ok: true,
+            configured: Boolean(res?.configured ?? true),
+            mask: res?.mask || '',
+          };
+        },
+        getPathname: () => window.location.pathname,
+      });
+      const res = await onboardingTour.start();
+      if (!res?.ok) {
+        onboardingTour.dispose?.();
+        onboardingTour = null;
+      }
+    } catch (err) {
+      console.warn('[pr+] onboarding failed', err);
+      try {
+        onboardingTour?.dispose?.();
+      } catch {
+        /* ignore */
+      }
+      onboardingTour = null;
+    }
+  }
+
+  function watchOnboardingRoute() {
+    const check = () => {
+      void maybeStartOnboarding();
+    };
+    window.addEventListener('popstate', check);
+    window.addEventListener('turbo:load', check);
+    window.addEventListener('turbo:render', check);
+    window.addEventListener('pjax:end', check);
+    window.addEventListener('pr-tree-location', check);
+    // Soft-nav poll (same idea as tree bootstrap)
+    window.setInterval(() => {
+      const active = onboardingTour?.isActive?.();
+      if (active) return;
+      if (isPullsListPath() && !document.getElementById('prp-onboarding')) {
+        void maybeStartOnboarding();
+      }
+    }, 2000);
+
+    // Popup "Start onboarding" — clear flag already done; remount tour
+    try {
+      chrome.runtime?.onMessage?.addListener((message) => {
+        if (message?.type !== 'PR_TREE_ONBOARDING_RESTART') return false;
+        try {
+          onboardingTour?.dispose?.();
+        } catch {
+          /* ignore */
+        }
+        onboardingTour = null;
+        void maybeStartOnboarding();
+        return false;
+      });
+    } catch {
+      /* ignore */
+    }
+  }
+
   // Expose for tests / host coordination
   globalThis.__PR_PLUS_CONTENT__ = {
     enableFeatures,
     disableFeatures,
     isEnabled: () => featuresEnabled,
     afterStackReady,
+    maybeStartOnboarding,
   };
 
+  async function boot() {
+    await start();
+    watchOnboardingRoute();
+    // Tour even without PAT (step 1 is PAT setup)
+    await maybeStartOnboarding();
+  }
+
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => void start(), { once: true });
+    document.addEventListener('DOMContentLoaded', () => void boot(), { once: true });
   } else {
-    void start();
+    void boot();
   }
 })();

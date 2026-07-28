@@ -203,6 +203,56 @@ async function fetchOpenPullsPublic(owner: any, repo: any, fetchImpl: any, token
   return data.map(mapApiPullRequest);
 }
 
+/**
+ * Lightweight PR probe for auto-refresh (head SHA / draft / state).
+ * Prefer over fetchPrDetail when only staleness is needed.
+ * @returns {Promise<{ headSha: string, baseSha: string, updatedAt: string|null, draft: boolean, state: string, number: number }>}
+ */
+async function fetchPrHeadProbe(owner: any, repo: any, number: any, fetchImpl: any, token: any = null, ctx: any = null) {
+  ctx = normalizeApiCtx(ctx);
+  const o = String(owner || '').trim();
+  const r = String(repo || '').trim();
+  const n = Number(number);
+  const empty = {
+    headSha: '',
+    baseSha: '',
+    updatedAt: null,
+    draft: false,
+    state: '',
+    number: Number.isFinite(n) ? n : 0,
+  };
+  if (!o || !r || !Number.isFinite(n) || n <= 0) return empty;
+  try {
+    const url = githubRestUrl(
+      `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/pulls/${n}`,
+      ctx
+    );
+    const res = await fetchImpl(url, { headers: buildApiHeaders(token) });
+    if (!res.ok) {
+      const err = new Error(`GitHub API ${res.status}: ${res.statusText}`);
+      err.status = res.status;
+      throw err;
+    }
+    const data = await res.json();
+    return {
+      headSha: String(data?.head?.sha || ''),
+      baseSha: String(data?.base?.sha || ''),
+      updatedAt: data?.updated_at || null,
+      draft: Boolean(data?.draft),
+      state: String(data?.state || ''),
+      number: Number(data?.number) || n,
+    };
+  } catch (err) {
+    if (
+      err?.name === 'AbortError' ||
+      /aborted|AbortError/i.test(String(err?.message || ''))
+    ) {
+      throw err;
+    }
+    return empty;
+  }
+}
+
 async function fetchPullByNumber(owner: any, repo: any, pullNumber: any, fetchImpl: any, token: any = null, ctx: any = null) {
   ctx = normalizeApiCtx(ctx);
   const url = githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}`, ctx);
@@ -908,6 +958,122 @@ async function fetchPrIssueComments(owner: any, repo: any, number: any, fetchImp
       throw err;
     }
     return empty;
+  }
+}
+
+/**
+ * Issue timeline system events (title rename, draft/ready, labels, assignees, …).
+ * GET /repos/{owner}/{repo}/issues/{number}/events — paginated, max 100/page.
+ * Skips pure noise (subscribed/unsubscribed/mentioned); comments/reviews live elsewhere.
+ * @returns {Promise<Array>}
+ */
+async function fetchPrTimelineEvents(owner: any, repo: any, number: any, fetchImpl: any, token: any = null, ctx: any = null) {
+  ctx = normalizeApiCtx(ctx);
+  const o = String(owner || '').trim();
+  const r = String(repo || '').trim();
+  const n = Number(number);
+  if (!o || !r || !Number.isFinite(n)) return [];
+
+  /** Events already covered by comments/reviews/aside, or pure noise. */
+  const SKIP = new Set([
+    'subscribed',
+    'unsubscribed',
+    'mentioned',
+    'comment_deleted',
+  ]);
+
+  function mapEvent(raw: any) {
+    if (!raw || typeof raw !== 'object') return null;
+    const event = String(raw.event || '').trim();
+    if (!event || SKIP.has(event)) return null;
+    const actor = raw.actor || raw.user || null;
+    const login = actor?.login || '';
+    const label = raw.label
+      ? {
+          name: String(raw.label.name || ''),
+          color: String(raw.label.color || ''),
+          description: String(raw.label.description || ''),
+        }
+      : null;
+    const assigneeLogin =
+      typeof raw.assignee === 'string'
+        ? raw.assignee
+        : raw.assignee?.login || null;
+    const requestedReviewer =
+      raw.requested_reviewer?.login ||
+      (typeof raw.requested_reviewer === 'string'
+        ? raw.requested_reviewer
+        : null);
+    const requestedTeam =
+      raw.requested_team?.slug ||
+      raw.requested_team?.name ||
+      (typeof raw.requested_team === 'string' ? raw.requested_team : null);
+    const milestone = raw.milestone
+      ? {
+          number:
+            raw.milestone.number != null ? Number(raw.milestone.number) : null,
+          title: String(raw.milestone.title || ''),
+        }
+      : null;
+    const rename =
+      raw.rename && typeof raw.rename === 'object'
+        ? {
+            from: String(raw.rename.from || ''),
+            to: String(raw.rename.to || ''),
+          }
+        : null;
+    return {
+      id: raw.id != null ? raw.id : null,
+      event,
+      actor: login,
+      avatarUrl: actor?.avatar_url || actor?.avatarUrl || '',
+      at: raw.created_at || raw.createdAt || null,
+      rename,
+      label: label && label.name ? label : null,
+      assignee: assigneeLogin || null,
+      requestedReviewer: requestedReviewer || null,
+      requestedTeam: requestedTeam || null,
+      milestone: milestone && (milestone.title || milestone.number != null)
+        ? milestone
+        : null,
+      lockReason: raw.lock_reason || raw.lockReason || null,
+      commitId: raw.commit_id || raw.commitId || null,
+      dismissReason: raw.dismissed_review?.dismissal_message || null,
+      reviewState: raw.dismissed_review?.state || raw.state || null,
+    };
+  }
+
+  const out = [];
+  try {
+    let page = 1;
+    const perPage = 100;
+    // Cap pages so a very noisy issue cannot hang open (1000 events max).
+    const maxPages = 10;
+    while (page <= maxPages) {
+      const url = githubRestUrl(
+        `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/issues/${n}/events?per_page=${perPage}&page=${page}`,
+        ctx
+      );
+      const { data, link } = await apiJsonWithLink(url, fetchImpl, token);
+      const batch = Array.isArray(data) ? data : [];
+      for (const raw of batch) {
+        const mapped = mapEvent(raw);
+        if (mapped) out.push(mapped);
+      }
+      if (batch.length < perPage) break;
+      const next = parseLinkNextUrl(link);
+      if (!next) break;
+      page += 1;
+    }
+    return out;
+  } catch (err) {
+    if (
+      err?.name === 'AbortError' ||
+      /aborted|AbortError/i.test(String(err?.message || ''))
+    ) {
+      throw err;
+    }
+    return [];
   }
 }
 
@@ -5039,6 +5205,7 @@ const fetchApi = {
   mapWithConcurrency,
   fetchOpenPullsPublic,
   fetchPullByNumber,
+  fetchPrHeadProbe,
   fetchDanglingPulls,
   fetchRepoAutolinks,
   buildAutolinkUrl,
@@ -5053,6 +5220,7 @@ const fetchApi = {
   fetchAllPrFiles,
   fetchPrFiles,
   fetchPrIssueComments,
+  fetchPrTimelineEvents,
   fetchPrReviews,
   fetchPrChecks,
   fetchPrDevelopment,

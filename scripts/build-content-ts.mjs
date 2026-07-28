@@ -23,6 +23,7 @@ const ENTRIES = [
   'github-endpoints',
   // content-bridge is assembled from src/content-bridge/parts (build-content-bridge.mjs)
   'content-bootstrap',
+  'onboarding',
   'content',
   'popup',
   'storage',

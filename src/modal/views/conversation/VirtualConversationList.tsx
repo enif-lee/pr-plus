@@ -13,6 +13,7 @@ import {
   conversationRowOffsets,
   conversationRowHeight,
   indexForConversationAnchor,
+  timelineEventRailSegments,
   type ConversationVirtualRow,
 } from '@lib/conversation-virtual';
 import { FloatingScrollbar } from '../../components/common/FloatingScrollbar';
@@ -90,6 +91,12 @@ function VirtualConversationListImpl(props: any) {
 
   const offsets = useMemo(
     () => conversationRowOffsets(rows, heightMap, heightOpts),
+    [rows, heightMap, heightOpts]
+  );
+
+  /** Continuous vertical rail for consecutive system-event runs (not per-row stubs). */
+  const timelineRails = useMemo(
+    () => timelineEventRailSegments(rows, heightMap, heightOpts),
     [rows, heightMap, heightOpts]
   );
 
@@ -307,7 +314,9 @@ function VirtualConversationListImpl(props: any) {
       className={`prp-scroll-float-host prp-edge-fade prp-conversation-virtual-host ${className}`.trim()}
     >
       <div
-        className="prp-conversation-virtual prp-scroll-float"
+        className={`prp-conversation-virtual prp-scroll-float${
+          timelineRails.length ? ' prp-conversation-virtual--timeline-rail' : ''
+        }`}
         ref={scrollerRef}
         onScroll={onScroll}
         data-virtual-count={rows.length}
@@ -319,6 +328,15 @@ function VirtualConversationListImpl(props: any) {
           className="prp-conversation-virtual__spacer"
           style={{ height: Math.max(range.totalHeight, 1), position: 'relative' }}
         >
+          {/* Continuous timeline vertical rails — full event runs, not clipped by virtualization */}
+          {timelineRails.map((seg, i) => (
+            <div
+              key={`tl-rail-${i}-${seg.top}`}
+              className="prp-conversation-timeline-rail"
+              style={{ top: seg.top, height: seg.height }}
+              aria-hidden="true"
+            />
+          ))}
           <div
             className="prp-conversation-virtual__window"
             style={{
@@ -328,6 +346,7 @@ function VirtualConversationListImpl(props: any) {
               right: 0,
               transform: `translateY(${range.offsetY || 0}px)`,
               willChange: 'transform',
+              zIndex: 1,
             }}
           >
             {visible.map((row) => {
