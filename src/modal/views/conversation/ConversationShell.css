@@ -1,0 +1,211 @@
+/**
+ * Conversation shell: main | splitter | aside, scroll-float hosts.
+ */
+
+.prp-conversation__main {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  /* Single virtual scroller owns the entire left panel — flush to splitter */
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+
+/*
+ * Floating (overlay) scrollbars — native bar is fully hidden so Chrome cannot
+ * reserve a classic gutter; a custom thumb paints over content instead.
+ */
+.prp-scroll-float-host {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+
+/*
+ * Soft edge fade: content dissolves into the shell background over
+ * --prp-edge-fade-size instead of hard-stopping at a padding box.
+ * Pair with vertical padding on the scroller so resting content sits clear.
+ */
+.prp-scroll-float-host.prp-edge-fade::before,
+.prp-scroll-float-host.prp-edge-fade::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: var(--prp-edge-fade-size, 18px);
+  z-index: 3;
+  pointer-events: none;
+}
+
+.prp-scroll-float-host.prp-edge-fade::before {
+  top: 0;
+  background: linear-gradient(
+    to bottom,
+    var(--prp-bg) 0%,
+    color-mix(in srgb, var(--prp-bg) 88%, transparent) 28%,
+    color-mix(in srgb, var(--prp-bg) 45%, transparent) 62%,
+    transparent 100%
+  );
+}
+
+.prp-scroll-float-host.prp-edge-fade::after {
+  bottom: 0;
+  background: linear-gradient(
+    to top,
+    var(--prp-bg) 0%,
+    color-mix(in srgb, var(--prp-bg) 88%, transparent) 28%,
+    color-mix(in srgb, var(--prp-bg) 45%, transparent) 62%,
+    transparent 100%
+  );
+}
+
+.prp-scroll-float {
+  /* Kill native scrollbar width in every engine */
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* legacy Edge */
+  scrollbar-gutter: unset;
+}
+
+.prp-scroll-float::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+  display: none !important;
+  background: transparent;
+}
+
+
+/* Full left-panel virtual list (description + composer/merge + timeline) */
+.prp-conversation-virtual-host {
+  /* sizing comes from .prp-scroll-float-host */
+}
+
+.prp-conversation-virtual {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+  /*
+   * Vertical inset scrolls under edge-fade overlays.
+   * Horizontal inset keeps keyboard/search focus rings (outline-offset)
+   * from being clipped by overflow-x: hidden.
+   */
+  padding: 16px 10px;
+  box-sizing: border-box;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: block;
+  min-height: 0;
+  min-width: 0;
+}
+
+.prp-conversation-virtual__spacer {
+  width: 100%;
+  position: relative;
+}
+
+.prp-conversation-virtual__window {
+  display: flex;
+  flex-direction: column;
+  /* No flex gap — spacing is padding on each row so ResizeObserver includes it */
+  gap: 0;
+  width: 100%;
+  box-sizing: border-box;
+  padding-bottom: 2px;
+}
+
+.prp-conversation-virtual__row {
+  flex: 0 0 auto;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  /* Matches former column gap; counted in measured row height */
+  padding-bottom: var(--prp-gap-stack);
+}
+
+.prp-conversation-virtual__row > .prp-card,
+.prp-conversation-virtual__row > .prp-timeline-gap,
+.prp-conversation-virtual__row > .prp-merge-box,
+.prp-conversation-virtual__row > .prp-pagination,
+.prp-conversation-virtual__row > .prp-conversation-empty {
+  width: 100%;
+}
+
+/* Description is a virtual row — full body height (no separate inner scroll) */
+.prp-conversation-virtual .prp-card--desc .prp-card__body {
+  max-height: none;
+  overflow: visible;
+}
+
+
+/* Vertical splitter between main and aside (hosts collapse control) */
+.prp-conversation__splitter {
+  position: relative;
+  z-index: 12; /* above edge-fade / scroll content so collapse tip is not clipped under */
+  align-self: stretch;
+  min-width: 0;
+  width: 100%;
+  background: transparent;
+  overflow: visible;
+}
+
+/* 1px hairline centered in the 28px track */
+.prp-conversation__splitter::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: var(--prp-border-muted);
+  pointer-events: none;
+}
+
+
+/* Host wraps aside so floating thumb can overlay flush on the panel edge */
+.prp-conversation__aside-host {
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  /* No host padding — float bar sits on the right edge; content pads inside scroller */
+  padding: 0;
+  box-sizing: border-box;
+}
+
+.prp-conversation__aside {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  width: 100%;
+  flex: 1 1 auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* Vertical inset under edge-fade + right inset for meta content */
+  padding: 16px 18px 16px 0;
+  box-sizing: border-box;
+}
+
+.prp-conversation__aside-host.prp-conversation__aside-host--collapsed {
+  padding: 0;
+}
+
+.prp-conversation__aside-host--collapsed .prp-conversation__aside {
+  /* compact rail padding lives on the scroller itself */
+  padding: 12px 4px 8px;
+}

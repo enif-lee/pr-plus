@@ -23,3 +23,9 @@
   font-size: 12px;
 }
 
+
+/* Checks summary residual */
+
+.prp-checks-summary {
+  margin-bottom: 10px;
+}

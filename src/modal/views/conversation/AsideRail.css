@@ -128,3 +128,402 @@
   padding: 8px 2px;
 }
 
+
+/* Aside panels: tags, projects, development, tree (from residual) */
+
+/* Conversation layout — GitHub PR overview.
+ * Columns scroll independently so the right rail stays sticky in view. */
+.prp-conversation {
+  --prp-aside-w: 280px;
+  display: grid;
+  /* main | splitter (28px for collapse ctrl) | aside — aside width via --prp-aside-w */
+  grid-template-columns: minmax(0, 1fr) 28px var(--prp-aside-w);
+  gap: 0;
+  overflow: hidden;
+  flex: 1 1 auto;
+  min-height: 0;
+  /* Left inset only — vertical inset lives in scrollers + edge-fade overlays
+   * so content soft-fades instead of hard-clipping at a 16px pad edge. */
+  padding: 0 0 0 18px;
+  background: var(--prp-bg);
+  overscroll-behavior: contain;
+  transition: grid-template-columns 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+
+.prp-conversation--aside-collapsed {
+  /* --prp-aside-w set inline to compact width */
+}
+
+
+.prp-aside-overflow {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--prp-fg-muted);
+}
+
+.prp-aside-overflow--btn {
+  appearance: none;
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 11px;
+  color: var(--prp-accent);
+  text-align: left;
+  cursor: pointer;
+}
+
+.prp-aside-overflow--btn:hover:not(:disabled),
+.prp-aside-overflow--btn:focus-visible:not(:disabled) {
+  text-decoration: underline;
+}
+
+.prp-aside-overflow--btn:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+
+.prp-aside-search {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 8px;
+  padding: 5px 8px;
+  border: 1px solid var(--prp-border-muted);
+  border-radius: 6px;
+  background: var(--prp-bg);
+  color: var(--prp-fg);
+  font: inherit;
+  font-size: 12px;
+}
+
+.prp-aside-search:focus {
+  outline: none;
+  border-color: var(--prp-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--prp-accent) 18%, transparent);
+}
+
+.prp-aside-tags {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 220px;
+  overflow: auto;
+  font-size: 12px;
+}
+
+.prp-aside-tags__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 3px 0;
+}
+
+.prp-aside-tags__name {
+  font-family: var(--prp-mono);
+  font-size: 12px;
+  color: var(--prp-accent);
+}
+
+.prp-aside-tags__sha {
+  font-family: var(--prp-mono);
+  font-size: 11px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.prp-aside-projects__item,
+.prp-aside-dev__item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  padding: 2px 0;
+  font-size: 12px;
+}
+
+.prp-aside-projects__num {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.prp-aside-dev__hint {
+  margin: 0 0 8px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.prp-aside-dev__title {
+  color: var(--prp-fg);
+  font-weight: 400;
+}
+
+.prp-aside-dev__state {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--prp-fg-muted);
+}
+
+.prp-aside-dev__state--open {
+  color: var(--prp-ok, #1a7f37);
+}
+
+.prp-aside-dev__state--closed {
+  color: var(--prp-fg-muted);
+}
+
+
+/* Development: badge list (#number title) + same-tab / new-tab actions */
+.prp-aside-dev--badges {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.prp-aside-dev__badge-item {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.prp-aside-dev__badge {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px 4px 2px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--prp-border-muted);
+  background: var(--prp-bg-muted);
+  color: var(--prp-fg);
+  font-size: 12px;
+  line-height: 1.3;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+.prp-aside-dev__badge:hover {
+  border-color: color-mix(in srgb, var(--prp-accent) 45%, var(--prp-border-muted));
+  background: color-mix(in srgb, var(--prp-accent) 8%, var(--prp-bg-muted));
+}
+
+.prp-aside-dev__badge--open {
+  color: var(--prp-ok, #1a7f37);
+  background: var(--prp-add-bg, #dafbe1);
+  border-color: color-mix(in srgb, var(--prp-ok, #1a7f37) 35%, transparent);
+}
+
+.prp-aside-dev__badge--open:hover {
+  border-color: color-mix(in srgb, var(--prp-ok, #1a7f37) 55%, transparent);
+  background: color-mix(in srgb, var(--prp-ok, #1a7f37) 14%, var(--prp-bg));
+}
+
+.prp-aside-dev__badge--muted {
+  color: var(--prp-fg-muted);
+}
+
+.prp-aside-dev__badge-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 auto;
+  padding: 2px 4px 2px 0;
+  color: inherit;
+  text-decoration: none;
+  overflow: hidden;
+}
+
+.prp-aside-dev__badge-main:hover {
+  text-decoration: none;
+}
+
+.prp-aside-dev__badge-num {
+  flex-shrink: 0;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--prp-accent, #0969da);
+}
+
+.prp-aside-dev__badge--open .prp-aside-dev__badge-num {
+  color: var(--prp-ok, #1a7f37);
+}
+
+.prp-aside-dev__badge-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+  color: var(--prp-fg);
+}
+
+.prp-aside-dev__badge--muted .prp-aside-dev__badge-title {
+  color: var(--prp-fg-muted);
+}
+
+.prp-aside-dev__badge-ext {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  color: var(--prp-fg-muted);
+  text-decoration: none;
+  line-height: 0;
+}
+
+.prp-aside-dev__badge-ext:hover,
+.prp-aside-dev__badge-ext:focus-visible {
+  color: var(--prp-accent);
+  background: color-mix(in srgb, var(--prp-accent) 12%, transparent);
+  outline: none;
+}
+
+.prp-aside-dev__badge-ext-icon {
+  display: block;
+}
+
+
+.prp-aside-compact__dev,
+.prp-aside-compact__projects {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.prp-aside-compact__dev-item,
+.prp-aside-compact__project-item {
+  position: relative;
+  display: inline-flex;
+  max-width: 100%;
+  min-width: 0;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--prp-border-muted);
+  background: var(--prp-bg-muted);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--prp-fg-muted);
+  cursor: default;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prp-milestone-chip {
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--prp-border-muted);
+  background: var(--prp-bg-muted);
+  font-size: 12px;
+  max-width: 100%;
+}
+
+.prp-milestone-chip__title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.prp-milestone-chip__num {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+
+/* Nested file tree (aside, compact) */
+.prp-aside-tree {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 260px;
+  overflow: auto;
+  font-size: 12px;
+}
+
+
+.prp-aside-tree__row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+
+.prp-aside-tree__item {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  font-size: 12px;
+  cursor: default;
+  border-radius: 6px;
+  min-width: 0;
+}
+
+
+.prp-aside-tree__dir {
+  font-weight: 600;
+  cursor: pointer;
+}
+
+
+.prp-aside-tree__dir:hover {
+  background: color-mix(in srgb, var(--prp-accent) 10%, transparent);
+}
+
+
+.prp-aside-tree__name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--prp-mono);
+  font-size: 11.5px;
+}
+
+
+.prp-aside-tree__stat {
+  flex: 0 0 auto;
+  color: var(--prp-fg-muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+
+.prp-aside-tree__chev {
+  width: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--prp-fg-muted);
+  flex: 0 0 auto;
+}

@@ -1,0 +1,119 @@
+/**
+ * Aside commits timeline.
+ */
+
+/* Compact commit timeline (aside) — rail + dots share one center axis.
+   Scroll lives on an outer wrapper so the absolute rail tracks full content height
+   (overflow:auto on the same element as ::before only covers the viewport). */
+.prp-commit-timeline-scroll {
+  max-height: 280px;
+  overflow: auto;
+  min-height: 0;
+}
+
+
+.prp-commit-timeline {
+  --prp-tl-gutter: 16px;
+  --prp-tl-dot: 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+
+/* Full-height rail through all commits (not just visible scrollport) */
+.prp-commit-timeline::before {
+  content: '';
+  position: absolute;
+  left: calc(var(--prp-tl-gutter) / 2);
+  top: calc(6px + 3px + var(--prp-tl-dot) / 2);
+  bottom: calc(10px + 3px + var(--prp-tl-dot) / 2);
+  width: 2px;
+  transform: translateX(-50%);
+  background: var(--prp-border-muted);
+  border-radius: 1px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+
+/* Per-item segment as backup (covers multi-line gaps between dots) */
+.prp-commit-timeline__item:not(.prp-commit-timeline__item--last)::after {
+  content: '';
+  position: absolute;
+  left: calc(var(--prp-tl-gutter) / 2);
+  top: calc(6px + 3px + var(--prp-tl-dot));
+  bottom: 0;
+  width: 2px;
+  transform: translateX(-50%);
+  background: var(--prp-border-muted);
+  border-radius: 1px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+
+.prp-commit-timeline__item {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--prp-tl-gutter) minmax(0, 1fr);
+  column-gap: 10px;
+  padding: 6px 0 10px;
+  font-size: 12px;
+  align-items: start;
+}
+
+
+.prp-commit-timeline__dot {
+  width: var(--prp-tl-dot);
+  height: var(--prp-tl-dot);
+  box-sizing: border-box;
+  /* Align with first text line (~12px * 1.35 ≈ 16px → center at 8px) */
+  margin: 3px 0 0;
+  border-radius: 50%;
+  background: var(--prp-bg);
+  border: 2px solid var(--prp-accent);
+  z-index: 1;
+  justify-self: center;
+  align-self: start;
+  position: relative;
+}
+
+
+.prp-commit-timeline__body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+
+.prp-commit-timeline__msg {
+  color: var(--prp-fg);
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+
+.prp-commit-timeline__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  color: var(--prp-fg-muted);
+  font-size: 11px;
+  align-items: center;
+}
+
+
+.prp-commit-timeline__sha {
+  font-family: var(--prp-mono);
+  color: var(--prp-accent);
+  font-size: 11px;
+}

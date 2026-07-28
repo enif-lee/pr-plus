@@ -1,0 +1,72 @@
+/**
+ * Floating overlay scrollbar thumb (vertical + horizontal).
+ */
+@keyframes prp-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+/* Custom overlay thumb — flush to the panel edge (no track inset).
+ * Shown only with .prp-float-sb--active (scrolling/dragging); auto-hides after
+ * idle (see FLOATING_SCROLLBAR_IDLE_MS). Hover alone does not keep it visible. */
+.prp-float-sb {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 6px;
+  z-index: 5;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms ease;
+}
+
+.prp-float-sb--active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.prp-float-sb__thumb {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  width: 100%;
+  min-height: 28px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--prp-fg-muted) 26%, transparent);
+  box-shadow: none;
+  cursor: default;
+  will-change: transform;
+  touch-action: none;
+}
+
+.prp-float-sb--active .prp-float-sb__thumb {
+  background: color-mix(in srgb, var(--prp-fg-muted) 40%, transparent);
+}
+
+/* Horizontal overlay (stack strip, etc.) — flush bottom edge */
+.prp-float-sb--horizontal {
+  top: auto;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: auto;
+  height: 6px;
+}
+
+.prp-float-sb--horizontal .prp-float-sb__thumb {
+  top: 0;
+  left: 0;
+  right: auto;
+  bottom: 0;
+  width: auto;
+  height: 100%;
+  min-height: 0;
+  min-width: 28px;
+  max-height: none;
+}

@@ -661,3 +661,35 @@
   -webkit-user-drag: none;
 }
 
+
+/* Composer / textarea residual (from residual) */
+
+.prp-composer {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+
+.prp-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--prp-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  resize: vertical;
+  min-height: 72px;
+  background: var(--prp-bg);
+  color: var(--prp-fg);
+}
+
+
+.prp-composer__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}

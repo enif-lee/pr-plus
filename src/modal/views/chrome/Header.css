@@ -1,0 +1,341 @@
+/* Header chrome (moved from styles/residual) */
+@keyframes prp-header-stats-content-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+
+.prp-header__actions {
+  grid-area: actions;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  flex: 0 0 auto;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+
+.prp-header__actions-inline {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+
+/* Overflow ⋯ menu retired — always show inline actions; keep DOM for a11y cleanup later */
+.prp-header__actions-more {
+  display: none !important;
+  position: relative;
+}
+
+
+.prp-header__more-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--prp-border);
+  border-radius: 8px;
+  background: var(--prp-bg);
+  color: var(--prp-fg);
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+
+.prp-header__more-btn:hover,
+.prp-header__more-btn:focus-visible {
+  background: var(--prp-bg-muted);
+}
+
+
+.prp-header__more-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 50;
+  min-width: 200px;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  border: 1px solid var(--prp-border);
+  border-radius: 10px;
+  background: var(--prp-bg);
+  box-shadow: 0 12px 32px rgba(1, 4, 9, 0.16);
+}
+
+
+.prp-header__more-item {
+  appearance: none;
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  padding: 8px 12px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  text-decoration: none;
+  box-sizing: border-box;
+}
+
+
+.prp-header__more-item:hover,
+.prp-header__more-item:focus-visible {
+  background: var(--prp-bg-muted);
+}
+
+
+.prp-header__more-item--danger {
+  color: var(--prp-danger);
+  border: 1px solid color-mix(in srgb, var(--prp-danger) 55%, transparent);
+  background: color-mix(in srgb, var(--prp-danger) 10%, var(--prp-bg));
+  border-radius: 6px;
+}
+
+.prp-header__more-item--danger:hover,
+.prp-header__more-item--danger:focus-visible {
+  background: color-mix(in srgb, var(--prp-danger) 16%, var(--prp-bg));
+  border-color: var(--prp-danger);
+}
+
+
+/*
+ * Review compact (Diff layout): single strip
+ *   # · title ✎ · Checks icons · base←head · +/− files · actions
+ * Stats sits after branch (not between title and branch).
+ */
+.prp-header--review-compact,
+.prp-header[data-review-compact='1'] {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 0;
+  padding: 10px 14px;
+  /* clear grid areas from wide mode */
+  grid-template-columns: none;
+  grid-template-areas: none;
+}
+
+/* Flatten primary so identity / stats order independently in the strip */
+.prp-header--review-compact .prp-header__row--primary,
+.prp-header[data-review-compact='1'] .prp-header__row--primary {
+  display: contents;
+}
+
+.prp-header--review-compact .prp-header__identity,
+.prp-header[data-review-compact='1'] .prp-header__identity {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+  order: 1;
+  /* never clip check avatar rings */
+  overflow: visible;
+}
+
+.prp-header--review-compact .prp-header__title-cluster,
+.prp-header[data-review-compact='1'] .prp-header__title-cluster {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  flex: 0 1 auto;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.prp-header--review-compact .prp-header__number,
+.prp-header[data-review-compact='1'] .prp-header__number {
+  flex-shrink: 0;
+  font-size: clamp(11px, 0.8cqi + 9px, 14px);
+}
+
+.prp-header--review-compact .prp-header__title,
+.prp-header[data-review-compact='1'] .prp-header__title {
+  font-size: clamp(11px, 1.1cqi + 9px, 14px);
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: none;
+}
+
+.prp-header--review-compact .prp-header__title-edit-btn,
+.prp-header--review-compact .prp-header__title-action,
+.prp-header[data-review-compact='1'] .prp-header__title-edit-btn,
+.prp-header[data-review-compact='1'] .prp-header__title-action {
+  flex: 0 0 auto;
+}
+
+.prp-header--review-compact .prp-header__meta-stack,
+.prp-header[data-review-compact='1'] .prp-header__meta-stack {
+  flex-shrink: 0;
+  overflow: visible;
+}
+
+.prp-header--review-compact .prp-header__checks,
+.prp-header[data-review-compact='1'] .prp-header__checks {
+  flex-shrink: 0;
+  overflow: visible;
+  padding: 0;
+  margin: 0;
+}
+
+/* Header never shows the "Checks" word — icons only (Diff compact) */
+.prp-header .prp-checks-summary-ctrl__label {
+  display: none;
+}
+
+.prp-header--review-compact .prp-checks-summary-stack,
+.prp-header[data-review-compact='1'] .prp-checks-summary-stack,
+.prp-header--review-compact .prp-checks-summary-ctrl,
+.prp-header[data-review-compact='1'] .prp-checks-summary-ctrl {
+  overflow: visible;
+}
+
+/* Branch then stats (user: stats to the right of branch direction) */
+.prp-header--review-compact .prp-header__branch-meta,
+.prp-header[data-review-compact='1'] .prp-header__branch-meta {
+  display: inline-flex;
+  flex: 0 1 auto;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: min(36cqi, 18rem);
+  overflow: hidden;
+  font-size: 12px;
+  grid-area: unset;
+  order: 2;
+}
+
+.prp-header--review-compact .prp-header__stats,
+.prp-header[data-review-compact='1'] .prp-header__stats {
+  margin-left: 0;
+  flex-shrink: 0;
+  font-size: 11px;
+  padding: 2px 8px;
+  min-height: 24px;
+  max-width: none;
+  order: 3;
+}
+
+.prp-header--review-compact .prp-header__author,
+.prp-header[data-review-compact='1'] .prp-header__author {
+  display: none;
+}
+
+.prp-header--review-compact .prp-branch-split,
+.prp-header[data-review-compact='1'] .prp-branch-split {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.prp-header--review-compact .prp-branch-tag,
+.prp-header[data-review-compact='1'] .prp-branch-tag {
+  max-width: min(18cqi, 9rem);
+  min-width: 0;
+  padding: 1px 6px;
+  font-size: 11px;
+  flex-shrink: 1;
+}
+
+.prp-header--review-compact .prp-branch-tag__copy-btn,
+.prp-header--review-compact .prp-branch-tag__edit-btn,
+.prp-header[data-review-compact='1'] .prp-branch-tag__copy-btn,
+.prp-header[data-review-compact='1'] .prp-branch-tag__edit-btn {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.prp-header--review-compact .prp-branch-split__arrow,
+.prp-header[data-review-compact='1'] .prp-branch-split__arrow {
+  flex-shrink: 0;
+}
+
+.prp-header--review-compact .prp-header__actions,
+.prp-header[data-review-compact='1'] .prp-header__actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  gap: 4px;
+  margin-left: auto;
+  justify-content: flex-end;
+  grid-area: unset;
+  order: 4;
+}
+
+.prp-header--review-compact .prp-header__actions-inline,
+.prp-header[data-review-compact='1'] .prp-header__actions-inline {
+  gap: 4px;
+}
+
+.prp-header--review-compact .prp-header__icon-btn,
+.prp-header--review-compact .prp-header__more-btn,
+.prp-header[data-review-compact='1'] .prp-header__icon-btn,
+.prp-header[data-review-compact='1'] .prp-header__more-btn {
+  width: 28px;
+  height: 28px;
+}
+
+
+.prp-branch-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--prp-border);
+  background: var(--prp-bg);
+  font-size: 12px;
+}
+
+
+/* Load stage lives in .prp-header__stats only (no top indeterminate bar). */
+@media (prefers-reduced-motion: reduce) {
+  .prp-header__stats,
+  .prp-header__stats-inner {
+    animation: none;
+    transition: none;
+  }
+  .prp-header__stats-spinner {
+    animation: none;
+    opacity: 0.7;
+  }
+}
+
+
+.prp-header__stats--skeleton {
+  min-height: 28px;
+  min-width: 120px;
+  gap: 6px;
+}

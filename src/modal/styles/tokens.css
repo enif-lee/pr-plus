@@ -255,3 +255,28 @@ html.prp-embed-active [data-target='app-header'] {
     box-shadow 280ms ease;
 }
 
+/* Shared text utilities */
+.prp-muted {
+  color: var(--prp-fg-muted);
+}
+
+.prp-mono {
+  font-family: var(--prp-mono);
+  font-size: 11px;
+}
+
+.prp-mt-2 {
+  margin-top: 10px;
+}
+
+.prp-status {
+  padding: var(--prp-space-4);
+  color: var(--prp-fg-muted);
+  flex: 0 0 auto;
+}
+
+.prp-status--error {
+  color: var(--prp-danger);
+  border-bottom: 1px solid var(--prp-border-muted);
+  background: color-mix(in srgb, var(--prp-danger) 8%, var(--prp-bg));
+}

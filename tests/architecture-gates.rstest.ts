@@ -120,20 +120,21 @@ describe('architecture gates', () => {
     expect(ts).toMatch(/export function toAppDetail/);
   });
 
-  test('modal styles are Tailwind-first with colocated sibling residual only', () => {
+  test('modal styles are Tailwind-first with colocated domain siblings only', () => {
     const idx = read('src/modal/styles/index.css');
     expect(idx).toMatch(/@tailwind base/);
     expect(idx).toMatch(/@tailwind components/);
     expect(idx).toMatch(/@tailwind utilities/);
     expect(idx).toMatch(/Tailwind-first/);
-    // Mega parts/ SoT must be gone
+    // Mega parts/ or residual dump SoT must be gone
     expect(fs.existsSync(path.join(root, 'src/modal/styles/parts'))).toBe(false);
     expect(fs.existsSync(path.join(root, 'src/modal/styles/parts.css'))).toBe(false);
+    expect(fs.existsSync(path.join(root, 'src/modal/styles/residual'))).toBe(false);
     // styles.css is deprecated stub if present
     if (fs.existsSync(path.join(root, 'src/modal/styles.css'))) {
       expect(read('src/modal/styles.css')).toMatch(/DEPRECATED|not SoT/i);
     }
-    // Sibling residual CSS next to domains
+    // Domain sibling CSS next to owners
     const siblings = [
       'src/modal/styles/tokens.css',
       'src/modal/components/common/Button.css',
@@ -141,23 +142,32 @@ describe('architecture gates', () => {
       'src/modal/components/common/Badge.css',
       'src/modal/components/common/Avatar.css',
       'src/modal/components/common/TipPopover.css',
+      'src/modal/components/common/ActionToast.css',
+      'src/modal/components/common/FloatingScrollbar.css',
       'src/modal/views/chrome/ShellLayout.css',
+      'src/modal/views/chrome/Header.css',
+      'src/modal/views/chrome/LoadingSkeleton.css',
       'src/modal/views/diff/HunkExpandControls.css',
-      'src/modal/views/diff/VirtualDiff'.length ? 'src/modal/views/diff/CodeCell.css' : 'src/modal/views/diff/CodeCell.css',
+      'src/modal/views/diff/CodeCell.css',
+      'src/modal/views/diff/DiffLayout.css',
       'src/modal/views/conversation/ConversationThread.css',
+      'src/modal/views/conversation/ConversationShell.css',
+      'src/modal/views/conversation/AsideCommitsTimeline.css',
     ];
     for (const f of siblings) {
       expect(fs.existsSync(path.join(root, f))).toBe(true);
     }
-    // index imports siblings only (no @import of mega parts/)
+    // index imports siblings only (no @import of mega parts/ residual dump)
     expect(idx).not.toMatch(/@import\s+['\"].*parts\//);
     expect(idx).not.toMatch(/@import\s+['\"]\.\/parts\.css['\"]/);
+    expect(idx).not.toMatch(/styles\/residual|\/residual\//);
     expect(idx).toMatch(/components\/common\/Button\.css/);
     expect(idx).toMatch(/views\/chrome\/ShellLayout\.css/);
+    expect(idx).toMatch(/views\/chrome\/Header\.css/);
     // Tailwind in common components
     expect(read('src/modal/components/common/Button.tsx')).toMatch(/inline-flex/);
     expect(read('src/modal/components/common/Badge.tsx')).toMatch(/rounded-full|inline-flex/);
-    // Every residual CSS under src/modal (non-dist) is ≤1500 lines
+    // Every domain CSS under src/modal (non-dist) is ≤1500 lines
     const overs: string[] = [];
     function walk(d: string) {
       const full = path.join(root, d);
