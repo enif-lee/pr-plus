@@ -135,3 +135,101 @@ describe('moveLineSelection seed without active file', () => {
     expect(moveLineSelection(null, [], 1, { activeFilePath: null })).toBe(null);
   });
 });
+
+describe('moveLineSelection from folded file', () => {
+  /**
+   * After fold, body rows are gone — only file-header remains. Stale selection
+   * still points at the folded path / old headRowIndex.
+   */
+  // a expanded, b header only (folded), c expanded
+  const afterFoldB = [
+    { kind: 'file-header', filePath: 'a.ts', rowIndex: 0, collapsed: false },
+    splitChangeRow({ rowIndex: 1, oldLine: 1, newLine: 1, path: 'a.ts' }),
+    splitChangeRow({ rowIndex: 2, oldLine: 2, newLine: 2, path: 'a.ts' }),
+    { kind: 'file-header', filePath: 'b.ts', rowIndex: 3, collapsed: true },
+    { kind: 'file-header', filePath: 'c.ts', rowIndex: 4, collapsed: false },
+    splitChangeRow({ rowIndex: 5, oldLine: 10, newLine: 10, path: 'c.ts' }),
+    splitChangeRow({ rowIndex: 6, oldLine: 11, newLine: 11, path: 'c.ts' }),
+  ];
+
+  test('ArrowDown from selection on folded file hops to next open file', () => {
+    // Stale selection as if b.ts was selected before fold (old index may be invalid)
+    const stale = {
+      filePath: 'b.ts',
+      anchorLine: 3,
+      headLine: 3,
+      anchorSide: 'RIGHT',
+      headSide: 'RIGHT',
+      anchorRowIndex: 99,
+      headRowIndex: 99,
+    };
+    const next = moveLineSelection(stale, afterFoldB, 1, {
+      activeFilePath: 'b.ts',
+    });
+    expect(next).toBeTruthy();
+    expect(next.filePath).toBe('c.ts');
+    expect(next.headRowIndex).toBe(5);
+    expect(next.headLine).toBe(10);
+  });
+
+  test('ArrowUp from selection on folded file hops to previous open file', () => {
+    const stale = {
+      filePath: 'b.ts',
+      anchorLine: 3,
+      headLine: 3,
+      anchorSide: 'RIGHT',
+      headSide: 'RIGHT',
+      anchorRowIndex: 99,
+      headRowIndex: 99,
+    };
+    const next = moveLineSelection(stale, afterFoldB, -1, {
+      activeFilePath: 'b.ts',
+    });
+    expect(next).toBeTruthy();
+    expect(next.filePath).toBe('a.ts');
+    // Nearest selectable above b header is last line of a
+    expect(next.headRowIndex).toBe(2);
+    expect(next.headLine).toBe(2);
+  });
+
+  test('ArrowDown skips multiple collapsed files to first open body', () => {
+    const multiCollapsed = [
+      { kind: 'file-header', filePath: 'a.ts', rowIndex: 0, collapsed: true },
+      { kind: 'file-header', filePath: 'b.ts', rowIndex: 1, collapsed: true },
+      { kind: 'file-header', filePath: 'c.ts', rowIndex: 2, collapsed: false },
+      splitChangeRow({ rowIndex: 3, oldLine: 1, newLine: 1, path: 'c.ts' }),
+    ];
+    const stale = {
+      filePath: 'a.ts',
+      anchorLine: 1,
+      headLine: 1,
+      anchorSide: 'RIGHT',
+      headSide: 'RIGHT',
+      anchorRowIndex: 5,
+      headRowIndex: 5,
+    };
+    const next = moveLineSelection(stale, multiCollapsed, 1, {
+      activeFilePath: 'a.ts',
+    });
+    expect(next?.filePath).toBe('c.ts');
+    expect(next?.headRowIndex).toBe(3);
+  });
+
+  test('Shift+Arrow does not hop out of folded file (extend stays put)', () => {
+    const stale = {
+      filePath: 'b.ts',
+      anchorLine: 3,
+      headLine: 3,
+      anchorSide: 'RIGHT',
+      headSide: 'RIGHT',
+      anchorRowIndex: 99,
+      headRowIndex: 99,
+    };
+    const next = moveLineSelection(stale, afterFoldB, 1, {
+      shift: true,
+      activeFilePath: 'b.ts',
+    });
+    // No same-file selectable rows → unchanged
+    expect(next).toBe(stale);
+  });
+});

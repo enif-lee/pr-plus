@@ -308,6 +308,9 @@ export function indexForConversationAnchor(rows, anchorId) {
     if (row.type === 'description' && (a === 'body' || a === 'description')) {
       return i;
     }
+    if (row.type === 'composer' && (a === 'composer' || a === 'comment-form')) {
+      return i;
+    }
     if (row.type === 'merge' && (a === 'merge' || a === 'merge-box')) {
       return i;
     }

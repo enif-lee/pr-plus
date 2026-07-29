@@ -980,6 +980,9 @@ export function conversationCommentFocusAnchor(item: any): string | null {
   const kind = String(item.kind || '');
   if (kind === 'description' || kind === 'body') return 'body';
   if (kind === 'merge' || kind === 'merge-box') return 'merge';
+  if (kind === 'composer' || kind === 'comment-form' || kind === 'review-form') {
+    return 'composer';
+  }
   if (item.id == null) return null;
   const id = String(item.id);
   if (kind === 'issue-comment') return `issue-comment:${id}`;
@@ -991,13 +994,26 @@ export function conversationCommentFocusAnchor(item: any): string | null {
   return null;
 }
 
+/** Options for Conversation ⌥J/K focus order (mirrors virtual row panel order). */
+export type ConversationFocusOrderOpts = {
+  /**
+   * When true (product default UI):
+   *   description → composer (comment/review form) → merge → comment/review units
+   * When false:
+   *   description → comment/review units → merge → composer
+   * Matches `buildConversationVirtualRows` panel placement.
+   */
+  reverseComments?: boolean;
+};
+
 /**
- * Pick the first focusable Conversation stop (priority: body → comments → merge).
+ * Pick the first focusable Conversation stop (description).
  */
 export function pickConversationCommentFocusTarget(
-  items: any
+  items: any,
+  opts?: ConversationFocusOrderOpts
 ): { id: string; kind: string; anchor: string } | null {
-  const targets = listConversationCommentFocusTargets(items);
+  const targets = listConversationCommentFocusTargets(items, opts);
   return targets.length ? targets[0] : null;
 }
 
@@ -1017,24 +1033,15 @@ function pushThreadFocusTarget(
 }
 
 /**
- * Ordered list of focusable Conversation stops for ⌥J / ⌥K.
- * Priority (product order, not necessarily DOM paint order):
- *   1. PR description (body)
- *   2. Comments / review threads (timeline)
- *   3. Merge box
- * Thread navigation is by **thread unit**, not per-reply.
- * Skips pending review-groups (composer-only).
+ * Timeline comment/review units only (no description/merge). Skips system events
+ * and pending review-groups. Thread navigation is by **thread unit**, not per-reply.
  */
-export function listConversationCommentFocusTargets(
+function listConversationTimelineFocusTargets(
   items: any
 ): Array<{ id: string; kind: string; anchor: string }> {
   const list = Array.isArray(items) ? items : [];
   const out: Array<{ id: string; kind: string; anchor: string }> = [];
 
-  // 1) PR body / description — always first when present
-  out.push({ id: 'body', kind: 'description', anchor: 'body' });
-
-  // 2) Timeline comments / reviews / threads
   for (const item of list) {
     if (!item) continue;
     // Structural markers passed explicitly are handled separately
@@ -1042,7 +1049,10 @@ export function listConversationCommentFocusTargets(
       item.kind === 'description' ||
       item.kind === 'body' ||
       item.kind === 'merge' ||
-      item.kind === 'merge-box'
+      item.kind === 'merge-box' ||
+      item.kind === 'composer' ||
+      item.kind === 'comment-form' ||
+      item.kind === 'review-form'
     ) {
       continue;
     }
@@ -1077,10 +1087,30 @@ export function listConversationCommentFocusTargets(
     });
   }
 
-  // 3) Merge box — always last
-  out.push({ id: 'merge', kind: 'merge', anchor: 'merge' });
-
   return out;
+}
+
+/**
+ * Ordered list of focusable Conversation stops for ⌥J / ⌥K.
+ * Mirrors on-screen panel order from `buildConversationVirtualRows`:
+ *   reverseComments true:  description → composer → merge → comment/review units
+ *   reverseComments false: description → comment/review units → merge → composer
+ * Skips pending review-groups and timeline-events.
+ */
+export function listConversationCommentFocusTargets(
+  items: any,
+  opts?: ConversationFocusOrderOpts
+): Array<{ id: string; kind: string; anchor: string }> {
+  const reverse = Boolean(opts?.reverseComments);
+  const description = { id: 'body', kind: 'description', anchor: 'body' };
+  const composer = { id: 'composer', kind: 'composer', anchor: 'composer' };
+  const merge = { id: 'merge', kind: 'merge', anchor: 'merge' };
+  const timeline = listConversationTimelineFocusTargets(items);
+
+  if (reverse) {
+    return [description, composer, merge, ...timeline];
+  }
+  return [description, ...timeline, merge, composer];
 }
 
 /**
@@ -1090,9 +1120,10 @@ export function listConversationCommentFocusTargets(
 export function stepConversationCommentFocus(
   items: any,
   currentAnchor: unknown,
-  delta: number
+  delta: number,
+  opts?: ConversationFocusOrderOpts
 ): { id: string; kind: string; anchor: string } | null {
-  const targets = listConversationCommentFocusTargets(items);
+  const targets = listConversationCommentFocusTargets(items, opts);
   if (!targets.length) return null;
   const d = delta < 0 ? -1 : 1;
   const cur = String(currentAnchor || '').trim();

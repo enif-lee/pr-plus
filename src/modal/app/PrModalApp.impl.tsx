@@ -2340,21 +2340,23 @@ export function PrModalApp({
   }
 
   /**
-   * ⌥J / ⌥K on Conversation: step next/prev in page order (wraps).
+   * ⌥J / ⌥K on Conversation: step next/prev in visual UI order (wraps).
+   * Order follows reverseComments (merge before vs after timeline).
    * Seeds on first press; focuses conversation layout if needed.
    */
   function navConversationComment(delta: number) {
     if (layoutMode === LAYOUT_DIFF) collapseDiff();
     const ordered = conversationCommentPageOrder();
+    const focusOpts = { reverseComments };
     const cur =
       conversationCommentFocusRef.current?.anchor ||
       useModalStore.getState().focusedConversationAnchor ||
       null;
     const next =
       typeof stepConversationCommentFocus === 'function'
-        ? stepConversationCommentFocus(ordered, cur, delta)
+        ? stepConversationCommentFocus(ordered, cur, delta, focusOpts)
         : typeof pickConversationCommentFocusTarget === 'function'
-          ? pickConversationCommentFocusTarget(ordered)
+          ? pickConversationCommentFocusTarget(ordered, focusOpts)
           : null;
     if (!next) {
       conversationCommentFocusRef.current = null;
@@ -3997,7 +3999,7 @@ export function PrModalApp({
     const ordered = conversationCommentPageOrder();
     const target =
       typeof pickConversationCommentFocusTarget === 'function'
-        ? pickConversationCommentFocusTarget(ordered)
+        ? pickConversationCommentFocusTarget(ordered, { reverseComments })
         : null;
     if (!target) {
       conversationCommentFocusRef.current = null;

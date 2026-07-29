@@ -1558,29 +1558,42 @@ function ConversationViewImpl(props: any) {
 
   function renderComposerCard() {
     return (
-      <ComposerCard
-        composerMode={composerMode}
-        setComposerMode={setComposerMode}
-        pendingCount={Number(pendingCount) || 0}
-        pendingReviewGroup={pendingReviewGroup}
-        commentText={commentText}
-        setCommentText={setCommentText}
-        actionBusy={actionBusy}
-        detail={detail}
-        commentBoxRef={commentBoxRef}
-        onUploadFile={onUploadFile}
-        linkCtx={linkCtx}
-        mentionCandidates={mentionCandidates}
-        onLeaveReviewAction={onLeaveReviewAction}
-        onDiscardPending={onDiscardPending}
-        onClosePr={onClosePr}
-        onReopenPr={onReopenPr}
-        showReviewVerdict={showReviewVerdict}
-        renderSearchableBody={(body, anchor, mark) =>
-          renderSearchableBody(body, anchor, mark)
-        }
-        renderPendingThreadList={renderReviewGroupThreadList}
-      />
+      <ConversationKbFocusClassName
+        anchor="composer"
+        baseClass="prp-composer-focus-host"
+      >
+        {(className, focused) => (
+          <div
+            className={`${className}${focused ? ' prp-composer-focus-host--focused' : ''}`.trim()}
+            data-search-anchor="composer"
+            tabIndex={focused ? -1 : undefined}
+          >
+            <ComposerCard
+              composerMode={composerMode}
+              setComposerMode={setComposerMode}
+              pendingCount={Number(pendingCount) || 0}
+              pendingReviewGroup={pendingReviewGroup}
+              commentText={commentText}
+              setCommentText={setCommentText}
+              actionBusy={actionBusy}
+              detail={detail}
+              commentBoxRef={commentBoxRef}
+              onUploadFile={onUploadFile}
+              linkCtx={linkCtx}
+              mentionCandidates={mentionCandidates}
+              onLeaveReviewAction={onLeaveReviewAction}
+              onDiscardPending={onDiscardPending}
+              onClosePr={onClosePr}
+              onReopenPr={onReopenPr}
+              showReviewVerdict={showReviewVerdict}
+              renderSearchableBody={(body, anchor, mark) =>
+                renderSearchableBody(body, anchor, mark)
+              }
+              renderPendingThreadList={renderReviewGroupThreadList}
+            />
+          </div>
+        )}
+      </ConversationKbFocusClassName>
     );
   }
 

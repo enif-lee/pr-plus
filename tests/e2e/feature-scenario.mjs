@@ -21,7 +21,9 @@ import {
   closeAll,
   closeOverlay,
   convFocusPin,
+  convFocusStop,
   convScrollTop,
+  convVisualSectionOrder,
   diffScroll,
   diffThreadProbe,
   ensureBrowser,
@@ -157,8 +159,165 @@ async function main() {
     log(`  scrolls=${scrolls.join('→')} pin=${pin.pin}`);
   });
 
+  /**
+   * ⌥J/K stop order must match on-screen panel order under reverseComments:
+   * reverse on  → description → composer → merge → comment/review…
+   * reverse off → description → comment/review… → merge → composer
+   */
+  await run('P1.2b ⌥J/K focus order matches UI sort', () => {
+    setLayout('conversation');
+    blurEditable();
+    // Clear existing focus so the next ⌥J seeds from empty.
+    // ⌥⇧C toggles: only press while focused (pressing unfocused seeds).
+    if (convFocusStop().hasFocus) {
+      press('Alt+Shift+c');
+      waitMs(TICK);
+    }
+    if (convFocusStop().hasFocus) {
+      press('Alt+Shift+c');
+      waitMs(TICK);
+    }
+    // Scroll near top so description + composer + merge (reverse layout) mount.
+    evalInPage(`
+      (() => {
+        const el = document.querySelector('.prp-conversation-virtual');
+        if (el) el.scrollTop = 0;
+      })()
+    `);
+    waitMs(200);
+
+    const visual = convVisualSectionOrder();
+    assert(
+      visual.sectionKinds.includes('description') || visual.descTop != null,
+      `description missing in DOM: ${JSON.stringify(visual)}`
+    );
+    assert(
+      visual.mergeTop != null || visual.sectionKinds.includes('merge'),
+      `merge box missing in DOM: ${JSON.stringify(visual)}`
+    );
+    log(
+      `  visual reverseComments=${visual.reverseComments} sections=${visual.sectionKinds.join('→')} tops d/c/m/t=${visual.descTop}/${visual.composerTop}/${visual.mergeTop}/${visual.commentTop}`
+    );
+
+    const kinds = [];
+    const maxSteps = 24;
+    for (let i = 0; i < maxSteps; i++) {
+      press('Alt+j');
+      waitMs(180);
+      const stop = convFocusStop();
+      assert(stop.hasFocus, `focus lost on ⌥J #${i}: ${JSON.stringify(stop)}`);
+      kinds.push(stop.kind);
+      // Wrap: second time we land on description after leaving it.
+      if (i > 0 && stop.kind === 'description') break;
+    }
+
+    assert(kinds[0] === 'description', `seed/first must be description, got ${kinds.join('→')}`);
+
+    const first = { description: -1, composer: -1, merge: -1, comment: -1 };
+    for (let i = 0; i < kinds.length; i++) {
+      const k = kinds[i];
+      if (first[k] === -1 && Object.prototype.hasOwnProperty.call(first, k)) {
+        first[k] = i;
+      }
+    }
+    assert(first.description === 0, `description not first: ${kinds.join('→')}`);
+    assert(first.merge >= 0, `never reached merge: ${kinds.join('→')}`);
+    assert(first.composer >= 0, `never reached composer form: ${kinds.join('→')}`);
+
+    if (visual.reverseComments) {
+      // description → composer → merge → comments
+      assert(
+        first.composer === 1,
+        `reverse on: composer must be step after description, got ${kinds.join('→')}`
+      );
+      assert(
+        first.merge === 2,
+        `reverse on: merge must be step after composer, got ${kinds.join('→')}`
+      );
+      if (first.comment >= 0) {
+        assert(
+          first.merge < first.comment,
+          `reverse on: merge before comments, got ${kinds.join('→')}`
+        );
+      }
+      // DOM sectionKinds should place composer before merge before comment
+      if (
+        visual.sectionKinds.includes('composer') &&
+        visual.sectionKinds.includes('merge')
+      ) {
+        assert(
+          visual.sectionKinds.indexOf('composer') <
+            visual.sectionKinds.indexOf('merge'),
+          `DOM visual order mismatch: ${visual.sectionKinds.join('→')}`
+        );
+      }
+      if (
+        visual.sectionKinds.includes('merge') &&
+        visual.sectionKinds.includes('comment')
+      ) {
+        assert(
+          visual.sectionKinds.indexOf('merge') <
+            visual.sectionKinds.indexOf('comment'),
+          `DOM visual order mismatch: ${visual.sectionKinds.join('→')}`
+        );
+      }
+    } else {
+      // description → comments → merge → composer
+      if (first.comment >= 0) {
+        assert(
+          first.comment < first.merge,
+          `reverse off: comments before merge, got ${kinds.join('→')}`
+        );
+      }
+      assert(
+        first.merge < first.composer || first.composer < 0,
+        `reverse off: merge before composer, got ${kinds.join('→')}`
+      );
+    }
+
+    // Coarse kind sequence before wrap (comments collapse to one slot).
+    const coarse = [];
+    for (const k of kinds) {
+      if (k === 'description' && coarse.includes('description') && coarse.length > 1) {
+        break; // wrap
+      }
+      if (k === 'comment') {
+        if (coarse[coarse.length - 1] !== 'comment') coarse.push('comment');
+      } else if (!coarse.includes(k)) {
+        coarse.push(k);
+      }
+    }
+    const expected = visual.reverseComments
+      ? first.comment >= 0
+        ? ['description', 'composer', 'merge', 'comment']
+        : ['description', 'composer', 'merge']
+      : first.comment >= 0
+        ? ['description', 'comment', 'merge', 'composer']
+        : ['description', 'merge', 'composer'];
+    assert(
+      expected.every((k, i) => coarse[i] === k),
+      `coarse order ${coarse.join('→')} != expected ${expected.join('→')} (raw=${kinds.join('→')})`
+    );
+    log(`  stepped ${kinds.join('→')} coarse=${coarse.join('→')}`);
+  });
+
   await run('P1.11 ⌥↑/↓ panel scroll (focus retained)', () => {
     blurEditable();
+    // Prior steps (esp. wrap on P1.2b) may leave focus on description; land on a
+    // comment stop so pin geometry matches the historical assertion path.
+    if (!convFocusStop().hasFocus || convFocusStop().kind === 'description') {
+      press('Alt+j');
+      waitMs(TICK);
+    }
+    if (!convFocusStop().hasFocus) {
+      press('Alt+Shift+c');
+      waitMs(TICK);
+    }
+    // Prefer a comment/review unit for scroll-pin checks.
+    for (let i = 0; i < 6 && convFocusStop().kind !== 'comment'; i++) {
+      press('Alt+j');
+      waitMs(150);
+    }
     const beforeFocus = convFocusPin();
     assert(beforeFocus.hasFocus, 'need focus before ⌥↑/↓');
     const beforeTop = convScrollTop();

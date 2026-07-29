@@ -239,10 +239,14 @@ export function modalProbe() {
   `);
 }
 
+/** Focus ring selector: cards, merge host, and in-group thread rows. */
+const CONV_KB_FOCUS_SEL =
+  '.prp-card--kb-focus, .prp-merge-box-focus-host--focused, .prp-review-group__row--kb-focus, [class*="kb-focus"]';
+
 export function convFocusPin() {
   return evalInPage(`
     (() => {
-      const focused = document.querySelector('.prp-card--kb-focus');
+      const focused = document.querySelector(${JSON.stringify(CONV_KB_FOCUS_SEL)});
       const scrollEl = document.querySelector('.prp-conversation-virtual');
       if (!focused || !scrollEl) {
         return { hasFocus: !!focused, pin: null, scrollTop: scrollEl?.scrollTop ?? null, cardH: null };
@@ -260,6 +264,120 @@ export function convFocusPin() {
         cardH: Math.round(fr.height),
         scrollTop: scrollEl.scrollTop,
         cls: focused.className.slice(0, 120),
+      };
+    })()
+  `);
+}
+
+/**
+ * Classify the current Conversation ⌥J/K focus stop.
+ * @returns {{ hasFocus: boolean, kind: 'description'|'composer'|'merge'|'comment'|null, anchor: string|null, cls: string|null }}
+ */
+export function convFocusStop() {
+  return evalInPage(`
+    (() => {
+      const f = document.querySelector(${JSON.stringify(CONV_KB_FOCUS_SEL)});
+      if (!f) return { hasFocus: false, kind: null, anchor: null, cls: null };
+      const a =
+        f.getAttribute('data-search-anchor') ||
+        f.getAttribute('data-thread-focus-anchor') ||
+        f.querySelector?.('[data-search-anchor]')?.getAttribute('data-search-anchor') ||
+        '';
+      const cls = String(f.className || '').slice(0, 160);
+      if (
+        a === 'body' ||
+        /\\bprp-card--desc\\b/.test(cls) ||
+        f.closest?.('.prp-card--desc')
+      ) {
+        return { hasFocus: true, kind: 'description', anchor: 'body', cls };
+      }
+      if (
+        a === 'composer' ||
+        /\\bprp-composer-focus-host\\b/.test(cls) ||
+        f.closest?.('.prp-composer-focus-host') ||
+        f.closest?.('.prp-card--composer')
+      ) {
+        return { hasFocus: true, kind: 'composer', anchor: 'composer', cls };
+      }
+      if (
+        a === 'merge' ||
+        /\\bprp-merge-box-focus-host\\b/.test(cls) ||
+        f.closest?.('.prp-merge-box-focus-host')
+      ) {
+        return { hasFocus: true, kind: 'merge', anchor: 'merge', cls };
+      }
+      return { hasFocus: true, kind: 'comment', anchor: a || null, cls };
+    })()
+  `);
+}
+
+/**
+ * Infer reverseComments panel layout from DOM section tops.
+ * reverse on: description → composer → merge → timeline
+ * reverse off: description → timeline → merge → composer
+ * @returns {{ reverseComments: boolean, descTop: number|null, composerTop: number|null, mergeTop: number|null, commentTop: number|null, sectionKinds: string[] }}
+ */
+export function convVisualSectionOrder() {
+  return evalInPage(`
+    (() => {
+      const host = document.querySelector('.prp-conversation-virtual');
+      if (!host) {
+        return {
+          reverseComments: true,
+          descTop: null,
+          composerTop: null,
+          mergeTop: null,
+          commentTop: null,
+          sectionKinds: [],
+        };
+      }
+      const absTop = (el) => {
+        if (!el) return null;
+        const hr = host.getBoundingClientRect();
+        const er = el.getBoundingClientRect();
+        return Math.round(er.top - hr.top + host.scrollTop);
+      };
+      const desc =
+        host.querySelector('[data-search-anchor="body"]') ||
+        host.querySelector('.prp-card--desc');
+      const composer =
+        host.querySelector('[data-search-anchor="composer"]') ||
+        host.querySelector('.prp-composer-focus-host') ||
+        host.querySelector('.prp-card--composer');
+      const merge =
+        host.querySelector('[data-search-anchor="merge"]') ||
+        host.querySelector('.prp-merge-box-focus-host');
+      const comment =
+        host.querySelector(
+          '[data-search-anchor^="issue-comment:"], [data-search-anchor^="review:"], [data-search-anchor^="review-group:"], [data-search-anchor^="review-comment:"], .prp-card--timeline'
+        );
+      const descTop = absTop(desc);
+      const composerTop = absTop(composer);
+      const mergeTop = absTop(merge);
+      const commentTop = absTop(comment);
+      const parts = [];
+      if (descTop != null) parts.push({ kind: 'description', top: descTop });
+      if (composerTop != null) parts.push({ kind: 'composer', top: composerTop });
+      if (mergeTop != null) parts.push({ kind: 'merge', top: mergeTop });
+      if (commentTop != null) parts.push({ kind: 'comment', top: commentTop });
+      parts.sort((a, b) => a.top - b.top);
+      const sectionKinds = parts.map((p) => p.kind);
+      let reverseComments = true;
+      if (mergeTop != null && commentTop != null) {
+        reverseComments = mergeTop < commentTop;
+      } else if (composerTop != null && commentTop != null) {
+        reverseComments = composerTop < commentTop;
+      } else if (mergeTop != null && descTop != null) {
+        // Merge close under description → reverse (composer sits between)
+        reverseComments = mergeTop - descTop < 800;
+      }
+      return {
+        reverseComments,
+        descTop,
+        composerTop,
+        mergeTop,
+        commentTop,
+        sectionKinds,
       };
     })()
   `);

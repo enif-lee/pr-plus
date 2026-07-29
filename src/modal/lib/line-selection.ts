@@ -385,10 +385,62 @@ function findSelectableRowNSteps(
 }
 
 /**
+ * Virtual-list index of a path's structural pivot (file-header preferred).
+ * Used when the body is collapsed so ↑↓ can hop to a neighbor file.
+ */
+export function filePivotIndexInVirtualRows(
+  virtualRows: any[] | null | undefined,
+  filePath: string | null | undefined
+): number {
+  const path = String(filePath || '').trim();
+  if (!path) return -1;
+  const list = Array.isArray(virtualRows) ? virtualRows : [];
+  let headerIdx = -1;
+  let anyIdx = -1;
+  for (let i = 0; i < list.length; i++) {
+    const row = list[i];
+    if (!row) continue;
+    const rp = String(row.filePath || row.path || '');
+    if (rp !== path) continue;
+    if (anyIdx < 0) anyIdx = i;
+    if (row.kind === 'file-header') headerIdx = i;
+  }
+  return headerIdx >= 0 ? headerIdx : anyIdx;
+}
+
+/**
+ * Nearest selectable diff-line in direction `delta` from a path's pivot.
+ * Skips collapsed/empty files until a real selectable row is found.
+ */
+export function nearestSelectableFromPath(
+  virtualRows: any[] | null | undefined,
+  filePath: string | null | undefined,
+  delta: number
+) {
+  const list = Array.isArray(virtualRows) ? virtualRows : [];
+  if (!list.length) return null;
+  const d = delta < 0 ? -1 : 1;
+  let pivot = filePivotIndexInVirtualRows(list, filePath);
+  if (pivot < 0) {
+    // Path not in list — scan from list edge so a stuck selection can still leave.
+    pivot = d > 0 ? -1 : list.length;
+  }
+  let i = pivot + d;
+  while (i >= 0 && i < list.length) {
+    const row = list[i];
+    if (row && isSelectableDiffRow(row)) return row;
+    i += d;
+  }
+  return null;
+}
+
+/**
  * Move or extend an active line selection by selectable rows.
  * - shift=false → single-line caret; continues into next/prev file at EOF/BOF
  * - shift=true → multi-line extend; blocked at file boundary
  * - no selection / wrong file + activeFilePath → seed first selectable line
+ * - selection on a **folded** file (no body rows) + plain ↑↓ → hop to nearest
+ *   open file above/below (first selectable line past that path's header)
  * - |delta| > 1: **one scan** to the N-th selectable (key-hold / ⌥↑↓ coalesce)
  */
 export function moveLineSelection(
@@ -415,6 +467,10 @@ export function moveLineSelection(
       seedPath && typeof firstSelectableRowInFile === 'function'
         ? firstSelectableRowInFile(list, seedPath)
         : null;
+    // Folded active/selection file: seed from nearest open neighbor, not global first
+    if (!seedRow && seedPath && !opts.shift) {
+      seedRow = nearestSelectableFromPath(list, seedPath, d);
+    }
     if (!seedRow) {
       seedRow =
         typeof firstSelectableRowAnywhere === 'function'
@@ -430,6 +486,21 @@ export function moveLineSelection(
     return cur;
   }
   if (steps <= 0) return cur;
+
+  // Selection stuck on a folded/empty-body file: plain ↑↓ leave for neighbor.
+  // (Stale headRowIndex after collapse must not pin movement inside dead rows.)
+  const curPath = String(cur.filePath || '').trim();
+  if (
+    !opts.shift &&
+    curPath &&
+    !firstSelectableRowInFile(list, curPath)
+  ) {
+    const hop = nearestSelectableFromPath(list, curPath, d);
+    if (!hop) return cur;
+    cur = beginLineSelection(hop) || cur;
+    steps -= 1;
+    if (steps <= 0) return cur;
+  }
 
   const target = findSelectableRowNSteps(cur, list, d, steps, opts);
   if (!target) return cur;
