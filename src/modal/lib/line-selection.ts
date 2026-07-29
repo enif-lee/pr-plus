@@ -13,6 +13,107 @@ export function isSelectableDiffRow(row) {
   return row.newLine != null || row.oldLine != null;
 }
 
+/** File header row — single-line caret can land here (file-level comment target). */
+export function isFileHeaderRow(row: any): boolean {
+  if (!row || row.kind !== 'file-header') return false;
+  return Boolean(String(row.filePath || row.path || '').trim());
+}
+
+/** Inline review-thread row on Diff (plain ↑/↓ stop; not multi-line). */
+export function isInlineCommentRow(row: any): boolean {
+  if (!row || row.kind !== 'inline-comment') return false;
+  return row.commentId != null && String(row.commentId).trim() !== '';
+}
+
+/**
+ * Rows that plain ↑/↓ may land on: body lines, file headers, review threads.
+ * Multi-line extend (shift) stays on **diff lines only**.
+ */
+export function isSelectionNavRow(row: any): boolean {
+  return (
+    isSelectableDiffRow(row) || isFileHeaderRow(row) || isInlineCommentRow(row)
+  );
+}
+
+export function isFileLevelSelection(selection: any): boolean {
+  return Boolean(
+    selection &&
+      (selection.kind === 'file' || selection.subjectType === 'file')
+  );
+}
+
+export function isThreadSelection(selection: any): boolean {
+  return Boolean(
+    selection &&
+      (selection.kind === 'thread' ||
+        selection.subjectType === 'thread' ||
+        selection.kind === 'inline-comment')
+  );
+}
+
+/** True when caret is a single line (not multi, not file/thread structural). */
+export function isSingleLineCaretSelection(selection: any): boolean {
+  if (!selection || isFileLevelSelection(selection) || isThreadSelection(selection)) {
+    return false;
+  }
+  const a = Number(selection.anchorLine);
+  const h = Number(selection.headLine);
+  if (!Number.isFinite(a) || !Number.isFinite(h) || a !== h) return false;
+  const aSide = String(selection.anchorSide || 'RIGHT').toUpperCase();
+  const hSide = String(selection.headSide || 'RIGHT').toUpperCase();
+  return aSide === hSide;
+}
+
+/**
+ * Begin caret selection on a nav row.
+ * - diff-line → normal line selection
+ * - file-header → file-level selection (`kind: 'file'`) for ⌥C file comments
+ * - inline-comment → thread selection (`kind: 'thread'`) for ↑↓ + ⌥C reply
+ */
+export function beginSelectionOnRow(row: any, preferredSide: 'LEFT' | 'RIGHT' | string = 'RIGHT') {
+  if (isFileHeaderRow(row)) {
+    const path = String(row.filePath || row.path || '').trim();
+    if (!path) return null;
+    const idx = Number(row.rowIndex);
+    const rowIndex = Number.isFinite(idx) ? idx : null;
+    return {
+      kind: 'file' as const,
+      subjectType: 'file' as const,
+      filePath: path,
+      anchorRowIndex: rowIndex,
+      headRowIndex: rowIndex,
+    };
+  }
+  if (isInlineCommentRow(row)) {
+    const path = String(row.filePath || row.path || '').trim();
+    const commentId = row.commentId;
+    if (!path || commentId == null) return null;
+    const idx = Number(row.rowIndex);
+    const rowIndex = Number.isFinite(idx) ? idx : null;
+    const side =
+      String(row.side || 'RIGHT').toUpperCase() === 'LEFT' ? 'LEFT' : 'RIGHT';
+    const line =
+      row.newLine != null
+        ? Number(row.newLine)
+        : row.oldLine != null
+          ? Number(row.oldLine)
+          : null;
+    return {
+      kind: 'thread' as const,
+      subjectType: 'thread' as const,
+      filePath: path,
+      commentId,
+      anchorRowIndex: rowIndex,
+      headRowIndex: rowIndex,
+      headSide: side,
+      anchorSide: side,
+      headLine: line,
+      anchorLine: line,
+    };
+  }
+  return beginLineSelection(row, preferredSide);
+}
+
 export function lineForSide(row, preferredSide = 'RIGHT') {
   if (!row) return null;
   if (preferredSide === 'LEFT') {
@@ -328,7 +429,31 @@ function selectionNeedsSeed(
   activeFilePath: string
 ): boolean {
   if (!selection) return true;
-  if (selection.kind === 'file' || selection.subjectType === 'file') return true;
+  // Structural carets (file header / thread) with identity are valid stops
+  if (isFileLevelSelection(selection) || isThreadSelection(selection)) {
+    if (!String(selection.filePath || '').trim()) return true;
+    if (isThreadSelection(selection) && selection.commentId == null) return true;
+    if (
+      activeFilePath &&
+      String(selection.filePath || '') !== activeFilePath
+    ) {
+      return true;
+    }
+    return false;
+  }
+  // Line carets: path+line identity is enough even if headRowIndex is stale
+  if (
+    String(selection.filePath || '').trim() &&
+    Number.isFinite(Number(selection.headLine))
+  ) {
+    if (
+      activeFilePath &&
+      String(selection.filePath || '') !== activeFilePath
+    ) {
+      return true;
+    }
+    return false;
+  }
   if (!Number.isFinite(Number(selection.headRowIndex))) return true;
   if (activeFilePath && String(selection.filePath || '') !== activeFilePath) {
     return true;
@@ -336,24 +461,121 @@ function selectionNeedsSeed(
   return false;
 }
 
+/** Find inline-comment row index by commentId. */
+export function findRowIndexForCommentId(
+  virtualRows: any[] | null | undefined,
+  commentId: unknown
+): number | null {
+  if (commentId == null) return null;
+  const want = String(commentId);
+  const list = Array.isArray(virtualRows) ? virtualRows : [];
+  for (let i = 0; i < list.length; i++) {
+    const row = list[i];
+    if (!isInlineCommentRow(row)) continue;
+    if (String(row.commentId) !== want) continue;
+    const idx = Number(row.rowIndex);
+    return Number.isFinite(idx) ? idx : i;
+  }
+  return null;
+}
+
 /**
- * Find the N-th selectable row in direction `d` from head (single pass).
- * - shift: stay in same file only
- * - plain: may cross files
+ * Resolve a stable head index for keyboard nav. Prefers live headRowIndex when
+ * it still points at the same identity; otherwise rebinds by line / commentId /
+ * header so comment-row renumbering cannot stall ↑↓.
+ */
+export function resolveSelectionHeadIndex(
+  selection: any,
+  list: any[]
+): number {
+  if (!selection || !Array.isArray(list) || !list.length) return -1;
+  const path = String(selection.filePath || '').trim();
+  const headIdx = Number(selection.headRowIndex);
+
+  if (isThreadSelection(selection)) {
+    const byId = findRowIndexForCommentId(list, selection.commentId);
+    if (byId != null) return byId;
+  }
+
+  if (Number.isFinite(headIdx) && headIdx >= 0 && headIdx < list.length) {
+    const row = list[headIdx];
+    if (row && isSelectionNavRow(row)) {
+      const rp = String(row.filePath || row.path || '');
+      if (!path || rp === path) {
+        if (isFileLevelSelection(selection) && isFileHeaderRow(row)) {
+          return headIdx;
+        }
+        if (
+          isThreadSelection(selection) &&
+          isInlineCommentRow(row) &&
+          String(row.commentId) === String(selection.commentId)
+        ) {
+          return headIdx;
+        }
+        if (
+          !isFileLevelSelection(selection) &&
+          !isThreadSelection(selection) &&
+          isSelectableDiffRow(row) &&
+          (!Number.isFinite(Number(selection.headLine)) ||
+            rowMatchesLineSide(
+              row,
+              selection.headLine,
+              selection.headSide || selection.anchorSide
+            ))
+        ) {
+          return headIdx;
+        }
+      }
+    }
+  }
+  // Stale after comment insert / fold — rebind by line, then header pivot
+  if (
+    path &&
+    !isFileLevelSelection(selection) &&
+    !isThreadSelection(selection)
+  ) {
+    const byLine = findRowIndexForLineSide(
+      list,
+      path,
+      selection.headLine,
+      selection.headSide || selection.anchorSide
+    );
+    if (byLine != null) return byLine;
+  }
+  if (path && isFileLevelSelection(selection)) {
+    const pivot = filePivotIndexInVirtualRows(list, path);
+    if (pivot >= 0) return pivot;
+  }
+  if (path) {
+    const pivot = filePivotIndexInVirtualRows(list, path);
+    if (pivot >= 0) return pivot;
+  }
+  return Number.isFinite(headIdx) ? headIdx : -1;
+}
+
+/**
+ * Find the N-th nav row in direction `d` from head (single pass).
+ * - shift: stay in same file, **diff lines only** (no headers in multi-line)
+ * - plain: file headers + diff lines; may cross files
  * @returns target row or null if none
  */
-function findSelectableRowNSteps(
+function findNavRowNSteps(
   selection: any,
   list: any[],
   d: number,
   steps: number,
   opts: { shift?: boolean } = {}
 ) {
-  if (!selection || selection.kind === 'file' || selection.subjectType === 'file') {
+  if (!selection) return null;
+  // Multi-line extend never starts from file-header / thread carets
+  if (
+    opts.shift &&
+    (isFileLevelSelection(selection) || isThreadSelection(selection))
+  ) {
     return null;
   }
-  const headIdx = Number(selection.headRowIndex);
-  if (!Number.isFinite(headIdx)) return null;
+  const headIdx = resolveSelectionHeadIndex(selection, list);
+  if (headIdx < 0) return null;
   const path = String(selection.filePath || '');
   const sameFileOnly = Boolean(opts.shift);
   const need = Math.max(1, Math.floor(steps) || 1);
@@ -371,11 +593,12 @@ function findSelectableRowNSteps(
       if (row.kind === 'file-header' && row.filePath && row.filePath !== path) {
         break;
       }
+      // Shift / multi-line: body lines only (no headers, no threads)
       if (isSelectableDiffRow(row) && row.filePath === path) {
         found += 1;
         last = row;
       }
-    } else if (isSelectableDiffRow(row)) {
+    } else if (isSelectionNavRow(row)) {
       found += 1;
       last = row;
     }
@@ -409,8 +632,8 @@ export function filePivotIndexInVirtualRows(
 }
 
 /**
- * Nearest selectable diff-line in direction `delta` from a path's pivot.
- * Skips collapsed/empty files until a real selectable row is found.
+ * Nearest plain-nav stop in direction `delta` from a path's pivot.
+ * Includes file headers (folded files) and body lines.
  */
 export function nearestSelectableFromPath(
   virtualRows: any[] | null | undefined,
@@ -428,20 +651,34 @@ export function nearestSelectableFromPath(
   let i = pivot + d;
   while (i >= 0 && i < list.length) {
     const row = list[i];
-    if (row && isSelectableDiffRow(row)) return row;
+    if (row && isSelectionNavRow(row)) return row;
     i += d;
   }
   return null;
 }
 
 /**
- * Move or extend an active line selection by selectable rows.
- * - shift=false → single-line caret; continues into next/prev file at EOF/BOF
- * - shift=true → multi-line extend; blocked at file boundary
- * - no selection / wrong file + activeFilePath → seed first selectable line
- * - selection on a **folded** file (no body rows) + plain ↑↓ → hop to nearest
- *   open file above/below (first selectable line past that path's header)
- * - |delta| > 1: **one scan** to the N-th selectable (key-hold / ⌥↑↓ coalesce)
+ * File-header row for a path, if present in the virtual list.
+ */
+export function fileHeaderRowInVirtualRows(
+  virtualRows: any[] | null | undefined,
+  filePath: string | null | undefined
+) {
+  const idx = filePivotIndexInVirtualRows(virtualRows, filePath);
+  if (idx < 0) return null;
+  const list = Array.isArray(virtualRows) ? virtualRows : [];
+  const row = list[idx];
+  return isFileHeaderRow(row) ? row : null;
+}
+
+/**
+ * Move or extend an active line selection by nav rows.
+ * - shift=false → single-line caret; visits **file headers** and body lines;
+ *   continues into next/prev file at EOF/BOF
+ * - shift=true → multi-line extend; body lines only; blocked at file boundary
+ * - no selection / wrong file + activeFilePath → seed first body line (or header if folded)
+ * - folded file: only the header is selectable; ↑/↓ → prev last line / next header|line
+ * - |delta| > 1: **one scan** to the N-th stop (key-hold / ⌥↑↓ coalesce)
  */
 export function moveLineSelection(
   selection: any,
@@ -461,13 +698,15 @@ export function moveLineSelection(
 
   if (selectionNeedsSeed(cur, activePath)) {
     const seedPath = activePath || String(cur?.filePath || '').trim();
-    // Prefer active/selection file; if neither is set (fresh PR open), seed the
-    // first selectable line in the virtual list so Arrow↑↓ work without a click.
+    // Prefer body of active/selection file; folded → that file's header.
     let seedRow =
       seedPath && typeof firstSelectableRowInFile === 'function'
         ? firstSelectableRowInFile(list, seedPath)
         : null;
-    // Folded active/selection file: seed from nearest open neighbor, not global first
+    if (!seedRow && seedPath) {
+      seedRow = fileHeaderRowInVirtualRows(list, seedPath);
+    }
+    // Still nothing (path missing): nearest nav stop in move direction
     if (!seedRow && seedPath && !opts.shift) {
       seedRow = nearestSelectableFromPath(list, seedPath, d);
     }
@@ -477,64 +716,87 @@ export function moveLineSelection(
           ? firstSelectableRowAnywhere(list)
           : null;
     }
+    // Ultimate fallback: first file header in the list
+    if (!seedRow) {
+      for (const row of list) {
+        if (isFileHeaderRow(row)) {
+          seedRow = row;
+          break;
+        }
+      }
+    }
     if (!seedRow) return selection;
-    cur = beginLineSelection(seedRow) || selection;
+    cur = beginSelectionOnRow(seedRow) || selection;
     steps -= 1; // this keypress only placed the caret
   }
 
-  if (!cur || cur.kind === 'file' || cur.subjectType === 'file') {
-    return cur;
-  }
+  if (!cur) return cur;
   if (steps <= 0) return cur;
 
-  // Selection stuck on a folded/empty-body file: plain ↑↓ leave for neighbor.
-  // (Stale headRowIndex after collapse must not pin movement inside dead rows.)
+  // Line selection on a folded/empty body: re-pin caret onto the file header
+  // so subsequent steps leave via header navigation (not a stale head index).
   const curPath = String(cur.filePath || '').trim();
   if (
     !opts.shift &&
     curPath &&
+    !isFileLevelSelection(cur) &&
+    !isThreadSelection(cur) &&
     !firstSelectableRowInFile(list, curPath)
   ) {
-    const hop = nearestSelectableFromPath(list, curPath, d);
-    if (!hop) return cur;
-    cur = beginLineSelection(hop) || cur;
-    steps -= 1;
-    if (steps <= 0) return cur;
+    const header = fileHeaderRowInVirtualRows(list, curPath);
+    if (header) {
+      cur = beginSelectionOnRow(header) || cur;
+      // Don't consume a step — user asked to leave the folded file
+    }
   }
 
-  const target = findSelectableRowNSteps(cur, list, d, steps, opts);
+  const target = findNavRowNSteps(cur, list, d, steps, opts);
   if (!target) return cur;
-  if (Number(target.rowIndex) === Number(cur.headRowIndex)) return cur;
+  // Same stop (line / header / thread) — no-op
+  const sameStop =
+    Number(target.rowIndex) === Number(cur.headRowIndex) &&
+    String(target.filePath || target.path || '') ===
+      String(cur.filePath || '') &&
+    (!isInlineCommentRow(target) ||
+      String(target.commentId) === String(cur.commentId || ''));
+  if (sameStop) return cur;
 
   if (opts.shift) {
+    if (
+      isFileLevelSelection(cur) ||
+      isThreadSelection(cur) ||
+      isFileHeaderRow(target) ||
+      isInlineCommentRow(target)
+    ) {
+      return cur;
+    }
     return extendLineSelection(cur, target) || cur;
   }
-  return beginLineSelection(target) || cur;
+  return beginSelectionOnRow(target) || cur;
 }
 
 /**
  * Whether a keyboard move was stuck at a file edge (for single-file mode hop).
+ * - ↓ edge: last body line, or file-header when the file has no body (folded)
+ * - ↑ edge: file-header caret (first body line can still step up onto the header)
  */
 export function isSelectionAtFileEdge(
   selection: any,
   virtualRows: any[] | null | undefined,
   delta: number
 ): boolean {
-  if (!selection || selection.kind === 'file' || selection.subjectType === 'file') {
-    return false;
-  }
+  if (!selection) return false;
   const list = Array.isArray(virtualRows) ? virtualRows : [];
   if (!list.length) return false;
   const path = String(selection.filePath || '');
-  const headIdx = Number(selection.headRowIndex);
-  if (!path || !Number.isFinite(headIdx)) return false;
+  const headIdx = resolveSelectionHeadIndex(selection, list);
+  if (!path || headIdx < 0) return false;
   const d = delta < 0 ? -1 : 1;
-  if (d > 0) {
-    const last = lastSelectableRowInFile(list, path);
-    return last != null && Number(last.rowIndex) === headIdx;
-  }
-  const first = firstSelectableRowInFile(list, path);
-  return first != null && Number(first.rowIndex) === headIdx;
+  // Next plain nav stop outside this path? if none in-file → edge
+  const next = findNavRowNSteps(selection, list, d, 1, { shift: false });
+  if (!next) return true;
+  const nextPath = String(next.filePath || next.path || '');
+  return nextPath !== path;
 }
 
 /** Delay before selection action toggles appear (hides island during key-hold). */
@@ -592,6 +854,15 @@ export function applySelectionPointerDown(currentSelection, row, opts: any = {})
     String(opts?.preferredSide || 'RIGHT').toUpperCase() === 'LEFT'
       ? 'LEFT'
       : 'RIGHT';
+  // File header click → file-level caret (not multi-line extend)
+  if (isFileHeaderRow(row)) {
+    const started = beginSelectionOnRow(row, preferredSide);
+    return {
+      selection: started,
+      mode: 'begin',
+      keepRange: false,
+    };
+  }
   if (!isSelectableDiffRow(row)) {
     return {
       selection: currentSelection || null,
@@ -602,6 +873,7 @@ export function applySelectionPointerDown(currentSelection, row, opts: any = {})
   if (
     shiftKey &&
     currentSelection &&
+    !isFileLevelSelection(currentSelection) &&
     currentSelection.filePath &&
     row.filePath === currentSelection.filePath
   ) {
@@ -613,7 +885,7 @@ export function applySelectionPointerDown(currentSelection, row, opts: any = {})
       keepRange: true,
     };
   }
-  const started = beginLineSelection(row, preferredSide);
+  const started = beginSelectionOnRow(row, preferredSide);
   return {
     selection: started,
     mode: 'begin',
@@ -681,6 +953,25 @@ export function normalizeSelection(selection) {
       endRowIndex: null,
     };
   }
+  // Thread caret — not a line-range comment payload
+  if (isThreadSelection(selection)) {
+    const filePath = selection.filePath || selection.path;
+    if (!filePath || selection.commentId == null) return null;
+    return {
+      filePath,
+      startLine: selection.headLine ?? selection.anchorLine ?? null,
+      endLine: selection.headLine ?? selection.anchorLine ?? null,
+      startSide: selection.headSide || 'RIGHT',
+      endSide: selection.headSide || 'RIGHT',
+      multi: false,
+      subjectType: 'thread',
+      commentId: selection.commentId,
+      anchorRowIndex: selection.anchorRowIndex ?? null,
+      headRowIndex: selection.headRowIndex ?? null,
+      startRowIndex: null,
+      endRowIndex: null,
+    };
+  }
   const ends = orderedSelectionEnds(selection);
   return {
     filePath: selection.filePath,
@@ -707,6 +998,8 @@ export function selectionToCommentPayload(selection, opts: any = {
 }) {
   const norm = normalizeSelection(selection);
   if (!norm || !opts.body || !String(opts.body).trim()) return null;
+  // Thread caret is not a new line-range comment target
+  if (norm.subjectType === 'thread') return null;
   if (norm.subjectType === 'file') {
     const payload: any = {
       body: String(opts.body).trim(),
@@ -740,6 +1033,10 @@ export function selectionToCommentPayload(selection, opts: any = {
  */
 export function finalizeSelection(selection, mode) {
   if (!selection) return null;
+  // Structural carets have no line range to collapse
+  if (isFileLevelSelection(selection) || isThreadSelection(selection)) {
+    return { ...selection };
+  }
   if (mode === 'drag' || mode === 'shift') {
     return { ...selection };
   }
@@ -768,15 +1065,153 @@ export function selectionGestureMode(start, end, thresholdPx = 4) {
 }
 
 /**
+ * True when a selectable row carries `line` on `side` (strict, no cross-pane).
+ */
+export function rowMatchesLineSide(
+  row: any,
+  line: unknown,
+  side: unknown
+): boolean {
+  if (!isSelectableDiffRow(row)) return false;
+  const want = Number(line);
+  if (!Number.isFinite(want)) return false;
+  const prefer =
+    String(side || 'RIGHT').toUpperCase() === 'LEFT' ? 'LEFT' : 'RIGHT';
+  const pos = lineForSideStrict(row, prefer);
+  return Boolean(pos && pos.line === want);
+}
+
+/**
+ * Locate a selectable row's rowIndex for path+line+side (first match).
+ * Used to rebind selection after inline comments shift virtual indices.
+ */
+export function findRowIndexForLineSide(
+  virtualRows: any[] | null | undefined,
+  filePath: unknown,
+  line: unknown,
+  side: unknown
+): number | null {
+  const path = String(filePath || '').trim();
+  if (!path) return null;
+  const list = Array.isArray(virtualRows) ? virtualRows : [];
+  for (const row of list) {
+    if (!row || String(row.filePath || '') !== path) continue;
+    if (!rowMatchesLineSide(row, line, side)) continue;
+    const idx = Number(row.rowIndex);
+    if (Number.isFinite(idx)) return idx;
+  }
+  return null;
+}
+
+/**
+ * Rebind anchor/head rowIndex onto the current virtual list by path+line+side.
+ * Inline review comments insert/remove rows and renumber rowIndex — without this
+ * the selection chrome vanishes while the store still holds a stale index.
+ * Returns the same object when nothing changed (Object.is-stable for React).
+ */
+export function rebindSelectionRowIndices(
+  selection: any,
+  virtualRows: any[] | null | undefined
+) {
+  if (!selection) return selection;
+  const list = Array.isArray(virtualRows) ? virtualRows : [];
+  if (!list.length) return selection;
+
+  if (isFileLevelSelection(selection)) {
+    const header = fileHeaderRowInVirtualRows(list, selection.filePath);
+    if (!header) return selection;
+    const idx = Number(header.rowIndex);
+    if (!Number.isFinite(idx)) return selection;
+    if (
+      Number(selection.headRowIndex) === idx &&
+      Number(selection.anchorRowIndex) === idx
+    ) {
+      return selection;
+    }
+    return {
+      ...selection,
+      anchorRowIndex: idx,
+      headRowIndex: idx,
+    };
+  }
+
+  if (isThreadSelection(selection)) {
+    const idx = findRowIndexForCommentId(list, selection.commentId);
+    if (idx == null) return selection;
+    if (
+      Number(selection.headRowIndex) === idx &&
+      Number(selection.anchorRowIndex) === idx
+    ) {
+      return selection;
+    }
+    return {
+      ...selection,
+      anchorRowIndex: idx,
+      headRowIndex: idx,
+    };
+  }
+
+  const path = String(selection.filePath || '').trim();
+  if (!path) return selection;
+
+  const aLine = selection.anchorLine;
+  const hLine = selection.headLine;
+  const aSide = selection.anchorSide || 'RIGHT';
+  const hSide = selection.headSide || 'RIGHT';
+
+  let aIdx = findRowIndexForLineSide(list, path, aLine, aSide);
+  let hIdx = findRowIndexForLineSide(list, path, hLine, hSide);
+
+  // Partial miss (row temporarily off-list) — keep prior indices
+  if (aIdx == null && hIdx == null) return selection;
+  if (aIdx == null) aIdx = hIdx;
+  if (hIdx == null) hIdx = aIdx;
+
+  if (
+    Number(selection.anchorRowIndex) === aIdx &&
+    Number(selection.headRowIndex) === hIdx
+  ) {
+    return selection;
+  }
+  return {
+    ...selection,
+    anchorRowIndex: aIdx,
+    headRowIndex: hIdx,
+  };
+}
+
+/**
  * Whether a virtual row is highlighted by the active selection.
  *
- * Prefer **rowIndex range** so interleaved add/del (LEFT vs RIGHT line numbers)
- * form one continuous visual block instead of jumping by mixed line coords.
+ * **Single-line caret: line+side identity first** (survives comment-row renumber).
+ * Multi-line: rowIndex range after rebind; line range as fallback.
  */
 export function isRowInSelection(selection, row) {
-  if (!selection || !row || row.filePath !== selection.filePath) return false;
-  if (row.kind !== 'diff-line') return false;
-  if (!isSelectableDiffRow(row)) return false;
+  if (!selection || !row) return false;
+  const selPath = String(selection.filePath || '').trim();
+  const rowPath = String(row.filePath || row.path || '').trim();
+  if (!selPath || selPath !== rowPath) return false;
+
+  if (isFileLevelSelection(selection)) {
+    return isFileHeaderRow(row);
+  }
+  if (isThreadSelection(selection)) {
+    return (
+      isInlineCommentRow(row) &&
+      String(row.commentId) === String(selection.commentId)
+    );
+  }
+
+  if (row.kind !== 'diff-line' || !isSelectableDiffRow(row)) return false;
+
+  // Single-line: identity by line+side only (ignore possibly-stale rowIndex)
+  if (isSingleLineCaretSelection(selection)) {
+    return rowMatchesLineSide(
+      row,
+      selection.headLine,
+      selection.headSide || selection.anchorSide
+    );
+  }
 
   const a = Number(selection.anchorRowIndex);
   const h = Number(selection.headRowIndex);
@@ -784,17 +1219,24 @@ export function isRowInSelection(selection, row) {
   if (Number.isFinite(a) && Number.isFinite(h) && Number.isFinite(ri)) {
     const lo = Math.min(a, h);
     const hi = Math.max(a, h);
-    return ri >= lo && ri <= hi;
+    if (ri >= lo && ri <= hi) return true;
   }
 
-  // Fallback: same-side line range (legacy / missing rowIndex)
+  // Fallback: same-side line range
   const norm = normalizeSelection(selection);
-  if (!norm || norm.subjectType === 'file') return false;
-  const line = row.newLine != null ? Number(row.newLine) : Number(row.oldLine);
-  if (!Number.isFinite(line)) return false;
-  if (norm.endSide === 'RIGHT' && row.newLine == null) return false;
-  if (norm.endSide === 'LEFT' && row.oldLine == null) return false;
-  return line >= norm.startLine && line <= norm.endLine;
+  if (!norm || norm.subjectType === 'file' || norm.subjectType === 'thread') {
+    return false;
+  }
+  const prefer =
+    String(norm.endSide || 'RIGHT').toUpperCase() === 'LEFT' ? 'LEFT' : 'RIGHT';
+  const pos = lineForSideStrict(row, prefer);
+  if (!pos) return false;
+  const start = Number(norm.startLine);
+  const end = Number(norm.endLine);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return false;
+  const loL = Math.min(start, end);
+  const hiL = Math.max(start, end);
+  return pos.line >= loL && pos.line <= hiL;
 }
 
 /**
@@ -833,22 +1275,55 @@ export function selectionBlockRole(selection, row) {
  */
 export function rowSelectionVisualKey(selection: any, row: any): string {
   if (!selection || !row) return '';
-  if (selection.kind === 'file' || selection.subjectType === 'file') return '';
+  // File-level: header gets 'only'
+  if (isFileLevelSelection(selection)) {
+    if (!isFileHeaderRow(row)) return '';
+    if (
+      String(row.filePath || row.path || '') !==
+      String(selection.filePath || '')
+    ) {
+      return '';
+    }
+    return 'only';
+  }
+  // Thread caret: matching inline-comment row
+  if (isThreadSelection(selection)) {
+    if (
+      !isInlineCommentRow(row) ||
+      String(row.commentId) !== String(selection.commentId)
+    ) {
+      return '';
+    }
+    return 'only';
+  }
   if (row.filePath !== selection.filePath) return '';
   if (typeof isSelectableDiffRow === 'function' && !isSelectableDiffRow(row)) {
     return '';
   }
+
+  // Single-line: line+side only — survives comment-row renumber / mid-scroll rebuild
+  if (isSingleLineCaretSelection(selection)) {
+    return rowMatchesLineSide(
+      row,
+      selection.headLine,
+      selection.headSide || selection.anchorSide
+    )
+      ? 'only'
+      : '';
+  }
+
   const a = Number(selection.anchorRowIndex);
   const h = Number(selection.headRowIndex);
   const ri = Number(row.rowIndex);
   if (Number.isFinite(a) && Number.isFinite(h) && Number.isFinite(ri)) {
     const lo = Math.min(a, h);
     const hi = Math.max(a, h);
-    if (ri < lo || ri > hi) return '';
-    if (lo === hi) return 'only';
-    if (ri === lo) return 'start';
-    if (ri === hi) return 'end';
-    return 'middle';
+    if (ri >= lo && ri <= hi) {
+      if (lo === hi) return 'only';
+      if (ri === lo) return 'start';
+      if (ri === hi) return 'end';
+      return 'middle';
+    }
   }
   const role =
     typeof selectionBlockRole === 'function'

@@ -193,6 +193,7 @@ import {
   firstSelectableRowInFile,
   lastSelectableRowInFile,
   isSelectionAtFileEdge,
+  rebindSelectionRowIndices,
   SELECTION_ACTIONS_REVEAL_MS,
   resolvePendingGotoSelection,
   resolveGotoPathAmongFiles,
@@ -1394,6 +1395,26 @@ export function PrModalApp({
 
   const fileStarts = useMemo(() => fileStartIndexMap(virtualRows), [virtualRows]);
 
+  /**
+   * Inline comments (and fold/expand) renumber virtual rowIndex. Selection stores
+   * path+line identity — rebind indices so chrome / island dock stay on the
+   * same lines instead of vanishing mid-scroll when comments are present.
+   */
+  useEffect(() => {
+    if (typeof rebindSelectionRowIndices !== 'function') return;
+    const sel = useModalStore.getState().lineSelection;
+    if (!sel) return;
+    const next = rebindSelectionRowIndices(sel, virtualRows);
+    if (
+      next &&
+      next !== sel &&
+      (Number(next.headRowIndex) !== Number(sel.headRowIndex) ||
+        Number(next.anchorRowIndex) !== Number(sel.anchorRowIndex))
+    ) {
+      setLineSelection(next);
+    }
+  }, [virtualRows, setLineSelection]);
+
   const isDiffCommentCollapsed = useCallback(
     (rowOrId: any, resolvedHint?: boolean) => {
       if (rowOrId && typeof rowOrId === 'object' && rowOrId.kind === 'inline-comment') {
@@ -2545,11 +2566,23 @@ export function PrModalApp({
       selectionActionsTimerRef.current = null;
       const st = useModalStore.getState();
       if (!st.lineSelection || st.selecting) return;
-      // File-level composer is shown explicitly; do not override phase here
+      // File-header caret → file-level comment composer (⌥C / island)
       if (
         st.lineSelection.kind === 'file' ||
         st.lineSelection.subjectType === 'file'
       ) {
+        setSelectionIslandLeaving(false);
+        setSelectionIslandPhase('comment');
+        setShowSelectionComposer(true);
+        return;
+      }
+      // Thread caret — no line island; Opt+C uses thread reply path
+      if (
+        st.lineSelection.kind === 'thread' ||
+        st.lineSelection.subjectType === 'thread' ||
+        st.lineSelection.kind === 'inline-comment'
+      ) {
+        setShowSelectionComposer(false);
         return;
       }
       setSelectionIslandLeaving(false);
@@ -2678,7 +2711,10 @@ export function PrModalApp({
         nextSel &&
         Number(nextSel.headRowIndex) === Number(prevSel.headRowIndex) &&
         Number(nextSel.anchorRowIndex) === Number(prevSel.anchorRowIndex) &&
-        String(nextSel.filePath || '') === String(prevSel.filePath || ''));
+        String(nextSel.filePath || '') === String(prevSel.filePath || '') &&
+        String(nextSel.kind || '') === String(prevSel.kind || '') &&
+        String(nextSel.commentId ?? '') === String(prevSel.commentId ?? '') &&
+        Number(nextSel.headLine) === Number(prevSel.headLine));
 
     // Single-file mode hop at EOF/BOF (not multi-line extend)
     if (
@@ -2719,6 +2755,20 @@ export function PrModalApp({
     // Avoid setSelectionIslandLeaving every frame if already false
     if (useModalStore.getState().selectionIslandLeaving) {
       setSelectionIslandLeaving(false);
+    }
+    // Thread caret: align Diff comment-nav index so ⌥C opens that reply
+    if (
+      nextSel &&
+      (nextSel.kind === 'thread' ||
+        nextSel.subjectType === 'thread' ||
+        nextSel.kind === 'inline-comment') &&
+      nextSel.commentId != null &&
+      Array.isArray(mappedComments)
+    ) {
+      const tIdx = mappedComments.findIndex(
+        (c: any) => String(c?.id) === String(nextSel.commentId)
+      );
+      if (tIdx >= 0 && tIdx !== commentIndex) setCommentIndex(tIdx);
     }
     scheduleSelectionActionsReveal();
     // DOM scroll + light path sync after paint (not another React commit)
@@ -5467,14 +5517,33 @@ export function PrModalApp({
    * Post a selection line comment.
    * @param asPending Start review / Add comment — always GitHub PENDING review
    */
-  function onFileHeaderComment(filePath: string) {
+  function onFileHeaderComment(filePath: string, headerRow?: any) {
     const path = String(filePath || '').trim();
     if (!path) return;
     // Dismiss line selection if any; open file-level composer
     setSelecting(false);
     selectingRef.current = false;
     setSelectionIslandLeaving(false);
-    setLineSelection({ kind: 'file', filePath: path, subjectType: 'file' });
+    const idx = Number(headerRow?.rowIndex);
+    const rowIndex = Number.isFinite(idx)
+      ? idx
+      : (() => {
+          const list = Array.isArray(virtualRows) ? virtualRows : [];
+          const h = list.find(
+            (r: any) =>
+              r?.kind === 'file-header' &&
+              String(r.filePath || r.path || '') === path
+          );
+          const i = Number(h?.rowIndex);
+          return Number.isFinite(i) ? i : null;
+        })();
+    setLineSelection({
+      kind: 'file',
+      subjectType: 'file',
+      filePath: path,
+      anchorRowIndex: rowIndex,
+      headRowIndex: rowIndex,
+    });
     setSelectionDraft('');
     setSelectionIslandPhase('comment');
     setShowSelectionComposer(true);

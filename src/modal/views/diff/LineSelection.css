@@ -13,7 +13,25 @@
   border-top-color: transparent;
   border-bottom-color: transparent;
   box-shadow: none;
-  z-index: 0;
+  /* Above inline comment cards that paint after the code row */
+  z-index: 1;
+  position: relative;
+}
+
+/* Review-thread caret (plain ↑↓) — same accent language as line selection */
+.prp-vline--comment-selected {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid var(--prp-accent, #0969da);
+  outline-offset: -2px;
+  border-radius: 8px;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--prp-accent) 35%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--prp-sel-bg-strong, #ffe566) 40%, transparent);
+}
+.prp-vline--comment-selected .prp-inline-thread__card {
+  border-color: color-mix(in srgb, var(--prp-accent) 55%, var(--prp-border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--prp-accent) 25%, transparent);
 }
 
 .prp-vline--selected.prp-vline--sel-only {

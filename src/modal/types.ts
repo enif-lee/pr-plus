@@ -28,10 +28,16 @@ export interface PickerState {
 }
 
 export interface LineSelection {
-  /** `file` = file-level comment target (no line range). */
-  kind?: 'line' | 'file';
-  subjectType?: 'line' | 'file';
+  /**
+   * `file` = file-level comment target (header caret).
+   * `thread` = Diff review-thread caret (plain ↑↓ only).
+   * default / `line` = body line range.
+   */
+  kind?: 'line' | 'file' | 'thread' | 'inline-comment';
+  subjectType?: 'line' | 'file' | 'thread';
   filePath?: string;
+  /** Review thread root id when kind is thread */
+  commentId?: string | number | null;
   startLine?: number;
   endLine?: number;
   startSide?: string;

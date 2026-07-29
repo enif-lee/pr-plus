@@ -94,6 +94,8 @@ function FileHeaderRow(props: {
   sticky?: boolean;
   /** Active file from tree / prev-next — focus chrome on this header */
   focused?: boolean;
+  /** File-level keyboard/pointer selection on this header */
+  selected?: boolean;
   style?: React.CSSProperties;
   /** File-level selection composer docked under this header */
   selectionIsland?: React.ReactNode;
@@ -112,6 +114,7 @@ function FileHeaderRow(props: {
     searchQuery = '',
     sticky = false,
     focused = false,
+    selected = false,
     style,
     selectionIsland = null,
   } = props;
@@ -133,7 +136,9 @@ function FileHeaderRow(props: {
     <div
       className={`prp-vline prp-vline--header prp-vline--header-${headerTone}${
         !openable ? ' prp-vline--header-binary' : ''
-      }${focused ? ' prp-vline--header-focus' : ''}${searchRowClass}`}
+      }${focused ? ' prp-vline--header-focus' : ''}${
+        selected ? ' prp-vline--header-selected' : ''
+      }${searchRowClass}`}
       style={{ height: ROW_HEIGHT, ...style }}
       data-row-index={sticky ? undefined : row.rowIndex}
       data-file-path={row.filePath || ''}
@@ -142,6 +147,7 @@ function FileHeaderRow(props: {
       data-file-kind={row.fileKind || undefined}
       data-sticky={sticky ? '1' : undefined}
       data-file-focus={focused ? '1' : undefined}
+      data-file-selected={selected ? '1' : undefined}
       data-search-current={isActiveHit ? '1' : undefined}
     >
       <label className="prp-file-header__viewed" title="Mark as viewed">
@@ -786,7 +792,7 @@ const DiffCodeLine = memo(function DiffCodeLine({
   return (
     <div
       className={`prp-sel-dock-host${splitDockClass}`}
-      style={{ height: h, minHeight: h }}
+      style={{ minHeight: h }}
       data-row-index={row.rowIndex}
       data-dock-side={isSplit ? dockSide : undefined}
     >
@@ -868,6 +874,18 @@ function VirtualDiffImpl(props: any) {
     }
     return '';
   });
+  const storeThreadSelectionId = useModalStore((s) => {
+    const sel = s.lineSelection;
+    if (
+      sel &&
+      (sel.kind === 'thread' ||
+        sel.subjectType === 'thread' ||
+        sel.kind === 'inline-comment')
+    ) {
+      return sel.commentId != null ? String(sel.commentId) : '';
+    }
+    return '';
+  });
   const storeSelecting = useModalStore((s) => s.selecting);
   const selecting =
     selectingProp !== undefined ? selectingProp : storeSelecting;
@@ -883,6 +901,16 @@ function VirtualDiffImpl(props: any) {
         : ''
       : storeFileSelectionPath;
   const isFileSelection = Boolean(fileSelectionPath);
+  const threadSelectionId =
+    selectionOverride !== undefined
+      ? selectionOverride &&
+        (selectionOverride.kind === 'thread' ||
+          selectionOverride.subjectType === 'thread' ||
+          selectionOverride.kind === 'inline-comment') &&
+        selectionOverride.commentId != null
+        ? String(selectionOverride.commentId)
+        : ''
+      : storeThreadSelectionId;
 
   const activePathNorm = String(activeFilePath || '').trim();
 
@@ -1405,6 +1433,10 @@ function VirtualDiffImpl(props: any) {
               Boolean(activePathNorm) &&
               String(stickyMeta.row?.filePath || '') === activePathNorm
             }
+            selected={
+              isFileSelection &&
+              fileSelectionPath === String(stickyMeta.row?.filePath || '')
+            }
             selectionIsland={
               showSelectionIsland &&
               isFileSelection &&
@@ -1460,6 +1492,9 @@ function VirtualDiffImpl(props: any) {
                   : 'RIGHT';
               // Split line threads dock under the matching pane; file-level stays full width
               const isSplitComment = Boolean(row.split);
+              const threadSelected =
+                Boolean(threadSelectionId) &&
+                String(row.commentId) === threadSelectionId;
               const threadEl = (
                 <InlineThread
                   row={row}
@@ -1499,13 +1534,14 @@ function VirtualDiffImpl(props: any) {
                     isSplitComment ? ' prp-vline--comment-split' : ''
                   }${collapsed ? ' prp-vline--comment-collapsed' : ''}${
                     pending ? ' prp-vline--comment-pending' : ''
-                  }${searchRowClass}`}
+                  }${threadSelected ? ' prp-vline--comment-selected' : ''}${searchRowClass}`}
                   style={minH != null ? { minHeight: minH } : undefined}
                   data-row-index={row.rowIndex}
                   data-collapsed={collapsed ? '1' : '0'}
                   data-pending={pending ? '1' : undefined}
                   data-side={commentSide}
                   data-split={isSplitComment ? '1' : '0'}
+                  data-thread-selected={threadSelected ? '1' : undefined}
                   data-search-current={isActiveHit ? '1' : undefined}
                   data-search-anchor={commentAnchor || undefined}
                   data-thread-focus-anchor={commentAnchor || undefined}
@@ -1540,11 +1576,13 @@ function VirtualDiffImpl(props: any) {
                 stickyMeta?.show &&
                 String(stickyMeta.row?.filePath || '') ===
                   String(row.filePath || '');
+              const headerSelected =
+                isFileSelection &&
+                fileSelectionPath === String(row.filePath || '');
               const dockFile =
                 showSelectionIsland &&
-                isFileSelection &&
-                !stickyOwnsFile &&
-                fileSelectionPath === String(row.filePath || '');
+                headerSelected &&
+                !stickyOwnsFile;
               return (
                 <FileHeaderRow
                   key={row.rowIndex}
@@ -1563,6 +1601,7 @@ function VirtualDiffImpl(props: any) {
                     Boolean(activePathNorm) &&
                     String(row.filePath || '') === activePathNorm
                   }
+                  selected={headerSelected}
                   selectionIsland={dockFile ? selectionIsland : null}
                 />
               );
