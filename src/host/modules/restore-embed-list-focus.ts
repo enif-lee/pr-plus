@@ -68,16 +68,25 @@
             }
           : { open: null, page: null, position: null, source: 'none' };
 
-    if (!resolved.open) return { ok: false, reason: 'none' };
-
-    // Session restore must match current pulls list repo
-    if (resolved.source === 'session') {
-      if (
-        pathOwner.toLowerCase() !== String(resolved.open.owner).toLowerCase() ||
-        pathRepo.toLowerCase() !== String(resolved.open.repo).toLowerCase()
-      ) {
-        return { ok: false, reason: 'repo-mismatch' };
+    if (!resolved.open) {
+      // Plain /pulls (no prp_number): drop stale session open snap so we never
+      // re-open the last PR without an explicit URI deep-link.
+      try {
+        if (typeof sessionStorage !== 'undefined' && sess?.clearOpenModal) {
+          sess.clearOpenModal(sessionStorage);
+        }
+      } catch {
+        /* ignore */
       }
+      return { ok: false, reason: 'none' };
+    }
+
+    // URI / path owner must match resolved open (repo isolation)
+    if (
+      pathOwner.toLowerCase() !== String(resolved.open.owner).toLowerCase() ||
+      pathRepo.toLowerCase() !== String(resolved.open.repo).toLowerCase()
+    ) {
+      return { ok: false, reason: 'repo-mismatch' };
     }
 
     try {

@@ -163,6 +163,39 @@ export const TOGGLE_VIEWED_SHORTCUT = {
 };
 
 /**
+ * Option+F on Diff — fold/expand the focused file (line-selection path,
+ * else active tree file) when a review thread is not the active focus.
+ *
+ * Priority on Diff:
+ *   1. Line selection active → file fold
+ *   2. Review-thread focus (⌥J/K / commentIndex) → thread fold
+ *   3. Otherwise → file fold
+ *
+ * Conversation review-thread focus still owns ⌥F via CONTEXT_THREAD_SHORTCUT.
+ */
+export const FILE_FOLD_SHORTCUT = {
+  key: 'f',
+  code: 'KeyF',
+  action: 'toggleActiveFileCollapse' as const,
+  chord: 'opt+f',
+  labelMac: '⌥F',
+  labelWin: 'Alt+F',
+} as const;
+
+/**
+ * Path to fold/expand: prefer line-selection file, else active tree file.
+ */
+export function resolveActiveFileForCollapse(opts: {
+  lineSelection?: { filePath?: string | null } | null;
+  activeFilePath?: string | null;
+} = {}): string | null {
+  const fromSel = String(opts.lineSelection?.filePath || '').trim();
+  if (fromSel) return fromSel;
+  const active = String(opts.activeFilePath || '').trim();
+  return active || null;
+}
+
+/**
  * Option+B — toggle the layout side panel:
  * - Diff: files navigator (left)
  * - Conversation: metadata rail (right)
@@ -698,6 +731,8 @@ export function sidePanelShortcutLabel(isMac = false): string {
  *   editableTarget?: boolean,
  *   conversationCommentFocused?: boolean,
  *   contextThreadActive?: boolean,
+ *   diffThreadFocused?: boolean,  // Diff review-thread focus (commentIndex / active id)
+ *   hasLineSelection?: boolean,   // Diff code line selection active
  *   searchOpen?: boolean,
  *   layoutMode?: string,
  * }} opts
@@ -720,6 +755,15 @@ export function resolveModalShortcutAction(opts: any = {}) {
   const contextThreadActive = Boolean(
     opts.contextThreadActive ?? opts.conversationCommentFocused
   );
+  const hasLineSelection = Boolean(opts.hasLineSelection);
+  /**
+   * Real Diff thread focus. When omitted, fall back to contextThreadActive so
+   * older callers keep prior behavior; App passes this explicitly.
+   */
+  const diffThreadFocused =
+    opts.diffThreadFocused != null
+      ? Boolean(opts.diffThreadFocused)
+      : layout === 'diff' && contextThreadActive;
 
   // GitHub ⌘K palette owns Escape / keyboard — never close pr+ shell
   if (opts.githubPaletteOpen) return null;
@@ -739,6 +783,10 @@ export function resolveModalShortcutAction(opts: any = {}) {
    *   ⌥F fold · ⌥D Diff · ⌥C comment (1st focus input, 2nd submit)
    *   ⌥⌃R resolve / unresolve
    * ⌥C allowed while the reply composer is focused (second stage).
+   *
+   * ⌥F on Diff is special: line selection → file fold; only a focused review
+   * thread takes thread fold. (contextThreadActive may be forced true on Diff
+   * so ⌥C/D seed the first thread — that force must not steal file fold.)
    */
   if (contextThreadActive && alt && !shift) {
     if (ctrl && !mod && key === 'r') {
@@ -746,12 +794,20 @@ export function resolveModalShortcutAction(opts: any = {}) {
     }
     if (!ctrl && !mod) {
       if (key === 'f' && !opts.editableTarget) {
-        return CONTEXT_THREAD_SHORTCUT.fold.action;
-      }
-      if (key === 'd' && !opts.editableTarget) {
+        if (layout === 'diff') {
+          if (hasLineSelection) {
+            return FILE_FOLD_SHORTCUT.action;
+          }
+          if (diffThreadFocused) {
+            return CONTEXT_THREAD_SHORTCUT.fold.action;
+          }
+          // No thread focus — fall through to FILE_FOLD below
+        } else {
+          return CONTEXT_THREAD_SHORTCUT.fold.action;
+        }
+      } else if (key === 'd' && !opts.editableTarget) {
         return CONTEXT_THREAD_SHORTCUT.gotoDiff.action;
-      }
-      if (key === 'c') {
+      } else if (key === 'c') {
         // First press focuses composer; second (while typing) submits.
         return CONTEXT_THREAD_SHORTCUT.comment.action;
       }
@@ -816,6 +872,13 @@ export function resolveModalShortcutAction(opts: any = {}) {
     if (opts.editableTarget) return null;
     if (layout !== 'diff') return null;
     return TOGGLE_VIEWED_SHORTCUT.action;
+  }
+
+  // ⌥F: fold/expand focused Diff file (context-thread ⌥F handled above)
+  if (alt && !mod && !ctrl && !shift && key === 'f') {
+    if (opts.editableTarget) return null;
+    if (layout !== 'diff') return null;
+    return FILE_FOLD_SHORTCUT.action;
   }
 
   // ⌥J / ⌥K: step prev/next — Find hits, Diff review threads, or Conversation comments.
@@ -910,10 +973,14 @@ export function resolveModalShortcutAction(opts: any = {}) {
 
 /**
  * Stable search-anchor for a conversation timeline comment/review row.
+ * Also supports structural stops: body (description) and merge box.
  */
 export function conversationCommentFocusAnchor(item: any): string | null {
-  if (!item || item.id == null) return null;
+  if (!item) return null;
   const kind = String(item.kind || '');
+  if (kind === 'description' || kind === 'body') return 'body';
+  if (kind === 'merge' || kind === 'merge-box') return 'merge';
+  if (item.id == null) return null;
   const id = String(item.id);
   if (kind === 'issue-comment') return `issue-comment:${id}`;
   if (kind === 'review') return `review:${id}`;
@@ -925,23 +992,13 @@ export function conversationCommentFocusAnchor(item: any): string | null {
 }
 
 /**
- * Pick the first focusable PR comment/review timeline entry (display order).
+ * Pick the first focusable Conversation stop (priority: body → comments → merge).
  */
 export function pickConversationCommentFocusTarget(
   items: any
 ): { id: string; kind: string; anchor: string } | null {
-  const list = Array.isArray(items) ? items : [];
-  for (const item of list) {
-    if (!item || item.pending) continue;
-    const anchor = conversationCommentFocusAnchor(item);
-    if (!anchor) continue;
-    return {
-      id: String(item.id),
-      kind: String(item.kind || ''),
-      anchor,
-    };
-  }
-  return null;
+  const targets = listConversationCommentFocusTargets(items);
+  return targets.length ? targets[0] : null;
 }
 
 /**
@@ -960,10 +1017,12 @@ function pushThreadFocusTarget(
 }
 
 /**
- * Ordered list of focusable conversation targets in **page visual order**.
- * Thread navigation is by **thread unit**, not per-reply:
- *   review-group → each included thread → …
- *   standalone review-thread (one stop)
+ * Ordered list of focusable Conversation stops for ⌥J / ⌥K.
+ * Priority (product order, not necessarily DOM paint order):
+ *   1. PR description (body)
+ *   2. Comments / review threads (timeline)
+ *   3. Merge box
+ * Thread navigation is by **thread unit**, not per-reply.
  * Skips pending review-groups (composer-only).
  */
 export function listConversationCommentFocusTargets(
@@ -971,19 +1030,33 @@ export function listConversationCommentFocusTargets(
 ): Array<{ id: string; kind: string; anchor: string }> {
   const list = Array.isArray(items) ? items : [];
   const out: Array<{ id: string; kind: string; anchor: string }> = [];
+
+  // 1) PR body / description — always first when present
+  out.push({ id: 'body', kind: 'description', anchor: 'body' });
+
+  // 2) Timeline comments / reviews / threads
   for (const item of list) {
     if (!item) continue;
+    // Structural markers passed explicitly are handled separately
+    if (
+      item.kind === 'description' ||
+      item.kind === 'body' ||
+      item.kind === 'merge' ||
+      item.kind === 'merge-box'
+    ) {
+      continue;
+    }
     // Pending review-group lives in the composer, not the timeline
     if (item.kind === 'review-group' && item.pending) continue;
+    // System events are not ⌥J/K stops
+    if (item.kind === 'timeline-event') continue;
 
     if (item.kind === 'review-group') {
-      // 1) group card first
       out.push({
         id: String(item.id),
         kind: 'review-group',
         anchor: `review-group:${item.id}`,
       });
-      // 2) each included file thread as one step (path/line order from builder)
       for (const t of item.threads || []) {
         pushThreadFocusTarget(out, t);
       }
@@ -1003,6 +1076,10 @@ export function listConversationCommentFocusTargets(
       anchor,
     });
   }
+
+  // 3) Merge box — always last
+  out.push({ id: 'merge', kind: 'merge', anchor: 'merge' });
+
   return out;
 }
 

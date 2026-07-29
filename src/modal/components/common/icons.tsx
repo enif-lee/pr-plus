@@ -22,6 +22,7 @@ import {
   CopyIcon,
   DotFillIcon,
   GitMergeIcon,
+  GitPullRequestClosedIcon,
   GitPullRequestDraftIcon,
   KebabHorizontalIcon,
   FileDiffIcon,
@@ -197,6 +198,8 @@ export function IconMergeStatus({
 }) {
   const cls = ['prp-octicon', className].filter(Boolean).join(' ');
   if (kind === 'merged') return <GitMergeIcon size={size} className={cls} aria-hidden="true" />;
+  if (kind === 'closed')
+    return <GitPullRequestClosedIcon size={size} className={cls} aria-hidden="true" />;
   if (kind === 'clean')
     return <CheckCircleFillIcon size={size} className={cls} aria-hidden="true" />;
   if (kind === 'blocked' || kind === 'conflicts')

@@ -927,8 +927,8 @@
   }
 
   /**
-   * After stack tree is applied on /pulls, reopen the modal that was open before refresh.
-   * Priority: sessionStorage open snap > URI (pr+number / page / position).
-   * Diff/conversation layout also restored inside App via loadSessionView + initialRoute.
+   * After stack tree is applied on /pulls, optionally reopen from URI deep-link.
+   * URI-first: only when `prp_number` (etc.) is present — not session-only snap.
+   * Diff/conversation layout still restored inside App via loadSessionView + initialRoute.
    */
 

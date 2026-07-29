@@ -20,13 +20,24 @@ const FADE_MS = 200;
  */
 export function ShortcutMonitor({
   enabled = true,
+  /** none | small (1×) | medium (2×) | large (3×) — none also via enabled=false */
+  size = 'small',
   isMac = true,
   dismissMs = SHORTCUT_MONITOR_DISMISS_MS,
 }: {
   enabled?: boolean;
+  size?: 'none' | 'small' | 'medium' | 'large' | string;
   isMac?: boolean;
   dismissMs?: number;
 }) {
+  const sizeClass = (() => {
+    const v = String(size || 'small')
+      .trim()
+      .toLowerCase();
+    if (v === 'medium' || v === 'md' || v === '2x') return 'medium';
+    if (v === 'large' || v === 'lg' || v === '3x') return 'large';
+    return 'small';
+  })();
   const [fire, setFire] = useState<ShortcutMonitorFire | null>(() =>
     getShortcutMonitorFire()
   );
@@ -188,11 +199,12 @@ export function ShortcutMonitor({
 
   return (
     <div
-      className={`prp-shortcut-monitor prp-shortcut-monitor--${display.mode} prp-shortcut-monitor--${phase}`}
+      className={`prp-shortcut-monitor prp-shortcut-monitor--size-${sizeClass} prp-shortcut-monitor--${display.mode} prp-shortcut-monitor--${phase}`}
       role="status"
       aria-live="polite"
       data-mode={display.mode}
       data-phase={phase}
+      data-size={sizeClass}
     >
       <div ref={lineRef} className="prp-shortcut-monitor__line">
         {display.text}

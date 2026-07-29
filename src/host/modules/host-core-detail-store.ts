@@ -28,7 +28,20 @@
     reverseComments: true,
     autoOpenEmbed: true,
     singleFileMode: false,
+    shortcutMonitorSize: 'small',
   };
+
+  function normalizeShortcutMonitorSize(raw: unknown): string {
+    const v = String(raw ?? '')
+      .trim()
+      .toLowerCase();
+    if (v === 'none' || v === 'off' || v === 'hidden' || v === '0') return 'none';
+    if (v === 'medium' || v === 'md' || v === '2' || v === '2x') return 'medium';
+    if (v === 'large' || v === 'lg' || v === '3' || v === '3x') return 'large';
+    if (v === 'small' || v === 'sm' || v === '1' || v === '1x') return 'small';
+    if (raw === false) return 'none';
+    return 'small';
+  }
 
   let prefs = { ...DEFAULT_PREFS };
   let prefsWatchUnsub = null;
@@ -867,6 +880,9 @@
           reverseComments: next.reverseComments !== false,
           autoOpenEmbed: next.autoOpenEmbed !== false,
           singleFileMode: next.singleFileMode === true,
+          shortcutMonitorSize: normalizeShortcutMonitorSize(
+            next.shortcutMonitorSize
+          ),
         };
       }
       prefsReady = true;
@@ -944,6 +960,9 @@
             reverseComments: next?.reverseComments !== false,
             autoOpenEmbed: next?.autoOpenEmbed !== false,
             singleFileMode: next?.singleFileMode === true,
+            shortcutMonitorSize: normalizeShortcutMonitorSize(
+              next?.shortcutMonitorSize
+            ),
           };
           if (current.open) render();
           // Turning auto-open on while on a PR page: enter embed.

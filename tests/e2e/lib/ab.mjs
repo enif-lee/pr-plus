@@ -11,6 +11,16 @@ export const ROOT = path.resolve(__dirname, '../../..');
 
 const SESSION = process.env.PRP_E2E_SESSION || 'pr-plus-e2e';
 const DEFAULT_TIMEOUT_MS = Number(process.env.PRP_E2E_CMD_TIMEOUT_MS || 60_000);
+/**
+ * E2e defaults to headless (no OS focus issues for chords). Override:
+ *   PRP_E2E_HEADED=1 npm run test:e2e
+ * Config agent-browser.json may set headed:true; --headed false overrides.
+ */
+const HEADED =
+  process.env.PRP_E2E_HEADED === '1' ||
+  process.env.PRP_E2E_HEADED === 'true' ||
+  process.env.AGENT_BROWSER_HEADED === '1' ||
+  process.env.AGENT_BROWSER_HEADED === 'true';
 
 /**
  * @param {string[]} args
@@ -18,13 +28,19 @@ const DEFAULT_TIMEOUT_MS = Number(process.env.PRP_E2E_CMD_TIMEOUT_MS || 60_000);
  */
 export function ab(args, opts = {}) {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const r = spawnSync('agent-browser', ['--session', SESSION, ...args], {
+  // Boolean form overrides agent-browser.json "headed" (see agent-browser README).
+  const headedFlag = HEADED ? ['--headed', 'true'] : ['--headed', 'false'];
+  const r = spawnSync('agent-browser', [...headedFlag, '--session', SESSION, ...args], {
     cwd: ROOT,
     encoding: 'utf8',
     input: opts.input,
     timeout: timeoutMs,
     maxBuffer: 8 * 1024 * 1024,
-    env: process.env,
+    env: {
+      ...process.env,
+      // Mirror CLI so child sessions stay consistent
+      AGENT_BROWSER_HEADED: HEADED ? '1' : '0',
+    },
   });
   if (r.error) throw r.error;
   if (r.status !== 0 && !opts.allowFail) {

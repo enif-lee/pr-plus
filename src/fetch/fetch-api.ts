@@ -2781,6 +2781,27 @@ async function fetchConflictFilePaths(owner: any, repo: any, baseRef: any, headS
 }
 
 /**
+ * Extract repository merge-method toggles from a REST Repository object.
+ * Returns null when the payload has none of the allow_* fields.
+ * @returns {{ allowMergeCommit: boolean|null, allowSquashMerge: boolean|null, allowRebaseMerge: boolean|null } | null}
+ */
+function extractRepoMergeMethodFlags(repo: any) {
+  if (!repo || typeof repo !== 'object') return null;
+  const has =
+    Object.prototype.hasOwnProperty.call(repo, 'allow_merge_commit') ||
+    Object.prototype.hasOwnProperty.call(repo, 'allow_squash_merge') ||
+    Object.prototype.hasOwnProperty.call(repo, 'allow_rebase_merge');
+  if (!has) return null;
+  const flag = (v: unknown): boolean | null =>
+    v === true || v === false ? v : null;
+  return {
+    allowMergeCommit: flag(repo.allow_merge_commit),
+    allowSquashMerge: flag(repo.allow_squash_merge),
+    allowRebaseMerge: flag(repo.allow_rebase_merge),
+  };
+}
+
+/**
  * Ensure mergeable/mergeable_state are computed; when dirty, attach conflict paths.
  * @returns {Promise<object>} pr with optional `_conflictFiles`
  */
@@ -3017,6 +3038,41 @@ async function fetchPrDetail(
     apiCtx: ctx,
   });
 
+  // Repo Settings → Pull Requests merge method toggles (drive merge-box menu).
+  // Prefer nested base.repo from the PR payload; fall back to GET /repos when missing.
+  let repoMergeFlags =
+    extractRepoMergeMethodFlags(pr?.base?.repo) ||
+    extractRepoMergeMethodFlags(pr?.head?.repo) ||
+    null;
+  if (!repoMergeFlags) {
+    try {
+      const repoJson = await timedFetch(
+        timings,
+        'repoMergeSettings',
+        apiJson(base, fetchImpl, token),
+        (r) =>
+          `(merge=${r?.allow_merge_commit} squash=${r?.allow_squash_merge} rebase=${r?.allow_rebase_merge})`
+      );
+      repoMergeFlags = extractRepoMergeMethodFlags(repoJson);
+    } catch (err) {
+      if (
+        err?.name === 'AbortError' ||
+        /aborted|AbortError/i.test(String(err?.message || ''))
+      ) {
+        throw err;
+      }
+      // @ts-expect-error classic fetch dynamic shapes
+      timings.repoMergeSettings = timings.repoMergeSettings || 0;
+      console.log(
+        `[pr-plus] fetchPrDetail repoMergeSettings: soft-fail ${err?.message || err}`
+      );
+      repoMergeFlags = null;
+    }
+  } else {
+    // @ts-expect-error classic fetch dynamic shapes
+    timings.repoMergeSettings = 0;
+  }
+
   // GraphQL viewerSubscription (REST issues/.../subscription is 404 / dead)
   const subscription = await timedFetch(
     timings,
@@ -3243,6 +3299,13 @@ async function fetchPrDetail(
     /** Paths that appear modified on both base tip and head (conflict candidates). */
     conflictFiles: Array.isArray(pr._conflictFiles) ? pr._conflictFiles : [],
     rebaseable: pr.rebaseable ?? null,
+    /**
+     * Repository Settings → Pull Requests merge methods.
+     * null when unknown (token/public payload omitted flags).
+     */
+    allowMergeCommit: repoMergeFlags ? repoMergeFlags.allowMergeCommit : null,
+    allowSquashMerge: repoMergeFlags ? repoMergeFlags.allowSquashMerge : null,
+    allowRebaseMerge: repoMergeFlags ? repoMergeFlags.allowRebaseMerge : null,
     createdAt: pr.created_at,
     updatedAt: pr.updated_at,
     additions: pr.additions,
@@ -4660,6 +4723,159 @@ async function updatePullBranch(
 }
 
 /**
+ * Delete a branch ref: DELETE /repos/{o}/{r}/git/refs/heads/{branch}
+ * Used post-merge optional "Delete branch".
+ */
+async function deleteHeadBranch(
+  owner,
+  repo,
+  branch,
+  fetchImpl,
+  token,
+  ctx = null
+) {
+  ctx = normalizeApiCtx(ctx);
+  const b = String(branch || '')
+    .trim()
+    .replace(/^refs\/heads\//, '');
+  if (!b) throw new Error('Branch name required');
+  const branchPath = b
+    .split('/')
+    .filter(Boolean)
+    .map((seg) => encodeURIComponent(seg))
+    .join('/');
+  return apiSend(
+    githubRestUrl(
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/refs/heads/${branchPath}`,
+      ctx
+    ),
+    fetchImpl,
+    token,
+    // @ts-expect-error classic fetch dynamic shapes
+    { method: 'DELETE' }
+  );
+}
+
+/**
+ * Paths the viewer has marked Viewed on this PR (GraphQL viewerViewedState).
+ * Pages up to maxPages (default 5 → 500 files).
+ * @returns {{ pullRequestId: string|null, viewedPaths: string[] }}
+ */
+async function fetchViewerViewedPaths(
+  owner,
+  repo,
+  pullNumber,
+  fetchImpl,
+  token,
+  opts: any = {}
+) {
+  const apiCtx = normalizeApiCtx(opts?.ctx);
+  // No token: do not pretend "zero viewed" — callers must check pullRequestId.
+  if (!token) {
+    return { pullRequestId: null, viewedPaths: [], unauthorized: true };
+  }
+  const maxPages = Math.max(1, Math.min(20, Number(opts.maxPages) || 5));
+  const viewed: string[] = [];
+  let cursor: string | null = null;
+  let pullRequestId: string | null = null;
+  for (let page = 0; page < maxPages; page++) {
+    const data = await apiGraphql(
+      `query ViewerViewedFiles($owner:String!,$repo:String!,$number:Int!,$cursor:String) {
+  repository(owner:$owner, name:$repo) {
+    pullRequest(number:$number) {
+      id
+      files(first:100, after:$cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes { path viewerViewedState }
+      }
+    }
+  }
+}`,
+      {
+        owner: String(owner || ''),
+        repo: String(repo || ''),
+        number: Number(pullNumber) || 0,
+        cursor,
+      },
+      fetchImpl,
+      token,
+      apiCtx
+    );
+    const pr = data?.repository?.pullRequest;
+    if (!pr) break;
+    if (pr.id) pullRequestId = String(pr.id);
+    const nodes = pr.files?.nodes || [];
+    for (const n of nodes) {
+      if (
+        String(n?.viewerViewedState || '')
+          .toUpperCase() === 'VIEWED' &&
+        n?.path
+      ) {
+        viewed.push(String(n.path));
+      }
+    }
+    if (!pr.files?.pageInfo?.hasNextPage) break;
+    cursor = pr.files.pageInfo.endCursor || null;
+    if (!cursor) break;
+  }
+  return { pullRequestId, viewedPaths: viewed };
+}
+
+async function markFileAsViewed(
+  pullRequestId,
+  path,
+  fetchImpl,
+  token,
+  ctx = null
+) {
+  ctx = normalizeApiCtx(ctx);
+  const data = await apiGraphql(
+    `mutation MarkFileAsViewed($input: MarkFileAsViewedInput!) {
+  markFileAsViewed(input: $input) {
+    pullRequest { id }
+  }
+}`,
+    {
+      input: {
+        pullRequestId: String(pullRequestId || ''),
+        path: String(path || ''),
+      },
+    },
+    fetchImpl,
+    token,
+    ctx
+  );
+  return data;
+}
+
+async function unmarkFileAsViewed(
+  pullRequestId,
+  path,
+  fetchImpl,
+  token,
+  ctx = null
+) {
+  ctx = normalizeApiCtx(ctx);
+  const data = await apiGraphql(
+    `mutation UnmarkFileAsViewed($input: UnmarkFileAsViewedInput!) {
+  unmarkFileAsViewed(input: $input) {
+    pullRequest { id }
+  }
+}`,
+    {
+      input: {
+        pullRequestId: String(pullRequestId || ''),
+        path: String(path || ''),
+      },
+    },
+    fetchImpl,
+    token,
+    ctx
+  );
+  return data;
+}
+
+/**
  * Resolve GraphQL node id for a pull request (PR_…).
  * Prefer REST `node_id` when available; otherwise look up via GraphQL.
  */
@@ -5275,6 +5491,10 @@ const fetchApi = {
   defaultNewLabelColor,
   mergePullRequest,
   updatePullBranch,
+  deleteHeadBranch,
+  fetchViewerViewedPaths,
+  markFileAsViewed,
+  unmarkFileAsViewed,
   setIssueSubscription,
   deleteIssueSubscription,
   fetchPullRequestSubscription,

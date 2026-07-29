@@ -21,9 +21,20 @@ import {
   highlightDemoPr,
   clearDemoPrHighlight,
   isOptHotkeySlotEvent,
+  matchesDiffDemoChord,
+  matchesDiffDemoStep,
+  isOnboardingEnterEvent,
+  isOnboardingSkipTourEvent,
+  isOnboardingBackEvent,
   ONBOARDING_TARGET_PR_CLASS,
   isModalOpen,
   isDiffLayout,
+  matchesConversationDemoChordAt,
+  nextConversationDemoChordIndex,
+  CONVERSATION_DEMO_STEPS,
+  readOpenModalPrNumber,
+  isDemoPrModalOpen,
+  ensureDemoPrForDiffStep,
   createOnboardingTour,
 } from '../src/onboarding';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -49,6 +60,7 @@ describe('onboarding plan', () => {
       'pat',
       'opt',
       'openPr',
+      'convDemo',
       'diffToggle',
       'diffDemo',
       'optShiftK',
@@ -76,11 +88,16 @@ describe('onboarding plan', () => {
     );
   });
 
-  test('PR_DEPENDENT_STEPS covers openPr → demo', () => {
-    expect(PR_DEPENDENT_STEPS).toEqual(['openPr', 'diffToggle', 'diffDemo']);
+  test('PR_DEPENDENT_STEPS covers openPr → conversation → diff tips', () => {
+    expect(PR_DEPENDENT_STEPS).toEqual([
+      'openPr',
+      'convDemo',
+      'diffToggle',
+      'diffDemo',
+    ]);
   });
 
-  test('DIFF_DEMO_STEPS covers file nav, selection, and comment thread nav', () => {
+  test('DIFF_DEMO_STEPS are user-driven tips (no auto-sim chords required empty only for click tips)', () => {
     const ids = DIFF_DEMO_STEPS.map((s) => s.id);
     expect(ids).toContain('file-next');
     expect(ids).toContain('file-prev');
@@ -95,7 +112,55 @@ describe('onboarding plan', () => {
     for (const s of DIFF_DEMO_STEPS) {
       expect(s.title.length).toBeGreaterThan(2);
       expect(s.body.length).toBeGreaterThan(10);
+      // tips should not ask for double-press simulation
+      expect(s.chords.length).toBeLessThanOrEqual(1);
     }
+  });
+
+  test('matchesDiffDemoChord detects guided Diff shortcuts', () => {
+    expect(
+      matchesDiffDemoChord(
+        { alt: true, shift: true, code: 'BracketRight' },
+        '⌥⇧]'
+      )
+    ).toBe(true);
+    expect(
+      matchesDiffDemoChord({ alt: true, shift: false, code: 'KeyJ' }, '⌥J')
+    ).toBe(true);
+    expect(
+      matchesDiffDemoChord({ alt: false, shift: true, code: 'ArrowDown' }, '⇧↓')
+    ).toBe(true);
+    expect(
+      matchesDiffDemoStep(
+        { alt: true, shift: false, code: 'KeyK' },
+        { chords: ['⌥K'] }
+      )
+    ).toBe(true);
+    expect(
+      matchesDiffDemoChord({ alt: true, shift: false, code: 'KeyC' }, '⌥C')
+    ).toBe(true);
+    expect(
+      matchesDiffDemoStep(
+        { alt: true, shift: false, code: 'KeyC' },
+        { chords: ['⌥C'] }
+      )
+    ).toBe(true);
+  });
+
+  test('comment-island uses ⌥C; select-line stays click-only', () => {
+    const select = DIFF_DEMO_STEPS.find((s) => s.id === 'select-line');
+    const comment = DIFF_DEMO_STEPS.find((s) => s.id === 'comment-island');
+    expect(select?.chords).toEqual([]);
+    expect(select?.body).toMatch(/Click/i);
+    expect(comment?.chords).toEqual(['⌥C']);
+    expect(comment?.body).toMatch(/⌥C/);
+  });
+
+  test('card chrome Enter / Esc / Backspace detectors', () => {
+    expect(isOnboardingEnterEvent({ key: 'Enter', code: 'Enter' })).toBe(true);
+    expect(isOnboardingEnterEvent({ key: 'Enter', alt: true })).toBe(false);
+    expect(isOnboardingSkipTourEvent({ key: 'Escape' })).toBe(true);
+    expect(isOnboardingBackEvent({ key: 'Backspace' })).toBe(true);
   });
 });
 
@@ -592,5 +657,237 @@ describe('createOnboardingTour', () => {
     const res = await tour.start();
     expect(res.ok).toBe(false);
     expect(doc.getElementById('prp-onboarding')).toBeNull();
+  });
+});
+
+describe('conversation focus order helpers (via matches)', () => {
+  test('conversation demo chords include JK and brackets', () => {
+    const { matchesConversationDemoStep } = require('../src/onboarding');
+    expect(CONVERSATION_DEMO_STEPS.map((s) => s.id)).toEqual([
+      'conv-jk',
+      'conv-jk-back',
+      'conv-adjacent',
+    ]);
+    expect(
+      matchesConversationDemoStep(
+        { alt: true, shift: false, code: 'KeyJ' },
+        CONVERSATION_DEMO_STEPS[0]
+      )
+    ).toBe(true);
+    expect(
+      matchesConversationDemoStep(
+        { alt: true, shift: false, code: 'BracketRight' },
+        CONVERSATION_DEMO_STEPS[2]
+      )
+    ).toBe(true);
+  });
+
+  test('conv-adjacent requires ⌥] then ⌥[ in order', () => {
+    const adjacent = CONVERSATION_DEMO_STEPS.find((s) => s.id === 'conv-adjacent')!;
+    expect(adjacent.chords).toEqual(['⌥]', '⌥[']);
+
+    // First chord: only ]
+    expect(
+      matchesConversationDemoChordAt(
+        { alt: true, shift: false, code: 'BracketRight' },
+        adjacent,
+        0
+      )
+    ).toBe(true);
+    expect(
+      matchesConversationDemoChordAt(
+        { alt: true, shift: false, code: 'BracketLeft' },
+        adjacent,
+        0
+      )
+    ).toBe(false);
+
+    // Second chord: only [
+    expect(
+      matchesConversationDemoChordAt(
+        { alt: true, shift: false, code: 'BracketLeft' },
+        adjacent,
+        1
+      )
+    ).toBe(true);
+    expect(
+      matchesConversationDemoChordAt(
+        { alt: true, shift: false, code: 'BracketRight' },
+        adjacent,
+        1
+      )
+    ).toBe(false);
+
+    expect(nextConversationDemoChordIndex(adjacent, 0)).toBe(1);
+    expect(nextConversationDemoChordIndex(adjacent, 1)).toBe('done');
+  });
+
+  test('readOpenModalPrNumber / isDemoPrModalOpen', () => {
+    const doc = {
+      querySelector: (sel: string) => {
+        if (sel.includes('prp-overlay') || sel.includes('prp-modal-root')) {
+          return {};
+        }
+        if (sel.includes('prp-header__number')) {
+          return { textContent: '#1' };
+        }
+        return null;
+      },
+    } as any;
+    // isModalOpen needs prp-overlay
+    expect(readOpenModalPrNumber(doc)).toBe(1);
+    // force isModalOpen true via overlay hit
+    expect(isDemoPrModalOpen(doc)).toBe(true);
+
+    const other = {
+      querySelector: (sel: string) => {
+        if (sel.includes('prp-overlay') || sel.includes('prp-modal-root')) {
+          return {};
+        }
+        if (sel.includes('prp-header__number')) {
+          return { textContent: '#12' };
+        }
+        return null;
+      },
+    } as any;
+    expect(readOpenModalPrNumber(other)).toBe(12);
+    expect(isDemoPrModalOpen(other)).toBe(false);
+  });
+
+  test('ensureDemoPrForDiffStep force opens #1; skips when already on #1', () => {
+    const calls: any[] = [];
+    const openModal = (args: any) => {
+      calls.push(args);
+    };
+    const onDemo = {
+      querySelector: (sel: string) => {
+        if (sel.includes('prp-overlay') || sel.includes('prp-modal-root')) {
+          return {};
+        }
+        if (sel.includes('prp-header__number')) {
+          return { textContent: '#1' };
+        }
+        if (sel.includes('prp-modal--diff')) return null;
+        return null;
+      },
+    } as any;
+    expect(ensureDemoPrForDiffStep(onDemo, { openModal, force: false })).toBe(
+      false
+    );
+    expect(calls).toHaveLength(0);
+
+    expect(ensureDemoPrForDiffStep(onDemo, { openModal, force: true })).toBe(
+      true
+    );
+    expect(calls[0]).toMatchObject({
+      owner: 'enif-lee',
+      repo: 'pr-plus',
+      number: 1,
+    });
+
+    const onOther = {
+      querySelector: (sel: string) => {
+        if (sel.includes('prp-overlay') || sel.includes('prp-modal-root')) {
+          return {};
+        }
+        if (sel.includes('prp-header__number')) {
+          return { textContent: '#3' };
+        }
+        return null;
+      },
+    } as any;
+    calls.length = 0;
+    expect(ensureDemoPrForDiffStep(onOther, { openModal, force: false })).toBe(
+      true
+    );
+    expect(calls[0].number).toBe(1);
+  });
+
+  test('tour advances conv-adjacent only after ] then [', async () => {
+    const { doc, win } = makeMockDom({ pullRows: 5 });
+    // Pretend modal open on conversation
+    const origQS = doc.querySelector.bind(doc);
+    doc.querySelector = (sel: string) => {
+      if (sel.includes('prp-overlay') || sel.includes('prp-modal-root')) {
+        return { className: 'prp-overlay' };
+      }
+      if (sel.includes('prp-modal--diff')) return null;
+      return origQS(sel);
+    };
+
+    const tour = createOnboardingTour({
+      document: doc,
+      window: win,
+      getPathname: () => '/o/r/pulls',
+      getPrefs: async () => ({ onboardingCompleted: false }),
+      setPrefs: async (p: any) => p,
+      isOnboardingDone: async () => false,
+      markOnboardingDone: async () => true,
+      getTokenStatus: async () => ({ configured: true, mask: 'x' }),
+      setToken: async () => ({ ok: true }),
+    });
+    await tour.start();
+    // Jump to convDemo
+    const plan = tour.getPlan();
+    const convIdx = plan.indexOf('convDemo');
+    expect(convIdx).toBeGreaterThanOrEqual(0);
+    tour.setStep(convIdx);
+    expect(tour.getStepId()).toBe('convDemo');
+
+    // Skip first two tips via Enter
+    const fireEnter = () =>
+      win.dispatchKey({
+        type: 'keydown',
+        key: 'Enter',
+        code: 'Enter',
+        altKey: false,
+        shiftKey: false,
+        metaKey: false,
+        ctrlKey: false,
+        preventDefault() {},
+        target: null,
+      });
+    fireEnter(); // skip conv-jk
+    fireEnter(); // skip conv-jk-back — now adjacent
+
+    // Only [ first should NOT leave convDemo
+    win.dispatchKey({
+      type: 'keydown',
+      key: '[',
+      code: 'BracketLeft',
+      altKey: true,
+      shiftKey: false,
+      metaKey: false,
+      ctrlKey: false,
+      preventDefault() {},
+      target: null,
+    });
+    expect(tour.getStepId()).toBe('convDemo');
+
+    // ] then [ completes adjacent → leaves convDemo (to diffToggle)
+    win.dispatchKey({
+      type: 'keydown',
+      key: ']',
+      code: 'BracketRight',
+      altKey: true,
+      shiftKey: false,
+      metaKey: false,
+      ctrlKey: false,
+      preventDefault() {},
+      target: null,
+    });
+    expect(tour.getStepId()).toBe('convDemo'); // still mid-sequence
+    win.dispatchKey({
+      type: 'keydown',
+      key: '[',
+      code: 'BracketLeft',
+      altKey: true,
+      shiftKey: false,
+      metaKey: false,
+      ctrlKey: false,
+      preventDefault() {},
+      target: null,
+    });
+    expect(tour.getStepId()).toBe('diffToggle');
   });
 });

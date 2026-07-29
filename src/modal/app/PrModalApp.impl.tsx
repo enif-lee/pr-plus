@@ -27,7 +27,7 @@ import {
   buildMergeConfirmRequest,
   confirmGateProceed,
 } from '../lib/confirm-gate';
-import { canUpdateBranch } from '../lib/merge-box-status';
+import { canUpdateBranch, coerceMergeMethod } from '../lib/merge-box-status';
 import { ConversationView } from '../views/conversation/ConversationView';
 import { DiffWorkspace } from '../views/pr-modal/DiffWorkspace';
 import { ShellResizers } from '../views/pr-modal/ShellResizers';
@@ -103,6 +103,8 @@ import {
   materializeCollapsedPaths,
   expandPathInCollapsedSet,
   isPathCollapsed,
+  togglePathInCollapsedSet,
+  shouldAutoExpandOnFileNav,
 } from '../lib/collapse';
 import {
   filterFilesByQuery,
@@ -117,6 +119,17 @@ import {
   resolveRootReviewCommentId,
   normalizeReviewCommentId,
 } from '../lib/review-threads';
+import { applyHideWhitespaceToFiles } from '../lib/hide-whitespace';
+import {
+  applyViewedToggle,
+  shouldApplyServerViewedPaths,
+} from '../lib/file-viewed';
+import {
+  shouldShowDeleteHeadBranch,
+  resolveDeleteHeadBranchTarget,
+  deleteHeadBranchButtonLabel,
+  shouldAutoCloseOnTerminalTransition,
+} from '../lib/delete-head-branch';
 import {
   flattenFilesToVirtualRows,
   fileStartIndexMap,
@@ -223,6 +236,7 @@ import {
   toggleReviewFilter,
   shortcutKeyFromEvent,
   normalizeShortcutKey,
+  resolveActiveFileForCollapse,
 } from '../lib/shortcut-policy';
 import {
   focusContextThreadReplyAfterPaint,
@@ -250,7 +264,11 @@ import {
   buildUnifiedReviewerRows,
   isBotAccount,
 } from '../lib/searchable-select';
-import { loadSessionView, saveSessionView } from '../lib/session-view';
+import {
+  canRestoreSessionView,
+  loadSessionView,
+  saveSessionView,
+} from '../lib/session-view';
 import {
   mergeDetailPreserveOptimistic,
   stripPendingReviewFromDetail,
@@ -314,6 +332,22 @@ export function PrModalApp({
   const reverseComments = prefs?.reverseComments !== false;
   /** Diff hunk list shows only the active file; file tree still lists all. */
   const singleFileMode = prefs?.singleFileMode === true;
+  /**
+   * When true, file tree / ⌥⇧[] nav auto-expands the target file.
+   * Default false — stay collapsed until the user expands (⌥F / chevron).
+   */
+  const autoExpandOnFileNav = shouldAutoExpandOnFileNav(prefs);
+  /** Bottom-center shortcut HUD size (none hides). */
+  const shortcutMonitorSize = (() => {
+    const raw = String(prefs?.shortcutMonitorSize || 'small')
+      .trim()
+      .toLowerCase();
+    if (raw === 'none' || raw === 'off' || raw === 'hidden') return 'none';
+    if (raw === 'medium' || raw === 'md' || raw === '2x') return 'medium';
+    if (raw === 'large' || raw === 'lg' || raw === '3x') return 'large';
+    return 'small';
+  })();
+  const shortcutMonitorEnabled = shortcutMonitorSize !== 'none';
   const isEmbed = isEmbedPresentation(presentation);
   const embedChrome = shellChrome && typeof shellChrome === 'object' ? shellChrome : null;
   const showCloseChrome =
@@ -834,10 +868,17 @@ export function PrModalApp({
   // Always re-annotate with gitattributesText so SW fallback defaults cannot
   // skip linguist-generated / binary rules from the fetched attributes file.
 
+  /** Per-PR session: hide whitespace-only noise in Diff (GitHub w=1 spirit). */
+  const [hideWhitespace, setHideWhitespace] = useState(false);
+  /** GraphQL pullRequest id for markFileAsViewed (may differ from REST nodeId). */
+  const pullRequestGqlIdRef = useRef<string | null>(null);
+
   const sourceFiles = useMemo(() => {
-    if (diffFilesOverride) return diffFilesOverride;
-    return detail?.files || [];
-  }, [detail?.files, diffFilesOverride]);
+    const raw = diffFilesOverride
+      ? diffFilesOverride
+      : detail?.files || [];
+    return applyHideWhitespaceToFiles(raw, hideWhitespace);
+  }, [detail?.files, diffFilesOverride, hideWhitespace]);
 
   const annotatedFiles = useMemo(() => {
     if (!sourceFiles?.length) return [];
@@ -860,7 +901,41 @@ export function PrModalApp({
     filesFullyLoadedRef.current = false;
     setPrTags(null);
     setPrTagsError(null);
+    setHideWhitespace(false);
+    pullRequestGqlIdRef.current = null;
   }, [prIdentity]);
+
+  // Hydrate Mark file Viewed from GitHub (viewerViewedState) when token allows.
+  useEffect(() => {
+    if (!open || !detail?.owner || !detail?.repo || !detail?.number) return;
+    const api = globalThis.PRTreeFetch;
+    if (typeof api?.fetchViewerViewedPaths !== 'function') return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await api.fetchViewerViewedPaths(
+          detail.owner,
+          detail.repo,
+          detail.number
+        );
+        if (cancelled) return;
+        // No-token / unauthorized stub returns { pullRequestId: null, viewedPaths: [] }
+        // — must not wipe sessionStorage hydrate of viewedPaths.
+        if (!shouldApplyServerViewedPaths(res)) return;
+        if (res?.pullRequestId) {
+          pullRequestGqlIdRef.current = String(res.pullRequestId);
+        }
+        if (Array.isArray(res?.viewedPaths)) {
+          setViewedPaths(new Set(res.viewedPaths.map(String).filter(Boolean)));
+        }
+      } catch {
+        /* keep session/local viewed set */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, prIdentity, detail?.owner, detail?.repo, detail?.number]);
 
   // Tags that point at commits in this PR (or head sha).
   useEffect(() => {
@@ -1826,6 +1901,8 @@ export function PrModalApp({
       side?: string | null;
     }) => {
       if (layoutMode !== LAYOUT_DIFF) setLayoutMode(LAYOUT_DIFF);
+      // Thread jump is a focus change — clear any line selection island.
+      clearLineSelectionForNav();
 
       // Clear thread filter if it hides the target file
       const path = target.path ? String(target.path) : '';
@@ -2034,6 +2111,8 @@ export function PrModalApp({
 
   function navComment(delta: number) {
     if (!mappedComments.length) return;
+    // Thread focus owns the surface — release any line selection.
+    clearLineSelectionForNav();
     if (typeof resolveCommentNav === 'function') {
       const st = resolveCommentNav(mappedComments, commentIndex, delta);
       const active = st.active;
@@ -2293,6 +2372,19 @@ export function PrModalApp({
     onToggleViewed(path);
   }
 
+  /**
+   * Fold / expand the focused Diff file (line selection path, else active tree file).
+   * Keyboard: ⌥F when layout is Diff and no context thread owns the chord.
+   */
+  function toggleActiveFileCollapse() {
+    const path = resolveActiveFileForCollapse({
+      lineSelection: useModalStore.getState().lineSelection,
+      activeFilePath,
+    });
+    if (!path) return;
+    onToggleFileCollapse(path);
+  }
+
   /** Apply Diff review-filter toggle (⌥U/R/P). */
   function applyReviewFilterToggle(
     target: 'unresolved' | 'resolved' | 'pending'
@@ -2413,6 +2505,28 @@ export function PrModalApp({
   }
 
   /**
+   * Drop Diff line selection + island chrome.
+   * Used when navigating threads or files so selection does not linger
+   * across focus contexts (⌥J/K threads, ⌥⇧[] files, tree click).
+   */
+  function clearLineSelectionForNav() {
+    clearSelectionActionsTimer();
+    if (selectionMoveRafRef.current) {
+      cancelAnimationFrame(selectionMoveRafRef.current);
+      selectionMoveRafRef.current = 0;
+    }
+    pendingSelectionMoveRef.current = null;
+    selectingRef.current = false;
+    setSelecting(false);
+    if (useModalStore.getState().lineSelection) {
+      setLineSelection(null);
+    }
+    setShowSelectionComposer(false);
+    setSelectionIslandLeaving(false);
+    setSelectionIslandPhase('actions');
+  }
+
+  /**
    * Hide action toggles immediately; re-show after idle so key-hold stays light.
    * File-target composer stays immediate (caller sets show + phase).
    */
@@ -2491,6 +2605,9 @@ export function PrModalApp({
   function ensureFileExpandedForSelection(path: string) {
     const p = String(path || '').trim();
     if (!p) return;
+    // Respect pref: do not force-open on selection hop unless auto-expand is on
+    // (explicit jump/goto still uses expandFileForJump).
+    if (!autoExpandOnFileNav) return;
     setCollapsedFiles((prev) => {
       const file = annotatedFiles.find(
         (f: any) => (f.filename || f.path) === p
@@ -2544,6 +2661,13 @@ export function PrModalApp({
         shift,
         activeFilePath: activePath,
       }) || prevSel;
+
+    // After seed with no prior active file, adopt selection path for tree/nav
+    const nextPath = String(nextSel?.filePath || '').trim();
+    if (nextPath && !activePath) {
+      setActiveFilePath(nextPath);
+      ensureFileExpandedForSelection(nextPath);
+    }
 
     // No-op: skip React / scroll work under key-hold against an edge
     const unchanged =
@@ -2635,7 +2759,8 @@ export function PrModalApp({
     });
   }
 
-  // Initialize / restore view state once per PR number (sessionStorage + initialRoute)
+  // Initialize / restore view state once per PR number (sessionStorage + initialRoute).
+  // Session UI (file/line selection, comment forms) restores only when PR + page match.
   useEffect(() => {
     if (!open || !detail?.owner || !detail?.repo || !detail?.number) return;
     const key = `${detail.owner}/${detail.repo}#${detail.number}`;
@@ -2645,11 +2770,20 @@ export function PrModalApp({
     setRouteWriteReady(false);
     // Zustand survives host unmount — never carry focused comment into a new PR URI
     setCommentIndex(-1);
+    setLineSelection(null);
+    setSelectionDraft('');
+    setShowSelectionComposer(false);
+    setSelectionIslandPhase('actions');
 
     let stored: any = null;
     try {
       if (typeof sessionStorage !== 'undefined') {
-        stored = loadSessionView(sessionStorage, detail.owner, detail.repo, detail.number);
+        stored = loadSessionView(
+          sessionStorage,
+          detail.owner,
+          detail.repo,
+          detail.number
+        );
       }
     } catch {
       stored = null;
@@ -2662,10 +2796,29 @@ export function PrModalApp({
       setLayoutMode(routePage === 'diff' ? LAYOUT_DIFF : LAYOUT_CENTERED);
     }
 
+    // Effective page for session gate (URI page, else stored page)
+    const effectivePage =
+      routePage ||
+      (stored?.page === 'diff' || stored?.layoutMode === 'diff'
+        ? 'diff'
+        : stored?.page === 'conversation' || stored?.layoutMode === 'centered'
+          ? 'conversation'
+          : null);
+
+    const allowSessionUi =
+      typeof canRestoreSessionView === 'function'
+        ? canRestoreSessionView(stored, {
+            owner: detail.owner,
+            repo: detail.repo,
+            number: detail.number,
+            page: effectivePage,
+          })
+        : Boolean(stored);
+
     // Commit filter restore runs via applyDiffCommitFilter effect below
     // (needs detail.commits for compare range). Do not half-set state here.
 
-    if (stored) {
+    if (stored && allowSessionUi) {
       if (
         !routePage &&
         (stored.layoutMode === 'diff' || stored.layoutMode === 'centered')
@@ -2677,6 +2830,9 @@ export function PrModalApp({
       if (stored.diffMode === 'split' || stored.diffMode === 'unified') {
         setDiffMode(stored.diffMode);
       }
+      if (typeof stored.hideWhitespace === 'boolean') {
+        setHideWhitespace(stored.hideWhitespace);
+      }
       if (Array.isArray(stored.collapsedFiles)) {
         setCollapsedFiles(new Set(stored.collapsedFiles));
       }
@@ -2684,6 +2840,28 @@ export function PrModalApp({
         setViewedPaths(new Set(stored.viewedPaths));
       }
       if (stored.activeFilePath) setActiveFilePath(stored.activeFilePath);
+      // File / line selection + comment forms (only same PR + page)
+      if (stored.lineSelection && typeof stored.lineSelection === 'object') {
+        setLineSelection(stored.lineSelection);
+      }
+      if (typeof stored.selectionDraft === 'string' && stored.selectionDraft) {
+        setSelectionDraft(stored.selectionDraft);
+      }
+      if (stored.showSelectionComposer) {
+        setShowSelectionComposer(true);
+        setSelectionIslandPhase(
+          stored.selectionIslandPhase === 'comment' ? 'comment' : 'actions'
+        );
+      }
+      if (typeof stored.commentText === 'string' && stored.commentText) {
+        setCommentText(stored.commentText);
+      }
+      if (
+        Number.isFinite(Number(stored.scrollTop)) &&
+        Number(stored.scrollTop) > 0
+      ) {
+        setScrollTop(Math.floor(Number(stored.scrollTop)));
+      }
     }
 
     // Allow URI writes after restore paints
@@ -2702,6 +2880,11 @@ export function PrModalApp({
     setViewedPaths,
     setActiveFilePath,
     setCommentIndex,
+    setLineSelection,
+    setSelectionDraft,
+    setShowSelectionComposer,
+    setCommentText,
+    setScrollTop,
   ]);
 
   // Inbound /changes/{sha}|{a}..{b} → full applyDiffCommitFilter (compare files + label)
@@ -2729,8 +2912,8 @@ export function PrModalApp({
   ]);
 
   // Restore #diff-{key}R… line selection once files are available.
-  // When inbound URL has no #diff-, clear zustand selection so URI write
-  // does not re-emit a stale hash after soft-nav remount.
+  // When inbound URL has no #diff-, leave session-restored selection alone
+  // (do not wipe file/line selection from matching PR+page session snap).
   useEffect(() => {
     if (!open || !detail?.number) return;
     const fileKey = initialRoute?.fileKey || null;
@@ -2741,7 +2924,6 @@ export function PrModalApp({
 
     if (!fileKey && !filePathHint) {
       ghSelectionAppliedRef.current = applyKey;
-      setLineSelection(null);
       return;
     }
 
@@ -2840,22 +3022,56 @@ export function PrModalApp({
     setScrollTop,
   ]);
 
-  // Persist session view (layout/collapse) for refresh
+  // Persist page UI for refresh: PR identity + page + file/line selection + forms.
+  // High-freq fields (drafts, selection) read via getState + store subscribe (debounced).
   useEffect(() => {
     if (!open || !detail?.owner || !detail?.repo || !detail?.number) return;
     if (!routeWriteReady) return;
-    try {
-      if (typeof sessionStorage === 'undefined') return;
-      saveSessionView(sessionStorage, detail.owner, detail.repo, detail.number, {
-        layoutMode,
-        diffMode,
-        collapsedFiles,
-        viewedPaths,
-        activeFilePath,
-      });
-    } catch {
-      /* ignore */
-    }
+    if (typeof sessionStorage === 'undefined') return undefined;
+
+    let timer = 0;
+    const flush = () => {
+      try {
+        const st = useModalStore.getState();
+        const page = layoutMode === LAYOUT_DIFF ? 'diff' : 'conversation';
+        saveSessionView(
+          sessionStorage,
+          detail.owner,
+          detail.repo,
+          detail.number,
+          {
+            owner: detail.owner,
+            repo: detail.repo,
+            number: detail.number,
+            page,
+            layoutMode,
+            diffMode,
+            hideWhitespace,
+            collapsedFiles: st.collapsedFiles,
+            viewedPaths: st.viewedPaths,
+            activeFilePath: st.activeFilePath,
+            lineSelection: st.lineSelection,
+            selectionDraft: st.selectionDraft,
+            showSelectionComposer: st.showSelectionComposer,
+            selectionIslandPhase,
+            commentText: st.commentText,
+            scrollTop: st.scrollTop,
+          }
+        );
+      } catch {
+        /* ignore */
+      }
+    };
+    flush();
+    const unsub = useModalStore.subscribe(() => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(flush, 200);
+    });
+    return () => {
+      window.clearTimeout(timer);
+      unsub();
+      flush();
+    };
   }, [
     open,
     detail?.owner,
@@ -2863,9 +3079,8 @@ export function PrModalApp({
     detail?.number,
     layoutMode,
     diffMode,
-    collapsedFiles,
-    viewedPaths,
-    activeFilePath,
+    hideWhitespace,
+    selectionIslandPhase,
     routeWriteReady,
   ]);
 
@@ -3076,9 +3291,9 @@ export function PrModalApp({
   }, [open, onClose, shellMode, layoutMode, setAnimClass, isEmbed]);
 
   /**
-   * After close or merge (or soft-revalidate that flips state), auto-close the
-   * centered modal or side sheet so the user returns to the pulls list.
-   * Does not close when opening an already-closed/merged PR.
+   * After Close PR (open→closed, not merged), auto-close the shell so the user
+   * returns to the pulls list. Merge stays open so optional Delete branch CTA
+   * is usable. Does not close when opening an already-closed/merged PR.
    */
   const terminalClosePrKeyRef = useRef('');
   const terminalCloseWasTerminalRef = useRef<boolean | null>(null);
@@ -3098,7 +3313,13 @@ export function PrModalApp({
       terminalCloseWasTerminalRef.current = isTerminal;
       return;
     }
-    if (isTerminal && terminalCloseWasTerminalRef.current === false) {
+    if (
+      shouldAutoCloseOnTerminalTransition({
+        wasTerminal: terminalCloseWasTerminalRef.current,
+        isTerminal,
+        merged: Boolean(detail.merged),
+      })
+    ) {
       terminalCloseWasTerminalRef.current = true;
       requestClose();
       return;
@@ -3654,48 +3875,39 @@ export function PrModalApp({
     setActiveFilePath(path);
     // Drop prior-file line selection so the next Arrow seeds the first
     // selectable (displayed) line of this file.
-    clearSelectionActionsTimer();
-    if (selectionMoveRafRef.current) {
-      cancelAnimationFrame(selectionMoveRafRef.current);
-      selectionMoveRafRef.current = 0;
-    }
-    pendingSelectionMoveRef.current = null;
-    selectingRef.current = false;
-    setSelecting(false);
-    setLineSelection(null);
-    setShowSelectionComposer(false);
-    setSelectionIslandLeaving(false);
-    setSelectionIslandPhase('actions');
-    // Auto-expand collapsed file when selected from tree (including defaults/viewed).
+    clearLineSelectionForNav();
+    // Optional auto-expand (pref; default off). Explicit jumps still expand.
     // Use expandPathInCollapsedSet so emptying the set does not re-collapse
     // the path via isPathCollapsed's empty-set + viewedPaths branch.
-    setCollapsedFiles((prev) => {
-      const file = annotatedFiles.find(
-        (f: any) => (f.filename || f.path) === path
-      );
-      if (
-        !isPathCollapsed(
-          path,
-          prev,
-          Boolean(file?.defaultCollapsed),
-          false,
-          viewedPaths
-        )
-      ) {
-        return prev;
-      }
-      if (typeof expandPathInCollapsedSet === 'function') {
-        return expandPathInCollapsedSet(
-          prev,
-          path,
-          annotatedFiles,
-          viewedPaths
+    if (autoExpandOnFileNav) {
+      setCollapsedFiles((prev) => {
+        const file = annotatedFiles.find(
+          (f: any) => (f.filename || f.path) === path
         );
-      }
-      const n = materializeCollapsedPaths(prev, annotatedFiles, viewedPaths);
-      n.delete(path);
-      return n;
-    });
+        if (
+          !isPathCollapsed(
+            path,
+            prev,
+            Boolean(file?.defaultCollapsed),
+            false,
+            viewedPaths
+          )
+        ) {
+          return prev;
+        }
+        if (typeof expandPathInCollapsedSet === 'function') {
+          return expandPathInCollapsedSet(
+            prev,
+            path,
+            annotatedFiles,
+            viewedPaths
+          );
+        }
+        const n = materializeCollapsedPaths(prev, annotatedFiles, viewedPaths);
+        n.delete(path);
+        return n;
+      });
+    }
     const idx = fileStarts.get(path);
     if (typeof idx === 'number') {
       // Pin file header to the first line of the Diff scrollport — DOM first.
@@ -3735,12 +3947,20 @@ export function PrModalApp({
   function onToggleFileCollapse(path: any) {
     // Materialize defaults first so toggling one path does not open every
     // other binary/huge/generated/viewed file that only collapsed via defaults.
-    setCollapsedFiles((prev) => {
-      const n = materializeCollapsedPaths(prev, annotatedFiles, viewedPaths);
-      if (n.has(path)) n.delete(path);
-      else n.add(path);
-      return n;
-    });
+    setCollapsedFiles((prev) =>
+      typeof togglePathInCollapsedSet === 'function'
+        ? togglePathInCollapsedSet(prev, path, annotatedFiles, viewedPaths)
+        : (() => {
+            const n = materializeCollapsedPaths(
+              prev,
+              annotatedFiles,
+              viewedPaths
+            );
+            if (n.has(path)) n.delete(path);
+            else n.add(path);
+            return n;
+          })()
+    );
   }
 
   function focusCommentBox() {
@@ -4872,6 +5092,9 @@ export function PrModalApp({
       case 'toggleViewedActiveFile':
         toggleViewedActiveFile();
         break;
+      case 'toggleActiveFileCollapse':
+        toggleActiveFileCollapse();
+        break;
       case 'stepNavPrev':
         if (searchOpen) navSearch(-1);
         else if (layoutMode === LAYOUT_DIFF) navComment(-1);
@@ -5614,7 +5837,11 @@ export function PrModalApp({
     if (!path) return;
     const markingViewed = !isPathViewed(viewedPaths, path);
     setViewedPaths((prev) =>
-      typeof toggleViewedPath === 'function' ? toggleViewedPath(prev, path) : prev
+      typeof applyViewedToggle === 'function'
+        ? applyViewedToggle(prev, path, markingViewed)
+        : typeof toggleViewedPath === 'function'
+          ? toggleViewedPath(prev, path)
+          : prev
     );
     // Viewed → collapse; uncheck → expand so the file can be re-read.
     setCollapsedFiles((prev) => {
@@ -5623,6 +5850,41 @@ export function PrModalApp({
       else n.delete(path);
       return n;
     });
+    // Server sync (best-effort) — local state already updated optimistically.
+    void (async () => {
+      try {
+        const api = globalThis.PRTreeFetch;
+        let gqlId =
+          pullRequestGqlIdRef.current ||
+          detail?.nodeId ||
+          detail?.node_id ||
+          null;
+        if (!gqlId && api?.fetchViewerViewedPaths && detail?.owner) {
+          const res = await api.fetchViewerViewedPaths(
+            detail.owner,
+            detail.repo,
+            detail.number
+          );
+          if (res?.pullRequestId) {
+            pullRequestGqlIdRef.current = res.pullRequestId;
+            gqlId = res.pullRequestId;
+          }
+        }
+        if (!gqlId) return;
+        if (markingViewed && api?.markFileAsViewed) {
+          await api.markFileAsViewed(gqlId, path);
+        } else if (!markingViewed && api?.unmarkFileAsViewed) {
+          await api.unmarkFileAsViewed(gqlId, path);
+        }
+      } catch (err) {
+        // Keep local toggle; surface soft error
+        setActionMsg(
+          err?.message
+            ? `Viewed saved locally (${err.message})`
+            : 'Viewed saved locally (server sync failed)'
+        );
+      }
+    })();
   }
 
   async function onClosePr() {
@@ -5801,7 +6063,14 @@ export function PrModalApp({
       setActionMsg('Cannot merge a draft PR. Mark ready for review first.');
       return;
     }
-    const m = ['merge', 'squash', 'rebase'].includes(method) ? method : 'merge';
+    // Respect repository Settings → Pull Requests merge methods.
+    const m = coerceMergeMethod(detail, method);
+    if (!m) {
+      setActionMsg(
+        'No merge methods are enabled for this repository (check Settings → Pull Requests).'
+      );
+      return;
+    }
     const mergeReq =
       typeof buildMergeConfirmRequest === 'function'
         ? buildMergeConfirmRequest(m, detail.number)
@@ -5823,8 +6092,10 @@ export function PrModalApp({
         mergeMethod: m,
         commitTitle: detail.title,
       });
-      setActionMsg(`Merged (${m}).`);
-      // Mark merged locally so UI + auto-close effect agree before host refresh.
+      setActionMsg(
+        `Merged (${m}). You can delete the head branch below if you no longer need it.`
+      );
+      // Stay open so Merge box can offer optional delete head branch.
       setLocalDetail((d) =>
         d
           ? {
@@ -5835,13 +6106,44 @@ export function PrModalApp({
             }
           : d
       );
-      // Return to the pulls list (works for centered modal and side sheet).
-      requestClose();
       try {
         await onRefresh?.();
       } catch {
-        /* list refresh is best-effort after close */
+        /* list refresh is best-effort */
       }
+    } catch (err) {
+      setActionMsg(err?.message || String(err));
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function onDeleteHeadBranch() {
+    if (!detail || !shouldShowDeleteHeadBranch(detail)) return;
+    const target = resolveDeleteHeadBranchTarget(detail);
+    if (!target) return;
+    if (
+      !confirmGateProceed(
+        await requestConfirm({
+          title: 'Delete branch?',
+          message: `Delete head branch “${target.branch}” from ${target.owner}/${target.repo}? This cannot be undone from pr+.`,
+          confirmLabel: 'Delete branch',
+          tone: 'danger',
+        })
+      )
+    ) {
+      return;
+    }
+    setActionBusy(true);
+    setActionMsg('');
+    try {
+      const api = globalThis.PRTreeFetch;
+      if (!api?.deleteHeadBranch) throw new Error('Delete branch API unavailable');
+      await api.deleteHeadBranch(target.owner, target.repo, target.branch);
+      setLocalDetail((d) =>
+        d ? { ...d, headBranchDeleted: true, headRefDeleted: true } : d
+      );
+      setActionMsg(`Deleted branch ${target.branch}.`);
     } catch (err) {
       setActionMsg(err?.message || String(err));
     } finally {
@@ -6550,6 +6852,7 @@ export function PrModalApp({
     optArrowScrollSelect,
     scrollConversationPanel,
     toggleViewedActiveFile,
+    toggleActiveFileCollapse,
     applyReviewFilterToggle,
     applyGotoQuery,
     applySelectionKeyboardMove,
@@ -7010,10 +7313,16 @@ export function PrModalApp({
       );
       const onDiff =
         ui.layoutMode === LAYOUT_DIFF || storeUi.layoutMode === LAYOUT_DIFF;
-      // Diff always exposes context chords; handlers seed commentIndex 0 if needed
-      // and no-op when there are no review threads.
+      // Diff: ⌥C/D/⌃R stay available (handlers seed commentIndex 0 if needed).
       // Conversation keep-alive focus must not win on Diff (hidden panel).
       const liveContextThread = onDiff ? true : liveConvFocus;
+      // Real Diff thread focus (⌥J/K / jump) — used so ⌥F does not always thread-fold.
+      const liveDiffThreadFocused =
+        onDiff &&
+        (Number(storeUi.commentIndex) >= 0 ||
+          storeUi.activeDiffCommentId != null);
+      // Prefer store over uiRef — line selection updates without always re-running this effect.
+      const liveLineSelection = Boolean(storeUi.lineSelection);
 
       let action =
         typeof resolveModalShortcutAction === 'function'
@@ -7032,7 +7341,8 @@ export function PrModalApp({
               githubPaletteOpen: false, // already bailed above when open
               editableTarget: editable,
               searchOpen: Boolean(ui.searchOpen),
-              hasLineSelection: Boolean(ui.hasLineSelection),
+              hasLineSelection: liveLineSelection,
+              diffThreadFocused: liveDiffThreadFocused,
               layoutMode: ui.layoutMode,
               conversationCommentFocused: liveConvFocus,
               contextThreadActive: liveContextThread,
@@ -7185,6 +7495,9 @@ export function PrModalApp({
           break;
         case 'toggleViewedActiveFile':
           if (ui.layoutMode === LAYOUT_DIFF) act.toggleViewedActiveFile?.();
+          break;
+        case 'toggleActiveFileCollapse':
+          if (ui.layoutMode === LAYOUT_DIFF) act.toggleActiveFileCollapse?.();
           break;
         case 'toggleReviewFilterUnresolved':
           if (ui.layoutMode === LAYOUT_DIFF) {
@@ -7353,7 +7666,8 @@ export function PrModalApp({
           }}
         />
         <ShortcutMonitor
-          enabled={open}
+          enabled={open && shortcutMonitorEnabled}
+          size={shortcutMonitorSize}
           isMac={isMac}
           dismissMs={SHORTCUT_MONITOR_DISMISS_MS}
         />
@@ -7526,6 +7840,7 @@ export function PrModalApp({
             onRerequestReviewer={onRerequestReviewer}
             onMergePr={onMergePr}
             onUpdateBranch={onUpdateBranch}
+            onDeleteHeadBranch={onDeleteHeadBranch}
             onSetDraftStage={onSetDraftStage}
             onClosePr={onClosePr}
             onReopenPr={onReopenPr}
@@ -7586,6 +7901,8 @@ export function PrModalApp({
               diffReviewFilter={diffReviewFilter}
               diffMode={diffMode}
               setDiffMode={setDiffMode}
+              hideWhitespace={hideWhitespace}
+              onHideWhitespace={setHideWhitespace}
               setScrollTop={setScrollTop}
               listRef={listRef}
               hasAnyReviewThreads={hasAnyReviewThreads}

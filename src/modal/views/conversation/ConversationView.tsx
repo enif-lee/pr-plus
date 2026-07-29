@@ -143,6 +143,7 @@ function ConversationViewImpl(props: any) {
     onRerequestReviewer = null,
     onMergePr,
     onUpdateBranch,
+    onDeleteHeadBranch = null,
     onSetDraftStage,
     onClosePr,
     onReopenPr,
@@ -430,13 +431,17 @@ function ConversationViewImpl(props: any) {
   const pendingFiles = Boolean(sidePending?.files);
   const ms = mergeStatus || buildMergeBoxStatus(detail);
   const boxTone =
-    ms.tone === 'ok'
-      ? 'ok'
-      : ms.tone === 'danger'
-        ? 'danger'
-        : ms.tone === 'warn' || ms.tone === 'draft'
-          ? 'warn'
-          : 'muted';
+    ms.tone === 'merged'
+      ? 'merged'
+      : ms.tone === 'closed'
+        ? 'closed'
+        : ms.tone === 'danger'
+          ? 'danger'
+          : ms.tone === 'ok'
+            ? 'ok'
+            : ms.tone === 'warn' || ms.tone === 'draft'
+              ? 'warn'
+              : 'muted';
 
   /** Markdown body with search marks injected into rendered HTML (structure preserved). */
   function renderSearchableBody(
@@ -1494,38 +1499,60 @@ function ConversationViewImpl(props: any) {
   }
 
   function renderDescriptionCard() {
+    const baseClass = searchCardClass('body', 'prp-card--desc');
     return (
-      <DescriptionCard
-        detail={detail}
-        sectionLoading={sectionLoading}
-        editingBody={editingBody}
-        actionBusy={actionBusy}
-        searchClassName={searchCardClass('body', 'prp-card--desc')}
-        onStartEditBody={onStartEditBody}
-        onCancelEditBody={onCancelEditBody}
-        onSaveBody={onSaveBody}
-        onRegisterEditorSave={onRegisterEditorSave}
-        onUploadFile={onUploadFile}
-        linkCtx={linkCtx}
-        mentionCandidates={mentionCandidates}
-        renderBody={(body, anchor, mark) =>
-          renderSearchableBody(body, anchor, mark)
-        }
-      />
+      <ConversationKbFocusClassName
+        anchor="body"
+        baseClass={baseClass}
+      >
+        {(className) => (
+          <DescriptionCard
+            detail={detail}
+            sectionLoading={sectionLoading}
+            editingBody={editingBody}
+            actionBusy={actionBusy}
+            searchClassName={className}
+            onStartEditBody={onStartEditBody}
+            onCancelEditBody={onCancelEditBody}
+            onSaveBody={onSaveBody}
+            onRegisterEditorSave={onRegisterEditorSave}
+            onUploadFile={onUploadFile}
+            linkCtx={linkCtx}
+            mentionCandidates={mentionCandidates}
+            renderBody={(body, anchor, mark) =>
+              renderSearchableBody(body, anchor, mark)
+            }
+          />
+        )}
+      </ConversationKbFocusClassName>
     );
   }
 
   function renderMergeBox() {
     return (
-      <MergeBox
-        detail={detail}
-        ms={ms}
-        boxTone={boxTone}
-        actionBusy={actionBusy}
-        onMergePr={onMergePr}
-        onUpdateBranch={onUpdateBranch}
-        onSetDraftStage={onSetDraftStage}
-      />
+      <ConversationKbFocusClassName
+        anchor="merge"
+        baseClass="prp-merge-box-focus-host"
+      >
+        {(className, focused) => (
+          <div
+            className={`${className}${focused ? ' prp-merge-box-focus-host--focused' : ''}`.trim()}
+            data-search-anchor="merge"
+            tabIndex={focused ? -1 : undefined}
+          >
+            <MergeBox
+              detail={detail}
+              ms={ms}
+              boxTone={boxTone}
+              actionBusy={actionBusy}
+              onMergePr={onMergePr}
+              onUpdateBranch={onUpdateBranch}
+              onDeleteHeadBranch={onDeleteHeadBranch}
+              onSetDraftStage={onSetDraftStage}
+            />
+          </div>
+        )}
+      </ConversationKbFocusClassName>
     );
   }
 

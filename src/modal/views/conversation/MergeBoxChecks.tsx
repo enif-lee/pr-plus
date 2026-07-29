@@ -3,50 +3,10 @@ import {
   buildMergeBoxCheckGroups,
   mergeBoxChecksHeadline,
 } from '@lib/checks';
-import {
-  IconCheckCircleFill,
-  IconCircleSlash,
-  IconDisclosure,
-  IconDotFill,
-  IconSkip,
-  IconXCircleFill,
-} from '@common/icons';
+import { IconCircleSlash, IconDisclosure } from '@common/icons';
+import { CheckOutcomeIcon } from './ChecksSummary';
 
 type GroupKey = string;
-
-function CheckOutcomeIcon({ outcome }: { outcome: string }) {
-  const size = 16 as const;
-  if (outcome === 'failure') {
-    return (
-      <IconXCircleFill
-        size={size}
-        className="prp-merge-checks__item-icon prp-merge-checks__item-icon--failure"
-      />
-    );
-  }
-  if (outcome === 'success') {
-    return (
-      <IconCheckCircleFill
-        size={size}
-        className="prp-merge-checks__item-icon prp-merge-checks__item-icon--success"
-      />
-    );
-  }
-  if (outcome === 'skipped') {
-    return (
-      <IconSkip
-        size={size}
-        className="prp-merge-checks__item-icon prp-merge-checks__item-icon--skipped"
-      />
-    );
-  }
-  return (
-    <IconDotFill
-      size={size}
-      className="prp-merge-checks__item-icon prp-merge-checks__item-icon--pending"
-    />
-  );
-}
 
 function GroupHeaderIcon({ outcome }: { outcome: string }) {
   // Keep header lightweight; item rows carry the status glyph
@@ -68,7 +28,7 @@ export function MergeBoxChecks({ checks }: { checks: any }) {
     [checks]
   );
 
-  // Failing + pending open by default; successful/skipped open when few items
+  // Failing / working / expected open by default; successful/skipped when few
   const [open, setOpen] = useState<Record<GroupKey, boolean>>({});
 
   if (!grouped.totalCount || !grouped.groups?.length) return null;
@@ -80,7 +40,13 @@ export function MergeBoxChecks({ checks }: { checks: any }) {
 
   function isGroupOpen(key: string, outcome: string, count: number) {
     if (Object.prototype.hasOwnProperty.call(open, key)) return open[key];
-    if (outcome === 'failure' || outcome === 'pending') return true;
+    if (
+      outcome === 'failure' ||
+      outcome === 'pending' ||
+      outcome === 'in_progress'
+    ) {
+      return true;
+    }
     if (outcome === 'skipped') return count <= 5;
     // success: expand when short list so it matches GitHub expanded panel
     return count <= 8;
@@ -133,7 +99,11 @@ export function MergeBoxChecks({ checks }: { checks: any }) {
                   {g.items.map((item: any) => (
                     <li key={item.id} className="prp-merge-checks__item">
                       <span className="prp-merge-checks__item-status" aria-hidden="true">
-                        <CheckOutcomeIcon outcome={item.outcome} />
+                        <CheckOutcomeIcon
+                          outcome={item.outcome}
+                          size={16}
+                          className={`prp-merge-checks__item-icon prp-merge-checks__item-icon--${item.outcome}`}
+                        />
                       </span>
                       <div className="prp-merge-checks__item-body">
                         <div className="prp-merge-checks__item-main">

@@ -8,7 +8,7 @@
  *   mod+f        → mod+f (Find)
  *   mod+shift+X  → opt+shift+X
  */
-import { canUpdateBranch } from './merge-box-status';
+import { allowedMergeMethods, canUpdateBranch } from './merge-box-status';
 
 /**
  * @typedef {{
@@ -325,6 +325,7 @@ export function optShortcutForCommandId(commandId: string): string | null {
     'diff-opt-arrow-up': 'opt+arrowup',
     'diff-opt-arrow-down': 'opt+arrowdown',
     'diff-toggle-viewed': 'opt+shift+r',
+    'diff-fold-file': 'opt+f',
     'diff-step-prev': 'opt+k',
     'diff-step-next': 'opt+j',
     'diff-filter-unresolved': 'opt+u',
@@ -411,6 +412,14 @@ export function buildDiffPaletteCommands(): any[] {
       keywords: ['viewed', 'read', 'unread', 'mark'],
       shortcut: optShortcutForCommandId('diff-toggle-viewed') || 'opt+shift+r',
       action: 'toggleViewedActiveFile',
+    },
+    {
+      id: 'diff-fold-file',
+      title: 'Fold / expand focused file',
+      section: 'Diff',
+      keywords: ['fold', 'collapse', 'expand', 'file', 'hide'],
+      shortcut: optShortcutForCommandId('diff-fold-file') || 'opt+f',
+      action: 'toggleActiveFileCollapse',
     },
     {
       id: 'diff-step-prev',
@@ -652,6 +661,7 @@ export function buildPaletteCommands(detail: any, opts: any = {}) {
           return !(a && v && a === v);
         })();
   const updateBranchPossible = canUpdateBranch(d);
+  const mergeMethodsAllowed = new Set(allowedMergeMethods(d));
   const cmds: any[] = [
     {
       id: 'toggle-diff',
@@ -825,31 +835,43 @@ export function buildPaletteCommands(detail: any, opts: any = {}) {
       shortcut: optShortcutForCommandId('ready-review') || 'opt+shift+d',
       action: 'readyForReview',
     },
-    {
-      id: 'merge-pr',
-      title: 'Merge pull request…',
-      section: 'Merge',
-      keywords: ['merge', 'ship', 'land'],
-      shortcut: optShortcutForCommandId('merge-pr') || 'opt+shift+m',
-      action: 'mergePr',
-      payload: { method: 'merge' },
-    },
-    {
-      id: 'squash-merge',
-      title: 'Squash and merge…',
-      section: 'Merge',
-      keywords: ['squash', 'merge'],
-      action: 'mergePr',
-      payload: { method: 'squash' },
-    },
-    {
-      id: 'rebase-merge',
-      title: 'Rebase and merge…',
-      section: 'Merge',
-      keywords: ['rebase', 'merge'],
-      action: 'mergePr',
-      payload: { method: 'rebase' },
-    },
+    ...(mergeMethodsAllowed.has('merge')
+      ? [
+          {
+            id: 'merge-pr',
+            title: 'Merge pull request…',
+            section: 'Merge',
+            keywords: ['merge', 'ship', 'land'],
+            shortcut: optShortcutForCommandId('merge-pr') || 'opt+shift+m',
+            action: 'mergePr',
+            payload: { method: 'merge' },
+          },
+        ]
+      : []),
+    ...(mergeMethodsAllowed.has('squash')
+      ? [
+          {
+            id: 'squash-merge',
+            title: 'Squash and merge…',
+            section: 'Merge',
+            keywords: ['squash', 'merge'],
+            action: 'mergePr',
+            payload: { method: 'squash' },
+          },
+        ]
+      : []),
+    ...(mergeMethodsAllowed.has('rebase')
+      ? [
+          {
+            id: 'rebase-merge',
+            title: 'Rebase and merge…',
+            section: 'Merge',
+            keywords: ['rebase', 'merge'],
+            action: 'mergePr',
+            payload: { method: 'rebase' },
+          },
+        ]
+      : []),
     ...(updateBranchPossible
       ? [
           {

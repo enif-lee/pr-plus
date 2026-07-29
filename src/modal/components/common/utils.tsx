@@ -21,7 +21,12 @@ export const IMAGE_ROW_HEIGHT = 220;
 
 /**
  * @param {any} row
- * @param {{ isCollapsed?: (row: any) => boolean } | null | undefined} [opts]
+ * @param {{
+ *   isCollapsed?: (row: any) => boolean,
+ *   expandedKeys?: Set<string> | null,
+ *   measuredHeights?: Map<string, number> | null,
+ *   expandedCodeLineHeight?: (row: any, opts: any) => number | null,
+ * } | null | undefined} [opts]
  */
 export function rowHeightFor(row, opts: any = null) {
   if (row?.kind === 'inline-comment') {
@@ -43,6 +48,35 @@ export function rowHeightFor(row, opts: any = null) {
     !row.expandBelow
   ) {
     return 0;
+  }
+  // Expanded long code lines (ellipsis → multi-line)
+  if (opts?.expandedKeys?.size && row?.kind === 'diff-line') {
+    if (typeof opts.expandedCodeLineHeight === 'function') {
+      const h = opts.expandedCodeLineHeight(row, opts);
+      if (h != null && Number.isFinite(h) && h > 0) return Math.max(ROW_HEIGHT, h);
+    } else {
+      // Lazy import-free path: inline estimate via measured map only
+      const path = String(row.filePath || row.path || '');
+      const ri = Number(row.rowIndex);
+      if (Number.isFinite(ri)) {
+        const key = `${path}#${ri}`;
+        if (opts.expandedKeys.has(key)) {
+          const m = opts.measuredHeights?.get?.(key);
+          if (m != null && Number.isFinite(m) && m > 0) {
+            return Math.max(ROW_HEIGHT, Math.ceil(m));
+          }
+          // Fallback estimate without circular import
+          const len = Math.max(
+            String(row.text || '').length,
+            String(row.code || '').length,
+            String(row.leftCode || '').length,
+            String(row.rightCode || '').length
+          );
+          const lines = Math.min(48, Math.max(1, Math.ceil(len / 100)));
+          return Math.max(ROW_HEIGHT, lines * ROW_HEIGHT);
+        }
+      }
+    }
   }
   return ROW_HEIGHT;
 }

@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { IconLinkExternal } from '@common/icons';
-import { normalizeChecks } from '@lib/checks';
+import { classifyCheckOutcome, normalizeChecks } from '@lib/checks';
 import { CheckOutcomeIcon } from './ChecksSummary';
 import './ChecksTips.css';
 
@@ -13,32 +13,6 @@ export function hasChecksData(checks: any): boolean {
   const runs = n.checkRuns || n.check_runs || [];
   // Ignore combined-status state alone — empty repos report state:"pending".
   return statuses.length > 0 || runs.length > 0;
-}
-
-/** Map status context / check-run conclusion → icon outcome key. */
-function outcomeFromCheck(stateOrConclusion: unknown): string {
-  const s = String(stateOrConclusion || '')
-    .trim()
-    .toLowerCase()
-    .replace(/_/g, ' ');
-  if (!s) return 'pending';
-  if (
-    s === 'failure' ||
-    s === 'error' ||
-    s === 'cancelled' ||
-    s === 'timed out' ||
-    s === 'action required'
-  ) {
-    return 'failure';
-  }
-  if (s === 'success' || s === 'neutral' || s === 'completed') {
-    return 'success';
-  }
-  if (s === 'skipped' || s === 'stale') {
-    return 'skipped';
-  }
-  // pending, queued, in progress, expected, …
-  return 'pending';
 }
 
 function DetailsLink({ href }: { href: string }) {
@@ -85,7 +59,10 @@ export function ChecksPanel({ checks, compact = false }: any) {
         <ul className="prp-list prp-checks-list">
           {statuses.map((s: any, i: number) => {
             const href = s.target_url || s.targetUrl || '';
-            const outcome = outcomeFromCheck(s.state);
+            const outcome =
+              typeof classifyCheckOutcome === 'function'
+                ? classifyCheckOutcome({ kind: 'status', state: s.state })
+                : 'pending';
             const label = String(s.state || outcome);
             return (
               <li
@@ -109,7 +86,10 @@ export function ChecksPanel({ checks, compact = false }: any) {
           {runs.map((r: any, i: number) => {
             const href =
               r.html_url || r.htmlUrl || r.details_url || r.detailsUrl || '';
-            const outcome = outcomeFromCheck(r.conclusion || r.status);
+            const outcome =
+              typeof classifyCheckOutcome === 'function'
+                ? classifyCheckOutcome(r)
+                : 'pending';
             const label = String(r.conclusion || r.status || outcome);
             return (
               <li

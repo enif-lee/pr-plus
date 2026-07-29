@@ -476,6 +476,13 @@
         <span class="pref__desc">Diff 본문에는 현재 선택한 파일만 표시합니다. 왼쪽 파일 목록·이전/다음 파일 이동은 그대로 동작합니다. 기본값: 꺼짐.</span>
       </span>
     </label>
+    <label class="pref" for="pref-auto-expand-file-nav">
+      <input id="pref-auto-expand-file-nav" type="checkbox" />
+      <span class="pref__body">
+        <span class="pref__title">파일 이동 시 자동 펼치기</span>
+        <span class="pref__desc">파일 트리 클릭 또는 ⌥⇧[ / ⌥⇧] 로 이동할 때 대상 파일을 자동으로 펼칩니다. 끄면 접힌 상태가 유지되며 ⌥F 또는 헤더로 직접 펼칩니다. 기본값: 꺼짐.</span>
+      </span>
+    </label>
     <label class="pref" for="pref-tree-view">
       <input id="pref-tree-view" type="checkbox" />
       <span class="pref__body">
@@ -483,6 +490,27 @@
         <span class="pref__desc">/pulls 목록에서 스택 관계를 들여쓰기로 표시합니다. 헤더의 Tree / Original 토글과 동기화됩니다. 기본값: 켜짐.</span>
       </span>
     </label>
+    <div class="pref pref--action" style="cursor: default">
+      <span class="pref__body">
+        <span class="pref__title">Shortcut / action monitor</span>
+        <span class="pref__desc">
+          모달 하단 중앙에 표시되는 단축키·액션 HUD 크기입니다.
+          None은 숨김, Small은 현재 크기, Medium/Large는 각각 2×·3× 입니다.
+        </span>
+        <label for="pref-shortcut-monitor-size" class="hint" style="margin-top: 8px; display: block">
+          Size
+        </label>
+        <select
+          id="pref-shortcut-monitor-size"
+          style="margin-top: 4px; width: 100%; max-width: 100%; padding: 6px 8px; border: 1px solid #d0d7de; border-radius: 6px; font-size: 12px; background: #fff"
+        >
+          <option value="none">None — hidden</option>
+          <option value="small" selected>Small — 1× (default)</option>
+          <option value="medium">Medium — 2×</option>
+          <option value="large">Large — 3×</option>
+        </select>
+      </span>
+    </div>
 
     <h3>Onboarding</h3>
     <div class="pref pref--action">

@@ -12,6 +12,7 @@ export {
   statusKey,
   checkRunKey,
   classifyCheckOutcome,
+  statusIsInProgress,
   formatDurationMs,
   formatRelativeAgo,
   formatCheckSummary,

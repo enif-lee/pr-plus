@@ -31,6 +31,10 @@ export const META_KEYS = [
   'behindBy',
   'conflictFiles',
   'rebaseable',
+  /** Repository Settings → Pull Requests merge methods */
+  'allowMergeCommit',
+  'allowSquashMerge',
+  'allowRebaseMerge',
   'createdAt',
   'updatedAt',
   'additions',

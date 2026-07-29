@@ -251,6 +251,10 @@
   /* Fixed-height code rows: skip layout/paint work when offscreen in parent */
   contain: layout style paint;
 }
+/* Expanded long lines: keep paint open for wrapped content */
+.prp-vline--line-expanded {
+  contain: layout style;
+}
 
 .prp-vline--selectable {
   cursor: default;

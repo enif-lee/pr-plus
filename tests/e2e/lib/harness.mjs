@@ -6,20 +6,50 @@ import {
   closeAll,
   evalInPage,
   open,
-  press,
+  press as abPress,
   waitFor,
   waitMs,
   waitNetwork,
   ROOT,
 } from './ab.mjs';
 
-export const PULLS_URL = 'https://github.com/enif-lee/pr-plus/pulls';
-/** Preferred multi-thread conversation / keyboard PR */
+export const REPO = 'enif-lee/pr-plus';
+export const PULLS_URL = `https://github.com/${REPO}/pulls`;
+/** Preferred multi-thread conversation / keyboard PR (open) */
 export const DEMO_PR = 7;
-/** Large architecture PR for heavy diff scroll */
+/**
+ * Large architecture PR for heavy diff scroll.
+ * Merged — not on default open /pulls; open via closed PR URL.
+ */
 export const HEAVY_PR = 14;
-/** Multi-hunk expand chrome */
+/** Multi-hunk expand chrome (open) */
 export const MULTI_HUNK_PR = 13;
+
+export function prUrl(n) {
+  return `https://github.com/${REPO}/pull/${Number(n)}`;
+}
+
+/** Wait until pr+ overlay (modal or embed) is ready for a PR. */
+export function waitPrShellReady(n, label) {
+  waitFor(
+    `
+    const ov = document.querySelector('.prp-overlay');
+    if (!ov) return false;
+    const loading = document.querySelector('.prp-skeleton, [class*="LoadingSkeleton"], .prp-loading');
+    if (loading) return false;
+    return !!(
+      document.querySelector('.prp-conversation-virtual') ||
+      document.querySelector('.prp-vlist') ||
+      document.querySelector('.prp-header')
+    );
+    `,
+    {
+      timeoutMs: 30_000,
+      label: label || `PR #${n} shell ready`,
+    }
+  );
+  waitMs(400);
+}
 
 export function log(msg) {
   const t = new Date().toISOString().slice(11, 23);
@@ -57,6 +87,7 @@ export async function step(name, fn) {
 
 export function ensureBrowser() {
   // Prefer fresh session for isolation; profile keeps GitHub login.
+  // Do not waitMs() after close — that can spawn a bare session without extensions.
   closeAll();
 }
 
@@ -88,10 +119,30 @@ export function closeOverlay() {
 }
 
 /**
- * Open a PR by number from the pulls list via content-script intercept.
+ * Open a closed/merged PR by direct GitHub URL (autoOpenEmbed or in-page shell).
+ * Use when the PR is not on the default open /pulls list.
  * @param {number} n
  */
-export function openPr(n) {
+export function openPrByUrl(n) {
+  closeOverlay();
+  open(prUrl(n));
+  waitNetwork();
+  waitMs(600);
+  waitPrShellReady(n, `PR #${n} via URL shell ready`);
+}
+
+/**
+ * Open a PR by number.
+ * - Default: click titled link on open /pulls (content-script intercept).
+ * - `viaUrl: true` or missing list link: navigate to `/pull/{n}` (closed/merged OK).
+ * @param {number} n
+ * @param {{ viaUrl?: boolean }} [opts]
+ */
+export function openPr(n, opts = {}) {
+  if (opts.viaUrl) {
+    openPrByUrl(n);
+    return;
+  }
   closeOverlay();
   // Ensure on pulls
   if (!evalInPage(`location.pathname.includes('/pulls')`)) {
@@ -111,23 +162,13 @@ export function openPr(n) {
       return { ok: true, text: (a.textContent || '').trim().slice(0, 80) };
     })()
   `);
-  assert(clicked?.ok, `PR #${n} link not found on pulls page`);
-  waitFor(
-    `
-    const ov = document.querySelector('.prp-overlay');
-    if (!ov) return false;
-    const loading = document.querySelector('.prp-skeleton, [class*="LoadingSkeleton"], .prp-loading');
-    if (loading) return false;
-    // conversation virtual or diff vlist present
-    return !!(
-      document.querySelector('.prp-conversation-virtual') ||
-      document.querySelector('.prp-vlist') ||
-      document.querySelector('.prp-header')
-    );
-    `,
-    { timeoutMs: 30_000, label: `PR #${n} modal ready` }
-  );
-  waitMs(400);
+  if (!clicked?.ok) {
+    // Closed/merged (or pagination): fall back to PR URL
+    log(`  PR #${n} not on open pulls list — opening ${prUrl(n)}`);
+    openPrByUrl(n);
+    return;
+  }
+  waitPrShellReady(n, `PR #${n} modal ready`);
 }
 
 export function layout() {
@@ -140,6 +181,11 @@ export function setLayout(target) {
     const cur = layout();
     if (cur === target) return;
     press('Alt+.');
+    waitMs(500);
+  }
+  // Fallback: header layout toggle button (when chord delivery is flaky)
+  if (layout() !== target) {
+    evalInPage(`document.querySelector('.prp-header__icon-btn--layout')?.click()`);
     waitMs(500);
   }
   assert(layout() === target, `expected layout=${target}, got ${layout()}`);
@@ -268,6 +314,190 @@ export function selectionProbe() {
   `);
 }
 
+/** Header status badges (Draft / Merged / Closed). */
+export function statusBadgeProbe() {
+  return evalInPage(`
+    (() => {
+      const badges = [...document.querySelectorAll('.prp-badge')].map((b) => ({
+        text: (b.textContent || '').trim(),
+        cls: String(b.className || ''),
+      }));
+      return {
+        badges,
+        hasMerged: badges.some(
+          (b) => /merged/i.test(b.text) || b.cls.includes('prp-badge--merged')
+        ),
+        hasClosed: badges.some(
+          (b) =>
+            /closed/i.test(b.text) &&
+            !/merged/i.test(b.text) &&
+            (b.cls.includes('prp-badge--closed') || b.cls.includes('closed'))
+        ),
+        hasDraft: badges.some(
+          (b) => /draft/i.test(b.text) || b.cls.includes('prp-badge--draft')
+        ),
+      };
+    })()
+  `);
+}
+
+/** Merge box terminal-state chrome (tone class + kind). */
+export function mergeBoxProbe() {
+  return evalInPage(`
+    (() => {
+      const box = document.querySelector('.prp-merge-box');
+      if (!box) return { ok: false };
+      const tone =
+        [...box.classList].find((c) => c.startsWith('prp-merge-box--')) || null;
+      return {
+        ok: true,
+        tone,
+        kind: box.getAttribute('data-merge-kind'),
+        headline: (
+          document.querySelector('.prp-merge-box__headline')?.textContent || ''
+        )
+          .trim()
+          .slice(0, 100),
+      };
+    })()
+  `);
+}
+
+/** Diff code-line expand affordance snapshot. */
+export function lineExpandProbe() {
+  return evalInPage(`
+    (() => {
+      const expandable = [
+        ...document.querySelectorAll('.prp-vline--line-expandable'),
+      ];
+      const expanded = document.querySelector('.prp-vline--line-expanded');
+      let maxTextLen = 0;
+      for (const r of document.querySelectorAll(
+        '.prp-vline--selectable:not(.prp-vline--header) .prp-code, .prp-vline--selectable:not(.prp-vline--header) code'
+      )) {
+        maxTextLen = Math.max(maxTextLen, (r.textContent || '').length);
+      }
+      return {
+        expandableCount: expandable.length,
+        expanded: !!expanded,
+        expandedH: expanded
+          ? Math.round(expanded.getBoundingClientRect().height)
+          : 0,
+        maxTextLen,
+        hasExpandBtn: !!document.querySelector('.prp-line-expand-btn'),
+      };
+    })()
+  `);
+}
+
+/**
+ * Click first long-line expand (or collapse) button.
+ * Caller should waitMs then read {@link lineExpandProbe} — height updates after React paint.
+ * @returns {{ ok: boolean, beforeH?: number, reason?: string }}
+ */
+export function clickFirstLineExpandBtn() {
+  return evalInPage(`
+    (() => {
+      const row =
+        document.querySelector('.prp-vline--line-expanded') ||
+        document.querySelector('.prp-vline--line-expandable');
+      const btn = row?.querySelector('.prp-line-expand-btn');
+      if (!row || !btn) return { ok: false, reason: 'no expandable row' };
+      row.scrollIntoView({ block: 'center' });
+      const beforeH = Math.round(row.getBoundingClientRect().height);
+      btn.click();
+      return { ok: true, beforeH };
+    })()
+  `);
+}
+
+/**
+ * Click file-header collapse chevron (focused header preferred).
+ * More reliable than keyboard when Diff still holds thread-nav context (⌥F = thread fold).
+ */
+export function clickFileHeaderCollapse() {
+  return evalInPage(`
+    (() => {
+      const header =
+        document.querySelector('.prp-vline--header-focus') ||
+        document.querySelector(
+          '.prp-vline--header[data-file-path="' +
+            (document
+              .querySelector('.prp-vline--selected')
+              ?.getAttribute('data-file-path') || '')
+              .replace(/"/g, '') +
+            '"]'
+        ) ||
+        document.querySelector('.prp-vline--header');
+      const btn = header?.querySelector('.prp-file-header__collapse');
+      if (!btn) return { ok: false, reason: 'no collapse button' };
+      header.scrollIntoView({ block: 'center' });
+      const before = btn.getAttribute('aria-expanded');
+      btn.click();
+      return {
+        ok: true,
+        before,
+        after: btn.getAttribute('aria-expanded'),
+        path: header.getAttribute('data-file-path'),
+      };
+    })()
+  `);
+}
+
+/** Diff file collapse chrome for the focused / first header. */
+export function fileCollapseProbe() {
+  return evalInPage(`
+    (() => {
+      const header =
+        document.querySelector('.prp-vline--header-focus') ||
+        document.querySelector('.prp-vline--header');
+      const btn =
+        header?.querySelector('.prp-file-header__collapse') ||
+        document.querySelector('.prp-file-header__collapse');
+      const codeRows = document.querySelectorAll(
+        '.prp-vline--selectable:not(.prp-vline--header)'
+      ).length;
+      return {
+        hasHeader: !!header,
+        hasBtn: !!btn,
+        ariaExpanded: btn?.getAttribute('aria-expanded') ?? null,
+        codeRows,
+        activePath:
+          document
+            .querySelector('.prp-vline--selected')
+            ?.getAttribute('data-file-path') ||
+          document
+            .querySelector('.prp-vline--header-focus')
+            ?.getAttribute('data-file-path') ||
+          document
+            .querySelector('.prp-filetree__item--active')
+            ?.getAttribute('data-file-path') ||
+          null,
+      };
+    })()
+  `);
+}
+
+/** Fire product Alt+F (file fold on Diff / thread fold when context active). */
+export function pressOptF() {
+  return evalInPage(`
+    (() => {
+      const t = document.documentElement;
+      const opts = {
+        key: 'f',
+        code: 'KeyF',
+        altKey: true,
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+      };
+      t.dispatchEvent(new KeyboardEvent('keydown', opts));
+      t.dispatchEvent(new KeyboardEvent('keyup', opts));
+      return true;
+    })()
+  `);
+}
+
 /**
  * Click a selectable code line (not file header) to seed Diff selection.
  * @param {number} [index]
@@ -355,6 +585,136 @@ export function blurEditable() {
   waitMs(40);
 }
 
+/** Physical key → KeyboardEvent.code (+ normalized key). */
+const KEY_CODE_MAP = {
+  j: 'KeyJ',
+  k: 'KeyK',
+  f: 'KeyF',
+  b: 'KeyB',
+  c: 'KeyC',
+  u: 'KeyU',
+  r: 'KeyR',
+  p: 'KeyP',
+  e: 'KeyE',
+  ArrowDown: 'ArrowDown',
+  ArrowUp: 'ArrowUp',
+  ArrowLeft: 'ArrowLeft',
+  ArrowRight: 'ArrowRight',
+  Escape: 'Escape',
+  Enter: 'Enter',
+  Tab: 'Tab',
+  Backspace: 'Backspace',
+  ']': 'BracketRight',
+  '[': 'BracketLeft',
+  '.': 'Period',
+  ',': 'Comma',
+  '/': 'Slash',
+  '-': 'Minus',
+  '=': 'Equal',
+  '1': 'Digit1',
+  '2': 'Digit2',
+  '3': 'Digit3',
+  '4': 'Digit4',
+  '5': 'Digit5',
+  '6': 'Digit6',
+  '7': 'Digit7',
+  '8': 'Digit8',
+  '9': 'Digit9',
+  '0': 'Digit0',
+};
+
+/**
+ * Parse agent-browser-style chord into KeyboardEvent fields.
+ * @param {string} chord e.g. 'Alt+j' | 'Meta+f' | 'Escape' | 'Shift+ArrowDown'
+ */
+export function parseChord(chord) {
+  const parts = String(chord)
+    .split('+')
+    .map((p) => p.trim())
+    .filter(Boolean);
+  const keyTok = parts[parts.length - 1] || '';
+  const altKey = parts.some((p) => /^alt$/i.test(p));
+  const shiftKey = parts.some((p) => /^shift$/i.test(p));
+  const metaKey = parts.some((p) => /^meta|cmd|command$/i.test(p));
+  const ctrlKey = parts.some((p) => /^control|ctrl$/i.test(p));
+  const keyNorm =
+    {
+      down: 'ArrowDown',
+      up: 'ArrowUp',
+      left: 'ArrowLeft',
+      right: 'ArrowRight',
+      esc: 'Escape',
+      escape: 'Escape',
+      enter: 'Enter',
+      return: 'Enter',
+      space: ' ',
+      period: '.',
+    }[keyTok.toLowerCase()] || keyTok;
+  const code =
+    KEY_CODE_MAP[keyNorm] ||
+    KEY_CODE_MAP[keyNorm.toLowerCase()] ||
+    (keyNorm.length === 1 && /[a-zA-Z]/.test(keyNorm)
+      ? `Key${keyNorm.toUpperCase()}`
+      : keyNorm.length === 1 && /[0-9]/.test(keyNorm)
+        ? `Digit${keyNorm}`
+        : keyNorm);
+  const key =
+    keyNorm === ' '
+      ? ' '
+      : keyNorm.length === 1
+        ? keyNorm.toLowerCase()
+        : keyNorm === 'Escape'
+          ? 'Escape'
+          : keyNorm === 'Enter'
+            ? 'Enter'
+            : keyNorm;
+  return { key, code, altKey, shiftKey, metaKey, ctrlKey };
+}
+
+/**
+ * Dispatch a single keydown/keyup on documentElement (capture-phase product handlers).
+ * Prefer this over agent-browser `press` for Alt/Meta product chords — CDP press often
+ * drops altKey / mis-maps Option glyphs in headless Chromium.
+ * @param {string} chord
+ */
+export function press(chord) {
+  const spec = parseChord(chord);
+  // Plain Escape/Enter still via CDP is fine; product chords always synthetic.
+  const needsSynthetic =
+    spec.altKey ||
+    spec.metaKey ||
+    spec.ctrlKey ||
+    (spec.shiftKey && /^arrow/i.test(spec.key)) ||
+    spec.key === '.' ||
+    spec.code === 'Period';
+  if (!needsSynthetic) {
+    return abPress(chord);
+  }
+  evalInPage(`
+    (() => {
+      const spec = ${JSON.stringify(spec)};
+      const target = document.documentElement;
+      const base = {
+        key: spec.key,
+        code: spec.code,
+        altKey: spec.altKey,
+        shiftKey: spec.shiftKey,
+        metaKey: spec.metaKey,
+        ctrlKey: spec.ctrlKey,
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+      };
+      target.dispatchEvent(new KeyboardEvent('keydown', base));
+      target.dispatchEvent(new KeyboardEvent('keyup', { ...base, bubbles: true }));
+      return true;
+    })()
+  `);
+  // Product handlers re-render / scroll on next frames — give React a beat.
+  waitMs(80);
+  return { status: 0, stdout: '', stderr: '' };
+}
+
 /**
  * Simulate OS key-hold / key-repeat for a chord (⌥J, ⌥⇧↓, …).
  * Dispatches real KeyboardEvents on document so capture-phase handlers run.
@@ -369,36 +729,7 @@ export function holdChord(chord, opts = {}) {
   const repeatMs = opts.repeatMs ?? 40;
   const sample = opts.sample || null;
 
-  const parts = String(chord)
-    .split('+')
-    .map((p) => p.trim());
-  const keyTok = parts[parts.length - 1];
-  const altKey = parts.some((p) => /^alt$/i.test(p));
-  const shiftKey = parts.some((p) => /^shift$/i.test(p));
-  const metaKey = parts.some((p) => /^meta|cmd$/i.test(p));
-  const ctrlKey = parts.some((p) => /^control|ctrl$/i.test(p));
-
-  const CODE_MAP = {
-    j: 'KeyJ',
-    k: 'KeyK',
-    ArrowDown: 'ArrowDown',
-    ArrowUp: 'ArrowUp',
-    ArrowLeft: 'ArrowLeft',
-    ArrowRight: 'ArrowRight',
-    ']': 'BracketRight',
-    '[': 'BracketLeft',
-    '.': 'Period',
-  };
-  // Normalize aliases from agent-browser-style chords (ArrowDown) and short names
-  const keyNorm =
-    {
-      down: 'ArrowDown',
-      up: 'ArrowUp',
-      left: 'ArrowLeft',
-      right: 'ArrowRight',
-    }[keyTok.toLowerCase()] || keyTok;
-  const code = CODE_MAP[keyNorm] || CODE_MAP[keyNorm.toLowerCase()] || `Key${keyNorm.toUpperCase()}`;
-  const key = keyNorm.length === 1 ? keyNorm.toLowerCase() : keyNorm;
+  const { key, code, altKey, shiftKey, metaKey, ctrlKey } = parseChord(chord);
 
   // Kick async hold in page, then wait for completion (no CLI roundtrip per repeat).
   evalInPage(`
@@ -406,14 +737,7 @@ export function holdChord(chord, opts = {}) {
       const holdMs = ${holdMs};
       const repeatMs = ${repeatMs};
       const sampleMode = ${JSON.stringify(sample)};
-      const spec = {
-        key: ${JSON.stringify(key)},
-        code: ${JSON.stringify(code)},
-        altKey: ${altKey},
-        shiftKey: ${shiftKey},
-        metaKey: ${metaKey},
-        ctrlKey: ${ctrlKey},
-      };
+      const spec = ${JSON.stringify({ key, code, altKey, shiftKey, metaKey, ctrlKey })};
       const target = document.documentElement;
       const fire = (type, repeat) => {
         const ev = new KeyboardEvent(type, {
@@ -514,4 +838,4 @@ export function holdChord(chord, opts = {}) {
   };
 }
 
-export { ab, evalInPage, press, waitMs, waitFor, open, closeAll, ROOT };
+export { ab, evalInPage, waitMs, waitFor, open, closeAll, ROOT };

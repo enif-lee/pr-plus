@@ -52,6 +52,8 @@ export type DiffWorkspaceProps = {
   diffReviewFilter: any;
   diffMode: string;
   setDiffMode: (m: string) => void;
+  hideWhitespace?: boolean;
+  onHideWhitespace?: ((v: boolean) => void) | null;
   setScrollTop?: (n: number) => void;
   listRef: React.RefObject<HTMLElement | null>;
   hasAnyReviewThreads: (c: any) => boolean;
@@ -176,6 +178,8 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
     diffReviewFilter,
     diffMode,
     setDiffMode,
+    hideWhitespace = false,
+    onHideWhitespace = null,
     setScrollTop: setScrollTopProp,
     listRef,
     hasAnyReviewThreads,
@@ -350,6 +354,8 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
           fileNavCollapsed={fileNav.collapsed}
           onToggleFileNav={onToggleFileNavCollapse}
           diffMode={diffMode}
+          hideWhitespace={hideWhitespace}
+          onHideWhitespace={onHideWhitespace}
           reviewFilter={diffReviewFilter}
           onReviewFilter={setDiffReviewFilter}
           showReviewFilter={

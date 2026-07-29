@@ -353,3 +353,37 @@ export function expandPathInCollapsedSet(
   }
   return n;
 }
+
+/**
+ * Toggle one path in the collapsed set (materialize defaults first).
+ * @returns next collapsed set
+ */
+export function togglePathInCollapsedSet(
+  collapsedPaths,
+  path,
+  files,
+  viewedPaths = null
+) {
+  const p = String(path || '').trim();
+  if (!p) {
+    return materializeCollapsedPaths(collapsedPaths, files, viewedPaths);
+  }
+  const n = materializeCollapsedPaths(collapsedPaths, files, viewedPaths);
+  if (n.has(p)) n.delete(p);
+  else n.add(p);
+  n.delete(COLLAPSED_SET_EXPLICIT_EMPTY);
+  if (n.size === 0) {
+    n.add(COLLAPSED_SET_EXPLICIT_EMPTY);
+  }
+  return n;
+}
+
+/**
+ * Pref: auto-expand the target file when navigating the file tree / ⌥⇧[] .
+ * Default off — keep collapsed files collapsed until the user expands them.
+ */
+export function shouldAutoExpandOnFileNav(
+  prefs: { autoExpandOnFileNav?: boolean } | null | undefined
+): boolean {
+  return prefs?.autoExpandOnFileNav === true;
+}

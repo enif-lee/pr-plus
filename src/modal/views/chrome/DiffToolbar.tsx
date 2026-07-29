@@ -43,6 +43,8 @@ export function DiffToolbar(props: any) {
     onToggleFileNav,
     diffMode = 'unified',
     onDiffMode,
+    hideWhitespace = false,
+    onHideWhitespace = null,
     commits = [],
     commitFilter,
     onCommitFilter,
@@ -237,6 +239,19 @@ export function DiffToolbar(props: any) {
             Split
           </label>
         </div>
+
+        <label
+          className="prp-diff-mode__opt prp-diff-hide-ws"
+          title="Hide lines that change only whitespace"
+        >
+          <input
+            type="checkbox"
+            checked={Boolean(hideWhitespace)}
+            onChange={(e) => onHideWhitespace?.(Boolean(e.target.checked))}
+            data-prp-hide-whitespace="1"
+          />
+          Hide whitespace
+        </label>
 
         <div className="prp-diff-toolbar__commits">
           <button

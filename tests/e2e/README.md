@@ -21,6 +21,9 @@ npm run test:e2e:perf         # shortcut + scroll loop render budgets
 
 Session name defaults to `pr-plus-e2e` (override with `PRP_E2E_SESSION`).
 
+**Headless by default** (reliable chords without OS window focus). For a visible
+browser: `PRP_E2E_HEADED=1 npm run test:e2e`.
+
 ## Scenarios
 
 ### `feature-scenario.mjs`
@@ -34,6 +37,14 @@ Port of session browser QA (see `docs/qa-browser-scenario.md`):
 | P1 thread | ⌥⇧C seed/clear, ⌥J/K pin, ⌥↑↓ panel scroll, ⌥⇧↑↓ page, ⌥F fold, ⌥C reply+Esc |
 | P2 thread/file | Diff ⌥J/K threads, ⌥⇧[] files, ⌥⇧↑↓ page, Find, ⌥B, Unified/Split |
 | P3 selection | click line → ↑↓ move, ⇧↑↓ extend, ⌥↑↓ jump, Esc island, multi-hunk expand |
+| P4 UI (read-only) | Diff file fold ⌥F · autoExpandOnFileNav off · long-line expand/collapse |
+| P5 merged chrome | PR **#14** Merged badge + purple merge-box (via closed PR URL) |
+
+P4–P5 assert **local UI only** (no merge / comment / review mutations).
+
+Closed/merged PRs (e.g. heavy **#14**): opened via `openPr(n, { viaUrl: true })` →
+`https://github.com/enif-lee/pr-plus/pull/{n}` (not the default open `/pulls` list).
+List miss also falls back to the same URL path.
 
 ### `perf-shortcut-loop.mjs`
 

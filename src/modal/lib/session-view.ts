@@ -1,7 +1,10 @@
 /** @module modal/lib/session-view */
 /**
- * SessionStorage view-state for PR modal (layout, collapse, viewed, diff mode).
+ * SessionStorage view-state for PR modal.
  * Content-script origin is github.com — key by owner/repo#number (no secrets).
+ *
+ * Snapshots hold page UI only (layout, file/line selection, comment forms).
+ * Restore only when PR identity **and** page (conversation|diff) match.
  */
 
 export const STORAGE_PREFIX = 'prp:view:';
@@ -10,6 +13,9 @@ export const OPEN_MODAL_KEY = 'prp:modal:open';
 /** Max age for restoring an open modal after reload (12h). */
 export const OPEN_MODAL_MAX_AGE_MS = 12 * 60 * 60 * 1000;
 
+/** Snapshot schema version (v2 = identity + page gate + selection/forms). */
+export const SESSION_VIEW_VERSION = 2;
+
 /**
  * @param {string} owner
  * @param {string} repo
@@ -17,6 +23,22 @@ export const OPEN_MODAL_MAX_AGE_MS = 12 * 60 * 60 * 1000;
  */
 export function sessionViewKey(owner, repo, number) {
   return `${STORAGE_PREFIX}${String(owner || '').toLowerCase()}/${String(repo || '').toLowerCase()}#${Number(number)}`;
+}
+
+function normalizePageToken(raw: unknown): 'conversation' | 'diff' | null {
+  const v = String(raw || '')
+    .trim()
+    .toLowerCase();
+  if (v === 'diff' || v === 'files' || v === 'review') return 'diff';
+  if (
+    v === 'conversation' ||
+    v === 'centered' ||
+    v === 'conv' ||
+    v === 'description'
+  ) {
+    return 'conversation';
+  }
+  return null;
 }
 
 /**
@@ -30,13 +52,7 @@ export function serializeOpenModal(payload) {
   const repo = String(payload.repo || '').trim();
   const number = Number(payload.number);
   if (!owner || !repo || !Number.isFinite(number) || number <= 0) return null;
-  const pageRaw = String(payload.page || '').trim().toLowerCase();
-  const page =
-    pageRaw === 'diff' || pageRaw === 'files' || pageRaw === 'review'
-      ? 'diff'
-      : pageRaw === 'conversation' || pageRaw === 'centered' || pageRaw === 'conv'
-        ? 'conversation'
-        : null;
+  const page = normalizePageToken(payload.page);
   const position =
     payload.position != null && String(payload.position).trim()
       ? String(payload.position).trim()
@@ -79,13 +95,7 @@ export function parseOpenModal(raw, opts: any = {}) {
       : OPEN_MODAL_MAX_AGE_MS;
   const at = Number(obj.at) || 0;
   if (at > 0 && now - at > maxAge) return null;
-  const pageRaw = String(obj.page || '').trim().toLowerCase();
-  const page =
-    pageRaw === 'diff'
-      ? 'diff'
-      : pageRaw === 'conversation'
-        ? 'conversation'
-        : null;
+  const page = normalizePageToken(obj.page);
   const position =
     obj.position != null && String(obj.position).trim()
       ? String(obj.position).trim()
@@ -123,12 +133,55 @@ export function clearOpenModal(storage) {
   }
 }
 
+/** @returns {object|null} serializable line selection (no rowIndex — rebuilt on restore) */
+export function serializeLineSelection(sel: any) {
+  if (!sel || typeof sel !== 'object') return null;
+  if (sel.kind === 'file' || sel.subjectType === 'file') {
+    const filePath = String(sel.filePath || '').trim();
+    if (!filePath) return null;
+    return { kind: 'file', subjectType: 'file', filePath };
+  }
+  const filePath = String(sel.filePath || '').trim();
+  const anchorLine = Number(sel.anchorLine);
+  const headLine = Number(sel.headLine ?? sel.anchorLine);
+  if (!filePath || !Number.isFinite(anchorLine) || anchorLine < 1) return null;
+  const side = (s: unknown) =>
+    String(s || 'RIGHT').toUpperCase() === 'LEFT' ? 'LEFT' : 'RIGHT';
+  return {
+    filePath,
+    anchorLine: Math.floor(anchorLine),
+    headLine: Number.isFinite(headLine) && headLine >= 1 ? Math.floor(headLine) : Math.floor(anchorLine),
+    anchorSide: side(sel.anchorSide),
+    headSide: side(sel.headSide ?? sel.anchorSide),
+  };
+}
+
+export function parseLineSelection(raw: any) {
+  if (!raw || typeof raw !== 'object') return null;
+  if (raw.kind === 'file' || raw.subjectType === 'file') {
+    const filePath = String(raw.filePath || '').trim();
+    return filePath ? { kind: 'file', subjectType: 'file', filePath } : null;
+  }
+  return serializeLineSelection(raw);
+}
+
 /**
- * @param {object} state
+ * @param {object} state — UI snapshot (+ optional owner/repo/number for identity)
  * @returns {object|null} JSON-safe snapshot
  */
 export function serializeSessionView(state) {
   if (!state || typeof state !== 'object') return null;
+  const owner = String(state.owner || '').trim();
+  const repo = String(state.repo || '').trim();
+  const number = Number(state.number);
+  if (!owner || !repo || !Number.isFinite(number) || number <= 0) return null;
+
+  const page =
+    normalizePageToken(state.page) ||
+    (state.layoutMode === 'diff' || state.layoutMode === LAYOUT_DIFF_ALIAS
+      ? 'diff'
+      : 'conversation');
+
   const collapsed =
     state.collapsedFiles instanceof Set
       ? [...state.collapsedFiles]
@@ -141,16 +194,41 @@ export function serializeSessionView(state) {
       : Array.isArray(state.viewedPaths)
         ? state.viewedPaths.slice()
         : [];
+
+  const islandPhase =
+    state.selectionIslandPhase === 'comment' ? 'comment' : 'actions';
+
   return {
-    v: 1,
-    layoutMode: state.layoutMode === 'diff' ? 'diff' : 'centered',
+    v: SESSION_VIEW_VERSION,
+    owner,
+    repo,
+    number,
+    page,
+    // layoutMode kept for v1 readers / resolveRestore helpers
+    layoutMode: page === 'diff' ? 'diff' : 'centered',
     diffMode: state.diffMode === 'split' ? 'split' : 'unified',
+    hideWhitespace: Boolean(state.hideWhitespace),
     collapsedFiles: collapsed.filter((p) => typeof p === 'string' && p),
     viewedPaths: viewed.filter((p) => typeof p === 'string' && p),
     activeFilePath:
-      typeof state.activeFilePath === 'string' ? state.activeFilePath : null,
+      typeof state.activeFilePath === 'string' && state.activeFilePath
+        ? state.activeFilePath
+        : null,
+    lineSelection: serializeLineSelection(state.lineSelection),
+    selectionDraft:
+      typeof state.selectionDraft === 'string' ? state.selectionDraft : '',
+    showSelectionComposer: Boolean(state.showSelectionComposer),
+    selectionIslandPhase: islandPhase,
+    commentText: typeof state.commentText === 'string' ? state.commentText : '',
+    scrollTop:
+      Number.isFinite(Number(state.scrollTop)) && Number(state.scrollTop) >= 0
+        ? Math.floor(Number(state.scrollTop))
+        : 0,
+    at: Number(state.at) || Date.now(),
   };
 }
+
+const LAYOUT_DIFF_ALIAS = 'diff';
 
 /**
  * @param {unknown} raw
@@ -165,10 +243,27 @@ export function parseSessionView(raw) {
       return null;
     }
   }
-  if (!obj || typeof obj !== 'object' || obj.v !== 1) return null;
+  if (!obj || typeof obj !== 'object') return null;
+  const ver = Number(obj.v) || 0;
+  if (ver !== 1 && ver !== SESSION_VIEW_VERSION) return null;
+
+  const page =
+    normalizePageToken(obj.page) ||
+    (obj.layoutMode === 'diff' ? 'diff' : obj.layoutMode === 'centered' ? 'conversation' : null);
+
+  const owner = String(obj.owner || '').trim();
+  const repo = String(obj.repo || '').trim();
+  const number = Number(obj.number);
+
   return {
-    layoutMode: obj.layoutMode === 'diff' ? 'diff' : 'centered',
+    v: ver,
+    owner: owner || null,
+    repo: repo || null,
+    number: Number.isFinite(number) && number > 0 ? number : null,
+    page,
+    layoutMode: page === 'diff' ? 'diff' : 'centered',
     diffMode: obj.diffMode === 'split' ? 'split' : 'unified',
+    hideWhitespace: Boolean(obj.hideWhitespace),
     collapsedFiles: Array.isArray(obj.collapsedFiles)
       ? obj.collapsedFiles.filter((p) => typeof p === 'string')
       : [],
@@ -177,7 +272,56 @@ export function parseSessionView(raw) {
       : [],
     activeFilePath:
       typeof obj.activeFilePath === 'string' ? obj.activeFilePath : null,
+    lineSelection: parseLineSelection(obj.lineSelection),
+    selectionDraft:
+      typeof obj.selectionDraft === 'string' ? obj.selectionDraft : '',
+    showSelectionComposer: Boolean(obj.showSelectionComposer),
+    selectionIslandPhase:
+      obj.selectionIslandPhase === 'comment' ? 'comment' : 'actions',
+    commentText: typeof obj.commentText === 'string' ? obj.commentText : '',
+    scrollTop:
+      Number.isFinite(Number(obj.scrollTop)) && Number(obj.scrollTop) >= 0
+        ? Math.floor(Number(obj.scrollTop))
+        : 0,
   };
+}
+
+/**
+ * Restore only when snap PR identity and page match the open target.
+ * @param {object|null|undefined} stored parseSessionView result
+ * @param {{ owner?: string, repo?: string, number?: number|string, page?: string|null }} identity
+ */
+export function canRestoreSessionView(stored: any, identity: any): boolean {
+  if (!stored || typeof stored !== 'object') return false;
+  const owner = String(identity?.owner || '').trim();
+  const repo = String(identity?.repo || '').trim();
+  const number = Number(identity?.number);
+  if (!owner || !repo || !Number.isFinite(number) || number <= 0) return false;
+
+  // v2+ snaps embed identity — must match exactly when present
+  if (stored.owner || stored.repo || stored.number != null) {
+    if (
+      String(stored.owner || '').toLowerCase() !== owner.toLowerCase() ||
+      String(stored.repo || '').toLowerCase() !== repo.toLowerCase() ||
+      Number(stored.number) !== number
+    ) {
+      return false;
+    }
+  }
+
+  const wantPage = normalizePageToken(identity?.page);
+  const havePage =
+    normalizePageToken(stored.page) ||
+    (stored.layoutMode === 'diff'
+      ? 'diff'
+      : stored.layoutMode === 'centered'
+        ? 'conversation'
+        : null);
+
+  // Both sides know the page → must agree (conversation vs diff)
+  if (wantPage && havePage && wantPage !== havePage) return false;
+
+  return true;
 }
 
 /**
@@ -198,7 +342,12 @@ export function loadSessionView(storage, owner, repo, number) {
  */
 export function saveSessionView(storage, owner, repo, number, state) {
   if (!storage || typeof storage.setItem !== 'function') return false;
-  const snap = serializeSessionView(state);
+  const snap = serializeSessionView({
+    ...state,
+    owner,
+    repo,
+    number,
+  });
   if (!snap) return false;
   try {
     storage.setItem(sessionViewKey(owner, repo, number), JSON.stringify(snap));

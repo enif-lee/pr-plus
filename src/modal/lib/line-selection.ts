@@ -26,6 +26,38 @@ export function lineForSide(row, preferredSide = 'RIGHT') {
 }
 
 /**
+ * Active selection side for split-view chrome (mark + action dock).
+ * Sticky to head, then anchor; default RIGHT.
+ */
+export function selectionActiveSide(selection: any): 'LEFT' | 'RIGHT' {
+  const s = String(
+    selection?.headSide || selection?.anchorSide || 'RIGHT'
+  )
+    .trim()
+    .toUpperCase();
+  return s === 'LEFT' ? 'LEFT' : 'RIGHT';
+}
+
+/**
+ * Line on a row for a preferred side only (no cross-side fallback).
+ * Used when extending multi-line selection so LEFT drag does not flip to RIGHT.
+ */
+export function lineForSideStrict(
+  row: any,
+  preferredSide: 'LEFT' | 'RIGHT' | string = 'RIGHT'
+): { line: number; side: 'LEFT' | 'RIGHT' } | null {
+  if (!row) return null;
+  const prefer =
+    String(preferredSide || 'RIGHT').toUpperCase() === 'LEFT' ? 'LEFT' : 'RIGHT';
+  if (prefer === 'LEFT') {
+    if (row.oldLine == null) return null;
+    return { line: Number(row.oldLine), side: 'LEFT' };
+  }
+  if (row.newLine == null) return null;
+  return { line: Number(row.newLine), side: 'RIGHT' };
+}
+
+/**
  * Start a selection on a selectable diff row.
  * @param {object} row
  * @param {'LEFT'|'RIGHT'} [preferredSide='RIGHT'] split pane click prefers that side
@@ -264,6 +296,18 @@ export function firstSelectableRowInFile(
   return null;
 }
 
+/** First selectable diff-line in the virtual list (any file). */
+export function firstSelectableRowAnywhere(
+  virtualRows: any[] | null | undefined
+) {
+  const list = Array.isArray(virtualRows) ? virtualRows : [];
+  for (let i = 0; i < list.length; i++) {
+    const row = list[i];
+    if (row && isSelectableDiffRow(row)) return row;
+  }
+  return null;
+}
+
 /** Last selectable diff-line for a file (bottom of file body). */
 export function lastSelectableRowInFile(
   virtualRows: any[] | null | undefined,
@@ -365,10 +409,18 @@ export function moveLineSelection(
 
   if (selectionNeedsSeed(cur, activePath)) {
     const seedPath = activePath || String(cur?.filePath || '').trim();
-    if (!seedPath) return selection;
-    // ArrowUp with no selection still seeds first line (file-nav contract);
-    // crossing into prev file uses lastSelectable via normal steps after seed.
-    const seedRow = firstSelectableRowInFile(list, seedPath);
+    // Prefer active/selection file; if neither is set (fresh PR open), seed the
+    // first selectable line in the virtual list so Arrow↑↓ work without a click.
+    let seedRow =
+      seedPath && typeof firstSelectableRowInFile === 'function'
+        ? firstSelectableRowInFile(list, seedPath)
+        : null;
+    if (!seedRow) {
+      seedRow =
+        typeof firstSelectableRowAnywhere === 'function'
+          ? firstSelectableRowAnywhere(list)
+          : null;
+    }
     if (!seedRow) return selection;
     cur = beginLineSelection(seedRow) || selection;
     steps -= 1; // this keypress only placed the caret
@@ -419,18 +471,26 @@ export const SELECTION_ACTIONS_REVEAL_MS = 300;
 
 /**
  * Extend selection to another row (same file only).
- * Always updates headRowIndex (visual range). Line/side track the row for the API.
- *
- * Prefer the anchor's side when both sides exist on the row; if the preferred side
- * is missing (e.g. drag from an add over a del), use the available side without
- * rewriting the anchor — highlighting uses rowIndex, not mixed line numbers.
+ * Always updates headRowIndex (visual range). Line/side stay on the anchor side
+ * in split view so RIGHT selection never flips the mark/dock to LEFT mid-drag.
+ * When the preferred side is missing on a row (pure del while selecting RIGHT),
+ * still extend the row range but keep headSide sticky.
  */
 export function extendLineSelection(selection, row) {
   if (!selection || !isSelectableDiffRow(row)) return selection;
   if (row.filePath !== selection.filePath) return selection;
-  const preferred = selection.anchorSide || 'RIGHT';
-  const pos = lineForSide(row, preferred);
-  if (!pos) return selection;
+  const preferred =
+    String(selection.anchorSide || 'RIGHT').toUpperCase() === 'LEFT'
+      ? 'LEFT'
+      : 'RIGHT';
+  const pos = lineForSideStrict(row, preferred);
+  if (!pos) {
+    return {
+      ...selection,
+      headRowIndex: row.rowIndex,
+      headSide: preferred,
+    };
+  }
   return {
     ...selection,
     headLine: pos.line,

@@ -4,12 +4,18 @@
  * Flow:
  *  1. pat        — save github.com PAT
  *  2. opt        — hold Option / Alt
- *  3. openPr     — click a PR or ⌥1 (skipped if list empty)
- *  4. diffToggle — ⌥. to open Diff (skipped if no PR)
- *  5. diffDemo   — auto demo (file / selection / multi / comment), then Esc
- *  6. optShiftK  — ⌥⇧K command palette
- *  7. prefs      — feature flags (incl. tree view)
- *  8. done       — finish
+ *  3. openPr     — open demo PR #1 via ⌥N / click (skipped if list empty)
+ *  4. convDemo   — Conversation tips: ⌥J/K (body→comments→merge), ⌥[ / ]
+ *  5. diffToggle — ⌥. to open Diff (skipped if no PR)
+ *  6. diffDemo   — guided Diff tips; user presses each shortcut (no auto-sim)
+ *  7. optShiftK  — ⌥⇧K command palette
+ *  8. prefs      — feature flags (incl. tree view)
+ *  9. done       — finish
+ *
+ * Card chrome shortcuts (when focus is not in an input):
+ *  Enter — primary (Continue / Save / Skip tip)
+ *  Esc   — skip entire tour
+ *  ⌫     — back
  */
 
 export const ONBOARDING_ROOT_ID = 'prp-onboarding';
@@ -28,11 +34,12 @@ export const ONBOARDING_STEPS = [
   { id: 'pat', title: 'PAT setup', index: 0 },
   { id: 'opt', title: 'Hold Option', index: 1 },
   { id: 'openPr', title: 'Open demo PR #1', index: 2 },
-  { id: 'diffToggle', title: 'Open Diff', index: 3 },
-  { id: 'diffDemo', title: 'Diff demo', index: 4 },
-  { id: 'optShiftK', title: 'Command palette', index: 5 },
-  { id: 'prefs', title: 'Feature settings', index: 6 },
-  { id: 'done', title: 'All set', index: 7 },
+  { id: 'convDemo', title: 'Conversation shortcuts', index: 3 },
+  { id: 'diffToggle', title: 'Open Diff', index: 4 },
+  { id: 'diffDemo', title: 'Diff shortcuts', index: 5 },
+  { id: 'optShiftK', title: 'Command palette', index: 6 },
+  { id: 'prefs', title: 'Feature settings', index: 7 },
+  { id: 'done', title: 'All set', index: 8 },
 ] as const;
 
 export type OnboardingStepId = (typeof ONBOARDING_STEPS)[number]['id'];
@@ -40,6 +47,7 @@ export type OnboardingStepId = (typeof ONBOARDING_STEPS)[number]['id'];
 /** Steps that need an open PR modal; skipped when list is empty. */
 export const PR_DEPENDENT_STEPS: OnboardingStepId[] = [
   'openPr',
+  'convDemo',
   'diffToggle',
   'diffDemo',
 ];
@@ -392,20 +400,20 @@ export function fireKey(
 }
 
 /**
- * Ordered Diff demo beats — each has a short explanation + optional chords.
- * Used by runDiffDemo for narration between actions.
+ * Guided Diff tips — user presses each shortcut (no auto-simulation).
+ * Primary chord is first entry; Enter skips the tip without practicing.
  */
 export const DIFF_DEMO_STEPS = [
   {
     id: 'select-line',
     title: '1 · Select a line',
-    body: 'On PR #1 we click a code line first. That starts a selection — the foundation for new comments.',
+    body: 'Click any code line in the Diff. That starts a selection — the base for new comments.',
     chords: [] as string[],
   },
   {
     id: 'file-next',
     title: '2 · Next file',
-    body: 'Jump to the next changed file in this PR (20+ demo files). No mouse needed.',
+    body: 'Jump to the next changed file. Press the shortcut once on the Diff panel.',
     chords: ['⌥⇧]'],
   },
   {
@@ -417,7 +425,7 @@ export const DIFF_DEMO_STEPS = [
   {
     id: 'page-down',
     title: '4 · Scroll Diff down',
-    body: 'Page the hunk list by roughly one screen — faster than the trackpad on long files.',
+    body: 'Page the hunk list by roughly one screen.',
     chords: ['⌥⇧↓'],
   },
   {
@@ -429,217 +437,371 @@ export const DIFF_DEMO_STEPS = [
   {
     id: 'move-selection',
     title: '6 · Move selection',
-    body: 'Arrow keys move the selected line one step at a time.',
+    body: 'With a line selected, use Arrow Down to move one line at a time.',
     chords: ['↓'],
   },
   {
     id: 'jump-selection',
     title: '7 · Jump selection',
-    body: 'Option + arrow hops several lines — useful when scanning a large hunk.',
+    body: 'Option + Arrow Down hops several lines — useful on long hunks.',
     chords: ['⌥↓'],
   },
   {
     id: 'multi-select',
     title: '8 · Multi-line range',
-    body: 'Shift + arrow grows the selection into a block you can comment on together.',
+    body: 'Shift + Arrow Down grows the selection into a block for one comment.',
     chords: ['⇧↓'],
   },
   {
     id: 'comment-island',
-    title: '9 · New comment bar',
-    body: 'With a range selected, a bar appears — that is how you start a *new* review comment.',
-    chords: [] as string[],
+    title: '9 · New comment',
+    body: 'With a range selected, press ⌥C to open the new-comment composer. You do not need to post — practice the shortcut, then continue.',
+    chords: ['⌥C'],
   },
   {
     id: 'clear-selection',
     title: '10 · Clear selection',
-    body: 'Esc dismisses the selection bar so we can navigate existing review threads.',
+    body: 'Press Esc on the Diff to dismiss the selection bar (Enter skips this tip).',
     chords: ['Esc'],
   },
   {
     id: 'thread-next',
     title: '11 · Next review thread',
-    body: 'PR #1 has 5 demo thread groups. ⌥J steps to the next review comment/thread on Diff.',
-    chords: ['⌥J', '⌥J'],
+    body: 'PR #1 has demo thread groups. Press ⌥J to step to the next review thread on Diff.',
+    chords: ['⌥J'],
   },
   {
     id: 'thread-prev',
     title: '12 · Previous review thread',
-    body: '⌥K steps backward through the same comment list — great for triage.',
-    chords: ['⌥K', '⌥K'],
+    body: 'Press ⌥K to step backward through review threads.',
+    chords: ['⌥K'],
   },
   {
     id: 'wrap-up',
-    title: '13 · Done with the demo',
-    body: 'You saw files, scrolling, selection, new comments, and thread nav on PR #1. Press Esc if anything is still focused, then continue.',
-    chords: ['Esc'],
+    title: '13 · Done',
+    body: 'You practiced Diff nav and thread jumping. Press Enter to continue the tour.',
+    chords: [] as string[],
   },
 ] as const;
 
 export type DiffDemoStepId = (typeof DIFF_DEMO_STEPS)[number]['id'];
 
-export type DiffDemoNarration = {
-  index: number;
-  total: number;
-  id: string;
-  title: string;
-  body: string;
-  chords: string[];
-};
+/**
+ * Whether a keydown matches a Diff tip chord label (e.g. "⌥⇧]", "↓", "Esc").
+ */
+export function matchesDiffDemoChord(
+  opts: {
+    alt?: boolean;
+    shift?: boolean;
+    mod?: boolean;
+    key?: string;
+    code?: string;
+  },
+  chord: string | null | undefined
+): boolean {
+  const c = String(chord || '').trim();
+  if (!c) return false;
+  const alt = Boolean(opts.alt);
+  const shift = Boolean(opts.shift);
+  const mod = Boolean(opts.mod);
+  if (mod) return false;
+  const code = String(opts.code || '');
+  const key = String(opts.key || '');
+
+  if (c === 'Esc' || c === 'Escape') {
+    return key === 'Escape' || code === 'Escape';
+  }
+  if (c === '↓' || c === 'ArrowDown') {
+    return !alt && !shift && (key === 'ArrowDown' || code === 'ArrowDown');
+  }
+  if (c === '↑' || c === 'ArrowUp') {
+    return !alt && !shift && (key === 'ArrowUp' || code === 'ArrowUp');
+  }
+  if (c === '⌥↓') {
+    return alt && !shift && (key === 'ArrowDown' || code === 'ArrowDown');
+  }
+  if (c === '⌥↑') {
+    return alt && !shift && (key === 'ArrowUp' || code === 'ArrowUp');
+  }
+  if (c === '⇧↓') {
+    return !alt && shift && (key === 'ArrowDown' || code === 'ArrowDown');
+  }
+  if (c === '⇧↑') {
+    return !alt && shift && (key === 'ArrowUp' || code === 'ArrowUp');
+  }
+  if (c === '⌥⇧↓') {
+    return alt && shift && (key === 'ArrowDown' || code === 'ArrowDown');
+  }
+  if (c === '⌥⇧↑') {
+    return alt && shift && (key === 'ArrowUp' || code === 'ArrowUp');
+  }
+  if (c === '⌥⇧]' || c === '⌥⇧】') {
+    return (
+      alt &&
+      shift &&
+      (code === 'BracketRight' || key === ']' || key === '}')
+    );
+  }
+  if (c === '⌥⇧[' || c === '⌥⇧【') {
+    return (
+      alt &&
+      shift &&
+      (code === 'BracketLeft' || key === '[' || key === '{')
+    );
+  }
+  if (c === '⌥J' || c === '⌥j') {
+    return alt && !shift && (code === 'KeyJ' || key.toLowerCase() === 'j');
+  }
+  if (c === '⌥K' || c === '⌥k') {
+    return alt && !shift && (code === 'KeyK' || key.toLowerCase() === 'k');
+  }
+  // Diff selection: open new-comment composer (same as product ⌥C)
+  if (c === '⌥C' || c === '⌥c') {
+    return alt && !shift && (code === 'KeyC' || key.toLowerCase() === 'c');
+  }
+  return false;
+}
+
+/** True if any chord on the tip matches this key event. */
+export function matchesDiffDemoStep(
+  opts: {
+    alt?: boolean;
+    shift?: boolean;
+    mod?: boolean;
+    key?: string;
+    code?: string;
+  },
+  step: { chords?: readonly string[] } | null | undefined
+): boolean {
+  const chords = step?.chords || [];
+  if (!chords.length) return false;
+  return chords.some((ch) => matchesDiffDemoChord(opts, ch));
+}
+
+/** Card chrome: Enter → primary / Continue */
+export function isOnboardingEnterEvent(opts: {
+  key?: string;
+  code?: string;
+  alt?: boolean;
+  mod?: boolean;
+}) {
+  if (opts?.alt || opts?.mod) return false;
+  return opts?.key === 'Enter' || opts?.code === 'Enter';
+}
+
+/** Card chrome: Esc → skip entire tour */
+export function isOnboardingSkipTourEvent(opts: {
+  key?: string;
+  code?: string;
+}) {
+  return opts?.key === 'Escape' || opts?.code === 'Escape';
+}
+
+/** Card chrome: Backspace → previous step */
+export function isOnboardingBackEvent(opts: {
+  key?: string;
+  code?: string;
+  alt?: boolean;
+  mod?: boolean;
+}) {
+  if (opts?.mod) return false;
+  return opts?.key === 'Backspace' || opts?.code === 'Backspace';
+}
 
 /**
- * Scripted Diff demo with narrated beats between shortcuts.
- * @param onNarrate called before each beat (update onboarding card UI)
+ * Guided Conversation tips — user presses each shortcut (no auto-sim).
+ * ⌥J/K order: 1) PR body · 2) comments/threads · 3) merge box.
  */
-export async function runDiffDemo(
-  doc: Document,
-  win: Window,
-  onNarrate?: (n: DiffDemoNarration) => void | Promise<void>
-) {
-  const target = doc;
-  const narrate = async (index: number) => {
-    const step = DIFF_DEMO_STEPS[index];
-    if (!step) return;
-    const payload: DiffDemoNarration = {
-      index,
-      total: DIFF_DEMO_STEPS.length,
-      id: step.id,
-      title: step.title,
-      body: step.body,
-      chords: [...step.chords],
-    };
-    try {
-      await onNarrate?.(payload);
-    } catch {
-      /* ignore UI errors */
-    }
-    // Pause so the user can read the card
-    await sleep(index === 0 ? 900 : 1100);
-  };
+export const CONVERSATION_DEMO_STEPS = [
+  {
+    id: 'conv-jk',
+    title: '1 · Step Conversation',
+    body: 'On Conversation, ⌥J / ⌥K moves focus in this order: 1) PR description, 2) comments & review threads, 3) merge box. Press ⌥J a few times.',
+    chords: ['⌥J'],
+  },
+  {
+    id: 'conv-jk-back',
+    title: '2 · Step backward',
+    body: '⌥K steps focus the other way through the same stops (merge → comments → description).',
+    chords: ['⌥K'],
+  },
+  {
+    id: 'conv-adjacent',
+    title: '3 · Adjacent PRs',
+    body: '⌥] opens the next PR, then ⌥[ comes back. Type them in that order so you return to demo PR #1.',
+    chords: ['⌥]', '⌥['],
+  },
+] as const;
 
-  const click = (sel: string) => {
-    const el = doc.querySelector(sel) as HTMLElement | null;
-    if (!el) return false;
-    try {
-      el.dispatchEvent(
-        new MouseEvent('mousedown', { bubbles: true, button: 0, clientX: 8, clientY: 8 })
-      );
-      el.dispatchEvent(
-        new MouseEvent('mouseup', { bubbles: true, button: 0, clientX: 8, clientY: 8 })
-      );
-      el.click();
-      return true;
-    } catch {
-      return false;
-    }
-  };
+export type ConversationDemoStepId =
+  (typeof CONVERSATION_DEMO_STEPS)[number]['id'];
 
-  const pickLine = () =>
-    click('.prp-vline--selectable') ||
-    click('.prp-vline--context') ||
-    click('.prp-vline--add') ||
-    click('.prp-vline--del') ||
-    click('.prp-vline');
-
-  // 0 — select line
-  await narrate(0);
-  pickLine();
-  await sleep(350);
-
-  // 1 — next file ⌥⇧]
-  await narrate(1);
-  fireKey(target, { key: ']', code: 'BracketRight', alt: true, shift: true });
-  await sleep(450);
-  pickLine();
-  await sleep(200);
-
-  // 2 — prev file ⌥⇧[
-  await narrate(2);
-  fireKey(target, { key: '[', code: 'BracketLeft', alt: true, shift: true });
-  await sleep(450);
-  pickLine();
-  await sleep(200);
-
-  // 3 — page down ⌥⇧↓
-  await narrate(3);
-  fireKey(target, { key: 'ArrowDown', code: 'ArrowDown', alt: true, shift: true });
-  await sleep(400);
-
-  // 4 — page up ⌥⇧↑
-  await narrate(4);
-  fireKey(target, { key: 'ArrowUp', code: 'ArrowUp', alt: true, shift: true });
-  await sleep(400);
-
-  // 5 — move selection ↓
-  await narrate(5);
-  pickLine();
-  await sleep(200);
-  for (let i = 0; i < 2; i++) {
-    fireKey(target, { key: 'ArrowDown', code: 'ArrowDown' });
-    await sleep(160);
+/** Match ⌥[ / ⌥] for adjacent PR nav tips. */
+export function matchesConversationDemoChord(
+  opts: {
+    alt?: boolean;
+    shift?: boolean;
+    mod?: boolean;
+    key?: string;
+    code?: string;
+  },
+  chord: string | null | undefined
+): boolean {
+  const c = String(chord || '').trim();
+  if (!c) return false;
+  // Reuse Diff chord matcher for J/K / Esc / arrows
+  if (matchesDiffDemoChord(opts, c)) return true;
+  const alt = Boolean(opts.alt);
+  const shift = Boolean(opts.shift);
+  const mod = Boolean(opts.mod);
+  if (!alt || shift || mod) return false;
+  const code = String(opts.code || '');
+  const key = String(opts.key || '');
+  if (c === '⌥]' || c === '⌥】') {
+    return code === 'BracketRight' || key === ']' || key === '}';
   }
-
-  // 6 — jump selection ⌥↓
-  await narrate(6);
-  for (let i = 0; i < 2; i++) {
-    fireKey(target, { key: 'ArrowDown', code: 'ArrowDown', alt: true });
-    await sleep(220);
+  if (c === '⌥[' || c === '⌥【') {
+    return code === 'BracketLeft' || key === '[' || key === '{';
   }
-
-  // 7 — multi-line ⇧↓
-  await narrate(7);
-  for (let i = 0; i < 3; i++) {
-    fireKey(target, { key: 'ArrowDown', code: 'ArrowDown', shift: true });
-    await sleep(180);
-  }
-  await sleep(280);
-
-  // 8 — new comment island
-  await narrate(8);
-  const commented =
-    click('.prp-selection-island button') ||
-    click('.prp-selection-dock button') ||
-    click('[data-action="comment"]') ||
-    click('.prp-sel-actions button') ||
-    click('.prp-selection-island .prp-btn--primary') ||
-    click('.prp-selection-dock .prp-btn');
-  void commented;
-  await sleep(700);
-
-  // 9 — clear selection with Esc
-  await narrate(9);
-  fireKey(target, { key: 'Escape', code: 'Escape' });
-  await sleep(350);
-  fireKey(target, { key: 'Escape', code: 'Escape' });
-  await sleep(300);
-
-  // Focus an existing review thread if present (PR #1 demo threads)
-  click('.prp-vline--comment') ||
-    click('.prp-inline-thread') ||
-    click('[data-thread-focus-anchor]') ||
-    click('.prp-inline-comment');
-  await sleep(400);
-
-  // 10 — next review thread ⌥J (step nav on Diff)
-  await narrate(10);
-  for (let i = 0; i < 2; i++) {
-    fireKey(target, { key: 'j', code: 'KeyJ', alt: true });
-    await sleep(450);
-  }
-
-  // 11 — previous review thread ⌥K
-  await narrate(11);
-  for (let i = 0; i < 2; i++) {
-    fireKey(target, { key: 'k', code: 'KeyK', alt: true });
-    await sleep(450);
-  }
-
-  // 12 — wrap-up
-  await narrate(12);
-  await sleep(400);
-
-  return { ok: true, steps: DIFF_DEMO_STEPS.length };
+  return false;
 }
+
+export function matchesConversationDemoStep(
+  opts: {
+    alt?: boolean;
+    shift?: boolean;
+    mod?: boolean;
+    key?: string;
+    code?: string;
+  },
+  step: { chords?: readonly string[] } | null | undefined
+): boolean {
+  const chords = step?.chords || [];
+  if (!chords.length) return false;
+  return chords.some((ch) => matchesConversationDemoChord(opts, ch));
+}
+
+/**
+ * Multi-chord tips require chords in order. Only the chord at `chordIndex` counts.
+ */
+export function matchesConversationDemoChordAt(
+  opts: {
+    alt?: boolean;
+    shift?: boolean;
+    mod?: boolean;
+    key?: string;
+    code?: string;
+  },
+  step: { chords?: readonly string[] } | null | undefined,
+  chordIndex = 0
+): boolean {
+  const chords = step?.chords || [];
+  if (!chords.length) return false;
+  const i = Math.max(0, Math.min(chords.length - 1, Math.floor(Number(chordIndex) || 0)));
+  return matchesConversationDemoChord(opts, chords[i]);
+}
+
+/**
+ * After matching chord at `chordIndex`, return the next index or `'done'`.
+ */
+export function nextConversationDemoChordIndex(
+  step: { chords?: readonly string[] } | null | undefined,
+  chordIndex = 0
+): number | 'done' {
+  const chords = step?.chords || [];
+  if (!chords.length) return 'done';
+  const i = Math.max(0, Math.floor(Number(chordIndex) || 0));
+  if (i + 1 >= chords.length) return 'done';
+  return i + 1;
+}
+
+/** Read open modal PR number from header chip (`#12`), if present. */
+export function readOpenModalPrNumber(
+  doc: Document | null | undefined
+): number | null {
+  if (!doc || typeof doc.querySelector !== 'function') return null;
+  const el = doc.querySelector('.prp-header__number');
+  const text = String(el?.textContent || '').trim();
+  const m = text.match(/#\s*(\d+)/);
+  if (m) {
+    const n = Number(m[1]);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }
+  const labeled = doc.querySelector(
+    '[aria-label*="Pull request #"], [aria-label*="pull request #"]'
+  );
+  const aria = String(labeled?.getAttribute?.('aria-label') || '');
+  const m2 = aria.match(/#\s*(\d+)/);
+  if (m2) {
+    const n = Number(m2[1]);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }
+  return null;
+}
+
+export function isDemoPrModalOpen(doc: Document | null | undefined): boolean {
+  if (!isModalOpen(doc)) return false;
+  const n = readOpenModalPrNumber(doc);
+  if (n == null) return false;
+  return n === Number(DEMO_PR.number);
+}
+
+/**
+ * Open demo PR #1 via host `openModal` (or injected `openModal` dep).
+ * @returns true when a call was dispatched
+ */
+export function openDemoPrModal(opts: {
+  openModal?: ((args: any) => unknown) | null;
+  page?: 'conversation' | 'diff' | null;
+} = {}): boolean {
+  const open =
+    typeof opts.openModal === 'function'
+      ? opts.openModal
+      : typeof globalThis !== 'undefined' &&
+          typeof (globalThis as any).PRModalHost?.openModal === 'function'
+        ? (args: any) => (globalThis as any).PRModalHost.openModal(args)
+        : null;
+  if (!open) return false;
+  try {
+    void open({
+      owner: DEMO_PR.owner,
+      repo: DEMO_PR.repo,
+      number: DEMO_PR.number,
+      page: opts.page || null,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Diff onboarding steps require demo PR #1.
+ * - `force: true` always re-opens #1 (step enter).
+ * - otherwise only re-homes when the open modal is known to be another PR.
+ * @returns true when openModal was invoked
+ */
+export function ensureDemoPrForDiffStep(
+  doc: Document | null | undefined,
+  opts: {
+    openModal?: ((args: any) => unknown) | null;
+    force?: boolean;
+  } = {}
+): boolean {
+  const page = isDiffLayout(doc) ? 'diff' : 'conversation';
+  if (opts.force) {
+    return openDemoPrModal({ openModal: opts.openModal, page });
+  }
+  if (!isModalOpen(doc)) {
+    return openDemoPrModal({ openModal: opts.openModal, page });
+  }
+  const n = readOpenModalPrNumber(doc);
+  // Unknown (header not painted yet) — do not thrash openModal
+  if (n == null) return false;
+  if (n === Number(DEMO_PR.number)) return false;
+  return openDemoPrModal({ openModal: opts.openModal, page });
+}
+
 
 /**
  * Mount the top-right onboarding card.
@@ -668,17 +830,46 @@ export function createOnboardingTour(deps: any) {
   let prefsDraft: any = null;
   let keyHandler: ((e: KeyboardEvent) => void) | null = null;
   let pollTimer: any = null;
-  let demoRunning = false;
-  let demoDone = false;
-  let demoWaitingEsc = false;
-  /** Live narration while Diff demo runs */
-  let demoNarration: DiffDemoNarration | null = null;
+  /** Index into DIFF_DEMO_STEPS while on diffDemo (user-driven tips). */
+  let demoSubIndex = 0;
+  /** Index into CONVERSATION_DEMO_STEPS while on convDemo. */
+  let convSubIndex = 0;
+  /** Progress within a multi-chord Conversation tip (e.g. ⌥] then ⌥[). */
+  let convChordIndex = 0;
   /** When entering openPr, was modal already open? (session restore) */
   let modalOpenOnOpenPrEnter = false;
   /** When entering diffToggle, was Diff already open? (session restore) */
   let diffOpenOnDiffToggleEnter = false;
   /** User pressed ⌥. while on diffToggle (required signal to leave the step). */
   let userPressedOptPeriod = false;
+
+  function resolveOpenModal() {
+    if (typeof deps.openModal === 'function') return deps.openModal;
+    try {
+      const host =
+        typeof globalThis !== 'undefined'
+          ? (globalThis as any).PRModalHost
+          : null;
+      if (host && typeof host.openModal === 'function') {
+        return (args: any) => host.openModal(args);
+      }
+    } catch {
+      /* ignore */
+    }
+    return null;
+  }
+
+  /** Force modal onto demo PR #1 before Diff teaching steps. */
+  function ensureDemoPrForCurrentDiffStep(force = false) {
+    const opened = ensureDemoPrForDiffStep(doc, {
+      openModal: resolveOpenModal(),
+      force,
+    });
+    if (opened) {
+      setStatus(`Using demo PR #${DEMO_PR.number} for Diff tips…`);
+    }
+    return opened;
+  }
 
   function currentId(): OnboardingStepId {
     return plan[planIndex] || 'done';
@@ -781,10 +972,9 @@ export function createOnboardingTour(deps: any) {
   function goToPlanIndex(next: number) {
     planIndex = Math.max(0, Math.min(plan.length - 1, next));
     statusText = '';
-    demoRunning = false;
-    demoDone = false;
-    demoWaitingEsc = false;
-    demoNarration = null;
+    demoSubIndex = 0;
+    convSubIndex = 0;
+    convChordIndex = 0;
     userPressedOptPeriod = false;
     const id = plan[planIndex];
     // Highlight only while teaching openPr (guidance — never auto-open)
@@ -796,14 +986,20 @@ export function createOnboardingTour(deps: any) {
       }
     }
     if (id === 'diffToggle') {
+      // Always land on demo PR #1 before teaching ⌥. (adjacent tips may leave #2+)
+      ensureDemoPrForCurrentDiffStep(true);
       // Session may already be on Diff — still teach ⌥. unless user Continues
       diffOpenOnDiffToggleEnter = isDiffLayout(doc);
     }
-    render();
-    // Only start demo after we are on the demo step *and* Diff is active
     if (id === 'diffDemo') {
-      maybeStartDemo();
+      demoSubIndex = 0;
+      ensureDemoPrForCurrentDiffStep(true);
     }
+    if (id === 'convDemo') {
+      convSubIndex = 0;
+      convChordIndex = 0;
+    }
+    render();
   }
 
   function advance() {
@@ -817,6 +1013,21 @@ export function createOnboardingTour(deps: any) {
   function goBack() {
     if (planIndex <= 0) return;
     goToPlanIndex(planIndex - 1);
+  }
+
+  /**
+   * Skip tour → jump to feature settings (prefs), not immediate close.
+   * If already on prefs or past it, finish the tour.
+   */
+  function skipToSettings() {
+    const prefsIdx = plan.indexOf('prefs');
+    const id = currentId();
+    if (prefsIdx >= 0 && planIndex < prefsIdx && id !== 'prefs') {
+      goToPlanIndex(prefsIdx);
+      setStatus('Skipped ahead — review feature settings, then Done.');
+      return;
+    }
+    void markComplete();
   }
 
   function el(tag: string, className = '', text = ''): HTMLElement {
@@ -959,15 +1170,101 @@ export function createOnboardingTour(deps: any) {
       return;
     }
 
+    if (id === 'convDemo') {
+      if (!isModalOpen(doc)) {
+        body.appendChild(
+          el(
+            'p',
+            'prp-onboarding__lead',
+            'Open a PR shell first (demo PR #1), then practice Conversation shortcuts here.'
+          )
+        );
+        body.appendChild(
+          el(
+            'p',
+            'prp-onboarding__hint prp-onboarding__hint--pulse',
+            'Stay on Conversation (not Diff) for these tips…'
+          )
+        );
+        return;
+      }
+      if (isDiffLayout(doc)) {
+        body.appendChild(
+          el(
+            'p',
+            'prp-onboarding__lead',
+            'Switch to Conversation for these tips, then come back to Diff later.'
+          )
+        );
+        body.appendChild(kbdRow([{ k: '⌥' }, '+', { k: '.' }]));
+        body.appendChild(
+          el(
+            'p',
+            'prp-onboarding__hint prp-onboarding__hint--pulse',
+            'Press ⌥. to leave Diff, then practice ⌥J / ⌥K…'
+          )
+        );
+        return;
+      }
+      const tip = CONVERSATION_DEMO_STEPS[convSubIndex] || CONVERSATION_DEMO_STEPS[0];
+      const total = CONVERSATION_DEMO_STEPS.length;
+      body.appendChild(
+        el(
+          'p',
+          'prp-onboarding__demo-progress',
+          `Tip ${convSubIndex + 1} / ${total}`
+        )
+      );
+      body.appendChild(el('p', 'prp-onboarding__lead', tip.title));
+      body.appendChild(el('p', 'prp-onboarding__hint', tip.body));
+      if (tip.chords.length) {
+        const sequential = tip.chords.length > 1;
+        const parts: Array<string | { k: string }> = [];
+        tip.chords.forEach((c, i) => {
+          if (i > 0) parts.push(sequential ? 'then' : 'or');
+          parts.push({ k: c });
+        });
+        body.appendChild(kbdRow(parts));
+        if (sequential) {
+          const nextChord =
+            tip.chords[
+              Math.max(0, Math.min(tip.chords.length - 1, convChordIndex))
+            ] || tip.chords[0];
+          body.appendChild(
+            el(
+              'p',
+              'prp-onboarding__hint',
+              `Step ${convChordIndex + 1} / ${tip.chords.length}: press ${nextChord}`
+            )
+          );
+        }
+      }
+      body.appendChild(
+        el(
+          'p',
+          'prp-onboarding__hint prp-onboarding__hint--pulse',
+          tip.chords.length > 1
+            ? 'Press each shortcut in order (or Enter to skip this tip)…'
+            : tip.chords.length
+              ? 'Press the shortcut (or Enter to skip this tip)…'
+              : 'Press Enter for the next tip…'
+        )
+      );
+      return;
+    }
+
     if (id === 'diffToggle') {
       const nowDiff = isDiffLayout(doc);
+      const onDemo = isDemoPrModalOpen(doc);
       body.appendChild(
         el(
           'p',
           'prp-onboarding__lead',
           nowDiff
-            ? 'You are on the Diff view. Press ⌥. to switch to Conversation and back, or Continue to keep Diff open.'
-            : 'Switch to Diff to review code. Press the shortcut once — Conversation is always one press away again.'
+            ? `You are on Diff for demo PR #${DEMO_PR.number}. Press ⌥. to switch to Conversation and back, or Continue to keep Diff open.`
+            : onDemo
+              ? `Demo PR #${DEMO_PR.number} is open. Switch to Diff to review code — Conversation is always one press away again.`
+              : `Opening demo PR #${DEMO_PR.number} for Diff practice. Then press ⌥. to switch to Diff.`
         )
       );
       body.appendChild(kbdRow([{ k: '⌥' }, '+', { k: '.' }]));
@@ -984,76 +1281,56 @@ export function createOnboardingTour(deps: any) {
     }
 
     if (id === 'diffDemo') {
-      if (demoWaitingEsc) {
+      if (!isDiffLayout(doc)) {
         body.appendChild(
           el(
             'p',
             'prp-onboarding__lead',
-            'Diff demo finished — file nav, paging, selection jumps, multi-line ranges, and the comment bar.'
+            'Open the Diff view first, then practice each shortcut yourself.'
           )
         );
-        body.appendChild(kbdRow([{ k: 'Esc' }]));
+        body.appendChild(kbdRow([{ k: '⌥' }, '+', { k: '.' }]));
         body.appendChild(
           el(
             'p',
             'prp-onboarding__hint prp-onboarding__hint--pulse',
-            'Press Esc to clear selection UI and continue…'
+            'Press ⌥. to open Diff, then continue…'
           )
         );
-      } else if (demoRunning && demoNarration) {
-        const n = demoNarration;
-        const progress = el(
-          'p',
-          'prp-onboarding__demo-progress',
-          `Demo ${n.index + 1} / ${n.total}`
-        );
-        body.appendChild(progress);
-        body.appendChild(el('p', 'prp-onboarding__lead', n.title));
-        body.appendChild(el('p', 'prp-onboarding__hint', n.body));
-        if (n.chords.length) {
-          const parts: Array<string | { k: string }> = [];
-          n.chords.forEach((c, i) => {
-            if (i > 0) parts.push('then');
-            // Expand multi-key labels like ⌥⇧] into separate kbd chips when possible
-            parts.push({ k: c });
-          });
-          body.appendChild(kbdRow(parts));
-        }
+        return;
+      }
+      const tip = DIFF_DEMO_STEPS[demoSubIndex] || DIFF_DEMO_STEPS[0];
+      const total = DIFF_DEMO_STEPS.length;
+      const progress = el(
+        'p',
+        'prp-onboarding__demo-progress',
+        `Tip ${demoSubIndex + 1} / ${total}`
+      );
+      body.appendChild(progress);
+      body.appendChild(el('p', 'prp-onboarding__lead', tip.title));
+      body.appendChild(el('p', 'prp-onboarding__hint', tip.body));
+      if (tip.chords.length) {
+        const parts: Array<string | { k: string }> = [];
+        tip.chords.forEach((c, i) => {
+          if (i > 0) parts.push('or');
+          parts.push({ k: c });
+        });
+        body.appendChild(kbdRow(parts));
         body.appendChild(
           el(
             'p',
             'prp-onboarding__hint prp-onboarding__hint--pulse',
-            'Watch the Diff panel…'
-          )
-        );
-      } else if (demoRunning) {
-        body.appendChild(
-          el(
-            'p',
-            'prp-onboarding__lead',
-            'Starting Diff demo…'
-          )
-        );
-        body.appendChild(
-          el(
-            'p',
-            'prp-onboarding__hint',
-            'We will walk through file navigation, scrolling, selection, and comments.'
+            'Press the shortcut on the Diff panel (or Enter to skip this tip)…'
           )
         );
       } else {
         body.appendChild(
           el(
             'p',
-            'prp-onboarding__lead',
-            'Ready for a guided Diff walkthrough. Stay on the Diff view.'
-          )
-        );
-        body.appendChild(
-          el(
-            'p',
-            'prp-onboarding__hint',
-            'Each step will explain a shortcut, then play it for you.'
+            'prp-onboarding__hint prp-onboarding__hint--pulse',
+            tip.id === 'wrap-up'
+              ? 'Press Enter to continue the tour…'
+              : 'Do this in Diff, then press Enter for the next tip…'
           )
         );
       }
@@ -1190,34 +1467,60 @@ export function createOnboardingTour(deps: any) {
         primary.textContent = 'Done';
         primary.hidden = false;
       } else if (id === 'openPr' && isModalOpen(doc)) {
-        primary.textContent = 'Continue';
+        primary.textContent = 'Continue · ⏎';
         primary.hidden = false;
       } else if (id === 'openPr' && !isModalOpen(doc)) {
         // Guidance only — do not auto-open; user presses ⌥N or clicks the row
-        primary.textContent = 'Skip this step';
+        primary.textContent = 'Skip · ⏎';
         primary.hidden = false;
       } else if (id === 'diffToggle' && isDiffLayout(doc)) {
         // Live Diff open → allow Continue without requiring a toggle
-        primary.textContent = 'Continue';
+        primary.textContent = 'Continue · ⏎';
         primary.hidden = false;
-      } else if (
-        id === 'opt' ||
-        id === 'diffToggle' ||
-        id === 'optShiftK' ||
-        (id === 'diffDemo' && demoWaitingEsc)
-      ) {
-        primary.textContent = 'Skip this step';
+      } else if (id === 'convDemo') {
+        if (convSubIndex >= CONVERSATION_DEMO_STEPS.length - 1) {
+          primary.textContent = 'Continue · ⏎';
+        } else {
+          primary.textContent = 'Next tip · ⏎';
+        }
         primary.hidden = false;
-      } else if (id === 'diffDemo' && demoRunning) {
-        primary.textContent = 'Skip demo';
+      } else if (id === 'diffDemo') {
+        if (!isDiffLayout(doc)) {
+          primary.textContent = 'Skip Diff tips · ⏎';
+        } else if (demoSubIndex >= DIFF_DEMO_STEPS.length - 1) {
+          primary.textContent = 'Continue · ⏎';
+        } else {
+          primary.textContent = 'Next tip · ⏎';
+        }
         primary.hidden = false;
-      } else if (id === 'diffDemo' && !isDiffLayout(doc) && !demoRunning) {
-        // Demo step but not on Diff yet — help user get there
-        primary.textContent = 'Skip demo';
+      } else if (id === 'opt' || id === 'diffToggle' || id === 'optShiftK') {
+        primary.textContent = 'Skip · ⏎';
         primary.hidden = false;
       } else {
-        primary.textContent = 'Continue';
+        primary.textContent = 'Continue · ⏎';
         primary.hidden = false;
+      }
+      // Annotate other primaries with Enter where not already
+      if (
+        primary &&
+        !primary.hidden &&
+        primary.textContent &&
+        !primary.textContent.includes('⏎') &&
+        (id === 'pat' || id === 'prefs' || id === 'done' || id === 'openPr')
+      ) {
+        if (id === 'pat') {
+          primary.textContent = tokenConfigured
+            ? 'Continue · ⏎'
+            : 'Save & continue · ⏎';
+        } else if (id === 'prefs') {
+          primary.textContent = 'Save & continue · ⏎';
+        } else if (id === 'done') {
+          primary.textContent = 'Done · ⏎';
+        } else if (id === 'openPr' && isModalOpen(doc)) {
+          primary.textContent = 'Continue · ⏎';
+        } else if (id === 'openPr' && !isModalOpen(doc)) {
+          primary.textContent = 'Skip · ⏎';
+        }
       }
     }
     setStatus(statusText, statusError);
@@ -1282,48 +1585,50 @@ export function createOnboardingTour(deps: any) {
       return;
     }
 
-    // Skip interactive steps
+    // Skip interactive steps / advance guided tips
+    if (id === 'diffDemo') {
+      advanceDiffTip();
+      return;
+    }
+    if (id === 'convDemo') {
+      advanceConvTip();
+      return;
+    }
     advance();
   }
 
-  async function maybeStartDemo() {
-    if (disposed || currentId() !== 'diffDemo') return;
-    if (demoRunning || demoDone || demoWaitingEsc) return;
-    // Never start the demo from Conversation — only real Diff layout
-    if (!isDiffLayout(doc)) {
+  /** Move to next Diff tip, or leave the Diff tips step when finished. */
+  function advanceDiffTip() {
+    if (demoSubIndex < DIFF_DEMO_STEPS.length - 1) {
+      demoSubIndex += 1;
+      setStatus('');
+      render();
       return;
     }
-    demoRunning = true;
-    demoNarration = null;
-    render();
-    try {
-      await runDiffDemo(doc, win, async (n) => {
-        if (disposed || currentId() !== 'diffDemo') return;
-        demoNarration = n;
-        render();
-      });
-    } catch (err) {
-      console.warn('[pr+] onboarding demo', err);
+    advance();
+  }
+
+  /** Move to next Conversation tip, or leave when finished. */
+  function advanceConvTip() {
+    convChordIndex = 0;
+    if (convSubIndex < CONVERSATION_DEMO_STEPS.length - 1) {
+      convSubIndex += 1;
+      setStatus('');
+      render();
+      return;
     }
-    demoRunning = false;
-    demoDone = true;
-    demoWaitingEsc = true;
-    demoNarration = null;
-    render();
+    advance();
   }
 
   function onKeyDown(e: KeyboardEvent) {
     if (disposed || !root) return;
     const t = e.target as HTMLElement | null;
-    if (
+    const inField = Boolean(
       t &&
-      (t.tagName === 'INPUT' ||
-        t.tagName === 'TEXTAREA' ||
-        (t as any).isContentEditable)
-    ) {
-      // Allow Esc even from inputs during demo wait
-      if (!(currentId() === 'diffDemo' && isEscapeEvent(e))) return;
-    }
+        (t.tagName === 'INPUT' ||
+          t.tagName === 'TEXTAREA' ||
+          (t as any).isContentEditable)
+    );
 
     const id = currentId();
     const mod = Boolean(e.metaKey || e.ctrlKey);
@@ -1336,6 +1641,42 @@ export function createOnboardingTour(deps: any) {
       type: 'keydown' as const,
     };
 
+    // Card chrome shortcuts (not inside form fields)
+    if (!inField) {
+      if (isOnboardingBackEvent(opts) && planIndex > 0) {
+        e.preventDefault();
+        goBack();
+        return;
+      }
+      if (isOnboardingEnterEvent(opts)) {
+        e.preventDefault();
+        void goNextFromPrimary();
+        return;
+      }
+      // Esc skips the whole tour — except when a Diff tip is teaching Esc
+      if (isOnboardingSkipTourEvent(opts)) {
+        const tip =
+          id === 'diffDemo' && isDiffLayout(doc)
+            ? DIFF_DEMO_STEPS[demoSubIndex]
+            : null;
+        if (tip && matchesDiffDemoStep(opts, tip)) {
+          e.preventDefault();
+          advanceDiffTip();
+          return;
+        }
+        e.preventDefault();
+        skipToSettings();
+        return;
+      }
+    } else {
+      // Esc in inputs still jumps to settings (or completes if already there)
+      if (isOnboardingSkipTourEvent(opts)) {
+        e.preventDefault();
+        skipToSettings();
+        return;
+      }
+    }
+
     if (id === 'opt' && isOptHoldEvent(opts) && e.altKey) {
       e.preventDefault();
       advance();
@@ -1345,25 +1686,63 @@ export function createOnboardingTour(deps: any) {
       // Let host open the PR via the guided hotkey; poll advances when modal appears
       const slot = resolveDemoPrHotkey(doc).slot;
       if (slot && isOptHotkeySlotEvent(opts, slot)) {
-        setStatus(`Opening PR #${DEMO_PR.number} with ⌥${String(slot).toUpperCase()}…`);
+        setStatus(
+          `Opening PR #${DEMO_PR.number} with ⌥${String(slot).toUpperCase()}…`
+        );
         return;
       }
-      // Also accept ⌥1 as common first-slot attempt (re-render keeps guide accurate)
       if (isOptDigit1Event(opts)) {
         setStatus('Opening with list hotkey…');
         return;
       }
     }
+    if (id === 'convDemo') {
+      // Stay on Conversation for JK tips; allow ⌥. to leave Diff if needed
+      if (isDiffLayout(doc) && isOptPeriodEvent(opts)) {
+        return; // host toggles to Conversation
+      }
+      const tip = CONVERSATION_DEMO_STEPS[convSubIndex];
+      if (tip?.chords?.length) {
+        // Multi-chord tips (⌥] then ⌥[) must be pressed in order so we land
+        // back on the demo PR before Diff steps.
+        if (matchesConversationDemoChordAt(opts, tip, convChordIndex)) {
+          const next = nextConversationDemoChordIndex(tip, convChordIndex);
+          if (next === 'done') {
+            convChordIndex = 0;
+            advanceConvTip();
+          } else {
+            convChordIndex = next;
+            const nextChord = tip.chords[next] || '';
+            setStatus(
+              tip.id === 'conv-adjacent'
+                ? `Good — now ${nextChord} to return to demo PR #${DEMO_PR.number}…`
+                : `Now press ${nextChord}…`
+            );
+            render();
+          }
+          return;
+        }
+        if (matchesConversationDemoStep(opts, tip)) {
+          const expected = tip.chords[convChordIndex] || tip.chords[0];
+          setStatus(
+            `Press ${expected} next (${tip.chords.join(' → ')})`
+          );
+          return;
+        }
+      }
+    }
     if (id === 'diffToggle' && isOptPeriodEvent(opts)) {
-      // Host toggles Diff; advance only after Diff is actually active (poll)
       userPressedOptPeriod = true;
-      // Re-render so copy tracks Conversation ↔ Diff immediately
       render();
       return;
     }
-    if (id === 'diffDemo' && demoWaitingEsc && isEscapeEvent(opts)) {
-      advance();
-      return;
+    if (id === 'diffDemo' && isDiffLayout(doc)) {
+      const tip = DIFF_DEMO_STEPS[demoSubIndex];
+      if (tip && matchesDiffDemoStep(opts, tip)) {
+        // Let host handle the shortcut; advance the tip guide
+        advanceDiffTip();
+        return;
+      }
     }
     if (id === 'optShiftK' && isOptShiftKEvent(opts)) {
       advance();
@@ -1388,20 +1767,35 @@ export function createOnboardingTour(deps: any) {
       return;
     }
     if (id === 'diffToggle') {
+      // Stay on demo PR #1 while teaching Diff toggle (only when known wrong)
+      const openNum = readOpenModalPrNumber(doc);
+      if (
+        isModalOpen(doc) &&
+        openNum != null &&
+        openNum !== Number(DEMO_PR.number)
+      ) {
+        ensureDemoPrForCurrentDiffStep(false);
+      }
       // Keep card copy in sync with live layout
       render();
       // Advance when user pressed ⌥. and Diff shell is active.
       // (If Diff was already open, primary "Continue" advances — no auto-skip.)
       if (userPressedOptPeriod && isDiffLayout(doc)) {
+        if (
+          openNum != null &&
+          openNum !== Number(DEMO_PR.number)
+        ) {
+          // Diff on wrong PR — re-home, do not leave the step yet
+          ensureDemoPrForCurrentDiffStep(false);
+          return;
+        }
         advance();
       }
       return;
     }
-    if (id === 'diffDemo') {
-      if (!demoRunning && !demoDone && !demoWaitingEsc) {
-        // Strict: Diff layout only — never conversation modal
-        if (isDiffLayout(doc)) void maybeStartDemo();
-      }
+    if (id === 'convDemo' || id === 'diffDemo') {
+      // Keep tip card in sync when user toggles Conversation ↔ Diff
+      render();
     }
   }
 
@@ -1419,9 +1813,10 @@ export function createOnboardingTour(deps: any) {
     header.appendChild(stepEl);
     const closeBtn = el('button', 'prp-onboarding__close', '×');
     closeBtn.setAttribute('type', 'button');
-    closeBtn.setAttribute('aria-label', 'Skip tour');
+    closeBtn.setAttribute('aria-label', 'Skip to settings');
+    closeBtn.setAttribute('title', 'Skip to feature settings (Esc)');
     closeBtn.addEventListener('click', () => {
-      void markComplete();
+      skipToSettings();
     });
     header.appendChild(closeBtn);
 
@@ -1431,22 +1826,28 @@ export function createOnboardingTour(deps: any) {
     status.setAttribute('aria-live', 'polite');
 
     const footer = el('footer', 'prp-onboarding__footer');
-    const back = el('button', 'prp-onboarding__btn prp-onboarding__btn--back', 'Back');
+    const back = el(
+      'button',
+      'prp-onboarding__btn prp-onboarding__btn--back',
+      'Back · ⌫'
+    );
     back.setAttribute('type', 'button');
+    back.setAttribute('title', 'Back (Backspace)');
     back.addEventListener('click', () => goBack());
     const skip = el(
       'button',
       'prp-onboarding__btn prp-onboarding__btn--ghost prp-onboarding__btn--skip',
-      'Skip tour'
+      'Skip to settings · Esc'
     );
     skip.setAttribute('type', 'button');
+    skip.setAttribute('title', 'Skip remaining tips and open feature settings (Esc)');
     skip.addEventListener('click', () => {
-      void markComplete();
+      skipToSettings();
     });
     const primary = el(
       'button',
       'prp-onboarding__btn prp-onboarding__btn--primary',
-      'Continue'
+      'Continue · ⏎'
     );
     primary.setAttribute('type', 'button');
     primary.addEventListener('click', () => {
@@ -1528,6 +1929,7 @@ const onboardingApi = {
   ONBOARDING_STEPS,
   PR_DEPENDENT_STEPS,
   DIFF_DEMO_STEPS,
+  CONVERSATION_DEMO_STEPS,
   DEMO_PR,
   shouldShowOnboarding,
   clampOnboardingStep,
@@ -1551,7 +1953,20 @@ const onboardingApi = {
   isEscapeEvent,
   resolveOnboardingPlan,
   fireKey,
-  runDiffDemo,
+  matchesDiffDemoChord,
+  matchesDiffDemoStep,
+  CONVERSATION_DEMO_STEPS,
+  matchesConversationDemoChord,
+  matchesConversationDemoStep,
+  matchesConversationDemoChordAt,
+  nextConversationDemoChordIndex,
+  readOpenModalPrNumber,
+  isDemoPrModalOpen,
+  openDemoPrModal,
+  ensureDemoPrForDiffStep,
+  isOnboardingEnterEvent,
+  isOnboardingSkipTourEvent,
+  isOnboardingBackEvent,
   createOnboardingTour,
 };
 

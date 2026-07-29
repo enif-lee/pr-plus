@@ -179,21 +179,38 @@
   }
 
   /**
+   * True when a Check Run is actively working (spinner), not merely expected.
+   * queued / waiting / in_progress → working; plain "pending" status → expected.
+   */
+  function statusIsInProgress(item) {
+    const status = String(item?.status || '').toLowerCase();
+    return (
+      status === 'in_progress' ||
+      status === 'queued' ||
+      status === 'waiting'
+    );
+  }
+
+  /**
    * GitHub merge-box bucket for one check item.
-   * @returns {'failure'|'pending'|'skipped'|'success'}
+   * - pending: expected / waiting for report (static yellow circle)
+   * - in_progress: actively running / queued (spinning indicator)
+   * @returns {'failure'|'pending'|'in_progress'|'skipped'|'success'}
    */
   function classifyCheckOutcome(item) {
     if (!item || typeof item !== 'object') return 'pending';
-    if (item.kind === 'status' || item.state != null) {
+    // Commit status contexts (no check-run `status`/`conclusion`)
+    if (
+      item.kind === 'status' ||
+      (item.state != null && item.status == null && item.conclusion == null)
+    ) {
       const st = String(item.state || '').toLowerCase();
       if (st === 'failure' || st === 'error') return 'failure';
       if (st === 'success') return 'success';
-      if (st === 'pending') return 'pending';
-      // expected / unknown → pending
+      // Commit-status "pending" = expected (not a live runner)
       return 'pending';
     }
     const conclusion = String(item.conclusion || '').toLowerCase();
-    const status = String(item.status || '').toLowerCase();
     if (
       conclusion === 'failure' ||
       conclusion === 'timed_out' ||
@@ -204,18 +221,9 @@
     }
     if (conclusion === 'skipped') return 'skipped';
     if (conclusion === 'success' || conclusion === 'neutral') return 'success';
-    if (
-      status === 'queued' ||
-      status === 'in_progress' ||
-      status === 'waiting' ||
-      status === 'requested' ||
-      status === 'pending' ||
-      conclusion === '' ||
-      conclusion === 'null' ||
-      conclusion === 'action_required'
-    ) {
-      return 'pending';
-    }
+    // Still running — spinner
+    if (statusIsInProgress(item)) return 'in_progress';
+    // Expected / requested / action_required / empty conclusion
     return 'pending';
   }
 
@@ -280,16 +288,12 @@
       if (when) return `Skipped ${when}`;
       return desc || 'Skipped';
     }
-    // pending
-    if (statusIsInProgress(item)) {
+    // Working (spinner)
+    if (outcome === 'in_progress' || statusIsInProgress(item)) {
       return duration ? `In progress — ${duration}` : desc || 'In progress';
     }
+    // Expected (static yellow)
     return desc || 'Expected — Waiting for status to be reported';
-  }
-
-  function statusIsInProgress(item) {
-    const status = String(item?.status || '').toLowerCase();
-    return status === 'in_progress' || status === 'queued' || status === 'waiting';
   }
 
   /**
@@ -337,6 +341,8 @@
         kind: 'run',
         name: displayName,
         outcome,
+        status: r.status || '',
+        conclusion: r.conclusion || '',
         description: '',
         url: r.htmlUrl || r.html_url || r.detailsUrl || r.details_url || '',
         startedAt: r.startedAt || r.started_at || '',
@@ -350,6 +356,7 @@
 
     const buckets = {
       failure: [],
+      in_progress: [],
       pending: [],
       skipped: [],
       success: [],
@@ -367,8 +374,15 @@
         items.length === 1 ? `1 ${singular}` : `${items.length} ${plural}`;
       groups.push({ key, label, outcome, items });
     };
-    // GitHub order: failing → expected/pending → skipped → successful
+    // GitHub order: failing → in progress → expected → skipped → successful
     pushGroup('failure', 'failure', 'failing check', 'failing checks', buckets.failure);
+    pushGroup(
+      'in_progress',
+      'in_progress',
+      'in progress check',
+      'in progress checks',
+      buckets.in_progress
+    );
     pushGroup('pending', 'pending', 'expected check', 'expected checks', buckets.pending);
     pushGroup('skipped', 'skipped', 'skipped check', 'skipped checks', buckets.skipped);
     pushGroup(
@@ -399,19 +413,21 @@
   /**
    * Count outcomes over normalized statuses + check runs for summary icons/popover.
    * @param {object|null|undefined} checks
-   * @returns {{ total: number, success: number, failure: number, pending: number, skipped: number, state: string }}
+   * @returns {{ total: number, success: number, failure: number, pending: number, inProgress: number, skipped: number, state: string }}
    */
   function summarizeCheckCounts(checks) {
     const n = normalizeChecks(checks);
     let success = 0;
     let failure = 0;
     let pending = 0;
+    let inProgress = 0;
     let skipped = 0;
     for (const s of n.statuses || []) {
       const o = classifyCheckOutcome({ kind: 'status', state: s?.state });
       if (o === 'failure') failure += 1;
       else if (o === 'success') success += 1;
       else if (o === 'skipped') skipped += 1;
+      else if (o === 'in_progress') inProgress += 1;
       else pending += 1;
     }
     for (const r of n.checkRuns || []) {
@@ -419,14 +435,16 @@
       if (o === 'failure') failure += 1;
       else if (o === 'success') success += 1;
       else if (o === 'skipped') skipped += 1;
+      else if (o === 'in_progress') inProgress += 1;
       else pending += 1;
     }
-    const total = success + failure + pending + skipped;
+    const total = success + failure + pending + inProgress + skipped;
     return {
       total,
       success,
       failure,
       pending,
+      inProgress,
       skipped,
       state: n.state || 'unknown',
     };
@@ -434,7 +452,7 @@
 
   /**
    * Human popover / aria copy for check counts.
-   * @param {{ total?: number, success?: number, failure?: number, pending?: number, skipped?: number, state?: string }|null|undefined} summary
+   * @param {{ total?: number, success?: number, failure?: number, pending?: number, inProgress?: number, skipped?: number, state?: string }|null|undefined} summary
    */
   function formatChecksCountLabel(summary) {
     const s = summary && typeof summary === 'object' ? summary : {};
@@ -442,6 +460,7 @@
     const success = Number(s.success) || 0;
     const failure = Number(s.failure) || 0;
     const pending = Number(s.pending) || 0;
+    const inProgress = Number(s.inProgress) || 0;
     const skipped = Number(s.skipped) || 0;
     if (!total) {
       // Empty payload — GitHub may still report combined state "pending"
@@ -451,20 +470,27 @@
       `${total} check${total === 1 ? '' : 's'}`,
       `${success} succeeded`,
       `${failure} failed`,
-      `${pending} in progress`,
     ];
+    if (inProgress > 0) parts.push(`${inProgress} in progress`);
+    if (pending > 0) parts.push(`${pending} expected`);
     if (skipped > 0) parts.push(`${skipped} skipped`);
     return parts.join(' · ');
   }
 
   /**
    * Names of individual checks bucketed by outcome (for stacked-icon tips).
-   * @returns {{ failure: string[], pending: string[], success: string[], skipped: string[], state: string }}
+   * @returns {{ failure: string[], pending: string[], in_progress: string[], success: string[], skipped: string[], state: string }}
    */
   function listCheckNamesByOutcome(checks) {
     const n = normalizeChecks(checks);
-    /** @type {{ failure: string[], pending: string[], success: string[], skipped: string[] }} */
-    const groups = { failure: [], pending: [], success: [], skipped: [] };
+    /** @type {{ failure: string[], pending: string[], in_progress: string[], success: string[], skipped: string[] }} */
+    const groups = {
+      failure: [],
+      pending: [],
+      in_progress: [],
+      success: [],
+      skipped: [],
+    };
     for (const s of n.statuses || []) {
       const o = classifyCheckOutcome({ kind: 'status', state: s?.state });
       const name = String(s?.context || s?.description || 'status').trim() || 'status';
@@ -485,6 +511,7 @@
     return {
       failure: groups.failure,
       pending: groups.pending,
+      in_progress: groups.in_progress,
       success: groups.success,
       skipped: groups.skipped,
       state: n.state || 'unknown',
@@ -493,7 +520,7 @@
 
   /**
    * Popover text for one outcome group (e.g. failed checks).
-   * @param {'failure'|'pending'|'success'|'skipped'} outcome
+   * @param {'failure'|'pending'|'in_progress'|'success'|'skipped'} outcome
    * @param {string[]} names
    */
   function formatCheckGroupTip(outcome, names) {
@@ -501,7 +528,8 @@
     const n = list.length;
     const headings = {
       failure: n === 1 ? '1 failed' : `${n} failed`,
-      pending: n === 1 ? '1 in progress' : `${n} in progress`,
+      in_progress: n === 1 ? '1 in progress' : `${n} in progress`,
+      pending: n === 1 ? '1 expected' : `${n} expected`,
       success: n === 1 ? '1 succeeded' : `${n} succeeded`,
       skipped: n === 1 ? '1 skipped' : `${n} skipped`,
     };
@@ -526,6 +554,7 @@
     deriveChecksState,
     normalizeChecks,
     classifyCheckOutcome,
+    statusIsInProgress,
     formatDurationMs,
     formatRelativeAgo,
     formatCheckSummary,

@@ -44,6 +44,73 @@
   box-sizing: border-box;
 }
 
+/* Long-line expand control lives in the existing 22px gutter */
+.prp-line-gutter {
+  position: relative;
+}
+.prp-line-expand-btn {
+  appearance: none;
+  position: absolute;
+  left: 3px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--prp-fg-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  z-index: 2;
+}
+.prp-vline--line-expandable:hover .prp-line-expand-btn,
+.prp-vline--line-expandable:focus-within .prp-line-expand-btn,
+.prp-vline--line-expanded .prp-line-expand-btn,
+.prp-line-expand-btn:focus-visible {
+  opacity: 1;
+}
+.prp-line-expand-btn:hover,
+.prp-line-expand-btn:focus-visible {
+  color: var(--prp-accent);
+  background: color-mix(in srgb, var(--prp-accent) 12%, transparent);
+  outline: none;
+}
+.prp-vline--line-expanded {
+  align-items: flex-start;
+  white-space: pre-wrap;
+  /* Allow multi-line paint; height still fixed by virtualizer */
+  contain: layout style;
+  overflow: hidden;
+}
+.prp-vline--line-expanded code,
+.prp-vline--line-expanded .prp-code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  text-overflow: clip;
+  overflow: visible;
+  line-height: 22px;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.prp-vline--line-expanded .prp-line-expand-btn {
+  top: 11px;
+  transform: none;
+}
+.prp-vline--line-expanded .prp-split-cols,
+.prp-vline--line-expanded .prp-split-cols__left,
+.prp-vline--line-expanded .prp-split-cols__right {
+  align-items: stretch;
+  height: auto;
+  min-height: 100%;
+}
+
 .prp-diff-mode {
   display: inline-flex;
   align-items: center;

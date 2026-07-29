@@ -8,7 +8,13 @@ const prefAutoOpenEmbed = document.getElementById('pref-auto-open-embed');
 const prefFastReview = document.getElementById('pref-fast-review');
 const prefReverseComments = document.getElementById('pref-reverse-comments');
 const prefSingleFileMode = document.getElementById('pref-single-file-mode');
+const prefAutoExpandFileNav = document.getElementById(
+  'pref-auto-expand-file-nav'
+);
 const prefTreeView = document.getElementById('pref-tree-view');
+const prefShortcutMonitorSize = document.getElementById(
+  'pref-shortcut-monitor-size'
+) as HTMLSelectElement | null;
 const restartOnboardingBtn = document.getElementById('restart-onboarding');
 const clearIdbBtn = document.getElementById('clear-idb');
 const enterpriseHostInput = document.getElementById('enterprise-host');
@@ -26,9 +32,21 @@ const DEFAULT_PREFS = {
   reverseComments: true,
   autoOpenEmbed: true,
   singleFileMode: false,
+  autoExpandOnFileNav: false,
   treeView: true,
+  shortcutMonitorSize: 'small',
   onboardingCompleted: false,
 };
+
+function normalizeShortcutMonitorSize(raw: unknown): string {
+  const v = String(raw ?? '')
+    .trim()
+    .toLowerCase();
+  if (v === 'none' || v === 'off' || v === 'hidden') return 'none';
+  if (v === 'medium' || v === 'md' || v === '2x') return 'medium';
+  if (v === 'large' || v === 'lg' || v === '3x') return 'large';
+  return 'small';
+}
 
 /** @type {{ host: string, mask: string }[]} */
 let hostAccountsState = [];
@@ -63,7 +81,16 @@ function renderPrefs(prefs: any) {
   // @ts-expect-error classic content-script dynamic shapes
   if (prefSingleFileMode) prefSingleFileMode.checked = p.singleFileMode === true;
   // @ts-expect-error classic content-script dynamic shapes
+  if (prefAutoExpandFileNav) {
+    prefAutoExpandFileNav.checked = p.autoExpandOnFileNav === true;
+  }
+  // @ts-expect-error classic content-script dynamic shapes
   if (prefTreeView) prefTreeView.checked = p.treeView !== false;
+  if (prefShortcutMonitorSize) {
+    prefShortcutMonitorSize.value = normalizeShortcutMonitorSize(
+      p.shortcutMonitorSize
+    );
+  }
 }
 
 function normalizeHostInput(raw: any) {
@@ -244,7 +271,12 @@ async function savePrefs() {
   // @ts-expect-error classic content-script dynamic shapes
       singleFileMode: Boolean(prefSingleFileMode?.checked),
   // @ts-expect-error classic content-script dynamic shapes
+      autoExpandOnFileNav: Boolean(prefAutoExpandFileNav?.checked),
+  // @ts-expect-error classic content-script dynamic shapes
       treeView: Boolean(prefTreeView?.checked),
+      shortcutMonitorSize: normalizeShortcutMonitorSize(
+        prefShortcutMonitorSize?.value
+      ),
     };
     const res = await send({ type: 'PR_TREE_PREFS_SET', prefs });
     if (!res?.ok && res?.error) {
@@ -312,6 +344,7 @@ prefFastReview.addEventListener('change', () => void savePrefs());
 prefReverseComments.addEventListener('change', () => void savePrefs());
 prefSingleFileMode?.addEventListener('change', () => void savePrefs());
 prefTreeView?.addEventListener('change', () => void savePrefs());
+prefShortcutMonitorSize?.addEventListener('change', () => void savePrefs());
 
 enterpriseHostInput?.addEventListener('input', () => {
   // @ts-expect-error classic content-script dynamic shapes

@@ -45,8 +45,30 @@ const DEFAULT_PREFS = {
   autoOpenEmbed: true,
   singleFileMode: false,
   treeView: true,
+  /**
+   * Bottom-center shortcut / action monitor size:
+   * none | small (1× default) | medium (2×) | large (3×)
+   */
+  shortcutMonitorSize: 'small',
+  /**
+   * Diff file nav (tree click / ⌥⇧[ ]): auto-expand the target file.
+   * Off by default — collapsed files stay collapsed until the user expands.
+   */
+  autoExpandOnFileNav: false,
   onboardingCompleted: false,
 };
+
+function normalizeShortcutMonitorSizePref(raw: unknown): string {
+  const v = String(raw ?? '')
+    .trim()
+    .toLowerCase();
+  if (v === 'none' || v === 'off' || v === 'hidden' || v === '0') return 'none';
+  if (v === 'medium' || v === 'md' || v === '2' || v === '2x') return 'medium';
+  if (v === 'large' || v === 'lg' || v === '3' || v === '3x') return 'large';
+  if (v === 'small' || v === 'sm' || v === '1' || v === '1x') return 'small';
+  if (raw === false) return 'none';
+  return DEFAULT_PREFS.shortcutMonitorSize;
+}
 
 function getStorageArea(storageApi: any = (globalThis as any).chrome?.storage?.local) {
   return storageApi || null;
@@ -61,6 +83,8 @@ function getStorageArea(storageApi: any = (globalThis as any).chrome?.storage?.l
  *   autoOpenEmbed: boolean,
  *   singleFileMode: boolean,
  *   treeView: boolean,
+ *   shortcutMonitorSize: 'none'|'small'|'medium'|'large',
+ *   autoExpandOnFileNav: boolean,
  *   onboardingCompleted: boolean,
  * }}
  */
@@ -86,6 +110,13 @@ function normalizePrefs(raw: any) {
         : DEFAULT_PREFS.singleFileMode,
     treeView:
       typeof src.treeView === 'boolean' ? src.treeView : DEFAULT_PREFS.treeView,
+    shortcutMonitorSize: normalizeShortcutMonitorSizePref(
+      src.shortcutMonitorSize
+    ),
+    autoExpandOnFileNav:
+      typeof src.autoExpandOnFileNav === 'boolean'
+        ? src.autoExpandOnFileNav
+        : DEFAULT_PREFS.autoExpandOnFileNav,
     onboardingCompleted:
       typeof src.onboardingCompleted === 'boolean'
         ? src.onboardingCompleted

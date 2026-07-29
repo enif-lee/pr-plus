@@ -13,12 +13,54 @@ import {
   FILE_NAV_SHORTCUT,
   DIFF_PAGE_SCROLL_SHORTCUT,
   TOGGLE_VIEWED_SHORTCUT,
+  FILE_FOLD_SHORTCUT,
   REVIEW_FILTER_SHORTCUT,
 } from './shortcut-policy';
 import { PR_MODAL_OPT_ACTIONS } from './command-palette';
 
 /** Auto-dismiss fired-action HUD after this idle (ms). Successive fires reset. */
 export const SHORTCUT_MONITOR_DISMISS_MS = 1800;
+
+/**
+ * Bottom-center shortcut / action monitor size (extension prefs).
+ * - none: hidden
+ * - small: current default (1×)
+ * - medium: 2×
+ * - large: 3×
+ */
+export type ShortcutMonitorSize = 'none' | 'small' | 'medium' | 'large';
+
+export const SHORTCUT_MONITOR_SIZE_OPTIONS: readonly ShortcutMonitorSize[] = [
+  'none',
+  'small',
+  'medium',
+  'large',
+] as const;
+
+/** Default when unset / unknown. */
+export const DEFAULT_SHORTCUT_MONITOR_SIZE: ShortcutMonitorSize = 'small';
+
+/**
+ * Normalize a prefs value to a known size. Unknown → small.
+ */
+export function normalizeShortcutMonitorSize(
+  raw: unknown
+): ShortcutMonitorSize {
+  const v = String(raw ?? '')
+    .trim()
+    .toLowerCase();
+  if (v === 'none' || v === 'off' || v === 'hidden' || v === '0') return 'none';
+  if (v === 'medium' || v === 'md' || v === '2' || v === '2x') return 'medium';
+  if (v === 'large' || v === 'lg' || v === '3' || v === '3x') return 'large';
+  if (v === 'small' || v === 'sm' || v === '1' || v === '1x') return 'small';
+  // boolean false from old experiments → none
+  if (raw === false) return 'none';
+  return DEFAULT_SHORTCUT_MONITOR_SIZE;
+}
+
+export function isShortcutMonitorEnabled(size: unknown): boolean {
+  return normalizeShortcutMonitorSize(size) !== 'none';
+}
 
 export type ShortcutMonitorFire = {
   action: string;
@@ -120,6 +162,11 @@ export const SHORTCUT_MONITOR_CATALOG: Record<string, ShortcutMonitorEntry> = {
     title: 'Toggle file viewed',
     labelMac: TOGGLE_VIEWED_SHORTCUT.labelMac,
     labelWin: TOGGLE_VIEWED_SHORTCUT.labelWin,
+  },
+  toggleActiveFileCollapse: {
+    title: 'Fold / expand focused file',
+    labelMac: FILE_FOLD_SHORTCUT.labelMac,
+    labelWin: FILE_FOLD_SHORTCUT.labelWin,
   },
   toggleReviewFilterUnresolved: {
     title: 'Filter unresolved',

@@ -3,18 +3,23 @@
  * Residual CSS: ./MergeBox.css (tone tokens + split CTA only).
  * Layout/spacing/typography: Tailwind utilities on this file.
  */
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@common/Button';
 import { IconFileDiff, IconMergeStatus } from '@common/icons';
 import { OptBtnHint } from '@common/OptBtnHint';
 import { MergeBoxChecks } from './MergeBoxChecks';
 import { hasChecksData } from './ChecksPanel';
 import {
+  defaultMergeMethod,
   mergeMethodButtonLabel,
-  MERGE_METHODS,
+  mergeMethodsForUi,
   normalizeMergeMethod,
   type MergeMethod,
 } from '@lib/merge-box-status';
+import {
+  shouldShowDeleteHeadBranch,
+  deleteHeadBranchButtonLabel,
+} from '@lib/delete-head-branch';
 import './MergeBox.css';
 
 export function MergeBox({
@@ -24,6 +29,7 @@ export function MergeBox({
   actionBusy,
   onMergePr,
   onUpdateBranch,
+  onDeleteHeadBranch,
   onSetDraftStage,
 }: {
   detail: any;
@@ -32,11 +38,25 @@ export function MergeBox({
   actionBusy?: boolean;
   onMergePr?: (method: MergeMethod) => void;
   onUpdateBranch?: () => void;
+  onDeleteHeadBranch?: (() => void) | null;
   onSetDraftStage?: (stage: string) => void;
 }) {
-  const [mergeMethod, setMergeMethod] = useState<MergeMethod>('merge');
+  const methods = useMemo(() => mergeMethodsForUi(detail), [detail]);
+  const [mergeMethod, setMergeMethod] = useState<MergeMethod>(() =>
+    defaultMergeMethod(detail)
+  );
   const [mergeMenuOpen, setMergeMenuOpen] = useState(false);
   const mergeMenuRef = useRef<HTMLDivElement | null>(null);
+
+  // Keep selection valid when repo settings load / change.
+  useEffect(() => {
+    setMergeMethod((cur) => defaultMergeMethod(detail, cur));
+  }, [
+    detail?.allowMergeCommit,
+    detail?.allowSquashMerge,
+    detail?.allowRebaseMerge,
+    detail?.number,
+  ]);
 
   useEffect(() => {
     if (!mergeMenuOpen) return undefined;
@@ -52,6 +72,13 @@ export function MergeBox({
 
   const conflictFiles = Array.isArray(ms.conflictFiles) ? ms.conflictFiles : [];
   const resolveUrl = ms.resolveConflictsUrl || null;
+  const activeMethodMeta =
+    methods.find((m) => m.id === mergeMethod) || methods[0] || null;
+  const showMethodMenu = methods.length > 1;
+  const showDeleteBranch =
+    typeof shouldShowDeleteHeadBranch === 'function'
+      ? shouldShowDeleteHeadBranch(detail)
+      : Boolean(detail?.merged && detail?.headRef && !detail?.headBranchDeleted);
 
   return (
     <div
@@ -68,7 +95,7 @@ export function MergeBox({
           <IconMergeStatus kind={ms.kind} size={16} />
         </span>
         <div className="prp-merge-box__copy min-w-0 flex-1">
-          <h3 className="prp-merge-box__headline m-0 mb-1 text-sm font-semibold leading-snug text-[var(--prp-fg)]">
+          <h3 className="prp-merge-box__headline m-0 mb-1 text-sm font-semibold leading-snug">
             {ms.headline}
           </h3>
           <p className="prp-merge-box__helper m-0 text-[13px] leading-snug text-[var(--prp-fg-muted)]">
@@ -131,9 +158,24 @@ export function MergeBox({
         </p>
       ) : null}
 
+      {showDeleteBranch ? (
+        <div className="prp-merge-box__actions flex flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            variant="danger"
+            disabled={actionBusy}
+            onClick={() => onDeleteHeadBranch?.()}
+            data-prp-delete-head-branch="1"
+            title="Delete the pull request head branch from the repository"
+          >
+            {deleteHeadBranchButtonLabel(detail)}
+          </Button>
+        </div>
+      ) : null}
+
       {detail.state === 'open' && !detail.merged ? (
         <div className="prp-merge-box__actions flex flex-wrap items-center gap-2">
-          {ms.showMerge ? (
+          {ms.showMerge && methods.length > 0 ? (
             <div
               className={`prp-merge-method prp-merge-method--${ms.ctaVariant || 'default'} relative inline-flex flex-col items-stretch${
                 ms.forceMerge ? ' prp-merge-method--force' : ''
@@ -142,6 +184,7 @@ export function MergeBox({
               data-cta-variant={ms.ctaVariant || 'default'}
               data-force-merge={ms.forceMerge ? '1' : '0'}
               data-can-merge={ms.canMerge ? '1' : '0'}
+              data-method-count={methods.length}
             >
               <div className="prp-merge-method__split prp-opt-hint-host inline-flex items-stretch overflow-hidden rounded-lg">
                 <OptBtnHint label="⌥⇧M" />
@@ -155,8 +198,7 @@ export function MergeBox({
                   title={
                     ms.forceMerge
                       ? 'Force merge — bypasses failing checks / branch protection if your token has permission'
-                      : MERGE_METHODS.find((m) => m.id === mergeMethod)?.description ||
-                        'Merge pull request'
+                      : activeMethodMeta?.description || 'Merge pull request'
                   }
                   shortcut="⌥⇧M"
                 >
@@ -164,27 +206,29 @@ export function MergeBox({
                     force: Boolean(ms.forceMerge),
                   })}
                 </Button>
-                <button
-                  type="button"
-                  className={`prp-merge-method__caret prp-merge-method__caret--${
-                    ms.ctaVariant || 'default'
-                  } inline-flex min-w-[34px] items-center justify-center px-2.5 text-xs font-inherit rounded-tr-lg rounded-br-lg`}
-                  disabled={actionBusy || !ms.canMerge}
-                  aria-haspopup="menu"
-                  aria-expanded={mergeMenuOpen}
-                  aria-label="Select merge method"
-                  title="Select merge method"
-                  onClick={() => setMergeMenuOpen((o) => !o)}
-                >
-                  ▾
-                </button>
+                {showMethodMenu ? (
+                  <button
+                    type="button"
+                    className={`prp-merge-method__caret prp-merge-method__caret--${
+                      ms.ctaVariant || 'default'
+                    } inline-flex min-w-[34px] items-center justify-center px-2.5 text-xs font-inherit rounded-tr-lg rounded-br-lg`}
+                    disabled={actionBusy || !ms.canMerge}
+                    aria-haspopup="menu"
+                    aria-expanded={mergeMenuOpen}
+                    aria-label="Select merge method"
+                    title="Select merge method"
+                    onClick={() => setMergeMenuOpen((o) => !o)}
+                  >
+                    ▾
+                  </button>
+                ) : null}
               </div>
-              {mergeMenuOpen ? (
+              {mergeMenuOpen && showMethodMenu ? (
                 <ul
                   className="prp-merge-method__menu m-0 list-none rounded-[10px] p-1.5"
                   role="menu"
                 >
-                  {MERGE_METHODS.map((m) => (
+                  {methods.map((m) => (
                     <li key={m.id} role="none">
                       <button
                         type="button"

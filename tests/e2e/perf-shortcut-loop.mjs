@@ -218,16 +218,24 @@ async function main() {
   // --- Conversation: hold ⌥J then ⌥K ---
   await run(`open PR #${DEMO_PR} conversation`, () => {
     openPr(DEMO_PR);
+    blurEditable();
     setLayout('conversation');
     focusModal();
+    blurEditable();
     installPerfProbe();
   });
 
   await run(`conv hold ⌥J then ⌥K (${HOLD_MS}ms each)`, () => {
-    // Seed one step so focus exists before hold.
-    press('Alt+j');
-    waitMs(60);
-    const seed = convFocusPin();
+    // Seed focus like feature-scenario (⌥⇧C), then step with ⌥J before hold.
+    blurEditable();
+    press('Alt+Shift+c');
+    waitMs(120);
+    let seed = convFocusPin();
+    if (!seed.hasFocus) {
+      press('Alt+j');
+      waitMs(120);
+      seed = convFocusPin();
+    }
     assert(seed.hasFocus, `failed to seed kb focus: ${JSON.stringify(seed)}`);
     log(`  seed pin=${seed.pin} scrollTop=${seed.scrollTop}`);
 
@@ -258,11 +266,14 @@ async function main() {
   });
 
   // --- Diff page: hold ⌥⇧↓ / ⌥⇧↑ ---
-  await run(`open heavy PR #${HEAVY_PR} Diff`, () => {
+  await run(`open heavy PR #${HEAVY_PR} Diff (closed PR URL)`, () => {
     closeOverlay();
-    openPr(HEAVY_PR);
+    // #14 is merged — open via /pull/14 (not default open /pulls list)
+    openPr(HEAVY_PR, { viaUrl: true });
+    blurEditable();
     setLayout('diff');
     focusModal();
+    blurEditable();
     installPerfProbe();
     const s = diffScroll();
     assert(s && s.scrollHeight > s.clientHeight * 2, `diff too short: ${JSON.stringify(s)}`);

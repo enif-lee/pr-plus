@@ -11,6 +11,7 @@ import {
   ROW_HEIGHT,
   COMMENT_ROW_HEIGHT_COLLAPSED,
   averageRowHeight,
+  rowHeightFor,
   rowOffsets,
   highlightCode,
   escapeHtml,
@@ -26,8 +27,11 @@ import { calculateVisibleRange } from '@lib/virtual-range';
 import {
   isSelectableDiffRow,
   rowSelectionVisualKey,
+  selectionActiveSide,
 } from '@lib/line-selection';
 import { isPathViewed } from '@lib/review-threads';
+import { OptBtnHint } from '@common/OptBtnHint';
+import { FILE_FOLD_SHORTCUT } from '@lib/shortcut-policy';
 import {
   stickyFileHeaderForScroll,
   resolveStickyFileHeaderLayout,
@@ -38,6 +42,12 @@ import {
   markSearchInHtml,
   resolveActiveMarkStart,
 } from '@lib/search-index';
+import {
+  diffLineExpandKey,
+  isDiffLineExpandable,
+  expandedCodeLineHeight,
+  toggleExpandKey,
+} from '@lib/line-expand';
 import { IconDisclosure } from '@common/icons';
 import { FloatingScrollbar } from '../../components/common/FloatingScrollbar';
 import { ImageViewer } from '@common/ImageViewer';
@@ -113,6 +123,11 @@ function FileHeaderRow(props: {
   const dels = row.deletions ?? 0;
   const headerTone = fileHeaderTone(row);
   const hasIsland = Boolean(selectionIsland);
+  const foldKbd =
+    typeof navigator !== 'undefined' &&
+    /Mac|iPhone|iPad/.test(navigator.platform || '')
+      ? FILE_FOLD_SHORTCUT.labelMac
+      : FILE_FOLD_SHORTCUT.labelWin;
 
   const headerEl = (
     <div
@@ -140,10 +155,25 @@ function FileHeaderRow(props: {
       {openable ? (
         <button
           type="button"
-          className="prp-file-header__collapse"
-          title={collapsed ? 'Expand file' : 'Collapse file'}
+          className={`prp-file-header__collapse${
+            focused ? ' prp-opt-hint-host' : ''
+          }`}
+          title={
+            focused
+              ? collapsed
+                ? `Expand file (${foldKbd})`
+                : `Collapse file (${foldKbd})`
+              : collapsed
+                ? 'Expand file'
+                : 'Collapse file'
+          }
+          aria-label={collapsed ? 'Expand file' : 'Collapse file'}
+          aria-expanded={!collapsed}
           onClick={() => onToggleCollapse?.(row.filePath)}
         >
+          {focused ? (
+            <OptBtnHint label={foldKbd} preferredPlacement="bottom" />
+          ) : null}
           <IconDisclosure open={!collapsed} size={12} />
         </button>
       ) : (
@@ -285,6 +315,12 @@ type DiffCodeLineProps = {
   hljsEpoch: number;
   /** Selection action/composer docked under selection end row */
   selectionIsland?: React.ReactNode;
+  /** Virtual row height (ROW_HEIGHT or expanded multi-line height). */
+  rowHeight?: number;
+  lineExpanded?: boolean;
+  lineExpandable?: boolean;
+  onToggleLineExpand?: () => void;
+  onMeasureLineHeight?: (height: number) => void;
 };
 
 type DiffCodeLineBodyProps = {
@@ -494,7 +530,7 @@ const DiffCodeLine = memo(function DiffCodeLine({
   occ,
   searchQuery,
   selectionOverride,
-  selecting,
+  selecting: _selecting,
   onSelectionStart,
   onSelectionExtend,
   onExpandGap,
@@ -502,6 +538,11 @@ const DiffCodeLine = memo(function DiffCodeLine({
   useSyntax,
   hljsEpoch: _hljsEpoch,
   selectionIsland = null,
+  rowHeight = ROW_HEIGHT,
+  lineExpanded = false,
+  lineExpandable = false,
+  onToggleLineExpand,
+  onMeasureLineHeight,
 }: DiffCodeLineProps) {
   const isCode =
     row.kind === 'diff-line' &&
@@ -532,11 +573,15 @@ const DiffCodeLine = memo(function DiffCodeLine({
         ? rowSelectionVisualKey(s.lineSelection, row)
         : '';
     const side =
-      String(
-        s.lineSelection?.headSide || s.lineSelection?.anchorSide || 'RIGHT'
-      ).toUpperCase() === 'LEFT'
-        ? 'LEFT'
-        : 'RIGHT';
+      typeof selectionActiveSide === 'function'
+        ? selectionActiveSide(s.lineSelection)
+        : String(
+            s.lineSelection?.headSide ||
+              s.lineSelection?.anchorSide ||
+              'RIGHT'
+          ).toUpperCase() === 'LEFT'
+          ? 'LEFT'
+          : 'RIGHT';
     return `${visualKey}\x1e${side}`;
   });
   const storeSep = storeLeafPacked.lastIndexOf('\x1e');
@@ -560,38 +605,76 @@ const DiffCodeLine = memo(function DiffCodeLine({
   );
   const dockSide: 'LEFT' | 'RIGHT' =
     selectionOverride !== undefined
-      ? String(
-          (selectionOverride as any)?.headSide ||
-            (selectionOverride as any)?.anchorSide ||
-            'RIGHT'
-        ).toUpperCase() === 'LEFT'
-        ? 'LEFT'
-        : 'RIGHT'
+      ? typeof selectionActiveSide === 'function'
+        ? selectionActiveSide(selectionOverride)
+        : String(
+            (selectionOverride as any)?.headSide ||
+              (selectionOverride as any)?.anchorSide ||
+              'RIGHT'
+          ).toUpperCase() === 'LEFT'
+          ? 'LEFT'
+          : 'RIGHT'
       : storeDockSide;
+  // Split: paint selection mark only on the active pane (LEFT|RIGHT)
+  const selSideClass =
+    selected && isSplit
+      ? dockSide === 'LEFT'
+        ? ' prp-vline--sel-side-left'
+        : ' prp-vline--sel-side-right'
+      : '';
+
+  const h = Math.max(ROW_HEIGHT, Number(rowHeight) || ROW_HEIGHT);
+  const lineRef = useRef<HTMLDivElement | null>(null);
+
+  // After expand, measure content and feed virtualizer offsets.
+  useLayoutEffect(() => {
+    if (!lineExpanded || typeof onMeasureLineHeight !== 'function') return;
+    const el = lineRef.current;
+    if (!el) return;
+    const measure = () => {
+      // Prefer content box (code) so padding is included via offsetHeight of row
+      const next = Math.ceil(el.scrollHeight || el.offsetHeight || h);
+      if (next > 0) onMeasureLineHeight(next);
+    };
+    measure();
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(() => measure());
+      ro.observe(el);
+    }
+    return () => {
+      ro?.disconnect();
+    };
+  }, [lineExpanded, onMeasureLineHeight, row.text, row.code, h]);
 
   // Line chrome only — dock mounts on a host *outside* .prp-vline because
   // .prp-vline uses contain:paint which clips absolute children to ROW_HEIGHT.
   const lineEl = (
     <div
+      ref={lineRef}
       className={`prp-vline prp-vline--${row.lineType || row.kind}${
         isSplit ? ' prp-vline--split' : ''
       }${isHunk ? ' prp-vline--hunk' : ''}${
         hasHunkExpand ? ' prp-vline--hunk-expandable' : ''
       }${hideHunkText ? ' prp-vline--hunk-hidden-text' : ''}${searchRowClass}${
         selected ? ' prp-vline--selected' : ''
-      }${selRole ? ` prp-vline--sel-${selRole}` : ''}${
+      }${selRole ? ` prp-vline--sel-${selRole}` : ''}${selSideClass}${
         selectable ? ' prp-vline--selectable' : ''
+      }${lineExpanded ? ' prp-vline--line-expanded' : ''}${
+        lineExpandable ? ' prp-vline--line-expandable' : ''
       }`}
-      style={{ height: ROW_HEIGHT }}
+      style={{ height: h, minHeight: h }}
       data-row-index={row.rowIndex}
       data-file-path={row.filePath || ''}
       data-old-line={row.oldLine ?? ''}
       data-new-line={row.newLine ?? ''}
       data-sel-role={selRole || undefined}
+      data-sel-side={selected && isSplit ? dockSide : undefined}
       data-split={isSplit ? '1' : '0'}
       data-search-match={isSearchMatch ? '1' : undefined}
       data-search-current={isActiveHit ? '1' : undefined}
       data-hunk-hidden={hideHunkText ? '1' : undefined}
+      data-line-expanded={lineExpanded ? '1' : undefined}
       title={
         selectable
           ? 'Click = single line · Shift+click or drag = multi-line comment'
@@ -599,6 +682,10 @@ const DiffCodeLine = memo(function DiffCodeLine({
       }
       onMouseDown={(e) => {
         if (e.button !== 0 || !selectable) return;
+        // Don't start line selection when clicking the expand control
+        if ((e.target as HTMLElement)?.closest?.('.prp-line-expand-btn')) {
+          return;
+        }
         e.preventDefault();
         // Split: pick LEFT/RIGHT from click X so comments land on that pane
         let preferredSide: 'LEFT' | 'RIGHT' = 'RIGHT';
@@ -621,11 +708,53 @@ const DiffCodeLine = memo(function DiffCodeLine({
           preferredSide,
         });
       }}
+      // Extend multi-line while primary button is held. Do not gate on the
+      // `selecting` React prop — it is false until the next render after
+      // mousedown; parent onSelectionExtend already no-ops via selectingRef.
+      // Prefer mousemove (bubbles) over mouseenter: React maps enter via
+      // mouseover, so synthetic mouseenter from e2e never extends.
+      onMouseMove={(e) => {
+        if (e.buttons !== 1) return;
+        onSelectionExtend?.(row);
+      }}
       onMouseEnter={() => {
-        if (selecting) onSelectionExtend?.(row);
+        onSelectionExtend?.(row);
+      }}
+      onDoubleClick={(e) => {
+        if (!lineExpandable || !onToggleLineExpand) return;
+        if ((e.target as HTMLElement)?.closest?.('button,a,input,textarea')) {
+          return;
+        }
+        e.preventDefault();
+        onToggleLineExpand();
       }}
     >
-      <span className="prp-line-gutter" />
+      <span className="prp-line-gutter">
+        {lineExpandable && typeof onToggleLineExpand === 'function' ? (
+          <button
+            type="button"
+            className="prp-line-expand-btn"
+            aria-expanded={lineExpanded}
+            aria-label={lineExpanded ? 'Collapse long line' : 'Expand long line'}
+            title={
+              lineExpanded
+                ? 'Collapse line'
+                : 'Expand long line (or double-click)'
+            }
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onToggleLineExpand();
+            }}
+            onMouseDown={(e) => {
+              // Prevent selection drag start
+              e.stopPropagation();
+            }}
+          >
+            <IconDisclosure open={lineExpanded} size={12} />
+          </button>
+        ) : null}
+      </span>
       <DiffCodeLineBody
         row={row}
         isCode={isCode}
@@ -657,7 +786,7 @@ const DiffCodeLine = memo(function DiffCodeLine({
   return (
     <div
       className={`prp-sel-dock-host${splitDockClass}`}
-      style={{ height: ROW_HEIGHT }}
+      style={{ height: h, minHeight: h }}
       data-row-index={row.rowIndex}
       data-dock-side={isSplit ? dockSide : undefined}
     >
@@ -789,13 +918,30 @@ function VirtualDiffImpl(props: any) {
     Math.max(120, Number(viewportHeight) || 520)
   );
 
+  /** Expanded long code lines: key → measured px (estimate until measured). */
+  const [expandedLineKeys, setExpandedLineKeys] = useState(() => new Set<string>());
+  const [measuredLineHeights, setMeasuredLineHeights] = useState(
+    () => new Map<string, number>()
+  );
+
   const heightOpts = useMemo(() => {
-    if (commentHeightOpts) return commentHeightOpts;
-    if (typeof isThreadCollapsed === 'function') {
-      return { isCollapsed: (row: any) => Boolean(isThreadCollapsed(row)) };
-    }
-    return null;
-  }, [commentHeightOpts, isThreadCollapsed]);
+    const base: any =
+      commentHeightOpts ||
+      (typeof isThreadCollapsed === 'function'
+        ? { isCollapsed: (row: any) => Boolean(isThreadCollapsed(row)) }
+        : {});
+    return {
+      ...base,
+      expandedKeys: expandedLineKeys,
+      measuredHeights: measuredLineHeights,
+      expandedCodeLineHeight,
+    };
+  }, [
+    commentHeightOpts,
+    isThreadCollapsed,
+    expandedLineKeys,
+    measuredLineHeights,
+  ]);
 
   const avgH = useMemo(
     () => averageRowHeight(virtualRows, heightOpts),
@@ -805,6 +951,37 @@ function VirtualDiffImpl(props: any) {
     () => rowOffsets(virtualRows, heightOpts),
     [virtualRows, heightOpts]
   );
+
+  const toggleLineExpand = useCallback((row: any) => {
+    const key = diffLineExpandKey(row);
+    if (!key) return;
+    setExpandedLineKeys((prev) => {
+      const next = toggleExpandKey(prev, key);
+      if (!next.has(key)) {
+        // Collapsed — drop measured height
+        setMeasuredLineHeights((m) => {
+          if (!m.has(key)) return m;
+          const copy = new Map(m);
+          copy.delete(key);
+          return copy;
+        });
+      }
+      return next;
+    });
+  }, []);
+
+  const measureLineHeight = useCallback((key: string, height: number) => {
+    const h = Math.ceil(Number(height) || 0);
+    if (!key || h < ROW_HEIGHT) return;
+    setMeasuredLineHeights((prev) => {
+      const cur = prev.get(key);
+      // Ignore sub-pixel / tiny churn
+      if (cur != null && Math.abs(cur - h) < 2) return prev;
+      const next = new Map(prev);
+      next.set(key, h);
+      return next;
+    });
+  }, []);
 
   const vp = Math.max(120, measuredH || Number(viewportHeight) || 520);
   const totalRows = virtualRows?.length || 0;
@@ -1486,6 +1663,13 @@ function VirtualDiffImpl(props: any) {
               );
             }
 
+            const expandKey = diffLineExpandKey(row);
+            const lineExpanded = Boolean(
+              expandKey && expandedLineKeys.has(expandKey)
+            );
+            const lineExpandable =
+              lineExpanded || isDiffLineExpandable(row);
+            const codeRowH = rowHeightFor(row, heightOpts);
             return (
               <DiffCodeLine
                 key={row.rowIndex}
@@ -1508,6 +1692,19 @@ function VirtualDiffImpl(props: any) {
                   showSelectionIsland && !isFileSelection
                     ? selectionIsland
                     : null
+                }
+                rowHeight={codeRowH}
+                lineExpanded={lineExpanded}
+                lineExpandable={lineExpandable}
+                onToggleLineExpand={
+                  lineExpandable
+                    ? () => toggleLineExpand(row)
+                    : undefined
+                }
+                onMeasureLineHeight={
+                  lineExpanded && expandKey
+                    ? (px: number) => measureLineHeight(expandKey, px)
+                    : undefined
                 }
               />
             );

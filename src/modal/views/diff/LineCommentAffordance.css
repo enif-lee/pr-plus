@@ -376,7 +376,8 @@ a.prp-commit-timeline__sha code {
 .prp-merge-checks__item-icon--skipped {
   color: var(--prp-fg-muted);
 }
-.prp-merge-checks__item-icon--pending {
+.prp-merge-checks__item-icon--pending,
+.prp-merge-checks__item-icon--in_progress {
   color: var(--prp-warn);
 }
 .prp-merge-checks__item-body {
@@ -541,7 +542,8 @@ a.prp-merge-checks__item-name:hover {
     0 0 0 1.5px var(--prp-bg),
     0 0 0 2.5px var(--prp-ok);
 }
-.prp-checks-summary-stack__item--pending {
+.prp-checks-summary-stack__item--pending,
+.prp-checks-summary-stack__item--in_progress {
   box-shadow:
     0 0 0 1.5px var(--prp-bg),
     0 0 0 2.5px var(--prp-warn);
@@ -568,6 +570,17 @@ a.prp-merge-checks__item-name:hover {
 }
 .prp-checks-summary-icon--skipped {
   color: var(--prp-fg-muted);
+}
+/* Working / in-progress: amber ring spinner (GitHub-like) */
+.prp-checks-summary-icon--working {
+  display: inline-block;
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  border: 2px solid color-mix(in srgb, var(--prp-warn) 28%, transparent);
+  border-top-color: var(--prp-warn);
+  border-radius: 50%;
+  animation: prp-spin 0.75s linear infinite;
+  vertical-align: middle;
 }
 .prp-checks-summary-icon--spin {
   animation: prp-spin 0.85s linear infinite;

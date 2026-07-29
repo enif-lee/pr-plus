@@ -28,6 +28,18 @@
   border-color: var(--prp-border);
   box-shadow: none;
 }
+/* Merged — GitHub purple surface */
+.prp-merge-box--merged {
+  background: color-mix(in srgb, var(--prp-merged, #8250df) 10%, var(--prp-bg));
+  border-color: color-mix(in srgb, var(--prp-merged, #8250df) 38%, var(--prp-border));
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--prp-merged, #8250df) 14%, transparent);
+}
+/* Closed (not merged) — danger/red surface */
+.prp-merge-box--closed {
+  background: color-mix(in srgb, var(--prp-danger) 8%, var(--prp-bg));
+  border-color: color-mix(in srgb, var(--prp-danger) 32%, var(--prp-border));
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--prp-danger) 10%, transparent);
+}
 
 /* Status icon chip tones */
 .prp-merge-box__icon {
@@ -39,13 +51,30 @@
   background: color-mix(in srgb, var(--prp-warn) 18%, var(--prp-bg));
   color: var(--prp-warn);
 }
-.prp-merge-box__icon--danger {
+.prp-merge-box__icon--danger,
+.prp-merge-box__icon--closed {
   background: color-mix(in srgb, var(--prp-danger) 16%, var(--prp-bg));
   color: var(--prp-danger);
+}
+.prp-merge-box__icon--merged {
+  background: color-mix(in srgb, var(--prp-merged, #8250df) 18%, var(--prp-bg));
+  color: var(--prp-merged, #8250df);
 }
 .prp-merge-box__icon--muted {
   background: var(--prp-bg-muted);
   color: var(--prp-fg-muted);
+}
+
+/* Headline inherits tone for terminal states */
+.prp-merge-box__headline {
+  color: var(--prp-fg);
+}
+.prp-merge-box--merged .prp-merge-box__headline {
+  color: var(--prp-merged, #8250df);
+}
+.prp-merge-box--closed .prp-merge-box__headline,
+.prp-merge-box--danger .prp-merge-box__headline {
+  color: var(--prp-danger);
 }
 
 .prp-merge-box__conflict-file {
@@ -137,4 +166,15 @@
 .prp-merge-method__item:hover,
 .prp-merge-method__item--active {
   background: var(--prp-bg-muted);
+}
+
+/* ⌥J/K focus ring host around merge box */
+.prp-merge-box-focus-host {
+  border-radius: 12px;
+  min-width: 0;
+}
+.prp-merge-box-focus-host--focused,
+.prp-merge-box-focus-host.prp-card--kb-focus {
+  outline: 2px solid var(--prp-accent, #0969da);
+  outline-offset: 2px;
 }

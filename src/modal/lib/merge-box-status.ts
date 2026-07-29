@@ -3,7 +3,16 @@
  * Mirrors GitHub's merge box role: one headline, one helper, clear CTAs.
  */
 
-export type MergeBoxTone = 'ok' | 'warn' | 'danger' | 'muted' | 'draft';
+export type MergeBoxTone =
+  | 'ok'
+  | 'warn'
+  | 'danger'
+  | 'muted'
+  | 'draft'
+  /** GitHub merged purple */
+  | 'merged'
+  /** Closed without merge — red */
+  | 'closed';
 
 /** Button visual variant (maps to prp-btn--*). */
 export type MergeCtaVariant = 'ok' | 'warn' | 'danger' | 'default';
@@ -13,6 +22,7 @@ export type MergeMethod = 'merge' | 'squash' | 'rebase';
 export interface MergeBoxStatus {
   kind:
     | 'merged'
+    | 'closed'
     | 'draft'
     | 'blocked'
     | 'conflicts'
@@ -179,6 +189,65 @@ export const MERGE_METHODS: Array<{ id: MergeMethod; label: string; description:
   },
 ];
 
+export type RepoMergeMethodFlags = {
+  allowMergeCommit: boolean | null;
+  allowSquashMerge: boolean | null;
+  allowRebaseMerge: boolean | null;
+};
+
+function boolFlagOrNull(v: unknown): boolean | null {
+  if (v === true || v === false) return v;
+  return null;
+}
+
+/**
+ * Read repository merge-method toggles from a PR detail snapshot.
+ * Accepts camelCase (our detail) or snake_case (raw REST).
+ * `null` means unknown / not yet loaded.
+ */
+export function readRepoMergeMethodFlags(detail: any): RepoMergeMethodFlags {
+  const d = detail || {};
+  return {
+    allowMergeCommit: boolFlagOrNull(
+      d.allowMergeCommit ?? d.allow_merge_commit
+    ),
+    allowSquashMerge: boolFlagOrNull(
+      d.allowSquashMerge ?? d.allow_squash_merge
+    ),
+    allowRebaseMerge: boolFlagOrNull(
+      d.allowRebaseMerge ?? d.allow_rebase_merge
+    ),
+  };
+}
+
+/**
+ * Merge methods enabled by repository settings (Settings → General → Pull Requests).
+ * When flags are unknown (all null), return all three so the UI does not hide
+ * controls before settings load. When any flag is known, only methods with
+ * `true` are returned (empty when the repo disabled every method).
+ */
+export function allowedMergeMethods(detail: any): MergeMethod[] {
+  const f = readRepoMergeMethodFlags(detail);
+  const known =
+    f.allowMergeCommit != null ||
+    f.allowSquashMerge != null ||
+    f.allowRebaseMerge != null;
+  if (!known) return ['merge', 'squash', 'rebase'];
+  const out: MergeMethod[] = [];
+  if (f.allowMergeCommit === true) out.push('merge');
+  if (f.allowSquashMerge === true) out.push('squash');
+  if (f.allowRebaseMerge === true) out.push('rebase');
+  return out;
+}
+
+/** MERGE_METHODS rows allowed by the repository (order preserved). */
+export function mergeMethodsForUi(
+  detail: any
+): Array<{ id: MergeMethod; label: string; description: string }> {
+  const allowed = new Set(allowedMergeMethods(detail));
+  return MERGE_METHODS.filter((m) => allowed.has(m.id));
+}
+
 export function normalizeMergeMethod(raw: unknown): MergeMethod {
   const v = String(raw || '')
     .trim()
@@ -186,6 +255,33 @@ export function normalizeMergeMethod(raw: unknown): MergeMethod {
   if (v === 'squash') return 'squash';
   if (v === 'rebase') return 'rebase';
   return 'merge';
+}
+
+/**
+ * Prefer `preferred` when still allowed; otherwise first repo-allowed method.
+ * Falls back to `'merge'` only when settings are unknown / empty.
+ */
+export function defaultMergeMethod(
+  detail: any,
+  preferred?: MergeMethod | null
+): MergeMethod {
+  const allowed = allowedMergeMethods(detail);
+  if (preferred && allowed.includes(preferred)) return preferred;
+  if (allowed.length > 0) return allowed[0];
+  return 'merge';
+}
+
+/**
+ * Coerce a requested method onto an allowed one, or null when none enabled.
+ */
+export function coerceMergeMethod(
+  detail: any,
+  requested?: unknown
+): MergeMethod | null {
+  const allowed = allowedMergeMethods(detail);
+  if (allowed.length === 0) return null;
+  const m = normalizeMergeMethod(requested);
+  return allowed.includes(m) ? m : allowed[0];
 }
 
 /**
@@ -257,6 +353,38 @@ function checksLineFrom(d: any): string | null {
 }
 
 /**
+ * When the repository has disabled every merge method, hide the merge CTA.
+ * (Unknown settings → keep status as-is.)
+ */
+function applyRepoMergeMethodGate(
+  status: MergeBoxStatus,
+  detail: any
+): MergeBoxStatus {
+  if (!status.showMerge) return status;
+  const f = readRepoMergeMethodFlags(detail);
+  const known =
+    f.allowMergeCommit != null ||
+    f.allowSquashMerge != null ||
+    f.allowRebaseMerge != null;
+  if (!known) return status;
+  if (allowedMergeMethods(detail).length > 0) return status;
+  return {
+    ...status,
+    showMerge: false,
+    canMerge: false,
+    forceMerge: false,
+    ctaVariant: 'default',
+    tone: status.kind === 'clean' ? 'muted' : status.tone,
+    headline:
+      status.kind === 'clean' || status.kind === 'unstable'
+        ? 'Merging is disabled for this repository'
+        : status.headline,
+    helper:
+      'All pull request merge methods are disabled in repository settings.',
+  };
+}
+
+/**
  * Build merge-box presentation + primary CTA from a PR detail snapshot.
  */
 export function buildMergeBoxStatus(detail: any): MergeBoxStatus {
@@ -272,7 +400,7 @@ export function buildMergeBoxStatus(detail: any): MergeBoxStatus {
   if (d.merged) {
     return {
       kind: 'merged',
-      tone: 'ok',
+      tone: 'merged',
       headline: 'Pull request successfully merged and closed',
       helper: 'This pull request has been merged.',
       checksLine: null,
@@ -289,8 +417,8 @@ export function buildMergeBoxStatus(detail: any): MergeBoxStatus {
   const isOpen = String(d.state || 'open') === 'open';
   if (!isOpen) {
     return {
-      kind: 'unknown',
-      tone: 'muted',
+      kind: 'closed',
+      tone: 'closed',
       headline: 'Pull request is closed',
       helper: 'Reopen the pull request to merge or update the branch.',
       checksLine,
@@ -357,40 +485,46 @@ export function buildMergeBoxStatus(detail: any): MergeBoxStatus {
   if (isPolicyBlocked || d.mergeable === false) {
     // mergeable=false + blocked (or blocked alone): checks / branch protection
     const canForce = forceAllowed;
-    return {
-      kind: 'blocked',
-      tone: 'danger',
-      headline: 'Required status checks must pass before merging',
-      helper: canForce
-        ? 'Repository rules block a normal merge. You can force-merge if you accept the risk.'
-        : 'Fix failing checks or update the branch, then try again.',
-      checksLine,
-      showMerge: true,
-      canMerge: canForce,
-      forceMerge: canForce,
-      ctaVariant: 'danger',
-      showUpdateBranch,
-      draftToggle: 'draft',
-      ...emptyConflictFields(),
-    };
+    return applyRepoMergeMethodGate(
+      {
+        kind: 'blocked',
+        tone: 'danger',
+        headline: 'Required status checks must pass before merging',
+        helper: canForce
+          ? 'Repository rules block a normal merge. You can force-merge if you accept the risk.'
+          : 'Fix failing checks or update the branch, then try again.',
+        checksLine,
+        showMerge: true,
+        canMerge: canForce,
+        forceMerge: canForce,
+        ctaVariant: 'danger',
+        showUpdateBranch,
+        draftToggle: 'draft',
+        ...emptyConflictFields(),
+      },
+      d
+    );
   }
 
   // Still computing mergeability — do not show green success CTA
   if (d.mergeable == null && mergeableState !== 'clean' && mergeableState !== 'unstable') {
-    return {
-      kind: 'unknown',
-      tone: 'muted',
-      headline: 'Checking if this branch can be merged…',
-      helper: 'Mergeability is still being calculated. Try again in a moment.',
-      checksLine,
-      showMerge: true,
-      canMerge: false,
-      forceMerge: false,
-      ctaVariant: 'default',
-      showUpdateBranch,
-      draftToggle: 'draft',
-      ...emptyConflictFields(),
-    };
+    return applyRepoMergeMethodGate(
+      {
+        kind: 'unknown',
+        tone: 'muted',
+        headline: 'Checking if this branch can be merged…',
+        helper: 'Mergeability is still being calculated. Try again in a moment.',
+        checksLine,
+        showMerge: true,
+        canMerge: false,
+        forceMerge: false,
+        ctaVariant: 'default',
+        showUpdateBranch,
+        draftToggle: 'draft',
+        ...emptyConflictFields(),
+      },
+      d
+    );
   }
 
   // Unstable: mergeable but failing/pending checks (real items only).
@@ -403,39 +537,45 @@ export function buildMergeBoxStatus(detail: any): MergeBoxStatus {
         checksState === 'error')) ||
     (mergeableState === 'unstable' && hasRealChecks);
   if (unstable && d.mergeable !== false) {
-    return {
-      kind: 'unstable',
-      tone: 'warn',
-      headline:
-        checksState === 'pending'
-          ? 'Some checks are still running'
-          : 'Merging is blocked by failing or pending checks',
-      helper:
-        'You can still attempt a merge if repository rules allow it; checks may be incomplete.',
+    return applyRepoMergeMethodGate(
+      {
+        kind: 'unstable',
+        tone: 'warn',
+        headline:
+          checksState === 'pending'
+            ? 'Some checks are still running'
+            : 'Merging is blocked by failing or pending checks',
+        helper:
+          'You can still attempt a merge if repository rules allow it; checks may be incomplete.',
+        checksLine,
+        showMerge: true,
+        canMerge: true,
+        forceMerge: false,
+        ctaVariant: 'warn',
+        showUpdateBranch,
+        draftToggle: 'draft',
+        ...emptyConflictFields(),
+      },
+      d
+    );
+  }
+
+  // Clean / ready
+  return applyRepoMergeMethodGate(
+    {
+      kind: 'clean',
+      tone: 'ok',
+      headline: 'This branch has no conflicts with the base branch',
+      helper: 'Merging can be performed automatically.',
       checksLine,
       showMerge: true,
       canMerge: true,
       forceMerge: false,
-      ctaVariant: 'warn',
+      ctaVariant: 'ok',
       showUpdateBranch,
       draftToggle: 'draft',
       ...emptyConflictFields(),
-    };
-  }
-
-  // Clean / ready
-  return {
-    kind: 'clean',
-    tone: 'ok',
-    headline: 'This branch has no conflicts with the base branch',
-    helper: 'Merging can be performed automatically.',
-    checksLine,
-    showMerge: true,
-    canMerge: true,
-    forceMerge: false,
-    ctaVariant: 'ok',
-    showUpdateBranch,
-    draftToggle: 'draft',
-    ...emptyConflictFields(),
-  };
+    },
+    d
+  );
 }

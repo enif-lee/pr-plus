@@ -821,10 +821,11 @@ export function Header(props: any) {
               </>
             )}
           </div>
-          {/* Status: draft only (no open badge). Closed still labeled when not merged. */}
+          {/* Status badges: draft / merged (purple) / closed (red). Open has no badge. */}
           {detail.draft ? <Badge tone="draft">Draft</Badge> : null}
-          {!detail.draft && detail.state === 'closed' && !detail.merged ? (
-            <Badge tone="muted">closed</Badge>
+          {detail.merged ? <Badge tone="merged">Merged</Badge> : null}
+          {!detail.merged && detail.state === 'closed' ? (
+            <Badge tone="closed">Closed</Badge>
           ) : null}
           {/* Conversation: reviewers/checks live in the right rail.
               Diff compact: continuous overlapping stack — reviewers then checks. */}

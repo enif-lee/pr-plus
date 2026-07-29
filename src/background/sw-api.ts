@@ -275,6 +275,10 @@ const MSG = {
   GET_REPO_FILE_TEXT: 'PR_TREE_GET_REPO_FILE_TEXT',
   MERGE_PULL: 'PR_TREE_MERGE_PULL',
   UPDATE_BRANCH: 'PR_TREE_UPDATE_BRANCH',
+  DELETE_HEAD_BRANCH: 'PR_TREE_DELETE_HEAD_BRANCH',
+  FETCH_VIEWER_VIEWED_PATHS: 'PR_TREE_FETCH_VIEWER_VIEWED_PATHS',
+  MARK_FILE_VIEWED: 'PR_TREE_MARK_FILE_VIEWED',
+  UNMARK_FILE_VIEWED: 'PR_TREE_UNMARK_FILE_VIEWED',
   SET_SUBSCRIPTION: 'PR_TREE_SET_SUBSCRIPTION',
   DELETE_SUBSCRIPTION: 'PR_TREE_DELETE_SUBSCRIPTION',
   SET_MILESTONE: 'PR_TREE_SET_MILESTONE',
@@ -1546,6 +1550,61 @@ async function handleMessage(message: any) {
         { expectedHeadSha: message.expectedHeadSha },
         fetchImpl(),
         token, apiCtx);
+      return { ok: true, result };
+    }
+    case MSG.DELETE_HEAD_BRANCH: {
+      const token = await tokenForMessage(message);
+      if (!token) throw new Error('GitHub PAT required to delete branch');
+      const result = await PRTreeFetch.deleteHeadBranch(
+        message.owner,
+        message.repo,
+        message.branch,
+        fetchImpl(),
+        token,
+        apiCtx
+      );
+      return { ok: true, result };
+    }
+    case MSG.FETCH_VIEWER_VIEWED_PATHS: {
+      const token = await tokenForMessage(message);
+      if (!token) {
+        return {
+          ok: true,
+          result: { pullRequestId: null, viewedPaths: [], unauthorized: true },
+        };
+      }
+      const result = await PRTreeFetch.fetchViewerViewedPaths(
+        message.owner,
+        message.repo,
+        message.number,
+        fetchImpl(),
+        token,
+        { maxPages: message.maxPages, ctx: apiCtx }
+      );
+      return { ok: true, result };
+    }
+    case MSG.MARK_FILE_VIEWED: {
+      const token = await tokenForMessage(message);
+      if (!token) throw new Error('GitHub PAT required to mark file viewed');
+      const result = await PRTreeFetch.markFileAsViewed(
+        message.pullRequestId,
+        message.path,
+        fetchImpl(),
+        token,
+        apiCtx
+      );
+      return { ok: true, result };
+    }
+    case MSG.UNMARK_FILE_VIEWED: {
+      const token = await tokenForMessage(message);
+      if (!token) throw new Error('GitHub PAT required to unmark file viewed');
+      const result = await PRTreeFetch.unmarkFileAsViewed(
+        message.pullRequestId,
+        message.path,
+        fetchImpl(),
+        token,
+        apiCtx
+      );
       return { ok: true, result };
     }
     case MSG.SET_SUBSCRIPTION: {

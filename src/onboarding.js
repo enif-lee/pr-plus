@@ -16,14 +16,16 @@ const ONBOARDING_STEPS = [
   { id: "pat", title: "PAT setup", index: 0 },
   { id: "opt", title: "Hold Option", index: 1 },
   { id: "openPr", title: "Open demo PR #1", index: 2 },
-  { id: "diffToggle", title: "Open Diff", index: 3 },
-  { id: "diffDemo", title: "Diff demo", index: 4 },
-  { id: "optShiftK", title: "Command palette", index: 5 },
-  { id: "prefs", title: "Feature settings", index: 6 },
-  { id: "done", title: "All set", index: 7 }
+  { id: "convDemo", title: "Conversation shortcuts", index: 3 },
+  { id: "diffToggle", title: "Open Diff", index: 4 },
+  { id: "diffDemo", title: "Diff shortcuts", index: 5 },
+  { id: "optShiftK", title: "Command palette", index: 6 },
+  { id: "prefs", title: "Feature settings", index: 7 },
+  { id: "done", title: "All set", index: 8 }
 ];
 const PR_DEPENDENT_STEPS = [
   "openPr",
+  "convDemo",
   "diffToggle",
   "diffDemo"
 ];
@@ -239,13 +241,13 @@ const DIFF_DEMO_STEPS = [
   {
     id: "select-line",
     title: "1 \xB7 Select a line",
-    body: "On PR #1 we click a code line first. That starts a selection \u2014 the foundation for new comments.",
+    body: "Click any code line in the Diff. That starts a selection \u2014 the base for new comments.",
     chords: []
   },
   {
     id: "file-next",
     title: "2 \xB7 Next file",
-    body: "Jump to the next changed file in this PR (20+ demo files). No mouse needed.",
+    body: "Jump to the next changed file. Press the shortcut once on the Diff panel.",
     chords: ["\u2325\u21E7]"]
   },
   {
@@ -257,7 +259,7 @@ const DIFF_DEMO_STEPS = [
   {
     id: "page-down",
     title: "4 \xB7 Scroll Diff down",
-    body: "Page the hunk list by roughly one screen \u2014 faster than the trackpad on long files.",
+    body: "Page the hunk list by roughly one screen.",
     chords: ["\u2325\u21E7\u2193"]
   },
   {
@@ -269,149 +271,230 @@ const DIFF_DEMO_STEPS = [
   {
     id: "move-selection",
     title: "6 \xB7 Move selection",
-    body: "Arrow keys move the selected line one step at a time.",
+    body: "With a line selected, use Arrow Down to move one line at a time.",
     chords: ["\u2193"]
   },
   {
     id: "jump-selection",
     title: "7 \xB7 Jump selection",
-    body: "Option + arrow hops several lines \u2014 useful when scanning a large hunk.",
+    body: "Option + Arrow Down hops several lines \u2014 useful on long hunks.",
     chords: ["\u2325\u2193"]
   },
   {
     id: "multi-select",
     title: "8 \xB7 Multi-line range",
-    body: "Shift + arrow grows the selection into a block you can comment on together.",
+    body: "Shift + Arrow Down grows the selection into a block for one comment.",
     chords: ["\u21E7\u2193"]
   },
   {
     id: "comment-island",
-    title: "9 \xB7 New comment bar",
-    body: "With a range selected, a bar appears \u2014 that is how you start a *new* review comment.",
-    chords: []
+    title: "9 \xB7 New comment",
+    body: "With a range selected, press \u2325C to open the new-comment composer. You do not need to post \u2014 practice the shortcut, then continue.",
+    chords: ["\u2325C"]
   },
   {
     id: "clear-selection",
     title: "10 \xB7 Clear selection",
-    body: "Esc dismisses the selection bar so we can navigate existing review threads.",
+    body: "Press Esc on the Diff to dismiss the selection bar (Enter skips this tip).",
     chords: ["Esc"]
   },
   {
     id: "thread-next",
     title: "11 \xB7 Next review thread",
-    body: "PR #1 has 5 demo thread groups. \u2325J steps to the next review comment/thread on Diff.",
-    chords: ["\u2325J", "\u2325J"]
+    body: "PR #1 has demo thread groups. Press \u2325J to step to the next review thread on Diff.",
+    chords: ["\u2325J"]
   },
   {
     id: "thread-prev",
     title: "12 \xB7 Previous review thread",
-    body: "\u2325K steps backward through the same comment list \u2014 great for triage.",
-    chords: ["\u2325K", "\u2325K"]
+    body: "Press \u2325K to step backward through review threads.",
+    chords: ["\u2325K"]
   },
   {
     id: "wrap-up",
-    title: "13 \xB7 Done with the demo",
-    body: "You saw files, scrolling, selection, new comments, and thread nav on PR #1. Press Esc if anything is still focused, then continue.",
-    chords: ["Esc"]
+    title: "13 \xB7 Done",
+    body: "You practiced Diff nav and thread jumping. Press Enter to continue the tour.",
+    chords: []
   }
 ];
-async function runDiffDemo(doc, win, onNarrate) {
-  const target = doc;
-  const narrate = async (index) => {
-    const step = DIFF_DEMO_STEPS[index];
-    if (!step) return;
-    const payload = {
-      index,
-      total: DIFF_DEMO_STEPS.length,
-      id: step.id,
-      title: step.title,
-      body: step.body,
-      chords: [...step.chords]
-    };
-    try {
-      await onNarrate?.(payload);
-    } catch {
-    }
-    await sleep(index === 0 ? 900 : 1100);
-  };
-  const click = (sel) => {
-    const el = doc.querySelector(sel);
-    if (!el) return false;
-    try {
-      el.dispatchEvent(
-        new MouseEvent("mousedown", { bubbles: true, button: 0, clientX: 8, clientY: 8 })
-      );
-      el.dispatchEvent(
-        new MouseEvent("mouseup", { bubbles: true, button: 0, clientX: 8, clientY: 8 })
-      );
-      el.click();
-      return true;
-    } catch {
-      return false;
-    }
-  };
-  const pickLine = () => click(".prp-vline--selectable") || click(".prp-vline--context") || click(".prp-vline--add") || click(".prp-vline--del") || click(".prp-vline");
-  await narrate(0);
-  pickLine();
-  await sleep(350);
-  await narrate(1);
-  fireKey(target, { key: "]", code: "BracketRight", alt: true, shift: true });
-  await sleep(450);
-  pickLine();
-  await sleep(200);
-  await narrate(2);
-  fireKey(target, { key: "[", code: "BracketLeft", alt: true, shift: true });
-  await sleep(450);
-  pickLine();
-  await sleep(200);
-  await narrate(3);
-  fireKey(target, { key: "ArrowDown", code: "ArrowDown", alt: true, shift: true });
-  await sleep(400);
-  await narrate(4);
-  fireKey(target, { key: "ArrowUp", code: "ArrowUp", alt: true, shift: true });
-  await sleep(400);
-  await narrate(5);
-  pickLine();
-  await sleep(200);
-  for (let i = 0; i < 2; i++) {
-    fireKey(target, { key: "ArrowDown", code: "ArrowDown" });
-    await sleep(160);
+function matchesDiffDemoChord(opts, chord) {
+  const c = String(chord || "").trim();
+  if (!c) return false;
+  const alt = Boolean(opts.alt);
+  const shift = Boolean(opts.shift);
+  const mod = Boolean(opts.mod);
+  if (mod) return false;
+  const code = String(opts.code || "");
+  const key = String(opts.key || "");
+  if (c === "Esc" || c === "Escape") {
+    return key === "Escape" || code === "Escape";
   }
-  await narrate(6);
-  for (let i = 0; i < 2; i++) {
-    fireKey(target, { key: "ArrowDown", code: "ArrowDown", alt: true });
-    await sleep(220);
+  if (c === "\u2193" || c === "ArrowDown") {
+    return !alt && !shift && (key === "ArrowDown" || code === "ArrowDown");
   }
-  await narrate(7);
-  for (let i = 0; i < 3; i++) {
-    fireKey(target, { key: "ArrowDown", code: "ArrowDown", shift: true });
-    await sleep(180);
+  if (c === "\u2191" || c === "ArrowUp") {
+    return !alt && !shift && (key === "ArrowUp" || code === "ArrowUp");
   }
-  await sleep(280);
-  await narrate(8);
-  const commented = click(".prp-selection-island button") || click(".prp-selection-dock button") || click('[data-action="comment"]') || click(".prp-sel-actions button") || click(".prp-selection-island .prp-btn--primary") || click(".prp-selection-dock .prp-btn");
-  void commented;
-  await sleep(700);
-  await narrate(9);
-  fireKey(target, { key: "Escape", code: "Escape" });
-  await sleep(350);
-  fireKey(target, { key: "Escape", code: "Escape" });
-  await sleep(300);
-  click(".prp-vline--comment") || click(".prp-inline-thread") || click("[data-thread-focus-anchor]") || click(".prp-inline-comment");
-  await sleep(400);
-  await narrate(10);
-  for (let i = 0; i < 2; i++) {
-    fireKey(target, { key: "j", code: "KeyJ", alt: true });
-    await sleep(450);
+  if (c === "\u2325\u2193") {
+    return alt && !shift && (key === "ArrowDown" || code === "ArrowDown");
   }
-  await narrate(11);
-  for (let i = 0; i < 2; i++) {
-    fireKey(target, { key: "k", code: "KeyK", alt: true });
-    await sleep(450);
+  if (c === "\u2325\u2191") {
+    return alt && !shift && (key === "ArrowUp" || code === "ArrowUp");
   }
-  await narrate(12);
-  await sleep(400);
-  return { ok: true, steps: DIFF_DEMO_STEPS.length };
+  if (c === "\u21E7\u2193") {
+    return !alt && shift && (key === "ArrowDown" || code === "ArrowDown");
+  }
+  if (c === "\u21E7\u2191") {
+    return !alt && shift && (key === "ArrowUp" || code === "ArrowUp");
+  }
+  if (c === "\u2325\u21E7\u2193") {
+    return alt && shift && (key === "ArrowDown" || code === "ArrowDown");
+  }
+  if (c === "\u2325\u21E7\u2191") {
+    return alt && shift && (key === "ArrowUp" || code === "ArrowUp");
+  }
+  if (c === "\u2325\u21E7]" || c === "\u2325\u21E7\u3011") {
+    return alt && shift && (code === "BracketRight" || key === "]" || key === "}");
+  }
+  if (c === "\u2325\u21E7[" || c === "\u2325\u21E7\u3010") {
+    return alt && shift && (code === "BracketLeft" || key === "[" || key === "{");
+  }
+  if (c === "\u2325J" || c === "\u2325j") {
+    return alt && !shift && (code === "KeyJ" || key.toLowerCase() === "j");
+  }
+  if (c === "\u2325K" || c === "\u2325k") {
+    return alt && !shift && (code === "KeyK" || key.toLowerCase() === "k");
+  }
+  if (c === "\u2325C" || c === "\u2325c") {
+    return alt && !shift && (code === "KeyC" || key.toLowerCase() === "c");
+  }
+  return false;
+}
+function matchesDiffDemoStep(opts, step) {
+  const chords = step?.chords || [];
+  if (!chords.length) return false;
+  return chords.some((ch) => matchesDiffDemoChord(opts, ch));
+}
+function isOnboardingEnterEvent(opts) {
+  if (opts?.alt || opts?.mod) return false;
+  return opts?.key === "Enter" || opts?.code === "Enter";
+}
+function isOnboardingSkipTourEvent(opts) {
+  return opts?.key === "Escape" || opts?.code === "Escape";
+}
+function isOnboardingBackEvent(opts) {
+  if (opts?.mod) return false;
+  return opts?.key === "Backspace" || opts?.code === "Backspace";
+}
+const CONVERSATION_DEMO_STEPS = [
+  {
+    id: "conv-jk",
+    title: "1 \xB7 Step Conversation",
+    body: "On Conversation, \u2325J / \u2325K moves focus in this order: 1) PR description, 2) comments & review threads, 3) merge box. Press \u2325J a few times.",
+    chords: ["\u2325J"]
+  },
+  {
+    id: "conv-jk-back",
+    title: "2 \xB7 Step backward",
+    body: "\u2325K steps focus the other way through the same stops (merge \u2192 comments \u2192 description).",
+    chords: ["\u2325K"]
+  },
+  {
+    id: "conv-adjacent",
+    title: "3 \xB7 Adjacent PRs",
+    body: "\u2325] opens the next PR, then \u2325[ comes back. Type them in that order so you return to demo PR #1.",
+    chords: ["\u2325]", "\u2325["]
+  }
+];
+function matchesConversationDemoChord(opts, chord) {
+  const c = String(chord || "").trim();
+  if (!c) return false;
+  if (matchesDiffDemoChord(opts, c)) return true;
+  const alt = Boolean(opts.alt);
+  const shift = Boolean(opts.shift);
+  const mod = Boolean(opts.mod);
+  if (!alt || shift || mod) return false;
+  const code = String(opts.code || "");
+  const key = String(opts.key || "");
+  if (c === "\u2325]" || c === "\u2325\u3011") {
+    return code === "BracketRight" || key === "]" || key === "}";
+  }
+  if (c === "\u2325[" || c === "\u2325\u3010") {
+    return code === "BracketLeft" || key === "[" || key === "{";
+  }
+  return false;
+}
+function matchesConversationDemoStep(opts, step) {
+  const chords = step?.chords || [];
+  if (!chords.length) return false;
+  return chords.some((ch) => matchesConversationDemoChord(opts, ch));
+}
+function matchesConversationDemoChordAt(opts, step, chordIndex = 0) {
+  const chords = step?.chords || [];
+  if (!chords.length) return false;
+  const i = Math.max(0, Math.min(chords.length - 1, Math.floor(Number(chordIndex) || 0)));
+  return matchesConversationDemoChord(opts, chords[i]);
+}
+function nextConversationDemoChordIndex(step, chordIndex = 0) {
+  const chords = step?.chords || [];
+  if (!chords.length) return "done";
+  const i = Math.max(0, Math.floor(Number(chordIndex) || 0));
+  if (i + 1 >= chords.length) return "done";
+  return i + 1;
+}
+function readOpenModalPrNumber(doc) {
+  if (!doc || typeof doc.querySelector !== "function") return null;
+  const el = doc.querySelector(".prp-header__number");
+  const text = String(el?.textContent || "").trim();
+  const m = text.match(/#\s*(\d+)/);
+  if (m) {
+    const n = Number(m[1]);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }
+  const labeled = doc.querySelector(
+    '[aria-label*="Pull request #"], [aria-label*="pull request #"]'
+  );
+  const aria = String(labeled?.getAttribute?.("aria-label") || "");
+  const m2 = aria.match(/#\s*(\d+)/);
+  if (m2) {
+    const n = Number(m2[1]);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }
+  return null;
+}
+function isDemoPrModalOpen(doc) {
+  if (!isModalOpen(doc)) return false;
+  const n = readOpenModalPrNumber(doc);
+  if (n == null) return false;
+  return n === Number(DEMO_PR.number);
+}
+function openDemoPrModal(opts = {}) {
+  const open = typeof opts.openModal === "function" ? opts.openModal : typeof globalThis !== "undefined" && typeof globalThis.PRModalHost?.openModal === "function" ? (args) => globalThis.PRModalHost.openModal(args) : null;
+  if (!open) return false;
+  try {
+    void open({
+      owner: DEMO_PR.owner,
+      repo: DEMO_PR.repo,
+      number: DEMO_PR.number,
+      page: opts.page || null
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+function ensureDemoPrForDiffStep(doc, opts = {}) {
+  const page = isDiffLayout(doc) ? "diff" : "conversation";
+  if (opts.force) {
+    return openDemoPrModal({ openModal: opts.openModal, page });
+  }
+  if (!isModalOpen(doc)) {
+    return openDemoPrModal({ openModal: opts.openModal, page });
+  }
+  const n = readOpenModalPrNumber(doc);
+  if (n == null) return false;
+  if (n === Number(DEMO_PR.number)) return false;
+  return openDemoPrModal({ openModal: opts.openModal, page });
 }
 function createOnboardingTour(deps) {
   const doc = deps.document || document;
@@ -434,13 +517,33 @@ function createOnboardingTour(deps) {
   let prefsDraft = null;
   let keyHandler = null;
   let pollTimer = null;
-  let demoRunning = false;
-  let demoDone = false;
-  let demoWaitingEsc = false;
-  let demoNarration = null;
+  let demoSubIndex = 0;
+  let convSubIndex = 0;
+  let convChordIndex = 0;
   let modalOpenOnOpenPrEnter = false;
   let diffOpenOnDiffToggleEnter = false;
   let userPressedOptPeriod = false;
+  function resolveOpenModal() {
+    if (typeof deps.openModal === "function") return deps.openModal;
+    try {
+      const host = typeof globalThis !== "undefined" ? globalThis.PRModalHost : null;
+      if (host && typeof host.openModal === "function") {
+        return (args) => host.openModal(args);
+      }
+    } catch {
+    }
+    return null;
+  }
+  function ensureDemoPrForCurrentDiffStep(force = false) {
+    const opened = ensureDemoPrForDiffStep(doc, {
+      openModal: resolveOpenModal(),
+      force
+    });
+    if (opened) {
+      setStatus(`Using demo PR #${DEMO_PR.number} for Diff tips\u2026`);
+    }
+    return opened;
+  }
   function currentId() {
     return plan[planIndex] || "done";
   }
@@ -533,10 +636,9 @@ function createOnboardingTour(deps) {
   function goToPlanIndex(next) {
     planIndex = Math.max(0, Math.min(plan.length - 1, next));
     statusText = "";
-    demoRunning = false;
-    demoDone = false;
-    demoWaitingEsc = false;
-    demoNarration = null;
+    demoSubIndex = 0;
+    convSubIndex = 0;
+    convChordIndex = 0;
     userPressedOptPeriod = false;
     const id = plan[planIndex];
     clearDemoPrHighlight(doc);
@@ -547,12 +649,18 @@ function createOnboardingTour(deps) {
       }
     }
     if (id === "diffToggle") {
+      ensureDemoPrForCurrentDiffStep(true);
       diffOpenOnDiffToggleEnter = isDiffLayout(doc);
     }
-    render();
     if (id === "diffDemo") {
-      maybeStartDemo();
+      demoSubIndex = 0;
+      ensureDemoPrForCurrentDiffStep(true);
     }
+    if (id === "convDemo") {
+      convSubIndex = 0;
+      convChordIndex = 0;
+    }
+    render();
   }
   function advance() {
     if (planIndex >= plan.length - 1) {
@@ -564,6 +672,16 @@ function createOnboardingTour(deps) {
   function goBack() {
     if (planIndex <= 0) return;
     goToPlanIndex(planIndex - 1);
+  }
+  function skipToSettings() {
+    const prefsIdx = plan.indexOf("prefs");
+    const id = currentId();
+    if (prefsIdx >= 0 && planIndex < prefsIdx && id !== "prefs") {
+      goToPlanIndex(prefsIdx);
+      setStatus("Skipped ahead \u2014 review feature settings, then Done.");
+      return;
+    }
+    void markComplete();
   }
   function el(tag, className = "", text = "") {
     const node = doc.createElement(tag);
@@ -694,13 +812,89 @@ function createOnboardingTour(deps) {
       }
       return;
     }
+    if (id === "convDemo") {
+      if (!isModalOpen(doc)) {
+        body.appendChild(
+          el(
+            "p",
+            "prp-onboarding__lead",
+            "Open a PR shell first (demo PR #1), then practice Conversation shortcuts here."
+          )
+        );
+        body.appendChild(
+          el(
+            "p",
+            "prp-onboarding__hint prp-onboarding__hint--pulse",
+            "Stay on Conversation (not Diff) for these tips\u2026"
+          )
+        );
+        return;
+      }
+      if (isDiffLayout(doc)) {
+        body.appendChild(
+          el(
+            "p",
+            "prp-onboarding__lead",
+            "Switch to Conversation for these tips, then come back to Diff later."
+          )
+        );
+        body.appendChild(kbdRow([{ k: "\u2325" }, "+", { k: "." }]));
+        body.appendChild(
+          el(
+            "p",
+            "prp-onboarding__hint prp-onboarding__hint--pulse",
+            "Press \u2325. to leave Diff, then practice \u2325J / \u2325K\u2026"
+          )
+        );
+        return;
+      }
+      const tip = CONVERSATION_DEMO_STEPS[convSubIndex] || CONVERSATION_DEMO_STEPS[0];
+      const total = CONVERSATION_DEMO_STEPS.length;
+      body.appendChild(
+        el(
+          "p",
+          "prp-onboarding__demo-progress",
+          `Tip ${convSubIndex + 1} / ${total}`
+        )
+      );
+      body.appendChild(el("p", "prp-onboarding__lead", tip.title));
+      body.appendChild(el("p", "prp-onboarding__hint", tip.body));
+      if (tip.chords.length) {
+        const sequential = tip.chords.length > 1;
+        const parts = [];
+        tip.chords.forEach((c, i) => {
+          if (i > 0) parts.push(sequential ? "then" : "or");
+          parts.push({ k: c });
+        });
+        body.appendChild(kbdRow(parts));
+        if (sequential) {
+          const nextChord = tip.chords[Math.max(0, Math.min(tip.chords.length - 1, convChordIndex))] || tip.chords[0];
+          body.appendChild(
+            el(
+              "p",
+              "prp-onboarding__hint",
+              `Step ${convChordIndex + 1} / ${tip.chords.length}: press ${nextChord}`
+            )
+          );
+        }
+      }
+      body.appendChild(
+        el(
+          "p",
+          "prp-onboarding__hint prp-onboarding__hint--pulse",
+          tip.chords.length > 1 ? "Press each shortcut in order (or Enter to skip this tip)\u2026" : tip.chords.length ? "Press the shortcut (or Enter to skip this tip)\u2026" : "Press Enter for the next tip\u2026"
+        )
+      );
+      return;
+    }
     if (id === "diffToggle") {
       const nowDiff = isDiffLayout(doc);
+      const onDemo = isDemoPrModalOpen(doc);
       body.appendChild(
         el(
           "p",
           "prp-onboarding__lead",
-          nowDiff ? "You are on the Diff view. Press \u2325. to switch to Conversation and back, or Continue to keep Diff open." : "Switch to Diff to review code. Press the shortcut once \u2014 Conversation is always one press away again."
+          nowDiff ? `You are on Diff for demo PR #${DEMO_PR.number}. Press \u2325. to switch to Conversation and back, or Continue to keep Diff open.` : onDemo ? `Demo PR #${DEMO_PR.number} is open. Switch to Diff to review code \u2014 Conversation is always one press away again.` : `Opening demo PR #${DEMO_PR.number} for Diff practice. Then press \u2325. to switch to Diff.`
         )
       );
       body.appendChild(kbdRow([{ k: "\u2325" }, "+", { k: "." }]));
@@ -714,75 +908,54 @@ function createOnboardingTour(deps) {
       return;
     }
     if (id === "diffDemo") {
-      if (demoWaitingEsc) {
+      if (!isDiffLayout(doc)) {
         body.appendChild(
           el(
             "p",
             "prp-onboarding__lead",
-            "Diff demo finished \u2014 file nav, paging, selection jumps, multi-line ranges, and the comment bar."
+            "Open the Diff view first, then practice each shortcut yourself."
           )
         );
-        body.appendChild(kbdRow([{ k: "Esc" }]));
+        body.appendChild(kbdRow([{ k: "\u2325" }, "+", { k: "." }]));
         body.appendChild(
           el(
             "p",
             "prp-onboarding__hint prp-onboarding__hint--pulse",
-            "Press Esc to clear selection UI and continue\u2026"
+            "Press \u2325. to open Diff, then continue\u2026"
           )
         );
-      } else if (demoRunning && demoNarration) {
-        const n = demoNarration;
-        const progress = el(
-          "p",
-          "prp-onboarding__demo-progress",
-          `Demo ${n.index + 1} / ${n.total}`
-        );
-        body.appendChild(progress);
-        body.appendChild(el("p", "prp-onboarding__lead", n.title));
-        body.appendChild(el("p", "prp-onboarding__hint", n.body));
-        if (n.chords.length) {
-          const parts = [];
-          n.chords.forEach((c, i) => {
-            if (i > 0) parts.push("then");
-            parts.push({ k: c });
-          });
-          body.appendChild(kbdRow(parts));
-        }
+        return;
+      }
+      const tip = DIFF_DEMO_STEPS[demoSubIndex] || DIFF_DEMO_STEPS[0];
+      const total = DIFF_DEMO_STEPS.length;
+      const progress = el(
+        "p",
+        "prp-onboarding__demo-progress",
+        `Tip ${demoSubIndex + 1} / ${total}`
+      );
+      body.appendChild(progress);
+      body.appendChild(el("p", "prp-onboarding__lead", tip.title));
+      body.appendChild(el("p", "prp-onboarding__hint", tip.body));
+      if (tip.chords.length) {
+        const parts = [];
+        tip.chords.forEach((c, i) => {
+          if (i > 0) parts.push("or");
+          parts.push({ k: c });
+        });
+        body.appendChild(kbdRow(parts));
         body.appendChild(
           el(
             "p",
             "prp-onboarding__hint prp-onboarding__hint--pulse",
-            "Watch the Diff panel\u2026"
-          )
-        );
-      } else if (demoRunning) {
-        body.appendChild(
-          el(
-            "p",
-            "prp-onboarding__lead",
-            "Starting Diff demo\u2026"
-          )
-        );
-        body.appendChild(
-          el(
-            "p",
-            "prp-onboarding__hint",
-            "We will walk through file navigation, scrolling, selection, and comments."
+            "Press the shortcut on the Diff panel (or Enter to skip this tip)\u2026"
           )
         );
       } else {
         body.appendChild(
           el(
             "p",
-            "prp-onboarding__lead",
-            "Ready for a guided Diff walkthrough. Stay on the Diff view."
-          )
-        );
-        body.appendChild(
-          el(
-            "p",
-            "prp-onboarding__hint",
-            "Each step will explain a shortcut, then play it for you."
+            "prp-onboarding__hint prp-onboarding__hint--pulse",
+            tip.id === "wrap-up" ? "Press Enter to continue the tour\u2026" : "Do this in Diff, then press Enter for the next tip\u2026"
           )
         );
       }
@@ -911,26 +1084,49 @@ function createOnboardingTour(deps) {
         primary.textContent = "Done";
         primary.hidden = false;
       } else if (id === "openPr" && isModalOpen(doc)) {
-        primary.textContent = "Continue";
+        primary.textContent = "Continue \xB7 \u23CE";
         primary.hidden = false;
       } else if (id === "openPr" && !isModalOpen(doc)) {
-        primary.textContent = "Skip this step";
+        primary.textContent = "Skip \xB7 \u23CE";
         primary.hidden = false;
       } else if (id === "diffToggle" && isDiffLayout(doc)) {
-        primary.textContent = "Continue";
+        primary.textContent = "Continue \xB7 \u23CE";
         primary.hidden = false;
-      } else if (id === "opt" || id === "diffToggle" || id === "optShiftK" || id === "diffDemo" && demoWaitingEsc) {
-        primary.textContent = "Skip this step";
+      } else if (id === "convDemo") {
+        if (convSubIndex >= CONVERSATION_DEMO_STEPS.length - 1) {
+          primary.textContent = "Continue \xB7 \u23CE";
+        } else {
+          primary.textContent = "Next tip \xB7 \u23CE";
+        }
         primary.hidden = false;
-      } else if (id === "diffDemo" && demoRunning) {
-        primary.textContent = "Skip demo";
+      } else if (id === "diffDemo") {
+        if (!isDiffLayout(doc)) {
+          primary.textContent = "Skip Diff tips \xB7 \u23CE";
+        } else if (demoSubIndex >= DIFF_DEMO_STEPS.length - 1) {
+          primary.textContent = "Continue \xB7 \u23CE";
+        } else {
+          primary.textContent = "Next tip \xB7 \u23CE";
+        }
         primary.hidden = false;
-      } else if (id === "diffDemo" && !isDiffLayout(doc) && !demoRunning) {
-        primary.textContent = "Skip demo";
+      } else if (id === "opt" || id === "diffToggle" || id === "optShiftK") {
+        primary.textContent = "Skip \xB7 \u23CE";
         primary.hidden = false;
       } else {
-        primary.textContent = "Continue";
+        primary.textContent = "Continue \xB7 \u23CE";
         primary.hidden = false;
+      }
+      if (primary && !primary.hidden && primary.textContent && !primary.textContent.includes("\u23CE") && (id === "pat" || id === "prefs" || id === "done" || id === "openPr")) {
+        if (id === "pat") {
+          primary.textContent = tokenConfigured ? "Continue \xB7 \u23CE" : "Save & continue \xB7 \u23CE";
+        } else if (id === "prefs") {
+          primary.textContent = "Save & continue \xB7 \u23CE";
+        } else if (id === "done") {
+          primary.textContent = "Done \xB7 \u23CE";
+        } else if (id === "openPr" && isModalOpen(doc)) {
+          primary.textContent = "Continue \xB7 \u23CE";
+        } else if (id === "openPr" && !isModalOpen(doc)) {
+          primary.textContent = "Skip \xB7 \u23CE";
+        }
       }
     }
     setStatus(statusText, statusError);
@@ -988,38 +1184,41 @@ function createOnboardingTour(deps) {
       await markComplete();
       return;
     }
-    advance();
-  }
-  async function maybeStartDemo() {
-    if (disposed || currentId() !== "diffDemo") return;
-    if (demoRunning || demoDone || demoWaitingEsc) return;
-    if (!isDiffLayout(doc)) {
+    if (id === "diffDemo") {
+      advanceDiffTip();
       return;
     }
-    demoRunning = true;
-    demoNarration = null;
-    render();
-    try {
-      await runDiffDemo(doc, win, async (n) => {
-        if (disposed || currentId() !== "diffDemo") return;
-        demoNarration = n;
-        render();
-      });
-    } catch (err) {
-      console.warn("[pr+] onboarding demo", err);
+    if (id === "convDemo") {
+      advanceConvTip();
+      return;
     }
-    demoRunning = false;
-    demoDone = true;
-    demoWaitingEsc = true;
-    demoNarration = null;
-    render();
+    advance();
+  }
+  function advanceDiffTip() {
+    if (demoSubIndex < DIFF_DEMO_STEPS.length - 1) {
+      demoSubIndex += 1;
+      setStatus("");
+      render();
+      return;
+    }
+    advance();
+  }
+  function advanceConvTip() {
+    convChordIndex = 0;
+    if (convSubIndex < CONVERSATION_DEMO_STEPS.length - 1) {
+      convSubIndex += 1;
+      setStatus("");
+      render();
+      return;
+    }
+    advance();
   }
   function onKeyDown(e) {
     if (disposed || !root) return;
     const t = e.target;
-    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) {
-      if (!(currentId() === "diffDemo" && isEscapeEvent(e))) return;
-    }
+    const inField = Boolean(
+      t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)
+    );
     const id = currentId();
     const mod = Boolean(e.metaKey || e.ctrlKey);
     const opts = {
@@ -1030,6 +1229,35 @@ function createOnboardingTour(deps) {
       code: e.code,
       type: "keydown"
     };
+    if (!inField) {
+      if (isOnboardingBackEvent(opts) && planIndex > 0) {
+        e.preventDefault();
+        goBack();
+        return;
+      }
+      if (isOnboardingEnterEvent(opts)) {
+        e.preventDefault();
+        void goNextFromPrimary();
+        return;
+      }
+      if (isOnboardingSkipTourEvent(opts)) {
+        const tip = id === "diffDemo" && isDiffLayout(doc) ? DIFF_DEMO_STEPS[demoSubIndex] : null;
+        if (tip && matchesDiffDemoStep(opts, tip)) {
+          e.preventDefault();
+          advanceDiffTip();
+          return;
+        }
+        e.preventDefault();
+        skipToSettings();
+        return;
+      }
+    } else {
+      if (isOnboardingSkipTourEvent(opts)) {
+        e.preventDefault();
+        skipToSettings();
+        return;
+      }
+    }
     if (id === "opt" && isOptHoldEvent(opts) && e.altKey) {
       e.preventDefault();
       advance();
@@ -1038,7 +1266,9 @@ function createOnboardingTour(deps) {
     if (id === "openPr") {
       const slot = resolveDemoPrHotkey(doc).slot;
       if (slot && isOptHotkeySlotEvent(opts, slot)) {
-        setStatus(`Opening PR #${DEMO_PR.number} with \u2325${String(slot).toUpperCase()}\u2026`);
+        setStatus(
+          `Opening PR #${DEMO_PR.number} with \u2325${String(slot).toUpperCase()}\u2026`
+        );
         return;
       }
       if (isOptDigit1Event(opts)) {
@@ -1046,14 +1276,47 @@ function createOnboardingTour(deps) {
         return;
       }
     }
+    if (id === "convDemo") {
+      if (isDiffLayout(doc) && isOptPeriodEvent(opts)) {
+        return;
+      }
+      const tip = CONVERSATION_DEMO_STEPS[convSubIndex];
+      if (tip?.chords?.length) {
+        if (matchesConversationDemoChordAt(opts, tip, convChordIndex)) {
+          const next = nextConversationDemoChordIndex(tip, convChordIndex);
+          if (next === "done") {
+            convChordIndex = 0;
+            advanceConvTip();
+          } else {
+            convChordIndex = next;
+            const nextChord = tip.chords[next] || "";
+            setStatus(
+              tip.id === "conv-adjacent" ? `Good \u2014 now ${nextChord} to return to demo PR #${DEMO_PR.number}\u2026` : `Now press ${nextChord}\u2026`
+            );
+            render();
+          }
+          return;
+        }
+        if (matchesConversationDemoStep(opts, tip)) {
+          const expected = tip.chords[convChordIndex] || tip.chords[0];
+          setStatus(
+            `Press ${expected} next (${tip.chords.join(" \u2192 ")})`
+          );
+          return;
+        }
+      }
+    }
     if (id === "diffToggle" && isOptPeriodEvent(opts)) {
       userPressedOptPeriod = true;
       render();
       return;
     }
-    if (id === "diffDemo" && demoWaitingEsc && isEscapeEvent(opts)) {
-      advance();
-      return;
+    if (id === "diffDemo" && isDiffLayout(doc)) {
+      const tip = DIFF_DEMO_STEPS[demoSubIndex];
+      if (tip && matchesDiffDemoStep(opts, tip)) {
+        advanceDiffTip();
+        return;
+      }
     }
     if (id === "optShiftK" && isOptShiftKEvent(opts)) {
       advance();
@@ -1074,16 +1337,22 @@ function createOnboardingTour(deps) {
       return;
     }
     if (id === "diffToggle") {
+      const openNum = readOpenModalPrNumber(doc);
+      if (isModalOpen(doc) && openNum != null && openNum !== Number(DEMO_PR.number)) {
+        ensureDemoPrForCurrentDiffStep(false);
+      }
       render();
       if (userPressedOptPeriod && isDiffLayout(doc)) {
+        if (openNum != null && openNum !== Number(DEMO_PR.number)) {
+          ensureDemoPrForCurrentDiffStep(false);
+          return;
+        }
         advance();
       }
       return;
     }
-    if (id === "diffDemo") {
-      if (!demoRunning && !demoDone && !demoWaitingEsc) {
-        if (isDiffLayout(doc)) void maybeStartDemo();
-      }
+    if (id === "convDemo" || id === "diffDemo") {
+      render();
     }
   }
   function buildShell() {
@@ -1099,9 +1368,10 @@ function createOnboardingTour(deps) {
     header.appendChild(stepEl);
     const closeBtn = el("button", "prp-onboarding__close", "\xD7");
     closeBtn.setAttribute("type", "button");
-    closeBtn.setAttribute("aria-label", "Skip tour");
+    closeBtn.setAttribute("aria-label", "Skip to settings");
+    closeBtn.setAttribute("title", "Skip to feature settings (Esc)");
     closeBtn.addEventListener("click", () => {
-      void markComplete();
+      skipToSettings();
     });
     header.appendChild(closeBtn);
     const title = el("h2", "prp-onboarding__title");
@@ -1109,22 +1379,28 @@ function createOnboardingTour(deps) {
     const status = el("p", "prp-onboarding__status");
     status.setAttribute("aria-live", "polite");
     const footer = el("footer", "prp-onboarding__footer");
-    const back = el("button", "prp-onboarding__btn prp-onboarding__btn--back", "Back");
+    const back = el(
+      "button",
+      "prp-onboarding__btn prp-onboarding__btn--back",
+      "Back \xB7 \u232B"
+    );
     back.setAttribute("type", "button");
+    back.setAttribute("title", "Back (Backspace)");
     back.addEventListener("click", () => goBack());
     const skip = el(
       "button",
       "prp-onboarding__btn prp-onboarding__btn--ghost prp-onboarding__btn--skip",
-      "Skip tour"
+      "Skip to settings \xB7 Esc"
     );
     skip.setAttribute("type", "button");
+    skip.setAttribute("title", "Skip remaining tips and open feature settings (Esc)");
     skip.addEventListener("click", () => {
-      void markComplete();
+      skipToSettings();
     });
     const primary = el(
       "button",
       "prp-onboarding__btn prp-onboarding__btn--primary",
-      "Continue"
+      "Continue \xB7 \u23CE"
     );
     primary.setAttribute("type", "button");
     primary.addEventListener("click", () => {
@@ -1196,6 +1472,7 @@ const onboardingApi = {
   ONBOARDING_STEPS,
   PR_DEPENDENT_STEPS,
   DIFF_DEMO_STEPS,
+  CONVERSATION_DEMO_STEPS,
   DEMO_PR,
   shouldShowOnboarding,
   clampOnboardingStep,
@@ -1219,7 +1496,20 @@ const onboardingApi = {
   isEscapeEvent,
   resolveOnboardingPlan,
   fireKey,
-  runDiffDemo,
+  matchesDiffDemoChord,
+  matchesDiffDemoStep,
+  CONVERSATION_DEMO_STEPS,
+  matchesConversationDemoChord,
+  matchesConversationDemoStep,
+  matchesConversationDemoChordAt,
+  nextConversationDemoChordIndex,
+  readOpenModalPrNumber,
+  isDemoPrModalOpen,
+  openDemoPrModal,
+  ensureDemoPrForDiffStep,
+  isOnboardingEnterEvent,
+  isOnboardingSkipTourEvent,
+  isOnboardingBackEvent,
   createOnboardingTour
 };
 if (typeof module !== "undefined" && module.exports) {

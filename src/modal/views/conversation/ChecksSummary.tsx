@@ -8,16 +8,22 @@ import {
 import { TipPopover } from '@common/TipPopover';
 import {
   IconCheckCircleFill,
+  IconDotFill,
   IconSkip,
-  IconSync,
   IconXCircleFill,
 } from '@common/icons';
 
-type OutcomeKey = 'failure' | 'pending' | 'success' | 'skipped';
+type OutcomeKey =
+  | 'failure'
+  | 'in_progress'
+  | 'pending'
+  | 'success'
+  | 'skipped';
 
-/** Display order: failures first (like merge box), then pending, success, skipped. */
+/** Display order: failures → working → expected → success → skipped. */
 const OUTCOME_ORDER: OutcomeKey[] = [
   'failure',
+  'in_progress',
   'pending',
   'success',
   'skipped',
@@ -36,6 +42,7 @@ export function buildCheckStackGroups(checks: any): CheckStackGroup[] {
       ? listCheckNamesByOutcome(checks)
       : {
           failure: [],
+          in_progress: [],
           pending: [],
           success: [],
           skipped: [],
@@ -57,41 +64,60 @@ export function buildCheckStackGroups(checks: any): CheckStackGroup[] {
   return out;
 }
 
+/**
+ * Shared check status glyph — same in Checks panel, header stack, merge box.
+ * - pending (expected): static yellow circle
+ * - in_progress (working): spinning amber ring
+ */
 export function CheckOutcomeIcon({
   outcome,
   size = 14,
+  className = '',
 }: {
   outcome: OutcomeKey | string;
   size?: number;
+  className?: string;
 }) {
+  const dim = Math.max(10, Number(size) || 14);
   if (outcome === 'failure') {
     return (
       <IconXCircleFill
-        size={size}
-        className="prp-checks-summary-icon prp-checks-summary-icon--failure"
+        size={dim}
+        className={`prp-checks-summary-icon prp-checks-summary-icon--failure ${className}`.trim()}
       />
     );
   }
-  if (outcome === 'pending') {
+  // Working: spinning ring (GitHub in-progress)
+  if (outcome === 'in_progress' || outcome === 'working') {
     return (
-      <IconSync
-        size={size}
-        className="prp-checks-summary-icon prp-checks-summary-icon--pending prp-checks-summary-icon--spin"
+      <span
+        className={`prp-checks-summary-icon prp-checks-summary-icon--working ${className}`.trim()}
+        style={{ width: dim, height: dim }}
+        aria-hidden="true"
+      />
+    );
+  }
+  // Expected / pending: static yellow circle
+  if (outcome === 'pending' || outcome === 'expected') {
+    return (
+      <IconDotFill
+        size={dim}
+        className={`prp-checks-summary-icon prp-checks-summary-icon--pending ${className}`.trim()}
       />
     );
   }
   if (outcome === 'skipped') {
     return (
       <IconSkip
-        size={size}
-        className="prp-checks-summary-icon prp-checks-summary-icon--skipped"
+        size={dim}
+        className={`prp-checks-summary-icon prp-checks-summary-icon--skipped ${className}`.trim()}
       />
     );
   }
   return (
     <IconCheckCircleFill
-      size={size}
-      className="prp-checks-summary-icon prp-checks-summary-icon--success"
+      size={dim}
+      className={`prp-checks-summary-icon prp-checks-summary-icon--success ${className}`.trim()}
     />
   );
 }

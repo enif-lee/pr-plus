@@ -1478,6 +1478,61 @@ var PRTreeFetch = {
     }
     return res.result;
   },
+  async deleteHeadBranch(owner, repo, branch) {
+    const res = await send({
+      type: 'PR_TREE_DELETE_HEAD_BRANCH',
+      owner,
+      repo,
+      branch,
+    });
+    if (!res?.ok) {
+      const err = new Error(res?.error || 'Failed to delete branch');
+      err.status = res?.status;
+      throw err;
+    }
+    return res.result;
+  },
+  async fetchViewerViewedPaths(owner, repo, number, opts: any = {}) {
+    const res = await send({
+      type: 'PR_TREE_FETCH_VIEWER_VIEWED_PATHS',
+      owner,
+      repo,
+      number,
+      maxPages: opts.maxPages,
+    });
+    if (!res?.ok) {
+      const err = new Error(res?.error || 'Failed to fetch viewed files');
+      err.status = res?.status;
+      throw err;
+    }
+    return res.result || { pullRequestId: null, viewedPaths: [] };
+  },
+  async markFileAsViewed(pullRequestId, path) {
+    const res = await send({
+      type: 'PR_TREE_MARK_FILE_VIEWED',
+      pullRequestId,
+      path,
+    });
+    if (!res?.ok) {
+      const err = new Error(res?.error || 'Failed to mark file viewed');
+      err.status = res?.status;
+      throw err;
+    }
+    return res.result;
+  },
+  async unmarkFileAsViewed(pullRequestId, path) {
+    const res = await send({
+      type: 'PR_TREE_UNMARK_FILE_VIEWED',
+      pullRequestId,
+      path,
+    });
+    if (!res?.ok) {
+      const err = new Error(res?.error || 'Failed to unmark file viewed');
+      err.status = res?.status;
+      throw err;
+    }
+    return res.result;
+  },
   async setIssueSubscription(
     owner,
     repo,
@@ -1554,8 +1609,21 @@ const DEFAULT_PREFS = {
   autoOpenEmbed: true,
   singleFileMode: false,
   treeView: true,
+  shortcutMonitorSize: 'small',
   onboardingCompleted: false,
 };
+
+function normalizeShortcutMonitorSizeLocal(raw) {
+  const v = String(raw ?? '')
+    .trim()
+    .toLowerCase();
+  if (v === 'none' || v === 'off' || v === 'hidden' || v === '0') return 'none';
+  if (v === 'medium' || v === 'md' || v === '2' || v === '2x') return 'medium';
+  if (v === 'large' || v === 'lg' || v === '3' || v === '3x') return 'large';
+  if (v === 'small' || v === 'sm' || v === '1' || v === '1x') return 'small';
+  if (raw === false) return 'none';
+  return DEFAULT_PREFS.shortcutMonitorSize;
+}
 
 function normalizePrefsLocal(raw) {
   const src = raw && typeof raw === 'object' ? raw : {};
@@ -1578,6 +1646,9 @@ function normalizePrefsLocal(raw) {
         : DEFAULT_PREFS.singleFileMode,
     treeView:
       typeof src.treeView === 'boolean' ? src.treeView : DEFAULT_PREFS.treeView,
+    shortcutMonitorSize: normalizeShortcutMonitorSizeLocal(
+      src.shortcutMonitorSize
+    ),
     onboardingCompleted:
       typeof src.onboardingCompleted === 'boolean'
         ? src.onboardingCompleted

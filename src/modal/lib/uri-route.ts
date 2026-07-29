@@ -329,8 +329,13 @@ export type SessionViewSnap = {
 } | null;
 
 /**
- * session storage > URI for open target + page + position.
- * Owner/repo for URI-only restore come from pathOwner/pathRepo (pulls list path).
+ * URI-first restore on /pulls.
+ *
+ * Only reopen a modal when the location names a PR (`prp_number` / legacy).
+ * SessionStorage may fill page/position **for the same PR** when URI omits them,
+ * but never reopens a PR by session alone (plain `/owner/repo/pulls` stays closed).
+ *
+ * Owner/repo for URI restore come from pathOwner/pathRepo (pulls list path).
  */
 export function resolveRestore(input: {
   sessionOpen?: SessionOpenSnap;
@@ -348,40 +353,51 @@ export function resolveRestore(input: {
   const sessionOpen = input.sessionOpen || null;
   const sessionView = input.sessionView || null;
 
-  if (sessionOpen && sessionOpen.owner && sessionOpen.repo && sessionOpen.number > 0) {
-    const pageFromSession =
-      normalizePage(sessionOpen.page) ||
-      (sessionView?.layoutMode === 'diff' ? 'diff' : sessionView?.layoutMode === 'centered' ? 'conversation' : null);
-    const page = pageFromSession || normalizePage(uri.page);
-    const position =
-      (sessionOpen.position && String(sessionOpen.position).trim()) ||
-      (uri.position && String(uri.position).trim()) ||
-      null;
-    return {
-      open: {
-        owner: sessionOpen.owner,
-        repo: sessionOpen.repo,
-        number: sessionOpen.number,
-      },
-      page: page || null,
-      position,
-      source: 'session',
-    };
-  }
-
   const n = uri.number != null ? Number(uri.number) : NaN;
   const owner = String(input.pathOwner || '').trim();
   const repo = String(input.pathRepo || '').trim();
-  if (owner && repo && Number.isFinite(n) && n > 0) {
-    return {
-      open: { owner, repo, number: Math.floor(n) },
-      page: normalizePage(uri.page),
-      position: uri.position ? String(uri.position).trim() : null,
-      source: 'uri',
-    };
+
+  // No PR id in URI → do not reopen from last session snap
+  if (!owner || !repo || !Number.isFinite(n) || n <= 0) {
+    return { open: null, page: null, position: null, source: 'none' };
   }
 
-  return { open: null, page: null, position: null, source: 'none' };
+  const number = Math.floor(n);
+  let page = normalizePage(uri.page);
+  let position =
+    uri.position != null && String(uri.position).trim()
+      ? String(uri.position).trim()
+      : null;
+
+  // Same PR in session: fill missing page/position only
+  const sameSession =
+    sessionOpen &&
+    sessionOpen.number > 0 &&
+    String(sessionOpen.owner || '').toLowerCase() === owner.toLowerCase() &&
+    String(sessionOpen.repo || '').toLowerCase() === repo.toLowerCase() &&
+    Number(sessionOpen.number) === number;
+
+  if (sameSession) {
+    if (!page) {
+      page =
+        normalizePage(sessionOpen.page) ||
+        (sessionView?.layoutMode === 'diff'
+          ? 'diff'
+          : sessionView?.layoutMode === 'centered'
+            ? 'conversation'
+            : null);
+    }
+    if (!position && sessionOpen.position) {
+      position = String(sessionOpen.position).trim() || null;
+    }
+  }
+
+  return {
+    open: { owner, repo, number },
+    page: page || null,
+    position,
+    source: 'uri',
+  };
 }
 
 /**

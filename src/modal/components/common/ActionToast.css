@@ -74,11 +74,18 @@
 
 /* Bottom-center floating HUD: black bg + white text (fire or Opt-alone held) */
 .prp-shortcut-monitor {
+  --prp-sm-font: 12px;
+  --prp-sm-pad-y: 6px;
+  --prp-sm-pad-x: 10px;
+  --prp-sm-radius: 6px;
+  --prp-sm-bottom: 20px;
+  --prp-sm-max: 360px;
+  --prp-sm-shadow: 0 4px 16px rgba(1, 4, 9, 0.35);
   position: absolute;
   left: 50%;
-  bottom: 20px;
+  bottom: var(--prp-sm-bottom);
   z-index: 90;
-  max-width: min(360px, calc(100% - 28px));
+  max-width: min(var(--prp-sm-max), calc(100% - 28px));
   pointer-events: none;
   font-family: var(--prp-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   transform: translateX(-50%) translateY(6px);
@@ -86,6 +93,34 @@
   transition:
     opacity 200ms ease,
     transform 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Size scale (prefs: shortcutMonitorSize) — small=1× default, medium=2×, large=3× */
+.prp-shortcut-monitor--size-small {
+  --prp-sm-font: 12px;
+  --prp-sm-pad-y: 6px;
+  --prp-sm-pad-x: 10px;
+  --prp-sm-radius: 6px;
+  --prp-sm-bottom: 20px;
+  --prp-sm-max: 360px;
+}
+.prp-shortcut-monitor--size-medium {
+  --prp-sm-font: 24px;
+  --prp-sm-pad-y: 12px;
+  --prp-sm-pad-x: 20px;
+  --prp-sm-radius: 12px;
+  --prp-sm-bottom: 28px;
+  --prp-sm-max: 720px;
+  --prp-sm-shadow: 0 8px 28px rgba(1, 4, 9, 0.4);
+}
+.prp-shortcut-monitor--size-large {
+  --prp-sm-font: 36px;
+  --prp-sm-pad-y: 18px;
+  --prp-sm-pad-x: 30px;
+  --prp-sm-radius: 16px;
+  --prp-sm-bottom: 36px;
+  --prp-sm-max: 960px;
+  --prp-sm-shadow: 0 12px 40px rgba(1, 4, 9, 0.45);
 }
 
 .prp-shortcut-monitor--in {
@@ -99,11 +134,11 @@
 }
 
 .prp-shortcut-monitor__line {
-  padding: 6px 10px;
-  border-radius: 6px;
+  padding: var(--prp-sm-pad-y) var(--prp-sm-pad-x);
+  border-radius: var(--prp-sm-radius);
   background: #0d1117;
   color: #f0f6fc;
-  font-size: 12px;
+  font-size: var(--prp-sm-font);
   font-weight: 600;
   line-height: 1.3;
   letter-spacing: 0.02em;
@@ -111,7 +146,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 100%;
-  box-shadow: 0 4px 16px rgba(1, 4, 9, 0.35);
+  box-shadow: var(--prp-sm-shadow);
   border: 1px solid rgba(240, 246, 252, 0.12);
 }
 

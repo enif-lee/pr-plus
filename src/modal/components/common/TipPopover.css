@@ -765,20 +765,39 @@ a.prp-branch-tag__text:focus-visible {
   margin-top: 8px;
 }
 
-/* Split: pin selection island under the LEFT or RIGHT half of the row */
+/*
+ * Split: pin selection dock under the LEFT or RIGHT half of the row.
+ * - Actions group: content-sized (max-content) — do not stretch to half-pane
+ *   width (that made the segmented toggle look oversized/odd).
+ * - Comment island: cap to half pane so the composer stays in the active side.
+ */
+.prp-sel-dock-host--split-left .prp-selection-dock.prp-selection-group {
+  left: 28px;
+  right: auto;
+  width: max-content;
+  max-width: calc(50% - 36px);
+  min-width: 0;
+}
+.prp-sel-dock-host--split-right .prp-selection-dock.prp-selection-group {
+  left: calc(50% + 8px);
+  right: auto;
+  width: max-content;
+  max-width: calc(50% - 24px);
+  min-width: 0;
+}
 .prp-sel-dock-host--split-left .prp-selection-dock.prp-selection-island {
   left: 28px;
   right: auto;
-  width: calc(50% - 36px);
+  width: auto;
   max-width: min(560px, calc(50% - 36px));
-  min-width: min(240px, 100%);
+  min-width: min(200px, calc(50% - 36px));
 }
 .prp-sel-dock-host--split-right .prp-selection-dock.prp-selection-island {
   left: calc(50% + 8px);
   right: 16px;
   width: auto;
   max-width: min(560px, calc(50% - 24px));
-  min-width: min(240px, 100%);
+  min-width: min(200px, calc(50% - 24px));
 }
 .prp-selection-dock .prp-mdc,
 .prp-selection-dock .prp-mdc__ta,

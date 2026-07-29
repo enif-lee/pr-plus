@@ -39,9 +39,9 @@ Sources: [About pull requests](https://docs.github.com/en/pull-requests/collabor
 | Delete own review comments | present | Timeline + inline |
 | ````suggestion` render | present | SuggestionBlock |
 | Apply suggestion | present | Contents API commit on head |
-| File-level review comment | missing | Rare; not wired |
-| Mark file Viewed | present | Local session (not GH GraphQL viewed) |
-| Viewed progress bar (server) | partial | Local only via sessionStorage |
+| File-level review comment | present | File header → `onFileHeaderComment`; `postReviewComment` with `subject_type: file` |
+| Mark file Viewed | present | Optimistic local + GraphQL `markFileAsViewed` / `unmarkFileAsViewed` when token allows; sessionStorage cache |
+| Viewed progress bar (server) | present | Hydrated from `viewerViewedState` on PR files (GraphQL); falls back to session cache offline |
 
 ## Files / Diff
 
@@ -51,7 +51,7 @@ Sources: [About pull requests](https://docs.github.com/en/pull-requests/collabor
 | Unified / split diff | present | Radio |
 | Virtualized large diffs | present | `calculateVisibleRange` |
 | Collapse large/generated files | present | gitattributes + defaults |
-| Hide whitespace | missing | Deferred UX |
+| Hide whitespace | present | Diff toolbar toggle; client-side patch filter (`filterPatchHideWhitespace`); remembered per PR session |
 | Jump to file | present | Tree click |
 | Search in PR/diff | present | `⌘F` index |
 | Dependency rich diff | deferred | Non-goal |
@@ -75,7 +75,7 @@ Sources: [About pull requests](https://docs.github.com/en/pull-requests/collabor
 | GitHub action | Modal | Notes |
 |---|---|---|
 | Status / check runs summary | present | Checks card |
-| Open check details URL | partial | Data only; no deep links UI |
+| Open check details URL | present | ChecksPanel / merge-box checks: DetailsLink from `html_url` / `details_url` |
 | Commits list | present | Aside timeline (truncated) |
 | Commits tab full history | partial | First 100 commits |
 
@@ -89,7 +89,7 @@ Sources: [About pull requests](https://docs.github.com/en/pull-requests/collabor
 | Update branch from base | present | Header/sidebar/palette `⌘⇧U` |
 | Merge queue enqueue | deferred | Enterprise non-goal |
 | Conflict resolution editor | deferred | Non-goal |
-| Delete branch after merge | missing | Optional post-merge |
+| Delete branch after merge | present | Merge box after merge: optional delete head ref (`DELETE …/git/refs/heads/…`); fork uses head owner/repo |
 
 ## Navigation / chrome
 
