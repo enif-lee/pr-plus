@@ -6,7 +6,7 @@
 
 /* Finish-review CTA Opt badges stack above the popover */
 .prp-opt-btn-hint--finish {
-  z-index: 100110;
+  z-index: var(--prp-z-dialog-top, 100110);
 }
 /* Review filter + thread navigator — pin to the right of the toolbar */
 .prp-diff-toolbar__thread-tools {

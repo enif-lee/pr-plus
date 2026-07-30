@@ -19,7 +19,8 @@
   right: 0;
   bottom: 0;
   width: 6px;
-  z-index: 5;
+  /* Below raised dropdown hosts (40) and chrome; above content (1–2) */
+  z-index: var(--prp-z-sticky, 10);
   opacity: 0;
   pointer-events: none;
   transition: opacity 180ms ease;

@@ -197,7 +197,7 @@ button.prp-stack-strip__item {
 }
 /* Floating path picker sits above modal chrome, aligned to the level chip */
 .prp-overlay .prp-sselect-panel--popover {
-  z-index: 120000;
+  z-index: var(--prp-z-portal, 120000);
   pointer-events: auto;
 }
 .prp-overlay .prp-sselect-backdrop--soft {

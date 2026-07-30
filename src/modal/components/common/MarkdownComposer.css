@@ -423,7 +423,7 @@
 .prp-mermaid-viewer {
   position: fixed;
   inset: 0;
-  z-index: 100010; /* > .prp-overlay (100000) when on body; top of overlay when inside it */
+  z-index: var(--prp-z-tip, 100020); /* > .prp-overlay (100000) when on body; top of overlay when inside it */
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -575,7 +575,7 @@
 .prp-image-viewer {
   position: fixed;
   inset: 0;
-  z-index: 100010;
+  z-index: var(--prp-z-tip, 100020);
   display: flex;
   flex-direction: column;
   align-items: stretch;

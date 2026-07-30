@@ -14,14 +14,14 @@
   border-bottom-color: transparent;
   box-shadow: none;
   /* Above inline comment cards that paint after the code row */
-  z-index: 1;
+  z-index: var(--prp-z-content, 1);
   position: relative;
 }
 
 /* Review-thread caret (plain ↑↓) — same accent language as line selection */
 .prp-vline--comment-selected {
   position: relative;
-  z-index: 1;
+  z-index: var(--prp-z-content, 1);
   outline: 2px solid var(--prp-accent, #0969da);
   outline-offset: -2px;
   border-radius: 8px;

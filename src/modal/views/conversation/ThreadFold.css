@@ -9,7 +9,7 @@
   position: absolute;
   top: 16px;
   left: 50%;
-  z-index: 14;
+  z-index: var(--prp-z-edge-fade, 12);
   transform: translateX(-50%);
   display: inline-flex;
   align-items: center;
@@ -70,7 +70,7 @@
    * Stack above the splitter (12) and collapse toggle (14) so right-opening
    * tips paint over chrome instead of sliding underneath.
    */
-  z-index: 20;
+  z-index: var(--prp-z-chrome, 20);
 }
 .prp-conversation__aside-host--collapsed .prp-aside-compact .prp-tip-pop {
   /* Portaled tips stack at 100020; keep compact label wrapping */

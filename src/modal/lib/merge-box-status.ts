@@ -149,13 +149,65 @@ export function canUpdateBranch(detail: any): boolean {
 }
 
 /**
+ * REST mergeable_state with GraphQL mergeStateStatus fallback.
+ * GitHub: clean | unstable | blocked | dirty | behind | has_hooks | unknown | draft
+ *
+ * Prefer REST when present — GraphQL mergeStateStatus can lag or differ during
+ * subscription patches; REST mergeable_state is what the merge box historically uses.
+ */
+export function effectiveMergeableState(detail: any): string {
+  const d = detail || {};
+  const rest = String(d.mergeableState || d.mergeable_state || '')
+    .trim()
+    .toLowerCase();
+  if (rest) return rest;
+  const mss = String(d.mergeStateStatus || d.merge_state_status || '')
+    .trim()
+    .toUpperCase();
+  switch (mss) {
+    case 'CLEAN':
+      return 'clean';
+    case 'UNSTABLE':
+      return 'unstable';
+    case 'BLOCKED':
+      return 'blocked';
+    case 'DIRTY':
+      return 'dirty';
+    case 'BEHIND':
+      return 'behind';
+    case 'HAS_HOOKS':
+      return 'has_hooks';
+    case 'DRAFT':
+      return 'draft';
+    case 'UNKNOWN':
+      return 'unknown';
+    default:
+      return '';
+  }
+}
+
+/**
+ * Normalize REST boolean or GraphQL mergeable enum to true | false | null.
+ * GraphQL: MERGEABLE | CONFLICTING | UNKNOWN
+ */
+export function normalizeMergeableFlag(detail: any): boolean | null {
+  const d = detail || {};
+  const raw = d.mergeable;
+  if (raw === true || raw === false) return raw;
+  if (raw == null || raw === '') return null;
+  const s = String(raw).trim().toUpperCase();
+  if (s === 'MERGEABLE' || s === 'TRUE' || s === '1') return true;
+  if (s === 'CONFLICTING' || s === 'FALSE' || s === '0') return false;
+  if (s === 'UNKNOWN') return null;
+  return null;
+}
+
+/**
  * True when GitHub reports merge conflicts (dirty / mergeable=false not policy-blocked).
  */
 export function isMergeConflictState(detail: any): boolean {
   const d = detail || {};
-  const mergeableState = String(d.mergeableState || d.mergeable_state || '')
-    .trim()
-    .toLowerCase();
+  const mergeableState = effectiveMergeableState(d);
   if (mergeableState === 'dirty') return true;
   if (d.mergeable === false && mergeableState !== 'blocked') return true;
   // GraphQL-style string enums sometimes stored on detail
@@ -188,6 +240,51 @@ export const MERGE_METHODS: Array<{ id: MergeMethod; label: string; description:
       'The commits from this branch will be rebased and added to the base branch.',
   },
 ];
+
+/**
+ * Commit count for merge-method copy (GitHub: "The N commits from this branch…").
+ * Prefers loaded commits array; falls back to totalCount-style fields.
+ */
+export function detailCommitCount(detail: any): number | null {
+  const d = detail || {};
+  if (Array.isArray(d.commits) && d.commits.length > 0) return d.commits.length;
+  for (const k of [
+    'commitsTotal',
+    'commitCount',
+    'commits_total',
+    'totalCommits',
+  ]) {
+    const n = Number(d[k]);
+    if (Number.isFinite(n) && n > 0) return Math.floor(n);
+  }
+  return null;
+}
+
+/**
+ * GitHub-style helper text for a merge method.
+ * Squash / rebase include the commit count when known.
+ */
+export function mergeMethodDescription(
+  method: MergeMethod,
+  commitCount?: number | null
+): string {
+  const n = Number(commitCount);
+  const hasN = Number.isFinite(n) && n > 0;
+  const commitsPhrase = hasN
+    ? `${n} commit${n === 1 ? '' : 's'}`
+    : 'commits';
+  if (method === 'squash') {
+    return hasN
+      ? `The ${commitsPhrase} from this branch will be combined into one commit in the base branch.`
+      : 'The commits from this branch will be combined into one commit in the base branch.';
+  }
+  if (method === 'rebase') {
+    return hasN
+      ? `The ${commitsPhrase} from this branch will be rebased and added to the base branch.`
+      : 'The commits from this branch will be rebased and added to the base branch.';
+  }
+  return 'All commits from this branch will be added to the base branch via a merge commit.';
+}
 
 export type RepoMergeMethodFlags = {
   allowMergeCommit: boolean | null;
@@ -245,7 +342,12 @@ export function mergeMethodsForUi(
   detail: any
 ): Array<{ id: MergeMethod; label: string; description: string }> {
   const allowed = new Set(allowedMergeMethods(detail));
-  return MERGE_METHODS.filter((m) => allowed.has(m.id));
+  const count = detailCommitCount(detail);
+  return MERGE_METHODS.filter((m) => allowed.has(m.id)).map((m) => ({
+    id: m.id,
+    label: m.label,
+    description: mergeMethodDescription(m.id, count),
+  }));
 }
 
 export function normalizeMergeMethod(raw: unknown): MergeMethod {
@@ -391,9 +493,7 @@ export function buildMergeBoxStatus(detail: any): MergeBoxStatus {
   const d = detail || {};
   const checksState = effectiveChecksState(d);
   const checksLine = checksLineFrom(d);
-  const mergeableState = String(d.mergeableState || d.mergeable_state || '')
-    .trim()
-    .toLowerCase();
+  const mergeableState = effectiveMergeableState(d);
   const forceAllowed = viewerMayForceMerge(d);
   const showUpdateBranch = canUpdateBranch(d);
 
@@ -454,6 +554,9 @@ export function buildMergeBoxStatus(detail: any): MergeBoxStatus {
   // force-merged via the API — only resolve conflicts. Force CTA is only for
   // policy-blocked PRs when the viewer may bypass rules (admin).
   const isDirty = isMergeConflictState(d);
+  const mergeableFlag = normalizeMergeableFlag(d);
+  // Policy block = branch protection / required checks (not optional CI noise).
+  // Never treat mergeable_state "unstable" as blocked — that is still mergeable.
   const isPolicyBlocked = mergeableState === 'blocked';
   const conflictFiles = normalizeConflictFiles(d);
   const resolveConflictsUrl = buildResolveConflictsUrl(d);
@@ -482,8 +585,9 @@ export function buildMergeBoxStatus(detail: any): MergeBoxStatus {
     };
   }
 
-  if (isPolicyBlocked || d.mergeable === false) {
-    // mergeable=false + blocked (or blocked alone): checks / branch protection
+  // GitHub: mergeable=true + unstable ≠ blocked. Only explicit blocked state
+  // (or mergeable=false without dirty) is a hard block.
+  if (isPolicyBlocked || mergeableFlag === false) {
     const canForce = forceAllowed;
     return applyRepoMergeMethodGate(
       {
@@ -507,7 +611,12 @@ export function buildMergeBoxStatus(detail: any): MergeBoxStatus {
   }
 
   // Still computing mergeability — do not show green success CTA
-  if (d.mergeable == null && mergeableState !== 'clean' && mergeableState !== 'unstable') {
+  if (
+    mergeableFlag == null &&
+    mergeableState !== 'clean' &&
+    mergeableState !== 'unstable' &&
+    mergeableState !== 'has_hooks'
+  ) {
     return applyRepoMergeMethodGate(
       {
         kind: 'unknown',
@@ -527,31 +636,33 @@ export function buildMergeBoxStatus(detail: any): MergeBoxStatus {
     );
   }
 
-  // Unstable: mergeable but failing/pending checks (real items only).
-  // Empty checks with legacy state:"pending" or GitHub combined default must not warn.
+  // Unstable: REST "unstable" / GraphQL UNSTABLE — PR is mergeable; optional
+  // checks may fail. GitHub still shows green "no conflicts" + enabled Merge.
+  // Callabo #2571: mergeable=true, mergeable_state=unstable, failed claude-review.
   const hasRealChecks = checksItemCount(d) > 0;
+  const checksUnsettled =
+    hasRealChecks &&
+    (checksState === 'failure' ||
+      checksState === 'pending' ||
+      checksState === 'error');
   const unstable =
-    (hasRealChecks &&
-      (checksState === 'failure' ||
-        checksState === 'pending' ||
-        checksState === 'error')) ||
-    (mergeableState === 'unstable' && hasRealChecks);
-  if (unstable && d.mergeable !== false) {
+    mergeableState === 'unstable' ||
+    (checksUnsettled &&
+      mergeableFlag !== false &&
+      mergeableState !== 'blocked');
+  if (unstable && mergeableFlag !== false && mergeableState !== 'blocked') {
     return applyRepoMergeMethodGate(
       {
         kind: 'unstable',
-        tone: 'warn',
-        headline:
-          checksState === 'pending'
-            ? 'Some checks are still running'
-            : 'Merging is blocked by failing or pending checks',
-        helper:
-          'You can still attempt a merge if repository rules allow it; checks may be incomplete.',
+        tone: 'ok',
+        headline: 'This branch has no conflicts with the base branch',
+        // Same primary helper as clean — check failures live in MergeBoxChecks
+        helper: 'Merging can be performed automatically.',
         checksLine,
         showMerge: true,
         canMerge: true,
         forceMerge: false,
-        ctaVariant: 'warn',
+        ctaVariant: 'ok',
         showUpdateBranch,
         draftToggle: 'draft',
         ...emptyConflictFields(),

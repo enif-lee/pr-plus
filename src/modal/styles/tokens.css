@@ -57,9 +57,47 @@ html.prp-scroll-lock body {
   --prp-sel-edge: #ca8a04;
   --prp-sel-border: color-mix(in srgb, #ca8a04 55%, transparent);
 
+  /*
+   * Z-index scale (inside .prp-overlay stacking context).
+   * Local document layers stay in the low band; shell chrome mid; floating
+   * menus high; portaled overlays use the 1000xx band above page embed.
+   *
+   *   base 0        · rails, backgrounds
+   *   content 1–2   · feed cards, selected rows
+   *   sticky 8–12   · sticky headers, edge-fade, splitter
+   *   chrome 20–30  · sticky file header, shell resizer
+   *   raised-row 40 · virtual row with open dropdown (above later siblings)
+   *   dropdown 50   · menus, more-menu (relative to host)
+   *   floating 60–90· islands, toasts, local popovers
+   *   overlay 100000· .prp-overlay itself (page-level)
+   *   tip 100020    · tips portaled to overlay/body
+   *   dialog 100100 · confirm / finish-review
+   *   portal 120000 · SearchableSelect / entity menus on body
+   */
+  --prp-z-base: 0;
+  --prp-z-content: 1;
+  --prp-z-content-raised: 2;
+  --prp-z-sticky: 10;
+  --prp-z-edge-fade: 12;
+  --prp-z-splitter: 12;
+  --prp-z-chrome: 20;
+  --prp-z-sticky-header: 24;
+  --prp-z-resizer: 30;
+  --prp-z-raised-row: 40;
+  --prp-z-dropdown: 50;
+  --prp-z-floating: 60;
+  --prp-z-island: 70;
+  --prp-z-toast: 80;
+  --prp-z-local-modal: 90;
+  --prp-z-overlay: 100000;
+  --prp-z-tip: 100020;
+  --prp-z-dialog: 100100;
+  --prp-z-dialog-top: 100110;
+  --prp-z-portal: 120000;
+
   position: fixed;
   inset: 0;
-  z-index: 100000;
+  z-index: var(--prp-z-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -149,7 +187,7 @@ html.prp-scroll-lock body {
   max-height: none !important;
   margin: 0 !important;
   padding: 0 !important;
-  z-index: 100000 !important;
+  z-index: var(--prp-z-overlay, 100000) !important;
   flex: none !important;
   background: var(--bgColor-default, var(--prp-bg, #fff)) !important;
   box-sizing: border-box !important;

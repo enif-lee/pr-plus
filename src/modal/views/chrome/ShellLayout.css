@@ -210,7 +210,7 @@
 /* Shell panel resizers (side sheet left edge / modal SE corner) */
 .prp-shell-resizer {
   position: absolute;
-  z-index: 30;
+  z-index: var(--prp-z-resizer, 30);
   touch-action: none;
   background: transparent;
   border: 0;
@@ -277,7 +277,7 @@
 /* Keep resizers visible in fullscreen so users can drag back to windowed size. */
 .prp-overlay.prp-shell--fullscreen .prp-shell-resizer {
   display: block;
-  z-index: 40;
+  z-index: var(--prp-z-raised-row, 40);
 }
 
 /*

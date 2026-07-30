@@ -8,6 +8,8 @@ import {
   canUpdateBranch,
   coerceMergeMethod,
   defaultMergeMethod,
+  detailCommitCount,
+  mergeMethodDescription,
   mergeMethodsForUi,
 } from '../src/modal/lib/merge-box-status';
 
@@ -168,6 +170,34 @@ describe('allowedMergeMethods (repo settings)', () => {
     expect(rows[0].label).toMatch(/Squash/i);
   });
 
+  test('mergeMethodDescription uses GitHub copy + commit count', () => {
+    expect(mergeMethodDescription('merge', 5)).toMatch(/merge commit/i);
+    expect(mergeMethodDescription('squash', 5)).toBe(
+      'The 5 commits from this branch will be combined into one commit in the base branch.'
+    );
+    expect(mergeMethodDescription('rebase', 1)).toBe(
+      'The 1 commit from this branch will be rebased and added to the base branch.'
+    );
+    expect(mergeMethodDescription('squash', null)).toMatch(/The commits from this branch/);
+  });
+
+  test('detailCommitCount prefers commits array', () => {
+    expect(detailCommitCount({ commits: [{}, {}, {}] })).toBe(3);
+    expect(detailCommitCount({ commitsTotal: 7 })).toBe(7);
+    expect(detailCommitCount({})).toBe(null);
+  });
+
+  test('mergeMethodsForUi injects commit count into squash/rebase copy', () => {
+    const rows = mergeMethodsForUi({
+      allowMergeCommit: true,
+      allowSquashMerge: true,
+      allowRebaseMerge: true,
+      commits: [{}, {}, {}, {}, {}],
+    });
+    const squash = rows.find((r) => r.id === 'squash');
+    expect(squash?.description).toMatch(/5 commits/);
+  });
+
   test('defaultMergeMethod prefers first allowed / keeps preferred', () => {
     const detail = {
       allowMergeCommit: false,
@@ -232,5 +262,72 @@ describe('allowedMergeMethods (repo settings)', () => {
     expect(ms.showMerge).toBe(true);
     expect(ms.canMerge).toBe(true);
     expect(ms.kind).toBe('clean');
+  });
+
+  test('unstable (mergeable + failing checks) is mergeable, not blocked — GH parity', () => {
+    // callabo-server#2571 style: mergeable=true, mergeable_state=unstable,
+    // optional non-required check failures (e.g. claude-review).
+    const ms = buildMergeBoxStatus({
+      state: 'open',
+      merged: false,
+      draft: false,
+      mergeable: true,
+      mergeableState: 'unstable',
+      mergeStateStatus: 'UNSTABLE',
+      checks: {
+        state: 'failure',
+        totalCount: 2,
+        checkRuns: [
+          { name: 'claude-review', conclusion: 'failure', status: 'completed' },
+          { name: 'test', conclusion: 'success', status: 'completed' },
+        ],
+      },
+      allowMergeCommit: true,
+      allowSquashMerge: true,
+      allowRebaseMerge: true,
+    });
+    expect(ms.kind).toBe('unstable');
+    expect(ms.canMerge).toBe(true);
+    expect(ms.showMerge).toBe(true);
+    expect(ms.forceMerge).toBe(false);
+    expect(ms.ctaVariant).toBe('ok');
+    expect(ms.tone).toBe('ok');
+    expect(ms.headline).toMatch(/no conflicts/i);
+    expect(ms.headline).not.toMatch(/blocked/i);
+    expect(ms.helper).toMatch(/Merging can be performed automatically/i);
+    expect(ms.helper).not.toMatch(/blocked/i);
+  });
+
+  test('GraphQL MERGEABLE string + UNSTABLE still mergeable', () => {
+    const ms = buildMergeBoxStatus({
+      state: 'open',
+      merged: false,
+      draft: false,
+      mergeable: 'MERGEABLE',
+      mergeStateStatus: 'UNSTABLE',
+      checks: {
+        state: 'failure',
+        checkRuns: [{ name: 'x', conclusion: 'failure', status: 'completed' }],
+      },
+      allowMergeCommit: true,
+    });
+    expect(ms.kind).toBe('unstable');
+    expect(ms.canMerge).toBe(true);
+    expect(ms.ctaVariant).toBe('ok');
+    expect(ms.headline).not.toMatch(/blocked/i);
+  });
+
+  test('policy blocked still blocks (required checks / reviews)', () => {
+    const ms = buildMergeBoxStatus({
+      state: 'open',
+      merged: false,
+      draft: false,
+      mergeable: false,
+      mergeableState: 'blocked',
+      allowMergeCommit: true,
+    });
+    expect(ms.kind).toBe('blocked');
+    expect(ms.canMerge).toBe(false);
+    expect(ms.headline).toMatch(/Required status checks|blocked/i);
   });
 });

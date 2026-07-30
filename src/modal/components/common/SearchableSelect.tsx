@@ -262,9 +262,9 @@ export function SearchableSelect({
         top: pos.top,
         left: pos.left,
         width: pos.width,
-        zIndex: 120000,
+        zIndex: 'var(--prp-z-portal, 120000)',
       }
-    : { zIndex: 120000 };
+    : { zIndex: 'var(--prp-z-portal, 120000)' };
 
   const panel = (
     <div

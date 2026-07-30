@@ -41,7 +41,7 @@
    * Above overlay chrome / modal panels. Portaled tips use fixed + this layer
    * so overflow:hidden ancestors never clip them.
    */
-  z-index: 100020;
+  z-index: var(--prp-z-tip, 100020);
 }
 /* Portaled tips (default path): fixed coords from JS, high stacking */
 .prp-tip-pop--portal {
@@ -50,7 +50,7 @@
   bottom: auto !important;
   margin: 0;
   /* Above ActionToast (80), selection group (30), SearchableSelect panels */
-  z-index: 100020;
+  z-index: var(--prp-z-tip, 100020);
 }
 .prp-tip-pop--portal.prp-tip-pop--top,
 .prp-tip-pop--portal[data-placement='top'] {
@@ -97,7 +97,7 @@
   bottom: calc(100% + 6px);
   top: auto;
   transform: translateX(-50%) translateY(4px);
-  z-index: 100020;
+  z-index: var(--prp-z-tip, 100020);
 }
 .prp-tip-pop:not(.prp-tip-pop--portal).prp-tip-pop--bottom,
 .prp-tip-pop:not(.prp-tip-pop--portal)[data-placement='bottom'] {
@@ -274,7 +274,7 @@
 .prp-sselect-layer {
   position: absolute;
   inset: 0;
-  z-index: 40;
+  z-index: var(--prp-z-dropdown, 50);
   display: flex;
   align-items: flex-start;
   justify-content: center;
@@ -733,7 +733,7 @@ a.prp-branch-tag__text:focus-visible {
  */
 .prp-sel-dock-host {
   position: relative;
-  z-index: 28;
+  z-index: var(--prp-z-sticky-header, 24);
   height: var(--prp-row-height, 22px);
   overflow: visible;
   /* no contain — absolute dock must paint outside host box */
@@ -746,7 +746,7 @@ a.prp-branch-tag__text:focus-visible {
   top: 100%;
   left: 28px;
   margin-top: 6px;
-  z-index: 30;
+  z-index: var(--prp-z-resizer, 30);
   pointer-events: auto;
   white-space: normal;
   /* Reset .prp-vlist-host mono metrics — UI chrome uses body font */
@@ -810,7 +810,7 @@ a.prp-branch-tag__text:focus-visible {
 
 /* Floating segmented selection actions (no card, no filename) */
 .prp-selection-group {
-  z-index: 30;
+  z-index: var(--prp-z-resizer, 30);
   display: inline-flex;
   align-items: stretch;
   flex-wrap: nowrap;
@@ -1008,7 +1008,7 @@ a.prp-branch-tag__text:focus-visible {
   position: relative;
 }
 .prp-selection-island {
-  z-index: 8;
+  z-index: var(--prp-z-sticky, 10);
   padding: 14px 16px;
   border-radius: 18px;
   border: 1px solid var(--prp-border);

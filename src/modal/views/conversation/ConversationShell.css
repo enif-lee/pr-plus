@@ -42,7 +42,7 @@
   left: 0;
   right: 0;
   height: var(--prp-edge-fade-size, 18px);
-  z-index: 3;
+  z-index: var(--prp-z-edge-fade, 12);
   pointer-events: none;
 }
 
@@ -127,7 +127,7 @@
   transform: translateX(-50%);
   background: var(--prp-border-muted);
   border-radius: 1px;
-  z-index: 0;
+  z-index: var(--prp-z-base, 0);
   pointer-events: none;
 }
 
@@ -155,7 +155,19 @@
   /* Matches former column gap; counted in measured row height */
   padding-bottom: var(--prp-gap-stack);
   position: relative;
-  z-index: 1;
+  z-index: var(--prp-z-content, 1);
+}
+
+/*
+ * Open popovers inside a virtual row (merge method menu, etc.) must stack
+ * above later siblings — timeline events paint after merge and otherwise
+ * cover the dropdown mid-scroll.
+ */
+.prp-conversation-virtual__row:has(.prp-merge-method--menu-open),
+.prp-conversation-virtual__row:has([data-menu-open='1']) {
+  z-index: var(--prp-z-raised-row, 40);
+  /* Let absolute menus extend past the row box without clipping */
+  overflow: visible;
 }
 
 /*
@@ -166,14 +178,24 @@
 .prp-conversation-virtual__row > .prp-card,
 .prp-conversation-virtual__row > .prp-timeline-gap,
 .prp-conversation-virtual__row > .prp-merge-box,
+.prp-conversation-virtual__row > .prp-merge-box-focus-host,
 .prp-conversation-virtual__row > .prp-pagination,
 .prp-conversation-virtual__row > .prp-conversation-empty,
 .prp-conversation-virtual__row > .prp-conversation-inline-thread {
   width: 100%;
   position: relative;
-  z-index: 2;
+  z-index: var(--prp-z-content-raised, 2);
   background: var(--prp-bg);
   box-sizing: border-box;
+}
+
+/* Focus host wraps merge box — keep opaque + raised when menu open */
+.prp-conversation-virtual__row > .prp-merge-box-focus-host:has(.prp-merge-method--menu-open) {
+  z-index: var(--prp-z-raised-row, 40);
+  overflow: visible;
+}
+.prp-conversation-virtual__row > .prp-merge-box-focus-host > .prp-merge-box {
+  background: var(--prp-bg);
 }
 
 /* Review thread shell may not inherit .prp-card bg — force opaque cover */
@@ -188,7 +210,7 @@
 .prp-conversation-virtual__row > .prp-timeline-event {
   width: 100%;
   position: relative;
-  z-index: 2;
+  z-index: var(--prp-z-content-raised, 2);
   background: transparent;
 }
 
@@ -202,7 +224,7 @@
 /* Vertical splitter between main and aside (hosts collapse control) */
 .prp-conversation__splitter {
   position: relative;
-  z-index: 12; /* above edge-fade / scroll content so collapse tip is not clipped under */
+  z-index: var(--prp-z-splitter, 12); /* above edge-fade / scroll content */
   align-self: stretch;
   min-width: 0;
   width: 100%;

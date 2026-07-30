@@ -162,7 +162,7 @@
   --prp-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
   position: fixed;
   inset: 0;
-  z-index: 100100;
+  z-index: var(--prp-z-dialog, 100100);
   pointer-events: none;
   font-family: var(--prp-font);
   color: var(--prp-fg);

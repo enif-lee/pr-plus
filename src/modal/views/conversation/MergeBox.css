@@ -145,11 +145,19 @@
   opacity: 0.55;
   cursor: not-allowed;
 }
+/*
+ * Open menu must paint above later virtual-list rows (timeline events).
+ * Raise the merge-method host + its virtual row (see ConversationShell.css).
+ */
+.prp-merge-method--menu-open {
+  position: relative;
+  z-index: var(--prp-z-dropdown, 50);
+}
 .prp-merge-method__menu {
   position: absolute;
   top: calc(100% + 6px);
   left: 0;
-  z-index: 40;
+  z-index: var(--prp-z-dropdown, 50);
   min-width: min(360px, 92vw);
   border: 1px solid var(--prp-border);
   background: var(--prp-bg);
@@ -157,15 +165,26 @@
 }
 .prp-merge-method__item {
   appearance: none;
-  border: 0;
+  border: 1px solid transparent;
   background: transparent;
   color: inherit;
   cursor: pointer;
   font: inherit;
 }
-.prp-merge-method__item:hover,
-.prp-merge-method__item--active {
+.prp-merge-method__item:hover {
   background: var(--prp-bg-muted);
+}
+/* GitHub-style selected method: accent outline + check */
+.prp-merge-method__item--active {
+  background: color-mix(in srgb, var(--prp-accent, #0969da) 6%, var(--prp-bg));
+  border-color: var(--prp-accent, #0969da);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--prp-accent, #0969da) 35%, transparent);
+}
+.prp-merge-method__item-check {
+  color: var(--prp-accent, #0969da);
+}
+.prp-merge-method__item--active .prp-merge-method__item-label {
+  color: var(--prp-fg);
 }
 
 /* ⌥J/K focus ring host around merge box */

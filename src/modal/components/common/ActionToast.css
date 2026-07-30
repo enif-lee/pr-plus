@@ -14,7 +14,7 @@
   position: absolute;
   top: 10px;
   left: 50%;
-  z-index: 80;
+  z-index: var(--prp-z-toast, 80);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -84,7 +84,7 @@
   position: absolute;
   left: 50%;
   bottom: var(--prp-sm-bottom);
-  z-index: 90;
+  z-index: var(--prp-z-local-modal, 90);
   max-width: min(var(--prp-sm-max), calc(100% - 28px));
   pointer-events: none;
   font-family: var(--prp-mono, ui-monospace, SFMono-Regular, Menlo, monospace);

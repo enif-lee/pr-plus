@@ -5,7 +5,7 @@
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@common/Button';
-import { IconFileDiff, IconMergeStatus } from '@common/icons';
+import { IconCheck, IconFileDiff, IconMergeStatus } from '@common/icons';
 import { OptBtnHint } from '@common/OptBtnHint';
 import { MergeBoxChecks } from './MergeBoxChecks';
 import { hasChecksData } from './ChecksPanel';
@@ -179,12 +179,13 @@ export function MergeBox({
             <div
               className={`prp-merge-method prp-merge-method--${ms.ctaVariant || 'default'} relative inline-flex flex-col items-stretch${
                 ms.forceMerge ? ' prp-merge-method--force' : ''
-              }`}
+              }${mergeMenuOpen ? ' prp-merge-method--menu-open' : ''}`}
               ref={mergeMenuRef}
               data-cta-variant={ms.ctaVariant || 'default'}
               data-force-merge={ms.forceMerge ? '1' : '0'}
               data-can-merge={ms.canMerge ? '1' : '0'}
               data-method-count={methods.length}
+              data-menu-open={mergeMenuOpen ? '1' : '0'}
             >
               <div className="prp-merge-method__split prp-opt-hint-host inline-flex items-stretch overflow-hidden rounded-lg">
                 <OptBtnHint label="⌥⇧M" />
@@ -212,7 +213,7 @@ export function MergeBox({
                     className={`prp-merge-method__caret prp-merge-method__caret--${
                       ms.ctaVariant || 'default'
                     } inline-flex min-w-[34px] items-center justify-center px-2.5 text-xs font-inherit rounded-tr-lg rounded-br-lg`}
-                    disabled={actionBusy || !ms.canMerge}
+                    disabled={actionBusy}
                     aria-haspopup="menu"
                     aria-expanded={mergeMenuOpen}
                     aria-label="Select merge method"
@@ -227,30 +228,42 @@ export function MergeBox({
                 <ul
                   className="prp-merge-method__menu m-0 list-none rounded-[10px] p-1.5"
                   role="menu"
+                  aria-label="Merge method"
                 >
-                  {methods.map((m) => (
-                    <li key={m.id} role="none">
-                      <button
-                        type="button"
-                        role="menuitemradio"
-                        aria-checked={mergeMethod === m.id}
-                        className={`prp-merge-method__item flex w-full flex-col gap-0.5 rounded-lg px-3 py-2.5 text-left${
-                          mergeMethod === m.id ? ' prp-merge-method__item--active' : ''
-                        }`}
-                        onClick={() => {
-                          setMergeMethod(m.id);
-                          setMergeMenuOpen(false);
-                        }}
-                      >
-                        <span className="prp-merge-method__item-label text-[13px] font-semibold">
-                          {m.label}
-                        </span>
-                        <span className="prp-merge-method__item-desc prp-muted text-xs leading-snug">
-                          {m.description}
-                        </span>
-                      </button>
-                    </li>
-                  ))}
+                  {methods.map((m) => {
+                    const active = mergeMethod === m.id;
+                    return (
+                      <li key={m.id} role="none">
+                        <button
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked={active}
+                          className={`prp-merge-method__item flex w-full items-start gap-2.5 rounded-lg px-3 py-2.5 text-left${
+                            active ? ' prp-merge-method__item--active' : ''
+                          }`}
+                          onClick={() => {
+                            setMergeMethod(m.id);
+                            setMergeMenuOpen(false);
+                          }}
+                        >
+                          <span
+                            className="prp-merge-method__item-check mt-0.5 inline-flex h-[1.1em] w-[1.1em] shrink-0 items-center justify-center"
+                            aria-hidden="true"
+                          >
+                            {active ? <IconCheck size={14} /> : null}
+                          </span>
+                          <span className="prp-merge-method__item-body flex min-w-0 flex-1 flex-col gap-0.5">
+                            <span className="prp-merge-method__item-label text-[13px] font-semibold leading-snug">
+                              {m.label}
+                            </span>
+                            <span className="prp-merge-method__item-desc prp-muted text-xs leading-snug">
+                              {m.description}
+                            </span>
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })}
                 </ul>
               ) : null}
             </div>
