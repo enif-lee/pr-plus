@@ -18,6 +18,81 @@ export const COMMENT_ROW_HEIGHT_PENDING = COMMENT_ROW_HEIGHT;
 export const COMMENT_ROW_HEIGHT_COLLAPSED = 76;
 /** Estimated height for rendered image previews in the virtualized diff list. */
 export const IMAGE_ROW_HEIGHT = 220;
+/** Soft cap so a mega-thread cannot dominate spacer before measure. */
+export const COMMENT_ROW_HEIGHT_MAX = 1600;
+
+/**
+ * Stable measure-map key for variable-height Diff virtual rows.
+ * Fixed-height rows (plain code / header / meta) return null.
+ *
+ * - inline-comment → `c:{commentId}`
+ * - diff-image → `img:{path|rowIndex}`
+ * - expanded code line → `{path}#{rowIndex}` (same as expand key)
+ */
+export function diffRowMeasureKey(
+  row: any,
+  opts?: { expandedKeys?: Set<string> | null } | null
+): string | null {
+  if (!row) return null;
+  if (row.kind === 'inline-comment' && row.commentId != null) {
+    return `c:${row.commentId}`;
+  }
+  if (row.kind === 'diff-image') {
+    const path = String(row.filePath || row.path || '');
+    if (path) return `img:${path}`;
+    const ri = Number(row.rowIndex);
+    return Number.isFinite(ri) ? `img:#${ri}` : null;
+  }
+  if (row.kind === 'diff-line') {
+    const t = row.lineType;
+    if (t !== 'add' && t !== 'del' && t !== 'change' && t !== 'context') {
+      return null;
+    }
+    const path = String(row.filePath || row.path || '');
+    const ri = Number(row.rowIndex);
+    if (!Number.isFinite(ri)) return null;
+    const key = `${path}#${ri}`;
+    // Only measure when expanded (or caller already tracks this key)
+    if (opts?.expandedKeys?.has?.(key)) return key;
+    return null;
+  }
+  return null;
+}
+
+/**
+ * Estimate open-thread height from row shape (before ResizeObserver).
+ * Floors at COMMENT_ROW_HEIGHT so under-estimate never clips the card.
+ */
+export function estimateInlineCommentHeight(
+  row: any,
+  opts: { isCollapsed?: (row: any) => boolean } | null = null
+): number {
+  const collapsed =
+    typeof opts?.isCollapsed === 'function'
+      ? Boolean(opts.isCollapsed(row))
+      : false;
+  if (collapsed) return COMMENT_ROW_HEIGHT_COLLAPSED;
+
+  let replies = 0;
+  if (Array.isArray(row?.replies)) replies = row.replies.length;
+  else if (Number.isFinite(Number(row?.replyCount))) {
+    replies = Math.max(0, Number(row.replyCount));
+  }
+  const bodyLen = Math.max(
+    String(row?.body || '').length,
+    String(row?.root?.body || '').length,
+    String(row?.comment?.body || '').length
+  );
+  let h = 168; // chrome + single comment baseline
+  h += Math.min(360, Math.floor(bodyLen / 3.5));
+  h += Math.min(10, replies) * 68;
+  if (row?.pending || row?.root?.pending) h += 96; // reply composer room
+  if (row?.path || row?.root?.path) h += 28; // file bar
+  return Math.max(
+    COMMENT_ROW_HEIGHT,
+    Math.min(COMMENT_ROW_HEIGHT_MAX, Math.round(h))
+  );
+}
 
 /**
  * @param {any} row
@@ -29,13 +104,33 @@ export const IMAGE_ROW_HEIGHT = 220;
  * } | null | undefined} [opts]
  */
 export function rowHeightFor(row, opts: any = null) {
+  // Measured heights win for any variable row (comments, images, expanded lines).
+  // For comments, ignore a stale expanded measure while collapsed (RO will re-publish).
+  const measureKey = diffRowMeasureKey(row, opts);
+  if (measureKey && opts?.measuredHeights) {
+    const m = opts.measuredHeights.get?.(measureKey);
+    if (m != null && Number.isFinite(m) && m > 0) {
+      if (row?.kind === 'inline-comment') {
+        const collapsed =
+          typeof opts?.isCollapsed === 'function'
+            ? Boolean(opts.isCollapsed(row))
+            : false;
+        if (collapsed) {
+          if (m <= COMMENT_ROW_HEIGHT_COLLAPSED + 60) {
+            return Math.max(40, Math.ceil(m));
+          }
+          // Stale open measure — fall through to collapsed estimate
+        } else {
+          return Math.max(COMMENT_ROW_HEIGHT_COLLAPSED, Math.ceil(m));
+        }
+      } else {
+        return Math.max(ROW_HEIGHT, Math.ceil(m));
+      }
+    }
+  }
+
   if (row?.kind === 'inline-comment') {
-    const collapsed =
-      typeof opts?.isCollapsed === 'function' ? Boolean(opts.isCollapsed(row)) : false;
-    if (collapsed) return COMMENT_ROW_HEIGHT_COLLAPSED;
-    // Pending and submitted threads share the same estimate so virtual offsets
-    // match real card height (under-estimate clips bottom + breaks toggles).
-    return COMMENT_ROW_HEIGHT;
+    return estimateInlineCommentHeight(row, opts);
   }
   if (row?.kind === 'diff-image') {
     return IMAGE_ROW_HEIGHT;
@@ -61,10 +156,6 @@ export function rowHeightFor(row, opts: any = null) {
       if (Number.isFinite(ri)) {
         const key = `${path}#${ri}`;
         if (opts.expandedKeys.has(key)) {
-          const m = opts.measuredHeights?.get?.(key);
-          if (m != null && Number.isFinite(m) && m > 0) {
-            return Math.max(ROW_HEIGHT, Math.ceil(m));
-          }
           // Fallback estimate without circular import
           const len = Math.max(
             String(row.text || '').length,

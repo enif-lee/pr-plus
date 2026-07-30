@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "pr+",
-  "version": "1.7.6",
+  "version": "1.7.7",
   "description": "GitHub PR stack tree + fast in-page review shell for conversation, diff, and merge.",
   "icons": {
     "16": "assets/icons/icon16.png",

@@ -109,7 +109,7 @@ export const SHORTCUT_MONITOR_CATALOG: Record<string, ShortcutMonitorEntry> = {
     labelWin: 'Alt+Shift+C',
   },
   clearConversationCommentFocus: {
-    title: 'Clear conversation focus',
+    title: 'Clear thread focus',
     labelMac: '⌥⇧C',
     labelWin: 'Alt+Shift+C',
   },

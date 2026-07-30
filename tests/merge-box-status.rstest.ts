@@ -5,13 +5,18 @@ import { describe, expect, test } from '@rstest/core';
 import {
   allowedMergeMethods,
   buildMergeBoxStatus,
+  BYPASS_RULES_CHECKBOX_LABEL,
   canUpdateBranch,
   coerceMergeMethod,
   defaultMergeMethod,
   detailCommitCount,
+  mergeMethodButtonLabel,
   mergeMethodDescription,
   mergeMethodsForUi,
+  resolveMergePrimaryAction,
 } from '../src/modal/lib/merge-box-status';
+import fs from 'node:fs';
+import path from 'node:path';
 
 describe('canUpdateBranch', () => {
   test('false when merged or closed', () => {
@@ -328,6 +333,135 @@ describe('allowedMergeMethods (repo settings)', () => {
     });
     expect(ms.kind).toBe('blocked');
     expect(ms.canMerge).toBe(false);
-    expect(ms.headline).toMatch(/Required status checks|blocked/i);
+    expect(ms.offerBypassRules).toBe(false);
+    expect(ms.headline).toMatch(/blocked/i);
+  });
+});
+
+describe('bypass rules opt-in (GitHub parity)', () => {
+  const blockedAdmin = {
+    state: 'open',
+    merged: false,
+    draft: false,
+    mergeable: false,
+    mergeableState: 'blocked',
+    viewerCanMergeAsAdmin: true,
+    allowMergeCommit: true,
+    allowSquashMerge: true,
+    allowRebaseMerge: true,
+  };
+
+  const blockedNoAdmin = {
+    ...blockedAdmin,
+    viewerCanMergeAsAdmin: false,
+    canForceMerge: false,
+    viewerAdmin: false,
+    viewerPermission: 'write',
+  };
+
+  test('blocked + can-bypass offers checkbox; merge disabled until accepted', () => {
+    const ms = buildMergeBoxStatus(blockedAdmin);
+    expect(ms.kind).toBe('blocked');
+    expect(ms.offerBypassRules).toBe(true);
+    expect(ms.showMerge).toBe(true);
+    expect(ms.canMerge).toBe(false);
+
+    const off = resolveMergePrimaryAction(ms, { bypassRulesAccepted: false });
+    expect(off.showBypassCheckbox).toBe(true);
+    expect(off.bypassCheckboxLabel).toBe(BYPASS_RULES_CHECKBOX_LABEL);
+    expect(off.mergeEnabled).toBe(false);
+    expect(off.buttonLabel('merge')).toBe('Merge pull request');
+    expect(off.bypassWording).toBe(false);
+
+    const on = resolveMergePrimaryAction(ms, { bypassRulesAccepted: true });
+    expect(on.showBypassCheckbox).toBe(true);
+    expect(on.mergeEnabled).toBe(true);
+    expect(on.bypassWording).toBe(true);
+    expect(on.buttonLabel('merge')).toBe('Bypass rules and merge');
+    expect(on.buttonLabel('squash')).toMatch(/Bypass rules and squash/i);
+    expect(on.ctaVariant).toBe('danger');
+  });
+
+  test('blocked without admin permission: no bypass checkbox', () => {
+    const ms = buildMergeBoxStatus(blockedNoAdmin);
+    expect(ms.kind).toBe('blocked');
+    expect(ms.offerBypassRules).toBe(false);
+    expect(ms.canMerge).toBe(false);
+    const act = resolveMergePrimaryAction(ms, { bypassRulesAccepted: true });
+    expect(act.showBypassCheckbox).toBe(false);
+    expect(act.mergeEnabled).toBe(false);
+  });
+
+  test('clean / unstable never offer bypass checkbox', () => {
+    for (const state of ['clean', 'unstable'] as const) {
+      const ms = buildMergeBoxStatus({
+        state: 'open',
+        merged: false,
+        draft: false,
+        mergeable: true,
+        mergeableState: state,
+        viewerCanMergeAsAdmin: true,
+        allowMergeCommit: true,
+        checks:
+          state === 'unstable'
+            ? {
+                state: 'failure',
+                checkRuns: [
+                  { name: 'x', conclusion: 'failure', status: 'completed' },
+                ],
+              }
+            : undefined,
+      });
+      expect(ms.offerBypassRules).toBe(false);
+      expect(ms.canMerge).toBe(true);
+      const act = resolveMergePrimaryAction(ms, { bypassRulesAccepted: true });
+      expect(act.showBypassCheckbox).toBe(false);
+      expect(act.mergeEnabled).toBe(true);
+      expect(act.buttonLabel('merge')).toBe('Merge pull request');
+    }
+  });
+
+  test('conflicts never offer force-bypass merge path', () => {
+    const ms = buildMergeBoxStatus({
+      state: 'open',
+      merged: false,
+      draft: false,
+      mergeable: false,
+      mergeableState: 'dirty',
+      viewerCanMergeAsAdmin: true,
+      allowMergeCommit: true,
+    });
+    expect(ms.kind).toBe('conflicts');
+    expect(ms.offerBypassRules).toBe(false);
+    expect(ms.showMerge).toBe(false);
+    const act = resolveMergePrimaryAction(ms, { bypassRulesAccepted: true });
+    expect(act.showBypassCheckbox).toBe(false);
+    expect(act.mergeEnabled).toBe(false);
+  });
+
+  test('mergeMethodButtonLabel bypass wording', () => {
+    expect(mergeMethodButtonLabel('merge', { bypass: true })).toBe(
+      'Bypass rules and merge'
+    );
+    expect(mergeMethodButtonLabel('rebase', { bypass: true })).toMatch(
+      /Bypass rules and rebase/
+    );
+  });
+
+  test('MergeBox view wires bypass opt-in (static presence)', () => {
+    const root = path.join(__dirname, '..');
+    const src = fs.readFileSync(
+      path.join(root, 'src/modal/views/conversation/MergeBox.tsx'),
+      'utf8'
+    );
+    expect(src).toMatch(/resolveMergePrimaryAction/);
+    expect(src).toMatch(/bypassRulesAccepted/);
+    expect(src).toMatch(/data-prp-bypass-rules/);
+    expect(src).toMatch(/showBypassCheckbox/);
+    expect(src).toMatch(/primaryAction\.mergeEnabled/);
+    // PR switch must always clear opt-in (not only when offerBypassRules is false).
+    expect(src).toMatch(
+      /setBypassRulesAccepted\(false\)[\s\S]*?\[detail\?\.number/
+    );
   });
 });

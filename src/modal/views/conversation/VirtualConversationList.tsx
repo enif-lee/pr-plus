@@ -7,7 +7,11 @@ import React, {
   useState,
   memo,
 } from 'react';
-import { calculateVisibleRange, scrollTopForIndex } from '@lib/virtual-range';
+import {
+  calculateVisibleRange,
+  scrollTopForIndex,
+  scrollTopToMaximizeIndex,
+} from '@lib/virtual-range';
 import {
   buildConversationVirtualRows,
   conversationRowOffsets,
@@ -20,7 +24,7 @@ import { FloatingScrollbar } from '../../components/common/FloatingScrollbar';
 import { useModalStore } from '../../store/modal-store';
 import {
   queryAnchorInScroller,
-  scrollChildToScrollerTop,
+  scrollChildToMaximizeInScroller,
 } from '@lib/context-thread-dom';
 
 /**
@@ -212,21 +216,29 @@ function VirtualConversationListImpl(props: any) {
       const idx = indexForConversationAnchor(r, a);
       const el = scrollerRef.current;
       if (idx < 0 || !el) return false;
-      // 1) Virtual row jump (group + standalone threads share this index)
-      //    24px inset so focus ring sits consistently below the scroller edge.
-      const top = scrollTopForIndex(idx, 120, vh, r.length, off, {
-        align: 'start',
-        pad: 24,
-      });
+      // 1) Virtual row jump — maximize visible fraction of the focused row
+      //    (fits → whole card; tall → pin top under 24px pad).
+      const top = scrollTopToMaximizeIndex(
+        idx,
+        el.scrollTop,
+        120,
+        vh,
+        r.length,
+        off,
+        { padTop: 24, padBottom: 24 }
+      );
       if (Math.abs((el.scrollTop || 0) - top) > 1) {
         el.scrollTop = top;
         setScrollTop(top);
       }
-      // 2) Within-row refine: review-group threads all map to the same row
-      //    index — pin the specific thread node to the same 24px top band.
+      // 2) Within-row refine: review-group threads share one row index —
+      //    maximize the specific thread node (not only top-pin).
       const node = queryAnchorInScroller(el, a);
       if (node) {
-        const applied = scrollChildToScrollerTop(el, node, { pad: 24 });
+        const applied = scrollChildToMaximizeInScroller(el, node, {
+          padTop: 24,
+          padBottom: 24,
+        });
         if (Math.abs(applied) > 1) {
           setScrollTop(el.scrollTop);
         }

@@ -29,10 +29,35 @@ export function prUrl(n) {
   return `https://github.com/${REPO}/pull/${Number(n)}`;
 }
 
+/** Click native-page pr+ toggle if overlay is not already open. */
+export function clickPrPlusToggleIfNeeded() {
+  return evalInPage(`
+    (() => {
+      if (document.querySelector('.prp-overlay')) return { already: true };
+      const btn = document.querySelector('.prp-gh-open-toggle');
+      if (btn) {
+        btn.click();
+        return { clicked: true };
+      }
+      // Host may exist without overlay yet
+      const host = document.getElementById('prp-page-embed') || document.getElementById('prp-modal-host');
+      return { clicked: false, hasHost: !!host };
+    })()
+  `);
+}
+
 /** Wait until pr+ overlay (modal or embed) is ready for a PR. */
 export function waitPrShellReady(n, label) {
+  // autoOpenEmbed may be off — open via toggle before waiting
+  clickPrPlusToggleIfNeeded();
+  waitMs(400);
   waitFor(
     `
+    // Retry toggle each poll if still no overlay
+    if (!document.querySelector('.prp-overlay')) {
+      const btn = document.querySelector('.prp-gh-open-toggle');
+      if (btn) btn.click();
+    }
     const ov = document.querySelector('.prp-overlay');
     if (!ov) return false;
     const loading = document.querySelector('.prp-skeleton, [class*="LoadingSkeleton"], .prp-loading');
@@ -44,7 +69,7 @@ export function waitPrShellReady(n, label) {
     );
     `,
     {
-      timeoutMs: 30_000,
+      timeoutMs: 45_000,
       label: label || `PR #${n} shell ready`,
     }
   );
@@ -121,12 +146,18 @@ export function closeOverlay() {
 /**
  * Open a closed/merged PR by direct GitHub URL (autoOpenEmbed or in-page shell).
  * Use when the PR is not on the default open /pulls list.
+ * When autoOpenEmbed is off, clicks `.prp-gh-open-toggle` before waiting.
  * @param {number} n
  */
 export function openPrByUrl(n) {
   closeOverlay();
   open(prUrl(n));
   waitNetwork();
+  waitMs(800);
+  const t = clickPrPlusToggleIfNeeded();
+  if (t && !t.already) {
+    log(`  PR #${n} open via URL — pr+ toggle ${JSON.stringify(t)}`);
+  }
   waitMs(600);
   waitPrShellReady(n, `PR #${n} via URL shell ready`);
 }
@@ -421,13 +452,49 @@ export function selectionProbe() {
       };
       const dock = document.querySelector('.prp-selection-dock, .prp-selection-group, .prp-selection-island');
       const commentPhase = !!document.querySelector('.prp-selection-island--comment, .prp-selection-island[data-phase="comment"]');
+      const actionsPhase = !!document.querySelector(
+        '.prp-selection-group[data-phase="actions"], .prp-selection-dock[data-phase="actions"]'
+      );
+      const fileTarget =
+        dock?.getAttribute('data-file-target') === '1' ||
+        !!document.querySelector('.prp-selection-group--file, .prp-selection-island--file');
+      const btnLabels = [...(dock?.querySelectorAll('button') || [])]
+        .map((b) => (b.textContent || '').replace(/\\s+/g, ' ').trim())
+        .filter(Boolean);
+      const headerSelected = !!document.querySelector(
+        '.prp-vline--header.prp-vline--selected'
+      );
       return {
         count: selected.length,
         roles,
         dock: !!dock,
         dockCls: dock?.className?.slice(0, 100) || null,
         commentPhase,
+        actionsPhase,
+        fileTarget,
+        btnLabels,
+        headerSelected,
       };
+    })()
+  `);
+}
+
+/** Fire plain ArrowLeft / ArrowRight (directed fold). */
+export function pressArrowFold(dir) {
+  const key = dir === 'right' || dir === 'expand' ? 'ArrowRight' : 'ArrowLeft';
+  return evalInPage(`
+    (() => {
+      const t = document.documentElement;
+      const opts = {
+        key: '${key}',
+        code: '${key}',
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+      };
+      t.dispatchEvent(new KeyboardEvent('keydown', opts));
+      t.dispatchEvent(new KeyboardEvent('keyup', opts));
+      return true;
     })()
   `);
 }

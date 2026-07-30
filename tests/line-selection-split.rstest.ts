@@ -6,12 +6,18 @@ import {
   beginLineSelection,
   beginSelectionOnRow,
   extendLineSelection,
+  extractSelectedCodeText,
   firstSelectableRowAnywhere,
+  isCodeBodySelection,
   isFileLevelSelection,
+  isMultiLineBodySelection,
+  isSingleLineCaretSelection,
   isThreadSelection,
   lineForSideStrict,
   moveLineSelection,
   rebindSelectionRowIndices,
+  resolveSelectionHeadIndex,
+  resolveSelectionIslandRevealPhase,
   rowSelectionVisualKey,
   selectionActiveSide,
 } from '../src/modal/lib/line-selection';
@@ -352,5 +358,183 @@ describe('moveLineSelection visits review threads (plain only)', () => {
     expect(isThreadSelection(next)).toBe(false);
     expect(next.headLine).toBe(2);
     expect(next.headRowIndex).toBe(3);
+  });
+});
+
+describe('isCodeBodySelection (fold priority)', () => {
+  test('code lines true; thread/file false', () => {
+    expect(
+      isCodeBodySelection({
+        kind: 'line',
+        subjectType: 'line',
+        filePath: 'a.ts',
+        anchorLine: 1,
+        headLine: 2,
+      })
+    ).toBe(true);
+    expect(
+      isCodeBodySelection({
+        kind: 'thread',
+        subjectType: 'thread',
+        commentId: 9,
+        filePath: 'a.ts',
+      })
+    ).toBe(false);
+    expect(
+      isCodeBodySelection({
+        kind: 'file',
+        subjectType: 'file',
+        filePath: 'a.ts',
+      })
+    ).toBe(false);
+    expect(isCodeBodySelection(null)).toBe(false);
+  });
+});
+
+describe('cross-side keyboard multi-select (sticky head past opposing region)', () => {
+  /**
+   * Unified/split opposing region: del-only then add-only then context.
+   * After extending RIGHT selection across del-only, Shift+↓ must still grow.
+   */
+  const rows = [
+    splitChangeRow({ rowIndex: 0, oldLine: 1, newLine: 1, path: 'a.ts' }),
+    // pure del (LEFT only)
+    splitChangeRow({ rowIndex: 1, oldLine: 2, newLine: null, path: 'a.ts' }),
+    splitChangeRow({ rowIndex: 2, oldLine: 3, newLine: null, path: 'a.ts' }),
+    // pure add (RIGHT only)
+    splitChangeRow({ rowIndex: 3, oldLine: null, newLine: 2, path: 'a.ts' }),
+    splitChangeRow({ rowIndex: 4, oldLine: null, newLine: 3, path: 'a.ts' }),
+    // context both sides
+    splitChangeRow({ rowIndex: 5, oldLine: 4, newLine: 4, path: 'a.ts' }),
+    splitChangeRow({ rowIndex: 6, oldLine: 5, newLine: 5, path: 'a.ts' }),
+  ];
+
+  test('sticky multi is not single-line caret; head index trusted', () => {
+    let sel = beginLineSelection(rows[0], 'RIGHT');
+    sel = extendLineSelection(sel, rows[1]);
+    sel = extendLineSelection(sel, rows[2]);
+    expect(sel.headRowIndex).toBe(2);
+    expect(sel.headSide).toBe('RIGHT');
+    // headLine still last RIGHT line (sticky)
+    expect(sel.headLine).toBe(1);
+    expect(isSingleLineCaretSelection(sel)).toBe(false);
+    expect(isMultiLineBodySelection(sel)).toBe(true);
+    // resolve must not snap head back to row 0
+    expect(resolveSelectionHeadIndex(sel, rows)).toBe(2);
+  });
+
+  test('Shift+ArrowDown continues past del/add opposing block', () => {
+    let sel = beginLineSelection(rows[0], 'RIGHT');
+    // Simulate multi already spanning into del block (as in screenshot)
+    sel = extendLineSelection(sel, rows[1]);
+    sel = extendLineSelection(sel, rows[2]);
+    expect(sel.headRowIndex).toBe(2);
+
+    const mid = moveLineSelection(sel, rows, 1, {
+      shift: true,
+      activeFilePath: 'a.ts',
+    });
+    expect(mid.headRowIndex).toBe(3);
+
+    const further = moveLineSelection(mid, rows, 1, {
+      shift: true,
+      activeFilePath: 'a.ts',
+    });
+    expect(further.headRowIndex).toBe(4);
+
+    const past = moveLineSelection(further, rows, 2, {
+      shift: true,
+      activeFilePath: 'a.ts',
+    });
+    expect(past.headRowIndex).toBe(6);
+  });
+});
+
+describe('resolveSelectionIslandRevealPhase (shipped idle-reveal path)', () => {
+  test('file header selection reveals actions (not comment)', () => {
+    const fileSel = beginSelectionOnRow({
+      kind: 'file-header',
+      filePath: 'a.ts',
+      rowIndex: 0,
+    });
+    expect(isFileLevelSelection(fileSel)).toBe(true);
+    expect(resolveSelectionIslandRevealPhase(fileSel)).toBe('actions');
+  });
+
+  test('line selection reveals actions', () => {
+    const line = beginLineSelection(
+      splitChangeRow({ rowIndex: 1, oldLine: 1, newLine: 1 }),
+      'RIGHT'
+    );
+    expect(resolveSelectionIslandRevealPhase(line)).toBe('actions');
+  });
+
+  test('thread caret hides line island', () => {
+    const thr = beginSelectionOnRow({
+      kind: 'inline-comment',
+      filePath: 'a.ts',
+      rowIndex: 2,
+      commentId: 9,
+      newLine: 3,
+    });
+    expect(isThreadSelection(thr)).toBe(true);
+    expect(resolveSelectionIslandRevealPhase(thr)).toBe('hidden');
+  });
+
+  test('PrModalApp scheduleSelectionActionsReveal uses pure reveal phase', () => {
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const app = fs.readFileSync(
+      path.join(__dirname, '../src/modal/app/PrModalApp.impl.tsx'),
+      'utf8'
+    );
+    expect(app).toMatch(/resolveSelectionIslandRevealPhase/);
+    // Must not force file → comment inside the reveal timer
+    expect(app).not.toMatch(
+      /lineSelection\.kind === 'file'[\s\S]{0,200}setSelectionIslandPhase\('comment'\)/
+    );
+  });
+
+  test('SelectionCommentBar: file actions + Back from comment', () => {
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const src = fs.readFileSync(
+      path.join(__dirname, '../src/modal/views/diff/SelectionCommentBar.tsx'),
+      'utf8'
+    );
+    expect(src).not.toMatch(/isFileTarget\s*\?\s*['"]comment['"]/);
+    expect(src).toMatch(/data-file-target/);
+    expect(src).toMatch(/data-prp-selection-back/);
+    // Back must not be gated only for non-file
+    expect(src).not.toMatch(/\{!isFileTarget \?\s*\([\s\S]*?Back[\s\S]*?\)\s*:\s*null\}/);
+  });
+});
+
+describe('file-level extractSelectedCodeText = whole file body', () => {
+  test('file selection copies all selectable lines for path', () => {
+    const rows = [
+      { kind: 'file-header', filePath: 'a.ts', rowIndex: 0 },
+      {
+        ...splitChangeRow({ rowIndex: 1, oldLine: 1, newLine: 1, path: 'a.ts' }),
+        rightCode: 'line-one',
+        leftCode: 'old-one',
+      },
+      {
+        ...splitChangeRow({ rowIndex: 2, oldLine: 2, newLine: 2, path: 'a.ts' }),
+        rightCode: 'line-two',
+        leftCode: 'old-two',
+      },
+      { kind: 'file-header', filePath: 'b.ts', rowIndex: 3 },
+      {
+        ...splitChangeRow({ rowIndex: 4, oldLine: 1, newLine: 1, path: 'b.ts' }),
+        rightCode: 'other',
+        leftCode: 'other-old',
+      },
+    ];
+    const fileSel = beginSelectionOnRow(rows[0]);
+    expect(isFileLevelSelection(fileSel)).toBe(true);
+    const text = extractSelectedCodeText(rows, fileSel);
+    expect(text).toBe('line-one\nline-two');
+    expect(text.includes('other')).toBe(false);
   });
 });

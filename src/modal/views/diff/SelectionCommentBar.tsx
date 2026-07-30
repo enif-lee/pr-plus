@@ -52,28 +52,29 @@ export function SelectionCommentBar(props: any) {
   const isFileTarget =
     selection?.kind === 'file' || selection?.subjectType === 'file';
 
-  const phase: SelectionIslandPhase = isFileTarget
-    ? 'comment'
-    : phaseProp === 'comment' || phaseProp === 'actions'
+  // File header selection uses the same action-group island as line selection
+  // (Comment / Copy code / Copy URL / Dismiss) — not comment-only.
+  const phase: SelectionIslandPhase =
+    phaseProp === 'comment' || phaseProp === 'actions'
       ? phaseProp
       : phaseLocal;
 
   function setPhase(next: SelectionIslandPhase) {
-    if (isFileTarget) return;
     if (typeof onPhaseChange === 'function') onPhaseChange(next);
     else setPhaseLocal(next);
   }
 
   useEffect(() => {
-    if (isFileTarget) return;
     if (phaseProp == null) setPhaseLocal('actions');
   }, [
     selection?.anchorLine,
     selection?.headLine,
     selection?.filePath,
     selection?.kind,
+    selection?.subjectType,
+    selection?.anchorRowIndex,
+    selection?.headRowIndex,
     phaseProp,
-    isFileTarget,
   ]);
 
   if (!selection || typeof normalizeSelection !== 'function') return null;
@@ -146,8 +147,8 @@ export function SelectionCommentBar(props: any) {
     flash(ok ? 'URL copied' : 'Copy failed');
   }
 
-  // ── Actions: floating segmented group only (no card, no filename) ──
-  if (phase === 'actions' && !isFileTarget) {
+  // ── Actions: floating segmented group (line + file header targets) ──
+  if (phase === 'actions') {
     const kbdComment = `${opt}C`;
     const kbdCopyCode = `${mod}C`;
     const kbdCopyUrl = `${mod}${opt}C`;
@@ -155,10 +156,13 @@ export function SelectionCommentBar(props: any) {
       <div
         className={`prp-selection-dock prp-selection-group${
           leaving ? ' prp-selection-group--out' : ' prp-selection-group--in'
-        }${showOptHints ? ' prp-selection-group--opt-hints' : ''}`}
+        }${showOptHints ? ' prp-selection-group--opt-hints' : ''}${
+          isFileTarget ? ' prp-selection-group--file' : ''
+        }`}
         role="toolbar"
-        aria-label="Selection actions"
+        aria-label={isFileTarget ? 'File selection actions' : 'Selection actions'}
         data-phase="actions"
+        data-file-target={isFileTarget ? '1' : '0'}
         data-opt-hints={showOptHints ? '1' : undefined}
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => e.stopPropagation()}
@@ -174,7 +178,14 @@ export function SelectionCommentBar(props: any) {
             preferredPlacement="top"
           />
           Comment
-          <TipPopover title="Add review comment" shortcut={kbdComment} />
+          <TipPopover
+            title={
+              isFileTarget
+                ? 'Add file-level review comment'
+                : 'Add review comment'
+            }
+            shortcut={kbdComment}
+          />
         </button>
         <button
           type="button"
@@ -187,7 +198,12 @@ export function SelectionCommentBar(props: any) {
             preferredPlacement="top"
           />
           Copy code
-          <TipPopover title="Copy selected code" shortcut={kbdCopyCode} />
+          <TipPopover
+            title={
+              isFileTarget ? 'Copy entire file code' : 'Copy selected code'
+            }
+            shortcut={kbdCopyCode}
+          />
         </button>
         <button
           type="button"
@@ -200,7 +216,12 @@ export function SelectionCommentBar(props: any) {
             preferredPlacement="top"
           />
           Copy URL
-          <TipPopover title="Copy GitHub line link" shortcut={kbdCopyUrl} />
+          <TipPopover
+            title={
+              isFileTarget ? 'Copy GitHub file link' : 'Copy GitHub line link'
+            }
+            shortcut={kbdCopyUrl}
+          />
         </button>
         <button
           type="button"
@@ -255,11 +276,14 @@ export function SelectionCommentBar(props: any) {
         <Button size="sm" disabled={!canSubmit} onClick={onSubmitPending}>
           {pendingCount > 0 ? 'Add comment' : 'Start review'}
         </Button>
-        {!isFileTarget ? (
-          <Button size="sm" disabled={actionBusy} onClick={() => setPhase('actions')}>
-            Back
-          </Button>
-        ) : null}
+        <Button
+          size="sm"
+          disabled={actionBusy}
+          onClick={() => setPhase('actions')}
+          data-prp-selection-back="1"
+        >
+          Back
+        </Button>
         <Button size="sm" disabled={actionBusy} onClick={onCancel}>
           Cancel
         </Button>

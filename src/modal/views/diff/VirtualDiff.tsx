@@ -13,6 +13,7 @@ import {
   averageRowHeight,
   rowHeightFor,
   rowOffsets,
+  diffRowMeasureKey,
   highlightCode,
   escapeHtml,
   clearHighlightCodeCache,
@@ -23,7 +24,10 @@ import {
   onHljsLanguagesChanged,
   prefetchHljsLanguages,
 } from '@lib/hljs-lazy';
-import { calculateVisibleRange } from '@lib/virtual-range';
+import {
+  adjustScrollTopForOffsetChange,
+  calculateVisibleRange,
+} from '@lib/virtual-range';
 import {
   isSelectableDiffRow,
   rowSelectionVisualKey,
@@ -99,6 +103,12 @@ function FileHeaderRow(props: {
   style?: React.CSSProperties;
   /** File-level selection composer docked under this header */
   selectionIsland?: React.ReactNode;
+  /** Pointer-down on header (not collapse/viewed/comment) → file selection */
+  onSelectionStart?: (
+    row: any,
+    point: { x: number; y: number },
+    opts?: { shiftKey?: boolean; preferredSide?: string }
+  ) => void;
 }) {
   const {
     row,
@@ -117,6 +127,7 @@ function FileHeaderRow(props: {
     selected = false,
     style,
     selectionIsland = null,
+    onSelectionStart,
   } = props;
   const viewed = isPathViewed ? isPathViewed(viewedPaths, row.filePath) : false;
   const collapsed = Boolean(row.collapsed);
@@ -149,6 +160,24 @@ function FileHeaderRow(props: {
       data-file-focus={focused ? '1' : undefined}
       data-file-selected={selected ? '1' : undefined}
       data-search-current={isActiveHit ? '1' : undefined}
+      onMouseDown={(e) => {
+        if (e.button !== 0 || typeof onSelectionStart !== 'function') return;
+        // Leave collapse / viewed / dedicated Comment control alone
+        const t = e.target as HTMLElement;
+        if (
+          t.closest?.(
+            '.prp-file-header__collapse, .prp-file-header__viewed, .prp-file-header__comment, input, button.prp-file-header__comment'
+          )
+        ) {
+          return;
+        }
+        // Path/stats button also toggles collapse on click — still allow select on mousedown
+        e.preventDefault();
+        onSelectionStart(row, { x: e.clientX, y: e.clientY }, {
+          shiftKey: Boolean(e.shiftKey),
+          preferredSide: 'RIGHT',
+        });
+      }}
     >
       <label className="prp-file-header__viewed" title="Mark as viewed">
         <input
@@ -194,11 +223,17 @@ function FileHeaderRow(props: {
       <button
         type="button"
         className="prp-file-header-btn"
-        onClick={() => {
-          if (openable) onToggleCollapse?.(row.filePath);
+        onClick={(e) => {
+          // Selection is on mousedown; chevron handles fold. Path click only
+          // focuses/selects — avoid toggling collapse on every select.
+          e.preventDefault();
         }}
         disabled={!openable}
-        title={openable ? undefined : 'Binary file — cannot open in diff view'}
+        title={
+          openable
+            ? 'Select file (Comment / Copy code). Use chevron to fold.'
+            : 'Binary file — cannot open in diff view'
+        }
       >
         <span className={`prp-file-header__status prp-file-header__status--${headerTone}`}>
           {status}
@@ -846,6 +881,11 @@ function VirtualDiffImpl(props: any) {
     onToggleThreadCollapse,
     /** Passed to rowOffsets / averageRowHeight for collapse-aware virtual heights */
     commentHeightOpts = null,
+    /**
+     * Live variable-height metrics for App nav (⌥J/K, selection reveal).
+     * Called when offsets / avgH change after measure or expand.
+     */
+    onVirtualMetricsChange = null,
     pendingCount = 0,
     searchQuery = '',
     searchMatchRows = null,
@@ -946,9 +986,13 @@ function VirtualDiffImpl(props: any) {
     Math.max(120, Number(viewportHeight) || 520)
   );
 
-  /** Expanded long code lines: key → measured px (estimate until measured). */
+  /** Expanded long code lines (keys only; heights live in measuredHeights). */
   const [expandedLineKeys, setExpandedLineKeys] = useState(() => new Set<string>());
-  const [measuredLineHeights, setMeasuredLineHeights] = useState(
+  /**
+   * Measured px for variable rows:
+   * comments (`c:id`), images (`img:path`), expanded lines (`path#ri`).
+   */
+  const [measuredHeights, setMeasuredHeights] = useState(
     () => new Map<string, number>()
   );
 
@@ -961,14 +1005,14 @@ function VirtualDiffImpl(props: any) {
     return {
       ...base,
       expandedKeys: expandedLineKeys,
-      measuredHeights: measuredLineHeights,
+      measuredHeights,
       expandedCodeLineHeight,
     };
   }, [
     commentHeightOpts,
     isThreadCollapsed,
     expandedLineKeys,
-    measuredLineHeights,
+    measuredHeights,
   ]);
 
   const avgH = useMemo(
@@ -980,6 +1024,40 @@ function VirtualDiffImpl(props: any) {
     [virtualRows, heightOpts]
   );
 
+  const reportMeasuredHeight = useCallback((key: string, height: number) => {
+    const h = Math.ceil(Number(height) || 0);
+    if (!key || h < 1) return;
+    setMeasuredHeights((prev) => {
+      const cur = prev.get(key);
+      // Ignore sub-pixel / tiny churn
+      if (cur != null && Math.abs(cur - h) < 2) return prev;
+      const next = new Map(prev);
+      next.set(key, h);
+      return next;
+    });
+  }, []);
+
+  // Drop measure keys that no longer exist in the row list / expanded set
+  useEffect(() => {
+    if (!Array.isArray(virtualRows)) return;
+    const live = new Set<string>();
+    for (const row of virtualRows) {
+      const k = diffRowMeasureKey(row, { expandedKeys: expandedLineKeys });
+      if (k) live.add(k);
+    }
+    // Expanded keys stay live even if row momentarily unmounted off-window
+    for (const k of expandedLineKeys) live.add(k);
+    setMeasuredHeights((prev) => {
+      let changed = false;
+      const next = new Map<string, number>();
+      for (const [k, v] of prev) {
+        if (live.has(k)) next.set(k, v);
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [virtualRows, expandedLineKeys]);
+
   const toggleLineExpand = useCallback((row: any) => {
     const key = diffLineExpandKey(row);
     if (!key) return;
@@ -987,7 +1065,7 @@ function VirtualDiffImpl(props: any) {
       const next = toggleExpandKey(prev, key);
       if (!next.has(key)) {
         // Collapsed — drop measured height
-        setMeasuredLineHeights((m) => {
+        setMeasuredHeights((m) => {
           if (!m.has(key)) return m;
           const copy = new Map(m);
           copy.delete(key);
@@ -998,18 +1076,30 @@ function VirtualDiffImpl(props: any) {
     });
   }, []);
 
-  const measureLineHeight = useCallback((key: string, height: number) => {
-    const h = Math.ceil(Number(height) || 0);
-    if (!key || h < ROW_HEIGHT) return;
-    setMeasuredLineHeights((prev) => {
-      const cur = prev.get(key);
-      // Ignore sub-pixel / tiny churn
-      if (cur != null && Math.abs(cur - h) < 2) return prev;
-      const next = new Map(prev);
-      next.set(key, h);
-      return next;
+  const measureLineHeight = useCallback(
+    (key: string, height: number) => {
+      if (!key) return;
+      const h = Math.ceil(Number(height) || 0);
+      if (h < ROW_HEIGHT) return;
+      reportMeasuredHeight(key, h);
+    },
+    [reportMeasuredHeight]
+  );
+
+  // Push live offsets to App so nav uses the same geometry as the list
+  const onMetricsRef = useRef(onVirtualMetricsChange);
+  onMetricsRef.current = onVirtualMetricsChange;
+  useEffect(() => {
+    const cb = onMetricsRef.current;
+    if (typeof cb !== 'function') return;
+    cb({
+      offsets,
+      avgH,
+      totalHeight: offsets.length ? offsets[offsets.length - 1] : 0,
+      measuredHeights,
+      expandedKeys: expandedLineKeys,
     });
-  }, []);
+  }, [offsets, avgH, measuredHeights, expandedLineKeys]);
 
   const vp = Math.max(120, measuredH || Number(viewportHeight) || 520);
   const totalRows = virtualRows?.length || 0;
@@ -1229,6 +1319,8 @@ function VirtualDiffImpl(props: any) {
   const prevScrollTopPropRef = useRef(scrollTopProp);
   /** Hold last programmatic target so row rebuild after expand reuses it once. */
   const programmaticTopRef = useRef<number | null>(null);
+  /** Previous prefix offsets — re-anchor scroll when measure changes heights. */
+  const prevOffsetsRef = useRef<number[] | null>(null);
 
   // Rows / viewport / external jump → recompute window (no-op if unchanged)
   useLayoutEffect(() => {
@@ -1245,6 +1337,7 @@ function VirtualDiffImpl(props: any) {
       programmaticTopRef.current = propTop;
       if (el) el.scrollTop = propTop;
       pendingScrollRef.current = propTop;
+      prevOffsetsRef.current = offsets;
       applyScrollTop(propTop);
       return;
     }
@@ -1258,16 +1351,41 @@ function VirtualDiffImpl(props: any) {
       const held = programmaticTopRef.current;
       el.scrollTop = held;
       pendingScrollRef.current = held;
+      prevOffsetsRef.current = offsets;
       applyScrollTop(held);
       return;
     }
 
-    const top =
+    let top =
       el && typeof el.scrollTop === 'number'
         ? el.scrollTop
         : propTop != null
           ? propTop
           : pendingScrollRef.current;
+
+    // Measure / expand changed row heights — keep the same content under the
+    // viewport top so the list does not jump under the cursor.
+    const prevOff = prevOffsetsRef.current;
+    if (
+      prevOff &&
+      offsets &&
+      prevOff !== offsets &&
+      (prevOff.length !== offsets.length ||
+        prevOff[prevOff.length - 1] !== offsets[offsets.length - 1])
+    ) {
+      const adjusted = adjustScrollTopForOffsetChange(top, prevOff, offsets);
+      const maxScroll = Math.max(
+        0,
+        (offsets[offsets.length - 1] || 0) - (el?.clientHeight || vp || 0)
+      );
+      const clamped = Math.min(maxScroll, Math.max(0, adjusted));
+      if (el && Math.abs(clamped - top) > 0.5) {
+        el.scrollTop = clamped;
+      }
+      top = clamped;
+      pendingScrollRef.current = clamped;
+    }
+    prevOffsetsRef.current = offsets;
     applyScrollTop(top);
   }, [virtualRows, offsets, vp, scrollTopProp, listRef, applyScrollTop]);
 
@@ -1428,6 +1546,7 @@ function VirtualDiffImpl(props: any) {
             onToggleViewed={onToggleViewed}
             onToggleCollapse={onToggleCollapse}
             onFileComment={onFileComment}
+            onSelectionStart={stableSelectionStart}
             sticky
             focused={
               Boolean(activePathNorm) &&
@@ -1471,6 +1590,10 @@ function VirtualDiffImpl(props: any) {
               isActiveHit ? ' prp-vline--hit' : ''
             }`;
             const activeHitForMarks = isActiveHit ? activeSearchHit : null;
+            const measureKey = diffRowMeasureKey(row, {
+              expandedKeys: expandedLineKeys,
+            });
+            const estH = rowHeightFor(row, heightOpts);
 
             if (row.kind === 'inline-comment') {
               const thread = threadsByCommentId?.get?.(String(row.commentId));
@@ -1527,9 +1650,8 @@ function VirtualDiffImpl(props: any) {
                   searchHitIndex={searchHitIndex}
                 />
               );
-              return (
+              const commentInner = (
                 <div
-                  key={row.rowIndex}
                   className={`prp-vline prp-vline--comment${
                     isSplitComment ? ' prp-vline--comment-split' : ''
                   }${collapsed ? ' prp-vline--comment-collapsed' : ''}${
@@ -1569,6 +1691,16 @@ function VirtualDiffImpl(props: any) {
                   )}
                 </div>
               );
+              return (
+                <DiffVirtualRowShell
+                  key={row.rowIndex}
+                  measureKey={measureKey}
+                  estimatedHeight={estH}
+                  onHeight={reportMeasuredHeight}
+                >
+                  {commentInner}
+                </DiffVirtualRowShell>
+              );
             }
             if (row.kind === 'file-header') {
               // Prefer sticky dock when that file is sticky (avoid double form)
@@ -1591,6 +1723,7 @@ function VirtualDiffImpl(props: any) {
                   onToggleViewed={onToggleViewed}
                   onToggleCollapse={onToggleCollapse}
                   onFileComment={onFileComment}
+                  onSelectionStart={stableSelectionStart}
                   searchRowClass={searchRowClass}
                   isSearchMatch={Boolean(isSearchMatch)}
                   isActiveHit={Boolean(isActiveHit)}
@@ -1615,74 +1748,82 @@ function VirtualDiffImpl(props: any) {
                 status !== 'removed' &&
                 status !== 'deleted';
               return (
-                <div
+                <DiffVirtualRowShell
                   key={row.rowIndex}
-                  className={`prp-vline prp-vline--image${searchRowClass}`}
-                  data-row-index={row.rowIndex}
-                  data-search-current={isActiveHit ? '1' : undefined}
+                  measureKey={measureKey}
+                  estimatedHeight={estH}
+                  onHeight={reportMeasuredHeight}
                 >
-                  <div className="prp-diff-image">
-                    {showBase ? (
-                      <figure className="prp-diff-image__pane prp-diff-image__pane--base">
-                        <figcaption className="prp-diff-image__label">
-                          {status === 'removed' || status === 'deleted'
-                            ? 'Removed'
-                            : 'Before'}
-                        </figcaption>
-                        <img
-                          className="prp-diff-image__img"
-                          src={row.baseUrl}
-                          alt={`${row.filePath || 'image'} (before)`}
-                          loading="lazy"
-                          referrerPolicy="no-referrer-when-downgrade"
-                          title="Click to expand"
-                          onClick={() =>
-                            setImageViewer({
-                              src: String(row.baseUrl),
-                              alt: `${row.filePath || 'image'} (before)`,
-                            })
-                          }
-                          onError={(e) => {
-                            (e.currentTarget as HTMLImageElement).style.display =
-                              'none';
-                          }}
-                        />
-                      </figure>
-                    ) : null}
-                    {showHead ? (
-                      <figure className="prp-diff-image__pane prp-diff-image__pane--head">
-                        <figcaption className="prp-diff-image__label">
-                          {status === 'added' || status === 'add'
-                            ? 'Added'
-                            : 'After'}
-                        </figcaption>
-                        <img
-                          className="prp-diff-image__img"
-                          src={row.headUrl}
-                          alt={`${row.filePath || 'image'} (after)`}
-                          loading="lazy"
-                          referrerPolicy="no-referrer-when-downgrade"
-                          title="Click to expand"
-                          onClick={() =>
-                            setImageViewer({
-                              src: String(row.headUrl),
-                              alt: `${row.filePath || 'image'} (after)`,
-                            })
-                          }
-                          onError={(e) => {
-                            (e.currentTarget as HTMLImageElement).style.display =
-                              'none';
-                          }}
-                        />
-                      </figure>
-                    ) : null}
-                    {!showBase && !showHead ? (
-                      <p className="prp-diff-image__empty">
-                        Image preview unavailable
-                      </p>
-                    ) : null}
+                  <div
+                    className={`prp-vline prp-vline--image${searchRowClass}`}
+                    data-row-index={row.rowIndex}
+                    data-search-current={isActiveHit ? '1' : undefined}
+                  >
+                    <div className="prp-diff-image">
+                      {showBase ? (
+                        <figure className="prp-diff-image__pane prp-diff-image__pane--base">
+                          <figcaption className="prp-diff-image__label">
+                            {status === 'removed' || status === 'deleted'
+                              ? 'Removed'
+                              : 'Before'}
+                          </figcaption>
+                          <img
+                            className="prp-diff-image__img"
+                            src={row.baseUrl}
+                            alt={`${row.filePath || 'image'} (before)`}
+                            loading="lazy"
+                            referrerPolicy="no-referrer-when-downgrade"
+                            title="Click to expand"
+                            onClick={() =>
+                              setImageViewer({
+                                src: String(row.baseUrl),
+                                alt: `${row.filePath || 'image'} (before)`,
+                              })
+                            }
+                            onError={(e) => {
+                              (
+                                e.currentTarget as HTMLImageElement
+                              ).style.display = 'none';
+                            }}
+                          />
+                        </figure>
+                      ) : null}
+                      {showHead ? (
+                        <figure className="prp-diff-image__pane prp-diff-image__pane--head">
+                          <figcaption className="prp-diff-image__label">
+                            {status === 'added' || status === 'add'
+                              ? 'Added'
+                              : 'After'}
+                          </figcaption>
+                          <img
+                            className="prp-diff-image__img"
+                            src={row.headUrl}
+                            alt={`${row.filePath || 'image'} (after)`}
+                            loading="lazy"
+                            referrerPolicy="no-referrer-when-downgrade"
+                            title="Click to expand"
+                            onClick={() =>
+                              setImageViewer({
+                                src: String(row.headUrl),
+                                alt: `${row.filePath || 'image'} (after)`,
+                              })
+                            }
+                            onError={(e) => {
+                              (
+                                e.currentTarget as HTMLImageElement
+                              ).style.display = 'none';
+                            }}
+                          />
+                        </figure>
+                      ) : null}
+                      {!showBase && !showHead ? (
+                        <p className="prp-diff-image__empty">
+                          Image preview unavailable
+                        </p>
+                      ) : null}
+                    </div>
                   </div>
-                </div>
+                </DiffVirtualRowShell>
               );
             }
 
@@ -1709,9 +1850,8 @@ function VirtualDiffImpl(props: any) {
             const lineExpandable =
               lineExpanded || isDiffLineExpandable(row);
             const codeRowH = rowHeightFor(row, heightOpts);
-            return (
+            const codeLine = (
               <DiffCodeLine
-                key={row.rowIndex}
                 row={row}
                 searchRowClass={searchRowClass}
                 isSearchMatch={Boolean(isSearchMatch)}
@@ -1747,6 +1887,23 @@ function VirtualDiffImpl(props: any) {
                 }
               />
             );
+            // Expanded long lines also report via DiffCodeLine RO; shell is
+            // belt-and-suspenders so offsets track even if paint order differs.
+            if (lineExpanded && measureKey) {
+              return (
+                <DiffVirtualRowShell
+                  key={row.rowIndex}
+                  measureKey={measureKey}
+                  estimatedHeight={codeRowH}
+                  onHeight={reportMeasuredHeight}
+                >
+                  {codeLine}
+                </DiffVirtualRowShell>
+              );
+            }
+            return (
+              <React.Fragment key={row.rowIndex}>{codeLine}</React.Fragment>
+            );
           })}
         </div>
       </div>
@@ -1763,6 +1920,50 @@ function VirtualDiffImpl(props: any) {
           onClose={() => setImageViewer(null)}
         />
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * Measure host for variable-height Diff rows (threads, images, expanded lines).
+ * Feeds measuredHeights → rowOffsets so spacer/totalHeight matches real DOM.
+ */
+function DiffVirtualRowShell({
+  measureKey,
+  estimatedHeight,
+  onHeight,
+  children,
+}: {
+  measureKey: string | null;
+  estimatedHeight: number;
+  onHeight: (key: string, h: number) => void;
+  children: React.ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  useLayoutEffect(() => {
+    if (!measureKey) return undefined;
+    const el = ref.current;
+    if (!el) return undefined;
+    const publish = () => {
+      const h = Math.ceil(el.getBoundingClientRect().height || el.offsetHeight || 0);
+      if (h > 0) onHeight(measureKey, h);
+    };
+    publish();
+    if (typeof ResizeObserver !== 'function') return undefined;
+    const ro = new ResizeObserver(() => publish());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [measureKey, onHeight, children]);
+
+  return (
+    <div
+      ref={ref}
+      className="prp-vlist__row-shell"
+      data-measure-key={measureKey || undefined}
+      data-est-h={estimatedHeight}
+    >
+      {children}
     </div>
   );
 }

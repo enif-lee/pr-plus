@@ -38,13 +38,23 @@ export interface MergeBoxStatus {
   checksLine: string | null;
   /** Show primary merge control. */
   showMerge: boolean;
-  /** Merge button enabled (clickable). */
+  /**
+   * Baseline merge enablement from status alone (before bypass opt-in).
+   * For blocked+bypass-offer, this is false until the UI applies opt-in via
+   * `resolveMergePrimaryAction`.
+   */
   canMerge: boolean;
   /**
-   * Viewer may force-merge / bypass (only when detail signals permission).
-   * When true on a blocked PR, canMerge is also true and CTA uses force wording.
+   * True when the primary action uses force/bypass wording after opt-in.
+   * Baseline from `buildMergeBoxStatus` is false; live CTA uses
+   * `resolveMergePrimaryAction({ bypassRulesAccepted })`.
    */
   forceMerge: boolean;
+  /**
+   * Show GitHub-style "Merge without waiting for requirements… (bypass rules)"
+   * checkbox. Only for policy-blocked PRs when the viewer may admin-bypass.
+   */
+  offerBypassRules: boolean;
   /** Primary merge button visual tone — never unqualified green when blocked/warn. */
   ctaVariant: MergeCtaVariant;
   showUpdateBranch: boolean;
@@ -57,6 +67,10 @@ export interface MergeBoxStatus {
   /** Absolute URL to GitHub's web conflict editor, or null. */
   resolveConflictsUrl: string | null;
 }
+
+/** GitHub checkbox copy for admin rule bypass. */
+export const BYPASS_RULES_CHECKBOX_LABEL =
+  'Merge without waiting for requirements to be met (bypass rules)';
 
 function emptyConflictFields(): Pick<
   MergeBoxStatus,
@@ -389,11 +403,17 @@ export function coerceMergeMethod(
 /**
  * Label for the primary merge control.
  * @param opts.force when true, prefix with Force (admin / bypass path)
+ * @param opts.bypass when true, GitHub-style "Bypass rules and …" wording
  */
 export function mergeMethodButtonLabel(
   method: MergeMethod,
-  opts: { force?: boolean } = {}
+  opts: { force?: boolean; bypass?: boolean } = {}
 ): string {
+  if (opts.bypass) {
+    if (method === 'squash') return 'Bypass rules and squash and merge';
+    if (method === 'rebase') return 'Bypass rules and rebase and merge';
+    return 'Bypass rules and merge';
+  }
   const force = Boolean(opts.force);
   if (method === 'squash') {
     return force ? 'Force squash and merge' : 'Squash and merge';
@@ -402,6 +422,56 @@ export function mergeMethodButtonLabel(
     return force ? 'Force rebase and merge' : 'Rebase and merge';
   }
   return force ? 'Force merge pull request' : 'Merge pull request';
+}
+
+/**
+ * Live merge primary CTA from baseline status + UI bypass checkbox state.
+ * Pure: UI holds `bypassRulesAccepted` (default false).
+ */
+export function resolveMergePrimaryAction(
+  status: MergeBoxStatus | null | undefined,
+  opts: { bypassRulesAccepted?: boolean } = {}
+): {
+  showBypassCheckbox: boolean;
+  bypassCheckboxLabel: string;
+  mergeEnabled: boolean;
+  forceWording: boolean;
+  bypassWording: boolean;
+  ctaVariant: MergeCtaVariant;
+  buttonLabel: (method: MergeMethod) => string;
+} {
+  const s = status || ({} as MergeBoxStatus);
+  const showBypass = Boolean(s.offerBypassRules && s.showMerge);
+  const accepted = Boolean(opts.bypassRulesAccepted);
+
+  if (!showBypass) {
+    const force = Boolean(s.forceMerge);
+    return {
+      showBypassCheckbox: false,
+      bypassCheckboxLabel: BYPASS_RULES_CHECKBOX_LABEL,
+      mergeEnabled: Boolean(s.canMerge && s.showMerge),
+      forceWording: force,
+      bypassWording: false,
+      ctaVariant: s.ctaVariant || 'default',
+      buttonLabel: (method) =>
+        mergeMethodButtonLabel(method, { force }),
+    };
+  }
+
+  // Blocked + can bypass: merge disabled until explicit opt-in
+  return {
+    showBypassCheckbox: true,
+    bypassCheckboxLabel: BYPASS_RULES_CHECKBOX_LABEL,
+    mergeEnabled: accepted,
+    forceWording: accepted,
+    bypassWording: accepted,
+    ctaVariant: accepted ? 'danger' : 'default',
+    buttonLabel: (method) =>
+      mergeMethodButtonLabel(method, {
+        bypass: accepted,
+        force: accepted,
+      }),
+  };
 }
 
 /**
@@ -475,6 +545,7 @@ function applyRepoMergeMethodGate(
     showMerge: false,
     canMerge: false,
     forceMerge: false,
+    offerBypassRules: false,
     ctaVariant: 'default',
     tone: status.kind === 'clean' ? 'muted' : status.tone,
     headline:
@@ -485,6 +556,8 @@ function applyRepoMergeMethodGate(
       'All pull request merge methods are disabled in repository settings.',
   };
 }
+
+
 
 /**
  * Build merge-box presentation + primary CTA from a PR detail snapshot.
@@ -507,6 +580,7 @@ export function buildMergeBoxStatus(detail: any): MergeBoxStatus {
       showMerge: false,
       canMerge: false,
       forceMerge: false,
+      offerBypassRules: false,
       ctaVariant: 'default',
       showUpdateBranch: false,
       draftToggle: null,
@@ -525,6 +599,7 @@ export function buildMergeBoxStatus(detail: any): MergeBoxStatus {
       showMerge: false,
       canMerge: false,
       forceMerge: false,
+      offerBypassRules: false,
       ctaVariant: 'default',
       showUpdateBranch: false,
       draftToggle: null,
@@ -543,6 +618,7 @@ export function buildMergeBoxStatus(detail: any): MergeBoxStatus {
       showMerge: false,
       canMerge: false,
       forceMerge: false,
+      offerBypassRules: false,
       ctaVariant: 'default',
       showUpdateBranch,
       draftToggle: 'ready',
@@ -576,6 +652,7 @@ export function buildMergeBoxStatus(detail: any): MergeBoxStatus {
       showMerge: false,
       canMerge: false,
       forceMerge: false,
+      offerBypassRules: false,
       ctaVariant: 'danger',
       showUpdateBranch,
       draftToggle: 'draft',
@@ -588,20 +665,22 @@ export function buildMergeBoxStatus(detail: any): MergeBoxStatus {
   // GitHub: mergeable=true + unstable ≠ blocked. Only explicit blocked state
   // (or mergeable=false without dirty) is a hard block.
   if (isPolicyBlocked || mergeableFlag === false) {
-    const canForce = forceAllowed;
+    const canBypass = forceAllowed;
     return applyRepoMergeMethodGate(
       {
         kind: 'blocked',
         tone: 'danger',
-        headline: 'Required status checks must pass before merging',
-        helper: canForce
-          ? 'Repository rules block a normal merge. You can force-merge if you accept the risk.'
-          : 'Fix failing checks or update the branch, then try again.',
+        headline: 'Merging is blocked',
+        helper: canBypass
+          ? 'Repository rules prevent merging until requirements are met. Admins can bypass rules below.'
+          : 'Fix failing checks, obtain required reviews, or update the branch, then try again.',
         checksLine,
         showMerge: true,
-        canMerge: canForce,
-        forceMerge: canForce,
-        ctaVariant: 'danger',
+        // Merge stays disabled until the UI checkbox is checked
+        canMerge: false,
+        forceMerge: false,
+        offerBypassRules: canBypass,
+        ctaVariant: 'default',
         showUpdateBranch,
         draftToggle: 'draft',
         ...emptyConflictFields(),
@@ -627,6 +706,7 @@ export function buildMergeBoxStatus(detail: any): MergeBoxStatus {
         showMerge: true,
         canMerge: false,
         forceMerge: false,
+        offerBypassRules: false,
         ctaVariant: 'default',
         showUpdateBranch,
         draftToggle: 'draft',
@@ -662,6 +742,7 @@ export function buildMergeBoxStatus(detail: any): MergeBoxStatus {
         showMerge: true,
         canMerge: true,
         forceMerge: false,
+        offerBypassRules: false,
         ctaVariant: 'ok',
         showUpdateBranch,
         draftToggle: 'draft',
@@ -682,6 +763,7 @@ export function buildMergeBoxStatus(detail: any): MergeBoxStatus {
       showMerge: true,
       canMerge: true,
       forceMerge: false,
+      offerBypassRules: false,
       ctaVariant: 'ok',
       showUpdateBranch,
       draftToggle: 'draft',

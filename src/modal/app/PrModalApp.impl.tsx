@@ -18,6 +18,7 @@ import { ActionToast } from '@common/ActionToast';
 import { ShortcutMonitor } from '@common/ShortcutMonitor';
 import { SearchableSelect } from '@common/SearchableSelect';
 import { Header } from '../views/chrome/Header';
+import { DetailGnb } from '../views/chrome/DetailGnb';
 import { StackStrip } from '../views/chrome/StackStrip';
 import { SearchBar } from '../views/chrome/SearchBar';
 import { CommandPalette } from '../views/chrome/CommandPalette';
@@ -104,6 +105,7 @@ import {
   expandPathInCollapsedSet,
   isPathCollapsed,
   togglePathInCollapsedSet,
+  setPathCollapsedInSet,
   shouldAutoExpandOnFileNav,
 } from '../lib/collapse';
 import {
@@ -184,6 +186,8 @@ import {
   selectionGestureMode,
   isRowInSelection,
   isSelectableDiffRow,
+  isThreadSelection,
+  isCodeBodySelection,
   selectionBlockRole,
   extractSelectedCodeText,
   githubBlobLinePermalink,
@@ -195,6 +199,7 @@ import {
   isSelectionAtFileEdge,
   rebindSelectionRowIndices,
   SELECTION_ACTIONS_REVEAL_MS,
+  resolveSelectionIslandRevealPhase,
   resolvePendingGotoSelection,
   resolveGotoPathAmongFiles,
 } from '../lib/line-selection';
@@ -238,6 +243,7 @@ import {
   shortcutKeyFromEvent,
   normalizeShortcutKey,
   resolveActiveFileForCollapse,
+  isEditableKeyboardTarget,
 } from '../lib/shortcut-policy';
 import {
   focusContextThreadReplyAfterPaint,
@@ -1435,6 +1441,32 @@ export function PrModalApp({
     [isDiffCommentCollapsed]
   );
 
+  /**
+   * Live Diff virtual metrics from VirtualDiff (measure map + expanded lines).
+   * Preferred over estimate-only rowOffsetList so ⌥J/K / selection reveal match
+   * the on-screen spacer geometry.
+   */
+  const liveDiffMetricsRef = useRef<{
+    offsets: number[] | null;
+    avgH: number;
+  }>({ offsets: null, avgH: ROW_HEIGHT });
+
+  const onVirtualMetricsChange = useCallback(
+    (m: {
+      offsets?: number[] | null;
+      avgH?: number;
+      totalHeight?: number;
+    }) => {
+      if (Array.isArray(m?.offsets)) {
+        liveDiffMetricsRef.current.offsets = m.offsets;
+      }
+      if (Number.isFinite(Number(m?.avgH)) && Number(m.avgH) > 0) {
+        liveDiffMetricsRef.current.avgH = Number(m.avgH);
+      }
+    },
+    []
+  );
+
   const avgH = useMemo(
     () => averageRowHeight(virtualRows, commentHeightOpts),
     [virtualRows, commentHeightOpts]
@@ -1444,6 +1476,19 @@ export function PrModalApp({
       typeof rowOffsets === 'function' ? rowOffsets(virtualRows, commentHeightOpts) : null,
     [virtualRows, commentHeightOpts]
   );
+
+  /** Prefer live VirtualDiff offsets when available. */
+  function getDiffScrollMetrics(): {
+    avgH: number;
+    rowOffsetList: number[] | null;
+  } {
+    const live = liveDiffMetricsRef.current;
+    return {
+      avgH:
+        live.avgH > 0 && Number.isFinite(live.avgH) ? live.avgH : avgH,
+      rowOffsetList: Array.isArray(live.offsets) ? live.offsets : rowOffsetList,
+    };
+  }
 
   // Diff comment navigator: filtered roots, top → bottom (file list + row order).
   const mappedComments = useMemo(() => {
@@ -1530,18 +1575,22 @@ export function PrModalApp({
     setDiffExpandBusyKey(null);
   }, [prIdentity]);
   // Jump geometry via ref so resize/scroll does not re-trigger search.
+  // Prefer live VirtualDiff metrics when the list has measured variable rows.
   const searchJumpRef = useRef({
     avgH,
     viewportHeight: viewportHeightRef.current,
     rowCount: virtualRows.length,
     rowOffsetList,
   });
-  searchJumpRef.current = {
-    avgH,
-    viewportHeight: viewportHeightRef.current,
-    rowCount: virtualRows.length,
-    rowOffsetList,
-  };
+  {
+    const live = getDiffScrollMetrics();
+    searchJumpRef.current = {
+      avgH: live.avgH,
+      viewportHeight: viewportHeightRef.current,
+      rowCount: virtualRows.length,
+      rowOffsetList: live.rowOffsetList,
+    };
+  }
 
   const jumpToSearchHit = useCallback(
     (hit: any) => {
@@ -1888,13 +1937,14 @@ export function PrModalApp({
   const scrollMappedCommentIntoView = useCallback(
     (active: { rowIndex?: number | null } | null | undefined) => {
       if (active?.rowIndex == null) return false;
+      const { avgH: h, rowOffsetList: offs } = getDiffScrollMetrics();
       // ⌥J/K thread nav on Diff: pin active comment near 1/3 viewport height
       const top = scrollTopForIndex(
         active.rowIndex,
-        avgH,
+        h,
         viewportHeightRef.current,
         virtualRows.length,
-        rowOffsetList,
+        offs,
         { align: 'third' }
       );
       // DOM-first thrift (same class as selection): avoid setScrollTop every hop
@@ -1906,11 +1956,11 @@ export function PrModalApp({
         minDomDelta: 1,
         // Sync store only on real jumps (rebuild hold); native scroll event
         // still range-gates VirtualDiff between store updates.
-        minStoreDelta: Math.max(48, avgH * 3),
+        minStoreDelta: Math.max(48, h * 3),
       });
       return true;
     },
-    [avgH, /* vh-ref */, virtualRows.length, rowOffsetList, setScrollTop]
+    [/* vh-ref */ virtualRows.length, setScrollTop]
   );
 
   /** Open Diff, expand file, scroll to thread root (or queue until rows re-map). */
@@ -2050,12 +2100,13 @@ export function PrModalApp({
   function scrollSelectionIntoView(sel: any) {
     const headIdx = Number(sel?.headRowIndex);
     if (!Number.isFinite(headIdx) || headIdx < 0) return;
+    const { avgH: h, rowOffsetList: offs } = getDiffScrollMetrics();
     const top = scrollTopForIndex(
       headIdx,
-      avgH,
+      h,
       viewportHeightRef.current,
       virtualRows.length,
-      rowOffsetList
+      offs
     );
     setScrollTop(top);
     if (listRef.current) listRef.current.scrollTop = top;
@@ -2397,7 +2448,7 @@ export function PrModalApp({
 
   /**
    * Fold / expand the focused Diff file (line selection path, else active tree file).
-   * Keyboard: ⌥F when layout is Diff and no context thread owns the chord.
+   * Keyboard: ⌥F toggle; ← collapse / → expand when layout is Diff.
    */
   function toggleActiveFileCollapse() {
     const path = resolveActiveFileForCollapse({
@@ -2406,6 +2457,43 @@ export function PrModalApp({
     });
     if (!path) return;
     onToggleFileCollapse(path);
+  }
+
+  /** Directed file fold: wantCollapsed true = collapse, false = expand. */
+  function setActiveFileCollapse(wantCollapsed: boolean) {
+    const path = resolveActiveFileForCollapse({
+      lineSelection: useModalStore.getState().lineSelection,
+      activeFilePath,
+    });
+    if (!path) return;
+    setCollapsedFiles((prev) =>
+      typeof setPathCollapsedInSet === 'function'
+        ? setPathCollapsedInSet(
+            prev,
+            path,
+            wantCollapsed,
+            annotatedFiles,
+            viewedPaths
+          )
+        : wantCollapsed
+          ? (() => {
+              const n = new Set(prev);
+              n.add(path);
+              return n;
+            })()
+          : typeof expandPathInCollapsedSet === 'function'
+            ? expandPathInCollapsedSet(
+                prev,
+                path,
+                annotatedFiles,
+                viewedPaths
+              )
+            : (() => {
+                const n = new Set(prev);
+                n.delete(path);
+                return n;
+              })()
+    );
   }
 
   /** Apply Diff review-filter toggle (⌥U/R/P). */
@@ -2566,27 +2654,21 @@ export function PrModalApp({
       selectionActionsTimerRef.current = null;
       const st = useModalStore.getState();
       if (!st.lineSelection || st.selecting) return;
-      // File-header caret → file-level comment composer (⌥C / island)
-      if (
-        st.lineSelection.kind === 'file' ||
-        st.lineSelection.subjectType === 'file'
-      ) {
-        setSelectionIslandLeaving(false);
-        setSelectionIslandPhase('comment');
-        setShowSelectionComposer(true);
-        return;
-      }
-      // Thread caret — no line island; Opt+C uses thread reply path
-      if (
-        st.lineSelection.kind === 'thread' ||
-        st.lineSelection.subjectType === 'thread' ||
-        st.lineSelection.kind === 'inline-comment'
-      ) {
+      // Pure reveal policy: file + line → actions; thread → hide island
+      const phase =
+        typeof resolveSelectionIslandRevealPhase === 'function'
+          ? resolveSelectionIslandRevealPhase(st.lineSelection)
+          : st.lineSelection.kind === 'thread' ||
+              st.lineSelection.subjectType === 'thread' ||
+              st.lineSelection.kind === 'inline-comment'
+            ? 'hidden'
+            : 'actions';
+      if (phase === 'hidden') {
         setShowSelectionComposer(false);
         return;
       }
       setSelectionIslandLeaving(false);
-      setSelectionIslandPhase('actions');
+      setSelectionIslandPhase(phase);
       setShowSelectionComposer(true);
     }, delay);
   }
@@ -2609,19 +2691,20 @@ export function PrModalApp({
         el && el.clientHeight > 0
           ? el.clientHeight
           : viewportHeightRef.current;
+      const { avgH: h, rowOffsetList: offs } = getDiffScrollMetrics();
       // Sticky file header overlays the top of the Diff list (~ROW_HEIGHT).
       // Without padTop, ArrowUp pins the caret under that fixed bar.
       const stickyTop =
-        typeof ROW_HEIGHT === 'number' && ROW_HEIGHT > 0 ? ROW_HEIGHT : avgH;
+        typeof ROW_HEIGHT === 'number' && ROW_HEIGHT > 0 ? ROW_HEIGHT : h;
       const top =
         typeof scrollTopToRevealIndex === 'function'
           ? scrollTopToRevealIndex(
               headIdx,
               cur,
-              avgH,
+              h,
               vp,
               virtualRows.length,
-              rowOffsetList,
+              offs,
               { padTop: stickyTop + 2, padBottom: 2 }
             )
           : cur;
@@ -2629,7 +2712,7 @@ export function PrModalApp({
         storeTop: useModalStore.getState().scrollTop,
         setStoreTop: setScrollTop,
         minDomDelta: 0.5,
-        minStoreDelta: Math.max(24, avgH * 2),
+        minStoreDelta: Math.max(24, h * 2),
       });
     } catch {
       /* ignore */
@@ -2756,7 +2839,8 @@ export function PrModalApp({
     if (useModalStore.getState().selectionIslandLeaving) {
       setSelectionIslandLeaving(false);
     }
-    // Thread caret: align Diff comment-nav index so ⌥C opens that reply
+    // Thread caret: align Diff comment-nav index so ⌥C opens that reply.
+    // Line/file selection leaves thread focus — drop hit ring (`.prp-vline--hit`).
     if (
       nextSel &&
       (nextSel.kind === 'thread' ||
@@ -2769,6 +2853,8 @@ export function PrModalApp({
         (c: any) => String(c?.id) === String(nextSel.commentId)
       );
       if (tIdx >= 0 && tIdx !== commentIndex) setCommentIndex(tIdx);
+    } else {
+      clearDiffThreadFocusIfNeeded();
     }
     scheduleSelectionActionsReveal();
     // DOM scroll + light path sync after paint (not another React commit)
@@ -3048,12 +3134,13 @@ export function PrModalApp({
     setCommentIndex(idx);
     const row = mappedComments[idx];
     if (row?.rowIndex != null) {
+      const { avgH: h, rowOffsetList: offs } = getDiffScrollMetrics();
       const top = scrollTopForIndex(
         row.rowIndex,
-        avgH,
+        h,
         viewportHeightRef.current,
         virtualRows.length,
-        rowOffsetList
+        offs
       );
       setScrollTop(top);
       requestAnimationFrame(() => {
@@ -3066,7 +3153,6 @@ export function PrModalApp({
     initialRoute?.position,
     mappedComments,
     layoutMode,
-    avgH,
     viewportHeightRef.current,
     virtualRows.length,
     setLayoutMode,
@@ -3490,6 +3576,8 @@ export function PrModalApp({
    */
   const contextThreadActionsRef = useRef<{
     fold: () => boolean;
+    foldCollapse?: () => boolean;
+    foldExpand?: () => boolean;
     gotoDiff: () => boolean;
     comment: () => boolean;
     resolve: () => boolean;
@@ -3498,6 +3586,8 @@ export function PrModalApp({
     (
       api: {
         fold: () => boolean;
+        foldCollapse?: () => boolean;
+        foldExpand?: () => boolean;
         gotoDiff: () => boolean;
         comment: () => boolean;
         resolve: () => boolean;
@@ -3557,7 +3647,13 @@ export function PrModalApp({
   }
 
   function runDiffContextThreadAction(
-    kind: 'fold' | 'gotoDiff' | 'comment' | 'resolve'
+    kind:
+      | 'fold'
+      | 'foldCollapse'
+      | 'foldExpand'
+      | 'gotoDiff'
+      | 'comment'
+      | 'resolve'
   ): boolean {
     const c = ensureDiffContextThread();
     if (!c || c.id == null) return false;
@@ -3576,6 +3672,14 @@ export function PrModalApp({
 
     if (kind === 'fold') {
       onToggleThreadCollapse(id, resolved);
+      return true;
+    }
+    if (kind === 'foldCollapse' || kind === 'foldExpand') {
+      const wantCollapsed = kind === 'foldCollapse';
+      const currently = isDiffThreadCollapsed(id, resolved);
+      if (currently !== wantCollapsed) {
+        onToggleThreadCollapse(id, resolved);
+      }
       return true;
     }
     if (kind === 'gotoDiff') {
@@ -3632,7 +3736,13 @@ export function PrModalApp({
   }
 
   function runContextThreadAction(
-    kind: 'fold' | 'gotoDiff' | 'comment' | 'resolve'
+    kind:
+      | 'fold'
+      | 'foldCollapse'
+      | 'foldExpand'
+      | 'gotoDiff'
+      | 'comment'
+      | 'resolve'
   ): boolean {
     // Prefer live store layout — keep-alive Conversation stays mounted on Diff.
     const liveLayout = useModalStore.getState().layoutMode;
@@ -3640,6 +3750,21 @@ export function PrModalApp({
       return runDiffContextThreadAction(kind);
     }
     try {
+      if (kind === 'foldCollapse') {
+        const api = contextThreadActionsRef.current;
+        if (typeof api?.foldCollapse === 'function') {
+          return Boolean(api.foldCollapse());
+        }
+        // Fallback: toggle only if currently expanded (legacy API)
+        return Boolean(api?.fold?.());
+      }
+      if (kind === 'foldExpand') {
+        const api = contextThreadActionsRef.current;
+        if (typeof api?.foldExpand === 'function') {
+          return Boolean(api.foldExpand());
+        }
+        return Boolean(api?.fold?.());
+      }
       return Boolean(contextThreadActionsRef.current?.[kind]?.());
     } catch {
       return false;
@@ -3965,12 +4090,13 @@ export function PrModalApp({
       // Pin file header to the first line of the Diff scrollport — DOM first.
       // Store sync thrifted so we don't stack an extra DiffWorkspace paint on
       // top of activeFilePath (already batched in this handler).
+      const { avgH: h, rowOffsetList: offs } = getDiffScrollMetrics();
       const top = scrollTopForIndex(
         idx,
-        avgH,
+        h,
         viewportHeightRef.current,
         virtualRows.length,
-        rowOffsetList,
+        offs,
         { align: 'start' }
       );
       const el = listRef.current as HTMLElement | null;
@@ -4033,15 +4159,6 @@ export function PrModalApp({
     }
   }
 
-  function isEditableKeyboardTarget(el: EventTarget | null) {
-    if (!el || typeof el !== 'object') return false;
-    const node = el as HTMLElement;
-    const tag = String(node.tagName || '').toUpperCase();
-    if (tag === 'TEXTAREA' || tag === 'INPUT' || tag === 'SELECT') return true;
-    if (node.isContentEditable) return true;
-    return Boolean(node.closest?.('textarea, input, select, [contenteditable="true"]'));
-  }
-
   function focusConversationCommentItem() {
     // Always land on conversation layout so the timeline is visible.
     // Scroll then focus via ConversationKbFocusScroller (leaf store sub).
@@ -4060,9 +4177,22 @@ export function PrModalApp({
     useModalStore.getState().requestConversationNav(target.anchor);
   }
 
+  /**
+   * Clear keyboard/thread focus chrome (Conversation ring + Diff hit ring).
+   * Diff ⌥J/K sets commentIndex which paints `.prp-vline--hit` until cleared.
+   */
   function clearConversationCommentFocus() {
     conversationCommentFocusRef.current = null;
     useModalStore.getState().requestConversationNav(null);
+    if (commentIndex >= 0) setCommentIndex(-1);
+    useModalStore.getState().setActiveDiffCommentId(null);
+  }
+
+  /** Drop Diff thread caret / hit ring when focus moves to code/file selection. */
+  function clearDiffThreadFocusIfNeeded() {
+    if (commentIndex >= 0) setCommentIndex(-1);
+    const st = useModalStore.getState();
+    if (st.activeDiffCommentId != null) st.setActiveDiffCommentId(null);
   }
 
   function dismissSelectionIsland(after?: any) {
@@ -5147,6 +5277,30 @@ export function PrModalApp({
       case 'toggleActiveFileCollapse':
         toggleActiveFileCollapse();
         break;
+      case 'collapseActiveFile':
+        setActiveFileCollapse(true);
+        break;
+      case 'expandActiveFile':
+        setActiveFileCollapse(false);
+        break;
+      case 'contextThreadCollapse':
+        runContextThreadAction('foldCollapse');
+        break;
+      case 'contextThreadExpand':
+        runContextThreadAction('foldExpand');
+        break;
+      case 'collapseFold':
+      case 'expandFold': {
+        // Fallback if resolveArrowFoldAction returned generic action names
+        const collapse = action === 'collapseFold';
+        if (layoutMode === LAYOUT_DIFF) {
+          setActiveFileCollapse(collapse);
+        } else {
+          runContextThreadAction(collapse ? 'foldCollapse' : 'foldExpand');
+        }
+        break;
+      }
+
       case 'stepNavPrev':
         if (searchOpen) navSearch(-1);
         else if (layoutMode === LAYOUT_DIFF) navComment(-1);
@@ -5433,6 +5587,24 @@ export function PrModalApp({
   }
 
   function onSelectionStart(row, point, opts: any = {}) {
+    // Drop sticky focus on toolbar radios (Unified/Split) so subsequent
+    // Arrow keys move the line selection, not the radiogroup.
+    try {
+      const ae =
+        typeof document !== 'undefined'
+          ? (document.activeElement as HTMLElement | null)
+          : null;
+      if (
+        ae &&
+        !isEditableKeyboardTarget(ae) &&
+        typeof ae.blur === 'function' &&
+        (ae.tagName === 'INPUT' || ae.tagName === 'BUTTON')
+      ) {
+        ae.blur();
+      }
+    } catch {
+      /* ignore */
+    }
     const shiftKey = Boolean(opts?.shiftKey);
     const preferredSide =
       String(opts?.preferredSide || 'RIGHT').toUpperCase() === 'LEFT'
@@ -5475,6 +5647,19 @@ export function PrModalApp({
     pointerStartRef.current = point || null;
     setSelecting(true);
     setLineSelection(next);
+    // Code/file pointer selection leaves Diff thread keyboard focus
+    const isThreadSel =
+      next.kind === 'thread' ||
+      next.subjectType === 'thread' ||
+      next.kind === 'inline-comment';
+    if (!isThreadSel) {
+      clearDiffThreadFocusIfNeeded();
+    } else if (next.commentId != null && Array.isArray(mappedComments)) {
+      const tIdx = mappedComments.findIndex(
+        (c: any) => String(c?.id) === String(next.commentId)
+      );
+      if (tIdx >= 0 && tIdx !== commentIndex) setCommentIndex(tIdx);
+    }
     // Hide island while dragging; reveal after pointer-up idle delay
     clearSelectionActionsTimer();
     setShowSelectionComposer(false);
@@ -6895,7 +7080,9 @@ export function PrModalApp({
             useModalStore.getState().focusedConversationAnchor ||
             useModalStore.getState().pendingConversationNavAnchor
     ),
-    hasLineSelection: Boolean(useModalStore.getState().lineSelection),
+    hasLineSelection: isCodeBodySelection(
+      useModalStore.getState().lineSelection
+    ),
   };
   actionsRef.current = {
     onClose: requestClose,
@@ -6924,6 +7111,7 @@ export function PrModalApp({
     scrollConversationPanel,
     toggleViewedActiveFile,
     toggleActiveFileCollapse,
+    setActiveFileCollapse,
     applyReviewFilterToggle,
     applyGotoQuery,
     applySelectionKeyboardMove,
@@ -7377,23 +7565,32 @@ export function PrModalApp({
       // Live context — App often does not re-render on ⌥J/K focus (store leaf only),
       // so uiRef.contextThreadActive can stay stale false and block ⌥C/F/D/⌃R.
       const storeUi = useModalStore.getState();
-      const liveConvFocus = Boolean(
-        conversationCommentFocusRef.current ||
+      const liveConvAnchor = String(
+        conversationCommentFocusRef.current?.anchor ||
           storeUi.focusedConversationAnchor ||
-          storeUi.pendingConversationNavAnchor
-      );
+          storeUi.pendingConversationNavAnchor ||
+          ''
+      ).trim();
+      const liveConvFocus = Boolean(liveConvAnchor);
       const onDiff =
         ui.layoutMode === LAYOUT_DIFF || storeUi.layoutMode === LAYOUT_DIFF;
       // Diff: ⌥C/D/⌃R stay available (handlers seed commentIndex 0 if needed).
       // Conversation keep-alive focus must not win on Diff (hidden panel).
       const liveContextThread = onDiff ? true : liveConvFocus;
-      // Real Diff thread focus (⌥J/K / jump) — used so ⌥F does not always thread-fold.
+      const liveSel = storeUi.lineSelection;
+      // Real Diff thread focus: ⌥J/K comment nav, active id, or ↑↓ caret on a thread.
       const liveDiffThreadFocused =
         onDiff &&
         (Number(storeUi.commentIndex) >= 0 ||
-          storeUi.activeDiffCommentId != null);
-      // Prefer store over uiRef — line selection updates without always re-running this effect.
-      const liveLineSelection = Boolean(storeUi.lineSelection);
+          storeUi.activeDiffCommentId != null ||
+          isThreadSelection(liveSel));
+      // Conversation ←/→ only fold when a review-thread stop is focused.
+      const liveFocusedReviewThread = onDiff
+        ? liveDiffThreadFocused
+        : liveConvAnchor.startsWith('review-comment:');
+      // Code-body selection only — thread/file carets must not force file fold
+      // (otherwise ← / ⌥F close the file while a thread is focused via ↑↓).
+      const liveLineSelection = isCodeBodySelection(liveSel);
 
       let action =
         typeof resolveModalShortcutAction === 'function'
@@ -7414,6 +7611,7 @@ export function PrModalApp({
               searchOpen: Boolean(ui.searchOpen),
               hasLineSelection: liveLineSelection,
               diffThreadFocused: liveDiffThreadFocused,
+              focusedReviewThread: liveFocusedReviewThread,
               layoutMode: ui.layoutMode,
               conversationCommentFocused: liveConvFocus,
               contextThreadActive: liveContextThread,
@@ -7569,6 +7767,26 @@ export function PrModalApp({
           break;
         case 'toggleActiveFileCollapse':
           if (ui.layoutMode === LAYOUT_DIFF) act.toggleActiveFileCollapse?.();
+          break;
+        case 'collapseActiveFile':
+          if (ui.layoutMode === LAYOUT_DIFF) act.setActiveFileCollapse?.(true);
+          break;
+        case 'expandActiveFile':
+          if (ui.layoutMode === LAYOUT_DIFF) act.setActiveFileCollapse?.(false);
+          break;
+        case 'contextThreadCollapse':
+          act.runContextThreadAction?.('foldCollapse');
+          break;
+        case 'contextThreadExpand':
+          act.runContextThreadAction?.('foldExpand');
+          break;
+        case 'collapseFold':
+          if (ui.layoutMode === LAYOUT_DIFF) act.setActiveFileCollapse?.(true);
+          else act.runContextThreadAction?.('foldCollapse');
+          break;
+        case 'expandFold':
+          if (ui.layoutMode === LAYOUT_DIFF) act.setActiveFileCollapse?.(false);
+          else act.runContextThreadAction?.('foldExpand');
           break;
         case 'toggleReviewFilterUnresolved':
           if (ui.layoutMode === LAYOUT_DIFF) {
@@ -7742,6 +7960,12 @@ export function PrModalApp({
           isMac={isMac}
           dismissMs={SHORTCUT_MONITOR_DISMISS_MS}
         />
+        {isEmbed ? (
+          <DetailGnb
+            detail={detail}
+            presentation="embed"
+          />
+        ) : null}
         <Header
           detail={detail}
           onClose={showCloseChrome ? requestClose : undefined}
@@ -8044,6 +8268,7 @@ export function PrModalApp({
               isDiffCommentCollapsed={isDiffCommentCollapsed}
               onToggleThreadCollapse={onToggleThreadCollapse}
               commentHeightOpts={commentHeightOpts}
+              onVirtualMetricsChange={onVirtualMetricsChange}
               showSelectionComposer={showSelectionComposer}
               selectionIslandLeaving={selectionIslandLeaving}
               selectionDraft={undefined /* leaf store */}

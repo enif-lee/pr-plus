@@ -225,6 +225,14 @@
   display: none !important;
 }
 
+/* Variable-height measure host — zero chrome so offsets match content box */
+.prp-vlist__row-shell {
+  display: block;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
 .prp-vlist__spacer {
   position: relative;
   width: 100%;

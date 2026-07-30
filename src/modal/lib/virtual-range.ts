@@ -78,6 +78,46 @@ export function isIndexVisible(index, range) {
 }
 
 /**
+ * Keep the same content under the viewport top when prefix offsets change
+ * (measure feedback, expand/collapse). Finds the row at `scrollTop` in
+ * `prevOffsets` and maps that in-row offset onto `nextOffsets`.
+ *
+ * @returns adjusted scrollTop (clamped to next content)
+ */
+export function adjustScrollTopForOffsetChange(
+  scrollTop: unknown,
+  prevOffsets: number[] | null | undefined,
+  nextOffsets: number[] | null | undefined
+): number {
+  const top = Math.max(0, Number(scrollTop) || 0);
+  const prev = Array.isArray(prevOffsets) ? prevOffsets : null;
+  const next = Array.isArray(nextOffsets) ? nextOffsets : null;
+  if (!prev || !next || prev.length < 2 || next.length < 2) return top;
+  // Different row counts → best-effort ratio on total height
+  if (prev.length !== next.length) {
+    const prevTotal = Math.max(1, Number(prev[prev.length - 1]) || 1);
+    const nextTotal = Math.max(0, Number(next[next.length - 1]) || 0);
+    const nextMax = Math.max(0, nextTotal); // caller clamps to viewport
+    return clamp((top / prevTotal) * nextTotal, 0, nextMax);
+  }
+  const totalRows = prev.length - 1;
+  // First index whose bottom > scrollTop
+  let lo = 0;
+  let hi = totalRows - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if ((prev[mid + 1] || 0) <= top) lo = mid + 1;
+    else hi = mid - 1;
+  }
+  const i = clamp(lo, 0, totalRows - 1);
+  const prevY = Number(prev[i]) || 0;
+  const nextY = Number(next[i]) || 0;
+  const within = Math.max(0, top - prevY);
+  const nextTotal = Math.max(0, Number(next[totalRows]) || 0);
+  return clamp(nextY + within, 0, nextTotal);
+}
+
+/**
  * ScrollTop so that `index` is in the viewport.
  * - align: 'quarter' (default) — slightly below top (search jumps)
  * - align: 'start' — top of scrollport (+ optional pad; Conversation ⌥J/K)
@@ -242,6 +282,105 @@ export function scrollTopToRevealIndex(
   }
   // Below viewport → pin row bottom to viewport bottom (- bottom inset)
   return clamp(rowBottom - vp + bottomInset, 0, maxScroll);
+}
+
+/**
+ * ScrollTop that **maximizes** how much of `[elementY, elementY+elementH)` is
+ * visible in the viewport. Used for Conversation ⌥J/K thread focus:
+ * - Already fully visible → keep currentScrollTop
+ * - Fits in viewport (with pads) → minimal scroll so the whole rect is in view
+ * - Taller than viewport → pin top (padTop) so the largest possible slice from
+ *   the focused root is shown (never leave the root above the viewport)
+ *
+ * Pure: no DOM. Content coords match virtual-row offsets.
+ *
+ * @returns {number} next scrollTop
+ */
+export function scrollTopToMaximizeRect(
+  currentScrollTop: unknown,
+  viewportHeight: unknown,
+  contentHeight: unknown,
+  elementY: unknown,
+  elementH: unknown,
+  opts?: {
+    pad?: number;
+    padTop?: number;
+    padBottom?: number;
+  } | null
+): number {
+  const vp = Math.max(0, Number(viewportHeight) || 0);
+  const totalH = Math.max(0, Number(contentHeight) || 0);
+  const y = Math.max(0, Number(elementY) || 0);
+  const h = Math.max(1, Number(elementH) || 1);
+  const maxScroll = Math.max(0, totalH - vp);
+  const cur = clamp(Number(currentScrollTop) || 0, 0, maxScroll);
+  if (vp <= 0) return cur;
+
+  const padBoth = Math.max(0, Number(opts?.pad) || 0);
+  const padTop = Math.max(
+    0,
+    opts?.padTop != null ? Number(opts.padTop) : padBoth
+  );
+  const padBottom = Math.max(
+    0,
+    opts?.padBottom != null ? Number(opts.padBottom) : padBoth
+  );
+  const maxInset = Math.max(0, Math.floor(vp / 2) - 1);
+  const topInset = Math.min(padTop, maxInset);
+  const bottomInset = Math.min(padBottom, maxInset);
+  const avail = Math.max(1, vp - topInset - bottomInset);
+  const rowBottom = y + h;
+
+  // Tall element: pin top under top inset → max visible fraction from root
+  if (h > avail) {
+    return clamp(y - topInset, 0, maxScroll);
+  }
+
+  // Fits: already fully visible → keep
+  const viewTop = cur + topInset;
+  const viewBottom = cur + vp - bottomInset;
+  if (y >= viewTop && rowBottom <= viewBottom) {
+    return cur;
+  }
+  // Above / under sticky → bring top to topInset
+  if (y < viewTop) {
+    return clamp(y - topInset, 0, maxScroll);
+  }
+  // Below / partially clipped at bottom → pin bottom to view bottom
+  return clamp(rowBottom - vp + bottomInset, 0, maxScroll);
+}
+
+/**
+ * Maximize visibility of virtual row `index` (uses offsets when available).
+ * Thin wrapper around {@link scrollTopToMaximizeRect} + {@link rowBoundsForIndex}.
+ */
+export function scrollTopToMaximizeIndex(
+  index: unknown,
+  currentScrollTop: unknown,
+  rowHeight: unknown,
+  viewportHeight: unknown,
+  totalRows: unknown,
+  offsets?: number[] | null,
+  opts?: {
+    pad?: number;
+    padTop?: number;
+    padBottom?: number;
+  } | null
+): number {
+  const { y, h, totalHeight } = rowBoundsForIndex(
+    index,
+    rowHeight,
+    totalRows,
+    offsets
+  );
+  return scrollTopToMaximizeRect(
+    currentScrollTop,
+    viewportHeight,
+    totalHeight,
+    y,
+    h,
+    opts
+  );
 }
 
 /**

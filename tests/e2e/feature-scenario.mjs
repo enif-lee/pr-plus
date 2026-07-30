@@ -45,6 +45,7 @@ import {
   step,
   clickFirstLineExpandBtn,
   clickFileHeaderCollapse,
+  pressArrowFold,
   waitMs,
 } from './lib/harness.mjs';
 
@@ -697,6 +698,156 @@ async function main() {
     // May clear selection or only dock — accept either as long as modal stays
     assert(evalInPage(`!!document.querySelector('.prp-overlay')`), 'modal closed on selection Esc');
     log(`  after Esc selection count=${sel.count} dock=${sel.dock}`);
+  });
+
+  // ─── P3b cross-side Shift extend, file action island, Arrow fold ─
+  // Always re-open #13 via URL (independent of P3 success / shell flakiness).
+  await run(`P3b.0 open PR #${MULTI_HUNK_PR} for selection/fold`, () => {
+    closeOverlay();
+    openPr(MULTI_HUNK_PR, { viaUrl: true });
+    setLayout('diff');
+    blurEditable();
+    waitMs(400);
+    const p = modalProbe();
+    assert(p.overlay, 'overlay missing after open #13');
+  });
+
+  await run(`P3b.1 Shift extend continues past multi selection on PR #${MULTI_HUNK_PR}`, () => {
+    setLayout('diff');
+    blurEditable();
+    // Expand if folded from prior steps
+    const folded = fileCollapseProbe();
+    if (folded?.ariaExpanded === 'false') {
+      pressArrowFold('right');
+      waitMs(350);
+    }
+    const seed = clickSelectableLine(1);
+    assert(seed?.ok, `clickSelectableLine: ${JSON.stringify(seed)}`);
+    waitMs(250);
+    // Build multi via Shift-click (holdChord alone is flaky for range seed)
+    const shiftClick = evalInPage(`
+      (() => {
+        const rows = [...document.querySelectorAll('.prp-vline--selectable')].filter(
+          (e) => !e.classList.contains('prp-vline--header')
+        );
+        const row = rows[12] || rows[Math.min(8, rows.length - 1)];
+        if (!row) return { ok: false, n: rows.length };
+        row.scrollIntoView({ block: 'center' });
+        const rect = row.getBoundingClientRect();
+        const x = rect.left + 24;
+        const y = rect.top + rect.height / 2;
+        const el = document.elementFromPoint(x, y) || row;
+        const opts = {
+          bubbles: true, cancelable: true, clientX: x, clientY: y,
+          button: 0, buttons: 1, shiftKey: true,
+        };
+        el.dispatchEvent(new PointerEvent('pointerdown', { ...opts, pointerId: 1, pointerType: 'mouse' }));
+        el.dispatchEvent(new MouseEvent('mousedown', opts));
+        const list = document.querySelector('.prp-vlist') || el;
+        list.dispatchEvent(new MouseEvent('mouseup', { ...opts, buttons: 0, shiftKey: true }));
+        el.dispatchEvent(new PointerEvent('pointerup', { ...opts, pointerId: 1, pointerType: 'mouse', buttons: 0 }));
+        return { ok: true, n: rows.length };
+      })()
+    `);
+    assert(shiftClick?.ok, `shift-click multi failed: ${JSON.stringify(shiftClick)}`);
+    waitMs(350);
+    const mid = selectionProbe();
+    assert(
+      mid.count >= 2 || mid.roles.middle >= 1 || mid.roles.end >= 1,
+      `need multi before further extend: ${JSON.stringify(mid)}`
+    );
+    const countMid = mid.count;
+    // Further Shift+↓ must not shrink (sticky head / opposing-side fix)
+    blurEditable();
+    holdChord('Shift+ArrowDown', { holdMs: 320, repeatMs: 40, sample: 'diff' });
+    waitMs(300);
+    const after = selectionProbe();
+    log(`  multi extend ${countMid}→${after.count} roles=${JSON.stringify(after.roles)}`);
+    assert(
+      after.count >= countMid,
+      `Shift+↓ stuck or shrunk after multi (${countMid}→${after.count})`
+    );
+  });
+
+  await run(`P3b.2 file header selection shows action island`, () => {
+    setLayout('diff');
+    blurEditable();
+    press('Escape');
+    waitMs(250);
+    // Click file header path; mouseup on vlist so selection finalize + reveal run
+    const hdr = evalInPage(`
+      (() => {
+        const header = document.querySelector('.prp-vline--header');
+        if (!header) return { ok: false, reason: 'no header' };
+        header.scrollIntoView({ block: 'center' });
+        const path = header.querySelector('.prp-file-header__path') || header;
+        const rect = path.getBoundingClientRect();
+        const x = rect.left + Math.min(100, rect.width * 0.5);
+        const y = rect.top + rect.height / 2;
+        const el = document.elementFromPoint(x, y) || path;
+        if (el.closest?.('.prp-file-header__collapse')) {
+          return { ok: false, reason: 'hit collapse' };
+        }
+        const opts = { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0, buttons: 1 };
+        el.dispatchEvent(new PointerEvent('pointerdown', { ...opts, pointerId: 1, pointerType: 'mouse' }));
+        el.dispatchEvent(new MouseEvent('mousedown', opts));
+        const list = document.querySelector('.prp-vlist') || el;
+        list.dispatchEvent(new MouseEvent('mouseup', { ...opts, buttons: 0 }));
+        el.dispatchEvent(new PointerEvent('pointerup', { ...opts, pointerId: 1, pointerType: 'mouse', buttons: 0 }));
+        return { ok: true, el: (el.className || '').toString().slice(0, 80) };
+      })()
+    `);
+    assert(hdr?.ok, `header click failed: ${JSON.stringify(hdr)}`);
+    // SELECTION_ACTIONS_REVEAL_MS is 300 — wait past it
+    waitMs(700);
+    const sel = selectionProbe();
+    log(`  file island: ${JSON.stringify(sel)}`);
+    assert(sel.dock, `file selection dock missing: ${JSON.stringify(sel)}`);
+    assert(
+      sel.actionsPhase || (sel.btnLabels || []).includes('Comment'),
+      `expected actions phase for file, got comment=${sel.commentPhase} labels=${JSON.stringify(sel.btnLabels)}`
+    );
+    assert(
+      !(sel.commentPhase && !sel.actionsPhase),
+      'file selection should not open comment-only island'
+    );
+    assert(sel.fileTarget || (sel.dockCls || '').includes('file'), `expected fileTarget: ${JSON.stringify(sel)}`);
+    const hasCopy = (sel.btnLabels || []).some((t) => /copy code/i.test(t));
+    assert(hasCopy, `Copy code missing: ${JSON.stringify(sel.btnLabels)}`);
+  });
+
+  await run(`P3b.3 ArrowLeft/Right file fold`, () => {
+    setLayout('diff');
+    blurEditable();
+    // Ensure file focus via header or selection
+    clickSelectableLine(1);
+    waitMs(150);
+    const before = fileCollapseProbe();
+    assert(before.hasBtn || before.hasHeader, `no file header: ${JSON.stringify(before)}`);
+    // Expand first so collapse is observable
+    if (before.ariaExpanded === 'false') {
+      pressArrowFold('right');
+      waitMs(350);
+    }
+    const open = fileCollapseProbe();
+    assert(open.ariaExpanded !== 'false', `file should be open before collapse: ${JSON.stringify(open)}`);
+    const codeOpen = open.codeRows;
+    pressArrowFold('left');
+    waitMs(400);
+    const collapsed = fileCollapseProbe();
+    log(`  after ←: ${JSON.stringify(collapsed)}`);
+    assert(
+      collapsed.ariaExpanded === 'false' || collapsed.codeRows < codeOpen,
+      `ArrowLeft should collapse file: ${JSON.stringify(collapsed)} codeOpen=${codeOpen}`
+    );
+    pressArrowFold('right');
+    waitMs(400);
+    const expanded = fileCollapseProbe();
+    log(`  after →: ${JSON.stringify(expanded)}`);
+    assert(
+      expanded.ariaExpanded === 'true' || expanded.codeRows >= codeOpen,
+      `ArrowRight should expand file: ${JSON.stringify(expanded)}`
+    );
   });
 
   await run(`P2 multi-hunk expand chrome PR #${MULTI_HUNK_PR}`, () => {

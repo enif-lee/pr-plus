@@ -45,6 +45,74 @@ export function scrollChildToScrollerTop(
   }
 }
 
+/**
+ * Adjust scrollTop so `child` is **as fully visible as possible** in `scroller`.
+ * Prefer whole-card visibility when height fits; otherwise pin top (max fraction).
+ * Used for Conversation keyboard focus on tall / bottom threads.
+ *
+ * @returns delta applied (0 if no-op / missing nodes)
+ */
+export function scrollChildToMaximizeInScroller(
+  scroller: HTMLElement | null | undefined,
+  child: HTMLElement | null | undefined,
+  opts?: {
+    pad?: number;
+    padTop?: number;
+    padBottom?: number;
+    minDelta?: number;
+  } | null
+): number {
+  if (!scroller || !child) return 0;
+  const padBoth = Number.isFinite(opts?.pad as number) ? Number(opts?.pad) : 0;
+  const padTop = Number.isFinite(opts?.padTop as number)
+    ? Number(opts?.padTop)
+    : padBoth;
+  const padBottom = Number.isFinite(opts?.padBottom as number)
+    ? Number(opts?.padBottom)
+    : padBoth;
+  const minDelta = Number.isFinite(opts?.minDelta as number)
+    ? Number(opts?.minDelta)
+    : 1;
+  try {
+    const sRect = scroller.getBoundingClientRect();
+    const cRect = child.getBoundingClientRect();
+    const vh = scroller.clientHeight || 0;
+    if (vh <= 0) return 0;
+    const maxInset = Math.max(0, Math.floor(vh / 2) - 1);
+    const topInset = Math.min(Math.max(0, padTop), maxInset);
+    const bottomInset = Math.min(Math.max(0, padBottom), maxInset);
+    const avail = Math.max(1, vh - topInset - bottomInset);
+    const childTopInView = cRect.top - sRect.top;
+    const childH = Math.max(1, cRect.height);
+    const childBottomInView = childTopInView + childH;
+    const viewTop = topInset;
+    const viewBottom = vh - bottomInset;
+
+    let delta = 0;
+    if (childH > avail) {
+      // Tall: pin top under pad so max visible slice starts at the root
+      delta = childTopInView - topInset;
+    } else if (childTopInView >= viewTop && childBottomInView <= viewBottom) {
+      return 0;
+    } else if (childTopInView < viewTop) {
+      delta = childTopInView - topInset;
+    } else {
+      // Clipped at bottom — pull up so bottom sits at viewBottom
+      delta = childBottomInView - viewBottom;
+    }
+
+    if (Math.abs(delta) <= minDelta) return 0;
+    const max = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+    const next = Math.min(max, Math.max(0, scroller.scrollTop + delta));
+    const applied = next - scroller.scrollTop;
+    if (Math.abs(applied) <= minDelta) return 0;
+    scroller.scrollTop = next;
+    return applied;
+  } catch {
+    return 0;
+  }
+}
+
 /** Query anchor node inside a scroller (thread-focus, then search). */
 export function queryAnchorInScroller(
   scroller: HTMLElement | null | undefined,

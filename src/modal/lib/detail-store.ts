@@ -35,6 +35,8 @@ export const META_KEYS = [
   'allowMergeCommit',
   'allowSquashMerge',
   'allowRebaseMerge',
+  /** REST repo.permissions.admin → merge-box bypass-rules opt-in */
+  'viewerCanMergeAsAdmin',
   'createdAt',
   'updatedAt',
   'additions',

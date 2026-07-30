@@ -224,7 +224,16 @@ export function DiffToolbar(props: any) {
               name="prp-diff-mode"
               value="unified"
               checked={diffMode === 'unified'}
-              onChange={() => onDiffMode?.('unified')}
+              onChange={(e) => {
+                onDiffMode?.('unified');
+                // Release radio focus so Arrow keys drive Diff line selection
+                // instead of the native radiogroup (sticky toggle focus bug).
+                try {
+                  (e.currentTarget as HTMLInputElement).blur();
+                } catch {
+                  /* ignore */
+                }
+              }}
             />
             Unified
           </label>
@@ -234,7 +243,14 @@ export function DiffToolbar(props: any) {
               name="prp-diff-mode"
               value="split"
               checked={diffMode === 'split'}
-              onChange={() => onDiffMode?.('split')}
+              onChange={(e) => {
+                onDiffMode?.('split');
+                try {
+                  (e.currentTarget as HTMLInputElement).blur();
+                } catch {
+                  /* ignore */
+                }
+              }}
             />
             Split
           </label>

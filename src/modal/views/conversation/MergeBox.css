@@ -187,6 +187,17 @@
   color: var(--prp-fg);
 }
 
+/* Admin bypass opt-in (GitHub: Merge without waiting for requirements…) */
+.prp-merge-bypass {
+  user-select: none;
+}
+.prp-merge-bypass__input {
+  cursor: pointer;
+}
+.prp-merge-bypass__label {
+  cursor: pointer;
+}
+
 /* ⌥J/K focus ring host around merge box */
 .prp-merge-box-focus-host {
   border-radius: 12px;

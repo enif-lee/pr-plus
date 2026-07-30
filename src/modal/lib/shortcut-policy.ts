@@ -172,6 +172,8 @@ export const TOGGLE_VIEWED_SHORTCUT = {
  *   3. Otherwise → file fold
  *
  * Conversation review-thread focus still owns ⌥F via CONTEXT_THREAD_SHORTCUT.
+ * Primary fold keys are ArrowLeft (collapse) / ArrowRight (expand); ⌥F remains
+ * a toggle alias.
  */
 export const FILE_FOLD_SHORTCUT = {
   key: 'f',
@@ -181,6 +183,85 @@ export const FILE_FOLD_SHORTCUT = {
   labelMac: '⌥F',
   labelWin: 'Alt+F',
 } as const;
+
+/**
+ * ArrowLeft / ArrowRight — directed fold for Diff file or focused thread.
+ * Collapse (←) / expand (→). Not active in editable fields.
+ */
+export const ARROW_FOLD_SHORTCUT = {
+  collapse: {
+    key: 'arrowleft',
+    code: 'ArrowLeft',
+    action: 'collapseFold' as const,
+    chord: '←',
+    labelMac: '←',
+    labelWin: '←',
+  },
+  expand: {
+    key: 'arrowright',
+    code: 'ArrowRight',
+    action: 'expandFold' as const,
+    chord: '→',
+    labelMac: '→',
+    labelWin: '→',
+  },
+} as const;
+
+/**
+ * Resolve directed fold target for ArrowLeft/Right.
+ * - Diff + thread focused (no **code-body** line selection) → thread
+ * - Diff otherwise → file
+ * - Conversation + context thread → thread
+ *
+ * `hasLineSelection` must mean code-body selection only. A Diff ↑↓ caret on a
+ * review-thread (`kind: 'thread'`) is thread focus, not a line selection.
+ * @returns action id or null
+ */
+export function resolveArrowFoldAction(opts: {
+  key?: string;
+  layoutMode?: string;
+  editableTarget?: boolean;
+  contextThreadActive?: boolean;
+  conversationCommentFocused?: boolean;
+  /** When false, Conversation ←/→ do not fold (e.g. body/composer/merge focus). */
+  focusedReviewThread?: boolean;
+  diffThreadFocused?: boolean;
+  /** Code-body multi/single line selection — not thread/file caret. */
+  hasLineSelection?: boolean;
+} = {}): string | null {
+  if (opts.editableTarget) return null;
+  const key = String(opts.key || '').toLowerCase();
+  if (key !== 'arrowleft' && key !== 'arrowright') return null;
+  const wantCollapse = key === 'arrowleft';
+  const layout = String(opts.layoutMode || '');
+  const contextThreadActive = Boolean(
+    opts.contextThreadActive ?? opts.conversationCommentFocused
+  );
+  const hasLineSelection = Boolean(opts.hasLineSelection);
+  const diffThreadFocused =
+    opts.diffThreadFocused != null
+      ? Boolean(opts.diffThreadFocused)
+      : layout === 'diff' && contextThreadActive;
+
+  if (layout === 'diff') {
+    // Prefer thread when thread-focused without a code-body line selection
+    if (diffThreadFocused && !hasLineSelection) {
+      return wantCollapse
+        ? 'contextThreadCollapse'
+        : 'contextThreadExpand';
+    }
+    return wantCollapse ? 'collapseActiveFile' : 'expandActiveFile';
+  }
+  if (
+    (layout === 'centered' || layout === 'conversation') &&
+    contextThreadActive
+  ) {
+    // Explicit false: focused stop is not a review-thread (description/merge/…)
+    if (opts.focusedReviewThread === false) return null;
+    return wantCollapse ? 'contextThreadCollapse' : 'contextThreadExpand';
+  }
+  return null;
+}
 
 /**
  * Path to fold/expand: prefer line-selection file, else active tree file.
@@ -634,6 +715,56 @@ export function shortcutKeyFromEvent(e: {
   });
 }
 
+/** INPUT types that accept typed text (block product arrow/selection keys). */
+const TEXT_INPUT_TYPES = new Set([
+  '',
+  'text',
+  'search',
+  'email',
+  'password',
+  'url',
+  'tel',
+  'number',
+  'date',
+  'datetime-local',
+  'month',
+  'week',
+  'time',
+]);
+
+/**
+ * Whether focus is in a **text-entry** control that should own keyboard input.
+ *
+ * Radio / checkbox / button inputs are **not** text entry — e.g. Diff toolbar
+ * Unified/Split radios must not trap Arrow keys after toggle (native radio
+ * group would otherwise steal line-selection arrows).
+ */
+export function isEditableKeyboardTarget(
+  el: EventTarget | null | undefined
+): boolean {
+  if (!el || typeof el !== 'object') return false;
+  const node = el as HTMLElement;
+  if (node.isContentEditable) return true;
+  const tag = String(node.tagName || '').toUpperCase();
+  if (tag === 'TEXTAREA' || tag === 'SELECT') return true;
+  if (tag === 'INPUT') {
+    const type = String(
+      (node as HTMLInputElement).type || 'text'
+    ).toLowerCase();
+    return TEXT_INPUT_TYPES.has(type);
+  }
+  // Nested: typing surface inside a host (composer, title field)
+  if (node.closest?.('textarea, select, [contenteditable="true"]')) {
+    return true;
+  }
+  const input = node.closest?.('input') as HTMLInputElement | null;
+  if (input) {
+    const type = String(input.type || 'text').toLowerCase();
+    return TEXT_INPUT_TYPES.has(type);
+  }
+  return false;
+}
+
 /**
  * Opt-hold badge slots for PR modal chrome (stack digits, adjacent, step-nav).
  * Pure mapping for UI + tests.
@@ -732,7 +863,8 @@ export function sidePanelShortcutLabel(isMac = false): string {
  *   conversationCommentFocused?: boolean,
  *   contextThreadActive?: boolean,
  *   diffThreadFocused?: boolean,  // Diff review-thread focus (commentIndex / active id)
- *   hasLineSelection?: boolean,   // Diff code line selection active
+ *   hasLineSelection?: boolean,   // Diff **code-body** line selection only
+ *                                 // (not thread/file caret — those keep thread fold)
  *   searchOpen?: boolean,
  *   layoutMode?: string,
  * }} opts
@@ -784,9 +916,10 @@ export function resolveModalShortcutAction(opts: any = {}) {
    *   ⌥⌃R resolve / unresolve
    * ⌥C allowed while the reply composer is focused (second stage).
    *
-   * ⌥F on Diff is special: line selection → file fold; only a focused review
-   * thread takes thread fold. (contextThreadActive may be forced true on Diff
-   * so ⌥C/D seed the first thread — that force must not steal file fold.)
+   * ⌥F on Diff is special: **code-body** line selection → file fold; focused
+   * review thread (⌥J/K or ↑↓ on thread) → thread fold. Thread/file carets are
+   * not hasLineSelection. (contextThreadActive may be forced true on Diff so
+   * ⌥C/D seed the first thread — that force must not steal file fold.)
    */
   if (contextThreadActive && alt && !shift) {
     if (ctrl && !mod && key === 'r') {
@@ -931,6 +1064,29 @@ export function resolveModalShortcutAction(opts: any = {}) {
     return key === 'arrowup' ? 'moveSelectionUp' : 'moveSelectionDown';
   }
 
+  // ← / → directed fold (file or focused thread). Before editable steal so
+  // we only run when not typing.
+  if (
+    !alt &&
+    !mod &&
+    !ctrl &&
+    !shift &&
+    (key === 'arrowleft' || key === 'arrowright')
+  ) {
+    if (opts.editableTarget) return null;
+    const foldAct = resolveArrowFoldAction({
+      key,
+      layoutMode: layout,
+      editableTarget: false,
+      contextThreadActive,
+      conversationCommentFocused: opts.conversationCommentFocused,
+      focusedReviewThread: opts.focusedReviewThread,
+      diffThreadFocused,
+      hasLineSelection,
+    });
+    if (foldAct) return foldAct;
+  }
+
   // Do not steal keys while typing in inputs/textareas/contenteditable
   if (opts.editableTarget) return null;
 
@@ -947,9 +1103,12 @@ export function resolveModalShortcutAction(opts: any = {}) {
   // ⌥⇧F → fullscreen shell toggle
   if (shift && key === 'f') return 'toggleFullscreen';
 
-  // ⌥⇧C → focus first conversation comment/review
+  // ⌥⇧C → focus first conversation comment/review; second press (or Diff
+  // thread nav) clears focus chrome (Conversation ring + Diff hit ring).
   if (shift && key === 'c') {
-    if (opts.conversationCommentFocused) return 'clearConversationCommentFocus';
+    if (opts.conversationCommentFocused || opts.diffThreadFocused) {
+      return 'clearConversationCommentFocus';
+    }
     return 'focusConversationComment';
   }
 

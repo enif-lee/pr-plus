@@ -51,9 +51,29 @@ export function isThreadSelection(selection: any): boolean {
   );
 }
 
+/**
+ * True for code-body line selection (single or multi).
+ * File-header and review-thread carets are **not** code selections — they must
+ * not steal ←/→ / ⌥F from thread fold (Diff ↑↓ lands on threads as `kind:thread`).
+ */
+export function isCodeBodySelection(selection: any): boolean {
+  return Boolean(
+    selection &&
+      !isFileLevelSelection(selection) &&
+      !isThreadSelection(selection)
+  );
+}
+
 /** True when caret is a single line (not multi, not file/thread structural). */
 export function isSingleLineCaretSelection(selection: any): boolean {
   if (!selection || isFileLevelSelection(selection) || isThreadSelection(selection)) {
+    return false;
+  }
+  // Multi-line range is row-span based (sticky side may park head on a row
+  // without the preferred side — still multi when indices differ).
+  const aIdx = Number(selection.anchorRowIndex);
+  const hIdx = Number(selection.headRowIndex);
+  if (Number.isFinite(aIdx) && Number.isFinite(hIdx) && aIdx !== hIdx) {
     return false;
   }
   const a = Number(selection.anchorLine);
@@ -62,6 +82,18 @@ export function isSingleLineCaretSelection(selection: any): boolean {
   const aSide = String(selection.anchorSide || 'RIGHT').toUpperCase();
   const hSide = String(selection.headSide || 'RIGHT').toUpperCase();
   return aSide === hSide;
+}
+
+/** Multi-line body selection (row span or line span); not file/thread. */
+export function isMultiLineBodySelection(selection: any): boolean {
+  if (
+    !selection ||
+    isFileLevelSelection(selection) ||
+    isThreadSelection(selection)
+  ) {
+    return false;
+  }
+  return !isSingleLineCaretSelection(selection);
 }
 
 /**
@@ -515,24 +547,34 @@ export function resolveSelectionHeadIndex(
         if (
           !isFileLevelSelection(selection) &&
           !isThreadSelection(selection) &&
-          isSelectableDiffRow(row) &&
-          (!Number.isFinite(Number(selection.headLine)) ||
+          isSelectableDiffRow(row)
+        ) {
+          // Sticky multi-select may park head on a row without preferred side
+          // (del-only while selecting RIGHT, or add-only while selecting LEFT).
+          // Trust live headRowIndex so Shift+↑/↓ can leave that block (mouse drag
+          // already does via continuous headRowIndex updates).
+          if (
+            !Number.isFinite(Number(selection.headLine)) ||
             rowMatchesLineSide(
               row,
               selection.headLine,
               selection.headSide || selection.anchorSide
-            ))
-        ) {
-          return headIdx;
+            ) ||
+            isMultiLineBodySelection(selection)
+          ) {
+            return headIdx;
+          }
         }
       }
     }
   }
   // Stale after comment insert / fold — rebind by line, then header pivot
+  // (skip rebind for multi-line: head may intentionally not match preferred side)
   if (
     path &&
     !isFileLevelSelection(selection) &&
-    !isThreadSelection(selection)
+    !isThreadSelection(selection) &&
+    !isMultiLineBodySelection(selection)
   ) {
     const byLine = findRowIndexForLineSide(
       list,
@@ -801,6 +843,21 @@ export function isSelectionAtFileEdge(
 
 /** Delay before selection action toggles appear (hides island during key-hold). */
 export const SELECTION_ACTIONS_REVEAL_MS = 300;
+
+/**
+ * Island phase after selection idle reveal (keyboard/mouse caret settle).
+ * - line + **file** header → `actions` (Comment / Copy code / Copy URL / Dismiss)
+ * - thread caret → no line island (`hidden`)
+ * Explicit open-comment paths (⌥C / onFileHeaderComment) set `comment` themselves.
+ */
+export function resolveSelectionIslandRevealPhase(
+  selection: any
+): 'actions' | 'hidden' {
+  if (!selection) return 'hidden';
+  if (isThreadSelection(selection)) return 'hidden';
+  // File-level and line-level both show the action group first
+  return 'actions';
+}
 
 /**
  * Extend selection to another row (same file only).
@@ -1333,52 +1390,74 @@ export function rowSelectionVisualKey(selection: any, row: any): string {
 }
 
 /**
+ * Code text for one selectable diff row (prefer RIGHT/LEFT per flag).
+ */
+function codeTextFromDiffRow(row: any, preferRight: boolean): string {
+  if (!row) return '';
+  let code = '';
+  if (preferRight) {
+    code =
+      row.rightCode != null
+        ? String(row.rightCode)
+        : row.code != null
+          ? String(row.code)
+          : String(row.text || '').replace(/^[-+ ]/, '');
+  } else {
+    code =
+      row.leftCode != null
+        ? String(row.leftCode)
+        : row.code != null
+          ? String(row.code)
+          : String(row.text || '').replace(/^[-+ ]/, '');
+  }
+  // Strip unified-diff prefix if still present
+  if (row.raw && /^[-+]/.test(String(row.raw)) && code === String(row.raw)) {
+    code = String(row.raw).slice(1);
+  } else if (
+    /^[-+ ]/.test(code) &&
+    (row.lineType === 'add' ||
+      row.lineType === 'del' ||
+      row.lineType === 'change' ||
+      row.lineType === 'context')
+  ) {
+    if (
+      code.charAt(0) === '+' ||
+      code.charAt(0) === '-' ||
+      code.charAt(0) === ' '
+    ) {
+      if (row.raw && String(row.raw).slice(1) === code.slice(1)) {
+        code = code.slice(1);
+      }
+    }
+  }
+  return code;
+}
+
+/**
  * Extract plain code for the current selection from virtual diff rows.
+ * - Line range: selected rows only
+ * - File selection: **entire file** body (all selectable lines for that path)
  * Uses RIGHT (new) content when endSide is RIGHT, else LEFT (old).
  */
 export function extractSelectedCodeText(virtualRows, selection) {
   const norm = normalizeSelection(selection);
   if (!norm) return '';
   const list = Array.isArray(virtualRows) ? virtualRows : [];
-  const lines = [];
+  const lines: string[] = [];
   const preferRight = (norm.endSide || 'RIGHT') === 'RIGHT';
+  const fileLevel = norm.subjectType === 'file';
+  const filePath = String(norm.filePath || selection?.filePath || '').trim();
+
   for (const row of list) {
-    if (!isRowInSelection(selection, row)) continue;
-    let code = '';
-    if (preferRight) {
-      code =
-        row.rightCode != null
-          ? String(row.rightCode)
-          : row.code != null
-            ? String(row.code)
-            : String(row.text || '').replace(/^[-+ ]/, '');
-    } else {
-      code =
-        row.leftCode != null
-          ? String(row.leftCode)
-          : row.code != null
-            ? String(row.code)
-            : String(row.text || '').replace(/^[-+ ]/, '');
-    }
-    // Strip unified-diff prefix if still present
-    if (row.raw && /^[-+]/.test(String(row.raw)) && code === String(row.raw)) {
-      code = String(row.raw).slice(1);
-    } else if (
-      /^[-+ ]/.test(code) &&
-      (row.lineType === 'add' ||
-        row.lineType === 'del' ||
-        row.lineType === 'change' ||
-        row.lineType === 'context')
-    ) {
-      // only strip when it looks like a diff marker and lineType is known
-      if (code.charAt(0) === '+' || code.charAt(0) === '-' || code.charAt(0) === ' ') {
-        // Prefer row.code without marker when raw exists
-        if (row.raw && String(row.raw).slice(1) === code.slice(1)) {
-          code = code.slice(1);
-        }
+    if (fileLevel) {
+      if (!filePath || String(row.filePath || row.path || '') !== filePath) {
+        continue;
       }
+      if (!isSelectableDiffRow(row)) continue;
+    } else if (!isRowInSelection(selection, row)) {
+      continue;
     }
-    lines.push(code);
+    lines.push(codeTextFromDiffRow(row, preferRight));
   }
   return lines.join('\n');
 }

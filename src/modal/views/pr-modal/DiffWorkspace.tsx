@@ -125,6 +125,8 @@ export type DiffWorkspaceProps = {
   isDiffCommentCollapsed: any;
   onToggleThreadCollapse: any;
   commentHeightOpts: any;
+  /** Live measure metrics from VirtualDiff → App nav offsets */
+  onVirtualMetricsChange?: ((m: any) => void) | null;
   showSelectionComposer: boolean;
   selectionIslandLeaving: boolean;
   /** Optional; default leaf-subscribe selection island group */
@@ -250,6 +252,7 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
     isDiffCommentCollapsed,
     onToggleThreadCollapse,
     commentHeightOpts,
+    onVirtualMetricsChange = null,
     showSelectionComposer,
     selectionIslandLeaving,
     selectionDraft: selectionDraftProp,
@@ -488,6 +491,7 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
           isThreadCollapsed={isDiffCommentCollapsed}
           onToggleThreadCollapse={onToggleThreadCollapse}
           commentHeightOpts={commentHeightOpts}
+          onVirtualMetricsChange={onVirtualMetricsChange}
           selectionIsland={
             showSelectionComposer || selectionIslandLeaving ? (
               <SelectionCommentBar

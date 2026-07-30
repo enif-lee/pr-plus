@@ -2802,6 +2802,20 @@ function extractRepoMergeMethodFlags(repo: any) {
 }
 
 /**
+ * Viewer may admin-bypass branch protection / rules (GitHub "bypass rules" merge).
+ * REST nested `pull.base.repo` usually omits `permissions`; GET /repos includes them.
+ * @returns {boolean|null} true/false when known, null when payload has no permissions
+ */
+function extractViewerCanMergeAsAdmin(repo: any): boolean | null {
+  if (!repo || typeof repo !== 'object') return null;
+  const p = repo.permissions;
+  if (!p || typeof p !== 'object') return null;
+  if (p.admin === true) return true;
+  if (p.admin === false) return false;
+  return null;
+}
+
+/**
  * Ensure mergeable/mergeable_state are computed; when dirty, attach conflict paths.
  * @returns {Promise<object>} pr with optional `_conflictFiles`
  */
@@ -3040,20 +3054,30 @@ async function fetchPrDetail(
 
   // Repo Settings → Pull Requests merge method toggles (drive merge-box menu).
   // Prefer nested base.repo from the PR payload; fall back to GET /repos when missing.
+  // Also resolve viewer admin (bypass-rules); nested PR repo objects usually omit permissions.
   let repoMergeFlags =
     extractRepoMergeMethodFlags(pr?.base?.repo) ||
     extractRepoMergeMethodFlags(pr?.head?.repo) ||
     null;
-  if (!repoMergeFlags) {
+  let viewerCanMergeAsAdmin =
+    extractViewerCanMergeAsAdmin(pr?.base?.repo) ??
+    extractViewerCanMergeAsAdmin(pr?.head?.repo) ??
+    null;
+  if (!repoMergeFlags || viewerCanMergeAsAdmin == null) {
     try {
       const repoJson = await timedFetch(
         timings,
         'repoMergeSettings',
         apiJson(base, fetchImpl, token),
         (r) =>
-          `(merge=${r?.allow_merge_commit} squash=${r?.allow_squash_merge} rebase=${r?.allow_rebase_merge})`
+          `(merge=${r?.allow_merge_commit} squash=${r?.allow_squash_merge} rebase=${r?.allow_rebase_merge} admin=${r?.permissions?.admin})`
       );
-      repoMergeFlags = extractRepoMergeMethodFlags(repoJson);
+      if (!repoMergeFlags) {
+        repoMergeFlags = extractRepoMergeMethodFlags(repoJson);
+      }
+      if (viewerCanMergeAsAdmin == null) {
+        viewerCanMergeAsAdmin = extractViewerCanMergeAsAdmin(repoJson);
+      }
     } catch (err) {
       if (
         err?.name === 'AbortError' ||
@@ -3066,7 +3090,7 @@ async function fetchPrDetail(
       console.log(
         `[pr-plus] fetchPrDetail repoMergeSettings: soft-fail ${err?.message || err}`
       );
-      repoMergeFlags = null;
+      if (!repoMergeFlags) repoMergeFlags = null;
     }
   } else {
     // @ts-expect-error classic fetch dynamic shapes
@@ -3306,6 +3330,16 @@ async function fetchPrDetail(
     allowMergeCommit: repoMergeFlags ? repoMergeFlags.allowMergeCommit : null,
     allowSquashMerge: repoMergeFlags ? repoMergeFlags.allowSquashMerge : null,
     allowRebaseMerge: repoMergeFlags ? repoMergeFlags.allowRebaseMerge : null,
+    /**
+     * True when REST repo.permissions.admin — enables GitHub-style bypass-rules
+     * opt-in on policy-blocked PRs. false/null → no bypass checkbox.
+     */
+    viewerCanMergeAsAdmin:
+      viewerCanMergeAsAdmin === true
+        ? true
+        : viewerCanMergeAsAdmin === false
+          ? false
+          : null,
     createdAt: pr.created_at,
     updatedAt: pr.updated_at,
     additions: pr.additions,

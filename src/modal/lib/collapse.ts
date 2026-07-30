@@ -379,6 +379,30 @@ export function togglePathInCollapsedSet(
 }
 
 /**
+ * Force one path collapsed or expanded (materialize defaults first).
+ * @returns next collapsed set
+ */
+export function setPathCollapsedInSet(
+  collapsedPaths,
+  path,
+  wantCollapsed: boolean,
+  files,
+  viewedPaths = null
+) {
+  const p = String(path || '').trim();
+  if (!p) {
+    return materializeCollapsedPaths(collapsedPaths, files, viewedPaths);
+  }
+  if (!wantCollapsed) {
+    return expandPathInCollapsedSet(collapsedPaths, p, files, viewedPaths);
+  }
+  const n = materializeCollapsedPaths(collapsedPaths, files, viewedPaths);
+  n.add(p);
+  n.delete(COLLAPSED_SET_EXPLICIT_EMPTY);
+  return n;
+}
+
+/**
  * Pref: auto-expand the target file when navigating the file tree / ⌥⇧[] .
  * Default off — keep collapsed files collapsed until the user expands them.
  */

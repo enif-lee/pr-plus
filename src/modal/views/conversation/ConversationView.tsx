@@ -794,6 +794,22 @@ function ConversationViewImpl(props: any) {
     });
   }
 
+  /** Directed fold: set collapsed state only when it differs (←/→). */
+  function setThreadCollapsed(item: any, wantCollapsed: boolean) {
+    if (item?.id == null) return false;
+    const key = String(item.id);
+    setThreadCollapseOverrides((prev) => {
+      const currently = prev.has(key)
+        ? Boolean(prev.get(key))
+        : defaultThreadCollapsed(item);
+      if (currently === wantCollapsed) return prev;
+      const next = new Map(prev);
+      next.set(key, wantCollapsed);
+      return next;
+    });
+    return true;
+  }
+
   function groupThreadKey(reviewId: any, threadId: any) {
     return `${reviewId}:${threadId}`;
   }
@@ -828,6 +844,26 @@ function ConversationViewImpl(props: any) {
       next.set(k, !currently);
       return next;
     });
+  }
+
+  /** Directed group-thread open (wantOpen=true expands; false collapses). */
+  function setGroupThreadOpen(
+    reviewId: any,
+    thread: any,
+    wantOpen: boolean
+  ): boolean {
+    if (thread?.id == null) return false;
+    const k = groupThreadKey(reviewId, thread.id);
+    setGroupThreadOpenOverrides((prev) => {
+      const currently = prev.has(k)
+        ? Boolean(prev.get(k))
+        : defaultGroupThreadOpen(thread);
+      if (currently === wantOpen) return prev;
+      const next = new Map(prev);
+      next.set(k, wantOpen);
+      return next;
+    });
+    return true;
   }
 
   /**
@@ -933,6 +969,21 @@ function ConversationViewImpl(props: any) {
       return findTimelineThreadById(id);
     }
 
+    const applyDirectedFold = (wantCollapsed: boolean): boolean => {
+      const a = currentAnchor();
+      const found = threadFromAnchor(a);
+      if (!found?.thread) return false;
+      if (found.reviewGroupId != null) {
+        // Group path rows: open = expanded (not collapsed)
+        return setGroupThreadOpen(
+          found.reviewGroupId,
+          found.thread,
+          !wantCollapsed
+        );
+      }
+      return setThreadCollapsed(found.thread, wantCollapsed);
+    };
+
     const api = {
       fold: () => {
         const a = currentAnchor();
@@ -945,6 +996,8 @@ function ConversationViewImpl(props: any) {
         toggleThreadCollapse(found.thread);
         return true;
       },
+      foldCollapse: () => applyDirectedFold(true),
+      foldExpand: () => applyDirectedFold(false),
       gotoDiff: () => {
         const a = currentAnchor();
         const found = threadFromAnchor(a);

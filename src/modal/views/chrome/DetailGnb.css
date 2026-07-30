@@ -1,0 +1,166 @@
+/**
+ * Thin top GNB for detail page-embed (secondary to PR header).
+ */
+.prp-detail-gnb {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 36px;
+  max-height: 40px;
+  padding: 0 12px;
+  box-sizing: border-box;
+  border-bottom: 1px solid var(--prp-border-muted, rgba(127, 127, 127, 0.25));
+  background: var(--prp-bg-muted, var(--prp-bg, #f6f8fa));
+  color: var(--prp-fg-muted, #656d76);
+  font-size: 12px;
+  line-height: 1.25;
+  font-weight: 500;
+  user-select: none;
+  z-index: 2;
+}
+
+.prp-detail-gnb__left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.prp-detail-gnb__mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 42%;
+  color: inherit;
+  text-decoration: none;
+  flex-shrink: 1;
+}
+
+.prp-detail-gnb__mark:hover {
+  color: var(--prp-fg, #1f2328);
+  text-decoration: none;
+}
+
+.prp-detail-gnb__repo-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--prp-fg, #1f2328);
+}
+
+.prp-detail-gnb__slash {
+  opacity: 0.55;
+  font-weight: 400;
+}
+
+.prp-detail-gnb__tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.prp-detail-gnb__tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.prp-detail-gnb__tab-item {
+  flex: 0 0 auto;
+}
+
+.prp-detail-gnb__tab {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 6px;
+  color: var(--prp-fg-muted, #656d76);
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.prp-detail-gnb__tab:hover {
+  color: var(--prp-fg, #1f2328);
+  background: var(--prp-bg-hover, rgba(127, 127, 127, 0.12));
+  text-decoration: none;
+}
+
+.prp-detail-gnb__right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.prp-detail-gnb__icon-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  color: var(--prp-fg-muted, #656d76);
+  text-decoration: none;
+}
+
+.prp-detail-gnb__icon-link:hover {
+  color: var(--prp-fg, #1f2328);
+  background: var(--prp-bg-hover, rgba(127, 127, 127, 0.12));
+}
+
+.prp-detail-gnb__account {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 28px;
+  border-radius: 999px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.prp-detail-gnb__account:hover {
+  opacity: 0.9;
+}
+
+.prp-detail-gnb__avatar {
+  /* Slightly tighter than default sm for the thin bar */
+  width: 20px !important;
+  height: 20px !important;
+  min-width: 20px;
+  min-height: 20px;
+  font-size: 8px !important;
+}
+
+.prp-detail-gnb__sign-in {
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--prp-fg, #1f2328);
+  border: 1px solid var(--prp-border-muted, rgba(127, 127, 127, 0.3));
+}
+
+/* Modal presentation must never paint GNB via CSS alone */
+.prp-overlay[data-presentation='modal'] .prp-detail-gnb {
+  display: none !important;
+}

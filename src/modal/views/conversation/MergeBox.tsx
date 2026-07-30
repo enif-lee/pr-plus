@@ -11,9 +11,9 @@ import { MergeBoxChecks } from './MergeBoxChecks';
 import { hasChecksData } from './ChecksPanel';
 import {
   defaultMergeMethod,
-  mergeMethodButtonLabel,
   mergeMethodsForUi,
   normalizeMergeMethod,
+  resolveMergePrimaryAction,
   type MergeMethod,
 } from '@lib/merge-box-status';
 import {
@@ -46,6 +46,8 @@ export function MergeBox({
     defaultMergeMethod(detail)
   );
   const [mergeMenuOpen, setMergeMenuOpen] = useState(false);
+  /** GitHub-style admin bypass opt-in (default off). */
+  const [bypassRulesAccepted, setBypassRulesAccepted] = useState(false);
   const mergeMenuRef = useRef<HTMLDivElement | null>(null);
 
   // Keep selection valid when repo settings load / change.
@@ -57,6 +59,12 @@ export function MergeBox({
     detail?.allowRebaseMerge,
     detail?.number,
   ]);
+
+  // Always clear opt-in on PR switch (and when bypass is no longer offered).
+  // Switching between two blocked+admin PRs must not keep a prior check.
+  useEffect(() => {
+    setBypassRulesAccepted(false);
+  }, [detail?.number, ms?.offerBypassRules]);
 
   useEffect(() => {
     if (!mergeMenuOpen) return undefined;
@@ -79,6 +87,27 @@ export function MergeBox({
     typeof shouldShowDeleteHeadBranch === 'function'
       ? shouldShowDeleteHeadBranch(detail)
       : Boolean(detail?.merged && detail?.headRef && !detail?.headBranchDeleted);
+
+  const primaryAction = useMemo(
+    () =>
+      typeof resolveMergePrimaryAction === 'function'
+        ? resolveMergePrimaryAction(ms, { bypassRulesAccepted })
+        : {
+            showBypassCheckbox: false,
+            bypassCheckboxLabel: '',
+            mergeEnabled: Boolean(ms?.canMerge),
+            forceWording: Boolean(ms?.forceMerge),
+            bypassWording: false,
+            ctaVariant: ms?.ctaVariant || 'default',
+            buttonLabel: (method: MergeMethod) =>
+              method === 'squash'
+                ? 'Squash and merge'
+                : method === 'rebase'
+                  ? 'Rebase and merge'
+                  : 'Merge pull request',
+          },
+    [ms, bypassRulesAccepted]
+  );
 
   return (
     <div
@@ -174,16 +203,48 @@ export function MergeBox({
       ) : null}
 
       {detail.state === 'open' && !detail.merged ? (
-        <div className="prp-merge-box__actions flex flex-wrap items-center gap-2">
+        <div className="prp-merge-box__actions flex flex-col items-stretch gap-2.5">
+          {primaryAction.showBypassCheckbox ? (
+            <label
+              className="prp-merge-bypass flex cursor-pointer items-start gap-2.5 rounded-lg border border-[var(--prp-border-muted)] bg-[var(--prp-bg-muted)] px-3 py-2.5"
+              data-prp-bypass-rules="1"
+            >
+              <input
+                type="checkbox"
+                className="prp-merge-bypass__input mt-0.5 h-4 w-4 shrink-0 accent-[var(--prp-danger)]"
+                checked={bypassRulesAccepted}
+                disabled={actionBusy}
+                onChange={(e) => setBypassRulesAccepted(Boolean(e.target.checked))}
+                data-prp-bypass-rules-check="1"
+              />
+              <span
+                className={`prp-merge-bypass__label text-[13px] font-semibold leading-snug${
+                  bypassRulesAccepted ? ' text-[var(--prp-danger)]' : ' text-[var(--prp-fg)]'
+                }`}
+              >
+                {primaryAction.bypassCheckboxLabel}
+              </span>
+            </label>
+          ) : null}
+
+          <div className="prp-merge-box__actions-row flex flex-wrap items-center gap-2">
           {ms.showMerge && methods.length > 0 ? (
             <div
-              className={`prp-merge-method prp-merge-method--${ms.ctaVariant || 'default'} relative inline-flex flex-col items-stretch${
-                ms.forceMerge ? ' prp-merge-method--force' : ''
+              className={`prp-merge-method prp-merge-method--${primaryAction.ctaVariant || 'default'} relative inline-flex flex-col items-stretch${
+                primaryAction.bypassWording || primaryAction.forceWording
+                  ? ' prp-merge-method--force'
+                  : ''
               }${mergeMenuOpen ? ' prp-merge-method--menu-open' : ''}`}
               ref={mergeMenuRef}
-              data-cta-variant={ms.ctaVariant || 'default'}
-              data-force-merge={ms.forceMerge ? '1' : '0'}
-              data-can-merge={ms.canMerge ? '1' : '0'}
+              data-cta-variant={primaryAction.ctaVariant || 'default'}
+              data-force-merge={
+                primaryAction.forceWording || primaryAction.bypassWording
+                  ? '1'
+                  : '0'
+              }
+              data-can-merge={primaryAction.mergeEnabled ? '1' : '0'}
+              data-bypass-offer={primaryAction.showBypassCheckbox ? '1' : '0'}
+              data-bypass-accepted={bypassRulesAccepted ? '1' : '0'}
               data-method-count={methods.length}
               data-menu-open={mergeMenuOpen ? '1' : '0'}
             >
@@ -191,27 +252,29 @@ export function MergeBox({
                 <OptBtnHint label="⌥⇧M" />
                 <Button
                   className={`prp-merge-method__primary prp-merge-method__primary--${
-                    ms.ctaVariant || 'default'
+                    primaryAction.ctaVariant || 'default'
                   } font-semibold`}
-                  variant={ms.ctaVariant || (ms.canMerge ? 'ok' : 'default')}
-                  disabled={actionBusy || !ms.canMerge}
+                  variant={
+                    primaryAction.ctaVariant ||
+                    (primaryAction.mergeEnabled ? 'ok' : 'default')
+                  }
+                  disabled={actionBusy || !primaryAction.mergeEnabled}
                   onClick={() => onMergePr?.(normalizeMergeMethod(mergeMethod))}
                   title={
-                    ms.forceMerge
-                      ? 'Force merge — bypasses failing checks / branch protection if your token has permission'
+                    primaryAction.bypassWording
+                      ? 'Bypass repository rules and merge — requires admin permission on the token'
                       : activeMethodMeta?.description || 'Merge pull request'
                   }
                   shortcut="⌥⇧M"
+                  data-prp-merge-primary="1"
                 >
-                  {mergeMethodButtonLabel(mergeMethod, {
-                    force: Boolean(ms.forceMerge),
-                  })}
+                  {primaryAction.buttonLabel(mergeMethod)}
                 </Button>
                 {showMethodMenu ? (
                   <button
                     type="button"
                     className={`prp-merge-method__caret prp-merge-method__caret--${
-                      ms.ctaVariant || 'default'
+                      primaryAction.ctaVariant || 'default'
                     } inline-flex min-w-[34px] items-center justify-center px-2.5 text-xs font-inherit rounded-tr-lg rounded-br-lg`}
                     disabled={actionBusy}
                     aria-haspopup="menu"
@@ -244,7 +307,8 @@ export function MergeBox({
                           onClick={() => {
                             setMergeMethod(m.id);
                             setMergeMenuOpen(false);
-                          }}
+                          }
+                          }
                         >
                           <span
                             className="prp-merge-method__item-check mt-0.5 inline-flex h-[1.1em] w-[1.1em] shrink-0 items-center justify-center"
@@ -305,6 +369,7 @@ export function MergeBox({
               </Button>
             </span>
           ) : null}
+          </div>
         </div>
       ) : null}
     </div>
