@@ -102,26 +102,37 @@ export function isMultiLineBodySelection(selection: any): boolean {
  * - file-header → file-level selection (`kind: 'file'`) for ⌥C file comments
  * - inline-comment → thread selection (`kind: 'thread'`) for ↑↓ + ⌥C reply
  */
-export function beginSelectionOnRow(row: any, preferredSide: 'LEFT' | 'RIGHT' | string = 'RIGHT') {
+/**
+ * @param arrayIndex Prefer virtualRows array index when known (must match
+ *   list position used by resolveSelectionHeadIndex). Falls back to row.rowIndex.
+ */
+export function beginSelectionOnRow(
+  row: any,
+  preferredSide: 'LEFT' | 'RIGHT' | string = 'RIGHT',
+  arrayIndex?: number | null
+) {
+  const idxFromArg = Number(arrayIndex);
+  const idxFromRow = Number(row?.rowIndex);
+  const resolvedIdx = Number.isFinite(idxFromArg)
+    ? idxFromArg
+    : Number.isFinite(idxFromRow)
+      ? idxFromRow
+      : null;
   if (isFileHeaderRow(row)) {
     const path = String(row.filePath || row.path || '').trim();
     if (!path) return null;
-    const idx = Number(row.rowIndex);
-    const rowIndex = Number.isFinite(idx) ? idx : null;
     return {
       kind: 'file' as const,
       subjectType: 'file' as const,
       filePath: path,
-      anchorRowIndex: rowIndex,
-      headRowIndex: rowIndex,
+      anchorRowIndex: resolvedIdx,
+      headRowIndex: resolvedIdx,
     };
   }
   if (isInlineCommentRow(row)) {
     const path = String(row.filePath || row.path || '').trim();
     const commentId = row.commentId;
     if (!path || commentId == null) return null;
-    const idx = Number(row.rowIndex);
-    const rowIndex = Number.isFinite(idx) ? idx : null;
     const side =
       String(row.side || 'RIGHT').toUpperCase() === 'LEFT' ? 'LEFT' : 'RIGHT';
     const line =
@@ -135,15 +146,15 @@ export function beginSelectionOnRow(row: any, preferredSide: 'LEFT' | 'RIGHT' | 
       subjectType: 'thread' as const,
       filePath: path,
       commentId,
-      anchorRowIndex: rowIndex,
-      headRowIndex: rowIndex,
+      anchorRowIndex: resolvedIdx,
+      headRowIndex: resolvedIdx,
       headSide: side,
       anchorSide: side,
       headLine: line,
       anchorLine: line,
     };
   }
-  return beginLineSelection(row, preferredSide);
+  return beginLineSelection(row, preferredSide, resolvedIdx);
 }
 
 export function lineForSide(row, preferredSide = 'RIGHT') {
@@ -196,20 +207,28 @@ export function lineForSideStrict(
  * @param {'LEFT'|'RIGHT'} [preferredSide='RIGHT'] split pane click prefers that side
  * @returns {object|null}
  */
-export function beginLineSelection(row, preferredSide = 'RIGHT') {
+export function beginLineSelection(
+  row,
+  preferredSide = 'RIGHT',
+  arrayIndex?: number | null
+) {
   if (!isSelectableDiffRow(row)) return null;
   const prefer =
     String(preferredSide || 'RIGHT').toUpperCase() === 'LEFT' ? 'LEFT' : 'RIGHT';
   const pos = lineForSide(row, prefer);
   if (!pos) return null;
+  const idxFromArg = Number(arrayIndex);
+  const idx = Number.isFinite(idxFromArg)
+    ? idxFromArg
+    : Number(row.rowIndex);
   return {
     filePath: row.filePath,
     anchorLine: pos.line,
     headLine: pos.line,
     anchorSide: pos.side,
     headSide: pos.side,
-    anchorRowIndex: row.rowIndex,
-    headRowIndex: row.rowIndex,
+    anchorRowIndex: Number.isFinite(idx) ? idx : row.rowIndex,
+    headRowIndex: Number.isFinite(idx) ? idx : row.rowIndex,
   };
 }
 
@@ -601,13 +620,17 @@ export function resolveSelectionHeadIndex(
  * - plain: file headers + diff lines; may cross files
  * @returns target row or null if none
  */
+/**
+ * Find the N-th nav row in direction `d` from head (single pass).
+ * @returns {{ row: any, arrayIndex: number } | null}
+ */
 function findNavRowNSteps(
   selection: any,
   list: any[],
   d: number,
   steps: number,
   opts: { shift?: boolean } = {}
-) {
+): { row: any; arrayIndex: number } | null {
   if (!selection) return null;
   // Multi-line extend never starts from file-header / thread carets
   if (
@@ -623,6 +646,7 @@ function findNavRowNSteps(
   const need = Math.max(1, Math.floor(steps) || 1);
   let found = 0;
   let last: any = null;
+  let lastI = -1;
   let i = headIdx + d;
   while (i >= 0 && i < list.length && found < need) {
     const row = list[i];
@@ -639,14 +663,17 @@ function findNavRowNSteps(
       if (isSelectableDiffRow(row) && row.filePath === path) {
         found += 1;
         last = row;
+        lastI = i;
       }
     } else if (isSelectionNavRow(row)) {
       found += 1;
       last = row;
+      lastI = i;
     }
     i += d;
   }
-  return last;
+  if (!last || lastI < 0) return null;
+  return { row: last, arrayIndex: lastI };
 }
 
 /**
@@ -714,6 +741,33 @@ export function fileHeaderRowInVirtualRows(
 }
 
 /**
+ * Coalesce rAF-batched selection keyboard deltas.
+ *
+ * Same-direction repeats sum (key-hold). **Opposite direction discards residual
+ * stack and keeps only the latest intent** — otherwise holding ↓ then tapping ↑
+ * still nets a positive delta and the caret keeps moving down (invert bug).
+ *
+ * @returns next pending `{ delta, shift }` (delta may be 0 if cancelled)
+ */
+export function coalesceSelectionMoveDelta(
+  pending: { delta: number; shift: boolean } | null | undefined,
+  nextDelta: number,
+  nextShift: boolean
+): { delta: number; shift: boolean } {
+  const nd = Number(nextDelta) || 0;
+  const ns = Boolean(nextShift);
+  if (!pending || pending.shift !== ns) {
+    return { delta: nd, shift: ns };
+  }
+  const pd = Number(pending.delta) || 0;
+  // Direction change: drop residual opposite stack
+  if (pd !== 0 && nd !== 0 && Math.sign(pd) !== Math.sign(nd)) {
+    return { delta: nd, shift: ns };
+  }
+  return { delta: pd + nd, shift: ns };
+}
+
+/**
  * Move or extend an active line selection by nav rows.
  * - shift=false → single-line caret; visits **file headers** and body lines;
  *   continues into next/prev file at EOF/BOF
@@ -768,7 +822,15 @@ export function moveLineSelection(
       }
     }
     if (!seedRow) return selection;
-    cur = beginSelectionOnRow(seedRow) || selection;
+    {
+      const seedIdx = list.indexOf(seedRow);
+      cur =
+        beginSelectionOnRow(
+          seedRow,
+          'RIGHT',
+          seedIdx >= 0 ? seedIdx : null
+        ) || selection;
+    }
     steps -= 1; // this keypress only placed the caret
   }
 
@@ -787,16 +849,20 @@ export function moveLineSelection(
   ) {
     const header = fileHeaderRowInVirtualRows(list, curPath);
     if (header) {
-      cur = beginSelectionOnRow(header) || cur;
+      const hIdx = list.indexOf(header);
+      cur =
+        beginSelectionOnRow(header, 'RIGHT', hIdx >= 0 ? hIdx : null) || cur;
       // Don't consume a step — user asked to leave the folded file
     }
   }
 
-  const target = findNavRowNSteps(cur, list, d, steps, opts);
-  if (!target) return cur;
-  // Same stop (line / header / thread) — no-op
+  const found = findNavRowNSteps(cur, list, d, steps, opts);
+  if (!found) return cur;
+  const target = found.row;
+  const arrIdx = found.arrayIndex;
+  // Same stop (line / header / thread) — no-op (compare array index)
   const sameStop =
-    Number(target.rowIndex) === Number(cur.headRowIndex) &&
+    Number(arrIdx) === Number(cur.headRowIndex) &&
     String(target.filePath || target.path || '') ===
       String(cur.filePath || '') &&
     (!isInlineCommentRow(target) ||
@@ -812,9 +878,12 @@ export function moveLineSelection(
     ) {
       return cur;
     }
-    return extendLineSelection(cur, target) || cur;
+    // extendLineSelection still uses row.rowIndex fields on the row object —
+    // stamp array index so multi-line range stays array-based
+    const stamped = { ...target, rowIndex: arrIdx };
+    return extendLineSelection(cur, stamped) || cur;
   }
-  return beginSelectionOnRow(target) || cur;
+  return beginSelectionOnRow(target, 'RIGHT', arrIdx) || cur;
 }
 
 /**
@@ -837,7 +906,7 @@ export function isSelectionAtFileEdge(
   // Next plain nav stop outside this path? if none in-file → edge
   const next = findNavRowNSteps(selection, list, d, 1, { shift: false });
   if (!next) return true;
-  const nextPath = String(next.filePath || next.path || '');
+  const nextPath = String(next.row.filePath || next.row.path || '');
   return nextPath !== path;
 }
 

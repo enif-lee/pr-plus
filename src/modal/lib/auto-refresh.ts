@@ -72,7 +72,7 @@ export function nextActionAt(
 }
 
 /**
- * Whether a probe snapshot indicates the open detail is stale.
+ * Whether a probe snapshot indicates the open detail is stale (head only).
  */
 export function headProbeIndicatesStale(
   baselineHeadSha: string | null | undefined,
@@ -82,4 +82,55 @@ export function headProbeIndicatesStale(
   const b = String(probeHeadSha || '').trim().toLowerCase();
   if (!a || !b) return false;
   return a !== b;
+}
+
+/**
+ * Whether a head probe indicates lifecycle or head drift vs open detail.
+ * Compares headSha, draft, and state so draft↔ready / close / merge without
+ * a new commit still trigger soft-refresh.
+ *
+ * @param baseline open detail (or partial { headSha, draft, state })
+ * @param probe fetchPrHeadProbe result
+ */
+export function prProbeIndicatesStale(
+  baseline: {
+    headSha?: string | null;
+    draft?: boolean | null;
+    state?: string | null;
+  } | null | undefined,
+  probe: {
+    headSha?: string | null;
+    draft?: boolean | null;
+    state?: string | null;
+    updatedAt?: string | null;
+  } | null | undefined
+): boolean {
+  if (!probe || typeof probe !== 'object') return false;
+  const base = baseline && typeof baseline === 'object' ? baseline : {};
+  const baseSha = String(base.headSha || '').trim().toLowerCase();
+  const probeSha = String(probe.headSha || '').trim().toLowerCase();
+  if (baseSha && probeSha && baseSha !== probeSha) return true;
+  // Empty baseline SHA: any non-empty probe head is enough to revalidate once
+  if (!baseSha && probeSha) return true;
+
+  if (typeof probe.draft === 'boolean' && typeof base.draft === 'boolean') {
+    if (Boolean(probe.draft) !== Boolean(base.draft)) return true;
+  }
+
+  const baseState = String(base.state || '')
+    .trim()
+    .toLowerCase();
+  const probeState = String(probe.state || '')
+    .trim()
+    .toLowerCase();
+  if (baseState && probeState && baseState !== probeState) return true;
+  // Probe closed/merged while baseline still open
+  if (
+    baseState === 'open' &&
+    (probeState === 'closed' || probeState === 'merged')
+  ) {
+    return true;
+  }
+
+  return false;
 }

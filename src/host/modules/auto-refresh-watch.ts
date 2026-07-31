@@ -96,8 +96,10 @@
     const owner = current.owner;
     const repo = current.repo;
     const number = current.number;
-    const baseline = String(current.detail?.headSha || '').trim();
-    if (!baseline) return;
+    const detail = current.detail;
+    const baseline = String(detail?.headSha || '').trim();
+    // Allow probe when SHA missing if we still have lifecycle fields to compare
+    if (!baseline && detail?.state == null && detail?.draft == null) return;
 
     const api = globalThis.PRTreeFetch;
     if (typeof api?.fetchPrHeadProbe !== 'function') return;
@@ -115,10 +117,27 @@
       }
       if (!canRunAutoRefreshTick()) return;
       const nextHead = String(probe?.headSha || '').trim();
-      if (!headProbeIndicatesStale(baseline, nextHead)) return;
+      const pure = autoRefreshApi();
+      const lifecycleStale =
+        typeof pure?.prProbeIndicatesStale === 'function'
+          ? Boolean(
+              pure.prProbeIndicatesStale(
+                {
+                  headSha: detail?.headSha,
+                  draft: detail?.draft,
+                  state: detail?.state,
+                },
+                probe
+              )
+            )
+          : headProbeIndicatesStale(baseline, nextHead);
+      if (!lifecycleStale) return;
 
       console.log(
-        `[pr-plus] auto-refresh head changed ${owner}/${repo}#${number} ${baseline.slice(0, 7)}→${nextHead.slice(0, 7)}`
+        `[pr-plus] auto-refresh stale ${owner}/${repo}#${number}` +
+          (baseline && nextHead && baseline !== nextHead
+            ? ` head ${baseline.slice(0, 7)}→${nextHead.slice(0, 7)}`
+            : ` draft/state`)
       );
       const props = typeof buildProps === 'function' ? buildProps() : null;
       if (typeof props?.onRefresh !== 'function') return;

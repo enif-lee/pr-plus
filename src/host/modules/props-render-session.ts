@@ -603,6 +603,19 @@
             }
             render();
           }
+        } finally {
+          // Await force open-list revalidate so merge re-assert runs after commit
+          // (tombstones still block lagging network resurrection).
+          try {
+            if (typeof ensureOpenPullsForStack === 'function' && owner && repo) {
+              await ensureOpenPullsForStack(owner, repo, {
+                force: true,
+                signal,
+              });
+            }
+          } catch {
+            /* ignore */
+          }
         }
       },
       /**
@@ -816,6 +829,29 @@
           detailCache.set(key, current.detail);
         } catch {
           /* ignore */
+        }
+        // Lifecycle meta (merge/draft/close) must update open-list / stack / decorations
+        if (
+          Object.prototype.hasOwnProperty.call(patch, 'draft') ||
+          Object.prototype.hasOwnProperty.call(patch, 'merged') ||
+          Object.prototype.hasOwnProperty.call(patch, 'state')
+        ) {
+          try {
+            if (typeof applyOpenPullLifecycle === 'function') {
+              applyOpenPullLifecycle(
+                current.owner,
+                current.repo,
+                current.number,
+                {
+                  draft: patch.draft,
+                  merged: patch.merged,
+                  state: patch.state,
+                }
+              );
+            }
+          } catch {
+            /* ignore */
+          }
         }
         render();
       },

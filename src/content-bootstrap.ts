@@ -67,6 +67,97 @@ function createPrTreeApp(deps: any) {
     lastPageSignature = null;
   }
 
+  /**
+   * Patch one PR in the list cache (draft/title/state). Rebuilds forest + redecorates.
+   */
+  function patchCachedPr(number: any, patch: any) {
+    const n = Number(number);
+    if (!Number.isFinite(n) || n <= 0 || !patch || typeof patch !== 'object') {
+      return false;
+    }
+    if (!Array.isArray(cachedPrs) || !cachedPrs.length) return false;
+    let hit = false;
+    cachedPrs = cachedPrs.map((p) => {
+      if (!p || Number(p.number) !== n) return p;
+      hit = true;
+      return { ...p, ...patch, number: n };
+    });
+    if (!hit) return false;
+    try {
+      cachedForest = buildPrTree(cachedPrs);
+    } catch {
+      /* keep prior forest */
+    }
+    if (currentPullsContext()) {
+      try {
+        if (treeModeEnabled && cachedForest) applyTreeView();
+        else applyDecorations();
+      } catch {
+        /* ignore */
+      }
+    }
+    return true;
+  }
+
+  /**
+   * Remove a PR from the list cache (merge/close). Rebuilds forest + redecorates.
+   */
+  function removeCachedPr(number: any) {
+    const n = Number(number);
+    if (!Number.isFinite(n) || n <= 0) return false;
+    if (!Array.isArray(cachedPrs) || !cachedPrs.length) return false;
+    const next = cachedPrs.filter((p) => !p || Number(p.number) !== n);
+    if (next.length === cachedPrs.length) return false;
+    cachedPrs = next;
+    try {
+      cachedForest = cachedPrs.length ? buildPrTree(cachedPrs) : [];
+    } catch {
+      cachedForest = [];
+    }
+    if (currentPullsContext()) {
+      try {
+        if (treeModeEnabled && cachedForest?.length) applyTreeView();
+        else applyDecorations();
+      } catch {
+        /* ignore */
+      }
+    }
+    return true;
+  }
+
+  /**
+   * Replace open-list snapshot after a forced network fetch (same repo).
+   */
+  function replaceCachedPrs(prs: any, opts: any = {}) {
+    if (!Array.isArray(prs)) return false;
+    const o = String(opts?.owner || '').trim();
+    const r = String(opts?.repo || '').trim();
+    if (o && r) {
+      const key = repoKey(o, r);
+      if (cachedRepoKey && cachedRepoKey !== key) {
+        // Different repo — adopt new key
+        cachedRepoKey = key;
+      } else if (!cachedRepoKey) {
+        cachedRepoKey = key;
+      }
+    }
+    cachedPrs = prs.slice();
+    try {
+      cachedForest = cachedPrs.length ? buildPrTree(cachedPrs) : [];
+    } catch {
+      cachedForest = [];
+    }
+    if (currentPullsContext()) {
+      try {
+        if (treeModeEnabled && cachedForest?.length) applyTreeView();
+        else applyDecorations();
+      } catch {
+        /* ignore */
+      }
+    }
+    return true;
+  }
+
   function pageSignature(numbers: any) {
     return numbers.slice().sort((a, b) => a - b).join(',');
   }
@@ -530,6 +621,9 @@ function createPrTreeApp(deps: any) {
     watchPullsPage,
     needsReapply,
     clearCache,
+    patchCachedPr,
+    removeCachedPr,
+    replaceCachedPrs,
     getCachedForest: () => cachedForest,
     getCachedPrs: () => cachedPrs,
     isActive: () => active,

@@ -1000,6 +1000,27 @@ html[data-color-mode='dark'] .prp-pp-list-host.prp-scroll-float-host,
   color: var(--fgColor-muted, #656d76);
   font-size: 14px;
 }
+.prp-pp-item--status .prp-pp-item__title {
+  font-weight: 500;
+  color: var(--fgColor-muted, #656d76);
+}
+.prp-pp-item--loading .prp-pp-item__title::before {
+  content: '';
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 8px;
+  border: 2px solid var(--borderColor-muted, #d0d7de);
+  border-top-color: var(--fgColor-accent, #0969da);
+  border-radius: 50%;
+  vertical-align: -1px;
+  animation: prp-pp-spin 0.7s linear infinite;
+}
+@keyframes prp-pp-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 .prp-pp-foot {
   display: flex;
   align-items: center;

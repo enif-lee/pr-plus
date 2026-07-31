@@ -438,7 +438,8 @@ export function flattenFilesToVirtualRows(files, mode = 'unified', options: any 
           code: line,
           split: false,
           raw: line,
-          rowIndex: index++,
+          // rowIndex assigned only when pushed — skipped hidden @@ must not
+          // consume an index (selection head uses array index ≡ rowIndex).
           lineType,
           oldLine: null,
           newLine: null,
@@ -453,6 +454,7 @@ export function flattenFilesToVirtualRows(files, mode = 'unified', options: any 
         if (lineType === 'hunk' && row.hidden && !row.expandAbove) {
           continue;
         }
+        row.rowIndex = index++;
         rows.push(row);
         continue;
       }
@@ -487,6 +489,7 @@ export function flattenFilesToVirtualRows(files, mode = 'unified', options: any 
         lastHunkRow.expandBelow = below;
         // Hidden last @@ was not pushed — insert now so expand controls render
         if (lastHunkRow.hidden && !rows.includes(lastHunkRow)) {
+          lastHunkRow.rowIndex = index++;
           rows.push(lastHunkRow);
         }
       }

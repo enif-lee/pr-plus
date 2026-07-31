@@ -7,6 +7,7 @@ import {
   canAutoRefresh,
   headProbeIndicatesStale,
   nextActionAt,
+  prProbeIndicatesStale,
 } from '../src/modal/lib/auto-refresh';
 
 describe('canAutoRefresh', () => {
@@ -86,5 +87,25 @@ describe('headProbeIndicatesStale', () => {
   test('false when either side missing', () => {
     expect(headProbeIndicatesStale('', 'bbb')).toBe(false);
     expect(headProbeIndicatesStale('aaa', null)).toBe(false);
+  });
+});
+
+describe('prProbeIndicatesStale', () => {
+  test('draft flip without head change triggers revalidate', () => {
+    expect(
+      prProbeIndicatesStale(
+        { headSha: 'abc', draft: true, state: 'open' },
+        { headSha: 'abc', draft: false, state: 'open' }
+      )
+    ).toBe(true);
+  });
+
+  test('state closed without head change triggers revalidate', () => {
+    expect(
+      prProbeIndicatesStale(
+        { headSha: 'abc', draft: false, state: 'open' },
+        { headSha: 'abc', draft: false, state: 'closed' }
+      )
+    ).toBe(true);
   });
 });

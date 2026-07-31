@@ -747,19 +747,190 @@
   let openPullsFetchedKey = '';
   /** @type {Promise<Array>|null} */
   let openPullsFetchP = null;
+  /** epoch ms of last successful host open-list fetch for openPullsFetchedKey */
+  let openPullsFetchedAt = 0;
+  /** Monotonic gen — only the latest force/fetch may commit results */
+  let openPullsFetchGen = 0;
+  /** @type {AbortController|null} */
+  let openPullsFetchAbort = null;
+  /**
+   * PR numbers removed by local lifecycle (merge/close) for the current
+   * openPullsFetchedKey. Network open-list lag must not resurrect them.
+   * @type {Set<number>}
+   */
+  let openPullsTombstones = new Set();
+  /** Default SWR age for open list (force always bypasses). */
+  const OPEN_PULLS_MAX_AGE_MS = 30_000;
+
+  function openPullsLifecycleApi() {
+    return globalThis.PRModalOpenPullsLifecycle || null;
+  }
 
   function resolveOpenPulls() {
     try {
       const app = globalThis.__PR_TREE_APP__;
       const list = app?.getCachedPrs?.();
-      if (Array.isArray(list) && list.length) return list;
+      if (Array.isArray(list) && list.length) {
+        return filterOpenPullsLocal(list);
+      }
     } catch {
       /* ignore */
     }
     if (Array.isArray(openPullsFetched) && openPullsFetched.length) {
-      return openPullsFetched;
+      return filterOpenPullsLocal(openPullsFetched);
     }
     return [];
+  }
+
+  function filterOpenPullsLocal(prs) {
+    const api = openPullsLifecycleApi();
+    if (typeof api?.filterOpenPullsByTombstones === 'function') {
+      return api.filterOpenPullsByTombstones(prs, openPullsTombstones);
+    }
+    if (!openPullsTombstones.size) {
+      return Array.isArray(prs) ? prs.slice() : [];
+    }
+    return (Array.isArray(prs) ? prs : []).filter(
+      (p) => !p || !openPullsTombstones.has(Number(p.number))
+    );
+  }
+
+  /**
+   * Drop host open-list cache (optionally scoped to owner/repo).
+   * Does not clear tree cachedPrs — use applyOpenPullLifecycle / tree APIs.
+   */
+  function invalidateOpenPulls(owner?: string, repo?: string) {
+    const o = String(owner || '').trim().toLowerCase();
+    const r = String(repo || '').trim().toLowerCase();
+    if (o && r) {
+      const key = `${o}/${r}`;
+      if (openPullsFetchedKey && openPullsFetchedKey !== key) {
+        // Different repo still cached — leave it unless caller clears all
+        return;
+      }
+    }
+    openPullsFetched = null;
+    openPullsFetchedKey = '';
+    openPullsFetchedAt = 0;
+    openPullsFetchP = null;
+    openPullsFetchGen += 1;
+    try {
+      openPullsFetchAbort?.abort?.();
+    } catch {
+      /* ignore */
+    }
+    openPullsFetchAbort = null;
+    // Keep tombstones for same-repo lag protection until reopen clears them
+  }
+
+  /**
+   * Apply lifecycle mutation to tree list cache + host openPullsFetched.
+   * merged/closed → remove; draft/state → patch row.
+   * Uses shipped pure helpers when PRModalOpenPullsLifecycle is loaded.
+   */
+  function applyOpenPullLifecycle(
+    owner: string,
+    repo: string,
+    number: number | string,
+    patch: Record<string, unknown>
+  ) {
+    const n = Number(number);
+    if (!Number.isFinite(n) || n <= 0) return;
+    const o = String(owner || '').trim();
+    const r = String(repo || '').trim();
+    const key = `${o.toLowerCase()}/${r.toLowerCase()}`;
+    const life = openPullsLifecycleApi();
+
+    // Tombstones for force-fetch lag (pure policy)
+    if (typeof life?.nextOpenPullTombstones === 'function') {
+      openPullsTombstones = life.nextOpenPullTombstones(
+        openPullsTombstones,
+        n,
+        patch
+      );
+    } else {
+      const merged = patch?.merged === true;
+      const state = String(patch?.state || '').toLowerCase();
+      if (merged || state === 'closed') openPullsTombstones.add(n);
+      else if (state === 'open' && patch?.merged !== true) {
+        openPullsTombstones.delete(n);
+      }
+    }
+
+    // Tree list (preferred by resolveOpenPulls)
+    try {
+      const app = globalThis.__PR_TREE_APP__;
+      const removes =
+        typeof life?.lifecycleRemovesFromOpenList === 'function'
+          ? life.lifecycleRemovesFromOpenList(patch)
+          : patch?.merged === true ||
+            String(patch?.state || '').toLowerCase() === 'closed';
+      if (removes) {
+        app?.removeCachedPr?.(n);
+      } else if (typeof app?.patchCachedPr === 'function') {
+        const field: Record<string, unknown> = {};
+        if (typeof patch?.draft === 'boolean') field.draft = patch.draft;
+        if (patch?.state != null) field.state = patch.state;
+        if (typeof patch?.merged === 'boolean') field.merged = patch.merged;
+        if (Object.keys(field).length) app.patchCachedPr(n, field);
+      }
+    } catch {
+      /* ignore */
+    }
+
+    // Host fallback list via pure applyLifecycleToOpenPulls
+    if (
+      openPullsFetchedKey === key &&
+      Array.isArray(openPullsFetched) &&
+      openPullsFetched.length
+    ) {
+      if (typeof life?.applyLifecycleToOpenPulls === 'function') {
+        const res = life.applyLifecycleToOpenPulls(
+          openPullsFetched,
+          n,
+          patch
+        );
+        openPullsFetched = res.prs;
+        if (!openPullsFetched.length) {
+          openPullsFetched = null;
+          openPullsFetchedAt = 0;
+        }
+      } else {
+        const removes =
+          patch?.merged === true ||
+          String(patch?.state || '').toLowerCase() === 'closed';
+        if (removes) {
+          openPullsFetched = openPullsFetched.filter(
+            (p) => !p || Number(p.number) !== n
+          );
+          if (!openPullsFetched.length) {
+            openPullsFetched = null;
+            openPullsFetchedAt = 0;
+          }
+        } else {
+          openPullsFetched = openPullsFetched.map((p) => {
+            if (!p || Number(p.number) !== n) return p;
+            const next = { ...p };
+            if (typeof patch?.draft === 'boolean') next.draft = patch.draft;
+            if (patch?.state != null) next.state = patch.state;
+            if (typeof patch?.merged === 'boolean') next.merged = patch.merged;
+            return next;
+          });
+        }
+      }
+    }
+
+    if (
+      current.open &&
+      String(current.owner || '').toLowerCase() === o.toLowerCase() &&
+      String(current.repo || '').toLowerCase() === r.toLowerCase()
+    ) {
+      try {
+        render();
+      } catch {
+        /* ignore */
+      }
+    }
   }
 
   /**
@@ -767,53 +938,121 @@
    * (embed / direct PR URL / cold tab). Non-blocking; re-renders when ready.
    * @param {string} owner
    * @param {string} repo
-   * @param {{ signal?: AbortSignal }} [opts]
+   * @param {{ signal?: AbortSignal, force?: boolean }} [opts]
    */
   function ensureOpenPullsForStack(owner, repo, opts: any = {}) {
     const o = String(owner || '').trim();
     const r = String(repo || '').trim();
     if (!o || !r) return Promise.resolve([]);
     const key = `${o.toLowerCase()}/${r.toLowerCase()}`;
+    const force = Boolean(opts.force);
     const cached = resolveOpenPulls();
-    // Already have enough rows to build a stack (or any list for branch picker)
-    if (cached.length >= 2) return Promise.resolve(cached);
-    if (
+    const now = Date.now();
+    const ageOk =
       openPullsFetchedKey === key &&
-      Array.isArray(openPullsFetched) &&
-      openPullsFetched.length
-    ) {
-      return Promise.resolve(openPullsFetched);
+      openPullsFetchedAt > 0 &&
+      now - openPullsFetchedAt <= OPEN_PULLS_MAX_AGE_MS;
+
+    // Serve warm cache only when a recent host fetch timestamp says so.
+    // force / missing age / expired age → network. Lifecycle patches keep tree
+    // in sync so resolveOpenPulls does not resurrect removed rows.
+    if (!force && ageOk) {
+      if (cached.length >= 2) return Promise.resolve(cached);
+      if (
+        openPullsFetchedKey === key &&
+        Array.isArray(openPullsFetched) &&
+        openPullsFetched.length
+      ) {
+        return Promise.resolve(filterOpenPullsLocal(openPullsFetched));
+      }
     }
-    if (openPullsFetchP) return openPullsFetchP;
+
+    if (openPullsFetchP && !force) return openPullsFetchP;
     if (!globalThis.PRTreeFetch?.fetchOpenPulls) {
       return Promise.resolve(cached);
     }
-    const signal = opts.signal || null;
+
+    // Abort prior in-flight; only latest gen may commit
+    try {
+      openPullsFetchAbort?.abort?.();
+    } catch {
+      /* ignore */
+    }
+    const ac =
+      typeof AbortController !== 'undefined' ? new AbortController() : null;
+    openPullsFetchAbort = ac;
+    const parentSignal = opts.signal || null;
+    const onParentAbort = () => {
+      try {
+        ac?.abort?.();
+      } catch {
+        /* ignore */
+      }
+    };
+    if (parentSignal) {
+      if (parentSignal.aborted) onParentAbort();
+      else {
+        try {
+          parentSignal.addEventListener?.('abort', onParentAbort, {
+            once: true,
+          });
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+
+    const fetchGen = ++openPullsFetchGen;
     openPullsFetchP = (async () => {
       try {
-        if (signal?.aborted) return cached;
+        if (ac?.signal?.aborted) return cached;
         const prs = await globalThis.PRTreeFetch.fetchOpenPulls(o, r, null, {
-          signal,
+          signal: ac?.signal || null,
         });
-        if (signal?.aborted) return cached;
-        if (Array.isArray(prs) && prs.length) {
-          openPullsFetched = prs;
-          openPullsFetchedKey = key;
-          // Stack strip depends on openPulls — re-render if modal still open
-          if (
-            current.open &&
-            String(current.owner || '').toLowerCase() === o.toLowerCase() &&
-            String(current.repo || '').toLowerCase() === r.toLowerCase()
-          ) {
-            render();
+        const life = openPullsLifecycleApi();
+        const decision =
+          typeof life?.acceptOpenPullsNetworkResult === 'function'
+            ? life.acceptOpenPullsNetworkResult({
+                fetchGen,
+                currentGen: openPullsFetchGen,
+                aborted: Boolean(ac?.signal?.aborted),
+                networkPrs: prs,
+                tombstones: openPullsTombstones,
+              })
+            : {
+                ok:
+                  fetchGen === openPullsFetchGen &&
+                  !ac?.signal?.aborted &&
+                  Array.isArray(prs),
+                prs: filterOpenPullsLocal(Array.isArray(prs) ? prs : []),
+              };
+        if (!decision.ok) return cached;
+        const next = decision.prs;
+        openPullsFetched = next;
+        openPullsFetchedKey = key;
+        openPullsFetchedAt = Date.now();
+        try {
+          const app = globalThis.__PR_TREE_APP__;
+          if (typeof app?.replaceCachedPrs === 'function') {
+            app.replaceCachedPrs(next, { owner: o, repo: r });
           }
-          return prs;
+        } catch {
+          /* optional */
         }
-        return cached;
+        if (
+          current.open &&
+          String(current.owner || '').toLowerCase() === o.toLowerCase() &&
+          String(current.repo || '').toLowerCase() === r.toLowerCase()
+        ) {
+          render();
+        }
+        return next;
       } catch {
         return cached;
       } finally {
-        openPullsFetchP = null;
+        if (fetchGen === openPullsFetchGen) {
+          openPullsFetchP = null;
+        }
       }
     })();
     return openPullsFetchP;

@@ -194,6 +194,7 @@ import {
   parseGotoQuery,
   selectionFromGoto,
   moveLineSelection,
+  coalesceSelectionMoveDelta,
   firstSelectableRowInFile,
   lastSelectableRowInFile,
   isSelectionAtFileEdge,
@@ -708,8 +709,9 @@ export function PrModalApp({
   const setEditingComment = useModalStore((s) => s.setEditingComment);
   const paletteOpen = useModalStore((s) => s.paletteOpen);
   const setPaletteOpen = useModalStore((s) => s.setPaletteOpen);
-  // paletteQuery: CommandPalette leaf-subscribes.
+  // paletteQuery: CommandPalette leaf-subscribes (no App value-subscribe).
   const setPaletteQuery = useModalStore((s) => s.setPaletteQuery);
+  const [paletteHelpOpen, setPaletteHelpOpen] = useState(false);
   const picker = useModalStore((s) => s.picker);
   const setPicker = useModalStore((s) => s.setPicker);
   const [theme, setTheme] = useState(() =>
@@ -2876,17 +2878,23 @@ export function PrModalApp({
   /**
    * Keyboard line move — rAF-coalesced under key-repeat so held arrows do not
    * thrash React with one update per OS keydown.
+   * Opposite-direction keys discard residual stack (see coalesceSelectionMoveDelta)
+   * so ↑ after a burst of ↓ is not net-positive.
    */
   function applySelectionKeyboardMove(delta: number, shift: boolean) {
     const pending = pendingSelectionMoveRef.current;
-    if (pending && pending.shift === Boolean(shift)) {
-      pending.delta += delta;
-    } else {
-      pendingSelectionMoveRef.current = {
-        delta,
-        shift: Boolean(shift),
-      };
-    }
+    const next =
+      typeof coalesceSelectionMoveDelta === 'function'
+        ? coalesceSelectionMoveDelta(pending, delta, Boolean(shift))
+        : pending && pending.shift === Boolean(shift)
+          ? // Fallback without pure helper: still cancel opposite residual
+            pending.delta !== 0 &&
+            delta !== 0 &&
+            Math.sign(pending.delta) !== Math.sign(delta)
+            ? { delta, shift: Boolean(shift) }
+            : { delta: pending.delta + delta, shift: Boolean(shift) }
+          : { delta, shift: Boolean(shift) };
+    pendingSelectionMoveRef.current = next;
     if (selectionMoveRafRef.current) return;
     selectionMoveRafRef.current = requestAnimationFrame(() => {
       selectionMoveRafRef.current = 0;
@@ -5234,13 +5242,48 @@ export function PrModalApp({
     });
   }, [detail, stackItems, openPulls, layoutMode]);
 
+  /** Async PR search boundary for palette `#…` mode (injectable fetch). */
+  const searchPalettePrs = useCallback(
+    async (term: string, signal?: AbortSignal | null) => {
+      const owner = String(detail?.owner || '').trim();
+      const repo = String(detail?.repo || '').trim();
+      const api = globalThis.PRTreeFetch;
+      if (!owner || !repo || typeof api?.fetchOpenPulls !== 'function') {
+        return [];
+      }
+      const prs = await api.fetchOpenPulls(owner, repo, null, {
+        signal: signal || null,
+      });
+      // Filter is applied by CommandPalette pure helpers; return full remote list
+      return Array.isArray(prs) ? prs : [];
+    },
+    [detail?.owner, detail?.repo]
+  );
+
   function runPaletteCommand(cmd: any) {
     if (!cmd) return;
+    // Help toggle keeps the palette open
+    if (cmd.action === 'toggleHelp') {
+      setPaletteHelpOpen((v) => !v);
+      return;
+    }
     setPaletteOpen(false);
     setPaletteQuery('');
+    setPaletteHelpOpen(false);
     const action = cmd.action;
     const p = cmd.payload || {};
     switch (action) {
+      case 'openPullRequest': {
+        const n = Number(p.number ?? cmd.number);
+        if (Number.isFinite(n) && n > 0) openStackOrListPr(n);
+        break;
+      }
+      case 'focusConversationComment':
+        focusConversationCommentItem();
+        break;
+      case 'clearConversationCommentFocus':
+        clearConversationCommentFocus();
+        break;
       case 'openStackPr': {
         const n = Number(p.number);
         if (Number.isFinite(n) && n > 0) openStackOrListPr(n);
@@ -6170,16 +6213,18 @@ export function PrModalApp({
         await api.updatePullState(detail.owner, detail.repo, detail.number, 'closed');
       }
       setActionMsg('Pull request closed.');
-      // Mark closed locally so UI + auto-close effect agree before host refresh.
-      setLocalDetail((d) =>
-        d
-          ? {
-              ...d,
-              state: 'closed',
-              mergeable: false,
-            }
-          : d
-      );
+      // Write-through host/detail cache BEFORE close so SWR does not resurrect open.
+      const closedPatch = {
+        state: 'closed',
+        mergeable: false,
+        merged: false,
+      };
+      setLocalDetail((d) => (d ? { ...d, ...closedPatch } : d));
+      try {
+        onPatchDetail?.(closedPatch);
+      } catch {
+        /* host optional */
+      }
       // Return to the pulls list (centered modal and side sheet).
       requestClose();
       try {
@@ -6209,7 +6254,30 @@ export function PrModalApp({
         await api.updatePullState(detail.owner, detail.repo, detail.number, 'open');
       }
       setActionMsg('Pull request reopened.');
-      await onRefresh?.();
+      const openPatch = {
+        state: 'open',
+        merged: false,
+        mergeable: null as boolean | null,
+      };
+      setLocalDetail((d) => (d ? { ...d, ...openPatch } : d));
+      try {
+        onPatchDetail?.(openPatch);
+      } catch {
+        /* host optional */
+      }
+      try {
+        await onRefresh?.();
+      } catch {
+        /* best-effort */
+      }
+      setLocalDetail((d) =>
+        d ? { ...d, state: 'open', merged: false } : d
+      );
+      try {
+        onPatchDetail?.({ state: 'open', merged: false });
+      } catch {
+        /* host optional */
+      }
     } catch (err) {
       setActionMsg(err?.message || String(err));
     } finally {
@@ -6352,21 +6420,29 @@ export function PrModalApp({
         `Merged (${m}). You can delete the head branch below if you no longer need it.`
       );
       // Stay open so Merge box can offer optional delete head branch.
-      setLocalDetail((d) =>
-        d
-          ? {
-              ...d,
-              merged: true,
-              state: 'closed',
-              mergeable: false,
-            }
-          : d
-      );
+      // Mirror draft path: host write-through + post-refresh re-assert so SWR/IDB
+      // and open-list stack do not resurrect pre-merge status.
+      const mergedPatch = {
+        merged: true,
+        state: 'closed',
+        mergeable: false,
+        draft: false,
+      };
+      const applyMerged = () => {
+        setLocalDetail((d) => (d ? { ...d, ...mergedPatch } : d));
+        try {
+          onPatchDetail?.(mergedPatch);
+        } catch {
+          /* host optional */
+        }
+      };
+      applyMerged();
       try {
         await onRefresh?.();
       } catch {
         /* list refresh is best-effort */
       }
+      applyMerged();
     } catch (err) {
       setActionMsg(err?.message || String(err));
     } finally {
@@ -8296,8 +8372,19 @@ export function PrModalApp({
           query={undefined /* leaf store */}
           onQuery={setPaletteQuery}
           commands={paletteCommands}
+          openPulls={Array.isArray(openPulls) ? openPulls : []}
+          searchPrs={searchPalettePrs}
+          helpOpen={paletteHelpOpen}
+          onHelpOpenChange={setPaletteHelpOpen}
+          detail={detail}
+          layoutMode={layoutMode === LAYOUT_DIFF ? 'diff' : 'centered'}
+          owner={detail?.owner || ''}
+          repo={detail?.repo || ''}
           onRun={runPaletteCommand}
-          onClose={() => setPaletteOpen(false)}
+          onClose={() => {
+            setPaletteOpen(false);
+            setPaletteHelpOpen(false);
+          }}
         />
         <ConfirmDialog
           open={Boolean(confirmState)}

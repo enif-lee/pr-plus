@@ -317,6 +317,9 @@ export function optShortcutForCommandId(commandId: string): string | null {
     'review-approve': 'opt+shift+enter',
     'review-changes': 'opt+shift+x',
     'apply-suggestion': 'opt+shift+s',
+    // Conversation focus seed / clear (⌥⇧C)
+    'focus-conversation-comment': 'opt+shift+c',
+    'clear-conversation-comment-focus': 'opt+shift+c',
     // Diff view
     'diff-prev-file': 'opt+shift+[',
     'diff-next-file': 'opt+shift+]',
@@ -348,7 +351,8 @@ export function optShortcutForCommandId(commandId: string): string | null {
     'conv-page-up': 'opt+shift+arrowup',
     'conv-page-down': 'opt+shift+arrowdown',
   };
-  return map[String(commandId || '')] || null;
+  const v = map[String(commandId || '')];
+  return v || null;
 }
 
 /**
@@ -664,6 +668,14 @@ export function buildPaletteCommands(detail: any, opts: any = {}) {
   const mergeMethodsAllowed = new Set(allowedMergeMethods(d));
   const cmds: any[] = [
     {
+      id: 'toggle-help',
+      title: 'Open / close help',
+      section: 'Navigate',
+      keywords: ['help', 'aliases', 'actions', 'docs', 'hh', '?'],
+      aliases: ['help', 'hh', '?'],
+      action: 'toggleHelp',
+    },
+    {
       id: 'toggle-diff',
       title: 'Toggle Diff / Conversation',
       section: 'Navigate',
@@ -689,6 +701,30 @@ export function buildPaletteCommands(detail: any, opts: any = {}) {
       ],
       shortcut: optShortcutForCommandId('toggle-side-panel') || 'opt+b',
       action: 'toggleSidePanel',
+    },
+    // Conversation focus seed / clear (⌥⇧C) — Conversation primary; Diff also clears
+    {
+      id: 'focus-conversation-comment',
+      title: isDiffLayout
+        ? 'Focus / clear conversation comment focus'
+        : 'Focus conversation comment',
+      section: 'Conversation',
+      keywords: ['focus', 'comment', 'seed', 'ring', 'conversation', 'clear'],
+      shortcut:
+        optShortcutForCommandId('focus-conversation-comment') || 'opt+shift+c',
+      action: 'focusConversationComment',
+      aliases: ['fc', 'focus'],
+    },
+    {
+      id: 'clear-conversation-comment-focus',
+      title: 'Clear conversation / thread focus',
+      section: 'Conversation',
+      keywords: ['clear', 'focus', 'comment', 'thread', 'ring'],
+      shortcut:
+        optShortcutForCommandId('clear-conversation-comment-focus') ||
+        'opt+shift+c',
+      action: 'clearConversationCommentFocus',
+      aliases: ['cf', 'clear focus'],
     },
     // Context-thread actions (active review unit on Conversation or Diff)
     {
@@ -1156,5 +1192,593 @@ export function formatShortcut(shortcut, isMac = false) {
     .replace(/mod\+/gi, isMac ? '⌘' : 'Ctrl+')
     .replace(/shift\+/gi, isMac ? '⇧' : 'Shift+')
     .replace(/opt\+|alt\+/gi, isMac ? '⌥' : 'Alt+')
-    .replace(/enter/gi, '↵');
+    .replace(/ctrl\+/gi, isMac ? '⌃' : 'Ctrl+')
+    .replace(/enter/gi, '↵')
+    .replace(/arrowup/gi, '↑')
+    .replace(/arrowdown/gi, '↓')
+    .replace(/arrowleft/gi, '←')
+    .replace(/arrowright/gi, '→');
+}
+
+/* -------------------------------------------------------------------------- */
+/* PR search (`#…` / `#$…`) — pure helpers shared by modal + pulls palettes   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Detect PR-search mode from a palette query.
+ * Accepted forms: `#123`, `#name`, `#$123`, `#$title words`.
+ * The `$` after `#` is optional documentation sugar (not required).
+ *
+ * @returns {{ isPrSearch: boolean, term: string, raw: string }}
+ */
+export function parsePalettePrSearchQuery(raw: unknown): {
+  isPrSearch: boolean;
+  term: string;
+  raw: string;
+} {
+  const rawStr = raw == null ? '' : String(raw);
+  const trimmed = rawStr.trim();
+  if (!trimmed.startsWith('#')) {
+    return { isPrSearch: false, term: '', raw: rawStr };
+  }
+  let rest = trimmed.slice(1);
+  // Optional `$` after `#` (documented `#$pr_number_or_name` token)
+  if (rest.startsWith('$')) rest = rest.slice(1);
+  return { isPrSearch: true, term: rest.trim(), raw: rawStr };
+}
+
+/**
+ * Sync filter of cached PRs by number and/or title/name/author/branch.
+ * Empty term (bare `#`) returns the full cache (still immediate).
+ */
+export function matchCachedPrsForSearch(prs: unknown, term: unknown): any[] {
+  const list = Array.isArray(prs) ? prs : [];
+  const t = String(term || '')
+    .trim()
+    .toLowerCase();
+  if (!t) return list.slice();
+  const exactNum = /^\d+$/.test(t) ? Number(t) : NaN;
+  const out: any[] = [];
+  for (const pr of list) {
+    if (!pr || typeof pr !== 'object') continue;
+    const num = Number((pr as any).number);
+    if (Number.isFinite(exactNum) && num === exactNum) {
+      out.push(pr);
+      continue;
+    }
+    if (Number.isFinite(num) && String(num).includes(t)) {
+      out.push(pr);
+      continue;
+    }
+    const title = String((pr as any).title || '').toLowerCase();
+    const head = String(
+      (pr as any).headRef || (pr as any).head?.ref || ''
+    ).toLowerCase();
+    const base = String(
+      (pr as any).baseRef || (pr as any).base?.ref || ''
+    ).toLowerCase();
+    const author = String(
+      (pr as any).author || (pr as any).user?.login || ''
+    ).toLowerCase();
+    if (
+      title.includes(t) ||
+      head.includes(t) ||
+      base.includes(t) ||
+      author.includes(t)
+    ) {
+      out.push(pr);
+    }
+  }
+  return out;
+}
+
+/**
+ * Merge cache hits + async hits by PR number. Cache order wins; async only
+ * appends numbers not already present (no duplicates, cache never dropped).
+ */
+export function mergePrSearchResults(
+  cacheHits: unknown,
+  asyncHits: unknown
+): any[] {
+  const byNum = new Map<number, any>();
+  const order: number[] = [];
+  const push = (pr: any) => {
+    if (!pr || typeof pr !== 'object') return;
+    const n = Number(pr.number);
+    if (!Number.isFinite(n) || n <= 0) return;
+    if (byNum.has(n)) return;
+    byNum.set(n, pr);
+    order.push(n);
+  };
+  for (const pr of Array.isArray(cacheHits) ? cacheHits : []) push(pr);
+  for (const pr of Array.isArray(asyncHits) ? asyncHits : []) push(pr);
+  return order.map((n) => byNum.get(n));
+}
+
+/**
+ * Build palette command rows for PR search results.
+ */
+export function buildPrSearchPaletteCommands(
+  prs: unknown,
+  opts: {
+    owner?: string;
+    repo?: string;
+    webOrigin?: string;
+    source?: 'cache' | 'async' | 'merged';
+  } = {}
+): any[] {
+  const list = Array.isArray(prs) ? prs : [];
+  const owner = String(opts.owner || '').trim();
+  const repo = String(opts.repo || '').trim();
+  const origin = String(opts.webOrigin || 'https://github.com').replace(
+    /\/+$/,
+    ''
+  );
+  const source = opts.source || 'merged';
+  return list
+    .map((pr: any) => {
+      const num = Number(pr?.number);
+      if (!Number.isFinite(num) || num <= 0) return null;
+      const title = String(pr?.title || '').trim() || `Pull request #${num}`;
+      const author = String(pr?.author || pr?.user?.login || '').trim();
+      const head = String(pr?.headRef || pr?.head?.ref || '').trim();
+      const base = String(pr?.baseRef || pr?.base?.ref || '').trim();
+      const refs = head || base ? `${head || '?'} → ${base || '?'}` : '';
+      const o = String(pr?.owner || owner || '').trim();
+      const r = String(pr?.repo || repo || '').trim();
+      return {
+        id: `pr-search-${num}`,
+        kind: 'pr',
+        action: 'openPullRequest',
+        title,
+        section: 'Pull requests',
+        keywords: [
+          String(num),
+          `#${num}`,
+          title,
+          author,
+          head,
+          base,
+          'pr',
+          'pull',
+        ].filter(Boolean),
+        description: [`#${num}`, author ? `@${author}` : '', refs]
+          .filter(Boolean)
+          .join(' · '),
+        number: num,
+        author: author || undefined,
+        headRef: head || undefined,
+        baseRef: base || undefined,
+        draft: Boolean(pr?.draft),
+        owner: o || undefined,
+        repo: r || undefined,
+        href:
+          pr?.htmlUrl ||
+          pr?.html_url ||
+          (o && r ? `${origin}/${o}/${r}/pull/${num}` : ''),
+        source,
+        payload: { number: num, owner: o || undefined, repo: r || undefined },
+      };
+    })
+    .filter(Boolean);
+}
+
+/** Synthetic loading row for PR-search mode. */
+export function buildPrSearchLoadingCommand(): any {
+  return {
+    id: 'pr-search-loading',
+    kind: 'status',
+    action: 'noop',
+    title: 'Searching pull requests…',
+    section: 'Pull requests',
+    keywords: ['loading', 'search'],
+    description: 'Fetching more matches',
+    loading: true,
+    disabled: true,
+  };
+}
+
+/** Empty-state row when cache + async both miss. */
+export function buildPrSearchEmptyCommand(term = ''): any {
+  const t = String(term || '').trim();
+  return {
+    id: 'pr-search-empty',
+    kind: 'status',
+    action: 'noop',
+    title: t ? `No pull requests match “${t}”` : 'No pull requests found',
+    section: 'Pull requests',
+    keywords: ['empty', 'none'],
+    description: 'Try another number or name',
+    empty: true,
+    disabled: true,
+  };
+}
+
+/**
+ * UI state for cache-first + async PR search.
+ * Pure transitions — hosts own the in-flight promise / abort.
+ */
+export type PalettePrSearchState = {
+  isPrSearch: boolean;
+  term: string;
+  cacheHits: any[];
+  asyncHits: any[];
+  items: any[];
+  loading: boolean;
+  error: string | null;
+};
+
+export function createPalettePrSearchState(): PalettePrSearchState {
+  return {
+    isPrSearch: false,
+    term: '',
+    cacheHits: [],
+    asyncHits: [],
+    items: [],
+    loading: false,
+    error: null,
+  };
+}
+
+function rebuildPrSearchItems(s: PalettePrSearchState): any[] {
+  return mergePrSearchResults(s.cacheHits, s.asyncHits);
+}
+
+/**
+ * Apply a new query: parse, sync cache filter, and mark loading when PR search
+ * is active (host should kick async next).
+ */
+export function applyPrSearchQuery(
+  state: PalettePrSearchState | null | undefined,
+  query: unknown,
+  cachedPrs: unknown
+): PalettePrSearchState {
+  const parsed = parsePalettePrSearchQuery(query);
+  if (!parsed.isPrSearch) {
+    return createPalettePrSearchState();
+  }
+  const cacheHits = matchCachedPrsForSearch(cachedPrs, parsed.term);
+  const next: PalettePrSearchState = {
+    isPrSearch: true,
+    term: parsed.term,
+    cacheHits,
+    asyncHits: [],
+    items: cacheHits.slice(),
+    loading: true,
+    error: null,
+  };
+  next.items = rebuildPrSearchItems(next);
+  return next;
+}
+
+/** Async search resolved successfully for the given term (ignore stale). */
+export function applyPrSearchAsyncResult(
+  state: PalettePrSearchState | null | undefined,
+  term: unknown,
+  asyncHits: unknown
+): PalettePrSearchState {
+  const s = state && state.isPrSearch ? state : createPalettePrSearchState();
+  const t = String(term || '').trim();
+  if (!s.isPrSearch || s.term !== t) {
+    // Stale response — leave state unchanged (still pure copy)
+    return {
+      ...s,
+      items: rebuildPrSearchItems(s),
+    };
+  }
+  const next: PalettePrSearchState = {
+    ...s,
+    asyncHits: Array.isArray(asyncHits) ? asyncHits.slice() : [],
+    loading: false,
+    error: null,
+  };
+  next.items = rebuildPrSearchItems(next);
+  return next;
+}
+
+/** Async search failed (keep cache hits; loading ends). */
+export function applyPrSearchAsyncError(
+  state: PalettePrSearchState | null | undefined,
+  term: unknown,
+  error: unknown
+): PalettePrSearchState {
+  const s = state && state.isPrSearch ? state : createPalettePrSearchState();
+  const t = String(term || '').trim();
+  if (!s.isPrSearch || s.term !== t) {
+    return { ...s, items: rebuildPrSearchItems(s) };
+  }
+  return {
+    ...s,
+    loading: false,
+    error: error == null ? 'Search failed' : String(error),
+    items: rebuildPrSearchItems(s),
+  };
+}
+
+/**
+ * Build help-panel rows for the modal palette (Conversation / Diff scoped).
+ * Lists scope-applicable actions with aliases/shortcuts; omits other-scope-only.
+ */
+export function buildModalPaletteHelpEntries(
+  detail: any,
+  opts: {
+    layoutMode?: string;
+    stackItems?: any[];
+    openPulls?: any[];
+    canSubmitReviewVerdict?: boolean;
+  } = {}
+): Array<{
+  id: string;
+  title: string;
+  aliases: string[];
+  primary: string;
+  action: string;
+  shortcut?: string | null;
+  section?: string;
+}> {
+  const cmds = buildPaletteCommands(detail, opts);
+  const out: Array<{
+    id: string;
+    title: string;
+    aliases: string[];
+    primary: string;
+    action: string;
+    shortcut?: string | null;
+    section?: string;
+  }> = [];
+  const seen = new Set<string>();
+  for (const c of cmds) {
+    if (!c || !c.id) continue;
+    // Help panel: prefer rows with a shortcut or typed aliases (actionable)
+    const aliases = Array.isArray(c.aliases)
+      ? c.aliases.map((a: any) => String(a).toLowerCase()).filter(Boolean)
+      : [];
+    const shortcut = c.shortcut ? String(c.shortcut) : '';
+    if (!shortcut && aliases.length === 0) continue;
+    // Skip dynamic people/label rows (too many)
+    if (
+      String(c.id).startsWith('rm-rev-') ||
+      String(c.id).startsWith('rm-asg-') ||
+      String(c.id).startsWith('label-') ||
+      String(c.id).startsWith('stack-slot-')
+    ) {
+      continue;
+    }
+    if (seen.has(c.id)) continue;
+    seen.add(c.id);
+    const displayAliases = [
+      ...aliases,
+      ...(shortcut ? [shortcut] : []),
+    ];
+    out.push({
+      id: String(c.id),
+      title: String(c.title || c.id),
+      aliases: displayAliases,
+      primary: aliases[0] || shortcut || '',
+      action: String(c.action || ''),
+      shortcut: shortcut || null,
+      section: c.section ? String(c.section) : undefined,
+    });
+  }
+  return out;
+}
+
+/**
+ * Inventory of product chords that MUST appear as palette rows for a scope.
+ * Used by unit tests to prevent shortcut ↔ palette drift.
+ *
+ * @param {'conversation'|'diff'} scope
+ * @returns {Array<{ id: string, shortcut: string, action: string }>}
+ */
+export function listRequiredPaletteShortcutCoverage(
+  scope: 'conversation' | 'diff' | string
+): Array<{ id: string; shortcut: string; action: string }> {
+  const s = String(scope || '').toLowerCase();
+  const common: Array<{ id: string; shortcut: string; action: string }> = [
+    { id: 'toggle-diff', shortcut: 'opt+.', action: 'toggleDiff' },
+    { id: 'toggle-side-panel', shortcut: 'opt+b', action: 'toggleSidePanel' },
+    { id: 'find-in-pr', shortcut: 'mod+f', action: 'openSearch' },
+    {
+      id: 'toggle-fullscreen',
+      shortcut: 'opt+shift+f',
+      action: 'toggleFullscreen',
+    },
+    {
+      id: 'focus-conversation-comment',
+      shortcut: 'opt+shift+c',
+      action: 'focusConversationComment',
+    },
+    {
+      id: 'nav-adjacent-prev',
+      shortcut: 'opt+[',
+      action: 'navAdjacentPrev',
+    },
+    {
+      id: 'nav-adjacent-next',
+      shortcut: 'opt+]',
+      action: 'navAdjacentNext',
+    },
+    {
+      id: 'context-thread-fold',
+      shortcut: 'opt+f',
+      action: 'contextThreadFold',
+    },
+    {
+      id: 'context-thread-diff',
+      shortcut: 'opt+d',
+      action: 'contextThreadGotoDiff',
+    },
+    {
+      id: 'context-thread-comment',
+      shortcut: 'opt+c',
+      action: 'contextThreadComment',
+    },
+    {
+      id: 'context-thread-resolve',
+      shortcut: 'opt+ctrl+r',
+      action: 'contextThreadResolve',
+    },
+  ];
+  if (s === 'diff') {
+    return [
+      ...common,
+      {
+        id: 'diff-prev-file',
+        shortcut: 'opt+shift+[',
+        action: 'navFilePrev',
+      },
+      {
+        id: 'diff-next-file',
+        shortcut: 'opt+shift+]',
+        action: 'navFileNext',
+      },
+      {
+        id: 'diff-page-up',
+        shortcut: 'opt+shift+arrowup',
+        action: 'scrollDiffPagePrev',
+      },
+      {
+        id: 'diff-page-down',
+        shortcut: 'opt+shift+arrowdown',
+        action: 'scrollDiffPageNext',
+      },
+      {
+        id: 'diff-opt-arrow-up',
+        shortcut: 'opt+arrowup',
+        action: 'optArrowScrollSelectPrev',
+      },
+      {
+        id: 'diff-opt-arrow-down',
+        shortcut: 'opt+arrowdown',
+        action: 'optArrowScrollSelectNext',
+      },
+      {
+        id: 'diff-toggle-viewed',
+        shortcut: 'opt+shift+r',
+        action: 'toggleViewedActiveFile',
+      },
+      {
+        id: 'diff-fold-file',
+        shortcut: 'opt+f',
+        action: 'toggleActiveFileCollapse',
+      },
+      {
+        id: 'diff-step-prev',
+        shortcut: 'opt+k',
+        action: 'stepNavPrev',
+      },
+      {
+        id: 'diff-step-next',
+        shortcut: 'opt+j',
+        action: 'stepNavNext',
+      },
+      {
+        id: 'diff-filter-unresolved',
+        shortcut: 'opt+u',
+        action: 'toggleReviewFilterUnresolved',
+      },
+      {
+        id: 'diff-filter-resolved',
+        shortcut: 'opt+r',
+        action: 'toggleReviewFilterResolved',
+      },
+      {
+        id: 'diff-filter-pending',
+        shortcut: 'opt+p',
+        action: 'toggleReviewFilterPending',
+      },
+      { id: 'diff-sel-up', shortcut: 'arrowup', action: 'moveSelectionUp' },
+      {
+        id: 'diff-sel-down',
+        shortcut: 'arrowdown',
+        action: 'moveSelectionDown',
+      },
+      {
+        id: 'diff-sel-extend-up',
+        shortcut: 'shift+arrowup',
+        action: 'extendSelectionUp',
+      },
+      {
+        id: 'diff-sel-extend-down',
+        shortcut: 'shift+arrowdown',
+        action: 'extendSelectionDown',
+      },
+      {
+        id: 'diff-sel-comment',
+        shortcut: 'opt+c',
+        action: 'openSelectionComment',
+      },
+      {
+        id: 'diff-sel-copy-code',
+        shortcut: 'mod+c',
+        action: 'copySelectionCode',
+      },
+      {
+        id: 'diff-sel-copy-url',
+        shortcut: 'mod+opt+c',
+        action: 'copySelectionUrl',
+      },
+    ];
+  }
+  // Conversation (centered)
+  return [
+    ...common,
+    {
+      id: 'conv-comment-prev',
+      shortcut: 'opt+k',
+      action: 'stepNavPrev',
+    },
+    {
+      id: 'conv-comment-next',
+      shortcut: 'opt+j',
+      action: 'stepNavNext',
+    },
+    {
+      id: 'conv-scroll-up',
+      shortcut: 'opt+arrowup',
+      action: 'scrollConversationOptPrev',
+    },
+    {
+      id: 'conv-scroll-down',
+      shortcut: 'opt+arrowdown',
+      action: 'scrollConversationOptNext',
+    },
+    {
+      id: 'conv-page-up',
+      shortcut: 'opt+shift+arrowup',
+      action: 'scrollConversationPagePrev',
+    },
+    {
+      id: 'conv-page-down',
+      shortcut: 'opt+shift+arrowdown',
+      action: 'scrollConversationPageNext',
+    },
+  ];
+}
+
+/**
+ * Assert every required chord for a scope is present on the built command list
+ * with a matching non-empty shortcut token.
+ *
+ * @returns {{ ok: boolean, missing: Array<{ id: string, shortcut: string }> }}
+ */
+export function checkPaletteShortcutCoverage(
+  commands: unknown,
+  scope: 'conversation' | 'diff' | string
+): { ok: boolean; missing: Array<{ id: string; shortcut: string }> } {
+  const list = Array.isArray(commands) ? commands : [];
+  const byId = new Map(
+    list.map((c: any) => [String(c?.id || ''), c]).filter(([id]) => id)
+  );
+  const required = listRequiredPaletteShortcutCoverage(scope);
+  const missing: Array<{ id: string; shortcut: string }> = [];
+  for (const req of required) {
+    const cmd = byId.get(req.id);
+    const sc = cmd?.shortcut != null ? String(cmd.shortcut).toLowerCase() : '';
+    const want = String(req.shortcut).toLowerCase();
+    if (!cmd || !sc || sc !== want) {
+      missing.push({ id: req.id, shortcut: req.shortcut });
+    }
+  }
+  return { ok: missing.length === 0, missing };
 }

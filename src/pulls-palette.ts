@@ -605,9 +605,79 @@ function actionMatchesQuery(action: any, query: any) {
 }
 
 /**
+ * Detect PR-search mode from a palette query.
+ * Forms: `#123`, `#name`, `#$123`, `#$title` (`$` after `#` optional).
+ * @param {unknown} raw
+ * @returns {{ isPrSearch: boolean, term: string, raw: string }}
+ */
+function parsePalettePrSearchQuery(raw: any) {
+  const rawStr = raw == null ? '' : String(raw);
+  const trimmed = rawStr.trim();
+  if (!trimmed.startsWith('#')) {
+    return { isPrSearch: false, term: '', raw: rawStr };
+  }
+  let rest = trimmed.slice(1);
+  if (rest.startsWith('$')) rest = rest.slice(1);
+  return { isPrSearch: true, term: rest.trim(), raw: rawStr };
+}
+
+/**
+ * Sync filter of cached PRs by number and/or title/name.
+ * @param {object[]} prs
+ * @param {string} term
+ */
+function matchCachedPrsForSearch(prs: any, term: any) {
+  const list = Array.isArray(prs) ? prs : [];
+  const t = String(term || '')
+    .trim()
+    .toLowerCase();
+  if (!t) return list.slice();
+  const exactNum = /^\d+$/.test(t) ? Number(t) : NaN;
+  const out = [];
+  for (const pr of list) {
+    if (!pr || typeof pr !== 'object') continue;
+    const num = Number(pr.number);
+    if (Number.isFinite(exactNum) && num === exactNum) {
+      out.push(pr);
+      continue;
+    }
+    if (Number.isFinite(num) && String(num).includes(t)) {
+      out.push(pr);
+      continue;
+    }
+    if (prSearchText(pr).includes(t)) out.push(pr);
+  }
+  return out;
+}
+
+/**
+ * Merge cache + async PR hits by number (cache first, no dupes).
+ * @param {object[]} cacheHits
+ * @param {object[]} asyncHits
+ */
+function mergePrSearchResults(cacheHits: any, asyncHits: any) {
+  const byNum = new Map();
+  const order = [];
+  const push = (pr: any) => {
+    if (!pr || typeof pr !== 'object') return;
+    const n = Number(pr.number);
+    if (!Number.isFinite(n) || n <= 0) return;
+    if (byNum.has(n)) return;
+    byNum.set(n, pr);
+    order.push(n);
+  };
+  for (const pr of Array.isArray(cacheHits) ? cacheHits : []) push(pr);
+  for (const pr of Array.isArray(asyncHits) ? asyncHits : []) push(pr);
+  return order.map((n) => byNum.get(n));
+}
+
+/**
  * Build palette option items: PRs + matching peer actions (create/filters).
  * Actions/filters are **hidden by default** (empty query → PRs only).
  * New PR alias: **np**.
+ *
+ * When `query` starts with `#` (or `#$`), enters PR-search mode: cache hits
+ * first, optional `asyncHits` merged in, optional `loading` status row.
  *
  * @param {object[]} prs
  * @param {{
@@ -617,6 +687,9 @@ function actionMatchesQuery(action: any, query: any) {
  *   owner?: string,
  *   repo?: string,
  *   webOrigin?: string,
+ *   asyncHits?: object[],
+ *   prSearchLoading?: boolean,
+ *   prSearchError?: string|null,
  * }} opts
  */
 function buildPullsPaletteItems(prs, opts: any = {}) {
@@ -627,6 +700,114 @@ function buildPullsPaletteItems(prs, opts: any = {}) {
     ''
   );
   const query = String(opts.query || '');
+  const prSearch = parsePalettePrSearchQuery(query);
+
+  // PR-search mode (`#…` / `#$…`): cache-first + optional async merge
+  if (prSearch.isPrSearch) {
+    const cacheHits = matchCachedPrsForSearch(prs, prSearch.term);
+    // Defense-in-depth: never surface async hits that fail the current term
+    // (host may still hold a prior query's remote list until reset).
+    const rawAsync = Array.isArray(opts.asyncHits) ? opts.asyncHits : [];
+    const asyncHits = matchCachedPrsForSearch(rawAsync, prSearch.term);
+    const merged = mergePrSearchResults(cacheHits, asyncHits);
+    /** @type {Array<object>} */
+    const items = [];
+    if (opts.prSearchLoading) {
+      items.push({
+        id: 'pr-search-loading',
+        kind: 'status',
+        action: 'noop',
+        title: 'Searching pull requests…',
+        description: 'Fetching more matches',
+        subtitle: 'Loading…',
+        section: null,
+        loading: true,
+        disabled: true,
+        digit: null,
+      });
+    }
+    for (const pr of merged) {
+      const num = Number(pr.number);
+      const head = String(pr.headRef || pr.head?.ref || '').trim();
+      const base = String(pr.baseRef || pr.base?.ref || '').trim();
+      const author = String(pr.author || pr.user?.login || '').trim();
+      const authorKey = author.toLowerCase();
+      const avatarFromMap =
+        pr.avatarUrls && typeof pr.avatarUrls === 'object'
+          ? pr.avatarUrls[authorKey] || pr.avatarUrls[author]
+          : '';
+      const authorAvatarUrl = String(
+        pr.authorAvatarUrl || pr.avatarUrl || avatarFromMap || ''
+      ).trim();
+      const refs = head || base ? `${head || '?'} → ${base || '?'}` : '';
+      items.push({
+        id: `pr-${num}`,
+        kind: 'pr',
+        action: 'openPullRequest',
+        title: pr.title || `Pull request #${num}`,
+        subtitle: [`#${num}`, author ? `@${author}` : '', refs]
+          .filter(Boolean)
+          .join(' · '),
+        section: null,
+        number: num,
+        author: author || undefined,
+        authorAvatarUrl: authorAvatarUrl || undefined,
+        headRef: head || undefined,
+        baseRef: base || undefined,
+        draft: Boolean(pr.draft),
+        owner: owner || undefined,
+        repo: repo || undefined,
+        href:
+          pr.htmlUrl ||
+          pr.html_url ||
+          (owner && repo ? `${origin}/${owner}/${repo}/pull/${num}` : ''),
+        digit: null,
+      });
+    }
+    if (
+      merged.length === 0 &&
+      !opts.prSearchLoading &&
+      !opts.prSearchError
+    ) {
+      items.push({
+        id: 'pr-search-empty',
+        kind: 'status',
+        action: 'noop',
+        title: prSearch.term
+          ? `No pull requests match “${prSearch.term}”`
+          : 'No pull requests found',
+        description: 'Try another number or name',
+        subtitle: 'No matches',
+        section: null,
+        empty: true,
+        disabled: true,
+        digit: null,
+      });
+    } else if (opts.prSearchError && merged.length === 0) {
+      items.push({
+        id: 'pr-search-error',
+        kind: 'status',
+        action: 'noop',
+        title: 'Search failed',
+        description: String(opts.prSearchError),
+        subtitle: String(opts.prSearchError),
+        section: null,
+        disabled: true,
+        digit: null,
+      });
+    }
+    // Option+1..9 only on activatable PR rows (skip loading/empty/status)
+    let dig = 1;
+    for (let i = 0; i < items.length && dig <= 9; i++) {
+      if (items[i].disabled || items[i].loading || items[i].empty) {
+        items[i] = { ...items[i], digit: null };
+        continue;
+      }
+      items[i] = { ...items[i], digit: dig++ };
+    }
+    return items;
+  }
+
   const filtered = filterPullsForPalette(prs, {
     query,
     filters: opts.filters,
@@ -657,6 +838,7 @@ function buildPullsPaletteItems(prs, opts: any = {}) {
         owner: owner || undefined,
         repo: repo || undefined,
         aliases: def.aliases,
+        shortcut: 'opt+shift+n',
         digit: null,
       });
       continue;
@@ -938,23 +1120,57 @@ function unwrapPullsPaletteAction(resolved: any) {
 }
 
 /**
- * Rows for the palette footer help panel (title + primary aliases).
- * @returns {Array<{ title: string, aliases: string[], primary: string }>}
+ * Rows for the palette footer help panel (title + primary aliases + opt shortcuts).
+ * Pulls-scope only: create/filters/help — not modal Diff/Conversation chords.
+ * @returns {Array<{ title: string, aliases: string[], primary: string, shortcut?: string|null }>}
  */
 function buildPullsPaletteHelpEntries() {
   return PULLS_PALETTE_ACTIONS.map((a) => {
     const aliases = Array.isArray(a.aliases)
       ? a.aliases.map((x) => String(x).toLowerCase()).filter(Boolean)
       : [];
+    const peerOpt = a.filterId
+      ? PULLS_PEER_OPT_ACTIONS.find((p) => p.filterId === a.filterId)
+      : null;
+    const shortcut = peerOpt ? `opt+shift+${peerOpt.key}` : null;
+    const displayAliases = [
+      ...aliases,
+      ...(shortcut ? [shortcut] : []),
+      ...(a.id === 'new-pull-request' ? ['opt+shift+n'] : []),
+      ...(a.id === 'toggle-filters-menu' ? ['opt+shift+f'] : []),
+    ];
     return {
       id: a.id,
       title: String(a.title || a.id),
-      aliases,
-      primary: aliases[0] || '',
+      aliases: displayAliases,
+      primary: aliases[0] || displayAliases[0] || '',
       action: a.action,
       filterId: a.filterId || null,
+      shortcut,
     };
   }).filter((e) => e.primary);
+}
+
+/**
+ * Product chords on the pulls list that must appear as palette rows (help or list)
+ * with a matching shortcut label.
+ * @returns {Array<{ id: string, shortcut: string, action: string }>}
+ */
+function listRequiredPullsPaletteShortcutCoverage() {
+  const peer = PULLS_PEER_OPT_ACTIONS.map((p) => ({
+    id: `filter-${p.filterId}`,
+    shortcut: `opt+shift+${p.key}`,
+    action: 'applyFilter',
+    filterId: p.filterId,
+  }));
+  return [
+    {
+      id: CREATE_PR_ACTION_ID,
+      shortcut: 'opt+shift+n',
+      action: 'createPullRequest',
+    },
+    ...peer,
+  ];
 }
 
 /**
@@ -1094,6 +1310,10 @@ const pullsPaletteApi = {
   unwrapPullsPaletteAction,
   resolveActivateIndex,
   buildPullsPaletteHelpEntries,
+  listRequiredPullsPaletteShortcutCoverage,
+  parsePalettePrSearchQuery,
+  matchCachedPrsForSearch,
+  mergePrSearchResults,
   buildCreatePullRequestUrl,
   githubQueryForFilter,
   resolvePullsPeerOptAction,

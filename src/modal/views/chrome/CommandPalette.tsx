@@ -1,5 +1,19 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { filterPaletteCommands, formatShortcut } from '@lib/command-palette';
+import {
+  filterPaletteCommands,
+  formatShortcut,
+  parsePalettePrSearchQuery,
+  matchCachedPrsForSearch,
+  buildPrSearchPaletteCommands,
+  buildPrSearchLoadingCommand,
+  buildPrSearchEmptyCommand,
+  applyPrSearchQuery,
+  applyPrSearchAsyncResult,
+  applyPrSearchAsyncError,
+  createPalettePrSearchState,
+  buildModalPaletteHelpEntries,
+  type PalettePrSearchState,
+} from '@lib/command-palette';
 import { FloatingScrollbar } from '../../components/common/FloatingScrollbar';
 import { useModalStore } from '../../store/modal-store';
 
@@ -27,8 +41,26 @@ export function stepPaletteFocusIndex(
  * PR-view command palette — same `prp-pp-*` shell as pulls.
  * Focus moves via DOM class toggle only (no full list re-render).
  * `query` may be omitted — leaf-subscribes paletteQuery so typing does not re-render App.
+ *
+ * PR search (`#…` / `#$…`): cache-first from `openPulls`, then async via `searchPrs`.
  */
-export function CommandPalette({ open, query: queryProp, onQuery, commands, onRun, onClose }: any) {
+export function CommandPalette({
+  open,
+  query: queryProp,
+  onQuery,
+  commands,
+  onRun,
+  onClose,
+  openPulls = [],
+  searchPrs,
+  helpEntries: helpEntriesProp,
+  helpOpen: helpOpenProp,
+  onHelpOpenChange,
+  detail = null,
+  layoutMode = 'centered',
+  owner = '',
+  repo = '',
+}: any) {
   const storeQuery = useModalStore((s) => s.paletteQuery);
   const storeSetQuery = useModalStore((s) => s.setPaletteQuery);
   const query = queryProp !== undefined ? queryProp : storeQuery;
@@ -40,12 +72,181 @@ export function CommandPalette({ open, query: queryProp, onQuery, commands, onRu
     typeof navigator !== 'undefined' &&
     /Mac|iPhone|iPad/.test(navigator.platform || '');
 
+  const [localHelpOpen, setLocalHelpOpen] = useState(false);
+  const helpOpen =
+    typeof helpOpenProp === 'boolean' ? helpOpenProp : localHelpOpen;
+  const setHelpOpen = useCallback(
+    (next: boolean | ((prev: boolean) => boolean)) => {
+      const resolved =
+        typeof next === 'function'
+          ? (next as (p: boolean) => boolean)(helpOpen)
+          : next;
+      if (typeof onHelpOpenChange === 'function') onHelpOpenChange(resolved);
+      else setLocalHelpOpen(resolved);
+    },
+    [helpOpen, onHelpOpenChange]
+  );
+
+  const [prSearch, setPrSearch] = useState<PalettePrSearchState>(() =>
+    typeof createPalettePrSearchState === 'function'
+      ? createPalettePrSearchState()
+      : {
+          isPrSearch: false,
+          term: '',
+          cacheHits: [],
+          asyncHits: [],
+          items: [],
+          loading: false,
+          error: null,
+        }
+  );
+  const prSearchSeqRef = useRef(0);
+  const prSearchAbortRef = useRef<AbortController | null>(null);
+
+  // Cache-first + debounced async PR search (leaf-owned; App only injects fetch)
+  useEffect(() => {
+    if (!open) {
+      setPrSearch(
+        typeof createPalettePrSearchState === 'function'
+          ? createPalettePrSearchState()
+          : {
+              isPrSearch: false,
+              term: '',
+              cacheHits: [],
+              asyncHits: [],
+              items: [],
+              loading: false,
+              error: null,
+            }
+      );
+      try {
+        prSearchAbortRef.current?.abort?.();
+      } catch {
+        /* ignore */
+      }
+      prSearchAbortRef.current = null;
+      return;
+    }
+    if (typeof applyPrSearchQuery !== 'function') return;
+    const cached = Array.isArray(openPulls) ? openPulls : [];
+    const next = applyPrSearchQuery(null, query, cached);
+    setPrSearch(next);
+    if (!next.isPrSearch) {
+      try {
+        prSearchAbortRef.current?.abort?.();
+      } catch {
+        /* ignore */
+      }
+      prSearchAbortRef.current = null;
+      return;
+    }
+    const term = next.term;
+    const seq = ++prSearchSeqRef.current;
+    const ac =
+      typeof AbortController !== 'undefined' ? new AbortController() : null;
+    try {
+      prSearchAbortRef.current?.abort?.();
+    } catch {
+      /* ignore */
+    }
+    prSearchAbortRef.current = ac;
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          let remote: any[] = [];
+          if (typeof searchPrs === 'function') {
+            const raw = await searchPrs(term, ac?.signal || null);
+            remote =
+              typeof matchCachedPrsForSearch === 'function'
+                ? matchCachedPrsForSearch(raw || [], term)
+                : Array.isArray(raw)
+                  ? raw
+                  : [];
+          }
+          if (seq !== prSearchSeqRef.current) return;
+          setPrSearch((prev) =>
+            typeof applyPrSearchAsyncResult === 'function'
+              ? applyPrSearchAsyncResult(prev, term, remote)
+              : { ...prev, asyncHits: remote, loading: false }
+          );
+        } catch (err: any) {
+          if (seq !== prSearchSeqRef.current) return;
+          if (err?.name === 'AbortError' || ac?.signal?.aborted) return;
+          setPrSearch((prev) =>
+            typeof applyPrSearchAsyncError === 'function'
+              ? applyPrSearchAsyncError(
+                  prev,
+                  term,
+                  err?.message || 'Search failed'
+                )
+              : {
+                  ...prev,
+                  loading: false,
+                  error: String(err || 'Search failed'),
+                }
+          );
+        }
+      })();
+    }, 180);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [open, query, openPulls, searchPrs]);
+
+  const helpEntries = useMemo(() => {
+    if (Array.isArray(helpEntriesProp)) return helpEntriesProp;
+    if (typeof buildModalPaletteHelpEntries === 'function') {
+      return buildModalPaletteHelpEntries(detail, {
+        layoutMode:
+          String(layoutMode || '').toLowerCase() === 'diff'
+            ? 'diff'
+            : 'centered',
+      });
+    }
+    return [];
+  }, [helpEntriesProp, detail, layoutMode]);
+
   const filtered = useMemo(() => {
+    if (prSearch.isPrSearch) {
+      const rows: any[] = [];
+      if (prSearch.loading) {
+        rows.push(
+          typeof buildPrSearchLoadingCommand === 'function'
+            ? buildPrSearchLoadingCommand()
+            : {
+                id: 'pr-search-loading',
+                title: 'Searching pull requests…',
+                loading: true,
+                disabled: true,
+              }
+        );
+      }
+      const prs = Array.isArray(prSearch.items) ? prSearch.items : [];
+      if (prs.length) {
+        const asCmds =
+          typeof buildPrSearchPaletteCommands === 'function'
+            ? buildPrSearchPaletteCommands(prs, { owner, repo, source: 'merged' })
+            : prs;
+        rows.push(...asCmds);
+      } else if (!prSearch.loading) {
+        rows.push(
+          typeof buildPrSearchEmptyCommand === 'function'
+            ? buildPrSearchEmptyCommand(prSearch.term)
+            : {
+                id: 'pr-search-empty',
+                title: 'No pull requests found',
+                empty: true,
+                disabled: true,
+              }
+        );
+      }
+      return rows;
+    }
     if (typeof filterPaletteCommands === 'function') {
       return filterPaletteCommands(commands, query);
     }
     return Array.isArray(commands) ? commands : [];
-  }, [commands, query]);
+  }, [commands, query, prSearch, owner, repo]);
 
   const focusIndexRef = useRef(0);
   const listRef = useRef<HTMLUListElement | null>(null);
@@ -70,7 +271,6 @@ export function CommandPalette({ open, query: queryProp, onQuery, commands, onRu
       if (on) focusedEl = row;
     }
     try {
-      // Instant — never smooth-scroll on focus step
       (focusedEl as HTMLElement | null)?.scrollIntoView?.({
         block: 'nearest',
         behavior: 'auto',
@@ -94,21 +294,24 @@ export function CommandPalette({ open, query: queryProp, onQuery, commands, onRu
     [applyFocusDom]
   );
 
-  // Rebuild list only when open / query / commands change
   useEffect(() => {
     if (!open) return;
     const cmdKey = Array.isArray(commands)
       ? commands.map((c: any) => c?.id).join('|')
       : '';
+    const prKey = prSearch.isPrSearch
+      ? `${prSearch.loading}:${prSearch.items.map((c: any) => c?.number).join('|')}`
+      : 'off';
+    const fullKey = `${cmdKey}::${prKey}`;
     const qChanged = prevQueryRef.current !== query;
-    const cChanged = prevCmdKeyRef.current !== cmdKey;
+    const cChanged = prevCmdKeyRef.current !== fullKey;
     prevQueryRef.current = query;
-    prevCmdKeyRef.current = cmdKey;
+    prevCmdKeyRef.current = fullKey;
     if (qChanged || cChanged) {
       focusIndexRef.current = 0;
       setListEpoch((e) => e + 1);
     }
-  }, [open, query, commands]);
+  }, [open, query, commands, prSearch]);
 
   useEffect(() => {
     if (!open) return;
@@ -125,7 +328,10 @@ export function CommandPalette({ open, query: queryProp, onQuery, commands, onRu
     });
   }, [open, applyFocusDom]);
 
-  // After list DOM paint, re-apply focus class
+  useEffect(() => {
+    if (!open) setHelpOpen(false);
+  }, [open, setHelpOpen]);
+
   useEffect(() => {
     if (!open) return;
     applyFocusDom(focusIndexRef.current);
@@ -134,9 +340,16 @@ export function CommandPalette({ open, query: queryProp, onQuery, commands, onRu
   const runAt = useCallback(
     (idx: number) => {
       const cmd = filteredRef.current[idx];
-      if (cmd) onRun?.(cmd);
+      if (!cmd) return;
+      if (cmd.disabled || cmd.loading || cmd.empty || cmd.kind === 'status')
+        return;
+      if (cmd.action === 'toggleHelp') {
+        setHelpOpen((v) => !v);
+        return;
+      }
+      onRun?.(cmd);
     },
-    [onRun]
+    [onRun, setHelpOpen]
   );
 
   const moveFocus = useCallback(
@@ -158,17 +371,18 @@ export function CommandPalette({ open, query: queryProp, onQuery, commands, onRu
       if (e.key === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
+        if (helpOpen) {
+          setHelpOpen(false);
+          return;
+        }
         onClose?.();
         return;
       }
 
-      // Arrow + Option+J/K (match pulls palette)
       const isDown =
-        e.key === 'ArrowDown' ||
-        (alt && (key === 'j' || code === 'KeyJ'));
+        e.key === 'ArrowDown' || (alt && (key === 'j' || code === 'KeyJ'));
       const isUp =
-        e.key === 'ArrowUp' ||
-        (alt && (key === 'k' || code === 'KeyK'));
+        e.key === 'ArrowUp' || (alt && (key === 'k' || code === 'KeyK'));
 
       if (isDown) {
         e.preventDefault();
@@ -187,19 +401,53 @@ export function CommandPalette({ open, query: queryProp, onQuery, commands, onRu
         runAt(focusIndexRef.current);
       }
     },
-    [moveFocus, onClose, runAt]
+    [moveFocus, onClose, runAt, helpOpen, setHelpOpen]
+  );
+
+  const runHelpEntry = useCallback(
+    (entry: any) => {
+      if (!entry) return;
+      const list = Array.isArray(commands) ? commands : [];
+      const cmd =
+        list.find((c: any) => c?.id === entry.id) ||
+        list.find((c: any) => c?.action === entry.action) ||
+        {
+          id: entry.id,
+          action: entry.action,
+          title: entry.title,
+        };
+      if (cmd.action === 'toggleHelp' || entry.action === 'toggleHelp') {
+        setHelpOpen((v) => !v);
+        return;
+      }
+      onRun?.(cmd);
+    },
+    [commands, onRun, setHelpOpen]
   );
 
   if (!open) return null;
 
+  const isPrSearchMode =
+    typeof parsePalettePrSearchQuery === 'function'
+      ? parsePalettePrSearchQuery(query).isPrSearch
+      : prSearch.isPrSearch;
+
   return (
-    <div className="prp-pp-layer prp-pp-layer--enter prp-pp-layer--modal" role="presentation">
-      <div className="prp-pp-backdrop" data-prp-pp-close="1" onClick={() => onClose?.()} />
+    <div
+      className="prp-pp-layer prp-pp-layer--enter prp-pp-layer--modal"
+      role="presentation"
+    >
       <div
-        className="prp-pp-panel"
+        className="prp-pp-backdrop"
+        data-prp-pp-close="1"
+        onClick={() => onClose?.()}
+      />
+      <div
+        className={`prp-pp-panel${helpOpen ? ' prp-pp-panel--help' : ''}`}
         role="dialog"
         aria-label="pr+ command palette"
         aria-modal="true"
+        data-prp-pp-help-open={helpOpen ? '1' : '0'}
       >
         <div className="prp-pp-main">
           <div className="prp-pp-head">
@@ -210,13 +458,17 @@ export function CommandPalette({ open, query: queryProp, onQuery, commands, onRu
               type="search"
               autoComplete="off"
               spellCheck={false}
-              placeholder="Type a command…  stack  merge  review"
+              placeholder="Type a command…  #123  #name  help  stack  merge"
               value={query}
               onChange={(e) => handleQuery(e.target.value)}
               onKeyDown={onKeyDown}
             />
             <div className="prp-pp-meta prp-muted" data-prp-pp-meta>
-              Opt+Shift actions · ↑↓ / ⌥J ⌥K · Enter · Esc · ⌥⇧K
+              {isPrSearchMode
+                ? prSearch.loading
+                  ? 'PR search · loading…'
+                  : 'PR search · #number or #name'
+                : 'Opt+Shift actions · ↑↓ / ⌥J ⌥K · Enter · Esc · #PR · help'}
             </div>
           </div>
           <div className="prp-scroll-float-host prp-edge-fade prp-pp-list-host">
@@ -226,38 +478,58 @@ export function CommandPalette({ open, query: queryProp, onQuery, commands, onRu
               data-prp-pp-list
               data-prp-pp-epoch={listEpoch}
               role="listbox"
-              aria-label="Commands"
+              aria-label={isPrSearchMode ? 'Pull request results' : 'Commands'}
             >
               {filtered.length === 0 ? (
-                <li className="prp-pp-empty prp-muted">No matching commands</li>
+                <li className="prp-pp-empty prp-muted">
+                  {isPrSearchMode
+                    ? 'No matching pull requests'
+                    : 'No matching commands'}
+                </li>
               ) : (
                 filtered.map((c: any, i: number) => {
-                  // Focus class applied via DOM after paint — not React state
                   const shortcut = c.shortcut
                     ? typeof formatShortcut === 'function'
                       ? formatShortcut(c.shortcut, isMac)
                       : c.shortcut
                     : '';
+                  const isStatus =
+                    c.kind === 'status' || c.loading || c.empty || c.disabled;
+                  const isPr =
+                    c.kind === 'pr' || c.action === 'openPullRequest';
                   return (
                     <li
                       key={c.id || i}
-                      className="prp-pp-item prp-pp-item--action"
+                      className={`prp-pp-item${
+                        isStatus
+                          ? c.loading
+                            ? ' prp-pp-item--status prp-pp-item--loading'
+                            : ' prp-pp-item--status'
+                          : isPr
+                            ? ' prp-pp-item--pr'
+                            : ' prp-pp-item--action'
+                      }`}
                       data-prp-pp-index={i}
+                      data-prp-pp-loading={c.loading ? '1' : undefined}
                       role="option"
                       aria-selected="false"
+                      aria-disabled={isStatus ? 'true' : undefined}
                     >
                       <button
                         type="button"
                         className="prp-pp-item__btn prp-pp-item__btn--row"
                         data-prp-pp-index={i}
-                        onClick={() => onRun?.(c)}
+                        disabled={Boolean(isStatus)}
+                        onClick={() => runAt(i)}
                         onMouseEnter={() => setFocusIndex(i)}
                       >
                         <span className="prp-pp-item__main">
                           <span className="prp-pp-item__title">{c.title}</span>
                           <span className="prp-pp-item__meta prp-pp-item__meta--action">
                             {c.section ? (
-                              <span className="prp-pp-action-section">{c.section}</span>
+                              <span className="prp-pp-action-section">
+                                {c.section}
+                              </span>
                             ) : null}
                             {Array.isArray(c.aliases) && c.aliases.length
                               ? c.aliases.map((a: string) => (
@@ -267,11 +539,15 @@ export function CommandPalette({ open, query: queryProp, onQuery, commands, onRu
                                 ))
                               : null}
                             {c.description ? (
-                              <span className="prp-pp-action-desc">{c.description}</span>
+                              <span className="prp-pp-action-desc">
+                                {c.description}
+                              </span>
                             ) : null}
                           </span>
                         </span>
-                        {shortcut ? <kbd className="prp-pp-digit">{shortcut}</kbd> : null}
+                        {shortcut ? (
+                          <kbd className="prp-pp-digit">{shortcut}</kbd>
+                        ) : null}
                       </button>
                     </li>
                   );
@@ -285,10 +561,89 @@ export function CommandPalette({ open, query: queryProp, onQuery, commands, onRu
           </div>
           <div className="prp-pp-foot">
             <span className="prp-pp-foot__keys prp-muted">
-              {isMac ? '⌥⇧K' : 'Alt+Shift+K'} · ↑↓ · ⌥J ⌥K · Enter · Esc
+              {isMac ? '⌥⇧K' : 'Alt+Shift+K'} · ↑↓ · ⌥J ⌥K · Enter · Esc · #PR
             </span>
+            <button
+              type="button"
+              className="prp-pp-help-btn"
+              data-prp-pp-help-toggle
+              aria-expanded={helpOpen ? 'true' : 'false'}
+              aria-controls="prp-pp-help-panel-modal"
+              title="Help"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setHelpOpen(!helpOpen);
+              }}
+            >
+              <svg
+                className="prp-pp-help-icon"
+                width="14"
+                height="14"
+                viewBox="0 0 16 16"
+                aria-hidden="true"
+                fill="currentColor"
+              >
+                <path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Zm9 3a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM6.92 6.085c.081-.16.19-.299.34-.398.145-.097.346-.178.62-.178.26 0 .44.07.55.16.12.095.17.22.17.37 0 .17-.06.3-.19.42-.12.12-.33.26-.66.42-.4.19-.7.4-.92.64a1.7 1.7 0 0 0-.36.75 1 1 0 0 0 1.95.4c.02-.08.06-.15.12-.22.08-.09.2-.19.38-.28.4-.2.76-.45 1.02-.74.27-.3.4-.66.4-1.1 0-.47-.16-.88-.48-1.2-.32-.33-.8-.5-1.4-.5-.52 0-.96.13-1.32.39-.36.25-.6.61-.71 1.06a1 1 0 0 0 1.9.4Z" />
+              </svg>
+              <span className="prp-pp-help-btn__label prp-muted">help</span>
+            </button>
           </div>
         </div>
+        <aside
+          className="prp-pp-help"
+          id="prp-pp-help-panel-modal"
+          data-prp-pp-help
+          hidden={!helpOpen}
+        >
+          <div className="prp-pp-help__head">
+            <div className="prp-pp-help__title">
+              {String(layoutMode || '').toLowerCase() === 'diff'
+                ? 'Diff actions'
+                : 'Conversation actions'}
+            </div>
+            <button
+              type="button"
+              className="prp-pp-help-close"
+              data-prp-pp-help-toggle
+              aria-label="Close help"
+              onClick={() => setHelpOpen(false)}
+            >
+              ×
+            </button>
+          </div>
+          <div className="prp-pp-help__list" data-prp-pp-help-list>
+            {helpEntries.length === 0 ? (
+              <div className="prp-pp-help__empty prp-muted">
+                No actions configured
+              </div>
+            ) : (
+              helpEntries.map((e: any) => (
+                <button
+                  key={e.id}
+                  type="button"
+                  className="prp-pp-help__row"
+                  data-prp-pp-help-run="1"
+                  data-prp-pp-help-id={e.id}
+                  data-prp-pp-help-action={e.action || ''}
+                  onClick={() => runHelpEntry(e)}
+                >
+                  <span className="prp-pp-help__action">{e.title}</span>
+                  <span className="prp-pp-help__aliases">
+                    {(e.aliases || []).map((a: string) => (
+                      <kbd key={a} className="prp-pp-help__alias">
+                        {a}
+                      </kbd>
+                    ))}
+                  </span>
+                </button>
+              ))
+            )}
+          </div>
+          <div className="prp-pp-help__hint prp-muted">
+            Click a row to run · or type alias + Enter · #PR search
+          </div>
+        </aside>
       </div>
     </div>
   );

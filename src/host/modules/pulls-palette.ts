@@ -11,6 +11,14 @@
   let pullsPaletteRoot = null;
   /** @type {null|(() => void)} */
   let pullsPaletteScrollbarDestroy = null;
+  /** Async PR-search (`#…`) state */
+  let pullsPalettePrSearchAsyncHits = [];
+  let pullsPalettePrSearchLoading = false;
+  let pullsPalettePrSearchError = null;
+  /** @type {AbortController|null} */
+  let pullsPalettePrSearchAbort = null;
+  let pullsPalettePrSearchSeq = 0;
+  let pullsPalettePrSearchTimer = null;
 
   function pullsPaletteApi() {
     return globalThis.PRPullsPalette || null;
@@ -78,6 +86,9 @@
         owner: repo.owner,
         repo: repo.repo,
         webOrigin: getWebOrigin(),
+        asyncHits: pullsPalettePrSearchAsyncHits,
+        prSearchLoading: pullsPalettePrSearchLoading,
+        prSearchError: pullsPalettePrSearchError,
       });
     } else {
       pullsPaletteItems = [];
@@ -92,6 +103,117 @@
       pullsPaletteFocusIndex = 0;
     }
     return pullsPaletteItems;
+  }
+
+  function resetPullsPalettePrSearch() {
+    pullsPalettePrSearchAsyncHits = [];
+    pullsPalettePrSearchLoading = false;
+    pullsPalettePrSearchError = null;
+    pullsPalettePrSearchSeq += 1;
+    try {
+      pullsPalettePrSearchAbort?.abort?.();
+    } catch {
+      /* ignore */
+    }
+    pullsPalettePrSearchAbort = null;
+    if (pullsPalettePrSearchTimer != null) {
+      try {
+        clearTimeout(pullsPalettePrSearchTimer);
+      } catch {
+        /* ignore */
+      }
+      pullsPalettePrSearchTimer = null;
+    }
+  }
+
+  /**
+   * Cache-first PR search already applied via buildPullsPaletteItems; kick a
+   * debounced network re-fetch of open pulls and merge extra matches.
+   */
+  function schedulePullsPalettePrSearch() {
+    const api = pullsPaletteApi();
+    const parsed =
+      typeof api?.parsePalettePrSearchQuery === 'function'
+        ? api.parsePalettePrSearchQuery(pullsPaletteQuery)
+        : { isPrSearch: false, term: '' };
+    if (!parsed.isPrSearch) {
+      resetPullsPalettePrSearch();
+      return;
+    }
+    // Immediate: drop prior async hits (stale term), show loading + cache only
+    pullsPalettePrSearchAsyncHits = [];
+    pullsPalettePrSearchLoading = true;
+    pullsPalettePrSearchError = null;
+    if (pullsPalettePrSearchTimer != null) {
+      try {
+        clearTimeout(pullsPalettePrSearchTimer);
+      } catch {
+        /* ignore */
+      }
+    }
+    try {
+      pullsPalettePrSearchAbort?.abort?.();
+    } catch {
+      /* ignore */
+    }
+    pullsPalettePrSearchAbort = null;
+    const term = String(parsed.term || '');
+    const seq = ++pullsPalettePrSearchSeq;
+    pullsPalettePrSearchTimer = setTimeout(() => {
+      pullsPalettePrSearchTimer = null;
+      void runPullsPalettePrSearchAsync(term, seq);
+    }, 180);
+  }
+
+  async function runPullsPalettePrSearchAsync(term, seq) {
+    if (seq !== pullsPalettePrSearchSeq) return;
+    const repo = getRepoForPalette();
+    if (!repo.owner || !repo.repo) {
+      if (seq === pullsPalettePrSearchSeq) {
+        pullsPalettePrSearchLoading = false;
+        paintPullsPalette();
+      }
+      return;
+    }
+    try {
+      pullsPalettePrSearchAbort?.abort?.();
+    } catch {
+      /* ignore */
+    }
+    const ac =
+      typeof AbortController !== 'undefined' ? new AbortController() : null;
+    pullsPalettePrSearchAbort = ac;
+    try {
+      let remote = [];
+      if (typeof globalThis.PRTreeFetch?.fetchOpenPulls === 'function') {
+        const prs = await globalThis.PRTreeFetch.fetchOpenPulls(
+          repo.owner,
+          repo.repo,
+          null,
+          { signal: ac?.signal || null }
+        );
+        if (seq !== pullsPalettePrSearchSeq) return;
+        const api = pullsPaletteApi();
+        remote =
+          typeof api?.matchCachedPrsForSearch === 'function'
+            ? api.matchCachedPrsForSearch(prs || [], term)
+            : Array.isArray(prs)
+              ? prs
+              : [];
+      }
+      if (seq !== pullsPalettePrSearchSeq) return;
+      pullsPalettePrSearchAsyncHits = remote;
+      pullsPalettePrSearchLoading = false;
+      pullsPalettePrSearchError = null;
+      paintPullsPalette();
+    } catch (err) {
+      if (seq !== pullsPalettePrSearchSeq) return;
+      if (err?.name === 'AbortError' || ac?.signal?.aborted) return;
+      pullsPalettePrSearchLoading = false;
+      pullsPalettePrSearchError =
+        err?.message || String(err || 'Search failed');
+      paintPullsPalette();
+    }
   }
 
   function escapeHtml(s) {
@@ -397,9 +519,20 @@
     }
     if (meta) {
       const viewer = getViewerLoginForPalette();
-      meta.textContent = viewer
-        ? `Type to filter · open help for actions  ·  @${viewer}`
-        : 'Type to filter · open help for actions';
+      const api = pullsPaletteApi();
+      const prSearch =
+        typeof api?.parsePalettePrSearchQuery === 'function'
+          ? api.parsePalettePrSearchQuery(pullsPaletteQuery)
+          : { isPrSearch: false };
+      if (prSearch.isPrSearch) {
+        meta.textContent = pullsPalettePrSearchLoading
+          ? `PR search · loading…${viewer ? `  ·  @${viewer}` : ''}`
+          : `PR search · #number or #name${viewer ? `  ·  @${viewer}` : ''}`;
+      } else {
+        meta.textContent = viewer
+          ? `Type to filter · #PR search · open help  ·  @${viewer}`
+          : 'Type to filter · #PR search · open help for actions';
+      }
     }
     if (!listEl) return;
     if (items.length === 0) {
@@ -417,16 +550,33 @@
           item.digit != null
             ? `<kbd class="prp-pp-digit">⌥${item.digit}</kbd>`
             : '';
+        const isStatus = item.kind === 'status' || item.loading || item.empty;
         const isPr = item.kind === 'pr';
-        const body = isPr
-          ? renderPullsPalettePrBody(item)
-          : renderPullsPaletteActionBody(item);
-        return `<li class="prp-pp-item${focused}${
-          item.kind === 'action' ? ' prp-pp-item--action' : ' prp-pp-item--pr'
-        }" data-prp-pp-index="${i}" role="option" aria-selected="${
+        const body = isStatus
+          ? `<span class="prp-pp-item__main"><span class="prp-pp-item__title">${escapeHtml(
+              item?.title || ''
+            )}</span><span class="prp-pp-item__meta prp-pp-item__meta--action"><span class="prp-pp-action-desc">${escapeHtml(
+              item?.description || item?.subtitle || ''
+            )}</span></span></span>`
+          : isPr
+            ? renderPullsPalettePrBody(item)
+            : renderPullsPaletteActionBody(item);
+        const kindClass = isStatus
+          ? item.loading
+            ? ' prp-pp-item--status prp-pp-item--loading'
+            : ' prp-pp-item--status'
+          : item.kind === 'action'
+            ? ' prp-pp-item--action'
+            : ' prp-pp-item--pr';
+        const disabled = item.disabled || item.loading || item.empty;
+        return `<li class="prp-pp-item${focused}${kindClass}" data-prp-pp-index="${i}" role="option" aria-selected="${
           i === pullsPaletteFocusIndex ? 'true' : 'false'
-        }">
-          <button type="button" class="prp-pp-item__btn prp-pp-item__btn--row" data-prp-pp-index="${i}">
+        }"${disabled ? ' aria-disabled="true"' : ''}${
+          item.loading ? ' data-prp-pp-loading="1"' : ''
+        }>
+          <button type="button" class="prp-pp-item__btn prp-pp-item__btn--row" data-prp-pp-index="${i}"${
+            disabled ? ' disabled' : ''
+          }>
             ${body}
             ${digit}
           </button>
@@ -450,6 +600,7 @@
     pullsPaletteQuery = '';
     pullsPaletteItems = null;
     pullsPaletteFocusIndex = 0;
+    resetPullsPalettePrSearch();
     try {
       pullsPaletteScrollbarDestroy?.();
     } catch {
@@ -484,6 +635,7 @@
     pullsPaletteOpen = true;
     pullsPaletteQuery = '';
     pullsPaletteFocusIndex = 0;
+    resetPullsPalettePrSearch();
 
     let root = document.getElementById(PULLS_PALETTE_ROOT_ID);
     if (!root) {
@@ -497,7 +649,7 @@
           <div class="prp-pp-main">
             <div class="prp-pp-head">
               <input class="prp-pp-input" data-prp-pp-input type="search" autocomplete="off" spellcheck="false"
-                placeholder="Search PRs or filters…  np  am  df  rd  rs  oi" />
+                placeholder="Search PRs · #123 · #name · np  am  df  help" />
               <div class="prp-pp-meta prp-muted" data-prp-pp-meta></div>
             </div>
             <div class="prp-scroll-float-host prp-edge-fade prp-pp-list-host" data-prp-pp-list-host>
@@ -558,6 +710,16 @@
       input?.addEventListener('input', (e) => {
         pullsPaletteQuery = String(e.target?.value || '');
         pullsPaletteFocusIndex = 0;
+        const api = pullsPaletteApi();
+        const prSearch =
+          typeof api?.parsePalettePrSearchQuery === 'function'
+            ? api.parsePalettePrSearchQuery(pullsPaletteQuery)
+            : { isPrSearch: false };
+        if (prSearch.isPrSearch) {
+          schedulePullsPalettePrSearch();
+        } else {
+          resetPullsPalettePrSearch();
+        }
         paintPullsPalette();
       });
       fillPullsPaletteHelp(root);
@@ -656,6 +818,10 @@
         : index;
     const item = items[resolvedIdx];
     if (!item) return false;
+    // Loading / empty status rows are not activatable
+    if (item.disabled || item.loading || item.empty || item.kind === 'status') {
+      return false;
+    }
     pullsPaletteFocusIndex = resolvedIdx;
     return executePullsPaletteCommand(item);
   }

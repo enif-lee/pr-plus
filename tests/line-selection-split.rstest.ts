@@ -15,6 +15,7 @@ import {
   isThreadSelection,
   lineForSideStrict,
   moveLineSelection,
+  coalesceSelectionMoveDelta,
   rebindSelectionRowIndices,
   resolveSelectionHeadIndex,
   resolveSelectionIslandRevealPhase,
@@ -536,5 +537,221 @@ describe('file-level extractSelectedCodeText = whole file body', () => {
     const text = extractSelectedCodeText(rows, fileSel);
     expect(text).toBe('line-one\nline-two');
     expect(text.includes('other')).toBe(false);
+  });
+});
+
+/**
+ * Long Diff travel then ↑ must move to a previous nav stop (not invert).
+ * Synthetic multi-kind rows: headers, lines, threads — mirrors large PR #2647.
+ */
+describe('moveLineSelection long-travel then up (direction monotonic)', () => {
+  function buildLongRows() {
+    const rows: any[] = [];
+    let idx = 0;
+    const pushHeader = (path: string) => {
+      rows.push({ kind: 'file-header', filePath: path, rowIndex: idx++ });
+    };
+    const pushLine = (path: string, line: number) => {
+      rows.push(
+        splitChangeRow({
+          rowIndex: idx++,
+          oldLine: line,
+          newLine: line,
+          path,
+        })
+      );
+    };
+    const pushThread = (path: string, commentId: number, line: number) => {
+      rows.push({
+        kind: 'inline-comment',
+        filePath: path,
+        rowIndex: idx++,
+        commentId,
+        side: 'RIGHT',
+        newLine: line,
+        oldLine: null,
+      });
+    };
+    pushHeader('a.ts');
+    for (let L = 1; L <= 20; L++) {
+      pushLine('a.ts', L);
+      if (L % 5 === 0) pushThread('a.ts', 1000 + L, L);
+    }
+    pushHeader('b.ts');
+    for (let L = 1; L <= 25; L++) {
+      pushLine('b.ts', L);
+      if (L % 7 === 0) pushThread('b.ts', 2000 + L, L);
+    }
+    pushHeader('c.ts');
+    for (let L = 1; L <= 15; L++) pushLine('c.ts', L);
+    return rows;
+  }
+
+  test('50 downs then one up decreases head nav order', () => {
+    const rows = buildLongRows();
+    let sel = beginLineSelection(rows[1]); // first line of a.ts
+    expect(sel).toBeTruthy();
+    let prevHead = Number(sel!.headRowIndex);
+    for (let i = 0; i < 50; i++) {
+      const next = moveLineSelection(sel, rows, 1, {
+        activeFilePath: sel!.filePath,
+      });
+      expect(Number(next.headRowIndex)).toBeGreaterThanOrEqual(prevHead);
+      sel = next;
+      prevHead = Number(sel.headRowIndex);
+    }
+    const beforeUp = Number(sel!.headRowIndex);
+    const afterUp = moveLineSelection(sel, rows, -1, {
+      activeFilePath: sel!.filePath,
+    });
+    expect(Number(afterUp.headRowIndex)).toBeLessThan(beforeUp);
+  });
+
+  test('stale headRowIndex rebind then up still moves previous', () => {
+    const rows = buildLongRows();
+    // Land deep in the list
+    let sel = beginLineSelection(rows[1]);
+    for (let i = 0; i < 40; i++) {
+      sel = moveLineSelection(sel, rows, 1, { activeFilePath: sel!.filePath });
+    }
+    const liveHead = Number(sel!.headRowIndex);
+    const liveLine = Number(sel!.headLine);
+    // Simulate renumber desync: headRowIndex lagging behind identity
+    const stale = {
+      ...sel!,
+      headRowIndex: Math.max(0, liveHead - 8),
+      anchorRowIndex: Math.max(0, liveHead - 8),
+    };
+    const up = moveLineSelection(stale, rows, -1, {
+      activeFilePath: stale.filePath,
+    });
+    // After rebind by line, up must not jump past live head downward
+    expect(Number(up.headRowIndex)).toBeLessThanOrEqual(liveHead);
+    // Prefer strictly previous line when rebind succeeds
+    if (Number.isFinite(liveLine) && Number.isFinite(Number(up.headLine))) {
+      expect(Number(up.headLine)).toBeLessThanOrEqual(liveLine);
+    }
+  });
+});
+
+/**
+ * Root cause of “↑ moves down after long ↓”: rAF coalesce summed opposite
+ * keys into residual stack (12×↓ + 1×↑ ⇒ net +11 down).
+ */
+/**
+ * Hidden @@ hunk rows must not consume rowIndex (array index ≡ rowIndex).
+ * Regression for callabo-server #2647: desync made ↑ resolve the wrong head
+ * and appear to move down.
+ */
+describe('diff-rows rowIndex stays sequential (no skip on hidden hunk)', () => {
+  test('hidden fully-omitted @@ does not desync rowIndex from array index', async () => {
+    // Dynamic import of flatten helper
+    const { flattenFilesToVirtualRows } = await import(
+      '../src/modal/lib/diff-rows'
+    );
+    // Two hunks where first is 1,1,1,1 style (hideHunkHeader) without expand —
+    // and a normal second hunk. Mirrors collapse chrome that skipped index++.
+    const files = [
+      {
+        filename: 'a.ts',
+        patch: [
+          '@@ -1,1 +1,1 @@',
+          ' context-one',
+          '@@ -10,3 +10,3 @@',
+          ' line-a',
+          '-old',
+          '+new',
+          ' line-b',
+        ].join('\n'),
+      },
+    ];
+    const rows = flattenFilesToVirtualRows(files, 'unified', {
+      // no fileLines → no expandAbove for first hunk; hideHunkHeader may apply
+    });
+    for (let i = 0; i < rows.length; i++) {
+      expect(Number(rows[i].rowIndex)).toBe(i);
+    }
+    // Keyboard: travel down then up must not invert when indices are consistent
+    let sel = beginLineSelection(rows[1] || rows[0], 'RIGHT', 1);
+    if (!sel && rows[0]) sel = beginSelectionOnRow(rows[0], 'RIGHT', 0);
+    expect(sel).toBeTruthy();
+    const start = Number(sel!.headRowIndex);
+    for (let i = 0; i < 5; i++) {
+      sel = moveLineSelection(sel, rows, 1, {
+        activeFilePath: String(sel!.filePath),
+      });
+    }
+    const mid = Number(sel!.headRowIndex);
+    expect(mid).toBeGreaterThanOrEqual(start);
+    const up = moveLineSelection(sel, rows, -1, {
+      activeFilePath: String(sel!.filePath),
+    });
+    expect(Number(up.headRowIndex)).toBeLessThan(mid);
+  });
+});
+
+describe('coalesceSelectionMoveDelta (shipped keyboard batching)', () => {
+  test('same-direction downs sum for key-hold', () => {
+    let p = coalesceSelectionMoveDelta(null, 1, false);
+    p = coalesceSelectionMoveDelta(p, 1, false);
+    p = coalesceSelectionMoveDelta(p, 1, false);
+    expect(p.delta).toBe(3);
+    expect(p.shift).toBe(false);
+  });
+
+  test('↑ after residual ↓ discards stack — net is up (not still down)', () => {
+    let p: { delta: number; shift: boolean } | null = null;
+    // Burst of downs in one frame (key-repeat)
+    for (let i = 0; i < 12; i++) {
+      p = coalesceSelectionMoveDelta(p, 1, false);
+    }
+    expect(p!.delta).toBe(12);
+    // User taps up — must not net positive
+    p = coalesceSelectionMoveDelta(p, -1, false);
+    expect(p.delta).toBe(-1);
+  });
+
+  test('↓ after residual ↑ discards stack — net is down', () => {
+    let p = coalesceSelectionMoveDelta(null, -1, false);
+    p = coalesceSelectionMoveDelta(p, -1, false);
+    p = coalesceSelectionMoveDelta(p, 1, false);
+    expect(p.delta).toBe(1);
+  });
+
+  test('shift flag change starts a fresh pending', () => {
+    let p = coalesceSelectionMoveDelta(null, 1, false);
+    p = coalesceSelectionMoveDelta(p, 1, true);
+    expect(p.delta).toBe(1);
+    expect(p.shift).toBe(true);
+  });
+
+  test('coalesced net applied to moveLineSelection keeps ↑ direction', () => {
+    const rows = Array.from({ length: 30 }, (_, i) =>
+      splitChangeRow({
+        rowIndex: i,
+        oldLine: i + 1,
+        newLine: i + 1,
+        path: 'a.ts',
+      })
+    );
+    let sel = beginLineSelection(rows[5]);
+    // Simulate held ↓: net +8
+    let pending = coalesceSelectionMoveDelta(null, 1, false);
+    for (let i = 0; i < 7; i++) pending = coalesceSelectionMoveDelta(pending, 1, false);
+    sel = moveLineSelection(sel, rows, pending.delta, {
+      activeFilePath: 'a.ts',
+    });
+    const afterDown = Number(sel.headRowIndex);
+    // User taps ↑ while residual would have been wrong under old sum
+    pending = coalesceSelectionMoveDelta(
+      { delta: 8, shift: false },
+      -1,
+      false
+    );
+    expect(pending.delta).toBe(-1);
+    const afterUp = moveLineSelection(sel, rows, pending.delta, {
+      activeFilePath: 'a.ts',
+    });
+    expect(Number(afterUp.headRowIndex)).toBe(afterDown - 1);
   });
 });
