@@ -4,6 +4,7 @@
 import React from 'react';
 import { Card } from '@common/Card';
 import { IconPencil } from '@common/icons';
+import { CommentReactions } from '@common/CommentReactions';
 import { BodyEditor } from '../composers/BodyEditor';
 
 export function DescriptionCard({
@@ -20,6 +21,8 @@ export function DescriptionCard({
   linkCtx,
   mentionCandidates,
   renderBody,
+  onToggleReaction = null,
+  onLoadReactors = null,
 }: {
   detail: any;
   sectionLoading?: boolean;
@@ -35,6 +38,8 @@ export function DescriptionCard({
   mentionCandidates?: any[];
   /** Renders markdown body (search-aware) when not editing */
   renderBody: (body: string, anchor: string, mark: boolean) => React.ReactNode;
+  onToggleReaction?: any;
+  onLoadReactors?: any;
 }) {
   return (
     <Card
@@ -68,7 +73,28 @@ export function DescriptionCard({
           mentionCandidates={mentionCandidates}
         />
       ) : (
-        renderBody(detail.body || '_No description provided._', 'body', false)
+        <>
+          {renderBody(
+            detail.body || '_No description provided._',
+            'body',
+            false
+          )}
+          {typeof onToggleReaction === 'function' ? (
+            <CommentReactions
+              reactions={detail.bodyReactions || []}
+              target={{
+                kind: 'pr',
+                commentId: detail.number,
+                number: detail.number,
+                nodeId: detail.nodeId || null,
+              }}
+              viewerLogin={detail.viewerLogin}
+              busy={actionBusy}
+              onToggle={onToggleReaction}
+              onLoadReactors={onLoadReactors}
+            />
+          ) : null}
+        </>
       )}
     </Card>
   );

@@ -4,6 +4,9 @@ const clearBtn = document.getElementById('clear');
 const statusEl = document.getElementById('status');
 const tokenSavedEl = document.getElementById('token-saved');
 const tokenMaskEl = document.getElementById('token-mask');
+const prefPluginEnabled = document.getElementById(
+  'pref-plugin-enabled'
+) as HTMLInputElement | null;
 const prefAutoOpenEmbed = document.getElementById('pref-auto-open-embed');
 const prefFastReview = document.getElementById('pref-fast-review');
 const prefReverseComments = document.getElementById('pref-reverse-comments');
@@ -15,6 +18,8 @@ const prefTreeView = document.getElementById('pref-tree-view');
 const prefShortcutMonitorSize = document.getElementById(
   'pref-shortcut-monitor-size'
 ) as HTMLSelectElement | null;
+const rateLimitBarsEl = document.getElementById('rate-limit-bars');
+const rateLimitStatusEl = document.getElementById('rate-limit-status');
 const restartOnboardingBtn = document.getElementById('restart-onboarding');
 const clearIdbBtn = document.getElementById('clear-idb');
 const enterpriseHostInput = document.getElementById('enterprise-host');
@@ -28,6 +33,7 @@ const hostAccountsEmptyEl = document.getElementById('host-accounts-empty');
 const MAX_HOST_ACCOUNTS = 3;
 
 const DEFAULT_PREFS = {
+  pluginEnabled: true,
   fastReview: true,
   reverseComments: true,
   autoOpenEmbed: true,
@@ -72,6 +78,9 @@ function renderTokenStatus(status: any) {
 
 function renderPrefs(prefs: any) {
   const p = prefs || DEFAULT_PREFS;
+  if (prefPluginEnabled) {
+    prefPluginEnabled.checked = p.pluginEnabled !== false;
+  }
   // @ts-expect-error classic content-script dynamic shapes
   if (prefAutoOpenEmbed) prefAutoOpenEmbed.checked = p.autoOpenEmbed !== false;
   // @ts-expect-error classic content-script dynamic shapes
@@ -90,6 +99,89 @@ function renderPrefs(prefs: any) {
     prefShortcutMonitorSize.value = normalizeShortcutMonitorSize(
       p.shortcutMonitorSize
     );
+  }
+}
+
+function rateLimitBarPercent(snap: any): number {
+  if (!snap) return 0;
+  const limit = Number(snap.limit);
+  if (!Number.isFinite(limit) || limit <= 0) return 0;
+  const remaining = Number(snap.remaining);
+  if (Number.isFinite(remaining)) {
+    return Math.max(0, Math.min(100, Math.round((remaining / limit) * 100)));
+  }
+  const used = Number(snap.used);
+  if (Number.isFinite(used)) {
+    return Math.max(
+      0,
+      Math.min(100, Math.round(((limit - used) / limit) * 100))
+    );
+  }
+  return 0;
+}
+
+function formatReset(snap: any, nowMs = Date.now()): string {
+  if (!snap?.reset) return '—';
+  const ms = Number(snap.reset) * 1000;
+  if (!Number.isFinite(ms)) return '—';
+  if (ms <= nowMs) return 'now';
+  try {
+    return new Date(ms).toLocaleTimeString();
+  } catch {
+    return String(snap.reset);
+  }
+}
+
+function renderRateLimitState(state: any, pluginEnabled = true) {
+  const snaps = state?.snapshots || {};
+  const disabled = state?.disabledUntil || {};
+  const now = Date.now();
+  const resources = ['core', 'graphql', 'search'] as const;
+  let any = false;
+  let blocked: string[] = [];
+  for (const r of resources) {
+    const row = rateLimitBarsEl?.querySelector?.(
+      `[data-rl="${r}"]`
+    ) as HTMLElement | null;
+    if (!row) continue;
+    const snap = snaps[r] || null;
+    const meta = row.querySelector('[data-rl-meta]') as HTMLElement | null;
+    const fill = row.querySelector('[data-rl-fill]') as HTMLElement | null;
+    const bar = row.querySelector('[data-rl-bar]') as HTMLElement | null;
+    if (snap) any = true;
+    const pct = rateLimitBarPercent(snap);
+    const rem = snap?.remaining != null ? snap.remaining : '—';
+    const lim = snap?.limit != null ? snap.limit : '—';
+    const used = snap?.used != null ? snap.used : '—';
+    if (meta) {
+      meta.textContent = `${rem} / ${lim} left · used ${used} · reset ${formatReset(snap, now)}`;
+    }
+    if (fill) {
+      fill.style.width = `${pct}%`;
+      fill.classList.toggle('is-warn', pct > 0 && pct <= 25);
+      fill.classList.toggle('is-crit', pct === 0 && snap != null);
+    }
+    if (bar) {
+      bar.setAttribute('aria-valuenow', String(pct));
+    }
+    const until = Number(disabled[r]) || 0;
+    if (until > now) blocked.push(r);
+  }
+  if (rateLimitStatusEl) {
+    rateLimitStatusEl.classList.toggle('is-off', !pluginEnabled || blocked.length > 0);
+    if (pluginEnabled === false) {
+      rateLimitStatusEl.textContent =
+        blocked.length > 0
+          ? `pr+ disabled (rate limit: ${blocked.join(', ')}). Re-enable after reset or use the toggle.`
+          : 'pr+ is disabled in settings.';
+    } else if (blocked.length > 0) {
+      rateLimitStatusEl.textContent = `Blocked resources until reset: ${blocked.join(', ')}.`;
+    } else if (!any) {
+      rateLimitStatusEl.textContent =
+        'Rate limit 정보가 아직 없습니다. GitHub에서 PR을 한 번 열어 주세요.';
+    } else {
+      rateLimitStatusEl.textContent = 'API rate limits look healthy.';
+    }
   }
 }
 
@@ -244,6 +336,10 @@ async function load() {
     }
     renderTokenStatus(status);
     renderPrefs(prefsRes?.prefs || DEFAULT_PREFS);
+    renderRateLimitState(
+      prefsRes?.rateLimit || null,
+      prefsRes?.prefs?.pluginEnabled !== false
+    );
     const accounts =
       hostsRes?.accounts ||
       prefsRes?.hostAccounts ||
@@ -251,6 +347,15 @@ async function load() {
     renderHostAccounts(accounts);
     if (!status?.configured && accounts.length === 0) {
       setStatus('No github.com token saved yet');
+    }
+    // Fresh rate-limit snapshot
+    try {
+      const rl = await send({ type: 'PR_TREE_RATE_LIMIT_GET' });
+      if (rl?.ok) {
+        renderRateLimitState(rl.state, rl.pluginEnabled !== false);
+      }
+    } catch {
+      /* ignore */
     }
   } catch (err) {
     setStatus(err.message || 'Failed to load status', true);
@@ -262,6 +367,9 @@ async function load() {
 async function savePrefs() {
   try {
     const prefs = {
+      pluginEnabled: prefPluginEnabled
+        ? Boolean(prefPluginEnabled.checked)
+        : true,
   // @ts-expect-error classic content-script dynamic shapes
       autoOpenEmbed: Boolean(prefAutoOpenEmbed?.checked),
   // @ts-expect-error classic content-script dynamic shapes
@@ -283,6 +391,12 @@ async function savePrefs() {
       throw new Error(res.error);
     }
     renderPrefs(res.prefs || prefs);
+    if (res.rateLimit) {
+      renderRateLimitState(
+        res.rateLimit,
+        (res.prefs || prefs)?.pluginEnabled !== false
+      );
+    }
     setStatus('Options saved');
   } catch (err) {
     setStatus(err.message || 'Failed to save options', true);
@@ -339,10 +453,12 @@ tokenInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') saveBtn.click();
 });
 
+prefPluginEnabled?.addEventListener('change', () => void savePrefs());
 prefAutoOpenEmbed?.addEventListener('change', () => void savePrefs());
 prefFastReview.addEventListener('change', () => void savePrefs());
 prefReverseComments.addEventListener('change', () => void savePrefs());
 prefSingleFileMode?.addEventListener('change', () => void savePrefs());
+prefAutoExpandFileNav?.addEventListener('change', () => void savePrefs());
 prefTreeView?.addEventListener('change', () => void savePrefs());
 prefShortcutMonitorSize?.addEventListener('change', () => void savePrefs());
 

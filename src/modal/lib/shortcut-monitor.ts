@@ -263,6 +263,92 @@ export const SHORTCUT_MONITOR_CATALOG: Record<string, ShortcutMonitorEntry> = {
     labelMac: 'Esc',
     labelWin: 'Esc',
   },
+  // Context-thread / fold (often fired on Diff + Conversation — missing → HUD showed "?")
+  contextThreadFold: {
+    title: 'Fold / expand thread',
+    labelMac: '⌥F',
+    labelWin: 'Alt+F',
+  },
+  contextThreadGotoDiff: {
+    title: 'View in Diff',
+    labelMac: '⌥D',
+    labelWin: 'Alt+D',
+  },
+  contextThreadComment: {
+    title: 'Comment on thread',
+    labelMac: '⌥C',
+    labelWin: 'Alt+C',
+  },
+  contextThreadResolve: {
+    title: 'Resolve / unresolve',
+    labelMac: '⌥⌃R',
+    labelWin: 'Alt+Ctrl+R',
+  },
+  composerEmoji: {
+    title: 'Emoji in composer',
+    labelMac: '⌥E',
+    labelWin: 'Alt+E',
+  },
+  composerSubmit: {
+    title: 'Submit composer',
+    labelMac: '⌥C · ⌘↵',
+    labelWin: 'Alt+C · Ctrl+Enter',
+  },
+  composerResolve: {
+    title: 'Resolve conversation',
+    labelMac: '⌥⌃R',
+    labelWin: 'Alt+Ctrl+R',
+  },
+  composerFocusInput: {
+    title: 'Focus composer input',
+    labelMac: '⌥I',
+    labelWin: 'Alt+I',
+  },
+  composerModeToggle: {
+    title: 'Toggle comment / review mode',
+    labelMac: '⌥T',
+    labelWin: 'Alt+T',
+  },
+  contextThreadCollapse: {
+    title: 'Collapse thread',
+    labelMac: '←',
+    labelWin: '←',
+  },
+  contextThreadExpand: {
+    title: 'Expand thread',
+    labelMac: '→',
+    labelWin: '→',
+  },
+  collapseActiveFile: {
+    title: 'Collapse file',
+    labelMac: '←',
+    labelWin: '←',
+  },
+  expandActiveFile: {
+    title: 'Expand file',
+    labelMac: '→',
+    labelWin: '→',
+  },
+  collapseFold: {
+    title: 'Collapse',
+    labelMac: '←',
+    labelWin: '←',
+  },
+  expandFold: {
+    title: 'Expand',
+    labelMac: '→',
+    labelWin: '→',
+  },
+  toggleSidePanel: {
+    title: 'Toggle side panel',
+    labelMac: '⌥B',
+    labelWin: 'Alt+B',
+  },
+  leaveReview: {
+    title: 'Leave review',
+    labelMac: '⌥↵',
+    labelWin: 'Alt+Enter',
+  },
 };
 
 // Merge opt peers: action id → entry (first definition wins for shared actions)
@@ -281,13 +367,14 @@ for (const def of PR_MODAL_OPT_ACTIONS as readonly {
   };
 }
 
-/** `[{shortcut} - {title}]` — criterion 1 format. */
+/** `[{shortcut} - {title}]` — criterion 1 format. Never surface bare `?`. */
 export function formatShortcutMonitorText(
   shortcut: string,
   title: string
 ): string {
-  const s = String(shortcut || '').trim() || '?';
+  const s = String(shortcut || '').trim();
   const t = String(title || '').trim() || 'Action';
+  if (!s || s === '?') return `[${t}]`;
   return `[${s} - ${t}]`;
 }
 
@@ -304,7 +391,7 @@ export function describeShortcutAction(
   isMac = true
 ): { shortcut: string; title: string } {
   const id = String(action || '').trim();
-  if (!id) return { shortcut: '?', title: 'Action' };
+  if (!id) return { shortcut: '', title: 'Action' };
 
   const stack = id.match(/^navStackDigit([1-9])$/);
   if (stack) {
@@ -323,11 +410,11 @@ export function describeShortcutAction(
     };
   }
 
-  // Fallback: readable action token
+  // Fallback: humanized action name only (no "?" keycap)
   const title = id
     .replace(/([a-z])([A-Z])/g, '$1 $2')
     .replace(/^./, (c) => c.toUpperCase());
-  return { shortcut: '?', title };
+  return { shortcut: '', title };
 }
 
 export function buildShortcutMonitorFire(
@@ -352,8 +439,14 @@ export function buildShortcutMonitorFireFromParts(
   action = '',
   at = Date.now()
 ): ShortcutMonitorFire {
-  const s = String(shortcut || '').trim() || '?';
+  let s = String(shortcut || '').trim();
   const t = String(title || '').trim() || 'Action';
+  // Prefer catalog chord when peer label missing (avoids "[? - …]")
+  if ((!s || s === '?') && action) {
+    const desc = describeShortcutAction(action, true);
+    if (desc.shortcut) s = desc.shortcut;
+  }
+  if (s === '?') s = '';
   return {
     action: String(action || ''),
     shortcut: s,

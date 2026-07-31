@@ -372,3 +372,183 @@ export function isPathViewed(viewed, path) {
   if (Array.isArray(viewed)) return viewed.includes(path);
   return false;
 }
+
+/** GraphQL reviewThreads connection max page size. */
+export const REVIEW_THREADS_API_MAX = 100;
+
+/**
+ * Warm-cache revalidate probe size for `last:N` newest window.
+ * Small enough to cut nested comments/diffHunk cost; large enough to
+ * detect new head threads without always escalating.
+ */
+export const REVIEW_THREADS_WARM_PROBE_SIZE = 10;
+
+/**
+ * True when detail already holds durable review-thread data worth probing
+ * instead of cold last:100.
+ * @param {any} detail
+ * @returns {boolean}
+ */
+export function hasUsableReviewThreadsCache(detail) {
+  if (!detail || typeof detail !== 'object') return false;
+  if (detail._sketch) return false;
+  const threads = Array.isArray(detail.reviewThreads) ? detail.reviewThreads : [];
+  const comments = Array.isArray(detail.reviewComments)
+    ? detail.reviewComments
+    : [];
+  const meta = detail.reviewThreadsMeta || {};
+  const loadedMeta = Number(meta.loadedThreadCount);
+  const withNode =
+    threads.some((t) => t && t.threadNodeId) ||
+    comments.some((c) => c && c.threadNodeId);
+  if (!withNode && !(loadedMeta > 0) && threads.length === 0 && comments.length === 0) {
+    return false;
+  }
+  // Need at least one PRRT id (or loaded meta) to compare against probe.
+  return withNode || loadedMeta > 0;
+}
+
+/**
+ * Pick GraphQL pageSize for newest reviewThreads fetch.
+ * @param {{ warmCache?: boolean, forceFull?: boolean }} [opts]
+ * @returns {number}
+ */
+export function pickNewestThreadsPageSize(opts: any = {}) {
+  if (opts?.forceFull) return REVIEW_THREADS_API_MAX;
+  if (opts?.warmCache) return REVIEW_THREADS_WARM_PROBE_SIZE;
+  return REVIEW_THREADS_API_MAX;
+}
+
+/**
+ * Count comments belonging to a thread in a page or detail.
+ * @param {any} pageOrDetail
+ * @param {string} threadNodeId
+ * @param {any} [thread] optional thread row with commentIds
+ */
+function countCommentsForThread(pageOrDetail, threadNodeId, thread = null) {
+  const id = String(threadNodeId || '');
+  if (!id) return 0;
+  if (thread && Array.isArray(thread.commentIds) && thread.commentIds.length) {
+    return thread.commentIds.length;
+  }
+  const comments = Array.isArray(pageOrDetail?.comments)
+    ? pageOrDetail.comments
+    : Array.isArray(pageOrDetail?.reviewComments)
+      ? pageOrDetail.reviewComments
+      : [];
+  let n = 0;
+  for (const c of comments) {
+    if (c && c.threadNodeId != null && String(c.threadNodeId) === id) n += 1;
+  }
+  return n;
+}
+
+/**
+ * Whether a small newest probe page is consistent with cached threads —
+ * safe to skip escalating to last:100.
+ *
+ * Outside-probe resolve drift is handled separately by unresolved byIds bulk.
+ *
+ * @param {any} page fetchReviewThreadsPage result
+ * @param {any} detail cached detail
+ * @returns {{ match: boolean, reason: string }}
+ */
+export function newestThreadsPageMatchesCache(page, detail) {
+  if (!page || !detail) {
+    return { match: false, reason: 'missing' };
+  }
+  if (!hasUsableReviewThreadsCache(detail)) {
+    return { match: false, reason: 'no-cache' };
+  }
+
+  const pageThreads = Array.isArray(page.threads) ? page.threads : [];
+  const cachedThreads = Array.isArray(detail.reviewThreads)
+    ? detail.reviewThreads
+    : [];
+  const byId = new Map();
+  for (const t of cachedThreads) {
+    if (t?.threadNodeId) byId.set(String(t.threadNodeId), t);
+  }
+  // Fallback: build synthetic rows from comments if reviewThreads empty
+  if (byId.size === 0) {
+    for (const c of Array.isArray(detail.reviewComments) ? detail.reviewComments : []) {
+      if (!c?.threadNodeId) continue;
+      const id = String(c.threadNodeId);
+      if (!byId.has(id)) {
+        byId.set(id, {
+          threadNodeId: id,
+          resolved: Boolean(c.resolved),
+        });
+      }
+    }
+  }
+
+  const pageTotal =
+    typeof page.totalCount === 'number' && Number.isFinite(page.totalCount)
+      ? page.totalCount
+      : null;
+  const cachedTotalRaw = detail.reviewThreadsMeta?.totalCount;
+  const cachedTotal =
+    typeof cachedTotalRaw === 'number' && Number.isFinite(cachedTotalRaw)
+      ? cachedTotalRaw
+      : null;
+  if (pageTotal != null && cachedTotal != null && pageTotal !== cachedTotal) {
+    return { match: false, reason: 'totalCount' };
+  }
+
+  const pageIds = [];
+  for (const t of pageThreads) {
+    if (!t?.threadNodeId) continue;
+    const id = String(t.threadNodeId);
+    pageIds.push(id);
+    const cached = byId.get(id);
+    if (!cached) {
+      return { match: false, reason: 'unknown-thread' };
+    }
+    if (Boolean(cached.resolved) !== Boolean(t.resolved)) {
+      return { match: false, reason: 'resolved' };
+    }
+    const pageN = countCommentsForThread(page, id, t);
+    if (pageN > 0) {
+      const cacheN = countCommentsForThread(detail, id, cached);
+      // Cache may lag body-only edits with same count; count mismatch ⇒ new/deleted reply
+      if (cacheN > 0 && cacheN !== pageN) {
+        return { match: false, reason: 'comment-count' };
+      }
+      // Cache missing comments for a known thread id (incomplete local) → escalate
+      if (cacheN === 0 && pageN > 0 && byId.has(id) && Array.isArray(detail.reviewComments)) {
+        // If we have no comments at all in detail, don't force escalate (sketchy cache)
+        if (detail.reviewComments.length > 0) {
+          return { match: false, reason: 'comment-count' };
+        }
+      }
+    }
+  }
+
+  const prevNewest = Array.isArray(detail.reviewThreadsMeta?.newestThreadIds)
+    ? detail.reviewThreadsMeta.newestThreadIds.map(String).filter(Boolean)
+    : [];
+  if (prevNewest.length > 0 && pageIds.length > 0) {
+    for (let i = 0; i < pageIds.length; i++) {
+      if (String(prevNewest[i] || '') !== pageIds[i]) {
+        return { match: false, reason: 'order' };
+      }
+    }
+  }
+
+  return { match: true, reason: 'ok' };
+}
+
+/**
+ * After a warm probe, should we re-fetch last:API_MAX?
+ * @param {any} page
+ * @param {any} detail
+ * @param {number} pageSize size used for the probe
+ * @returns {boolean}
+ */
+export function shouldEscalateNewestThreadsProbe(page, detail, pageSize) {
+  const size = Math.max(0, Number(pageSize) || 0);
+  if (size >= REVIEW_THREADS_API_MAX) return false;
+  if (!hasUsableReviewThreadsCache(detail)) return true;
+  return !newestThreadsPageMatchesCache(page, detail).match;
+}

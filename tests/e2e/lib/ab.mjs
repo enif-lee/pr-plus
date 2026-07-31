@@ -54,8 +54,57 @@ export function ab(args, opts = {}) {
   };
 }
 
+/**
+ * List open page tabs for the e2e session.
+ * @returns {Array<{ tabId: string, active?: boolean, url?: string, type?: string }>}
+ */
+export function listTabs() {
+  const r = ab(['tab', 'list', '--json'], { allowFail: true });
+  if (r.status !== 0 || !r.stdout) return [];
+  try {
+    const parsed = JSON.parse(r.stdout);
+    const tabs = parsed?.data?.tabs || parsed?.tabs || [];
+    return Array.isArray(tabs) ? tabs : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Keep only the active (or first) page tab; close the rest.
+ * Profile / prior runs often leave many GH tabs which steal focus and flake
+ * keyboard chords (⌥J, key-hold, Esc). Always collapse to a single test tab.
+ *
+ * @returns {{ kept: string|null, closed: number }}
+ */
+export function ensureSingleTab() {
+  const tabs = listTabs().filter(
+    (t) => t && t.tabId && String(t.type || 'page') !== 'service_worker'
+  );
+  if (tabs.length <= 1) {
+    return { kept: tabs[0]?.tabId || null, closed: 0 };
+  }
+  const keep = tabs.find((t) => t.active) || tabs[0];
+  let closed = 0;
+  for (const t of tabs) {
+    if (String(t.tabId) === String(keep.tabId)) continue;
+    ab(['tab', 'close', String(t.tabId)], { allowFail: true });
+    closed += 1;
+  }
+  if (keep?.tabId) {
+    ab(['tab', String(keep.tabId)], { allowFail: true });
+  }
+  return { kept: keep?.tabId || null, closed };
+}
+
+/**
+ * Navigate to `url` on the session, then collapse to a single tab.
+ * Prefer this over raw `tab new` so tests never accumulate tabs.
+ */
 export function open(url) {
-  return ab(['open', url], { timeoutMs: 90_000 });
+  const r = ab(['open', url], { timeoutMs: 90_000 });
+  ensureSingleTab();
+  return r;
 }
 
 export function closeAll() {

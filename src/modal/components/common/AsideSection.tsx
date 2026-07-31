@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { IconDisclosure } from './icons';
 import './AsideSection.css';
 
@@ -14,6 +14,10 @@ export function AsideSection({
   collapsible = false,
   defaultOpen = true,
   loading = false,
+  /** Fires when open toggles (collapsible only). */
+  onOpenChange = null,
+  /** Fires once the first time the section transitions to open. */
+  onFirstOpen = null,
   ...rest
 }: {
   title?: any;
@@ -23,14 +27,37 @@ export function AsideSection({
   collapsible?: boolean;
   defaultOpen?: boolean;
   loading?: boolean;
+  onOpenChange?: ((open: boolean) => void) | null;
+  onFirstOpen?: (() => void) | null;
   [key: string]: any;
 }) {
   const [open, setOpen] = useState(Boolean(defaultOpen));
+  const firstOpenFired = useRef(Boolean(defaultOpen));
   const hasHead = title != null || actions != null;
   const titleIsPlain =
     title == null || typeof title === 'string' || typeof title === 'number';
   const showBody = !collapsible || open;
   const busy = Boolean(loading);
+
+  function setOpenAndNotify(next: boolean) {
+    setOpen(next);
+    try {
+      onOpenChange?.(next);
+    } catch {
+      /* ignore */
+    }
+    if (next && !firstOpenFired.current) {
+      firstOpenFired.current = true;
+      try {
+        onFirstOpen?.();
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  // defaultOpen=true: fire first-open once after mount if consumer cares
+  // (lazy panels use defaultOpen=false)
 
   const titleNode = titleIsPlain ? (
     <h3 className="prp-aside-section__title m-0 text-xs font-semibold leading-snug">
@@ -67,7 +94,7 @@ export function AsideSection({
             <button
               type="button"
               className="prp-aside-section__toggle inline-flex min-w-0 flex-1 items-center gap-1.5 p-0"
-              onClick={() => setOpen((v) => !v)}
+              onClick={() => setOpenAndNotify(!open)}
               aria-expanded={open}
               title={
                 open

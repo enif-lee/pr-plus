@@ -6,6 +6,7 @@ import {
   viewportBounds,
   type TipPlacement,
 } from './TipPopover';
+import { KeyGlyphs } from './KeyGlyphs';
 import { useModalStore } from '../../store/modal-store';
 
 /**
@@ -17,6 +18,26 @@ import { useModalStore } from '../../store/modal-store';
  * `show` optional override (tests). Default: store `optHintsActive` so parents
  * need not re-render on Opt press — only this leaf subscribes.
  */
+/**
+ * True when Option is held via store **or** DOM latch
+ * (`documentElement[data-prp-opt-held]`) — page-world e2e can set the attribute
+ * without crossing isolated-world keyboard events.
+ */
+function readDomOptHeld(): boolean {
+  try {
+    if (typeof document === 'undefined') return false;
+    const root = document.documentElement;
+    return (
+      root?.hasAttribute?.('data-prp-opt-held') ||
+      root?.classList?.contains?.('prp-opt-held') ||
+      document.body?.classList?.contains?.('prp-opt-held') ||
+      Boolean(document.querySelector?.('.prp-opt-hints-on'))
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function OptBtnHint({
   show: showProp,
   label,
@@ -29,7 +50,44 @@ export function OptBtnHint({
   preferredPlacement?: TipPlacement;
 }) {
   const storeShow = useModalStore((s) => s.optHintsActive);
-  const show = showProp !== undefined ? Boolean(showProp) : storeShow;
+  const [domHeld, setDomHeld] = useState(() => readDomOptHeld());
+  // Observe DOM latch (data-prp-opt-held) — page-world e2e sets the attribute.
+  // MutationObserver + cheap interval; not per-frame rAF (many instances).
+  useLayoutEffect(() => {
+    let alive = true;
+    const sync = () => {
+      if (!alive) return;
+      const next = readDomOptHeld();
+      setDomHeld((prev) => (prev === next ? prev : next));
+    };
+    sync();
+    let mo: MutationObserver | null = null;
+    try {
+      mo = new MutationObserver(sync);
+      mo.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ['data-prp-opt-held', 'class'],
+      });
+      if (document.body) {
+        mo.observe(document.body, {
+          attributes: true,
+          attributeFilter: ['class'],
+        });
+      }
+    } catch {
+      /* ignore */
+    }
+    const iv = window.setInterval(sync, 80);
+    return () => {
+      alive = false;
+      mo?.disconnect();
+      window.clearInterval(iv);
+    };
+  }, []);
+  const show =
+    showProp !== undefined
+      ? Boolean(showProp)
+      : Boolean(storeShow || domHeld);
   const anchorRef = useRef<HTMLSpanElement | null>(null);
   const tipRef = useRef<HTMLSpanElement | null>(null);
   const [placement, setPlacement] = useState<TipPlacement>(preferredPlacement);
@@ -179,7 +237,7 @@ export function OptBtnHint({
               data-placement={placement}
               aria-hidden="true"
             >
-              {text}
+              <KeyGlyphs text={text} />
             </kbd>,
             document.body
           )

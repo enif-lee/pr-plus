@@ -261,6 +261,7 @@ function buildThreadEntry(c, children, snippetFn, files, viewerLogin, i) {
       createdAt: r.createdAt,
       pending: Boolean(r.pending),
       nodeId: r.nodeId || r.node_id || null,
+      reactions: Array.isArray(r.reactions) ? r.reactions : [],
       canDelete: Boolean(
         viewerLogin && r.author && r.author === viewerLogin && !r.pending
       ),
@@ -310,6 +311,7 @@ function buildThreadEntry(c, children, snippetFn, files, viewerLogin, i) {
     outdated: Boolean(c.outdated),
     threadNodeId: c.threadNodeId || null,
     nodeId: c.nodeId || c.node_id || null,
+    reactions: Array.isArray(c.reactions) ? c.reactions : [],
     reviewId: Number.isFinite(reviewId) ? reviewId : null,
     pending: Boolean(c.pending),
     replies,
@@ -370,6 +372,8 @@ export function buildConversationTimeline(detail, opts: any = {}) {
       avatarUrl: c.avatarUrl || c.avatar_url || null,
       body: c.body || '',
       at: c.createdAt,
+      nodeId: c.nodeId || c.node_id || null,
+      reactions: Array.isArray(c.reactions) ? c.reactions : [],
       canDelete: Boolean(
         viewerLogin && c.author && c.author === viewerLogin
       ),

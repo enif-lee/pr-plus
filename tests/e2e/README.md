@@ -24,6 +24,10 @@ Session name defaults to `pr-plus-e2e` (override with `PRP_E2E_SESSION`).
 **Headless by default** (reliable chords without OS window focus). For a visible
 browser: `PRP_E2E_HEADED=1 npm run test:e2e`.
 
+**Single-tab policy:** every `open()` closes all other tabs and keeps only the
+active test tab. Extra profile-restored tabs steal focus and flake keyboard
+chords — do not open parallel tabs during e2e or manual `ag` QA.
+
 ## Scenarios
 
 ### `feature-scenario.mjs`

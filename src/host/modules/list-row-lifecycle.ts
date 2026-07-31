@@ -385,7 +385,9 @@
 
   /**
    * GH ⌘K palette can leave its <dialog> stuck in the CSS top layer (:modal)
-   * after close, which blocks all PR list clicks. Heal on user interaction.
+   * after close, which blocks all page clicks. Always safe to call (no-ops when
+   * dialog.open is true). Do not gate on current.open — PR embed can be open
+   * while the GH palette still poisons the top layer.
    */
   function recoverGithubPaletteIfStuck() {
     const api = listFocusApi();
@@ -396,7 +398,137 @@
         return false;
       }
     }
-    return false;
+    // Fallback if pure module not yet loaded
+    try {
+      const d =
+        document.getElementById('command-palette-pjax-container') ||
+        document.querySelector?.('dialog.js-command-palette-dialog');
+      if (!d || d.open) return false;
+      let isModal = false;
+      try {
+        isModal = typeof d.matches === 'function' && d.matches(':modal');
+      } catch {
+        isModal = false;
+      }
+      if (!isModal) return false;
+      try {
+        d.close?.();
+      } catch {
+        /* ignore */
+      }
+      try {
+        d.removeAttribute?.('open');
+      } catch {
+        /* ignore */
+      }
+      if (d.matches?.(':modal')) {
+        const parent = d.parentNode;
+        const next = d.nextSibling;
+        if (parent) {
+          parent.removeChild(d);
+          if (next) parent.insertBefore(d, next);
+          else parent.appendChild(d);
+        }
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Escape / close races: GH clears open before :modal drops — heal multi-pass. */
+  function scheduleGithubPaletteTopLayerHeal() {
+    recoverGithubPaletteIfStuck();
+    try {
+      queueMicrotask(() => recoverGithubPaletteIfStuck());
+    } catch {
+      /* ignore */
+    }
+    setTimeout(() => recoverGithubPaletteIfStuck(), 0);
+    setTimeout(() => recoverGithubPaletteIfStuck(), 50);
+    setTimeout(() => recoverGithubPaletteIfStuck(), 200);
+  }
+
+  /**
+   * Always-on heal: Escape after GH ⌘K, pointerdown, and dialog open→false.
+   * Clicks alone are insufficient — stuck :modal blocks hit-testing so click
+   * handlers may never run in a useful way.
+   */
+  function ensureGithubPaletteTopLayerWatch() {
+    if ((ensureGithubPaletteTopLayerWatch as any)._installed) return;
+    (ensureGithubPaletteTopLayerWatch as any)._installed = true;
+
+    const onKey = (event: any) => {
+      const key = String(event?.key || '');
+      if (key === 'Escape' || key === 'Esc') {
+        scheduleGithubPaletteTopLayerHeal();
+      }
+    };
+    document.addEventListener('keydown', onKey, true);
+    document.addEventListener('keyup', onKey, true);
+    // Capture before anything else — heal even when pr+ modal is open
+    document.addEventListener(
+      'pointerdown',
+      () => {
+        recoverGithubPaletteIfStuck();
+      },
+      true
+    );
+
+    const watchDialog = (d: any) => {
+      if (!d || d.__prpGhPaletteWatch) return;
+      d.__prpGhPaletteWatch = true;
+      try {
+        const mo = new MutationObserver(() => {
+          if (!d.open) scheduleGithubPaletteTopLayerHeal();
+        });
+        mo.observe(d, {
+          attributes: true,
+          attributeFilter: ['open', 'class', 'style'],
+        });
+      } catch {
+        /* ignore */
+      }
+    };
+
+    const scan = () => {
+      try {
+        watchDialog(document.getElementById('command-palette-pjax-container'));
+        watchDialog(document.querySelector?.('dialog.js-command-palette-dialog'));
+        recoverGithubPaletteIfStuck();
+      } catch {
+        /* ignore */
+      }
+    };
+    scan();
+    try {
+      const rootMo = new MutationObserver(() => scan());
+      rootMo.observe(document.documentElement, {
+        childList: true,
+        subtree: true,
+      });
+    } catch {
+      /* ignore */
+    }
+    // Cheap safety net if Escape observers miss a stuck frame
+    try {
+      setInterval(() => {
+        try {
+          const api = listFocusApi();
+          if (typeof api?.isGithubCommandPaletteStuck === 'function') {
+            if (api.isGithubCommandPaletteStuck(document)) {
+              recoverGithubPaletteIfStuck();
+            }
+            return;
+          }
+        } catch {
+          /* fall through */
+        }
+        recoverGithubPaletteIfStuck();
+      }, 1500);
+    } catch {
+      /* ignore */
+    }
   }
 
   /* ------------------------------------------------------------------ */

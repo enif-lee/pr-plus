@@ -13,7 +13,19 @@ import {
 } from '@common/utils';
 import { filterSelectOptions, buildUnifiedReviewerRows } from '@lib/searchable-select';
 import { parseSuggestionFences } from '@lib/pr-edit-api';
-import { splitMarkdownSegments, filterMentions, filterSlashCommands, detectMentionTrigger, detectSlashTrigger, applyMentionInsertion, applySlashInsertion, SLASH_COMMANDS } from '@lib/markdown-composer';
+import {
+  filterMentions,
+  filterSlashCommands,
+  filterEmojis,
+  detectMentionTrigger,
+  detectSlashTrigger,
+  detectEmojiTrigger,
+  applyMentionInsertion,
+  applySlashInsertion,
+  applyEmojiInsertion,
+  emojiMenuLabel,
+  SLASH_COMMANDS,
+} from '@lib/markdown-composer';
 import { filterPaletteCommands, formatShortcut } from '@lib/command-palette';
 import { githubUserUrl, githubLabelUrl, uniqueLogins, uniqueReviewsByAuthor, buildStackStrip } from '@lib/ui-polish';
 import { takeCommitsForTimeline, takeVisibleTreeNodes } from '@lib/aside-lists';
@@ -41,7 +53,8 @@ export function RichComposer({
   className = '',
 }: any) {
   const taRef = useRef(null);
-  const [menu, setMenu] = useState(null); // { kind:'mention'|'slash', items, trigger }
+  const [menu, setMenu] = useState(null); // { kind:'mention'|'slash'|'emoji', items, trigger }
+  const [menuIndex, setMenuIndex] = useState(0);
 
   function syncMenus(text, cursor) {
     if (typeof detectMentionTrigger !== 'function') {
@@ -52,12 +65,24 @@ export function RichComposer({
     if (mTrig) {
       const items = filterMentions(mTrig.query, mentionCandidates);
       setMenu({ kind: 'mention', items, trigger: mTrig });
+      setMenuIndex(0);
       return;
+    }
+    if (typeof detectEmojiTrigger === 'function') {
+      const eTrig = detectEmojiTrigger(text, cursor);
+      if (eTrig) {
+        const items =
+          typeof filterEmojis === 'function' ? filterEmojis(eTrig.query, 12) : [];
+        setMenu({ kind: 'emoji', items, trigger: eTrig });
+        setMenuIndex(0);
+        return;
+      }
     }
     const sTrig = detectSlashTrigger(text, cursor);
     if (sTrig) {
       const items = filterSlashCommands(sTrig.query);
       setMenu({ kind: 'slash', items, trigger: sTrig });
+      setMenuIndex(0);
       return;
     }
     setMenu(null);
@@ -65,17 +90,19 @@ export function RichComposer({
 
   function applyItem(item) {
     const ta = taRef.current;
-    const cursor = ta ? ta.selectionStart : value.length;
     let next;
     if (menu?.kind === 'mention') {
       next = applyMentionInsertion(value, menu.trigger, item);
     } else if (menu?.kind === 'slash') {
       next = applySlashInsertion(value, menu.trigger, item);
+    } else if (menu?.kind === 'emoji') {
+      next = applyEmojiInsertion(value, menu.trigger, item);
     } else {
       return;
     }
     onChange(next.text);
     setMenu(null);
+    setMenuIndex(0);
     requestAnimationFrame(() => {
       if (ta) {
         ta.focus();
@@ -97,22 +124,84 @@ export function RichComposer({
           onChange(e.target.value);
           syncMenus(e.target.value, e.target.selectionStart);
         }}
-        onKeyUp={(e) => syncMenus(e.currentTarget.value, e.currentTarget.selectionStart)}
+        onKeyUp={(e) => {
+          if (
+            e.key === 'ArrowDown' ||
+            e.key === 'ArrowUp' ||
+            e.key === 'Enter' ||
+            e.key === 'Tab' ||
+            e.key === 'Escape'
+          ) {
+            return;
+          }
+          syncMenus(e.currentTarget.value, e.currentTarget.selectionStart);
+        }}
+        onKeyDown={(e) => {
+          if (!menu?.items?.length) return;
+          const n = menu.items.length;
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            setMenu(null);
+            return;
+          }
+          if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            setMenuIndex((i) => (i + 1) % n);
+            return;
+          }
+          if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            setMenuIndex((i) => (i - 1 + n) % n);
+            return;
+          }
+          if (e.key === 'Enter' || e.key === 'Tab') {
+            e.preventDefault();
+            applyItem(menu.items[menuIndex] ?? menu.items[0]);
+          }
+        }}
         onClick={(e) => syncMenus(e.currentTarget.value, e.currentTarget.selectionStart)}
       />
       {menu?.items?.length ? (
-        <ul className="prp-composer-menu" role="listbox">
-          {menu.items.map((item) => {
-            const label =
-              menu.kind === 'mention'
+        <ul
+          className={`prp-composer-menu${
+            menu.kind === 'emoji' ? ' prp-composer-menu--emoji' : ''
+          }`}
+          role="listbox"
+        >
+          {menu.items.map((item, idx) => {
+            const isEmoji = menu.kind === 'emoji';
+            const label = isEmoji
+              ? emojiMenuLabel?.(item) || `:${item.name}:`
+              : menu.kind === 'mention'
                 ? `@${item}`
                 : item.label || item.id;
             const desc = menu.kind === 'slash' ? item.description : null;
             return (
-              <li key={label}>
-                <button type="button" className="prp-composer-menu__item" onClick={() => applyItem(item)}>
-                  <strong>{label}</strong>
-                  {desc ? <span className="prp-muted"> {desc}</span> : null}
+              <li key={String(isEmoji ? item.name : label)} role="option">
+                <button
+                  type="button"
+                  className={`prp-composer-menu__item${
+                    isEmoji ? ' prp-composer-menu__item--emoji' : ''
+                  }${idx === menuIndex ? ' prp-composer-menu__item--active' : ''}`}
+                  onMouseDown={(ev) => {
+                    ev.preventDefault();
+                    applyItem(item);
+                  }}
+                  onMouseEnter={() => setMenuIndex(idx)}
+                >
+                  {isEmoji ? (
+                    <>
+                      <span className="prp-composer-menu__emoji" aria-hidden="true">
+                        {item.emoji}
+                      </span>
+                      <span className="prp-composer-menu__emoji-name">{label}</span>
+                    </>
+                  ) : (
+                    <>
+                      <strong>{label}</strong>
+                      {desc ? <span className="prp-muted"> {desc}</span> : null}
+                    </>
+                  )}
                 </button>
               </li>
             );
@@ -120,7 +209,8 @@ export function RichComposer({
         </ul>
       ) : null}
       <div className="prp-composer-hint prp-muted">
-        Markdown · mermaid fences · @mention · /commands ({(SLASH_COMMANDS || []).map((c) => c.label).join(' ')})
+        Markdown · @mention · :emoji · /commands (
+        {(SLASH_COMMANDS || []).map((c) => c.label).join(' ')})
       </div>
     </div>
   );

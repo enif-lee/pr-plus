@@ -222,6 +222,58 @@
     .pref--action button {
       margin: 0;
     }
+    .rl-bars {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 8px;
+    }
+    .rl-row {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .rl-row__head {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 8px;
+      font-size: 11px;
+      color: #656d76;
+    }
+    .rl-row__name {
+      font-weight: 650;
+      color: #1f2328;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      font-size: 10px;
+    }
+    .rl-row__meta {
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+      font-size: 10px;
+    }
+    .rl-bar {
+      height: 8px;
+      border-radius: 999px;
+      background: #eaeef2;
+      overflow: hidden;
+      border: 1px solid #d0d7de;
+    }
+    .rl-bar__fill {
+      height: 100%;
+      border-radius: 999px;
+      background: #1a7f37;
+      transition: width 0.2s ease;
+    }
+    .rl-bar__fill.is-warn { background: #9a6700; }
+    .rl-bar__fill.is-crit { background: #cf222e; }
+    .rl-status {
+      margin: 6px 0 0;
+      font-size: 11px;
+      color: #656d76;
+    }
+    .rl-status.is-off { color: #cf222e; font-weight: 600; }
     .perm-list {
       margin: 0;
       padding: 0;
@@ -448,6 +500,50 @@
     </h2>
 
     <h3>Options</h3>
+    <label class="pref" for="pref-plugin-enabled">
+      <input id="pref-plugin-enabled" type="checkbox" />
+      <span class="pref__body">
+        <span class="pref__title">pr+ 활성화</span>
+        <span class="pref__desc">끄면 GitHub API 호출과 목록/모달 호스트를 중지합니다. PAT rate limit(429) 시 자동으로 꺼지며, reset 시각 이후 다시 켤 수 있습니다.</span>
+      </span>
+    </label>
+
+    <h3>API rate limits</h3>
+    <p class="hint" style="margin: 0 0 6px">
+      최근 API 응답의 <code>x-ratelimit-*</code> (resource: core / graphql / search).
+      GraphQL 포인트와 REST core 한도는 별개입니다.
+    </p>
+    <div class="rl-bars" id="rate-limit-bars" aria-live="polite">
+      <div class="rl-row" data-rl="core">
+        <div class="rl-row__head">
+          <span class="rl-row__name">core (REST)</span>
+          <span class="rl-row__meta" data-rl-meta>—</span>
+        </div>
+        <div class="rl-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" data-rl-bar>
+          <div class="rl-bar__fill" data-rl-fill style="width:0%"></div>
+        </div>
+      </div>
+      <div class="rl-row" data-rl="graphql">
+        <div class="rl-row__head">
+          <span class="rl-row__name">graphql</span>
+          <span class="rl-row__meta" data-rl-meta>—</span>
+        </div>
+        <div class="rl-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" data-rl-bar>
+          <div class="rl-bar__fill" data-rl-fill style="width:0%"></div>
+        </div>
+      </div>
+      <div class="rl-row" data-rl="search">
+        <div class="rl-row__head">
+          <span class="rl-row__name">search</span>
+          <span class="rl-row__meta" data-rl-meta>—</span>
+        </div>
+        <div class="rl-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" data-rl-bar>
+          <div class="rl-bar__fill" data-rl-fill style="width:0%"></div>
+        </div>
+      </div>
+    </div>
+    <p id="rate-limit-status" class="rl-status">Rate limit 정보가 아직 없습니다. GitHub에서 PR을 한 번 열어 주세요.</p>
+
     <label class="pref" for="pref-auto-open-embed">
       <input id="pref-auto-open-embed" type="checkbox" />
       <span class="pref__body">

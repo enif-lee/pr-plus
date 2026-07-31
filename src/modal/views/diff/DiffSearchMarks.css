@@ -350,12 +350,19 @@ kbd.prp-modal-hotkey {
   background: var(--prp-bg, #fff);
   box-shadow: 0 4px 12px rgba(1, 4, 9, 0.18);
   color: var(--prp-fg-muted, #656d76);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, 'Segoe UI Symbol',
+    monospace;
   font-size: 10.5px;
   font-weight: 700;
   line-height: 1;
   white-space: nowrap;
   pointer-events: none;
+}
+.prp-opt-btn-hint .prp-key-glyph--shift {
+  font-size: 1.3em;
+  font-weight: 700;
+  line-height: 1;
+  transform: translateY(-0.04em);
 }
 /* Fixed portal — placement matches TipPopover transforms */
 .prp-opt-btn-hint--fixed {

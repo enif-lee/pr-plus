@@ -220,6 +220,8 @@ const MSG = {
   PREFS_GET: 'PR_TREE_PREFS_GET',
   PREFS_SET: 'PR_TREE_PREFS_SET',
   PREFS_CHANGED: 'PR_TREE_PREFS_CHANGED',
+  RATE_LIMIT_GET: 'PR_TREE_RATE_LIMIT_GET',
+  RATE_LIMIT_CHANGED: 'PR_TREE_RATE_LIMIT_CHANGED',
   ONBOARDING_GET: 'PR_TREE_ONBOARDING_GET',
   ONBOARDING_SET: 'PR_TREE_ONBOARDING_SET',
   HOST_ACCOUNTS_LIST: 'PR_TREE_HOST_ACCOUNTS_LIST',
@@ -247,6 +249,8 @@ const MSG = {
   UPDATE_PULL_STATE: 'PR_TREE_UPDATE_PULL_STATE',
   DELETE_REVIEW_COMMENT: 'PR_TREE_DELETE_REVIEW_COMMENT',
   DELETE_ISSUE_COMMENT: 'PR_TREE_DELETE_ISSUE_COMMENT',
+  TOGGLE_COMMENT_REACTION: 'PR_TREE_TOGGLE_COMMENT_REACTION',
+  FETCH_REACTABLE_REACTORS: 'PR_TREE_FETCH_REACTABLE_REACTORS',
   UPDATE_PULL: 'PR_TREE_UPDATE_PULL',
   EDIT_ISSUE_COMMENT: 'PR_TREE_EDIT_ISSUE_COMMENT',
   EDIT_REVIEW_COMMENT: 'PR_TREE_EDIT_REVIEW_COMMENT',
@@ -397,13 +401,27 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     const prefs = PRTreeStorage.normalizePrefs(
       changes[PRTreeStorage.PREFS_KEY].newValue
     );
+    rlMem.pluginEnabled = prefs?.pluginEnabled !== false;
+    rlMem.loaded = true;
     broadcastPrefsChanged(prefs);
   }
+  if (
+    PRTreeStorage.RATE_LIMIT_KEY &&
+    changes[PRTreeStorage.RATE_LIMIT_KEY]
+  ) {
+    try {
+      const RL = rateLimitApi();
+      const raw = changes[PRTreeStorage.RATE_LIMIT_KEY].newValue;
+      rlMem.state =
+        typeof RL?.normalizeRateLimitState === 'function'
+          ? RL.normalizeRateLimitState(raw)
+          : raw;
+      rlMem.loaded = true;
+    } catch {
+      /* ignore */
+    }
+  }
 });
-
-function fetchImpl() {
-  return globalThis.fetch.bind(globalThis);
-}
 
 /**
  * In-flight GitHub fetches keyed by content-script requestId.
@@ -424,8 +442,203 @@ function makeAbortError() {
   return err;
 }
 
+/** In-memory rate-limit + pluginEnabled (refreshed from storage). */
+let rlMem = {
+  pluginEnabled: true,
+  state: null as any,
+  loaded: false,
+  saveTimer: null as any,
+};
+
+/** Raw browser fetch (no rate-limit). Only used as the innermost base. */
+function rawBrowserFetch() {
+  return globalThis.fetch.bind(globalThis);
+}
+
+function rateLimitApi() {
+  return globalThis.PRModalRateLimit || null;
+}
+
+async function ensureRateLimitMem() {
+  if (rlMem.loaded) return rlMem;
+  try {
+    const prefs = await PRTreeStorage.getExtensionPrefs();
+    rlMem.pluginEnabled = prefs?.pluginEnabled !== false;
+  } catch {
+    rlMem.pluginEnabled = true;
+  }
+  try {
+    const st = await PRTreeStorage.getRateLimitState();
+    const RL = rateLimitApi();
+    rlMem.state =
+      typeof RL?.clearExpiredRateDisables === 'function'
+        ? RL.clearExpiredRateDisables(st, Date.now())
+        : st;
+  } catch {
+    const RL = rateLimitApi();
+    rlMem.state =
+      typeof RL?.emptyRateLimitState === 'function'
+        ? RL.emptyRateLimitState()
+        : {
+            disabledUntil: { core: 0, graphql: 0, search: 0 },
+            snapshots: { core: null, graphql: null, search: null },
+          };
+  }
+  rlMem.loaded = true;
+  return rlMem;
+}
+
+function schedulePersistRateLimitState() {
+  if (rlMem.saveTimer) return;
+  rlMem.saveTimer = setTimeout(() => {
+    rlMem.saveTimer = null;
+    const st = rlMem.state;
+    if (!st) return;
+    void PRTreeStorage.setRateLimitState(st)
+      .then(() => {
+        try {
+          broadcastToGithubTabs({
+            type: MSG.RATE_LIMIT_CHANGED,
+            state: st,
+            pluginEnabled: rlMem.pluginEnabled,
+          });
+        } catch {
+          /* ignore */
+        }
+      })
+      .catch(() => {});
+  }, 200);
+}
+
+function makeRateLimitError(resource: string, untilMs: number, reason: string) {
+  const until =
+    untilMs > 0 ? new Date(untilMs).toISOString() : '';
+  const err: any = new Error(
+    reason === 'plugin-disabled'
+      ? 'pr+ is disabled in settings'
+      : `GitHub ${resource} rate limit — retry after ${until || 'reset'}`
+  );
+  err.name = 'RateLimitError';
+  err.status = 429;
+  err.rateLimitResource = resource;
+  err.rateLimitUntil = untilMs;
+  err.rateLimitReason = reason;
+  return err;
+}
+
+function assertGithubRequestAllowed(url: any) {
+  const RL = rateLimitApi();
+  const resource =
+    typeof RL?.classifyGithubUrl === 'function'
+      ? RL.classifyGithubUrl(url)
+      : 'core';
+  if (rlMem.pluginEnabled === false) {
+    throw makeRateLimitError(resource, 0, 'plugin-disabled');
+  }
+  if (typeof RL?.shouldAllowGithubRequest === 'function') {
+    const gate = RL.shouldAllowGithubRequest({
+      pluginEnabled: rlMem.pluginEnabled,
+      state: rlMem.state,
+      resource,
+      nowMs: Date.now(),
+    });
+    if (!gate.allow) {
+      throw makeRateLimitError(
+        resource,
+        gate.disabledUntilMs || 0,
+        gate.reason || 'rate-disabled'
+      );
+    }
+  }
+  return resource;
+}
+
+function noteGithubResponse(res: any, url: any, resourceHint: any) {
+  const RL = rateLimitApi();
+  if (!RL || !res) return;
+  const resource =
+    resourceHint ||
+    (typeof RL.classifyGithubUrl === 'function'
+      ? RL.classifyGithubUrl(url)
+      : 'core');
+  const now = Date.now();
+  try {
+    let next = rlMem.state;
+    if (res.status === 429) {
+      if (typeof RL.withRateLimit429 === 'function') {
+        next = RL.withRateLimit429(next, resource, res.headers, now);
+      }
+      // Auto-disable plugin until the earliest active reset for this resource
+      const until = next?.disabledUntil?.[resource] || 0;
+      if (until > now) {
+        rlMem.pluginEnabled = false;
+        void PRTreeStorage.setExtensionPrefs({ pluginEnabled: false })
+          .then((prefs) => {
+            try {
+              broadcastPrefsChanged(prefs);
+            } catch {
+              /* ignore */
+            }
+          })
+          .catch(() => {});
+      }
+    } else if (typeof RL.parseRateLimitHeaders === 'function') {
+      const snap = RL.parseRateLimitHeaders(res.headers, {
+        fallbackResource: resource,
+        nowMs: now,
+      });
+      if (snap && typeof RL.withRateLimitSnapshot === 'function') {
+        next = RL.withRateLimitSnapshot(next, snap);
+      }
+    }
+    if (typeof RL.clearExpiredRateDisables === 'function') {
+      next = RL.clearExpiredRateDisables(next, now);
+    }
+    rlMem.state = next;
+    schedulePersistRateLimitState();
+  } catch {
+    /* ignore observe errors */
+  }
+}
+
+/**
+ * Rate-limit + pluginEnabled gate + header observation for every GitHub HTTP call.
+ * Used by fetchImpl() so bare handlers and beginTrackedFetch share one path.
+ */
+function wrapFetchWithRateLimit(baseFetch: any) {
+  return async (url, init: any = {}) => {
+    try {
+      await ensureRateLimitMem();
+    } catch {
+      /* proceed if storage cold */
+    }
+    let resource = 'core';
+    try {
+      resource = assertGithubRequestAllowed(url);
+    } catch (err) {
+      return Promise.reject(err);
+    }
+    const res = await baseFetch(url, init);
+    try {
+      noteGithubResponse(res, url, resource);
+    } catch {
+      /* ignore */
+    }
+    return res;
+  };
+}
+
+/**
+ * Default fetch for ALL SW GitHub handlers (mutations + tracked reads).
+ * Never return raw globalThis.fetch — that bypassed rate-limit gates.
+ */
+function fetchImpl() {
+  return wrapFetchWithRateLimit(rawBrowserFetch());
+}
+
+/** AbortSignal merge only; rate-limit is already on baseFetch from fetchImpl(). */
 function wrapFetchWithSignal(baseFetch: any, signal: any) {
-  return (url, init: any = {}) => {
+  return async (url, init: any = {}) => {
     if (signal.aborted) return Promise.reject(makeAbortError());
     let nextSignal = signal;
     if (init.signal && init.signal !== signal) {
@@ -436,7 +649,10 @@ function wrapFetchWithSignal(baseFetch: any, signal: any) {
         nextSignal = AbortSignal.any([init.signal, signal]);
       }
     }
-    return baseFetch(url, { ...(init as any), signal: nextSignal });
+    return baseFetch(url, {
+      ...(init as any),
+      signal: nextSignal,
+    });
   };
 }
 
@@ -639,7 +855,21 @@ async function handleMessage(message: any) {
       } catch {
         endpoints = null;
       }
-      return { ok: true, prefs, hostAccounts, endpoints };
+      let rateLimit = null;
+      try {
+        await ensureRateLimitMem();
+        rateLimit = rlMem.state;
+      } catch {
+        rateLimit = null;
+      }
+      return {
+        ok: true,
+        prefs,
+        hostAccounts,
+        endpoints,
+        rateLimit,
+        pluginEnabled: prefs?.pluginEnabled !== false,
+      };
     }
     case MSG.PREFS_SET: {
       const patch = message.prefs || message.patch || {};
@@ -647,8 +877,37 @@ async function handleMessage(message: any) {
       if (patch && typeof patch === 'object' && 'enterpriseWebHosts' in patch) {
         delete patch.enterpriseWebHosts;
       }
+      // Manual re-enable after rate-limit: clear expired/all disable clocks
+      if (patch && patch.pluginEnabled === true) {
+        try {
+          await ensureRateLimitMem();
+          const RL = rateLimitApi();
+          if (typeof RL?.clearExpiredRateDisables === 'function') {
+            rlMem.state = RL.clearExpiredRateDisables(rlMem.state, Date.now(), {
+              clearAll: true,
+            });
+            await PRTreeStorage.setRateLimitState(rlMem.state);
+          }
+        } catch {
+          /* ignore */
+        }
+      }
       const prefs = await PRTreeStorage.setExtensionPrefs(patch);
-      return { ok: true, prefs };
+      rlMem.pluginEnabled = prefs?.pluginEnabled !== false;
+      rlMem.loaded = true;
+      return { ok: true, prefs, rateLimit: rlMem.state };
+    }
+    case MSG.RATE_LIMIT_GET: {
+      await ensureRateLimitMem();
+      const RL = rateLimitApi();
+      if (typeof RL?.clearExpiredRateDisables === 'function') {
+        rlMem.state = RL.clearExpiredRateDisables(rlMem.state, Date.now());
+      }
+      return {
+        ok: true,
+        state: rlMem.state,
+        pluginEnabled: rlMem.pluginEnabled,
+      };
     }
     case MSG.ONBOARDING_GET: {
       const completed = await PRTreeStorage.getOnboardingCompleted();
@@ -1039,6 +1298,48 @@ async function handleMessage(message: any) {
         fetchImpl(),
         token, apiCtx);
       return { ok: true, result };
+    }
+    case MSG.TOGGLE_COMMENT_REACTION: {
+      const token = await tokenForMessage(message);
+      if (!token) throw new Error('GitHub PAT required to react on comments');
+      if (typeof PRTreeFetch.toggleCommentReaction !== 'function') {
+        throw new Error('Reaction API unavailable');
+      }
+      const result = await PRTreeFetch.toggleCommentReaction(
+        message.owner,
+        message.repo,
+        message.kind || 'issue',
+        message.opts || {},
+        fetchImpl(),
+        token,
+        apiCtx
+      );
+      return { ok: true, result };
+    }
+    case MSG.FETCH_REACTABLE_REACTORS: {
+      const token = await tokenForMessage(message);
+      if (!token) throw new Error('GitHub PAT required to load reaction users');
+      if (typeof PRTreeFetch.fetchReactableReactors !== 'function') {
+        throw new Error('Reaction reactors API unavailable');
+      }
+      const tracked = beginTrackedFetch(message.requestId);
+      try {
+        const groups = await PRTreeFetch.fetchReactableReactors(
+          message.nodeId,
+          tracked.fetch,
+          token,
+          apiCtx,
+          { first: message.first != null ? Number(message.first) : 5 }
+        );
+        return { ok: true, groups };
+      } catch (err) {
+        if (isAbortError(err)) {
+          return { ok: false, aborted: true, error: 'aborted' };
+        }
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
+      }
     }
     case MSG.UPDATE_PULL: {
       const token = await tokenForMessage(message);

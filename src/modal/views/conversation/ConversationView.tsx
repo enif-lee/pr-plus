@@ -15,6 +15,7 @@ import { UserLink } from '@common/UserLink';
 import { LabelLink } from '@common/LabelLink';
 import { formatWhen } from '@common/utils';
 import { Avatar } from '@common/Avatar';
+import { CommentReactions } from '@common/CommentReactions';
 import {
   IconChevronLeft,
   IconChevronRight,
@@ -110,6 +111,8 @@ function ConversationViewImpl(props: any) {
     presentation = 'modal',
     onDeleteIssueComment,
     onDeleteReviewComment,
+    onToggleReaction = null,
+    onLoadReactors = null,
     editingBody,
     onStartEditBody,
     onCancelEditBody,
@@ -133,6 +136,8 @@ function ConversationViewImpl(props: any) {
     onClearMilestone,
     onEnsureAllCommits = null,
     onEnsureAllFiles = null,
+    /** First open of Tags section — not on conversation mount. */
+    onEnsurePrTags = null,
     commitsLoading = false,
     filesLoading = false,
     /** Side panels loading without cache: { commits, checks, development } */
@@ -516,18 +521,44 @@ function ConversationViewImpl(props: any) {
       item.line != null &&
       (item.side || 'RIGHT') === 'RIGHT' &&
       detail.state === 'open';
-    return renderSearchableBody(item.body || '', anchorId || `item:${item.id}`, true, {
-      canApplySuggestion: canApply,
-      actionBusy,
-      onRegisterApply,
-      onApplySuggestion: (content: string) =>
-        onApplySuggestion?.({
-          path: item.path,
-          startLine: item.startLine || item.line,
-          endLine: item.line,
-          suggestion: content,
-        }),
-    });
+    const body = renderSearchableBody(
+      item.body || '',
+      anchorId || `item:${item.id}`,
+      true,
+      {
+        canApplySuggestion: canApply,
+        actionBusy,
+        onRegisterApply,
+        onApplySuggestion: (content: string) =>
+          onApplySuggestion?.({
+            path: item.path,
+            startLine: item.startLine || item.line,
+            endLine: item.line,
+            suggestion: content,
+          }),
+      }
+    );
+    // Issue comments: GitHub-style reaction row under body
+    if (kind === 'issue' && typeof onToggleReaction === 'function') {
+      return (
+        <>
+          {body}
+          <CommentReactions
+            reactions={item.reactions || []}
+            target={{
+              kind: 'issue',
+              commentId: item.id,
+              nodeId: item.nodeId || null,
+            }}
+            viewerLogin={detail?.viewerLogin}
+            busy={actionBusy}
+            onToggle={onToggleReaction}
+            onLoadReactors={onLoadReactors}
+          />
+        </>
+      );
+    }
+    return body;
   }
 
   function commentActions(kind: string | null, id: any, canDelete: boolean, body?: string) {
@@ -1377,6 +1408,8 @@ function ConversationViewImpl(props: any) {
       startLine: item.startLine ?? item.line,
       side: item.side || 'RIGHT',
       threadNodeId: item.threadNodeId || null,
+      nodeId: item.nodeId || null,
+      reactions: Array.isArray(item.reactions) ? item.reactions : [],
       resolved: Boolean(item.resolved),
       outdated: Boolean(item.outdated),
       pending: Boolean(item.pending),
@@ -1398,6 +1431,8 @@ function ConversationViewImpl(props: any) {
         outdated: Boolean(item.outdated),
         resolved: Boolean(item.resolved),
         threadNodeId: item.threadNodeId || null,
+        nodeId: item.nodeId || null,
+        reactions: Array.isArray(item.reactions) ? item.reactions : [],
       },
       replies: reviewReplies,
       threadNodeId: item.threadNodeId || null,
@@ -1528,6 +1563,8 @@ function ConversationViewImpl(props: any) {
           onRegisterEditorSave={onRegisterEditorSave}
           onApplySuggestion={onApplySuggestion}
           onRegisterApply={onRegisterApply}
+          onToggleReaction={onToggleReaction}
+          onLoadReactors={onLoadReactors}
           actionBusy={actionBusy}
           viewerLogin={detail.viewerLogin}
           prOpen={detail.state === 'open'}
@@ -1572,6 +1609,8 @@ function ConversationViewImpl(props: any) {
             onUploadFile={onUploadFile}
             linkCtx={linkCtx}
             mentionCandidates={mentionCandidates}
+            onToggleReaction={onToggleReaction}
+            onLoadReactors={onLoadReactors}
             renderBody={(body, anchor, mark) =>
               renderSearchableBody(body, anchor, mark)
             }
@@ -2099,6 +2138,9 @@ function ConversationViewImpl(props: any) {
           loading={
             Boolean(prTagsLoading) && !(Array.isArray(prTags) && prTags.length)
           }
+          onFirstOpen={() => {
+            if (typeof onEnsurePrTags === 'function') void onEnsurePrTags();
+          }}
         >
           <AsideTagsList
             tags={prTags || []}
@@ -2119,9 +2161,14 @@ function ConversationViewImpl(props: any) {
           collapsible
           defaultOpen={false}
           loading={
-            pendingCommits &&
+            (pendingCommits || commitsLoading) &&
             !(Array.isArray(detail.commits) && detail.commits.length)
           }
+          onFirstOpen={() => {
+            if (typeof onEnsureAllCommits === 'function') {
+              void onEnsureAllCommits();
+            }
+          }}
         >
           <AsideCommitsTimeline
             commits={detail.commits || []}
@@ -2146,6 +2193,11 @@ function ConversationViewImpl(props: any) {
             (pendingFiles || filesLoading) &&
             !(Array.isArray(detail.files) && detail.files.length)
           }
+          onFirstOpen={() => {
+            if (typeof onEnsureAllFiles === 'function') {
+              void onEnsureAllFiles();
+            }
+          }}
         >
           <AsideFilesTree
             files={detail.files || []}

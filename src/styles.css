@@ -215,9 +215,33 @@
   border: 1px solid var(--borderColor-default, #d0d7de);
   border-radius: 6px;
   background: var(--bgColor-muted, #f6f8fa);
-  font: 600 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font: 600 13px/1 ui-monospace, SFMono-Regular, Menlo, 'Apple Color Emoji',
+    'Segoe UI Symbol', monospace;
   color: var(--fgColor-default, #1f2328);
   box-shadow: 0 1px 0 rgba(31, 35, 40, 0.06);
+  box-sizing: border-box;
+}
+/* ⇧ paints shorter than ⌥/⌘ in most system fonts — match optical height */
+.prp-onboarding__kbd--shift,
+.prp-onboarding__kbd[data-key='shift'] {
+  font-size: 16px;
+  font-weight: 700;
+  padding: 0 6px;
+  letter-spacing: -0.04em;
+}
+.prp-onboarding__kbd-sep {
+  font-size: 12px;
+  color: var(--fgColor-muted, #656d76);
+  user-select: none;
+}
+/* Shared glyph scale when ⇧ appears inside combined labels (tips / opt hints) */
+.prp-key-glyph--shift {
+  display: inline-block;
+  font-size: 1.25em;
+  font-weight: 700;
+  line-height: 1;
+  transform: translateY(-0.04em);
+  vertical-align: baseline;
 }
 .prp-onboarding__tips {
   margin: 8px 0 0;

@@ -353,6 +353,23 @@ function __resetGithubPaletteWatchForTests() {
 }
 
 /**
+ * True when GH palette <dialog> is still in the CSS top layer but not open.
+ * This state blocks all page hit-testing (clicks appear dead).
+ * @param {Document|null|undefined} doc
+ */
+function isGithubCommandPaletteStuck(doc: any) {
+  if (!doc || typeof doc.getElementById !== 'function') return false;
+  try {
+    const d = findGithubCommandPaletteDialog(doc);
+    if (!d) return false;
+    if (d.open) return false;
+    return typeof d.matches === 'function' && d.matches(':modal');
+  } catch {
+    return false;
+  }
+}
+
+/**
  * GitHub command palette can leave its <dialog> in the CSS top layer
  * (`:modal`) after close while open=false / display:none. That blocks all
  * hit-testing on the page (elementFromPoint → html only). Force-release it.
@@ -361,10 +378,11 @@ function __resetGithubPaletteWatchForTests() {
  */
 function recoverGithubCommandPaletteTopLayer(doc: any) {
   if (!doc || typeof doc.getElementById !== 'function') return false;
-  const d =
-    doc.getElementById('command-palette-pjax-container') ||
-    doc.querySelector?.('dialog.js-command-palette-dialog');
+  const d = findGithubCommandPaletteDialog(doc);
   if (!d) return false;
+
+  // Legitimately open — never touch while dialog.open is true
+  if (d.open) return false;
 
   let isModal = false;
   try {
@@ -373,9 +391,6 @@ function recoverGithubCommandPaletteTopLayer(doc: any) {
     isModal = false;
   }
   if (!isModal) return false;
-
-  // Legitimately open + visible — do not touch
-  if (isGithubCommandPaletteOpen(doc) && d.open) return false;
 
   let recovered = false;
   try {
@@ -386,6 +401,15 @@ function recoverGithubCommandPaletteTopLayer(doc: any) {
   } catch {
     /* ignore */
   }
+  try {
+    if (d.hasAttribute?.('open')) {
+      d.removeAttribute('open');
+      recovered = true;
+    }
+  } catch {
+    /* ignore */
+  }
+  // close() often leaves :modal — reparent out of the top layer
   try {
     if (typeof d.matches === 'function' && d.matches(':modal')) {
       const parent = d.parentNode;
@@ -585,6 +609,7 @@ const prListFocusApi = {
   findFocusIndex,
   applyFocusToRows,
   isGithubCommandPaletteOpen,
+  isGithubCommandPaletteStuck,
   touchGithubCommandPaletteOpen,
   shouldIgnoreModalEscapeForGithubPalette,
   findGithubCommandPaletteDialog,

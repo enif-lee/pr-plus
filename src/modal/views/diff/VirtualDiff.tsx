@@ -870,6 +870,8 @@ function VirtualDiffImpl(props: any) {
     onRegisterEditorSave,
     onApplySuggestion,
     onRegisterApply,
+    onToggleReaction = null,
+    onLoadReactors = null,
     actionBusy,
     viewerLogin,
     prOpen,
@@ -1632,6 +1634,8 @@ function VirtualDiffImpl(props: any) {
                   onRegisterEditorSave={onRegisterEditorSave}
                   onApplySuggestion={onApplySuggestion}
                   onRegisterApply={onRegisterApply}
+                  onToggleReaction={onToggleReaction}
+                  onLoadReactors={onLoadReactors}
                   actionBusy={actionBusy}
                   viewerLogin={viewerLogin}
                   prOpen={prOpen}

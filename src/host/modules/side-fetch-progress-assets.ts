@@ -107,44 +107,28 @@
     const wrap = (name, p, meta: any = undefined) =>
       tl && typeof tl.span === 'function' ? tl.span(name, p, meta) : p;
 
+    // Files list is deferred: conversation aside / Diff first-need owns the
+    // fetch. Credit progress so open loadStage can finish without the list.
+    // Cache-hit opens that already settled files still skip the network.
     if (claim('files')) {
-      markPendingIfNeeded('files');
-      filesP =
-        typeof api.fetchPrFiles === 'function'
-          ? wrap(
-              'side.files',
-              api
-                .fetchPrFiles(owner, repo, number, {
-                  signal,
-                  headSha: headSha || null,
-                  gitattributesText: current.detail?.gitattributesText || '',
-                })
-                .then((pack) => {
-                  const files = Array.isArray(pack?.files)
-                    ? pack.files
-                    : Array.isArray(pack)
-                      ? pack
-                      : [];
-                  const gitattributesText =
-                    typeof pack?.gitattributesText === 'string'
-                      ? pack.gitattributesText
-                      : current.detail?.gitattributesText || '';
-                  settleSide('files', { files, gitattributesText });
-                  return pack;
-                })
-                .catch((err) => {
-                  failSide('files', err);
-                  return null;
-                }),
-              { headSha: headSha ? String(headSha).slice(0, 7) : null }
-            )
-          : Promise.resolve(null).then(() => {
-              if (alive() && !current.sideSettled?.files) {
-                setSideFlag('files', { pending: false, settled: true });
-              }
-              creditSide('files');
-              return null;
-            });
+      if (current.sideSettled?.files) {
+        creditSide('files');
+      } else if (
+        Array.isArray(current.detail?.files) &&
+        current.detail.files.length > 0
+      ) {
+        // Snapshot already has files (memory/IDB) — mark settled, no re-fetch
+        settleSide('files', {
+          files: current.detail.files,
+          gitattributesText: current.detail?.gitattributesText || '',
+        });
+      } else {
+        // Lazy: not pending (no skeleton on collapsed aside), not settled
+        if (alive()) {
+          setSideFlag('files', { pending: false, settled: false }, { render: false });
+        }
+        creditSide('files');
+      }
     }
 
     if (claim('comments')) {
@@ -232,32 +216,27 @@
             });
     }
 
+    // Commits list deferred (aside first-open / Diff commit picker).
     if (claim('commits')) {
-      markPendingIfNeeded('commits');
-      commitsP =
-        typeof api.fetchPrCommits === 'function'
-          ? wrap(
-              'side.commits',
-              api
-                .fetchPrCommits(owner, repo, number, { signal })
-                .then((commits) => {
-                  settleSide('commits', {
-                    commits: Array.isArray(commits) ? commits : [],
-                  });
-                  return commits;
-                })
-                .catch((err) => {
-                  failSide('commits', err);
-                  return null;
-                })
-            )
-          : Promise.resolve(null).then(() => {
-              if (alive() && !current.sideSettled?.commits) {
-                setSideFlag('commits', { pending: false, settled: true });
-              }
-              creditSide('commits');
-              return null;
-            });
+      if (current.sideSettled?.commits) {
+        creditSide('commits');
+      } else if (
+        Array.isArray(current.detail?.commits) &&
+        current.detail.commits.length > 0
+      ) {
+        settleSide('commits', {
+          commits: current.detail.commits,
+        });
+      } else {
+        if (alive()) {
+          setSideFlag(
+            'commits',
+            { pending: false, settled: false },
+            { render: false }
+          );
+        }
+        creditSide('commits');
+      }
     }
 
     // checks needs headSha — may be claimed later when core paints with sha
@@ -1185,5 +1164,99 @@
     // Has real title body from network/cache without sketch flag
     if (d.title != null && !d._sketch) return 2;
     return 1;
+  }
+
+  /**
+   * Newest reviewThreads fetch with warm-cache probe + escalate.
+   * Cold / forceFull → last:100. Warm match → last:10 early exit.
+   * Warm mismatch → probe then escalate to last:100.
+   *
+   * @param {string} owner
+   * @param {string} repo
+   * @param {number|string} number
+   * @param {{
+   *   signal?: AbortSignal|null,
+   *   cacheDetail?: any,
+   *   forceFull?: boolean,
+   * }} [opts]
+   * @returns {Promise<{
+   *   page: any,
+   *   pageSize: number,
+   *   warm: boolean,
+   *   escalated: boolean,
+   *   earlyExit: boolean,
+   * }>}
+   */
+  async function fetchNewestReviewThreadsAdaptive(
+    owner,
+    repo,
+    number,
+    opts: any = {}
+  ) {
+    const signal = opts?.signal || null;
+    const cacheDetail = opts?.cacheDetail || null;
+    const forceFull = Boolean(opts?.forceFull);
+    const RT =
+      typeof globalThis !== 'undefined' && globalThis.PRModalReviewThreads
+        ? globalThis.PRModalReviewThreads
+        : {};
+    const apiMax = Number(RT.REVIEW_THREADS_API_MAX) || 100;
+    const probeN = Number(RT.REVIEW_THREADS_WARM_PROBE_SIZE) || 10;
+    const hasWarm =
+      !forceFull &&
+      (typeof RT.hasUsableReviewThreadsCache === 'function'
+        ? Boolean(RT.hasUsableReviewThreadsCache(cacheDetail))
+        : Boolean(
+            cacheDetail &&
+              !cacheDetail._sketch &&
+              ((Array.isArray(cacheDetail.reviewThreads) &&
+                cacheDetail.reviewThreads.some((t) => t?.threadNodeId)) ||
+                (Array.isArray(cacheDetail.reviewComments) &&
+                  cacheDetail.reviewComments.some((c) => c?.threadNodeId)))
+          ));
+    const pageSize =
+      typeof RT.pickNewestThreadsPageSize === 'function'
+        ? Number(
+            RT.pickNewestThreadsPageSize({
+              warmCache: hasWarm,
+              forceFull,
+            })
+          ) || (hasWarm ? probeN : apiMax)
+        : hasWarm
+          ? probeN
+          : apiMax;
+
+    const fetchPage = (size) =>
+      globalThis.PRTreeFetch.fetchReviewThreadsPage(owner, repo, number, {
+        direction: 'newest',
+        cursor: null,
+        pageSize: size,
+        signal,
+      });
+
+    let page = await fetchPage(pageSize);
+    let escalated = false;
+    let earlyExit = false;
+    if (hasWarm && pageSize < apiMax) {
+      const shouldEsc =
+        typeof RT.shouldEscalateNewestThreadsProbe === 'function'
+          ? Boolean(
+              RT.shouldEscalateNewestThreadsProbe(page, cacheDetail, pageSize)
+            )
+          : true;
+      if (shouldEsc) {
+        page = await fetchPage(apiMax);
+        escalated = true;
+      } else {
+        earlyExit = true;
+      }
+    }
+    return {
+      page,
+      pageSize: escalated ? apiMax : pageSize,
+      warm: hasWarm,
+      escalated,
+      earlyExit,
+    };
   }
 

@@ -4,6 +4,7 @@
 import {
   ab,
   closeAll,
+  ensureSingleTab,
   evalInPage,
   open,
   press as abPress,
@@ -117,9 +118,14 @@ export function ensureBrowser() {
 }
 
 export function openPulls() {
-  open(PULLS_URL);
+  open(PULLS_URL); // open() already collapses to a single tab
   waitNetwork();
   waitMs(500);
+  // Profile can restore tabs after first paint — enforce solo tab again.
+  const solo = ensureSingleTab();
+  if (solo.closed > 0) {
+    log(`  closed ${solo.closed} extra tab(s); kept ${solo.kept}`);
+  }
   const title = evalInPage(`document.title`);
   assert(/pull/i.test(String(title)) || locationOk(), `expected pulls page, title=${title}`);
 }
@@ -151,7 +157,8 @@ export function closeOverlay() {
  */
 export function openPrByUrl(n) {
   closeOverlay();
-  open(prUrl(n));
+  open(prUrl(n)); // single-tab policy via open()
+  ensureSingleTab();
   waitNetwork();
   waitMs(800);
   const t = clickPrPlusToggleIfNeeded();
@@ -288,11 +295,25 @@ export function convFocusPin() {
       const anchor =
         focused.querySelector('[data-thread-focus-anchor], [data-search-anchor]') || focused;
       const ar = anchor.getBoundingClientRect();
+      const pin = Math.round(ar.top - sr.top);
+      const cardPin = Math.round(fr.top - sr.top);
+      const cardH = Math.round(fr.height);
+      const viewportH = Math.round(sr.height);
+      const topClip = Math.max(0, -cardPin);
+      const bottomClip = Math.max(0, cardPin + cardH - viewportH);
+      // Matches VirtualConversationList maximize: whole short card preferred.
+      // Allow a few px of chrome/subpixel clip before treating as "off-screen".
+      const fullyVisible =
+        cardH > 0 && topClip <= 8 && bottomClip <= 24;
       return {
         hasFocus: true,
-        pin: Math.round(ar.top - sr.top),
-        cardPin: Math.round(fr.top - sr.top),
-        cardH: Math.round(fr.height),
+        pin,
+        cardPin,
+        cardH,
+        viewportH,
+        topClip,
+        bottomClip,
+        fullyVisible,
         scrollTop: scrollEl.scrollTop,
         cls: focused.className.slice(0, 120),
       };
@@ -912,6 +933,7 @@ export function press(chord) {
 export function holdChord(chord, opts = {}) {
   const holdMs = opts.holdMs ?? 450;
   const repeatMs = opts.repeatMs ?? 40;
+  /** @type {'conv'|'diff'|'optHints'|null} */
   const sample = opts.sample || null;
 
   const { key, code, altKey, shiftKey, metaKey, ctrlKey } = parseChord(chord);
@@ -924,11 +946,13 @@ export function holdChord(chord, opts = {}) {
       const sampleMode = ${JSON.stringify(sample)};
       const spec = ${JSON.stringify({ key, code, altKey, shiftKey, metaKey, ctrlKey })};
       const target = document.documentElement;
-      const fire = (type, repeat) => {
+      const fire = (type, repeat, forceAlt) => {
+        const alt =
+          forceAlt != null ? Boolean(forceAlt) : Boolean(spec.altKey);
         const ev = new KeyboardEvent(type, {
           key: spec.key,
           code: spec.code,
-          altKey: spec.altKey,
+          altKey: alt,
           shiftKey: spec.shiftKey,
           metaKey: spec.metaKey,
           ctrlKey: spec.ctrlKey,
@@ -937,7 +961,12 @@ export function holdChord(chord, opts = {}) {
           composed: true,
           repeat: Boolean(repeat),
         });
+        // Prefer documentElement (product capture). Fan-out only for opt-hold latch.
         target.dispatchEvent(ev);
+        if (sampleMode === 'optHints' || pureAlt) {
+          window.dispatchEvent(ev);
+          document.dispatchEvent(ev);
+        }
       };
       const sampleScroll = () => {
         if (sampleMode === 'conv') {
@@ -948,54 +977,150 @@ export function holdChord(chord, opts = {}) {
         }
         return null;
       };
+      /** Mid-hold snapshot of OptBtnHint portals + overlay class. */
+      const sampleOptHints = () => {
+        const on = !!document.querySelector(
+          '.prp-opt-hints-on, .prp-overlay.prp-opt-hints-on'
+        );
+        const tips = [...document.querySelectorAll('kbd.prp-opt-btn-hint, .prp-opt-btn-hint')]
+          .map((el) => (el.textContent || '').replace(/\\s+/g, ' ').trim())
+          .filter(Boolean);
+        const hasEmoji = tips.some((t) => /E/.test(t));
+        const hasSubmit = tips.some((t) => /C|↵|Enter/.test(t));
+        return {
+          on,
+          tipCount: tips.length,
+          sample: tips.slice(0, 12),
+          hasEmoji,
+          hasSubmit,
+          at: performance.now(),
+        };
+      };
       window.__prpE2eHold = {
         done: false,
         events: 0,
         samples: [],
+        optSamples: [],
         scrollStart: sampleScroll(),
         scrollEnd: null,
         holdMs,
       };
       // Modifier keydown first so altKey-synced UI (opt-hold tips) arms.
-      if (spec.altKey) {
-        target.dispatchEvent(
-          new KeyboardEvent('keydown', {
+      if (spec.altKey || /^alt$/i.test(String(spec.key || ''))) {
+        const altDown = new KeyboardEvent('keydown', {
+          key: 'Alt',
+          code: 'AltLeft',
+          altKey: true,
+          bubbles: true,
+          cancelable: true,
+          composed: true,
+        });
+        window.dispatchEvent(altDown);
+        document.dispatchEvent(altDown);
+        target.dispatchEvent(altDown);
+      }
+      // Pure Alt hold: do not fire a second non-alt key; keep altKey latched
+      const pureAlt =
+        /^alt$/i.test(String(spec.key || '')) ||
+        (spec.altKey &&
+          !spec.shiftKey &&
+          !spec.metaKey &&
+          !spec.ctrlKey &&
+          /^alt$/i.test(String(spec.key || '')));
+      if (!pureAlt) {
+        // Pass real altKey for the chord (do not force Alt on Shift-only holds)
+        fire('keydown', false, Boolean(spec.altKey));
+        window.__prpE2eHold.events += 1;
+      } else {
+        window.__prpE2eHold.events += 1;
+      }
+      // Arm OptBtnHint via shared DOM latch (works across page/content worlds)
+      // + CustomEvent for content-script store.
+      const setOptHints = (active) => {
+        try {
+          const root = document.documentElement;
+          if (active) {
+            root.setAttribute('data-prp-opt-held', '1');
+            root.classList.add('prp-opt-held');
+            document.body?.classList?.add?.('prp-opt-held');
+          } else {
+            root.removeAttribute('data-prp-opt-held');
+            root.classList.remove('prp-opt-held');
+            document.body?.classList?.remove?.('prp-opt-held');
+          }
+          window.dispatchEvent(
+            new CustomEvent('prp-set-opt-hints', {
+              detail: { active: Boolean(active) },
+              bubbles: true,
+              composed: true,
+            })
+          );
+        } catch {
+          /* ignore */
+        }
+      };
+      // Only latch DOM for pure-Alt opt-hold sampling (avoid side effects on ⌥J/K holds)
+      if (sampleMode === 'optHints' || pureAlt) {
+        setOptHints(true);
+      }
+      // Immediate mid-hold sample after first Alt down (React may paint next frames)
+      if (sampleMode === 'optHints') {
+        window.__prpE2eHold.optSamples.push(sampleOptHints());
+      }
+      const t0 = performance.now();
+      const tick = () => {
+        const st = window.__prpE2eHold;
+        if (!st || st.done) return;
+        const elapsed = performance.now() - t0;
+        // Sample opt hints WHILE Alt is still held (before keyup)
+        if (sampleMode === 'optHints') {
+          // Re-assert hints each tick so React has frames to portal tips
+          setOptHints(true);
+          st.optSamples.push(sampleOptHints());
+        }
+        if (elapsed >= holdMs) {
+          // Last sample before releasing Alt / clearing hints
+          if (sampleMode === 'optHints') {
+            st.optSamples.push(sampleOptHints());
+          }
+          if (!pureAlt) fire('keyup', false, Boolean(spec.altKey));
+          if (spec.altKey || pureAlt) {
+            const altUp = new KeyboardEvent('keyup', {
+              key: 'Alt',
+              code: 'AltLeft',
+              altKey: false,
+              bubbles: true,
+              cancelable: true,
+              composed: true,
+            });
+            window.dispatchEvent(altUp);
+            document.dispatchEvent(altUp);
+            target.dispatchEvent(altUp);
+          }
+          setOptHints(false);
+          st.scrollEnd = sampleScroll();
+          st.done = true;
+          return;
+        }
+        if (!pureAlt) {
+          fire('keydown', true, Boolean(spec.altKey));
+          st.events += 1;
+        } else {
+          // Re-assert Alt held so content-script sync stays active
+          const altDown = new KeyboardEvent('keydown', {
             key: 'Alt',
             code: 'AltLeft',
             altKey: true,
             bubbles: true,
             cancelable: true,
             composed: true,
-          })
-        );
-      }
-      fire('keydown', false);
-      window.__prpE2eHold.events += 1;
-      const t0 = performance.now();
-      const tick = () => {
-        const st = window.__prpE2eHold;
-        if (!st || st.done) return;
-        const elapsed = performance.now() - t0;
-        if (elapsed >= holdMs) {
-          fire('keyup', false);
-          if (spec.altKey) {
-            target.dispatchEvent(
-              new KeyboardEvent('keyup', {
-                key: 'Alt',
-                code: 'AltLeft',
-                altKey: false,
-                bubbles: true,
-                cancelable: true,
-                composed: true,
-              })
-            );
-          }
-          st.scrollEnd = sampleScroll();
-          st.done = true;
-          return;
+            repeat: true,
+          });
+          window.dispatchEvent(altDown);
+          document.dispatchEvent(altDown);
+          target.dispatchEvent(altDown);
+          st.events += 1;
         }
-        fire('keydown', true);
-        st.events += 1;
         const s = sampleScroll();
         if (s != null) st.samples.push(s);
         setTimeout(tick, repeatMs);
@@ -1018,9 +1143,11 @@ export function holdChord(chord, opts = {}) {
     events: result.events,
     holdMs: result.holdMs,
     samples: result.samples || [],
+    /** Mid-hold OptBtnHint snapshots (when sample: 'optHints') */
+    optSamples: result.optSamples || [],
     scrollStart: result.scrollStart,
     scrollEnd: result.scrollEnd,
   };
 }
 
-export { ab, evalInPage, waitMs, waitFor, open, closeAll, ROOT };
+export { ab, evalInPage, waitMs, waitFor, open, closeAll, ensureSingleTab, ROOT };

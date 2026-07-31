@@ -858,8 +858,11 @@
   }
 
   function onPullsListKeydown(event) {
-    // Escape / any key while GH palette is closing: heal stuck top-layer first
-    if (!current.open) {
+    // Escape / close races leave GH dialog in :modal — always schedule heal
+    // (do not gate on current.open; embed can be open while top layer is stuck).
+    if (event.key === 'Escape' || event.key === 'Esc') {
+      scheduleGithubPaletteTopLayerHeal();
+    } else {
       recoverGithubPaletteIfStuck();
     }
 
@@ -1071,8 +1074,9 @@
   }
 
   function onPointerDownCapture(event) {
-    if (current.open) return;
+    // Heal stuck GH top layer before any early-return (incl. pr+ modal open)
     recoverGithubPaletteIfStuck();
+    if (current.open) return;
     // Pulls palette owns its own focus chrome
     if (isPullsPaletteOpen()) return;
     if (!isPullsListPage()) return;

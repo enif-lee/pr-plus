@@ -11,6 +11,39 @@ const read = (rel: string) =>
   fs.readFileSync(path.join(root, rel), 'utf8');
 
 describe('mutation write-through wiring', () => {
+  test('onPatchDetail write-through applies comments/threads slices', () => {
+    const fs = require('node:fs') as typeof import('node:fs');
+    const path = require('node:path') as typeof import('node:path');
+    const host = fs.readFileSync(
+      path.join(path.resolve(__dirname, '..'), 'src/host/modules/props-render-session.ts'),
+      'utf8'
+    );
+    // Comments must land in detail store — not meta-only apply
+    expect(host).toMatch(
+      /onPatchDetail[\s\S]*?applyComments[\s\S]*?applyThreadsFromMergedDetail/
+    );
+    expect(host).toMatch(/Object\.prototype\.hasOwnProperty\.call\(patch,\s*['"]comments['"]\)/);
+  });
+
+  test('issue comment post is pessimistic write-through (no pre-API local paint)', () => {
+    const fs = require('node:fs') as typeof import('node:fs');
+    const path = require('node:path') as typeof import('node:path');
+    const impl = fs.readFileSync(
+      path.join(path.resolve(__dirname, '..'), 'src/modal/app/PrModalApp.impl.tsx'),
+      'utf8'
+    );
+    // forceIssueComment block: post then commitCommentListPatch / appendIssueCommentToDetail
+    const m = impl.match(
+      /if \(forceIssueComment\) \{[\s\S]*?finally \{\s*setActionBusy\(false\);\s*\}/
+    );
+    expect(m).toBeTruthy();
+    const block = m![0];
+    expect(block).toMatch(/postIssueComment/);
+    expect(block).toMatch(/commitCommentListPatch|appendIssueCommentToDetail/);
+    // Must not soft-refresh immediately after (race wiped confirmed comment)
+    expect(block).not.toMatch(/await onRefresh/);
+  });
+
   test('merge path patches host via onPatchDetail with merged/state', () => {
     const impl = read('src/modal/app/PrModalApp.impl.tsx');
     const mergeFn = impl.slice(
@@ -85,6 +118,31 @@ describe('list bootstrap APIs', () => {
     expect(boot).toMatch(/patchCachedPr,/);
     expect(boot).toMatch(/removeCachedPr,/);
     expect(boot).toMatch(/replaceCachedPrs,/);
+  });
+});
+
+describe('PR→list resync wiring', () => {
+  test('closeModal re-renders the open PR row from detail (not full list reload)', () => {
+    const props = read('src/host/modules/props-render-session.ts');
+    expect(props).toMatch(/function scheduleListResyncAfterPrShell/);
+    expect(props).toMatch(/function applyOpenDetailToListRow/);
+    expect(props).toMatch(/function listRowFieldsFromDetail/);
+    expect(props).toMatch(/scheduleListResyncAfterPrShell\(listResync\)/);
+    // Single-row path from open detail — no Turbo soft-reload
+    expect(props).not.toMatch(/function softReloadPullsList/);
+    expect(props).toMatch(/applyListRowFromDetail/);
+    // Meta patches also write-through list row (labels/title/…)
+    expect(props).toMatch(/touchesListRow/);
+    expect(props).toMatch(/applyOpenDetailToListRow\(\{\s*number:\s*current\.number/);
+  });
+
+  test('DOM exports applyListRowFromDetail for labels/title/comments', () => {
+    const dom = read('src/dom.ts');
+    expect(dom).toMatch(/function updateListRowCommentCount/);
+    expect(dom).toMatch(/function applyListRowFromDetail/);
+    expect(dom).toMatch(/function applyListRowLabels/);
+    expect(dom).toMatch(/applyListRowFromDetail,/);
+    expect(dom).toMatch(/applyListRowLabels,/);
   });
 });
 

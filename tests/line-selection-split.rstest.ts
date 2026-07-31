@@ -509,6 +509,31 @@ describe('resolveSelectionIslandRevealPhase (shipped idle-reveal path)', () => {
     // Back must not be gated only for non-file
     expect(src).not.toMatch(/\{!isFileTarget \?\s*\([\s\S]*?Back[\s\S]*?\)\s*:\s*null\}/);
   });
+
+  test('SelectionCommentBar: selComposerFocused useState is unconditional (Rules of Hooks)', () => {
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const src = fs.readFileSync(
+      path.join(__dirname, '../src/modal/views/diff/SelectionCommentBar.tsx'),
+      'utf8'
+    );
+    // State for Opt-hold composer hints must not sit after phase==='actions' return
+    const stateIdx = src.indexOf(
+      'const [selComposerFocused, setSelComposerFocused] = useState(false)'
+    );
+    const actionsReturnIdx = src.indexOf("if (phase === 'actions')");
+    expect(stateIdx).toBeGreaterThan(0);
+    expect(actionsReturnIdx).toBeGreaterThan(0);
+    expect(stateIdx).toBeLessThan(actionsReturnIdx);
+    // Only one useState for this flag
+    expect(
+      (
+        src.match(
+          /const \[selComposerFocused,\s*setSelComposerFocused\]\s*=\s*useState/g
+        ) || []
+      ).length
+    ).toBe(1);
+  });
 });
 
 describe('file-level extractSelectedCodeText = whole file body', () => {

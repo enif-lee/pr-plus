@@ -75,6 +75,8 @@ export function flattenFilesToVirtualRows(files, mode = 'unified', options: any 
       author: c.author || '',
       avatarUrl: c.avatarUrl || c.avatar_url || '',
       commentId: c.id,
+      nodeId: c.nodeId || c.node_id || null,
+      reactions: Array.isArray(c.reactions) ? c.reactions : [],
       threadNodeId: c.threadNodeId || null,
       resolved: Boolean(c.resolved),
       outdated: Boolean(c.outdated),

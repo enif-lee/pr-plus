@@ -6,6 +6,10 @@ import {
   DEFAULT_SHORTCUT_MONITOR_SIZE,
   isShortcutMonitorEnabled,
   normalizeShortcutMonitorSize,
+  describeShortcutAction,
+  formatShortcutMonitorText,
+  buildShortcutMonitorFire,
+  SHORTCUT_MONITOR_CATALOG,
 } from '../src/modal/lib/shortcut-monitor';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const storageApi = require('../src/storage');
@@ -49,5 +53,39 @@ describe('storage.normalizePrefs shortcutMonitorSize', () => {
       storageApi.normalizePrefs({ shortcutMonitorSize: 'none' })
         .shortcutMonitorSize
     ).toBe('none');
+  });
+});
+
+describe('shortcut monitor never shows bare ?', () => {
+  test('context-thread and fold actions have chords', () => {
+    for (const id of [
+      'contextThreadFold',
+      'contextThreadGotoDiff',
+      'contextThreadComment',
+      'contextThreadResolve',
+      'contextThreadCollapse',
+      'contextThreadExpand',
+      'collapseActiveFile',
+      'expandActiveFile',
+      'toggleSidePanel',
+    ]) {
+      expect(SHORTCUT_MONITOR_CATALOG[id]).toBeTruthy();
+      const d = describeShortcutAction(id, true);
+      expect(d.shortcut).toBeTruthy();
+      expect(d.shortcut).not.toBe('?');
+      expect(formatShortcutMonitorText(d.shortcut, d.title)).not.toMatch(
+        /\[\?/
+      );
+    }
+  });
+
+  test('unknown action falls back to title-only (no ? keycap)', () => {
+    const d = describeShortcutAction('totallyUnknownActionZzz', true);
+    expect(d.shortcut).toBe('');
+    expect(formatShortcutMonitorText(d.shortcut, d.title)).toBe(
+      '[Totally Unknown Action Zzz]'
+    );
+    const fire = buildShortcutMonitorFire('totallyUnknownActionZzz', true);
+    expect(fire.text).not.toContain('?');
   });
 });

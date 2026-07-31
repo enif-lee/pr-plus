@@ -1,12 +1,31 @@
 /** @module modal/lib/markdown-composer */
 /**
- * Pure markdown segment helpers + mention / slash composer affordances.
+ * Pure markdown segment helpers + mention / slash / emoji composer affordances.
  *
  * Supported slash commands (bounded set):
  *   /approve /nit /blocking /question /suggestion /lgtm
  *
  * Mentions: filter collaborators by prefix after '@'.
+ * Emoji: `:` typeahead → `:shortcode:` (see emoji-shortcodes).
  */
+
+import {
+  EMOJI_SHORTCODES,
+  detectEmojiTrigger,
+  filterEmojis,
+  applyEmojiInsertion,
+  emojiMenuLabel,
+  expandEmojiShortcodes,
+} from './emoji-shortcodes';
+
+export {
+  EMOJI_SHORTCODES,
+  detectEmojiTrigger,
+  filterEmojis,
+  applyEmojiInsertion,
+  emojiMenuLabel,
+  expandEmojiShortcodes,
+};
 
 /** @type {Array<{ id: string, label: string, insert: string, description: string }>} */
 export const SLASH_COMMANDS = [
@@ -152,3 +171,5 @@ export function applySlashInsertion(text, trigger, command) {
   if (!trigger || !command) return { text: String(text || ''), cursor: String(text || '').length };
   return applyInsertion(text, trigger.start, trigger.end, command.insert);
 }
+
+// applyEmojiInsertion re-exported from emoji-shortcodes above

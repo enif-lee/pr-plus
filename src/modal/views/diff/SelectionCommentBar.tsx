@@ -48,6 +48,8 @@ export function SelectionCommentBar(props: any) {
   const selection = selectionProp ?? storeSelection;
 
   const [phaseLocal, setPhaseLocal] = useState<SelectionIslandPhase>('actions');
+  // Must be unconditional (before phase === 'actions' early return) — Rules of Hooks.
+  const [selComposerFocused, setSelComposerFocused] = useState(false);
 
   const isFileTarget =
     selection?.kind === 'file' || selection?.subjectType === 'file';
@@ -249,32 +251,66 @@ export function SelectionCommentBar(props: any) {
       }${isFileTarget ? ' prp-selection-island--file' : ''}`}
       data-phase="comment"
       data-subject={norm.subjectType || 'line'}
+      data-prp-composer-root="1"
+      data-prp-composer-kind="selection"
       onMouseDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
     >
-      <MarkdownComposer
-        value={draft}
-        onChange={onDraft}
-        placeholder={
-          isFileTarget
-            ? 'Write a file-level review comment…'
-            : 'Write a review comment…'
-        }
-        forceOpen
-        compact={false}
-        rows={3}
-        disabled={actionBusy}
-        showTabs
-        onUploadFile={onUploadFile}
-        linkCtx={linkCtx}
-        mentionCandidates={mentionCandidates}
-      />
+      <div className="prp-opt-hint-host prp-selection-island__composer-field">
+        {selComposerFocused ? (
+          <>
+            <OptBtnHint label="⌥E" preferredPlacement="top" />
+            <OptBtnHint label="⌥I" preferredPlacement="top" />
+          </>
+        ) : null}
+        <MarkdownComposer
+          value={draft}
+          onChange={onDraft}
+          placeholder={
+            isFileTarget
+              ? 'Write a file-level review comment…'
+              : 'Write a review comment…'
+          }
+          forceOpen
+          compact={false}
+          rows={3}
+          disabled={actionBusy}
+          showTabs
+          onUploadFile={onUploadFile}
+          linkCtx={linkCtx}
+          mentionCandidates={mentionCandidates}
+          onSubmitRequest={onSubmitImmediate}
+          onComposerFocusChange={setSelComposerFocused}
+        />
+      </div>
       <div className="prp-composer__row">
-        <Button size="sm" variant="primary" disabled={!canSubmit} onClick={onSubmitImmediate}>
-          Comment
-        </Button>
-        <Button size="sm" disabled={!canSubmit} onClick={onSubmitPending}>
-          {pendingCount > 0 ? 'Add comment' : 'Start review'}
+        <span className="prp-opt-hint-host inline-flex">
+          {selComposerFocused ? (
+            <OptBtnHint label="⌥C · ⌘↵" preferredPlacement="top" />
+          ) : null}
+          <Button
+            size="sm"
+            variant="primary"
+            loading={Boolean(actionBusy)}
+            disabled={!canSubmit}
+            onClick={onSubmitImmediate}
+            data-prp-composer-submit="1"
+            title="Comment (⌥C · ⌘↵)"
+          >
+            {actionBusy ? 'Submitting…' : 'Comment'}
+          </Button>
+        </span>
+        <Button
+          size="sm"
+          loading={Boolean(actionBusy)}
+          disabled={!canSubmit}
+          onClick={onSubmitPending}
+        >
+          {actionBusy
+            ? 'Working…'
+            : pendingCount > 0
+              ? 'Add comment'
+              : 'Start review'}
         </Button>
         <Button
           size="sm"

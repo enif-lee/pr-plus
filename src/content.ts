@@ -201,7 +201,20 @@
     }
   }
 
+  async function pluginAllowed() {
+    try {
+      const prefs = await globalThis.PRTreeStorage?.getExtensionPrefs?.();
+      return prefs?.pluginEnabled !== false;
+    } catch {
+      return true;
+    }
+  }
+
   async function enableFeatures() {
+    if (!(await pluginAllowed())) {
+      disableFeatures();
+      return;
+    }
     if (featuresEnabled) {
       app.scheduleSync?.(0);
       return;
@@ -248,13 +261,25 @@
     // Bridge may broadcast TOKEN_CHANGED without the secret
     try {
       chrome.runtime?.onMessage?.addListener((message) => {
-        if (message?.type !== 'PR_TREE_TOKEN_CHANGED') return false;
-        void (async () => {
-          const ok = await tokenConfigured();
-          if (ok) await enableFeatures();
-          else disableFeatures();
-        })();
-        // Sync listener: do not return true (no async sendResponse)
+        if (message?.type === 'PR_TREE_TOKEN_CHANGED') {
+          void (async () => {
+            const ok = await tokenConfigured();
+            if (ok) await enableFeatures();
+            else disableFeatures();
+          })();
+          return false;
+        }
+        // Master enable + rate-limit auto-disable
+        if (message?.type === 'PR_TREE_PREFS_CHANGED') {
+          const enabled = message?.prefs?.pluginEnabled !== false;
+          if (!enabled) disableFeatures();
+          else void enableFeatures();
+          return false;
+        }
+        if (message?.type === 'PR_TREE_RATE_LIMIT_CHANGED') {
+          if (message?.pluginEnabled === false) disableFeatures();
+          return false;
+        }
         return false;
       });
     } catch {
@@ -267,6 +292,14 @@
       globalThis.PRTreeStorage?.watchGithubToken?.((token) => {
         if (token) void enableFeatures();
         else disableFeatures();
+      });
+    } catch {
+      /* ignore */
+    }
+    try {
+      globalThis.PRTreeStorage?.watchExtensionPrefs?.((prefs) => {
+        if (prefs?.pluginEnabled === false) disableFeatures();
+        else void enableFeatures();
       });
     } catch {
       /* ignore */
