@@ -1321,6 +1321,14 @@ export function buildPrSearchPaletteCommands(
       if (!Number.isFinite(num) || num <= 0) return null;
       const title = String(pr?.title || '').trim() || `Pull request #${num}`;
       const author = String(pr?.author || pr?.user?.login || '').trim();
+      const authorKey = author.toLowerCase();
+      const avatarFromMap =
+        pr?.avatarUrls && typeof pr.avatarUrls === 'object'
+          ? pr.avatarUrls[authorKey] || pr.avatarUrls[author]
+          : '';
+      const authorAvatarUrl = String(
+        pr?.authorAvatarUrl || pr?.avatarUrl || avatarFromMap || ''
+      ).trim();
       const head = String(pr?.headRef || pr?.head?.ref || '').trim();
       const base = String(pr?.baseRef || pr?.base?.ref || '').trim();
       const refs = head || base ? `${head || '?'} → ${base || '?'}` : '';
@@ -1347,6 +1355,7 @@ export function buildPrSearchPaletteCommands(
           .join(' · '),
         number: num,
         author: author || undefined,
+        authorAvatarUrl: authorAvatarUrl || undefined,
         headRef: head || undefined,
         baseRef: base || undefined,
         draft: Boolean(pr?.draft),
@@ -1425,8 +1434,17 @@ function rebuildPrSearchItems(s: PalettePrSearchState): any[] {
 }
 
 /**
- * Apply a new query: parse, sync cache filter, and mark loading when PR search
- * is active (host should kick async next).
+ * Whether the host/modal should kick a debounced remote PR search.
+ * Bare `#` / `#$` (empty term) is cache-only — no network until the user types
+ * a search term after the prefix.
+ */
+export function shouldKickPrSearchAsync(term: unknown): boolean {
+  return String(term ?? '').trim().length > 0;
+}
+
+/**
+ * Apply a new query: parse, sync cache filter, and mark loading when a remote
+ * search should follow (non-empty term). Bare `#` stays cache-only.
  */
 export function applyPrSearchQuery(
   state: PalettePrSearchState | null | undefined,
@@ -1438,13 +1456,14 @@ export function applyPrSearchQuery(
     return createPalettePrSearchState();
   }
   const cacheHits = matchCachedPrsForSearch(cachedPrs, parsed.term);
+  const kickAsync = shouldKickPrSearchAsync(parsed.term);
   const next: PalettePrSearchState = {
     isPrSearch: true,
     term: parsed.term,
     cacheHits,
     asyncHits: [],
     items: cacheHits.slice(),
-    loading: true,
+    loading: kickAsync,
     error: null,
   };
   next.items = rebuildPrSearchItems(next);

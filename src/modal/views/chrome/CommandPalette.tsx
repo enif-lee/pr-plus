@@ -11,6 +11,7 @@ import {
   applyPrSearchAsyncResult,
   applyPrSearchAsyncError,
   createPalettePrSearchState,
+  shouldKickPrSearchAsync,
   buildModalPaletteHelpEntries,
   type PalettePrSearchState,
 } from '@lib/command-palette';
@@ -35,6 +36,87 @@ export function stepPaletteFocusIndex(
   if (next < 0) next = n - 1;
   if (next >= n) next = 0;
   return next;
+}
+
+/** Author avatar or initials fallback — matches pulls-palette host chrome. */
+function PalettePrAvatar({
+  author,
+  authorAvatarUrl,
+}: {
+  author?: string;
+  authorAvatarUrl?: string;
+}) {
+  const login = String(author || '').trim();
+  const url = String(authorAvatarUrl || '').trim();
+  const initials = login ? login.slice(0, 2).toUpperCase() : '?';
+  if (url) {
+    return (
+      <img
+        className="prp-pp-avatar"
+        src={url}
+        alt=""
+        width={28}
+        height={28}
+        loading="lazy"
+        decoding="async"
+      />
+    );
+  }
+  return (
+    <span className="prp-pp-avatar prp-pp-avatar--fallback" aria-hidden="true">
+      {initials}
+    </span>
+  );
+}
+
+/**
+ * Rich PR row body: title + #num · avatar @author · Draft · head → base.
+ * Same structure/classes as `renderPullsPalettePrBody` in host pulls-palette.
+ */
+function PalettePrBody({ item }: { item: any }) {
+  const num = item?.number != null ? Number(item.number) : NaN;
+  const author = String(item?.author || '').trim();
+  const head = String(item?.headRef || '').trim();
+  const base = String(item?.baseRef || '').trim();
+  return (
+    <span className="prp-pp-item__main">
+      <span className="prp-pp-item__title">{item.title || ''}</span>
+      <span className="prp-pp-item__meta">
+        {Number.isFinite(num) ? (
+          <span className="prp-pp-pr-num">#{num}</span>
+        ) : null}
+        {author ? (
+          <span className="prp-pp-author">
+            <PalettePrAvatar
+              author={author}
+              authorAvatarUrl={item.authorAvatarUrl}
+            />
+            <span className="prp-pp-author__login">@{author}</span>
+          </span>
+        ) : null}
+        {item?.draft ? <span className="prp-pp-draft">Draft</span> : null}
+        {head || base ? (
+          <span className="prp-pp-branches">
+            {head ? (
+              <span className="prp-pp-branch" title={head}>
+                {head}
+              </span>
+            ) : null}
+            {head && base ? (
+              <span className="prp-pp-branch-arrow" aria-hidden="true">
+                →
+              </span>
+            ) : null}
+            {base ? (
+              <span className="prp-pp-branch prp-pp-branch--base" title={base}>
+                {base}
+              </span>
+            ) : null}
+          </span>
+        ) : null}
+      </span>
+    </span>
+  );
 }
 
 /**
@@ -103,7 +185,9 @@ export function CommandPalette({
   const prSearchSeqRef = useRef(0);
   const prSearchAbortRef = useRef<AbortController | null>(null);
 
-  // Cache-first + debounced async PR search (leaf-owned; App only injects fetch)
+  // Cache-first + debounced async PR search (leaf-owned; App only injects fetch).
+  // Bare `#` / `#$` is cache-only — remote fetch starts only after a non-empty
+  // term settles past the debounce window.
   useEffect(() => {
     if (!open) {
       setPrSearch(
@@ -131,24 +215,27 @@ export function CommandPalette({
     const cached = Array.isArray(openPulls) ? openPulls : [];
     const next = applyPrSearchQuery(null, query, cached);
     setPrSearch(next);
-    if (!next.isPrSearch) {
-      try {
-        prSearchAbortRef.current?.abort?.();
-      } catch {
-        /* ignore */
-      }
-      prSearchAbortRef.current = null;
-      return;
-    }
-    const term = next.term;
+    // Invalidate any in-flight request whenever the query changes.
     const seq = ++prSearchSeqRef.current;
-    const ac =
-      typeof AbortController !== 'undefined' ? new AbortController() : null;
     try {
       prSearchAbortRef.current?.abort?.();
     } catch {
       /* ignore */
     }
+    prSearchAbortRef.current = null;
+    if (!next.isPrSearch) {
+      return;
+    }
+    const term = next.term;
+    const kickAsync =
+      typeof shouldKickPrSearchAsync === 'function'
+        ? shouldKickPrSearchAsync(term)
+        : String(term || '').trim().length > 0;
+    if (!kickAsync) {
+      return;
+    }
+    const ac =
+      typeof AbortController !== 'undefined' ? new AbortController() : null;
     prSearchAbortRef.current = ac;
     const timer = setTimeout(() => {
       void (async () => {
@@ -523,28 +610,32 @@ export function CommandPalette({
                         onClick={() => runAt(i)}
                         onMouseEnter={() => setFocusIndex(i)}
                       >
-                        <span className="prp-pp-item__main">
-                          <span className="prp-pp-item__title">{c.title}</span>
-                          <span className="prp-pp-item__meta prp-pp-item__meta--action">
-                            {c.section ? (
-                              <span className="prp-pp-action-section">
-                                {c.section}
-                              </span>
-                            ) : null}
-                            {Array.isArray(c.aliases) && c.aliases.length
-                              ? c.aliases.map((a: string) => (
-                                  <kbd key={a} className="prp-pp-alias">
-                                    {a}
-                                  </kbd>
-                                ))
-                              : null}
-                            {c.description ? (
-                              <span className="prp-pp-action-desc">
-                                {c.description}
-                              </span>
-                            ) : null}
+                        {isPr && !isStatus ? (
+                          <PalettePrBody item={c} />
+                        ) : (
+                          <span className="prp-pp-item__main">
+                            <span className="prp-pp-item__title">{c.title}</span>
+                            <span className="prp-pp-item__meta prp-pp-item__meta--action">
+                              {c.section ? (
+                                <span className="prp-pp-action-section">
+                                  {c.section}
+                                </span>
+                              ) : null}
+                              {Array.isArray(c.aliases) && c.aliases.length
+                                ? c.aliases.map((a: string) => (
+                                    <kbd key={a} className="prp-pp-alias">
+                                      {a}
+                                    </kbd>
+                                  ))
+                                : null}
+                              {c.description ? (
+                                <span className="prp-pp-action-desc">
+                                  {c.description}
+                                </span>
+                              ) : null}
+                            </span>
                           </span>
-                        </span>
+                        )}
                         {shortcut ? (
                           <kbd className="prp-pp-digit">{shortcut}</kbd>
                         ) : null}

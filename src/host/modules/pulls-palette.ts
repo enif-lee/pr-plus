@@ -129,6 +129,8 @@
   /**
    * Cache-first PR search already applied via buildPullsPaletteItems; kick a
    * debounced network re-fetch of open pulls and merge extra matches.
+   * Bare `#` / `#$` (empty term) stays cache-only — no network until the user
+   * types a non-empty term after the prefix (still debounced).
    */
   function schedulePullsPalettePrSearch() {
     const api = pullsPaletteApi();
@@ -140,9 +142,8 @@
       resetPullsPalettePrSearch();
       return;
     }
-    // Immediate: drop prior async hits (stale term), show loading + cache only
+    // Drop prior async hits (stale term) immediately
     pullsPalettePrSearchAsyncHits = [];
-    pullsPalettePrSearchLoading = true;
     pullsPalettePrSearchError = null;
     if (pullsPalettePrSearchTimer != null) {
       try {
@@ -150,6 +151,7 @@
       } catch {
         /* ignore */
       }
+      pullsPalettePrSearchTimer = null;
     }
     try {
       pullsPalettePrSearchAbort?.abort?.();
@@ -158,6 +160,17 @@
     }
     pullsPalettePrSearchAbort = null;
     const term = String(parsed.term || '');
+    const kickAsync =
+      typeof api?.shouldKickPrSearchAsync === 'function'
+        ? api.shouldKickPrSearchAsync(term)
+        : term.trim().length > 0;
+    if (!kickAsync) {
+      // Bare prefix: cache-only, no loading spinner / network
+      pullsPalettePrSearchLoading = false;
+      pullsPalettePrSearchSeq += 1;
+      return;
+    }
+    pullsPalettePrSearchLoading = true;
     const seq = ++pullsPalettePrSearchSeq;
     pullsPalettePrSearchTimer = setTimeout(() => {
       pullsPalettePrSearchTimer = null;

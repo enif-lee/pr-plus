@@ -17,6 +17,7 @@ import {
   applyPrSearchAsyncResult,
   applyPrSearchAsyncError,
   createPalettePrSearchState,
+  shouldKickPrSearchAsync,
   buildModalPaletteHelpEntries,
   listRequiredPaletteShortcutCoverage,
   checkPaletteShortcutCoverage,
@@ -52,8 +53,10 @@ const CACHED_PRS = [
     number: 42,
     title: 'Fix login timeout',
     author: 'alice',
+    authorAvatarUrl: 'https://example.com/alice.png',
     headRef: 'fix-login',
     baseRef: 'main',
+    draft: false,
   },
   {
     number: 99,
@@ -61,6 +64,7 @@ const CACHED_PRS = [
     author: 'bob',
     headRef: 'dark-mode',
     baseRef: 'main',
+    draft: true,
   },
   {
     number: 7,
@@ -133,6 +137,23 @@ describe('matchCachedPrsForSearch + mergePrSearchResults', () => {
 });
 
 describe('PR search loading state transitions', () => {
+  test('bare # is cache-only (no async kick / loading)', () => {
+    expect(shouldKickPrSearchAsync('')).toBe(false);
+    expect(shouldKickPrSearchAsync('  ')).toBe(false);
+    expect(shouldKickPrSearchAsync('dark')).toBe(true);
+
+    const bare = applyPrSearchQuery(null, '#', CACHED_PRS);
+    expect(bare.isPrSearch).toBe(true);
+    expect(bare.term).toBe('');
+    expect(bare.loading).toBe(false);
+    expect(bare.items.map((p) => p.number)).toEqual([42, 99, 7]);
+
+    const bareDollar = applyPrSearchQuery(null, '#$', CACHED_PRS);
+    expect(bareDollar.isPrSearch).toBe(true);
+    expect(bareDollar.term).toBe('');
+    expect(bareDollar.loading).toBe(false);
+  });
+
   test('loading true only while in-flight search pending', () => {
     let state = createPalettePrSearchState();
     expect(state.loading).toBe(false);
@@ -198,6 +219,23 @@ describe('buildPrSearchPaletteCommands open path payload', () => {
       expect(c.payload.repo).toBe('app');
       expect(String(c.href)).toMatch(/\/pull\/\d+/);
     }
+  });
+
+  test('rows carry rich PR chrome fields for list-parity rendering', () => {
+    const cmds = buildPrSearchPaletteCommands(CACHED_PRS, {
+      owner: 'acme',
+      repo: 'app',
+    });
+    const first = cmds.find((c) => c.number === 42);
+    expect(first?.author).toBe('alice');
+    expect(first?.authorAvatarUrl).toBe('https://example.com/alice.png');
+    expect(first?.headRef).toBe('fix-login');
+    expect(first?.baseRef).toBe('main');
+    expect(first?.draft).toBe(false);
+
+    const draft = cmds.find((c) => c.number === 99);
+    expect(draft?.draft).toBe(true);
+    expect(draft?.author).toBe('bob');
   });
 });
 
@@ -389,6 +427,11 @@ describe('pulls palette PR search + help (shipped pulls-palette)', () => {
     expect(host).toMatch(
       /function schedulePullsPalettePrSearch[\s\S]*?pullsPalettePrSearchAsyncHits\s*=\s*\[\s*\]/
     );
+    // Bare `#` must not schedule network (kickAsync gate + debounce only when true)
+    expect(host).toMatch(/shouldKickPrSearchAsync|kickAsync/);
+    expect(host).toMatch(
+      /function schedulePullsPalettePrSearch[\s\S]*?setTimeout\([\s\S]*?180/
+    );
   });
 });
 
@@ -452,9 +495,20 @@ describe('structural: palette UIs ship help + PR-search loading', () => {
     expect(ui).toMatch(/buildPrSearchLoadingCommand/);
     expect(ui).toMatch(/parsePalettePrSearchQuery/);
     expect(ui).toMatch(/applyPrSearchQuery/);
+    expect(ui).toMatch(/shouldKickPrSearchAsync/);
     expect(ui).toMatch(/searchPrs/);
     expect(ui).toMatch(/data-prp-pp-loading/);
     expect(ui).toMatch(/prp-pp-item--loading/);
+    // Debounced remote only after non-empty term
+    expect(ui).toMatch(/setTimeout/);
+    expect(ui).toMatch(/180/);
+    // PR-search rows mirror pulls list palette chrome
+    expect(ui).toMatch(/prp-pp-pr-num/);
+    expect(ui).toMatch(/prp-pp-avatar/);
+    expect(ui).toMatch(/prp-pp-author__login/);
+    expect(ui).toMatch(/prp-pp-branch/);
+    expect(ui).toMatch(/prp-pp-draft/);
+    expect(ui).toMatch(/PalettePrBody/);
   });
 
   test('pulls host palette has help + async PR search + loading paint', () => {

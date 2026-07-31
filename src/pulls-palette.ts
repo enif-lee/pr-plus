@@ -622,6 +622,15 @@ function parsePalettePrSearchQuery(raw: any) {
 }
 
 /**
+ * Bare `#` / `#$` is cache-only; remote search only after a non-empty term.
+ * @param {unknown} term
+ * @returns {boolean}
+ */
+function shouldKickPrSearchAsync(term: any) {
+  return String(term ?? '').trim().length > 0;
+}
+
+/**
  * Sync filter of cached PRs by number and/or title/name.
  * @param {object[]} prs
  * @param {string} term
@@ -1312,6 +1321,7 @@ const pullsPaletteApi = {
   buildPullsPaletteHelpEntries,
   listRequiredPullsPaletteShortcutCoverage,
   parsePalettePrSearchQuery,
+  shouldKickPrSearchAsync,
   matchCachedPrsForSearch,
   mergePrSearchResults,
   buildCreatePullRequestUrl,
