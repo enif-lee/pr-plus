@@ -1,7 +1,10 @@
 import React, { useMemo, memo, useEffect, useState, useCallback } from 'react';
 // memo for render isolation
 import { parseSuggestionFences } from '@lib/pr-edit-api';
-import { splitMarkdownSegments } from '@lib/markdown-composer';
+import {
+  splitMarkdownSegments,
+  expandEmojiShortcodes,
+} from '@lib/markdown-composer';
 import { markSearchInHtml } from '@lib/search-index';
 import { onHljsLanguagesChanged } from '@lib/hljs-lazy';
 import { MermaidBlock } from './MermaidBlock';
@@ -111,7 +114,12 @@ function MarkdownViewImpl({
         }
         // hljsEpoch invalidates after lazy language load so fences re-highlight
         void hljsEpoch;
-        let html = renderMdHtml(seg.content || '', linkCtx);
+        // Expand :shortcode: for preview + feed (GitHub-style)
+        const mdSource =
+          typeof expandEmojiShortcodes === 'function'
+            ? expandEmojiShortcodes(seg.content || '')
+            : seg.content || '';
+        let html = renderMdHtml(mdSource, linkCtx);
         if (q && typeof markSearchInHtml === 'function') {
           html = markSearchInHtml(html, q, {
             currentStart: searchCurrentStart,

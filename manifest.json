@@ -57,7 +57,9 @@
         "src/modal/pure/page-embed.js",
         "src/modal/pure/floating-scrollbar.js",
         "src/modal/pure/auto-refresh.js",
+        "src/modal/pure/rate-limit.js",
         "src/modal/pure/open-pulls-lifecycle.js",
+        "src/modal/pure/review-threads.js",
         "src/modal/dist/pr-modal.bundle.js",
         "src/pr-modal-host.js"
       ],

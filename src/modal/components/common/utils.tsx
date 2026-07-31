@@ -411,10 +411,30 @@ export function renderMdHtml(raw, linkCtx) {
   try {
     const md = (globalThis as any).marked;
     const purify = (globalThis as any).DOMPurify;
-    if (!md) return escapeHtml(raw).replace(/\n/g, '<br/>');
+    // Expand :shortcode: → Unicode before markdown parse (preview + feed)
+    let source = String(raw ?? '');
+    try {
+      const expand =
+        typeof (globalThis as any).PRModalMarkdownComposer
+          ?.expandEmojiShortcodes === 'function'
+          ? (globalThis as any).PRModalMarkdownComposer.expandEmojiShortcodes
+          : null;
+      if (expand) source = expand(source);
+      else {
+        // Bundled modal path: direct import not available here; inline light expand
+        // via marked-time dynamic require avoided — MarkdownView uses expand pre-call.
+      }
+    } catch {
+      /* keep raw */
+    }
+    if (!md) return escapeHtml(source).replace(/\n/g, '<br/>');
     configureMarkedCodeHighlight(md);
     let parsed =
-      typeof md.parse === 'function' ? md.parse(raw) : typeof md === 'function' ? md(raw) : raw;
+      typeof md.parse === 'function'
+        ? md.parse(source)
+        : typeof md === 'function'
+          ? md(source)
+          : source;
     const html = typeof parsed === 'string' ? parsed : String(parsed);
     // Keep hljs class names on pre/code (default purify already allows class;
     // be explicit for extension builds that tighten ALLOWED_ATTR).

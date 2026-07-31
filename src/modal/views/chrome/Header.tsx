@@ -29,6 +29,12 @@ import { LAYOUT_DIFF } from '@lib/layout-mode';
 import { headerReviewCompact } from '@lib/header-layout';
 import { branchRefCopyText, copyTextToClipboard } from '@lib/copy-to-clipboard';
 import { buildUnifiedReviewerRows } from '@lib/searchable-select';
+import {
+  detectEmojiTrigger,
+  filterEmojis,
+  applyEmojiInsertion,
+  emojiMenuLabel,
+} from '@lib/markdown-composer';
 import { reviewStatusTone } from '@common/utils';
 import { hasChecksData } from '../conversation/ChecksPanel';
 import {
@@ -38,6 +44,7 @@ import {
 import { useModalStore } from '../../store/modal-store';
 import { useDetailUiStore } from '../../store/detail-ui-store';
 import './Header.css';
+import '../../components/common/MarkdownComposer.css';
 
 /** 1–4 reviewers all shown; 5+ → first 3 + “+N” chip. */
 const HEADER_REVIEWER_MAX_FULL = 4;
@@ -543,6 +550,12 @@ export function Header(props: any) {
   const [titleDraft, setTitleDraft] = useState('');
   /** Input width matched to the rendered h2 title (px) when edit starts. */
   const [titleInputWidthPx, setTitleInputWidthPx] = useState<number | null>(null);
+  /** `:` emoji typeahead while editing title */
+  const [titleEmojiMenu, setTitleEmojiMenu] = useState<{
+    items: any[];
+    trigger: { query: string; start: number; end: number };
+  } | null>(null);
+  const [titleEmojiIndex, setTitleEmojiIndex] = useState(0);
   /** Which branch chip last copied: 'base' | 'head' | null */
   const [copiedRef, setCopiedRef] = useState<string | null>(null);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -618,9 +631,48 @@ export function Header(props: any) {
     setEditingTitle(false);
     setTitleDraft('');
     setTitleInputWidthPx(null);
+    setTitleEmojiMenu(null);
+    setTitleEmojiIndex(0);
   };
 
+  function syncTitleEmojiMenu(text: string, cursor: number) {
+    if (typeof detectEmojiTrigger !== 'function') {
+      setTitleEmojiMenu(null);
+      return;
+    }
+    const trig = detectEmojiTrigger(text, cursor);
+    if (!trig) {
+      setTitleEmojiMenu(null);
+      return;
+    }
+    const items =
+      typeof filterEmojis === 'function' ? filterEmojis(trig.query, 12) : [];
+    setTitleEmojiMenu({ items, trigger: trig });
+    setTitleEmojiIndex(0);
+  }
+
+  function applyTitleEmoji(item: any) {
+    if (!titleEmojiMenu || !item) return;
+    const next = applyEmojiInsertion(
+      titleDraft,
+      titleEmojiMenu.trigger,
+      item
+    );
+    setTitleDraft(next.text);
+    setTitleEmojiMenu(null);
+    setTitleEmojiIndex(0);
+    requestAnimationFrame(() => {
+      const el = titleInputRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(next.cursor, next.cursor);
+      syncTitleEmojiMenu(next.text, next.cursor);
+    });
+  }
+
   const commitEditTitle = async () => {
+    setTitleEmojiMenu(null);
+    setTitleEmojiIndex(0);
     if (!detail || typeof onEditTitle !== 'function') {
       setEditingTitle(false);
       setTitleInputWidthPx(null);
@@ -745,8 +797,64 @@ export function Header(props: any) {
                         }
                       : undefined
                   }
-                  onChange={(e) => setTitleDraft(e.target.value)}
+                  onChange={(e) => {
+                    setTitleDraft(e.target.value);
+                    syncTitleEmojiMenu(
+                      e.target.value,
+                      e.target.selectionStart ?? e.target.value.length
+                    );
+                  }}
+                  onClick={(e) =>
+                    syncTitleEmojiMenu(
+                      e.currentTarget.value,
+                      e.currentTarget.selectionStart ?? 0
+                    )
+                  }
+                  onKeyUp={(e) => {
+                    if (
+                      e.key === 'ArrowDown' ||
+                      e.key === 'ArrowUp' ||
+                      e.key === 'Enter' ||
+                      e.key === 'Tab' ||
+                      e.key === 'Escape'
+                    ) {
+                      return;
+                    }
+                    syncTitleEmojiMenu(
+                      e.currentTarget.value,
+                      e.currentTarget.selectionStart ?? 0
+                    );
+                  }}
                   onKeyDown={(e) => {
+                    const items = titleEmojiMenu?.items || [];
+                    if (items.length) {
+                      if (e.key === 'Escape') {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setTitleEmojiMenu(null);
+                        return;
+                      }
+                      if (e.key === 'ArrowDown') {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setTitleEmojiIndex((i) => (i + 1) % items.length);
+                        return;
+                      }
+                      if (e.key === 'ArrowUp') {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setTitleEmojiIndex(
+                          (i) => (i - 1 + items.length) % items.length
+                        );
+                        return;
+                      }
+                      if (e.key === 'Enter' || e.key === 'Tab') {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        applyTitleEmoji(items[titleEmojiIndex] ?? items[0]);
+                        return;
+                      }
+                    }
                     if (e.key === 'Enter') {
                       e.preventDefault();
                       e.stopPropagation();
@@ -767,10 +875,57 @@ export function Header(props: any) {
                         skipBlurSaveRef.current = false;
                         return;
                       }
+                      setTitleEmojiMenu(null);
                       void commitEditTitle();
                     }, 0);
                   }}
                 />
+                {titleEmojiMenu?.items?.length ? (
+                  <ul
+                    className="prp-composer-menu prp-composer-menu--emoji prp-header__title-emoji-menu"
+                    role="listbox"
+                    aria-label="Emoji suggestions"
+                  >
+                    {titleEmojiMenu.items.map((item: any, idx: number) => {
+                      const label =
+                        typeof emojiMenuLabel === 'function'
+                          ? emojiMenuLabel(item)
+                          : `:${item.name}:`;
+                      return (
+                        <li
+                          key={String(item.name || label)}
+                          role="option"
+                          aria-selected={idx === titleEmojiIndex}
+                        >
+                          <button
+                            type="button"
+                            className={`prp-composer-menu__item prp-composer-menu__item--emoji${
+                              idx === titleEmojiIndex
+                                ? ' prp-composer-menu__item--active'
+                                : ''
+                            }`}
+                            onMouseDown={(ev) => {
+                              ev.preventDefault();
+                              skipBlurSaveRef.current = true;
+                              applyTitleEmoji(item);
+                            }}
+                            onMouseEnter={() => setTitleEmojiIndex(idx)}
+                          >
+                            <span
+                              className="prp-composer-menu__emoji"
+                              aria-hidden="true"
+                            >
+                              {item.emoji}
+                            </span>
+                            <span className="prp-composer-menu__emoji-name">
+                              {label}
+                            </span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : null}
                 <button
                   type="button"
                   className="prp-icon-btn prp-header__title-action prp-has-tip"

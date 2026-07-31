@@ -2,11 +2,12 @@
  * Conversation footer: Comment vs Review composer with pending threads slot.
  * Layout tabs prefer Tailwind; residual tokens stay in ComposerTabs.css.
  */
-import React from 'react';
+import React, { useState } from 'react';
 import { Button } from '@common/Button';
 import { Badge } from '@common/Badge';
 import { Card } from '@common/Card';
 import { MarkdownComposer } from '@common/MarkdownComposer';
+import { OptBtnHint } from '@common/OptBtnHint';
 
 export function ComposerCard({
   composerMode,
@@ -52,6 +53,11 @@ export function ComposerCard({
   const pendingThreadCount = Array.isArray(pendingReviewGroup?.threads)
     ? pendingReviewGroup.threads.length
     : pendingCount;
+  const [composerFocused, setComposerFocused] = useState(false);
+  const showHints = composerFocused;
+
+  const submitComment = () => onLeaveReviewAction?.('issue-comment');
+  const submitReview = () => onLeaveReviewAction?.('comment');
 
   return (
     <Card
@@ -61,18 +67,26 @@ export function ComposerCard({
           className="prp-composer-mode inline-flex items-center gap-0 rounded-lg p-0.5"
           role="tablist"
           aria-label="Comment or review"
+          data-prp-composer-mode-tabs="1"
         >
-          <button
-            type="button"
-            role="tab"
-            aria-selected={composerMode === 'comment'}
-            className={`prp-composer-mode__tab inline-flex items-center gap-1.5${
-              composerMode === 'comment' ? ' prp-composer-mode__tab--active' : ''
-            }`}
-            onClick={() => setComposerMode('comment')}
-          >
-            Comment
-          </button>
+          <span className="prp-opt-hint-host inline-flex">
+            {showHints ? (
+              <OptBtnHint label="⌥T" preferredPlacement="top" />
+            ) : null}
+            <button
+              type="button"
+              role="tab"
+              aria-selected={composerMode === 'comment'}
+              className={`prp-composer-mode__tab inline-flex items-center gap-1.5${
+                composerMode === 'comment' ? ' prp-composer-mode__tab--active' : ''
+              }`}
+              onClick={() => setComposerMode('comment')}
+              data-prp-composer-mode="comment"
+              title="Comment mode (⌥T toggles)"
+            >
+              Comment
+            </button>
+          </span>
           <button
             type="button"
             role="tab"
@@ -81,6 +95,8 @@ export function ComposerCard({
               composerMode === 'review' ? ' prp-composer-mode__tab--active' : ''
             }`}
             onClick={() => setComposerMode('review')}
+            data-prp-composer-mode="review"
+            title="Review mode (⌥T toggles)"
           >
             Review
             {pendingCount > 0 ? (
@@ -95,7 +111,13 @@ export function ComposerCard({
         </div>
       }
     >
-      <div className="prp-composer prp-composer--review" ref={commentBoxRef as any}>
+      <div
+        className="prp-composer prp-composer--review"
+        ref={commentBoxRef as any}
+        data-prp-composer-root="1"
+        data-prp-composer-kind="conversation"
+        data-prp-can-toggle-mode="1"
+      >
         {composerMode === 'review' && pendingReviewGroup ? (
           <div
             className="prp-composer__pending-threads"
@@ -123,38 +145,58 @@ export function ComposerCard({
             })}
           </div>
         ) : null}
-        <MarkdownComposer
-          value={commentText}
-          onChange={setCommentText}
-          placeholder={
-            composerMode === 'review'
-              ? 'Leave a review summary (optional with pending threads)…'
-              : 'Write a comment…'
-          }
-          compact
-          rows={3}
-          disabled={actionBusy}
-          showTabs
-          onUploadFile={onUploadFile}
-          linkCtx={linkCtx}
-          mentionCandidates={mentionCandidates}
-        />
+        <div className="prp-opt-hint-host prp-composer__field-hint">
+          {showHints ? (
+            <>
+              <OptBtnHint label="⌥E" preferredPlacement="top" />
+              <OptBtnHint label="⌥I" preferredPlacement="top" />
+            </>
+          ) : null}
+          <MarkdownComposer
+            value={commentText}
+            onChange={setCommentText}
+            placeholder={
+              composerMode === 'review'
+                ? 'Leave a review summary (optional with pending threads)…'
+                : 'Write a comment…'
+            }
+            compact
+            rows={3}
+            disabled={actionBusy}
+            showTabs
+            onUploadFile={onUploadFile}
+            linkCtx={linkCtx}
+            mentionCandidates={mentionCandidates}
+            onComposerFocusChange={setComposerFocused}
+            onSubmitRequest={
+              composerMode === 'comment' ? submitComment : submitReview
+            }
+          />
+        </div>
         {composerMode === 'comment' ? (
           <div className="prp-composer__row prp-composer__row--review flex flex-wrap gap-2 items-center mt-2">
-            <Button
-              variant="primary"
-              size="sm"
-              disabled={actionBusy || !String(commentText || '').trim()}
-              onClick={() => onLeaveReviewAction?.('issue-comment')}
-              title="Post conversation comment"
-            >
-              Submit
-            </Button>
+            <span className="prp-opt-hint-host inline-flex">
+              {showHints ? (
+                <OptBtnHint label="⌥C · ⌘↵" preferredPlacement="top" />
+              ) : null}
+              <Button
+                variant="primary"
+                size="sm"
+                loading={Boolean(actionBusy)}
+                disabled={!String(commentText || '').trim()}
+                onClick={submitComment}
+                title="Post conversation comment (⌥C · ⌘↵)"
+                data-prp-composer-submit="1"
+              >
+                {actionBusy ? 'Submitting…' : 'Submit'}
+              </Button>
+            </span>
             {detail.state === 'open' && !detail.merged ? (
               <Button
                 size="sm"
                 variant="danger"
                 disabled={actionBusy}
+                loading={Boolean(actionBusy)}
                 onClick={onClosePr}
                 title="Close pull request"
               >
@@ -166,6 +208,7 @@ export function ComposerCard({
                 size="sm"
                 variant="ok"
                 disabled={actionBusy}
+                loading={Boolean(actionBusy)}
                 onClick={onReopenPr}
                 title="Reopen pull request"
               >
@@ -175,40 +218,49 @@ export function ComposerCard({
           </div>
         ) : (
           <div className="prp-composer__row prp-composer__row--review flex flex-wrap gap-2 items-center mt-2">
-            <Button
-              variant="primary"
-              size="sm"
-              disabled={
-                actionBusy || (!String(commentText || '').trim() && !pendingCount)
-              }
-              onClick={() => onLeaveReviewAction?.('comment')}
-              title={
-                pendingCount > 0
-                  ? 'Submit pending review as comment'
-                  : 'Submit review as comment'
-              }
-            >
-              Submit review
-            </Button>
+            <span className="prp-opt-hint-host inline-flex">
+              {showHints ? (
+                <OptBtnHint label="⌥C · ⌘↵" preferredPlacement="top" />
+              ) : null}
+              <Button
+                variant="primary"
+                size="sm"
+                loading={Boolean(actionBusy)}
+                disabled={
+                  !String(commentText || '').trim() && !pendingCount
+                }
+                onClick={submitReview}
+                title={
+                  pendingCount > 0
+                    ? 'Submit pending review as comment (⌥C · ⌘↵)'
+                    : 'Submit review as comment (⌥C · ⌘↵)'
+                }
+                data-prp-composer-submit="1"
+              >
+                {actionBusy ? 'Submitting…' : 'Submit review'}
+              </Button>
+            </span>
             {showReviewVerdict ? (
               <>
                 <Button
                   size="sm"
                   variant="ok"
                   disabled={actionBusy}
+                  loading={Boolean(actionBusy)}
                   onClick={() => onLeaveReviewAction?.('approve')}
                   title="Approve pull request"
                 >
-                  Approve
+                  {actionBusy ? 'Working…' : 'Approve'}
                 </Button>
                 <Button
                   size="sm"
                   variant="warn"
                   disabled={actionBusy}
+                  loading={Boolean(actionBusy)}
                   onClick={() => onLeaveReviewAction?.('request_changes')}
                   title="Request changes"
                 >
-                  Request changes
+                  {actionBusy ? 'Working…' : 'Request changes'}
                 </Button>
               </>
             ) : null}
@@ -217,10 +269,11 @@ export function ComposerCard({
                 size="sm"
                 variant="danger"
                 disabled={actionBusy}
+                loading={Boolean(actionBusy)}
                 onClick={() => onDiscardPending?.()}
                 title="Discard pending review"
               >
-                Discard
+                {actionBusy ? 'Working…' : 'Discard'}
               </Button>
             ) : null}
           </div>

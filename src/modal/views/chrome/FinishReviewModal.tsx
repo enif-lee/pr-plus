@@ -340,7 +340,8 @@ export function FinishReviewModal({
               <Button
                 size="sm"
                 variant="primary"
-                disabled={actionBusy || !canSubmit}
+                loading={Boolean(actionBusy)}
+                disabled={!canSubmit}
                 onClick={() => void handleSubmit('comment')}
                 title={canSubmit ? 'Submit review as comment' : submitBlockedTitle}
                 shortcut={scComment}
@@ -359,13 +360,14 @@ export function FinishReviewModal({
                 <Button
                   size="sm"
                   variant="ok"
-                  disabled={actionBusy || !canSubmit}
+                  loading={Boolean(actionBusy)}
+                  disabled={!canSubmit}
                   onClick={() => void handleSubmit('approve')}
                   title={canSubmit ? 'Approve pull request' : submitBlockedTitle}
                   shortcut={scApprove}
                   tipPlacement="top"
                 >
-                  Approve
+                  {actionBusy ? 'Working…' : 'Approve'}
                 </Button>
               </span>
             ) : null}
@@ -379,7 +381,8 @@ export function FinishReviewModal({
                 <Button
                   size="sm"
                   variant="warn"
-                  disabled={actionBusy || !canSubmit}
+                  loading={Boolean(actionBusy)}
+                  disabled={!canSubmit}
                   onClick={() => void handleSubmit('request_changes')}
                   title={
                     canSubmit ? 'Request changes' : submitBlockedTitle
@@ -387,7 +390,7 @@ export function FinishReviewModal({
                   shortcut={scChanges}
                   tipPlacement="top"
                 >
-                  Request changes
+                  {actionBusy ? 'Working…' : 'Request changes'}
                 </Button>
               </span>
             ) : null}

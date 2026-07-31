@@ -114,6 +114,8 @@ export type DiffWorkspaceProps = {
   threadsByCommentId: any;
   onReplyToThread: any;
   onResolveThread: any;
+  onToggleReaction?: any;
+  onLoadReactors?: any;
   onDeleteReviewComment: any;
   onStartEditReviewComment: any;
   onSaveEditComment: any;
@@ -241,6 +243,8 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
     threadsByCommentId,
     onReplyToThread,
     onResolveThread,
+    onToggleReaction = null,
+    onLoadReactors = null,
     onDeleteReviewComment,
     onStartEditReviewComment,
     onSaveEditComment,
@@ -462,6 +466,8 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
           onReply={onReplyToThread}
           pendingCount={totalPendingCount}
           onResolve={onResolveThread}
+          onToggleReaction={onToggleReaction}
+          onLoadReactors={onLoadReactors}
           onDeleteReviewComment={onDeleteReviewComment}
           onEditReviewComment={onStartEditReviewComment}
           onSaveEditReviewComment={(id, body) =>

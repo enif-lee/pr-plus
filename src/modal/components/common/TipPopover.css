@@ -4,6 +4,16 @@
  * Migrated from styles/parts/24-zero-size-host-marker-for-portaled-tips.css
  */
 
+/* ⇧ optical scale (also used by OptBtnHint via KeyGlyphs) */
+.prp-key-glyph--shift {
+  display: inline-block;
+  font-size: 1.28em;
+  font-weight: 700;
+  line-height: 1;
+  transform: translateY(-0.05em);
+  vertical-align: baseline;
+}
+
 /* Zero-size host marker for portaled tips */
 .prp-tip-anchor {
   position: absolute;

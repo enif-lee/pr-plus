@@ -505,18 +505,42 @@
           ? (name: any, p: any, meta: any = undefined) => tl.span(name, p, meta)
           : (_n: any, p: any, _m: any = undefined) => p;
 
+      // Warm cache → last:10 probe (+ escalate on mismatch); cold → last:100.
+      // Await IDB hydrate (≤~400ms) so list/empty opens can warm-probe when
+      // durable threads already exist — first paint already happened above.
+      try {
+        await idbHydrateP;
+      } catch {
+        /* ignore */
+      }
+      // Snapshot cache at kickoff so match does not race with partial paints.
+      const threadsCacheSnap = cached || current.detail || null;
+      const useWarmThreads =
+        Boolean(fromCache || detailRank(cached) >= 3) &&
+        Boolean(threadsCacheSnap) &&
+        !threadsCacheSnap?._sketch &&
+        (typeof globalThis.PRModalReviewThreads?.hasUsableReviewThreadsCache ===
+        'function'
+          ? globalThis.PRModalReviewThreads.hasUsableReviewThreadsCache(
+              threadsCacheSnap
+            )
+          : Boolean(
+              (Array.isArray(threadsCacheSnap.reviewThreads) &&
+                threadsCacheSnap.reviewThreads.some((t) => t?.threadNodeId)) ||
+                (Array.isArray(threadsCacheSnap.reviewComments) &&
+                  threadsCacheSnap.reviewComments.some((c) => c?.threadNodeId))
+            ));
       // Start threads in parallel with core — paint as soon as *this* fetch lands
       const threadsKickoffP = canFetchThreads
         ? span(
             'fetch.threadsNewest',
-            globalThis.PRTreeFetch
-              .fetchReviewThreadsPage(owner, repo, number, {
-                direction: 'newest',
-                cursor: null,
-                pageSize: apiMax,
-                signal,
-              })
-              .then((page) => {
+            fetchNewestReviewThreadsAdaptive(owner, repo, number, {
+              signal,
+              cacheDetail: useWarmThreads ? threadsCacheSnap : null,
+              forceFull: !useWarmThreads,
+            })
+              .then((res) => {
+                const page = res.page;
                 prog.mark(
                   'threadsNewest',
                   uw.threadsNewest,
@@ -528,9 +552,24 @@
                 earlyThreadsPage = page;
                 paintThreadsNewestNow(page);
                 tl?.mark?.('paint.threadsNewest', 'mark', {
-                  note: `${page?.threads?.length || 0} threads`,
+                  note: `${page?.threads?.length || 0} threads` +
+                    (res.earlyExit
+                      ? ' warm-probe-exit'
+                      : res.escalated
+                        ? ' warm-escalated'
+                        : ''),
                 });
-                return { ok: true, page, paintedEarly: threadsPaintedEarly };
+                console.log(
+                  `[pr-plus] openModal threads.newest adaptive ${owner}/${repo}#${number}: ` +
+                    `pageSize=${res.pageSize} warm=${res.warm} earlyExit=${res.earlyExit} escalated=${res.escalated} ` +
+                    `threads=${page?.threads?.length || 0}`
+                );
+                return {
+                  ok: true,
+                  page,
+                  paintedEarly: threadsPaintedEarly,
+                  adaptive: res,
+                };
               })
               .catch((err) => {
                 prog.mark(
@@ -541,7 +580,15 @@
                 );
                 return { ok: false, err };
               }),
-            { pageSize: apiMax }
+            {
+              pageSize: useWarmThreads
+                ? Number(
+                    globalThis.PRModalReviewThreads
+                      ?.REVIEW_THREADS_WARM_PROBE_SIZE
+                  ) || 10
+                : apiMax,
+              warm: useWarmThreads,
+            }
           )
         : Promise.resolve({ ok: false, err: null, skipped: true }).then((r) => {
             prog.mark('threadsNewest', uw.threadsNewest, corePhase, coreLabel);
@@ -657,10 +704,15 @@
             const kick = await threadsKickoffP;
             if (!kick.ok) throw kick.err || new Error('Threads fetch failed');
             const newest = kick.page;
+            const adapt = kick.adaptive || null;
             console.log(
               `[pr-plus] openModal phase=threads.last ${owner}/${repo}#${number}: ${Math.round(
                 nowMs() - tNewest0
-              )}ms (${newest?.threads?.length || 0} threads, parallel-kickoff) pct=${prog.percent()} early=${Boolean(kick.paintedEarly || threadsPaintedEarly)}`
+              )}ms (${newest?.threads?.length || 0} threads, parallel-kickoff` +
+                (adapt
+                  ? `, pageSize=${adapt.pageSize}, earlyExit=${adapt.earlyExit}, escalated=${adapt.escalated}`
+                  : '') +
+                `) pct=${prog.percent()} early=${Boolean(kick.paintedEarly || threadsPaintedEarly)}`
             );
             if (!openStill()) return;
 
@@ -687,7 +739,7 @@
             );
             render();
 
-            // Step 2: remaining unresolved not in last-100; drop remote-missing zombies
+            // Step 2: remaining unresolved not in newest page; drop remote-missing zombies
             const collectIds =
               globalThis.PRTreeFetch.collectUnresolvedThreadNodeIds ||
               ((d) => {

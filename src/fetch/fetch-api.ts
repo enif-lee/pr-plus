@@ -1137,6 +1137,186 @@ function commentsPageHelpers() {
   }
 }
 
+function mapRestReactions(raw: any) {
+  // Inline REST summary → groups (keep fetch free of modal pure deps at runtime)
+  const DEFS = [
+    '+1',
+    '-1',
+    'laugh',
+    'hooray',
+    'confused',
+    'heart',
+    'rocket',
+    'eyes',
+  ];
+  if (!raw || typeof raw !== 'object') return [];
+  const out = [];
+  for (const content of DEFS) {
+    const count = Number(raw[content]) || 0;
+    if (count <= 0) continue;
+    out.push({ content, count, viewerHasReacted: false, users: [] });
+  }
+  return out;
+}
+
+const GQL_REACTION_TO_REST = {
+  THUMBS_UP: '+1',
+  THUMBS_DOWN: '-1',
+  LAUGH: 'laugh',
+  HOORAY: 'hooray',
+  CONFUSED: 'confused',
+  HEART: 'heart',
+  ROCKET: 'rocket',
+  EYES: 'eyes',
+  '+1': '+1',
+  '-1': '-1',
+  laugh: 'laugh',
+  hooray: 'hooray',
+  confused: 'confused',
+  heart: 'heart',
+  rocket: 'rocket',
+  eyes: 'eyes',
+};
+
+function extractReactorLogins(reactors: any) {
+  const nodes = reactors?.nodes || [];
+  const out = [];
+  const seen = new Set();
+  for (const n of Array.isArray(nodes) ? nodes : []) {
+    const login = String(n?.login || '').trim();
+    if (!login) continue;
+    const key = login.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(login);
+  }
+  return out;
+}
+
+function mapGraphqlReactionGroups(groups: any) {
+  if (!Array.isArray(groups)) return [];
+  const order = [
+    '+1',
+    '-1',
+    'laugh',
+    'hooray',
+    'confused',
+    'heart',
+    'rocket',
+    'eyes',
+  ];
+  const by = new Map();
+  for (const g of groups) {
+    if (!g) continue;
+    const content =
+      GQL_REACTION_TO_REST[String(g.content || '').toUpperCase()] ||
+      GQL_REACTION_TO_REST[String(g.content || '')] ||
+      null;
+    if (!content) continue;
+    const users = extractReactorLogins(g.reactors);
+    const count = Number(
+      g.reactors?.totalCount ?? g.users?.totalCount ?? users.length ?? 0
+    );
+    const viewerHasReacted = Boolean(g.viewerHasReacted);
+    if (count <= 0 && !viewerHasReacted) continue;
+    by.set(content, {
+      content,
+      count: Math.max(0, count, users.length),
+      viewerHasReacted,
+      users,
+    });
+  }
+  return order.map((c) => by.get(c)).filter(Boolean);
+}
+
+/**
+ * Batch-load reactionGroups for Reactable node IDs (issue comments, PR, …).
+ * Default: count + viewerHasReacted only (no reactor login lists).
+ * Pass `reactorsFirst` > 0 to include up to that many reactor logins per group.
+ * @returns Map<nodeId, ReactionGroup[]>
+ */
+async function fetchReactableReactionGroups(
+  nodeIds: any,
+  fetchImpl: any,
+  token: any,
+  ctx: any = null,
+  opts: any = null
+) {
+  ctx = normalizeApiCtx(ctx);
+  const ids = [
+    ...new Set(
+      (Array.isArray(nodeIds) ? nodeIds : [])
+        .map((id) => String(id || '').trim())
+        .filter(Boolean)
+    ),
+  ].slice(0, 100);
+  const out = new Map();
+  if (!ids.length || !token) return out;
+  const reactorsFirst = Math.max(
+    0,
+    Math.min(20, Number(opts?.reactorsFirst) || 0)
+  );
+  // GitHub connections need first/last; omit nodes on the hot path (count only).
+  const reactorsSel =
+    reactorsFirst > 0
+      ? `reactors(first:${reactorsFirst}){
+            totalCount
+            nodes{
+              ... on User { login }
+              ... on Bot { login }
+            }
+          }`
+      : `reactors(first:1){ totalCount }`;
+  const query = `query($ids:[ID!]!){
+    nodes(ids:$ids){
+      ... on Reactable {
+        id
+        reactionGroups {
+          content
+          viewerHasReacted
+          ${reactorsSel}
+        }
+      }
+    }
+  }`;
+  try {
+    const data = await apiGraphql(query, { ids }, fetchImpl, token, ctx);
+    for (const node of data?.nodes || []) {
+      if (!node?.id) continue;
+      out.set(String(node.id), mapGraphqlReactionGroups(node.reactionGroups));
+    }
+  } catch {
+    /* soft — keep REST summary */
+  }
+  return out;
+}
+
+/**
+ * On-demand reactor logins for one Reactable (hover tooltips).
+ * Caps nodes at `first` (default 5).
+ * @returns ReactionGroup[] with users filled when available
+ */
+async function fetchReactableReactors(
+  nodeId: any,
+  fetchImpl: any,
+  token: any,
+  ctx: any = null,
+  opts: any = null
+) {
+  ctx = normalizeApiCtx(ctx);
+  const id = String(nodeId || '').trim();
+  if (!id || !token) return [];
+  const first = Math.max(1, Math.min(10, Number(opts?.first) || 5));
+  const map = await fetchReactableReactionGroups(
+    [id],
+    fetchImpl,
+    token,
+    ctx,
+    { reactorsFirst: first }
+  );
+  return map.get(id) || [];
+}
+
 function mapIssueComment(c: any) {
   return {
     id: c.id,
@@ -1144,6 +1324,8 @@ function mapIssueComment(c: any) {
     avatarUrl: c.user?.avatar_url || '',
     body: c.body || '',
     createdAt: c.created_at,
+    nodeId: c.node_id || null,
+    reactions: mapRestReactions(c.reactions),
   };
 }
 
@@ -1189,6 +1371,7 @@ function mapReviewComment(c, extra: any = {}) {
     createdAt: c.created_at,
     inReplyToId: c.in_reply_to_id ?? null,
     nodeId: c.node_id || null,
+    reactions: mapRestReactions(c.reactions),
     threadNodeId: extra.threadNodeId ?? null,
     /** Pull request review id (groups file threads under one review event). */
     reviewId:
@@ -1248,6 +1431,7 @@ function mapGraphqlReviewCommentNode(node, threadMeta: any = {}) {
     createdAt: node.createdAt || null,
     inReplyToId: node.replyTo?.databaseId ?? null,
     nodeId: node.id || null,
+    reactions: mapGraphqlReactionGroups(node.reactionGroups),
     threadNodeId: threadMeta.threadNodeId || null,
     reviewId: reviewDbId,
     resolved: Boolean(threadMeta.resolved),
@@ -1525,6 +1709,23 @@ async function fetchPrCommentsPage(owner: any, repo: any, pullNumber: any, kind:
     const raw = Array.isArray(data) ? data : [];
     const items =
       kind === 'review' ? raw.map(mapReviewComment) : raw.map(mapIssueComment);
+    // Enrich viewerHasReacted + reactor logins via GraphQL when nodeIds exist
+    if (kind === 'issue' && token && items.length) {
+      const ids = items.map((c) => c?.nodeId).filter(Boolean);
+      if (ids.length) {
+        const byId = await fetchReactableReactionGroups(
+          ids,
+          fetchImpl,
+          token,
+          ctx
+        );
+        for (const c of items) {
+          if (!c?.nodeId) continue;
+          const groups = byId.get(String(c.nodeId));
+          if (groups && groups.length) c.reactions = groups;
+        }
+      }
+    }
     return { items, raw, link, pageNum };
   }
 
@@ -1879,6 +2080,13 @@ const REVIEW_THREAD_NODE_FIELDS = `
       author { login avatarUrl }
       replyTo { databaseId }
       pullRequestReview { databaseId state }
+      reactionGroups {
+        content
+        viewerHasReacted
+        reactors(first:1) {
+          totalCount
+        }
+      }
     }
   }
 `;
@@ -3283,6 +3491,23 @@ async function fetchPrDetail(
     }
   }
 
+  // PR body reactions (issue reactions on the PR number)
+  let bodyReactions = mapRestReactions(pr.reactions);
+  if (pr.node_id && token) {
+    try {
+      const byId = await fetchReactableReactionGroups(
+        [pr.node_id],
+        fetchImpl,
+        token,
+        ctx
+      );
+      const enriched = byId.get(String(pr.node_id));
+      if (enriched && enriched.length) bodyReactions = enriched;
+    } catch {
+      /* keep REST summary */
+    }
+  }
+
   return {
     owner,
     repo,
@@ -3290,6 +3515,7 @@ async function fetchPrDetail(
     nodeId: pr.node_id || null,
     title: pr.title,
     body: pr.body || '',
+    bodyReactions,
     state: pr.state,
     draft: Boolean(pr.draft),
     author: pr.user?.login || '',
@@ -4387,6 +4613,144 @@ async function deleteIssueComment(owner: any, repo: any, commentId: any, fetchIm
   );
 }
 
+const REST_TO_GQL_REACTION = {
+  '+1': 'THUMBS_UP',
+  '-1': 'THUMBS_DOWN',
+  laugh: 'LAUGH',
+  hooray: 'HOORAY',
+  confused: 'CONFUSED',
+  heart: 'HEART',
+  rocket: 'ROCKET',
+  eyes: 'EYES',
+};
+
+/**
+ * Toggle a reaction on an issue comment, PR body, or pull-review comment.
+ * Prefers GraphQL addReaction/removeReaction when `nodeId` is known (accurate).
+ * Falls back to REST create + list/delete when only database id / PR number is available.
+ *
+ * @param {'issue'|'review'|'pr'} kind  `pr` = reactions on the pull request body
+ * @param {{ content: string, viewerHasReacted?: boolean, nodeId?: string|null, commentId?: number|string, number?: number|string }} opts
+ * @returns {Promise<{ content: string, reacted: boolean }>}
+ */
+async function toggleCommentReaction(
+  owner: any,
+  repo: any,
+  kind: any,
+  opts: any,
+  fetchImpl: any,
+  token: any,
+  ctx: any = null
+) {
+  ctx = normalizeApiCtx(ctx);
+  const content = String(opts?.content || '').trim();
+  const gqlContent = REST_TO_GQL_REACTION[content];
+  if (!gqlContent) {
+    throw new Error(`Unsupported reaction: ${content || '(empty)'}`);
+  }
+  const nodeId = String(opts?.nodeId || '').trim();
+  const currently = Boolean(opts?.viewerHasReacted);
+  const nextReacted = !currently;
+  const kRaw = String(kind || 'issue').toLowerCase();
+  const k = kRaw === 'review' ? 'review' : kRaw === 'pr' ? 'pr' : 'issue';
+
+  if (nodeId) {
+    const mutation = nextReacted
+      ? `mutation($id:ID!,$content:ReactionContent!){
+          addReaction(input:{subjectId:$id, content:$content}) {
+            reaction { content }
+          }
+        }`
+      : `mutation($id:ID!,$content:ReactionContent!){
+          removeReaction(input:{subjectId:$id, content:$content}) {
+            reaction { content }
+          }
+        }`;
+    await apiGraphql(
+      mutation,
+      { id: nodeId, content: gqlContent },
+      fetchImpl,
+      token,
+      ctx
+    );
+    return { content, reacted: nextReacted };
+  }
+
+  // REST fallback
+  let basePath = '';
+  let deletePath = (reactionId: any) => '';
+  if (k === 'review') {
+    const commentId = opts?.commentId;
+    if (commentId == null || commentId === '') {
+      throw new Error('Reaction toggle needs nodeId or commentId');
+    }
+    basePath = `/repos/${owner}/${repo}/pulls/comments/${commentId}/reactions`;
+    deletePath = (rid) =>
+      `/repos/${owner}/${repo}/pulls/comments/${commentId}/reactions/${rid}`;
+  } else if (k === 'pr') {
+    const num = opts?.number ?? opts?.commentId;
+    if (num == null || num === '') {
+      throw new Error('Reaction toggle needs nodeId or PR number');
+    }
+    basePath = `/repos/${owner}/${repo}/issues/${num}/reactions`;
+    deletePath = (rid) =>
+      `/repos/${owner}/${repo}/issues/${num}/reactions/${rid}`;
+  } else {
+    const commentId = opts?.commentId;
+    if (commentId == null || commentId === '') {
+      throw new Error('Reaction toggle needs nodeId or commentId');
+    }
+    basePath = `/repos/${owner}/${repo}/issues/comments/${commentId}/reactions`;
+    deletePath = (rid) =>
+      `/repos/${owner}/${repo}/issues/comments/${commentId}/reactions/${rid}`;
+  }
+
+  if (nextReacted) {
+    await apiSend(
+      githubRestUrl(basePath, ctx),
+      fetchImpl,
+      token,
+      // @ts-expect-error classic fetch dynamic shapes
+      { method: 'POST', body: { content } }
+    );
+    return { content, reacted: true };
+  }
+
+  // Remove: list reactions of this content for the viewer, then DELETE
+  const listed = await apiJson(
+    githubRestUrl(
+      `${basePath}?content=${encodeURIComponent(content)}&per_page=100`,
+      ctx
+    ),
+    fetchImpl,
+    token
+  );
+  const rows = Array.isArray(listed) ? listed : [];
+  let target = rows[0] || null;
+  try {
+    const me = await fetchViewerLogin(fetchImpl, token, ctx);
+    const login = String(me || '').toLowerCase();
+    if (login) {
+      const mine = rows.find(
+        (r) => String(r?.user?.login || '').toLowerCase() === login
+      );
+      if (mine) target = mine;
+    }
+  } catch {
+    /* keep first */
+  }
+  if (!target?.id) {
+    return { content, reacted: false };
+  }
+  await apiSend(
+    githubRestUrl(deletePath(target.id), ctx),
+    fetchImpl,
+    token,
+    { method: 'DELETE' }
+  );
+  return { content, reacted: false };
+}
+
 async function updatePullRequest(owner: any, repo: any, pullNumber: any, fields: any, fetchImpl: any, token: any, ctx: any = null) {
   ctx = normalizeApiCtx(ctx);
   const body: any = {};
@@ -5476,6 +5840,8 @@ const fetchApi = {
   fetchPrDevelopment,
   fetchPrSidebarMeta,
   fetchIssueOrPrSummaries,
+  fetchReactableReactionGroups,
+  fetchReactableReactors,
   fetchCompareFiles,
   mapAndAnnotateFiles,
   fetchPullReviewThreads,
@@ -5508,6 +5874,7 @@ const fetchApi = {
   reopenPullRequest,
   deleteReviewComment,
   deleteIssueComment,
+  toggleCommentReaction,
   updatePullRequest,
   editIssueComment,
   editReviewComment,

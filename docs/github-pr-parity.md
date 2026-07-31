@@ -20,7 +20,7 @@ Sources: [About pull requests](https://docs.github.com/en/pull-requests/collabor
 | Edit own issue comments | present | Timeline Edit |
 | Delete own issue comments | present | Timeline Delete |
 | Timeline pagination | present | Newer/Older |
-| Reactions on comments | deferred | Non-goal (emoji matrix) |
+| Reactions on comments | present | Issue + review comments; official 8 + picker |
 | Lock conversation | deferred | Admin-ish |
 
 ## Review lifecycle

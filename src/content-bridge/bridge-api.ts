@@ -935,6 +935,47 @@ var PRTreeFetch = {
     }
     return res.result;
   },
+  /**
+   * Toggle a GitHub reaction on an issue or review comment.
+   * @param {'issue'|'review'} kind
+   * @param {{ content: string, viewerHasReacted?: boolean, nodeId?: string|null, commentId?: number|string }} opts
+   */
+  async toggleCommentReaction(owner, repo, kind, opts) {
+    const res = await send({
+      type: 'PR_TREE_TOGGLE_COMMENT_REACTION',
+      owner,
+      repo,
+      kind,
+      opts: opts || {},
+    });
+    if (!res?.ok) {
+      const err = new Error(res?.error || 'Failed to update reaction');
+      err.status = res?.status;
+      throw err;
+    }
+    return res.result;
+  },
+  /**
+   * Hover: load reactor logins for one Reactable (first-N at query level).
+   * @returns {Promise<Array>} reaction groups with users
+   */
+  async fetchReactableReactors(nodeId, opts: any = {}) {
+    const res = await send(
+      {
+        type: 'PR_TREE_FETCH_REACTABLE_REACTORS',
+        nodeId,
+        first: opts.first != null ? Number(opts.first) : 5,
+      },
+      { signal: opts.signal || null }
+    );
+    if (!res?.ok) {
+      if (res?.aborted) throw makeAbortError();
+      const err = new Error(res?.error || 'Failed to load reaction users');
+      err.status = res?.status;
+      throw err;
+    }
+    return Array.isArray(res.groups) ? res.groups : [];
+  },
   async updatePullRequest(owner, repo, number, fields) {
     const res = await send({
       type: 'PR_TREE_UPDATE_PULL',

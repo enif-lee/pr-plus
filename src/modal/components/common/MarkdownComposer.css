@@ -293,6 +293,7 @@
   flex-direction: column;
   gap: 0;
   min-width: 0;
+  overflow: visible;
 }
 
 .prp-composer-menu {
@@ -307,9 +308,21 @@
   border-radius: 8px;
   background: var(--prp-bg);
   box-shadow: 0 8px 24px rgba(1, 4, 9, 0.16);
-  max-height: 180px;
+  max-height: 220px;
   overflow: auto;
   z-index: 50;
+}
+
+/* Fixed portal — escapes overflow:hidden on cards / virtual list */
+.prp-composer-menu--portal {
+  position: fixed;
+  right: auto;
+  top: auto;
+  z-index: var(--prp-z-tip, 100020);
+  max-height: min(280px, 40vh);
+  box-shadow:
+    0 12px 32px rgba(1, 4, 9, 0.22),
+    0 0 0 1px color-mix(in srgb, var(--prp-border) 80%, transparent);
 }
 
 .prp-composer-menu__item {
@@ -329,6 +342,63 @@
 .prp-composer-menu__item:hover,
 .prp-composer-menu__item--active {
   background: color-mix(in srgb, var(--prp-accent) 12%, transparent);
+}
+
+.prp-composer-menu--emoji {
+  max-height: 220px;
+}
+.prp-composer-menu__item--emoji {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 500;
+}
+.prp-composer-menu__emoji {
+  flex: 0 0 auto;
+  width: 1.5em;
+  text-align: center;
+  font-size: 18px;
+  line-height: 1;
+  font-family:
+    'Apple Color Emoji',
+    'Segoe UI Emoji',
+    'Noto Color Emoji',
+    sans-serif;
+}
+.prp-composer-menu__emoji-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--prp-fg-muted, #656d76);
+}
+.prp-composer-menu__item--active .prp-composer-menu__emoji-name,
+.prp-composer-menu__item--emoji:hover .prp-composer-menu__emoji-name {
+  color: var(--prp-fg, #1f2328);
+}
+
+/* Title input emoji menu (Header) — floats under the field */
+.prp-header__title-edit {
+  position: relative;
+}
+.prp-header__title-emoji-menu {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 4px);
+  z-index: 80;
+  min-width: min(280px, 70vw);
+  max-width: min(360px, 90vw);
+  max-height: 220px;
+  overflow: auto;
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  border: 1px solid var(--prp-border, #d0d7de);
+  border-radius: 8px;
+  background: var(--prp-bg, #fff);
+  box-shadow: 0 8px 24px rgba(1, 4, 9, 0.16);
 }
 
 .prp-composer-hint {

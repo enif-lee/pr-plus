@@ -36,10 +36,44 @@ import {
   isDemoPrModalOpen,
   ensureDemoPrForDiffStep,
   createOnboardingTour,
+  splitChordKeys,
+  chordLabelsToKbdParts,
 } from '../src/onboarding';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const storageApi = require('../src/storage');
 const { normalizePrefs, DEFAULT_PREFS } = storageApi;
+
+describe('splitChordKeys / chordLabelsToKbdParts', () => {
+  test('splits Mac combos into separate keycaps', () => {
+    expect(splitChordKeys('⌥⇧]')).toEqual(['⌥', '⇧', ']']);
+    expect(splitChordKeys('⌥⇧↓')).toEqual(['⌥', '⇧', '↓']);
+    expect(splitChordKeys('⇧↓')).toEqual(['⇧', '↓']);
+    expect(splitChordKeys('⌥C')).toEqual(['⌥', 'C']);
+    expect(splitChordKeys('⌥J')).toEqual(['⌥', 'J']);
+    expect(splitChordKeys('↓')).toEqual(['↓']);
+    expect(splitChordKeys('Esc')).toEqual(['Esc']);
+    expect(splitChordKeys('Alt+Shift+K')).toEqual(['Alt', 'Shift', 'K']);
+  });
+
+  test('chordLabelsToKbdParts joins with + and or/then', () => {
+    expect(chordLabelsToKbdParts(['⌥⇧]'])).toEqual([
+      { k: '⌥' },
+      '+',
+      { k: '⇧' },
+      '+',
+      { k: ']' },
+    ]);
+    expect(chordLabelsToKbdParts(['⌥]', '⌥['], 'or')).toEqual([
+      { k: '⌥' },
+      '+',
+      { k: ']' },
+      'or',
+      { k: '⌥' },
+      '+',
+      { k: '[' },
+    ]);
+  });
+});
 
 describe('onboarding prefs', () => {
   test('DEFAULT_PREFS includes treeView and onboardingCompleted', () => {

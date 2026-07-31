@@ -123,18 +123,22 @@ describe('App source contracts — thrift nav paths', () => {
     expect(appImpl).toContain('function onSelectFile');
   });
 
-  test('file and page nav are rAF-coalesced under key-repeat', () => {
-    expect(appImpl).toMatch(/pageScrollRafRef/);
+  test('file nav is rAF-coalesced; page scroll applies sync (headless-safe)', () => {
+    // File nav still one hop per frame under key-hold
     expect(appImpl).toMatch(/fileNavRafRef/);
-    expect(appImpl).toMatch(/pendingPageScrollDirRef/);
     expect(appImpl).toMatch(/pendingFileNavDeltaRef/);
-    // Soft thrift: latest dir only (one hop/frame), not multi-file jump accumulate
     expect(appImpl).toMatch(
       /pendingFileNavDeltaRef\.current\s*=\s*d/
     );
     expect(appImpl).not.toMatch(
       /pendingFileNavDeltaRef\.current\s*\+=/
     );
+    // Page scroll: sync DOM hop (rAF freezes in background/headless) + optional
+    // rAF bookkeeping refs still present for same-frame key-repeat clear
+    expect(appImpl).toMatch(/pageScrollRafRef/);
+    expect(appImpl).toMatch(/pendingPageScrollDirRef/);
+    expect(appImpl).toMatch(/function applyDiffPageScroll/);
+    expect(appImpl).toMatch(/applyDiffPageScroll\(dir\)/);
   });
 
   test('selection still rAF-coalesces keyboard move', () => {

@@ -20,6 +20,7 @@ const deps = [
   'modal/pure/pending-review.js',
   'modal/pure/pr-edit-api.js',
   'modal/pure/checks.js',
+  'modal/pure/rate-limit.js',
   'storage',
   'fetch-pulls.js',
 ];

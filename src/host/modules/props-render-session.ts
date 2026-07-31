@@ -83,7 +83,8 @@
        * }} [opts]
        *   - visible-threads (conversation header): core + bulk only on-screen threads
        *   - full-threads (diff header): core + last:100 + start:20 + Load all
-       *   - revalidate (mutations / default): core + last:100 + remaining unresolved bulk
+       *   - revalidate (mutations / default): warm last:10 probe (escalate if needed)
+       *     + remaining unresolved bulk
        */
       onRefresh: async (opts: any = {}) => {
         if (!owner || !repo || !number) return;
@@ -275,17 +276,17 @@
             return true;
           }
 
-          // Parallel kickoff — paint as each fetch lands
+          // Parallel kickoff — warm revalidate uses probe; full-threads forces last:100
+          const refreshThreadsCacheSnap = prevDetail || current.detail || null;
           const threadsNewestP =
             mode !== 'visible-threads' && canPageThreads
-              ? globalThis.PRTreeFetch
-                  .fetchReviewThreadsPage(owner, repo, number, {
-                    direction: 'newest',
-                    cursor: null,
-                    pageSize: apiMax,
-                    signal,
-                  })
-                  .then((page) => {
+              ? fetchNewestReviewThreadsAdaptive(owner, repo, number, {
+                  signal,
+                  cacheDetail: refreshThreadsCacheSnap,
+                  forceFull: mode === 'full-threads',
+                })
+                  .then((res) => {
+                    const page = res.page;
                     prog.mark(
                       'threadsNewest',
                       uw.threadsNewest,
@@ -294,7 +295,13 @@
                     );
                     earlyRefreshThreadsPage = page;
                     paintRefreshThreadsNewest(page);
-                    return { ok: true, page };
+                    console.log(
+                      `[pr-plus] onRefresh threads.newest adaptive ${owner}/${repo}#${number}: ` +
+                        `mode=${mode} pageSize=${res.pageSize} warm=${res.warm} ` +
+                        `earlyExit=${res.earlyExit} escalated=${res.escalated} ` +
+                        `threads=${page?.threads?.length || 0}`
+                    );
+                    return { ok: true, page, adaptive: res };
                   })
                   .catch((err) => {
                     prog.mark(
@@ -431,7 +438,7 @@
             return;
           }
 
-          // 2a) last:100 (full-threads + mutation revalidate) — await parallel kickoff
+          // 2a) newest window (warm probe or full last:100) — await parallel kickoff
           setLoadStage(
             'threads',
             loadStageLabel('threads-update'),
@@ -444,10 +451,15 @@
           if (!kick.ok) throw kick.err || new Error('Threads fetch failed');
           const newest = kick.page;
           if (!stillOpen()) return;
+          const adapt = kick.adaptive || null;
           console.log(
             `[pr-plus] onRefresh last ${owner}/${repo}#${number}: ${Math.round(
               nowMs() - t0
-            )}ms (${newest?.threads?.length || 0}) mode=${mode} parallel-kickoff pct=${prog.percent()}`
+            )}ms (${newest?.threads?.length || 0}) mode=${mode} parallel-kickoff` +
+              (adapt
+                ? ` pageSize=${adapt.pageSize} earlyExit=${adapt.earlyExit} escalated=${adapt.escalated}`
+                : '') +
+              ` pct=${prog.percent()}`
           );
           let next =
             typeof mergeFn === 'function'
@@ -811,7 +823,8 @@
         if (Object.prototype.hasOwnProperty.call(patch, 'milestone')) {
           next.milestone = patch.milestone == null ? null : patch.milestone;
         }
-        // User/meta mutations: write meta slice with trustEmpty so clears stick
+        // Meta + comment/thread slices: write-through so post-comment cache is real
+        // (applyMeta alone dropped comments/reviewComments — stale reopen bug).
         const S = detailStoreApi();
         if (S) {
           ensureDetailStore(next);
@@ -820,6 +833,34 @@
             source: 'patch',
             sketch: false,
           });
+          if (Object.prototype.hasOwnProperty.call(patch, 'comments')) {
+            S.applyComments(current.detailStore, next.comments, {
+              settled: true,
+              pageMeta: next.commentsMeta,
+              timelineEvents: next.timelineEvents,
+            });
+          }
+          if (
+            Object.prototype.hasOwnProperty.call(patch, 'reviewComments') ||
+            Object.prototype.hasOwnProperty.call(patch, 'reviewThreads') ||
+            Object.prototype.hasOwnProperty.call(patch, 'reviewThreadsMeta') ||
+            Object.prototype.hasOwnProperty.call(patch, 'reviewCommentsMeta')
+          ) {
+            S.applyThreadsFromMergedDetail(current.detailStore, next);
+          }
+          if (
+            Object.prototype.hasOwnProperty.call(patch, 'viewerPendingReview')
+          ) {
+            S.applyPendingReview(
+              current.detailStore,
+              next.viewerPendingReview ?? null
+            );
+          }
+          if (Object.prototype.hasOwnProperty.call(patch, 'reviews')) {
+            S.applyReviews(current.detailStore, next.reviews, {
+              settled: true,
+            });
+          }
           publishDetailFromStore();
         } else {
           current.detail = next;
@@ -849,6 +890,28 @@
                 }
               );
             }
+          } catch {
+            /* ignore */
+          }
+        }
+        // List-visible fields (labels/title/comments/…) → single-row re-render
+        // under the overlay so PR→list close shows current shell truth.
+        const touchesListRow =
+          Object.prototype.hasOwnProperty.call(patch, 'labels') ||
+          Object.prototype.hasOwnProperty.call(patch, 'title') ||
+          Object.prototype.hasOwnProperty.call(patch, 'draft') ||
+          Object.prototype.hasOwnProperty.call(patch, 'assignees') ||
+          Object.prototype.hasOwnProperty.call(patch, 'comments') ||
+          Object.prototype.hasOwnProperty.call(patch, 'baseRef') ||
+          Object.prototype.hasOwnProperty.call(patch, 'headRef');
+        if (touchesListRow) {
+          try {
+            applyOpenDetailToListRow({
+              number: current.number,
+              detail: current.detail,
+              // Label meta writes may clear all chips — must force empty through
+              forceLabels: Object.prototype.hasOwnProperty.call(patch, 'labels'),
+            });
           } catch {
             /* ignore */
           }
@@ -1204,9 +1267,155 @@
     };
   }
 
+  /**
+   * Best-effort list comment total from detail (issue comments).
+   * Only when the page is complete (!hasMore) so we never under-count.
+   */
+  function estimateListCommentCount(detail: any) {
+    if (!detail || !Array.isArray(detail.comments)) return null;
+    const meta = detail.commentsMeta;
+    if (meta && meta.hasMore) return null;
+    return detail.comments.length;
+  }
+
+  /**
+   * List-cache + native-row fields taken from the open PR detail.
+   * Prefer this over full-list network / soft-reload.
+   */
+  function listRowFieldsFromDetail(detail: any, number: any) {
+    if (!detail || typeof detail !== 'object') return null;
+    const n = Number(number || detail.number);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    const commentCount = estimateListCommentCount(detail);
+    const fields: any = {
+      number: n,
+      title: detail.title != null ? String(detail.title) : undefined,
+      draft: Boolean(detail.draft),
+      state: detail.state != null ? String(detail.state) : undefined,
+      merged: Boolean(detail.merged),
+      baseRef: detail.baseRef || detail.base?.ref || undefined,
+      headRef: detail.headRef || detail.head?.ref || undefined,
+      author:
+        typeof detail.author === 'string'
+          ? detail.author
+          : detail.author?.login || detail.user?.login || undefined,
+      body: detail.body != null ? String(detail.body) : undefined,
+      magicLinks: detail.magicLinks,
+    };
+    // Always forward labels/assignees when present as arrays (incl. empty).
+    // Empty means user/API cleared them — must update list cache/DOM so reopen
+    // list-sketch does not resurrect deleted chips.
+    if (Array.isArray(detail.labels)) {
+      fields.labels = detail.labels;
+    }
+    if (Array.isArray(detail.assignees)) {
+      fields.assignees = detail.assignees;
+    }
+    if (commentCount != null) {
+      fields.listCommentCount = commentCount;
+    }
+    // Drop undefined so patchCachedPr does not clobber with undefined
+    for (const k of Object.keys(fields)) {
+      if (fields[k] === undefined) delete fields[k];
+    }
+    return fields;
+  }
+
+  /**
+   * Push open-PR truth into the list cache + re-render that one native row.
+   * No full-list fetch / Turbo soft-reload — labels, title, draft, comments
+   * come from the detail the user was just looking at.
+   *
+   * @param {{ number?: number, detail?: object, fields?: object, forceLabels?: boolean }} opts
+   *   forceLabels: include labels even when empty (meta write cleared them)
+   */
+  function applyOpenDetailToListRow(opts: any = {}) {
+    if (typeof isPullsListPage === 'function' && !isPullsListPage()) {
+      return false;
+    }
+    const number = Number(opts?.number);
+    let fields =
+      opts?.fields ||
+      listRowFieldsFromDetail(opts?.detail, number);
+    if (!fields || !Number.isFinite(fields.number)) return false;
+
+    // Explicit label writes (incl. clear-all) must reach the native row
+    if (
+      opts?.forceLabels &&
+      opts?.detail &&
+      Array.isArray(opts.detail.labels)
+    ) {
+      fields = { ...fields, labels: opts.detail.labels };
+    }
+
+    // 1) Tree / open-list cache (list sketch + decorations on reopen)
+    try {
+      const app = globalThis.__PR_TREE_APP__;
+      if (typeof app?.patchCachedPr === 'function') {
+        const cachePatch: any = { ...fields };
+        delete cachePatch.listCommentCount;
+        delete cachePatch.number;
+        if (Object.keys(cachePatch).length) {
+          app.patchCachedPr(fields.number, cachePatch);
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+
+    // 2) Native row: labels / title / comment count / draft meta
+    try {
+      const dom = globalThis.PRTreeDOM;
+      if (typeof dom?.applyListRowFromDetail === 'function') {
+        return Boolean(
+          dom.applyListRowFromDetail(document, fields.number, fields)
+        );
+      }
+      // Fallback: comment count only
+      if (
+        typeof dom?.updateListRowCommentCount === 'function' &&
+        Number.isFinite(fields.listCommentCount)
+      ) {
+        return Boolean(
+          dom.updateListRowCommentCount(
+            document,
+            fields.number,
+            fields.listCommentCount
+          )
+        );
+      }
+    } catch {
+      /* ignore */
+    }
+    return false;
+  }
+
+  /**
+   * After PR shell closes on the pulls list: re-render that PR's list row
+   * from the open detail snapshot (efficient single-row path).
+   */
+  function scheduleListResyncAfterPrShell(opts: any = {}) {
+    if (typeof isPullsListPage === 'function' && !isPullsListPage()) return;
+    try {
+      applyOpenDetailToListRow(opts);
+    } catch {
+      /* ignore */
+    }
+  }
+
   function closeModal() {
     abortOpenFetches('sheet-closed');
     const wasEmbed = isEmbedPresentation(current.presentation);
+    // Capture before wiping session — single-row re-render from open detail
+    const listResync = {
+      owner: current.owner,
+      repo: current.repo,
+      number: current.number,
+      detail: current.detail,
+      fields: listRowFieldsFromDetail(current.detail, current.number),
+      // Empty labels/assignees must write through list cache on PR→list
+      forceLabels: Array.isArray(current.detail?.labels),
+    };
     clearPersistedOpenModal();
     // Keep native PR URL clean when embed closes (no prp_* strip needed if we never wrote)
     if (!wasEmbed) clearUriRoute();
@@ -1240,6 +1449,14 @@
       ensureGithubPrToggle();
     } catch {
       /* ignore */
+    }
+    // Modal on /pulls → list: re-render that PR row from detail (labels, title, …)
+    if (!wasEmbed) {
+      try {
+        scheduleListResyncAfterPrShell(listResync);
+      } catch {
+        /* ignore */
+      }
     }
   }
 

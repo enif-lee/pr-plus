@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { KeyGlyphs } from './KeyGlyphs';
 import './TipPopover.css';
 
 export type TipPlacement = 'top' | 'bottom' | 'left' | 'right';
@@ -176,7 +177,11 @@ export function TipPopover({
       }}
     >
       {tipLabel ? <span className="prp-tip-pop__label">{tipLabel}</span> : null}
-      {tipKbd ? <kbd className="prp-tip-pop__kbd">{tipKbd}</kbd> : null}
+      {tipKbd ? (
+        <kbd className="prp-tip-pop__kbd">
+          <KeyGlyphs text={tipKbd} />
+        </kbd>
+      ) : null}
     </span>
   );
 

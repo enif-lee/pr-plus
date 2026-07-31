@@ -487,6 +487,77 @@ export const DIFF_DEMO_STEPS = [
 export type DiffDemoStepId = (typeof DIFF_DEMO_STEPS)[number]['id'];
 
 /**
+ * Split a compact chord label into individual keys for separate keycaps.
+ * Examples: `⌥⇧]` → ['⌥','⇧',']'] · `⌥C` → ['⌥','C'] · `Alt+Shift+K` → ['Alt','Shift','K']
+ */
+export function splitChordKeys(chord: unknown): string[] {
+  let s = String(chord ?? '').trim();
+  if (!s) return [];
+  // Explicit Win/Linux style (already separated)
+  if (s.includes('+')) {
+    return s
+      .split('+')
+      .map((p) => p.trim())
+      .filter(Boolean);
+  }
+  // Named single keys
+  if (/^(Esc|Enter|Tab|Space|Spacebar|Return)$/i.test(s)) {
+    return [s.length <= 3 ? s : s[0].toUpperCase() + s.slice(1).toLowerCase()];
+  }
+  const keys: string[] = [];
+  const MODS = ['⌥', '⇧', '⌘', '⌃', '⎇'];
+  let guard = 0;
+  while (s && guard++ < 16) {
+    let hit = false;
+    for (const m of MODS) {
+      if (s.startsWith(m)) {
+        keys.push(m);
+        s = s.slice(m.length);
+        hit = true;
+        break;
+      }
+    }
+    if (hit) continue;
+    break;
+  }
+  if (!s) return keys;
+  // Arrow as remaining first char
+  if (['↑', '↓', '←', '→'].includes(s[0])) {
+    keys.push(s[0]);
+    s = s.slice(1);
+  }
+  if (s) {
+    // Single letter → uppercase for display parity with docs
+    if (/^[a-z]$/.test(s)) keys.push(s.toUpperCase());
+    else keys.push(s);
+  }
+  return keys;
+}
+
+/**
+ * Build kbd-row parts: each chord becomes separate keycaps joined by `+`,
+ * and multiple chords join with `or` / `then`.
+ */
+export function chordLabelsToKbdParts(
+  chords: unknown,
+  multiJoiner: 'or' | 'then' = 'or'
+): Array<string | { k: string }> {
+  const list = (Array.isArray(chords) ? chords : [chords])
+    .map((c) => String(c || '').trim())
+    .filter(Boolean);
+  const parts: Array<string | { k: string }> = [];
+  list.forEach((chord, i) => {
+    if (i > 0) parts.push(multiJoiner);
+    const keys = splitChordKeys(chord);
+    keys.forEach((k, j) => {
+      if (j > 0) parts.push('+');
+      parts.push({ k });
+    });
+  });
+  return parts;
+}
+
+/**
  * Whether a keydown matches a Diff tip chord label (e.g. "⌥⇧]", "↓", "Esc").
  */
 export function matchesDiffDemoChord(
@@ -1041,12 +1112,38 @@ export function createOnboardingTour(deps: any) {
     const row = el('div', 'prp-onboarding__kbd-row');
     for (const p of parts) {
       if (typeof p === 'string') {
-        row.appendChild(el('span', '', p));
+        row.appendChild(el('span', 'prp-onboarding__kbd-sep', p));
       } else {
-        row.appendChild(el('kbd', 'prp-onboarding__kbd', p.k));
+        const key = String(p.k || '');
+        let kbdClass = 'prp-onboarding__kbd';
+        // Shift glyph paints shorter than ⌥/⌘ in most fonts — optical scale
+        if (key === '⇧' || key === 'Shift') {
+          kbdClass += ' prp-onboarding__kbd--shift';
+        }
+        const kbd = el('kbd', kbdClass, key);
+        try {
+          if (key === '⇧' || key === 'Shift') {
+            kbd.setAttribute('data-key', 'shift');
+          } else if (key === '⌥' || key === 'Alt') {
+            kbd.setAttribute('data-key', 'opt');
+          } else if (key === '⌘' || key === 'Ctrl' || key === '⌃') {
+            kbd.setAttribute('data-key', 'mod');
+          }
+        } catch {
+          /* mock DOM */
+        }
+        row.appendChild(kbd);
       }
     }
     return row;
+  }
+
+  /** Combo chords → separate keycaps (⌥ + ⇧ + ]). */
+  function kbdRowFromChords(
+    chords: string[] | readonly string[],
+    multiJoiner: 'or' | 'then' = 'or'
+  ) {
+    return kbdRow(chordLabelsToKbdParts(chords, multiJoiner));
   }
 
   function renderBody(body: HTMLElement) {
@@ -1219,12 +1316,9 @@ export function createOnboardingTour(deps: any) {
       body.appendChild(el('p', 'prp-onboarding__hint', tip.body));
       if (tip.chords.length) {
         const sequential = tip.chords.length > 1;
-        const parts: Array<string | { k: string }> = [];
-        tip.chords.forEach((c, i) => {
-          if (i > 0) parts.push(sequential ? 'then' : 'or');
-          parts.push({ k: c });
-        });
-        body.appendChild(kbdRow(parts));
+        body.appendChild(
+          kbdRowFromChords(tip.chords, sequential ? 'then' : 'or')
+        );
         if (sequential) {
           const nextChord =
             tip.chords[
@@ -1310,12 +1404,7 @@ export function createOnboardingTour(deps: any) {
       body.appendChild(el('p', 'prp-onboarding__lead', tip.title));
       body.appendChild(el('p', 'prp-onboarding__hint', tip.body));
       if (tip.chords.length) {
-        const parts: Array<string | { k: string }> = [];
-        tip.chords.forEach((c, i) => {
-          if (i > 0) parts.push('or');
-          parts.push({ k: c });
-        });
-        body.appendChild(kbdRow(parts));
+        body.appendChild(kbdRowFromChords(tip.chords, 'or'));
         body.appendChild(
           el(
             'p',
@@ -1967,6 +2056,8 @@ const onboardingApi = {
   isOnboardingEnterEvent,
   isOnboardingSkipTourEvent,
   isOnboardingBackEvent,
+  splitChordKeys,
+  chordLabelsToKbdParts,
   createOnboardingTour,
 };
 

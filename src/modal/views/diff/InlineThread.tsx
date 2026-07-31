@@ -8,6 +8,7 @@ import { OptBtnHint } from '@common/OptBtnHint';
 import { formatWhen } from '@common/utils';
 import { Avatar } from '@common/Avatar';
 import { IconDisclosure, IconPencil, IconTrash } from '@common/icons';
+import { CommentReactions } from '@common/CommentReactions';
 import { BodyEditor } from '../composers/BodyEditor';
 import { DiffSnippetView } from '../conversation/DiffSnippetView';
 import { useModalStore } from '../../store/modal-store';
@@ -39,6 +40,8 @@ function InlineThreadImpl(props: any) {
     onRegisterEditorSave,
     onApplySuggestion,
     onRegisterApply,
+    onToggleReaction,
+    onLoadReactors = null,
     actionBusy,
     viewerLogin,
     prOpen,
@@ -225,10 +228,47 @@ function InlineThreadImpl(props: any) {
     );
   }
 
+  function renderCommentReactions(
+    id: any,
+    comment: {
+      reactions?: any[];
+      nodeId?: string | null;
+      pending?: boolean;
+    } | null
+  ) {
+    if (isEditingId(id)) return null;
+    if (comment?.pending) return null;
+    if (typeof onToggleReaction !== 'function') return null;
+    return (
+      <CommentReactions
+        reactions={comment?.reactions || []}
+        target={{
+          kind: 'review',
+          commentId: id,
+          nodeId: comment?.nodeId || null,
+        }}
+        viewerLogin={viewerLogin}
+        busy={actionBusy}
+        onToggle={onToggleReaction}
+        onLoadReactors={onLoadReactors}
+      />
+    );
+  }
+
   function renderCommentBody(
     id: any,
     commentBody: any,
-    { canApplySuggestion = false } = {}
+    {
+      canApplySuggestion = false,
+      reactions = null,
+      nodeId = null,
+      pending = false,
+    }: {
+      canApplySuggestion?: boolean;
+      reactions?: any[] | null;
+      nodeId?: string | null;
+      pending?: boolean;
+    } = {}
   ) {
     if (isEditingId(id)) {
       return (
@@ -248,28 +288,35 @@ function InlineThreadImpl(props: any) {
       );
     }
     return (
-      <MarkdownView
-        source={commentBody || ''}
-        className="prp-md--compact"
-        canApplySuggestion={canApplySuggestion}
-        actionBusy={actionBusy}
-        onRegisterApply={onRegisterApply}
-        linkCtx={linkCtx}
-        searchQuery={qSearch}
-        searchCurrentStart={commentCurrentStart(id)}
-        searchOccurrenceIndex={commentOcc(id)}
-        onApplySuggestion={
-          canApplySuggestion
-            ? (content: string) =>
-                onApplySuggestion?.({
-                  path,
-                  startLine: startLine || line,
-                  endLine: line,
-                  suggestion: content,
-                })
-            : undefined
-        }
-      />
+      <>
+        <MarkdownView
+          source={commentBody || ''}
+          className="prp-md--compact"
+          canApplySuggestion={canApplySuggestion}
+          actionBusy={actionBusy}
+          onRegisterApply={onRegisterApply}
+          linkCtx={linkCtx}
+          searchQuery={qSearch}
+          searchCurrentStart={commentCurrentStart(id)}
+          searchOccurrenceIndex={commentOcc(id)}
+          onApplySuggestion={
+            canApplySuggestion
+              ? (content: string) =>
+                  onApplySuggestion?.({
+                    path,
+                    startLine: startLine || line,
+                    endLine: line,
+                    suggestion: content,
+                  })
+              : undefined
+          }
+        />
+        {renderCommentReactions(id, {
+          reactions: reactions || [],
+          nodeId,
+          pending,
+        })}
+      </>
     );
   }
 
@@ -396,6 +443,17 @@ function InlineThreadImpl(props: any) {
                     </div>
                     {renderCommentBody(row?.commentId || thread?.id, body, {
                       canApplySuggestion: canApply,
+                      reactions:
+                        row?.reactions ||
+                        thread?.root?.reactions ||
+                        thread?.reactions ||
+                        [],
+                      nodeId:
+                        row?.nodeId ||
+                        thread?.root?.nodeId ||
+                        thread?.nodeId ||
+                        null,
+                      pending: rootPending,
                     })}
                   </div>
                 </li>
@@ -439,7 +497,11 @@ function InlineThreadImpl(props: any) {
                           ) : null}
                           {!isPending ? renderCommentActions(r.id, r.body, ownReply) : null}
                         </div>
-                        {renderCommentBody(r.id, r.body)}
+                        {renderCommentBody(r.id, r.body, {
+                          reactions: r.reactions || [],
+                          nodeId: r.nodeId || null,
+                          pending: isPending,
+                        })}
                       </div>
                     </li>
                   );
@@ -472,6 +534,17 @@ function InlineThreadImpl(props: any) {
                 <div className="prp-inline-thread__body">
                   {renderCommentBody(row?.commentId || thread?.id, body, {
                     canApplySuggestion: canApply,
+                    reactions:
+                      row?.reactions ||
+                      thread?.root?.reactions ||
+                      thread?.reactions ||
+                      [],
+                    nodeId:
+                      row?.nodeId ||
+                      thread?.root?.nodeId ||
+                      thread?.nodeId ||
+                      null,
+                    pending: rootPending,
                   })}
                 </div>
               </div>
@@ -481,6 +554,9 @@ function InlineThreadImpl(props: any) {
               className="prp-inline-thread__composer"
               data-context-reply="1"
               data-context-active={contextActive ? '1' : undefined}
+              data-prp-composer-root="1"
+              data-prp-composer-kind="reply"
+              data-prp-can-resolve={canResolveThread ? '1' : undefined}
               onFocusCapture={() => setReplyFocused(true)}
               onBlurCapture={(e) => {
                 const next = e.relatedTarget as Node | null;
@@ -489,24 +565,36 @@ function InlineThreadImpl(props: any) {
               }}
             >
               <div className="prp-inline-thread__composer-field">
-                <MarkdownComposer
-                  value={replyText || ''}
-                  onChange={onReplyTextChange}
-                  placeholder="Reply"
-                  compact
-                  rows={2}
-                  disabled={actionBusy}
-                  showTabs
-                  onUploadFile={onUploadFile}
-                  linkCtx={linkCtx}
-                  mentionCandidates={mentionCandidates}
-                />
-                {/* 1st ⌥C: focus reply — tip over the input field */}
-                {contextActive && !replyFocused ? (
-                  <span className="prp-opt-hint-host prp-inline-thread__context-hint">
+                <div className="prp-opt-hint-host">
+                  {replyFocused ? (
+                    <>
+                      <OptBtnHint label="⌥E" preferredPlacement="top" />
+                      <OptBtnHint label="⌥I" preferredPlacement="top" />
+                    </>
+                  ) : null}
+                  {/* 1st ⌥C: focus reply when thread focused but input not yet */}
+                  {contextActive && !replyFocused ? (
                     <OptBtnHint label="⌥C" preferredPlacement="top" />
-                  </span>
-                ) : null}
+                  ) : null}
+                  <MarkdownComposer
+                    value={replyText || ''}
+                    onChange={onReplyTextChange}
+                    placeholder="Reply"
+                    compact
+                    rows={2}
+                    disabled={actionBusy}
+                    showTabs
+                    onUploadFile={onUploadFile}
+                    linkCtx={linkCtx}
+                    mentionCandidates={mentionCandidates}
+                    onComposerFocusChange={setReplyFocused}
+                    onSubmitRequest={() =>
+                      onReply?.(thread || { id: row?.commentId, root: row }, {
+                        mode: 'comment',
+                      })
+                    }
+                  />
+                </div>
               </div>
               {/* Actions after Reply focused or draft text remains */}
               <div
@@ -516,42 +604,30 @@ function InlineThreadImpl(props: any) {
                     : ''
                 }`}
               >
-                {contextActive && replyFocused ? (
-                  <span className="prp-opt-hint-host">
-                    {/* 2nd ⌥C: submit — tip over Comment button */}
-                    <OptBtnHint label="⌥C" preferredPlacement="top" />
-                    <Button
-                      size="sm"
-                      variant="primary"
-                      disabled={actionBusy || !String(replyText || '').trim()}
-                      onClick={() =>
-                        onReply?.(thread || { id: row?.commentId, root: row }, {
-                          mode: 'comment',
-                        })
-                      }
-                      title="Comment (⌥C)"
-                    >
-                      Comment
-                    </Button>
-                  </span>
-                ) : (
+                <span className="prp-opt-hint-host">
+                  {replyFocused ? (
+                    <OptBtnHint label="⌥C · ⌘↵" preferredPlacement="top" />
+                  ) : null}
                   <Button
                     size="sm"
                     variant="primary"
-                    disabled={actionBusy || !String(replyText || '').trim()}
+                    loading={Boolean(actionBusy)}
+                    disabled={!String(replyText || '').trim()}
                     onClick={() =>
                       onReply?.(thread || { id: row?.commentId, root: row }, {
                         mode: 'comment',
                       })
                     }
-                    title="Comment"
+                    title="Comment (⌥C · ⌘↵)"
+                    data-prp-composer-submit="1"
                   >
-                    Comment
+                    {actionBusy ? 'Submitting…' : 'Comment'}
                   </Button>
-                )}
+                </span>
                 <Button
                   size="sm"
-                  disabled={actionBusy || !String(replyText || '').trim()}
+                  loading={Boolean(actionBusy)}
+                  disabled={!String(replyText || '').trim()}
                   onClick={() =>
                     onReply?.(thread || { id: row?.commentId, root: row }, {
                       mode: 'pending',
@@ -563,29 +639,17 @@ function InlineThreadImpl(props: any) {
                       : 'Start a pending review with this reply'
                   }
                 >
-                  {pendingCount > 0 || hasPendingReplies ? 'Add comment' : 'Start review'}
+                  {actionBusy
+                    ? 'Working…'
+                    : pendingCount > 0 || hasPendingReplies
+                      ? 'Add comment'
+                      : 'Start review'}
                 </Button>
                 {canResolveThread ? (
-                  contextActive && replyFocused ? (
-                    <span className="prp-opt-hint-host">
+                  <span className="prp-opt-hint-host">
+                    {replyFocused ? (
                       <OptBtnHint label="⌥⌃R" preferredPlacement="top" />
-                      <Button
-                        size="sm"
-                        disabled={actionBusy}
-                        onClick={() =>
-                          onResolve?.(
-                            thread?.threadNodeId || row?.threadNodeId,
-                            !(thread?.resolved || row?.resolved)
-                          )
-                        }
-                        title="Resolve / unresolve (⌥⌃R)"
-                      >
-                        {thread?.resolved || row?.resolved
-                          ? 'Unresolve conversation'
-                          : 'Resolve conversation'}
-                      </Button>
-                    </span>
-                  ) : (
+                    ) : null}
                     <Button
                       size="sm"
                       disabled={actionBusy}
@@ -595,12 +659,14 @@ function InlineThreadImpl(props: any) {
                           !(thread?.resolved || row?.resolved)
                         )
                       }
+                      title="Resolve / unresolve (⌥⌃R)"
+                      data-prp-composer-resolve="1"
                     >
                       {thread?.resolved || row?.resolved
                         ? 'Unresolve conversation'
                         : 'Resolve conversation'}
                     </Button>
-                  )
+                  </span>
                 ) : null}
               </div>
             </div>

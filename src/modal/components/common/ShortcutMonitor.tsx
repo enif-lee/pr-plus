@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   type ShortcutMonitorFire,
   SHORTCUT_MONITOR_DISMISS_MS,
@@ -11,6 +11,7 @@ import {
   subscribeShortcutMonitorFire,
   clearShortcutMonitorFire,
 } from '@lib/shortcut-monitor-bus';
+import { KeyGlyphs } from './KeyGlyphs';
 
 const FADE_MS = 200;
 
@@ -183,11 +184,6 @@ export function ShortcutMonitor({
     return undefined;
   }, [enabled, liveMode, liveText]);
 
-  useLayoutEffect(() => {
-    const el = lineRef.current;
-    if (el && display?.text) el.textContent = display.text;
-  }, [display?.text]);
-
   useEffect(() => {
     return () => {
       if (fadeTimerRef.current) window.clearTimeout(fadeTimerRef.current);
@@ -207,7 +203,7 @@ export function ShortcutMonitor({
       data-size={sizeClass}
     >
       <div ref={lineRef} className="prp-shortcut-monitor__line">
-        {display.text}
+        <KeyGlyphs text={display.text} />
       </div>
     </div>
   );

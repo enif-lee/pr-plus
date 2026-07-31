@@ -46,6 +46,11 @@ const DEFAULT_PREFS = {
   singleFileMode: false,
   treeView: true,
   /**
+   * Master switch: when false, pr+ host/network features stay off.
+   * Rate-limit auto-disable also flips this off until reset (user may re-enable).
+   */
+  pluginEnabled: true,
+  /**
    * Bottom-center shortcut / action monitor size:
    * none | small (1× default) | medium (2×) | large (3×)
    */
@@ -57,6 +62,9 @@ const DEFAULT_PREFS = {
   autoExpandOnFileNav: false,
   onboardingCompleted: false,
 };
+
+/** Last-known GitHub rate-limit snapshots + per-resource disable clocks. */
+const RATE_LIMIT_KEY = 'rateLimitState';
 
 function normalizeShortcutMonitorSizePref(raw: unknown): string {
   const v = String(raw ?? '')
@@ -110,6 +118,10 @@ function normalizePrefs(raw: any) {
         : DEFAULT_PREFS.singleFileMode,
     treeView:
       typeof src.treeView === 'boolean' ? src.treeView : DEFAULT_PREFS.treeView,
+    pluginEnabled:
+      typeof src.pluginEnabled === 'boolean'
+        ? src.pluginEnabled
+        : DEFAULT_PREFS.pluginEnabled,
     shortcutMonitorSize: normalizeShortcutMonitorSizePref(
       src.shortcutMonitorSize
     ),
@@ -122,6 +134,95 @@ function normalizePrefs(raw: any) {
         ? src.onboardingCompleted
         : DEFAULT_PREFS.onboardingCompleted,
   };
+}
+
+function emptyRateLimitStateLocal() {
+  const RL = globalThis.PRModalRateLimit;
+  if (typeof RL?.emptyRateLimitState === 'function') {
+    return RL.emptyRateLimitState();
+  }
+  return {
+    disabledUntil: { core: 0, graphql: 0, search: 0 },
+    snapshots: { core: null, graphql: null, search: null },
+  };
+}
+
+function normalizeRateLimitStateLocal(raw: any) {
+  const RL = globalThis.PRModalRateLimit;
+  if (typeof RL?.normalizeRateLimitState === 'function') {
+    return RL.normalizeRateLimitState(raw);
+  }
+  return emptyRateLimitStateLocal();
+}
+
+/**
+ * @param {unknown} [storageApi]
+ * @returns {Promise<object>}
+ */
+function getRateLimitState(storageApi: any) {
+  const area = getStorageArea(storageApi);
+  if (!area) return Promise.resolve(emptyRateLimitStateLocal());
+  return new Promise((resolve) => {
+    area.get([RATE_LIMIT_KEY], (result) => {
+      resolve(normalizeRateLimitStateLocal(result?.[RATE_LIMIT_KEY]));
+    });
+  });
+}
+
+/**
+ * Replace rate-limit state (snapshots + disabledUntil clocks).
+ * @param {object} next
+ * @param {unknown} [storageApi]
+ */
+async function setRateLimitState(next: any, storageApi: any) {
+  const area = getStorageArea(storageApi);
+  if (!area) return Promise.reject(new Error('chrome.storage unavailable'));
+  const normalized = normalizeRateLimitStateLocal(next);
+  return new Promise((resolve, reject) => {
+    area.set({ [RATE_LIMIT_KEY]: normalized }, () => {
+      const err = (globalThis as any).chrome?.runtime?.lastError;
+      if (err) reject(err);
+      else resolve(normalized);
+    });
+  });
+}
+
+/**
+ * Merge patch into rate-limit state.
+ * @param {Partial<object>} patch
+ */
+async function patchRateLimitState(patch: any, storageApi: any) {
+  const prev = await getRateLimitState(storageApi);
+  const next = normalizeRateLimitStateLocal({
+    ...prev,
+    ...(patch && typeof patch === 'object' ? patch : {}),
+    disabledUntil: {
+      ...(prev as any).disabledUntil,
+      ...(patch?.disabledUntil && typeof patch.disabledUntil === 'object'
+        ? patch.disabledUntil
+        : {}),
+    },
+    snapshots: {
+      ...(prev as any).snapshots,
+      ...(patch?.snapshots && typeof patch.snapshots === 'object'
+        ? patch.snapshots
+        : {}),
+    },
+  });
+  return setRateLimitState(next, storageApi);
+}
+
+function watchRateLimitState(
+  onChange: any,
+  storageApi: any = (globalThis as any).chrome?.storage
+) {
+  if (!storageApi?.onChanged || typeof onChange !== 'function') return () => {};
+  const listener = (changes, areaName) => {
+    if (areaName !== 'local' || !changes[RATE_LIMIT_KEY]) return;
+    onChange(normalizeRateLimitStateLocal(changes[RATE_LIMIT_KEY].newValue));
+  };
+  storageApi.onChanged.addListener(listener);
+  return () => storageApi.onChanged.removeListener(listener);
 }
 
 /**
@@ -583,6 +684,7 @@ const storageApi = {
   HOST_ACCOUNTS_KEY,
   PREFS_KEY,
   ONBOARDING_KEY,
+  RATE_LIMIT_KEY,
   DEFAULT_PREFS,
   normalizePrefs,
   normalizeHostAccounts,
@@ -595,6 +697,10 @@ const storageApi = {
   getExtensionPrefs,
   setExtensionPrefs,
   watchExtensionPrefs,
+  getRateLimitState,
+  setRateLimitState,
+  patchRateLimitState,
+  watchRateLimitState,
   getOnboardingCompleted,
   setOnboardingCompleted,
   getHostAccounts,

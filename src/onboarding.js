@@ -317,6 +317,55 @@ const DIFF_DEMO_STEPS = [
     chords: []
   }
 ];
+function splitChordKeys(chord) {
+  let s = String(chord ?? "").trim();
+  if (!s) return [];
+  if (s.includes("+")) {
+    return s.split("+").map((p) => p.trim()).filter(Boolean);
+  }
+  if (/^(Esc|Enter|Tab|Space|Spacebar|Return)$/i.test(s)) {
+    return [s.length <= 3 ? s : s[0].toUpperCase() + s.slice(1).toLowerCase()];
+  }
+  const keys = [];
+  const MODS = ["\u2325", "\u21E7", "\u2318", "\u2303", "\u2387"];
+  let guard = 0;
+  while (s && guard++ < 16) {
+    let hit = false;
+    for (const m of MODS) {
+      if (s.startsWith(m)) {
+        keys.push(m);
+        s = s.slice(m.length);
+        hit = true;
+        break;
+      }
+    }
+    if (hit) continue;
+    break;
+  }
+  if (!s) return keys;
+  if (["\u2191", "\u2193", "\u2190", "\u2192"].includes(s[0])) {
+    keys.push(s[0]);
+    s = s.slice(1);
+  }
+  if (s) {
+    if (/^[a-z]$/.test(s)) keys.push(s.toUpperCase());
+    else keys.push(s);
+  }
+  return keys;
+}
+function chordLabelsToKbdParts(chords, multiJoiner = "or") {
+  const list = (Array.isArray(chords) ? chords : [chords]).map((c) => String(c || "").trim()).filter(Boolean);
+  const parts = [];
+  list.forEach((chord, i) => {
+    if (i > 0) parts.push(multiJoiner);
+    const keys = splitChordKeys(chord);
+    keys.forEach((k, j) => {
+      if (j > 0) parts.push("+");
+      parts.push({ k });
+    });
+  });
+  return parts;
+}
 function matchesDiffDemoChord(opts, chord) {
   const c = String(chord || "").trim();
   if (!c) return false;
@@ -693,12 +742,31 @@ function createOnboardingTour(deps) {
     const row = el("div", "prp-onboarding__kbd-row");
     for (const p of parts) {
       if (typeof p === "string") {
-        row.appendChild(el("span", "", p));
+        row.appendChild(el("span", "prp-onboarding__kbd-sep", p));
       } else {
-        row.appendChild(el("kbd", "prp-onboarding__kbd", p.k));
+        const key = String(p.k || "");
+        let kbdClass = "prp-onboarding__kbd";
+        if (key === "\u21E7" || key === "Shift") {
+          kbdClass += " prp-onboarding__kbd--shift";
+        }
+        const kbd = el("kbd", kbdClass, key);
+        try {
+          if (key === "\u21E7" || key === "Shift") {
+            kbd.setAttribute("data-key", "shift");
+          } else if (key === "\u2325" || key === "Alt") {
+            kbd.setAttribute("data-key", "opt");
+          } else if (key === "\u2318" || key === "Ctrl" || key === "\u2303") {
+            kbd.setAttribute("data-key", "mod");
+          }
+        } catch {
+        }
+        row.appendChild(kbd);
       }
     }
     return row;
+  }
+  function kbdRowFromChords(chords, multiJoiner = "or") {
+    return kbdRow(chordLabelsToKbdParts(chords, multiJoiner));
   }
   function renderBody(body) {
     body.innerHTML = "";
@@ -861,12 +929,9 @@ function createOnboardingTour(deps) {
       body.appendChild(el("p", "prp-onboarding__hint", tip.body));
       if (tip.chords.length) {
         const sequential = tip.chords.length > 1;
-        const parts = [];
-        tip.chords.forEach((c, i) => {
-          if (i > 0) parts.push(sequential ? "then" : "or");
-          parts.push({ k: c });
-        });
-        body.appendChild(kbdRow(parts));
+        body.appendChild(
+          kbdRowFromChords(tip.chords, sequential ? "then" : "or")
+        );
         if (sequential) {
           const nextChord = tip.chords[Math.max(0, Math.min(tip.chords.length - 1, convChordIndex))] || tip.chords[0];
           body.appendChild(
@@ -937,12 +1002,7 @@ function createOnboardingTour(deps) {
       body.appendChild(el("p", "prp-onboarding__lead", tip.title));
       body.appendChild(el("p", "prp-onboarding__hint", tip.body));
       if (tip.chords.length) {
-        const parts = [];
-        tip.chords.forEach((c, i) => {
-          if (i > 0) parts.push("or");
-          parts.push({ k: c });
-        });
-        body.appendChild(kbdRow(parts));
+        body.appendChild(kbdRowFromChords(tip.chords, "or"));
         body.appendChild(
           el(
             "p",
@@ -1510,6 +1570,8 @@ const onboardingApi = {
   isOnboardingEnterEvent,
   isOnboardingSkipTourEvent,
   isOnboardingBackEvent,
+  splitChordKeys,
+  chordLabelsToKbdParts,
   createOnboardingTour
 };
 if (typeof module !== "undefined" && module.exports) {

@@ -53,6 +53,8 @@ export const META_KEYS = [
   'subscribed',
   'locked',
   'gitattributesText',
+  /** PR body (issue) reaction groups */
+  'bodyReactions',
 ];
 
 function emptyListSlice(items?: unknown) {
@@ -494,12 +496,18 @@ export function applyPendingReview(store, pending) {
 /**
  * Apply core fetchPrDetail payload: meta + pendingReview only.
  * Empty side placeholders on the payload are ignored (isolation).
+ *
+ * Meta people/label arrays use trustEmpty: REST core always includes
+ * labels/assignees/reviewers on the PR object. Empty means cleared on
+ * GitHub — must overwrite list-sketch / cache so deleted labels do not
+ * resurrect on reopen (applyMeta otherwise keeps non-empty previous).
  */
 export function applyCorePayload(store, coreFlat) {
   if (!store || !coreFlat) return store;
   applyMeta(store, pickMeta(coreFlat), {
     source: coreFlat._source || 'network',
     sketch: false,
+    trustEmpty: true,
   });
   if (coreFlat.viewerPendingReview !== undefined) {
     applyPendingReview(store, coreFlat.viewerPendingReview);

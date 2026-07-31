@@ -455,11 +455,14 @@ export function mapRestIssueComment(raw, fallback: any = {}) {
     body: r.body || fallback.body || '',
     createdAt: r.created_at || fallback.createdAt || null,
     htmlUrl: r.html_url || null,
+    nodeId: r.node_id || fallback.nodeId || null,
+    reactions: Array.isArray(fallback.reactions) ? fallback.reactions : [],
   };
 }
 
 /**
- * Append an optimistic review comment into a detail-like snapshot.
+ * Append a server-confirmed review comment into a detail-like snapshot.
+ * Name kept for call-site compatibility (was optimistic; now used after API success).
  * @param {{ reviewComments?: Array }} detail
  * @param {object|null} comment mapped comment
  */
@@ -472,4 +475,18 @@ export function appendOptimisticReviewComment(detail, comment) {
   }
   list.push(comment);
   return { ...base, reviewComments: list };
+}
+
+/**
+ * Append a server-confirmed issue (conversation) comment after POST succeeds.
+ */
+export function appendIssueCommentToDetail(detail, comment) {
+  const base = detail || {};
+  if (!comment || comment.id == null) return base;
+  const list = Array.isArray(base.comments) ? base.comments.slice() : [];
+  if (list.some((c) => String(c.id) === String(comment.id))) {
+    return { ...base, comments: list };
+  }
+  list.push(comment);
+  return { ...base, comments: list };
 }

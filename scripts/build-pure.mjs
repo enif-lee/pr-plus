@@ -17,6 +17,7 @@ const pureDir = path.join(root, 'src/modal/pure');
 const MAP = {
   'aside-lists': { lib: 'aside-lists.ts', global: 'PRModalAsideLists' },
   'auto-refresh': { lib: 'auto-refresh.ts', global: 'PRModalAutoRefresh' },
+  'rate-limit': { lib: 'rate-limit.ts', global: 'PRModalRateLimit' },
   'open-pulls-lifecycle': {
     lib: 'open-pulls-lifecycle.ts',
     global: 'PRModalOpenPullsLifecycle',

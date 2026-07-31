@@ -373,6 +373,146 @@ export const CONTEXT_THREAD_SHORTCUT = {
 export const FOCUSED_THREAD_SHORTCUT = CONTEXT_THREAD_SHORTCUT;
 
 /**
+ * Composer-focused context chords — active while a markdown composer
+ * textarea (comment / reply / thread / selection bar) is focused.
+ *
+ *   ⌥E emoji typeahead (`:`) · ⌥C / ⌘↵ submit · ⌥⌃R resolve (when form has it)
+ *   ⌥I focus input · ⌥T review↔comment mode toggle (main conversation composer)
+ */
+export const COMPOSER_CONTEXT_SHORTCUT = {
+  emoji: {
+    key: 'e',
+    code: 'KeyE',
+    action: 'composerEmoji' as const,
+    chord: 'opt+e',
+    labelMac: '⌥E',
+    labelWin: 'Alt+E',
+  },
+  submit: {
+    key: 'c',
+    code: 'KeyC',
+    action: 'composerSubmit' as const,
+    chord: 'opt+c',
+    labelMac: '⌥C',
+    labelWin: 'Alt+C',
+  },
+  /** ⌘Enter / Ctrl+Enter — same submit path as primary button */
+  submitModEnter: {
+    key: 'enter',
+    code: 'Enter',
+    action: 'composerSubmit' as const,
+    chord: 'mod+enter',
+    labelMac: '⌘↵',
+    labelWin: 'Ctrl+Enter',
+  },
+  resolve: {
+    key: 'r',
+    code: 'KeyR',
+    action: 'composerResolve' as const,
+    chord: 'opt+ctrl+r',
+    labelMac: '⌥⌃R',
+    labelWin: 'Alt+Ctrl+R',
+    ctrl: true,
+  },
+  focusInput: {
+    key: 'i',
+    code: 'KeyI',
+    action: 'composerFocusInput' as const,
+    chord: 'opt+i',
+    labelMac: '⌥I',
+    labelWin: 'Alt+I',
+  },
+  modeToggle: {
+    key: 't',
+    code: 'KeyT',
+    action: 'composerModeToggle' as const,
+    chord: 'opt+t',
+    labelMac: '⌥T',
+    labelWin: 'Alt+T',
+  },
+} as const;
+
+/**
+ * True when the keyboard target is inside a pr+ markdown composer.
+ * @param {EventTarget|null|undefined} el
+ */
+export function isComposerKeyboardTarget(
+  el: EventTarget | null | undefined
+): boolean {
+  if (!el || typeof el !== 'object') return false;
+  const node = el as HTMLElement;
+  try {
+    if (node.closest?.('[data-prp-composer], .prp-mdc')) return true;
+    if (node.classList?.contains?.('prp-mdc__ta')) return true;
+  } catch {
+    /* ignore */
+  }
+  return false;
+}
+
+/**
+ * Resolve Option / ⌘Enter chords when a comment/reply composer is focused.
+ * Returns null when not composer-focused or chord does not apply.
+ *
+ * @param {{
+ *   mod?: boolean,
+ *   shift?: boolean,
+ *   alt?: boolean,
+ *   ctrl?: boolean,
+ *   key?: string,
+ *   code?: string,
+ *   composerFocused?: boolean,
+ *   canResolve?: boolean,
+ *   canToggleMode?: boolean,
+ * }} [opts]
+ * @returns {string|null}
+ */
+export function resolveComposerContextShortcutAction(opts: any = {}) {
+  if (!opts.composerFocused) return null;
+  const mod = Boolean(opts.mod);
+  const shift = Boolean(opts.shift);
+  const alt = Boolean(opts.alt);
+  const ctrl = Boolean(opts.ctrl);
+  const key = normalizeShortcutKey({
+    key: opts.key,
+    code: opts.code,
+    alt,
+  });
+
+  // ⌘Enter / Ctrl+Enter → submit (composer only; no Option required)
+  if (
+    mod &&
+    !alt &&
+    !shift &&
+    (key === 'enter' || opts.code === 'Enter' || opts.code === 'NumpadEnter')
+  ) {
+    return COMPOSER_CONTEXT_SHORTCUT.submitModEnter.action;
+  }
+
+  // Remaining chords need Option (not ⌘)
+  if (!alt || mod) return null;
+
+  // ⌥⌃R resolve when the form supports it
+  if (ctrl && !shift && key === 'r') {
+    if (opts.canResolve === false) return null;
+    return COMPOSER_CONTEXT_SHORTCUT.resolve.action;
+  }
+  if (ctrl) return null;
+
+  if (shift) return null;
+
+  if (key === 'e') return COMPOSER_CONTEXT_SHORTCUT.emoji.action;
+  if (key === 'c') return COMPOSER_CONTEXT_SHORTCUT.submit.action;
+  if (key === 'i') return COMPOSER_CONTEXT_SHORTCUT.focusInput.action;
+  if (key === 't') {
+    if (opts.canToggleMode === false) return null;
+    // When canToggleMode omitted, still emit — handlers no-op if no mode UI
+    return COMPOSER_CONTEXT_SHORTCUT.modeToggle.action;
+  }
+  return null;
+}
+
+/**
  * Toggle Diff review-filter: same target again → clear (null).
  * @returns next filter mode
  */
@@ -1085,6 +1225,23 @@ export function resolveModalShortcutAction(opts: any = {}) {
       hasLineSelection,
     });
     if (foldAct) return foldAct;
+  }
+
+  // Composer-focused context (comment / reply / thread / selection form):
+  // ⌥E emoji · ⌥C submit · ⌥⌃R resolve · ⌥I focus · ⌥T mode · ⌘↵ submit
+  if (opts.composerFocused) {
+    const ca = resolveComposerContextShortcutAction({
+      mod,
+      shift,
+      alt,
+      ctrl,
+      key: opts.key,
+      code: opts.code,
+      composerFocused: true,
+      canResolve: opts.canResolve,
+      canToggleMode: opts.canToggleMode,
+    });
+    if (ca) return ca;
   }
 
   // Do not steal keys while typing in inputs/textareas/contenteditable

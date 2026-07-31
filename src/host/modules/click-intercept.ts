@@ -1,9 +1,8 @@
 // TypeScript SoT — assembled by build scripts (classic runtime JS emit)
 
   function onClickCapture(event) {
-    if (!current.open) {
-      recoverGithubPaletteIfStuck();
-    }
+    // Always heal stuck GH ⌘K top layer (even when pr+ modal is open)
+    recoverGithubPaletteIfStuck();
     // Clicks outside the pulls palette (non-palette targets) close it only via backdrop handler
     if (!hostEnabled) return;
     if (!isPullsListPage()) return;
@@ -63,6 +62,12 @@
   function install() {
     document.addEventListener('click', onClickCapture, true);
     ensurePullsListKeyboard();
+    // GH ⌘K can leave :modal stuck after Esc — watch Escape/pointer/mutations
+    try {
+      ensureGithubPaletteTopLayerWatch();
+    } catch {
+      /* ignore */
+    }
     // Modal + full-page embed: activity-gated head.sha auto-refresh
     try {
       ensureAutoRefreshWatch();

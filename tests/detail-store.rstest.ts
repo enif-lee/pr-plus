@@ -18,7 +18,7 @@ import {
 } from '../src/modal/lib/detail-store';
 
 describe('detail-store isolation', () => {
-  test('core does not wipe sketch reviewers or settle files', () => {
+  test('core network empty labels/assignees overwrite sketch (no resurrection)', () => {
     const store = fromAppDetail({
       owner: 'o',
       repo: 'r',
@@ -34,6 +34,7 @@ describe('detail-store isolation', () => {
       _source: 'list',
     });
 
+    // REST core always carries people/label arrays — empty means cleared on GH
     applyCorePayload(store, {
       owner: 'o',
       repo: 'r',
@@ -53,9 +54,29 @@ describe('detail-store isolation', () => {
     const flat = toAppDetail(store)!;
     expect(flat.body).toBe('full body');
     expect(flat.headSha).toBe('deadbeef');
-    expect(flat.requestedReviewers).toEqual(['alice', 'bob']);
-    expect(flat.assignees).toEqual(['alice']);
+    // Authoritative core must clear sketch chips (label-delete reopen bug)
+    expect(flat.requestedReviewers).toEqual([]);
+    expect(flat.assignees).toEqual([]);
+    expect(flat.labels).toEqual([]);
     expect(store.files.settled).toBe(false);
+  });
+
+  test('applyMeta without trustEmpty still protects progressive empty wipe', () => {
+    const store = fromAppDetail({
+      owner: 'o',
+      repo: 'r',
+      number: 1,
+      labels: [{ name: 'bug', color: 'f00' }],
+      assignees: ['alice'],
+    });
+    applyMeta(
+      store,
+      { labels: [], assignees: [] },
+      { source: 'progressive', trustEmpty: false }
+    );
+    const flat = toAppDetail(store)!;
+    expect(flat.labels).toEqual([{ name: 'bug', color: 'f00' }]);
+    expect(flat.assignees).toEqual(['alice']);
   });
 
   test('side writes touch only their slices', () => {

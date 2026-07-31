@@ -550,6 +550,270 @@ function clearListDecorations(doc: any) {
   }
 }
 
+/**
+ * Native GH list row control that shows the conversation comment count
+ * (speech-bubble icon + number). Best-effort — markup varies by GH version.
+ */
+function findListRowCommentControl(row: any) {
+  if (!row?.querySelector) return null;
+  try {
+    const withIcon = row.querySelector(
+      'a:has(.octicon-comment), a:has([class*="octicon-comment"]), span:has(.octicon-comment)'
+    );
+    if (withIcon) return withIcon;
+  } catch {
+    /* :has() may throw on old engines */
+  }
+  const candidates = row.querySelectorAll?.(
+    'a.Link--muted, a[class*="Link"], a[aria-label*="comment" i], a[aria-label*="Comment"]'
+  );
+  if (candidates) {
+    for (const a of candidates) {
+      const label = String(a.getAttribute?.('aria-label') || '');
+      if (/comment/i.test(label)) return a;
+      if (a.querySelector?.('.octicon-comment, [class*="octicon-comment"]')) {
+        return a;
+      }
+    }
+  }
+  return null;
+}
+
+function findListRowByNumber(doc: any, prNumber: any) {
+  const n = Number(prNumber);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  for (const row of findOriginalPrRows(doc)) {
+    if (getPrNumberFromRow(row) === n) return row;
+  }
+  return null;
+}
+
+function findListRowTitleAnchor(row: any) {
+  if (!row?.querySelector) return null;
+  return (
+    row.querySelector('a.js-navigation-open') ||
+    row.querySelector('a[id$="_link"]') ||
+    row.querySelector('h3 a[href*="/pull/"]') ||
+    row.querySelector('a.Link--primary[href*="/pull/"]') ||
+    row.querySelector('a[href*="/pull/"]')
+  );
+}
+
+/** Contrast text for a GH label hex color (no leading #). */
+function labelFgForBg(hex: any) {
+  const h = String(hex || 'ededed').replace(/^#/, '');
+  if (!/^[0-9a-fA-F]{6}$/.test(h)) return '#000000';
+  const r = Number.parseInt(h.slice(0, 2), 16);
+  const g = Number.parseInt(h.slice(2, 4), 16);
+  const b = Number.parseInt(h.slice(4, 6), 16);
+  // Relative luminance (sRGB approx)
+  const y = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  return y > 0.55 ? '#000000' : '#ffffff';
+}
+
+function normalizeListLabel(raw: any) {
+  if (raw == null) return null;
+  if (typeof raw === 'string') {
+    const name = raw.trim();
+    return name ? { name, color: 'ededed', description: '' } : null;
+  }
+  const name = String(raw.name || raw.label || '').trim();
+  if (!name) return null;
+  return {
+    name,
+    color: String(raw.color || 'ededed').replace(/^#/, ''),
+    description: String(raw.description || ''),
+  };
+}
+
+function findListRowLabelsHost(row: any) {
+  if (!row?.querySelector) return null;
+  const owned = row.querySelector('.pr-tree-list-labels');
+  if (owned) return owned;
+  const classic = row.querySelector('.labels, .labels-list, [data-testid="list-row-labels"]');
+  if (classic) return classic;
+  const firstLabel = row.querySelector(
+    'a.IssueLabel, span.IssueLabel, a.hx_IssueLabel, [class*="IssueLabel"]'
+  );
+  return firstLabel?.parentElement || null;
+}
+
+/**
+ * Rebuild native list-row label chips from detail.labels.
+ * Replaces an existing labels host or inserts after the title link.
+ */
+function applyListRowLabels(doc: any, row: any, labels: any) {
+  if (!row || !doc) return false;
+  const list = (Array.isArray(labels) ? labels : [])
+    .map(normalizeListLabel)
+    .filter(Boolean);
+
+  let host = findListRowLabelsHost(row);
+  if (!host) {
+    if (!list.length) return true; // nothing to clear
+    host = doc.createElement('span');
+    host.className = 'labels lh-default d-block d-md-inline pr-tree-list-labels';
+    const title = findListRowTitleAnchor(row);
+    if (title?.parentElement) {
+      title.insertAdjacentElement('afterend', host);
+    } else {
+      const col = findSecondColumnHost(row);
+      (col || row).appendChild(host);
+    }
+  } else if (!host.classList.contains('pr-tree-list-labels')) {
+    host.classList.add('pr-tree-list-labels');
+  }
+
+  host.replaceChildren();
+  for (const lab of list) {
+    const a = doc.createElement('a');
+    a.className = 'IssueLabel hx_IssueLabel pr-tree-list-label';
+    a.textContent = lab.name;
+    a.title = lab.description || lab.name;
+    a.setAttribute('data-name', lab.name);
+    a.setAttribute('data-pr-tree-label', '1');
+    const bg = `#${lab.color}`;
+    a.style.backgroundColor = bg;
+    a.style.color = labelFgForBg(lab.color);
+    // Non-navigating chip — row open is handled by title / intercept
+    a.href = '#';
+    a.addEventListener('click', (e: any) => {
+      try {
+        e.preventDefault();
+        e.stopPropagation();
+      } catch {
+        /* ignore */
+      }
+    });
+    host.appendChild(a);
+  }
+  return true;
+}
+
+/**
+ * Patch native list-row comment count for one PR from known detail.
+ * @returns {boolean} true when a control was updated
+ */
+function updateListRowCommentCount(doc: any, prNumber: any, count: any) {
+  const n = Number(prNumber);
+  const c = Number(count);
+  if (!Number.isFinite(n) || n <= 0 || !Number.isFinite(c) || c < 0) {
+    return false;
+  }
+  const row = findListRowByNumber(doc, n);
+  if (!row) return false;
+  const el = findListRowCommentControl(row);
+  if (!el) return false;
+
+  const label = c === 1 ? '1 comment' : `${c} comments`;
+  try {
+    const aria = el.getAttribute?.('aria-label');
+    if (aria && /comment/i.test(aria)) {
+      el.setAttribute('aria-label', label);
+    }
+  } catch {
+    /* ignore */
+  }
+
+  // Prefer a dedicated numeric span (icon sibling)
+  try {
+    const spans = el.querySelectorAll?.('span');
+    if (spans) {
+      for (const span of spans) {
+        if (span.querySelector?.('svg, .octicon, [class*="octicon"]')) continue;
+        const t = String(span.textContent || '').trim();
+        if (/^\d+$/.test(t)) {
+          span.textContent = String(c);
+          return true;
+        }
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+
+  // Text node next to the icon
+  try {
+    for (const node of el.childNodes || []) {
+      if (node.nodeType !== 3) continue; // TEXT_NODE
+      const t = String(node.textContent || '');
+      if (/\d/.test(t)) {
+        node.textContent = t.replace(/\d+/, String(c));
+        return true;
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+
+  return false;
+}
+
+/**
+ * Re-render one list row from the open PR detail (labels, title, draft meta,
+ * comment count). Prefer this over full list soft-reload — uses in-memory
+ * truth from the shell the user just left.
+ *
+ * @param {Document} doc
+ * @param {number} prNumber
+ * @param {object} detail  flat PR detail / list-pr shape
+ * @returns {boolean}
+ */
+function applyListRowFromDetail(doc: any, prNumber: any, detail: any) {
+  if (!doc || !detail || typeof detail !== 'object') return false;
+  const n = Number(prNumber || detail.number);
+  if (!Number.isFinite(n) || n <= 0) return false;
+  const row = findListRowByNumber(doc, n);
+  if (!row) return false;
+
+  let changed = false;
+
+  // Title
+  if (typeof detail.title === 'string' && detail.title.trim()) {
+    const anchor = findListRowTitleAnchor(row);
+    if (anchor) {
+      const next = detail.title.trim();
+      if (String(anchor.textContent || '').trim() !== next) {
+        anchor.textContent = next;
+        changed = true;
+      }
+    }
+  }
+
+  // Labels (native chips — not covered by applyRowMeta decorations).
+  // Only when the key is present (explicit write-through). Missing key = leave
+  // server HTML alone so a partial detail snapshot cannot wipe chips.
+  if (Object.prototype.hasOwnProperty.call(detail, 'labels')) {
+    if (applyListRowLabels(doc, row, detail.labels || [])) changed = true;
+  }
+
+  // Comment count when caller provides a complete total
+  const commentCount = Number(
+    detail.listCommentCount ?? detail._listCommentCount ?? detail.commentCount
+  );
+  if (Number.isFinite(commentCount) && commentCount >= 0) {
+    if (updateListRowCommentCount(doc, n, commentCount)) changed = true;
+  }
+
+  // pr+ second-line meta: draft / branch / magic links
+  const prShape = {
+    number: n,
+    title: detail.title,
+    draft: Boolean(detail.draft),
+    baseRef: detail.baseRef || detail.base?.ref || '',
+    headRef: detail.headRef || detail.head?.ref || '',
+    author:
+      typeof detail.author === 'string'
+        ? detail.author
+        : detail.author?.login || detail.user?.login || '',
+    labels: Array.isArray(detail.labels) ? detail.labels : [],
+    magicLinks: detail.magicLinks,
+  };
+  if (applyRowMeta(doc, row, prShape)) changed = true;
+
+  return changed;
+}
+
 function countMissingDecorations(doc: any, prs: any) {
   if (!Array.isArray(prs) || prs.length === 0) return 0;
   const byNumber = new Map(prs.map((pr) => [pr.number, pr]));
@@ -651,6 +915,13 @@ const domApi = {
   applyRowMeta,
   applyListDecorations,
   clearListDecorations,
+  findListRowByNumber,
+  findListRowTitleAnchor,
+  findListRowCommentControl,
+  findListRowLabelsHost,
+  applyListRowLabels,
+  updateListRowCommentCount,
+  applyListRowFromDetail,
   countMissingDecorations,
   refreshReviewBadges,
   createToggleButton,

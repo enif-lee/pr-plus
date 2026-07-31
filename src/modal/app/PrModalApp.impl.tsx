@@ -121,6 +121,15 @@ import {
   resolveRootReviewCommentId,
   normalizeReviewCommentId,
 } from '../lib/review-threads';
+import { applyReactionToggle } from '../lib/comment-reactions';
+import {
+  filterTagsByCommitShas,
+  getRepoTagsCache,
+  isRepoTagsCacheFresh,
+  mergeNewestFirstTagPage,
+  setRepoTagsCache,
+  type RepoTag,
+} from '../lib/tags-cache';
 import { applyHideWhitespaceToFiles } from '../lib/hide-whitespace';
 import {
   applyViewedToggle,
@@ -211,7 +220,7 @@ import {
 import {
   parseSuggestionFences, applySuggestionToFileContent, mapLeaveReviewAction,
   isViewerPrAuthor, canSubmitReviewVerdict, isReviewVerdictKind,
-  buildRerequestReviewerLogins, mapRestReviewComment, mapRestIssueComment, appendOptimisticReviewComment,
+  buildRerequestReviewerLogins, mapRestReviewComment, mapRestIssueComment, appendOptimisticReviewComment, appendIssueCommentToDetail,
 } from '../lib/pr-edit-api';
 import {
   buildPaletteCommands,
@@ -245,6 +254,7 @@ import {
   normalizeShortcutKey,
   resolveActiveFileForCollapse,
   isEditableKeyboardTarget,
+  isComposerKeyboardTarget,
 } from '../lib/shortcut-policy';
 import {
   focusContextThreadReplyAfterPaint,
@@ -946,77 +956,147 @@ export function PrModalApp({
     };
   }, [open, prIdentity, detail?.owner, detail?.repo, detail?.number]);
 
-  // Tags that point at commits in this PR (or head sha).
-  useEffect(() => {
+  const tagsLoadGenRef = useRef(0);
+  const tagsLoadedForKeyRef = useRef('');
+
+  /**
+   * Load PR-related tags on first Tags section open (not on mount).
+   * Uses repo-level newest-first cache so re-open / other PRs skip rewalk.
+   */
+  const ensurePrTags = useCallback(async () => {
     if (!detail?.owner || !detail?.repo) return;
     const api = globalThis.PRTreeFetch;
-    let cancelled = false;
     const shas = [
       detail.headSha,
       ...((detail.commits || []).map((c: any) => c?.sha).filter(Boolean) as string[]),
     ];
-    const uniq = [...new Set(shas.map((s) => String(s).trim()).filter(Boolean))];
-    if (!uniq.length) {
-      setPrTags([]);
-      setPrTagsError(null);
+    const uniq = [
+      ...new Set(shas.map((s) => String(s).trim()).filter(Boolean)),
+    ];
+    const cacheKey = `${String(detail.owner).toLowerCase()}/${String(
+      detail.repo
+    ).toLowerCase()}#${detail.number || ''}:${detail.headSha || ''}:${uniq.length}`;
+    if (tagsLoadedForKeyRef.current === cacheKey && Array.isArray(prTags)) {
       return;
     }
+
+    const applyFiltered = (all: RepoTag[]) => {
+      const filtered = filterTagsByCommitShas(all, uniq);
+      setPrTags(filtered);
+      setPrTagsError(null);
+      tagsLoadedForKeyRef.current = cacheKey;
+    };
+
+    // Fresh repo cache → filter client-side only
+    const cached = getRepoTagsCache(detail.owner, detail.repo);
+    if (isRepoTagsCacheFresh(cached) && cached) {
+      applyFiltered(cached.tags);
+      return;
+    }
+
+    if (typeof api?.fetchRepoTags !== 'function' && typeof api?.fetchTagsForCommits !== 'function') {
+      setPrTags([]);
+      return;
+    }
+
+    const gen = ++tagsLoadGenRef.current;
     setPrTagsLoading(true);
     setPrTagsError(null);
-    void (async () => {
-      try {
-        let tags: any[] = [];
-        if (typeof api?.fetchTagsForCommits === 'function') {
-          tags = await api.fetchTagsForCommits(detail.owner, detail.repo, uniq);
-        } else if (typeof api?.fetchRepoTags === 'function') {
-          // Stale SW without FETCH_TAGS_FOR_COMMITS — filter client-side.
-          const all = await api.fetchRepoTags(detail.owner, detail.repo);
-          const want = new Set(uniq.map((s) => String(s).toLowerCase()));
-          tags = (Array.isArray(all) ? all : []).filter((t: any) =>
-            want.has(String(t?.sha || '').toLowerCase())
-          );
+    try {
+      // Prefer full repo list into cache (newest-first pages); then filter.
+      if (typeof api.fetchRepoTags === 'function') {
+        let entry = cached;
+        let page = 1;
+        const pageSize = 100;
+        let needMore = true;
+        let guard = 0;
+        while (needMore && guard < 10) {
+          guard += 1;
+          // fetchRepoTags loads up to maxPages in one call — use maxPages:1
+          // per iteration only if API supports; otherwise one multi-page call.
+          if (page === 1 && !entry) {
+            const all = await api.fetchRepoTags(detail.owner, detail.repo, {
+              maxPages: 10,
+            });
+            if (gen !== tagsLoadGenRef.current) return;
+            const list = (Array.isArray(all) ? all : []).map((t: any) => ({
+              name: String(t?.name || ''),
+              sha: String(t?.sha || t?.commit?.sha || ''),
+              zipballUrl: t?.zipballUrl || t?.zipball_url || '',
+              tarballUrl: t?.tarballUrl || t?.tarball_url || '',
+            }));
+            const merged = mergeNewestFirstTagPage(null, list, {
+              pageSize,
+              pageIndex: 1,
+            });
+            // fetchRepoTags already walked pages — mark complete
+            entry = {
+              ...merged.entry,
+              pagesLoaded: Math.max(
+                1,
+                Math.ceil(list.length / pageSize) || 1
+              ),
+              complete: true,
+            };
+            setRepoTagsCache(detail.owner, detail.repo, entry);
+            needMore = false;
+          } else {
+            needMore = false;
+          }
         }
-        if (cancelled) return;
+        if (gen !== tagsLoadGenRef.current) return;
+        applyFiltered(entry?.tags || []);
+      } else if (typeof api.fetchTagsForCommits === 'function') {
+        const tags = await api.fetchTagsForCommits(
+          detail.owner,
+          detail.repo,
+          uniq
+        );
+        if (gen !== tagsLoadGenRef.current) return;
         setPrTags(Array.isArray(tags) ? tags : []);
         setPrTagsError(null);
-      } catch (err: any) {
-        if (cancelled) return;
-        const msg = err?.message || String(err);
-        // Stale service worker after upgrade: don't surface as a hard error.
-        if (/unknown type:\s*PR_TREE_FETCH_TAGS/i.test(msg)) {
-          setPrTags([]);
-          setPrTagsError(null);
-          try {
-            console.warn(
-              '[pr+] Tags require reloading the extension (chrome://extensions → pr+ → Reload).',
-              msg
-            );
-          } catch {
-            /* ignore */
-          }
-        } else {
-          setPrTagsError(msg);
-          setPrTags([]);
-        }
-      } finally {
-        if (!cancelled) setPrTagsLoading(false);
+        tagsLoadedForKeyRef.current = cacheKey;
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    detail?.owner,
-    detail?.repo,
-    detail?.headSha,
-    // Re-run when commit list identity changes (page load / ensureAll).
-    detail?.commits?.length,
-    prIdentity,
-  ]);
+    } catch (err: any) {
+      if (gen !== tagsLoadGenRef.current) return;
+      const msg = err?.message || String(err);
+      if (/unknown type:\s*PR_TREE_FETCH_TAGS/i.test(msg)) {
+        setPrTags([]);
+        setPrTagsError(null);
+        try {
+          console.warn(
+            '[pr+] Tags require reloading the extension (chrome://extensions → pr+ → Reload).',
+            msg
+          );
+        } catch {
+          /* ignore */
+        }
+      } else {
+        setPrTagsError(msg);
+        setPrTags([]);
+      }
+    } finally {
+      if (gen === tagsLoadGenRef.current) setPrTagsLoading(false);
+    }
+  }, [detail?.owner, detail?.repo, detail?.number, detail?.headSha, detail?.commits]);
+
+  useEffect(() => {
+    tagsLoadedForKeyRef.current = '';
+    tagsLoadGenRef.current += 1;
+  }, [prIdentity]);
 
   const ensureAllCommits = useCallback(async () => {
     if (!detail || typeof onFetchAllPrCommits !== 'function') return;
     if (commitsFullyLoadedRef.current) return;
+    // Have a complete list already — nothing to fetch.
+    if (Array.isArray(detail.commits) && detail.commits.length > 0) {
+      const total = Number(detail.commitsCount);
+      if (!Number.isFinite(total) || total <= detail.commits.length) {
+        commitsFullyLoadedRef.current = true;
+        return;
+      }
+      // Partial list (mayHaveMore) — fall through to full fetch.
+    }
     setCommitListLoading(true);
     try {
       const all = await onFetchAllPrCommits();
@@ -1045,6 +1125,15 @@ export function PrModalApp({
       filesFullyLoadedRef.current = true;
       return;
     }
+    // Complete file list already present.
+    if (Array.isArray(detail.files) && detail.files.length > 0) {
+      const total = Number(detail.changedFiles);
+      if (!Number.isFinite(total) || total <= detail.files.length) {
+        filesFullyLoadedRef.current = true;
+        return;
+      }
+      // Partial — fall through to full fetch.
+    }
     setFileListLoading(true);
     try {
       const all = await onFetchAllPrFiles({
@@ -1067,6 +1156,15 @@ export function PrModalApp({
       setFileListLoading(false);
     }
   }, [detail, onFetchAllPrFiles, onPatchDetail, diffFilesOverride]);
+
+  // Diff needs files list even when conversation deferred side-fetch.
+  useEffect(() => {
+    if (layoutMode !== LAYOUT_DIFF) return;
+    const hasFiles =
+      Array.isArray(detail?.files) && detail.files.length > 0;
+    if (hasFiles || diffFilesOverride) return;
+    void ensureAllFiles();
+  }, [layoutMode, detail?.files, diffFilesOverride, ensureAllFiles]);
 
   const applyDiffCommitFilter = useCallback(
     async (nextRaw: DiffCommitFilterState) => {
@@ -2254,8 +2352,50 @@ export function PrModalApp({
    */
   const pendingFileNavDeltaRef = useRef(0);
   const fileNavRafRef = useRef(0);
+  /** Coalesce page-scroll under key-hold: one hop per frame when rAF runs. */
   const pendingPageScrollDirRef = useRef(0);
   const pageScrollRafRef = useRef(0);
+
+  /** Live Diff scroller — prefer connected listRef, else DOM query. */
+  function diffScrollerEl(): HTMLElement | null {
+    const refEl = listRef.current as HTMLElement | null;
+    if (refEl && refEl.isConnected) return refEl;
+    try {
+      if (typeof document === 'undefined') return null;
+      return document.querySelector('.prp-vlist') as HTMLElement | null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Apply one Diff page hop immediately (DOM-only; no store mirror). */
+  function applyDiffPageScroll(dir: number) {
+    const d = dir < 0 ? -1 : 1;
+    const el = diffScrollerEl();
+    if (!el) return;
+    const next =
+      typeof nextScrollTopByPage === 'function'
+        ? nextScrollTopByPage(
+            el.scrollTop,
+            el.clientHeight,
+            el.scrollHeight,
+            d
+          )
+        : Math.max(
+            0,
+            Math.min(
+              el.scrollHeight - el.clientHeight,
+              el.scrollTop + d * el.clientHeight * 0.9
+            )
+          );
+    // DOM-first; minStoreDelta = Infinity → never setScrollTop for page hops
+    applyProgrammaticDiffScroll(el, next, {
+      storeTop: useModalStore.getState().scrollTop,
+      setStoreTop: setScrollTop,
+      minDomDelta: 0.5,
+      minStoreDelta: Number.POSITIVE_INFINITY,
+    });
+  }
 
   /** Diff file step — same DFS order as explorer + Diff list (displayFiles). */
   function navFile(delta: number) {
@@ -2278,40 +2418,27 @@ export function PrModalApp({
    * Scroll Diff virtual list by ~one viewport page.
    * DOM-only under key-hold: VirtualDiff range-gates via native scroll event.
    * Never mirrors store per hop (was re-rendering whole DiffWorkspace).
+   *
+   * Apply synchronously first (conversation page scroll does the same).
+   * Background/headless Chrome freezes rAF — pure rAF page hops left scrollTop
+   * stuck at 0 while the shortcut monitor still reported the action.
+   * rAF coalesce still drops multi-fires in the same frame when rAF runs.
    */
   function scrollDiffPage(delta: number) {
     const dir = delta < 0 ? -1 : 1;
     pendingPageScrollDirRef.current = dir;
+    // Always move now so unfocused/headless sessions still page.
+    applyDiffPageScroll(dir);
+    // Coalesce further OS key-repeat in this frame (no-op if rAF is frozen).
     if (pageScrollRafRef.current) return;
+    if (typeof requestAnimationFrame !== 'function') {
+      pendingPageScrollDirRef.current = 0;
+      return;
+    }
     pageScrollRafRef.current = requestAnimationFrame(() => {
       pageScrollRafRef.current = 0;
-      const d = pendingPageScrollDirRef.current;
+      // Direction already applied synchronously; clear pending only.
       pendingPageScrollDirRef.current = 0;
-      if (!d) return;
-      const el = listRef.current as HTMLElement | null;
-      if (!el) return;
-      const next =
-        typeof nextScrollTopByPage === 'function'
-          ? nextScrollTopByPage(
-              el.scrollTop,
-              el.clientHeight,
-              el.scrollHeight,
-              d
-            )
-          : Math.max(
-              0,
-              Math.min(
-                el.scrollHeight - el.clientHeight,
-                el.scrollTop + d * el.clientHeight * 0.9
-              )
-            );
-      // DOM-first; minStoreDelta = Infinity → never setScrollTop for page hops
-      applyProgrammaticDiffScroll(el, next, {
-        storeTop: useModalStore.getState().scrollTop,
-        setStoreTop: setScrollTop,
-        minDomDelta: 0.5,
-        minStoreDelta: Number.POSITIVE_INFINITY,
-      });
     });
   }
 
@@ -4395,29 +4522,31 @@ export function PrModalApp({
       setActionMsg('');
       try {
         if (!fetchApi.postIssueComment) throw new Error('Comment API unavailable');
+        // Pessimistic: wait for GitHub, then write-through host+cache (no pre-paint).
         const raw = await fetchApi.postIssueComment(
           detail.owner,
           detail.repo,
           detail.number,
           body
         );
-        const optimistic = mapRestIssueComment(raw, {
+        const mapped = mapRestIssueComment(raw, {
           body,
           author: detail.viewerLogin || '',
         });
-        if (optimistic) {
-          setLocalDetail((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  comments: [...(prev.comments || []), optimistic],
-                }
-              : prev
-          );
+        if (mapped) {
+          const next =
+            typeof appendIssueCommentToDetail === 'function'
+              ? appendIssueCommentToDetail(detail, mapped)
+              : {
+                  ...detail,
+                  comments: [...(detail.comments || []), mapped],
+                };
+          commitCommentListPatch(next);
         }
         setCommentText('');
         setActionMsg('Comment posted.');
-        await onRefresh?.();
+        // Host cache already has the comment; skip soft-refresh race that could
+        // repaint an empty/stale comments side-fetch over the confirmed write.
         return true;
       } catch (err: any) {
         setActionMsg(err?.message || String(err));
@@ -5797,7 +5926,8 @@ export function PrModalApp({
     });
     const isPending = Boolean(raw?.pending || asPending || serverPendingReviewId);
     if (isPending) forceDropPendingRef.current = false;
-    const optimistic = mapRestReviewComment(raw, {
+    // Pessimistic: only after API success, write server-mapped row to host cache.
+    const mapped = mapRestReviewComment(raw, {
       body: payload.body,
       path: payload.path,
       line: isFile ? null : payload.line,
@@ -5809,36 +5939,33 @@ export function PrModalApp({
       threadNodeId: raw?.threadNodeId || null,
       subjectType: isFile ? 'file' : 'line',
     });
-    if (optimistic) {
-      setLocalDetail((prev) => {
-        const withComment =
-          typeof appendOptimisticReviewComment === 'function'
-            ? appendOptimisticReviewComment(prev, { ...optimistic, pending: isPending })
-            : prev
-              ? {
-                  ...prev,
-                  reviewComments: [
-                    ...(prev.reviewComments || []),
-                    { ...optimistic, pending: isPending },
-                  ],
-                }
-              : prev;
-        if (!withComment) return withComment;
-        // New activity cancels discard-strip so merge won't drop this row
-        if (!isPending) {
-          return withComment._dropPending
-            ? { ...withComment, _dropPending: undefined }
-            : withComment;
-        }
-        // Seed viewerPendingReview so toolbar Submit appears immediately
-        const reviewId = optimistic.pendingReviewId || raw?.pendingReviewId || null;
+    if (mapped) {
+      const base = detail || {};
+      const withComment =
+        typeof appendOptimisticReviewComment === 'function'
+          ? appendOptimisticReviewComment(base, {
+              ...mapped,
+              pending: isPending,
+            })
+          : {
+              ...base,
+              reviewComments: [
+                ...(base.reviewComments || []),
+                { ...mapped, pending: isPending },
+              ],
+            };
+      let next = withComment;
+      if (isPending) {
+        const reviewId =
+          mapped.pendingReviewId || raw?.pendingReviewId || null;
         const pendingRows = (withComment.reviewComments || []).filter(
           (c: any) => c?.pending
         );
-        return {
+        next = {
           ...withComment,
           _dropPending: undefined,
-          viewerPendingReview: withComment.viewerPendingReview ||
+          viewerPendingReview:
+            withComment.viewerPendingReview ||
             (reviewId
               ? {
                   id: reviewId,
@@ -5847,7 +5974,10 @@ export function PrModalApp({
                 }
               : null),
         };
-      });
+      } else if (withComment._dropPending) {
+        next = { ...withComment, _dropPending: undefined };
+      }
+      commitCommentListPatch(next);
     }
     return { raw, isPending };
   }
@@ -5880,10 +6010,12 @@ export function PrModalApp({
     setActionMsg('');
     try {
       // If a PENDING review already exists, GitHub forces attach — shown as pending
-      const { isPending } = await postSelectionLineComment(payload, { asPending: false });
+      const { isPending } = await postSelectionLineComment(payload, {
+        asPending: false,
+      });
       setActionMsg(selectionActionMessage(payload, isPending));
       dismissSelectionIsland();
-      await onRefresh?.();
+      // postSelectionLineComment already write-through host cache (pessimistic).
     } catch (err) {
       setActionMsg(err?.message || String(err));
     } finally {
@@ -5918,7 +6050,7 @@ export function PrModalApp({
         );
       }
       dismissSelectionIsland();
-      await onRefresh?.();
+      // Host cache updated in postSelectionLineComment — no soft-refresh race.
     } catch (err: any) {
       setActionMsg(err?.message || String(err));
     } finally {
@@ -6037,7 +6169,8 @@ export function PrModalApp({
       );
       const isPending = Boolean(raw?.pending || mode === 'pending');
       if (isPending) forceDropPendingRef.current = false;
-      const optimistic = mapRestReviewComment(raw, {
+      // Pessimistic: server-mapped reply → host write-through (no pre-paint).
+      const mapped = mapRestReviewComment(raw, {
         body,
         author: detail.viewerLogin || '',
         path: thread?.root?.path || thread?.path || '',
@@ -6048,27 +6181,28 @@ export function PrModalApp({
         pending: isPending,
         pendingReviewId: raw?.pendingReviewId ?? serverPendingReviewId ?? null,
       });
-      if (optimistic) {
-        setLocalDetail((prev) => {
-          const withReply =
-            typeof appendOptimisticReviewComment === 'function'
-              ? appendOptimisticReviewComment(prev, {
-                  ...optimistic,
-                  pending: isPending,
-                })
-              : prev
-                ? {
-                    ...prev,
-                    reviewComments: [
-                      ...(prev.reviewComments || []),
-                      { ...optimistic, pending: isPending },
-                    ],
-                  }
-                : prev;
-          if (!withReply || !isPending) return withReply;
+      if (mapped) {
+        const base = detail || {};
+        const withReply =
+          typeof appendOptimisticReviewComment === 'function'
+            ? appendOptimisticReviewComment(base, {
+                ...mapped,
+                pending: isPending,
+              })
+            : {
+                ...base,
+                reviewComments: [
+                  ...(base.reviewComments || []),
+                  { ...mapped, pending: isPending },
+                ],
+              };
+        let next = withReply;
+        if (isPending) {
           const reviewId =
-            optimistic.pendingReviewId || raw?.pendingReviewId || serverPendingReviewId;
-          return {
+            mapped.pendingReviewId ||
+            raw?.pendingReviewId ||
+            serverPendingReviewId;
+          next = {
             ...withReply,
             _dropPending: undefined,
             viewerPendingReview:
@@ -6083,7 +6217,8 @@ export function PrModalApp({
                   }
                 : null),
           };
-        });
+        }
+        commitCommentListPatch(next);
       }
       setReplyDrafts((prev: any) => ({ ...prev, [String(draftKey)]: '' }));
       setActionMsg(
@@ -6093,7 +6228,7 @@ export function PrModalApp({
             : 'Reply attached to your pending review.'
           : 'Reply posted.'
       );
-      await onRefresh?.();
+      // Confirmed write already in host cache — avoid soft-refresh race wipe.
     } catch (err) {
       setActionMsg(err?.message || String(err));
     } finally {
@@ -7035,6 +7170,7 @@ export function PrModalApp({
         reviewComments: next.reviewComments,
         comments: next.comments,
         reviewThreads: next.reviewThreads,
+        bodyReactions: next.bodyReactions,
         viewerPendingReview: next.viewerPendingReview ?? null,
       });
     } catch {
@@ -7129,6 +7265,166 @@ export function PrModalApp({
       }
     } finally {
       setActionBusy(false);
+    }
+  }
+
+  /**
+   * Hover: fill reactor logins (first-N at GraphQL) for tooltips.
+   * Hot-path timeline loads omit reactor nodes to cut payload.
+   */
+  async function onLoadReactors(target: {
+    kind: 'issue' | 'review' | 'pr';
+    commentId: string | number;
+    nodeId?: string | null;
+    number?: number | null;
+  }) {
+    if (!detail) return;
+    const api = globalThis.PRTreeFetch;
+    if (typeof api?.fetchReactableReactors !== 'function') return;
+    let nodeId = target?.nodeId ? String(target.nodeId) : '';
+    if (!nodeId && target?.kind === 'pr' && detail.nodeId) {
+      nodeId = String(detail.nodeId);
+    }
+    if (!nodeId) return;
+    try {
+      const groups = await api.fetchReactableReactors(nodeId, { first: 5 });
+      if (!Array.isArray(groups) || !groups.length) return;
+      const kindRaw = String(target?.kind || '').toLowerCase();
+      if (kindRaw === 'pr') {
+        const next = { ...detail, bodyReactions: groups };
+        setLocalDetail(next);
+        try {
+          onPatchDetail?.({ bodyReactions: groups });
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
+      if (kindRaw === 'review') {
+        const list = Array.isArray(detail.reviewComments)
+          ? detail.reviewComments
+          : [];
+        const id = String(target.commentId);
+        const nextList = list.map((c: any) =>
+          c && String(c.id) === id ? { ...c, reactions: groups } : c
+        );
+        const next = { ...detail, reviewComments: nextList };
+        commitCommentListPatch(next);
+        return;
+      }
+      // issue
+      const list = Array.isArray(detail.comments) ? detail.comments : [];
+      const id = String(target.commentId);
+      const nextList = list.map((c: any) =>
+        c && String(c.id) === id ? { ...c, reactions: groups } : c
+      );
+      const next = { ...detail, comments: nextList };
+      commitCommentListPatch(next);
+    } catch {
+      /* soft — tooltip stays without names */
+    }
+  }
+
+  /**
+   * Toggle emoji reaction on issue/review comment or PR body (GitHub official set).
+   * Optimistic local patch; reverts on API failure.
+   * Clicking an already-reacted pill removes the viewer's reaction.
+   */
+  async function onToggleReaction(
+    target: {
+      kind: 'issue' | 'review' | 'pr';
+      commentId: string | number;
+      nodeId?: string | null;
+      number?: number | null;
+    },
+    content: string,
+    currentlyReacted: boolean
+  ) {
+    if (!detail || !content) return;
+    const kindRaw = String(target?.kind || '').toLowerCase();
+    const kind =
+      kindRaw === 'review' ? 'review' : kindRaw === 'pr' ? 'pr' : 'issue';
+    const viewerLogin = detail.viewerLogin || null;
+
+    // PR description body
+    if (kind === 'pr') {
+      const prevReactions = Array.isArray(detail.bodyReactions)
+        ? detail.bodyReactions
+        : [];
+      const nextReactions = applyReactionToggle(
+        prevReactions,
+        content,
+        !currentlyReacted,
+        viewerLogin
+      );
+      const patched = { ...detail, bodyReactions: nextReactions };
+      commitCommentListPatch(patched);
+      try {
+        const api = globalThis.PRTreeFetch;
+        if (!api?.toggleCommentReaction) {
+          throw new Error('Reaction API unavailable');
+        }
+        await api.toggleCommentReaction(detail.owner, detail.repo, 'pr', {
+          content,
+          viewerHasReacted: currentlyReacted,
+          nodeId: target.nodeId || detail.nodeId || null,
+          number: target.number ?? detail.number,
+          commentId: target.commentId ?? detail.number,
+        });
+      } catch (err: any) {
+        commitCommentListPatch({
+          ...detail,
+          bodyReactions: prevReactions,
+        });
+        setActionMsg(err?.message || String(err) || 'Reaction failed');
+      }
+      return;
+    }
+
+    if (target?.commentId == null) return;
+    const listKey = kind === 'review' ? 'reviewComments' : 'comments';
+    const list = Array.isArray(detail[listKey]) ? detail[listKey] : [];
+    const comment = list.find(
+      (c: any) => c && String(c.id) === String(target.commentId)
+    );
+    if (!comment) return;
+    const prevReactions = Array.isArray(comment.reactions)
+      ? comment.reactions
+      : [];
+    const nextReactions = applyReactionToggle(
+      prevReactions,
+      content,
+      !currentlyReacted,
+      viewerLogin
+    );
+
+    const patchedList = list.map((c: any) =>
+      c && String(c.id) === String(target.commentId)
+        ? { ...c, reactions: nextReactions }
+        : c
+    );
+    commitCommentListPatch({
+      ...detail,
+      [listKey]: patchedList,
+    });
+
+    try {
+      const api = globalThis.PRTreeFetch;
+      if (!api?.toggleCommentReaction) {
+        throw new Error('Reaction API unavailable');
+      }
+      await api.toggleCommentReaction(detail.owner, detail.repo, kind, {
+        content,
+        viewerHasReacted: currentlyReacted,
+        nodeId: target.nodeId || comment.nodeId || null,
+        commentId: target.commentId,
+      });
+    } catch (err: any) {
+      commitCommentListPatch({
+        ...detail,
+        [listKey]: list,
+      });
+      setActionMsg(err?.message || String(err) || 'Reaction failed');
     }
   }
 
@@ -7267,6 +7563,23 @@ export function PrModalApp({
       if (!held) optHintsSuppressedRef.current = false;
       syncOptHintsActive();
     };
+    /**
+     * Automation / mid-hold sampling bridge. Synthetic KeyboardEvents from the
+     * page world sometimes fail to latch altKey for content-script listeners;
+     * e2e holdChord dispatches this while Alt is held so OptBtnHint portals paint.
+     * detail.active: boolean
+     */
+    const onForce = (e: Event) => {
+      try {
+        const active = Boolean((e as CustomEvent)?.detail?.active);
+        lastHeld = active;
+        optHeldRef.current = active;
+        if (!active) optHintsSuppressedRef.current = false;
+        syncOptHintsActive();
+      } catch {
+        /* ignore */
+      }
+    };
     const clear = () => {
       if (!lastHeld) return;
       lastHeld = false;
@@ -7274,6 +7587,7 @@ export function PrModalApp({
       optHintsSuppressedRef.current = false;
       useModalStore.getState().setOptHintsActive(false);
     };
+    window.addEventListener('prp-set-opt-hints', onForce as any, true);
     window.addEventListener('keydown', sync, true);
     window.addEventListener('keyup', sync, true);
     window.addEventListener('blur', clear);
@@ -7281,6 +7595,7 @@ export function PrModalApp({
       if (document.hidden) clear();
     });
     return () => {
+      window.removeEventListener('prp-set-opt-hints', onForce as any, true);
       window.removeEventListener('keydown', sync, true);
       window.removeEventListener('keyup', sync, true);
       window.removeEventListener('blur', clear);
@@ -7540,11 +7855,37 @@ export function PrModalApp({
       }
 
       const editable = isEditableKeyboardTarget(e.target);
+      const composerFocused = isComposerKeyboardTarget(
+        (typeof document !== 'undefined'
+          ? (document.activeElement as HTMLElement | null)
+          : null) || (e.target as HTMLElement | null)
+      );
       // Option product chords: allow Control+Option (⌥⌃R) but not ⌘+Option.
       // `alt` already from e.altKey above (physical-key normalize).
       const ctrlKey = Boolean(e.ctrlKey);
       const altOnly = alt && !e.metaKey && !ctrlKey;
       const shift = Boolean(e.shiftKey);
+      // Capabilities for composer-context chords (DOM on focused form)
+      let canResolveComposer = false;
+      let canToggleModeComposer = false;
+      if (composerFocused && typeof document !== 'undefined') {
+        try {
+          const ae =
+            (document.activeElement as HTMLElement | null) ||
+            (e.target as HTMLElement | null);
+          const root = ae?.closest?.('[data-prp-composer-root]');
+          canResolveComposer = Boolean(
+            root?.hasAttribute?.('data-prp-can-resolve') ||
+              root?.querySelector?.('[data-prp-composer-resolve]')
+          );
+          canToggleModeComposer = Boolean(
+            root?.hasAttribute?.('data-prp-can-toggle-mode') ||
+              root?.querySelector?.('[data-prp-composer-mode-tabs]')
+          );
+        } catch {
+          /* ignore */
+        }
+      }
 
       // Option / Option+Shift command actions (former mod → opt; no mod back-compat)
       if (
@@ -7583,7 +7924,7 @@ export function PrModalApp({
               : peer.labelWin || peer.labelMac || peer.label;
             reportShortcutMonitor(
               buildShortcutMonitorFireFromParts(
-                String(chord || '?'),
+                String(chord || ''),
                 String(peer.title || peer.action),
                 String(peer.action || '')
               )
@@ -7672,7 +8013,8 @@ export function PrModalApp({
         typeof resolveModalShortcutAction === 'function'
           ? resolveModalShortcutAction({
               // When Option is held, do not treat Ctrl/⌘ as "mod" — Ctrl pairs with ⌥ for resolve.
-              mod: mod && !alt,
+              // For ⌘Enter submit while composer-focused, keep real mod.
+              mod: composerFocused ? mod : mod && !alt,
               shift,
               alt: alt && !e.metaKey,
               /** Physical Control (⌥⌃R resolve) — not ⌘/meta */
@@ -7684,6 +8026,9 @@ export function PrModalApp({
               paletteOpen: ui.paletteOpen,
               githubPaletteOpen: false, // already bailed above when open
               editableTarget: editable,
+              composerFocused,
+              canResolve: canResolveComposer,
+              canToggleMode: canToggleModeComposer,
               searchOpen: Boolean(ui.searchOpen),
               hasLineSelection: liveLineSelection,
               diffThreadFocused: liveDiffThreadFocused,
@@ -7775,6 +8120,122 @@ export function PrModalApp({
         case 'focusedThreadResolve':
           act.runContextThreadAction?.('resolve');
           break;
+        case 'composerSubmit': {
+          // Prefer custom event on focused MarkdownComposer; fallback click submit btn
+          try {
+            const ae = document.activeElement as HTMLElement | null;
+            const mdc = ae?.closest?.('[data-prp-composer]') as HTMLElement | null;
+            if (mdc) {
+              mdc.dispatchEvent(
+                new CustomEvent('prp-composer-submit', {
+                  bubbles: true,
+                  cancelable: true,
+                })
+              );
+              break;
+            }
+            const root = ae?.closest?.('[data-prp-composer-root]');
+            const btn = root?.querySelector?.(
+              '[data-prp-composer-submit]:not([disabled])'
+            ) as HTMLButtonElement | null;
+            btn?.click?.();
+          } catch {
+            /* ignore */
+          }
+          break;
+        }
+        case 'composerEmoji': {
+          try {
+            const ae = document.activeElement as HTMLElement | null;
+            const mdc = ae?.closest?.('[data-prp-composer]') as HTMLElement | null;
+            mdc?.dispatchEvent(
+              new CustomEvent('prp-composer-emoji', {
+                bubbles: true,
+                cancelable: true,
+              })
+            );
+          } catch {
+            /* ignore */
+          }
+          break;
+        }
+        case 'composerFocusInput': {
+          try {
+            const ae = document.activeElement as HTMLElement | null;
+            const mdc = ae?.closest?.('[data-prp-composer]') as HTMLElement | null;
+            mdc?.dispatchEvent(
+              new CustomEvent('prp-composer-focus-input', {
+                bubbles: true,
+                cancelable: true,
+              })
+            );
+            const ta =
+              mdc?.querySelector?.('[data-prp-composer-input]') ||
+              ae?.closest?.('[data-prp-composer-root]')?.querySelector?.(
+                '[data-prp-composer-input]'
+              );
+            (ta as HTMLTextAreaElement | null)?.focus?.();
+          } catch {
+            /* ignore */
+          }
+          break;
+        }
+        case 'composerResolve': {
+          // Prefer form resolve button; else context-thread resolve API
+          try {
+            const ae = document.activeElement as HTMLElement | null;
+            const root = ae?.closest?.('[data-prp-composer-root]');
+            const btn = root?.querySelector?.(
+              '[data-prp-composer-resolve]:not([disabled])'
+            ) as HTMLButtonElement | null;
+            if (btn) {
+              btn.click();
+              break;
+            }
+          } catch {
+            /* ignore */
+          }
+          act.runContextThreadAction?.('resolve');
+          break;
+        }
+        case 'composerModeToggle': {
+          try {
+            const ae = document.activeElement as HTMLElement | null;
+            const root = ae?.closest?.('[data-prp-composer-root]');
+            const commentTab = root
+              ?.closest?.('.prp-card--composer')
+              ?.querySelector?.(
+                '[data-prp-composer-mode="comment"]'
+              ) as HTMLButtonElement | null;
+            const reviewTab = root
+              ?.closest?.('.prp-card--composer')
+              ?.querySelector?.(
+                '[data-prp-composer-mode="review"]'
+              ) as HTMLButtonElement | null;
+            // Prefer tabs from title region (sibling structure)
+            const host =
+              root?.closest?.('.prp-card--composer') ||
+              document.querySelector?.('.prp-card--composer');
+            const cTab =
+              commentTab ||
+              (host?.querySelector?.(
+                '[data-prp-composer-mode="comment"]'
+              ) as HTMLButtonElement | null);
+            const rTab =
+              reviewTab ||
+              (host?.querySelector?.(
+                '[data-prp-composer-mode="review"]'
+              ) as HTMLButtonElement | null);
+            if (cTab && rTab) {
+              const commentOn =
+                cTab.getAttribute('aria-selected') === 'true';
+              (commentOn ? rTab : cTab).click();
+            }
+          } catch {
+            /* ignore */
+          }
+          break;
+        }
         case 'restoreNativeView':
           if (isEmbed && typeof onRestoreNative === 'function') {
             onRestoreNative();
@@ -7807,10 +8268,20 @@ export function PrModalApp({
           if (ui.layoutMode === LAYOUT_DIFF) act.navFile?.(1);
           break;
         case 'scrollDiffPagePrev':
-          if (ui.layoutMode === LAYOUT_DIFF) act.scrollDiffPage?.(-1);
+          if (
+            ui.layoutMode === LAYOUT_DIFF ||
+            useModalStore.getState().layoutMode === LAYOUT_DIFF
+          ) {
+            act.scrollDiffPage?.(-1);
+          }
           break;
         case 'scrollDiffPageNext':
-          if (ui.layoutMode === LAYOUT_DIFF) act.scrollDiffPage?.(1);
+          if (
+            ui.layoutMode === LAYOUT_DIFF ||
+            useModalStore.getState().layoutMode === LAYOUT_DIFF
+          ) {
+            act.scrollDiffPage?.(1);
+          }
           break;
         case 'optArrowScrollSelectPrev':
           if (ui.layoutMode === LAYOUT_DIFF) act.optArrowScrollSelect?.(-1);
@@ -8159,6 +8630,8 @@ export function PrModalApp({
             onDiscardPending={onDiscardPendingReview}
             sectionLoading={isInitialLoad}
             onDeleteIssueComment={onDeleteIssueComment}
+            onToggleReaction={onToggleReaction}
+            onLoadReactors={onLoadReactors}
             onDeleteReviewComment={onDeleteReviewComment}
             onEditIssueComment={(id, body) => onSaveEditComment('issue', id, body)}
             onEditReviewComment={(id, body) => onSaveEditComment('review', id, body)}
@@ -8202,6 +8675,7 @@ export function PrModalApp({
             onClearMilestone={() => void onSetMilestone(true)}
             onEnsureAllCommits={ensureAllCommits}
             onEnsureAllFiles={ensureAllFiles}
+            onEnsurePrTags={ensurePrTags}
             commitsLoading={commitListLoading}
             filesLoading={fileListLoading}
             sidePending={sidePending}
@@ -8333,6 +8807,8 @@ export function PrModalApp({
               threadsByCommentId={threadsByCommentId}
               onReplyToThread={onReplyToThread}
               onResolveThread={onResolveThread}
+              onToggleReaction={onToggleReaction}
+              onLoadReactors={onLoadReactors}
               onDeleteReviewComment={onDeleteReviewComment}
               onStartEditReviewComment={onStartEditReviewComment}
               onSaveEditComment={onSaveEditComment}
