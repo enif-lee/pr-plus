@@ -43,6 +43,12 @@ export let rlMem = {
   saveTimer: null as any,
 };
 
+/** In-flight GitHub fetches keyed by content-script requestId. */
+export const activeFetchControllers = new Map();
+/** requestIds cancelled before beginTrackedFetch ran. */
+export const preCancelledFetchIds = new Set();
+
+
 /** Raw browser fetch (no rate-limit). Only used as the innermost base. */
 export function rawBrowserFetch() {
   return globalThis.fetch.bind(globalThis);
@@ -382,3 +388,22 @@ export function withTimeout(promise: any, ms: any, label: any) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
+
+
+export function applyPrefsToRlMem(prefs: any) {
+  rlMem.pluginEnabled = prefs?.pluginEnabled !== false;
+  rlMem.loaded = true;
+}
+
+export function applyRateLimitStateToRlMem(raw: any) {
+  try {
+    const RL = rateLimitApi();
+    rlMem.state =
+      typeof RL?.normalizeRateLimitState === 'function'
+        ? RL.normalizeRateLimitState(raw)
+        : raw;
+    rlMem.loaded = true;
+  } catch {
+    /* ignore */
+  }
+}

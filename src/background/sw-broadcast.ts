@@ -1,34 +1,17 @@
 /** SW unit: sw-broadcast.ts */
 /* global PRTreeStorage, PRTreeFetch, PRModalCollapse, PRGithubEndpoints */
 
-export const ENTERPRISE_CS_ID = 'prp-enterprise-hosts';
-export const CONTENT_SCRIPT_JS = [
-  'src/tree.js',
-  'src/dom.js',
-  'src/pr-list-focus.js',
-  'src/pulls-palette.js',
-  'src/github-endpoints.js',
-  'src/content-bridge.js',
-  'src/content-bootstrap.js',
-  'src/onboarding.js',
-  'src/content.js',
-  'src/modal/pure/detail-idb-cache.js',
-  'src/modal/pure/detail-cache.js',
-  'src/modal/pure/detail-merge.js',
-  'src/modal/pure/detail-store.js',
-  'src/modal/pure/load-progress.js',
-  'src/modal/pure/page-embed.js',
-  'src/modal/pure/floating-scrollbar.js',
-  'src/modal/pure/auto-refresh.js',
-  'src/modal/dist/pr-modal.bundle.js',
-  'src/pr-modal-host.js',
-];
+import {
+  MSG,
+  registeredEnterpriseHosts,
+  githubTabUrlPatterns,
+  syncEnterpriseContentScripts,
+} from './sw-enterprise';
+import {
+  applyPrefsToRlMem,
+  applyRateLimitStateToRlMem,
+} from './sw-rate-limit';
 
-/**
- * Stateless API context from RPC message (webHost from content page).
- * No process-global mutation — pass returned ctx into every PRTreeFetch call.
- * @param {object|null|undefined} message
- */
 export function broadcastToGithubTabs(message: any) {
   // Notify extension pages / open content scripts without sending secrets.
   // sendMessage may not return a Promise on all runtimes — never assume .catch.
@@ -137,8 +120,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     const prefs = PRTreeStorage.normalizePrefs(
       changes[PRTreeStorage.PREFS_KEY].newValue
     );
-    rlMem.pluginEnabled = prefs?.pluginEnabled !== false;
-    rlMem.loaded = true;
+    applyPrefsToRlMem(prefs);
     broadcastPrefsChanged(prefs);
   }
   if (
@@ -146,13 +128,8 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     changes[PRTreeStorage.RATE_LIMIT_KEY]
   ) {
     try {
-      const RL = rateLimitApi();
       const raw = changes[PRTreeStorage.RATE_LIMIT_KEY].newValue;
-      rlMem.state =
-        typeof RL?.normalizeRateLimitState === 'function'
-          ? RL.normalizeRateLimitState(raw)
-          : raw;
-      rlMem.loaded = true;
+      applyRateLimitStateToRlMem(raw);
     } catch {
       /* ignore */
     }
@@ -164,11 +141,3 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
  * Abort when the modal/sheet closes so network work stops immediately.
  * @type {Map<string, AbortController>}
  */
-export const activeFetchControllers = new Map();
-/**
- * requestIds cancelled before beginTrackedFetch ran (still in microtask queue).
- * beginTrackedFetch honors these and starts aborted.
- * @type {Set<string>}
- */
-export const preCancelledFetchIds = new Set();
-

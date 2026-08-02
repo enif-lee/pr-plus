@@ -1,34 +1,28 @@
-/** SW unit: sw-handle-message.ts */
+/** SW unit: sw-handle-a.ts — message handlers part A */
 /* global PRTreeStorage, PRTreeFetch, PRModalCollapse, PRGithubEndpoints */
 
-export const ENTERPRISE_CS_ID = 'prp-enterprise-hosts';
-export const CONTENT_SCRIPT_JS = [
-  'src/tree.js',
-  'src/dom.js',
-  'src/pr-list-focus.js',
-  'src/pulls-palette.js',
-  'src/github-endpoints.js',
-  'src/content-bridge.js',
-  'src/content-bootstrap.js',
-  'src/onboarding.js',
-  'src/content.js',
-  'src/modal/pure/detail-idb-cache.js',
-  'src/modal/pure/detail-cache.js',
-  'src/modal/pure/detail-merge.js',
-  'src/modal/pure/detail-store.js',
-  'src/modal/pure/load-progress.js',
-  'src/modal/pure/page-embed.js',
-  'src/modal/pure/floating-scrollbar.js',
-  'src/modal/pure/auto-refresh.js',
-  'src/modal/dist/pr-modal.bundle.js',
-  'src/pr-modal-host.js',
-];
+import {
+  MSG,
+  apiCtxFromMessage,
+  tokenForMessage,
+  requestEnterprisePermissions,
+  syncEnterpriseContentScripts,
+  ENTERPRISE_CS_ID,
+  CONTENT_SCRIPT_JS,
+} from './sw-enterprise';
+import { clearDetailCacheOnGithubTabs } from './sw-broadcast';
+import {
+  beginTrackedFetch,
+  endTrackedFetch,
+  cancelTrackedFetches,
+  cancelAllTrackedFetches,
+  fetchImpl,
+  ensureRateLimitMem,
+  rateLimitApi,
+  isAbortError,
+  rlMem,
+} from './sw-rate-limit';
 
-/**
- * Stateless API context from RPC message (webHost from content page).
- * No process-global mutation — pass returned ctx into every PRTreeFetch call.
- * @param {object|null|undefined} message
- */
 export async function handleMessagePartA(message: any): Promise<any> {
   const apiCtx = apiCtxFromMessage(message || {});
 
