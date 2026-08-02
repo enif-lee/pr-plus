@@ -39,6 +39,26 @@
   min-height: 22px;
   line-height: 1.2;
 }
+
+/* Lazy by-ids comments in flight (expand shell / resolved) */
+.prp-inline-thread__loading {
+  display: inline-flex;
+  align-items: center;
+  color: var(--prp-fg-muted);
+  flex-shrink: 0;
+}
+.prp-inline-thread__loading-icon {
+  animation: prp-inline-thread-spin 0.7s linear infinite;
+}
+@keyframes prp-inline-thread-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.prp-inline-thread[data-comments-loading='1'] .prp-inline-thread__filebar {
+  /* subtle cue while bodies hydrate — order stays stable */
+  opacity: 0.95;
+}
 /* Shared compact path header (Diff + Conversation) */
 .prp-inline-thread__filebar.prp-review-thread__file-header {
   margin: 0;

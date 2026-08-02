@@ -1,7 +1,10 @@
-# Local browser e2e (agent-browser)
+# Local browser e2e (agent-browser + rstest)
 
-Scenario-based end-to-end tests for the pr+ extension modal.  
-**Not included in `npm test` / `npm run test:unit` / `npm run check`.**
+Scenario-based end-to-end tests for the pr+ extension modal.
+
+**Not included in `npm test` / `npm run test:unit` / `npm run check`.**  
+Unit suite uses `rstest.config.ts` (excludes `tests/e2e/**`).  
+E2E uses a **separate** config: `rstest.e2e.config.ts`.
 
 ## Prerequisites
 
@@ -14,9 +17,26 @@ Scenario-based end-to-end tests for the pr+ extension modal.
 ## Commands
 
 ```bash
-npm run test:e2e              # features + perf
-npm run test:e2e:features     # full feature / style / layout scenario
-npm run test:e2e:perf         # shortcut + scroll loop render budgets
+# All e2e groups (serial, maxWorkers=1)
+npm run test:e2e
+
+# Feature groups only
+npm run test:e2e:features
+
+# Named groups
+npm run test:e2e:smoke
+npm run test:e2e:selection
+npm run test:e2e:perf
+npm run test:e2e:list-row
+
+# Filter by file / name (rstest filters)
+rstest run -c rstest.e2e.config.ts smoke
+rstest run -c rstest.e2e.config.ts selection
+rstest run -c rstest.e2e.config.ts tests/e2e/features
+rstest run -c rstest.e2e.config.ts -t "P3 selection"
+
+# List discovered e2e tests
+rstest list -c rstest.e2e.config.ts
 ```
 
 Session name defaults to `pr-plus-e2e` (override with `PRP_E2E_SESSION`).
@@ -28,40 +48,77 @@ browser: `PRP_E2E_HEADED=1 npm run test:e2e`.
 active test tab. Extra profile-restored tabs steal focus and flake keyboard
 chords — do not open parallel tabs during e2e or manual `ag` QA.
 
-## Scenarios
+**Shared browser session:** `globalSetup` launches agent-browser once; each suite
+`beforeAll` only **soft-resets** (single tab + clear IDB/`prp:` sessionStorage) —
+Chrome is not relaunched between files. Teardown closes the session at the end.
 
-### `feature-scenario.mjs`
+**Data-load gating:** host publishes readiness on the **page DOM** (content-script
+world is isolated from agent-browser `eval`):
 
-Port of session browser QA (see `docs/qa-browser-scenario.md`):
+| Attribute | Meaning |
+|-----------|---------|
+| `data-prp-meta-ready=1` | open + core painted + load bar idle |
+| `data-prp-files-ready=1` | Diff file list has usable patch bodies |
+| `data-prp-load-busy=1` | open/refresh progress still running |
+| `data-prp-e2e-load` | compact JSON snapshot |
 
-| Phase | Checks |
-|-------|--------|
-| P0 | pulls → open PR #7 → conversation chrome → Diff ↔ Conversation → Esc |
-| Styles | `pr-modal.css` loaded, merge/header/aside/filetree dimensions |
-| P1 thread | ⌥⇧C seed/clear, ⌥J/K pin, ⌥↑↓ panel scroll, ⌥⇧↑↓ page, ⌥F fold, ⌥C reply+Esc |
-| P2 thread/file | Diff ⌥J/K threads, ⌥⇧[] files, ⌥⇧↑↓ page, Find, ⌥B, Unified/Split |
-| P3 selection | click line → ↑↓ move, ⇧↑↓ extend, ⌥↑↓ jump, Esc island, multi-hunk expand |
-| P4 UI (read-only) | Diff file fold ⌥F · autoExpandOnFileNav off · long-line expand/collapse |
-| P5 merged chrome | PR **#14** Merged badge + purple merge-box (via closed PR URL) |
+E2E helpers: `probeLoad()`, `waitDetailReady({ number, meta, files })`,
+`waitDiffFilesReady()`. `openPr` / `setLayout` wait on these instead of fixed
+`waitMs` before actions.
 
-P4–P5 assert **local UI only** (no merge / comment / review mutations).
+**Timeouts:** `testTimeout` / `hookTimeout` are 2–3 minutes in
+`rstest.e2e.config.ts` (browser open + Diff load).
 
-Closed/merged PRs (e.g. heavy **#14**): opened via `openPr(n, { viaUrl: true })` →
-`https://github.com/enif-lee/pr-plus/pull/{n}` (not the default open `/pulls` list).
-List miss also falls back to the same URL path.
+**Perf budgets:** conversation / light Diff use tight rAF budgets (~50ms p95).
+Heavy PR **#14** page/file holds use separate `PRP_E2E_*_HEAVY_MS` ceilings —
+large virtual remounts are not comparable to #7/#13.
 
-### `perf-shortcut-loop.mjs`
+## Groups
 
-**Key-hold** (OS key-repeat via in-page `KeyboardEvent` + `repeat: true`):
+| Group | File | What it covers |
+|-------|------|----------------|
+| `smoke` | `features/smoke.rstest.ts` | open PR #7, layout chrome, Diff toggle |
+| `conversation-nav` | `features/conversation-nav.rstest.ts` | ⌥J/K, fold, reply, composer |
+| `diff-nav` | `features/diff-nav.rstest.ts` | Diff thread/file/page nav, Find, mode |
+| `selection` | `features/selection.rstest.ts` | PR #13 selection island, fold, multi-hunk |
+| `diff-ui` | `features/diff-ui.rstest.ts` | file fold, auto-expand-off, long-line |
+| `merged-chrome` | `features/merged-chrome.rstest.ts` | PR #14 Merged badge + Esc close |
+| `perf` | `perf-shortcut-loop.rstest.ts` | key-hold frame / longtask budgets |
+| `list-row` | `list-row-resync.rstest.ts` | label write-through → list row |
+| `session-defects` | `features/session-defects.rstest.ts` | files loading settle, key-hold, label→timeline, lazy aside idle |
 
-1. Conversation hold **⌥J / ⌥K** (thread step)  
-2. Diff hold **⌥⇧↓ / ⌥⇧↑** (page)  
-3. Diff hold **⌥⇧]** (file)  
-4. Diff selection hold **↓ / ⇧↓ / ⌥↓** (move / extend / multi-line jump)  
+Each group owns its browser session (`beforeAll` ensureBrowser / `afterAll` closeAll)
+so groups can run alone or in any filter subset.
 
-Each hold is short (`HOLD_MS`); key-repeat ticks every `REPEAT_MS`.
+Step bodies live in companion `*.mjs` modules as `getSteps()` (ordered
+`{ name, fn }[]`). The `.rstest.ts` file only registers them with rstest.
 
-### Budgets / hold length (env overrides)
+## Layout
+
+```
+rstest.config.ts          # unit only — excludes tests/e2e/**
+rstest.e2e.config.ts      # e2e only — serial pool, long timeouts
+
+tests/e2e/
+  README.md
+  lib/
+    ab.mjs              # agent-browser CLI
+    harness.mjs         # open PR, layout, probes
+    runner.mjs          # legacy step bag (optional)
+    e2e-register.ts     # registerE2eFeature() for rstest
+  features/
+    smoke.mjs + smoke.rstest.ts
+    conversation-nav.mjs + .rstest.ts
+    diff-nav.mjs + .rstest.ts
+    selection.mjs + .rstest.ts
+    diff-ui.mjs + .rstest.ts
+    merged-chrome.mjs + .rstest.ts
+    session-defects.mjs + .rstest.ts
+  perf-shortcut-loop.mjs + .rstest.ts
+  list-row-resync.mjs + .rstest.ts
+```
+
+## Budgets / hold length (perf env overrides)
 
 | Env | Default | Meaning |
 |-----|---------|---------|
@@ -69,18 +126,11 @@ Each hold is short (`HOLD_MS`); key-repeat ticks every `REPEAT_MS`.
 | `PRP_E2E_REPEAT_MS` | `40` | synthetic key-repeat interval while held |
 | `PRP_E2E_FRAME_P95_MS` | `50` | rAF frame p95 max during hold (nav) |
 | `PRP_E2E_FRAME_P95_FILE_MS` | `80` | rAF frame p95 max during file-hop hold |
-| `PRP_E2E_LONGTASK_MAX_MS` | `200` | single longtask max |
-| `PRP_E2E_LONGTASK_SUM_MS` | `400` | sum of longtasks per hold phase |
+| `PRP_E2E_LONGTASK_MAX_MS` | `200` | single longtask max (light) |
+| `PRP_E2E_LONGTASK_SUM_MS` | `400` | sum of longtasks per hold (light) |
+| `PRP_E2E_FRAME_P95_HEAVY_MS` | `400` | heavy PR #14 page/file hold p95 |
+| `PRP_E2E_LONGTASK_MAX_HEAVY_MS` | `400` | heavy PR single longtask max |
+| `PRP_E2E_LONGTASK_SUM_HEAVY_MS` | `2000` | heavy PR longtask sum per hold |
 
-## Layout
-
-```
-tests/e2e/
-  README.md
-  run.mjs
-  feature-scenario.mjs
-  perf-shortcut-loop.mjs
-  lib/
-    ab.mjs       # agent-browser CLI
-    harness.mjs  # open PR, layout, probes
-```
+Closed/merged PRs (e.g. heavy **#14**): opened via `openPr(n, { viaUrl: true })` →
+`https://github.com/enif-lee/pr-plus/pull/{n}`.

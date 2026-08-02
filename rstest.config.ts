@@ -16,8 +16,10 @@ export default defineConfig({
     '**/node_modules/**',
     '**/dist/**',
     'src/modal/dist/**',
-    // Local agent-browser e2e (npm run test:e2e) — not unit/CI suite
+    // Agent-browser e2e lives under tests/e2e and uses rstest.e2e.config.ts
+    // (npm run test:e2e). Never part of unit / npm test / npm run check.
     'tests/e2e/**',
+    '**/*.e2e.rstest.ts',
   ],
   // Match modal path aliases used by the app
   resolve: {

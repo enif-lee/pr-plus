@@ -142,13 +142,15 @@ describe('newestThreadsPageMatchesCache', () => {
     const r = newestThreadsPageMatchesCache(page, detail);
     expect(r.match).toBe(false);
     expect(r.reason).toBe('totalCount');
+    // Sub-max probe size → escalate; at WARM_PROBE(=API max) there is nowhere larger.
+    expect(shouldEscalateNewestThreadsProbe(page, detail, 10)).toBe(true);
     expect(
       shouldEscalateNewestThreadsProbe(
         page,
         detail,
         REVIEW_THREADS_WARM_PROBE_SIZE
       )
-    ).toBe(true);
+    ).toBe(false);
   });
 
   test('mismatches when newest head has unknown thread', () => {

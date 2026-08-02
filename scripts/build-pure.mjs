@@ -18,6 +18,10 @@ const MAP = {
   'aside-lists': { lib: 'aside-lists.ts', global: 'PRModalAsideLists' },
   'auto-refresh': { lib: 'auto-refresh.ts', global: 'PRModalAutoRefresh' },
   'rate-limit': { lib: 'rate-limit.ts', global: 'PRModalRateLimit' },
+  'graphql-cost-log': {
+    lib: 'graphql-cost-log.ts',
+    global: 'PRModalGraphqlCostLog',
+  },
   'open-pulls-lifecycle': {
     lib: 'open-pulls-lifecycle.ts',
     global: 'PRModalOpenPullsLifecycle',

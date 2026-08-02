@@ -6,6 +6,9 @@ import {
   buildConversationTimeline,
   describeTimelineEvent,
   timelineEventToItem,
+  labelChangeTimelineEvents,
+  mergeTimelineEventsById,
+  milestoneChangeTimelineEvents,
 } from '../src/modal/lib/conversation-timeline';
 import { timelineEventRailSegments } from '../src/modal/lib/conversation-virtual';
 
@@ -91,6 +94,80 @@ describe('describeTimelineEvent', () => {
       { type: 'text', text: ' commit ' },
       { type: 'commit', text: 'abcdef0' },
     ]);
+  });
+});
+
+describe('local timeline after meta writes', () => {
+  test('labelChangeTimelineEvents emits labeled/unlabeled', () => {
+    const added = labelChangeTimelineEvents(
+      [],
+      [{ name: 'bug', color: 'd73a4a' }],
+      { login: 'enif-lee' }
+    );
+    expect(added).toHaveLength(1);
+    expect(added[0].event).toBe('labeled');
+    expect(added[0].label?.name).toBe('bug');
+    expect(String(added[0].id)).toMatch(/^local:labeled:bug:/);
+
+    const removed = labelChangeTimelineEvents(
+      [{ name: 'bug', color: 'd73a4a' }],
+      [],
+      { login: 'enif-lee' }
+    );
+    expect(removed).toHaveLength(1);
+    expect(removed[0].event).toBe('unlabeled');
+
+    // Historical labeled:bug must NOT swallow a brand-new local row
+    const oldServer = {
+      id: 88,
+      event: 'labeled',
+      label: { name: 'bug', color: 'd73a4a' },
+      actor: 'enif-lee',
+      at: '2026-07-01T00:00:00Z',
+    };
+    const withHistory = mergeTimelineEventsById(added, [oldServer]);
+    expect(withHistory.some((e: any) => e.id === 88)).toBe(true);
+    expect(withHistory.some((e: any) => String(e.id).startsWith('local:'))).toBe(
+      true
+    );
+
+    // Recent-but-older twin (e.g. prior test run 30s ago) must also keep local
+    const localAt = Date.parse(added[0].at);
+    const recentOld = {
+      id: 89,
+      event: 'labeled',
+      label: { name: 'bug', color: 'd73a4a' },
+      actor: 'enif-lee',
+      at: new Date(localAt - 30_000).toISOString(),
+    };
+    const withRecentOld = mergeTimelineEventsById(added, [recentOld]);
+    expect(
+      withRecentOld.some((e: any) => String(e.id).startsWith('local:'))
+    ).toBe(true);
+
+    // Same-wave server event (at >= local) replaces local optimistic
+    const now = added[0].at;
+    const server = {
+      id: 99,
+      event: 'labeled',
+      label: { name: 'bug', color: 'd73a4a' },
+      actor: 'enif-lee',
+      at: now,
+    };
+    const merged = mergeTimelineEventsById(added, [server]);
+    expect(merged.some((e: any) => e.id === 99)).toBe(true);
+    expect(merged.some((e: any) => String(e.id).startsWith('local:'))).toBe(
+      false
+    );
+  });
+
+  test('milestoneChangeTimelineEvents demilestone + milestoned', () => {
+    const ev = milestoneChangeTimelineEvents(
+      { number: 1, title: 'v1' },
+      { number: 2, title: 'v2' },
+      { login: 'enif-lee' }
+    );
+    expect(ev.map((e: any) => e.event)).toEqual(['demilestoned', 'milestoned']);
   });
 });
 

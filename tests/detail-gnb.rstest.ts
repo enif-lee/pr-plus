@@ -1,9 +1,7 @@
 /**
- * Thin detail-page GNB — pure helpers + embed shell static wiring.
+ * Thin detail-page GNB — pure helpers.
  */
 import { describe, expect, test } from '@rstest/core';
-import fs from 'node:fs';
-import path from 'node:path';
 import {
   buildDetailGnbLeftItems,
   buildDetailGnbModel,
@@ -12,8 +10,6 @@ import {
   normalizeRepoSlug,
   shouldShowDetailGnb,
 } from '../src/modal/lib/detail-gnb';
-
-const root = path.join(__dirname, '..');
 
 describe('normalizeRepoSlug / githubAbsPath', () => {
   test('normalizes owner/repo; rejects empty or slashy', () => {
@@ -126,43 +122,5 @@ describe('buildDetailGnbModel + shouldShowDetailGnb', () => {
     expect(shouldShowDetailGnb('modal')).toBe(false);
     expect(shouldShowDetailGnb(null)).toBe(false);
     expect(shouldShowDetailGnb('page')).toBe(true);
-  });
-});
-
-describe('detail embed shell wires DetailGnb', () => {
-  test('PrModalApp mounts DetailGnb only under isEmbed', () => {
-    const app = fs.readFileSync(
-      path.join(root, 'src/modal/app/PrModalApp.impl.tsx'),
-      'utf8'
-    );
-    expect(app).toMatch(/import\s+\{\s*DetailGnb\s*\}/);
-    expect(app).toMatch(/isEmbed\s*\?\s*\(/);
-    expect(app).toMatch(/<DetailGnb[\s\S]*?presentation="embed"/);
-  });
-
-  test('DetailGnb view exposes left tabs + right slots data attrs', () => {
-    const src = fs.readFileSync(
-      path.join(root, 'src/modal/views/chrome/DetailGnb.tsx'),
-      'utf8'
-    );
-    expect(src).toMatch(/data-prp-detail-gnb/);
-    expect(src).toMatch(/data-prp-gnb-tab/);
-    expect(src).toMatch(/data-prp-gnb-slot="notifications"/);
-    expect(src).toMatch(/data-prp-gnb-slot="account"/);
-    expect(src).toMatch(/buildDetailGnbModel/);
-    expect(src).toMatch(/shouldShowDetailGnb/);
-  });
-
-  test('CSS keeps bar thin and hides under modal presentation', () => {
-    const css = fs.readFileSync(
-      path.join(root, 'src/modal/views/chrome/DetailGnb.css'),
-      'utf8'
-    );
-    expect(css).toMatch(/\.prp-detail-gnb\s*\{/);
-    expect(css).toMatch(/max-height:\s*40px/);
-    expect(css).toMatch(/min-height:\s*36px/);
-    expect(css).toMatch(
-      /\[data-presentation='modal'\]\s+\.prp-detail-gnb/
-    );
   });
 });

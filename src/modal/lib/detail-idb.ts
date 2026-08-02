@@ -69,6 +69,187 @@ function txDone(tx: IDBTransaction): Promise<void> {
 export const MAX_FULL_CACHE_PATCH_CHARS = 3_500_000;
 
 /**
+ * True when a PR file entry is allowed to lack a textual patch body
+ * (binary, rename/delete, or zero-line change). Slim cache rows use
+ * `_patchOmitted` and must NOT count as complete Diff bodies.
+ */
+export function fileAllowsMissingPatch(file: any): boolean {
+  if (!file || typeof file !== 'object') return false;
+  if (file._patchOmitted) return false;
+  const st = String(file.status || file.changeType || '').toLowerCase();
+  const binary = Boolean(file.binary || file.isBinary);
+  const noChange =
+    Number(file.changes) === 0 ||
+    (Number(file.additions || 0) === 0 && Number(file.deletions || 0) === 0);
+  return (
+    binary ||
+    st === 'renamed' ||
+    st === 'removed' ||
+    st === 'deleted' ||
+    noChange
+  );
+}
+
+/**
+ * True when `files` can paint Diff text (or are legitimately patchless).
+ * False when empty, slim (`_patchOmitted`), or text changes lack patch bodies —
+ * callers must re-fetch via ensureAllFiles / fetchPrFiles.
+ *
+ * Note: GitHub REST omits patch for oversized files without setting
+ * `_patchOmitted`. That is *not* fixed by re-fetch — use
+ * `filesListNeedsFullFetch` for re-fetch gates so Diff does not loop
+ * "Loading all files…".
+ */
+export function filesListHasUsableDiffBodies(files: any): boolean {
+  if (!Array.isArray(files) || files.length === 0) return false;
+  let anyPatch = false;
+  let missingRequired = false;
+  for (const f of files) {
+    if (!f || typeof f !== 'object') continue;
+    if (f._patchOmitted) {
+      missingRequired = true;
+      continue;
+    }
+    const patch = typeof f.patch === 'string' ? f.patch : '';
+    if (patch.length > 0) {
+      anyPatch = true;
+      continue;
+    }
+    if (!fileAllowsMissingPatch(f)) {
+      missingRequired = true;
+    }
+  }
+  if (missingRequired) return false;
+  // All entries ok without patch (binaries only) OR at least one real patch.
+  return anyPatch || true;
+}
+
+/**
+ * True when Diff should call fetchAllPrFiles again.
+ * - empty list
+ * - incomplete vs `changedFiles` count
+ * - slim IDB / meta rows (`_patchOmitted`)
+ *
+ * False after a full REST page even if some text files lack `patch`
+ * (GitHub-omitted large diffs). Re-fetching never restores those bodies.
+ */
+export function filesListNeedsFullFetch(
+  files: any,
+  changedFiles?: number | null
+): boolean {
+  if (!Array.isArray(files) || files.length === 0) return true;
+  for (const f of files) {
+    if (f && typeof f === 'object' && f._patchOmitted) return true;
+  }
+  const total = Number(changedFiles);
+  if (Number.isFinite(total) && total > files.length) return true;
+  return false;
+}
+
+/** Normalize Git head SHA for equality checks (trim + lower). */
+export function normalizeHeadSha(sha: any): string {
+  return String(sha || '').trim().toLowerCase();
+}
+
+/**
+ * True when both values are non-empty and equal after normalize.
+ * Empty/missing SHAs never match (forces fetch rather than false reuse).
+ */
+export function sameHeadSha(a: any, b: any): boolean {
+  const sa = normalizeHeadSha(a);
+  const sb = normalizeHeadSha(b);
+  return Boolean(sa && sb && sa === sb);
+}
+
+export type FilesCommitsDiffReuseDecision = {
+  /** Cache and live/network share a non-empty head SHA (or provisional same). */
+  sameHead: boolean;
+  /** Reuse cached files[] including usable diff bodies — skip full files fetch. */
+  reuseFiles: boolean;
+  /** Reuse cached commits[] — skip commits list fetch. */
+  reuseCommits: boolean;
+  /** Stable reason code for logs / e2e (e.g. reuse, head-mismatch, cache-slim). */
+  reason: string;
+};
+
+/**
+ * Decide whether cached files / commits / diff bodies may be reused without
+ * re-fetch when the live/network core head SHA matches the cache.
+ *
+ * @param cacheDetail cached or current detail snapshot
+ * @param networkOrLive freshly loaded core (or seed with headSha); when null,
+ *   cache is evaluated against its own headSha (provisional side-fetch kick)
+ */
+export function mayReuseFilesCommitsDiff(
+  cacheDetail: any,
+  networkOrLive: any = null
+): FilesCommitsDiffReuseDecision {
+  const cache =
+    cacheDetail && typeof cacheDetail === 'object' ? cacheDetail : null;
+  if (!cache) {
+    return {
+      sameHead: false,
+      reuseFiles: false,
+      reuseCommits: false,
+      reason: 'no-cache',
+    };
+  }
+  const live =
+    networkOrLive && typeof networkOrLive === 'object'
+      ? networkOrLive
+      : cache;
+  const cacheSha = normalizeHeadSha(cache.headSha);
+  const liveSha = normalizeHeadSha(live.headSha);
+
+  if (liveSha && cacheSha && liveSha !== cacheSha) {
+    return {
+      sameHead: false,
+      reuseFiles: false,
+      reuseCommits: false,
+      reason: 'head-mismatch',
+    };
+  }
+  if (!cacheSha && !liveSha) {
+    return {
+      sameHead: false,
+      reuseFiles: false,
+      reuseCommits: false,
+      reason: 'missing-head-sha',
+    };
+  }
+  // Provisional: cache has sha and live is empty (core still in flight) OR equal
+  const sameHead = Boolean(
+    cacheSha && (!liveSha || liveSha === cacheSha)
+  );
+  if (!sameHead) {
+    return {
+      sameHead: false,
+      reuseFiles: false,
+      reuseCommits: false,
+      reason: 'cache-missing-sha',
+    };
+  }
+
+  const files = Array.isArray(cache.files) ? cache.files : [];
+  const commits = Array.isArray(cache.commits) ? cache.commits : [];
+  const filesUsable =
+    files.length > 0 &&
+    filesListHasUsableDiffBodies(files) &&
+    !files.some((f: any) => f && f._patchOmitted) &&
+    !filesListNeedsFullFetch(files, cache.changedFiles ?? live.changedFiles);
+
+  const reuseFiles = filesUsable;
+  const reuseCommits = commits.length > 0;
+
+  let reason = 'reuse';
+  if (!reuseFiles && !reuseCommits) reason = 'cache-slim-or-empty';
+  else if (!reuseFiles) reason = 'reuse-commits-only';
+  else if (!reuseCommits) reason = 'reuse-files-only';
+
+  return { sameHead, reuseFiles, reuseCommits, reason };
+}
+
+/**
  * True when detail has finished loading files (with patches), commits, and is
  * safe to promote into a durable full snapshot (not a progressive partial).
  */
@@ -81,30 +262,17 @@ export function isDetailCompleteForFullCache(detail: any): boolean {
   if (!files.length) return false;
   // Slim snapshots mark omitted patches — never treat as full
   if (files.some((f: any) => f && f._patchOmitted)) return false;
+  if (!filesListHasUsableDiffBodies(files)) return false;
 
   const commits = Array.isArray(detail.commits) ? detail.commits : [];
   if (!commits.length) return false;
 
   let patchChars = 0;
-  let anyPatch = false;
-  let allOkWithoutPatch = true;
   for (const f of files) {
     if (!f || typeof f !== 'object') continue;
     const patch = typeof f.patch === 'string' ? f.patch : '';
-    if (patch.length) {
-      anyPatch = true;
-      patchChars += patch.length;
-      allOkWithoutPatch = false;
-    } else {
-      const st = String(f.status || f.changeType || '').toLowerCase();
-      const binary = Boolean(f.binary || f.isBinary);
-      const noChange = Number(f.changes) === 0 || (Number(f.additions) === 0 && Number(f.deletions) === 0);
-      if (!(binary || st === 'renamed' || st === 'removed' || st === 'deleted' || noChange)) {
-        allOkWithoutPatch = false;
-      }
-    }
+    if (patch.length) patchChars += patch.length;
   }
-  if (!anyPatch && !allOkWithoutPatch) return false;
   if (patchChars > MAX_FULL_CACHE_PATCH_CHARS) return false;
   return true;
 }

@@ -23,6 +23,7 @@ import {
   IconFileDiff,
   IconLinkExternal,
   IconPencil,
+  IconSync,
   IconTrash,
 } from '@common/icons';
 import {
@@ -46,6 +47,13 @@ import { AsideCompactRail } from './AsideCompactRail';
 import {
   buildConversationTimeline,
   partitionTimelineWithThreadGap,
+  filterTimelineItemsByVisibility,
+  normalizeTimelineVisibility,
+  toggleTimelineTip,
+  isTimelineVisibilityAllOn,
+  TIMELINE_TIP_IDS,
+  TIMELINE_TIP_LABELS,
+  type TimelineTipId,
 } from '@lib/conversation-timeline';
 import { snippetForComment } from '@lib/diff-snippet';
 import { buildMergeBoxStatus } from '@lib/merge-box-status';
@@ -172,12 +180,29 @@ function ConversationViewImpl(props: any) {
     onReplyToThread = null,
     onResolveThread = null,
     onLoadMoreReviewThreads = null,
+    /**
+     * Lazy-load GraphQL comments when expanding a shell/resolved thread.
+     * Receives threadNodeId (PRRT_…) or shell comment id.
+     */
+    onEnsureThreadComments = null,
+    /**
+     * (threadNodeId | commentId) => boolean — by-ids comments in flight.
+     * Drives header loading spinner on expand.
+     */
+    isThreadCommentsLoading = null,
     /** Open Diff and scroll to this review thread (file:line / comment id). */
     onJumpToReviewThread = null,
     /** Visible review-thread GraphQL ids (PRRT_…) for targeted refresh */
     onVisibleThreadNodeIds = null,
     /** When true: composer → merge box → conversation (latest first). */
     reverseComments = true,
+    /**
+     * Global timeline category visibility (labels/title/milestone/comments).
+     * Synced with extensionPrefs.timelineVisibility.
+     */
+    timelineVisibility = null,
+    /** (nextMap) => void — patch global prefs when a tip is toggled */
+    onTimelineVisibilityChange = null,
     reviewThreadsMeta = null,
     searchQuery = '',
     searchHits = null,
@@ -317,6 +342,21 @@ function ConversationViewImpl(props: any) {
     setGroupThreadOpenOverrides(new Map());
   }, [detail?.owner, detail?.repo, detail?.number]);
 
+  // Fingerprint timelineEvents so optimistic labeled/milestoned rows after a
+  // meta write always rebuild the virtual conversation list (not just labels).
+  const timelineEventsKey = useMemo(() => {
+    const te = Array.isArray(detail?.timelineEvents) ? detail.timelineEvents : [];
+    if (!te.length) return '0';
+    let maxAt = '';
+    const ids: string[] = [];
+    for (const e of te) {
+      if (e?.id != null) ids.push(String(e.id));
+      const at = String(e?.at || '');
+      if (at > maxAt) maxAt = at;
+    }
+    return `${te.length}:${ids.length}:${maxAt}:${ids[ids.length - 1] || ''}`;
+  }, [detail?.timelineEvents]);
+
   const allItems = useMemo(() => {
     if (typeof buildConversationTimeline === 'function') {
       return buildConversationTimeline(detail, {
@@ -325,7 +365,10 @@ function ConversationViewImpl(props: any) {
       });
     }
     return [];
-  }, [detail]);
+    // timelineEventsKey forces recompute when only system events change
+    // (host may reuse a detail object shell with a new timelineEvents array).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detail, timelineEventsKey]);
 
   /** Pending review-group is embedded in the Review submit form (not the timeline). */
   const pendingReviewGroup = useMemo(() => {
@@ -336,11 +379,74 @@ function ConversationViewImpl(props: any) {
     );
   }, [allItems]);
 
+  // Local optimistic visibility so tip chips flip immediately; host prefs
+  // remain source of truth. Track last emitted map so lagging props / storage
+  // round-trips cannot re-enable a tip the user just turned off.
+  const [localTimelineVis, setLocalTimelineVis] = useState(() =>
+    normalizeTimelineVisibility(timelineVisibility)
+  );
+  const lastEmittedVisRef = useRef<string>(
+    JSON.stringify(normalizeTimelineVisibility(timelineVisibility))
+  );
+  useEffect(() => {
+    const incoming = normalizeTimelineVisibility(timelineVisibility);
+    const incomingJson = JSON.stringify(incoming);
+    // Host caught up to our last tip click
+    if (incomingJson === lastEmittedVisRef.current) {
+      setLocalTimelineVis(incoming);
+      return;
+    }
+    // Ignore lagging all-on props while a partial tip-off emit is in flight
+    try {
+      const emitted = JSON.parse(lastEmittedVisRef.current || '{}');
+      if (
+        isTimelineVisibilityAllOn(incoming) &&
+        emitted &&
+        !isTimelineVisibilityAllOn(emitted)
+      ) {
+        return;
+      }
+    } catch {
+      /* ignore */
+    }
+    // External change (popup / storage) — take props
+    setLocalTimelineVis(incoming);
+    lastEmittedVisRef.current = incomingJson;
+  }, [timelineVisibility]);
+
+  const timelineVisibilityNorm = localTimelineVis;
+
   const timelineItems = useMemo(() => {
-    return allItems.filter(
+    const base = allItems.filter(
       (i: any) => !(i && i.kind === 'review-group' && i.pending)
     );
-  }, [allItems]);
+    return filterTimelineItemsByVisibility(base, timelineVisibilityNorm);
+  }, [allItems, timelineVisibilityNorm]);
+
+  function onTipClick(tipId: TimelineTipId | string) {
+    const next = toggleTimelineTip(timelineVisibilityNorm, tipId);
+    const nextJson = JSON.stringify(next);
+    lastEmittedVisRef.current = nextJson;
+    setLocalTimelineVis(next);
+    // Debug/e2e observability
+    try {
+      document.documentElement?.setAttribute?.(
+        'data-prp-timeline-vis',
+        nextJson
+      );
+    } catch {
+      /* ignore */
+    }
+    if (typeof onTimelineVisibilityChange === 'function') {
+      try {
+        onTimelineVisibilityChange(next);
+      } catch {
+        /* soft — local filter still applies */
+      }
+    }
+  }
+
+  const allTipOn = isTimelineVisibilityAllOn(timelineVisibilityNorm);
 
   const qSearch = String(searchQuery || '').trim();
   const hitAnchorSet = useMemo(() => {
@@ -666,19 +772,22 @@ function ConversationViewImpl(props: any) {
               {p.title}
             </Badge>
           ) : null;
-        case 'title':
-          // Soft (non-bordered) badge — long PR titles need wider chip
+        case 'title': {
+          // Soft badge: CSS ellipsis at max-width; full string on hover target.
+          const fullTitle = String(p.text || '');
           return (
             <Badge
               key={key}
               tone="muted"
               variant="soft"
               className="prp-timeline-event__param prp-timeline-event__param--title"
-              title={p.text}
+              title={fullTitle}
+              data-prp-full-title={fullTitle}
             >
               {p.text}
             </Badge>
           );
+        }
         case 'status': {
           const tone = timelineStatusBadgeTone(p.tone || 'default');
           return (
@@ -812,32 +921,46 @@ function ConversationViewImpl(props: any) {
     return defaultThreadCollapsed(item);
   }
 
+  function requestThreadCommentsOnExpand(item: any) {
+    if (typeof onEnsureThreadComments !== 'function' || !item) return;
+    const tid =
+      item.threadNodeId ||
+      item.root?.threadNodeId ||
+      (String(item.id || '').startsWith('shell:')
+        ? String(item.id).slice(6)
+        : null);
+    if (tid) void onEnsureThreadComments(tid);
+  }
+
   function toggleThreadCollapse(item: any) {
     if (item?.id == null) return;
     const key = String(item.id);
+    const currently = threadCollapseOverrides.has(key)
+      ? Boolean(threadCollapseOverrides.get(key))
+      : defaultThreadCollapsed(item);
+    const nextCollapsed = !currently;
     setThreadCollapseOverrides((prev) => {
-      const currently = prev.has(key)
-        ? Boolean(prev.get(key))
-        : defaultThreadCollapsed(item);
       const next = new Map(prev);
-      next.set(key, !currently);
+      next.set(key, nextCollapsed);
       return next;
     });
+    if (!nextCollapsed) requestThreadCommentsOnExpand(item);
   }
 
   /** Directed fold: set collapsed state only when it differs (←/→). */
   function setThreadCollapsed(item: any, wantCollapsed: boolean) {
     if (item?.id == null) return false;
     const key = String(item.id);
+    const currently = threadCollapseOverrides.has(key)
+      ? Boolean(threadCollapseOverrides.get(key))
+      : defaultThreadCollapsed(item);
+    if (currently === wantCollapsed) return false;
     setThreadCollapseOverrides((prev) => {
-      const currently = prev.has(key)
-        ? Boolean(prev.get(key))
-        : defaultThreadCollapsed(item);
-      if (currently === wantCollapsed) return prev;
       const next = new Map(prev);
       next.set(key, wantCollapsed);
       return next;
     });
+    if (!wantCollapsed) requestThreadCommentsOnExpand(item);
     return true;
   }
 
@@ -867,14 +990,16 @@ function ConversationViewImpl(props: any) {
 
   function toggleGroupThread(reviewId: any, thread: any) {
     const k = groupThreadKey(reviewId, thread?.id);
+    const currently = groupThreadOpenOverrides.has(k)
+      ? Boolean(groupThreadOpenOverrides.get(k))
+      : defaultGroupThreadOpen(thread);
+    const nextOpen = !currently;
     setGroupThreadOpenOverrides((prev) => {
-      const currently = prev.has(k)
-        ? Boolean(prev.get(k))
-        : defaultGroupThreadOpen(thread);
       const next = new Map(prev);
-      next.set(k, !currently);
+      next.set(k, nextOpen);
       return next;
     });
+    if (nextOpen) requestThreadCommentsOnExpand(thread);
   }
 
   /** Directed group-thread open (wantOpen=true expands; false collapses). */
@@ -885,15 +1010,16 @@ function ConversationViewImpl(props: any) {
   ): boolean {
     if (thread?.id == null) return false;
     const k = groupThreadKey(reviewId, thread.id);
+    const currently = groupThreadOpenOverrides.has(k)
+      ? Boolean(groupThreadOpenOverrides.get(k))
+      : defaultGroupThreadOpen(thread);
+    if (currently === wantOpen) return false;
     setGroupThreadOpenOverrides((prev) => {
-      const currently = prev.has(k)
-        ? Boolean(prev.get(k))
-        : defaultGroupThreadOpen(thread);
-      if (currently === wantOpen) return prev;
       const next = new Map(prev);
       next.set(k, wantOpen);
       return next;
     });
+    if (wantOpen) requestThreadCommentsOnExpand(thread);
     return true;
   }
 
@@ -1396,6 +1522,15 @@ function ConversationViewImpl(props: any) {
     const fileLoc = formatThreadFileLoc(item);
     // Group already has path row; standalone needs conversation-level header
     const showOuterHeader = !opts.hideOuterHeader && !opts.forceExpanded;
+    const loadingTid =
+      item.threadNodeId ||
+      (item.id != null && String(item.id).startsWith('shell:')
+        ? String(item.id).slice(6)
+        : item.id);
+    const commentsLoading = Boolean(
+      typeof isThreadCommentsLoading === 'function' &&
+        isThreadCommentsLoading(loadingTid || item.id)
+    );
 
     // Same shape Diff VirtualDiff passes into InlineThread
     const row = {
@@ -1492,6 +1627,20 @@ function ConversationViewImpl(props: any) {
               >
                 {fileLoc || item.path || 'thread'}
               </span>
+              {commentsLoading ? (
+                <span
+                  className="prp-inline-thread__loading"
+                  title="Loading comments…"
+                  data-prp-thread-loading="1"
+                  aria-label="Loading comments"
+                >
+                  <IconSync
+                    className="prp-inline-thread__loading-icon"
+                    size={12}
+                    aria-hidden="true"
+                  />
+                </span>
+              ) : null}
               {item.pending ? (
                 <Badge tone="warn">Pending</Badge>
               ) : null}
@@ -1581,6 +1730,7 @@ function ConversationViewImpl(props: any) {
           showFileHeader={false}
           showHunk
           snippet={item.snippet || null}
+          commentsLoading={commentsLoading}
         />
       </div>
         )}
@@ -1648,6 +1798,50 @@ function ConversationViewImpl(props: any) {
     );
   }
 
+  /** Category tip chips — placed as a virtual row between merge and timeline. */
+  function renderTimelineTips() {
+    return (
+      <div
+        className="prp-timeline-tips"
+        role="toolbar"
+        aria-label="Timeline event filters"
+        data-prp-timeline-tips="1"
+      >
+        {TIMELINE_TIP_IDS.map((tipId) => {
+          const selected =
+            tipId === 'all'
+              ? allTipOn
+              : timelineVisibilityNorm[
+                  tipId as keyof typeof timelineVisibilityNorm
+                ] !== false;
+          const label = TIMELINE_TIP_LABELS[tipId] || tipId;
+          return (
+            <button
+              key={tipId}
+              type="button"
+              className={`prp-timeline-tips__chip${
+                selected ? ' is-selected' : ''
+              }`}
+              data-prp-timeline-tip={tipId}
+              data-selected={selected ? '1' : '0'}
+              aria-pressed={selected}
+              title={
+                tipId === 'all'
+                  ? 'Show all timeline categories'
+                  : selected
+                    ? `Hide ${label} from the timeline`
+                    : `Show ${label} on the timeline`
+              }
+              onClick={() => onTipClick(tipId)}
+            >
+              {label}
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
+
   function renderComposerCard() {
     return (
       <ConversationKbFocusClassName
@@ -1697,6 +1891,8 @@ function ConversationViewImpl(props: any) {
         return renderComposerCard();
       case 'merge':
         return renderMergeBox();
+      case 'timeline-tips':
+        return renderTimelineTips();
       case 'gap':
         return renderThreadGap(
           Number(row.hiddenCount ?? paged.hiddenCount ?? reviewThreadsMeta?.hiddenCount) ||
@@ -1758,6 +1954,8 @@ function ConversationViewImpl(props: any) {
             isGroupThreadExpanded={(groupItem: any, thread: any) =>
               isGroupThreadOpen(groupItem?.id, thread)
             }
+            // Bust memo when tip visibility changes so chips + filtered rows repaint
+            timelineVisibilityKey={JSON.stringify(timelineVisibilityNorm)}
             // Search hit scroll; keyboard focus uses store pendingNav in VCL
             scrollToAnchor={activeAnchor}
             renderRow={renderPanelRow}

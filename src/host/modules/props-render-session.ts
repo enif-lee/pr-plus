@@ -35,6 +35,96 @@
       },
       openPulls,
       prefs: { ...prefs },
+      /**
+       * Conversation timeline tip toggles → extensionPrefs.timelineVisibility.
+       * Capture prevVis **before** optimistic write, then lazy-fetch system
+       * events if a tip was re-enabled after partial-fetch skip. Storage watch
+       * alone is insufficient (prev is already clobbered by then).
+       */
+      onTimelineVisibilityChange: (nextVis: any) => {
+        const pure = (globalThis as any).PRModalConversationTimeline;
+        const prevVis = prefs.timelineVisibility;
+        const planned =
+          typeof pure?.planTimelineVisibilityChange === 'function'
+            ? pure.planTimelineVisibilityChange(
+                prevVis,
+                nextVis,
+                current.detail?.timelineEvents
+              )
+            : null;
+        const nextNormalized =
+          planned?.nextVisibility ??
+          (typeof pure?.normalizeTimelineVisibility === 'function'
+            ? pure.normalizeTimelineVisibility(nextVis)
+            : nextVis && typeof nextVis === 'object'
+              ? nextVis
+              : prevVis);
+        const shouldLazy =
+          planned != null
+            ? Boolean(planned.shouldLazyFetch)
+            : typeof pure?.needsLazyTimelineEventsFetch === 'function'
+              ? pure.needsLazyTimelineEventsFetch(
+                  prevVis,
+                  nextNormalized,
+                  current.detail?.timelineEvents
+                )
+              : false;
+        const patch = { timelineVisibility: nextNormalized };
+        // Optimistic local merge so tips re-render before storage round-trip
+        try {
+          prefs = {
+            ...prefs,
+            timelineVisibility: nextNormalized,
+          };
+          if (current.open) render();
+        } catch {
+          /* ignore */
+        }
+        // Lazy REST events: must use captured prevVis (not watch path)
+        if (shouldLazy && current.open) {
+          try {
+            void maybeLazyFetchTimelineEvents(prevVis, nextNormalized);
+          } catch {
+            /* ignore */
+          }
+        }
+        const done = (full: any) => {
+          if (full && typeof full === 'object') {
+            try {
+              prefs = {
+                ...prefs,
+                ...full,
+                timelineVisibility:
+                  full.timelineVisibility || prefs.timelineVisibility,
+              };
+              if (current.open) render();
+            } catch {
+              /* ignore */
+            }
+          }
+        };
+        try {
+          if (typeof globalThis.PRTreeStorage?.setExtensionPrefs === 'function') {
+            void globalThis.PRTreeStorage.setExtensionPrefs(patch)
+              .then(done)
+              .catch(() => {});
+            return;
+          }
+        } catch {
+          /* fall through */
+        }
+        try {
+          const chromeApi = (globalThis as any).chrome;
+          chromeApi?.runtime?.sendMessage?.(
+            { type: 'PR_TREE_PREFS_SET', prefs: patch },
+            (res: any) => {
+              if (res?.prefs) done(res.prefs);
+            }
+          );
+        } catch {
+          /* ignore */
+        }
+      },
       presentation,
       shellChrome: chrome,
       // Deep-link restore (page/position + GH commit/selection); App also writes URI
@@ -82,9 +172,9 @@
        *   threadNodeIds?: string[],
        * }} [opts]
        *   - visible-threads (conversation header): core + bulk only on-screen threads
-       *   - full-threads (diff header): core + last:100 + start:20 + Load all
-       *   - revalidate (mutations / default): warm last:10 probe (escalate if needed)
-       *     + remaining unresolved bulk
+       *   - full-threads (diff header): REST/GraphQL newest 15 + oldest window + Load all
+       *   - revalidate (mutations / default): REST newest 15 (empty trusted)
+       *     + remaining unresolved bulk when PRRT ids exist
        */
       onRefresh: async (opts: any = {}) => {
         if (!owner || !repo || !number) return;
@@ -105,7 +195,7 @@
         ];
         const key = detailKey(owner, repo, number);
         // Cancel prior open/refresh fetches; new cancelable session
-        const { gen, signal } = beginOpenFetchSession();
+        const { gen, signal, metaGenAtStart } = beginOpenFetchSession();
         const prevDetail = current.detail;
         current.error = null;
         setLoadStage(
@@ -129,7 +219,9 @@
 
         const mergeFn =
           globalThis.PRTreeFetch.mergeReviewThreadsPageIntoDetail || null;
-        const apiMax = 100;
+        const apiMax =
+          Number(globalThis.PRModalReviewThreads?.REVIEW_THREADS_PAGE_SIZE) ||
+          15;
         const nowMs = () =>
           typeof performance !== 'undefined' && performance.now
             ? performance.now()
@@ -199,7 +291,10 @@
                   f.patch.length > 0 &&
                   !f._patchOmitted
               );
-              if (cachedHasPatches && !netHasPatches) {
+              const netSlim =
+                netFiles.length > 0 &&
+                (netFiles.some((f) => f && f._patchOmitted) || !netHasPatches);
+              if (cachedHasPatches && (netFiles.length === 0 || netSlim)) {
                 detail = { ...detail, files: prevDetail.files };
               }
             }
@@ -212,9 +307,10 @@
               detail = { ...detail, commits: prevDetail.commits };
             }
             current.loading = false;
-            // Core refresh: meta slice only (isolation)
+            // Core refresh: meta slice only (isolation). If App meta write
+            // bumped metaRefreshGen mid-flight, skip supersede keys.
             ensureDetailStore(current.detail || prevDetail);
-            applyCoreToStore(detail);
+            applyCoreToStore(detail, { metaGenAtStart });
             current.error = null;
             detailCache.set(key, current.detail);
             setLoadStage(
@@ -276,23 +372,64 @@
             return true;
           }
 
-          // Parallel kickoff — warm revalidate uses probe; full-threads forces last:100
+          // Parallel kickoff — GraphQL shell newest (page 15); full-threads same
           const refreshThreadsCacheSnap = prevDetail || current.detail || null;
+          const refreshWShell = uw.threadsShell ?? uw.threadsNewest ?? 8;
+          const refreshWComments = uw.threadsComments ?? uw.threadsRemaining ?? 8;
+          const refreshWReactions = uw.threadsReactions ?? uw.threadsEarlier ?? 4;
+          const creditRefreshThreadLadder = (labelKind = 'threads-update') => {
+            const lab = loadStageLabel(labelKind);
+            prog.mark('threadsShell', refreshWShell, 'threads', lab);
+            prog.mark('threadsComments', refreshWComments, 'threads', lab);
+            prog.mark('threadsReactions', refreshWReactions, 'threads', lab);
+          };
           const threadsNewestP =
             mode !== 'visible-threads' && canPageThreads
               ? fetchNewestReviewThreadsAdaptive(owner, repo, number, {
                   signal,
                   cacheDetail: refreshThreadsCacheSnap,
                   forceFull: mode === 'full-threads',
+                  onStage: (stage) => {
+                    if (!stillOpen()) return;
+                    if (stage === 'shell') {
+                      prog.mark(
+                        'threadsShell',
+                        refreshWShell,
+                        'threads',
+                        loadStageLabel('threads-shell')
+                      );
+                    } else if (stage === 'comments-start') {
+                      setLoadStage(
+                        'threads',
+                        loadStageLabel('threads-comments'),
+                        true,
+                        { percent: prog.percent() }
+                      );
+                      try {
+                        render();
+                      } catch {
+                        /* ignore */
+                      }
+                    } else if (stage === 'comments') {
+                      prog.mark(
+                        'threadsComments',
+                        refreshWComments,
+                        'threads',
+                        loadStageLabel('threads-comments')
+                      );
+                    } else if (stage === 'reactions') {
+                      prog.mark(
+                        'threadsReactions',
+                        refreshWReactions,
+                        'threads',
+                        loadStageLabel('threads-reactions')
+                      );
+                    }
+                  },
                 })
                   .then((res) => {
                     const page = res.page;
-                    prog.mark(
-                      'threadsNewest',
-                      uw.threadsNewest,
-                      'threads',
-                      loadStageLabel('threads-update')
-                    );
+                    creditRefreshThreadLadder('threads-update');
                     earlyRefreshThreadsPage = page;
                     paintRefreshThreadsNewest(page);
                     console.log(
@@ -304,22 +441,12 @@
                     return { ok: true, page, adaptive: res };
                   })
                   .catch((err) => {
-                    prog.mark(
-                      'threadsNewest',
-                      uw.threadsNewest,
-                      'threads',
-                      loadStageLabel('threads-failed', { message: err?.message })
-                    );
+                    creditRefreshThreadLadder('threads-failed');
                     return { ok: false, err };
                   })
               : Promise.resolve({ ok: false, skipped: true }).then((r) => {
                   if (mode !== 'visible-threads') {
-                    prog.mark(
-                      'threadsNewest',
-                      uw.threadsNewest,
-                      'refresh',
-                      loadStageLabel('refresh-meta')
-                    );
+                    creditRefreshThreadLadder('refresh-meta');
                   }
                   return r;
                 });
@@ -420,25 +547,24 @@
             return;
           }
 
+          const wShell = uw.threadsShell ?? uw.threadsNewest ?? 8;
+          const wComments = uw.threadsComments ?? uw.threadsRemaining ?? 8;
+          const wReactions = uw.threadsReactions ?? uw.threadsEarlier ?? 4;
+          const creditThreadLadder = (labelKind = 'refresh') => {
+            const lab = loadStageLabel(labelKind);
+            prog.mark('threadsShell', wShell, 'threads', lab);
+            prog.mark('threadsComments', wComments, 'threads', lab);
+            prog.mark('threadsReactions', wReactions, 'threads', lab);
+          };
+
           if (!canPageThreads) {
-            prog.mark(
-              'threadsNewest',
-              uw.threadsNewest,
-              'refresh',
-              loadStageLabel('refresh')
-            );
-            prog.mark(
-              'threadsFollow',
-              uw.threadsFollow,
-              'refresh',
-              loadStageLabel('refresh')
-            );
+            creditThreadLadder('refresh');
             tryFinishOpenProgress(prog);
             render();
             return;
           }
 
-          // 2a) newest window (warm probe or full last:100) — await parallel kickoff
+          // 2a) newest window (REST 15 or forceFull GraphQL 15) — await parallel kickoff
           setLoadStage(
             'threads',
             loadStageLabel('threads-update'),
@@ -479,6 +605,25 @@
             typeof newest.totalCount === 'number'
               ? newest.totalCount
               : newest.threads?.length || 0;
+          const RT =
+            typeof globalThis !== 'undefined'
+              ? globalThis.PRModalReviewThreads
+              : null;
+          const newestSource = newest?.source || adapt?.source || null;
+          // Soft revalidate: by-id bulk for remaining unresolved PRRT (see open-modal).
+          const skipByIds =
+            mode !== 'full-threads' &&
+            (typeof RT?.shouldSkipUnresolvedByIdsBulk === 'function'
+              ? Boolean(
+                  RT.shouldSkipUnresolvedByIdsBulk({
+                    newestSource,
+                    hostRestFallback: Boolean(adapt?.hostRestFallback),
+                    forceFull: mode === 'full-threads',
+                    mode,
+                  })
+                )
+              : String(newestSource || '').toLowerCase() === 'rest' ||
+                Boolean(adapt?.hostRestFallback));
 
           if (mode === 'full-threads') {
             // Diff: seed start window then drain all remaining pages
@@ -494,7 +639,11 @@
                     {
                       direction: 'oldest',
                       cursor: null,
-                      pageSize: 20,
+                      pageSize:
+                        Number(
+                          globalThis.PRModalReviewThreads
+                            ?.REVIEW_THREADS_PAGE_SIZE
+                        ) || 100,
                       signal,
                     }
                   );
@@ -510,12 +659,8 @@
                 /* keep last-only */
               }
             }
-            prog.mark(
-              'threadsFollow',
-              uw.threadsFollow,
-              'threads',
-              loadStageLabel('threads-earlier')
-            );
+            // full-threads: shell+eager already credited; ensure ladder complete
+            creditThreadLadder('threads-shell');
             if (stillOpen() && next?.reviewThreadsMeta?.hasMore) {
               const props = buildProps();
               if (typeof props.onLoadMoreReviewThreads === 'function') {
@@ -526,7 +671,9 @@
               render();
             }
           } else {
-            // Mutation revalidate: unresolved bulk for threads not in last:100
+            // Mutation / soft revalidate: unresolved by-id only when newest was GraphQL
+            // (or full escalate). GraphQL newest may still need by-id for out-of-window
+            // and missingThreadIds wipe of REST paint under rate-limit.
             const collectIds =
               globalThis.PRTreeFetch.collectUnresolvedThreadNodeIds ||
               ((d) => {
@@ -538,21 +685,40 @@
                 }
                 return [...ids];
               });
-            // Bulk revalidate unresolved threads; drop remote-missing and re-check once
-            // so a local zombie PRRT cannot block refresh forever.
+            const filterRemaining =
+              typeof RT?.remainingUnresolvedForByIdsBulk === 'function'
+                ? (unresolved, updated, known) =>
+                    RT.remainingUnresolvedForByIdsBulk(
+                      unresolved,
+                      updated,
+                      known
+                    )
+                : (unresolved, updated, known) =>
+                    (unresolved || []).filter((id) => {
+                      const s = String(id);
+                      if (!/^PRRT_/i.test(s)) return false;
+                      return !updated.has(s) && !known.has(s);
+                    });
             let unresolvedPass = 0;
             const knownMissing = new Set();
+            if (skipByIds) {
+              console.log(
+                `[pr-plus] onRefresh unresolved-remaining ${owner}/${repo}#${number}: skipped by-id bulk`
+              );
+            }
             while (
+              !skipByIds &&
               unresolvedPass < 2 &&
               typeof globalThis.PRTreeFetch.fetchReviewThreadsByIds ===
                 'function' &&
               typeof mergeFn === 'function'
             ) {
               unresolvedPass += 1;
-              const remainingUnresolvedIds = collectIds(next).filter((id) => {
-                const s = String(id);
-                return !updatedIdSet.has(s) && !knownMissing.has(s);
-              });
+              const remainingUnresolvedIds = filterRemaining(
+                collectIds(next),
+                updatedIdSet,
+                knownMissing
+              );
               if (!remainingUnresolvedIds.length) break;
               setLoadStage(
                 'threads',
@@ -586,12 +752,8 @@
               // Only retry when we actually pruned zombies (otherwise stop)
               if (!missingN) break;
             }
-            prog.mark(
-              'threadsFollow',
-              uw.threadsFollow,
-              'threads',
-              loadStageLabel('threads-unresolved')
-            );
+            // soft revalidate: remaining by-ids done; ladder already from kickoff
+            creditThreadLadder('threads-comments');
             if (stillOpen()) {
               applyThreadsToStore(next);
               detailCache.set(key, current.detail);
@@ -658,9 +820,99 @@
             ? meta.newestStartCursor || meta.endCursor || null
             : meta.oldestEndCursor || null;
 
+        /** Clear stuck hasMore so Diff auto load-all cannot re-enter forever. */
+        const clearStuckHasMore = (detailSnap, reason = '') => {
+          const meta = detailSnap?.reviewThreadsMeta || {};
+          if (!meta.hasMore) return detailSnap;
+          const loaded = Number(meta.loadedThreadCount) || 0;
+          const nextMeta = {
+            ...meta,
+            hasMore: false,
+            hasOlder: false,
+            hasNewerFromOldest: false,
+            hiddenCount: 0,
+            totalCount: loaded || Number(meta.totalCount) || 0,
+          };
+          if (reason) {
+            console.log(
+              `[pr-plus] loadMore threads: clear stuck hasMore (${reason}) ` +
+                `${owner}/${repo}#${number}`
+            );
+          }
+          return {
+            ...detailSnap,
+            reviewThreadsMeta: nextMeta,
+            reviewCommentsMeta: {
+              ...(detailSnap.reviewCommentsMeta || {}),
+              hasMore: false,
+            },
+          };
+        };
+
+        const paintLoadAllStage = (meta) => {
+          if (!loadAll) return;
+          const loaded = Number(meta?.loadedThreadCount) || 0;
+          const total =
+            Number(meta?.totalCount) || Number(meta0TotalHint) || 0;
+          const pct =
+            total > 0
+              ? Math.min(99, Math.max(1, Math.round((loaded / total) * 100)))
+              : 8;
+          setLoadStage(
+            'threads',
+            loadStageLabel('threads-all', { loaded, total }),
+            true,
+            { percent: pct }
+          );
+          render();
+        };
+
         const loadOnePage = async (detailSnap) => {
           const meta = detailSnap.reviewThreadsMeta || {};
           if (!meta.hasMore) return { detail: detailSnap, progressed: false };
+          const beforeCount = Number(meta.loadedThreadCount) || 0;
+          const pageSize =
+            Number(
+              globalThis.PRModalReviewThreads?.REVIEW_THREADS_PAGE_SIZE
+            ) || 100;
+
+          // REST multi-page: continue with next restPage (no GraphQL cursors).
+          const restSource =
+            meta.source === 'rest' ||
+            (meta.restPage != null && !meta.newestStartCursor);
+          if (restSource && meta.hasMore) {
+            const nextRestPage = Math.max(1, Number(meta.restPage) || 1) + 1;
+            const page = await globalThis.PRTreeFetch.fetchReviewThreadsPage(
+              owner,
+              repo,
+              number,
+              {
+                direction: 'newest',
+                cursor: null,
+                pageSize,
+                preferRest: true,
+                restPage: nextRestPage,
+                reviewCommentsCount:
+                  detailSnap.reviewCommentsCount != null
+                    ? Number(detailSnap.reviewCommentsCount)
+                    : null,
+                signal: openFetchAbort?.signal || null,
+              }
+            );
+            if (gen !== detailFetchGen) return { detail: null, progressed: false };
+            let next = detailSnap;
+            if (typeof mergeFn === 'function') {
+              next = mergeFn(detailSnap, page, 'newest');
+            }
+            const afterCount =
+              Number(next?.reviewThreadsMeta?.loadedThreadCount) || 0;
+            // Only real growth counts — same page re-fetch is not progress.
+            return {
+              detail: next,
+              progressed: afterCount > beforeCount,
+            };
+          }
+
           let dir = String(direction || '').toLowerCase();
           if (loadAll || !['older', 'newer', 'oldest', 'newest'].includes(dir)) {
             dir = pickDirection(meta);
@@ -681,7 +933,11 @@
             dir = 'older';
           }
           const cursor = cursorFor(meta, dir);
-          const beforeCount = Number(meta.loadedThreadCount) || 0;
+          // GraphQL older/newer without a cursor re-fetches the edge window and
+          // must not be treated as progress (infinite load-all flicker).
+          if ((dir === 'older' || dir === 'newer') && !cursor) {
+            return { detail: detailSnap, progressed: false };
+          }
           const page = await globalThis.PRTreeFetch.fetchReviewThreadsPage(
             owner,
             repo,
@@ -689,7 +945,7 @@
             {
               direction: dir,
               cursor,
-              pageSize: 100,
+              pageSize,
               signal: openFetchAbort?.signal || null,
             }
           );
@@ -702,47 +958,37 @@
             Number(next?.reviewThreadsMeta?.loadedThreadCount) || 0;
           return {
             detail: next,
-            progressed: afterCount > beforeCount || Boolean(page?.threads?.length),
+            progressed: afterCount > beforeCount,
           };
         };
 
         let meta0 = current.detail.reviewThreadsMeta || {};
         if (!meta0.hasMore) return current.detail;
 
-        const totalHint = Number(meta0.totalCount) || 0;
-        const hidden0 = Number(meta0.hiddenCount) || 0;
-        setLoadStage(
-          'threads',
-          loadAll
-            ? loadStageLabel('threads-all', {
-                loaded: meta0.loadedThreadCount || 0,
-                total: totalHint || 0,
-              })
-            : loadStageLabel('threads-more'),
-          true
-        );
-        render();
+        const meta0TotalHint = Number(meta0.totalCount) || 0;
+        if (loadAll) {
+          paintLoadAllStage(meta0);
+        } else {
+          setLoadStage('threads', loadStageLabel('threads-more'), true, {
+            percent: 8,
+          });
+          render();
+        }
 
         try {
           // Single page (timeline gap) or drain dual-window until complete
           const maxPages = loadAll ? 80 : 1;
           let next = current.detail;
           let pages = 0;
+          let lastLoaded = Number(meta0.loadedThreadCount) || 0;
           while (pages < maxPages) {
             const meta = next.reviewThreadsMeta || {};
             if (!meta.hasMore) break;
-            const hidden = Number(meta.hiddenCount) || 0;
             const loaded = Number(meta.loadedThreadCount) || 0;
-            if (loadAll) {
-              setLoadStage(
-                'threads',
-                loadStageLabel('threads-all', {
-                  loaded,
-                  total: totalHint || 0,
-                }),
-                true
-              );
-              render();
+            // Update badge only when loaded advances (avoids identical re-renders)
+            if (loadAll && (pages === 0 || loaded !== lastLoaded)) {
+              paintLoadAllStage(meta);
+              lastLoaded = loaded;
             }
             const step = await loadOnePage(next);
             if (gen !== detailFetchGen) return null;
@@ -750,12 +996,19 @@
               return null;
             }
             if (!step.detail) return null;
+            if (!step.progressed) {
+              // Stuck hasMore (no cursor / REST complete / empty page) → seal meta
+              next = clearStuckHasMore(step.detail, 'no-progress');
+              applyThreadsToStore(next);
+              next = current.detail;
+              detailCache.set(detailKey(owner, repo, number), next);
+              break;
+            }
             applyThreadsToStore(step.detail);
             next = current.detail;
             detailCache.set(detailKey(owner, repo, number), next);
             pages += 1;
             if (!loadAll) break;
-            if (!step.progressed) break;
             if (!(next.reviewThreadsMeta || {}).hasMore) break;
           }
           clearLoadStage();
@@ -777,148 +1030,106 @@
         }
       },
       /**
+       * Lazy-load full comments for GraphQL shell threads (resolved/collapsed).
+       * One-shot by-id bulk; merge as direction `ids`. Idempotent when already loaded.
+       * @param {string|string[]} threadNodeIds PRRT_…
+       * @returns {Promise<object|null>} updated detail or null
+       */
+      onLoadReviewThreadComments: async (threadNodeIds) => {
+        if (!owner || !repo || !number) return null;
+        if (!globalThis.PRTreeFetch?.fetchReviewThreadsByIds) return null;
+        if (!current.detail) return null;
+        const RT =
+          typeof globalThis !== 'undefined' && globalThis.PRModalReviewThreads
+            ? globalThis.PRModalReviewThreads
+            : {};
+        const ids = [
+          ...new Set(
+            (Array.isArray(threadNodeIds)
+              ? threadNodeIds
+              : [threadNodeIds]
+            )
+              .map((id) => String(id || '').trim())
+              .filter((id) =>
+                typeof RT.isGraphqlReviewThreadNodeId === 'function'
+                  ? RT.isGraphqlReviewThreadNodeId(id)
+                  : /^PRRT_/i.test(id)
+              )
+          ),
+        ];
+        if (!ids.length) return current.detail;
+
+        const detailSnap = current.detail;
+        const threads = Array.isArray(detailSnap.reviewThreads)
+          ? detailSnap.reviewThreads
+          : [];
+        const comments = Array.isArray(detailSnap.reviewComments)
+          ? detailSnap.reviewComments
+          : [];
+        const missing =
+          typeof RT.selectThreadIdsMissingComments === 'function'
+            ? RT.selectThreadIdsMissingComments(threads, comments, {
+                onlyThreadIds: ids,
+              })
+            : ids.filter((id) => {
+                const t = threads.find(
+                  (x) => x && String(x.threadNodeId) === id
+                );
+                if (t?.commentsLoaded === true) return false;
+                return !comments.some(
+                  (c) =>
+                    c &&
+                    !c._commentsPending &&
+                    String(c.threadNodeId || '') === id
+                );
+              });
+        if (!missing.length) return current.detail;
+
+        const gen = detailFetchGen;
+        try {
+          const bulk = await globalThis.PRTreeFetch.fetchReviewThreadsByIds(
+            missing,
+            { signal: openFetchAbort?.signal || null }
+          );
+          if (gen !== detailFetchGen) return null;
+          if (!current.open || Number(current.number) !== Number(number)) {
+            return null;
+          }
+          const mergeFn =
+            globalThis.PRTreeFetch?.mergeReviewThreadsPageIntoDetail || null;
+          if (typeof mergeFn !== 'function') return current.detail;
+          const next = mergeFn(current.detail, bulk, 'ids');
+          applyThreadsToStore(next);
+          detailCache.set(detailKey(owner, repo, number), current.detail);
+          render();
+          console.log(
+            `[pr-plus] lazy thread comments: ${missing.length} id(s) → ` +
+              `${bulk?.comments?.length || 0} comments ${owner}/${repo}#${number}`
+          );
+          return current.detail;
+        } catch (err) {
+          if (
+            err?.name === 'AbortError' ||
+            /aborted|AbortError/i.test(String(err?.message || ''))
+          ) {
+            return null;
+          }
+          console.log(
+            `[pr-plus] lazy thread comments soft-fail: ${err?.message || err}`
+          );
+          return null;
+        }
+      },
+      /**
        * Patch in-memory detail + cache after a successful meta write so a
        * remount / soft refresh does not resurrect pre-write assignees/labels.
        */
-      onPatchDetail: (patch) => {
-        if (!patch || typeof patch !== 'object') return;
-        if (!current.open || !current.detail) return;
-        if (
-          owner &&
-          repo &&
-          number &&
-          (current.owner !== owner ||
-            current.repo !== repo ||
-            Number(current.number) !== Number(number))
-        ) {
-          return;
-        }
-        // Supersede in-flight soft-refreshes that started before this write so
-        // their responses cannot resurrect pre-write assignees/labels.
-        detailFetchGen += 1;
-        const next = {
-          ...current.detail,
-          ...patch,
-          avatarUrls: {
-            ...(current.detail.avatarUrls || {}),
-            ...(patch.avatarUrls && typeof patch.avatarUrls === 'object'
-              ? patch.avatarUrls
-              : {}),
-          },
-          // Meta lock is React-local only; never stick it in the SWR cache.
-          _metaSeq: 0,
-        };
-        // Explicit empty arrays / null milestone must win (spread alone is fine)
-        if (Object.prototype.hasOwnProperty.call(patch, 'assignees')) {
-          next.assignees = Array.isArray(patch.assignees) ? patch.assignees : [];
-        }
-        if (Object.prototype.hasOwnProperty.call(patch, 'labels')) {
-          next.labels = Array.isArray(patch.labels) ? patch.labels : [];
-        }
-        if (Object.prototype.hasOwnProperty.call(patch, 'requestedReviewers')) {
-          next.requestedReviewers = Array.isArray(patch.requestedReviewers)
-            ? patch.requestedReviewers
-            : [];
-        }
-        if (Object.prototype.hasOwnProperty.call(patch, 'milestone')) {
-          next.milestone = patch.milestone == null ? null : patch.milestone;
-        }
-        // Meta + comment/thread slices: write-through so post-comment cache is real
-        // (applyMeta alone dropped comments/reviewComments — stale reopen bug).
-        const S = detailStoreApi();
-        if (S) {
-          ensureDetailStore(next);
-          S.applyMeta(current.detailStore, S.pickMeta(next), {
-            trustEmpty: true,
-            source: 'patch',
-            sketch: false,
-          });
-          if (Object.prototype.hasOwnProperty.call(patch, 'comments')) {
-            S.applyComments(current.detailStore, next.comments, {
-              settled: true,
-              pageMeta: next.commentsMeta,
-              timelineEvents: next.timelineEvents,
-            });
-          }
-          if (
-            Object.prototype.hasOwnProperty.call(patch, 'reviewComments') ||
-            Object.prototype.hasOwnProperty.call(patch, 'reviewThreads') ||
-            Object.prototype.hasOwnProperty.call(patch, 'reviewThreadsMeta') ||
-            Object.prototype.hasOwnProperty.call(patch, 'reviewCommentsMeta')
-          ) {
-            S.applyThreadsFromMergedDetail(current.detailStore, next);
-          }
-          if (
-            Object.prototype.hasOwnProperty.call(patch, 'viewerPendingReview')
-          ) {
-            S.applyPendingReview(
-              current.detailStore,
-              next.viewerPendingReview ?? null
-            );
-          }
-          if (Object.prototype.hasOwnProperty.call(patch, 'reviews')) {
-            S.applyReviews(current.detailStore, next.reviews, {
-              settled: true,
-            });
-          }
-          publishDetailFromStore();
-        } else {
-          current.detail = next;
-        }
-        try {
-          const key = detailKey(current.owner, current.repo, current.number);
-          detailCache.set(key, current.detail);
-        } catch {
-          /* ignore */
-        }
-        // Lifecycle meta (merge/draft/close) must update open-list / stack / decorations
-        if (
-          Object.prototype.hasOwnProperty.call(patch, 'draft') ||
-          Object.prototype.hasOwnProperty.call(patch, 'merged') ||
-          Object.prototype.hasOwnProperty.call(patch, 'state')
-        ) {
-          try {
-            if (typeof applyOpenPullLifecycle === 'function') {
-              applyOpenPullLifecycle(
-                current.owner,
-                current.repo,
-                current.number,
-                {
-                  draft: patch.draft,
-                  merged: patch.merged,
-                  state: patch.state,
-                }
-              );
-            }
-          } catch {
-            /* ignore */
-          }
-        }
-        // List-visible fields (labels/title/comments/…) → single-row re-render
-        // under the overlay so PR→list close shows current shell truth.
-        const touchesListRow =
-          Object.prototype.hasOwnProperty.call(patch, 'labels') ||
-          Object.prototype.hasOwnProperty.call(patch, 'title') ||
-          Object.prototype.hasOwnProperty.call(patch, 'draft') ||
-          Object.prototype.hasOwnProperty.call(patch, 'assignees') ||
-          Object.prototype.hasOwnProperty.call(patch, 'comments') ||
-          Object.prototype.hasOwnProperty.call(patch, 'baseRef') ||
-          Object.prototype.hasOwnProperty.call(patch, 'headRef');
-        if (touchesListRow) {
-          try {
-            applyOpenDetailToListRow({
-              number: current.number,
-              detail: current.detail,
-              // Label meta writes may clear all chips — must force empty through
-              forceLabels: Object.prototype.hasOwnProperty.call(patch, 'labels'),
-            });
-          } catch {
-            /* ignore */
-          }
-        }
-        render();
-      },
-      /** Files for a single commit or commit range (GitHub compare). */
+      /**
+      /**
+       * Narrow write-through. Returns { status: 'applied'|'stale'|'failed', error? }.
+       * Never bumps detailFetchGen (openGen). Meta supersede keys bump metaRefreshGen only.
+       */
+      onPatchDetail: (patch) => runOnPatchDetail(patch, owner, repo, number),
       onFetchCompareFiles: async (base, head, options: any = {}) => {
         if (!owner || !repo) {
           throw new Error('No open repository for compare');
@@ -1263,6 +1474,7 @@
     // gen already bumped in abortOpenFetches; capture current for this session
     return {
       gen: detailFetchGen,
+      metaGenAtStart: metaRefreshGen,
       signal: openFetchAbort.signal,
     };
   }
@@ -1310,6 +1522,21 @@
     }
     if (Array.isArray(detail.assignees)) {
       fields.assignees = detail.assignees;
+    }
+    // Milestone write-through so list-sketch reopen paints the just-set board
+    // (pulls list API often omits milestone; modal patch is authoritative).
+    if (Object.prototype.hasOwnProperty.call(detail, 'milestone')) {
+      fields.milestone =
+        detail.milestone == null
+          ? null
+          : {
+              number:
+                detail.milestone.number != null
+                  ? Number(detail.milestone.number)
+                  : null,
+              title: String(detail.milestone.title || ''),
+              state: detail.milestone.state || '',
+            };
     }
     if (commentCount != null) {
       fields.listCommentCount = commentCount;
@@ -1416,6 +1643,36 @@
       // Empty labels/assignees must write through list cache on PR→list
       forceLabels: Array.isArray(current.detail?.labels),
     };
+    // Re-stamp memory/IDB with the just-closed detail so soft reopen after a
+    // meta write (milestone/assignees) does not fall back to a stale list sketch.
+    try {
+      if (
+        listResync.detail &&
+        listResync.owner &&
+        listResync.repo &&
+        Number(listResync.number) > 0
+      ) {
+        const key = detailKey(
+          listResync.owner,
+          listResync.repo,
+          listResync.number
+        );
+        detailCache.set(key, listResync.detail);
+        // Also force list-cache people-meta so the next list-sketch paint has
+        // the just-set milestone (pulls list API often omits it).
+        try {
+          applyOpenDetailToListRow({
+            number: listResync.number,
+            detail: listResync.detail,
+            forceLabels: Array.isArray(listResync.detail?.labels),
+          });
+        } catch {
+          /* ignore list restamp */
+        }
+      }
+    } catch {
+      /* ignore */
+    }
     clearPersistedOpenModal();
     // Keep native PR URL clean when embed closes (no prp_* strip needed if we never wrote)
     if (!wasEmbed) clearUriRoute();

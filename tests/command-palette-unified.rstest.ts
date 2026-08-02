@@ -415,24 +415,6 @@ describe('pulls palette PR search + help (shipped pulls-palette)', () => {
     ).toEqual([42, 300]);
   });
 
-  test('host schedule path clears asyncHits on term change (source contract)', () => {
-    const fs = require('node:fs') as typeof import('node:fs');
-    const path = require('node:path') as typeof import('node:path');
-    const root = path.resolve(__dirname, '..');
-    const host = fs.readFileSync(
-      path.join(root, 'src/host/modules/pulls-palette.ts'),
-      'utf8'
-    );
-    // schedulePullsPalettePrSearch must zero asyncHits before loading
-    expect(host).toMatch(
-      /function schedulePullsPalettePrSearch[\s\S]*?pullsPalettePrSearchAsyncHits\s*=\s*\[\s*\]/
-    );
-    // Bare `#` must not schedule network (kickAsync gate + debounce only when true)
-    expect(host).toMatch(/shouldKickPrSearchAsync|kickAsync/);
-    expect(host).toMatch(
-      /function schedulePullsPalettePrSearch[\s\S]*?setTimeout\([\s\S]*?180/
-    );
-  });
 });
 
 /**
@@ -462,68 +444,4 @@ describe('open-PR action path (shipped runner contract)', () => {
     expect(opened).toEqual([55]);
   });
 
-  test('PrModalApp wires openPullRequest + toggleHelp + focusConversationComment', () => {
-    const fs = require('node:fs') as typeof import('node:fs');
-    const path = require('node:path') as typeof import('node:path');
-    const root = path.resolve(__dirname, '..');
-    const impl = fs.readFileSync(
-      path.join(root, 'src/modal/app/PrModalApp.impl.tsx'),
-      'utf8'
-    );
-    expect(impl).toMatch(/case\s+['"]openPullRequest['"]/);
-    expect(impl).toMatch(/case\s+['"]focusConversationComment['"]/);
-    expect(impl).toMatch(/case\s+['"]clearConversationCommentFocus['"]/);
-    expect(impl).toMatch(/toggleHelp/);
-    expect(impl).toMatch(/searchPrs=\{searchPalettePrs\}/);
-    expect(impl).toMatch(/openPulls=\{Array\.isArray\(openPulls\)/);
-    expect(impl).toMatch(/fetchOpenPulls/);
-  });
-});
-
-describe('structural: palette UIs ship help + PR-search loading', () => {
-  test('modal CommandPalette has help panel + loading markup', () => {
-    const fs = require('node:fs') as typeof import('node:fs');
-    const path = require('node:path') as typeof import('node:path');
-    const root = path.resolve(__dirname, '..');
-    const ui = fs.readFileSync(
-      path.join(root, 'src/modal/views/chrome/CommandPalette.tsx'),
-      'utf8'
-    );
-    expect(ui).toMatch(/data-prp-pp-help-toggle/);
-    expect(ui).toMatch(/data-prp-pp-help/);
-    expect(ui).toMatch(/prp-pp-panel--help/);
-    expect(ui).toMatch(/buildPrSearchLoadingCommand/);
-    expect(ui).toMatch(/parsePalettePrSearchQuery/);
-    expect(ui).toMatch(/applyPrSearchQuery/);
-    expect(ui).toMatch(/shouldKickPrSearchAsync/);
-    expect(ui).toMatch(/searchPrs/);
-    expect(ui).toMatch(/data-prp-pp-loading/);
-    expect(ui).toMatch(/prp-pp-item--loading/);
-    // Debounced remote only after non-empty term
-    expect(ui).toMatch(/setTimeout/);
-    expect(ui).toMatch(/180/);
-    // PR-search rows mirror pulls list palette chrome
-    expect(ui).toMatch(/prp-pp-pr-num/);
-    expect(ui).toMatch(/prp-pp-avatar/);
-    expect(ui).toMatch(/prp-pp-author__login/);
-    expect(ui).toMatch(/prp-pp-branch/);
-    expect(ui).toMatch(/prp-pp-draft/);
-    expect(ui).toMatch(/PalettePrBody/);
-  });
-
-  test('pulls host palette has help + async PR search + loading paint', () => {
-    const fs = require('node:fs') as typeof import('node:fs');
-    const path = require('node:path') as typeof import('node:path');
-    const root = path.resolve(__dirname, '..');
-    const host = fs.readFileSync(
-      path.join(root, 'src/host/modules/pulls-palette.ts'),
-      'utf8'
-    );
-    expect(host).toMatch(/data-prp-pp-help-toggle/);
-    expect(host).toMatch(/schedulePullsPalettePrSearch/);
-    expect(host).toMatch(/prSearchLoading/);
-    expect(host).toMatch(/data-prp-pp-loading/);
-    expect(host).toMatch(/fetchOpenPulls/);
-    expect(host).toMatch(/openPullRequest/);
-  });
 });

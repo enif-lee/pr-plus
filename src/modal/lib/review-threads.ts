@@ -111,6 +111,306 @@ export function mapGraphqlReviewThreads(nodes) {
 }
 
 /**
+ * Whether a GraphQL `comments` connection is a complete load for the thread.
+ * Shell uses `comments(first:1){ totalCount nodes {…} }` as a root preview —
+ * when totalCount > nodes.length, replies are still deferred (commentsLoaded:false).
+ * Full by-id payloads omit totalCount or return all nodes → loaded.
+ *
+ * @param {any} commentsConn
+ * @returns {boolean}
+ */
+export function graphqlCommentsAreFullyLoaded(commentsConn: any): boolean {
+  if (!commentsConn || typeof commentsConn !== 'object') return false;
+  const nodes = Array.isArray(commentsConn.nodes) ? commentsConn.nodes : [];
+  const totalRaw = commentsConn.totalCount;
+  const total =
+    typeof totalRaw === 'number' && Number.isFinite(totalRaw) ? totalRaw : null;
+  if (nodes.length === 0) return total === 0;
+  if (total != null) return total <= nodes.length;
+  // No totalCount → treat as full (by-ids / legacy fixtures).
+  return true;
+}
+
+/**
+ * Map GraphQL PullRequestReviewThread nodes → { threads, comments }.
+ * Shell may include `comments(first:1)` root preview (description) without
+ * marking the thread fully loaded when more comments exist.
+ * Full by-id nodes include complete `comments` → commentsLoaded:true.
+ *
+ * @param {any[]} allNodes
+ * @returns {{ threads: any[], comments: any[] }}
+ */
+export function mapGraphqlReviewThreadNodes(allNodes: any) {
+  const threads = [];
+  const comments = [];
+  for (const t of Array.isArray(allNodes) ? allNodes : []) {
+    if (!t?.id) continue;
+    const commentsConnPresent =
+      t.comments != null && typeof t.comments === 'object';
+    const commentsLoaded =
+      commentsConnPresent && graphqlCommentsAreFullyLoaded(t.comments);
+    const commentIds = [];
+    if (commentsConnPresent) {
+      for (const node of t.comments?.nodes || []) {
+        if (!node) continue;
+        const dbId = node.databaseId ?? node.id;
+        if (dbId == null) continue;
+        const id =
+          typeof dbId === 'number' ? dbId : Number(dbId) || String(dbId);
+        commentIds.push(id);
+        comments.push({
+          id,
+          body: node.body || '',
+          path: node.path || t.path || '',
+          line: node.line ?? t.line ?? null,
+          side: t.diffSide || 'RIGHT',
+          author: node.author?.login || '',
+          avatarUrl: node.author?.avatarUrl || '',
+          createdAt: node.createdAt || null,
+          inReplyToId: node.replyTo?.databaseId ?? null,
+          threadNodeId: t.id,
+          resolved: Boolean(t.isResolved),
+          outdated: Boolean(node.outdated ?? t.isOutdated),
+          // Preview-only root when shell first:1 and more replies remain
+          _commentsPreview: commentsLoaded ? false : true,
+        });
+      }
+    }
+    threads.push({
+      threadNodeId: t.id,
+      resolved: Boolean(t.isResolved),
+      outdated: Boolean(t.isOutdated),
+      path: t.path || '',
+      line: t.line ?? t.originalLine ?? null,
+      startLine: t.startLine ?? t.originalStartLine ?? null,
+      side: t.diffSide || 'RIGHT',
+      commentIds,
+      commentsLoaded,
+      commentCount:
+        typeof t.comments?.totalCount === 'number'
+          ? t.comments.totalCount
+          : commentIds.length || null,
+    });
+  }
+  return { threads, comments };
+}
+
+/**
+ * Merge a by-ids full-comment page onto a shell threads page.
+ * Unresolved threads get commentsLoaded:true; deferred shells stay false.
+ *
+ * @param {any} shellPage
+ * @param {any} bulkPage
+ * @returns {any}
+ */
+export function mergeCommentsBulkIntoThreadsPage(shellPage: any, bulkPage: any) {
+  const shellThreads = Array.isArray(shellPage?.threads) ? shellPage.threads : [];
+  const bulkThreads = Array.isArray(bulkPage?.threads) ? bulkPage.threads : [];
+  const bulkComments = Array.isArray(bulkPage?.comments) ? bulkPage.comments : [];
+  const byId = new Map(
+    bulkThreads
+      .filter((t) => t?.threadNodeId)
+      .map((t) => [String(t.threadNodeId), t])
+  );
+  const threads = shellThreads.map((t) => {
+    const id = t?.threadNodeId ? String(t.threadNodeId) : '';
+    const full = id ? byId.get(id) : null;
+    if (!full) {
+      return {
+        ...t,
+        commentsLoaded: t.commentsLoaded === true,
+      };
+    }
+    return {
+      ...t,
+      ...full,
+      commentsLoaded: true,
+      commentIds: Array.isArray(full.commentIds)
+        ? full.commentIds
+        : t.commentIds || [],
+    };
+  });
+  const loadedIds = new Set(
+    threads.filter((t) => t.commentsLoaded).map((t) => String(t.threadNodeId))
+  );
+  const prevComments = Array.isArray(shellPage?.comments)
+    ? shellPage.comments
+    : [];
+  // Keep deferred first:1 root bodies; drop only empty placeholders and
+  // previews for threads that just received a full bulk.
+  const kept = retainShellCommentsAfterBulk(prevComments, loadedIds);
+  const seen = new Set(kept.map((c) => String(c.id)));
+  for (const c of bulkComments) {
+    if (!c || c.id == null) continue;
+    const k = String(c.id);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    kept.push(c);
+  }
+  // Deferred shells still need a row if no preview body exists.
+  return {
+    ...shellPage,
+    threads,
+    comments: ensureShellPlaceholderComments(threads, kept),
+    shellOnly: false,
+  };
+}
+
+/**
+ * After eager by-ids bulk, decide which shell-page comments to keep.
+ * - Fully loaded thread ids: drop placeholders + first:1 previews (bulk wins).
+ * - Deferred threads: keep root preview bodies (description); drop empty
+ *   shell placeholders only.
+ *
+ * @param {any[]} prevComments
+ * @param {Set<string>|Iterable<string>} loadedIds threads with commentsLoaded
+ * @returns {any[]}
+ */
+export function retainShellCommentsAfterBulk(
+  prevComments: any,
+  loadedIds: any
+): any[] {
+  const loaded =
+    loadedIds instanceof Set
+      ? loadedIds
+      : new Set(
+          [...(loadedIds || [])].map((id) => String(id || '').trim()).filter(Boolean)
+        );
+  const kept = [];
+  for (const c of Array.isArray(prevComments) ? prevComments : []) {
+    if (!c?.threadNodeId) continue;
+    const tid = String(c.threadNodeId);
+    if (loaded.has(tid)) {
+      if (c._commentsPending || c._commentsPreview) continue;
+      kept.push(c);
+      continue;
+    }
+    // Deferred: preserve description preview; drop empty shell-only rows.
+    if (c._commentsPending && !String(c.body || '').trim()) continue;
+    kept.push(c);
+  }
+  return kept;
+}
+
+/**
+ * Replace comments for hydrated threads **in place** (stable sibling order).
+ * Walking prevComments, the first time a loaded threadNodeId is seen, emit that
+ * thread's bulk comments at that position; drop old placeholders/previews for it.
+ * Bulk-only threads (not in prev) append at end.
+ *
+ * @param {any[]} prevComments
+ * @param {any[]} bulkComments
+ * @param {Iterable<string>|Set<string>} loadedThreadIds PRRT ids hydrated
+ * @returns {any[]}
+ */
+export function hydrateReviewCommentsInPlace(
+  prevComments: any,
+  bulkComments: any,
+  loadedThreadIds: any
+): any[] {
+  const loaded =
+    loadedThreadIds instanceof Set
+      ? loadedThreadIds
+      : new Set(
+          [...(loadedThreadIds || [])]
+            .map((id) => String(id || '').trim())
+            .filter(Boolean)
+        );
+  if (!loaded.size) {
+    return Array.isArray(prevComments) ? prevComments.slice() : [];
+  }
+  /** @type {Map<string, any[]>} */
+  const bulkByTid = new Map();
+  for (const c of Array.isArray(bulkComments) ? bulkComments : []) {
+    if (!c || c.id == null) continue;
+    const tid = String(c.threadNodeId || '').trim();
+    if (!tid || !loaded.has(tid)) continue;
+    if (!bulkByTid.has(tid)) bulkByTid.set(tid, []);
+    const row = c._commentsPreview ? { ...c, _commentsPreview: false } : c;
+    bulkByTid.get(tid).push(row);
+  }
+  const emitted = new Set();
+  const result = [];
+  for (const c of Array.isArray(prevComments) ? prevComments : []) {
+    if (!c) continue;
+    const tid = c.threadNodeId != null ? String(c.threadNodeId) : '';
+    if (tid && loaded.has(tid)) {
+      if (!emitted.has(tid)) {
+        emitted.add(tid);
+        const bulk = bulkByTid.get(tid) || [];
+        for (const bc of bulk) result.push(bc);
+      }
+      continue;
+    }
+    result.push(c);
+  }
+  // Bulk-only threads never present in prev (should be rare on expand)
+  for (const [tid, bulk] of bulkByTid) {
+    if (emitted.has(tid)) continue;
+    for (const bc of bulk) result.push(bc);
+  }
+  return result;
+}
+
+/**
+ * Apply an ids/refresh comments bulk onto detail-like shape (pure).
+ * Models host merge direction `ids` for lazy expand: marks commentsLoaded,
+ * merges comments **in place** (preserves sibling thread order), drops shell
+ * placeholders for loaded threads.
+ *
+ * @param {any} detail
+ * @param {any} bulkPage from by-ids full fetch
+ * @returns {any}
+ */
+export function mergeThreadCommentsBulkIntoDetail(detail: any, bulkPage: any) {
+  if (!detail || typeof detail !== 'object') return detail;
+  const prevTh = Array.isArray(detail.reviewThreads) ? detail.reviewThreads : [];
+  const prevRc = Array.isArray(detail.reviewComments)
+    ? detail.reviewComments
+    : [];
+  const bulkThreads = Array.isArray(bulkPage?.threads) ? bulkPage.threads : [];
+  const bulkComments = Array.isArray(bulkPage?.comments) ? bulkPage.comments : [];
+  const byId = new Map(
+    bulkThreads
+      .filter((t) => t?.threadNodeId)
+      .map((t) => [String(t.threadNodeId), t])
+  );
+  // Preserve reviewThreads array order from prev
+  const reviewThreads = prevTh.map((t) => {
+    const id = t?.threadNodeId ? String(t.threadNodeId) : '';
+    const full = id ? byId.get(id) : null;
+    if (!full) return t;
+    return {
+      ...t,
+      ...full,
+      commentsLoaded: true,
+      commentIds: Array.isArray(full.commentIds)
+        ? full.commentIds
+        : t.commentIds || [],
+    };
+  });
+  // Also append bulk-only threads
+  for (const t of bulkThreads) {
+    const id = t?.threadNodeId ? String(t.threadNodeId) : '';
+    if (!id || prevTh.some((p) => String(p?.threadNodeId) === id)) continue;
+    reviewThreads.push({ ...t, commentsLoaded: true });
+  }
+  const loadedIds = new Set(
+    bulkThreads.map((t) => String(t?.threadNodeId || '')).filter(Boolean)
+  );
+  const reviewComments = hydrateReviewCommentsInPlace(
+    prevRc,
+    bulkComments,
+    loadedIds
+  );
+  return {
+    ...detail,
+    reviewThreads,
+    reviewComments,
+  };
+}
+
+/**
  * Count review threads (root comments) per file path.
  * @param {Array} comments
  * @returns {Map<string, number>}
@@ -373,19 +673,28 @@ export function isPathViewed(viewed, path) {
   return false;
 }
 
-/** GraphQL reviewThreads connection max page size. */
+/**
+ * Hard cap for GraphQL connection `first`/`last` (GitHub max 100).
+ * Used for by-id chunking only — normal pages use REVIEW_THREADS_PAGE_SIZE.
+ */
 export const REVIEW_THREADS_API_MAX = 100;
 
 /**
- * Warm-cache revalidate probe size for `last:N` newest window.
- * Small enough to cut nested comments/diffHunk cost; large enough to
- * detect new head threads without always escalating.
+ * Default GraphQL shell / REST window size.
+ * Shell queries (no nested comments) measure rateLimit.cost=1 for last:15 and
+ * last:100 on GitHub; prefer 100 so one window covers typical PRs with PRRT ids.
  */
-export const REVIEW_THREADS_WARM_PROBE_SIZE = 10;
+export const REVIEW_THREADS_PAGE_SIZE = 100;
+
+/**
+ * Warm-cache revalidate probe size (≤ PAGE_SIZE).
+ * Same as PAGE_SIZE — shell cost is flat at 1 for this shape.
+ */
+export const REVIEW_THREADS_WARM_PROBE_SIZE = 100;
 
 /**
  * True when detail already holds durable review-thread data worth probing
- * instead of cold last:100.
+ * instead of a cold full window.
  * @param {any} detail
  * @returns {boolean}
  */
@@ -409,14 +718,565 @@ export function hasUsableReviewThreadsCache(detail) {
 }
 
 /**
- * Pick GraphQL pageSize for newest reviewThreads fetch.
+ * Pick pageSize for newest reviewThreads / REST comments window.
+ * Always PAGE_SIZE (100) — shell cost is flat; one window covers typical PRs.
  * @param {{ warmCache?: boolean, forceFull?: boolean }} [opts]
  * @returns {number}
  */
 export function pickNewestThreadsPageSize(opts: any = {}) {
-  if (opts?.forceFull) return REVIEW_THREADS_API_MAX;
-  if (opts?.warmCache) return REVIEW_THREADS_WARM_PROBE_SIZE;
-  return REVIEW_THREADS_API_MAX;
+  void opts;
+  return REVIEW_THREADS_PAGE_SIZE;
+}
+
+/**
+ * Whether REST empty (or PR.review_comments === 0) should skip GraphQL escalate.
+ * Trust REST: no free last:100 when there are no review comments.
+ *
+ * @param {{
+ *   reviewCommentsCount?: number | null,
+ *   restCommentCount?: number | null,
+ *   forceGraphql?: boolean,
+ *   forceFull?: boolean,
+ * }} [opts]
+ * @returns {boolean} true → do not GraphQL escalate
+ */
+export function shouldTrustRestEmptyReviewThreads(opts: any = {}) {
+  if (opts?.forceGraphql || opts?.forceFull) return false;
+  const prCount = opts?.reviewCommentsCount;
+  if (prCount != null && Number.isFinite(Number(prCount)) && Number(prCount) <= 0) {
+    return true;
+  }
+  const restN = opts?.restCommentCount;
+  if (restN != null && Number.isFinite(Number(restN)) && Number(restN) <= 0) {
+    // Empty list page with known zero or unknown PR count → trust empty
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Choose transport for a review-threads page fetch.
+ *
+ * **GraphQL-first** (shell window + PRRT_… ids). Cheap shell queries made
+ * REST-first obsolete; always manage native thread node ids for resolve /
+ * by-id comments. REST only when explicitly requested (`preferRest === true`).
+ *
+ * @param {{
+ *   direction?: string,
+ *   cursor?: string | null,
+ *   preferRest?: boolean | null,
+ *   forceGraphql?: boolean,
+ *   forceFull?: boolean,
+ * }} [opts]
+ * @returns {'rest' | 'graphql'}
+ */
+export function chooseReviewThreadsTransport(opts: any = {}) {
+  // Explicit REST opt-in only (legacy / tests). Default is GraphQL.
+  if (opts?.preferRest === true) return 'rest';
+  if (opts?.forceGraphql || opts?.forceFull) return 'graphql';
+  if (opts?.preferRest === false) return 'graphql';
+  // newest/oldest/older/newer/cursor → GraphQL shell (PRRT always)
+  return 'graphql';
+}
+
+/**
+ * True for native GraphQL PullRequestReviewThread global ids (PRRT_…).
+ * Synthetic REST ids (`rest-thread-*`) and comment node ids (PRRC_…) are false.
+ */
+export function isGraphqlReviewThreadNodeId(id: any): boolean {
+  return /^PRRT_/i.test(String(id || '').trim());
+}
+
+/**
+ * Whether a thread should load full comment bodies eagerly (GraphQL bulk).
+ * Default UI: unresolved threads start expanded → need bodies now.
+ * Resolved (default collapsed) → defer until expand.
+ *
+ * @param {{
+ *   threadNodeId?: string,
+ *   resolved?: boolean,
+ *   commentsLoaded?: boolean,
+ * }} thread
+ * @param {{
+ *   forceAll?: boolean,
+ *   expandedThreadIds?: Iterable<string> | Set<string> | string[] | null,
+ * }} [opts]
+ * @returns {boolean}
+ */
+export function threadNeedsEagerComments(thread: any, opts: any = {}): boolean {
+  if (!thread || !isGraphqlReviewThreadNodeId(thread.threadNodeId)) return false;
+  if (opts?.forceAll) return true;
+  const tid = String(thread.threadNodeId);
+  const expanded = opts?.expandedThreadIds;
+  if (expanded != null) {
+    if (expanded instanceof Set) {
+      if (expanded.has(tid)) return true;
+    } else if (Array.isArray(expanded)) {
+      if (expanded.some((id) => String(id) === tid)) return true;
+    } else if (typeof (expanded as any)[Symbol.iterator] === 'function') {
+      for (const id of expanded as Iterable<string>) {
+        if (String(id) === tid) return true;
+      }
+    }
+  }
+  // Unresolved → default expanded in Conversation/Diff
+  return !Boolean(thread.resolved);
+}
+
+/**
+ * Select PRRT ids that should receive full comments after a shell window.
+ * @param {any[]} threads
+ * @param {{ forceAll?: boolean, expandedThreadIds?: any }} [opts]
+ * @returns {string[]}
+ */
+export function selectThreadIdsForEagerComments(
+  threads: any,
+  opts: any = {}
+): string[] {
+  const list = Array.isArray(threads) ? threads : [];
+  const out = [];
+  const seen = new Set();
+  for (const t of list) {
+    if (!threadNeedsEagerComments(t, opts)) continue;
+    const id = String(t.threadNodeId || '').trim();
+    if (!id || seen.has(id)) continue;
+    // Skip if already marked loaded
+    if (t.commentsLoaded === true) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
+
+/**
+ * True when full comment bodies for this thread are already present.
+ * REST threads and by-id full fetches set commentsLoaded; legacy rows with
+ * non-empty commentIds count as loaded.
+ *
+ * @param {any} thread
+ * @param {any[]|null} [comments] detail.reviewComments / page.comments
+ * @returns {boolean}
+ */
+export function threadCommentsAreLoaded(thread: any, comments: any = null): boolean {
+  if (!thread) return false;
+  if (thread.commentsLoaded === true) return true;
+  if (thread.commentsLoaded === false) return false;
+  if (Array.isArray(thread.commentIds) && thread.commentIds.length > 0) {
+    // Legacy / REST: commentIds present without explicit flag
+    if (!isGraphqlReviewThreadNodeId(thread.threadNodeId)) return true;
+  }
+  const tid = String(thread.threadNodeId || '');
+  if (!tid || !Array.isArray(comments)) return false;
+  let n = 0;
+  for (const c of comments) {
+    if (!c || String(c.threadNodeId || '') !== tid) continue;
+    if (c._commentsPending) continue;
+    n += 1;
+  }
+  return n > 0;
+}
+
+/**
+ * PRRT ids that still need a comments bulk (eager set or explicit ids).
+ *
+ * @param {any[]} threads
+ * @param {any[]|null} [comments]
+ * @param {{
+ *   forceAll?: boolean,
+ *   expandedThreadIds?: any,
+ *   onlyThreadIds?: Iterable<string> | string[] | null,
+ * }} [opts]
+ * @returns {string[]}
+ */
+export function selectThreadIdsMissingComments(
+  threads: any,
+  comments: any = null,
+  opts: any = {}
+): string[] {
+  const list = Array.isArray(threads) ? threads : [];
+  const only = opts?.onlyThreadIds
+    ? new Set(
+        [...opts.onlyThreadIds].map((id) => String(id || '').trim()).filter(Boolean)
+      )
+    : null;
+  const out = [];
+  const seen = new Set();
+  for (const t of list) {
+    const id = String(t?.threadNodeId || '').trim();
+    if (!isGraphqlReviewThreadNodeId(id)) continue;
+    if (only && !only.has(id)) continue;
+    if (only) {
+      // explicit expand / by-id request: load if missing
+      if (threadCommentsAreLoaded(t, comments)) continue;
+    } else if (!threadNeedsEagerComments(t, opts)) {
+      continue;
+    } else if (threadCommentsAreLoaded(t, comments)) {
+      continue;
+    }
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
+
+/**
+ * Placeholder comment so Diff/Conversation can show a collapsed shell thread
+ * before full comments arrive. Stripped when real comments merge in.
+ *
+ * @param {any} thread
+ * @returns {object|null}
+ */
+export function buildShellThreadPlaceholderComment(thread: any) {
+  if (!thread || !isGraphqlReviewThreadNodeId(thread.threadNodeId)) return null;
+  const tid = String(thread.threadNodeId);
+  return {
+    id: `shell:${tid}`,
+    author: '',
+    avatarUrl: '',
+    body: '',
+    path: thread.path || '',
+    line: thread.line ?? null,
+    startLine: thread.startLine ?? null,
+    side: thread.side || 'RIGHT',
+    threadNodeId: tid,
+    resolved: Boolean(thread.resolved),
+    outdated: Boolean(thread.outdated),
+    pending: false,
+    _commentsPending: true,
+    commentsLoaded: false,
+  };
+}
+
+/**
+ * Ensure every deferred GraphQL shell thread has a placeholder row in comments.
+ * Without this, Diff (rows from reviewComments) and Conversation (timeline from
+ * reviewComments) hide resolved threads after shell-only fetch.
+ *
+ * @param {any[]} threads
+ * @param {any[]|null|undefined} comments
+ * @returns {any[]}
+ */
+export function ensureShellPlaceholderComments(
+  threads: any,
+  comments: any = null
+): any[] {
+  const list = Array.isArray(comments) ? comments.slice() : [];
+  const covered = new Set();
+  for (const c of list) {
+    if (!c?.threadNodeId) continue;
+    covered.add(String(c.threadNodeId));
+  }
+  for (const t of Array.isArray(threads) ? threads : []) {
+    const tid = t?.threadNodeId ? String(t.threadNodeId) : '';
+    if (!isGraphqlReviewThreadNodeId(tid)) continue;
+    if (covered.has(tid)) continue;
+    const ph = buildShellThreadPlaceholderComment(t);
+    if (!ph) continue;
+    list.push(ph);
+    covered.add(tid);
+  }
+  return list;
+}
+
+/**
+ * Merge comment-based groups with shell-only reviewThreads (no bodies yet).
+ * @param {any[]} commentGroups from groupReviewThreads
+ * @param {any[]} reviewThreads detail.reviewThreads
+ * @returns {any[]}
+ */
+export function mergeReviewThreadGroupsWithShells(
+  commentGroups: any,
+  reviewThreads: any
+): any[] {
+  const groups = Array.isArray(commentGroups) ? commentGroups.slice() : [];
+  const have = new Set();
+  for (const g of groups) {
+    const tid = g?.threadNodeId || g?.root?.threadNodeId || null;
+    if (tid) have.add(String(tid));
+    // also map by root id
+  }
+  for (const t of Array.isArray(reviewThreads) ? reviewThreads : []) {
+    const tid = t?.threadNodeId ? String(t.threadNodeId) : '';
+    if (!tid || have.has(tid)) continue;
+    if (threadCommentsAreLoaded(t, null) && (t.commentIds || []).length) {
+      continue;
+    }
+    // Shell-only: inject group for collapsed header / expand target
+    have.add(tid);
+    groups.push({
+      id: `shell:${tid}`,
+      path: t.path || '',
+      line: t.line ?? null,
+      side: t.side || 'RIGHT',
+      root: {
+        id: `shell:${tid}`,
+        body: '',
+        path: t.path || '',
+        line: t.line ?? null,
+        side: t.side || 'RIGHT',
+        threadNodeId: tid,
+        resolved: Boolean(t.resolved),
+        outdated: Boolean(t.outdated),
+        _commentsPending: true,
+      },
+      replies: [],
+      resolved: Boolean(t.resolved),
+      outdated: Boolean(t.outdated),
+      pending: false,
+      threadNodeId: tid,
+      count: 0,
+      commentsPending: true,
+      commentsLoaded: false,
+    });
+  }
+  return groups;
+}
+
+/**
+ * Whether to skip GraphQL nodes(ids:) unresolved bulk after newest page.
+ * GraphQL-first opens already return PRRT_ + eager comments for unresolved;
+ * skip only when explicitly told (legacy host REST paint). Default: do not skip.
+ *
+ * @param {{
+ *   newestSource?: string | null,
+ *   hostRestFallback?: boolean,
+ *   forceFull?: boolean,
+ *   mode?: string | null,
+ * }} [opts]
+ * @returns {boolean} true → skip by-id bulk
+ */
+export function shouldSkipUnresolvedByIdsBulk(opts: any = {}): boolean {
+  if (opts?.forceFull || opts?.mode === 'full-threads') return false;
+  // Legacy: host painted REST synthetic threads only
+  if (opts?.hostRestFallback) return true;
+  const src = String(opts?.newestSource || '').toLowerCase();
+  // GraphQL newest already has PRRT — still allow by-id for missing unresolved
+  // outside the window; do not skip solely because source is graphql.
+  return src === 'rest';
+}
+
+/**
+ * Filter unresolved ids for GraphQL by-id bulk: only PRRT_, not already in the
+ * newest page set, not known remote-missing this open.
+ *
+ * @param {Iterable<string>|string[]|null|undefined} unresolvedIds
+ * @param {Iterable<string>|Set<string>|null|undefined} updatedIdSet
+ * @param {Iterable<string>|Set<string>|null|undefined} knownMissing
+ * @returns {string[]}
+ */
+export function remainingUnresolvedForByIdsBulk(
+  unresolvedIds: any,
+  updatedIdSet: any = null,
+  knownMissing: any = null
+): string[] {
+  const updated =
+    updatedIdSet instanceof Set
+      ? updatedIdSet
+      : new Set(
+          [...(updatedIdSet || [])].map((id) => String(id || '')).filter(Boolean)
+        );
+  const missing =
+    knownMissing instanceof Set
+      ? knownMissing
+      : new Set(
+          [...(knownMissing || [])].map((id) => String(id || '')).filter(Boolean)
+        );
+  const out = [];
+  const seen = new Set();
+  for (const raw of unresolvedIds || []) {
+    const id = String(raw || '').trim();
+    if (!id || seen.has(id)) continue;
+    if (!isGraphqlReviewThreadNodeId(id)) continue;
+    if (updated.has(id) || missing.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
+
+/**
+ * From a successful GraphQL `nodes(ids:)` response, which requested ids are
+ * confirmed remote-missing (null slot)? Length mismatch → no confirmed missing
+ * for unmatched indices (unknown — do not drop).
+ *
+ * @param {string[]} chunkIds
+ * @param {any[]|null|undefined} rawNodes
+ * @returns {string[]}
+ */
+export function confirmedMissingThreadIdsFromNodes(
+  chunkIds: any,
+  rawNodes: any
+): string[] {
+  const ids = Array.isArray(chunkIds) ? chunkIds.map((id) => String(id)) : [];
+  if (!Array.isArray(rawNodes) || !ids.length) return [];
+  const missing = [];
+  const n = Math.min(ids.length, rawNodes.length);
+  for (let i = 0; i < n; i++) {
+    if (rawNodes[i] == null) missing.push(ids[i]);
+  }
+  return missing;
+}
+
+/**
+ * Thread ids safe to drop after a by-id / refresh merge.
+ *
+ * **Only** `page.missingThreadIds` (confirmed remote-null from a successful
+ * GraphQL nodes[] response). Never derive `requestedThreadIds − returned`
+ * — failed/unknown by-id chunks leave ids out of missingThreadIds and must
+ * not wipe REST-painted comments.
+ *
+ * @param {object|null|undefined} page
+ * @returns {string[]}
+ */
+export function resolveMissingThreadIdsForDrop(page: any): string[] {
+  if (!page || typeof page !== 'object') return [];
+  if (!Array.isArray(page.missingThreadIds)) return [];
+  return [
+    ...new Set(
+      page.missingThreadIds
+        .map((id: any) => String(id || '').trim())
+        .filter(Boolean)
+    ),
+  ];
+}
+
+/**
+ * Pure drop of review threads + comments by threadNodeId (merge refresh path).
+ * Does not invent missing ids — caller must pass resolveMissingThreadIdsForDrop.
+ *
+ * @param {object|null} detail
+ * @param {Iterable<string>|string[]|null|undefined} threadNodeIds
+ * @returns {object|null}
+ */
+export function dropReviewThreadsByNodeIds(detail: any, threadNodeIds: any) {
+  if (!detail) return detail;
+  const drop = new Set(
+    [...(threadNodeIds || [])]
+      .map((id) => String(id || '').trim())
+      .filter(Boolean)
+  );
+  if (!drop.size) return detail;
+  const prevRc = Array.isArray(detail.reviewComments)
+    ? detail.reviewComments
+    : [];
+  const prevTh = Array.isArray(detail.reviewThreads)
+    ? detail.reviewThreads
+    : [];
+  return {
+    ...detail,
+    reviewComments: prevRc.filter((c) => {
+      if (!c) return false;
+      const tid = c.threadNodeId ? String(c.threadNodeId) : '';
+      return !(tid && drop.has(tid));
+    }),
+    reviewThreads: prevTh.filter(
+      (t) => !t?.threadNodeId || !drop.has(String(t.threadNodeId))
+    ),
+  };
+}
+
+/**
+ * Merge refresh/ids page drop gate: apply only confirmed missingThreadIds.
+ * Models mergeReviewThreadsPageIntoDetail drop step for unit tests.
+ *
+ * @param {object|null} detail
+ * @param {object|null|undefined} page by-id bulk page shape
+ * @returns {object|null}
+ */
+export function applyByIdsRefreshDrop(detail: any, page: any) {
+  const missing = resolveMissingThreadIdsForDrop(page);
+  if (!missing.length) return detail;
+  return dropReviewThreadsByNodeIds(detail, missing);
+}
+
+/**
+ * Pure REST → threads page shape (Diff/conversation group from comments).
+ * Synthetic threadNodeId is `rest-thread-{rootId}` unless REST row already
+ * carries a GraphQL node id.
+ *
+ * @param {any[]} items mapped REST review comments
+ * @param {string} [direction]
+ * @returns {object}
+ */
+export function buildRestReviewThreadsPageFromComments(
+  items: any[],
+  direction = 'newest'
+) {
+  const list = Array.isArray(items) ? items : [];
+  const empty = {
+    threads: [],
+    comments: [],
+    hasMore: false,
+    endCursor: null,
+    startCursor: null,
+    hasNextPage: false,
+    hasPreviousPage: false,
+    totalCount: 0,
+    pageCount: list.length ? 1 : 0,
+    direction: direction || 'newest',
+    window: 'newest',
+    source: 'rest' as const,
+  };
+  if (!list.length) return empty;
+  const byId = new Map();
+  for (const c of list) {
+    if (c && c.id != null) byId.set(String(c.id), c);
+  }
+  const roots = list.filter((c) => {
+    if (!c || c.id == null) return false;
+    const parent = c.inReplyToId ?? c.in_reply_to_id ?? null;
+    return parent == null || !byId.has(String(parent));
+  });
+  const threads = roots.map((r) => {
+    const replyIds = list
+      .filter(
+        (c) =>
+          c &&
+          String(c.inReplyToId ?? c.in_reply_to_id ?? '') === String(r.id)
+      )
+      .map((c) => c.id);
+    // Always synthetic REST id — never promote comment PRRC_ to "thread" id
+    // (warm revalidate must not treat REST paint as GraphQL PRRT coverage).
+    const threadNodeId =
+      r.threadNodeId && /^PRRT_/i.test(String(r.threadNodeId))
+        ? String(r.threadNodeId)
+        : `rest-thread-${r.id}`;
+    const commentIds = [r.id, ...replyIds];
+    for (const cid of commentIds) {
+      const row = byId.get(String(cid));
+      if (row) {
+        row.threadNodeId = threadNodeId;
+        row.loadWindow = 'newest';
+      }
+    }
+    return {
+      threadNodeId,
+      resolved: Boolean(r.resolved ?? r.isResolved),
+      outdated: Boolean(r.outdated),
+      path: r.path || '',
+      line: r.line ?? r.originalLine ?? r.original_line ?? null,
+      startLine: r.startLine ?? r.start_line ?? null,
+      side: r.side || 'RIGHT',
+      commentIds,
+      commentsLoaded: true,
+      loadWindow: 'newest',
+    };
+  });
+  return {
+    threads,
+    comments: list,
+    totalCount: list.length,
+    startCursor: null,
+    endCursor: null,
+    hasNextPage: false,
+    hasPreviousPage: false,
+    hasMore: false,
+    pageCount: 1,
+    direction: direction || 'newest',
+    window: 'newest',
+    source: 'rest' as const,
+  };
 }
 
 /**

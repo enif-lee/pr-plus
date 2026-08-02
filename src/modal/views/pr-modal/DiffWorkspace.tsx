@@ -126,6 +126,8 @@ export type DiffWorkspaceProps = {
   applyActionRef: any;
   isDiffCommentCollapsed: any;
   onToggleThreadCollapse: any;
+  /** Lazy by-ids comments loading (PRRT / comment id) */
+  isThreadCommentsLoading?: ((id: any) => boolean) | null;
   commentHeightOpts: any;
   /** Live measure metrics from VirtualDiff → App nav offsets */
   onVirtualMetricsChange?: ((m: any) => void) | null;
@@ -255,6 +257,7 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
     applyActionRef,
     isDiffCommentCollapsed,
     onToggleThreadCollapse,
+    isThreadCommentsLoading = null,
     commentHeightOpts,
     onVirtualMetricsChange = null,
     showSelectionComposer,
@@ -496,6 +499,7 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
           mentionCandidates={mentionCandidates}
           isThreadCollapsed={isDiffCommentCollapsed}
           onToggleThreadCollapse={onToggleThreadCollapse}
+          isThreadCommentsLoading={isThreadCommentsLoading}
           commentHeightOpts={commentHeightOpts}
           onVirtualMetricsChange={onVirtualMetricsChange}
           selectionIsland={

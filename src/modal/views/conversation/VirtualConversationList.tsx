@@ -48,7 +48,10 @@ function VirtualConversationListImpl(props: any) {
     scrollToAnchor = null,
     /** Report review-thread node ids currently in the virtual viewport */
     onVisibleThreadNodeIds = null,
+    /** Opaque key so tip-filter updates re-render memoized list */
+    timelineVisibilityKey = null,
   } = props;
+  void timelineVisibilityKey;
 
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const [scrollTop, setScrollTop] = useState(0);

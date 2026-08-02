@@ -142,6 +142,12 @@ function mapApiPullRequest(pr: any) {
     additions: pr.additions ?? null,
     deletions: pr.deletions ?? null,
     changedFiles: pr.changed_files ?? null,
+    // Official PR review-comment count (not thread count). Used to skip GraphQL
+    // escalate when 0 and to size REST windows.
+    reviewCommentsCount:
+      pr.review_comments != null && Number.isFinite(Number(pr.review_comments))
+        ? Number(pr.review_comments)
+        : null,
     nodeId: pr.node_id || null,
   };
 }
@@ -450,8 +456,21 @@ function decodeBase64Utf8(b64: any) {
   }
 }
 
-async function apiJson(url: any, fetchImpl: any, token: any) {
-  const res = await fetchImpl(url, { headers: buildApiHeaders(token) });
+async function apiJson(
+  url: any,
+  fetchImpl: any,
+  token: any,
+  opts: { headers?: Record<string, string>; cache?: RequestCache } = {}
+) {
+  const headers = {
+    ...buildApiHeaders(token),
+    ...(opts.headers && typeof opts.headers === 'object' ? opts.headers : {}),
+  };
+  const init: RequestInit = { headers };
+  // Prefer no-store for identity meta (milestone/title) so hard reopen after a
+  // modal write cannot paint a browser-cached pre-write pull/issue body.
+  if (opts.cache) init.cache = opts.cache;
+  const res = await fetchImpl(url, init);
   if (!res.ok) {
     const err = new Error(`GitHub API ${res.status}: ${res.statusText}`);
     err.status = res.status;
@@ -490,6 +509,23 @@ function parseLinkNextUrl(linkHeader: any) {
   for (const p of parts) {
     const m = p.match(/<([^>]+)>\s*;\s*rel="?next"?/i);
     if (m) return m[1].trim();
+  }
+  return null;
+}
+
+/** Page number from Link header rel (next|last|prev|first), or null. */
+function parseLinkRelPage(linkHeader: any, rel: string) {
+  const raw = String(linkHeader || '');
+  if (!raw || !rel) return null;
+  const re = new RegExp(`rel="?${rel}"?`, 'i');
+  const parts = raw.split(',');
+  for (const part of parts) {
+    if (!re.test(part)) continue;
+    const m = part.match(/[?&]page=(\d+)/i);
+    if (m) {
+      const n = Number(m[1]);
+      return Number.isFinite(n) && n > 0 ? n : null;
+    }
   }
   return null;
 }
@@ -1045,25 +1081,68 @@ async function fetchPrTimelineEvents(owner: any, repo: any, number: any, fetchIm
 
   const out = [];
   try {
-    let page = 1;
     const perPage = 100;
     // Cap pages so a very noisy issue cannot hang open (1000 events max).
+    // Events API is ascending (oldest first). Prefer the *newest* pages so
+    // labeled/milestoned writes land in conversation after meta refresh.
     const maxPages = 10;
-    while (page <= maxPages) {
-      const url = githubRestUrl(
+    const pageUrl = (page: number) =>
+      githubRestUrl(
         `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/issues/${n}/events?per_page=${perPage}&page=${page}`,
         ctx
       );
-      const { data, link } = await apiJsonWithLink(url, fetchImpl, token);
-      const batch = Array.isArray(data) ? data : [];
+
+    const first = await apiJsonWithLink(pageUrl(1), fetchImpl, token);
+    const firstBatch = Array.isArray(first.data) ? first.data : [];
+    const lastPage =
+      parseLinkRelPage(first.link, 'last') ||
+      (firstBatch.length < perPage ? 1 : null);
+
+    // When Link has no last but page 1 is full, walk forward (legacy path).
+    if (lastPage == null) {
+      for (const raw of firstBatch) {
+        const mapped = mapEvent(raw);
+        if (mapped) out.push(mapped);
+      }
+      let page = 2;
+      let link = first.link;
+      while (page <= maxPages) {
+        const next = parseLinkNextUrl(link);
+        if (!next) break;
+        const { data, link: nextLink } = await apiJsonWithLink(
+          pageUrl(page),
+          fetchImpl,
+          token
+        );
+        link = nextLink;
+        const batch = Array.isArray(data) ? data : [];
+        for (const raw of batch) {
+          const mapped = mapEvent(raw);
+          if (mapped) out.push(mapped);
+        }
+        if (batch.length < perPage) break;
+        page += 1;
+      }
+      return out;
+    }
+
+    const endPage = Math.max(1, Number(lastPage) || 1);
+    const startPage = Math.max(1, endPage - maxPages + 1);
+    // Reuse page-1 body when the newest window still includes it.
+    const cachedPage1 = startPage === 1 ? firstBatch : null;
+
+    for (let page = startPage; page <= endPage; page++) {
+      let batch: any[];
+      if (page === 1 && cachedPage1) {
+        batch = cachedPage1;
+      } else {
+        const { data } = await apiJsonWithLink(pageUrl(page), fetchImpl, token);
+        batch = Array.isArray(data) ? data : [];
+      }
       for (const raw of batch) {
         const mapped = mapEvent(raw);
         if (mapped) out.push(mapped);
       }
-      if (batch.length < perPage) break;
-      const next = parseLinkNextUrl(link);
-      if (!next) break;
-      page += 1;
     }
     return out;
   } catch (err) {
@@ -1256,7 +1335,8 @@ async function fetchReactableReactionGroups(
     0,
     Math.min(20, Number(opts?.reactorsFirst) || 0)
   );
-  // GitHub connections need first/last; omit nodes on the hot path (count only).
+  // Count-only: reactors { totalCount } (no first) is cost-flat; first:N only when
+  // loading who-reacted logins for a small set of comments.
   const reactorsSel =
     reactorsFirst > 0
       ? `reactors(first:${reactorsFirst}){
@@ -1266,7 +1346,7 @@ async function fetchReactableReactionGroups(
               ... on Bot { login }
             }
           }`
-      : `reactors(first:1){ totalCount }`;
+      : `reactors { totalCount }`;
   const query = `query($ids:[ID!]!){
     nodes(ids:$ids){
       ... on Reactable {
@@ -2025,34 +2105,338 @@ async function fetchIssueOrPrSummaries(owner: any, repo: any, numbers: any, fetc
   return out;
 }
 
+// ── GraphQL primary-point cost observation (e2e / debugging) ───────────
+const GQL_COST_LOG_MAX = 400;
+/** @type {Array<object>} */
+const gqlCostLogEntries: any[] = [];
+let gqlCostHeaderUsedPrev: number | null = null;
+
+function graphqlCostPure() {
+  try {
+    return typeof globalThis !== 'undefined'
+      ? (globalThis as any).PRModalGraphqlCostLog || null
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function injectRateLimitCostFieldLocal(query: any): string {
+  const pure = graphqlCostPure();
+  if (typeof pure?.injectRateLimitCostField === 'function') {
+    return pure.injectRateLimitCostField(query);
+  }
+  const q = String(query || '');
+  if (!q.trim() || /rateLimit\s*\{/.test(q)) return q;
+  // Query-only field — mutations (resolveReviewThread, …) reject rateLimit
+  if (/\bmutation\b/i.test(q)) return q;
+  const trimmed = q.replace(/\s+$/, '');
+  const lastBrace = trimmed.lastIndexOf('}');
+  if (lastBrace < 0) return q;
+  return (
+    trimmed.slice(0, lastBrace) +
+    '\n  rateLimit { cost remaining used limit resetAt }\n' +
+    trimmed.slice(lastBrace)
+  );
+}
+
+function labelGraphqlOperationLocal(query: any, variables: any = null): string {
+  const pure = graphqlCostPure();
+  if (typeof pure?.labelGraphqlOperation === 'function') {
+    return pure.labelGraphqlOperation(query, variables);
+  }
+  const q = String(query || '');
+  const named = q.match(/\b(query|mutation)\s+([A-Za-z_][A-Za-z0-9_]*)/);
+  if (named?.[2]) return named[2];
+  if (/reviewThreads/.test(q)) return 'reviewThreads';
+  return /\bmutation\b/.test(q) ? 'mutation' : 'query';
+}
+
+function sanitizeGraphqlVariablesLocal(variables: any) {
+  const pure = graphqlCostPure();
+  if (typeof pure?.sanitizeGraphqlVariables === 'function') {
+    return pure.sanitizeGraphqlVariables(variables);
+  }
+  return {};
+}
+
+function summarizeGraphqlCostLogLocal(entries: any = gqlCostLogEntries) {
+  const pure = graphqlCostPure();
+  if (typeof pure?.summarizeGraphqlCostEntries === 'function') {
+    return pure.summarizeGraphqlCostEntries(entries);
+  }
+  // Inline when pure IIFE not loaded in SW
+  const list = Array.isArray(entries) ? entries : [];
+  const map = new Map();
+  let totalCost = 0;
+  let unknownCostCalls = 0;
+  for (const e of list) {
+    const op = String(e?.op || 'unknown');
+    const cost =
+      e?.cost != null && Number.isFinite(Number(e.cost)) ? Number(e.cost) : null;
+    const ms =
+      e?.ms != null && Number.isFinite(Number(e.ms)) ? Number(e.ms) : 0;
+    if (!map.has(op)) {
+      map.set(op, {
+        op,
+        calls: 0,
+        cost: 0,
+        maxCost: 0,
+        msSum: 0,
+        knownCostCalls: 0,
+      });
+    }
+    const row = map.get(op);
+    row.calls += 1;
+    row.msSum += ms;
+    if (cost != null) {
+      row.cost += cost;
+      row.knownCostCalls += 1;
+      row.maxCost = Math.max(row.maxCost, cost);
+      totalCost += cost;
+    } else {
+      unknownCostCalls += 1;
+    }
+  }
+  const byOp = [...map.values()]
+    .map((r: any) => ({
+      op: r.op,
+      calls: r.calls,
+      cost: r.cost,
+      avgCost:
+        r.knownCostCalls > 0
+          ? Math.round((r.cost / r.knownCostCalls) * 100) / 100
+          : 0,
+      maxCost: r.maxCost,
+      avgMs: r.calls > 0 ? Math.round(r.msSum / r.calls) : 0,
+    }))
+    .sort((a, b) => b.cost - a.cost || b.calls - a.calls);
+  return {
+    totalCalls: list.length,
+    totalCost,
+    unknownCostCalls,
+    byOp,
+  };
+}
+
+function headerInt(headers: any, name: string): number | null {
+  if (!headers || typeof headers.get !== 'function') return null;
+  try {
+    const v =
+      headers.get(name) ??
+      headers.get(name.toLowerCase()) ??
+      headers.get(name.toUpperCase());
+    if (v == null || v === '') return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+function recordGraphqlCostEntry(entry: any) {
+  const row = {
+    t: Date.now(),
+    op: String(entry?.op || 'unknown'),
+    cost: entry?.cost != null && Number.isFinite(Number(entry.cost))
+      ? Number(entry.cost)
+      : null,
+    costSource: entry?.costSource || null,
+    remaining:
+      entry?.remaining != null && Number.isFinite(Number(entry.remaining))
+        ? Number(entry.remaining)
+        : null,
+    used:
+      entry?.used != null && Number.isFinite(Number(entry.used))
+        ? Number(entry.used)
+        : null,
+    ms:
+      entry?.ms != null && Number.isFinite(Number(entry.ms))
+        ? Math.round(Number(entry.ms))
+        : null,
+    ok: entry?.ok !== false,
+    err: entry?.err ? String(entry.err).slice(0, 160) : null,
+    vars: entry?.vars && typeof entry.vars === 'object' ? entry.vars : {},
+  };
+  gqlCostLogEntries.push(row);
+  while (gqlCostLogEntries.length > GQL_COST_LOG_MAX) gqlCostLogEntries.shift();
+  const costStr = row.cost != null ? String(row.cost) : '?';
+  const remStr = row.remaining != null ? String(row.remaining) : '?';
+  console.log(
+    `[pr-plus] gql cost=${costStr} remaining=${remStr} op=${row.op}` +
+      (row.ms != null ? ` ${row.ms}ms` : '') +
+      (row.costSource ? ` via=${row.costSource}` : '') +
+      (row.ok ? '' : ` FAIL ${row.err || ''}`) +
+      (row.vars && Object.keys(row.vars).length
+        ? ` vars=${JSON.stringify(row.vars)}`
+        : '')
+  );
+  return row;
+}
+
+function getGraphqlCostLog() {
+  return gqlCostLogEntries.slice();
+}
+
+function clearGraphqlCostLog() {
+  gqlCostLogEntries.length = 0;
+  gqlCostHeaderUsedPrev = null;
+}
+
+function summarizeGraphqlCostLog() {
+  return summarizeGraphqlCostLogLocal(gqlCostLogEntries);
+}
+
 /**
  * GraphQL client: HTTP 200 can still carry body.errors — treat those as failures.
- * @returns {Promise<object>} data field only
+ * Injects rateLimit { cost } for per-query primary points; records to cost log.
+ * @returns {Promise<object>} data field only (includes rateLimit when present)
  */
 async function apiGraphql(query: any, variables: any, fetchImpl: any, token: any, ctx: any = null) {
   ctx = normalizeApiCtx(ctx);
-  const json = await apiSend(
-    githubGraphqlUrl(ctx),
-    fetchImpl,
-    token,
-  // @ts-expect-error classic fetch dynamic shapes
-    { method: 'POST', body: { query, variables: variables || {} } }
-  );
+  const op = labelGraphqlOperationLocal(query, variables);
+  const vars = sanitizeGraphqlVariablesLocal(variables);
+  const q = injectRateLimitCostFieldLocal(query);
+  const t0 =
+    typeof performance !== 'undefined' && performance.now
+      ? performance.now()
+      : Date.now();
+  const url = githubGraphqlUrl(ctx);
+  const headers = buildApiHeaders(token);
+  headers['Content-Type'] = 'application/json';
+  let res: any;
+  let json: any = null;
+  try {
+    res = await fetchImpl(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ query: q, variables: variables || {} }),
+    });
+  } catch (err: any) {
+    const ms =
+      (typeof performance !== 'undefined' && performance.now
+        ? performance.now()
+        : Date.now()) - t0;
+    recordGraphqlCostEntry({
+      op,
+      cost: null,
+      ms,
+      ok: false,
+      err: err?.message || err,
+      vars,
+    });
+    throw err;
+  }
+  const hdrRemaining = headerInt(res?.headers, 'x-ratelimit-remaining');
+  const hdrUsed = headerInt(res?.headers, 'x-ratelimit-used');
+  const hdrLimit = headerInt(res?.headers, 'x-ratelimit-limit');
+  try {
+    json = await res.json();
+  } catch (err: any) {
+    const ms =
+      (typeof performance !== 'undefined' && performance.now
+        ? performance.now()
+        : Date.now()) - t0;
+    recordGraphqlCostEntry({
+      op,
+      cost: null,
+      remaining: hdrRemaining,
+      used: hdrUsed,
+      ms,
+      ok: false,
+      err: err?.message || 'invalid json',
+      vars,
+    });
+    throw err;
+  }
+  const ms =
+    (typeof performance !== 'undefined' && performance.now
+      ? performance.now()
+      : Date.now()) - t0;
+  const bodyRl = json?.data?.rateLimit || null;
+  let cost: number | null =
+    bodyRl?.cost != null && Number.isFinite(Number(bodyRl.cost))
+      ? Number(bodyRl.cost)
+      : null;
+  let costSource: string | null = cost != null ? 'body.rateLimit.cost' : null;
+  // Fallback: header used delta (imprecise under concurrency)
+  if (cost == null && hdrUsed != null && gqlCostHeaderUsedPrev != null) {
+    const delta = hdrUsed - gqlCostHeaderUsedPrev;
+    if (delta >= 0 && delta < 5000) {
+      cost = delta;
+      costSource = 'header.used-delta';
+    }
+  }
+  if (hdrUsed != null) gqlCostHeaderUsedPrev = hdrUsed;
+  const remaining =
+    bodyRl?.remaining != null && Number.isFinite(Number(bodyRl.remaining))
+      ? Number(bodyRl.remaining)
+      : hdrRemaining;
+  const used =
+    bodyRl?.used != null && Number.isFinite(Number(bodyRl.used))
+      ? Number(bodyRl.used)
+      : hdrUsed;
+
+  if (!res.ok) {
+    recordGraphqlCostEntry({
+      op,
+      cost,
+      costSource,
+      remaining,
+      used,
+      ms,
+      ok: false,
+      err: `HTTP ${res.status}`,
+      vars,
+    });
+    const err: any = new Error(
+      `GitHub GraphQL HTTP ${res.status}: ${res.statusText || ''}`
+    );
+    err.status = res.status;
+    throw err;
+  }
   if (json?.errors?.length) {
     const msg = json.errors
-      .map((e) => e?.message || String(e))
+      .map((e: any) => e?.message || String(e))
       .filter(Boolean)
       .join('; ');
-    const err = new Error(`GitHub GraphQL: ${msg || 'unknown error'}`);
+    recordGraphqlCostEntry({
+      op,
+      cost,
+      costSource,
+      remaining,
+      used,
+      ms,
+      ok: false,
+      err: msg || 'graphql errors',
+      vars,
+    });
+    const err: any = new Error(`GitHub GraphQL: ${msg || 'unknown error'}`);
     err.graphqlErrors = json.errors;
     err.status = 200;
     throw err;
   }
+  recordGraphqlCostEntry({
+    op,
+    cost,
+    costSource,
+    remaining,
+    used,
+    limit: bodyRl?.limit != null ? Number(bodyRl.limit) : hdrLimit,
+    ms,
+    ok: true,
+    vars,
+  });
   return json?.data ?? null;
 }
 
-/** Thread node fields shared by first/last pagination queries. */
-const REVIEW_THREAD_NODE_FIELDS = `
+/**
+ * Thread shell + root preview (`comments(first:1)`).
+ * Root body is the thread "description" (GitHub has no separate field).
+ * Measured cost stays 1 for last:100 + first:1; avoid comments(first:100) and
+ * nested reactionGroups on the window (those dominate cost).
+ */
+const REVIEW_THREAD_SHELL_FIELDS = `
   id
   isResolved
   isOutdated
@@ -2064,6 +2448,21 @@ const REVIEW_THREAD_NODE_FIELDS = `
   diffSide
   startDiffSide
   subjectType
+  comments(first:1) {
+    totalCount
+    nodes {
+      databaseId
+      body
+      path
+      line
+      createdAt
+      author { login avatarUrl }
+    }
+  }
+`;
+
+/** Full thread + comments — used only for selective by-id bulk / lazy expand. */
+const REVIEW_THREAD_COMMENTS_FIELDS = `
   comments(first:100){
     nodes{
       id
@@ -2083,7 +2482,7 @@ const REVIEW_THREAD_NODE_FIELDS = `
       reactionGroups {
         content
         viewerHasReacted
-        reactors(first:1) {
+        reactors {
           totalCount
         }
       }
@@ -2091,43 +2490,123 @@ const REVIEW_THREAD_NODE_FIELDS = `
   }
 `;
 
-/** Oldest → newer (forward). */
+/**
+ * Full by-ids document fragment: thread meta + full comments + reaction counts.
+ * Intentionally does NOT embed REVIEW_THREAD_SHELL_FIELDS (which has
+ * comments(first:1)) — that collides with comments(first:100) in GraphQL.
+ * Kept as one string so SW runtime cannot mix shell+full selections.
+ */
+const REVIEW_THREADS_BY_IDS_NODE_SELECTION = `
+  id
+  isResolved
+  isOutdated
+  path
+  line
+  originalLine
+  startLine
+  originalStartLine
+  diffSide
+  startDiffSide
+  subjectType
+  comments(first:100){
+    totalCount
+    nodes{
+      id
+      databaseId
+      body
+      path
+      line
+      originalLine
+      startLine
+      originalStartLine
+      outdated
+      diffHunk
+      createdAt
+      author { login avatarUrl }
+      replyTo { databaseId }
+      pullRequestReview { databaseId state }
+      reactionGroups {
+        content
+        viewerHasReacted
+        reactors {
+          totalCount
+        }
+      }
+    }
+  }
+`;
+
+/** Oldest → newer (forward) — shell only. */
 const REVIEW_THREADS_FIRST_QUERY = `
-query($owner:String!,$name:String!,$number:Int!,$n:Int!,$cursor:String){
+query ReviewThreadsFirstShell($owner:String!,$name:String!,$number:Int!,$n:Int!,$cursor:String){
   repository(owner:$owner,name:$name){
     pullRequest(number:$number){
       reviewThreads(first:$n, after:$cursor){
         totalCount
         pageInfo { hasNextPage hasPreviousPage startCursor endCursor }
-        nodes { ${REVIEW_THREAD_NODE_FIELDS} }
+        nodes { ${REVIEW_THREAD_SHELL_FIELDS} }
       }
     }
   }
 }`;
 
-/** Newest ← older (backward). */
+/** Newest ← older (backward) — shell only. */
 const REVIEW_THREADS_LAST_QUERY = `
-query($owner:String!,$name:String!,$number:Int!,$n:Int!,$cursor:String){
+query ReviewThreadsLastShell($owner:String!,$name:String!,$number:Int!,$n:Int!,$cursor:String){
   repository(owner:$owner,name:$name){
     pullRequest(number:$number){
       reviewThreads(last:$n, before:$cursor){
         totalCount
         pageInfo { hasNextPage hasPreviousPage startCursor endCursor }
-        nodes { ${REVIEW_THREAD_NODE_FIELDS} }
+        nodes { ${REVIEW_THREAD_SHELL_FIELDS} }
       }
     }
   }
 }`;
 
 /** GraphQL connection / nodes(ids) hard cap. */
+/** GraphQL connection hard cap / by-id chunk size. */
 const REVIEW_THREADS_API_MAX = 100;
-/** Default page size for dual-window expand (Load more / Load all). Matches API max. */
-const REVIEW_THREADS_PAGE_SIZE = REVIEW_THREADS_API_MAX;
+/** Default GraphQL shell window (matches pure REVIEW_THREADS_PAGE_SIZE). */
+const REVIEW_THREADS_PAGE_SIZE = 100;
 
 /**
  * Map GraphQL reviewThreads.nodes → { threads, comments }.
+ * Shell may include comments(first:1) root preview; full by-id has complete set.
+ * Prefers pure `mapGraphqlReviewThreadNodes` when payload is shell/light;
+ * full by-id (diffHunk / reactionGroups / etc.) uses mapGraphqlReviewCommentNode.
  */
 function mapReviewThreadNodes(allNodes: any) {
+  try {
+    const pure =
+      typeof globalThis !== 'undefined'
+        ? (globalThis as any).PRModalReviewThreads
+        : null;
+    const list = Array.isArray(allNodes) ? allNodes : [];
+    const hasFullCommentShape = list.some((n) =>
+      (n?.comments?.nodes || []).some(
+        (c: any) =>
+          c &&
+          (c.reactionGroups != null ||
+            c.diffHunk != null ||
+            c.pullRequestReview != null ||
+            c.replyTo != null)
+      )
+    );
+    // Shell / preview-only: pure mapper (totalCount-aware commentsLoaded).
+    if (
+      !hasFullCommentShape &&
+      typeof pure?.mapGraphqlReviewThreadNodes === 'function'
+    ) {
+      return pure.mapGraphqlReviewThreadNodes(allNodes);
+    }
+  } catch {
+    /* fall through */
+  }
+  const pureRt =
+    typeof globalThis !== 'undefined'
+      ? (globalThis as any).PRModalReviewThreads
+      : null;
   const threads = [];
   const comments = [];
   for (const t of Array.isArray(allNodes) ? allNodes : []) {
@@ -2144,12 +2623,30 @@ function mapReviewThreadNodes(allNodes: any) {
       startLine: t.startLine ?? t.originalStartLine ?? null,
       subjectType: t.subjectType || null,
     };
+    const commentsConnPresent =
+      t.comments != null && typeof t.comments === 'object';
+    const commentsLoaded = commentsConnPresent
+      ? typeof pureRt?.graphqlCommentsAreFullyLoaded === 'function'
+        ? Boolean(pureRt.graphqlCommentsAreFullyLoaded(t.comments))
+        : (() => {
+            const nodes = t.comments?.nodes || [];
+            const total = t.comments?.totalCount;
+            if (!nodes.length) return total === 0;
+            if (typeof total === 'number') return total <= nodes.length;
+            return true;
+          })()
+      : false;
     const commentIds = [];
-    for (const node of t.comments?.nodes || []) {
-      const mapped = mapGraphqlReviewCommentNode(node, threadMeta);
-      if (!mapped) continue;
-      comments.push(mapped);
-      commentIds.push(mapped.id);
+    if (commentsConnPresent) {
+      for (const node of t.comments?.nodes || []) {
+        const mapped = mapGraphqlReviewCommentNode(node, threadMeta);
+        if (!mapped) continue;
+        if (!commentsLoaded) {
+          (mapped as any)._commentsPreview = true;
+        }
+        comments.push(mapped);
+        commentIds.push(mapped.id);
+      }
     }
     threads.push({
       threadNodeId: t.id,
@@ -2160,9 +2657,154 @@ function mapReviewThreadNodes(allNodes: any) {
       startLine: t.startLine ?? t.originalStartLine ?? null,
       side: t.diffSide || 'RIGHT',
       commentIds,
+      commentsLoaded,
+      commentCount:
+        typeof t.comments?.totalCount === 'number'
+          ? t.comments.totalCount
+          : commentIds.length || null,
     });
   }
   return { threads, comments };
+}
+
+/**
+ * Pure selection of eager comment thread ids (mirrors PRModalReviewThreads).
+ */
+function selectEagerCommentThreadIdsLocal(threads: any, opts: any = {}) {
+  try {
+    const pure =
+      typeof globalThis !== 'undefined'
+        ? (globalThis as any).PRModalReviewThreads
+        : null;
+    if (typeof pure?.selectThreadIdsForEagerComments === 'function') {
+      return pure.selectThreadIdsForEagerComments(threads, opts);
+    }
+  } catch {
+    /* fall through */
+  }
+  const list = Array.isArray(threads) ? threads : [];
+  const out = [];
+  for (const t of list) {
+    if (!t?.threadNodeId || t.commentsLoaded === true) continue;
+    if (!/^PRRT_/i.test(String(t.threadNodeId))) continue;
+    if (opts?.forceAll || !Boolean(t.resolved)) out.push(String(t.threadNodeId));
+  }
+  return out;
+}
+
+/**
+ * Merge a by-ids full-comment page onto a shell page (same window).
+ */
+function mergeCommentsBulkIntoThreadsPage(shellPage: any, bulkPage: any) {
+  try {
+    const pure =
+      typeof globalThis !== 'undefined'
+        ? (globalThis as any).PRModalReviewThreads
+        : null;
+    if (typeof pure?.mergeCommentsBulkIntoThreadsPage === 'function') {
+      return pure.mergeCommentsBulkIntoThreadsPage(shellPage, bulkPage);
+    }
+  } catch {
+    /* fall through */
+  }
+  const shellThreads = Array.isArray(shellPage?.threads) ? shellPage.threads : [];
+  const bulkThreads = Array.isArray(bulkPage?.threads) ? bulkPage.threads : [];
+  const bulkComments = Array.isArray(bulkPage?.comments) ? bulkPage.comments : [];
+  const byId = new Map(
+    bulkThreads
+      .filter((t) => t?.threadNodeId)
+      .map((t) => [String(t.threadNodeId), t])
+  );
+  const threads = shellThreads.map((t) => {
+    const id = t?.threadNodeId ? String(t.threadNodeId) : '';
+    const full = id ? byId.get(id) : null;
+    if (!full) {
+      return { ...t, commentsLoaded: Boolean(t.commentsLoaded) };
+    }
+    return {
+      ...t,
+      ...full,
+      commentsLoaded: true,
+      commentIds: Array.isArray(full.commentIds) ? full.commentIds : t.commentIds || [],
+    };
+  });
+  // Drop shell placeholders/previews for loaded ids; keep deferred first:1 bodies.
+  const loadedIds = new Set(
+    threads.filter((t) => t.commentsLoaded).map((t) => String(t.threadNodeId))
+  );
+  const prevComments = Array.isArray(shellPage?.comments) ? shellPage.comments : [];
+  let kept = [];
+  try {
+    const pure =
+      typeof globalThis !== 'undefined'
+        ? (globalThis as any).PRModalReviewThreads
+        : null;
+    if (typeof pure?.retainShellCommentsAfterBulk === 'function') {
+      kept = pure.retainShellCommentsAfterBulk(prevComments, loadedIds);
+    } else {
+      for (const c of prevComments) {
+        if (!c?.threadNodeId) continue;
+        const tid = String(c.threadNodeId);
+        if (loadedIds.has(tid)) {
+          if (c._commentsPending || c._commentsPreview) continue;
+          kept.push(c);
+          continue;
+        }
+        if (c._commentsPending && !String(c.body || '').trim()) continue;
+        kept.push(c);
+      }
+    }
+  } catch {
+    kept = prevComments.slice();
+  }
+  const seen = new Set(kept.map((c) => String(c.id)));
+  for (const c of bulkComments) {
+    if (!c || c.id == null) continue;
+    const k = String(c.id);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    kept.push(c);
+  }
+  // Keep deferred shells visible (resolved) via pure placeholder helper.
+  let comments = kept;
+  try {
+    const pure =
+      typeof globalThis !== 'undefined'
+        ? (globalThis as any).PRModalReviewThreads
+        : null;
+    if (typeof pure?.ensureShellPlaceholderComments === 'function') {
+      comments = pure.ensureShellPlaceholderComments(threads, kept);
+    } else {
+      for (const t of threads) {
+        if (!t?.threadNodeId || t.commentsLoaded === true) continue;
+        const tid = String(t.threadNodeId);
+        if (!/^PRRT_/i.test(tid)) continue;
+        if (kept.some((c) => c && String(c.threadNodeId) === tid)) continue;
+        kept.push({
+          id: `shell:${tid}`,
+          author: '',
+          body: '',
+          path: t.path || '',
+          line: t.line ?? null,
+          side: t.side || 'RIGHT',
+          threadNodeId: tid,
+          resolved: Boolean(t.resolved),
+          outdated: Boolean(t.outdated),
+          pending: false,
+          _commentsPending: true,
+          commentsLoaded: false,
+        });
+      }
+      comments = kept;
+    }
+  } catch {
+    comments = kept;
+  }
+  return {
+    ...shellPage,
+    threads,
+    comments,
+  };
 }
 
 /**
@@ -2173,11 +2815,241 @@ function mapReviewThreadNodes(allNodes: any) {
  *   - oldest: first:N (connection start = earliest)
  *   - newer:  first:N after endCursor (expand oldest window into newer)
  */
+/**
+ * Build a threads page shape from REST pull review comments.
+ * Used when GraphQL reviewThreads is rate-limited / unavailable. Diff UI groups
+ * from comments; synthetic threads keep meta counters non-zero.
+ */
+/**
+ * Choose REST vs GraphQL for a threads page (mirrors pure helper when loaded).
+ * Kept inline so SW fetch-api does not depend on pure IIFE load order.
+ */
+function chooseReviewThreadsTransportLocal(opts: any = {}) {
+  try {
+    const pure =
+      typeof globalThis !== 'undefined'
+        ? (globalThis as any).PRModalReviewThreads
+        : null;
+    if (typeof pure?.chooseReviewThreadsTransport === 'function') {
+      return pure.chooseReviewThreadsTransport(opts);
+    }
+  } catch {
+    /* fall through */
+  }
+  // GraphQL-first (shell + PRRT). REST only when preferRest === true.
+  if (opts?.preferRest === true) return 'rest';
+  return 'graphql';
+}
+
+function buildRestReviewThreadsPageFromCommentsLocal(
+  items: any[],
+  direction = 'newest'
+) {
+  try {
+    const pure =
+      typeof globalThis !== 'undefined'
+        ? (globalThis as any).PRModalReviewThreads
+        : null;
+    if (typeof pure?.buildRestReviewThreadsPageFromComments === 'function') {
+      return pure.buildRestReviewThreadsPageFromComments(items, direction);
+    }
+  } catch {
+    /* fall through */
+  }
+  // Minimal inline copy when pure helper unavailable (tests / partial SW)
+  const list = Array.isArray(items) ? items : [];
+  if (!list.length) {
+    return {
+      threads: [],
+      comments: [],
+      hasMore: false,
+      endCursor: null,
+      startCursor: null,
+      hasNextPage: false,
+      hasPreviousPage: false,
+      totalCount: 0,
+      pageCount: 0,
+      direction: direction || 'newest',
+      window: 'newest',
+      source: 'rest',
+    };
+  }
+  const byId = new Map();
+  for (const c of list) {
+    if (c && c.id != null) byId.set(String(c.id), c);
+  }
+  const roots = list.filter((c) => {
+    if (!c || c.id == null) return false;
+    const parent = c.inReplyToId ?? c.in_reply_to_id ?? null;
+    return parent == null || !byId.has(String(parent));
+  });
+  const threads = roots.map((r) => {
+    const replyIds = list
+      .filter(
+        (c) =>
+          c && String(c.inReplyToId ?? c.in_reply_to_id ?? '') === String(r.id)
+      )
+      .map((c) => c.id);
+    const threadNodeId = r.nodeId || r.threadNodeId || `rest-thread-${r.id}`;
+    const commentIds = [r.id, ...replyIds];
+    for (const cid of commentIds) {
+      const row = byId.get(String(cid));
+      if (row) {
+        row.threadNodeId = threadNodeId;
+        row.loadWindow = 'newest';
+      }
+    }
+    return {
+      threadNodeId,
+      resolved: Boolean(r.resolved ?? r.isResolved),
+      outdated: Boolean(r.outdated),
+      path: r.path || '',
+      line: r.line ?? r.originalLine ?? null,
+      startLine: r.startLine ?? null,
+      side: r.side || 'RIGHT',
+      commentIds,
+      commentsLoaded: true,
+      loadWindow: 'newest',
+    };
+  });
+  return {
+    threads,
+    comments: list,
+    totalCount: list.length,
+    startCursor: null,
+    endCursor: null,
+    hasNextPage: false,
+    hasPreviousPage: false,
+    hasMore: false,
+    pageCount: 1,
+    direction: direction || 'newest',
+    window: 'newest',
+    source: 'rest',
+  };
+}
+
+async function restReviewThreadsFallbackPage(
+  owner,
+  repo,
+  pullNumber,
+  direction,
+  fetchImpl,
+  token,
+  ctx,
+  opts: any = {}
+) {
+  const empty = buildRestReviewThreadsPageFromCommentsLocal([], direction);
+  const perPage = Math.max(
+    1,
+    Math.min(
+      REVIEW_THREADS_API_MAX,
+      Number(opts.perPage) || REVIEW_THREADS_PAGE_SIZE
+    )
+  );
+  const pageNum = Math.max(1, Number(opts.page) || 1);
+  const knownCount =
+    opts.reviewCommentsCount != null &&
+    Number.isFinite(Number(opts.reviewCommentsCount))
+      ? Number(opts.reviewCommentsCount)
+      : null;
+
+  // PR.review_comments === 0 → trust empty (no list fetch, no GraphQL).
+  if (knownCount != null && knownCount <= 0) {
+    return {
+      ...empty,
+      totalCount: 0,
+      source: 'rest',
+      reviewCommentsCount: 0,
+    };
+  }
+
+  try {
+    const restPage = await fetchPrCommentsPage(
+      owner,
+      repo,
+      pullNumber,
+      'review',
+      { page: pageNum, perPage, preferNewest: true },
+      fetchImpl,
+      token,
+      ctx
+    );
+    const items = Array.isArray(restPage?.items) ? restPage.items : [];
+    if (!items.length) {
+      return {
+        ...empty,
+        totalCount: knownCount != null ? knownCount : 0,
+        source: 'rest',
+        reviewCommentsCount: knownCount,
+      };
+    }
+    const page = buildRestReviewThreadsPageFromCommentsLocal(items, direction);
+    // More REST comment pages when official count exceeds this window or full page
+    const hasMoreComments =
+      (knownCount != null && pageNum * perPage < knownCount) ||
+      (knownCount == null && items.length >= perPage);
+    // Thread totalCount must be thread-shaped — never PR.review_comments.
+    // Using comment count as totalCount made merge invent hiddenCount (e.g. 7
+    // threads / 14 comments → hasMore forever → Diff auto load-all flicker).
+    const threadTotal = hasMoreComments
+      ? // Unknown full thread total while more comment pages remain
+        Math.max(page.threads.length, Number(page.totalCount) || 0)
+      : page.threads.length;
+    console.log(
+      `[pr-plus] fetchReviewThreadsPage REST: ${page.threads.length} threads, ${items.length} comments` +
+        ` page=${pageNum} perPage=${perPage}` +
+        (knownCount != null ? ` pr.review_comments=${knownCount}` : '') +
+        (hasMoreComments ? ' hasMoreComments' : '')
+    );
+    return {
+      ...page,
+      totalCount: threadTotal,
+      hasMore: hasMoreComments,
+      hasPreviousPage: hasMoreComments && (direction === 'newest' || !direction),
+      hasNextPage: hasMoreComments,
+      pageCount: 1,
+      restPage: pageNum,
+      restPerPage: perPage,
+      reviewCommentsCount: knownCount,
+      source: 'rest',
+    };
+  } catch (err) {
+    if (
+      err?.name === 'AbortError' ||
+      /aborted|AbortError/i.test(String(err?.message || ''))
+    ) {
+      throw err;
+    }
+    console.log(
+      `[pr-plus] fetchReviewThreadsPage REST soft-fail: ${
+        err?.message || err
+      }`
+    );
+    return empty;
+  }
+}
+
 async function fetchReviewThreadsPage(
   owner,
   repo,
   pullNumber,
-  { direction = 'newest', cursor = null, pageSize = REVIEW_THREADS_PAGE_SIZE } = {},
+  {
+    direction = 'newest',
+    cursor = null,
+    pageSize = REVIEW_THREADS_PAGE_SIZE,
+    preferRest = null,
+    forceGraphql = false,
+    forceFull = false,
+    reviewCommentsCount = null,
+    restPage = 1,
+    /** When true, bulk-fetch comments for every shell thread (rare). */
+    forceAllComments = false,
+    /**
+     * When true, return shell-only (no eager by-ids). Host stages progress as
+     * threads → comments → reactions by calling by-ids separately.
+     */
+    skipEagerComments = false,
+  }: any = {},
   fetchImpl,
   token,
   ctx = null
@@ -2194,8 +3066,8 @@ async function fetchReviewThreadsPage(
     totalCount: null,
     pageCount: 0,
     direction,
+    source: null,
   };
-  if (!token) return empty;
   const n = Number(pullNumber);
   if (!Number.isFinite(n)) return empty;
   const size = Math.max(
@@ -2203,53 +3075,197 @@ async function fetchReviewThreadsPage(
     Math.min(REVIEW_THREADS_API_MAX, Number(pageSize) || REVIEW_THREADS_PAGE_SIZE)
   );
   const dir = String(direction || 'newest');
+  const transport = chooseReviewThreadsTransportLocal({
+    direction: dir,
+    cursor,
+    preferRest,
+    forceGraphql,
+    forceFull,
+  });
+
+  // GraphQL-first: shell window (PRRT_…) + selective comments bulk.
+  // REST only when transport === 'rest' (explicit preferRest: true).
+  const useRest = transport === 'rest';
+
+  if (useRest) {
+    const rest = await restReviewThreadsFallbackPage(
+      owner,
+      repo,
+      n,
+      dir,
+      fetchImpl,
+      token,
+      ctx,
+      {
+        perPage: size,
+        page: restPage,
+        reviewCommentsCount,
+      }
+    );
+    return { ...rest, source: 'rest' };
+  }
+
+  // GraphQL shell (no nested comments(first:100)) then eager by-ids comments.
+  if (!token) return { ...empty, source: null };
+
   const useLast = dir === 'newest' || dir === 'older';
   const query = useLast ? REVIEW_THREADS_LAST_QUERY : REVIEW_THREADS_FIRST_QUERY;
   // newest: last:N, cursor=null
   // older:  last:N, before=cursor (start of current newest window)
   // oldest: first:N, cursor=null
   // newer:  first:N, after=cursor (end of current oldest window)
-  const data = await apiGraphql(
-    query,
-    {
-      owner,
-      name: repo,
-      number: n,
-      n: size,
-      cursor: cursor || null,
-    },
-    fetchImpl,
-    token,
-    ctx
-  );
-  const conn = data?.repository?.pullRequest?.reviewThreads;
-  const nodes = conn?.nodes || [];
-  const pageInfo = conn?.pageInfo || {};
-  const mapped = mapReviewThreadNodes(nodes);
-  // Tag threads with load window for UI gap split
-  const windowTag =
-    dir === 'newest' || dir === 'older' ? 'newest' : 'oldest';
-  for (const t of mapped.threads) {
-    t.loadWindow = windowTag;
+  try {
+    const data = await apiGraphql(
+      query,
+      {
+        owner,
+        name: repo,
+        number: n,
+        n: size,
+        cursor: cursor || null,
+      },
+      fetchImpl,
+      token,
+      ctx
+    );
+    const conn = data?.repository?.pullRequest?.reviewThreads;
+    const nodes = conn?.nodes || [];
+    const pageInfo = conn?.pageInfo || {};
+    const mapped = mapReviewThreadNodes(nodes);
+    // Tag threads with load window for UI gap split
+    const windowTag =
+      dir === 'newest' || dir === 'older' ? 'newest' : 'oldest';
+    for (const t of mapped.threads) {
+      t.loadWindow = windowTag;
+      // Shell may embed comments(first:1) preview; only full loads set true.
+      if (t.commentsLoaded !== true) t.commentsLoaded = false;
+    }
+    // Empty GraphQL window is authoritative (no REST fallback).
+
+    let page = {
+      threads: mapped.threads,
+      comments: mapped.comments,
+      totalCount:
+        typeof conn?.totalCount === 'number' ? conn.totalCount : null,
+      startCursor: pageInfo.startCursor || null,
+      endCursor: pageInfo.endCursor || null,
+      hasNextPage: Boolean(pageInfo.hasNextPage),
+      hasPreviousPage: Boolean(pageInfo.hasPreviousPage),
+      // Convenience for dual-window UI
+      hasMore:
+        useLast
+          ? Boolean(pageInfo.hasPreviousPage)
+          : Boolean(pageInfo.hasNextPage),
+      pageCount: 1,
+      direction: dir,
+      window: windowTag,
+      source: 'graphql',
+      shellOnly: true,
+    };
+
+    // Selective comments bulk: unresolved (default expanded) only.
+    // forceFull still defers resolved until expand — plan: no free first:100
+    // on every node. forceAllComments opts reserved for future.
+    // skipEagerComments: host owns by-ids so open progress can mark
+    // threads → comments → reactions as separate bar steps.
+    if (skipEagerComments) {
+      page.shellOnly = true;
+      page.eagerCommentIds = [];
+      console.log(
+        `[pr-plus] fetchReviewThreadsPage GraphQL shell-only: ${page.threads.length} threads (eager deferred to host)`
+      );
+    } else {
+      const eagerIds = selectEagerCommentThreadIdsLocal(page.threads, {
+        forceAll: Boolean(forceAllComments),
+      });
+      if (eagerIds.length) {
+        try {
+          const bulk = await fetchReviewThreadsByIds(
+            eagerIds,
+            fetchImpl,
+            token,
+            ctx
+          );
+          page = mergeCommentsBulkIntoThreadsPage(page, bulk);
+          page.shellOnly = false;
+          page.eagerCommentIds = eagerIds;
+          console.log(
+            `[pr-plus] fetchReviewThreadsPage GraphQL shell+comments: ` +
+              `${page.threads.length} threads, eagerComments=${eagerIds.length}, ` +
+              `comments=${page.comments.length}`
+          );
+        } catch (bulkErr) {
+          console.log(
+            `[pr-plus] fetchReviewThreadsPage eager comments soft-fail: ${
+              bulkErr?.message || bulkErr
+            }`
+          );
+        }
+      } else {
+        console.log(
+          `[pr-plus] fetchReviewThreadsPage GraphQL shell: ${page.threads.length} threads (no eager comments)`
+        );
+      }
+    }
+    // Always attach shell placeholders for deferred threads (resolved, etc.)
+    // so Diff/Conversation rows exist before lazy expand.
+    try {
+      const pure =
+        typeof globalThis !== 'undefined'
+          ? (globalThis as any).PRModalReviewThreads
+          : null;
+      if (typeof pure?.ensureShellPlaceholderComments === 'function') {
+        page = {
+          ...page,
+          comments: pure.ensureShellPlaceholderComments(
+            page.threads,
+            page.comments
+          ),
+        };
+      } else {
+        const covered = new Set(
+          (page.comments || [])
+            .map((c: any) => (c?.threadNodeId ? String(c.threadNodeId) : ''))
+            .filter(Boolean)
+        );
+        const extra = [];
+        for (const t of page.threads || []) {
+          const tid = t?.threadNodeId ? String(t.threadNodeId) : '';
+          if (!tid || !/^PRRT_/i.test(tid) || covered.has(tid)) continue;
+          if (t.commentsLoaded === true) continue;
+          extra.push({
+            id: `shell:${tid}`,
+            author: '',
+            body: '',
+            path: t.path || '',
+            line: t.line ?? null,
+            side: t.side || 'RIGHT',
+            threadNodeId: tid,
+            resolved: Boolean(t.resolved),
+            outdated: Boolean(t.outdated),
+            pending: false,
+            _commentsPending: true,
+            commentsLoaded: false,
+          });
+        }
+        if (extra.length) {
+          page = { ...page, comments: [...(page.comments || []), ...extra] };
+        }
+      }
+    } catch {
+      /* keep page as-is */
+    }
+    return page;
+  } catch (err) {
+    if (
+      err?.name === 'AbortError' ||
+      /aborted|AbortError/i.test(String(err?.message || ''))
+    ) {
+      throw err;
+    }
+    // No REST fallback — surface GraphQL failures to the caller.
+    throw err;
   }
-  return {
-    threads: mapped.threads,
-    comments: mapped.comments,
-    totalCount:
-      typeof conn?.totalCount === 'number' ? conn.totalCount : null,
-    startCursor: pageInfo.startCursor || null,
-    endCursor: pageInfo.endCursor || null,
-    hasNextPage: Boolean(pageInfo.hasNextPage),
-    hasPreviousPage: Boolean(pageInfo.hasPreviousPage),
-    // Convenience for dual-window UI
-    hasMore:
-      useLast
-        ? Boolean(pageInfo.hasPreviousPage)
-        : Boolean(pageInfo.hasNextPage),
-    pageCount: 1,
-    direction: dir,
-    window: windowTag,
-  };
 }
 
 /**
@@ -2258,6 +3274,21 @@ async function fetchReviewThreadsPage(
  * @param {object|null} detail
  * @returns {string[]}
  */
+function isGraphqlReviewThreadNodeIdLocal(id: any): boolean {
+  try {
+    const pure =
+      typeof globalThis !== 'undefined'
+        ? (globalThis as any).PRModalReviewThreads
+        : null;
+    if (typeof pure?.isGraphqlReviewThreadNodeId === 'function') {
+      return Boolean(pure.isGraphqlReviewThreadNodeId(id));
+    }
+  } catch {
+    /* fall through */
+  }
+  return /^PRRT_/i.test(String(id || '').trim());
+}
+
 function collectUnresolvedThreadNodeIds(detail: any) {
   const dropped =
     detail?._droppedThreadNodeIds instanceof Set
@@ -2272,6 +3303,8 @@ function collectUnresolvedThreadNodeIds(detail: any) {
     if (!t?.threadNodeId || t.resolved) continue;
     const id = String(t.threadNodeId);
     if (dropped.has(id)) continue;
+    // GraphQL by-id bulk only understands PRRT_… — never rest-thread-* / PRRC_
+    if (!isGraphqlReviewThreadNodeIdLocal(id)) continue;
     ids.add(id);
   }
   const list = Array.isArray(detail?.reviewComments) ? detail.reviewComments : [];
@@ -2283,6 +3316,7 @@ function collectUnresolvedThreadNodeIds(detail: any) {
     if (!c?.threadNodeId || c.resolved) continue;
     const id = String(c.threadNodeId);
     if (dropped.has(id)) continue;
+    if (!isGraphqlReviewThreadNodeIdLocal(id)) continue;
     const parentId = c.inReplyToId ?? c.in_reply_to_id ?? null;
     // Prefer roots (or orphans) — replies inherit resolved from thread meta anyway
     if (parentId != null && byId.has(String(parentId))) continue;
@@ -2321,32 +3355,78 @@ async function fetchReviewThreadsByIds(threadNodeIds: any, fetchImpl: any, token
   ];
   if (!ids.length) return empty;
 
+  // Name includes CostFlat marker so e2e/cost logs prove the new SW is loaded
+  // (not a stale worker still shipping shell+full comments field conflict).
   const query = `
-query($ids:[ID!]!){
+query ReviewThreadsByIdsFullCostFlat($ids:[ID!]!){
   nodes(ids:$ids){
     ... on PullRequestReviewThread {
-      ${REVIEW_THREAD_NODE_FIELDS}
+      ${REVIEW_THREADS_BY_IDS_NODE_SELECTION}
     }
   }
 }`;
+  const byIdsQueryMeta = {
+    qName: 'ReviewThreadsByIdsFullCostFlat',
+    hasFirst1: /comments\s*\(\s*first\s*:\s*1\s*\)/.test(query),
+    hasFirst100: /comments\s*\(\s*first\s*:\s*100\s*\)/.test(query),
+    hasReactorsFirst: /reactors\s*\(\s*first\s*:/.test(query),
+  };
+  try {
+    (globalThis as any).__prpLastByIdsQueryMeta = byIdsQueryMeta;
+  } catch {
+    /* ignore */
+  }
 
   const allThreads = [];
   const allComments = [];
   const foundIds = new Set();
+  /** Only ids with a successful nodes[] slot that is null (remote-deleted). */
+  const confirmedMissing = new Set();
   let pages = 0;
+
+  const confirmedMissingFromNodes = (chunkIds: string[], rawNodes: any) => {
+    try {
+      const pure =
+        typeof globalThis !== 'undefined'
+          ? (globalThis as any).PRModalReviewThreads
+          : null;
+      if (typeof pure?.confirmedMissingThreadIdsFromNodes === 'function') {
+        return pure.confirmedMissingThreadIdsFromNodes(chunkIds, rawNodes);
+      }
+    } catch {
+      /* fall through */
+    }
+    if (!Array.isArray(rawNodes) || !chunkIds.length) return [];
+    const missing = [];
+    const n = Math.min(chunkIds.length, rawNodes.length);
+    for (let j = 0; j < n; j++) {
+      if (rawNodes[j] == null) missing.push(String(chunkIds[j]));
+    }
+    return missing;
+  };
+
   for (let i = 0; i < ids.length; i += REVIEW_THREADS_API_MAX) {
     const chunk = ids.slice(i, i + REVIEW_THREADS_API_MAX);
     try {
       const data = await apiGraphql(query, { ids: chunk }, fetchImpl, token, ctx);
-      // nodes[] is parallel to requested ids; deleted/not-found → null
-      const rawNodes = Array.isArray(data?.nodes) ? data.nodes : [];
+      // nodes[] is parallel to requested ids; deleted/not-found → null.
+      // Length mismatch or non-array → treat as unknown (do NOT mass-drop).
+      const rawNodes = Array.isArray(data?.nodes) ? data.nodes : null;
+      if (!rawNodes) {
+        console.warn(
+          '[pr-plus] fetchReviewThreadsByIds chunk: missing nodes[] — not marking missing'
+        );
+        continue;
+      }
+      for (const mid of confirmedMissingFromNodes(chunk, rawNodes)) {
+        confirmedMissing.add(String(mid));
+      }
       const nodes = rawNodes.filter(Boolean);
       const mapped = mapReviewThreadNodes(nodes);
       for (const t of mapped.threads) {
         t.loadWindow = t.loadWindow || 'refresh';
         if (t.threadNodeId) foundIds.add(String(t.threadNodeId));
       }
-      // Also mark any non-null node id from raw (even if mapping skipped)
       for (const n of nodes) {
         if (n?.id) foundIds.add(String(n.id));
       }
@@ -2354,15 +3434,14 @@ query($ids:[ID!]!){
       allComments.push(...mapped.comments);
       pages += 1;
     } catch (err) {
-      // One bad chunk must not block the rest — treat whole chunk as unknown
-      // (not missing) so we don't mass-drop on transient GraphQL errors.
+      // Transient GraphQL errors / rate-limit: leave ids unknown — never
+      // put them in missingThreadIds (would wipe REST-painted threads on merge).
       console.warn(
         '[pr-plus] fetchReviewThreadsByIds chunk failed',
         err?.message || err
       );
     }
   }
-  const missingThreadIds = ids.filter((id) => !foundIds.has(String(id)));
   return {
     threads: allThreads,
     comments: allComments,
@@ -2372,7 +3451,8 @@ query($ids:[ID!]!){
     hasPreviousPage: false,
     hasNextPage: false,
     requestedThreadIds: ids,
-    missingThreadIds,
+    // Confirmed remote-null only — failed/unknown chunks stay out.
+    missingThreadIds: [...confirmedMissing],
   };
 }
 
@@ -2475,8 +3555,8 @@ function dropReviewThreadsFromDetail(detail: any, threadNodeIds: any) {
 }
 
 /**
- * Initial dual-window load: last:100 first, then start:20 only when total ≥ 100.
- * Small PRs (total < 100) load a single last window covering everything.
+ * Initial dual-window load: newest window (page size 100), then oldest seed
+ * only when total still has more (legacy GraphQL path).
  */
 async function fetchPullReviewThreadsBundle(
   owner,
@@ -2501,18 +3581,25 @@ async function fetchPullReviewThreadsBundle(
   }
   const lastPageSize = Math.min(
     REVIEW_THREADS_API_MAX,
-    Number(opts.pageSize) || REVIEW_THREADS_API_MAX
+    Number(opts.pageSize) || REVIEW_THREADS_PAGE_SIZE
   );
   const startPageSize = Math.min(
     20,
     Number(opts.startPageSize) || 20
   );
-  // Last (newest) first
+  // Last (newest) first — GraphQL shell + eager comments (PRRT always)
   const newest = await fetchReviewThreadsPage(
     owner,
     repo,
     pullNumber,
-    { direction: 'newest', cursor: null, pageSize: lastPageSize },
+    {
+      direction: 'newest',
+      cursor: null,
+      pageSize: lastPageSize,
+      preferRest: false,
+      forceGraphql: true,
+      reviewCommentsCount: opts.reviewCommentsCount,
+    },
     fetchImpl,
     token,
     ctx
@@ -2622,42 +3709,91 @@ function mergeReviewThreadsPageIntoDetail(detail: any, page: any, direction: any
   const prevRc = Array.isArray(detail.reviewComments) ? detail.reviewComments : [];
   const prevTh = Array.isArray(detail.reviewThreads) ? detail.reviewThreads : [];
 
-  // Explicit missing list from nodes(ids:) bulk fetch (remote-deleted threads)
-  const explicitMissing = Array.isArray(page?.missingThreadIds)
-    ? page.missingThreadIds.map(String).filter(Boolean)
-    : [];
-  // Or derive: requested − returned
-  const requested = Array.isArray(page?.requestedThreadIds)
-    ? page.requestedThreadIds.map(String).filter(Boolean)
-    : [];
-  const returnedIds = new Set(
-    (page?.threads || [])
-      .map((t) => (t?.threadNodeId ? String(t.threadNodeId) : ''))
-      .filter(Boolean)
-  );
-  const derivedMissing =
-    requested.length > 0
-      ? requested.filter((id) => !returnedIds.has(id))
-      : [];
-  const missingIds = [
-    ...new Set([...explicitMissing, ...derivedMissing]),
-  ];
+  // Confirmed remote-null only (page.missingThreadIds). Never derive
+  // requested − returned: by-id chunk fail leaves ids unknown and must not
+  // mass-drop REST-painted threads via dropReviewThreadsFromDetail.
+  const missingIds = (() => {
+    try {
+      const pure =
+        typeof globalThis !== 'undefined'
+          ? (globalThis as any).PRModalReviewThreads
+          : null;
+      if (typeof pure?.resolveMissingThreadIdsForDrop === 'function') {
+        return pure.resolveMissingThreadIdsForDrop(page);
+      }
+    } catch {
+      /* fall through */
+    }
+    if (!Array.isArray(page?.missingThreadIds)) return [];
+    return [
+      ...new Set(
+        page.missingThreadIds.map((id: any) => String(id || '').trim()).filter(Boolean)
+      ),
+    ];
+  })();
 
-  // refresh/ids: replace comments for updated threads so new replies land and deleted ones drop
+  // refresh/ids: hydrate comments in place (stable sibling order). Other dirs
+  // still use filter+append via baseRc then mergePending.
   let baseRc = prevRc;
+  let reviewComments;
   if ((dir === 'refresh' || dir === 'ids') && (page?.threads || []).length) {
     const refreshed = new Set(
       (page.threads || [])
         .map((t) => (t?.threadNodeId ? String(t.threadNodeId) : ''))
         .filter(Boolean)
     );
-    if (refreshed.size) {
+    try {
+      const pure =
+        typeof globalThis !== 'undefined'
+          ? (globalThis as any).PRModalReviewThreads
+          : null;
+      if (typeof pure?.hydrateReviewCommentsInPlace === 'function') {
+        reviewComments = pure.hydrateReviewCommentsInPlace(
+          prevRc,
+          page?.comments || [],
+          refreshed
+        );
+      }
+    } catch {
+      /* fall through */
+    }
+    if (!reviewComments) {
+      // Fallback: drop refreshed threads then append (may reorder)
       baseRc = prevRc.filter(
         (c) => !c?.threadNodeId || !refreshed.has(String(c.threadNodeId))
       );
+      reviewComments = mergePendingReviewComments(baseRc, page?.comments || []);
     }
+  } else {
+    // GraphQL shell±bulk window is authority for listed PRRT threads:
+    // drop prior REST synthetic comments (rest-thread-*) and any prev rows for
+    // page thread ids so deferred shells stay body-less until expand, and eager
+    // bulk replaces REST paint without duplicates.
+    const deferredShellIds = new Set();
+    const pageThreadIds = new Set();
+    if (
+      page?.source === 'graphql' &&
+      Array.isArray(page?.threads)
+    ) {
+      for (const t of page.threads) {
+        if (!t?.threadNodeId) continue;
+        const id = String(t.threadNodeId);
+        pageThreadIds.add(id);
+        if (t.commentsLoaded === false) deferredShellIds.add(id);
+      }
+      if (pageThreadIds.size) {
+        baseRc = baseRc.filter((c) => {
+          if (!c) return false;
+          const tid = c.threadNodeId != null ? String(c.threadNodeId) : '';
+          if (tid.startsWith('rest-thread-')) return false;
+          if (pageThreadIds.has(tid)) return false;
+          if (deferredShellIds.has(tid)) return false;
+          return true;
+        });
+      }
+    }
+    reviewComments = mergePendingReviewComments(baseRc, page?.comments || []);
   }
-  const reviewComments = mergePendingReviewComments(baseRc, page?.comments || []);
   // When GraphQL thread meta updates resolved, stamp onto all comments in those threads
   const resolvedByThread = new Map();
   for (const t of page?.threads || []) {
@@ -2665,7 +3801,7 @@ function mergeReviewThreadsPageIntoDetail(detail: any, page: any, direction: any
       resolvedByThread.set(String(t.threadNodeId), Boolean(t.resolved));
     }
   }
-  const stampedComments =
+  const stampedCommentsRaw =
     resolvedByThread.size === 0
       ? reviewComments
       : reviewComments.map((c) => {
@@ -2674,17 +3810,99 @@ function mergeReviewThreadsPageIntoDetail(detail: any, page: any, direction: any
           if (!resolvedByThread.has(key)) return c;
           return { ...c, resolved: resolvedByThread.get(key) };
         });
+  // Drop shell placeholders once real comments exist for that thread
+  const realCommentThreadIds = new Set();
+  for (const c of stampedCommentsRaw) {
+    if (c && !c._commentsPending && c.threadNodeId) {
+      realCommentThreadIds.add(String(c.threadNodeId));
+    }
+  }
+  let stampedComments = stampedCommentsRaw.filter((c) => {
+    if (!c?._commentsPending) return true;
+    return !realCommentThreadIds.has(String(c.threadNodeId || ''));
+  });
+  // After GraphQL shell merge, deferred threads may have zero comment rows.
+  // Inject placeholders so resolved threads remain visible until expand.
+  try {
+    const pure =
+      typeof globalThis !== 'undefined'
+        ? (globalThis as any).PRModalReviewThreads
+        : null;
+    const shellThreads = Array.isArray(page?.threads) ? page.threads : [];
+    if (
+      page?.source === 'graphql' &&
+      dir !== 'ids' &&
+      dir !== 'refresh' &&
+      typeof pure?.ensureShellPlaceholderComments === 'function'
+    ) {
+      stampedComments = pure.ensureShellPlaceholderComments(
+        shellThreads,
+        stampedComments
+      );
+    } else if (
+      page?.source === 'graphql' &&
+      dir !== 'ids' &&
+      dir !== 'refresh'
+    ) {
+      const covered = new Set(
+        stampedComments
+          .map((c: any) => (c?.threadNodeId ? String(c.threadNodeId) : ''))
+          .filter(Boolean)
+      );
+      for (const t of shellThreads) {
+        const tid = t?.threadNodeId ? String(t.threadNodeId) : '';
+        if (!tid || !/^PRRT_/i.test(tid) || covered.has(tid)) continue;
+        if (t.commentsLoaded === true) continue;
+        stampedComments.push({
+          id: `shell:${tid}`,
+          author: '',
+          body: '',
+          path: t.path || '',
+          line: t.line ?? null,
+          side: t.side || 'RIGHT',
+          threadNodeId: tid,
+          resolved: Boolean(t.resolved),
+          outdated: Boolean(t.outdated),
+          pending: false,
+          _commentsPending: true,
+          commentsLoaded: false,
+        });
+        covered.add(tid);
+      }
+    }
+  } catch {
+    /* keep stampedComments */
+  }
 
   const thById = new Map(
     prevTh.map((t) => [String(t.threadNodeId), t]).filter(([k]) => k && k !== 'undefined')
   );
   for (const t of page?.threads || []) {
     if (t?.threadNodeId) {
-      thById.set(String(t.threadNodeId), {
-  // @ts-expect-error classic fetch dynamic shapes
-        ...(thById.get(String(t.threadNodeId)) || {}),
+      const prevT = thById.get(String(t.threadNodeId)) || {};
+      const mergedT = {
+        // @ts-expect-error classic fetch dynamic shapes
+        ...prevT,
         ...t,
-      });
+      };
+      // GraphQL shell defer: page.commentsLoaded false wins over prior REST paint
+      if (
+        page?.source === 'graphql' &&
+        t.commentsLoaded === false &&
+        dir !== 'ids' &&
+        dir !== 'refresh'
+      ) {
+        mergedT.commentsLoaded = false;
+        mergedT.commentIds = Array.isArray(t.commentIds) ? t.commentIds : [];
+      } else if (prevT.commentsLoaded === true || t.commentsLoaded === true) {
+        mergedT.commentsLoaded = true;
+      } else if (t.commentsLoaded === false || prevT.commentsLoaded === false) {
+        mergedT.commentsLoaded =
+          Array.isArray(mergedT.commentIds) && mergedT.commentIds.length > 0
+            ? true
+            : false;
+      }
+      thById.set(String(t.threadNodeId), mergedT);
     }
   }
   const reviewThreads = [...thById.values()];
@@ -2720,16 +3938,34 @@ function mergeReviewThreadsPageIntoDetail(detail: any, page: any, direction: any
   }
 
   // Windows meet when no hidden left or cursors exhausted both ways
-  const totalCount =
-    typeof page?.totalCount === 'number'
+  const isRest = page?.source === 'rest';
+  // REST pages: totalCount is thread-shaped (not PR.review_comments). Prefer
+  // page.hasMore for dual-window flags — never invent hasMore from a
+  // comment-count vs thread-count gap (Diff auto load-all flicker).
+  const totalCount = isRest
+    ? Boolean(page?.hasMore)
+      ? Math.max(
+          reviewThreads.length,
+          typeof page?.totalCount === 'number'
+            ? page.totalCount
+            : 0,
+          Number(prevMeta.totalCount) || 0
+        )
+      : reviewThreads.length
+    : typeof page?.totalCount === 'number'
       ? page.totalCount
       : Number(prevMeta.totalCount) || reviewThreads.length;
   const loadedThreadCount = reviewThreads.length;
-  const hiddenCount = Math.max(0, totalCount - loadedThreadCount);
+  const hiddenCount = isRest
+    ? Boolean(page?.hasMore)
+      ? Math.max(1, totalCount - loadedThreadCount)
+      : 0
+    : Math.max(0, totalCount - loadedThreadCount);
 
   // Drop ids from oldest that are now in newest (overlap)
   for (const id of newestIds) oldestIds.delete(id);
 
+  const restHasMore = isRest && Boolean(page?.hasMore);
   const meta = {
     ...prevMeta,
     totalCount,
@@ -2742,14 +3978,34 @@ function mergeReviewThreadsPageIntoDetail(detail: any, page: any, direction: any
         : (Number(prevMeta.pagesLoaded) || 0) + (page?.pageCount || 1),
     newestStartCursor,
     newestEndCursor,
-    hasOlder: hiddenCount > 0 && hasOlder,
+    hasOlder: isRest
+      ? restHasMore && (dir === 'newest' || dir === 'older' || !dir)
+      : hiddenCount > 0 && hasOlder,
     oldestStartCursor,
     oldestEndCursor,
-    hasNewerFromOldest: hiddenCount > 0 && hasNewerFromOldest,
+    hasNewerFromOldest: isRest
+      ? restHasMore && (dir === 'oldest' || dir === 'newer')
+      : hiddenCount > 0 && hasNewerFromOldest,
     newestThreadIds: [...newestIds],
     oldestThreadIds: [...oldestIds],
-    hasMore: hiddenCount > 0,
+    hasMore: isRest ? restHasMore : hiddenCount > 0,
     endCursor: newestStartCursor,
+    // REST multi-page bookkeeping for load-all
+    ...(isRest
+      ? {
+          source: 'rest',
+          restPage:
+            page?.restPage != null
+              ? Number(page.restPage)
+              : Number(prevMeta.restPage) || 1,
+          restPerPage:
+            page?.restPerPage != null
+              ? Number(page.restPerPage)
+              : Number(prevMeta.restPerPage) || null,
+        }
+      : page?.source
+        ? { source: page.source }
+        : {}),
   };
 
   let next = {
@@ -3186,20 +4442,54 @@ async function fetchPrDetail(
       ` skipReviewThreads=${skipReviewThreads} threadsMaxPages=${threadsMaxPages}`
   );
 
-  // Lean core: pull identity + viewer + autolinks only.
+  // Lean core: pull + issue identity + viewer + autolinks.
+  // Issue REST is fetched in parallel with pull — pulls occasionally omit or
+  // lag milestone/labels after modal writes; hard/soft reopen must match `gh api`.
   // files / issue comments / reviews / commits / checks / development are
   // independent host fetches (do not block header + description paint).
-  const PARALLEL_REST_KEYS = ['pull', 'viewerLogin', 'autolinks'];
+  const PARALLEL_REST_KEYS = ['pull', 'issue', 'viewerLogin', 'autolinks'];
   const tParallel0 = fetchNowMs();
   const batchOpt = { batchStart: tParallel0 };
-  let [pr, viewerLogin, autolinks] = await Promise.all([
+  // no-store + no-cache + cache-busted URL: hard reopen after modal milestone set
+  // must not paint a stale browser/SW HTTP cache that predates the write.
+  const bust = () =>
+    `_prp=${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+  const noCache = {
+    cache: 'no-store' as RequestCache,
+    headers: {
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      Pragma: 'no-cache',
+    },
+  };
+  let [pr, issue, viewerLogin, autolinks] = await Promise.all([
     timedFetch(
       timings,
       'pull',
-      apiJson(`${base}/pulls/${n}`, fetchImpl, token),
+      // Bust intermediary caches so hard-reopen after modal meta writes sees
+      // the same milestone/title as authenticated `gh api` (e2e MB3/MB7).
+      apiJson(`${base}/pulls/${n}?${bust()}`, fetchImpl, token, noCache),
       null,
       batchOpt
     ),
+    token
+      ? timedFetch(
+          timings,
+          'issue',
+          apiJson(`${base}/issues/${n}?${bust()}`, fetchImpl, token, noCache).catch(
+            (err) => {
+              if (
+                err?.name === 'AbortError' ||
+                /aborted|AbortError/i.test(String(err?.message || ''))
+              ) {
+                throw err;
+              }
+              return null;
+            }
+          ),
+          null,
+          batchOpt
+        )
+      : Promise.resolve(null),
     timedFetch(
       timings,
       'viewerLogin',
@@ -3215,6 +4505,70 @@ async function fetchPrDetail(
       batchOpt
     ),
   ]);
+  // Prefer issue REST for people-meta identity when present (milestone/labels/
+  // assignees). Pull can lag or omit milestone after modal set (soft/hard reopen).
+  if (pr && issue && typeof issue === 'object') {
+    if (issue.milestone) {
+      pr = { ...pr, milestone: issue.milestone };
+    }
+    // Labels/assignees: prefer issue arrays when pull omitted them.
+    if (
+      Array.isArray(issue.labels) &&
+      (!Array.isArray(pr.labels) || pr.labels.length === 0) &&
+      issue.labels.length > 0
+    ) {
+      pr = { ...pr, labels: issue.labels };
+    }
+    if (
+      Array.isArray(issue.assignees) &&
+      (!Array.isArray(pr.assignees) || pr.assignees.length === 0) &&
+      issue.assignees.length > 0
+    ) {
+      pr = { ...pr, assignees: issue.assignees };
+    }
+  }
+  // One immediate re-GET when parallel path missed milestone (soft-fail / race).
+  // Further host-side polls happen only when openModal expects a board (authority).
+  // Always no-store + bust so hard reopen cannot stick on a pre-write HTTP cache.
+  if (pr && !pr.milestone && token) {
+    try {
+      const issueRetry = await timedFetch(
+        timings,
+        'issueMilestoneRetry',
+        apiJson(`${base}/issues/${n}?${bust()}`, fetchImpl, token, noCache),
+        null,
+        batchOpt
+      );
+      if (issueRetry?.milestone) {
+        pr = { ...pr, milestone: issueRetry.milestone };
+        console.log(
+          `[pr-plus] fetchPrDetail issue milestone retry: #${issueRetry.milestone.number || '?'} ${issueRetry.milestone.title || ''}`
+        );
+      } else {
+        const pullRetry = await timedFetch(
+          timings,
+          'pullMilestoneRetry',
+          apiJson(`${base}/pulls/${n}?${bust()}`, fetchImpl, token, noCache),
+          null,
+          batchOpt
+        );
+        if (pullRetry?.milestone) {
+          pr = { ...pr, milestone: pullRetry.milestone };
+          console.log(
+            `[pr-plus] fetchPrDetail pull milestone retry: #${pullRetry.milestone.number || '?'} ${pullRetry.milestone.title || ''}`
+          );
+        }
+      }
+    } catch (err: any) {
+      if (
+        err?.name === 'AbortError' ||
+        /aborted|AbortError/i.test(String(err?.message || ''))
+      ) {
+        throw err;
+      }
+      /* soft */
+    }
+  }
   const parallelWall = fetchNowMs() - tParallel0;
   // @ts-expect-error classic fetch dynamic shapes
   timings.coreParallelWall = Math.round(parallelWall);
@@ -3356,6 +4710,102 @@ async function fetchPrDetail(
         token
       )} maxPages=${threadsMaxPages})`
     );
+  }
+
+  // REST fallback when GraphQL is rate-limited or returns empty. Diff inline
+  // threads group from reviewComments; without this, ⌥J/K nav has zero threads
+  // after GraphQL exhaustion while REST core quota remains.
+  if (
+    token &&
+    threadsMaxPages > 0 &&
+    !(Array.isArray(reviewThreadBundle?.comments) && reviewThreadBundle.comments.length > 0)
+  ) {
+    try {
+      const restPage = await timedFetch(
+        timings,
+        'reviewThreadsRest',
+        fetchPrCommentsPage(
+          owner,
+          repo,
+          n,
+          'review',
+          { page: 1, perPage: 100, preferNewest: true },
+          fetchImpl,
+          token,
+          ctx
+        ).catch((err) => {
+          if (
+            err?.name === 'AbortError' ||
+            /aborted|AbortError/i.test(String(err?.message || ''))
+          ) {
+            throw err;
+          }
+          return null;
+        }),
+        (p) => `(${(p?.items || []).length} rest review comments)`
+      );
+      const items = Array.isArray(restPage?.items) ? restPage.items : [];
+      if (items.length) {
+        const byId = new Map();
+        for (const c of items) {
+          if (c && c.id != null) byId.set(String(c.id), c);
+        }
+        const roots = items.filter((c) => {
+          if (!c || c.id == null) return false;
+          const parent = c.inReplyToId ?? c.in_reply_to_id ?? null;
+          return parent == null || !byId.has(String(parent));
+        });
+        const threads = roots.map((r) => {
+          const replyIds = items
+            .filter(
+              (c) =>
+                c &&
+                String(c.inReplyToId ?? c.in_reply_to_id ?? '') === String(r.id)
+            )
+            .map((c) => c.id);
+          const threadNodeId = r.nodeId || `rest-thread-${r.id}`;
+          const commentIds = [r.id, ...replyIds];
+          for (const cid of commentIds) {
+            const row = byId.get(String(cid));
+            if (row) row.threadNodeId = threadNodeId;
+          }
+          return {
+            threadNodeId,
+            resolved: false,
+            outdated: Boolean(r.outdated),
+            path: r.path || '',
+            line: r.line ?? r.originalLine ?? null,
+            startLine: r.startLine ?? null,
+            side: r.side || 'RIGHT',
+            commentIds,
+          };
+        });
+        reviewThreadBundle = {
+          threads,
+          comments: items,
+          hasMore: Boolean(restPage?.meta?.hasMore ?? restPage?.hasMore),
+          endCursor: null,
+          pageCount: 1,
+          totalCount: items.length,
+        };
+        console.log(
+          `[pr-plus] fetchPrDetail reviewThreads: REST fallback ` +
+            `${threads.length} threads, ${items.length} comments`
+        );
+      }
+    } catch (err: any) {
+      if (
+        err?.name === 'AbortError' ||
+        /aborted|AbortError/i.test(String(err?.message || ''))
+      ) {
+        throw err;
+      }
+      console.log(
+        `[pr-plus] fetchPrDetail reviewThreads REST fallback soft-fail: ${
+          err?.message || err
+        }`
+      );
+    }
   }
 
   const reviewThreads = reviewThreadBundle?.threads || [];
@@ -3652,7 +5102,12 @@ async function fetchPrDetail(
     },
     // Populated by independent fetchPrReviews
     reviews: Array.isArray(reviews) ? reviews : [],
-    // GraphQL first page (or empty if skipReviewThreads) — more via fetchReviewThreadsPage
+    // Official REST PR.review_comments count (for empty short-circuit / paging)
+    reviewCommentsCount:
+      pr.review_comments != null && Number.isFinite(Number(pr.review_comments))
+        ? Number(pr.review_comments)
+        : null,
+    // REST/GraphQL threads window — more via fetchReviewThreadsPage
     reviewComments: Array.isArray(reviewComments) ? reviewComments : [],
     reviewCommentsMeta,
     reviewThreads: Array.isArray(reviewThreads) ? reviewThreads : [],
@@ -4666,14 +6121,20 @@ async function toggleCommentReaction(
             reaction { content }
           }
         }`;
-    await apiGraphql(
-      mutation,
-      { id: nodeId, content: gqlContent },
-      fetchImpl,
-      token,
-      ctx
-    );
-    return { content, reacted: nextReacted };
+    try {
+      await apiGraphql(
+        mutation,
+        { id: nodeId, content: gqlContent },
+        fetchImpl,
+        token,
+        ctx
+      );
+      return { content, reacted: nextReacted };
+    } catch {
+      // GraphQL can fail when nodeId is a PullRequest id the schema rejects,
+      // or reaction already exists — fall through to REST issue reactions.
+      // Without this, optimistic body pills flash then vanish (e2e MB6).
+    }
   }
 
   // REST fallback
@@ -5847,12 +7308,19 @@ const fetchApi = {
   fetchPullReviewThreads,
   fetchPullReviewThreadsBundle,
   fetchReviewThreadsPage,
+  chooseReviewThreadsTransportLocal,
+  buildRestReviewThreadsPageFromCommentsLocal,
   fetchReviewThreadsByIds,
   collectUnresolvedThreadNodeIds,
   dropReviewThreadsFromDetail,
   mapGraphqlReviewCommentNode,
   mergeReviewThreadsPageIntoDetail,
   emptyReviewThreadsMeta,
+  getGraphqlCostLog,
+  clearGraphqlCostLog,
+  summarizeGraphqlCostLog,
+  injectRateLimitCostFieldLocal,
+  labelGraphqlOperationLocal,
   REVIEW_THREADS_API_MAX,
   REVIEW_THREADS_PAGE_SIZE,
   postIssueComment,

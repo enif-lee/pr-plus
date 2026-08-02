@@ -129,6 +129,267 @@ export function pickMeta(flat: Record<string, any> | null | undefined): Record<s
   return out;
 }
 
+/**
+ * Meta keys whose soft-refresh projections must not resurrect after an App
+ * write-through. Bumps metaRefreshGen only — never openGen / detailFetchGen.
+ * Does NOT include viewerPendingReview (pending epoch / forceDrop handles that).
+ */
+export const SUPERSEDES_META_REFRESH_KEYS = [
+  'assignees',
+  'labels',
+  'requestedReviewers',
+  'milestone',
+  'title',
+  'body',
+  'draft',
+  'state',
+  'merged',
+  'baseRef',
+  'subscribed',
+] as const;
+
+export function patchTouchesSupersedeMeta(
+  patch: Record<string, any> | null | undefined
+): boolean {
+  if (!patch || typeof patch !== 'object') return false;
+  return SUPERSEDES_META_REFRESH_KEYS.some((k) =>
+    Object.prototype.hasOwnProperty.call(patch, k)
+  );
+}
+
+/** Drop supersede-meta keys so a stale soft-refresh cannot overwrite them. */
+export function stripSupersededMetaFields(
+  flat: Record<string, any> | null | undefined
+): Record<string, any> {
+  if (!flat || typeof flat !== 'object') return {};
+  const out = { ...flat };
+  for (const k of SUPERSEDES_META_REFRESH_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(out, k)) delete out[k];
+  }
+  return out;
+}
+
+/** Keys that App meta write-through owns until network core catches up. */
+export const PEOPLE_META_AUTHORITY_KEYS = [
+  'labels',
+  'assignees',
+  'requestedReviewers',
+  'milestone',
+] as const;
+
+/** How long a non-empty people-meta write shields core revalidate from stale REST. */
+export const PEOPLE_META_AUTHORITY_TTL_MS = 120_000;
+/**
+ * Clear-all writes (empty labels/assignees) only need a short shield — long empty
+ * authority made UI show "No labels" while GitHub already had chips again
+ * (external edit / soft-reset session reuse), which felt broken.
+ */
+export const PEOPLE_META_CLEAR_TTL_MS = 12_000;
+
+function labelNameKey(l: any): string {
+  return String(typeof l === 'string' ? l : l?.name || '')
+    .trim()
+    .toLowerCase();
+}
+
+function peopleListFingerprint(list: any): string {
+  return (Array.isArray(list) ? list : [])
+    .map((x) =>
+      typeof x === 'string'
+        ? String(x).trim().toLowerCase()
+        : labelNameKey(x) || String(x?.login || '').trim().toLowerCase()
+    )
+    .filter(Boolean)
+    .sort()
+    .join('\0');
+}
+
+function milestoneFp(m: any): string {
+  if (m == null) return '';
+  if (typeof m === 'number') return String(m);
+  const n = m.number != null ? String(m.number) : '';
+  const t = String(m.title || '').trim().toLowerCase();
+  return `${n}\0${t}`;
+}
+
+export function peopleMetaFingerprint(key: string, value: any): string {
+  if (key === 'milestone') return milestoneFp(value);
+  return peopleListFingerprint(value);
+}
+
+/**
+ * Snapshot of people/meta after a confirmed GitHub write. Used so open /
+ * detail-page revalidate cannot flash the post-write chips then wipe them
+ * with a stale core GET (labels briefly appear then vanish).
+ */
+export function buildPeopleMetaAuthority(
+  identity: {
+    owner?: string | null;
+    repo?: string | null;
+    number?: number | string | null;
+  },
+  patch: Record<string, any> | null | undefined,
+  opts: { gen?: number; at?: number } = {}
+): Record<string, any> | null {
+  if (!patch || typeof patch !== 'object') return null;
+  const fields: Record<string, any> = {};
+  for (const k of PEOPLE_META_AUTHORITY_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(patch, k)) {
+      fields[k] = patch[k];
+    }
+  }
+  if (!Object.keys(fields).length) return null;
+  const n = Number(identity?.number);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return {
+    owner: String(identity?.owner || '').toLowerCase(),
+    repo: String(identity?.repo || '').toLowerCase(),
+    number: n,
+    gen: Number(opts.gen) || 0,
+    at: Number(opts.at) || Date.now(),
+    fields,
+  };
+}
+
+function authorityMatchesIdentity(
+  authority: any,
+  identity: {
+    owner?: string | null;
+    repo?: string | null;
+    number?: number | string | null;
+  }
+): boolean {
+  if (!authority || typeof authority !== 'object') return false;
+  const n = Number(identity?.number);
+  if (!Number.isFinite(n) || n <= 0) return false;
+  if (Number(authority.number) !== n) return false;
+  const o = String(identity?.owner || '').toLowerCase();
+  const r = String(identity?.repo || '').toLowerCase();
+  if (authority.owner && o && authority.owner !== o) return false;
+  if (authority.repo && r && authority.repo !== r) return false;
+  return true;
+}
+
+function isEmptyPeopleMetaValue(key: string, value: any): boolean {
+  if (key === 'milestone') return value == null || milestoneFp(value) === '';
+  return peopleListFingerprint(value) === '';
+}
+
+/**
+ * Overlay confirmed people-meta writes onto a network core flat when REST is
+ * still missing the chips (or still shows pre-write values).
+ *
+ * Policy:
+ * - **Non-empty write** (add labels): force authority while net differs (TTL 120s).
+ * - **Empty write** (clear labels): force empty only briefly (CLEAR_TTL) so a
+ *   stale core GET cannot resurrect chips; after that, non-empty network wins
+ *   (external re-add / session reuse after soft-reset).
+ * - When net matches authority fingerprint → fullyMatched (caller drops auth).
+ *
+ * @returns {{ flat: object, fullyMatched: boolean }}
+ */
+export function applyPeopleMetaAuthorityToCore(
+  coreFlat: Record<string, any> | null | undefined,
+  authority: any,
+  identity: {
+    owner?: string | null;
+    repo?: string | null;
+    number?: number | string | null;
+  },
+  opts: { now?: number; ttlMs?: number; clearTtlMs?: number } = {}
+): { flat: Record<string, any> | null | undefined; fullyMatched: boolean } {
+  if (!coreFlat || typeof coreFlat !== 'object') {
+    return { flat: coreFlat, fullyMatched: false };
+  }
+  if (!authorityMatchesIdentity(authority, identity)) {
+    return { flat: coreFlat, fullyMatched: false };
+  }
+  const now = Number(opts.now) || Date.now();
+  const age = now - Number(authority.at || 0);
+  const ttl =
+    Number.isFinite(opts.ttlMs) && Number(opts.ttlMs) >= 0
+      ? Number(opts.ttlMs)
+      : PEOPLE_META_AUTHORITY_TTL_MS;
+  const clearTtl =
+    Number.isFinite(opts.clearTtlMs) && Number(opts.clearTtlMs) >= 0
+      ? Number(opts.clearTtlMs)
+      : PEOPLE_META_CLEAR_TTL_MS;
+  if (age > ttl) {
+    return { flat: coreFlat, fullyMatched: false };
+  }
+  const fields =
+    authority.fields && typeof authority.fields === 'object'
+      ? authority.fields
+      : {};
+  const keys = Object.keys(fields);
+  if (!keys.length) return { flat: coreFlat, fullyMatched: false };
+
+  let allMatched = true;
+  let appliedShield = false;
+  const out = { ...coreFlat };
+  for (const k of keys) {
+    const authVal = fields[k];
+    const netVal = coreFlat[k];
+    const authFp = peopleMetaFingerprint(k, authVal);
+    const netFp = peopleMetaFingerprint(k, netVal);
+    if (authFp === netFp) {
+      continue;
+    }
+    allMatched = false;
+    const authEmpty = isEmptyPeopleMetaValue(k, authVal);
+    const netEmpty = isEmptyPeopleMetaValue(k, netVal);
+
+    // Clear-write: only shield empty while net is still stale-nonempty briefly.
+    if (authEmpty) {
+      if (!netEmpty && age > clearTtl) {
+        // Network has chips again after our clear window — abandon shield.
+        continue;
+      }
+      // Within clear window (or net already empty): keep empty authority.
+      appliedShield = true;
+      out[k] = authVal;
+      continue;
+    }
+
+    // Non-empty write: keep until net catches up (or overall TTL).
+    appliedShield = true;
+    out[k] = authVal;
+  }
+  if (allMatched) return { flat: out, fullyMatched: true };
+  if (!appliedShield) {
+    // Every differing key abandoned (e.g. clear past TTL) → pure network
+    return { flat: coreFlat, fullyMatched: false };
+  }
+  return { flat: out, fullyMatched: false };
+}
+
+/** Comment / thread / pending keys only — never full detail spread. */
+export const COMMENT_PATCH_KEYS = [
+  'comments',
+  'commentsMeta',
+  'timelineEvents',
+  'reviewComments',
+  'reviewThreads',
+  'reviewCommentsMeta',
+  'reviewThreadsMeta',
+  'viewerPendingReview',
+  'bodyReactions',
+  'reviews',
+] as const;
+
+export function pickCommentPatchKeys(
+  detail: Record<string, any> | null | undefined
+): Record<string, any> {
+  if (!detail || typeof detail !== 'object') return {};
+  const out: Record<string, any> = {};
+  for (const k of COMMENT_PATCH_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(detail, k)) {
+      out[k] = detail[k];
+    }
+  }
+  return out;
+}
+
 function mergeAvatarMaps(a, b) {
   return {
     ...(a && typeof a === 'object' ? a : {}),
@@ -355,6 +616,19 @@ export function applyMeta(store, metaPartial, opts: ApplyOpts = {}) {
     ) {
       continue;
     }
+    // Lagging network core often reports milestone:null right after a modal set.
+    // Keep a non-null store milestone unless the write is an explicit App patch
+    // clear (source=patch with null). Soft reopen: GH has board, pull lags.
+    if (
+      k === 'milestone' &&
+      v == null &&
+      next[k] != null &&
+      opts.trustEmpty &&
+      opts.source &&
+      String(opts.source).startsWith('network')
+    ) {
+      continue;
+    }
     next[k] = v;
   }
   store.meta = next;
@@ -394,15 +668,31 @@ export function applyComments(store, comments, opts: ApplyOpts = {}) {
   const prevEvents = Array.isArray(store.comments?.timelineEvents)
     ? store.comments.timelineEvents
     : [];
+  // Union by id: meta refresh / local optimistics must not be wiped by a
+  // lagging comments side-fetch that still has the pre-write event list.
+  let timelineEvents = prevEvents;
+  if (opts.timelineEvents != null) {
+    const incoming = Array.isArray(opts.timelineEvents)
+      ? opts.timelineEvents
+      : [];
+    const byId = new Map<string, any>();
+    for (const e of prevEvents) {
+      if (e && e.id != null) byId.set(String(e.id), e);
+    }
+    for (const e of incoming) {
+      if (e && e.id != null) byId.set(String(e.id), e);
+    }
+    timelineEvents =
+      byId.size > 0
+        ? [...byId.values()]
+        : incoming.length
+          ? incoming.slice()
+          : prevEvents.slice();
+  }
   store.comments = {
     items: Array.isArray(comments) ? comments.slice() : [],
     pageMeta: opts.pageMeta != null ? opts.pageMeta : store.comments.pageMeta,
-    timelineEvents:
-      opts.timelineEvents != null
-        ? Array.isArray(opts.timelineEvents)
-          ? opts.timelineEvents.slice()
-          : []
-        : prevEvents,
+    timelineEvents,
     settled: opts.settled !== false,
   };
   return store;
@@ -502,9 +792,12 @@ export function applyPendingReview(store, pending) {
  * GitHub — must overwrite list-sketch / cache so deleted labels do not
  * resurrect on reopen (applyMeta otherwise keeps non-empty previous).
  */
-export function applyCorePayload(store, coreFlat) {
+export function applyCorePayload(store, coreFlat, opts: ApplyOpts = {}) {
   if (!store || !coreFlat) return store;
-  applyMeta(store, pickMeta(coreFlat), {
+  const metaSrc = opts.skipSupersedeMeta
+    ? stripSupersededMetaFields(coreFlat)
+    : coreFlat;
+  applyMeta(store, pickMeta(metaSrc), {
     source: coreFlat._source || 'network',
     sketch: false,
     trustEmpty: true,

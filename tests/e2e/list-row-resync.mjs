@@ -200,23 +200,104 @@ function extensionDomProbe() {
   `);
 }
 
-async function main() {
-  const failures = [];
-  const run = async (name, fn) => {
-    try {
-      await step(name, fn);
-    } catch (e) {
-      failures.push({ name, err: e });
-      log(`FAIL: ${name}: ${e.message || e}`);
-    }
+
+/**
+ * Ordered e2e steps for rstest.
+ * @returns {{ name: string, fn: () => unknown | Promise<unknown> }[]}
+ */
+export function getSteps() {
+  /** @type {{ name: string, fn: () => unknown | Promise<unknown> }[]} */
+  const steps = [];
+  const run = (name, fn) => {
+    steps.push({ name, fn });
   };
 
-  log('=== list-row-resync (UI) start ===');
-  ensureBrowser();
+  /** @type {{ found?: boolean, hasBug?: boolean, labels?: string[] } | null} */
+  let baseline = null;
+  /** @type {{ found?: boolean, hasBug?: boolean, labels?: string[] } | null} */
+  let afterApply = null;
+  /** @type {{ found?: boolean, hasBug?: boolean, labels?: string[] } | null} */
+  let afterClose = null;
 
-  let baseline;
+  /** True when label name is exactly/contains bug (case-insensitive). */
+  function hasBugLabel(probe) {
+    return Boolean(
+      probe?.hasBug ||
+        (probe?.labels || []).some(
+          (l) => String(l).toLowerCase() === 'bug' || /\bbug\b/i.test(String(l))
+        )
+    );
+  }
 
-  await run('open pulls + extension decorations', () => {
+  /** Force-toggle bug label via aside picker. wantSelected=true → ensure applied. */
+  function forceBugLabel(wantSelected) {
+    const open = openLabelsPicker();
+    assert(open.clicked, `open labels picker: ${JSON.stringify(open)}`);
+    waitMs(700);
+    assert(
+      evalInPage(`!!document.querySelector('.prp-sselect-panel')`),
+      'labels panel missing after Add label…'
+    );
+    const state = evalInPage(`
+      (function () {
+        var want = ${wantSelected ? 'true' : 'false'};
+        var panel = document.querySelector('.prp-sselect-panel');
+        if (!panel) return { panel: false };
+        var items = panel.querySelectorAll('button.prp-sselect-item');
+        for (var i = 0; i < items.length; i++) {
+          var lab = items[i].querySelector('.prp-sselect-item__label');
+          var t = (lab ? lab.textContent : items[i].textContent || '').trim();
+          if (t === 'bug' || /^bug$/i.test(t)) {
+            var sel = items[i].getAttribute('aria-selected') === 'true';
+            if (sel !== want) items[i].click();
+            return {
+              panel: true,
+              found: true,
+              wasSelected: sel,
+              nowSelected: items[i].getAttribute('aria-selected') === 'true',
+            };
+          }
+        }
+        return { panel: true, found: false };
+      })()
+    `);
+    assert(state.found, `bug label option missing in picker: ${JSON.stringify(state)}`);
+    waitMs(350);
+    // Apply if dirty (preview button present)
+    const preview = evalInPage(`
+      (function () {
+        var b = Array.prototype.slice
+          .call(document.querySelectorAll('button'))
+          .find(function (x) {
+            return /apply labels/i.test(x.textContent || '');
+          });
+        return b ? (b.textContent || '').trim() : null;
+      })()
+    `);
+    if (preview) {
+      const applied = applyLabels();
+      assert(applied.ok, `Apply labels failed: ${JSON.stringify(applied)}`);
+      waitMs(600);
+    } else {
+      // Selection may already match — Esc panel
+      abPressEscape();
+      waitMs(200);
+    }
+    return state;
+  }
+
+  function abPressEscape() {
+    evalInPage(`
+      (() => {
+        document.documentElement.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+        );
+        return true;
+      })()
+    `);
+  }
+
+  run('open pulls + extension decorations', () => {
     openPulls();
     const ext = extensionDomProbe();
     log(`  ext=${JSON.stringify(ext)}`);
@@ -224,142 +305,185 @@ async function main() {
     baseline = probeListRow(DEMO_PR);
     log(`  baseline=#${DEMO_PR} ${JSON.stringify(baseline)}`);
     assert(baseline.found, `PR #${DEMO_PR} not on open pulls`);
+    assert(
+      typeof baseline.title === 'string' && baseline.title.length > 2,
+      `list row title missing: ${JSON.stringify(baseline)}`
+    );
   });
 
-  await run(`open PR #${DEMO_PR} shell`, () => {
+  run(`open PR #${DEMO_PR} shell`, () => {
     openPr(DEMO_PR);
     const ov = evalInPage(`!!document.querySelector('.prp-overlay')`);
     assert(ov, 'overlay missing');
     waitMs(600);
-    log(`  aside=${JSON.stringify(probeAsideLabels())}`);
+    const aside = probeAsideLabels();
+    log(`  aside=${JSON.stringify(aside)}`);
+    assert(aside.open, 'conversation aside missing');
   });
 
-  await run('ensure bug label applied (write-through target)', () => {
-    const aside0 = probeAsideLabels();
-    log(`  aside before=${JSON.stringify(aside0)}`);
-    if (!aside0.hasBug) {
-      const open = openLabelsPicker();
-      log(`  open picker=${JSON.stringify(open)}`);
-      assert(open.clicked, 'could not open labels picker');
-      waitMs(700);
-      assert(
-        evalInPage(`!!document.querySelector('.prp-sselect-panel')`),
-        'labels panel missing'
+  run('mutation: reset bug label off (known pre-state)', () => {
+    // True mutation tests require a known start: bug must be OFF before we apply it.
+    // List may still show stale chips while aside already paints authoritative
+    // "No labels" (prior suite write-through). Clear via product picker so both
+    // surfaces settle — never leave list chips without a modal write-through.
+    let aside = probeAsideLabels();
+    let under = probeListRow(DEMO_PR);
+    if (aside.hasBug || hasBugLabel(under)) {
+      log(
+        `  pre-state has bug — removing first aside=${aside.hasBug} list=${hasBugLabel(under)}`
       );
-      const pick = pickLabelNamed('bug');
-      log(`  pick=${JSON.stringify(pick)}`);
-      assert(pick.ok, 'could not pick bug');
-      waitMs(400);
-      const applyPreview = evalInPage(`
-        (function () {
-          var b = Array.prototype.slice
-            .call(document.querySelectorAll('button'))
-            .find(function (x) {
-              return /apply labels/i.test(x.textContent || '');
-            });
-          return b ? (b.textContent || '').trim() : null;
-        })()
-      `);
-      log(`  applyPreview=${applyPreview}`);
-      const applied = applyLabels();
-      log(`  apply=${JSON.stringify(applied)}`);
-      assert(applied.ok, 'Apply labels failed');
-      const aside = waitAsideHasBug(10000);
-      log(`  aside after=${JSON.stringify(aside)}`);
-      assert(aside.hasBug, 'aside still missing bug after apply');
-    } else {
-      log('  bug already on PR — skip re-apply');
+      // If aside is already empty but list is dirty, force a set→clear cycle so
+      // the product applies labels=[] write-through to the native row.
+      if (!aside.hasBug && hasBugLabel(under)) {
+        forceBugLabel(true);
+        const tSet = Date.now();
+        aside = probeAsideLabels();
+        while (!aside.hasBug && Date.now() - tSet < 10_000) {
+          waitMs(300);
+          aside = probeAsideLabels();
+        }
+        assert(aside.hasBug, `pre-state force-on failed: ${JSON.stringify(aside)}`);
+      }
+      forceBugLabel(false);
+      const t0 = Date.now();
+      aside = probeAsideLabels();
+      under = probeListRow(DEMO_PR);
+      while (
+        (aside.hasBug || hasBugLabel(under)) &&
+        Date.now() - t0 < 12_000
+      ) {
+        waitMs(350);
+        aside = probeAsideLabels();
+        under = probeListRow(DEMO_PR);
+      }
     }
+    assert(!aside.hasBug, `pre-state: bug still on after reset: ${JSON.stringify(aside)}`);
+    under = probeListRow(DEMO_PR);
+    log(`  pre-state list=${JSON.stringify(under)} aside=${JSON.stringify(aside)}`);
+    assert(!hasBugLabel(under), `pre-state list still has bug: ${JSON.stringify(under)}`);
   });
 
-  await run('list row under shell has bug (write-through)', () => {
-    waitMs(500);
+  run('mutation: apply bug label (aside + write-through)', () => {
+    const aside0 = probeAsideLabels();
+    assert(!aside0.hasBug, `expected no bug before apply: ${JSON.stringify(aside0)}`);
+    const pick = forceBugLabel(true);
+    log(`  forceBug on=${JSON.stringify(pick)}`);
+    const aside = waitAsideHasBug(12_000);
+    log(`  aside after=${JSON.stringify(aside)}`);
+    assert(aside.hasBug, `aside missing bug after apply: ${JSON.stringify(aside)}`);
+    assert(!aside.hasNoLabels, 'aside still shows No labels after apply');
+  });
+
+  run('mutation: list row under shell reflects bug (write-through hard)', () => {
     let under = probeListRow(DEMO_PR);
     const t0 = Date.now();
-    while (!under.hasBug && Date.now() - t0 < 3000) {
+    while (!hasBugLabel(under) && Date.now() - t0 < 8000) {
       waitMs(300);
       under = probeListRow(DEMO_PR);
     }
     log(`  under=${JSON.stringify(under)}`);
-    // Soft signal: write-through may lag; close path is the hard assert
-    if (!under.hasBug) {
-      log('  note: list under shell not yet patched — will recheck after close');
-    }
+    assert(under.found, 'list row missing under shell');
+    assert(
+      hasBugLabel(under),
+      `write-through: list row missing bug under shell; labels=${JSON.stringify(under.labels)}`
+    );
+    assert(
+      (under.labels || []).some((l) => String(l).toLowerCase() === 'bug'),
+      `expected exact "bug" label token: ${JSON.stringify(under.labels)}`
+    );
+    afterApply = under;
   });
 
-  await run('close shell → list shows bug label', () => {
+  run('mutation: close shell → list still shows bug', () => {
     closeOverlay();
-    waitMs(1000);
+    waitMs(800);
     const ov = evalInPage(`!!document.querySelector('.prp-overlay')`);
-    assert(!ov, 'overlay still open');
+    assert(!ov, 'overlay still open after Esc/close');
+    // Ensure we're on /pulls list surface
+    if (!evalInPage(`location.pathname.indexOf('/pulls') !== -1`)) {
+      openPulls();
+    }
     let after = probeListRow(DEMO_PR);
     const t0 = Date.now();
-    while (!after.hasBug && Date.now() - t0 < 5000) {
+    while (!hasBugLabel(after) && Date.now() - t0 < 8000) {
       waitMs(300);
       after = probeListRow(DEMO_PR);
     }
     log(`  afterClose=${JSON.stringify(after)}`);
     assert(after.found, 'row missing after close');
     assert(
-      after.hasBug,
-      `list row missing bug label after PR→list; labels=${JSON.stringify(after.labels)}`
+      hasBugLabel(after),
+      `list row missing bug after close; labels=${JSON.stringify(after.labels)}`
     );
+    assert(
+      afterApply && afterApply.title === after.title,
+      `title changed across mutation: before=${afterApply?.title} after=${after.title}`
+    );
+    afterClose = after;
   });
 
-  await run('cleanup: clear bug label', () => {
+  run('mutation: cleanup remove bug + assert gone', () => {
     openPr(DEMO_PR, { viaUrl: true });
     waitMs(800);
-    openLabelsPicker();
-    waitMs(700);
-    const state = evalInPage(`
-      (function () {
-        var panel = document.querySelector('.prp-sselect-panel');
-        if (!panel) return { panel: false };
-        var items = panel.querySelectorAll('button.prp-sselect-item');
-        for (var i = 0; i < items.length; i++) {
-          var lab = items[i].querySelector('.prp-sselect-item__label');
-          var t = (lab ? lab.textContent : items[i].textContent || '').trim();
-          if (t === 'bug') {
-            var sel = items[i].getAttribute('aria-selected') === 'true';
-            if (sel) items[i].click();
-            return { panel: true, found: true, wasSelected: sel };
-          }
-        }
-        return { panel: true, found: false };
-      })()
-    `);
-    log(`  cleanup pick state=${JSON.stringify(state)}`);
-    waitMs(300);
-    applyLabels();
-    waitMs(2500);
+    forceBugLabel(false);
+    // Wait aside clears
+    const tAside = Date.now();
+    let aside = probeAsideLabels();
+    while (aside.hasBug && Date.now() - tAside < 10000) {
+      waitMs(300);
+      aside = probeAsideLabels();
+    }
+    assert(!aside.hasBug, `cleanup: aside still has bug: ${JSON.stringify(aside)}`);
     closeOverlay();
     waitMs(800);
-    // If still on /pull/{n} embed close may not land on list — reopen pulls
     if (!evalInPage(`location.pathname.indexOf('/pulls') !== -1`)) {
       openPulls();
     }
-    const cleaned = probeListRow(DEMO_PR);
+    let cleaned = probeListRow(DEMO_PR);
+    const t0 = Date.now();
+    while (hasBugLabel(cleaned) && Date.now() - t0 < 10000) {
+      waitMs(300);
+      cleaned = probeListRow(DEMO_PR);
+    }
     log(`  cleaned=${JSON.stringify(cleaned)}`);
+    assert(cleaned.found, 'row missing after cleanup');
+    assert(
+      !hasBugLabel(cleaned),
+      `cleanup failed: list still has bug; labels=${JSON.stringify(cleaned.labels)}`
+    );
+    // Round-trip: labels should not retain bug from afterClose
+    assert(
+      afterClose && hasBugLabel(afterClose) && !hasBugLabel(cleaned),
+      'mutation round-trip: expected afterClose has bug and cleaned has none'
+    );
   });
 
-  closeAll();
-
-  if (failures.length) {
-    console.error(`\nlist-row-resync: ${failures.length} failed`);
-    for (const f of failures) {
-      console.error(`  - ${f.name}: ${f.err?.message || f.err}`);
-    }
-    process.exit(1);
-  }
-  log('=== list-row-resync ALL PASSED ===');
+  return steps;
 }
 
-main().catch((e) => {
-  console.error(e);
-  try {
-    closeAll();
-  } catch {
-    /* ignore */
+/** CLI entry (legacy). Prefer npm run test:e2e via rstest. */
+async function main() {
+  const { createRunner } = await import('./lib/runner.mjs');
+  const { ensureBrowser, closeAll, log } = await import('./lib/harness.mjs');
+  const { run, report } = createRunner();
+  log('=== scenario start ===');
+  ensureBrowser();
+  for (const step of getSteps()) {
+    await run(step.name, step.fn);
   }
-  process.exit(1);
-});
+  closeAll();
+  const r = report('scenario');
+  process.exit(r.ok ? 0 : 1);
+}
+
+const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/').split('/').pop());
+// Always allow: node path/to/file.mjs
+if (process.argv[1] && /list-row-resync\.mjs$/.test(process.argv[1])) {
+  main().catch((e) => {
+    console.error(e);
+    try { /* close in main */ } catch {}
+    process.exit(1);
+  });
+}
+
+

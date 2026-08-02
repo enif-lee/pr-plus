@@ -103,25 +103,36 @@
   position: relative;
   top: -1px; /* optical center vs 13px narrative */
 }
-/* Long titles / branches: wider than default status chips */
+/* Title rename before/after: fixed max width + single-line ellipsis.
+   Full text lives on native `title` of the badge root *and* .prp-badge__text
+   so hover on the clipped span still shows the complete string. */
 .prp-timeline-event__param--title {
-  max-width: min(320px, 100%) !important;
-  height: auto !important;
+  max-width: min(220px, 36vw) !important;
+  min-width: 0 !important;
+  height: 1.25rem !important;
   min-height: 1.25rem;
-  white-space: normal !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis;
   border-radius: 6px !important;
-  padding-top: 1px;
-  padding-bottom: 1px;
+  padding-top: 0;
+  padding-bottom: 0;
   color: var(--prp-fg) !important;
   background: var(--prp-bg-muted) !important;
+  vertical-align: middle;
+  /* Ensure pointer events reach the titled node (not a transparent overlay). */
+  pointer-events: auto;
+  cursor: default;
 }
 .prp-timeline-event__param--title .prp-badge__text {
-  white-space: normal !important;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  line-height: 1.3;
+  display: block !important;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+  line-height: 1.25rem;
+  pointer-events: auto;
 }
 .prp-timeline-event__param--wide {
   max-width: min(220px, 100%) !important;
@@ -483,7 +494,7 @@
   z-index: 2;
 }
 
-/* Comment / Start review (and Resolve) stay hidden until Reply is focused or has draft text */
+/* Comment / Start review hidden until focus/draft; Resolve path forces --open in JSX */
 .prp-inline-thread__composer-actions {
   display: none;
 }

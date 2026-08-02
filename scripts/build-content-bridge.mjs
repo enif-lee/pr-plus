@@ -6,6 +6,11 @@ import * as esbuild from 'esbuild';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  esbuildReleaseExtras,
+  isReleaseBuild,
+  maybeStripDebugLogs,
+} from './release-build-options.mjs';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const sot = path.join(root, 'src/content-bridge/bridge-api.ts');
@@ -26,6 +31,7 @@ const result = await esbuild.transform(src, {
   format: 'esm',
   target: 'es2020',
   platform: 'neutral',
+  ...esbuildReleaseExtras(),
 });
 
 let code = result.code
@@ -33,6 +39,7 @@ let code = result.code
   .replace(/^export\s+(async\s+)?function\s+/gm, 'function ')
   .replace(/^export\s+class\s+/gm, 'class ')
   .replace(/^export\s+(const|let|var)\s+/gm, '$1 ');
+code = await maybeStripDebugLogs(code, { loader: 'js' });
 
 if (/__commonJS|require_stdin/.test(code)) {
   console.error('FATAL: unexpected cjs wrap in content-bridge emit');
@@ -64,4 +71,9 @@ export const CONTENT_BRIDGE_SOT = 'src/content-bridge/bridge-api.ts' as const;
 `
 );
 
-console.log('Built content-bridge.js from bridge-api.ts', file.split(/\n/).length, 'lines');
+console.log(
+  'Built content-bridge.js from bridge-api.ts',
+  file.split(/\n/).length,
+  'lines',
+  isReleaseBuild() ? '(release)' : ''
+);

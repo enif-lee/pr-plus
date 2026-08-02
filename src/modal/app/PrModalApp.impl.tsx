@@ -12,7 +12,7 @@ import React, {
   memo,
   startTransition,
 } from 'react';
-import { createRoot } from 'react-dom/client';
+import { createRoot, flushSync } from 'react-dom/client';
 import { Button } from '@common/Button';
 import { ActionToast } from '@common/ActionToast';
 import { ShortcutMonitor } from '@common/ShortcutMonitor';
@@ -40,6 +40,7 @@ import {
   resolveCompareRange,
   type DiffCommitFilter as DiffCommitFilterState,
 } from '../lib/diff-commit-filter';
+import { filesListNeedsFullFetch } from '../lib/detail-idb';
 import {
   SHELL_MODAL,
   SHELL_SHEET,
@@ -116,6 +117,9 @@ import {
   countPendingReviewThreadsByPath,
   countReviewThreadTotals,
   groupReviewThreads,
+  mergeReviewThreadGroupsWithShells,
+  threadCommentsAreLoaded,
+  isGraphqlReviewThreadNodeId,
   toggleViewedPath,
   isPathViewed,
   resolveRootReviewCommentId,
@@ -221,6 +225,8 @@ import {
   parseSuggestionFences, applySuggestionToFileContent, mapLeaveReviewAction,
   isViewerPrAuthor, canSubmitReviewVerdict, isReviewVerdictKind,
   buildRerequestReviewerLogins, mapRestReviewComment, mapRestIssueComment, appendOptimisticReviewComment, appendIssueCommentToDetail,
+  stampThreadResolved,
+  applyResolveStamps,
 } from '../lib/pr-edit-api';
 import {
   buildPaletteCommands,
@@ -264,6 +270,12 @@ import { resolveDiffDisplayFiles } from '../lib/single-file-mode';
 import {
   buildConversationTimeline,
   partitionTimelineWithThreadGap,
+  mergeTimelineEventsById,
+  labelChangeTimelineEvents,
+  assigneeChangeTimelineEvents,
+  reviewerChangeTimelineEvents,
+  milestoneChangeTimelineEvents,
+  makeLocalTimelineEvent,
 } from '../lib/conversation-timeline';
 import { resolveGithubTheme } from '../lib/theme';
 import { buildStackStrip, buildStackPathModel } from '../lib/ui-polish';
@@ -328,6 +340,8 @@ export function PrModalApp({
   /** Independent side panels still loading without settled cache */
   sidePending = null,
   onLoadMoreReviewThreads = null,
+  /** Lazy GraphQL comments for shell/resolved threads on expand */
+  onLoadReviewThreadComments = null,
   error,
   detail: detailProp,
   openPulls,
@@ -341,6 +355,8 @@ export function PrModalApp({
   initialRoute = null,
   onRouteChange = null,
   prefs = null,
+  /** Patch extensionPrefs.timelineVisibility from Conversation tips */
+  onTimelineVisibilityChange = null,
   /** 'modal' overlay (default) | 'embed' in-page under GitHub header */
   presentation = 'modal',
   shellChrome = null,
@@ -348,6 +364,7 @@ export function PrModalApp({
   onRestoreNative = null,
 }: any) {
   const reverseComments = prefs?.reverseComments !== false;
+  const timelineVisibility = prefs?.timelineVisibility ?? null;
   /** Diff hunk list shows only the active file; file tree still lists all. */
   const singleFileMode = prefs?.singleFileMode === true;
   /**
@@ -389,14 +406,53 @@ export function PrModalApp({
    * merged snapshot. Clear the flag only once the host also has no PENDING.
    */
   const forceDropPendingRef = useRef(false);
-  // Merge host detail onto optimistic local state so reply/comment flash-revert is avoided
+  // Merge host detail onto optimistic local state so reply/comment flash-revert is avoided.
+  // When host closes the sheet (detailProp null), drop localDetail so a reopen cannot
+  // keep a stale _metaSeq title/body/milestone over network core (reverse e2e / GH edits).
   useEffect(() => {
-    if (!detailProp) return;
+    if (!detailProp) {
+      setLocalDetail(null);
+      return;
+    }
     setLocalDetail((prev) => {
+      // Switching PRs: never merge optimistic meta across issues
+      if (
+        prev &&
+        (String(prev.owner || '') !== String(detailProp.owner || '') ||
+          String(prev.repo || '') !== String(detailProp.repo || '') ||
+          Number(prev.number) !== Number(detailProp.number))
+      ) {
+        return detailProp;
+      }
       let merged =
         typeof mergeDetailPreserveOptimistic === 'function'
           ? mergeDetailPreserveOptimistic(prev, detailProp)
           : detailProp;
+      // External reverse edits (gh / native): when host brings a different
+      // title/body and we are not holding a local meta write (_metaSeq), adopt
+      // host identity fields so hard-reopen after reverse e2e cannot stick on
+      // the pre-reverse modal title.
+      if (merged && detailProp && !(Number(prev?._metaSeq) > 0)) {
+        const hostTitle = String(detailProp.title || '').trim();
+        const localTitle = String(merged.title || '').trim();
+        if (hostTitle && hostTitle !== localTitle) {
+          merged = { ...merged, title: detailProp.title };
+        }
+        if (
+          detailProp.body != null &&
+          String(detailProp.body) !== String(merged.body || '')
+        ) {
+          merged = { ...merged, body: detailProp.body };
+        }
+        if (
+          detailProp.milestone != null &&
+          (merged.milestone == null ||
+            Number(merged.milestone?.number) !==
+              Number(detailProp.milestone?.number))
+        ) {
+          merged = { ...merged, milestone: detailProp.milestone };
+        }
+      }
       const hostHasPending =
         Boolean(detailProp.viewerPendingReview?.id) ||
         (Array.isArray(detailProp.reviewComments) &&
@@ -907,6 +963,12 @@ export function PrModalApp({
   /** True after we paged through every commit/file for this PR open. */
   const commitsFullyLoadedRef = useRef(false);
   const filesFullyLoadedRef = useRef(false);
+  /** Flight token for ensureAllFiles (0 = idle). Prevents cross-PR stale writes. */
+  const filesFlightRef = useRef(0);
+  /** Flight token for ensureAllCommits (0 = idle). */
+  const commitsFlightRef = useRef(0);
+  const filesFlightSeqRef = useRef(0);
+  const commitsFlightSeqRef = useRef(0);
   const [commitListLoading, setCommitListLoading] = useState(false);
   const [fileListLoading, setFileListLoading] = useState(false);
   const [prTags, setPrTags] = useState<Array<{ name: string; sha: string }> | null>(
@@ -918,6 +980,8 @@ export function PrModalApp({
   useEffect(() => {
     commitsFullyLoadedRef.current = false;
     filesFullyLoadedRef.current = false;
+    filesFlightRef.current = 0;
+    commitsFlightRef.current = 0;
     setPrTags(null);
     setPrTagsError(null);
     setHideWhitespace(false);
@@ -1087,7 +1151,7 @@ export function PrModalApp({
 
   const ensureAllCommits = useCallback(async () => {
     if (!detail || typeof onFetchAllPrCommits !== 'function') return;
-    if (commitsFullyLoadedRef.current) return;
+    if (commitsFullyLoadedRef.current || commitsFlightRef.current) return;
     // Have a complete list already — nothing to fetch.
     if (Array.isArray(detail.commits) && detail.commits.length > 0) {
       const total = Number(detail.commitsCount);
@@ -1097,74 +1161,131 @@ export function PrModalApp({
       }
       // Partial list (mayHaveMore) — fall through to full fetch.
     }
+    const identity = prIdentity;
+    const flight = ++commitsFlightSeqRef.current;
+    commitsFlightRef.current = flight;
     setCommitListLoading(true);
     try {
       const all = await onFetchAllPrCommits();
-      if (!Array.isArray(all)) return;
-      commitsFullyLoadedRef.current = true;
-      setLocalDetail((prev: any) =>
-        prev ? { ...prev, commits: all } : prev
-      );
-      try {
-        onPatchDetail?.({ commits: all });
-      } catch {
-        /* ignore */
+      if (prIdentity !== identity || commitsFlightRef.current !== flight) {
+        return; // stale flight
       }
+      if (!Array.isArray(all)) return;
+      // Empty success is authoritative settled empty (count 0 when no rows).
+      const coreTotal = Number(detail.commitsCount);
+      if (
+        all.length === 0 &&
+        Number.isFinite(coreTotal) &&
+        coreTotal > 0
+      ) {
+        // Inconsistency — keep prior, do not claim settled empty
+        return;
+      }
+      commitsFullyLoadedRef.current = true;
+      const count = all.length;
+      setLocalDetail((prev: any) =>
+        prev
+          ? {
+              ...prev,
+              commits: all,
+              commitsCount: count,
+              _sideSettled: { ...(prev._sideSettled || {}), commits: true },
+            }
+          : prev
+      );
+      void patchHostDetail({ commits: all, commitsCount: count });
     } catch (err: any) {
-      setDiffCommitError(err?.message || String(err));
+      if (prIdentity === identity && commitsFlightRef.current === flight) {
+        setDiffCommitError(err?.message || String(err));
+      }
     } finally {
+      if (commitsFlightRef.current === flight) {
+        commitsFlightRef.current = 0;
+      }
       setCommitListLoading(false);
     }
-  }, [detail, onFetchAllPrCommits, onPatchDetail]);
+  }, [detail, onFetchAllPrCommits, onPatchDetail, prIdentity]);
 
   const ensureAllFiles = useCallback(async () => {
     if (!detail || typeof onFetchAllPrFiles !== 'function') return;
-    if (filesFullyLoadedRef.current) return;
+    if (filesFlightRef.current) return;
     // Don't clobber a commit-range override with full PR files mid-filter.
     if (diffFilesOverride) {
       filesFullyLoadedRef.current = true;
       return;
     }
-    // Complete file list already present.
-    if (Array.isArray(detail.files) && detail.files.length > 0) {
-      const total = Number(detail.changedFiles);
-      if (!Number.isFinite(total) || total <= detail.files.length) {
-        filesFullyLoadedRef.current = true;
-        return;
-      }
-      // Partial — fall through to full fetch.
+    // Re-fetch only for empty / incomplete count / slim IDB (`_patchOmitted`).
+    // Do NOT treat GitHub-omitted large-file patches as incomplete — re-fetch
+    // never restores them and caused infinite "Loading all files…" on big PRs.
+    const needsFetch = filesListNeedsFullFetch(
+      detail.files,
+      detail.changedFiles
+    );
+    if (!needsFetch) {
+      filesFullyLoadedRef.current = true;
+      return;
     }
+    // Slim wipe or incomplete list — clear latch and fetch.
+    filesFullyLoadedRef.current = false;
+    const identity = prIdentity;
+    const flight = ++filesFlightSeqRef.current;
+    filesFlightRef.current = flight;
     setFileListLoading(true);
     try {
       const all = await onFetchAllPrFiles({
         gitattributesText: detail.gitattributesText || '',
       });
-      if (!Array.isArray(all) || !all.length) {
-        filesFullyLoadedRef.current = true;
+      if (prIdentity !== identity || filesFlightRef.current !== flight) {
+        return; // stale flight
+      }
+      if (!Array.isArray(all)) return;
+      const coreTotal = Number(detail.changedFiles);
+      if (
+        all.length === 0 &&
+        Number.isFinite(coreTotal) &&
+        coreTotal > 0
+      ) {
+        // Inconsistency — keep prior, do not claim settled empty
         return;
       }
+      // Full REST page is authoritative even if some patches are omitted by GitHub.
       filesFullyLoadedRef.current = true;
-      setLocalDetail((prev: any) => (prev ? { ...prev, files: all } : prev));
-      try {
-        onPatchDetail?.({ files: all, changedFiles: all.length });
-      } catch {
-        /* ignore */
-      }
+      const count = all.length;
+      setLocalDetail((prev: any) =>
+        prev
+          ? {
+              ...prev,
+              files: all,
+              changedFiles: count,
+              _sideSettled: { ...(prev._sideSettled || {}), files: true },
+            }
+          : prev
+      );
+      void patchHostDetail({
+        files: all,
+        changedFiles: count,
+        ...(detail.gitattributesText
+          ? { gitattributesText: detail.gitattributesText }
+          : null),
+      });
     } catch {
-      /* soft-fail: keep partial file list */
+      /* soft-fail: keep partial file list; do not invent settled empty */
     } finally {
+      if (filesFlightRef.current === flight) {
+        filesFlightRef.current = 0;
+      }
       setFileListLoading(false);
     }
-  }, [detail, onFetchAllPrFiles, onPatchDetail, diffFilesOverride]);
+  }, [detail, onFetchAllPrFiles, onPatchDetail, diffFilesOverride, prIdentity]);
 
-  // Diff needs files list even when conversation deferred side-fetch.
+  // Diff: re-fetch when empty, incomplete count, or slim IDB — not when GitHub
+  // already omitted some large-file patches after a full page.
   useEffect(() => {
     if (layoutMode !== LAYOUT_DIFF) return;
-    const hasFiles =
-      Array.isArray(detail?.files) && detail.files.length > 0;
-    if (hasFiles || diffFilesOverride) return;
+    if (diffFilesOverride) return;
+    if (!filesListNeedsFullFetch(detail?.files, detail?.changedFiles)) return;
     void ensureAllFiles();
-  }, [layoutMode, detail?.files, diffFilesOverride, ensureAllFiles]);
+  }, [layoutMode, detail?.files, detail?.changedFiles, diffFilesOverride, ensureAllFiles]);
 
   const applyDiffCommitFilter = useCallback(
     async (nextRaw: DiffCommitFilterState) => {
@@ -1414,11 +1535,20 @@ export function PrModalApp({
   ]);
 
   const threads = useMemo(() => {
-    if (typeof groupReviewThreads === 'function') {
-      return groupReviewThreads(detail?.reviewComments || []);
+    const fromComments =
+      typeof groupReviewThreads === 'function'
+        ? groupReviewThreads(detail?.reviewComments || [])
+        : [];
+    // Shell GraphQL threads (resolved/collapsed, no bodies yet) still appear
+    // so expand can trigger lazy comment load.
+    if (typeof mergeReviewThreadGroupsWithShells === 'function') {
+      return mergeReviewThreadGroupsWithShells(
+        fromComments,
+        detail?.reviewThreads || []
+      );
     }
-    return [];
-  }, [detail?.reviewComments]);
+    return fromComments;
+  }, [detail?.reviewComments, detail?.reviewThreads]);
 
   const threadsByCommentId = useMemo(() => {
     const map = new Map();
@@ -1527,10 +1657,17 @@ export function PrModalApp({
         const id = rowOrId.commentId;
         const thread = threadsByCommentId?.get?.(String(id));
         const resolved = Boolean(thread?.resolved ?? rowOrId.resolved);
-        return isDiffThreadCollapsed(id, resolved);
+        const tid =
+          rowOrId.threadNodeId ||
+          thread?.threadNodeId ||
+          thread?.root?.threadNodeId ||
+          null;
+        return isDiffThreadCollapsed(id, resolved, tid);
       }
       return isDiffThreadCollapsed(rowOrId, Boolean(resolvedHint));
     },
+    // lazyLoadingThreadIds is unrelated (loading spinner); do not list it here —
+    // the state is declared later in this component and would TDZ-crash every render.
     [diffThreadCollapse, threadsByCommentId]
   );
 
@@ -1874,6 +2011,13 @@ export function PrModalApp({
     if (typeof onLoadMoreReviewThreads !== 'function') return undefined;
     const meta = detail.reviewThreadsMeta || {};
     if (!meta.hasMore) return undefined;
+    // Only auto-drain when there is a real dual-window / REST page to walk.
+    // Stuck hasMore (e.g. old REST comment-count total) would re-enter forever
+    // and flicker "Loading comments a/b" in the header.
+    const canDrain =
+      Boolean(meta.hasOlder || meta.hasNewerFromOldest) ||
+      (meta.source === 'rest' && Number(meta.restPage) >= 1);
+    if (!canDrain) return undefined;
     const key = `${detail.owner}/${detail.repo}#${detail.number}`;
     // Avoid re-entry for same PR while a load is in flight / already kicked off
     if (diffFullLoadKeyRef.current === key && diffFullLoadGenRef.current > 0) {
@@ -1888,10 +2032,9 @@ export function PrModalApp({
         /* host stage surfaces errors */
       } finally {
         if (gen === diffFullLoadGenRef.current) {
-          // allow retry if still hasMore after failure
-          if (detail?.reviewThreadsMeta?.hasMore) {
-            diffFullLoadKeyRef.current = '';
-          }
+          // Keep key set after attempt — only re-open when PR identity resets.
+          // (Previously clearing key while hasMore stayed true caused load-all
+          // thrash + header badge flicker on every detail re-render.)
         }
       }
     })();
@@ -1902,6 +2045,10 @@ export function PrModalApp({
     detail?.repo,
     detail?.number,
     detail?.reviewThreadsMeta?.hasMore,
+    detail?.reviewThreadsMeta?.hasOlder,
+    detail?.reviewThreadsMeta?.hasNewerFromOldest,
+    detail?.reviewThreadsMeta?.source,
+    detail?.reviewThreadsMeta?.restPage,
     onLoadMoreReviewThreads,
   ]);
 
@@ -2903,18 +3050,18 @@ export function PrModalApp({
     const st = useModalStore.getState();
     const activePath = String(st.activeFilePath || '').trim();
     const prevSel = st.lineSelection;
+    // Prefer selection.filePath for seed context so lagging tree activeFile
+    // cannot reseed to the previous file top under key-hold (jump-up).
+    const pathHint = String(prevSel?.filePath || activePath || '').trim();
     const nextSel =
       moveLineSelection(prevSel, virtualRows, delta, {
         shift,
-        activeFilePath: activePath,
+        activeFilePath: pathHint,
       }) || prevSel;
 
-    // After seed with no prior active file, adopt selection path for tree/nav
     const nextPath = String(nextSel?.filePath || '').trim();
-    if (nextPath && !activePath) {
-      setActiveFilePath(nextPath);
-      ensureFileExpandedForSelection(nextPath);
-    }
+    const crossedFile =
+      Boolean(nextPath) && nextPath !== String(prevSel?.filePath || '').trim();
 
     // No-op: skip React / scroll work under key-hold against an edge
     const unchanged =
@@ -2941,8 +3088,12 @@ export function PrModalApp({
           : true;
       if (atEdge) {
         const d = delta < 0 ? -1 : 1;
-        const adj = resolveAdjacentFileNav(displayFiles, activePath, d);
-        if (adj.path && adj.path !== activePath) {
+        const adj = resolveAdjacentFileNav(
+          displayFiles,
+          pathHint || activePath,
+          d
+        );
+        if (adj.path && adj.path !== (pathHint || activePath)) {
           pendingCrossFileSeedRef.current = {
             path: adj.path,
             edge: d > 0 ? 'first' : 'last',
@@ -2964,6 +3115,16 @@ export function PrModalApp({
     }
 
     setLineSelection(nextSel);
+    // Sync tree path **synchronously** when caret crosses files so the next
+    // key-repeat frame does not reseed using a stale activeFilePath (jump-up).
+    // Microtask-only sync was one frame too late under OS key-hold.
+    if (nextPath && nextPath !== activePath) {
+      setActiveFilePath(nextPath);
+      if (crossedFile) {
+        ensureFileExpandedForSelection(nextPath);
+        scrollFileNavRowIntoView(nextPath);
+      }
+    }
     // Avoid setSelectionIslandLeaving every frame if already false
     if (useModalStore.getState().selectionIslandLeaving) {
       setSelectionIslandLeaving(false);
@@ -2986,15 +3147,10 @@ export function PrModalApp({
       clearDiffThreadFocusIfNeeded();
     }
     scheduleSelectionActionsReveal();
-    // DOM scroll + light path sync after paint (not another React commit)
+    // DOM scroll after paint only (path already synced above)
     queueMicrotask(() => {
       try {
         const sel = useModalStore.getState().lineSelection || nextSel;
-        const prevPath = String(activePath || '');
-        const nextPath = String(sel?.filePath || '');
-        if (nextPath && nextPath !== prevPath) {
-          syncActiveFileFromSelection(sel);
-        }
         scrollSelectionHeadDomOnly(sel);
       } catch {
         /* ignore */
@@ -4644,16 +4800,28 @@ export function PrModalApp({
 
   async function onSaveBody(body: any) {
     if (!detail) return;
+    const nextBody = body == null ? '' : String(body);
+    const prevBody = detail.body;
     setActionBusy(true);
     setActionMsg('');
+    // Optimistic description so conversation card updates immediately.
+    setLocalDetail((prev) => (prev ? { ...prev, body: nextBody } : prev));
     try {
       const api = globalThis.PRTreeFetch;
       if (!api?.updatePullRequest) throw new Error('Update PR API unavailable');
-      await api.updatePullRequest(detail.owner, detail.repo, detail.number, { body });
+      await api.updatePullRequest(detail.owner, detail.repo, detail.number, { body: nextBody });
       setEditingBody(false);
       setActionMsg('Description updated.');
-      await onRefresh?.();
+      // Write-through host/IDB only — no full soft-refresh after known body write.
+      const base = detailRef.current || detail;
+      const next = base ? { ...base, body: nextBody } : null;
+      if (next) {
+        detailRef.current = next;
+        setLocalDetail(next);
+      }
+      void patchHostDetail({ body: nextBody });
     } catch (err) {
+      setLocalDetail((prev) => (prev ? { ...prev, body: prevBody } : prev));
       setActionMsg(err?.message || String(err));
     } finally {
       setActionBusy(false);
@@ -4753,10 +4921,19 @@ export function PrModalApp({
         merged.push(name);
       }
       const requestedReviewers = fromApi.length ? fromApi : merged;
-      commitMetaPatch({
-        requestedReviewers,
-        avatarUrls: mergeAvatarUrls(detail, result, requestedReviewers),
-      });
+      commitMetaPatch(
+        {
+          requestedReviewers,
+          avatarUrls: mergeAvatarUrls(detail, result, requestedReviewers),
+        },
+        {
+          localTimelineEvents: reviewerChangeTimelineEvents(
+            detail.requestedReviewers,
+            requestedReviewers,
+            timelineActorFromDetail(detail)
+          ),
+        }
+      );
       setActionMsg(`Requested review from ${name}.`);
     } catch (err) {
       setActionMsg(err?.message || String(err));
@@ -4830,7 +5007,16 @@ export function PrModalApp({
         : (detail.requestedReviewers || []).filter(
             (x) => String(x).toLowerCase() !== String(login).toLowerCase()
           );
-      commitMetaPatch({ requestedReviewers });
+      commitMetaPatch(
+        { requestedReviewers },
+        {
+          localTimelineEvents: reviewerChangeTimelineEvents(
+            detail.requestedReviewers,
+            requestedReviewers,
+            timelineActorFromDetail(detail)
+          ),
+        }
+      );
       setActionMsg(`Removed reviewer ${login}.`);
     } catch (err) {
       setActionMsg(err?.message || String(err));
@@ -4912,16 +5098,123 @@ export function PrModalApp({
     return map;
   }
 
+  /** Viewer identity for optimistic conversation system events. */
+  function timelineActorFromDetail(d: any = detail) {
+    const login = String(d?.viewerLogin || '').trim();
+    const key = login.toLowerCase();
+    const avatarUrl =
+      (key && d?.avatarUrls?.[key]) ||
+      d?.viewerAvatarUrl ||
+      d?.user?.avatar_url ||
+      '';
+    return { login, avatarUrl: String(avatarUrl || '') };
+  }
+
+  /**
+   * Re-fetch issue timeline system events (labeled, milestoned, assigned, …)
+   * so conversation stays in sync after meta writes. Soft-fails; does not
+   * roll back the confirmed meta patch. Local optimistics stay until a server
+   * event covers the same narrative.
+   */
+  async function refreshTimelineEvents(opts: { retryMs?: number } = {}) {
+    const snap = detailRef.current || detail;
+    if (!snap?.owner || !snap?.repo || !snap?.number) return;
+    const api = globalThis.PRTreeFetch;
+    if (typeof api?.fetchPrTimelineEvents !== 'function') return;
+    const identity = prIdentity;
+    const owner = snap.owner;
+    const repo = snap.repo;
+    const number = snap.number;
+    const prevIds = new Set(
+      (Array.isArray(snap.timelineEvents) ? snap.timelineEvents : [])
+        .map((e: any) => (e?.id != null ? String(e.id) : ''))
+        .filter(Boolean)
+    );
+    const prevLen = prevIds.size;
+    const maxId = (list: any[]) => {
+      let m = 0;
+      for (const e of list) {
+        const n = Number(e?.id);
+        if (Number.isFinite(n) && n > m) m = n;
+      }
+      return m;
+    };
+    const prevMax = maxId(
+      Array.isArray(snap.timelineEvents) ? snap.timelineEvents : []
+    );
+    try {
+      let events: any[] = [];
+      // Events API often lags the mutating write; poll for new numeric ids.
+      const gaps = [0, 500, 1200, 2500, 4000];
+      for (const gap of gaps) {
+        if (gap) await new Promise((r) => setTimeout(r, gap));
+        if (prIdentity !== identity) return;
+        const batch = await api.fetchPrTimelineEvents(owner, repo, number);
+        if (!Array.isArray(batch)) continue;
+        events = batch;
+        const nextMax = maxId(events);
+        const grew =
+          events.length > prevLen ||
+          nextMax > prevMax ||
+          events.some((e) => e?.id != null && !prevIds.has(String(e.id)));
+        if (grew || gap === gaps[gaps.length - 1]) break;
+      }
+      if (prIdentity !== identity) return;
+      if (!Array.isArray(events)) events = [];
+      // Fold onto detailRef first (commitMetaPatch writes optimistics there
+      // synchronously — setState alone would still be stale mid-poll).
+      const live = detailRef.current || detail;
+      const merged = mergeTimelineEventsById(
+        Array.isArray(live?.timelineEvents) ? live.timelineEvents : [],
+        events
+      );
+      if (live) {
+        detailRef.current = { ...live, timelineEvents: merged };
+      }
+      setLocalDetail((prev: any) => {
+        const base = prev || live;
+        if (!base) return prev;
+        return {
+          ...base,
+          timelineEvents: mergeTimelineEventsById(base.timelineEvents, events),
+        };
+      });
+      void patchHostDetail({ timelineEvents: merged });
+    } catch {
+      /* soft-fail: meta write + local timeline already applied */
+    }
+  }
+
   /**
    * After a successful meta write (labels / assignees / reviewers / milestone),
    * update local + host cache only — never re-fetch full PR detail.
+   * Host gets a **narrow** patch (keys from `patch` only) — never full detail.
+   * Injects local timeline events immediately so conversation updates even when
+   * the Events API lags; then refreshes from GitHub to converge on real ids.
    */
-  function commitMetaPatch(patch: Record<string, unknown>) {
-    const base = detail;
+  function commitMetaPatch(
+    patch: Record<string, unknown>,
+    opts: {
+      refreshTimeline?: boolean;
+      localTimelineEvents?: any[];
+    } = {}
+  ) {
+    // Prefer live ref so a fast second meta write sees prior local timeline rows.
+    const base = detailRef.current || detail;
     if (!base) return;
+    const localTe = Array.isArray(opts.localTimelineEvents)
+      ? opts.localTimelineEvents
+      : [];
+    const timelineEvents =
+      localTe.length > 0
+        ? mergeTimelineEventsById(base.timelineEvents, localTe)
+        : Array.isArray(base.timelineEvents)
+          ? base.timelineEvents
+          : [];
     const next = {
       ...base,
       ...patch,
+      ...(localTe.length > 0 ? { timelineEvents } : null),
       avatarUrls: {
         ...(base.avatarUrls && typeof base.avatarUrls === 'object' ? base.avatarUrls : {}),
         ...(patch.avatarUrls && typeof patch.avatarUrls === 'object'
@@ -4932,58 +5225,143 @@ export function PrModalApp({
       // Never persist _metaSeq to host/cache — that blocked empty API results on reopen.
       _metaSeq: (Number(base._metaSeq) || 0) + 1,
     };
-    setLocalDetail(next);
+    // Sync ref + flush paint before host patch / async refresh. Without
+    // flushSync, a lagging host re-render or refresh poll can merge before the
+    // optimistic timeline rows ever reach ConversationView's virtual list.
+    detailRef.current = next;
     try {
-      const { _metaSeq: _drop, ...forHost } = next as any;
-      onPatchDetail?.({
-        ...forHost,
-        assignees: next.assignees,
-        labels: next.labels,
-        requestedReviewers: next.requestedReviewers,
-        milestone: next.milestone,
-        avatarUrls: next.avatarUrls,
+      flushSync(() => {
+        setLocalDetail(next);
       });
     } catch {
-      /* host optional */
+      // Nested update / unmounted edge: fall back to async setState
+      setLocalDetail(next);
+    }
+    // Narrow host payload: only keys the caller intended to write.
+    const forHost: Record<string, unknown> = { ...patch };
+    if (Object.prototype.hasOwnProperty.call(patch, 'avatarUrls') || next.avatarUrls) {
+      forHost.avatarUrls = next.avatarUrls;
+    }
+    if (localTe.length > 0) {
+      forHost.timelineEvents = timelineEvents;
+    }
+    // Host write-through must be synchronous: a soft close/reopen right after
+    // a meta write (milestone e2e) used to race the previous queueMicrotask and
+    // reopen from a pre-write cache/list sketch ("No milestone").
+    void patchHostDetail(forHost);
+    if (opts.refreshTimeline !== false) {
+      queueMicrotask(() => {
+        void refreshTimelineEvents();
+      });
     }
   }
 
+  /**
+   * Write-through to host with ack. After API success, never roll back local;
+   * on failed apply retry once then surface cache write failure.
+   */
+  function patchHostDetail(patch: Record<string, unknown>): {
+    status: 'applied' | 'stale' | 'failed' | 'skipped';
+    error?: string;
+  } {
+    if (typeof onPatchDetail !== 'function') {
+      return { status: 'skipped' };
+    }
+    const run = () => {
+      try {
+        const res = onPatchDetail(patch);
+        if (res && typeof res === 'object' && res.status) return res;
+        // Legacy void return → treat as applied (pre-ack hosts)
+        return { status: 'applied' as const };
+      } catch (err: any) {
+        return {
+          status: 'failed' as const,
+          error: err?.message || String(err),
+        };
+      }
+    };
+    let res = run();
+    if (res.status === 'failed') {
+      res = run();
+    }
+    if (res.status === 'failed') {
+      const msg = res.error || 'Host cache write failed';
+      console.warn('[pr-plus] host patch failed after API success', msg, patch);
+      try {
+        setActionMsg(`Saved on GitHub; cache sync failed (${msg})`);
+      } catch {
+        /* ignore */
+      }
+    }
+    return res;
+  }
+
   async function applyAddAssignees(logins: any) {
-    if (!detail) return;
+    const base = detailRef.current || detail;
+    if (!base) return;
     const names = (Array.isArray(logins) ? logins : [logins])
       .map((s) => String(s || '').trim())
       .filter(Boolean);
     if (!names.length) return;
+    const prevAssignees = Array.isArray(base.assignees) ? base.assignees.slice() : [];
+    // Optimistic paint immediately so multi-select Apply never waits on REST.
+    const optimistic = prevAssignees.slice();
+    for (const name of names) {
+      if (!optimistic.some((x) => String(x).toLowerCase() === name.toLowerCase())) {
+        optimistic.push(name);
+      }
+    }
+    commitMetaPatch(
+      { assignees: optimistic },
+      {
+        localTimelineEvents: assigneeChangeTimelineEvents(
+          prevAssignees,
+          optimistic,
+          timelineActorFromDetail(base)
+        ),
+        refreshTimeline: false,
+      }
+    );
     setActionBusy(true);
     setActionMsg('');
     try {
       const api = globalThis.PRTreeFetch;
       if (!api?.addAssignees) throw new Error('Add assignees API unavailable');
       const result = await api.addAssignees(
-        detail.owner,
-        detail.repo,
-        detail.number,
+        base.owner,
+        base.repo,
+        base.number,
         names
       );
       const fromApi = mapAssigneesFromApi(result, []);
-      const existing = Array.isArray(detail.assignees) ? detail.assignees.slice() : [];
-      const merged = [...existing];
+      // Prefer API assignees when present; always union requested names so a
+      // lagging empty body cannot wipe the optimistic write.
+      const merged = (fromApi.length ? fromApi.slice() : optimistic.slice());
       for (const name of names) {
         if (!merged.some((x) => String(x).toLowerCase() === name.toLowerCase())) {
           merged.push(name);
         }
       }
-      // Prefer API assignees when present; otherwise merge into existing.
-      // Empty API list after a successful add is treated as lag — keep merged.
-      const assignees = fromApi.length ? fromApi : merged;
-      const avatarUrls = mergeAvatarUrls(detail, result, assignees);
+      const assignees = merged;
+      const avatarUrls = mergeAvatarUrls(base, result, assignees);
       // Trust write response + host cache patch only — full soft-refresh races
       // with in-flight detail fetches and was resurrecting stale labels/assignees.
-      commitMetaPatch({ assignees, avatarUrls });
+      commitMetaPatch(
+        { assignees, avatarUrls },
+        {
+          // Timeline already injected optimistically — refresh only.
+          localTimelineEvents: [],
+        }
+      );
       setActionMsg(
         names.length === 1 ? `Assigned ${names[0]}.` : `Assigned ${names.length} people.`
       );
     } catch (err) {
+      // Roll back optimistic assignees on API failure.
+      commitMetaPatch(
+        { assignees: prevAssignees },
+        { localTimelineEvents: [], refreshTimeline: false }
+      );
       setActionMsg(err?.message || String(err));
     } finally {
       setActionBusy(false);
@@ -5057,10 +5435,19 @@ export function PrModalApp({
         : (detail.assignees || []).filter(
             (x) => String(x).toLowerCase() !== String(login).toLowerCase()
           );
-      commitMetaPatch({
-        assignees,
-        avatarUrls: mergeAvatarUrls(detail, result, assignees),
-      });
+      commitMetaPatch(
+        {
+          assignees,
+          avatarUrls: mergeAvatarUrls(detail, result, assignees),
+        },
+        {
+          localTimelineEvents: assigneeChangeTimelineEvents(
+            detail.assignees,
+            assignees,
+            timelineActorFromDetail(detail)
+          ),
+        }
+      );
       setActionMsg(`Unassigned ${login}.`);
     } catch (err) {
       setActionMsg(err?.message || String(err));
@@ -5071,6 +5458,13 @@ export function PrModalApp({
 
   async function applySetLabels(labels: any) {
     if (!detail) return;
+    // Snapshot pre-write labels from the live ref (not a stale render closure)
+    // so clear→set in the same session always produces labeled/unlabeled rows.
+    const prevLabels = Array.isArray(detailRef.current?.labels)
+      ? detailRef.current.labels
+      : Array.isArray(detail.labels)
+        ? detail.labels
+        : [];
     const next = (labels || []).map((s) => String(s).trim()).filter(Boolean);
     setActionBusy(true);
     setActionMsg('');
@@ -5093,17 +5487,45 @@ export function PrModalApp({
           fromApi.length > 0 || next.length === 0
             ? fromApi
             : next.map((name) => {
-                const existing = (detail.labels || []).find(
-                  (l) => String(l.name || l).toLowerCase() === name.toLowerCase()
+                const existing = (prevLabels || []).find(
+                  (l: any) =>
+                    String(l.name || l).toLowerCase() === name.toLowerCase()
                 );
                 return existing && typeof existing === 'object'
                   ? existing
                   : { name, color: '' };
               });
       }
+      // Prefer API result for chips; for timeline delta also consider the
+      // requested name set so an empty/lagging PUT body still paints events.
+      const actor = timelineActorFromDetail(detailRef.current || detail);
+      const requestedAsLabels = next.map((name) => {
+        const existing = (labelsOut || prevLabels || []).find(
+          (l: any) => String(l.name || l).toLowerCase() === name.toLowerCase()
+        );
+        return existing && typeof existing === 'object'
+          ? existing
+          : { name, color: '' };
+      });
+      let localTimelineEvents = labelChangeTimelineEvents(
+        prevLabels,
+        labelsOut,
+        actor
+      );
+      if (!localTimelineEvents.length) {
+        localTimelineEvents = labelChangeTimelineEvents(
+          prevLabels,
+          requestedAsLabels,
+          actor
+        );
+      }
       // No full soft-refresh: in-flight fetchPrDetail responses were overwriting
       // this patch with pre-write assignees/labels a few seconds later.
-      commitMetaPatch({ labels: labelsOut });
+      // Local labeled/unlabeled rows so conversation updates immediately.
+      commitMetaPatch(
+        { labels: labelsOut },
+        { localTimelineEvents }
+      );
       setActionMsg(
         next.length === 0
           ? 'Labels cleared.'
@@ -5732,24 +6154,13 @@ export function PrModalApp({
         break;
       }
       case 'toggleLabel': {
+        // Same write-through as aside labels — never full soft-refresh.
         if (!p.name || !detail) break;
-        const names = (detail.labels || []).map((l) => l.name || l);
+        const names = (detail.labels || []).map((l: any) => l.name || l);
         const next = names.includes(p.name)
-          ? names.filter((n) => n !== p.name)
+          ? names.filter((n: any) => n !== p.name)
           : [...names, p.name];
-        void (async () => {
-          setActionBusy(true);
-          try {
-            const api = globalThis.PRTreeFetch;
-            await api.setIssueLabels(detail.owner, detail.repo, detail.number, next);
-            setActionMsg('Labels updated.');
-            await onRefresh?.();
-          } catch (err) {
-            setActionMsg(err?.message || String(err));
-          } finally {
-            setActionBusy(false);
-          }
-        })();
+        void applySetLabels(next);
         break;
       }
       case 'noop':
@@ -6237,14 +6648,17 @@ export function PrModalApp({
   }
 
   async function onResolveThread(threadNodeId, resolved) {
-    if (!threadNodeId) {
-      setActionMsg('Resolve requires a review thread id from GitHub.');
+    const tid = threadNodeId != null ? String(threadNodeId).trim() : '';
+    if (!tid || !/^PRRT_/i.test(tid)) {
+      setActionMsg(
+        'Resolve requires a GraphQL review thread id (PRRT_…). Refresh the pull to load thread ids.'
+      );
       return;
     }
     // Pending (unsubmitted) review threads cannot be resolved on GitHub
     const pendingOnThread = (detail?.reviewComments || []).some(
       (c: any) =>
-        c?.pending && c.threadNodeId && String(c.threadNodeId) === String(threadNodeId)
+        c?.pending && c.threadNodeId && String(c.threadNodeId) === tid
     );
     if (pendingOnThread) {
       setActionMsg(
@@ -6254,13 +6668,41 @@ export function PrModalApp({
     }
     setActionBusy(true);
     setActionMsg('');
+    // Optimistic local + host write-through so resolve flips without full soft-refresh.
+    // Sync host patch (not queueMicrotask) so mergeDetailPreserveOptimistic sees
+    // the stamped resolved flag before a racey side-fetch re-render.
+    const stamp = (d: any, nextResolved: boolean) =>
+      typeof stampThreadResolved === 'function'
+        ? stampThreadResolved(d, tid, nextResolved)
+        : d;
+    const applyStamp = (nextResolved: boolean) => {
+      const base = detailRef.current || detail;
+      const next = stamp(base, nextResolved);
+      if (!next) return;
+      detailRef.current = next;
+      try {
+        flushSync(() => {
+          setLocalDetail(next);
+        });
+      } catch {
+        setLocalDetail(next);
+      }
+      void patchHostDetail({
+        reviewComments: next.reviewComments,
+        reviewThreads: next.reviewThreads,
+        // Local-only stamp map is not persisted on host; keep via detailRef + merge.
+      });
+    };
+    applyStamp(Boolean(resolved));
     try {
       const api = globalThis.PRTreeFetch;
       if (!api?.resolveReviewThread) throw new Error('Resolve API unavailable');
-      await api.resolveReviewThread(threadNodeId, resolved);
+      await api.resolveReviewThread(tid, resolved);
       setActionMsg(resolved ? 'Thread resolved.' : 'Thread unresolved.');
-      await onRefresh?.();
+      // Confirmed write already stamped in local + host — no full revalidate.
     } catch (err) {
+      // Roll back optimistic stamp on both local and host.
+      applyStamp(!resolved);
       setActionMsg(err?.message || String(err));
     } finally {
       setActionBusy(false);
@@ -6355,11 +6797,7 @@ export function PrModalApp({
         merged: false,
       };
       setLocalDetail((d) => (d ? { ...d, ...closedPatch } : d));
-      try {
-        onPatchDetail?.(closedPatch);
-      } catch {
-        /* host optional */
-      }
+      void patchHostDetail(closedPatch);
       // Return to the pulls list (centered modal and side sheet).
       requestClose();
       try {
@@ -6395,11 +6833,7 @@ export function PrModalApp({
         mergeable: null as boolean | null,
       };
       setLocalDetail((d) => (d ? { ...d, ...openPatch } : d));
-      try {
-        onPatchDetail?.(openPatch);
-      } catch {
-        /* host optional */
-      }
+      void patchHostDetail(openPatch);
       try {
         await onRefresh?.();
       } catch {
@@ -6408,11 +6842,7 @@ export function PrModalApp({
       setLocalDetail((d) =>
         d ? { ...d, state: 'open', merged: false } : d
       );
-      try {
-        onPatchDetail?.({ state: 'open', merged: false });
-      } catch {
-        /* host optional */
-      }
+      void patchHostDetail({ state: 'open', merged: false });
     } catch (err) {
       setActionMsg(err?.message || String(err));
     } finally {
@@ -6433,7 +6863,32 @@ export function PrModalApp({
       if (!api?.updatePullRequest) throw new Error('Update PR API unavailable');
       await api.updatePullRequest(detail.owner, detail.repo, detail.number, { title });
       setActionMsg('Title updated.');
-      await onRefresh?.();
+      const renameEv = makeLocalTimelineEvent({
+        event: 'renamed',
+        actor: timelineActorFromDetail(detail).login,
+        avatarUrl: timelineActorFromDetail(detail).avatarUrl,
+        rename: { from: String(detail.title || ''), to: title },
+      });
+      setLocalDetail((prev) =>
+        prev
+          ? {
+              ...prev,
+              title,
+              timelineEvents: mergeTimelineEventsById(prev.timelineEvents, [
+                renameEv,
+              ]),
+            }
+          : prev
+      );
+      void patchHostDetail({
+        title,
+        timelineEvents: mergeTimelineEventsById(
+          Array.isArray(detail.timelineEvents) ? detail.timelineEvents : [],
+          [renameEv]
+        ),
+      });
+      // Timeline-only convergence — never full soft-refresh after known title write.
+      void refreshTimelineEvents();
     } catch (err) {
       setActionMsg(err?.message || String(err));
       // Revert optimistic title on failure
@@ -6467,11 +6922,7 @@ export function PrModalApp({
     // remount does not resurrect the pre-write draft flag from SWR/IDB.
     const applyDraft = (draft: boolean) => {
       setLocalDetail((prev) => (prev ? { ...prev, draft: Boolean(draft) } : prev));
-      try {
-        onPatchDetail?.({ draft: Boolean(draft) });
-      } catch {
-        /* host optional */
-      }
+      void patchHostDetail({ draft: Boolean(draft) });
     };
     applyDraft(nextDraft);
     setActionBusy(true);
@@ -6496,6 +6947,7 @@ export function PrModalApp({
           ? 'Converted to draft.'
           : 'Marked ready for review.'
       );
+      void refreshTimelineEvents();
       try {
         await onRefresh?.();
       } catch {
@@ -6565,11 +7017,7 @@ export function PrModalApp({
       };
       const applyMerged = () => {
         setLocalDetail((d) => (d ? { ...d, ...mergedPatch } : d));
-        try {
-          onPatchDetail?.(mergedPatch);
-        } catch {
-          /* host optional */
-        }
+        void patchHostDetail(mergedPatch);
       };
       applyMerged();
       try {
@@ -6665,11 +7113,7 @@ export function PrModalApp({
     setLocalDetail((prev) =>
       prev ? { ...prev, subscribed: nextSubscribed } : prev
     );
-    try {
-      onPatchDetail?.({ subscribed: nextSubscribed });
-    } catch {
-      /* host optional */
-    }
+    void patchHostDetail({ subscribed: nextSubscribed });
     setActionBusy(true);
     setActionMsg('');
     try {
@@ -6727,31 +7171,29 @@ export function PrModalApp({
             }
           : prev
       );
-      try {
-        onPatchDetail?.({
-          subscribed:
-            typeof prevSubscribed === 'boolean' ? prevSubscribed : !nextSubscribed,
-        });
-      } catch {
-        /* ignore */
-      }
+      void patchHostDetail({ subscribed: typeof prevSubscribed === 'boolean' ? prevSubscribed : !nextSubscribed });
       setActionMsg(err?.message || String(err));
     } finally {
       setActionBusy(false);
     }
   }
 
-  async function applyMilestoneNumber(milestone: number | null) {
-    if (!detail) return;
+  async function applyMilestoneNumber(
+    milestone: number | null,
+    opts: { titleHint?: string } = {}
+  ) {
+    const base = detailRef.current || detail;
+    if (!base) return;
     setActionBusy(true);
     setActionMsg('');
+    const titleHint = String(opts.titleHint || '').trim();
     try {
       const api = globalThis.PRTreeFetch;
       if (!api?.setIssueMilestone) throw new Error('Milestone API unavailable');
       const result = await api.setIssueMilestone(
-        detail.owner,
-        detail.repo,
-        detail.number,
+        base.owner,
+        base.repo,
+        base.number,
         milestone
       );
       // PATCH /issues returns the issue (with milestone object) when successful.
@@ -6761,15 +7203,45 @@ export function PrModalApp({
       } else if (result?.milestone && typeof result.milestone === 'object') {
         nextMilestone = {
           number: Number(result.milestone.number) || milestone,
-          title: result.milestone.title || `Milestone ${milestone}`,
+          title:
+            result.milestone.title ||
+            titleHint ||
+            `Milestone ${milestone}`,
         };
       } else {
         nextMilestone = {
           number: milestone,
-          title: detail.milestone?.title || `Milestone ${milestone}`,
+          title: titleHint || `Milestone ${milestone}`,
         };
       }
-      commitMetaPatch({ milestone: nextMilestone });
+      // If API omitted title, try repo milestones catalog for the e2e-visible name.
+      if (
+        nextMilestone &&
+        (!nextMilestone.title ||
+          /^Milestone\s+\d+$/i.test(String(nextMilestone.title))) &&
+        typeof api?.fetchRepoMilestones === 'function'
+      ) {
+        try {
+          const catalog = await api.fetchRepoMilestones(base.owner, base.repo);
+          const hit = (Array.isArray(catalog) ? catalog : []).find(
+            (m: any) => Number(m?.number) === Number(nextMilestone.number)
+          );
+          if (hit?.title) nextMilestone = { ...nextMilestone, title: hit.title };
+        } catch {
+          /* keep fallback title */
+        }
+      }
+      const prevMs = base.milestone ?? null;
+      commitMetaPatch(
+        { milestone: nextMilestone },
+        {
+          localTimelineEvents: milestoneChangeTimelineEvents(
+            prevMs,
+            nextMilestone,
+            timelineActorFromDetail(base)
+          ),
+        }
+      );
       setActionMsg(milestone == null ? 'Milestone cleared.' : `Milestone set to #${milestone}.`);
     } catch (err) {
       setActionMsg(err?.message || String(err));
@@ -6862,19 +7334,21 @@ export function PrModalApp({
       },
       onPick: (opt) => {
         closePicker();
-        // Prefer meta.number; fall back to parsing id
+        // Prefer meta.number; fall back to parsing id. Pass title hint so aside
+        // paints the human name even when PATCH body omits milestone.title.
+        const titleHint = String(opt?.meta?.title || opt?.label || '')
+          .replace(/\s*\(#\d+\)\s*$/, '')
+          .trim();
         const fromMeta = Number(opt?.meta?.number);
-        if (Number.isFinite(fromMeta) && fromMeta > 0) {
-          void applyMilestoneNumber(fromMeta);
-          return;
-        }
-        const raw = String(opt?.id || opt?.label || '').replace(/[^\d]/g, '');
-        const n = Number(raw);
+        const n =
+          Number.isFinite(fromMeta) && fromMeta > 0
+            ? fromMeta
+            : Number(String(opt?.id || opt?.label || '').replace(/[^\d]/g, ''));
         if (!Number.isFinite(n) || n <= 0) {
           setActionMsg('Invalid milestone.');
           return;
         }
-        void applyMilestoneNumber(n);
+        void applyMilestoneNumber(n, { titleHint });
       },
     });
   }
@@ -6952,23 +7426,179 @@ export function PrModalApp({
     }
   }
 
-  function isDiffThreadCollapsed(commentId: any, resolved: boolean) {
-    const key = String(commentId ?? '');
-    if (diffThreadCollapse.has(key)) return Boolean(diffThreadCollapse.get(key));
+  /**
+   * Collapse map key: prefer stable PRRT threadNodeId so shell:… → numeric id
+   * hydrate does not lose expand state or re-default to resolved-collapsed.
+   */
+  function collapseKeyForThread(
+    commentId: any,
+    threadNodeId: any = null
+  ): string {
+    const tid = threadNodeId != null ? String(threadNodeId) : '';
+    if (tid && isGraphqlReviewThreadNodeId(tid)) return tid;
+    const fromComment = resolveThreadNodeIdFromCommentId(commentId);
+    if (fromComment) return fromComment;
+    return String(commentId ?? '');
+  }
+
+  function isDiffThreadCollapsed(
+    commentId: any,
+    resolved: boolean,
+    threadNodeId: any = null
+  ) {
+    const key = collapseKeyForThread(commentId, threadNodeId);
+    if (key && diffThreadCollapse.has(key)) {
+      return Boolean(diffThreadCollapse.get(key));
+    }
+    // Legacy keys (shell:… / numeric) during transition
+    const legacy = String(commentId ?? '');
+    if (legacy && diffThreadCollapse.has(legacy)) {
+      return Boolean(diffThreadCollapse.get(legacy));
+    }
     return Boolean(resolved);
   }
 
-  function onToggleThreadCollapse(commentId: any, resolved?: boolean) {
+  /** In-flight lazy comment loads (PRRT id → promise). */
+  const lazyThreadCommentsInflight = useRef(new Map());
+  /** PRRT ids currently loading full comments (header spinner). */
+  const [lazyLoadingThreadIds, setLazyLoadingThreadIds] = useState(
+    () => new Set<string>()
+  );
+
+  /**
+   * Ensure full comments for a GraphQL shell thread (expand path).
+   * No-op when comments already loaded or REST synthetic ids.
+   */
+  const ensureThreadCommentsLoaded = useCallback(
+    async (threadNodeId: any) => {
+      const tid = String(threadNodeId || '').trim();
+      if (!tid || !isGraphqlReviewThreadNodeId(tid)) return null;
+      const snap = localDetail || detailProp;
+      const th = (Array.isArray(snap?.reviewThreads) ? snap.reviewThreads : []).find(
+        (t: any) => t && String(t.threadNodeId) === tid
+      );
+      if (
+        typeof threadCommentsAreLoaded === 'function' &&
+        threadCommentsAreLoaded(th || { threadNodeId: tid }, snap?.reviewComments)
+      ) {
+        return snap;
+      }
+      const inflight = lazyThreadCommentsInflight.current;
+      if (inflight.has(tid)) return inflight.get(tid);
+
+      setLazyLoadingThreadIds((prev) => {
+        if (prev.has(tid)) return prev;
+        const next = new Set(prev);
+        next.add(tid);
+        return next;
+      });
+
+      const run = (async () => {
+        try {
+          if (typeof onLoadReviewThreadComments === 'function') {
+            const next = await onLoadReviewThreadComments(tid);
+            if (next && typeof next === 'object') {
+              setLocalDetail((prev: any) => {
+                if (!prev || Number(prev.number) !== Number(next.number)) {
+                  return next;
+                }
+                const folded = {
+                  ...prev,
+                  reviewThreads: next.reviewThreads ?? prev.reviewThreads,
+                  reviewComments: next.reviewComments ?? prev.reviewComments,
+                  reviewThreadsMeta:
+                    next.reviewThreadsMeta ?? prev.reviewThreadsMeta,
+                  reviewCommentsMeta:
+                    next.reviewCommentsMeta ?? prev.reviewCommentsMeta,
+                };
+                // Re-apply resolve/unresolve write-through stamps — lazy by-ids
+                // must not resurrect pre-mutation isResolved after local stamp.
+                return typeof applyResolveStamps === 'function'
+                  ? applyResolveStamps(folded, prev._resolveStamps)
+                  : folded;
+              });
+            }
+            return next;
+          }
+          // Fallback: bridge fetch + local merge when host prop missing
+          const api = globalThis.PRTreeFetch;
+          if (!api?.fetchReviewThreadsByIds || !api?.mergeReviewThreadsPageIntoDetail) {
+            return null;
+          }
+          const bulk = await api.fetchReviewThreadsByIds([tid]);
+          const base = localDetail || detailProp;
+          if (!base) return null;
+          const merged = api.mergeReviewThreadsPageIntoDetail(base, bulk, 'ids');
+          const stamped =
+            typeof applyResolveStamps === 'function'
+              ? applyResolveStamps(merged, base._resolveStamps)
+              : merged;
+          setLocalDetail(stamped);
+          return stamped;
+        } catch {
+          return null;
+        } finally {
+          inflight.delete(tid);
+          setLazyLoadingThreadIds((prev) => {
+            if (!prev.has(tid)) return prev;
+            const next = new Set(prev);
+            next.delete(tid);
+            return next;
+          });
+        }
+      })();
+      inflight.set(tid, run);
+      return run;
+    },
+    [localDetail, detailProp, onLoadReviewThreadComments]
+  );
+
+  function resolveThreadNodeIdFromCommentId(commentId: any): string | null {
     const key = String(commentId ?? '');
+    if (!key) return null;
+    if (isGraphqlReviewThreadNodeId(key)) return key;
+    const th = threadsByCommentId.get(key);
+    if (th?.threadNodeId && isGraphqlReviewThreadNodeId(th.threadNodeId)) {
+      return String(th.threadNodeId);
+    }
+    const c = (detail?.reviewComments || []).find(
+      (x: any) => x && String(x.id) === key
+    );
+    if (c?.threadNodeId && isGraphqlReviewThreadNodeId(c.threadNodeId)) {
+      return String(c.threadNodeId);
+    }
+    // shell:PRRT_… id
+    if (key.startsWith('shell:') && isGraphqlReviewThreadNodeId(key.slice(6))) {
+      return key.slice(6);
+    }
+    return null;
+  }
+
+  function onToggleThreadCollapse(
+    commentId: any,
+    resolved?: boolean,
+    threadNodeId: any = null
+  ) {
+    const tid =
+      (threadNodeId && isGraphqlReviewThreadNodeId(threadNodeId)
+        ? String(threadNodeId)
+        : null) || resolveThreadNodeIdFromCommentId(commentId);
+    const key = collapseKeyForThread(commentId, tid);
     if (!key) return;
+    const currently = isDiffThreadCollapsed(commentId, Boolean(resolved), tid);
+    const nextCollapsed = !currently;
     setDiffThreadCollapse((prev) => {
-      const currently = prev.has(key)
-        ? Boolean(prev.get(key))
-        : Boolean(resolved);
       const next = new Map(prev);
-      next.set(key, !currently);
+      next.set(key, nextCollapsed);
+      // Keep legacy comment-id key in sync during shell→numeric hydrate
+      const legacy = String(commentId ?? '');
+      if (legacy && legacy !== key) next.set(legacy, nextCollapsed);
       return next;
     });
+    // Expanding → lazy-load comments for shell/resolved GraphQL threads
+    if (!nextCollapsed && tid) {
+      void ensureThreadCommentsLoaded(tid);
+    }
   }
 
   /**
@@ -7036,10 +7666,19 @@ export function PrModalApp({
         }
       }
       const requestedReviewers = fromApi.length ? fromApi : merged;
-      commitMetaPatch({
-        requestedReviewers,
-        avatarUrls: mergeAvatarUrls(detail, result, requestedReviewers),
-      });
+      commitMetaPatch(
+        {
+          requestedReviewers,
+          avatarUrls: mergeAvatarUrls(detail, result, requestedReviewers),
+        },
+        {
+          localTimelineEvents: reviewerChangeTimelineEvents(
+            detail.requestedReviewers,
+            requestedReviewers,
+            timelineActorFromDetail(detail)
+          ),
+        }
+      );
       setActionMsg(`Re-requested review from ${logins.join(', ')}.`);
     } catch (err) {
       setActionMsg(err?.message || String(err));
@@ -7150,31 +7789,65 @@ export function PrModalApp({
   }
 
   /**
-   * Apply local detail mutation + host cache patch (no full soft-refresh).
-   * Strips local-only tombstone/meta fields that must not poison IDB permanently
-   * beyond this session — but keeps comments/threads lists on the host.
+   * Apply local detail mutation + **narrow** host cache patch (no full soft-refresh).
+   * Only comment/thread/pending/reaction slices — never title/body/files/draft.
+   * Body reactions use flushSync so is-reacted pills paint before a racey host
+   * re-render can merge a pre-patch snapshot.
    */
   function commitCommentListPatch(next: any) {
     if (!next) return;
-    setLocalDetail(next);
+    detailRef.current = next;
+    const hasBodyReactions = Object.prototype.hasOwnProperty.call(
+      next,
+      'bodyReactions'
+    );
     try {
-      const {
-        _metaSeq: _m,
-        _dropPending: _d,
-        _deletedReviewCommentIds: _dr,
-        _deletedIssueCommentIds: _di,
-        ...forHost
-      } = next;
-      onPatchDetail?.({
-        ...forHost,
-        reviewComments: next.reviewComments,
-        comments: next.comments,
-        reviewThreads: next.reviewThreads,
-        bodyReactions: next.bodyReactions,
-        viewerPendingReview: next.viewerPendingReview ?? null,
-      });
+      if (hasBodyReactions) {
+        flushSync(() => {
+          setLocalDetail(next);
+        });
+      } else {
+        setLocalDetail(next);
+      }
     } catch {
-      /* host optional */
+      setLocalDetail(next);
+    }
+    const forHost: Record<string, unknown> = {};
+    if (Object.prototype.hasOwnProperty.call(next, 'comments')) {
+      forHost.comments = next.comments;
+    }
+    if (Object.prototype.hasOwnProperty.call(next, 'commentsMeta')) {
+      forHost.commentsMeta = next.commentsMeta;
+    }
+    if (Object.prototype.hasOwnProperty.call(next, 'timelineEvents')) {
+      forHost.timelineEvents = next.timelineEvents;
+    }
+    if (Object.prototype.hasOwnProperty.call(next, 'reviewComments')) {
+      forHost.reviewComments = next.reviewComments;
+    }
+    if (Object.prototype.hasOwnProperty.call(next, 'reviewThreads')) {
+      forHost.reviewThreads = next.reviewThreads;
+    }
+    if (Object.prototype.hasOwnProperty.call(next, 'reviewCommentsMeta')) {
+      forHost.reviewCommentsMeta = next.reviewCommentsMeta;
+    }
+    if (Object.prototype.hasOwnProperty.call(next, 'reviewThreadsMeta')) {
+      forHost.reviewThreadsMeta = next.reviewThreadsMeta;
+    }
+    if (Object.prototype.hasOwnProperty.call(next, 'viewerPendingReview')) {
+      forHost.viewerPendingReview = next.viewerPendingReview ?? null;
+    }
+    if (hasBodyReactions) {
+      forHost.bodyReactions = next.bodyReactions;
+    }
+    if (Object.prototype.hasOwnProperty.call(next, 'reviews')) {
+      forHost.reviews = next.reviews;
+    }
+    if (Object.keys(forHost).length) {
+      // Defer host patch so flushSync paint is not nested inside host→props→merge.
+      queueMicrotask(() => {
+        void patchHostDetail(forHost);
+      });
     }
   }
 
@@ -7293,11 +7966,7 @@ export function PrModalApp({
       if (kindRaw === 'pr') {
         const next = { ...detail, bodyReactions: groups };
         setLocalDetail(next);
-        try {
-          onPatchDetail?.({ bodyReactions: groups });
-        } catch {
-          /* ignore */
-        }
+        void patchHostDetail({ bodyReactions: groups });
         return;
       }
       if (kindRaw === 'review') {
@@ -7348,8 +8017,9 @@ export function PrModalApp({
 
     // PR description body
     if (kind === 'pr') {
-      const prevReactions = Array.isArray(detail.bodyReactions)
-        ? detail.bodyReactions
+      const live = detailRef.current || detail;
+      const prevReactions = Array.isArray(live.bodyReactions)
+        ? live.bodyReactions
         : [];
       const nextReactions = applyReactionToggle(
         prevReactions,
@@ -7357,23 +8027,31 @@ export function PrModalApp({
         !currentlyReacted,
         viewerLogin
       );
-      const patched = { ...detail, bodyReactions: nextReactions };
+      const patched = { ...live, bodyReactions: nextReactions };
       commitCommentListPatch(patched);
       try {
         const api = globalThis.PRTreeFetch;
         if (!api?.toggleCommentReaction) {
           throw new Error('Reaction API unavailable');
         }
-        await api.toggleCommentReaction(detail.owner, detail.repo, 'pr', {
+        // Prefer REST issue-number path for PR body: GraphQL subjectId is often
+        // a PullRequest node which some tokens reject; REST /issues/{n}/reactions
+        // is the durable path (matches GitHub description reactions).
+        await api.toggleCommentReaction(live.owner, live.repo, 'pr', {
           content,
           viewerHasReacted: currentlyReacted,
-          nodeId: target.nodeId || detail.nodeId || null,
-          number: target.number ?? detail.number,
-          commentId: target.commentId ?? detail.number,
+          // Force REST unless we know the node is an Issue id (I_…)
+          nodeId: (() => {
+            const id = String(target.nodeId || live.nodeId || '').trim();
+            if (id.startsWith('I_') || id.includes('Issue')) return id;
+            return null;
+          })(),
+          number: target.number ?? live.number,
+          commentId: target.commentId ?? live.number,
         });
       } catch (err: any) {
         commitCommentListPatch({
-          ...detail,
+          ...(detailRef.current || live),
           bodyReactions: prevReactions,
         });
         setActionMsg(err?.message || String(err) || 'Reaction failed');
@@ -8645,6 +9323,23 @@ export function PrModalApp({
             onSaveEditComment={onSaveEditComment}
             pendingCount={totalPendingCount}
             onLoadMoreReviewThreads={onLoadMoreReviewThreads}
+            onEnsureThreadComments={ensureThreadCommentsLoaded}
+            isThreadCommentsLoading={(id: any) => {
+              const key = String(id || '');
+              if (!key) return false;
+              if (lazyLoadingThreadIds.has(key)) return true;
+              if (isGraphqlReviewThreadNodeId(key)) {
+                return lazyLoadingThreadIds.has(key);
+              }
+              if (
+                key.startsWith('shell:') &&
+                isGraphqlReviewThreadNodeId(key.slice(6))
+              ) {
+                return lazyLoadingThreadIds.has(key.slice(6));
+              }
+              const tid = resolveThreadNodeIdFromCommentId(key);
+              return Boolean(tid && lazyLoadingThreadIds.has(tid));
+            }}
             onJumpToReviewThread={jumpToReviewComment}
             onVisibleThreadNodeIds={(ids: string[]) => {
               visibleConvThreadNodeIdsRef.current = Array.isArray(ids)
@@ -8652,6 +9347,12 @@ export function PrModalApp({
                 : [];
             }}
             reverseComments={reverseComments}
+            timelineVisibility={timelineVisibility}
+            onTimelineVisibilityChange={
+              typeof onTimelineVisibilityChange === 'function'
+                ? onTimelineVisibilityChange
+                : null
+            }
             reviewThreadsMeta={detail?.reviewThreadsMeta || null}
             searchQuery={(searchQuery || '').trim()}
             searchHits={searchHits}
@@ -8819,6 +9520,23 @@ export function PrModalApp({
               applyActionRef={applyActionRef}
               isDiffCommentCollapsed={isDiffCommentCollapsed}
               onToggleThreadCollapse={onToggleThreadCollapse}
+              isThreadCommentsLoading={(id: any) => {
+                const key = String(id || '');
+                if (!key) return false;
+                if (lazyLoadingThreadIds.has(key)) return true;
+                // Resolve shell:… / comment id → PRRT
+                if (isGraphqlReviewThreadNodeId(key)) {
+                  return lazyLoadingThreadIds.has(key);
+                }
+                if (
+                  key.startsWith('shell:') &&
+                  isGraphqlReviewThreadNodeId(key.slice(6))
+                ) {
+                  return lazyLoadingThreadIds.has(key.slice(6));
+                }
+                const tid = resolveThreadNodeIdFromCommentId(key);
+                return Boolean(tid && lazyLoadingThreadIds.has(tid));
+              }}
               commentHeightOpts={commentHeightOpts}
               onVirtualMetricsChange={onVirtualMetricsChange}
               showSelectionComposer={showSelectionComposer}

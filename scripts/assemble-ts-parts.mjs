@@ -8,6 +8,10 @@
 import * as esbuild from 'esbuild';
 import fs from 'node:fs';
 import path from 'node:path';
+import {
+  esbuildReleaseExtras,
+  maybeStripDebugLogs,
+} from './release-build-options.mjs';
 
 export async function assembleTsParts({
   partsDir,
@@ -68,6 +72,7 @@ export async function assembleTsParts({
           format: 'esm',
           target: 'es2020',
           platform: 'neutral',
+          ...esbuildReleaseExtras(),
         });
         let out = result.code
           .replace(/^export\s+\{[^}]*\};?\s*$/gm, '')
@@ -90,7 +95,8 @@ export async function assembleTsParts({
     }
   }
 
-  const body = wrap(chunks.join('\n\n'));
+  let body = wrap(chunks.join('\n\n'));
+  body = await maybeStripDebugLogs(body, { loader: 'js' });
   const file = `${banner}\n${body}\n`;
   fs.writeFileSync(outFile, file);
   return {

@@ -475,21 +475,25 @@ export function lastSelectableRowInFile(
   return null;
 }
 
-function selectionNeedsSeed(
+/**
+ * Whether keyboard nav must place a fresh caret before stepping.
+ *
+ * Important: do **not** reseed solely because `activeFilePath` lags the
+ * selection path. Under key-hold, selection crosses files in the same rAF
+ * batch while tree `activeFilePath` still points at the previous file; reseeding
+ * to that file's first line makes the caret jump **up** (reported on large
+ * Diffs like #14). Tree file clicks clear selection via onSelectFile, so they
+ * still seed cleanly when selection is null.
+ */
+export function selectionNeedsSeed(
   selection: any,
-  activeFilePath: string
+  _activeFilePath: string
 ): boolean {
   if (!selection) return true;
   // Structural carets (file header / thread) with identity are valid stops
   if (isFileLevelSelection(selection) || isThreadSelection(selection)) {
     if (!String(selection.filePath || '').trim()) return true;
     if (isThreadSelection(selection) && selection.commentId == null) return true;
-    if (
-      activeFilePath &&
-      String(selection.filePath || '') !== activeFilePath
-    ) {
-      return true;
-    }
     return false;
   }
   // Line carets: path+line identity is enough even if headRowIndex is stale
@@ -497,19 +501,17 @@ function selectionNeedsSeed(
     String(selection.filePath || '').trim() &&
     Number.isFinite(Number(selection.headLine))
   ) {
-    if (
-      activeFilePath &&
-      String(selection.filePath || '') !== activeFilePath
-    ) {
-      return true;
-    }
+    return false;
+  }
+  // File-level-ish without headLine: path + row index is enough
+  if (
+    String(selection.filePath || '').trim() &&
+    Number.isFinite(Number(selection.headRowIndex))
+  ) {
     return false;
   }
   if (!Number.isFinite(Number(selection.headRowIndex))) return true;
-  if (activeFilePath && String(selection.filePath || '') !== activeFilePath) {
-    return true;
-  }
-  return false;
+  return true;
 }
 
 /** Find inline-comment row index by commentId. */

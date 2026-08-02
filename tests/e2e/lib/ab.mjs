@@ -102,7 +102,8 @@ export function ensureSingleTab() {
  * Prefer this over raw `tab new` so tests never accumulate tabs.
  */
 export function open(url) {
-  const r = ab(['open', url], { timeoutMs: 90_000 });
+  // 45s — long enough for cold GH + extension inject; short enough not to look hung.
+  const r = ab(['open', url], { timeoutMs: 45_000 });
   ensureSingleTab();
   return r;
 }
@@ -111,17 +112,195 @@ export function closeAll() {
   return ab(['close', '--all'], { allowFail: true });
 }
 
+/**
+ * Drop pr+ session keys that restore layout/collapsed files across navigations.
+ * Call on a github.com document (same as IDB clear).
+ */
+export function clearPrPlusSessionStorage() {
+  try {
+    return evalInPage(`
+      (() => {
+        const keys = [];
+        for (let i = sessionStorage.length - 1; i >= 0; i--) {
+          const k = sessionStorage.key(i);
+          if (k && (k.startsWith('prp:') || k.startsWith('pr-plus'))) {
+            keys.push(k);
+            sessionStorage.removeItem(k);
+          }
+        }
+        return { ok: true, removed: keys.length, keys: keys.slice(0, 20) };
+      })()
+    `);
+  } catch (e) {
+    return { ok: false, error: String(e?.message || e) };
+  }
+}
+
+/**
+ * Wipe page-origin PR detail IndexedDB (`pr-plus-detail-cache`).
+ * Must run on a github.com (or GHES) document so the origin matches content scripts.
+ * Prefer calling via `ensureBrowser()` / harness — not mid-scenario unless needed.
+ *
+ * @returns {{ ok: boolean, via?: string, error?: string, host?: string }}
+ */
+/**
+ * Low-level eval with a short CLI timeout (IDB clear must not burn 60s).
+ * @param {string} script
+ * @param {number} [timeoutMs]
+ */
+function evalInPageTimed(script, timeoutMs = 8_000) {
+  const r = ab(['eval', '--json', '--stdin'], {
+    input: script,
+    timeoutMs,
+    allowFail: true,
+  });
+  if (r.status !== 0) {
+    throw new Error((r.stderr || r.stdout || `eval exit ${r.status}`).slice(0, 200));
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(r.stdout);
+  } catch {
+    throw new Error(`eval JSON parse failed:\n${r.stdout.slice(0, 300)}`);
+  }
+  if (parsed.success === false || parsed.error) {
+    throw new Error(`eval error: ${JSON.stringify(parsed.error || parsed)}`);
+  }
+  if (parsed.data && 'result' in parsed.data) return parsed.data.result;
+  if ('result' in parsed) return parsed.result;
+  return parsed;
+}
+
+export function clearPrPlusIdb() {
+  // Fire-and-poll: do NOT await the async deleteDatabase promise via agent-browser
+  // (await can hang until CLI timeout when IDB is blocked). Kick work, poll window.
+  try {
+    evalInPageTimed(
+      `
+      (() => {
+        window.__prpE2eIdbClear = null;
+        const name = 'pr-plus-detail-cache';
+        const finish = (out) => {
+          window.__prpE2eIdbClear = out;
+        };
+        const run = async () => {
+          const out = { ok: false, via: [], errors: [], host: location.host };
+          try {
+            const idb = globalThis.PRModalDetailIdb?.createDetailIdb?.();
+            if (idb?.clear) {
+              await Promise.race([
+                idb.clear(),
+                new Promise((_, rej) => setTimeout(() => rej(new Error('idb.clear timeout')), 1500)),
+              ]);
+              out.via.push('PRModalDetailIdb.clear');
+            }
+          } catch (e) {
+            out.errors.push(String(e?.message || e));
+          }
+          try {
+            await new Promise((resolve) => {
+              const t = setTimeout(() => resolve(false), 1500);
+              const req = indexedDB.deleteDatabase(name);
+              req.onsuccess = () => {
+                clearTimeout(t);
+                resolve(true);
+              };
+              req.onerror = () => {
+                clearTimeout(t);
+                resolve(false);
+              };
+              req.onblocked = () => {
+                clearTimeout(t);
+                resolve(false);
+              };
+            });
+            out.via.push('deleteDatabase');
+            out.ok = true;
+          } catch (e) {
+            out.errors.push(String(e?.message || e));
+          }
+          if (!out.ok && out.via.length) out.ok = true;
+          out.via = out.via.join('+') || null;
+          out.error = out.errors.length ? out.errors.join('; ') : null;
+          delete out.errors;
+          finish(out);
+          return out;
+        };
+        // Intentionally do not return the promise — avoid agent-browser await hang.
+        void run();
+        return { kicked: true, host: location.host };
+      })()
+    `,
+      5_000
+    );
+  } catch (e) {
+    return { ok: false, error: String(e?.message || e) };
+  }
+  // Poll until result or short deadline (local sleep)
+  const deadline = Date.now() + 2_500;
+  while (Date.now() < deadline) {
+    try {
+      const r = evalInPageTimed(`window.__prpE2eIdbClear`, 3_000);
+      if (r && typeof r === 'object' && ('ok' in r || r.via)) {
+        return r;
+      }
+    } catch {
+      /* retry */
+    }
+    sleepSync(40);
+  }
+  return { ok: false, error: 'IDB clear timed out' };
+}
+
 export function press(key) {
   // Quote-safe: pass as single argv (spawn does not use shell)
   return ab(['press', key]);
 }
 
-export function waitMs(ms) {
-  return ab(['wait', String(ms)]);
+/**
+ * Sync sleep without spawning agent-browser (CLI spawn overhead dominates short polls).
+ * @param {number} ms
+ */
+export function sleepSync(ms) {
+  const n = Math.max(0, Math.min(120_000, Number(ms) || 0));
+  if (n <= 0) return;
+  try {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, n);
+  } catch {
+    const end = Date.now() + n;
+    while (Date.now() < end) {
+      /* spin fallback */
+    }
+  }
 }
 
+/**
+ * Wait `ms` milliseconds. Short waits use local sleep; long waits may use the
+ * browser CLI (keeps the page event loop free for multi-second pauses).
+ * @param {number} ms
+ */
+export function waitMs(ms) {
+  const n = Math.max(0, Number(ms) || 0);
+  // agent-browser spawn ≈ 50–200ms; never worth it under ~1.5s
+  if (n <= 1500) {
+    sleepSync(n);
+    return { status: 0, stdout: '', stderr: '' };
+  }
+  return ab(['wait', String(n)], { allowFail: true, timeoutMs: n + 5_000 });
+}
+
+/**
+ * Wait for document load. Prefer `load` over `networkidle` — GitHub keeps
+ * long-lived sockets/polls so networkidle often burns the full timeout and
+ * makes the suite look hung (90s × every navigation).
+ */
 export function waitNetwork() {
-  return ab(['wait', '--load', 'networkidle'], { timeoutMs: 90_000, allowFail: true });
+  // `domcontentloaded` is usually enough; fall back to fixed pause if CLI rejects it.
+  const r = ab(['wait', '--load', 'load'], { timeoutMs: 12_000, allowFail: true });
+  if (r.status !== 0) {
+    sleepSync(400);
+  }
+  return r;
 }
 
 /**
@@ -145,21 +324,28 @@ export function evalInPage(script) {
   return parsed;
 }
 
+/** Default poll interval for waitFor (local sleep; no agent-browser spawn). */
+export const WAIT_FOR_DEFAULT_INTERVAL_MS = 100;
+/** Default failure ceiling for waitFor (cold GH still allowed). */
+export const WAIT_FOR_DEFAULT_TIMEOUT_MS = 20_000;
+
 /**
  * Poll until predicate (page function body returning truthy) or timeout.
+ * Success path exits as soon as the predicate is truthy (interval is poll
+ * granularity only — not a fixed multi-second sleep stack).
  * @param {string} predicateBody  expression or block ending with return
  * @param {{ timeoutMs?: number, intervalMs?: number, label?: string }} [opts]
  */
 export function waitFor(predicateBody, opts = {}) {
-  const timeoutMs = opts.timeoutMs ?? 20_000;
-  const intervalMs = opts.intervalMs ?? 250;
+  const timeoutMs = opts.timeoutMs ?? WAIT_FOR_DEFAULT_TIMEOUT_MS;
+  const intervalMs = opts.intervalMs ?? WAIT_FOR_DEFAULT_INTERVAL_MS;
   const label = opts.label || 'condition';
   const start = Date.now();
   let last;
   while (Date.now() - start < timeoutMs) {
     last = evalInPage(`(() => { ${predicateBody} })()`);
     if (last) return last;
-    waitMs(intervalMs);
+    sleepSync(intervalMs);
   }
   throw new Error(`waitFor timeout (${timeoutMs}ms): ${label}; last=${JSON.stringify(last)}`);
 }

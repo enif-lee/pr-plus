@@ -140,7 +140,15 @@ export function CommentReactions({
     const currently = Boolean(cur?.viewerHasReacted);
     setPickerOpen(false);
     try {
-      await onToggle?.(target, content, currently);
+      // Fire-and-forget paint path: parent applies optimistic groups synchronously
+      // (flushSync). Awaiting a slow REST call here left the picker closing without
+      // a visible pill when the host re-render raced the unawaited setState.
+      const p = onToggle?.(target, content, currently);
+      if (p && typeof (p as Promise<unknown>).then === 'function') {
+        void Promise.resolve(p).catch(() => {
+          /* parent surfaces */
+        });
+      }
     } catch {
       /* parent surfaces */
     }

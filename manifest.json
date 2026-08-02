@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "pr+",
-  "version": "1.8.1",
+  "version": "1.8.3",
   "description": "GitHub PR stack tree + fast in-page review shell for conversation, diff, and merge.",
   "icons": {
     "16": "assets/icons/icon16.png",
@@ -22,7 +22,7 @@
     "http://*/*"
   ],
   "background": {
-    "service_worker": "src/background.bundle.js"
+    "service_worker": "src/background.sw.js"
   },
   "action": {
     "default_title": "pr+",
@@ -58,7 +58,9 @@
         "src/modal/pure/floating-scrollbar.js",
         "src/modal/pure/auto-refresh.js",
         "src/modal/pure/rate-limit.js",
+        "src/modal/pure/graphql-cost-log.js",
         "src/modal/pure/open-pulls-lifecycle.js",
+        "src/modal/pure/conversation-timeline.js",
         "src/modal/pure/review-threads.js",
         "src/modal/dist/pr-modal.bundle.js",
         "src/pr-modal-host.js"

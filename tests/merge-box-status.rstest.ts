@@ -15,8 +15,6 @@ import {
   mergeMethodsForUi,
   resolveMergePrimaryAction,
 } from '../src/modal/lib/merge-box-status';
-import fs from 'node:fs';
-import path from 'node:path';
 
 describe('canUpdateBranch', () => {
   test('false when merged or closed', () => {
@@ -448,20 +446,4 @@ describe('bypass rules opt-in (GitHub parity)', () => {
     );
   });
 
-  test('MergeBox view wires bypass opt-in (static presence)', () => {
-    const root = path.join(__dirname, '..');
-    const src = fs.readFileSync(
-      path.join(root, 'src/modal/views/conversation/MergeBox.tsx'),
-      'utf8'
-    );
-    expect(src).toMatch(/resolveMergePrimaryAction/);
-    expect(src).toMatch(/bypassRulesAccepted/);
-    expect(src).toMatch(/data-prp-bypass-rules/);
-    expect(src).toMatch(/showBypassCheckbox/);
-    expect(src).toMatch(/primaryAction\.mergeEnabled/);
-    // PR switch must always clear opt-in (not only when offerBypassRules is false).
-    expect(src).toMatch(
-      /setBypassRulesAccepted\(false\)[\s\S]*?\[detail\?\.number/
-    );
-  });
 });

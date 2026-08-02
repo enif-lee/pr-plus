@@ -8,6 +8,12 @@ import * as esbuild from 'esbuild';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  esbuildReleaseExtras,
+  isReleaseBuild,
+  maybeStripDebugLogs,
+  stripDebugMarkersRegexOnly,
+} from './release-build-options.mjs';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const src = path.join(root, 'src');
@@ -21,6 +27,7 @@ const deps = [
   'modal/pure/pr-edit-api.js',
   'modal/pure/checks.js',
   'modal/pure/rate-limit.js',
+  'modal/pure/graphql-cost-log.js',
   'storage',
   'fetch-pulls.js',
 ];
@@ -58,8 +65,17 @@ for (const rel of deps) {
       target: 'es2020',
       format: 'cjs',
       legalComments: 'none',
+      ...esbuildReleaseExtras(),
     });
     body = result.code.trim();
+  }
+  // Per-part strip (pure .js deps included) — avoids re-parsing full SW with GraphQL `$ids`
+  if (isReleaseBuild()) {
+    try {
+      body = (await maybeStripDebugLogs(body, { loader: 'js' })).trim();
+    } catch {
+      body = stripDebugMarkersRegexOnly(body).trim();
+    }
   }
   parts.push(`\n/* ---- ${label} ---- */\n`);
   const needsWrap =
@@ -89,6 +105,7 @@ if (bgFile.endsWith('.ts')) {
       target: 'es2020',
       format: 'cjs',
       legalComments: 'none',
+      ...esbuildReleaseExtras(),
     })
   ).code;
 }
@@ -110,6 +127,20 @@ parts.push(`\n/* ---- ${path.relative(src, bgFile)} ---- */\n`);
 parts.push(bg);
 
 const out = path.join(src, 'background.bundle.js');
-fs.writeFileSync(out, parts.join('\n'));
+const outSw = path.join(src, 'background.sw.js');
+let body = parts.join('\n');
+// Light final regex pass only (parts already stripped); no full esbuild re-parse
+if (isReleaseBuild()) {
+  body = stripDebugMarkersRegexOnly(body);
+}
+fs.writeFileSync(out, body);
+// Distinct SW path so unpacked Chrome reloads pick up handler changes (MV3 cache).
+fs.writeFileSync(outSw, body);
 const size = fs.statSync(out).size;
-console.log('Built', path.relative(root, out), `(${size} bytes) from TS/JS mix`);
+console.log(
+  'Built',
+  path.relative(root, out),
+  `+ ${path.relative(root, outSw)}`,
+  `(${size} bytes) from TS/JS mix`,
+  isReleaseBuild() ? '[release logs stripped]' : ''
+);

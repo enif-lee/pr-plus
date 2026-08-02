@@ -15,6 +15,49 @@
   overscroll-behavior: contain;
 }
 
+/* Timeline category tips (filter chips) — virtual row between merge & feed */
+.prp-timeline-tips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 6px 4px 10px;
+  border-bottom: 1px solid var(--prp-border, rgba(31, 35, 40, 0.12));
+  background: transparent;
+  z-index: 1;
+}
+.prp-timeline-tips__chip {
+  appearance: none;
+  margin: 0;
+  border: 1px solid var(--prp-border, #d0d7de);
+  background: var(--prp-bg, #fff);
+  color: var(--prp-fg-muted, #656d76);
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.5;
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease,
+    color 0.12s ease;
+}
+.prp-timeline-tips__chip:hover {
+  border-color: var(--prp-accent, #0969da);
+  color: var(--prp-fg, #1f2328);
+}
+.prp-timeline-tips__chip.is-selected {
+  background: color-mix(in srgb, var(--prp-accent, #0969da) 12%, transparent);
+  border-color: var(--prp-accent, #0969da);
+  color: var(--prp-accent, #0969da);
+}
+.prp-timeline-tips__chip:focus-visible {
+  outline: 2px solid var(--prp-accent, #0969da);
+  outline-offset: 1px;
+}
+
 /*
  * Floating (overlay) scrollbars — native bar is fully hidden so Chrome cannot
  * reserve a classic gutter; a custom thumb paints over content instead.

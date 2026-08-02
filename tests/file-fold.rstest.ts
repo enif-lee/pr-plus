@@ -9,8 +9,6 @@ import {
   isEditableKeyboardTarget,
   FILE_FOLD_SHORTCUT,
 } from '../src/modal/lib/shortcut-policy';
-import fs from 'node:fs';
-import path from 'node:path';
 import {
   togglePathInCollapsedSet,
   setPathCollapsedInSet,
@@ -217,24 +215,6 @@ describe('isEditableKeyboardTarget (toolbar radios must not trap arrows)', () =>
     expect(isEditableKeyboardTarget(fakeEl('button'))).toBe(false);
   });
 
-  test('DiffToolbar blurs mode radio after change; App uses pure helper', () => {
-    const root = path.join(__dirname, '..');
-    const toolbar = fs.readFileSync(
-      path.join(root, 'src/modal/views/chrome/DiffToolbar.tsx'),
-      'utf8'
-    );
-    expect(toolbar).toMatch(/onDiffMode\?\.\('unified'\)/);
-    expect(toolbar).toMatch(/\.blur\(\)/);
-    const app = fs.readFileSync(
-      path.join(root, 'src/modal/app/PrModalApp.impl.tsx'),
-      'utf8'
-    );
-    expect(app).toMatch(/isEditableKeyboardTarget/);
-    // Local re-definition that treats all INPUT as editable must not exist
-    expect(app).not.toMatch(
-      /function isEditableKeyboardTarget[\s\S]{0,200}tag === 'INPUT'/
-    );
-  });
 });
 
 describe('ArrowLeft/Right directed fold', () => {

@@ -1,8 +1,12 @@
 /**
  * Shared e2e harness for pr+ modal scenarios.
  */
+import fs from 'node:fs';
+import path from 'node:path';
 import {
   ab,
+  clearPrPlusIdb,
+  clearPrPlusSessionStorage,
   closeAll,
   ensureSingleTab,
   evalInPage,
@@ -13,6 +17,10 @@ import {
   waitNetwork,
   ROOT,
 } from './ab.mjs';
+import {
+  ensureSharedSession,
+  teardownSharedSession,
+} from './session.mjs';
 
 export const REPO = 'enif-lee/pr-plus';
 export const PULLS_URL = `https://github.com/${REPO}/pulls`;
@@ -47,11 +55,166 @@ export function clickPrPlusToggleIfNeeded() {
   `);
 }
 
+/**
+ * Snapshot host e2e load readiness from **page DOM** attributes.
+ * Content-script `window.__prpE2eLoad` is isolated — agent-browser eval reads DOM.
+ */
+export function probeLoad() {
+  return evalInPage(`
+    (() => {
+      const host =
+        document.getElementById('prp-page-embed') ||
+        document.getElementById('prp-modal-host');
+      const root = document.documentElement;
+      let snap = null;
+      try {
+        const raw = host?.getAttribute('data-prp-e2e-load');
+        if (raw) snap = JSON.parse(raw);
+      } catch {}
+      const metaReady =
+        host?.getAttribute('data-prp-meta-ready') === '1' ||
+        root.getAttribute('data-prp-meta-ready') === '1' ||
+        snap?.metaReady === true;
+      const filesReady =
+        host?.getAttribute('data-prp-files-ready') === '1' ||
+        root.getAttribute('data-prp-files-ready') === '1' ||
+        snap?.filesReady === true;
+      const loadBusy =
+        host?.getAttribute('data-prp-load-busy') === '1' ||
+        root.getAttribute('data-prp-load-busy') === '1' ||
+        snap?.loadBusy === true;
+      return {
+        snap: snap
+          ? { ...snap, metaReady, filesReady, loadBusy }
+          : {
+              metaReady,
+              filesReady,
+              loadBusy,
+              filesCount: Number(host?.getAttribute('data-prp-files-count') || 0),
+              number: host?.getAttribute('data-prp-load-number')
+                ? Number(host.getAttribute('data-prp-load-number'))
+                : null,
+              seq: host?.getAttribute('data-prp-load-seq')
+                ? Number(host.getAttribute('data-prp-load-seq'))
+                : null,
+            },
+        seq: host?.getAttribute('data-prp-load-seq') || snap?.seq || null,
+        hostBusy: host?.getAttribute('data-prp-load-busy') ?? null,
+        hostMeta: host?.getAttribute('data-prp-meta-ready') ?? null,
+        hostFiles: host?.getAttribute('data-prp-files-ready') ?? null,
+        overlay: !!document.querySelector('.prp-overlay'),
+        layout:
+          document.querySelector('.prp-overlay')?.getAttribute('data-layout') ||
+          null,
+      };
+    })()
+  `);
+}
+
+/**
+ * Wait until PR detail load is ready for the next action/assert.
+ * Reads page-visible data-prp-* attributes published by host.
+ *
+ * @param {{
+ *   number?: number,
+ *   files?: boolean,
+ *   meta?: boolean,
+ *   timeoutMs?: number,
+ *   label?: string,
+ * }} [opts]
+ */
+/** Shell/detail ready failure ceiling (cold GH). Success exits early via poll. */
+export const DETAIL_READY_TIMEOUT_MS = 30_000;
+/** Poll interval for ready waits (local sleep). */
+export const DETAIL_READY_INTERVAL_MS = 100;
+
+export function waitDetailReady(opts = {}) {
+  const n = opts.number != null ? Number(opts.number) : null;
+  const needFiles = Boolean(opts.files);
+  const needMeta = opts.meta !== false;
+  const timeoutMs = opts.timeoutMs ?? DETAIL_READY_TIMEOUT_MS;
+  const intervalMs = opts.intervalMs ?? DETAIL_READY_INTERVAL_MS;
+  const label =
+    opts.label ||
+    `detail ready${n != null ? ` #${n}` : ''}${needFiles ? ' +files' : ''}`;
+
+  waitFor(
+    `
+    // Keep overlay mounted while polling
+    if (!document.querySelector('.prp-overlay')) {
+      const btn = document.querySelector('.prp-gh-open-toggle');
+      if (btn) btn.click();
+    }
+    const ov = document.querySelector('.prp-overlay');
+    if (!ov) return false;
+    const host =
+      document.getElementById('prp-page-embed') ||
+      document.getElementById('prp-modal-host');
+    const root = document.documentElement;
+    let snap = null;
+    try {
+      const raw = host?.getAttribute('data-prp-e2e-load');
+      if (raw) snap = JSON.parse(raw);
+    } catch {}
+    const metaReady =
+      host?.getAttribute('data-prp-meta-ready') === '1' ||
+      root.getAttribute('data-prp-meta-ready') === '1' ||
+      snap?.metaReady === true;
+    const filesReady =
+      host?.getAttribute('data-prp-files-ready') === '1' ||
+      root.getAttribute('data-prp-files-ready') === '1' ||
+      snap?.filesReady === true;
+    const loadBusy =
+      host?.getAttribute('data-prp-load-busy') === '1' ||
+      root.getAttribute('data-prp-load-busy') === '1' ||
+      snap?.loadBusy === true;
+    const numAttr = host?.getAttribute('data-prp-load-number');
+    const number = numAttr != null ? Number(numAttr) : snap?.number;
+    ${
+      n != null
+        ? `if (number != null && Number(number) !== ${n}) return false;`
+        : ''
+    }
+    if (loadBusy) return false;
+    ${needMeta ? `if (!metaReady) return false;` : ''}
+    ${
+      needFiles
+        ? `
+    const selectable = document.querySelectorAll(
+      '.prp-vline--selectable:not(.prp-vline--header)'
+    ).length;
+    // Prefer product filesReady; accept painted selectables as settle fallback
+    if (!filesReady && selectable < 1) return false;
+    if (filesReady && selectable < 1) {
+      // bodies ready but virtual list not painted yet — keep waiting
+      return false;
+    }
+    `
+        : ''
+    }
+    const loading = document.querySelector(
+      '.prp-skeleton, [class*="LoadingSkeleton"], .prp-loading'
+    );
+    if (loading) return false;
+    return !!(
+      document.querySelector('.prp-header') ||
+      document.querySelector('.prp-conversation-virtual') ||
+      document.querySelector('.prp-vlist')
+    );
+    `,
+    { timeoutMs, intervalMs, label }
+  );
+  const snap = probeLoad();
+  log(
+    `  waitDetailReady ok seq=${snap.seq} meta=${snap.snap?.metaReady} files=${snap.snap?.filesReady} filesCount=${snap.snap?.filesCount} busy=${snap.snap?.loadBusy}`
+  );
+  return snap;
+}
+
 /** Wait until pr+ overlay (modal or embed) is ready for a PR. */
 export function waitPrShellReady(n, label) {
   // autoOpenEmbed may be off — open via toggle before waiting
   clickPrPlusToggleIfNeeded();
-  waitMs(400);
   waitFor(
     `
     // Retry toggle each poll if still no overlay
@@ -61,8 +224,6 @@ export function waitPrShellReady(n, label) {
     }
     const ov = document.querySelector('.prp-overlay');
     if (!ov) return false;
-    const loading = document.querySelector('.prp-skeleton, [class*="LoadingSkeleton"], .prp-loading');
-    if (loading) return false;
     return !!(
       document.querySelector('.prp-conversation-virtual') ||
       document.querySelector('.prp-vlist') ||
@@ -70,16 +231,128 @@ export function waitPrShellReady(n, label) {
     );
     `,
     {
-      timeoutMs: 45_000,
-      label: label || `PR #${n} shell ready`,
+      timeoutMs: DETAIL_READY_TIMEOUT_MS,
+      intervalMs: DETAIL_READY_INTERVAL_MS,
+      label: label || `PR #${n} shell mount`,
     }
   );
-  waitMs(400);
+  // Data: wait for meta/core settle via host e2e load hook (not fixed sleep).
+  waitDetailReady({
+    number: n,
+    meta: true,
+    files: false,
+    label: label || `PR #${n} detail meta ready`,
+  });
 }
 
 export function log(msg) {
   const t = new Date().toISOString().slice(11, 23);
   console.log(`[e2e ${t}] ${msg}`);
+}
+
+/**
+ * Flush SW GraphQL cost log into page sessionStorage (via content-script event),
+ * then return { summary, log } for observation. Safe if extension absent.
+ * @param {{ label?: string, logEntries?: boolean }} [opts]
+ */
+export function dumpGraphqlCostLog(opts = {}) {
+  const label = opts.label || 'gql-cost';
+  try {
+    evalInPage(
+      `document.dispatchEvent(new CustomEvent('prp-flush-gql-cost', { bubbles: true })); true`
+    );
+  } catch {
+    /* ignore */
+  }
+  // Content script async sendMessage + SW — poll briefly (not fixed 600ms)
+  let summary = null;
+  let logEntries = [];
+  let err = null;
+  let hook = null;
+  try {
+    let snap = null;
+    const flushDeadline = Date.now() + 500;
+    while (Date.now() < flushDeadline) {
+      snap = evalInPage(`(() => {
+        try {
+          return {
+            summary: JSON.parse(sessionStorage.getItem('prp:gql-cost-summary') || 'null'),
+            log: JSON.parse(sessionStorage.getItem('prp:gql-cost-log') || '[]'),
+            err: sessionStorage.getItem('prp:gql-cost-err'),
+            hook: document.documentElement.getAttribute('data-prp-gql-cost-hook'),
+            ready: document.documentElement.getAttribute('data-prp-gql-cost-ready'),
+          };
+        } catch (e) {
+          return { summary: null, log: [], err: String(e), hook: null, ready: null };
+        }
+      })()`);
+      if (snap?.ready === '1' || snap?.ready === 1 || snap?.summary) break;
+      waitMs(50);
+    }
+    summary = snap?.summary ?? null;
+    logEntries = Array.isArray(snap?.log) ? snap.log : [];
+    err = snap?.err || null;
+    hook = snap?.hook || null;
+    if (snap?.ready) log(`  [${label}] flush ready=${snap.ready} hook=${hook || '?'}`);
+  } catch {
+    summary = null;
+  }
+  if (err) {
+    log(`  [${label}] gql-cost err: ${String(err).slice(0, 200)}`);
+  }
+  if (!hook) {
+    log(
+      `  [${label}] WARN: data-prp-gql-cost-hook missing — content-bridge may be stale; hard-relaunch browser after rebuild`
+    );
+  }
+  const totalCost = Number(summary?.totalCost) || 0;
+  const totalCalls = Number(summary?.totalCalls) || logEntries.length || 0;
+  const top = Array.isArray(summary?.byOp) ? summary.byOp.slice(0, 12) : [];
+  log(
+    `  [${label}] GraphQL primary points: totalCost=${totalCost} calls=${totalCalls}` +
+      (summary?.unknownCostCalls
+        ? ` unknownCost=${summary.unknownCostCalls}`
+        : '')
+  );
+  for (const row of top) {
+    log(
+      `  [${label}]   op=${row.op} cost=${row.cost} calls=${row.calls} avg=${row.avgCost} max=${row.maxCost} avgMs=${row.avgMs}`
+    );
+  }
+  if (logEntries.length) {
+    // Per-call lines (capped) so suite logs show real burdens
+    const sample = logEntries.slice(-40);
+    for (const e of sample) {
+      log(
+        `  [${label}]   · cost=${e.cost ?? '?'} op=${e.op}` +
+          (e.ms != null ? ` ${e.ms}ms` : '') +
+          (e.remaining != null ? ` rem=${e.remaining}` : '') +
+          (e.vars && Object.keys(e.vars).length
+            ? ` ${JSON.stringify(e.vars)}`
+            : '') +
+          (e.ok === false ? ` FAIL` : '')
+      );
+    }
+  }
+  return { summary, log: logEntries, totalCost, totalCalls, err, hook };
+}
+
+/** Clear SW + page GraphQL cost observation log. */
+export function clearGraphqlCostLog() {
+  try {
+    evalInPage(
+      `document.dispatchEvent(new CustomEvent('prp-clear-gql-cost')); true`
+    );
+  } catch {
+    /* ignore */
+  }
+  try {
+    evalInPage(`sessionStorage.removeItem('prp:gql-cost-log');
+      sessionStorage.removeItem('prp:gql-cost-summary'); true`);
+  } catch {
+    /* ignore */
+  }
+  waitMs(100);
 }
 
 export function assert(cond, msg) {
@@ -111,10 +384,74 @@ export async function step(name, fn) {
   }
 }
 
-export function ensureBrowser() {
-  // Prefer fresh session for isolation; profile keeps GitHub login.
-  // Do not waitMs() after close — that can spawn a bare session without extensions.
-  closeAll();
+/**
+ * Ensure browser for e2e (shared session by default).
+ * Reuses Chrome when already open; soft-resets IDB/session + single tab.
+ * @param {{ forceRelaunch?: boolean }} [opts]
+ */
+export function ensureBrowser(opts = {}) {
+  if (opts.forceRelaunch) {
+    teardownSharedSession();
+  }
+  ensureSharedSession(opts.forceRelaunch ? 'force-relaunch' : 'ensureBrowser');
+}
+
+/**
+ * After Diff layout, wait until file tree and/or code rows exist.
+ * Prefers host `__prpE2eLoad.filesReady`, then DOM selectable rows.
+ */
+export function waitDiffFilesReady(label) {
+  // First: product load hook (files bodies + meta not busy)
+  try {
+    waitDetailReady({
+      files: true,
+      meta: true,
+      timeoutMs: 35_000,
+      label: label || 'Diff detail+files ready',
+    });
+  } catch {
+    /* fall through to DOM-only wait */
+  }
+  waitFor(
+    `
+    const host =
+      document.getElementById('prp-page-embed') ||
+      document.getElementById('prp-modal-host');
+    const filesReady =
+      host?.getAttribute('data-prp-files-ready') === '1' ||
+      document.documentElement.getAttribute('data-prp-files-ready') === '1';
+    const loadBusy =
+      host?.getAttribute('data-prp-load-busy') === '1' ||
+      document.documentElement.getAttribute('data-prp-load-busy') === '1';
+    const selectableHook = document.querySelectorAll(
+      '.prp-vline--selectable:not(.prp-vline--header)'
+    ).length;
+    // Product says files have patch bodies and paint has code rows
+    if (filesReady && !loadBusy && selectableHook > 0) {
+      return true;
+    }
+    const tree = document.querySelectorAll(
+      '.prp-filetree__row, .prp-filetree__item, .prp-filetree a, .prp-filetree [data-path]'
+    ).length;
+    const spacer = document.querySelector('.prp-vlist__spacer');
+    const spacerH = spacer ? Number(spacer.offsetHeight) || 0 : 0;
+    const selectable = document.querySelectorAll(
+      '.prp-vline--selectable:not(.prp-vline--header)'
+    ).length;
+    const bodyText = (document.querySelector('.prp-vlist')?.innerText || '');
+    const emptyBinary =
+      /this file is empty/i.test(bodyText) ||
+      (/\\bbinary\\b/i.test(bodyText) && selectable === 0);
+    if (emptyBinary && selectable === 0) return false;
+    if (selectable > 0) return true;
+    if (tree > 0 && spacerH > 50 && selectable > 0) return true;
+    return false;
+    `,
+    {
+      timeoutMs: 25_000,
+      label: label || 'Diff files/code ready',
+    }
+  );
 }
 
 export function openPulls() {
@@ -136,15 +473,43 @@ function locationOk() {
 
 /** Close pr+ overlay if present (Esc cascade). */
 export function closeOverlay() {
+  // Prefer product chrome close so host closeModal runs (list resync + session
+  // wipe). Escape alone can race GH palette ownership and leave host open.
+  // requestClose animates ~280ms before calling onClose — wait past that.
   for (let i = 0; i < 4; i++) {
     const open = evalInPage(`!!document.querySelector('.prp-overlay')`);
     if (!open) return;
-    press('Escape');
-    waitMs(200);
+    const clicked = evalInPage(`
+      (() => {
+        // Prefer exact modal Close (not "Close pull request")
+        const btn =
+          document.querySelector(
+            '.prp-overlay button[aria-label="Close"]'
+          ) ||
+          [...document.querySelectorAll('.prp-overlay button')].find((b) => {
+            const lab = (b.getAttribute('aria-label') || '').trim();
+            return lab === 'Close';
+          });
+        if (btn) {
+          btn.click();
+          return { ok: true, via: 'close-btn' };
+        }
+        return { ok: false };
+      })()
+    `);
+    if (!clicked?.ok) press('Escape');
+    // Allow exit animation + host onClose (sheet 240ms / modal 280ms)
+    waitMs(450);
   }
-  // Force-remove only if stuck (should not happen)
+  // Last resort: only force-remove if still open after product close attempts
   const still = evalInPage(`!!document.querySelector('.prp-overlay')`);
   if (still) {
+    // One more Escape + longer wait before DOM destroy
+    press('Escape');
+    waitMs(500);
+  }
+  const still2 = evalInPage(`!!document.querySelector('.prp-overlay')`);
+  if (still2) {
     evalInPage(`document.querySelector('.prp-overlay')?.remove(); document.body.style.overflow=''; true`);
   }
 }
@@ -160,12 +525,12 @@ export function openPrByUrl(n) {
   open(prUrl(n)); // single-tab policy via open()
   ensureSingleTab();
   waitNetwork();
-  waitMs(800);
+  // Extension inject is usually ready by load; short grace only
+  waitMs(150);
   const t = clickPrPlusToggleIfNeeded();
   if (t && !t.already) {
     log(`  PR #${n} open via URL — pr+ toggle ${JSON.stringify(t)}`);
   }
-  waitMs(600);
   waitPrShellReady(n, `PR #${n} via URL shell ready`);
 }
 
@@ -217,16 +582,26 @@ export function setLayout(target) {
   // target: 'conversation' | 'diff'
   for (let i = 0; i < 3; i++) {
     const cur = layout();
-    if (cur === target) return;
+    if (cur === target) break;
     press('Alt+.');
-    waitMs(500);
+    waitMs(300);
   }
   // Fallback: header layout toggle button (when chord delivery is flaky)
   if (layout() !== target) {
     evalInPage(`document.querySelector('.prp-header__icon-btn--layout')?.click()`);
-    waitMs(500);
+    waitMs(300);
   }
   assert(layout() === target, `expected layout=${target}, got ${layout()}`);
+  // Wait for data required by that layout (hook-driven, not fixed sleep)
+  if (target === 'diff') {
+    waitDiffFilesReady(`layout=${target} files ready`);
+  } else {
+    waitDetailReady({
+      meta: true,
+      files: false,
+      label: `layout=${target} meta ready`,
+    });
+  }
 }
 
 export function modalProbe() {
@@ -709,6 +1084,17 @@ export function pressOptF() {
  * @param {number} [index]
  */
 export function clickSelectableLine(index = 3) {
+  // Clear opt-hold latch so line selection is not swallowed by chord mode.
+  evalInPage(`
+    (() => {
+      document.documentElement.removeAttribute('data-prp-opt-held');
+      document.documentElement.classList.remove('prp-opt-held');
+      const v = document.querySelector('.prp-vlist, .prp-diff-vlist');
+      if (v && typeof v.focus === 'function') {
+        try { v.focus({ preventScroll: true }); } catch { v.focus(); }
+      }
+    })()
+  `);
   const r = evalInPage(`
     (() => {
       const rows = [...document.querySelectorAll('.prp-vline--selectable')].filter(
@@ -718,19 +1104,47 @@ export function clickSelectableLine(index = 3) {
       if (!row) return { ok: false, n: rows.length };
       row.scrollIntoView({ block: 'center' });
       const rect = row.getBoundingClientRect();
-      const x = rect.left + 24;
+      const x = rect.left + Math.min(40, Math.max(12, rect.width * 0.2));
       const y = rect.top + rect.height / 2;
-      const el = document.elementFromPoint(x, y) || row;
+      // Prefer the row itself — elementFromPoint can hit overlays/islands.
+      const el = row;
       const opts = { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0, buttons: 1 };
       el.dispatchEvent(new PointerEvent('pointerdown', { ...opts, pointerId: 1, pointerType: 'mouse' }));
       el.dispatchEvent(new MouseEvent('mousedown', opts));
       el.dispatchEvent(new PointerEvent('pointerup', { ...opts, pointerId: 1, pointerType: 'mouse', buttons: 0 }));
       el.dispatchEvent(new MouseEvent('mouseup', { ...opts, buttons: 0 }));
       el.dispatchEvent(new MouseEvent('click', { ...opts, buttons: 0 }));
-      return { ok: true, n: rows.length, cls: row.className.slice(0, 80) };
+      // Direct click() as last resort for React synthetic handlers
+      try { el.click(); } catch { /* ignore */ }
+      const selected = document.querySelectorAll('.prp-vline--selected').length;
+      return { ok: true, n: rows.length, selected, cls: row.className.slice(0, 80) };
     })()
   `);
   waitMs(350);
+  // Retry once if selection did not paint (focus race / overlay)
+  if (!r?.selected) {
+    waitMs(200);
+    const r2 = evalInPage(`
+      (() => {
+        const rows = [...document.querySelectorAll('.prp-vline--selectable')].filter(
+          (e) => !e.classList.contains('prp-vline--header')
+        );
+        const row = rows[${Number(index)}] || rows[Math.min(3, rows.length - 1)] || rows[0];
+        if (!row) return { ok: false, n: rows.length, selected: 0 };
+        row.scrollIntoView({ block: 'center' });
+        row.click();
+        return {
+          ok: true,
+          n: rows.length,
+          selected: document.querySelectorAll('.prp-vline--selected').length,
+          cls: row.className.slice(0, 80),
+          via: 'retry-click',
+        };
+      })()
+    `);
+    waitMs(300);
+    return r2 || r;
+  }
   return r;
 }
 
@@ -1150,4 +1564,15 @@ export function holdChord(chord, opts = {}) {
   };
 }
 
-export { ab, evalInPage, waitMs, waitFor, open, closeAll, ensureSingleTab, ROOT };
+export {
+  ab,
+  clearPrPlusIdb,
+  clearPrPlusSessionStorage,
+  evalInPage,
+  waitMs,
+  waitFor,
+  open,
+  closeAll,
+  ensureSingleTab,
+  ROOT,
+};

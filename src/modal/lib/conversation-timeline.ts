@@ -246,6 +246,361 @@ export function timelineEventToItem(ev, i = 0) {
   };
 }
 
+/**
+ * Optimistic system event after a confirmed meta write (labels / milestone / …).
+ * Id is always `local:…` so it never collides with GitHub numeric event ids.
+ */
+export function makeLocalTimelineEvent(partial: {
+  event: string;
+  actor?: string;
+  avatarUrl?: string;
+  at?: string;
+  label?: { name: string; color?: string; description?: string } | null;
+  assignee?: string | null;
+  requestedReviewer?: string | null;
+  requestedTeam?: string | null;
+  milestone?: { number?: number | null; title?: string } | null;
+  rename?: { from: string; to: string } | null;
+  commitId?: string | null;
+} = { event: '' }) {
+  const event = String(partial.event || '').trim();
+  const stamp = partial.at || new Date().toISOString();
+  const keyPart =
+    partial.label?.name ||
+    partial.assignee ||
+    partial.requestedReviewer ||
+    partial.requestedTeam ||
+    partial.milestone?.title ||
+    partial.milestone?.number ||
+    partial.rename?.to ||
+    event;
+  const id = `local:${event}:${String(keyPart).toLowerCase()}:${stamp}:${Math.random().toString(36).slice(2, 7)}`;
+  const label =
+    partial.label && partial.label.name
+      ? {
+          name: String(partial.label.name),
+          color: String(partial.label.color || ''),
+          description: String(partial.label.description || ''),
+        }
+      : null;
+  return {
+    id,
+    event,
+    actor: partial.actor || '',
+    avatarUrl: partial.avatarUrl || '',
+    at: stamp,
+    label,
+    assignee: partial.assignee || null,
+    requestedReviewer: partial.requestedReviewer || null,
+    requestedTeam: partial.requestedTeam || null,
+    milestone: partial.milestone || null,
+    rename: partial.rename || null,
+    commitId: partial.commitId || null,
+    lockReason: null,
+    dismissReason: null,
+    reviewState: null,
+    _local: true,
+  };
+}
+
+/** Same narrative (event + primary subject) — used to drop local rows once server lands. */
+export function timelineEventsNarrativelyEqual(a: any, b: any): boolean {
+  if (!a || !b) return false;
+  if (String(a.event || '') !== String(b.event || '')) return false;
+  const al = String(a.label?.name || '').toLowerCase();
+  const bl = String(b.label?.name || '').toLowerCase();
+  if (al || bl) return al === bl && al !== '';
+  const aa = String(a.assignee || '').toLowerCase();
+  const ba = String(b.assignee || '').toLowerCase();
+  if (aa || ba) return aa === ba && aa !== '';
+  const ar = String(a.requestedReviewer || '').toLowerCase();
+  const br = String(b.requestedReviewer || '').toLowerCase();
+  if (ar || br) return ar === br && ar !== '';
+  const at = String(a.requestedTeam || '').toLowerCase();
+  const bt = String(b.requestedTeam || '').toLowerCase();
+  if (at || bt) return at === bt && at !== '';
+  const am = String(a.milestone?.title || a.milestone?.number || '').toLowerCase();
+  const bm = String(b.milestone?.title || b.milestone?.number || '').toLowerCase();
+  if (am || bm) return am === bm && am !== '';
+  const af = String(a.rename?.from || '');
+  const at2 = String(a.rename?.to || '');
+  const bf = String(b.rename?.from || '');
+  const bt2 = String(b.rename?.to || '');
+  if (af || at2 || bf || bt2) return af === bf && at2 === bt2;
+  // Same event type with no subject (closed/reopened/…) — treat as equal
+  return true;
+}
+
+/**
+ * True when a *server* event can stand in for a *local* optimistic row.
+ * Server must not be older than the local write (minus small skew) — a labeled
+ * event from a test run 30s ago must not swallow a brand-new local labeled row.
+ */
+export function serverEventCoversLocal(
+  server: any,
+  local: any,
+  skewMs = 5_000,
+  maxFutureMs = 180_000
+): boolean {
+  if (!timelineEventsNarrativelyEqual(server, local)) return false;
+  const ts = Date.parse(String(server?.at || server?.createdAt || ''));
+  const tl = Date.parse(String(local?.at || local?.createdAt || ''));
+  if (!Number.isFinite(ts) || !Number.isFinite(tl)) return false;
+  return ts >= tl - skewMs && ts <= tl + maxFutureMs;
+}
+
+/** @deprecated use serverEventCoversLocal — kept for callers/tests */
+export function timelineEventsCloseInTime(
+  a: any,
+  b: any,
+  windowMs = 120_000
+): boolean {
+  const ta = Date.parse(String(a?.at || a?.createdAt || ''));
+  const tb = Date.parse(String(b?.at || b?.createdAt || ''));
+  if (!Number.isFinite(ta) || !Number.isFinite(tb)) return false;
+  return Math.abs(ta - tb) <= windowMs;
+}
+
+/**
+ * Union timeline events by id. Server (non-local) rows replace matching local
+ * optimistics only when narrative matches **and** the server event is at least
+ * as new as the local write (not a historical twin from a prior mutation).
+ */
+export function mergeTimelineEventsById(prev: any, next: any): any[] {
+  const byId = new Map<string, any>();
+  for (const e of Array.isArray(prev) ? prev : []) {
+    if (e && e.id != null) byId.set(String(e.id), e);
+  }
+  for (const e of Array.isArray(next) ? next : []) {
+    if (e && e.id != null) byId.set(String(e.id), e);
+  }
+  const all = [...byId.values()];
+  const server = all.filter((e) => !String(e?.id ?? '').startsWith('local:'));
+  const locals = all.filter((e) => String(e?.id ?? '').startsWith('local:'));
+  const keptLocals = locals.filter(
+    (local) => !server.some((s) => serverEventCoversLocal(s, local))
+  );
+  return [...server, ...keptLocals];
+}
+
+function labelNameKey(l: any): string {
+  const name = typeof l === 'string' ? l : l?.name;
+  return String(name || '')
+    .trim()
+    .toLowerCase();
+}
+
+function labelObj(l: any): { name: string; color: string; description?: string } | null {
+  if (typeof l === 'string' && l.trim()) {
+    return { name: l.trim(), color: '' };
+  }
+  if (l && typeof l === 'object' && l.name) {
+    return {
+      name: String(l.name),
+      color: String(l.color || ''),
+      description: String(l.description || ''),
+    };
+  }
+  return null;
+}
+
+/** labeled / unlabeled events for set-labels write-through. */
+export function labelChangeTimelineEvents(
+  prevLabels: any,
+  nextLabels: any,
+  actor: { login?: string; avatarUrl?: string } = {}
+): any[] {
+  const prevMap = new Map<string, any>();
+  for (const l of Array.isArray(prevLabels) ? prevLabels : []) {
+    const k = labelNameKey(l);
+    const obj = labelObj(l);
+    if (k && obj) prevMap.set(k, obj);
+  }
+  const nextMap = new Map<string, any>();
+  for (const l of Array.isArray(nextLabels) ? nextLabels : []) {
+    const k = labelNameKey(l);
+    const obj = labelObj(l);
+    if (k && obj) nextMap.set(k, obj);
+  }
+  const out: any[] = [];
+  const actorLogin = actor.login || '';
+  const avatarUrl = actor.avatarUrl || '';
+  for (const [k, lab] of nextMap) {
+    if (!prevMap.has(k)) {
+      out.push(
+        makeLocalTimelineEvent({
+          event: 'labeled',
+          actor: actorLogin,
+          avatarUrl,
+          label: lab,
+        })
+      );
+    }
+  }
+  for (const [k, lab] of prevMap) {
+    if (!nextMap.has(k)) {
+      out.push(
+        makeLocalTimelineEvent({
+          event: 'unlabeled',
+          actor: actorLogin,
+          avatarUrl,
+          label: lab,
+        })
+      );
+    }
+  }
+  return out;
+}
+
+function loginKey(x: any): string {
+  return String(typeof x === 'string' ? x : x?.login || '')
+    .trim()
+    .toLowerCase();
+}
+
+/** assigned / unassigned for assignee meta writes. */
+export function assigneeChangeTimelineEvents(
+  prevAssignees: any,
+  nextAssignees: any,
+  actor: { login?: string; avatarUrl?: string } = {}
+): any[] {
+  const prev = new Set(
+    (Array.isArray(prevAssignees) ? prevAssignees : [])
+      .map(loginKey)
+      .filter(Boolean)
+  );
+  const nextList = Array.isArray(nextAssignees) ? nextAssignees : [];
+  const next = new Set(nextList.map(loginKey).filter(Boolean));
+  const out: any[] = [];
+  const actorLogin = actor.login || '';
+  const avatarUrl = actor.avatarUrl || '';
+  for (const a of nextList) {
+    const k = loginKey(a);
+    if (!k || prev.has(k)) continue;
+    out.push(
+      makeLocalTimelineEvent({
+        event: 'assigned',
+        actor: actorLogin,
+        avatarUrl,
+        assignee: typeof a === 'string' ? a : a?.login || k,
+      })
+    );
+  }
+  for (const a of Array.isArray(prevAssignees) ? prevAssignees : []) {
+    const k = loginKey(a);
+    if (!k || next.has(k)) continue;
+    out.push(
+      makeLocalTimelineEvent({
+        event: 'unassigned',
+        actor: actorLogin,
+        avatarUrl,
+        assignee: typeof a === 'string' ? a : a?.login || k,
+      })
+    );
+  }
+  return out;
+}
+
+/** review_requested / review_request_removed for reviewer meta writes. */
+export function reviewerChangeTimelineEvents(
+  prevReviewers: any,
+  nextReviewers: any,
+  actor: { login?: string; avatarUrl?: string } = {}
+): any[] {
+  const prev = new Set(
+    (Array.isArray(prevReviewers) ? prevReviewers : [])
+      .map(loginKey)
+      .filter(Boolean)
+  );
+  const nextList = Array.isArray(nextReviewers) ? nextReviewers : [];
+  const next = new Set(nextList.map(loginKey).filter(Boolean));
+  const out: any[] = [];
+  const actorLogin = actor.login || '';
+  const avatarUrl = actor.avatarUrl || '';
+  for (const r of nextList) {
+    const k = loginKey(r);
+    if (!k || prev.has(k)) continue;
+    out.push(
+      makeLocalTimelineEvent({
+        event: 'review_requested',
+        actor: actorLogin,
+        avatarUrl,
+        requestedReviewer: typeof r === 'string' ? r : r?.login || k,
+      })
+    );
+  }
+  for (const r of Array.isArray(prevReviewers) ? prevReviewers : []) {
+    const k = loginKey(r);
+    if (!k || next.has(k)) continue;
+    out.push(
+      makeLocalTimelineEvent({
+        event: 'review_request_removed',
+        actor: actorLogin,
+        avatarUrl,
+        requestedReviewer: typeof r === 'string' ? r : r?.login || k,
+      })
+    );
+  }
+  return out;
+}
+
+/** milestoned / demilestoned for milestone meta writes. */
+export function milestoneChangeTimelineEvents(
+  prevMilestone: any,
+  nextMilestone: any,
+  actor: { login?: string; avatarUrl?: string } = {}
+): any[] {
+  const prevTitle = prevMilestone?.title
+    ? String(prevMilestone.title)
+    : prevMilestone?.number != null
+      ? String(prevMilestone.number)
+      : '';
+  const nextTitle = nextMilestone?.title
+    ? String(nextMilestone.title)
+    : nextMilestone?.number != null
+      ? String(nextMilestone.number)
+      : '';
+  const prevKey = prevMilestone
+    ? `${prevMilestone.number ?? ''}:${prevTitle}`.toLowerCase()
+    : '';
+  const nextKey = nextMilestone
+    ? `${nextMilestone.number ?? ''}:${nextTitle}`.toLowerCase()
+    : '';
+  if (prevKey === nextKey) return [];
+  const out: any[] = [];
+  const actorLogin = actor.login || '';
+  const avatarUrl = actor.avatarUrl || '';
+  if (prevMilestone && prevKey) {
+    out.push(
+      makeLocalTimelineEvent({
+        event: 'demilestoned',
+        actor: actorLogin,
+        avatarUrl,
+        milestone: {
+          number:
+            prevMilestone.number != null ? Number(prevMilestone.number) : null,
+          title: prevTitle,
+        },
+      })
+    );
+  }
+  if (nextMilestone && nextKey) {
+    out.push(
+      makeLocalTimelineEvent({
+        event: 'milestoned',
+        actor: actorLogin,
+        avatarUrl,
+        milestone: {
+          number:
+            nextMilestone.number != null ? Number(nextMilestone.number) : null,
+          title: nextTitle,
+        },
+      })
+    );
+  }
+  return out;
+}
+
 function buildThreadEntry(c, children, snippetFn, files, viewerLogin, i) {
   const replies = (children.get(String(c.id)) || [])
     .slice()
@@ -637,5 +992,222 @@ export function partitionTimelineWithThreadGap(items, meta: any = null) {
     bottom,
     hiddenCount,
     showGap: true,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Timeline category tips (global filter prefs)
+// ---------------------------------------------------------------------------
+
+/** Selectable tip categories (not including synthetic "all"). */
+export const TIMELINE_CATEGORY_IDS = [
+  'labels',
+  'title',
+  'milestone',
+  'referenced',
+  'comments',
+] as const;
+
+export type TimelineCategoryId = (typeof TIMELINE_CATEGORY_IDS)[number];
+
+/** Tip row order: All first, then categories. */
+export const TIMELINE_TIP_IDS = ['all', ...TIMELINE_CATEGORY_IDS] as const;
+
+export type TimelineTipId = (typeof TIMELINE_TIP_IDS)[number];
+
+/** Human labels for tips (conversation row + plugin settings) — short chips. */
+export const TIMELINE_TIP_LABELS: Record<TimelineTipId, string> = {
+  all: 'All',
+  labels: 'label',
+  title: 'title',
+  milestone: 'milestone',
+  referenced: 'referenced',
+  comments: 'comments',
+};
+
+/** Default: every category visible. */
+export const DEFAULT_TIMELINE_VISIBILITY: Record<TimelineCategoryId, boolean> = {
+  labels: true,
+  title: true,
+  milestone: true,
+  referenced: true,
+  comments: true,
+};
+
+/**
+ * Normalize prefs.timelineVisibility map. Missing keys default to visible.
+ * @param {unknown} raw
+ * @returns {Record<TimelineCategoryId, boolean>}
+ */
+export function normalizeTimelineVisibility(
+  raw: unknown
+): Record<TimelineCategoryId, boolean> {
+  const src =
+    raw && typeof raw === 'object' && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>)
+      : {};
+  const out = { ...DEFAULT_TIMELINE_VISIBILITY };
+  for (const id of TIMELINE_CATEGORY_IDS) {
+    if (typeof src[id] === 'boolean') out[id] = src[id] as boolean;
+  }
+  // Explicit "all: true" forces every category on
+  if (src.all === true) {
+    for (const id of TIMELINE_CATEGORY_IDS) out[id] = true;
+  }
+  return out;
+}
+
+/** True when every category tip is on (All chip selected state). */
+export function isTimelineVisibilityAllOn(
+  vis: Record<string, boolean> | null | undefined
+): boolean {
+  const v = normalizeTimelineVisibility(vis);
+  return TIMELINE_CATEGORY_IDS.every((id) => v[id] !== false);
+}
+
+/**
+ * Toggle a tip and return the next visibility map.
+ * - "all" → all categories true
+ * - category → flip that category
+ */
+export function toggleTimelineTip(
+  vis: unknown,
+  tipId: string
+): Record<TimelineCategoryId, boolean> {
+  const cur = normalizeTimelineVisibility(vis);
+  const id = String(tipId || '').trim().toLowerCase();
+  if (id === 'all') {
+    return { ...DEFAULT_TIMELINE_VISIBILITY };
+  }
+  if ((TIMELINE_CATEGORY_IDS as readonly string[]).includes(id)) {
+    const key = id as TimelineCategoryId;
+    return { ...cur, [key]: !cur[key] };
+  }
+  return cur;
+}
+
+/**
+ * Map a built timeline item (or raw issue event) to a tip category, or null
+ * when the row is always shown (description chrome, other system events).
+ *
+ * @param {object} item timeline item from buildConversationTimeline or raw event
+ * @returns {TimelineCategoryId|null}
+ */
+export function timelineItemCategory(item: any): TimelineCategoryId | null {
+  if (!item || typeof item !== 'object') return null;
+  const kind = String(item.kind || '');
+  if (
+    kind === 'issue-comment' ||
+    kind === 'review-thread' ||
+    kind === 'review-comment' ||
+    kind === 'review-group' ||
+    kind === 'review'
+  ) {
+    return 'comments';
+  }
+  // timeline-event or raw REST event
+  const event = String(item.event || '').trim().toLowerCase();
+  if (event === 'labeled' || event === 'unlabeled') return 'labels';
+  if (event === 'renamed') return 'title';
+  if (event === 'milestoned' || event === 'demilestoned') return 'milestone';
+  // "referenced this pull request from commit" + related cross-repo mentions
+  if (
+    event === 'referenced' ||
+    event === 'cross-referenced' ||
+    event === 'connected' ||
+    event === 'disconnected'
+  ) {
+    return 'referenced';
+  }
+  return null;
+}
+
+/**
+ * Filter timeline items by visibility map. Items with no category (other
+ * system events) always pass through.
+ *
+ * @param {any[]} items
+ * @param {unknown} visibility
+ * @returns {any[]}
+ */
+export function filterTimelineItemsByVisibility(
+  items: any,
+  visibility: unknown
+): any[] {
+  const list = Array.isArray(items) ? items : [];
+  const vis = normalizeTimelineVisibility(visibility);
+  return list.filter((item) => {
+    const cat = timelineItemCategory(item);
+    if (!cat) return true;
+    return vis[cat] !== false;
+  });
+}
+
+/**
+ * Whether REST issue **system** timeline events should be fetched.
+ * False only when labels + title + milestone + referenced are all off
+ * (comments tip is independent — issue comments / review threads use other
+ * endpoints).
+ */
+export function shouldFetchSystemTimelineEvents(visibility: unknown): boolean {
+  const vis = normalizeTimelineVisibility(visibility);
+  return (
+    vis.labels !== false ||
+    vis.title !== false ||
+    vis.milestone !== false ||
+    vis.referenced !== false
+  );
+}
+
+/**
+ * Whether re-enabling tips requires a lazy events fetch (system tips newly on
+ * and no usable events payload yet).
+ */
+export function needsLazyTimelineEventsFetch(
+  prevVisibility: unknown,
+  nextVisibility: unknown,
+  timelineEvents: any
+): boolean {
+  if (!shouldFetchSystemTimelineEvents(nextVisibility)) return false;
+  if (shouldFetchSystemTimelineEvents(prevVisibility)) {
+    // Already wanted system events — only refetch if we never got any and
+    // a tip that was off is now on (partial skip may have left empty).
+    const prev = normalizeTimelineVisibility(prevVisibility);
+    const next = normalizeTimelineVisibility(nextVisibility);
+    const newlyOn = TIMELINE_CATEGORY_IDS.some(
+      (id) => id !== 'comments' && prev[id] === false && next[id] !== false
+    );
+    if (!newlyOn) return false;
+  }
+  const te = Array.isArray(timelineEvents) ? timelineEvents : [];
+  // Empty or missing — need fetch. If we already have events, filter-only.
+  return te.length === 0;
+}
+
+/**
+ * Host tip-toggle plan: **capture prev before writing next**, then decide lazy
+ * REST events fetch. Callers must not read prev from prefs after optimistic write
+ * (that clobbers prev===next and skips fetch).
+ *
+ * @param {unknown} prevVisibility current prefs.timelineVisibility
+ * @param {unknown} nextVisibility tip-toggle result
+ * @param {any} timelineEvents current detail.timelineEvents
+ * @returns {{ nextVisibility: Record<TimelineCategoryId, boolean>, shouldLazyFetch: boolean, prevVisibility: Record<TimelineCategoryId, boolean> }}
+ */
+export function planTimelineVisibilityChange(
+  prevVisibility: unknown,
+  nextVisibility: unknown,
+  timelineEvents: any = null
+): {
+  prevVisibility: Record<TimelineCategoryId, boolean>;
+  nextVisibility: Record<TimelineCategoryId, boolean>;
+  shouldLazyFetch: boolean;
+} {
+  const prev = normalizeTimelineVisibility(prevVisibility);
+  const next = normalizeTimelineVisibility(nextVisibility);
+  return {
+    prevVisibility: prev,
+    nextVisibility: next,
+    shouldLazyFetch: needsLazyTimelineEventsFetch(prev, next, timelineEvents),
   };
 }

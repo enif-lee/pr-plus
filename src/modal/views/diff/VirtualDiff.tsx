@@ -881,6 +881,8 @@ function VirtualDiffImpl(props: any) {
     /** (row|commentId, resolved?) => boolean — resolved defaults collapsed */
     isThreadCollapsed = null,
     onToggleThreadCollapse,
+    /** (threadNodeId|commentId) => boolean — lazy comments in flight */
+    isThreadCommentsLoading = null,
     /** Passed to rowOffsets / averageRowHeight for collapse-aware virtual heights */
     commentHeightOpts = null,
     /**
@@ -1599,7 +1601,12 @@ function VirtualDiffImpl(props: any) {
 
             if (row.kind === 'inline-comment') {
               const thread = threadsByCommentId?.get?.(String(row.commentId));
-              const resolved = Boolean(thread?.resolved || row?.resolved);
+              // Prefer live thread over row snapshot (resolve write-through).
+              const resolved = Boolean(
+                thread != null
+                  ? thread.resolved || thread.root?.resolved
+                  : row?.resolved
+              );
               const pending = Boolean(
                 row?.pending || thread?.pending || thread?.root?.pending
               );
@@ -1644,8 +1651,20 @@ function VirtualDiffImpl(props: any) {
                   onUploadFile={onUploadFile}
                   collapsed={collapsed}
                   onToggleCollapse={() =>
-                    onToggleThreadCollapse?.(row.commentId, resolved)
+                    onToggleThreadCollapse?.(
+                      row.commentId,
+                      resolved,
+                      row.threadNodeId || thread?.threadNodeId || null
+                    )
                   }
+                  commentsLoading={Boolean(
+                    typeof isThreadCommentsLoading === 'function' &&
+                      isThreadCommentsLoading(
+                        row.threadNodeId ||
+                          thread?.threadNodeId ||
+                          row.commentId
+                      )
+                  )}
                   pendingCount={pendingCount}
                   showHunk={false}
                   searchQuery={qActive ? searchQuery : ''}

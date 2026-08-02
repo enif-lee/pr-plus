@@ -7,11 +7,14 @@ import {
   clearExpiredRateDisables,
   disableUntilMsFrom429,
   emptyRateLimitState,
+  hasAnyRateLimitSnapshot,
+  headersToLowerMap,
   parseRateLimitHeaders,
   rateLimitBarPercent,
   shouldAllowGithubRequest,
   snapshotFromGraphqlRateLimit,
   withRateLimit429,
+  withRateLimitEndpointPayload,
   withRateLimitSnapshot,
 } from '../src/modal/lib/rate-limit';
 
@@ -57,10 +60,47 @@ describe('parseRateLimitHeaders', () => {
     expect(snap!.reset).toBe(1700000000);
   });
 
+  test('reads Headers.forEach map (real Fetch Headers)', () => {
+    const h = new Headers({
+      'X-RateLimit-Limit': '5000',
+      'X-RateLimit-Remaining': '0',
+      'X-RateLimit-Used': '5000',
+      'X-RateLimit-Reset': '1700000099',
+      'X-RateLimit-Resource': 'graphql',
+    });
+    const map = headersToLowerMap(h);
+    expect(map['x-ratelimit-remaining']).toBe('0');
+    const snap = parseRateLimitHeaders(h, { nowMs: 1 });
+    expect(snap?.resource).toBe('graphql');
+    expect(snap?.remaining).toBe(0);
+    expect(snap?.used).toBe(5000);
+  });
+
   test('returns null when no rate headers', () => {
     expect(parseRateLimitHeaders(headers({ 'content-type': 'json' }))).toBe(
       null
     );
+  });
+});
+
+describe('withRateLimitEndpointPayload', () => {
+  test('merges core/graphql/search from GET /rate_limit body', () => {
+    const next = withRateLimitEndpointPayload(
+      emptyRateLimitState(),
+      {
+        resources: {
+          core: { limit: 5000, remaining: 4990, reset: 100, used: 10 },
+          graphql: { limit: 5000, remaining: 100, reset: 200, used: 4900 },
+          search: { limit: 30, remaining: 28, reset: 300, used: 2 },
+        },
+      },
+      1_000
+    );
+    expect(next.snapshots.core?.remaining).toBe(4990);
+    expect(next.snapshots.graphql?.used).toBe(4900);
+    expect(next.snapshots.search?.limit).toBe(30);
+    expect(hasAnyRateLimitSnapshot(next)).toBe(true);
+    expect(hasAnyRateLimitSnapshot(emptyRateLimitState())).toBe(false);
   });
 });
 

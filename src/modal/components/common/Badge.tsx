@@ -26,13 +26,23 @@ export function Badge({
 }: any) {
   const autoTitle = textFromChildren(children);
   const soft = variant === 'soft' || variant === 'plain';
+  // Prefer explicit title (e.g. full PR title on ellipsized chips). Put it on
+  // both the root and the text span so hover over the ellipsis still shows it
+  // (inner overflow box is the actual pointer target).
+  const tip =
+    title != null && String(title).length
+      ? String(title)
+      : autoTitle || undefined;
   return (
     <span
       className={`prp-badge prp-badge--${tone}${soft ? ' prp-badge--soft' : ''} inline-flex h-5 max-w-[min(160px,100%)] min-w-0 items-center overflow-hidden whitespace-nowrap rounded-full px-2 text-[11px] font-semibold ${className}`.trim()}
-      title={title != null ? title : autoTitle || undefined}
+      title={tip}
       {...rest}
     >
-      <span className="prp-badge__text min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+      <span
+        className="prp-badge__text min-w-0 overflow-hidden text-ellipsis whitespace-nowrap"
+        title={tip}
+      >
         {children}
       </span>
     </span>

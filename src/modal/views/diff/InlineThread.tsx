@@ -7,7 +7,7 @@ import { MarkdownComposer } from '@common/MarkdownComposer';
 import { OptBtnHint } from '@common/OptBtnHint';
 import { formatWhen } from '@common/utils';
 import { Avatar } from '@common/Avatar';
-import { IconDisclosure, IconPencil, IconTrash } from '@common/icons';
+import { IconDisclosure, IconPencil, IconSync, IconTrash } from '@common/icons';
 import { CommentReactions } from '@common/CommentReactions';
 import { BodyEditor } from '../composers/BodyEditor';
 import { DiffSnippetView } from '../conversation/DiffSnippetView';
@@ -63,6 +63,8 @@ function InlineThreadImpl(props: any) {
      * (review-group row or conversation thread header) — hide duplicate bar.
      */
     showFileHeader = true,
+    /** Lazy by-ids comments in flight (expand shell/resolved threads). */
+    commentsLoading = false,
   } = props;
 
   const qSearch = String(searchQuery || '').trim();
@@ -91,9 +93,14 @@ function InlineThreadImpl(props: any) {
     return null;
   }
 
-  const defaultCollapsed = Boolean(
-    thread?.resolved || row?.resolved || thread?.root?.resolved
+  // Prefer live thread group over virtual-row snapshot so resolve write-through
+  // is not stuck on a stale row.resolved after stampThreadResolved.
+  const isThreadResolved = Boolean(
+    thread != null
+      ? thread.resolved || thread.root?.resolved
+      : row?.resolved
   );
+  const defaultCollapsed = isThreadResolved;
   /** null = follow default (resolved → collapsed) */
   const [localCollapsed, setLocalCollapsed] = useState<boolean | null>(null);
   const controlled = typeof collapsedProp === 'boolean';
@@ -169,10 +176,14 @@ function InlineThreadImpl(props: any) {
   const rootPending = Boolean(
     thread?.root?.pending || row?.pending || thread?.pending
   );
+  // GraphQL resolveReviewThread requires PRRT_… (not REST rest-thread-*)
+  const resolveThreadNodeId = (() => {
+    const raw = thread?.threadNodeId || row?.threadNodeId || null;
+    const s = raw != null ? String(raw).trim() : '';
+    return /^PRRT_/i.test(s) ? s : null;
+  })();
   const canResolveThread =
-    Boolean(thread?.threadNodeId || row?.threadNodeId) &&
-    !rootPending &&
-    !hasPendingReplies;
+    Boolean(resolveThreadNodeId) && !rootPending && !hasPendingReplies;
 
   const isFileComment =
     row?.subjectType === 'file' ||
@@ -331,6 +342,8 @@ function InlineThreadImpl(props: any) {
         rootId != null ? `review-comment:${rootId}` : undefined
       }
       data-pending={rootPending ? '1' : undefined}
+      data-comments-loading={commentsLoading ? '1' : undefined}
+      aria-busy={commentsLoading ? true : undefined}
     >
       <div className="prp-inline-thread__card">
         {showFileHeader ? (
@@ -344,15 +357,23 @@ function InlineThreadImpl(props: any) {
                 onClick={toggleCollapse}
                 aria-expanded={!collapsed}
                 title={
-                  contextActive
-                    ? collapsed
-                      ? 'Expand thread (⌥F)'
-                      : 'Collapse thread (⌥F)'
+                  commentsLoading
+                    ? 'Loading comments…'
+                    : contextActive
+                      ? collapsed
+                        ? 'Expand thread (⌥F)'
+                        : 'Collapse thread (⌥F)'
+                      : collapsed
+                        ? 'Expand thread'
+                        : 'Collapse thread'
+                }
+                aria-label={
+                  commentsLoading
+                    ? 'Loading comments'
                     : collapsed
                       ? 'Expand thread'
                       : 'Collapse thread'
                 }
-                aria-label={collapsed ? 'Expand thread' : 'Collapse thread'}
               >
                 {contextActive ? (
                   <OptBtnHint label="⌥F" preferredPlacement="top" />
@@ -388,6 +409,20 @@ function InlineThreadImpl(props: any) {
               )}
             </div>
             <div className="prp-review-thread__file-header-meta">
+              {commentsLoading ? (
+                <span
+                  className="prp-inline-thread__loading"
+                  title="Loading comments…"
+                  data-prp-thread-loading="1"
+                  aria-label="Loading comments"
+                >
+                  <IconSync
+                    className="prp-inline-thread__loading-icon"
+                    size={12}
+                    aria-hidden="true"
+                  />
+                </span>
+              ) : null}
               <span className="prp-muted prp-thread-toggle__count">{commentCount}</span>
               {side && fileLoc ? (
                 <span className="prp-muted prp-review-thread__file-side">
@@ -404,7 +439,7 @@ function InlineThreadImpl(props: any) {
                   outdated
                 </Badge>
               ) : null}
-              {thread?.resolved || row?.resolved ? (
+              {isThreadResolved ? (
                 <Badge tone="ok">resolved</Badge>
               ) : null}
             </div>
@@ -596,10 +631,14 @@ function InlineThreadImpl(props: any) {
                   />
                 </div>
               </div>
-              {/* Actions after Reply focused or draft text remains */}
+              {/* Actions: open when focused/draft OR resolvable (Resolve must stay
+                  clickable without typing — empty reply blur used to hide this row
+                  before click landed). */}
               <div
                 className={`prp-composer__row prp-inline-thread__composer-actions${
-                  String(replyText || '').trim() || replyFocused
+                  String(replyText || '').trim() ||
+                  replyFocused ||
+                  canResolveThread
                     ? ' prp-inline-thread__composer-actions--open'
                     : ''
                 }`}
@@ -613,6 +652,10 @@ function InlineThreadImpl(props: any) {
                     variant="primary"
                     loading={Boolean(actionBusy)}
                     disabled={!String(replyText || '').trim()}
+                    onMouseDown={(e) => {
+                      // Keep composer focus so actions row does not unmount mid-click
+                      e.preventDefault();
+                    }}
                     onClick={() =>
                       onReply?.(thread || { id: row?.commentId, root: row }, {
                         mode: 'comment',
@@ -628,6 +671,9 @@ function InlineThreadImpl(props: any) {
                   size="sm"
                   loading={Boolean(actionBusy)}
                   disabled={!String(replyText || '').trim()}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                  }}
                   onClick={() =>
                     onReply?.(thread || { id: row?.commentId, root: row }, {
                       mode: 'pending',
@@ -652,17 +698,22 @@ function InlineThreadImpl(props: any) {
                     ) : null}
                     <Button
                       size="sm"
-                      disabled={actionBusy}
+                      disabled={actionBusy || !resolveThreadNodeId}
+                      onMouseDown={(e) => {
+                        // Prevent reply textarea blur → actions hide before click
+                        e.preventDefault();
+                      }}
                       onClick={() =>
                         onResolve?.(
-                          thread?.threadNodeId || row?.threadNodeId,
-                          !(thread?.resolved || row?.resolved)
+                          resolveThreadNodeId,
+                          !isThreadResolved
                         )
                       }
                       title="Resolve / unresolve (⌥⌃R)"
                       data-prp-composer-resolve="1"
+                      data-prp-thread-node-id={resolveThreadNodeId || undefined}
                     >
-                      {thread?.resolved || row?.resolved
+                      {isThreadResolved
                         ? 'Unresolve conversation'
                         : 'Resolve conversation'}
                     </Button>

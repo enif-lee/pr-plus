@@ -11,13 +11,13 @@ import {
 } from '../src/modal/lib/load-progress';
 
 describe('load-progress', () => {
-  test('OPEN_PROGRESS_KEYS covers core sides and threads', () => {
+  test('OPEN_PROGRESS_KEYS covers core sides and three thread stages', () => {
     expect(OPEN_PROGRESS_KEYS).toContain('core');
     expect(OPEN_PROGRESS_KEYS).toContain('files');
     expect(OPEN_PROGRESS_KEYS).toContain('reviews');
-    expect(OPEN_PROGRESS_KEYS.some((k) => String(k).includes('thread'))).toBe(
-      true
-    );
+    expect(OPEN_PROGRESS_KEYS).toContain('threadsShell');
+    expect(OPEN_PROGRESS_KEYS).toContain('threadsComments');
+    expect(OPEN_PROGRESS_KEYS).toContain('threadsReactions');
   });
 
   test('weight progress reaches 100 when all keys complete', () => {

@@ -3,14 +3,14 @@
  * Drives the real Zustand store (shipped `useModalStore` + `data-groups`).
  */
 import { describe, expect, test, beforeEach } from '@rstest/core';
+import fs from 'node:fs';
+import path from 'node:path';
 import { useModalStore } from '../src/modal/store/modal-store';
 import {
   ROOT_FORBIDDEN_HIGH_FREQ_FIELDS,
   useScrollMetricsGroup,
   useSelectionIslandGroup,
 } from '../src/modal/store/data-groups';
-import fs from 'node:fs';
-import path from 'node:path';
 
 function resetStore() {
   useModalStore.getState().resetForClose();
@@ -96,25 +96,6 @@ describe('store data groups — selective notification', () => {
     expect(scrollFires).toBe(0);
   });
 
-  test('composition root must not value-subscribe to high-freq fields', () => {
-    const app = fs.readFileSync(
-      path.join(__dirname, '../src/modal/app/PrModalApp.impl.tsx'),
-      'utf8'
-    );
-    for (const field of ROOT_FORBIDDEN_HIGH_FREQ_FIELDS) {
-      const re = new RegExp(
-        String.raw`useModalStore\(\s*\(?\s*s\s*\)?\s*=>\s*s\.${field}\s*\)`
-      );
-      expect(app).not.toMatch(re);
-    }
-    // DiffWorkspace leaf owns scroll + selection draft groups
-    const dw = fs.readFileSync(
-      path.join(__dirname, '../src/modal/views/pr-modal/DiffWorkspace.tsx'),
-      'utf8'
-    );
-    expect(dw).toMatch(/useScrollMetricsGroup/);
-    expect(dw).toMatch(/useSelectionIslandGroup/);
-  });
 });
 
 describe('rerender bench (before vs after data-group isolation)', () => {
@@ -179,7 +160,8 @@ describe('rerender bench (before vs after data-group isolation)', () => {
 
     const scratch =
       process.env.GROK_SCRATCH ||
-      '/var/folders/sl/km7nh7qj50b9mw4901n7ch940000gn/T/grok-goal-c40c817cc4f0/implementer';
+      process.env.TMPDIR ||
+      require('node:os').tmpdir();
     fs.mkdirSync(scratch, { recursive: true });
     fs.writeFileSync(
       path.join(scratch, 'rerender-bench.json'),

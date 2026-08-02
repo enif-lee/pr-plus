@@ -152,22 +152,46 @@ export function tweenCounterSamples(
  * advances when that request lands (order-independent).
  *
  * Open path keys sum to 100:
- *   start + core + threadsNewest + threadsFollow
+ *   start + core
+ *   + threadsShell + threadsComments + threadsReactions
  *   + files + comments + reviews + commits + checks + development
- * refresh may use threadsVisible instead of threadsNewest+threadsFollow.
+ *
+ * Review-thread open ladder (progress bar labels / marks):
+ *   1. threadsShell — GraphQL shell window (thread meta + root preview)
+ *   2. threadsComments — by-ids full comment bodies (eager + remaining)
+ *   3. threadsReactions — reaction counts (co-fetched on by-ids; separate mark)
+ *
+ * Side-panel `comments` is issue comments (not review-thread bodies).
+ * refresh may use threadsVisible instead of the three open thread keys.
+ * Legacy aliases (threadsNewest / Remaining / Earlier / Follow) keep weights
+ * for older call sites; prefer the shell/comments/reactions names.
  */
 export const FETCH_UNIT_WEIGHTS = {
   start: 4,
   core: 18,
-  threadsNewest: 14,
-  threadsFollow: 6,
+  /** Stage 1: shell thread list / meta. */
+  threadsShell: 8,
+  /** Stage 2: full review-comment bodies (by-ids). */
+  threadsComments: 8,
+  /** Stage 3: reaction counts on review comments. */
+  threadsReactions: 4,
+  /** @deprecated alias → threadsShell */
+  threadsNewest: 8,
+  /** @deprecated alias → threadsComments */
+  threadsRemaining: 8,
+  /** @deprecated alias → threadsReactions */
+  threadsEarlier: 4,
+  /**
+   * Legacy single follow-up key (comments+reactions). Prefer split keys.
+   */
+  threadsFollow: 12,
   files: 12,
   comments: 10,
   reviews: 10,
   commits: 10,
   checks: 10,
   development: 6,
-  /** refresh-only: visible bulk instead of newest page */
+  /** refresh-only: visible bulk instead of shell+comments+reactions */
   threadsVisible: 20,
 } as const;
 
@@ -175,8 +199,9 @@ export const FETCH_UNIT_WEIGHTS = {
 export const OPEN_PROGRESS_KEYS = [
   'start',
   'core',
-  'threadsNewest',
-  'threadsFollow',
+  'threadsShell',
+  'threadsComments',
+  'threadsReactions',
   'files',
   'comments',
   'reviews',
@@ -184,6 +209,36 @@ export const OPEN_PROGRESS_KEYS = [
   'checks',
   'development',
 ] as const;
+
+/**
+ * Whether open/refresh thread units are fully credited.
+ * Prefer shell + comments + reactions; accept legacy ladders / threadsVisible.
+ */
+export function threadsProgressComplete(
+  hasKey: (key: string) => boolean
+): boolean {
+  if (typeof hasKey !== 'function') return false;
+  if (hasKey('threadsVisible')) return true;
+  if (
+    hasKey('threadsShell') &&
+    hasKey('threadsComments') &&
+    hasKey('threadsReactions')
+  ) {
+    return true;
+  }
+  // Legacy network ladder (newest / remaining / earlier)
+  if (
+    hasKey('threadsNewest') &&
+    hasKey('threadsRemaining') &&
+    hasKey('threadsEarlier')
+  ) {
+    return true;
+  }
+  // Legacy: newest + single follow-up weight
+  if (hasKey('threadsNewest') && hasKey('threadsFollow')) return true;
+  if (hasKey('threadsShell') && hasKey('threadsFollow')) return true;
+  return false;
+}
 
 /**
  * Accumulating progress for concurrent fetches.

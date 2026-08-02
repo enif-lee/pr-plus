@@ -21,6 +21,7 @@ const out = path.join(root, 'src/pr-modal-host.js');
 export const HOST_MODULE_ORDER = [
   'host-core-detail-store.ts', // HOST_ID, current, detail-store apply/publish
   'side-fetch-progress-assets.ts', // independent side fetches, progress, assets, cache
+  'detail-on-patch.ts', // runOnPatchDetail (narrow write-through + ack)
   'props-render-session.ts', // buildProps, render, close / session abort
   'open-modal.ts', // openModal entry
   'restore-embed-list-focus.ts', // restore open, embed watch, list focus helpers

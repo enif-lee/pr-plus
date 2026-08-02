@@ -61,6 +61,18 @@ const DEFAULT_PREFS = {
    */
   autoExpandOnFileNav: false,
   onboardingCompleted: false,
+  /**
+   * Conversation timeline category visibility (plugin-global).
+   * labels | title | milestone | comments — each true = tip on / rows shown.
+   * Synced with conversation tip row + popup settings.
+   */
+  timelineVisibility: {
+    labels: true,
+    title: true,
+    milestone: true,
+    referenced: true,
+    comments: true,
+  },
 };
 
 /** Last-known GitHub rate-limit snapshots + per-resource disable clocks. */
@@ -96,6 +108,40 @@ function getStorageArea(storageApi: any = (globalThis as any).chrome?.storage?.l
  *   onboardingCompleted: boolean,
  * }}
  */
+/**
+ * Normalize timelineVisibility map (also used by Conversation tips).
+ * Falls back to pure helper when assembled into SW/content, else local.
+ */
+function normalizeTimelineVisibilityPref(raw: any) {
+  try {
+    const pure = (globalThis as any).PRModalConversationTimeline;
+    if (typeof pure?.normalizeTimelineVisibility === 'function') {
+      return pure.normalizeTimelineVisibility(raw);
+    }
+  } catch {
+    /* ignore */
+  }
+  const src = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const base = {
+    labels: true,
+    title: true,
+    milestone: true,
+    referenced: true,
+    comments: true,
+  };
+  for (const id of Object.keys(base) as (keyof typeof base)[]) {
+    if (typeof src[id] === 'boolean') base[id] = src[id];
+  }
+  if (src.all === true) {
+    base.labels = true;
+    base.title = true;
+    base.milestone = true;
+    base.referenced = true;
+    base.comments = true;
+  }
+  return base;
+}
+
 function normalizePrefs(raw: any) {
   const src = raw && typeof raw === 'object' ? raw : {};
 
@@ -133,6 +179,9 @@ function normalizePrefs(raw: any) {
       typeof src.onboardingCompleted === 'boolean'
         ? src.onboardingCompleted
         : DEFAULT_PREFS.onboardingCompleted,
+    timelineVisibility: normalizeTimelineVisibilityPref(
+      src.timelineVisibility ?? DEFAULT_PREFS.timelineVisibility
+    ),
   };
 }
 

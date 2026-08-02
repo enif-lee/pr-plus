@@ -88,6 +88,9 @@ await esbuild.build({
   charset: 'utf8',
   legalComments: 'none',
   logLevel: 'info',
+  // Release: rewrite debug console.* to dead code then minify drops them.
+  // (pure:console.log alone leaves free-floating nested templates — broken.)
+  drop: ['debugger'],
 });
 
 // --- Build pr-modal.css from TSX-discovered CSS graph ---

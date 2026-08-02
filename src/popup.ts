@@ -42,7 +42,41 @@ const DEFAULT_PREFS = {
   treeView: true,
   shortcutMonitorSize: 'small',
   onboardingCompleted: false,
+  timelineVisibility: {
+    labels: true,
+    title: true,
+    milestone: true,
+    referenced: true,
+    comments: true,
+  },
 };
+
+const prefTlLabels = document.getElementById(
+  'pref-tl-labels'
+) as HTMLInputElement | null;
+const prefTlTitle = document.getElementById(
+  'pref-tl-title'
+) as HTMLInputElement | null;
+const prefTlMilestone = document.getElementById(
+  'pref-tl-milestone'
+) as HTMLInputElement | null;
+const prefTlReferenced = document.getElementById(
+  'pref-tl-referenced'
+) as HTMLInputElement | null;
+const prefTlComments = document.getElementById(
+  'pref-tl-comments'
+) as HTMLInputElement | null;
+
+function normalizeTimelineVisibilityPopup(raw: any) {
+  const src = raw && typeof raw === 'object' ? raw : {};
+  return {
+    labels: src.labels !== false,
+    title: src.title !== false,
+    milestone: src.milestone !== false,
+    referenced: src.referenced !== false,
+    comments: src.comments !== false,
+  };
+}
 
 function normalizeShortcutMonitorSize(raw: unknown): string {
   const v = String(raw ?? '')
@@ -100,6 +134,12 @@ function renderPrefs(prefs: any) {
       p.shortcutMonitorSize
     );
   }
+  const tl = normalizeTimelineVisibilityPopup(p.timelineVisibility);
+  if (prefTlLabels) prefTlLabels.checked = tl.labels;
+  if (prefTlTitle) prefTlTitle.checked = tl.title;
+  if (prefTlMilestone) prefTlMilestone.checked = tl.milestone;
+  if (prefTlReferenced) prefTlReferenced.checked = tl.referenced;
+  if (prefTlComments) prefTlComments.checked = tl.comments;
 }
 
 function rateLimitBarPercent(snap: any): number {
@@ -348,9 +388,12 @@ async function load() {
     if (!status?.configured && accounts.length === 0) {
       setStatus('No github.com token saved yet');
     }
-    // Fresh rate-limit snapshot
+    // Fresh rate-limit snapshot (auto-refresh from GET /rate_limit when empty)
     try {
-      const rl = await send({ type: 'PR_TREE_RATE_LIMIT_GET' });
+      const rl = await send({
+        type: 'PR_TREE_RATE_LIMIT_GET',
+        refresh: true,
+      });
       if (rl?.ok) {
         renderRateLimitState(rl.state, rl.pluginEnabled !== false);
       }
@@ -385,6 +428,15 @@ async function savePrefs() {
       shortcutMonitorSize: normalizeShortcutMonitorSize(
         prefShortcutMonitorSize?.value
       ),
+      timelineVisibility: {
+        labels: prefTlLabels ? Boolean(prefTlLabels.checked) : true,
+        title: prefTlTitle ? Boolean(prefTlTitle.checked) : true,
+        milestone: prefTlMilestone ? Boolean(prefTlMilestone.checked) : true,
+        referenced: prefTlReferenced
+          ? Boolean(prefTlReferenced.checked)
+          : true,
+        comments: prefTlComments ? Boolean(prefTlComments.checked) : true,
+      },
     };
     const res = await send({ type: 'PR_TREE_PREFS_SET', prefs });
     if (!res?.ok && res?.error) {
@@ -461,6 +513,11 @@ prefSingleFileMode?.addEventListener('change', () => void savePrefs());
 prefAutoExpandFileNav?.addEventListener('change', () => void savePrefs());
 prefTreeView?.addEventListener('change', () => void savePrefs());
 prefShortcutMonitorSize?.addEventListener('change', () => void savePrefs());
+prefTlLabels?.addEventListener('change', () => void savePrefs());
+prefTlTitle?.addEventListener('change', () => void savePrefs());
+prefTlMilestone?.addEventListener('change', () => void savePrefs());
+prefTlReferenced?.addEventListener('change', () => void savePrefs());
+prefTlComments?.addEventListener('change', () => void savePrefs());
 
 enterpriseHostInput?.addEventListener('input', () => {
   // @ts-expect-error classic content-script dynamic shapes

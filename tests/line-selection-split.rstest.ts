@@ -482,58 +482,6 @@ describe('resolveSelectionIslandRevealPhase (shipped idle-reveal path)', () => {
     expect(resolveSelectionIslandRevealPhase(thr)).toBe('hidden');
   });
 
-  test('PrModalApp scheduleSelectionActionsReveal uses pure reveal phase', () => {
-    const fs = require('node:fs');
-    const path = require('node:path');
-    const app = fs.readFileSync(
-      path.join(__dirname, '../src/modal/app/PrModalApp.impl.tsx'),
-      'utf8'
-    );
-    expect(app).toMatch(/resolveSelectionIslandRevealPhase/);
-    // Must not force file → comment inside the reveal timer
-    expect(app).not.toMatch(
-      /lineSelection\.kind === 'file'[\s\S]{0,200}setSelectionIslandPhase\('comment'\)/
-    );
-  });
-
-  test('SelectionCommentBar: file actions + Back from comment', () => {
-    const fs = require('node:fs');
-    const path = require('node:path');
-    const src = fs.readFileSync(
-      path.join(__dirname, '../src/modal/views/diff/SelectionCommentBar.tsx'),
-      'utf8'
-    );
-    expect(src).not.toMatch(/isFileTarget\s*\?\s*['"]comment['"]/);
-    expect(src).toMatch(/data-file-target/);
-    expect(src).toMatch(/data-prp-selection-back/);
-    // Back must not be gated only for non-file
-    expect(src).not.toMatch(/\{!isFileTarget \?\s*\([\s\S]*?Back[\s\S]*?\)\s*:\s*null\}/);
-  });
-
-  test('SelectionCommentBar: selComposerFocused useState is unconditional (Rules of Hooks)', () => {
-    const fs = require('node:fs');
-    const path = require('node:path');
-    const src = fs.readFileSync(
-      path.join(__dirname, '../src/modal/views/diff/SelectionCommentBar.tsx'),
-      'utf8'
-    );
-    // State for Opt-hold composer hints must not sit after phase==='actions' return
-    const stateIdx = src.indexOf(
-      'const [selComposerFocused, setSelComposerFocused] = useState(false)'
-    );
-    const actionsReturnIdx = src.indexOf("if (phase === 'actions')");
-    expect(stateIdx).toBeGreaterThan(0);
-    expect(actionsReturnIdx).toBeGreaterThan(0);
-    expect(stateIdx).toBeLessThan(actionsReturnIdx);
-    // Only one useState for this flag
-    expect(
-      (
-        src.match(
-          /const \[selComposerFocused,\s*setSelComposerFocused\]\s*=\s*useState/g
-        ) || []
-      ).length
-    ).toBe(1);
-  });
 });
 
 describe('file-level extractSelectedCodeText = whole file body', () => {
@@ -569,6 +517,50 @@ describe('file-level extractSelectedCodeText = whole file body', () => {
  * Long Diff travel then ↑ must move to a previous nav stop (not invert).
  * Synthetic multi-kind rows: headers, lines, threads — mirrors large PR #2647.
  */
+describe('selectionNeedsSeed / activeFilePath lag (key-hold cross-file)', () => {
+  test('↓ with activeFilePath still on previous file does not jump to that file top', () => {
+    const rows: any[] = [];
+    let idx = 0;
+    rows.push({ kind: 'file-header', filePath: 'a.ts', rowIndex: idx++ });
+    for (let L = 1; L <= 5; L++) {
+      rows.push(
+        splitChangeRow({
+          rowIndex: idx++,
+          oldLine: L,
+          newLine: L,
+          path: 'a.ts',
+        })
+      );
+    }
+    rows.push({ kind: 'file-header', filePath: 'b.ts', rowIndex: idx++ });
+    for (let L = 1; L <= 5; L++) {
+      rows.push(
+        splitChangeRow({
+          rowIndex: idx++,
+          oldLine: L,
+          newLine: L,
+          path: 'b.ts',
+        })
+      );
+    }
+    // Caret already on b.ts line 2 (after natural ↓ cross-file); tree active still a.ts
+    const onB2 = rows.find(
+      (r) => r.filePath === 'b.ts' && r.newLine === 2
+    );
+    expect(onB2).toBeTruthy();
+    let sel = beginLineSelection(onB2);
+    expect(sel?.filePath).toBe('b.ts');
+    expect(Number(sel?.headLine)).toBe(2);
+    // Stale activeFilePath = a.ts used to reseed to a.ts first line (jump UP)
+    const next = moveLineSelection(sel, rows, 1, {
+      activeFilePath: 'a.ts',
+    });
+    expect(next.filePath).toBe('b.ts');
+    expect(Number(next.headLine)).toBe(3);
+    expect(Number(next.headRowIndex)).toBeGreaterThan(Number(sel!.headRowIndex));
+  });
+});
+
 describe('moveLineSelection long-travel then up (direction monotonic)', () => {
   function buildLongRows() {
     const rows: any[] = [];

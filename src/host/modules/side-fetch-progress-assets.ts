@@ -1,5 +1,41 @@
 // TypeScript SoT — assembled by build scripts (classic runtime JS emit)
 
+  /**
+   * True when a files[] snapshot can paint Diff (has patches, or only
+   * legitimately patchless entries). Slim IDB rows use `_patchOmitted`.
+   * Host pure global may lag rebuild — keep this inline for settle gates.
+   */
+  function filesSnapshotHasUsableDiffBodies(files) {
+    if (!Array.isArray(files) || files.length === 0) return false;
+    let missingRequired = false;
+    for (const f of files) {
+      if (!f || typeof f !== 'object') continue;
+      if (f._patchOmitted) {
+        missingRequired = true;
+        continue;
+      }
+      const patch = typeof f.patch === 'string' ? f.patch : '';
+      if (patch.length > 0) continue;
+      const st = String(f.status || f.changeType || '').toLowerCase();
+      const binary = Boolean(f.binary || f.isBinary);
+      const noChange =
+        Number(f.changes) === 0 ||
+        (Number(f.additions || 0) === 0 && Number(f.deletions || 0) === 0);
+      if (
+        !(
+          binary ||
+          st === 'renamed' ||
+          st === 'removed' ||
+          st === 'deleted' ||
+          noChange
+        )
+      ) {
+        missingRequired = true;
+      }
+    }
+    return !missingRequired;
+  }
+
   function kickIndependentSideFetches({
     owner,
     repo,
@@ -38,15 +74,17 @@
         err?.name === 'AbortError' ||
         /aborted|AbortError/i.test(String(err?.message || ''))
       ) {
-        // Aborted open — leave flags; modal likely closed or superseded
+        // Aborted/superseded open — do not credit the new session's progress
+        // and do not invent settled empty authority.
         return;
       }
       console.log(
         `[pr-plus] side-fetch ${key} soft-fail ${err?.message || err}`
       );
-      // Soft-fail: stop skeleton so empty state can show (no infinite shimmer)
+      // Soft-fail: clear pending skeleton + credit progress terminal, but do
+      // NOT set settled:true (would invent authoritative empty and wipe lists).
       if (alive()) {
-        setSideFlag(key, { pending: false, settled: true });
+        setSideFlag(key, { pending: false }, { render: true });
         markSideProgress(key);
       }
     };
@@ -109,23 +147,78 @@
 
     // Files list is deferred: conversation aside / Diff first-need owns the
     // fetch. Credit progress so open loadStage can finish without the list.
-    // Cache-hit opens that already settled files still skip the network.
+    // Same headSha + usable Diff bodies → settle from cache (no re-fetch).
+    // Slim IDB (`_patchOmitted`) or head mismatch → leave unsettled so
+    // ensureAllFiles fetches patches.
     if (claim('files')) {
-      if (current.sideSettled?.files) {
+      const snap = current.detail || null;
+      const snapFiles = Array.isArray(snap?.files) ? snap.files : [];
+      const idb =
+        typeof globalThis !== 'undefined'
+          ? (globalThis as any).PRModalDetailIdb
+          : null;
+      const reuse =
+        typeof idb?.mayReuseFilesCommitsDiff === 'function'
+          ? idb.mayReuseFilesCommitsDiff(snap, {
+              headSha: headSha || snap?.headSha || null,
+              changedFiles: snap?.changedFiles,
+            })
+          : null;
+      const bodiesOk =
+        reuse != null
+          ? Boolean(reuse.reuseFiles)
+          : filesSnapshotHasUsableDiffBodies(snapFiles) &&
+            snapFiles.length > 0 &&
+            Boolean(
+              String(snap?.headSha || headSha || '')
+                .trim()
+            );
+      const reason =
+        reuse?.reason ||
+        (bodiesOk ? 'reuse' : snapFiles.length ? 'cache-slim' : 'empty');
+      try {
+        console.log(
+          `[pr-plus] side-fetch files ${owner}/${repo}#${number} ` +
+            `cache-reuse=${bodiesOk ? 1 : 0} reason=${reason}` +
+            (headSha ? ` head=${String(headSha).slice(0, 7)}` : '')
+        );
+        for (const id of [HOST_ID, embedHostId()]) {
+          try {
+            const el = document.getElementById(id);
+            if (!el) continue;
+            el.setAttribute(
+              'data-prp-cache-files',
+              bodiesOk ? 'reuse' : String(reason).slice(0, 24)
+            );
+            if (headSha) {
+              el.setAttribute(
+                'data-prp-head-sha',
+                String(headSha).slice(0, 12)
+              );
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+      if (current.sideSettled?.files && bodiesOk) {
         creditSide('files');
-      } else if (
-        Array.isArray(current.detail?.files) &&
-        current.detail.files.length > 0
-      ) {
-        // Snapshot already has files (memory/IDB) — mark settled, no re-fetch
+      } else if (snapFiles.length > 0 && bodiesOk) {
+        // Same head + usable Diff bodies — mark settled, no re-fetch
         settleSide('files', {
-          files: current.detail.files,
+          files: snapFiles,
           gitattributesText: current.detail?.gitattributesText || '',
         });
       } else {
-        // Lazy: not pending (no skeleton on collapsed aside), not settled
+        // Lazy, slim, or head-mismatch: Diff ensureAllFiles will fetch patches
         if (alive()) {
-          setSideFlag('files', { pending: false, settled: false }, { render: false });
+          setSideFlag(
+            'files',
+            { pending: false, settled: false },
+            { render: false }
+          );
         }
         creditSide('files');
       }
@@ -133,12 +226,34 @@
 
     if (claim('comments')) {
       markPendingIfNeeded('comments');
+      // Skip REST issue events when all system tips (labels/title/milestone) are off.
+      let wantSystemEvents = true;
+      try {
+        const pure = (globalThis as any).PRModalConversationTimeline;
+        const vis =
+          prefs?.timelineVisibility ??
+          pure?.DEFAULT_TIMELINE_VISIBILITY ??
+          null;
+        if (typeof pure?.shouldFetchSystemTimelineEvents === 'function') {
+          wantSystemEvents = pure.shouldFetchSystemTimelineEvents(vis);
+        } else {
+          const v = vis || {};
+          wantSystemEvents =
+            v.labels !== false ||
+            v.title !== false ||
+            v.milestone !== false ||
+            v.referenced !== false;
+        }
+      } catch {
+        wantSystemEvents = true;
+      }
       commentsP =
         typeof api.fetchPrIssueComments === 'function'
           ? wrap(
               'side.comments',
               Promise.all([
                 api.fetchPrIssueComments(owner, repo, number, { signal }),
+                wantSystemEvents &&
                 typeof api.fetchPrTimelineEvents === 'function'
                   ? api
                       .fetchPrTimelineEvents(owner, repo, number, { signal })
@@ -153,7 +268,7 @@
                         }
                         return [];
                       })
-                  : Promise.resolve([]),
+                  : Promise.resolve(null),
               ])
                 .then(([page, events]) => {
                   const items = Array.isArray(page?.items)
@@ -161,7 +276,7 @@
                     : Array.isArray(page)
                       ? page
                       : [];
-                  settleSide('comments', {
+                  const patch: any = {
                     comments: items,
                     commentsMeta: page?.meta || {
                       page: 1,
@@ -170,8 +285,13 @@
                       nextPage: null,
                       loadedCount: items.length,
                     },
-                    timelineEvents: Array.isArray(events) ? events : [],
-                  });
+                  };
+                  // Only overwrite timelineEvents when we actually fetched
+                  // (null skip keeps prior / empty until lazy tip re-enable).
+                  if (Array.isArray(events)) {
+                    patch.timelineEvents = events;
+                  }
+                  settleSide('comments', patch);
                   return page;
                 })
                 .catch((err) => {
@@ -217,15 +337,43 @@
     }
 
     // Commits list deferred (aside first-open / Diff commit picker).
+    // Reuse only when same headSha as seed/core and cache has commits.
     if (claim('commits')) {
-      if (current.sideSettled?.commits) {
+      const snap = current.detail || null;
+      const idb =
+        typeof globalThis !== 'undefined'
+          ? (globalThis as any).PRModalDetailIdb
+          : null;
+      const reuse =
+        typeof idb?.mayReuseFilesCommitsDiff === 'function'
+          ? idb.mayReuseFilesCommitsDiff(snap, {
+              headSha: headSha || snap?.headSha || null,
+            })
+          : null;
+      const canReuseCommits =
+        reuse != null
+          ? Boolean(reuse.reuseCommits)
+          : Array.isArray(snap?.commits) &&
+            snap.commits.length > 0 &&
+            Boolean(String(snap?.headSha || headSha || '').trim());
+      try {
+        console.log(
+          `[pr-plus] side-fetch commits ${owner}/${repo}#${number} ` +
+            `cache-reuse=${canReuseCommits ? 1 : 0}` +
+            (reuse?.reason ? ` reason=${reuse.reason}` : '')
+        );
+      } catch {
+        /* ignore */
+      }
+      if (current.sideSettled?.commits && canReuseCommits) {
         creditSide('commits');
       } else if (
-        Array.isArray(current.detail?.commits) &&
-        current.detail.commits.length > 0
+        canReuseCommits &&
+        Array.isArray(snap?.commits) &&
+        snap.commits.length > 0
       ) {
         settleSide('commits', {
-          commits: current.detail.commits,
+          commits: snap.commits,
         });
       } else {
         if (alive()) {
@@ -368,8 +516,20 @@
       return Boolean(current.open);
     }
 
+    /**
+     * Progress bookkeeping stays live while this prog owns the open bar.
+     * Do not gate on detailFetchGen: meta patches may bump gen to supersede
+     * soft-refresh, and side-data patches previously did too — either would
+     * leave the header stuck on the last panel label (often "Loading reviews…")
+     * even after that panel finished.
+     */
+    function progressAlive() {
+      if (activeOpenProgress !== prog) return false;
+      return Boolean(current.open);
+    }
+
     function mark(key, weight, phase, label, opts = null) {
-      if (!alive()) return tracker.percent();
+      if (!progressAlive()) return tracker.percent();
       const res = tracker.complete(String(key), Number(weight) || 0);
       // Cap at 99 while busy so clearLoadStage owns the 100 settle
       const percent = Math.min(99, Math.max(0, res.percent));
@@ -385,7 +545,14 @@
       return percent;
     }
 
-    const prog = { mark, percent: () => tracker.percent(), tracker, weights: w };
+    const prog = {
+      mark,
+      percent: () => tracker.percent(),
+      tracker,
+      weights: w,
+      /** True when data writes for this open gen are still valid. */
+      stillOpen: alive,
+    };
     activeOpenProgress = prog;
     return prog;
   }
@@ -418,6 +585,13 @@
       busy: b,
       percent: nextPercent,
     };
+    try {
+      publishE2eLoadHook(
+        `setLoadStage:${phase || ''}:${b ? 'busy' : 'idle'}`
+      );
+    } catch {
+      /* ignore */
+    }
   }
 
   /**
@@ -451,6 +625,12 @@
         return 'Loading review threads…';
       case 'threads-update':
         return 'Updating review threads…';
+      case 'threads-shell':
+        return 'Updating threads…';
+      case 'threads-comments':
+        return 'Updating comments…';
+      case 'threads-reactions':
+        return 'Updating reactions…';
       case 'threads-earlier':
         return 'Loading earlier threads…';
       case 'threads-unresolved':
@@ -465,13 +645,14 @@
         return 'Loading more threads…';
       case 'threads-all': {
         if (Number.isFinite(loaded) && loaded >= 0 && Number.isFinite(total) && total > 0) {
-          const a = String(Math.min(Math.floor(loaded), 999)).padStart(3, ' ');
-          const b = String(Math.min(Math.floor(total), 999)).padStart(3, ' ');
-          return `Loading comments${a}/${b}`;
+          const a = Math.min(Math.floor(loaded), 999);
+          const b = Math.min(Math.floor(total), 999);
+          // No padStart spaces — fixed badge width + spaces caused flicker thrash.
+          return `Loading comments ${a}/${b}`;
         }
         if (Number.isFinite(loaded) && loaded >= 0) {
-          const a = String(Math.min(Math.floor(loaded), 999)).padStart(3, ' ');
-          return `Loading comments ·${a}`;
+          const a = Math.min(Math.floor(loaded), 999);
+          return `Loading comments · ${a}`;
         }
         return 'Loading all comments…';
       }
@@ -532,6 +713,11 @@
     }
     // Drop load pill immediately → metrics stats (no "Ready" settle flash).
     current.loadStage = null;
+    try {
+      publishE2eLoadHook('clearLoadStage');
+    } catch {
+      /* ignore */
+    }
   }
 
   /**
@@ -1167,9 +1353,8 @@
   }
 
   /**
-   * Newest reviewThreads fetch with warm-cache probe + escalate.
-   * Cold / forceFull → last:100. Warm match → last:10 early exit.
-   * Warm mismatch → probe then escalate to last:100.
+   * Newest reviewThreads fetch (GraphQL shell, page size 100).
+   * Always PRRT_… ids; selective by-ids comments for unresolved.
    *
    * @param {string} owner
    * @param {string} repo
@@ -1200,8 +1385,8 @@
       typeof globalThis !== 'undefined' && globalThis.PRModalReviewThreads
         ? globalThis.PRModalReviewThreads
         : {};
-    const apiMax = Number(RT.REVIEW_THREADS_API_MAX) || 100;
-    const probeN = Number(RT.REVIEW_THREADS_WARM_PROBE_SIZE) || 10;
+    const apiMax = Number(RT.REVIEW_THREADS_PAGE_SIZE) || Number(RT.REVIEW_THREADS_API_MAX) || 100;
+    const probeN = Number(RT.REVIEW_THREADS_WARM_PROBE_SIZE) || apiMax;
     const hasWarm =
       !forceFull &&
       (typeof RT.hasUsableReviewThreadsCache === 'function'
@@ -1226,18 +1411,120 @@
           ? probeN
           : apiMax;
 
-    const fetchPage = (size) =>
+    // GraphQL-first shell (page size 100) + PRRT_; selective comments bulk.
+    const reviewCommentsCount = (() => {
+      const d = cacheDetail;
+      if (d && d.reviewCommentsCount != null && Number.isFinite(Number(d.reviewCommentsCount))) {
+        return Number(d.reviewCommentsCount);
+      }
+      return null;
+    })();
+    const fetchPage = (size, transport: any = {}) =>
       globalThis.PRTreeFetch.fetchReviewThreadsPage(owner, repo, number, {
         direction: 'newest',
         cursor: null,
         pageSize: size,
         signal,
+        preferRest: false,
+        forceGraphql: true,
+        forceFull: Boolean(forceFull),
+        // Shell only — host runs eager by-ids so progress can mark
+        // threads → comments → reactions as separate bar steps.
+        skipEagerComments: true,
+        reviewCommentsCount,
       });
 
-    let page = await fetchPage(pageSize);
+    /** Host-side REST page when SW GraphQL path is gated / empty. */
+    async function restPageFromComments() {
+      try {
+        const F = globalThis.PRTreeFetch;
+        if (typeof F?.fetchPrCommentsPage !== 'function') return null;
+        const restPage = await F.fetchPrCommentsPage(owner, repo, number, {
+          kind: 'review',
+          page: 1,
+          perPage: Number(RT.REVIEW_THREADS_PAGE_SIZE) || 100,
+          preferNewest: true,
+          signal,
+        });
+        const items = Array.isArray(restPage?.items) ? restPage.items : [];
+        if (!items.length) return null;
+        const build =
+          typeof RT.buildRestReviewThreadsPageFromComments === 'function'
+            ? RT.buildRestReviewThreadsPageFromComments
+            : null;
+        if (!build) {
+          // Minimal synthetic page so Diff can group from comments
+          return {
+            threads: items
+              .filter((c) => c && c.id != null && c.inReplyToId == null)
+              .map((r) => ({
+                threadNodeId:
+                  r.threadNodeId || r.nodeId || `rest-thread-${r.id}`,
+                resolved: Boolean(r.resolved),
+                outdated: Boolean(r.outdated),
+                path: r.path || '',
+                line: r.line ?? r.originalLine ?? null,
+                startLine: r.startLine ?? null,
+                side: r.side || 'RIGHT',
+                commentIds: [r.id],
+                loadWindow: 'newest',
+              })),
+            comments: items,
+            totalCount: items.length,
+            hasMore: false,
+            pageCount: 1,
+            direction: 'newest',
+            window: 'newest',
+            source: 'rest',
+          };
+        }
+        const page = build(items, 'newest');
+        return page ? { ...page, source: 'rest' } : null;
+      } catch (err) {
+        if (
+          err?.name === 'AbortError' ||
+          /aborted|AbortError/i.test(String(err?.message || ''))
+        ) {
+          throw err;
+        }
+        console.log(
+          `[pr-plus] host REST threads fallback soft-fail: ${err?.message || err}`
+        );
+        return null;
+      }
+    }
+
+    const pageHasData = (p) =>
+      (Array.isArray(p?.threads) && p.threads.length > 0) ||
+      (Array.isArray(p?.comments) && p.comments.length > 0);
+
+    let page = null;
     let escalated = false;
     let earlyExit = false;
-    if (hasWarm && pageSize < apiMax) {
+    let hostRestFallback = false;
+    try {
+      page = await fetchPage(pageSize);
+    } catch (err) {
+      if (
+        err?.name === 'AbortError' ||
+        /aborted|AbortError/i.test(String(err?.message || ''))
+      ) {
+        throw err;
+      }
+      // GraphQL remaining=0 / SW throw → still try host REST comments.
+      console.log(
+        `[pr-plus] fetchNewestReviewThreadsAdaptive primary fail: ${err?.message || err}`
+      );
+      page = null;
+    }
+
+    let fromRest = page?.source === 'rest';
+    let hasData = pageHasData(page);
+
+    // GraphQL shell success — done (PRRT always on graphql pages).
+    if (hasData && page?.source === 'graphql') {
+      earlyExit = true;
+    } else if (hasWarm && pageSize < apiMax && hasData) {
       const shouldEsc =
         typeof RT.shouldEscalateNewestThreadsProbe === 'function'
           ? Boolean(
@@ -1245,18 +1532,130 @@
             )
           : true;
       if (shouldEsc) {
-        page = await fetchPage(apiMax);
-        escalated = true;
+        try {
+          page = await fetchPage(apiMax, { forceGraphql: true });
+          escalated = true;
+          fromRest = page?.source === 'rest';
+          hasData = pageHasData(page);
+        } catch {
+          /* keep probe page */
+        }
       } else {
         earlyExit = true;
       }
     }
+
+    // No REST host fallback — GraphQL empty is authoritative.
+
+    if (!page) {
+      page = {
+        threads: [],
+        comments: [],
+        hasMore: false,
+        totalCount: 0,
+        pageCount: 0,
+        direction: 'newest',
+        source: null,
+      };
+    }
+
+    // Progress stage: shell list/meta is ready.
+    try {
+      if (typeof opts?.onStage === 'function') {
+        opts.onStage('shell', {
+          page,
+          pageSize: escalated ? apiMax : pageSize,
+          warm: hasWarm,
+        });
+      }
+    } catch {
+      /* ignore stage */
+    }
+
+    // Eager full comments + reaction counts on host (by-ids) so the open bar
+    // can advance threads → comments → reactions separately.
+    // Warm early-exit still loads unresolved bodies when comments are missing.
+    const pureMerge =
+      typeof RT.mergeCommentsBulkIntoThreadsPage === 'function'
+        ? RT.mergeCommentsBulkIntoThreadsPage
+        : null;
+    const selectEager =
+      typeof RT.selectThreadIdsForEagerComments === 'function'
+        ? RT.selectThreadIdsForEagerComments
+        : null;
+    const needBodies =
+      !earlyExit ||
+      !hasWarm ||
+      (Array.isArray(page?.threads) &&
+        page.threads.some(
+          (t) => t && t.commentsLoaded !== true && !Boolean(t.resolved)
+        ));
+    let eagerN = 0;
+    if (
+      needBodies &&
+      page?.source === 'graphql' &&
+      typeof globalThis.PRTreeFetch?.fetchReviewThreadsByIds === 'function' &&
+      selectEager
+    ) {
+      const eagerIds = selectEager(page.threads || [], {
+        forceAll: Boolean(forceFull),
+      });
+      eagerN = eagerIds.length;
+      if (eagerIds.length) {
+        try {
+          try {
+            if (typeof opts?.onStage === 'function') {
+              opts.onStage('comments-start', { ids: eagerIds.length });
+            }
+          } catch {
+            /* ignore */
+          }
+          const bulk = await globalThis.PRTreeFetch.fetchReviewThreadsByIds(
+            eagerIds,
+            { signal }
+          );
+          if (pureMerge && bulk) {
+            page = pureMerge(page, bulk);
+            page.shellOnly = false;
+            page.eagerCommentIds = eagerIds;
+          }
+        } catch (bulkErr) {
+          console.log(
+            `[pr-plus] fetchNewestReviewThreadsAdaptive eager by-ids soft-fail: ${
+              bulkErr?.message || bulkErr
+            }`
+          );
+        }
+      }
+    }
+
+    try {
+      if (typeof opts?.onStage === 'function') {
+        opts.onStage('comments', {
+          page,
+          eager: eagerN,
+          skipped: eagerN === 0,
+        });
+        // Reaction counts ship on the same by-ids document (reactors{totalCount}).
+        opts.onStage('reactions', {
+          page,
+          eager: eagerN,
+          skipped: eagerN === 0,
+        });
+      }
+    } catch {
+      /* ignore stage */
+    }
+
     return {
       page,
       pageSize: escalated ? apiMax : pageSize,
       warm: hasWarm,
       escalated,
       earlyExit,
+      source: page?.source || null,
+      hostRestFallback,
+      eagerCommentCount: eagerN,
     };
   }
 

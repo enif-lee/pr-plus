@@ -383,25 +383,60 @@ function mergeReviewThreadsPageIntoDetailLocal(detail, page, direction = 'older'
   const prevRc = Array.isArray(detail.reviewComments) ? detail.reviewComments : [];
   const prevTh = Array.isArray(detail.reviewThreads) ? detail.reviewThreads : [];
 
-  // Remote-deleted threads from nodes(ids:) bulk fetch
-  const explicitMissing = Array.isArray(page?.missingThreadIds)
-    ? page.missingThreadIds.map(String).filter(Boolean)
-    : [];
-  const requested = Array.isArray(page?.requestedThreadIds)
-    ? page.requestedThreadIds.map(String).filter(Boolean)
-    : [];
-  const returnedIds = new Set(
-    (page?.threads || [])
-      .map((t) => (t?.threadNodeId ? String(t.threadNodeId) : ''))
-      .filter(Boolean)
-  );
-  const derivedMissing =
-    requested.length > 0
-      ? requested.filter((id) => !returnedIds.has(id))
-      : [];
-  const missingIds = [...new Set([...explicitMissing, ...derivedMissing])];
+  // Confirmed remote-null only — never requested − returned (by-id fail ≠ drop).
+  const missingIds = (() => {
+    try {
+      const pure =
+        typeof globalThis !== 'undefined'
+          ? (globalThis as any).PRModalReviewThreads
+          : null;
+      if (typeof pure?.resolveMissingThreadIdsForDrop === 'function') {
+        return pure.resolveMissingThreadIdsForDrop(page);
+      }
+    } catch {
+      /* fall through */
+    }
+    if (!Array.isArray(page?.missingThreadIds)) return [];
+    return [
+      ...new Set(
+        page.missingThreadIds
+          .map((id: any) => String(id || '').trim())
+          .filter(Boolean)
+      ),
+    ];
+  })();
 
-  const byId = new Map(prevRc.map((c) => [String(c.id), c]));
+  // GraphQL shell±bulk authority: drop REST synthetic + prev rows for page PRRTs
+  // so deferred shells stay body-less until expand (mirrors fetch-api merge).
+  const deferredShellIds = new Set();
+  const pageThreadIds = new Set();
+  if (
+    page?.source === 'graphql' &&
+    dir !== 'ids' &&
+    dir !== 'refresh' &&
+    Array.isArray(page?.threads)
+  ) {
+    for (const t of page.threads) {
+      if (!t?.threadNodeId) continue;
+      const id = String(t.threadNodeId);
+      pageThreadIds.add(id);
+      if (t.commentsLoaded === false) deferredShellIds.add(id);
+    }
+  }
+
+  let baseRc = prevRc;
+  if (pageThreadIds.size) {
+    baseRc = prevRc.filter((c) => {
+      if (!c) return false;
+      const tid = (c as any).threadNodeId != null ? String((c as any).threadNodeId) : '';
+      if (tid.startsWith('rest-thread-')) return false;
+      if (pageThreadIds.has(tid)) return false;
+      if (deferredShellIds.has(tid)) return false;
+      return true;
+    });
+  }
+
+  const byId = new Map(baseRc.map((c) => [String(c.id), c]));
   for (const c of page?.comments || []) {
     if (c?.id != null) {
       byId.set(String(c.id), { ...(byId.get(String(c.id)) || ({} as any)), ...c });
@@ -413,10 +448,20 @@ function mergeReviewThreadsPageIntoDetailLocal(detail, page, direction = 'older'
   }
   for (const t of page?.threads || []) {
     if (t?.threadNodeId) {
-      thById.set(String(t.threadNodeId), {
-        ...(thById.get(String(t.threadNodeId)) || ({} as any)),
-        ...t,
-      });
+      const prevT = thById.get(String(t.threadNodeId)) || ({} as any);
+      const mergedT = { ...prevT, ...t };
+      if (
+        page?.source === 'graphql' &&
+        t.commentsLoaded === false &&
+        dir !== 'ids' &&
+        dir !== 'refresh'
+      ) {
+        mergedT.commentsLoaded = false;
+        mergedT.commentIds = Array.isArray(t.commentIds) ? t.commentIds : [];
+      } else if (prevT.commentsLoaded === true || t.commentsLoaded === true) {
+        mergedT.commentsLoaded = true;
+      }
+      thById.set(String(t.threadNodeId), mergedT);
     }
   }
   const reviewThreads = [...thById.values()];
@@ -457,18 +502,108 @@ function mergeReviewThreadsPageIntoDetailLocal(detail, page, direction = 'older'
   const hiddenCount = Math.max(0, totalCount - loadedThreadCount);
   for (const id of newestIds) oldestIds.delete(id);
 
-  // Default: merge by comment id. refresh: replace comments for updated threads.
+  // Default: merge by comment id. ids/refresh: hydrate in place (stable order).
   let reviewComments = [...byId.values()];
   if ((dir === 'refresh' || dir === 'ids') && pageIds.length) {
     const refreshed = new Set(pageIds);
-    const kept = prevRc.filter(
-      (c) => !(c as any)?.threadNodeId || !refreshed.has(String((c as any).threadNodeId))
-    );
-    const keptMap = new Map(kept.map((c) => [String(c.id), c]));
-    for (const c of page?.comments || []) {
-      if (c?.id != null) keptMap.set(String(c.id), { ...(keptMap.get(String(c.id)) || ({} as any)), ...c });
+    try {
+      const pure =
+        typeof globalThis !== 'undefined'
+          ? (globalThis as any).PRModalReviewThreads
+          : null;
+      if (typeof pure?.hydrateReviewCommentsInPlace === 'function') {
+        reviewComments = pure.hydrateReviewCommentsInPlace(
+          prevRc,
+          page?.comments || [],
+          refreshed
+        );
+      } else {
+        const kept = prevRc.filter(
+          (c) =>
+            !(c as any)?.threadNodeId ||
+            !refreshed.has(String((c as any).threadNodeId))
+        );
+        const keptMap = new Map(kept.map((c) => [String(c.id), c]));
+        for (const c of page?.comments || []) {
+          if (c?.id != null) {
+            keptMap.set(String(c.id), {
+              ...(keptMap.get(String(c.id)) || ({} as any)),
+              ...c,
+            });
+          }
+        }
+        reviewComments = [...keptMap.values()];
+      }
+    } catch {
+      const kept = prevRc.filter(
+        (c) =>
+          !(c as any)?.threadNodeId ||
+          !refreshed.has(String((c as any).threadNodeId))
+      );
+      reviewComments = [
+        ...kept,
+        ...((page?.comments || []) as any[]),
+      ];
     }
-    reviewComments = [...keptMap.values()];
+  }
+  // Drop shell placeholders once real comments exist
+  const realCommentThreadIds = new Set();
+  for (const c of reviewComments) {
+    if (c && !(c as any)._commentsPending && (c as any).threadNodeId) {
+      realCommentThreadIds.add(String((c as any).threadNodeId));
+    }
+  }
+  reviewComments = reviewComments.filter((c) => {
+    if (!(c as any)?._commentsPending) return true;
+    return !realCommentThreadIds.has(String((c as any).threadNodeId || ''));
+  });
+  // Deferred GraphQL shells need placeholder rows or Diff/Conversation hide them.
+  if (
+    page?.source === 'graphql' &&
+    dir !== 'ids' &&
+    dir !== 'refresh' &&
+    Array.isArray(page?.threads)
+  ) {
+    try {
+      const pure =
+        typeof globalThis !== 'undefined'
+          ? (globalThis as any).PRModalReviewThreads
+          : null;
+      if (typeof pure?.ensureShellPlaceholderComments === 'function') {
+        reviewComments = pure.ensureShellPlaceholderComments(
+          page.threads,
+          reviewComments
+        );
+      } else {
+        const covered = new Set(
+          reviewComments
+            .map((c: any) => (c?.threadNodeId ? String(c.threadNodeId) : ''))
+            .filter(Boolean)
+        );
+        for (const t of page.threads) {
+          const tid = t?.threadNodeId ? String(t.threadNodeId) : '';
+          if (!tid || !/^PRRT_/i.test(tid) || covered.has(tid)) continue;
+          if (t.commentsLoaded === true) continue;
+          reviewComments.push({
+            id: `shell:${tid}`,
+            author: '',
+            body: '',
+            path: t.path || '',
+            line: t.line ?? null,
+            side: t.side || 'RIGHT',
+            threadNodeId: tid,
+            resolved: Boolean(t.resolved),
+            outdated: Boolean(t.outdated),
+            pending: false,
+            _commentsPending: true,
+            commentsLoaded: false,
+          } as any);
+          covered.add(tid);
+        }
+      }
+    } catch {
+      /* keep reviewComments */
+    }
   }
   const resolvedByThread = new Map();
   for (const t of page?.threads || []) {
@@ -526,6 +661,21 @@ function mergeReviewThreadsPageIntoDetailLocal(detail, page, direction = 'older'
   return next;
 }
 
+function isGraphqlReviewThreadNodeIdBridge(id: any): boolean {
+  try {
+    const pure =
+      typeof globalThis !== 'undefined'
+        ? (globalThis as any).PRModalReviewThreads
+        : null;
+    if (typeof pure?.isGraphqlReviewThreadNodeId === 'function') {
+      return Boolean(pure.isGraphqlReviewThreadNodeId(id));
+    }
+  } catch {
+    /* fall through */
+  }
+  return /^PRRT_/i.test(String(id || '').trim());
+}
+
 function collectUnresolvedThreadNodeIdsLocal(detail) {
   const dropped =
     detail?._droppedThreadNodeIds instanceof Set
@@ -540,6 +690,7 @@ function collectUnresolvedThreadNodeIdsLocal(detail) {
     if (!t?.threadNodeId || t.resolved) continue;
     const id = String(t.threadNodeId);
     if (dropped.has(id)) continue;
+    if (!isGraphqlReviewThreadNodeIdBridge(id)) continue;
     ids.add(id);
   }
   const list = Array.isArray(detail?.reviewComments) ? detail.reviewComments : [];
@@ -551,6 +702,7 @@ function collectUnresolvedThreadNodeIdsLocal(detail) {
     if (!(c as any)?.threadNodeId || c.resolved) continue;
     const id = String((c as any).threadNodeId);
     if (dropped.has(id)) continue;
+    if (!isGraphqlReviewThreadNodeIdBridge(id)) continue;
     const parentId = c.inReplyToId ?? c.in_reply_to_id ?? null;
     if (parentId != null && byId.has(String(parentId))) continue;
     ids.add(id);
@@ -651,6 +803,16 @@ var PRTreeFetch = {
         direction: opts.direction || 'newest',
         cursor: opts.cursor || null,
         pageSize: opts.pageSize,
+        // GraphQL-first default (preferRest true only if caller opts in).
+        preferRest: opts.preferRest === true ? true : opts.preferRest === false ? false : false,
+        forceGraphql: Boolean(opts.forceGraphql),
+        forceFull: Boolean(opts.forceFull),
+        skipEagerComments: Boolean(opts.skipEagerComments),
+        reviewCommentsCount:
+          opts.reviewCommentsCount != null
+            ? Number(opts.reviewCommentsCount)
+            : null,
+        restPage: opts.restPage != null ? Number(opts.restPage) : 1,
       },
       { signal: opts.signal || null }
     );
@@ -696,6 +858,102 @@ var PRTreeFetch = {
     return mergeReviewThreadsPageIntoDetailLocal(detail, page, direction);
   },
   /**
+   * GraphQL primary-point cost observation log (from SW apiGraphql).
+   * Also mirrors summary into sessionStorage for page-world e2e reads.
+   */
+  async getGraphqlCostLog() {
+    try {
+      let res = await send({ type: 'PR_TREE_GQL_COST_LOG_GET' });
+      // Fallback: older SW without GQL_COST message — RATE_LIMIT_GET carries log
+      if (!res?.ok && /unknown type/i.test(String(res?.error || ''))) {
+        res = await send({ type: 'PR_TREE_RATE_LIMIT_GET' });
+        if (res?.ok) {
+          res = {
+            ok: true,
+            log: res.gqlCostLog || [],
+            summary: res.gqlCostSummary || {
+              totalCalls: 0,
+              totalCost: 0,
+              byOp: [],
+            },
+            gqlCostBuild: res.gqlCostBuild || null,
+          };
+        }
+      }
+      if (!res?.ok) {
+        try {
+          sessionStorage.setItem(
+            'prp:gql-cost-err',
+            String(res?.error || 'GQL_COST_LOG_GET not ok')
+          );
+        } catch {
+          /* ignore */
+        }
+        return { log: [], summary: { totalCalls: 0, totalCost: 0, byOp: [] } };
+      }
+      const log = Array.isArray(res.log) ? res.log : [];
+      const summary = res.summary || {
+        totalCalls: 0,
+        totalCost: 0,
+        unknownCostCalls: 0,
+        byOp: [],
+      };
+      try {
+        sessionStorage.setItem('prp:gql-cost-log', JSON.stringify(log));
+        sessionStorage.setItem('prp:gql-cost-summary', JSON.stringify(summary));
+        sessionStorage.removeItem('prp:gql-cost-err');
+      } catch {
+        /* quota / private mode */
+      }
+      try {
+        for (const id of ['prp-page-embed', 'prp-modal-host']) {
+          const el = document.getElementById(id);
+          if (!el) continue;
+          el.setAttribute(
+            'data-prp-gql-cost-summary',
+            JSON.stringify({
+              totalCalls: summary.totalCalls,
+              totalCost: summary.totalCost,
+              top: (summary.byOp || []).slice(0, 8),
+            }).slice(0, 1800)
+          );
+        }
+        document.documentElement?.setAttribute?.(
+          'data-prp-gql-cost-ready',
+          '1'
+        );
+      } catch {
+        /* ignore */
+      }
+      return { log, summary };
+    } catch (e: any) {
+      try {
+        sessionStorage.setItem(
+          'prp:gql-cost-err',
+          String(e?.message || e || 'getGraphqlCostLog failed').slice(0, 300)
+        );
+      } catch {
+        /* ignore */
+      }
+      return { log: [], summary: { totalCalls: 0, totalCost: 0, byOp: [] } };
+    }
+  },
+  async clearGraphqlCostLog() {
+    try {
+      const res = await send({ type: 'PR_TREE_GQL_COST_LOG_CLEAR' });
+      try {
+        sessionStorage.removeItem('prp:gql-cost-log');
+        sessionStorage.removeItem('prp:gql-cost-summary');
+        sessionStorage.removeItem('prp:gql-cost-err');
+      } catch {
+        /* ignore */
+      }
+      return Boolean(res?.ok);
+    } catch {
+      return false;
+    }
+  },
+  /**
    * Lazy page of issue or review comments (offset page or since= window).
    * @param {{ kind?: 'issue'|'review', page?: number, perPage?: number, since?: string }} [opts]
    */
@@ -710,6 +968,7 @@ var PRTreeFetch = {
         page: opts.page,
         perPage: opts.perPage,
         since: opts.since || null,
+        preferNewest: Boolean(opts.preferNewest),
       },
       { signal: opts.signal || null }
     );
@@ -1825,4 +2084,51 @@ try {
   }
 } catch {
   /* non-DOM context (tests) */
+}
+
+// Page-world e2e can dispatch this to mirror SW GraphQL cost log → sessionStorage.
+// Capture phase so we see the event even if page handlers stop propagation.
+try {
+  document.addEventListener(
+    'prp-flush-gql-cost',
+    () => {
+      void (async () => {
+        try {
+          await PRTreeFetch.getGraphqlCostLog();
+        } catch (e: any) {
+          try {
+            sessionStorage.setItem(
+              'prp:gql-cost-err',
+              String(e?.message || e).slice(0, 300)
+            );
+          } catch {
+            /* ignore */
+          }
+        }
+      })();
+    },
+    true
+  );
+  document.addEventListener(
+    'prp-clear-gql-cost',
+    () => {
+      void PRTreeFetch.clearGraphqlCostLog?.();
+    },
+    true
+  );
+  document.documentElement?.setAttribute?.('data-prp-gql-cost-hook', '1');
+  // Dev/e2e: force SW+extension reload so disk rebuilds are picked up.
+  document.addEventListener(
+    'prp-reload-extension',
+    () => {
+      try {
+        chrome.runtime.reload();
+      } catch {
+        /* ignore */
+      }
+    },
+    true
+  );
+} catch {
+  /* non-DOM */
 }

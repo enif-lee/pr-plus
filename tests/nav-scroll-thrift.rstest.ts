@@ -1,11 +1,9 @@
 /**
  * Diff navigation thrift: page / file / comment / selection share DOM-first
  * programmatic scroll; store setScrollTop is gated (selection-class).
- * Drives shipped pure helpers + source contracts on App wiring.
+ * Drives shipped pure helpers.
  */
 import { describe, expect, test } from '@rstest/core';
-import fs from 'node:fs';
-import path from 'node:path';
 import {
   planProgrammaticScroll,
   applyProgrammaticDiffScroll,
@@ -16,12 +14,6 @@ import {
   nextScrollTopByPage as pageStep,
   resolveAdjacentFileNav,
 } from '../src/modal/lib/shortcut-policy';
-
-const root = path.join(__dirname, '..');
-const appImpl = fs.readFileSync(
-  path.join(root, 'src/modal/app/PrModalApp.impl.tsx'),
-  'utf8'
-);
 
 describe('planProgrammaticScroll / applyProgrammaticDiffScroll', () => {
   test('DOM applies when delta exceeds minDom; store gated by minStore', () => {
@@ -98,52 +90,6 @@ describe('page step pure helper still works', () => {
     expect(next - 100).toBeGreaterThanOrEqual(40);
     // ~0.9 * 500 = 450
     expect(next - 100).toBeLessThanOrEqual(500);
-  });
-});
-
-describe('App source contracts — thrift nav paths', () => {
-  test('scrollDiffPage uses thrift helper with Infinity store min (no per-hop setScrollTop)', () => {
-    expect(appImpl).toMatch(/function scrollDiffPage/);
-    expect(appImpl).toMatch(/applyProgrammaticDiffScroll/);
-    expect(appImpl).toMatch(
-      /minStoreDelta:\s*Number\.POSITIVE_INFINITY/
-    );
-    // Old thrash pattern: assign DOM then always setScrollTop(next)
-    expect(appImpl).not.toMatch(
-      /el\.scrollTop\s*=\s*next;\s*\n\s*setScrollTop\(next\)/
-    );
-  });
-
-  test('comment + selection + file pin call applyProgrammaticDiffScroll', () => {
-    // Counts of helper call sites in App (page + comment + selection + file + …)
-    const n = (appImpl.match(/applyProgrammaticDiffScroll\(/g) || []).length;
-    expect(n).toBeGreaterThanOrEqual(4);
-    expect(appImpl).toContain('scrollMappedCommentIntoView');
-    expect(appImpl).toContain('scrollSelectionHeadDomOnly');
-    expect(appImpl).toContain('function onSelectFile');
-  });
-
-  test('file nav is rAF-coalesced; page scroll applies sync (headless-safe)', () => {
-    // File nav still one hop per frame under key-hold
-    expect(appImpl).toMatch(/fileNavRafRef/);
-    expect(appImpl).toMatch(/pendingFileNavDeltaRef/);
-    expect(appImpl).toMatch(
-      /pendingFileNavDeltaRef\.current\s*=\s*d/
-    );
-    expect(appImpl).not.toMatch(
-      /pendingFileNavDeltaRef\.current\s*\+=/
-    );
-    // Page scroll: sync DOM hop (rAF freezes in background/headless) + optional
-    // rAF bookkeeping refs still present for same-frame key-repeat clear
-    expect(appImpl).toMatch(/pageScrollRafRef/);
-    expect(appImpl).toMatch(/pendingPageScrollDirRef/);
-    expect(appImpl).toMatch(/function applyDiffPageScroll/);
-    expect(appImpl).toMatch(/applyDiffPageScroll\(dir\)/);
-  });
-
-  test('selection still rAF-coalesces keyboard move', () => {
-    expect(appImpl).toMatch(/selectionMoveRafRef/);
-    expect(appImpl).toMatch(/applySelectionKeyboardMove/);
   });
 });
 

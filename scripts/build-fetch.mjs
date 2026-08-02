@@ -5,6 +5,11 @@ import * as esbuild from 'esbuild';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  esbuildReleaseExtras,
+  isReleaseBuild,
+  maybeStripDebugLogs,
+} from './release-build-options.mjs';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const sot = path.join(root, 'src/fetch/fetch-api.ts');
@@ -37,6 +42,7 @@ const result = await esbuild.transform(protectedSrc, {
   format: 'esm',
   target: 'es2020',
   platform: 'neutral',
+  ...esbuildReleaseExtras(),
 });
 
 let code = result.code
@@ -65,11 +71,18 @@ if (/:\s*any\b|: string\b|: number\b|: boolean\b/.test(code) && /function \w+\([
   process.exit(1);
 }
 
+code = await maybeStripDebugLogs(code, { loader: 'js' });
+
 const file = `/**
  * AUTO-GENERATED from src/fetch/fetch-api.ts
  * SOURCE OF TRUTH: src/fetch/fetch-api.ts — npm run build:fetch
- */
+${isReleaseBuild() ? ' * RELEASE: debug console.log/info stripped (PRP_RELEASE=1)\n' : ''} */
 ${code}
 `;
 fs.writeFileSync(out, file);
-console.log('Built fetch-pulls.js from fetch-api.ts', file.split(/\n/).length, 'lines');
+console.log(
+  'Built fetch-pulls.js from fetch-api.ts',
+  file.split(/\n/).length,
+  'lines',
+  isReleaseBuild() ? '(release, logs stripped)' : ''
+);

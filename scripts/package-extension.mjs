@@ -5,7 +5,8 @@
  *   dist/pr-plus-<version>/
  *   dist/pr-plus-<version>.zip
  *
- * Run via: npm run package  (builds first)
+ * Run via: npm run package  (runs build:release first — strips debug logs).
+ * Day-to-day load-unpacked: npm run build (keeps [pr-plus] observability logs).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -25,7 +26,7 @@ const outName = `pr-plus-${version}`;
 const outDir = path.join(distDir, outName);
 const zipPath = path.join(distDir, `${outName}.zip`);
 
-// Required runtime artifacts (must exist after npm run build)
+// Required runtime artifacts (must exist after npm run build:release)
 const required = [
   'manifest.json',
   'src/background.bundle.js',
@@ -36,9 +37,14 @@ const required = [
 for (const rel of required) {
   const p = path.join(root, rel);
   if (!fs.existsSync(p)) {
-    console.error(`Missing ${rel} — run \`npm run build\` first.`);
+    console.error(`Missing ${rel} — run \`npm run build:release\` (or package) first.`);
     process.exit(1);
   }
+}
+if (process.env.PRP_RELEASE !== '1' && process.env.PRP_RELEASE !== 'true') {
+  console.warn(
+    'WARN: packaging without PRP_RELEASE=1 — debug console.log may still be in bundles. Prefer `npm run package`.'
+  );
 }
 
 fs.mkdirSync(distDir, { recursive: true });

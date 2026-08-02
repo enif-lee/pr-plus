@@ -27,8 +27,132 @@
     ensurePrefsWatch();
     void ensureAssets();
     const key = detailKey(owner, repo, number);
+    // If the previous shell is still "open" in host memory (force-DOM close
+    // without closeModal), restamp cache from live detail so soft reopen after
+    // a milestone write does not fall back to a pre-write list sketch.
+    try {
+      if (
+        current?.open &&
+        Number(current.number) === Number(number) &&
+        current.detail &&
+        typeof current.detail === 'object'
+      ) {
+        detailCache.set(key, current.detail);
+      }
+    } catch {
+      /* ignore */
+    }
     // Abort any previous open's fetches, start a new cancelable session
-    const { gen, signal } = beginOpenFetchSession();
+    const { gen, signal, metaGenAtStart } = beginOpenFetchSession();
+    // Hydrate people-meta authority from sessionStorage before first paint.
+    try {
+      if (
+        (!lastPeopleMetaAuthority ||
+          Number(lastPeopleMetaAuthority.number) !== Number(number)) &&
+        typeof loadPeopleMetaAuthorityFromSession === 'function'
+      ) {
+        const hydrated = loadPeopleMetaAuthorityFromSession();
+        if (hydrated && Number(hydrated.number) === Number(number)) {
+          lastPeopleMetaAuthority = hydrated;
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    // chrome.storage.session hydrate (async): hard reopen clears page
+    // sessionStorage but keeps extension session write-through — reassert when
+    // the bag arrives so first hard open paints modal-set milestone without
+    // waiting on lagging REST.
+    try {
+      if (typeof loadPeopleMetaAuthorityFromChromeSession === 'function') {
+        const openGenSnap = detailFetchGen;
+        void loadPeopleMetaAuthorityFromChromeSession().then((chromeAuth) => {
+          try {
+            if (
+              openGenSnap !== detailFetchGen ||
+              !current.open ||
+              Number(current.number) !== Number(number)
+            ) {
+              return;
+            }
+            if (
+              !chromeAuth ||
+              Number(chromeAuth.number) !== Number(number)
+            ) {
+              return;
+            }
+            lastPeopleMetaAuthority = chromeAuth;
+            // Mirror into page sessionStorage for subsequent soft reopens.
+            try {
+              persistPeopleMetaAuthority(chromeAuth);
+            } catch {
+              /* ignore */
+            }
+            const S = detailStoreApi();
+            const fields = chromeAuth.fields || {};
+            if (
+              S?.applyMeta &&
+              current.detailStore &&
+              fields &&
+              Object.keys(fields).length
+            ) {
+              S.applyMeta(current.detailStore, fields, {
+                trustEmpty: true,
+                source: 'people-meta-authority-chrome-session',
+                sketch: false,
+              });
+              publishDetailFromStore();
+              render();
+              console.log(
+                `[pr-plus] openModal people-meta chrome.session hydrate ${owner}/${repo}#${number} ` +
+                  `ms=${fields.milestone?.title || fields.milestone?.number || '—'}`
+              );
+            }
+          } catch {
+            /* ignore */
+          }
+        });
+      }
+    } catch {
+      /* ignore */
+    }
+    // Drop people-meta clear shields on a fresh open so external re-assigns /
+    // milestone restores (and reverse e2e) are not blocked by a recent clear.
+    try {
+      if (
+        typeof lastPeopleMetaAuthority !== 'undefined' &&
+        lastPeopleMetaAuthority &&
+        Number(lastPeopleMetaAuthority.number) === Number(number)
+      ) {
+        const fields = lastPeopleMetaAuthority.fields || {};
+        const nextFields: Record<string, unknown> = { ...fields };
+        let changed = false;
+        for (const k of Object.keys(nextFields)) {
+          const v = nextFields[k];
+          const empty =
+            k === 'milestone'
+              ? v == null
+              : Array.isArray(v)
+                ? v.length === 0
+                : !v;
+          // Keep non-empty write-throughs; drop empty clear shields on open.
+          if (empty) {
+            delete nextFields[k];
+            changed = true;
+          }
+        }
+        if (changed) {
+          lastPeopleMetaAuthority = Object.keys(nextFields).length
+            ? { ...lastPeopleMetaAuthority, fields: nextFields }
+            : null;
+          if (typeof persistPeopleMetaAuthority === 'function') {
+            persistPeopleMetaAuthority(lastPeopleMetaAuthority);
+          }
+        }
+      }
+    } catch {
+      /* ignore */
+    }
 
     // Stack strip needs open PR list. List page has it cached; PR-page embed does
     // not — fetch in background so Stack/header parity matches fullscreen.
@@ -76,13 +200,82 @@
     const listPr = findListPr(owner, repo, number);
     const listSketch = detailSketchFromList(listPr, owner, repo, number);
 
-    // 1) Sync memory paint first (never block on IDB)
+    // 1) Sync memory paint first (never block on IDB).
+    // Drop a warm memory entry when its title/body/milestone clearly lags a
+    // list sketch from the live pulls page (external edit / reverse write).
     let peeked = peekDetailMemory(key);
     let cached = peeked.value || null;
+    if (cached && listSketch) {
+      try {
+        const cTitle = String(cached.title || '').trim();
+        const lTitle = String(listSketch.title || '').trim();
+        const cMs = cached.milestone?.title || cached.milestone?.number || '';
+        const lMs =
+          listSketch.milestone?.title || listSketch.milestone?.number || '';
+        if (
+          (lTitle && cTitle && lTitle !== cTitle) ||
+          (lMs && String(cMs) !== String(lMs))
+        ) {
+          try {
+            if (typeof detailCache.invalidate === 'function') {
+              detailCache.invalidate(key);
+            } else if (typeof detailCache.delete === 'function') {
+              detailCache.delete(key);
+            }
+          } catch {
+            /* ignore */
+          }
+          cached = null;
+          peeked = { value: null, fresh: false, stale: false, source: null };
+        }
+      } catch {
+        /* ignore */
+      }
+    }
     let fromCache = Boolean(cached);
     const fromList = !fromCache && Boolean(listSketch);
     // Prefer real cache over list sketch; else sketch; else empty
     let initialDetail = cached || listSketch || null;
+    // Overlay last confirmed people-meta write onto first paint. Soft reopen
+    // after modal milestone/assignee set must not flash "No milestone" while
+    // list-sketch/cache lag GitHub (session authority survives closeModal).
+    try {
+      if (
+        typeof lastPeopleMetaAuthority !== 'undefined' &&
+        lastPeopleMetaAuthority &&
+        Number(lastPeopleMetaAuthority.number) === Number(number)
+      ) {
+        const fields = lastPeopleMetaAuthority.fields || {};
+        if (fields && typeof fields === 'object' && Object.keys(fields).length) {
+          if (!initialDetail) {
+            // Cold shell: seed a minimal sketch from authority so aside paints
+            // milestone before network core (soft reopen after force-close).
+            initialDetail = {
+              owner: String(owner || ''),
+              repo: String(repo || ''),
+              number: Number(number),
+              title: `Pull Request #${number}`,
+              body: '',
+              labels: [],
+              assignees: [],
+              requestedReviewers: [],
+              milestone: null,
+              _sketch: true,
+              _source: 'people-meta-authority',
+              ...fields,
+            };
+          } else {
+            initialDetail = {
+              ...initialDetail,
+              ...fields,
+              _sketch: initialDetail._sketch,
+            };
+          }
+        }
+      }
+    } catch {
+      /* ignore */
+    }
 
     // Explicit page (stack nav) > path tab (embed) > keep current view > default conversation
     const ghLoc =
@@ -192,9 +385,22 @@
         ...sideSettledFromDetail(current.detail),
       };
       current.sidePending = emptySideFlags();
-      // Pending = not yet settled
+      // Pending only for sides that auto-fetch on open. files/commits are lazy
+      // (aside first-open / Diff ensureAll*) — do not spin "Loading…" while idle.
+      const autoFetchSides = new Set([
+        'comments',
+        'reviews',
+        'checks',
+        'development',
+      ]);
       for (const k of Object.keys(current.sideSettled)) {
-        current.sidePending[k] = !current.sideSettled[k];
+        if (current.sideSettled[k]) {
+          current.sidePending[k] = false;
+        } else if (autoFetchSides.has(k)) {
+          current.sidePending[k] = true;
+        } else {
+          current.sidePending[k] = false;
+        }
       }
     }
     persistOpenModal(owner, repo, number, {
@@ -354,7 +560,8 @@
       // Let IDB finish (or time out) without blocking core fetch
       void idbHydrateP;
 
-      const apiMax = 100;
+      const apiMax =
+        Number(globalThis.PRModalReviewThreads?.REVIEW_THREADS_PAGE_SIZE) || 100;
       const canFetchThreads = Boolean(
         globalThis.PRTreeFetch.fetchReviewThreadsPage
       );
@@ -368,6 +575,32 @@
       /** Merge SWR preserve fields from cache into network core detail. */
       function mergeCoreWithCache(raw, cacheSnap) {
         let detail = raw;
+        const idb =
+          typeof globalThis !== 'undefined'
+            ? (globalThis as any).PRModalDetailIdb
+            : null;
+        const sameHead =
+          typeof idb?.sameHeadSha === 'function'
+            ? Boolean(idb.sameHeadSha(cacheSnap?.headSha, raw?.headSha))
+            : (() => {
+                const a = String(cacheSnap?.headSha || '')
+                  .trim()
+                  .toLowerCase();
+                const b = String(raw?.headSha || '')
+                  .trim()
+                  .toLowerCase();
+                return Boolean(a && b && a === b);
+              })();
+        const reuse =
+          typeof idb?.mayReuseFilesCommitsDiff === 'function'
+            ? idb.mayReuseFilesCommitsDiff(cacheSnap, raw)
+            : {
+                sameHead,
+                reuseFiles: sameHead,
+                reuseCommits: sameHead,
+                reason: sameHead ? 'reuse' : 'head-mismatch',
+              };
+
         if (
           cacheSnap &&
           Array.isArray(cacheSnap.reviewComments) &&
@@ -388,7 +621,14 @@
                 : cacheSnap.comments || detail.comments,
           };
         }
-        if (cacheSnap && Array.isArray(cacheSnap.files) && cacheSnap.files.length) {
+        // Same headSha only: keep usable Diff bodies from cache when network
+        // core is empty/slim. Different head → never re-attach stale patches.
+        if (
+          reuse.reuseFiles &&
+          cacheSnap &&
+          Array.isArray(cacheSnap.files) &&
+          cacheSnap.files.length
+        ) {
           const netFiles = Array.isArray(detail.files) ? detail.files : [];
           const cachedHasPatches = cacheSnap.files.some(
             (f) =>
@@ -404,11 +644,15 @@
               f.patch.length > 0 &&
               !f._patchOmitted
           );
-          if (cachedHasPatches && !netHasPatches) {
+          const netSlim =
+            netFiles.length > 0 &&
+            (netFiles.some((f) => f && f._patchOmitted) || !netHasPatches);
+          if (cachedHasPatches && (netFiles.length === 0 || netSlim)) {
             detail = { ...detail, files: cacheSnap.files };
           }
         }
         if (
+          reuse.reuseCommits &&
           cacheSnap &&
           Array.isArray(cacheSnap.commits) &&
           cacheSnap.commits.length &&
@@ -417,7 +661,17 @@
           detail = { ...detail, commits: cacheSnap.commits };
         }
         if (detail && typeof detail === 'object') {
-          detail = { ...detail, _sketch: undefined, _source: 'network' };
+          detail = {
+            ...detail,
+            _sketch: undefined,
+            _source: 'network',
+            _cacheReuse: {
+              sameHead: Boolean(reuse.sameHead),
+              reuseFiles: Boolean(reuse.reuseFiles),
+              reuseCommits: Boolean(reuse.reuseCommits),
+              reason: String(reuse.reason || ''),
+            },
+          };
         }
         return detail;
       }
@@ -425,11 +679,145 @@
       /** Immediate partial paint when core fetch resolves (do not wait for threads/IDB). */
       function paintCoreNow(raw) {
         if (!openStill() || !raw) return null;
+        // Diagnostics: raw network milestone vs post-apply host detail.
+        // Stamp both modal host and page-embed (viaUrl hard reopen uses embed).
+        try {
+          const rawMs = raw?.milestone;
+          const label =
+            rawMs == null
+              ? 'null'
+              : String(rawMs.title || rawMs.number || 'obj').slice(0, 80);
+          for (const id of [HOST_ID, embedHostId()]) {
+            try {
+              document.getElementById(id)?.setAttribute?.('data-prp-raw-ms', label);
+            } catch {
+              /* ignore */
+            }
+          }
+          document.documentElement?.setAttribute?.('data-prp-raw-ms', label);
+        } catch {
+          /* ignore */
+        }
         // Core writes meta slice only (via applyCorePayload) — never empties
         // files/commits/reviews that other fetches own.
         const fromNetwork = mergeCoreWithCache(raw, cached);
+        // Capture reuse decision before applyCore (store flatten may drop _cacheReuse).
+        const reuseMetaSnap = fromNetwork?._cacheReuse
+          ? { ...fromNetwork._cacheReuse }
+          : null;
         ensureDetailStore(current.detail);
-        applyCoreToStore(fromNetwork);
+        applyCoreToStore(fromNetwork, { metaGenAtStart });
+        // Prefer network identity meta even when a warm cache/IDB shell painted
+        // first with stale title/body/milestone (external GH edits, reverse e2e).
+        // applyCorePayload already merges, but skipSupersedeMeta mid-open or a
+        // residual people-meta clear can leave store behind REST truth.
+        try {
+          const S = detailStoreApi();
+          if (S?.applyMeta && current.detailStore && raw) {
+            const force: Record<string, unknown> = {};
+            for (const k of [
+              'title',
+              'body',
+              'milestone',
+              'state',
+              'draft',
+              'merged',
+              'labels',
+              'assignees',
+              'requestedReviewers',
+            ] as const) {
+              if (!Object.prototype.hasOwnProperty.call(raw, k)) continue;
+              const v = (raw as any)[k];
+              // Never force-null milestone/title over a richer shell — a lagging
+              // REST payload must not erase a just-written meta field. Empty
+              // labels/assignees still win (cleared on GitHub).
+              if (
+                (k === 'milestone' || k === 'title' || k === 'body') &&
+                (v == null || v === '')
+              ) {
+                continue;
+              }
+              force[k] = v;
+            }
+            if (Object.keys(force).length) {
+              S.applyMeta(current.detailStore, force, {
+                trustEmpty: true,
+                source: 'network-core-force',
+                sketch: false,
+              });
+              publishDetailFromStore();
+            }
+            // Always re-stamp identity meta from REST after core paint. Stale
+            // IDB/list-sketch can leave title/milestone/assignees behind GitHub
+            // after modal writes + hard reload (MB3/MB7 reverse e2e).
+            const identity: Record<string, unknown> = {};
+            if (raw.title != null && String(raw.title).trim() !== '') {
+              identity.title = raw.title;
+            }
+            if (raw.body != null) identity.body = raw.body;
+            // Prefer non-null network milestone; do not force-null over a richer
+            // shell (lagging REST). Non-null always wins over stale IDB/list.
+            if (raw.milestone != null) {
+              identity.milestone = raw.milestone;
+            }
+            if (Array.isArray(raw.assignees)) identity.assignees = raw.assignees;
+            if (Array.isArray(raw.labels)) identity.labels = raw.labels;
+            if (Array.isArray(raw.requestedReviewers)) {
+              identity.requestedReviewers = raw.requestedReviewers;
+            }
+            if (Object.keys(identity).length) {
+              S.applyMeta(current.detailStore, identity, {
+                // Empty assignees/labels/milestone must win on revalidate —
+                // they are authoritative REST fields on the PR object.
+                trustEmpty: true,
+                source: 'network-core-identity',
+                sketch: false,
+              });
+              publishDetailFromStore();
+            }
+            // Re-assert session people-meta after network identity. A lagging
+            // null milestone on pull REST must not stick when modal just set it
+            // (soft reopen e2e: GH has board, aside flashed "No milestone").
+            try {
+              if (
+                typeof lastPeopleMetaAuthority !== 'undefined' &&
+                lastPeopleMetaAuthority &&
+                Number(lastPeopleMetaAuthority.number) === Number(number) &&
+                lastPeopleMetaAuthority.fields
+              ) {
+                const age =
+                  Date.now() - Number(lastPeopleMetaAuthority.at || 0);
+                if (age >= 0 && age < 120_000) {
+                  const authFields = lastPeopleMetaAuthority.fields || {};
+                  const reassert: Record<string, unknown> = {};
+                  for (const k of Object.keys(authFields)) {
+                    const v = authFields[k];
+                    const empty =
+                      k === 'milestone'
+                        ? v == null
+                        : Array.isArray(v)
+                          ? v.length === 0
+                          : !v;
+                    // Only shield non-empty writes (never re-clear on reopen).
+                    if (!empty) reassert[k] = v;
+                  }
+                  if (Object.keys(reassert).length) {
+                    S.applyMeta(current.detailStore, reassert, {
+                      trustEmpty: true,
+                      source: 'people-meta-authority-core-paint',
+                      sketch: false,
+                    });
+                    publishDetailFromStore();
+                  }
+                }
+              }
+            } catch {
+              /* ignore reassert */
+            }
+          }
+        } catch {
+          /* ignore force meta */
+        }
         current.loading = false;
         current.error = null;
         const detail = current.detail;
@@ -448,6 +836,107 @@
           `[pr-plus] openModal phase=core-paint ${owner}/${repo}#${number} ` +
             `(prior=${fromCache ? 'cache' : fromList ? 'list' : 'empty'}) pct=${prog.percent()}`
         );
+        // Under-shell list row must track network meta (incl. empty labels).
+        // Without this, a prior optimistic write-through leaves stale chips while
+        // the aside shows authoritative No labels (list-row-resync pre-state).
+        try {
+          if (
+            typeof applyOpenDetailToListRow === 'function' &&
+            detail &&
+            Array.isArray(detail.labels)
+          ) {
+            applyOpenDetailToListRow({
+              number,
+              detail,
+              forceLabels: true,
+            });
+          }
+        } catch {
+          /* ignore list write-through */
+        }
+        // Head moved vs cache: drop settled files/commits so Diff re-fetches.
+        try {
+          const reuseMeta = reuseMetaSnap || detail?._cacheReuse || null;
+          const cacheSha = String(cached?.headSha || '')
+            .trim()
+            .toLowerCase();
+          const liveSha = String(detail?.headSha || raw?.headSha || '')
+            .trim()
+            .toLowerCase();
+          const headMismatch =
+            Boolean(cacheSha && liveSha && cacheSha !== liveSha) ||
+            reuseMeta?.reason === 'head-mismatch';
+          if (headMismatch) {
+            try {
+              current._sideKickStarted?.delete?.('files');
+              current._sideKickStarted?.delete?.('commits');
+            } catch {
+              /* ignore */
+            }
+            setSideFlag('files', { pending: false, settled: false }, {
+              render: false,
+            });
+            setSideFlag('commits', { pending: false, settled: false }, {
+              render: false,
+            });
+            console.log(
+              `[pr-plus] openModal cache-reuse head-mismatch ${owner}/${repo}#${number} ` +
+                `cache=${cacheSha.slice(0, 7)} live=${liveSha.slice(0, 7)} — re-fetch files/commits`
+            );
+          }
+          // E2e / diagnostics: stamp reuse decision on hosts + documentElement
+          const stamp =
+            reuseMeta?.reuseFiles || reuseMeta?.reuseCommits
+              ? 'reuse'
+              : headMismatch
+                ? 'mismatch'
+                : String(reuseMeta?.reason || 'none');
+          console.log(
+            `[pr-plus] openModal cache-reuse ${owner}/${repo}#${number} ` +
+              `stamp=${stamp} reason=${reuseMeta?.reason || '?'} ` +
+              `files=${reuseMeta?.reuseFiles ? 1 : 0} commits=${reuseMeta?.reuseCommits ? 1 : 0}`
+          );
+          for (const id of [HOST_ID, embedHostId()]) {
+            try {
+              const el = document.getElementById(id);
+              if (!el) continue;
+              el.setAttribute('data-prp-cache-files', stamp);
+              if (liveSha) {
+                el.setAttribute('data-prp-head-sha', liveSha.slice(0, 12));
+              }
+              if (reuseMeta?.reason) {
+                el.setAttribute(
+                  'data-prp-cache-reuse-reason',
+                  String(reuseMeta.reason).slice(0, 40)
+                );
+              }
+            } catch {
+              /* ignore */
+            }
+          }
+          try {
+            document.documentElement?.setAttribute?.(
+              'data-prp-cache-files',
+              stamp
+            );
+            if (liveSha) {
+              document.documentElement?.setAttribute?.(
+                'data-prp-head-sha',
+                liveSha.slice(0, 12)
+              );
+            }
+            if (reuseMeta?.reason) {
+              document.documentElement?.setAttribute?.(
+                'data-prp-cache-reuse-reason',
+                String(reuseMeta.reason).slice(0, 40)
+              );
+            }
+          } catch {
+            /* ignore */
+          }
+        } catch {
+          /* ignore */
+        }
         // Independent panels — do not block conversation/threads
         kickIndependentSideFetches({
           owner,
@@ -470,14 +959,55 @@
        * Immediate partial paint when newest threads resolve — works against
        * cache/list core already on screen, without waiting for network core.
        */
+      function stampThreadsDiag(page, extra: any = {}) {
+        try {
+          const nT = Array.isArray(page?.threads) ? page.threads.length : 0;
+          const nC = Array.isArray(page?.comments) ? page.comments.length : 0;
+          const src = page?.source != null ? String(page.source) : '';
+          const payload = JSON.stringify({
+            threads: nT,
+            comments: nC,
+            source: src || null,
+            ...extra,
+          }).slice(0, 400);
+          for (const id of [HOST_ID, embedHostId()]) {
+            try {
+              const el = document.getElementById(id);
+              if (!el) continue;
+              el.setAttribute('data-prp-threads-count', String(nT));
+              el.setAttribute('data-prp-threads-comments', String(nC));
+              if (src) el.setAttribute('data-prp-threads-source', src);
+              el.setAttribute('data-prp-threads-diag', payload);
+            } catch {
+              /* ignore */
+            }
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+
       function paintThreadsNewestNow(page) {
         if (!openStill() || !page || typeof mergeFn !== 'function') return false;
+        const nT = Array.isArray(page?.threads) ? page.threads.length : 0;
+        const nC = Array.isArray(page?.comments) ? page.comments.length : 0;
+        // Empty network page must not wipe cache/store threads (GraphQL=0 races).
+        if (nT === 0 && nC === 0) {
+          stampThreadsDiag(page, { painted: false, reason: 'empty-page' });
+          return false;
+        }
         const base = current.detail;
         // Need a real detail shell (cache or core) — not empty
-        if (!base || typeof base !== 'object') return false;
+        if (!base || typeof base !== 'object') {
+          stampThreadsDiag(page, { painted: false, reason: 'no-base' });
+          return false;
+        }
         // Allow merge into sketch only if it has identity; prefer non-empty host
         const next = mergeFn(base, page, 'newest');
-        if (!next) return false;
+        if (!next) {
+          stampThreadsDiag(page, { painted: false, reason: 'merge-null' });
+          return false;
+        }
         current.loading = false;
         // Threads merge only touches threads slice (via applyThreadsToStore)
         applyThreadsToStore(next);
@@ -492,9 +1022,18 @@
           { percent: prog.percent() }
         );
         render();
+        stampThreadsDiag(page, {
+          painted: true,
+          storeThreads: Array.isArray(current.detail?.reviewThreads)
+            ? current.detail.reviewThreads.length
+            : 0,
+          storeComments: Array.isArray(current.detail?.reviewComments)
+            ? current.detail.reviewComments.length
+            : 0,
+        });
         console.log(
           `[pr-plus] openModal phase=threads.last-early-paint ${owner}/${repo}#${number} ` +
-            `(${page?.threads?.length || 0} threads) pct=${prog.percent()}`
+            `(${nT} threads, ${nC} comments, source=${page?.source || '?'}) pct=${prog.percent()}`
         );
         return true;
       }
@@ -505,8 +1044,8 @@
           ? (name: any, p: any, meta: any = undefined) => tl.span(name, p, meta)
           : (_n: any, p: any, _m: any = undefined) => p;
 
-      // Warm cache → last:10 probe (+ escalate on mismatch); cold → last:100.
-      // Await IDB hydrate (≤~400ms) so list/empty opens can warm-probe when
+      // GraphQL shell newest window (page size 100, PRRT always).
+      // Await IDB hydrate (≤~400ms) so list/empty opens can use warm cache when
       // durable threads already exist — first paint already happened above.
       try {
         await idbHydrateP;
@@ -530,24 +1069,86 @@
                 (Array.isArray(threadsCacheSnap.reviewComments) &&
                   threadsCacheSnap.reviewComments.some((c) => c?.threadNodeId))
             ));
-      // Start threads in parallel with core — paint as soon as *this* fetch lands
+      const warmOrCache = fromCache || detailRank(cached) >= 3;
+      const wShell = uw.threadsShell ?? uw.threadsNewest ?? 8;
+      const wComments = uw.threadsComments ?? uw.threadsRemaining ?? 8;
+      const wReactions = uw.threadsReactions ?? uw.threadsEarlier ?? 4;
+      /** Credit review-thread ladder stages (idempotent via prog.mark). */
+      const markThreadStage = (stage, labelKind) => {
+        if (stage === 'shell') {
+          prog.mark(
+            'threadsShell',
+            wShell,
+            'threads',
+            loadStageLabel(labelKind || 'threads-shell')
+          );
+        } else if (stage === 'comments' || stage === 'comments-start') {
+          if (stage === 'comments-start') {
+            setLoadStage(
+              'threads',
+              loadStageLabel('threads-comments'),
+              true,
+              { percent: prog.percent() }
+            );
+            try {
+              render();
+            } catch {
+              /* ignore */
+            }
+            return;
+          }
+          prog.mark(
+            'threadsComments',
+            wComments,
+            'threads',
+            loadStageLabel(labelKind || 'threads-comments')
+          );
+        } else if (stage === 'reactions') {
+          prog.mark(
+            'threadsReactions',
+            wReactions,
+            'threads',
+            loadStageLabel(labelKind || 'threads-reactions')
+          );
+        }
+      };
+      const creditAllThreadStages = (labelKind) => {
+        markThreadStage('shell', labelKind || 'threads-shell');
+        markThreadStage('comments', labelKind || 'threads-comments');
+        markThreadStage('reactions', labelKind || 'threads-reactions');
+      };
+
+      // Start threads in parallel with core — paint as soon as *this* fetch lands.
+      // onStage fires shell → comments → reactions so the open bar steps.
       const threadsKickoffP = canFetchThreads
         ? span(
             'fetch.threadsNewest',
             fetchNewestReviewThreadsAdaptive(owner, repo, number, {
               signal,
               cacheDetail: useWarmThreads ? threadsCacheSnap : null,
-              forceFull: !useWarmThreads,
+              // Cold open: GraphQL shell (not nested comments first:100).
+              forceFull: false,
+              onStage: (stage) => {
+                if (!openStill()) return;
+                if (stage === 'shell') {
+                  markThreadStage(
+                    'shell',
+                    warmOrCache ? 'threads-shell' : 'threads-shell'
+                  );
+                } else if (stage === 'comments-start') {
+                  markThreadStage('comments-start');
+                } else if (stage === 'comments') {
+                  markThreadStage('comments', 'threads-comments');
+                } else if (stage === 'reactions') {
+                  markThreadStage('reactions', 'threads-reactions');
+                }
+              },
             })
               .then((res) => {
                 const page = res.page;
-                prog.mark(
-                  'threadsNewest',
-                  uw.threadsNewest,
-                  'threads',
-                  fromCache || detailRank(cached) >= 3
-                    ? loadStageLabel('threads-update')
-                    : loadStageLabel('threads-load')
+                // Ensure all three stages credited even if onStage was skipped
+                creditAllThreadStages(
+                  warmOrCache ? 'threads-update' : 'threads-load'
                 );
                 earlyThreadsPage = page;
                 paintThreadsNewestNow(page);
@@ -557,12 +1158,21 @@
                       ? ' warm-probe-exit'
                       : res.escalated
                         ? ' warm-escalated'
-                        : ''),
+                        : res.hostRestFallback
+                          ? ' host-rest-fallback'
+                          : '') +
+                    (res.eagerCommentCount != null
+                      ? ` eager=${res.eagerCommentCount}`
+                      : ''),
                 });
                 console.log(
                   `[pr-plus] openModal threads.newest adaptive ${owner}/${repo}#${number}: ` +
                     `pageSize=${res.pageSize} warm=${res.warm} earlyExit=${res.earlyExit} escalated=${res.escalated} ` +
-                    `threads=${page?.threads?.length || 0}`
+                    `hostRest=${Boolean(res.hostRestFallback)} source=${page?.source || '?'} ` +
+                    `threads=${page?.threads?.length || 0} comments=${page?.comments?.length || 0}` +
+                    (res.eagerCommentCount != null
+                      ? ` eager=${res.eagerCommentCount}`
+                      : '')
                 );
                 return {
                   ok: true,
@@ -572,12 +1182,19 @@
                 };
               })
               .catch((err) => {
-                prog.mark(
-                  'threadsNewest',
-                  uw.threadsNewest,
-                  'threads',
-                  loadStageLabel('threads-failed', { message: err?.message })
-                );
+                creditAllThreadStages('threads-failed');
+                try {
+                  for (const id of [HOST_ID, embedHostId()]) {
+                    document
+                      .getElementById(id)
+                      ?.setAttribute?.(
+                        'data-prp-threads-err',
+                        String(err?.message || err || 'fail').slice(0, 200)
+                      );
+                  }
+                } catch {
+                  /* ignore */
+                }
                 return { ok: false, err };
               }),
             {
@@ -591,7 +1208,7 @@
             }
           )
         : Promise.resolve({ ok: false, err: null, skipped: true }).then((r) => {
-            prog.mark('threadsNewest', uw.threadsNewest, corePhase, coreLabel);
+            creditAllThreadStages(corePhase);
             return r;
           });
 
@@ -677,9 +1294,81 @@
         detail = current.detail || detail;
       }
 
+      // Milestone identity recovery: do NOT pass the open AbortSignal — side
+      // finish / cancelAll races used to abort settle polls so hard reopen stuck
+      // on "No milestone" while GH still had the board (MB3).
+      async function fetchIdentityDetailLoose() {
+        if (!globalThis.PRTreeFetch?.fetchPrDetail) return null;
+        return globalThis.PRTreeFetch.fetchPrDetail(owner, repo, number, {
+          skipReviewThreads: true,
+          // no signal — best-effort identity recovery
+        });
+      }
+      if (
+        openStill() &&
+        current.detail &&
+        current.detail.milestone == null
+      ) {
+        try {
+          const again = await fetchIdentityDetailLoose();
+          if (openStill() && again?.milestone) {
+            paintCoreNow(again);
+            detail = current.detail || again;
+            console.log(
+              `[pr-plus] openModal phase=core-milestone-retry ${owner}/${repo}#${number} ` +
+                `ms=${again.milestone?.title || again.milestone?.number || '?'}`
+            );
+          }
+        } catch {
+          /* soft */
+        }
+      }
+      // Background settle within e2e 45s wait window.
+      if (
+        openStill() &&
+        current.detail &&
+        current.detail.milestone == null
+      ) {
+        const settleGen = gen;
+        void (async () => {
+          const delays = [400, 900, 1800, 3500, 7000, 12000, 18000];
+          for (let i = 0; i < delays.length; i++) {
+            await new Promise((r) => setTimeout(r, delays[i]));
+            if (
+              settleGen !== detailFetchGen ||
+              !current.open ||
+              Number(current.number) !== Number(number) ||
+              current.detail?.milestone != null
+            ) {
+              return;
+            }
+            try {
+              const again = await fetchIdentityDetailLoose();
+              if (
+                settleGen !== detailFetchGen ||
+                !current.open ||
+                Number(current.number) !== Number(number)
+              ) {
+                return;
+              }
+              if (again?.milestone) {
+                paintCoreNow(again);
+                console.log(
+                  `[pr-plus] openModal phase=core-milestone-settle#${i + 1} ${owner}/${repo}#${number} ` +
+                    `ms=${again.milestone?.title || again.milestone?.number || '?'}`
+                );
+                return;
+              }
+            } catch {
+              /* soft */
+            }
+          }
+        })();
+      }
+
       // Phase 2: await parallel threads kickoff (may already be painted early)
       // - Cold open: dual-window (newest last:N + oldest first:20)
-      // - Cache revalidate: newest last:100 + bulk unresolved by PRRT ids
+      // - Cache revalidate: REST newest (15) + optional bulk unresolved by PRRT ids
       if (canFetchThreads) {
         try {
           const nowMs = () =>
@@ -694,7 +1383,7 @@
             // —— Incremental revalidate ——
             setLoadStage(
               'threads',
-              loadStageLabel('threads-update'),
+              loadStageLabel('threads-shell'),
               true,
               { percent: prog.percent() }
             );
@@ -731,15 +1420,27 @@
             applyThreadsToStore(next);
             detail = current.detail;
             detailCache.set(key, detail);
-            setLoadStage(
-              'threads',
-              loadStageLabel('threads-unresolved'),
-              true,
-              { percent: prog.percent() }
-            );
             render();
 
-            // Step 2: remaining unresolved not in newest page; drop remote-missing zombies
+            // Remaining unresolved not in newest page (extra comments bulk).
+            const RT =
+              typeof globalThis !== 'undefined'
+                ? globalThis.PRModalReviewThreads
+                : null;
+            const newestSource =
+              newest?.source || adapt?.source || null;
+            const skipByIds =
+              typeof RT?.shouldSkipUnresolvedByIdsBulk === 'function'
+                ? Boolean(
+                    RT.shouldSkipUnresolvedByIdsBulk({
+                      newestSource,
+                      hostRestFallback: Boolean(adapt?.hostRestFallback),
+                      forceFull: false,
+                    })
+                  )
+                : String(newestSource || '').toLowerCase() === 'rest' ||
+                  Boolean(adapt?.hostRestFallback);
+
             const collectIds =
               globalThis.PRTreeFetch.collectUnresolvedThreadNodeIds ||
               ((d) => {
@@ -751,19 +1452,37 @@
                 }
                 return [...ids];
               });
+            const filterRemaining =
+              typeof RT?.remainingUnresolvedForByIdsBulk === 'function'
+                ? (unresolved, updated, known) =>
+                    RT.remainingUnresolvedForByIdsBulk(unresolved, updated, known)
+                : (unresolved, updated, known) =>
+                    (unresolved || []).filter((id) => {
+                      const s = String(id);
+                      if (!/^PRRT_/i.test(s)) return false;
+                      return !updated.has(s) && !known.has(s);
+                    });
+
             let unresolvedPass = 0;
             let didUnresolvedFetch = false;
             /** PRRT ids confirmed remote-missing this open — never re-fetch. */
             const knownMissing = new Set();
+            if (skipByIds) {
+              console.log(
+                `[pr-plus] openModal phase=threads.unresolved-remaining ${owner}/${repo}#${number}: skipped by-id bulk`
+              );
+            }
             while (
+              !skipByIds &&
               unresolvedPass < 2 &&
               typeof globalThis.PRTreeFetch.fetchReviewThreadsByIds === 'function'
             ) {
               unresolvedPass += 1;
-              const remainingUnresolvedIds = collectIds(next).filter((id) => {
-                const s = String(id);
-                return !updatedIdSet.has(s) && !knownMissing.has(s);
-              });
+              const remainingUnresolvedIds = filterRemaining(
+                collectIds(next),
+                updatedIdSet,
+                knownMissing
+              );
               if (!remainingUnresolvedIds.length) {
                 if (unresolvedPass === 1) {
                   console.log(
@@ -773,6 +1492,13 @@
                 break;
               }
               didUnresolvedFetch = true;
+              setLoadStage(
+                'threads',
+                loadStageLabel('threads-comments'),
+                true,
+                { percent: prog.percent() }
+              );
+              render();
               const tBulk0 = nowMs();
               const bulk = await globalThis.PRTreeFetch.fetchReviewThreadsByIds(
                 remainingUnresolvedIds,
@@ -802,19 +1528,14 @@
               if (!missingN) break;
             }
 
-            // Credit follow-up weight when bulk finished or was skipped
-            prog.mark(
-              'threadsFollow',
-              uw.threadsFollow,
-              'threads',
-              didUnresolvedFetch
-                ? loadStageLabel('threads-unresolved')
-                : loadStageLabel('threads-update')
+            // Kickoff already credited shell/comments/reactions; re-credit is no-op.
+            creditAllThreadStages(
+              didUnresolvedFetch ? 'threads-comments' : 'threads-reactions'
             );
             console.log(
               `[pr-plus] openModal phase=threads(revalidate) ${owner}/${repo}#${number}: ${Math.round(
                 nowMs() - tThreads0
-              )}ms total pct=${prog.percent()}`
+              )}ms total pct=${prog.percent()} remaining=${didUnresolvedFetch ? 'fetched' : 'skip'}`
             );
             if (!openStill()) return;
             if (current.detail) {
@@ -825,7 +1546,7 @@
               render();
             }
           } else {
-            // —— Cold open: last:100 (parallel kickoff) then start:20 if total ≥ 100 ——
+            // —— Cold open: newest shell(+eager) then optional oldest window ——
             const tNewest0 = nowMs();
             const kick = await threadsKickoffP;
             if (!kick.ok) throw kick.err || new Error('Threads fetch failed');
@@ -835,18 +1556,19 @@
                 nowMs() - tNewest0
               )}ms (${newest?.threads?.length || 0} threads, parallel-kickoff) pct=${prog.percent()} early=${Boolean(kick.paintedEarly || threadsPaintedEarly)}`
             );
-            if (!openStill()) return;
-            // Re-merge after core (early paint may have used sketch/cache base)
-            let next =
-              typeof mergeFn === 'function'
-                ? mergeFn(current.detail, newest, 'newest')
-                : current.detail;
+            let next = current.detail;
+            if (openStill()) {
+              next =
+                typeof mergeFn === 'function'
+                  ? mergeFn(current.detail, newest, 'newest')
+                  : current.detail;
 
-            applyThreadsToStore(next);
-            detail = current.detail;
-            next = detail;
-            detailCache.set(key, detail);
-            render();
+              applyThreadsToStore(next);
+              detail = current.detail;
+              next = detail;
+              detailCache.set(key, detail);
+              render();
+            }
 
             const totalCount =
               typeof newest.totalCount === 'number'
@@ -855,11 +1577,11 @@
             // total < 100 → last page already covers everything; skip start
             const needStartWindow =
               totalCount >= apiMax && Boolean(newest.hasPreviousPage);
-            if (needStartWindow) {
+            if (needStartWindow && openStill()) {
               try {
                 setLoadStage(
                   'threads',
-                  loadStageLabel('threads-earlier'),
+                  loadStageLabel('threads-shell'),
                   true,
                   { percent: prog.percent() }
                 );
@@ -873,7 +1595,12 @@
                     {
                       direction: 'oldest',
                       cursor: null,
-                      pageSize: 20,
+                      pageSize:
+                        Number(
+                          globalThis.PRModalReviewThreads
+                            ?.REVIEW_THREADS_PAGE_SIZE
+                        ) || 100,
+                      skipEagerComments: true,
                       signal,
                     }
                   );
@@ -888,30 +1615,25 @@
               } catch {
                 /* keep last-only window */
               }
-            } else {
+            } else if (!needStartWindow) {
               console.log(
                 `[pr-plus] openModal phase=threads.start ${owner}/${repo}#${number}: skipped (total=${totalCount} < ${apiMax})`
               );
             }
-            // Follow-up weight after start window completes or is skipped
-            prog.mark(
-              'threadsFollow',
-              uw.threadsFollow,
-              'threads',
-              loadStageLabel('threads-load')
-            );
+            creditAllThreadStages('threads-load');
             console.log(
               `[pr-plus] openModal phase=threads ${owner}/${repo}#${number}: ${Math.round(
                 nowMs() - tThreads0
-              )}ms total pct=${prog.percent()}`
+              )}ms total pct=${prog.percent()} earlier=${needStartWindow ? 'fetched' : 'skip'}`
             );
-            if (!openStill()) return;
-            if (current.detail) {
+            if (openStill() && current.detail) {
               applyThreadsToStore(next);
               detail = current.detail;
               detailCache.set(key, detail);
               tryFinishOpenProgress(prog);
               render();
+            } else {
+              tryFinishOpenProgress(prog);
             }
 
             // Full load when "가볍고 빠른 PR 검토" is off — drain remaining pages
@@ -934,16 +1656,14 @@
         } catch (threadErr) {
           // Core already painted — keep it; surface soft stage error
           if (openStill()) {
-            prog.mark(
-              'threadsFollow',
-              uw.threadsFollow,
-              'threads',
-              loadStageLabel('threads-failed', { message: threadErr?.message })
-            );
+            const failLabel = loadStageLabel('threads-failed', {
+              message: threadErr?.message,
+            });
+            creditAllThreadStages('threads-failed');
             if (!tryFinishOpenProgress(prog)) {
               setLoadStage(
                 'threads',
-                loadStageLabel('threads-failed', { message: threadErr?.message }),
+                failLabel,
                 true,
                 { percent: Math.min(99, prog.percent()) }
               );
@@ -952,27 +1672,95 @@
           }
         }
       } else {
-        // No thread API — credit remaining units then settle
-        prog.mark('threadsFollow', uw.threadsFollow, corePhase, coreLabel);
+        // No thread API — credit all thread units then settle
+        creditAllThreadStages(corePhase);
         tryFinishOpenProgress(prog);
         render();
       }
     } catch (err) {
       if (
         gen !== detailFetchGen ||
-        signal.aborted ||
         err?.name === 'AbortError' ||
         /aborted|AbortError/i.test(String(err?.message || err || ''))
       ) {
-        return;
+        // Even when superseded mid-flight, do not early-return before optional
+        // identity recovery if this gen is still current and milestone missing.
+        if (gen !== detailFetchGen) return;
       }
-      if (current.open) {
+      if (current.open && gen === detailFetchGen) {
         current.loading = false;
         if (!current.detail) {
           current.error = err?.message || String(err);
         }
         clearLoadStage();
         render();
+        // Core threw (SW warm-up / channel) with sketch shell: still try REST
+        // identity so hard reopen can paint milestone within settle window.
+        if (
+          current.detail &&
+          current.detail.milestone == null &&
+          globalThis.PRTreeFetch?.fetchPrDetail
+        ) {
+          const settleGen = gen;
+          void (async () => {
+            const delays = [500, 1500, 4000, 10000];
+            for (let i = 0; i < delays.length; i++) {
+              await new Promise((r) => setTimeout(r, delays[i]));
+              if (
+                settleGen !== detailFetchGen ||
+                !current.open ||
+                Number(current.number) !== Number(number) ||
+                current.detail?.milestone != null
+              ) {
+                return;
+              }
+              try {
+                const again = await globalThis.PRTreeFetch.fetchPrDetail(
+                  owner,
+                  repo,
+                  number,
+                  { skipReviewThreads: true }
+                );
+                if (
+                  settleGen === detailFetchGen &&
+                  current.open &&
+                  Number(current.number) === Number(number) &&
+                  again?.milestone
+                ) {
+                  try {
+                    if (typeof paintCoreNow === 'function') {
+                      paintCoreNow(again);
+                    } else {
+                      const S = detailStoreApi();
+                      if (S?.applyMeta && current.detailStore) {
+                        S.applyMeta(
+                          current.detailStore,
+                          { milestone: again.milestone },
+                          {
+                            trustEmpty: true,
+                            source: 'network-core-milestone-catch-settle',
+                            sketch: false,
+                          }
+                        );
+                        publishDetailFromStore();
+                        render();
+                      }
+                    }
+                    console.log(
+                      `[pr-plus] openModal catch-milestone-settle#${i + 1} ${owner}/${repo}#${number} ` +
+                        `ms=${again.milestone?.title || again.milestone?.number || '?'}`
+                    );
+                  } catch {
+                    /* soft */
+                  }
+                  return;
+                }
+              } catch {
+                /* soft */
+              }
+            }
+          })();
+        }
       }
     }
     })(); // end background upgrade after sync first paint

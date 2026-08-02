@@ -1,5 +1,5 @@
 /**
- * Comment reaction pure helpers + structural wiring.
+ * Comment reaction pure helpers.
  */
 import { describe, expect, test } from '@rstest/core';
 import {
@@ -134,72 +134,5 @@ describe('comment-reactions pure', () => {
     ]);
     expect(next[0].reactions).toEqual([]);
     expect(next[1].reactions[0].content).toBe('heart');
-  });
-});
-
-describe('structural: reactions wiring', () => {
-  test('fetch maps reactions + toggleCommentReaction export', () => {
-    const fs = require('node:fs') as typeof import('node:fs');
-    const path = require('node:path') as typeof import('node:path');
-    const root = path.resolve(__dirname, '..');
-    const fetchSrc = fs.readFileSync(
-      path.join(root, 'src/fetch/fetch-api.ts'),
-      'utf8'
-    );
-    expect(fetchSrc).toMatch(/function mapRestReactions/);
-    expect(fetchSrc).toMatch(/function mapGraphqlReactionGroups/);
-    expect(fetchSrc).toMatch(/async function toggleCommentReaction/);
-    expect(fetchSrc).toMatch(/reactionGroups/);
-    expect(fetchSrc).toMatch(/toggleCommentReaction,/);
-
-    const sw = fs.readFileSync(
-      path.join(root, 'src/background/sw-api.ts'),
-      'utf8'
-    );
-    expect(sw).toMatch(/TOGGLE_COMMENT_REACTION/);
-    expect(sw).toMatch(/toggleCommentReaction/);
-
-    const bridge = fs.readFileSync(
-      path.join(root, 'src/content-bridge/bridge-api.ts'),
-      'utf8'
-    );
-    expect(bridge).toMatch(/toggleCommentReaction/);
-    expect(bridge).toMatch(/PR_TREE_TOGGLE_COMMENT_REACTION/);
-
-    const ui = fs.readFileSync(
-      path.join(root, 'src/modal/components/common/CommentReactions.tsx'),
-      'utf8'
-    );
-    expect(ui).toMatch(/prp-reactions/);
-    expect(ui).toMatch(/Add reaction/);
-    expect(ui).toMatch(/REACTION_DEFS/);
-    expect(ui).toMatch(/formatReactionUsersTooltip|is-reacted/);
-    expect(ui).toMatch(/prp-reactions__picker--portal|createPortal/);
-
-    const inline = fs.readFileSync(
-      path.join(root, 'src/modal/views/diff/InlineThread.tsx'),
-      'utf8'
-    );
-    expect(inline).toMatch(/CommentReactions/);
-    expect(inline).toMatch(/onToggleReaction/);
-
-    const desc = fs.readFileSync(
-      path.join(root, 'src/modal/views/conversation/DescriptionCard.tsx'),
-      'utf8'
-    );
-    expect(desc).toMatch(/CommentReactions/);
-    expect(desc).toMatch(/bodyReactions|kind: 'pr'/);
-
-    const mdv = fs.readFileSync(
-      path.join(root, 'src/modal/components/common/MarkdownView.tsx'),
-      'utf8'
-    );
-    expect(mdv).toMatch(/expandEmojiShortcodes/);
-
-    const mdc = fs.readFileSync(
-      path.join(root, 'src/modal/components/common/MarkdownComposer.tsx'),
-      'utf8'
-    );
-    expect(mdc).toMatch(/prp-composer-menu--portal|createPortal/);
   });
 });

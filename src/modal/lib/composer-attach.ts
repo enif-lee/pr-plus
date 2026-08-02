@@ -1,6 +1,7 @@
 /**
  * Pure helpers for markdown composers: attachment insert + optimistic detail merge.
  */
+import { filesListHasUsableDiffBodies } from './detail-idb';
 
 /**
  * Insert an attachment markdown snippet at a cursor offset (or append).
@@ -251,11 +252,20 @@ export function mergeDetailPreserveOptimistic(prev: any, next: any): any {
     : Array.isArray(next.requestedReviewers)
       ? nextReviewers
       : prevReviewers;
+  // Milestone: non-null next always wins. List-sketch / incomplete shells with
+  // null must not wipe a known non-null prev. Authoritative network null
+  // (external clear) still wins when next is not a sketch.
+  const nextIsSketch =
+    Boolean(next._sketch) || String(next._source || '') === 'list';
   const milestone = holdLocalMeta
     ? prev.milestone ?? null
-    : Object.prototype.hasOwnProperty.call(next, 'milestone')
+    : next.milestone != null
       ? next.milestone
-      : prev.milestone ?? null;
+      : prev.milestone != null && nextIsSketch
+        ? prev.milestone
+        : Object.prototype.hasOwnProperty.call(next, 'milestone')
+          ? next.milestone
+          : prev.milestone ?? null;
   // Drop the lock once host matches local write; otherwise keep the higher seq.
   const metaSeq = holdLocalMeta
     ? prevSeq
@@ -311,12 +321,189 @@ export function mergeDetailPreserveOptimistic(prev: any, next: any): any {
         ? prev.subscribed
         : next.subscribed ?? prev.subscribed ?? null;
 
+  // Files/commits authority: non-empty next wins; settled empty is authoritative;
+  // unsettled empty must not clobber a non-empty local list (deferred side-fetch).
+  const files = mergeSliceListAuthority(prev, next, 'files');
+  const commits = mergeSliceListAuthority(prev, next, 'commits');
+  const sideSettled = mergeSideSettledFlags(prev, next, files, commits);
+
+  // System events (labeled/milestoned/…): union by id; keep local optimistics
+  // until a server event covers the same narrative (meta write-through).
+  const prevTe = Array.isArray(prev.timelineEvents) ? prev.timelineEvents : [];
+  const nextTe = Array.isArray(next.timelineEvents) ? next.timelineEvents : [];
+  let timelineEvents = nextTe;
+  if (prevTe.length || nextTe.length) {
+    // Prefer next (host) for same id, then prev-only; drop covered local:* rows.
+    const byId = new Map<string, any>();
+    for (const e of prevTe) {
+      if (e && e.id != null) byId.set(String(e.id), e);
+    }
+    for (const e of nextTe) {
+      if (e && e.id != null) byId.set(String(e.id), e);
+    }
+    if (byId.size > 0) {
+      const all = [...byId.values()];
+      const server = all.filter((e) => !String(e?.id ?? '').startsWith('local:'));
+      const locals = all.filter((e) => String(e?.id ?? '').startsWith('local:'));
+      const narrEq = (a: any, b: any) => {
+        if (!a || !b) return false;
+        if (String(a.event || '') !== String(b.event || '')) return false;
+        const al = String(a.label?.name || '').toLowerCase();
+        const bl = String(b.label?.name || '').toLowerCase();
+        if (al || bl) return al === bl && al !== '';
+        const aa = String(a.assignee || '').toLowerCase();
+        const ba = String(b.assignee || '').toLowerCase();
+        if (aa || ba) return aa === ba && aa !== '';
+        const ar = String(a.requestedReviewer || '').toLowerCase();
+        const br = String(b.requestedReviewer || '').toLowerCase();
+        if (ar || br) return ar === br && ar !== '';
+        const am = String(
+          a.milestone?.title || a.milestone?.number || ''
+        ).toLowerCase();
+        const bm = String(
+          b.milestone?.title || b.milestone?.number || ''
+        ).toLowerCase();
+        if (am || bm) return am === bm && am !== '';
+        return true;
+      };
+      // Drop local only when a server twin is *at least as new* as the local
+      // write (not a historical labeled:bug from a prior mutation / test run).
+      const serverCoversLocal = (s: any, local: any) => {
+        if (!narrEq(s, local)) return false;
+        const ts = Date.parse(String(s?.at || s?.createdAt || ''));
+        const tl = Date.parse(String(local?.at || local?.createdAt || ''));
+        if (!Number.isFinite(ts) || !Number.isFinite(tl)) return false;
+        return ts >= tl - 5_000 && ts <= tl + 180_000;
+      };
+      const keptLocals = locals.filter(
+        (local) => !server.some((s) => serverCoversLocal(s, local))
+      );
+      timelineEvents = [...server, ...keptLocals];
+    } else if (prevTe.length > nextTe.length) {
+      timelineEvents = prevTe;
+    }
+  }
+
+  // Body emoji reactions: keep local optimistic viewer toggles until host
+  // snapshot includes the same content with at least as many viewer reacts.
+  // A racey host re-render (pre-patch store) used to wipe is-reacted pills.
+  const prevBr = Array.isArray(prev.bodyReactions) ? prev.bodyReactions : [];
+  const nextBr = Array.isArray(next.bodyReactions) ? next.bodyReactions : null;
+  let bodyReactions = nextBr != null ? nextBr : prevBr;
+  if (prevBr.length || (nextBr && nextBr.length)) {
+    const fp = (list: any[]) =>
+      (Array.isArray(list) ? list : [])
+        .map((g) => {
+          const c = String(g?.content || '').trim();
+          const v = g?.viewerHasReacted ? '1' : '0';
+          const n = Number(g?.count) || 0;
+          return `${c}:${v}:${n}`;
+        })
+        .filter((s) => s !== ':0:0')
+        .sort()
+        .join('|');
+    const prevViewer = prevBr.filter((g) => g && g.viewerHasReacted);
+    const nextViewer =
+      nextBr != null ? nextBr.filter((g) => g && g.viewerHasReacted) : [];
+    const prevHasViewer = prevViewer.length > 0;
+    const nextMissingViewer =
+      prevHasViewer &&
+      prevViewer.some((pg) => {
+        const key = String(pg.content || '');
+        const ng = (nextBr || []).find(
+          (g) => String(g?.content || '') === key
+        );
+        return !ng || !ng.viewerHasReacted;
+      });
+    // Prefer local when host is lagging on viewer reaction state.
+    if (nextBr == null || nextMissingViewer) {
+      bodyReactions = prevBr;
+    } else if (fp(prevBr) === fp(nextBr)) {
+      bodyReactions = nextBr;
+    } else {
+      // Host has the same-or-richer viewer set — adopt host (authoritative).
+      bodyReactions = nextBr;
+    }
+  }
+
+  // Resolve/unresolve write-through: hold local `_resolveStamps` against a
+  // lagging host/by-ids snapshot (host comment rows prefer host.resolved and
+  // would otherwise flip Unresolve back after a soft side-fetch).
+  const resolveStamps = {
+    ...(prev._resolveStamps && typeof prev._resolveStamps === 'object'
+      ? prev._resolveStamps
+      : {}),
+    ...(next._resolveStamps && typeof next._resolveStamps === 'object'
+      ? next._resolveStamps
+      : {}),
+  };
+  let reviewCommentsOut = mergedRc;
+  let reviewThreadsOut = Array.isArray(next.reviewThreads)
+    ? next.reviewThreads
+    : Array.isArray(prev.reviewThreads)
+      ? prev.reviewThreads
+      : next.reviewThreads;
+  let resolveStampsOut: Record<string, boolean> | undefined =
+    Object.keys(resolveStamps).length > 0 ? { ...resolveStamps } : undefined;
+  if (resolveStampsOut) {
+    const applyStamp = (row: any) => {
+      if (!row) return row;
+      const tid = String(row.threadNodeId || '');
+      if (!tid || !Object.prototype.hasOwnProperty.call(resolveStampsOut!, tid)) {
+        return row;
+      }
+      const want = Boolean(resolveStampsOut![tid]);
+      if (Boolean(row.resolved) === want) return row;
+      return { ...row, resolved: want };
+    };
+    reviewCommentsOut = mergedRc.map(applyStamp);
+    if (Array.isArray(reviewThreadsOut)) {
+      reviewThreadsOut = reviewThreadsOut.map(applyStamp);
+    }
+    // Drop stamps once host rows for that tid all agree (write converged).
+    for (const tid of Object.keys(resolveStampsOut)) {
+      const want = Boolean(resolveStampsOut[tid]);
+      const relatedC = reviewCommentsOut.filter(
+        (c: any) => c && String(c.threadNodeId || '') === tid
+      );
+      // Prefer host agreement: if next had rows for tid and they all match want,
+      // the stamp is done even if we also re-applied (idempotent).
+      const hostRelated = nextRc.filter(
+        (c: any) => c && String(c.threadNodeId || '') === tid
+      );
+      const hostAgrees =
+        hostRelated.length > 0 &&
+        hostRelated.every((c: any) => Boolean(c.resolved) === want);
+      if (hostAgrees) {
+        delete resolveStampsOut[tid];
+        continue;
+      }
+      // No host rows yet — keep stamp while local rows hold the write.
+      if (
+        relatedC.length > 0 &&
+        relatedC.every((c: any) => Boolean(c.resolved) === want)
+      ) {
+        // Keep until host agrees
+        continue;
+      }
+    }
+    if (Object.keys(resolveStampsOut).length === 0) {
+      resolveStampsOut = undefined;
+    }
+  }
+
   return {
     ...prev,
     ...next,
     viewerPendingReview,
-    reviewComments: mergedRc,
+    reviewComments: reviewCommentsOut,
+    reviewThreads: reviewThreadsOut,
     comments: [...cById.values()],
+    timelineEvents,
+    bodyReactions,
+    files,
+    commits,
+    _sideSettled: sideSettled,
     assignees,
     labels,
     requestedReviewers,
@@ -325,11 +512,75 @@ export function mergeDetailPreserveOptimistic(prev: any, next: any): any {
     subscribed,
     _metaSeq: metaSeq,
     _dropPending: dropPending ? true : undefined,
+    _resolveStamps: resolveStampsOut,
     // Keep tombstones local so a stale host snapshot cannot re-add deleted rows
     _deletedReviewCommentIds:
       deletedReviewIds.size > 0 ? deletedReviewIds : undefined,
     _deletedIssueCommentIds:
       deletedIssueIds.size > 0 ? deletedIssueIds : undefined,
+  };
+}
+
+/** Pure list merge for files/commits (exported for unit tests). */
+export function mergeSliceListAuthority(
+  prev: any,
+  next: any,
+  key: 'files' | 'commits'
+): any[] {
+  const prevList = Array.isArray(prev?.[key]) ? prev[key] : [];
+  const nextList = Array.isArray(next?.[key]) ? next[key] : null;
+  const nextSettled = Boolean(next?._sideSettled?.[key]);
+  if (nextList && nextList.length > 0) {
+    // Prefer prev only when next is slim IDB (`_patchOmitted`). GitHub REST
+    // also omits patch for oversized files without that flag — treating those
+    // as "unusable" rejected full fetchAllPrFiles results and left Diff stuck
+    // re-fetching / "Loading all files…" forever on large PRs.
+    if (
+      key === 'files' &&
+      nextList.some((f: any) => f && f._patchOmitted) &&
+      filesListHasUsableDiffBodies(prevList)
+    ) {
+      return prevList;
+    }
+    return nextList;
+  }
+  if (nextSettled && nextList) return nextList; // authoritative empty
+  if (prevList.length > 0) return prevList; // placeholder protection
+  return nextList || prevList;
+}
+
+function mergeSideSettledFlags(
+  prev: any,
+  next: any,
+  files: any[],
+  commits: any[]
+) {
+  const p = (prev?._sideSettled && typeof prev._sideSettled === 'object'
+    ? prev._sideSettled
+    : {}) as Record<string, boolean>;
+  const n = (next?._sideSettled && typeof next._sideSettled === 'object'
+    ? next._sideSettled
+    : {}) as Record<string, boolean>;
+  const prevFiles = Array.isArray(prev?.files) ? prev.files : [];
+  const prevCommits = Array.isArray(prev?.commits) ? prev.commits : [];
+  // If we kept prev's non-empty list, keep prev's settled bit for that slice.
+  const filesSettled =
+    files === prevFiles && prevFiles.length > 0
+      ? Boolean(p.files)
+      : n.files !== undefined
+        ? Boolean(n.files)
+        : Boolean(p.files);
+  const commitsSettled =
+    commits === prevCommits && prevCommits.length > 0
+      ? Boolean(p.commits)
+      : n.commits !== undefined
+        ? Boolean(n.commits)
+        : Boolean(p.commits);
+  return {
+    ...p,
+    ...n,
+    files: filesSettled,
+    commits: commitsSettled,
   };
 }
 

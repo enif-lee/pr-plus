@@ -222,6 +222,9 @@ const MSG = {
   PREFS_CHANGED: 'PR_TREE_PREFS_CHANGED',
   RATE_LIMIT_GET: 'PR_TREE_RATE_LIMIT_GET',
   RATE_LIMIT_CHANGED: 'PR_TREE_RATE_LIMIT_CHANGED',
+  /** GraphQL per-query cost observation log (primary points). */
+  GQL_COST_LOG_GET: 'PR_TREE_GQL_COST_LOG_GET',
+  GQL_COST_LOG_CLEAR: 'PR_TREE_GQL_COST_LOG_CLEAR',
   ONBOARDING_GET: 'PR_TREE_ONBOARDING_GET',
   ONBOARDING_SET: 'PR_TREE_ONBOARDING_SET',
   HOST_ACCOUNTS_LIST: 'PR_TREE_HOST_ACCOUNTS_LIST',
@@ -568,20 +571,10 @@ function noteGithubResponse(res: any, url: any, resourceHint: any) {
       if (typeof RL.withRateLimit429 === 'function') {
         next = RL.withRateLimit429(next, resource, res.headers, now);
       }
-      // Auto-disable plugin until the earliest active reset for this resource
-      const until = next?.disabledUntil?.[resource] || 0;
-      if (until > now) {
-        rlMem.pluginEnabled = false;
-        void PRTreeStorage.setExtensionPrefs({ pluginEnabled: false })
-          .then((prefs) => {
-            try {
-              broadcastPrefsChanged(prefs);
-            } catch {
-              /* ignore */
-            }
-          })
-          .catch(() => {});
-      }
+      // Per-resource disable only (withRateLimit429). Do NOT flip global
+      // pluginEnabled off — a GraphQL 429 used to kill core REST too, so hard
+      // reopen after meta write painted "No milestone" while GH still had it
+      // (full e2e suite cascade: P2.1 threads=0 + MB3 hard miss).
     } else if (typeof RL.parseRateLimitHeaders === 'function') {
       const snap = RL.parseRateLimitHeaders(res.headers, {
         fallbackResource: resource,
@@ -903,11 +896,41 @@ async function handleMessage(message: any) {
       if (typeof RL?.clearExpiredRateDisables === 'function') {
         rlMem.state = RL.clearExpiredRateDisables(rlMem.state, Date.now());
       }
+      // Also return GraphQL cost observation (same payload as GQL_COST_LOG_GET)
+      // so clients can read costs without a dedicated message if SW was mid-upgrade.
+      const gqlLog =
+        typeof PRTreeFetch?.getGraphqlCostLog === 'function'
+          ? PRTreeFetch.getGraphqlCostLog()
+          : [];
+      const gqlSummary =
+        typeof PRTreeFetch?.summarizeGraphqlCostLog === 'function'
+          ? PRTreeFetch.summarizeGraphqlCostLog()
+          : { totalCalls: 0, totalCost: 0, unknownCostCalls: 0, byOp: [] };
       return {
         ok: true,
         state: rlMem.state,
         pluginEnabled: rlMem.pluginEnabled,
+        gqlCostLog: gqlLog,
+        gqlCostSummary: gqlSummary,
+        gqlCostBuild: 'gql-cost-v1',
       };
+    }
+    case MSG.GQL_COST_LOG_GET: {
+      const log =
+        typeof PRTreeFetch?.getGraphqlCostLog === 'function'
+          ? PRTreeFetch.getGraphqlCostLog()
+          : [];
+      const summary =
+        typeof PRTreeFetch?.summarizeGraphqlCostLog === 'function'
+          ? PRTreeFetch.summarizeGraphqlCostLog()
+          : { totalCalls: 0, totalCost: 0, unknownCostCalls: 0, byOp: [] };
+      return { ok: true, log, summary, gqlCostBuild: 'gql-cost-v1' };
+    }
+    case MSG.GQL_COST_LOG_CLEAR: {
+      if (typeof PRTreeFetch?.clearGraphqlCostLog === 'function') {
+        PRTreeFetch.clearGraphqlCostLog();
+      }
+      return { ok: true };
     }
     case MSG.ONBOARDING_GET: {
       const completed = await PRTreeStorage.getOnboardingCompleted();
@@ -1075,6 +1098,17 @@ async function handleMessage(message: any) {
             direction: message.direction || 'newest',
             cursor: message.cursor || null,
             pageSize: message.pageSize != null ? Number(message.pageSize) : undefined,
+            preferRest:
+              message.preferRest !== undefined ? message.preferRest : null,
+            forceGraphql: Boolean(message.forceGraphql),
+            forceFull: Boolean(message.forceFull),
+            skipEagerComments: Boolean(message.skipEagerComments),
+            reviewCommentsCount:
+              message.reviewCommentsCount != null
+                ? Number(message.reviewCommentsCount)
+                : null,
+            restPage:
+              message.restPage != null ? Number(message.restPage) : 1,
           },
           tracked.fetch,
           token,
@@ -1121,6 +1155,7 @@ async function handleMessage(message: any) {
             page: message.page,
             perPage: message.perPage,
             since: message.since || null,
+            preferNewest: Boolean(message.preferNewest),
           },
           tracked.fetch,
           token,

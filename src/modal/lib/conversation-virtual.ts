@@ -8,6 +8,8 @@ export type ConversationVirtualRow =
   | { type: 'description'; key: string }
   | { type: 'composer'; key: string }
   | { type: 'merge'; key: string }
+  /** Category tip chips — always between merge box and timeline feed. */
+  | { type: 'timeline-tips'; key: string }
   | {
       type: 'item';
       key: string;
@@ -33,6 +35,7 @@ export const CONV_EST_COMMENT = 120;
 export const CONV_EST_DESCRIPTION = 220;
 export const CONV_EST_COMPOSER = 168;
 export const CONV_EST_MERGE = 132;
+export const CONV_EST_TIMELINE_TIPS = 40;
 export const CONV_EST_PAGINATION = 48;
 export const CONV_EST_EMPTY = 40;
 /** Compact system event row (title rename, draft/ready, labels, …) */
@@ -45,8 +48,9 @@ export const CONV_ROW_GAP = 14;
 /**
  * Build flat virtual rows for the entire left panel.
  *
- * Order (reverseComments=true): description → composer → merge → timeline → pagination
- * Order (reverseComments=false): description → timeline → pagination → merge → composer
+ * Order (reverseComments=true): description → composer → merge → **tips** → timeline
+ * Order (reverseComments=false): description → timeline → **tips** → merge → composer
+ * Tips always sit between the merge box and the timeline event feed.
  *
  * @param {{
  *   items?: any[],
@@ -84,6 +88,8 @@ export function buildConversationVirtualRows(paged: any, opts: any = {}) {
   if (reverse) {
     rows.push({ type: 'composer', key: 'composer' });
     rows.push({ type: 'merge', key: 'merge' });
+    // merge → tips → timeline
+    rows.push({ type: 'timeline-tips', key: 'timeline-tips' });
   }
 
   if (!hasTimeline) {
@@ -118,6 +124,8 @@ export function buildConversationVirtualRows(paged: any, opts: any = {}) {
   }
 
   if (!reverse) {
+    // timeline → tips → merge → composer
+    rows.push({ type: 'timeline-tips', key: 'timeline-tips' });
     rows.push({ type: 'merge', key: 'merge' });
     rows.push({ type: 'composer', key: 'composer' });
   }
@@ -144,6 +152,7 @@ export function estimateConversationRowHeight(row, opts: any = {}) {
   }
   if (row.type === 'composer') return CONV_EST_COMPOSER + CONV_ROW_GAP;
   if (row.type === 'merge') return CONV_EST_MERGE + CONV_ROW_GAP;
+  if (row.type === 'timeline-tips') return CONV_EST_TIMELINE_TIPS + CONV_ROW_GAP;
   if (row.type === 'pagination') return CONV_EST_PAGINATION + CONV_ROW_GAP;
   if (row.type === 'empty') return CONV_EST_EMPTY + CONV_ROW_GAP;
   if (row.type === 'gap') return CONV_EST_GAP + CONV_ROW_GAP;

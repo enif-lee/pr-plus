@@ -105,15 +105,17 @@
       trustEmpty: trustMetaEmpty || (!protectMeta && Array.isArray(next.labels)),
     });
 
-    // Milestone: don't let sketch null wipe a real one; explicit null after
-    // network/core with trustMetaEmpty is allowed.
+    // Milestone: don't let sketch null wipe a real one. Empty only wins when
+    // trustMetaEmpty (confirmed clear / authoritative network empty).
     if (Object.prototype.hasOwnProperty.call(next, 'milestone')) {
       if (next.milestone != null) {
         out.milestone = next.milestone;
-      } else if (protectMeta && prev.milestone) {
+      } else if (trustMetaEmpty) {
+        out.milestone = null;
+      } else if (prev.milestone) {
         out.milestone = prev.milestone;
       } else {
-        out.milestone = next.milestone;
+        out.milestone = null;
       }
     } else if (prev.milestone) {
       out.milestone = prev.milestone;
@@ -140,13 +142,26 @@
       });
     }
 
-    // Timeline system events ride with the comments side-fetch
-    if (nextSettled.comments && Object.prototype.hasOwnProperty.call(next, 'timelineEvents')) {
-      out.timelineEvents = asArray(next.timelineEvents) || [];
-    } else {
-      out.timelineEvents = mergeListField(prev.timelineEvents, next.timelineEvents, {
-        trustEmpty: Boolean(nextSettled.comments),
-      });
+    // Timeline system events ride with the comments side-fetch.
+    // Always union by id so a lagging side-fetch cannot wipe labeled/milestoned
+    // rows that local meta write-through just appended.
+    {
+      const prevTe = asArray(prev.timelineEvents) || [];
+      const nextTe = Object.prototype.hasOwnProperty.call(next, 'timelineEvents')
+        ? asArray(next.timelineEvents) || []
+        : [];
+      if (prevTe.length || nextTe.length) {
+        const byId = /* @__PURE__ */ new Map();
+        for (const e of prevTe) {
+          if (e && e.id != null) byId.set(String(e.id), e);
+        }
+        for (const e of nextTe) {
+          if (e && e.id != null) byId.set(String(e.id), e);
+        }
+        out.timelineEvents = byId.size > 0 ? [...byId.values()] : nextTe.length ? nextTe : prevTe;
+      } else {
+        out.timelineEvents = nextTe;
+      }
     }
 
     // checks

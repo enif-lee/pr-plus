@@ -89,7 +89,10 @@ export function DescriptionCard({
                 nodeId: detail.nodeId || null,
               }}
               viewerLogin={detail.viewerLogin}
-              busy={actionBusy}
+              // Do not lock body reactions on unrelated meta actionBusy —
+              // that made picker Heart clicks no-op (disabled) while e2e still
+              // saw the button in the DOM (MB6).
+              busy={false}
               onToggle={onToggleReaction}
               onLoadReactors={onLoadReactors}
             />

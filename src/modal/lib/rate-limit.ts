@@ -132,30 +132,90 @@ export function classifyGithubUrl(url: unknown): RateResource {
 }
 
 type HeaderSource =
-  | { get?: (k: string) => string | null }
+  | { get?: (k: string) => string | null; forEach?: (cb: (v: string, k: string) => void) => void }
   | Record<string, string | null | undefined>
   | null
   | undefined;
 
+/**
+ * Normalize any Headers-like source into a lower-cased key map.
+ * Prefer forEach (covers Headers) — some SW/polyfill shapes are flaky with .get alone.
+ */
+export function headersToLowerMap(headers: HeaderSource): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!headers) return out;
+  if (typeof (headers as any).forEach === 'function') {
+    try {
+      (headers as any).forEach((value: string, key: string) => {
+        if (key != null && value != null && value !== '') {
+          out[String(key).toLowerCase()] = String(value);
+        }
+      });
+      return out;
+    } catch {
+      /* fall through */
+    }
+  }
+  if (typeof (headers as any).entries === 'function') {
+    try {
+      for (const [key, value] of (headers as any).entries()) {
+        if (key != null && value != null && value !== '') {
+          out[String(key).toLowerCase()] = String(value);
+        }
+      }
+      return out;
+    } catch {
+      /* fall through */
+    }
+  }
+  if (typeof (headers as any).get === 'function') {
+    // Probe known rate-limit names when only .get works
+    for (const name of [
+      'x-ratelimit-limit',
+      'x-ratelimit-remaining',
+      'x-ratelimit-used',
+      'x-ratelimit-reset',
+      'x-ratelimit-resource',
+      'retry-after',
+    ]) {
+      try {
+        const v =
+          (headers as any).get(name) ??
+          (headers as any).get(name.toUpperCase());
+        if (v != null && v !== '') out[name] = String(v);
+      } catch {
+        /* ignore */
+      }
+    }
+    return out;
+  }
+  const o = headers as Record<string, string | null | undefined>;
+  for (const k of Object.keys(o)) {
+    const v = o[k];
+    if (v != null && v !== '') out[k.toLowerCase()] = String(v);
+  }
+  return out;
+}
+
 function headerGet(headers: HeaderSource, name: string): string | null {
   if (!headers) return null;
   const lower = name.toLowerCase();
+  // Prefer map path (forEach/entries) for reliability
+  const map = headersToLowerMap(headers);
+  if (Object.keys(map).length) {
+    const v = map[lower];
+    return v != null && v !== '' ? v : null;
+  }
   if (typeof (headers as any).get === 'function') {
     try {
+      // Use nullish coalescing — remaining "0" must not fall through
       const v =
-        (headers as any).get(name) ||
-        (headers as any).get(lower) ||
+        (headers as any).get(name) ??
+        (headers as any).get(lower) ??
         (headers as any).get(name.toUpperCase());
       return v != null && v !== '' ? String(v) : null;
     } catch {
       return null;
-    }
-  }
-  const o = headers as Record<string, string | null | undefined>;
-  for (const k of Object.keys(o)) {
-    if (k.toLowerCase() === lower) {
-      const v = o[k];
-      return v != null && v !== '' ? String(v) : null;
     }
   }
   return null;
@@ -284,6 +344,76 @@ export function withRateLimitSnapshot(
       [resource]: snapshot,
     },
   };
+}
+
+/**
+ * Parse one resource block from GET /rate_limit (or GraphQL rateLimit).
+ * reset is unix seconds.
+ */
+export function snapshotFromResourceBlock(
+  resource: RateResource,
+  block: unknown,
+  nowMs = Date.now()
+): RateLimitSnapshot | null {
+  if (!block || typeof block !== 'object') return null;
+  const b = block as any;
+  const limit = toNullableInt(b.limit);
+  const remaining = toNullableInt(b.remaining);
+  const used = toNullableInt(b.used);
+  const reset = toNullableInt(b.reset);
+  if (limit == null && remaining == null && reset == null && used == null) {
+    return null;
+  }
+  let usedVal = used;
+  if (usedVal == null && limit != null && remaining != null) {
+    usedVal = Math.max(0, limit - remaining);
+  }
+  return {
+    resource,
+    limit,
+    remaining,
+    used: usedVal,
+    reset,
+    updatedAt: nowMs,
+  };
+}
+
+/**
+ * Apply GitHub GET /rate_limit JSON body into state (all resources).
+ * https://docs.github.com/en/rest/rate-limit/rate-limit
+ */
+export function withRateLimitEndpointPayload(
+  prev: RateLimitState | null | undefined,
+  json: unknown,
+  nowMs = Date.now()
+): RateLimitState {
+  let state = normalizeRateLimitState(prev);
+  if (!json || typeof json !== 'object') return state;
+  const root = json as any;
+  const resources =
+    root.resources && typeof root.resources === 'object'
+      ? root.resources
+      : root;
+  for (const r of RATE_LIMIT_RESOURCES) {
+    const block = resources?.[r] ?? (r === 'core' ? root.rate : null);
+    const snap = snapshotFromResourceBlock(r, block, nowMs);
+    if (snap) state = withRateLimitSnapshot(state, snap);
+  }
+  return state;
+}
+
+/** True when at least one resource has a usable snapshot. */
+export function hasAnyRateLimitSnapshot(
+  state: RateLimitState | null | undefined
+): boolean {
+  const s = normalizeRateLimitState(state);
+  return RATE_LIMIT_RESOURCES.some((r) => {
+    const snap = s.snapshots[r];
+    return (
+      snap != null &&
+      (snap.limit != null || snap.remaining != null || snap.reset != null)
+    );
+  });
 }
 
 /** Apply 429: snapshot + disable resource until reset. */

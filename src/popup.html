@@ -565,6 +565,36 @@
         <span class="pref__desc">코멘트 작성란 → Merge box → Conversation(최신 우선) 순으로 배치합니다.</span>
       </span>
     </label>
+    <div class="pref pref--action" style="cursor: default" data-prp-timeline-prefs="1">
+      <span class="pref__body">
+        <span class="pref__title">Conversation timeline filters</span>
+        <span class="pref__desc">
+          Conversation 타임라인 상단 팁과 동기화됩니다. 끄면 해당 유형 이벤트가 타임라인에서 숨겨집니다.
+        </span>
+        <div style="margin-top: 8px; display: flex; flex-direction: column; gap: 6px">
+          <label class="hint" style="display: flex; align-items: center; gap: 8px; cursor: pointer">
+            <input id="pref-tl-labels" type="checkbox" data-prp-pref-tl="labels" checked />
+            <span>label</span>
+          </label>
+          <label class="hint" style="display: flex; align-items: center; gap: 8px; cursor: pointer">
+            <input id="pref-tl-title" type="checkbox" data-prp-pref-tl="title" checked />
+            <span>title</span>
+          </label>
+          <label class="hint" style="display: flex; align-items: center; gap: 8px; cursor: pointer">
+            <input id="pref-tl-milestone" type="checkbox" data-prp-pref-tl="milestone" checked />
+            <span>milestone</span>
+          </label>
+          <label class="hint" style="display: flex; align-items: center; gap: 8px; cursor: pointer">
+            <input id="pref-tl-referenced" type="checkbox" data-prp-pref-tl="referenced" checked />
+            <span>referenced</span>
+          </label>
+          <label class="hint" style="display: flex; align-items: center; gap: 8px; cursor: pointer">
+            <input id="pref-tl-comments" type="checkbox" data-prp-pref-tl="comments" checked />
+            <span>comments</span>
+          </label>
+        </div>
+      </span>
+    </div>
     <label class="pref" for="pref-single-file-mode">
       <input id="pref-single-file-mode" type="checkbox" />
       <span class="pref__body">

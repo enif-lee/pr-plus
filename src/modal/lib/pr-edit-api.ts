@@ -490,3 +490,104 @@ export function appendIssueCommentToDetail(detail, comment) {
   list.push(comment);
   return { ...base, comments: list };
 }
+
+/**
+ * Stamp `resolved` on matching reviewComments + reviewThreads after resolve/unresolve.
+ * Used for optimistic paint and host write-through without a full PR soft-refresh.
+ * Also records `_resolveStamps[tid]` so mergeDetailPreserveOptimistic can hold the
+ * write against a lagging host/by-ids snapshot until host catches up.
+ * @param {object|null|undefined} detail
+ * @param {string} threadNodeId GraphQL PRRT_… id
+ * @param {boolean} resolved
+ * @returns {object|null|undefined}
+ */
+export function stampThreadResolved(detail, threadNodeId, resolved) {
+  if (!detail) return detail;
+  const tid = threadNodeId != null ? String(threadNodeId).trim() : '';
+  if (!tid) return detail;
+  const nextResolved = Boolean(resolved);
+  const stampC = (c: any) =>
+    c && String(c.threadNodeId || '') === tid
+      ? { ...c, resolved: nextResolved }
+      : c;
+  const prevStamps =
+    detail._resolveStamps && typeof detail._resolveStamps === 'object'
+      ? detail._resolveStamps
+      : {};
+  return {
+    ...detail,
+    reviewComments: Array.isArray(detail.reviewComments)
+      ? detail.reviewComments.map(stampC)
+      : detail.reviewComments,
+    reviewThreads: Array.isArray(detail.reviewThreads)
+      ? detail.reviewThreads.map((t: any) =>
+          t && String(t.threadNodeId || '') === tid
+            ? { ...t, resolved: nextResolved }
+            : t
+        )
+      : detail.reviewThreads,
+    _resolveStamps: { ...prevStamps, [tid]: nextResolved },
+  };
+}
+
+/**
+ * Re-apply `_resolveStamps` onto reviewComments / reviewThreads and drop stamps
+ * that the host snapshot already matches (write-through convergence).
+ * @param {object|null|undefined} detail
+ * @param {Record<string, boolean>|null|undefined} stamps
+ * @returns {object|null|undefined}
+ */
+export function applyResolveStamps(detail, stamps) {
+  if (!detail) return detail;
+  const map =
+    stamps && typeof stamps === 'object' && !Array.isArray(stamps)
+      ? stamps
+      : detail._resolveStamps && typeof detail._resolveStamps === 'object'
+        ? detail._resolveStamps
+        : null;
+  if (!map || !Object.keys(map).length) {
+    return detail._resolveStamps
+      ? { ...detail, _resolveStamps: undefined }
+      : detail;
+  }
+  const remaining: Record<string, boolean> = { ...map };
+  const inComments = Array.isArray(detail.reviewComments)
+    ? detail.reviewComments
+    : [];
+  const inThreads = Array.isArray(detail.reviewThreads)
+    ? detail.reviewThreads
+    : [];
+  // Drop stamps only when input already agrees (host caught up) — not after
+  // we force-apply, which would always clear.
+  for (const tid of Object.keys(remaining)) {
+    const want = Boolean(remaining[tid]);
+    const relatedC = inComments.filter(
+      (c: any) => c && String(c.threadNodeId || '') === tid
+    );
+    const relatedT = inThreads.filter(
+      (t: any) => t && String(t.threadNodeId || '') === tid
+    );
+    if (relatedC.length === 0 && relatedT.length === 0) continue;
+    const allAgree =
+      (relatedC.length === 0 ||
+        relatedC.every((c: any) => Boolean(c.resolved) === want)) &&
+      (relatedT.length === 0 ||
+        relatedT.every((t: any) => Boolean(t.resolved) === want));
+    if (allAgree) delete remaining[tid];
+  }
+  const stampC = (c: any) => {
+    if (!c) return c;
+    const tid = String(c.threadNodeId || '');
+    if (!tid || !Object.prototype.hasOwnProperty.call(map, tid)) return c;
+    const want = Boolean(map[tid]);
+    if (Boolean(c.resolved) === want) return c;
+    return { ...c, resolved: want };
+  };
+  return {
+    ...detail,
+    reviewComments: inComments.map(stampC),
+    reviewThreads: inThreads.map(stampC),
+    _resolveStamps:
+      Object.keys(remaining).length > 0 ? remaining : undefined,
+  };
+}
