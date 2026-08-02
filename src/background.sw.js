@@ -805,8 +805,10 @@ var __copyProps = (to, from, except, desc) => {
   return to;
 };
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
-var stdin_exports = {};
-__export(stdin_exports, {
+
+// src/modal/lib/review-threads.ts
+var review_threads_exports = {};
+__export(review_threads_exports, {
   REVIEW_THREADS_API_MAX: () => REVIEW_THREADS_API_MAX,
   REVIEW_THREADS_PAGE_SIZE: () => REVIEW_THREADS_PAGE_SIZE,
   REVIEW_THREADS_WARM_PROBE_SIZE: () => REVIEW_THREADS_WARM_PROBE_SIZE,
@@ -818,6 +820,7 @@ __export(stdin_exports, {
   buildShellThreadPlaceholderComment: () => buildShellThreadPlaceholderComment,
   chooseReviewThreadsTransport: () => chooseReviewThreadsTransport,
   confirmedMissingThreadIdsFromNodes: () => confirmedMissingThreadIdsFromNodes,
+  countCommentsForThread: () => countCommentsForThread,
   countPendingReviewThreads: () => countPendingReviewThreads,
   countPendingReviewThreadsByPath: () => countPendingReviewThreadsByPath,
   countReviewThreadTotals: () => countReviewThreadTotals,
@@ -854,7 +857,9 @@ __export(stdin_exports, {
   threadNeedsEagerComments: () => threadNeedsEagerComments,
   toggleViewedPath: () => toggleViewedPath
 });
-module.exports = __toCommonJS(stdin_exports);
+module.exports = __toCommonJS(review_threads_exports);
+
+// src/modal/lib/review-threads-group.ts
 function groupReviewThreads(comments) {
   const list = Array.isArray(comments) ? comments : [];
   const byId = /* @__PURE__ */ new Map();
@@ -897,6 +902,469 @@ function groupReviewThreads(comments) {
     };
   });
 }
+function countReviewThreadsByPath(comments) {
+  const threads = groupReviewThreads(comments);
+  const map = /* @__PURE__ */ new Map();
+  for (const t of threads) {
+    const p = t.path || "";
+    if (!p) continue;
+    map.set(p, (map.get(p) || 0) + 1);
+  }
+  return map;
+}
+function countUnresolvedReviewThreadsByPath(comments) {
+  const threads = groupReviewThreads(comments);
+  const map = /* @__PURE__ */ new Map();
+  for (const t of threads) {
+    if (t.resolved) continue;
+    const p = t.path || "";
+    if (!p) continue;
+    map.set(p, (map.get(p) || 0) + 1);
+  }
+  return map;
+}
+function countPendingReviewThreads(comments) {
+  const threads = groupReviewThreads(comments);
+  let n = 0;
+  for (const t of threads) {
+    if (t.pending) n += 1;
+  }
+  return n;
+}
+function countPendingReviewThreadsByPath(comments) {
+  const map = /* @__PURE__ */ new Map();
+  const threads = groupReviewThreads(comments);
+  for (const t of threads) {
+    if (!t.pending) continue;
+    const p = t.path || "";
+    if (!p) continue;
+    map.set(p, (map.get(p) || 0) + 1);
+  }
+  for (const c of Array.isArray(comments) ? comments : []) {
+    if (!c?.pending) continue;
+    const p = c.path || "";
+    if (!p || map.has(p)) continue;
+    map.set(p, 1);
+  }
+  return map;
+}
+function countReviewThreadTotals(comments, opts = {}) {
+  const pathSet = opts?.allowedPaths instanceof Set ? opts.allowedPaths : opts?.allowedPaths ? new Set(
+    Array.isArray(opts.allowedPaths) ? opts.allowedPaths.map(String).filter(Boolean) : []
+  ) : null;
+  const excludeOutdated = Boolean(opts?.excludeOutdated);
+  const threads = groupReviewThreads(comments);
+  let total = 0;
+  let unresolved = 0;
+  let resolved = 0;
+  let pendingThreads = 0;
+  for (const t of threads) {
+    const p = t.path || "";
+    if (!p) continue;
+    if (pathSet && !pathSet.has(p)) continue;
+    if (excludeOutdated && t.outdated) continue;
+    total += 1;
+    if (t.pending) pendingThreads += 1;
+    if (t.resolved) resolved += 1;
+    else if (!t.pending) unresolved += 1;
+  }
+  return { total, unresolved, resolved, pendingThreads };
+}
+function normalizeReviewCommentId(raw) {
+  if (raw == null || raw === "") return null;
+  if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
+    return Math.floor(raw);
+  }
+  const s = String(raw).trim();
+  if (!/^\d+$/.test(s)) return null;
+  const n = Number(s);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+function resolveRootReviewCommentId(comments, commentId) {
+  const start = normalizeReviewCommentId(commentId);
+  if (start == null) return null;
+  const byId = /* @__PURE__ */ new Map();
+  for (const c of Array.isArray(comments) ? comments : []) {
+    if (!c || c.id == null) continue;
+    const id = normalizeReviewCommentId(c.id);
+    if (id != null) byId.set(id, c);
+  }
+  let cur = byId.get(start) || null;
+  if (!cur) return start;
+  const seen = /* @__PURE__ */ new Set();
+  while (cur) {
+    const id = normalizeReviewCommentId(cur.id);
+    if (id == null || seen.has(id)) break;
+    seen.add(id);
+    const parentRaw = cur.inReplyToId ?? cur.in_reply_to_id ?? null;
+    const parentId = normalizeReviewCommentId(parentRaw);
+    if (parentId == null || !byId.has(parentId)) return id;
+    cur = byId.get(parentId);
+  }
+  return start;
+}
+function filterFilesByQuery(files, query) {
+  const list = Array.isArray(files) ? files : [];
+  const q = String(query || "").trim().toLowerCase();
+  if (!q) return list.slice();
+  return list.filter((f) => {
+    const path = String(f.filename || f.path || "").toLowerCase();
+    return path.includes(q);
+  });
+}
+function toggleViewedPath(viewed, path) {
+  const next = viewed instanceof Set ? new Set(viewed) : new Set(viewed || []);
+  const p = String(path || "");
+  if (!p) return next;
+  if (next.has(p)) next.delete(p);
+  else next.add(p);
+  return next;
+}
+function isPathViewed(viewed, path) {
+  if (!path) return false;
+  if (viewed instanceof Set) return viewed.has(path);
+  if (Array.isArray(viewed)) return viewed.includes(path);
+  return false;
+}
+
+// src/modal/lib/review-threads-transport.ts
+var REVIEW_THREADS_API_MAX = 100;
+var REVIEW_THREADS_PAGE_SIZE = 100;
+var REVIEW_THREADS_WARM_PROBE_SIZE = 100;
+function hasUsableReviewThreadsCache(detail) {
+  if (!detail || typeof detail !== "object") return false;
+  if (detail._sketch) return false;
+  const threads = Array.isArray(detail.reviewThreads) ? detail.reviewThreads : [];
+  const comments = Array.isArray(detail.reviewComments) ? detail.reviewComments : [];
+  const meta = detail.reviewThreadsMeta || {};
+  const loadedMeta = Number(meta.loadedThreadCount);
+  const withNode = threads.some((t) => t && t.threadNodeId) || comments.some((c) => c && c.threadNodeId);
+  if (!withNode && !(loadedMeta > 0) && threads.length === 0 && comments.length === 0) {
+    return false;
+  }
+  return withNode || loadedMeta > 0;
+}
+function pickNewestThreadsPageSize(opts = {}) {
+  void opts;
+  return REVIEW_THREADS_PAGE_SIZE;
+}
+function shouldTrustRestEmptyReviewThreads(opts = {}) {
+  if (opts?.forceGraphql || opts?.forceFull) return false;
+  const prCount = opts?.reviewCommentsCount;
+  if (prCount != null && Number.isFinite(Number(prCount)) && Number(prCount) <= 0) {
+    return true;
+  }
+  const restN = opts?.restCommentCount;
+  if (restN != null && Number.isFinite(Number(restN)) && Number(restN) <= 0) {
+    return true;
+  }
+  return false;
+}
+function chooseReviewThreadsTransport(opts = {}) {
+  if (opts?.preferRest === true) return "rest";
+  if (opts?.forceGraphql || opts?.forceFull) return "graphql";
+  if (opts?.preferRest === false) return "graphql";
+  return "graphql";
+}
+function isGraphqlReviewThreadNodeId(id) {
+  return /^PRRT_/i.test(String(id || "").trim());
+}
+function threadNeedsEagerComments(thread, opts = {}) {
+  if (!thread || !isGraphqlReviewThreadNodeId(thread.threadNodeId)) return false;
+  if (opts?.forceAll) return true;
+  const tid = String(thread.threadNodeId);
+  const expanded = opts?.expandedThreadIds;
+  if (expanded != null) {
+    if (expanded instanceof Set) {
+      if (expanded.has(tid)) return true;
+    } else if (Array.isArray(expanded)) {
+      if (expanded.some((id) => String(id) === tid)) return true;
+    } else if (typeof expanded[Symbol.iterator] === "function") {
+      for (const id of expanded) {
+        if (String(id) === tid) return true;
+      }
+    }
+  }
+  return !Boolean(thread.resolved);
+}
+function selectThreadIdsForEagerComments(threads, opts = {}) {
+  const list = Array.isArray(threads) ? threads : [];
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const t of list) {
+    if (!threadNeedsEagerComments(t, opts)) continue;
+    const id = String(t.threadNodeId || "").trim();
+    if (!id || seen.has(id)) continue;
+    if (t.commentsLoaded === true) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
+function threadCommentsAreLoaded(thread, comments = null) {
+  if (!thread) return false;
+  if (thread.commentsLoaded === true) return true;
+  if (thread.commentsLoaded === false) return false;
+  if (Array.isArray(thread.commentIds) && thread.commentIds.length > 0) {
+    if (!isGraphqlReviewThreadNodeId(thread.threadNodeId)) return true;
+  }
+  const tid = String(thread.threadNodeId || "");
+  if (!tid || !Array.isArray(comments)) return false;
+  let n = 0;
+  for (const c of comments) {
+    if (!c || String(c.threadNodeId || "") !== tid) continue;
+    if (c._commentsPending) continue;
+    n += 1;
+  }
+  return n > 0;
+}
+function selectThreadIdsMissingComments(threads, comments = null, opts = {}) {
+  const list = Array.isArray(threads) ? threads : [];
+  const only = opts?.onlyThreadIds ? new Set(
+    [...opts.onlyThreadIds].map((id) => String(id || "").trim()).filter(Boolean)
+  ) : null;
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const t of list) {
+    const id = String(t?.threadNodeId || "").trim();
+    if (!isGraphqlReviewThreadNodeId(id)) continue;
+    if (only && !only.has(id)) continue;
+    if (only) {
+      if (threadCommentsAreLoaded(t, comments)) continue;
+    } else if (!threadNeedsEagerComments(t, opts)) {
+      continue;
+    } else if (threadCommentsAreLoaded(t, comments)) {
+      continue;
+    }
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
+function shouldSkipUnresolvedByIdsBulk(opts = {}) {
+  if (opts?.forceFull || opts?.mode === "full-threads") return false;
+  if (opts?.hostRestFallback) return true;
+  const src = String(opts?.newestSource || "").toLowerCase();
+  return src === "rest";
+}
+function remainingUnresolvedForByIdsBulk(unresolvedIds, updatedIdSet = null, knownMissing = null) {
+  const updated = updatedIdSet instanceof Set ? updatedIdSet : new Set(
+    [...updatedIdSet || []].map((id) => String(id || "")).filter(Boolean)
+  );
+  const missing = knownMissing instanceof Set ? knownMissing : new Set(
+    [...knownMissing || []].map((id) => String(id || "")).filter(Boolean)
+  );
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const raw of unresolvedIds || []) {
+    const id = String(raw || "").trim();
+    if (!id || seen.has(id)) continue;
+    if (!isGraphqlReviewThreadNodeId(id)) continue;
+    if (updated.has(id) || missing.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
+function confirmedMissingThreadIdsFromNodes(chunkIds, rawNodes) {
+  const ids = Array.isArray(chunkIds) ? chunkIds.map((id) => String(id)) : [];
+  if (!Array.isArray(rawNodes) || !ids.length) return [];
+  const missing = [];
+  const n = Math.min(ids.length, rawNodes.length);
+  for (let i = 0; i < n; i++) {
+    if (rawNodes[i] == null) missing.push(ids[i]);
+  }
+  return missing;
+}
+function resolveMissingThreadIdsForDrop(page) {
+  if (!page || typeof page !== "object") return [];
+  if (!Array.isArray(page.missingThreadIds)) return [];
+  return [
+    ...new Set(
+      page.missingThreadIds.map((id) => String(id || "").trim()).filter(Boolean)
+    )
+  ];
+}
+function dropReviewThreadsByNodeIds(detail, threadNodeIds) {
+  if (!detail) return detail;
+  const drop = new Set(
+    [...threadNodeIds || []].map((id) => String(id || "").trim()).filter(Boolean)
+  );
+  if (!drop.size) return detail;
+  const prevRc = Array.isArray(detail.reviewComments) ? detail.reviewComments : [];
+  const prevTh = Array.isArray(detail.reviewThreads) ? detail.reviewThreads : [];
+  return {
+    ...detail,
+    reviewComments: prevRc.filter((c) => {
+      if (!c) return false;
+      const tid = c.threadNodeId ? String(c.threadNodeId) : "";
+      return !(tid && drop.has(tid));
+    }),
+    reviewThreads: prevTh.filter(
+      (t) => !t?.threadNodeId || !drop.has(String(t.threadNodeId))
+    )
+  };
+}
+function applyByIdsRefreshDrop(detail, page) {
+  const missing = resolveMissingThreadIdsForDrop(page);
+  if (!missing.length) return detail;
+  return dropReviewThreadsByNodeIds(detail, missing);
+}
+function buildRestReviewThreadsPageFromComments(items, direction = "newest") {
+  const list = Array.isArray(items) ? items : [];
+  const empty = {
+    threads: [],
+    comments: [],
+    hasMore: false,
+    endCursor: null,
+    startCursor: null,
+    hasNextPage: false,
+    hasPreviousPage: false,
+    totalCount: 0,
+    pageCount: list.length ? 1 : 0,
+    direction: direction || "newest",
+    window: "newest",
+    source: "rest"
+  };
+  if (!list.length) return empty;
+  const byId = /* @__PURE__ */ new Map();
+  for (const c of list) {
+    if (c && c.id != null) byId.set(String(c.id), c);
+  }
+  const roots = list.filter((c) => {
+    if (!c || c.id == null) return false;
+    const parent = c.inReplyToId ?? c.in_reply_to_id ?? null;
+    return parent == null || !byId.has(String(parent));
+  });
+  const threads = roots.map((r) => {
+    const replyIds = list.filter(
+      (c) => c && String(c.inReplyToId ?? c.in_reply_to_id ?? "") === String(r.id)
+    ).map((c) => c.id);
+    const threadNodeId = r.threadNodeId && /^PRRT_/i.test(String(r.threadNodeId)) ? String(r.threadNodeId) : `rest-thread-${r.id}`;
+    const commentIds = [r.id, ...replyIds];
+    for (const cid of commentIds) {
+      const row = byId.get(String(cid));
+      if (row) {
+        row.threadNodeId = threadNodeId;
+        row.loadWindow = "newest";
+      }
+    }
+    return {
+      threadNodeId,
+      resolved: Boolean(r.resolved ?? r.isResolved),
+      outdated: Boolean(r.outdated),
+      path: r.path || "",
+      line: r.line ?? r.originalLine ?? r.original_line ?? null,
+      startLine: r.startLine ?? r.start_line ?? null,
+      side: r.side || "RIGHT",
+      commentIds,
+      commentsLoaded: true,
+      loadWindow: "newest"
+    };
+  });
+  return {
+    threads,
+    comments: list,
+    totalCount: list.length,
+    startCursor: null,
+    endCursor: null,
+    hasNextPage: false,
+    hasPreviousPage: false,
+    hasMore: false,
+    pageCount: 1,
+    direction: direction || "newest",
+    window: "newest",
+    source: "rest"
+  };
+}
+function countCommentsForThread(pageOrDetail, threadNodeId, thread = null) {
+  const id = String(threadNodeId || "");
+  if (!id) return 0;
+  if (thread && Array.isArray(thread.commentIds) && thread.commentIds.length) {
+    return thread.commentIds.length;
+  }
+  const comments = Array.isArray(pageOrDetail?.comments) ? pageOrDetail.comments : Array.isArray(pageOrDetail?.reviewComments) ? pageOrDetail.reviewComments : [];
+  let n = 0;
+  for (const c of comments) {
+    if (c && c.threadNodeId != null && String(c.threadNodeId) === id) n += 1;
+  }
+  return n;
+}
+function newestThreadsPageMatchesCache(page, detail) {
+  if (!page || !detail) {
+    return { match: false, reason: "missing" };
+  }
+  if (!hasUsableReviewThreadsCache(detail)) {
+    return { match: false, reason: "no-cache" };
+  }
+  const pageThreads = Array.isArray(page.threads) ? page.threads : [];
+  const cachedThreads = Array.isArray(detail.reviewThreads) ? detail.reviewThreads : [];
+  const byId = /* @__PURE__ */ new Map();
+  for (const t of cachedThreads) {
+    if (t?.threadNodeId) byId.set(String(t.threadNodeId), t);
+  }
+  if (byId.size === 0) {
+    for (const c of Array.isArray(detail.reviewComments) ? detail.reviewComments : []) {
+      if (!c?.threadNodeId) continue;
+      const id = String(c.threadNodeId);
+      if (!byId.has(id)) {
+        byId.set(id, {
+          threadNodeId: id,
+          resolved: Boolean(c.resolved)
+        });
+      }
+    }
+  }
+  const pageTotal = typeof page.totalCount === "number" && Number.isFinite(page.totalCount) ? page.totalCount : null;
+  const cachedTotalRaw = detail.reviewThreadsMeta?.totalCount;
+  const cachedTotal = typeof cachedTotalRaw === "number" && Number.isFinite(cachedTotalRaw) ? cachedTotalRaw : null;
+  if (pageTotal != null && cachedTotal != null && pageTotal !== cachedTotal) {
+    return { match: false, reason: "totalCount" };
+  }
+  const pageIds = [];
+  for (const t of pageThreads) {
+    if (!t?.threadNodeId) continue;
+    const id = String(t.threadNodeId);
+    pageIds.push(id);
+    const cached = byId.get(id);
+    if (!cached) {
+      return { match: false, reason: "unknown-thread" };
+    }
+    if (Boolean(cached.resolved) !== Boolean(t.resolved)) {
+      return { match: false, reason: "resolved" };
+    }
+    const pageN = countCommentsForThread(page, id, t);
+    if (pageN > 0) {
+      const cacheN = countCommentsForThread(detail, id, cached);
+      if (cacheN > 0 && cacheN !== pageN) {
+        return { match: false, reason: "comment-count" };
+      }
+      if (cacheN === 0 && pageN > 0 && byId.has(id) && Array.isArray(detail.reviewComments)) {
+        if (detail.reviewComments.length > 0) {
+          return { match: false, reason: "comment-count" };
+        }
+      }
+    }
+  }
+  const prevNewest = Array.isArray(detail.reviewThreadsMeta?.newestThreadIds) ? detail.reviewThreadsMeta.newestThreadIds.map(String).filter(Boolean) : [];
+  if (prevNewest.length > 0 && pageIds.length > 0) {
+    for (let i = 0; i < pageIds.length; i++) {
+      if (String(prevNewest[i] || "") !== pageIds[i]) {
+        return { match: false, reason: "order" };
+      }
+    }
+  }
+  return { match: true, reason: "ok" };
+}
+function shouldEscalateNewestThreadsProbe(page, detail, pageSize) {
+  const size = Math.max(0, Number(pageSize) || 0);
+  if (size >= REVIEW_THREADS_API_MAX) return false;
+  if (!hasUsableReviewThreadsCache(detail)) return true;
+  return !newestThreadsPageMatchesCache(page, detail).match;
+}
+
+// src/modal/lib/review-threads-map.ts
 function mergeReviewThreadMeta(comments, threads) {
   const list = Array.isArray(comments) ? comments : [];
   const byCommentId = /* @__PURE__ */ new Map();
@@ -1130,281 +1598,6 @@ function mergeThreadCommentsBulkIntoDetail(detail, bulkPage) {
     reviewComments
   };
 }
-function countReviewThreadsByPath(comments) {
-  const threads = groupReviewThreads(comments);
-  const map = /* @__PURE__ */ new Map();
-  for (const t of threads) {
-    const p = t.path || "";
-    if (!p) continue;
-    map.set(p, (map.get(p) || 0) + 1);
-  }
-  return map;
-}
-function countUnresolvedReviewThreadsByPath(comments) {
-  const threads = groupReviewThreads(comments);
-  const map = /* @__PURE__ */ new Map();
-  for (const t of threads) {
-    if (t.resolved) continue;
-    const p = t.path || "";
-    if (!p) continue;
-    map.set(p, (map.get(p) || 0) + 1);
-  }
-  return map;
-}
-function countPendingReviewThreads(comments) {
-  const threads = groupReviewThreads(comments);
-  let n = 0;
-  for (const t of threads) {
-    if (t.pending) n += 1;
-  }
-  return n;
-}
-function countPendingReviewThreadsByPath(comments) {
-  const map = /* @__PURE__ */ new Map();
-  const threads = groupReviewThreads(comments);
-  for (const t of threads) {
-    if (!t.pending) continue;
-    const p = t.path || "";
-    if (!p) continue;
-    map.set(p, (map.get(p) || 0) + 1);
-  }
-  for (const c of Array.isArray(comments) ? comments : []) {
-    if (!c?.pending) continue;
-    const p = c.path || "";
-    if (!p || map.has(p)) continue;
-    map.set(p, 1);
-  }
-  return map;
-}
-function countReviewThreadTotals(comments, opts = {}) {
-  const pathSet = opts?.allowedPaths instanceof Set ? opts.allowedPaths : opts?.allowedPaths ? new Set(
-    Array.isArray(opts.allowedPaths) ? opts.allowedPaths.map(String).filter(Boolean) : []
-  ) : null;
-  const excludeOutdated = Boolean(opts?.excludeOutdated);
-  const threads = groupReviewThreads(comments);
-  let total = 0;
-  let unresolved = 0;
-  let resolved = 0;
-  let pendingThreads = 0;
-  for (const t of threads) {
-    const p = t.path || "";
-    if (!p) continue;
-    if (pathSet && !pathSet.has(p)) continue;
-    if (excludeOutdated && t.outdated) continue;
-    total += 1;
-    if (t.pending) pendingThreads += 1;
-    if (t.resolved) resolved += 1;
-    else if (!t.pending) unresolved += 1;
-  }
-  return { total, unresolved, resolved, pendingThreads };
-}
-function normalizeReviewCommentId(raw) {
-  if (raw == null || raw === "") return null;
-  if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
-    return Math.floor(raw);
-  }
-  const s = String(raw).trim();
-  if (!/^\d+$/.test(s)) return null;
-  const n = Number(s);
-  return Number.isFinite(n) && n > 0 ? n : null;
-}
-function resolveRootReviewCommentId(comments, commentId) {
-  const start = normalizeReviewCommentId(commentId);
-  if (start == null) return null;
-  const byId = /* @__PURE__ */ new Map();
-  for (const c of Array.isArray(comments) ? comments : []) {
-    if (!c || c.id == null) continue;
-    const id = normalizeReviewCommentId(c.id);
-    if (id != null) byId.set(id, c);
-  }
-  let cur = byId.get(start) || null;
-  if (!cur) return start;
-  const seen = /* @__PURE__ */ new Set();
-  while (cur) {
-    const id = normalizeReviewCommentId(cur.id);
-    if (id == null || seen.has(id)) break;
-    seen.add(id);
-    const parentRaw = cur.inReplyToId ?? cur.in_reply_to_id ?? null;
-    const parentId = normalizeReviewCommentId(parentRaw);
-    if (parentId == null || !byId.has(parentId)) return id;
-    cur = byId.get(parentId);
-  }
-  return start;
-}
-function buildReplyReviewThreadGraphql(threadNodeId, body) {
-  return {
-    method: "POST",
-    url: "https://api.github.com/graphql",
-    body: {
-      query: `mutation($id:ID!,$body:String!){
-  addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$id,body:$body}){
-    comment { databaseId body }
-  }
-}`,
-      variables: {
-        id: String(threadNodeId || ""),
-        body: String(body || "").trim()
-      }
-    }
-  };
-}
-function buildReplyReviewCommentRequest(owner, repo, pullNumber, commentId, body) {
-  const parentId = normalizeReviewCommentId(commentId);
-  const text = String(body || "").trim();
-  return {
-    method: "POST",
-    url: `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/comments/${parentId ?? commentId}/replies`,
-    body: { body: text }
-  };
-}
-function buildResolveThreadGraphql(threadNodeId, resolved = true) {
-  const mutation = resolved ? `mutation($id:ID!){ resolveReviewThread(input:{threadId:$id}){ thread { id isResolved } } }` : `mutation($id:ID!){ unresolveReviewThread(input:{threadId:$id}){ thread { id isResolved } } }`;
-  return {
-    method: "POST",
-    url: "https://api.github.com/graphql",
-    body: {
-      query: mutation,
-      variables: { id: threadNodeId }
-    }
-  };
-}
-function filterFilesByQuery(files, query) {
-  const list = Array.isArray(files) ? files : [];
-  const q = String(query || "").trim().toLowerCase();
-  if (!q) return list.slice();
-  return list.filter((f) => {
-    const path = String(f.filename || f.path || "").toLowerCase();
-    return path.includes(q);
-  });
-}
-function toggleViewedPath(viewed, path) {
-  const next = viewed instanceof Set ? new Set(viewed) : new Set(viewed || []);
-  const p = String(path || "");
-  if (!p) return next;
-  if (next.has(p)) next.delete(p);
-  else next.add(p);
-  return next;
-}
-function isPathViewed(viewed, path) {
-  if (!path) return false;
-  if (viewed instanceof Set) return viewed.has(path);
-  if (Array.isArray(viewed)) return viewed.includes(path);
-  return false;
-}
-const REVIEW_THREADS_API_MAX = 100;
-const REVIEW_THREADS_PAGE_SIZE = 100;
-const REVIEW_THREADS_WARM_PROBE_SIZE = 100;
-function hasUsableReviewThreadsCache(detail) {
-  if (!detail || typeof detail !== "object") return false;
-  if (detail._sketch) return false;
-  const threads = Array.isArray(detail.reviewThreads) ? detail.reviewThreads : [];
-  const comments = Array.isArray(detail.reviewComments) ? detail.reviewComments : [];
-  const meta = detail.reviewThreadsMeta || {};
-  const loadedMeta = Number(meta.loadedThreadCount);
-  const withNode = threads.some((t) => t && t.threadNodeId) || comments.some((c) => c && c.threadNodeId);
-  if (!withNode && !(loadedMeta > 0) && threads.length === 0 && comments.length === 0) {
-    return false;
-  }
-  return withNode || loadedMeta > 0;
-}
-function pickNewestThreadsPageSize(opts = {}) {
-  void opts;
-  return REVIEW_THREADS_PAGE_SIZE;
-}
-function shouldTrustRestEmptyReviewThreads(opts = {}) {
-  if (opts?.forceGraphql || opts?.forceFull) return false;
-  const prCount = opts?.reviewCommentsCount;
-  if (prCount != null && Number.isFinite(Number(prCount)) && Number(prCount) <= 0) {
-    return true;
-  }
-  const restN = opts?.restCommentCount;
-  if (restN != null && Number.isFinite(Number(restN)) && Number(restN) <= 0) {
-    return true;
-  }
-  return false;
-}
-function chooseReviewThreadsTransport(opts = {}) {
-  if (opts?.preferRest === true) return "rest";
-  if (opts?.forceGraphql || opts?.forceFull) return "graphql";
-  if (opts?.preferRest === false) return "graphql";
-  return "graphql";
-}
-function isGraphqlReviewThreadNodeId(id) {
-  return /^PRRT_/i.test(String(id || "").trim());
-}
-function threadNeedsEagerComments(thread, opts = {}) {
-  if (!thread || !isGraphqlReviewThreadNodeId(thread.threadNodeId)) return false;
-  if (opts?.forceAll) return true;
-  const tid = String(thread.threadNodeId);
-  const expanded = opts?.expandedThreadIds;
-  if (expanded != null) {
-    if (expanded instanceof Set) {
-      if (expanded.has(tid)) return true;
-    } else if (Array.isArray(expanded)) {
-      if (expanded.some((id) => String(id) === tid)) return true;
-    } else if (typeof expanded[Symbol.iterator] === "function") {
-      for (const id of expanded) {
-        if (String(id) === tid) return true;
-      }
-    }
-  }
-  return !Boolean(thread.resolved);
-}
-function selectThreadIdsForEagerComments(threads, opts = {}) {
-  const list = Array.isArray(threads) ? threads : [];
-  const out = [];
-  const seen = /* @__PURE__ */ new Set();
-  for (const t of list) {
-    if (!threadNeedsEagerComments(t, opts)) continue;
-    const id = String(t.threadNodeId || "").trim();
-    if (!id || seen.has(id)) continue;
-    if (t.commentsLoaded === true) continue;
-    seen.add(id);
-    out.push(id);
-  }
-  return out;
-}
-function threadCommentsAreLoaded(thread, comments = null) {
-  if (!thread) return false;
-  if (thread.commentsLoaded === true) return true;
-  if (thread.commentsLoaded === false) return false;
-  if (Array.isArray(thread.commentIds) && thread.commentIds.length > 0) {
-    if (!isGraphqlReviewThreadNodeId(thread.threadNodeId)) return true;
-  }
-  const tid = String(thread.threadNodeId || "");
-  if (!tid || !Array.isArray(comments)) return false;
-  let n = 0;
-  for (const c of comments) {
-    if (!c || String(c.threadNodeId || "") !== tid) continue;
-    if (c._commentsPending) continue;
-    n += 1;
-  }
-  return n > 0;
-}
-function selectThreadIdsMissingComments(threads, comments = null, opts = {}) {
-  const list = Array.isArray(threads) ? threads : [];
-  const only = opts?.onlyThreadIds ? new Set(
-    [...opts.onlyThreadIds].map((id) => String(id || "").trim()).filter(Boolean)
-  ) : null;
-  const out = [];
-  const seen = /* @__PURE__ */ new Set();
-  for (const t of list) {
-    const id = String(t?.threadNodeId || "").trim();
-    if (!isGraphqlReviewThreadNodeId(id)) continue;
-    if (only && !only.has(id)) continue;
-    if (only) {
-      if (threadCommentsAreLoaded(t, comments)) continue;
-    } else if (!threadNeedsEagerComments(t, opts)) {
-      continue;
-    } else if (threadCommentsAreLoaded(t, comments)) {
-      continue;
-    }
-    if (seen.has(id)) continue;
-    seen.add(id);
-    out.push(id);
-  }
-  return out;
-}
 function buildShellThreadPlaceholderComment(thread) {
   if (!thread || !isGraphqlReviewThreadNodeId(thread.threadNodeId)) return null;
   const tid = String(thread.threadNodeId);
@@ -1485,226 +1678,44 @@ function mergeReviewThreadGroupsWithShells(commentGroups, reviewThreads) {
   }
   return groups;
 }
-function shouldSkipUnresolvedByIdsBulk(opts = {}) {
-  if (opts?.forceFull || opts?.mode === "full-threads") return false;
-  if (opts?.hostRestFallback) return true;
-  const src = String(opts?.newestSource || "").toLowerCase();
-  return src === "rest";
-}
-function remainingUnresolvedForByIdsBulk(unresolvedIds, updatedIdSet = null, knownMissing = null) {
-  const updated = updatedIdSet instanceof Set ? updatedIdSet : new Set(
-    [...updatedIdSet || []].map((id) => String(id || "")).filter(Boolean)
-  );
-  const missing = knownMissing instanceof Set ? knownMissing : new Set(
-    [...knownMissing || []].map((id) => String(id || "")).filter(Boolean)
-  );
-  const out = [];
-  const seen = /* @__PURE__ */ new Set();
-  for (const raw of unresolvedIds || []) {
-    const id = String(raw || "").trim();
-    if (!id || seen.has(id)) continue;
-    if (!isGraphqlReviewThreadNodeId(id)) continue;
-    if (updated.has(id) || missing.has(id)) continue;
-    seen.add(id);
-    out.push(id);
-  }
-  return out;
-}
-function confirmedMissingThreadIdsFromNodes(chunkIds, rawNodes) {
-  const ids = Array.isArray(chunkIds) ? chunkIds.map((id) => String(id)) : [];
-  if (!Array.isArray(rawNodes) || !ids.length) return [];
-  const missing = [];
-  const n = Math.min(ids.length, rawNodes.length);
-  for (let i = 0; i < n; i++) {
-    if (rawNodes[i] == null) missing.push(ids[i]);
-  }
-  return missing;
-}
-function resolveMissingThreadIdsForDrop(page) {
-  if (!page || typeof page !== "object") return [];
-  if (!Array.isArray(page.missingThreadIds)) return [];
-  return [
-    ...new Set(
-      page.missingThreadIds.map((id) => String(id || "").trim()).filter(Boolean)
-    )
-  ];
-}
-function dropReviewThreadsByNodeIds(detail, threadNodeIds) {
-  if (!detail) return detail;
-  const drop = new Set(
-    [...threadNodeIds || []].map((id) => String(id || "").trim()).filter(Boolean)
-  );
-  if (!drop.size) return detail;
-  const prevRc = Array.isArray(detail.reviewComments) ? detail.reviewComments : [];
-  const prevTh = Array.isArray(detail.reviewThreads) ? detail.reviewThreads : [];
+
+// src/modal/lib/review-threads-build.ts
+function buildReplyReviewThreadGraphql(threadNodeId, body) {
   return {
-    ...detail,
-    reviewComments: prevRc.filter((c) => {
-      if (!c) return false;
-      const tid = c.threadNodeId ? String(c.threadNodeId) : "";
-      return !(tid && drop.has(tid));
-    }),
-    reviewThreads: prevTh.filter(
-      (t) => !t?.threadNodeId || !drop.has(String(t.threadNodeId))
-    )
-  };
-}
-function applyByIdsRefreshDrop(detail, page) {
-  const missing = resolveMissingThreadIdsForDrop(page);
-  if (!missing.length) return detail;
-  return dropReviewThreadsByNodeIds(detail, missing);
-}
-function buildRestReviewThreadsPageFromComments(items, direction = "newest") {
-  const list = Array.isArray(items) ? items : [];
-  const empty = {
-    threads: [],
-    comments: [],
-    hasMore: false,
-    endCursor: null,
-    startCursor: null,
-    hasNextPage: false,
-    hasPreviousPage: false,
-    totalCount: 0,
-    pageCount: list.length ? 1 : 0,
-    direction: direction || "newest",
-    window: "newest",
-    source: "rest"
-  };
-  if (!list.length) return empty;
-  const byId = /* @__PURE__ */ new Map();
-  for (const c of list) {
-    if (c && c.id != null) byId.set(String(c.id), c);
+    method: "POST",
+    url: "https://api.github.com/graphql",
+    body: {
+      query: `mutation($id:ID!,$body:String!){
+  addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$id,body:$body}){
+    comment { databaseId body }
   }
-  const roots = list.filter((c) => {
-    if (!c || c.id == null) return false;
-    const parent = c.inReplyToId ?? c.in_reply_to_id ?? null;
-    return parent == null || !byId.has(String(parent));
-  });
-  const threads = roots.map((r) => {
-    const replyIds = list.filter(
-      (c) => c && String(c.inReplyToId ?? c.in_reply_to_id ?? "") === String(r.id)
-    ).map((c) => c.id);
-    const threadNodeId = r.threadNodeId && /^PRRT_/i.test(String(r.threadNodeId)) ? String(r.threadNodeId) : `rest-thread-${r.id}`;
-    const commentIds = [r.id, ...replyIds];
-    for (const cid of commentIds) {
-      const row = byId.get(String(cid));
-      if (row) {
-        row.threadNodeId = threadNodeId;
-        row.loadWindow = "newest";
+}`,
+      variables: {
+        id: String(threadNodeId || ""),
+        body: String(body || "").trim()
       }
     }
-    return {
-      threadNodeId,
-      resolved: Boolean(r.resolved ?? r.isResolved),
-      outdated: Boolean(r.outdated),
-      path: r.path || "",
-      line: r.line ?? r.originalLine ?? r.original_line ?? null,
-      startLine: r.startLine ?? r.start_line ?? null,
-      side: r.side || "RIGHT",
-      commentIds,
-      commentsLoaded: true,
-      loadWindow: "newest"
-    };
-  });
+  };
+}
+function buildReplyReviewCommentRequest(owner, repo, pullNumber, commentId, body) {
+  const parentId = normalizeReviewCommentId(commentId);
+  const text = String(body || "").trim();
   return {
-    threads,
-    comments: list,
-    totalCount: list.length,
-    startCursor: null,
-    endCursor: null,
-    hasNextPage: false,
-    hasPreviousPage: false,
-    hasMore: false,
-    pageCount: 1,
-    direction: direction || "newest",
-    window: "newest",
-    source: "rest"
+    method: "POST",
+    url: `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/comments/${parentId ?? commentId}/replies`,
+    body: { body: text }
   };
 }
-function countCommentsForThread(pageOrDetail, threadNodeId, thread = null) {
-  const id = String(threadNodeId || "");
-  if (!id) return 0;
-  if (thread && Array.isArray(thread.commentIds) && thread.commentIds.length) {
-    return thread.commentIds.length;
-  }
-  const comments = Array.isArray(pageOrDetail?.comments) ? pageOrDetail.comments : Array.isArray(pageOrDetail?.reviewComments) ? pageOrDetail.reviewComments : [];
-  let n = 0;
-  for (const c of comments) {
-    if (c && c.threadNodeId != null && String(c.threadNodeId) === id) n += 1;
-  }
-  return n;
-}
-function newestThreadsPageMatchesCache(page, detail) {
-  if (!page || !detail) {
-    return { match: false, reason: "missing" };
-  }
-  if (!hasUsableReviewThreadsCache(detail)) {
-    return { match: false, reason: "no-cache" };
-  }
-  const pageThreads = Array.isArray(page.threads) ? page.threads : [];
-  const cachedThreads = Array.isArray(detail.reviewThreads) ? detail.reviewThreads : [];
-  const byId = /* @__PURE__ */ new Map();
-  for (const t of cachedThreads) {
-    if (t?.threadNodeId) byId.set(String(t.threadNodeId), t);
-  }
-  if (byId.size === 0) {
-    for (const c of Array.isArray(detail.reviewComments) ? detail.reviewComments : []) {
-      if (!c?.threadNodeId) continue;
-      const id = String(c.threadNodeId);
-      if (!byId.has(id)) {
-        byId.set(id, {
-          threadNodeId: id,
-          resolved: Boolean(c.resolved)
-        });
-      }
+function buildResolveThreadGraphql(threadNodeId, resolved = true) {
+  const mutation = resolved ? `mutation($id:ID!){ resolveReviewThread(input:{threadId:$id}){ thread { id isResolved } } }` : `mutation($id:ID!){ unresolveReviewThread(input:{threadId:$id}){ thread { id isResolved } } }`;
+  return {
+    method: "POST",
+    url: "https://api.github.com/graphql",
+    body: {
+      query: mutation,
+      variables: { id: threadNodeId }
     }
-  }
-  const pageTotal = typeof page.totalCount === "number" && Number.isFinite(page.totalCount) ? page.totalCount : null;
-  const cachedTotalRaw = detail.reviewThreadsMeta?.totalCount;
-  const cachedTotal = typeof cachedTotalRaw === "number" && Number.isFinite(cachedTotalRaw) ? cachedTotalRaw : null;
-  if (pageTotal != null && cachedTotal != null && pageTotal !== cachedTotal) {
-    return { match: false, reason: "totalCount" };
-  }
-  const pageIds = [];
-  for (const t of pageThreads) {
-    if (!t?.threadNodeId) continue;
-    const id = String(t.threadNodeId);
-    pageIds.push(id);
-    const cached = byId.get(id);
-    if (!cached) {
-      return { match: false, reason: "unknown-thread" };
-    }
-    if (Boolean(cached.resolved) !== Boolean(t.resolved)) {
-      return { match: false, reason: "resolved" };
-    }
-    const pageN = countCommentsForThread(page, id, t);
-    if (pageN > 0) {
-      const cacheN = countCommentsForThread(detail, id, cached);
-      if (cacheN > 0 && cacheN !== pageN) {
-        return { match: false, reason: "comment-count" };
-      }
-      if (cacheN === 0 && pageN > 0 && byId.has(id) && Array.isArray(detail.reviewComments)) {
-        if (detail.reviewComments.length > 0) {
-          return { match: false, reason: "comment-count" };
-        }
-      }
-    }
-  }
-  const prevNewest = Array.isArray(detail.reviewThreadsMeta?.newestThreadIds) ? detail.reviewThreadsMeta.newestThreadIds.map(String).filter(Boolean) : [];
-  if (prevNewest.length > 0 && pageIds.length > 0) {
-    for (let i = 0; i < pageIds.length; i++) {
-      if (String(prevNewest[i] || "") !== pageIds[i]) {
-        return { match: false, reason: "order" };
-      }
-    }
-  }
-  return { match: true, reason: "ok" };
-}
-function shouldEscalateNewestThreadsProbe(page, detail, pageSize) {
-  const size = Math.max(0, Number(pageSize) || 0);
-  if (size >= REVIEW_THREADS_API_MAX) return false;
-  if (!hasUsableReviewThreadsCache(detail)) return true;
-  return !newestThreadsPageMatchesCache(page, detail).match;
+  };
 }
 
 

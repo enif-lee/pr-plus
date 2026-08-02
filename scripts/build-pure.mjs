@@ -166,7 +166,11 @@ for (const [pureName, { lib, global: gname }] of Object.entries(MAP)) {
   const nonTypeImportLines = (src.match(/^import\s+.+$/gm) || []).filter(
     (l) => !/\bimport\s+type\b/.test(l)
   );
-  const needsBundle = hasRelativeImports && nonTypeImportLines.length > 0;
+  // Barrels that only re-export (`export * from './x'`) have no import lines but
+  // still need bundle — plain transform emits require() and would skip.
+  const hasExportFrom = /export\s+\*\s+from\s+['"]\.\//.test(src);
+  const needsBundle =
+    (hasRelativeImports && nonTypeImportLines.length > 0) || hasExportFrom;
 
   let transformedCode;
   try {

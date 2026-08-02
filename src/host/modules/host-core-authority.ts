@@ -1,7 +1,5 @@
 // TypeScript SoT — assembled by build scripts (classic runtime JS emit)
 
-
-
   const HOST_ID = 'prp-modal-host';
   let reactRoot = null;
   /** DOM node the current reactRoot is bound to (soft-nav may replace it). */

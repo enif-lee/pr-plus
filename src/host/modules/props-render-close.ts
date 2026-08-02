@@ -75,7 +75,13 @@
       try {
         // Reuse root — preserves Diff layout, scrollTop, and search UI state.
         reactRoot.render(props);
-        return;
+        // Zombie root guard: live flags OK but nothing painted → remount.
+        if ((!host.innerHTML || host.innerHTML.length === 0) && props?.open) {
+          console.warn('[pr+] live root painted empty; remounting');
+          dropReactRoot();
+        } else {
+          return;
+        }
       } catch (err) {
         console.warn('[pr+] root.render failed; remounting', err);
         dropReactRoot();
@@ -102,6 +108,7 @@
     reactRoot = globalThis.mountPrModal(host, props);
     reactRootHost = host;
   }
+
 
   function persistOpenModal(owner, repo, number, extra: any = {}) {
     const api = sessionApi();
