@@ -4042,12 +4042,19 @@ if (typeof globalThis !== "undefined") {
 
 /* ---- fetch-pulls.js ---- */
 
-;(function(){
 /**
- * AUTO-GENERATED from src/fetch/fetch-api.ts
- * SOURCE OF TRUTH: src/fetch/fetch-api.ts — npm run build:fetch
+ * AUTO-GENERATED from src/fetch/* (entry: fetch-api.ts)
+ * SOURCE OF TRUTH: src/fetch/ — npm run build:fetch
  */
-function normalizeApiCtx(ctx) {
+var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, {
+  get: (a, b) => (typeof require !== "undefined" ? require : a)[b]
+}) : x)(function(x) {
+  if (typeof require !== "undefined") return require.apply(this, arguments);
+  throw Error('Dynamic require of "' + x + '" is not supported');
+});
+
+// src/fetch/http.ts
+function normalizeApiCtx2(ctx) {
   if (ctx && typeof ctx === "object" && (ctx.restBase || ctx.graphqlUrl)) {
     return {
       kind: ctx.kind || "custom",
@@ -4074,8 +4081,8 @@ function normalizeApiCtx(ctx) {
     graphqlUrl: "https://api.github.com/graphql"
   };
 }
-function githubRestUrl(path, ctx) {
-  const c = normalizeApiCtx(ctx);
+function githubRestUrl2(path, ctx) {
+  const c = normalizeApiCtx2(ctx);
   try {
     if (globalThis.PRGithubEndpoints && typeof globalThis.PRGithubEndpoints.githubRestUrl === "function") {
       return globalThis.PRGithubEndpoints.githubRestUrl(path, c);
@@ -4088,7 +4095,7 @@ function githubRestUrl(path, ctx) {
   return base + (p.startsWith("/") ? p : "/" + p);
 }
 function githubGraphqlUrl(ctx) {
-  const c = normalizeApiCtx(ctx);
+  const c = normalizeApiCtx2(ctx);
   try {
     if (globalThis.PRGithubEndpoints && typeof globalThis.PRGithubEndpoints.githubGraphqlUrl === "function") {
       return globalThis.PRGithubEndpoints.githubGraphqlUrl(c);
@@ -4097,78 +4104,12 @@ function githubGraphqlUrl(ctx) {
   }
   return String(c.graphqlUrl || "https://api.github.com/graphql");
 }
-function mapApiPullRequest(pr) {
-  const author = pr.user?.login || "";
-  const authorAvatarUrl = pr.user?.avatar_url || "";
-  const labels = Array.isArray(pr.labels) ? pr.labels.map((l) => ({
-    name: l?.name || String(l || ""),
-    color: l?.color || "",
-    description: l?.description || ""
-  })).filter((l) => l.name) : [];
-  const assignees = Array.isArray(pr.assignees) ? pr.assignees.map((u) => u?.login || u).filter(Boolean) : [];
-  const requestedReviewers = Array.isArray(pr.requested_reviewers) ? pr.requested_reviewers.map((u) => u?.login || u).filter(Boolean) : [];
-  const avatarUrls = {};
-  const putUser = (u) => {
-    const login = u?.login || (typeof u === "string" ? u : "");
-    const url = u?.avatar_url || "";
-    if (login && url) avatarUrls[String(login).toLowerCase()] = url;
-  };
-  putUser(pr.user);
-  for (const u of pr.assignees || []) putUser(u);
-  for (const u of pr.requested_reviewers || []) putUser(u);
-  const milestone = pr.milestone ? {
-    number: pr.milestone.number,
-    title: pr.milestone.title || "",
-    state: pr.milestone.state || "",
-    dueOn: pr.milestone.due_on || null
-  } : null;
-  return {
-    number: pr.number,
-    title: pr.title,
-    // Body required so attachMagicLinks/prMatchText can match description tokens
-    body: pr.body || "",
-    headRef: pr.head?.ref || "",
-    baseRef: pr.base?.ref || "",
-    author,
-    authorAvatarUrl,
-    draft: Boolean(pr.draft),
-    htmlUrl: pr.html_url,
-    labels,
-    assignees,
-    requestedReviewers,
-    milestone,
-    avatarUrls,
-    // Optional stats when present on full list items
-    additions: pr.additions ?? null,
-    deletions: pr.deletions ?? null,
-    changedFiles: pr.changed_files ?? null,
-    // Official PR review-comment count (not thread count). Used to skip GraphQL
-    // escalate when 0 and to size REST windows.
-    reviewCommentsCount: pr.review_comments != null && Number.isFinite(Number(pr.review_comments)) ? Number(pr.review_comments) : null,
-    nodeId: pr.node_id || null
-  };
-}
 function buildApiHeaders(token) {
   const headers = { Accept: "application/vnd.github+json" };
   if (token) {
     headers.Authorization = `Bearer ${token}`;
   }
   return headers;
-}
-function findDanglingPrNumbers(pagePrNumbers, prs) {
-  if (!Array.isArray(pagePrNumbers) || pagePrNumbers.length === 0) {
-    return [];
-  }
-  const have = new Set((prs || []).map((pr) => pr.number));
-  const dangling = [];
-  const seen = /* @__PURE__ */ new Set();
-  for (const raw of pagePrNumbers) {
-    const num = Number(raw);
-    if (!Number.isFinite(num) || seen.has(num) || have.has(num)) continue;
-    seen.add(num);
-    dangling.push(num);
-  }
-  return dangling;
 }
 async function mapWithConcurrency(items, limit, worker) {
   if (!items.length) return [];
@@ -4184,184 +4125,8 @@ async function mapWithConcurrency(items, limit, worker) {
   await Promise.all(runners);
   return results;
 }
-async function fetchOpenPullsPublic(owner, repo, fetchImpl, token = null, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  const url = githubRestUrl(`/repos/${owner}/${repo}/pulls?state=open&per_page=100`, ctx);
-  const res = await fetchImpl(url, {
-    headers: buildApiHeaders(token)
-  });
-  if (!res.ok) {
-    const err = new Error(`GitHub API ${res.status}: ${res.statusText}`);
-    err.status = res.status;
-    throw err;
-  }
-  const data = await res.json();
-  return data.map(mapApiPullRequest);
-}
-async function fetchPrHeadProbe(owner, repo, number, fetchImpl, token = null, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  const o = String(owner || "").trim();
-  const r = String(repo || "").trim();
-  const n = Number(number);
-  const empty = {
-    headSha: "",
-    baseSha: "",
-    updatedAt: null,
-    draft: false,
-    state: "",
-    number: Number.isFinite(n) ? n : 0
-  };
-  if (!o || !r || !Number.isFinite(n) || n <= 0) return empty;
-  try {
-    const url = githubRestUrl(
-      `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/pulls/${n}`,
-      ctx
-    );
-    const res = await fetchImpl(url, { headers: buildApiHeaders(token) });
-    if (!res.ok) {
-      const err = new Error(`GitHub API ${res.status}: ${res.statusText}`);
-      err.status = res.status;
-      throw err;
-    }
-    const data = await res.json();
-    return {
-      headSha: String(data?.head?.sha || ""),
-      baseSha: String(data?.base?.sha || ""),
-      updatedAt: data?.updated_at || null,
-      draft: Boolean(data?.draft),
-      state: String(data?.state || ""),
-      number: Number(data?.number) || n
-    };
-  } catch (err) {
-    if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
-      throw err;
-    }
-    return empty;
-  }
-}
-async function fetchPullByNumber(owner, repo, pullNumber, fetchImpl, token = null, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  const url = githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}`, ctx);
-  const res = await fetchImpl(url, {
-    headers: buildApiHeaders(token)
-  });
-  if (!res.ok) {
-    const err = new Error(`GitHub API ${res.status}: ${res.statusText} (PR #${pullNumber})`);
-    err.status = res.status;
-    err.pullNumber = pullNumber;
-    throw err;
-  }
-  const data = await res.json();
-  return mapApiPullRequest(data);
-}
-async function fetchDanglingPulls(owner, repo, numbers, fetchImpl, token = null, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  if (!numbers.length) return [];
-  const settled = await mapWithConcurrency(numbers, 5, async (pullNumber) => {
-    try {
-      return await fetchPullByNumber(owner, repo, pullNumber, fetchImpl, token, ctx);
-    } catch (err) {
-      if (err.status === 401 || err.status === 403) {
-        throw err;
-      }
-      console.warn(`[PR Tree] Skipping dangling PR #${pullNumber}:`, err.message || err);
-      return null;
-    }
-  });
-  return settled.filter(Boolean);
-}
-async function fetchRepoAutolinks(owner, repo, fetchImpl, token = null, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  const url = githubRestUrl(`/repos/${owner}/${repo}/autolinks`, ctx);
-  try {
-    const res = await fetchImpl(url, { headers: buildApiHeaders(token) });
-    if (!res.ok) return [];
-    const data = await res.json();
-    if (!Array.isArray(data)) return [];
-    return data.filter((a) => a && typeof a.key_prefix === "string" && typeof a.url_template === "string").map((a) => ({
-      key_prefix: a.key_prefix,
-      url_template: a.url_template,
-      is_alphanumeric: a.is_alphanumeric !== false
-    }));
-  } catch {
-    return [];
-  }
-}
 function escapeRegExp(s) {
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-function buildAutolinkUrl(urlTemplate, num) {
-  return String(urlTemplate).replace(/<num>/gi, num).replace(/\{num\}/gi, num);
-}
-function matchAutolinksInText(text, autolinks) {
-  if (!text || !Array.isArray(autolinks) || autolinks.length === 0) return [];
-  const found = [];
-  const seen = /* @__PURE__ */ new Set();
-  for (const rule of autolinks) {
-    const prefix = rule.key_prefix;
-    if (!prefix) continue;
-    const numClass = rule.is_alphanumeric !== false ? "(?:\\d+|[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*)" : "\\d+";
-    const re = new RegExp(
-      `(^|[^A-Za-z0-9_])(${escapeRegExp(prefix)})(${numClass})`,
-      "gi"
-    );
-    let m;
-    while ((m = re.exec(text)) !== null) {
-      const key = `${m[2]}${m[3]}`;
-      const url = buildAutolinkUrl(rule.url_template, m[3]);
-      if (!url || seen.has(url)) continue;
-      seen.add(url);
-      found.push({ key, url, prefix: m[2] });
-    }
-  }
-  return found;
-}
-function prMatchText(pr) {
-  if (!pr) return "";
-  return [pr.title, pr.headRef, pr.baseRef, pr.body, pr.author].filter(Boolean).join("\n");
-}
-function attachMagicLinks(prs, autolinks) {
-  if (!Array.isArray(prs)) return [];
-  if (!Array.isArray(autolinks) || autolinks.length === 0) {
-    return prs.map((pr) => ({ ...pr, magicLinks: pr.magicLinks || [] }));
-  }
-  return prs.map((pr) => ({
-    ...pr,
-    magicLinks: matchAutolinksInText(prMatchText(pr), autolinks)
-  }));
-}
-async function fetchOpenPulls(owner, repo, fetchImpl, options = {}) {
-  const {
-    token = null,
-    pagePrNumbers = [],
-    includeAutolinks = true
-  } = options;
-  const ctx = normalizeApiCtx(options?.ctx);
-  const listed = await fetchOpenPullsPublic(owner, repo, fetchImpl, token, ctx);
-  const danglingNumbers = findDanglingPrNumbers(pagePrNumbers, listed);
-  let prs = listed;
-  if (danglingNumbers.length > 0) {
-    const extras = await fetchDanglingPulls(
-      owner,
-      repo,
-      danglingNumbers,
-      fetchImpl,
-      token,
-      ctx
-    );
-    if (extras.length > 0) {
-      const byNumber = new Map(listed.map((pr) => [pr.number, pr]));
-      for (const pr of extras) {
-        byNumber.set(pr.number, pr);
-      }
-      prs = [...byNumber.values()];
-    }
-  }
-  if (!includeAutolinks) {
-    return attachMagicLinks(prs, []);
-  }
-  const autolinks = await fetchRepoAutolinks(owner, repo, fetchImpl, token, ctx);
-  return attachMagicLinks(prs, autolinks);
 }
 function decodeBase64Utf8(b64) {
   try {
@@ -4379,7 +4144,7 @@ function decodeBase64Utf8(b64) {
     return "";
   }
 }
-async function apiJson(url, fetchImpl, token, opts = {}) {
+async function apiJson2(url, fetchImpl, token, opts = {}) {
   const headers = {
     ...buildApiHeaders(token),
     ...opts.headers && typeof opts.headers === "object" ? opts.headers : {}
@@ -4451,1007 +4216,6 @@ async function fetchRestCollectionAll(firstUrl, fetchImpl, token, opts = {}) {
   }
   return all;
 }
-function mapPrCommitRow(c) {
-  return {
-    sha: c?.sha || "",
-    message: c?.commit?.message || c?.message || "",
-    author: c?.commit?.author?.name || c?.author?.login || c?.author || "",
-    date: c?.commit?.author?.date || c?.commit?.committer?.date || c?.date || ""
-  };
-}
-async function fetchPrCommits(owner, repo, number, fetchImpl, token = null, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  const o = String(owner || "").trim();
-  const r = String(repo || "").trim();
-  const n = Number(number);
-  if (!o || !r || !Number.isFinite(n)) {
-    throw new Error("owner, repo, and number are required for commits");
-  }
-  const url = githubRestUrl(
-    `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/pulls/${n}/commits?per_page=100`,
-    ctx
-  );
-  try {
-    const data = await apiJson(url, fetchImpl, token);
-    return (Array.isArray(data) ? data : []).map(mapPrCommitRow).filter((c) => c.sha);
-  } catch (err) {
-    if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
-      throw err;
-    }
-    return [];
-  }
-}
-async function fetchAllPrCommits(owner, repo, number, fetchImpl, token = null, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  const o = String(owner || "").trim();
-  const r = String(repo || "").trim();
-  const n = Number(number);
-  if (!o || !r || !Number.isFinite(n)) {
-    throw new Error("owner, repo, and number are required for commits");
-  }
-  const first = githubRestUrl(
-    `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/pulls/${n}/commits?per_page=100`,
-    ctx
-  );
-  const raw = await fetchRestCollectionAll(first, fetchImpl, token);
-  return raw.map(mapPrCommitRow).filter((c) => c.sha);
-}
-async function fetchPrChecks(owner, repo, headSha, fetchImpl, token = null, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  const o = String(owner || "").trim();
-  const r = String(repo || "").trim();
-  const sha = String(headSha || "").trim();
-  const empty = { state: "unknown", totalCount: 0, statuses: [], checkRuns: [] };
-  if (!o || !r || !sha) return empty;
-  const base = githubRestUrl(`/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}`, ctx);
-  let checks = { ...empty };
-  try {
-    const status = await apiJson(`${base}/commits/${encodeURIComponent(sha)}/status`, fetchImpl, token);
-    const statusList = Array.isArray(status?.statuses) ? status.statuses : [];
-    const emptyCombined = !statusList.length && !(Number(status?.total_count) > 0);
-    checks = {
-      state: emptyCombined ? "unknown" : status.state || "unknown",
-      totalCount: emptyCombined ? 0 : status.total_count || statusList.length,
-      statuses: statusList.map((s) => ({
-        context: s.context || "",
-        state: s.state || "",
-        description: s.description || "",
-        targetUrl: s.target_url || "",
-        createdAt: s.created_at || "",
-        updatedAt: s.updated_at || ""
-      })),
-      checkRuns: []
-    };
-  } catch (err) {
-    if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
-      throw err;
-    }
-  }
-  try {
-    const runs = await apiJson(
-      `${base}/commits/${encodeURIComponent(sha)}/check-runs?per_page=100&filter=latest`,
-      fetchImpl,
-      token
-    );
-    const list = runs?.check_runs || [];
-    if (list.length) {
-      checks.checkRuns = list.map((r2) => ({
-        id: r2.id,
-        name: r2.name || "",
-        status: r2.status || "",
-        conclusion: r2.conclusion || "",
-        htmlUrl: r2.html_url || "",
-        startedAt: r2.started_at || "",
-        completedAt: r2.completed_at || "",
-        appSlug: r2.app?.slug || "",
-        appName: r2.app?.name || ""
-      }));
-    }
-  } catch (err) {
-    if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
-      throw err;
-    }
-  }
-  const normalize = typeof globalThis !== "undefined" && globalThis.PRModalChecks?.normalizeChecks || null;
-  if (typeof normalize === "function") {
-    return normalize(checks);
-  }
-  const byCtx = /* @__PURE__ */ new Map();
-  for (const s of checks.statuses || []) {
-    const k = String(s.context || "").toLowerCase();
-    if (!k) continue;
-    const prev = byCtx.get(k);
-    const t = Date.parse(s.updatedAt || s.createdAt || "") || 0;
-    const pt = prev ? Date.parse(prev.updatedAt || prev.createdAt || "") || 0 : -1;
-    if (!prev || t >= pt) byCtx.set(k, s);
-  }
-  const byName = /* @__PURE__ */ new Map();
-  for (const r2 of checks.checkRuns || []) {
-    const k = String(r2.name || "").toLowerCase();
-    if (!k) continue;
-    const prev = byName.get(k);
-    const t = Date.parse(r2.completedAt || r2.startedAt || "") || Number(r2.id) || 0;
-    const pt = prev ? Date.parse(prev.completedAt || prev.startedAt || "") || Number(prev.id) || 0 : -1;
-    if (!prev || t >= pt) byName.set(k, r2);
-  }
-  checks.statuses = [...byCtx.values()];
-  checks.checkRuns = [...byName.values()];
-  checks.totalCount = checks.statuses.length + checks.checkRuns.length;
-  return checks;
-}
-async function fetchPrDevelopment(owner, repo, number, fetchImpl, token = null, opts = {}) {
-  const ctx = normalizeApiCtx(opts?.ctx);
-  const o = String(owner || "").trim();
-  const r = String(repo || "").trim();
-  const n = Number(number);
-  const body = String(opts.body || "");
-  let linkedIssues = [];
-  try {
-    let editApi = typeof globalThis !== "undefined" ? globalThis.PRModalPrEditApi : null;
-    if (!editApi && typeof require === "function") {
-      try {
-        editApi = require("./modal/pure/pr-edit-api.js");
-      } catch {
-        editApi = null;
-      }
-    }
-    if (editApi?.parseLinkedIssueNumbers) {
-      linkedIssues = editApi.parseLinkedIssueNumbers(body);
-    }
-  } catch {
-    linkedIssues = [];
-  }
-  let developmentIssues = [];
-  let projects = [];
-  try {
-    const side = await fetchPrSidebarMeta(o, r, n, fetchImpl, token, ctx);
-    if (side && typeof side === "object") {
-      if (Array.isArray(side.developmentIssues) && side.developmentIssues.length) {
-        developmentIssues = side.developmentIssues.map((item) => ({
-          number: Number(item?.number),
-          title: String(item?.title || "").trim(),
-          url: String(item?.url || "").trim(),
-          state: String(item?.state || "").trim().toLowerCase(),
-          source: item?.source || "closing",
-          kind: item?.kind || ""
-        }));
-        const fromGql = developmentIssues.map((x) => Number(x?.number)).filter((x) => Number.isFinite(x) && x > 0);
-        if (fromGql.length) {
-          const set = /* @__PURE__ */ new Set([...linkedIssues, ...fromGql]);
-          linkedIssues = [...set].sort((a, b) => a - b);
-        }
-      }
-      if (Array.isArray(side.projects)) projects = side.projects;
-    }
-  } catch (err) {
-    if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
-      throw err;
-    }
-  }
-  {
-    const byNum = /* @__PURE__ */ new Map();
-    for (const item of developmentIssues) {
-      const num = Number(item?.number);
-      if (!Number.isFinite(num) || num <= 0) continue;
-      byNum.set(num, {
-        number: num,
-        title: String(item?.title || "").trim(),
-        url: String(item?.url || "").trim(),
-        state: String(item?.state || "").trim().toLowerCase(),
-        source: item?.source || "closing",
-        kind: item?.kind || ""
-      });
-    }
-    for (const raw of linkedIssues) {
-      const num = Number(raw);
-      if (!Number.isFinite(num) || num <= 0 || byNum.has(num)) continue;
-      byNum.set(num, {
-        number: num,
-        title: "",
-        url: `https://github.com/${o}/${r}/issues/${num}`,
-        state: "",
-        source: "body",
-        kind: ""
-      });
-    }
-    developmentIssues = [...byNum.values()].sort((a, b) => a.number - b.number);
-  }
-  const needTitles = developmentIssues.filter((x) => !String(x?.title || "").trim()).map((x) => x.number);
-  if (needTitles.length && token) {
-    try {
-      const summaries = await fetchIssueOrPrSummaries(
-        o,
-        r,
-        needTitles,
-        fetchImpl,
-        token
-      );
-      if (summaries && summaries.size) {
-        developmentIssues = developmentIssues.map((item) => {
-          const s = summaries.get(item.number);
-          if (!s) return item;
-          return {
-            ...item,
-            title: item.title || s.title,
-            url: s.url || item.url,
-            state: item.state || s.state,
-            kind: s.kind || item.kind || ""
-          };
-        });
-      }
-    } catch (err) {
-      if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
-        throw err;
-      }
-    }
-  }
-  return {
-    linkedIssues,
-    developmentIssues,
-    projects
-  };
-}
-async function fetchAllPrFiles(owner, repo, number, fetchImpl, token = null, options = {}) {
-  const ctx = normalizeApiCtx(options?.ctx);
-  const o = String(owner || "").trim();
-  const r = String(repo || "").trim();
-  const n = Number(number);
-  if (!o || !r || !Number.isFinite(n)) {
-    throw new Error("owner, repo, and number are required for files");
-  }
-  const first = githubRestUrl(
-    `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/pulls/${n}/files?per_page=100`,
-    ctx
-  );
-  const raw = await fetchRestCollectionAll(first, fetchImpl, token);
-  return mapAndAnnotateFiles(raw, options.gitattributesText || "");
-}
-async function fetchPrFiles(owner, repo, number, fetchImpl, token = null, options = {}) {
-  const ctx = normalizeApiCtx(options?.ctx);
-  const o = String(owner || "").trim();
-  const r = String(repo || "").trim();
-  const n = Number(number);
-  if (!o || !r || !Number.isFinite(n)) {
-    throw new Error("owner, repo, and number are required for files");
-  }
-  const base = githubRestUrl(
-    `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}`,
-    ctx
-  );
-  let raw = [];
-  try {
-    const data = await apiJson(
-      `${base}/pulls/${n}/files?per_page=100`,
-      fetchImpl,
-      token
-    );
-    raw = Array.isArray(data) ? data : [];
-  } catch (err) {
-    if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
-      throw err;
-    }
-    raw = [];
-  }
-  let gitattributesText = String(options.gitattributesText || "");
-  if (!gitattributesText) {
-    try {
-      const ref = String(options.headSha || options.ref || "").trim() || "HEAD";
-      const attr = await apiJson(
-        `${base}/contents/.gitattributes?ref=${encodeURIComponent(ref)}`,
-        fetchImpl,
-        token
-      );
-      if (attr?.content && attr.encoding === "base64") {
-        gitattributesText = decodeBase64Utf8(
-          String(attr.content).replace(/\n/g, "")
-        );
-      } else if (typeof attr?.content === "string") {
-        gitattributesText = attr.content;
-      }
-    } catch (err) {
-      if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
-        throw err;
-      }
-      gitattributesText = "";
-    }
-  }
-  return {
-    files: mapAndAnnotateFiles(raw, gitattributesText),
-    gitattributesText
-  };
-}
-async function fetchPrIssueComments(owner, repo, number, fetchImpl, token = null, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  const o = String(owner || "").trim();
-  const r = String(repo || "").trim();
-  const n = Number(number);
-  const empty = {
-    items: [],
-    meta: {
-      page: 1,
-      perPage: COMMENT_PAGE_SIZE,
-      hasMore: false,
-      nextPage: null,
-      order: "from-end",
-      loadedCount: 0
-    }
-  };
-  if (!o || !r || !Number.isFinite(n)) return empty;
-  try {
-    return await fetchPrCommentsPage(
-      o,
-      r,
-      n,
-      "issue",
-      { page: 1, perPage: COMMENT_PAGE_SIZE, preferNewest: true },
-      fetchImpl,
-      token,
-      ctx
-    );
-  } catch (err) {
-    if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
-      throw err;
-    }
-    return empty;
-  }
-}
-async function fetchPrTimelineEvents(owner, repo, number, fetchImpl, token = null, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  const o = String(owner || "").trim();
-  const r = String(repo || "").trim();
-  const n = Number(number);
-  if (!o || !r || !Number.isFinite(n)) return [];
-  const SKIP = /* @__PURE__ */ new Set([
-    "subscribed",
-    "unsubscribed",
-    "mentioned",
-    "comment_deleted"
-  ]);
-  function mapEvent(raw) {
-    if (!raw || typeof raw !== "object") return null;
-    const event = String(raw.event || "").trim();
-    if (!event || SKIP.has(event)) return null;
-    const actor = raw.actor || raw.user || null;
-    const login = actor?.login || "";
-    const label = raw.label ? {
-      name: String(raw.label.name || ""),
-      color: String(raw.label.color || ""),
-      description: String(raw.label.description || "")
-    } : null;
-    const assigneeLogin = typeof raw.assignee === "string" ? raw.assignee : raw.assignee?.login || null;
-    const requestedReviewer = raw.requested_reviewer?.login || (typeof raw.requested_reviewer === "string" ? raw.requested_reviewer : null);
-    const requestedTeam = raw.requested_team?.slug || raw.requested_team?.name || (typeof raw.requested_team === "string" ? raw.requested_team : null);
-    const milestone = raw.milestone ? {
-      number: raw.milestone.number != null ? Number(raw.milestone.number) : null,
-      title: String(raw.milestone.title || "")
-    } : null;
-    const rename = raw.rename && typeof raw.rename === "object" ? {
-      from: String(raw.rename.from || ""),
-      to: String(raw.rename.to || "")
-    } : null;
-    return {
-      id: raw.id != null ? raw.id : null,
-      event,
-      actor: login,
-      avatarUrl: actor?.avatar_url || actor?.avatarUrl || "",
-      at: raw.created_at || raw.createdAt || null,
-      rename,
-      label: label && label.name ? label : null,
-      assignee: assigneeLogin || null,
-      requestedReviewer: requestedReviewer || null,
-      requestedTeam: requestedTeam || null,
-      milestone: milestone && (milestone.title || milestone.number != null) ? milestone : null,
-      lockReason: raw.lock_reason || raw.lockReason || null,
-      commitId: raw.commit_id || raw.commitId || null,
-      dismissReason: raw.dismissed_review?.dismissal_message || null,
-      reviewState: raw.dismissed_review?.state || raw.state || null
-    };
-  }
-  const out = [];
-  try {
-    const perPage = 100;
-    const maxPages = 10;
-    const pageUrl = (page) => githubRestUrl(
-      `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/issues/${n}/events?per_page=${perPage}&page=${page}`,
-      ctx
-    );
-    const first = await apiJsonWithLink(pageUrl(1), fetchImpl, token);
-    const firstBatch = Array.isArray(first.data) ? first.data : [];
-    const lastPage = parseLinkRelPage(first.link, "last") || (firstBatch.length < perPage ? 1 : null);
-    if (lastPage == null) {
-      for (const raw of firstBatch) {
-        const mapped = mapEvent(raw);
-        if (mapped) out.push(mapped);
-      }
-      let page = 2;
-      let link = first.link;
-      while (page <= maxPages) {
-        const next = parseLinkNextUrl(link);
-        if (!next) break;
-        const { data, link: nextLink } = await apiJsonWithLink(
-          pageUrl(page),
-          fetchImpl,
-          token
-        );
-        link = nextLink;
-        const batch = Array.isArray(data) ? data : [];
-        for (const raw of batch) {
-          const mapped = mapEvent(raw);
-          if (mapped) out.push(mapped);
-        }
-        if (batch.length < perPage) break;
-        page += 1;
-      }
-      return out;
-    }
-    const endPage = Math.max(1, Number(lastPage) || 1);
-    const startPage = Math.max(1, endPage - maxPages + 1);
-    const cachedPage1 = startPage === 1 ? firstBatch : null;
-    for (let page = startPage; page <= endPage; page++) {
-      let batch;
-      if (page === 1 && cachedPage1) {
-        batch = cachedPage1;
-      } else {
-        const { data } = await apiJsonWithLink(pageUrl(page), fetchImpl, token);
-        batch = Array.isArray(data) ? data : [];
-      }
-      for (const raw of batch) {
-        const mapped = mapEvent(raw);
-        if (mapped) out.push(mapped);
-      }
-    }
-    return out;
-  } catch (err) {
-    if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
-      throw err;
-    }
-    return [];
-  }
-}
-async function fetchPrReviews(owner, repo, number, fetchImpl, token = null, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  const o = String(owner || "").trim();
-  const r = String(repo || "").trim();
-  const n = Number(number);
-  if (!o || !r || !Number.isFinite(n)) return [];
-  try {
-    const data = await apiJson(
-      githubRestUrl(
-        `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/pulls/${n}/reviews?per_page=100`,
-        ctx
-      ),
-      fetchImpl,
-      token
-    );
-    return (Array.isArray(data) ? data : []).map((rev) => ({
-      id: rev.id,
-      author: rev.user?.login || "",
-      avatarUrl: rev.user?.avatar_url || "",
-      type: rev.user?.type || "",
-      isBot: String(rev.user?.type || "").toLowerCase() === "bot" || /\[bot\]$/i.test(String(rev.user?.login || "")),
-      state: rev.state || "",
-      body: rev.body || "",
-      submittedAt: rev.submitted_at
-    }));
-  } catch (err) {
-    if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
-      throw err;
-    }
-    return [];
-  }
-}
-const COMMENT_PAGE_SIZE = 50;
-function commentsPageHelpers() {
-  try {
-    let mod = typeof globalThis !== "undefined" ? globalThis.PRModalCommentsPage : null;
-    if (!mod && typeof require === "function") {
-      try {
-        mod = require("./modal/pure/comments-page.js");
-      } catch {
-        mod = null;
-      }
-    }
-    return mod;
-  } catch {
-    return null;
-  }
-}
-function mapRestReactions(raw) {
-  const DEFS = [
-    "+1",
-    "-1",
-    "laugh",
-    "hooray",
-    "confused",
-    "heart",
-    "rocket",
-    "eyes"
-  ];
-  if (!raw || typeof raw !== "object") return [];
-  const out = [];
-  for (const content of DEFS) {
-    const count = Number(raw[content]) || 0;
-    if (count <= 0) continue;
-    out.push({ content, count, viewerHasReacted: false, users: [] });
-  }
-  return out;
-}
-const GQL_REACTION_TO_REST = {
-  THUMBS_UP: "+1",
-  THUMBS_DOWN: "-1",
-  LAUGH: "laugh",
-  HOORAY: "hooray",
-  CONFUSED: "confused",
-  HEART: "heart",
-  ROCKET: "rocket",
-  EYES: "eyes",
-  "+1": "+1",
-  "-1": "-1",
-  laugh: "laugh",
-  hooray: "hooray",
-  confused: "confused",
-  heart: "heart",
-  rocket: "rocket",
-  eyes: "eyes"
-};
-function extractReactorLogins(reactors) {
-  const nodes = reactors?.nodes || [];
-  const out = [];
-  const seen = /* @__PURE__ */ new Set();
-  for (const n of Array.isArray(nodes) ? nodes : []) {
-    const login = String(n?.login || "").trim();
-    if (!login) continue;
-    const key = login.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(login);
-  }
-  return out;
-}
-function mapGraphqlReactionGroups(groups) {
-  if (!Array.isArray(groups)) return [];
-  const order = [
-    "+1",
-    "-1",
-    "laugh",
-    "hooray",
-    "confused",
-    "heart",
-    "rocket",
-    "eyes"
-  ];
-  const by = /* @__PURE__ */ new Map();
-  for (const g of groups) {
-    if (!g) continue;
-    const content = GQL_REACTION_TO_REST[String(g.content || "").toUpperCase()] || GQL_REACTION_TO_REST[String(g.content || "")] || null;
-    if (!content) continue;
-    const users = extractReactorLogins(g.reactors);
-    const count = Number(
-      g.reactors?.totalCount ?? g.users?.totalCount ?? users.length ?? 0
-    );
-    const viewerHasReacted = Boolean(g.viewerHasReacted);
-    if (count <= 0 && !viewerHasReacted) continue;
-    by.set(content, {
-      content,
-      count: Math.max(0, count, users.length),
-      viewerHasReacted,
-      users
-    });
-  }
-  return order.map((c) => by.get(c)).filter(Boolean);
-}
-async function fetchReactableReactionGroups(nodeIds, fetchImpl, token, ctx = null, opts = null) {
-  ctx = normalizeApiCtx(ctx);
-  const ids = [
-    ...new Set(
-      (Array.isArray(nodeIds) ? nodeIds : []).map((id) => String(id || "").trim()).filter(Boolean)
-    )
-  ].slice(0, 100);
-  const out = /* @__PURE__ */ new Map();
-  if (!ids.length || !token) return out;
-  const reactorsFirst = Math.max(
-    0,
-    Math.min(20, Number(opts?.reactorsFirst) || 0)
-  );
-  const reactorsSel = reactorsFirst > 0 ? `reactors(first:${reactorsFirst}){
-            totalCount
-            nodes{
-              ... on User { login }
-              ... on Bot { login }
-            }
-          }` : `reactors { totalCount }`;
-  const query = `query($ids:[ID!]!){
-    nodes(ids:$ids){
-      ... on Reactable {
-        id
-        reactionGroups {
-          content
-          viewerHasReacted
-          ${reactorsSel}
-        }
-      }
-    }
-  }`;
-  try {
-    const data = await apiGraphql(query, { ids }, fetchImpl, token, ctx);
-    for (const node of data?.nodes || []) {
-      if (!node?.id) continue;
-      out.set(String(node.id), mapGraphqlReactionGroups(node.reactionGroups));
-    }
-  } catch {
-  }
-  return out;
-}
-async function fetchReactableReactors(nodeId, fetchImpl, token, ctx = null, opts = null) {
-  ctx = normalizeApiCtx(ctx);
-  const id = String(nodeId || "").trim();
-  if (!id || !token) return [];
-  const first = Math.max(1, Math.min(10, Number(opts?.first) || 5));
-  const map = await fetchReactableReactionGroups(
-    [id],
-    fetchImpl,
-    token,
-    ctx,
-    { reactorsFirst: first }
-  );
-  return map.get(id) || [];
-}
-function mapIssueComment(c) {
-  return {
-    id: c.id,
-    author: c.user?.login || "",
-    avatarUrl: c.user?.avatar_url || "",
-    body: c.body || "",
-    createdAt: c.created_at,
-    nodeId: c.node_id || null,
-    reactions: mapRestReactions(c.reactions)
-  };
-}
-function mapReviewComment(c, extra = {}) {
-  const subjectTypeRaw = String(
-    extra.subjectType || c.subject_type || c.subjectType || ""
-  ).toLowerCase();
-  const isFileSubject = subjectTypeRaw === "file";
-  const line = isFileSubject ? null : c.line ?? c.original_line ?? (c.position != null && Number.isFinite(Number(c.position)) ? Number(c.position) : null);
-  const outdated = extra.outdated != null ? Boolean(extra.outdated) : c.outdated != null ? Boolean(c.outdated) : !isFileSubject && c.line == null && c.original_line != null;
-  const subjectType = isFileSubject || line == null && !c.original_line && c.path && subjectTypeRaw !== "line" ? "file" : "line";
-  return {
-    id: c.id,
-    author: c.user?.login || "",
-    avatarUrl: c.user?.avatar_url || "",
-    body: c.body || "",
-    path: c.path || "",
-    line: line != null ? Number(line) : null,
-    originalLine: subjectType === "file" ? null : c.original_line ?? null,
-    startLine: subjectType === "file" ? null : c.start_line ?? null,
-    side: c.side || "RIGHT",
-    startSide: c.start_side || null,
-    diffHunk: c.diff_hunk || c.diffHunk || "",
-    createdAt: c.created_at,
-    inReplyToId: c.in_reply_to_id ?? null,
-    nodeId: c.node_id || null,
-    reactions: mapRestReactions(c.reactions),
-    threadNodeId: extra.threadNodeId ?? null,
-    /** Pull request review id (groups file threads under one review event). */
-    reviewId: c.pull_request_review_id != null ? Number(c.pull_request_review_id) : extra.reviewId != null ? Number(extra.reviewId) : null,
-    resolved: Boolean(extra.resolved),
-    outdated,
-    /** True when part of a not-yet-submitted PENDING review (hidden from main list). */
-    pending: Boolean(extra.pending || c.pending),
-    pendingReviewId: extra.pendingReviewId ?? c.pendingReviewId ?? null,
-    /** `file` | `line` — file-level comments have no line anchor. */
-    subjectType
-  };
-}
-function mapGraphqlReviewCommentNode(node, threadMeta = {}) {
-  if (!node) return null;
-  const id = node.databaseId ?? null;
-  if (id == null) return null;
-  const reviewState = String(node.pullRequestReview?.state || "").toUpperCase();
-  const pending = reviewState === "PENDING";
-  const reviewDbId = node.pullRequestReview?.databaseId != null ? Number(node.pullRequestReview.databaseId) : null;
-  const subjectTypeRaw = String(
-    threadMeta.subjectType || node.subjectType || ""
-  ).toUpperCase();
-  const isFile = subjectTypeRaw === "FILE";
-  const line = isFile ? null : node.line != null ? Number(node.line) : node.originalLine != null ? Number(node.originalLine) : null;
-  const sideRaw = threadMeta.diffSide || threadMeta.side || "RIGHT";
-  const side = String(sideRaw).toUpperCase() === "LEFT" ? "LEFT" : "RIGHT";
-  return {
-    id: Number(id),
-    author: node.author?.login || "",
-    avatarUrl: node.author?.avatarUrl || "",
-    body: node.body || "",
-    path: node.path || threadMeta.path || "",
-    line,
-    originalLine: isFile ? null : node.originalLine ?? null,
-    startLine: isFile ? null : node.startLine ?? node.originalStartLine ?? null,
-    side,
-    startSide: threadMeta.startDiffSide || null,
-    diffHunk: node.diffHunk || "",
-    createdAt: node.createdAt || null,
-    inReplyToId: node.replyTo?.databaseId ?? null,
-    nodeId: node.id || null,
-    reactions: mapGraphqlReactionGroups(node.reactionGroups),
-    threadNodeId: threadMeta.threadNodeId || null,
-    reviewId: reviewDbId,
-    resolved: Boolean(threadMeta.resolved),
-    outdated: Boolean(node.outdated ?? threadMeta.isOutdated),
-    pending,
-    pendingReviewId: pending ? reviewDbId : null,
-    subjectType: isFile ? "file" : "line"
-  };
-}
-function mergePendingReviewComments(published, pendingList) {
-  const list = Array.isArray(published) ? published.slice() : [];
-  const seen = new Set(list.map((c) => c && c.id != null ? String(c.id) : "").filter(Boolean));
-  for (const p of Array.isArray(pendingList) ? pendingList : []) {
-    if (!p || p.id == null) continue;
-    const key = String(p.id);
-    if (seen.has(key)) {
-      const idx = list.findIndex((c) => c && String(c.id) === key);
-      if (idx < 0) continue;
-      const host = list[idx];
-      list[idx] = {
-        ...p,
-        ...host,
-        pending: Boolean(host.pending || p.pending),
-        pendingReviewId: host.pendingReviewId ?? p.pendingReviewId ?? null,
-        threadNodeId: host.threadNodeId || p.threadNodeId || null,
-        nodeId: host.nodeId || p.nodeId || null,
-        outdated: Boolean(host.outdated || p.outdated),
-        diffHunk: host.diffHunk || p.diffHunk || "",
-        resolved: Boolean(host.resolved || p.resolved)
-      };
-      continue;
-    }
-    seen.add(key);
-    list.push(p);
-  }
-  return list;
-}
-function pickViewerPendingFromReviews(reviews, login) {
-  const list = Array.isArray(reviews) ? reviews : [];
-  const mine = list.filter((r2) => {
-    if (!r2 || String(r2.state || "").toUpperCase() !== "PENDING") return false;
-    if (!login) return true;
-    return String(r2.user?.login || "").toLowerCase() === String(login).toLowerCase();
-  });
-  if (!mine.length) return null;
-  const r = mine[mine.length - 1];
-  return {
-    id: Number(r.id),
-    node_id: r.node_id || null
-  };
-}
-async function fetchViewerPendingReviewBundle(owner, repo, pullNumber, fetchImpl, token, preloaded = null, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  if (!token) return { comments: [], review: null };
-  let pending = null;
-  if (preloaded && (Array.isArray(preloaded.reviews) || preloaded.login != null)) {
-    pending = pickViewerPendingFromReviews(
-      preloaded.reviews,
-      preloaded.login || null
-    );
-  }
-  if (!pending?.id) {
-    pending = await findViewerPendingReview(
-      owner,
-      repo,
-      pullNumber,
-      fetchImpl,
-      token
-    );
-  }
-  if (!pending?.id) return { comments: [], review: null };
-  try {
-    const n = Number(pullNumber);
-    const raw = await apiJson(
-      githubRestUrl(`/repos/${owner}/${repo}/pulls/${n}/reviews/${pending.id}/comments?per_page=100`, ctx),
-      fetchImpl,
-      token
-    );
-    const comments = (Array.isArray(raw) ? raw : []).map(
-      (c) => mapReviewComment(c, { pending: true, pendingReviewId: pending.id })
-    );
-    return {
-      comments,
-      review: {
-        id: pending.id,
-        nodeId: pending.node_id || null,
-        commentCount: comments.length
-      }
-    };
-  } catch {
-    return {
-      comments: [],
-      review: {
-        id: pending.id,
-        nodeId: pending.node_id || null,
-        commentCount: 0
-      }
-    };
-  }
-}
-async function fetchViewerPendingReviewComments(owner, repo, pullNumber, fetchImpl, token) {
-  const { comments } = await fetchViewerPendingReviewBundle(
-    owner,
-    repo,
-    pullNumber,
-    fetchImpl,
-    token
-  );
-  return comments;
-}
-async function createPendingPullReview(owner, repo, pullNumber, { commitId } = {}, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  const body = {};
-  if (commitId) body.commit_id = commitId;
-  return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`, ctx),
-    fetchImpl,
-    token,
-    { method: "POST", body }
-  );
-}
-async function submitPendingPullReview(owner, repo, pullNumber, reviewId, { event = "COMMENT", body = "" } = {}, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  const id = Number(reviewId);
-  if (!Number.isFinite(id) || id <= 0) {
-    throw new Error("Invalid pending review id");
-  }
-  const ev = String(event || "COMMENT").toUpperCase();
-  if (!["COMMENT", "APPROVE", "REQUEST_CHANGES"].includes(ev)) {
-    throw new Error("Invalid review event");
-  }
-  return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${id}/events`, ctx),
-    fetchImpl,
-    token,
-    { method: "POST", body: { event: ev, body: body || "" } }
-  );
-}
-async function deletePendingPullReview(owner, repo, pullNumber, reviewId, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  const id = Number(reviewId);
-  if (!Number.isFinite(id) || id <= 0) {
-    throw new Error("Invalid pending review id");
-  }
-  return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${id}`, ctx),
-    fetchImpl,
-    token,
-    { method: "DELETE" }
-  );
-}
-async function fetchPrCommentsPage(owner, repo, pullNumber, kind, opts, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  const helpers = commentsPageHelpers();
-  const perPage = helpers?.clampPerPage?.(opts?.perPage) || Math.min(100, Number(opts?.perPage) || COMMENT_PAGE_SIZE);
-  let page = Math.max(1, Number(opts?.page) || 1);
-  const since = opts?.since || null;
-  const preferNewest = Boolean(opts?.preferNewest) && !since;
-  const orderHint = opts?.order || null;
-  async function fetchPage(pageNum, listOpts = {}, ctx2 = null) {
-    ctx2 = normalizeApiCtx(ctx2);
-    const sort = listOpts.sort != null ? listOpts.sort : kind === "review" ? "created" : void 0;
-    const direction = listOpts.direction != null ? listOpts.direction : kind === "review" ? preferNewest || orderHint === "desc" ? "desc" : "asc" : void 0;
-    const url = helpers?.buildCommentsListUrl ? helpers.buildCommentsListUrl(kind, owner, repo, pullNumber, {
-      page: pageNum,
-      perPage,
-      since,
-      sort,
-      direction
-    }) : (() => {
-      const base = kind === "review" ? githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/comments`, ctx2) : githubRestUrl(`/repos/${owner}/${repo}/issues/${pullNumber}/comments`, ctx2);
-      const q = new URLSearchParams({
-        per_page: String(perPage),
-        page: String(pageNum)
-      });
-      if (since) q.set("since", since);
-      if (sort) q.set("sort", sort);
-      if (direction) q.set("direction", direction);
-      return `${base}?${q}`;
-    })();
-    const { data, link } = await apiJsonWithLink(url, fetchImpl, token);
-    const raw = Array.isArray(data) ? data : [];
-    const items = kind === "review" ? raw.map(mapReviewComment) : raw.map(mapIssueComment);
-    if (kind === "issue" && token && items.length) {
-      const ids = items.map((c) => c?.nodeId).filter(Boolean);
-      if (ids.length) {
-        const byId = await fetchReactableReactionGroups(
-          ids,
-          fetchImpl,
-          token,
-          ctx2
-        );
-        for (const c of items) {
-          if (!c?.nodeId) continue;
-          const groups = byId.get(String(c.nodeId));
-          if (groups && groups.length) c.reactions = groups;
-        }
-      }
-    }
-    return { items, raw, link, pageNum };
-  }
-  if (kind === "issue" && preferNewest && page === 1 && !orderHint) {
-    const probe = await fetchPage(1);
-    const lastPage = helpers?.parseLinkLastPage && helpers.parseLinkLastPage(probe.link) || null;
-    if (lastPage != null && lastPage > 1) {
-      const newest = await fetchPage(lastPage);
-      const meta3 = helpers?.buildCommentsPageMeta ? helpers.buildCommentsPageMeta(newest.items, {
-        page: lastPage,
-        perPage,
-        linkHeader: newest.link,
-        since,
-        order: "from-end"
-      }) : {
-        page: lastPage,
-        perPage,
-        hasMore: lastPage > 1,
-        nextPage: lastPage > 1 ? lastPage - 1 : null,
-        order: "from-end",
-        since,
-        loadedCount: newest.items.length
-      };
-      return { items: newest.items, meta: meta3, kind };
-    }
-    const meta2 = helpers?.buildCommentsPageMeta ? helpers.buildCommentsPageMeta(probe.items, {
-      page: 1,
-      perPage,
-      linkHeader: probe.link,
-      since,
-      order: "from-end"
-    }) : {
-      page: 1,
-      perPage,
-      hasMore: false,
-      nextPage: null,
-      order: "from-end",
-      since,
-      loadedCount: probe.items.length
-    };
-    return { items: probe.items, meta: meta2, kind };
-  }
-  if (kind === "issue" && (orderHint === "from-end" || opts?.order === "from-end")) {
-    const res2 = await fetchPage(page);
-    const meta2 = helpers?.buildCommentsPageMeta ? helpers.buildCommentsPageMeta(res2.items, {
-      page,
-      perPage,
-      linkHeader: res2.link,
-      since,
-      order: "from-end"
-    }) : {
-      page,
-      perPage,
-      hasMore: page > 1,
-      nextPage: page > 1 ? page - 1 : null,
-      order: "from-end",
-      since,
-      loadedCount: res2.items.length
-    };
-    return { items: res2.items, meta: meta2, kind };
-  }
-  const res = await fetchPage(page, {
-    direction: kind === "review" ? preferNewest || orderHint === "desc" ? "desc" : "asc" : void 0,
-    sort: kind === "review" ? "created" : void 0
-  });
-  const meta = helpers?.buildCommentsPageMeta ? helpers.buildCommentsPageMeta(res.items, {
-    page,
-    perPage,
-    linkHeader: res.link,
-    since,
-    order: kind === "review" && (preferNewest || orderHint === "desc") ? "desc" : "asc"
-  }) : {
-    page,
-    perPage,
-    hasMore: res.raw.length >= perPage,
-    nextPage: res.raw.length >= perPage ? page + 1 : null,
-    since,
-    loadedCount: res.items.length
-  };
-  return { items: res.items, meta, kind };
-}
 async function apiSend(url, fetchImpl, token, { method = "GET", body } = {}) {
   const headers = buildApiHeaders(token);
   if (body != null) headers["Content-Type"] = "application/json";
@@ -5484,139 +4248,9 @@ async function apiSend(url, fetchImpl, token, { method = "GET", body } = {}) {
   if (res.status === 204) return null;
   return res.json();
 }
-async function fetchPrSidebarMeta(owner, repo, number, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  const o = String(owner || "").trim();
-  const r = String(repo || "").trim();
-  const n = Number(number);
-  if (!o || !r || !Number.isFinite(n) || n <= 0 || !token) {
-    return { projects: [], developmentIssues: [] };
-  }
-  const query = `
-    query($owner:String!,$repo:String!,$number:Int!) {
-      repository(owner:$owner, name:$repo) {
-        pullRequest(number:$number) {
-          projectItems(first: 20) {
-            nodes {
-              id
-              project {
-                title
-                number
-                url
-              }
-            }
-          }
-          closingIssuesReferences(first: 20) {
-            nodes {
-              number
-              title
-              url
-              state
-            }
-          }
-        }
-      }
-    }
-  `;
-  try {
-    const data = await apiGraphql(
-      query,
-      { owner: o, repo: r, number: n },
-      fetchImpl,
-      token,
-      ctx
-    );
-    const prNode = data?.repository?.pullRequest || null;
-    const projects = [];
-    for (const node of prNode?.projectItems?.nodes || []) {
-      const p = node?.project;
-      if (!p) continue;
-      const title = String(p.title || "").trim();
-      if (!title) continue;
-      projects.push({
-        id: String(node.id || `${p.number}:${title}`),
-        title,
-        number: p.number != null ? Number(p.number) : null,
-        url: String(p.url || "").trim()
-      });
-    }
-    const developmentIssues = [];
-    for (const node of prNode?.closingIssuesReferences?.nodes || []) {
-      const num = Number(node?.number);
-      if (!Number.isFinite(num) || num <= 0) continue;
-      developmentIssues.push({
-        number: num,
-        title: String(node?.title || "").trim(),
-        url: String(node?.url || "").trim(),
-        state: String(node?.state || "").trim().toLowerCase()
-      });
-    }
-    return { projects, developmentIssues };
-  } catch (err) {
-    if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
-      throw err;
-    }
-    return { projects: [], developmentIssues: [] };
-  }
-}
-async function fetchIssueOrPrSummaries(owner, repo, numbers, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  const o = String(owner || "").trim();
-  const r = String(repo || "").trim();
-  const nums = [
-    ...new Set(
-      (Array.isArray(numbers) ? numbers : []).map((n) => Number(n)).filter((n) => Number.isFinite(n) && n > 0)
-    )
-  ].slice(0, 30);
-  const out = /* @__PURE__ */ new Map();
-  if (!o || !r || !nums.length || !token) return out;
-  const fields = nums.map(
-    (n, i) => `
-      n${i}: issueOrPullRequest(number: ${n}) {
-        __typename
-        ... on Issue { number title url state }
-        ... on PullRequest { number title url state }
-      }`
-  ).join("\n");
-  const query = `
-    query($owner:String!,$repo:String!) {
-      repository(owner:$owner, name:$repo) {
-        ${fields}
-      }
-    }
-  `;
-  try {
-    const data = await apiGraphql(
-      query,
-      { owner: o, repo: r },
-      fetchImpl,
-      token,
-      ctx
-    );
-    const repoNode = data?.repository || {};
-    for (let i = 0; i < nums.length; i++) {
-      const node = repoNode[`n${i}`];
-      if (!node || node.number == null) continue;
-      const num = Number(node.number);
-      if (!Number.isFinite(num) || num <= 0) continue;
-      out.set(num, {
-        number: num,
-        title: String(node.title || "").trim(),
-        url: String(node.url || "").trim(),
-        state: String(node.state || "").trim().toLowerCase(),
-        kind: node.__typename === "PullRequest" ? "pull" : "issue"
-      });
-    }
-  } catch (err) {
-    if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
-      throw err;
-    }
-  }
-  return out;
-}
-const GQL_COST_LOG_MAX = 400;
-const gqlCostLogEntries = [];
-let gqlCostHeaderUsedPrev = null;
+var GQL_COST_LOG_MAX = 400;
+var gqlCostLogEntries = [];
+var gqlCostHeaderUsedPrev = null;
 function graphqlCostPure() {
   try {
     return typeof globalThis !== "undefined" ? globalThis.PRModalGraphqlCostLog || null : null;
@@ -5749,7 +4383,7 @@ function summarizeGraphqlCostLog() {
   return summarizeGraphqlCostLogLocal(gqlCostLogEntries);
 }
 async function apiGraphql(query, variables, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
+  ctx = normalizeApiCtx2(ctx);
   const op = labelGraphqlOperationLocal(query, variables);
   const vars = sanitizeGraphqlVariablesLocal(variables);
   const q = injectRateLimitCostFieldLocal(query);
@@ -5859,7 +4493,2541 @@ async function apiGraphql(query, variables, fetchImpl, token, ctx = null) {
   });
   return json?.data ?? null;
 }
-const REVIEW_THREAD_SHELL_FIELDS = `
+function fetchNowMs2() {
+  return typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
+}
+async function timedFetch2(timings, name, promise, extra = void 0, opts = {}) {
+  const t0 = fetchNowMs2();
+  const batchStart = opts && Number.isFinite(opts.batchStart) ? Number(opts.batchStart) : null;
+  if (batchStart != null) {
+    timings[`${name}_start`] = Math.round(t0 - batchStart);
+  }
+  try {
+    const result = await promise;
+    const ms = Math.round(fetchNowMs2() - t0);
+    timings[name] = ms;
+    let suffix = "";
+    try {
+      if (typeof extra === "function") suffix = extra(result) || "";
+    } catch {
+    }
+    const startLabel = batchStart != null && timings[`${name}_start`] != null ? ` t+${timings[`${name}_start`]}ms` : "";
+    console.log(
+      `[pr-plus] fetchPrDetail ${name}: ${ms}ms${startLabel}${suffix ? ` ${suffix}` : ""}`
+    );
+    return result;
+  } catch (err) {
+    const ms = Math.round(fetchNowMs2() - t0);
+    timings[name] = ms;
+    const msg = err?.message || String(err);
+    timings[`${name}_error`] = msg;
+    const startLabel = batchStart != null && timings[`${name}_start`] != null ? ` t+${timings[`${name}_start`]}ms` : "";
+    console.log(
+      `[pr-plus] fetchPrDetail ${name}: ${ms}ms${startLabel} ERROR ${msg}`
+    );
+    throw err;
+  }
+}
+function logParallelRestSummary2(timings, names, wallMs) {
+  const rows = (Array.isArray(names) ? names : []).map((name) => {
+    const ms = Number(timings[name]);
+    const start = Number(timings[`${name}_start`]);
+    const err = timings[`${name}_error`];
+    return {
+      name,
+      ms: Number.isFinite(ms) ? ms : null,
+      start: Number.isFinite(start) ? start : null,
+      error: err ? String(err) : null
+    };
+  }).filter((r) => r.ms != null);
+  rows.sort((a, b) => (b.ms || 0) - (a.ms || 0));
+  const slowest = rows[0];
+  const sum = rows.reduce((s, r) => s + (r.ms || 0), 0);
+  const lines = rows.map((r) => {
+    const bar = wallMs > 0 && r.ms != null ? "\u2588".repeat(Math.max(1, Math.round(r.ms / wallMs * 20))) : "";
+    const start = r.start != null ? `+${r.start}ms`.padStart(7) : "   n/a";
+    const dur = r.ms != null ? `${r.ms}ms`.padStart(6) : "   n/a";
+    const err = r.error ? ` ERR:${r.error.slice(0, 40)}` : "";
+    return `  ${r.name.padEnd(16)} start${start}  dur${dur}  ${bar}${err}`;
+  });
+  console.log(
+    `[pr-plus] fetchPrDetail parallel REST summary
+  wall=${Math.round(wallMs)}ms  sum=${sum}ms  slowest=${slowest ? `${slowest.name}@${slowest.ms}ms` : "n/a"}
+` + (lines.length ? lines.join("\n") : "  (no rows)")
+  );
+  timings.coreParallel = {
+    wallMs: Math.round(wallMs),
+    sumMs: sum,
+    slowest: slowest ? { name: slowest.name, ms: slowest.ms } : null,
+    byName: Object.fromEntries(rows.map((r) => [r.name, r.ms]))
+  };
+}
+function sleepMs(ms) {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms || 0)));
+}
+
+// src/fetch/mappers.ts
+function mapApiPullRequest(pr) {
+  const author = pr.user?.login || "";
+  const authorAvatarUrl = pr.user?.avatar_url || "";
+  const labels = Array.isArray(pr.labels) ? pr.labels.map((l) => ({
+    name: l?.name || String(l || ""),
+    color: l?.color || "",
+    description: l?.description || ""
+  })).filter((l) => l.name) : [];
+  const assignees = Array.isArray(pr.assignees) ? pr.assignees.map((u) => u?.login || u).filter(Boolean) : [];
+  const requestedReviewers = Array.isArray(pr.requested_reviewers) ? pr.requested_reviewers.map((u) => u?.login || u).filter(Boolean) : [];
+  const avatarUrls = {};
+  const putUser = (u) => {
+    const login = u?.login || (typeof u === "string" ? u : "");
+    const url = u?.avatar_url || "";
+    if (login && url) avatarUrls[String(login).toLowerCase()] = url;
+  };
+  putUser(pr.user);
+  for (const u of pr.assignees || []) putUser(u);
+  for (const u of pr.requested_reviewers || []) putUser(u);
+  const milestone = pr.milestone ? {
+    number: pr.milestone.number,
+    title: pr.milestone.title || "",
+    state: pr.milestone.state || "",
+    dueOn: pr.milestone.due_on || null
+  } : null;
+  return {
+    number: pr.number,
+    title: pr.title,
+    // Body required so attachMagicLinks/prMatchText can match description tokens
+    body: pr.body || "",
+    headRef: pr.head?.ref || "",
+    baseRef: pr.base?.ref || "",
+    author,
+    authorAvatarUrl,
+    draft: Boolean(pr.draft),
+    htmlUrl: pr.html_url,
+    labels,
+    assignees,
+    requestedReviewers,
+    milestone,
+    avatarUrls,
+    // Optional stats when present on full list items
+    additions: pr.additions ?? null,
+    deletions: pr.deletions ?? null,
+    changedFiles: pr.changed_files ?? null,
+    // Official PR review-comment count (not thread count). Used to skip GraphQL
+    // escalate when 0 and to size REST windows.
+    reviewCommentsCount: pr.review_comments != null && Number.isFinite(Number(pr.review_comments)) ? Number(pr.review_comments) : null,
+    nodeId: pr.node_id || null
+  };
+}
+function mapPrCommitRow(c) {
+  return {
+    sha: c?.sha || "",
+    message: c?.commit?.message || c?.message || "",
+    author: c?.commit?.author?.name || c?.author?.login || c?.author || "",
+    date: c?.commit?.author?.date || c?.commit?.committer?.date || c?.date || ""
+  };
+}
+function commentsPageHelpers() {
+  try {
+    let mod = typeof globalThis !== "undefined" ? globalThis.PRModalCommentsPage : null;
+    if (!mod && typeof __require === "function") {
+      try {
+        mod = __require("./modal/pure/comments-page.js");
+      } catch {
+        mod = null;
+      }
+    }
+    return mod;
+  } catch {
+    return null;
+  }
+}
+function mapRestReactions2(raw) {
+  const DEFS = [
+    "+1",
+    "-1",
+    "laugh",
+    "hooray",
+    "confused",
+    "heart",
+    "rocket",
+    "eyes"
+  ];
+  if (!raw || typeof raw !== "object") return [];
+  const out = [];
+  for (const content of DEFS) {
+    const count = Number(raw[content]) || 0;
+    if (count <= 0) continue;
+    out.push({ content, count, viewerHasReacted: false, users: [] });
+  }
+  return out;
+}
+var GQL_REACTION_TO_REST = {
+  THUMBS_UP: "+1",
+  THUMBS_DOWN: "-1",
+  LAUGH: "laugh",
+  HOORAY: "hooray",
+  CONFUSED: "confused",
+  HEART: "heart",
+  ROCKET: "rocket",
+  EYES: "eyes",
+  "+1": "+1",
+  "-1": "-1",
+  laugh: "laugh",
+  hooray: "hooray",
+  confused: "confused",
+  heart: "heart",
+  rocket: "rocket",
+  eyes: "eyes"
+};
+function extractReactorLogins(reactors) {
+  const nodes = reactors?.nodes || [];
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const n of Array.isArray(nodes) ? nodes : []) {
+    const login = String(n?.login || "").trim();
+    if (!login) continue;
+    const key = login.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(login);
+  }
+  return out;
+}
+function mapGraphqlReactionGroups(groups) {
+  if (!Array.isArray(groups)) return [];
+  const order = [
+    "+1",
+    "-1",
+    "laugh",
+    "hooray",
+    "confused",
+    "heart",
+    "rocket",
+    "eyes"
+  ];
+  const by = /* @__PURE__ */ new Map();
+  for (const g of groups) {
+    if (!g) continue;
+    const content = GQL_REACTION_TO_REST[String(g.content || "").toUpperCase()] || GQL_REACTION_TO_REST[String(g.content || "")] || null;
+    if (!content) continue;
+    const users = extractReactorLogins(g.reactors);
+    const count = Number(
+      g.reactors?.totalCount ?? g.users?.totalCount ?? users.length ?? 0
+    );
+    const viewerHasReacted = Boolean(g.viewerHasReacted);
+    if (count <= 0 && !viewerHasReacted) continue;
+    by.set(content, {
+      content,
+      count: Math.max(0, count, users.length),
+      viewerHasReacted,
+      users
+    });
+  }
+  return order.map((c) => by.get(c)).filter(Boolean);
+}
+function mapIssueComment(c) {
+  return {
+    id: c.id,
+    author: c.user?.login || "",
+    avatarUrl: c.user?.avatar_url || "",
+    body: c.body || "",
+    createdAt: c.created_at,
+    nodeId: c.node_id || null,
+    reactions: mapRestReactions2(c.reactions)
+  };
+}
+function mapReviewComment(c, extra = {}) {
+  const subjectTypeRaw = String(
+    extra.subjectType || c.subject_type || c.subjectType || ""
+  ).toLowerCase();
+  const isFileSubject = subjectTypeRaw === "file";
+  const line = isFileSubject ? null : c.line ?? c.original_line ?? (c.position != null && Number.isFinite(Number(c.position)) ? Number(c.position) : null);
+  const outdated = extra.outdated != null ? Boolean(extra.outdated) : c.outdated != null ? Boolean(c.outdated) : !isFileSubject && c.line == null && c.original_line != null;
+  const subjectType = isFileSubject || line == null && !c.original_line && c.path && subjectTypeRaw !== "line" ? "file" : "line";
+  return {
+    id: c.id,
+    author: c.user?.login || "",
+    avatarUrl: c.user?.avatar_url || "",
+    body: c.body || "",
+    path: c.path || "",
+    line: line != null ? Number(line) : null,
+    originalLine: subjectType === "file" ? null : c.original_line ?? null,
+    startLine: subjectType === "file" ? null : c.start_line ?? null,
+    side: c.side || "RIGHT",
+    startSide: c.start_side || null,
+    diffHunk: c.diff_hunk || c.diffHunk || "",
+    createdAt: c.created_at,
+    inReplyToId: c.in_reply_to_id ?? null,
+    nodeId: c.node_id || null,
+    reactions: mapRestReactions2(c.reactions),
+    threadNodeId: extra.threadNodeId ?? null,
+    /** Pull request review id (groups file threads under one review event). */
+    reviewId: c.pull_request_review_id != null ? Number(c.pull_request_review_id) : extra.reviewId != null ? Number(extra.reviewId) : null,
+    resolved: Boolean(extra.resolved),
+    outdated,
+    /** True when part of a not-yet-submitted PENDING review (hidden from main list). */
+    pending: Boolean(extra.pending || c.pending),
+    pendingReviewId: extra.pendingReviewId ?? c.pendingReviewId ?? null,
+    /** `file` | `line` — file-level comments have no line anchor. */
+    subjectType
+  };
+}
+function mapGraphqlReviewCommentNode(node, threadMeta = {}) {
+  if (!node) return null;
+  const id = node.databaseId ?? null;
+  if (id == null) return null;
+  const reviewState = String(node.pullRequestReview?.state || "").toUpperCase();
+  const pending = reviewState === "PENDING";
+  const reviewDbId = node.pullRequestReview?.databaseId != null ? Number(node.pullRequestReview.databaseId) : null;
+  const subjectTypeRaw = String(
+    threadMeta.subjectType || node.subjectType || ""
+  ).toUpperCase();
+  const isFile = subjectTypeRaw === "FILE";
+  const line = isFile ? null : node.line != null ? Number(node.line) : node.originalLine != null ? Number(node.originalLine) : null;
+  const sideRaw = threadMeta.diffSide || threadMeta.side || "RIGHT";
+  const side = String(sideRaw).toUpperCase() === "LEFT" ? "LEFT" : "RIGHT";
+  return {
+    id: Number(id),
+    author: node.author?.login || "",
+    avatarUrl: node.author?.avatarUrl || "",
+    body: node.body || "",
+    path: node.path || threadMeta.path || "",
+    line,
+    originalLine: isFile ? null : node.originalLine ?? null,
+    startLine: isFile ? null : node.startLine ?? node.originalStartLine ?? null,
+    side,
+    startSide: threadMeta.startDiffSide || null,
+    diffHunk: node.diffHunk || "",
+    createdAt: node.createdAt || null,
+    inReplyToId: node.replyTo?.databaseId ?? null,
+    nodeId: node.id || null,
+    reactions: mapGraphqlReactionGroups(node.reactionGroups),
+    threadNodeId: threadMeta.threadNodeId || null,
+    reviewId: reviewDbId,
+    resolved: Boolean(threadMeta.resolved),
+    outdated: Boolean(node.outdated ?? threadMeta.isOutdated),
+    pending,
+    pendingReviewId: pending ? reviewDbId : null,
+    subjectType: isFile ? "file" : "line"
+  };
+}
+function extractRepoMergeMethodFlags2(repo) {
+  if (!repo || typeof repo !== "object") return null;
+  const has = Object.prototype.hasOwnProperty.call(repo, "allow_merge_commit") || Object.prototype.hasOwnProperty.call(repo, "allow_squash_merge") || Object.prototype.hasOwnProperty.call(repo, "allow_rebase_merge");
+  if (!has) return null;
+  const flag = (v) => v === true || v === false ? v : null;
+  return {
+    allowMergeCommit: flag(repo.allow_merge_commit),
+    allowSquashMerge: flag(repo.allow_squash_merge),
+    allowRebaseMerge: flag(repo.allow_rebase_merge)
+  };
+}
+function extractViewerCanMergeAsAdmin2(repo) {
+  if (!repo || typeof repo !== "object") return null;
+  const p = repo.permissions;
+  if (!p || typeof p !== "object") return null;
+  if (p.admin === true) return true;
+  if (p.admin === false) return false;
+  return null;
+}
+function mapGraphqlReviewCommentToRest(c, fallback = {}) {
+  if (!c) return null;
+  return {
+    id: c.databaseId ?? fallback.id ?? null,
+    node_id: c.id || null,
+    body: c.body || fallback.body || "",
+    path: c.path || fallback.path || "",
+    line: c.line ?? fallback.line ?? null,
+    original_line: c.originalLine ?? null,
+    start_line: c.startLine ?? fallback.startLine ?? null,
+    side: c.side || fallback.side || "RIGHT",
+    start_side: c.startSide || null,
+    diff_hunk: c.diffHunk || "",
+    created_at: c.createdAt || fallback.createdAt || null,
+    in_reply_to_id: c.replyTo?.databaseId ?? c.replyTo?.id ?? fallback.inReplyToId ?? fallback.in_reply_to_id ?? null,
+    user: {
+      login: c.author?.login || fallback.author || "",
+      avatar_url: c.author?.avatarUrl || fallback.avatarUrl || ""
+    },
+    pull_request_review_id: c.pullRequestReview?.databaseId ?? null
+  };
+}
+function mapViewerSubscription(state) {
+  const s = String(state || "").toUpperCase();
+  if (s === "SUBSCRIBED") return { subscribed: true, ignored: false, viewerSubscription: s };
+  if (s === "IGNORED") return { subscribed: false, ignored: true, viewerSubscription: s };
+  if (s === "UNSUBSCRIBED") {
+    return { subscribed: false, ignored: false, viewerSubscription: s };
+  }
+  return { subscribed: null, ignored: false, viewerSubscription: s || null };
+}
+function mapAndAnnotateFiles(files, gitattributesText = "") {
+  const mappedFiles = (Array.isArray(files) ? files : []).map((f) => ({
+    filename: f.filename,
+    status: f.status,
+    additions: f.additions,
+    deletions: f.deletions,
+    changes: f.changes,
+    patch: f.patch || "",
+    // Preserve media URLs for image preview / binary classification
+    raw_url: f.raw_url || f.rawUrl || "",
+    blob_url: f.blob_url || f.blobUrl || "",
+    contents_url: f.contents_url || f.contentsUrl || "",
+    sha: f.sha || "",
+    previous_filename: f.previous_filename || f.previousFilename || ""
+  }));
+  let filesOut;
+  try {
+    let collapse = typeof globalThis !== "undefined" ? globalThis.PRModalCollapse : null;
+    if (!collapse && typeof __require === "function") {
+      try {
+        collapse = __require("./modal/pure/collapse.js");
+      } catch {
+        collapse = null;
+      }
+    }
+    if (collapse?.annotateFilesForCollapse) {
+      filesOut = collapse.annotateFilesForCollapse(mappedFiles, gitattributesText);
+    }
+  } catch {
+    filesOut = null;
+  }
+  if (!filesOut) {
+    const LARGE = 5e3;
+    filesOut = mappedFiles.map((f) => {
+      const path = f.filename || "";
+      const isImage = /\.(png|jpe?g|gif|webp|bmp|svg|ico|avif)$/i.test(path);
+      const hasPatch = Boolean(f.patch);
+      const kind = isImage ? "image" : hasPatch ? "text" : "binary";
+      return {
+        ...f,
+        fileKind: kind,
+        openableAsText: kind === "text",
+        renderImage: kind === "image",
+        defaultCollapsed: kind === "binary" || (f.changes || 0) >= LARGE || /package-lock\.json$|yarn\.lock$|\.min\.(js|css)$|\.bundle\.js$/i.test(
+          path
+        )
+      };
+    });
+  }
+  return filesOut;
+}
+
+// src/fetch/detail-sides-comments.ts
+async function fetchPrIssueComments(owner, repo, number, fetchImpl, token = null, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  const o = String(owner || "").trim();
+  const r = String(repo || "").trim();
+  const n = Number(number);
+  const empty = {
+    items: [],
+    meta: {
+      page: 1,
+      perPage: COMMENT_PAGE_SIZE2,
+      hasMore: false,
+      nextPage: null,
+      order: "from-end",
+      loadedCount: 0
+    }
+  };
+  if (!o || !r || !Number.isFinite(n)) return empty;
+  try {
+    return await fetchPrCommentsPage2(
+      o,
+      r,
+      n,
+      "issue",
+      { page: 1, perPage: COMMENT_PAGE_SIZE2, preferNewest: true },
+      fetchImpl,
+      token,
+      ctx
+    );
+  } catch (err) {
+    if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
+      throw err;
+    }
+    return empty;
+  }
+}
+async function fetchPrTimelineEvents(owner, repo, number, fetchImpl, token = null, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  const o = String(owner || "").trim();
+  const r = String(repo || "").trim();
+  const n = Number(number);
+  if (!o || !r || !Number.isFinite(n)) return [];
+  const SKIP = /* @__PURE__ */ new Set([
+    "subscribed",
+    "unsubscribed",
+    "mentioned",
+    "comment_deleted"
+  ]);
+  function mapEvent(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    const event = String(raw.event || "").trim();
+    if (!event || SKIP.has(event)) return null;
+    const actor = raw.actor || raw.user || null;
+    const login = actor?.login || "";
+    const label = raw.label ? {
+      name: String(raw.label.name || ""),
+      color: String(raw.label.color || ""),
+      description: String(raw.label.description || "")
+    } : null;
+    const assigneeLogin = typeof raw.assignee === "string" ? raw.assignee : raw.assignee?.login || null;
+    const requestedReviewer = raw.requested_reviewer?.login || (typeof raw.requested_reviewer === "string" ? raw.requested_reviewer : null);
+    const requestedTeam = raw.requested_team?.slug || raw.requested_team?.name || (typeof raw.requested_team === "string" ? raw.requested_team : null);
+    const milestone = raw.milestone ? {
+      number: raw.milestone.number != null ? Number(raw.milestone.number) : null,
+      title: String(raw.milestone.title || "")
+    } : null;
+    const rename = raw.rename && typeof raw.rename === "object" ? {
+      from: String(raw.rename.from || ""),
+      to: String(raw.rename.to || "")
+    } : null;
+    return {
+      id: raw.id != null ? raw.id : null,
+      event,
+      actor: login,
+      avatarUrl: actor?.avatar_url || actor?.avatarUrl || "",
+      at: raw.created_at || raw.createdAt || null,
+      rename,
+      label: label && label.name ? label : null,
+      assignee: assigneeLogin || null,
+      requestedReviewer: requestedReviewer || null,
+      requestedTeam: requestedTeam || null,
+      milestone: milestone && (milestone.title || milestone.number != null) ? milestone : null,
+      lockReason: raw.lock_reason || raw.lockReason || null,
+      commitId: raw.commit_id || raw.commitId || null,
+      dismissReason: raw.dismissed_review?.dismissal_message || null,
+      reviewState: raw.dismissed_review?.state || raw.state || null
+    };
+  }
+  const out = [];
+  try {
+    const perPage = 100;
+    const maxPages = 10;
+    const pageUrl = (page) => githubRestUrl2(
+      `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/issues/${n}/events?per_page=${perPage}&page=${page}`,
+      ctx
+    );
+    const first = await apiJsonWithLink(pageUrl(1), fetchImpl, token);
+    const firstBatch = Array.isArray(first.data) ? first.data : [];
+    const lastPage = parseLinkRelPage(first.link, "last") || (firstBatch.length < perPage ? 1 : null);
+    if (lastPage == null) {
+      for (const raw of firstBatch) {
+        const mapped = mapEvent(raw);
+        if (mapped) out.push(mapped);
+      }
+      let page = 2;
+      let link = first.link;
+      while (page <= maxPages) {
+        const next = parseLinkNextUrl(link);
+        if (!next) break;
+        const { data, link: nextLink } = await apiJsonWithLink(
+          pageUrl(page),
+          fetchImpl,
+          token
+        );
+        link = nextLink;
+        const batch = Array.isArray(data) ? data : [];
+        for (const raw of batch) {
+          const mapped = mapEvent(raw);
+          if (mapped) out.push(mapped);
+        }
+        if (batch.length < perPage) break;
+        page += 1;
+      }
+      return out;
+    }
+    const endPage = Math.max(1, Number(lastPage) || 1);
+    const startPage = Math.max(1, endPage - maxPages + 1);
+    const cachedPage1 = startPage === 1 ? firstBatch : null;
+    for (let page = startPage; page <= endPage; page++) {
+      let batch;
+      if (page === 1 && cachedPage1) {
+        batch = cachedPage1;
+      } else {
+        const { data } = await apiJsonWithLink(pageUrl(page), fetchImpl, token);
+        batch = Array.isArray(data) ? data : [];
+      }
+      for (const raw of batch) {
+        const mapped = mapEvent(raw);
+        if (mapped) out.push(mapped);
+      }
+    }
+    return out;
+  } catch (err) {
+    if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
+      throw err;
+    }
+    return [];
+  }
+}
+async function fetchPrReviews(owner, repo, number, fetchImpl, token = null, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  const o = String(owner || "").trim();
+  const r = String(repo || "").trim();
+  const n = Number(number);
+  if (!o || !r || !Number.isFinite(n)) return [];
+  try {
+    const data = await apiJson2(
+      githubRestUrl2(
+        `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/pulls/${n}/reviews?per_page=100`,
+        ctx
+      ),
+      fetchImpl,
+      token
+    );
+    return (Array.isArray(data) ? data : []).map((rev) => ({
+      id: rev.id,
+      author: rev.user?.login || "",
+      avatarUrl: rev.user?.avatar_url || "",
+      type: rev.user?.type || "",
+      isBot: String(rev.user?.type || "").toLowerCase() === "bot" || /\[bot\]$/i.test(String(rev.user?.login || "")),
+      state: rev.state || "",
+      body: rev.body || "",
+      submittedAt: rev.submitted_at
+    }));
+  } catch (err) {
+    if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
+      throw err;
+    }
+    return [];
+  }
+}
+var COMMENT_PAGE_SIZE2 = 50;
+async function fetchPrCommentsPage2(owner, repo, pullNumber, kind, opts, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  const helpers = commentsPageHelpers();
+  const perPage = helpers?.clampPerPage?.(opts?.perPage) || Math.min(100, Number(opts?.perPage) || COMMENT_PAGE_SIZE2);
+  let page = Math.max(1, Number(opts?.page) || 1);
+  const since = opts?.since || null;
+  const preferNewest = Boolean(opts?.preferNewest) && !since;
+  const orderHint = opts?.order || null;
+  async function fetchPage(pageNum, listOpts = {}, ctx2 = null) {
+    ctx2 = normalizeApiCtx2(ctx2);
+    const sort = (
+      // @ts-expect-error classic fetch dynamic shapes
+      listOpts.sort != null ? listOpts.sort : kind === "review" ? "created" : void 0
+    );
+    const direction = (
+      // @ts-expect-error classic fetch dynamic shapes
+      listOpts.direction != null ? listOpts.direction : kind === "review" ? preferNewest || orderHint === "desc" ? "desc" : "asc" : void 0
+    );
+    const url = helpers?.buildCommentsListUrl ? helpers.buildCommentsListUrl(kind, owner, repo, pullNumber, {
+      page: pageNum,
+      perPage,
+      since,
+      sort,
+      direction
+    }) : (() => {
+      const base = kind === "review" ? githubRestUrl2(`/repos/${owner}/${repo}/pulls/${pullNumber}/comments`, ctx2) : githubRestUrl2(`/repos/${owner}/${repo}/issues/${pullNumber}/comments`, ctx2);
+      const q = new URLSearchParams({
+        per_page: String(perPage),
+        page: String(pageNum)
+      });
+      if (since) q.set("since", since);
+      if (sort) q.set("sort", sort);
+      if (direction) q.set("direction", direction);
+      return `${base}?${q}`;
+    })();
+    const { data, link } = await apiJsonWithLink(url, fetchImpl, token);
+    const raw = Array.isArray(data) ? data : [];
+    const items = kind === "review" ? raw.map(mapReviewComment) : raw.map(mapIssueComment);
+    if (kind === "issue" && token && items.length) {
+      const ids = items.map((c) => c?.nodeId).filter(Boolean);
+      if (ids.length) {
+        const byId = await fetchReactableReactionGroups(
+          ids,
+          fetchImpl,
+          token,
+          ctx2
+        );
+        for (const c of items) {
+          if (!c?.nodeId) continue;
+          const groups = byId.get(String(c.nodeId));
+          if (groups && groups.length) c.reactions = groups;
+        }
+      }
+    }
+    return { items, raw, link, pageNum };
+  }
+  if (kind === "issue" && preferNewest && page === 1 && !orderHint) {
+    const probe = await fetchPage(1);
+    const lastPage = helpers?.parseLinkLastPage && helpers.parseLinkLastPage(probe.link) || null;
+    if (lastPage != null && lastPage > 1) {
+      const newest = await fetchPage(lastPage);
+      const meta3 = helpers?.buildCommentsPageMeta ? helpers.buildCommentsPageMeta(newest.items, {
+        page: lastPage,
+        perPage,
+        linkHeader: newest.link,
+        since,
+        order: "from-end"
+      }) : {
+        page: lastPage,
+        perPage,
+        hasMore: lastPage > 1,
+        nextPage: lastPage > 1 ? lastPage - 1 : null,
+        order: "from-end",
+        since,
+        loadedCount: newest.items.length
+      };
+      return { items: newest.items, meta: meta3, kind };
+    }
+    const meta2 = helpers?.buildCommentsPageMeta ? helpers.buildCommentsPageMeta(probe.items, {
+      page: 1,
+      perPage,
+      linkHeader: probe.link,
+      since,
+      order: "from-end"
+    }) : {
+      page: 1,
+      perPage,
+      hasMore: false,
+      nextPage: null,
+      order: "from-end",
+      since,
+      loadedCount: probe.items.length
+    };
+    return { items: probe.items, meta: meta2, kind };
+  }
+  if (kind === "issue" && (orderHint === "from-end" || opts?.order === "from-end")) {
+    const res2 = await fetchPage(page);
+    const meta2 = helpers?.buildCommentsPageMeta ? helpers.buildCommentsPageMeta(res2.items, {
+      page,
+      perPage,
+      linkHeader: res2.link,
+      since,
+      order: "from-end"
+    }) : {
+      page,
+      perPage,
+      hasMore: page > 1,
+      nextPage: page > 1 ? page - 1 : null,
+      order: "from-end",
+      since,
+      loadedCount: res2.items.length
+    };
+    return { items: res2.items, meta: meta2, kind };
+  }
+  const res = await fetchPage(page, {
+    direction: kind === "review" ? preferNewest || orderHint === "desc" ? "desc" : "asc" : void 0,
+    sort: kind === "review" ? "created" : void 0
+  });
+  const meta = helpers?.buildCommentsPageMeta ? helpers.buildCommentsPageMeta(res.items, {
+    page,
+    perPage,
+    linkHeader: res.link,
+    since,
+    order: kind === "review" && (preferNewest || orderHint === "desc") ? "desc" : "asc"
+  }) : {
+    page,
+    perPage,
+    hasMore: res.raw.length >= perPage,
+    nextPage: res.raw.length >= perPage ? page + 1 : null,
+    since,
+    loadedCount: res.items.length
+  };
+  return { items: res.items, meta, kind };
+}
+async function fetchPrSidebarMeta2(owner, repo, number, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  const o = String(owner || "").trim();
+  const r = String(repo || "").trim();
+  const n = Number(number);
+  if (!o || !r || !Number.isFinite(n) || n <= 0 || !token) {
+    return { projects: [], developmentIssues: [] };
+  }
+  const query = `
+    query($owner:String!,$repo:String!,$number:Int!) {
+      repository(owner:$owner, name:$repo) {
+        pullRequest(number:$number) {
+          projectItems(first: 20) {
+            nodes {
+              id
+              project {
+                title
+                number
+                url
+              }
+            }
+          }
+          closingIssuesReferences(first: 20) {
+            nodes {
+              number
+              title
+              url
+              state
+            }
+          }
+        }
+      }
+    }
+  `;
+  try {
+    const data = await apiGraphql(
+      query,
+      { owner: o, repo: r, number: n },
+      fetchImpl,
+      token,
+      ctx
+    );
+    const prNode = data?.repository?.pullRequest || null;
+    const projects = [];
+    for (const node of prNode?.projectItems?.nodes || []) {
+      const p = node?.project;
+      if (!p) continue;
+      const title = String(p.title || "").trim();
+      if (!title) continue;
+      projects.push({
+        id: String(node.id || `${p.number}:${title}`),
+        title,
+        number: p.number != null ? Number(p.number) : null,
+        url: String(p.url || "").trim()
+      });
+    }
+    const developmentIssues = [];
+    for (const node of prNode?.closingIssuesReferences?.nodes || []) {
+      const num = Number(node?.number);
+      if (!Number.isFinite(num) || num <= 0) continue;
+      developmentIssues.push({
+        number: num,
+        title: String(node?.title || "").trim(),
+        url: String(node?.url || "").trim(),
+        state: String(node?.state || "").trim().toLowerCase()
+      });
+    }
+    return { projects, developmentIssues };
+  } catch (err) {
+    if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
+      throw err;
+    }
+    return { projects: [], developmentIssues: [] };
+  }
+}
+async function fetchIssueOrPrSummaries2(owner, repo, numbers, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  const o = String(owner || "").trim();
+  const r = String(repo || "").trim();
+  const nums = [
+    ...new Set(
+      (Array.isArray(numbers) ? numbers : []).map((n) => Number(n)).filter((n) => Number.isFinite(n) && n > 0)
+    )
+  ].slice(0, 30);
+  const out = /* @__PURE__ */ new Map();
+  if (!o || !r || !nums.length || !token) return out;
+  const fields = nums.map(
+    (n, i) => `
+      n${i}: issueOrPullRequest(number: ${n}) {
+        __typename
+        ... on Issue { number title url state }
+        ... on PullRequest { number title url state }
+      }`
+  ).join("\n");
+  const query = `
+    query($owner:String!,$repo:String!) {
+      repository(owner:$owner, name:$repo) {
+        ${fields}
+      }
+    }
+  `;
+  try {
+    const data = await apiGraphql(
+      query,
+      { owner: o, repo: r },
+      fetchImpl,
+      token,
+      ctx
+    );
+    const repoNode = data?.repository || {};
+    for (let i = 0; i < nums.length; i++) {
+      const node = repoNode[`n${i}`];
+      if (!node || node.number == null) continue;
+      const num = Number(node.number);
+      if (!Number.isFinite(num) || num <= 0) continue;
+      out.set(num, {
+        number: num,
+        title: String(node.title || "").trim(),
+        url: String(node.url || "").trim(),
+        state: String(node.state || "").trim().toLowerCase(),
+        kind: node.__typename === "PullRequest" ? "pull" : "issue"
+      });
+    }
+  } catch (err) {
+    if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
+      throw err;
+    }
+  }
+  return out;
+}
+async function fetchConflictFilePaths(owner, repo, baseRef, headSha, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  const o = String(owner || "").trim();
+  const r = String(repo || "").trim();
+  const ref = String(baseRef || "").trim();
+  const head = String(headSha || "").trim();
+  if (!o || !r || !ref || !head) return [];
+  try {
+    const baseUrl = githubRestUrl2(`/repos/${o}/${r}`, ctx);
+    const refJson = await apiJson2(
+      `${baseUrl}/git/ref/heads/${encodeURIComponent(ref)}`,
+      fetchImpl,
+      token
+    );
+    const baseTip = String(refJson?.object?.sha || "").trim();
+    if (!baseTip) return [];
+    const headVsBase = await apiJson2(
+      `${baseUrl}/compare/${encodeURIComponent(baseTip)}...${encodeURIComponent(head)}`,
+      fetchImpl,
+      token
+    );
+    const mergeBase = String(headVsBase?.merge_base_commit?.sha || "").trim();
+    if (!mergeBase) return [];
+    const [baseSide, headSide] = await Promise.all([
+      apiJson2(
+        `${baseUrl}/compare/${encodeURIComponent(mergeBase)}...${encodeURIComponent(baseTip)}?per_page=100`,
+        fetchImpl,
+        token
+      ),
+      apiJson2(
+        `${baseUrl}/compare/${encodeURIComponent(mergeBase)}...${encodeURIComponent(head)}?per_page=100`,
+        fetchImpl,
+        token
+      )
+    ]);
+    const onBase = new Set(
+      (Array.isArray(baseSide?.files) ? baseSide.files : []).map((f) => String(f?.filename || f?.previous_filename || "").trim()).filter(Boolean)
+    );
+    const conflicts = [];
+    for (const f of Array.isArray(headSide?.files) ? headSide.files : []) {
+      const path = String(f?.filename || "").trim();
+      if (path && onBase.has(path)) conflicts.push(path);
+    }
+    return conflicts;
+  } catch (err) {
+    if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
+      throw err;
+    }
+    console.log(
+      `[pr-plus] fetchConflictFilePaths: soft-fail ${err?.message || err}`
+    );
+    return [];
+  }
+}
+async function resolvePrMergeability2(pr, base, pullNumber, fetchImpl, token, timings, meta = {}) {
+  if (!pr || typeof pr !== "object") return pr;
+  let out = pr;
+  const apiCtx = normalizeApiCtx2(meta?.apiCtx || meta?.ctx);
+  const needsCompute = out.mergeable == null || out.mergeable === void 0 || !String(out.mergeable_state || "").trim() || String(out.mergeable_state || "").toLowerCase() === "unknown";
+  if (needsCompute) {
+    try {
+      await sleepMs(350);
+      const again = await timedFetch2(
+        timings,
+        "pullMergeable",
+        apiJson2(`${base}/pulls/${pullNumber}`, fetchImpl, token),
+        (p) => `(mergeable=${p?.mergeable} state=${p?.mergeable_state || "?"})`
+      );
+      if (again && typeof again === "object") {
+        out = {
+          ...out,
+          mergeable: again.mergeable,
+          mergeable_state: again.mergeable_state,
+          rebaseable: again.rebaseable != null ? again.rebaseable : out.rebaseable,
+          merge_commit_sha: again.merge_commit_sha || out.merge_commit_sha
+        };
+      }
+    } catch (err) {
+      if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
+        throw err;
+      }
+      console.log(
+        `[pr-plus] resolvePrMergeability re-fetch: soft-fail ${err?.message || err}`
+      );
+    }
+  }
+  const state = String(out.mergeable_state || "").toLowerCase();
+  try {
+    if (state === "behind") {
+      out = { ...out, behind_by: Math.max(1, Number(out.behind_by) || 1) };
+    } else if (state === "clean" || state === "unstable" || state === "has_hooks") {
+      out = { ...out, behind_by: 0 };
+    } else {
+      const baseOwner = out.base?.repo?.owner?.login || String(meta.owner || "").trim() || "";
+      const baseRepo = out.base?.repo?.name || String(meta.repo || "").trim() || "";
+      const baseRef = String(out.base?.ref || "").trim();
+      const headSha = String(out.head?.sha || "").trim();
+      if (baseOwner && baseRepo && baseRef && headSha) {
+        const cmpUrl = githubRestUrl2(
+          `/repos/${encodeURIComponent(baseOwner)}/${encodeURIComponent(baseRepo)}/compare/${encodeURIComponent(baseRef)}...${encodeURIComponent(headSha)}`,
+          apiCtx
+        );
+        const cmp = await timedFetch2(
+          timings,
+          "branchBehind",
+          apiJson2(cmpUrl, fetchImpl, token),
+          (c) => `(behind=${c?.behind_by ?? "?"} status=${c?.status || "?"})`
+        );
+        if (cmp && typeof cmp === "object" && cmp.behind_by != null) {
+          out = { ...out, behind_by: Number(cmp.behind_by) || 0 };
+        }
+      }
+    }
+  } catch (err) {
+    if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
+      throw err;
+    }
+    console.log(
+      `[pr-plus] resolvePrMergeability behind_by: soft-fail ${err?.message || err}`
+    );
+  }
+  const isDirty = state === "dirty" || out.mergeable === false && state !== "blocked" && state !== "clean";
+  if (isDirty) {
+    const baseOwner = out.base?.repo?.owner?.login || String(meta.owner || "").trim() || null;
+    const baseRepo = out.base?.repo?.name || String(meta.repo || "").trim() || null;
+    const conflictFiles = await timedFetch2(
+      timings,
+      "conflictFiles",
+      fetchConflictFilePaths(
+        baseOwner,
+        baseRepo,
+        out.base?.ref || "",
+        out.head?.sha || "",
+        fetchImpl,
+        token,
+        apiCtx
+      ).catch(() => []),
+      (list) => `(${Array.isArray(list) ? list.length : 0} paths)`
+    );
+    out = {
+      ...out,
+      _conflictFiles: Array.isArray(conflictFiles) ? conflictFiles : []
+    };
+  } else {
+    out = { ...out, _conflictFiles: [] };
+  }
+  return out;
+}
+async function fetchCompareFiles(owner, repo, base, head, fetchImpl, token = null, options = {}) {
+  const ctx = normalizeApiCtx2(options?.ctx);
+  const o = String(owner || "").trim();
+  const r = String(repo || "").trim();
+  const b = String(base || "").trim();
+  const h = String(head || "").trim();
+  if (!o || !r || !b || !h) {
+    throw new Error("owner, repo, base, and head are required for compare");
+  }
+  const gitattributesText = String(options.gitattributesText || "");
+  const url = githubRestUrl2(`/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/compare/${encodeURIComponent(b)}...${encodeURIComponent(h)}`, ctx);
+  const data = await apiJson2(url, fetchImpl, token);
+  const files = mapAndAnnotateFiles(data?.files || [], gitattributesText);
+  return {
+    files,
+    base: b,
+    head: h,
+    status: data?.status || null,
+    aheadBy: data?.ahead_by ?? null,
+    behindBy: data?.behind_by ?? null,
+    totalCommits: data?.total_commits ?? (Array.isArray(data?.commits) ? data.commits.length : null),
+    truncated: Boolean(data?.files && data.files.length >= 300)
+  };
+}
+
+// src/fetch/detail-sides-files.ts
+async function fetchPrCommits(owner, repo, number, fetchImpl, token = null, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  const o = String(owner || "").trim();
+  const r = String(repo || "").trim();
+  const n = Number(number);
+  if (!o || !r || !Number.isFinite(n)) {
+    throw new Error("owner, repo, and number are required for commits");
+  }
+  const url = githubRestUrl2(
+    `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/pulls/${n}/commits?per_page=100`,
+    ctx
+  );
+  try {
+    const data = await apiJson2(url, fetchImpl, token);
+    return (Array.isArray(data) ? data : []).map(mapPrCommitRow).filter((c) => c.sha);
+  } catch (err) {
+    if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
+      throw err;
+    }
+    return [];
+  }
+}
+async function fetchAllPrCommits(owner, repo, number, fetchImpl, token = null, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  const o = String(owner || "").trim();
+  const r = String(repo || "").trim();
+  const n = Number(number);
+  if (!o || !r || !Number.isFinite(n)) {
+    throw new Error("owner, repo, and number are required for commits");
+  }
+  const first = githubRestUrl2(
+    `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/pulls/${n}/commits?per_page=100`,
+    ctx
+  );
+  const raw = await fetchRestCollectionAll(first, fetchImpl, token);
+  return raw.map(mapPrCommitRow).filter((c) => c.sha);
+}
+async function fetchPrChecks(owner, repo, headSha, fetchImpl, token = null, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  const o = String(owner || "").trim();
+  const r = String(repo || "").trim();
+  const sha = String(headSha || "").trim();
+  const empty = { state: "unknown", totalCount: 0, statuses: [], checkRuns: [] };
+  if (!o || !r || !sha) return empty;
+  const base = githubRestUrl2(`/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}`, ctx);
+  let checks = { ...empty };
+  try {
+    const status = await apiJson2(`${base}/commits/${encodeURIComponent(sha)}/status`, fetchImpl, token);
+    const statusList = Array.isArray(status?.statuses) ? status.statuses : [];
+    const emptyCombined = !statusList.length && !(Number(status?.total_count) > 0);
+    checks = {
+      state: emptyCombined ? "unknown" : status.state || "unknown",
+      totalCount: emptyCombined ? 0 : status.total_count || statusList.length,
+      statuses: statusList.map((s) => ({
+        context: s.context || "",
+        state: s.state || "",
+        description: s.description || "",
+        targetUrl: s.target_url || "",
+        createdAt: s.created_at || "",
+        updatedAt: s.updated_at || ""
+      })),
+      checkRuns: []
+    };
+  } catch (err) {
+    if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
+      throw err;
+    }
+  }
+  try {
+    const runs = await apiJson2(
+      `${base}/commits/${encodeURIComponent(sha)}/check-runs?per_page=100&filter=latest`,
+      fetchImpl,
+      token
+    );
+    const list = runs?.check_runs || [];
+    if (list.length) {
+      checks.checkRuns = list.map((r2) => ({
+        id: r2.id,
+        name: r2.name || "",
+        status: r2.status || "",
+        conclusion: r2.conclusion || "",
+        htmlUrl: r2.html_url || "",
+        startedAt: r2.started_at || "",
+        completedAt: r2.completed_at || "",
+        appSlug: r2.app?.slug || "",
+        appName: r2.app?.name || ""
+      }));
+    }
+  } catch (err) {
+    if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
+      throw err;
+    }
+  }
+  const normalize = typeof globalThis !== "undefined" && globalThis.PRModalChecks?.normalizeChecks || null;
+  if (typeof normalize === "function") {
+    return normalize(checks);
+  }
+  const byCtx = /* @__PURE__ */ new Map();
+  for (const s of checks.statuses || []) {
+    const k = String(s.context || "").toLowerCase();
+    if (!k) continue;
+    const prev = byCtx.get(k);
+    const t = Date.parse(s.updatedAt || s.createdAt || "") || 0;
+    const pt = prev ? Date.parse(prev.updatedAt || prev.createdAt || "") || 0 : -1;
+    if (!prev || t >= pt) byCtx.set(k, s);
+  }
+  const byName = /* @__PURE__ */ new Map();
+  for (const r2 of checks.checkRuns || []) {
+    const k = String(r2.name || "").toLowerCase();
+    if (!k) continue;
+    const prev = byName.get(k);
+    const t = Date.parse(r2.completedAt || r2.startedAt || "") || Number(r2.id) || 0;
+    const pt = prev ? Date.parse(prev.completedAt || prev.startedAt || "") || Number(prev.id) || 0 : -1;
+    if (!prev || t >= pt) byName.set(k, r2);
+  }
+  checks.statuses = [...byCtx.values()];
+  checks.checkRuns = [...byName.values()];
+  checks.totalCount = checks.statuses.length + checks.checkRuns.length;
+  return checks;
+}
+async function fetchPrDevelopment(owner, repo, number, fetchImpl, token = null, opts = {}) {
+  const ctx = normalizeApiCtx2(opts?.ctx);
+  const o = String(owner || "").trim();
+  const r = String(repo || "").trim();
+  const n = Number(number);
+  const body = String(opts.body || "");
+  let linkedIssues = [];
+  try {
+    let editApi = typeof globalThis !== "undefined" ? globalThis.PRModalPrEditApi : null;
+    if (!editApi && typeof __require === "function") {
+      try {
+        editApi = __require("./modal/pure/pr-edit-api.js");
+      } catch {
+        editApi = null;
+      }
+    }
+    if (editApi?.parseLinkedIssueNumbers) {
+      linkedIssues = editApi.parseLinkedIssueNumbers(body);
+    }
+  } catch {
+    linkedIssues = [];
+  }
+  let developmentIssues = [];
+  let projects = [];
+  try {
+    const side = await fetchPrSidebarMeta(o, r, n, fetchImpl, token, ctx);
+    if (side && typeof side === "object") {
+      if (Array.isArray(side.developmentIssues) && side.developmentIssues.length) {
+        developmentIssues = side.developmentIssues.map((item) => ({
+          number: Number(item?.number),
+          title: String(item?.title || "").trim(),
+          url: String(item?.url || "").trim(),
+          state: String(item?.state || "").trim().toLowerCase(),
+          source: item?.source || "closing",
+          kind: item?.kind || ""
+        }));
+        const fromGql = developmentIssues.map((x) => Number(x?.number)).filter((x) => Number.isFinite(x) && x > 0);
+        if (fromGql.length) {
+          const set = /* @__PURE__ */ new Set([...linkedIssues, ...fromGql]);
+          linkedIssues = [...set].sort((a, b) => a - b);
+        }
+      }
+      if (Array.isArray(side.projects)) projects = side.projects;
+    }
+  } catch (err) {
+    if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
+      throw err;
+    }
+  }
+  {
+    const byNum = /* @__PURE__ */ new Map();
+    for (const item of developmentIssues) {
+      const num = Number(item?.number);
+      if (!Number.isFinite(num) || num <= 0) continue;
+      byNum.set(num, {
+        number: num,
+        title: String(item?.title || "").trim(),
+        url: String(item?.url || "").trim(),
+        state: String(item?.state || "").trim().toLowerCase(),
+        source: item?.source || "closing",
+        kind: item?.kind || ""
+      });
+    }
+    for (const raw of linkedIssues) {
+      const num = Number(raw);
+      if (!Number.isFinite(num) || num <= 0 || byNum.has(num)) continue;
+      byNum.set(num, {
+        number: num,
+        title: "",
+        url: `https://github.com/${o}/${r}/issues/${num}`,
+        state: "",
+        source: "body",
+        kind: ""
+      });
+    }
+    developmentIssues = [...byNum.values()].sort((a, b) => a.number - b.number);
+  }
+  const needTitles = developmentIssues.filter((x) => !String(x?.title || "").trim()).map((x) => x.number);
+  if (needTitles.length && token) {
+    try {
+      const summaries = await fetchIssueOrPrSummaries(
+        o,
+        r,
+        needTitles,
+        fetchImpl,
+        token
+      );
+      if (summaries && summaries.size) {
+        developmentIssues = developmentIssues.map((item) => {
+          const s = summaries.get(item.number);
+          if (!s) return item;
+          return {
+            ...item,
+            title: item.title || s.title,
+            url: s.url || item.url,
+            state: item.state || s.state,
+            kind: s.kind || item.kind || ""
+          };
+        });
+      }
+    } catch (err) {
+      if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
+        throw err;
+      }
+    }
+  }
+  return {
+    linkedIssues,
+    developmentIssues,
+    projects
+  };
+}
+async function fetchAllPrFiles(owner, repo, number, fetchImpl, token = null, options = {}) {
+  const ctx = normalizeApiCtx2(options?.ctx);
+  const o = String(owner || "").trim();
+  const r = String(repo || "").trim();
+  const n = Number(number);
+  if (!o || !r || !Number.isFinite(n)) {
+    throw new Error("owner, repo, and number are required for files");
+  }
+  const first = githubRestUrl2(
+    `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/pulls/${n}/files?per_page=100`,
+    ctx
+  );
+  const raw = await fetchRestCollectionAll(first, fetchImpl, token);
+  return mapAndAnnotateFiles(raw, options.gitattributesText || "");
+}
+async function fetchPrFiles(owner, repo, number, fetchImpl, token = null, options = {}) {
+  const ctx = normalizeApiCtx2(options?.ctx);
+  const o = String(owner || "").trim();
+  const r = String(repo || "").trim();
+  const n = Number(number);
+  if (!o || !r || !Number.isFinite(n)) {
+    throw new Error("owner, repo, and number are required for files");
+  }
+  const base = githubRestUrl2(
+    `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}`,
+    ctx
+  );
+  let raw = [];
+  try {
+    const data = await apiJson2(
+      `${base}/pulls/${n}/files?per_page=100`,
+      fetchImpl,
+      token
+    );
+    raw = Array.isArray(data) ? data : [];
+  } catch (err) {
+    if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
+      throw err;
+    }
+    raw = [];
+  }
+  let gitattributesText = String(options.gitattributesText || "");
+  if (!gitattributesText) {
+    try {
+      const ref = String(options.headSha || options.ref || "").trim() || "HEAD";
+      const attr = await apiJson2(
+        `${base}/contents/.gitattributes?ref=${encodeURIComponent(ref)}`,
+        fetchImpl,
+        token
+      );
+      if (attr?.content && attr.encoding === "base64") {
+        gitattributesText = decodeBase64Utf8(
+          String(attr.content).replace(/\n/g, "")
+        );
+      } else if (typeof attr?.content === "string") {
+        gitattributesText = attr.content;
+      }
+    } catch (err) {
+      if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
+        throw err;
+      }
+      gitattributesText = "";
+    }
+  }
+  return {
+    files: mapAndAnnotateFiles(raw, gitattributesText),
+    gitattributesText
+  };
+}
+
+// src/fetch/misc.ts
+var REST_TO_GQL_REACTION = {
+  "+1": "THUMBS_UP",
+  "-1": "THUMBS_DOWN",
+  laugh: "LAUGH",
+  hooray: "HOORAY",
+  confused: "CONFUSED",
+  heart: "HEART",
+  rocket: "ROCKET",
+  eyes: "EYES"
+};
+
+// src/fetch/pending-review.ts
+function mergePendingReviewComments2(published, pendingList) {
+  const list = Array.isArray(published) ? published.slice() : [];
+  const seen = new Set(list.map((c) => c && c.id != null ? String(c.id) : "").filter(Boolean));
+  for (const p of Array.isArray(pendingList) ? pendingList : []) {
+    if (!p || p.id == null) continue;
+    const key = String(p.id);
+    if (seen.has(key)) {
+      const idx = list.findIndex((c) => c && String(c.id) === key);
+      if (idx < 0) continue;
+      const host = list[idx];
+      list[idx] = {
+        ...p,
+        ...host,
+        pending: Boolean(host.pending || p.pending),
+        pendingReviewId: host.pendingReviewId ?? p.pendingReviewId ?? null,
+        threadNodeId: host.threadNodeId || p.threadNodeId || null,
+        nodeId: host.nodeId || p.nodeId || null,
+        outdated: Boolean(host.outdated || p.outdated),
+        diffHunk: host.diffHunk || p.diffHunk || "",
+        resolved: Boolean(host.resolved || p.resolved)
+      };
+      continue;
+    }
+    seen.add(key);
+    list.push(p);
+  }
+  return list;
+}
+function pickViewerPendingFromReviews(reviews, login) {
+  const list = Array.isArray(reviews) ? reviews : [];
+  const mine = list.filter((r2) => {
+    if (!r2 || String(r2.state || "").toUpperCase() !== "PENDING") return false;
+    if (!login) return true;
+    return String(r2.user?.login || "").toLowerCase() === String(login).toLowerCase();
+  });
+  if (!mine.length) return null;
+  const r = mine[mine.length - 1];
+  return {
+    id: Number(r.id),
+    node_id: r.node_id || null
+  };
+}
+async function fetchViewerPendingReviewBundle2(owner, repo, pullNumber, fetchImpl, token, preloaded = null, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  if (!token) return { comments: [], review: null };
+  let pending = null;
+  if (preloaded && (Array.isArray(preloaded.reviews) || preloaded.login != null)) {
+    pending = pickViewerPendingFromReviews(
+      preloaded.reviews,
+      preloaded.login || null
+    );
+  }
+  if (!pending?.id) {
+    pending = await findViewerPendingReview(
+      owner,
+      repo,
+      pullNumber,
+      fetchImpl,
+      token
+    );
+  }
+  if (!pending?.id) return { comments: [], review: null };
+  try {
+    const n = Number(pullNumber);
+    const raw = await apiJson2(
+      githubRestUrl2(`/repos/${owner}/${repo}/pulls/${n}/reviews/${pending.id}/comments?per_page=100`, ctx),
+      fetchImpl,
+      token
+    );
+    const comments = (Array.isArray(raw) ? raw : []).map(
+      (c) => mapReviewComment(c, { pending: true, pendingReviewId: pending.id })
+    );
+    return {
+      comments,
+      review: {
+        id: pending.id,
+        nodeId: pending.node_id || null,
+        commentCount: comments.length
+      }
+    };
+  } catch {
+    return {
+      comments: [],
+      review: {
+        id: pending.id,
+        nodeId: pending.node_id || null,
+        commentCount: 0
+      }
+    };
+  }
+}
+async function fetchViewerPendingReviewComments(owner, repo, pullNumber, fetchImpl, token) {
+  const { comments } = await fetchViewerPendingReviewBundle2(
+    owner,
+    repo,
+    pullNumber,
+    fetchImpl,
+    token
+  );
+  return comments;
+}
+async function createPendingPullReview(owner, repo, pullNumber, { commitId } = {}, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  const body = {};
+  if (commitId) body.commit_id = commitId;
+  return apiSend(
+    githubRestUrl2(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`, ctx),
+    fetchImpl,
+    token,
+    // @ts-expect-error classic fetch dynamic shapes
+    { method: "POST", body }
+  );
+}
+async function submitPendingPullReview(owner, repo, pullNumber, reviewId, { event = "COMMENT", body = "" } = {}, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  const id = Number(reviewId);
+  if (!Number.isFinite(id) || id <= 0) {
+    throw new Error("Invalid pending review id");
+  }
+  const ev = String(event || "COMMENT").toUpperCase();
+  if (!["COMMENT", "APPROVE", "REQUEST_CHANGES"].includes(ev)) {
+    throw new Error("Invalid review event");
+  }
+  return apiSend(
+    githubRestUrl2(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${id}/events`, ctx),
+    fetchImpl,
+    token,
+    // @ts-expect-error classic fetch dynamic shapes
+    { method: "POST", body: { event: ev, body: body || "" } }
+  );
+}
+async function deletePendingPullReview(owner, repo, pullNumber, reviewId, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  const id = Number(reviewId);
+  if (!Number.isFinite(id) || id <= 0) {
+    throw new Error("Invalid pending review id");
+  }
+  return apiSend(
+    githubRestUrl2(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${id}`, ctx),
+    fetchImpl,
+    token,
+    { method: "DELETE" }
+  );
+}
+async function postReviewCommentViaPendingGraphql(pendingReviewNodeId, { body, path, line, side = "RIGHT", startLine, startSide, subjectType = "line" }, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  const isFile = String(subjectType || "").toLowerCase() === "file";
+  const hasRange = !isFile && startLine != null && Number.isFinite(Number(startLine)) && Number(startLine) !== Number(line);
+  const variables = {
+    review: String(pendingReviewNodeId),
+    body: String(body || "").trim(),
+    path: String(path || "")
+  };
+  let query;
+  if (isFile) {
+    query = `mutation($review:ID!,$body:String!,$path:String!){
+      addPullRequestReviewThread(input:{
+        pullRequestReviewId:$review
+        body:$body
+        path:$path
+        subjectType:FILE
+      }){
+        thread {
+          id
+          comments(first:1){
+            nodes{
+              id
+              databaseId
+              body
+              path
+              createdAt
+              author { login avatarUrl }
+              pullRequestReview { databaseId }
+            }
+          }
+        }
+      }
+    }`;
+  } else if (hasRange) {
+    variables.line = Number(line);
+    variables.side = String(side || "RIGHT").toUpperCase() === "LEFT" ? "LEFT" : "RIGHT";
+    variables.startLine = Number(startLine);
+    variables.startSide = String(startSide || side || "RIGHT").toUpperCase() === "LEFT" ? "LEFT" : "RIGHT";
+    query = `mutation($review:ID!,$body:String!,$path:String!,$line:Int!,$side:DiffSide!,$startLine:Int!,$startSide:DiffSide!){
+      addPullRequestReviewThread(input:{
+        pullRequestReviewId:$review
+        body:$body
+        path:$path
+        line:$line
+        side:$side
+        startLine:$startLine
+        startSide:$startSide
+      }){
+        thread {
+          id
+          comments(first:1){
+            nodes{
+              id
+              databaseId
+              body
+              path
+              createdAt
+              author { login avatarUrl }
+              pullRequestReview { databaseId }
+            }
+          }
+        }
+      }
+    }`;
+  } else {
+    variables.line = Number(line);
+    variables.side = String(side || "RIGHT").toUpperCase() === "LEFT" ? "LEFT" : "RIGHT";
+    query = `mutation($review:ID!,$body:String!,$path:String!,$line:Int!,$side:DiffSide!){
+      addPullRequestReviewThread(input:{
+        pullRequestReviewId:$review
+        body:$body
+        path:$path
+        line:$line
+        side:$side
+      }){
+        thread {
+          id
+          comments(first:1){
+            nodes{
+              id
+              databaseId
+              body
+              path
+              createdAt
+              author { login avatarUrl }
+              pullRequestReview { databaseId }
+            }
+          }
+        }
+      }
+    }`;
+  }
+  const data = await apiGraphql(query, variables, fetchImpl, token, ctx);
+  const thread = data?.addPullRequestReviewThread?.thread;
+  const node = thread?.comments?.nodes?.[0];
+  if (!node) {
+    throw new Error(
+      isFile ? `Could not add pending file comment on ${path}.` : `Could not add pending comment on ${path}:${line} (${side || "RIGHT"}). The line may be outside the diff or on the wrong side.`
+    );
+  }
+  const threadNodeId = thread?.id || null;
+  const rest = mapGraphqlReviewCommentToRest(node, {
+    body,
+    path,
+    line: isFile ? null : line,
+    startLine: hasRange ? Number(startLine) : null,
+    side,
+    inReplyToId: null
+  });
+  return {
+    ...rest,
+    // GraphQL/REST often omit line on pending comments — keep selection line for UI
+    line: isFile ? null : rest.line ?? Number(line),
+    path: rest.path || path,
+    side: side || "RIGHT",
+    start_line: hasRange ? Number(startLine) : null,
+    start_side: hasRange ? startSide || side || "RIGHT" : null,
+    subject_type: isFile ? "file" : "line",
+    pending: true,
+    pendingReviewId: node.pullRequestReview?.databaseId ?? null,
+    threadNodeId
+  };
+}
+async function ensureViewerPendingReview(owner, repo, pullNumber, { commitId = null, createIfMissing = false } = {}, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  const hydrateNodeId = async (pending2) => {
+    if (!pending2?.id) return null;
+    try {
+      const full = await apiJson2(
+        githubRestUrl2(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${pending2.id}`, ctx),
+        fetchImpl,
+        token
+      );
+      if (!full || String(full.state || "").toUpperCase() !== "PENDING") {
+        return null;
+      }
+      return {
+        id: Number(pending2.id),
+        node_id: full.node_id || pending2.node_id || null
+      };
+    } catch (err) {
+      if (err?.status === 404) return null;
+      if (err?.status >= 400 && err?.status < 500) return null;
+      return pending2?.node_id ? { id: Number(pending2.id), node_id: pending2.node_id } : null;
+    }
+  };
+  let pending = await findViewerPendingReview(
+    owner,
+    repo,
+    pullNumber,
+    fetchImpl,
+    token
+  );
+  pending = await hydrateNodeId(pending);
+  if (pending?.node_id) return pending;
+  if (!createIfMissing) return pending;
+  try {
+    const created = await createPendingPullReview(
+      owner,
+      repo,
+      pullNumber,
+      { commitId },
+      fetchImpl,
+      token
+    );
+    return {
+      id: Number(created?.id),
+      node_id: created?.node_id || null
+    };
+  } catch (err) {
+    const msg = String(err?.message || err || "");
+    if (err?.status === 422 || /one pending review/i.test(msg) || /Unprocessable Entity/i.test(msg)) {
+      pending = await findViewerPendingReview(
+        owner,
+        repo,
+        pullNumber,
+        fetchImpl,
+        token
+      );
+      pending = await hydrateNodeId(pending);
+      if (pending?.node_id) return pending;
+    }
+    throw err;
+  }
+}
+async function findViewerPendingReview(owner, repo, pullNumber, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  if (!token) return null;
+  const n = Number(pullNumber);
+  if (!Number.isFinite(n)) return null;
+  try {
+    const [reviews, login] = await Promise.all([
+      apiJson2(
+        githubRestUrl2(`/repos/${owner}/${repo}/pulls/${n}/reviews?per_page=100`, ctx),
+        fetchImpl,
+        token
+      ).catch(() => []),
+      fetchViewerLogin(fetchImpl, token).catch(() => null)
+    ]);
+    return pickViewerPendingFromReviews(reviews, login);
+  } catch {
+    return null;
+  }
+}
+async function replyViaThreadGraphql(threadNodeId, body, fetchImpl, token, fallback = {}, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  const data = await apiGraphql(
+    `mutation($id:ID!,$body:String!){
+      addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$id,body:$body}){
+        comment {
+          id
+          databaseId
+          body
+          path
+          diffHunk
+          createdAt
+          author { login avatarUrl }
+          replyTo { databaseId }
+          pullRequestReview { databaseId }
+        }
+      }
+    }`,
+    { id: String(threadNodeId), body: String(body) },
+    fetchImpl,
+    token,
+    ctx
+  );
+  const c = data?.addPullRequestReviewThreadReply?.comment;
+  if (!c) throw new Error("GraphQL thread reply returned no comment");
+  return mapGraphqlReviewCommentToRest(c, fallback);
+}
+async function replyViaPendingReviewGraphql(pendingReviewNodeId, parentCommentNodeId, body, fetchImpl, token, fallback = {}, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  const data = await apiGraphql(
+    `mutation($review:ID!,$body:String!,$inReplyTo:ID!){
+      addPullRequestReviewComment(input:{
+        pullRequestReviewId:$review
+        body:$body
+        inReplyTo:$inReplyTo
+      }){
+        comment {
+          id
+          databaseId
+          body
+          path
+          diffHunk
+          createdAt
+          author { login avatarUrl }
+          replyTo { databaseId }
+          pullRequestReview { databaseId }
+        }
+      }
+    }`,
+    {
+      review: String(pendingReviewNodeId),
+      body: String(body),
+      inReplyTo: String(parentCommentNodeId)
+    },
+    fetchImpl,
+    token
+  );
+  const c = data?.addPullRequestReviewComment?.comment;
+  if (!c) throw new Error("GraphQL pending-review reply returned no comment");
+  return mapGraphqlReviewCommentToRest(c, fallback);
+}
+async function resolveParentCommentNodeId(owner, repo, parentId, fetchImpl, token, knownNodeId, pullNumber = null, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  if (knownNodeId) return String(knownNodeId);
+  const id = Math.floor(Number(parentId));
+  if (!Number.isFinite(id) || id <= 0) return null;
+  try {
+    const parent = await apiJson2(
+      githubRestUrl2(`/repos/${owner}/${repo}/pulls/comments/${id}`, ctx),
+      fetchImpl,
+      token
+    );
+    if (parent?.node_id) return String(parent.node_id);
+  } catch {
+  }
+  if (pullNumber == null || !token) return null;
+  try {
+    const { comments } = await fetchViewerPendingReviewBundle2(
+      owner,
+      repo,
+      pullNumber,
+      fetchImpl,
+      token
+    );
+    const hit = (comments || []).find(
+      // @ts-expect-error classic fetch dynamic shapes
+      (c) => c && Number(c.id) === id && (c.nodeId || c.node_id)
+    );
+    if (hit) return String(hit.nodeId || hit.node_id);
+  } catch {
+  }
+  return null;
+}
+
+// src/fetch/mutations-comments.ts
+async function postIssueComment(owner, repo, issueNumber, body, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  return apiSend(
+    githubRestUrl2(`/repos/${owner}/${repo}/issues/${issueNumber}/comments`, ctx),
+    fetchImpl,
+    token,
+    // @ts-expect-error classic fetch dynamic shapes
+    { method: "POST", body: { body } }
+  );
+}
+async function submitPullReview(owner, repo, pullNumber, { event, body = "", commitId, comments }, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  const payload = { event, body: body || "" };
+  if (commitId) payload.commit_id = commitId;
+  if (Array.isArray(comments) && comments.length) {
+    payload.comments = comments.map((c) => {
+      const row = {
+        path: c.path,
+        body: c.body,
+        line: c.line,
+        side: c.side || "RIGHT"
+      };
+      if (c.start_line != null || c.startLine != null) {
+        const sl = c.start_line != null ? c.start_line : c.startLine;
+        if (Number(sl) !== Number(c.line)) {
+          row.start_line = Number(sl);
+          row.start_side = c.start_side || c.startSide || c.side || "RIGHT";
+        }
+      }
+      return row;
+    });
+  }
+  return apiSend(
+    githubRestUrl2(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`, ctx),
+    fetchImpl,
+    token,
+    // @ts-expect-error classic fetch dynamic shapes
+    { method: "POST", body: payload }
+  );
+}
+async function postReviewComment(owner, repo, pullNumber, {
+  body,
+  path,
+  line,
+  side = "RIGHT",
+  commitId,
+  startLine,
+  startSide,
+  asPending = false,
+  subjectType = "line"
+}, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  const text = String(body || "").trim();
+  if (!text) throw new Error("Comment body is required");
+  if (!path) throw new Error("path is required");
+  const isFile = String(subjectType || "").toLowerCase() === "file";
+  if (!isFile && line == null) throw new Error("path and line are required");
+  let pending = await ensureViewerPendingReview(
+    owner,
+    repo,
+    pullNumber,
+    {
+      commitId: commitId || null,
+      // Create only when caller wants pending; also create path recovers on 422
+      createIfMissing: Boolean(asPending)
+    },
+    fetchImpl,
+    token
+  );
+  const gqlFields = {
+    body: text,
+    path,
+    line: isFile ? null : line,
+    side,
+    startLine: isFile ? null : startLine,
+    startSide: isFile ? null : startSide,
+    subjectType: isFile ? "file" : "line"
+  };
+  if (pending?.node_id) {
+    try {
+      const raw = await postReviewCommentViaPendingGraphql(
+        pending.node_id,
+        gqlFields,
+        fetchImpl,
+        token,
+        ctx
+      );
+      return {
+        ...raw,
+        pending: true,
+        pendingReviewId: raw.pendingReviewId || pending.id || null
+      };
+    } catch (err) {
+      const msg = String(err?.message || err || "");
+      if (asPending && /Could not resolve to a node|global id|NOT_FOUND|Could not find/i.test(msg)) {
+        try {
+          const created = await createPendingPullReview(
+            owner,
+            repo,
+            pullNumber,
+            { commitId: commitId || null },
+            fetchImpl,
+            token,
+            ctx
+          );
+          pending = {
+            id: Number(created?.id),
+            node_id: created?.node_id || null
+          };
+        } catch (createErr) {
+          if (createErr?.status === 422 || /one pending review/i.test(String(createErr?.message || ""))) {
+            pending = await ensureViewerPendingReview(
+              owner,
+              repo,
+              pullNumber,
+              { commitId: commitId || null, createIfMissing: false },
+              fetchImpl,
+              token,
+              ctx
+            );
+          } else {
+            throw createErr;
+          }
+        }
+        if (pending?.node_id) {
+          const raw = await postReviewCommentViaPendingGraphql(
+            pending.node_id,
+            gqlFields,
+            fetchImpl,
+            token,
+            ctx
+          );
+          return {
+            ...raw,
+            pending: true,
+            pendingReviewId: raw.pendingReviewId || pending.id || null
+          };
+        }
+      }
+      throw err;
+    }
+  }
+  if (asPending) {
+    throw new Error(
+      "Could not start or find a pending review. Try Discard any leftover pending review, then retry."
+    );
+  }
+  const payload = isFile ? { body: text, path, subject_type: "file" } : { body: text, path, line, side };
+  if (commitId) payload.commit_id = commitId;
+  if (!isFile && startLine != null && Number(startLine) !== Number(line)) {
+    payload.start_line = Number(startLine);
+    payload.start_side = startSide || side || "RIGHT";
+  }
+  return apiSend(
+    githubRestUrl2(`/repos/${owner}/${repo}/pulls/${pullNumber}/comments`, ctx),
+    fetchImpl,
+    token,
+    // @ts-expect-error classic fetch dynamic shapes
+    { method: "POST", body: payload }
+  );
+}
+async function replyToReviewComment(owner, repo, pullNumber, commentId, body, fetchImpl, token, opts = {}) {
+  const ctx = normalizeApiCtx2(opts?.ctx);
+  const text = String(body || "").trim();
+  if (!text) throw new Error("Reply body is required");
+  const parentId = Number(commentId);
+  if (!Number.isFinite(parentId) || parentId <= 0) {
+    throw new Error("Invalid review comment id for reply");
+  }
+  const n = Number(pullNumber);
+  const mode = opts?.mode === "pending" ? "pending" : "comment";
+  const threadNodeId = opts?.threadNodeId || null;
+  let parentNodeId = opts?.parentNodeId || null;
+  const fallback = {
+    body: text,
+    inReplyToId: Math.floor(parentId),
+    path: opts?.path || "",
+    line: opts?.line ?? null,
+    side: opts?.side || "RIGHT"
+  };
+  async function attachReplyToPending({ createIfMissing }) {
+    const pending = await ensureViewerPendingReview(
+      owner,
+      repo,
+      n,
+      {
+        commitId: opts?.commitId || null,
+        createIfMissing: Boolean(createIfMissing)
+      },
+      fetchImpl,
+      token
+    );
+    if (!pending?.node_id && !threadNodeId) return null;
+    if (threadNodeId) {
+      try {
+        const raw = await replyViaThreadGraphql(
+          threadNodeId,
+          text,
+          fetchImpl,
+          token,
+          fallback
+        );
+        return {
+          ...raw,
+          pending: true,
+          // @ts-expect-error classic fetch dynamic shapes
+          pendingReviewId: raw.pendingReviewId || pending?.id || null
+        };
+      } catch {
+      }
+    }
+    if (!pending?.node_id) return null;
+    parentNodeId = await resolveParentCommentNodeId(
+      owner,
+      repo,
+      parentId,
+      fetchImpl,
+      token,
+      parentNodeId,
+      n
+    );
+    if (!parentNodeId) {
+      throw new Error(
+        "Cannot reply while a pending review exists (missing parent comment node id)."
+      );
+    }
+    try {
+      const raw = await replyViaPendingReviewGraphql(
+        pending.node_id,
+        parentNodeId,
+        text,
+        fetchImpl,
+        token,
+        fallback
+      );
+      return { ...raw, pending: true, pendingReviewId: pending.id };
+    } catch (err) {
+      const msg = String(err?.message || err || "");
+      if (!/Could not resolve to a node|global id|NOT_FOUND|Could not find/i.test(msg)) {
+        throw err;
+      }
+      let next = null;
+      try {
+        const created = await createPendingPullReview(
+          owner,
+          repo,
+          n,
+          { commitId: opts?.commitId || null },
+          fetchImpl,
+          token
+        );
+        next = {
+          id: Number(created?.id),
+          node_id: created?.node_id || null
+        };
+      } catch (createErr) {
+        if (createErr?.status === 422 || /one pending review/i.test(String(createErr?.message || ""))) {
+          next = await ensureViewerPendingReview(
+            owner,
+            repo,
+            n,
+            { commitId: opts?.commitId || null, createIfMissing: false },
+            fetchImpl,
+            token
+          );
+        } else {
+          throw createErr;
+        }
+      }
+      if (!next?.node_id) throw err;
+      const raw = await replyViaPendingReviewGraphql(
+        next.node_id,
+        parentNodeId,
+        text,
+        fetchImpl,
+        token,
+        fallback
+      );
+      return { ...raw, pending: true, pendingReviewId: next.id };
+    }
+  }
+  if (mode === "pending") {
+    const attached = await attachReplyToPending({ createIfMissing: true });
+    if (attached) return attached;
+    throw new Error(
+      "Could not start or find a pending review for this reply. Try Discard any leftover pending review, then retry."
+    );
+  }
+  const existingPending = await ensureViewerPendingReview(
+    owner,
+    repo,
+    n,
+    { createIfMissing: false },
+    fetchImpl,
+    token
+  );
+  if (existingPending?.node_id) {
+    const attached = await attachReplyToPending({ createIfMissing: false });
+    if (attached) return attached;
+  }
+  if (threadNodeId) {
+    try {
+      const raw = await replyViaThreadGraphql(
+        threadNodeId,
+        text,
+        fetchImpl,
+        token,
+        fallback
+      );
+      return { ...raw, pending: false };
+    } catch {
+    }
+  }
+  try {
+    return await apiSend(
+      githubRestUrl2(`/repos/${owner}/${repo}/pulls/${n}/comments/${Math.floor(parentId)}/replies`, ctx),
+      fetchImpl,
+      token,
+      // @ts-expect-error classic fetch dynamic shapes
+      { method: "POST", body: { body: text } }
+    );
+  } catch (err) {
+    const msg = String(err?.message || err || "");
+    if (err?.status === 422 || /one pending review/i.test(msg) || /Unprocessable Entity/i.test(msg)) {
+      const attached = await attachReplyToPending({ createIfMissing: false });
+      if (attached) return attached;
+    }
+    throw err;
+  }
+}
+async function resolveReviewThread(threadNodeId, resolved, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  if (!threadNodeId) throw new Error("threadNodeId required to resolve review thread");
+  const mutation = resolved ? `mutation($id:ID!){ resolveReviewThread(input:{threadId:$id}){ thread { id isResolved } } }` : `mutation($id:ID!){ unresolveReviewThread(input:{threadId:$id}){ thread { id isResolved } } }`;
+  return apiGraphql(
+    mutation,
+    { id: threadNodeId },
+    fetchImpl,
+    token,
+    ctx
+  );
+}
+async function updatePullState(owner, repo, pullNumber, state, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  const next = state === "closed" ? "closed" : "open";
+  return apiSend(
+    githubRestUrl2(`/repos/${owner}/${repo}/pulls/${pullNumber}`, ctx),
+    fetchImpl,
+    token,
+    // @ts-expect-error classic fetch dynamic shapes
+    { method: "PATCH", body: { state: next } }
+  );
+}
+async function closePullRequest(owner, repo, pullNumber, fetchImpl, token) {
+  return updatePullState(owner, repo, pullNumber, "closed", fetchImpl, token);
+}
+async function reopenPullRequest(owner, repo, pullNumber, fetchImpl, token) {
+  return updatePullState(owner, repo, pullNumber, "open", fetchImpl, token);
+}
+async function deleteReviewComment(owner, repo, commentId, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  return apiSend(
+    githubRestUrl2(`/repos/${owner}/${repo}/pulls/comments/${commentId}`, ctx),
+    fetchImpl,
+    token,
+    { method: "DELETE" }
+  );
+}
+async function deleteIssueComment(owner, repo, commentId, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  return apiSend(
+    githubRestUrl2(`/repos/${owner}/${repo}/issues/comments/${commentId}`, ctx),
+    fetchImpl,
+    token,
+    { method: "DELETE" }
+  );
+}
+
+// src/fetch/mutations-meta.ts
+async function updatePullRequest(owner, repo, pullNumber, fields, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  const body = {};
+  if (fields?.title != null) body.title = String(fields.title);
+  if (fields?.body != null) body.body = String(fields.body);
+  if (fields?.base != null) body.base = String(fields.base);
+  if (fields?.state != null) body.state = fields.state === "closed" ? "closed" : "open";
+  return apiSend(
+    githubRestUrl2(`/repos/${owner}/${repo}/pulls/${pullNumber}`, ctx),
+    fetchImpl,
+    token,
+    // @ts-expect-error classic fetch dynamic shapes
+    { method: "PATCH", body }
+  );
+}
+async function editIssueComment(owner, repo, commentId, body, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  return apiSend(
+    githubRestUrl2(`/repos/${owner}/${repo}/issues/comments/${commentId}`, ctx),
+    fetchImpl,
+    token,
+    // @ts-expect-error classic fetch dynamic shapes
+    { method: "PATCH", body: { body: String(body || "") } }
+  );
+}
+async function editReviewComment(owner, repo, commentId, body, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  return apiSend(
+    githubRestUrl2(`/repos/${owner}/${repo}/pulls/comments/${commentId}`, ctx),
+    fetchImpl,
+    token,
+    // @ts-expect-error classic fetch dynamic shapes
+    { method: "PATCH", body: { body: String(body || "") } }
+  );
+}
+async function requestReviewers(owner, repo, pullNumber, { reviewers = [], teamReviewers = [] }, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  return apiSend(
+    githubRestUrl2(`/repos/${owner}/${repo}/pulls/${pullNumber}/requested_reviewers`, ctx),
+    fetchImpl,
+    token,
+    {
+      method: "POST",
+      // @ts-expect-error classic fetch dynamic shapes
+      body: { reviewers, team_reviewers: teamReviewers }
+    }
+  );
+}
+async function removeReviewers(owner, repo, pullNumber, { reviewers = [], teamReviewers = [] }, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  return apiSend(
+    githubRestUrl2(`/repos/${owner}/${repo}/pulls/${pullNumber}/requested_reviewers`, ctx),
+    fetchImpl,
+    token,
+    {
+      method: "DELETE",
+      // @ts-expect-error classic fetch dynamic shapes
+      body: { reviewers, team_reviewers: teamReviewers }
+    }
+  );
+}
+async function addAssignees(owner, repo, issueNumber, assignees, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  return apiSend(
+    githubRestUrl2(`/repos/${owner}/${repo}/issues/${issueNumber}/assignees`, ctx),
+    fetchImpl,
+    token,
+    // @ts-expect-error classic fetch dynamic shapes
+    { method: "POST", body: { assignees: assignees || [] } }
+  );
+}
+async function removeAssignees(owner, repo, issueNumber, assignees, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  return apiSend(
+    githubRestUrl2(`/repos/${owner}/${repo}/issues/${issueNumber}/assignees`, ctx),
+    fetchImpl,
+    token,
+    // @ts-expect-error classic fetch dynamic shapes
+    { method: "DELETE", body: { assignees: assignees || [] } }
+  );
+}
+async function setIssueLabels(owner, repo, issueNumber, labels, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  return apiSend(
+    githubRestUrl2(`/repos/${owner}/${repo}/issues/${issueNumber}/labels`, ctx),
+    fetchImpl,
+    token,
+    // @ts-expect-error classic fetch dynamic shapes
+    { method: "PUT", body: { labels: labels || [] } }
+  );
+}
+async function fetchRepoLabels(owner, repo, fetchImpl, token = null, opts = {}) {
+  const ctx = normalizeApiCtx2(opts?.ctx);
+  const perPage = 100;
+  const maxPages = Math.max(1, Math.min(10, Number(opts.maxPages) || 5));
+  const out = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const url = githubRestUrl2(
+      `/repos/${owner}/${repo}/labels?per_page=${perPage}&page=${page}`,
+      ctx
+    );
+    const batch = await apiJson2(url, fetchImpl, token);
+    if (!Array.isArray(batch) || !batch.length) break;
+    for (const l of batch) {
+      const name = String(l?.name || "").trim();
+      if (!name) continue;
+      out.push({
+        name,
+        color: String(l?.color || "").trim().replace(/^#/, ""),
+        description: String(l?.description || "")
+      });
+    }
+    if (batch.length < perPage) break;
+  }
+  return out;
+}
+function defaultNewLabelColor(name) {
+  const palette = [
+    "d73a4a",
+    "0075ca",
+    "a2eeef",
+    "7057ff",
+    "008672",
+    "e4e669",
+    "d876e3",
+    "fbca04",
+    "0e8a16",
+    "5319e7"
+  ];
+  const s = String(name || "");
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = h * 31 + s.charCodeAt(i) >>> 0;
+  return palette[h % palette.length];
+}
+async function createRepoLabel(owner, repo, { name, color, description } = {}, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  const rawName = String(name || "").trim();
+  if (!rawName) throw new Error("Label name is required");
+  const body = {
+    name: rawName,
+    color: String(color || defaultNewLabelColor(rawName)).trim().replace(/^#/, "")
+  };
+  if (description != null) body.description = String(description);
+  const result = await apiSend(
+    githubRestUrl2(`/repos/${owner}/${repo}/labels`, ctx),
+    fetchImpl,
+    token,
+    // @ts-expect-error classic fetch dynamic shapes
+    { method: "POST", body }
+  );
+  return {
+    name: String(result?.name || rawName),
+    color: String(result?.color || body.color || "").trim().replace(/^#/, ""),
+    description: String(result?.description || description || "")
+  };
+}
+async function fetchRepoMilestones(owner, repo, fetchImpl, token = null, opts = {}) {
+  const ctx = normalizeApiCtx2(opts?.ctx);
+  const perPage = 100;
+  const maxPages = Math.max(1, Math.min(10, Number(opts.maxPages) || 5));
+  const state = opts.state || "all";
+  const out = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const url = githubRestUrl2(
+      `/repos/${owner}/${repo}/milestones?state=${encodeURIComponent(state)}&per_page=${perPage}&page=${page}&sort=due_on&direction=desc`,
+      ctx
+    );
+    const batch = await apiJson2(url, fetchImpl, token);
+    if (!Array.isArray(batch) || !batch.length) break;
+    for (const m of batch) {
+      const number = Number(m?.number);
+      if (!Number.isFinite(number) || number <= 0) continue;
+      out.push({
+        number,
+        title: String(m?.title || `Milestone ${number}`),
+        state: String(m?.state || ""),
+        description: String(m?.description || ""),
+        dueOn: m?.due_on || null
+      });
+    }
+    if (batch.length < perPage) break;
+  }
+  return out;
+}
+async function createRepoMilestone(owner, repo, { title, description, state } = {}, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  const rawTitle = String(title || "").trim();
+  if (!rawTitle) throw new Error("Milestone title is required");
+  const body = { title: rawTitle, state: state === "closed" ? "closed" : "open" };
+  if (description != null) body.description = String(description);
+  const result = await apiSend(
+    githubRestUrl2(`/repos/${owner}/${repo}/milestones`, ctx),
+    fetchImpl,
+    token,
+    // @ts-expect-error classic fetch dynamic shapes
+    { method: "POST", body }
+  );
+  return {
+    number: Number(result?.number) || 0,
+    title: String(result?.title || rawTitle),
+    state: String(result?.state || body.state),
+    description: String(result?.description || description || ""),
+    dueOn: result?.due_on || null
+  };
+}
+async function fetchRepoTags(owner, repo, fetchImpl, token = null, opts = {}) {
+  const ctx = normalizeApiCtx2(opts?.ctx);
+  const perPage = 100;
+  const maxPages = Math.max(1, Math.min(20, Number(opts.maxPages) || 10));
+  const out = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const url = githubRestUrl2(
+      `/repos/${owner}/${repo}/tags?per_page=${perPage}&page=${page}`,
+      ctx
+    );
+    const batch = await apiJson2(url, fetchImpl, token);
+    if (!Array.isArray(batch) || !batch.length) break;
+    for (const t of batch) {
+      const name = String(t?.name || "").trim();
+      const sha = String(t?.commit?.sha || t?.sha || "").trim();
+      if (!name) continue;
+      out.push({
+        name,
+        sha,
+        zipballUrl: t?.zipball_url || "",
+        tarballUrl: t?.tarball_url || ""
+      });
+    }
+    if (batch.length < perPage) break;
+  }
+  return out;
+}
+async function fetchTagsForCommits(owner, repo, shas, fetchImpl, token = null, opts = {}) {
+  const want = new Set(
+    (shas || []).map((s) => String(s || "").trim().toLowerCase()).filter(Boolean)
+  );
+  if (!want.size) return [];
+  const tags = await fetchRepoTags(owner, repo, fetchImpl, token, opts);
+  return tags.filter((t) => want.has(String(t.sha || "").toLowerCase()));
+}
+async function mergePullRequest(owner, repo, pullNumber, { mergeMethod = "merge", commitTitle, commitMessage } = {}, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  const body = { merge_method: mergeMethod };
+  if (commitTitle != null) body.commit_title = String(commitTitle);
+  if (commitMessage != null) body.commit_message = String(commitMessage);
+  return apiSend(
+    githubRestUrl2(`/repos/${owner}/${repo}/pulls/${pullNumber}/merge`, ctx),
+    fetchImpl,
+    token,
+    // @ts-expect-error classic fetch dynamic shapes
+    { method: "PUT", body }
+  );
+}
+async function updatePullBranch(owner, repo, pullNumber, { expectedHeadSha } = {}, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  const body = {};
+  if (expectedHeadSha) body.expected_head_sha = String(expectedHeadSha);
+  return apiSend(
+    githubRestUrl2(`/repos/${owner}/${repo}/pulls/${pullNumber}/update-branch`, ctx),
+    fetchImpl,
+    token,
+    // @ts-expect-error classic fetch dynamic shapes
+    { method: "PUT", body }
+  );
+}
+async function deleteHeadBranch(owner, repo, branch, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  const b = String(branch || "").trim().replace(/^refs\/heads\//, "");
+  if (!b) throw new Error("Branch name required");
+  const branchPath = b.split("/").filter(Boolean).map((seg) => encodeURIComponent(seg)).join("/");
+  return apiSend(
+    githubRestUrl2(
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/refs/heads/${branchPath}`,
+      ctx
+    ),
+    fetchImpl,
+    token,
+    // @ts-expect-error classic fetch dynamic shapes
+    { method: "DELETE" }
+  );
+}
+async function setIssueMilestone(owner, repo, issueNumber, milestoneNumber, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  return apiSend(
+    githubRestUrl2(`/repos/${owner}/${repo}/issues/${issueNumber}`, ctx),
+    fetchImpl,
+    token,
+    {
+      method: "PATCH",
+      // @ts-expect-error classic fetch dynamic shapes
+      body: { milestone: milestoneNumber == null ? null : Number(milestoneNumber) }
+    }
+  );
+}
+async function setPullRequestDraftStage(owner, repo, pullNumber, stage, fetchImpl, token, nodeId = null, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  let id = nodeId;
+  if (!id) {
+    const pr = await apiJson2(
+      githubRestUrl2(`/repos/${owner}/${repo}/pulls/${pullNumber}`, ctx),
+      fetchImpl,
+      token
+    );
+    id = pr?.node_id;
+  }
+  if (!id) throw new Error("PR node_id unavailable for draft stage change");
+  let buildFn = null;
+  try {
+    let mod = typeof globalThis !== "undefined" ? globalThis.PRModalPrEditApi : null;
+    if (!mod && typeof __require === "function") {
+      try {
+        mod = __require("./modal/pure/pr-edit-api.js");
+      } catch {
+        mod = null;
+      }
+    }
+    buildFn = mod?.buildDraftStageGraphql;
+  } catch {
+    buildFn = null;
+  }
+  const gql = buildFn ? buildFn(stage === "ready" ? "ready" : "draft", id) : stage === "ready" ? {
+    query: `mutation($id:ID!){markPullRequestReadyForReview(input:{pullRequestId:$id}){pullRequest{id isDraft}}}`,
+    variables: { id }
+  } : {
+    query: `mutation($id:ID!){convertPullRequestToDraft(input:{pullRequestId:$id}){pullRequest{id isDraft}}}`,
+    variables: { id }
+  };
+  const data = await apiGraphql(gql.query, gql.variables, fetchImpl, token, ctx);
+  let parseFn = null;
+  try {
+    let mod = typeof globalThis !== "undefined" ? globalThis.PRModalPrEditApi : null;
+    if (!mod && typeof __require === "function") {
+      try {
+        mod = __require("./modal/pure/pr-edit-api.js");
+      } catch {
+        mod = null;
+      }
+    }
+    parseFn = mod?.draftFromStageGraphqlData;
+  } catch {
+    parseFn = null;
+  }
+  let draft = null;
+  if (typeof parseFn === "function") {
+    draft = parseFn(data);
+  } else if (data && typeof data === "object") {
+    const pr = data.markPullRequestReadyForReview?.pullRequest || data.convertPullRequestToDraft?.pullRequest || null;
+    if (pr && typeof pr.isDraft === "boolean") draft = pr.isDraft;
+  }
+  if (typeof draft !== "boolean") {
+    draft = stage !== "ready";
+  }
+  return { draft: Boolean(draft), data };
+}
+
+// src/fetch/review-threads-map.ts
+var REVIEW_THREAD_SHELL_FIELDS = `
   id
   isResolved
   isOutdated
@@ -5883,7 +7051,7 @@ const REVIEW_THREAD_SHELL_FIELDS = `
     }
   }
 `;
-const REVIEW_THREAD_COMMENTS_FIELDS = `
+var REVIEW_THREAD_COMMENTS_FIELDS = `
   comments(first:100){
     nodes{
       id
@@ -5910,7 +7078,7 @@ const REVIEW_THREAD_COMMENTS_FIELDS = `
     }
   }
 `;
-const REVIEW_THREADS_BY_IDS_NODE_SELECTION = `
+var REVIEW_THREADS_BY_IDS_NODE_SELECTION = `
   id
   isResolved
   isOutdated
@@ -5949,7 +7117,7 @@ const REVIEW_THREADS_BY_IDS_NODE_SELECTION = `
     }
   }
 `;
-const REVIEW_THREADS_FIRST_QUERY = `
+var REVIEW_THREADS_FIRST_QUERY = `
 query ReviewThreadsFirstShell($owner:String!,$name:String!,$number:Int!,$n:Int!,$cursor:String){
   repository(owner:$owner,name:$name){
     pullRequest(number:$number){
@@ -5961,7 +7129,7 @@ query ReviewThreadsFirstShell($owner:String!,$name:String!,$number:Int!,$n:Int!,
     }
   }
 }`;
-const REVIEW_THREADS_LAST_QUERY = `
+var REVIEW_THREADS_LAST_QUERY = `
 query ReviewThreadsLastShell($owner:String!,$name:String!,$number:Int!,$n:Int!,$cursor:String){
   repository(owner:$owner,name:$name){
     pullRequest(number:$number){
@@ -5973,8 +7141,8 @@ query ReviewThreadsLastShell($owner:String!,$name:String!,$number:Int!,$n:Int!,$
     }
   }
 }`;
-const REVIEW_THREADS_API_MAX = 100;
-const REVIEW_THREADS_PAGE_SIZE = 100;
+var REVIEW_THREADS_API_MAX = 100;
+var REVIEW_THREADS_PAGE_SIZE = 100;
 function mapReviewThreadNodes(allNodes) {
   try {
     const pure = typeof globalThis !== "undefined" ? globalThis.PRModalReviewThreads : null;
@@ -6241,6 +7409,8 @@ function buildRestReviewThreadsPageFromCommentsLocal(items, direction = "newest"
     source: "rest"
   };
 }
+
+// src/fetch/review-threads-page.ts
 async function restReviewThreadsFallbackPage(owner, repo, pullNumber, direction, fetchImpl, token, ctx, opts = {}) {
   const empty = buildRestReviewThreadsPageFromCommentsLocal([], direction);
   const perPage = Math.max(
@@ -6261,7 +7431,7 @@ async function restReviewThreadsFallbackPage(owner, repo, pullNumber, direction,
     };
   }
   try {
-    const restPage = await fetchPrCommentsPage(
+    const restPage = await fetchPrCommentsPage2(
       owner,
       repo,
       pullNumber,
@@ -6328,7 +7498,7 @@ async function fetchReviewThreadsPage(owner, repo, pullNumber, {
    */
   skipEagerComments = false
 } = {}, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
+  ctx = normalizeApiCtx2(ctx);
   const empty = {
     threads: [],
     comments: [],
@@ -6537,8 +7707,10 @@ function collectUnresolvedThreadNodeIds(detail) {
   }
   return [...ids];
 }
-async function fetchReviewThreadsByIds(threadNodeIds, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
+
+// src/fetch/review-threads-bulk.ts
+async function fetchReviewThreadsByIds2(threadNodeIds, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
   const empty = {
     threads: [],
     comments: [],
@@ -6669,7 +7841,7 @@ function dropReviewThreadsFromDetail(detail, threadNodeIds) {
       ...droppedCommentIds
     ].map(String)
   );
-  const prevMeta = detail.reviewThreadsMeta || emptyReviewThreadsMeta();
+  const prevMeta = detail.reviewThreadsMeta || emptyReviewThreadsMeta2();
   const filterIdList = (list) => (Array.isArray(list) ? list : []).map(String).filter((id) => id && !drop.has(id));
   const loadedThreadCount = reviewThreads.length;
   const totalCount = Math.max(
@@ -6706,7 +7878,7 @@ function dropReviewThreadsFromDetail(detail, threadNodeIds) {
   };
 }
 async function fetchPullReviewThreadsBundle(owner, repo, pullNumber, fetchImpl, token, opts = {}) {
-  const ctx = normalizeApiCtx(opts?.ctx);
+  const ctx = normalizeApiCtx2(opts?.ctx);
   if (!token) {
     return {
       threads: [],
@@ -6716,7 +7888,7 @@ async function fetchPullReviewThreadsBundle(owner, repo, pullNumber, fetchImpl, 
       startCursor: null,
       pageCount: 0,
       totalCount: 0,
-      reviewThreadsMeta: emptyReviewThreadsMeta()
+      reviewThreadsMeta: emptyReviewThreadsMeta2()
     };
   }
   const lastPageSize = Math.min(
@@ -6812,7 +7984,7 @@ async function fetchPullReviewThreadsBundle(owner, repo, pullNumber, fetchImpl, 
     reviewThreadsMeta: meta
   };
 }
-function emptyReviewThreadsMeta() {
+function emptyReviewThreadsMeta2() {
   return {
     totalCount: 0,
     hiddenCount: 0,
@@ -6834,7 +8006,7 @@ function emptyReviewThreadsMeta() {
 function mergeReviewThreadsPageIntoDetail(detail, page, direction = "older") {
   if (!detail) return detail;
   const dir = String(direction || page?.direction || "older");
-  const prevMeta = detail.reviewThreadsMeta || emptyReviewThreadsMeta();
+  const prevMeta = detail.reviewThreadsMeta || emptyReviewThreadsMeta2();
   const prevRc = Array.isArray(detail.reviewComments) ? detail.reviewComments : [];
   const prevTh = Array.isArray(detail.reviewThreads) ? detail.reviewThreads : [];
   const missingIds = (() => {
@@ -6873,7 +8045,7 @@ function mergeReviewThreadsPageIntoDetail(detail, page, direction = "older") {
       baseRc = prevRc.filter(
         (c) => !c?.threadNodeId || !refreshed.has(String(c.threadNodeId))
       );
-      reviewComments = mergePendingReviewComments(baseRc, page?.comments || []);
+      reviewComments = mergePendingReviewComments2(baseRc, page?.comments || []);
     }
   } else {
     const deferredShellIds = /* @__PURE__ */ new Set();
@@ -6896,7 +8068,7 @@ function mergeReviewThreadsPageIntoDetail(detail, page, direction = "older") {
         });
       }
     }
-    reviewComments = mergePendingReviewComments(baseRc, page?.comments || []);
+    reviewComments = mergePendingReviewComments2(baseRc, page?.comments || []);
   }
   const resolvedByThread = /* @__PURE__ */ new Map();
   for (const t of page?.threads || []) {
@@ -6962,6 +8134,7 @@ function mergeReviewThreadsPageIntoDetail(detail, page, direction = "older") {
     if (t?.threadNodeId) {
       const prevT = thById.get(String(t.threadNodeId)) || {};
       const mergedT = {
+        // @ts-expect-error classic fetch dynamic shapes
         ...prevT,
         ...t
       };
@@ -7062,245 +8235,365 @@ async function fetchPullReviewThreads(owner, repo, pullNumber, fetchImpl, token)
     return [];
   }
 }
-function fetchNowMs() {
-  return typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
-}
-async function timedFetch(timings, name, promise, extra = void 0, opts = {}) {
-  const t0 = fetchNowMs();
-  const batchStart = opts && Number.isFinite(opts.batchStart) ? Number(opts.batchStart) : null;
-  if (batchStart != null) {
-    timings[`${name}_start`] = Math.round(t0 - batchStart);
+
+// src/fetch/viewer.ts
+async function fetchViewerViewedPaths(owner, repo, pullNumber, fetchImpl, token, opts = {}) {
+  const apiCtx = normalizeApiCtx2(opts?.ctx);
+  if (!token) {
+    return { pullRequestId: null, viewedPaths: [], unauthorized: true };
   }
-  try {
-    const result = await promise;
-    const ms = Math.round(fetchNowMs() - t0);
-    timings[name] = ms;
-    let suffix = "";
-    try {
-      if (typeof extra === "function") suffix = extra(result) || "";
-    } catch {
+  const maxPages = Math.max(1, Math.min(20, Number(opts.maxPages) || 5));
+  const viewed = [];
+  let cursor = null;
+  let pullRequestId = null;
+  for (let page = 0; page < maxPages; page++) {
+    const data = await apiGraphql(
+      `query ViewerViewedFiles($owner:String!,$repo:String!,$number:Int!,$cursor:String) {
+  repository(owner:$owner, name:$repo) {
+    pullRequest(number:$number) {
+      id
+      files(first:100, after:$cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes { path viewerViewedState }
+      }
     }
-    const startLabel = batchStart != null && timings[`${name}_start`] != null ? ` t+${timings[`${name}_start`]}ms` : "";
-    console.log(
-      `[pr-plus] fetchPrDetail ${name}: ${ms}ms${startLabel}${suffix ? ` ${suffix}` : ""}`
-    );
-    return result;
-  } catch (err) {
-    const ms = Math.round(fetchNowMs() - t0);
-    timings[name] = ms;
-    const msg = err?.message || String(err);
-    timings[`${name}_error`] = msg;
-    const startLabel = batchStart != null && timings[`${name}_start`] != null ? ` t+${timings[`${name}_start`]}ms` : "";
-    console.log(
-      `[pr-plus] fetchPrDetail ${name}: ${ms}ms${startLabel} ERROR ${msg}`
-    );
-    throw err;
   }
+}`,
+      {
+        owner: String(owner || ""),
+        repo: String(repo || ""),
+        number: Number(pullNumber) || 0,
+        cursor
+      },
+      fetchImpl,
+      token,
+      apiCtx
+    );
+    const pr = data?.repository?.pullRequest;
+    if (!pr) break;
+    if (pr.id) pullRequestId = String(pr.id);
+    const nodes = pr.files?.nodes || [];
+    for (const n of nodes) {
+      if (String(n?.viewerViewedState || "").toUpperCase() === "VIEWED" && n?.path) {
+        viewed.push(String(n.path));
+      }
+    }
+    if (!pr.files?.pageInfo?.hasNextPage) break;
+    cursor = pr.files.pageInfo.endCursor || null;
+    if (!cursor) break;
+  }
+  return { pullRequestId, viewedPaths: viewed };
 }
-function logParallelRestSummary(timings, names, wallMs) {
-  const rows = (Array.isArray(names) ? names : []).map((name) => {
-    const ms = Number(timings[name]);
-    const start = Number(timings[`${name}_start`]);
-    const err = timings[`${name}_error`];
-    return {
-      name,
-      ms: Number.isFinite(ms) ? ms : null,
-      start: Number.isFinite(start) ? start : null,
-      error: err ? String(err) : null
-    };
-  }).filter((r) => r.ms != null);
-  rows.sort((a, b) => (b.ms || 0) - (a.ms || 0));
-  const slowest = rows[0];
-  const sum = rows.reduce((s, r) => s + (r.ms || 0), 0);
-  const lines = rows.map((r) => {
-    const bar = wallMs > 0 && r.ms != null ? "\u2588".repeat(Math.max(1, Math.round(r.ms / wallMs * 20))) : "";
-    const start = r.start != null ? `+${r.start}ms`.padStart(7) : "   n/a";
-    const dur = r.ms != null ? `${r.ms}ms`.padStart(6) : "   n/a";
-    const err = r.error ? ` ERR:${r.error.slice(0, 40)}` : "";
-    return `  ${r.name.padEnd(16)} start${start}  dur${dur}  ${bar}${err}`;
-  });
-  console.log(
-    `[pr-plus] fetchPrDetail parallel REST summary
-  wall=${Math.round(wallMs)}ms  sum=${sum}ms  slowest=${slowest ? `${slowest.name}@${slowest.ms}ms` : "n/a"}
-` + (lines.length ? lines.join("\n") : "  (no rows)")
+async function markFileAsViewed(pullRequestId, path, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  const data = await apiGraphql(
+    `mutation MarkFileAsViewed($input: MarkFileAsViewedInput!) {
+  markFileAsViewed(input: $input) {
+    pullRequest { id }
+  }
+}`,
+    {
+      input: {
+        pullRequestId: String(pullRequestId || ""),
+        path: String(path || "")
+      }
+    },
+    fetchImpl,
+    token,
+    ctx
   );
-  timings.coreParallel = {
-    wallMs: Math.round(wallMs),
-    sumMs: sum,
-    slowest: slowest ? { name: slowest.name, ms: slowest.ms } : null,
-    byName: Object.fromEntries(rows.map((r) => [r.name, r.ms]))
-  };
+  return data;
 }
-function sleepMs(ms) {
-  return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms || 0)));
+async function unmarkFileAsViewed(pullRequestId, path, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  const data = await apiGraphql(
+    `mutation UnmarkFileAsViewed($input: UnmarkFileAsViewedInput!) {
+  unmarkFileAsViewed(input: $input) {
+    pullRequest { id }
+  }
+}`,
+    {
+      input: {
+        pullRequestId: String(pullRequestId || ""),
+        path: String(path || "")
+      }
+    },
+    fetchImpl,
+    token,
+    ctx
+  );
+  return data;
 }
-async function fetchConflictFilePaths(owner, repo, baseRef, headSha, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  const o = String(owner || "").trim();
-  const r = String(repo || "").trim();
-  const ref = String(baseRef || "").trim();
-  const head = String(headSha || "").trim();
-  if (!o || !r || !ref || !head) return [];
+async function resolvePullRequestNodeId(owner, repo, pullNumber, fetchImpl, token, nodeId = null, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  if (nodeId) return String(nodeId);
+  const n = Number(pullNumber);
+  if (!token || !owner || !repo || !Number.isFinite(n) || n <= 0) return null;
   try {
-    const baseUrl = githubRestUrl(`/repos/${o}/${r}`, ctx);
-    const refJson = await apiJson(
-      `${baseUrl}/git/ref/heads/${encodeURIComponent(ref)}`,
+    const pr = await apiJson2(
+      githubRestUrl2(`/repos/${owner}/${repo}/pulls/${n}`, ctx),
       fetchImpl,
       token
     );
-    const baseTip = String(refJson?.object?.sha || "").trim();
-    if (!baseTip) return [];
-    const headVsBase = await apiJson(
-      `${baseUrl}/compare/${encodeURIComponent(baseTip)}...${encodeURIComponent(head)}`,
+    if (pr?.node_id) return String(pr.node_id);
+  } catch {
+  }
+  try {
+    const data = await apiGraphql(
+      `query($owner:String!,$name:String!,$number:Int!){
+  repository(owner:$owner, name:$name) {
+    pullRequest(number:$number) { id }
+  }
+}`,
+      { owner: String(owner), name: String(repo), number: n },
       fetchImpl,
-      token
+      token,
+      ctx
     );
-    const mergeBase = String(headVsBase?.merge_base_commit?.sha || "").trim();
-    if (!mergeBase) return [];
-    const [baseSide, headSide] = await Promise.all([
-      apiJson(
-        `${baseUrl}/compare/${encodeURIComponent(mergeBase)}...${encodeURIComponent(baseTip)}?per_page=100`,
-        fetchImpl,
-        token
-      ),
-      apiJson(
-        `${baseUrl}/compare/${encodeURIComponent(mergeBase)}...${encodeURIComponent(head)}?per_page=100`,
-        fetchImpl,
-        token
-      )
-    ]);
-    const onBase = new Set(
-      (Array.isArray(baseSide?.files) ? baseSide.files : []).map((f) => String(f?.filename || f?.previous_filename || "").trim()).filter(Boolean)
-    );
-    const conflicts = [];
-    for (const f of Array.isArray(headSide?.files) ? headSide.files : []) {
-      const path = String(f?.filename || "").trim();
-      if (path && onBase.has(path)) conflicts.push(path);
-    }
-    return conflicts;
-  } catch (err) {
-    if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
-      throw err;
-    }
-    console.log(
-      `[pr-plus] fetchConflictFilePaths: soft-fail ${err?.message || err}`
-    );
-    return [];
+    const id = data?.repository?.pullRequest?.id;
+    return id ? String(id) : null;
+  } catch {
+    return null;
   }
 }
-function extractRepoMergeMethodFlags(repo) {
-  if (!repo || typeof repo !== "object") return null;
-  const has = Object.prototype.hasOwnProperty.call(repo, "allow_merge_commit") || Object.prototype.hasOwnProperty.call(repo, "allow_squash_merge") || Object.prototype.hasOwnProperty.call(repo, "allow_rebase_merge");
-  if (!has) return null;
-  const flag = (v) => v === true || v === false ? v : null;
-  return {
-    allowMergeCommit: flag(repo.allow_merge_commit),
-    allowSquashMerge: flag(repo.allow_squash_merge),
-    allowRebaseMerge: flag(repo.allow_rebase_merge)
-  };
+async function setIssueSubscription(owner, repo, issueNumber, { subscribed = true, ignored = false, nodeId = null } = {}, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  if (!token) throw new Error("GitHub PAT required for notifications");
+  const id = await resolvePullRequestNodeId(
+    owner,
+    repo,
+    issueNumber,
+    fetchImpl,
+    token,
+    nodeId,
+    ctx
+  );
+  if (!id) {
+    throw new Error(
+      "Could not resolve pull request id for subscription. Refresh and try again."
+    );
+  }
+  const state = ignored ? "IGNORED" : subscribed ? "SUBSCRIBED" : "UNSUBSCRIBED";
+  const data = await apiGraphql(
+    `mutation($id:ID!,$state:SubscriptionState!){
+  updateSubscription(input:{subscribableId:$id, state:$state}) {
+    subscribable {
+      ... on PullRequest { id viewerSubscription }
+      ... on Issue { id viewerSubscription }
+    }
+  }
+}`,
+    { id: String(id), state },
+    fetchImpl,
+    token
+  );
+  const vs = data?.updateSubscription?.subscribable?.viewerSubscription;
+  return mapViewerSubscription(vs);
 }
-function extractViewerCanMergeAsAdmin(repo) {
-  if (!repo || typeof repo !== "object") return null;
-  const p = repo.permissions;
-  if (!p || typeof p !== "object") return null;
-  if (p.admin === true) return true;
-  if (p.admin === false) return false;
-  return null;
+async function deleteIssueSubscription(owner, repo, issueNumber, fetchImpl, token, nodeId = null) {
+  return setIssueSubscription(
+    owner,
+    repo,
+    issueNumber,
+    { subscribed: false, ignored: false, nodeId },
+    fetchImpl,
+    token
+  );
 }
-async function resolvePrMergeability(pr, base, pullNumber, fetchImpl, token, timings, meta = {}) {
-  if (!pr || typeof pr !== "object") return pr;
-  let out = pr;
-  const apiCtx = normalizeApiCtx(meta?.apiCtx || meta?.ctx);
-  const needsCompute = out.mergeable == null || out.mergeable === void 0 || !String(out.mergeable_state || "").trim() || String(out.mergeable_state || "").toLowerCase() === "unknown";
-  if (needsCompute) {
-    try {
-      await sleepMs(350);
-      const again = await timedFetch(
-        timings,
-        "pullMergeable",
-        apiJson(`${base}/pulls/${pullNumber}`, fetchImpl, token),
-        (p) => `(mergeable=${p?.mergeable} state=${p?.mergeable_state || "?"})`
-      );
-      if (again && typeof again === "object") {
-        out = {
-          ...out,
-          mergeable: again.mergeable,
-          mergeable_state: again.mergeable_state,
-          rebaseable: again.rebaseable != null ? again.rebaseable : out.rebaseable,
-          merge_commit_sha: again.merge_commit_sha || out.merge_commit_sha
+async function fetchPullRequestSubscription(owner, repo, pullNumber, fetchImpl, token, nodeId = null, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  if (!token) return null;
+  try {
+    const id = await resolvePullRequestNodeId(
+      owner,
+      repo,
+      pullNumber,
+      fetchImpl,
+      token,
+      nodeId,
+      ctx
+    );
+    if (!id) return null;
+    const data = await apiGraphql(
+      `query($id:ID!){
+  node(id:$id) {
+    ... on PullRequest {
+      viewerSubscription
+      viewerCanSubscribe
+      mergeStateStatus
+    }
+    ... on Issue { viewerSubscription viewerCanSubscribe }
+  }
+}`,
+      { id: String(id) },
+      fetchImpl,
+      token,
+      ctx
+    );
+    const node = data?.node || null;
+    const vs = node?.viewerSubscription;
+    if (!vs) {
+      if (node?.mergeStateStatus) {
+        return {
+          subscribed: null,
+          mergeStateStatus: String(node.mergeStateStatus || "") || null
         };
       }
-    } catch (err) {
-      if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
-        throw err;
-      }
-      console.log(
-        `[pr-plus] resolvePrMergeability re-fetch: soft-fail ${err?.message || err}`
-      );
+      return null;
     }
+    const mapped = mapViewerSubscription(vs);
+    if (node?.mergeStateStatus) {
+      return {
+        ...mapped,
+        mergeStateStatus: String(node.mergeStateStatus || "") || null
+      };
+    }
+    return mapped;
+  } catch {
+    return null;
   }
-  const state = String(out.mergeable_state || "").toLowerCase();
+}
+async function uploadRepoFile(owner, repo, { path, contentBase64, message, branch }, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  if (!path || !contentBase64) throw new Error("path and contentBase64 required");
+  const encPath = String(path).split("/").map(encodeURIComponent).join("/");
+  let sha;
   try {
-    if (state === "behind") {
-      out = { ...out, behind_by: Math.max(1, Number(out.behind_by) || 1) };
-    } else if (state === "clean" || state === "unstable" || state === "has_hooks") {
-      out = { ...out, behind_by: 0 };
-    } else {
-      const baseOwner = out.base?.repo?.owner?.login || String(meta.owner || "").trim() || "";
-      const baseRepo = out.base?.repo?.name || String(meta.repo || "").trim() || "";
-      const baseRef = String(out.base?.ref || "").trim();
-      const headSha = String(out.head?.sha || "").trim();
-      if (baseOwner && baseRepo && baseRef && headSha) {
-        const cmpUrl = githubRestUrl(
-          `/repos/${encodeURIComponent(baseOwner)}/${encodeURIComponent(baseRepo)}/compare/${encodeURIComponent(baseRef)}...${encodeURIComponent(headSha)}`,
-          apiCtx
-        );
-        const cmp = await timedFetch(
-          timings,
-          "branchBehind",
-          apiJson(cmpUrl, fetchImpl, token),
-          (c) => `(behind=${c?.behind_by ?? "?"} status=${c?.status || "?"})`
-        );
-        if (cmp && typeof cmp === "object" && cmp.behind_by != null) {
-          out = { ...out, behind_by: Number(cmp.behind_by) || 0 };
-        }
-      }
-    }
-  } catch (err) {
-    if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
+    const meta = await apiJson2(
+      githubRestUrl2(
+        `/repos/${owner}/${repo}/contents/${encPath}${branch ? `?ref=${encodeURIComponent(branch)}` : ""}`,
+        ctx
+      ),
+      fetchImpl,
+      token
+    );
+    sha = meta?.sha;
+  } catch {
+    sha = void 0;
+  }
+  const body = {
+    message: message || `Upload ${path}`,
+    content: String(contentBase64).replace(/\s+/g, "")
+  };
+  if (branch) body.branch = branch;
+  if (sha) body.sha = sha;
+  const result = await apiSend(
+    githubRestUrl2(`/repos/${owner}/${repo}/contents/${encPath}`, ctx),
+    fetchImpl,
+    token,
+    // @ts-expect-error classic fetch dynamic shapes
+    { method: "PUT", body }
+  );
+  const content = result?.content || result;
+  return {
+    downloadUrl: content?.download_url || content?.html_url || "",
+    htmlUrl: content?.html_url || content?.download_url || "",
+    path: content?.path || path,
+    sha: content?.sha || ""
+  };
+}
+async function getRepoFileText(owner, repo, { path, ref }, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  if (!path) throw new Error("path required");
+  const rev = ref || "HEAD";
+  const encPath = String(path).split("/").map(encodeURIComponent).join("/");
+  const meta = await apiJson2(
+    githubRestUrl2(`/repos/${owner}/${repo}/contents/${encPath}?ref=${encodeURIComponent(rev)}`, ctx),
+    fetchImpl,
+    token
+  );
+  if (meta?.type && meta.type !== "file") {
+    throw new Error(`Not a file: ${path}`);
+  }
+  let raw = "";
+  if (meta?.content && meta?.encoding === "base64") {
+    raw = decodeBase64Utf8(String(meta.content).replace(/\n/g, ""));
+  } else if (meta?.download_url) {
+    const res = await fetchImpl(meta.download_url, {
+      headers: buildApiHeaders(token)
+    });
+    if (!res.ok) {
+      const err = new Error(`GitHub download ${res.status}: ${res.statusText}`);
+      err.status = res.status;
       throw err;
     }
-    console.log(
-      `[pr-plus] resolvePrMergeability behind_by: soft-fail ${err?.message || err}`
-    );
+    raw = await res.text();
+  } else if (meta?.content) {
+    raw = decodeBase64Utf8(String(meta.content).replace(/\n/g, ""));
   }
-  const isDirty = state === "dirty" || out.mergeable === false && state !== "blocked" && state !== "clean";
-  if (isDirty) {
-    const baseOwner = out.base?.repo?.owner?.login || String(meta.owner || "").trim() || null;
-    const baseRepo = out.base?.repo?.name || String(meta.repo || "").trim() || null;
-    const conflictFiles = await timedFetch(
-      timings,
-      "conflictFiles",
-      fetchConflictFilePaths(
-        baseOwner,
-        baseRepo,
-        out.base?.ref || "",
-        out.head?.sha || "",
-        fetchImpl,
-        token,
-        apiCtx
-      ).catch(() => []),
-      (list) => `(${Array.isArray(list) ? list.length : 0} paths)`
-    );
-    out = {
-      ...out,
-      _conflictFiles: Array.isArray(conflictFiles) ? conflictFiles : []
-    };
-  } else {
-    out = { ...out, _conflictFiles: [] };
-  }
-  return out;
+  return {
+    path: meta?.path || path,
+    ref: rev,
+    text: raw,
+    sha: meta?.sha || "",
+    size: Number(meta?.size) || raw.length
+  };
 }
+async function applyReviewSuggestion(owner, repo, { path, headRef, startLine, endLine, suggestion, message }, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  const ref = headRef || "HEAD";
+  const file = await getRepoFileText(
+    owner,
+    repo,
+    { path, ref },
+    fetchImpl,
+    token
+  );
+  const raw = file.text || "";
+  let applyFn = null;
+  try {
+    let mod = typeof globalThis !== "undefined" ? globalThis.PRModalPrEditApi : null;
+    if (!mod && typeof __require === "function") {
+      try {
+        mod = __require("./modal/pure/pr-edit-api.js");
+      } catch {
+        mod = null;
+      }
+    }
+    applyFn = mod?.applySuggestionToFileContent;
+  } catch {
+    applyFn = null;
+  }
+  if (!applyFn) throw new Error("applySuggestionToFileContent unavailable");
+  const next = applyFn(raw, {
+    startLine,
+    endLine,
+    suggestion
+  });
+  let contentB64;
+  if (typeof Buffer !== "undefined") {
+    contentB64 = Buffer.from(next, "utf8").toString("base64");
+  } else {
+    contentB64 = btoa(unescape(encodeURIComponent(next)));
+  }
+  return apiSend(
+    githubRestUrl2(`/repos/${owner}/${repo}/contents/${path.split("/").map(encodeURIComponent).join("/")}`, ctx),
+    fetchImpl,
+    token,
+    {
+      method: "PUT",
+      // @ts-expect-error classic fetch dynamic shapes
+      body: {
+        message: message || `Apply suggestion to ${path}`,
+        content: contentB64,
+        branch: ref,
+        sha: file.sha
+      }
+    }
+  );
+}
+async function fetchViewerLogin2(fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  if (!token) return null;
+  try {
+    const me = await apiJson2(githubRestUrl2("/user", ctx), fetchImpl, token);
+    return me?.login || null;
+  } catch {
+    return null;
+  }
+}
+
+// src/fetch/pr-detail.ts
 async function fetchPrDetail(owner, repo, pullNumber, fetchImpl, token = null, opts = {}) {
   const ctx = normalizeApiCtx(opts?.ctx);
   const base = githubRestUrl(`/repos/${owner}/${repo}`, ctx);
@@ -7350,7 +8643,7 @@ async function fetchPrDetail(owner, repo, pullNumber, fetchImpl, token = null, o
     timedFetch(
       timings,
       "viewerLogin",
-      fetchViewerLogin(fetchImpl, token, ctx),
+      fetchViewerLogin2(fetchImpl, token, ctx),
       null,
       batchOpt
     ),
@@ -7638,9 +8931,11 @@ async function fetchPrDetail(owner, repo, pullNumber, fetchImpl, token = null, o
     loadedThreadCount: (reviewThreads || []).length,
     loadedCommentCount: (reviewThreadBundle?.comments || []).length,
     pagesLoaded: reviewThreadBundle?.pageCount || (threadsMaxPages > 0 ? 1 : 0),
+    // @ts-expect-error classic fetch dynamic shapes
     totalCount: Number(reviewThreadBundle?.totalCount) || (reviewThreads || []).length,
     hiddenCount: Math.max(
       0,
+      // @ts-expect-error classic fetch dynamic shapes
       (Number(reviewThreadBundle?.totalCount) || 0) - (reviewThreads || []).length
     )
   };
@@ -7652,9 +8947,9 @@ async function fetchPrDetail(owner, repo, pullNumber, fetchImpl, token = null, o
   const projects = [];
   try {
     let editApi = typeof globalThis !== "undefined" ? globalThis.PRModalPrEditApi : null;
-    if (!editApi && typeof require === "function") {
+    if (!editApi && typeof __require === "function") {
       try {
-        editApi = require("./modal/pure/pr-edit-api.js");
+        editApi = __require("./modal/pure/pr-edit-api.js");
       } catch {
         editApi = null;
       }
@@ -7682,6 +8977,7 @@ async function fetchPrDetail(owner, repo, pullNumber, fetchImpl, token = null, o
   );
   timings.total = Math.round(fetchNowMs() - tTotal0);
   console.log(
+    // @ts-expect-error classic fetch dynamic shapes
     `[pr-plus] fetchPrDetail total: ${timings.total}ms`,
     JSON.stringify(timings)
   );
@@ -7850,708 +9146,259 @@ async function fetchPrDetail(owner, repo, pullNumber, fetchImpl, token = null, o
     _fetchTimings: timings
   };
 }
-async function postIssueComment(owner, repo, issueNumber, body, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/comments`, ctx),
-    fetchImpl,
-    token,
-    { method: "POST", body: { body } }
-  );
+
+// src/fetch/pulls.ts
+function findDanglingPrNumbers(pagePrNumbers, prs) {
+  if (!Array.isArray(pagePrNumbers) || pagePrNumbers.length === 0) {
+    return [];
+  }
+  const have = new Set((prs || []).map((pr) => pr.number));
+  const dangling = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const raw of pagePrNumbers) {
+    const num = Number(raw);
+    if (!Number.isFinite(num) || seen.has(num) || have.has(num)) continue;
+    seen.add(num);
+    dangling.push(num);
+  }
+  return dangling;
 }
-async function submitPullReview(owner, repo, pullNumber, { event, body = "", commitId, comments }, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  const payload = { event, body: body || "" };
-  if (commitId) payload.commit_id = commitId;
-  if (Array.isArray(comments) && comments.length) {
-    payload.comments = comments.map((c) => {
-      const row = {
-        path: c.path,
-        body: c.body,
-        line: c.line,
-        side: c.side || "RIGHT"
-      };
-      if (c.start_line != null || c.startLine != null) {
-        const sl = c.start_line != null ? c.start_line : c.startLine;
-        if (Number(sl) !== Number(c.line)) {
-          row.start_line = Number(sl);
-          row.start_side = c.start_side || c.startSide || c.side || "RIGHT";
-        }
-      }
-      return row;
-    });
-  }
-  return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`, ctx),
-    fetchImpl,
-    token,
-    { method: "POST", body: payload }
-  );
-}
-async function postReviewCommentViaPendingGraphql(pendingReviewNodeId, { body, path, line, side = "RIGHT", startLine, startSide, subjectType = "line" }, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  const isFile = String(subjectType || "").toLowerCase() === "file";
-  const hasRange = !isFile && startLine != null && Number.isFinite(Number(startLine)) && Number(startLine) !== Number(line);
-  const variables = {
-    review: String(pendingReviewNodeId),
-    body: String(body || "").trim(),
-    path: String(path || "")
-  };
-  let query;
-  if (isFile) {
-    query = `mutation($review:ID!,$body:String!,$path:String!){
-      addPullRequestReviewThread(input:{
-        pullRequestReviewId:$review
-        body:$body
-        path:$path
-        subjectType:FILE
-      }){
-        thread {
-          id
-          comments(first:1){
-            nodes{
-              id
-              databaseId
-              body
-              path
-              createdAt
-              author { login avatarUrl }
-              pullRequestReview { databaseId }
-            }
-          }
-        }
-      }
-    }`;
-  } else if (hasRange) {
-    variables.line = Number(line);
-    variables.side = String(side || "RIGHT").toUpperCase() === "LEFT" ? "LEFT" : "RIGHT";
-    variables.startLine = Number(startLine);
-    variables.startSide = String(startSide || side || "RIGHT").toUpperCase() === "LEFT" ? "LEFT" : "RIGHT";
-    query = `mutation($review:ID!,$body:String!,$path:String!,$line:Int!,$side:DiffSide!,$startLine:Int!,$startSide:DiffSide!){
-      addPullRequestReviewThread(input:{
-        pullRequestReviewId:$review
-        body:$body
-        path:$path
-        line:$line
-        side:$side
-        startLine:$startLine
-        startSide:$startSide
-      }){
-        thread {
-          id
-          comments(first:1){
-            nodes{
-              id
-              databaseId
-              body
-              path
-              createdAt
-              author { login avatarUrl }
-              pullRequestReview { databaseId }
-            }
-          }
-        }
-      }
-    }`;
-  } else {
-    variables.line = Number(line);
-    variables.side = String(side || "RIGHT").toUpperCase() === "LEFT" ? "LEFT" : "RIGHT";
-    query = `mutation($review:ID!,$body:String!,$path:String!,$line:Int!,$side:DiffSide!){
-      addPullRequestReviewThread(input:{
-        pullRequestReviewId:$review
-        body:$body
-        path:$path
-        line:$line
-        side:$side
-      }){
-        thread {
-          id
-          comments(first:1){
-            nodes{
-              id
-              databaseId
-              body
-              path
-              createdAt
-              author { login avatarUrl }
-              pullRequestReview { databaseId }
-            }
-          }
-        }
-      }
-    }`;
-  }
-  const data = await apiGraphql(query, variables, fetchImpl, token, ctx);
-  const thread = data?.addPullRequestReviewThread?.thread;
-  const node = thread?.comments?.nodes?.[0];
-  if (!node) {
-    throw new Error(
-      isFile ? `Could not add pending file comment on ${path}.` : `Could not add pending comment on ${path}:${line} (${side || "RIGHT"}). The line may be outside the diff or on the wrong side.`
-    );
-  }
-  const threadNodeId = thread?.id || null;
-  const rest = mapGraphqlReviewCommentToRest(node, {
-    body,
-    path,
-    line: isFile ? null : line,
-    startLine: hasRange ? Number(startLine) : null,
-    side,
-    inReplyToId: null
+async function fetchOpenPullsPublic(owner, repo, fetchImpl, token = null, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  const url = githubRestUrl2(`/repos/${owner}/${repo}/pulls?state=open&per_page=100`, ctx);
+  const res = await fetchImpl(url, {
+    headers: buildApiHeaders(token)
   });
-  return {
-    ...rest,
-    // GraphQL/REST often omit line on pending comments — keep selection line for UI
-    line: isFile ? null : rest.line ?? Number(line),
-    path: rest.path || path,
-    side: side || "RIGHT",
-    start_line: hasRange ? Number(startLine) : null,
-    start_side: hasRange ? startSide || side || "RIGHT" : null,
-    subject_type: isFile ? "file" : "line",
-    pending: true,
-    pendingReviewId: node.pullRequestReview?.databaseId ?? null,
-    threadNodeId
-  };
-}
-async function ensureViewerPendingReview(owner, repo, pullNumber, { commitId = null, createIfMissing = false } = {}, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  const hydrateNodeId = async (pending2) => {
-    if (!pending2?.id) return null;
-    try {
-      const full = await apiJson(
-        githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${pending2.id}`, ctx),
-        fetchImpl,
-        token
-      );
-      if (!full || String(full.state || "").toUpperCase() !== "PENDING") {
-        return null;
-      }
-      return {
-        id: Number(pending2.id),
-        node_id: full.node_id || pending2.node_id || null
-      };
-    } catch (err) {
-      if (err?.status === 404) return null;
-      if (err?.status >= 400 && err?.status < 500) return null;
-      return pending2?.node_id ? { id: Number(pending2.id), node_id: pending2.node_id } : null;
-    }
-  };
-  let pending = await findViewerPendingReview(
-    owner,
-    repo,
-    pullNumber,
-    fetchImpl,
-    token
-  );
-  pending = await hydrateNodeId(pending);
-  if (pending?.node_id) return pending;
-  if (!createIfMissing) return pending;
-  try {
-    const created = await createPendingPullReview(
-      owner,
-      repo,
-      pullNumber,
-      { commitId },
-      fetchImpl,
-      token
-    );
-    return {
-      id: Number(created?.id),
-      node_id: created?.node_id || null
-    };
-  } catch (err) {
-    const msg = String(err?.message || err || "");
-    if (err?.status === 422 || /one pending review/i.test(msg) || /Unprocessable Entity/i.test(msg)) {
-      pending = await findViewerPendingReview(
-        owner,
-        repo,
-        pullNumber,
-        fetchImpl,
-        token
-      );
-      pending = await hydrateNodeId(pending);
-      if (pending?.node_id) return pending;
-    }
+  if (!res.ok) {
+    const err = new Error(`GitHub API ${res.status}: ${res.statusText}`);
+    err.status = res.status;
     throw err;
   }
+  const data = await res.json();
+  return data.map(mapApiPullRequest);
 }
-async function postReviewComment(owner, repo, pullNumber, {
-  body,
-  path,
-  line,
-  side = "RIGHT",
-  commitId,
-  startLine,
-  startSide,
-  asPending = false,
-  subjectType = "line"
-}, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  const text = String(body || "").trim();
-  if (!text) throw new Error("Comment body is required");
-  if (!path) throw new Error("path is required");
-  const isFile = String(subjectType || "").toLowerCase() === "file";
-  if (!isFile && line == null) throw new Error("path and line are required");
-  let pending = await ensureViewerPendingReview(
-    owner,
-    repo,
-    pullNumber,
-    {
-      commitId: commitId || null,
-      // Create only when caller wants pending; also create path recovers on 422
-      createIfMissing: Boolean(asPending)
-    },
-    fetchImpl,
-    token
-  );
-  const gqlFields = {
-    body: text,
-    path,
-    line: isFile ? null : line,
-    side,
-    startLine: isFile ? null : startLine,
-    startSide: isFile ? null : startSide,
-    subjectType: isFile ? "file" : "line"
+async function fetchPrHeadProbe(owner, repo, number, fetchImpl, token = null, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  const o = String(owner || "").trim();
+  const r = String(repo || "").trim();
+  const n = Number(number);
+  const empty = {
+    headSha: "",
+    baseSha: "",
+    updatedAt: null,
+    draft: false,
+    state: "",
+    number: Number.isFinite(n) ? n : 0
   };
-  if (pending?.node_id) {
-    try {
-      const raw = await postReviewCommentViaPendingGraphql(
-        pending.node_id,
-        gqlFields,
-        fetchImpl,
-        token,
-        ctx
-      );
-      return {
-        ...raw,
-        pending: true,
-        pendingReviewId: raw.pendingReviewId || pending.id || null
-      };
-    } catch (err) {
-      const msg = String(err?.message || err || "");
-      if (asPending && /Could not resolve to a node|global id|NOT_FOUND|Could not find/i.test(msg)) {
-        try {
-          const created = await createPendingPullReview(
-            owner,
-            repo,
-            pullNumber,
-            { commitId: commitId || null },
-            fetchImpl,
-            token,
-            ctx
-          );
-          pending = {
-            id: Number(created?.id),
-            node_id: created?.node_id || null
-          };
-        } catch (createErr) {
-          if (createErr?.status === 422 || /one pending review/i.test(String(createErr?.message || ""))) {
-            pending = await ensureViewerPendingReview(
-              owner,
-              repo,
-              pullNumber,
-              { commitId: commitId || null, createIfMissing: false },
-              fetchImpl,
-              token,
-              ctx
-            );
-          } else {
-            throw createErr;
-          }
-        }
-        if (pending?.node_id) {
-          const raw = await postReviewCommentViaPendingGraphql(
-            pending.node_id,
-            gqlFields,
-            fetchImpl,
-            token,
-            ctx
-          );
-          return {
-            ...raw,
-            pending: true,
-            pendingReviewId: raw.pendingReviewId || pending.id || null
-          };
-        }
-      }
+  if (!o || !r || !Number.isFinite(n) || n <= 0) return empty;
+  try {
+    const url = githubRestUrl2(
+      `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/pulls/${n}`,
+      ctx
+    );
+    const res = await fetchImpl(url, { headers: buildApiHeaders(token) });
+    if (!res.ok) {
+      const err = new Error(`GitHub API ${res.status}: ${res.statusText}`);
+      err.status = res.status;
       throw err;
     }
-  }
-  if (asPending) {
-    throw new Error(
-      "Could not start or find a pending review. Try Discard any leftover pending review, then retry."
-    );
-  }
-  const payload = isFile ? { body: text, path, subject_type: "file" } : { body: text, path, line, side };
-  if (commitId) payload.commit_id = commitId;
-  if (!isFile && startLine != null && Number(startLine) !== Number(line)) {
-    payload.start_line = Number(startLine);
-    payload.start_side = startSide || side || "RIGHT";
-  }
-  return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/comments`, ctx),
-    fetchImpl,
-    token,
-    { method: "POST", body: payload }
-  );
-}
-async function findViewerPendingReview(owner, repo, pullNumber, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  if (!token) return null;
-  const n = Number(pullNumber);
-  if (!Number.isFinite(n)) return null;
-  try {
-    const [reviews, login] = await Promise.all([
-      apiJson(
-        githubRestUrl(`/repos/${owner}/${repo}/pulls/${n}/reviews?per_page=100`, ctx),
-        fetchImpl,
-        token
-      ).catch(() => []),
-      fetchViewerLogin(fetchImpl, token).catch(() => null)
-    ]);
-    return pickViewerPendingFromReviews(reviews, login);
-  } catch {
-    return null;
-  }
-}
-function mapGraphqlReviewCommentToRest(c, fallback = {}) {
-  if (!c) return null;
-  return {
-    id: c.databaseId ?? fallback.id ?? null,
-    node_id: c.id || null,
-    body: c.body || fallback.body || "",
-    path: c.path || fallback.path || "",
-    line: c.line ?? fallback.line ?? null,
-    original_line: c.originalLine ?? null,
-    start_line: c.startLine ?? fallback.startLine ?? null,
-    side: c.side || fallback.side || "RIGHT",
-    start_side: c.startSide || null,
-    diff_hunk: c.diffHunk || "",
-    created_at: c.createdAt || fallback.createdAt || null,
-    in_reply_to_id: c.replyTo?.databaseId ?? c.replyTo?.id ?? fallback.inReplyToId ?? fallback.in_reply_to_id ?? null,
-    user: {
-      login: c.author?.login || fallback.author || "",
-      avatar_url: c.author?.avatarUrl || fallback.avatarUrl || ""
-    },
-    pull_request_review_id: c.pullRequestReview?.databaseId ?? null
-  };
-}
-async function replyViaThreadGraphql(threadNodeId, body, fetchImpl, token, fallback = {}, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  const data = await apiGraphql(
-    `mutation($id:ID!,$body:String!){
-      addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$id,body:$body}){
-        comment {
-          id
-          databaseId
-          body
-          path
-          diffHunk
-          createdAt
-          author { login avatarUrl }
-          replyTo { databaseId }
-          pullRequestReview { databaseId }
-        }
-      }
-    }`,
-    { id: String(threadNodeId), body: String(body) },
-    fetchImpl,
-    token,
-    ctx
-  );
-  const c = data?.addPullRequestReviewThreadReply?.comment;
-  if (!c) throw new Error("GraphQL thread reply returned no comment");
-  return mapGraphqlReviewCommentToRest(c, fallback);
-}
-async function replyViaPendingReviewGraphql(pendingReviewNodeId, parentCommentNodeId, body, fetchImpl, token, fallback = {}, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  const data = await apiGraphql(
-    `mutation($review:ID!,$body:String!,$inReplyTo:ID!){
-      addPullRequestReviewComment(input:{
-        pullRequestReviewId:$review
-        body:$body
-        inReplyTo:$inReplyTo
-      }){
-        comment {
-          id
-          databaseId
-          body
-          path
-          diffHunk
-          createdAt
-          author { login avatarUrl }
-          replyTo { databaseId }
-          pullRequestReview { databaseId }
-        }
-      }
-    }`,
-    {
-      review: String(pendingReviewNodeId),
-      body: String(body),
-      inReplyTo: String(parentCommentNodeId)
-    },
-    fetchImpl,
-    token
-  );
-  const c = data?.addPullRequestReviewComment?.comment;
-  if (!c) throw new Error("GraphQL pending-review reply returned no comment");
-  return mapGraphqlReviewCommentToRest(c, fallback);
-}
-async function resolveParentCommentNodeId(owner, repo, parentId, fetchImpl, token, knownNodeId, pullNumber = null, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  if (knownNodeId) return String(knownNodeId);
-  const id = Math.floor(Number(parentId));
-  if (!Number.isFinite(id) || id <= 0) return null;
-  try {
-    const parent = await apiJson(
-      githubRestUrl(`/repos/${owner}/${repo}/pulls/comments/${id}`, ctx),
-      fetchImpl,
-      token
-    );
-    if (parent?.node_id) return String(parent.node_id);
-  } catch {
-  }
-  if (pullNumber == null || !token) return null;
-  try {
-    const { comments } = await fetchViewerPendingReviewBundle(
-      owner,
-      repo,
-      pullNumber,
-      fetchImpl,
-      token
-    );
-    const hit = (comments || []).find(
-      (c) => c && Number(c.id) === id && (c.nodeId || c.node_id)
-    );
-    if (hit) return String(hit.nodeId || hit.node_id);
-  } catch {
-  }
-  return null;
-}
-async function replyToReviewComment(owner, repo, pullNumber, commentId, body, fetchImpl, token, opts = {}) {
-  const ctx = normalizeApiCtx(opts?.ctx);
-  const text = String(body || "").trim();
-  if (!text) throw new Error("Reply body is required");
-  const parentId = Number(commentId);
-  if (!Number.isFinite(parentId) || parentId <= 0) {
-    throw new Error("Invalid review comment id for reply");
-  }
-  const n = Number(pullNumber);
-  const mode = opts?.mode === "pending" ? "pending" : "comment";
-  const threadNodeId = opts?.threadNodeId || null;
-  let parentNodeId = opts?.parentNodeId || null;
-  const fallback = {
-    body: text,
-    inReplyToId: Math.floor(parentId),
-    path: opts?.path || "",
-    line: opts?.line ?? null,
-    side: opts?.side || "RIGHT"
-  };
-  async function attachReplyToPending({ createIfMissing }) {
-    const pending = await ensureViewerPendingReview(
-      owner,
-      repo,
-      n,
-      {
-        commitId: opts?.commitId || null,
-        createIfMissing: Boolean(createIfMissing)
-      },
-      fetchImpl,
-      token
-    );
-    if (!pending?.node_id && !threadNodeId) return null;
-    if (threadNodeId) {
-      try {
-        const raw = await replyViaThreadGraphql(
-          threadNodeId,
-          text,
-          fetchImpl,
-          token,
-          fallback
-        );
-        return {
-          ...raw,
-          pending: true,
-          pendingReviewId: raw.pendingReviewId || pending?.id || null
-        };
-      } catch {
-      }
-    }
-    if (!pending?.node_id) return null;
-    parentNodeId = await resolveParentCommentNodeId(
-      owner,
-      repo,
-      parentId,
-      fetchImpl,
-      token,
-      parentNodeId,
-      n
-    );
-    if (!parentNodeId) {
-      throw new Error(
-        "Cannot reply while a pending review exists (missing parent comment node id)."
-      );
-    }
-    try {
-      const raw = await replyViaPendingReviewGraphql(
-        pending.node_id,
-        parentNodeId,
-        text,
-        fetchImpl,
-        token,
-        fallback
-      );
-      return { ...raw, pending: true, pendingReviewId: pending.id };
-    } catch (err) {
-      const msg = String(err?.message || err || "");
-      if (!/Could not resolve to a node|global id|NOT_FOUND|Could not find/i.test(msg)) {
-        throw err;
-      }
-      let next = null;
-      try {
-        const created = await createPendingPullReview(
-          owner,
-          repo,
-          n,
-          { commitId: opts?.commitId || null },
-          fetchImpl,
-          token
-        );
-        next = {
-          id: Number(created?.id),
-          node_id: created?.node_id || null
-        };
-      } catch (createErr) {
-        if (createErr?.status === 422 || /one pending review/i.test(String(createErr?.message || ""))) {
-          next = await ensureViewerPendingReview(
-            owner,
-            repo,
-            n,
-            { commitId: opts?.commitId || null, createIfMissing: false },
-            fetchImpl,
-            token
-          );
-        } else {
-          throw createErr;
-        }
-      }
-      if (!next?.node_id) throw err;
-      const raw = await replyViaPendingReviewGraphql(
-        next.node_id,
-        parentNodeId,
-        text,
-        fetchImpl,
-        token,
-        fallback
-      );
-      return { ...raw, pending: true, pendingReviewId: next.id };
-    }
-  }
-  if (mode === "pending") {
-    const attached = await attachReplyToPending({ createIfMissing: true });
-    if (attached) return attached;
-    throw new Error(
-      "Could not start or find a pending review for this reply. Try Discard any leftover pending review, then retry."
-    );
-  }
-  const existingPending = await ensureViewerPendingReview(
-    owner,
-    repo,
-    n,
-    { createIfMissing: false },
-    fetchImpl,
-    token
-  );
-  if (existingPending?.node_id) {
-    const attached = await attachReplyToPending({ createIfMissing: false });
-    if (attached) return attached;
-  }
-  if (threadNodeId) {
-    try {
-      const raw = await replyViaThreadGraphql(
-        threadNodeId,
-        text,
-        fetchImpl,
-        token,
-        fallback
-      );
-      return { ...raw, pending: false };
-    } catch {
-    }
-  }
-  try {
-    return await apiSend(
-      githubRestUrl(`/repos/${owner}/${repo}/pulls/${n}/comments/${Math.floor(parentId)}/replies`, ctx),
-      fetchImpl,
-      token,
-      { method: "POST", body: { body: text } }
-    );
+    const data = await res.json();
+    return {
+      headSha: String(data?.head?.sha || ""),
+      baseSha: String(data?.base?.sha || ""),
+      updatedAt: data?.updated_at || null,
+      draft: Boolean(data?.draft),
+      state: String(data?.state || ""),
+      number: Number(data?.number) || n
+    };
   } catch (err) {
-    const msg = String(err?.message || err || "");
-    if (err?.status === 422 || /one pending review/i.test(msg) || /Unprocessable Entity/i.test(msg)) {
-      const attached = await attachReplyToPending({ createIfMissing: false });
-      if (attached) return attached;
+    if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
+      throw err;
     }
+    return empty;
+  }
+}
+async function fetchPullByNumber(owner, repo, pullNumber, fetchImpl, token = null, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  const url = githubRestUrl2(`/repos/${owner}/${repo}/pulls/${pullNumber}`, ctx);
+  const res = await fetchImpl(url, {
+    headers: buildApiHeaders(token)
+  });
+  if (!res.ok) {
+    const err = new Error(`GitHub API ${res.status}: ${res.statusText} (PR #${pullNumber})`);
+    err.status = res.status;
+    err.pullNumber = pullNumber;
     throw err;
   }
+  const data = await res.json();
+  return mapApiPullRequest(data);
 }
-async function resolveReviewThread(threadNodeId, resolved, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  if (!threadNodeId) throw new Error("threadNodeId required to resolve review thread");
-  const mutation = resolved ? `mutation($id:ID!){ resolveReviewThread(input:{threadId:$id}){ thread { id isResolved } } }` : `mutation($id:ID!){ unresolveReviewThread(input:{threadId:$id}){ thread { id isResolved } } }`;
-  return apiGraphql(
-    mutation,
-    { id: threadNodeId },
+async function fetchDanglingPulls(owner, repo, numbers, fetchImpl, token = null, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  if (!numbers.length) return [];
+  const settled = await mapWithConcurrency(numbers, 5, async (pullNumber) => {
+    try {
+      return await fetchPullByNumber(owner, repo, pullNumber, fetchImpl, token, ctx);
+    } catch (err) {
+      if (err.status === 401 || err.status === 403) {
+        throw err;
+      }
+      console.warn(`[PR Tree] Skipping dangling PR #${pullNumber}:`, err.message || err);
+      return null;
+    }
+  });
+  return settled.filter(Boolean);
+}
+async function fetchRepoAutolinks2(owner, repo, fetchImpl, token = null, ctx = null) {
+  ctx = normalizeApiCtx2(ctx);
+  const url = githubRestUrl2(`/repos/${owner}/${repo}/autolinks`, ctx);
+  try {
+    const res = await fetchImpl(url, { headers: buildApiHeaders(token) });
+    if (!res.ok) return [];
+    const data = await res.json();
+    if (!Array.isArray(data)) return [];
+    return data.filter((a) => a && typeof a.key_prefix === "string" && typeof a.url_template === "string").map((a) => ({
+      key_prefix: a.key_prefix,
+      url_template: a.url_template,
+      is_alphanumeric: a.is_alphanumeric !== false
+    }));
+  } catch {
+    return [];
+  }
+}
+function buildAutolinkUrl(urlTemplate, num) {
+  return String(urlTemplate).replace(/<num>/gi, num).replace(/\{num\}/gi, num);
+}
+function matchAutolinksInText2(text, autolinks) {
+  if (!text || !Array.isArray(autolinks) || autolinks.length === 0) return [];
+  const found = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const rule of autolinks) {
+    const prefix = rule.key_prefix;
+    if (!prefix) continue;
+    const numClass = rule.is_alphanumeric !== false ? "(?:\\d+|[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*)" : "\\d+";
+    const re = new RegExp(
+      `(^|[^A-Za-z0-9_])(${escapeRegExp(prefix)})(${numClass})`,
+      "gi"
+    );
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      const key = `${m[2]}${m[3]}`;
+      const url = buildAutolinkUrl(rule.url_template, m[3]);
+      if (!url || seen.has(url)) continue;
+      seen.add(url);
+      found.push({ key, url, prefix: m[2] });
+    }
+  }
+  return found;
+}
+function prMatchText2(pr) {
+  if (!pr) return "";
+  return [pr.title, pr.headRef, pr.baseRef, pr.body, pr.author].filter(Boolean).join("\n");
+}
+function attachMagicLinks(prs, autolinks) {
+  if (!Array.isArray(prs)) return [];
+  if (!Array.isArray(autolinks) || autolinks.length === 0) {
+    return prs.map((pr) => ({ ...pr, magicLinks: pr.magicLinks || [] }));
+  }
+  return prs.map((pr) => ({
+    ...pr,
+    magicLinks: matchAutolinksInText2(prMatchText2(pr), autolinks)
+  }));
+}
+async function fetchOpenPulls(owner, repo, fetchImpl, options = {}) {
+  const {
+    token = null,
+    pagePrNumbers = [],
+    includeAutolinks = true
+  } = options;
+  const ctx = normalizeApiCtx2(options?.ctx);
+  const listed = await fetchOpenPullsPublic(owner, repo, fetchImpl, token, ctx);
+  const danglingNumbers = findDanglingPrNumbers(pagePrNumbers, listed);
+  let prs = listed;
+  if (danglingNumbers.length > 0) {
+    const extras = await fetchDanglingPulls(
+      owner,
+      repo,
+      danglingNumbers,
+      fetchImpl,
+      token,
+      ctx
+    );
+    if (extras.length > 0) {
+      const byNumber = new Map(listed.map((pr) => [pr.number, pr]));
+      for (const pr of extras) {
+        byNumber.set(pr.number, pr);
+      }
+      prs = [...byNumber.values()];
+    }
+  }
+  if (!includeAutolinks) {
+    return attachMagicLinks(prs, []);
+  }
+  const autolinks = await fetchRepoAutolinks2(owner, repo, fetchImpl, token, ctx);
+  return attachMagicLinks(prs, autolinks);
+}
+
+// src/fetch/reactions.ts
+async function fetchReactableReactionGroups2(nodeIds, fetchImpl, token, ctx = null, opts = null) {
+  ctx = normalizeApiCtx2(ctx);
+  const ids = [
+    ...new Set(
+      (Array.isArray(nodeIds) ? nodeIds : []).map((id) => String(id || "").trim()).filter(Boolean)
+    )
+  ].slice(0, 100);
+  const out = /* @__PURE__ */ new Map();
+  if (!ids.length || !token) return out;
+  const reactorsFirst = Math.max(
+    0,
+    Math.min(20, Number(opts?.reactorsFirst) || 0)
+  );
+  const reactorsSel = reactorsFirst > 0 ? `reactors(first:${reactorsFirst}){
+            totalCount
+            nodes{
+              ... on User { login }
+              ... on Bot { login }
+            }
+          }` : `reactors { totalCount }`;
+  const query = `query($ids:[ID!]!){
+    nodes(ids:$ids){
+      ... on Reactable {
+        id
+        reactionGroups {
+          content
+          viewerHasReacted
+          ${reactorsSel}
+        }
+      }
+    }
+  }`;
+  try {
+    const data = await apiGraphql(query, { ids }, fetchImpl, token, ctx);
+    for (const node of data?.nodes || []) {
+      if (!node?.id) continue;
+      out.set(String(node.id), mapGraphqlReactionGroups(node.reactionGroups));
+    }
+  } catch {
+  }
+  return out;
+}
+async function fetchReactableReactors(nodeId, fetchImpl, token, ctx = null, opts = null) {
+  ctx = normalizeApiCtx2(ctx);
+  const id = String(nodeId || "").trim();
+  if (!id || !token) return [];
+  const first = Math.max(1, Math.min(10, Number(opts?.first) || 5));
+  const map = await fetchReactableReactionGroups2(
+    [id],
     fetchImpl,
     token,
-    ctx
+    ctx,
+    { reactorsFirst: first }
   );
+  return map.get(id) || [];
 }
-async function updatePullState(owner, repo, pullNumber, state, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  const next = state === "closed" ? "closed" : "open";
-  return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}`, ctx),
-    fetchImpl,
-    token,
-    { method: "PATCH", body: { state: next } }
-  );
-}
-async function closePullRequest(owner, repo, pullNumber, fetchImpl, token) {
-  return updatePullState(owner, repo, pullNumber, "closed", fetchImpl, token);
-}
-async function reopenPullRequest(owner, repo, pullNumber, fetchImpl, token) {
-  return updatePullState(owner, repo, pullNumber, "open", fetchImpl, token);
-}
-async function deleteReviewComment(owner, repo, commentId, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/pulls/comments/${commentId}`, ctx),
-    fetchImpl,
-    token,
-    { method: "DELETE" }
-  );
-}
-async function deleteIssueComment(owner, repo, commentId, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/issues/comments/${commentId}`, ctx),
-    fetchImpl,
-    token,
-    { method: "DELETE" }
-  );
-}
-const REST_TO_GQL_REACTION = {
-  "+1": "THUMBS_UP",
-  "-1": "THUMBS_DOWN",
-  laugh: "LAUGH",
-  hooray: "HOORAY",
-  confused: "CONFUSED",
-  heart: "HEART",
-  rocket: "ROCKET",
-  eyes: "EYES"
-};
 async function toggleCommentReaction(owner, repo, kind, opts, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
+  ctx = normalizeApiCtx2(ctx);
   const content = String(opts?.content || "").trim();
   const gqlContent = REST_TO_GQL_REACTION[content];
   if (!gqlContent) {
@@ -8610,15 +9457,16 @@ async function toggleCommentReaction(owner, repo, kind, opts, fetchImpl, token, 
   }
   if (nextReacted) {
     await apiSend(
-      githubRestUrl(basePath, ctx),
+      githubRestUrl2(basePath, ctx),
       fetchImpl,
       token,
+      // @ts-expect-error classic fetch dynamic shapes
       { method: "POST", body: { content } }
     );
     return { content, reacted: true };
   }
-  const listed = await apiJson(
-    githubRestUrl(
+  const listed = await apiJson2(
+    githubRestUrl2(
       `${basePath}?content=${encodeURIComponent(content)}&per_page=100`,
       ctx
     ),
@@ -8642,792 +9490,17 @@ async function toggleCommentReaction(owner, repo, kind, opts, fetchImpl, token, 
     return { content, reacted: false };
   }
   await apiSend(
-    githubRestUrl(deletePath(target.id), ctx),
+    githubRestUrl2(deletePath(target.id), ctx),
     fetchImpl,
     token,
     { method: "DELETE" }
   );
   return { content, reacted: false };
 }
-async function updatePullRequest(owner, repo, pullNumber, fields, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  const body = {};
-  if (fields?.title != null) body.title = String(fields.title);
-  if (fields?.body != null) body.body = String(fields.body);
-  if (fields?.base != null) body.base = String(fields.base);
-  if (fields?.state != null) body.state = fields.state === "closed" ? "closed" : "open";
-  return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}`, ctx),
-    fetchImpl,
-    token,
-    { method: "PATCH", body }
-  );
-}
-async function editIssueComment(owner, repo, commentId, body, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/issues/comments/${commentId}`, ctx),
-    fetchImpl,
-    token,
-    { method: "PATCH", body: { body: String(body || "") } }
-  );
-}
-async function editReviewComment(owner, repo, commentId, body, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/pulls/comments/${commentId}`, ctx),
-    fetchImpl,
-    token,
-    { method: "PATCH", body: { body: String(body || "") } }
-  );
-}
-async function requestReviewers(owner, repo, pullNumber, { reviewers = [], teamReviewers = [] }, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/requested_reviewers`, ctx),
-    fetchImpl,
-    token,
-    {
-      method: "POST",
-      body: { reviewers, team_reviewers: teamReviewers }
-    }
-  );
-}
-async function removeReviewers(owner, repo, pullNumber, { reviewers = [], teamReviewers = [] }, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/requested_reviewers`, ctx),
-    fetchImpl,
-    token,
-    {
-      method: "DELETE",
-      body: { reviewers, team_reviewers: teamReviewers }
-    }
-  );
-}
-async function addAssignees(owner, repo, issueNumber, assignees, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/assignees`, ctx),
-    fetchImpl,
-    token,
-    { method: "POST", body: { assignees: assignees || [] } }
-  );
-}
-async function removeAssignees(owner, repo, issueNumber, assignees, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/assignees`, ctx),
-    fetchImpl,
-    token,
-    { method: "DELETE", body: { assignees: assignees || [] } }
-  );
-}
-async function setIssueLabels(owner, repo, issueNumber, labels, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/labels`, ctx),
-    fetchImpl,
-    token,
-    { method: "PUT", body: { labels: labels || [] } }
-  );
-}
-async function fetchRepoLabels(owner, repo, fetchImpl, token = null, opts = {}) {
-  const ctx = normalizeApiCtx(opts?.ctx);
-  const perPage = 100;
-  const maxPages = Math.max(1, Math.min(10, Number(opts.maxPages) || 5));
-  const out = [];
-  for (let page = 1; page <= maxPages; page++) {
-    const url = githubRestUrl(
-      `/repos/${owner}/${repo}/labels?per_page=${perPage}&page=${page}`,
-      ctx
-    );
-    const batch = await apiJson(url, fetchImpl, token);
-    if (!Array.isArray(batch) || !batch.length) break;
-    for (const l of batch) {
-      const name = String(l?.name || "").trim();
-      if (!name) continue;
-      out.push({
-        name,
-        color: String(l?.color || "").trim().replace(/^#/, ""),
-        description: String(l?.description || "")
-      });
-    }
-    if (batch.length < perPage) break;
-  }
-  return out;
-}
-function defaultNewLabelColor(name) {
-  const palette = [
-    "d73a4a",
-    "0075ca",
-    "a2eeef",
-    "7057ff",
-    "008672",
-    "e4e669",
-    "d876e3",
-    "fbca04",
-    "0e8a16",
-    "5319e7"
-  ];
-  const s = String(name || "");
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = h * 31 + s.charCodeAt(i) >>> 0;
-  return palette[h % palette.length];
-}
-async function createRepoLabel(owner, repo, { name, color, description } = {}, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  const rawName = String(name || "").trim();
-  if (!rawName) throw new Error("Label name is required");
-  const body = {
-    name: rawName,
-    color: String(color || defaultNewLabelColor(rawName)).trim().replace(/^#/, "")
-  };
-  if (description != null) body.description = String(description);
-  const result = await apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/labels`, ctx),
-    fetchImpl,
-    token,
-    { method: "POST", body }
-  );
-  return {
-    name: String(result?.name || rawName),
-    color: String(result?.color || body.color || "").trim().replace(/^#/, ""),
-    description: String(result?.description || description || "")
-  };
-}
-async function fetchRepoMilestones(owner, repo, fetchImpl, token = null, opts = {}) {
-  const ctx = normalizeApiCtx(opts?.ctx);
-  const perPage = 100;
-  const maxPages = Math.max(1, Math.min(10, Number(opts.maxPages) || 5));
-  const state = opts.state || "all";
-  const out = [];
-  for (let page = 1; page <= maxPages; page++) {
-    const url = githubRestUrl(
-      `/repos/${owner}/${repo}/milestones?state=${encodeURIComponent(state)}&per_page=${perPage}&page=${page}&sort=due_on&direction=desc`,
-      ctx
-    );
-    const batch = await apiJson(url, fetchImpl, token);
-    if (!Array.isArray(batch) || !batch.length) break;
-    for (const m of batch) {
-      const number = Number(m?.number);
-      if (!Number.isFinite(number) || number <= 0) continue;
-      out.push({
-        number,
-        title: String(m?.title || `Milestone ${number}`),
-        state: String(m?.state || ""),
-        description: String(m?.description || ""),
-        dueOn: m?.due_on || null
-      });
-    }
-    if (batch.length < perPage) break;
-  }
-  return out;
-}
-async function createRepoMilestone(owner, repo, { title, description, state } = {}, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  const rawTitle = String(title || "").trim();
-  if (!rawTitle) throw new Error("Milestone title is required");
-  const body = { title: rawTitle, state: state === "closed" ? "closed" : "open" };
-  if (description != null) body.description = String(description);
-  const result = await apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/milestones`, ctx),
-    fetchImpl,
-    token,
-    { method: "POST", body }
-  );
-  return {
-    number: Number(result?.number) || 0,
-    title: String(result?.title || rawTitle),
-    state: String(result?.state || body.state),
-    description: String(result?.description || description || ""),
-    dueOn: result?.due_on || null
-  };
-}
-async function fetchRepoTags(owner, repo, fetchImpl, token = null, opts = {}) {
-  const ctx = normalizeApiCtx(opts?.ctx);
-  const perPage = 100;
-  const maxPages = Math.max(1, Math.min(20, Number(opts.maxPages) || 10));
-  const out = [];
-  for (let page = 1; page <= maxPages; page++) {
-    const url = githubRestUrl(
-      `/repos/${owner}/${repo}/tags?per_page=${perPage}&page=${page}`,
-      ctx
-    );
-    const batch = await apiJson(url, fetchImpl, token);
-    if (!Array.isArray(batch) || !batch.length) break;
-    for (const t of batch) {
-      const name = String(t?.name || "").trim();
-      const sha = String(t?.commit?.sha || t?.sha || "").trim();
-      if (!name) continue;
-      out.push({
-        name,
-        sha,
-        zipballUrl: t?.zipball_url || "",
-        tarballUrl: t?.tarball_url || ""
-      });
-    }
-    if (batch.length < perPage) break;
-  }
-  return out;
-}
-async function fetchTagsForCommits(owner, repo, shas, fetchImpl, token = null, opts = {}) {
-  const want = new Set(
-    (shas || []).map((s) => String(s || "").trim().toLowerCase()).filter(Boolean)
-  );
-  if (!want.size) return [];
-  const tags = await fetchRepoTags(owner, repo, fetchImpl, token, opts);
-  return tags.filter((t) => want.has(String(t.sha || "").toLowerCase()));
-}
-async function mergePullRequest(owner, repo, pullNumber, { mergeMethod = "merge", commitTitle, commitMessage } = {}, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  const body = { merge_method: mergeMethod };
-  if (commitTitle != null) body.commit_title = String(commitTitle);
-  if (commitMessage != null) body.commit_message = String(commitMessage);
-  return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/merge`, ctx),
-    fetchImpl,
-    token,
-    { method: "PUT", body }
-  );
-}
-async function updatePullBranch(owner, repo, pullNumber, { expectedHeadSha } = {}, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  const body = {};
-  if (expectedHeadSha) body.expected_head_sha = String(expectedHeadSha);
-  return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/update-branch`, ctx),
-    fetchImpl,
-    token,
-    { method: "PUT", body }
-  );
-}
-async function deleteHeadBranch(owner, repo, branch, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  const b = String(branch || "").trim().replace(/^refs\/heads\//, "");
-  if (!b) throw new Error("Branch name required");
-  const branchPath = b.split("/").filter(Boolean).map((seg) => encodeURIComponent(seg)).join("/");
-  return apiSend(
-    githubRestUrl(
-      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/refs/heads/${branchPath}`,
-      ctx
-    ),
-    fetchImpl,
-    token,
-    { method: "DELETE" }
-  );
-}
-async function fetchViewerViewedPaths(owner, repo, pullNumber, fetchImpl, token, opts = {}) {
-  const apiCtx = normalizeApiCtx(opts?.ctx);
-  if (!token) {
-    return { pullRequestId: null, viewedPaths: [], unauthorized: true };
-  }
-  const maxPages = Math.max(1, Math.min(20, Number(opts.maxPages) || 5));
-  const viewed = [];
-  let cursor = null;
-  let pullRequestId = null;
-  for (let page = 0; page < maxPages; page++) {
-    const data = await apiGraphql(
-      `query ViewerViewedFiles($owner:String!,$repo:String!,$number:Int!,$cursor:String) {
-  repository(owner:$owner, name:$repo) {
-    pullRequest(number:$number) {
-      id
-      files(first:100, after:$cursor) {
-        pageInfo { hasNextPage endCursor }
-        nodes { path viewerViewedState }
-      }
-    }
-  }
-}`,
-      {
-        owner: String(owner || ""),
-        repo: String(repo || ""),
-        number: Number(pullNumber) || 0,
-        cursor
-      },
-      fetchImpl,
-      token,
-      apiCtx
-    );
-    const pr = data?.repository?.pullRequest;
-    if (!pr) break;
-    if (pr.id) pullRequestId = String(pr.id);
-    const nodes = pr.files?.nodes || [];
-    for (const n of nodes) {
-      if (String(n?.viewerViewedState || "").toUpperCase() === "VIEWED" && n?.path) {
-        viewed.push(String(n.path));
-      }
-    }
-    if (!pr.files?.pageInfo?.hasNextPage) break;
-    cursor = pr.files.pageInfo.endCursor || null;
-    if (!cursor) break;
-  }
-  return { pullRequestId, viewedPaths: viewed };
-}
-async function markFileAsViewed(pullRequestId, path, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  const data = await apiGraphql(
-    `mutation MarkFileAsViewed($input: MarkFileAsViewedInput!) {
-  markFileAsViewed(input: $input) {
-    pullRequest { id }
-  }
-}`,
-    {
-      input: {
-        pullRequestId: String(pullRequestId || ""),
-        path: String(path || "")
-      }
-    },
-    fetchImpl,
-    token,
-    ctx
-  );
-  return data;
-}
-async function unmarkFileAsViewed(pullRequestId, path, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  const data = await apiGraphql(
-    `mutation UnmarkFileAsViewed($input: UnmarkFileAsViewedInput!) {
-  unmarkFileAsViewed(input: $input) {
-    pullRequest { id }
-  }
-}`,
-    {
-      input: {
-        pullRequestId: String(pullRequestId || ""),
-        path: String(path || "")
-      }
-    },
-    fetchImpl,
-    token,
-    ctx
-  );
-  return data;
-}
-async function resolvePullRequestNodeId(owner, repo, pullNumber, fetchImpl, token, nodeId = null, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  if (nodeId) return String(nodeId);
-  const n = Number(pullNumber);
-  if (!token || !owner || !repo || !Number.isFinite(n) || n <= 0) return null;
-  try {
-    const pr = await apiJson(
-      githubRestUrl(`/repos/${owner}/${repo}/pulls/${n}`, ctx),
-      fetchImpl,
-      token
-    );
-    if (pr?.node_id) return String(pr.node_id);
-  } catch {
-  }
-  try {
-    const data = await apiGraphql(
-      `query($owner:String!,$name:String!,$number:Int!){
-  repository(owner:$owner, name:$name) {
-    pullRequest(number:$number) { id }
-  }
-}`,
-      { owner: String(owner), name: String(repo), number: n },
-      fetchImpl,
-      token,
-      ctx
-    );
-    const id = data?.repository?.pullRequest?.id;
-    return id ? String(id) : null;
-  } catch {
-    return null;
-  }
-}
-function mapViewerSubscription(state) {
-  const s = String(state || "").toUpperCase();
-  if (s === "SUBSCRIBED") return { subscribed: true, ignored: false, viewerSubscription: s };
-  if (s === "IGNORED") return { subscribed: false, ignored: true, viewerSubscription: s };
-  if (s === "UNSUBSCRIBED") {
-    return { subscribed: false, ignored: false, viewerSubscription: s };
-  }
-  return { subscribed: null, ignored: false, viewerSubscription: s || null };
-}
-async function setIssueSubscription(owner, repo, issueNumber, { subscribed = true, ignored = false, nodeId = null } = {}, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  if (!token) throw new Error("GitHub PAT required for notifications");
-  const id = await resolvePullRequestNodeId(
-    owner,
-    repo,
-    issueNumber,
-    fetchImpl,
-    token,
-    nodeId,
-    ctx
-  );
-  if (!id) {
-    throw new Error(
-      "Could not resolve pull request id for subscription. Refresh and try again."
-    );
-  }
-  const state = ignored ? "IGNORED" : subscribed ? "SUBSCRIBED" : "UNSUBSCRIBED";
-  const data = await apiGraphql(
-    `mutation($id:ID!,$state:SubscriptionState!){
-  updateSubscription(input:{subscribableId:$id, state:$state}) {
-    subscribable {
-      ... on PullRequest { id viewerSubscription }
-      ... on Issue { id viewerSubscription }
-    }
-  }
-}`,
-    { id: String(id), state },
-    fetchImpl,
-    token
-  );
-  const vs = data?.updateSubscription?.subscribable?.viewerSubscription;
-  return mapViewerSubscription(vs);
-}
-async function deleteIssueSubscription(owner, repo, issueNumber, fetchImpl, token, nodeId = null) {
-  return setIssueSubscription(
-    owner,
-    repo,
-    issueNumber,
-    { subscribed: false, ignored: false, nodeId },
-    fetchImpl,
-    token
-  );
-}
-async function fetchPullRequestSubscription(owner, repo, pullNumber, fetchImpl, token, nodeId = null, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  if (!token) return null;
-  try {
-    const id = await resolvePullRequestNodeId(
-      owner,
-      repo,
-      pullNumber,
-      fetchImpl,
-      token,
-      nodeId,
-      ctx
-    );
-    if (!id) return null;
-    const data = await apiGraphql(
-      `query($id:ID!){
-  node(id:$id) {
-    ... on PullRequest {
-      viewerSubscription
-      viewerCanSubscribe
-      mergeStateStatus
-    }
-    ... on Issue { viewerSubscription viewerCanSubscribe }
-  }
-}`,
-      { id: String(id) },
-      fetchImpl,
-      token,
-      ctx
-    );
-    const node = data?.node || null;
-    const vs = node?.viewerSubscription;
-    if (!vs) {
-      if (node?.mergeStateStatus) {
-        return {
-          subscribed: null,
-          mergeStateStatus: String(node.mergeStateStatus || "") || null
-        };
-      }
-      return null;
-    }
-    const mapped = mapViewerSubscription(vs);
-    if (node?.mergeStateStatus) {
-      return {
-        ...mapped,
-        mergeStateStatus: String(node.mergeStateStatus || "") || null
-      };
-    }
-    return mapped;
-  } catch {
-    return null;
-  }
-}
-async function setIssueMilestone(owner, repo, issueNumber, milestoneNumber, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}`, ctx),
-    fetchImpl,
-    token,
-    {
-      method: "PATCH",
-      body: { milestone: milestoneNumber == null ? null : Number(milestoneNumber) }
-    }
-  );
-}
-async function setPullRequestDraftStage(owner, repo, pullNumber, stage, fetchImpl, token, nodeId = null, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  let id = nodeId;
-  if (!id) {
-    const pr = await apiJson(
-      githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}`, ctx),
-      fetchImpl,
-      token
-    );
-    id = pr?.node_id;
-  }
-  if (!id) throw new Error("PR node_id unavailable for draft stage change");
-  let buildFn = null;
-  try {
-    let mod = typeof globalThis !== "undefined" ? globalThis.PRModalPrEditApi : null;
-    if (!mod && typeof require === "function") {
-      try {
-        mod = require("./modal/pure/pr-edit-api.js");
-      } catch {
-        mod = null;
-      }
-    }
-    buildFn = mod?.buildDraftStageGraphql;
-  } catch {
-    buildFn = null;
-  }
-  const gql = buildFn ? buildFn(stage === "ready" ? "ready" : "draft", id) : stage === "ready" ? {
-    query: `mutation($id:ID!){markPullRequestReadyForReview(input:{pullRequestId:$id}){pullRequest{id isDraft}}}`,
-    variables: { id }
-  } : {
-    query: `mutation($id:ID!){convertPullRequestToDraft(input:{pullRequestId:$id}){pullRequest{id isDraft}}}`,
-    variables: { id }
-  };
-  const data = await apiGraphql(gql.query, gql.variables, fetchImpl, token, ctx);
-  let parseFn = null;
-  try {
-    let mod = typeof globalThis !== "undefined" ? globalThis.PRModalPrEditApi : null;
-    if (!mod && typeof require === "function") {
-      try {
-        mod = require("./modal/pure/pr-edit-api.js");
-      } catch {
-        mod = null;
-      }
-    }
-    parseFn = mod?.draftFromStageGraphqlData;
-  } catch {
-    parseFn = null;
-  }
-  let draft = null;
-  if (typeof parseFn === "function") {
-    draft = parseFn(data);
-  } else if (data && typeof data === "object") {
-    const pr = data.markPullRequestReadyForReview?.pullRequest || data.convertPullRequestToDraft?.pullRequest || null;
-    if (pr && typeof pr.isDraft === "boolean") draft = pr.isDraft;
-  }
-  if (typeof draft !== "boolean") {
-    draft = stage !== "ready";
-  }
-  return { draft: Boolean(draft), data };
-}
-async function uploadRepoFile(owner, repo, { path, contentBase64, message, branch }, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  if (!path || !contentBase64) throw new Error("path and contentBase64 required");
-  const encPath = String(path).split("/").map(encodeURIComponent).join("/");
-  let sha;
-  try {
-    const meta = await apiJson(
-      githubRestUrl(
-        `/repos/${owner}/${repo}/contents/${encPath}${branch ? `?ref=${encodeURIComponent(branch)}` : ""}`,
-        ctx
-      ),
-      fetchImpl,
-      token
-    );
-    sha = meta?.sha;
-  } catch {
-    sha = void 0;
-  }
-  const body = {
-    message: message || `Upload ${path}`,
-    content: String(contentBase64).replace(/\s+/g, "")
-  };
-  if (branch) body.branch = branch;
-  if (sha) body.sha = sha;
-  const result = await apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/contents/${encPath}`, ctx),
-    fetchImpl,
-    token,
-    { method: "PUT", body }
-  );
-  const content = result?.content || result;
-  return {
-    downloadUrl: content?.download_url || content?.html_url || "",
-    htmlUrl: content?.html_url || content?.download_url || "",
-    path: content?.path || path,
-    sha: content?.sha || ""
-  };
-}
-async function getRepoFileText(owner, repo, { path, ref }, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  if (!path) throw new Error("path required");
-  const rev = ref || "HEAD";
-  const encPath = String(path).split("/").map(encodeURIComponent).join("/");
-  const meta = await apiJson(
-    githubRestUrl(`/repos/${owner}/${repo}/contents/${encPath}?ref=${encodeURIComponent(rev)}`, ctx),
-    fetchImpl,
-    token
-  );
-  if (meta?.type && meta.type !== "file") {
-    throw new Error(`Not a file: ${path}`);
-  }
-  let raw = "";
-  if (meta?.content && meta?.encoding === "base64") {
-    raw = decodeBase64Utf8(String(meta.content).replace(/\n/g, ""));
-  } else if (meta?.download_url) {
-    const res = await fetchImpl(meta.download_url, {
-      headers: buildApiHeaders(token)
-    });
-    if (!res.ok) {
-      const err = new Error(`GitHub download ${res.status}: ${res.statusText}`);
-      err.status = res.status;
-      throw err;
-    }
-    raw = await res.text();
-  } else if (meta?.content) {
-    raw = decodeBase64Utf8(String(meta.content).replace(/\n/g, ""));
-  }
-  return {
-    path: meta?.path || path,
-    ref: rev,
-    text: raw,
-    sha: meta?.sha || "",
-    size: Number(meta?.size) || raw.length
-  };
-}
-async function applyReviewSuggestion(owner, repo, { path, headRef, startLine, endLine, suggestion, message }, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  const ref = headRef || "HEAD";
-  const file = await getRepoFileText(
-    owner,
-    repo,
-    { path, ref },
-    fetchImpl,
-    token
-  );
-  const raw = file.text || "";
-  let applyFn = null;
-  try {
-    let mod = typeof globalThis !== "undefined" ? globalThis.PRModalPrEditApi : null;
-    if (!mod && typeof require === "function") {
-      try {
-        mod = require("./modal/pure/pr-edit-api.js");
-      } catch {
-        mod = null;
-      }
-    }
-    applyFn = mod?.applySuggestionToFileContent;
-  } catch {
-    applyFn = null;
-  }
-  if (!applyFn) throw new Error("applySuggestionToFileContent unavailable");
-  const next = applyFn(raw, {
-    startLine,
-    endLine,
-    suggestion
-  });
-  let contentB64;
-  if (typeof Buffer !== "undefined") {
-    contentB64 = Buffer.from(next, "utf8").toString("base64");
-  } else {
-    contentB64 = btoa(unescape(encodeURIComponent(next)));
-  }
-  return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/contents/${path.split("/").map(encodeURIComponent).join("/")}`, ctx),
-    fetchImpl,
-    token,
-    {
-      method: "PUT",
-      body: {
-        message: message || `Apply suggestion to ${path}`,
-        content: contentB64,
-        branch: ref,
-        sha: file.sha
-      }
-    }
-  );
-}
-async function fetchViewerLogin(fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  if (!token) return null;
-  try {
-    const me = await apiJson(githubRestUrl("/user", ctx), fetchImpl, token);
-    return me?.login || null;
-  } catch {
-    return null;
-  }
-}
-function mapAndAnnotateFiles(files, gitattributesText = "") {
-  const mappedFiles = (Array.isArray(files) ? files : []).map((f) => ({
-    filename: f.filename,
-    status: f.status,
-    additions: f.additions,
-    deletions: f.deletions,
-    changes: f.changes,
-    patch: f.patch || "",
-    // Preserve media URLs for image preview / binary classification
-    raw_url: f.raw_url || f.rawUrl || "",
-    blob_url: f.blob_url || f.blobUrl || "",
-    contents_url: f.contents_url || f.contentsUrl || "",
-    sha: f.sha || "",
-    previous_filename: f.previous_filename || f.previousFilename || ""
-  }));
-  let filesOut;
-  try {
-    let collapse = typeof globalThis !== "undefined" ? globalThis.PRModalCollapse : null;
-    if (!collapse && typeof require === "function") {
-      try {
-        collapse = require("./modal/pure/collapse.js");
-      } catch {
-        collapse = null;
-      }
-    }
-    if (collapse?.annotateFilesForCollapse) {
-      filesOut = collapse.annotateFilesForCollapse(mappedFiles, gitattributesText);
-    }
-  } catch {
-    filesOut = null;
-  }
-  if (!filesOut) {
-    const LARGE = 5e3;
-    filesOut = mappedFiles.map((f) => {
-      const path = f.filename || "";
-      const isImage = /\.(png|jpe?g|gif|webp|bmp|svg|ico|avif)$/i.test(path);
-      const hasPatch = Boolean(f.patch);
-      const kind = isImage ? "image" : hasPatch ? "text" : "binary";
-      return {
-        ...f,
-        fileKind: kind,
-        openableAsText: kind === "text",
-        renderImage: kind === "image",
-        defaultCollapsed: kind === "binary" || (f.changes || 0) >= LARGE || /package-lock\.json$|yarn\.lock$|\.min\.(js|css)$|\.bundle\.js$/i.test(
-          path
-        )
-      };
-    });
-  }
-  return filesOut;
-}
-async function fetchCompareFiles(owner, repo, base, head, fetchImpl, token = null, options = {}) {
-  const ctx = normalizeApiCtx(options?.ctx);
-  const o = String(owner || "").trim();
-  const r = String(repo || "").trim();
-  const b = String(base || "").trim();
-  const h = String(head || "").trim();
-  if (!o || !r || !b || !h) {
-    throw new Error("owner, repo, base, and head are required for compare");
-  }
-  const gitattributesText = String(options.gitattributesText || "");
-  const url = githubRestUrl(`/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/compare/${encodeURIComponent(b)}...${encodeURIComponent(h)}`, ctx);
-  const data = await apiJson(url, fetchImpl, token);
-  const files = mapAndAnnotateFiles(data?.files || [], gitattributesText);
-  return {
-    files,
-    base: b,
-    head: h,
-    status: data?.status || null,
-    aheadBy: data?.ahead_by ?? null,
-    behindBy: data?.behind_by ?? null,
-    totalCommits: data?.total_commits ?? (Array.isArray(data?.commits) ? data.commits.length : null),
-    truncated: Boolean(data?.files && data.files.length >= 300)
-  };
-}
-const fetchApi = {
-  normalizeApiCtx,
+
+// src/fetch/fetch-api.ts
+var fetchApi = {
+  normalizeApiCtx: normalizeApiCtx2,
   mapApiPullRequest,
   buildApiHeaders,
   findDanglingPrNumbers,
@@ -9436,14 +9509,14 @@ const fetchApi = {
   fetchPullByNumber,
   fetchPrHeadProbe,
   fetchDanglingPulls,
-  fetchRepoAutolinks,
+  fetchRepoAutolinks: fetchRepoAutolinks2,
   buildAutolinkUrl,
-  matchAutolinksInText,
-  prMatchText,
+  matchAutolinksInText: matchAutolinksInText2,
+  prMatchText: prMatchText2,
   attachMagicLinks,
   fetchOpenPulls,
   fetchPrDetail,
-  fetchPrCommentsPage,
+  fetchPrCommentsPage: fetchPrCommentsPage2,
   fetchPrCommits,
   fetchAllPrCommits,
   fetchAllPrFiles,
@@ -9453,9 +9526,9 @@ const fetchApi = {
   fetchPrReviews,
   fetchPrChecks,
   fetchPrDevelopment,
-  fetchPrSidebarMeta,
-  fetchIssueOrPrSummaries,
-  fetchReactableReactionGroups,
+  fetchPrSidebarMeta: fetchPrSidebarMeta2,
+  fetchIssueOrPrSummaries: fetchIssueOrPrSummaries2,
+  fetchReactableReactionGroups: fetchReactableReactionGroups2,
   fetchReactableReactors,
   fetchCompareFiles,
   mapAndAnnotateFiles,
@@ -9464,12 +9537,12 @@ const fetchApi = {
   fetchReviewThreadsPage,
   chooseReviewThreadsTransportLocal,
   buildRestReviewThreadsPageFromCommentsLocal,
-  fetchReviewThreadsByIds,
+  fetchReviewThreadsByIds: fetchReviewThreadsByIds2,
   collectUnresolvedThreadNodeIds,
   dropReviewThreadsFromDetail,
   mapGraphqlReviewCommentNode,
   mergeReviewThreadsPageIntoDetail,
-  emptyReviewThreadsMeta,
+  emptyReviewThreadsMeta: emptyReviewThreadsMeta2,
   getGraphqlCostLog,
   clearGraphqlCostLog,
   summarizeGraphqlCostLog,
@@ -9485,11 +9558,11 @@ const fetchApi = {
   ensureViewerPendingReview,
   pickViewerPendingFromReviews,
   fetchViewerPendingReviewComments,
-  fetchViewerPendingReviewBundle,
+  fetchViewerPendingReviewBundle: fetchViewerPendingReviewBundle2,
   createPendingPullReview,
   submitPendingPullReview,
   deletePendingPullReview,
-  mergePendingReviewComments,
+  mergePendingReviewComments: mergePendingReviewComments2,
   resolveReviewThread,
   updatePullState,
   closePullRequest,
@@ -9527,25 +9600,24 @@ const fetchApi = {
   applyReviewSuggestion,
   getRepoFileText,
   uploadRepoFile,
-  fetchViewerLogin,
-  apiJson,
+  fetchViewerLogin: fetchViewerLogin2,
+  apiJson: apiJson2,
   apiSend,
   apiGraphql
 };
-if (typeof module !== "undefined" && module.exports) {
-  module.exports = fetchApi;
-}
 if (typeof globalThis !== "undefined") {
   globalThis.PRTreeFetch = fetchApi;
 }
-})();
+try {
+  if (typeof module !== "undefined" && module?.exports !== void 0) module.exports = fetchApi;
+} catch {
+};
 
 
 /* ---- background.ts ---- */
 
-/* deps inlined by scripts/build-sw.mjs */
-const ENTERPRISE_CS_ID = "prp-enterprise-hosts";
-const CONTENT_SCRIPT_JS = [
+var ENTERPRISE_CS_ID = "prp-enterprise-hosts";
+var CONTENT_SCRIPT_JS = [
   "src/tree.js",
   "src/dom.js",
   "src/pr-list-focus.js",
@@ -9566,7 +9638,7 @@ const CONTENT_SCRIPT_JS = [
   "src/modal/dist/pr-modal.bundle.js",
   "src/pr-modal-host.js"
 ];
-function apiCtxFromMessage(message) {
+function apiCtxFromMessage2(message) {
   const webHost = message?.webHost || message?.webOrigin || "github.com";
   if (typeof PRGithubEndpoints?.resolveGithubEndpoints === "function") {
     return PRGithubEndpoints.resolveGithubEndpoints({ webHost });
@@ -9582,15 +9654,15 @@ function apiCtxFromMessage(message) {
     graphqlUrl: "https://api.github.com/graphql"
   };
 }
-async function tokenForMessage(message) {
+async function tokenForMessage2(message) {
   const webHost = message?.webHost || message?.webOrigin || "github.com";
   const sel = await PRTreeStorage.getTokenForWebHost(webHost);
   return sel.token;
 }
-async function registeredEnterpriseHosts() {
+async function registeredEnterpriseHosts2() {
   return PRTreeStorage.getHostAccountHosts();
 }
-function githubTabUrlPatterns(enterpriseHosts) {
+function githubTabUrlPatterns2(enterpriseHosts) {
   const patterns = ["https://github.com/*", "https://*.github.com/*"];
   const hosts = PRGithubEndpoints.normalizeEnterpriseWebHosts(enterpriseHosts);
   for (const h of hosts) {
@@ -9598,8 +9670,8 @@ function githubTabUrlPatterns(enterpriseHosts) {
   }
   return patterns;
 }
-let enterpriseCsSyncChain = Promise.resolve();
-async function syncEnterpriseContentScripts(enterpriseHosts) {
+var enterpriseCsSyncChain = Promise.resolve();
+async function syncEnterpriseContentScripts2(enterpriseHosts) {
   const run = () => syncEnterpriseContentScriptsImpl(enterpriseHosts);
   const next = enterpriseCsSyncChain.then(run, run);
   enterpriseCsSyncChain = next.then(
@@ -9664,7 +9736,7 @@ async function syncEnterpriseContentScriptsImpl(enterpriseHosts) {
   }
   return { registered: true, matches };
 }
-async function requestEnterprisePermissions(enterpriseHosts) {
+async function requestEnterprisePermissions2(enterpriseHosts) {
   if (!chrome.permissions?.request) {
     return { granted: false, error: "permissions API unavailable" };
   }
@@ -9685,7 +9757,7 @@ async function requestEnterprisePermissions(enterpriseHosts) {
     });
   });
 }
-const MSG = {
+var MSG2 = {
   /** Lightweight wake / health check (content scripts retry against this). */
   PING: "PR_TREE_PING",
   TOKEN_STATUS: "PR_TREE_TOKEN_STATUS",
@@ -9767,8 +9839,34 @@ const MSG = {
   SET_DRAFT_STAGE: "PR_TREE_SET_DRAFT_STAGE",
   UPLOAD_REPO_FILE: "PR_TREE_UPLOAD_REPO_FILE"
 };
-const MESSAGE_TIMEOUT_MS = 12e4;
-function broadcastToGithubTabs(message) {
+var MESSAGE_TIMEOUT_MS = 12e4;
+async function rehydrateEnterpriseScripts() {
+  try {
+    const hosts = await registeredEnterpriseHosts2();
+    await syncEnterpriseContentScripts2(hosts);
+  } catch (err) {
+    console.warn("[pr+] enterprise content scripts", err?.message || err);
+  }
+}
+var INSTALL_PULLS_URL = "https://github.com/enif-lee/pr-plus/pulls";
+try {
+  chrome.runtime.onInstalled.addListener((details) => {
+    void rehydrateEnterpriseScripts();
+    if (details?.reason === "install") {
+      try {
+        chrome.tabs.create({ url: INSTALL_PULLS_URL });
+      } catch (err) {
+        console.warn("[pr+] open install pulls tab failed", err?.message || err);
+      }
+    }
+  });
+  chrome.runtime.onStartup.addListener(() => {
+    void rehydrateEnterpriseScripts();
+  });
+} catch {
+}
+void rehydrateEnterpriseScripts();
+function broadcastToGithubTabs2(message) {
   try {
     chrome.runtime.sendMessage(message, () => {
       void chrome.runtime.lastError;
@@ -9794,12 +9892,12 @@ function broadcastToGithubTabs(message) {
   }
 }
 function broadcastTokenChanged() {
-  broadcastToGithubTabs({ type: MSG.TOKEN_CHANGED });
+  broadcastToGithubTabs2({ type: MSG.TOKEN_CHANGED });
 }
 function broadcastPrefsChanged(prefs) {
-  broadcastToGithubTabs({ type: MSG.PREFS_CHANGED, prefs });
+  broadcastToGithubTabs2({ type: MSG.PREFS_CHANGED, prefs });
 }
-function clearDetailCacheOnGithubTabs() {
+function clearDetailCacheOnGithubTabs2() {
   return new Promise((resolve) => {
     try {
       registeredEnterpriseHosts().then((hosts) => {
@@ -9852,7 +9950,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     broadcastTokenChanged();
   }
   if (changes[PRTreeStorage.HOST_ACCOUNTS_KEY]) {
-    broadcastToGithubTabs({ type: MSG.HOST_ACCOUNTS_CHANGED });
+    broadcastToGithubTabs2({ type: MSG.HOST_ACCOUNTS_CHANGED });
     broadcastTokenChanged();
     void registeredEnterpriseHosts().then(
       (hosts) => syncEnterpriseContentScripts(hosts)
@@ -9876,14 +9974,14 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     }
   }
 });
-const activeFetchControllers = /* @__PURE__ */ new Map();
-const preCancelledFetchIds = /* @__PURE__ */ new Set();
+var activeFetchControllers2 = /* @__PURE__ */ new Map();
+var preCancelledFetchIds2 = /* @__PURE__ */ new Set();
 function makeAbortError() {
   const err = new Error("The operation was aborted.");
   err.name = "AbortError";
   return err;
 }
-let rlMem = {
+var rlMem2 = {
   pluginEnabled: true,
   state: null,
   loaded: false,
@@ -9892,43 +9990,43 @@ let rlMem = {
 function rawBrowserFetch() {
   return globalThis.fetch.bind(globalThis);
 }
-function rateLimitApi() {
+function rateLimitApi2() {
   return globalThis.PRModalRateLimit || null;
 }
-async function ensureRateLimitMem() {
-  if (rlMem.loaded) return rlMem;
+async function ensureRateLimitMem2() {
+  if (rlMem2.loaded) return rlMem2;
   try {
     const prefs = await PRTreeStorage.getExtensionPrefs();
-    rlMem.pluginEnabled = prefs?.pluginEnabled !== false;
+    rlMem2.pluginEnabled = prefs?.pluginEnabled !== false;
   } catch {
-    rlMem.pluginEnabled = true;
+    rlMem2.pluginEnabled = true;
   }
   try {
     const st = await PRTreeStorage.getRateLimitState();
-    const RL = rateLimitApi();
-    rlMem.state = typeof RL?.clearExpiredRateDisables === "function" ? RL.clearExpiredRateDisables(st, Date.now()) : st;
+    const RL = rateLimitApi2();
+    rlMem2.state = typeof RL?.clearExpiredRateDisables === "function" ? RL.clearExpiredRateDisables(st, Date.now()) : st;
   } catch {
-    const RL = rateLimitApi();
-    rlMem.state = typeof RL?.emptyRateLimitState === "function" ? RL.emptyRateLimitState() : {
+    const RL = rateLimitApi2();
+    rlMem2.state = typeof RL?.emptyRateLimitState === "function" ? RL.emptyRateLimitState() : {
       disabledUntil: { core: 0, graphql: 0, search: 0 },
       snapshots: { core: null, graphql: null, search: null }
     };
   }
-  rlMem.loaded = true;
-  return rlMem;
+  rlMem2.loaded = true;
+  return rlMem2;
 }
 function schedulePersistRateLimitState() {
-  if (rlMem.saveTimer) return;
-  rlMem.saveTimer = setTimeout(() => {
-    rlMem.saveTimer = null;
-    const st = rlMem.state;
+  if (rlMem2.saveTimer) return;
+  rlMem2.saveTimer = setTimeout(() => {
+    rlMem2.saveTimer = null;
+    const st = rlMem2.state;
     if (!st) return;
     void PRTreeStorage.setRateLimitState(st).then(() => {
       try {
         broadcastToGithubTabs({
           type: MSG.RATE_LIMIT_CHANGED,
           state: st,
-          pluginEnabled: rlMem.pluginEnabled
+          pluginEnabled: rlMem2.pluginEnabled
         });
       } catch {
       }
@@ -9949,15 +10047,15 @@ function makeRateLimitError(resource, untilMs, reason) {
   return err;
 }
 function assertGithubRequestAllowed(url) {
-  const RL = rateLimitApi();
+  const RL = rateLimitApi2();
   const resource = typeof RL?.classifyGithubUrl === "function" ? RL.classifyGithubUrl(url) : "core";
-  if (rlMem.pluginEnabled === false) {
+  if (rlMem2.pluginEnabled === false) {
     throw makeRateLimitError(resource, 0, "plugin-disabled");
   }
   if (typeof RL?.shouldAllowGithubRequest === "function") {
     const gate = RL.shouldAllowGithubRequest({
-      pluginEnabled: rlMem.pluginEnabled,
-      state: rlMem.state,
+      pluginEnabled: rlMem2.pluginEnabled,
+      state: rlMem2.state,
       resource,
       nowMs: Date.now()
     });
@@ -9972,12 +10070,12 @@ function assertGithubRequestAllowed(url) {
   return resource;
 }
 function noteGithubResponse(res, url, resourceHint) {
-  const RL = rateLimitApi();
+  const RL = rateLimitApi2();
   if (!RL || !res) return;
   const resource = resourceHint || (typeof RL.classifyGithubUrl === "function" ? RL.classifyGithubUrl(url) : "core");
   const now = Date.now();
   try {
-    let next = rlMem.state;
+    let next = rlMem2.state;
     if (res.status === 429) {
       if (typeof RL.withRateLimit429 === "function") {
         next = RL.withRateLimit429(next, resource, res.headers, now);
@@ -9994,7 +10092,7 @@ function noteGithubResponse(res, url, resourceHint) {
     if (typeof RL.clearExpiredRateDisables === "function") {
       next = RL.clearExpiredRateDisables(next, now);
     }
-    rlMem.state = next;
+    rlMem2.state = next;
     schedulePersistRateLimitState();
   } catch {
   }
@@ -10002,7 +10100,7 @@ function noteGithubResponse(res, url, resourceHint) {
 function wrapFetchWithRateLimit(baseFetch) {
   return async (url, init = {}) => {
     try {
-      await ensureRateLimitMem();
+      await ensureRateLimitMem2();
     } catch {
     }
     let resource = "core";
@@ -10019,7 +10117,7 @@ function wrapFetchWithRateLimit(baseFetch) {
     return res;
   };
 }
-function fetchImpl() {
+function fetchImpl2() {
   return wrapFetchWithRateLimit(rawBrowserFetch());
 }
 function wrapFetchWithSignal(baseFetch, signal) {
@@ -10037,7 +10135,7 @@ function wrapFetchWithSignal(baseFetch, signal) {
     });
   };
 }
-function beginTrackedFetch(requestId) {
+function beginTrackedFetch2(requestId) {
   const id = requestId != null && String(requestId) ? String(requestId) : `auto-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
   if (preCancelledFetchIds.has(id)) {
     preCancelledFetchIds.delete(id);
@@ -10049,7 +10147,7 @@ function beginTrackedFetch(requestId) {
     return {
       requestId: id,
       controller: controller2,
-      fetch: wrapFetchWithSignal(fetchImpl(), controller2.signal)
+      fetch: wrapFetchWithSignal(fetchImpl2(), controller2.signal)
     };
   }
   const prev = activeFetchControllers.get(id);
@@ -10064,10 +10162,10 @@ function beginTrackedFetch(requestId) {
   return {
     requestId: id,
     controller,
-    fetch: wrapFetchWithSignal(fetchImpl(), controller.signal)
+    fetch: wrapFetchWithSignal(fetchImpl2(), controller.signal)
   };
 }
-function endTrackedFetch(requestId) {
+function endTrackedFetch2(requestId) {
   const id = requestId != null ? String(requestId) : "";
   if (!id) return;
   activeFetchControllers.delete(id);
@@ -10091,7 +10189,7 @@ function cancelTrackedFetch(requestId) {
   }
   return true;
 }
-function cancelTrackedFetches(requestIds) {
+function cancelTrackedFetches2(requestIds) {
   const ids = Array.isArray(requestIds) ? requestIds : [];
   let n = 0;
   for (const id of ids) {
@@ -10099,7 +10197,7 @@ function cancelTrackedFetches(requestIds) {
   }
   return n;
 }
-function cancelAllTrackedFetches() {
+function cancelAllTrackedFetches2() {
   const ids = [...activeFetchControllers.keys()];
   let n = 0;
   for (const id of ids) {
@@ -10107,7 +10205,7 @@ function cancelAllTrackedFetches() {
   }
   return n;
 }
-function isAbortError(err) {
+function isAbortError2(err) {
   return err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || err || ""));
 }
 function withServiceWorkerKeepAlive(work) {
@@ -10144,7 +10242,7 @@ function withTimeout(promise, ms, label) {
   });
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
-async function handleMessage(message) {
+async function handleMessagePartA(message) {
   const apiCtx = apiCtxFromMessage(message || {});
   switch (message.type) {
     case MSG.PING: {
@@ -10727,6 +10825,13 @@ async function handleMessage(message) {
       );
       return { ok: true, result };
     }
+    default:
+      return void 0;
+  }
+}
+async function handleMessagePartB(message) {
+  const apiCtx = apiCtxFromMessage(message || {});
+  switch (message.type) {
     case MSG.EDIT_ISSUE_COMMENT: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to edit comments");
@@ -11375,56 +11480,12 @@ async function handleMessage(message) {
       return { ok: false, error: `unknown type: ${message.type}` };
   }
 }
-chrome.runtime.onMessage.addListener((message, _sender) => {
-  if (message?.type === MSG.TOKEN_CHANGED) {
-    return false;
-  }
-  if (!message || typeof message.type !== "string") {
-    return Promise.resolve({ ok: false, error: "invalid message" });
-  }
-  if (message.type === MSG.CANCEL_FETCH || message.type === MSG.PING) {
-    return Promise.resolve().then(() => handleMessage(message)).catch((err) => ({
-      ok: false,
-      error: err?.message || String(err),
-      status: err?.status
-    }));
-  }
-  return withServiceWorkerKeepAlive(
-    () => withTimeout(
-      handleMessage(message),
-      MESSAGE_TIMEOUT_MS,
-      message.type
-    ).catch((err) => ({
-      ok: false,
-      error: err?.message || String(err),
-      status: err?.status,
-      aborted: isAbortError(err) || void 0
-    }))
-  );
-});
-async function rehydrateEnterpriseScripts() {
-  try {
-    const hosts = await registeredEnterpriseHosts();
-    await syncEnterpriseContentScripts(hosts);
-  } catch (err) {
-    console.warn("[pr+] enterprise content scripts", err?.message || err);
-  }
+async function handleMessage(message) {
+  const a = await handleMessagePartA(message);
+  if (a !== void 0) return a;
+  return handleMessagePartB(message);
 }
-const INSTALL_PULLS_URL = "https://github.com/enif-lee/pr-plus/pulls";
 try {
-  chrome.runtime.onInstalled.addListener((details) => {
-    void rehydrateEnterpriseScripts();
-    if (details?.reason === "install") {
-      try {
-        chrome.tabs.create({ url: INSTALL_PULLS_URL });
-      } catch (err) {
-        console.warn("[pr+] open install pulls tab failed", err?.message || err);
-      }
-    }
-  });
-  chrome.runtime.onStartup.addListener(() => {
-    void rehydrateEnterpriseScripts();
-  });
+  /* deps inlined by scripts/build-sw.mjs */
 } catch {
 }
-void rehydrateEnterpriseScripts();

@@ -19,16 +19,25 @@ const out = path.join(root, 'src/pr-modal-host.js');
  * Keep ≤~1500 lines per file; refine domains rather than mid-expression cuts.
  */
 export const HOST_MODULE_ORDER = [
-  'host-core-detail-store.ts', // HOST_ID, current, detail-store apply/publish
-  'side-fetch-progress-assets.ts', // independent side fetches, progress, assets, cache
-  'detail-on-patch.ts', // runOnPatchDetail (narrow write-through + ack)
-  'props-render-session.ts', // buildProps, render, close / session abort
-  'open-modal.ts', // openModal entry
-  'restore-embed-list-focus.ts', // restore open, embed watch, list focus helpers
-  'list-row-lifecycle.ts', // pulls list row open / filter hotkeys
-  'pulls-palette.ts', // pulls-page command palette
-  'auto-refresh-watch.ts', // head-sha poll (modal + embed), activity gate
-  'click-intercept.ts', // list click intercept + install
+  'host-core-authority.ts',
+  'host-core-store.ts',
+  'host-core-timeline-a.ts',
+  'host-core-timeline-b.ts',
+  'side-fetch-kick.ts',
+  'side-fetch-progress.ts',
+  'side-fetch-cache-assets.ts',
+  'detail-on-patch.ts',
+  'props-build.ts',
+  'props-render-close.ts',
+  'open-modal-run.ts',
+  'open-modal.ts',
+  'restore-embed-list-focus.ts',
+  'list-row-lifecycle.ts',
+  'pulls-palette-state.ts',
+  'pulls-palette-render.ts',
+  'pulls-palette-keys.ts',
+  'auto-refresh-watch.ts',
+  'click-intercept.ts',
 ];
 
 // Validate starts + line budget

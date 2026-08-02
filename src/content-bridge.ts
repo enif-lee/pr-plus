@@ -1,6 +1,1 @@
-/**
- * Content-script bridge entry pointer.
- * SOURCE OF TRUTH: src/content-bridge/bridge-api.ts
- * Runtime: src/content-bridge.js — npm run build:content-bridge
- */
-export const CONTENT_BRIDGE_SOT = 'src/content-bridge/bridge-api.ts' as const;
+/** Pointer — SoT is src/content-bridge/*.ts (entry bridge-api.ts). Built to content-bridge.js */

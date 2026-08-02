@@ -3,175 +3,7 @@
  * SOURCE OF TRUTH: src/onboarding.ts — do not edit this .js
  * Rebuild: node scripts/build-content-ts.mjs
  */
-const ONBOARDING_ROOT_ID = "prp-onboarding";
-const DEMO_PR = {
-  owner: "enif-lee",
-  repo: "pr-plus",
-  number: 1,
-  pathSuffix: "/enif-lee/pr-plus/pull/1",
-  pullsUrl: "https://github.com/enif-lee/pr-plus/pulls",
-  prUrl: "https://github.com/enif-lee/pr-plus/pull/1"
-};
-const ONBOARDING_STEPS = [
-  { id: "pat", title: "PAT setup", index: 0 },
-  { id: "opt", title: "Hold Option", index: 1 },
-  { id: "openPr", title: "Open demo PR #1", index: 2 },
-  { id: "convDemo", title: "Conversation shortcuts", index: 3 },
-  { id: "diffToggle", title: "Open Diff", index: 4 },
-  { id: "diffDemo", title: "Diff shortcuts", index: 5 },
-  { id: "optShiftK", title: "Command palette", index: 6 },
-  { id: "prefs", title: "Feature settings", index: 7 },
-  { id: "done", title: "All set", index: 8 }
-];
-const PR_DEPENDENT_STEPS = [
-  "openPr",
-  "convDemo",
-  "diffToggle",
-  "diffDemo"
-];
-function shouldShowOnboarding(prefs, pathname) {
-  if (prefs?.onboardingCompleted === true) return false;
-  const path = String(pathname || "");
-  if (!path.includes("/pulls")) return false;
-  if (/\/pull\/\d+/.test(path)) return false;
-  return true;
-}
-function clampOnboardingStep(step) {
-  const max = ONBOARDING_STEPS.length - 1;
-  const n = Number(step);
-  if (!Number.isFinite(n)) return 0;
-  return Math.max(0, Math.min(max, Math.floor(n)));
-}
-function stepIdAt(step) {
-  return ONBOARDING_STEPS[clampOnboardingStep(step)]?.id || "pat";
-}
-function countPullListItems(doc) {
-  if (!doc || typeof doc.querySelectorAll !== "function") return 0;
-  const links = doc.querySelectorAll(
-    'a[href*="/pull/"], a[id^="issue_"], .js-issue-row, [data-hovercard-type="pull_request"]'
-  );
-  const rows = doc.querySelectorAll(
-    '.js-issue-row, [data-testid="issue-row"], .Box-row'
-  );
-  if (rows.length > 0) return rows.length;
-  return links.length;
-}
-function buildOnboardingHotkeySlots() {
-  let s = "123456789";
-  for (let i = 0; i < 26; i++) {
-    const ch = String.fromCharCode(97 + i);
-    if (ch !== "j" && ch !== "k") s += ch;
-  }
-  return s;
-}
-const ONBOARDING_HOTKEY_SLOTS = buildOnboardingHotkeySlots();
-const ONBOARDING_TARGET_PR_CLASS = "prp-onboarding-target-pr";
-const ONBOARDING_TARGET_PR_ATTR = "data-prp-onboarding-target";
-function findDemoPrLink(doc) {
-  if (!doc || typeof doc.querySelectorAll !== "function") return null;
-  const n = Number(DEMO_PR.number) || 1;
-  const candidates = [
-    ...doc.querySelectorAll('a[href*="/pull/"]')
-  ];
-  for (const a of candidates) {
-    const href = String(a.getAttribute?.("href") || "");
-    if (new RegExp(`/pull/${n}(?:$|[?#/])`).test(href) || href.endsWith(`/pull/${n}`)) {
-      const text = (a.textContent || "").trim();
-      if (text.length > 2 || !candidates.some((x) => x !== a)) return a;
-    }
-  }
-  return candidates.find(
-    (a) => new RegExp(`/pull/${n}(?:$|[?#/])`).test(
-      String(a.getAttribute?.("href") || "")
-    )
-  ) || null;
-}
-function listPullRowsForHotkeys(doc) {
-  if (!doc || typeof doc.querySelectorAll !== "function") return [];
-  const selectors = [
-    ".js-navigation-container .js-issue-row",
-    ".js-issue-row",
-    '[data-testid="issue-row"]',
-    ".Box-row.js-navigation-item"
-  ];
-  for (const sel of selectors) {
-    const rows = [...doc.querySelectorAll(sel)];
-    if (rows.length) return rows;
-  }
-  return [];
-}
-function resolveDemoPrHotkey(doc) {
-  const link = findDemoPrLink(doc);
-  if (!link) {
-    return { link: null, row: null, slot: null, index: -1 };
-  }
-  const rows = listPullRowsForHotkeys(doc);
-  let index = rows.findIndex((row2) => row2.contains(link));
-  if (index < 0) {
-    let el = link;
-    while (el && el !== doc?.body) {
-      index = rows.indexOf(el);
-      if (index >= 0) break;
-      el = el.parentElement;
-    }
-  }
-  const row = index >= 0 ? rows[index] : link.closest(
-    '.js-issue-row, [data-testid="issue-row"], .Box-row, li'
-  ) || link;
-  const slot = index >= 0 && index < ONBOARDING_HOTKEY_SLOTS.length ? ONBOARDING_HOTKEY_SLOTS[index] : null;
-  return { link, row, slot, index };
-}
-function clearDemoPrHighlight(doc) {
-  if (!doc || typeof doc.querySelectorAll !== "function") return;
-  try {
-    doc.querySelectorAll(
-      `.${ONBOARDING_TARGET_PR_CLASS}, [${ONBOARDING_TARGET_PR_ATTR}]`
-    ).forEach((el) => {
-      el.classList.remove(ONBOARDING_TARGET_PR_CLASS);
-      try {
-        el.removeAttribute(ONBOARDING_TARGET_PR_ATTR);
-      } catch {
-      }
-    });
-  } catch {
-  }
-}
-function highlightDemoPr(doc) {
-  clearDemoPrHighlight(doc);
-  const info = resolveDemoPrHotkey(doc);
-  if (!info.row) return info;
-  try {
-    info.row.classList.add(ONBOARDING_TARGET_PR_CLASS);
-    info.row.setAttribute(ONBOARDING_TARGET_PR_ATTR, "1");
-    if (typeof info.row.scrollIntoView === "function") {
-      info.row.scrollIntoView({ block: "center", behavior: "smooth" });
-    }
-  } catch {
-  }
-  return info;
-}
-function clickDemoPr(doc) {
-  const a = findDemoPrLink(doc);
-  if (!a) return false;
-  try {
-    a.click();
-    return true;
-  } catch {
-    return false;
-  }
-}
-function isModalOpen(doc) {
-  if (!doc) return false;
-  return Boolean(
-    doc.querySelector(
-      ".prp-overlay, .prp-modal, #prp-modal-host .prp-modal, #prp-page-embed .prp-modal"
-    )
-  );
-}
-function isDiffLayout(doc) {
-  if (!doc || typeof doc.querySelector !== "function") return false;
-  return Boolean(doc.querySelector(".prp-modal--diff"));
-}
+// src/onboarding-hotkeys.ts
 function isOptHoldEvent(opts) {
   if (!opts?.alt) return false;
   const type = String(opts.type || "keydown");
@@ -211,13 +43,6 @@ function isEscapeEvent(opts) {
   const code = String(opts.code || "");
   return key === "Escape" || code === "Escape";
 }
-function resolveOnboardingPlan(opts) {
-  const hasPulls = Boolean(opts?.hasPulls);
-  return ONBOARDING_STEPS.filter((s) => {
-    if (!hasPulls && PR_DEPENDENT_STEPS.includes(s.id)) return false;
-    return true;
-  }).map((s) => s.id);
-}
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
@@ -237,7 +62,20 @@ function fireKey(target, init) {
   });
   return target.dispatchEvent(evt);
 }
-const DIFF_DEMO_STEPS = [
+function isOnboardingEnterEvent(opts) {
+  if (opts?.alt || opts?.mod) return false;
+  return opts?.key === "Enter" || opts?.code === "Enter";
+}
+function isOnboardingSkipTourEvent(opts) {
+  return opts?.key === "Escape" || opts?.code === "Escape";
+}
+function isOnboardingBackEvent(opts) {
+  if (opts?.mod) return false;
+  return opts?.key === "Backspace" || opts?.code === "Backspace";
+}
+
+// src/onboarding-diff-demo.ts
+var DIFF_DEMO_STEPS = [
   {
     id: "select-line",
     title: "1 \xB7 Select a line",
@@ -424,18 +262,7 @@ function matchesDiffDemoStep(opts, step) {
   if (!chords.length) return false;
   return chords.some((ch) => matchesDiffDemoChord(opts, ch));
 }
-function isOnboardingEnterEvent(opts) {
-  if (opts?.alt || opts?.mod) return false;
-  return opts?.key === "Enter" || opts?.code === "Enter";
-}
-function isOnboardingSkipTourEvent(opts) {
-  return opts?.key === "Escape" || opts?.code === "Escape";
-}
-function isOnboardingBackEvent(opts) {
-  if (opts?.mod) return false;
-  return opts?.key === "Backspace" || opts?.code === "Backspace";
-}
-const CONVERSATION_DEMO_STEPS = [
+var CONVERSATION_DEMO_STEPS = [
   {
     id: "conv-jk",
     title: "1 \xB7 Step Conversation",
@@ -455,6 +282,186 @@ const CONVERSATION_DEMO_STEPS = [
     chords: ["\u2325]", "\u2325["]
   }
 ];
+
+// src/onboarding-core.ts
+var ONBOARDING_ROOT_ID = "prp-onboarding";
+var DEMO_PR = {
+  owner: "enif-lee",
+  repo: "pr-plus",
+  number: 1,
+  pathSuffix: "/enif-lee/pr-plus/pull/1",
+  pullsUrl: "https://github.com/enif-lee/pr-plus/pulls",
+  prUrl: "https://github.com/enif-lee/pr-plus/pull/1"
+};
+var ONBOARDING_STEPS = [
+  { id: "pat", title: "PAT setup", index: 0 },
+  { id: "opt", title: "Hold Option", index: 1 },
+  { id: "openPr", title: "Open demo PR #1", index: 2 },
+  { id: "convDemo", title: "Conversation shortcuts", index: 3 },
+  { id: "diffToggle", title: "Open Diff", index: 4 },
+  { id: "diffDemo", title: "Diff shortcuts", index: 5 },
+  { id: "optShiftK", title: "Command palette", index: 6 },
+  { id: "prefs", title: "Feature settings", index: 7 },
+  { id: "done", title: "All set", index: 8 }
+];
+var PR_DEPENDENT_STEPS = [
+  "openPr",
+  "convDemo",
+  "diffToggle",
+  "diffDemo"
+];
+function shouldShowOnboarding(prefs, pathname) {
+  if (prefs?.onboardingCompleted === true) return false;
+  const path = String(pathname || "");
+  if (!path.includes("/pulls")) return false;
+  if (/\/pull\/\d+/.test(path)) return false;
+  return true;
+}
+function clampOnboardingStep(step) {
+  const max = ONBOARDING_STEPS.length - 1;
+  const n = Number(step);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(max, Math.floor(n)));
+}
+function stepIdAt(step) {
+  return ONBOARDING_STEPS[clampOnboardingStep(step)]?.id || "pat";
+}
+function countPullListItems(doc) {
+  if (!doc || typeof doc.querySelectorAll !== "function") return 0;
+  const links = doc.querySelectorAll(
+    'a[href*="/pull/"], a[id^="issue_"], .js-issue-row, [data-hovercard-type="pull_request"]'
+  );
+  const rows = doc.querySelectorAll(
+    '.js-issue-row, [data-testid="issue-row"], .Box-row'
+  );
+  if (rows.length > 0) return rows.length;
+  return links.length;
+}
+function buildOnboardingHotkeySlots() {
+  let s = "123456789";
+  for (let i = 0; i < 26; i++) {
+    const ch = String.fromCharCode(97 + i);
+    if (ch !== "j" && ch !== "k") s += ch;
+  }
+  return s;
+}
+var ONBOARDING_HOTKEY_SLOTS = buildOnboardingHotkeySlots();
+var ONBOARDING_TARGET_PR_CLASS = "prp-onboarding-target-pr";
+var ONBOARDING_TARGET_PR_ATTR = "data-prp-onboarding-target";
+function findDemoPrLink(doc) {
+  if (!doc || typeof doc.querySelectorAll !== "function") return null;
+  const n = Number(DEMO_PR.number) || 1;
+  const candidates = [
+    ...doc.querySelectorAll('a[href*="/pull/"]')
+  ];
+  for (const a of candidates) {
+    const href = String(a.getAttribute?.("href") || "");
+    if (new RegExp(`/pull/${n}(?:$|[?#/])`).test(href) || href.endsWith(`/pull/${n}`)) {
+      const text = (a.textContent || "").trim();
+      if (text.length > 2 || !candidates.some((x) => x !== a)) return a;
+    }
+  }
+  return candidates.find(
+    (a) => new RegExp(`/pull/${n}(?:$|[?#/])`).test(
+      String(a.getAttribute?.("href") || "")
+    )
+  ) || null;
+}
+function listPullRowsForHotkeys(doc) {
+  if (!doc || typeof doc.querySelectorAll !== "function") return [];
+  const selectors = [
+    ".js-navigation-container .js-issue-row",
+    ".js-issue-row",
+    '[data-testid="issue-row"]',
+    ".Box-row.js-navigation-item"
+  ];
+  for (const sel of selectors) {
+    const rows = [...doc.querySelectorAll(sel)];
+    if (rows.length) return rows;
+  }
+  return [];
+}
+function resolveDemoPrHotkey(doc) {
+  const link = findDemoPrLink(doc);
+  if (!link) {
+    return { link: null, row: null, slot: null, index: -1 };
+  }
+  const rows = listPullRowsForHotkeys(doc);
+  let index = rows.findIndex((row2) => row2.contains(link));
+  if (index < 0) {
+    let el = link;
+    while (el && el !== doc?.body) {
+      index = rows.indexOf(el);
+      if (index >= 0) break;
+      el = el.parentElement;
+    }
+  }
+  const row = index >= 0 ? rows[index] : link.closest(
+    '.js-issue-row, [data-testid="issue-row"], .Box-row, li'
+  ) || link;
+  const slot = index >= 0 && index < ONBOARDING_HOTKEY_SLOTS.length ? ONBOARDING_HOTKEY_SLOTS[index] : null;
+  return { link, row, slot, index };
+}
+
+// src/onboarding-ui.ts
+function clearDemoPrHighlight(doc) {
+  if (!doc || typeof doc.querySelectorAll !== "function") return;
+  try {
+    doc.querySelectorAll(
+      `.${ONBOARDING_TARGET_PR_CLASS}, [${ONBOARDING_TARGET_PR_ATTR}]`
+    ).forEach((el) => {
+      el.classList.remove(ONBOARDING_TARGET_PR_CLASS);
+      try {
+        el.removeAttribute(ONBOARDING_TARGET_PR_ATTR);
+      } catch {
+      }
+    });
+  } catch {
+  }
+}
+function highlightDemoPr(doc) {
+  clearDemoPrHighlight(doc);
+  const info = resolveDemoPrHotkey(doc);
+  if (!info.row) return info;
+  try {
+    info.row.classList.add(ONBOARDING_TARGET_PR_CLASS);
+    info.row.setAttribute(ONBOARDING_TARGET_PR_ATTR, "1");
+    if (typeof info.row.scrollIntoView === "function") {
+      info.row.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+  } catch {
+  }
+  return info;
+}
+function clickDemoPr(doc) {
+  const a = findDemoPrLink(doc);
+  if (!a) return false;
+  try {
+    a.click();
+    return true;
+  } catch {
+    return false;
+  }
+}
+function isModalOpen(doc) {
+  if (!doc) return false;
+  return Boolean(
+    doc.querySelector(
+      ".prp-overlay, .prp-modal, #prp-modal-host .prp-modal, #prp-page-embed .prp-modal"
+    )
+  );
+}
+function isDiffLayout(doc) {
+  if (!doc || typeof doc.querySelector !== "function") return false;
+  return Boolean(doc.querySelector(".prp-modal--diff"));
+}
+function resolveOnboardingPlan(opts) {
+  const hasPulls = Boolean(opts?.hasPulls);
+  return ONBOARDING_STEPS.filter((s) => {
+    if (!hasPulls && PR_DEPENDENT_STEPS.includes(s.id)) return false;
+    return true;
+  }).map((s) => s.id);
+}
 function matchesConversationDemoChord(opts, chord) {
   const c = String(chord || "").trim();
   if (!c) return false;
@@ -1527,7 +1534,7 @@ function createOnboardingTour(deps) {
     isActive: () => Boolean(root) && !disposed
   };
 }
-const onboardingApi = {
+var onboardingApi = {
   ONBOARDING_ROOT_ID,
   ONBOARDING_STEPS,
   PR_DEPENDENT_STEPS,

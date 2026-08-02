@@ -78,19 +78,38 @@ for (const name of ENTRIES) {
     continue;
   }
 
-  let code = fs.readFileSync(tsPath, 'utf8');
-  code = code.replace(/^\/\/ @ts-nocheck.*$/m, '');
-  const protectedCode = protectCjsDualExport(code);
-
   let stripped;
   try {
-    const result = await esbuild.transform(protectedCode, {
-      loader: 'ts',
-      format: 'esm',
-      target: 'es2020',
-      platform: 'neutral',
-    });
-    stripped = restoreCjsDualExport(stripModuleSyntax(result.code));
+    // Multi-file entries (onboarding/* barrel) need bundle; others type-erase only.
+    const needsBundle =
+      name === 'onboarding' ||
+      fs.existsSync(path.join(src, `${name}-steps.ts`)) ||
+      /export \* from '\.\//.test(fs.readFileSync(tsPath, 'utf8').slice(0, 500));
+    if (needsBundle) {
+      const result = await esbuild.build({
+        entryPoints: [tsPath],
+        bundle: true,
+        write: false,
+        format: 'esm',
+        platform: 'neutral',
+        target: 'es2020',
+        logLevel: 'warning',
+      });
+      stripped = restoreCjsDualExport(
+        stripModuleSyntax(protectCjsDualExport(result.outputFiles[0].text))
+      );
+    } else {
+      let code = fs.readFileSync(tsPath, 'utf8');
+      code = code.replace(/^\/\/ @ts-nocheck.*$/m, '');
+      const protectedCode = protectCjsDualExport(code);
+      const result = await esbuild.transform(protectedCode, {
+        loader: 'ts',
+        format: 'esm',
+        target: 'es2020',
+        platform: 'neutral',
+      });
+      stripped = restoreCjsDualExport(stripModuleSyntax(result.code));
+    }
   } catch (err) {
     failures.push(`${name}: ${err.message?.slice(0, 160)}`);
     console.error('transform failed', name, err.message?.slice(0, 160));

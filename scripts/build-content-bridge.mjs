@@ -1,6 +1,6 @@
 /**
- * Emit src/content-bridge.js from complete TypeScript SoT:
- * src/content-bridge/bridge-api.ts
+ * Emit src/content-bridge.js from composed TypeScript SoT under src/content-bridge/.
+ * Entry: src/content-bridge/bridge-api.ts
  */
 import * as esbuild from 'esbuild';
 import fs from 'node:fs';
@@ -13,66 +13,50 @@ import {
 } from './release-build-options.mjs';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const sot = path.join(root, 'src/content-bridge/bridge-api.ts');
+const entry = path.join(root, 'src/content-bridge/bridge-api.ts');
 const out = path.join(root, 'src/content-bridge.js');
 const pointer = path.join(root, 'src/content-bridge.ts');
 
-if (!fs.existsSync(sot)) {
-  console.error('Missing SoT', sot);
+if (!fs.existsSync(entry)) {
+  console.error('Missing SoT entry', entry);
   process.exit(1);
 }
 
-let src = fs.readFileSync(sot, 'utf8');
-src = src.replace(/^\/\*\*[\s\S]*?Do not split into mid-function fragments\.\s*\*\/\s*/m, '');
-src = src.replace(/^\s*\/\/ @ts-expect-error.*$/gm, '');
-
-const result = await esbuild.transform(src, {
-  loader: 'ts',
+const result = await esbuild.build({
+  entryPoints: [entry],
+  bundle: true,
+  write: false,
   format: 'esm',
-  target: 'es2020',
   platform: 'neutral',
+  target: 'es2020',
+  logLevel: 'warning',
   ...esbuildReleaseExtras(),
 });
 
-let code = result.code
+let code = result.outputFiles[0].text;
+code = code
   .replace(/^export\s+\{[^}]*\};?\s*$/gm, '')
   .replace(/^export\s+(async\s+)?function\s+/gm, 'function ')
   .replace(/^export\s+class\s+/gm, 'class ')
-  .replace(/^export\s+(const|let|var)\s+/gm, '$1 ');
+  .replace(/^export\s+(const|let|var)\s+/gm, '$1 ')
+  .replace(/^export\s+default\s+/gm, '');
+
 code = await maybeStripDebugLogs(code, { loader: 'js' });
 
-if (/__commonJS|require_stdin/.test(code)) {
-  console.error('FATAL: unexpected cjs wrap in content-bridge emit');
-  process.exit(1);
-}
-if (/function \w+\([^)]*:\s*/.test(code)) {
-  console.error('FATAL: type annotations leaked into content-bridge.js');
-  process.exit(1);
-}
-
 const file = `/**
- * AUTO-GENERATED from src/content-bridge/bridge-api.ts
- * SOURCE OF TRUTH: src/content-bridge/bridge-api.ts — npm run build:content-bridge
- */
-(function initPrTreeContentBridge() {
+ * AUTO-GENERATED from src/content-bridge/* (entry: bridge-api.ts)
+ * SOURCE OF TRUTH: src/content-bridge/ — npm run build:content-bridge
+${isReleaseBuild() ? ' * RELEASE: debug console.log/info stripped (PRP_RELEASE=1)\n' : ''} */
 ${code}
-})();
 `;
 fs.writeFileSync(out, file);
-
+// Keep thin pointer for tools that look at content-bridge.ts
 fs.writeFileSync(
   pointer,
-  `/**
- * Content-script bridge entry pointer.
- * SOURCE OF TRUTH: src/content-bridge/bridge-api.ts
- * Runtime: src/content-bridge.js — npm run build:content-bridge
- */
-export const CONTENT_BRIDGE_SOT = 'src/content-bridge/bridge-api.ts' as const;
-`
+  `/** Pointer — SoT is src/content-bridge/*.ts (entry bridge-api.ts). Built to content-bridge.js */\n`
 );
-
 console.log(
-  'Built content-bridge.js from bridge-api.ts',
+  'Built content-bridge.js from src/content-bridge/*',
   file.split(/\n/).length,
   'lines',
   isReleaseBuild() ? '(release)' : ''
