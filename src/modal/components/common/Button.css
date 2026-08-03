@@ -82,17 +82,6 @@
   color: var(--prp-fg, #1f2328);
 }
 
-.prp-btn--danger {
-  color: #fff;
-  background: var(--prp-danger, #cf222e);
-  border-color: var(--prp-danger, #cf222e);
-}
-
-.prp-btn--danger:hover:not(:disabled) {
-  background: #a40e26;
-  border-color: #a40e26;
-}
-
 .prp-btn--size-sm {
   font-size: 12px;
 }
@@ -163,17 +152,38 @@
 }
 
 
+/*
+ * Danger CTA (Delete branch, discard, …).
+ * Rest: low-chroma soft surface + danger label (quiet until intent).
+ * Hover/focus: solid high-chroma danger fill + white label.
+ * Cancel global .prp-btn:hover filter so reds stay clean.
+ */
 .prp-btn--danger {
   color: var(--prp-danger);
-  border-color: color-mix(in srgb, var(--prp-danger) 72%, var(--prp-border));
+  border-color: color-mix(in srgb, var(--prp-danger) 55%, var(--prp-border));
   background: color-mix(in srgb, var(--prp-danger) 12%, var(--prp-bg));
 }
 
-.prp-btn--danger:hover,
-.prp-btn--danger:focus-visible {
-  color: var(--prp-danger);
+.prp-btn--danger:hover:not(:disabled),
+.prp-btn--danger:focus-visible:not(:disabled) {
+  color: #fff;
   border-color: var(--prp-danger);
-  background: color-mix(in srgb, var(--prp-danger) 18%, var(--prp-bg));
+  background: var(--prp-danger);
+  filter: none;
+}
+
+.prp-theme-dark .prp-btn--danger {
+  color: var(--prp-danger);
+  border-color: color-mix(in srgb, var(--prp-danger) 50%, var(--prp-border));
+  background: color-mix(in srgb, var(--prp-danger) 14%, var(--prp-bg));
+}
+
+.prp-theme-dark .prp-btn--danger:hover:not(:disabled),
+.prp-theme-dark .prp-btn--danger:focus-visible:not(:disabled) {
+  color: #fff;
+  border-color: var(--prp-danger);
+  background: var(--prp-danger);
+  filter: none;
 }
 
 
