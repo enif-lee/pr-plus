@@ -15,7 +15,14 @@ import {
   reviewerChangeTimelineEvents,
 } from '../lib/conversation-timeline';
 import { resolveRootReviewCommentId, normalizeReviewCommentId } from '../lib/review-threads';
-import { confirmGateProceed } from '../lib/confirm-gate';
+import {
+  buildMergeConfirmRequest,
+  confirmGateProceed,
+} from '../lib/confirm-gate';
+import {
+  canUpdateBranch,
+  coerceMergeMethod,
+} from '../lib/merge-box-status';
 import { useModalStore } from '../store/modal-store';
 import {
   mapRequestedReviewersFromApi,
