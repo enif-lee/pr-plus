@@ -12,8 +12,17 @@
 </p>
 
 <p align="center">
+  <a href="https://chromewebstore.google.com/detail/pr+/iohbbnefenodmnlejjkjjkfkhifnabii?hl=en-US"><img alt="Chrome Web Store" src="https://img.shields.io/chrome-web-store/v/iohbbnefenodmnlejjkjjkfkhifnabii?label=Chrome%20Web%20Store&logo=googlechrome&logoColor=white&color=4285F4" /></a>
+  <a href="https://chromewebstore.google.com/detail/pr+/iohbbnefenodmnlejjkjjkfkhifnabii?hl=en-US"><img alt="users" src="https://img.shields.io/chrome-web-store/users/iohbbnefenodmnlejjkjjkfkhifnabii?label=users&logo=googlechrome&logoColor=white&color=4285F4" /></a>
   <a href="https://github.com/enif-lee/pr-plus"><img alt="repo" src="https://img.shields.io/badge/github-enif--lee%2Fpr--plus-181717?logo=github" /></a>
   <img alt="manifest" src="https://img.shields.io/badge/manifest-v3-blue" />
+</p>
+
+<p align="center">
+  <strong>Install:</strong>
+  <a href="https://chromewebstore.google.com/detail/pr+/iohbbnefenodmnlejjkjjkfkhifnabii?hl=en-US">Chrome Web Store</a>
+  ·
+  <a href="#install">Load unpacked</a>
 </p>
 
 ---
@@ -227,7 +236,15 @@ Deep matrix of GitHub PR-view vs modal: **[docs/github-pr-parity.md](./docs/gith
 
 ## Install
 
-### Developer mode (local)
+### Chrome Web Store (recommended)
+
+One-click install for Chrome (and other Chromium browsers that support the Chrome Web Store):
+
+**[pr+ on the Chrome Web Store](https://chromewebstore.google.com/detail/pr+/iohbbnefenodmnlejjkjjkfkhifnabii?hl=en-US)**
+
+After install, open the **pr+** toolbar icon and save a GitHub PAT (see [PAT](#pat-personal-access-token)).
+
+### Developer mode (local / Load unpacked)
 
 1. Clone this repository.
 2. `npm install && npm run build` (builds the modal bundle, CSS, Mermaid chunk, and hljs language packs under `src/modal/dist/`).
