@@ -209,6 +209,20 @@
       return current.detail;
     }
     current.detail = S.toAppDetail(current.detailStore);
+    // Diagnostics for branch identity paint (list-sketch often lacks base/head).
+    try {
+      const d = current.detail;
+      const label = `${d?.baseRef || '∅'}←${d?.headRef || '∅'}`;
+      for (const id of [HOST_ID, typeof embedHostId === 'function' ? embedHostId() : 'prp-page-embed']) {
+        try {
+          document.getElementById(id)?.setAttribute?.('data-prp-branches', label);
+        } catch {
+          /* ignore */
+        }
+      }
+    } catch {
+      /* ignore */
+    }
     // Mirror settled from store. Do NOT map !settled → pending:true —
     // files/commits are intentionally deferred (settled:false, idle) until
     // ensureAll*; treating them as pending made aside "Loading…" forever

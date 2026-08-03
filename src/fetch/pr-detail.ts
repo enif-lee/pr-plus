@@ -2,6 +2,40 @@
  * Fetch feature unit: pr-detail
  */
 import {
+  normalizeApiCtx,
+  githubRestUrl,
+  apiJson,
+  fetchNowMs,
+  timedFetch,
+  logParallelRestSummary,
+} from './http';
+import {
+  mapRestReactions,
+  extractRepoMergeMethodFlags,
+  extractViewerCanMergeAsAdmin,
+} from './mappers';
+import {
+  fetchRepoAutolinks,
+  matchAutolinksInText,
+  prMatchText,
+} from './pulls';
+import {
+  fetchPrDevelopment,
+  fetchPrFiles,
+} from './detail-sides-files';
+import {
+  fetchPrReviews,
+  fetchPrCommentsPage,
+  resolvePrMergeability,
+  COMMENT_PAGE_SIZE,
+} from './detail-sides-comments';
+import {
+  mergePendingReviewComments,
+  fetchViewerPendingReviewBundle,
+} from './pending-review';
+import { fetchReactableReactionGroups } from './reactions';
+import {
+  emptyReviewThreadsMeta,
   fetchPullReviewThreadsBundle,
 } from './review-threads-bulk';
 import {

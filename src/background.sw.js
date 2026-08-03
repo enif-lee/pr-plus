@@ -4065,7 +4065,7 @@ var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require
 });
 
 // src/fetch/http.ts
-function normalizeApiCtx2(ctx) {
+function normalizeApiCtx(ctx) {
   if (ctx && typeof ctx === "object" && (ctx.restBase || ctx.graphqlUrl)) {
     return {
       kind: ctx.kind || "custom",
@@ -4092,8 +4092,8 @@ function normalizeApiCtx2(ctx) {
     graphqlUrl: "https://api.github.com/graphql"
   };
 }
-function githubRestUrl2(path, ctx) {
-  const c = normalizeApiCtx2(ctx);
+function githubRestUrl(path, ctx) {
+  const c = normalizeApiCtx(ctx);
   try {
     if (globalThis.PRGithubEndpoints && typeof globalThis.PRGithubEndpoints.githubRestUrl === "function") {
       return globalThis.PRGithubEndpoints.githubRestUrl(path, c);
@@ -4106,7 +4106,7 @@ function githubRestUrl2(path, ctx) {
   return base + (p.startsWith("/") ? p : "/" + p);
 }
 function githubGraphqlUrl(ctx) {
-  const c = normalizeApiCtx2(ctx);
+  const c = normalizeApiCtx(ctx);
   try {
     if (globalThis.PRGithubEndpoints && typeof globalThis.PRGithubEndpoints.githubGraphqlUrl === "function") {
       return globalThis.PRGithubEndpoints.githubGraphqlUrl(c);
@@ -4155,7 +4155,7 @@ function decodeBase64Utf8(b64) {
     return "";
   }
 }
-async function apiJson2(url, fetchImpl, token, opts = {}) {
+async function apiJson(url, fetchImpl, token, opts = {}) {
   const headers = {
     ...buildApiHeaders(token),
     ...opts.headers && typeof opts.headers === "object" ? opts.headers : {}
@@ -4394,7 +4394,7 @@ function summarizeGraphqlCostLog() {
   return summarizeGraphqlCostLogLocal(gqlCostLogEntries);
 }
 async function apiGraphql(query, variables, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   const op = labelGraphqlOperationLocal(query, variables);
   const vars = sanitizeGraphqlVariablesLocal(variables);
   const q = injectRateLimitCostFieldLocal(query);
@@ -4504,18 +4504,18 @@ async function apiGraphql(query, variables, fetchImpl, token, ctx = null) {
   });
   return json?.data ?? null;
 }
-function fetchNowMs2() {
+function fetchNowMs() {
   return typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
 }
-async function timedFetch2(timings, name, promise, extra = void 0, opts = {}) {
-  const t0 = fetchNowMs2();
+async function timedFetch(timings, name, promise, extra = void 0, opts = {}) {
+  const t0 = fetchNowMs();
   const batchStart = opts && Number.isFinite(opts.batchStart) ? Number(opts.batchStart) : null;
   if (batchStart != null) {
     timings[`${name}_start`] = Math.round(t0 - batchStart);
   }
   try {
     const result = await promise;
-    const ms = Math.round(fetchNowMs2() - t0);
+    const ms = Math.round(fetchNowMs() - t0);
     timings[name] = ms;
     let suffix = "";
     try {
@@ -4528,7 +4528,7 @@ async function timedFetch2(timings, name, promise, extra = void 0, opts = {}) {
     );
     return result;
   } catch (err) {
-    const ms = Math.round(fetchNowMs2() - t0);
+    const ms = Math.round(fetchNowMs() - t0);
     timings[name] = ms;
     const msg = err?.message || String(err);
     timings[`${name}_error`] = msg;
@@ -4539,7 +4539,7 @@ async function timedFetch2(timings, name, promise, extra = void 0, opts = {}) {
     throw err;
   }
 }
-function logParallelRestSummary2(timings, names, wallMs) {
+function logParallelRestSummary(timings, names, wallMs) {
   const rows = (Array.isArray(names) ? names : []).map((name) => {
     const ms = Number(timings[name]);
     const start = Number(timings[`${name}_start`]);
@@ -4652,7 +4652,7 @@ function commentsPageHelpers() {
     return null;
   }
 }
-function mapRestReactions2(raw) {
+function mapRestReactions(raw) {
   const DEFS = [
     "+1",
     "-1",
@@ -4744,7 +4744,7 @@ function mapIssueComment(c) {
     body: c.body || "",
     createdAt: c.created_at,
     nodeId: c.node_id || null,
-    reactions: mapRestReactions2(c.reactions)
+    reactions: mapRestReactions(c.reactions)
   };
 }
 function mapReviewComment(c, extra = {}) {
@@ -4770,7 +4770,7 @@ function mapReviewComment(c, extra = {}) {
     createdAt: c.created_at,
     inReplyToId: c.in_reply_to_id ?? null,
     nodeId: c.node_id || null,
-    reactions: mapRestReactions2(c.reactions),
+    reactions: mapRestReactions(c.reactions),
     threadNodeId: extra.threadNodeId ?? null,
     /** Pull request review id (groups file threads under one review event). */
     reviewId: c.pull_request_review_id != null ? Number(c.pull_request_review_id) : extra.reviewId != null ? Number(extra.reviewId) : null,
@@ -4822,7 +4822,7 @@ function mapGraphqlReviewCommentNode(node, threadMeta = {}) {
     subjectType: isFile ? "file" : "line"
   };
 }
-function extractRepoMergeMethodFlags2(repo) {
+function extractRepoMergeMethodFlags(repo) {
   if (!repo || typeof repo !== "object") return null;
   const has = Object.prototype.hasOwnProperty.call(repo, "allow_merge_commit") || Object.prototype.hasOwnProperty.call(repo, "allow_squash_merge") || Object.prototype.hasOwnProperty.call(repo, "allow_rebase_merge");
   if (!has) return null;
@@ -4833,7 +4833,7 @@ function extractRepoMergeMethodFlags2(repo) {
     allowRebaseMerge: flag(repo.allow_rebase_merge)
   };
 }
-function extractViewerCanMergeAsAdmin2(repo) {
+function extractViewerCanMergeAsAdmin(repo) {
   if (!repo || typeof repo !== "object") return null;
   const p = repo.permissions;
   if (!p || typeof p !== "object") return null;
@@ -4926,7 +4926,7 @@ function mapAndAnnotateFiles(files, gitattributesText = "") {
 
 // src/fetch/detail-sides-comments.ts
 async function fetchPrIssueComments(owner, repo, number, fetchImpl, token = null, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   const o = String(owner || "").trim();
   const r = String(repo || "").trim();
   const n = Number(number);
@@ -4934,7 +4934,7 @@ async function fetchPrIssueComments(owner, repo, number, fetchImpl, token = null
     items: [],
     meta: {
       page: 1,
-      perPage: COMMENT_PAGE_SIZE2,
+      perPage: COMMENT_PAGE_SIZE,
       hasMore: false,
       nextPage: null,
       order: "from-end",
@@ -4943,12 +4943,12 @@ async function fetchPrIssueComments(owner, repo, number, fetchImpl, token = null
   };
   if (!o || !r || !Number.isFinite(n)) return empty;
   try {
-    return await fetchPrCommentsPage2(
+    return await fetchPrCommentsPage(
       o,
       r,
       n,
       "issue",
-      { page: 1, perPage: COMMENT_PAGE_SIZE2, preferNewest: true },
+      { page: 1, perPage: COMMENT_PAGE_SIZE, preferNewest: true },
       fetchImpl,
       token,
       ctx
@@ -4961,7 +4961,7 @@ async function fetchPrIssueComments(owner, repo, number, fetchImpl, token = null
   }
 }
 async function fetchPrTimelineEvents(owner, repo, number, fetchImpl, token = null, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   const o = String(owner || "").trim();
   const r = String(repo || "").trim();
   const n = Number(number);
@@ -5016,7 +5016,7 @@ async function fetchPrTimelineEvents(owner, repo, number, fetchImpl, token = nul
   try {
     const perPage = 100;
     const maxPages = 10;
-    const pageUrl = (page) => githubRestUrl2(
+    const pageUrl = (page) => githubRestUrl(
       `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/issues/${n}/events?per_page=${perPage}&page=${page}`,
       ctx
     );
@@ -5074,14 +5074,14 @@ async function fetchPrTimelineEvents(owner, repo, number, fetchImpl, token = nul
   }
 }
 async function fetchPrReviews(owner, repo, number, fetchImpl, token = null, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   const o = String(owner || "").trim();
   const r = String(repo || "").trim();
   const n = Number(number);
   if (!o || !r || !Number.isFinite(n)) return [];
   try {
-    const data = await apiJson2(
-      githubRestUrl2(
+    const data = await apiJson(
+      githubRestUrl(
         `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/pulls/${n}/reviews?per_page=100`,
         ctx
       ),
@@ -5105,17 +5105,17 @@ async function fetchPrReviews(owner, repo, number, fetchImpl, token = null, ctx 
     return [];
   }
 }
-var COMMENT_PAGE_SIZE2 = 50;
-async function fetchPrCommentsPage2(owner, repo, pullNumber, kind, opts, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+var COMMENT_PAGE_SIZE = 50;
+async function fetchPrCommentsPage(owner, repo, pullNumber, kind, opts, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   const helpers = commentsPageHelpers();
-  const perPage = helpers?.clampPerPage?.(opts?.perPage) || Math.min(100, Number(opts?.perPage) || COMMENT_PAGE_SIZE2);
+  const perPage = helpers?.clampPerPage?.(opts?.perPage) || Math.min(100, Number(opts?.perPage) || COMMENT_PAGE_SIZE);
   let page = Math.max(1, Number(opts?.page) || 1);
   const since = opts?.since || null;
   const preferNewest = Boolean(opts?.preferNewest) && !since;
   const orderHint = opts?.order || null;
   async function fetchPage(pageNum, listOpts = {}, ctx2 = null) {
-    ctx2 = normalizeApiCtx2(ctx2);
+    ctx2 = normalizeApiCtx(ctx2);
     const sort = (
       // @ts-expect-error classic fetch dynamic shapes
       listOpts.sort != null ? listOpts.sort : kind === "review" ? "created" : void 0
@@ -5131,7 +5131,7 @@ async function fetchPrCommentsPage2(owner, repo, pullNumber, kind, opts, fetchIm
       sort,
       direction
     }) : (() => {
-      const base = kind === "review" ? githubRestUrl2(`/repos/${owner}/${repo}/pulls/${pullNumber}/comments`, ctx2) : githubRestUrl2(`/repos/${owner}/${repo}/issues/${pullNumber}/comments`, ctx2);
+      const base = kind === "review" ? githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/comments`, ctx2) : githubRestUrl(`/repos/${owner}/${repo}/issues/${pullNumber}/comments`, ctx2);
       const q = new URLSearchParams({
         per_page: String(perPage),
         page: String(pageNum)
@@ -5241,7 +5241,7 @@ async function fetchPrCommentsPage2(owner, repo, pullNumber, kind, opts, fetchIm
   return { items: res.items, meta, kind };
 }
 async function fetchPrSidebarMeta2(owner, repo, number, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   const o = String(owner || "").trim();
   const r = String(repo || "").trim();
   const n = Number(number);
@@ -5316,7 +5316,7 @@ async function fetchPrSidebarMeta2(owner, repo, number, fetchImpl, token, ctx = 
   }
 }
 async function fetchIssueOrPrSummaries2(owner, repo, numbers, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   const o = String(owner || "").trim();
   const r = String(repo || "").trim();
   const nums = [
@@ -5371,22 +5371,22 @@ async function fetchIssueOrPrSummaries2(owner, repo, numbers, fetchImpl, token, 
   return out;
 }
 async function fetchConflictFilePaths(owner, repo, baseRef, headSha, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   const o = String(owner || "").trim();
   const r = String(repo || "").trim();
   const ref = String(baseRef || "").trim();
   const head = String(headSha || "").trim();
   if (!o || !r || !ref || !head) return [];
   try {
-    const baseUrl = githubRestUrl2(`/repos/${o}/${r}`, ctx);
-    const refJson = await apiJson2(
+    const baseUrl = githubRestUrl(`/repos/${o}/${r}`, ctx);
+    const refJson = await apiJson(
       `${baseUrl}/git/ref/heads/${encodeURIComponent(ref)}`,
       fetchImpl,
       token
     );
     const baseTip = String(refJson?.object?.sha || "").trim();
     if (!baseTip) return [];
-    const headVsBase = await apiJson2(
+    const headVsBase = await apiJson(
       `${baseUrl}/compare/${encodeURIComponent(baseTip)}...${encodeURIComponent(head)}`,
       fetchImpl,
       token
@@ -5394,12 +5394,12 @@ async function fetchConflictFilePaths(owner, repo, baseRef, headSha, fetchImpl, 
     const mergeBase = String(headVsBase?.merge_base_commit?.sha || "").trim();
     if (!mergeBase) return [];
     const [baseSide, headSide] = await Promise.all([
-      apiJson2(
+      apiJson(
         `${baseUrl}/compare/${encodeURIComponent(mergeBase)}...${encodeURIComponent(baseTip)}?per_page=100`,
         fetchImpl,
         token
       ),
-      apiJson2(
+      apiJson(
         `${baseUrl}/compare/${encodeURIComponent(mergeBase)}...${encodeURIComponent(head)}?per_page=100`,
         fetchImpl,
         token
@@ -5424,18 +5424,18 @@ async function fetchConflictFilePaths(owner, repo, baseRef, headSha, fetchImpl, 
     return [];
   }
 }
-async function resolvePrMergeability2(pr, base, pullNumber, fetchImpl, token, timings, meta = {}) {
+async function resolvePrMergeability(pr, base, pullNumber, fetchImpl, token, timings, meta = {}) {
   if (!pr || typeof pr !== "object") return pr;
   let out = pr;
-  const apiCtx = normalizeApiCtx2(meta?.apiCtx || meta?.ctx);
+  const apiCtx = normalizeApiCtx(meta?.apiCtx || meta?.ctx);
   const needsCompute = out.mergeable == null || out.mergeable === void 0 || !String(out.mergeable_state || "").trim() || String(out.mergeable_state || "").toLowerCase() === "unknown";
   if (needsCompute) {
     try {
       await sleepMs(350);
-      const again = await timedFetch2(
+      const again = await timedFetch(
         timings,
         "pullMergeable",
-        apiJson2(`${base}/pulls/${pullNumber}`, fetchImpl, token),
+        apiJson(`${base}/pulls/${pullNumber}`, fetchImpl, token),
         (p) => `(mergeable=${p?.mergeable} state=${p?.mergeable_state || "?"})`
       );
       if (again && typeof again === "object") {
@@ -5468,14 +5468,14 @@ async function resolvePrMergeability2(pr, base, pullNumber, fetchImpl, token, ti
       const baseRef = String(out.base?.ref || "").trim();
       const headSha = String(out.head?.sha || "").trim();
       if (baseOwner && baseRepo && baseRef && headSha) {
-        const cmpUrl = githubRestUrl2(
+        const cmpUrl = githubRestUrl(
           `/repos/${encodeURIComponent(baseOwner)}/${encodeURIComponent(baseRepo)}/compare/${encodeURIComponent(baseRef)}...${encodeURIComponent(headSha)}`,
           apiCtx
         );
-        const cmp = await timedFetch2(
+        const cmp = await timedFetch(
           timings,
           "branchBehind",
-          apiJson2(cmpUrl, fetchImpl, token),
+          apiJson(cmpUrl, fetchImpl, token),
           (c) => `(behind=${c?.behind_by ?? "?"} status=${c?.status || "?"})`
         );
         if (cmp && typeof cmp === "object" && cmp.behind_by != null) {
@@ -5495,7 +5495,7 @@ async function resolvePrMergeability2(pr, base, pullNumber, fetchImpl, token, ti
   if (isDirty) {
     const baseOwner = out.base?.repo?.owner?.login || String(meta.owner || "").trim() || null;
     const baseRepo = out.base?.repo?.name || String(meta.repo || "").trim() || null;
-    const conflictFiles = await timedFetch2(
+    const conflictFiles = await timedFetch(
       timings,
       "conflictFiles",
       fetchConflictFilePaths(
@@ -5519,7 +5519,7 @@ async function resolvePrMergeability2(pr, base, pullNumber, fetchImpl, token, ti
   return out;
 }
 async function fetchCompareFiles(owner, repo, base, head, fetchImpl, token = null, options = {}) {
-  const ctx = normalizeApiCtx2(options?.ctx);
+  const ctx = normalizeApiCtx(options?.ctx);
   const o = String(owner || "").trim();
   const r = String(repo || "").trim();
   const b = String(base || "").trim();
@@ -5528,8 +5528,8 @@ async function fetchCompareFiles(owner, repo, base, head, fetchImpl, token = nul
     throw new Error("owner, repo, base, and head are required for compare");
   }
   const gitattributesText = String(options.gitattributesText || "");
-  const url = githubRestUrl2(`/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/compare/${encodeURIComponent(b)}...${encodeURIComponent(h)}`, ctx);
-  const data = await apiJson2(url, fetchImpl, token);
+  const url = githubRestUrl(`/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/compare/${encodeURIComponent(b)}...${encodeURIComponent(h)}`, ctx);
+  const data = await apiJson(url, fetchImpl, token);
   const files = mapAndAnnotateFiles(data?.files || [], gitattributesText);
   return {
     files,
@@ -5545,19 +5545,19 @@ async function fetchCompareFiles(owner, repo, base, head, fetchImpl, token = nul
 
 // src/fetch/detail-sides-files.ts
 async function fetchPrCommits(owner, repo, number, fetchImpl, token = null, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   const o = String(owner || "").trim();
   const r = String(repo || "").trim();
   const n = Number(number);
   if (!o || !r || !Number.isFinite(n)) {
     throw new Error("owner, repo, and number are required for commits");
   }
-  const url = githubRestUrl2(
+  const url = githubRestUrl(
     `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/pulls/${n}/commits?per_page=100`,
     ctx
   );
   try {
-    const data = await apiJson2(url, fetchImpl, token);
+    const data = await apiJson(url, fetchImpl, token);
     return (Array.isArray(data) ? data : []).map(mapPrCommitRow).filter((c) => c.sha);
   } catch (err) {
     if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
@@ -5567,14 +5567,14 @@ async function fetchPrCommits(owner, repo, number, fetchImpl, token = null, ctx 
   }
 }
 async function fetchAllPrCommits(owner, repo, number, fetchImpl, token = null, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   const o = String(owner || "").trim();
   const r = String(repo || "").trim();
   const n = Number(number);
   if (!o || !r || !Number.isFinite(n)) {
     throw new Error("owner, repo, and number are required for commits");
   }
-  const first = githubRestUrl2(
+  const first = githubRestUrl(
     `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/pulls/${n}/commits?per_page=100`,
     ctx
   );
@@ -5582,16 +5582,16 @@ async function fetchAllPrCommits(owner, repo, number, fetchImpl, token = null, c
   return raw.map(mapPrCommitRow).filter((c) => c.sha);
 }
 async function fetchPrChecks(owner, repo, headSha, fetchImpl, token = null, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   const o = String(owner || "").trim();
   const r = String(repo || "").trim();
   const sha = String(headSha || "").trim();
   const empty = { state: "unknown", totalCount: 0, statuses: [], checkRuns: [] };
   if (!o || !r || !sha) return empty;
-  const base = githubRestUrl2(`/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}`, ctx);
+  const base = githubRestUrl(`/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}`, ctx);
   let checks = { ...empty };
   try {
-    const status = await apiJson2(`${base}/commits/${encodeURIComponent(sha)}/status`, fetchImpl, token);
+    const status = await apiJson(`${base}/commits/${encodeURIComponent(sha)}/status`, fetchImpl, token);
     const statusList = Array.isArray(status?.statuses) ? status.statuses : [];
     const emptyCombined = !statusList.length && !(Number(status?.total_count) > 0);
     checks = {
@@ -5613,7 +5613,7 @@ async function fetchPrChecks(owner, repo, headSha, fetchImpl, token = null, ctx 
     }
   }
   try {
-    const runs = await apiJson2(
+    const runs = await apiJson(
       `${base}/commits/${encodeURIComponent(sha)}/check-runs?per_page=100&filter=latest`,
       fetchImpl,
       token
@@ -5665,7 +5665,7 @@ async function fetchPrChecks(owner, repo, headSha, fetchImpl, token = null, ctx 
   return checks;
 }
 async function fetchPrDevelopment(owner, repo, number, fetchImpl, token = null, opts = {}) {
-  const ctx = normalizeApiCtx2(opts?.ctx);
+  const ctx = normalizeApiCtx(opts?.ctx);
   const o = String(owner || "").trim();
   const r = String(repo || "").trim();
   const n = Number(number);
@@ -5777,14 +5777,14 @@ async function fetchPrDevelopment(owner, repo, number, fetchImpl, token = null, 
   };
 }
 async function fetchAllPrFiles(owner, repo, number, fetchImpl, token = null, options = {}) {
-  const ctx = normalizeApiCtx2(options?.ctx);
+  const ctx = normalizeApiCtx(options?.ctx);
   const o = String(owner || "").trim();
   const r = String(repo || "").trim();
   const n = Number(number);
   if (!o || !r || !Number.isFinite(n)) {
     throw new Error("owner, repo, and number are required for files");
   }
-  const first = githubRestUrl2(
+  const first = githubRestUrl(
     `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/pulls/${n}/files?per_page=100`,
     ctx
   );
@@ -5792,20 +5792,20 @@ async function fetchAllPrFiles(owner, repo, number, fetchImpl, token = null, opt
   return mapAndAnnotateFiles(raw, options.gitattributesText || "");
 }
 async function fetchPrFiles(owner, repo, number, fetchImpl, token = null, options = {}) {
-  const ctx = normalizeApiCtx2(options?.ctx);
+  const ctx = normalizeApiCtx(options?.ctx);
   const o = String(owner || "").trim();
   const r = String(repo || "").trim();
   const n = Number(number);
   if (!o || !r || !Number.isFinite(n)) {
     throw new Error("owner, repo, and number are required for files");
   }
-  const base = githubRestUrl2(
+  const base = githubRestUrl(
     `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}`,
     ctx
   );
   let raw = [];
   try {
-    const data = await apiJson2(
+    const data = await apiJson(
       `${base}/pulls/${n}/files?per_page=100`,
       fetchImpl,
       token
@@ -5821,7 +5821,7 @@ async function fetchPrFiles(owner, repo, number, fetchImpl, token = null, option
   if (!gitattributesText) {
     try {
       const ref = String(options.headSha || options.ref || "").trim() || "HEAD";
-      const attr = await apiJson2(
+      const attr = await apiJson(
         `${base}/contents/.gitattributes?ref=${encodeURIComponent(ref)}`,
         fetchImpl,
         token
@@ -5859,7 +5859,7 @@ var REST_TO_GQL_REACTION = {
 };
 
 // src/fetch/pending-review.ts
-function mergePendingReviewComments2(published, pendingList) {
+function mergePendingReviewComments(published, pendingList) {
   const list = Array.isArray(published) ? published.slice() : [];
   const seen = new Set(list.map((c) => c && c.id != null ? String(c.id) : "").filter(Boolean));
   for (const p of Array.isArray(pendingList) ? pendingList : []) {
@@ -5901,8 +5901,8 @@ function pickViewerPendingFromReviews(reviews, login) {
     node_id: r.node_id || null
   };
 }
-async function fetchViewerPendingReviewBundle2(owner, repo, pullNumber, fetchImpl, token, preloaded = null, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+async function fetchViewerPendingReviewBundle(owner, repo, pullNumber, fetchImpl, token, preloaded = null, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
   if (!token) return { comments: [], review: null };
   let pending = null;
   if (preloaded && (Array.isArray(preloaded.reviews) || preloaded.login != null)) {
@@ -5923,8 +5923,8 @@ async function fetchViewerPendingReviewBundle2(owner, repo, pullNumber, fetchImp
   if (!pending?.id) return { comments: [], review: null };
   try {
     const n = Number(pullNumber);
-    const raw = await apiJson2(
-      githubRestUrl2(`/repos/${owner}/${repo}/pulls/${n}/reviews/${pending.id}/comments?per_page=100`, ctx),
+    const raw = await apiJson(
+      githubRestUrl(`/repos/${owner}/${repo}/pulls/${n}/reviews/${pending.id}/comments?per_page=100`, ctx),
       fetchImpl,
       token
     );
@@ -5951,7 +5951,7 @@ async function fetchViewerPendingReviewBundle2(owner, repo, pullNumber, fetchImp
   }
 }
 async function fetchViewerPendingReviewComments(owner, repo, pullNumber, fetchImpl, token) {
-  const { comments } = await fetchViewerPendingReviewBundle2(
+  const { comments } = await fetchViewerPendingReviewBundle(
     owner,
     repo,
     pullNumber,
@@ -5961,11 +5961,11 @@ async function fetchViewerPendingReviewComments(owner, repo, pullNumber, fetchIm
   return comments;
 }
 async function createPendingPullReview(owner, repo, pullNumber, { commitId } = {}, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   const body = {};
   if (commitId) body.commit_id = commitId;
   return apiSend(
-    githubRestUrl2(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`, ctx),
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`, ctx),
     fetchImpl,
     token,
     // @ts-expect-error classic fetch dynamic shapes
@@ -5973,7 +5973,7 @@ async function createPendingPullReview(owner, repo, pullNumber, { commitId } = {
   );
 }
 async function submitPendingPullReview(owner, repo, pullNumber, reviewId, { event = "COMMENT", body = "" } = {}, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   const id = Number(reviewId);
   if (!Number.isFinite(id) || id <= 0) {
     throw new Error("Invalid pending review id");
@@ -5983,7 +5983,7 @@ async function submitPendingPullReview(owner, repo, pullNumber, reviewId, { even
     throw new Error("Invalid review event");
   }
   return apiSend(
-    githubRestUrl2(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${id}/events`, ctx),
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${id}/events`, ctx),
     fetchImpl,
     token,
     // @ts-expect-error classic fetch dynamic shapes
@@ -5991,20 +5991,20 @@ async function submitPendingPullReview(owner, repo, pullNumber, reviewId, { even
   );
 }
 async function deletePendingPullReview(owner, repo, pullNumber, reviewId, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   const id = Number(reviewId);
   if (!Number.isFinite(id) || id <= 0) {
     throw new Error("Invalid pending review id");
   }
   return apiSend(
-    githubRestUrl2(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${id}`, ctx),
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${id}`, ctx),
     fetchImpl,
     token,
     { method: "DELETE" }
   );
 }
 async function postReviewCommentViaPendingGraphql(pendingReviewNodeId, { body, path, line, side = "RIGHT", startLine, startSide, subjectType = "line" }, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   const isFile = String(subjectType || "").toLowerCase() === "file";
   const hasRange = !isFile && startLine != null && Number.isFinite(Number(startLine)) && Number(startLine) !== Number(line);
   const variables = {
@@ -6128,12 +6128,12 @@ async function postReviewCommentViaPendingGraphql(pendingReviewNodeId, { body, p
   };
 }
 async function ensureViewerPendingReview(owner, repo, pullNumber, { commitId = null, createIfMissing = false } = {}, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   const hydrateNodeId = async (pending2) => {
     if (!pending2?.id) return null;
     try {
-      const full = await apiJson2(
-        githubRestUrl2(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${pending2.id}`, ctx),
+      const full = await apiJson(
+        githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${pending2.id}`, ctx),
         fetchImpl,
         token
       );
@@ -6190,14 +6190,14 @@ async function ensureViewerPendingReview(owner, repo, pullNumber, { commitId = n
   }
 }
 async function findViewerPendingReview(owner, repo, pullNumber, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   if (!token) return null;
   const n = Number(pullNumber);
   if (!Number.isFinite(n)) return null;
   try {
     const [reviews, login] = await Promise.all([
-      apiJson2(
-        githubRestUrl2(`/repos/${owner}/${repo}/pulls/${n}/reviews?per_page=100`, ctx),
+      apiJson(
+        githubRestUrl(`/repos/${owner}/${repo}/pulls/${n}/reviews?per_page=100`, ctx),
         fetchImpl,
         token
       ).catch(() => []),
@@ -6209,7 +6209,7 @@ async function findViewerPendingReview(owner, repo, pullNumber, fetchImpl, token
   }
 }
 async function replyViaThreadGraphql(threadNodeId, body, fetchImpl, token, fallback = {}, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   const data = await apiGraphql(
     `mutation($id:ID!,$body:String!){
       addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$id,body:$body}){
@@ -6236,7 +6236,7 @@ async function replyViaThreadGraphql(threadNodeId, body, fetchImpl, token, fallb
   return mapGraphqlReviewCommentToRest(c, fallback);
 }
 async function replyViaPendingReviewGraphql(pendingReviewNodeId, parentCommentNodeId, body, fetchImpl, token, fallback = {}, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   const data = await apiGraphql(
     `mutation($review:ID!,$body:String!,$inReplyTo:ID!){
       addPullRequestReviewComment(input:{
@@ -6270,13 +6270,13 @@ async function replyViaPendingReviewGraphql(pendingReviewNodeId, parentCommentNo
   return mapGraphqlReviewCommentToRest(c, fallback);
 }
 async function resolveParentCommentNodeId(owner, repo, parentId, fetchImpl, token, knownNodeId, pullNumber = null, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   if (knownNodeId) return String(knownNodeId);
   const id = Math.floor(Number(parentId));
   if (!Number.isFinite(id) || id <= 0) return null;
   try {
-    const parent = await apiJson2(
-      githubRestUrl2(`/repos/${owner}/${repo}/pulls/comments/${id}`, ctx),
+    const parent = await apiJson(
+      githubRestUrl(`/repos/${owner}/${repo}/pulls/comments/${id}`, ctx),
       fetchImpl,
       token
     );
@@ -6285,7 +6285,7 @@ async function resolveParentCommentNodeId(owner, repo, parentId, fetchImpl, toke
   }
   if (pullNumber == null || !token) return null;
   try {
-    const { comments } = await fetchViewerPendingReviewBundle2(
+    const { comments } = await fetchViewerPendingReviewBundle(
       owner,
       repo,
       pullNumber,
@@ -6304,9 +6304,9 @@ async function resolveParentCommentNodeId(owner, repo, parentId, fetchImpl, toke
 
 // src/fetch/mutations-comments.ts
 async function postIssueComment(owner, repo, issueNumber, body, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   return apiSend(
-    githubRestUrl2(`/repos/${owner}/${repo}/issues/${issueNumber}/comments`, ctx),
+    githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/comments`, ctx),
     fetchImpl,
     token,
     // @ts-expect-error classic fetch dynamic shapes
@@ -6314,7 +6314,7 @@ async function postIssueComment(owner, repo, issueNumber, body, fetchImpl, token
   );
 }
 async function submitPullReview(owner, repo, pullNumber, { event, body = "", commitId, comments }, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   const payload = { event, body: body || "" };
   if (commitId) payload.commit_id = commitId;
   if (Array.isArray(comments) && comments.length) {
@@ -6336,7 +6336,7 @@ async function submitPullReview(owner, repo, pullNumber, { event, body = "", com
     });
   }
   return apiSend(
-    githubRestUrl2(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`, ctx),
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`, ctx),
     fetchImpl,
     token,
     // @ts-expect-error classic fetch dynamic shapes
@@ -6354,7 +6354,7 @@ async function postReviewComment(owner, repo, pullNumber, {
   asPending = false,
   subjectType = "line"
 }, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   const text = String(body || "").trim();
   if (!text) throw new Error("Comment body is required");
   if (!path) throw new Error("path is required");
@@ -6457,7 +6457,7 @@ async function postReviewComment(owner, repo, pullNumber, {
     payload.start_side = startSide || side || "RIGHT";
   }
   return apiSend(
-    githubRestUrl2(`/repos/${owner}/${repo}/pulls/${pullNumber}/comments`, ctx),
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/comments`, ctx),
     fetchImpl,
     token,
     // @ts-expect-error classic fetch dynamic shapes
@@ -6465,7 +6465,7 @@ async function postReviewComment(owner, repo, pullNumber, {
   );
 }
 async function replyToReviewComment(owner, repo, pullNumber, commentId, body, fetchImpl, token, opts = {}) {
-  const ctx = normalizeApiCtx2(opts?.ctx);
+  const ctx = normalizeApiCtx(opts?.ctx);
   const text = String(body || "").trim();
   if (!text) throw new Error("Reply body is required");
   const parentId = Number(commentId);
@@ -6618,7 +6618,7 @@ async function replyToReviewComment(owner, repo, pullNumber, commentId, body, fe
   }
   try {
     return await apiSend(
-      githubRestUrl2(`/repos/${owner}/${repo}/pulls/${n}/comments/${Math.floor(parentId)}/replies`, ctx),
+      githubRestUrl(`/repos/${owner}/${repo}/pulls/${n}/comments/${Math.floor(parentId)}/replies`, ctx),
       fetchImpl,
       token,
       // @ts-expect-error classic fetch dynamic shapes
@@ -6634,7 +6634,7 @@ async function replyToReviewComment(owner, repo, pullNumber, commentId, body, fe
   }
 }
 async function resolveReviewThread(threadNodeId, resolved, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   if (!threadNodeId) throw new Error("threadNodeId required to resolve review thread");
   const mutation = resolved ? `mutation($id:ID!){ resolveReviewThread(input:{threadId:$id}){ thread { id isResolved } } }` : `mutation($id:ID!){ unresolveReviewThread(input:{threadId:$id}){ thread { id isResolved } } }`;
   return apiGraphql(
@@ -6646,10 +6646,10 @@ async function resolveReviewThread(threadNodeId, resolved, fetchImpl, token, ctx
   );
 }
 async function updatePullState(owner, repo, pullNumber, state, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   const next = state === "closed" ? "closed" : "open";
   return apiSend(
-    githubRestUrl2(`/repos/${owner}/${repo}/pulls/${pullNumber}`, ctx),
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}`, ctx),
     fetchImpl,
     token,
     // @ts-expect-error classic fetch dynamic shapes
@@ -6663,18 +6663,18 @@ async function reopenPullRequest(owner, repo, pullNumber, fetchImpl, token) {
   return updatePullState(owner, repo, pullNumber, "open", fetchImpl, token);
 }
 async function deleteReviewComment(owner, repo, commentId, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   return apiSend(
-    githubRestUrl2(`/repos/${owner}/${repo}/pulls/comments/${commentId}`, ctx),
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/comments/${commentId}`, ctx),
     fetchImpl,
     token,
     { method: "DELETE" }
   );
 }
 async function deleteIssueComment(owner, repo, commentId, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   return apiSend(
-    githubRestUrl2(`/repos/${owner}/${repo}/issues/comments/${commentId}`, ctx),
+    githubRestUrl(`/repos/${owner}/${repo}/issues/comments/${commentId}`, ctx),
     fetchImpl,
     token,
     { method: "DELETE" }
@@ -6683,14 +6683,14 @@ async function deleteIssueComment(owner, repo, commentId, fetchImpl, token, ctx 
 
 // src/fetch/mutations-meta.ts
 async function updatePullRequest(owner, repo, pullNumber, fields, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   const body = {};
   if (fields?.title != null) body.title = String(fields.title);
   if (fields?.body != null) body.body = String(fields.body);
   if (fields?.base != null) body.base = String(fields.base);
   if (fields?.state != null) body.state = fields.state === "closed" ? "closed" : "open";
   return apiSend(
-    githubRestUrl2(`/repos/${owner}/${repo}/pulls/${pullNumber}`, ctx),
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}`, ctx),
     fetchImpl,
     token,
     // @ts-expect-error classic fetch dynamic shapes
@@ -6698,9 +6698,9 @@ async function updatePullRequest(owner, repo, pullNumber, fields, fetchImpl, tok
   );
 }
 async function editIssueComment(owner, repo, commentId, body, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   return apiSend(
-    githubRestUrl2(`/repos/${owner}/${repo}/issues/comments/${commentId}`, ctx),
+    githubRestUrl(`/repos/${owner}/${repo}/issues/comments/${commentId}`, ctx),
     fetchImpl,
     token,
     // @ts-expect-error classic fetch dynamic shapes
@@ -6708,9 +6708,9 @@ async function editIssueComment(owner, repo, commentId, body, fetchImpl, token, 
   );
 }
 async function editReviewComment(owner, repo, commentId, body, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   return apiSend(
-    githubRestUrl2(`/repos/${owner}/${repo}/pulls/comments/${commentId}`, ctx),
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/comments/${commentId}`, ctx),
     fetchImpl,
     token,
     // @ts-expect-error classic fetch dynamic shapes
@@ -6718,9 +6718,9 @@ async function editReviewComment(owner, repo, commentId, body, fetchImpl, token,
   );
 }
 async function requestReviewers(owner, repo, pullNumber, { reviewers = [], teamReviewers = [] }, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   return apiSend(
-    githubRestUrl2(`/repos/${owner}/${repo}/pulls/${pullNumber}/requested_reviewers`, ctx),
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/requested_reviewers`, ctx),
     fetchImpl,
     token,
     {
@@ -6731,9 +6731,9 @@ async function requestReviewers(owner, repo, pullNumber, { reviewers = [], teamR
   );
 }
 async function removeReviewers(owner, repo, pullNumber, { reviewers = [], teamReviewers = [] }, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   return apiSend(
-    githubRestUrl2(`/repos/${owner}/${repo}/pulls/${pullNumber}/requested_reviewers`, ctx),
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/requested_reviewers`, ctx),
     fetchImpl,
     token,
     {
@@ -6744,9 +6744,9 @@ async function removeReviewers(owner, repo, pullNumber, { reviewers = [], teamRe
   );
 }
 async function addAssignees(owner, repo, issueNumber, assignees, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   return apiSend(
-    githubRestUrl2(`/repos/${owner}/${repo}/issues/${issueNumber}/assignees`, ctx),
+    githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/assignees`, ctx),
     fetchImpl,
     token,
     // @ts-expect-error classic fetch dynamic shapes
@@ -6754,9 +6754,9 @@ async function addAssignees(owner, repo, issueNumber, assignees, fetchImpl, toke
   );
 }
 async function removeAssignees(owner, repo, issueNumber, assignees, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   return apiSend(
-    githubRestUrl2(`/repos/${owner}/${repo}/issues/${issueNumber}/assignees`, ctx),
+    githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/assignees`, ctx),
     fetchImpl,
     token,
     // @ts-expect-error classic fetch dynamic shapes
@@ -6764,9 +6764,9 @@ async function removeAssignees(owner, repo, issueNumber, assignees, fetchImpl, t
   );
 }
 async function setIssueLabels(owner, repo, issueNumber, labels, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   return apiSend(
-    githubRestUrl2(`/repos/${owner}/${repo}/issues/${issueNumber}/labels`, ctx),
+    githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/labels`, ctx),
     fetchImpl,
     token,
     // @ts-expect-error classic fetch dynamic shapes
@@ -6774,16 +6774,16 @@ async function setIssueLabels(owner, repo, issueNumber, labels, fetchImpl, token
   );
 }
 async function fetchRepoLabels(owner, repo, fetchImpl, token = null, opts = {}) {
-  const ctx = normalizeApiCtx2(opts?.ctx);
+  const ctx = normalizeApiCtx(opts?.ctx);
   const perPage = 100;
   const maxPages = Math.max(1, Math.min(10, Number(opts.maxPages) || 5));
   const out = [];
   for (let page = 1; page <= maxPages; page++) {
-    const url = githubRestUrl2(
+    const url = githubRestUrl(
       `/repos/${owner}/${repo}/labels?per_page=${perPage}&page=${page}`,
       ctx
     );
-    const batch = await apiJson2(url, fetchImpl, token);
+    const batch = await apiJson(url, fetchImpl, token);
     if (!Array.isArray(batch) || !batch.length) break;
     for (const l of batch) {
       const name = String(l?.name || "").trim();
@@ -6817,7 +6817,7 @@ function defaultNewLabelColor(name) {
   return palette[h % palette.length];
 }
 async function createRepoLabel(owner, repo, { name, color, description } = {}, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   const rawName = String(name || "").trim();
   if (!rawName) throw new Error("Label name is required");
   const body = {
@@ -6826,7 +6826,7 @@ async function createRepoLabel(owner, repo, { name, color, description } = {}, f
   };
   if (description != null) body.description = String(description);
   const result = await apiSend(
-    githubRestUrl2(`/repos/${owner}/${repo}/labels`, ctx),
+    githubRestUrl(`/repos/${owner}/${repo}/labels`, ctx),
     fetchImpl,
     token,
     // @ts-expect-error classic fetch dynamic shapes
@@ -6839,17 +6839,17 @@ async function createRepoLabel(owner, repo, { name, color, description } = {}, f
   };
 }
 async function fetchRepoMilestones(owner, repo, fetchImpl, token = null, opts = {}) {
-  const ctx = normalizeApiCtx2(opts?.ctx);
+  const ctx = normalizeApiCtx(opts?.ctx);
   const perPage = 100;
   const maxPages = Math.max(1, Math.min(10, Number(opts.maxPages) || 5));
   const state = opts.state || "all";
   const out = [];
   for (let page = 1; page <= maxPages; page++) {
-    const url = githubRestUrl2(
+    const url = githubRestUrl(
       `/repos/${owner}/${repo}/milestones?state=${encodeURIComponent(state)}&per_page=${perPage}&page=${page}&sort=due_on&direction=desc`,
       ctx
     );
-    const batch = await apiJson2(url, fetchImpl, token);
+    const batch = await apiJson(url, fetchImpl, token);
     if (!Array.isArray(batch) || !batch.length) break;
     for (const m of batch) {
       const number = Number(m?.number);
@@ -6867,13 +6867,13 @@ async function fetchRepoMilestones(owner, repo, fetchImpl, token = null, opts = 
   return out;
 }
 async function createRepoMilestone(owner, repo, { title, description, state } = {}, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   const rawTitle = String(title || "").trim();
   if (!rawTitle) throw new Error("Milestone title is required");
   const body = { title: rawTitle, state: state === "closed" ? "closed" : "open" };
   if (description != null) body.description = String(description);
   const result = await apiSend(
-    githubRestUrl2(`/repos/${owner}/${repo}/milestones`, ctx),
+    githubRestUrl(`/repos/${owner}/${repo}/milestones`, ctx),
     fetchImpl,
     token,
     // @ts-expect-error classic fetch dynamic shapes
@@ -6888,16 +6888,16 @@ async function createRepoMilestone(owner, repo, { title, description, state } = 
   };
 }
 async function fetchRepoTags(owner, repo, fetchImpl, token = null, opts = {}) {
-  const ctx = normalizeApiCtx2(opts?.ctx);
+  const ctx = normalizeApiCtx(opts?.ctx);
   const perPage = 100;
   const maxPages = Math.max(1, Math.min(20, Number(opts.maxPages) || 10));
   const out = [];
   for (let page = 1; page <= maxPages; page++) {
-    const url = githubRestUrl2(
+    const url = githubRestUrl(
       `/repos/${owner}/${repo}/tags?per_page=${perPage}&page=${page}`,
       ctx
     );
-    const batch = await apiJson2(url, fetchImpl, token);
+    const batch = await apiJson(url, fetchImpl, token);
     if (!Array.isArray(batch) || !batch.length) break;
     for (const t of batch) {
       const name = String(t?.name || "").trim();
@@ -6923,12 +6923,12 @@ async function fetchTagsForCommits(owner, repo, shas, fetchImpl, token = null, o
   return tags.filter((t) => want.has(String(t.sha || "").toLowerCase()));
 }
 async function mergePullRequest(owner, repo, pullNumber, { mergeMethod = "merge", commitTitle, commitMessage } = {}, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   const body = { merge_method: mergeMethod };
   if (commitTitle != null) body.commit_title = String(commitTitle);
   if (commitMessage != null) body.commit_message = String(commitMessage);
   return apiSend(
-    githubRestUrl2(`/repos/${owner}/${repo}/pulls/${pullNumber}/merge`, ctx),
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/merge`, ctx),
     fetchImpl,
     token,
     // @ts-expect-error classic fetch dynamic shapes
@@ -6936,11 +6936,11 @@ async function mergePullRequest(owner, repo, pullNumber, { mergeMethod = "merge"
   );
 }
 async function updatePullBranch(owner, repo, pullNumber, { expectedHeadSha } = {}, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   const body = {};
   if (expectedHeadSha) body.expected_head_sha = String(expectedHeadSha);
   return apiSend(
-    githubRestUrl2(`/repos/${owner}/${repo}/pulls/${pullNumber}/update-branch`, ctx),
+    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/update-branch`, ctx),
     fetchImpl,
     token,
     // @ts-expect-error classic fetch dynamic shapes
@@ -6948,12 +6948,12 @@ async function updatePullBranch(owner, repo, pullNumber, { expectedHeadSha } = {
   );
 }
 async function deleteHeadBranch(owner, repo, branch, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   const b = String(branch || "").trim().replace(/^refs\/heads\//, "");
   if (!b) throw new Error("Branch name required");
   const branchPath = b.split("/").filter(Boolean).map((seg) => encodeURIComponent(seg)).join("/");
   return apiSend(
-    githubRestUrl2(
+    githubRestUrl(
       `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/refs/heads/${branchPath}`,
       ctx
     ),
@@ -6964,9 +6964,9 @@ async function deleteHeadBranch(owner, repo, branch, fetchImpl, token, ctx = nul
   );
 }
 async function setIssueMilestone(owner, repo, issueNumber, milestoneNumber, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   return apiSend(
-    githubRestUrl2(`/repos/${owner}/${repo}/issues/${issueNumber}`, ctx),
+    githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}`, ctx),
     fetchImpl,
     token,
     {
@@ -6977,11 +6977,11 @@ async function setIssueMilestone(owner, repo, issueNumber, milestoneNumber, fetc
   );
 }
 async function setPullRequestDraftStage(owner, repo, pullNumber, stage, fetchImpl, token, nodeId = null, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   let id = nodeId;
   if (!id) {
-    const pr = await apiJson2(
-      githubRestUrl2(`/repos/${owner}/${repo}/pulls/${pullNumber}`, ctx),
+    const pr = await apiJson(
+      githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}`, ctx),
       fetchImpl,
       token
     );
@@ -7035,6 +7035,357 @@ async function setPullRequestDraftStage(owner, repo, pullNumber, stage, fetchImp
     draft = stage !== "ready";
   }
   return { draft: Boolean(draft), data };
+}
+
+// src/fetch/pulls.ts
+function findDanglingPrNumbers(pagePrNumbers, prs) {
+  if (!Array.isArray(pagePrNumbers) || pagePrNumbers.length === 0) {
+    return [];
+  }
+  const have = new Set((prs || []).map((pr) => pr.number));
+  const dangling = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const raw of pagePrNumbers) {
+    const num = Number(raw);
+    if (!Number.isFinite(num) || seen.has(num) || have.has(num)) continue;
+    seen.add(num);
+    dangling.push(num);
+  }
+  return dangling;
+}
+async function fetchOpenPullsPublic(owner, repo, fetchImpl, token = null, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
+  const url = githubRestUrl(`/repos/${owner}/${repo}/pulls?state=open&per_page=100`, ctx);
+  const res = await fetchImpl(url, {
+    headers: buildApiHeaders(token)
+  });
+  if (!res.ok) {
+    const err = new Error(`GitHub API ${res.status}: ${res.statusText}`);
+    err.status = res.status;
+    throw err;
+  }
+  const data = await res.json();
+  return data.map(mapApiPullRequest);
+}
+async function fetchPrHeadProbe(owner, repo, number, fetchImpl, token = null, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
+  const o = String(owner || "").trim();
+  const r = String(repo || "").trim();
+  const n = Number(number);
+  const empty = {
+    headSha: "",
+    baseSha: "",
+    updatedAt: null,
+    draft: false,
+    state: "",
+    number: Number.isFinite(n) ? n : 0
+  };
+  if (!o || !r || !Number.isFinite(n) || n <= 0) return empty;
+  try {
+    const url = githubRestUrl(
+      `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/pulls/${n}`,
+      ctx
+    );
+    const res = await fetchImpl(url, { headers: buildApiHeaders(token) });
+    if (!res.ok) {
+      const err = new Error(`GitHub API ${res.status}: ${res.statusText}`);
+      err.status = res.status;
+      throw err;
+    }
+    const data = await res.json();
+    return {
+      headSha: String(data?.head?.sha || ""),
+      baseSha: String(data?.base?.sha || ""),
+      updatedAt: data?.updated_at || null,
+      draft: Boolean(data?.draft),
+      state: String(data?.state || ""),
+      number: Number(data?.number) || n
+    };
+  } catch (err) {
+    if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
+      throw err;
+    }
+    return empty;
+  }
+}
+async function fetchPullByNumber(owner, repo, pullNumber, fetchImpl, token = null, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
+  const url = githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}`, ctx);
+  const res = await fetchImpl(url, {
+    headers: buildApiHeaders(token)
+  });
+  if (!res.ok) {
+    const err = new Error(`GitHub API ${res.status}: ${res.statusText} (PR #${pullNumber})`);
+    err.status = res.status;
+    err.pullNumber = pullNumber;
+    throw err;
+  }
+  const data = await res.json();
+  return mapApiPullRequest(data);
+}
+async function fetchDanglingPulls(owner, repo, numbers, fetchImpl, token = null, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
+  if (!numbers.length) return [];
+  const settled = await mapWithConcurrency(numbers, 5, async (pullNumber) => {
+    try {
+      return await fetchPullByNumber(owner, repo, pullNumber, fetchImpl, token, ctx);
+    } catch (err) {
+      if (err.status === 401 || err.status === 403) {
+        throw err;
+      }
+      console.warn(`[PR Tree] Skipping dangling PR #${pullNumber}:`, err.message || err);
+      return null;
+    }
+  });
+  return settled.filter(Boolean);
+}
+async function fetchRepoAutolinks(owner, repo, fetchImpl, token = null, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
+  const url = githubRestUrl(`/repos/${owner}/${repo}/autolinks`, ctx);
+  try {
+    const res = await fetchImpl(url, { headers: buildApiHeaders(token) });
+    if (!res.ok) return [];
+    const data = await res.json();
+    if (!Array.isArray(data)) return [];
+    return data.filter((a) => a && typeof a.key_prefix === "string" && typeof a.url_template === "string").map((a) => ({
+      key_prefix: a.key_prefix,
+      url_template: a.url_template,
+      is_alphanumeric: a.is_alphanumeric !== false
+    }));
+  } catch {
+    return [];
+  }
+}
+function buildAutolinkUrl(urlTemplate, num) {
+  return String(urlTemplate).replace(/<num>/gi, num).replace(/\{num\}/gi, num);
+}
+function matchAutolinksInText(text, autolinks) {
+  if (!text || !Array.isArray(autolinks) || autolinks.length === 0) return [];
+  const found = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const rule of autolinks) {
+    const prefix = rule.key_prefix;
+    if (!prefix) continue;
+    const numClass = rule.is_alphanumeric !== false ? "(?:\\d+|[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*)" : "\\d+";
+    const re = new RegExp(
+      `(^|[^A-Za-z0-9_])(${escapeRegExp(prefix)})(${numClass})`,
+      "gi"
+    );
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      const key = `${m[2]}${m[3]}`;
+      const url = buildAutolinkUrl(rule.url_template, m[3]);
+      if (!url || seen.has(url)) continue;
+      seen.add(url);
+      found.push({ key, url, prefix: m[2] });
+    }
+  }
+  return found;
+}
+function prMatchText(pr) {
+  if (!pr) return "";
+  return [pr.title, pr.headRef, pr.baseRef, pr.body, pr.author].filter(Boolean).join("\n");
+}
+function attachMagicLinks(prs, autolinks) {
+  if (!Array.isArray(prs)) return [];
+  if (!Array.isArray(autolinks) || autolinks.length === 0) {
+    return prs.map((pr) => ({ ...pr, magicLinks: pr.magicLinks || [] }));
+  }
+  return prs.map((pr) => ({
+    ...pr,
+    magicLinks: matchAutolinksInText(prMatchText(pr), autolinks)
+  }));
+}
+async function fetchOpenPulls(owner, repo, fetchImpl, options = {}) {
+  const {
+    token = null,
+    pagePrNumbers = [],
+    includeAutolinks = true
+  } = options;
+  const ctx = normalizeApiCtx(options?.ctx);
+  const listed = await fetchOpenPullsPublic(owner, repo, fetchImpl, token, ctx);
+  const danglingNumbers = findDanglingPrNumbers(pagePrNumbers, listed);
+  let prs = listed;
+  if (danglingNumbers.length > 0) {
+    const extras = await fetchDanglingPulls(
+      owner,
+      repo,
+      danglingNumbers,
+      fetchImpl,
+      token,
+      ctx
+    );
+    if (extras.length > 0) {
+      const byNumber = new Map(listed.map((pr) => [pr.number, pr]));
+      for (const pr of extras) {
+        byNumber.set(pr.number, pr);
+      }
+      prs = [...byNumber.values()];
+    }
+  }
+  if (!includeAutolinks) {
+    return attachMagicLinks(prs, []);
+  }
+  const autolinks = await fetchRepoAutolinks(owner, repo, fetchImpl, token, ctx);
+  return attachMagicLinks(prs, autolinks);
+}
+
+// src/fetch/reactions.ts
+async function fetchReactableReactionGroups2(nodeIds, fetchImpl, token, ctx = null, opts = null) {
+  ctx = normalizeApiCtx(ctx);
+  const ids = [
+    ...new Set(
+      (Array.isArray(nodeIds) ? nodeIds : []).map((id) => String(id || "").trim()).filter(Boolean)
+    )
+  ].slice(0, 100);
+  const out = /* @__PURE__ */ new Map();
+  if (!ids.length || !token) return out;
+  const reactorsFirst = Math.max(
+    0,
+    Math.min(20, Number(opts?.reactorsFirst) || 0)
+  );
+  const reactorsSel = reactorsFirst > 0 ? `reactors(first:${reactorsFirst}){
+            totalCount
+            nodes{
+              ... on User { login }
+              ... on Bot { login }
+            }
+          }` : `reactors { totalCount }`;
+  const query = `query($ids:[ID!]!){
+    nodes(ids:$ids){
+      ... on Reactable {
+        id
+        reactionGroups {
+          content
+          viewerHasReacted
+          ${reactorsSel}
+        }
+      }
+    }
+  }`;
+  try {
+    const data = await apiGraphql(query, { ids }, fetchImpl, token, ctx);
+    for (const node of data?.nodes || []) {
+      if (!node?.id) continue;
+      out.set(String(node.id), mapGraphqlReactionGroups(node.reactionGroups));
+    }
+  } catch {
+  }
+  return out;
+}
+async function fetchReactableReactors(nodeId, fetchImpl, token, ctx = null, opts = null) {
+  ctx = normalizeApiCtx(ctx);
+  const id = String(nodeId || "").trim();
+  if (!id || !token) return [];
+  const first = Math.max(1, Math.min(10, Number(opts?.first) || 5));
+  const map = await fetchReactableReactionGroups2(
+    [id],
+    fetchImpl,
+    token,
+    ctx,
+    { reactorsFirst: first }
+  );
+  return map.get(id) || [];
+}
+async function toggleCommentReaction(owner, repo, kind, opts, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
+  const content = String(opts?.content || "").trim();
+  const gqlContent = REST_TO_GQL_REACTION[content];
+  if (!gqlContent) {
+    throw new Error(`Unsupported reaction: ${content || "(empty)"}`);
+  }
+  const nodeId = String(opts?.nodeId || "").trim();
+  const currently = Boolean(opts?.viewerHasReacted);
+  const nextReacted = !currently;
+  const kRaw = String(kind || "issue").toLowerCase();
+  const k = kRaw === "review" ? "review" : kRaw === "pr" ? "pr" : "issue";
+  if (nodeId) {
+    const mutation = nextReacted ? `mutation($id:ID!,$content:ReactionContent!){
+          addReaction(input:{subjectId:$id, content:$content}) {
+            reaction { content }
+          }
+        }` : `mutation($id:ID!,$content:ReactionContent!){
+          removeReaction(input:{subjectId:$id, content:$content}) {
+            reaction { content }
+          }
+        }`;
+    try {
+      await apiGraphql(
+        mutation,
+        { id: nodeId, content: gqlContent },
+        fetchImpl,
+        token,
+        ctx
+      );
+      return { content, reacted: nextReacted };
+    } catch {
+    }
+  }
+  let basePath = "";
+  let deletePath = (reactionId) => "";
+  if (k === "review") {
+    const commentId = opts?.commentId;
+    if (commentId == null || commentId === "") {
+      throw new Error("Reaction toggle needs nodeId or commentId");
+    }
+    basePath = `/repos/${owner}/${repo}/pulls/comments/${commentId}/reactions`;
+    deletePath = (rid) => `/repos/${owner}/${repo}/pulls/comments/${commentId}/reactions/${rid}`;
+  } else if (k === "pr") {
+    const num = opts?.number ?? opts?.commentId;
+    if (num == null || num === "") {
+      throw new Error("Reaction toggle needs nodeId or PR number");
+    }
+    basePath = `/repos/${owner}/${repo}/issues/${num}/reactions`;
+    deletePath = (rid) => `/repos/${owner}/${repo}/issues/${num}/reactions/${rid}`;
+  } else {
+    const commentId = opts?.commentId;
+    if (commentId == null || commentId === "") {
+      throw new Error("Reaction toggle needs nodeId or commentId");
+    }
+    basePath = `/repos/${owner}/${repo}/issues/comments/${commentId}/reactions`;
+    deletePath = (rid) => `/repos/${owner}/${repo}/issues/comments/${commentId}/reactions/${rid}`;
+  }
+  if (nextReacted) {
+    await apiSend(
+      githubRestUrl(basePath, ctx),
+      fetchImpl,
+      token,
+      // @ts-expect-error classic fetch dynamic shapes
+      { method: "POST", body: { content } }
+    );
+    return { content, reacted: true };
+  }
+  const listed = await apiJson(
+    githubRestUrl(
+      `${basePath}?content=${encodeURIComponent(content)}&per_page=100`,
+      ctx
+    ),
+    fetchImpl,
+    token
+  );
+  const rows = Array.isArray(listed) ? listed : [];
+  let target = rows[0] || null;
+  try {
+    const me = await fetchViewerLogin(fetchImpl, token, ctx);
+    const login = String(me || "").toLowerCase();
+    if (login) {
+      const mine = rows.find(
+        (r) => String(r?.user?.login || "").toLowerCase() === login
+      );
+      if (mine) target = mine;
+    }
+  } catch {
+  }
+  if (!target?.id) {
+    return { content, reacted: false };
+  }
+  await apiSend(
+    githubRestUrl(deletePath(target.id), ctx),
+    fetchImpl,
+    token,
+    { method: "DELETE" }
+  );
+  return { content, reacted: false };
 }
 
 // src/fetch/review-threads-map.ts
@@ -7442,7 +7793,7 @@ async function restReviewThreadsFallbackPage(owner, repo, pullNumber, direction,
     };
   }
   try {
-    const restPage = await fetchPrCommentsPage2(
+    const restPage = await fetchPrCommentsPage(
       owner,
       repo,
       pullNumber,
@@ -7509,7 +7860,7 @@ async function fetchReviewThreadsPage(owner, repo, pullNumber, {
    */
   skipEagerComments = false
 } = {}, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   const empty = {
     threads: [],
     comments: [],
@@ -7721,7 +8072,7 @@ function collectUnresolvedThreadNodeIds(detail) {
 
 // src/fetch/review-threads-bulk.ts
 async function fetchReviewThreadsByIds2(threadNodeIds, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   const empty = {
     threads: [],
     comments: [],
@@ -7852,7 +8203,7 @@ function dropReviewThreadsFromDetail(detail, threadNodeIds) {
       ...droppedCommentIds
     ].map(String)
   );
-  const prevMeta = detail.reviewThreadsMeta || emptyReviewThreadsMeta2();
+  const prevMeta = detail.reviewThreadsMeta || emptyReviewThreadsMeta();
   const filterIdList = (list) => (Array.isArray(list) ? list : []).map(String).filter((id) => id && !drop.has(id));
   const loadedThreadCount = reviewThreads.length;
   const totalCount = Math.max(
@@ -7889,7 +8240,7 @@ function dropReviewThreadsFromDetail(detail, threadNodeIds) {
   };
 }
 async function fetchPullReviewThreadsBundle(owner, repo, pullNumber, fetchImpl, token, opts = {}) {
-  const ctx = normalizeApiCtx2(opts?.ctx);
+  const ctx = normalizeApiCtx(opts?.ctx);
   if (!token) {
     return {
       threads: [],
@@ -7899,7 +8250,7 @@ async function fetchPullReviewThreadsBundle(owner, repo, pullNumber, fetchImpl, 
       startCursor: null,
       pageCount: 0,
       totalCount: 0,
-      reviewThreadsMeta: emptyReviewThreadsMeta2()
+      reviewThreadsMeta: emptyReviewThreadsMeta()
     };
   }
   const lastPageSize = Math.min(
@@ -7995,7 +8346,7 @@ async function fetchPullReviewThreadsBundle(owner, repo, pullNumber, fetchImpl, 
     reviewThreadsMeta: meta
   };
 }
-function emptyReviewThreadsMeta2() {
+function emptyReviewThreadsMeta() {
   return {
     totalCount: 0,
     hiddenCount: 0,
@@ -8017,7 +8368,7 @@ function emptyReviewThreadsMeta2() {
 function mergeReviewThreadsPageIntoDetail(detail, page, direction = "older") {
   if (!detail) return detail;
   const dir = String(direction || page?.direction || "older");
-  const prevMeta = detail.reviewThreadsMeta || emptyReviewThreadsMeta2();
+  const prevMeta = detail.reviewThreadsMeta || emptyReviewThreadsMeta();
   const prevRc = Array.isArray(detail.reviewComments) ? detail.reviewComments : [];
   const prevTh = Array.isArray(detail.reviewThreads) ? detail.reviewThreads : [];
   const missingIds = (() => {
@@ -8056,7 +8407,7 @@ function mergeReviewThreadsPageIntoDetail(detail, page, direction = "older") {
       baseRc = prevRc.filter(
         (c) => !c?.threadNodeId || !refreshed.has(String(c.threadNodeId))
       );
-      reviewComments = mergePendingReviewComments2(baseRc, page?.comments || []);
+      reviewComments = mergePendingReviewComments(baseRc, page?.comments || []);
     }
   } else {
     const deferredShellIds = /* @__PURE__ */ new Set();
@@ -8079,7 +8430,7 @@ function mergeReviewThreadsPageIntoDetail(detail, page, direction = "older") {
         });
       }
     }
-    reviewComments = mergePendingReviewComments2(baseRc, page?.comments || []);
+    reviewComments = mergePendingReviewComments(baseRc, page?.comments || []);
   }
   const resolvedByThread = /* @__PURE__ */ new Map();
   for (const t of page?.threads || []) {
@@ -8249,7 +8600,7 @@ async function fetchPullReviewThreads(owner, repo, pullNumber, fetchImpl, token)
 
 // src/fetch/viewer.ts
 async function fetchViewerViewedPaths(owner, repo, pullNumber, fetchImpl, token, opts = {}) {
-  const apiCtx = normalizeApiCtx2(opts?.ctx);
+  const apiCtx = normalizeApiCtx(opts?.ctx);
   if (!token) {
     return { pullRequestId: null, viewedPaths: [], unauthorized: true };
   }
@@ -8296,7 +8647,7 @@ async function fetchViewerViewedPaths(owner, repo, pullNumber, fetchImpl, token,
   return { pullRequestId, viewedPaths: viewed };
 }
 async function markFileAsViewed(pullRequestId, path, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   const data = await apiGraphql(
     `mutation MarkFileAsViewed($input: MarkFileAsViewedInput!) {
   markFileAsViewed(input: $input) {
@@ -8316,7 +8667,7 @@ async function markFileAsViewed(pullRequestId, path, fetchImpl, token, ctx = nul
   return data;
 }
 async function unmarkFileAsViewed(pullRequestId, path, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   const data = await apiGraphql(
     `mutation UnmarkFileAsViewed($input: UnmarkFileAsViewedInput!) {
   unmarkFileAsViewed(input: $input) {
@@ -8336,13 +8687,13 @@ async function unmarkFileAsViewed(pullRequestId, path, fetchImpl, token, ctx = n
   return data;
 }
 async function resolvePullRequestNodeId(owner, repo, pullNumber, fetchImpl, token, nodeId = null, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   if (nodeId) return String(nodeId);
   const n = Number(pullNumber);
   if (!token || !owner || !repo || !Number.isFinite(n) || n <= 0) return null;
   try {
-    const pr = await apiJson2(
-      githubRestUrl2(`/repos/${owner}/${repo}/pulls/${n}`, ctx),
+    const pr = await apiJson(
+      githubRestUrl(`/repos/${owner}/${repo}/pulls/${n}`, ctx),
       fetchImpl,
       token
     );
@@ -8368,7 +8719,7 @@ async function resolvePullRequestNodeId(owner, repo, pullNumber, fetchImpl, toke
   }
 }
 async function setIssueSubscription(owner, repo, issueNumber, { subscribed = true, ignored = false, nodeId = null } = {}, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   if (!token) throw new Error("GitHub PAT required for notifications");
   const id = await resolvePullRequestNodeId(
     owner,
@@ -8412,7 +8763,7 @@ async function deleteIssueSubscription(owner, repo, issueNumber, fetchImpl, toke
   );
 }
 async function fetchPullRequestSubscription(owner, repo, pullNumber, fetchImpl, token, nodeId = null, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   if (!token) return null;
   try {
     const id = await resolvePullRequestNodeId(
@@ -8465,13 +8816,13 @@ async function fetchPullRequestSubscription(owner, repo, pullNumber, fetchImpl, 
   }
 }
 async function uploadRepoFile(owner, repo, { path, contentBase64, message, branch }, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   if (!path || !contentBase64) throw new Error("path and contentBase64 required");
   const encPath = String(path).split("/").map(encodeURIComponent).join("/");
   let sha;
   try {
-    const meta = await apiJson2(
-      githubRestUrl2(
+    const meta = await apiJson(
+      githubRestUrl(
         `/repos/${owner}/${repo}/contents/${encPath}${branch ? `?ref=${encodeURIComponent(branch)}` : ""}`,
         ctx
       ),
@@ -8489,7 +8840,7 @@ async function uploadRepoFile(owner, repo, { path, contentBase64, message, branc
   if (branch) body.branch = branch;
   if (sha) body.sha = sha;
   const result = await apiSend(
-    githubRestUrl2(`/repos/${owner}/${repo}/contents/${encPath}`, ctx),
+    githubRestUrl(`/repos/${owner}/${repo}/contents/${encPath}`, ctx),
     fetchImpl,
     token,
     // @ts-expect-error classic fetch dynamic shapes
@@ -8504,12 +8855,12 @@ async function uploadRepoFile(owner, repo, { path, contentBase64, message, branc
   };
 }
 async function getRepoFileText(owner, repo, { path, ref }, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   if (!path) throw new Error("path required");
   const rev = ref || "HEAD";
   const encPath = String(path).split("/").map(encodeURIComponent).join("/");
-  const meta = await apiJson2(
-    githubRestUrl2(`/repos/${owner}/${repo}/contents/${encPath}?ref=${encodeURIComponent(rev)}`, ctx),
+  const meta = await apiJson(
+    githubRestUrl(`/repos/${owner}/${repo}/contents/${encPath}?ref=${encodeURIComponent(rev)}`, ctx),
     fetchImpl,
     token
   );
@@ -8541,7 +8892,7 @@ async function getRepoFileText(owner, repo, { path, ref }, fetchImpl, token, ctx
   };
 }
 async function applyReviewSuggestion(owner, repo, { path, headRef, startLine, endLine, suggestion, message }, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   const ref = headRef || "HEAD";
   const file = await getRepoFileText(
     owner,
@@ -8578,7 +8929,7 @@ async function applyReviewSuggestion(owner, repo, { path, headRef, startLine, en
     contentB64 = btoa(unescape(encodeURIComponent(next)));
   }
   return apiSend(
-    githubRestUrl2(`/repos/${owner}/${repo}/contents/${path.split("/").map(encodeURIComponent).join("/")}`, ctx),
+    githubRestUrl(`/repos/${owner}/${repo}/contents/${path.split("/").map(encodeURIComponent).join("/")}`, ctx),
     fetchImpl,
     token,
     {
@@ -8594,10 +8945,10 @@ async function applyReviewSuggestion(owner, repo, { path, headRef, startLine, en
   );
 }
 async function fetchViewerLogin2(fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
+  ctx = normalizeApiCtx(ctx);
   if (!token) return null;
   try {
-    const me = await apiJson2(githubRestUrl2("/user", ctx), fetchImpl, token);
+    const me = await apiJson(githubRestUrl("/user", ctx), fetchImpl, token);
     return me?.login || null;
   } catch {
     return null;
@@ -9001,7 +9352,7 @@ async function fetchPrDetail(owner, repo, pullNumber, fetchImpl, token = null, o
   let bodyReactions = mapRestReactions(pr.reactions);
   if (pr.node_id && token) {
     try {
-      const byId = await fetchReactableReactionGroups(
+      const byId = await fetchReactableReactionGroups2(
         [pr.node_id],
         fetchImpl,
         token,
@@ -9158,360 +9509,9 @@ async function fetchPrDetail(owner, repo, pullNumber, fetchImpl, token = null, o
   };
 }
 
-// src/fetch/pulls.ts
-function findDanglingPrNumbers(pagePrNumbers, prs) {
-  if (!Array.isArray(pagePrNumbers) || pagePrNumbers.length === 0) {
-    return [];
-  }
-  const have = new Set((prs || []).map((pr) => pr.number));
-  const dangling = [];
-  const seen = /* @__PURE__ */ new Set();
-  for (const raw of pagePrNumbers) {
-    const num = Number(raw);
-    if (!Number.isFinite(num) || seen.has(num) || have.has(num)) continue;
-    seen.add(num);
-    dangling.push(num);
-  }
-  return dangling;
-}
-async function fetchOpenPullsPublic(owner, repo, fetchImpl, token = null, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
-  const url = githubRestUrl2(`/repos/${owner}/${repo}/pulls?state=open&per_page=100`, ctx);
-  const res = await fetchImpl(url, {
-    headers: buildApiHeaders(token)
-  });
-  if (!res.ok) {
-    const err = new Error(`GitHub API ${res.status}: ${res.statusText}`);
-    err.status = res.status;
-    throw err;
-  }
-  const data = await res.json();
-  return data.map(mapApiPullRequest);
-}
-async function fetchPrHeadProbe(owner, repo, number, fetchImpl, token = null, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
-  const o = String(owner || "").trim();
-  const r = String(repo || "").trim();
-  const n = Number(number);
-  const empty = {
-    headSha: "",
-    baseSha: "",
-    updatedAt: null,
-    draft: false,
-    state: "",
-    number: Number.isFinite(n) ? n : 0
-  };
-  if (!o || !r || !Number.isFinite(n) || n <= 0) return empty;
-  try {
-    const url = githubRestUrl2(
-      `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/pulls/${n}`,
-      ctx
-    );
-    const res = await fetchImpl(url, { headers: buildApiHeaders(token) });
-    if (!res.ok) {
-      const err = new Error(`GitHub API ${res.status}: ${res.statusText}`);
-      err.status = res.status;
-      throw err;
-    }
-    const data = await res.json();
-    return {
-      headSha: String(data?.head?.sha || ""),
-      baseSha: String(data?.base?.sha || ""),
-      updatedAt: data?.updated_at || null,
-      draft: Boolean(data?.draft),
-      state: String(data?.state || ""),
-      number: Number(data?.number) || n
-    };
-  } catch (err) {
-    if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
-      throw err;
-    }
-    return empty;
-  }
-}
-async function fetchPullByNumber(owner, repo, pullNumber, fetchImpl, token = null, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
-  const url = githubRestUrl2(`/repos/${owner}/${repo}/pulls/${pullNumber}`, ctx);
-  const res = await fetchImpl(url, {
-    headers: buildApiHeaders(token)
-  });
-  if (!res.ok) {
-    const err = new Error(`GitHub API ${res.status}: ${res.statusText} (PR #${pullNumber})`);
-    err.status = res.status;
-    err.pullNumber = pullNumber;
-    throw err;
-  }
-  const data = await res.json();
-  return mapApiPullRequest(data);
-}
-async function fetchDanglingPulls(owner, repo, numbers, fetchImpl, token = null, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
-  if (!numbers.length) return [];
-  const settled = await mapWithConcurrency(numbers, 5, async (pullNumber) => {
-    try {
-      return await fetchPullByNumber(owner, repo, pullNumber, fetchImpl, token, ctx);
-    } catch (err) {
-      if (err.status === 401 || err.status === 403) {
-        throw err;
-      }
-      console.warn(`[PR Tree] Skipping dangling PR #${pullNumber}:`, err.message || err);
-      return null;
-    }
-  });
-  return settled.filter(Boolean);
-}
-async function fetchRepoAutolinks2(owner, repo, fetchImpl, token = null, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
-  const url = githubRestUrl2(`/repos/${owner}/${repo}/autolinks`, ctx);
-  try {
-    const res = await fetchImpl(url, { headers: buildApiHeaders(token) });
-    if (!res.ok) return [];
-    const data = await res.json();
-    if (!Array.isArray(data)) return [];
-    return data.filter((a) => a && typeof a.key_prefix === "string" && typeof a.url_template === "string").map((a) => ({
-      key_prefix: a.key_prefix,
-      url_template: a.url_template,
-      is_alphanumeric: a.is_alphanumeric !== false
-    }));
-  } catch {
-    return [];
-  }
-}
-function buildAutolinkUrl(urlTemplate, num) {
-  return String(urlTemplate).replace(/<num>/gi, num).replace(/\{num\}/gi, num);
-}
-function matchAutolinksInText2(text, autolinks) {
-  if (!text || !Array.isArray(autolinks) || autolinks.length === 0) return [];
-  const found = [];
-  const seen = /* @__PURE__ */ new Set();
-  for (const rule of autolinks) {
-    const prefix = rule.key_prefix;
-    if (!prefix) continue;
-    const numClass = rule.is_alphanumeric !== false ? "(?:\\d+|[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*)" : "\\d+";
-    const re = new RegExp(
-      `(^|[^A-Za-z0-9_])(${escapeRegExp(prefix)})(${numClass})`,
-      "gi"
-    );
-    let m;
-    while ((m = re.exec(text)) !== null) {
-      const key = `${m[2]}${m[3]}`;
-      const url = buildAutolinkUrl(rule.url_template, m[3]);
-      if (!url || seen.has(url)) continue;
-      seen.add(url);
-      found.push({ key, url, prefix: m[2] });
-    }
-  }
-  return found;
-}
-function prMatchText2(pr) {
-  if (!pr) return "";
-  return [pr.title, pr.headRef, pr.baseRef, pr.body, pr.author].filter(Boolean).join("\n");
-}
-function attachMagicLinks(prs, autolinks) {
-  if (!Array.isArray(prs)) return [];
-  if (!Array.isArray(autolinks) || autolinks.length === 0) {
-    return prs.map((pr) => ({ ...pr, magicLinks: pr.magicLinks || [] }));
-  }
-  return prs.map((pr) => ({
-    ...pr,
-    magicLinks: matchAutolinksInText2(prMatchText2(pr), autolinks)
-  }));
-}
-async function fetchOpenPulls(owner, repo, fetchImpl, options = {}) {
-  const {
-    token = null,
-    pagePrNumbers = [],
-    includeAutolinks = true
-  } = options;
-  const ctx = normalizeApiCtx2(options?.ctx);
-  const listed = await fetchOpenPullsPublic(owner, repo, fetchImpl, token, ctx);
-  const danglingNumbers = findDanglingPrNumbers(pagePrNumbers, listed);
-  let prs = listed;
-  if (danglingNumbers.length > 0) {
-    const extras = await fetchDanglingPulls(
-      owner,
-      repo,
-      danglingNumbers,
-      fetchImpl,
-      token,
-      ctx
-    );
-    if (extras.length > 0) {
-      const byNumber = new Map(listed.map((pr) => [pr.number, pr]));
-      for (const pr of extras) {
-        byNumber.set(pr.number, pr);
-      }
-      prs = [...byNumber.values()];
-    }
-  }
-  if (!includeAutolinks) {
-    return attachMagicLinks(prs, []);
-  }
-  const autolinks = await fetchRepoAutolinks2(owner, repo, fetchImpl, token, ctx);
-  return attachMagicLinks(prs, autolinks);
-}
-
-// src/fetch/reactions.ts
-async function fetchReactableReactionGroups2(nodeIds, fetchImpl, token, ctx = null, opts = null) {
-  ctx = normalizeApiCtx2(ctx);
-  const ids = [
-    ...new Set(
-      (Array.isArray(nodeIds) ? nodeIds : []).map((id) => String(id || "").trim()).filter(Boolean)
-    )
-  ].slice(0, 100);
-  const out = /* @__PURE__ */ new Map();
-  if (!ids.length || !token) return out;
-  const reactorsFirst = Math.max(
-    0,
-    Math.min(20, Number(opts?.reactorsFirst) || 0)
-  );
-  const reactorsSel = reactorsFirst > 0 ? `reactors(first:${reactorsFirst}){
-            totalCount
-            nodes{
-              ... on User { login }
-              ... on Bot { login }
-            }
-          }` : `reactors { totalCount }`;
-  const query = `query($ids:[ID!]!){
-    nodes(ids:$ids){
-      ... on Reactable {
-        id
-        reactionGroups {
-          content
-          viewerHasReacted
-          ${reactorsSel}
-        }
-      }
-    }
-  }`;
-  try {
-    const data = await apiGraphql(query, { ids }, fetchImpl, token, ctx);
-    for (const node of data?.nodes || []) {
-      if (!node?.id) continue;
-      out.set(String(node.id), mapGraphqlReactionGroups(node.reactionGroups));
-    }
-  } catch {
-  }
-  return out;
-}
-async function fetchReactableReactors(nodeId, fetchImpl, token, ctx = null, opts = null) {
-  ctx = normalizeApiCtx2(ctx);
-  const id = String(nodeId || "").trim();
-  if (!id || !token) return [];
-  const first = Math.max(1, Math.min(10, Number(opts?.first) || 5));
-  const map = await fetchReactableReactionGroups2(
-    [id],
-    fetchImpl,
-    token,
-    ctx,
-    { reactorsFirst: first }
-  );
-  return map.get(id) || [];
-}
-async function toggleCommentReaction(owner, repo, kind, opts, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx2(ctx);
-  const content = String(opts?.content || "").trim();
-  const gqlContent = REST_TO_GQL_REACTION[content];
-  if (!gqlContent) {
-    throw new Error(`Unsupported reaction: ${content || "(empty)"}`);
-  }
-  const nodeId = String(opts?.nodeId || "").trim();
-  const currently = Boolean(opts?.viewerHasReacted);
-  const nextReacted = !currently;
-  const kRaw = String(kind || "issue").toLowerCase();
-  const k = kRaw === "review" ? "review" : kRaw === "pr" ? "pr" : "issue";
-  if (nodeId) {
-    const mutation = nextReacted ? `mutation($id:ID!,$content:ReactionContent!){
-          addReaction(input:{subjectId:$id, content:$content}) {
-            reaction { content }
-          }
-        }` : `mutation($id:ID!,$content:ReactionContent!){
-          removeReaction(input:{subjectId:$id, content:$content}) {
-            reaction { content }
-          }
-        }`;
-    try {
-      await apiGraphql(
-        mutation,
-        { id: nodeId, content: gqlContent },
-        fetchImpl,
-        token,
-        ctx
-      );
-      return { content, reacted: nextReacted };
-    } catch {
-    }
-  }
-  let basePath = "";
-  let deletePath = (reactionId) => "";
-  if (k === "review") {
-    const commentId = opts?.commentId;
-    if (commentId == null || commentId === "") {
-      throw new Error("Reaction toggle needs nodeId or commentId");
-    }
-    basePath = `/repos/${owner}/${repo}/pulls/comments/${commentId}/reactions`;
-    deletePath = (rid) => `/repos/${owner}/${repo}/pulls/comments/${commentId}/reactions/${rid}`;
-  } else if (k === "pr") {
-    const num = opts?.number ?? opts?.commentId;
-    if (num == null || num === "") {
-      throw new Error("Reaction toggle needs nodeId or PR number");
-    }
-    basePath = `/repos/${owner}/${repo}/issues/${num}/reactions`;
-    deletePath = (rid) => `/repos/${owner}/${repo}/issues/${num}/reactions/${rid}`;
-  } else {
-    const commentId = opts?.commentId;
-    if (commentId == null || commentId === "") {
-      throw new Error("Reaction toggle needs nodeId or commentId");
-    }
-    basePath = `/repos/${owner}/${repo}/issues/comments/${commentId}/reactions`;
-    deletePath = (rid) => `/repos/${owner}/${repo}/issues/comments/${commentId}/reactions/${rid}`;
-  }
-  if (nextReacted) {
-    await apiSend(
-      githubRestUrl2(basePath, ctx),
-      fetchImpl,
-      token,
-      // @ts-expect-error classic fetch dynamic shapes
-      { method: "POST", body: { content } }
-    );
-    return { content, reacted: true };
-  }
-  const listed = await apiJson2(
-    githubRestUrl2(
-      `${basePath}?content=${encodeURIComponent(content)}&per_page=100`,
-      ctx
-    ),
-    fetchImpl,
-    token
-  );
-  const rows = Array.isArray(listed) ? listed : [];
-  let target = rows[0] || null;
-  try {
-    const me = await fetchViewerLogin(fetchImpl, token, ctx);
-    const login = String(me || "").toLowerCase();
-    if (login) {
-      const mine = rows.find(
-        (r) => String(r?.user?.login || "").toLowerCase() === login
-      );
-      if (mine) target = mine;
-    }
-  } catch {
-  }
-  if (!target?.id) {
-    return { content, reacted: false };
-  }
-  await apiSend(
-    githubRestUrl2(deletePath(target.id), ctx),
-    fetchImpl,
-    token,
-    { method: "DELETE" }
-  );
-  return { content, reacted: false };
-}
-
 // src/fetch/fetch-api.ts
 var fetchApi = {
-  normalizeApiCtx: normalizeApiCtx2,
+  normalizeApiCtx,
   mapApiPullRequest,
   buildApiHeaders,
   findDanglingPrNumbers,
@@ -9520,14 +9520,14 @@ var fetchApi = {
   fetchPullByNumber,
   fetchPrHeadProbe,
   fetchDanglingPulls,
-  fetchRepoAutolinks: fetchRepoAutolinks2,
+  fetchRepoAutolinks,
   buildAutolinkUrl,
-  matchAutolinksInText: matchAutolinksInText2,
-  prMatchText: prMatchText2,
+  matchAutolinksInText,
+  prMatchText,
   attachMagicLinks,
   fetchOpenPulls,
   fetchPrDetail,
-  fetchPrCommentsPage: fetchPrCommentsPage2,
+  fetchPrCommentsPage,
   fetchPrCommits,
   fetchAllPrCommits,
   fetchAllPrFiles,
@@ -9553,7 +9553,7 @@ var fetchApi = {
   dropReviewThreadsFromDetail,
   mapGraphqlReviewCommentNode,
   mergeReviewThreadsPageIntoDetail,
-  emptyReviewThreadsMeta: emptyReviewThreadsMeta2,
+  emptyReviewThreadsMeta,
   getGraphqlCostLog,
   clearGraphqlCostLog,
   summarizeGraphqlCostLog,
@@ -9569,11 +9569,11 @@ var fetchApi = {
   ensureViewerPendingReview,
   pickViewerPendingFromReviews,
   fetchViewerPendingReviewComments,
-  fetchViewerPendingReviewBundle: fetchViewerPendingReviewBundle2,
+  fetchViewerPendingReviewBundle,
   createPendingPullReview,
   submitPendingPullReview,
   deletePendingPullReview,
-  mergePendingReviewComments: mergePendingReviewComments2,
+  mergePendingReviewComments,
   resolveReviewThread,
   updatePullState,
   closePullRequest,
@@ -9612,7 +9612,7 @@ var fetchApi = {
   getRepoFileText,
   uploadRepoFile,
   fetchViewerLogin: fetchViewerLogin2,
-  apiJson: apiJson2,
+  apiJson,
   apiSend,
   apiGraphql
 };
@@ -9768,7 +9768,7 @@ async function requestEnterprisePermissions(enterpriseHosts) {
     });
   });
 }
-var MSG2 = {
+var MSG = {
   /** Lightweight wake / health check (content scripts retry against this). */
   PING: "PR_TREE_PING",
   TOKEN_STATUS: "PR_TREE_TOKEN_STATUS",
@@ -9877,19 +9877,34 @@ try {
 } catch {
 }
 void rehydrateEnterpriseScripts();
+function getRlMem() {
+  const g = globalThis;
+  if (!g.__prpRlMem) {
+    g.__prpRlMem = {
+      pluginEnabled: true,
+      state: null,
+      loaded: false,
+      saveTimer: null
+    };
+  }
+  return g.__prpRlMem;
+}
+var rlMem = new Proxy({}, {
+  get(_t, prop) {
+    return getRlMem()[prop];
+  },
+  set(_t, prop, value) {
+    getRlMem()[prop] = value;
+    return true;
+  }
+});
+var activeFetchControllers = /* @__PURE__ */ new Map();
+var preCancelledFetchIds = /* @__PURE__ */ new Set();
 function makeAbortError() {
   const err = new Error("The operation was aborted.");
   err.name = "AbortError";
   return err;
 }
-var rlMem = {
-  pluginEnabled: true,
-  state: null,
-  loaded: false,
-  saveTimer: null
-};
-var activeFetchControllers = /* @__PURE__ */ new Map();
-var preCancelledFetchIds = /* @__PURE__ */ new Set();
 function rawBrowserFetch() {
   return globalThis.fetch.bind(globalThis);
 }
@@ -9926,10 +9941,13 @@ function schedulePersistRateLimitState() {
     if (!st) return;
     void PRTreeStorage.setRateLimitState(st).then(() => {
       try {
-        broadcastToGithubTabs({
-          type: MSG.RATE_LIMIT_CHANGED,
+        const msg = {
+          type: "PR_TREE_RATE_LIMIT_CHANGED",
           state: st,
           pluginEnabled: rlMem.pluginEnabled
+        };
+        chrome.runtime.sendMessage(msg, () => {
+          void chrome.runtime.lastError;
         });
       } catch {
       }
@@ -10157,7 +10175,7 @@ function applyRateLimitStateToRlMem(raw) {
   } catch {
   }
 }
-function broadcastToGithubTabs2(message) {
+function broadcastToGithubTabs(message) {
   try {
     chrome.runtime.sendMessage(message, () => {
       void chrome.runtime.lastError;
@@ -10183,10 +10201,10 @@ function broadcastToGithubTabs2(message) {
   }
 }
 function broadcastTokenChanged() {
-  broadcastToGithubTabs2({ type: MSG2.TOKEN_CHANGED });
+  broadcastToGithubTabs({ type: MSG.TOKEN_CHANGED });
 }
 function broadcastPrefsChanged(prefs) {
-  broadcastToGithubTabs2({ type: MSG2.PREFS_CHANGED, prefs });
+  broadcastToGithubTabs({ type: MSG.PREFS_CHANGED, prefs });
 }
 function clearDetailCacheOnGithubTabs() {
   return new Promise((resolve) => {
@@ -10213,7 +10231,7 @@ function clearDetailCacheOnGithubTabs() {
             try {
               chrome.tabs.sendMessage(
                 tab.id,
-                { type: MSG2.CLEAR_DETAIL_CACHE },
+                { type: MSG.CLEAR_DETAIL_CACHE },
                 (res) => {
                   const err = chrome.runtime.lastError;
                   if (err || !res?.ok) failed += 1;
@@ -10241,7 +10259,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     broadcastTokenChanged();
   }
   if (changes[PRTreeStorage.HOST_ACCOUNTS_KEY]) {
-    broadcastToGithubTabs2({ type: MSG2.HOST_ACCOUNTS_CHANGED });
+    broadcastToGithubTabs({ type: MSG.HOST_ACCOUNTS_CHANGED });
     broadcastTokenChanged();
     void registeredEnterpriseHosts().then(
       (hosts) => syncEnterpriseContentScripts(hosts)
@@ -10265,7 +10283,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 async function handleMessagePartA(message) {
   const apiCtx = apiCtxFromMessage(message || {});
   switch (message.type) {
-    case MSG2.PING: {
+    case MSG.PING: {
       return {
         ok: true,
         pong: true,
@@ -10274,7 +10292,7 @@ async function handleMessagePartA(message) {
         hasEndpoints: typeof PRGithubEndpoints?.resolveGithubEndpoints === "function"
       };
     }
-    case MSG2.TOKEN_STATUS: {
+    case MSG.TOKEN_STATUS: {
       const webHost = message.webHost || message.webOrigin || "github.com";
       const sel = await PRTreeStorage.getTokenForWebHost(webHost);
       if (!sel.token) {
@@ -10294,16 +10312,16 @@ async function handleMessagePartA(message) {
         host: sel.host
       };
     }
-    case MSG2.TOKEN_SET: {
+    case MSG.TOKEN_SET: {
       await PRTreeStorage.setGithubToken(message.token || "");
       const status = await PRTreeStorage.getGithubTokenStatus();
       return { ok: true, ...status };
     }
-    case MSG2.TOKEN_CLEAR: {
+    case MSG.TOKEN_CLEAR: {
       await PRTreeStorage.setGithubToken("");
       return { ok: true, configured: false, mask: "" };
     }
-    case MSG2.PREFS_GET: {
+    case MSG.PREFS_GET: {
       const prefs = await PRTreeStorage.getExtensionPrefs();
       const hostAccounts = await PRTreeStorage.getHostAccountsPublic();
       let endpoints = null;
@@ -10330,7 +10348,7 @@ async function handleMessagePartA(message) {
         pluginEnabled: prefs?.pluginEnabled !== false
       };
     }
-    case MSG2.PREFS_SET: {
+    case MSG.PREFS_SET: {
       const patch = message.prefs || message.patch || {};
       if (patch && typeof patch === "object" && "enterpriseWebHosts" in patch) {
         delete patch.enterpriseWebHosts;
@@ -10353,7 +10371,7 @@ async function handleMessagePartA(message) {
       rlMem.loaded = true;
       return { ok: true, prefs, rateLimit: rlMem.state };
     }
-    case MSG2.RATE_LIMIT_GET: {
+    case MSG.RATE_LIMIT_GET: {
       await ensureRateLimitMem();
       const RL = rateLimitApi();
       if (typeof RL?.clearExpiredRateDisables === "function") {
@@ -10370,28 +10388,28 @@ async function handleMessagePartA(message) {
         gqlCostBuild: "gql-cost-v1"
       };
     }
-    case MSG2.GQL_COST_LOG_GET: {
+    case MSG.GQL_COST_LOG_GET: {
       const log = typeof PRTreeFetch?.getGraphqlCostLog === "function" ? PRTreeFetch.getGraphqlCostLog() : [];
       const summary = typeof PRTreeFetch?.summarizeGraphqlCostLog === "function" ? PRTreeFetch.summarizeGraphqlCostLog() : { totalCalls: 0, totalCost: 0, unknownCostCalls: 0, byOp: [] };
       return { ok: true, log, summary, gqlCostBuild: "gql-cost-v1" };
     }
-    case MSG2.GQL_COST_LOG_CLEAR: {
+    case MSG.GQL_COST_LOG_CLEAR: {
       if (typeof PRTreeFetch?.clearGraphqlCostLog === "function") {
         PRTreeFetch.clearGraphqlCostLog();
       }
       return { ok: true };
     }
-    case MSG2.ONBOARDING_GET: {
+    case MSG.ONBOARDING_GET: {
       const completed = await PRTreeStorage.getOnboardingCompleted();
       return { ok: true, completed: Boolean(completed) };
     }
-    case MSG2.ONBOARDING_SET: {
+    case MSG.ONBOARDING_SET: {
       const completed = await PRTreeStorage.setOnboardingCompleted(
         message.completed !== false && message.completed !== 0
       );
       return { ok: true, completed: Boolean(completed) };
     }
-    case MSG2.HOST_ACCOUNTS_LIST: {
+    case MSG.HOST_ACCOUNTS_LIST: {
       const accounts = await PRTreeStorage.getHostAccountsPublic();
       return {
         ok: true,
@@ -10399,7 +10417,7 @@ async function handleMessagePartA(message) {
         max: PRGithubEndpoints.MAX_HOST_ACCOUNTS || 3
       };
     }
-    case MSG2.HOST_ACCOUNT_ADD: {
+    case MSG.HOST_ACCOUNT_ADD: {
       const result = await PRTreeStorage.registerHostAccount(
         message.host,
         message.token
@@ -10428,7 +10446,7 @@ async function handleMessagePartA(message) {
         max: PRGithubEndpoints.MAX_HOST_ACCOUNTS || 3
       };
     }
-    case MSG2.HOST_ACCOUNT_REMOVE: {
+    case MSG.HOST_ACCOUNT_REMOVE: {
       const result = await PRTreeStorage.unregisterHostAccount(message.host);
       const hosts = result.accounts.map((a) => a.host);
       const contentScripts = await syncEnterpriseContentScripts(hosts);
@@ -10442,11 +10460,11 @@ async function handleMessagePartA(message) {
         max: PRGithubEndpoints.MAX_HOST_ACCOUNTS || 3
       };
     }
-    case MSG2.CLEAR_DETAIL_CACHE: {
+    case MSG.CLEAR_DETAIL_CACHE: {
       const result = await clearDetailCacheOnGithubTabs();
       return { ok: true, ...result };
     }
-    case MSG2.FETCH_OPEN_PULLS: {
+    case MSG.FETCH_OPEN_PULLS: {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
@@ -10468,7 +10486,7 @@ async function handleMessagePartA(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG2.FETCH_DANGLING: {
+    case MSG.FETCH_DANGLING: {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
@@ -10488,12 +10506,12 @@ async function handleMessagePartA(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG2.CANCEL_FETCH: {
+    case MSG.CANCEL_FETCH: {
       const ids = Array.isArray(message.requestIds) ? message.requestIds : message.requestId != null ? [message.requestId] : [];
       const cancelled = (message.cancelAll ? cancelAllTrackedFetches() : 0) + cancelTrackedFetches(ids);
       return { ok: true, cancelled };
     }
-    case MSG2.FETCH_PR_DETAIL: {
+    case MSG.FETCH_PR_DETAIL: {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
@@ -10517,7 +10535,7 @@ async function handleMessagePartA(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG2.FETCH_REVIEW_THREADS_PAGE: {
+    case MSG.FETCH_REVIEW_THREADS_PAGE: {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
@@ -10560,7 +10578,7 @@ async function handleMessagePartA(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG2.FETCH_REVIEW_THREADS_BY_IDS: {
+    case MSG.FETCH_REVIEW_THREADS_BY_IDS: {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
@@ -10579,7 +10597,7 @@ async function handleMessagePartA(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG2.FETCH_COMMENTS_PAGE: {
+    case MSG.FETCH_COMMENTS_PAGE: {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
@@ -10606,7 +10624,7 @@ async function handleMessagePartA(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG2.FETCH_COMPARE_FILES: {
+    case MSG.FETCH_COMPARE_FILES: {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
@@ -10627,7 +10645,7 @@ async function handleMessagePartA(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG2.POST_ISSUE_COMMENT: {
+    case MSG.POST_ISSUE_COMMENT: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to post comments");
       const result = await PRTreeFetch.postIssueComment(
@@ -10641,7 +10659,7 @@ async function handleMessagePartA(message) {
       );
       return { ok: true, result };
     }
-    case MSG2.SUBMIT_REVIEW: {
+    case MSG.SUBMIT_REVIEW: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to submit reviews");
       const result = await PRTreeFetch.submitPullReview(
@@ -10660,7 +10678,7 @@ async function handleMessagePartA(message) {
       );
       return { ok: true, result };
     }
-    case MSG2.SUBMIT_PENDING_REVIEW: {
+    case MSG.SUBMIT_PENDING_REVIEW: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to submit pending reviews");
       const result = await PRTreeFetch.submitPendingPullReview(
@@ -10675,7 +10693,7 @@ async function handleMessagePartA(message) {
       );
       return { ok: true, result };
     }
-    case MSG2.DELETE_PENDING_REVIEW: {
+    case MSG.DELETE_PENDING_REVIEW: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to discard pending reviews");
       const result = await PRTreeFetch.deletePendingPullReview(
@@ -10689,7 +10707,7 @@ async function handleMessagePartA(message) {
       );
       return { ok: true, result };
     }
-    case MSG2.POST_REVIEW_COMMENT: {
+    case MSG.POST_REVIEW_COMMENT: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to post review comments");
       const result = await PRTreeFetch.postReviewComment(
@@ -10713,7 +10731,7 @@ async function handleMessagePartA(message) {
       );
       return { ok: true, result };
     }
-    case MSG2.REPLY_REVIEW_COMMENT: {
+    case MSG.REPLY_REVIEW_COMMENT: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to reply to review comments");
       const result = await PRTreeFetch.replyToReviewComment(
@@ -10737,7 +10755,7 @@ async function handleMessagePartA(message) {
       );
       return { ok: true, result };
     }
-    case MSG2.RESOLVE_REVIEW_THREAD: {
+    case MSG.RESOLVE_REVIEW_THREAD: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to resolve review threads");
       const result = await PRTreeFetch.resolveReviewThread(
@@ -10749,7 +10767,7 @@ async function handleMessagePartA(message) {
       );
       return { ok: true, result };
     }
-    case MSG2.UPDATE_PULL_STATE: {
+    case MSG.UPDATE_PULL_STATE: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to close or reopen pull requests");
       const result = await PRTreeFetch.updatePullState(
@@ -10763,7 +10781,7 @@ async function handleMessagePartA(message) {
       );
       return { ok: true, result };
     }
-    case MSG2.DELETE_REVIEW_COMMENT: {
+    case MSG.DELETE_REVIEW_COMMENT: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to delete review comments");
       const result = await PRTreeFetch.deleteReviewComment(
@@ -10776,7 +10794,7 @@ async function handleMessagePartA(message) {
       );
       return { ok: true, result };
     }
-    case MSG2.DELETE_ISSUE_COMMENT: {
+    case MSG.DELETE_ISSUE_COMMENT: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to delete comments");
       const result = await PRTreeFetch.deleteIssueComment(
@@ -10789,7 +10807,7 @@ async function handleMessagePartA(message) {
       );
       return { ok: true, result };
     }
-    case MSG2.TOGGLE_COMMENT_REACTION: {
+    case MSG.TOGGLE_COMMENT_REACTION: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to react on comments");
       if (typeof PRTreeFetch.toggleCommentReaction !== "function") {
@@ -10806,7 +10824,7 @@ async function handleMessagePartA(message) {
       );
       return { ok: true, result };
     }
-    case MSG2.FETCH_REACTABLE_REACTORS: {
+    case MSG.FETCH_REACTABLE_REACTORS: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to load reaction users");
       if (typeof PRTreeFetch.fetchReactableReactors !== "function") {
@@ -10831,7 +10849,7 @@ async function handleMessagePartA(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG2.UPDATE_PULL: {
+    case MSG.UPDATE_PULL: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to update pull request");
       const result = await PRTreeFetch.updatePullRequest(
@@ -10852,7 +10870,7 @@ async function handleMessagePartA(message) {
 async function handleMessagePartB(message) {
   const apiCtx = apiCtxFromMessage(message || {});
   switch (message.type) {
-    case MSG2.EDIT_ISSUE_COMMENT: {
+    case MSG.EDIT_ISSUE_COMMENT: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to edit comments");
       const result = await PRTreeFetch.editIssueComment(
@@ -10866,7 +10884,7 @@ async function handleMessagePartB(message) {
       );
       return { ok: true, result };
     }
-    case MSG2.EDIT_REVIEW_COMMENT: {
+    case MSG.EDIT_REVIEW_COMMENT: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to edit review comments");
       const result = await PRTreeFetch.editReviewComment(
@@ -10880,7 +10898,7 @@ async function handleMessagePartB(message) {
       );
       return { ok: true, result };
     }
-    case MSG2.REQUEST_REVIEWERS: {
+    case MSG.REQUEST_REVIEWERS: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to request reviewers");
       const result = await PRTreeFetch.requestReviewers(
@@ -10897,7 +10915,7 @@ async function handleMessagePartB(message) {
       );
       return { ok: true, result };
     }
-    case MSG2.REMOVE_REVIEWERS: {
+    case MSG.REMOVE_REVIEWERS: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to remove reviewers");
       const result = await PRTreeFetch.removeReviewers(
@@ -10914,7 +10932,7 @@ async function handleMessagePartB(message) {
       );
       return { ok: true, result };
     }
-    case MSG2.ADD_ASSIGNEES: {
+    case MSG.ADD_ASSIGNEES: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to add assignees");
       const result = await PRTreeFetch.addAssignees(
@@ -10928,7 +10946,7 @@ async function handleMessagePartB(message) {
       );
       return { ok: true, result };
     }
-    case MSG2.REMOVE_ASSIGNEES: {
+    case MSG.REMOVE_ASSIGNEES: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to remove assignees");
       const result = await PRTreeFetch.removeAssignees(
@@ -10942,7 +10960,7 @@ async function handleMessagePartB(message) {
       );
       return { ok: true, result };
     }
-    case MSG2.SET_LABELS: {
+    case MSG.SET_LABELS: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to set labels");
       const result = await PRTreeFetch.setIssueLabels(
@@ -10956,7 +10974,7 @@ async function handleMessagePartB(message) {
       );
       return { ok: true, result };
     }
-    case MSG2.FETCH_REPO_LABELS: {
+    case MSG.FETCH_REPO_LABELS: {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
@@ -10978,7 +10996,7 @@ async function handleMessagePartB(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG2.CREATE_REPO_LABEL: {
+    case MSG.CREATE_REPO_LABEL: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to create labels");
       const result = await PRTreeFetch.createRepoLabel(
@@ -10995,7 +11013,7 @@ async function handleMessagePartB(message) {
       );
       return { ok: true, result };
     }
-    case MSG2.FETCH_REPO_MILESTONES: {
+    case MSG.FETCH_REPO_MILESTONES: {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
@@ -11018,7 +11036,7 @@ async function handleMessagePartB(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG2.CREATE_REPO_MILESTONE: {
+    case MSG.CREATE_REPO_MILESTONE: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to create milestones");
       const result = await PRTreeFetch.createRepoMilestone(
@@ -11035,7 +11053,7 @@ async function handleMessagePartB(message) {
       );
       return { ok: true, result };
     }
-    case MSG2.FETCH_REPO_TAGS: {
+    case MSG.FETCH_REPO_TAGS: {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
@@ -11057,7 +11075,7 @@ async function handleMessagePartB(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG2.FETCH_TAGS_FOR_COMMITS: {
+    case MSG.FETCH_TAGS_FOR_COMMITS: {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
@@ -11080,7 +11098,7 @@ async function handleMessagePartB(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG2.FETCH_ALL_PR_COMMITS: {
+    case MSG.FETCH_ALL_PR_COMMITS: {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
@@ -11100,7 +11118,7 @@ async function handleMessagePartB(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG2.FETCH_PR_COMMITS: {
+    case MSG.FETCH_PR_COMMITS: {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
@@ -11120,7 +11138,7 @@ async function handleMessagePartB(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG2.FETCH_PR_FILES: {
+    case MSG.FETCH_PR_FILES: {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
@@ -11148,7 +11166,7 @@ async function handleMessagePartB(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG2.FETCH_PR_ISSUE_COMMENTS: {
+    case MSG.FETCH_PR_ISSUE_COMMENTS: {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
@@ -11168,7 +11186,7 @@ async function handleMessagePartB(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG2.FETCH_PR_TIMELINE_EVENTS: {
+    case MSG.FETCH_PR_TIMELINE_EVENTS: {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
@@ -11188,7 +11206,7 @@ async function handleMessagePartB(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG2.FETCH_PR_HEAD_PROBE: {
+    case MSG.FETCH_PR_HEAD_PROBE: {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
@@ -11215,7 +11233,7 @@ async function handleMessagePartB(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG2.FETCH_PR_REVIEWS: {
+    case MSG.FETCH_PR_REVIEWS: {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
@@ -11235,7 +11253,7 @@ async function handleMessagePartB(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG2.FETCH_PR_CHECKS: {
+    case MSG.FETCH_PR_CHECKS: {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
@@ -11255,7 +11273,7 @@ async function handleMessagePartB(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG2.FETCH_PR_DEVELOPMENT: {
+    case MSG.FETCH_PR_DEVELOPMENT: {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
@@ -11275,7 +11293,7 @@ async function handleMessagePartB(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG2.FETCH_ALL_PR_FILES: {
+    case MSG.FETCH_ALL_PR_FILES: {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
@@ -11295,7 +11313,7 @@ async function handleMessagePartB(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG2.UPLOAD_REPO_FILE: {
+    case MSG.UPLOAD_REPO_FILE: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to upload files");
       const result = await PRTreeFetch.uploadRepoFile(
@@ -11313,7 +11331,7 @@ async function handleMessagePartB(message) {
       );
       return { ok: true, result };
     }
-    case MSG2.APPLY_SUGGESTION: {
+    case MSG.APPLY_SUGGESTION: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to apply suggestions");
       const result = await PRTreeFetch.applyReviewSuggestion(
@@ -11333,7 +11351,7 @@ async function handleMessagePartB(message) {
       );
       return { ok: true, result };
     }
-    case MSG2.GET_REPO_FILE_TEXT: {
+    case MSG.GET_REPO_FILE_TEXT: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to read files");
       const result = await PRTreeFetch.getRepoFileText(
@@ -11349,7 +11367,7 @@ async function handleMessagePartB(message) {
       );
       return { ok: true, result };
     }
-    case MSG2.MERGE_PULL: {
+    case MSG.MERGE_PULL: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to merge");
       const result = await PRTreeFetch.mergePullRequest(
@@ -11367,7 +11385,7 @@ async function handleMessagePartB(message) {
       );
       return { ok: true, result };
     }
-    case MSG2.UPDATE_BRANCH: {
+    case MSG.UPDATE_BRANCH: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to update branch");
       const result = await PRTreeFetch.updatePullBranch(
@@ -11381,7 +11399,7 @@ async function handleMessagePartB(message) {
       );
       return { ok: true, result };
     }
-    case MSG2.DELETE_HEAD_BRANCH: {
+    case MSG.DELETE_HEAD_BRANCH: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to delete branch");
       const result = await PRTreeFetch.deleteHeadBranch(
@@ -11394,7 +11412,7 @@ async function handleMessagePartB(message) {
       );
       return { ok: true, result };
     }
-    case MSG2.FETCH_VIEWER_VIEWED_PATHS: {
+    case MSG.FETCH_VIEWER_VIEWED_PATHS: {
       const token = await tokenForMessage(message);
       if (!token) {
         return {
@@ -11412,7 +11430,7 @@ async function handleMessagePartB(message) {
       );
       return { ok: true, result };
     }
-    case MSG2.MARK_FILE_VIEWED: {
+    case MSG.MARK_FILE_VIEWED: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to mark file viewed");
       const result = await PRTreeFetch.markFileAsViewed(
@@ -11424,7 +11442,7 @@ async function handleMessagePartB(message) {
       );
       return { ok: true, result };
     }
-    case MSG2.UNMARK_FILE_VIEWED: {
+    case MSG.UNMARK_FILE_VIEWED: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to unmark file viewed");
       const result = await PRTreeFetch.unmarkFileAsViewed(
@@ -11436,7 +11454,7 @@ async function handleMessagePartB(message) {
       );
       return { ok: true, result };
     }
-    case MSG2.SET_SUBSCRIPTION: {
+    case MSG.SET_SUBSCRIPTION: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required for notifications");
       const result = await PRTreeFetch.setIssueSubscription(
@@ -11454,7 +11472,7 @@ async function handleMessagePartB(message) {
       );
       return { ok: true, result };
     }
-    case MSG2.DELETE_SUBSCRIPTION: {
+    case MSG.DELETE_SUBSCRIPTION: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required for notifications");
       const result = await PRTreeFetch.deleteIssueSubscription(
@@ -11467,7 +11485,7 @@ async function handleMessagePartB(message) {
       );
       return { ok: true, result };
     }
-    case MSG2.SET_MILESTONE: {
+    case MSG.SET_MILESTONE: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to set milestone");
       const result = await PRTreeFetch.setIssueMilestone(
@@ -11481,7 +11499,7 @@ async function handleMessagePartB(message) {
       );
       return { ok: true, result };
     }
-    case MSG2.SET_DRAFT_STAGE: {
+    case MSG.SET_DRAFT_STAGE: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to change draft stage");
       const result = await PRTreeFetch.setPullRequestDraftStage(
@@ -11506,13 +11524,13 @@ async function handleMessage(message) {
   return handleMessagePartB(message);
 }
 chrome.runtime.onMessage.addListener((message, _sender) => {
-  if (message?.type === MSG2.TOKEN_CHANGED) {
+  if (message?.type === MSG.TOKEN_CHANGED) {
     return false;
   }
   if (!message || typeof message.type !== "string") {
     return Promise.resolve({ ok: false, error: "invalid message" });
   }
-  if (message.type === MSG2.CANCEL_FETCH || message.type === MSG2.PING) {
+  if (message.type === MSG.CANCEL_FETCH || message.type === MSG.PING) {
     return Promise.resolve().then(() => handleMessage(message)).catch((err) => ({
       ok: false,
       error: err?.message || String(err),

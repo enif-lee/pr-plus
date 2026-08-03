@@ -13,6 +13,7 @@ import {
   shouldFetchSystemTimelineEvents,
   needsLazyTimelineEventsFetch,
   planTimelineVisibilityChange,
+  shouldAcceptTimelineVisibilityFromHost,
   mergeTimelineEventsById,
   DEFAULT_TIMELINE_VISIBILITY,
   TIMELINE_TIP_LABELS,
@@ -197,6 +198,78 @@ describe('timelineItemCategory + filterTimelineItemsByVisibility', () => {
     expect(next.labels).toBe(false);
     expect(next.title).toBe(true);
     expect(isTimelineVisibilityAllOn(next)).toBe(false);
+  });
+
+  test('comments tip hide then re-enable restores comment items', () => {
+    const items = buildConversationTimeline(mixedDetail());
+    const hidden = toggleTimelineTip(DEFAULT_TIMELINE_VISIBILITY, 'comments');
+    expect(hidden.comments).toBe(false);
+    const afterHide = filterTimelineItemsByVisibility(items, hidden);
+    expect(afterHide.some((i) => timelineItemCategory(i) === 'comments')).toBe(
+      false
+    );
+    const shown = toggleTimelineTip(hidden, 'comments');
+    expect(shown.comments).toBe(true);
+    const afterShow = filterTimelineItemsByVisibility(items, shown);
+    expect(afterShow.some((i) => timelineItemCategory(i) === 'comments')).toBe(
+      true
+    );
+    expect(afterShow.length).toBe(items.length);
+  });
+});
+
+describe('shouldAcceptTimelineVisibilityFromHost', () => {
+  test('accepts host when lock idle (no until)', () => {
+    expect(
+      shouldAcceptTimelineVisibilityFromHost({
+        incoming: { comments: false },
+        lastEmitted: DEFAULT_TIMELINE_VISIBILITY,
+        nowMs: 1_000,
+        ignoreHostUntilMs: 0,
+      })
+    ).toEqual({ accept: true, clearPending: true });
+  });
+
+  test('rejects lagging hide inside optimistic lock even after pending cleared', () => {
+    const reEnabled = toggleTimelineTip(
+      { ...DEFAULT_TIMELINE_VISIBILITY, comments: false },
+      'comments'
+    );
+    expect(reEnabled.comments).toBe(true);
+    // Storage still delivering the previous hide write inside TTL window
+    expect(
+      shouldAcceptTimelineVisibilityFromHost({
+        incoming: { ...DEFAULT_TIMELINE_VISIBILITY, comments: false },
+        lastEmitted: reEnabled,
+        pendingEmit: false,
+        nowMs: 1_000,
+        ignoreHostUntilMs: 3_000,
+      })
+    ).toEqual({ accept: false, clearPending: false });
+  });
+
+  test('accepts host when it matches last emit (clears pending)', () => {
+    const reEnabled = { ...DEFAULT_TIMELINE_VISIBILITY, comments: true };
+    expect(
+      shouldAcceptTimelineVisibilityFromHost({
+        incoming: reEnabled,
+        lastEmitted: reEnabled,
+        nowMs: 1_000,
+        ignoreHostUntilMs: 3_000,
+      })
+    ).toEqual({ accept: true, clearPending: true });
+  });
+
+  test('TTL expiry allows external host after abandoned optimistic lock', () => {
+    expect(
+      shouldAcceptTimelineVisibilityFromHost({
+        incoming: { ...DEFAULT_TIMELINE_VISIBILITY, comments: false },
+        lastEmitted: DEFAULT_TIMELINE_VISIBILITY,
+        pendingEmit: true,
+        nowMs: 5_000,
+        ignoreHostUntilMs: 2_000,
+      })
+    ).toEqual({ accept: true, clearPending: true });
   });
 });
 

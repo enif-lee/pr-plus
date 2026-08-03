@@ -688,14 +688,18 @@
             rawMs == null
               ? 'null'
               : String(rawMs.title || rawMs.number || 'obj').slice(0, 80);
+          const br = `${raw?.baseRef || '∅'}←${raw?.headRef || '∅'}`;
           for (const id of [HOST_ID, embedHostId()]) {
             try {
-              document.getElementById(id)?.setAttribute?.('data-prp-raw-ms', label);
+              const el = document.getElementById(id);
+              el?.setAttribute?.('data-prp-raw-ms', label);
+              el?.setAttribute?.('data-prp-raw-branches', br);
             } catch {
               /* ignore */
             }
           }
           document.documentElement?.setAttribute?.('data-prp-raw-ms', label);
+          document.documentElement?.setAttribute?.('data-prp-raw-branches', br);
         } catch {
           /* ignore */
         }
@@ -726,6 +730,15 @@
               'labels',
               'assignees',
               'requestedReviewers',
+              // Branch identity — must not stay "—" after network core paints.
+              'baseRef',
+              'headRef',
+              'baseSha',
+              'headSha',
+              'baseOwner',
+              'baseRepo',
+              'headOwner',
+              'headRepo',
             ] as const) {
               if (!Object.prototype.hasOwnProperty.call(raw, k)) continue;
               const v = (raw as any)[k];
@@ -765,6 +778,20 @@
             if (Array.isArray(raw.labels)) identity.labels = raw.labels;
             if (Array.isArray(raw.requestedReviewers)) {
               identity.requestedReviewers = raw.requestedReviewers;
+            }
+            // Always stamp branch refs from REST when present (list sketch often omits).
+            for (const k of [
+              'baseRef',
+              'headRef',
+              'baseSha',
+              'headSha',
+              'baseOwner',
+              'baseRepo',
+              'headOwner',
+              'headRepo',
+            ] as const) {
+              const v = (raw as any)[k];
+              if (v != null && String(v).trim() !== '') identity[k] = v;
             }
             if (Object.keys(identity).length) {
               S.applyMeta(current.detailStore, identity, {

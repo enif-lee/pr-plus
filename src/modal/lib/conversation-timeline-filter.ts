@@ -243,3 +243,39 @@ export function planTimelineVisibilityChange(
     shouldLazyFetch: needsLazyTimelineEventsFetch(prev, next, timelineEvents),
   };
 }
+
+/**
+ * Whether ConversationView should take host/storage `timelineVisibility` props
+ * into local optimistic state.
+ *
+ * After a tip click we keep an optimistic lock until `ignoreHostUntilMs`.
+ * Non-matching host/storage updates in that window are ignored so a lagging
+ * prefs write (or watch echo of a prior map) cannot clobber the chip the user
+ * just flipped — even after an intermediate host match cleared `pendingEmit`.
+ */
+export function shouldAcceptTimelineVisibilityFromHost(opts: {
+  incoming: unknown;
+  lastEmitted: unknown;
+  /** @deprecated kept for call-site compat; lock is driven by ignoreHostUntilMs */
+  pendingEmit?: boolean;
+  /** Epoch ms — defaults to Date.now() when omitted. */
+  nowMs?: number;
+  /** Ignore non-matching host props until this epoch ms (optimistic lock TTL). */
+  ignoreHostUntilMs?: number;
+}): { accept: boolean; clearPending: boolean } {
+  const incoming = normalizeTimelineVisibility(opts.incoming);
+  const lastEmitted = normalizeTimelineVisibility(opts.lastEmitted);
+  const incomingJson = JSON.stringify(incoming);
+  const emittedJson = JSON.stringify(lastEmitted);
+  if (incomingJson === emittedJson) {
+    return { accept: true, clearPending: true };
+  }
+  const now = Number(opts.nowMs ?? Date.now());
+  const until = Number(opts.ignoreHostUntilMs || 0);
+  if (until > 0 && now < until) {
+    // Still inside tip-click optimistic lock — drop lagging host maps.
+    return { accept: false, clearPending: false };
+  }
+  // Lock idle or expired — accept external host truth (popup / other tab).
+  return { accept: true, clearPending: true };
+}

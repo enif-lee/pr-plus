@@ -1,52 +1,52 @@
 /** SW unit: sw-rate-limit.ts */
 /* global PRTreeStorage, PRTreeFetch, PRModalCollapse, PRGithubEndpoints */
 
-export const ENTERPRISE_CS_ID = 'prp-enterprise-hosts';
-export const CONTENT_SCRIPT_JS = [
-  'src/tree.js',
-  'src/dom.js',
-  'src/pr-list-focus.js',
-  'src/pulls-palette.js',
-  'src/github-endpoints.js',
-  'src/content-bridge.js',
-  'src/content-bootstrap.js',
-  'src/onboarding.js',
-  'src/content.js',
-  'src/modal/pure/detail-idb-cache.js',
-  'src/modal/pure/detail-cache.js',
-  'src/modal/pure/detail-merge.js',
-  'src/modal/pure/detail-store.js',
-  'src/modal/pure/load-progress.js',
-  'src/modal/pure/page-embed.js',
-  'src/modal/pure/floating-scrollbar.js',
-  'src/modal/pure/auto-refresh.js',
-  'src/modal/dist/pr-modal.bundle.js',
-  'src/pr-modal-host.js',
-];
-
 /**
- * Stateless API context from RPC message (webHost from content page).
- * No process-global mutation — pass returned ctx into every PRTreeFetch call.
- * @param {object|null|undefined} message
+ * In-memory rate-limit + pluginEnabled.
+ * Always pin to globalThis so esbuild renames / split modules cannot leave
+ * free `rlMem` bindings as ReferenceError in event handlers.
  */
-export function makeAbortError() {
-  const err = new Error('The operation was aborted.');
-  err.name = 'AbortError';
-  return err;
+type RlMem = {
+  pluginEnabled: boolean;
+  state: any;
+  loaded: boolean;
+  saveTimer: any;
+};
+
+function getRlMem(): RlMem {
+  const g = globalThis as any;
+  if (!g.__prpRlMem) {
+    g.__prpRlMem = {
+      pluginEnabled: true,
+      state: null,
+      loaded: false,
+      saveTimer: null,
+    };
+  }
+  return g.__prpRlMem as RlMem;
 }
 
-/** In-memory rate-limit + pluginEnabled (refreshed from storage). */
-export let rlMem = {
-  pluginEnabled: true,
-  state: null as any,
-  loaded: false,
-  saveTimer: null as any,
-};
+/** Live bag — reads/writes go to globalThis.__prpRlMem. */
+export const rlMem: RlMem = new Proxy({} as RlMem, {
+  get(_t, prop: string | symbol) {
+    return (getRlMem() as any)[prop];
+  },
+  set(_t, prop: string | symbol, value) {
+    (getRlMem() as any)[prop] = value;
+    return true;
+  },
+});
 
 /** In-flight GitHub fetches keyed by content-script requestId. */
 export const activeFetchControllers = new Map();
 /** requestIds cancelled before beginTrackedFetch ran. */
 export const preCancelledFetchIds = new Set();
+
+export function makeAbortError() {
+  const err = new Error('The operation was aborted.');
+  err.name = 'AbortError';
+  return err;
+}
 
 
 /** Raw browser fetch (no rate-limit). Only used as the innermost base. */
@@ -95,11 +95,15 @@ export function schedulePersistRateLimitState() {
     if (!st) return;
     void PRTreeStorage.setRateLimitState(st)
       .then(() => {
+        // Avoid importing broadcast (cycle); notify via runtime + tabs lightly.
         try {
-          broadcastToGithubTabs({
-            type: MSG.RATE_LIMIT_CHANGED,
+          const msg = {
+            type: 'PR_TREE_RATE_LIMIT_CHANGED',
             state: st,
             pluginEnabled: rlMem.pluginEnabled,
+          };
+          chrome.runtime.sendMessage(msg, () => {
+            void chrome.runtime.lastError;
           });
         } catch {
           /* ignore */

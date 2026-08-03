@@ -103,7 +103,44 @@ function tipState() {
   `);
 }
 
+/** Scroll conversation to top so virtualized tip chips remount. */
+function ensureTimelineTipsMounted() {
+  evalInPage(`
+    (() => {
+      const sc =
+        document.querySelector('.prp-conversation-virtual') ||
+        document.querySelector('[data-prp-conversation-scroll]');
+      if (!sc) return false;
+      sc.scrollTop = 0;
+      sc.dispatchEvent(new Event('scroll', { bubbles: true }));
+      return true;
+    })()
+  `);
+  waitMs(80);
+  // One more paint if tips still virtualized away
+  if (
+    !evalInPage(`!!document.querySelector('[data-prp-timeline-tips]')`)
+  ) {
+    evalInPage(`
+      (() => {
+        const sc =
+          document.querySelector('.prp-conversation-virtual') ||
+          document.querySelector('[data-prp-conversation-scroll]');
+        if (!sc) return false;
+        // reverseComments: tips sit just below merge near top — nudge slightly
+        sc.scrollTop = Math.min(120, Math.max(0, sc.scrollHeight - sc.clientHeight));
+        sc.dispatchEvent(new Event('scroll', { bubbles: true }));
+        sc.scrollTop = 0;
+        sc.dispatchEvent(new Event('scroll', { bubbles: true }));
+        return true;
+      })()
+    `);
+    waitMs(100);
+  }
+}
+
 function clickTip(id) {
+  ensureTimelineTipsMounted();
   return evalInPage(`
     (() => {
       const el = document.querySelector('[data-prp-timeline-tip="${id}"]');
@@ -142,6 +179,33 @@ function countKeyForTip(tipId) {
   return tipId;
 }
 
+/**
+ * Product mounts review threads as `.prp-conversation-inline-thread` with
+ * `data-search-anchor="review-comment:…"` (not only review-thread:).
+ * Keep class + anchor forms so hide/restore counts stay honest.
+ */
+const COMMENT_CARD_SELECTOR = [
+  '.prp-card--timeline-review-thread',
+  '.prp-card--timeline-issue-comment',
+  '.prp-card--timeline-review-group',
+  '.prp-conversation-inline-thread',
+  '.prp-inline-thread--conversation',
+  '[data-search-anchor^="issue-comment:"]',
+  '[data-search-anchor^="review-thread:"]',
+  '[data-search-anchor^="review-group:"]',
+  '[data-search-anchor^="review-comment:"]',
+].join(', ');
+
+function countCommentCardsInDom() {
+  return (
+    Number(
+      evalInPage(
+        `document.querySelectorAll(${JSON.stringify(COMMENT_CARD_SELECTOR)}).length`
+      )
+    ) || 0
+  );
+}
+
 function countTimelineEventsByCategory() {
   return evalInPage(`
     (() => {
@@ -152,18 +216,7 @@ function countTimelineEventsByCategory() {
       const titles = by(['renamed']);
       const milestones = by(['milestoned', 'demilestoned']);
       const referenced = by(['referenced', 'cross-referenced', 'connected', 'disconnected']);
-      const comments = document.querySelectorAll(
-        [
-          '.prp-card--timeline-review-thread',
-          '.prp-card--timeline-issue-comment',
-          '.prp-card--timeline-review-group',
-          '.prp-conversation-inline-thread',
-          '.prp-inline-thread--conversation',
-          '[data-search-anchor^="issue-comment:"]',
-          '[data-search-anchor^="review-thread:"]',
-          '[data-search-anchor^="review-group:"]',
-        ].join(', ')
-      ).length;
+      const comments = document.querySelectorAll(${JSON.stringify(COMMENT_CARD_SELECTOR)}).length;
       return {
         labels,
         titles,
@@ -179,86 +232,115 @@ function countTimelineEventsByCategory() {
 
 /**
  * Scroll conversation virtual list so comment/thread cards mount.
- * Virtualization only keeps nearby rows in DOM — scan full scroll range.
+ * React virtualization only paints after scroll → state → re-render, so each
+ * step must leave the page (waitMs) — a single sync eval scan always undercounts.
  */
 function scrollConversationToMountComments() {
-  return evalInPage(`
+  const meta = evalInPage(`
     (() => {
       const sc =
         document.querySelector('.prp-conversation-virtual') ||
         document.querySelector('[data-prp-conversation-scroll]');
-      if (!sc) return { ok: false, reason: 'no-scroller', maxComments: 0 };
-      const count = () =>
-        document.querySelectorAll(
-          [
-            '.prp-card--timeline-review-thread',
-            '.prp-card--timeline-issue-comment',
-            '.prp-card--timeline-review-group',
-            '.prp-conversation-inline-thread',
-            '[data-search-anchor^="issue-comment:"]',
-            '[data-search-anchor^="review-thread:"]',
-            '[data-search-anchor^="review-group:"]',
-          ].join(', ')
-        ).length;
-      let maxComments = count();
-      const maxScroll = Math.max(0, sc.scrollHeight - sc.clientHeight);
-      const steps = 12;
-      for (let i = 0; i <= steps; i++) {
-        sc.scrollTop = Math.round((maxScroll * i) / steps);
-        sc.dispatchEvent(new Event('scroll', { bubbles: true }));
-        maxComments = Math.max(maxComments, count());
-      }
-      // Leave near top-of-feed after tips so tip chips stay mounted
-      sc.scrollTop = 0;
-      sc.dispatchEvent(new Event('scroll', { bubbles: true }));
+      if (!sc) return { ok: false, reason: 'no-scroller', maxScroll: 0, scrollHeight: 0, clientHeight: 0 };
       return {
         ok: true,
-        maxComments,
+        maxScroll: Math.max(0, sc.scrollHeight - sc.clientHeight),
         scrollHeight: sc.scrollHeight,
         clientHeight: sc.clientHeight,
       };
     })()
   `);
-}
-
-/**
- * After scrolling feed, leave scroller at a position that still shows tips
- * and maximizes chance comment cards are in the window (middle of list).
- */
-function scrollConversationForCommentProbe() {
-  return evalInPage(`
+  if (!meta?.ok) return { ok: false, reason: meta?.reason || 'no-scroller', maxComments: 0 };
+  let maxComments = countCommentCardsInDom();
+  const steps = 12;
+  for (let i = 0; i <= steps; i++) {
+    const top = Math.round((Number(meta.maxScroll || 0) * i) / steps);
+    evalInPage(`
+      (() => {
+        const sc =
+          document.querySelector('.prp-conversation-virtual') ||
+          document.querySelector('[data-prp-conversation-scroll]');
+        if (!sc) return false;
+        sc.scrollTop = ${top};
+        sc.dispatchEvent(new Event('scroll', { bubbles: true }));
+        return true;
+      })()
+    `);
+    waitMs(60);
+    maxComments = Math.max(maxComments, countCommentCardsInDom());
+  }
+  evalInPage(`
     (() => {
       const sc =
         document.querySelector('.prp-conversation-virtual') ||
         document.querySelector('[data-prp-conversation-scroll]');
-      if (!sc) return { ok: false, comments: 0 };
-      const count = () =>
-        document.querySelectorAll(
-          [
-            '.prp-card--timeline-review-thread',
-            '.prp-card--timeline-issue-comment',
-            '.prp-card--timeline-review-group',
-            '.prp-conversation-inline-thread',
-            '[data-search-anchor^="issue-comment:"]',
-            '[data-search-anchor^="review-thread:"]',
-            '[data-search-anchor^="review-group:"]',
-          ].join(', ')
-        ).length;
-      const maxScroll = Math.max(0, sc.scrollHeight - sc.clientHeight);
-      let best = { top: 0, n: count() };
-      const steps = 16;
-      for (let i = 0; i <= steps; i++) {
-        const top = Math.round((maxScroll * i) / steps);
-        sc.scrollTop = top;
-        sc.dispatchEvent(new Event('scroll', { bubbles: true }));
-        const n = count();
-        if (n > best.n) best = { top, n };
-      }
-      sc.scrollTop = best.top;
+      if (!sc) return false;
+      sc.scrollTop = 0;
       sc.dispatchEvent(new Event('scroll', { bubbles: true }));
-      return { ok: true, comments: best.n, scrollTop: best.top, maxScroll };
+      return true;
     })()
   `);
+  waitMs(60);
+  return {
+    ok: true,
+    maxComments,
+    scrollHeight: meta.scrollHeight,
+    clientHeight: meta.clientHeight,
+  };
+}
+
+/**
+ * After scrolling feed, leave scroller at a position that maximizes comment
+ * cards in the window (with React paint waits between steps).
+ */
+function scrollConversationForCommentProbe() {
+  const meta = evalInPage(`
+    (() => {
+      const sc =
+        document.querySelector('.prp-conversation-virtual') ||
+        document.querySelector('[data-prp-conversation-scroll]');
+      if (!sc) return { ok: false, maxScroll: 0 };
+      return { ok: true, maxScroll: Math.max(0, sc.scrollHeight - sc.clientHeight) };
+    })()
+  `);
+  if (!meta?.ok) return { ok: false, comments: 0 };
+  let best = { top: 0, n: countCommentCardsInDom() };
+  const steps = 16;
+  for (let i = 0; i <= steps; i++) {
+    const top = Math.round((Number(meta.maxScroll || 0) * i) / steps);
+    evalInPage(`
+      (() => {
+        const sc =
+          document.querySelector('.prp-conversation-virtual') ||
+          document.querySelector('[data-prp-conversation-scroll]');
+        if (!sc) return false;
+        sc.scrollTop = ${top};
+        sc.dispatchEvent(new Event('scroll', { bubbles: true }));
+        return true;
+      })()
+    `);
+    waitMs(60);
+    const n = countCommentCardsInDom();
+    if (n > best.n) best = { top, n };
+  }
+  evalInPage(`
+    (() => {
+      const sc =
+        document.querySelector('.prp-conversation-virtual') ||
+        document.querySelector('[data-prp-conversation-scroll]');
+      if (!sc) return false;
+      sc.scrollTop = ${Number(best.top) || 0};
+      sc.dispatchEvent(new Event('scroll', { bubbles: true }));
+      return true;
+    })()
+  `);
+  waitMs(80);
+  return {
+    ok: true,
+    comments: countCommentCardsInDom(),
+    scrollTop: best.top,
+    maxScroll: meta.maxScroll,
+  };
 }
 
 function placementProbe() {
@@ -328,11 +410,19 @@ function hideAndRestoreCategory(target, beforeCounts) {
   log(`  click ${target} → ${JSON.stringify(click)}`);
   assert(click?.ok, `click ${target} tip`);
   waitTipSelected(target, false, `deselect ${target}`);
-  waitMs(150);
+  waitMs(200);
 
-  const after = countTimelineEventsByCategory();
-  log(`  after hide ${target} ${JSON.stringify(after)}`);
-  const afterN = Number(after[key] || 0);
+  let afterN;
+  if (target === 'comments') {
+    // Full-range probe so virtualization cannot leave a false non-zero window.
+    const hiddenProbe = scrollConversationForCommentProbe();
+    log(`  after hide comments probe ${JSON.stringify(hiddenProbe)}`);
+    afterN = Number(hiddenProbe?.comments || 0);
+  } else {
+    const after = countTimelineEventsByCategory();
+    log(`  after hide ${target} ${JSON.stringify(after)}`);
+    afterN = Number(after[key] || 0);
+  }
   assert(
     afterN < beforeN,
     `expected ${target} rows to decrease: before=${beforeN} after=${afterN}`
@@ -342,19 +432,27 @@ function hideAndRestoreCategory(target, beforeCounts) {
   log(`  re-click ${target} → ${JSON.stringify(re)}`);
   assert(re?.ok, `re-click ${target}`);
   waitTipSelected(target, true, `reselect ${target}`);
-  waitMs(200);
+  // Allow React filter + virtual list to rebuild rows after re-enable.
+  waitMs(300);
 
-  // Re-probe at same scroll (comments) or default viewport
-  let restored = countTimelineEventsByCategory();
-  if (target === 'comments' && Number(restored.comments || 0) < beforeN) {
-    // Virtual list may need re-scroll to remount cards
+  let restoredN;
+  if (target === 'comments') {
     const sc = scrollConversationForCommentProbe();
     log(`  re-scroll for restore ${JSON.stringify(sc)}`);
-    waitMs(150);
-    restored = countTimelineEventsByCategory();
+    restoredN = Number(sc?.comments || 0);
+    // One more settle if first paint was empty (slow thread remount).
+    if (restoredN <= afterN) {
+      waitMs(400);
+      const sc2 = scrollConversationForCommentProbe();
+      log(`  re-scroll for restore #2 ${JSON.stringify(sc2)}`);
+      restoredN = Math.max(restoredN, Number(sc2?.comments || 0));
+    }
+  } else {
+    const restored = countTimelineEventsByCategory();
+    log(`  restored ${target} ${JSON.stringify(restored)}`);
+    restoredN = Number(restored[key] || 0);
   }
-  log(`  restored ${target} ${JSON.stringify(restored)}`);
-  const restoredN = Number(restored[key] || 0);
+  log(`  restored ${target} n=${restoredN} (before=${beforeN} after=${afterN})`);
   // Broken re-enable leaving 0 after a successful hide must fail (not restored>=after).
   assert(
     restoredN > afterN,
@@ -509,26 +607,38 @@ export function buildTimelineTipsSteps() {
         const mounted = waitForCommentMarkInDom(seed.mark);
         log(`  mounted ${JSON.stringify(mounted)}`);
 
-        // Prefer best scroll for comment card mount count
+        // Prefer best scroll for comment card mount count (React paint waits).
         const probe = scrollConversationForCommentProbe();
         log(`  comment probe ${JSON.stringify(probe)}`);
-        waitMs(200);
+        waitMs(120);
 
         let before = countTimelineEventsByCategory();
+        // Authoritative live comment count from stepped scroll (not stale inflate).
+        const liveComments = Math.max(
+          Number(before.comments || 0),
+          Number(probe?.comments || 0)
+        );
+        if (liveComments > Number(before.comments || 0)) {
+          before = { ...before, comments: liveComments };
+        }
         log(`  comments before ${JSON.stringify(before)}`);
 
-        // Fallbacks: scan max / mark-based nodes
         if (before.comments <= 0) {
           const scan = scrollConversationToMountComments();
           log(`  scroll scan ${JSON.stringify(scan)}`);
-          scrollConversationForCommentProbe();
-          waitMs(150);
+          const probe2 = scrollConversationForCommentProbe();
+          log(`  comment probe #2 ${JSON.stringify(probe2)}`);
+          waitMs(120);
           before = countTimelineEventsByCategory();
-          if (before.comments <= 0 && (scan?.maxComments || 0) > 0) {
-            before = { ...before, comments: scan.maxComments };
-          }
-          if (before.comments <= 0 && (mounted?.comments || 0) > 0) {
-            before = { ...before, comments: mounted.comments };
+          const n = Math.max(
+            Number(before.comments || 0),
+            Number(scan?.maxComments || 0),
+            Number(probe2?.comments || 0)
+          );
+          // Only accept scan/probe counts that are live in DOM after settle —
+          // never invent beforeN when viewport is empty (hides hide/restore).
+          if (n > 0) {
+            before = { ...before, comments: n };
           }
         }
         log(`  comments before (final) ${JSON.stringify(before)}`);
@@ -539,6 +649,8 @@ export function buildTimelineTipsSteps() {
           )}`
         );
 
+        // Probe may leave scroller mid-feed where tip chips are virtualized out.
+        ensureTimelineTipsMounted();
         hideAndRestoreCategory('comments', before);
 
         // Hygiene: delete seeded comment

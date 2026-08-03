@@ -51,6 +51,7 @@ import {
   normalizeTimelineVisibility,
   toggleTimelineTip,
   isTimelineVisibilityAllOn,
+  shouldAcceptTimelineVisibilityFromHost,
   TIMELINE_TIP_IDS,
   TIMELINE_TIP_LABELS,
   type TimelineTipId,
@@ -380,36 +381,43 @@ function ConversationViewImpl(props: any) {
   }, [allItems]);
 
   // Local optimistic visibility so tip chips flip immediately; host prefs
-  // remain source of truth. Track last emitted map so lagging props / storage
-  // round-trips cannot re-enable a tip the user just turned off.
+  // remain source of truth. While a tip click is pending, lagging storage
+  // round-trips must not clobber hide/re-enable until host matches last emit
+  // (or the optimistic lock TTL expires).
   const [localTimelineVis, setLocalTimelineVis] = useState(() =>
     normalizeTimelineVisibility(timelineVisibility)
   );
   const lastEmittedVisRef = useRef<string>(
     JSON.stringify(normalizeTimelineVisibility(timelineVisibility))
   );
+  const pendingTimelineVisEmitRef = useRef(false);
+  const ignoreHostUntilMsRef = useRef(0);
   useEffect(() => {
     const incoming = normalizeTimelineVisibility(timelineVisibility);
     const incomingJson = JSON.stringify(incoming);
-    // Host caught up to our last tip click
-    if (incomingJson === lastEmittedVisRef.current) {
-      setLocalTimelineVis(incoming);
-      return;
-    }
-    // Ignore lagging all-on props while a partial tip-off emit is in flight
+    let lastEmitted: unknown = null;
     try {
-      const emitted = JSON.parse(lastEmittedVisRef.current || '{}');
-      if (
-        isTimelineVisibilityAllOn(incoming) &&
-        emitted &&
-        !isTimelineVisibilityAllOn(emitted)
-      ) {
-        return;
-      }
+      lastEmitted = JSON.parse(lastEmittedVisRef.current || '{}');
     } catch {
-      /* ignore */
+      lastEmitted = null;
     }
-    // External change (popup / storage) — take props
+    const decision =
+      typeof shouldAcceptTimelineVisibilityFromHost === 'function'
+        ? shouldAcceptTimelineVisibilityFromHost({
+            incoming,
+            lastEmitted,
+            pendingEmit: pendingTimelineVisEmitRef.current,
+            nowMs: Date.now(),
+            ignoreHostUntilMs: ignoreHostUntilMsRef.current,
+          })
+        : {
+            accept:
+              !pendingTimelineVisEmitRef.current ||
+              incomingJson === lastEmittedVisRef.current,
+            clearPending: true,
+          };
+    if (!decision.accept) return;
+    if (decision.clearPending) pendingTimelineVisEmitRef.current = false;
     setLocalTimelineVis(incoming);
     lastEmittedVisRef.current = incomingJson;
   }, [timelineVisibility]);
@@ -426,6 +434,9 @@ function ConversationViewImpl(props: any) {
   function onTipClick(tipId: TimelineTipId | string) {
     const next = toggleTimelineTip(timelineVisibilityNorm, tipId);
     const nextJson = JSON.stringify(next);
+    pendingTimelineVisEmitRef.current = true;
+    // Hold optimistic local map long enough for storage lag + e2e waits.
+    ignoreHostUntilMsRef.current = Date.now() + 2000;
     lastEmittedVisRef.current = nextJson;
     setLocalTimelineVis(next);
     // Debug/e2e observability

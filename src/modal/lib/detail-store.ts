@@ -794,14 +794,69 @@ export function applyPendingReview(store, pending) {
  */
 export function applyCorePayload(store, coreFlat, opts: ApplyOpts = {}) {
   if (!store || !coreFlat) return store;
-  const metaSrc = opts.skipSupersedeMeta
+  let metaSrc = opts.skipSupersedeMeta
     ? stripSupersededMetaFields(coreFlat)
     : coreFlat;
+  // Branch identity is often missing from list-sketch. Even when supersede strip
+  // removes baseRef (post base-change write-through), fill empty store slots from
+  // network so the header never sticks on "— —".
+  if (opts.skipSupersedeMeta && coreFlat && store?.meta) {
+    const branchKeys = [
+      'baseRef',
+      'headRef',
+      'baseSha',
+      'headSha',
+      'baseOwner',
+      'baseRepo',
+      'headOwner',
+      'headRepo',
+    ] as const;
+    const restored: Record<string, any> = { ...metaSrc };
+    let filled = false;
+    for (const k of branchKeys) {
+      const cur = store.meta[k];
+      const next = (coreFlat as any)[k];
+      const curEmpty = cur == null || String(cur).trim() === '';
+      const nextOk = next != null && String(next).trim() !== '';
+      if (curEmpty && nextOk) {
+        restored[k] = next;
+        filled = true;
+      }
+    }
+    if (filled) metaSrc = restored;
+  }
   applyMeta(store, pickMeta(metaSrc), {
     source: coreFlat._source || 'network',
     sketch: false,
     trustEmpty: true,
   });
+  // Always force non-empty branch refs from network core (authoritative REST).
+  // Covers cold open from URL (no list sketch branches) and failed soft-refresh.
+  try {
+    const branchForce: Record<string, any> = {};
+    for (const k of [
+      'baseRef',
+      'headRef',
+      'baseSha',
+      'headSha',
+      'baseOwner',
+      'baseRepo',
+      'headOwner',
+      'headRepo',
+    ] as const) {
+      const v = (coreFlat as any)[k];
+      if (v != null && String(v).trim() !== '') branchForce[k] = v;
+    }
+    if (Object.keys(branchForce).length) {
+      applyMeta(store, branchForce, {
+        source: 'network-core-branches',
+        sketch: false,
+        trustEmpty: true,
+      });
+    }
+  } catch {
+    /* ignore */
+  }
   if (coreFlat.viewerPendingReview !== undefined) {
     applyPendingReview(store, coreFlat.viewerPendingReview);
   }
