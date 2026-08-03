@@ -3584,13 +3584,15 @@ const DEFAULT_PREFS = {
   onboardingCompleted: false,
   /**
    * Conversation timeline category visibility (plugin-global).
-   * labels | title | milestone | comments — each true = tip on / rows shown.
-   * Synced with conversation tip row + popup settings.
+   * labels | title | milestone | assignees | reviewers | referenced | comments
+   * — each true = tip on / rows shown. Synced with conversation tip row + popup.
    */
   timelineVisibility: {
     labels: true,
     title: true,
     milestone: true,
+    assignees: true,
+    reviewers: true,
     referenced: true,
     comments: true
   }
@@ -9768,7 +9770,7 @@ async function requestEnterprisePermissions(enterpriseHosts) {
     });
   });
 }
-var MSG = {
+var MSG2 = {
   /** Lightweight wake / health check (content scripts retry against this). */
   PING: "PR_TREE_PING",
   TOKEN_STATUS: "PR_TREE_TOKEN_STATUS",
@@ -9877,34 +9879,19 @@ try {
 } catch {
 }
 void rehydrateEnterpriseScripts();
-function getRlMem() {
-  const g = globalThis;
-  if (!g.__prpRlMem) {
-    g.__prpRlMem = {
-      pluginEnabled: true,
-      state: null,
-      loaded: false,
-      saveTimer: null
-    };
-  }
-  return g.__prpRlMem;
-}
-var rlMem = new Proxy({}, {
-  get(_t, prop) {
-    return getRlMem()[prop];
-  },
-  set(_t, prop, value) {
-    getRlMem()[prop] = value;
-    return true;
-  }
-});
-var activeFetchControllers = /* @__PURE__ */ new Map();
-var preCancelledFetchIds = /* @__PURE__ */ new Set();
 function makeAbortError() {
   const err = new Error("The operation was aborted.");
   err.name = "AbortError";
   return err;
 }
+var rlMem = {
+  pluginEnabled: true,
+  state: null,
+  loaded: false,
+  saveTimer: null
+};
+var activeFetchControllers = /* @__PURE__ */ new Map();
+var preCancelledFetchIds = /* @__PURE__ */ new Set();
 function rawBrowserFetch() {
   return globalThis.fetch.bind(globalThis);
 }
@@ -9941,13 +9928,10 @@ function schedulePersistRateLimitState() {
     if (!st) return;
     void PRTreeStorage.setRateLimitState(st).then(() => {
       try {
-        const msg = {
-          type: "PR_TREE_RATE_LIMIT_CHANGED",
+        broadcastToGithubTabs({
+          type: MSG.RATE_LIMIT_CHANGED,
           state: st,
           pluginEnabled: rlMem.pluginEnabled
-        };
-        chrome.runtime.sendMessage(msg, () => {
-          void chrome.runtime.lastError;
         });
       } catch {
       }
@@ -10175,7 +10159,7 @@ function applyRateLimitStateToRlMem(raw) {
   } catch {
   }
 }
-function broadcastToGithubTabs(message) {
+function broadcastToGithubTabs2(message) {
   try {
     chrome.runtime.sendMessage(message, () => {
       void chrome.runtime.lastError;
@@ -10201,10 +10185,10 @@ function broadcastToGithubTabs(message) {
   }
 }
 function broadcastTokenChanged() {
-  broadcastToGithubTabs({ type: MSG.TOKEN_CHANGED });
+  broadcastToGithubTabs2({ type: MSG2.TOKEN_CHANGED });
 }
 function broadcastPrefsChanged(prefs) {
-  broadcastToGithubTabs({ type: MSG.PREFS_CHANGED, prefs });
+  broadcastToGithubTabs2({ type: MSG2.PREFS_CHANGED, prefs });
 }
 function clearDetailCacheOnGithubTabs() {
   return new Promise((resolve) => {
@@ -10231,7 +10215,7 @@ function clearDetailCacheOnGithubTabs() {
             try {
               chrome.tabs.sendMessage(
                 tab.id,
-                { type: MSG.CLEAR_DETAIL_CACHE },
+                { type: MSG2.CLEAR_DETAIL_CACHE },
                 (res) => {
                   const err = chrome.runtime.lastError;
                   if (err || !res?.ok) failed += 1;
@@ -10259,7 +10243,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     broadcastTokenChanged();
   }
   if (changes[PRTreeStorage.HOST_ACCOUNTS_KEY]) {
-    broadcastToGithubTabs({ type: MSG.HOST_ACCOUNTS_CHANGED });
+    broadcastToGithubTabs2({ type: MSG2.HOST_ACCOUNTS_CHANGED });
     broadcastTokenChanged();
     void registeredEnterpriseHosts().then(
       (hosts) => syncEnterpriseContentScripts(hosts)
@@ -10283,7 +10267,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 async function handleMessagePartA(message) {
   const apiCtx = apiCtxFromMessage(message || {});
   switch (message.type) {
-    case MSG.PING: {
+    case MSG2.PING: {
       return {
         ok: true,
         pong: true,
@@ -10292,7 +10276,7 @@ async function handleMessagePartA(message) {
         hasEndpoints: typeof PRGithubEndpoints?.resolveGithubEndpoints === "function"
       };
     }
-    case MSG.TOKEN_STATUS: {
+    case MSG2.TOKEN_STATUS: {
       const webHost = message.webHost || message.webOrigin || "github.com";
       const sel = await PRTreeStorage.getTokenForWebHost(webHost);
       if (!sel.token) {
@@ -10312,16 +10296,16 @@ async function handleMessagePartA(message) {
         host: sel.host
       };
     }
-    case MSG.TOKEN_SET: {
+    case MSG2.TOKEN_SET: {
       await PRTreeStorage.setGithubToken(message.token || "");
       const status = await PRTreeStorage.getGithubTokenStatus();
       return { ok: true, ...status };
     }
-    case MSG.TOKEN_CLEAR: {
+    case MSG2.TOKEN_CLEAR: {
       await PRTreeStorage.setGithubToken("");
       return { ok: true, configured: false, mask: "" };
     }
-    case MSG.PREFS_GET: {
+    case MSG2.PREFS_GET: {
       const prefs = await PRTreeStorage.getExtensionPrefs();
       const hostAccounts = await PRTreeStorage.getHostAccountsPublic();
       let endpoints = null;
@@ -10348,7 +10332,7 @@ async function handleMessagePartA(message) {
         pluginEnabled: prefs?.pluginEnabled !== false
       };
     }
-    case MSG.PREFS_SET: {
+    case MSG2.PREFS_SET: {
       const patch = message.prefs || message.patch || {};
       if (patch && typeof patch === "object" && "enterpriseWebHosts" in patch) {
         delete patch.enterpriseWebHosts;
@@ -10371,7 +10355,7 @@ async function handleMessagePartA(message) {
       rlMem.loaded = true;
       return { ok: true, prefs, rateLimit: rlMem.state };
     }
-    case MSG.RATE_LIMIT_GET: {
+    case MSG2.RATE_LIMIT_GET: {
       await ensureRateLimitMem();
       const RL = rateLimitApi();
       if (typeof RL?.clearExpiredRateDisables === "function") {
@@ -10388,28 +10372,28 @@ async function handleMessagePartA(message) {
         gqlCostBuild: "gql-cost-v1"
       };
     }
-    case MSG.GQL_COST_LOG_GET: {
+    case MSG2.GQL_COST_LOG_GET: {
       const log = typeof PRTreeFetch?.getGraphqlCostLog === "function" ? PRTreeFetch.getGraphqlCostLog() : [];
       const summary = typeof PRTreeFetch?.summarizeGraphqlCostLog === "function" ? PRTreeFetch.summarizeGraphqlCostLog() : { totalCalls: 0, totalCost: 0, unknownCostCalls: 0, byOp: [] };
       return { ok: true, log, summary, gqlCostBuild: "gql-cost-v1" };
     }
-    case MSG.GQL_COST_LOG_CLEAR: {
+    case MSG2.GQL_COST_LOG_CLEAR: {
       if (typeof PRTreeFetch?.clearGraphqlCostLog === "function") {
         PRTreeFetch.clearGraphqlCostLog();
       }
       return { ok: true };
     }
-    case MSG.ONBOARDING_GET: {
+    case MSG2.ONBOARDING_GET: {
       const completed = await PRTreeStorage.getOnboardingCompleted();
       return { ok: true, completed: Boolean(completed) };
     }
-    case MSG.ONBOARDING_SET: {
+    case MSG2.ONBOARDING_SET: {
       const completed = await PRTreeStorage.setOnboardingCompleted(
         message.completed !== false && message.completed !== 0
       );
       return { ok: true, completed: Boolean(completed) };
     }
-    case MSG.HOST_ACCOUNTS_LIST: {
+    case MSG2.HOST_ACCOUNTS_LIST: {
       const accounts = await PRTreeStorage.getHostAccountsPublic();
       return {
         ok: true,
@@ -10417,7 +10401,7 @@ async function handleMessagePartA(message) {
         max: PRGithubEndpoints.MAX_HOST_ACCOUNTS || 3
       };
     }
-    case MSG.HOST_ACCOUNT_ADD: {
+    case MSG2.HOST_ACCOUNT_ADD: {
       const result = await PRTreeStorage.registerHostAccount(
         message.host,
         message.token
@@ -10446,7 +10430,7 @@ async function handleMessagePartA(message) {
         max: PRGithubEndpoints.MAX_HOST_ACCOUNTS || 3
       };
     }
-    case MSG.HOST_ACCOUNT_REMOVE: {
+    case MSG2.HOST_ACCOUNT_REMOVE: {
       const result = await PRTreeStorage.unregisterHostAccount(message.host);
       const hosts = result.accounts.map((a) => a.host);
       const contentScripts = await syncEnterpriseContentScripts(hosts);
@@ -10460,11 +10444,11 @@ async function handleMessagePartA(message) {
         max: PRGithubEndpoints.MAX_HOST_ACCOUNTS || 3
       };
     }
-    case MSG.CLEAR_DETAIL_CACHE: {
+    case MSG2.CLEAR_DETAIL_CACHE: {
       const result = await clearDetailCacheOnGithubTabs();
       return { ok: true, ...result };
     }
-    case MSG.FETCH_OPEN_PULLS: {
+    case MSG2.FETCH_OPEN_PULLS: {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
@@ -10486,7 +10470,7 @@ async function handleMessagePartA(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG.FETCH_DANGLING: {
+    case MSG2.FETCH_DANGLING: {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
@@ -10506,12 +10490,12 @@ async function handleMessagePartA(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG.CANCEL_FETCH: {
+    case MSG2.CANCEL_FETCH: {
       const ids = Array.isArray(message.requestIds) ? message.requestIds : message.requestId != null ? [message.requestId] : [];
       const cancelled = (message.cancelAll ? cancelAllTrackedFetches() : 0) + cancelTrackedFetches(ids);
       return { ok: true, cancelled };
     }
-    case MSG.FETCH_PR_DETAIL: {
+    case MSG2.FETCH_PR_DETAIL: {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
@@ -10535,7 +10519,7 @@ async function handleMessagePartA(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG.FETCH_REVIEW_THREADS_PAGE: {
+    case MSG2.FETCH_REVIEW_THREADS_PAGE: {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
@@ -10578,7 +10562,7 @@ async function handleMessagePartA(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG.FETCH_REVIEW_THREADS_BY_IDS: {
+    case MSG2.FETCH_REVIEW_THREADS_BY_IDS: {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
@@ -10597,7 +10581,7 @@ async function handleMessagePartA(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG.FETCH_COMMENTS_PAGE: {
+    case MSG2.FETCH_COMMENTS_PAGE: {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
@@ -10624,7 +10608,7 @@ async function handleMessagePartA(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG.FETCH_COMPARE_FILES: {
+    case MSG2.FETCH_COMPARE_FILES: {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
@@ -10645,7 +10629,7 @@ async function handleMessagePartA(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG.POST_ISSUE_COMMENT: {
+    case MSG2.POST_ISSUE_COMMENT: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to post comments");
       const result = await PRTreeFetch.postIssueComment(
@@ -10659,7 +10643,7 @@ async function handleMessagePartA(message) {
       );
       return { ok: true, result };
     }
-    case MSG.SUBMIT_REVIEW: {
+    case MSG2.SUBMIT_REVIEW: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to submit reviews");
       const result = await PRTreeFetch.submitPullReview(
@@ -10678,7 +10662,7 @@ async function handleMessagePartA(message) {
       );
       return { ok: true, result };
     }
-    case MSG.SUBMIT_PENDING_REVIEW: {
+    case MSG2.SUBMIT_PENDING_REVIEW: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to submit pending reviews");
       const result = await PRTreeFetch.submitPendingPullReview(
@@ -10693,7 +10677,7 @@ async function handleMessagePartA(message) {
       );
       return { ok: true, result };
     }
-    case MSG.DELETE_PENDING_REVIEW: {
+    case MSG2.DELETE_PENDING_REVIEW: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to discard pending reviews");
       const result = await PRTreeFetch.deletePendingPullReview(
@@ -10707,7 +10691,7 @@ async function handleMessagePartA(message) {
       );
       return { ok: true, result };
     }
-    case MSG.POST_REVIEW_COMMENT: {
+    case MSG2.POST_REVIEW_COMMENT: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to post review comments");
       const result = await PRTreeFetch.postReviewComment(
@@ -10731,7 +10715,7 @@ async function handleMessagePartA(message) {
       );
       return { ok: true, result };
     }
-    case MSG.REPLY_REVIEW_COMMENT: {
+    case MSG2.REPLY_REVIEW_COMMENT: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to reply to review comments");
       const result = await PRTreeFetch.replyToReviewComment(
@@ -10755,7 +10739,7 @@ async function handleMessagePartA(message) {
       );
       return { ok: true, result };
     }
-    case MSG.RESOLVE_REVIEW_THREAD: {
+    case MSG2.RESOLVE_REVIEW_THREAD: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to resolve review threads");
       const result = await PRTreeFetch.resolveReviewThread(
@@ -10767,7 +10751,7 @@ async function handleMessagePartA(message) {
       );
       return { ok: true, result };
     }
-    case MSG.UPDATE_PULL_STATE: {
+    case MSG2.UPDATE_PULL_STATE: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to close or reopen pull requests");
       const result = await PRTreeFetch.updatePullState(
@@ -10781,7 +10765,7 @@ async function handleMessagePartA(message) {
       );
       return { ok: true, result };
     }
-    case MSG.DELETE_REVIEW_COMMENT: {
+    case MSG2.DELETE_REVIEW_COMMENT: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to delete review comments");
       const result = await PRTreeFetch.deleteReviewComment(
@@ -10794,7 +10778,7 @@ async function handleMessagePartA(message) {
       );
       return { ok: true, result };
     }
-    case MSG.DELETE_ISSUE_COMMENT: {
+    case MSG2.DELETE_ISSUE_COMMENT: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to delete comments");
       const result = await PRTreeFetch.deleteIssueComment(
@@ -10807,7 +10791,7 @@ async function handleMessagePartA(message) {
       );
       return { ok: true, result };
     }
-    case MSG.TOGGLE_COMMENT_REACTION: {
+    case MSG2.TOGGLE_COMMENT_REACTION: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to react on comments");
       if (typeof PRTreeFetch.toggleCommentReaction !== "function") {
@@ -10824,7 +10808,7 @@ async function handleMessagePartA(message) {
       );
       return { ok: true, result };
     }
-    case MSG.FETCH_REACTABLE_REACTORS: {
+    case MSG2.FETCH_REACTABLE_REACTORS: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to load reaction users");
       if (typeof PRTreeFetch.fetchReactableReactors !== "function") {
@@ -10849,7 +10833,7 @@ async function handleMessagePartA(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG.UPDATE_PULL: {
+    case MSG2.UPDATE_PULL: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to update pull request");
       const result = await PRTreeFetch.updatePullRequest(
@@ -10870,7 +10854,7 @@ async function handleMessagePartA(message) {
 async function handleMessagePartB(message) {
   const apiCtx = apiCtxFromMessage(message || {});
   switch (message.type) {
-    case MSG.EDIT_ISSUE_COMMENT: {
+    case MSG2.EDIT_ISSUE_COMMENT: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to edit comments");
       const result = await PRTreeFetch.editIssueComment(
@@ -10884,7 +10868,7 @@ async function handleMessagePartB(message) {
       );
       return { ok: true, result };
     }
-    case MSG.EDIT_REVIEW_COMMENT: {
+    case MSG2.EDIT_REVIEW_COMMENT: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to edit review comments");
       const result = await PRTreeFetch.editReviewComment(
@@ -10898,7 +10882,7 @@ async function handleMessagePartB(message) {
       );
       return { ok: true, result };
     }
-    case MSG.REQUEST_REVIEWERS: {
+    case MSG2.REQUEST_REVIEWERS: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to request reviewers");
       const result = await PRTreeFetch.requestReviewers(
@@ -10915,7 +10899,7 @@ async function handleMessagePartB(message) {
       );
       return { ok: true, result };
     }
-    case MSG.REMOVE_REVIEWERS: {
+    case MSG2.REMOVE_REVIEWERS: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to remove reviewers");
       const result = await PRTreeFetch.removeReviewers(
@@ -10932,7 +10916,7 @@ async function handleMessagePartB(message) {
       );
       return { ok: true, result };
     }
-    case MSG.ADD_ASSIGNEES: {
+    case MSG2.ADD_ASSIGNEES: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to add assignees");
       const result = await PRTreeFetch.addAssignees(
@@ -10946,7 +10930,7 @@ async function handleMessagePartB(message) {
       );
       return { ok: true, result };
     }
-    case MSG.REMOVE_ASSIGNEES: {
+    case MSG2.REMOVE_ASSIGNEES: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to remove assignees");
       const result = await PRTreeFetch.removeAssignees(
@@ -10960,7 +10944,7 @@ async function handleMessagePartB(message) {
       );
       return { ok: true, result };
     }
-    case MSG.SET_LABELS: {
+    case MSG2.SET_LABELS: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to set labels");
       const result = await PRTreeFetch.setIssueLabels(
@@ -10974,7 +10958,7 @@ async function handleMessagePartB(message) {
       );
       return { ok: true, result };
     }
-    case MSG.FETCH_REPO_LABELS: {
+    case MSG2.FETCH_REPO_LABELS: {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
@@ -10996,7 +10980,7 @@ async function handleMessagePartB(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG.CREATE_REPO_LABEL: {
+    case MSG2.CREATE_REPO_LABEL: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to create labels");
       const result = await PRTreeFetch.createRepoLabel(
@@ -11013,7 +10997,7 @@ async function handleMessagePartB(message) {
       );
       return { ok: true, result };
     }
-    case MSG.FETCH_REPO_MILESTONES: {
+    case MSG2.FETCH_REPO_MILESTONES: {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
@@ -11036,7 +11020,7 @@ async function handleMessagePartB(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG.CREATE_REPO_MILESTONE: {
+    case MSG2.CREATE_REPO_MILESTONE: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to create milestones");
       const result = await PRTreeFetch.createRepoMilestone(
@@ -11053,7 +11037,7 @@ async function handleMessagePartB(message) {
       );
       return { ok: true, result };
     }
-    case MSG.FETCH_REPO_TAGS: {
+    case MSG2.FETCH_REPO_TAGS: {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
@@ -11075,7 +11059,7 @@ async function handleMessagePartB(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG.FETCH_TAGS_FOR_COMMITS: {
+    case MSG2.FETCH_TAGS_FOR_COMMITS: {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
@@ -11098,7 +11082,7 @@ async function handleMessagePartB(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG.FETCH_ALL_PR_COMMITS: {
+    case MSG2.FETCH_ALL_PR_COMMITS: {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
@@ -11118,7 +11102,7 @@ async function handleMessagePartB(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG.FETCH_PR_COMMITS: {
+    case MSG2.FETCH_PR_COMMITS: {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
@@ -11138,7 +11122,7 @@ async function handleMessagePartB(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG.FETCH_PR_FILES: {
+    case MSG2.FETCH_PR_FILES: {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
@@ -11166,7 +11150,7 @@ async function handleMessagePartB(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG.FETCH_PR_ISSUE_COMMENTS: {
+    case MSG2.FETCH_PR_ISSUE_COMMENTS: {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
@@ -11186,7 +11170,7 @@ async function handleMessagePartB(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG.FETCH_PR_TIMELINE_EVENTS: {
+    case MSG2.FETCH_PR_TIMELINE_EVENTS: {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
@@ -11206,7 +11190,7 @@ async function handleMessagePartB(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG.FETCH_PR_HEAD_PROBE: {
+    case MSG2.FETCH_PR_HEAD_PROBE: {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
@@ -11233,7 +11217,7 @@ async function handleMessagePartB(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG.FETCH_PR_REVIEWS: {
+    case MSG2.FETCH_PR_REVIEWS: {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
@@ -11253,7 +11237,7 @@ async function handleMessagePartB(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG.FETCH_PR_CHECKS: {
+    case MSG2.FETCH_PR_CHECKS: {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
@@ -11273,7 +11257,7 @@ async function handleMessagePartB(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG.FETCH_PR_DEVELOPMENT: {
+    case MSG2.FETCH_PR_DEVELOPMENT: {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
@@ -11293,7 +11277,7 @@ async function handleMessagePartB(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG.FETCH_ALL_PR_FILES: {
+    case MSG2.FETCH_ALL_PR_FILES: {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
@@ -11313,7 +11297,7 @@ async function handleMessagePartB(message) {
         endTrackedFetch(tracked.requestId);
       }
     }
-    case MSG.UPLOAD_REPO_FILE: {
+    case MSG2.UPLOAD_REPO_FILE: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to upload files");
       const result = await PRTreeFetch.uploadRepoFile(
@@ -11331,7 +11315,7 @@ async function handleMessagePartB(message) {
       );
       return { ok: true, result };
     }
-    case MSG.APPLY_SUGGESTION: {
+    case MSG2.APPLY_SUGGESTION: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to apply suggestions");
       const result = await PRTreeFetch.applyReviewSuggestion(
@@ -11351,7 +11335,7 @@ async function handleMessagePartB(message) {
       );
       return { ok: true, result };
     }
-    case MSG.GET_REPO_FILE_TEXT: {
+    case MSG2.GET_REPO_FILE_TEXT: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to read files");
       const result = await PRTreeFetch.getRepoFileText(
@@ -11367,7 +11351,7 @@ async function handleMessagePartB(message) {
       );
       return { ok: true, result };
     }
-    case MSG.MERGE_PULL: {
+    case MSG2.MERGE_PULL: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to merge");
       const result = await PRTreeFetch.mergePullRequest(
@@ -11385,7 +11369,7 @@ async function handleMessagePartB(message) {
       );
       return { ok: true, result };
     }
-    case MSG.UPDATE_BRANCH: {
+    case MSG2.UPDATE_BRANCH: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to update branch");
       const result = await PRTreeFetch.updatePullBranch(
@@ -11399,7 +11383,7 @@ async function handleMessagePartB(message) {
       );
       return { ok: true, result };
     }
-    case MSG.DELETE_HEAD_BRANCH: {
+    case MSG2.DELETE_HEAD_BRANCH: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to delete branch");
       const result = await PRTreeFetch.deleteHeadBranch(
@@ -11412,7 +11396,7 @@ async function handleMessagePartB(message) {
       );
       return { ok: true, result };
     }
-    case MSG.FETCH_VIEWER_VIEWED_PATHS: {
+    case MSG2.FETCH_VIEWER_VIEWED_PATHS: {
       const token = await tokenForMessage(message);
       if (!token) {
         return {
@@ -11430,7 +11414,7 @@ async function handleMessagePartB(message) {
       );
       return { ok: true, result };
     }
-    case MSG.MARK_FILE_VIEWED: {
+    case MSG2.MARK_FILE_VIEWED: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to mark file viewed");
       const result = await PRTreeFetch.markFileAsViewed(
@@ -11442,7 +11426,7 @@ async function handleMessagePartB(message) {
       );
       return { ok: true, result };
     }
-    case MSG.UNMARK_FILE_VIEWED: {
+    case MSG2.UNMARK_FILE_VIEWED: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to unmark file viewed");
       const result = await PRTreeFetch.unmarkFileAsViewed(
@@ -11454,7 +11438,7 @@ async function handleMessagePartB(message) {
       );
       return { ok: true, result };
     }
-    case MSG.SET_SUBSCRIPTION: {
+    case MSG2.SET_SUBSCRIPTION: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required for notifications");
       const result = await PRTreeFetch.setIssueSubscription(
@@ -11472,7 +11456,7 @@ async function handleMessagePartB(message) {
       );
       return { ok: true, result };
     }
-    case MSG.DELETE_SUBSCRIPTION: {
+    case MSG2.DELETE_SUBSCRIPTION: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required for notifications");
       const result = await PRTreeFetch.deleteIssueSubscription(
@@ -11485,7 +11469,7 @@ async function handleMessagePartB(message) {
       );
       return { ok: true, result };
     }
-    case MSG.SET_MILESTONE: {
+    case MSG2.SET_MILESTONE: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to set milestone");
       const result = await PRTreeFetch.setIssueMilestone(
@@ -11499,7 +11483,7 @@ async function handleMessagePartB(message) {
       );
       return { ok: true, result };
     }
-    case MSG.SET_DRAFT_STAGE: {
+    case MSG2.SET_DRAFT_STAGE: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error("GitHub PAT required to change draft stage");
       const result = await PRTreeFetch.setPullRequestDraftStage(
@@ -11524,13 +11508,13 @@ async function handleMessage(message) {
   return handleMessagePartB(message);
 }
 chrome.runtime.onMessage.addListener((message, _sender) => {
-  if (message?.type === MSG.TOKEN_CHANGED) {
+  if (message?.type === MSG2.TOKEN_CHANGED) {
     return false;
   }
   if (!message || typeof message.type !== "string") {
     return Promise.resolve({ ok: false, error: "invalid message" });
   }
-  if (message.type === MSG.CANCEL_FETCH || message.type === MSG.PING) {
+  if (message.type === MSG2.CANCEL_FETCH || message.type === MSG2.PING) {
     return Promise.resolve().then(() => handleMessage(message)).catch((err) => ({
       ok: false,
       error: err?.message || String(err),
