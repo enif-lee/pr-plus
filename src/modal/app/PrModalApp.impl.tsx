@@ -3726,7 +3726,11 @@ export function PrModalApp({
   }
 
   function onToggleDiff() {
-    if (layoutMode === LAYOUT_DIFF) collapseDiff();
+    // Live store — avoid stale render-closure layoutMode under key-hold /
+    // peer-opt → runPaletteCommand paths (monitor fired but layout stuck).
+    const live =
+      useModalStore.getState().layoutMode || layoutMode;
+    if (live === LAYOUT_DIFF) collapseDiff();
     else expandDiff();
   }
 
@@ -4953,8 +4957,18 @@ export function PrModalApp({
         expandActiveFile: () => setActiveFileCollapse(false),
         collapseFold,
         expandFold,
-        stepNavPrev: () => navComment(-1),
-        stepNavNext: () => navComment(1),
+        stepNavPrev: () => {
+          if (useModalStore.getState().searchOpen) navSearch(-1);
+          else if (useModalStore.getState().layoutMode === LAYOUT_DIFF) {
+            navComment(-1);
+          } else navConversationComment(-1);
+        },
+        stepNavNext: () => {
+          if (useModalStore.getState().searchOpen) navSearch(1);
+          else if (useModalStore.getState().layoutMode === LAYOUT_DIFF) {
+            navComment(1);
+          } else navConversationComment(1);
+        },
         scrollDiffPage,
         optArrowScrollSelect,
         toggleViewedActiveFile,
@@ -4971,7 +4985,25 @@ export function PrModalApp({
         focusedThreadResolve,
         scrollConversationPanel,
         navConversationComment,
+        navComment,
+        navSearch,
         navFile,
+        runContextThreadAction,
+        searchOpen,
+        searchInputRef,
+        setTitleEditSignal,
+        setEditingBody,
+        setSelectionIslandPhase,
+        setShowSelectionComposer,
+        setPicker,
+        closePicker,
+        useModalStore,
+        uiRef,
+        onToggleShellFullscreen: () => {
+          if (!isEmbed) {
+            setShellFullscreen((prev) => toggleShellFullscreen(prev));
+          }
+        },
         moveSelectionUp: () => applySelectionKeyboardMove(-1, false),
         moveSelectionDown: () => applySelectionKeyboardMove(1, false),
         extendSelectionUp: () => applySelectionKeyboardMove(-1, true),
@@ -6693,13 +6725,43 @@ export function PrModalApp({
               return;
             }
           }
-          // Route through palette runner (merge confirm, etc.)
-          act.runPaletteCommand?.({
-            action: peer.action,
-            payload: peer.payload || {},
-            id: peer.id,
-            title: peer.title,
-          });
+          // High-traffic nav peers: call act handlers directly. Avoids
+          // runPaletteCommand ReferenceErrors / missing deps killing the chord
+          // after the monitor already reported a successful fire.
+          const peerAct = String(peer.action || '');
+          if (peerAct === 'toggleDiff') {
+            act.onToggleDiff?.();
+            return;
+          }
+          if (peerAct === 'toggleSidePanel') {
+            act.toggleSidePanel?.();
+            return;
+          }
+          if (peerAct === 'toggleFullscreen') {
+            if (!isEmbed) {
+              setShellFullscreen((prev) => toggleShellFullscreen(prev));
+            }
+            return;
+          }
+          // Route through palette runner (merge confirm, pickers, etc.)
+          try {
+            act.runPaletteCommand?.({
+              action: peer.action,
+              payload: peer.payload || {},
+              id: peer.id,
+              title: peer.title,
+            });
+          } catch (err) {
+            try {
+              console.warn(
+                '[pr-plus] runPaletteCommand failed:',
+                peerAct,
+                err?.message || err
+              );
+            } catch {
+              /* ignore */
+            }
+          }
           return;
         }
       }
@@ -6794,6 +6856,10 @@ export function PrModalApp({
       }
       // Bottom-right monitor — only real fires (resolved + about to run)
       reportShortcutAction(String(action));
+
+      // Prefer live store for layout-gated chords (uiRef can lag under hold)
+      const liveLayoutMode =
+        useModalStore.getState().layoutMode || ui.layoutMode;
 
       switch (action) {
         case 'openPalette':
@@ -6970,7 +7036,7 @@ export function PrModalApp({
           // Find → Diff threads → Conversation comments (⌥K)
           if (ui.searchOpen) {
             act.navSearch?.(-1);
-          } else if (ui.layoutMode === LAYOUT_DIFF) {
+          } else if (liveLayoutMode === LAYOUT_DIFF) {
             act.navComment?.(-1);
           } else {
             act.navConversationComment?.(-1);
@@ -6980,17 +7046,17 @@ export function PrModalApp({
           // Find → Diff threads → Conversation comments (⌥J)
           if (ui.searchOpen) {
             act.navSearch?.(1);
-          } else if (ui.layoutMode === LAYOUT_DIFF) {
+          } else if (liveLayoutMode === LAYOUT_DIFF) {
             act.navComment?.(1);
           } else {
             act.navConversationComment?.(1);
           }
           break;
         case 'navFilePrev':
-          if (ui.layoutMode === LAYOUT_DIFF) act.navFile?.(-1);
+          if (liveLayoutMode === LAYOUT_DIFF) act.navFile?.(-1);
           break;
         case 'navFileNext':
-          if (ui.layoutMode === LAYOUT_DIFF) act.navFile?.(1);
+          if (liveLayoutMode === LAYOUT_DIFF) act.navFile?.(1);
           break;
         case 'scrollDiffPagePrev':
           if (

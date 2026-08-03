@@ -46,11 +46,16 @@ const DEFAULT_PREFS = {
     labels: true,
     title: true,
     milestone: true,
+    assignees: true,
+    reviewers: true,
     referenced: true,
     comments: true,
   },
 };
 
+const prefTlAll = document.getElementById(
+  'pref-tl-all'
+) as HTMLInputElement | null;
 const prefTlLabels = document.getElementById(
   'pref-tl-labels'
 ) as HTMLInputElement | null;
@@ -60,6 +65,12 @@ const prefTlTitle = document.getElementById(
 const prefTlMilestone = document.getElementById(
   'pref-tl-milestone'
 ) as HTMLInputElement | null;
+const prefTlAssignees = document.getElementById(
+  'pref-tl-assignees'
+) as HTMLInputElement | null;
+const prefTlReviewers = document.getElementById(
+  'pref-tl-reviewers'
+) as HTMLInputElement | null;
 const prefTlReferenced = document.getElementById(
   'pref-tl-referenced'
 ) as HTMLInputElement | null;
@@ -67,15 +78,58 @@ const prefTlComments = document.getElementById(
   'pref-tl-comments'
 ) as HTMLInputElement | null;
 
+/** Category checkboxes only (not All). */
+const PREF_TL_CATEGORY_INPUTS = () =>
+  [
+    prefTlLabels,
+    prefTlTitle,
+    prefTlMilestone,
+    prefTlAssignees,
+    prefTlReviewers,
+    prefTlReferenced,
+    prefTlComments,
+  ].filter(Boolean) as HTMLInputElement[];
+
 function normalizeTimelineVisibilityPopup(raw: any) {
   const src = raw && typeof raw === 'object' ? raw : {};
   return {
     labels: src.labels !== false,
     title: src.title !== false,
     milestone: src.milestone !== false,
+    assignees: src.assignees !== false,
+    reviewers: src.reviewers !== false,
     referenced: src.referenced !== false,
     comments: src.comments !== false,
   };
+}
+
+function isTimelineVisibilityAllOnPopup(tl: {
+  labels: boolean;
+  title: boolean;
+  milestone: boolean;
+  assignees: boolean;
+  reviewers: boolean;
+  referenced: boolean;
+  comments: boolean;
+}): boolean {
+  return (
+    tl.labels &&
+    tl.title &&
+    tl.milestone &&
+    tl.assignees &&
+    tl.reviewers &&
+    tl.referenced &&
+    tl.comments
+  );
+}
+
+/** Sync All checkbox from current category inputs (no save). */
+function syncTimelineAllCheckboxFromCategories() {
+  if (!prefTlAll) return;
+  const cats = PREF_TL_CATEGORY_INPUTS();
+  prefTlAll.checked =
+    cats.length > 0 && cats.every((el) => Boolean(el.checked));
+  prefTlAll.indeterminate = false;
 }
 
 function normalizeShortcutMonitorSize(raw: unknown): string {
@@ -138,8 +192,14 @@ function renderPrefs(prefs: any) {
   if (prefTlLabels) prefTlLabels.checked = tl.labels;
   if (prefTlTitle) prefTlTitle.checked = tl.title;
   if (prefTlMilestone) prefTlMilestone.checked = tl.milestone;
+  if (prefTlAssignees) prefTlAssignees.checked = tl.assignees;
+  if (prefTlReviewers) prefTlReviewers.checked = tl.reviewers;
   if (prefTlReferenced) prefTlReferenced.checked = tl.referenced;
   if (prefTlComments) prefTlComments.checked = tl.comments;
+  if (prefTlAll) {
+    prefTlAll.checked = isTimelineVisibilityAllOnPopup(tl);
+    prefTlAll.indeterminate = false;
+  }
 }
 
 function rateLimitBarPercent(snap: any): number {
@@ -432,6 +492,8 @@ async function savePrefs() {
         labels: prefTlLabels ? Boolean(prefTlLabels.checked) : true,
         title: prefTlTitle ? Boolean(prefTlTitle.checked) : true,
         milestone: prefTlMilestone ? Boolean(prefTlMilestone.checked) : true,
+        assignees: prefTlAssignees ? Boolean(prefTlAssignees.checked) : true,
+        reviewers: prefTlReviewers ? Boolean(prefTlReviewers.checked) : true,
         referenced: prefTlReferenced
           ? Boolean(prefTlReferenced.checked)
           : true,
@@ -513,11 +575,30 @@ prefSingleFileMode?.addEventListener('change', () => void savePrefs());
 prefAutoExpandFileNav?.addEventListener('change', () => void savePrefs());
 prefTreeView?.addEventListener('change', () => void savePrefs());
 prefShortcutMonitorSize?.addEventListener('change', () => void savePrefs());
-prefTlLabels?.addEventListener('change', () => void savePrefs());
-prefTlTitle?.addEventListener('change', () => void savePrefs());
-prefTlMilestone?.addEventListener('change', () => void savePrefs());
-prefTlReferenced?.addEventListener('change', () => void savePrefs());
-prefTlComments?.addEventListener('change', () => void savePrefs());
+// All master: check → every category on; uncheck → every category off
+prefTlAll?.addEventListener('change', () => {
+  const on = Boolean(prefTlAll.checked);
+  for (const el of PREF_TL_CATEGORY_INPUTS()) {
+    el.checked = on;
+  }
+  prefTlAll.indeterminate = false;
+  void savePrefs();
+});
+// Category flips: keep All in sync, then save
+for (const el of [
+  prefTlLabels,
+  prefTlTitle,
+  prefTlMilestone,
+  prefTlAssignees,
+  prefTlReviewers,
+  prefTlReferenced,
+  prefTlComments,
+]) {
+  el?.addEventListener('change', () => {
+    syncTimelineAllCheckboxFromCategories();
+    void savePrefs();
+  });
+}
 
 enterpriseHostInput?.addEventListener('input', () => {
   // @ts-expect-error classic content-script dynamic shapes

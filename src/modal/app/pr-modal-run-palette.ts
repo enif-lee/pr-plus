@@ -6,7 +6,7 @@ export function runPaletteCommand(d: Record<string, any>, cmd: any) {
     focusConversationCommentItem, clearConversationCommentFocus, applyReviewFilterToggle,
     applySelectionKeyboardMove, openSelectionComposer, copySelectionCode, copySelectionUrl,
     onToggleDiff, toggleSidePanel, setSearchOpen, setSearchQuery, setSearchHits, setSearchHitIndex,
-    toggleFullscreen, startEditTitle, startEditBody, openBasePicker, onSetDraftStage, onMergePr,
+    toggleFullscreen, onToggleShellFullscreen, startEditTitle, startEditBody, openBasePicker, onSetDraftStage, onMergePr,
     onUpdateBranch, onSubscribe, onUnsubscribe, openMilestonePicker, clearMilestone, onRerequestReview,
     openReviewerPicker, openAssigneePicker, onRemoveReviewer, onRemoveAssignee, openLabelPicker,
     onLeaveReviewAction, onClosePr, onReopenPr, applySetLabels, detail, layoutMode, LAYOUT_DIFF,
@@ -15,25 +15,49 @@ export function runPaletteCommand(d: Record<string, any>, cmd: any) {
     toggleViewedActiveFile, toggleActiveFileCollapse, contextThreadCollapse, contextThreadExpand,
     contextThreadFold, contextThreadGotoDiff, contextThreadComment, contextThreadResolve,
     focusedThreadFold, focusedThreadGotoDiff, focusedThreadComment, focusedThreadResolve,
-    scrollConversationPanel, navConversationComment, navFile, moveSelectionUp, moveSelectionDown,
+    scrollConversationPanel, navConversationComment, navComment, navSearch, navFile,
+    moveSelectionUp, moveSelectionDown,
     extendSelectionUp, extendSelectionDown, navAdjacentPrev, navAdjacentNext, openGithub,
     promptLabels, promptMilestone, promptBase, promptAddReviewer, promptRemoveReviewer,
     promptAddAssignee, promptRemoveAssignee, rerequestReview, leaveReview, mergePr, updateBranch,
     convertDraft, readyForReview, toggleDraftStage, editTitle, editBody, subscribe, unsubscribe,
     closePr, reopenPr, applySuggestion, focusComment, openStackPr, openPullRequest,
     setActiveFileCollapse, applyGotoQuery, onDiscardPendingReview, onReplyToThread, onResolveThread,
+    runContextThreadAction, searchOpen, searchInputRef, setTitleEditSignal, setEditingBody,
+    setSelectionIslandPhase, setShowSelectionComposer, setPicker, closePicker,
+    useModalStore: useModalStoreDep, uiRef, isReviewVerdictKind, isViewerPrAuthor,
+    onSetMilestone,
   } = d;
+  // Optional helpers (may be provided by App or fall back to global / no-op)
+  const runCtx =
+    typeof runContextThreadAction === 'function'
+      ? runContextThreadAction
+      : (typeof contextThreadFold === 'function'
+          ? (kind: string) => {
+              if (kind === 'fold') contextThreadFold?.();
+              else if (kind === 'gotoDiff') contextThreadGotoDiff?.();
+              else if (kind === 'comment') contextThreadComment?.();
+              else if (kind === 'resolve') contextThreadResolve?.();
+              else if (kind === 'foldCollapse') contextThreadCollapse?.();
+              else if (kind === 'foldExpand') contextThreadExpand?.();
+            }
+          : () => {});
   if (!cmd) return;
   // Help toggle keeps the palette open
   if (cmd.action === 'toggleHelp') {
-    setPaletteHelpOpen((v) => !v);
+    if (typeof setPaletteHelpOpen === 'function') setPaletteHelpOpen((v: boolean) => !v);
     return;
   }
-  setPaletteOpen(false);
-  setPaletteQuery('');
-  setPaletteHelpOpen(false);
+  if (typeof setPaletteOpen === 'function') setPaletteOpen(false);
+  if (typeof setPaletteQuery === 'function') setPaletteQuery('');
+  if (typeof setPaletteHelpOpen === 'function') setPaletteHelpOpen(false);
   const action = cmd.action;
   const p = cmd.payload || {};
+  // Live layout when store is available (stale closure safety)
+  const liveLayout =
+    (typeof useModalStoreDep?.getState === 'function'
+      ? useModalStoreDep.getState()?.layoutMode
+      : null) || layoutMode;
   switch (action) {
     case 'openPullRequest': {
       const n = Number(p.number ?? cmd.number);
@@ -89,32 +113,32 @@ export function runPaletteCommand(d: Record<string, any>, cmd: any) {
       setActiveFileCollapse(false);
       break;
     case 'contextThreadCollapse':
-      runContextThreadAction('foldCollapse');
+      runCtx('foldCollapse');
       break;
     case 'contextThreadExpand':
-      runContextThreadAction('foldExpand');
+      runCtx('foldExpand');
       break;
     case 'collapseFold':
     case 'expandFold': {
       // Fallback if resolveArrowFoldAction returned generic action names
       const collapse = action === 'collapseFold';
-      if (layoutMode === LAYOUT_DIFF) {
-        setActiveFileCollapse(collapse);
+      if (liveLayout === LAYOUT_DIFF) {
+        setActiveFileCollapse?.(collapse);
       } else {
-        runContextThreadAction(collapse ? 'foldCollapse' : 'foldExpand');
+        runCtx(collapse ? 'foldCollapse' : 'foldExpand');
       }
       break;
     }
 
     case 'stepNavPrev':
-      if (searchOpen) navSearch(-1);
-      else if (layoutMode === LAYOUT_DIFF) navComment(-1);
-      else navConversationComment(-1);
+      if (searchOpen) navSearch?.(-1);
+      else if (liveLayout === LAYOUT_DIFF) navComment?.(-1);
+      else navConversationComment?.(-1);
       break;
     case 'stepNavNext':
-      if (searchOpen) navSearch(1);
-      else if (layoutMode === LAYOUT_DIFF) navComment(1);
-      else navConversationComment(1);
+      if (searchOpen) navSearch?.(1);
+      else if (liveLayout === LAYOUT_DIFF) navComment?.(1);
+      else navConversationComment?.(1);
       break;
     case 'scrollConversationOptPrev':
       scrollConversationPanel(-1, false);
@@ -130,19 +154,19 @@ export function runPaletteCommand(d: Record<string, any>, cmd: any) {
       break;
     case 'contextThreadFold':
     case 'focusedThreadFold':
-      runContextThreadAction('fold');
+      runCtx('fold');
       break;
     case 'contextThreadGotoDiff':
     case 'focusedThreadGotoDiff':
-      runContextThreadAction('gotoDiff');
+      runCtx('gotoDiff');
       break;
     case 'contextThreadComment':
     case 'focusedThreadComment':
-      runContextThreadAction('comment');
+      runCtx('comment');
       break;
     case 'contextThreadResolve':
     case 'focusedThreadResolve':
-      runContextThreadAction('resolve');
+      runCtx('resolve');
       break;
     case 'toggleReviewFilterUnresolved':
       applyReviewFilterToggle('unresolved');
@@ -166,40 +190,58 @@ export function runPaletteCommand(d: Record<string, any>, cmd: any) {
       applySelectionKeyboardMove(1, true);
       break;
     case 'openSelectionComment':
-      setSelectionIslandPhase('comment');
-      setShowSelectionComposer(true);
+      if (typeof setSelectionIslandPhase === 'function') {
+        setSelectionIslandPhase('comment');
+      }
+      if (typeof setShowSelectionComposer === 'function') {
+        setShowSelectionComposer(true);
+      } else {
+        openSelectionComposer?.();
+      }
       break;
     case 'copySelectionCode':
-      void copySelectionCode();
+      void copySelectionCode?.();
       break;
     case 'copySelectionUrl':
-      void copySelectionUrl();
+      void copySelectionUrl?.();
       break;
     case 'toggleDiff':
-      onToggleDiff();
+      onToggleDiff?.();
       break;
     case 'toggleSidePanel':
-      toggleSidePanel();
+      toggleSidePanel?.();
       break;
     case 'openSearch':
-      setSearchOpen(true);
+      setSearchOpen?.(true);
       queueMicrotask(() => {
         try {
-          searchInputRef.current?.focus?.();
-          searchInputRef.current?.select?.();
+          searchInputRef?.current?.focus?.();
+          searchInputRef?.current?.select?.();
         } catch {
           /* ignore */
         }
       });
       break;
     case 'toggleFullscreen':
-      onToggleShellFullscreen();
+      if (typeof onToggleShellFullscreen === 'function') {
+        onToggleShellFullscreen();
+      } else if (typeof toggleFullscreen === 'function') {
+        toggleFullscreen();
+      }
       break;
     case 'editTitle':
-      setTitleEditSignal((n) => n + 1);
+      if (typeof setTitleEditSignal === 'function') {
+        setTitleEditSignal((n: number) => n + 1);
+      } else {
+        startEditTitle?.();
+      }
       break;
     case 'editBody':
-      setEditingBody(true);
+      if (typeof setEditingBody === 'function') {
+        setEditingBody(true);
+      } else {
+        startEditBody?.();
+      }
       break;
     case 'promptBase':
       openBasePicker();
@@ -304,7 +346,7 @@ export function runPaletteCommand(d: Record<string, any>, cmd: any) {
         typeof isViewerPrAuthor === 'function' &&
         isViewerPrAuthor(detail)
       ) {
-        setActionMsg('Cannot approve or request changes on your own pull request.');
+        setActionMsg?.('Cannot approve or request changes on your own pull request.');
         break;
       }
       // Finish modal already open → its capture-phase Opt chords own submit.
@@ -317,12 +359,12 @@ export function runPaletteCommand(d: Record<string, any>, cmd: any) {
       }
       // Diff: always open Finish-your-review (never direct-submit from shortcut).
       // Read live store + DOM — render-closure layoutMode can lag behind uiRef.
-      const liveLayout =
-        useModalStore.getState().layoutMode ||
-        uiRef.current?.layoutMode ||
+      const leaveLayout =
+        liveLayout ||
+        uiRef?.current?.layoutMode ||
         layoutMode;
       const diffActive =
-        liveLayout === LAYOUT_DIFF ||
+        leaveLayout === LAYOUT_DIFF ||
         (typeof document !== 'undefined' &&
           Boolean(
             document.querySelector(
@@ -338,12 +380,12 @@ export function runPaletteCommand(d: Record<string, any>, cmd: any) {
           );
         } catch {
           /* open failed — do not silent-submit */
-          setActionMsg('Could not open Finish your review.');
+          setActionMsg?.('Could not open Finish your review.');
         }
         break;
       }
       // Conversation Review tab / palette while not on Diff
-      void onLeaveReviewAction(kind);
+      void onLeaveReviewAction?.(kind);
       break;
     }
     case 'closePr':

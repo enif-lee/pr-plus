@@ -66,4 +66,20 @@ describe('fetch composition layout', () => {
     }
     expect(Object.keys(api).length).toBeGreaterThanOrEqual(90);
   });
+
+  test('pr-detail.ts imports normalizeApiCtx (no free ReferenceError in SW)', () => {
+    const src = readFileSync(resolve(fetchDir, 'pr-detail.ts'), 'utf8');
+    expect(src).toMatch(
+      /import\s*\{[\s\S]*\bnormalizeApiCtx\b[\s\S]*\}\s*from\s*['"]\.\/http['"]/
+    );
+    expect(src).toMatch(
+      /import\s*\{[\s\S]*\bgithubRestUrl\b[\s\S]*\}\s*from\s*['"]\.\/http['"]/
+    );
+    // Built bundle must define normalizeApiCtx before fetchPrDetail uses it
+    const built = readFileSync(resolve(root, 'src/fetch-pulls.js'), 'utf8');
+    const def = built.indexOf('function normalizeApiCtx');
+    const use = built.indexOf('async function fetchPrDetail');
+    expect(def).toBeGreaterThanOrEqual(0);
+    expect(use).toBeGreaterThan(def);
+  });
 });

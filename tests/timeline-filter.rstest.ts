@@ -100,6 +100,34 @@ function mixedDetail() {
         actor: 'bob',
         at: '2026-01-01T12:45:00Z',
       },
+      {
+        id: 9,
+        event: 'assigned',
+        actor: 'alice',
+        at: '2026-01-01T13:00:00Z',
+        assignee: 'carol',
+      },
+      {
+        id: 10,
+        event: 'unassigned',
+        actor: 'alice',
+        at: '2026-01-01T13:05:00Z',
+        assignee: 'dave',
+      },
+      {
+        id: 11,
+        event: 'review_requested',
+        actor: 'alice',
+        at: '2026-01-01T13:10:00Z',
+        requestedReviewer: 'erin',
+      },
+      {
+        id: 12,
+        event: 'review_request_removed',
+        actor: 'alice',
+        at: '2026-01-01T13:15:00Z',
+        requestedReviewer: 'frank',
+      },
     ],
   };
 }
@@ -111,6 +139,8 @@ describe('timelineItemCategory + filterTimelineItemsByVisibility', () => {
     expect(cats).toContain('labels');
     expect(cats).toContain('title');
     expect(cats).toContain('milestone');
+    expect(cats).toContain('assignees');
+    expect(cats).toContain('reviewers');
     expect(cats).toContain('comments');
     expect(cats).toContain('referenced');
     // closed has no tip category — always shown
@@ -118,13 +148,17 @@ describe('timelineItemCategory + filterTimelineItemsByVisibility', () => {
     expect(timelineItemCategory(closed)).toBe(null);
   });
 
-  test('short tip labels are title/label/milestone/referenced/comments', () => {
+  test('short tip labels include assignee/reviewer', () => {
     expect(TIMELINE_TIP_LABELS.labels).toBe('label');
     expect(TIMELINE_TIP_LABELS.title).toBe('title');
     expect(TIMELINE_TIP_LABELS.milestone).toBe('milestone');
+    expect(TIMELINE_TIP_LABELS.assignees).toBe('assignee');
+    expect(TIMELINE_TIP_LABELS.reviewers).toBe('reviewer');
     expect(TIMELINE_TIP_LABELS.referenced).toBe('referenced');
     expect(TIMELINE_TIP_LABELS.comments).toBe('comments');
     expect(TIMELINE_CATEGORY_IDS).toContain('referenced');
+    expect(TIMELINE_CATEGORY_IDS).toContain('assignees');
+    expect(TIMELINE_CATEGORY_IDS).toContain('reviewers');
   });
 
   test('referenced / cross-referenced map to referenced category', () => {
@@ -142,6 +176,27 @@ describe('timelineItemCategory + filterTimelineItemsByVisibility', () => {
     ).toBe('referenced');
   });
 
+  test('assigned / review_requested map to assignees / reviewers', () => {
+    expect(
+      timelineItemCategory({ kind: 'timeline-event', event: 'assigned' })
+    ).toBe('assignees');
+    expect(
+      timelineItemCategory({ kind: 'timeline-event', event: 'unassigned' })
+    ).toBe('assignees');
+    expect(
+      timelineItemCategory({
+        kind: 'timeline-event',
+        event: 'review_requested',
+      })
+    ).toBe('reviewers');
+    expect(
+      timelineItemCategory({
+        kind: 'timeline-event',
+        event: 'review_request_removed',
+      })
+    ).toBe('reviewers');
+  });
+
   test('hiding each category removes only that kind', () => {
     const items = buildConversationTimeline(mixedDetail());
     const total = items.length;
@@ -150,6 +205,8 @@ describe('timelineItemCategory + filterTimelineItemsByVisibility', () => {
       'labels',
       'title',
       'milestone',
+      'assignees',
+      'reviewers',
       'referenced',
       'comments',
     ] as const) {
@@ -182,6 +239,8 @@ describe('timelineItemCategory + filterTimelineItemsByVisibility', () => {
         labels: false,
         title: false,
         milestone: true,
+        assignees: false,
+        reviewers: false,
         referenced: false,
         comments: true,
       },
@@ -190,6 +249,8 @@ describe('timelineItemCategory + filterTimelineItemsByVisibility', () => {
     expect(isTimelineVisibilityAllOn(off)).toBe(true);
     expect(off.labels).toBe(true);
     expect(off.title).toBe(true);
+    expect(off.assignees).toBe(true);
+    expect(off.reviewers).toBe(true);
     expect(off.referenced).toBe(true);
   });
 
@@ -318,6 +379,8 @@ describe('partial fetch + lazy merge helpers', () => {
         labels: false,
         title: false,
         milestone: false,
+        assignees: false,
+        reviewers: false,
         referenced: false,
         comments: true,
       })
@@ -327,6 +390,8 @@ describe('partial fetch + lazy merge helpers', () => {
         labels: false,
         title: false,
         milestone: false,
+        assignees: false,
+        reviewers: false,
         referenced: true,
         comments: false,
       })
@@ -339,6 +404,18 @@ describe('partial fetch + lazy merge helpers', () => {
         comments: false,
       })
     ).toBe(true);
+    // assignees alone still requires system events fetch
+    expect(
+      shouldFetchSystemTimelineEvents({
+        labels: false,
+        title: false,
+        milestone: false,
+        assignees: true,
+        reviewers: false,
+        referenced: false,
+        comments: false,
+      })
+    ).toBe(true);
   });
 
   test('needsLazyTimelineEventsFetch when tip re-enabled and events empty', () => {
@@ -346,6 +423,8 @@ describe('partial fetch + lazy merge helpers', () => {
       labels: false,
       title: false,
       milestone: false,
+      assignees: false,
+      reviewers: false,
       referenced: false,
       comments: true,
     };

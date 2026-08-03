@@ -63,13 +63,15 @@ const DEFAULT_PREFS = {
   onboardingCompleted: false,
   /**
    * Conversation timeline category visibility (plugin-global).
-   * labels | title | milestone | comments — each true = tip on / rows shown.
-   * Synced with conversation tip row + popup settings.
+   * labels | title | milestone | assignees | reviewers | referenced | comments
+   * — each true = tip on / rows shown. Synced with conversation tip row + popup.
    */
   timelineVisibility: {
     labels: true,
     title: true,
     milestone: true,
+    assignees: true,
+    reviewers: true,
     referenced: true,
     comments: true,
   },

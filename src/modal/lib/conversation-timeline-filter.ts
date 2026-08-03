@@ -36,6 +36,8 @@ export const TIMELINE_CATEGORY_IDS = [
   'labels',
   'title',
   'milestone',
+  'assignees',
+  'reviewers',
   'referenced',
   'comments',
 ] as const;
@@ -53,6 +55,8 @@ export const TIMELINE_TIP_LABELS: Record<TimelineTipId, string> = {
   labels: 'label',
   title: 'title',
   milestone: 'milestone',
+  assignees: 'assignee',
+  reviewers: 'reviewer',
   referenced: 'referenced',
   comments: 'comments',
 };
@@ -62,6 +66,8 @@ export const DEFAULT_TIMELINE_VISIBILITY: Record<TimelineCategoryId, boolean> = 
   labels: true,
   title: true,
   milestone: true,
+  assignees: true,
+  reviewers: true,
   referenced: true,
   comments: true,
 };
@@ -142,6 +148,13 @@ export function timelineItemCategory(item: any): TimelineCategoryId | null {
   if (event === 'labeled' || event === 'unlabeled') return 'labels';
   if (event === 'renamed') return 'title';
   if (event === 'milestoned' || event === 'demilestoned') return 'milestone';
+  if (event === 'assigned' || event === 'unassigned') return 'assignees';
+  if (
+    event === 'review_requested' ||
+    event === 'review_request_removed'
+  ) {
+    return 'reviewers';
+  }
   // "referenced this pull request from commit" + related cross-repo mentions
   if (
     event === 'referenced' ||
@@ -177,9 +190,9 @@ export function filterTimelineItemsByVisibility(
 
 /**
  * Whether REST issue **system** timeline events should be fetched.
- * False only when labels + title + milestone + referenced are all off
- * (comments tip is independent — issue comments / review threads use other
- * endpoints).
+ * False only when all system tips are off (labels/title/milestone/assignees/
+ * reviewers/referenced). Comments tip is independent — issue comments /
+ * review threads use other endpoints.
  */
 export function shouldFetchSystemTimelineEvents(visibility: unknown): boolean {
   const vis = normalizeTimelineVisibility(visibility);
@@ -187,6 +200,8 @@ export function shouldFetchSystemTimelineEvents(visibility: unknown): boolean {
     vis.labels !== false ||
     vis.title !== false ||
     vis.milestone !== false ||
+    vis.assignees !== false ||
+    vis.reviewers !== false ||
     vis.referenced !== false
   );
 }
