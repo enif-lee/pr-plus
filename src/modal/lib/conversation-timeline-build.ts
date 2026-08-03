@@ -109,6 +109,31 @@ export function buildThreadEntry(c, children, snippetFn, files, viewerLogin, i) 
 }
 
 /**
+ * Numeric epoch ms for a timeline item timestamp (0 if missing/invalid).
+ * Prefer this over string localeCompare so ISO variants sort correctly.
+ */
+export function timelineItemTimeMs(item: any): number {
+  if (!item || typeof item !== 'object') return 0;
+  const raw =
+    item.at ||
+    item.createdAt ||
+    item.submittedAt ||
+    item.created_at ||
+    '';
+  const t = Date.parse(String(raw));
+  return Number.isFinite(t) ? t : 0;
+}
+
+/** Newest-first compare; stable secondary by key/id. */
+export function compareTimelineItemsNewestFirst(a: any, b: any): number {
+  const d = timelineItemTimeMs(b) - timelineItemTimeMs(a);
+  if (d !== 0) return d;
+  return String(b?.key || b?.id || '').localeCompare(
+    String(a?.key || a?.id || '')
+  );
+}
+
+/**
  * @param {object} detail
  * @param {{ snippetForComment?: Function }} [opts]
  * @returns {Array}
@@ -322,7 +347,7 @@ export function buildConversationTimeline(detail, opts: any = {}) {
   });
 
   // Newest first (comments, threads, and system events interleaved by time)
-  items.sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
+  items.sort(compareTimelineItemsNewestFirst);
   return items;
 }
 
@@ -402,11 +427,30 @@ export function partitionTimelineWithThreadGap(items, meta: any = null) {
     );
   }
 
+  // Cutoff = newest timestamp among oldest-window review threads. Every feed
+  // item at or before that time (system events, comments, other threads) must
+  // sit in `bottom` with those threads — otherwise old label/title/milestone
+  // rows stay in `top` above the gap while older threads go below, breaking
+  // chronological order.
+  let cutoffMs = 0;
+  for (const item of list) {
+    if (!inOldestWindow(item)) continue;
+    const t = timelineItemTimeMs(item);
+    if (t > cutoffMs) cutoffMs = t;
+  }
+
   const top = [];
   const bottom = [];
   for (const item of list) {
-    if (inOldestWindow(item)) bottom.push(item);
-    else top.push(item);
+    const t = timelineItemTimeMs(item);
+    if (
+      inOldestWindow(item) ||
+      (cutoffMs > 0 && t > 0 && t <= cutoffMs)
+    ) {
+      bottom.push(item);
+    } else {
+      top.push(item);
+    }
   }
 
   if (bottom.length === 0) {

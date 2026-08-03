@@ -2532,6 +2532,7 @@ ${body}`;
     assigneeChangeTimelineEvents: () => assigneeChangeTimelineEvents,
     buildConversationTimeline: () => buildConversationTimeline,
     buildThreadEntry: () => buildThreadEntry,
+    compareTimelineItemsNewestFirst: () => compareTimelineItemsNewestFirst,
     describeTimelineEvent: () => describeTimelineEvent,
     filterTimelineItemsByVisibility: () => filterTimelineItemsByVisibility,
     isTimelineVisibilityAllOn: () => isTimelineVisibilityAllOn,
@@ -2555,6 +2556,7 @@ ${body}`;
     timelineEventsCloseInTime: () => timelineEventsCloseInTime,
     timelineEventsNarrativelyEqual: () => timelineEventsNarrativelyEqual,
     timelineItemCategory: () => timelineItemCategory,
+    timelineItemTimeMs: () => timelineItemTimeMs,
     toggleTimelineTip: () => toggleTimelineTip
   }), module.exports = __toCommonJS(conversation_timeline_exports);
   function describeTimelineEvent(ev) {
@@ -2962,6 +2964,17 @@ ${body}`;
       canDelete: !!(viewerLogin && c.author && c.author === viewerLogin && !c.pending)
     };
   }
+  function timelineItemTimeMs(item) {
+    if (!item || typeof item != "object") return 0;
+    const raw = item.at || item.createdAt || item.submittedAt || item.created_at || "", t = Date.parse(String(raw));
+    return Number.isFinite(t) ? t : 0;
+  }
+  function compareTimelineItemsNewestFirst(a, b) {
+    const d = timelineItemTimeMs(b) - timelineItemTimeMs(a);
+    return d !== 0 ? d : String(b?.key || b?.id || "").localeCompare(
+      String(a?.key || a?.id || "")
+    );
+  }
   function buildConversationTimeline(detail, opts = {}) {
     if (!detail) return [];
     const items = [], snippetFn = typeof opts.snippetForComment == "function" ? opts.snippetForComment : typeof globalThis < "u" && globalThis.PRModalDiffSnippet?.snippetForComment ? globalThis.PRModalDiffSnippet.snippetForComment : null, files = detail.files || [], viewerLogin = detail.viewerLogin, reviewById = /* @__PURE__ */ new Map();
@@ -3068,7 +3081,7 @@ ${body}`;
     return (Array.isArray(detail.timelineEvents) ? detail.timelineEvents : []).forEach((ev, i) => {
       const item = timelineEventToItem(ev, i);
       item && items.push(item);
-    }), items.sort((a, b) => String(b.at || "").localeCompare(String(a.at || ""))), items;
+    }), items.sort(compareTimelineItemsNewestFirst), items;
   }
   function pageTimelineItems(items, opts = {}) {
     const list = Array.isArray(items) ? items : [], pageSize = Number.isFinite(opts.pageSize) && opts.pageSize > 0 ? Math.floor(opts.pageSize) : 20, page = Number.isFinite(opts.page) && opts.page > 0 ? Math.floor(opts.page) : 1, total = list.length, totalPages = Math.max(1, Math.ceil(total / pageSize) || 1), safePage = Math.min(page, totalPages), start = (safePage - 1) * pageSize, slice = list.slice(start, start + pageSize), hasNewer = safePage > 1, hasOlder = safePage < totalPages;
@@ -3104,9 +3117,17 @@ ${body}`;
       const tid = item.threadNodeId != null ? String(item.threadNodeId) : item.thread_node_id != null ? String(item.thread_node_id) : null;
       return (item.kind === "review-thread" || item.kind === "review-comment") && tid && oldestIds.has(tid);
     }
+    let cutoffMs = 0;
+    for (const item of list) {
+      if (!inOldestWindow(item)) continue;
+      const t = timelineItemTimeMs(item);
+      t > cutoffMs && (cutoffMs = t);
+    }
     const top = [], bottom = [];
-    for (const item of list)
-      inOldestWindow(item) ? bottom.push(item) : top.push(item);
+    for (const item of list) {
+      const t = timelineItemTimeMs(item);
+      inOldestWindow(item) || cutoffMs > 0 && t > 0 && t <= cutoffMs ? bottom.push(item) : top.push(item);
+    }
     return bottom.length === 0 ? {
       top: list,
       bottom: [],

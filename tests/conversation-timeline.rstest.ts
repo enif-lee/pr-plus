@@ -4,8 +4,11 @@
 import { describe, expect, test } from '@rstest/core';
 import {
   buildConversationTimeline,
+  compareTimelineItemsNewestFirst,
   describeTimelineEvent,
+  partitionTimelineWithThreadGap,
   timelineEventToItem,
+  timelineItemTimeMs,
   labelChangeTimelineEvents,
   mergeTimelineEventsById,
   milestoneChangeTimelineEvents,
@@ -234,6 +237,63 @@ describe('timelineEventToItem + buildConversationTimeline', () => {
     expect(items[0].event).toBe('ready_for_review');
     expect(items[1].event).toBe('convert_to_draft');
     expect(items[3].event).toBe('renamed');
+  });
+
+  test('ISO timestamp variants sort by real time (not string localeCompare)', () => {
+    const items = [
+      { key: 'ms', at: '2024-03-15T08:00:00.000Z' },
+      { key: 'z', at: '2024-03-15T08:00:00Z' },
+      { key: 'later', at: '2024-03-15T09:00:00Z' },
+    ].sort(compareTimelineItemsNewestFirst);
+    expect(items[0].key).toBe('later');
+    // Same instant (.000Z vs Z) — equal ms, order only by stable key secondary
+    expect(timelineItemTimeMs(items[1])).toBe(timelineItemTimeMs(items[2]));
+    expect(timelineItemTimeMs(items[0])).toBeGreaterThan(
+      timelineItemTimeMs(items[1])
+    );
+  });
+
+  test('dual-window partition keeps old system events with oldest threads', () => {
+    const items = [
+      {
+        key: 'new-comment',
+        kind: 'issue-comment',
+        id: 1,
+        at: '2024-06-01T12:00:00Z',
+      },
+      {
+        key: 'old-label',
+        kind: 'timeline-event',
+        id: 2,
+        event: 'labeled',
+        at: '2020-01-02T12:00:00Z',
+      },
+      {
+        key: 'oldest-thread',
+        kind: 'review-thread',
+        id: 3,
+        threadNodeId: 'PRRT_OLD',
+        at: '2020-01-03T12:00:00Z',
+      },
+    ].sort(compareTimelineItemsNewestFirst);
+    // Newest-first list before partition
+    expect(items.map((i) => i.key)).toEqual([
+      'new-comment',
+      'oldest-thread',
+      'old-label',
+    ]);
+    const part = partitionTimelineWithThreadGap(items, {
+      hasMore: true,
+      hiddenCount: 5,
+      oldestThreadIds: ['PRRT_OLD'],
+    });
+    expect(part.showGap).toBe(true);
+    expect(part.top.map((i: any) => i.key)).toEqual(['new-comment']);
+    // Old label must not sit above the gap while its contemporary thread is below
+    expect(part.bottom.map((i: any) => i.key)).toEqual([
+      'oldest-thread',
+      'old-label',
+    ]);
   });
 
   test('empty detail returns empty timeline', () => {
