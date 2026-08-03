@@ -28,6 +28,8 @@ const deps = [
   'modal/pure/checks.js',
   'modal/pure/rate-limit.js',
   'modal/pure/graphql-cost-log.js',
+  // Before storage — prefs normalizeTimelineVisibility uses pure when present
+  'modal/pure/conversation-timeline.js',
   'storage',
   'fetch-pulls.js',
 ];

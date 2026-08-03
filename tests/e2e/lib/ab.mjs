@@ -42,7 +42,20 @@ export function ab(args, opts = {}) {
       AGENT_BROWSER_HEADED: HEADED ? '1' : '0',
     },
   });
-  if (r.error) throw r.error;
+  // spawnSync sets r.error on timeout (ETIMEDOUT) even when the CLI may have
+  // partially succeeded. allowFail must swallow that too — otherwise waitNetwork
+  // / closeAll blow up hardLaunch soft-fail paths.
+  if (r.error) {
+    if (opts.allowFail) {
+      return {
+        status: r.status == null ? 1 : r.status,
+        stdout: (r.stdout || '').trim(),
+        stderr: (r.stderr || String(r.error.message || r.error)).trim(),
+        error: r.error,
+      };
+    }
+    throw r.error;
+  }
   if (r.status !== 0 && !opts.allowFail) {
     const err = (r.stderr || r.stdout || '').trim() || `exit ${r.status}`;
     throw new Error(`agent-browser ${args.join(' ')} failed: ${err}`);
@@ -102,7 +115,7 @@ export function ensureSingleTab() {
  * Prefer this over raw `tab new` so tests never accumulate tabs.
  */
 export function open(url) {
-  // 45s — long enough for cold GH + extension inject; short enough not to look hung.
+  // 45s covers cold GH + extension inject; hard launch may pass a higher timeout.
   const r = ab(['open', url], { timeoutMs: 45_000 });
   ensureSingleTab();
   return r;
@@ -293,12 +306,24 @@ export function waitMs(ms) {
  * Wait for document load. Prefer `load` over `networkidle` — GitHub keeps
  * long-lived sockets/polls so networkidle often burns the full timeout and
  * makes the suite look hung (90s × every navigation).
+ *
+ * If the document is already complete/interactive, return immediately — a CLI
+ * `wait --load load` after load has already fired often burns the full timeout
+ * (~12–20s × every soft-reset), which dominated suite wall time.
  */
 export function waitNetwork() {
-  // `domcontentloaded` is usually enough; fall back to fixed pause if CLI rejects it.
-  const r = ab(['wait', '--load', 'load'], { timeoutMs: 12_000, allowFail: true });
-  if (r.status !== 0) {
-    sleepSync(400);
+  try {
+    const ready = evalInPage(`document.readyState || ''`);
+    if (ready === 'complete' || ready === 'interactive') {
+      return { status: 0, stdout: String(ready), stderr: '' };
+    }
+  } catch {
+    /* fall through to CLI wait */
+  }
+  // Short budget: allowFail + ab() timeout soft-return (never throw).
+  const r = ab(['wait', '--load', 'load'], { timeoutMs: 5_000, allowFail: true });
+  if (r.status !== 0 || r.error) {
+    sleepSync(200);
   }
   return r;
 }

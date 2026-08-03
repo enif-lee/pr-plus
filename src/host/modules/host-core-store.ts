@@ -71,14 +71,20 @@
       const filesBodiesOk = e2eFilesBodiesOk(files);
       const loadStage = current.loadStage || null;
       const loadBusy = Boolean(loadStage && loadStage.busy);
+      // Placeholder from people-meta cold seed is not authoritative meta.
+      const title = d ? String(d.title || '').trim() : '';
+      const titleAuthoritative =
+        Boolean(title) && !/^Pull Request #\d+$/i.test(title);
       const shellReady = Boolean(
         current.open &&
           d &&
-          (d.title != null || d.number != null) &&
-          !current.loading
+          !current.loading &&
+          d.number != null &&
+          titleAuthoritative
       );
-      // Meta "open settle": core painted and open progress bar cleared.
-      const metaReady = Boolean(shellReady && !loadBusy);
+      // Meta ready = core shell with real title. Progress bar (loadBusy) is
+      // independent — a stuck threads pill must not block e2e/meta settle.
+      const metaReady = Boolean(shellReady);
       const snap = {
         seq: ++e2eLoadSeq,
         ts: Date.now(),

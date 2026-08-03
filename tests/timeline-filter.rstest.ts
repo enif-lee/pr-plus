@@ -233,8 +233,8 @@ describe('timelineItemCategory + filterTimelineItemsByVisibility', () => {
     expect(isTimelineVisibilityAllOn(DEFAULT_TIMELINE_VISIBILITY)).toBe(true);
   });
 
-  test('toggle all restores every category', () => {
-    const off = toggleTimelineTip(
+  test('toggle all turns every category on when any is off', () => {
+    const on = toggleTimelineTip(
       {
         labels: false,
         title: false,
@@ -246,12 +246,23 @@ describe('timelineItemCategory + filterTimelineItemsByVisibility', () => {
       },
       'all'
     );
-    expect(isTimelineVisibilityAllOn(off)).toBe(true);
-    expect(off.labels).toBe(true);
-    expect(off.title).toBe(true);
-    expect(off.assignees).toBe(true);
-    expect(off.reviewers).toBe(true);
-    expect(off.referenced).toBe(true);
+    expect(isTimelineVisibilityAllOn(on)).toBe(true);
+    expect(on.labels).toBe(true);
+    expect(on.title).toBe(true);
+    expect(on.assignees).toBe(true);
+    expect(on.reviewers).toBe(true);
+    expect(on.referenced).toBe(true);
+  });
+
+  test('toggle all turns every category off when all already on', () => {
+    const off = toggleTimelineTip(DEFAULT_TIMELINE_VISIBILITY, 'all');
+    expect(isTimelineVisibilityAllOn(off)).toBe(false);
+    for (const id of TIMELINE_CATEGORY_IDS) {
+      expect(off[id]).toBe(false);
+    }
+    // second click restores all
+    const on = toggleTimelineTip(off, 'all');
+    expect(isTimelineVisibilityAllOn(on)).toBe(true);
   });
 
   test('toggle category flips one key', () => {

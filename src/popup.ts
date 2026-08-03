@@ -78,6 +78,17 @@ const prefTlComments = document.getElementById(
   'pref-tl-comments'
 ) as HTMLInputElement | null;
 
+/** Category keys in popup order (not All). */
+const PREF_TL_CATEGORY_KEYS = [
+  'labels',
+  'title',
+  'milestone',
+  'assignees',
+  'reviewers',
+  'referenced',
+  'comments',
+] as const;
+
 /** Category checkboxes only (not All). */
 const PREF_TL_CATEGORY_INPUTS = () =>
   [
@@ -101,6 +112,29 @@ function normalizeTimelineVisibilityPopup(raw: any) {
     referenced: src.referenced !== false,
     comments: src.comments !== false,
   };
+}
+
+/** Read category map from live checkbox DOM (authoritative for save). */
+function readTimelineVisibilityFromDom(): Record<
+  (typeof PREF_TL_CATEGORY_KEYS)[number],
+  boolean
+> {
+  const byKey: Record<string, HTMLInputElement | null> = {
+    labels: prefTlLabels,
+    title: prefTlTitle,
+    milestone: prefTlMilestone,
+    assignees: prefTlAssignees,
+    reviewers: prefTlReviewers,
+    referenced: prefTlReferenced,
+    comments: prefTlComments,
+  };
+  const out: any = {};
+  for (const k of PREF_TL_CATEGORY_KEYS) {
+    const el = byKey[k];
+    // Missing DOM → true (legacy); present → exact checked state (incl. false)
+    out[k] = el ? Boolean(el.checked) : true;
+  }
+  return out;
 }
 
 function isTimelineVisibilityAllOnPopup(tl: {
@@ -488,17 +522,7 @@ async function savePrefs() {
       shortcutMonitorSize: normalizeShortcutMonitorSize(
         prefShortcutMonitorSize?.value
       ),
-      timelineVisibility: {
-        labels: prefTlLabels ? Boolean(prefTlLabels.checked) : true,
-        title: prefTlTitle ? Boolean(prefTlTitle.checked) : true,
-        milestone: prefTlMilestone ? Boolean(prefTlMilestone.checked) : true,
-        assignees: prefTlAssignees ? Boolean(prefTlAssignees.checked) : true,
-        reviewers: prefTlReviewers ? Boolean(prefTlReviewers.checked) : true,
-        referenced: prefTlReferenced
-          ? Boolean(prefTlReferenced.checked)
-          : true,
-        comments: prefTlComments ? Boolean(prefTlComments.checked) : true,
-      },
+      timelineVisibility: readTimelineVisibilityFromDom(),
     };
     const res = await send({ type: 'PR_TREE_PREFS_SET', prefs });
     if (!res?.ok && res?.error) {
@@ -582,6 +606,7 @@ prefTlAll?.addEventListener('change', () => {
     el.checked = on;
   }
   prefTlAll.indeterminate = false;
+  // Prevent double-fire if category change listeners also run
   void savePrefs();
 });
 // Category flips: keep All in sync, then save
@@ -594,7 +619,13 @@ for (const el of [
   prefTlReferenced,
   prefTlComments,
 ]) {
-  el?.addEventListener('change', () => {
+  el?.addEventListener('change', (ev) => {
+    // Stop bubbling so a parent "All" handler never re-applies defaults
+    try {
+      ev.stopPropagation();
+    } catch {
+      /* ignore */
+    }
     syncTimelineAllCheckboxFromCategories();
     void savePrefs();
   });

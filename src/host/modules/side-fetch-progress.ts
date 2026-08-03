@@ -1,4 +1,25 @@
   // continued host module segment
+  /** Force-clear a stuck open progress pill after shell is interactive. */
+  let openProgressWatchdogTimer = null;
+  function armOpenProgressWatchdog(ms = 10_000) {
+    if (openProgressWatchdogTimer) clearTimeout(openProgressWatchdogTimer);
+    openProgressWatchdogTimer = setTimeout(() => {
+      openProgressWatchdogTimer = null;
+      if (!current.open || !current.loadStage?.busy) return;
+      const d = current.detail;
+      if (!d || (d.title == null && d.number == null) || current.loading) return;
+      console.log(
+        '[pr-plus] open progress watchdog: force clearLoadStage (shell ready, bar still busy)'
+      );
+      clearLoadStage();
+      try {
+        render();
+      } catch {
+        /* ignore */
+      }
+    }, ms);
+  }
+
   function beginFetchProgress(gen, stillOpenFn = null) {
     const lp = globalThis.PRModalLoadProgress;
     const w = fetchUnitWeights();
@@ -50,15 +71,20 @@
       const res = tracker.complete(String(key), Number(weight) || 0);
       // Cap at 99 while busy so clearLoadStage owns the 100 settle
       const percent = Math.min(99, Math.max(0, res.percent));
-      setLoadStage(phase, label, true, {
-        percent,
-        ...(opts && typeof opts === 'object' ? opts : {}),
-      });
-      try {
-        render();
-      } catch {
-        /* ignore */
+      if (res.added) {
+        setLoadStage(phase, label, true, {
+          percent,
+          ...(opts && typeof opts === 'object' ? opts : {}),
+        });
+        try {
+          render();
+        } catch {
+          /* ignore */
+        }
       }
+      // Thread ladder last key (reactions) must settle here — markSideProgress
+      // alone used to call tryFinish; mark() did not, so reconnect stuck at ~99%.
+      tryFinishOpenProgress(prog);
       return percent;
     }
 
@@ -80,6 +106,21 @@
       return;
     }
     const b = Boolean(busy);
+    // Revalidate/reconnect: threads kickoff often finishes during core paint and
+    // tryFinish already cleared the bar. Later setLoadStage('threads-update',
+    // { percent: prog.percent() }) was re-raising a 100% "Updating review
+    // threads…" pill for the whole unresolved/post-await window.
+    // Do not re-raise the bar once all open units are already credited
+    // (reconnect post-await setLoadStage used to stick at 100%).
+    if (b && isOpenProgressComplete(activeOpenProgress)) {
+      clearLoadStage();
+      try {
+        render();
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
     const fraction =
       opts && Number.isFinite(opts.phaseFraction) ? opts.phaseFraction : undefined;
     // Prefer explicit percent from fetch-unit marks; else derive from phase
@@ -87,21 +128,27 @@
       opts && Number.isFinite(opts.percent)
         ? Math.min(100, Math.max(0, Math.round(opts.percent)))
         : loadStagePercent(phase, b, fraction);
-    // Never decrease percent during a busy session (parallel completions can race)
+    // Never decrease percent during a busy session (parallel completions can race).
+    // Busy hard-cap 99 — only clearLoadStage removes the pill (never show 100% stuck).
     const prev =
       current.loadStage && Number.isFinite(current.loadStage.percent)
         ? Number(current.loadStage.percent)
         : 0;
-    const nextPercent =
-      b && current.loadStage && current.loadStage.busy
-        ? Math.max(prev, percent)
-        : percent;
+    const nextPercent = b
+      ? Math.min(
+          99,
+          current.loadStage && current.loadStage.busy
+            ? Math.max(prev, percent)
+            : percent
+        )
+      : percent;
     current.loadStage = {
       phase: phase || null,
       label: label || null,
       busy: b,
       percent: nextPercent,
     };
+    if (b) armOpenProgressWatchdog(10_000);
     try {
       publishE2eLoadHook(
         `setLoadStage:${phase || ''}:${b ? 'busy' : 'idle'}`
@@ -143,7 +190,8 @@
       case 'threads-update':
         return 'Updating review threads…';
       case 'threads-shell':
-        return 'Updating threads…';
+        // Short alias when revalidate sets shell explicitly (same ladder step 1).
+        return 'Updating review threads…';
       case 'threads-comments':
         return 'Updating comments…';
       case 'threads-reactions':
@@ -200,6 +248,10 @@
   }
 
   function clearLoadStage() {
+    if (openProgressWatchdogTimer) {
+      clearTimeout(openProgressWatchdogTimer);
+      openProgressWatchdogTimer = null;
+    }
     try {
       const tl = getFetchTimeline();
       if (tl) {

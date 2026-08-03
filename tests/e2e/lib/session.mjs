@@ -97,34 +97,52 @@ function dismissOverlayIfAny() {
 
 /**
  * Wipe pr+ IDB + sessionStorage on a github.com origin.
- * Happy path: **exactly one** intentional `open('https://github.com/')`, then
- * clear caches **in place** — never open→clear→open again.
  *
- * Always navigating once is intentional: a fresh document unblocks IDB
- * (deleteDatabase can hang for 60s when the prior PR page still holds the DB)
- * while still cutting the old double-navigation soft-reset cost in half.
+ * Prefer in-place clear after dismissing the modal (no navigation). Only open
+ * github.com when off-origin, or when the first IDB clear fails (PR document
+ * can block deleteDatabase — then one land + retry). Never open→clear→open.
  *
  * @param {string} [label]
- * @returns {{ mode: 'open', opens: number, idbOk: boolean, sessRemoved: number }}
+ * @returns {{ mode: string, opens: number, idbOk: boolean, sessRemoved: number }}
  */
 export function softResetBrowser(label = 'soft-reset') {
   slog(`  session ${label}: soft reset (single tab + clear caches)`);
   dismissOverlayIfAny();
 
-  // Single land on github.com (not conditional skip — avoids blocked IDB hangs).
   let opens = 0;
-  try {
-    open('https://github.com/');
-    opens = 1;
-  } catch (e) {
-    slog(`  soft reset open failed (${e.message || e}); will hard relaunch`);
-    throw e;
+  const host = pageHostname();
+  if (softResetNeedsGithubOpen(host)) {
+    try {
+      open('https://github.com/');
+      opens = 1;
+    } catch (e) {
+      slog(`  soft reset open failed (${e.message || e}); will hard relaunch`);
+      throw e;
+    }
+    ensureSingleTab();
+    waitNetwork();
+    sleepSync(40);
+  } else {
+    ensureSingleTab();
+    // readyState-complete → waitNetwork is immediate (no CLI load burn).
+    waitNetwork();
   }
-  ensureSingleTab();
-  waitNetwork();
-  sleepSync(80);
 
-  const idb = clearPrPlusIdb();
+  let idb = clearPrPlusIdb();
+  // PR page can leave IDB blocked — one recovery navigation, then re-clear.
+  if (!idb?.ok && opens === 0) {
+    slog(`  IDB clear failed in-place (${idb?.error || 'unknown'}); recover via github.com`);
+    try {
+      open('https://github.com/');
+      opens = 1;
+      ensureSingleTab();
+      waitNetwork();
+      sleepSync(40);
+      idb = clearPrPlusIdb();
+    } catch (e) {
+      slog(`  soft reset recover open failed (${e.message || e})`);
+    }
+  }
   if (idb?.ok) {
     slog(
       `  cleared PR detail IDB (via ${idb.via || 'idb'} on ${idb.host || 'github'})` +
@@ -138,10 +156,9 @@ export function softResetBrowser(label = 'soft-reset') {
     slog(`  cleared prp: sessionStorage keys=${sess.removed || 0}`);
   }
 
-  // Stay on github.com after clear — no second open.
   ensureSingleTab();
   return {
-    mode: 'open',
+    mode: opens ? 'open' : 'in-place',
     opens,
     idbOk: Boolean(idb?.ok),
     sessRemoved: Number(sess?.removed) || 0,
@@ -156,10 +173,11 @@ function hardLaunch() {
   let lastErr = null;
   for (let attempt = 1; attempt <= 5; attempt++) {
     try {
-      ab(['open', 'https://github.com/'], { timeoutMs: 45_000 });
+      // Cold Chrome + extension inject can be slow; only hard-launch uses 90s.
+      ab(['open', 'https://github.com/'], { timeoutMs: 90_000 });
       ensureSingleTab();
       waitNetwork();
-      sleepSync(200);
+      sleepSync(100);
       lastErr = null;
       break;
     } catch (e) {

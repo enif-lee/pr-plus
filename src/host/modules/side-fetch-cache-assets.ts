@@ -822,6 +822,19 @@
       };
     }
 
+    // Let the header paint each ladder label (shell → comments → reactions).
+    // Double-rAF only — no fixed 100ms+ dwell (that stacked on every open/e2e).
+    const yieldStagePaint = () =>
+      new Promise((resolve) => {
+        if (typeof requestAnimationFrame === 'function') {
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => resolve());
+          });
+        } else {
+          setTimeout(resolve, 16);
+        }
+      });
+
     // Progress stage: shell list/meta is ready.
     try {
       if (typeof opts?.onStage === 'function') {
@@ -854,6 +867,7 @@
           (t) => t && t.commentsLoaded !== true && !Boolean(t.resolved)
         ));
     let eagerN = 0;
+    let didCommentsFetch = false;
     if (
       needBodies &&
       page?.source === 'graphql' &&
@@ -873,6 +887,7 @@
           } catch {
             /* ignore */
           }
+          didCommentsFetch = true;
           const bulk = await globalThis.PRTreeFetch.fetchReviewThreadsByIds(
             eagerIds,
             { signal }
@@ -892,14 +907,22 @@
       }
     }
 
+    // No network between shell→comments (skipped) or comments→reactions:
+    // yield so each label can paint before the next mark overwrites it.
     try {
       if (typeof opts?.onStage === 'function') {
+        if (!didCommentsFetch) {
+          await yieldStagePaint();
+          opts.onStage('comments-start', { ids: 0, skipped: true });
+          await yieldStagePaint();
+        }
         opts.onStage('comments', {
           page,
           eager: eagerN,
           skipped: eagerN === 0,
         });
         // Reaction counts ship on the same by-ids document (reactors{totalCount}).
+        await yieldStagePaint();
         opts.onStage('reactions', {
           page,
           eager: eagerN,

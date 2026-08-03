@@ -1,4 +1,4 @@
-import React, { memo, useState } from 'react';
+import React, { memo, useEffect, useRef, useState } from 'react';
 import { Button } from '@common/Button';
 import { Badge } from '@common/Badge';
 import { MarkdownView } from '@common/MarkdownView';
@@ -12,7 +12,11 @@ import { CommentReactions } from '@common/CommentReactions';
 import { BodyEditor } from '../composers/BodyEditor';
 import { DiffSnippetView } from '../conversation/DiffSnippetView';
 import { useModalStore } from '../../store/modal-store';
-import { isContextThreadCommentActive } from '@lib/context-thread-dom';
+import {
+  dispatchContextThreadTabLeave,
+  isContextThreadCommentActive,
+  stepContextThreadComposerTab,
+} from '@lib/context-thread-dom';
 
 /**
  * Inline review thread card (Diff + Conversation).
@@ -133,6 +137,45 @@ function InlineThreadImpl(props: any) {
   );
   /** Resolve tip only while reply input is focused (not on idle threads) */
   const [replyFocused, setReplyFocused] = useState(false);
+  const composerRootRef = useRef<HTMLDivElement | null>(null);
+
+  /**
+   * Thread focus: Tab cycles input → Comment → Start review → Resolve → next
+   * comment; Shift+Tab reverse (prev comment before input).
+   */
+  useEffect(() => {
+    if (!contextActive) return undefined;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab' || e.altKey || e.metaKey || e.ctrlKey) return;
+      const root = composerRootRef.current;
+      if (!root) return;
+      const ae = document.activeElement as HTMLElement | null;
+      // Only trap when focus is inside this thread (or nothing focused / body)
+      const threadHost =
+        (root.closest?.('.prp-inline-thread') as HTMLElement | null) || root;
+      if (
+        ae &&
+        ae !== document.body &&
+        ae !== document.documentElement &&
+        !threadHost.contains(ae)
+      ) {
+        return;
+      }
+      const dir = e.shiftKey ? -1 : 1;
+      const result = stepContextThreadComposerTab(root, dir, ae);
+      if (result === 'ignore') return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (result === 'leave-next' || result === 'leave-prev') {
+        dispatchContextThreadTabLeave(
+          result === 'leave-next' ? 1 : -1,
+          rootCommentId
+        );
+      }
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [contextActive, rootCommentId]);
 
   function onReplyTextChange(t: string) {
     if (draftKey) setReplyDraft(draftKey, t);
@@ -586,6 +629,7 @@ function InlineThreadImpl(props: any) {
             )}
 
             <div
+              ref={composerRootRef}
               className="prp-inline-thread__composer"
               data-context-reply="1"
               data-context-active={contextActive ? '1' : undefined}
@@ -633,18 +677,32 @@ function InlineThreadImpl(props: any) {
               </div>
               {/* Actions: open when focused/draft OR resolvable (Resolve must stay
                   clickable without typing — empty reply blur used to hide this row
-                  before click landed). */}
+                  before click landed). Also open when context-focused so Tab
+                  stops stay mounted. */}
               <div
                 className={`prp-composer__row prp-inline-thread__composer-actions${
                   String(replyText || '').trim() ||
                   replyFocused ||
+                  contextActive ||
                   canResolveThread
                     ? ' prp-inline-thread__composer-actions--open'
                     : ''
                 }`}
               >
-                <span className="prp-opt-hint-host">
-                  {replyFocused ? (
+                <span
+                  className="prp-opt-hint-host"
+                  data-prp-thread-tab-host="comment"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key !== 'Enter' && e.key !== ' ') return;
+                    if (!String(replyText || '').trim() || actionBusy) return;
+                    e.preventDefault();
+                    onReply?.(thread || { id: row?.commentId, root: row }, {
+                      mode: 'comment',
+                    });
+                  }}
+                >
+                  {replyFocused || contextActive ? (
                     <OptBtnHint label="⌥C · ⌘↵" preferredPlacement="top" />
                   ) : null}
                   <Button
@@ -652,6 +710,7 @@ function InlineThreadImpl(props: any) {
                     variant="primary"
                     loading={Boolean(actionBusy)}
                     disabled={!String(replyText || '').trim()}
+                    tabIndex={-1}
                     onMouseDown={(e) => {
                       // Keep composer focus so actions row does not unmount mid-click
                       e.preventDefault();
@@ -667,38 +726,67 @@ function InlineThreadImpl(props: any) {
                     {actionBusy ? 'Submitting…' : 'Comment'}
                   </Button>
                 </span>
-                <Button
-                  size="sm"
-                  loading={Boolean(actionBusy)}
-                  disabled={!String(replyText || '').trim()}
-                  onMouseDown={(e) => {
+                <span
+                  className="prp-opt-hint-host"
+                  data-prp-thread-tab-host="start-review"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key !== 'Enter' && e.key !== ' ') return;
+                    if (!String(replyText || '').trim() || actionBusy) return;
                     e.preventDefault();
-                  }}
-                  onClick={() =>
                     onReply?.(thread || { id: row?.commentId, root: row }, {
                       mode: 'pending',
-                    })
-                  }
-                  title={
-                    pendingCount > 0 || hasPendingReplies
-                      ? 'Add this reply to your pending review'
-                      : 'Start a pending review with this reply'
-                  }
+                    });
+                  }}
                 >
-                  {actionBusy
-                    ? 'Working…'
-                    : pendingCount > 0 || hasPendingReplies
-                      ? 'Add comment'
-                      : 'Start review'}
-                </Button>
+                  <Button
+                    size="sm"
+                    loading={Boolean(actionBusy)}
+                    disabled={!String(replyText || '').trim()}
+                    tabIndex={-1}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                    }}
+                    onClick={() =>
+                      onReply?.(thread || { id: row?.commentId, root: row }, {
+                        mode: 'pending',
+                      })
+                    }
+                    title={
+                      pendingCount > 0 || hasPendingReplies
+                        ? 'Add this reply to your pending review'
+                        : 'Start a pending review with this reply'
+                    }
+                    data-prp-composer-start-review="1"
+                  >
+                    {actionBusy
+                      ? 'Working…'
+                      : pendingCount > 0 || hasPendingReplies
+                        ? 'Add comment'
+                        : 'Start review'}
+                  </Button>
+                </span>
                 {canResolveThread ? (
-                  <span className="prp-opt-hint-host">
-                    {replyFocused ? (
+                  <span
+                    className="prp-opt-hint-host"
+                    data-prp-thread-tab-host="resolve"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key !== 'Enter' && e.key !== ' ') return;
+                      if (actionBusy || !resolveThreadNodeId) return;
+                      e.preventDefault();
+                      onResolve?.(resolveThreadNodeId, !isThreadResolved);
+                    }}
+                  >
+                    {/* Thread/comment focus (not only reply input) — ⌥⌃R always
+                        advertised while the unit is the context target. */}
+                    {contextActive || replyFocused ? (
                       <OptBtnHint label="⌥⌃R" preferredPlacement="top" />
                     ) : null}
                     <Button
                       size="sm"
                       disabled={actionBusy || !resolveThreadNodeId}
+                      tabIndex={-1}
                       onMouseDown={(e) => {
                         // Prevent reply textarea blur → actions hide before click
                         e.preventDefault();
@@ -709,7 +797,13 @@ function InlineThreadImpl(props: any) {
                           !isThreadResolved
                         )
                       }
-                      title="Resolve / unresolve (⌥⌃R)"
+                      title={
+                        isThreadResolved
+                          ? 'Unresolve conversation'
+                          : 'Resolve conversation'
+                      }
+                      shortcut="⌥⌃R"
+                      tipPlacement="top"
                       data-prp-composer-resolve="1"
                       data-prp-thread-node-id={resolveThreadNodeId || undefined}
                     >

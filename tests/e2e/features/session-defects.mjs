@@ -832,7 +832,7 @@ export function getSteps() {
     openPr(DEMO_PR, { viaUrl: true });
     setLayout('conversation');
     waitDetailReady({ meta: true, files: false, label: 'SD4 meta' });
-    waitMs(800);
+    waitMs(250);
 
     // Known start: clear bug if present (chip ✕ → picker empty Apply)
     let aside = asideLabelsProbe();
@@ -889,14 +889,12 @@ export function getSteps() {
       `GitHub API missing bug after set: ${JSON.stringify(apiSet)}`
     );
 
-    // Allow product refreshTimelineEvents poll windows (~0–3s) + React paint
-    waitMs(3500);
-    // Timeline delta: new labeled+bug system event must appear (events API lag)
+    // refreshTimelineEvents + events API lag: poll first (no fixed 3.5s sleep).
     const tlAfterSet = waitPred(
       timelineLabelEventsSnap,
       (t) => hasNewLabeledBug(tlBeforeSet, t),
       25_000,
-      600
+      350
     );
     log(`  timeline after set: ${JSON.stringify(tlAfterSet)}`);
     assert(
@@ -929,12 +927,11 @@ export function getSteps() {
       `API/aside diverge after clear: aside=${JSON.stringify(aside)} api=${JSON.stringify(apiFinal)}`
     );
 
-    waitMs(3500);
     const tlAfterClear = waitPred(
       timelineLabelEventsSnap,
       (t) => hasNewUnlabeledBug(tlBeforeClear, t),
       25_000,
-      600
+      350
     );
     log(`  timeline after clear: ${JSON.stringify(tlAfterClear)}`);
     assert(
@@ -952,17 +949,17 @@ export function getSteps() {
     // Ensure bug on (previous step restores; re-assert)
     closeOverlay();
     openPulls();
-    waitMs(800);
+    waitMs(250);
     openPr(DEMO_PR);
     setLayout('conversation');
-    waitMs(500);
+    waitMs(200);
     let aside = asideLabelsProbe();
     if (!aside.hasBug) {
       forceBugLabel(true);
       aside = waitPred(asideLabelsProbe, (a) => a.hasBug, 12_000);
     }
     assert(aside.hasBug, 'aside needs bug before list check');
-    waitMs(600);
+    waitMs(200);
     // List under shell (pulls page)
     const under = evalInPage(`
       (() => {

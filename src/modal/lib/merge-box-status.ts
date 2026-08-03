@@ -570,7 +570,15 @@ export function buildMergeBoxStatus(detail: any): MergeBoxStatus {
   const forceAllowed = viewerMayForceMerge(d);
   const showUpdateBranch = canUpdateBranch(d);
 
-  if (d.merged) {
+  // REST sometimes omits `merged` on partial/sketch payloads while still
+  // carrying merged_at / closed+merged lifecycle — treat all as terminal merged.
+  const isMerged =
+    Boolean(d.merged) ||
+    Boolean(d.mergedAt || d.merged_at) ||
+    String(d.state || '')
+      .trim()
+      .toLowerCase() === 'merged';
+  if (isMerged) {
     return {
       kind: 'merged',
       tone: 'merged',

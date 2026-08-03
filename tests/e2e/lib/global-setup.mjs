@@ -41,10 +41,24 @@ function tryReloadExtension(label = 'globalSetup') {
     evalInPage(
       `document.dispatchEvent(new CustomEvent('prp-reload-extension', { bubbles: true })); true`
     );
-    // SW restart — short settle then single re-land (not pre+post double without need)
-    waitMs(1500);
-    open('https://github.com/');
-    waitMs(300);
+    // SW + content re-inject after runtime.reload needs more than ~1.5s or early
+    // suites hit modal-ready timeouts (bridge/SW still restarting).
+    waitMs(4000);
+    open('https://github.com/enif-lee/pr-plus/pulls');
+    waitMs(800);
+    // Wait until content bridge is back before any suite runs.
+    try {
+      const deadline = Date.now() + 12_000;
+      while (Date.now() < deadline) {
+        const hook = evalInPage(
+          `document.documentElement.getAttribute('data-prp-bridge') || document.documentElement.getAttribute('data-prp-gql-cost-hook') || ''`
+        );
+        if (hook) break;
+        waitMs(300);
+      }
+    } catch {
+      /* soft */
+    }
   } catch (e) {
     console.log(
       `[e2e] ${label}: extension reload soft-fail: ${String(e?.message || e).slice(0, 160)}`

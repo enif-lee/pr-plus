@@ -71,10 +71,16 @@ describe('shipped code paths exist', () => {
     expect(t).toMatch(/onDeleteHeadBranch/);
   });
   test('fetch-api exports delete + viewed APIs', () => {
+    // fetch-api re-exports; implementations live in domain modules.
     const t = readFileSync(join(root, 'src/fetch/fetch-api.ts'), 'utf8');
-    expect(t).toMatch(/async function deleteHeadBranch/);
-    expect(t).toMatch(/async function fetchViewerViewedPaths/);
-    expect(t).toMatch(/async function markFileAsViewed/);
+    expect(t).toMatch(/\bdeleteHeadBranch\b/);
+    expect(t).toMatch(/\bfetchViewerViewedPaths\b/);
+    expect(t).toMatch(/\bmarkFileAsViewed\b/);
+    const meta = readFileSync(join(root, 'src/fetch/mutations-meta.ts'), 'utf8');
+    expect(meta).toMatch(/export async function deleteHeadBranch/);
+    const viewer = readFileSync(join(root, 'src/fetch/viewer.ts'), 'utf8');
+    expect(viewer).toMatch(/export async function fetchViewerViewedPaths/);
+    expect(viewer).toMatch(/export async function markFileAsViewed/);
   });
 
   test('PrModalApp gates auto-close and viewed hydrate via shipped helpers', () => {

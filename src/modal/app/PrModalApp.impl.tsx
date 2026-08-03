@@ -273,6 +273,7 @@ import {
 import {
   focusContextThreadReplyAfterPaint,
   isContextThreadReplyFocused,
+  PRP_CONTEXT_THREAD_TAB_LEAVE,
 } from '../lib/context-thread-dom';
 import { resolveDiffDisplayFiles } from '../lib/single-file-mode';
 import {
@@ -6221,6 +6222,14 @@ export function PrModalApp({
     focusConversationCommentItem,
     clearConversationCommentFocus,
     runContextThreadAction,
+    // Tab-leave from focused thread composer (next/prev comment)
+    stepContextThreadFromTab: (dir: number) => {
+      const d = dir < 0 ? -1 : 1;
+      const live =
+        useModalStore.getState().layoutMode || layoutMode;
+      if (live === LAYOUT_DIFF) navComment(d);
+      else navConversationComment(d);
+    },
     openSelectionComment: () => {
       setSelectionIslandPhase('comment');
       setShowSelectionComposer(true);
@@ -6417,6 +6426,32 @@ export function PrModalApp({
       mo.disconnect();
       window.removeEventListener('keydown', onMaybeOpen, true);
     };
+  }, [open]);
+
+  /**
+   * Tab past last / before first stop in a focused thread composer → step
+   * next/prev review comment (same as ⌥J / ⌥K).
+   */
+  useEffect(() => {
+    if (!open) return undefined;
+    const onLeave = (ev: Event) => {
+      const ce = ev as CustomEvent;
+      const dir = Number(ce?.detail?.dir) || 1;
+      try {
+        actionsRef.current?.stepContextThreadFromTab?.(dir);
+      } catch {
+        /* ignore */
+      }
+    };
+    window.addEventListener(
+      PRP_CONTEXT_THREAD_TAB_LEAVE,
+      onLeave as EventListener
+    );
+    return () =>
+      window.removeEventListener(
+        PRP_CONTEXT_THREAD_TAB_LEAVE,
+        onLeave as EventListener
+      );
   }, [open]);
 
   useEffect(() => {

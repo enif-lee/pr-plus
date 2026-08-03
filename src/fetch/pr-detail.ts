@@ -77,16 +77,13 @@ export async function fetchPrDetail(
   const PARALLEL_REST_KEYS = ['pull', 'issue', 'viewerLogin', 'autolinks'];
   const tParallel0 = fetchNowMs();
   const batchOpt = { batchStart: tParallel0 };
-  // no-store + no-cache + cache-busted URL: hard reopen after modal milestone set
-  // must not paint a stale browser/SW HTTP cache that predates the write.
+  // cache: 'no-store' + URL bust: hard reopen after modal milestone must not
+  // paint a stale HTTP cache. Do NOT send Cache-Control / Pragma — GitHub API
+  // CORS rejects them (preflight → Failed to fetch from extension origin).
   const bust = () =>
     `_prp=${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
   const noCache = {
     cache: 'no-store' as RequestCache,
-    headers: {
-      'Cache-Control': 'no-cache, no-store, must-revalidate',
-      Pragma: 'no-cache',
-    },
   };
   let [pr, issue, viewerLogin, autolinks] = await Promise.all([
     timedFetch(
@@ -593,7 +590,13 @@ export async function fetchPrDetail(
     title: pr.title,
     body: pr.body || '',
     bodyReactions,
-    state: pr.state,
+    // Merged PRs are closed on GitHub; never leave state=open with merged flag.
+    state:
+      Boolean(pr.merged) || Boolean(pr.merged_at)
+        ? pr.state === 'open'
+          ? 'closed'
+          : pr.state || 'closed'
+        : pr.state,
     draft: Boolean(pr.draft),
     author: pr.user?.login || '',
     authorAvatarUrl: pr.user?.avatar_url || '',
@@ -610,7 +613,9 @@ export async function fetchPrDetail(
     headSha,
     magicLinks,
     htmlUrl: pr.html_url,
-    merged: Boolean(pr.merged),
+    // merged_at alone is enough when `merged` is omitted on slim payloads.
+    merged: Boolean(pr.merged) || Boolean(pr.merged_at),
+    mergedAt: pr.merged_at || null,
     mergeable: pr.mergeable,
     mergeableState: pr.mergeable_state || null,
     /** GraphQL mergeStateStatus when available (BEHIND / CLEAN / BLOCKED / …). */

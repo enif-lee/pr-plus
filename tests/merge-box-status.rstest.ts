@@ -78,6 +78,19 @@ describe('buildMergeBoxStatus terminal states', () => {
     expect(ms.showMerge).toBe(false);
   });
 
+  test('merged_at alone is terminal merged (not "checking mergeability")', () => {
+    const ms = buildMergeBoxStatus({
+      state: 'closed',
+      merged: false,
+      merged_at: '2026-07-28T08:13:19Z',
+      mergeable: null,
+      mergeableState: 'unknown',
+    });
+    expect(ms.kind).toBe('merged');
+    expect(ms.tone).toBe('merged');
+    expect(ms.headline).toMatch(/merged/i);
+  });
+
   test('closed (not merged) uses closed/red tone', () => {
     const ms = buildMergeBoxStatus({
       state: 'closed',

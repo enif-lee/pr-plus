@@ -124,22 +124,20 @@ function normalizeTimelineVisibilityPref(raw: any) {
     /* ignore */
   }
   const src = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
-  const base = {
+  const base: Record<string, boolean> = {
     labels: true,
     title: true,
     milestone: true,
+    assignees: true,
+    reviewers: true,
     referenced: true,
     comments: true,
   };
-  for (const id of Object.keys(base) as (keyof typeof base)[]) {
-    if (typeof src[id] === 'boolean') base[id] = src[id];
+  for (const id of Object.keys(base)) {
+    if (typeof src[id] === 'boolean') base[id] = src[id] as boolean;
   }
   if (src.all === true) {
-    base.labels = true;
-    base.title = true;
-    base.milestone = true;
-    base.referenced = true;
-    base.comments = true;
+    for (const id of Object.keys(base)) base[id] = true;
   }
   return base;
 }

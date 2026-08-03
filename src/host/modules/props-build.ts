@@ -377,11 +377,26 @@
           const refreshWShell = uw.threadsShell ?? uw.threadsNewest ?? 8;
           const refreshWComments = uw.threadsComments ?? uw.threadsRemaining ?? 8;
           const refreshWReactions = uw.threadsReactions ?? uw.threadsEarlier ?? 4;
-          const creditRefreshThreadLadder = (labelKind = 'threads-update') => {
-            const lab = loadStageLabel(labelKind);
-            prog.mark('threadsShell', refreshWShell, 'threads', lab);
-            prog.mark('threadsComments', refreshWComments, 'threads', lab);
-            prog.mark('threadsReactions', refreshWReactions, 'threads', lab);
+          // Per-stage labels so re-credit never flattens to one shared phrase.
+          const creditRefreshThreadLadder = () => {
+            prog.mark(
+              'threadsShell',
+              refreshWShell,
+              'threads',
+              loadStageLabel('threads-shell')
+            );
+            prog.mark(
+              'threadsComments',
+              refreshWComments,
+              'threads',
+              loadStageLabel('threads-comments')
+            );
+            prog.mark(
+              'threadsReactions',
+              refreshWReactions,
+              'threads',
+              loadStageLabel('threads-reactions')
+            );
           };
           const threadsNewestP =
             mode !== 'visible-threads' && canPageThreads
@@ -429,7 +444,7 @@
                 })
                   .then((res) => {
                     const page = res.page;
-                    creditRefreshThreadLadder('threads-update');
+                    creditRefreshThreadLadder();
                     earlyRefreshThreadsPage = page;
                     paintRefreshThreadsNewest(page);
                     console.log(
@@ -441,12 +456,12 @@
                     return { ok: true, page, adaptive: res };
                   })
                   .catch((err) => {
-                    creditRefreshThreadLadder('threads-failed');
+                    creditRefreshThreadLadder();
                     return { ok: false, err };
                   })
               : Promise.resolve({ ok: false, skipped: true }).then((r) => {
                   if (mode !== 'visible-threads') {
-                    creditRefreshThreadLadder('refresh-meta');
+                    creditRefreshThreadLadder();
                   }
                   return r;
                 });
@@ -550,15 +565,29 @@
           const wShell = uw.threadsShell ?? uw.threadsNewest ?? 8;
           const wComments = uw.threadsComments ?? uw.threadsRemaining ?? 8;
           const wReactions = uw.threadsReactions ?? uw.threadsEarlier ?? 4;
-          const creditThreadLadder = (labelKind = 'refresh') => {
-            const lab = loadStageLabel(labelKind);
-            prog.mark('threadsShell', wShell, 'threads', lab);
-            prog.mark('threadsComments', wComments, 'threads', lab);
-            prog.mark('threadsReactions', wReactions, 'threads', lab);
+          const creditThreadLadder = () => {
+            prog.mark(
+              'threadsShell',
+              wShell,
+              'threads',
+              loadStageLabel('threads-shell')
+            );
+            prog.mark(
+              'threadsComments',
+              wComments,
+              'threads',
+              loadStageLabel('threads-comments')
+            );
+            prog.mark(
+              'threadsReactions',
+              wReactions,
+              'threads',
+              loadStageLabel('threads-reactions')
+            );
           };
 
           if (!canPageThreads) {
-            creditThreadLadder('refresh');
+            creditThreadLadder();
             tryFinishOpenProgress(prog);
             render();
             return;
@@ -660,7 +689,7 @@
               }
             }
             // full-threads: shell+eager already credited; ensure ladder complete
-            creditThreadLadder('threads-shell');
+            creditThreadLadder();
             if (stillOpen() && next?.reviewThreadsMeta?.hasMore) {
               const props = buildProps();
               if (typeof props.onLoadMoreReviewThreads === 'function') {
@@ -753,7 +782,7 @@
               if (!missingN) break;
             }
             // soft revalidate: remaining by-ids done; ladder already from kickoff
-            creditThreadLadder('threads-comments');
+            creditThreadLadder();
             if (stillOpen()) {
               applyThreadsToStore(next);
               detailCache.set(key, current.detail);

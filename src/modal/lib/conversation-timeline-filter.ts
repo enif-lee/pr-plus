@@ -105,7 +105,7 @@ export function isTimelineVisibilityAllOn(
 
 /**
  * Toggle a tip and return the next visibility map.
- * - "all" → all categories true
+ * - "all" → if every category is on, turn all off; otherwise turn all on
  * - category → flip that category
  */
 export function toggleTimelineTip(
@@ -115,6 +115,11 @@ export function toggleTimelineTip(
   const cur = normalizeTimelineVisibility(vis);
   const id = String(tipId || '').trim().toLowerCase();
   if (id === 'all') {
+    if (isTimelineVisibilityAllOn(cur)) {
+      const off = { ...cur };
+      for (const key of TIMELINE_CATEGORY_IDS) off[key] = false;
+      return off;
+    }
     return { ...DEFAULT_TIMELINE_VISIBILITY };
   }
   if ((TIMELINE_CATEGORY_IDS as readonly string[]).includes(id)) {

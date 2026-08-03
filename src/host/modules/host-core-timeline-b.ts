@@ -454,20 +454,48 @@
       tryFinishOpenProgress(prog);
       return;
     }
+    // While the review-thread ladder is still open, advance % without
+    // replacing the stage copy (threads → comments → reactions) — unless
+    // percent is already high (sides dominating): then show panel label so
+    // the bar does not look "stuck" on review threads at ~90%+.
+    const has =
+      prog.tracker && typeof prog.tracker.has === 'function'
+        ? (k) => prog.tracker.has(k)
+        : () => false;
+    const lp = globalThis.PRModalLoadProgress;
+    const threadsOk =
+      typeof lp?.threadsProgressComplete === 'function'
+        ? Boolean(lp.threadsProgressComplete(has))
+        : has('threadsVisible') ||
+          (has('threadsShell') &&
+            has('threadsComments') &&
+            has('threadsReactions')) ||
+          (has('threadsNewest') && has('threadsFollow'));
+    const pctNow =
+      typeof prog.percent === 'function' ? Number(prog.percent()) || 0 : 0;
+    const keepThreadLabel =
+      !threadsOk &&
+      pctNow < 85 &&
+      current.loadStage &&
+      current.loadStage.busy &&
+      current.loadStage.label;
     prog.mark(
       name,
       w,
-      'panels',
-      loadStageLabel(labelKind, { panel: name })
+      keepThreadLabel ? current.loadStage.phase || 'threads' : 'panels',
+      keepThreadLabel
+        ? current.loadStage.label
+        : loadStageLabel(labelKind, { panel: name })
     );
+    // mark() already tryFinishOpenProgress; call again is cheap/idempotent.
     tryFinishOpenProgress(prog);
   }
 
   /**
-   * Ready only when core+threads+all independent panels have been credited.
-   * (Percent is capped at 99 in mark(); clearLoadStage owns 100.)
+   * True when all open/refresh weight units are credited (bar may clear).
+   * Used by tryFinish and setLoadStage (refuse to re-raise a settled bar).
    */
-  function tryFinishOpenProgress(prog = activeOpenProgress) {
+  function isOpenProgressComplete(prog = activeOpenProgress) {
     if (!prog?.tracker || typeof prog.tracker.has !== 'function') return false;
     const has = (k) => prog.tracker.has(k);
     const sides = [
@@ -494,7 +522,15 @@
           (has('threadsNewest') && has('threadsFollow'));
     const refreshDone =
       has('start') && has('core') && threadsOk && sidesDone;
-    if (!openDone && !refreshDone) return false;
+    return openDone || refreshDone;
+  }
+
+  /**
+   * Ready only when core+threads+all independent panels have been credited.
+   * (Percent is capped at 99 in mark(); clearLoadStage owns settle/clear.)
+   */
+  function tryFinishOpenProgress(prog = activeOpenProgress) {
+    if (!isOpenProgressComplete(prog)) return false;
     clearLoadStage();
     try {
       render();

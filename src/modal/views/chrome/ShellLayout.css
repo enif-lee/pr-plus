@@ -912,12 +912,12 @@
   /*
    * Fixed pill width while loading — phrases swap ("Loading commits…" →
    * "Loading files…") without the badge growing/shrinking (no layout jitter).
-   * ~34ch minus 24px per product tweak.
+   * Baseline was calc(34ch - 24px); +20px only.
    */
   /* Target size for stage mode (FLIP animates into/out of this) */
-  width: calc(34ch - 24px);
-  min-width: calc(34ch - 24px);
-  max-width: min(56vw, calc(34ch - 24px));
+  width: calc(34ch - 4px);
+  min-width: calc(34ch - 4px);
+  max-width: min(56vw, calc(34ch - 4px));
   overflow: hidden;
 }
 .prp-header__stats--busy .prp-header__stats-inner {

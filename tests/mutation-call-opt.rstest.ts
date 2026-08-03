@@ -162,7 +162,10 @@ describe('stampThreadResolved (shipped pure)', () => {
 });
 
 describe('post-mutation success paths: no full soft-refresh (source contract)', () => {
-  const app = read('src/modal/app/PrModalApp.impl.tsx');
+  // Mutations live in pr-modal-mutations.ts (wired from PrModalApp.impl).
+  const mutations = read('src/modal/app/pr-modal-mutations.ts');
+  const palette = read('src/modal/app/pr-modal-run-palette.ts');
+  const appShell = read('src/modal/app/PrModalApp.impl.tsx');
 
   /**
    * Extract a function body by name. Skips default-param object literals
@@ -207,8 +210,14 @@ describe('post-mutation success paths: no full soft-refresh (source contract)', 
     throw new Error(`unclosed ${name}`);
   }
 
+  test('App shell still wires mutation handlers from pr-modal-mutations', () => {
+    expect(appShell).toMatch(/applySetLabels/);
+    expect(appShell).toMatch(/onResolveThread/);
+    expect(appShell).toMatch(/onEditTitle/);
+  });
+
   test('onResolveThread stamps via stampThreadResolved + patchHostDetail; no onRefresh', () => {
-    const body = extractFn(app, 'onResolveThread');
+    const body = extractFn(mutations, 'onResolveThread');
     expect(body).toMatch(/stampThreadResolved/);
     expect(body).toMatch(/patchHostDetail/);
     expect(body).toMatch(/reviewComments/);
@@ -216,27 +225,27 @@ describe('post-mutation success paths: no full soft-refresh (source contract)', 
   });
 
   test('onEditTitle patches host + timeline only; no onRefresh revalidate', () => {
-    const body = extractFn(app, 'onEditTitle');
+    const body = extractFn(mutations, 'onEditTitle');
     expect(body).toMatch(/patchHostDetail/);
     expect(body).toMatch(/refreshTimelineEvents/);
     expect(body).not.toMatch(/onRefresh/);
   });
 
   test('onSaveBody patches body local+host; no onRefresh', () => {
-    const body = extractFn(app, 'onSaveBody');
+    const body = extractFn(mutations, 'onSaveBody');
     expect(body).toMatch(/patchHostDetail\(\{\s*body/);
     expect(body).not.toMatch(/onRefresh/);
   });
 
   test('applySetLabels still uses commitMetaPatch without onRefresh', () => {
-    const body = extractFn(app, 'applySetLabels');
+    const body = extractFn(mutations, 'applySetLabels');
     expect(body).toMatch(/commitMetaPatch/);
     expect(body).not.toMatch(/onRefresh/);
   });
 
   test('palette toggleLabel routes through applySetLabels (no inline onRefresh)', () => {
     // Command-palette label toggle must not reintroduce full soft-refresh.
-    const m = app.match(
+    const m = palette.match(
       /case\s+['"]toggleLabel['"]\s*:\s*\{([\s\S]*?)\n\s*break;\s*\n\s*\}/
     );
     expect(m?.[1]).toBeTruthy();
@@ -247,7 +256,7 @@ describe('post-mutation success paths: no full soft-refresh (source contract)', 
   });
 
   test('onReplyToThread stays write-through only (no onRefresh)', () => {
-    const body = extractFn(app, 'onReplyToThread');
+    const body = extractFn(mutations, 'onReplyToThread');
     expect(body).toMatch(/commitCommentListPatch/);
     expect(body).not.toMatch(/onRefresh/);
   });

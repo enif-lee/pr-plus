@@ -35,17 +35,29 @@ export function getSteps() {
     }
     setLayout('conversation');
     blurEditable();
-    waitMs(500);
-
-    const badges = statusBadgeProbe();
+    // Progressive core may briefly lack merged flag while mergeable is unknown.
+    const t0 = Date.now();
+    let badges = statusBadgeProbe();
+    let box = mergeBoxProbe();
+    while (
+      Date.now() - t0 < 18_000 &&
+      !(
+        badges.hasMerged &&
+        box.ok &&
+        (box.kind === 'merged' || box.tone === 'prp-merge-box--merged') &&
+        /merged/i.test(String(box.headline || ''))
+      )
+    ) {
+      waitMs(300);
+      badges = statusBadgeProbe();
+      box = mergeBoxProbe();
+    }
     log(`  badges=${JSON.stringify(badges.badges?.map((b) => b.text))}`);
+    log(`  mergeBox tone=${box.tone} kind=${box.kind} headline=${box.headline}`);
     assert(
       badges.hasMerged,
       `expected Merged header badge on #${HEAVY_PR}: ${JSON.stringify(badges)}`
     );
-
-    const box = mergeBoxProbe();
-    log(`  mergeBox tone=${box.tone} kind=${box.kind} headline=${box.headline}`);
     assert(box.ok, 'merge box missing');
     assert(
       box.kind === 'merged' || box.tone === 'prp-merge-box--merged',

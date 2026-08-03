@@ -332,3 +332,145 @@ export function isContextThreadCommentActive(
   const diffId = state.activeDiffCommentId;
   return diffId != null && String(diffId) === id;
 }
+
+/**
+ * CustomEvent name: Tab past last / before first stop in a focused thread
+ * composer. detail: `{ dir: 1 | -1, commentId?: string }`
+ * App listens and runs step-nav (next/prev comment).
+ */
+export const PRP_CONTEXT_THREAD_TAB_LEAVE = 'prp-context-thread-tab-leave';
+
+/**
+ * Ordered Tab stops inside an InlineThread reply composer:
+ * input → Comment → Start review → Resolve (if present).
+ * Prefer `[data-prp-thread-tab-host]` wrappers so disabled buttons still focus.
+ */
+export function listContextThreadComposerTabStops(
+  composerRoot: HTMLElement | null | undefined
+): HTMLElement[] {
+  if (!composerRoot) return [];
+  const stops: HTMLElement[] = [];
+  try {
+    const ta = composerRoot.querySelector(
+      'textarea.prp-mdc__ta'
+    ) as HTMLElement | null;
+    if (ta) {
+      stops.push(ta);
+    } else {
+      const ghost = composerRoot.querySelector(
+        '.prp-mdc__ghost, button.prp-mdc__ghost'
+      ) as HTMLElement | null;
+      if (ghost) stops.push(ghost);
+    }
+    for (const role of ['comment', 'start-review', 'resolve'] as const) {
+      const host = composerRoot.querySelector(
+        `[data-prp-thread-tab-host="${role}"]`
+      ) as HTMLElement | null;
+      if (host) {
+        stops.push(host);
+        continue;
+      }
+      // Fallback: the control itself (when enabled)
+      const sel =
+        role === 'comment'
+          ? '[data-prp-composer-submit]'
+          : role === 'start-review'
+            ? '[data-prp-composer-start-review]'
+            : '[data-prp-composer-resolve]';
+      const el = composerRoot.querySelector(sel) as HTMLButtonElement | null;
+      if (el && !el.disabled) stops.push(el);
+    }
+  } catch {
+    /* ignore */
+  }
+  return stops;
+}
+
+/**
+ * Move Tab / Shift+Tab focus among composer stops for a focused thread.
+ * @returns 'moved' | 'leave-next' | 'leave-prev' | 'ignore'
+ */
+export function stepContextThreadComposerTab(
+  composerRoot: HTMLElement | null | undefined,
+  dir: number,
+  activeEl: Element | null = typeof document !== 'undefined'
+    ? document.activeElement
+    : null
+): 'moved' | 'leave-next' | 'leave-prev' | 'ignore' {
+  const stops = listContextThreadComposerTabStops(composerRoot);
+  if (!stops.length) return 'ignore';
+  const d = dir < 0 ? -1 : 1;
+  let idx = -1;
+  if (activeEl && composerRoot?.contains(activeEl)) {
+    idx = stops.findIndex(
+      (el) =>
+        el === activeEl ||
+        el.contains(activeEl as Node) ||
+        (activeEl as HTMLElement).closest?.(
+          '[data-prp-thread-tab-host], .prp-mdc'
+        ) === el
+    );
+    // Textarea inside mdc — match first stop
+    if (idx < 0 && activeEl instanceof HTMLTextAreaElement) {
+      idx = stops.findIndex(
+        (el) => el === activeEl || el.contains(activeEl)
+      );
+    }
+  }
+  const next = idx + d;
+  if (next < 0) return 'leave-prev';
+  if (next >= stops.length) return 'leave-next';
+  const target = stops[next];
+  try {
+    // Ghost open → click first so textarea mounts
+    if (
+      target.classList?.contains?.('prp-mdc__ghost') ||
+      target.matches?.('.prp-mdc__ghost, button.prp-mdc__ghost')
+    ) {
+      target.click?.();
+      // Retry focus textarea shortly
+      window.requestAnimationFrame(() => {
+        const ta = composerRoot?.querySelector(
+          'textarea.prp-mdc__ta'
+        ) as HTMLTextAreaElement | null;
+        try {
+          ta?.focus?.();
+        } catch {
+          /* ignore */
+        }
+      });
+      return 'moved';
+    }
+    target.focus?.({ preventScroll: true } as FocusOptions);
+  } catch {
+    /* ignore */
+  }
+  return 'moved';
+}
+
+/**
+ * Dispatch leave event so App can step to next/prev comment.
+ */
+export function dispatchContextThreadTabLeave(
+  dir: number,
+  commentId?: string | number | null
+): void {
+  try {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(
+      new CustomEvent(PRP_CONTEXT_THREAD_TAB_LEAVE, {
+        detail: {
+          dir: dir < 0 ? -1 : 1,
+          commentId:
+            commentId != null && commentId !== ''
+              ? String(commentId)
+              : null,
+        },
+        bubbles: true,
+        composed: true,
+      })
+    );
+  } catch {
+    /* ignore */
+  }
+}

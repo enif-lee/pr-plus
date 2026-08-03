@@ -17,18 +17,15 @@
   }) {
 
     if (!hostEnabled) return Promise.resolve({ ok: false, reason: 'disabled' });
-    // Dismiss pulls list palette if it was open (Esc-restore path is separate)
     try {
       if (typeof closePullsPalette === 'function') closePullsPalette();
     } catch {
       /* ignore */
     }
-    // Prefs/CSS never block first paint (defaults + content_scripts CSS).
     void refreshPrefs();
     ensurePrefsWatch();
     void ensureAssets();
     const key = detailKey(owner, repo, number);
-    // If the previous shell is still "open" in host memory (force-DOM close
     // without closeModal), restamp cache from live detail so soft reopen after
     // a milestone write does not fall back to a pre-write list sketch.
     try {
@@ -43,7 +40,6 @@
     } catch {
       /* ignore */
     }
-    // Abort any previous open's fetches, start a new cancelable session
     const { gen, signal, metaGenAtStart } = beginOpenFetchSession();
     // Hydrate people-meta authority from sessionStorage before first paint.
     try {
@@ -249,13 +245,12 @@
         const fields = lastPeopleMetaAuthority.fields || {};
         if (fields && typeof fields === 'object' && Object.keys(fields).length) {
           if (!initialDetail) {
-            // Cold shell: seed a minimal sketch from authority so aside paints
-            // milestone before network core (soft reopen after force-close).
+            // Authority seed only — empty title until network (no PR #N fake).
             initialDetail = {
               owner: String(owner || ''),
               repo: String(repo || ''),
               number: Number(number),
-              title: `Pull Request #${number}`,
+              title: '',
               body: '',
               labels: [],
               assignees: [],
@@ -851,14 +846,16 @@
         const detail = current.detail;
         detailCache.set(key, detail);
         corePainted = true;
+        prog.mark('core', uw.core, corePhase, coreLabel);
         setLoadStage(
           'threads',
           fromCache || detailRank(cached) >= 3
             ? loadStageLabel('threads-update')
             : loadStageLabel('threads-load'),
           true,
-          { percent: prog.percent() }
+          { percent: Math.min(99, prog.percent()) }
         );
+        tryFinishOpenProgress(prog);
         render();
         console.log(
           `[pr-plus] openModal phase=core-paint ${owner}/${repo}#${number} ` +
@@ -1047,7 +1044,7 @@
             ? loadStageLabel('threads-update')
             : loadStageLabel('threads-load'),
           true,
-          { percent: prog.percent() }
+          { percent: Math.min(99, prog.percent()) }
         );
         render();
         stampThreadsDiag(page, {
@@ -1140,10 +1137,11 @@
           );
         }
       };
-      const creditAllThreadStages = (labelKind) => {
-        markThreadStage('shell', labelKind || 'threads-shell');
-        markThreadStage('comments', labelKind || 'threads-comments');
-        markThreadStage('reactions', labelKind || 'threads-reactions');
+      // Always credit with per-stage labels (never one shared kind for all three).
+      const creditAllThreadStages = () => {
+        markThreadStage('shell', 'threads-shell');
+        markThreadStage('comments', 'threads-comments');
+        markThreadStage('reactions', 'threads-reactions');
       };
 
       // Start threads in parallel with core — paint as soon as *this* fetch lands.
@@ -1159,9 +1157,10 @@
               onStage: (stage) => {
                 if (!openStill()) return;
                 if (stage === 'shell') {
+                  // First ladder step: long "review threads" copy (matches product).
                   markThreadStage(
                     'shell',
-                    warmOrCache ? 'threads-shell' : 'threads-shell'
+                    warmOrCache ? 'threads-update' : 'threads-load'
                   );
                 } else if (stage === 'comments-start') {
                   markThreadStage('comments-start');
@@ -1175,9 +1174,8 @@
               .then((res) => {
                 const page = res.page;
                 // Ensure all three stages credited even if onStage was skipped
-                creditAllThreadStages(
-                  warmOrCache ? 'threads-update' : 'threads-load'
-                );
+                // (re-credit is label-safe: prog.mark no-ops when key already done).
+                creditAllThreadStages();
                 earlyThreadsPage = page;
                 paintThreadsNewestNow(page);
                 tl?.mark?.('paint.threadsNewest', 'mark', {
@@ -1210,7 +1208,7 @@
                 };
               })
               .catch((err) => {
-                creditAllThreadStages('threads-failed');
+                creditAllThreadStages();
                 try {
                   for (const id of [HOST_ID, embedHostId()]) {
                     document
@@ -1236,7 +1234,7 @@
             }
           )
         : Promise.resolve({ ok: false, err: null, skipped: true }).then((r) => {
-            creditAllThreadStages(corePhase);
+            creditAllThreadStages();
             return r;
           });
 
@@ -1409,13 +1407,15 @@
 
           if (useRevalidatePath) {
             // —— Incremental revalidate ——
-            setLoadStage(
-              'threads',
-              loadStageLabel('threads-shell'),
-              true,
-              { percent: prog.percent() }
-            );
-            render();
+            if (current.loadStage?.busy) {
+              setLoadStage(
+                'threads',
+                loadStageLabel('threads-shell'),
+                true,
+                { percent: Math.min(99, prog.percent()) }
+              );
+              render();
+            }
 
             const tNewest0 = nowMs();
             const kick = await threadsKickoffP;
@@ -1432,6 +1432,9 @@
                 `) pct=${prog.percent()} early=${Boolean(kick.paintedEarly || threadsPaintedEarly)}`
             );
             if (!openStill()) return;
+
+            creditAllThreadStages();
+            tryFinishOpenProgress(prog);
 
             const updatedIdSet = new Set(
               (newest?.threads || [])
@@ -1520,13 +1523,15 @@
                 break;
               }
               didUnresolvedFetch = true;
-              setLoadStage(
-                'threads',
-                loadStageLabel('threads-comments'),
-                true,
-                { percent: prog.percent() }
-              );
-              render();
+              if (current.loadStage?.busy) {
+                setLoadStage(
+                  'threads',
+                  loadStageLabel('threads-comments'),
+                  true,
+                  { percent: Math.min(99, prog.percent()) }
+                );
+                render();
+              }
               const tBulk0 = nowMs();
               const bulk = await globalThis.PRTreeFetch.fetchReviewThreadsByIds(
                 remainingUnresolvedIds,
@@ -1557,9 +1562,7 @@
             }
 
             // Kickoff already credited shell/comments/reactions; re-credit is no-op.
-            creditAllThreadStages(
-              didUnresolvedFetch ? 'threads-comments' : 'threads-reactions'
-            );
+            creditAllThreadStages();
             console.log(
               `[pr-plus] openModal phase=threads(revalidate) ${owner}/${repo}#${number}: ${Math.round(
                 nowMs() - tThreads0
@@ -1648,7 +1651,7 @@
                 `[pr-plus] openModal phase=threads.start ${owner}/${repo}#${number}: skipped (total=${totalCount} < ${apiMax})`
               );
             }
-            creditAllThreadStages('threads-load');
+            creditAllThreadStages();
             console.log(
               `[pr-plus] openModal phase=threads ${owner}/${repo}#${number}: ${Math.round(
                 nowMs() - tThreads0
@@ -1687,7 +1690,7 @@
             const failLabel = loadStageLabel('threads-failed', {
               message: threadErr?.message,
             });
-            creditAllThreadStages('threads-failed');
+            creditAllThreadStages();
             if (!tryFinishOpenProgress(prog)) {
               setLoadStage(
                 'threads',
@@ -1701,7 +1704,7 @@
         }
       } else {
         // No thread API — credit all thread units then settle
-        creditAllThreadStages(corePhase);
+        creditAllThreadStages();
         tryFinishOpenProgress(prog);
         render();
       }

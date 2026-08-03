@@ -82,13 +82,19 @@ describe('architecture gates', () => {
     expect(hostTs.some((f) => /^\d{2}-/.test(f))).toBe(false);
     expect(hostTs).toEqual(
       expect.arrayContaining([
-        'host-core-detail-store.ts',
-        'side-fetch-progress-assets.ts',
-        'props-render-session.ts',
+        'host-core-authority.ts',
+        'host-core-store.ts',
+        'side-fetch-progress.ts',
+        'side-fetch-cache-assets.ts',
+        'props-build.ts',
+        'props-render-close.ts',
         'open-modal.ts',
+        'open-modal-run.ts',
         'restore-embed-list-focus.ts',
         'list-row-lifecycle.ts',
-        'pulls-palette.ts',
+        'pulls-palette-state.ts',
+        'pulls-palette-render.ts',
+        'pulls-palette-keys.ts',
         'auto-refresh-watch.ts',
         'click-intercept.ts',
       ])
@@ -97,7 +103,8 @@ describe('architecture gates', () => {
     // build-host declares explicit domain order
     const buildHost = read('scripts/build-host.mjs');
     expect(buildHost).toMatch(/HOST_MODULE_ORDER/);
-    expect(buildHost).toMatch(/host-core-detail-store\.ts/);
+    expect(buildHost).toMatch(/host-core-store\.ts/);
+    expect(buildHost).toMatch(/side-fetch-progress\.ts/);
     expect(buildHost).not.toMatch(/01-state-detail-store/);
     expect(fs.existsSync(path.join(root, 'src/fetch/fetch-api.ts'))).toBe(true);
     expect(fs.existsSync(path.join(root, 'src/content-bridge/bridge-api.ts'))).toBe(true);

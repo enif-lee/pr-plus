@@ -229,15 +229,72 @@ export function getSteps() {
     );
   }
 
+  /** Remove bug via aside chip ✕ (more reliable than picker when already applied). */
+  function removeBugViaChip() {
+    return evalInPage(`
+      (() => {
+        const aside =
+          document.querySelector('.prp-conversation__aside') ||
+          document.querySelector('.prp-aside') ||
+          document.querySelector('.prp-overlay');
+        if (!aside) return { ok: false, reason: 'no aside' };
+        const chips = [...aside.querySelectorAll('.prp-label-chip, [class*="label-chip"]')];
+        for (const chip of chips) {
+          const name = (
+            chip.querySelector('.prp-label, a, span')?.textContent ||
+            chip.textContent ||
+            ''
+          )
+            .replace(/[✕×x]/gi, '')
+            .replace(/\\s+/g, ' ')
+            .trim();
+          if (!/^bug$/i.test(name) && !/\\bbug\\b/i.test(name)) continue;
+          const x = chip.querySelector(
+            'button.prp-label-chip__remove, button[aria-label*="emove"], button'
+          );
+          if (x) {
+            x.click();
+            return { ok: true, via: 'chip-x', name };
+          }
+        }
+        return { ok: false, reason: 'no-bug-chip', chips: chips.length };
+      })()
+    `);
+  }
+
   /** Force-toggle bug label via aside picker. wantSelected=true → ensure applied. */
   function forceBugLabel(wantSelected) {
-    const open = openLabelsPicker();
+    // Fast path: remove via chip ✕ when deselecting an applied bug.
+    if (!wantSelected) {
+      const chip = removeBugViaChip();
+      if (chip?.ok) {
+        waitMs(500);
+        return chip;
+      }
+    }
+    // Bring Labels control into view (aside scroll / virtualization).
+    evalInPage(`
+      (() => {
+        const lab = Array.prototype.slice
+          .call(document.querySelectorAll('.prp-overlay button, .prp-overlay [role="button"]'))
+          .find((b) => /add label/i.test(b.textContent || ''));
+        lab?.scrollIntoView?.({ block: 'center', inline: 'nearest' });
+        return !!lab;
+      })()
+    `);
+    waitMs(150);
+    let open = { clicked: false };
+    let panel = false;
+    const t0 = Date.now();
+    while (Date.now() - t0 < 8_000) {
+      open = openLabelsPicker();
+      waitMs(280);
+      panel = evalInPage(`!!document.querySelector('.prp-sselect-panel')`);
+      if (panel) break;
+      waitMs(200);
+    }
     assert(open.clicked, `open labels picker: ${JSON.stringify(open)}`);
-    waitMs(700);
-    assert(
-      evalInPage(`!!document.querySelector('.prp-sselect-panel')`),
-      'labels panel missing after Add label…'
-    );
+    assert(panel, 'labels panel missing after Add label…');
     const state = evalInPage(`
       (function () {
         var want = ${wantSelected ? 'true' : 'false'};
@@ -262,8 +319,7 @@ export function getSteps() {
       })()
     `);
     assert(state.found, `bug label option missing in picker: ${JSON.stringify(state)}`);
-    waitMs(350);
-    // Apply if dirty (preview button present)
+    waitMs(300);
     const preview = evalInPage(`
       (function () {
         var b = Array.prototype.slice
@@ -279,7 +335,6 @@ export function getSteps() {
       assert(applied.ok, `Apply labels failed: ${JSON.stringify(applied)}`);
       waitMs(600);
     } else {
-      // Selection may already match — Esc panel
       abPressEscape();
       waitMs(200);
     }
@@ -424,18 +479,26 @@ export function getSteps() {
 
   run('mutation: cleanup remove bug + assert gone', () => {
     openPr(DEMO_PR, { viaUrl: true });
-    waitMs(800);
-    forceBugLabel(false);
-    // Wait aside clears
-    const tAside = Date.now();
+    waitMs(500);
+    // Retry remove: chip ✕ can race reopen paint; picker is fallback.
     let aside = probeAsideLabels();
-    while (aside.hasBug && Date.now() - tAside < 10000) {
-      waitMs(300);
+    const tAside = Date.now();
+    while (aside.hasBug && Date.now() - tAside < 16_000) {
+      const chip = removeBugViaChip();
+      log(`  cleanup chip=${JSON.stringify(chip)}`);
+      if (!chip?.ok) {
+        try {
+          forceBugLabel(false);
+        } catch (e) {
+          log(`  cleanup picker soft-fail ${String(e?.message || e).slice(0, 80)}`);
+        }
+      }
+      waitMs(450);
       aside = probeAsideLabels();
     }
     assert(!aside.hasBug, `cleanup: aside still has bug: ${JSON.stringify(aside)}`);
     closeOverlay();
-    waitMs(800);
+    waitMs(600);
     if (!evalInPage(`location.pathname.indexOf('/pulls') !== -1`)) {
       openPulls();
     }

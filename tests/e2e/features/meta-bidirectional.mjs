@@ -883,12 +883,12 @@ function toggleBodyHeartReaction() {
 
 function reopenModalFresh(n = DEMO_PR, { bustCache = false } = {}) {
   closeOverlay();
-  waitMs(250);
+  waitMs(120);
   if (bustCache) {
     // Full navigation clears content-script in-memory detailCache (IDB alone is not enough).
     try {
       openPage('https://github.com/');
-      waitMs(600);
+      waitMs(250);
     } catch {
       /* ignore */
     }
@@ -902,14 +902,14 @@ function reopenModalFresh(n = DEMO_PR, { bustCache = false } = {}) {
     } catch {
       /* ignore */
     }
-    waitMs(400);
+    waitMs(150);
   }
   openPulls();
-  waitMs(600);
+  waitMs(200);
   openPr(n, { viaUrl: true });
   setLayout('conversation');
   waitDetailReady({ meta: true, files: false, label: 'meta reopen' });
-  waitMs(1000);
+  waitMs(300);
 }
 
 // ── steps ───────────────────────────────────────────────────────────
@@ -951,11 +951,21 @@ export function getSteps() {
     openPr(DEMO_PR, { viaUrl: true });
     setLayout('conversation');
     waitDetailReady({ meta: true, files: false, label: 'MB0' });
-    waitMs(600);
-    const modal = probeModalMeta();
+    // Progressive open may paint a cold seed first — wait for GH title, not
+    // the "Pull Request #N" placeholder.
+    const want = ctx.originalTitle.slice(0, 12);
+    const modal = waitPred(
+      probeModalMeta,
+      (m) =>
+        m.open &&
+        String(m.title || '').includes(want) &&
+        !/^Pull Request #\d+$/i.test(String(m.title || '').trim()),
+      20_000,
+      250
+    );
     assert(modal.open, 'modal not open');
     assert(
-      modal.title && modal.title.includes(ctx.originalTitle.slice(0, 12)),
+      modal.title && modal.title.includes(want),
       `modal title baseline mismatch: ${JSON.stringify(modal.title)} vs ${ctx.originalTitle}`
     );
   });
@@ -976,11 +986,12 @@ export function getSteps() {
     // List under shell (pulls still in background) — close to list if needed
     closeOverlay();
     openPulls();
-    waitMs(800);
+    waitMs(250);
     const list = waitPred(
       () => probeListRow(DEMO_PR),
       (r) => r.found && String(r.title || '').includes(MARK),
-      14_000
+      14_000,
+      250
     );
     assert(
       list.found && String(list.title || '').includes(MARK),
@@ -1075,7 +1086,7 @@ export function getSteps() {
     // Fail-closed: session write-through / people-meta authority must paint the
     // same milestone on reopened modal aside (AC1 — not log-only).
     closeOverlay();
-    waitMs(700);
+    waitMs(200);
     openPr(DEMO_PR);
     setLayout('conversation');
     waitDetailReady({ meta: true, files: false, label: 'MB3 soft reopen' });
@@ -1086,7 +1097,7 @@ export function getSteps() {
         (/pr-plus-e2e-meta/i.test(m.asideText || '') ||
           /pr-plus-e2e-meta/i.test(m.milestoneSnippet || '')),
       20_000,
-      400
+      250
     );
     log(
       `  soft reopen: snippet=${JSON.stringify(softMs.milestoneSnippet)} asideHas=${/pr-plus-e2e-meta/i.test(softMs.asideText || '')}`
@@ -1101,16 +1112,16 @@ export function getSteps() {
     // First open after reload must paint GH milestone — no free second thrash,
     // no issue-field gh seed.
     openPage(PULLS_URL);
-    waitMs(500);
+    waitMs(200);
     evalInPage(`location.reload()`);
-    waitMs(2800);
+    waitMs(1200);
     try {
       clearPrPlusIdb();
       clearPrPlusSessionStorage();
     } catch {
       /* ignore */
     }
-    waitMs(600);
+    waitMs(200);
     const listHit = waitPred(
       () => probeListRow(DEMO_PR),
       (r) => r.found,
@@ -1121,7 +1132,7 @@ export function getSteps() {
     openPr(DEMO_PR, { viaUrl: true });
     setLayout('conversation');
     waitDetailReady({ meta: true, files: false, label: 'MB3 hard reopen' });
-    waitMs(1500);
+    waitMs(300);
     const finalMs = waitPred(
       probeModalMeta,
       (m) =>
@@ -1129,7 +1140,7 @@ export function getSteps() {
         (/pr-plus-e2e-meta/i.test(m.asideText || '') ||
           /pr-plus-e2e-meta/i.test(m.milestoneSnippet || '')),
       45_000,
-      500
+      300
     );
     const ghAtReopen = ghIssueGet(DEMO_PR);
     assert(
@@ -1349,9 +1360,9 @@ export function getSteps() {
 
     // Hard reload + wait for native list title to reflect reverse patch, then open.
     openPage(PULLS_URL);
-    waitMs(600);
+    waitMs(200);
     evalInPage(`location.reload()`);
-    waitMs(2500);
+    waitMs(1200);
     try {
       clearPrPlusIdb();
       clearPrPlusSessionStorage();
@@ -1362,7 +1373,8 @@ export function getSteps() {
     const listRev = waitPred(
       () => probeListRow(DEMO_PR),
       (r) => r.found && String(r.title || '').includes('rev-'),
-      20_000
+      20_000,
+      300
     );
     log(`  list after reverse: ${JSON.stringify(listRev)}`);
     if (listRev.found && String(listRev.title || '').includes('rev-')) {
@@ -1372,13 +1384,13 @@ export function getSteps() {
     }
     setLayout('conversation');
     waitDetailReady({ meta: true, files: false, label: 'MB7 reverse' });
-    waitMs(2000);
+    waitMs(400);
 
     let modal = waitPred(
       probeModalMeta,
       (m) => m.open && String(m.title || '').includes('rev-'),
       30_000,
-      500
+      300
     );
     // If still stale, hard reopen once more after list truth is visible.
     if (!String(modal.title || '').includes('rev-')) {
@@ -1387,16 +1399,16 @@ export function getSteps() {
       );
       closeOverlay();
       openPage(PULLS_URL);
-      waitMs(400);
+      waitMs(200);
       evalInPage(`location.reload()`);
-      waitMs(3000);
+      waitMs(1200);
       try {
         clearPrPlusIdb();
         clearPrPlusSessionStorage();
       } catch {
         /* ignore */
       }
-      waitMs(500);
+      waitMs(200);
       openPr(DEMO_PR, { viaUrl: true });
       setLayout('conversation');
       waitDetailReady({ meta: true, files: false, label: 'MB7 reverse retry' });
@@ -1404,7 +1416,7 @@ export function getSteps() {
         probeModalMeta,
         (m) => m.open && String(m.title || '').includes('rev-'),
         35_000,
-        500
+        300
       );
     }
     assert(

@@ -175,7 +175,8 @@ export function waitDetailReady(opts = {}) {
         ? `if (number != null && Number(number) !== ${n}) return false;`
         : ''
     }
-    if (loadBusy) return false;
+    // Do not gate on loadBusy — open progress can lag (or stick) after shell paint.
+    // metaReady reflects core shell interactive; progress bar is independent.
     ${needMeta ? `if (!metaReady) return false;` : ''}
     ${
       needFiles
