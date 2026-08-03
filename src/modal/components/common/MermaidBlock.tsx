@@ -1,9 +1,19 @@
-import React, { useEffect, useId, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import {
   ensureMermaid,
   initMermaid,
   resolveMermaidColorMode,
 } from '../../lib/mermaid-lazy';
+import {
+  mermaidSourceKey,
+  shouldRunMermaidHeavyWork,
+  shouldShowHeavyPlaceholder,
+} from '../../lib/scroll-idle-render';
+import {
+  fitMermaidSvgInline,
+  MERMAID_INLINE_MAX_HEIGHT_PX,
+} from '../../lib/mermaid-viewer';
+import { useConversationScrollIdle } from '../../views/conversation/ConversationScrollIdleContext';
 import { IconFullscreen } from './icons';
 import { MermaidViewer } from './MermaidViewer';
 import './MermaidBlock.css';
@@ -29,6 +39,12 @@ function useShellColorMode(): 'light' | 'dark' {
 /**
  * Renders a ```mermaid fence via lazy-loaded Mermaid (dist/mermaid.esm.js).
  *
+ * Conversation virtual list: defer ensureMermaid/render while the scroller is
+ * actively scrolling (ConversationScrollIdleContext). Outside conversation
+ * (composer preview, etc.) the context defaults to idle → render immediately.
+ * Scroll end does not re-run heavy work when SVG is already cached for the
+ * same code+theme (avoids flash / jank).
+ *
  * Important: never write SVG via element.innerHTML on a React-managed node that
  * also has children — that corrupts the fiber tree (removeChild crash) and can
  * tear down the whole modal root. SVG is held in React state instead.
@@ -37,18 +53,43 @@ export function MermaidBlock({ code }: { code?: string }) {
   const reactId = useId().replace(/:/g, '');
   const colorMode = useShellColorMode();
   const mermaidTheme = colorMode === 'dark' ? 'dark' : 'neutral';
+  const { isScrolling } = useConversationScrollIdle();
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(true);
   const [svg, setSvg] = useState('');
   const [viewerOpen, setViewerOpen] = useState(false);
+  /** Last successfully rendered code+theme identity (survives scroll toggles). */
+  const cachedKeyRef = useRef<string>('');
+  const svgRef = useRef(svg);
+  svgRef.current = svg;
 
   useEffect(() => {
     let cancelled = false;
     const source = String(code || '').trim();
+    const sourceKey = mermaidSourceKey(source, mermaidTheme);
     if (!source) {
       setBusy(false);
       setSvg('');
+      cachedKeyRef.current = '';
       setErr('Empty mermaid diagram');
+      return undefined;
+    }
+
+    const runHeavy = shouldRunMermaidHeavyWork({
+      isScrolling,
+      hasCachedResult: Boolean(svgRef.current),
+      sourceKey,
+      cachedSourceKey: cachedKeyRef.current,
+    });
+
+    // Scrolling, or idle with a valid cache for this source: do not touch SVG.
+    if (!runHeavy) {
+      if (isScrolling && !svgRef.current) {
+        setBusy(true);
+        setErr(null);
+      } else if (!isScrolling && svgRef.current && cachedKeyRef.current === sourceKey) {
+        setBusy(false);
+      }
       return undefined;
     }
 
@@ -56,6 +97,7 @@ export function MermaidBlock({ code }: { code?: string }) {
       setBusy(true);
       setErr(null);
       setSvg('');
+      cachedKeyRef.current = '';
 
       let eng: any = null;
       try {
@@ -87,13 +129,22 @@ export function MermaidBlock({ code }: { code?: string }) {
           setErr('Mermaid returned empty SVG');
           return;
         }
-        setSvg(out);
+        // Fit inside max-height without nested scroll (conversation is sole scroller).
+        const fitted =
+          typeof fitMermaidSvgInline === 'function'
+            ? fitMermaidSvgInline(out, {
+                maxHeight: MERMAID_INLINE_MAX_HEIGHT_PX,
+              })
+            : out;
+        setSvg(fitted);
+        cachedKeyRef.current = sourceKey;
         setBusy(false);
         setErr(null);
       } catch (e: any) {
         if (cancelled) return;
         setBusy(false);
         setSvg('');
+        cachedKeyRef.current = '';
         setErr(e?.message || String(e));
         try {
           document.getElementById(id)?.remove();
@@ -108,7 +159,7 @@ export function MermaidBlock({ code }: { code?: string }) {
     return () => {
       cancelled = true;
     };
-  }, [code, reactId, mermaidTheme]);
+  }, [code, reactId, mermaidTheme, isScrolling]);
 
   if (err) {
     return (
@@ -119,10 +170,24 @@ export function MermaidBlock({ code }: { code?: string }) {
     );
   }
 
-  if (busy && !svg) {
+  if (
+    shouldShowHeavyPlaceholder({
+      isScrolling,
+      hasResult: Boolean(svg),
+      busy,
+    })
+  ) {
     return (
-      <div className="prp-mermaid prp-mermaid--loading" aria-busy="true">
-        <span className="prp-muted prp-mermaid__loading">Rendering diagram…</span>
+      <div
+        className="prp-mermaid prp-mermaid--loading"
+        aria-busy="true"
+        data-prp-mermaid-deferred={isScrolling ? '1' : '0'}
+        data-prp-mermaid-skeleton="1"
+      >
+        <div className="prp-mermaid__skeleton" aria-hidden="true" />
+        <span className="prp-muted prp-mermaid__loading">
+          {isScrolling ? 'Diagram paused while scrolling…' : 'Rendering diagram…'}
+        </span>
       </div>
     );
   }

@@ -765,8 +765,29 @@
     let escalated = false;
     let earlyExit = false;
     let hostRestFallback = false;
+    /** Bound GraphQL shell so a stuck SW channel cannot leave openModal threads forever. */
+    const SHELL_TIMEOUT_MS = 8_000;
+    const fetchPageBounded = async (size: number, transport: any = {}) => {
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      try {
+        return await Promise.race([
+          fetchPage(size, transport),
+          new Promise((_, reject) => {
+            timer = setTimeout(() => {
+              const err: any = new Error(
+                `reviewThreads shell timed out after ${SHELL_TIMEOUT_MS}ms`
+              );
+              err.status = 408;
+              reject(err);
+            }, SHELL_TIMEOUT_MS);
+          }),
+        ]);
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    };
     try {
-      page = await fetchPage(pageSize);
+      page = await fetchPageBounded(pageSize);
     } catch (err) {
       if (
         err?.name === 'AbortError' ||
@@ -774,7 +795,7 @@
       ) {
         throw err;
       }
-      // GraphQL remaining=0 / SW throw → still try host REST comments.
+      // GraphQL remaining=0 / SW hang / throw → host REST comments fallback.
       console.log(
         `[pr-plus] fetchNewestReviewThreadsAdaptive primary fail: ${err?.message || err}`
       );
@@ -796,7 +817,7 @@
           : true;
       if (shouldEsc) {
         try {
-          page = await fetchPage(apiMax, { forceGraphql: true });
+          page = await fetchPageBounded(apiMax, { forceGraphql: true });
           escalated = true;
           fromRest = page?.source === 'rest';
           hasData = pageHasData(page);
@@ -808,7 +829,46 @@
       }
     }
 
-    // No REST host fallback — GraphQL empty is authoritative.
+    // REST fallback when GraphQL empty, timed out, or never returned PRRT shells.
+    // (E2e / flaky SW: GraphQL cost log may show shell while content channel stalls.)
+    if (!hasData) {
+      try {
+        let restTimer: ReturnType<typeof setTimeout> | null = null;
+        const rest = await Promise.race([
+          restPageFromComments(),
+          new Promise((_, reject) => {
+            restTimer = setTimeout(() => {
+              const err: any = new Error(
+                `reviewThreads REST fallback timed out after ${SHELL_TIMEOUT_MS}ms`
+              );
+              err.status = 408;
+              reject(err);
+            }, SHELL_TIMEOUT_MS);
+          }),
+        ]).finally(() => {
+          if (restTimer) clearTimeout(restTimer);
+        });
+        if (pageHasData(rest)) {
+          page = rest;
+          hostRestFallback = true;
+          fromRest = true;
+          hasData = true;
+          earlyExit = true;
+        }
+      } catch (restErr) {
+        if (
+          restErr?.name === 'AbortError' ||
+          /aborted|AbortError/i.test(String(restErr?.message || ''))
+        ) {
+          throw restErr;
+        }
+        console.log(
+          `[pr-plus] fetchNewestReviewThreadsAdaptive REST fallback soft-fail: ${
+            restErr?.message || restErr
+          }`
+        );
+      }
+    }
 
     if (!page) {
       page = {
@@ -822,17 +882,11 @@
       };
     }
 
-    // Let the header paint each ladder label (shell → comments → reactions).
-    // Double-rAF only — no fixed 100ms+ dwell (that stacked on every open/e2e).
+    // Yield so ladder labels can paint. Prefer setTimeout over rAF — background
+    // / headless tabs throttle rAF to near-zero, which starved openModal threads.
     const yieldStagePaint = () =>
       new Promise((resolve) => {
-        if (typeof requestAnimationFrame === 'function') {
-          requestAnimationFrame(() => {
-            requestAnimationFrame(() => resolve());
-          });
-        } else {
-          setTimeout(resolve, 16);
-        }
+        setTimeout(resolve, 0);
       });
 
     // Progress stage: shell list/meta is ready.
@@ -888,10 +942,25 @@
             /* ignore */
           }
           didCommentsFetch = true;
-          const bulk = await globalThis.PRTreeFetch.fetchReviewThreadsByIds(
-            eagerIds,
-            { signal }
-          );
+          // Bound by-ids: shell already has PRRT + preview bodies; a stuck
+          // SW channel must not block Diff thread paint indefinitely.
+          let bulkTimer: ReturnType<typeof setTimeout> | null = null;
+          const bulk = await Promise.race([
+            globalThis.PRTreeFetch.fetchReviewThreadsByIds(eagerIds, {
+              signal,
+            }),
+            new Promise((_, reject) => {
+              bulkTimer = setTimeout(() => {
+                const err: any = new Error(
+                  `reviewThreads byIds timed out after ${SHELL_TIMEOUT_MS}ms`
+                );
+                err.status = 408;
+                reject(err);
+              }, SHELL_TIMEOUT_MS);
+            }),
+          ]).finally(() => {
+            if (bulkTimer) clearTimeout(bulkTimer);
+          });
           if (pureMerge && bulk) {
             page = pureMerge(page, bulk);
             page.shellOnly = false;

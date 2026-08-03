@@ -73,7 +73,10 @@ export function buildConversationVirtualRows(paged: any, opts: any = {}) {
   const top = Array.isArray(paged?.items) ? paged.items : [];
   const bottom = Array.isArray(paged?.bottomItems) ? paged.bottomItems : [];
   const hidden = Number(paged?.hiddenCount ?? opts.metaHiddenCount) || 0;
-  // Classic dual-window / single-window fold when threads remain
+  // Classic dual-window / single-window fold when threads remain.
+  // Prefer explicit paged.showThreadGap (ConversationView sets this from meta
+  // hasMore / hasOlder / hasNewerFromOldest) so Load more is not dropped when
+  // hiddenCount is still settling at 0.
   const showGap = Boolean(
     paged?.showThreadGap ||
       (opts.hasMoreThreads && hidden > 0 && opts.canLoadMore !== false)

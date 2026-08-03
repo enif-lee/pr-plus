@@ -269,3 +269,104 @@ export function prepareMermaidSvgForViewer(svgHtml: string): string {
   }
   return s;
 }
+
+/** Inline conversation mermaid box max height (matches CSS). */
+export const MERMAID_INLINE_MAX_HEIGHT_PX = 720;
+/** Horizontal/vertical padding inside `.prp-mermaid` (12px × 2). */
+export const MERMAID_INLINE_PAD_PX = 24;
+
+/**
+ * Scale an inline Mermaid SVG so it fits within max height (and optional max
+ * width) **without nested scroll**. Preserves viewBox for sharpness; rewrites
+ * numeric width/height attrs to the fitted size. Never upscales above 1.
+ *
+ * Conversation list remains the only scroller — the box is max-height capped
+ * and the diagram is shrunk to fit inside.
+ */
+export function fitMermaidSvgInline(
+  svgHtml: string,
+  opts: { maxHeight?: number; maxWidth?: number | null } = {}
+): string {
+  let s = String(svgHtml || '');
+  if (!s) return s;
+  const maxH = Math.max(
+    48,
+    Number(opts.maxHeight) > 0
+      ? Number(opts.maxHeight)
+      : MERMAID_INLINE_MAX_HEIGHT_PX
+  );
+  // Content area inside padding
+  const contentMaxH = Math.max(32, maxH - MERMAID_INLINE_PAD_PX);
+  const maxW =
+    opts.maxWidth != null && Number(opts.maxWidth) > 0
+      ? Number(opts.maxWidth)
+      : null;
+
+  const open = s.match(/<svg\b[^>]*>/i);
+  if (!open) return s;
+  const tag = open[0];
+
+  const vb =
+    tag.match(/\sviewBox="([^"]+)"/i)?.[1] ||
+    tag.match(/\sviewbox="([^"]+)"/i)?.[1] ||
+    '';
+  const vbParts = vb
+    .trim()
+    .split(/[\s,]+/)
+    .map((x) => Number(x));
+  let iw = 0;
+  let ih = 0;
+  if (vbParts.length >= 4 && vbParts[2] > 1 && vbParts[3] > 1) {
+    iw = vbParts[2];
+    ih = vbParts[3];
+  } else {
+    const num = (attr: string) => {
+      const m = tag.match(new RegExp(`\\s${attr}="([\\d.]+)(px)?"`, 'i'));
+      return m ? Number(m[1]) : NaN;
+    };
+    iw = num('width');
+    ih = num('height');
+  }
+  if (!(iw > 1) || !(ih > 1)) return s;
+
+  let scale = Math.min(1, contentMaxH / ih);
+  if (maxW != null) scale = Math.min(scale, maxW / iw);
+  if (!(scale > 0) || !Number.isFinite(scale)) scale = 1;
+
+  const outW = Math.max(1, Math.round(iw * scale * 1000) / 1000);
+  const outH = Math.max(1, Math.round(ih * scale * 1000) / 1000);
+
+  let next = tag;
+  // Ensure viewBox exists so vector scale stays sharp when attrs shrink
+  if (!/\sviewBox=/i.test(next) && !/\sviewbox=/i.test(next)) {
+    next = next.replace(/<svg\b/i, `<svg viewBox="0 0 ${iw} ${ih}"`);
+  }
+  if (/\swidth="/i.test(next)) {
+    next = next.replace(/\swidth="[^"]*"/i, ` width="${outW}"`);
+  } else {
+    next = next.replace(/<svg\b/i, `<svg width="${outW}"`);
+  }
+  if (/\sheight="/i.test(next)) {
+    next = next.replace(/\sheight="[^"]*"/i, ` height="${outH}"`);
+  } else {
+    next = next.replace(/<svg\b/i, `<svg height="${outH}"`);
+  }
+  // Strip style width/height that would fight the fitted attrs
+  next = next.replace(/\sstyle="([^"]*)"/i, (_m, style: string) => {
+    const cleaned = String(style)
+      .replace(/max-width\s*:\s*[^;]+;?/gi, '')
+      .replace(/max-height\s*:\s*[^;]+;?/gi, '')
+      .replace(/width\s*:\s*[^;]+;?/gi, '')
+      .replace(/height\s*:\s*[^;]+;?/gi, '')
+      .replace(/;;+/g, ';')
+      .trim()
+      .replace(/^;|;$/g, '');
+    return cleaned ? ` style="${cleaned}"` : '';
+  });
+  next = next.replace(
+    /<svg\b/i,
+    `<svg data-prp-mermaid-fit="1" data-prp-mermaid-scale="${scale.toFixed(4)}"`
+  );
+
+  return s.replace(tag, next);
+}

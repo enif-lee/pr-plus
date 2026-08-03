@@ -601,18 +601,16 @@ export function installPrModalMutations(d: Record<string, any>) {
   async function onSaveBody(body: any) {
     if (!d.detail) return;
     const nextBody = body == null ? '' : String(body);
-    const prevBody = d.detail.body;
     d.setActionBusy(true);
     d.setActionMsg('');
-    // Optimistic description so conversation card updates immediately.
-    d.setLocalDetail((prev) => (prev ? { ...prev, body: nextBody } : prev));
+    // Pessimistic: paint description only after API success (no pre-await body stamp).
     try {
       const api = globalThis.PRTreeFetch;
       if (!api?.updatePullRequest) throw new Error('Update PR API unavailable');
       await api.updatePullRequest(d.detail.owner, d.detail.repo, d.detail.number, { body: nextBody });
       d.setEditingBody(false);
       d.setActionMsg('Description updated.');
-      // Write-through host/IDB only — no full soft-refresh after known body write.
+      // Narrow write-through host/IDB — no full soft-refresh after known body write.
       const base = d.detailRef.current || d.detail;
       const next = base ? { ...base, body: nextBody } : null;
       if (next) {
@@ -621,7 +619,7 @@ export function installPrModalMutations(d: Record<string, any>) {
       }
       void patchHostDetail({ body: nextBody });
     } catch (err) {
-      d.setLocalDetail((prev) => (prev ? { ...prev, body: prevBody } : prev));
+      // Prior settled body preserved (never pre-painted).
       d.setActionMsg(err?.message || String(err));
     } finally {
       d.setActionBusy(false);
@@ -629,20 +627,43 @@ export function installPrModalMutations(d: Record<string, any>) {
   }
   async function onSaveEditComment(kind, id, body) {
     if (!d.detail || id == null) return;
+    const nextBody = body == null ? '' : String(body);
     d.setActionBusy(true);
     d.setActionMsg('');
     try {
       const api = globalThis.PRTreeFetch;
       if (kind === 'issue') {
         if (!api?.editIssueComment) throw new Error('Edit comment API unavailable');
-        await api.editIssueComment(d.detail.owner, d.detail.repo, id, body);
+        await api.editIssueComment(d.detail.owner, d.detail.repo, id, nextBody);
       } else {
         if (!api?.editReviewComment) throw new Error('Edit review comment API unavailable');
-        await api.editReviewComment(d.detail.owner, d.detail.repo, id, body);
+        await api.editReviewComment(d.detail.owner, d.detail.repo, id, nextBody);
       }
       d.setEditingComment(null);
       d.setActionMsg('Comment updated.');
-      await d.onRefresh?.();
+      // Narrow post-API body patch on latest detail (no full soft-refresh).
+      const base = d.detailRef.current || d.detail;
+      if (!base) return;
+      const key = String(id);
+      let next = base;
+      if (kind === 'issue') {
+        const list = Array.isArray(base.comments) ? base.comments : [];
+        next = {
+          ...base,
+          comments: list.map((c: any) =>
+            c && String(c.id) === key ? { ...c, body: nextBody } : c
+          ),
+        };
+      } else {
+        const list = Array.isArray(base.reviewComments) ? base.reviewComments : [];
+        next = {
+          ...base,
+          reviewComments: list.map((c: any) =>
+            c && String(c.id) === key ? { ...c, body: nextBody } : c
+          ),
+        };
+      }
+      commitCommentListPatch(next);
     } catch (err) {
       d.setActionMsg(err?.message || String(err));
     } finally {
@@ -1049,13 +1070,13 @@ export function installPrModalMutations(d: Record<string, any>) {
     }
     d.setActionBusy(true);
     d.setActionMsg('');
-    // Optimistic local + host write-through so resolve flips without full soft-refresh.
+    // Pessimistic: stamp local + host only after resolve API succeeds.
     // Sync host patch (not queueMicrotask) so mergeDetailPreserveOptimistic sees
     // the stamped resolved flag before a racey side-fetch re-render.
-    const stamp = (d: any, nextResolved: boolean) =>
+    const stamp = (snap: any, nextResolved: boolean) =>
       typeof stampThreadResolved === 'function'
-        ? stampThreadResolved(d, tid, nextResolved)
-        : d;
+        ? stampThreadResolved(snap, tid, nextResolved)
+        : snap;
     const applyStamp = (nextResolved: boolean) => {
       const base = d.detailRef.current || d.detail;
       const next = stamp(base, nextResolved);
@@ -1074,16 +1095,14 @@ export function installPrModalMutations(d: Record<string, any>) {
         // Local-only stamp map is not persisted on host; keep via d.detailRef + merge.
       });
     };
-    applyStamp(Boolean(resolved));
     try {
       const api = globalThis.PRTreeFetch;
       if (!api?.resolveReviewThread) throw new Error('Resolve API unavailable');
       await api.resolveReviewThread(tid, resolved);
+      applyStamp(Boolean(resolved));
       d.setActionMsg(resolved ? 'Thread resolved.' : 'Thread unresolved.');
-      // Confirmed write already stamped in local + host — no full revalidate.
     } catch (err) {
-      // Roll back optimistic stamp on both local and host.
-      applyStamp(!resolved);
+      // Prior settled resolve state preserved (never pre-stamped).
       d.setActionMsg(err?.message || String(err));
     } finally {
       d.setActionBusy(false);
@@ -1230,11 +1249,11 @@ export function installPrModalMutations(d: Record<string, any>) {
   async function onEditTitle(nextTitle: string) {
     if (!d.detail) return;
     const title = String(nextTitle ?? '').trim();
-    if (!title || title === String(d.detail.title || '').trim()) return;
+    const prevTitle = String(d.detail.title || '');
+    if (!title || title === prevTitle.trim()) return;
     d.setActionBusy(true);
     d.setActionMsg('');
-    // Optimistic title so header updates immediately
-    d.setLocalDetail((prev) => (prev ? { ...prev, title } : prev));
+    // Pessimistic: paint title only after API success.
     try {
       const api = globalThis.PRTreeFetch;
       if (!api?.updatePullRequest) throw new Error('Update PR API unavailable');
@@ -1244,34 +1263,35 @@ export function installPrModalMutations(d: Record<string, any>) {
         event: 'renamed',
         actor: timelineActorFromDetail(d.detail).login,
         avatarUrl: timelineActorFromDetail(d.detail).avatarUrl,
-        rename: { from: String(d.detail.title || ''), to: title },
+        rename: { from: prevTitle, to: title },
       });
+      const base = d.detailRef.current || d.detail;
+      const timelineEvents = mergeTimelineEventsById(
+        Array.isArray(base?.timelineEvents)
+          ? base.timelineEvents
+          : Array.isArray(d.detail.timelineEvents)
+            ? d.detail.timelineEvents
+            : [],
+        [renameEv]
+      );
       d.setLocalDetail((prev) =>
         prev
           ? {
               ...prev,
               title,
-              timelineEvents: mergeTimelineEventsById(prev.timelineEvents, [
-                renameEv,
-              ]),
+              timelineEvents,
             }
           : prev
       );
       void patchHostDetail({
         title,
-        timelineEvents: mergeTimelineEventsById(
-          Array.isArray(d.detail.timelineEvents) ? d.detail.timelineEvents : [],
-          [renameEv]
-        ),
+        timelineEvents,
       });
       // Timeline-only convergence — never full soft-refresh after known title write.
       void refreshTimelineEvents();
     } catch (err) {
+      // Prior settled title preserved (never pre-painted).
       d.setActionMsg(err?.message || String(err));
-      // Revert optimistic title on failure
-      d.setLocalDetail((prev) =>
-        prev ? { ...prev, title: d.detail.title } : prev
-      );
     } finally {
       d.setActionBusy(false);
     }
@@ -1280,7 +1300,6 @@ export function installPrModalMutations(d: Record<string, any>) {
     if (!d.detail) return;
     const wantReady = stage === 'ready';
     const nextDraft = !wantReady;
-    const prevDraft = Boolean(d.detail.draft);
     const label = wantReady ? 'Mark ready for review' : 'Convert to draft';
     if (
       !confirmGateProceed(
@@ -1294,13 +1313,12 @@ export function installPrModalMutations(d: Record<string, any>) {
     ) {
       return;
     }
-    // Optimistic + host cache so merge box / header flip immediately and a
-    // remount does not resurrect the pre-write draft flag from SWR/IDB.
+    // Pessimistic: draft flag + host cache only after API success; re-assert after
+    // refresh so SWR/IDB cannot resurrect pre-write draft.
     const applyDraft = (draft: boolean) => {
       d.setLocalDetail((prev) => (prev ? { ...prev, draft: Boolean(draft) } : prev));
       void patchHostDetail({ draft: Boolean(draft) });
     };
-    applyDraft(nextDraft);
     d.setActionBusy(true);
     d.setActionMsg('');
     try {
@@ -1329,11 +1347,10 @@ export function installPrModalMutations(d: Record<string, any>) {
       } catch {
         /* best-effort — draft already patched */
       }
-      // Re-assert after refresh: REST/cache can briefly lag GraphQL and
-      // clobber optimistic draft via mergeDetailPreserveOptimistic.
+      // Re-assert after refresh: REST/cache can briefly lag GraphQL.
       applyDraft(confirmed);
     } catch (err) {
-      applyDraft(prevDraft);
+      // Prior settled draft preserved (never pre-painted).
       d.setActionMsg(err?.message || String(err));
     } finally {
       d.setActionBusy(false);
@@ -1589,32 +1606,27 @@ export function installPrModalMutations(d: Record<string, any>) {
     }
     d.setActionBusy(true);
     d.setActionMsg('');
-    // Drop from local + host immediately so revalidate bulk-fetch and merge
-    // cannot target / resurrect the deleted id.
-    const stripped =
-      typeof d.removeReviewCommentFromDetail === 'function'
-        ? d.removeReviewCommentFromDetail(d.detail, commentId)
-        : {
-            ...detail,
-            reviewComments: (d.detail.reviewComments || []).filter(
-              (c: any) => c && String(c.id) !== String(commentId)
-            ),
-          };
-    commitCommentListPatch(stripped);
+    // Pessimistic: strip only after delete API succeeds (latest detailRef).
     try {
       const api = globalThis.PRTreeFetch;
       if (!api?.deleteReviewComment) throw new Error('Delete review comment API unavailable');
       await api.deleteReviewComment(d.detail.owner, d.detail.repo, commentId);
+      const base = d.detailRef.current || d.detail;
+      const stripped =
+        typeof d.removeReviewCommentFromDetail === 'function'
+          ? d.removeReviewCommentFromDetail(base, commentId)
+          : {
+              ...base,
+              reviewComments: (base?.reviewComments || []).filter(
+                (c: any) => c && String(c.id) !== String(commentId)
+              ),
+            };
+      commitCommentListPatch(stripped);
       d.setActionMsg('Review comment deleted.');
       // No full d.onRefresh — soft revalidate was re-fetching deleted PRRT ids and failing.
     } catch (err) {
+      // Prior settled comments preserved (never pre-stripped).
       d.setActionMsg(err?.message || String(err));
-      // Restore truth from host only on failure
-      try {
-        await d.onRefresh?.();
-      } catch {
-        /* ignore secondary errors */
-      }
     } finally {
       d.setActionBusy(false);
     }
@@ -1635,28 +1647,26 @@ export function installPrModalMutations(d: Record<string, any>) {
     }
     d.setActionBusy(true);
     d.setActionMsg('');
-    const stripped =
-      typeof d.removeIssueCommentFromDetail === 'function'
-        ? d.removeIssueCommentFromDetail(d.detail, commentId)
-        : {
-            ...detail,
-            comments: (d.detail.comments || []).filter(
-              (c: any) => c && String(c.id) !== String(commentId)
-            ),
-          };
-    commitCommentListPatch(stripped);
+    // Pessimistic: strip only after delete API succeeds (latest detailRef).
     try {
       const api = globalThis.PRTreeFetch;
       if (!api?.deleteIssueComment) throw new Error('Delete comment API unavailable');
       await api.deleteIssueComment(d.detail.owner, d.detail.repo, commentId);
+      const base = d.detailRef.current || d.detail;
+      const stripped =
+        typeof d.removeIssueCommentFromDetail === 'function'
+          ? d.removeIssueCommentFromDetail(base, commentId)
+          : {
+              ...base,
+              comments: (base?.comments || []).filter(
+                (c: any) => c && String(c.id) !== String(commentId)
+              ),
+            };
+      commitCommentListPatch(stripped);
       d.setActionMsg('Comment deleted.');
     } catch (err) {
+      // Prior settled comments preserved (never pre-stripped).
       d.setActionMsg(err?.message || String(err));
-      try {
-        await d.onRefresh?.();
-      } catch {
-        /* ignore */
-      }
     } finally {
       d.setActionBusy(false);
     }

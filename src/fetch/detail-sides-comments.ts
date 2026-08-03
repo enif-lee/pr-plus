@@ -27,6 +27,7 @@ import {
   fetchAllPrFiles,
   fetchPrFiles,
 } from './detail-sides-files';
+import { fetchReactableReactionGroups } from './reactions';
 
 export async function fetchPrIssueComments(owner: any, repo: any, number: any, fetchImpl: any, token: any = null, ctx: any = null) {
   ctx = normalizeApiCtx(ctx);
@@ -45,26 +46,19 @@ export async function fetchPrIssueComments(owner: any, repo: any, number: any, f
     },
   };
   if (!o || !r || !Number.isFinite(n)) return empty;
-  try {
-    return await fetchPrCommentsPage(
-      o,
-      r,
-      n,
-      'issue',
-      { page: 1, perPage: COMMENT_PAGE_SIZE, preferNewest: true },
-      fetchImpl,
-      token,
-      ctx
-    );
-  } catch (err) {
-    if (
-      err?.name === 'AbortError' ||
-      /aborted|AbortError/i.test(String(err?.message || ''))
-    ) {
-      throw err;
-    }
-    return empty;
-  }
+  // Do not swallow network/auth errors into an empty page. Host failSide
+  // must leave comments unsettled so IDB cannot persist authoritative empty
+  // (seen on callabo-server#2424 — issue comments permanently omitted).
+  return await fetchPrCommentsPage(
+    o,
+    r,
+    n,
+    'issue',
+    { page: 1, perPage: COMMENT_PAGE_SIZE, preferNewest: true },
+    fetchImpl,
+    token,
+    ctx
+  );
 }
 
 /**
@@ -328,20 +322,31 @@ export async function fetchPrCommentsPage(owner: any, repo: any, pullNumber: any
     const raw = Array.isArray(data) ? data : [];
     const items =
       kind === 'review' ? raw.map(mapReviewComment) : raw.map(mapIssueComment);
-    // Enrich viewerHasReacted + reactor logins via GraphQL when nodeIds exist
+    // Enrich viewerHasReacted + reactor logins via GraphQL when nodeIds exist.
+    // Soft-fail: missing reactions must never drop the comment bodies themselves.
     if (kind === 'issue' && token && items.length) {
       const ids = items.map((c) => c?.nodeId).filter(Boolean);
       if (ids.length) {
-        const byId = await fetchReactableReactionGroups(
-          ids,
-          fetchImpl,
-          token,
-          ctx
-        );
-        for (const c of items) {
-          if (!c?.nodeId) continue;
-          const groups = byId.get(String(c.nodeId));
-          if (groups && groups.length) c.reactions = groups;
+        try {
+          const byId = await fetchReactableReactionGroups(
+            ids,
+            fetchImpl,
+            token,
+            ctx
+          );
+          for (const c of items) {
+            if (!c?.nodeId) continue;
+            const groups = byId.get(String(c.nodeId));
+            if (groups && groups.length) c.reactions = groups;
+          }
+        } catch (err) {
+          if (
+            err?.name === 'AbortError' ||
+            /aborted|AbortError/i.test(String(err?.message || ''))
+          ) {
+            throw err;
+          }
+          // keep REST reaction summary from mapIssueComment
         }
       }
     }

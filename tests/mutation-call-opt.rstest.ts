@@ -216,25 +216,35 @@ describe('post-mutation success paths: no full soft-refresh (source contract)', 
     expect(appShell).toMatch(/onEditTitle/);
   });
 
-  test('onResolveThread stamps via stampThreadResolved + patchHostDetail; no onRefresh', () => {
+  test('onResolveThread stamps via stampThreadResolved + patchHostDetail after API; no onRefresh', () => {
     const body = extractFn(mutations, 'onResolveThread');
     expect(body).toMatch(/stampThreadResolved/);
     expect(body).toMatch(/patchHostDetail/);
     expect(body).toMatch(/reviewComments/);
     expect(body).not.toMatch(/onRefresh/);
+    // Pessimistic: await resolve before applyStamp paint
+    expect(body.indexOf('await api.resolveReviewThread')).toBeLessThan(
+      body.indexOf('applyStamp(Boolean(resolved))')
+    );
   });
 
-  test('onEditTitle patches host + timeline only; no onRefresh revalidate', () => {
+  test('onEditTitle patches host + timeline only after API; no onRefresh revalidate', () => {
     const body = extractFn(mutations, 'onEditTitle');
     expect(body).toMatch(/patchHostDetail/);
     expect(body).toMatch(/refreshTimelineEvents/);
     expect(body).not.toMatch(/onRefresh/);
+    expect(body.indexOf('await api.updatePullRequest')).toBeLessThan(
+      body.indexOf('setLocalDetail')
+    );
   });
 
-  test('onSaveBody patches body local+host; no onRefresh', () => {
+  test('onSaveBody patches body local+host after API; no onRefresh', () => {
     const body = extractFn(mutations, 'onSaveBody');
     expect(body).toMatch(/patchHostDetail\(\{\s*body/);
     expect(body).not.toMatch(/onRefresh/);
+    expect(body.indexOf('await api.updatePullRequest')).toBeLessThan(
+      body.indexOf('setLocalDetail')
+    );
   });
 
   test('applySetLabels still uses commitMetaPatch without onRefresh', () => {

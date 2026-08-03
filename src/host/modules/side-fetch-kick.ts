@@ -251,31 +251,82 @@
         typeof api.fetchPrIssueComments === 'function'
           ? wrap(
               'side.comments',
-              Promise.all([
-                api.fetchPrIssueComments(owner, repo, number, { signal }),
-                wantSystemEvents &&
-                typeof api.fetchPrTimelineEvents === 'function'
-                  ? api
-                      .fetchPrTimelineEvents(owner, repo, number, { signal })
-                      .catch((err) => {
-                        if (
-                          err?.name === 'AbortError' ||
-                          /aborted|AbortError/i.test(
-                            String(err?.message || '')
-                          )
-                        ) {
-                          throw err;
-                        }
-                        return [];
-                      })
-                  : Promise.resolve(null),
-              ])
-                .then(([page, events]) => {
+              // Settle issue comments as soon as they land — do not wait on
+              // timeline events. Coupling them in Promise.all discarded a
+              // successful comments page when events aborted/failed late
+              // (long PRs e.g. callabo-server#2424).
+              (() => {
+                const commentsFetch = api.fetchPrIssueComments(
+                  owner,
+                  repo,
+                  number,
+                  { signal }
+                );
+                const eventsFetch =
+                  wantSystemEvents &&
+                  typeof api.fetchPrTimelineEvents === 'function'
+                    ? api
+                        .fetchPrTimelineEvents(owner, repo, number, {
+                          signal,
+                        })
+                        .catch((err) => {
+                          if (
+                            err?.name === 'AbortError' ||
+                            /aborted|AbortError/i.test(
+                              String(err?.message || '')
+                            )
+                          ) {
+                            throw err;
+                          }
+                          return [];
+                        })
+                    : Promise.resolve(null);
+
+                // Hold system events if they finish before comments so paint
+                // always includes them (events-before-comments race).
+                let pendingTimelineEvents: any = null;
+
+                const paintComments = (page: any) => {
                   const items = Array.isArray(page?.items)
                     ? page.items
                     : Array.isArray(page)
                       ? page
                       : [];
+                  try {
+                    for (const id of [
+                      HOST_ID,
+                      typeof embedHostId === 'function'
+                        ? embedHostId()
+                        : 'prp-page-embed',
+                    ]) {
+                      const el = document.getElementById(id);
+                      el?.setAttribute?.(
+                        'data-prp-comments-fetch',
+                        String(items.length)
+                      );
+                    }
+                    sessionStorage.setItem(
+                      'prp:diag:comments-fetch',
+                      JSON.stringify({
+                        n: items.length,
+                        hasMeta: Boolean(page?.meta),
+                        sample: items.slice(0, 3).map((c: any) => ({
+                          id: c?.id,
+                          author: c?.author,
+                        })),
+                        at: Date.now(),
+                      })
+                    );
+                  } catch {
+                    /* ignore */
+                  }
+                  if (!items.length && page == null) {
+                    failSide(
+                      'comments',
+                      new Error('issue comments page missing')
+                    );
+                    return page;
+                  }
                   const patch: any = {
                     comments: items,
                     commentsMeta: page?.meta || {
@@ -286,18 +337,86 @@
                       loadedCount: items.length,
                     },
                   };
-                  // Only overwrite timelineEvents when we actually fetched
-                  // (null skip keeps prior / empty until lazy tip re-enable).
-                  if (Array.isArray(events)) {
-                    patch.timelineEvents = events;
+                  if (Array.isArray(pendingTimelineEvents)) {
+                    patch.timelineEvents = pendingTimelineEvents;
                   }
                   settleSide('comments', patch);
                   return page;
-                })
-                .catch((err) => {
-                  failSide('comments', err);
-                  return null;
-                })
+                };
+
+                const commentsPInner = commentsFetch
+                  .then((page) => paintComments(page))
+                  .catch((err) => {
+                    try {
+                      const msg = String(err?.message || err || 'unknown').slice(
+                        0,
+                        160
+                      );
+                      for (const id of [
+                        HOST_ID,
+                        typeof embedHostId === 'function'
+                          ? embedHostId()
+                          : 'prp-page-embed',
+                      ]) {
+                        document
+                          .getElementById(id)
+                          ?.setAttribute?.('data-prp-comments-fetch-err', msg);
+                      }
+                      sessionStorage.setItem(
+                        'prp:diag:comments-fetch-err',
+                        JSON.stringify({
+                          msg,
+                          name: err?.name || null,
+                          status: err?.status ?? null,
+                          at: Date.now(),
+                        })
+                      );
+                    } catch {
+                      /* ignore */
+                    }
+                    failSide('comments', err);
+                    return null;
+                  });
+
+                void eventsFetch
+                  .then((events) => {
+                    if (!Array.isArray(events) || !alive()) return;
+                    pendingTimelineEvents = events;
+                    const items = Array.isArray(
+                      current.detailStore?.comments?.items
+                    )
+                      ? current.detailStore.comments.items
+                      : Array.isArray(current.detail?.comments)
+                        ? current.detail.comments
+                        : [];
+                    // Comments not painted yet — paintComments will attach
+                    // pendingTimelineEvents when the page lands.
+                    if (!current.sideSettled?.comments && items.length === 0) {
+                      return;
+                    }
+                    settleSide('comments', {
+                      comments: items,
+                      commentsMeta:
+                        current.detailStore?.comments?.pageMeta ||
+                        current.detail?.commentsMeta ||
+                        null,
+                      timelineEvents: events,
+                    });
+                  })
+                  .catch((err) => {
+                    if (
+                      err?.name === 'AbortError' ||
+                      /aborted|AbortError/i.test(String(err?.message || ''))
+                    ) {
+                      return;
+                    }
+                    console.log(
+                      `[pr-plus] side-fetch timeline events soft-fail ${err?.message || err}`
+                    );
+                  });
+
+                return commentsPInner;
+              })()
             )
           : Promise.resolve(null).then(() => {
               if (alive() && !current.sideSettled?.comments) {

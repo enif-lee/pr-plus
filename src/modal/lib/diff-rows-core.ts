@@ -145,13 +145,13 @@ export function flattenFilesToVirtualRows(files, mode = 'unified', options: any 
     pushFileLevelComments(path);
 
     // Collapsed / non-openable: header + file comments only (binary never opens as text).
+    // Still surface *line* threads so Diff thread nav / Resolve e2e can land on
+    // them when the file is viewed/default-collapsed (demo PR #7: all threads on
+    // a one-line file that is often marked viewed).
     if (isCollapsed || !openable) {
-      // Non-openable binaries still surface line threads so Diff nav can land on them.
-      if (!openable) {
-        for (const c of rootsByPath.get(path) || []) {
-          if (!isFileLevelComment(c)) {
-            pushInline(path, c, c.line ?? null, c.originalLine ?? null);
-          }
+      for (const c of rootsByPath.get(path) || []) {
+        if (!isFileLevelComment(c)) {
+          pushInline(path, c, c.line ?? null, c.originalLine ?? null);
         }
       }
       continue;

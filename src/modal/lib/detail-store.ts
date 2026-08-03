@@ -668,6 +668,9 @@ export function applyComments(store, comments, opts: ApplyOpts = {}) {
   const prevEvents = Array.isArray(store.comments?.timelineEvents)
     ? store.comments.timelineEvents
     : [];
+  const prevItems = Array.isArray(store.comments?.items)
+    ? store.comments.items
+    : [];
   // Union by id: meta refresh / local optimistics must not be wiped by a
   // lagging comments side-fetch that still has the pre-write event list.
   let timelineEvents = prevEvents;
@@ -689,13 +692,126 @@ export function applyComments(store, comments, opts: ApplyOpts = {}) {
           ? incoming.slice()
           : prevEvents.slice();
   }
+  const incomingItems = Array.isArray(comments) ? comments : [];
+  // Progressive isolation: lagging empty page must not wipe painted issue
+  // comments (or invent permanent empty via IDB) unless caller trusts empty.
+  let items = incomingItems.slice();
+  if (
+    !opts.trustEmpty &&
+    incomingItems.length === 0 &&
+    prevItems.length > 0
+  ) {
+    items = prevItems.slice();
+  }
   store.comments = {
-    items: Array.isArray(comments) ? comments.slice() : [],
+    items,
     pageMeta: opts.pageMeta != null ? opts.pageMeta : store.comments.pageMeta,
     timelineEvents,
     settled: opts.settled !== false,
   };
   return store;
+}
+
+/**
+ * When replacing the detail store with a full flat snapshot (list sketch / IDB
+ * upgrade mid-open), keep progressive side slices that are already richer on
+ * the live detail. Side-fetch uses claim() once per open — wiping painted
+ * issue comments/reviews without re-fetch would permanently omit them from the
+ * conversation timeline (seen on long PRs e.g. callabo-server#2424).
+ *
+ * @param prevFlat live `current.detail` before reset (may be null)
+ * @param nextFlat incoming snapshot (sketch / IDB / cache)
+ * @returns flat suitable for fromAppDetail
+ */
+export function mergeProgressiveSidesIntoFlat(prevFlat: any, nextFlat: any): any {
+  if (!nextFlat || typeof nextFlat !== 'object') return prevFlat || nextFlat;
+  if (!prevFlat || typeof prevFlat !== 'object') return nextFlat;
+  const out: any = { ...nextFlat };
+  const prevSettled =
+    prevFlat._sideSettled && typeof prevFlat._sideSettled === 'object'
+      ? prevFlat._sideSettled
+      : {};
+  const nextSettled =
+    nextFlat._sideSettled && typeof nextFlat._sideSettled === 'object'
+      ? { ...nextFlat._sideSettled }
+      : {};
+
+  const prevComments = Array.isArray(prevFlat.comments) ? prevFlat.comments : [];
+  const nextComments = Array.isArray(nextFlat.comments) ? nextFlat.comments : [];
+  if (prevComments.length > nextComments.length) {
+    out.comments = prevComments.slice();
+    if (prevFlat.commentsMeta != null) out.commentsMeta = prevFlat.commentsMeta;
+    nextSettled.comments = true;
+  }
+  // Prefer longer system-events list when we already fetched them
+  const prevEvents = Array.isArray(prevFlat.timelineEvents)
+    ? prevFlat.timelineEvents
+    : [];
+  const nextEvents = Array.isArray(nextFlat.timelineEvents)
+    ? nextFlat.timelineEvents
+    : [];
+  if (prevEvents.length > nextEvents.length) {
+    out.timelineEvents = prevEvents.slice();
+  }
+
+  const prevReviews = Array.isArray(prevFlat.reviews) ? prevFlat.reviews : [];
+  const nextReviews = Array.isArray(nextFlat.reviews) ? nextFlat.reviews : [];
+  if (prevReviews.length > nextReviews.length) {
+    out.reviews = prevReviews.slice();
+    nextSettled.reviews = true;
+  }
+
+  const prevTh = Array.isArray(prevFlat.reviewThreads)
+    ? prevFlat.reviewThreads
+    : [];
+  const nextTh = Array.isArray(nextFlat.reviewThreads)
+    ? nextFlat.reviewThreads
+    : [];
+  const prevRc = Array.isArray(prevFlat.reviewComments)
+    ? prevFlat.reviewComments
+    : [];
+  const nextRc = Array.isArray(nextFlat.reviewComments)
+    ? nextFlat.reviewComments
+    : [];
+  if (prevTh.length > nextTh.length || prevRc.length > nextRc.length) {
+    if (prevTh.length >= nextTh.length) out.reviewThreads = prevTh.slice();
+    if (prevRc.length >= nextRc.length) out.reviewComments = prevRc.slice();
+    if (prevFlat.reviewThreadsMeta != null) {
+      out.reviewThreadsMeta = prevFlat.reviewThreadsMeta;
+    }
+    if (prevFlat.reviewCommentsMeta != null) {
+      out.reviewCommentsMeta = prevFlat.reviewCommentsMeta;
+    }
+    if (prevFlat.viewerPendingReview !== undefined) {
+      out.viewerPendingReview = prevFlat.viewerPendingReview;
+    }
+  }
+
+  const prevFiles = Array.isArray(prevFlat.files) ? prevFlat.files : [];
+  const nextFiles = Array.isArray(nextFlat.files) ? nextFlat.files : [];
+  if (prevFiles.length > nextFiles.length) {
+    out.files = prevFiles.slice();
+    nextSettled.files = Boolean(prevSettled.files) || nextSettled.files;
+  }
+  const prevCommits = Array.isArray(prevFlat.commits) ? prevFlat.commits : [];
+  const nextCommits = Array.isArray(nextFlat.commits) ? nextFlat.commits : [];
+  if (prevCommits.length > nextCommits.length) {
+    out.commits = prevCommits.slice();
+    nextSettled.commits = Boolean(prevSettled.commits) || nextSettled.commits;
+  }
+
+  out._sideSettled = {
+    ...prevSettled,
+    ...nextSettled,
+    // Explicitly keep comments/reviews settled when we preserved longer lists
+    comments:
+      Boolean(nextSettled.comments) ||
+      (prevComments.length > nextComments.length && Boolean(prevSettled.comments)),
+    reviews:
+      Boolean(nextSettled.reviews) ||
+      (prevReviews.length > nextReviews.length && Boolean(prevSettled.reviews)),
+  };
+  return out;
 }
 
 export function applyReviews(store, reviews, opts: ApplyOpts = {}) {

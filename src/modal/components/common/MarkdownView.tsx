@@ -1,4 +1,10 @@
-import React, { useMemo, memo, useEffect, useState, useCallback } from 'react';
+import React, {
+  useMemo,
+  memo,
+  useEffect,
+  useState,
+  useCallback,
+} from 'react';
 // memo for render isolation
 import { parseSuggestionFences } from '@lib/pr-edit-api';
 import {
@@ -12,6 +18,23 @@ import { SuggestionBlock } from './SuggestionBlock';
 import { ImageViewer } from './ImageViewer';
 import { clearHighlightCodeCache, renderMdHtml } from './utils';
 import './MarkdownView.css';
+
+function MdHtmlSegment({
+  html,
+  segKey,
+}: {
+  html: string;
+  segKey: string;
+}) {
+  return (
+    <div
+      key={segKey}
+      dangerouslySetInnerHTML={{
+        __html: html,
+      }}
+    />
+  );
+}
 
 function MarkdownViewImpl({
   source,
@@ -127,11 +150,10 @@ function MarkdownViewImpl({
           });
         }
         return (
-          <div
+          <MdHtmlSegment
             key={`h-${i}-${hljsEpoch}`}
-            dangerouslySetInnerHTML={{
-              __html: html,
-            }}
+            segKey={`h-${i}-${hljsEpoch}`}
+            html={html}
           />
         );
       })}

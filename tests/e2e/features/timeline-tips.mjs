@@ -244,6 +244,57 @@ function countTimelineEventsByCategory() {
 }
 
 /**
+ * Progressive side-fetch paints system events after first conversation paint.
+ * Virtual list only mounts a window — walk the scroller and poll until events
+ * appear (or timeout). Returns the best count snapshot seen.
+ */
+function waitForSystemTimelineEvents(timeoutMs = 12_000) {
+  const deadline = Date.now() + timeoutMs;
+  let best = countTimelineEventsByCategory();
+  while (Date.now() < deadline) {
+    // Leave the page so React can paint after each scroll step
+    evalInPage(`
+      (() => {
+        const sc = document.querySelector('.prp-conversation-virtual');
+        if (!sc) return false;
+        const max = Math.max(0, sc.scrollHeight - sc.clientHeight);
+        // Sample a few offsets each poll (newest-first: older events near bottom)
+        for (const f of [0, 0.25, 0.5, 0.75, 1]) {
+          sc.scrollTop = Math.round(max * f);
+          sc.dispatchEvent(new Event('scroll', { bubbles: true }));
+        }
+        return true;
+      })()
+    `);
+    waitMs(250);
+    const snap = countTimelineEventsByCategory();
+    const score =
+      Number(snap?.eventNodes || 0) +
+      Number(snap?.labels || 0) +
+      Number(snap?.titles || 0) +
+      Number(snap?.milestones || 0) +
+      Number(snap?.referenced || 0);
+    const bestScore =
+      Number(best?.eventNodes || 0) +
+      Number(best?.labels || 0) +
+      Number(best?.titles || 0) +
+      Number(best?.milestones || 0) +
+      Number(best?.referenced || 0);
+    if (score >= bestScore) best = snap;
+    if (
+      Number(snap?.eventNodes || 0) > 0 ||
+      Number(snap?.labels || 0) > 0 ||
+      Number(snap?.titles || 0) > 0 ||
+      Number(snap?.milestones || 0) > 0 ||
+      Number(snap?.referenced || 0) > 0
+    ) {
+      return snap;
+    }
+  }
+  return best;
+}
+
+/**
  * Scroll conversation virtual list so comment/thread cards mount.
  * React virtualization only paints after scroll → state → re-render, so each
  * step must leave the page (waitMs) — a single sync eval scan always undercounts.
@@ -546,17 +597,9 @@ export function buildTimelineTipsSteps() {
     {
       name: 'TT.2 hide/show every system tip category that has data',
       fn: () => {
-        // Ensure tips stay visible (scroll top)
-        evalInPage(`
-          (() => {
-            const sc = document.querySelector('.prp-conversation-virtual');
-            if (sc) { sc.scrollTop = 0; sc.dispatchEvent(new Event('scroll', { bubbles: true })); }
-            return true;
-          })()
-        `);
-        waitMs(200);
-
-        const before = countTimelineEventsByCategory();
+        // Side-fetch system events land after first paint; virtual list mounts
+        // only a window — wait + scroll until at least one category appears.
+        const before = waitForSystemTimelineEvents(12_000);
         log(`  before categories ${JSON.stringify(before)}`);
 
         // Exercise EVERY tip id that currently has visible rows (not just first hit)
@@ -680,33 +723,30 @@ export function buildTimelineTipsSteps() {
     {
       name: 'TT.4 title chip full string available on hover target',
       fn: () => {
-        evalInPage(`
-          (() => {
-            const sc = document.querySelector('.prp-conversation-virtual');
-            if (sc) { sc.scrollTop = 0; sc.dispatchEvent(new Event('scroll', { bubbles: true })); }
-            return true;
-          })()
-        `);
-        waitMs(150);
-        const chips = titleChipProbe();
-        log(`  title chips count=${Array.isArray(chips) ? chips.length : 0}`);
-        if (!Array.isArray(chips) || chips.length === 0) {
-          // Scroll a bit to find rename events
+        // Wait for system events (incl. renamed) then hunt title chips while scrolling.
+        waitForSystemTimelineEvents(12_000);
+        const deadline = Date.now() + 10_000;
+        let chips2 = titleChipProbe();
+        while (
+          Date.now() < deadline &&
+          (!Array.isArray(chips2) || chips2.length === 0)
+        ) {
           evalInPage(`
             (() => {
               const sc = document.querySelector('.prp-conversation-virtual');
               if (!sc) return false;
-              for (let i = 0; i < 8; i++) {
-                sc.scrollTop = Math.round((sc.scrollHeight - sc.clientHeight) * i / 8);
+              const max = Math.max(0, sc.scrollHeight - sc.clientHeight);
+              for (let i = 0; i <= 12; i++) {
+                sc.scrollTop = Math.round((max * i) / 12);
                 sc.dispatchEvent(new Event('scroll', { bubbles: true }));
                 if (document.querySelector('.prp-timeline-event__param--title')) return true;
               }
               return false;
             })()
           `);
-          waitMs(100);
+          waitMs(200);
+          chips2 = titleChipProbe();
         }
-        const chips2 = titleChipProbe();
         log(`  title chips ${JSON.stringify(chips2)?.slice(0, 400)}`);
         assert(
           Array.isArray(chips2) && chips2.length > 0,

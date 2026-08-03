@@ -842,6 +842,18 @@
         const pickDirection = (meta) => {
           if (meta.hasOlder) return 'older';
           if (meta.hasNewerFromOldest) return 'newer';
+          // hasMore with neither cursor flag (partial newest window / total lag):
+          // open the oldest edge so dual-window can grow toward the middle.
+          if (meta.hasMore) {
+            const oldestIds = Array.isArray(meta.oldestThreadIds)
+              ? meta.oldestThreadIds
+              : [];
+            if (oldestIds.length === 0) return 'oldest';
+            // Oldest window exists but hasNewerFromOldest cleared — still try newer
+            if (meta.oldestEndCursor) return 'newer';
+            if (meta.newestStartCursor || meta.endCursor) return 'older';
+            return 'oldest';
+          }
           return null;
         };
         const cursorFor = (meta, dir) =>

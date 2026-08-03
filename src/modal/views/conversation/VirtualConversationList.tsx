@@ -26,6 +26,8 @@ import {
   queryAnchorInScroller,
   scrollChildToMaximizeInScroller,
 } from '@lib/context-thread-dom';
+import { CONVERSATION_SCROLL_IDLE_MS } from '@lib/scroll-idle-render';
+import { ConversationScrollIdleProvider } from './ConversationScrollIdleContext';
 
 /**
  * Variable-height virtual list for the full conversation left panel
@@ -135,15 +137,19 @@ function VirtualConversationListImpl(props: any) {
   }, []);
 
   const scrollHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** React-facing twin of `prp-is-scrolling` — gates Mermaid/heavy body work. */
+  const [isScrolling, setIsScrolling] = useState(false);
   const onScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     const el = e.target as HTMLDivElement;
     setScrollTop(el.scrollTop);
     el.classList.add('prp-is-scrolling');
+    setIsScrolling(true);
     if (scrollHideTimer.current) clearTimeout(scrollHideTimer.current);
     scrollHideTimer.current = setTimeout(() => {
       el.classList.remove('prp-is-scrolling');
+      setIsScrolling(false);
       scrollHideTimer.current = null;
-    }, 700);
+    }, CONVERSATION_SCROLL_IDLE_MS);
   }, []);
 
   const reportHeight = useCallback((key: string, height: number) => {
@@ -325,66 +331,70 @@ function VirtualConversationListImpl(props: any) {
   }, [start, end, rows, onVisibleThreadNodeIds]);
 
   return (
-    <div
-      className={`prp-scroll-float-host prp-edge-fade prp-conversation-virtual-host ${className}`.trim()}
-    >
+    <ConversationScrollIdleProvider isScrolling={isScrolling}>
       <div
-        className={`prp-conversation-virtual prp-scroll-float${
-          timelineRails.length ? ' prp-conversation-virtual--timeline-rail' : ''
-        }`}
-        ref={scrollerRef}
-        onScroll={onScroll}
-        data-virtual-count={rows.length}
-        data-virtual-start={Number.isFinite(start) ? start : 0}
-        data-virtual-end={Number.isFinite(end) ? end : -1}
-        data-virtual-panel="full"
+        className={`prp-scroll-float-host prp-edge-fade prp-conversation-virtual-host ${className}`.trim()}
+        data-prp-conv-scrolling={isScrolling ? '1' : '0'}
       >
         <div
-          className="prp-conversation-virtual__spacer"
-          style={{ height: Math.max(range.totalHeight, 1), position: 'relative' }}
+          className={`prp-conversation-virtual prp-scroll-float${
+            timelineRails.length ? ' prp-conversation-virtual--timeline-rail' : ''
+          }`}
+          ref={scrollerRef}
+          onScroll={onScroll}
+          data-virtual-count={rows.length}
+          data-virtual-start={Number.isFinite(start) ? start : 0}
+          data-virtual-end={Number.isFinite(end) ? end : -1}
+          data-virtual-panel="full"
+          data-prp-is-scrolling={isScrolling ? '1' : '0'}
         >
-          {/* Continuous timeline vertical rails — full event runs, not clipped by virtualization */}
-          {timelineRails.map((seg, i) => (
-            <div
-              key={`tl-rail-${i}-${seg.top}`}
-              className="prp-conversation-timeline-rail"
-              style={{ top: seg.top, height: seg.height }}
-              aria-hidden="true"
-            />
-          ))}
           <div
-            className="prp-conversation-virtual__window"
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              right: 0,
-              transform: `translateY(${range.offsetY || 0}px)`,
-              willChange: 'transform',
-              zIndex: 1,
-            }}
+            className="prp-conversation-virtual__spacer"
+            style={{ height: Math.max(range.totalHeight, 1), position: 'relative' }}
           >
-            {visible.map((row) => {
-              const h = conversationRowHeight(row, heightMap, heightOpts);
-              return (
-                <VirtualRowShell
-                  key={row.key}
-                  rowKey={row.key}
-                  estimatedHeight={h}
-                  onHeight={reportHeight}
-                >
-                  {typeof renderRow === 'function' ? renderRow(row) : null}
-                </VirtualRowShell>
-              );
-            })}
+            {/* Continuous timeline vertical rails — full event runs, not clipped by virtualization */}
+            {timelineRails.map((seg, i) => (
+              <div
+                key={`tl-rail-${i}-${seg.top}`}
+                className="prp-conversation-timeline-rail"
+                style={{ top: seg.top, height: seg.height }}
+                aria-hidden="true"
+              />
+            ))}
+            <div
+              className="prp-conversation-virtual__window"
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                transform: `translateY(${range.offsetY || 0}px)`,
+                willChange: 'transform',
+                zIndex: 1,
+              }}
+            >
+              {visible.map((row) => {
+                const h = conversationRowHeight(row, heightMap, heightOpts);
+                return (
+                  <VirtualRowShell
+                    key={row.key}
+                    rowKey={row.key}
+                    estimatedHeight={h}
+                    onHeight={reportHeight}
+                  >
+                    {typeof renderRow === 'function' ? renderRow(row) : null}
+                  </VirtualRowShell>
+                );
+              })}
+            </div>
           </div>
         </div>
+        <FloatingScrollbar
+          scrollerRef={scrollerRef}
+          contentKey={`${rows.length}:${range.totalHeight}`}
+        />
       </div>
-      <FloatingScrollbar
-        scrollerRef={scrollerRef}
-        contentKey={`${rows.length}:${range.totalHeight}`}
-      />
-    </div>
+    </ConversationScrollIdleProvider>
   );
 }
 

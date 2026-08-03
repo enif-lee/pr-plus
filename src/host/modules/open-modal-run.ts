@@ -1146,9 +1146,11 @@
 
       // Start threads in parallel with core — paint as soon as *this* fetch lands.
       // onStage fires shell → comments → reactions so the open bar steps.
-      const threadsKickoffP = canFetchThreads
-        ? span(
-            'fetch.threadsNewest',
+      // Outer bound: nested shell/byIds timeouts can still stall on rAF yields
+      // or un-raced awaits; never leave openModal threads in-flight forever.
+      const THREADS_ADAPTIVE_BUDGET_MS = 18_000;
+      const threadsAdaptiveP = canFetchThreads
+        ? Promise.race([
             fetchNewestReviewThreadsAdaptive(owner, repo, number, {
               signal,
               cacheDetail: useWarmThreads ? threadsCacheSnap : null,
@@ -1170,33 +1172,48 @@
                   markThreadStage('reactions', 'threads-reactions');
                 }
               },
-            })
+            }),
+            new Promise((_, reject) => {
+              setTimeout(() => {
+                const err: any = new Error(
+                  `threads adaptive budget ${THREADS_ADAPTIVE_BUDGET_MS}ms`
+                );
+                err.status = 408;
+                reject(err);
+              }, THREADS_ADAPTIVE_BUDGET_MS);
+            }),
+          ])
+        : Promise.resolve(null);
+      const threadsKickoffP = canFetchThreads
+        ? span(
+            'fetch.threadsNewest',
+            threadsAdaptiveP
               .then((res) => {
-                const page = res.page;
+                const page = res?.page;
                 // Ensure all three stages credited even if onStage was skipped
                 // (re-credit is label-safe: prog.mark no-ops when key already done).
                 creditAllThreadStages();
                 earlyThreadsPage = page;
-                paintThreadsNewestNow(page);
+                if (page) paintThreadsNewestNow(page);
                 tl?.mark?.('paint.threadsNewest', 'mark', {
                   note: `${page?.threads?.length || 0} threads` +
-                    (res.earlyExit
+                    (res?.earlyExit
                       ? ' warm-probe-exit'
-                      : res.escalated
+                      : res?.escalated
                         ? ' warm-escalated'
-                        : res.hostRestFallback
+                        : res?.hostRestFallback
                           ? ' host-rest-fallback'
                           : '') +
-                    (res.eagerCommentCount != null
+                    (res?.eagerCommentCount != null
                       ? ` eager=${res.eagerCommentCount}`
                       : ''),
                 });
                 console.log(
                   `[pr-plus] openModal threads.newest adaptive ${owner}/${repo}#${number}: ` +
-                    `pageSize=${res.pageSize} warm=${res.warm} earlyExit=${res.earlyExit} escalated=${res.escalated} ` +
-                    `hostRest=${Boolean(res.hostRestFallback)} source=${page?.source || '?'} ` +
+                    `pageSize=${res?.pageSize} warm=${res?.warm} earlyExit=${res?.earlyExit} escalated=${res?.escalated} ` +
+                    `hostRest=${Boolean(res?.hostRestFallback)} source=${page?.source || '?'} ` +
                     `threads=${page?.threads?.length || 0} comments=${page?.comments?.length || 0}` +
-                    (res.eagerCommentCount != null
+                    (res?.eagerCommentCount != null
                       ? ` eager=${res.eagerCommentCount}`
                       : '')
                 );
@@ -1605,9 +1622,15 @@
               typeof newest.totalCount === 'number'
                 ? newest.totalCount
                 : newest.threads?.length || 0;
-            // total < 100 → last page already covers everything; skip start
+            const newestLoaded = Array.isArray(newest.threads)
+              ? newest.threads.length
+              : 0;
+            // Oldest window when GraphQL says more exist behind the newest page,
+            // or totalCount exceeds what the newest window returned (even if
+            // total < PAGE_SIZE due to a short adaptive probe).
             const needStartWindow =
-              totalCount >= apiMax && Boolean(newest.hasPreviousPage);
+              Boolean(newest.hasPreviousPage) ||
+              (totalCount > newestLoaded && newestLoaded > 0);
             if (needStartWindow && openStill()) {
               try {
                 setLoadStage(

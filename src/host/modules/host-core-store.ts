@@ -219,9 +219,14 @@
     try {
       const d = current.detail;
       const label = `${d?.baseRef || '∅'}←${d?.headRef || '∅'}`;
+      const issueN = Array.isArray(d?.comments) ? d.comments.length : 0;
+      const reviewN = Array.isArray(d?.reviews) ? d.reviews.length : 0;
       for (const id of [HOST_ID, typeof embedHostId === 'function' ? embedHostId() : 'prp-page-embed']) {
         try {
-          document.getElementById(id)?.setAttribute?.('data-prp-branches', label);
+          const el = document.getElementById(id);
+          el?.setAttribute?.('data-prp-branches', label);
+          el?.setAttribute?.('data-prp-issue-comments', String(issueN));
+          el?.setAttribute?.('data-prp-reviews', String(reviewN));
         } catch {
           /* ignore */
         }
@@ -269,15 +274,25 @@
   /**
    * Hydrate/replace store from a full flat snapshot (list sketch / cache open).
    * Isolation starts after this; subsequent writes are slice-only.
+   *
+   * Mid-open IDB/list upgrades must not wipe progressive sides already painted
+   * (issue comments, reviews, threads). Side-fetch claim() runs once per open —
+   * a full reset without re-apply permanently drops those slices from the
+   * conversation timeline.
    */
   function resetDetailStoreFromFlat(flat) {
     const S = detailStoreApi();
+    const prevFlat = current.detail;
+    const mergedFlat =
+      typeof S?.mergeProgressiveSidesIntoFlat === 'function'
+        ? S.mergeProgressiveSidesIntoFlat(prevFlat, flat)
+        : flat;
     if (!S) {
-      current.detail = flat;
+      current.detail = mergedFlat;
       current.detailStore = null;
-      return flat;
+      return mergedFlat;
     }
-    current.detailStore = S.fromAppDetail(flat);
+    current.detailStore = S.fromAppDetail(mergedFlat);
     return publishDetailFromStore();
   }
 
@@ -471,8 +486,13 @@
     } else if (key === 'commits') {
       S.applyCommits(current.detailStore, payload.commits, { settled: true });
     } else if (key === 'comments') {
+      // Network side-fetch is authoritative for the issue-comments window
+      // (including real empty). trustEmpty lets a successful empty page clear
+      // prior optimistics; applyComments still protects against lagging empty
+      // when trustEmpty is omitted.
       S.applyComments(current.detailStore, payload.comments, {
         settled: true,
+        trustEmpty: true,
         pageMeta: payload.commentsMeta,
         timelineEvents: payload.timelineEvents,
       });

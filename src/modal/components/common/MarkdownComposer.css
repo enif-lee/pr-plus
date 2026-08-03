@@ -410,6 +410,7 @@
   border: 1px solid var(--prp-border-muted);
   border-radius: 8px;
   background: color-mix(in srgb, var(--prp-bg-muted) 88%, var(--prp-fg-muted) 4%);
+  /* Clip to rounded corners only — not a scrollport (SVG is pre-fitted). */
   overflow: hidden;
 }
 .prp-mermaid__chrome {
@@ -444,35 +445,80 @@
   border-color: color-mix(in srgb, var(--prp-accent) 40%, var(--prp-border));
   outline: none;
 }
+/*
+ * Inline mermaid: keep max-height, NO nested scroll.
+ * SVG is pre-scaled via fitMermaidSvgInline so content never exceeds the box.
+ * Conversation virtual list is the only scroller.
+ */
 .prp-mermaid {
   margin: 0;
   padding: 12px;
-  overflow: auto;
+  box-sizing: border-box;
+  overflow: hidden; /* never a scrollport */
   min-height: 48px;
-  /* Keep tall sequence/flow diagrams from dominating conversation comments */
   max-height: 720px;
   cursor: zoom-in;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .prp-mermaid svg {
   max-width: 100%;
+  max-height: 100%;
+  width: auto;
   height: auto;
   display: block;
   /* Soften any residual color mermaid injects */
   filter: grayscale(0.15);
 }
+/*
+ * Loading / scroll-deferred skeleton: same max-height budget, no scroll.
+ */
 .prp-mermaid--loading {
   display: flex;
-  align-items: center;
-  min-height: 48px;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 10px;
+  box-sizing: border-box;
+  min-height: 120px;
+  max-height: 720px;
+  height: min(200px, 40vh);
   margin: 0.6em 0;
   padding: 12px;
   border: 1px solid var(--prp-border-muted);
   border-radius: 8px;
   background: color-mix(in srgb, var(--prp-bg-muted) 88%, var(--prp-fg-muted) 4%);
+  overflow: hidden; /* clip shimmer only — not a scrollport */
+  position: relative;
+}
+.prp-mermaid--loading .prp-mermaid__skeleton {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  border-radius: 6px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--prp-fg-muted) 8%, var(--prp-bg-muted)) 0%,
+    color-mix(in srgb, var(--prp-fg-muted) 16%, var(--prp-bg)) 45%,
+    color-mix(in srgb, var(--prp-fg-muted) 8%, var(--prp-bg-muted)) 100%
+  );
+  background-size: 200% 100%;
+  animation: prp-md-skeleton-shimmer 1.2s ease-in-out infinite;
 }
 .prp-mermaid__loading {
   font-size: 12px;
+  flex: 0 0 auto;
+  z-index: 1;
 }
+@keyframes prp-md-skeleton-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
 .prp-mermaid--error {
   white-space: pre-wrap;
   font-size: 12px;

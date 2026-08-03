@@ -239,3 +239,39 @@ describe('diff expand + unified line numbers', () => {
     expect(rows.some((r: any) => r.expandAbove || r.expandBelow)).toBe(false);
   });
 });
+
+test('viewed/collapsed text file still emits line inline-comment rows', async () => {
+  const { flattenFilesToVirtualRows } = await import(
+    '../src/modal/lib/diff-rows-core'
+  );
+  const files = [
+    {
+      filename: 'demo-stack/demo-g.txt',
+      status: 'added',
+      additions: 1,
+      deletions: 0,
+      patch: '@@ -0,0 +1 @@\n+stack root\n',
+    },
+  ];
+  const comments = [
+    {
+      id: 99,
+      path: 'demo-stack/demo-g.txt',
+      line: 1,
+      body: 'line thread',
+      author: 'enif-lee',
+      side: 'RIGHT',
+    },
+  ];
+  const rows = flattenFilesToVirtualRows(files, 'unified', {
+    reviewComments: comments,
+    viewedPaths: new Set(['demo-stack/demo-g.txt']),
+  });
+  const inline = rows.filter((r: any) => r.kind === 'inline-comment');
+  expect(inline).toHaveLength(1);
+  expect(inline[0].commentId).toBe(99);
+  // Header only + comment (no patch lines when collapsed via viewed)
+  expect(rows.some((r: any) => r.kind === 'file-header' && r.collapsed)).toBe(
+    true
+  );
+});

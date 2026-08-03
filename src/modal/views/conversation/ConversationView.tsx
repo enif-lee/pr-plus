@@ -511,12 +511,18 @@ function ConversationViewImpl(props: any) {
         hiddenCount: hidden || threadGap.hiddenCount,
       };
     }
-    // Single window (or dual without matched oldest): fold after all loaded items
+    // Single window (or dual without matched oldest): fold after all loaded items.
+    // Show Load more whenever meta says more threads remain — even if hiddenCount
+    // is briefly 0 while totalCount catches up (banner falls back to "More…").
+    const showEndGap =
+      hasMore ||
+      Boolean(reviewThreadsMeta?.hasOlder) ||
+      Boolean(reviewThreadsMeta?.hasNewerFromOldest);
     return {
       items: timelineItems,
       bottomItems: [],
       total: timelineItems.length,
-      showThreadGap: hasMore && hidden > 0,
+      showThreadGap: showEndGap,
       hiddenCount: hidden,
     };
   }, [timelineItems, threadGap, reviewThreadsMeta]);
