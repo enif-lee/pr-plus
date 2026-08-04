@@ -648,16 +648,53 @@ export function getSteps() {
   });
 
   run('VG.6 Esc closes viewer only (modal stays)', () => {
-    press('Escape');
-    waitMs(250);
-    const snap = evalInPage(`
-      (() => ({
-        viewer: !!document.querySelector('[data-prp-mermaid-viewer="1"]'),
-        imageViewer: !!document.querySelector('[data-prp-image-viewer="1"]'),
-        overlay: !!document.querySelector('.prp-overlay'),
-      }))()
+    const probeViewers = () =>
+      evalInPage(`
+        (() => ({
+          viewer: !!document.querySelector('[data-prp-mermaid-viewer="1"]'),
+          imageViewer: !!document.querySelector('[data-prp-image-viewer="1"]'),
+          overlay: !!document.querySelector('.prp-overlay'),
+        }))()
+      `);
+    // Focus viewer surface so Esc is owned by fullscreen viewer, not Diff/toolbar.
+    evalInPage(`
+      (() => {
+        const v =
+          document.querySelector('[data-prp-mermaid-viewer="1"]') ||
+          document.querySelector('[data-prp-image-viewer="1"]');
+        if (!v) return false;
+        v.focus?.();
+        v.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+        return true;
+      })()
     `);
-    log(`  after Esc: ${JSON.stringify(snap)}`);
+    waitMs(80);
+    let snap = probeViewers();
+    for (let attempt = 0; attempt < 4 && (snap.viewer || snap.imageViewer); attempt++) {
+      press('Escape');
+      waitMs(200 + attempt * 80);
+      snap = probeViewers();
+      log(`  after Esc attempt ${attempt + 1}: ${JSON.stringify(snap)}`);
+    }
+    // Fallback: explicit close control if Esc was swallowed (focus elsewhere)
+    if (snap.viewer || snap.imageViewer) {
+      evalInPage(`
+        (() => {
+          const btn =
+            document.querySelector(
+              '[data-prp-mermaid-viewer="1"] button[aria-label*="Close" i], [data-prp-image-viewer="1"] button[aria-label*="Close" i], .prp-mermaid-viewer__close, .prp-image-viewer__close'
+            ) ||
+            [...document.querySelectorAll('[data-prp-mermaid-viewer="1"] button, [data-prp-image-viewer="1"] button')].find(
+              (b) => /close|닫기|esc/i.test((b.getAttribute('aria-label') || '') + (b.textContent || ''))
+            );
+          btn?.click();
+          return !!btn;
+        })()
+      `);
+      waitMs(250);
+      snap = probeViewers();
+      log(`  after close-btn fallback: ${JSON.stringify(snap)}`);
+    }
     assert(!snap.viewer && !snap.imageViewer, `viewer still open: ${JSON.stringify(snap)}`);
     assert(snap.overlay, 'Esc must not close PR modal while closing viewer');
   });

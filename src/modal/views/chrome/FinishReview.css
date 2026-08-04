@@ -68,9 +68,15 @@
   color: var(--prp-accent);
   background: color-mix(in srgb, var(--prp-accent) 12%, var(--prp-bg));
 }
+/* Standalone gear (no StepNav): full rounded control */
+.prp-diff-toolbar__filter-gear--alone {
+  margin-left: 0;
+  border-radius: 8px;
+}
 .prp-diff-review-settings {
   position: absolute;
   z-index: var(--prp-z-popover, 100050);
+  right: 0;
   min-width: 220px;
   max-width: 280px;
   max-height: min(360px, 70vh);
@@ -109,6 +115,12 @@
 .prp-diff-review-settings__row input {
   margin: 2px 0 0;
   flex-shrink: 0;
+}
+.prp-diff-review-settings__radios {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0 0 4px;
 }
 .prp-diff-review-settings__empty {
   margin: 0;

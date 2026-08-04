@@ -68,26 +68,50 @@ export function getSteps() {
           const btns = Array.from(
             document.querySelectorAll('.prp-review-filter__btn')
           );
-          const pressed = btns.map((b) => ({
-            text: (b.textContent || '').replace(/\\s+/g, ' ').trim(),
-            on: b.getAttribute('aria-pressed') === 'true' ||
-              b.classList.contains('prp-review-filter__btn--on'),
-          }));
+          const pressed = btns.map((b) => {
+            const text = (b.textContent || '').replace(/\\s+/g, ' ').trim();
+            const m = text.match(/^(Unresolved|Resolved|Pending)\\s*(\\d+)?/i);
+            return {
+              text,
+              kind: m ? m[1].toLowerCase() : null,
+              count: m && m[2] != null ? Number(m[2]) : null,
+              on:
+                b.getAttribute('aria-pressed') === 'true' ||
+                b.classList.contains('prp-review-filter__btn--on'),
+            };
+          });
           const gear = document.querySelector('[data-prp-review-filter-gear="1"]');
           const stepPrev = document.querySelector(
             '.prp-diff-toolbar__thread-nav .prp-step-nav__btn'
           );
           const cs = stepPrev ? getComputedStyle(stepPrev) : null;
+          // Primary toolbar must NOT host mode/whitespace (moved into gear menu)
+          const toolbar = document.querySelector('.prp-diff-toolbar');
+          const menuOpen = document.querySelector(
+            '[data-prp-review-filter-menu="1"]'
+          );
+          const primaryRadios = toolbar
+            ? [...toolbar.querySelectorAll('input[name="prp-diff-mode"]')].filter(
+                (el) => !menuOpen || !menuOpen.contains(el)
+              )
+            : [];
+          const primaryHideWs = toolbar
+            ? [...toolbar.querySelectorAll('[data-prp-hide-whitespace="1"]')].filter(
+                (el) => !menuOpen || !menuOpen.contains(el)
+              )
+            : [];
           return {
             pressed,
             hasGear: !!gear,
             prevPadRight: cs?.paddingRight || null,
             prevPadLeft: cs?.paddingLeft || null,
             prevW: cs?.width || null,
-            toolbar: !!document.querySelector('.prp-diff-toolbar'),
+            toolbar: !!toolbar,
             layout:
               document.querySelector('.prp-overlay')?.getAttribute('data-layout') ||
               null,
+            primaryModeRadios: primaryRadios.length,
+            primaryHideWs: primaryHideWs.length,
           };
         })()
       `);
@@ -98,6 +122,34 @@ export function getSteps() {
       snap = probeFilterChrome();
     }
     assert(snap?.hasGear, `review filter gear missing: ${JSON.stringify(snap)}`);
+    // Display controls live only in settings popover — not on primary row
+    assert(
+      snap.primaryModeRadios === 0,
+      `Unified/Split must not sit on primary toolbar: ${JSON.stringify(snap)}`
+    );
+    assert(
+      snap.primaryHideWs === 0,
+      `Hide whitespace must not sit on primary toolbar: ${JSON.stringify(snap)}`
+    );
+
+    // Pending chip: hidden when count is 0 (product: only show when pending > 0)
+    const pendingChip = (snap.pressed || []).find(
+      (p) => p.kind === 'pending' || /^Pending\\b/i.test(p.text)
+    );
+    if (pendingChip) {
+      assert(
+        pendingChip.count == null || pendingChip.count > 0,
+        `Pending chip must not render at count 0: ${JSON.stringify(pendingChip)}`
+      );
+      assert(
+        pendingChip.on,
+        `Pending should start selected when shown: ${JSON.stringify(snap.pressed)}`
+      );
+    } else {
+      // No pending work → chip absent (not a disabled 0 chip)
+      log('  Pending chip hidden (no pending comments) — OK');
+    }
+
     // Open gear menu (React state) then re-query after a tick
     evalInPage(`
       (() => {
@@ -115,13 +167,30 @@ export function getSteps() {
           menuOpen: !!menu,
           hide: /Hide outdated/i.test(menuText),
           by: /Reviewed by/i.test(menuText),
-          text: menuText.slice(0, 120),
+          text: menuText.slice(0, 160),
+          unified: !!menu?.querySelector('input[value="unified"]'),
+          split: !!menu?.querySelector('input[value="split"]'),
+          hideWs: !!menu?.querySelector('[data-prp-hide-whitespace="1"]'),
+          hasDiffView: /Diff view/i.test(menuText),
+          unifiedChecked: !!menu?.querySelector(
+            'input[value="unified"]:checked'
+          ),
+          hideWsChecked: !!menu?.querySelector(
+            '[data-prp-hide-whitespace="1"]:checked'
+          ),
         };
       })()
     `);
     assert(
       menuSnap?.menuOpen && menuSnap?.hide && menuSnap?.by,
       `settings menu missing hide/outdated or authors: ${JSON.stringify(menuSnap)}`
+    );
+    assert(
+      menuSnap?.unified &&
+        menuSnap?.split &&
+        menuSnap?.hideWs &&
+        menuSnap?.hasDiffView,
+      `settings menu missing display options: ${JSON.stringify(menuSnap)}`
     );
     // close
     evalInPage(`
@@ -131,21 +200,15 @@ export function getSteps() {
         return true;
       })()
     `);
-    const unresolved = (snap.pressed || []).find((p) =>
-      /Unresolved/i.test(p.text)
+    waitMs(100);
+    const unresolved = (snap.pressed || []).find(
+      (p) => p.kind === 'unresolved' || /Unresolved/i.test(p.text)
     );
-    const pending = (snap.pressed || []).find((p) => /Pending/i.test(p.text));
-    // Defaults: unresolved (+ pending when present) selected; not exclusive single
+    // Defaults: unresolved selected; not exclusive single
     assert(
       unresolved?.on,
       `Unresolved should start selected: ${JSON.stringify(snap.pressed)}`
     );
-    if (pending) {
-      assert(
-        pending.on,
-        `Pending should start selected when shown: ${JSON.stringify(snap.pressed)}`
-      );
-    }
     // ↑ button no extra right padding vs left
     if (snap.prevPadRight != null) {
       assert(
@@ -153,7 +216,7 @@ export function getSteps() {
         `StepNav ↑ padding-right should be 0: ${snap.prevPadRight}`
       );
     }
-    log('P2.0b review filter OK', snap);
+    log('P2.0b review filter OK', { snap, menuSnap, pendingChip: pendingChip || null });
   });
   run('P2.1 Diff ⌥J/K thread nav', () => {
     setLayout('diff');
@@ -358,19 +421,158 @@ export function getSteps() {
       `filetree not re-expanded after second ⌥B: ${JSON.stringify(navAfter)}`
     );
 
-    const mode = evalInPage(`
+    // ── Display settings popover: Unified/Split + Hide whitespace ──
+    const probeDiffPaint = () =>
+      evalInPage(`
+        (() => {
+          const splitRows = document.querySelectorAll(
+            '.prp-vline--split, .prp-split-cols, [data-split="1"]'
+          ).length;
+          const vlines = document.querySelectorAll('.prp-vline').length;
+          const hideWsInMenu = document.querySelector(
+            '[data-prp-review-filter-menu="1"] [data-prp-hide-whitespace="1"]'
+          );
+          const splitRadio = document.querySelector(
+            '[data-prp-review-filter-menu="1"] input[value="split"]'
+          );
+          const unifiedRadio = document.querySelector(
+            '[data-prp-review-filter-menu="1"] input[value="unified"]'
+          );
+          return {
+            splitRows,
+            vlines,
+            hideWsChecked: !!hideWsInMenu?.checked,
+            splitChecked: !!splitRadio?.checked,
+            unifiedChecked: !!unifiedRadio?.checked,
+            primaryModeOutsideMenu: [
+              ...document.querySelectorAll(
+                '.prp-diff-toolbar input[name="prp-diff-mode"]'
+              ),
+            ].filter(
+              (el) =>
+                !el.closest('[data-prp-review-filter-menu="1"]')
+            ).length,
+            primaryHideWsOutsideMenu: [
+              ...document.querySelectorAll(
+                '.prp-diff-toolbar [data-prp-hide-whitespace="1"]'
+              ),
+            ].filter(
+              (el) =>
+                !el.closest('[data-prp-review-filter-menu="1"]')
+            ).length,
+          };
+        })()
+      `);
+
+    const beforePaint = probeDiffPaint();
+    assert(
+      beforePaint.primaryModeOutsideMenu === 0 &&
+        beforePaint.primaryHideWsOutsideMenu === 0,
+      `display controls leaked to primary toolbar: ${JSON.stringify(beforePaint)}`
+    );
+
+    const openGear = () =>
+      evalInPage(`
+        (() => {
+          const gear = document.querySelector(
+            '[data-prp-review-filter-gear="1"], .prp-diff-toolbar__filter-gear'
+          );
+          if (!gear) return { ok: false, reason: 'no-gear' };
+          if (gear.getAttribute('aria-expanded') !== 'true') gear.click();
+          return { ok: true };
+        })()
+      `);
+    const closeGear = () =>
+      evalInPage(`
+        (() => {
+          const gear = document.querySelector('[data-prp-review-filter-gear="1"]');
+          if (gear?.getAttribute('aria-expanded') === 'true') gear.click();
+          return true;
+        })()
+      `);
+
+    assert(openGear().ok, 'diff settings gear missing');
+    waitMs(220);
+
+    // Switch to Split — rows should gain split paint
+    const splitClick = evalInPage(`
       (() => {
-        const split = document.querySelector('input[value="split"]');
-        const unified = document.querySelector('input[value="unified"]');
-        if (!split || !unified) return { ok: false };
+        const menu = document.querySelector('[data-prp-review-filter-menu="1"]');
+        const split = menu?.querySelector('input[value="split"]');
+        if (!split) return { ok: false, reason: 'no-split' };
         split.click();
         return { ok: true };
       })()
     `);
-    assert(mode.ok, 'diff mode radios missing');
-    waitMs(200);
-    evalInPage(`document.querySelector('input[value="unified"]')?.click()`);
-    waitMs(150);
+    assert(splitClick.ok, `split radio missing: ${JSON.stringify(splitClick)}`);
+    waitMs(500);
+    let paint = probeDiffPaint();
+    // Virtual list may take a tick to remount; poll briefly
+    for (let i = 0; i < 8 && paint.splitRows < 1; i++) {
+      waitMs(200);
+      paint = probeDiffPaint();
+    }
+    assert(
+      paint.splitChecked || paint.splitRows >= 1,
+      `Split mode did not apply: ${JSON.stringify(paint)}`
+    );
+    log(`  after Split: ${JSON.stringify(paint)}`);
+
+    // Toggle Hide whitespace on then off
+    const wsToggle = evalInPage(`
+      (() => {
+        const cb = document.querySelector(
+          '[data-prp-review-filter-menu="1"] [data-prp-hide-whitespace="1"]'
+        );
+        if (!cb) return { ok: false };
+        const before = !!cb.checked;
+        cb.click();
+        return { ok: true, before, after: !!cb.checked };
+      })()
+    `);
+    assert(
+      wsToggle.ok && wsToggle.after !== wsToggle.before,
+      `Hide whitespace toggle failed: ${JSON.stringify(wsToggle)}`
+    );
+    waitMs(350);
+    // Toggle back to original
+    evalInPage(`
+      document
+        .querySelector(
+          '[data-prp-review-filter-menu="1"] [data-prp-hide-whitespace="1"]'
+        )
+        ?.click()
+    `);
+    waitMs(250);
+
+    // Restore Unified
+    evalInPage(`
+      document
+        .querySelector(
+          '[data-prp-review-filter-menu="1"] input[value="unified"]'
+        )
+        ?.click()
+    `);
+    waitMs(450);
+    paint = probeDiffPaint();
+    for (let i = 0; i < 6 && paint.splitRows > 0 && !paint.unifiedChecked; i++) {
+      waitMs(200);
+      paint = probeDiffPaint();
+    }
+    assert(
+      paint.unifiedChecked || paint.splitRows === 0,
+      `Unified restore failed: ${JSON.stringify(paint)}`
+    );
+    log(`  after Unified restore: ${JSON.stringify(paint)}`);
+
+    closeGear();
+    waitMs(100);
+    // Closed menu: still no primary-row display controls
+    const closed = probeDiffPaint();
+    assert(
+      closed.primaryModeOutsideMenu === 0 && closed.primaryHideWsOutsideMenu === 0,
+      `display controls on toolbar after close: ${JSON.stringify(closed)}`
+    );
   });
 
 

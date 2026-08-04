@@ -290,6 +290,12 @@ describe('product wiring structure', () => {
     expect(tb).toMatch(/Hide outdated comments/);
     expect(tb).toMatch(/Reviewed by/);
     expect(tb).toMatch(/IconGear/);
+    // Display options live in the gear popover (not primary toolbar row)
+    expect(tb).toMatch(/Hide whitespace/);
+    expect(tb).toMatch(/data-prp-hide-whitespace/);
+    expect(tb).toMatch(/value="unified"/);
+    expect(tb).toMatch(/value="split"/);
+    expect(tb).toMatch(/Diff view/);
     // No exclusive single-select assignment of string modes only
     expect(tb).not.toMatch(/reviewFilter === 'unresolved' \? null : 'unresolved'/);
   });

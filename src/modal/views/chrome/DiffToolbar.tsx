@@ -34,12 +34,15 @@ import {
 } from './FinishReviewModal';
 
 /**
- * Unified Diff top chrome: files, multi-checkbox commits, unified/split,
+ * Unified Diff top chrome: files, multi-checkbox commits, thread filters,
  * grouped comment nav, pending review — no checks.
  * (+/−/files stats live in the PR header only.)
  *
  * Leave-review CTAs live in FinishReviewModal (GitHub-style). Diff header
  * only shows "Submit review" (always available, even with 0 pending).
+ *
+ * Display options (unified/split, hide whitespace) and review-filter extras
+ * (hide outdated, authors) live in the gear settings popover.
  *
  * When find-in-diff is open, Unresolved/Resolved/Pending filters are replaced
  * by an inline search box (no extra header row).
@@ -297,58 +300,6 @@ export function DiffToolbar(props: any) {
           />
         </button>
 
-        <div className="prp-diff-mode" role="radiogroup" aria-label="Diff view mode">
-          <label className="prp-diff-mode__opt">
-            <input
-              type="radio"
-              name="prp-diff-mode"
-              value="unified"
-              checked={diffMode === 'unified'}
-              onChange={(e) => {
-                onDiffMode?.('unified');
-                // Release radio focus so Arrow keys drive Diff line selection
-                // instead of the native radiogroup (sticky toggle focus bug).
-                try {
-                  (e.currentTarget as HTMLInputElement).blur();
-                } catch {
-                  /* ignore */
-                }
-              }}
-            />
-            Unified
-          </label>
-          <label className="prp-diff-mode__opt">
-            <input
-              type="radio"
-              name="prp-diff-mode"
-              value="split"
-              checked={diffMode === 'split'}
-              onChange={(e) => {
-                onDiffMode?.('split');
-                try {
-                  (e.currentTarget as HTMLInputElement).blur();
-                } catch {
-                  /* ignore */
-                }
-              }}
-            />
-            Split
-          </label>
-        </div>
-
-        <label
-          className="prp-diff-mode__opt prp-diff-hide-ws"
-          title="Hide lines that change only whitespace"
-        >
-          <input
-            type="checkbox"
-            checked={Boolean(hideWhitespace)}
-            onChange={(e) => onHideWhitespace?.(Boolean(e.target.checked))}
-            data-prp-hide-whitespace="1"
-          />
-          Hide whitespace
-        </label>
-
         <div className="prp-diff-toolbar__commits">
           <button
             type="button"
@@ -402,91 +353,91 @@ export function DiffToolbar(props: any) {
           />
         </div>
 
-        {searchOpen || showReviewFilter || comments?.length ? (
-          <div
-            className={`prp-diff-toolbar__thread-tools${
-              searchOpen ? ' prp-diff-toolbar__thread-tools--search' : ''
-            }`}
-          >
-            {searchOpen ? (
-              <SearchBar
-                variant="toolbar"
-                open
-                query={searchQuery}
-                hits={searchHits}
-                hitIndex={searchHitIndex}
-                inputRef={searchInputRef}
-                searching={searchBusy}
-                showLoadComments={showSearchLoadComments}
-                onLoadComments={onSearchLoadComments}
-                loadCommentsBusy={searchLoadCommentsBusy}
-                onChange={onSearchChange}
-                onClose={onSearchClose}
-                onNext={onSearchNext}
-                onPrev={onSearchPrev}
-                placeholder="Find in diff, comments…"
-              />
-            ) : showReviewFilter ? (
-              <div
-                className="prp-review-filter"
-                role="group"
-                aria-label="Filter review threads by status (multi-select)"
+        <div
+          className={`prp-diff-toolbar__thread-tools${
+            searchOpen ? ' prp-diff-toolbar__thread-tools--search' : ''
+          }`}
+        >
+          {searchOpen ? (
+            <SearchBar
+              variant="toolbar"
+              open
+              query={searchQuery}
+              hits={searchHits}
+              hitIndex={searchHitIndex}
+              inputRef={searchInputRef}
+              searching={searchBusy}
+              showLoadComments={showSearchLoadComments}
+              onLoadComments={onSearchLoadComments}
+              loadCommentsBusy={searchLoadCommentsBusy}
+              onChange={onSearchChange}
+              onClose={onSearchClose}
+              onNext={onSearchNext}
+              onPrev={onSearchPrev}
+              placeholder="Find in diff, comments…"
+            />
+          ) : showReviewFilter ? (
+            <div
+              className="prp-review-filter"
+              role="group"
+              aria-label="Filter review threads by status (multi-select)"
+            >
+              <button
+                type="button"
+                className={
+                  isStatusActive(filterState, 'unresolved')
+                    ? 'prp-review-filter__btn prp-review-filter__btn--on'
+                    : 'prp-review-filter__btn'
+                }
+                aria-pressed={isStatusActive(filterState, 'unresolved')}
+                title={`Toggle unresolved threads (${unresN}). Empty selection shows all.`}
+                onClick={() => toggleStatus('unresolved')}
               >
+                Unresolved{' '}
+                <span className="prp-review-filter__count">{unresN}</span>
+              </button>
+              <button
+                type="button"
+                className={
+                  isStatusActive(filterState, 'resolved')
+                    ? 'prp-review-filter__btn prp-review-filter__btn--on'
+                    : 'prp-review-filter__btn'
+                }
+                aria-pressed={isStatusActive(filterState, 'resolved')}
+                title={`Toggle resolved threads (${resN}). Empty selection shows all.`}
+                onClick={() => toggleStatus('resolved')}
+              >
+                Resolved <span className="prp-review-filter__count">{resN}</span>
+              </button>
+              {pending > 0 ? (
                 <button
                   type="button"
                   className={
-                    isStatusActive(filterState, 'unresolved')
+                    isStatusActive(filterState, 'pending')
                       ? 'prp-review-filter__btn prp-review-filter__btn--on'
                       : 'prp-review-filter__btn'
                   }
-                  aria-pressed={isStatusActive(filterState, 'unresolved')}
-                  title={`Toggle unresolved threads (${unresN}). Empty selection shows all.`}
-                  onClick={() => toggleStatus('unresolved')}
+                  aria-pressed={isStatusActive(filterState, 'pending')}
+                  title={`Toggle pending (unsubmitted) comments (${pending}). Empty selection shows all.`}
+                  onClick={() => toggleStatus('pending')}
                 >
-                  Unresolved{' '}
-                  <span className="prp-review-filter__count">{unresN}</span>
+                  Pending{' '}
+                  <span className="prp-review-filter__count">{pending}</span>
                 </button>
-                <button
-                  type="button"
-                  className={
-                    isStatusActive(filterState, 'resolved')
-                      ? 'prp-review-filter__btn prp-review-filter__btn--on'
-                      : 'prp-review-filter__btn'
-                  }
-                  aria-pressed={isStatusActive(filterState, 'resolved')}
-                  title={`Toggle resolved threads (${resN}). Empty selection shows all.`}
-                  onClick={() => toggleStatus('resolved')}
-                >
-                  Resolved <span className="prp-review-filter__count">{resN}</span>
-                </button>
-                {pending > 0 || isStatusActive(filterState, 'pending') ? (
-                  <button
-                    type="button"
-                    className={
-                      isStatusActive(filterState, 'pending')
-                        ? 'prp-review-filter__btn prp-review-filter__btn--on'
-                        : 'prp-review-filter__btn'
-                    }
-                    aria-pressed={isStatusActive(filterState, 'pending')}
-                    title={`Toggle pending (unsubmitted) comments (${pending}). Empty selection shows all.`}
-                    onClick={() => toggleStatus('pending')}
-                  >
-                    Pending{' '}
-                    <span className="prp-review-filter__count">{pending}</span>
-                  </button>
-                ) : null}
-              </div>
-            ) : null}
-            {!searchOpen && (showReviewFilter || comments?.length) ? (
-              <div
-                className="prp-diff-toolbar__thread-nav-wrap"
-                ref={settingsWrapRef}
-              >
-                <div className="prp-diff-toolbar__thread-nav">
+              ) : null}
+            </div>
+          ) : null}
+          {!searchOpen ? (
+            <div
+              className="prp-diff-toolbar__thread-nav-wrap"
+              ref={settingsWrapRef}
+            >
+              <div className="prp-diff-toolbar__thread-nav">
+                {Array.isArray(comments) && comments.length ? (
                   <StepNav
                     className="prp-diff-toolbar__comments prp-comment-nav"
                     index={commentIndex}
-                    total={Array.isArray(comments) ? comments.length : 0}
+                    total={comments.length}
                     onPrev={onPrevComment}
                     onNext={onNextComment}
                     label="Review threads"
@@ -502,87 +453,155 @@ export function DiffToolbar(props: any) {
                     prevShortcut={threadPrevShortcut}
                     nextShortcut={threadNextShortcut}
                   />
-                  <button
-                    type="button"
-                    className="prp-diff-toolbar__filter-gear"
-                    aria-label="Review filter settings"
-                    aria-haspopup="menu"
-                    aria-expanded={settingsOpen}
-                    title="Filter options"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSettingsOpen((v) => !v);
-                    }}
-                    data-prp-review-filter-gear="1"
-                  >
-                    <IconGear size={14} />
-                  </button>
-                </div>
-                {settingsOpen ? (
-                  <div
-                    className="prp-diff-review-settings"
-                    role="menu"
-                    aria-label="Review filter options"
-                    data-prp-review-filter-menu="1"
-                  >
-                    <div className="prp-diff-review-settings__section">
+                ) : null}
+                <button
+                  type="button"
+                  className={
+                    Array.isArray(comments) && comments.length
+                      ? 'prp-diff-toolbar__filter-gear'
+                      : 'prp-diff-toolbar__filter-gear prp-diff-toolbar__filter-gear--alone'
+                  }
+                  aria-label="Diff view settings"
+                  aria-haspopup="menu"
+                  aria-expanded={settingsOpen}
+                  title="View and filter options"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSettingsOpen((v) => !v);
+                  }}
+                  data-prp-review-filter-gear="1"
+                >
+                  <IconGear size={14} />
+                </button>
+              </div>
+              {settingsOpen ? (
+                <div
+                  className="prp-diff-review-settings"
+                  role="menu"
+                  aria-label="Diff view settings"
+                  data-prp-review-filter-menu="1"
+                >
+                  <div className="prp-diff-review-settings__section">
+                    <p className="prp-diff-review-settings__heading">
+                      Diff view
+                    </p>
+                    <div
+                      className="prp-diff-review-settings__radios"
+                      role="radiogroup"
+                      aria-label="Diff view mode"
+                    >
                       <label className="prp-diff-review-settings__row">
                         <input
-                          type="checkbox"
-                          checked={Boolean(filterState.hideOutdated)}
-                          onChange={(e) =>
-                            patchFilter({ hideOutdated: e.target.checked })
-                          }
+                          type="radio"
+                          name="prp-diff-mode"
+                          value="unified"
+                          checked={diffMode === 'unified'}
+                          onChange={(e) => {
+                            onDiffMode?.('unified');
+                            try {
+                              (e.currentTarget as HTMLInputElement).blur();
+                            } catch {
+                              /* ignore */
+                            }
+                          }}
                         />
-                        <span>Hide outdated comments</span>
+                        <span>Unified</span>
+                      </label>
+                      <label className="prp-diff-review-settings__row">
+                        <input
+                          type="radio"
+                          name="prp-diff-mode"
+                          value="split"
+                          checked={diffMode === 'split'}
+                          onChange={(e) => {
+                            onDiffMode?.('split');
+                            try {
+                              (e.currentTarget as HTMLInputElement).blur();
+                            } catch {
+                              /* ignore */
+                            }
+                          }}
+                        />
+                        <span>Split</span>
                       </label>
                     </div>
-                    <hr className="prp-diff-review-settings__divider" />
-                    <div className="prp-diff-review-settings__section">
-                      <p className="prp-diff-review-settings__heading">
-                        Reviewed by…
-                      </p>
-                      {authorList.length === 0 ? (
-                        <p className="prp-diff-review-settings__empty">
-                          No review authors yet
-                        </p>
-                      ) : (
-                        authorList.map((login) => {
-                          const key = String(login).toLowerCase();
-                          const checked = filterState.authors.some(
-                            (a) => a.toLowerCase() === key
-                          );
-                          return (
-                            <label
-                              key={key}
-                              className="prp-diff-review-settings__row"
-                            >
-                              <input
-                                type="checkbox"
-                                checked={checked}
-                                onChange={() => {
-                                  const next = new Set(
-                                    filterState.authors.map((a) =>
-                                      a.toLowerCase()
-                                    )
-                                  );
-                                  if (next.has(key)) next.delete(key);
-                                  else next.add(key);
-                                  patchFilter({ authors: [...next] });
-                                }}
-                              />
-                              <span>{login}</span>
-                            </label>
-                          );
-                        })
-                      )}
-                    </div>
+                    <label
+                      className="prp-diff-review-settings__row"
+                      title="Hide lines that change only whitespace"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={Boolean(hideWhitespace)}
+                        onChange={(e) =>
+                          onHideWhitespace?.(Boolean(e.target.checked))
+                        }
+                        data-prp-hide-whitespace="1"
+                      />
+                      <span>Hide whitespace</span>
+                    </label>
                   </div>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
+                  {showReviewFilter || authorList.length > 0 ? (
+                    <>
+                      <hr className="prp-diff-review-settings__divider" />
+                      <div className="prp-diff-review-settings__section">
+                        <label className="prp-diff-review-settings__row">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(filterState.hideOutdated)}
+                            onChange={(e) =>
+                              patchFilter({ hideOutdated: e.target.checked })
+                            }
+                          />
+                          <span>Hide outdated comments</span>
+                        </label>
+                      </div>
+                      <hr className="prp-diff-review-settings__divider" />
+                      <div className="prp-diff-review-settings__section">
+                        <p className="prp-diff-review-settings__heading">
+                          Reviewed by…
+                        </p>
+                        {authorList.length === 0 ? (
+                          <p className="prp-diff-review-settings__empty">
+                            No review authors yet
+                          </p>
+                        ) : (
+                          authorList.map((login) => {
+                            const key = String(login).toLowerCase();
+                            const checked = filterState.authors.some(
+                              (a) => a.toLowerCase() === key
+                            );
+                            return (
+                              <label
+                                key={key}
+                                className="prp-diff-review-settings__row"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => {
+                                    const next = new Set(
+                                      filterState.authors.map((a) =>
+                                        a.toLowerCase()
+                                      )
+                                    );
+                                    if (next.has(key)) next.delete(key);
+                                    else next.add(key);
+                                    patchFilter({ authors: [...next] });
+                                  }}
+                                />
+                                <span>{login}</span>
+                              </label>
+                            );
+                          })
+                        )}
+                      </div>
+                    </>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
 
         {/* Always available — event/body live in FinishReviewModal */}
         <div className="prp-diff-toolbar__pending" role="group" aria-label="Leave a review">
