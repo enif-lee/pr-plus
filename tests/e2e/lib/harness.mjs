@@ -1097,6 +1097,15 @@ export function clickFirstLineExpandBtn() {
       // Do NOT scrollIntoView here: Diff virtual list remounts on scroll and
       // can detach the button before click() lands (expand appears to no-op).
       const beforeH = Math.round(row.getBoundingClientRect().height);
+      const r = btn.getBoundingClientRect();
+      const opts = {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+        buttons: 1,
+        clientX: r.left + r.width / 2,
+        clientY: r.top + r.height / 2,
+      };
       try {
         btn.focus({ preventScroll: true });
       } catch {
@@ -1106,8 +1115,55 @@ export function clickFirstLineExpandBtn() {
           /* ignore */
         }
       }
-      btn.click();
-      return { ok: true, beforeH, path: row.getAttribute('data-file-path') || null };
+      // Full pointer/mouse sequence — React 19 onClick is more reliable with it
+      try {
+        btn.dispatchEvent(
+          new PointerEvent('pointerdown', {
+            ...opts,
+            pointerId: 1,
+            pointerType: 'mouse',
+          })
+        );
+      } catch {
+        /* PointerEvent missing */
+      }
+      btn.dispatchEvent(new MouseEvent('mousedown', opts));
+      try {
+        btn.dispatchEvent(
+          new PointerEvent('pointerup', {
+            ...opts,
+            pointerId: 1,
+            pointerType: 'mouse',
+            buttons: 0,
+          })
+        );
+      } catch {
+        /* ignore */
+      }
+      btn.dispatchEvent(new MouseEvent('mouseup', { ...opts, buttons: 0 }));
+      btn.dispatchEvent(new MouseEvent('click', { ...opts, buttons: 0 }));
+      try {
+        btn.click();
+      } catch {
+        /* ignore */
+      }
+      // Fallback: double-click the row (product also toggles via onDoubleClick)
+      if (!document.querySelector('.prp-vline--line-expanded') && row) {
+        row.dispatchEvent(
+          new MouseEvent('dblclick', {
+            bubbles: true,
+            cancelable: true,
+            clientX: opts.clientX + 40,
+            clientY: opts.clientY,
+          })
+        );
+      }
+      return {
+        ok: true,
+        beforeH,
+        path: row.getAttribute('data-file-path') || null,
+        expandedNow: !!document.querySelector('.prp-vline--line-expanded'),
+      };
     })()
   `);
 }

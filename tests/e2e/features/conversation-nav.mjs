@@ -1091,6 +1091,292 @@ export function getSteps() {
     }
   });
 
+  /**
+   * Regression: main conversation ghost mousedown must leave focus on the real
+   * composer textarea. Success must NOT use a manual ta.focus() rescue.
+   */
+  run('P1.15 main composer ghost mousedown focuses textarea (no focus rescue)', () => {
+    blurEditable();
+    setLayout('conversation');
+    waitMs(250);
+    if (!evalInPage(`!!document.querySelector('.prp-overlay')`)) {
+      openPr(DEMO_PR);
+      setLayout('conversation');
+      waitMs(500);
+    }
+    waitDetailReady({ meta: true, files: false, label: 'P1.15 meta' });
+    // Reset scroll so footer / conversation composer is mounted in the virtual list.
+    evalInPage(`
+      (() => {
+        const sc =
+          document.querySelector('.prp-conversation__scroller') ||
+          document.querySelector('.prp-conversation [data-prp-scroll]') ||
+          document.querySelector('.prp-overlay .prp-vlist');
+        if (sc) sc.scrollTop = Math.max(0, (sc.scrollHeight || 0) - (sc.clientHeight || 0));
+        document
+          .querySelector(
+            '[data-prp-composer-kind="conversation"], .prp-conversation__composer, .prp-card--composer'
+          )
+          ?.scrollIntoView?.({ block: 'center' });
+      })()
+    `);
+    waitMs(400);
+    // Force collapsed ghost: clear draft + blur so MarkdownComposer shows ghost.
+    evalInPage(`
+      (() => {
+        const root =
+          document.querySelector('[data-prp-composer-kind="conversation"]') ||
+          document.querySelector('.prp-card--composer');
+        const ta = root?.querySelector?.(
+          'textarea[data-prp-composer-input], textarea.prp-mdc__ta'
+        );
+        if (ta) {
+          const native = Object.getOwnPropertyDescriptor(
+            window.HTMLTextAreaElement.prototype,
+            'value'
+          );
+          if (native?.set) {
+            native.set.call(ta, '');
+            ta.dispatchEvent(new Event('input', { bubbles: true }));
+            ta.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+          ta.blur();
+        }
+        document.activeElement?.blur?.();
+      })()
+    `);
+    waitMs(200);
+    const fired = evalInPage(`
+      (() => {
+        const roots = [
+          document.querySelector('[data-prp-composer-kind="conversation"]'),
+          document.querySelector('.prp-card--composer [data-prp-composer-root]'),
+          document.querySelector('.prp-card--composer'),
+          ...document.querySelectorAll('.prp-overlay .prp-mdc__ghost'),
+        ].filter(Boolean);
+        let ghost = null;
+        let root = null;
+        for (const r of roots) {
+          if (r.classList?.contains?.('prp-mdc__ghost')) {
+            ghost = r;
+            root = r.closest('[data-prp-composer-kind], .prp-card--composer, [data-prp-composer-root]');
+            break;
+          }
+          const g = r.querySelector?.('.prp-mdc__ghost');
+          if (g) {
+            ghost = g;
+            root = r;
+            break;
+          }
+        }
+        // Prefer Write a comment ghost (main) over Reply ghosts
+        const writeGhost = [...document.querySelectorAll('.prp-overlay .prp-mdc__ghost')].find(
+          (g) => /write a comment/i.test(g.textContent || '')
+        );
+        if (writeGhost) {
+          ghost = writeGhost;
+          root =
+            writeGhost.closest('[data-prp-composer-kind], .prp-card--composer, [data-prp-composer-root]') ||
+            root;
+        }
+        if (!ghost) {
+          return {
+            ok: false,
+            reason: 'no-ghost',
+            ghosts: [...document.querySelectorAll('.prp-overlay .prp-mdc__ghost')].map((g) =>
+              (g.textContent || '').trim().slice(0, 30)
+            ),
+            openTas: document.querySelectorAll(
+              '.prp-overlay textarea[data-prp-composer-input]'
+            ).length,
+          };
+        }
+        ghost.scrollIntoView?.({ block: 'center' });
+        const box = ghost.getBoundingClientRect();
+        const opts = {
+          bubbles: true,
+          cancelable: true,
+          button: 0,
+          clientX: box.left + Math.min(24, Math.max(8, box.width / 2)),
+          clientY: box.top + Math.min(12, Math.max(4, box.height / 2)),
+        };
+        // Real path: mousedown preventDefault + openWriteSurface (product code).
+        ghost.dispatchEvent(new MouseEvent('mousedown', opts));
+        ghost.dispatchEvent(new MouseEvent('mouseup', opts));
+        ghost.dispatchEvent(new MouseEvent('click', opts));
+        return {
+          ok: true,
+          ghostText: (ghost.textContent || '').trim().slice(0, 40),
+          hasRoot: !!root,
+        };
+      })()
+    `);
+    log(`  P1.15 ghost fire: ${JSON.stringify(fired)}`);
+    assert(fired?.ok, `ghost mousedown setup failed: ${JSON.stringify(fired)}`);
+    // React commit + useLayoutEffect focus — do not ta.focus() as success.
+    waitMs(250);
+    const hit = evalInPage(`
+      (() => {
+        const ae = document.activeElement;
+        const isComposerTa =
+          !!ae &&
+          (ae.getAttribute?.('data-prp-composer-input') === '1' ||
+            ae.classList?.contains?.('prp-mdc__ta'));
+        const inMain =
+          isComposerTa &&
+          !!ae.closest?.(
+            '[data-prp-composer-kind="conversation"], .prp-card--composer, [data-prp-composer-root]'
+          );
+        const openCount = document.querySelectorAll(
+          '.prp-overlay .prp-mdc--open, .prp-overlay textarea[data-prp-composer-input]'
+        ).length;
+        return {
+          activeTag: ae?.tagName || null,
+          isComposerTa,
+          inMain: !!inMain,
+          dataInput: ae?.getAttribute?.('data-prp-composer-input') || null,
+          activeClass: String(ae?.className || '').slice(0, 80),
+          openCount,
+          ghostsLeft: [...document.querySelectorAll('.prp-overlay .prp-mdc__ghost')].map((g) =>
+            (g.textContent || '').trim().slice(0, 24)
+          ),
+        };
+      })()
+    `);
+    log(`  P1.15 after paint: ${JSON.stringify(hit)}`);
+    assert(
+      hit?.isComposerTa && hit?.inMain,
+      `activeElement must be conversation composer textarea after ghost mousedown (no focus rescue): ${JSON.stringify(hit)}`
+    );
+  });
+
+  /**
+   * Regression: with composer textarea focused (optionally with draft text),
+   * ⌥⇧L must open the labels SearchableSelect panel — not only the shortcut monitor.
+   */
+  run('P1.16 editable ⌥⇧L opens labels picker panel', () => {
+    setLayout('conversation');
+    waitMs(200);
+    if (!evalInPage(`!!document.querySelector('.prp-overlay')`)) {
+      openPr(DEMO_PR);
+      setLayout('conversation');
+      waitMs(500);
+    }
+    waitDetailReady({ meta: true, files: false, label: 'P1.16 meta' });
+    // Close leftover picker without relying on Esc clearing composer
+    evalInPage(`document.querySelector('.prp-sselect-panel')?.remove?.()`);
+    // Open / focus main conversation composer (same ghost path as P1.15)
+    evalInPage(`
+      (() => {
+        const writeGhost = [...document.querySelectorAll('.prp-overlay .prp-mdc__ghost')].find(
+          (g) => /write a comment/i.test(g.textContent || '')
+        );
+        const anyTa = document.querySelector(
+          '.prp-overlay textarea[data-prp-composer-input], .prp-overlay textarea.prp-mdc__ta'
+        );
+        if (writeGhost) {
+          writeGhost.scrollIntoView?.({ block: 'center' });
+          const r = writeGhost.getBoundingClientRect();
+          const opts = {
+            bubbles: true,
+            cancelable: true,
+            button: 0,
+            clientX: r.left + 12,
+            clientY: r.top + 8,
+          };
+          writeGhost.dispatchEvent(new MouseEvent('mousedown', opts));
+          writeGhost.dispatchEvent(new MouseEvent('click', opts));
+          return { via: 'ghost' };
+        }
+        if (anyTa) {
+          anyTa.scrollIntoView?.({ block: 'center' });
+          anyTa.focus();
+          return { via: 'existing-ta' };
+        }
+        return { via: 'none' };
+      })()
+    `);
+    waitMs(300);
+    const focused = evalInPage(`
+      (() => {
+        let ta =
+          document.activeElement?.getAttribute?.('data-prp-composer-input') === '1'
+            ? document.activeElement
+            : null;
+        if (!ta) {
+          ta = document.querySelector(
+            '.prp-overlay textarea[data-prp-composer-input], .prp-overlay textarea.prp-mdc__ta'
+          );
+          ta?.focus?.();
+        }
+        if (!ta) {
+          return {
+            ok: false,
+            reason: 'no-ta',
+            ghosts: [...document.querySelectorAll('.prp-overlay .prp-mdc__ghost')].map((g) =>
+              (g.textContent || '').trim().slice(0, 24)
+            ),
+            openMdc: document.querySelectorAll('.prp-overlay .prp-mdc--open').length,
+          };
+        }
+        const native = Object.getOwnPropertyDescriptor(
+          window.HTMLTextAreaElement.prototype,
+          'value'
+        );
+        if (native?.set) {
+          native.set.call(ta, 'e2e labels while typing draft');
+          ta.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        ta.focus();
+        return {
+          ok: document.activeElement === ta,
+          tag: document.activeElement?.tagName || null,
+          data: document.activeElement?.getAttribute?.('data-prp-composer-input'),
+          valueLen: String(ta.value || '').length,
+        };
+      })()
+    `);
+    log(`  P1.16 focus: ${JSON.stringify(focused)}`);
+    assert(focused?.ok, `composer textarea must be focused before ⌥⇧L: ${JSON.stringify(focused)}`);
+    // Trusted product chord path (harness synthetic on documentElement)
+    press('Alt+Shift+l');
+    waitMs(400);
+    // Poll for async fetchRepoLabels + setPicker
+    let panel = null;
+    for (let i = 0; i < 12; i++) {
+      panel = evalInPage(`
+        (() => {
+          const p = document.querySelector('.prp-sselect-panel');
+          const title = document.querySelector('.prp-sselect-title')?.textContent?.trim() || '';
+          const mon = document.querySelector('.prp-shortcut-monitor')?.textContent?.trim() || '';
+          const r = p?.getBoundingClientRect?.();
+          return {
+            panel: !!p,
+            title,
+            mon,
+            w: r ? Math.round(r.width) : 0,
+            h: r ? Math.round(r.height) : 0,
+          };
+        })()
+      `);
+      if (panel?.panel && panel.w > 0 && /label/i.test(panel.title || '')) break;
+      waitMs(350);
+    }
+    log(`  P1.16 panel: ${JSON.stringify(panel)}`);
+    assert(panel?.panel, `⌥⇧L while typing must open .prp-sselect-panel: ${JSON.stringify(panel)}`);
+    assert(
+      panel.w > 0 && panel.h > 0,
+      `labels panel must be visible size: ${JSON.stringify(panel)}`
+    );
+    assert(
+      /set labels|labels/i.test(panel.title || ''),
+      `labels panel title expected, got: ${JSON.stringify(panel)}`
+    );
+    // Cleanup picker so later suites are not blocked
+    press('Escape');
+    waitMs(200);
+  });
+
   // Hygiene: DELETE any issue/review comments posted earlier in this feature
   // (P1.10 Cmd+Enter). Fail-closed when a tracked id remains after delete.
   run('P1.99 comment cleanup hygiene (delete e2e posts)', () => {

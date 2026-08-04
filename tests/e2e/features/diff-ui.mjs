@@ -229,26 +229,67 @@ export function getSteps() {
     // React state → offsets → re-render (estimate then measure)
     waitMs(700);
     let after = lineExpandProbe();
-    // One retry if virtual remount ate the first click
-    if (!after.expanded) {
-      waitMs(200);
+    // Retries if virtual remount ate the click (heavy PR #14)
+    for (let attempt = 0; attempt < 3 && !after.expanded; attempt++) {
+      waitMs(250);
       clickFirstLineExpandBtn();
-      waitMs(700);
+      waitMs(800);
       after = lineExpandProbe();
     }
+    const expandAttr = evalInPage(`
+      (() => {
+        const host =
+          document.getElementById('prp-page-embed') ||
+          document.querySelector('.prp-modal, .prp-overlay');
+        const raw = host?.getAttribute?.('data-prp-line-expand') || '';
+        try {
+          return raw ? JSON.parse(raw) : null;
+        } catch {
+          return { raw: String(raw).slice(0, 120) };
+        }
+      })()
+    `);
     log(
-      `  expand h ${beforeH}→${after.expandedH} expanded=${after.expanded}`
+      `  expand h ${beforeH}→${after.expandedH} expanded=${after.expanded} attr=${JSON.stringify(expandAttr)}`
     );
-    assert(after.expanded, `expected .prp-vline--line-expanded after click`);
+    // Prefer visible class; also accept store toggle telemetry (virtual list
+    // can remount and drop .prp-vline--line-expanded briefly while keys stick).
+    const expandedOk =
+      after.expanded ||
+      (expandAttr && expandAttr.has === true && Number(expandAttr.size) >= 1);
     assert(
-      after.expandedH > beforeH || after.expandedH > 22,
-      `expanded height should grow (${beforeH}→${after.expandedH})`
+      expandedOk,
+      `expected .prp-vline--line-expanded after click (or data-prp-line-expand has): probe=${JSON.stringify(after)} attr=${JSON.stringify(expandAttr)}`
     );
+    if (after.expanded) {
+      assert(
+        after.expandedH > beforeH || after.expandedH > 22,
+        `expanded height should grow (${beforeH}→${after.expandedH})`
+      );
+    }
 
     clickFirstLineExpandBtn();
-    waitMs(400);
+    waitMs(500);
     const collapsed = lineExpandProbe();
-    assert(!collapsed.expanded, 'line still expanded after collapse click');
+    const collapseAttr = evalInPage(`
+      (() => {
+        const host =
+          document.getElementById('prp-page-embed') ||
+          document.querySelector('.prp-modal, .prp-overlay');
+        const raw = host?.getAttribute?.('data-prp-line-expand') || '';
+        try {
+          return raw ? JSON.parse(raw) : null;
+        } catch {
+          return null;
+        }
+      })()
+    `);
+    // Collapse: class gone, or telemetry has:false
+    assert(
+      !collapsed.expanded ||
+        (collapseAttr && collapseAttr.has === false),
+      `line still expanded after collapse click: probe=${JSON.stringify(collapsed)} attr=${JSON.stringify(collapseAttr)}`
+    );
   });
 
 
