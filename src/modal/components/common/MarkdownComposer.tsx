@@ -105,13 +105,45 @@ export function MarkdownComposer({
     };
   }, []);
 
+  /**
+   * Ghost → open mounts the textarea after state commit. Focusing in onClick
+   * via setTimeout(0) often races: taRef is still null, or a prior editable
+   * (thread reply) still holds focus. Layout-effect focus after open is reliable.
+   */
+  useLayoutEffect(() => {
+    if (!open || !focused || tab !== 'write' || disabled) return;
+    const ta = taRef.current;
+    if (!ta) return;
+    if (typeof document !== 'undefined' && document.activeElement === ta) return;
+    try {
+      ta.focus({ preventScroll: true });
+    } catch {
+      try {
+        ta.focus();
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [open, focused, tab, disabled]);
+
   // App / host can dispatch these on the .prp-mdc root (composer context chords)
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return undefined;
     const onEmoji = (ev: Event) => {
       ev.preventDefault?.();
-      insertEmojiTrigger();
+      // Collapsed ghost: open write surface so ":" lands in a real textarea
+      if (!taRef.current) {
+        clearBlurTimer();
+        setFocused(true);
+        setTab('write');
+      }
+      // After open, ta mounts; insert on next frame if needed
+      if (taRef.current) {
+        insertEmojiTrigger();
+      } else {
+        requestAnimationFrame(() => insertEmojiTrigger());
+      }
     };
     const onSubmitEv = (ev: Event) => {
       ev.preventDefault?.();
@@ -119,7 +151,17 @@ export function MarkdownComposer({
     };
     const onFocusIn = (ev: Event) => {
       ev.preventDefault?.();
-      taRef.current?.focus?.();
+      clearBlurTimer();
+      setFocused(true);
+      setTab('write');
+      // Focus runs in useLayoutEffect once open + ta is mounted
+      queueMicrotask(() => {
+        try {
+          taRef.current?.focus?.({ preventScroll: true });
+        } catch {
+          taRef.current?.focus?.();
+        }
+      });
     };
     root.addEventListener('prp-composer-emoji', onEmoji);
     root.addEventListener('prp-composer-submit', onSubmitEv);
@@ -456,17 +498,41 @@ export function MarkdownComposer({
     void handleFiles(e.dataTransfer?.files || null);
   }
 
+  function openWriteSurface() {
+    if (disabled) return;
+    clearBlurTimer();
+    setFocused(true);
+    setTab('write');
+    try {
+      onComposerFocusChange?.(true);
+    } catch {
+      /* ignore */
+    }
+  }
+
   if (!open && !forceOpen) {
     return (
-      <div className={`prp-mdc ${className}`.trim()} ref={rootRef}>
+      <div
+        className={`prp-mdc ${className}`.trim()}
+        ref={rootRef}
+        data-prp-composer="1"
+        data-prp-composer-collapsed="1"
+      >
         <button
           type="button"
           className="prp-mdc__ghost"
           disabled={disabled}
+          // preventDefault: do not focus the ghost button itself. That left
+          // focus on the button (or kept a prior textarea focused when the
+          // click was swallowed) so the write surface never received caret.
+          onMouseDown={(e) => {
+            if (disabled) return;
+            e.preventDefault();
+            openWriteSurface();
+          }}
           onClick={() => {
-            setFocused(true);
-            setTab('write');
-            setTimeout(() => taRef.current?.focus(), 0);
+            // Keyboard activation (Enter/Space) when ghost is focused
+            openWriteSurface();
           }}
         >
           {placeholder}

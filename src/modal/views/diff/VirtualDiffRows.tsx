@@ -856,14 +856,26 @@ export function DiffVirtualRowShell({
     const el = ref.current;
     if (!el) return undefined;
     const publish = () => {
-      const h = Math.ceil(el.getBoundingClientRect().height || el.offsetHeight || 0);
+      // Prefer content size (scrollHeight) over clipped client box — overflow:hidden
+      // ancestors can make getBoundingClientRect under-report after body hydrate.
+      const rect = el.getBoundingClientRect().height || 0;
+      const scroll = el.scrollHeight || 0;
+      const offset = el.offsetHeight || 0;
+      const h = Math.ceil(Math.max(rect, scroll, offset));
       if (h > 0) onHeight(measureKey, h);
     };
     publish();
-    if (typeof ResizeObserver !== 'function') return undefined;
+    // Second tick after markdown/layout (images, fonts) settles
+    const t = window.setTimeout(publish, 48);
+    if (typeof ResizeObserver !== 'function') {
+      return () => clearTimeout(t);
+    }
     const ro = new ResizeObserver(() => publish());
     ro.observe(el);
-    return () => ro.disconnect();
+    return () => {
+      clearTimeout(t);
+      ro.disconnect();
+    };
   }, [measureKey, onHeight, children]);
 
   return (

@@ -181,17 +181,61 @@ export function getSteps() {
     waitMs(150);
     blurEditable();
 
+    // ⌥B — Diff files navigator collapse (same chord as Conversation metadata rail).
+    const fileNavProbe = () =>
+      evalInPage(`
+        (() => {
+          const ft =
+            document.querySelector('.prp-filetree') ||
+            document.querySelector('.prp-diff-layout .prp-filetree');
+          const layout = document.querySelector('.prp-diff-layout');
+          const collapsed =
+            ft?.classList.contains('prp-filetree--nav-collapsed') ||
+            layout?.classList.contains('prp-diff-layout--nav-collapsed') ||
+            document.querySelector('.prp-file-nav-resizer')?.getAttribute('data-collapsed') ===
+              '1';
+          const w = ft ? Math.round(ft.getBoundingClientRect().width) : 0;
+          return { hasTree: !!ft, collapsed: !!collapsed, w };
+        })()
+      `);
+
+    let navBefore = fileNavProbe();
+    log(`  filetree before ${JSON.stringify(navBefore)}`);
+    assert(navBefore.hasTree, `filetree missing: ${JSON.stringify(navBefore)}`);
+    if (navBefore.collapsed) {
+      press('Alt+b');
+      waitMs(300);
+      navBefore = fileNavProbe();
+      assert(
+        !navBefore.collapsed,
+        `could not expand filetree before toggle: ${JSON.stringify(navBefore)}`
+      );
+    }
+    const expandedW = navBefore.w;
+
     press('Alt+b');
     waitMs(300);
-    const collapsed = evalInPage(`
-      (() => {
-        const ft = document.querySelector('.prp-filetree');
-        return ft ? ft.classList.contains('prp-filetree--nav-collapsed') : false;
-      })()
-    `);
-    assert(collapsed, 'filetree not collapsed after ⌥B');
+    const navMid = fileNavProbe();
+    log(`  filetree after collapse ${JSON.stringify(navMid)}`);
+    assert(
+      navMid.collapsed,
+      `filetree not collapsed after ⌥B: ${JSON.stringify(navMid)}`
+    );
+    if (expandedW > 80) {
+      assert(
+        navMid.w < expandedW - 20,
+        `collapsed filetree should shrink (${expandedW}→${navMid.w})`
+      );
+    }
+
     press('Alt+b');
-    waitMs(200);
+    waitMs(250);
+    const navAfter = fileNavProbe();
+    log(`  filetree after re-expand ${JSON.stringify(navAfter)}`);
+    assert(
+      !navAfter.collapsed,
+      `filetree not re-expanded after second ⌥B: ${JSON.stringify(navAfter)}`
+    );
 
     const mode = evalInPage(`
       (() => {

@@ -320,6 +320,7 @@ async addAssignees(owner, repo, number, assignees) {
   },
   /**
    * PR conversation system events (title rename, draft/ready, labels, …).
+   * REST fallback; prefer fetchPrTimelineItemsPage for GraphQL-first path.
    * @returns {Promise<Array>}
    */
   async fetchPrTimelineEvents(owner, repo, number, opts: any = {}) {
@@ -338,6 +339,95 @@ async addAssignees(owner, repo, number, assignees) {
       return [];
     }
     return Array.isArray(res.events) ? res.events : [];
+  },
+  /**
+   * GraphQL-first conversation timeline page (timelineItems, unfiltered).
+   * Returns { comments, timelineEvents, reviews, pageInfo, hasMore, ... }.
+   */
+  async fetchPrTimelineItemsPage(owner, repo, number, opts: any = {}) {
+    // Prefer TIMELINE_EVENTS + graphql mode (long-stable SW route). Also try
+    // dedicated TIMELINE_ITEMS type. Never treat REST {events} as a GraphQL page.
+    const payload = {
+      owner,
+      repo,
+      number,
+      direction: opts.direction || 'newest',
+      cursor: opts.cursor || null,
+      since: opts.since || null,
+      pageSize: opts.pageSize || 100,
+      mode: 'graphql',
+      source: 'graphql',
+      graphql: true,
+    };
+    const attempts = [
+      { type: 'PR_TREE_FETCH_PR_TIMELINE_EVENTS', ...payload },
+      { type: 'PR_TREE_FETCH_PR_TIMELINE_ITEMS', ...payload },
+    ];
+    let lastRes = null;
+    for (const msg of attempts) {
+      const res = await send(msg, { signal: opts.signal || null });
+      lastRes = res;
+      if (!res?.ok) {
+        if (res?.aborted) throw makeAbortError();
+        // try next type
+        continue;
+      }
+      const page = res.page || res.timelinePage || null;
+      if (page && typeof page === 'object' && !page.error) {
+        return page;
+      }
+      // Soft-fail GraphQL page with error still usable if it has nodes
+      if (
+        page &&
+        typeof page === 'object' &&
+        ((Array.isArray(page.timelineEvents) && page.timelineEvents.length) ||
+          (Array.isArray(page.comments) && page.comments.length) ||
+          page.hasMore === true)
+      ) {
+        return page;
+      }
+    }
+    try {
+      sessionStorage.setItem(
+        'prp:diag:timeline-bridge-res',
+        JSON.stringify({
+          ok: lastRes?.ok,
+          keys: lastRes ? Object.keys(lastRes) : [],
+          err: lastRes?.error || null,
+          eventsLen: Array.isArray(lastRes?.events)
+            ? lastRes.events.length
+            : null,
+          at: Date.now(),
+        })
+      );
+    } catch {
+      /* ignore */
+    }
+    if (lastRes && !lastRes.ok) {
+      if (lastRes.aborted) throw makeAbortError();
+      const err = new Error(lastRes.error || 'Failed to fetch timeline items');
+      // @ts-expect-error status on Error
+      err.status = lastRes.status;
+      throw err;
+    }
+    return {
+      comments: [],
+      timelineEvents: [],
+      reviews: [],
+      pageInfo: {
+        hasNextPage: false,
+        hasPreviousPage: false,
+        startCursor: null,
+        endCursor: null,
+      },
+      hasMore: false,
+      totalCount: null,
+      source: 'graphql',
+      error: 'missing-graphql-page',
+    };
+  },
+  async fetchPrTimelineShell(owner, repo, number, opts: any = {}) {
+    return this.fetchPrTimelineItemsPage(owner, repo, number, opts);
   },
   /** Submitted PR reviews list. */
   async fetchPrReviews(owner, repo, number, opts: any = {}) {

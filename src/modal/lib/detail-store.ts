@@ -81,7 +81,14 @@ export function createEmptyStore() {
     meta: {},
     files: emptyListSlice(),
     commits: emptyListSlice(),
-    comments: { items: [], pageMeta: null, timelineEvents: [], settled: false },
+    comments: {
+      items: [],
+      pageMeta: null,
+      timelineEvents: [],
+      /** GraphQL timelineItems page cursors / coverage (not REST comments only). */
+      timelineMeta: null,
+      settled: false,
+    },
     reviews: emptyListSlice(),
     checks: {
       data: {
@@ -368,6 +375,7 @@ export const COMMENT_PATCH_KEYS = [
   'comments',
   'commentsMeta',
   'timelineEvents',
+  'timelineMeta',
   'reviewComments',
   'reviewThreads',
   'reviewCommentsMeta',
@@ -434,9 +442,14 @@ export function fromAppDetail(flat) {
     timelineEvents: Array.isArray(flat.timelineEvents)
       ? flat.timelineEvents.slice()
       : [],
+    timelineMeta:
+      flat.timelineMeta != null && typeof flat.timelineMeta === 'object'
+        ? { ...flat.timelineMeta }
+        : null,
     settled:
       Boolean(settled.comments) ||
-      (Array.isArray(flat.comments) && flat.comments.length > 0),
+      (Array.isArray(flat.comments) && flat.comments.length > 0) ||
+      (flat.timelineMeta != null && typeof flat.timelineMeta === 'object'),
   };
   store.reviews = {
     items: Array.isArray(flat.reviews) ? flat.reviews.slice() : [],
@@ -516,6 +529,12 @@ export function toAppDetail(store) {
     timelineEvents: Array.isArray(store.comments?.timelineEvents)
       ? store.comments.timelineEvents
       : [],
+    // Survives applyThreads / publishDetailFromStore (comments slice, not meta).
+    timelineMeta:
+      store.comments?.timelineMeta != null &&
+      typeof store.comments.timelineMeta === 'object'
+        ? { ...store.comments.timelineMeta }
+        : null,
     reviews: Array.isArray(store.reviews?.items) ? store.reviews.items : [],
     checks: store.checks?.data || {
       state: 'unknown',
@@ -703,10 +722,24 @@ export function applyComments(store, comments, opts: ApplyOpts = {}) {
   ) {
     items = prevItems.slice();
   }
+  // GraphQL timelineItems pagination meta — keep prior when omit / null patch.
+  let timelineMeta =
+    store.comments?.timelineMeta != null &&
+    typeof store.comments.timelineMeta === 'object'
+      ? store.comments.timelineMeta
+      : null;
+  if (
+    Object.prototype.hasOwnProperty.call(opts, 'timelineMeta') &&
+    opts.timelineMeta != null &&
+    typeof opts.timelineMeta === 'object'
+  ) {
+    timelineMeta = { ...opts.timelineMeta };
+  }
   store.comments = {
     items,
     pageMeta: opts.pageMeta != null ? opts.pageMeta : store.comments.pageMeta,
     timelineEvents,
+    timelineMeta,
     settled: opts.settled !== false,
   };
   return store;
@@ -752,6 +785,14 @@ export function mergeProgressiveSidesIntoFlat(prevFlat: any, nextFlat: any): any
     : [];
   if (prevEvents.length > nextEvents.length) {
     out.timelineEvents = prevEvents.slice();
+  }
+  // Keep GraphQL timelineItems cursors when next sketch lacks them
+  if (
+    (out.timelineMeta == null || typeof out.timelineMeta !== 'object') &&
+    prevFlat.timelineMeta != null &&
+    typeof prevFlat.timelineMeta === 'object'
+  ) {
+    out.timelineMeta = { ...prevFlat.timelineMeta };
   }
 
   const prevReviews = Array.isArray(prevFlat.reviews) ? prevFlat.reviews : [];

@@ -357,6 +357,7 @@
   font-size: 13px;
 }
 
+/* Same inset as .prp-inline-thread__collapsed-preview (collapsed/open parity) */
 .prp-inline-thread__body {
   padding: 8px 12px 10px;
 }
@@ -503,10 +504,23 @@
   display: flex;
 }
 
-/* Expanded comment row: content-sized (do not force large min-height) */
+/* Expanded comment row: content-sized (do not force large min-height).
+ * Must not inherit .prp-vline { overflow:hidden; contain:paint } — that clips
+ * multi-line markdown when virtual-list measure lags body hydrate. */
 .prp-vline--comment:not(.prp-vline--comment-collapsed):not([data-collapsed='1']) {
   min-height: 0 !important;
   height: auto !important;
   box-sizing: border-box;
+  overflow: visible !important;
+  contain: layout style !important; /* drop paint containment */
+}
+.prp-vline--comment:not(.prp-vline--comment-collapsed):not([data-collapsed='1'])
+  .prp-inline-thread__card {
+  overflow: visible;
+}
+.prp-vline--comment:not(.prp-vline--comment-collapsed):not([data-collapsed='1'])
+  .prp-review-thread__content {
+  overflow-x: auto;
+  overflow-y: visible;
 }
 

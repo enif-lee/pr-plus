@@ -2,7 +2,7 @@
  * Conversation footer: Comment vs Review composer with pending threads slot.
  * Layout tabs prefer Tailwind; residual tokens stay in ComposerTabs.css.
  */
-import React, { useState } from 'react';
+import React from 'react';
 import { Button } from '@common/Button';
 import { Badge } from '@common/Badge';
 import { Card } from '@common/Card';
@@ -53,8 +53,6 @@ export function ComposerCard({
   const pendingThreadCount = Array.isArray(pendingReviewGroup?.threads)
     ? pendingReviewGroup.threads.length
     : pendingCount;
-  const [composerFocused, setComposerFocused] = useState(false);
-  const showHints = composerFocused;
 
   const submitComment = () => onLeaveReviewAction?.('issue-comment');
   const submitReview = () => onLeaveReviewAction?.('comment');
@@ -70,9 +68,7 @@ export function ComposerCard({
           data-prp-composer-mode-tabs="1"
         >
           <span className="prp-opt-hint-host inline-flex">
-            {showHints ? (
-              <OptBtnHint label="⌥T" preferredPlacement="top" />
-            ) : null}
+            <OptBtnHint label="⌥T" preferredPlacement="top" />
             <button
               type="button"
               role="tab"
@@ -146,12 +142,8 @@ export function ComposerCard({
           </div>
         ) : null}
         <div className="prp-opt-hint-host prp-composer__field-hint">
-          {showHints ? (
-            <>
-              <OptBtnHint label="⌥E" preferredPlacement="top" />
-              <OptBtnHint label="⌥I" preferredPlacement="top" />
-            </>
-          ) : null}
+          <OptBtnHint label="⌥E" preferredPlacement="top" />
+          <OptBtnHint label="⌥I" preferredPlacement="top" />
           <MarkdownComposer
             value={commentText}
             onChange={setCommentText}
@@ -167,7 +159,6 @@ export function ComposerCard({
             onUploadFile={onUploadFile}
             linkCtx={linkCtx}
             mentionCandidates={mentionCandidates}
-            onComposerFocusChange={setComposerFocused}
             onSubmitRequest={
               composerMode === 'comment' ? submitComment : submitReview
             }
@@ -176,9 +167,7 @@ export function ComposerCard({
         {composerMode === 'comment' ? (
           <div className="prp-composer__row prp-composer__row--review flex flex-wrap gap-2 items-center mt-2">
             <span className="prp-opt-hint-host inline-flex">
-              {showHints ? (
-                <OptBtnHint label="⌥C · ⌘↵" preferredPlacement="top" />
-              ) : null}
+              <OptBtnHint label="⌥C · ⌘↵" preferredPlacement="top" />
               <Button
                 variant="primary"
                 size="sm"
@@ -219,9 +208,7 @@ export function ComposerCard({
         ) : (
           <div className="prp-composer__row prp-composer__row--review flex flex-wrap gap-2 items-center mt-2">
             <span className="prp-opt-hint-host inline-flex">
-              {showHints ? (
-                <OptBtnHint label="⌥C · ⌘↵" preferredPlacement="top" />
-              ) : null}
+              <OptBtnHint label="⌥C · ⌘↵" preferredPlacement="top" />
               <Button
                 variant="primary"
                 size="sm"

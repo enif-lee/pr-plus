@@ -995,6 +995,102 @@ export function getSteps() {
     assert(cleared, '⌥⇧C should clear conversation comment focus');
   });
 
+  /**
+   * Conversation metadata rail (Reviewers / Labels / …) — product ⌥B / Alt+B.
+   * Diff uses the same chord for filetree; this step asserts Conversation rail only.
+   */
+  run('P1.13 ⌥B toggles conversation metadata aside', () => {
+    setLayout('conversation');
+    blurEditable();
+    waitDetailReady({
+      meta: true,
+      files: false,
+      label: 'P1.13 meta ready',
+    });
+    waitMs(200);
+
+    const probe = () =>
+      evalInPage(`
+        (() => {
+          const conv = document.querySelector('.prp-conversation');
+          const host =
+            document.querySelector('.prp-conversation__aside-host') ||
+            document.querySelector('.prp-conversation__aside');
+          const btn = document.querySelector('.prp-aside-collapse-btn');
+          const collapsed =
+            conv?.getAttribute('data-aside-collapsed') === '1' ||
+            conv?.classList.contains('prp-conversation--aside-collapsed') ||
+            host?.classList.contains('prp-conversation__aside-host--collapsed') ||
+            host?.classList.contains('prp-conversation__aside--collapsed');
+          const w = host
+            ? Math.round(host.getBoundingClientRect().width)
+            : 0;
+          return {
+            hasConv: !!conv,
+            hasAside: !!host,
+            hasBtn: !!btn,
+            collapsed: !!collapsed,
+            w,
+            ariaExpanded: btn?.getAttribute('aria-expanded') ?? null,
+          };
+        })()
+      `);
+
+    let before = probe();
+    log(`  aside before ${JSON.stringify(before)}`);
+    assert(before.hasConv && before.hasAside, `aside missing: ${JSON.stringify(before)}`);
+    assert(before.hasBtn, `aside collapse control missing: ${JSON.stringify(before)}`);
+
+    // Normalize to expanded so the first chord always collapses.
+    if (before.collapsed) {
+      press('Alt+b');
+      waitMs(350);
+      before = probe();
+      log(`  aside after expand-normalize ${JSON.stringify(before)}`);
+      assert(
+        !before.collapsed,
+        `could not expand aside before toggle: ${JSON.stringify(before)}`
+      );
+    }
+    const expandedW = before.w;
+
+    press('Alt+b');
+    waitMs(350);
+    const mid = probe();
+    log(`  aside after collapse ${JSON.stringify(mid)}`);
+    assert(mid.collapsed, `aside not collapsed after ⌥B: ${JSON.stringify(mid)}`);
+    assert(
+      mid.ariaExpanded === 'false' || mid.ariaExpanded === null,
+      `collapse control aria-expanded should be false: ${JSON.stringify(mid)}`
+    );
+    // Compact rail is narrower (product ASIDE_COLLAPSED_WIDTH ~80 + splitter).
+    if (expandedW > 120) {
+      assert(
+        mid.w > 0 && mid.w < expandedW - 40,
+        `collapsed aside should shrink width (${expandedW}→${mid.w})`
+      );
+    }
+
+    press('Alt+b');
+    waitMs(350);
+    const after = probe();
+    log(`  aside after re-expand ${JSON.stringify(after)}`);
+    assert(
+      !after.collapsed,
+      `aside not re-expanded after second ⌥B: ${JSON.stringify(after)}`
+    );
+    assert(
+      after.ariaExpanded === 'true' || after.ariaExpanded === null,
+      `expand control aria-expanded should be true: ${JSON.stringify(after)}`
+    );
+    if (expandedW > 120) {
+      assert(
+        after.w >= mid.w + 40,
+        `re-expand should widen aside (${mid.w}→${after.w})`
+      );
+    }
+  });
+
   // Hygiene: DELETE any issue/review comments posted earlier in this feature
   // (P1.10 Cmd+Enter). Fail-closed when a tracked id remains after delete.
   run('P1.99 comment cleanup hygiene (delete e2e posts)', () => {

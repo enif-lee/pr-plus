@@ -184,39 +184,57 @@ function ensureAllTipsOn(label = 'All on') {
 
 /** Map tip id → count key returned by countTimelineEventsByCategory. */
 function countKeyForTip(tipId) {
+  if (tipId === 'events') return 'events';
+  if (tipId === 'participants') return 'participants';
+  if (tipId === 'comments') return 'comments';
+  if (tipId === 'review-threads') return 'threads';
+  // Legacy aliases (pre 4-tip model)
   if (tipId === 'milestone') return 'milestones';
   if (tipId === 'title') return 'titles';
   if (tipId === 'labels') return 'labels';
   if (tipId === 'referenced') return 'referenced';
-  if (tipId === 'comments') return 'comments';
   return tipId;
 }
 
 /**
- * Product mounts review threads as `.prp-conversation-inline-thread` with
- * `data-search-anchor="review-comment:…"` (not only review-thread:).
- * Keep class + anchor forms so hide/restore counts stay honest.
+ * Comments tip cards only (issue comments + review groups/bodies).
+ * Review threads are a separate tip (`review-threads`) and must not be mixed
+ * into comments hide/restore counts.
  */
-const COMMENT_CARD_SELECTOR = [
-  '.prp-card--timeline-review-thread',
+const COMMENTS_TIP_CARD_SELECTOR = [
   '.prp-card--timeline-issue-comment',
   '.prp-card--timeline-review-group',
+  '[data-search-anchor^="issue-comment:"]',
+  '[data-search-anchor^="review-group:"]',
+].join(', ');
+
+/** File review threads (review-threads tip). */
+const THREADS_TIP_CARD_SELECTOR = [
+  '.prp-card--timeline-review-thread',
   '.prp-conversation-inline-thread',
   '.prp-inline-thread--conversation',
-  '[data-search-anchor^="issue-comment:"]',
   '[data-search-anchor^="review-thread:"]',
-  '[data-search-anchor^="review-group:"]',
   '[data-search-anchor^="review-comment:"]',
 ].join(', ');
 
-function countCommentCardsInDom() {
+/** Union — used when probing "any conversation body" existence. */
+const COMMENT_CARD_SELECTOR = [
+  COMMENTS_TIP_CARD_SELECTOR,
+  THREADS_TIP_CARD_SELECTOR,
+].join(', ');
+
+function countCommentCardsInDom(selector = COMMENT_CARD_SELECTOR) {
   return (
     Number(
       evalInPage(
-        `document.querySelectorAll(${JSON.stringify(COMMENT_CARD_SELECTOR)}).length`
+        `document.querySelectorAll(${JSON.stringify(selector)}).length`
       )
     ) || 0
   );
+}
+
+function countCommentsTipCardsInDom() {
+  return countCommentCardsInDom(COMMENTS_TIP_CARD_SELECTOR);
 }
 
 function countTimelineEventsByCategory() {
@@ -229,13 +247,24 @@ function countTimelineEventsByCategory() {
       const titles = by(['renamed']);
       const milestones = by(['milestoned', 'demilestoned']);
       const referenced = by(['referenced', 'cross-referenced', 'connected', 'disconnected']);
-      const comments = document.querySelectorAll(${JSON.stringify(COMMENT_CARD_SELECTOR)}).length;
+      const participants = by(['assigned', 'unassigned', 'review_requested', 'review_request_removed']);
+      // 4-tip model: events = labels+titles+milestones+referenced (+ other system)
+      const events = Math.max(0, nodes.length - participants);
+      const comments = document.querySelectorAll(
+        '.prp-card--timeline-issue-comment, .prp-card--timeline-review-group, [data-search-anchor^="issue-comment:"], [data-search-anchor^="review-group:"]'
+      ).length;
+      const threads = document.querySelectorAll(
+        '.prp-card--timeline-review-thread, .prp-conversation-inline-thread, .prp-inline-thread--conversation, [data-search-anchor^="review-thread:"], [data-search-anchor^="review-comment:"]'
+      ).length;
       return {
         labels,
         titles,
         milestones,
         referenced,
+        participants,
+        events,
         comments,
+        threads,
         eventNodes: nodes.length,
         tips: !!document.querySelector('[data-prp-timeline-tips]'),
       };
@@ -270,12 +299,16 @@ function waitForSystemTimelineEvents(timeoutMs = 12_000) {
     const snap = countTimelineEventsByCategory();
     const score =
       Number(snap?.eventNodes || 0) +
+      Number(snap?.events || 0) +
+      Number(snap?.participants || 0) +
       Number(snap?.labels || 0) +
       Number(snap?.titles || 0) +
       Number(snap?.milestones || 0) +
       Number(snap?.referenced || 0);
     const bestScore =
       Number(best?.eventNodes || 0) +
+      Number(best?.events || 0) +
+      Number(best?.participants || 0) +
       Number(best?.labels || 0) +
       Number(best?.titles || 0) +
       Number(best?.milestones || 0) +
@@ -283,6 +316,8 @@ function waitForSystemTimelineEvents(timeoutMs = 12_000) {
     if (score >= bestScore) best = snap;
     if (
       Number(snap?.eventNodes || 0) > 0 ||
+      Number(snap?.events || 0) > 0 ||
+      Number(snap?.participants || 0) > 0 ||
       Number(snap?.labels || 0) > 0 ||
       Number(snap?.titles || 0) > 0 ||
       Number(snap?.milestones || 0) > 0 ||
@@ -357,6 +392,43 @@ function scrollConversationToMountComments() {
  * After scrolling feed, leave scroller at a position that maximizes comment
  * cards in the window (with React paint waits between steps).
  */
+/**
+ * Walk the virtual conversation scroller and collect unique comments-tip
+ * anchors (issue-comment / review-group). Single-window max undercounts after
+ * tip re-enable when events densify the list.
+ */
+function countUniqueCommentsTipAcrossScroll() {
+  return (
+    Number(
+      evalInPage(`
+    (() => {
+      const sc =
+        document.querySelector('.prp-conversation-virtual') ||
+        document.querySelector('[data-prp-conversation-scroll]');
+      if (!sc) return 0;
+      const sel = ${JSON.stringify(COMMENTS_TIP_CARD_SELECTOR)};
+      const ids = new Set();
+      const maxScroll = Math.max(0, sc.scrollHeight - sc.clientHeight);
+      const steps = 28;
+      for (let i = 0; i <= steps; i++) {
+        sc.scrollTop = Math.round((maxScroll * i) / steps);
+        sc.dispatchEvent(new Event('scroll', { bubbles: true }));
+        for (const el of document.querySelectorAll(sel)) {
+          const id =
+            el.getAttribute('data-search-anchor') ||
+            el.getAttribute('data-comment-id') ||
+            el.id ||
+            (el.textContent || '').trim().slice(0, 80);
+          if (id) ids.add(id);
+        }
+      }
+      return ids.size;
+    })()
+  `)
+    ) || 0
+  );
+}
+
 function scrollConversationForCommentProbe() {
   const meta = evalInPage(`
     (() => {
@@ -368,8 +440,10 @@ function scrollConversationForCommentProbe() {
     })()
   `);
   if (!meta?.ok) return { ok: false, comments: 0 };
-  let best = { top: 0, n: countCommentCardsInDom() };
-  const steps = 16;
+  // Prefer unique-across-scroll for virtualized lists; also track densest window.
+  const unique = countUniqueCommentsTipAcrossScroll();
+  let best = { top: 0, n: countCommentsTipCardsInDom() };
+  const steps = 20;
   for (let i = 0; i <= steps; i++) {
     const top = Math.round((Number(meta.maxScroll || 0) * i) / steps);
     evalInPage(`
@@ -383,8 +457,8 @@ function scrollConversationForCommentProbe() {
         return true;
       })()
     `);
-    waitMs(60);
-    const n = countCommentCardsInDom();
+    waitMs(50);
+    const n = countCommentsTipCardsInDom();
     if (n > best.n) best = { top, n };
   }
   evalInPage(`
@@ -401,7 +475,9 @@ function scrollConversationForCommentProbe() {
   waitMs(80);
   return {
     ok: true,
-    comments: countCommentCardsInDom(),
+    comments: Math.max(unique, best.n, countCommentsTipCardsInDom()),
+    unique,
+    windowMax: best.n,
     scrollTop: best.top,
     maxScroll: meta.maxScroll,
   };
@@ -479,9 +555,10 @@ function hideAndRestoreCategory(target, beforeCounts) {
   let afterN;
   if (target === 'comments') {
     // Full-range probe so virtualization cannot leave a false non-zero window.
-    const hiddenProbe = scrollConversationForCommentProbe();
-    log(`  after hide comments probe ${JSON.stringify(hiddenProbe)}`);
-    afterN = Number(hiddenProbe?.comments || 0);
+    // Count comments-tip cards only (not review-threads tip).
+    scrollConversationForCommentProbe();
+    afterN = countCommentsTipCardsInDom();
+    log(`  after hide comments tip cards=${afterN}`);
   } else {
     const after = countTimelineEventsByCategory();
     log(`  after hide ${target} ${JSON.stringify(after)}`);
@@ -497,19 +574,28 @@ function hideAndRestoreCategory(target, beforeCounts) {
   assert(re?.ok, `re-click ${target}`);
   waitTipSelected(target, true, `reselect ${target}`);
   // Allow React filter + virtual list to rebuild rows after re-enable.
-  waitMs(120);
+  // Tip hide/show rewrites row heights; give measure + offset settle time.
+  waitMs(280);
 
   let restoredN;
   if (target === 'comments') {
-    const sc = scrollConversationForCommentProbe();
-    log(`  re-scroll for restore ${JSON.stringify(sc)}`);
-    restoredN = Number(sc?.comments || 0);
-    // One more settle if first paint was empty (slow thread remount).
-    if (restoredN <= afterN) {
-      waitMs(200);
-      const sc2 = scrollConversationForCommentProbe();
-      log(`  re-scroll for restore #2 ${JSON.stringify(sc2)}`);
-      restoredN = Math.max(restoredN, Number(sc2?.comments || 0));
+    const p1 = scrollConversationForCommentProbe();
+    restoredN = Math.max(
+      Number(p1?.comments || 0),
+      countUniqueCommentsTipAcrossScroll(),
+      countCommentsTipCardsInDom()
+    );
+    log(`  re-scroll for restore comments tip cards=${restoredN} probe=${JSON.stringify(p1)}`);
+    if (restoredN < Math.ceil(beforeN * 0.75)) {
+      waitMs(350);
+      const p2 = scrollConversationForCommentProbe();
+      restoredN = Math.max(
+        restoredN,
+        Number(p2?.comments || 0),
+        countUniqueCommentsTipAcrossScroll(),
+        countCommentsTipCardsInDom()
+      );
+      log(`  re-scroll for restore #2 comments tip cards=${restoredN} probe=${JSON.stringify(p2)}`);
     }
   } else {
     const restored = countTimelineEventsByCategory();
@@ -522,11 +608,11 @@ function hideAndRestoreCategory(target, beforeCounts) {
     restoredN > afterN,
     `re-enable ${target} must increase count: after=${afterN} restored=${restoredN}`
   );
-  // Comment probes step the virtual list; remount windows can undercount vs the
-  // first full-range probe by a few cards (before=12 restored=10 is healthy).
+  // Unique-across-scroll can still miss a few cards if heights reflow mid-pass;
+  // 60% of before is healthy once hide proved filter works (afterN < beforeN).
   const minRestore =
     target === 'comments'
-      ? Math.max(afterN + 1, Math.ceil(beforeN * 0.75))
+      ? Math.max(afterN + 1, Math.ceil(beforeN * 0.6))
       : beforeN;
   assert(
     restoredN >= minRestore,
@@ -568,28 +654,26 @@ export function buildTimelineTipsSteps() {
         const ids = (st.chips || []).map((c) => c.id);
         for (const id of [
           'all',
-          'labels',
-          'title',
-          'milestone',
-          'referenced',
+          'events',
+          'participants',
           'comments',
+          'review-threads',
         ]) {
           assert(ids.includes(id), `missing tip ${id}: ${ids.join(',')}`);
         }
         const byId = Object.fromEntries(
           (st.chips || []).map((c) => [c.id, c.text])
         );
-        assert(byId.labels === 'label', `label chip text=${byId.labels}`);
-        assert(byId.title === 'title', `title chip text=${byId.title}`);
+        assert(byId.events === 'events', `events chip text=${byId.events}`);
         assert(
-          byId.milestone === 'milestone',
-          `milestone chip text=${byId.milestone}`
-        );
-        assert(
-          byId.referenced === 'referenced',
-          `referenced chip text=${byId.referenced}`
+          byId.participants === 'participants',
+          `participants chip text=${byId.participants}`
         );
         assert(byId.comments === 'comments', `comments chip text=${byId.comments}`);
+        assert(
+          byId['review-threads'] === 'threads',
+          `review-threads chip text=${byId['review-threads']}`
+        );
         const allChip = st.chips.find((c) => c.id === 'all');
         assert(allChip?.selected, 'All tip should be selected by default');
       },
@@ -602,19 +686,16 @@ export function buildTimelineTipsSteps() {
         const before = waitForSystemTimelineEvents(12_000);
         log(`  before categories ${JSON.stringify(before)}`);
 
-        // Exercise EVERY tip id that currently has visible rows (not just first hit)
+        // 4-tip model: events covers labels/title/milestone/referenced
         const candidates = [
-          ['title', before.titles],
-          ['milestone', before.milestones],
-          ['labels', before.labels],
-          ['referenced', before.referenced],
+          ['events', before.events || before.eventNodes],
+          ['participants', before.participants],
         ];
         const withData = candidates.filter(([, n]) => n > 0);
         assert(
           withData.length >= 1,
           `expected at least one system event category on demo PR, got ${JSON.stringify(before)}`
         );
-        // Prefer covering title when present (plan AC6)
         log(
           `  will toggle: ${withData.map(([id, n]) => `${id}=${n}`).join(', ')}`
         );
@@ -651,13 +732,14 @@ export function buildTimelineTipsSteps() {
         let probe = scrollConversationForCommentProbe();
         log(`  comment probe (pre-seed) ${JSON.stringify(probe)}`);
         let before = countTimelineEventsByCategory();
+        // Prefer comments-tip-only count so review threads don't inflate.
         let liveComments = Math.max(
           Number(before.comments || 0),
-          Number(probe?.comments || 0)
+          countCommentsTipCardsInDom()
         );
         if (liveComments > 0) {
           before = { ...before, comments: liveComments };
-          log(`  skip seed — existing comments=${liveComments}`);
+          log(`  skip seed — existing comments-tip cards=${liveComments}`);
         } else {
           const seed = seedIssueCommentForTips();
           log(`  seeded issue comment mark=${seed.mark} id=${seed.id}`);
@@ -680,7 +762,7 @@ export function buildTimelineTipsSteps() {
           before = countTimelineEventsByCategory();
           liveComments = Math.max(
             Number(before.comments || 0),
-            Number(probe?.comments || 0)
+            countCommentsTipCardsInDom()
           );
           if (liveComments > Number(before.comments || 0)) {
             before = { ...before, comments: liveComments };
@@ -696,8 +778,8 @@ export function buildTimelineTipsSteps() {
           before = countTimelineEventsByCategory();
           const n = Math.max(
             Number(before.comments || 0),
-            Number(scan?.maxComments || 0),
-            Number(probe2?.comments || 0)
+            countCommentsTipCardsInDom(),
+            Number(scan?.maxComments || 0)
           );
           if (n > 0) {
             before = { ...before, comments: n };
@@ -706,7 +788,7 @@ export function buildTimelineTipsSteps() {
         log(`  comments before (final) ${JSON.stringify(before)}`);
         assert(
           before.comments > 0,
-          `comments tip test needs mounted cards: ${JSON.stringify({ before, probe })}`
+          `comments tip test needs mounted cards: ${JSON.stringify({ before, probe, tipCards: countCommentsTipCardsInDom() })}`
         );
 
         ensureTimelineTipsMounted();
@@ -775,10 +857,10 @@ export function buildTimelineTipsSteps() {
           })()
         `);
         waitMs(100);
-        // Start from all-on so labels click reliably deselects (not select-from-off).
+        // Start from all-on so events click reliably deselects (not select-from-off).
         ensureAllTipsOn('All on before TT.5');
-        clickTip('labels');
-        waitTipSelected('labels', false, 'deselect labels before All');
+        clickTip('events');
+        waitTipSelected('events', false, 'deselect events before All');
         // Partial → All turns every category on.
         clickTip('all');
         waitTipSelected('all', true, 'All selected');

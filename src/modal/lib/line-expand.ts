@@ -16,6 +16,8 @@ export const LINE_EXPAND_MAX_LINES = 48;
 
 /**
  * Stable key for a virtualized code row (unified or split visual row).
+ * Prefer path + lineType + old/new line numbers so expand state survives
+ * virtual-list rebuilds while Diff files are still streaming in (rowIndex shifts).
  */
 export function diffLineExpandKey(row: any): string | null {
   if (!row || row.kind !== 'diff-line') return null;
@@ -24,9 +26,18 @@ export function diffLineExpandKey(row: any): string | null {
     return null;
   }
   const path = String(row.filePath || row.path || '');
+  if (!path) return null;
+  const oldL =
+    row.oldLine != null && row.oldLine !== '' ? String(row.oldLine) : '';
+  const newL =
+    row.newLine != null && row.newLine !== '' ? String(row.newLine) : '';
+  if (oldL || newL) {
+    return `${path}#${t}:${oldL}:${newL}`;
+  }
+  // Fallback when line numbers are absent (rare context-only rows).
   const ri = Number(row.rowIndex);
   if (!Number.isFinite(ri)) return null;
-  return `${path}#${ri}`;
+  return `${path}#${t}:ri${ri}`;
 }
 
 /**

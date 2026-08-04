@@ -3415,6 +3415,9 @@ function labelGraphqlOperation(query, variables = null) {
   if (/ReviewThreadsLastShell/.test(q)) return "reviewThreads.last.shell";
   if (/ReviewThreadsFirstShell/.test(q)) return "reviewThreads.first.shell";
   if (/ReviewThreadsByIdsFull/.test(q)) return "reviewThreads.byIds";
+  if (/TimelineItemsPage/.test(q) || /timelineItems\s*\(/.test(q)) {
+    return "timelineItems.page";
+  }
   if (/reviewThreads\s*\(/.test(q) && /last\s*:/.test(q)) {
     if (/comments\s*\(\s*first\s*:\s*100/.test(q)) return "reviewThreads.last";
     return "reviewThreads.last.shell";
@@ -3461,7 +3464,10 @@ function sanitizeGraphqlVariables(variables) {
     "cursor",
     "ids",
     "first",
-    "last"
+    "last",
+    "since",
+    "before",
+    "after"
   ]) {
     if (variables[k] === void 0) continue;
     if (k === "ids" && Array.isArray(variables[k])) {
@@ -3586,36 +3592,50 @@ var conversation_timeline_exports = {};
 __export(conversation_timeline_exports, {
   DEFAULT_TIMELINE_VISIBILITY: () => DEFAULT_TIMELINE_VISIBILITY,
   TIMELINE_CATEGORY_IDS: () => TIMELINE_CATEGORY_IDS,
+  TIMELINE_PAGE_SIZE: () => TIMELINE_PAGE_SIZE,
   TIMELINE_TIP_IDS: () => TIMELINE_TIP_IDS,
   TIMELINE_TIP_LABELS: () => TIMELINE_TIP_LABELS,
   assigneeChangeTimelineEvents: () => assigneeChangeTimelineEvents,
   buildConversationTimeline: () => buildConversationTimeline,
   buildThreadEntry: () => buildThreadEntry,
   compareTimelineItemsNewestFirst: () => compareTimelineItemsNewestFirst,
+  conversationLoadMoreState: () => conversationLoadMoreState,
   describeTimelineEvent: () => describeTimelineEvent,
+  emptyTimelinePageMeta: () => emptyTimelinePageMeta,
   filterTimelineItemsByVisibility: () => filterTimelineItemsByVisibility,
+  isReviewThreadsLoadIncomplete: () => isReviewThreadsLoadIncomplete,
+  isTimelineLoadIncomplete: () => isTimelineLoadIncomplete,
   isTimelineVisibilityAllOn: () => isTimelineVisibilityAllOn,
+  itemTimestampMs: () => itemTimestampMs,
   labelChangeTimelineEvents: () => labelChangeTimelineEvents,
   labelNameKey: () => labelNameKey,
   labelObj: () => labelObj,
   loginKey: () => loginKey,
   makeLocalTimelineEvent: () => makeLocalTimelineEvent,
+  maxTimelineWatermark: () => maxTimelineWatermark,
   mergeTimelineEventsById: () => mergeTimelineEventsById,
+  mergeTimelineItemsById: () => mergeTimelineItemsById,
   milestoneChangeTimelineEvents: () => milestoneChangeTimelineEvents,
+  minTimelineCoverageEndAt: () => minTimelineCoverageEndAt,
   needsLazyTimelineEventsFetch: () => needsLazyTimelineEventsFetch,
   normalizeTimelineVisibility: () => normalizeTimelineVisibility,
   pageTimelineItems: () => pageTimelineItems,
+  partitionConversationLoadMore: () => partitionConversationLoadMore,
   partitionTimelineWithThreadGap: () => partitionTimelineWithThreadGap,
   planTimelineVisibilityChange: () => planTimelineVisibilityChange,
   reviewerChangeTimelineEvents: () => reviewerChangeTimelineEvents,
+  selectDirtyThreadIdsByCommentCount: () => selectDirtyThreadIdsByCommentCount,
   serverEventCoversLocal: () => serverEventCoversLocal,
   shouldAcceptTimelineVisibilityFromHost: () => shouldAcceptTimelineVisibilityFromHost,
   shouldFetchSystemTimelineEvents: () => shouldFetchSystemTimelineEvents,
+  singleCursorReviewThreadsMeta: () => singleCursorReviewThreadsMeta,
+  timelineCoverageEndAtFromItems: () => timelineCoverageEndAtFromItems,
   timelineEventToItem: () => timelineEventToItem,
   timelineEventsCloseInTime: () => timelineEventsCloseInTime,
   timelineEventsNarrativelyEqual: () => timelineEventsNarrativelyEqual,
   timelineItemCategory: () => timelineItemCategory,
   timelineItemTimeMs: () => timelineItemTimeMs,
+  timelineMetaFromPageInfo: () => timelineMetaFromPageInfo,
   toggleTimelineTip: () => toggleTimelineTip
 });
 module.exports = __toCommonJS(conversation_timeline_exports);
@@ -3676,6 +3696,8 @@ function describeTimelineEvent(ev) {
       return [status("reopened", "reopened"), t(" this")];
     case "merged":
       return ev.commitId ? [status("merged", "merged"), t(" commit "), commit(shortSha(ev.commitId))] : [status("merged", "merged"), t(" this pull request")];
+    case "committed":
+      return ev.commitId ? [t("added commit "), commit(shortSha(ev.commitId))] : [t("added a commit")];
     case "labeled":
       return ev.label?.name ? [t("added the "), label(ev.label.name, ev.label.color), t(" label")] : [t("added a label")];
     case "unlabeled":
@@ -3728,6 +3750,8 @@ function describeTimelineEvent(ev) {
       ] : [t("locked and limited conversation to collaborators")];
     case "unlocked":
       return [t("unlocked this conversation")];
+    case "head_ref_force_pushed":
+      return [t("force-pushed the head branch")];
     case "head_ref_deleted":
       return [t("deleted the head branch")];
     case "head_ref_restored":
@@ -4058,6 +4082,283 @@ function milestoneChangeTimelineEvents(prevMilestone, nextMilestone, actor = {})
   return out;
 }
 
+// src/modal/lib/timeline-pagination.ts
+var TIMELINE_PAGE_SIZE = 100;
+function emptyTimelinePageMeta(overrides = {}) {
+  return {
+    pageSize: TIMELINE_PAGE_SIZE,
+    direction: "newest",
+    // 'newest' | 'oldest'
+    hasMore: false,
+    hasPreviousPage: false,
+    hasNextPage: false,
+    startCursor: null,
+    endCursor: null,
+    /** ISO watermark for newest-only since incremental */
+    watermark: null,
+    loadedCount: 0,
+    totalCount: null,
+    complete: true,
+    source: "graphql",
+    ...overrides
+  };
+}
+function timelineMetaFromPageInfo(pageInfo, opts = {}) {
+  const dir = String(opts.direction || opts.prev?.direction || "newest").toLowerCase() === "oldest" ? "oldest" : "newest";
+  const hasPreviousPage = Boolean(pageInfo?.hasPreviousPage);
+  const hasNextPage = Boolean(pageInfo?.hasNextPage);
+  const hasMore = dir === "newest" ? hasPreviousPage : hasNextPage;
+  const loadedCount = Number(opts.loadedCount) || 0;
+  const totalCount = opts.totalCount != null ? Number(opts.totalCount) : opts.prev?.totalCount != null ? Number(opts.prev.totalCount) : null;
+  return emptyTimelinePageMeta({
+    direction: dir,
+    hasMore,
+    hasPreviousPage,
+    hasNextPage,
+    startCursor: pageInfo?.startCursor || null,
+    endCursor: pageInfo?.endCursor || null,
+    watermark: opts.watermark != null ? opts.watermark : opts.prev?.watermark != null ? opts.prev.watermark : null,
+    loadedCount,
+    totalCount: Number.isFinite(totalCount) ? totalCount : null,
+    complete: !hasMore,
+    source: "graphql"
+  });
+}
+function maxTimelineWatermark(items) {
+  let best = null;
+  let bestMs = 0;
+  for (const it of Array.isArray(items) ? items : []) {
+    const raw = it?.at || it?.createdAt || it?.submittedAt || it?.created_at || "";
+    const s = String(raw || "").trim();
+    if (!s) continue;
+    const ms = Date.parse(s);
+    if (!Number.isFinite(ms)) continue;
+    if (ms >= bestMs) {
+      bestMs = ms;
+      best = s;
+    }
+  }
+  return best;
+}
+function mergeTimelineItemsById(prevItems, nextItems, opts = {}) {
+  const map = /* @__PURE__ */ new Map();
+  const keyOf = (it, i2) => {
+    if (it?.key != null) return String(it.key);
+    if (it?.id != null) return `${it.kind || "item"}-${it.id}`;
+    if (it?.nodeId != null) return String(it.nodeId);
+    return `idx-${i2}-${it?.at || ""}`;
+  };
+  let i = 0;
+  for (const it of Array.isArray(prevItems) ? prevItems : []) {
+    if (!it) continue;
+    map.set(keyOf(it, i++), it);
+  }
+  for (const it of Array.isArray(nextItems) ? nextItems : []) {
+    if (!it) continue;
+    map.set(keyOf(it, i++), it);
+  }
+  const out = [...map.values()];
+  if (opts.sortNewest !== false) {
+    out.sort((a, b) => {
+      const ta = Date.parse(String(a?.at || a?.createdAt || "")) || 0;
+      const tb = Date.parse(String(b?.at || b?.createdAt || "")) || 0;
+      if (tb !== ta) return tb - ta;
+      return String(b?.key || b?.id || "").localeCompare(
+        String(a?.key || a?.id || "")
+      );
+    });
+  }
+  return out;
+}
+function selectDirtyThreadIdsByCommentCount(prevThreads, nextThreads) {
+  const prevById = /* @__PURE__ */ new Map();
+  for (const t of Array.isArray(prevThreads) ? prevThreads : []) {
+    const id = t?.threadNodeId ? String(t.threadNodeId) : "";
+    if (id) prevById.set(id, t);
+  }
+  const dirty = [];
+  for (const t of Array.isArray(nextThreads) ? nextThreads : []) {
+    const id = t?.threadNodeId ? String(t.threadNodeId) : "";
+    if (!id || !/^PRRT_/i.test(id)) continue;
+    const prev = prevById.get(id);
+    if (!prev) {
+      if (t.commentsLoaded !== true) dirty.push(id);
+      continue;
+    }
+    const prevCount = typeof prev.commentCount === "number" ? prev.commentCount : Array.isArray(prev.commentIds) ? prev.commentIds.length : null;
+    const nextCount = typeof t.commentCount === "number" ? t.commentCount : Array.isArray(t.commentIds) ? t.commentIds.length : null;
+    if (prevCount != null && nextCount != null && Number(prevCount) !== Number(nextCount)) {
+      dirty.push(id);
+      continue;
+    }
+    if (Boolean(prev.resolved) !== Boolean(t.resolved)) {
+      dirty.push(id);
+      continue;
+    }
+    if (t.commentsLoaded !== true && prev.commentsLoaded === true) {
+      dirty.push(id);
+    }
+  }
+  return dirty;
+}
+function isReviewThreadsLoadIncomplete(meta) {
+  if (!meta || typeof meta !== "object") return false;
+  if (meta.hasMore) return true;
+  if (meta.hasOlder) return true;
+  if (meta.hasNewerFromOldest) return true;
+  const hidden = Number(meta.hiddenCount) || 0;
+  if (hidden > 0) return true;
+  const total = Number(meta.totalCount);
+  const loaded = Number(meta.loadedThreadCount);
+  if (Number.isFinite(total) && Number.isFinite(loaded) && total > loaded) {
+    return true;
+  }
+  return false;
+}
+function isTimelineLoadIncomplete(meta) {
+  if (!meta || typeof meta !== "object") return false;
+  if (meta.hasMore) return true;
+  if (meta.complete === false) return true;
+  return false;
+}
+function conversationLoadMoreState(threadsMeta = null, timelineMeta = null) {
+  const threadsIncomplete = isReviewThreadsLoadIncomplete(threadsMeta);
+  const timelineIncomplete = isTimelineLoadIncomplete(timelineMeta);
+  const threadsHidden = Math.max(0, Number(threadsMeta?.hiddenCount) || 0);
+  const timelineLoaded = Number(timelineMeta?.loadedCount) || 0;
+  const timelineTotal = timelineMeta?.totalCount != null ? Number(timelineMeta.totalCount) : null;
+  const timelineHidden = timelineTotal != null && Number.isFinite(timelineTotal) ? Math.max(0, timelineTotal - timelineLoaded) : timelineIncomplete ? 1 : 0;
+  return {
+    threadsIncomplete,
+    timelineIncomplete,
+    anyIncomplete: threadsIncomplete || timelineIncomplete,
+    /**
+     * When Diff (or load-all threads) already completed reviewThreads but
+     * timelineItems still has older pages, older threads may already paint
+     * below the timeline window — prefer a mid-list gap at coverage floor.
+     */
+    preferMiddleGap: !threadsIncomplete && timelineIncomplete,
+    hiddenCount: Math.max(threadsHidden, timelineHidden),
+    coverageEndAt: timelineMeta?.coverageEndAt || timelineMeta?.oldestLoadedAt || null
+  };
+}
+function itemTimestampMs(it) {
+  const raw = it?.at || it?.createdAt || it?.submittedAt || it?.created_at || "";
+  const s = String(raw || "").trim();
+  if (!s) return null;
+  const ms = Date.parse(s);
+  return Number.isFinite(ms) ? ms : null;
+}
+function timelineCoverageEndAtFromItems(items) {
+  let best = null;
+  let bestMs = Infinity;
+  for (const it of Array.isArray(items) ? items : []) {
+    if (!it) continue;
+    const kind = String(it.kind || it.type || "").toLowerCase();
+    if (kind === "review-thread" || kind === "review-group" || kind === "review" || kind === "pending-review") {
+      continue;
+    }
+    const ms = itemTimestampMs(it);
+    if (ms == null) continue;
+    if (ms < bestMs) {
+      bestMs = ms;
+      best = String(it.at || it.createdAt || it.submittedAt || "").trim() || null;
+    }
+  }
+  return best;
+}
+function minTimelineCoverageEndAt(comments, events) {
+  let best = null;
+  let bestMs = Infinity;
+  for (const it of [
+    ...Array.isArray(comments) ? comments : [],
+    ...Array.isArray(events) ? events : []
+  ]) {
+    const raw = it?.createdAt || it?.at || it?.created_at || "";
+    const s = String(raw || "").trim();
+    if (!s) continue;
+    const ms = Date.parse(s);
+    if (!Number.isFinite(ms) || ms >= bestMs) continue;
+    bestMs = ms;
+    best = s;
+  }
+  return best;
+}
+function partitionConversationLoadMore(items, threadsMeta = null, timelineMeta = null) {
+  const list = Array.isArray(items) ? items : [];
+  const st = conversationLoadMoreState(threadsMeta, timelineMeta);
+  if (!st.anyIncomplete) {
+    return {
+      top: list,
+      bottom: [],
+      hiddenCount: 0,
+      showGap: false,
+      gapPlacement: "none",
+      loadState: st
+    };
+  }
+  if (st.preferMiddleGap) {
+    const floorRaw = st.coverageEndAt;
+    const floorMs = floorRaw ? Date.parse(String(floorRaw)) : NaN;
+    if (Number.isFinite(floorMs)) {
+      const top = [];
+      const bottom = [];
+      for (const it of list) {
+        const ms = itemTimestampMs(it);
+        if (ms == null || ms >= floorMs) top.push(it);
+        else bottom.push(it);
+      }
+      if (bottom.length > 0 && top.length > 0) {
+        return {
+          top,
+          bottom,
+          hiddenCount: st.hiddenCount,
+          showGap: true,
+          gapPlacement: "middle",
+          loadState: st
+        };
+      }
+    }
+  }
+  return {
+    top: list,
+    bottom: [],
+    hiddenCount: st.hiddenCount,
+    showGap: true,
+    gapPlacement: "end",
+    loadState: st
+  };
+}
+function singleCursorReviewThreadsMeta(page, prev = null) {
+  const threads = Array.isArray(page?.threads) ? page.threads : [];
+  const totalCount = typeof page?.totalCount === "number" ? page.totalCount : Number(prev?.totalCount) || threads.length;
+  const loadedThreadCount = threads.length;
+  const hiddenCount = Math.max(0, totalCount - loadedThreadCount);
+  const dir = String(page?.direction || page?.window || "newest").toLowerCase() === "oldest" ? "oldest" : "newest";
+  const hasOlder = dir === "newest" ? Boolean(page?.hasPreviousPage) && hiddenCount > 0 : false;
+  const hasNewer = dir === "oldest" ? Boolean(page?.hasNextPage) && hiddenCount > 0 : false;
+  return {
+    totalCount,
+    hiddenCount,
+    loadedThreadCount,
+    loadedCommentCount: Array.isArray(page?.comments) ? page.comments.length : 0,
+    pagesLoaded: 1,
+    newestStartCursor: page?.startCursor || null,
+    newestEndCursor: page?.endCursor || null,
+    hasOlder: hasOlder || dir === "newest" && Boolean(page?.hasPreviousPage),
+    oldestStartCursor: null,
+    oldestEndCursor: null,
+    /** Dual-window retired — always false in product path */
+    hasNewerFromOldest: false,
+    newestThreadIds: threads.map((t) => t.threadNodeId).filter(Boolean),
+    oldestThreadIds: [],
+    hasMore: hiddenCount > 0 || hasOlder || hasNewer,
+    endCursor: page?.startCursor || null,
+    direction: dir,
+    source: page?.source || "graphql"
+  };
+}
+
 // src/modal/lib/conversation-timeline-build.ts
 function buildThreadEntry(c, children, snippetFn, files, viewerLogin, i) {
   const replies = (children.get(String(c.id)) || []).slice().sort(
@@ -4297,98 +4598,55 @@ function pageTimelineItems(items, opts = {}) {
     hasOlder
   };
 }
-function partitionTimelineWithThreadGap(items, meta = null) {
-  const list = Array.isArray(items) ? items : [];
-  const hiddenCount = Math.max(0, Number(meta?.hiddenCount) || 0);
-  const oldestIds = new Set(
-    (meta?.oldestThreadIds || []).map(String).filter(Boolean)
-  );
-  const wantsGap = Boolean(meta?.hasMore) && hiddenCount > 0;
-  if (!wantsGap || oldestIds.size === 0) {
-    return {
-      top: list,
-      bottom: [],
-      hiddenCount,
-      showGap: wantsGap
-    };
-  }
-  function inOldestWindow(item) {
-    if (!item) return false;
-    if (item.kind === "review-group") {
-      return (item.threads || []).some(
-        (t) => t?.threadNodeId != null && oldestIds.has(String(t.threadNodeId))
-      );
-    }
-    const tid = item.threadNodeId != null ? String(item.threadNodeId) : item.thread_node_id != null ? String(item.thread_node_id) : null;
-    return (item.kind === "review-thread" || item.kind === "review-comment") && tid && oldestIds.has(tid);
-  }
-  let cutoffMs = 0;
-  for (const item of list) {
-    if (!inOldestWindow(item)) continue;
-    const t = timelineItemTimeMs(item);
-    if (t > cutoffMs) cutoffMs = t;
-  }
-  const top = [];
-  const bottom = [];
-  for (const item of list) {
-    const t = timelineItemTimeMs(item);
-    if (inOldestWindow(item) || cutoffMs > 0 && t > 0 && t <= cutoffMs) {
-      bottom.push(item);
-    } else {
-      top.push(item);
-    }
-  }
-  if (bottom.length === 0) {
-    return {
-      top: list,
-      bottom: [],
-      hiddenCount,
-      showGap: wantsGap
-    };
-  }
-  return {
-    top,
-    bottom,
-    hiddenCount,
-    showGap: true
-  };
+function partitionTimelineWithThreadGap(items, threadsMeta = null, timelineMeta = null) {
+  return partitionConversationLoadMore(items, threadsMeta, timelineMeta);
 }
 
 // src/modal/lib/conversation-timeline-filter.ts
 var TIMELINE_CATEGORY_IDS = [
-  "labels",
-  "title",
-  "milestone",
-  "assignees",
-  "reviewers",
-  "referenced",
-  "comments"
+  "events",
+  "participants",
+  "comments",
+  "review-threads"
 ];
 var TIMELINE_TIP_IDS = ["all", ...TIMELINE_CATEGORY_IDS];
 var TIMELINE_TIP_LABELS = {
   all: "All",
-  labels: "label",
-  title: "title",
-  milestone: "milestone",
-  assignees: "assignee",
-  reviewers: "reviewer",
-  referenced: "referenced",
-  comments: "comments"
+  events: "events",
+  participants: "participants",
+  comments: "comments",
+  "review-threads": "threads"
 };
 var DEFAULT_TIMELINE_VISIBILITY = {
-  labels: true,
-  title: true,
-  milestone: true,
-  assignees: true,
-  reviewers: true,
-  referenced: true,
-  comments: true
+  events: true,
+  participants: true,
+  comments: true,
+  "review-threads": true
 };
+var LEGACY_EVENT_KEYS = [
+  "labels",
+  "title",
+  "milestone",
+  "referenced"
+];
+var LEGACY_PARTICIPANT_KEYS = ["assignees", "reviewers"];
 function normalizeTimelineVisibility(raw) {
   const src = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
   const out = { ...DEFAULT_TIMELINE_VISIBILITY };
   for (const id of TIMELINE_CATEGORY_IDS) {
     if (typeof src[id] === "boolean") out[id] = src[id];
+  }
+  const hasNewKey = TIMELINE_CATEGORY_IDS.some((id) => typeof src[id] === "boolean");
+  if (!hasNewKey) {
+    const anyLegacy = [...LEGACY_EVENT_KEYS, ...LEGACY_PARTICIPANT_KEYS, "comments"].some(
+      (k) => typeof src[k] === "boolean"
+    );
+    if (anyLegacy) {
+      out.events = LEGACY_EVENT_KEYS.some((k) => src[k] !== false);
+      out.participants = LEGACY_PARTICIPANT_KEYS.some((k) => src[k] !== false);
+      if (typeof src.comments === "boolean") out.comments = src.comments;
+      out["review-threads"] = true;
+    }
   }
   if (src.all === true) {
     for (const id of TIMELINE_CATEGORY_IDS) out[id] = true;
@@ -4419,20 +4677,23 @@ function toggleTimelineTip(vis, tipId) {
 function timelineItemCategory(item) {
   if (!item || typeof item !== "object") return null;
   const kind = String(item.kind || "");
-  if (kind === "issue-comment" || kind === "review-thread" || kind === "review-comment" || kind === "review-group" || kind === "review") {
-    return "comments";
+  if (kind === "issue-comment") return "comments";
+  if (kind === "review-thread" || kind === "review-comment") {
+    return "review-threads";
+  }
+  if (kind === "review-group" || kind === "review") return "comments";
+  const cat = String(item.category || "").trim().toLowerCase();
+  if (TIMELINE_CATEGORY_IDS.includes(cat)) {
+    return cat;
   }
   const event = String(item.event || "").trim().toLowerCase();
-  if (event === "labeled" || event === "unlabeled") return "labels";
-  if (event === "renamed") return "title";
-  if (event === "milestoned" || event === "demilestoned") return "milestone";
-  if (event === "assigned" || event === "unassigned") return "assignees";
-  if (event === "review_requested" || event === "review_request_removed") {
-    return "reviewers";
+  if (event === "assigned" || event === "unassigned" || event === "review_requested" || event === "review_request_removed") {
+    return "participants";
   }
-  if (event === "referenced" || event === "cross-referenced" || event === "connected" || event === "disconnected") {
-    return "referenced";
+  if (event === "labeled" || event === "unlabeled" || event === "renamed" || event === "milestoned" || event === "demilestoned" || event === "referenced" || event === "cross-referenced" || event === "connected" || event === "disconnected" || event === "closed" || event === "reopened" || event === "merged" || event === "convert_to_draft" || event === "ready_for_review" || event === "head_ref_force_pushed" || event === "base_ref_changed" || event === "locked" || event === "unlocked" || event === "added_to_project" || event === "removed_from_project" || event === "moved_columns_in_project" || event === "project_v2_item_status_changed") {
+    return "events";
   }
+  if (kind === "timeline-event" || kind === "system-event") return "events";
   return null;
 }
 function filterTimelineItemsByVisibility(items, visibility) {
@@ -4446,16 +4707,14 @@ function filterTimelineItemsByVisibility(items, visibility) {
 }
 function shouldFetchSystemTimelineEvents(visibility) {
   const vis = normalizeTimelineVisibility(visibility);
-  return vis.labels !== false || vis.title !== false || vis.milestone !== false || vis.assignees !== false || vis.reviewers !== false || vis.referenced !== false;
+  return vis.events !== false || vis.participants !== false;
 }
 function needsLazyTimelineEventsFetch(prevVisibility, nextVisibility, timelineEvents) {
   if (!shouldFetchSystemTimelineEvents(nextVisibility)) return false;
   if (shouldFetchSystemTimelineEvents(prevVisibility)) {
     const prev = normalizeTimelineVisibility(prevVisibility);
     const next = normalizeTimelineVisibility(nextVisibility);
-    const newlyOn = TIMELINE_CATEGORY_IDS.some(
-      (id) => id !== "comments" && prev[id] === false && next[id] !== false
-    );
+    const newlyOn = prev.events === false && next.events !== false || prev.participants === false && next.participants !== false;
     if (!newlyOn) return false;
   }
   const te = Array.isArray(timelineEvents) ? timelineEvents : [];
@@ -4545,17 +4804,15 @@ const DEFAULT_PREFS = {
   onboardingCompleted: false,
   /**
    * Conversation timeline category visibility (plugin-global).
-   * labels | title | milestone | assignees | reviewers | referenced | comments
+   * events | participants | comments | review-threads
    * — each true = tip on / rows shown. Synced with conversation tip row + popup.
+   * Legacy 7-key maps are migrated in normalizeTimelineVisibility.
    */
   timelineVisibility: {
-    labels: true,
-    title: true,
-    milestone: true,
-    assignees: true,
-    reviewers: true,
-    referenced: true,
-    comments: true
+    events: true,
+    participants: true,
+    comments: true,
+    "review-threads": true
   }
 };
 const RATE_LIMIT_KEY = "rateLimitState";
@@ -4581,16 +4838,24 @@ function normalizeTimelineVisibilityPref(raw) {
   }
   const src = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
   const base = {
-    labels: true,
-    title: true,
-    milestone: true,
-    assignees: true,
-    reviewers: true,
-    referenced: true,
-    comments: true
+    events: true,
+    participants: true,
+    comments: true,
+    "review-threads": true
   };
   for (const id of Object.keys(base)) {
     if (typeof src[id] === "boolean") base[id] = src[id];
+  }
+  const hasNew = Object.keys(base).some((k) => typeof src[k] === "boolean");
+  if (!hasNew) {
+    const legacyEvent = ["labels", "title", "milestone", "referenced"];
+    const legacyPart = ["assignees", "reviewers"];
+    if ([...legacyEvent, ...legacyPart, "comments"].some((k) => typeof src[k] === "boolean")) {
+      base.events = legacyEvent.some((k) => src[k] !== false);
+      base.participants = legacyPart.some((k) => src[k] !== false);
+      if (typeof src.comments === "boolean") base.comments = src.comments;
+      base["review-threads"] = true;
+    }
   }
   if (src.all === true) {
     for (const id of Object.keys(base)) base[id] = true;
@@ -9217,16 +9482,13 @@ async function fetchPullReviewThreadsBundle(owner, repo, pullNumber, fetchImpl, 
     REVIEW_THREADS_API_MAX,
     Number(opts.pageSize) || REVIEW_THREADS_PAGE_SIZE
   );
-  const startPageSize = Math.min(
-    20,
-    Number(opts.startPageSize) || 20
-  );
-  const newest = await fetchReviewThreadsPage(
+  const direction = String(opts.direction || "newest").toLowerCase() === "oldest" ? "oldest" : "newest";
+  const page = await fetchReviewThreadsPage(
     owner,
     repo,
     pullNumber,
     {
-      direction: "newest",
+      direction,
       cursor: null,
       pageSize: lastPageSize,
       preferRest: false,
@@ -9237,70 +9499,39 @@ async function fetchPullReviewThreadsBundle(owner, repo, pullNumber, fetchImpl, 
     token,
     ctx
   );
-  const totalCount = Number(newest.totalCount) || newest.threads.length;
-  let oldest = null;
-  if (totalCount >= REVIEW_THREADS_API_MAX && newest.hasPreviousPage) {
-    try {
-      oldest = await fetchReviewThreadsPage(
-        owner,
-        repo,
-        pullNumber,
-        {
-          direction: "oldest",
-          cursor: null,
-          pageSize: startPageSize
-        },
-        fetchImpl,
-        token,
-        ctx
-      );
-    } catch {
-      oldest = null;
-    }
-  }
-  const threads = [...newest.threads || []];
-  const comments = [...newest.comments || []];
-  const newestIds = newest.threads.map((t) => t.threadNodeId).filter(Boolean);
-  const oldestIds = [];
-  if (oldest) {
-    for (const t of oldest.threads || []) {
-      if (!newestIds.includes(t.threadNodeId)) {
-        threads.push(t);
-        oldestIds.push(t.threadNodeId);
-      }
-    }
-    for (const c of oldest.comments || []) {
-      if (!comments.some((x) => String(x.id) === String(c.id))) comments.push(c);
-    }
-  }
+  const totalCount = Number(page.totalCount) || page.threads.length;
+  const threads = [...page.threads || []];
+  const comments = [...page.comments || []];
+  const newestIds = threads.map((t) => t.threadNodeId).filter(Boolean);
   const loaded = threads.length;
   const hiddenCount = Math.max(0, totalCount - loaded);
+  const hasOlder = direction === "newest" ? Boolean(page.hasPreviousPage) : Boolean(page.hasNextPage);
   const meta = {
     totalCount,
     hiddenCount,
     loadedThreadCount: loaded,
     loadedCommentCount: comments.length,
-    pagesLoaded: 1 + (oldest ? 1 : 0),
-    // Newest window cursors (expand older with before: startCursor)
-    newestStartCursor: newest.startCursor || null,
-    newestEndCursor: newest.endCursor || null,
-    hasOlder: Boolean(newest.hasPreviousPage),
-    // Oldest window cursors (expand newer with after: endCursor)
-    oldestStartCursor: oldest?.startCursor || null,
-    oldestEndCursor: oldest?.endCursor || null,
-    hasNewerFromOldest: Boolean(oldest?.hasNextPage),
+    pagesLoaded: 1,
+    newestStartCursor: page.startCursor || null,
+    newestEndCursor: page.endCursor || null,
+    hasOlder,
+    // Dual-window retired
+    oldestStartCursor: null,
+    oldestEndCursor: null,
+    hasNewerFromOldest: false,
     newestThreadIds: newestIds,
-    oldestThreadIds: oldestIds,
-    hasMore: hiddenCount > 0,
-    endCursor: newest.startCursor || null
-    // legacy: load-more-older
+    oldestThreadIds: [],
+    hasMore: hiddenCount > 0 || hasOlder,
+    endCursor: page.startCursor || null,
+    direction,
+    source: page.source || "graphql"
   };
   return {
     threads,
     comments,
     hasMore: meta.hasMore,
     endCursor: meta.endCursor,
-    startCursor: newest.startCursor || null,
+    startCursor: page.startCursor || null,
     pageCount: meta.pagesLoaded,
     totalCount,
     reviewThreadsMeta: meta
@@ -9322,7 +9553,8 @@ function emptyReviewThreadsMeta() {
     newestThreadIds: [],
     oldestThreadIds: [],
     hasMore: false,
-    endCursor: null
+    endCursor: null,
+    direction: "newest"
   };
 }
 function mergeReviewThreadsPageIntoDetail(detail, page, direction = "older") {
@@ -9473,25 +9705,22 @@ function mergeReviewThreadsPageIntoDetail(detail, page, direction = "older") {
   }
   const reviewThreads = [...thById.values()];
   let newestIds = new Set((prevMeta.newestThreadIds || []).map(String));
-  let oldestIds = new Set((prevMeta.oldestThreadIds || []).map(String));
   const pageIds = (page?.threads || []).map((t) => t.threadNodeId).filter(Boolean).map(String);
   let newestStartCursor = prevMeta.newestStartCursor;
   let newestEndCursor = prevMeta.newestEndCursor;
   let hasOlder = prevMeta.hasOlder;
-  let oldestStartCursor = prevMeta.oldestStartCursor;
-  let oldestEndCursor = prevMeta.oldestEndCursor;
-  let hasNewerFromOldest = prevMeta.hasNewerFromOldest;
   if (dir === "refresh" || dir === "ids") {
-  } else if (dir === "newest" || dir === "older") {
+  } else if (dir === "newest" || dir === "older" || dir === "oldest" || dir === "newer") {
     for (const id of pageIds) newestIds.add(id);
     if (page?.startCursor) newestStartCursor = page.startCursor;
-    if (dir === "newest" && page?.endCursor) newestEndCursor = page.endCursor;
-    hasOlder = Boolean(page?.hasPreviousPage);
-  } else {
-    for (const id of pageIds) oldestIds.add(id);
-    if (page?.endCursor) oldestEndCursor = page.endCursor;
-    if (dir === "oldest" && page?.startCursor) oldestStartCursor = page.startCursor;
-    hasNewerFromOldest = Boolean(page?.hasNextPage);
+    if (page?.endCursor && (dir === "newest" || dir === "older")) {
+      newestEndCursor = page.endCursor;
+    }
+    if (dir === "newest" || dir === "older") {
+      hasOlder = Boolean(page?.hasPreviousPage);
+    } else {
+      hasOlder = Boolean(page?.hasNextPage);
+    }
   }
   const isRest = page?.source === "rest";
   const totalCount = isRest ? Boolean(page?.hasMore) ? Math.max(
@@ -9501,7 +9730,6 @@ function mergeReviewThreadsPageIntoDetail(detail, page, direction = "older") {
   ) : reviewThreads.length : typeof page?.totalCount === "number" ? page.totalCount : Number(prevMeta.totalCount) || reviewThreads.length;
   const loadedThreadCount = reviewThreads.length;
   const hiddenCount = isRest ? Boolean(page?.hasMore) ? Math.max(1, totalCount - loadedThreadCount) : 0 : Math.max(0, totalCount - loadedThreadCount);
-  for (const id of newestIds) oldestIds.delete(id);
   const restHasMore = isRest && Boolean(page?.hasMore);
   const meta = {
     ...prevMeta,
@@ -9512,12 +9740,13 @@ function mergeReviewThreadsPageIntoDetail(detail, page, direction = "older") {
     pagesLoaded: dir === "refresh" || dir === "ids" ? Number(prevMeta.pagesLoaded) || 0 : (Number(prevMeta.pagesLoaded) || 0) + (page?.pageCount || 1),
     newestStartCursor,
     newestEndCursor,
-    hasOlder: isRest ? restHasMore && (dir === "newest" || dir === "older" || !dir) : hiddenCount > 0 && hasOlder,
-    oldestStartCursor,
-    oldestEndCursor,
-    hasNewerFromOldest: isRest ? restHasMore && (dir === "oldest" || dir === "newer") : hiddenCount > 0 && hasNewerFromOldest,
+    hasOlder: isRest ? restHasMore : hiddenCount > 0 && hasOlder,
+    // Dual-window retired
+    oldestStartCursor: null,
+    oldestEndCursor: null,
+    hasNewerFromOldest: false,
     newestThreadIds: [...newestIds],
-    oldestThreadIds: [...oldestIds],
+    oldestThreadIds: [],
     hasMore: isRest ? restHasMore : hiddenCount > 0,
     endCursor: newestStartCursor,
     // REST multi-page bookkeeping for load-all
@@ -10468,6 +10697,528 @@ async function fetchPrDetail(owner, repo, pullNumber, fetchImpl, token = null, o
   };
 }
 
+// src/fetch/timeline-items.ts
+var TIMELINE_ITEMS_PAGE_SIZE = 100;
+var TIMELINE_ITEMS_QUERY = `
+query TimelineItemsPage(
+  $owner: String!
+  $name: String!
+  $number: Int!
+  $first: Int
+  $last: Int
+  $after: String
+  $before: String
+  $since: DateTime
+) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      timelineItems(
+        first: $first
+        last: $last
+        after: $after
+        before: $before
+        since: $since
+      ) {
+        totalCount
+        filteredCount
+        updatedAt
+        pageInfo {
+          hasNextPage
+          hasPreviousPage
+          startCursor
+          endCursor
+        }
+        nodes {
+          __typename
+          ... on IssueComment {
+            id
+            databaseId
+            createdAt
+            body
+            author { login avatarUrl }
+            reactionGroups {
+              content
+              viewerHasReacted
+              reactors { totalCount }
+            }
+          }
+          ... on PullRequestReview {
+            id
+            databaseId
+            state
+            submittedAt
+            body
+            author { login avatarUrl }
+            comments { totalCount }
+          }
+          ... on LabeledEvent {
+            id
+            createdAt
+            label { name color description }
+            actor { login avatarUrl }
+          }
+          ... on UnlabeledEvent {
+            id
+            createdAt
+            label { name color description }
+            actor { login avatarUrl }
+          }
+          ... on RenamedTitleEvent {
+            id
+            createdAt
+            previousTitle
+            currentTitle
+            actor { login avatarUrl }
+          }
+          ... on AssignedEvent {
+            id
+            createdAt
+            actor { login avatarUrl }
+            assignee { ... on User { login } ... on Bot { login } }
+          }
+          ... on UnassignedEvent {
+            id
+            createdAt
+            actor { login avatarUrl }
+            assignee { ... on User { login } ... on Bot { login } }
+          }
+          ... on ReviewRequestedEvent {
+            id
+            createdAt
+            actor { login avatarUrl }
+            requestedReviewer {
+              ... on User { login }
+              ... on Team { name slug }
+              ... on Bot { login }
+            }
+          }
+          ... on ReviewRequestRemovedEvent {
+            id
+            createdAt
+            actor { login avatarUrl }
+            requestedReviewer {
+              ... on User { login }
+              ... on Team { name slug }
+              ... on Bot { login }
+            }
+          }
+          ... on MilestonedEvent {
+            id
+            createdAt
+            milestoneTitle
+            actor { login avatarUrl }
+          }
+          ... on DemilestonedEvent {
+            id
+            createdAt
+            milestoneTitle
+            actor { login avatarUrl }
+          }
+          ... on ReadyForReviewEvent {
+            id
+            createdAt
+            actor { login avatarUrl }
+          }
+          ... on ConvertToDraftEvent {
+            id
+            createdAt
+            actor { login avatarUrl }
+          }
+          ... on ClosedEvent {
+            id
+            createdAt
+            actor { login avatarUrl }
+          }
+          ... on ReopenedEvent {
+            id
+            createdAt
+            actor { login avatarUrl }
+          }
+          ... on MergedEvent {
+            id
+            createdAt
+            actor { login avatarUrl }
+            commit { oid }
+          }
+          ... on CrossReferencedEvent {
+            id
+            createdAt
+            actor { login avatarUrl }
+          }
+          ... on ReferencedEvent {
+            id
+            createdAt
+            actor { login avatarUrl }
+          }
+          ... on LockedEvent {
+            id
+            createdAt
+            actor { login avatarUrl }
+            lockReason
+          }
+          ... on UnlockedEvent {
+            id
+            createdAt
+            actor { login avatarUrl }
+          }
+          ... on HeadRefForcePushedEvent {
+            id
+            createdAt
+            actor { login avatarUrl }
+          }
+          ... on BaseRefChangedEvent {
+            id
+            createdAt
+            actor { login avatarUrl }
+          }
+          ... on PullRequestCommit {
+            id
+            commit {
+              oid
+              abbreviatedOid
+              messageHeadline
+              committedDate
+              author { user { login avatarUrl } name }
+            }
+          }
+        }
+      }
+    }
+  }
+}`;
+var SKIP_TYPENAMES = /* @__PURE__ */ new Set([
+  "SubscribedEvent",
+  "UnsubscribedEvent",
+  "MentionedEvent",
+  "CommentDeletedEvent"
+]);
+function actorLogin(node) {
+  return node?.actor?.login || node?.author?.login || "";
+}
+function actorAvatar(node) {
+  return node?.actor?.avatarUrl || node?.author?.avatarUrl || "";
+}
+function mapReactionGroups(groups) {
+  if (!Array.isArray(groups)) return [];
+  return groups.map((g) => {
+    const content = String(g?.content || "");
+    const count = Number(g?.reactors?.totalCount) || 0;
+    if (!content || count <= 0) return null;
+    return {
+      content,
+      count,
+      viewerHasReacted: Boolean(g?.viewerHasReacted)
+    };
+  }).filter(Boolean);
+}
+function mapGraphqlTimelineNode(node) {
+  if (!node || typeof node !== "object") return { kind: null, value: null };
+  const tn = String(node.__typename || "");
+  if (SKIP_TYPENAMES.has(tn)) return { kind: null, value: null };
+  if (tn === "IssueComment") {
+    const comment = mapIssueComment({
+      id: node.databaseId,
+      node_id: node.id,
+      body: node.body || "",
+      user: {
+        login: node.author?.login || "",
+        avatar_url: node.author?.avatarUrl || ""
+      },
+      created_at: node.createdAt,
+      updated_at: node.createdAt
+    });
+    const reactions = mapReactionGroups(node.reactionGroups);
+    if (reactions.length) comment.reactions = reactions;
+    comment.nodeId = node.id || comment.nodeId;
+    return { kind: "comment", value: comment };
+  }
+  if (tn === "PullRequestReview") {
+    return {
+      kind: "review",
+      value: {
+        id: node.databaseId,
+        nodeId: node.id,
+        author: node.author?.login || "",
+        avatarUrl: node.author?.avatarUrl || "",
+        state: node.state || "",
+        body: node.body || "",
+        submittedAt: node.submittedAt || null,
+        commentCount: typeof node.comments?.totalCount === "number" ? node.comments.totalCount : null,
+        isBot: /\[bot\]$/i.test(String(node.author?.login || ""))
+      }
+    };
+  }
+  const base = {
+    id: node.id || null,
+    actor: actorLogin(node),
+    avatarUrl: actorAvatar(node),
+    at: node.createdAt || null,
+    source: "graphql"
+  };
+  switch (tn) {
+    case "LabeledEvent":
+      return {
+        kind: "event",
+        value: {
+          ...base,
+          event: "labeled",
+          label: node.label ? {
+            name: String(node.label.name || ""),
+            color: String(node.label.color || ""),
+            description: String(node.label.description || "")
+          } : null
+        }
+      };
+    case "UnlabeledEvent":
+      return {
+        kind: "event",
+        value: {
+          ...base,
+          event: "unlabeled",
+          label: node.label ? {
+            name: String(node.label.name || ""),
+            color: String(node.label.color || ""),
+            description: String(node.label.description || "")
+          } : null
+        }
+      };
+    case "RenamedTitleEvent":
+      return {
+        kind: "event",
+        value: {
+          ...base,
+          event: "renamed",
+          rename: {
+            from: String(node.previousTitle || ""),
+            to: String(node.currentTitle || "")
+          }
+        }
+      };
+    case "AssignedEvent":
+      return {
+        kind: "event",
+        value: {
+          ...base,
+          event: "assigned",
+          assignee: node.assignee?.login || null
+        }
+      };
+    case "UnassignedEvent":
+      return {
+        kind: "event",
+        value: {
+          ...base,
+          event: "unassigned",
+          assignee: node.assignee?.login || null
+        }
+      };
+    case "ReviewRequestedEvent":
+      return {
+        kind: "event",
+        value: {
+          ...base,
+          event: "review_requested",
+          requestedReviewer: node.requestedReviewer?.login || node.requestedReviewer?.slug || node.requestedReviewer?.name || null,
+          requestedTeam: node.requestedReviewer?.slug || null
+        }
+      };
+    case "ReviewRequestRemovedEvent":
+      return {
+        kind: "event",
+        value: {
+          ...base,
+          event: "review_request_removed",
+          requestedReviewer: node.requestedReviewer?.login || node.requestedReviewer?.slug || node.requestedReviewer?.name || null
+        }
+      };
+    case "MilestonedEvent":
+      return {
+        kind: "event",
+        value: {
+          ...base,
+          event: "milestoned",
+          milestone: { title: String(node.milestoneTitle || ""), number: null }
+        }
+      };
+    case "DemilestonedEvent":
+      return {
+        kind: "event",
+        value: {
+          ...base,
+          event: "demilestoned",
+          milestone: { title: String(node.milestoneTitle || ""), number: null }
+        }
+      };
+    case "ReadyForReviewEvent":
+      return { kind: "event", value: { ...base, event: "ready_for_review" } };
+    case "ConvertToDraftEvent":
+      return { kind: "event", value: { ...base, event: "convert_to_draft" } };
+    case "ClosedEvent":
+      return { kind: "event", value: { ...base, event: "closed" } };
+    case "ReopenedEvent":
+      return { kind: "event", value: { ...base, event: "reopened" } };
+    case "MergedEvent":
+      return {
+        kind: "event",
+        value: {
+          ...base,
+          event: "merged",
+          commitId: node.commit?.oid || null
+        }
+      };
+    case "CrossReferencedEvent":
+      return { kind: "event", value: { ...base, event: "cross-referenced" } };
+    case "ReferencedEvent":
+      return { kind: "event", value: { ...base, event: "referenced" } };
+    case "LockedEvent":
+      return {
+        kind: "event",
+        value: {
+          ...base,
+          event: "locked",
+          lockReason: node.lockReason || null
+        }
+      };
+    case "UnlockedEvent":
+      return { kind: "event", value: { ...base, event: "unlocked" } };
+    case "HeadRefForcePushedEvent":
+      return {
+        kind: "event",
+        value: { ...base, event: "head_ref_force_pushed" }
+      };
+    case "BaseRefChangedEvent":
+      return {
+        kind: "event",
+        value: { ...base, event: "base_ref_changed" }
+      };
+    case "PullRequestCommit":
+      return {
+        kind: "event",
+        value: {
+          ...base,
+          at: node.commit?.committedDate || base.at,
+          actor: node.commit?.author?.user?.login || node.commit?.author?.name || base.actor,
+          event: "committed",
+          commitId: node.commit?.oid || null,
+          commitMessage: node.commit?.messageHeadline || ""
+        }
+      };
+    default:
+      return { kind: null, value: null };
+  }
+}
+function mapGraphqlTimelineNodes(nodes) {
+  const comments = [];
+  const timelineEvents = [];
+  const reviews = [];
+  for (const node of Array.isArray(nodes) ? nodes : []) {
+    const { kind, value } = mapGraphqlTimelineNode(node);
+    if (!value) continue;
+    if (kind === "comment") comments.push(value);
+    else if (kind === "event") timelineEvents.push(value);
+    else if (kind === "review") reviews.push(value);
+  }
+  return { comments, timelineEvents, reviews };
+}
+async function fetchPrTimelineItemsPage(owner, repo, number, opts = {}, fetchImpl = null, token = null, ctx = null) {
+  ctx = normalizeApiCtx(ctx || opts?.ctx);
+  const o = String(owner || "").trim();
+  const r = String(repo || "").trim();
+  const n = Number(number);
+  const empty = {
+    comments: [],
+    timelineEvents: [],
+    reviews: [],
+    pageInfo: {
+      hasNextPage: false,
+      hasPreviousPage: false,
+      startCursor: null,
+      endCursor: null
+    },
+    totalCount: 0,
+    filteredCount: 0,
+    updatedAt: null,
+    direction: "newest",
+    hasMore: false,
+    source: "graphql"
+  };
+  if (!o || !r || !Number.isFinite(n) || !token) return empty;
+  const pageSize = Math.min(
+    TIMELINE_ITEMS_PAGE_SIZE,
+    Math.max(1, Number(opts.pageSize) || TIMELINE_ITEMS_PAGE_SIZE)
+  );
+  const direction = String(opts.direction || "newest").toLowerCase() === "oldest" ? "oldest" : "newest";
+  const cursor = opts.cursor != null ? String(opts.cursor) : null;
+  const since = opts.since ? String(opts.since) : null;
+  const variables = {
+    owner: o,
+    name: r,
+    number: n
+  };
+  if (since) variables.since = String(since);
+  if (since && direction === "newest") {
+    variables.first = pageSize;
+    if (cursor) variables.after = cursor;
+  } else if (direction === "newest") {
+    variables.last = pageSize;
+    if (cursor) variables.before = cursor;
+  } else {
+    variables.first = pageSize;
+    if (cursor) variables.after = cursor;
+  }
+  try {
+    const data = await apiGraphql(
+      TIMELINE_ITEMS_QUERY,
+      variables,
+      fetchImpl || fetch,
+      token,
+      { ...ctx, qName: "TimelineItemsPage" }
+    );
+    const conn = data?.repository?.pullRequest?.timelineItems;
+    const nodes = Array.isArray(conn?.nodes) ? conn.nodes : [];
+    const mapped = mapGraphqlTimelineNodes(nodes);
+    const pageInfo = conn?.pageInfo || empty.pageInfo;
+    const hasMore = since ? Boolean(pageInfo.hasNextPage) : direction === "newest" ? Boolean(pageInfo.hasPreviousPage) : Boolean(pageInfo.hasNextPage);
+    return {
+      ...mapped,
+      pageInfo: {
+        hasNextPage: Boolean(pageInfo.hasNextPage),
+        hasPreviousPage: Boolean(pageInfo.hasPreviousPage),
+        startCursor: pageInfo.startCursor || null,
+        endCursor: pageInfo.endCursor || null
+      },
+      totalCount: typeof conn?.totalCount === "number" ? conn.totalCount : nodes.length,
+      filteredCount: typeof conn?.filteredCount === "number" ? conn.filteredCount : nodes.length,
+      updatedAt: conn?.updatedAt || null,
+      direction,
+      hasMore,
+      source: "graphql",
+      since: since || null
+    };
+  } catch (err) {
+    if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
+      throw err;
+    }
+    return { ...empty, error: String(err?.message || err || "timeline failed") };
+  }
+}
+async function fetchPrTimelineShell(owner, repo, number, opts = {}, fetchImpl = null, token = null, ctx = null) {
+  return fetchPrTimelineItemsPage(
+    owner,
+    repo,
+    number,
+    {
+      direction: opts.direction || "newest",
+      pageSize: opts.pageSize || TIMELINE_ITEMS_PAGE_SIZE,
+      since: opts.since || null,
+      cursor: opts.cursor || null
+    },
+    fetchImpl,
+    token,
+    ctx
+  );
+}
+
 // src/fetch/fetch-api.ts
 var fetchApi = {
   normalizeApiCtx,
@@ -10493,6 +11244,11 @@ var fetchApi = {
   fetchPrFiles,
   fetchPrIssueComments,
   fetchPrTimelineEvents,
+  fetchPrTimelineItemsPage,
+  fetchPrTimelineShell,
+  mapGraphqlTimelineNode,
+  mapGraphqlTimelineNodes,
+  TIMELINE_ITEMS_PAGE_SIZE,
   fetchPrReviews,
   fetchPrChecks,
   fetchPrDevelopment,
@@ -10790,6 +11546,7 @@ var MSG = {
   FETCH_PR_FILES: "PR_TREE_FETCH_PR_FILES",
   FETCH_PR_ISSUE_COMMENTS: "PR_TREE_FETCH_PR_ISSUE_COMMENTS",
   FETCH_PR_TIMELINE_EVENTS: "PR_TREE_FETCH_PR_TIMELINE_EVENTS",
+  FETCH_PR_TIMELINE_ITEMS: "PR_TREE_FETCH_PR_TIMELINE_ITEMS",
   FETCH_PR_HEAD_PROBE: "PR_TREE_FETCH_PR_HEAD_PROBE",
   FETCH_PR_REVIEWS: "PR_TREE_FETCH_PR_REVIEWS",
   FETCH_PR_CHECKS: "PR_TREE_FETCH_PR_CHECKS",
@@ -11247,6 +12004,7 @@ async function handleMessagePartA(message) {
         ok: true,
         pong: true,
         hasFetch: typeof PRTreeFetch?.fetchPrDetail === "function",
+        hasTimelineItems: typeof PRTreeFetch?.fetchPrTimelineItemsPage === "function",
         hasStorage: typeof PRTreeStorage?.getGithubTokenStatus === "function",
         hasEndpoints: typeof PRGithubEndpoints?.resolveGithubEndpoints === "function"
       };
@@ -12149,6 +12907,40 @@ async function handleMessagePartB(message) {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
+        const wantGraphqlPage = message.mode === "graphql" || message.source === "graphql" || message.graphql === true || message.pageSize != null || message.direction != null || // Explicit product path: always prefer GraphQL when pageSize/direction set
+        message.type === MSG.FETCH_PR_TIMELINE_ITEMS || message.type === "PR_TREE_FETCH_PR_TIMELINE_ITEMS";
+        const hasTimelineFn = typeof PRTreeFetch?.fetchPrTimelineItemsPage === "function";
+        if (wantGraphqlPage && hasTimelineFn) {
+          const page = await PRTreeFetch.fetchPrTimelineItemsPage(
+            message.owner,
+            message.repo,
+            message.number,
+            {
+              direction: message.direction || "newest",
+              cursor: message.cursor || null,
+              since: message.since || null,
+              pageSize: message.pageSize || 100
+            },
+            tracked.fetch,
+            token,
+            apiCtx
+          );
+          const p = page || {
+            comments: [],
+            timelineEvents: [],
+            reviews: [],
+            hasMore: false,
+            source: "graphql",
+            error: "empty-page"
+          };
+          return {
+            ok: true,
+            page: p,
+            timelinePage: p,
+            // Keep events alias for older callers
+            events: Array.isArray(p?.timelineEvents) ? p.timelineEvents : []
+          };
+        }
         const events = typeof PRTreeFetch.fetchPrTimelineEvents === "function" ? await PRTreeFetch.fetchPrTimelineEvents(
           message.owner,
           message.repo,
@@ -12157,7 +12949,85 @@ async function handleMessagePartB(message) {
           token,
           apiCtx
         ) : [];
-        return { ok: true, events: Array.isArray(events) ? events : [] };
+        return {
+          ok: true,
+          events: Array.isArray(events) ? events : [],
+          page: null,
+          timelinePage: null,
+          _diag: {
+            wantGraphqlPage,
+            hasTimelineFn,
+            mode: message.mode || null,
+            pageSize: message.pageSize ?? null,
+            direction: message.direction || null
+          }
+        };
+      } catch (err) {
+        if (isAbortError(err)) return { ok: false, aborted: true, error: "aborted" };
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
+      }
+    }
+    // Dedicated type (also kept for forward-compat).
+    case MSG.FETCH_PR_TIMELINE_ITEMS:
+    case "PR_TREE_FETCH_PR_TIMELINE_ITEMS": {
+      const tracked = beginTrackedFetch(message.requestId);
+      try {
+        const token = await tokenForMessage(message);
+        if (!token) {
+          return {
+            ok: true,
+            page: {
+              comments: [],
+              timelineEvents: [],
+              reviews: [],
+              hasMore: false,
+              source: "graphql",
+              error: "no-token"
+            }
+          };
+        }
+        if (typeof PRTreeFetch.fetchPrTimelineItemsPage !== "function") {
+          return {
+            ok: true,
+            page: {
+              comments: [],
+              timelineEvents: [],
+              reviews: [],
+              hasMore: false,
+              source: "graphql",
+              error: "no-fetchPrTimelineItemsPage"
+            }
+          };
+        }
+        const page = await PRTreeFetch.fetchPrTimelineItemsPage(
+          message.owner,
+          message.repo,
+          message.number,
+          {
+            direction: message.direction || "newest",
+            cursor: message.cursor || null,
+            since: message.since || null,
+            pageSize: message.pageSize || 100
+          },
+          tracked.fetch,
+          token,
+          apiCtx
+        );
+        const p = page || {
+          comments: [],
+          timelineEvents: [],
+          reviews: [],
+          hasMore: false,
+          source: "graphql",
+          error: "empty-page"
+        };
+        return {
+          ok: true,
+          page: p,
+          timelinePage: p
+        };
       } catch (err) {
         if (isAbortError(err)) return { ok: false, aborted: true, error: "aborted" };
         throw err;

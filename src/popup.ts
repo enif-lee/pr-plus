@@ -43,74 +43,73 @@ const DEFAULT_PREFS = {
   shortcutMonitorSize: 'small',
   onboardingCompleted: false,
   timelineVisibility: {
-    labels: true,
-    title: true,
-    milestone: true,
-    assignees: true,
-    reviewers: true,
-    referenced: true,
+    events: true,
+    participants: true,
     comments: true,
+    'review-threads': true,
   },
 };
 
 const prefTlAll = document.getElementById(
   'pref-tl-all'
 ) as HTMLInputElement | null;
-const prefTlLabels = document.getElementById(
-  'pref-tl-labels'
+const prefTlEvents = document.getElementById(
+  'pref-tl-events'
 ) as HTMLInputElement | null;
-const prefTlTitle = document.getElementById(
-  'pref-tl-title'
-) as HTMLInputElement | null;
-const prefTlMilestone = document.getElementById(
-  'pref-tl-milestone'
-) as HTMLInputElement | null;
-const prefTlAssignees = document.getElementById(
-  'pref-tl-assignees'
-) as HTMLInputElement | null;
-const prefTlReviewers = document.getElementById(
-  'pref-tl-reviewers'
-) as HTMLInputElement | null;
-const prefTlReferenced = document.getElementById(
-  'pref-tl-referenced'
+const prefTlParticipants = document.getElementById(
+  'pref-tl-participants'
 ) as HTMLInputElement | null;
 const prefTlComments = document.getElementById(
   'pref-tl-comments'
 ) as HTMLInputElement | null;
+const prefTlReviewThreads = document.getElementById(
+  'pref-tl-review-threads'
+) as HTMLInputElement | null;
 
 /** Category keys in popup order (not All). */
 const PREF_TL_CATEGORY_KEYS = [
-  'labels',
-  'title',
-  'milestone',
-  'assignees',
-  'reviewers',
-  'referenced',
+  'events',
+  'participants',
   'comments',
+  'review-threads',
 ] as const;
 
 /** Category checkboxes only (not All). */
 const PREF_TL_CATEGORY_INPUTS = () =>
   [
-    prefTlLabels,
-    prefTlTitle,
-    prefTlMilestone,
-    prefTlAssignees,
-    prefTlReviewers,
-    prefTlReferenced,
+    prefTlEvents,
+    prefTlParticipants,
     prefTlComments,
+    prefTlReviewThreads,
   ].filter(Boolean) as HTMLInputElement[];
 
 function normalizeTimelineVisibilityPopup(raw: any) {
   const src = raw && typeof raw === 'object' ? raw : {};
+  // Prefer new 4-key model; migrate legacy when needed.
+  if (
+    typeof src.events === 'boolean' ||
+    typeof src.participants === 'boolean' ||
+    typeof src['review-threads'] === 'boolean'
+  ) {
+    return {
+      events: src.events !== false,
+      participants: src.participants !== false,
+      comments: src.comments !== false,
+      'review-threads': src['review-threads'] !== false,
+    };
+  }
+  const events =
+    src.labels !== false ||
+    src.title !== false ||
+    src.milestone !== false ||
+    src.referenced !== false;
+  const participants =
+    src.assignees !== false || src.reviewers !== false;
   return {
-    labels: src.labels !== false,
-    title: src.title !== false,
-    milestone: src.milestone !== false,
-    assignees: src.assignees !== false,
-    reviewers: src.reviewers !== false,
-    referenced: src.referenced !== false,
+    events,
+    participants,
     comments: src.comments !== false,
+    'review-threads': true,
   };
 }
 
@@ -120,13 +119,10 @@ function readTimelineVisibilityFromDom(): Record<
   boolean
 > {
   const byKey: Record<string, HTMLInputElement | null> = {
-    labels: prefTlLabels,
-    title: prefTlTitle,
-    milestone: prefTlMilestone,
-    assignees: prefTlAssignees,
-    reviewers: prefTlReviewers,
-    referenced: prefTlReferenced,
+    events: prefTlEvents,
+    participants: prefTlParticipants,
     comments: prefTlComments,
+    'review-threads': prefTlReviewThreads,
   };
   const out: any = {};
   for (const k of PREF_TL_CATEGORY_KEYS) {
@@ -138,22 +134,16 @@ function readTimelineVisibilityFromDom(): Record<
 }
 
 function isTimelineVisibilityAllOnPopup(tl: {
-  labels: boolean;
-  title: boolean;
-  milestone: boolean;
-  assignees: boolean;
-  reviewers: boolean;
-  referenced: boolean;
+  events: boolean;
+  participants: boolean;
   comments: boolean;
+  'review-threads': boolean;
 }): boolean {
   return (
-    tl.labels &&
-    tl.title &&
-    tl.milestone &&
-    tl.assignees &&
-    tl.reviewers &&
-    tl.referenced &&
-    tl.comments
+    tl.events &&
+    tl.participants &&
+    tl.comments &&
+    tl['review-threads']
   );
 }
 
@@ -223,13 +213,10 @@ function renderPrefs(prefs: any) {
     );
   }
   const tl = normalizeTimelineVisibilityPopup(p.timelineVisibility);
-  if (prefTlLabels) prefTlLabels.checked = tl.labels;
-  if (prefTlTitle) prefTlTitle.checked = tl.title;
-  if (prefTlMilestone) prefTlMilestone.checked = tl.milestone;
-  if (prefTlAssignees) prefTlAssignees.checked = tl.assignees;
-  if (prefTlReviewers) prefTlReviewers.checked = tl.reviewers;
-  if (prefTlReferenced) prefTlReferenced.checked = tl.referenced;
+  if (prefTlEvents) prefTlEvents.checked = tl.events;
+  if (prefTlParticipants) prefTlParticipants.checked = tl.participants;
   if (prefTlComments) prefTlComments.checked = tl.comments;
+  if (prefTlReviewThreads) prefTlReviewThreads.checked = tl['review-threads'];
   if (prefTlAll) {
     prefTlAll.checked = isTimelineVisibilityAllOnPopup(tl);
     prefTlAll.indeterminate = false;
@@ -611,13 +598,10 @@ prefTlAll?.addEventListener('change', () => {
 });
 // Category flips: keep All in sync, then save
 for (const el of [
-  prefTlLabels,
-  prefTlTitle,
-  prefTlMilestone,
-  prefTlAssignees,
-  prefTlReviewers,
-  prefTlReferenced,
+  prefTlEvents,
+  prefTlParticipants,
   prefTlComments,
+  prefTlReviewThreads,
 ]) {
   el?.addEventListener('change', (ev) => {
     // Stop bubbling so a parent "All" handler never re-applies defaults

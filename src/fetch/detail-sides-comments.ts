@@ -65,6 +65,18 @@ export async function fetchPrIssueComments(owner: any, repo: any, number: any, f
  * Issue timeline system events (title rename, draft/ready, labels, assignees, …).
  * GET /repos/{owner}/{repo}/issues/{number}/events — paginated, max 100/page.
  * Skips pure noise (subscribed/unsubscribed/mentioned); comments/reviews live elsewhere.
+ *
+ * GitHub docs (issue events / timeline — NOT activity feed):
+ * - Official text: "Lists all events for an issue" / "List all timeline events".
+ * - Documented limit: per_page max 100 (+ page). No total-count cap, no 30-day window.
+ *   docs.github.com/en/rest/issues/events
+ *   docs.github.com/en/rest/issues/timeline
+ * - Do NOT apply Activity Events "up to 300 events / past 30 days" here — that is a
+ *   different API (activity streams). docs.github.com/en/rest/activity/events
+ *
+ * Undocumented: on very dense PRs REST may stop before GraphQL totalCount / miss
+ * fresh rename rows even after title updates (platform indexing quirk, not per_page).
+ *
  * @returns {Promise<Array>}
  */
 export async function fetchPrTimelineEvents(owner: any, repo: any, number: any, fetchImpl: any, token: any = null, ctx: any = null) {

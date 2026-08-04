@@ -27,7 +27,8 @@ export const COMMENT_ROW_HEIGHT_MAX = 1600;
  *
  * - inline-comment → `c:{commentId}`
  * - diff-image → `img:{path|rowIndex}`
- * - expanded code line → `{path}#{rowIndex}` (same as expand key)
+ * - expanded code line → same format as line-expand.diffLineExpandKey
+ *   (`{path}#{lineType}:{old}:{new}`) so measure map survives rowIndex shifts
  */
 export function diffRowMeasureKey(
   row: any,
@@ -35,7 +36,20 @@ export function diffRowMeasureKey(
 ): string | null {
   if (!row) return null;
   if (row.kind === 'inline-comment' && row.commentId != null) {
-    return `c:${row.commentId}`;
+    // Include body/reply fingerprint so shell→full hydrate and expand re-measure
+    // (stale short heights clip markdown under .prp-vline overflow:hidden).
+    const bodyLen = Math.max(
+      String(row.body || '').length,
+      String(row.root?.body || '').length,
+      String(row.comment?.body || '').length
+    );
+    const replies = Array.isArray(row.replies)
+      ? row.replies.length
+      : Number.isFinite(Number(row.replyCount))
+        ? Number(row.replyCount)
+        : 0;
+    const loaded = row.commentsLoaded === false ? '0' : '1';
+    return `c:${row.commentId}:b${bodyLen}:r${replies}:L${loaded}`;
   }
   if (row.kind === 'diff-image') {
     const path = String(row.filePath || row.path || '');
@@ -49,9 +63,19 @@ export function diffRowMeasureKey(
       return null;
     }
     const path = String(row.filePath || row.path || '');
-    const ri = Number(row.rowIndex);
-    if (!Number.isFinite(ri)) return null;
-    const key = `${path}#${ri}`;
+    if (!path) return null;
+    const oldL =
+      row.oldLine != null && row.oldLine !== '' ? String(row.oldLine) : '';
+    const newL =
+      row.newLine != null && row.newLine !== '' ? String(row.newLine) : '';
+    let key: string | null = null;
+    if (oldL || newL) {
+      key = `${path}#${t}:${oldL}:${newL}`;
+    } else {
+      const ri = Number(row.rowIndex);
+      if (!Number.isFinite(ri)) return null;
+      key = `${path}#${t}:ri${ri}`;
+    }
     // Only measure when expanded (or caller already tracks this key)
     if (opts?.expandedKeys?.has?.(key)) return key;
     return null;
@@ -83,11 +107,16 @@ export function estimateInlineCommentHeight(
     String(row?.root?.body || '').length,
     String(row?.comment?.body || '').length
   );
-  let h = 168; // chrome + single comment baseline
-  h += Math.min(360, Math.floor(bodyLen / 3.5));
-  h += Math.min(10, replies) * 68;
+  // Chrome (filebar + author + reactions + reply composer) + body.
+  // Prefer slight over-estimate: under-estimate + overflow:hidden clips markdown.
+  let h = 200; // chrome + single comment baseline (incl. reply row)
+  // ~40 chars/line at 14px; Korean packs denser — use /2.8 not /3.5
+  h += Math.min(520, Math.floor(bodyLen / 2.8) * 1.15);
+  h += Math.min(12, replies) * 72;
   if (row?.pending || row?.root?.pending) h += 96; // reply composer room
   if (row?.path || row?.root?.path) h += 28; // file bar
+  // Reactions row + padding under body
+  h += 36;
   return Math.max(
     COMMENT_ROW_HEIGHT,
     Math.min(COMMENT_ROW_HEIGHT_MAX, Math.round(h))

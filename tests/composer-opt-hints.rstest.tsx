@@ -1,6 +1,7 @@
 /**
  * OptBtnHint portals only when show/optHintsActive is true.
- * Composer chrome mounts anchors when focused; tips appear only with hints active.
+ * Composer always mounts OptBtnHint leaves; tips paint only while Opt is held
+ * (store optHintsActive / data-prp-opt-held) — including collapsed ghost state.
  */
 import React from 'react';
 import { describe, expect, test } from '@rstest/core';

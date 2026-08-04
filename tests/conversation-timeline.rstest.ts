@@ -253,7 +253,7 @@ describe('timelineEventToItem + buildConversationTimeline', () => {
     );
   });
 
-  test('dual-window partition keeps old system events with oldest threads', () => {
+  test('single-direction partition never opens dual-window middle gap', () => {
     const items = [
       {
         key: 'new-comment',
@@ -276,7 +276,6 @@ describe('timelineEventToItem + buildConversationTimeline', () => {
         at: '2020-01-03T12:00:00Z',
       },
     ].sort(compareTimelineItemsNewestFirst);
-    // Newest-first list before partition
     expect(items.map((i) => i.key)).toEqual([
       'new-comment',
       'oldest-thread',
@@ -287,10 +286,12 @@ describe('timelineEventToItem + buildConversationTimeline', () => {
       hiddenCount: 5,
       oldestThreadIds: ['PRRT_OLD'],
     });
+    // Threads incomplete → end gap (not dual-window middle split)
     expect(part.showGap).toBe(true);
-    expect(part.top.map((i: any) => i.key)).toEqual(['new-comment']);
-    // Old label must not sit above the gap while its contemporary thread is below
-    expect(part.bottom.map((i: any) => i.key)).toEqual([
+    expect(part.gapPlacement).toBe('end');
+    expect(part.bottom).toEqual([]);
+    expect(part.top.map((i: any) => i.key)).toEqual([
+      'new-comment',
       'oldest-thread',
       'old-label',
     ]);

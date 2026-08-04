@@ -317,6 +317,52 @@ export async function handleMessagePartB(message: any): Promise<any> {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
+        // GraphQL-first page (comments + events) when bridge asks via mode/source.
+        // Uses the established TIMELINE_EVENTS message type so SW routing is
+        // guaranteed after rebuild (new message keys can miss hot-reload).
+        const wantGraphqlPage =
+          message.mode === 'graphql' ||
+          message.source === 'graphql' ||
+          message.graphql === true ||
+          message.pageSize != null ||
+          message.direction != null ||
+          // Explicit product path: always prefer GraphQL when pageSize/direction set
+          message.type === MSG.FETCH_PR_TIMELINE_ITEMS ||
+          message.type === 'PR_TREE_FETCH_PR_TIMELINE_ITEMS';
+        const hasTimelineFn =
+          typeof PRTreeFetch?.fetchPrTimelineItemsPage === 'function';
+        if (wantGraphqlPage && hasTimelineFn) {
+          const page = await PRTreeFetch.fetchPrTimelineItemsPage(
+            message.owner,
+            message.repo,
+            message.number,
+            {
+              direction: message.direction || 'newest',
+              cursor: message.cursor || null,
+              since: message.since || null,
+              pageSize: message.pageSize || 100,
+            },
+            tracked.fetch,
+            token,
+            apiCtx
+          );
+          const p = page || {
+            comments: [],
+            timelineEvents: [],
+            reviews: [],
+            hasMore: false,
+            source: 'graphql',
+            error: 'empty-page',
+          };
+          return {
+            ok: true,
+            page: p,
+            timelinePage: p,
+            // Keep events alias for older callers
+            events: Array.isArray(p?.timelineEvents) ? p.timelineEvents : [],
+          };
+        }
+        // REST fallback path — include diag so bridge can report why GraphQL was skipped
         const events =
           typeof PRTreeFetch.fetchPrTimelineEvents === 'function'
             ? await PRTreeFetch.fetchPrTimelineEvents(
@@ -328,7 +374,85 @@ export async function handleMessagePartB(message: any): Promise<any> {
                 apiCtx
               )
             : [];
-        return { ok: true, events: Array.isArray(events) ? events : [] };
+        return {
+          ok: true,
+          events: Array.isArray(events) ? events : [],
+          page: null,
+          timelinePage: null,
+          _diag: {
+            wantGraphqlPage,
+            hasTimelineFn,
+            mode: message.mode || null,
+            pageSize: message.pageSize ?? null,
+            direction: message.direction || null,
+          },
+        };
+      } catch (err) {
+        if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
+      }
+    }
+    // Dedicated type (also kept for forward-compat).
+    case MSG.FETCH_PR_TIMELINE_ITEMS:
+    case 'PR_TREE_FETCH_PR_TIMELINE_ITEMS': {
+      const tracked = beginTrackedFetch(message.requestId);
+      try {
+        const token = await tokenForMessage(message);
+        if (!token) {
+          return {
+            ok: true,
+            page: {
+              comments: [],
+              timelineEvents: [],
+              reviews: [],
+              hasMore: false,
+              source: 'graphql',
+              error: 'no-token',
+            },
+          };
+        }
+        if (typeof PRTreeFetch.fetchPrTimelineItemsPage !== 'function') {
+          return {
+            ok: true,
+            page: {
+              comments: [],
+              timelineEvents: [],
+              reviews: [],
+              hasMore: false,
+              source: 'graphql',
+              error: 'no-fetchPrTimelineItemsPage',
+            },
+          };
+        }
+        const page = await PRTreeFetch.fetchPrTimelineItemsPage(
+          message.owner,
+          message.repo,
+          message.number,
+          {
+            direction: message.direction || 'newest',
+            cursor: message.cursor || null,
+            since: message.since || null,
+            pageSize: message.pageSize || 100,
+          },
+          tracked.fetch,
+          token,
+          apiCtx
+        );
+        const p = page || {
+          comments: [],
+          timelineEvents: [],
+          reviews: [],
+          hasMore: false,
+          source: 'graphql',
+          error: 'empty-page',
+        };
+        return {
+          ok: true,
+          page: p,
+          timelinePage: p,
+        };
       } catch (err) {
         if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
         throw err;

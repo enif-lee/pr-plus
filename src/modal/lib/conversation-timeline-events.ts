@@ -88,6 +88,10 @@ export function describeTimelineEvent(ev) {
       return ev.commitId
         ? [status('merged', 'merged'), t(' commit '), commit(shortSha(ev.commitId))]
         : [status('merged', 'merged'), t(' this pull request')];
+    case 'committed':
+      return ev.commitId
+        ? [t('added commit '), commit(shortSha(ev.commitId))]
+        : [t('added a commit')];
     case 'labeled':
       return ev.label?.name
         ? [t('added the '), label(ev.label.name, ev.label.color), t(' label')]
@@ -160,6 +164,8 @@ export function describeTimelineEvent(ev) {
         : [t('locked and limited conversation to collaborators')];
     case 'unlocked':
       return [t('unlocked this conversation')];
+    case 'head_ref_force_pushed':
+      return [t('force-pushed the head branch')];
     case 'head_ref_deleted':
       return [t('deleted the head branch')];
     case 'head_ref_restored':

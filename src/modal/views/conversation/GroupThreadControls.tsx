@@ -34,7 +34,11 @@ export function GroupThreadFoldBtn({
       className={`prp-review-group__row-btn inline-flex min-w-0 flex-1 items-center gap-1.5 text-left${
         focused ? ' prp-opt-hint-host' : ''
       }`}
-      onClick={onToggle}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onToggle();
+      }}
       aria-expanded={open}
       title={
         focused

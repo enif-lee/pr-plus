@@ -242,6 +242,7 @@ import {
   resolveAdjacentPrNumber,
   stackDigitSlotNumber,
   resolvePrModalOptAction,
+  allowPrModalOptPeerWhileEditable,
 } from '../lib/command-palette';
 import {
   buildShortcutMonitorFire,
@@ -269,6 +270,8 @@ import {
   resolveActiveFileForCollapse,
   isEditableKeyboardTarget,
   isComposerKeyboardTarget,
+  findComposerShortcutSurface,
+  resolveComposerContextShortcutAction,
 } from '../lib/shortcut-policy';
 import {
   focusContextThreadReplyAfterPaint,
@@ -2049,7 +2052,8 @@ export function PrModalApp({
     layoutMode,
   ]);
 
-  // Diff enter → drain all remaining review threads once (idempotent if complete)
+  // Diff enter → cache-first paint already shows loaded threads; complete
+  // remaining single-cursor pagination in background (idempotent if complete).
   const diffFullLoadGenRef = useRef(0);
   const diffFullLoadKeyRef = useRef('');
   useEffect(() => {
@@ -2058,12 +2062,19 @@ export function PrModalApp({
     if (typeof onLoadMoreReviewThreads !== 'function') return undefined;
     const meta = detail.reviewThreadsMeta || {};
     if (!meta.hasMore) return undefined;
-    // Only auto-drain when there is a real dual-window / REST page to walk.
-    // Stuck hasMore (e.g. old REST comment-count total) would re-enter forever
-    // and flicker "Loading comments a/b" in the header.
-    const canDrain =
-      Boolean(meta.hasOlder || meta.hasNewerFromOldest) ||
-      (meta.source === 'rest' && Number(meta.restPage) >= 1);
+    // Single-cursor / REST multi-page: drain when hasOlder or REST pages remain.
+    // Stuck hasMore without a cursor must not re-enter forever.
+    let canDrain = Boolean(meta.hasOlder);
+    if (!canDrain && meta.source === 'rest' && Number(meta.restPage) >= 1) {
+      canDrain = true;
+    }
+    if (
+      !canDrain &&
+      (meta.newestStartCursor || meta.endCursor) &&
+      meta.hasMore
+    ) {
+      canDrain = true;
+    }
     if (!canDrain) return undefined;
     const key = `${detail.owner}/${detail.repo}#${detail.number}`;
     // Avoid re-entry for same PR while a load is in flight / already kicked off
@@ -2074,14 +2085,13 @@ export function PrModalApp({
     const gen = ++diffFullLoadGenRef.current;
     void (async () => {
       try {
-        await onLoadMoreReviewThreads('all');
+        // Threads only — Diff completeness must not drain full timelineItems.
+        await onLoadMoreReviewThreads('threads-all');
       } catch {
         /* host stage surfaces errors */
       } finally {
         if (gen === diffFullLoadGenRef.current) {
           // Keep key set after attempt — only re-open when PR identity resets.
-          // (Previously clearing key while hasMore stayed true caused load-all
-          // thrash + header badge flicker on every detail re-render.)
         }
       }
     })();
@@ -2093,9 +2103,10 @@ export function PrModalApp({
     detail?.number,
     detail?.reviewThreadsMeta?.hasMore,
     detail?.reviewThreadsMeta?.hasOlder,
-    detail?.reviewThreadsMeta?.hasNewerFromOldest,
     detail?.reviewThreadsMeta?.source,
     detail?.reviewThreadsMeta?.restPage,
+    detail?.reviewThreadsMeta?.newestStartCursor,
+    detail?.reviewThreadsMeta?.endCursor,
     onLoadMoreReviewThreads,
   ]);
 
@@ -2171,8 +2182,8 @@ export function PrModalApp({
   const onSearchLoadComments = useCallback(async () => {
     if (typeof onLoadMoreReviewThreads !== 'function') return;
     try {
-      // 'all' drains dual-window cursors until every review thread is loaded
-      await onLoadMoreReviewThreads('all');
+      // Search needs full review-thread corpus; not full timelineItems history.
+      await onLoadMoreReviewThreads('threads-all');
       // detail update rebuilds searchDocs → effect re-runs with same query
     } catch {
       /* host surfaces stage errors */
@@ -4927,7 +4938,13 @@ export function PrModalApp({
         setSearchQuery,
         setSearchHits,
         setSearchHitIndex,
-        toggleFullscreen,
+        // Must be a real binding — bare `toggleFullscreen` was never declared and
+        // threw ReferenceError for every palette/peer action (monitor fired, no UI).
+        toggleFullscreen: () => {
+          if (!isEmbed) {
+            setShellFullscreen((prev) => toggleShellFullscreen(prev));
+          }
+        },
         startEditTitle: () => setTitleEditSignal((n) => n + 1),
         startEditBody: () => setEditingBody(true),
         openBasePicker,
@@ -4935,7 +4952,7 @@ export function PrModalApp({
         onMergePr,
         onUpdateBranch,
         onSubscribe,
-        onUnsubscribe,
+        // unsubscribe is onSubscribe(false) in the runner; no separate binding
         openMilestonePicker: () => openMilestonePicker?.(),
         clearMilestone: () => void applyMilestone?.(null),
         onRerequestReview,
@@ -4956,8 +4973,7 @@ export function PrModalApp({
         focusCommentBox,
         collapseActiveFile: () => setActiveFileCollapse(true),
         expandActiveFile: () => setActiveFileCollapse(false),
-        collapseFold,
-        expandFold,
+        // Fold / context-thread cases use setActiveFileCollapse + runContextThreadAction
         stepNavPrev: () => {
           if (useModalStore.getState().searchOpen) navSearch(-1);
           else if (useModalStore.getState().layoutMode === LAYOUT_DIFF) {
@@ -4974,16 +4990,6 @@ export function PrModalApp({
         optArrowScrollSelect,
         toggleViewedActiveFile,
         toggleActiveFileCollapse,
-        contextThreadCollapse,
-        contextThreadExpand,
-        contextThreadFold,
-        contextThreadGotoDiff,
-        contextThreadComment,
-        contextThreadResolve,
-        focusedThreadFold,
-        focusedThreadGotoDiff,
-        focusedThreadComment,
-        focusedThreadResolve,
         scrollConversationPanel,
         navConversationComment,
         navComment,
@@ -6647,44 +6653,207 @@ export function PrModalApp({
       }
 
       const editable = isEditableKeyboardTarget(e.target);
-      const composerFocused = isComposerKeyboardTarget(
+      const aeForComposer =
         (typeof document !== 'undefined'
           ? (document.activeElement as HTMLElement | null)
-          : null) || (e.target as HTMLElement | null)
-      );
+          : null) || (e.target as HTMLElement | null);
+      // Footer tips stay visible without focus — default to conversation
+      // composer so ⌥E/C/I/T match the OptBtnHint badges on that form.
+      const composerSurface =
+        typeof findComposerShortcutSurface === 'function'
+          ? findComposerShortcutSurface({
+              activeElement: aeForComposer,
+              eventTarget: e.target,
+            })
+          : {
+              active: isComposerKeyboardTarget(aeForComposer),
+              root: null as HTMLElement | null,
+              mdc: null as HTMLElement | null,
+            };
+      const composerFocused = Boolean(composerSurface.active);
       // Option product chords: allow Control+Option (⌥⌃R) but not ⌘+Option.
       // `alt` already from e.altKey above (physical-key normalize).
       const ctrlKey = Boolean(e.ctrlKey);
       const altOnly = alt && !e.metaKey && !ctrlKey;
       const shift = Boolean(e.shiftKey);
-      // Capabilities for composer-context chords (DOM on focused form)
+      // Capabilities for composer-context chords (DOM on focused / default form)
       let canResolveComposer = false;
       let canToggleModeComposer = false;
       if (composerFocused && typeof document !== 'undefined') {
         try {
-          const ae =
-            (document.activeElement as HTMLElement | null) ||
-            (e.target as HTMLElement | null);
-          const root = ae?.closest?.('[data-prp-composer-root]');
+          const root =
+            composerSurface.root ||
+            (aeForComposer?.closest?.(
+              '[data-prp-composer-root]'
+            ) as HTMLElement | null);
           canResolveComposer = Boolean(
             root?.hasAttribute?.('data-prp-can-resolve') ||
               root?.querySelector?.('[data-prp-composer-resolve]')
           );
           canToggleModeComposer = Boolean(
             root?.hasAttribute?.('data-prp-can-toggle-mode') ||
-              root?.querySelector?.('[data-prp-composer-mode-tabs]')
+              root?.querySelector?.('[data-prp-composer-mode-tabs]') ||
+              document.querySelector?.(
+                '.prp-card--composer [data-prp-composer-mode-tabs]'
+              )
           );
         } catch {
           /* ignore */
         }
       }
 
+      // Composer-context chords win over product peers when a surface is
+      // active (focused mdc OR default conversation footer). Otherwise ⌥E
+      // is stolen by editBody peer before composerEmoji can run.
+      if (
+        composerFocused &&
+        !ui.paletteOpen &&
+        typeof resolveComposerContextShortcutAction === 'function'
+      ) {
+        const composerAct = resolveComposerContextShortcutAction({
+          mod: composerFocused ? mod : mod && !alt,
+          shift,
+          alt: alt && !e.metaKey,
+          ctrl: ctrlKey,
+          key,
+          code: e.code,
+          composerFocused: true,
+          canResolve: canResolveComposer,
+          canToggleMode: canToggleModeComposer,
+        });
+        if (composerAct) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (e.altKey) {
+            optHintsSuppressedRef.current = true;
+            syncOptHintsActive();
+          }
+          reportShortcutAction(String(composerAct));
+          const mdc =
+            composerSurface.mdc ||
+            (aeForComposer?.closest?.(
+              '[data-prp-composer], .prp-mdc'
+            ) as HTMLElement | null);
+          const root =
+            composerSurface.root ||
+            (aeForComposer?.closest?.(
+              '[data-prp-composer-root]'
+            ) as HTMLElement | null);
+          switch (composerAct) {
+            case 'composerSubmit': {
+              try {
+                if (mdc) {
+                  mdc.dispatchEvent(
+                    new CustomEvent('prp-composer-submit', {
+                      bubbles: true,
+                      cancelable: true,
+                    })
+                  );
+                  break;
+                }
+                const btn = root?.querySelector?.(
+                  '[data-prp-composer-submit]:not([disabled])'
+                ) as HTMLButtonElement | null;
+                btn?.click?.();
+              } catch {
+                /* ignore */
+              }
+              break;
+            }
+            case 'composerEmoji': {
+              try {
+                // Collapsed ghost: open write surface first so emoji lands in ta
+                if (mdc && !mdc.querySelector?.('[data-prp-composer-input]')) {
+                  mdc.dispatchEvent(
+                    new CustomEvent('prp-composer-focus-input', {
+                      bubbles: true,
+                      cancelable: true,
+                    })
+                  );
+                }
+                mdc?.dispatchEvent(
+                  new CustomEvent('prp-composer-emoji', {
+                    bubbles: true,
+                    cancelable: true,
+                  })
+                );
+              } catch {
+                /* ignore */
+              }
+              break;
+            }
+            case 'composerFocusInput': {
+              try {
+                mdc?.dispatchEvent(
+                  new CustomEvent('prp-composer-focus-input', {
+                    bubbles: true,
+                    cancelable: true,
+                  })
+                );
+                const ta =
+                  mdc?.querySelector?.('[data-prp-composer-input]') ||
+                  root?.querySelector?.('[data-prp-composer-input]');
+                (ta as HTMLTextAreaElement | null)?.focus?.();
+              } catch {
+                /* ignore */
+              }
+              break;
+            }
+            case 'composerResolve': {
+              try {
+                const btn = root?.querySelector?.(
+                  '[data-prp-composer-resolve]:not([disabled])'
+                ) as HTMLButtonElement | null;
+                if (btn) {
+                  btn.click();
+                  break;
+                }
+              } catch {
+                /* ignore */
+              }
+              act.runContextThreadAction?.('resolve');
+              break;
+            }
+            case 'composerModeToggle': {
+              try {
+                const host =
+                  root?.closest?.('.prp-card--composer') ||
+                  document.querySelector?.('.prp-card--composer');
+                const cTab = host?.querySelector?.(
+                  '[data-prp-composer-mode="comment"]'
+                ) as HTMLButtonElement | null;
+                const rTab = host?.querySelector?.(
+                  '[data-prp-composer-mode="review"]'
+                ) as HTMLButtonElement | null;
+                if (cTab && rTab) {
+                  const commentOn =
+                    cTab.getAttribute('aria-selected') === 'true';
+                  (commentOn ? rTab : cTab).click();
+                }
+              } catch {
+                /* ignore */
+              }
+              break;
+            }
+            default:
+              break;
+          }
+          return;
+        }
+      }
+
       // Option / Option+Shift command actions (former mod → opt; no mod back-compat)
+      // Opt+Shift peers (⌥⇧L labels, ⌥⇧P milestone, …) fire even while typing.
+      // Plain Opt stays blocked so composers keep ⌥E emoji / text entry.
       if (
         altOnly &&
-        !editable &&
         !ui.paletteOpen &&
-        typeof resolvePrModalOptAction === 'function'
+        typeof resolvePrModalOptAction === 'function' &&
+        (typeof allowPrModalOptPeerWhileEditable !== 'function' ||
+          allowPrModalOptPeerWhileEditable({
+            editableTarget: editable,
+            shift,
+          }))
       ) {
         const peer = resolvePrModalOptAction({
           alt: true,
@@ -6705,6 +6874,14 @@ export function PrModalApp({
         if (peer?.action && !skipPeerForDiffViewed) {
           e.preventDefault();
           e.stopPropagation();
+          // Leave the typing surface so pickers can take focus
+          if (editable) {
+            try {
+              (document.activeElement as HTMLElement | null)?.blur?.();
+            } catch {
+              /* ignore */
+            }
+          }
           optHintsSuppressedRef.current = true;
           syncOptHintsActive();
           // Shortcut monitor: opt peer already has title + chord labels
@@ -7546,6 +7723,7 @@ export function PrModalApp({
                 : null
             }
             reviewThreadsMeta={detail?.reviewThreadsMeta || null}
+            timelineMeta={detail?.timelineMeta || null}
             searchQuery={(searchQuery || '').trim()}
             searchHits={searchHits}
             searchHitIndex={searchHitIndex}

@@ -42,13 +42,13 @@ function tryReloadExtension(label = 'globalSetup') {
       `document.dispatchEvent(new CustomEvent('prp-reload-extension', { bubbles: true })); true`
     );
     // SW + content re-inject after runtime.reload needs more than ~1.5s or early
-    // suites hit modal-ready timeouts (bridge/SW still restarting).
-    waitMs(4000);
+    // suites hit modal-ready timeouts / "No active page" (bridge/SW still restarting).
+    waitMs(5500);
     open('https://github.com/enif-lee/pr-plus/pulls');
-    waitMs(800);
+    waitMs(1000);
     // Wait until content bridge is back before any suite runs.
     try {
-      const deadline = Date.now() + 12_000;
+      const deadline = Date.now() + 15_000;
       while (Date.now() < deadline) {
         const hook = evalInPage(
           `document.documentElement.getAttribute('data-prp-bridge') || document.documentElement.getAttribute('data-prp-gql-cost-hook') || ''`
@@ -56,6 +56,13 @@ function tryReloadExtension(label = 'globalSetup') {
         if (hook) break;
         waitMs(300);
       }
+    } catch {
+      /* soft */
+    }
+    // One more land after reload settles — first suite open is less flaky.
+    try {
+      open('https://github.com/enif-lee/pr-plus/pulls');
+      waitMs(400);
     } catch {
       /* soft */
     }

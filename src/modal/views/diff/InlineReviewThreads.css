@@ -4,7 +4,12 @@
  * Migrated from styles/parts/17-polished-inline-review-threads-on-diff.css
  */
 
-/* Polished inline review threads on diff */
+/* Polished inline review threads on diff
+ * Padding tokens (collapsed === expanded chrome):
+ *   outer shell  6px 10px 8px
+ *   filebar      4px 10px
+ *   body/preview 8px 12px 10px  (see LineCommentAffordance + ConversationThread)
+ */
 .prp-inline-thread {
   width: 100%;
   max-width: min(720px, 100%);
@@ -14,8 +19,9 @@
   font-size: 14px;
   line-height: 1.5;
 }
+/* Collapsed keeps the same outer padding as open (no tighter bottom). */
 .prp-inline-thread--collapsed {
-  padding-bottom: 4px;
+  padding: 6px 10px 8px;
 }
 
 .prp-inline-thread__card {
@@ -59,11 +65,11 @@
   /* subtle cue while bodies hydrate — order stays stable */
   opacity: 0.95;
 }
-/* Shared compact path header (Diff + Conversation) */
+/* Shared compact path header (Diff + Conversation) — same padding as base filebar */
 .prp-inline-thread__filebar.prp-review-thread__file-header {
   margin: 0;
-  padding: 3px 10px;
-  min-height: 20px;
+  padding: 4px 10px;
+  min-height: 22px;
 }
 
 .prp-inline-thread__loc {

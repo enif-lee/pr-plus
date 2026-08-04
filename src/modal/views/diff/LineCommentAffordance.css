@@ -255,8 +255,9 @@ a.prp-commit-timeline__sha code {
   gap: 8px;
   justify-content: space-between;
 }
+/* Match expanded .prp-inline-thread__body horizontal rhythm (8px 12px 10px) */
 .prp-inline-thread__collapsed-preview {
-  padding: 6px 10px 8px;
+  padding: 8px 12px 10px;
   cursor: pointer;
   border-radius: 0 0 8px 8px;
 }
@@ -268,9 +269,10 @@ a.prp-commit-timeline__sha code {
 .prp-inline-thread--collapsed .prp-inline-thread__card {
   opacity: 0.96;
 }
+/* Same filebar padding as open (4px 10px) — no tighter collapsed chrome */
 .prp-inline-thread--collapsed .prp-inline-thread__filebar {
   margin: 0;
-  padding: 6px 8px;
+  padding: 4px 10px;
 }
 
 /* ── Merge box checks detail ── */

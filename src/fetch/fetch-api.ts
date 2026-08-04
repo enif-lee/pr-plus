@@ -16,6 +16,7 @@ export * from './reactions';
 export * from './review-threads-bulk';
 export * from './review-threads-map';
 export * from './review-threads-page';
+export * from './timeline-items';
 export * from './viewer';
 
 import {
@@ -170,6 +171,13 @@ import {
   mergeReviewThreadsPageIntoDetail,
 } from './review-threads-bulk';
 import {
+  TIMELINE_ITEMS_PAGE_SIZE,
+  fetchPrTimelineItemsPage,
+  fetchPrTimelineShell,
+  mapGraphqlTimelineNode,
+  mapGraphqlTimelineNodes,
+} from './timeline-items';
+import {
   REVIEW_THREADS_API_MAX,
   REVIEW_THREADS_BY_IDS_NODE_SELECTION,
   REVIEW_THREADS_FIRST_QUERY,
@@ -228,6 +236,11 @@ export const fetchApi = {
   fetchPrFiles,
   fetchPrIssueComments,
   fetchPrTimelineEvents,
+  fetchPrTimelineItemsPage,
+  fetchPrTimelineShell,
+  mapGraphqlTimelineNode,
+  mapGraphqlTimelineNodes,
+  TIMELINE_ITEMS_PAGE_SIZE,
   fetchPrReviews,
   fetchPrChecks,
   fetchPrDevelopment,

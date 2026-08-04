@@ -655,45 +655,13 @@
                 Boolean(adapt?.hostRestFallback));
 
           if (mode === 'full-threads') {
-            // Diff: seed start window then drain all remaining pages
-            if (totalCount >= apiMax && newest.hasPreviousPage) {
-              try {
-                setLoadStage('threads', loadStageLabel('threads-earlier'), true);
-                render();
-                const oldest =
-                  await globalThis.PRTreeFetch.fetchReviewThreadsPage(
-                    owner,
-                    repo,
-                    number,
-                    {
-                      direction: 'oldest',
-                      cursor: null,
-                      pageSize:
-                        Number(
-                          globalThis.PRModalReviewThreads
-                            ?.REVIEW_THREADS_PAGE_SIZE
-                        ) || 100,
-                      signal,
-                    }
-                  );
-                if (!stillOpen()) return;
-                if (typeof mergeFn === 'function') {
-                  next = mergeFn(next, oldest, 'oldest');
-                  applyThreadsToStore(next);
-                  next = current.detail;
-                  detailCache.set(key, next);
-                  render();
-                }
-              } catch {
-                /* keep last-only */
-              }
-            }
-            // full-threads: shell+eager already credited; ensure ladder complete
+            // Diff incomplete: single-cursor only — drain remaining *threads*
+            // (not timelineItems history) — no dual-window oldest seed.
             creditThreadLadder();
             if (stillOpen() && next?.reviewThreadsMeta?.hasMore) {
               const props = buildProps();
               if (typeof props.onLoadMoreReviewThreads === 'function') {
-                await props.onLoadMoreReviewThreads('all');
+                await props.onLoadMoreReviewThreads('threads-all');
               }
             } else if (stillOpen()) {
               tryFinishOpenProgress(prog);
@@ -822,58 +790,70 @@
         }
       },
       /**
-       * Lazy GraphQL page of review threads (middle fold / dual-window).
-       * @param {'older'|'newer'|'all'|string} [direction]
-       *   older/newer: one page toward the gap
-       *   all: keep paging until hasMore is false (full comment/thread corpus)
+       * Unified Conversation load-more: reviewThreads and/or timelineItems.
+       * @param {string|boolean} [direction]
+       *   undefined / 'more' — one page of each incomplete source
+       *   'all' — drain both (banner Load all)
+       *   'threads-all' | 'threads' — threads only (Diff / search completeness)
+       *   'timeline-all' | 'timeline' — timelineItems only
+       *   older|newer|oldest|newest — thread direction (one page; + timeline page)
        */
       onLoadMoreReviewThreads: async (direction) => {
         if (!owner || !repo || !number) return null;
-        if (!globalThis.PRTreeFetch?.fetchReviewThreadsPage) return null;
         if (!current.detail) return null;
+        const dirRaw = String(direction ?? 'more').toLowerCase();
         const loadAll =
-          direction === 'all' ||
           direction === true ||
-          (direction && String(direction).toLowerCase() === 'all');
+          dirRaw === 'all' ||
+          dirRaw === 'threads-all' ||
+          dirRaw === 'timeline-all';
+        const wantThreads =
+          dirRaw !== 'timeline' &&
+          dirRaw !== 'timeline-all' &&
+          (dirRaw === 'threads' ||
+            dirRaw === 'threads-all' ||
+            dirRaw === 'all' ||
+            dirRaw === 'more' ||
+            dirRaw === 'older' ||
+            dirRaw === 'newer' ||
+            dirRaw === 'oldest' ||
+            dirRaw === 'newest' ||
+            direction == null ||
+            direction === false);
+        const wantTimeline =
+          dirRaw !== 'threads' &&
+          dirRaw !== 'threads-all' &&
+          (dirRaw === 'timeline' ||
+            dirRaw === 'timeline-all' ||
+            dirRaw === 'all' ||
+            dirRaw === 'more' ||
+            dirRaw === 'older' ||
+            dirRaw === 'newer' ||
+            dirRaw === 'oldest' ||
+            dirRaw === 'newest' ||
+            direction == null ||
+            direction === false);
         const gen = detailFetchGen;
         const mergeFn =
           globalThis.PRTreeFetch?.mergeReviewThreadsPageIntoDetail || null;
+        const pure = (globalThis as any).PRModalConversationTimeline;
 
         const pickDirection = (meta) => {
-          if (meta.hasOlder) return 'older';
-          if (meta.hasNewerFromOldest) return 'newer';
-          // hasMore with neither cursor flag (partial newest window / total lag):
-          // open the oldest edge so dual-window can grow toward the middle.
-          if (meta.hasMore) {
-            const oldestIds = Array.isArray(meta.oldestThreadIds)
-              ? meta.oldestThreadIds
-              : [];
-            if (oldestIds.length === 0) return 'oldest';
-            // Oldest window exists but hasNewerFromOldest cleared — still try newer
-            if (meta.oldestEndCursor) return 'newer';
+          if (meta.hasOlder || meta.hasMore) {
             if (meta.newestStartCursor || meta.endCursor) return 'older';
-            return 'oldest';
+            return 'newest';
           }
           return null;
         };
         const cursorFor = (meta, dir) =>
           dir === 'older' || dir === 'newest'
             ? meta.newestStartCursor || meta.endCursor || null
-            : meta.oldestEndCursor || null;
+            : meta.newestEndCursor || meta.oldestEndCursor || null;
 
-        /** Clear stuck hasMore so Diff auto load-all cannot re-enter forever. */
-        const clearStuckHasMore = (detailSnap, reason = '') => {
+        const clearStuckThreads = (detailSnap, reason = '') => {
           const meta = detailSnap?.reviewThreadsMeta || {};
           if (!meta.hasMore) return detailSnap;
           const loaded = Number(meta.loadedThreadCount) || 0;
-          const nextMeta = {
-            ...meta,
-            hasMore: false,
-            hasOlder: false,
-            hasNewerFromOldest: false,
-            hiddenCount: 0,
-            totalCount: loaded || Number(meta.totalCount) || 0,
-          };
           if (reason) {
             console.log(
               `[pr-plus] loadMore threads: clear stuck hasMore (${reason}) ` +
@@ -882,10 +862,36 @@
           }
           return {
             ...detailSnap,
-            reviewThreadsMeta: nextMeta,
+            reviewThreadsMeta: {
+              ...meta,
+              hasMore: false,
+              hasOlder: false,
+              hasNewerFromOldest: false,
+              hiddenCount: 0,
+              totalCount: loaded || Number(meta.totalCount) || 0,
+            },
             reviewCommentsMeta: {
               ...(detailSnap.reviewCommentsMeta || {}),
               hasMore: false,
+            },
+          };
+        };
+
+        const clearStuckTimeline = (detailSnap, reason = '') => {
+          const meta = detailSnap?.timelineMeta || {};
+          if (!meta.hasMore && meta.complete !== false) return detailSnap;
+          if (reason) {
+            console.log(
+              `[pr-plus] loadMore timeline: clear stuck hasMore (${reason}) ` +
+                `${owner}/${repo}#${number}`
+            );
+          }
+          return {
+            ...detailSnap,
+            timelineMeta: {
+              ...meta,
+              hasMore: false,
+              complete: true,
             },
           };
         };
@@ -908,7 +914,10 @@
           render();
         };
 
-        const loadOnePage = async (detailSnap) => {
+        const loadOneThreadPage = async (detailSnap) => {
+          if (!globalThis.PRTreeFetch?.fetchReviewThreadsPage) {
+            return { detail: detailSnap, progressed: false };
+          }
           const meta = detailSnap.reviewThreadsMeta || {};
           if (!meta.hasMore) return { detail: detailSnap, progressed: false };
           const beforeCount = Number(meta.loadedThreadCount) || 0;
@@ -917,7 +926,6 @@
               globalThis.PRModalReviewThreads?.REVIEW_THREADS_PAGE_SIZE
             ) || 100;
 
-          // REST multi-page: continue with next restPage (no GraphQL cursors).
           const restSource =
             meta.source === 'rest' ||
             (meta.restPage != null && !meta.newestStartCursor);
@@ -947,15 +955,17 @@
             }
             const afterCount =
               Number(next?.reviewThreadsMeta?.loadedThreadCount) || 0;
-            // Only real growth counts — same page re-fetch is not progress.
             return {
               detail: next,
               progressed: afterCount > beforeCount,
             };
           }
 
-          let dir = String(direction || '').toLowerCase();
-          if (loadAll || !['older', 'newer', 'oldest', 'newest'].includes(dir)) {
+          let dir = dirRaw;
+          if (
+            loadAll ||
+            !['older', 'newer', 'oldest', 'newest'].includes(dir)
+          ) {
             dir = pickDirection(meta);
           }
           if (!dir) return { detail: detailSnap, progressed: false };
@@ -974,8 +984,6 @@
             dir = 'older';
           }
           const cursor = cursorFor(meta, dir);
-          // GraphQL older/newer without a cursor re-fetches the edge window and
-          // must not be treated as progress (infinite load-all flicker).
           if ((dir === 'older' || dir === 'newer') && !cursor) {
             return { detail: detailSnap, progressed: false };
           }
@@ -1003,11 +1011,164 @@
           };
         };
 
-        let meta0 = current.detail.reviewThreadsMeta || {};
-        if (!meta0.hasMore) return current.detail;
+        /** One older (or newer) GraphQL timelineItems page + merge into detail. */
+        const loadOneTimelinePage = async (detailSnap) => {
+          if (typeof globalThis.PRTreeFetch?.fetchPrTimelineItemsPage !== 'function') {
+            return { detail: detailSnap, progressed: false };
+          }
+          const meta = detailSnap.timelineMeta || {};
+          const cm = detailSnap.commentsMeta || {};
+          const hasMoreFlag =
+            Boolean(meta.hasMore) ||
+            meta.complete === false ||
+            Boolean(cm.hasMore);
+          if (!hasMoreFlag) {
+            return { detail: detailSnap, progressed: false };
+          }
+          const sortNewest =
+            String(meta.direction || 'newest').toLowerCase() !== 'oldest';
+          // Newest window → walk older with before:startCursor.
+          // Oldest window → walk newer with after:endCursor.
+          const cursor = sortNewest
+            ? meta.startCursor || cm.startCursor || null
+            : meta.endCursor || cm.endCursor || null;
+          if (!cursor) {
+            return { detail: detailSnap, progressed: false };
+          }
+          const beforeComments = Array.isArray(detailSnap.comments)
+            ? detailSnap.comments.length
+            : 0;
+          const beforeEvents = Array.isArray(detailSnap.timelineEvents)
+            ? detailSnap.timelineEvents.length
+            : 0;
+          const page = await globalThis.PRTreeFetch.fetchPrTimelineItemsPage(
+            owner,
+            repo,
+            number,
+            {
+              direction: sortNewest ? 'newest' : 'oldest',
+              cursor,
+              pageSize: 100,
+              signal: openFetchAbort?.signal || null,
+            }
+          );
+          if (gen !== detailFetchGen) return { detail: null, progressed: false };
+          if (!page || page.error) {
+            return { detail: detailSnap, progressed: false };
+          }
+          const pageComments = Array.isArray(page.comments) ? page.comments : [];
+          const pageEvents = Array.isArray(page.timelineEvents)
+            ? page.timelineEvents
+            : [];
+          let comments = Array.isArray(detailSnap.comments)
+            ? detailSnap.comments
+            : [];
+          let events = Array.isArray(detailSnap.timelineEvents)
+            ? detailSnap.timelineEvents
+            : [];
+          if (typeof pure?.mergeTimelineItemsById === 'function') {
+            comments = pure.mergeTimelineItemsById(comments, pageComments);
+            events = pure.mergeTimelineItemsById(events, pageEvents);
+          } else {
+            const byId = new Map(
+              comments.map((c: any) => [String(c?.id ?? c?.nodeId), c])
+            );
+            for (const c of pageComments) {
+              if (c?.id != null || c?.nodeId) {
+                byId.set(String(c.id ?? c.nodeId), c);
+              }
+            }
+            comments = [...byId.values()];
+            const evMap = new Map(
+              events.map((e: any, i: number) => [
+                String(e?.id ?? e?.nodeId ?? i),
+                e,
+              ])
+            );
+            for (const e of pageEvents) {
+              evMap.set(String(e?.id ?? e?.nodeId ?? Math.random()), e);
+            }
+            events = [...evMap.values()];
+          }
+          const pi = page.pageInfo || {};
+          // Walking older (newest dir): new older edge is page startCursor.
+          // Walking newer (oldest dir): new newer edge is page endCursor.
+          const nextStart = sortNewest
+            ? pi.startCursor || meta.startCursor || null
+            : meta.startCursor || pi.startCursor || null;
+          const nextEnd = sortNewest
+            ? meta.endCursor || pi.endCursor || null
+            : pi.endCursor || meta.endCursor || null;
+          const hasMore = Boolean(page.hasMore);
+          let coverageEndAt = meta.coverageEndAt || null;
+          if (typeof pure?.minTimelineCoverageEndAt === 'function') {
+            coverageEndAt =
+              pure.minTimelineCoverageEndAt(comments, events) || coverageEndAt;
+          }
+          const loadedCount = comments.length + events.length;
+          const next = {
+            ...detailSnap,
+            comments,
+            timelineEvents: events,
+            commentsMeta: {
+              ...(detailSnap.commentsMeta || {}),
+              loadedCount: comments.length,
+              hasMore,
+              watermark: meta.watermark || detailSnap.commentsMeta?.watermark,
+            },
+            timelineMeta: {
+              ...meta,
+              direction: sortNewest ? 'newest' : 'oldest',
+              hasMore,
+              hasPreviousPage: Boolean(pi.hasPreviousPage),
+              hasNextPage: Boolean(pi.hasNextPage),
+              startCursor: nextStart,
+              endCursor: nextEnd,
+              pageInfo: pi,
+              complete: !hasMore,
+              source: page.source || 'graphql',
+              loadedCount,
+              totalCount:
+                typeof page.totalCount === 'number'
+                  ? page.totalCount
+                  : meta.totalCount ?? null,
+              coverageEndAt,
+              pagesLoaded: (Number(meta.pagesLoaded) || 1) + 1,
+            },
+          };
+          const progressed =
+            comments.length > beforeComments ||
+            events.length > beforeEvents ||
+            (hasMore === false && Boolean(meta.hasMore));
+          return { detail: next, progressed };
+        };
 
+        const threadsIncomplete = (snap = current.detail) => {
+          const m = snap?.reviewThreadsMeta || {};
+          return Boolean(m.hasMore || m.hasOlder);
+        };
+        const timelineIncomplete = (snap = current.detail) => {
+          const m = snap?.timelineMeta || {};
+          // Fallback: commentsMeta may mirror hasMore/cursors
+          const cm = snap?.commentsMeta || {};
+          return (
+            Boolean(m.hasMore) ||
+            m.complete === false ||
+            (Boolean(cm.hasMore) && Boolean(cm.startCursor || m.startCursor))
+          );
+        };
+
+        // Early exit when neither requested source can load
+        if (
+          (!wantThreads || !threadsIncomplete()) &&
+          (!wantTimeline || !timelineIncomplete())
+        ) {
+          return current.detail;
+        }
+
+        const meta0 = current.detail.reviewThreadsMeta || {};
         const meta0TotalHint = Number(meta0.totalCount) || 0;
-        if (loadAll) {
+        if (loadAll && wantThreads) {
           paintLoadAllStage(meta0);
         } else {
           setLoadStage('threads', loadStageLabel('threads-more'), true, {
@@ -1017,40 +1178,93 @@
         }
 
         try {
-          // Single page (timeline gap) or drain dual-window until complete
           const maxPages = loadAll ? 80 : 1;
           let next = current.detail;
           let pages = 0;
           let lastLoaded = Number(meta0.loadedThreadCount) || 0;
+
           while (pages < maxPages) {
-            const meta = next.reviewThreadsMeta || {};
-            if (!meta.hasMore) break;
-            const loaded = Number(meta.loadedThreadCount) || 0;
-            // Update badge only when loaded advances (avoids identical re-renders)
-            if (loadAll && (pages === 0 || loaded !== lastLoaded)) {
-              paintLoadAllStage(meta);
-              lastLoaded = loaded;
-            }
-            const step = await loadOnePage(next);
-            if (gen !== detailFetchGen) return null;
             if (!current.open || Number(current.number) !== Number(number)) {
               return null;
             }
-            if (!step.detail) return null;
-            if (!step.progressed) {
-              // Stuck hasMore (no cursor / REST complete / empty page) → seal meta
-              next = clearStuckHasMore(step.detail, 'no-progress');
+            if (gen !== detailFetchGen) return null;
+
+            let anyProgress = false;
+            const doThreads = wantThreads && threadsIncomplete(next);
+            const doTimeline = wantTimeline && timelineIncomplete(next);
+
+            if (!doThreads && !doTimeline) break;
+
+            if (loadAll && wantThreads && doThreads) {
+              const loaded =
+                Number(next.reviewThreadsMeta?.loadedThreadCount) || 0;
+              if (pages === 0 || loaded !== lastLoaded) {
+                paintLoadAllStage(next.reviewThreadsMeta || {});
+                lastLoaded = loaded;
+              }
+            }
+
+            if (doThreads) {
+              // Carry timelineMeta on the merge flat so no-store path preserves it;
+              // store path keeps it on comments slice across publishDetailFromStore.
+              const priorTimelineMeta =
+                next.timelineMeta || current.detail?.timelineMeta || null;
+              const step = await loadOneThreadPage(next);
+              if (gen !== detailFetchGen) return null;
+              if (!step.detail) return null;
+              if (!step.progressed) {
+                next = clearStuckThreads(step.detail, 'no-progress');
+              } else {
+                next = step.detail;
+                anyProgress = true;
+              }
+              if (priorTimelineMeta != null && next.timelineMeta == null) {
+                next = { ...next, timelineMeta: priorTimelineMeta };
+              }
               applyThreadsToStore(next);
               next = current.detail;
               detailCache.set(detailKey(owner, repo, number), next);
-              break;
             }
-            applyThreadsToStore(step.detail);
-            next = current.detail;
-            detailCache.set(detailKey(owner, repo, number), next);
+
+            if (doTimeline) {
+              // timelineMeta must still be on current.detail after threads apply
+              next = {
+                ...current.detail,
+                timelineMeta:
+                  current.detail?.timelineMeta || next.timelineMeta || null,
+              };
+              const step = await loadOneTimelinePage(next);
+              if (gen !== detailFetchGen) return null;
+              if (!step.detail) return null;
+              if (!step.progressed) {
+                next = clearStuckTimeline(step.detail, 'no-progress');
+              } else {
+                next = step.detail;
+                anyProgress = true;
+              }
+              // Comments / events / timelineMeta via comments side
+              applySideToStore('comments', {
+                comments: next.comments,
+                commentsMeta: {
+                  ...(next.commentsMeta || {}),
+                  hasMore: Boolean(next.timelineMeta?.hasMore),
+                  loadedCount: Array.isArray(next.comments)
+                    ? next.comments.length
+                    : 0,
+                  startCursor: next.timelineMeta?.startCursor || null,
+                  endCursor: next.timelineMeta?.endCursor || null,
+                  watermark: next.timelineMeta?.watermark || null,
+                },
+                timelineEvents: next.timelineEvents,
+                timelineMeta: next.timelineMeta,
+              });
+              next = current.detail;
+              detailCache.set(detailKey(owner, repo, number), next);
+            }
+
             pages += 1;
             if (!loadAll) break;
-            if (!(next.reviewThreadsMeta || {}).hasMore) break;
+            if (!anyProgress) break;
           }
           clearLoadStage();
           render();

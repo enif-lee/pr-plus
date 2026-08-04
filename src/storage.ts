@@ -63,17 +63,15 @@ const DEFAULT_PREFS = {
   onboardingCompleted: false,
   /**
    * Conversation timeline category visibility (plugin-global).
-   * labels | title | milestone | assignees | reviewers | referenced | comments
+   * events | participants | comments | review-threads
    * — each true = tip on / rows shown. Synced with conversation tip row + popup.
+   * Legacy 7-key maps are migrated in normalizeTimelineVisibility.
    */
   timelineVisibility: {
-    labels: true,
-    title: true,
-    milestone: true,
-    assignees: true,
-    reviewers: true,
-    referenced: true,
+    events: true,
+    participants: true,
     comments: true,
+    'review-threads': true,
   },
 };
 
@@ -125,16 +123,25 @@ function normalizeTimelineVisibilityPref(raw: any) {
   }
   const src = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
   const base: Record<string, boolean> = {
-    labels: true,
-    title: true,
-    milestone: true,
-    assignees: true,
-    reviewers: true,
-    referenced: true,
+    events: true,
+    participants: true,
     comments: true,
+    'review-threads': true,
   };
   for (const id of Object.keys(base)) {
     if (typeof src[id] === 'boolean') base[id] = src[id] as boolean;
+  }
+  // Legacy 7-key migration
+  const hasNew = Object.keys(base).some((k) => typeof src[k] === 'boolean');
+  if (!hasNew) {
+    const legacyEvent = ['labels', 'title', 'milestone', 'referenced'];
+    const legacyPart = ['assignees', 'reviewers'];
+    if ([...legacyEvent, ...legacyPart, 'comments'].some((k) => typeof src[k] === 'boolean')) {
+      base.events = legacyEvent.some((k) => src[k] !== false);
+      base.participants = legacyPart.some((k) => src[k] !== false);
+      if (typeof src.comments === 'boolean') base.comments = src.comments;
+      base['review-threads'] = true;
+    }
   }
   if (src.all === true) {
     for (const id of Object.keys(base)) base[id] = true;

@@ -5,7 +5,9 @@
 import { describe, expect, test } from '@rstest/core';
 import {
   COMPOSER_CONTEXT_SHORTCUT,
+  findComposerShortcutSurface,
   isComposerKeyboardTarget,
+  isEditableKeyboardTarget,
   resolveComposerContextShortcutAction,
   resolveModalShortcutAction,
 } from '../src/modal/lib/shortcut-policy';
@@ -134,6 +136,59 @@ describe('resolveModalShortcutAction composer path', () => {
         composerFocused: false,
       })
     ).toBeNull();
+  });
+});
+
+describe('findComposerShortcutSurface', () => {
+  test('defaults to conversation footer when focus is body', () => {
+    if (typeof document === 'undefined') {
+      expect(true).toBe(true);
+      return;
+    }
+    const root = document.createElement('div');
+    root.setAttribute('data-prp-composer-root', '1');
+    root.setAttribute('data-prp-composer-kind', 'conversation');
+    root.setAttribute('data-prp-can-toggle-mode', '1');
+    const mdc = document.createElement('div');
+    mdc.className = 'prp-mdc';
+    mdc.setAttribute('data-prp-composer', '1');
+    root.appendChild(mdc);
+    document.body.appendChild(root);
+    try {
+      const surface = findComposerShortcutSurface({
+        activeElement: document.body,
+        doc: document,
+      });
+      expect(surface.active).toBe(true);
+      expect(surface.root).toBe(root);
+      expect(surface.mdc).toBe(mdc);
+    } finally {
+      root.remove();
+    }
+  });
+
+  test('does not default when typing in a non-composer editable', () => {
+    if (typeof document === 'undefined') {
+      expect(true).toBe(true);
+      return;
+    }
+    const root = document.createElement('div');
+    root.setAttribute('data-prp-composer-root', '1');
+    root.setAttribute('data-prp-composer-kind', 'conversation');
+    document.body.appendChild(root);
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    try {
+      expect(isEditableKeyboardTarget(input)).toBe(true);
+      const surface = findComposerShortcutSurface({
+        activeElement: input,
+        doc: document,
+      });
+      expect(surface.active).toBe(false);
+    } finally {
+      root.remove();
+      input.remove();
+    }
   });
 });
 

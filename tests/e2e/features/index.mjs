@@ -38,6 +38,10 @@ export {
   runDetailCache,
   getSteps as getDetailCacheSteps,
 } from './detail-cache.mjs';
+export {
+  getSteps as getTimelineLoadMoreSteps,
+  buildTimelineLoadMoreSteps,
+} from './timeline-load-more.mjs';
 
 import { createRunner } from '../lib/runner.mjs';
 import { closeAll, ensureBrowser, log } from '../lib/harness.mjs';
@@ -52,6 +56,7 @@ import { getSteps as getMetaBidirectionalSteps } from './meta-bidirectional.mjs'
 import { getSteps as getResolveThreadSteps } from './resolve-thread.mjs';
 import { getSteps as getThreadBodiesSteps } from './thread-bodies.mjs';
 import { getSteps as getDetailCacheSteps } from './detail-cache.mjs';
+import { getSteps as getTimelineLoadMoreSteps } from './timeline-load-more.mjs';
 
 /** Ordered feature suite (shared browser session for legacy runner). */
 export const FEATURE_SUITE = [
@@ -66,6 +71,7 @@ export const FEATURE_SUITE = [
   { id: 'resolve-thread', getSteps: getResolveThreadSteps },
   { id: 'thread-bodies', getSteps: getThreadBodiesSteps },
   { id: 'detail-cache', getSteps: getDetailCacheSteps },
+  { id: 'timeline-load-more', getSteps: getTimelineLoadMoreSteps },
 ];
 
 /**

@@ -490,11 +490,14 @@
       // (including real empty). trustEmpty lets a successful empty page clear
       // prior optimistics; applyComments still protects against lagging empty
       // when trustEmpty is omitted.
+      // timelineMeta lives on the comments store slice so applyThreads →
+      // publishDetailFromStore (toAppDetail) does not drop GraphQL cursors.
       S.applyComments(current.detailStore, payload.comments, {
         settled: true,
         trustEmpty: true,
         pageMeta: payload.commentsMeta,
         timelineEvents: payload.timelineEvents,
+        timelineMeta: payload.timelineMeta,
       });
     } else if (key === 'reviews') {
       S.applyReviews(current.detailStore, payload.reviews, { settled: true });
@@ -517,6 +520,11 @@
           reviewComments: mergedFlat.reviewComments,
           reviewThreadsMeta: mergedFlat.reviewThreadsMeta,
           reviewCommentsMeta: mergedFlat.reviewCommentsMeta,
+          // Keep GraphQL timelineItems meta when threads-only merge omits it
+          timelineMeta:
+            mergedFlat.timelineMeta != null
+              ? mergedFlat.timelineMeta
+              : current.detail.timelineMeta,
           viewerPendingReview:
             mergedFlat.viewerPendingReview !== undefined
               ? mergedFlat.viewerPendingReview
@@ -529,6 +537,8 @@
     }
     ensureDetailStore(current.detail || mergedFlat);
     S.applyThreadsFromMergedDetail(current.detailStore, mergedFlat);
+    // toAppDetail projects comments.timelineMeta — threads apply does not
+    // touch the comments slice, so cursors/coverage survive Diff threads-all.
     return publishDetailFromStore();
   }
 

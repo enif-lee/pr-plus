@@ -367,9 +367,28 @@ export function waitFor(predicateBody, opts = {}) {
   const label = opts.label || 'condition';
   const start = Date.now();
   let last;
+  let recoveredNoPage = false;
   while (Date.now() - start < timeoutMs) {
-    last = evalInPage(`(() => { ${predicateBody} })()`);
-    if (last) return last;
+    try {
+      last = evalInPage(`(() => { ${predicateBody} })()`);
+      if (last) return last;
+    } catch (e) {
+      const msg = String(e?.message || e);
+      // Extension reload / CDP blip: one soft recovery then keep polling.
+      if (!recoveredNoPage && /No active page|no active page|not connected/i.test(msg)) {
+        recoveredNoPage = true;
+        try {
+          // Re-assert session tab without changing product state.
+          ab(['tab', 'list', '--json'], { allowFail: true, timeoutMs: 5_000 });
+          sleepSync(500);
+          last = { recover: 'no-active-page' };
+          continue;
+        } catch {
+          /* fall through */
+        }
+      }
+      throw e;
+    }
     sleepSync(intervalMs);
   }
   throw new Error(`waitFor timeout (${timeoutMs}ms): ${label}; last=${JSON.stringify(last)}`);

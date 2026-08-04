@@ -256,8 +256,8 @@ export function dropReviewThreadsFromDetail(detail: any, threadNodeIds: any) {
 }
 
 /**
- * Initial dual-window load: newest window (page size 100), then oldest seed
- * only when total still has more (legacy GraphQL path).
+ * Initial single-direction load: newest (or oldest) window only, page size 100.
+ * Dual-window oldest seed is retired — load more/all expands one cursor.
  */
 export async function fetchPullReviewThreadsBundle(
   owner,
@@ -284,17 +284,17 @@ export async function fetchPullReviewThreadsBundle(
     REVIEW_THREADS_API_MAX,
     Number(opts.pageSize) || REVIEW_THREADS_PAGE_SIZE
   );
-  const startPageSize = Math.min(
-    20,
-    Number(opts.startPageSize) || 20
-  );
-  // Last (newest) first — GraphQL shell + eager comments (PRRT always)
-  const newest = await fetchReviewThreadsPage(
+  const direction =
+    String(opts.direction || 'newest').toLowerCase() === 'oldest'
+      ? 'oldest'
+      : 'newest';
+  // Single window — GraphQL shell + eager comments (PRRT always)
+  const page = await fetchReviewThreadsPage(
     owner,
     repo,
     pullNumber,
     {
-      direction: 'newest',
+      direction,
       cursor: null,
       pageSize: lastPageSize,
       preferRest: false,
@@ -305,65 +305,35 @@ export async function fetchPullReviewThreadsBundle(
     token,
     ctx
   );
-  const totalCount = Number(newest.totalCount) || newest.threads.length;
-  let oldest = null;
-  // total < 100 → last page already covers all; skip start window
-  if (totalCount >= REVIEW_THREADS_API_MAX && newest.hasPreviousPage) {
-    try {
-      oldest = await fetchReviewThreadsPage(
-        owner,
-        repo,
-        pullNumber,
-        {
-          direction: 'oldest',
-          cursor: null,
-          pageSize: startPageSize,
-        },
-        fetchImpl,
-        token,
-        ctx
-      );
-    } catch {
-      oldest = null;
-    }
-  }
-
-  const threads = [...(newest.threads || [])];
-  const comments = [...(newest.comments || [])];
-  const newestIds = newest.threads.map((t) => t.threadNodeId).filter(Boolean);
-  const oldestIds = [];
-  if (oldest) {
-    for (const t of oldest.threads || []) {
-      if (!newestIds.includes(t.threadNodeId)) {
-        threads.push(t);
-        oldestIds.push(t.threadNodeId);
-      }
-    }
-    for (const c of oldest.comments || []) {
-      if (!comments.some((x) => String(x.id) === String(c.id))) comments.push(c);
-    }
-  }
-
+  const totalCount = Number(page.totalCount) || page.threads.length;
+  const threads = [...(page.threads || [])];
+  const comments = [...(page.comments || [])];
+  const newestIds = threads.map((t) => t.threadNodeId).filter(Boolean);
   const loaded = threads.length;
   const hiddenCount = Math.max(0, totalCount - loaded);
+  const hasOlder =
+    direction === 'newest'
+      ? Boolean(page.hasPreviousPage)
+      : Boolean(page.hasNextPage);
   const meta = {
     totalCount,
     hiddenCount,
     loadedThreadCount: loaded,
     loadedCommentCount: comments.length,
-    pagesLoaded: 1 + (oldest ? 1 : 0),
-    // Newest window cursors (expand older with before: startCursor)
-    newestStartCursor: newest.startCursor || null,
-    newestEndCursor: newest.endCursor || null,
-    hasOlder: Boolean(newest.hasPreviousPage),
-    // Oldest window cursors (expand newer with after: endCursor)
-    oldestStartCursor: oldest?.startCursor || null,
-    oldestEndCursor: oldest?.endCursor || null,
-    hasNewerFromOldest: Boolean(oldest?.hasNextPage),
+    pagesLoaded: 1,
+    newestStartCursor: page.startCursor || null,
+    newestEndCursor: page.endCursor || null,
+    hasOlder,
+    // Dual-window retired
+    oldestStartCursor: null,
+    oldestEndCursor: null,
+    hasNewerFromOldest: false,
     newestThreadIds: newestIds,
-    oldestThreadIds: oldestIds,
-    hasMore: hiddenCount > 0,
-    endCursor: newest.startCursor || null, // legacy: load-more-older
+    oldestThreadIds: [],
+    hasMore: hiddenCount > 0 || hasOlder,
+    endCursor: page.startCursor || null,
+    direction,
+    source: page.source || 'graphql',
   };
 
   return {
@@ -371,7 +341,7 @@ export async function fetchPullReviewThreadsBundle(
     comments,
     hasMore: meta.hasMore,
     endCursor: meta.endCursor,
-    startCursor: newest.startCursor || null,
+    startCursor: page.startCursor || null,
     pageCount: meta.pagesLoaded,
     totalCount,
     reviewThreadsMeta: meta,
@@ -395,6 +365,7 @@ export function emptyReviewThreadsMeta() {
     oldestThreadIds: [],
     hasMore: false,
     endCursor: null,
+    direction: 'newest',
   };
 }
 
@@ -609,7 +580,6 @@ export function mergeReviewThreadsPageIntoDetail(detail: any, page: any, directi
   const reviewThreads = [...thById.values()];
 
   let newestIds = new Set((prevMeta.newestThreadIds || []).map(String));
-  let oldestIds = new Set((prevMeta.oldestThreadIds || []).map(String));
   const pageIds = (page?.threads || [])
     .map((t) => t.threadNodeId)
     .filter(Boolean)
@@ -618,31 +588,33 @@ export function mergeReviewThreadsPageIntoDetail(detail: any, page: any, directi
   let newestStartCursor = prevMeta.newestStartCursor;
   let newestEndCursor = prevMeta.newestEndCursor;
   let hasOlder = prevMeta.hasOlder;
-  let oldestStartCursor = prevMeta.oldestStartCursor;
-  let oldestEndCursor = prevMeta.oldestEndCursor;
-  let hasNewerFromOldest = prevMeta.hasNewerFromOldest;
 
   if (dir === 'refresh' || dir === 'ids') {
-    // Bulk / targeted revalidate — preserve dual-window pagination state
-  } else if (dir === 'newest' || dir === 'older') {
+    // Bulk / targeted revalidate — preserve single-cursor pagination state
+  } else if (
+    dir === 'newest' ||
+    dir === 'older' ||
+    dir === 'oldest' ||
+    dir === 'newer'
+  ) {
+    // Single-direction: all page expansions grow the same id set and move
+    // the outer cursor. Dual-window oldest seed is no longer used.
     for (const id of pageIds) newestIds.add(id);
-    // Expanding older moves the "start" of newest window further back
     if (page?.startCursor) newestStartCursor = page.startCursor;
-    if (dir === 'newest' && page?.endCursor) newestEndCursor = page.endCursor;
-    hasOlder = Boolean(page?.hasPreviousPage);
-  } else {
-    // oldest | newer — expand oldest window toward the middle
-    for (const id of pageIds) oldestIds.add(id);
-    if (page?.endCursor) oldestEndCursor = page.endCursor;
-    if (dir === 'oldest' && page?.startCursor) oldestStartCursor = page.startCursor;
-    hasNewerFromOldest = Boolean(page?.hasNextPage);
+    if (page?.endCursor && (dir === 'newest' || dir === 'older')) {
+      newestEndCursor = page.endCursor;
+    }
+    if (dir === 'newest' || dir === 'older') {
+      hasOlder = Boolean(page?.hasPreviousPage);
+    } else {
+      // oldest | newer — walking forward from oldest edge still uses hasNext
+      hasOlder = Boolean(page?.hasNextPage);
+    }
   }
 
-  // Windows meet when no hidden left or cursors exhausted both ways
   const isRest = page?.source === 'rest';
   // REST pages: totalCount is thread-shaped (not PR.review_comments). Prefer
-  // page.hasMore for dual-window flags — never invent hasMore from a
-  // comment-count vs thread-count gap (Diff auto load-all flicker).
+  // page.hasMore — never invent hasMore from a comment-count vs thread-count gap.
   const totalCount = isRest
     ? Boolean(page?.hasMore)
       ? Math.max(
@@ -663,9 +635,6 @@ export function mergeReviewThreadsPageIntoDetail(detail: any, page: any, directi
       : 0
     : Math.max(0, totalCount - loadedThreadCount);
 
-  // Drop ids from oldest that are now in newest (overlap)
-  for (const id of newestIds) oldestIds.delete(id);
-
   const restHasMore = isRest && Boolean(page?.hasMore);
   const meta = {
     ...prevMeta,
@@ -680,15 +649,14 @@ export function mergeReviewThreadsPageIntoDetail(detail: any, page: any, directi
     newestStartCursor,
     newestEndCursor,
     hasOlder: isRest
-      ? restHasMore && (dir === 'newest' || dir === 'older' || !dir)
+      ? restHasMore
       : hiddenCount > 0 && hasOlder,
-    oldestStartCursor,
-    oldestEndCursor,
-    hasNewerFromOldest: isRest
-      ? restHasMore && (dir === 'oldest' || dir === 'newer')
-      : hiddenCount > 0 && hasNewerFromOldest,
+    // Dual-window retired
+    oldestStartCursor: null,
+    oldestEndCursor: null,
+    hasNewerFromOldest: false,
     newestThreadIds: [...newestIds],
-    oldestThreadIds: [...oldestIds],
+    oldestThreadIds: [],
     hasMore: isRest ? restHasMore : hiddenCount > 0,
     endCursor: newestStartCursor,
     // REST multi-page bookkeeping for load-all

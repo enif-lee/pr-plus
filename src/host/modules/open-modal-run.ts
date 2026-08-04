@@ -1,4 +1,3 @@
-// TypeScript SoT — assembled by build scripts (classic runtime JS emit)
 
   function runOpenModalBody({
     owner,
@@ -26,8 +25,6 @@
     ensurePrefsWatch();
     void ensureAssets();
     const key = detailKey(owner, repo, number);
-    // without closeModal), restamp cache from live detail so soft reopen after
-    // a milestone write does not fall back to a pre-write list sketch.
     try {
       if (
         current?.open &&
@@ -41,7 +38,6 @@
       /* ignore */
     }
     const { gen, signal, metaGenAtStart } = beginOpenFetchSession();
-    // Hydrate people-meta authority from sessionStorage before first paint.
     try {
       if (
         (!lastPeopleMetaAuthority ||
@@ -56,9 +52,6 @@
     } catch {
       /* ignore */
     }
-    // chrome.storage.session hydrate (async): hard reopen clears page
-    // sessionStorage but keeps extension session write-through — reassert when
-    // the bag arrives so first hard open paints modal-set milestone without
     // waiting on lagging REST.
     try {
       if (typeof loadPeopleMetaAuthorityFromChromeSession === 'function') {
@@ -79,7 +72,6 @@
               return;
             }
             lastPeopleMetaAuthority = chromeAuth;
-            // Mirror into page sessionStorage for subsequent soft reopens.
             try {
               persistPeopleMetaAuthority(chromeAuth);
             } catch {
@@ -113,8 +105,6 @@
     } catch {
       /* ignore */
     }
-    // Drop people-meta clear shields on a fresh open so external re-assigns /
-    // milestone restores (and reverse e2e) are not blocked by a recent clear.
     try {
       if (
         typeof lastPeopleMetaAuthority !== 'undefined' &&
@@ -132,7 +122,6 @@
               : Array.isArray(v)
                 ? v.length === 0
                 : !v;
-          // Keep non-empty write-throughs; drop empty clear shields on open.
           if (empty) {
             delete nextFields[k];
             changed = true;
@@ -151,11 +140,8 @@
       /* ignore */
     }
 
-    // Stack strip needs open PR list. List page has it cached; PR-page embed does
-    // not — fetch in background so Stack/header parity matches fullscreen.
     void ensureOpenPullsForStack(owner, repo, { signal });
 
-    // Resolve presentation: explicit > path-based embed > keep current if same PR > modal
     const pathTarget = parsePrPagePath(
       typeof location !== 'undefined' ? location.pathname : ''
     );
@@ -178,7 +164,6 @@
     ) {
       resolvedPresentation = 'embed';
     }
-    // Switching overlay ↔ embed needs a clean host + fresh React root
     if (
       current.open &&
       isEmbedPresentation(current.presentation) !==
@@ -189,17 +174,9 @@
     }
     current.presentation = resolvedPresentation;
 
-    // Progressive sources (fast → slow):
-    //   1) list sketch (pulls page cache — title/body already available)
-    //   2) memory cache
-    //   3) IDB (async, non-blocking)
-    //   4) network core + threads
     const listPr = findListPr(owner, repo, number);
     const listSketch = detailSketchFromList(listPr, owner, repo, number);
 
-    // 1) Sync memory paint first (never block on IDB).
-    // Drop a warm memory entry when its title/body/milestone clearly lags a
-    // list sketch from the live pulls page (external edit / reverse write).
     let peeked = peekDetailMemory(key);
     let cached = peeked.value || null;
     if (cached && listSketch) {
@@ -231,11 +208,7 @@
     }
     let fromCache = Boolean(cached);
     const fromList = !fromCache && Boolean(listSketch);
-    // Prefer real cache over list sketch; else sketch; else empty
     let initialDetail = cached || listSketch || null;
-    // Overlay last confirmed people-meta write onto first paint. Soft reopen
-    // after modal milestone/assignee set must not flash "No milestone" while
-    // list-sketch/cache lag GitHub (session authority survives closeModal).
     try {
       if (
         typeof lastPeopleMetaAuthority !== 'undefined' &&
@@ -245,7 +218,6 @@
         const fields = lastPeopleMetaAuthority.fields || {};
         if (fields && typeof fields === 'object' && Object.keys(fields).length) {
           if (!initialDetail) {
-            // Authority seed only — empty title until network (no PR #N fake).
             initialDetail = {
               owner: String(owner || ''),
               repo: String(repo || ''),
@@ -273,7 +245,6 @@
       /* ignore */
     }
 
-    // Explicit page (stack nav) > path tab (embed) > keep current view > default conversation
     const ghLoc =
       isEmbedPresentation(resolvedPresentation) ||
       (pathTarget &&
@@ -317,8 +288,6 @@
     const resolvedEndLine = endLine != null ? endLine : ghLoc?.endLine ?? null;
     const resolvedSide = side != null ? side : ghLoc?.side || null;
 
-    // Side panels: if we already have cached data, mark settled so revalidate
-    // does not flash section skeletons over real content.
     const initialSideSettled = sideSettledFromDetail(initialDetail);
     const fetchTl = beginFetchTimeline(
       `open ${owner}/${repo}#${number}` +
@@ -334,7 +303,6 @@
     });
     current = {
       open: true,
-      // Only block whole UI when we have nothing to show yet
       loading: !initialDetail,
       error: null,
       detail: initialDetail,
@@ -362,18 +330,14 @@
             ? loadStageLabel('core-full')
             : loadStageLabel('core'),
         busy: true,
-        // Start at unit weight floor; parallel fetches mark up as each resolves
         percent: fetchUnitWeights().start || 5,
       },
     };
-    // Modal + full-page embed: reset activity clock and ensure head.sha poller
     try {
       armAutoRefreshForOpen();
     } catch {
       /* ignore */
     }
-    // Isolated slice store — subsequent core/side/threads writes never clobber
-    // other domains. Flat `detail` is a projection for React.
     if (initialDetail) {
       resetDetailStoreFromFlat(initialDetail);
       current.sideSettled = {
@@ -381,8 +345,6 @@
         ...sideSettledFromDetail(current.detail),
       };
       current.sidePending = emptySideFlags();
-      // Pending only for sides that auto-fetch on open. files/commits are lazy
-      // (aside first-open / Diff ensureAll*) — do not spin "Loading…" while idle.
       const autoFetchSides = new Set([
         'comments',
         'reviews',
@@ -429,11 +391,7 @@
       );
     }
 
-    // ── First paint is done (list sketch / cache / empty skeleton). ──
-    // Everything below upgrades asynchronously and must not delay click→visible.
 
-    // 2) Background IDB hydrate (timeout) — only if memory miss
-    //    Upgrades list-sketch → IDB snapshot; must not delay network.
     const idbHydrateP = !fromCache
       ? peekDetailIdb(key, 400).then((idbPeek) => {
           if (gen !== detailFetchGen) return null;
@@ -451,11 +409,9 @@
           if (!v) return null;
           const curRank = detailRank(current.detail);
           const idbRank = detailRank(v);
-          // Network already delivered richer data — keep IDB only for thread preserve
           if (curRank >= 2 && !current.detail?._sketch) {
             return v;
           }
-          // Upgrade empty / list-sketch → IDB
           if (idbRank > curRank || (current.detail?._sketch && idbRank >= 2)) {
             cached = v;
             fromCache = true;
@@ -505,7 +461,6 @@
             if (isAbortErr(err)) throw err;
             lastErr = err;
             const msg = String(err?.message || err || '');
-            // Context invalidation cannot be fixed by retry — page refresh required
             if (
               /Extension context invalidated|Extension was reloaded/i.test(msg)
             ) {
@@ -526,13 +481,10 @@
         throw lastErr || new Error('Failed to fetch PR detail');
       }
 
-      // Prefs may still be warming; do not re-await for first network phase
       if (!prefsReady) await refreshPrefs();
       ensurePrefsWatch();
       const fastReview = prefs.fastReview !== false;
 
-      // Phase 1+2 kickoff: core + threads in parallel. Progress bar advances
-      // inside each promise's completion (order-independent), not only at the end.
       const openStill = () =>
         gen === detailFetchGen &&
         current.open &&
@@ -553,7 +505,6 @@
         typeof performance !== 'undefined' && performance.now
           ? performance.now()
           : Date.now();
-      // Let IDB finish (or time out) without blocking core fetch
       void idbHydrateP;
 
       const apiMax =
@@ -617,8 +568,6 @@
                 : cacheSnap.comments || detail.comments,
           };
         }
-        // Same headSha only: keep usable Diff bodies from cache when network
-        // core is empty/slim. Different head → never re-attach stale patches.
         if (
           reuse.reuseFiles &&
           cacheSnap &&
@@ -675,8 +624,6 @@
       /** Immediate partial paint when core fetch resolves (do not wait for threads/IDB). */
       function paintCoreNow(raw) {
         if (!openStill() || !raw) return null;
-        // Diagnostics: raw network milestone vs post-apply host detail.
-        // Stamp both modal host and page-embed (viaUrl hard reopen uses embed).
         try {
           const rawMs = raw?.milestone;
           const label =
@@ -1410,8 +1357,8 @@
       }
 
       // Phase 2: await parallel threads kickoff (may already be painted early)
-      // - Cold open: dual-window (newest last:N + oldest first:20)
-      // - Cache revalidate: REST newest (15) + optional bulk unresolved by PRRT ids
+      // - Cold open: single-direction newest window (page 100); load more expands older
+      // - Cache revalidate: newest shell + dirty comment-count by-ids + unresolved bulk
       if (canFetchThreads) {
         try {
           const nowMs = () =>
@@ -1433,6 +1380,13 @@
               );
               render();
             }
+
+            // Snapshot prior threads for dirty comment-count selection (before merge)
+            const prevThreadsForDirty = Array.isArray(
+              current.detail?.reviewThreads
+            )
+              ? current.detail.reviewThreads.slice()
+              : [];
 
             const tNewest0 = nowMs();
             const kick = await threadsKickoffP;
@@ -1469,6 +1423,70 @@
             detail = current.detail;
             detailCache.set(key, detail);
             render();
+
+            // Dirty by comment-count (AC2): re-fetch full comments only when
+            // shell totalCount / resolve flag changed vs prior cache.
+            const TL =
+              typeof globalThis !== 'undefined'
+                ? (globalThis as any).PRModalConversationTimeline
+                : null;
+            const dirtyByCount =
+              typeof TL?.selectDirtyThreadIdsByCommentCount === 'function'
+                ? TL.selectDirtyThreadIdsByCommentCount(
+                    prevThreadsForDirty,
+                    newest?.threads || []
+                  )
+                : [];
+            if (
+              dirtyByCount.length &&
+              typeof globalThis.PRTreeFetch?.fetchReviewThreadsByIds ===
+                'function' &&
+              openStill()
+            ) {
+              try {
+                if (current.loadStage?.busy) {
+                  setLoadStage(
+                    'threads',
+                    loadStageLabel('threads-comments'),
+                    true,
+                    { percent: Math.min(99, prog.percent()) }
+                  );
+                  render();
+                }
+                const tDirty0 = nowMs();
+                const dirtyBulk =
+                  await globalThis.PRTreeFetch.fetchReviewThreadsByIds(
+                    dirtyByCount,
+                    { signal }
+                  );
+                console.log(
+                  `[pr-plus] openModal phase=threads.dirty-by-count ${owner}/${repo}#${number}: ${Math.round(
+                    nowMs() - tDirty0
+                  )}ms (${dirtyBulk?.threads?.length || 0}/${dirtyByCount.length} dirty)`
+                );
+                if (
+                  openStill() &&
+                  typeof mergeFn === 'function' &&
+                  dirtyBulk
+                ) {
+                  next = mergeFn(next, dirtyBulk, 'refresh');
+                  applyThreadsToStore(next);
+                  detail = current.detail;
+                  detailCache.set(key, detail);
+                  render();
+                }
+              } catch (err: any) {
+                if (
+                  err?.name === 'AbortError' ||
+                  /aborted|AbortError/i.test(String(err?.message || ''))
+                ) {
+                  throw err;
+                }
+                console.log(
+                  `[pr-plus] openModal dirty-by-count soft-fail ${err?.message || err}`
+                );
+              }
+            }
 
             // Remaining unresolved not in newest page (extra comments bulk).
             const RT =
@@ -1515,6 +1533,8 @@
             let didUnresolvedFetch = false;
             /** PRRT ids confirmed remote-missing this open — never re-fetch. */
             const knownMissing = new Set();
+            // Already hydrated via dirty-by-count — don't re-request
+            for (const id of dirtyByCount) knownMissing.add(String(id));
             if (skipByIds) {
               console.log(
                 `[pr-plus] openModal phase=threads.unresolved-remaining ${owner}/${repo}#${number}: skipped by-id bulk`
@@ -1594,7 +1614,7 @@
               render();
             }
           } else {
-            // —— Cold open: newest shell(+eager) then optional oldest window ——
+            // —— Cold open: single-direction newest shell only (no dual oldest seed) ——
             const tNewest0 = nowMs();
             const kick = await threadsKickoffP;
             if (!kick.ok) throw kick.err || new Error('Threads fetch failed');
@@ -1622,63 +1642,15 @@
               typeof newest.totalCount === 'number'
                 ? newest.totalCount
                 : newest.threads?.length || 0;
-            const newestLoaded = Array.isArray(newest.threads)
-              ? newest.threads.length
-              : 0;
-            // Oldest window when GraphQL says more exist behind the newest page,
-            // or totalCount exceeds what the newest window returned (even if
-            // total < PAGE_SIZE due to a short adaptive probe).
-            const needStartWindow =
-              Boolean(newest.hasPreviousPage) ||
-              (totalCount > newestLoaded && newestLoaded > 0);
-            if (needStartWindow && openStill()) {
-              try {
-                setLoadStage(
-                  'threads',
-                  loadStageLabel('threads-shell'),
-                  true,
-                  { percent: prog.percent() }
-                );
-                render();
-                const tOldest0 = nowMs();
-                const oldest =
-                  await globalThis.PRTreeFetch.fetchReviewThreadsPage(
-                    owner,
-                    repo,
-                    number,
-                    {
-                      direction: 'oldest',
-                      cursor: null,
-                      pageSize:
-                        Number(
-                          globalThis.PRModalReviewThreads
-                            ?.REVIEW_THREADS_PAGE_SIZE
-                        ) || 100,
-                      skipEagerComments: true,
-                      signal,
-                    }
-                  );
-                console.log(
-                  `[pr-plus] openModal phase=threads.start ${owner}/${repo}#${number}: ${Math.round(
-                    nowMs() - tOldest0
-                  )}ms (${oldest?.threads?.length || 0} threads, total=${totalCount})`
-                );
-                if (openStill() && typeof mergeFn === 'function') {
-                  next = mergeFn(next, oldest, 'oldest');
-                }
-              } catch {
-                /* keep last-only window */
-              }
-            } else if (!needStartWindow) {
-              console.log(
-                `[pr-plus] openModal phase=threads.start ${owner}/${repo}#${number}: skipped (total=${totalCount} < ${apiMax})`
-              );
-            }
+            // Remaining pages load via Conversation/Diff load more|all (single cursor).
+            console.log(
+              `[pr-plus] openModal phase=threads.start ${owner}/${repo}#${number}: skipped dual-seed (single-direction; total=${totalCount} hasPrevious=${Boolean(newest.hasPreviousPage)})`
+            );
             creditAllThreadStages();
             console.log(
               `[pr-plus] openModal phase=threads ${owner}/${repo}#${number}: ${Math.round(
                 nowMs() - tThreads0
-              )}ms total pct=${prog.percent()} earlier=${needStartWindow ? 'fetched' : 'skip'}`
+              )}ms total pct=${prog.percent()} earlier=skip`
             );
             if (openStill() && current.detail) {
               applyThreadsToStore(next);
@@ -1700,7 +1672,7 @@
               try {
                 const props = buildProps();
                 if (typeof props.onLoadMoreReviewThreads === 'function') {
-                  await props.onLoadMoreReviewThreads('all');
+                  await props.onLoadMoreReviewThreads('threads-all');
                 }
               } catch {
                 /* stage error already surfaced */

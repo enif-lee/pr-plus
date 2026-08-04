@@ -171,7 +171,7 @@ describe('wiring: Conversation scroller → Mermaid gate', () => {
   });
 });
 
-describe('conversation dual-window gap chrome', () => {
+describe('conversation single-direction load-more chrome', () => {
   test('buildConversationVirtualRows keeps gap when showThreadGap even if hiddenCount is 0', () => {
     const {
       buildConversationVirtualRows,
@@ -188,10 +188,13 @@ describe('conversation dual-window gap chrome', () => {
     expect(rows.some((r) => r.type === 'gap')).toBe(true);
   });
 
-  test('load-more pickDirection recovery is wired in host props-build', () => {
+  test('load-more pickDirection is single-cursor older/newest in host props-build', () => {
     const src = read('src/host/modules/props-build.ts');
-    expect(src).toMatch(/oldestThreadIds/);
-    expect(src).toMatch(/return 'oldest'/);
-    expect(src).toMatch(/hasMore with neither cursor flag/);
+    // Dual-window middle gap retired — only older/newest single cursor (+ timeline)
+    expect(src).toMatch(/pickDirection/);
+    expect(src).toMatch(/return 'older'/);
+    expect(src).toMatch(/return 'newest'/);
+    expect(src).toMatch(/loadOneTimelinePage/);
+    expect(src).not.toMatch(/hasMore with neither cursor flag/);
   });
 });

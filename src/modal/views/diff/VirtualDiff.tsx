@@ -309,6 +309,28 @@ function VirtualDiffImpl(props: any) {
     if (!key) return;
     setExpandedLineKeys((prev) => {
       const next = toggleExpandKey(prev, key);
+      // E2e/debug: surface last expand key so harness can observe state without fiber.
+      try {
+        const host =
+          typeof document !== 'undefined'
+            ? document.getElementById('prp-page-embed') ||
+              document.querySelector('.prp-modal')
+            : null;
+        host?.setAttribute?.(
+          'data-prp-line-expand',
+          JSON.stringify({
+            key,
+            size: next.size,
+            has: next.has(key),
+            path: row?.filePath || row?.path || null,
+            oldLine: row?.oldLine ?? null,
+            newLine: row?.newLine ?? null,
+            lineType: row?.lineType || null,
+          })
+        );
+      } catch {
+        /* ignore */
+      }
       if (!next.has(key)) {
         // Collapsed — drop measured height
         setMeasuredHeights((m) => {

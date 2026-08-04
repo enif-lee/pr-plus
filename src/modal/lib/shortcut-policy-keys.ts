@@ -45,10 +45,79 @@ export function isComposerKeyboardTarget(
   try {
     if (node.closest?.('[data-prp-composer], .prp-mdc')) return true;
     if (node.classList?.contains?.('prp-mdc__ta')) return true;
+    // Mode tabs / submit chrome sit outside .prp-mdc but inside the form root
+    if (node.closest?.('[data-prp-composer-root]')) return true;
   } catch {
     /* ignore */
   }
   return false;
+}
+
+/**
+ * Surface for composer-context chords (⌥E/C/I/T, ⌘↵).
+ *
+ * 1. Focused reply / selection / conversation composer → that surface.
+ * 2. Else, if focus is not another editable, the main conversation footer
+ *    composer (where Opt-hold tips always show, including collapsed ghost).
+ */
+export function findComposerShortcutSurface(opts: {
+  activeElement?: Element | null;
+  eventTarget?: EventTarget | null;
+  doc?: Document | null;
+} = {}): {
+  active: boolean;
+  root: HTMLElement | null;
+  mdc: HTMLElement | null;
+} {
+  const doc =
+    opts.doc ??
+    (typeof document !== 'undefined' ? document : null);
+  const ae = (opts.activeElement ||
+    opts.eventTarget ||
+    null) as HTMLElement | null;
+
+  if (ae && isComposerKeyboardTarget(ae)) {
+    let mdc: HTMLElement | null = null;
+    let root: HTMLElement | null = null;
+    try {
+      mdc =
+        (ae.closest?.('[data-prp-composer], .prp-mdc') as HTMLElement | null) ||
+        null;
+      root =
+        (ae.closest?.('[data-prp-composer-root]') as HTMLElement | null) ||
+        (mdc?.closest?.('[data-prp-composer-root]') as HTMLElement | null) ||
+        null;
+      if (!mdc && root) {
+        mdc =
+          (root.querySelector?.(
+            '[data-prp-composer], .prp-mdc'
+          ) as HTMLElement | null) || null;
+      }
+    } catch {
+      /* ignore */
+    }
+    return { active: true, root, mdc };
+  }
+
+  // Typing outside a composer — do not steal for footer tips
+  if (ae && isEditableKeyboardTarget(ae)) {
+    return { active: false, root: null, mdc: null };
+  }
+
+  if (!doc) return { active: false, root: null, mdc: null };
+  try {
+    const root = doc.querySelector(
+      '[data-prp-composer-root][data-prp-composer-kind="conversation"]'
+    ) as HTMLElement | null;
+    if (!root) return { active: false, root: null, mdc: null };
+    const mdc =
+      (root.querySelector(
+        '[data-prp-composer], .prp-mdc'
+      ) as HTMLElement | null) || null;
+    return { active: true, root, mdc };
+  } catch {
+    return { active: false, root: null, mdc: null };
+  }
 }
 
 /**

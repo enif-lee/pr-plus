@@ -336,7 +336,7 @@ export function runPaletteCommand(d: Record<string, any>, cmd: any) {
       if (p.login) void onRemoveAssignee(p.login);
       break;
     case 'promptLabels':
-      openLabelPicker();
+      openLabelPicker?.();
       break;
     case 'leaveReview': {
       const kind = p.kind || 'comment';

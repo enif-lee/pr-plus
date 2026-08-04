@@ -1,6 +1,7 @@
 import {
   timelineEventToItem,
 } from './conversation-timeline-events';
+import { partitionConversationLoadMore } from './timeline-pagination';
 
 /** Split from conversation-timeline.ts: conversation-timeline-build */
 /** @module modal/lib/conversation-timeline */
@@ -385,89 +386,21 @@ export function pageTimelineItems(items, opts: any = {}) {
 }
 
 /**
- * Split newest-first timeline into dual windows + middle gap.
+ * Conversation Load more fold (threads + timelineItems).
+ * Placement: end while threads incomplete; middle at timeline coverage floor
+ * when threads are complete but timelineItems still has older pages (e.g. after
+ * Diff auto load-all of review threads).
+ *
  * @param {Array} items
- * @param {object|null} meta
+ * @param {object|null} threadsMeta reviewThreadsMeta
+ * @param {object|null} timelineMeta detail.timelineMeta
  */
-export function partitionTimelineWithThreadGap(items, meta: any = null) {
-  const list = Array.isArray(items) ? items : [];
-  const hiddenCount = Math.max(0, Number(meta?.hiddenCount) || 0);
-  const oldestIds = new Set(
-    (meta?.oldestThreadIds || []).map(String).filter(Boolean)
-  );
-  const wantsGap = Boolean(meta?.hasMore) && hiddenCount > 0;
-
-  if (!wantsGap || oldestIds.size === 0) {
-    return {
-      top: list,
-      bottom: [],
-      hiddenCount,
-      showGap: wantsGap,
-    };
-  }
-
-  function inOldestWindow(item: any) {
-    if (!item) return false;
-    if (item.kind === 'review-group') {
-      return (item.threads || []).some(
-        (t: any) =>
-          t?.threadNodeId != null && oldestIds.has(String(t.threadNodeId))
-      );
-    }
-    const tid =
-      item.threadNodeId != null
-        ? String(item.threadNodeId)
-        : item.thread_node_id != null
-          ? String(item.thread_node_id)
-          : null;
-    return (
-      (item.kind === 'review-thread' || item.kind === 'review-comment') &&
-      tid &&
-      oldestIds.has(tid)
-    );
-  }
-
-  // Cutoff = newest timestamp among oldest-window review threads. Every feed
-  // item at or before that time (system events, comments, other threads) must
-  // sit in `bottom` with those threads — otherwise old label/title/milestone
-  // rows stay in `top` above the gap while older threads go below, breaking
-  // chronological order.
-  let cutoffMs = 0;
-  for (const item of list) {
-    if (!inOldestWindow(item)) continue;
-    const t = timelineItemTimeMs(item);
-    if (t > cutoffMs) cutoffMs = t;
-  }
-
-  const top = [];
-  const bottom = [];
-  for (const item of list) {
-    const t = timelineItemTimeMs(item);
-    if (
-      inOldestWindow(item) ||
-      (cutoffMs > 0 && t > 0 && t <= cutoffMs)
-    ) {
-      bottom.push(item);
-    } else {
-      top.push(item);
-    }
-  }
-
-  if (bottom.length === 0) {
-    return {
-      top: list,
-      bottom: [],
-      hiddenCount,
-      showGap: wantsGap,
-    };
-  }
-
-  return {
-    top,
-    bottom,
-    hiddenCount,
-    showGap: true,
-  };
+export function partitionTimelineWithThreadGap(
+  items,
+  threadsMeta: any = null,
+  timelineMeta: any = null
+) {
+  return partitionConversationLoadMore(items, threadsMeta, timelineMeta);
 }
 
 // ---------------------------------------------------------------------------

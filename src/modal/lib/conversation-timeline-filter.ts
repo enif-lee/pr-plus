@@ -5,41 +5,16 @@ import {
 /** Split from conversation-timeline.ts: conversation-timeline-filter */
 /** @module modal/lib/conversation-timeline */
 /**
- * Build GitHub-like conversation timeline + pagination for review comments.
- * Multiple file threads from the same Pull Request Review are grouped under
- * a single review-group entry (GitHub conversation UI).
- *
- * Also merges REST issue system events (title rename, draft/ready, labels,
- * assignees, review requests, milestones, closed/reopened, …).
+ * Conversation timeline tip filters (client-only).
+ * Four categories: events | participants | comments | review-threads.
+ * Network pages stay unfiltered so cursors remain stable.
  */
 
-/**
- * @typedef {{ type: 'text', text: string }
- *   | { type: 'strong', text: string }
- *   | { type: 'title', text: string }
- *   | { type: 'status', text: string, tone?: string }
- *   | { type: 'code', text: string }
- *   | { type: 'commit', text: string }
- *   | { type: 'branch', text: string }
- *   | { type: 'user', login: string }
- *   | { type: 'label', name: string, color?: string }
- *   | { type: 'milestone', title: string }
- * } TimelinePart
- */
-
-/**
- * Build GitHub-style narrative parts for a system timeline event (after actor).
- * @param {object} ev normalized event from fetchPrTimelineEvents
- * @returns {TimelinePart[]|null} null when the event should not be shown
- */
 export const TIMELINE_CATEGORY_IDS = [
-  'labels',
-  'title',
-  'milestone',
-  'assignees',
-  'reviewers',
-  'referenced',
+  'events',
+  'participants',
   'comments',
+  'review-threads',
 ] as const;
 
 export type TimelineCategoryId = (typeof TIMELINE_CATEGORY_IDS)[number];
@@ -52,30 +27,32 @@ export type TimelineTipId = (typeof TIMELINE_TIP_IDS)[number];
 /** Human labels for tips (conversation row + plugin settings) — short chips. */
 export const TIMELINE_TIP_LABELS: Record<TimelineTipId, string> = {
   all: 'All',
-  labels: 'label',
-  title: 'title',
-  milestone: 'milestone',
-  assignees: 'assignee',
-  reviewers: 'reviewer',
-  referenced: 'referenced',
+  events: 'events',
+  participants: 'participants',
   comments: 'comments',
+  'review-threads': 'threads',
 };
 
 /** Default: every category visible. */
 export const DEFAULT_TIMELINE_VISIBILITY: Record<TimelineCategoryId, boolean> = {
-  labels: true,
-  title: true,
-  milestone: true,
-  assignees: true,
-  reviewers: true,
-  referenced: true,
+  events: true,
+  participants: true,
   comments: true,
+  'review-threads': true,
 };
+
+/** Legacy tip keys (pre 4-category model). */
+const LEGACY_EVENT_KEYS = [
+  'labels',
+  'title',
+  'milestone',
+  'referenced',
+] as const;
+const LEGACY_PARTICIPANT_KEYS = ['assignees', 'reviewers'] as const;
 
 /**
  * Normalize prefs.timelineVisibility map. Missing keys default to visible.
- * @param {unknown} raw
- * @returns {Record<TimelineCategoryId, boolean>}
+ * Migrates legacy 7-key maps into the 4-category model.
  */
 export function normalizeTimelineVisibility(
   raw: unknown
@@ -85,10 +62,27 @@ export function normalizeTimelineVisibility(
       ? (raw as Record<string, unknown>)
       : {};
   const out = { ...DEFAULT_TIMELINE_VISIBILITY };
+
+  // New keys take precedence when present.
   for (const id of TIMELINE_CATEGORY_IDS) {
     if (typeof src[id] === 'boolean') out[id] = src[id] as boolean;
   }
-  // Explicit "all: true" forces every category on
+
+  // Legacy migration when new keys absent.
+  const hasNewKey = TIMELINE_CATEGORY_IDS.some((id) => typeof src[id] === 'boolean');
+  if (!hasNewKey) {
+    const anyLegacy = [...LEGACY_EVENT_KEYS, ...LEGACY_PARTICIPANT_KEYS, 'comments'].some(
+      (k) => typeof src[k] === 'boolean'
+    );
+    if (anyLegacy) {
+      out.events = LEGACY_EVENT_KEYS.some((k) => src[k] !== false);
+      out.participants = LEGACY_PARTICIPANT_KEYS.some((k) => src[k] !== false);
+      if (typeof src.comments === 'boolean') out.comments = src.comments;
+      // Review threads were folded into "comments" tip previously — keep on.
+      out['review-threads'] = true;
+    }
+  }
+
   if (src.all === true) {
     for (const id of TIMELINE_CATEGORY_IDS) out[id] = true;
   }
@@ -132,53 +126,68 @@ export function toggleTimelineTip(
 /**
  * Map a built timeline item (or raw issue event) to a tip category, or null
  * when the row is always shown (description chrome, other system events).
- *
- * @param {object} item timeline item from buildConversationTimeline or raw event
- * @returns {TimelineCategoryId|null}
  */
 export function timelineItemCategory(item: any): TimelineCategoryId | null {
   if (!item || typeof item !== 'object') return null;
   const kind = String(item.kind || '');
-  if (
-    kind === 'issue-comment' ||
-    kind === 'review-thread' ||
-    kind === 'review-comment' ||
-    kind === 'review-group' ||
-    kind === 'review'
-  ) {
-    return 'comments';
+
+  if (kind === 'issue-comment') return 'comments';
+  if (kind === 'review-thread' || kind === 'review-comment') {
+    return 'review-threads';
   }
+  // Review body / multi-file group — comments tip (not file-thread fold).
+  if (kind === 'review-group' || kind === 'review') return 'comments';
+
+  // Explicit category from GraphQL mapper (preferred).
+  const cat = String(item.category || '').trim().toLowerCase();
+  if ((TIMELINE_CATEGORY_IDS as readonly string[]).includes(cat)) {
+    return cat as TimelineCategoryId;
+  }
+
   // timeline-event or raw REST event
   const event = String(item.event || '').trim().toLowerCase();
-  if (event === 'labeled' || event === 'unlabeled') return 'labels';
-  if (event === 'renamed') return 'title';
-  if (event === 'milestoned' || event === 'demilestoned') return 'milestone';
-  if (event === 'assigned' || event === 'unassigned') return 'assignees';
   if (
+    event === 'assigned' ||
+    event === 'unassigned' ||
     event === 'review_requested' ||
     event === 'review_request_removed'
   ) {
-    return 'reviewers';
+    return 'participants';
   }
-  // "referenced this pull request from commit" + related cross-repo mentions
   if (
+    event === 'labeled' ||
+    event === 'unlabeled' ||
+    event === 'renamed' ||
+    event === 'milestoned' ||
+    event === 'demilestoned' ||
     event === 'referenced' ||
     event === 'cross-referenced' ||
     event === 'connected' ||
-    event === 'disconnected'
+    event === 'disconnected' ||
+    event === 'closed' ||
+    event === 'reopened' ||
+    event === 'merged' ||
+    event === 'convert_to_draft' ||
+    event === 'ready_for_review' ||
+    event === 'head_ref_force_pushed' ||
+    event === 'base_ref_changed' ||
+    event === 'locked' ||
+    event === 'unlocked' ||
+    event === 'added_to_project' ||
+    event === 'removed_from_project' ||
+    event === 'moved_columns_in_project' ||
+    event === 'project_v2_item_status_changed'
   ) {
-    return 'referenced';
+    return 'events';
   }
+  // timeline-event without recognized event still treated as events when kind set
+  if (kind === 'timeline-event' || kind === 'system-event') return 'events';
   return null;
 }
 
 /**
- * Filter timeline items by visibility map. Items with no category (other
- * system events) always pass through.
- *
- * @param {any[]} items
- * @param {unknown} visibility
- * @returns {any[]}
+ * Filter timeline items by visibility map. Items with no category always pass.
+ * Client-only — never drives GraphQL itemTypes.
  */
 export function filterTimelineItemsByVisibility(
   items: any,
@@ -194,26 +203,18 @@ export function filterTimelineItemsByVisibility(
 }
 
 /**
- * Whether REST issue **system** timeline events should be fetched.
- * False only when all system tips are off (labels/title/milestone/assignees/
- * reviewers/referenced). Comments tip is independent — issue comments /
- * review threads use other endpoints.
+ * Whether system timeline *events* are visible (events or participants tip on).
+ * Used only for lazy client display decisions — product GraphQL pages stay
+ * unfiltered. Always true when either tip is on.
  */
 export function shouldFetchSystemTimelineEvents(visibility: unknown): boolean {
   const vis = normalizeTimelineVisibility(visibility);
-  return (
-    vis.labels !== false ||
-    vis.title !== false ||
-    vis.milestone !== false ||
-    vis.assignees !== false ||
-    vis.reviewers !== false ||
-    vis.referenced !== false
-  );
+  return vis.events !== false || vis.participants !== false;
 }
 
 /**
- * Whether re-enabling tips requires a lazy events fetch (system tips newly on
- * and no usable events payload yet).
+ * Whether re-enabling tips requires a lazy events fetch.
+ * With GraphQL-first unfiltered pages, usually false once any page landed.
  */
 export function needsLazyTimelineEventsFetch(
   prevVisibility: unknown,
@@ -222,29 +223,19 @@ export function needsLazyTimelineEventsFetch(
 ): boolean {
   if (!shouldFetchSystemTimelineEvents(nextVisibility)) return false;
   if (shouldFetchSystemTimelineEvents(prevVisibility)) {
-    // Already wanted system events — only refetch if we never got any and
-    // a tip that was off is now on (partial skip may have left empty).
     const prev = normalizeTimelineVisibility(prevVisibility);
     const next = normalizeTimelineVisibility(nextVisibility);
-    const newlyOn = TIMELINE_CATEGORY_IDS.some(
-      (id) => id !== 'comments' && prev[id] === false && next[id] !== false
-    );
+    const newlyOn =
+      (prev.events === false && next.events !== false) ||
+      (prev.participants === false && next.participants !== false);
     if (!newlyOn) return false;
   }
   const te = Array.isArray(timelineEvents) ? timelineEvents : [];
-  // Empty or missing — need fetch. If we already have events, filter-only.
   return te.length === 0;
 }
 
 /**
- * Host tip-toggle plan: **capture prev before writing next**, then decide lazy
- * REST events fetch. Callers must not read prev from prefs after optimistic write
- * (that clobbers prev===next and skips fetch).
- *
- * @param {unknown} prevVisibility current prefs.timelineVisibility
- * @param {unknown} nextVisibility tip-toggle result
- * @param {any} timelineEvents current detail.timelineEvents
- * @returns {{ nextVisibility: Record<TimelineCategoryId, boolean>, shouldLazyFetch: boolean, prevVisibility: Record<TimelineCategoryId, boolean> }}
+ * Host tip-toggle plan: capture prev before writing next, then decide lazy fetch.
  */
 export function planTimelineVisibilityChange(
   prevVisibility: unknown,
@@ -265,22 +256,14 @@ export function planTimelineVisibilityChange(
 }
 
 /**
- * Whether ConversationView should take host/storage `timelineVisibility` props
+ * Whether ConversationView should take host/storage timelineVisibility props
  * into local optimistic state.
- *
- * After a tip click we keep an optimistic lock until `ignoreHostUntilMs`.
- * Non-matching host/storage updates in that window are ignored so a lagging
- * prefs write (or watch echo of a prior map) cannot clobber the chip the user
- * just flipped — even after an intermediate host match cleared `pendingEmit`.
  */
 export function shouldAcceptTimelineVisibilityFromHost(opts: {
   incoming: unknown;
   lastEmitted: unknown;
-  /** @deprecated kept for call-site compat; lock is driven by ignoreHostUntilMs */
   pendingEmit?: boolean;
-  /** Epoch ms — defaults to Date.now() when omitted. */
   nowMs?: number;
-  /** Ignore non-matching host props until this epoch ms (optimistic lock TTL). */
   ignoreHostUntilMs?: number;
 }): { accept: boolean; clearPending: boolean } {
   const incoming = normalizeTimelineVisibility(opts.incoming);
@@ -293,9 +276,10 @@ export function shouldAcceptTimelineVisibilityFromHost(opts: {
   const now = Number(opts.nowMs ?? Date.now());
   const until = Number(opts.ignoreHostUntilMs || 0);
   if (until > 0 && now < until) {
-    // Still inside tip-click optimistic lock — drop lagging host maps.
     return { accept: false, clearPending: false };
   }
-  // Lock idle or expired — accept external host truth (popup / other tab).
   return { accept: true, clearPending: true };
 }
+
+// Keep import used for side-effect type coupling in barrel consumers.
+void buildConversationTimeline;

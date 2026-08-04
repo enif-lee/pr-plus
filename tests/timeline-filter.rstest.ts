@@ -133,93 +133,66 @@ function mixedDetail() {
 }
 
 describe('timelineItemCategory + filterTimelineItemsByVisibility', () => {
-  test('categorizes mixed built timeline', () => {
+  test('categorizes mixed built timeline into 4 tips', () => {
     const items = buildConversationTimeline(mixedDetail());
     const cats = items.map((i) => timelineItemCategory(i));
-    expect(cats).toContain('labels');
-    expect(cats).toContain('title');
-    expect(cats).toContain('milestone');
-    expect(cats).toContain('assignees');
-    expect(cats).toContain('reviewers');
+    expect(cats).toContain('events');
+    expect(cats).toContain('participants');
     expect(cats).toContain('comments');
-    expect(cats).toContain('referenced');
-    // closed has no tip category — always shown
+    // closed maps to events under 4-category model
     const closed = items.find((i) => i.event === 'closed');
-    expect(timelineItemCategory(closed)).toBe(null);
+    expect(timelineItemCategory(closed)).toBe('events');
   });
 
-  test('short tip labels include assignee/reviewer', () => {
-    expect(TIMELINE_TIP_LABELS.labels).toBe('label');
-    expect(TIMELINE_TIP_LABELS.title).toBe('title');
-    expect(TIMELINE_TIP_LABELS.milestone).toBe('milestone');
-    expect(TIMELINE_TIP_LABELS.assignees).toBe('assignee');
-    expect(TIMELINE_TIP_LABELS.reviewers).toBe('reviewer');
-    expect(TIMELINE_TIP_LABELS.referenced).toBe('referenced');
+  test('short tip labels for 4 categories', () => {
+    expect(TIMELINE_TIP_LABELS.events).toBe('events');
+    expect(TIMELINE_TIP_LABELS.participants).toBe('participants');
     expect(TIMELINE_TIP_LABELS.comments).toBe('comments');
-    expect(TIMELINE_CATEGORY_IDS).toContain('referenced');
-    expect(TIMELINE_CATEGORY_IDS).toContain('assignees');
-    expect(TIMELINE_CATEGORY_IDS).toContain('reviewers');
+    expect(TIMELINE_TIP_LABELS['review-threads']).toBe('threads');
+    expect([...TIMELINE_CATEGORY_IDS]).toEqual([
+      'events',
+      'participants',
+      'comments',
+      'review-threads',
+    ]);
   });
 
-  test('referenced / cross-referenced map to referenced category', () => {
+  test('referenced / labeled map to events; assignees / reviewers to participants', () => {
     expect(
       timelineItemCategory({ kind: 'timeline-event', event: 'referenced' })
-    ).toBe('referenced');
+    ).toBe('events');
     expect(
       timelineItemCategory({
         kind: 'timeline-event',
         event: 'cross-referenced',
       })
-    ).toBe('referenced');
+    ).toBe('events');
     expect(
-      timelineItemCategory({ kind: 'timeline-event', event: 'connected' })
-    ).toBe('referenced');
-  });
-
-  test('assigned / review_requested map to assignees / reviewers', () => {
+      timelineItemCategory({ kind: 'timeline-event', event: 'labeled' })
+    ).toBe('events');
     expect(
       timelineItemCategory({ kind: 'timeline-event', event: 'assigned' })
-    ).toBe('assignees');
-    expect(
-      timelineItemCategory({ kind: 'timeline-event', event: 'unassigned' })
-    ).toBe('assignees');
+    ).toBe('participants');
     expect(
       timelineItemCategory({
         kind: 'timeline-event',
         event: 'review_requested',
       })
-    ).toBe('reviewers');
-    expect(
-      timelineItemCategory({
-        kind: 'timeline-event',
-        event: 'review_request_removed',
-      })
-    ).toBe('reviewers');
+    ).toBe('participants');
   });
 
   test('hiding each category removes only that kind', () => {
     const items = buildConversationTimeline(mixedDetail());
     const total = items.length;
 
-    for (const cat of [
-      'labels',
-      'title',
-      'milestone',
-      'assignees',
-      'reviewers',
-      'referenced',
-      'comments',
-    ] as const) {
+    for (const cat of TIMELINE_CATEGORY_IDS) {
       const vis = { ...DEFAULT_TIMELINE_VISIBILITY, [cat]: false };
       const filtered = filterTimelineItemsByVisibility(items, vis);
-      expect(filtered.length).toBeLessThan(total);
-      expect(filtered.every((i) => timelineItemCategory(i) !== cat)).toBe(true);
-      // Other tip categories still present when they exist in fixture
-      if (cat !== 'labels') {
-        expect(filtered.some((i) => timelineItemCategory(i) === 'labels')).toBe(
-          true
-        );
+      // review-threads may be empty in mixedDetail (no standalone threads after grouping)
+      if (items.some((i) => timelineItemCategory(i) === cat)) {
+        expect(filtered.length).toBeLessThan(total);
       }
+      expect(filtered.every((i) => timelineItemCategory(i) !== cat)).toBe(true);
     }
   });
 
@@ -236,22 +209,17 @@ describe('timelineItemCategory + filterTimelineItemsByVisibility', () => {
   test('toggle all turns every category on when any is off', () => {
     const on = toggleTimelineTip(
       {
-        labels: false,
-        title: false,
-        milestone: true,
-        assignees: false,
-        reviewers: false,
-        referenced: false,
+        events: false,
+        participants: false,
         comments: true,
+        'review-threads': false,
       },
       'all'
     );
     expect(isTimelineVisibilityAllOn(on)).toBe(true);
-    expect(on.labels).toBe(true);
-    expect(on.title).toBe(true);
-    expect(on.assignees).toBe(true);
-    expect(on.reviewers).toBe(true);
-    expect(on.referenced).toBe(true);
+    expect(on.events).toBe(true);
+    expect(on.participants).toBe(true);
+    expect(on['review-threads']).toBe(true);
   });
 
   test('toggle all turns every category off when all already on', () => {
@@ -266,9 +234,9 @@ describe('timelineItemCategory + filterTimelineItemsByVisibility', () => {
   });
 
   test('toggle category flips one key', () => {
-    const next = toggleTimelineTip(DEFAULT_TIMELINE_VISIBILITY, 'labels');
-    expect(next.labels).toBe(false);
-    expect(next.title).toBe(true);
+    const next = toggleTimelineTip(DEFAULT_TIMELINE_VISIBILITY, 'events');
+    expect(next.events).toBe(false);
+    expect(next.comments).toBe(true);
     expect(isTimelineVisibilityAllOn(next)).toBe(false);
   });
 
@@ -384,62 +352,41 @@ describe('tips placement between merge and timeline', () => {
 });
 
 describe('partial fetch + lazy merge helpers', () => {
-  test('shouldFetchSystemTimelineEvents false only when all system tips off', () => {
+  test('shouldFetchSystemTimelineEvents false only when events+participants off', () => {
     expect(
       shouldFetchSystemTimelineEvents({
-        labels: false,
-        title: false,
-        milestone: false,
-        assignees: false,
-        reviewers: false,
-        referenced: false,
+        events: false,
+        participants: false,
         comments: true,
+        'review-threads': true,
       })
     ).toBe(false);
     expect(
       shouldFetchSystemTimelineEvents({
-        labels: false,
-        title: false,
-        milestone: false,
-        assignees: false,
-        reviewers: false,
-        referenced: true,
+        events: true,
+        participants: false,
         comments: false,
+        'review-threads': false,
       })
     ).toBe(true);
     expect(
       shouldFetchSystemTimelineEvents({
-        labels: true,
-        title: false,
-        milestone: false,
+        events: false,
+        participants: true,
         comments: false,
-      })
-    ).toBe(true);
-    // assignees alone still requires system events fetch
-    expect(
-      shouldFetchSystemTimelineEvents({
-        labels: false,
-        title: false,
-        milestone: false,
-        assignees: true,
-        reviewers: false,
-        referenced: false,
-        comments: false,
+        'review-threads': false,
       })
     ).toBe(true);
   });
 
   test('needsLazyTimelineEventsFetch when tip re-enabled and events empty', () => {
     const prev = {
-      labels: false,
-      title: false,
-      milestone: false,
-      assignees: false,
-      reviewers: false,
-      referenced: false,
+      events: false,
+      participants: false,
       comments: true,
+      'review-threads': true,
     };
-    const next = { ...prev, labels: true };
+    const next = { ...prev, events: true };
     expect(needsLazyTimelineEventsFetch(prev, next, [])).toBe(true);
     expect(
       needsLazyTimelineEventsFetch(prev, next, [
@@ -449,29 +396,25 @@ describe('partial fetch + lazy merge helpers', () => {
   });
 
   test('planTimelineVisibilityChange captures prev before write (shipped host order)', () => {
-    // System tips all off → partial-fetch skip left events empty
     let prefsVis = {
-      labels: false,
-      title: false,
-      milestone: false,
+      events: false,
+      participants: false,
       comments: true,
+      'review-threads': true,
     };
     const timelineEvents: any[] = [];
-    // User re-enables labels via tip toggle
-    const nextRaw = toggleTimelineTip(prefsVis, 'labels');
-    expect(nextRaw.labels).toBe(true);
+    const nextRaw = toggleTimelineTip(prefsVis, 'events');
+    expect(nextRaw.events).toBe(true);
 
-    // Correct host order: plan with prev BEFORE optimistic prefs write
     const plan = planTimelineVisibilityChange(
       prefsVis,
       nextRaw,
       timelineEvents
     );
     expect(plan.shouldLazyFetch).toBe(true);
-    expect(plan.prevVisibility.labels).toBe(false);
-    expect(plan.nextVisibility.labels).toBe(true);
+    expect(plan.prevVisibility.events).toBe(false);
+    expect(plan.nextVisibility.events).toBe(true);
 
-    // Bug class: if host wrote prefs first, watch path sees prev===next
     prefsVis = plan.nextVisibility;
     const clobbered = needsLazyTimelineEventsFetch(
       prefsVis,
@@ -480,7 +423,6 @@ describe('partial fetch + lazy merge helpers', () => {
     );
     expect(clobbered).toBe(false);
 
-    // Simulated host after plan: fetch must run when shouldLazyFetch
     let fetchInvoked = false;
     if (plan.shouldLazyFetch) {
       fetchInvoked = true;
@@ -489,7 +431,6 @@ describe('partial fetch + lazy merge helpers', () => {
   });
 
   test('host tip path: optimistic write + fetch uses plan prev (integration-style)', async () => {
-    // Mirrors onTimelineVisibilityChange: prev capture → plan → write → maybe fetch
     const fetchCalls: any[] = [];
     const fetchPrTimelineEvents = async (...args: any[]) => {
       fetchCalls.push(args);
@@ -506,17 +447,16 @@ describe('partial fetch + lazy merge helpers', () => {
 
     let prefs = {
       timelineVisibility: {
-        labels: false,
-        title: false,
-        milestone: false,
+        events: false,
+        participants: false,
         comments: true,
+        'review-threads': true,
       },
     };
     let detail = { timelineEvents: [] as any[], owner: 'o', repo: 'r', number: 7 };
 
-    // --- shipped order (planTimelineVisibilityChange) ---
     const prevVis = prefs.timelineVisibility;
-    const nextVis = toggleTimelineTip(prevVis, 'labels');
+    const nextVis = toggleTimelineTip(prevVis, 'events');
     const plan = planTimelineVisibilityChange(
       prevVis,
       nextVis,
@@ -536,8 +476,7 @@ describe('partial fetch + lazy merge helpers', () => {
 
     expect(fetchCalls.length).toBe(1);
     expect(detail.timelineEvents.some((e) => e.id === 42)).toBe(true);
-    // Prior empty → merged rows present; re-enable did not wipe (no prior rows)
-    expect(prefs.timelineVisibility.labels).toBe(true);
+    expect(prefs.timelineVisibility.events).toBe(true);
   });
 
   test('mergeTimelineEventsById keeps prior rows when new events arrive', () => {
@@ -555,8 +494,9 @@ describe('partial fetch + lazy merge helpers', () => {
 
 describe('timeline tip labels (shipped constants)', () => {
   test('labels match product copy', () => {
-    expect(TIMELINE_TIP_LABELS.labels).toBe('label');
+    expect(TIMELINE_TIP_LABELS.events).toBe('events');
     expect(TIMELINE_TIP_LABELS.comments).toBe('comments');
-    expect(TIMELINE_TIP_LABELS.referenced).toBe('referenced');
+    expect(TIMELINE_TIP_LABELS.participants).toBe('participants');
+    expect(TIMELINE_TIP_LABELS['review-threads']).toBe('threads');
   });
 });

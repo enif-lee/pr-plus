@@ -182,7 +182,13 @@ function InlineThreadImpl(props: any) {
     onReplyText?.(t);
   }
 
-  function toggleCollapse() {
+  function toggleCollapse(e?: { preventDefault?: () => void; stopPropagation?: () => void }) {
+    try {
+      e?.preventDefault?.();
+      e?.stopPropagation?.();
+    } catch {
+      /* ignore */
+    }
     if (controlled) {
       onToggleCollapse?.();
     } else {

@@ -415,14 +415,23 @@ function VirtualRowShell({
     const el = ref.current;
     if (!el) return undefined;
     const publish = () => {
-      const h = el.getBoundingClientRect().height;
+      const rect = el.getBoundingClientRect().height || 0;
+      const scroll = el.scrollHeight || 0;
+      const offset = el.offsetHeight || 0;
+      const h = Math.ceil(Math.max(rect, scroll, offset));
       if (h > 0) onHeight(rowKey, h);
     };
     publish();
-    if (typeof ResizeObserver !== 'function') return undefined;
+    const t = window.setTimeout(publish, 48);
+    if (typeof ResizeObserver !== 'function') {
+      return () => clearTimeout(t);
+    }
     const ro = new ResizeObserver(publish);
     ro.observe(el);
-    return () => ro.disconnect();
+    return () => {
+      clearTimeout(t);
+      ro.disconnect();
+    };
   }, [rowKey, onHeight, children]);
 
   return (

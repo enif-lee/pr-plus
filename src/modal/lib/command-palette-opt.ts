@@ -214,6 +214,22 @@ export const PR_MODAL_OPT_ACTIONS = [
 ] as const;
 
 /**
+ * Whether PR modal Option peers may run while focus is in an editable.
+ *
+ * - Opt+Shift (⌥⇧L labels, ⌥⇧P milestone, …) → always allow: these chords
+ *   never type characters and are shown on Opt-hold tips even in composers.
+ * - Plain Opt (⌥E, ⌥.) → block while typing so composer-local chords
+ *   (⌥E emoji) and normal text entry are not stolen.
+ */
+export function allowPrModalOptPeerWhileEditable(opts: {
+  editableTarget?: boolean;
+  shift?: boolean;
+} = {}): boolean {
+  if (!opts.editableTarget) return true;
+  return Boolean(opts.shift);
+}
+
+/**
  * Resolve Option(+Shift) command for PR detail.
  * Modifier-only keydowns never match.
  */

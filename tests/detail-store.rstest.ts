@@ -11,6 +11,7 @@ import {
   applyCommits,
   applyComments,
   applyDevelopment,
+  applyThreadsFromMergedDetail,
   createEmptyStore,
   applyMeta,
   pickMeta,
@@ -139,6 +140,94 @@ describe('detail-store isolation', () => {
     // Re-hydrate preserves timelineEvents
     const again = toAppDetail(fromAppDetail(flat))!;
     expect(again.timelineEvents).toHaveLength(1);
+  });
+
+  test('timelineMeta survives applyThreadsFromMergedDetail (Diff threads-all path)', () => {
+    const store = fromAppDetail({
+      owner: 'o',
+      repo: 'r',
+      number: 7,
+      title: 'T',
+    });
+    const timelineMeta = {
+      hasMore: true,
+      complete: false,
+      direction: 'newest',
+      startCursor: 'cursor-older-edge',
+      endCursor: 'cursor-newer-edge',
+      coverageEndAt: '2026-02-01T00:00:00Z',
+      loadedCount: 100,
+      totalCount: 1200,
+      source: 'graphql',
+      pagesLoaded: 1,
+    };
+    applyComments(
+      store,
+      [
+        {
+          id: 1,
+          author: 'a',
+          body: 'hi',
+          createdAt: '2026-03-01T00:00:00Z',
+        },
+      ],
+      {
+        settled: true,
+        trustEmpty: true,
+        pageMeta: {
+          hasMore: true,
+          startCursor: timelineMeta.startCursor,
+          loadedCount: 1,
+        },
+        timelineEvents: [
+          {
+            id: 9,
+            event: 'labeled',
+            actor: 'a',
+            at: '2026-02-15T00:00:00Z',
+          },
+        ],
+        timelineMeta,
+      }
+    );
+    // Simulate Diff threads-all: threads merge must not wipe timelineMeta
+    applyThreadsFromMergedDetail(store, {
+      reviewThreads: [
+        {
+          threadNodeId: 'PRRT_NEW',
+          path: 'a.ts',
+          line: 1,
+          at: '2026-03-01T00:00:00Z',
+        },
+        {
+          threadNodeId: 'PRRT_OLD',
+          path: 'b.ts',
+          line: 2,
+          at: '2026-01-01T00:00:00Z',
+        },
+      ],
+      reviewComments: [],
+      reviewThreadsMeta: {
+        hasMore: false,
+        hasOlder: false,
+        hiddenCount: 0,
+        loadedThreadCount: 2,
+        totalCount: 2,
+      },
+      reviewCommentsMeta: { hasMore: false },
+    });
+    const flat = toAppDetail(store)!;
+    expect(flat.timelineMeta).toBeTruthy();
+    expect(flat.timelineMeta.hasMore).toBe(true);
+    expect(flat.timelineMeta.startCursor).toBe('cursor-older-edge');
+    expect(flat.timelineMeta.coverageEndAt).toBe('2026-02-01T00:00:00Z');
+    expect(flat.reviewThreadsMeta?.hasMore).toBe(false);
+    expect(flat.reviewThreads).toHaveLength(2);
+
+    // Round-trip through fromAppDetail/toAppDetail (publishDetailFromStore shape)
+    const again = toAppDetail(fromAppDetail(flat))!;
+    expect(again.timelineMeta?.startCursor).toBe('cursor-older-edge');
+    expect(again.timelineMeta?.hasMore).toBe(true);
   });
 
   test('development settle empty is ok', () => {

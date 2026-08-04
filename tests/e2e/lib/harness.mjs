@@ -43,16 +43,74 @@ export function clickPrPlusToggleIfNeeded() {
   return evalInPage(`
     (() => {
       if (document.querySelector('.prp-overlay')) return { already: true };
-      const btn = document.querySelector('.prp-gh-open-toggle');
+      const btn =
+        document.querySelector('.prp-gh-open-toggle') ||
+        document.getElementById('prp-gh-open-toggle');
       if (btn) {
         btn.click();
         return { clicked: true };
       }
-      // Host may exist without overlay yet
-      const host = document.getElementById('prp-page-embed') || document.getElementById('prp-modal-host');
+      // Host may exist without overlay yet (autoOpenEmbed mid-mount, or stale
+      // embed shell after close). Prefer re-click when toggle appears later.
+      const host =
+        document.getElementById('prp-page-embed') ||
+        document.getElementById('prp-modal-host');
+      // Stale host without overlay: remove so auto-open / toggle can remount.
+      if (host && !document.querySelector('.prp-overlay')) {
+        const hasShell = !!(
+          document.querySelector('.prp-header') ||
+          document.querySelector('.prp-conversation-virtual') ||
+          document.querySelector('.prp-vlist')
+        );
+        if (!hasShell) {
+          try {
+            host.remove();
+          } catch {
+            /* ignore */
+          }
+          document.body?.classList?.remove?.('prp-embed-active');
+          return { clicked: false, hasHost: true, clearedStaleHost: true };
+        }
+      }
       return { clicked: false, hasHost: !!host };
     })()
   `);
+}
+
+/**
+ * After navigation / extension reload, wait until content inject is usable
+ * (toggle, bridge hook, or host) so shell-open does not race SW restart.
+ */
+export function waitContentInject(opts = {}) {
+  const timeoutMs = opts.timeoutMs ?? 15_000;
+  const label = opts.label || 'content inject';
+  try {
+    return waitFor(
+      `
+      const bridge =
+        document.documentElement.getAttribute('data-prp-bridge') ||
+        document.documentElement.getAttribute('data-prp-gql-cost-hook');
+      const toggle =
+        document.querySelector('.prp-gh-open-toggle') ||
+        document.getElementById('prp-gh-open-toggle');
+      const host =
+        document.getElementById('prp-page-embed') ||
+        document.getElementById('prp-modal-host');
+      const ov = document.querySelector('.prp-overlay');
+      if (ov || toggle || bridge || host) {
+        return {
+          ok: true,
+          via: ov ? 'overlay' : toggle ? 'toggle' : bridge ? 'bridge' : 'host',
+        };
+      }
+      return false;
+      `,
+      { timeoutMs, intervalMs: 200, label }
+    );
+  } catch (e) {
+    log(`  waitContentInject soft: ${e?.message || e}`);
+    return { ok: false };
+  }
 }
 
 /**
@@ -216,27 +274,72 @@ export function waitDetailReady(opts = {}) {
 export function waitPrShellReady(n, label) {
   // autoOpenEmbed may be off — open via toggle before waiting
   clickPrPlusToggleIfNeeded();
-  waitFor(
-    `
-    // Retry toggle each poll if still no overlay
-    if (!document.querySelector('.prp-overlay')) {
-      const btn = document.querySelector('.prp-gh-open-toggle');
-      if (btn) btn.click();
-    }
-    const ov = document.querySelector('.prp-overlay');
-    if (!ov) return false;
-    return !!(
-      document.querySelector('.prp-conversation-virtual') ||
-      document.querySelector('.prp-vlist') ||
-      document.querySelector('.prp-header')
+  const shellLabel = label || `PR #${n} shell mount`;
+  try {
+    waitFor(
+      `
+      // Retry toggle each poll if still no overlay
+      if (!document.querySelector('.prp-overlay')) {
+        const btn =
+          document.querySelector('.prp-gh-open-toggle') ||
+          document.getElementById('prp-gh-open-toggle');
+        if (btn) btn.click();
+        // Stale embed host without chrome: drop so re-inject can remount
+        const host =
+          document.getElementById('prp-page-embed') ||
+          document.getElementById('prp-modal-host');
+        if (host && !document.querySelector('.prp-header')) {
+          try { host.remove(); } catch {}
+          document.body?.classList?.remove?.('prp-embed-active');
+        }
+      }
+      const ov = document.querySelector('.prp-overlay');
+      if (!ov) return false;
+      return !!(
+        document.querySelector('.prp-conversation-virtual') ||
+        document.querySelector('.prp-vlist') ||
+        document.querySelector('.prp-header')
+      );
+      `,
+      {
+        timeoutMs: DETAIL_READY_TIMEOUT_MS,
+        intervalMs: DETAIL_READY_INTERVAL_MS,
+        label: shellLabel,
+      }
     );
-    `,
-    {
-      timeoutMs: DETAIL_READY_TIMEOUT_MS,
-      intervalMs: DETAIL_READY_INTERVAL_MS,
-      label: label || `PR #${n} shell mount`,
-    }
-  );
+  } catch (e) {
+    // Extension reload / tab drop: one hard re-open before failing the suite.
+    const msg = String(e?.message || e);
+    log(`  waitPrShellReady retry after: ${msg.slice(0, 160)}`);
+    open(prUrl(n));
+    ensureSingleTab();
+    waitNetwork();
+    waitMs(400);
+    waitContentInject({ label: `${shellLabel} inject-retry` });
+    clickPrPlusToggleIfNeeded();
+    waitFor(
+      `
+      if (!document.querySelector('.prp-overlay')) {
+        const btn =
+          document.querySelector('.prp-gh-open-toggle') ||
+          document.getElementById('prp-gh-open-toggle');
+        if (btn) btn.click();
+      }
+      const ov = document.querySelector('.prp-overlay');
+      if (!ov) return false;
+      return !!(
+        document.querySelector('.prp-conversation-virtual') ||
+        document.querySelector('.prp-vlist') ||
+        document.querySelector('.prp-header')
+      );
+      `,
+      {
+        timeoutMs: DETAIL_READY_TIMEOUT_MS,
+        intervalMs: DETAIL_READY_INTERVAL_MS,
+        label: `${shellLabel} (retry)`,
+      }
+    );
+  }
   // Data: wait for meta/core settle via host e2e load hook (not fixed sleep).
   waitDetailReady({
     number: n,
@@ -526,9 +629,15 @@ export function openPrByUrl(n) {
   open(prUrl(n)); // single-tab policy via open()
   ensureSingleTab();
   waitNetwork();
-  // Extension inject is usually ready by load; short grace only
-  waitMs(150);
-  const t = clickPrPlusToggleIfNeeded();
+  // After chrome.runtime.reload / soft reset, content inject can lag past load.
+  waitContentInject({ label: `PR #${n} inject`, timeoutMs: 12_000 });
+  waitMs(200);
+  let t = clickPrPlusToggleIfNeeded();
+  if (t?.clearedStaleHost) {
+    waitMs(300);
+    waitContentInject({ label: `PR #${n} inject after stale clear`, timeoutMs: 8_000 });
+    t = clickPrPlusToggleIfNeeded();
+  }
   if (t && !t.already) {
     log(`  PR #${n} open via URL — pr+ toggle ${JSON.stringify(t)}`);
   }
@@ -985,10 +1094,20 @@ export function clickFirstLineExpandBtn() {
         document.querySelector('.prp-vline--line-expandable');
       const btn = row?.querySelector('.prp-line-expand-btn');
       if (!row || !btn) return { ok: false, reason: 'no expandable row' };
-      row.scrollIntoView({ block: 'center' });
+      // Do NOT scrollIntoView here: Diff virtual list remounts on scroll and
+      // can detach the button before click() lands (expand appears to no-op).
       const beforeH = Math.round(row.getBoundingClientRect().height);
+      try {
+        btn.focus({ preventScroll: true });
+      } catch {
+        try {
+          btn.focus();
+        } catch {
+          /* ignore */
+        }
+      }
       btn.click();
-      return { ok: true, beforeH };
+      return { ok: true, beforeH, path: row.getAttribute('data-file-path') || null };
     })()
   `);
 }

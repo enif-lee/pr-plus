@@ -22,6 +22,8 @@ function codeRow(opts: {
   split?: boolean;
   leftCode?: string;
   rightCode?: string;
+  oldLine?: number | null;
+  newLine?: number | null;
 }) {
   return {
     kind: 'diff-line',
@@ -33,15 +35,28 @@ function codeRow(opts: {
     split: opts.split,
     leftCode: opts.leftCode,
     rightCode: opts.rightCode,
-    newLine: 1,
+    // Distinct line numbers so expand keys do not collide across rows.
+    newLine: opts.newLine !== undefined ? opts.newLine : opts.rowIndex + 1,
+    oldLine: opts.oldLine !== undefined ? opts.oldLine : null,
   };
 }
 
 describe('diffLineExpandKey / length', () => {
-  test('keys code rows; ignores hunks', () => {
+  test('keys code rows by path+lines; ignores hunks', () => {
+    // codeRow default newLine=rowIndex+1, lineType=add
     expect(diffLineExpandKey(codeRow({ rowIndex: 3, text: 'x' }))).toBe(
-      'a.ts#3'
+      'a.ts#add::4'
     );
+    expect(
+      diffLineExpandKey({
+        kind: 'diff-line',
+        lineType: 'context',
+        rowIndex: 9,
+        filePath: 'b.ts',
+        oldLine: 4,
+        newLine: 4,
+      })
+    ).toBe('b.ts#context:4:4');
     expect(
       diffLineExpandKey({
         kind: 'diff-line',

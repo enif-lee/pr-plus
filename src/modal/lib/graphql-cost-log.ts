@@ -40,6 +40,9 @@ export function labelGraphqlOperation(query: any, variables: any = null): string
   if (/ReviewThreadsLastShell/.test(q)) return 'reviewThreads.last.shell';
   if (/ReviewThreadsFirstShell/.test(q)) return 'reviewThreads.first.shell';
   if (/ReviewThreadsByIdsFull/.test(q)) return 'reviewThreads.byIds';
+  if (/TimelineItemsPage/.test(q) || /timelineItems\s*\(/.test(q)) {
+    return 'timelineItems.page';
+  }
   // legacy name + CostFlat rename both map to byIds
   if (/reviewThreads\s*\(/.test(q) && /last\s*:/.test(q)) {
     // Nested comments(first:100) on window = legacy full; else shell-like
@@ -98,6 +101,9 @@ export function sanitizeGraphqlVariables(variables: any): Record<string, any> {
     'ids',
     'first',
     'last',
+    'since',
+    'before',
+    'after',
   ]) {
     if (variables[k] === undefined) continue;
     if (k === 'ids' && Array.isArray(variables[k])) {

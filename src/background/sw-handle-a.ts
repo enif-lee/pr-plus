@@ -34,6 +34,8 @@ export async function handleMessagePartA(message: any): Promise<any> {
         ok: true,
         pong: true,
         hasFetch: typeof PRTreeFetch?.fetchPrDetail === 'function',
+        hasTimelineItems:
+          typeof PRTreeFetch?.fetchPrTimelineItemsPage === 'function',
         hasStorage: typeof PRTreeStorage?.getGithubTokenStatus === 'function',
         hasEndpoints: typeof PRGithubEndpoints?.resolveGithubEndpoints === 'function',
       };

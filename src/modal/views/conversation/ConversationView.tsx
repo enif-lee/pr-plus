@@ -180,6 +180,11 @@ function ConversationViewImpl(props: any) {
     milestoneAddRef,
     onReplyToThread = null,
     onResolveThread = null,
+    /**
+     * Unified Conversation load-more: one page (or 'all') of remaining
+     * reviewThreads and/or timelineItems. Diff completeness uses
+     * 'threads-all' (threads only).
+     */
     onLoadMoreReviewThreads = null,
     /**
      * Lazy-load GraphQL comments when expanding a shell/resolved thread.
@@ -205,6 +210,8 @@ function ConversationViewImpl(props: any) {
     /** (nextMap) => void — patch global prefs when a tip is toggled */
     onTimelineVisibilityChange = null,
     reviewThreadsMeta = null,
+    /** GraphQL timelineItems page meta (comments + system events). */
+    timelineMeta = null,
     searchQuery = '',
     searchHits = null,
     searchHitIndex = -1,
@@ -478,54 +485,47 @@ function ConversationViewImpl(props: any) {
     return Boolean(activeAnchor && activeAnchor === anchorId);
   }
 
-  /** Dual-window fold: newest window | N hidden | oldest window */
+  /**
+   * Unified fold: end gap while threads incomplete; middle gap when threads
+   * are complete but timelineItems still has older pages (Diff full-load case).
+   */
   const threadGap: any = useMemo(() => {
     if (typeof partitionTimelineWithThreadGap !== 'function') {
+      const hasMore =
+        Boolean(reviewThreadsMeta?.hasMore) ||
+        Boolean(reviewThreadsMeta?.hasOlder) ||
+        Boolean(timelineMeta?.hasMore) ||
+        timelineMeta?.complete === false;
       return {
         top: timelineItems,
         bottom: [],
         hiddenCount: 0,
-        showGap: false,
+        showGap: hasMore,
+        gapPlacement: hasMore ? 'end' : 'none',
       };
     }
-    return partitionTimelineWithThreadGap(timelineItems, reviewThreadsMeta);
-  }, [timelineItems, reviewThreadsMeta]);
+    return partitionTimelineWithThreadGap(
+      timelineItems,
+      reviewThreadsMeta,
+      timelineMeta
+    );
+  }, [timelineItems, reviewThreadsMeta, timelineMeta]);
 
   // Search jump is handled inside VirtualConversationList (scrollToAnchor).
-  // No client-side pagination — virtual list shows all loaded items; remaining
-  // review threads use the dual-window gap (Load more / Load all).
+  // Load more / Load all: single handle for threads + timelineItems.
 
   const paged: any = useMemo(() => {
-    const hidden = Math.max(
-      0,
-      Number(reviewThreadsMeta?.hiddenCount ?? threadGap.hiddenCount) || 0
-    );
-    const hasMore = Boolean(reviewThreadsMeta?.hasMore);
-    // Prefer dual-window split when partition produced a bottom (oldest) slice
-    if (threadGap.showGap && (threadGap.bottom || []).length > 0) {
-      return {
-        items: threadGap.top,
-        bottomItems: threadGap.bottom,
-        total: timelineItems.length,
-        showThreadGap: true,
-        hiddenCount: hidden || threadGap.hiddenCount,
-      };
-    }
-    // Single window (or dual without matched oldest): fold after all loaded items.
-    // Show Load more whenever meta says more threads remain — even if hiddenCount
-    // is briefly 0 while totalCount catches up (banner falls back to "More…").
-    const showEndGap =
-      hasMore ||
-      Boolean(reviewThreadsMeta?.hasOlder) ||
-      Boolean(reviewThreadsMeta?.hasNewerFromOldest);
+    const hidden = Math.max(0, Number(threadGap.hiddenCount) || 0);
+    const showGap = Boolean(threadGap.showGap);
     return {
-      items: timelineItems,
-      bottomItems: [],
+      items: Array.isArray(threadGap.top) ? threadGap.top : timelineItems,
+      bottomItems: Array.isArray(threadGap.bottom) ? threadGap.bottom : [],
       total: timelineItems.length,
-      showThreadGap: showEndGap,
+      showThreadGap: showGap,
       hiddenCount: hidden,
+      gapPlacement: threadGap.gapPlacement || 'end',
     };
-  }, [timelineItems, threadGap, reviewThreadsMeta]);
+  }, [timelineItems, threadGap]);
 
   const mergeStatus = useMemo(
     () => (typeof buildMergeBoxStatus === 'function' ? buildMergeBoxStatus(detail) : null),
@@ -930,59 +930,139 @@ function ConversationViewImpl(props: any) {
     return Boolean(item?.resolved);
   }
 
-  function isReviewThreadCollapsed(item: any) {
-    const key = String(item?.id);
-    if (threadCollapseOverrides.has(key)) {
-      return Boolean(threadCollapseOverrides.get(key));
-    }
-    return defaultThreadCollapsed(item);
-  }
-
-  function requestThreadCommentsOnExpand(item: any) {
-    if (typeof onEnsureThreadComments !== 'function' || !item) return;
-    const tid =
+  /** Stable GraphQL thread node id (PRRT_…) when present. */
+  function threadNodeIdOf(item: any): string | null {
+    if (!item) return null;
+    const raw =
       item.threadNodeId ||
       item.root?.threadNodeId ||
       (String(item.id || '').startsWith('shell:')
         ? String(item.id).slice(6)
         : null);
+    const tid = raw != null ? String(raw).trim() : '';
+    if (tid && /^PRRT_/i.test(tid)) return tid;
+    return null;
+  }
+
+  /**
+   * Collapse map key: prefer PRRT so shell:… → numeric id hydrate after
+   * lazy comments load does not drop expand state (resolved would re-collapse).
+   * Mirrors Diff `collapseKeyForThread`.
+   */
+  function conversationCollapseKey(item: any): string {
+    const tid = threadNodeIdOf(item);
+    if (tid) return tid;
+    return String(item?.id ?? '');
+  }
+
+  function lookupCollapseOverride(item: any): boolean | undefined {
+    const key = conversationCollapseKey(item);
+    if (key && threadCollapseOverrides.has(key)) {
+      return Boolean(threadCollapseOverrides.get(key));
+    }
+    const legacy = String(item?.id ?? '');
+    if (legacy && threadCollapseOverrides.has(legacy)) {
+      return Boolean(threadCollapseOverrides.get(legacy));
+    }
+    const tid = threadNodeIdOf(item);
+    if (tid) {
+      const shell = `shell:${tid}`;
+      if (threadCollapseOverrides.has(shell)) {
+        return Boolean(threadCollapseOverrides.get(shell));
+      }
+    }
+    return undefined;
+  }
+
+  function writeCollapseOverride(
+    item: any,
+    collapsed: boolean,
+    prev: Map<string, boolean>
+  ): Map<string, boolean> {
+    const next = new Map(prev);
+    const key = conversationCollapseKey(item);
+    if (key) next.set(key, collapsed);
+    const legacy = String(item?.id ?? '');
+    if (legacy && legacy !== key) next.set(legacy, collapsed);
+    const tid = threadNodeIdOf(item);
+    if (tid) {
+      const shell = `shell:${tid}`;
+      if (shell !== legacy && shell !== key) next.set(shell, collapsed);
+    }
+    return next;
+  }
+
+  function isReviewThreadCollapsed(item: any) {
+    // Shared PRRT expand map (also written by group toggles) so shell→full
+    // hydrate that moves a thread into a review-group keeps expand state.
+    const o = lookupCollapseOverride(item);
+    if (o !== undefined) return o;
+    return defaultThreadCollapsed(item);
+  }
+
+  function requestThreadCommentsOnExpand(item: any) {
+    if (typeof onEnsureThreadComments !== 'function' || !item) return;
+    const tid = threadNodeIdOf(item);
     if (tid) void onEnsureThreadComments(tid);
   }
 
   function toggleThreadCollapse(item: any) {
-    if (item?.id == null) return;
-    const key = String(item.id);
-    const currently = threadCollapseOverrides.has(key)
-      ? Boolean(threadCollapseOverrides.get(key))
-      : defaultThreadCollapsed(item);
+    if (item?.id == null && !threadNodeIdOf(item)) return;
+    const currently = isReviewThreadCollapsed(item);
     const nextCollapsed = !currently;
-    setThreadCollapseOverrides((prev) => {
-      const next = new Map(prev);
-      next.set(key, nextCollapsed);
-      return next;
-    });
+    setThreadCollapseOverrides((prev) =>
+      writeCollapseOverride(item, nextCollapsed, prev)
+    );
+    // Mirror into group map so if hydrate moves thread under a review-group,
+    // isGroupThreadOpen still sees the user intent.
+    if (item?.reviewId != null) {
+      const nextOpen = !nextCollapsed;
+      setGroupThreadOpenOverrides((prev) => {
+        const next = new Map(prev);
+        const k = groupThreadKey(item.reviewId, item);
+        next.set(k, nextOpen);
+        const legacy = groupThreadKey(item.reviewId, item?.id);
+        if (legacy !== k) next.set(legacy, nextOpen);
+        return next;
+      });
+    }
     if (!nextCollapsed) requestThreadCommentsOnExpand(item);
   }
 
   /** Directed fold: set collapsed state only when it differs (←/→). */
   function setThreadCollapsed(item: any, wantCollapsed: boolean) {
-    if (item?.id == null) return false;
-    const key = String(item.id);
-    const currently = threadCollapseOverrides.has(key)
-      ? Boolean(threadCollapseOverrides.get(key))
-      : defaultThreadCollapsed(item);
+    if (item?.id == null && !threadNodeIdOf(item)) return false;
+    const currently = isReviewThreadCollapsed(item);
     if (currently === wantCollapsed) return false;
-    setThreadCollapseOverrides((prev) => {
-      const next = new Map(prev);
-      next.set(key, wantCollapsed);
-      return next;
-    });
+    setThreadCollapseOverrides((prev) =>
+      writeCollapseOverride(item, wantCollapsed, prev)
+    );
+    if (item?.reviewId != null) {
+      const nextOpen = !wantCollapsed;
+      setGroupThreadOpenOverrides((prev) => {
+        const next = new Map(prev);
+        const k = groupThreadKey(item.reviewId, item);
+        next.set(k, nextOpen);
+        const legacy = groupThreadKey(item.reviewId, item?.id);
+        if (legacy !== k) next.set(legacy, nextOpen);
+        return next;
+      });
+    }
     if (!wantCollapsed) requestThreadCommentsOnExpand(item);
     return true;
   }
 
-  function groupThreadKey(reviewId: any, threadId: any) {
-    return `${reviewId}:${threadId}`;
+  /**
+   * Group path-row key: prefer PRRT so shell→numeric hydrate keeps open state.
+   * @param reviewId
+   * @param thread thread item or raw id (legacy callers)
+   */
+  function groupThreadKey(reviewId: any, thread: any) {
+    if (thread != null && typeof thread === 'object') {
+      const tid = threadNodeIdOf(thread) || String(thread.id ?? '');
+      return `${reviewId}:${tid}`;
+    }
+    return `${reviewId}:${thread}`;
   }
 
   /**
@@ -990,7 +1070,7 @@ function ConversationViewImpl(props: any) {
    * - pending (unsubmitted) → closed
    * - resolved → closed
    * - otherwise unresolved → open
-   * User toggles win via groupThreadOpenOverrides.
+   * User toggles win via groupThreadOpenOverrides / shared PRRT collapse map.
    */
   function defaultGroupThreadOpen(thread: any) {
     if (thread?.pending) return false;
@@ -998,22 +1078,35 @@ function ConversationViewImpl(props: any) {
   }
 
   function isGroupThreadOpen(reviewId: any, thread: any) {
-    const k = groupThreadKey(reviewId, thread?.id);
+    // Prefer shared collapse override (standalone expand survives regroup).
+    const collapseO = lookupCollapseOverride(thread);
+    if (collapseO !== undefined) return !collapseO;
+
+    const k = groupThreadKey(reviewId, thread);
     if (groupThreadOpenOverrides.has(k)) {
       return Boolean(groupThreadOpenOverrides.get(k));
+    }
+    // Legacy key with raw comment id during shell→numeric hydrate
+    const legacy = groupThreadKey(reviewId, thread?.id);
+    if (legacy !== k && groupThreadOpenOverrides.has(legacy)) {
+      return Boolean(groupThreadOpenOverrides.get(legacy));
     }
     return defaultGroupThreadOpen(thread);
   }
 
   function toggleGroupThread(reviewId: any, thread: any) {
-    const k = groupThreadKey(reviewId, thread?.id);
-    const currently = groupThreadOpenOverrides.has(k)
-      ? Boolean(groupThreadOpenOverrides.get(k))
-      : defaultGroupThreadOpen(thread);
+    const k = groupThreadKey(reviewId, thread);
+    const currently = isGroupThreadOpen(reviewId, thread);
     const nextOpen = !currently;
+    // Shared PRRT map is source of truth across standalone ↔ group morphs.
+    setThreadCollapseOverrides((prev) =>
+      writeCollapseOverride(thread, !nextOpen, prev)
+    );
     setGroupThreadOpenOverrides((prev) => {
       const next = new Map(prev);
       next.set(k, nextOpen);
+      const legacy = groupThreadKey(reviewId, thread?.id);
+      if (legacy !== k) next.set(legacy, nextOpen);
       return next;
     });
     if (nextOpen) requestThreadCommentsOnExpand(thread);
@@ -1025,15 +1118,18 @@ function ConversationViewImpl(props: any) {
     thread: any,
     wantOpen: boolean
   ): boolean {
-    if (thread?.id == null) return false;
-    const k = groupThreadKey(reviewId, thread.id);
-    const currently = groupThreadOpenOverrides.has(k)
-      ? Boolean(groupThreadOpenOverrides.get(k))
-      : defaultGroupThreadOpen(thread);
+    if (thread?.id == null && !threadNodeIdOf(thread)) return false;
+    const currently = isGroupThreadOpen(reviewId, thread);
     if (currently === wantOpen) return false;
+    setThreadCollapseOverrides((prev) =>
+      writeCollapseOverride(thread, !wantOpen, prev)
+    );
     setGroupThreadOpenOverrides((prev) => {
       const next = new Map(prev);
+      const k = groupThreadKey(reviewId, thread);
       next.set(k, wantOpen);
+      const legacy = groupThreadKey(reviewId, thread?.id);
+      if (legacy !== k) next.set(legacy, wantOpen);
       return next;
     });
     if (wantOpen) requestThreadCommentsOnExpand(thread);
@@ -1070,20 +1166,21 @@ function ConversationViewImpl(props: any) {
     if (!found?.thread) return;
     const { thread, reviewGroupId } = found;
     if (reviewGroupId != null) {
-      const k = groupThreadKey(reviewGroupId, thread.id);
+      const k = groupThreadKey(reviewGroupId, thread);
       setGroupThreadOpenOverrides((prev) => {
         const next = new Map(prev);
         next.set(k, true);
+        const legacy = groupThreadKey(reviewGroupId, thread.id);
+        if (legacy !== k) next.set(legacy, true);
         return next;
       });
+      requestThreadCommentsOnExpand(thread);
       return;
     }
-    const key = String(thread.id);
-    setThreadCollapseOverrides((prev) => {
-      const next = new Map(prev);
-      next.set(key, false); // false = expanded
-      return next;
-    });
+    setThreadCollapseOverrides((prev) =>
+      writeCollapseOverride(thread, false, prev)
+    );
+    requestThreadCommentsOnExpand(thread);
   }
 
   /**
@@ -1098,14 +1195,18 @@ function ConversationViewImpl(props: any) {
       if (found.thread.resolved || found.thread.pending) return;
       if (found.reviewGroupId == null) return;
       // Unresolved group path row: open so thread body is visible
-      const k = groupThreadKey(found.reviewGroupId, found.thread.id);
+      const k = groupThreadKey(found.reviewGroupId, found.thread);
+      const legacy = groupThreadKey(found.reviewGroupId, found.thread.id);
       setGroupThreadOpenOverrides((prev) => {
         const open = prev.has(k)
           ? Boolean(prev.get(k))
-          : defaultGroupThreadOpen(found.thread);
+          : prev.has(legacy)
+            ? Boolean(prev.get(legacy))
+            : defaultGroupThreadOpen(found.thread);
         if (open) return prev;
         const next = new Map(prev);
         next.set(k, true);
+        if (legacy !== k) next.set(legacy, true);
         return next;
       });
     },
@@ -1220,10 +1321,12 @@ function ConversationViewImpl(props: any) {
         expandFocusedThread(String(t.id));
         // Host may be group row — ensure open so InlineThread mounts
         if (found.reviewGroupId != null) {
-          const k = groupThreadKey(found.reviewGroupId, t.id);
+          const k = groupThreadKey(found.reviewGroupId, t);
           setGroupThreadOpenOverrides((prev) => {
             const next = new Map(prev);
             next.set(k, true);
+            const legacy = groupThreadKey(found.reviewGroupId, t.id);
+            if (legacy !== k) next.set(legacy, true);
             return next;
           });
         }
@@ -1489,8 +1592,8 @@ function ConversationViewImpl(props: any) {
   }
 
   /**
-   * Classic dual-window fold: "N hidden items · Load more… · Load all"
-   * (same chrome for mid-list dual-window and end-of-list single window).
+   * Unified fold: "N hidden items · Load more… · Load all"
+   * (end-of-list, or mid-list when threads complete + timeline partial).
    */
   function renderThreadGap(hiddenCount: number) {
     return (
@@ -1498,6 +1601,7 @@ function ConversationViewImpl(props: any) {
         hiddenCount={hiddenCount}
         actionBusy={actionBusy}
         onLoadMore={onLoadMoreReviewThreads}
+        gapPlacement={paged?.gapPlacement || threadGap?.gapPlacement || 'end'}
       />
     );
   }
@@ -1619,7 +1723,11 @@ function ConversationViewImpl(props: any) {
               className={`prp-conversation-thread-header__toggle${
                 focused ? ' prp-opt-hint-host' : ''
               }`}
-              onClick={() => toggleThreadCollapse(item)}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                toggleThreadCollapse(item);
+              }}
               aria-expanded={!collapsed}
               title={
                 focused

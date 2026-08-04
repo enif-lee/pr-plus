@@ -25,8 +25,20 @@ import {
 describe('diffRowMeasureKey', () => {
   test('comment / image / expanded line keys', () => {
     expect(
-      diffRowMeasureKey({ kind: 'inline-comment', commentId: 42 })
-    ).toBe('c:42');
+      diffRowMeasureKey({
+        kind: 'inline-comment',
+        commentId: 42,
+        body: 'hi',
+      })
+    ).toBe('c:42:b2:r0:L1');
+    // Body fingerprint changes measure key so hydrate re-measures
+    expect(
+      diffRowMeasureKey({
+        kind: 'inline-comment',
+        commentId: 42,
+        body: 'hello world',
+      })
+    ).toBe('c:42:b11:r0:L1');
     expect(
       diffRowMeasureKey({ kind: 'diff-image', filePath: 'a.png' })
     ).toBe('img:a.png');
@@ -35,11 +47,14 @@ describe('diffRowMeasureKey', () => {
       lineType: 'add',
       filePath: 'a.ts',
       rowIndex: 9,
+      newLine: 20,
     };
+    const expandKey = diffLineExpandKey(line)!;
+    expect(expandKey).toBe('a.ts#add::20');
     expect(diffRowMeasureKey(line)).toBe(null);
     expect(
-      diffRowMeasureKey(line, { expandedKeys: new Set(['a.ts#9']) })
-    ).toBe('a.ts#9');
+      diffRowMeasureKey(line, { expandedKeys: new Set([expandKey]) })
+    ).toBe(expandKey);
     expect(diffRowMeasureKey({ kind: 'file-header', filePath: 'a.ts' })).toBe(
       null
     );
@@ -122,9 +137,11 @@ describe('rowHeightFor measured-first', () => {
       lineType: 'add',
       filePath: 'a.ts',
       rowIndex: 2,
+      newLine: 12,
       text: 'w'.repeat(200),
     };
     const key = diffLineExpandKey(row)!;
+    expect(key).toBe('a.ts#add::12');
     const opts = {
       expandedKeys: new Set([key]),
       measuredHeights: new Map([[key, 88]]),
@@ -155,7 +172,8 @@ describe('rowOffsets + visible range with mixed heights', () => {
         text: 'y',
       },
     ];
-    const key = 'c:1';
+    const key = diffRowMeasureKey(rows[2])!; // c:1:b2:r0:L1
+    expect(key).toMatch(/^c:1:/);
     const opts = {
       isCollapsed: () => false,
       measuredHeights: new Map([[key, 400]]),

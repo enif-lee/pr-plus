@@ -183,13 +183,20 @@ export function getSteps() {
     openPr(HEAVY_PR, { viaUrl: true });
     setLayout('diff');
     blurEditable();
-    waitMs(900);
+    // Wait for Diff file stream to settle — expand keys used to use rowIndex
+    // which shifts while files are still loading.
+    try {
+      waitDiffFilesReady(`P4 #${HEAVY_PR} files ready`);
+    } catch {
+      waitMs(1500);
+    }
+    waitMs(400);
 
     let probe = lineExpandProbe();
     if (probe.expandableCount < 1) {
-      for (let i = 0; i < 8 && probe.expandableCount < 1; i++) {
+      for (let i = 0; i < 10 && probe.expandableCount < 1; i++) {
         press('Alt+Shift+]');
-        waitMs(300);
+        waitMs(350);
         probe = lineExpandProbe();
       }
     }
@@ -220,8 +227,15 @@ export function getSteps() {
     const clicked = clickFirstLineExpandBtn();
     assert(clicked?.ok, `expand btn click failed: ${JSON.stringify(clicked)}`);
     // React state → offsets → re-render (estimate then measure)
-    waitMs(550);
-    const after = lineExpandProbe();
+    waitMs(700);
+    let after = lineExpandProbe();
+    // One retry if virtual remount ate the first click
+    if (!after.expanded) {
+      waitMs(200);
+      clickFirstLineExpandBtn();
+      waitMs(700);
+      after = lineExpandProbe();
+    }
     log(
       `  expand h ${beforeH}→${after.expandedH} expanded=${after.expanded}`
     );

@@ -7,6 +7,7 @@ import {
   RELOAD_REFRESH_MSG,
 } from './bridge-channel';
 import { PRTreeFetch } from './bridge-fetch-proxy';
+// send used by e2e probe hook below
 
 export const DEFAULT_PREFS = {
   fastReview: true,
@@ -231,6 +232,54 @@ try {
       } catch {
         /* ignore */
       }
+    },
+    true
+  );
+  // Page-world e2e: probe SW timeline GraphQL page via content-script bridge.
+  document.addEventListener(
+    'prp-probe-timeline-page',
+    (ev: any) => {
+      void (async () => {
+        const d = ev?.detail || {};
+        const owner = String(d.owner || 'enif-lee');
+        const repo = String(d.repo || 'pr-plus');
+        const number = Number(d.number || 7);
+        try {
+          const ping = await send({ type: 'PR_TREE_PING' });
+          const page = await PRTreeFetch.fetchPrTimelineItemsPage(
+            owner,
+            repo,
+            number,
+            { direction: 'newest', pageSize: 100 }
+          );
+          sessionStorage.setItem(
+            'prp:diag:timeline-bridge-probe',
+            JSON.stringify({
+              ok: true,
+              ping,
+              hasMore: page?.hasMore ?? null,
+              totalCount: page?.totalCount ?? null,
+              events: Array.isArray(page?.timelineEvents)
+                ? page.timelineEvents.length
+                : -1,
+              comments: Array.isArray(page?.comments)
+                ? page.comments.length
+                : -1,
+              hasPrev: page?.pageInfo?.hasPreviousPage ?? null,
+              error: page?.error || null,
+              source: page?.source || null,
+            })
+          );
+        } catch (e: any) {
+          sessionStorage.setItem(
+            'prp:diag:timeline-bridge-probe',
+            JSON.stringify({
+              ok: false,
+              err: String(e?.message || e).slice(0, 300),
+            })
+          );
+        }
+      })();
     },
     true
   );
