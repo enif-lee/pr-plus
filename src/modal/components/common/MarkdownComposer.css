@@ -654,7 +654,7 @@
   top: 0;
   /* scale/translate from JS fit + pan/zoom; origin top-left of content */
   transform-origin: 0 0;
-  will-change: transform;
+  /* Avoid will-change:transform — promotes a low-res bitmap layer when zooming */
   padding: 0;
   box-sizing: border-box;
   /* Vector SVG — no max-width so fit scale can enlarge crisply */
@@ -665,13 +665,12 @@
 .prp-mermaid-viewer__canvas svg {
   max-width: none !important;
   max-height: none !important;
-  width: auto !important;
-  height: auto !important;
+  /* Keep attribute width/height from prepareMermaidSvgForViewer (full viewBox) */
   display: block;
-  /* Keep intrinsic viewBox resolution; CSS scale handles display size */
+  /* Crisp vectors when CSS-scaled; no filter (filters force rasterization) */
   shape-rendering: geometricPrecision;
   text-rendering: geometricPrecision;
-  filter: grayscale(0.1);
+  image-rendering: auto;
   background: var(--prp-bg);
   border-radius: 10px;
   padding: 20px;

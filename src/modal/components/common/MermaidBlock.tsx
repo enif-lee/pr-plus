@@ -56,7 +56,13 @@ export function MermaidBlock({ code }: { code?: string }) {
   const { isScrolling } = useConversationScrollIdle();
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(true);
+  /** Inline (max-height fitted) SVG for conversation card. */
   const [svg, setSvg] = useState('');
+  /**
+   * Full-resolution Mermaid output (pre-fit). Fullscreen viewer must use this
+   * so pan/zoom scales a large vector, not the thumbnail width/height.
+   */
+  const [svgFull, setSvgFull] = useState('');
   const [viewerOpen, setViewerOpen] = useState(false);
   /** Last successfully rendered code+theme identity (survives scroll toggles). */
   const cachedKeyRef = useRef<string>('');
@@ -70,6 +76,7 @@ export function MermaidBlock({ code }: { code?: string }) {
     if (!source) {
       setBusy(false);
       setSvg('');
+      setSvgFull('');
       cachedKeyRef.current = '';
       setErr('Empty mermaid diagram');
       return undefined;
@@ -97,6 +104,7 @@ export function MermaidBlock({ code }: { code?: string }) {
       setBusy(true);
       setErr(null);
       setSvg('');
+      setSvgFull('');
       cachedKeyRef.current = '';
 
       let eng: any = null;
@@ -129,13 +137,14 @@ export function MermaidBlock({ code }: { code?: string }) {
           setErr('Mermaid returned empty SVG');
           return;
         }
-        // Fit inside max-height without nested scroll (conversation is sole scroller).
+        // Keep full SVG for fullscreen viewer; fit only the conversation card.
         const fitted =
           typeof fitMermaidSvgInline === 'function'
             ? fitMermaidSvgInline(out, {
                 maxHeight: MERMAID_INLINE_MAX_HEIGHT_PX,
               })
             : out;
+        setSvgFull(out);
         setSvg(fitted);
         cachedKeyRef.current = sourceKey;
         setBusy(false);
@@ -144,6 +153,7 @@ export function MermaidBlock({ code }: { code?: string }) {
         if (cancelled) return;
         setBusy(false);
         setSvg('');
+        setSvgFull('');
         cachedKeyRef.current = '';
         setErr(e?.message || String(e));
         try {
@@ -212,9 +222,9 @@ export function MermaidBlock({ code }: { code?: string }) {
         onDoubleClick={() => setViewerOpen(true)}
         title="Double-click or use 자세히 보기 for fullscreen"
       />
-      {viewerOpen && svg ? (
+      {viewerOpen && (svgFull || svg) ? (
         <MermaidViewer
-          svg={svg}
+          svg={svgFull || svg}
           title="Diagram"
           onClose={() => setViewerOpen(false)}
         />

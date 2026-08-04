@@ -3,8 +3,9 @@
  * Continuous wheel/trackpad zoom, pinch zoom, drag pan (no modifier keys).
  */
 
-export const MERMAID_ZOOM_MIN = 0.2;
-export const MERMAID_ZOOM_MAX = 8;
+export const MERMAID_ZOOM_MIN = 0.15;
+/** Higher ceiling so long diagrams can zoom past 1:1 without clipping too early. */
+export const MERMAID_ZOOM_MAX = 16;
 /** @deprecated discrete step kept for callers; wheel uses continuous sensitivity */
 export const MERMAID_ZOOM_STEP = 1.12;
 /** Wheel/trackpad zoom: scale *= exp(-deltaY * sensitivity). Higher = faster. */
@@ -219,14 +220,20 @@ export function measureMermaidSvgSize(
 }
 
 /**
- * Strip percentage / max-width constraints so the viewer can scale the SVG freely.
- * When Mermaid emits width="100%" + viewBox only, removing % leaves no intrinsic
- * size (browser collapses to ~a few dozen px). Re-apply numeric width/height from
- * viewBox so fit-to-stage scale matches layout pixels.
+ * Prepare Mermaid SVG for the fullscreen viewer at **full viewBox resolution**.
+ *
+ * Inline conversation uses {@link fitMermaidSvgInline}, which shrinks width/height
+ * for the max-height box while keeping viewBox. Passing that fitted SVG into the
+ * viewer makes CSS `transform: scale()` upscale a small layout box → blurry text
+ * on long diagrams. Always re-apply width/height from viewBox so pan/zoom scales
+ * a true full-size vector, not the inline thumbnail size.
  */
 export function prepareMermaidSvgForViewer(svgHtml: string): string {
   let s = String(svgHtml || '');
   if (!s) return s;
+  // Drop inline-fit markers (viewer must not inherit shrunk attrs)
+  s = s.replace(/\sdata-prp-mermaid-fit="[^"]*"/gi, '');
+  s = s.replace(/\sdata-prp-mermaid-scale="[^"]*"/gi, '');
   // Remove width="100%" / height="100%" on root svg
   s = s.replace(/(<svg\b[^>]*?)\swidth="100%"/gi, '$1');
   s = s.replace(/(<svg\b[^>]*?)\sheight="100%"/gi, '$1');
@@ -243,27 +250,39 @@ export function prepareMermaidSvgForViewer(svgHtml: string): string {
     return cleaned ? `${tag} style="${cleaned}"` : tag;
   });
 
-  // Ensure root svg has numeric width/height matching viewBox (user units).
+  // Force root svg width/height = viewBox size (full native units).
   const open = s.match(/<svg\b[^>]*>/i);
   if (open) {
-    const tag = open[0];
-    const hasNumW = /\swidth="[\d.]+(px)?"/i.test(tag);
-    const hasNumH = /\sheight="[\d.]+(px)?"/i.test(tag);
-    if (!hasNumW || !hasNumH) {
-      const vb =
-        tag.match(/\sviewBox="([^"]+)"/i)?.[1] ||
-        tag.match(/\sviewbox="([^"]+)"/i)?.[1] ||
-        '';
-      const parts = vb
-        .trim()
-        .split(/[\s,]+/)
-        .map((x) => Number(x));
-      if (parts.length >= 4 && parts[2] > 1 && parts[3] > 1) {
-        const attrs =
-          (!hasNumW ? ` width="${parts[2]}"` : '') +
-          (!hasNumH ? ` height="${parts[3]}"` : '');
-        const next = tag.replace(/<svg\b/i, `<svg${attrs}`);
-        s = s.replace(tag, next);
+    let tag = open[0];
+    const vb =
+      tag.match(/\sviewBox="([^"]+)"/i)?.[1] ||
+      tag.match(/\sviewbox="([^"]+)"/i)?.[1] ||
+      '';
+    const parts = vb
+      .trim()
+      .split(/[\s,]+/)
+      .map((x) => Number(x));
+    if (parts.length >= 4 && parts[2] > 1 && parts[3] > 1) {
+      const iw = parts[2];
+      const ih = parts[3];
+      if (/\swidth="/i.test(tag)) {
+        tag = tag.replace(/\swidth="[^"]*"/i, ` width="${iw}"`);
+      } else {
+        tag = tag.replace(/<svg\b/i, `<svg width="${iw}"`);
+      }
+      if (/\sheight="/i.test(tag)) {
+        tag = tag.replace(/\sheight="[^"]*"/i, ` height="${ih}"`);
+      } else {
+        tag = tag.replace(/<svg\b/i, `<svg height="${ih}"`);
+      }
+      tag = tag.replace(/<svg\b/i, '<svg data-prp-mermaid-viewer-svg="1"');
+      s = s.replace(open[0], tag);
+    } else {
+      // No viewBox: keep numeric attrs if present; strip % only (already done)
+      const hasNumW = /\swidth="[\d.]+(px)?"/i.test(tag);
+      const hasNumH = /\sheight="[\d.]+(px)?"/i.test(tag);
+      if (!hasNumW || !hasNumH) {
+        /* leave as-is */
       }
     }
   }
