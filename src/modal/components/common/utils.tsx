@@ -14,7 +14,7 @@ export const COMMENT_ROW_HEIGHT = 220;
  * the virtual list clips the card (composer / collapse toggle mis-hit).
  */
 export const COMMENT_ROW_HEIGHT_PENDING = COMMENT_ROW_HEIGHT;
-/** Collapsed thread chrome (filebar + 3-line preview) — keep tight to avoid dead space. */
+/** Collapsed thread chrome (filebar + 2-line body preview) — keep tight. */
 export const COMMENT_ROW_HEIGHT_COLLAPSED = 76;
 /** Estimated height for rendered image previews in the virtualized diff list. */
 export const IMAGE_ROW_HEIGHT = 220;

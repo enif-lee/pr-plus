@@ -42,6 +42,97 @@ export function getSteps() {
     waitDiffFilesReady(`P2.0 PR #${DEMO_PR} Diff files ready`);
     waitMs(300);
   });
+
+  run('P2.0b review filter multi-select defaults + gear', () => {
+    if (!evalInPage(`!!document.querySelector('.prp-overlay')`)) {
+      openPr(DEMO_PR);
+    }
+    setLayout('diff');
+    blurEditable();
+    waitDiffFilesReady(`P2.0b PR #${DEMO_PR} Diff files ready`);
+    waitMs(500);
+    const snap = evalInPage(`
+      (() => {
+        const btns = Array.from(
+          document.querySelectorAll('.prp-review-filter__btn')
+        );
+        const pressed = btns.map((b) => ({
+          text: (b.textContent || '').replace(/\\s+/g, ' ').trim(),
+          on: b.getAttribute('aria-pressed') === 'true' ||
+            b.classList.contains('prp-review-filter__btn--on'),
+        }));
+        const gear = document.querySelector('[data-prp-review-filter-gear="1"]');
+        const stepPrev = document.querySelector(
+          '.prp-diff-toolbar__thread-nav .prp-step-nav__btn'
+        );
+        const cs = stepPrev ? getComputedStyle(stepPrev) : null;
+        return {
+          pressed,
+          hasGear: !!gear,
+          prevPadRight: cs?.paddingRight || null,
+          prevPadLeft: cs?.paddingLeft || null,
+          prevW: cs?.width || null,
+        };
+      })()
+    `);
+    assert(snap?.hasGear, `review filter gear missing: ${JSON.stringify(snap)}`);
+    // Open gear menu (React state) then re-query after a tick
+    evalInPage(`
+      (() => {
+        const gear = document.querySelector('[data-prp-review-filter-gear="1"]');
+        if (gear) gear.click();
+        return !!gear;
+      })()
+    `);
+    waitMs(200);
+    const menuSnap = evalInPage(`
+      (() => {
+        const menu = document.querySelector('[data-prp-review-filter-menu="1"]');
+        const menuText = (menu?.innerText || '').replace(/\\s+/g, ' ');
+        return {
+          menuOpen: !!menu,
+          hide: /Hide outdated/i.test(menuText),
+          by: /Reviewed by/i.test(menuText),
+          text: menuText.slice(0, 120),
+        };
+      })()
+    `);
+    assert(
+      menuSnap?.menuOpen && menuSnap?.hide && menuSnap?.by,
+      `settings menu missing hide/outdated or authors: ${JSON.stringify(menuSnap)}`
+    );
+    // close
+    evalInPage(`
+      (() => {
+        const gear = document.querySelector('[data-prp-review-filter-gear="1"]');
+        if (gear) gear.click();
+        return true;
+      })()
+    `);
+    const unresolved = (snap.pressed || []).find((p) =>
+      /Unresolved/i.test(p.text)
+    );
+    const pending = (snap.pressed || []).find((p) => /Pending/i.test(p.text));
+    // Defaults: unresolved (+ pending when present) selected; not exclusive single
+    assert(
+      unresolved?.on,
+      `Unresolved should start selected: ${JSON.stringify(snap.pressed)}`
+    );
+    if (pending) {
+      assert(
+        pending.on,
+        `Pending should start selected when shown: ${JSON.stringify(snap.pressed)}`
+      );
+    }
+    // ↑ button no extra right padding vs left
+    if (snap.prevPadRight != null) {
+      assert(
+        snap.prevPadRight === '0px' || snap.prevPadRight === '0',
+        `StepNav ↑ padding-right should be 0: ${snap.prevPadRight}`
+      );
+    }
+    log('P2.0b review filter OK', snap);
+  });
   run('P2.1 Diff ⌥J/K thread nav', () => {
     setLayout('diff');
     blurEditable();

@@ -26,6 +26,7 @@ import {
   GitPullRequestDraftIcon,
   KebabHorizontalIcon,
   FileDiffIcon,
+  GearIcon,
   LinkExternalIcon,
   LinkIcon,
   MarkGithubIcon,
@@ -88,6 +89,8 @@ export const IconLink = wrap(LinkIcon);
 /** GitHub mark — restore native PR UI from embed */
 export const IconMarkGithub = wrap(MarkGithubIcon);
 export const IconFileDiff = wrap(FileDiffIcon);
+/** Diff review-nav filter settings */
+export const IconGear = wrap(GearIcon);
 /** Conversation / discussion threads view */
 export const IconConversation = wrap(CommentDiscussionIcon);
 export const IconKebab = wrap(KebabHorizontalIcon);

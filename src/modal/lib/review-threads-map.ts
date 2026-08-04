@@ -115,6 +115,14 @@ export function mapGraphqlReviewThreadNodes(allNodes: any) {
         const id =
           typeof dbId === 'number' ? dbId : Number(dbId) || String(dbId);
         commentIds.push(id);
+        const reviewState = String(
+          node.pullRequestReview?.state || ''
+        ).toUpperCase();
+        const reviewDbId =
+          node.pullRequestReview?.databaseId != null
+            ? Number(node.pullRequestReview.databaseId)
+            : null;
+        const pending = reviewState === 'PENDING';
         comments.push({
           id,
           body: node.body || '',
@@ -126,8 +134,13 @@ export function mapGraphqlReviewThreadNodes(allNodes: any) {
           createdAt: node.createdAt || null,
           inReplyToId: node.replyTo?.databaseId ?? null,
           threadNodeId: t.id,
+          // Shell first:1 includes pullRequestReview so timeline can group
+          // before by-ids hydrate (resolved threads skip eager bulk).
+          reviewId: Number.isFinite(reviewDbId) ? reviewDbId : null,
           resolved: Boolean(t.isResolved),
           outdated: Boolean(node.outdated ?? t.isOutdated),
+          pending,
+          pendingReviewId: pending ? reviewDbId : null,
           // Preview-only root when shell first:1 and more replies remain
           _commentsPreview: commentsLoaded ? false : true,
         });

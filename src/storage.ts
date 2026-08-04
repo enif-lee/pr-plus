@@ -29,7 +29,6 @@ const ONBOARDING_KEY = 'onboardingCompleted';
 
 /**
  * Default extension preferences.
- * - fastReview: progressive dual-window load (core first, threads on demand)
  * - reverseComments: composer → merge box → conversation (latest-first timeline)
  * - autoOpenEmbed: on GitHub PR routes, open pr+ embed automatically (vs native + toggle)
  * - singleFileMode: Diff virtual list shows only the active file (nav still lists all)
@@ -38,9 +37,9 @@ const ONBOARDING_KEY = 'onboardingCompleted';
  *
  * Enterprise hosts are NOT in prefs — they live in HOST_ACCOUNTS_KEY with paired PATs.
  * Legacy `enterpriseWebHosts` (hosts-only list) is dropped on normalize (re-register required).
+ * Legacy `fastReview` is dropped on normalize (progressive load is always on).
  */
 const DEFAULT_PREFS = {
-  fastReview: true,
   reverseComments: true,
   autoOpenEmbed: true,
   singleFileMode: false,
@@ -98,7 +97,6 @@ function getStorageArea(storageApi: any = (globalThis as any).chrome?.storage?.l
  * Normalize prefs object; unknown keys dropped, missing keys filled from defaults.
  * @param {unknown} raw
  * @returns {{
- *   fastReview: boolean,
  *   reverseComments: boolean,
  *   autoOpenEmbed: boolean,
  *   singleFileMode: boolean,
@@ -153,10 +151,6 @@ function normalizePrefs(raw: any) {
   const src = raw && typeof raw === 'object' ? raw : {};
 
   return {
-    fastReview:
-      typeof src.fastReview === 'boolean'
-        ? src.fastReview
-        : DEFAULT_PREFS.fastReview,
     reverseComments:
       typeof src.reverseComments === 'boolean'
         ? src.reverseComments
@@ -316,7 +310,6 @@ function normalizeHostAccounts(raw: any) {
 /**
  * @param {unknown} [storageApi]
  * @returns {Promise<{
- *   fastReview: boolean,
  *   reverseComments: boolean,
  *   autoOpenEmbed: boolean,
  *   singleFileMode: boolean,
@@ -338,7 +331,6 @@ function getExtensionPrefs(storageApi: any) {
 /**
  * Merge patch into stored prefs and return the full next prefs.
  * @param {Partial<{
- *   fastReview: boolean,
  *   reverseComments: boolean,
  *   autoOpenEmbed: boolean,
  *   singleFileMode: boolean,
@@ -369,7 +361,6 @@ async function setExtensionPrefs(patch: any, storageApi: any) {
 /**
  * Watch prefs changes (local area only).
  * @param {(prefs: {
- *   fastReview: boolean,
  *   reverseComments: boolean,
  *   autoOpenEmbed: boolean,
  *   singleFileMode: boolean,

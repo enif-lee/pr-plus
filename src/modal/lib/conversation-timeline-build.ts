@@ -253,15 +253,10 @@ export function buildConversationTimeline(detail, opts: any = {}) {
     const state = anyPending
       ? 'PENDING'
       : String(review?.state || 'COMMENTED').toUpperCase();
-    // Group multi-file / body / non-comment reviews; always embed PENDING as a group
-    const shouldGroup =
-      anyPending ||
-      threads.length >= 2 ||
-      (threads.length >= 1 && Boolean(reviewBody)) ||
-      (threads.length >= 1 &&
-        state &&
-        state !== 'COMMENTED' &&
-        state !== 'PENDING');
+    // Always group when threads share a reviewId / pending bucket — including
+    // single-thread COMMENTED with empty body and any resolve state. Standalone
+    // review-thread cards are only for true orphans (no reviewId/pending key).
+    const shouldGroup = threads.length >= 1;
 
     threads.sort((a, b) => {
       const pa = a.path || '';

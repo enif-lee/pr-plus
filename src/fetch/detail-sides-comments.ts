@@ -234,6 +234,8 @@ export async function fetchPrTimelineEvents(owner: any, repo: any, number: any, 
 
 /**
  * Submitted PR reviews list. Independent of fetchPrDetail.
+ * Walks REST pages of 100 via Link rel=next until exhaustion so PRs with
+ * more than 100 reviews are fully available for review-group headers.
  * @returns {Promise<Array>}
  */
 export async function fetchPrReviews(owner: any, repo: any, number: any, fetchImpl: any, token: any = null, ctx: any = null) {
@@ -243,13 +245,16 @@ export async function fetchPrReviews(owner: any, repo: any, number: any, fetchIm
   const n = Number(number);
   if (!o || !r || !Number.isFinite(n)) return [];
   try {
-    const data = await apiJson(
-      githubRestUrl(
-        `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/pulls/${n}/reviews?per_page=100`
-      , ctx),
-      fetchImpl,
-      token
+    // GitHub list reviews: per_page max 100. Page through Link next (or
+    // stop on short/empty page) so totals > 100 are not truncated.
+    const firstUrl = githubRestUrl(
+      `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/pulls/${n}/reviews?per_page=100`,
+      ctx
     );
+    const data = await fetchRestCollectionAll(firstUrl, fetchImpl, token, {
+      // Safety cap: 100 pages × 100 = 10k reviews (pathological bots).
+      maxPages: 100,
+    });
     return (Array.isArray(data) ? data : []).map((rev) => ({
       id: rev.id,
       author: rev.user?.login || '',

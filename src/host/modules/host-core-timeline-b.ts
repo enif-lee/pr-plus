@@ -182,7 +182,6 @@
       const next = await globalThis.PRTreeStorage?.getExtensionPrefs?.();
       if (next && typeof next === 'object') {
         prefs = {
-          fastReview: next.fastReview !== false,
           reverseComments: next.reverseComments !== false,
           autoOpenEmbed: next.autoOpenEmbed !== false,
           singleFileMode: next.singleFileMode === true,
@@ -333,7 +332,6 @@
           const prevAuto = prefs.autoOpenEmbed !== false;
           const prevVis = prefs.timelineVisibility;
           prefs = {
-            fastReview: next?.fastReview !== false,
             reverseComments: next?.reverseComments !== false,
             autoOpenEmbed: next?.autoOpenEmbed !== false,
             singleFileMode: next?.singleFileMode === true,

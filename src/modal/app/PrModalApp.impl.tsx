@@ -41,6 +41,7 @@ import {
   type DiffCommitFilter as DiffCommitFilterState,
 } from '../lib/diff-commit-filter';
 import { filesListNeedsFullFetch } from '../lib/detail-idb';
+import { useDetailUiStore } from '../store/detail-ui-store';
 import {
   SHELL_MODAL,
   SHELL_SHEET,
@@ -157,20 +158,28 @@ import {
   filesInTreeOrder,
   flattenVisibleTree,
   collectDirPaths,
-  filterFilesByReviewMode,
   filterFilesByExtensions,
   filterFilesUnreadOnly,
   hasAnyReviewThreads,
-  type DiffReviewFilterMode,
 } from '../lib/file-tree';
 import {
   sortThreadRootComments,
   mapCommentsToRowIndices,
   resolveCommentNav,
-  filterReviewCommentsForNav,
   filterReviewRootsForNav,
   buildPathOrderMap,
 } from '../lib/comment-nav';
+import {
+  createDefaultDiffReviewFilter,
+  createUnrestrictedDiffReviewFilter,
+  filterFilesByDiffReviewFilter,
+  filterReviewCommentsForDiffNav,
+  filterReviewRootsForDiffNav,
+  normalizeDiffReviewFilter,
+  toggleDiffReviewStatus,
+  type DiffReviewFilterState,
+  type DiffReviewStatus,
+} from '../lib/diff-review-filter';
 import {
   buildSearchIndex,
   resolveQuerySearchState,
@@ -611,7 +620,7 @@ export function PrModalApp({
     setStackPathSelections({});
     commentPrefetchGenRef.current += 1;
     setDiffThreadCollapse(new Map());
-    setDiffReviewFilter(null);
+    setDiffReviewFilter(createDefaultDiffReviewFilter());
     setFileExtFilter(new Set());
     setFileUnreadOnly(false);
     // Zustand selection survives remount — clear so we never write another PR's #diff-
@@ -851,8 +860,12 @@ export function PrModalApp({
     () => new Map<string, Array<{ start: number; end: number }>>()
   );
   const [diffExpandBusyKey, setDiffExpandBusyKey] = useState<string | null>(null);
-  /** Diff toolbar: Unresolved | Resolved | off (null). Filters files + review nav. */
-  const [diffReviewFilter, setDiffReviewFilter] = useState<DiffReviewFilterMode>(null);
+  /**
+   * Diff toolbar multi-select review filter (status chips + settings).
+   * Default: unresolved + pending. Empty statuses ≡ all.
+   */
+  const [diffReviewFilter, setDiffReviewFilter] =
+    useState<DiffReviewFilterState>(() => createDefaultDiffReviewFilter());
   /** Files-nav filters (shared with Diff review nav counts). */
   const [fileExtFilter, setFileExtFilter] = useState(() => new Set<string>());
   const [fileUnreadOnly, setFileUnreadOnly] = useState(false);
@@ -1281,6 +1294,30 @@ export function PrModalApp({
     const flight = ++filesFlightSeqRef.current;
     filesFlightRef.current = flight;
     setFileListLoading(true);
+    // Header progress pill (detail-ui-store) — open host bar does not track
+    // Diff-entry full file fetch; surface busy label + soft percent here.
+    const ui = useDetailUiStore.getState();
+    const expected = Number(detail.changedFiles);
+    const startLabel =
+      Number.isFinite(expected) && expected > 0
+        ? `Loading files 0/${Math.min(Math.floor(expected), 999)}`
+        : 'Loading all files…';
+    ui.setLoadStage({ busy: true, label: startLabel, percent: 18 });
+    // Soft mid progress while REST pages walk (no per-page callbacks yet).
+    const midTimer =
+      typeof window !== 'undefined'
+        ? window.setTimeout(() => {
+            if (filesFlightRef.current !== flight) return;
+            useDetailUiStore.getState().setLoadStage({
+              busy: true,
+              label:
+                Number.isFinite(expected) && expected > 0
+                  ? `Loading files…`
+                  : 'Loading all files…',
+              percent: 58,
+            });
+          }, 400)
+        : null;
     try {
       const all = await onFetchAllPrFiles({
         gitattributesText: detail.gitattributesText || '',
@@ -1318,13 +1355,49 @@ export function PrModalApp({
           ? { gitattributesText: detail.gitattributesText }
           : null),
       });
+      useDetailUiStore.getState().setLoadStage({
+        busy: true,
+        label:
+          count > 0
+            ? `Loading files ${Math.min(count, 999)}/${Math.min(count, 999)}`
+            : 'Files ready',
+        percent: 96,
+      });
     } catch {
       /* soft-fail: keep partial file list; do not invent settled empty */
     } finally {
-      if (filesFlightRef.current === flight) {
+      if (midTimer != null) {
+        try {
+          window.clearTimeout(midTimer);
+        } catch {
+          /* ignore */
+        }
+      }
+      const stillMine = filesFlightRef.current === flight;
+      if (stillMine) {
         filesFlightRef.current = 0;
       }
       setFileListLoading(false);
+      // Only settle the header bar when this flight still owns the slot
+      // (a newer ensureAllFiles would have a higher flight id).
+      if (stillMine) {
+        useDetailUiStore.getState().setLoadStage({
+          busy: false,
+          label: null,
+          percent: 100,
+        });
+        if (typeof window !== 'undefined') {
+          const settledFlight = flight;
+          window.setTimeout(() => {
+            // Newer flight in progress — leave its stage alone.
+            if (filesFlightRef.current !== 0) return;
+            if (filesFlightSeqRef.current !== settledFlight) return;
+            useDetailUiStore.getState().clearLoadStage();
+          }, 280);
+        } else {
+          useDetailUiStore.getState().clearLoadStage();
+        }
+      }
     }
   }, [detail, onFetchAllPrFiles, onPatchDetail, diffFilesOverride, prIdentity]);
 
@@ -1480,20 +1553,12 @@ export function PrModalApp({
    */
   const reviewScopedFiles = useMemo(
     () =>
-      filterFilesByReviewMode(
+      filterFilesByDiffReviewFilter(
         annotatedFiles,
-        threadCounts,
-        unresolvedThreadCounts,
-        diffReviewFilter,
-        pendingThreadCounts
+        detail?.reviewComments || [],
+        diffReviewFilter
       ),
-    [
-      annotatedFiles,
-      threadCounts,
-      unresolvedThreadCounts,
-      pendingThreadCounts,
-      diffReviewFilter,
-    ]
+    [annotatedFiles, detail?.reviewComments, diffReviewFilter]
   );
 
   /**
@@ -1554,35 +1619,9 @@ export function PrModalApp({
    */
   const navReviewComments = useMemo(() => {
     const all = detail?.reviewComments || [];
-    if (!diffReviewFilter && displayPathSet.size === annotatedFiles.length) {
-      // Fast path: no review mode and no file filters that shrink the set
-      const unfiltered =
-        !String(fileQuery || '').trim() &&
-        fileExtFilter.size === 0 &&
-        !fileUnreadOnly;
-      if (unfiltered) return all;
-    }
-    // Path-only filter when review mode is off — never drop pending by mode
-    if (!diffReviewFilter) {
-      if (!displayPathSet.size) return all;
-      return all.filter((c: any) => {
-        if (!c) return false;
-        const path = c.path || '';
-        return !path || displayPathSet.has(path);
-      });
-    }
-    return typeof filterReviewCommentsForNav === 'function'
-      ? filterReviewCommentsForNav(all, diffReviewFilter, displayPathSet)
-      : all;
-  }, [
-    detail?.reviewComments,
-    diffReviewFilter,
-    displayPathSet,
-    annotatedFiles.length,
-    fileQuery,
-    fileExtFilter,
-    fileUnreadOnly,
-  ]);
+    const f = normalizeDiffReviewFilter(diffReviewFilter);
+    return filterReviewCommentsForDiffNav(all, f, displayPathSet);
+  }, [detail?.reviewComments, diffReviewFilter, displayPathSet]);
 
   const threads = useMemo(() => {
     const fromComments =
@@ -1784,19 +1823,14 @@ export function PrModalApp({
       typeof buildPathOrderMap === 'function'
         ? buildPathOrderMap(displayFiles)
         : null;
-    const roots =
-      typeof filterReviewRootsForNav === 'function'
-        ? sortThreadRootComments(
-            filterReviewRootsForNav(
-              detail?.reviewComments || [],
-              diffReviewFilter,
-              displayPathSet
-            ),
-            pathOrder
-          )
-        : typeof sortThreadRootComments === 'function'
-          ? sortThreadRootComments(navReviewComments, pathOrder)
-          : navReviewComments;
+    const roots = sortThreadRootComments(
+      filterReviewRootsForDiffNav(
+        detail?.reviewComments || [],
+        diffReviewFilter,
+        displayPathSet
+      ),
+      pathOrder
+    );
     return mapCommentsToRowIndices(roots, virtualRows, { pathOrder });
   }, [
     detail?.reviewComments,
@@ -2284,12 +2318,13 @@ export function PrModalApp({
       const path = target.path ? String(target.path) : '';
       if (
         path &&
-        diffReviewFilter &&
         !reviewFilteredFiles.some(
           (f: any) => (f.filename || f.path) === path
         )
       ) {
-        setDiffReviewFilter(null);
+        // Widen to unrestricted (empty statuses ≡ all) — not product default
+        // unresolved+pending, which would still hide resolved-only paths.
+        setDiffReviewFilter(createUnrestrictedDiffReviewFilter());
       }
 
       if (path) expandFileForJump(path);
@@ -2830,17 +2865,22 @@ export function PrModalApp({
     );
   }
 
-  /** Apply Diff review-filter toggle (⌥U/R/P). */
+  /** Apply Diff review-filter status toggle (⌥U/R/P) — multi-select. */
   function applyReviewFilterToggle(
     target: 'unresolved' | 'resolved' | 'pending'
   ) {
     setDiffReviewFilter((prev) =>
       typeof toggleReviewFilter === 'function'
-        ? toggleReviewFilter(prev, target)
-        : prev === target
-          ? null
-          : target
+        ? normalizeDiffReviewFilter(toggleReviewFilter(prev, target))
+        : toggleDiffReviewStatus(prev, target)
     );
+  }
+
+  function patchDiffReviewFilter(partial: Partial<DiffReviewFilterState>) {
+    setDiffReviewFilter((prev) => {
+      const base = normalizeDiffReviewFilter(prev);
+      return normalizeDiffReviewFilter({ ...base, ...partial });
+    });
   }
 
   /**
@@ -4664,22 +4704,8 @@ export function PrModalApp({
   /** Thread-level pending count (same as pendingCount; kept for Diff toolbar props). */
   const totalPendingCount = pendingCount;
 
-  // Clear review filter when the active mode has nothing left.
-  // Use path counts + comment count so a brief host refresh race (pending
-  // rows stripped then restored) does not wipe the Pending toggle mid-click.
-  useEffect(() => {
-    if (!diffReviewFilter) return;
-    if (diffReviewFilter === 'pending') {
-      const hasPendingPaths = hasAnyReviewThreads(pendingThreadCounts);
-      if (totalPendingCount === 0 && !hasPendingPaths) {
-        setDiffReviewFilter(null);
-      }
-      return;
-    }
-    if (!hasAnyReviewThreads(threadCounts) && totalPendingCount === 0) {
-      setDiffReviewFilter(null);
-    }
-  }, [threadCounts, pendingThreadCounts, diffReviewFilter, totalPendingCount]);
+  // Multi-select: do not auto-clear status chips when counts hit zero
+  // (user may keep unresolved+pending selected across refresh races).
 
   /**
    * Leave a review (Diff Finish modal / Conversation Review tab / shortcuts).
@@ -7855,6 +7881,12 @@ export function PrModalApp({
               totalPendingCount={totalPendingCount}
               reviewThreadTotals={reviewThreadTotals}
               setDiffReviewFilter={setDiffReviewFilter}
+              onToggleReviewStatus={(status: string) =>
+                applyReviewFilterToggle(
+                  status as DiffReviewStatus
+                )
+              }
+              onPatchReviewFilter={patchDiffReviewFilter}
               detailCommits={detail.commits || []}
               diffCommitFilter={diffCommitFilter}
               applyDiffCommitFilter={applyDiffCommitFilter}

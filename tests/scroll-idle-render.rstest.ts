@@ -149,6 +149,9 @@ describe('wiring: Conversation scroller → Mermaid gate', () => {
     expect(mmd).toMatch(/useConversationScrollIdle/);
     expect(mmd).toMatch(/cachedKeyRef/);
     expect(mmd).toMatch(/ensureMermaid/);
+    // Module LRU survives virtual-list remount
+    expect(mmd).toMatch(/getMermaidSvgCache/);
+    expect(mmd).toMatch(/setMermaidSvgCache/);
     // Heavy path only when runHeavy is true
     expect(mmd).toMatch(/if\s*\(\s*!runHeavy\s*\)/);
     const gateIdx = mmd.indexOf('if (!runHeavy)');

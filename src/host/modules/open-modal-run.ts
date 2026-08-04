@@ -483,7 +483,6 @@
 
       if (!prefsReady) await refreshPrefs();
       ensurePrefsWatch();
-      const fastReview = prefs.fastReview !== false;
 
       const openStill = () =>
         gen === detailFetchGen &&
@@ -1662,9 +1661,11 @@
               tryFinishOpenProgress(prog);
             }
 
-            // Full load when "가볍고 빠른 PR 검토" is off — drain remaining pages
+            // Conversation open: first window only — remaining pages via user
+            // load-more. Full drain only when this open targets Diff (or the
+            // Diff-enter effect in PrModalApp).
             if (
-              !fastReview &&
+              resolvedPage === 'diff' &&
               gen === detailFetchGen &&
               current.open &&
               current.detail?.reviewThreadsMeta?.hasMore

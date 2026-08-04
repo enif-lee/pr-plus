@@ -295,19 +295,25 @@ export function HeaderStatsBadge({
   deletions?: number;
   fileCount?: number;
 }) {
-  // Prefer host prop; fall back to Zustand progressive mirror (detail-ui-store).
+  // Host prop is primary for open/refresh; modal store can surface Diff-side
+  // work (ensureAllFiles) when host bar is idle, or when store is actively busy.
   const storePercent = useDetailUiStore((s) => s.loadPercent);
   const storeLabel = useDetailUiStore((s) => s.loadLabel);
   const storeBusy = useDetailUiStore((s) => s.loadBusy);
-  const effectiveStage =
-    loadStage ||
-    (storeBusy || storeLabel
+  const hostBusy = Boolean(loadStage?.busy);
+  const storeStage =
+    storeBusy || storeLabel
       ? {
           percent: storePercent,
           label: storeLabel,
           busy: storeBusy,
+          phase: storeBusy ? 'files' : null,
         }
-      : null);
+      : null;
+  const effectiveStage =
+    storeBusy && storeLabel && !hostBusy
+      ? storeStage
+      : loadStage || storeStage;
   const stageLabel = effectiveStage?.label ? String(effectiveStage.label) : '';
   const stageBusy = Boolean(effectiveStage?.busy);
   const stagePhase = effectiveStage?.phase != null ? String(effectiveStage.phase) : '';

@@ -314,7 +314,7 @@ export function getSteps() {
       ) {
         break;
       }
-      // Fallback: generic first expand btn (same path as open)
+      // Fallback: generic first expand btn (same path as open; harness is single-toggle)
       clickFirstLineExpandBtn();
       waitMs(500);
     }

@@ -11,12 +11,20 @@ import {
   truncateCommitLabel,
 } from '@lib/diff-commit-filter';
 import { pendingReviewCount } from '@lib/pending-review';
-import { IconChevronDown, IconFileNavToggle } from '@common/icons';
+import { IconChevronDown, IconFileNavToggle, IconGear } from '@common/icons';
 import { StepNav } from '@common/StepNav';
 import {
   sidePanelShortcutLabel,
   stepNavShortcutLabel,
 } from '@lib/shortcut-policy';
+import {
+  createDefaultDiffReviewFilter,
+  isStatusActive,
+  listReviewAuthorsFromComments,
+  normalizeDiffReviewFilter,
+  type DiffReviewFilterState,
+  type DiffReviewStatus,
+} from '@lib/diff-review-filter';
 import { TipPopover } from '@common/TipPopover';
 import { SearchBar } from './SearchBar';
 import './DiffToolbar.css';
@@ -58,13 +66,22 @@ export function DiffToolbar(props: any) {
     commentIndex = -1,
     onPrevComment,
     onNextComment,
-    /** null | 'unresolved' | 'resolved' | 'pending' — deselectable segment control */
+    /**
+     * Multi-select review filter state (statuses + hideOutdated + authors).
+     * Legacy string/null still accepted via normalizeDiffReviewFilter.
+     */
     reviewFilter = null,
     onReviewFilter = null,
+    /** Toggle one status chip (multi-select). */
+    onToggleReviewStatus = null,
+    /** Patch hideOutdated / authors. */
+    onPatchReviewFilter = null,
     showReviewFilter = false,
     /** Thread totals for filter button labels */
     unresolvedCount = 0,
     resolvedCount = 0,
+    /** All review comments (for author list) */
+    reviewComments = null,
     pendingBatch,
     pendingServerCount = 0,
     totalPendingCount = null,
@@ -104,6 +121,69 @@ export function DiffToolbar(props: any) {
       : Number(pendingServerCount || 0) || localPending;
   const unresN = Number(unresolvedCount) || 0;
   const resN = Number(resolvedCount) || 0;
+  const filterState: DiffReviewFilterState = useMemo(
+    () =>
+      normalizeDiffReviewFilter(
+        reviewFilter ?? createDefaultDiffReviewFilter()
+      ),
+    [reviewFilter]
+  );
+  const authorList = useMemo(() => {
+    const src = Array.isArray(reviewComments)
+      ? reviewComments
+      : Array.isArray(comments)
+        ? comments
+        : Array.isArray(detail?.reviewComments)
+          ? detail.reviewComments
+          : [];
+    return typeof listReviewAuthorsFromComments === 'function'
+      ? listReviewAuthorsFromComments(src)
+      : [];
+  }, [reviewComments, comments, detail?.reviewComments]);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsWrapRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!settingsOpen) return undefined;
+    // Defer outside-click so the opening click does not immediately close.
+    let armed = false;
+    const armTimer = window.setTimeout(() => {
+      armed = true;
+    }, 0);
+    function onDoc(e: MouseEvent) {
+      if (!armed) return;
+      const root = settingsWrapRef.current;
+      if (!root) return;
+      if (e.target instanceof Node && root.contains(e.target)) return;
+      setSettingsOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setSettingsOpen(false);
+    }
+    document.addEventListener('mousedown', onDoc, true);
+    document.addEventListener('keydown', onKey, true);
+    return () => {
+      window.clearTimeout(armTimer);
+      document.removeEventListener('mousedown', onDoc, true);
+      document.removeEventListener('keydown', onKey, true);
+    };
+  }, [settingsOpen]);
+  function toggleStatus(status: DiffReviewStatus) {
+    if (typeof onToggleReviewStatus === 'function') {
+      onToggleReviewStatus(status);
+      return;
+    }
+    // Fallback: exclusive-style via onReviewFilter for older hosts
+    onReviewFilter?.(
+      isStatusActive(filterState, status) ? null : status
+    );
+  }
+  function patchFilter(partial: Partial<DiffReviewFilterState>) {
+    if (typeof onPatchReviewFilter === 'function') {
+      onPatchReviewFilter(partial);
+      return;
+    }
+    onReviewFilter?.({ ...filterState, ...partial });
+  }
   const isMac =
     typeof navigator !== 'undefined' &&
     /Mac|iPhone|iPad/.test(navigator.platform || '');
@@ -350,26 +430,18 @@ export function DiffToolbar(props: any) {
               <div
                 className="prp-review-filter"
                 role="group"
-                aria-label="Filter files by review threads"
+                aria-label="Filter review threads by status (multi-select)"
               >
                 <button
                   type="button"
                   className={
-                    reviewFilter === 'unresolved'
+                    isStatusActive(filterState, 'unresolved')
                       ? 'prp-review-filter__btn prp-review-filter__btn--on'
                       : 'prp-review-filter__btn'
                   }
-                  aria-pressed={reviewFilter === 'unresolved'}
-                  title={
-                    reviewFilter === 'unresolved'
-                      ? 'Clear filter — show all review threads'
-                      : `Show only unresolved review threads (${unresN})`
-                  }
-                  onClick={() =>
-                    onReviewFilter?.(
-                      reviewFilter === 'unresolved' ? null : 'unresolved'
-                    )
-                  }
+                  aria-pressed={isStatusActive(filterState, 'unresolved')}
+                  title={`Toggle unresolved threads (${unresN}). Empty selection shows all.`}
+                  onClick={() => toggleStatus('unresolved')}
                 >
                   Unresolved{' '}
                   <span className="prp-review-filter__count">{unresN}</span>
@@ -377,43 +449,27 @@ export function DiffToolbar(props: any) {
                 <button
                   type="button"
                   className={
-                    reviewFilter === 'resolved'
+                    isStatusActive(filterState, 'resolved')
                       ? 'prp-review-filter__btn prp-review-filter__btn--on'
                       : 'prp-review-filter__btn'
                   }
-                  aria-pressed={reviewFilter === 'resolved'}
-                  title={
-                    reviewFilter === 'resolved'
-                      ? 'Clear filter — show all review threads'
-                      : `Show only resolved review threads (${resN})`
-                  }
-                  onClick={() =>
-                    onReviewFilter?.(
-                      reviewFilter === 'resolved' ? null : 'resolved'
-                    )
-                  }
+                  aria-pressed={isStatusActive(filterState, 'resolved')}
+                  title={`Toggle resolved threads (${resN}). Empty selection shows all.`}
+                  onClick={() => toggleStatus('resolved')}
                 >
                   Resolved <span className="prp-review-filter__count">{resN}</span>
                 </button>
-                {pending > 0 || reviewFilter === 'pending' ? (
+                {pending > 0 || isStatusActive(filterState, 'pending') ? (
                   <button
                     type="button"
                     className={
-                      reviewFilter === 'pending'
+                      isStatusActive(filterState, 'pending')
                         ? 'prp-review-filter__btn prp-review-filter__btn--on'
                         : 'prp-review-filter__btn'
                     }
-                    aria-pressed={reviewFilter === 'pending'}
-                    title={
-                      reviewFilter === 'pending'
-                        ? 'Clear filter — show all review threads'
-                        : `Show only pending (unsubmitted) comments (${pending})`
-                    }
-                    onClick={() =>
-                      onReviewFilter?.(
-                        reviewFilter === 'pending' ? null : 'pending'
-                      )
-                    }
+                    aria-pressed={isStatusActive(filterState, 'pending')}
+                    title={`Toggle pending (unsubmitted) comments (${pending}). Empty selection shows all.`}
+                    onClick={() => toggleStatus('pending')}
                   >
                     Pending{' '}
                     <span className="prp-review-filter__count">{pending}</span>
@@ -421,24 +477,109 @@ export function DiffToolbar(props: any) {
                 ) : null}
               </div>
             ) : null}
-            {!searchOpen && comments?.length ? (
-              <StepNav
-                className="prp-diff-toolbar__comments prp-comment-nav"
-                index={commentIndex}
-                total={comments.length}
-                onPrev={onPrevComment}
-                onNext={onNextComment}
-                label="Review threads"
-                title={
-                  reviewFilter
-                    ? `Filtered review threads (${reviewFilter}; replies excluded)`
-                    : 'Review threads (replies excluded)'
-                }
-                prevTitle="Previous review thread"
-                nextTitle="Next review thread"
-                prevShortcut={threadPrevShortcut}
-                nextShortcut={threadNextShortcut}
-              />
+            {!searchOpen && (showReviewFilter || comments?.length) ? (
+              <div
+                className="prp-diff-toolbar__thread-nav-wrap"
+                ref={settingsWrapRef}
+              >
+                <div className="prp-diff-toolbar__thread-nav">
+                  <StepNav
+                    className="prp-diff-toolbar__comments prp-comment-nav"
+                    index={commentIndex}
+                    total={Array.isArray(comments) ? comments.length : 0}
+                    onPrev={onPrevComment}
+                    onNext={onNextComment}
+                    label="Review threads"
+                    title={
+                      filterState.statuses.length ||
+                      filterState.hideOutdated ||
+                      filterState.authors.length
+                        ? `Filtered review threads (replies excluded)`
+                        : 'Review threads (replies excluded)'
+                    }
+                    prevTitle="Previous review thread"
+                    nextTitle="Next review thread"
+                    prevShortcut={threadPrevShortcut}
+                    nextShortcut={threadNextShortcut}
+                  />
+                  <button
+                    type="button"
+                    className="prp-diff-toolbar__filter-gear"
+                    aria-label="Review filter settings"
+                    aria-haspopup="menu"
+                    aria-expanded={settingsOpen}
+                    title="Filter options"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSettingsOpen((v) => !v);
+                    }}
+                    data-prp-review-filter-gear="1"
+                  >
+                    <IconGear size={14} />
+                  </button>
+                </div>
+                {settingsOpen ? (
+                  <div
+                    className="prp-diff-review-settings"
+                    role="menu"
+                    aria-label="Review filter options"
+                    data-prp-review-filter-menu="1"
+                  >
+                    <div className="prp-diff-review-settings__section">
+                      <label className="prp-diff-review-settings__row">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(filterState.hideOutdated)}
+                          onChange={(e) =>
+                            patchFilter({ hideOutdated: e.target.checked })
+                          }
+                        />
+                        <span>Hide outdated comments</span>
+                      </label>
+                    </div>
+                    <hr className="prp-diff-review-settings__divider" />
+                    <div className="prp-diff-review-settings__section">
+                      <p className="prp-diff-review-settings__heading">
+                        Reviewed by…
+                      </p>
+                      {authorList.length === 0 ? (
+                        <p className="prp-diff-review-settings__empty">
+                          No review authors yet
+                        </p>
+                      ) : (
+                        authorList.map((login) => {
+                          const key = String(login).toLowerCase();
+                          const checked = filterState.authors.some(
+                            (a) => a.toLowerCase() === key
+                          );
+                          return (
+                            <label
+                              key={key}
+                              className="prp-diff-review-settings__row"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => {
+                                  const next = new Set(
+                                    filterState.authors.map((a) =>
+                                      a.toLowerCase()
+                                    )
+                                  );
+                                  if (next.has(key)) next.delete(key);
+                                  else next.add(key);
+                                  patchFilter({ authors: [...next] });
+                                }}
+                              />
+                              <span>{login}</span>
+                            </label>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
             ) : null}
           </div>
         ) : null}

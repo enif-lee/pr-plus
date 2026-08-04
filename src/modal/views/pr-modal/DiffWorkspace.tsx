@@ -60,6 +60,8 @@ export type DiffWorkspaceProps = {
   totalPendingCount: number;
   reviewThreadTotals: { unresolved: number; resolved: number };
   setDiffReviewFilter: any;
+  onToggleReviewStatus?: (status: string) => void;
+  onPatchReviewFilter?: (partial: any) => void;
   detailCommits: any[];
   diffCommitFilter: any;
   applyDiffCommitFilter: any;
@@ -192,6 +194,8 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
     totalPendingCount,
     reviewThreadTotals,
     setDiffReviewFilter,
+    onToggleReviewStatus,
+    onPatchReviewFilter,
     detailCommits,
     diffCommitFilter,
     applyDiffCommitFilter,
@@ -368,6 +372,17 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
           onHideWhitespace={onHideWhitespace}
           reviewFilter={diffReviewFilter}
           onReviewFilter={setDiffReviewFilter}
+          onToggleReviewStatus={(status: string) => {
+            if (typeof onToggleReviewStatus === 'function') {
+              onToggleReviewStatus(status);
+            }
+          }}
+          onPatchReviewFilter={(partial: any) => {
+            if (typeof onPatchReviewFilter === 'function') {
+              onPatchReviewFilter(partial);
+            }
+          }}
+          reviewComments={detail?.reviewComments || []}
           showReviewFilter={
             hasAnyReviewThreads(threadCounts) || totalPendingCount > 0
           }

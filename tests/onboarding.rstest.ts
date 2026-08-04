@@ -573,7 +573,6 @@ describe('createOnboardingTour', () => {
       prefs: {
         onboardingCompleted: false,
         treeView: true,
-        fastReview: true,
         reverseComments: true,
         autoOpenEmbed: true,
         singleFileMode: false,

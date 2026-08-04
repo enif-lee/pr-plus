@@ -10,7 +10,6 @@ import { PRTreeFetch } from './bridge-fetch-proxy';
 // send used by e2e probe hook below
 
 export const DEFAULT_PREFS = {
-  fastReview: true,
   reverseComments: true,
   autoOpenEmbed: true,
   singleFileMode: false,
@@ -34,10 +33,6 @@ export function normalizeShortcutMonitorSizeLocal(raw) {
 export function normalizePrefsLocal(raw) {
   const src = raw && typeof raw === 'object' ? raw : {};
   return {
-    fastReview:
-      typeof src.fastReview === 'boolean'
-        ? src.fastReview
-        : DEFAULT_PREFS.fastReview,
     reverseComments:
       typeof src.reverseComments === 'boolean'
         ? src.reverseComments

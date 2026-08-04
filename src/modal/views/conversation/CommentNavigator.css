@@ -73,11 +73,20 @@
   font: inherit;
   font-size: 13px;
   line-height: 1;
-  /* Equal outer buttons — no extra padding */
+  /* Equal prev/next — no asymmetric padding/margin on ↑ alone */
   width: 28px;
   min-width: 28px;
+  max-width: 28px;
   padding: 0;
+  margin-right: 0;
+  box-sizing: border-box;
   cursor: pointer;
+}
+/* Guard against host-level text spacing on the middle (↑) control */
+.prp-step-nav__btn + .prp-step-nav__btn {
+  margin-left: 0;
+  padding-left: 0;
+  padding-right: 0;
 }
 .prp-step-nav__btn:hover:not(:disabled),
 .prp-step-nav__btn:focus-visible:not(:disabled) {

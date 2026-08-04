@@ -10,6 +10,10 @@ import {
   shouldShowHeavyPlaceholder,
 } from '../../lib/scroll-idle-render';
 import {
+  getMermaidSvgCache,
+  setMermaidSvgCache,
+} from '../../lib/mermaid-svg-cache';
+import {
   fitMermaidSvgInline,
   MERMAID_INLINE_MAX_HEIGHT_PX,
 } from '../../lib/mermaid-viewer';
@@ -45,6 +49,9 @@ function useShellColorMode(): 'light' | 'dark' {
  * Scroll end does not re-run heavy work when SVG is already cached for the
  * same code+theme (avoids flash / jank).
  *
+ * Module LRU (`mermaid-svg-cache`) survives virtual-list unmount/remount so
+ * diagrams that leave and re-enter the viewport reuse SVG without eng.render.
+ *
  * Important: never write SVG via element.innerHTML on a React-managed node that
  * also has children — that corrupts the fiber tree (removeChild crash) and can
  * tear down the whole modal root. SVG is held in React state instead.
@@ -54,18 +61,25 @@ export function MermaidBlock({ code }: { code?: string }) {
   const colorMode = useShellColorMode();
   const mermaidTheme = colorMode === 'dark' ? 'dark' : 'neutral';
   const { isScrolling } = useConversationScrollIdle();
+  const sourceTrim = String(code || '').trim();
+  const initialKey = mermaidSourceKey(sourceTrim, mermaidTheme);
+  const initialHit = sourceTrim ? getMermaidSvgCache(initialKey) : null;
+
   const [err, setErr] = useState<string | null>(null);
-  const [busy, setBusy] = useState(true);
+  const [busy, setBusy] = useState(() => !initialHit);
   /** Inline (max-height fitted) SVG for conversation card. */
-  const [svg, setSvg] = useState('');
+  const [svg, setSvg] = useState(() => initialHit?.svgFitted || '');
   /**
    * Full-resolution Mermaid output (pre-fit). Fullscreen viewer must use this
    * so pan/zoom scales a large vector, not the thumbnail width/height.
    */
-  const [svgFull, setSvgFull] = useState('');
+  const [svgFull, setSvgFull] = useState(() => initialHit?.svgFull || '');
   const [viewerOpen, setViewerOpen] = useState(false);
-  /** Last successfully rendered code+theme identity (survives scroll toggles). */
-  const cachedKeyRef = useRef<string>('');
+  /**
+   * Last successfully rendered code+theme identity.
+   * Component ref covers scroll-while-mounted; module LRU covers remount.
+   */
+  const cachedKeyRef = useRef<string>(initialHit ? initialKey : '');
   const svgRef = useRef(svg);
   svgRef.current = svg;
 
@@ -82,6 +96,18 @@ export function MermaidBlock({ code }: { code?: string }) {
       return undefined;
     }
 
+    // Virtual-list remount: module LRU survives unmount — restore SVG and
+    // skip eng.render entirely (even while scrolling).
+    const moduleHit = getMermaidSvgCache(sourceKey);
+    if (moduleHit?.svgFitted) {
+      setSvg(moduleHit.svgFitted);
+      setSvgFull(moduleHit.svgFull || moduleHit.svgFitted);
+      cachedKeyRef.current = sourceKey;
+      setBusy(false);
+      setErr(null);
+      return undefined;
+    }
+
     const runHeavy = shouldRunMermaidHeavyWork({
       isScrolling,
       hasCachedResult: Boolean(svgRef.current),
@@ -89,12 +115,16 @@ export function MermaidBlock({ code }: { code?: string }) {
       cachedSourceKey: cachedKeyRef.current,
     });
 
-    // Scrolling, or idle with a valid cache for this source: do not touch SVG.
+    // Scrolling, or idle with a valid component cache: do not re-render.
     if (!runHeavy) {
       if (isScrolling && !svgRef.current) {
         setBusy(true);
         setErr(null);
-      } else if (!isScrolling && svgRef.current && cachedKeyRef.current === sourceKey) {
+      } else if (
+        !isScrolling &&
+        svgRef.current &&
+        cachedKeyRef.current === sourceKey
+      ) {
         setBusy(false);
       }
       return undefined;
@@ -147,6 +177,7 @@ export function MermaidBlock({ code }: { code?: string }) {
         setSvgFull(out);
         setSvg(fitted);
         cachedKeyRef.current = sourceKey;
+        setMermaidSvgCache(sourceKey, { svgFitted: fitted, svgFull: out });
         setBusy(false);
         setErr(null);
       } catch (e: any) {

@@ -454,7 +454,6 @@ export function createOnboardingTour(deps: any) {
       prefsDraft = { ...(await getPrefs()) };
     } catch {
       prefsDraft = {
-        fastReview: true,
         reverseComments: true,
         autoOpenEmbed: true,
         singleFileMode: false,
@@ -902,11 +901,6 @@ export function createOnboardingTour(deps: any) {
           desc: 'Open the pr+ shell when you land on a PR URL',
         },
         {
-          key: 'fastReview',
-          title: 'Fast progressive load',
-          desc: 'Show core data first; load threads on demand',
-        },
-        {
           key: 'reverseComments',
           title: 'Newest comments first',
           desc: 'Composer → merge box → latest conversation',
@@ -1091,7 +1085,6 @@ export function createOnboardingTour(deps: any) {
         const patch = {
           treeView: Boolean(prefsDraft.treeView !== false),
           autoOpenEmbed: Boolean(prefsDraft.autoOpenEmbed !== false),
-          fastReview: Boolean(prefsDraft.fastReview !== false),
           reverseComments: Boolean(prefsDraft.reverseComments !== false),
           singleFileMode: Boolean(prefsDraft.singleFileMode === true),
         };

@@ -34,6 +34,9 @@ export const REVIEW_THREAD_SHELL_FIELDS = `
       line
       createdAt
       author { login avatarUrl }
+      # reviewId for first-paint review-group (cost stays 1 — measured on
+      # callabo-server#2424 last:10/100 baseline vs +pullRequestReview).
+      pullRequestReview { databaseId state }
     }
   }
 `;

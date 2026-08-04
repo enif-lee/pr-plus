@@ -8,7 +8,6 @@ const prefPluginEnabled = document.getElementById(
   'pref-plugin-enabled'
 ) as HTMLInputElement | null;
 const prefAutoOpenEmbed = document.getElementById('pref-auto-open-embed');
-const prefFastReview = document.getElementById('pref-fast-review');
 const prefReverseComments = document.getElementById('pref-reverse-comments');
 const prefSingleFileMode = document.getElementById('pref-single-file-mode');
 const prefAutoExpandFileNav = document.getElementById(
@@ -34,7 +33,6 @@ const MAX_HOST_ACCOUNTS = 3;
 
 const DEFAULT_PREFS = {
   pluginEnabled: true,
-  fastReview: true,
   reverseComments: true,
   autoOpenEmbed: true,
   singleFileMode: false,
@@ -195,8 +193,6 @@ function renderPrefs(prefs: any) {
   }
   // @ts-expect-error classic content-script dynamic shapes
   if (prefAutoOpenEmbed) prefAutoOpenEmbed.checked = p.autoOpenEmbed !== false;
-  // @ts-expect-error classic content-script dynamic shapes
-  prefFastReview.checked = p.fastReview !== false;
   // @ts-expect-error classic content-script dynamic shapes
   prefReverseComments.checked = p.reverseComments !== false;
   // @ts-expect-error classic content-script dynamic shapes
@@ -497,8 +493,6 @@ async function savePrefs() {
   // @ts-expect-error classic content-script dynamic shapes
       autoOpenEmbed: Boolean(prefAutoOpenEmbed?.checked),
   // @ts-expect-error classic content-script dynamic shapes
-      fastReview: Boolean(prefFastReview.checked),
-  // @ts-expect-error classic content-script dynamic shapes
       reverseComments: Boolean(prefReverseComments.checked),
   // @ts-expect-error classic content-script dynamic shapes
       singleFileMode: Boolean(prefSingleFileMode?.checked),
@@ -580,7 +574,6 @@ tokenInput.addEventListener('keydown', (e) => {
 
 prefPluginEnabled?.addEventListener('change', () => void savePrefs());
 prefAutoOpenEmbed?.addEventListener('change', () => void savePrefs());
-prefFastReview.addEventListener('change', () => void savePrefs());
 prefReverseComments.addEventListener('change', () => void savePrefs());
 prefSingleFileMode?.addEventListener('change', () => void savePrefs());
 prefAutoExpandFileNav?.addEventListener('change', () => void savePrefs());

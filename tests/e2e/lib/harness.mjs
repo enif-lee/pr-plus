@@ -1141,23 +1141,9 @@ export function clickFirstLineExpandBtn() {
         /* ignore */
       }
       btn.dispatchEvent(new MouseEvent('mouseup', { ...opts, buttons: 0 }));
+      // Single click only. Do not also call btn.click() or row dblclick —
+      // those double-toggle expand state (expand then immediately collapse).
       btn.dispatchEvent(new MouseEvent('click', { ...opts, buttons: 0 }));
-      try {
-        btn.click();
-      } catch {
-        /* ignore */
-      }
-      // Fallback: double-click the row (product also toggles via onDoubleClick)
-      if (!document.querySelector('.prp-vline--line-expanded') && row) {
-        row.dispatchEvent(
-          new MouseEvent('dblclick', {
-            bubbles: true,
-            cancelable: true,
-            clientX: opts.clientX + 40,
-            clientY: opts.clientY,
-          })
-        );
-      }
       return {
         ok: true,
         beforeH,

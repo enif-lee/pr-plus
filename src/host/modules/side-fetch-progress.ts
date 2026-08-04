@@ -229,6 +229,20 @@
         return 'Load more failed';
       case 'threads-all-failed':
         return 'Load all failed';
+      case 'files-all':
+      case 'files-load': {
+        if (
+          Number.isFinite(loaded) &&
+          loaded >= 0 &&
+          Number.isFinite(total) &&
+          total > 0
+        ) {
+          const a = Math.min(Math.floor(loaded), 999);
+          const b = Math.min(Math.floor(total), 999);
+          return `Loading files ${a}/${b}`;
+        }
+        return 'Loading all files…';
+      }
       case 'panels': {
         const panel = String(extra?.panel || '');
         if (panel === 'files') return 'Loading files…';

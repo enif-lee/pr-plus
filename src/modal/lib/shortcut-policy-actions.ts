@@ -136,20 +136,44 @@ export function resolveComposerContextShortcutAction(opts: any = {}) {
 }
 
 /**
- * Toggle Diff review-filter: same target again → clear (null).
- * @returns next filter mode
+ * Toggle Diff review-filter status chip (multi-select).
+ * Delegates to diff-review-filter; empty status set ≡ show all.
  */
 export function toggleReviewFilter(
   current: unknown,
   target: 'unresolved' | 'resolved' | 'pending' | string
-): 'unresolved' | 'resolved' | 'pending' | null {
+) {
+  // Lazy require-free import via dynamic path would break pure build;
+  // inline multi-toggle matching diff-review-filter semantics.
   const t = String(target || '').toLowerCase();
   if (t !== 'unresolved' && t !== 'resolved' && t !== 'pending') {
-    return (current as any) ?? null;
+    return current ?? null;
   }
-  const cur = current == null || current === '' ? null : String(current).toLowerCase();
-  if (cur === t) return null;
-  return t as 'unresolved' | 'resolved' | 'pending';
+  const statusesOrder = ['unresolved', 'resolved', 'pending'] as const;
+  let statuses: string[] = [];
+  let hideOutdated = false;
+  let authors: string[] = [];
+  if (current && typeof current === 'object' && !Array.isArray(current)) {
+    const o = current as any;
+    if (Array.isArray(o.statuses)) {
+      statuses = o.statuses.map(String).map((s) => s.toLowerCase());
+    }
+    hideOutdated = Boolean(o.hideOutdated);
+    if (Array.isArray(o.authors)) authors = o.authors.map(String);
+  } else if (typeof current === 'string' && current) {
+    statuses = [String(current).toLowerCase()];
+  } else if (current == null || current === '') {
+    // Product default when toggling from uninitialized exclusive null
+    statuses = ['unresolved', 'pending'];
+  }
+  const set = new Set(statuses.filter((s) => statusesOrder.includes(s as any)));
+  if (set.has(t)) set.delete(t);
+  else set.add(t);
+  return {
+    statuses: statusesOrder.filter((s) => set.has(s)),
+    hideOutdated,
+    authors,
+  };
 }
 
 /**

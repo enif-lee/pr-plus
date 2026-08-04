@@ -180,7 +180,6 @@
   }
 
   const DEFAULT_PREFS = {
-    fastReview: true,
     reverseComments: true,
     autoOpenEmbed: true,
     singleFileMode: false,
