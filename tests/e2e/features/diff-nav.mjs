@@ -50,31 +50,53 @@ export function getSteps() {
     setLayout('diff');
     blurEditable();
     waitDiffFilesReady(`P2.0b PR #${DEMO_PR} Diff files ready`);
-    waitMs(500);
-    const snap = evalInPage(`
-      (() => {
-        const btns = Array.from(
-          document.querySelectorAll('.prp-review-filter__btn')
-        );
-        const pressed = btns.map((b) => ({
-          text: (b.textContent || '').replace(/\\s+/g, ' ').trim(),
-          on: b.getAttribute('aria-pressed') === 'true' ||
-            b.classList.contains('prp-review-filter__btn--on'),
-        }));
-        const gear = document.querySelector('[data-prp-review-filter-gear="1"]');
-        const stepPrev = document.querySelector(
-          '.prp-diff-toolbar__thread-nav .prp-step-nav__btn'
-        );
-        const cs = stepPrev ? getComputedStyle(stepPrev) : null;
-        return {
-          pressed,
-          hasGear: !!gear,
-          prevPadRight: cs?.paddingRight || null,
-          prevPadLeft: cs?.paddingLeft || null,
-          prevW: cs?.width || null,
-        };
-      })()
-    `);
+    // Close Find-in-diff if left open — it replaces the review-filter chrome.
+    for (let i = 0; i < 3; i++) {
+      const searchOpen = evalInPage(`
+        !!document.querySelector(
+          '.prp-diff-toolbar__thread-tools--search, .prp-search-bar, input[placeholder*="Find in diff" i]'
+        )
+      `);
+      if (!searchOpen) break;
+      press('Escape');
+      waitMs(150);
+    }
+    waitMs(400);
+    const probeFilterChrome = () =>
+      evalInPage(`
+        (() => {
+          const btns = Array.from(
+            document.querySelectorAll('.prp-review-filter__btn')
+          );
+          const pressed = btns.map((b) => ({
+            text: (b.textContent || '').replace(/\\s+/g, ' ').trim(),
+            on: b.getAttribute('aria-pressed') === 'true' ||
+              b.classList.contains('prp-review-filter__btn--on'),
+          }));
+          const gear = document.querySelector('[data-prp-review-filter-gear="1"]');
+          const stepPrev = document.querySelector(
+            '.prp-diff-toolbar__thread-nav .prp-step-nav__btn'
+          );
+          const cs = stepPrev ? getComputedStyle(stepPrev) : null;
+          return {
+            pressed,
+            hasGear: !!gear,
+            prevPadRight: cs?.paddingRight || null,
+            prevPadLeft: cs?.paddingLeft || null,
+            prevW: cs?.width || null,
+            toolbar: !!document.querySelector('.prp-diff-toolbar'),
+            layout:
+              document.querySelector('.prp-overlay')?.getAttribute('data-layout') ||
+              null,
+          };
+        })()
+      `);
+    // Thread filter/gear mounts after shell counts land — poll mid-suite.
+    let snap = probeFilterChrome();
+    for (let attempt = 0; attempt < 12 && !snap?.hasGear; attempt++) {
+      waitMs(350);
+      snap = probeFilterChrome();
+    }
     assert(snap?.hasGear, `review filter gear missing: ${JSON.stringify(snap)}`);
     // Open gear menu (React state) then re-query after a tick
     evalInPage(`

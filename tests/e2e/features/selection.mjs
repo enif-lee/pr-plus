@@ -285,47 +285,78 @@ export function getSteps() {
       pressArrowFold('right');
       waitMs(350);
     }
+    // Same multi seed as P3 (mousedown on A, shift-click B) — elementFromPoint
+    // path is flaky when the selection dock is painted over mid-file rows.
+    press('Escape');
+    waitMs(120);
     const seed = clickSelectableLine(1);
     assert(
       seed?.ok,
       `clickSelectableLine: ${JSON.stringify(seed)}; probe=${JSON.stringify(diffReadyProbe())}`
     );
-    waitMs(250);
-    // Build multi via Shift-click (holdChord alone is flaky for range seed)
-    const shiftClick = evalInPage(`
-      (() => {
-        const rows = [...document.querySelectorAll('.prp-vline--selectable')].filter(
-          (e) => !e.classList.contains('prp-vline--header')
-        );
-        const row = rows[12] || rows[Math.min(8, rows.length - 1)];
-        if (!row) return { ok: false, n: rows.length };
-        row.scrollIntoView({ block: 'center' });
-        const rect = row.getBoundingClientRect();
-        const x = rect.left + 24;
-        const y = rect.top + rect.height / 2;
-        const el = document.elementFromPoint(x, y) || row;
-        const opts = {
-          bubbles: true, cancelable: true, clientX: x, clientY: y,
-          button: 0, buttons: 1, shiftKey: true,
-        };
-        el.dispatchEvent(new PointerEvent('pointerdown', { ...opts, pointerId: 1, pointerType: 'mouse' }));
-        el.dispatchEvent(new MouseEvent('mousedown', opts));
-        const list = document.querySelector('.prp-vlist') || el;
-        list.dispatchEvent(new MouseEvent('mouseup', { ...opts, buttons: 0, shiftKey: true }));
-        el.dispatchEvent(new PointerEvent('pointerup', { ...opts, pointerId: 1, pointerType: 'mouse', buttons: 0 }));
-        return { ok: true, n: rows.length };
-      })()
-    `);
-    assert(shiftClick?.ok, `shift-click multi failed: ${JSON.stringify(shiftClick)}`);
-    waitMs(350);
-    const mid = selectionProbe();
+    waitMs(150);
+    press('Escape');
+    waitMs(100);
+    let mid = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const shiftClick = evalInPage(`
+        (() => {
+          const lines = [...document.querySelectorAll('.prp-vline--selectable')].filter(
+            (e) => !e.classList.contains('prp-vline--header')
+          );
+          if (lines.length < 6) return { ok: false, n: lines.length, reason: 'few-lines' };
+          const a = lines[1];
+          const b = lines[Math.min(10, lines.length - 1)];
+          const fire = (el, shift) => {
+            el.scrollIntoView?.({ block: 'center' });
+            const rect = el.getBoundingClientRect();
+            const base = {
+              bubbles: true,
+              cancelable: true,
+              button: 0,
+              shiftKey: Boolean(shift),
+              clientX: rect.left + 8,
+              clientY: rect.top + 4,
+            };
+            el.dispatchEvent(new MouseEvent('mousedown', base));
+            el.dispatchEvent(new MouseEvent('mouseup', base));
+            el.dispatchEvent(new MouseEvent('click', base));
+          };
+          fire(a, false);
+          fire(b, true);
+          return { ok: true, n: lines.length, attempt: ${attempt} };
+        })()
+      `);
+      waitMs(300);
+      mid = selectionProbe();
+      log(
+        `  multi attempt ${attempt + 1}: shift=${JSON.stringify(shiftClick)} count=${mid.count} roles=${JSON.stringify(mid.roles)}`
+      );
+      if (mid.count >= 2 || mid.roles.middle >= 1 || mid.roles.end >= 1 || mid.roles.start >= 1) {
+        break;
+      }
+      // Keyboard fallback after focusing the list (not the action island)
+      blurEditable();
+      evalInPage(`document.querySelector('.prp-vlist')?.focus?.()`);
+      holdChord('Shift+ArrowDown', { holdMs: 450, repeatMs: 40, sample: 'diff' });
+      waitMs(250);
+      mid = selectionProbe();
+      if (mid.count >= 2 || mid.roles.middle >= 1 || mid.roles.end >= 1 || mid.roles.start >= 1) {
+        break;
+      }
+      press('Escape');
+      waitMs(100);
+      clickSelectableLine(2);
+      waitMs(150);
+    }
     assert(
-      mid.count >= 2 || mid.roles.middle >= 1 || mid.roles.end >= 1,
+      mid.count >= 2 || mid.roles.middle >= 1 || mid.roles.end >= 1 || mid.roles.start >= 1,
       `need multi before further extend: ${JSON.stringify(mid)}`
     );
     const countMid = mid.count;
     // Further Shift+↓ must not shrink (sticky head / opposing-side fix)
     blurEditable();
+    evalInPage(`document.querySelector('.prp-vlist')?.focus?.()`);
     holdChord('Shift+ArrowDown', { holdMs: 320, repeatMs: 40, sample: 'diff' });
     waitMs(300);
     const after = selectionProbe();

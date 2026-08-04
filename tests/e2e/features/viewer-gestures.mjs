@@ -8,9 +8,13 @@ import {
   REPO,
   assert,
   blurEditable,
+  clearPrPlusIdb,
+  clearPrPlusSessionStorage,
+  closeOverlay,
   evalInPage,
   holdChord,
   log,
+  open as openPage,
   openPr,
   press,
   setLayout,
@@ -251,6 +255,42 @@ function dragPanViewer(dx = 40, dy = 60) {
   `);
 }
 
+/**
+ * Bust in-memory detail cache + IDB so a just-posted issue comment is not
+ * masked by a stale PR #7 snapshot (common mid full-suite after soft reset
+ * still leaves content-script Map entries until a hard navigation).
+ */
+function reopenConversationFresh(label = 'VG reopen') {
+  closeOverlay();
+  waitMs(120);
+  try {
+    openPage('https://github.com/');
+    waitMs(250);
+  } catch {
+    /* ignore */
+  }
+  try {
+    clearPrPlusIdb();
+  } catch {
+    /* ignore */
+  }
+  try {
+    clearPrPlusSessionStorage();
+  } catch {
+    /* ignore */
+  }
+  waitMs(150);
+  openPr(DEMO_PR, { viaUrl: true });
+  setLayout('conversation');
+  blurEditable();
+  waitDetailReady({ meta: true, files: false, label });
+  waitMs(500);
+  // Soft refresh re-pulls timeline/comments when first paint used a racey empty window
+  evalInPage(`document.querySelector('[data-prp-refresh]')?.click?.()`);
+  waitMs(1400);
+  waitDetailReady({ meta: true, files: false, label: `${label} refresh` });
+}
+
 function waitForMermaidExpand(mark, timeoutMs = 28_000) {
   const deadline = Date.now() + timeoutMs;
   let last = null;
@@ -271,8 +311,15 @@ function waitForMermaidExpand(mark, timeoutMs = 28_000) {
           sc.scrollTop = Math.round((max * step) / 15);
           sc.dispatchEvent(new Event('scroll', { bubbles: true }));
         }
-        const text = document.body.innerText || '';
-        const hasMark = text.includes(mark);
+        // Virtual list: search full host HTML + text so off-screen mounts still count
+        // when rows remount after scroll; also probe data attrs for issue count.
+        const host =
+          document.getElementById('prp-page-embed') ||
+          document.getElementById('prp-modal-host');
+        const root = host || document.body;
+        const text = (root.innerText || '') + '\\n' + (document.body.innerText || '');
+        const html = String(root.innerHTML || '');
+        const hasMark = text.includes(mark) || html.includes(mark);
         const wrap = document.querySelector('.prp-mermaid-wrap');
         const expand = document.querySelector('.prp-mermaid__expand');
         const svg = document.querySelector(
@@ -290,6 +337,7 @@ function waitForMermaidExpand(mark, timeoutMs = 28_000) {
           expandText: expand ? (expand.textContent || '').trim().slice(0, 40) : null,
           scrollTop: sc ? Math.round(sc.scrollTop) : null,
           maxScroll: max,
+          issueCommentsAttr: host?.getAttribute?.('data-prp-issue-comments') || null,
         };
       })()
     `);
@@ -330,16 +378,9 @@ export function getSteps() {
     seed = seedMermaidComment();
     log(`  seeded mermaid comment mark=${seed.mark} id=${seed.id}`);
     assert(seed.id, `gh seed comment failed (no id): ${JSON.stringify(seed)}`);
-    // Cold open so detail fetch includes the new issue comment
-    openPr(DEMO_PR, { viaUrl: true });
-    setLayout('conversation');
-    blurEditable();
-    waitDetailReady({ meta: true, files: false, label: 'VG.0' });
-    waitMs(800);
-    // Soft refresh re-pulls timeline when first-page cache missed the seed
-    evalInPage(`document.querySelector('[data-prp-refresh]')?.click?.()`);
-    waitMs(1200);
-    waitDetailReady({ meta: true, files: false, label: 'VG.0 refresh' });
+    // Full-suite: prior files leave content-script detailCache for #7. Bust
+    // before open so REST issue comments include the brand-new seed.
+    reopenConversationFresh('VG.0');
   });
 
   run('VG.1 mermaid renders + open fullscreen viewer', () => {
@@ -360,6 +401,26 @@ export function getSteps() {
       log(`  load-more for mermaid seed: ${JSON.stringify(clicked)}`);
       waitMs(900);
       found = waitForMermaidExpand(seed.mark, 8_000);
+    }
+    // One hard reopen if still missing (stale window after suite pressure)
+    if (!found?.hasMark) {
+      log(`  mermaid mark still missing — cache-bust reopen: ${JSON.stringify(found)}`);
+      reopenConversationFresh('VG.1 retry');
+      found = waitForMermaidExpand(seed.mark, 14_000);
+      for (let i = 0; i < 4 && !found?.hasMark; i++) {
+        evalInPage(`
+          (() => {
+            const b = [...document.querySelectorAll('button')].find((x) =>
+              /Load more/i.test(x.textContent || '')
+            );
+            b?.scrollIntoView?.({ block: 'center' });
+            b?.click?.();
+            return !!b;
+          })()
+        `);
+        waitMs(1000);
+        found = waitForMermaidExpand(seed.mark, 6_000);
+      }
     }
     log(`  mermaid find: ${JSON.stringify(found)}`);
     assert(found?.hasMark, `mermaid seed mark not in DOM: ${JSON.stringify(found)}`);

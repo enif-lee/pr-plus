@@ -173,6 +173,41 @@ export function getSteps() {
     setLayout('diff');
     waitDiffFilesReady(`thread-bodies #${DEMO_PR}`);
     waitMs(1200);
+    // Default Diff filter is Unresolved+Pending — also pin Resolved so
+    // collapsed resolved cards count toward TB.4 body probes (and so files
+    // that only carry resolved roots stay mounted after multi-filter).
+    const filterSnap = evalInPage(`
+      (() => {
+        const group = document.querySelector('.prp-review-filter');
+        const btns = group
+          ? [...group.querySelectorAll('button.prp-review-filter__btn')]
+          : [];
+        const clicked = [];
+        for (const b of btns) {
+          const t = (b.textContent || '').replace(/\\s+/g, ' ').trim();
+          const on =
+            b.getAttribute('aria-pressed') === 'true' ||
+            b.classList.contains('prp-review-filter__btn--on');
+          // Ensure Unresolved + Resolved on (Pending optional)
+          if (/^(Unresolved|Resolved)\\b/i.test(t) && !on) {
+            b.click();
+            clicked.push(t.slice(0, 24));
+          }
+        }
+        return {
+          n: btns.length,
+          clicked,
+          state: btns.map((b) => ({
+            t: (b.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 28),
+            on:
+              b.getAttribute('aria-pressed') === 'true' ||
+              b.classList.contains('prp-review-filter__btn--on'),
+          })),
+        };
+      })()
+    `);
+    log(`  [TB.3] review filter ${JSON.stringify(filterSnap)}`);
+    waitMs(600);
   });
 
   run('TB.3b GraphQL cost: shell ≤1; byIds not first:1-scaled', () => {
@@ -215,8 +250,35 @@ export function getSteps() {
   });
 
   run('TB.4 inline threads have real bodies (not empty No content)', () => {
-    const p = probeThreadBodies();
+    // Virtual list + progressive byIds: poll/scroll until cards mount.
+    let p = probeThreadBodies();
+    for (let attempt = 0; attempt < 12 && (p?.threadCount || 0) < 1; attempt++) {
+      const step = attempt % 6;
+      evalInPage(`
+        (() => {
+          const sc =
+            document.querySelector('.prp-vlist') ||
+            document.querySelector('.prp-diff-scroll') ||
+            document.querySelector('.prp-overlay [class*="scroll"]');
+          if (!sc) return;
+          const max = Math.max(0, (sc.scrollHeight || 0) - (sc.clientHeight || 0));
+          const step = ${step};
+          sc.scrollTop = max > 0 ? Math.round((max * step) / 5) : 0;
+          sc.dispatchEvent(new Event('scroll', { bubbles: true }));
+        })()
+      `);
+      waitMs(450);
+      p = probeThreadBodies();
+    }
+    log(`  [TB.4] probe ${JSON.stringify({ threadCount: p?.threadCount, withBody: p?.withBodyCount, empty: p?.emptyNoContentCount, sample: p?.rows?.slice?.(0, 3) })}`);
     assert(p.threadCount > 0, `expected inline threads, got ${p.threadCount}`);
+    // Bodies may still hydrate after shell; short wait if cards present but empty
+    if (p.withBodyCount < 1) {
+      for (let i = 0; i < 10 && p.withBodyCount < 1; i++) {
+        waitMs(400);
+        p = probeThreadBodies();
+      }
+    }
     assert(
       p.withBodyCount > 0,
       `expected at least one thread with real body; ` +

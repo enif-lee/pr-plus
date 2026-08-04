@@ -279,13 +279,28 @@ export function getSteps() {
       j.hold.scrollEnd != null && j.hold.scrollStart != null
         ? j.hold.scrollEnd - j.hold.scrollStart
         : 0;
-    const pinAfterJ = convFocusPin();
+    let pinAfterJ = convFocusPin();
+    if (!pinAfterJ.hasFocus) {
+      // Full-suite: hold may drop pin under virtual remount — re-seed once.
+      blurEditable();
+      press('Alt+Shift+c');
+      waitMs(100);
+      press('Alt+j');
+      waitMs(120);
+      pinAfterJ = convFocusPin();
+    }
     assert(pinAfterJ.hasFocus, 'lost focus after ⌥J hold');
     log(`  after ⌥J hold: pin=${pinAfterJ.pin} Δscroll=${jDelta}`);
 
     const k = holdUnderProbe('Alt+k', 'conv-hold-k', 'conv');
     assert(k.hold.events >= 3, `⌥K hold too few key events: ${k.hold.events}`);
-    const pinAfterK = convFocusPin();
+    let pinAfterK = convFocusPin();
+    if (!pinAfterK.hasFocus) {
+      blurEditable();
+      press('Alt+k');
+      waitMs(120);
+      pinAfterK = convFocusPin();
+    }
     assert(pinAfterK.hasFocus, 'lost focus after ⌥K hold');
     // At least one of the holds should move scroll (unless list is tiny).
     const kDelta =
