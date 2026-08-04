@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Button } from '@common/Button';
 import { OptBtnHint } from '@common/OptBtnHint';
 import { SearchableSelect } from '@common/SearchableSelect';
@@ -145,6 +146,58 @@ export function DiffToolbar(props: any) {
   }, [reviewComments, comments, detail?.reviewComments]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsWrapRef = useRef<HTMLDivElement | null>(null);
+  const settingsGearRef = useRef<HTMLButtonElement | null>(null);
+  const settingsMenuRef = useRef<HTMLDivElement | null>(null);
+  const [settingsCoords, setSettingsCoords] = useState<{
+    top: number;
+    left: number;
+    maxHeight: number;
+  } | null>(null);
+
+  const placeSettingsMenu = () => {
+    const gear = settingsGearRef.current;
+    if (!gear || typeof window === 'undefined') return;
+    const rect = gear.getBoundingClientRect();
+    const gap = 4;
+    const menuW = 240;
+    const pad = 8;
+    // Prefer below the gear; flip above if not enough room
+    const spaceBelow = window.innerHeight - rect.bottom - gap - pad;
+    const spaceAbove = rect.top - gap - pad;
+    const preferBelow = spaceBelow >= 160 || spaceBelow >= spaceAbove;
+    const maxHeight = Math.max(
+      120,
+      Math.min(360, preferBelow ? spaceBelow : spaceAbove)
+    );
+    let top = preferBelow
+      ? rect.bottom + gap
+      : Math.max(pad, rect.top - gap - maxHeight);
+    // Right-align to gear (toolbar sits on the right half of Diff chrome)
+    let left = rect.right - menuW;
+    left = Math.max(pad, Math.min(left, window.innerWidth - menuW - pad));
+    // If flipped above and we estimated height, keep top within viewport
+    if (!preferBelow) {
+      top = Math.max(pad, rect.top - gap - maxHeight);
+    }
+    setSettingsCoords({ top, left, maxHeight });
+  };
+
+  useLayoutEffect(() => {
+    if (!settingsOpen) {
+      setSettingsCoords(null);
+      return undefined;
+    }
+    placeSettingsMenu();
+    const onReposition = () => placeSettingsMenu();
+    window.addEventListener('resize', onReposition);
+    // Capture scroll on any ancestor (virtual list / modal shell)
+    window.addEventListener('scroll', onReposition, true);
+    return () => {
+      window.removeEventListener('resize', onReposition);
+      window.removeEventListener('scroll', onReposition, true);
+    };
+  }, [settingsOpen]);
+
   useEffect(() => {
     if (!settingsOpen) return undefined;
     // Defer outside-click so the opening click does not immediately close.
@@ -154,9 +207,11 @@ export function DiffToolbar(props: any) {
     }, 0);
     function onDoc(e: MouseEvent) {
       if (!armed) return;
-      const root = settingsWrapRef.current;
-      if (!root) return;
-      if (e.target instanceof Node && root.contains(e.target)) return;
+      const t = e.target;
+      if (!(t instanceof Node)) return;
+      if (settingsWrapRef.current?.contains(t)) return;
+      if (settingsMenuRef.current?.contains(t)) return;
+      if (settingsGearRef.current?.contains(t)) return;
       setSettingsOpen(false);
     }
     function onKey(e: KeyboardEvent) {
@@ -455,6 +510,7 @@ export function DiffToolbar(props: any) {
                   />
                 ) : null}
                 <button
+                  ref={settingsGearRef}
                   type="button"
                   className={
                     Array.isArray(comments) && comments.length
@@ -474,131 +530,149 @@ export function DiffToolbar(props: any) {
                   <IconGear size={14} />
                 </button>
               </div>
-              {settingsOpen ? (
-                <div
-                  className="prp-diff-review-settings"
-                  role="menu"
-                  aria-label="Diff view settings"
-                  data-prp-review-filter-menu="1"
-                >
-                  <div className="prp-diff-review-settings__section">
-                    <p className="prp-diff-review-settings__heading">
-                      Diff view
-                    </p>
-                    <div
-                      className="prp-diff-review-settings__radios"
-                      role="radiogroup"
-                      aria-label="Diff view mode"
-                    >
-                      <label className="prp-diff-review-settings__row">
-                        <input
-                          type="radio"
-                          name="prp-diff-mode"
-                          value="unified"
-                          checked={diffMode === 'unified'}
-                          onChange={(e) => {
-                            onDiffMode?.('unified');
-                            try {
-                              (e.currentTarget as HTMLInputElement).blur();
-                            } catch {
-                              /* ignore */
-                            }
-                          }}
-                        />
-                        <span>Unified</span>
-                      </label>
-                      <label className="prp-diff-review-settings__row">
-                        <input
-                          type="radio"
-                          name="prp-diff-mode"
-                          value="split"
-                          checked={diffMode === 'split'}
-                          onChange={(e) => {
-                            onDiffMode?.('split');
-                            try {
-                              (e.currentTarget as HTMLInputElement).blur();
-                            } catch {
-                              /* ignore */
-                            }
-                          }}
-                        />
-                        <span>Split</span>
-                      </label>
-                    </div>
-                    <label
-                      className="prp-diff-review-settings__row"
-                      title="Hide lines that change only whitespace"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={Boolean(hideWhitespace)}
-                        onChange={(e) =>
-                          onHideWhitespace?.(Boolean(e.target.checked))
-                        }
-                        data-prp-hide-whitespace="1"
-                      />
-                      <span>Hide whitespace</span>
-                    </label>
-                  </div>
-                  {showReviewFilter || authorList.length > 0 ? (
-                    <>
-                      <hr className="prp-diff-review-settings__divider" />
-                      <div className="prp-diff-review-settings__section">
-                        <label className="prp-diff-review-settings__row">
-                          <input
-                            type="checkbox"
-                            checked={Boolean(filterState.hideOutdated)}
-                            onChange={(e) =>
-                              patchFilter({ hideOutdated: e.target.checked })
-                            }
-                          />
-                          <span>Hide outdated comments</span>
-                        </label>
-                      </div>
-                      <hr className="prp-diff-review-settings__divider" />
-                      <div className="prp-diff-review-settings__section">
-                        <p className="prp-diff-review-settings__heading">
-                          Reviewed by…
-                        </p>
-                        {authorList.length === 0 ? (
-                          <p className="prp-diff-review-settings__empty">
-                            No review authors yet
+              {settingsOpen && settingsCoords
+                ? (() => {
+                    const menu = (
+                      <div
+                        ref={settingsMenuRef}
+                        className="prp-diff-review-settings prp-diff-review-settings--portal"
+                        role="menu"
+                        aria-label="Diff view settings"
+                        data-prp-review-filter-menu="1"
+                        style={{
+                          top: settingsCoords.top,
+                          left: settingsCoords.left,
+                          maxHeight: settingsCoords.maxHeight,
+                        }}
+                      >
+                        <div className="prp-diff-review-settings__section">
+                          <p className="prp-diff-review-settings__heading">
+                            Diff view
                           </p>
-                        ) : (
-                          authorList.map((login) => {
-                            const key = String(login).toLowerCase();
-                            const checked = filterState.authors.some(
-                              (a) => a.toLowerCase() === key
-                            );
-                            return (
-                              <label
-                                key={key}
-                                className="prp-diff-review-settings__row"
-                              >
+                          <div
+                            className="prp-diff-review-settings__radios"
+                            role="radiogroup"
+                            aria-label="Diff view mode"
+                          >
+                            <label className="prp-diff-review-settings__row">
+                              <input
+                                type="radio"
+                                name="prp-diff-mode"
+                                value="unified"
+                                checked={diffMode === 'unified'}
+                                onChange={(e) => {
+                                  onDiffMode?.('unified');
+                                  try {
+                                    (e.currentTarget as HTMLInputElement).blur();
+                                  } catch {
+                                    /* ignore */
+                                  }
+                                }}
+                              />
+                              <span>Unified</span>
+                            </label>
+                            <label className="prp-diff-review-settings__row">
+                              <input
+                                type="radio"
+                                name="prp-diff-mode"
+                                value="split"
+                                checked={diffMode === 'split'}
+                                onChange={(e) => {
+                                  onDiffMode?.('split');
+                                  try {
+                                    (e.currentTarget as HTMLInputElement).blur();
+                                  } catch {
+                                    /* ignore */
+                                  }
+                                }}
+                              />
+                              <span>Split</span>
+                            </label>
+                          </div>
+                          <label
+                            className="prp-diff-review-settings__row"
+                            title="Hide lines that change only whitespace"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={Boolean(hideWhitespace)}
+                              onChange={(e) =>
+                                onHideWhitespace?.(Boolean(e.target.checked))
+                              }
+                              data-prp-hide-whitespace="1"
+                            />
+                            <span>Hide whitespace</span>
+                          </label>
+                        </div>
+                        {showReviewFilter || authorList.length > 0 ? (
+                          <>
+                            <hr className="prp-diff-review-settings__divider" />
+                            <div className="prp-diff-review-settings__section">
+                              <label className="prp-diff-review-settings__row">
                                 <input
                                   type="checkbox"
-                                  checked={checked}
-                                  onChange={() => {
-                                    const next = new Set(
-                                      filterState.authors.map((a) =>
-                                        a.toLowerCase()
-                                      )
-                                    );
-                                    if (next.has(key)) next.delete(key);
-                                    else next.add(key);
-                                    patchFilter({ authors: [...next] });
-                                  }}
+                                  checked={Boolean(filterState.hideOutdated)}
+                                  onChange={(e) =>
+                                    patchFilter({
+                                      hideOutdated: e.target.checked,
+                                    })
+                                  }
                                 />
-                                <span>{login}</span>
+                                <span>Hide outdated comments</span>
                               </label>
-                            );
-                          })
-                        )}
+                            </div>
+                            <hr className="prp-diff-review-settings__divider" />
+                            <div className="prp-diff-review-settings__section">
+                              <p className="prp-diff-review-settings__heading">
+                                Reviewed by…
+                              </p>
+                              {authorList.length === 0 ? (
+                                <p className="prp-diff-review-settings__empty">
+                                  No review authors yet
+                                </p>
+                              ) : (
+                                authorList.map((login) => {
+                                  const key = String(login).toLowerCase();
+                                  const checked = filterState.authors.some(
+                                    (a) => a.toLowerCase() === key
+                                  );
+                                  return (
+                                    <label
+                                      key={key}
+                                      className="prp-diff-review-settings__row"
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={checked}
+                                        onChange={() => {
+                                          const next = new Set(
+                                            filterState.authors.map((a) =>
+                                              a.toLowerCase()
+                                            )
+                                          );
+                                          if (next.has(key)) next.delete(key);
+                                          else next.add(key);
+                                          patchFilter({ authors: [...next] });
+                                        }}
+                                      />
+                                      <span>{login}</span>
+                                    </label>
+                                  );
+                                })
+                              )}
+                            </div>
+                          </>
+                        ) : null}
                       </div>
-                    </>
-                  ) : null}
-                </div>
-              ) : null}
+                    );
+                    if (typeof document === 'undefined') return menu;
+                    const portalRoot =
+                      (document.querySelector(
+                        '.prp-overlay'
+                      ) as HTMLElement | null) || document.body;
+                    return createPortal(menu, portalRoot);
+                  })()
+                : null}
             </div>
           ) : null}
         </div>

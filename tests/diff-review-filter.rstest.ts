@@ -296,6 +296,9 @@ describe('product wiring structure', () => {
     expect(tb).toMatch(/value="unified"/);
     expect(tb).toMatch(/value="split"/);
     expect(tb).toMatch(/Diff view/);
+    // Portaled so Diff shell overflow never clips Reviewed-by / Diff view
+    expect(tb).toMatch(/createPortal/);
+    expect(tb).toMatch(/prp-diff-review-settings--portal/);
     // No exclusive single-select assignment of string modes only
     expect(tb).not.toMatch(/reviewFilter === 'unresolved' \? null : 'unresolved'/);
   });

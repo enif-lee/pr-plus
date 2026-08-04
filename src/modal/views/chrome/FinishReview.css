@@ -90,6 +90,22 @@
   color: var(--prp-fg);
   font-size: 13px;
 }
+/**
+ * Portaled into `.prp-overlay` (or body) so Diff shell / toolbar
+ * `overflow: hidden` never clips Diff view / Reviewed-by content.
+ * Coordinates are set inline (viewport fixed).
+ */
+.prp-diff-review-settings--portal {
+  position: fixed;
+  right: auto;
+  margin-top: 0;
+  width: 240px;
+  min-width: 220px;
+  max-width: min(280px, calc(100vw - 16px));
+  /* Above Diff toolbar chrome; below dialogs (FinishReview ~100110) */
+  z-index: var(--prp-z-dialog, 100100);
+  box-sizing: border-box;
+}
 .prp-diff-review-settings__section {
   padding: 4px 12px 8px;
 }
