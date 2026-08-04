@@ -112,6 +112,99 @@ export function zoomMermaidTransform(
 }
 
 /**
+ * Normalize wheel deltas to pixel units (line/page modes → px-ish).
+ * Used by both Mermaid and Image viewers.
+ */
+export function normalizeViewerWheelDeltas(opts: {
+  deltaX?: unknown;
+  deltaY?: unknown;
+  deltaMode?: unknown;
+} = {}): { dx: number; dy: number } {
+  let dx = Number(opts.deltaX);
+  let dy = Number(opts.deltaY);
+  if (!Number.isFinite(dx)) dx = 0;
+  if (!Number.isFinite(dy)) dy = 0;
+  const mode = Number(opts.deltaMode);
+  // 0 = pixel, 1 = line, 2 = page
+  if (mode === 1) {
+    dx *= 16;
+    dy *= 16;
+  } else if (mode === 2) {
+    dx *= 320;
+    dy *= 320;
+  }
+  return { dx, dy };
+}
+
+export type ViewerWheelGesture =
+  | { kind: 'pan'; dx: number; dy: number }
+  | { kind: 'zoom'; deltaY: number };
+
+/**
+ * Wheel policy for fullscreen Mermaid / Image viewers:
+ * - plain scroll → pan (deltaY vertical, deltaX horizontal; content follows scroll)
+ * - Option/Alt + scroll → continuous zoom (uses deltaY; falls back to deltaX if only X)
+ * - ctrlKey alone (macOS pinch→wheel) does **not** zoom (Opt only)
+ */
+export function mapViewerWheelGesture(opts: {
+  deltaX?: unknown;
+  deltaY?: unknown;
+  deltaMode?: unknown;
+  altKey?: unknown;
+  metaKey?: unknown;
+  ctrlKey?: unknown;
+} = {}): ViewerWheelGesture | null {
+  const { dx, dy } = normalizeViewerWheelDeltas(opts);
+  if (dx === 0 && dy === 0) return null;
+  const alt = Boolean(opts.altKey);
+  // Meta+wheel is not Opt zoom; plain pan unless Alt held
+  if (alt) {
+    // Prefer vertical; trackpad sometimes only reports X while holding Opt
+    const zoomDy = dy !== 0 ? dy : dx;
+    if (zoomDy === 0) return null;
+    return { kind: 'zoom', deltaY: zoomDy };
+  }
+  // Invert so scroll-down moves content up (browser-like pan). Normalize -0 → 0.
+  const pdx = -dx || 0;
+  const pdy = -dy || 0;
+  return { kind: 'pan', dx: pdx, dy: pdy };
+}
+
+/**
+ * Apply a mapped wheel gesture to a view transform.
+ * Zoom stays continuous/smooth via {@link zoomMermaidTransform}.
+ */
+export function applyViewerWheelGesture(
+  t: MermaidViewTransform,
+  gesture: ViewerWheelGesture | null | undefined,
+  pivot?: MermaidPoint | null
+): MermaidViewTransform {
+  if (!gesture) return { ...t };
+  if (gesture.kind === 'pan') {
+    return panMermaidTransform(t, gesture.dx, gesture.dy);
+  }
+  return zoomMermaidTransform(t, gesture.deltaY, pivot);
+}
+
+/**
+ * One-shot: normalize wheel event-like input and apply pan or Opt+zoom.
+ */
+export function applyViewerWheelEvent(
+  t: MermaidViewTransform,
+  opts: {
+    deltaX?: unknown;
+    deltaY?: unknown;
+    deltaMode?: unknown;
+    altKey?: unknown;
+    metaKey?: unknown;
+    ctrlKey?: unknown;
+  },
+  pivot?: MermaidPoint | null
+): MermaidViewTransform {
+  return applyViewerWheelGesture(t, mapViewerWheelGesture(opts), pivot);
+}
+
+/**
  * Two-finger pinch: scale by nextDist/prevDist around the pinch midpoint.
  */
 export function pinchMermaidTransform(

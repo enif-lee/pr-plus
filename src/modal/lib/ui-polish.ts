@@ -81,6 +81,47 @@ export function githubPullUrl(owner, repo, number) {
   return `https://github.com/${encodeURIComponent(o)}/${encodeURIComponent(r)}/pull/${n}`;
 }
 
+/**
+ * Canonical GitHub (or GHES) PR detail page URL for open/copy actions.
+ * Prefer API `htmlUrl` when present; otherwise build from webOrigin + owner/repo/number.
+ *
+ * @param {{
+ *   owner?: string,
+ *   repo?: string,
+ *   number?: number|string,
+ *   htmlUrl?: string|null,
+ *   webOrigin?: string|null,
+ * }} [opts]
+ * @returns {string} absolute PR page URL or ''
+ */
+export function buildGithubPrPageUrl(opts = {}) {
+  const html = String(opts.htmlUrl || '').trim();
+  if (html) {
+    // Strip hash/query noise for clipboard; keep path
+    try {
+      const u = new URL(html);
+      if (/\/pull\/\d+/i.test(u.pathname)) {
+        return `${u.origin}${u.pathname.replace(/\/$/, '')}`;
+      }
+      // Some payloads use full html_url already clean
+      if (/^https?:\/\//i.test(html)) return html.replace(/\/$/, '');
+    } catch {
+      if (/^https?:\/\//i.test(html) && /\/pull\/\d+/i.test(html)) {
+        return html.split(/[?#]/)[0].replace(/\/$/, '');
+      }
+    }
+  }
+  const o = String(opts.owner || '').trim();
+  const r = String(opts.repo || '').trim();
+  const n = Number(opts.number);
+  if (!o || !r || !Number.isFinite(n) || n <= 0) return '';
+  let origin = String(opts.webOrigin || 'https://github.com').trim();
+  if (!origin) origin = 'https://github.com';
+  origin = origin.replace(/\/$/, '');
+  if (!/^https?:\/\//i.test(origin)) origin = `https://${origin}`;
+  return `${origin}/${encodeURIComponent(o)}/${encodeURIComponent(r)}/pull/${n}`;
+}
+
 /** Encode a git ref for a path (keep `/` as path separators). */
 export function encodeGitRefPath(ref) {
   const raw = String(ref || '').trim();

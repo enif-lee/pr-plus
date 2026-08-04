@@ -1,4 +1,6 @@
 /** Command palette action runner extracted from PrModalApp */
+import { buildGithubPrPageUrl } from '../lib/ui-polish';
+import { copyTextToClipboard } from '../lib/copy-to-clipboard';
 
 export function runPaletteCommand(d: Record<string, any>, cmd: any) {
   const {
@@ -10,7 +12,7 @@ export function runPaletteCommand(d: Record<string, any>, cmd: any) {
     onUpdateBranch, onSubscribe, onUnsubscribe, openMilestonePicker, clearMilestone, onRerequestReview,
     openReviewerPicker, openAssigneePicker, onRemoveReviewer, onRemoveAssignee, openLabelPicker,
     onLeaveReviewAction, onClosePr, onReopenPr, applySetLabels, detail, layoutMode, LAYOUT_DIFF,
-    applyActionRef, setActionMsg, focusCommentBox, collapseActiveFile, expandActiveFile,
+    applyActionRef, setActionMsg, focusCommentBox, onRefresh, collapseActiveFile, expandActiveFile,
     collapseFold, expandFold, stepNavPrev, stepNavNext, scrollDiffPage, optArrowScrollSelect,
     toggleViewedActiveFile, toggleActiveFileCollapse, contextThreadCollapse, contextThreadExpand,
     contextThreadFold, contextThreadGotoDiff, contextThreadComment, contextThreadResolve,
@@ -397,6 +399,65 @@ export function runPaletteCommand(d: Record<string, any>, cmd: any) {
     case 'openGithub':
       if (detail?.htmlUrl) window.open(detail.htmlUrl, '_blank', 'noopener,noreferrer');
       break;
+    case 'refreshDetail': {
+      // Same entry as header IconSync / ⌥⇧G — App supplies layout-aware onRefresh
+      if (typeof onRefresh === 'function') {
+        void onRefresh();
+        setActionMsg?.('Refreshing…');
+      } else {
+        setActionMsg?.('Refresh unavailable');
+      }
+      break;
+    }
+    case 'copyPrGithubLink': {
+      // Same URL as header hyperlink control
+      void (async () => {
+        try {
+          let webOrigin = detail?.webOrigin || null;
+          if (!webOrigin && detail?.htmlUrl) {
+            try {
+              webOrigin = new URL(String(detail.htmlUrl)).origin;
+            } catch {
+              webOrigin = null;
+            }
+          }
+          const url = buildGithubPrPageUrl({
+            owner: detail?.owner,
+            repo: detail?.repo,
+            number: detail?.number,
+            htmlUrl: detail?.htmlUrl,
+            webOrigin,
+          });
+          if (!url) {
+            setActionMsg?.('No PR link to copy');
+            return;
+          }
+          try {
+            (globalThis as any).__prpLastCopiedPrUrl = url;
+            document.documentElement?.setAttribute?.(
+              'data-prp-last-copied-pr-url',
+              url
+            );
+          } catch {
+            /* ignore */
+          }
+          const ok = await copyTextToClipboard(url);
+          setActionMsg?.(ok ? 'PR link copied' : 'Copy failed');
+          try {
+            (globalThis as any).__prpLastCopyPrOk = ok;
+            document.documentElement?.setAttribute?.(
+              'data-prp-last-copy-pr-ok',
+              ok ? '1' : '0'
+            );
+          } catch {
+            /* ignore */
+          }
+        } catch (err: any) {
+          setActionMsg?.(err?.message || 'Copy failed');
+        }
+      })();
+      break;
+    }
     case 'focusComment':
       focusCommentBox();
       break;

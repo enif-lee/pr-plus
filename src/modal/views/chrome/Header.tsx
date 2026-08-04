@@ -12,6 +12,7 @@ import {
   IconCircleSlash,
   IconCopy,
   IconKebab,
+  IconLink,
   IconLinkExternal,
   IconMarkGithub,
   IconPencil,
@@ -28,6 +29,7 @@ import { EMBED_RESTORE_SHORTCUT } from '@lib/page-embed';
 import { LAYOUT_DIFF } from '@lib/layout-mode';
 import { headerReviewCompact } from '@lib/header-layout';
 import { branchRefCopyText, copyTextToClipboard } from '@lib/copy-to-clipboard';
+import { buildGithubPrPageUrl } from '@lib/ui-polish';
 import { buildUnifiedReviewerRows } from '@lib/searchable-select';
 import {
   detectEmojiTrigger,
@@ -139,6 +141,75 @@ export function Header(props: any) {
       copyTimerRef.current = null;
     }, 1600);
   }
+
+  /** Clipboard + toast for PR GitHub detail page URL (chrome + palette share builder). */
+  async function copyPrGithubPageUrl() {
+    const d = detail || {};
+    let webOrigin = d.webOrigin || null;
+    if (!webOrigin && d.htmlUrl) {
+      try {
+        webOrigin = new URL(String(d.htmlUrl)).origin;
+      } catch {
+        webOrigin = null;
+      }
+    }
+    const url =
+      typeof buildGithubPrPageUrl === 'function'
+        ? buildGithubPrPageUrl({
+            owner: d.owner,
+            repo: d.repo,
+            number: d.number,
+            htmlUrl: d.htmlUrl,
+            webOrigin,
+          })
+        : String(d.htmlUrl || '').trim();
+    if (!url) {
+      if (typeof onActionMsg === 'function') onActionMsg('No PR link to copy');
+      return false;
+    }
+    // Publish URL before clipboard write so e2e can assert even if clipboard is blocked
+    try {
+      (globalThis as any).__prpLastCopiedPrUrl = url;
+      document.documentElement?.setAttribute?.('data-prp-last-copied-pr-url', url);
+    } catch {
+      /* ignore */
+    }
+    const ok = await copyTextToClipboard(url);
+    if (typeof onActionMsg === 'function') {
+      onActionMsg(ok ? 'PR link copied' : 'Copy failed');
+    }
+    try {
+      (globalThis as any).__prpLastCopyPrOk = ok;
+      document.documentElement?.setAttribute?.(
+        'data-prp-last-copy-pr-ok',
+        ok ? '1' : '0'
+      );
+    } catch {
+      /* ignore */
+    }
+    return ok;
+  }
+
+  const prPageUrl = useMemo(() => {
+    const d = detail || {};
+    let webOrigin = d.webOrigin || null;
+    if (!webOrigin && d.htmlUrl) {
+      try {
+        webOrigin = new URL(String(d.htmlUrl)).origin;
+      } catch {
+        webOrigin = null;
+      }
+    }
+    return typeof buildGithubPrPageUrl === 'function'
+      ? buildGithubPrPageUrl({
+          owner: d.owner,
+          repo: d.repo,
+          number: d.number,
+          htmlUrl: d.htmlUrl,
+          webOrigin,
+        })
+      : String(d.htmlUrl || '').trim();
+  }, [detail]);
 
   useEffect(() => {
     return () => {
@@ -722,15 +793,22 @@ export function Header(props: any) {
             {typeof onRefresh === 'function' ? (
               <button
                 type="button"
-                className="prp-header__icon-btn prp-header__refresh-btn prp-has-tip"
+                className="prp-header__icon-btn prp-header__refresh-btn prp-has-tip prp-opt-hint-host"
                 disabled={actionBusy || sectionLoading}
                 onClick={() => onRefresh()}
+                data-prp-refresh="1"
                 aria-label={
                   effectiveLayout === LAYOUT_DIFF
-                    ? 'Refresh metadata and all review threads'
-                    : 'Refresh metadata and visible review threads'
+                    ? 'Refresh metadata and all review threads (⌥⇧G)'
+                    : 'Refresh metadata and visible review threads (⌥⇧G)'
+                }
+                title={
+                  effectiveLayout === LAYOUT_DIFF
+                    ? 'Refresh (metadata + all threads) · ⌥⇧G'
+                    : 'Refresh (metadata + visible threads) · ⌥⇧G'
                 }
               >
+                <OptBtnHint label="⌥⇧G" preferredPlacement="bottom" />
                 <IconSync size={16} aria-hidden="true" />
                 <TipPopover
                   title={
@@ -738,6 +816,7 @@ export function Header(props: any) {
                       ? 'Refresh (metadata + all threads)'
                       : 'Refresh (metadata + visible threads)'
                   }
+                  shortcut="⌥⇧G"
                 />
               </button>
             ) : null}
@@ -792,13 +871,14 @@ export function Header(props: any) {
                 Reopen PR
               </Button>
             ) : null}
-            {detail.htmlUrl ? (
+            {detail.htmlUrl || prPageUrl ? (
               <a
                 className="prp-header__icon-btn prp-has-tip"
-                href={detail.htmlUrl}
+                href={detail.htmlUrl || prPageUrl}
                 target="_blank"
                 rel="noreferrer"
                 aria-label="Open on GitHub"
+                data-prp-open-github="1"
               >
                 <IconLinkExternal size={16} aria-hidden="true" />
                 <TipPopover title="Open on GitHub" />
@@ -811,6 +891,7 @@ export function Header(props: any) {
                 onClick={() => onRestoreNative?.()}
                 aria-label="Show GitHub PR page"
                 data-action="restore-native"
+                data-prp-github-mark="1"
               >
                 <IconMarkGithub size={16} aria-hidden="true" />
                 <TipPopover
@@ -818,6 +899,25 @@ export function Header(props: any) {
                   shortcut={restoreShortcut}
                   preferredPlacement="bottom"
                 />
+              </button>
+            ) : null}
+            {/* Hyperlink control adjacent to GitHub open / mark controls */}
+            {prPageUrl ? (
+              <button
+                type="button"
+                className="prp-header__icon-btn prp-has-tip"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  void copyPrGithubPageUrl();
+                }}
+                aria-label="Copy link to PR on GitHub"
+                title="Copy link to PR on GitHub"
+                data-prp-copy-pr-link="1"
+                data-prp-pr-url={prPageUrl}
+              >
+                <IconLink size={16} aria-hidden="true" />
+                <TipPopover title="Copy link to PR on GitHub" />
               </button>
             ) : null}
             {showClose ? (
@@ -903,6 +1003,7 @@ export function Header(props: any) {
                       role="menuitem"
                       className="prp-header__more-item"
                       disabled={actionBusy || sectionLoading}
+                      data-prp-refresh="1"
                       onClick={() => {
                         setOverflowOpen(false);
                         onRefresh();
@@ -911,6 +1012,7 @@ export function Header(props: any) {
                       {effectiveLayout === LAYOUT_DIFF
                         ? 'Refresh (all threads)'
                         : 'Refresh (visible threads)'}
+                      {' · ⌥⇧G'}
                     </button>
                   </li>
                 ) : null}
@@ -960,18 +1062,34 @@ export function Header(props: any) {
                     </button>
                   </li>
                 ) : null}
-                {detail.htmlUrl ? (
+                {detail.htmlUrl || prPageUrl ? (
                   <li role="none">
                     <a
                       role="menuitem"
                       className="prp-header__more-item"
-                      href={detail.htmlUrl}
+                      href={detail.htmlUrl || prPageUrl}
                       target="_blank"
                       rel="noreferrer"
                       onClick={() => setOverflowOpen(false)}
                     >
                       Open on GitHub
                     </a>
+                  </li>
+                ) : null}
+                {prPageUrl ? (
+                  <li role="none">
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="prp-header__more-item"
+                      data-prp-copy-pr-link="1"
+                      onClick={() => {
+                        setOverflowOpen(false);
+                        void copyPrGithubPageUrl();
+                      }}
+                    >
+                      Copy PR link
+                    </button>
                   </li>
                 ) : null}
                 {showRestoreNative ? (

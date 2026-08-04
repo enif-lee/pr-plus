@@ -2,7 +2,9 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { createPortal } from 'react-dom';
 import { IconX } from './icons';
 import { resolveMermaidColorMode } from '../../lib/mermaid-lazy';
+import { useModalStore } from '../../store/modal-store';
 import {
+  applyViewerWheelEvent,
   fitMermaidToStage,
   identityMermaidTransform,
   measureMermaidSvgSize,
@@ -12,7 +14,6 @@ import {
   panMermaidTransform,
   pinchMermaidTransform,
   prepareMermaidSvgForViewer,
-  zoomMermaidTransform,
   type MermaidPoint,
   type MermaidViewTransform,
 } from '../../lib/mermaid-viewer';
@@ -32,7 +33,7 @@ function resolvePortalHost(): HTMLElement | null {
 /**
  * Fullscreen overlay for a rendered Mermaid SVG.
  * - Opens centered + fit-to-stage (vector scale)
- * - Scroll / trackpad / pinch: continuous zoom · drag: pan
+ * - Scroll / trackpad: pan · Opt+scroll: continuous zoom · drag: pan · pinch: zoom
  * - Esc closes viewer only (not the PR modal)
  */
 export function MermaidViewer({ svg, onClose, title = 'Diagram' }: Props) {
@@ -88,6 +89,12 @@ export function MermaidViewer({ svg, onClose, title = 'Diagram' }: Props) {
   useEffect(() => {
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
+    // Hide Opt-hold tips that were already painted under the veil
+    try {
+      useModalStore.getState().setOptHintsActive(false);
+    } catch {
+      /* ignore */
+    }
     return () => {
       document.body.style.overflow = prev;
     };
@@ -163,23 +170,35 @@ export function MermaidViewer({ svg, onClose, title = 'Diagram' }: Props) {
     };
   }, [viewerSvg, fitToStage, commitTransform]);
 
-  // Continuous wheel/trackpad zoom (incl. macOS pinch→wheel); non-passive.
+  // Wheel: plain scroll pans; Opt+scroll zooms smoothly (rAF-coalesced).
   useEffect(() => {
     const stage = stageRef.current;
     if (!stage) return undefined;
     let raf = 0;
+    let pendingDx = 0;
     let pendingDy = 0;
+    let pendingAlt = false;
     let pendingPivot: MermaidPoint | null = null;
 
     const flush = () => {
       raf = 0;
+      const dx = pendingDx;
       const dy = pendingDy;
+      const alt = pendingAlt;
       const pivot = pendingPivot;
+      pendingDx = 0;
       pendingDy = 0;
+      pendingAlt = false;
       pendingPivot = null;
-      if (!dy) return;
-      const next = zoomMermaidTransform(xfRef.current, dy, pivot);
-      // Paint immediately; React state catch-up is fine next frame
+      if (dx === 0 && dy === 0) return;
+      // Accumulator already inverted for pan; zoom stores raw deltaY
+      const next = alt
+        ? applyViewerWheelEvent(
+            xfRef.current,
+            { deltaX: 0, deltaY: dy, altKey: true },
+            pivot
+          )
+        : panMermaidTransform(xfRef.current, dx, dy);
       paintTransform(next);
       setXf(next);
     };
@@ -187,13 +206,37 @@ export function MermaidViewer({ svg, onClose, title = 'Diagram' }: Props) {
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      // Normalize line/page deltas to pixel-ish units for smooth continuous zoom
+      let dx = e.deltaX;
       let dy = e.deltaY;
-      if (e.deltaMode === 1) dy *= 16; // lines
-      if (e.deltaMode === 2) dy *= 320; // pages
+      if (e.deltaMode === 1) {
+        dx *= 16;
+        dy *= 16;
+      } else if (e.deltaMode === 2) {
+        dx *= 320;
+        dy *= 320;
+      }
       const rect = stage.getBoundingClientRect();
       pendingPivot = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-      pendingDy += dy;
+      // Last event in the rAF window decides pan vs Opt-zoom
+      pendingAlt = Boolean(e.altKey);
+      if (e.altKey) {
+        // Continuous zoom: accumulate raw wheel (smooth exp scale)
+        pendingDy += dy !== 0 ? dy : dx;
+      } else {
+        // Browser-like pan (scroll down → content up)
+        pendingDx += -dx;
+        pendingDy += -dy;
+      }
+      // Synthetic/untrusted (e2e dispatchEvent): apply now — rAF may not tick
+      // under headless automation between eval turns.
+      if (!e.isTrusted) {
+        if (raf) {
+          cancelAnimationFrame(raf);
+          raf = 0;
+        }
+        flush();
+        return;
+      }
       if (!raf) raf = requestAnimationFrame(flush);
     };
     stage.addEventListener('wheel', onWheel, { passive: false });
@@ -361,7 +404,7 @@ export function MermaidViewer({ svg, onClose, title = 'Diagram' }: Props) {
         <div className="prp-mermaid-viewer__bar">
           <span className="prp-mermaid-viewer__title">{title}</span>
           <span className="prp-mermaid-viewer__hint prp-muted">
-            Scroll / pinch zoom · drag pan · Esc close
+            Scroll pan · ⌥+scroll zoom · drag pan · Esc close
           </span>
           <div className="prp-mermaid-viewer__actions">
             <button

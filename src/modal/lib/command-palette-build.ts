@@ -722,6 +722,21 @@ export function buildPaletteCommands(detail: any, opts: any = {}) {
       action: 'openGithub',
     },
     {
+      id: 'copy-pr-link',
+      title: 'Copy link to PR on GitHub',
+      section: 'Navigate',
+      keywords: ['copy', 'link', 'url', 'share', 'github', 'clipboard', 'permalink'],
+      action: 'copyPrGithubLink',
+    },
+    {
+      id: 'refresh-pr',
+      title: 'Refresh PR detail',
+      section: 'Navigate',
+      keywords: ['refresh', 'reload', 'sync', 'update', 'fetch'],
+      shortcut: optShortcutForCommandId('refresh-pr') || 'opt+shift+g',
+      action: 'refreshDetail',
+    },
+    {
       id: 'focus-comment',
       title: 'Focus comment box',
       section: 'Navigate',

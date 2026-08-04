@@ -211,6 +211,17 @@ export const PR_MODAL_OPT_ACTIONS = [
     labelWin: 'Alt+Shift+S',
     section: 'Review',
   },
+  {
+    id: 'opt-refresh',
+    action: 'refreshDetail',
+    title: 'Refresh PR detail',
+    key: 'g',
+    code: 'KeyG',
+    shift: true,
+    labelMac: '⌥⇧G',
+    labelWin: 'Alt+Shift+G',
+    section: 'Navigate',
+  },
 ] as const;
 
 /**
@@ -334,6 +345,8 @@ export function optShortcutForCommandId(commandId: string): string | null {
     'review-approve': 'opt+shift+enter',
     'review-changes': 'opt+shift+x',
     'apply-suggestion': 'opt+shift+s',
+    // Refresh PR detail (⌥⇧G — free peer; not used by nav/merge/labels)
+    'refresh-pr': 'opt+shift+g',
     // Conversation focus seed / clear (⌥⇧C)
     'focus-conversation-comment': 'opt+shift+c',
     'clear-conversation-comment-focus': 'opt+shift+c',

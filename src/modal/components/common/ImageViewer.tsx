@@ -2,7 +2,9 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { createPortal } from 'react-dom';
 import { IconX } from './icons';
 import { resolveMermaidColorMode } from '../../lib/mermaid-lazy';
+import { useModalStore } from '../../store/modal-store';
 import {
+  applyViewerWheelEvent,
   fitMermaidToStage,
   identityMermaidTransform,
   mermaidPointerDistance,
@@ -10,7 +12,6 @@ import {
   mermaidTransformStyle,
   panMermaidTransform,
   pinchMermaidTransform,
-  zoomMermaidTransform,
   type MermaidPoint,
   type MermaidViewTransform,
 } from '../../lib/mermaid-viewer';
@@ -30,7 +31,7 @@ function resolvePortalHost(): HTMLElement | null {
 
 /**
  * Fullscreen overlay for markdown / diff images (MermaidViewer-style).
- * Scroll/pinch zoom · drag pan · Esc closes viewer only.
+ * Scroll pan · Opt+scroll zoom · drag pan · pinch zoom · Esc closes viewer only.
  */
 export function ImageViewer({
   src,
@@ -86,6 +87,11 @@ export function ImageViewer({
   useEffect(() => {
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
+    try {
+      useModalStore.getState().setOptHintsActive(false);
+    } catch {
+      /* ignore */
+    }
     return () => {
       document.body.style.overflow = prev;
     };
@@ -140,21 +146,34 @@ export function ImageViewer({
     };
   }, [src, fitToStage, commitTransform]);
 
+  // Wheel: plain scroll pans; Opt+scroll zooms smoothly (rAF-coalesced).
   useEffect(() => {
     const stage = stageRef.current;
     if (!stage) return undefined;
     let raf = 0;
+    let pendingDx = 0;
     let pendingDy = 0;
+    let pendingAlt = false;
     let pendingPivot: MermaidPoint | null = null;
 
     const flush = () => {
       raf = 0;
+      const dx = pendingDx;
       const dy = pendingDy;
+      const alt = pendingAlt;
       const pivot = pendingPivot;
+      pendingDx = 0;
       pendingDy = 0;
+      pendingAlt = false;
       pendingPivot = null;
-      if (!dy) return;
-      const next = zoomMermaidTransform(xfRef.current, dy, pivot);
+      if (dx === 0 && dy === 0) return;
+      const next = alt
+        ? applyViewerWheelEvent(
+            xfRef.current,
+            { deltaX: 0, deltaY: dy, altKey: true },
+            pivot
+          )
+        : panMermaidTransform(xfRef.current, dx, dy);
       paintTransform(next);
       setXf(next);
     };
@@ -162,12 +181,34 @@ export function ImageViewer({
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       e.stopPropagation();
+      let dx = e.deltaX;
       let dy = e.deltaY;
-      if (e.deltaMode === 1) dy *= 16;
-      if (e.deltaMode === 2) dy *= 320;
+      if (e.deltaMode === 1) {
+        dx *= 16;
+        dy *= 16;
+      } else if (e.deltaMode === 2) {
+        dx *= 320;
+        dy *= 320;
+      }
       const rect = stage.getBoundingClientRect();
       pendingPivot = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-      pendingDy += dy;
+      pendingAlt = Boolean(e.altKey);
+      if (e.altKey) {
+        pendingDy += dy !== 0 ? dy : dx;
+      } else {
+        pendingDx += -dx;
+        pendingDy += -dy;
+      }
+      // Synthetic/untrusted (e2e dispatchEvent): apply now — rAF may not tick
+      // under headless automation between eval turns.
+      if (!e.isTrusted) {
+        if (raf) {
+          cancelAnimationFrame(raf);
+          raf = 0;
+        }
+        flush();
+        return;
+      }
       if (!raf) raf = requestAnimationFrame(flush);
     };
     stage.addEventListener('wheel', onWheel, { passive: false });
@@ -307,7 +348,7 @@ export function ImageViewer({
         <div className="prp-image-viewer__bar">
           <span className="prp-image-viewer__title">{title}</span>
           <span className="prp-image-viewer__hint prp-muted">
-            Scroll / pinch zoom · drag pan · Esc close
+            Scroll pan · ⌥+scroll zoom · drag pan · Esc close
           </span>
           <div className="prp-image-viewer__actions">
             <button

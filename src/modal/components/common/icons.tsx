@@ -27,6 +27,7 @@ import {
   KebabHorizontalIcon,
   FileDiffIcon,
   LinkExternalIcon,
+  LinkIcon,
   MarkGithubIcon,
   PencilIcon,
   ScreenFullIcon,
@@ -82,6 +83,8 @@ export const IconBellFill = wrap(BellFillIcon);
 export const IconBellSlash = wrap(BellSlashIcon);
 export const IconCircleSlash = wrap(CircleSlashIcon);
 export const IconLinkExternal = wrap(LinkExternalIcon);
+/** Hyperlink — copy PR page URL */
+export const IconLink = wrap(LinkIcon);
 /** GitHub mark — restore native PR UI from embed */
 export const IconMarkGithub = wrap(MarkGithubIcon);
 export const IconFileDiff = wrap(FileDiffIcon);

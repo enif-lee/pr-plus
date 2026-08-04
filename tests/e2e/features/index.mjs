@@ -42,6 +42,18 @@ export {
   getSteps as getTimelineLoadMoreSteps,
   buildTimelineLoadMoreSteps,
 } from './timeline-load-more.mjs';
+export {
+  getSteps as getViewerGesturesSteps,
+  runViewerGestures,
+} from './viewer-gestures.mjs';
+export {
+  getSteps as getCopyPrLinkSteps,
+  runCopyPrLink,
+} from './copy-pr-link.mjs';
+export {
+  getSteps as getRefreshActionSteps,
+  runRefreshAction,
+} from './refresh-action.mjs';
 
 import { createRunner } from '../lib/runner.mjs';
 import { closeAll, ensureBrowser, log } from '../lib/harness.mjs';
@@ -57,6 +69,9 @@ import { getSteps as getResolveThreadSteps } from './resolve-thread.mjs';
 import { getSteps as getThreadBodiesSteps } from './thread-bodies.mjs';
 import { getSteps as getDetailCacheSteps } from './detail-cache.mjs';
 import { getSteps as getTimelineLoadMoreSteps } from './timeline-load-more.mjs';
+import { getSteps as getViewerGesturesSteps } from './viewer-gestures.mjs';
+import { getSteps as getCopyPrLinkSteps } from './copy-pr-link.mjs';
+import { getSteps as getRefreshActionSteps } from './refresh-action.mjs';
 
 /** Ordered feature suite (shared browser session for legacy runner). */
 export const FEATURE_SUITE = [
@@ -72,6 +87,9 @@ export const FEATURE_SUITE = [
   { id: 'thread-bodies', getSteps: getThreadBodiesSteps },
   { id: 'detail-cache', getSteps: getDetailCacheSteps },
   { id: 'timeline-load-more', getSteps: getTimelineLoadMoreSteps },
+  { id: 'viewer-gestures', getSteps: getViewerGesturesSteps },
+  { id: 'copy-pr-link', getSteps: getCopyPrLinkSteps },
+  { id: 'refresh-action', getSteps: getRefreshActionSteps },
 ];
 
 /**

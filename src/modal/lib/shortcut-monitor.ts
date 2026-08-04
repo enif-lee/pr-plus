@@ -103,6 +103,11 @@ export const SHORTCUT_MONITOR_CATALOG: Record<string, ShortcutMonitorEntry> = {
     labelMac: '⌥⇧F',
     labelWin: 'Alt+Shift+F',
   },
+  refreshDetail: {
+    title: 'Refresh PR detail',
+    labelMac: '⌥⇧G',
+    labelWin: 'Alt+Shift+G',
+  },
   focusConversationComment: {
     title: 'Focus conversation comment',
     labelMac: '⌥⇧C',

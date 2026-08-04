@@ -4917,6 +4917,35 @@ export function PrModalApp({
     [detail?.number, stackItems, openPulls, openStackOrListPr]
   );
 
+  /** Soft-refresh entry shared by header, palette, and ⌥⇧G peer. */
+  function refreshDetail() {
+    try {
+      const n =
+        Number(
+          document.documentElement.getAttribute('data-prp-refresh-seq') || 0
+        ) + 1;
+      document.documentElement.setAttribute('data-prp-refresh-seq', String(n));
+      document.documentElement.setAttribute(
+        'data-prp-last-refresh-at',
+        String(Date.now())
+      );
+      document.documentElement.setAttribute(
+        'data-prp-last-refresh-mode',
+        layoutMode === LAYOUT_DIFF ? 'full-threads' : 'visible-threads'
+      );
+    } catch {
+      /* ignore */
+    }
+    if (typeof onRefresh !== 'function') return;
+    return onRefresh({
+      mode: layoutMode === LAYOUT_DIFF ? 'full-threads' : 'visible-threads',
+      threadNodeIds:
+        layoutMode === LAYOUT_DIFF
+          ? undefined
+          : visibleConvThreadNodeIdsRef.current.slice(),
+    });
+  }
+
   function runPaletteCommand(cmd: any) {
     runPaletteCommandImpl(
       {
@@ -4961,6 +4990,7 @@ export function PrModalApp({
         onRemoveReviewer,
         onRemoveAssignee,
         openLabelPicker,
+        onRefresh: refreshDetail,
         onLeaveReviewAction,
         onClosePr,
         onReopenPr,
@@ -6302,14 +6332,26 @@ export function PrModalApp({
   /**
    * Opt-hold → store only (no App setState). Leaf OptBtnHint + overlay class bridge
    * re-render; ConversationView tree stays memoized.
+   * Fullscreen Mermaid/Image viewers own the stage — never paint tips underneath.
    */
   function syncOptHintsActive() {
     const ui = uiRef.current || {};
+    let viewerOpen = false;
+    try {
+      viewerOpen = Boolean(
+        typeof document !== 'undefined' &&
+          (document.querySelector('[data-prp-mermaid-viewer="1"]') ||
+            document.querySelector('[data-prp-image-viewer="1"]'))
+      );
+    } catch {
+      viewerOpen = false;
+    }
     const active =
       Boolean(optHeldRef.current) &&
       !optHintsSuppressedRef.current &&
       !ui.paletteOpen &&
-      !ui.confirmOpen;
+      !ui.confirmOpen &&
+      !viewerOpen;
     useModalStore.getState().setOptHintsActive(active);
   }
 
@@ -7588,19 +7630,7 @@ export function PrModalApp({
           loadStage={loadStage}
           onActionMsg={setActionMsg}
           onRefresh={
-            typeof onRefresh === 'function'
-              ? () =>
-                  onRefresh({
-                    mode:
-                      layoutMode === LAYOUT_DIFF
-                        ? 'full-threads'
-                        : 'visible-threads',
-                    threadNodeIds:
-                      layoutMode === LAYOUT_DIFF
-                        ? undefined
-                        : visibleConvThreadNodeIdsRef.current.slice(),
-                  })
-              : null
+            typeof onRefresh === 'function' ? () => refreshDetail() : null
           }
         />
         <StackStrip
