@@ -6139,7 +6139,7 @@ async function fetchPrTimelineEvents(owner, repo, number, fetchImpl, token = nul
   const out = [];
   try {
     const perPage = 100;
-    const maxPages = 10;
+    const maxPages = 25;
     const pageUrl = (page) => githubRestUrl(
       `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/issues/${n}/events?per_page=${perPage}&page=${page}`,
       ctx

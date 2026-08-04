@@ -146,10 +146,10 @@ export async function fetchPrTimelineEvents(owner: any, repo: any, number: any, 
   const out = [];
   try {
     const perPage = 100;
-    // Cap pages so a very noisy issue cannot hang open (1000 events max).
+    // Cap pages so a very noisy issue cannot hang open (2500 events max).
     // Events API is ascending (oldest first). Prefer the *newest* pages so
     // labeled/milestoned writes land in conversation after meta refresh.
-    const maxPages = 10;
+    const maxPages = 25;
     const pageUrl = (page: number) =>
       githubRestUrl(
         `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/issues/${n}/events?per_page=${perPage}&page=${page}`,

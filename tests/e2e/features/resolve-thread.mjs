@@ -12,6 +12,7 @@ import {
   assert,
   blurEditable,
   DEMO_PR,
+  log,
   openPr,
   openPulls,
   setLayout,
@@ -360,36 +361,92 @@ export function getSteps() {
     const id = resolvedThreadId;
     assert(id, 'R4: missing resolvedThreadId from R3');
 
-    // Show resolved threads (filter) + expand collapsed so Unresolve can paint
-    evalInPage(`
+    /**
+     * Unresolve lives only in the expanded composer (`!collapsed`). Resolved
+     * threads default-collapse after write-through, so R4 must:
+     *  1) pin Diff toolbar "Resolved" filter (not a badge with the same word)
+     *  2) expand collapsed rows (toggle + collapsed-preview) with retries
+     * Full-suite flakes left all rows collapsed → btnCount=0.
+     */
+    const filterSnap = evalInPage(`
       (() => {
-        const btns = [...document.querySelectorAll('button, [role="button"]')];
+        const group = document.querySelector('.prp-review-filter');
+        const btns = group
+          ? [...group.querySelectorAll('button.prp-review-filter__btn, button')]
+          : [];
         const resolved = btns.find((el) =>
           /^\\s*Resolved\\b/i.test((el.textContent || '').trim())
         );
-        if (resolved) resolved.click();
-        else {
-          const all = btns.find((el) =>
-            /^\\s*All\\b/i.test((el.textContent || '').trim())
-          );
-          if (all) all.click();
+        if (resolved) {
+          if (resolved.getAttribute('aria-pressed') !== 'true') resolved.click();
+          return {
+            ok: true,
+            via: 'review-filter',
+            pressed: resolved.getAttribute('aria-pressed'),
+            text: (resolved.textContent || '').trim().slice(0, 40),
+          };
         }
-        return true;
+        // Fallback: any toolbar button labeled Resolved N
+        const loose = [...document.querySelectorAll('button')].find(
+          (el) =>
+            el.closest('.prp-diff-toolbar, .prp-review-filter, [class*="DiffToolbar"]') &&
+            /^\\s*Resolved\\b/i.test((el.textContent || '').trim())
+        );
+        if (loose) {
+          loose.click();
+          return { ok: true, via: 'toolbar-loose', text: (loose.textContent || '').trim().slice(0, 40) };
+        }
+        return { ok: false, reason: 'no-resolved-filter' };
       })()
     `);
-    waitMs(700);
-    evalInPage(`
-      (() => {
-        document
-          .querySelectorAll('.prp-inline-thread--collapsed .prp-thread-toggle')
-          .forEach((t) => t.click());
-        return document.querySelectorAll('.prp-inline-thread--collapsed').length;
-      })()
-    `);
+    log(`  R4 filter ${JSON.stringify(filterSnap)}`);
     waitMs(500);
+
+    function expandCollapsedThreads() {
+      return evalInPage(`
+        (() => {
+          const collapsed = [...document.querySelectorAll('.prp-inline-thread--collapsed')];
+          let clicked = 0;
+          for (const th of collapsed) {
+            const toggle =
+              th.querySelector('.prp-thread-toggle') ||
+              th.querySelector('button[aria-label="Expand thread"]') ||
+              th.querySelector('button[aria-expanded="false"]');
+            const preview = th.querySelector('.prp-inline-thread__collapsed-preview');
+            const target = toggle || preview;
+            if (!target) continue;
+            target.dispatchEvent(
+              new MouseEvent('click', { bubbles: true, cancelable: true, view: window })
+            );
+            clicked += 1;
+          }
+          return {
+            clicked,
+            stillCollapsed: document.querySelectorAll('.prp-inline-thread--collapsed').length,
+            threads: document.querySelectorAll('.prp-inline-thread').length,
+            resolveBtns: document.querySelectorAll('[data-prp-composer-resolve="1"]').length,
+          };
+        })()
+      `);
+    }
+
+    let expandSnap = expandCollapsedThreads();
+    log(`  R4 expand#1 ${JSON.stringify(expandSnap)}`);
+    waitMs(400);
+    // Soft revalidate after resolve can remount rows collapsed — expand again.
+    expandSnap = expandCollapsedThreads();
+    log(`  R4 expand#2 ${JSON.stringify(expandSnap)}`);
+    waitMs(400);
 
     let unresolveProbe = null;
     for (let i = 0; i < 40; i++) {
+      // Keep expanding while we still have collapsed shells (lazy comments settle).
+      if (i === 0 || i % 4 === 0) {
+        const mid = expandCollapsedThreads();
+        if (i === 0 || Number(mid?.clicked) > 0) {
+          log(`  R4 expand@${i} ${JSON.stringify(mid)}`);
+        }
+      }
       unresolveProbe = evalInPage(`
         (() => {
           const id = ${JSON.stringify(id)};
@@ -409,6 +466,10 @@ export function getSteps() {
               threadCount: document.querySelectorAll('.prp-inline-thread').length,
               collapsed: document.querySelectorAll('.prp-inline-thread--collapsed').length,
               busy: document.querySelectorAll('[aria-busy="true"], .prp-btn--loading').length,
+              filterPressed: document
+                .querySelector('.prp-review-filter__btn[aria-pressed="true"]')
+                ?.textContent?.trim()
+                ?.slice(0, 40) || null,
             };
           }
           const r = b.getBoundingClientRect();
