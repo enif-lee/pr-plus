@@ -335,11 +335,32 @@ export function getSteps() {
     setLayout('conversation');
     blurEditable();
     waitDetailReady({ meta: true, files: false, label: 'VG.0' });
-    waitMs(1000);
+    waitMs(800);
+    // Soft refresh re-pulls timeline when first-page cache missed the seed
+    evalInPage(`document.querySelector('[data-prp-refresh]')?.click?.()`);
+    waitMs(1200);
+    waitDetailReady({ meta: true, files: false, label: 'VG.0 refresh' });
   });
 
   run('VG.1 mermaid renders + open fullscreen viewer', () => {
-    const found = waitForMermaidExpand(seed.mark);
+    // Dense PR #7: seed may sit past first timeline page — Load more until mark.
+    let found = waitForMermaidExpand(seed.mark, 12_000);
+    for (let i = 0; i < 8 && !found?.hasMark; i++) {
+      const clicked = evalInPage(`
+        (() => {
+          const b = [...document.querySelectorAll('button')].find((x) =>
+            /Load more/i.test(x.textContent || '')
+          );
+          if (!b) return { ok: false };
+          b.scrollIntoView?.({ block: 'center' });
+          b.click();
+          return { ok: true };
+        })()
+      `);
+      log(`  load-more for mermaid seed: ${JSON.stringify(clicked)}`);
+      waitMs(900);
+      found = waitForMermaidExpand(seed.mark, 8_000);
+    }
     log(`  mermaid find: ${JSON.stringify(found)}`);
     assert(found?.hasMark, `mermaid seed mark not in DOM: ${JSON.stringify(found)}`);
     // SVG may still be loading; wait a bit more for Mermaid chunk

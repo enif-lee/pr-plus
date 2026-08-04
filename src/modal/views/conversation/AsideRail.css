@@ -152,7 +152,9 @@
 
 
 .prp-conversation--aside-collapsed {
-  /* --prp-aside-w set inline to compact width */
+  /* --prp-aside-w set inline to compact width (ASIDE_COLLAPSED_WIDTH) */
+  /* Ensure grid track actually shrinks even if content min-size fights */
+  grid-template-columns: minmax(0, 1fr) 28px var(--prp-aside-w, 80px);
 }
 
 

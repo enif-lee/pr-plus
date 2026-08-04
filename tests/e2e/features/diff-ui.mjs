@@ -268,22 +268,56 @@ export function getSteps() {
       );
     }
 
-    clickFirstLineExpandBtn();
-    waitMs(500);
-    const collapsed = lineExpandProbe();
-    const collapseAttr = evalInPage(`
-      (() => {
-        const host =
-          document.getElementById('prp-page-embed') ||
-          document.querySelector('.prp-modal, .prp-overlay');
-        const raw = host?.getAttribute?.('data-prp-line-expand') || '';
-        try {
-          return raw ? JSON.parse(raw) : null;
-        } catch {
-          return null;
-        }
-      })()
-    `);
+    // Collapse: prefer the expanded row's control (aria-label), retry on virtual remount.
+    let collapsed = lineExpandProbe();
+    let collapseAttr = null;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const clickCollapse = evalInPage(`
+        (() => {
+          const expanded =
+            document.querySelector('.prp-vline--line-expanded .prp-line-expand-btn') ||
+            document.querySelector(
+              '.prp-line-expand-btn[aria-expanded="true"], .prp-line-expand-btn[aria-label*="Collapse"]'
+            );
+          const btn = expanded || document.querySelector('.prp-line-expand-btn');
+          if (!btn) return { ok: false, reason: 'no-btn' };
+          btn.scrollIntoView?.({ block: 'center' });
+          btn.click();
+          return {
+            ok: true,
+            aria: btn.getAttribute('aria-expanded'),
+            label: (btn.getAttribute('aria-label') || '').slice(0, 40),
+          };
+        })()
+      `);
+      waitMs(550 + attempt * 120);
+      collapsed = lineExpandProbe();
+      collapseAttr = evalInPage(`
+        (() => {
+          const host =
+            document.getElementById('prp-page-embed') ||
+            document.querySelector('.prp-modal, .prp-overlay');
+          const raw = host?.getAttribute?.('data-prp-line-expand') || '';
+          try {
+            return raw ? JSON.parse(raw) : null;
+          } catch {
+            return null;
+          }
+        })()
+      `);
+      log(
+        `  collapse attempt ${attempt + 1}: ${JSON.stringify(clickCollapse)} expanded=${collapsed.expanded} attr=${JSON.stringify(collapseAttr)}`
+      );
+      if (
+        !collapsed.expanded ||
+        (collapseAttr && collapseAttr.has === false)
+      ) {
+        break;
+      }
+      // Fallback: generic first expand btn (same path as open)
+      clickFirstLineExpandBtn();
+      waitMs(500);
+    }
     // Collapse: class gone, or telemetry has:false
     assert(
       !collapsed.expanded ||

@@ -81,20 +81,19 @@ export function githubPullUrl(owner, repo, number) {
   return `https://github.com/${encodeURIComponent(o)}/${encodeURIComponent(r)}/pull/${n}`;
 }
 
+export type GithubPrPageUrlOpts = {
+  owner?: string;
+  repo?: string;
+  number?: number | string;
+  htmlUrl?: string | null;
+  webOrigin?: string | null;
+};
+
 /**
  * Canonical GitHub (or GHES) PR detail page URL for open/copy actions.
  * Prefer API `htmlUrl` when present; otherwise build from webOrigin + owner/repo/number.
- *
- * @param {{
- *   owner?: string,
- *   repo?: string,
- *   number?: number|string,
- *   htmlUrl?: string|null,
- *   webOrigin?: string|null,
- * }} [opts]
- * @returns {string} absolute PR page URL or ''
  */
-export function buildGithubPrPageUrl(opts = {}) {
+export function buildGithubPrPageUrl(opts: GithubPrPageUrlOpts = {}): string {
   const html = String(opts.htmlUrl || '').trim();
   if (html) {
     // Strip hash/query noise for clipboard; keep path

@@ -321,6 +321,10 @@
 
 .prp-conversation__aside-host.prp-conversation__aside-host--collapsed {
   padding: 0;
+  /* Cap rail to the grid track so overflow:visible tips do not inflate measured width */
+  max-width: var(--prp-aside-w, 80px);
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .prp-conversation__aside-host--collapsed .prp-conversation__aside {

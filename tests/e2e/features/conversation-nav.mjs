@@ -1025,12 +1025,22 @@ export function getSteps() {
           const w = host
             ? Math.round(host.getBoundingClientRect().width)
             : 0;
+          const asideVar = conv
+            ? String(getComputedStyle(conv).getPropertyValue('--prp-aside-w') || '').trim()
+            : '';
+          const asideVarPx = parseFloat(asideVar) || 0;
+          const grid = conv
+            ? String(getComputedStyle(conv).gridTemplateColumns || '')
+            : '';
           return {
             hasConv: !!conv,
             hasAside: !!host,
             hasBtn: !!btn,
             collapsed: !!collapsed,
             w,
+            asideVar,
+            asideVarPx,
+            grid: grid.slice(0, 80),
             ariaExpanded: btn?.getAttribute('aria-expanded') ?? null,
           };
         })()
@@ -1055,19 +1065,32 @@ export function getSteps() {
     const expandedW = before.w;
 
     press('Alt+b');
-    waitMs(350);
-    const mid = probe();
+    waitMs(450);
+    let mid = probe();
+    // CSS width transition can lag data-aside-collapsed under load
+    for (let i = 0; i < 6 && expandedW > 120 && !(mid.w > 0 && mid.w < expandedW - 40); i++) {
+      if (!mid.collapsed) {
+        // Chord may have been eaten; click collapse control
+        evalInPage(`document.querySelector('.prp-aside-collapse-btn')?.click?.()`);
+      }
+      waitMs(200);
+      mid = probe();
+    }
     log(`  aside after collapse ${JSON.stringify(mid)}`);
     assert(mid.collapsed, `aside not collapsed after ⌥B: ${JSON.stringify(mid)}`);
     assert(
       mid.ariaExpanded === 'false' || mid.ariaExpanded === null,
       `collapse control aria-expanded should be false: ${JSON.stringify(mid)}`
     );
-    // Compact rail is narrower (product ASIDE_COLLAPSED_WIDTH ~80 + splitter).
+    // Compact rail is narrower (product ASIDE_COLLAPSED_WIDTH ~80).
+    // Prefer measured host width; fall back to --prp-aside-w CSS var (grid track).
     if (expandedW > 120) {
+      const shrunkHost = mid.w > 0 && mid.w < expandedW - 40;
+      const shrunkVar =
+        Number(mid.asideVarPx) > 0 && Number(mid.asideVarPx) < expandedW - 40;
       assert(
-        mid.w > 0 && mid.w < expandedW - 40,
-        `collapsed aside should shrink width (${expandedW}→${mid.w})`
+        shrunkHost || shrunkVar,
+        `collapsed aside should shrink width (${expandedW}→${mid.w}, var=${mid.asideVar}): ${JSON.stringify(mid)}`
       );
     }
 

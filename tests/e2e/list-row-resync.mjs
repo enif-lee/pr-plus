@@ -272,6 +272,20 @@ export function getSteps() {
         return chip;
       }
     }
+    // Ensure conversation aside is expanded (⌥B may have collapsed it).
+    evalInPage(`
+      (() => {
+        const conv = document.querySelector('.prp-conversation');
+        const collapsed =
+          conv?.getAttribute('data-aside-collapsed') === '1' ||
+          conv?.classList.contains('prp-conversation--aside-collapsed');
+        if (collapsed) {
+          document.querySelector('.prp-aside-collapse-btn')?.click?.();
+        }
+        return { collapsed };
+      })()
+    `);
+    waitMs(250);
     // Bring Labels control into view (aside scroll / virtualization).
     evalInPage(`
       (() => {

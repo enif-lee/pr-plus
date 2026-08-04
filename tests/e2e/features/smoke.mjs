@@ -11,6 +11,7 @@ import {
   openPulls,
   setLayout,
   waitDiffFilesReady,
+  waitMs,
 } from '../lib/harness.mjs';
 
 /**
@@ -38,11 +39,16 @@ export function getSteps() {
   });
   run('P0.3 conversation chrome', () => {
     setLayout('conversation');
-    const p = modalProbe();
+    // Aside can lag one paint after layout flip under full-suite load
+    let p = modalProbe();
+    for (let i = 0; i < 12 && !(p.aside && p.aside.w > 100); i++) {
+      waitMs(200);
+      p = modalProbe();
+    }
     assert(p.layout === 'conversation', `layout=${p.layout}`);
     assert(p.conv && p.conv.h > 200, 'conversation virtual host missing');
     assert(p.merge && p.merge.h > 40, 'merge box missing');
-    assert(p.aside && p.aside.w > 100, 'aside rail missing');
+    assert(p.aside && p.aside.w > 100, `aside rail missing: ${JSON.stringify(p.aside)}`);
     assert(p.cards >= 1, 'expected timeline cards');
     assert(p.merge.bg && p.merge.bg !== 'rgba(0, 0, 0, 0)', `merge bg unstyled: ${p.merge.bg}`);
   });
