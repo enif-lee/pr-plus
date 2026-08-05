@@ -202,7 +202,7 @@ export function diffCommitFilterToSelection(
   const f = normalizeDiffCommitFilter(filter);
   if (f.mode === 'all' || !f.sha) return [];
   if (f.mode === 'single') return [String(f.sha)];
-  // range: include all commits from start..end inclusive
+  // range: all commits from start..end inclusive (checkboxes show full span)
   const list = normalizePrCommits(commits);
   let i = list.findIndex((c) => String(c.sha) === String(f.sha));
   let j = list.findIndex((c) => String(c.sha) === String(f.endSha));
@@ -212,8 +212,67 @@ export function diffCommitFilterToSelection(
     i = j;
     j = t;
   }
-  // For checkbox UI we only need endpoints as selected markers for range,
-  // or all in range? User asked for checkboxes for single or range (2 commits).
-  // Keep endpoints only so 2 checks = range.
-  return [String(list[i].sha), String(list[j].sha)];
+  return list.slice(i, j + 1).map((c) => String(c.sha));
+}
+
+/**
+ * Multi-checkbox toggle for commit / inclusive-range picking.
+ *
+ * Semantics (commits ordered oldest → newest via normalizePrCommits):
+ * - empty → click A: select A alone
+ * - single A → click A: clear
+ * - single A → click B: select every commit between A and B (inclusive)
+ * - range [lo…hi] → click lo: leave only hi (single)
+ * - range [lo…hi] → click hi: leave only lo (single)
+ * - range → click interior or outside: reset to that commit alone
+ *
+ * Used by Diff toolbar SearchableSelect (not plain multi add/remove).
+ */
+export function toggleCommitRangeSelection(
+  prevSelected: string[] | null | undefined,
+  clickedId: string | null | undefined,
+  commits: CommitLike[] | null | undefined
+): string[] {
+  const list = normalizePrCommits(commits);
+  const indexOf = (sha: string) =>
+    list.findIndex((c) => String(c.sha) === String(sha));
+  const click = String(clickedId || '').trim();
+  if (!click || !list.length) {
+    return Array.isArray(prevSelected) ? prevSelected.map(String) : [];
+  }
+  const clickI = indexOf(click);
+  if (clickI < 0) {
+    return Array.isArray(prevSelected) ? prevSelected.map(String) : [];
+  }
+
+  const prev = (Array.isArray(prevSelected) ? prevSelected : [])
+    .map((x) => String(x || '').trim())
+    .filter(Boolean);
+  const prevIdx = [
+    ...new Set(prev.map((sha) => indexOf(sha)).filter((i) => i >= 0)),
+  ].sort((a, b) => a - b);
+
+  if (!prevIdx.length) {
+    return [click];
+  }
+
+  if (prevIdx.length === 1) {
+    const only = prevIdx[0];
+    if (only === clickI) return [];
+    const lo = Math.min(only, clickI);
+    const hi = Math.max(only, clickI);
+    return list.slice(lo, hi + 1).map((c) => String(c.sha));
+  }
+
+  // Multi / range: endpoints = min & max of current selection
+  const lo = prevIdx[0];
+  const hi = prevIdx[prevIdx.length - 1];
+  if (clickI === lo) {
+    return [String(list[hi].sha)];
+  }
+  if (clickI === hi) {
+    return [String(list[lo].sha)];
+  }
+  // Interior of span or outside: reset selection to the clicked commit
+  return [click];
 }

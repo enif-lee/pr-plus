@@ -47,6 +47,12 @@ export function SearchableSelect({
   initialSelectedIds = null,
   onConfirm = null,
   confirmLabel = 'Apply',
+  /**
+   * Optional multi-toggle resolver (e.g. commit range fill).
+   * When set, called as (prevSelectedIds, clickedId) → nextSelectedIds
+   * instead of plain add/remove.
+   */
+  resolveMultiToggle = null,
 }: any) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
@@ -213,6 +219,16 @@ export function SearchableSelect({
     const raw = String(id || '').trim();
     if (!raw) return;
     setSelected((prev) => {
+      if (typeof resolveMultiToggle === 'function') {
+        try {
+          const next = resolveMultiToggle(prev, raw);
+          return Array.isArray(next)
+            ? next.map((x) => String(x || '').trim()).filter(Boolean)
+            : prev;
+        } catch {
+          /* fall through to default toggle */
+        }
+      }
       const key = raw.toLowerCase();
       const has = prev.some((x) => x.toLowerCase() === key);
       if (has) return prev.filter((x) => x.toLowerCase() !== key);

@@ -9,6 +9,7 @@ import {
   isAllCommitsFilter,
   normalizeDiffCommitFilter,
   selectionToDiffCommitFilter,
+  toggleCommitRangeSelection,
   truncateCommitLabel,
 } from '@lib/diff-commit-filter';
 import { pendingReviewCount } from '@lib/pending-review';
@@ -372,7 +373,7 @@ export function DiffToolbar(props: any) {
             }}
             aria-haspopup="dialog"
             aria-expanded={commitPickerOpen}
-            title="Select 1 commit for a single diff, or 2 for an inclusive range"
+            title="Select commits: 1 = single, 2 endpoints fill the range between them"
           >
             {commitLoading && !commitOpts.length ? 'Loading…' : triggerLabel}
             <span className="prp-diff-toolbar__chevron" aria-hidden="true">
@@ -384,7 +385,7 @@ export function DiffToolbar(props: any) {
             title={
               commitLoading
                 ? 'Commits — loading all…'
-                : 'Commits — check 1 or 2'
+                : 'Commits — pick endpoints (range auto-fills)'
             }
             options={selectOptions}
             query={commitQuery}
@@ -400,6 +401,9 @@ export function DiffToolbar(props: any) {
             placement="bottom"
             multi
             initialSelectedIds={initialSelectedIds}
+            resolveMultiToggle={(prev: string[], id: string) =>
+              toggleCommitRangeSelection(prev, id, commits)
+            }
             confirmLabel="Apply selection"
             placeholder="Search commits by message or sha…"
             emptyLabel={

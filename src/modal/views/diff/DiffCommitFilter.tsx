@@ -6,6 +6,7 @@ import {
   isAllCommitsFilter,
   normalizeDiffCommitFilter,
   selectionToDiffCommitFilter,
+  toggleCommitRangeSelection,
   truncateCommitLabel,
   type DiffCommitFilter as Filter,
 } from '@lib/diff-commit-filter';
@@ -23,7 +24,8 @@ type Props = {
 };
 
 /**
- * Multi-checkbox SearchableSelect: 1 commit = single, 2 = range, 0 = all.
+ * Multi-checkbox SearchableSelect with range-fill toggle:
+ * 1 commit = single, 2 endpoints fill every commit between, 0 = all.
  * Options are newest-first (see buildCommitFilterOptions).
  */
 export function DiffCommitFilter({
@@ -91,14 +93,18 @@ export function DiffCommitFilter({
         }}
         aria-haspopup="dialog"
         aria-expanded={open}
-        title="Check 1 commit for single diff, or 2 for a range"
+        title="Select commits: 1 = single, 2 endpoints fill the range between them"
       >
         {loading && !options.length ? 'Loading…' : trigger}
         <span aria-hidden="true"> ▾</span>
       </button>
       <SearchableSelect
         open={open}
-        title={loading ? 'Commits — loading all…' : 'Commits — check 1 or 2'}
+        title={
+          loading
+            ? 'Commits — loading all…'
+            : 'Commits — pick endpoints (range auto-fills)'
+        }
         options={selectOptions}
         query={query}
         onQuery={setQuery}
@@ -117,6 +123,9 @@ export function DiffCommitFilter({
         placement="bottom"
         multi
         initialSelectedIds={initialSelectedIds}
+        resolveMultiToggle={(prev: string[], id: string) =>
+          toggleCommitRangeSelection(prev, id, commits)
+        }
         confirmLabel="Apply selection"
         placeholder="Search commits by message or sha…"
         emptyLabel={loading ? 'Loading remaining commits…' : 'No matches'}
