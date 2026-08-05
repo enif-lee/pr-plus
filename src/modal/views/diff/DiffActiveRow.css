@@ -264,14 +264,18 @@
   contain: layout style;
 }
 /*
- * Inline review-thread rows: do not clip selection outline / card shadow.
- * overflow:hidden + contain:paint on the base .prp-vline cut the blue ring
- * and card corners (esp. bottom-right edge of pending threads).
+ * Inline review-thread rows: keep card + header inside the pane.
+ * Use overflow:hidden (not visible) so split RIGHT threads never paint past
+ * the column edge. Selection ring is inset-only (see LineSelection.css).
  */
 .prp-vline--comment,
-.prp-vline--comment-selected {
-  overflow: visible;
+.prp-vline--comment-selected,
+.prp-vline--comment-pending {
+  overflow: hidden;
   contain: layout style;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .prp-vline--selectable {

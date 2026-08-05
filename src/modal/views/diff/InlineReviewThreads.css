@@ -13,11 +13,14 @@
 .prp-inline-thread {
   width: 100%;
   max-width: min(720px, 100%);
+  min-width: 0;
   padding: 6px 10px 8px;
   box-sizing: border-box;
   font-family: var(--prp-font);
   font-size: 14px;
   line-height: 1.5;
+  /* Never paint outside the Diff row / split pane */
+  overflow: hidden;
 }
 /* Collapsed keeps the same outer padding as open (no tighter bottom). */
 .prp-inline-thread--collapsed {
@@ -30,7 +33,10 @@
   background: var(--prp-bg);
   box-shadow: 0 2px 8px rgba(1, 4, 9, 0.06);
   overflow: hidden;
+  width: 100%;
   max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .prp-inline-thread__filebar {
@@ -44,6 +50,10 @@
   font-size: 11px;
   min-height: 22px;
   line-height: 1.2;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 /* Lazy by-ids comments in flight (expand shell / resolved) */
@@ -73,6 +83,8 @@
 }
 
 .prp-inline-thread__loc {
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: 11px;
   color: var(--prp-fg-muted);
   overflow: hidden;

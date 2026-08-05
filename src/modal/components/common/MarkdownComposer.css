@@ -95,16 +95,25 @@
   align-items: stretch;
   /* Match code-row gutter + two panes */
   padding-left: 0;
+  min-width: 0;
+  max-width: 100%;
 }
 .prp-split-cols--comment {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
   align-items: stretch;
   border-left: 1px solid var(--prp-border-muted);
+  overflow: hidden;
 }
 .prp-split-cols__comment-pane {
   display: flex;
   flex-direction: column;
+  flex: 1 1 50%;
   min-width: 0;
-  overflow: visible;
+  max-width: 100%;
+  /* Contain thread card inside the pane — never spill into the sibling / edge */
+  overflow: hidden;
   box-sizing: border-box;
   padding: 4px 6px 6px;
 }
@@ -114,9 +123,15 @@
 .prp-vline--comment-split .prp-inline-thread {
   width: 100%;
   max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 .prp-vline--comment-split .prp-inline-thread__card {
+  width: 100%;
   max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 .prp-file-header__viewed {
