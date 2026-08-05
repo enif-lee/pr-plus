@@ -54,7 +54,7 @@ export function commitOptionLabel(commit: CommitLike | null | undefined): string
   const msg = String(commit.message || '')
     .trim()
     .split('\n')[0]
-    .slice(0, 48);
+    .slice(0, 80);
   return msg ? `${sha} · ${msg}` : sha;
 }
 
@@ -128,7 +128,7 @@ export function compareCacheKey(owner: string, repo: string, base: string, head:
 }
 
 /** Max visible chars for commit option / trigger labels (ellipsis beyond). */
-export const COMMIT_LABEL_MAX_LEN = 42;
+export const COMMIT_LABEL_MAX_LEN = 72;
 
 /**
  * Truncate a label for the commit picker (keeps UI width bounded).
@@ -141,6 +141,47 @@ export function truncateCommitLabel(label: string, maxLen = COMMIT_LABEL_MAX_LEN
 }
 
 /**
+ * Compact date for commit-picker secondary line (author · time).
+ * Pure and locale-stable enough for unit tests (en-US short month).
+ */
+export function formatCommitOptionDate(iso: string | null | undefined): string {
+  const raw = String(iso || '').trim();
+  if (!raw) return '';
+  try {
+    const d = new Date(raw);
+    if (Number.isNaN(d.getTime())) return raw;
+    return d.toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
+  } catch {
+    return raw;
+  }
+}
+
+/**
+ * Secondary line under each commit option: "Author · Aug 5, 2026, 1:45 PM".
+ * Omits missing parts; empty when neither author nor date is available.
+ */
+export function formatCommitOptionSecondary(
+  commit: CommitLike | null | undefined
+): string {
+  if (!commit) return '';
+  const author = String(commit.author || '').trim();
+  const when = formatCommitOptionDate(
+    (commit.date as string) ||
+      (commit.committedAt as string) ||
+      (commit.authoredAt as string) ||
+      ''
+  );
+  if (author && when) return `${author} · ${when}`;
+  return author || when || '';
+}
+
+/**
  * Build select options for the commit filter UI (newest-first for scanning).
  */
 export function buildCommitFilterOptions(commits: CommitLike[] | null | undefined): Array<{
@@ -148,6 +189,8 @@ export function buildCommitFilterOptions(commits: CommitLike[] | null | undefine
   label: string;
   shortSha: string;
   fullLabel: string;
+  /** Small muted line under the primary label (author · time). */
+  secondary: string;
 }> {
   const list = normalizePrCommits(commits);
   // newest first in the dropdown
@@ -158,6 +201,7 @@ export function buildCommitFilterOptions(commits: CommitLike[] | null | undefine
       shortSha: shortSha(c.sha),
       fullLabel,
       label: truncateCommitLabel(fullLabel),
+      secondary: formatCommitOptionSecondary(c),
     };
   });
 }

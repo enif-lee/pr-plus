@@ -14,6 +14,7 @@ import {
 import {
   REST_TO_GQL_REACTION,
 } from './misc';
+import { fetchViewerLogin } from './viewer';
 
 export async function fetchReactableReactionGroups(
   nodeIds: any,
@@ -181,7 +182,6 @@ export async function toggleCommentReaction(
       githubRestUrl(basePath, ctx),
       fetchImpl,
       token,
-      // @ts-expect-error classic fetch dynamic shapes
       { method: 'POST', body: { content } }
     );
     return { content, reacted: true };

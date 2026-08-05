@@ -4,9 +4,11 @@ import { IconX } from './icons';
 import { resolveMermaidColorMode } from '../../lib/mermaid-lazy';
 import { useModalStore } from '../../store/modal-store';
 import {
+  applyViewerKeyGesture,
   applyViewerWheelEvent,
   fitMermaidToStage,
   identityMermaidTransform,
+  mapViewerKeyGesture,
   measureMermaidSvgSize,
   mermaidPointerDistance,
   mermaidPointerMidpoint,
@@ -31,9 +33,10 @@ function resolvePortalHost(): HTMLElement | null {
 }
 
 /**
- * Fullscreen overlay for a rendered Mermaid SVG.
+ * Fullscreen overlay for a rendered Mermaid SVG (portaled into .prp-overlay).
  * - Opens centered + fit-to-stage (vector scale)
- * - Scroll / trackpad: pan · Opt+scroll: continuous zoom · drag: pan · pinch: zoom
+ * - Scroll pan · Opt+scroll / Opt± zoom · arrows pan 48px · drag/pinch
+ * - Mid-gesture transform is DOM-only (`paintTransform`); React commits on idle/end
  * - Esc closes viewer only (not the PR modal)
  */
 export function MermaidViewer({ svg, onClose, title = 'Diagram' }: Props) {
@@ -53,6 +56,7 @@ export function MermaidViewer({ svg, onClose, title = 'Diagram' }: Props) {
     dist: number;
     mid: MermaidPoint;
   } | null>(null);
+  const wheelIdleTimerRef = useRef(0);
   const [panning, setPanning] = useState(false);
   const colorMode = resolveMermaidColorMode();
   const portalHost = useMemo(() => resolvePortalHost(), []);
@@ -74,17 +78,50 @@ export function MermaidViewer({ svg, onClose, title = 'Diagram' }: Props) {
     [paintTransform]
   );
 
+  // After any React paint (e.g. setPanning), re-apply live ref transform so
+  // style={{ transform: xf }} cannot clobber mid-gesture DOM paints.
+  useLayoutEffect(() => {
+    paintTransform(xfRef.current);
+  });
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
+      const gesture = mapViewerKeyGesture({
+        key: e.key,
+        code: e.code,
+        altKey: e.altKey,
+        metaKey: e.metaKey,
+        ctrlKey: e.ctrlKey,
+        shiftKey: e.shiftKey,
+      });
+      if (!gesture) return;
+      if (gesture.kind === 'close') {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        onClose();
+        return;
+      }
+      // Stage-center pivot for keyboard zoom
+      const stage = stageRef.current;
+      let pivot: MermaidPoint | null = null;
+      if (gesture.kind === 'zoom' && stage) {
+        pivot = {
+          x: stage.clientWidth / 2,
+          y: stage.clientHeight / 2,
+        };
+      }
+      const next = applyViewerKeyGesture(xfRef.current, gesture, pivot);
+      if (!next) return;
       e.preventDefault();
       e.stopPropagation();
       e.stopImmediatePropagation();
-      onClose();
+      // Discrete keys: commit React (not continuous rAF shutter risk)
+      commitTransform(next);
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [onClose]);
+  }, [onClose, commitTransform]);
 
   useEffect(() => {
     const prev = document.body.style.overflow;
@@ -180,7 +217,18 @@ export function MermaidViewer({ svg, onClose, title = 'Diagram' }: Props) {
     let pendingAlt = false;
     let pendingPivot: MermaidPoint | null = null;
 
-    const flush = () => {
+    const scheduleWheelCommit = () => {
+      if (wheelIdleTimerRef.current) {
+        window.clearTimeout(wheelIdleTimerRef.current);
+      }
+      // Commit React after wheel stream idles (DOM already painted).
+      wheelIdleTimerRef.current = window.setTimeout(() => {
+        wheelIdleTimerRef.current = 0;
+        setXf(xfRef.current);
+      }, 120);
+    };
+
+    const flush = (opts?: { commit?: boolean }) => {
       raf = 0;
       const dx = pendingDx;
       const dy = pendingDy;
@@ -199,8 +247,13 @@ export function MermaidViewer({ svg, onClose, title = 'Diagram' }: Props) {
             pivot
           )
         : panMermaidTransform(xfRef.current, dx, dy);
+      // Mid-gesture: DOM paint only (avoid React re-render of large SVG)
       paintTransform(next);
-      setXf(next);
+      if (opts?.commit) {
+        setXf(next);
+      } else {
+        scheduleWheelCommit();
+      }
     };
 
     const onWheel = (e: WheelEvent) => {
@@ -227,22 +280,26 @@ export function MermaidViewer({ svg, onClose, title = 'Diagram' }: Props) {
         pendingDx += -dx;
         pendingDy += -dy;
       }
-      // Synthetic/untrusted (e2e dispatchEvent): apply now — rAF may not tick
-      // under headless automation between eval turns.
+      // Synthetic/untrusted (e2e dispatchEvent): apply + commit now — rAF may
+      // not tick under headless automation between eval turns.
       if (!e.isTrusted) {
         if (raf) {
           cancelAnimationFrame(raf);
           raf = 0;
         }
-        flush();
+        flush({ commit: true });
         return;
       }
-      if (!raf) raf = requestAnimationFrame(flush);
+      if (!raf) raf = requestAnimationFrame(() => flush());
     };
     stage.addEventListener('wheel', onWheel, { passive: false });
     return () => {
       stage.removeEventListener('wheel', onWheel);
       if (raf) cancelAnimationFrame(raf);
+      if (wheelIdleTimerRef.current) {
+        window.clearTimeout(wheelIdleTimerRef.current);
+        wheelIdleTimerRef.current = 0;
+      }
     };
   }, [paintTransform]);
 
@@ -320,8 +377,8 @@ export function MermaidViewer({ svg, onClose, title = 'Diagram' }: Props) {
         // Follow pinch centroid drift as pan
         next = panMermaidTransform(next, mid.x - prev.mid.x, mid.y - prev.mid.y);
         pinchRef.current = { dist, mid };
+        // Mid-gesture: DOM only
         paintTransform(next);
-        setXf(next);
         return;
       }
 
@@ -333,7 +390,6 @@ export function MermaidViewer({ svg, onClose, title = 'Diagram' }: Props) {
       drag.lastY = e.clientY;
       const next = panMermaidTransform(xfRef.current, dx, dy);
       paintTransform(next);
-      setXf(next);
     },
     [paintTransform, stageLocal]
   );
@@ -369,6 +425,9 @@ export function MermaidViewer({ svg, onClose, title = 'Diagram' }: Props) {
       const [id, pt] = [...pointersRef.current.entries()][0];
       dragRef.current = { pointerId: id, lastX: pt.x, lastY: pt.y };
       setPanning(true);
+    } else if (pointersRef.current.size === 0) {
+      // Gesture ended — commit live transform into React once
+      setXf(xfRef.current);
     }
     try {
       (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
@@ -404,7 +463,7 @@ export function MermaidViewer({ svg, onClose, title = 'Diagram' }: Props) {
         <div className="prp-mermaid-viewer__bar">
           <span className="prp-mermaid-viewer__title">{title}</span>
           <span className="prp-mermaid-viewer__hint prp-muted">
-            Scroll pan · ⌥+scroll zoom · drag pan · Esc close
+            Scroll pan · ⌥± / ⌥+scroll zoom · arrows pan · drag · Esc
           </span>
           <div className="prp-mermaid-viewer__actions">
             <button

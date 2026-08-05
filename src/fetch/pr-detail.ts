@@ -411,7 +411,7 @@ export async function fetchPrDetail(
           endCursor: null,
           pageCount: 1,
           totalCount: items.length,
-        };
+        } as any;
         console.log(
           `[pr-plus] fetchPrDetail reviewThreads: REST fallback ` +
             `${threads.length} threads, ${items.length} comments`

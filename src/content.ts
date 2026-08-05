@@ -332,10 +332,11 @@
 
       const storage = globalThis.PRTreeStorage;
       const bridgeSend = async (message) => {
-        if (!globalThis.chrome?.runtime?.sendMessage) {
+        const chromeApi = (globalThis as any).chrome;
+        if (!chromeApi?.runtime?.sendMessage) {
           throw new Error('chrome.runtime unavailable');
         }
-        return chrome.runtime.sendMessage(message);
+        return chromeApi.runtime.sendMessage(message);
       };
 
       const getPrefs = async () => {
@@ -370,10 +371,11 @@
        * directly so we do not depend on a woken service worker for completion.
        */
       const ONBOARDING_KEY = 'onboardingCompleted';
+      const chromeApi = () => (globalThis as any).chrome;
       const readOnboardingLocal = () =>
         new Promise((resolve) => {
           try {
-            const area = globalThis.chrome?.storage?.local;
+            const area = chromeApi()?.storage?.local;
             if (!area?.get) {
               resolve(null);
               return;
@@ -397,7 +399,7 @@
       const writeOnboardingLocal = (completed) =>
         new Promise((resolve) => {
           try {
-            const area = globalThis.chrome?.storage?.local;
+            const area = chromeApi()?.storage?.local;
             if (!area?.set) {
               resolve(false);
               return;
@@ -416,7 +418,7 @@
                   },
                 },
                 () => {
-                  const err = globalThis.chrome?.runtime?.lastError;
+                  const err = chromeApi()?.runtime?.lastError;
                   resolve(!err);
                 }
               );

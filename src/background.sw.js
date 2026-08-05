@@ -825,11 +825,10 @@
     return missing;
   }
   function resolveMissingThreadIdsForDrop(page) {
-    return !page || typeof page != "object" ? [] : Array.isArray(page.missingThreadIds) ? [
-      ...new Set(
-        page.missingThreadIds.map((id) => String(id || "").trim()).filter(Boolean)
-      )
-    ] : [];
+    if (!page || typeof page != "object") return [];
+    if (!Array.isArray(page.missingThreadIds)) return [];
+    const ids = page.missingThreadIds.map((id) => String(id || "").trim()).filter(Boolean);
+    return [...new Set(ids)];
   }
   function dropReviewThreadsByNodeIds(detail, threadNodeIds) {
     if (!detail) return detail;
@@ -1067,14 +1066,17 @@
       bulkThreads.filter((t) => t?.threadNodeId).map((t) => [String(t.threadNodeId), t])
     ), threads = shellThreads.map((t) => {
       const id = t?.threadNodeId ? String(t.threadNodeId) : "", full = id ? byId.get(id) : null;
-      return full ? {
+      if (!full)
+        return {
+          ...t,
+          commentsLoaded: t.commentsLoaded === !0
+        };
+      const fullObj = full && typeof full == "object" ? full : {};
+      return {
         ...t,
-        ...full,
+        ...fullObj,
         commentsLoaded: !0,
-        commentIds: Array.isArray(full.commentIds) ? full.commentIds : t.commentIds || []
-      } : {
-        ...t,
-        commentsLoaded: t.commentsLoaded === !0
+        commentIds: Array.isArray(fullObj.commentIds) ? fullObj.commentIds : t.commentIds || []
       };
     }), loadedIds = new Set(
       threads.filter((t) => t.commentsLoaded).map((t) => String(t.threadNodeId))
@@ -1147,12 +1149,14 @@
       bulkThreads.filter((t) => t?.threadNodeId).map((t) => [String(t.threadNodeId), t])
     ), reviewThreads = prevTh.map((t) => {
       const id = t?.threadNodeId ? String(t.threadNodeId) : "", full = id ? byId.get(id) : null;
-      return full ? {
+      if (!full) return t;
+      const fullObj = full && typeof full == "object" ? full : {};
+      return {
         ...t,
-        ...full,
+        ...fullObj,
         commentsLoaded: !0,
-        commentIds: Array.isArray(full.commentIds) ? full.commentIds : t.commentIds || []
-      } : t;
+        commentIds: Array.isArray(fullObj.commentIds) ? fullObj.commentIds : t.commentIds || []
+      };
     });
     for (const t of bulkThreads) {
       const id = t?.threadNodeId ? String(t.threadNodeId) : "";
@@ -4022,8 +4026,8 @@ async function fetchRestCollectionAll(firstUrl, fetchImpl, token, opts = {}) {
   }
   return all;
 }
-async function apiSend(url, fetchImpl, token, { method = "GET", body } = {}) {
-  const headers = buildApiHeaders(token);
+async function apiSend(url, fetchImpl, token, opts = {}) {
+  const method = opts?.method || "GET", body = opts?.body, headers = buildApiHeaders(token);
   body != null && (headers["Content-Type"] = "application/json");
   const res = await fetchImpl(url, {
     method,
@@ -4598,6 +4602,309 @@ var REST_TO_GQL_REACTION = {
   rocket: "ROCKET",
   eyes: "EYES"
 };
+async function fetchViewerViewedPaths(owner, repo, pullNumber, fetchImpl, token, opts = {}) {
+  const apiCtx = normalizeApiCtx(opts?.ctx);
+  if (!token)
+    return { pullRequestId: null, viewedPaths: [], unauthorized: !0 };
+  const maxPages = Math.max(1, Math.min(20, Number(opts.maxPages) || 5)), viewed = [];
+  let cursor = null, pullRequestId = null;
+  for (let page = 0; page < maxPages; page++) {
+    const pr = (await apiGraphql(
+      `query ViewerViewedFiles($owner:String!,$repo:String!,$number:Int!,$cursor:String) {
+  repository(owner:$owner, name:$repo) {
+    pullRequest(number:$number) {
+      id
+      files(first:100, after:$cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes { path viewerViewedState }
+      }
+    }
+  }
+}`,
+      {
+        owner: String(owner || ""),
+        repo: String(repo || ""),
+        number: Number(pullNumber) || 0,
+        cursor
+      },
+      fetchImpl,
+      token,
+      apiCtx
+    ))?.repository?.pullRequest;
+    if (!pr) break;
+    pr.id && (pullRequestId = String(pr.id));
+    const nodes = pr.files?.nodes || [];
+    for (const n of nodes)
+      String(n?.viewerViewedState || "").toUpperCase() === "VIEWED" && n?.path && viewed.push(String(n.path));
+    if (!pr.files?.pageInfo?.hasNextPage || (cursor = pr.files.pageInfo.endCursor || null, !cursor)) break;
+  }
+  return { pullRequestId, viewedPaths: viewed };
+}
+async function markFileAsViewed(pullRequestId, path, fetchImpl, token, ctx = null) {
+  return ctx = normalizeApiCtx(ctx), await apiGraphql(
+    `mutation MarkFileAsViewed($input: MarkFileAsViewedInput!) {
+  markFileAsViewed(input: $input) {
+    pullRequest { id }
+  }
+}`,
+    {
+      input: {
+        pullRequestId: String(pullRequestId || ""),
+        path: String(path || "")
+      }
+    },
+    fetchImpl,
+    token,
+    ctx
+  );
+}
+async function unmarkFileAsViewed(pullRequestId, path, fetchImpl, token, ctx = null) {
+  return ctx = normalizeApiCtx(ctx), await apiGraphql(
+    `mutation UnmarkFileAsViewed($input: UnmarkFileAsViewedInput!) {
+  unmarkFileAsViewed(input: $input) {
+    pullRequest { id }
+  }
+}`,
+    {
+      input: {
+        pullRequestId: String(pullRequestId || ""),
+        path: String(path || "")
+      }
+    },
+    fetchImpl,
+    token,
+    ctx
+  );
+}
+async function resolvePullRequestNodeId(owner, repo, pullNumber, fetchImpl, token, nodeId = null, ctx = null) {
+  if (ctx = normalizeApiCtx(ctx), nodeId) return String(nodeId);
+  const n = Number(pullNumber);
+  if (!token || !owner || !repo || !Number.isFinite(n) || n <= 0) return null;
+  try {
+    const pr = await apiJson(
+      githubRestUrl(`/repos/${owner}/${repo}/pulls/${n}`, ctx),
+      fetchImpl,
+      token
+    );
+    if (pr?.node_id) return String(pr.node_id);
+  } catch {
+  }
+  try {
+    const id = (await apiGraphql(
+      `query($owner:String!,$name:String!,$number:Int!){
+  repository(owner:$owner, name:$name) {
+    pullRequest(number:$number) { id }
+  }
+}`,
+      { owner: String(owner), name: String(repo), number: n },
+      fetchImpl,
+      token,
+      ctx
+    ))?.repository?.pullRequest?.id;
+    return id ? String(id) : null;
+  } catch {
+    return null;
+  }
+}
+async function setIssueSubscription(owner, repo, issueNumber, { subscribed = !0, ignored = !1, nodeId = null } = {}, fetchImpl, token, ctx = null) {
+  if (ctx = normalizeApiCtx(ctx), !token) throw new Error("GitHub PAT required for notifications");
+  const id = await resolvePullRequestNodeId(
+    owner,
+    repo,
+    issueNumber,
+    fetchImpl,
+    token,
+    nodeId,
+    ctx
+  );
+  if (!id)
+    throw new Error(
+      "Could not resolve pull request id for subscription. Refresh and try again."
+    );
+  const state = ignored ? "IGNORED" : subscribed ? "SUBSCRIBED" : "UNSUBSCRIBED", vs = (await apiGraphql(
+    `mutation($id:ID!,$state:SubscriptionState!){
+  updateSubscription(input:{subscribableId:$id, state:$state}) {
+    subscribable {
+      ... on PullRequest { id viewerSubscription }
+      ... on Issue { id viewerSubscription }
+    }
+  }
+}`,
+    { id: String(id), state },
+    fetchImpl,
+    token
+  ))?.updateSubscription?.subscribable?.viewerSubscription;
+  return mapViewerSubscription(vs);
+}
+async function deleteIssueSubscription(owner, repo, issueNumber, fetchImpl, token, nodeId = null) {
+  return setIssueSubscription(
+    owner,
+    repo,
+    issueNumber,
+    { subscribed: !1, ignored: !1, nodeId },
+    fetchImpl,
+    token
+  );
+}
+async function fetchPullRequestSubscription(owner, repo, pullNumber, fetchImpl, token, nodeId = null, ctx = null) {
+  if (ctx = normalizeApiCtx(ctx), !token) return null;
+  try {
+    const id = await resolvePullRequestNodeId(
+      owner,
+      repo,
+      pullNumber,
+      fetchImpl,
+      token,
+      nodeId,
+      ctx
+    );
+    if (!id) return null;
+    const node = (await apiGraphql(
+      `query($id:ID!){
+  node(id:$id) {
+    ... on PullRequest {
+      viewerSubscription
+      viewerCanSubscribe
+      mergeStateStatus
+    }
+    ... on Issue { viewerSubscription viewerCanSubscribe }
+  }
+}`,
+      { id: String(id) },
+      fetchImpl,
+      token,
+      ctx
+    ))?.node || null, vs = node?.viewerSubscription;
+    if (!vs)
+      return node?.mergeStateStatus ? {
+        subscribed: null,
+        mergeStateStatus: String(node.mergeStateStatus || "") || null
+      } : null;
+    const mapped = mapViewerSubscription(vs);
+    return node?.mergeStateStatus ? {
+      ...mapped,
+      mergeStateStatus: String(node.mergeStateStatus || "") || null
+    } : mapped;
+  } catch {
+    return null;
+  }
+}
+async function uploadRepoFile(owner, repo, { path, contentBase64, message, branch }, fetchImpl, token, ctx = null) {
+  if (ctx = normalizeApiCtx(ctx), !path || !contentBase64) throw new Error("path and contentBase64 required");
+  const encPath = String(path).split("/").map(encodeURIComponent).join("/");
+  let sha;
+  try {
+    sha = (await apiJson(
+      githubRestUrl(
+        `/repos/${owner}/${repo}/contents/${encPath}${branch ? `?ref=${encodeURIComponent(branch)}` : ""}`,
+        ctx
+      ),
+      fetchImpl,
+      token
+    ))?.sha;
+  } catch {
+    sha = void 0;
+  }
+  const body = {
+    message: message || `Upload ${path}`,
+    content: String(contentBase64).replace(/\s+/g, "")
+  };
+  branch && (body.branch = branch), sha && (body.sha = sha);
+  const result = await apiSend(
+    githubRestUrl(`/repos/${owner}/${repo}/contents/${encPath}`, ctx),
+    fetchImpl,
+    token,
+    { method: "PUT", body }
+  ), content = result?.content || result;
+  return {
+    downloadUrl: content?.download_url || content?.html_url || "",
+    htmlUrl: content?.html_url || content?.download_url || "",
+    path: content?.path || path,
+    sha: content?.sha || ""
+  };
+}
+async function getRepoFileText(owner, repo, { path, ref }, fetchImpl, token, ctx = null) {
+  if (ctx = normalizeApiCtx(ctx), !path) throw new Error("path required");
+  const rev = ref || "HEAD", encPath = String(path).split("/").map(encodeURIComponent).join("/"), meta = await apiJson(
+    githubRestUrl(`/repos/${owner}/${repo}/contents/${encPath}?ref=${encodeURIComponent(rev)}`, ctx),
+    fetchImpl,
+    token
+  );
+  if (meta?.type && meta.type !== "file")
+    throw new Error(`Not a file: ${path}`);
+  let raw = "";
+  if (meta?.content && meta?.encoding === "base64")
+    raw = decodeBase64Utf8(String(meta.content).replace(/\n/g, ""));
+  else if (meta?.download_url) {
+    const res = await fetchImpl(meta.download_url, {
+      headers: buildApiHeaders(token)
+    });
+    if (!res.ok) {
+      const err = new Error(`GitHub download ${res.status}: ${res.statusText}`);
+      throw err.status = res.status, err;
+    }
+    raw = await res.text();
+  } else meta?.content && (raw = decodeBase64Utf8(String(meta.content).replace(/\n/g, "")));
+  return {
+    path: meta?.path || path,
+    ref: rev,
+    text: raw,
+    sha: meta?.sha || "",
+    size: Number(meta?.size) || raw.length
+  };
+}
+async function applyReviewSuggestion(owner, repo, { path, headRef, startLine, endLine, suggestion, message }, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
+  const ref = headRef || "HEAD", file = await getRepoFileText(
+    owner,
+    repo,
+    { path, ref },
+    fetchImpl,
+    token
+  ), raw = file.text || "";
+  let applyFn = null;
+  try {
+    let mod = typeof globalThis < "u" ? globalThis.PRModalPrEditApi : null;
+    if (!mod && typeof __require == "function")
+      try {
+        mod = __require("./modal/pure/pr-edit-api.js");
+      } catch {
+        mod = null;
+      }
+    applyFn = mod?.applySuggestionToFileContent;
+  } catch {
+    applyFn = null;
+  }
+  if (!applyFn) throw new Error("applySuggestionToFileContent unavailable");
+  const next = applyFn(raw, {
+    startLine,
+    endLine,
+    suggestion
+  });
+  let contentB64;
+  return typeof Buffer < "u" ? contentB64 = Buffer.from(next, "utf8").toString("base64") : contentB64 = btoa(unescape(encodeURIComponent(next))), apiSend(
+    githubRestUrl(`/repos/${owner}/${repo}/contents/${path.split("/").map(encodeURIComponent).join("/")}`, ctx),
+    fetchImpl,
+    token,
+    {
+      method: "PUT",
+      body: {
+        message: message || `Apply suggestion to ${path}`,
+        content: contentB64,
+        branch: ref,
+        sha: file.sha
+      }
+    }
+  );
+}
+async function fetchViewerLogin(fetchImpl, token, ctx = null) {
+  if (ctx = normalizeApiCtx(ctx), !token) return null;
+  try {
+    return (await apiJson(githubRestUrl("/user", ctx), fetchImpl, token))?.login || null;
+  } catch {
+    return null;
+  }
+}
 async function fetchReactableReactionGroups(nodeIds, fetchImpl, token, ctx = null, opts = null) {
   ctx = normalizeApiCtx(ctx);
   const ids = [
@@ -4697,7 +5004,6 @@ async function toggleCommentReaction(owner, repo, kind, opts, fetchImpl, token, 
       githubRestUrl(basePath, ctx),
       fetchImpl,
       token,
-      // @ts-expect-error classic fetch dynamic shapes
       { method: "POST", body: { content } }
     ), { content, reacted: !0 };
   const listed = await apiJson(
@@ -4879,13 +5185,7 @@ async function fetchPrCommentsPage(owner, repo, pullNumber, kind, opts, fetchImp
   const since = opts?.since || null, preferNewest = !!opts?.preferNewest && !since, orderHint = opts?.order || null;
   async function fetchPage(pageNum, listOpts = {}, ctx2 = null) {
     ctx2 = normalizeApiCtx(ctx2);
-    const sort = (
-      // @ts-expect-error classic fetch dynamic shapes
-      listOpts.sort != null ? listOpts.sort : kind === "review" ? "created" : void 0
-    ), direction = (
-      // @ts-expect-error classic fetch dynamic shapes
-      listOpts.direction != null ? listOpts.direction : kind === "review" ? preferNewest || orderHint === "desc" ? "desc" : "asc" : void 0
-    ), url = helpers?.buildCommentsListUrl ? helpers.buildCommentsListUrl(kind, owner, repo, pullNumber, {
+    const sort = listOpts?.sort != null ? listOpts.sort : kind === "review" ? "created" : void 0, direction = listOpts?.direction != null ? listOpts.direction : kind === "review" ? preferNewest || orderHint === "desc" ? "desc" : "asc" : void 0, url = helpers?.buildCommentsListUrl ? helpers.buildCommentsListUrl(kind, owner, repo, pullNumber, {
       page: pageNum,
       perPage,
       since,
@@ -4994,7 +5294,7 @@ async function fetchPrCommentsPage(owner, repo, pullNumber, kind, opts, fetchImp
   };
   return { items: res.items, meta, kind };
 }
-async function fetchPrSidebarMeta2(owner, repo, number, fetchImpl, token, ctx = null) {
+async function fetchPrSidebarMeta(owner, repo, number, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
   const o = String(owner || "").trim(), r = String(repo || "").trim(), n = Number(number);
   if (!o || !r || !Number.isFinite(n) || n <= 0 || !token)
@@ -5061,7 +5361,7 @@ async function fetchPrSidebarMeta2(owner, repo, number, fetchImpl, token, ctx = 
     return { projects: [], developmentIssues: [] };
   }
 }
-async function fetchIssueOrPrSummaries2(owner, repo, numbers, fetchImpl, token, ctx = null) {
+async function fetchIssueOrPrSummaries(owner, repo, numbers, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
   const o = String(owner || "").trim(), r = String(repo || "").trim(), nums = [
     ...new Set(
@@ -5564,14 +5864,13 @@ async function fetchViewerPendingReviewComments(owner, repo, pullNumber, fetchIm
   );
   return comments;
 }
-async function createPendingPullReview(owner, repo, pullNumber, { commitId } = {}, fetchImpl, token, ctx = null) {
+async function createPendingPullReview(owner, repo, pullNumber, opts = {}, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
   const body = {};
-  return commitId && (body.commit_id = commitId), apiSend(
+  return opts?.commitId && (body.commit_id = opts.commitId), apiSend(
     githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`, ctx),
     fetchImpl,
     token,
-    // @ts-expect-error classic fetch dynamic shapes
     { method: "POST", body }
   );
 }
@@ -5587,7 +5886,6 @@ async function submitPendingPullReview(owner, repo, pullNumber, reviewId, { even
     githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${id}/events`, ctx),
     fetchImpl,
     token,
-    // @ts-expect-error classic fetch dynamic shapes
     { method: "POST", body: { event: ev, body: body || "" } }
   );
 }
@@ -5860,7 +6158,6 @@ async function resolveParentCommentNodeId(owner, repo, parentId, fetchImpl, toke
       fetchImpl,
       token
     ), hit = (comments || []).find(
-      // @ts-expect-error classic fetch dynamic shapes
       (c) => c && Number(c.id) === id && (c.nodeId || c.node_id)
     );
     if (hit) return String(hit.nodeId || hit.node_id);
@@ -5873,7 +6170,6 @@ async function postIssueComment(owner, repo, issueNumber, body, fetchImpl, token
     githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/comments`, ctx),
     fetchImpl,
     token,
-    // @ts-expect-error classic fetch dynamic shapes
     { method: "POST", body: { body } }
   );
 }
@@ -5896,7 +6192,6 @@ async function submitPullReview(owner, repo, pullNumber, { event, body = "", com
     githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`, ctx),
     fetchImpl,
     token,
-    // @ts-expect-error classic fetch dynamic shapes
     { method: "POST", body: payload }
   );
 }
@@ -6009,7 +6304,6 @@ async function postReviewComment(owner, repo, pullNumber, {
     githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/comments`, ctx),
     fetchImpl,
     token,
-    // @ts-expect-error classic fetch dynamic shapes
     { method: "POST", body: payload }
   );
 }
@@ -6053,7 +6347,6 @@ async function replyToReviewComment(owner, repo, pullNumber, commentId, body, fe
         return {
           ...raw,
           pending: !0,
-          // @ts-expect-error classic fetch dynamic shapes
           pendingReviewId: raw.pendingReviewId || pending?.id || null
         };
       } catch {
@@ -6156,7 +6449,6 @@ async function replyToReviewComment(owner, repo, pullNumber, commentId, body, fe
       githubRestUrl(`/repos/${owner}/${repo}/pulls/${n}/comments/${Math.floor(parentId)}/replies`, ctx),
       fetchImpl,
       token,
-      // @ts-expect-error classic fetch dynamic shapes
       { method: "POST", body: { body: text } }
     );
   } catch (err) {
@@ -6185,7 +6477,6 @@ async function updatePullState(owner, repo, pullNumber, state, fetchImpl, token,
     githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}`, ctx),
     fetchImpl,
     token,
-    // @ts-expect-error classic fetch dynamic shapes
     { method: "PATCH", body: { state: next } }
   );
 }
@@ -6218,7 +6509,6 @@ async function updatePullRequest(owner, repo, pullNumber, fields, fetchImpl, tok
     githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}`, ctx),
     fetchImpl,
     token,
-    // @ts-expect-error classic fetch dynamic shapes
     { method: "PATCH", body }
   );
 }
@@ -6227,7 +6517,6 @@ async function editIssueComment(owner, repo, commentId, body, fetchImpl, token, 
     githubRestUrl(`/repos/${owner}/${repo}/issues/comments/${commentId}`, ctx),
     fetchImpl,
     token,
-    // @ts-expect-error classic fetch dynamic shapes
     { method: "PATCH", body: { body: String(body || "") } }
   );
 }
@@ -6236,7 +6525,6 @@ async function editReviewComment(owner, repo, commentId, body, fetchImpl, token,
     githubRestUrl(`/repos/${owner}/${repo}/pulls/comments/${commentId}`, ctx),
     fetchImpl,
     token,
-    // @ts-expect-error classic fetch dynamic shapes
     { method: "PATCH", body: { body: String(body || "") } }
   );
 }
@@ -6247,7 +6535,6 @@ async function requestReviewers(owner, repo, pullNumber, { reviewers = [], teamR
     token,
     {
       method: "POST",
-      // @ts-expect-error classic fetch dynamic shapes
       body: { reviewers, team_reviewers: teamReviewers }
     }
   );
@@ -6259,7 +6546,6 @@ async function removeReviewers(owner, repo, pullNumber, { reviewers = [], teamRe
     token,
     {
       method: "DELETE",
-      // @ts-expect-error classic fetch dynamic shapes
       body: { reviewers, team_reviewers: teamReviewers }
     }
   );
@@ -6269,7 +6555,6 @@ async function addAssignees(owner, repo, issueNumber, assignees, fetchImpl, toke
     githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/assignees`, ctx),
     fetchImpl,
     token,
-    // @ts-expect-error classic fetch dynamic shapes
     { method: "POST", body: { assignees: assignees || [] } }
   );
 }
@@ -6278,7 +6563,6 @@ async function removeAssignees(owner, repo, issueNumber, assignees, fetchImpl, t
     githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/assignees`, ctx),
     fetchImpl,
     token,
-    // @ts-expect-error classic fetch dynamic shapes
     { method: "DELETE", body: { assignees: assignees || [] } }
   );
 }
@@ -6287,7 +6571,6 @@ async function setIssueLabels(owner, repo, issueNumber, labels, fetchImpl, token
     githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/labels`, ctx),
     fetchImpl,
     token,
-    // @ts-expect-error classic fetch dynamic shapes
     { method: "PUT", body: { labels: labels || [] } }
   );
 }
@@ -6341,7 +6624,6 @@ async function createRepoLabel(owner, repo, { name, color, description } = {}, f
     githubRestUrl(`/repos/${owner}/${repo}/labels`, ctx),
     fetchImpl,
     token,
-    // @ts-expect-error classic fetch dynamic shapes
     { method: "POST", body }
   );
   return {
@@ -6382,7 +6664,6 @@ async function createRepoMilestone(owner, repo, { title, description, state } = 
     githubRestUrl(`/repos/${owner}/${repo}/milestones`, ctx),
     fetchImpl,
     token,
-    // @ts-expect-error classic fetch dynamic shapes
     { method: "POST", body }
   );
   return {
@@ -6420,14 +6701,17 @@ async function fetchTagsForCommits(owner, repo, shas, fetchImpl, token = null, o
   );
   return want.size ? (await fetchRepoTags(owner, repo, fetchImpl, token, opts)).filter((t) => want.has(String(t.sha || "").toLowerCase())) : [];
 }
-async function mergePullRequest(owner, repo, pullNumber, { mergeMethod = "merge", commitTitle, commitMessage } = {}, fetchImpl, token, ctx = null) {
+async function mergePullRequest(owner, repo, pullNumber, {
+  mergeMethod = "merge",
+  commitTitle,
+  commitMessage
+} = {}, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
   const body = { merge_method: mergeMethod };
   return commitTitle != null && (body.commit_title = String(commitTitle)), commitMessage != null && (body.commit_message = String(commitMessage)), apiSend(
     githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/merge`, ctx),
     fetchImpl,
     token,
-    // @ts-expect-error classic fetch dynamic shapes
     { method: "PUT", body }
   );
 }
@@ -6438,7 +6722,6 @@ async function updatePullBranch(owner, repo, pullNumber, { expectedHeadSha } = {
     githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/update-branch`, ctx),
     fetchImpl,
     token,
-    // @ts-expect-error classic fetch dynamic shapes
     { method: "PUT", body }
   );
 }
@@ -6454,7 +6737,6 @@ async function deleteHeadBranch(owner, repo, branch, fetchImpl, token, ctx = nul
     ),
     fetchImpl,
     token,
-    // @ts-expect-error classic fetch dynamic shapes
     { method: "DELETE" }
   );
 }
@@ -6465,7 +6747,6 @@ async function setIssueMilestone(owner, repo, issueNumber, milestoneNumber, fetc
     token,
     {
       method: "PATCH",
-      // @ts-expect-error classic fetch dynamic shapes
       body: { milestone: milestoneNumber == null ? null : Number(milestoneNumber) }
     }
   );
@@ -6859,12 +7140,15 @@ function mergeCommentsBulkIntoThreadsPage(shellPage, bulkPage) {
     bulkThreads.filter((t) => t?.threadNodeId).map((t) => [String(t.threadNodeId), t])
   ), threads = shellThreads.map((t) => {
     const id = t?.threadNodeId ? String(t.threadNodeId) : "", full = id ? byId.get(id) : null;
-    return full ? {
+    if (!full)
+      return { ...t, commentsLoaded: !!t.commentsLoaded };
+    const fullObj = full && typeof full == "object" ? full : {};
+    return {
       ...t,
-      ...full,
+      ...fullObj,
       commentsLoaded: !0,
-      commentIds: Array.isArray(full.commentIds) ? full.commentIds : t.commentIds || []
-    } : { ...t, commentsLoaded: !!t.commentsLoaded };
+      commentIds: Array.isArray(fullObj.commentIds) ? fullObj.commentIds : t.commentIds || []
+    };
   }), loadedIds = new Set(
     threads.filter((t) => t.commentsLoaded).map((t) => String(t.threadNodeId))
   ), prevComments = Array.isArray(shellPage?.comments) ? shellPage.comments : [];
@@ -7236,7 +7520,7 @@ function collectUnresolvedThreadNodeIds(detail) {
   }
   return [...ids];
 }
-async function fetchReviewThreadsByIds2(threadNodeIds, fetchImpl, token, ctx = null) {
+async function fetchReviewThreadsByIds(threadNodeIds, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
   const empty = {
     threads: [],
@@ -7545,7 +7829,6 @@ function mergeReviewThreadsPageIntoDetail(detail, page, direction = "older") {
   for (const t of page?.threads || [])
     if (t?.threadNodeId) {
       const prevT = thById.get(String(t.threadNodeId)) || {}, mergedT = {
-        // @ts-expect-error classic fetch dynamic shapes
         ...prevT,
         ...t
       };
@@ -7614,311 +7897,6 @@ async function fetchPullReviewThreads(owner, repo, pullNumber, fetchImpl, token)
     return [];
   }
 }
-async function fetchViewerViewedPaths(owner, repo, pullNumber, fetchImpl, token, opts = {}) {
-  const apiCtx = normalizeApiCtx(opts?.ctx);
-  if (!token)
-    return { pullRequestId: null, viewedPaths: [], unauthorized: !0 };
-  const maxPages = Math.max(1, Math.min(20, Number(opts.maxPages) || 5)), viewed = [];
-  let cursor = null, pullRequestId = null;
-  for (let page = 0; page < maxPages; page++) {
-    const pr = (await apiGraphql(
-      `query ViewerViewedFiles($owner:String!,$repo:String!,$number:Int!,$cursor:String) {
-  repository(owner:$owner, name:$repo) {
-    pullRequest(number:$number) {
-      id
-      files(first:100, after:$cursor) {
-        pageInfo { hasNextPage endCursor }
-        nodes { path viewerViewedState }
-      }
-    }
-  }
-}`,
-      {
-        owner: String(owner || ""),
-        repo: String(repo || ""),
-        number: Number(pullNumber) || 0,
-        cursor
-      },
-      fetchImpl,
-      token,
-      apiCtx
-    ))?.repository?.pullRequest;
-    if (!pr) break;
-    pr.id && (pullRequestId = String(pr.id));
-    const nodes = pr.files?.nodes || [];
-    for (const n of nodes)
-      String(n?.viewerViewedState || "").toUpperCase() === "VIEWED" && n?.path && viewed.push(String(n.path));
-    if (!pr.files?.pageInfo?.hasNextPage || (cursor = pr.files.pageInfo.endCursor || null, !cursor)) break;
-  }
-  return { pullRequestId, viewedPaths: viewed };
-}
-async function markFileAsViewed(pullRequestId, path, fetchImpl, token, ctx = null) {
-  return ctx = normalizeApiCtx(ctx), await apiGraphql(
-    `mutation MarkFileAsViewed($input: MarkFileAsViewedInput!) {
-  markFileAsViewed(input: $input) {
-    pullRequest { id }
-  }
-}`,
-    {
-      input: {
-        pullRequestId: String(pullRequestId || ""),
-        path: String(path || "")
-      }
-    },
-    fetchImpl,
-    token,
-    ctx
-  );
-}
-async function unmarkFileAsViewed(pullRequestId, path, fetchImpl, token, ctx = null) {
-  return ctx = normalizeApiCtx(ctx), await apiGraphql(
-    `mutation UnmarkFileAsViewed($input: UnmarkFileAsViewedInput!) {
-  unmarkFileAsViewed(input: $input) {
-    pullRequest { id }
-  }
-}`,
-    {
-      input: {
-        pullRequestId: String(pullRequestId || ""),
-        path: String(path || "")
-      }
-    },
-    fetchImpl,
-    token,
-    ctx
-  );
-}
-async function resolvePullRequestNodeId(owner, repo, pullNumber, fetchImpl, token, nodeId = null, ctx = null) {
-  if (ctx = normalizeApiCtx(ctx), nodeId) return String(nodeId);
-  const n = Number(pullNumber);
-  if (!token || !owner || !repo || !Number.isFinite(n) || n <= 0) return null;
-  try {
-    const pr = await apiJson(
-      githubRestUrl(`/repos/${owner}/${repo}/pulls/${n}`, ctx),
-      fetchImpl,
-      token
-    );
-    if (pr?.node_id) return String(pr.node_id);
-  } catch {
-  }
-  try {
-    const id = (await apiGraphql(
-      `query($owner:String!,$name:String!,$number:Int!){
-  repository(owner:$owner, name:$name) {
-    pullRequest(number:$number) { id }
-  }
-}`,
-      { owner: String(owner), name: String(repo), number: n },
-      fetchImpl,
-      token,
-      ctx
-    ))?.repository?.pullRequest?.id;
-    return id ? String(id) : null;
-  } catch {
-    return null;
-  }
-}
-async function setIssueSubscription(owner, repo, issueNumber, { subscribed = !0, ignored = !1, nodeId = null } = {}, fetchImpl, token, ctx = null) {
-  if (ctx = normalizeApiCtx(ctx), !token) throw new Error("GitHub PAT required for notifications");
-  const id = await resolvePullRequestNodeId(
-    owner,
-    repo,
-    issueNumber,
-    fetchImpl,
-    token,
-    nodeId,
-    ctx
-  );
-  if (!id)
-    throw new Error(
-      "Could not resolve pull request id for subscription. Refresh and try again."
-    );
-  const state = ignored ? "IGNORED" : subscribed ? "SUBSCRIBED" : "UNSUBSCRIBED", vs = (await apiGraphql(
-    `mutation($id:ID!,$state:SubscriptionState!){
-  updateSubscription(input:{subscribableId:$id, state:$state}) {
-    subscribable {
-      ... on PullRequest { id viewerSubscription }
-      ... on Issue { id viewerSubscription }
-    }
-  }
-}`,
-    { id: String(id), state },
-    fetchImpl,
-    token
-  ))?.updateSubscription?.subscribable?.viewerSubscription;
-  return mapViewerSubscription(vs);
-}
-async function deleteIssueSubscription(owner, repo, issueNumber, fetchImpl, token, nodeId = null) {
-  return setIssueSubscription(
-    owner,
-    repo,
-    issueNumber,
-    { subscribed: !1, ignored: !1, nodeId },
-    fetchImpl,
-    token
-  );
-}
-async function fetchPullRequestSubscription(owner, repo, pullNumber, fetchImpl, token, nodeId = null, ctx = null) {
-  if (ctx = normalizeApiCtx(ctx), !token) return null;
-  try {
-    const id = await resolvePullRequestNodeId(
-      owner,
-      repo,
-      pullNumber,
-      fetchImpl,
-      token,
-      nodeId,
-      ctx
-    );
-    if (!id) return null;
-    const node = (await apiGraphql(
-      `query($id:ID!){
-  node(id:$id) {
-    ... on PullRequest {
-      viewerSubscription
-      viewerCanSubscribe
-      mergeStateStatus
-    }
-    ... on Issue { viewerSubscription viewerCanSubscribe }
-  }
-}`,
-      { id: String(id) },
-      fetchImpl,
-      token,
-      ctx
-    ))?.node || null, vs = node?.viewerSubscription;
-    if (!vs)
-      return node?.mergeStateStatus ? {
-        subscribed: null,
-        mergeStateStatus: String(node.mergeStateStatus || "") || null
-      } : null;
-    const mapped = mapViewerSubscription(vs);
-    return node?.mergeStateStatus ? {
-      ...mapped,
-      mergeStateStatus: String(node.mergeStateStatus || "") || null
-    } : mapped;
-  } catch {
-    return null;
-  }
-}
-async function uploadRepoFile(owner, repo, { path, contentBase64, message, branch }, fetchImpl, token, ctx = null) {
-  if (ctx = normalizeApiCtx(ctx), !path || !contentBase64) throw new Error("path and contentBase64 required");
-  const encPath = String(path).split("/").map(encodeURIComponent).join("/");
-  let sha;
-  try {
-    sha = (await apiJson(
-      githubRestUrl(
-        `/repos/${owner}/${repo}/contents/${encPath}${branch ? `?ref=${encodeURIComponent(branch)}` : ""}`,
-        ctx
-      ),
-      fetchImpl,
-      token
-    ))?.sha;
-  } catch {
-    sha = void 0;
-  }
-  const body = {
-    message: message || `Upload ${path}`,
-    content: String(contentBase64).replace(/\s+/g, "")
-  };
-  branch && (body.branch = branch), sha && (body.sha = sha);
-  const result = await apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/contents/${encPath}`, ctx),
-    fetchImpl,
-    token,
-    // @ts-expect-error classic fetch dynamic shapes
-    { method: "PUT", body }
-  ), content = result?.content || result;
-  return {
-    downloadUrl: content?.download_url || content?.html_url || "",
-    htmlUrl: content?.html_url || content?.download_url || "",
-    path: content?.path || path,
-    sha: content?.sha || ""
-  };
-}
-async function getRepoFileText(owner, repo, { path, ref }, fetchImpl, token, ctx = null) {
-  if (ctx = normalizeApiCtx(ctx), !path) throw new Error("path required");
-  const rev = ref || "HEAD", encPath = String(path).split("/").map(encodeURIComponent).join("/"), meta = await apiJson(
-    githubRestUrl(`/repos/${owner}/${repo}/contents/${encPath}?ref=${encodeURIComponent(rev)}`, ctx),
-    fetchImpl,
-    token
-  );
-  if (meta?.type && meta.type !== "file")
-    throw new Error(`Not a file: ${path}`);
-  let raw = "";
-  if (meta?.content && meta?.encoding === "base64")
-    raw = decodeBase64Utf8(String(meta.content).replace(/\n/g, ""));
-  else if (meta?.download_url) {
-    const res = await fetchImpl(meta.download_url, {
-      headers: buildApiHeaders(token)
-    });
-    if (!res.ok) {
-      const err = new Error(`GitHub download ${res.status}: ${res.statusText}`);
-      throw err.status = res.status, err;
-    }
-    raw = await res.text();
-  } else meta?.content && (raw = decodeBase64Utf8(String(meta.content).replace(/\n/g, "")));
-  return {
-    path: meta?.path || path,
-    ref: rev,
-    text: raw,
-    sha: meta?.sha || "",
-    size: Number(meta?.size) || raw.length
-  };
-}
-async function applyReviewSuggestion(owner, repo, { path, headRef, startLine, endLine, suggestion, message }, fetchImpl, token, ctx = null) {
-  ctx = normalizeApiCtx(ctx);
-  const ref = headRef || "HEAD", file = await getRepoFileText(
-    owner,
-    repo,
-    { path, ref },
-    fetchImpl,
-    token
-  ), raw = file.text || "";
-  let applyFn = null;
-  try {
-    let mod = typeof globalThis < "u" ? globalThis.PRModalPrEditApi : null;
-    if (!mod && typeof __require == "function")
-      try {
-        mod = __require("./modal/pure/pr-edit-api.js");
-      } catch {
-        mod = null;
-      }
-    applyFn = mod?.applySuggestionToFileContent;
-  } catch {
-    applyFn = null;
-  }
-  if (!applyFn) throw new Error("applySuggestionToFileContent unavailable");
-  const next = applyFn(raw, {
-    startLine,
-    endLine,
-    suggestion
-  });
-  let contentB64;
-  return typeof Buffer < "u" ? contentB64 = Buffer.from(next, "utf8").toString("base64") : contentB64 = btoa(unescape(encodeURIComponent(next))), apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/contents/${path.split("/").map(encodeURIComponent).join("/")}`, ctx),
-    fetchImpl,
-    token,
-    {
-      method: "PUT",
-      // @ts-expect-error classic fetch dynamic shapes
-      body: {
-        message: message || `Apply suggestion to ${path}`,
-        content: contentB64,
-        branch: ref,
-        sha: file.sha
-      }
-    }
-  );
-}
-async function fetchViewerLogin2(fetchImpl, token, ctx = null) {
-  if (ctx = normalizeApiCtx(ctx), !token) return null;
-  try {
-    return (await apiJson(githubRestUrl("/user", ctx), fetchImpl, token))?.login || null;
-  } catch {
-    return null;
-  }
-}
 async function fetchPrDetail(owner, repo, pullNumber, fetchImpl, token = null, opts = {}) {
   const ctx = normalizeApiCtx(opts?.ctx), base = githubRestUrl(`/repos/${owner}/${repo}`, ctx), n = Number(pullNumber), threadsMaxPages = opts.skipReviewThreads ? 0 : Math.max(1, Math.min(20, Number(opts.threadsMaxPages) || 1)), timings = {}, tTotal0 = fetchNowMs(), PARALLEL_REST_KEYS = ["pull", "issue", "viewerLogin", "autolinks"], tParallel0 = fetchNowMs(), batchOpt = { batchStart: tParallel0 }, bust = () => `_prp=${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`, noCache = {
     cache: "no-store"
@@ -7949,7 +7927,7 @@ async function fetchPrDetail(owner, repo, pullNumber, fetchImpl, token = null, o
     timedFetch(
       timings,
       "viewerLogin",
-      fetchViewerLogin2(fetchImpl, token, ctx),
+      fetchViewerLogin(fetchImpl, token, ctx),
       null,
       batchOpt
     ),
@@ -8863,8 +8841,8 @@ var fetchApi = {
   fetchPrReviews,
   fetchPrChecks,
   fetchPrDevelopment,
-  fetchPrSidebarMeta: fetchPrSidebarMeta2,
-  fetchIssueOrPrSummaries: fetchIssueOrPrSummaries2,
+  fetchPrSidebarMeta,
+  fetchIssueOrPrSummaries,
   fetchReactableReactionGroups,
   fetchReactableReactors,
   fetchCompareFiles,
@@ -8874,7 +8852,7 @@ var fetchApi = {
   fetchReviewThreadsPage,
   chooseReviewThreadsTransportLocal,
   buildRestReviewThreadsPageFromCommentsLocal,
-  fetchReviewThreadsByIds: fetchReviewThreadsByIds2,
+  fetchReviewThreadsByIds,
   collectUnresolvedThreadNodeIds,
   dropReviewThreadsFromDetail,
   mapGraphqlReviewCommentNode,
@@ -8937,7 +8915,7 @@ var fetchApi = {
   applyReviewSuggestion,
   getRepoFileText,
   uploadRepoFile,
-  fetchViewerLogin: fetchViewerLogin2,
+  fetchViewerLogin,
   apiJson,
   apiSend,
   apiGraphql

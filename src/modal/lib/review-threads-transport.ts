@@ -345,13 +345,10 @@ export function confirmedMissingThreadIdsFromNodes(
 export function resolveMissingThreadIdsForDrop(page: any): string[] {
   if (!page || typeof page !== 'object') return [];
   if (!Array.isArray(page.missingThreadIds)) return [];
-  return [
-    ...new Set(
-      page.missingThreadIds
-        .map((id: any) => String(id || '').trim())
-        .filter(Boolean)
-    ),
-  ];
+  const ids: string[] = page.missingThreadIds
+    .map((id: any) => String(id || '').trim())
+    .filter(Boolean);
+  return [...new Set(ids)];
 }
 
 /**

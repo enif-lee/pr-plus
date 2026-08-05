@@ -52,7 +52,9 @@ export function DiffCommitFilter({
       options.map((o) => ({
         id: o.sha,
         label: o.label,
-        keywords: [o.shortSha, o.sha, o.fullLabel],
+        keywords: [o.shortSha, o.sha, o.fullLabel, o.secondary].filter(Boolean),
+        secondary: o.secondary || '',
+        meta: { secondary: o.secondary || '' },
       })),
     [options]
   );
@@ -100,11 +102,7 @@ export function DiffCommitFilter({
       </button>
       <SearchableSelect
         open={open}
-        title={
-          loading
-            ? 'Commits — loading all…'
-            : 'Commits — pick endpoints (range auto-fills)'
-        }
+        title={loading ? 'Commits — loading…' : 'Commits'}
         options={selectOptions}
         query={query}
         onQuery={setQuery}
@@ -122,6 +120,8 @@ export function DiffCommitFilter({
         anchorRef={btnRef}
         placement="bottom"
         multi
+        minWidth={480}
+        maxWidth={560}
         initialSelectedIds={initialSelectedIds}
         resolveMultiToggle={(prev: string[], id: string) =>
           toggleCommitRangeSelection(prev, id, commits)

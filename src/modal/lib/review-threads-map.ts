@@ -191,12 +191,13 @@ export function mergeCommentsBulkIntoThreadsPage(shellPage: any, bulkPage: any) 
         commentsLoaded: t.commentsLoaded === true,
       };
     }
+    const fullObj = full && typeof full === 'object' ? (full as any) : {};
     return {
       ...t,
-      ...full,
+      ...fullObj,
       commentsLoaded: true,
-      commentIds: Array.isArray(full.commentIds)
-        ? full.commentIds
+      commentIds: Array.isArray(fullObj.commentIds)
+        ? fullObj.commentIds
         : t.commentIds || [],
     };
   });
@@ -350,12 +351,13 @@ export function mergeThreadCommentsBulkIntoDetail(detail: any, bulkPage: any) {
     const id = t?.threadNodeId ? String(t.threadNodeId) : '';
     const full = id ? byId.get(id) : null;
     if (!full) return t;
+    const fullObj = full && typeof full === 'object' ? (full as any) : {};
     return {
       ...t,
-      ...full,
+      ...fullObj,
       commentsLoaded: true,
-      commentIds: Array.isArray(full.commentIds)
-        ? full.commentIds
+      commentIds: Array.isArray(fullObj.commentIds)
+        ? fullObj.commentIds
         : t.commentIds || [],
     };
   });

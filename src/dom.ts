@@ -890,8 +890,7 @@ function createToggleButton(doc, { onShowTree, onShowOriginal, initialMode = 'tr
   });
 
   // External sync (prefs / onboarding) without firing click handlers
-  // @ts-expect-error classic content-script dynamic shapes
-  btn.setMode = (nextMode: any) => {
+  (btn as any).setMode = (nextMode: any) => {
     mode = nextMode === 'original' ? 'original' : 'tree';
     updateLabel();
   };

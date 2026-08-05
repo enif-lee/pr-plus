@@ -4,9 +4,11 @@ import { IconX } from './icons';
 import { resolveMermaidColorMode } from '../../lib/mermaid-lazy';
 import { useModalStore } from '../../store/modal-store';
 import {
+  applyViewerKeyGesture,
   applyViewerWheelEvent,
   fitMermaidToStage,
   identityMermaidTransform,
+  mapViewerKeyGesture,
   mermaidPointerDistance,
   mermaidPointerMidpoint,
   mermaidTransformStyle,
@@ -30,8 +32,9 @@ function resolvePortalHost(): HTMLElement | null {
 }
 
 /**
- * Fullscreen overlay for markdown / diff images (MermaidViewer-style).
- * Scroll pan · Opt+scroll zoom · drag pan · pinch zoom · Esc closes viewer only.
+ * Fullscreen overlay for markdown / diff images (MermaidViewer-style, portaled).
+ * Mid-gesture transform is DOM-only; React commits on idle/end.
+ * Scroll pan · Opt± / Opt+scroll zoom · arrows pan · Esc closes viewer only.
  */
 export function ImageViewer({
   src,
@@ -52,6 +55,7 @@ export function ImageViewer({
     lastY: number;
   } | null>(null);
   const pinchRef = useRef<{ dist: number; mid: MermaidPoint } | null>(null);
+  const wheelIdleTimerRef = useRef(0);
   const [panning, setPanning] = useState(false);
   const colorMode = resolveMermaidColorMode();
   const portalHost = useMemo(() => resolvePortalHost(), []);
@@ -72,17 +76,46 @@ export function ImageViewer({
     [paintTransform]
   );
 
+  useLayoutEffect(() => {
+    paintTransform(xfRef.current);
+  });
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
+      const gesture = mapViewerKeyGesture({
+        key: e.key,
+        code: e.code,
+        altKey: e.altKey,
+        metaKey: e.metaKey,
+        ctrlKey: e.ctrlKey,
+        shiftKey: e.shiftKey,
+      });
+      if (!gesture) return;
+      if (gesture.kind === 'close') {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        onClose();
+        return;
+      }
+      const stage = stageRef.current;
+      let pivot: MermaidPoint | null = null;
+      if (gesture.kind === 'zoom' && stage) {
+        pivot = {
+          x: stage.clientWidth / 2,
+          y: stage.clientHeight / 2,
+        };
+      }
+      const next = applyViewerKeyGesture(xfRef.current, gesture, pivot);
+      if (!next) return;
       e.preventDefault();
       e.stopPropagation();
       e.stopImmediatePropagation();
-      onClose();
+      commitTransform(next);
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [onClose]);
+  }, [onClose, commitTransform]);
 
   useEffect(() => {
     const prev = document.body.style.overflow;
@@ -156,7 +189,17 @@ export function ImageViewer({
     let pendingAlt = false;
     let pendingPivot: MermaidPoint | null = null;
 
-    const flush = () => {
+    const scheduleWheelCommit = () => {
+      if (wheelIdleTimerRef.current) {
+        window.clearTimeout(wheelIdleTimerRef.current);
+      }
+      wheelIdleTimerRef.current = window.setTimeout(() => {
+        wheelIdleTimerRef.current = 0;
+        setXf(xfRef.current);
+      }, 120);
+    };
+
+    const flush = (opts?: { commit?: boolean }) => {
       raf = 0;
       const dx = pendingDx;
       const dy = pendingDy;
@@ -175,7 +218,8 @@ export function ImageViewer({
           )
         : panMermaidTransform(xfRef.current, dx, dy);
       paintTransform(next);
-      setXf(next);
+      if (opts?.commit) setXf(next);
+      else scheduleWheelCommit();
     };
 
     const onWheel = (e: WheelEvent) => {
@@ -199,22 +243,26 @@ export function ImageViewer({
         pendingDx += -dx;
         pendingDy += -dy;
       }
-      // Synthetic/untrusted (e2e dispatchEvent): apply now — rAF may not tick
-      // under headless automation between eval turns.
+      // Synthetic/untrusted (e2e dispatchEvent): apply + commit now — rAF may
+      // not tick under headless automation between eval turns.
       if (!e.isTrusted) {
         if (raf) {
           cancelAnimationFrame(raf);
           raf = 0;
         }
-        flush();
+        flush({ commit: true });
         return;
       }
-      if (!raf) raf = requestAnimationFrame(flush);
+      if (!raf) raf = requestAnimationFrame(() => flush());
     };
     stage.addEventListener('wheel', onWheel, { passive: false });
     return () => {
       stage.removeEventListener('wheel', onWheel);
       if (raf) cancelAnimationFrame(raf);
+      if (wheelIdleTimerRef.current) {
+        window.clearTimeout(wheelIdleTimerRef.current);
+        wheelIdleTimerRef.current = 0;
+      }
     };
   }, [paintTransform]);
 
@@ -285,7 +333,6 @@ export function ImageViewer({
         next = panMermaidTransform(next, mid.x - prev.mid.x, mid.y - prev.mid.y);
         pinchRef.current = { dist, mid };
         paintTransform(next);
-        setXf(next);
         return;
       }
 
@@ -297,7 +344,6 @@ export function ImageViewer({
       drag.lastY = e.clientY;
       const next = panMermaidTransform(xfRef.current, dx, dy);
       paintTransform(next);
-      setXf(next);
     },
     [paintTransform, stageLocal]
   );
@@ -315,6 +361,8 @@ export function ImageViewer({
       const [id, pt] = [...pointersRef.current.entries()][0];
       dragRef.current = { pointerId: id, lastX: pt.x, lastY: pt.y };
       setPanning(true);
+    } else if (pointersRef.current.size === 0) {
+      setXf(xfRef.current);
     }
     try {
       (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
@@ -348,7 +396,7 @@ export function ImageViewer({
         <div className="prp-image-viewer__bar">
           <span className="prp-image-viewer__title">{title}</span>
           <span className="prp-image-viewer__hint prp-muted">
-            Scroll pan · ⌥+scroll zoom · drag pan · Esc close
+            Scroll pan · ⌥± / ⌥+scroll zoom · arrows pan · drag · Esc
           </span>
           <div className="prp-image-viewer__actions">
             <button

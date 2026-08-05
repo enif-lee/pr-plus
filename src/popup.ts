@@ -193,16 +193,19 @@ function renderPrefs(prefs: any) {
   }
   // @ts-expect-error classic content-script dynamic shapes
   if (prefAutoOpenEmbed) prefAutoOpenEmbed.checked = p.autoOpenEmbed !== false;
-  // @ts-expect-error classic content-script dynamic shapes
-  prefReverseComments.checked = p.reverseComments !== false;
-  // @ts-expect-error classic content-script dynamic shapes
-  if (prefSingleFileMode) prefSingleFileMode.checked = p.singleFileMode === true;
-  // @ts-expect-error classic content-script dynamic shapes
-  if (prefAutoExpandFileNav) {
-    prefAutoExpandFileNav.checked = p.autoExpandOnFileNav === true;
+  (prefReverseComments as HTMLInputElement).checked =
+    p.reverseComments !== false;
+  if (prefSingleFileMode) {
+    (prefSingleFileMode as HTMLInputElement).checked =
+      p.singleFileMode === true;
   }
-  // @ts-expect-error classic content-script dynamic shapes
-  if (prefTreeView) prefTreeView.checked = p.treeView !== false;
+  if (prefAutoExpandFileNav) {
+    (prefAutoExpandFileNav as HTMLInputElement).checked =
+      p.autoExpandOnFileNav === true;
+  }
+  if (prefTreeView) {
+    (prefTreeView as HTMLInputElement).checked = p.treeView !== false;
+  }
   if (prefShortcutMonitorSize) {
     prefShortcutMonitorSize.value = normalizeShortcutMonitorSize(
       p.shortcutMonitorSize

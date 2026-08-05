@@ -1,5 +1,7 @@
 /** PrModal mutations/meta/write-through — nested install scope for mutual calls. */
-import { flushSync } from 'react-dom/client';
+import { flushSync } from 'react-dom';
+import { buildLabelOptions } from '../lib/searchable-select';
+import { toggleViewedPath } from '../lib/review-threads';
 import {
   stampThreadResolved,
   appendOptimisticReviewComment,

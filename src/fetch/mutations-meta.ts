@@ -38,7 +38,6 @@ export async function updatePullRequest(owner: any, repo: any, pullNumber: any, 
     githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}`, ctx),
     fetchImpl,
     token,
-  // @ts-expect-error classic fetch dynamic shapes
     { method: 'PATCH', body }
   );
 }
@@ -49,7 +48,6 @@ export async function editIssueComment(owner: any, repo: any, commentId: any, bo
     githubRestUrl(`/repos/${owner}/${repo}/issues/comments/${commentId}`, ctx),
     fetchImpl,
     token,
-  // @ts-expect-error classic fetch dynamic shapes
     { method: 'PATCH', body: { body: String(body || '') } }
   );
 }
@@ -60,7 +58,6 @@ export async function editReviewComment(owner: any, repo: any, commentId: any, b
     githubRestUrl(`/repos/${owner}/${repo}/pulls/comments/${commentId}`, ctx),
     fetchImpl,
     token,
-  // @ts-expect-error classic fetch dynamic shapes
     { method: 'PATCH', body: { body: String(body || '') } }
   );
 }
@@ -80,7 +77,6 @@ export async function requestReviewers(
     token,
     {
       method: 'POST',
-  // @ts-expect-error classic fetch dynamic shapes
       body: { reviewers, team_reviewers: teamReviewers },
     }
   );
@@ -101,7 +97,6 @@ export async function removeReviewers(
     token,
     {
       method: 'DELETE',
-  // @ts-expect-error classic fetch dynamic shapes
       body: { reviewers, team_reviewers: teamReviewers },
     }
   );
@@ -113,7 +108,6 @@ export async function addAssignees(owner: any, repo: any, issueNumber: any, assi
     githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/assignees`, ctx),
     fetchImpl,
     token,
-  // @ts-expect-error classic fetch dynamic shapes
     { method: 'POST', body: { assignees: assignees || [] } }
   );
 }
@@ -124,7 +118,6 @@ export async function removeAssignees(owner: any, repo: any, issueNumber: any, a
     githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/assignees`, ctx),
     fetchImpl,
     token,
-  // @ts-expect-error classic fetch dynamic shapes
     { method: 'DELETE', body: { assignees: assignees || [] } }
   );
 }
@@ -135,7 +128,6 @@ export async function setIssueLabels(owner: any, repo: any, issueNumber: any, la
     githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/labels`, ctx),
     fetchImpl,
     token,
-  // @ts-expect-error classic fetch dynamic shapes
     { method: 'PUT', body: { labels: labels || [] } }
   );
 }
@@ -199,8 +191,7 @@ export function defaultNewLabelColor(name: any) {
 export async function createRepoLabel(
   owner,
   repo,
-  // @ts-expect-error classic fetch dynamic shapes
-  { name, color, description } = {},
+  { name, color, description }: { name?: string; color?: string; description?: string } = {},
   fetchImpl,
   token
 , ctx = null) {
@@ -218,7 +209,6 @@ export async function createRepoLabel(
     githubRestUrl(`/repos/${owner}/${repo}/labels`, ctx),
     fetchImpl,
     token,
-  // @ts-expect-error classic fetch dynamic shapes
     { method: 'POST', body }
   );
   return {
@@ -269,8 +259,7 @@ export async function fetchRepoMilestones(owner, repo, fetchImpl, token = null, 
 export async function createRepoMilestone(
   owner,
   repo,
-  // @ts-expect-error classic fetch dynamic shapes
-  { title, description, state } = {},
+  { title, description, state }: { title?: string; description?: string; state?: string } = {},
   fetchImpl,
   token
 , ctx = null) {
@@ -283,7 +272,6 @@ export async function createRepoMilestone(
     githubRestUrl(`/repos/${owner}/${repo}/milestones`, ctx),
     fetchImpl,
     token,
-  // @ts-expect-error classic fetch dynamic shapes
     { method: 'POST', body }
   );
   return {
@@ -357,8 +345,11 @@ export async function mergePullRequest(
   owner,
   repo,
   pullNumber,
-  // @ts-expect-error classic fetch dynamic shapes
-  { mergeMethod = 'merge', commitTitle, commitMessage } = {},
+  {
+    mergeMethod = 'merge',
+    commitTitle,
+    commitMessage,
+  }: { mergeMethod?: string; commitTitle?: string; commitMessage?: string } = {},
   fetchImpl,
   token
 , ctx = null) {
@@ -370,7 +361,6 @@ export async function mergePullRequest(
     githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/merge`, ctx),
     fetchImpl,
     token,
-  // @ts-expect-error classic fetch dynamic shapes
     { method: 'PUT', body }
   );
 }
@@ -379,8 +369,7 @@ export async function updatePullBranch(
   owner,
   repo,
   pullNumber,
-  // @ts-expect-error classic fetch dynamic shapes
-  { expectedHeadSha } = {},
+  { expectedHeadSha }: { expectedHeadSha?: string } = {},
   fetchImpl,
   token
 , ctx = null) {
@@ -391,7 +380,6 @@ export async function updatePullBranch(
     githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/update-branch`, ctx),
     fetchImpl,
     token,
-  // @ts-expect-error classic fetch dynamic shapes
     { method: 'PUT', body }
   );
 }
@@ -425,7 +413,6 @@ export async function deleteHeadBranch(
     ),
     fetchImpl,
     token,
-    // @ts-expect-error classic fetch dynamic shapes
     { method: 'DELETE' }
   );
 }
@@ -443,7 +430,6 @@ export async function setIssueMilestone(owner: any, repo: any, issueNumber: any,
     token,
     {
       method: 'PATCH',
-  // @ts-expect-error classic fetch dynamic shapes
       body: { milestone: milestoneNumber == null ? null : Number(milestoneNumber) },
     }
   );

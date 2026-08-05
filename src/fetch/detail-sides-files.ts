@@ -19,6 +19,10 @@ import {
   mapPrCommitRow,
   mapReviewComment,
 } from './mappers';
+import {
+  fetchIssueOrPrSummaries,
+  fetchPrSidebarMeta,
+} from './detail-sides-comments';
 
 export async function fetchPrCommits(owner: any, repo: any, number: any, fetchImpl: any, token: any = null, ctx: any = null) {
   ctx = normalizeApiCtx(ctx);

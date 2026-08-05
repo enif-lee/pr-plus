@@ -352,8 +352,9 @@ export function DiffToolbar(props: any) {
       commitOpts.map((o) => ({
         id: o.sha,
         label: o.label,
-        keywords: [o.shortSha, o.sha, o.fullLabel],
-        meta: { fullLabel: o.fullLabel },
+        keywords: [o.shortSha, o.sha, o.fullLabel, o.secondary].filter(Boolean),
+        secondary: o.secondary || '',
+        meta: { fullLabel: o.fullLabel, secondary: o.secondary || '' },
       })),
     [commitOpts]
   );
@@ -435,11 +436,7 @@ export function DiffToolbar(props: any) {
           </button>
           <SearchableSelect
             open={commitPickerOpen}
-            title={
-              commitLoading
-                ? 'Commits — loading all…'
-                : 'Commits — pick endpoints (range auto-fills)'
-            }
+            title={commitLoading ? 'Commits — loading…' : 'Commits'}
             options={selectOptions}
             query={commitQuery}
             onQuery={setCommitQuery}
@@ -453,6 +450,8 @@ export function DiffToolbar(props: any) {
             anchorRef={commitBtnRef}
             placement="bottom"
             multi
+            minWidth={480}
+            maxWidth={560}
             initialSelectedIds={initialSelectedIds}
             resolveMultiToggle={(prev: string[], id: string) =>
               toggleCommitRangeSelection(prev, id, commits)
@@ -666,24 +665,27 @@ export function DiffToolbar(props: any) {
                             />
                             <span>Hide whitespace</span>
                           </label>
+                          {showReviewFilter || authorList.length > 0 ? (
+                            <label
+                              className="prp-diff-review-settings__row"
+                              title="Hide outdated review comments"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={Boolean(filterState.hideOutdated)}
+                                onChange={(e) =>
+                                  patchFilter({
+                                    hideOutdated: e.target.checked,
+                                  })
+                                }
+                                data-prp-hide-outdated="1"
+                              />
+                              <span>Hide outdated comments</span>
+                            </label>
+                          ) : null}
                         </div>
                         {showReviewFilter || authorList.length > 0 ? (
                           <>
-                            <hr className="prp-diff-review-settings__divider" />
-                            <div className="prp-diff-review-settings__section">
-                              <label className="prp-diff-review-settings__row">
-                                <input
-                                  type="checkbox"
-                                  checked={Boolean(filterState.hideOutdated)}
-                                  onChange={(e) =>
-                                    patchFilter({
-                                      hideOutdated: e.target.checked,
-                                    })
-                                  }
-                                />
-                                <span>Hide outdated comments</span>
-                              </label>
-                            </div>
                             <hr className="prp-diff-review-settings__divider" />
                             <div className="prp-diff-review-settings__section">
                               <p className="prp-diff-review-settings__heading">

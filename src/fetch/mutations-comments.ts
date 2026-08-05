@@ -21,7 +21,6 @@ export async function postIssueComment(owner: any, repo: any, issueNumber: any, 
     githubRestUrl(`/repos/${owner}/${repo}/issues/${issueNumber}/comments`, ctx),
     fetchImpl,
     token,
-  // @ts-expect-error classic fetch dynamic shapes
     { method: 'POST', body: { body } }
   );
 }
@@ -43,7 +42,7 @@ export async function submitPullReview(
   if (commitId) payload.commit_id = commitId;
   if (Array.isArray(comments) && comments.length) {
     payload.comments = comments.map((c) => {
-      const row = {
+      const row: any = {
         path: c.path,
         body: c.body,
         line: c.line,
@@ -52,9 +51,7 @@ export async function submitPullReview(
       if (c.start_line != null || c.startLine != null) {
         const sl = c.start_line != null ? c.start_line : c.startLine;
         if (Number(sl) !== Number(c.line)) {
-  // @ts-expect-error classic fetch dynamic shapes
           row.start_line = Number(sl);
-  // @ts-expect-error classic fetch dynamic shapes
           row.start_side = c.start_side || c.startSide || c.side || 'RIGHT';
         }
       }
@@ -65,7 +62,6 @@ export async function submitPullReview(
     githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`, ctx),
     fetchImpl,
     token,
-  // @ts-expect-error classic fetch dynamic shapes
     { method: 'POST', body: payload }
   );
 }
@@ -205,22 +201,18 @@ export async function postReviewComment(
   }
 
   // Published single comment (no PENDING review)
-  const payload = isFile
+  const payload: any = isFile
     ? { body: text, path, subject_type: 'file' }
     : { body: text, path, line, side };
-  // @ts-expect-error classic fetch dynamic shapes
   if (commitId) payload.commit_id = commitId;
   if (!isFile && startLine != null && Number(startLine) !== Number(line)) {
-  // @ts-expect-error classic fetch dynamic shapes
     payload.start_line = Number(startLine);
-  // @ts-expect-error classic fetch dynamic shapes
     payload.start_side = startSide || side || 'RIGHT';
   }
   return apiSend(
     githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/comments`, ctx),
     fetchImpl,
     token,
-  // @ts-expect-error classic fetch dynamic shapes
     { method: 'POST', body: payload }
   );
 }
@@ -294,8 +286,7 @@ export async function replyToReviewComment(
         return {
           ...raw,
           pending: true,
-  // @ts-expect-error classic fetch dynamic shapes
-          pendingReviewId: raw.pendingReviewId || pending?.id || null,
+          pendingReviewId: (raw as any).pendingReviewId || pending?.id || null,
         };
       } catch {
         /* fall through to inReplyTo path */
@@ -427,7 +418,6 @@ export async function replyToReviewComment(
       githubRestUrl(`/repos/${owner}/${repo}/pulls/${n}/comments/${Math.floor(parentId)}/replies`, ctx),
       fetchImpl,
       token,
-  // @ts-expect-error classic fetch dynamic shapes
       { method: 'POST', body: { body: text } }
     );
   } catch (err) {
@@ -477,7 +467,6 @@ export async function updatePullState(owner: any, repo: any, pullNumber: any, st
     githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}`, ctx),
     fetchImpl,
     token,
-  // @ts-expect-error classic fetch dynamic shapes
     { method: 'PATCH', body: { state: next } }
   );
 }

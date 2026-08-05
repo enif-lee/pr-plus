@@ -174,7 +174,7 @@ describe('normalize + multi-status', () => {
     );
     expect(app).toMatch(/createUnrestrictedDiffReviewFilter/);
     expect(app).toMatch(
-      /Widen to unrestricted[\s\S]{0,200}createUnrestrictedDiffReviewFilter/
+      /Widen to unrestricted[\s\S]{0,400}createUnrestrictedDiffReviewFilter/
     );
     // Must not widen with product default (would leave resolved-only hidden)
     expect(app).not.toMatch(
@@ -203,11 +203,13 @@ describe('normalize + multi-status', () => {
     const next = toggleFromShortcuts(
       { statuses: ['unresolved', 'pending'], hideOutdated: false, authors: [] },
       'resolved'
-    );
+    ) as { statuses: string[] };
     expect(next.statuses).toContain('resolved');
     expect(next.statuses).toContain('unresolved');
     // null current seeds default (unresolved+pending) then toggles target
-    const fromNull = toggleReviewFilter(null, 'resolved');
+    const fromNull = toggleReviewFilter(null, 'resolved') as {
+      statuses: string[];
+    };
     expect(fromNull.statuses).toContain('resolved');
     expect(fromNull.statuses).toContain('unresolved');
     expect(fromNull.statuses).toContain('pending');
@@ -343,6 +345,47 @@ describe('product wiring structure', () => {
     expect(app).toMatch(/filterFilesCommentedOnly/);
     expect(app).not.toMatch(/filterFilesByDiffReviewFilter\(/);
     expect(app).toMatch(/onPatchReviewFilter/);
+  });
+
+  test('PrModalApp schedules filter writes via startTransition (not urgent-only)', () => {
+    const app = readFileSync(
+      resolve(root, 'src/modal/app/PrModalApp.impl.tsx'),
+      'utf8'
+    );
+    expect(app).toMatch(/startTransition/);
+    expect(app).toMatch(/function scheduleDiffReviewFilter/);
+    // Toggle + patch go through the low-priority scheduler
+    expect(app).toMatch(/scheduleDiffReviewFilter\(\(prev\)/);
+    // Jump-widen also uses concurrent scheduling
+    expect(app).toMatch(
+      /startTransition\(\(\)\s*=>\s*\{\s*setDiffReviewFilter\(createUnrestrictedDiffReviewFilter/
+    );
+    // Must not only rely on useDeferredValue for the write path
+    expect(app).toMatch(/useDeferredValue\(diffReviewFilter\)/);
+  });
+
+  test('setDiffReviewHideOutdated + author multi-select pure path', () => {
+    let f = createDefaultDiffReviewFilter();
+    f = setDiffReviewHideOutdated(f, true);
+    expect(f.hideOutdated).toBe(true);
+    // status defaults preserved
+    expect(f.statuses).toEqual(
+      expect.arrayContaining(['unresolved', 'pending'])
+    );
+    f = toggleDiffReviewAuthor(f, 'carol');
+    expect(f.authors.map((a) => a.toLowerCase())).toContain('carol');
+    const roots = filterReviewRootsForDiffNav(commentsFixture(), f);
+    // carol id=4 unresolved, not outdated
+    expect(roots.map((r) => r.id)).toEqual([4]);
+    // hide outdated drops bob's resolved outdated even if statuses widen
+    f = normalizeDiffReviewFilter({
+      statuses: [],
+      hideOutdated: true,
+      authors: [],
+    });
+    const all = filterReviewRootsForDiffNav(commentsFixture(), f);
+    expect(all.map((r) => r.id).sort()).toEqual([1, 3, 4]);
+    expect(all.some((r) => r.id === 2)).toBe(false);
   });
 
   test('StepNav count is variable width; arrow cells equal fixed', () => {

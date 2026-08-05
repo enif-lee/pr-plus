@@ -57,11 +57,10 @@ function renderApp(root: { render: (node: React.ReactNode) => void }, hostEl: HT
     /* ignore */
   }
   root.render(
-    React.createElement(
-      MountErrorBoundary,
-      { hostEl },
-      React.createElement(PrModalApp, props)
-    )
+    React.createElement(MountErrorBoundary, {
+      hostEl,
+      children: React.createElement(PrModalApp, props),
+    })
   );
 }
 

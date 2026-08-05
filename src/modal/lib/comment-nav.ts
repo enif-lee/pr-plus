@@ -230,9 +230,98 @@ export function filterReviewCommentsForNav(comments, mode = null, allowedPaths =
 }
 
 /**
+ * One-pass indexes over virtual rows for comment → rowIndex lookup.
+ * Avoids O(roots × rows) nested full scans in mapCommentsToRowIndices.
+ *
+ * @param {Array<{ kind: string, filePath?: string, newLine?: number|null, oldLine?: number|null, rowIndex?: number, commentId?: string|number }>} virtualRows
+ */
+export function buildCommentRowLookup(virtualRows: any) {
+  /** @type {Map<string, number>} */
+  const byCommentId = new Map();
+  /** path\0LEFT|RIGHT\0line → first matching diff-line rowIndex */
+  /** @type {Map<string, number>} */
+  const byPathSideLine = new Map();
+  /** path\0line → first diff-line with newLine or oldLine === line */
+  /** @type {Map<string, number>} */
+  const byPathEitherLine = new Map();
+  /** path\0line\0commentId → inline-comment rowIndex (first in order) */
+  /** @type {Map<string, number>} */
+  const byPathLineCommentId = new Map();
+  /** path\0line → first inline-comment on that path+line (id-agnostic) */
+  /** @type {Map<string, number>} */
+  const byPathLineAnyComment = new Map();
+  /** path → file-header rowIndex */
+  /** @type {Map<string, number>} */
+  const fileHeaderByPath = new Map();
+
+  const list = Array.isArray(virtualRows) ? virtualRows : [];
+  for (const row of list) {
+    if (!row || row.rowIndex == null) continue;
+    const ri = Number(row.rowIndex);
+    if (!Number.isFinite(ri)) continue;
+    const path = row.filePath || '';
+    const kind = row.kind;
+
+    if (kind === 'file-header' && path && !fileHeaderByPath.has(path)) {
+      fileHeaderByPath.set(path, ri);
+    }
+
+    if (kind === 'inline-comment') {
+      if (row.commentId != null) {
+        const idKey = String(row.commentId);
+        if (!byCommentId.has(idKey)) byCommentId.set(idKey, ri);
+      }
+      const n = row.newLine != null ? Number(row.newLine) : null;
+      const o = row.oldLine != null ? Number(row.oldLine) : null;
+      const lines = new Set();
+      if (n != null && Number.isFinite(n)) lines.add(n);
+      if (o != null && Number.isFinite(o)) lines.add(o);
+      for (const line of lines) {
+        const pathLine = `${path}\0${line}`;
+        if (!byPathLineAnyComment.has(pathLine)) {
+          byPathLineAnyComment.set(pathLine, ri);
+        }
+        if (row.commentId != null) {
+          const ck = `${path}\0${line}\0${String(row.commentId)}`;
+          if (!byPathLineCommentId.has(ck)) byPathLineCommentId.set(ck, ri);
+        }
+      }
+    }
+
+    if (kind === 'diff-line' && path) {
+      const n = row.newLine != null ? Number(row.newLine) : null;
+      const o = row.oldLine != null ? Number(row.oldLine) : null;
+      if (n != null && Number.isFinite(n)) {
+        const rightKey = `${path}\0RIGHT\0${n}`;
+        if (!byPathSideLine.has(rightKey)) byPathSideLine.set(rightKey, ri);
+        const eitherKey = `${path}\0${n}`;
+        if (!byPathEitherLine.has(eitherKey)) byPathEitherLine.set(eitherKey, ri);
+      }
+      if (o != null && Number.isFinite(o)) {
+        const leftKey = `${path}\0LEFT\0${o}`;
+        if (!byPathSideLine.has(leftKey)) byPathSideLine.set(leftKey, ri);
+        const eitherKey = `${path}\0${o}`;
+        if (!byPathEitherLine.has(eitherKey)) byPathEitherLine.set(eitherKey, ri);
+      }
+    }
+  }
+
+  return {
+    byCommentId,
+    byPathSideLine,
+    byPathEitherLine,
+    byPathLineCommentId,
+    byPathLineAnyComment,
+    fileHeaderByPath,
+  };
+}
+
+/**
  * Attach rowIndex by matching virtual rows (filePath + newLine).
  * Expects **thread roots** (use sortThreadRootComments / filterThreadRootComments).
  * Result is ordered top → bottom in the Diff (by rowIndex, then file path order).
+ *
+ * Uses one-pass indexes (O(rows + roots)), not nested full scans per root.
  *
  * @param {InlineComment[]} comments
  * @param {Array<{ kind: string, filePath?: string, newLine?: number|null, rowIndex: number }>} virtualRows
@@ -251,6 +340,7 @@ export function mapCommentsToRowIndices(
       pathOrder
     );
   }
+  const idx = buildCommentRowLookup(virtualRows);
   const mapped = sorted.map((c) => {
     const line =
       c.line != null
@@ -259,61 +349,43 @@ export function mapCommentsToRowIndices(
           ? Number(c.originalLine)
           : null;
     const side = String(c.side || 'RIGHT').toUpperCase() === 'LEFT' ? 'LEFT' : 'RIGHT';
-    let rowIndex;
+    let rowIndex: number | undefined;
 
     // 1) Exact inline-comment row for this comment id
-    for (const row of virtualRows) {
-      if (row.kind === 'inline-comment' && String(row.commentId) === String(c.id)) {
-        rowIndex = row.rowIndex;
-        break;
-      }
+    if (c.id != null) {
+      const hit = idx.byCommentId.get(String(c.id));
+      if (hit != null) rowIndex = hit;
     }
 
     // 2) Diff line on the correct side (LEFT → oldLine, RIGHT → newLine)
-    if (rowIndex == null && line != null) {
-      for (const row of virtualRows) {
-        if (row.kind !== 'diff-line' || row.filePath !== c.path) continue;
-        const rowLine = side === 'LEFT' ? row.oldLine : row.newLine;
-        if (rowLine === line) {
-          rowIndex = row.rowIndex;
-          break;
-        }
-      }
-      // Fallback: either side if primary side missed (outdated / split quirks)
-      if (rowIndex == null) {
-        for (const row of virtualRows) {
-          if (row.kind !== 'diff-line' || row.filePath !== c.path) continue;
-          if (row.newLine === line || row.oldLine === line) {
-            rowIndex = row.rowIndex;
-            break;
-          }
-        }
+    if (rowIndex == null && line != null && Number.isFinite(line)) {
+      const path = c.path || '';
+      const sideHit = idx.byPathSideLine.get(`${path}\0${side}\0${line}`);
+      if (sideHit != null) rowIndex = sideHit;
+      else {
+        const either = idx.byPathEitherLine.get(`${path}\0${line}`);
+        if (either != null) rowIndex = either;
       }
     }
 
     // 3) Prefer dedicated comment row after the line (same path + line)
-    if (rowIndex != null && line != null) {
-      for (const row of virtualRows) {
-        if (
-          row.kind === 'inline-comment' &&
-          row.filePath === c.path &&
-          (row.newLine === line || row.oldLine === line) &&
-          (c.id == null || String(row.commentId) === String(c.id))
-        ) {
-          rowIndex = row.rowIndex;
-          break;
-        }
+    if (rowIndex != null && line != null && Number.isFinite(line)) {
+      const path = c.path || '';
+      if (c.id != null) {
+        const ck = idx.byPathLineCommentId.get(
+          `${path}\0${line}\0${String(c.id)}`
+        );
+        if (ck != null) rowIndex = ck;
+      } else {
+        const any = idx.byPathLineAnyComment.get(`${path}\0${line}`);
+        if (any != null) rowIndex = any;
       }
     }
 
     // 4) Collapsed file / no line row — jump to file header so nav still scrolls
     if (rowIndex == null && c.path) {
-      for (const row of virtualRows) {
-        if (row.kind === 'file-header' && row.filePath === c.path) {
-          rowIndex = row.rowIndex;
-          break;
-        }
-      }
+      const header = idx.fileHeaderByPath.get(String(c.path));
+      if (header != null) rowIndex = header;
     }
 
     return { ...c, rowIndex };

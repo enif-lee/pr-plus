@@ -26,6 +26,7 @@ import {
   REVIEW_THREADS_API_MAX,
   REVIEW_THREADS_PAGE_SIZE,
 } from './review-threads-map';
+import { fetchReviewThreadsByIds } from './review-threads-bulk';
 
 export async function restReviewThreadsFallbackPage(
   owner,
@@ -268,8 +269,8 @@ export async function fetchReviewThreadsPage(
     // skipEagerComments: host owns by-ids so open progress can mark
     // threads → comments → reactions as separate bar steps.
     if (skipEagerComments) {
-      page.shellOnly = true;
-      page.eagerCommentIds = [];
+      (page as any).shellOnly = true;
+      (page as any).eagerCommentIds = [];
       console.log(
         `[pr-plus] fetchReviewThreadsPage GraphQL shell-only: ${page.threads.length} threads (eager deferred to host)`
       );
@@ -285,9 +286,9 @@ export async function fetchReviewThreadsPage(
             token,
             ctx
           );
-          page = mergeCommentsBulkIntoThreadsPage(page, bulk);
-          page.shellOnly = false;
-          page.eagerCommentIds = eagerIds;
+          page = mergeCommentsBulkIntoThreadsPage(page, bulk) as any;
+          (page as any).shellOnly = false;
+          (page as any).eagerCommentIds = eagerIds;
           console.log(
             `[pr-plus] fetchReviewThreadsPage GraphQL shell+comments: ` +
               `${page.threads.length} threads, eagerComments=${eagerIds.length}, ` +

@@ -1558,7 +1558,6 @@ var onboardingApi = {
   fireKey,
   matchesDiffDemoChord,
   matchesDiffDemoStep,
-  CONVERSATION_DEMO_STEPS,
   matchesConversationDemoChord,
   matchesConversationDemoStep,
   matchesConversationDemoChordAt,

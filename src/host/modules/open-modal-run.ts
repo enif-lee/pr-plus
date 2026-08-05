@@ -1111,7 +1111,7 @@
                     warmOrCache ? 'threads-update' : 'threads-load'
                   );
                 } else if (stage === 'comments-start') {
-                  markThreadStage('comments-start');
+                  markThreadStage('comments-start', 'threads-comments');
                 } else if (stage === 'comments') {
                   markThreadStage('comments', 'threads-comments');
                 } else if (stage === 'reactions') {
@@ -1755,23 +1755,21 @@
                   again?.milestone
                 ) {
                   try {
-                    if (typeof paintCoreNow === 'function') {
-                      paintCoreNow(again);
-                    } else {
-                      const S = detailStoreApi();
-                      if (S?.applyMeta && current.detailStore) {
-                        S.applyMeta(
-                          current.detailStore,
-                          { milestone: again.milestone },
-                          {
-                            trustEmpty: true,
-                            source: 'network-core-milestone-catch-settle',
-                            sketch: false,
-                          }
-                        );
-                        publishDetailFromStore();
-                        render();
-                      }
+                    // paintCoreNow lives in the try-success path only; catch settle
+                    // applies milestone via store meta write-through.
+                    const S = detailStoreApi();
+                    if (S?.applyMeta && current.detailStore) {
+                      S.applyMeta(
+                        current.detailStore,
+                        { milestone: again.milestone },
+                        {
+                          trustEmpty: true,
+                          source: 'network-core-milestone-catch-settle',
+                          sketch: false,
+                        }
+                      );
+                      publishDetailFromStore();
+                      render();
                     }
                     console.log(
                       `[pr-plus] openModal catch-milestone-settle#${i + 1} ${owner}/${repo}#${number} ` +

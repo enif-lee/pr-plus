@@ -12,6 +12,7 @@ import {
   mapGraphqlReviewCommentToRest,
   mapReviewComment,
 } from './mappers';
+import { fetchViewerLogin } from './viewer';
 
 export function mergePendingReviewComments(published: any, pendingList: any) {
   const list = Array.isArray(published) ? published.slice() : [];
@@ -144,19 +145,17 @@ export async function createPendingPullReview(
   owner,
   repo,
   pullNumber,
-  // @ts-expect-error classic fetch dynamic shapes
-  { commitId } = {},
+  opts: { commitId?: string } = {},
   fetchImpl,
   token
 , ctx = null) {
   ctx = normalizeApiCtx(ctx);
   const body: any = {};
-  if (commitId) body.commit_id = commitId;
+  if (opts?.commitId) body.commit_id = opts.commitId;
   return apiSend(
     githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`, ctx),
     fetchImpl,
     token,
-  // @ts-expect-error classic fetch dynamic shapes
     { method: 'POST', body }
   );
 }
@@ -187,7 +186,6 @@ export async function submitPendingPullReview(
     githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${id}/events`, ctx),
     fetchImpl,
     token,
-  // @ts-expect-error classic fetch dynamic shapes
     { method: 'POST', body: { event: ev, body: body || '' } }
   );
 }
@@ -231,7 +229,7 @@ export async function postReviewCommentViaPendingGraphql(
     startLine != null &&
     Number.isFinite(Number(startLine)) &&
     Number(startLine) !== Number(line);
-  const variables = {
+  const variables: any = {
     review: String(pendingReviewNodeId),
     body: String(body || '').trim(),
     path: String(path || ''),
@@ -262,14 +260,10 @@ export async function postReviewCommentViaPendingGraphql(
       }
     }`;
   } else if (hasRange) {
-  // @ts-expect-error classic fetch dynamic shapes
     variables.line = Number(line);
-  // @ts-expect-error classic fetch dynamic shapes
     variables.side =
       String(side || 'RIGHT').toUpperCase() === 'LEFT' ? 'LEFT' : 'RIGHT';
-  // @ts-expect-error classic fetch dynamic shapes
     variables.startLine = Number(startLine);
-  // @ts-expect-error classic fetch dynamic shapes
     variables.startSide =
       String(startSide || side || 'RIGHT').toUpperCase() === 'LEFT' ? 'LEFT' : 'RIGHT';
     query = `mutation($review:ID!,$body:String!,$path:String!,$line:Int!,$side:DiffSide!,$startLine:Int!,$startSide:DiffSide!){
@@ -299,9 +293,7 @@ export async function postReviewCommentViaPendingGraphql(
       }
     }`;
   } else {
-  // @ts-expect-error classic fetch dynamic shapes
     variables.line = Number(line);
-  // @ts-expect-error classic fetch dynamic shapes
     variables.side =
       String(side || 'RIGHT').toUpperCase() === 'LEFT' ? 'LEFT' : 'RIGHT';
     query = `mutation($review:ID!,$body:String!,$path:String!,$line:Int!,$side:DiffSide!){
@@ -596,11 +588,9 @@ export async function resolveParentCommentNodeId(owner: any, repo: any, parentId
       token
     );
     const hit = (comments || []).find(
-  // @ts-expect-error classic fetch dynamic shapes
-      (c) => c && Number(c.id) === id && (c.nodeId || c.node_id)
+      (c: any) => c && Number(c.id) === id && (c.nodeId || c.node_id)
     );
-  // @ts-expect-error classic fetch dynamic shapes
-    if (hit) return String(hit.nodeId || hit.node_id);
+    if (hit) return String((hit as any).nodeId || (hit as any).node_id);
   } catch {
     /* ignore */
   }

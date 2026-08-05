@@ -323,7 +323,6 @@ export async function uploadRepoFile(
     githubRestUrl(`/repos/${owner}/${repo}/contents/${encPath}`, ctx),
     fetchImpl,
     token,
-  // @ts-expect-error classic fetch dynamic shapes
     { method: 'PUT', body }
   );
   const content = result?.content || result;
@@ -435,7 +434,6 @@ export async function applyReviewSuggestion(
     token,
     {
       method: 'PUT',
-  // @ts-expect-error classic fetch dynamic shapes
       body: {
         message: message || `Apply suggestion to ${path}`,
         content: contentB64,

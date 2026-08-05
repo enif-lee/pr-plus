@@ -301,11 +301,14 @@ export function mergeCommentsBulkIntoThreadsPage(shellPage: any, bulkPage: any) 
     if (!full) {
       return { ...t, commentsLoaded: Boolean(t.commentsLoaded) };
     }
+    const fullObj = full && typeof full === 'object' ? (full as any) : {};
     return {
       ...t,
-      ...full,
+      ...fullObj,
       commentsLoaded: true,
-      commentIds: Array.isArray(full.commentIds) ? full.commentIds : t.commentIds || [],
+      commentIds: Array.isArray(fullObj.commentIds)
+        ? fullObj.commentIds
+        : t.commentIds || [],
     };
   });
   // Drop shell placeholders/previews for loaded ids; keep deferred first:1 bodies.

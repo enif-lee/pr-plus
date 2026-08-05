@@ -551,9 +551,8 @@ export function mergeReviewThreadsPageIntoDetail(detail: any, page: any, directi
   );
   for (const t of page?.threads || []) {
     if (t?.threadNodeId) {
-      const prevT = thById.get(String(t.threadNodeId)) || {};
-      const mergedT = {
-        // @ts-expect-error classic fetch dynamic shapes
+      const prevT: any = thById.get(String(t.threadNodeId)) || {};
+      const mergedT: any = {
         ...prevT,
         ...t,
       };

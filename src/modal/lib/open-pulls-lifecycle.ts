@@ -211,7 +211,8 @@ export function acceptOpenPullsNetworkResult(opts: {
   aborted?: boolean;
   networkPrs?: OpenPullLike[] | null;
   tombstones?: Iterable<number> | null;
-} = {}): { ok: boolean; prs: OpenPullLike[] } {
+}): { ok: boolean; prs: OpenPullLike[] } {
+  opts = opts || ({ fetchGen: NaN, currentGen: NaN } as any);
   if (opts.aborted) return { ok: false, prs: [] };
   const fetchGen = Number(opts.fetchGen);
   const currentGen = Number(opts.currentGen);

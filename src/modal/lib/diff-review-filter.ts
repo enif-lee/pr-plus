@@ -113,10 +113,16 @@ export function normalizeDiffReviewFilter(
   };
 }
 
-export function createDefaultDiffReviewFilter(): DiffReviewFilterState {
+/**
+ * Product default filter (unresolved + pending).
+ * Optional override for global-persisted hideOutdated.
+ */
+export function createDefaultDiffReviewFilter(
+  overrides?: { hideOutdated?: boolean } | null
+): DiffReviewFilterState {
   return {
     statuses: [...DEFAULT_DIFF_REVIEW_FILTER.statuses],
-    hideOutdated: false,
+    hideOutdated: Boolean(overrides?.hideOutdated),
     authors: [],
   };
 }
@@ -358,12 +364,18 @@ export function rootReviewStatus(
 
 /**
  * Whether a root passes the full Diff review filter.
+ * Optional `authorSet` / `effectiveStatuses` avoid re-allocating per root.
  */
 export function rootMatchesDiffReviewFilter(
   root: any,
   comments: any[],
   filter: DiffReviewFilterState | null | undefined,
-  opts?: DiffReviewFilterEvalOpts | null
+  opts?: DiffReviewFilterEvalOpts | null,
+  precomputed?: {
+    authorSet?: Set<string> | null;
+    effectiveStatuses?: DiffReviewStatus[] | null;
+    statusUnrestricted?: boolean;
+  } | null
 ): boolean {
   if (!root) return false;
   const f = normalizeDiffReviewFilter(
@@ -372,12 +384,17 @@ export function rootMatchesDiffReviewFilter(
   if (f.hideOutdated && Boolean(root.outdated)) return false;
   if (!isAuthorFilterUnrestricted(f)) {
     const author = rootAuthorLogin(root);
-    const allowed = new Set(f.authors.map((a) => a.toLowerCase()));
+    const allowed =
+      precomputed?.authorSet ??
+      new Set(f.authors.map((a) => a.toLowerCase()));
     if (!author || !allowed.has(author)) return false;
   }
-  if (!isStatusFilterUnrestricted(f, opts)) {
+  const statusUnrestricted =
+    precomputed?.statusUnrestricted ?? isStatusFilterUnrestricted(f, opts);
+  if (!statusUnrestricted) {
     const st = rootReviewStatus(root, comments);
-    const effective = effectiveDiffReviewStatuses(f, opts);
+    const effective =
+      precomputed?.effectiveStatuses ?? effectiveDiffReviewStatuses(f, opts);
     if (!effective.includes(st)) return false;
   }
   return true;
@@ -406,11 +423,23 @@ export function filterReviewRootsForDiffNav(
   const f = normalizeDiffReviewFilter(
     filter ?? createDefaultDiffReviewFilter()
   );
+  const authorSet = isAuthorFilterUnrestricted(f)
+    ? null
+    : new Set(f.authors.map((a) => a.toLowerCase()));
+  const statusUnrestricted = isStatusFilterUnrestricted(f, opts);
+  const effectiveStatuses = statusUnrestricted
+    ? null
+    : effectiveDiffReviewStatuses(f, opts);
+  const pre = {
+    authorSet,
+    effectiveStatuses,
+    statusUnrestricted,
+  };
   return list.filter((c) => {
     if (!isThreadRoot(c, byId)) return false;
     const path = c.path || '';
     if (pathSet && path && !pathSet.has(path)) return false;
-    return rootMatchesDiffReviewFilter(c, list, f, opts);
+    return rootMatchesDiffReviewFilter(c, list, f, opts, pre);
   });
 }
 

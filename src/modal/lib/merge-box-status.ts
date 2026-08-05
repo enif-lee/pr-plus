@@ -733,12 +733,12 @@ export function buildMergeBoxStatus(detail: any): MergeBoxStatus {
     (checksState === 'failure' ||
       checksState === 'pending' ||
       checksState === 'error');
+  // Past the blocked branch above: mergeableFlag is not false (true | null-handled).
+  // Do not re-compare mergeableFlag to false — TS narrows it away.
   const unstable =
     mergeableState === 'unstable' ||
-    (checksUnsettled &&
-      mergeableFlag !== false &&
-      mergeableState !== 'blocked');
-  if (unstable && mergeableFlag !== false && mergeableState !== 'blocked') {
+    (checksUnsettled && mergeableState !== 'blocked');
+  if (unstable && mergeableState !== 'blocked') {
     return applyRepoMergeMethodGate(
       {
         kind: 'unstable',

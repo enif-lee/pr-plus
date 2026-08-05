@@ -405,8 +405,7 @@ async addAssignees(owner, repo, number, assignees) {
     }
     if (lastRes && !lastRes.ok) {
       if (lastRes.aborted) throw makeAbortError();
-      const err = new Error(lastRes.error || 'Failed to fetch timeline items');
-      // @ts-expect-error status on Error
+      const err: any = new Error(lastRes.error || 'Failed to fetch timeline items');
       err.status = lastRes.status;
       throw err;
     }

@@ -302,13 +302,15 @@ export function checkPaletteShortcutCoverage(
   scope: 'conversation' | 'diff' | string
 ): { ok: boolean; missing: Array<{ id: string; shortcut: string }> } {
   const list = Array.isArray(commands) ? commands : [];
-  const byId = new Map(
-    list.map((c: any) => [String(c?.id || ''), c]).filter(([id]) => id)
-  );
+  const byId = new Map<string, any>();
+  for (const c of list as any[]) {
+    const id = String(c?.id || '');
+    if (id) byId.set(id, c);
+  }
   const required = listRequiredPaletteShortcutCoverage(scope);
   const missing: Array<{ id: string; shortcut: string }> = [];
   for (const req of required) {
-    const cmd = byId.get(req.id);
+    const cmd = byId.get(req.id) as { shortcut?: string } | undefined;
     const sc = cmd?.shortcut != null ? String(cmd.shortcut).toLowerCase() : '';
     const want = String(req.shortcut).toLowerCase();
     if (!cmd || !sc || sc !== want) {

@@ -13,7 +13,8 @@ import React, {
   memo,
   startTransition,
 } from 'react';
-import { createRoot, flushSync } from 'react-dom/client';
+import { createRoot } from 'react-dom/client';
+import { flushSync } from 'react-dom';
 import { Button } from '@common/Button';
 import { ActionToast } from '@common/ActionToast';
 import { ShortcutMonitor } from '@common/ShortcutMonitor';
@@ -182,6 +183,11 @@ import {
   type DiffReviewFilterState,
   type DiffReviewStatus,
 } from '../lib/diff-review-filter';
+import {
+  loadDiffGlobalPrefs,
+  saveDiffGlobalPrefs,
+  resolveDiffGlobalPrefsStorage,
+} from '../lib/diff-global-prefs';
 import {
   buildSearchIndex,
   resolveQuerySearchState,
@@ -622,7 +628,15 @@ export function PrModalApp({
     setStackPathSelections({});
     commentPrefetchGenRef.current += 1;
     setDiffThreadCollapse(new Map());
-    setDiffReviewFilter(createDefaultDiffReviewFilter());
+    // Re-seed review filter from product default but keep global hideOutdated.
+    try {
+      const g = loadDiffGlobalPrefs(resolveDiffGlobalPrefsStorage(window));
+      setDiffReviewFilter(
+        createDefaultDiffReviewFilter({ hideOutdated: g.hideOutdated })
+      );
+    } catch {
+      setDiffReviewFilter(createDefaultDiffReviewFilter());
+    }
     setFileExtFilter(new Set());
     setFileUnreadOnly(false);
     setFileCommentedOnly(false);
@@ -870,7 +884,15 @@ export function PrModalApp({
    * before the heavy list rebuild (toggle felt laggy until Diff took focus).
    */
   const [diffReviewFilter, setDiffReviewFilter] =
-    useState<DiffReviewFilterState>(() => createDefaultDiffReviewFilter());
+    useState<DiffReviewFilterState>(() => {
+      try {
+        if (typeof window === 'undefined') return createDefaultDiffReviewFilter();
+        const g = loadDiffGlobalPrefs(resolveDiffGlobalPrefsStorage(window));
+        return createDefaultDiffReviewFilter({ hideOutdated: g.hideOutdated });
+      } catch {
+        return createDefaultDiffReviewFilter();
+      }
+    });
   const deferredDiffReviewFilter = useDeferredValue(diffReviewFilter);
   /** Files-nav filters (shared with Diff review nav counts). */
   const [fileExtFilter, setFileExtFilter] = useState(() => new Set<string>());
@@ -1014,8 +1036,16 @@ export function PrModalApp({
   // Always re-annotate with gitattributesText so SW fallback defaults cannot
   // skip linguist-generated / binary rules from the fetched attributes file.
 
-  /** Per-PR session: hide whitespace-only noise in Diff (GitHub w=1 spirit). */
-  const [hideWhitespace, setHideWhitespace] = useState(false);
+  /** Hide whitespace-only noise in Diff — global preference (GitHub w=1 spirit). */
+  const [hideWhitespace, setHideWhitespace] = useState(() => {
+    try {
+      if (typeof window === 'undefined') return false;
+      return loadDiffGlobalPrefs(resolveDiffGlobalPrefsStorage(window))
+        .hideWhitespace;
+    } catch {
+      return false;
+    }
+  });
   /** GraphQL pullRequest id for markFileAsViewed (may differ from REST nodeId). */
   const pullRequestGqlIdRef = useRef<string | null>(null);
 
@@ -1055,7 +1085,15 @@ export function PrModalApp({
     commitsFlightRef.current = 0;
     setPrTags(null);
     setPrTagsError(null);
-    setHideWhitespace(false);
+    // Re-apply global hideWhitespace (do not force false on PR switch).
+    try {
+      setHideWhitespace(
+        loadDiffGlobalPrefs(resolveDiffGlobalPrefsStorage(window))
+          .hideWhitespace
+      );
+    } catch {
+      /* keep current */
+    }
     pullRequestGqlIdRef.current = null;
   }, [prIdentity]);
 
@@ -2370,7 +2408,10 @@ export function PrModalApp({
       ) {
         // Widen to unrestricted (empty statuses ≡ all) — not product default
         // unresolved+pending, which would still hide resolved-only paths.
-        setDiffReviewFilter(createUnrestrictedDiffReviewFilter());
+        // Low-priority: same lane as filter toggles (optimistic UI not needed for jump).
+        startTransition(() => {
+          setDiffReviewFilter(createUnrestrictedDiffReviewFilter());
+        });
       }
 
       if (path) expandFileForJump(path);
@@ -2911,11 +2952,25 @@ export function PrModalApp({
     );
   }
 
+  /**
+   * Low-priority filter write so toolbar optimistic paint stays on the urgent
+   * lane; deferred consumers (virtualRows / mappedComments) follow after.
+   */
+  function scheduleDiffReviewFilter(
+    next:
+      | DiffReviewFilterState
+      | ((prev: DiffReviewFilterState) => DiffReviewFilterState)
+  ) {
+    startTransition(() => {
+      setDiffReviewFilter(next);
+    });
+  }
+
   /** Apply Diff review-filter status toggle (⌥U/R/P) — multi-select. */
   function applyReviewFilterToggle(
     target: 'unresolved' | 'resolved' | 'pending'
   ) {
-    setDiffReviewFilter((prev) =>
+    scheduleDiffReviewFilter((prev) =>
       typeof toggleReviewFilter === 'function'
         ? normalizeDiffReviewFilter(toggleReviewFilter(prev, target))
         : toggleDiffReviewStatus(prev, target)
@@ -2923,10 +2978,36 @@ export function PrModalApp({
   }
 
   function patchDiffReviewFilter(partial: Partial<DiffReviewFilterState>) {
-    setDiffReviewFilter((prev) => {
+    scheduleDiffReviewFilter((prev) => {
       const base = normalizeDiffReviewFilter(prev);
-      return normalizeDiffReviewFilter({ ...base, ...partial });
+      const next = normalizeDiffReviewFilter({ ...base, ...partial });
+      if (
+        partial &&
+        Object.prototype.hasOwnProperty.call(partial, 'hideOutdated')
+      ) {
+        try {
+          saveDiffGlobalPrefs(resolveDiffGlobalPrefsStorage(window), {
+            hideOutdated: next.hideOutdated,
+          });
+        } catch {
+          /* ignore */
+        }
+      }
+      return next;
     });
+  }
+
+  /** Persist hide-whitespace globally and update local state. */
+  function applyHideWhitespace(next: boolean) {
+    const v = Boolean(next);
+    setHideWhitespace(v);
+    try {
+      saveDiffGlobalPrefs(resolveDiffGlobalPrefsStorage(window), {
+        hideWhitespace: v,
+      });
+    } catch {
+      /* ignore */
+    }
   }
 
   /**
@@ -3403,9 +3484,7 @@ export function PrModalApp({
       if (stored.diffMode === 'split' || stored.diffMode === 'unified') {
         setDiffMode(stored.diffMode);
       }
-      if (typeof stored.hideWhitespace === 'boolean') {
-        setHideWhitespace(stored.hideWhitespace);
-      }
+      // hideWhitespace is global (diff-global-prefs); do not restore per-PR session over it.
       if (Array.isArray(stored.collapsedFiles)) {
         setCollapsedFiles(new Set(stored.collapsedFiles));
       }
@@ -5055,7 +5134,7 @@ export function PrModalApp({
         onSubscribe,
         // unsubscribe is onSubscribe(false) in the runner; no separate binding
         openMilestonePicker: () => openMilestonePicker?.(),
-        clearMilestone: () => void applyMilestone?.(null),
+        clearMilestone: () => void applyMilestoneNumber(null),
         onRerequestReview,
         openReviewerPicker,
         openAssigneePicker,
@@ -7922,13 +8001,13 @@ export function PrModalApp({
               diffMode={diffMode}
               setDiffMode={setDiffMode}
               hideWhitespace={hideWhitespace}
-              onHideWhitespace={setHideWhitespace}
+              onHideWhitespace={applyHideWhitespace}
               setScrollTop={setScrollTop}
               listRef={listRef}
               hasAnyReviewThreads={hasAnyReviewThreads}
               totalPendingCount={totalPendingCount}
               reviewThreadTotals={reviewThreadTotals}
-              setDiffReviewFilter={setDiffReviewFilter}
+              setDiffReviewFilter={scheduleDiffReviewFilter}
               onToggleReviewStatus={(status: string) =>
                 applyReviewFilterToggle(
                   status as DiffReviewStatus

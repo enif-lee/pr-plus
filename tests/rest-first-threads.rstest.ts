@@ -157,8 +157,8 @@ describe('buildRestReviewThreadsPageFromComments (shipped pure)', () => {
     expect(t10?.threadNodeId).toBe('rest-thread-10');
     expect(t10?.commentIds).toEqual([10, 11]);
     // Side-effect: stamp threadNodeId on comment rows
-    expect(items[0].threadNodeId).toBe('rest-thread-10');
-    expect(items[1].threadNodeId).toBe('rest-thread-10');
+    expect((items[0] as any).threadNodeId).toBe('rest-thread-10');
+    expect((items[1] as any).threadNodeId).toBe('rest-thread-10');
   });
 
   test('empty list → empty page without throwing', () => {

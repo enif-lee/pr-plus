@@ -345,12 +345,36 @@
   background: color-mix(in srgb, var(--prp-accent) 12%, var(--prp-bg-muted));
   outline: none;
 }
-.prp-sselect-item__label {
+.prp-sselect-item__text {
   flex: 1 1 auto;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+.prp-sselect-item__label {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.prp-sselect-item__secondary {
+  font-size: 11px;
+  line-height: 1.25;
+  color: var(--prp-fg-muted);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prp-sselect-item--has-secondary {
+  align-items: flex-start;
+}
+.prp-sselect-item--has-secondary .prp-sselect-check {
+  margin-top: 2px;
 }
 .prp-sselect-item__meta {
   margin-left: auto;
@@ -372,28 +396,14 @@
 .prp-sselect-item__avatar {
   flex-shrink: 0;
 }
-/* Commit multi-select: fixed panel width so long messages don't grow the popover */
+/* Multi-select: measure path sets width; keep a soft viewport cap only */
 .prp-sselect-panel--multi {
-  max-width: min(320px, calc(100vw - 24px));
-  width: min(320px, calc(100vw - 24px));
+  max-width: min(560px, calc(100vw - 24px));
 }
 .prp-sselect-panel--multi .prp-sselect-item__label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 240px;
-}
-
-/* Commit multi-select: fixed panel width so long messages don't grow the popover */
-.prp-sselect-panel--multi {
-  max-width: min(320px, calc(100vw - 24px));
-  width: min(320px, calc(100vw - 24px));
-}
-.prp-sselect-panel--multi .prp-sselect-item__label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 240px;
 }
 
 .prp-sselect-check {

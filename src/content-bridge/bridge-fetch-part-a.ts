@@ -467,10 +467,10 @@ export const prTreeFetchPartA = {
     return res.result;
   },
   async closePullRequest(owner, repo, number) {
-    return PRTreeFetch.updatePullState(owner, repo, number, 'closed');
+    return prTreeFetchPartA.updatePullState(owner, repo, number, 'closed');
   },
   async reopenPullRequest(owner, repo, number) {
-    return PRTreeFetch.updatePullState(owner, repo, number, 'open');
+    return prTreeFetchPartA.updatePullState(owner, repo, number, 'open');
   },
   async deleteReviewComment(owner, repo, commentId) {
     const res = await send({

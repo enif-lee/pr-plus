@@ -53,6 +53,12 @@ export function SearchableSelect({
    * instead of plain add/remove.
    */
   resolveMultiToggle = null,
+  /**
+   * Panel width bounds (px). Defaults keep other pickers compact;
+   * commit picker passes a wider min/max so messages fit.
+   */
+  minWidth = 220,
+  maxWidth = 320,
 }: any) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
@@ -85,7 +91,11 @@ export function SearchableSelect({
 
       const gap = 6;
       const edge = 8;
-      const width = Math.max(220, Math.min(320, Math.max(r.width, 200)));
+      const minW = Number.isFinite(Number(minWidth)) ? Math.max(160, Number(minWidth)) : 220;
+      const maxW = Number.isFinite(Number(maxWidth))
+        ? Math.max(minW, Number(maxWidth))
+        : 320;
+      const width = Math.max(minW, Math.min(maxW, Math.max(r.width, minW)));
       const left = Math.min(Math.max(edge, r.left), window.innerWidth - width - edge);
       const h = panelRef.current?.offsetHeight || 0;
       const preferBottom = placement !== 'top';
@@ -137,7 +147,18 @@ export function SearchableSelect({
       window.removeEventListener('resize', measure);
       window.removeEventListener('scroll', measure, true);
     };
-  }, [open, anchorRef, anchorKey, placement, query, options?.length, selected.length, multi]);
+  }, [
+    open,
+    anchorRef,
+    anchorKey,
+    placement,
+    query,
+    options?.length,
+    selected.length,
+    multi,
+    minWidth,
+    maxWidth,
+  ]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -278,6 +299,8 @@ export function SearchableSelect({
         top: pos.top,
         left: pos.left,
         width: pos.width,
+        minWidth: pos.width,
+        maxWidth: pos.width,
         zIndex: 'var(--prp-z-portal, 120000)',
       }
     : { zIndex: 'var(--prp-z-portal, 120000)' };
@@ -330,6 +353,9 @@ export function SearchableSelect({
             const kind = String(meta.kind || '');
             const id = String(o.id || o.label || '');
             const isOn = selectedSet.has(id.toLowerCase());
+            const secondary = String(
+              o.secondary || meta.secondary || ''
+            ).trim();
             const colorCss =
               typeof labelColorCss === 'function'
                 ? labelColorCss(meta.color, meta.name || id)
@@ -350,7 +376,9 @@ export function SearchableSelect({
               <li key={id}>
                 <button
                   type="button"
-                  className={`prp-sselect-item${isOn ? ' prp-sselect-item--selected' : ''}`}
+                  className={`prp-sselect-item${isOn ? ' prp-sselect-item--selected' : ''}${
+                    secondary ? ' prp-sselect-item--has-secondary' : ''
+                  }`}
                   aria-selected={multi ? isOn : undefined}
                   onClick={() => {
                     if (multi) toggleId(id);
@@ -382,7 +410,14 @@ export function SearchableSelect({
                       className="prp-sselect-item__avatar"
                     />
                   ) : null}
-                  <span className="prp-sselect-item__label">{o.label}</span>
+                  <span className="prp-sselect-item__text">
+                    <span className="prp-sselect-item__label">{o.label}</span>
+                    {secondary ? (
+                      <span className="prp-sselect-item__secondary">
+                        {secondary}
+                      </span>
+                    ) : null}
+                  </span>
                   {meta.status ? (
                     <span className="prp-sselect-item__meta">{String(meta.status)}</span>
                   ) : meta.state && kind === 'milestone' ? (

@@ -689,7 +689,7 @@ describe('diff-rows rowIndex stays sequential (no skip on hidden hunk)', () => {
       expect(Number(rows[i].rowIndex)).toBe(i);
     }
     // Keyboard: travel down then up must not invert when indices are consistent
-    let sel = beginLineSelection(rows[1] || rows[0], 'RIGHT', 1);
+    let sel: any = beginLineSelection(rows[1] || rows[0], 'RIGHT', 1);
     if (!sel && rows[0]) sel = beginSelectionOnRow(rows[0], 'RIGHT', 0);
     expect(sel).toBeTruthy();
     const start = Number(sel!.headRowIndex);

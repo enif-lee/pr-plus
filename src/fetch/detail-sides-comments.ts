@@ -293,20 +293,16 @@ export async function fetchPrCommentsPage(owner: any, repo: any, pullNumber: any
   const preferNewest = Boolean(opts?.preferNewest) && !since;
   const orderHint = opts?.order || null;
 
-  async function fetchPage(pageNum, listOpts = {}, ctx = null) {
+  async function fetchPage(pageNum, listOpts: any = {}, ctx = null) {
   ctx = normalizeApiCtx(ctx);
     const sort =
-  // @ts-expect-error classic fetch dynamic shapes
-      listOpts.sort != null
-  // @ts-expect-error classic fetch dynamic shapes
+      listOpts?.sort != null
         ? listOpts.sort
         : kind === 'review'
           ? 'created'
           : undefined;
     const direction =
-  // @ts-expect-error classic fetch dynamic shapes
-      listOpts.direction != null
-  // @ts-expect-error classic fetch dynamic shapes
+      listOpts?.direction != null
         ? listOpts.direction
         : kind === 'review'
           ? preferNewest || orderHint === 'desc'
@@ -464,8 +460,6 @@ export async function fetchPrCommentsPage(owner: any, repo: any, pullNumber: any
       };
   return { items: res.items, meta, kind };
 }
-
-  // @ts-expect-error classic fetch dynamic shapes
 export async function fetchPrSidebarMeta(owner: any, repo: any, number: any, fetchImpl: any, token: any, ctx: any = null) {
   ctx = normalizeApiCtx(ctx);
   const o = String(owner || '').trim();

@@ -84,7 +84,7 @@ describe('detail-patch contract (PR0A)', () => {
       title: 'Local title',
       headSha: 'old',
     });
-    expect(store.meta.labels).toEqual(['keep-me']);
+    expect((store.meta as any).labels).toEqual(['keep-me']);
     applyCorePayload(
       store,
       {
@@ -97,9 +97,9 @@ describe('detail-patch contract (PR0A)', () => {
       },
       { skipSupersedeMeta: true }
     );
-    expect(store.meta.labels).toEqual(['keep-me']);
-    expect(store.meta.title).toBe('Local title');
-    expect(store.meta.headSha).toBe('newsha');
+    expect((store.meta as any).labels).toEqual(['keep-me']);
+    expect((store.meta as any).title).toBe('Local title');
+    expect((store.meta as any).headSha).toBe('newsha');
   });
 
   test('people meta authority keeps post-write labels over stale core', () => {

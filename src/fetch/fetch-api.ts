@@ -328,6 +328,5 @@ if (typeof globalThis !== 'undefined') {
   (globalThis as any).PRTreeFetch = fetchApi;
 }
 try {
-  // @ts-expect-error classic
   if (typeof module !== 'undefined' && module?.exports !== undefined) module.exports = fetchApi;
 } catch {}

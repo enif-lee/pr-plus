@@ -625,3 +625,15 @@ if (typeof module !== 'undefined' && module.exports) {
 if (typeof globalThis !== 'undefined') {
   globalThis.PRListFocus = prListFocusApi;
 }
+
+// ESM named exports for unit tests / TypeScript imports
+export {
+  isGithubCommandPaletteOpen,
+  isGithubCommandPaletteStuck,
+  recoverGithubCommandPaletteTopLayer,
+  PR_LIST_FOCUS_CLASS,
+  PR_LIST_FOCUS_ATTR,
+  nextFocusIndex,
+  resolvePrListHotkeyIndex,
+  resolvePrListShortcutAction,
+};

@@ -226,7 +226,9 @@ export async function fetchRestCollectionAll(firstUrl, fetchImpl, token, opts: a
   return all;
 }
 
-export async function apiSend(url, fetchImpl, token, { method = 'GET', body } = {}) {
+export async function apiSend(url, fetchImpl, token, opts: any = {}) {
+  const method = opts?.method || 'GET';
+  const body = opts?.body;
   const headers = buildApiHeaders(token);
   if (body != null) headers['Content-Type'] = 'application/json';
   const res = await fetchImpl(url, {

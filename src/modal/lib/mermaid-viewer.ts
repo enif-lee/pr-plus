@@ -6,8 +6,10 @@
 export const MERMAID_ZOOM_MIN = 0.15;
 /** Higher ceiling so long diagrams can zoom past 1:1 without clipping too early. */
 export const MERMAID_ZOOM_MAX = 16;
-/** @deprecated discrete step kept for callers; wheel uses continuous sensitivity */
+/** Discrete zoom factor for keyboard Opt± (and legacy step callers). */
 export const MERMAID_ZOOM_STEP = 1.12;
+/** Arrow-key pan step (stage pixels). */
+export const MERMAID_KEY_PAN_STEP = 48;
 /** Wheel/trackpad zoom: scale *= exp(-deltaY * sensitivity). Higher = faster. */
 export const MERMAID_WHEEL_ZOOM_SENSITIVITY = 0.00165;
 
@@ -255,6 +257,119 @@ export function panMermaidTransform(
     tx: t.tx + (Number.isFinite(x) ? x : 0),
     ty: t.ty + (Number.isFinite(y) ? y : 0),
   };
+}
+
+/**
+ * Keyboard pan: Arrow keys → ±step on one axis (default {@link MERMAID_KEY_PAN_STEP}).
+ * ArrowUp → content moves up (ty decreases), matching browser scroll feel.
+ */
+export function panMermaidTransformByArrowKey(
+  t: MermaidViewTransform,
+  key: unknown,
+  step: unknown = MERMAID_KEY_PAN_STEP
+): MermaidViewTransform | null {
+  const k = String(key || '');
+  const s = Number(step);
+  const px = Number.isFinite(s) && s > 0 ? s : MERMAID_KEY_PAN_STEP;
+  if (k === 'ArrowLeft') return panMermaidTransform(t, px, 0);
+  if (k === 'ArrowRight') return panMermaidTransform(t, -px, 0);
+  if (k === 'ArrowUp') return panMermaidTransform(t, 0, px);
+  if (k === 'ArrowDown') return panMermaidTransform(t, 0, -px);
+  return null;
+}
+
+/**
+ * Keyboard zoom step (Opt+ / Opt−).
+ * code: Equal / NumpadAdd → zoom in; Minus / NumpadSubtract → zoom out.
+ * Optional pivot keeps that stage-local point fixed.
+ */
+export function zoomMermaidTransformByKeyboardStep(
+  t: MermaidViewTransform,
+  direction: 'in' | 'out' | unknown,
+  pivot?: MermaidPoint | null,
+  factor: unknown = MERMAID_ZOOM_STEP
+): MermaidViewTransform {
+  const f = Number(factor);
+  const base = Number.isFinite(f) && f > 1 ? f : MERMAID_ZOOM_STEP;
+  const dir = direction === 'out' ? 1 / base : base;
+  return scaleMermaidTransform(t, dir, pivot);
+}
+
+/**
+ * Map a keydown-like event to a viewer keyboard gesture.
+ * Opt/Alt + Equal/Minus/NumpadAdd/NumpadSubtract → zoom.
+ * Arrow keys (no Opt required) → pan. Escape is handled by the UI close path.
+ */
+export type ViewerKeyGesture =
+  | { kind: 'zoom'; direction: 'in' | 'out' }
+  | { kind: 'pan'; key: 'ArrowUp' | 'ArrowDown' | 'ArrowLeft' | 'ArrowRight' }
+  | { kind: 'close' };
+
+export function mapViewerKeyGesture(opts: {
+  key?: unknown;
+  code?: unknown;
+  altKey?: unknown;
+  metaKey?: unknown;
+  ctrlKey?: unknown;
+  shiftKey?: unknown;
+} = {}): ViewerKeyGesture | null {
+  const key = String(opts.key || '');
+  const code = String(opts.code || '');
+  const alt = Boolean(opts.altKey);
+
+  if (key === 'Escape') return { kind: 'close' };
+
+  // Opt± zoom (Equal is "+" without shift on many layouts; also Numpad)
+  if (alt) {
+    const zoomIn =
+      code === 'Equal' ||
+      code === 'NumpadAdd' ||
+      key === '+' ||
+      key === '=' ||
+      // Some layouts report "Add"
+      code === 'Add';
+    const zoomOut =
+      code === 'Minus' ||
+      code === 'NumpadSubtract' ||
+      key === '-' ||
+      key === '_' ||
+      code === 'Subtract';
+    // Only treat as zoom when it is clearly ± (avoid Opt+Arrow collisions)
+    if (zoomIn && !zoomOut) return { kind: 'zoom', direction: 'in' };
+    if (zoomOut && !zoomIn) return { kind: 'zoom', direction: 'out' };
+    // Opt+Arrow: still allow pan (same 48px) so user can Opt-hold and move
+  }
+
+  if (
+    key === 'ArrowUp' ||
+    key === 'ArrowDown' ||
+    key === 'ArrowLeft' ||
+    key === 'ArrowRight'
+  ) {
+    return { kind: 'pan', key };
+  }
+  return null;
+}
+
+/**
+ * Apply {@link mapViewerKeyGesture} result to a transform.
+ * Returns null when the event is not a pan/zoom (e.g. close).
+ */
+export function applyViewerKeyGesture(
+  t: MermaidViewTransform,
+  gesture: ViewerKeyGesture | null | undefined,
+  pivot?: MermaidPoint | null,
+  panStep: unknown = MERMAID_KEY_PAN_STEP
+): MermaidViewTransform | null {
+  if (!gesture) return null;
+  if (gesture.kind === 'close') return null;
+  if (gesture.kind === 'pan') {
+    return panMermaidTransformByArrowKey(t, gesture.key, panStep);
+  }
+  if (gesture.kind === 'zoom') {
+    return zoomMermaidTransformByKeyboardStep(t, gesture.direction, pivot);
+  }
+  return null;
 }
 
 export function mermaidTransformStyle(t: MermaidViewTransform): string {

@@ -602,8 +602,8 @@
           );
           render();
           const t0 = nowMs();
-          const kick = await threadsNewestP;
-          if (!kick.ok) throw kick.err || new Error('Threads fetch failed');
+          const kick: any = await threadsNewestP;
+          if (!kick?.ok) throw kick?.err || new Error('Threads fetch failed');
           const newest = kick.page;
           if (!stillOpen()) return;
           const adapt = kick.adaptive || null;
@@ -640,14 +640,15 @@
               : null;
           const newestSource = newest?.source || adapt?.source || null;
           // Soft revalidate: by-id bulk for remaining unresolved PRRT (see open-modal).
+          const forceFull = mode === 'full-threads';
           const skipByIds =
-            mode !== 'full-threads' &&
+            !forceFull &&
             (typeof RT?.shouldSkipUnresolvedByIdsBulk === 'function'
               ? Boolean(
                   RT.shouldSkipUnresolvedByIdsBulk({
                     newestSource,
                     hostRestFallback: Boolean(adapt?.hostRestFallback),
-                    forceFull: mode === 'full-threads',
+                    forceFull: false,
                     mode,
                   })
                 )

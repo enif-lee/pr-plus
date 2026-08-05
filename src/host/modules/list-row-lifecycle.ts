@@ -412,7 +412,7 @@
       }
       if (!isModal) return false;
       try {
-        d.close?.();
+        (d as HTMLDialogElement).close?.();
       } catch {
         /* ignore */
       }
