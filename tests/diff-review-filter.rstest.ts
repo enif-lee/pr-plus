@@ -358,16 +358,19 @@ describe('product wiring structure', () => {
     expect(app).toMatch(/onPatchReviewFilter/);
   });
 
-  test('StepNav three equal cells with zero horizontal padding', () => {
+  test('StepNav count is variable width; arrow cells equal fixed', () => {
     const css = readFileSync(
       resolve(root, 'src/modal/views/conversation/CommentNavigator.css'),
       'utf8'
     );
-    // Equal grid columns (meta | ↑ | ↓)
+    // count (max-content) | ↑ fixed | ↓ fixed
     expect(css).toMatch(
-      /grid-template-columns:\s*repeat\(\s*3\s*,\s*var\(--prp-step-nav-cell/
+      /grid-template-columns:\s*max-content\s+var\(--prp-step-nav-btn/
     );
-    expect(css).toMatch(/\.prp-step-nav__meta\s*\{[^}]*padding:\s*0/s);
+    expect(css).toMatch(/\.prp-step-nav__meta\s*\{[^}]*width:\s*auto/s);
+    expect(css).toMatch(
+      /\.prp-step-nav__btn\s*\{[^}]*width:\s*var\(--prp-step-nav-btn/s
+    );
     expect(css).toMatch(/\.prp-step-nav__btn\s*\{[^}]*padding:\s*0/s);
     expect(css).toMatch(/\.prp-step-nav__btn\s*\{[^}]*margin:\s*0/s);
   });

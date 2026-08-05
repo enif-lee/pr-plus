@@ -47,11 +47,11 @@
 }
 
 /* Shared step navigator: count | prev | next (thread + finder)
- * Three equal-width cells — no horizontal padding/margin on any column. */
+ * Count is content-sized (variable width); ↑ / ↓ share equal fixed cells. */
 .prp-step-nav {
-  --prp-step-nav-cell: var(--prp-diff-ctrl-h, 28px);
+  --prp-step-nav-btn: var(--prp-diff-ctrl-h, 28px);
   display: inline-grid;
-  grid-template-columns: repeat(3, var(--prp-step-nav-cell));
+  grid-template-columns: max-content var(--prp-step-nav-btn) var(--prp-step-nav-btn);
   align-items: stretch;
   border: 1px solid var(--prp-border);
   border-radius: 8px;
@@ -62,8 +62,8 @@
   box-sizing: border-box;
   height: var(--prp-diff-ctrl-h, 28px);
   min-height: var(--prp-diff-ctrl-h, 28px);
-  width: calc(3 * var(--prp-step-nav-cell));
-  min-width: calc(3 * var(--prp-step-nav-cell));
+  width: max-content;
+  min-width: 0;
   gap: 0;
   padding: 0;
   margin: 0;
@@ -81,10 +81,10 @@
   font: inherit;
   font-size: 13px;
   line-height: 1;
-  /* Match meta cell exactly — no pad/margin on ↑ or ↓ */
-  width: 100%;
-  min-width: 0;
-  max-width: none;
+  /* Equal fixed ↑ / ↓ — no pad/margin */
+  width: var(--prp-step-nav-btn);
+  min-width: var(--prp-step-nav-btn);
+  max-width: var(--prp-step-nav-btn);
   height: 100%;
   padding: 0;
   box-sizing: border-box;
@@ -107,12 +107,14 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  /* Same cell size as ↑ / ↓ — no horizontal padding */
-  width: 100%;
-  min-width: 0;
+  /* Variable width for n/m (e.g. 3/3 vs 128/1300) */
+  width: auto;
+  min-width: var(--prp-step-nav-btn);
+  max-width: none;
   height: 100%;
   margin: 0;
-  padding: 0;
+  /* Tight horizontal inset only — not a fixed column width */
+  padding: 0 6px;
   border: 0;
   background: transparent;
   color: var(--prp-fg-muted);
@@ -123,8 +125,6 @@
   white-space: nowrap;
   user-select: none;
   box-sizing: border-box;
-  overflow: hidden;
-  text-overflow: clip;
 }
 .prp-step-nav--busy .prp-step-nav__meta {
   color: var(--prp-fg-muted);
