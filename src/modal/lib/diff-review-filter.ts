@@ -121,13 +121,61 @@ export function createDefaultDiffReviewFilter(): DiffReviewFilterState {
   };
 }
 
-/** Empty status set or all three selected → no status restriction. */
-export function isStatusFilterUnrestricted(
-  filter: DiffReviewFilterState | null | undefined
-): boolean {
+/**
+ * Options for status multi-select evaluation.
+ * When `pendingCount` is 0 (or null treated as unknown): if known zero, pending
+ * is not a selectable chip — omit from empty/all and matching effective set.
+ */
+export type DiffReviewFilterEvalOpts = {
+  /**
+   * Pending (unsubmitted) review comment count for the open PR.
+   * When 0, pending is excluded from unrestricted / empty-selection evaluation
+   * and from the effective status match set (same as hidden Pending chip).
+   * When null/undefined, pending stays in the evaluation (legacy / unknown).
+   */
+  pendingCount?: number | null;
+};
+
+/** Status chips that exist for empty/all evaluation (drops pending when count is 0). */
+export function availableDiffReviewStatuses(
+  opts?: DiffReviewFilterEvalOpts | null
+): DiffReviewStatus[] {
+  const n = opts?.pendingCount;
+  if (n != null && Number(n) <= 0) {
+    return DIFF_REVIEW_STATUSES.filter((s) => s !== 'pending');
+  }
+  return DIFF_REVIEW_STATUSES.slice();
+}
+
+/**
+ * Active statuses used for root matching.
+ * When pendingCount is 0, drop pending so a ghost default pending chip cannot
+ * leave the filter stuck on pending-only (empty) or block "all selected".
+ */
+export function effectiveDiffReviewStatuses(
+  filter: DiffReviewFilterState | null | undefined,
+  opts?: DiffReviewFilterEvalOpts | null
+): DiffReviewStatus[] {
   const f = normalizeDiffReviewFilter(filter ?? { statuses: [] });
-  if (!f.statuses.length) return true;
-  return DIFF_REVIEW_STATUSES.every((s) => f.statuses.includes(s));
+  const n = opts?.pendingCount;
+  if (n != null && Number(n) <= 0) {
+    return f.statuses.filter((s) => s !== 'pending');
+  }
+  return f.statuses.slice();
+}
+
+/**
+ * Empty status set → no status restriction.
+ * All *available* chips selected → same (pending omitted when pendingCount is 0).
+ */
+export function isStatusFilterUnrestricted(
+  filter: DiffReviewFilterState | null | undefined,
+  opts?: DiffReviewFilterEvalOpts | null
+): boolean {
+  const effective = effectiveDiffReviewStatuses(filter, opts);
+  if (!effective.length) return true;
+  const available = availableDiffReviewStatuses(opts);
+  return available.every((s) => effective.includes(s));
 }
 
 export function isAuthorFilterUnrestricted(
@@ -286,7 +334,8 @@ export function rootReviewStatus(
 export function rootMatchesDiffReviewFilter(
   root: any,
   comments: any[],
-  filter: DiffReviewFilterState | null | undefined
+  filter: DiffReviewFilterState | null | undefined,
+  opts?: DiffReviewFilterEvalOpts | null
 ): boolean {
   if (!root) return false;
   const f = normalizeDiffReviewFilter(
@@ -298,9 +347,10 @@ export function rootMatchesDiffReviewFilter(
     const allowed = new Set(f.authors.map((a) => a.toLowerCase()));
     if (!author || !allowed.has(author)) return false;
   }
-  if (!isStatusFilterUnrestricted(f)) {
+  if (!isStatusFilterUnrestricted(f, opts)) {
     const st = rootReviewStatus(root, comments);
-    if (!f.statuses.includes(st)) return false;
+    const effective = effectiveDiffReviewStatuses(f, opts);
+    if (!effective.includes(st)) return false;
   }
   return true;
 }
@@ -311,7 +361,8 @@ export function rootMatchesDiffReviewFilter(
 export function filterReviewRootsForDiffNav(
   comments: any[],
   filter: DiffReviewFilterState | null | undefined,
-  allowedPaths: Set<string> | string[] | null = null
+  allowedPaths: Set<string> | string[] | null = null,
+  opts?: DiffReviewFilterEvalOpts | null
 ): any[] {
   const list = Array.isArray(comments) ? comments : [];
   const byId = new Map();
@@ -331,7 +382,7 @@ export function filterReviewRootsForDiffNav(
     if (!isThreadRoot(c, byId)) return false;
     const path = c.path || '';
     if (pathSet && path && !pathSet.has(path)) return false;
-    return rootMatchesDiffReviewFilter(c, list, f);
+    return rootMatchesDiffReviewFilter(c, list, f, opts);
   });
 }
 
@@ -341,10 +392,16 @@ export function filterReviewRootsForDiffNav(
 export function filterReviewCommentsForDiffNav(
   comments: any[],
   filter: DiffReviewFilterState | null | undefined,
-  allowedPaths: Set<string> | string[] | null = null
+  allowedPaths: Set<string> | string[] | null = null,
+  opts?: DiffReviewFilterEvalOpts | null
 ): any[] {
   const list = Array.isArray(comments) ? comments : [];
-  const allowedRoots = filterReviewRootsForDiffNav(list, filter, allowedPaths);
+  const allowedRoots = filterReviewRootsForDiffNav(
+    list,
+    filter,
+    allowedPaths,
+    opts
+  );
   const rootIds = new Set(
     allowedRoots
       .map((c) => (c && c.id != null ? String(c.id) : ''))
@@ -378,17 +435,18 @@ export function filterReviewCommentsForDiffNav(
 export function filterFilesByDiffReviewFilter(
   files: any[],
   comments: any[],
-  filter: DiffReviewFilterState | null | undefined
+  filter: DiffReviewFilterState | null | undefined,
+  opts?: DiffReviewFilterEvalOpts | null
 ): any[] {
   const list = Array.isArray(files) ? files : [];
-  const roots = filterReviewRootsForDiffNav(comments, filter, null);
+  const roots = filterReviewRootsForDiffNav(comments, filter, null, opts);
   // Unrestricted status+author+outdated with no roots → still show all files
   // when there are simply no comments (not a "hide everything" case).
   const f = normalizeDiffReviewFilter(
     filter ?? createDefaultDiffReviewFilter()
   );
   const unrestricted =
-    isStatusFilterUnrestricted(f) &&
+    isStatusFilterUnrestricted(f, opts) &&
     isAuthorFilterUnrestricted(f) &&
     !f.hideOutdated;
   if (unrestricted) return list.slice();

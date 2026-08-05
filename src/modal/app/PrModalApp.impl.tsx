@@ -1551,14 +1551,41 @@ export function PrModalApp({
    * Extension chips are derived from this list so selecting one ext does not
    * hide other ext chips / drop multi-select — only review mode reshapes them.
    */
+  /**
+   * Same thread-level pending count as Diff toolbar (see pendingCount below).
+   * Declared early so file/comment filters can exclude pending from empty/all
+   * status evaluation when the chip is hidden (count === 0).
+   */
+  const reviewFilterEvalOpts = useMemo(() => {
+    const list = detail?.reviewComments || [];
+    let n = 0;
+    if (typeof countPendingReviewThreads === 'function') {
+      n = Number(countPendingReviewThreads(list)) || 0;
+    } else {
+      const byId = new Map(
+        list
+          .filter((c: any) => c?.id != null)
+          .map((c: any) => [String(c.id), c])
+      );
+      n = list.filter((c: any) => {
+        if (!c?.pending) return false;
+        const parentId = c.inReplyToId ?? c.in_reply_to_id ?? null;
+        if (parentId != null && byId.has(String(parentId))) return false;
+        return true;
+      }).length;
+    }
+    return { pendingCount: n };
+  }, [detail?.reviewComments]);
+
   const reviewScopedFiles = useMemo(
     () =>
       filterFilesByDiffReviewFilter(
         annotatedFiles,
         detail?.reviewComments || [],
-        diffReviewFilter
+        diffReviewFilter,
+        reviewFilterEvalOpts
       ),
-    [annotatedFiles, detail?.reviewComments, diffReviewFilter]
+    [annotatedFiles, detail?.reviewComments, diffReviewFilter, reviewFilterEvalOpts]
   );
 
   /**
@@ -1620,8 +1647,18 @@ export function PrModalApp({
   const navReviewComments = useMemo(() => {
     const all = detail?.reviewComments || [];
     const f = normalizeDiffReviewFilter(diffReviewFilter);
-    return filterReviewCommentsForDiffNav(all, f, displayPathSet);
-  }, [detail?.reviewComments, diffReviewFilter, displayPathSet]);
+    return filterReviewCommentsForDiffNav(
+      all,
+      f,
+      displayPathSet,
+      reviewFilterEvalOpts
+    );
+  }, [
+    detail?.reviewComments,
+    diffReviewFilter,
+    displayPathSet,
+    reviewFilterEvalOpts,
+  ]);
 
   const threads = useMemo(() => {
     const fromComments =
@@ -1827,7 +1864,8 @@ export function PrModalApp({
       filterReviewRootsForDiffNav(
         detail?.reviewComments || [],
         diffReviewFilter,
-        displayPathSet
+        displayPathSet,
+        reviewFilterEvalOpts
       ),
       pathOrder
     );
@@ -1839,6 +1877,7 @@ export function PrModalApp({
     displayPathSet,
     displayFiles,
     navReviewComments,
+    reviewFilterEvalOpts,
   ]);
 
   // Keep commentIndex inside the filtered list when filters change

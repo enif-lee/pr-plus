@@ -5,8 +5,10 @@ import { describe, expect, test } from '@rstest/core';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
+  availableDiffReviewStatuses,
   createDefaultDiffReviewFilter,
   createUnrestrictedDiffReviewFilter,
+  effectiveDiffReviewStatuses,
   filterFilesByDiffReviewFilter,
   filterReviewCommentsForDiffNav,
   filterReviewRootsForDiffNav,
@@ -91,6 +93,48 @@ describe('normalize + multi-status', () => {
     const f = normalizeDiffReviewFilter({ statuses: [] });
     expect(isStatusFilterUnrestricted(f)).toBe(true);
     const roots = filterReviewRootsForDiffNav(commentsFixture(), f);
+    expect(roots.map((r) => r.id).sort()).toEqual([1, 2, 3, 4]);
+  });
+
+  test('pendingCount 0: pending excluded from empty/all evaluation', () => {
+    // All *visible* chips selected (unresolved+resolved) while pending is 0
+    // → treat as unrestricted (pending is not an evaluation target).
+    const allVisible = normalizeDiffReviewFilter({
+      statuses: ['unresolved', 'resolved'],
+    });
+    expect(isStatusFilterUnrestricted(allVisible, { pendingCount: 0 })).toBe(
+      true
+    );
+    expect(isStatusFilterUnrestricted(allVisible)).toBe(false); // pending unknown/on
+    expect(availableDiffReviewStatuses({ pendingCount: 0 })).toEqual([
+      'unresolved',
+      'resolved',
+    ]);
+
+    // Default unresolved+pending with pendingCount 0 → effective unresolved only
+    const def = createDefaultDiffReviewFilter();
+    expect(effectiveDiffReviewStatuses(def, { pendingCount: 0 })).toEqual([
+      'unresolved',
+    ]);
+    expect(isStatusFilterUnrestricted(def, { pendingCount: 0 })).toBe(false);
+
+    // Only ghost pending left (user cleared unresolved) → empty effective → all
+    const ghostPending = normalizeDiffReviewFilter({ statuses: ['pending'] });
+    expect(effectiveDiffReviewStatuses(ghostPending, { pendingCount: 0 })).toEqual(
+      []
+    );
+    expect(isStatusFilterUnrestricted(ghostPending, { pendingCount: 0 })).toBe(
+      true
+    );
+    const roots = filterReviewRootsForDiffNav(
+      commentsFixture().map((c) =>
+        c.id === 3 ? { ...c, pending: false } : c
+      ),
+      ghostPending,
+      null,
+      { pendingCount: 0 }
+    );
+    // unrestricted: all roots (fixture with pending cleared still has 1,2,3,4 roots)
     expect(roots.map((r) => r.id).sort()).toEqual([1, 2, 3, 4]);
   });
 
