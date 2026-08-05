@@ -313,11 +313,16 @@ describe('hide outdated + authors + compose', () => {
     expect(out.map((x) => x.filename).sort()).toEqual(['only.ts', 'other.ts']);
   });
 
-  test('listReviewAuthorsFromComments unique sorted', () => {
-    expect(listReviewAuthorsFromComments(commentsFixture())).toEqual([
-      'alice',
-      'bob',
-      'carol',
+  test('listReviewAuthorsFromComments unique sorted with avatars', () => {
+    const withAv = commentsFixture().map((c) =>
+      c.id === 1
+        ? { ...c, avatarUrl: 'https://example.com/alice.png' }
+        : c
+    );
+    expect(listReviewAuthorsFromComments(withAv)).toEqual([
+      { login: 'alice', avatarUrl: 'https://example.com/alice.png' },
+      { login: 'bob', avatarUrl: null },
+      { login: 'carol', avatarUrl: null },
     ]);
   });
 });
@@ -334,6 +339,8 @@ describe('product wiring structure', () => {
     expect(tb).toMatch(/Hide outdated comments/);
     expect(tb).toMatch(/Reviewed by/);
     expect(tb).toMatch(/IconGear/);
+    expect(tb).toMatch(/Avatar/);
+    expect(tb).toMatch(/prp-diff-review-settings__author/);
     // Display options live in the gear popover (not primary toolbar row)
     expect(tb).toMatch(/Hide whitespace/);
     expect(tb).toMatch(/data-prp-hide-whitespace/);

@@ -290,28 +290,56 @@ function rootAuthorLogin(root: any): string {
     .toLowerCase();
 }
 
+/** Author row for Diff “Reviewed by…” (login + optional avatar). */
+export type ReviewAuthorOption = {
+  login: string;
+  avatarUrl: string | null;
+};
+
+function rootAuthorAvatarUrl(root: any): string | null {
+  if (!root || typeof root !== 'object') return null;
+  const raw =
+    root.avatarUrl ||
+    root.avatar_url ||
+    root.user?.avatarUrl ||
+    root.user?.avatar_url ||
+    (root.author && typeof root.author === 'object'
+      ? root.author.avatarUrl || root.author.avatar_url
+      : null) ||
+    null;
+  const s = raw != null ? String(raw).trim() : '';
+  return s || null;
+}
+
 /**
- * Unique review authors (login) from thread roots, sorted.
+ * Unique review authors from thread roots, sorted by login.
+ * Includes avatarUrl when present on the root (falls back to null; UI uses
+ * GitHub avatar URL from login).
  */
-export function listReviewAuthorsFromComments(comments: any[]): string[] {
+export function listReviewAuthorsFromComments(
+  comments: any[]
+): ReviewAuthorOption[] {
   const list = Array.isArray(comments) ? comments : [];
   const byId = new Map();
   for (const c of list) {
     if (c && c.id != null) byId.set(String(c.id), c);
   }
-  const seen = new Set<string>();
-  const out: string[] = [];
+  const seen = new Map<string, ReviewAuthorOption>();
   for (const c of list) {
     if (!isThreadRoot(c, byId)) continue;
-    const login = rootAuthorLogin(c);
-    if (!login || seen.has(login)) continue;
-    // keep display form from first occurrence
-    const display = String(c.author || c.user?.login || login).trim();
-    seen.add(login);
-    out.push(display || login);
+    const key = rootAuthorLogin(c);
+    if (!key) continue;
+    const display = String(c.author || c.user?.login || key).trim() || key;
+    const avatarUrl = rootAuthorAvatarUrl(c);
+    const prev = seen.get(key);
+    if (!prev) {
+      seen.set(key, { login: display, avatarUrl });
+    } else if (!prev.avatarUrl && avatarUrl) {
+      seen.set(key, { ...prev, avatarUrl });
+    }
   }
-  return out.sort((a, b) =>
-    a.toLowerCase().localeCompare(b.toLowerCase())
+  return [...seen.values()].sort((a, b) =>
+    a.login.toLowerCase().localeCompare(b.login.toLowerCase())
   );
 }
 

@@ -13,6 +13,7 @@ import {
   truncateCommitLabel,
 } from '@lib/diff-commit-filter';
 import { pendingReviewCount } from '@lib/pending-review';
+import { Avatar } from '@common/Avatar';
 import { IconChevronDown, IconFileNavToggle, IconGear } from '@common/icons';
 import { StepNav } from '@common/StepNav';
 import {
@@ -141,10 +142,37 @@ export function DiffToolbar(props: any) {
         : Array.isArray(detail?.reviewComments)
           ? detail.reviewComments
           : [];
-    return typeof listReviewAuthorsFromComments === 'function'
-      ? listReviewAuthorsFromComments(src)
-      : [];
-  }, [reviewComments, comments, detail?.reviewComments]);
+    const raw =
+      typeof listReviewAuthorsFromComments === 'function'
+        ? listReviewAuthorsFromComments(src)
+        : [];
+    // Normalize legacy string[] if pure rebuild lags
+    const avatars =
+      detail?.avatarUrls && typeof detail.avatarUrls === 'object'
+        ? detail.avatarUrls
+        : null;
+    return (Array.isArray(raw) ? raw : []).map((row: any) => {
+      if (typeof row === 'string') {
+        const login = row.trim();
+        const key = login.toLowerCase();
+        const fromMap =
+          avatars && (avatars[key] || avatars[login])
+            ? String(avatars[key] || avatars[login])
+            : null;
+        return { login, avatarUrl: fromMap };
+      }
+      const login = String(row?.login || '').trim();
+      const key = login.toLowerCase();
+      const fromMap =
+        avatars && (avatars[key] || avatars[login])
+          ? String(avatars[key] || avatars[login])
+          : null;
+      return {
+        login,
+        avatarUrl: row?.avatarUrl || fromMap || null,
+      };
+    }).filter((a: { login: string }) => a.login);
+  }, [reviewComments, comments, detail?.reviewComments, detail?.avatarUrls]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsWrapRef = useRef<HTMLDivElement | null>(null);
   const settingsGearRef = useRef<HTMLButtonElement | null>(null);
@@ -641,15 +669,16 @@ export function DiffToolbar(props: any) {
                                   No review authors yet
                                 </p>
                               ) : (
-                                authorList.map((login) => {
-                                  const key = String(login).toLowerCase();
+                                authorList.map((author) => {
+                                  const login = String(author.login || '').trim();
+                                  const key = login.toLowerCase();
                                   const checked = filterState.authors.some(
                                     (a) => a.toLowerCase() === key
                                   );
                                   return (
                                     <label
                                       key={key}
-                                      className="prp-diff-review-settings__row"
+                                      className="prp-diff-review-settings__row prp-diff-review-settings__row--author"
                                     >
                                       <input
                                         type="checkbox"
@@ -665,7 +694,16 @@ export function DiffToolbar(props: any) {
                                           patchFilter({ authors: [...next] });
                                         }}
                                       />
-                                      <span>{login}</span>
+                                      <span className="prp-diff-review-settings__author">
+                                        <Avatar
+                                          login={login}
+                                          avatarUrl={author.avatarUrl}
+                                          size="sm"
+                                        />
+                                        <span className="prp-diff-review-settings__author-login">
+                                          {login}
+                                        </span>
+                                      </span>
                                     </label>
                                   );
                                 })

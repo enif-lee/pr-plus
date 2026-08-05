@@ -132,6 +132,28 @@
   margin: 2px 0 0;
   flex-shrink: 0;
 }
+.prp-diff-review-settings__row--author {
+  align-items: center;
+}
+.prp-diff-review-settings__row--author input {
+  margin: 0;
+}
+.prp-diff-review-settings__author {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.prp-diff-review-settings__author .prp-avatar {
+  flex-shrink: 0;
+}
+.prp-diff-review-settings__author-login {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 /* Segmented Unified | Split — matches former Diff toolbar toggle */
 .prp-diff-review-settings__mode.prp-diff-mode {
   display: flex;
