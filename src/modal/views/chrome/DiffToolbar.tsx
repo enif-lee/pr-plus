@@ -553,12 +553,13 @@ export function DiffToolbar(props: any) {
                           <p className="prp-diff-review-settings__heading">
                             Diff view
                           </p>
+                          {/* Segmented toggle (same chrome as former toolbar control) */}
                           <div
-                            className="prp-diff-review-settings__radios"
+                            className="prp-diff-mode prp-diff-review-settings__mode"
                             role="radiogroup"
                             aria-label="Diff view mode"
                           >
-                            <label className="prp-diff-review-settings__row">
+                            <label className="prp-diff-mode__opt">
                               <input
                                 type="radio"
                                 name="prp-diff-mode"
@@ -573,9 +574,9 @@ export function DiffToolbar(props: any) {
                                   }
                                 }}
                               />
-                              <span>Unified</span>
+                              Unified
                             </label>
-                            <label className="prp-diff-review-settings__row">
+                            <label className="prp-diff-mode__opt">
                               <input
                                 type="radio"
                                 name="prp-diff-mode"
@@ -590,11 +591,11 @@ export function DiffToolbar(props: any) {
                                   }
                                 }}
                               />
-                              <span>Split</span>
+                              Split
                             </label>
                           </div>
                           <label
-                            className="prp-diff-review-settings__row"
+                            className="prp-diff-review-settings__row prp-diff-review-settings__row--after-mode"
                             title="Hide lines that change only whitespace"
                           >
                             <input

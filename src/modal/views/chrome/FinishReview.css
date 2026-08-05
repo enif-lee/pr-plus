@@ -132,11 +132,35 @@
   margin: 2px 0 0;
   flex-shrink: 0;
 }
-.prp-diff-review-settings__radios {
+/* Segmented Unified | Split — matches former Diff toolbar toggle */
+.prp-diff-review-settings__mode.prp-diff-mode {
   display: flex;
-  flex-direction: column;
-  gap: 0;
-  margin: 0 0 4px;
+  width: 100%;
+  margin: 0 0 8px;
+  box-sizing: border-box;
+  height: var(--prp-diff-ctrl-h, 28px);
+  min-height: var(--prp-diff-ctrl-h, 28px);
+  align-items: stretch;
+  gap: 2px;
+  padding: 2px;
+}
+.prp-diff-review-settings__mode .prp-diff-mode__opt {
+  flex: 1 1 0;
+  justify-content: center;
+  margin: 0;
+  /* hide native radio; segment uses :has(input:checked) paint */
+  position: relative;
+}
+.prp-diff-review-settings__mode .prp-diff-mode__opt input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  pointer-events: none;
+}
+.prp-diff-review-settings__row--after-mode {
+  padding-top: 2px;
 }
 .prp-diff-review-settings__empty {
   margin: 0;
