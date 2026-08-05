@@ -46,9 +46,12 @@
   background: var(--prp-bg-muted);
 }
 
-/* Shared step navigator: count | prev | next (thread + finder) */
+/* Shared step navigator: count | prev | next (thread + finder)
+ * Three equal-width cells — no horizontal padding/margin on any column. */
 .prp-step-nav {
-  display: inline-flex;
+  --prp-step-nav-cell: var(--prp-diff-ctrl-h, 28px);
+  display: inline-grid;
+  grid-template-columns: repeat(3, var(--prp-step-nav-cell));
   align-items: stretch;
   border: 1px solid var(--prp-border);
   border-radius: 8px;
@@ -59,6 +62,11 @@
   box-sizing: border-box;
   height: var(--prp-diff-ctrl-h, 28px);
   min-height: var(--prp-diff-ctrl-h, 28px);
+  width: calc(3 * var(--prp-step-nav-cell));
+  min-width: calc(3 * var(--prp-step-nav-cell));
+  gap: 0;
+  padding: 0;
+  margin: 0;
 }
 .prp-step-nav__btn {
   appearance: none;
@@ -73,20 +81,18 @@
   font: inherit;
   font-size: 13px;
   line-height: 1;
-  /* Equal prev/next — no asymmetric padding/margin on ↑ alone */
-  width: 28px;
-  min-width: 28px;
-  max-width: 28px;
+  /* Match meta cell exactly — no pad/margin on ↑ or ↓ */
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  height: 100%;
   padding: 0;
-  margin-right: 0;
   box-sizing: border-box;
   cursor: pointer;
 }
-/* Guard against host-level text spacing on the middle (↑) control */
 .prp-step-nav__btn + .prp-step-nav__btn {
-  margin-left: 0;
-  padding-left: 0;
-  padding-right: 0;
+  margin: 0;
+  padding: 0;
 }
 .prp-step-nav__btn:hover:not(:disabled),
 .prp-step-nav__btn:focus-visible:not(:disabled) {
@@ -101,8 +107,12 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0 8px;
-  min-width: 2.75rem;
+  /* Same cell size as ↑ / ↓ — no horizontal padding */
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  margin: 0;
+  padding: 0;
   border: 0;
   background: transparent;
   color: var(--prp-fg-muted);
@@ -112,6 +122,9 @@
   line-height: 1;
   white-space: nowrap;
   user-select: none;
+  box-sizing: border-box;
+  overflow: hidden;
+  text-overflow: clip;
 }
 .prp-step-nav--busy .prp-step-nav__meta {
   color: var(--prp-fg-muted);

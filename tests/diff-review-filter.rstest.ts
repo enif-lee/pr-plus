@@ -358,14 +358,17 @@ describe('product wiring structure', () => {
     expect(app).toMatch(/onPatchReviewFilter/);
   });
 
-  test('StepNav buttons share equal width and no asymmetric padding', () => {
+  test('StepNav three equal cells with zero horizontal padding', () => {
     const css = readFileSync(
       resolve(root, 'src/modal/views/conversation/CommentNavigator.css'),
       'utf8'
     );
-    expect(css).toMatch(/\.prp-step-nav__btn\s*\{[^}]*width:\s*28px/s);
-    expect(css).toMatch(/padding:\s*0/);
-    expect(css).toMatch(/max-width:\s*28px/);
-    expect(css).toMatch(/margin-right:\s*0/);
+    // Equal grid columns (meta | ↑ | ↓)
+    expect(css).toMatch(
+      /grid-template-columns:\s*repeat\(\s*3\s*,\s*var\(--prp-step-nav-cell/
+    );
+    expect(css).toMatch(/\.prp-step-nav__meta\s*\{[^}]*padding:\s*0/s);
+    expect(css).toMatch(/\.prp-step-nav__btn\s*\{[^}]*padding:\s*0/s);
+    expect(css).toMatch(/\.prp-step-nav__btn\s*\{[^}]*margin:\s*0/s);
   });
 });
