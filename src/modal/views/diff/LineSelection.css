@@ -22,16 +22,26 @@
 .prp-vline--comment-selected {
   position: relative;
   z-index: var(--prp-z-content, 1);
+  /* Inset outline so the ring stays inside the row (avoids scrollport clip) */
   outline: 2px solid var(--prp-accent, #0969da);
   outline-offset: -2px;
   border-radius: 8px;
+  /* Keep ring fully inside the box; outer glow uses inset only at edges */
   box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--prp-accent) 35%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--prp-accent) 35%, transparent),
     inset 0 0 0 1px color-mix(in srgb, var(--prp-sel-bg-strong, #ffe566) 40%, transparent);
+  /* Small horizontal inset so card + ring clear the pane edge / float scrollbar */
+  padding-right: 2px;
+  box-sizing: border-box;
 }
 .prp-vline--comment-selected .prp-inline-thread__card {
   border-color: color-mix(in srgb, var(--prp-accent) 55%, var(--prp-border));
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--prp-accent) 25%, transparent);
+}
+/* Pending thread row: same clip immunity even when not keyboard-selected */
+.prp-vline--comment-pending {
+  overflow: visible;
+  contain: layout style;
 }
 
 .prp-vline--selected.prp-vline--sel-only {

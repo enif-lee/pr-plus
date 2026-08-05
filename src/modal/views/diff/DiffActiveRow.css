@@ -263,6 +263,16 @@
 .prp-vline--line-expanded {
   contain: layout style;
 }
+/*
+ * Inline review-thread rows: do not clip selection outline / card shadow.
+ * overflow:hidden + contain:paint on the base .prp-vline cut the blue ring
+ * and card corners (esp. bottom-right edge of pending threads).
+ */
+.prp-vline--comment,
+.prp-vline--comment-selected {
+  overflow: visible;
+  contain: layout style;
+}
 
 .prp-vline--selectable {
   cursor: default;
