@@ -212,6 +212,15 @@ export function MarkdownComposer({
         return;
       }
       setFocused(false);
+      // Empty + unfocused should collapse to ghost. Preview tab alone used to
+      // keep open=true, so e2e/real blur never showed the ghost again.
+      if (
+        !forceOpen &&
+        !Boolean(String(value || '').trim()) &&
+        tab === 'preview'
+      ) {
+        setTab('write');
+      }
     }, 0);
   }
 

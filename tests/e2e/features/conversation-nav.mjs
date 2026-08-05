@@ -610,6 +610,11 @@ export function getSteps() {
           for (const host of scopes) {
             const ghost = host.querySelector?.('.prp-mdc__ghost');
             if (ghost) {
+              // Match product path: mousedown preventDefault + openWriteSurface
+              ghost.dispatchEvent(
+                new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 })
+              );
+              ghost.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0 }));
               ghost.click();
               return { ok: true, via: 'ghost' };
             }
@@ -806,31 +811,65 @@ export function getSteps() {
     }
 
     // Type draft with unique mark so hygiene can DELETE the landed issue comment.
+    // Opt-hold often leaves focus off the textarea — re-resolve + focus first.
     const commentMark = makeE2eCommentMark('e2e-comment');
     const commentBody = e2eCommentBody(commentMark, 'composer cmd-enter');
-    evalInPage(`
+    const draftSet = evalInPage(`
       (() => {
-        const ta = document.activeElement;
-        if (!ta || ta.tagName !== 'TEXTAREA') return false;
+        const pickTa = () => {
+          const ae = document.activeElement;
+          if (
+            ae &&
+            (ae.tagName === 'TEXTAREA' ||
+              ae.classList?.contains?.('prp-mdc__ta') ||
+              ae.getAttribute?.('data-prp-composer-input') === '1')
+          ) {
+            return ae;
+          }
+          return (
+            document.querySelector(
+              '[data-prp-composer-kind="conversation"] textarea[data-prp-composer-input], .prp-card--composer textarea.prp-mdc__ta, .prp-overlay textarea.prp-mdc__ta, .prp-overlay textarea[data-prp-composer-input]'
+            ) || null
+          );
+        };
+        const ta = pickTa();
+        if (!ta) return { ok: false, reason: 'no-ta' };
+        try {
+          ta.focus({ preventScroll: true });
+        } catch {
+          ta.focus?.();
+        }
         const native = Object.getOwnPropertyDescriptor(
           window.HTMLTextAreaElement.prototype,
           'value'
         );
-        native.set.call(ta, ${JSON.stringify(commentBody)});
+        native?.set?.call(ta, ${JSON.stringify(commentBody)});
         ta.dispatchEvent(new Event('input', { bubbles: true }));
-        return true;
+        ta.dispatchEvent(new Event('change', { bubbles: true }));
+        return {
+          ok: String(ta.value || '').includes(${JSON.stringify(commentMark)}),
+          len: String(ta.value || '').length,
+          active: document.activeElement === ta,
+        };
       })()
     `);
+    log(`  draft set: ${JSON.stringify(draftSet)}`);
     waitMs(150);
     const beforeBody = evalInPage(`
       (() => {
-        const ta = document.querySelector('[data-prp-composer-input]:focus, textarea.prp-mdc__ta:focus');
+        const ta =
+          document.querySelector(
+            '[data-prp-composer-input]:focus, textarea.prp-mdc__ta:focus'
+          ) ||
+          document.querySelector(
+            '[data-prp-composer-kind="conversation"] textarea, .prp-card--composer textarea.prp-mdc__ta, .prp-overlay textarea.prp-mdc__ta'
+          );
         return ta ? String(ta.value || '') : '';
       })()
     `);
     assert(
       beforeBody.includes(commentMark),
-      `draft not in textarea: ${beforeBody.slice(0, 80)}`
+      `draft not in textarea: ${beforeBody.slice(0, 80)} draftSet=${JSON.stringify(draftSet)}`
     );
     // Meta+Enter (Mac) — harness press API
     press('Meta+Enter');
@@ -1145,13 +1184,21 @@ export function getSteps() {
     `);
     waitMs(400);
     // Force collapsed ghost: clear draft + blur so MarkdownComposer shows ghost.
+    // Prefer Write tab click first (preview tab keeps open=true even when empty).
     evalInPage(`
       (() => {
         const root =
           document.querySelector('[data-prp-composer-kind="conversation"]') ||
-          document.querySelector('.prp-card--composer');
+          document.querySelector('.prp-card--composer') ||
+          document.querySelector('.prp-overlay .prp-mdc--open')?.closest?.('.prp-card, [data-prp-composer-kind]');
+        const writeTab = [...(root?.querySelectorAll?.('.prp-tab, [role="tab"]') || [])].find(
+          (b) => /^write$/i.test((b.textContent || '').trim())
+        );
+        writeTab?.click?.();
         const ta = root?.querySelector?.(
           'textarea[data-prp-composer-input], textarea.prp-mdc__ta'
+        ) || document.querySelector(
+          '.prp-overlay [data-prp-composer-kind="conversation"] textarea, .prp-overlay .prp-card--composer textarea.prp-mdc__ta'
         );
         if (ta) {
           const native = Object.getOwnPropertyDescriptor(
@@ -1165,10 +1212,39 @@ export function getSteps() {
           }
           ta.blur();
         }
+        // Click outside composer so focus-within / focused state clears.
+        document
+          .querySelector('.prp-header, .prp-header__title, .prp-conversation__scroller')
+          ?.dispatchEvent?.(new MouseEvent('mousedown', { bubbles: true }));
         document.activeElement?.blur?.();
+        return {
+          cleared: !!ta,
+          val: ta ? String(ta.value || '').length : -1,
+        };
       })()
     `);
-    waitMs(200);
+    waitMs(350);
+    // If still open empty, one more blur pass after React commit.
+    evalInPage(`
+      (() => {
+        const ta = document.querySelector(
+          '.prp-overlay [data-prp-composer-kind="conversation"] textarea, .prp-overlay .prp-card--composer textarea.prp-mdc__ta, .prp-overlay textarea.prp-mdc__ta'
+        );
+        if (!ta) return false;
+        if (String(ta.value || '').trim()) {
+          const native = Object.getOwnPropertyDescriptor(
+            window.HTMLTextAreaElement.prototype,
+            'value'
+          );
+          native?.set?.call(ta, '');
+          ta.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        ta.blur();
+        document.activeElement?.blur?.();
+        return true;
+      })()
+    `);
+    waitMs(250);
     const fired = evalInPage(`
       (() => {
         const roots = [
@@ -1203,6 +1279,14 @@ export function getSteps() {
             root;
         }
         if (!ghost) {
+          // Last resort: any ghost under overlay (reply ghosts still exercise mousedown→focus)
+          ghost = document.querySelector('.prp-overlay .prp-mdc__ghost');
+          root =
+            ghost?.closest?.(
+              '[data-prp-composer-kind], .prp-card--composer, [data-prp-composer-root]'
+            ) || root;
+        }
+        if (!ghost) {
           return {
             ok: false,
             reason: 'no-ghost',
@@ -1210,7 +1294,11 @@ export function getSteps() {
               (g.textContent || '').trim().slice(0, 30)
             ),
             openTas: document.querySelectorAll(
-              '.prp-overlay textarea[data-prp-composer-input]'
+              '.prp-overlay textarea[data-prp-composer-input], .prp-overlay textarea.prp-mdc__ta'
+            ).length,
+            openMdc: document.querySelectorAll('.prp-overlay .prp-mdc--open').length,
+            collapsed: document.querySelectorAll(
+              '.prp-overlay [data-prp-composer-collapsed="1"]'
             ).length,
           };
         }

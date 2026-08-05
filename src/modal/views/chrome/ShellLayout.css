@@ -399,7 +399,10 @@
   display: block;
 }
 
-/* Header icon actions (shell / subscribe / close PR / open GitHub) */
+/*
+ * Header icon actions — neutral at rest; chromatic only on hover / focus / active.
+ * Pressed / danger / layout variants stay monochrome until interaction.
+ */
 .prp-header__icon-btn,
 .prp-shell-toggle {
   appearance: none;
@@ -424,39 +427,84 @@
     border-color 120ms ease,
     background 120ms ease;
 }
+/* Neutral “on” / pressed — stronger gray, no accent fill at rest */
+.prp-header__icon-btn--on,
+.prp-header__icon-btn[aria-pressed='true'],
+.prp-shell-toggle[aria-pressed='true'],
+.prp-header__icon-btn--layout,
+.prp-header__icon-btn--subscribed,
+.prp-header__icon-btn--subscribed[aria-pressed='true'],
+.prp-header__icon-btn--danger {
+  color: var(--prp-fg-muted);
+  border-color: var(--prp-border);
+  background: var(--prp-bg-muted);
+}
+.prp-header__icon-btn--on,
+.prp-header__icon-btn[aria-pressed='true'],
+.prp-shell-toggle[aria-pressed='true'] {
+  color: var(--prp-fg);
+  background: color-mix(in srgb, var(--prp-fg-muted) 12%, var(--prp-bg));
+  border-color: color-mix(in srgb, var(--prp-fg-muted) 35%, var(--prp-border));
+}
+/* Default hover / focus / press → accent */
 .prp-header__icon-btn:hover,
 .prp-header__icon-btn:focus-visible,
+.prp-header__icon-btn:active,
 .prp-shell-toggle:hover,
-.prp-shell-toggle:focus-visible {
+.prp-shell-toggle:focus-visible,
+.prp-shell-toggle:active {
   color: var(--prp-accent);
   border-color: var(--prp-accent);
   background: color-mix(in srgb, var(--prp-accent) 10%, var(--prp-bg));
   outline: none;
 }
-.prp-header__icon-btn--on,
-.prp-header__icon-btn[aria-pressed='true'],
-.prp-shell-toggle[aria-pressed='true'] {
+/* Layout toggle (Diff ↔ Conversation) — same accent interaction */
+.prp-header__icon-btn--layout:hover,
+.prp-header__icon-btn--layout:focus-visible,
+.prp-header__icon-btn--layout:active {
   color: var(--prp-accent);
-  border-color: color-mix(in srgb, var(--prp-accent) 45%, var(--prp-border));
-  background: color-mix(in srgb, var(--prp-accent) 10%, var(--prp-bg));
+  border-color: var(--prp-accent);
+  background: color-mix(in srgb, var(--prp-accent) 14%, var(--prp-bg));
+  outline: none;
 }
-/* Close PR — light red fill, strong red border (always, not only hover) */
-.prp-header__icon-btn--danger {
-  color: var(--prp-danger, #cf222e);
-  border-color: color-mix(in srgb, var(--prp-danger, #cf222e) 72%, var(--prp-border));
-  background: color-mix(in srgb, var(--prp-danger, #cf222e) 12%, var(--prp-bg));
-}
+/* Close PR — danger only on interaction */
 .prp-header__icon-btn--danger:hover,
-.prp-header__icon-btn--danger:focus-visible {
+.prp-header__icon-btn--danger:focus-visible,
+.prp-header__icon-btn--danger:active {
   color: var(--prp-danger, #cf222e);
   border-color: var(--prp-danger, #cf222e);
-  background: color-mix(in srgb, var(--prp-danger, #cf222e) 18%, var(--prp-bg));
+  background: color-mix(in srgb, var(--prp-danger, #cf222e) 14%, var(--prp-bg));
+  outline: none;
+}
+/* Subscribe pressed: neutral at rest; accent on interaction (unsubscribe) */
+.prp-header__icon-btn--subscribed:hover,
+.prp-header__icon-btn--subscribed:focus-visible,
+.prp-header__icon-btn--subscribed:active {
+  color: var(--prp-fg);
+  border-color: color-mix(in srgb, var(--prp-fg-muted) 40%, var(--prp-border));
+  background: color-mix(in srgb, var(--prp-fg-muted) 10%, var(--prp-bg));
   outline: none;
 }
 .prp-header__icon-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
   pointer-events: none;
+}
+/* Reopen PR text control — default neutral; success green only on interaction */
+.prp-header__actions .prp-header__reopen-btn.prp-btn {
+  color: var(--prp-fg-muted);
+  border-color: var(--prp-border);
+  background: var(--prp-bg-muted);
+  filter: none;
+}
+.prp-header__actions .prp-header__reopen-btn.prp-btn:hover:not(:disabled),
+.prp-header__actions .prp-header__reopen-btn.prp-btn:focus-visible:not(:disabled),
+.prp-header__actions .prp-header__reopen-btn.prp-btn:active:not(:disabled) {
+  color: var(--prp-ok, #1a7f37);
+  border-color: color-mix(in srgb, var(--prp-ok, #1a7f37) 55%, var(--prp-border));
+  background: color-mix(in srgb, var(--prp-ok, #1a7f37) 12%, var(--prp-bg));
+  outline: none;
+  filter: none;
 }
 .prp-header__refresh-btn .prp-octicon {
   display: block;

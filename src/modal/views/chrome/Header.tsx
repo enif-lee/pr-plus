@@ -863,7 +863,8 @@ export function Header(props: any) {
             {canReopen ? (
               <Button
                 size="sm"
-                variant="ok"
+                variant="default"
+                className="prp-header__reopen-btn"
                 disabled={actionBusy}
                 onClick={onReopenPr}
                 title="Reopen pull request"

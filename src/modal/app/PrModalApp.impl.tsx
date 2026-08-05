@@ -5,6 +5,7 @@
  */
 import React, {
   useCallback,
+  useDeferredValue,
   useEffect,
   useMemo,
   useRef,
@@ -865,9 +866,12 @@ export function PrModalApp({
   /**
    * Diff toolbar multi-select review filter (status chips + settings).
    * Default: unresolved + pending. Empty statuses ≡ all.
+   * Deferred copy drives virtualRows / mappedComments so chip --on paints
+   * before the heavy list rebuild (toggle felt laggy until Diff took focus).
    */
   const [diffReviewFilter, setDiffReviewFilter] =
     useState<DiffReviewFilterState>(() => createDefaultDiffReviewFilter());
+  const deferredDiffReviewFilter = useDeferredValue(diffReviewFilter);
   /** Files-nav filters (shared with Diff review nav counts). */
   const [fileExtFilter, setFileExtFilter] = useState(() => new Set<string>());
   const [fileUnreadOnly, setFileUnreadOnly] = useState(false);
@@ -1648,7 +1652,8 @@ export function PrModalApp({
    */
   const navReviewComments = useMemo(() => {
     const all = detail?.reviewComments || [];
-    const f = normalizeDiffReviewFilter(diffReviewFilter);
+    // Deferred: chip selection uses urgent diffReviewFilter; list rebuild lags.
+    const f = normalizeDiffReviewFilter(deferredDiffReviewFilter);
     return filterReviewCommentsForDiffNav(
       all,
       f,
@@ -1657,7 +1662,7 @@ export function PrModalApp({
     );
   }, [
     detail?.reviewComments,
-    diffReviewFilter,
+    deferredDiffReviewFilter,
     displayPathSet,
     reviewFilterEvalOpts,
   ]);
@@ -1865,7 +1870,7 @@ export function PrModalApp({
     const roots = sortThreadRootComments(
       filterReviewRootsForDiffNav(
         detail?.reviewComments || [],
-        diffReviewFilter,
+        deferredDiffReviewFilter,
         displayPathSet,
         reviewFilterEvalOpts
       ),
@@ -1875,7 +1880,7 @@ export function PrModalApp({
   }, [
     detail?.reviewComments,
     virtualRows,
-    diffReviewFilter,
+    deferredDiffReviewFilter,
     displayPathSet,
     displayFiles,
     navReviewComments,

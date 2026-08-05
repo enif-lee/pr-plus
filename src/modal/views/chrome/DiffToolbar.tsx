@@ -25,6 +25,7 @@ import {
   isStatusActive,
   listReviewAuthorsFromComments,
   normalizeDiffReviewFilter,
+  toggleDiffReviewStatus,
   type DiffReviewFilterState,
   type DiffReviewStatus,
 } from '@lib/diff-review-filter';
@@ -127,13 +128,35 @@ export function DiffToolbar(props: any) {
       : Number(pendingServerCount || 0) || localPending;
   const unresN = Number(unresolvedCount) || 0;
   const resN = Number(resolvedCount) || 0;
-  const filterState: DiffReviewFilterState = useMemo(
+  /**
+   * Optimistic chip UI: parent filter recompute rebuilds virtualRows and can
+   * lag a frame (selected underline only appears after Diff steals focus).
+   * Local state paints --on immediately; drop when props catch up.
+   */
+  const [optimisticFilter, setOptimisticFilter] =
+    useState<DiffReviewFilterState | null>(null);
+  const propsFilter: DiffReviewFilterState = useMemo(
     () =>
       normalizeDiffReviewFilter(
         reviewFilter ?? createDefaultDiffReviewFilter()
       ),
     [reviewFilter]
   );
+  const filterState: DiffReviewFilterState = optimisticFilter ?? propsFilter;
+  useEffect(() => {
+    if (!optimisticFilter) return;
+    const a = optimisticFilter;
+    const b = propsFilter;
+    if (
+      a.hideOutdated === b.hideOutdated &&
+      a.statuses.length === b.statuses.length &&
+      a.statuses.every((s, i) => s === b.statuses[i]) &&
+      a.authors.length === b.authors.length &&
+      a.authors.every((s, i) => s === b.authors[i])
+    ) {
+      setOptimisticFilter(null);
+    }
+  }, [optimisticFilter, propsFilter]);
   const authorList = useMemo(() => {
     const src = Array.isArray(reviewComments)
       ? reviewComments
@@ -255,21 +278,23 @@ export function DiffToolbar(props: any) {
     };
   }, [settingsOpen]);
   function toggleStatus(status: DiffReviewStatus) {
+    const next = toggleDiffReviewStatus(filterState, status);
+    setOptimisticFilter(next);
     if (typeof onToggleReviewStatus === 'function') {
       onToggleReviewStatus(status);
       return;
     }
-    // Fallback: exclusive-style via onReviewFilter for older hosts
-    onReviewFilter?.(
-      isStatusActive(filterState, status) ? null : status
-    );
+    // Fallback: full multi state for older hosts (not exclusive string)
+    onReviewFilter?.(next);
   }
   function patchFilter(partial: Partial<DiffReviewFilterState>) {
+    const next = normalizeDiffReviewFilter({ ...filterState, ...partial });
+    setOptimisticFilter(next);
     if (typeof onPatchReviewFilter === 'function') {
       onPatchReviewFilter(partial);
       return;
     }
-    onReviewFilter?.({ ...filterState, ...partial });
+    onReviewFilter?.(next);
   }
   const isMac =
     typeof navigator !== 'undefined' &&

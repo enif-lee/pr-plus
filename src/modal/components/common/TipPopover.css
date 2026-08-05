@@ -253,32 +253,11 @@
   display: none; /* permanent badges off */
 }
 
-/* Subscribe: muted/slash when on; normal outline bell when off */
-.prp-header__icon-btn--subscribed,
-.prp-header__icon-btn--subscribed[aria-pressed='true'] {
-  color: var(--prp-fg-muted);
-  border-color: var(--prp-border);
-  background: var(--prp-bg-muted);
-}
-.prp-header__icon-btn--subscribed:hover,
-.prp-header__icon-btn--subscribed:focus-visible {
-  color: var(--prp-fg);
-  border-color: var(--prp-border);
-  background: color-mix(in srgb, var(--prp-fg-muted) 8%, var(--prp-bg));
-}
-
-/* Diff ↔ Conversation layout toggle — accent like former primary button */
-.prp-header__icon-btn--layout {
-  color: var(--prp-accent);
-  border-color: color-mix(in srgb, var(--prp-accent) 40%, var(--prp-border));
-  background: color-mix(in srgb, var(--prp-accent) 12%, var(--prp-bg));
-}
-.prp-header__icon-btn--layout:hover,
-.prp-header__icon-btn--layout:focus-visible {
-  color: var(--prp-accent);
-  border-color: var(--prp-accent);
-  background: color-mix(in srgb, var(--prp-accent) 18%, var(--prp-bg));
-}
+/*
+ * Subscribe / layout header actions: rest chrome lives in ShellLayout.css
+ * (neutral at rest, color only on hover/active). Keep this file free of
+ * chromatic defaults so TipPopover load order cannot re-color the rest state.
+ */
 
 /* ── Searchable select ── */
 .prp-sselect-layer {

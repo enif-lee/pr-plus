@@ -505,8 +505,9 @@
 }
 
 /* Expanded comment row: content-sized (do not force large min-height).
- * Must not inherit .prp-vline { overflow:hidden; contain:paint } — that clips
- * multi-line markdown when virtual-list measure lags body hydrate. */
+ * Row may open overflow for virtual-list measure, but the card MUST keep
+ * overflow:hidden so filebar/body never paint over border-radius corners.
+ * (overflow:visible on the card made "RIGHT" etc. sit on top of the border.) */
 .prp-vline--comment:not(.prp-vline--comment-collapsed):not([data-collapsed='1']) {
   min-height: 0 !important;
   height: auto !important;
@@ -516,7 +517,7 @@
 }
 .prp-vline--comment:not(.prp-vline--comment-collapsed):not([data-collapsed='1'])
   .prp-inline-thread__card {
-  overflow: visible;
+  overflow: hidden; /* clip to border-radius — never paint over the stroke */
 }
 .prp-vline--comment:not(.prp-vline--comment-collapsed):not([data-collapsed='1'])
   .prp-review-thread__content {

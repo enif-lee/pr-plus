@@ -32,11 +32,13 @@
   border-radius: 10px;
   background: var(--prp-bg);
   box-shadow: 0 2px 8px rgba(1, 4, 9, 0.06);
+  /* Always clip children to the rounded rect — body/filebar must not sit on the border */
   overflow: hidden;
   width: 100%;
   max-width: 100%;
   min-width: 0;
   box-sizing: border-box;
+  isolation: isolate;
 }
 
 .prp-inline-thread__filebar {
@@ -54,6 +56,8 @@
   max-width: 100%;
   box-sizing: border-box;
   overflow: hidden;
+  /* Match card top radius so meta ("RIGHT") stays inside the curve */
+  border-radius: 10px 10px 0 0;
 }
 
 /* Lazy by-ids comments in flight (expand shell / resolved) */

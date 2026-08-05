@@ -368,7 +368,16 @@ export function getSteps() {
 
   run('open pulls + extension decorations', () => {
     openPulls();
-    const ext = extensionDomProbe();
+    // Content inject can lag after full-suite soft reset / SW reload — poll.
+    let ext = extensionDomProbe();
+    for (let i = 0; i < 12 && !(ext.decorated > 0 || ext.treeToggle); i++) {
+      waitMs(400);
+      if (i === 5) {
+        // Nudge: re-open pulls so content-bootstrap re-runs decorations.
+        openPulls();
+      }
+      ext = extensionDomProbe();
+    }
     log(`  ext=${JSON.stringify(ext)}`);
     assert(ext.decorated > 0 || ext.treeToggle, 'extension decorations missing');
     baseline = probeListRow(DEMO_PR);
