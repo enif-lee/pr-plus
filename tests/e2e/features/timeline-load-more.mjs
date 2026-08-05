@@ -6,13 +6,64 @@
 import {
   DEMO_PR,
   assert,
+  closeOverlay,
   evalInPage,
   log,
   openPr,
+  openPulls,
   setLayout,
   waitDetailReady,
   waitMs,
 } from '../lib/harness.mjs';
+
+/** Native pulls-list speech-bubble count for PR #n (null if missing). */
+function probeListCommentCount(n) {
+  return evalInPage(`
+    (() => {
+      const n = ${Number(n)};
+      const rows = [
+        ...document.querySelectorAll('.js-issue-row, [id^="issue_"]'),
+      ];
+      let row = null;
+      for (const r of rows) {
+        if (r.id === 'issue_' + n) {
+          row = r;
+          break;
+        }
+        const hit = [...r.querySelectorAll('a[href*="/pull/"]')].some((a) => {
+          const h = a.getAttribute('href') || '';
+          return h.includes('/pull/' + n);
+        });
+        if (hit) {
+          row = r;
+          break;
+        }
+      }
+      if (!row) return { found: false, commentCount: null };
+      let el =
+        row.querySelector('a[aria-label*="comment" i]') ||
+        row.querySelector('a:has(.octicon-comment)');
+      if (!el) {
+        return { found: true, commentCount: null, reason: 'no-control' };
+      }
+      const aria = el.getAttribute('aria-label') || '';
+      const m = aria.match(/(\\d+)\\s*comment/i);
+      let count = m ? Number(m[1]) : null;
+      if (count == null) {
+        const spans = el.querySelectorAll('span');
+        for (const s of spans) {
+          if (s.querySelector('svg, .octicon')) continue;
+          const t = (s.textContent || '').trim();
+          if (/^\\d+$/.test(t)) {
+            count = Number(t);
+            break;
+          }
+        }
+      }
+      return { found: true, commentCount: count, aria: aria.slice(0, 40) };
+    })()
+  `);
+}
 
 /** Snapshot gap chrome + timeline diag on the page. */
 function paginationProbe() {
@@ -192,6 +243,8 @@ export function buildTimelineLoadMoreSteps() {
   const steps = [];
   /** @type {any} */
   let beforeLoad = null;
+  /** @type {{ found?: boolean, commentCount?: number|null }|null} */
+  let listCommentBefore = null;
 
   steps.push({
     name: `TLM.0 open PR #${DEMO_PR} conversation`,
@@ -207,6 +260,13 @@ export function buildTimelineLoadMoreSteps() {
           return true;
         })()
       `);
+      // Baseline list speech-bubble before open/load-more can corrupt it
+      openPulls();
+      waitMs(500);
+      listCommentBefore = probeListCommentCount(DEMO_PR);
+      log(
+        `  list comment baseline #${DEMO_PR}=${JSON.stringify(listCommentBefore)}`
+      );
       openPr(DEMO_PR);
       setLayout('conversation');
       waitDetailReady({
@@ -406,6 +466,55 @@ export function buildTimelineLoadMoreSteps() {
         }
       } else {
         log('  no gap after Diff — corpus complete for this window ✓');
+      }
+    },
+  });
+
+  steps.push({
+    name: 'TLM.4 close after load-more → list comment count not wiped to 0',
+    fn: () => {
+      // Regression: load more set commentsMeta.hasMore=false with empty/partial
+      // comments[] → estimateListCommentCount published 0 onto the list badge.
+      closeOverlay();
+      waitMs(700);
+      if (!evalInPage(`location.pathname.includes('/pulls')`)) {
+        openPulls();
+        waitMs(500);
+      }
+      let after = probeListCommentCount(DEMO_PR);
+      const t0 = Date.now();
+      while (
+        after?.found &&
+        after.commentCount == null &&
+        Date.now() - t0 < 4000
+      ) {
+        waitMs(300);
+        after = probeListCommentCount(DEMO_PR);
+      }
+      log(
+        `  list comment after load-more close: before=${JSON.stringify(
+          listCommentBefore
+        )} after=${JSON.stringify(after)}`
+      );
+      assert(after?.found, `PR #${DEMO_PR} list row missing after close`);
+      // Must not be wiped to zero when the list previously showed a positive count
+      if (
+        listCommentBefore?.commentCount != null &&
+        listCommentBefore.commentCount > 0
+      ) {
+        assert(
+          after.commentCount != null && after.commentCount > 0,
+          `list comment count wiped after load-more: before=${listCommentBefore.commentCount} after=${JSON.stringify(after)}`
+        );
+        assert(
+          after.commentCount >= listCommentBefore.commentCount,
+          `list comment count decreased after load-more: ${listCommentBefore.commentCount}→${after.commentCount}`
+        );
+      } else if (after.commentCount != null) {
+        assert(
+          after.commentCount > 0,
+          `list comment count is 0 after load-more close: ${JSON.stringify(after)}`
+        );
       }
     },
   });

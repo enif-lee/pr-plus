@@ -301,13 +301,47 @@
 
   /**
    * Best-effort list comment total from detail (issue comments).
-   * Only when the page is complete (!hasMore) so we never under-count.
+   * Prefer pure helper (list-comment-count); never under-count after load-more.
    */
   function estimateListCommentCount(detail: any) {
-    if (!detail || !Array.isArray(detail.comments)) return null;
-    const meta = detail.commentsMeta;
-    if (meta && meta.hasMore) return null;
-    return detail.comments.length;
+    try {
+      const pure = (globalThis as any).PRModalListCommentCount;
+      if (typeof pure?.estimateListCommentCount === 'function') {
+        return pure.estimateListCommentCount(detail);
+      }
+    } catch {
+      /* fall through */
+    }
+    // Inline fallback (same rules as src/modal/lib/list-comment-count.ts)
+    if (!detail || typeof detail !== 'object') return null;
+    for (const key of [
+      'listCommentCount',
+      '_listCommentCount',
+      'commentCount',
+    ]) {
+      if (!Object.prototype.hasOwnProperty.call(detail, key)) continue;
+      const n = Number(detail[key]);
+      if (Number.isFinite(n) && n >= 0) return n;
+    }
+    const meta =
+      detail.commentsMeta && typeof detail.commentsMeta === 'object'
+        ? detail.commentsMeta
+        : null;
+    if (meta) {
+      const total = Number(meta.totalCount);
+      if (Number.isFinite(total) && total >= 0) return total;
+    }
+    if (!Array.isArray(detail.comments)) return null;
+    if (meta && (meta.hasMore === true || meta.complete === false)) return null;
+    if (meta && meta.nextPage != null && Number(meta.nextPage) > 0) return null;
+    const tm =
+      detail.timelineMeta && typeof detail.timelineMeta === 'object'
+        ? detail.timelineMeta
+        : null;
+    if (tm && (tm.hasMore === true || tm.complete === false)) return null;
+    const n = detail.comments.length;
+    if (n <= 0) return null;
+    return n;
   }
 
   /**

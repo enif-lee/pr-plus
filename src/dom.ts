@@ -705,6 +705,33 @@ function updateListRowCommentCount(doc: any, prNumber: any, count: any) {
   const el = findListRowCommentControl(row);
   if (!el) return false;
 
+  // Never downgrade the native list badge to a smaller number (progressive
+  // load-more can yield a partial comments[] that is not the full total).
+  // Explicit 0 is also refused when a positive count is already painted.
+  try {
+    const aria = String(el.getAttribute?.('aria-label') || '');
+    const m = aria.match(/(\d+)\s*comment/i);
+    if (m) {
+      const prev = Number(m[1]);
+      if (Number.isFinite(prev) && prev > c) return false;
+    } else {
+      const spans = el.querySelectorAll?.('span');
+      if (spans) {
+        for (const span of spans) {
+          if (span.querySelector?.('svg, .octicon, [class*="octicon"]')) continue;
+          const t = String(span.textContent || '').trim();
+          if (/^\d+$/.test(t)) {
+            const prev = Number(t);
+            if (Number.isFinite(prev) && prev > c) return false;
+            break;
+          }
+        }
+      }
+    }
+  } catch {
+    /* ignore and proceed */
+  }
+
   const label = c === 1 ? '1 comment' : `${c} comments`;
   try {
     const aria = el.getAttribute?.('aria-label');

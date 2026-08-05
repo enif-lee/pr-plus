@@ -1106,15 +1106,25 @@
               pure.minTimelineCoverageEndAt(comments, events) || coverageEndAt;
           }
           const loadedCount = comments.length + events.length;
+          // Preserve REST issue-comment incompleteness: timeline exhaustion must
+          // not mark commentsMeta complete or list resync will publish a partial
+          // (or empty) comments[].length as the pulls-list speech-bubble count.
+          const prevCm = detailSnap.commentsMeta || {};
+          const restStillMore =
+            prevCm.hasMore === true ||
+            prevCm.complete === false ||
+            (prevCm.nextPage != null && Number(prevCm.nextPage) > 0);
+          const commentsHasMore = Boolean(hasMore) || restStillMore;
           const next = {
             ...detailSnap,
             comments,
             timelineEvents: events,
             commentsMeta: {
-              ...(detailSnap.commentsMeta || {}),
+              ...prevCm,
               loadedCount: comments.length,
-              hasMore,
-              watermark: meta.watermark || detailSnap.commentsMeta?.watermark,
+              hasMore: commentsHasMore,
+              complete: !commentsHasMore,
+              watermark: meta.watermark || prevCm.watermark,
             },
             timelineMeta: {
               ...meta,
@@ -1247,13 +1257,24 @@
                 comments: next.comments,
                 commentsMeta: {
                   ...(next.commentsMeta || {}),
-                  hasMore: Boolean(next.timelineMeta?.hasMore),
+                  // Keep commentsMeta.hasMore from loadOneTimelinePage (OR of
+                  // timeline + residual REST incompleteness) — do not force
+                  // false solely from timelineMeta.hasMore.
                   loadedCount: Array.isArray(next.comments)
                     ? next.comments.length
                     : 0,
-                  startCursor: next.timelineMeta?.startCursor || null,
-                  endCursor: next.timelineMeta?.endCursor || null,
-                  watermark: next.timelineMeta?.watermark || null,
+                  startCursor:
+                    next.commentsMeta?.startCursor ??
+                    next.timelineMeta?.startCursor ??
+                    null,
+                  endCursor:
+                    next.commentsMeta?.endCursor ??
+                    next.timelineMeta?.endCursor ??
+                    null,
+                  watermark:
+                    next.commentsMeta?.watermark ??
+                    next.timelineMeta?.watermark ??
+                    null,
                 },
                 timelineEvents: next.timelineEvents,
                 timelineMeta: next.timelineMeta,
