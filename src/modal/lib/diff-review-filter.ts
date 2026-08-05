@@ -458,39 +458,15 @@ export function filterReviewCommentsForDiffNav(
 }
 
 /**
- * Files that still have ≥1 root matching the Diff review filter.
+ * @deprecated Review multi-filter no longer scopes the Diff file list.
+ * File scoping for “has comments” is `filterFilesCommentedOnly` (file explorer).
+ * Kept as identity so older callers do not hide files unexpectedly.
  */
 export function filterFilesByDiffReviewFilter(
   files: any[],
-  comments: any[],
-  filter: DiffReviewFilterState | null | undefined,
-  opts?: DiffReviewFilterEvalOpts | null
+  _comments?: any[],
+  _filter?: DiffReviewFilterState | null,
+  _opts?: DiffReviewFilterEvalOpts | null
 ): any[] {
-  const list = Array.isArray(files) ? files : [];
-  const roots = filterReviewRootsForDiffNav(comments, filter, null, opts);
-  // Unrestricted status+author+outdated with no roots → still show all files
-  // when there are simply no comments (not a "hide everything" case).
-  const f = normalizeDiffReviewFilter(
-    filter ?? createDefaultDiffReviewFilter()
-  );
-  const unrestricted =
-    isStatusFilterUnrestricted(f, opts) &&
-    isAuthorFilterUnrestricted(f) &&
-    !f.hideOutdated;
-  if (unrestricted) return list.slice();
-
-  const paths = new Set<string>();
-  for (const r of roots) {
-    const p = r?.path || '';
-    if (p) paths.add(p);
-  }
-  // No matching review threads for the active status/author filters: keep the
-  // full file list so Diff stays usable (blank Diff when default is
-  // unresolved+pending but the PR only has resolved — or no — threads).
-  // Thread/comment nav still uses filterReviewRootsForDiffNav / ForDiffNav.
-  if (!paths.size) return list.slice();
-  return list.filter((file) => {
-    const path = file?.filename || file?.path || '';
-    return path && paths.has(path);
-  });
+  return Array.isArray(files) ? files.slice() : [];
 }

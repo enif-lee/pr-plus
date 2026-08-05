@@ -354,6 +354,21 @@ export function filterFilesUnreadOnly(files, viewedPaths, unreadOnly) {
 }
 
 /**
+ * Keep only files that have ≥1 review thread (any status).
+ * Used by the file explorer "Commented" chip — independent of Diff review-status
+ * multi-filter (which only hides threads, not files).
+ *
+ * @param {Array<{ filename?: string, path?: string }>} files
+ * @param {Map<string, number>|Record<string, number>|null|undefined} threadCounts
+ * @param {boolean} commentedOnly
+ */
+export function filterFilesCommentedOnly(files, threadCounts, commentedOnly) {
+  const list = Array.isArray(files) ? files : [];
+  if (!commentedOnly) return list.slice();
+  return filterFilesByReviewMode(list, threadCounts, threadCounts, 'all');
+}
+
+/**
  * Collect every dir path in a nested tree (for auto-expand while filtering).
  * @param {TreeNode[]} nodes
  * @returns {Set<string>}

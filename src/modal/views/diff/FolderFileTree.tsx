@@ -5,6 +5,7 @@ import {
   listFileExtensions,
   filterFilesByExtensions,
   filterFilesUnreadOnly,
+  filterFilesCommentedOnly,
   toggleFileExtension,
   formatFileExtensionLabel,
   collectDirPaths,
@@ -52,6 +53,9 @@ function FolderFileTreeImpl(props: any) {
     onSelectedExts = null,
     unreadOnly: unreadOnlyProp = null,
     onUnreadOnly = null,
+    /** Show only files that have ≥1 review thread (any status). */
+    commentedOnly: commentedOnlyProp = null,
+    onCommentedOnly = null,
     /** Visible file list index for prev/next (0-based; -1 if unknown) */
     fileIndex = -1,
     fileTotal = 0,
@@ -77,14 +81,23 @@ function FolderFileTreeImpl(props: any) {
 
   const [selectedExtsLocal, setSelectedExtsLocal] = useState(() => new Set<string>());
   const [unreadOnlyLocal, setUnreadOnlyLocal] = useState(false);
+  const [commentedOnlyLocal, setCommentedOnlyLocal] = useState(false);
   const selectedExts =
     selectedExtsProp instanceof Set ? selectedExtsProp : selectedExtsLocal;
   const unreadOnly =
     typeof unreadOnlyProp === 'boolean' ? unreadOnlyProp : unreadOnlyLocal;
+  const commentedOnly =
+    typeof commentedOnlyProp === 'boolean'
+      ? commentedOnlyProp
+      : commentedOnlyLocal;
   const setSelectedExts =
     typeof onSelectedExts === 'function' ? onSelectedExts : setSelectedExtsLocal;
   const setUnreadOnly =
     typeof onUnreadOnly === 'function' ? onUnreadOnly : setUnreadOnlyLocal;
+  const setCommentedOnly =
+    typeof onCommentedOnly === 'function'
+      ? onCommentedOnly
+      : setCommentedOnlyLocal;
 
   const extOptions = useMemo(() => {
     // Prefer resolve-status-scoped source so selecting .ts does not remove .tsx/etc chips.
@@ -99,7 +112,7 @@ function FolderFileTreeImpl(props: any) {
     return out;
   }, [extSourceFiles, files, selectedExts]);
 
-  // Parent App already applies review + name/ext/unread filters when controlled.
+  // Parent App already applies name/ext/unread/commented filters when controlled.
   // Re-apply here only for local (uncontrolled) mode, or when parent passes unfiltered files.
   const parentFiltersFiles = selectedExtsProp instanceof Set;
   const filteredTree = useMemo(() => {
@@ -110,6 +123,9 @@ function FolderFileTreeImpl(props: any) {
       }
       list = filterFilesByExtensions(list, selectedExts);
       list = filterFilesUnreadOnly(list, viewedPaths, unreadOnly);
+      if (typeof filterFilesCommentedOnly === 'function') {
+        list = filterFilesCommentedOnly(list, threadCounts, commentedOnly);
+      }
     }
     if (typeof buildNestedFileTree === 'function') {
       return buildNestedFileTree(list);
@@ -120,7 +136,9 @@ function FolderFileTreeImpl(props: any) {
     fileQuery,
     selectedExts,
     unreadOnly,
+    commentedOnly,
     viewedPaths,
+    threadCounts,
     treeProp,
     parentFiltersFiles,
   ]);
@@ -128,7 +146,8 @@ function FolderFileTreeImpl(props: any) {
   const filtering =
     Boolean(String(fileQuery || '').trim()) ||
     selectedExts.size > 0 ||
-    unreadOnly;
+    unreadOnly ||
+    commentedOnly;
 
   const effectiveExpanded = useMemo(() => {
     if (!filtering) return expandedDirs;
@@ -210,9 +229,26 @@ function FolderFileTreeImpl(props: any) {
                 ? 'Show all files (clear unread filter)'
                 : 'Show only unread (not viewed) files'
             }
-            onClick={() => setUnreadOnly((v) => !v)}
+            onClick={() => setUnreadOnly((v: boolean) => !v)}
           >
             Unread
+          </button>
+          <button
+            type="button"
+            className={
+              commentedOnly
+                ? 'prp-filetree__ext prp-filetree__ext--on'
+                : 'prp-filetree__ext'
+            }
+            aria-pressed={commentedOnly}
+            title={
+              commentedOnly
+                ? 'Show all files (clear commented filter)'
+                : 'Show only files with review comments'
+            }
+            onClick={() => setCommentedOnly((v: boolean) => !v)}
+          >
+            Commented
           </button>
           {extOptions.map((ext) => {
             const on = selectedExts.has(ext);

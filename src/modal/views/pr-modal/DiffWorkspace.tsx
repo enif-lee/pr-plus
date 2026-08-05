@@ -38,6 +38,8 @@ export type DiffWorkspaceProps = {
   setFileExtFilter: any;
   fileUnreadOnly: boolean;
   setFileUnreadOnly: any;
+  fileCommentedOnly?: boolean;
+  setFileCommentedOnly?: any;
   threadCounts: any;
   viewedPaths: any;
   onToggleViewed: any;
@@ -173,6 +175,8 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
     setFileExtFilter,
     fileUnreadOnly,
     setFileUnreadOnly,
+    fileCommentedOnly = false,
+    setFileCommentedOnly = null,
     threadCounts,
     viewedPaths,
     onToggleViewed,
@@ -336,6 +340,8 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
         onSelectedExts={setFileExtFilter}
         unreadOnly={fileUnreadOnly}
         onUnreadOnly={setFileUnreadOnly}
+        commentedOnly={fileCommentedOnly}
+        onCommentedOnly={setFileCommentedOnly}
         threadCounts={threadCounts}
         viewedPaths={viewedPaths}
         onToggleViewed={onToggleViewed}

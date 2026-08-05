@@ -160,6 +160,7 @@ import {
   collectDirPaths,
   filterFilesByExtensions,
   filterFilesUnreadOnly,
+  filterFilesCommentedOnly,
   hasAnyReviewThreads,
 } from '../lib/file-tree';
 import {
@@ -172,7 +173,7 @@ import {
 import {
   createDefaultDiffReviewFilter,
   createUnrestrictedDiffReviewFilter,
-  filterFilesByDiffReviewFilter,
+
   filterReviewCommentsForDiffNav,
   filterReviewRootsForDiffNav,
   normalizeDiffReviewFilter,
@@ -623,6 +624,7 @@ export function PrModalApp({
     setDiffReviewFilter(createDefaultDiffReviewFilter());
     setFileExtFilter(new Set());
     setFileUnreadOnly(false);
+    setFileCommentedOnly(false);
     // Zustand selection survives remount — clear so we never write another PR's #diff-
     // Use getState() so this effect can run before setLineSelection is declared below
     // (avoids TDZ: Cannot access 'setLineSelection' before initialization).
@@ -869,6 +871,8 @@ export function PrModalApp({
   /** Files-nav filters (shared with Diff review nav counts). */
   const [fileExtFilter, setFileExtFilter] = useState(() => new Set<string>());
   const [fileUnreadOnly, setFileUnreadOnly] = useState(false);
+  /** File explorer: only paths with ≥1 review thread (any status). */
+  const [fileCommentedOnly, setFileCommentedOnly] = useState(false);
   /** Outer shell: modal (default) vs side sheet — persisted preference. */
   const [shellMode, setShellMode] = useState<ShellMode>(() => {
     try {
@@ -1577,41 +1581,39 @@ export function PrModalApp({
     return { pendingCount: n };
   }, [detail?.reviewComments]);
 
-  const reviewScopedFiles = useMemo(
-    () =>
-      filterFilesByDiffReviewFilter(
-        annotatedFiles,
-        detail?.reviewComments || [],
-        diffReviewFilter,
-        reviewFilterEvalOpts
-      ),
-    [annotatedFiles, detail?.reviewComments, diffReviewFilter, reviewFilterEvalOpts]
-  );
-
   /**
-   * Files after resolve-status + name/ext/unread filters, then **DFS tree
-   * order** (dirs-first + name sort — same as left file explorer).
+   * Files after name/ext/unread/commented filters, then **DFS tree order**
+   * (dirs-first + name sort — same as left file explorer).
+   * Review-status multi-filter no longer scopes the file list (threads only).
    * Shared by Diff virtual list, file tree, prev/next file nav, and pathOrder.
    */
   const displayFiles = useMemo(() => {
-    let list = reviewScopedFiles;
+    let list = Array.isArray(annotatedFiles) ? annotatedFiles : [];
     if (typeof filterFilesByQuery === 'function') {
       list = filterFilesByQuery(list, fileQuery);
     }
     list = filterFilesByExtensions(list, fileExtFilter);
     list = filterFilesUnreadOnly(list, viewedPaths, fileUnreadOnly);
+    if (typeof filterFilesCommentedOnly === 'function') {
+      list = filterFilesCommentedOnly(list, threadCounts, fileCommentedOnly);
+    }
     // One order for Diff + explorer + step-nav (not GitHub files[] API order)
     if (typeof filesInTreeOrder === 'function') {
       list = filesInTreeOrder(list);
     }
     return list;
   }, [
-    reviewScopedFiles,
+    annotatedFiles,
     fileQuery,
     fileExtFilter,
     viewedPaths,
     fileUnreadOnly,
+    fileCommentedOnly,
+    threadCounts,
   ]);
+
+  /** Ext chips source: full annotated set (not narrowed by explorer filters). */
+  const reviewScopedFiles = annotatedFiles;
 
   /**
    * Diff virtual list source. In single-file mode only the active (or first)
@@ -7899,6 +7901,8 @@ export function PrModalApp({
               setFileExtFilter={setFileExtFilter}
               fileUnreadOnly={fileUnreadOnly}
               setFileUnreadOnly={setFileUnreadOnly}
+              fileCommentedOnly={fileCommentedOnly}
+              setFileCommentedOnly={setFileCommentedOnly}
               threadCounts={threadCounts}
               viewedPaths={viewedPaths}
               onToggleViewed={onToggleViewed}

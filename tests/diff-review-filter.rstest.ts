@@ -154,24 +154,17 @@ describe('normalize + multi-status', () => {
     expect(defIds).not.toContain(2);
     expect(allIds).toContain(2);
     expect(allIds.sort()).toEqual([1, 2, 3, 4]);
-    // Files with only resolved threads reappear under unrestricted
+    // File list is no longer scoped by review multi-filter (threads only)
     const files = [
       { filename: 'a.ts' },
       { filename: 'b.ts' },
       { filename: 'c.ts' },
     ];
-    const underDefault = filterFilesByDiffReviewFilter(
-      files,
-      commentsFixture(),
-      def
-    ).map((f) => f.filename);
-    const underAll = filterFilesByDiffReviewFilter(
-      files,
-      commentsFixture(),
-      unrestricted
-    ).map((f) => f.filename);
-    expect(underDefault).not.toContain('b.ts');
-    expect(underAll.sort()).toEqual(['a.ts', 'b.ts', 'c.ts']);
+    expect(
+      filterFilesByDiffReviewFilter(files, commentsFixture(), def).map(
+        (f) => f.filename
+      )
+    ).toEqual(['a.ts', 'b.ts', 'c.ts']);
   });
 
   test('jump-widen path in App uses unrestricted not default', () => {
@@ -279,7 +272,7 @@ describe('hide outdated + authors + compose', () => {
     expect(all.some((c) => c.id === 2)).toBe(false);
   });
 
-  test('filterFilesByDiffReviewFilter scopes files to matching roots', () => {
+  test('filterFilesByDiffReviewFilter is identity (threads-only policy)', () => {
     const files = [
       { filename: 'a.ts' },
       { filename: 'b.ts' },
@@ -288,29 +281,12 @@ describe('hide outdated + authors + compose', () => {
     ];
     const f = createDefaultDiffReviewFilter();
     const out = filterFilesByDiffReviewFilter(files, commentsFixture(), f);
-    expect(out.map((x) => x.filename).sort()).toEqual(['a.ts', 'c.ts']);
-  });
-
-  test('filterFilesByDiffReviewFilter falls back to all files when no roots match', () => {
-    const files = [
-      { filename: 'only.ts' },
-      { filename: 'other.ts' },
-    ];
-    // Only resolved threads exist; default unresolved+pending matches none
-    const comments = [
-      {
-        id: 9,
-        author: 'x',
-        path: 'only.ts',
-        line: 1,
-        resolved: true,
-        pending: false,
-        body: 'done',
-      },
-    ];
-    const f = createDefaultDiffReviewFilter();
-    const out = filterFilesByDiffReviewFilter(files, comments, f);
-    expect(out.map((x) => x.filename).sort()).toEqual(['only.ts', 'other.ts']);
+    expect(out.map((x) => x.filename).sort()).toEqual([
+      'a.ts',
+      'b.ts',
+      'c.ts',
+      'z.ts',
+    ]);
   });
 
   test('listReviewAuthorsFromComments unique sorted with avatars', () => {
@@ -364,7 +340,8 @@ describe('product wiring structure', () => {
     );
     expect(app).toMatch(/createDefaultDiffReviewFilter/);
     expect(app).toMatch(/filterReviewRootsForDiffNav/);
-    expect(app).toMatch(/filterFilesByDiffReviewFilter/);
+    expect(app).toMatch(/filterFilesCommentedOnly/);
+    expect(app).not.toMatch(/filterFilesByDiffReviewFilter\(/);
     expect(app).toMatch(/onPatchReviewFilter/);
   });
 
