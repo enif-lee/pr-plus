@@ -492,11 +492,15 @@ export function DiffToolbar(props: any) {
               ref={settingsWrapRef}
             >
               <div className="prp-diff-toolbar__thread-nav">
-                {Array.isArray(comments) && comments.length ? (
+                {/* Keep StepNav when PR has review threads even if the active
+                    multi-filter yields 0 mapped roots (e.g. default
+                    Unresolved+Pending on a resolved-only closed PR). */}
+                {showReviewFilter ||
+                (Array.isArray(comments) && comments.length > 0) ? (
                   <StepNav
                     className="prp-diff-toolbar__comments prp-comment-nav"
                     index={commentIndex}
-                    total={comments.length}
+                    total={Array.isArray(comments) ? comments.length : 0}
                     onPrev={onPrevComment}
                     onNext={onNextComment}
                     label="Review threads"
@@ -517,7 +521,8 @@ export function DiffToolbar(props: any) {
                   ref={settingsGearRef}
                   type="button"
                   className={
-                    Array.isArray(comments) && comments.length
+                    showReviewFilter ||
+                    (Array.isArray(comments) && comments.length > 0)
                       ? 'prp-diff-toolbar__filter-gear'
                       : 'prp-diff-toolbar__filter-gear prp-diff-toolbar__filter-gear--alone'
                   }

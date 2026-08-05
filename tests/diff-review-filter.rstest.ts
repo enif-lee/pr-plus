@@ -343,6 +343,9 @@ describe('product wiring structure', () => {
     // Portaled so Diff shell overflow never clips Reviewed-by / Diff view
     expect(tb).toMatch(/createPortal/);
     expect(tb).toMatch(/prp-diff-review-settings--portal/);
+    // StepNav stays when filters yield 0 mapped roots but PR has threads
+    expect(tb).toMatch(/showReviewFilter \|\|/);
+    expect(tb).toMatch(/Filtered review threads/);
     // No exclusive single-select assignment of string modes only
     expect(tb).not.toMatch(/reviewFilter === 'unresolved' \? null : 'unresolved'/);
   });
