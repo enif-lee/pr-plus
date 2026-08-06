@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { useT } from '@lib/locale-context';
 import { Avatar } from '@common/Avatar';
 import { TipPopover } from '@common/TipPopover';
 import { buildUnifiedReviewerRows } from '@lib/searchable-select';
@@ -123,6 +124,7 @@ export function AsideCompactRail({
   /** PR-related git tags (sha matches PR commits / head). */
   tags?: Array<{ name?: string; sha?: string }> | null;
 }) {
+  const t = useT();
   const avatars =
     detail?.avatarUrls && typeof detail.avatarUrls === 'object'
       ? detail.avatarUrls
@@ -308,22 +310,22 @@ export function AsideCompactRail({
     <div className="prp-aside-compact" aria-label="Pull request metadata (compact)">
       {/* Empty groups are omitted entirely when collapsed. */}
       {reviewers.length ? (
-        <section className="prp-aside-compact__group" aria-label="Reviewers">
-          <h3 className="prp-aside-compact__label">Reviewers</h3>
+        <section className="prp-aside-compact__group" aria-label={t('meta_reviewers')}>
+          <h3 className="prp-aside-compact__label">{t('meta_reviewers')}</h3>
           <AvatarStack people={reviewers} withStatusRing />
         </section>
       ) : null}
 
       {assignees.length ? (
-        <section className="prp-aside-compact__group" aria-label="Assignees">
-          <h3 className="prp-aside-compact__label">Assignees</h3>
+        <section className="prp-aside-compact__group" aria-label={t('meta_assignees')}>
+          <h3 className="prp-aside-compact__label">{t('meta_assignees')}</h3>
           <AvatarStack people={assignees} />
         </section>
       ) : null}
 
       {showChecks ? (
-        <section className="prp-aside-compact__group" aria-label="Checks">
-          <h3 className="prp-aside-compact__label">Checks</h3>
+        <section className="prp-aside-compact__group" aria-label={t('meta_checks')}>
+          <h3 className="prp-aside-compact__label">{t('meta_checks')}</h3>
           <ChecksSummary
             checks={detail.checks}
             showLabel={false}
@@ -334,8 +336,8 @@ export function AsideCompactRail({
       ) : null}
 
       {labelItems.length ? (
-        <section className="prp-aside-compact__group" aria-label="Labels">
-          <h3 className="prp-aside-compact__label">Labels</h3>
+        <section className="prp-aside-compact__group" aria-label={t('meta_labels')}>
+          <h3 className="prp-aside-compact__label">{t('meta_labels')}</h3>
           <div className="prp-aside-compact__labels">
             {labelItems.map((l) => (
               <span
@@ -352,8 +354,8 @@ export function AsideCompactRail({
       ) : null}
 
       {projectItems.length ? (
-        <section className="prp-aside-compact__group" aria-label="Projects">
-          <h3 className="prp-aside-compact__label">Projects</h3>
+        <section className="prp-aside-compact__group" aria-label={t('meta_projects')}>
+          <h3 className="prp-aside-compact__label">{t('meta_projects')}</h3>
           <div className="prp-aside-compact__projects" role="list">
             {projectItems.slice(0, 4).map((p) => (
               <span
@@ -388,8 +390,8 @@ export function AsideCompactRail({
       ) : null}
 
       {showMilestone ? (
-        <section className="prp-aside-compact__group" aria-label="Milestone">
-          <h3 className="prp-aside-compact__label">Milestone</h3>
+        <section className="prp-aside-compact__group" aria-label={t('meta_milestone')}>
+          <h3 className="prp-aside-compact__label">{t('meta_milestone')}</h3>
           <span className="prp-aside-compact__pill prp-has-tip" tabIndex={0}>
             <span className="prp-aside-compact__pill-txt">
               {milestone.title
@@ -412,8 +414,8 @@ export function AsideCompactRail({
       ) : null}
 
       {developmentItems.length ? (
-        <section className="prp-aside-compact__group" aria-label="Development">
-          <h3 className="prp-aside-compact__label">Development</h3>
+        <section className="prp-aside-compact__group" aria-label={t('meta_development')}>
+          <h3 className="prp-aside-compact__label">{t('meta_development')}</h3>
           <div className="prp-aside-compact__dev" role="list">
             {developmentItems.slice(0, 4).map((d) => (
               <span
@@ -448,8 +450,8 @@ export function AsideCompactRail({
       ) : null}
 
       {tagItems.length ? (
-        <section className="prp-aside-compact__group" aria-label="Tags">
-          <h3 className="prp-aside-compact__label">Tags</h3>
+        <section className="prp-aside-compact__group" aria-label={t('meta_tags')}>
+          <h3 className="prp-aside-compact__label">{t('meta_tags')}</h3>
           <div className="prp-aside-compact__tags" role="list">
             {tagShown.map((t) => (
               <span

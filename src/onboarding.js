@@ -404,6 +404,21 @@ function resolveDemoPrHotkey(doc) {
 }
 
 // src/onboarding-ui.ts
+function onbMsg(key, fallback, subs) {
+  try {
+    const pure = globalThis.PRModalI18n;
+    let locale = document.documentElement?.getAttribute?.("data-prp-app-locale") || document.documentElement?.getAttribute?.("data-prp-ui-language") || document.documentElement?.getAttribute?.("lang") || "en";
+    if (locale === "auto") {
+      locale = document.documentElement?.getAttribute?.("lang") || "en";
+    }
+    if (typeof pure?.formatMessage === "function") {
+      const m = pure.formatMessage(key, locale, subs);
+      if (m && m !== key) return m;
+    }
+  } catch {
+  }
+  return fallback;
+}
 function clearDemoPrHighlight(doc) {
   if (!doc || typeof doc.querySelectorAll !== "function") return;
   try {
@@ -648,7 +663,10 @@ function createOnboardingTour(deps) {
     }
     if (!saved) {
       setStatus(
-        lastErr?.message || "Could not save setup progress \u2014 try again or Skip tour",
+        lastErr?.message || onbMsg(
+          "onboarding_save_error",
+          "Could not save setup progress \u2014 try again or Skip tour"
+        ),
         true
       );
     }
@@ -733,7 +751,12 @@ function createOnboardingTour(deps) {
     const id = currentId();
     if (prefsIdx >= 0 && planIndex < prefsIdx && id !== "prefs") {
       goToPlanIndex(prefsIdx);
-      setStatus("Skipped ahead \u2014 review feature settings, then Done.");
+      setStatus(
+        onbMsg(
+          "onboarding_skipped_status",
+          "Skipped ahead \u2014 review feature settings, then Done."
+        )
+      );
       return;
     }
     void markComplete();
@@ -1058,23 +1081,47 @@ function createOnboardingTour(deps) {
       const flags = [
         {
           key: "treeView",
-          title: "PR stack tree view",
-          desc: "Indent stacked PRs on the /pulls list"
+          title: onbMsg(
+            "onboarding_pref_tree_title",
+            "PR stack tree view"
+          ),
+          desc: onbMsg(
+            "onboarding_pref_tree_desc",
+            "Indent stacked PRs on the /pulls list"
+          )
         },
         {
           key: "autoOpenEmbed",
-          title: "Auto-open pr+ on PR pages",
-          desc: "Open the pr+ shell when you land on a PR URL"
+          title: onbMsg(
+            "onboarding_pref_auto_open_title",
+            "Auto-open pr+ on PR pages"
+          ),
+          desc: onbMsg(
+            "onboarding_pref_auto_open_desc",
+            "Open the pr+ shell when you land on a PR URL"
+          )
         },
         {
           key: "reverseComments",
-          title: "Newest comments first",
-          desc: "Composer \u2192 merge box \u2192 latest conversation"
+          title: onbMsg(
+            "onboarding_pref_newest_title",
+            "Newest comments first"
+          ),
+          desc: onbMsg(
+            "onboarding_pref_newest_desc",
+            "Composer \u2192 merge box \u2192 latest conversation"
+          )
         },
         {
           key: "singleFileMode",
-          title: "Single-file Diff mode",
-          desc: "Show only the active file in the Diff list"
+          title: onbMsg(
+            "onboarding_pref_single_file_title",
+            "Single-file Diff mode"
+          ),
+          desc: onbMsg(
+            "onboarding_pref_single_file_desc",
+            "Show only the active file in the Diff list"
+          )
         }
       ];
       const draft = prefsDraft || {};
@@ -1128,7 +1175,8 @@ function createOnboardingTour(deps) {
     const back = root.querySelector(
       ".prp-onboarding__btn--back"
     );
-    if (titleEl) titleEl.textContent = meta?.title || "pr+ setup";
+    if (titleEl)
+      titleEl.textContent = meta?.title || onbMsg("onboarding_setup_title", "pr+ setup");
     if (stepEl) stepEl.textContent = `${planIndex + 1} / ${plan.length}`;
     if (body) renderBody(body);
     if (back) {
@@ -1136,57 +1184,93 @@ function createOnboardingTour(deps) {
     }
     if (primary) {
       if (id === "pat") {
-        primary.textContent = tokenConfigured ? "Continue" : "Save & continue";
+        primary.textContent = tokenConfigured ? onbMsg("onboarding_continue", "Continue") : onbMsg("onboarding_save_continue", "Save & continue");
         primary.hidden = false;
       } else if (id === "prefs") {
-        primary.textContent = "Save & continue";
+        primary.textContent = onbMsg(
+          "onboarding_save_continue",
+          "Save & continue"
+        );
         primary.hidden = false;
       } else if (id === "done") {
-        primary.textContent = "Done";
+        primary.textContent = onbMsg("onboarding_done", "Done");
         primary.hidden = false;
       } else if (id === "openPr" && isModalOpen(doc)) {
-        primary.textContent = "Continue \xB7 \u23CE";
+        primary.textContent = onbMsg(
+          "onboarding_continue_enter",
+          "Continue \xB7 \u23CE"
+        );
         primary.hidden = false;
       } else if (id === "openPr" && !isModalOpen(doc)) {
-        primary.textContent = "Skip \xB7 \u23CE";
+        primary.textContent = onbMsg("onboarding_skip_enter", "Skip \xB7 \u23CE");
         primary.hidden = false;
       } else if (id === "diffToggle" && isDiffLayout(doc)) {
-        primary.textContent = "Continue \xB7 \u23CE";
+        primary.textContent = onbMsg(
+          "onboarding_continue_enter",
+          "Continue \xB7 \u23CE"
+        );
         primary.hidden = false;
       } else if (id === "convDemo") {
         if (convSubIndex >= CONVERSATION_DEMO_STEPS.length - 1) {
-          primary.textContent = "Continue \xB7 \u23CE";
+          primary.textContent = onbMsg(
+            "onboarding_continue_enter",
+            "Continue \xB7 \u23CE"
+          );
         } else {
-          primary.textContent = "Next tip \xB7 \u23CE";
+          primary.textContent = onbMsg(
+            "onboarding_next_tip_enter",
+            "Next tip \xB7 \u23CE"
+          );
         }
         primary.hidden = false;
       } else if (id === "diffDemo") {
         if (!isDiffLayout(doc)) {
-          primary.textContent = "Skip Diff tips \xB7 \u23CE";
+          primary.textContent = onbMsg(
+            "onboarding_skip_diff_tips_enter",
+            "Skip Diff tips \xB7 \u23CE"
+          );
         } else if (demoSubIndex >= DIFF_DEMO_STEPS.length - 1) {
-          primary.textContent = "Continue \xB7 \u23CE";
+          primary.textContent = onbMsg(
+            "onboarding_continue_enter",
+            "Continue \xB7 \u23CE"
+          );
         } else {
-          primary.textContent = "Next tip \xB7 \u23CE";
+          primary.textContent = onbMsg(
+            "onboarding_next_tip_enter",
+            "Next tip \xB7 \u23CE"
+          );
         }
         primary.hidden = false;
       } else if (id === "opt" || id === "diffToggle" || id === "optShiftK") {
-        primary.textContent = "Skip \xB7 \u23CE";
+        primary.textContent = onbMsg("onboarding_skip_enter", "Skip \xB7 \u23CE");
         primary.hidden = false;
       } else {
-        primary.textContent = "Continue \xB7 \u23CE";
+        primary.textContent = onbMsg(
+          "onboarding_continue_enter",
+          "Continue \xB7 \u23CE"
+        );
         primary.hidden = false;
       }
       if (primary && !primary.hidden && primary.textContent && !primary.textContent.includes("\u23CE") && (id === "pat" || id === "prefs" || id === "done" || id === "openPr")) {
         if (id === "pat") {
-          primary.textContent = tokenConfigured ? "Continue \xB7 \u23CE" : "Save & continue \xB7 \u23CE";
+          primary.textContent = tokenConfigured ? onbMsg("onboarding_continue_enter", "Continue \xB7 \u23CE") : onbMsg(
+            "onboarding_save_continue_enter",
+            "Save & continue \xB7 \u23CE"
+          );
         } else if (id === "prefs") {
-          primary.textContent = "Save & continue \xB7 \u23CE";
+          primary.textContent = onbMsg(
+            "onboarding_save_continue_enter",
+            "Save & continue \xB7 \u23CE"
+          );
         } else if (id === "done") {
-          primary.textContent = "Done \xB7 \u23CE";
+          primary.textContent = onbMsg("onboarding_done_enter", "Done \xB7 \u23CE");
         } else if (id === "openPr" && isModalOpen(doc)) {
-          primary.textContent = "Continue \xB7 \u23CE";
+          primary.textContent = onbMsg(
+            "onboarding_continue_enter",
+            "Continue \xB7 \u23CE"
+          );
         } else if (id === "openPr" && !isModalOpen(doc)) {
-          primary.textContent = "Skip \xB7 \u23CE";
+          primary.textContent = onbMsg("onboarding_skip_enter", "Skip \xB7 \u23CE");
         }
       }
     }
@@ -1428,8 +1512,17 @@ function createOnboardingTour(deps) {
     header.appendChild(stepEl);
     const closeBtn = el("button", "prp-onboarding__close", "\xD7");
     closeBtn.setAttribute("type", "button");
-    closeBtn.setAttribute("aria-label", "Skip to settings");
-    closeBtn.setAttribute("title", "Skip to feature settings (Esc)");
+    closeBtn.setAttribute(
+      "aria-label",
+      onbMsg("onboarding_skip_to_settings", "Skip to settings \xB7 Esc")
+    );
+    closeBtn.setAttribute(
+      "title",
+      onbMsg(
+        "onboarding_skip_to_settings_title",
+        "Skip remaining tips and open feature settings (Esc)"
+      )
+    );
     closeBtn.addEventListener("click", () => {
       skipToSettings();
     });
@@ -1450,10 +1543,16 @@ function createOnboardingTour(deps) {
     const skip = el(
       "button",
       "prp-onboarding__btn prp-onboarding__btn--ghost prp-onboarding__btn--skip",
-      "Skip to settings \xB7 Esc"
+      onbMsg("onboarding_skip_to_settings", "Skip to settings \xB7 Esc")
     );
     skip.setAttribute("type", "button");
-    skip.setAttribute("title", "Skip remaining tips and open feature settings (Esc)");
+    skip.setAttribute(
+      "title",
+      onbMsg(
+        "onboarding_skip_to_settings_title",
+        "Skip remaining tips and open feature settings (Esc)"
+      )
+    );
     skip.addEventListener("click", () => {
       skipToSettings();
     });

@@ -27,9 +27,20 @@
     if (current.open && isEmbedPresentation(current.presentation)) {
       return { ok: false, reason: 'embed-open' };
     }
-    const t = parsePrPagePath(
-      typeof location !== 'undefined' ? location.pathname : ''
-    );
+    // Prefer full location (path + prp_* query/hash) so comment deep-links restore
+    const t =
+      (typeof parseGithubLocation === 'function'
+        ? parseGithubLocation()
+        : null) ||
+      (typeof withUriRouteFromLocation === 'function'
+        ? withUriRouteFromLocation(
+            parsePrPagePath(
+              typeof location !== 'undefined' ? location.pathname : ''
+            )
+          )
+        : parsePrPagePath(
+            typeof location !== 'undefined' ? location.pathname : ''
+          ));
     if (!t) return { ok: false, reason: 'not-pr-page' };
     removeGithubPrToggle();
     void openModal({
@@ -37,9 +48,24 @@
       repo: t.repo,
       number: t.number,
       page: t.page,
+      position: t.position || null,
       presentation: 'embed',
+      commitSha: t.commitSha || null,
+      commitEndSha: t.commitEndSha || null,
+      filePath: t.filePath || null,
+      fileKey: t.fileKey || null,
+      startLine: t.startLine ?? null,
+      endLine: t.endLine ?? null,
+      side: t.side || null,
     });
-    return { ok: true, owner: t.owner, repo: t.repo, number: t.number };
+    return {
+      ok: true,
+      owner: t.owner,
+      repo: t.repo,
+      number: t.number,
+      page: t.page,
+      position: t.position || null,
+    };
   }
 
   function isEditableKeyTarget(target) {
@@ -128,6 +154,30 @@
     }
 
     const scLabel = openEmbedShortcutLabel();
+    const openWithLabel = (() => {
+      try {
+        const pure = (globalThis as any).PRModalI18n;
+        let locale =
+          document.documentElement.getAttribute('data-prp-ui-language') ||
+          document.documentElement.getAttribute('data-prp-app-locale') ||
+          'en';
+        if (locale === 'auto') {
+          locale =
+            document.documentElement.getAttribute('lang') ||
+            document.documentElement.lang ||
+            'en';
+        }
+        if (typeof pure?.formatMessage === 'function') {
+          const base = pure.formatMessage('open_with_prp', locale);
+          if (base && base !== 'open_with_prp') {
+            return scLabel ? `${base} (${scLabel})` : base;
+          }
+        }
+      } catch {
+        /* fall through */
+      }
+      return scLabel ? `Open with pr+ (${scLabel})` : 'Open with pr+';
+    })();
     let btn = document.getElementById(GH_PR_TOGGLE_ID);
     if (!btn) {
       btn = document.createElement('button');
@@ -136,8 +186,8 @@
       // Match Primer PR header actions (32px / 14px / parent gap) — see styles.css
       btn.className = 'prp-gh-open-toggle';
       btn.setAttribute('data-prp-gh-toggle', '1');
-      btn.setAttribute('aria-label', `Open with pr+ (${scLabel})`);
-      btn.title = `Open with pr+ (${scLabel})`;
+      btn.setAttribute('aria-label', openWithLabel);
+      btn.title = openWithLabel;
       btn.textContent = 'pr+';
       btn.addEventListener('click', (e) => {
         e.preventDefault();
@@ -145,8 +195,8 @@
         openEmbedFromNativePr();
       });
     } else {
-      btn.setAttribute('aria-label', `Open with pr+ (${scLabel})`);
-      btn.title = `Open with pr+ (${scLabel})`;
+      btn.setAttribute('aria-label', openWithLabel);
+      btn.title = openWithLabel;
     }
 
     const mount = findGithubPrHeaderMount();
@@ -179,19 +229,46 @@
 
   async function refreshPrefs() {
     try {
-      const next = await globalThis.PRTreeStorage?.getExtensionPrefs?.();
+      // Prefer direct storage read (same as bridge) so uiLanguage is never lost
+      // when SW PREFS_GET is stale. Fall back to bridge getExtensionPrefs.
+      let next = null;
+      try {
+        const area = (globalThis as any).chrome?.storage?.local;
+        if (area?.get) {
+          next = await new Promise((resolve) => {
+            area.get(['extensionPrefs'], (result: any) => {
+              resolve(result?.extensionPrefs || null);
+            });
+          });
+        }
+      } catch {
+        next = null;
+      }
+      if (!next || typeof next !== 'object') {
+        next = await globalThis.PRTreeStorage?.getExtensionPrefs?.();
+      }
       if (next && typeof next === 'object') {
         prefs = {
           reverseComments: next.reverseComments !== false,
           autoOpenEmbed: next.autoOpenEmbed !== false,
           singleFileMode: next.singleFileMode === true,
+          autoExpandOnFileNav: next.autoExpandOnFileNav === true,
           shortcutMonitorSize: normalizeShortcutMonitorSize(
             next.shortcutMonitorSize
           ),
+          uiLanguage: normalizeUiLanguage(next.uiLanguage),
           timelineVisibility: normalizeTimelineVisibilityLocal(
             next.timelineVisibility
           ),
         };
+        try {
+          document.documentElement.setAttribute(
+            'data-prp-ui-language',
+            prefs.uiLanguage || 'auto'
+          );
+        } catch {
+          /* ignore */
+        }
       }
       prefsReady = true;
     } catch {
@@ -335,13 +412,23 @@
             reverseComments: next?.reverseComments !== false,
             autoOpenEmbed: next?.autoOpenEmbed !== false,
             singleFileMode: next?.singleFileMode === true,
+            autoExpandOnFileNav: next?.autoExpandOnFileNav === true,
             shortcutMonitorSize: normalizeShortcutMonitorSize(
               next?.shortcutMonitorSize
             ),
+            uiLanguage: normalizeUiLanguage(next?.uiLanguage),
             timelineVisibility: normalizeTimelineVisibilityLocal(
               next?.timelineVisibility
             ),
           };
+          try {
+            document.documentElement.setAttribute(
+              'data-prp-ui-language',
+              prefs.uiLanguage || 'auto'
+            );
+          } catch {
+            /* ignore */
+          }
           if (current.open) {
             render();
             // Lazy-load system timeline events when a tip is re-enabled

@@ -5,6 +5,7 @@ import {
   takeVisibleTreeNodes,
 } from '@lib/aside-lists';
 import { IconDisclosure } from '@common/icons';
+import { useT } from '@lib/locale-context';
 
 const DEFAULT_CAP = 20;
 
@@ -19,6 +20,7 @@ export function AsideFilesTree({
   loadingMore?: boolean;
   onEnsureAll?: (() => void | Promise<void>) | null;
 }) {
+  const t = useT();
   const [expandedDirs, setExpandedDirs] = useState(() => new Set());
   const [query, setQuery] = useState('');
   const [showAll, setShowAll] = useState(false);
@@ -72,7 +74,7 @@ export function AsideFilesTree({
     overflowFromCap || (mayHaveMore && !loadingMore) || loadingMore;
 
   if (!files?.length && !loadingMore) {
-    return <div className="prp-muted">No files</div>;
+    return <div className="prp-muted">{t('aside_no_files')}</div>;
   }
 
   return (
@@ -80,18 +82,18 @@ export function AsideFilesTree({
       <input
         type="search"
         className="prp-aside-search"
-        placeholder="Search files…"
+        placeholder={t('aside_search_files')}
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        aria-label="Search files"
+        aria-label={t('aside_search_files')}
       />
       {!nodes.length ? (
         <div className="prp-muted">
           {query.trim()
             ? loadingMore
-              ? 'Loading files…'
-              : 'No matching files'
-            : 'No files'}
+              ? t('load_stage_panel_files')
+              : t('aside_no_matching_files')
+            : t('aside_no_files')}
         </div>
       ) : (
         <ul className="prp-aside-tree">
@@ -152,11 +154,11 @@ export function AsideFilesTree({
           onClick={onMoreClick}
         >
           {loadingMore
-            ? 'Loading…'
+            ? t('stats_loading')
             : mayHaveMore
               ? overflowFromCap
                 ? `+${truncated} more… · load all`
-                : 'Load all files…'
+                : t('cta_load_all_files')
               : `+${truncated} more… · ${total} visible when expanded`}
         </button>
       ) : null}

@@ -4,6 +4,7 @@
 import React, { useMemo } from 'react';
 import { Avatar } from '@common/Avatar';
 import { IconBell, IconMarkGithub } from '@common/icons';
+import { useLocale } from '@lib/locale-context';
 import {
   buildDetailGnbModel,
   shouldShowDetailGnb,
@@ -49,6 +50,7 @@ export function DetailGnb({
   presentation = 'embed',
   model: modelProp,
 }: DetailGnbProps) {
+  const { locale } = useLocale();
   const model = useMemo(() => {
     if (modelProp) return modelProp;
     if (!shouldShowDetailGnb(presentation)) return null;
@@ -57,8 +59,9 @@ export function DetailGnb({
       repo: repo ?? detail?.repo,
       viewerLogin: detail?.viewerLogin,
       detail,
+      locale,
     });
-  }, [modelProp, presentation, owner, repo, detail]);
+  }, [modelProp, presentation, owner, repo, detail, locale]);
 
   if (!model || !shouldShowDetailGnb(presentation)) return null;
 

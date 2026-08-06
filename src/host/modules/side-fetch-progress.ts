@@ -166,99 +166,135 @@
    * @param {string} kind
    * @param {{ count?: number, loaded?: number, total?: number, message?: string }|null} [extra]
    */
+  /**
+   * Short, near-constant-width load copy for the header stats badge.
+   * Locale via pure PRModalI18n + data-prp-app-locale (or English fallback).
+   */
   function loadStageLabel(kind, extra = null) {
-    const n = Number(extra?.count);
-    const loaded = Number(extra?.loaded);
-    const total = Number(extra?.total);
-    switch (String(kind || '')) {
-      case 'core':
-        return 'Loading pull request…';
-      case 'core-full':
-        return 'Loading full details…';
-      case 'revalidate':
-        return 'Updating pull request…';
-      case 'refresh':
-        return 'Refreshing pull request…';
-      case 'refresh-meta':
-        return 'Refreshing metadata…';
-      case 'refresh-visible':
-        return 'Refreshing visible…';
-      case 'refresh-all':
-        return 'Refreshing threads…';
-      case 'threads-load':
-        return 'Loading review threads…';
-      case 'threads-update':
-        return 'Updating review threads…';
-      case 'threads-shell':
-        // Short alias when revalidate sets shell explicitly (same ladder step 1).
-        return 'Updating review threads…';
-      case 'threads-comments':
-        return 'Updating comments…';
-      case 'threads-reactions':
-        return 'Updating reactions…';
-      case 'threads-earlier':
-        return 'Loading earlier threads…';
-      case 'threads-unresolved':
-        return 'Updating open threads…';
-      case 'threads-visible': {
-        const c = Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
-        // Fixed shape: "Updating ## threads…" (~22)
-        const num = String(Math.min(c, 99)).padStart(2, '0');
-        return `Updating ${num} threads…`;
-      }
-      case 'threads-more':
-        return 'Loading more threads…';
-      case 'threads-all': {
-        if (Number.isFinite(loaded) && loaded >= 0 && Number.isFinite(total) && total > 0) {
-          const a = Math.min(Math.floor(loaded), 999);
-          const b = Math.min(Math.floor(total), 999);
-          // No padStart spaces — fixed badge width + spaces caused flicker thrash.
-          return `Loading comments ${a}/${b}`;
+    try {
+      const pure = (globalThis as any).PRModalI18n;
+      let locale = 'en';
+      try {
+        const el = document?.documentElement;
+        locale =
+          el?.getAttribute?.('data-prp-app-locale') ||
+          el?.getAttribute?.('data-prp-ui-language') ||
+          'en';
+        if (locale === 'auto') {
+          locale = el?.getAttribute?.('lang') || 'en';
         }
-        if (Number.isFinite(loaded) && loaded >= 0) {
-          const a = Math.min(Math.floor(loaded), 999);
-          return `Loading comments · ${a}`;
+      } catch {
+        locale = 'en';
+      }
+      if (typeof pure?.formatLoadStageLabel === 'function') {
+        return pure.formatLoadStageLabel(kind, extra, locale);
+      }
+      // Inline map when pure helper not yet bundled into PRModalI18n
+      if (typeof pure?.formatMessage === 'function') {
+        const t = (key: string, subs?: Record<string, string | number>) => {
+          const m = pure.formatMessage(key, locale, subs);
+          return m && m !== key ? m : '';
+        };
+        const n = Number(extra?.count);
+        const loaded = Number(extra?.loaded);
+        const total = Number(extra?.total);
+        const k = String(kind || '');
+        const map: Record<string, string> = {
+          core: t('load_stage_core'),
+          'core-full': t('load_stage_core_full'),
+          revalidate: t('load_stage_revalidate'),
+          refresh: t('load_stage_refresh'),
+          'refresh-meta': t('load_stage_refresh_meta'),
+          'refresh-visible': t('load_stage_refresh_visible'),
+          'refresh-all': t('load_stage_refresh_all'),
+          'threads-load': t('load_stage_threads_load'),
+          'threads-update': t('load_stage_threads_update'),
+          'threads-shell': t('load_stage_threads_update'),
+          'threads-comments': t('load_stage_threads_comments'),
+          'threads-reactions': t('load_stage_threads_reactions'),
+          'threads-earlier': t('load_stage_threads_earlier'),
+          'threads-unresolved': t('load_stage_threads_unresolved'),
+          'threads-more': t('load_stage_threads_more'),
+          'refresh-failed': t('load_stage_refresh_failed'),
+          'threads-failed': t('load_stage_threads_failed'),
+          'threads-more-failed': t('load_stage_threads_more_failed'),
+          'threads-all-failed': t('load_stage_threads_all_failed'),
+        };
+        if (map[k]) return map[k];
+        if (k === 'threads-visible') {
+          const c = Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+          const num = String(Math.min(c, 99)).padStart(2, '0');
+          return (
+            t('load_stage_threads_visible', { count: num }) ||
+            `Updating ${num} threads…`
+          );
         }
-        return 'Loading all comments…';
-      }
-      case 'refresh-failed':
-        return 'Refresh failed';
-      case 'threads-failed':
-        return 'Threads failed to load';
-      case 'threads-more-failed':
-        return 'Load more failed';
-      case 'threads-all-failed':
-        return 'Load all failed';
-      case 'files-all':
-      case 'files-load': {
-        if (
-          Number.isFinite(loaded) &&
-          loaded >= 0 &&
-          Number.isFinite(total) &&
-          total > 0
-        ) {
-          const a = Math.min(Math.floor(loaded), 999);
-          const b = Math.min(Math.floor(total), 999);
-          return `Loading files ${a}/${b}`;
+        if (k === 'threads-all') {
+          if (
+            Number.isFinite(loaded) &&
+            loaded >= 0 &&
+            Number.isFinite(total) &&
+            total > 0
+          ) {
+            return (
+              t('load_stage_threads_all_n', {
+                loaded: Math.min(Math.floor(loaded), 999),
+                total: Math.min(Math.floor(total), 999),
+              }) || `Loading comments ${loaded}/${total}`
+            );
+          }
+          if (Number.isFinite(loaded) && loaded >= 0) {
+            return (
+              t('load_stage_threads_all_count', {
+                loaded: Math.min(Math.floor(loaded), 999),
+              }) || `Loading comments · ${loaded}`
+            );
+          }
+          return t('load_stage_threads_all') || 'Loading all comments…';
         }
-        return 'Loading all files…';
+        if (k === 'files-all' || k === 'files-load') {
+          if (
+            Number.isFinite(loaded) &&
+            loaded >= 0 &&
+            Number.isFinite(total) &&
+            total > 0
+          ) {
+            return (
+              t('load_stage_files_n', {
+                loaded: Math.min(Math.floor(loaded), 999),
+                total: Math.min(Math.floor(total), 999),
+              }) || `Loading files ${loaded}/${total}`
+            );
+          }
+          return t('load_stage_files_all') || 'Loading all files…';
+        }
+        if (k === 'panels') {
+          const panel = String(extra?.panel || '');
+          const pk =
+            panel === 'files'
+              ? 'load_stage_panel_files'
+              : panel === 'comments'
+                ? 'load_stage_panel_comments'
+                : panel === 'reviews'
+                  ? 'load_stage_panel_reviews'
+                  : panel === 'commits'
+                    ? 'load_stage_panel_commits'
+                    : panel === 'checks'
+                      ? 'load_stage_panel_checks'
+                      : panel === 'development'
+                        ? 'load_stage_panel_development'
+                        : 'load_stage_panels';
+          return t(pk) || 'Loading panels…';
+        }
+        const msg = String(extra?.message || kind || '').trim();
+        if (msg) return msg.length > 26 ? `${msg.slice(0, 24)}…` : msg;
+        return t('load_stage_loading') || 'Loading…';
       }
-      case 'panels': {
-        const panel = String(extra?.panel || '');
-        if (panel === 'files') return 'Loading files…';
-        if (panel === 'comments') return 'Loading comments…';
-        if (panel === 'reviews') return 'Loading reviews…';
-        if (panel === 'commits') return 'Loading commits…';
-        if (panel === 'checks') return 'Loading checks…';
-        if (panel === 'development') return 'Loading development…';
-        return 'Loading panels…';
-      }
-      default: {
-        const msg = String(extra?.message || kind || 'Loading…').trim();
-        // Hard cap so unexpected API errors don't explode the badge
-        return msg.length > 26 ? `${msg.slice(0, 24)}…` : msg || 'Loading…';
-      }
+    } catch {
+      /* fall through */
     }
+    // Last-resort English (pure catalogs unavailable)
+    return String(extra?.message || kind || 'Loading…').slice(0, 26);
   }
 
   function clearLoadStage() {

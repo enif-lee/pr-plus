@@ -259,21 +259,30 @@
 
   /**
    * Human summary next to the check name (GitHub merge-box style).
-   * @param {{ outcome: string, description?: string, startedAt?: string, completedAt?: string, updatedAt?: string }} item
+   * In-progress rows always use wall-clock elapsed from startedAt → nowMs
+   * (not completedAt/updatedAt, which often equals startedAt and freezes at `<1s`).
+   * @param {{ outcome: string, description?: string, startedAt?: string, completedAt?: string, updatedAt?: string, status?: string }} item
    * @param {number} [nowMs]
    */
   function formatCheckSummary(item, nowMs) {
     if (!item) return '';
     const desc = String(item.description || '').trim();
     const start = parseTime(item.startedAt);
-    const end = parseTime(item.completedAt) || parseTime(item.updatedAt);
-    const duration =
-      start && end && end >= start
-        ? formatDurationMs(end - start)
-        : start && !end
-          ? formatDurationMs((Number.isFinite(nowMs) ? nowMs : Date.now()) - start)
-          : '';
     const outcome = item.outcome || classifyCheckOutcome(item);
+    const live =
+      outcome === 'in_progress' || statusIsInProgress(item);
+    const now = Number.isFinite(nowMs) ? nowMs : Date.now();
+    let duration = '';
+    if (live && start) {
+      duration = formatDurationMs(Math.max(0, now - start));
+    } else {
+      const end = parseTime(item.completedAt) || parseTime(item.updatedAt);
+      if (start && end && end >= start) {
+        duration = formatDurationMs(end - start);
+      } else if (start && !end) {
+        duration = formatDurationMs(Math.max(0, now - start));
+      }
+    }
 
     if (outcome === 'failure') {
       if (duration) return `Failing after ${duration}`;
@@ -289,11 +298,32 @@
       return desc || 'Skipped';
     }
     // Working (spinner)
-    if (outcome === 'in_progress' || statusIsInProgress(item)) {
+    if (live) {
       return duration ? `In progress — ${duration}` : desc || 'In progress';
     }
     // Expected (static yellow)
     return desc || 'Expected — Waiting for status to be reported';
+  }
+
+  /**
+   * True when merge-box check UI should refresh elapsed every ~1s.
+   * (Any in-progress / queued run or status with a start time.)
+   * @param {object|null|undefined} checks
+   */
+  function checksNeedElapsedTick(checks) {
+    const n = normalizeChecks(checks);
+    for (const r of n.checkRuns || []) {
+      if (classifyCheckOutcome(r) !== 'in_progress') continue;
+      if (parseTime(r.startedAt || r.started_at)) return true;
+    }
+    for (const s of n.statuses || []) {
+      const o = classifyCheckOutcome({ kind: 'status', state: s.state });
+      if (o !== 'in_progress') continue;
+      if (parseTime(s.createdAt || s.created_at || s.startedAt || s.started_at)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**
@@ -523,24 +553,57 @@
    * @param {'failure'|'pending'|'in_progress'|'success'|'skipped'} outcome
    * @param {string[]} names
    */
-  function formatCheckGroupTip(outcome, names) {
+  /**
+   * @param {'failure'|'pending'|'in_progress'|'success'|'skipped'} outcome
+   * @param {string[]} names
+   * @param {string} [locale] optional app locale for headings
+   */
+  function formatCheckGroupTip(outcome, names, locale) {
     const list = Array.isArray(names) ? names.filter(Boolean) : [];
     const n = list.length;
-    const headings = {
-      failure: n === 1 ? '1 failed' : `${n} failed`,
-      in_progress: n === 1 ? '1 in progress' : `${n} in progress`,
-      pending: n === 1 ? '1 expected' : `${n} expected`,
-      success: n === 1 ? '1 succeeded' : `${n} succeeded`,
-      skipped: n === 1 ? '1 skipped' : `${n} skipped`,
+    const pure = typeof globalThis !== 'undefined' ? globalThis.PRModalI18n : null;
+    const t = (key, subs) => {
+      if (pure && typeof pure.formatMessage === 'function' && locale) {
+        const m = pure.formatMessage(key, locale, subs);
+        if (m && m !== key) return m;
+      }
+      return '';
     };
-    const head = headings[outcome] || `${n} checks`;
+    const headings = {
+      failure:
+        n === 1
+          ? t('check_tip_failed_one') || '1 failed'
+          : t('check_tip_failed_n', { count: n }) || `${n} failed`,
+      in_progress:
+        n === 1
+          ? t('check_tip_in_progress_one') || '1 in progress'
+          : t('check_tip_in_progress_n', { count: n }) || `${n} in progress`,
+      pending:
+        n === 1
+          ? t('check_tip_expected_one') || '1 expected'
+          : t('check_tip_expected_n', { count: n }) || `${n} expected`,
+      success:
+        n === 1
+          ? t('check_tip_succeeded_one') || '1 succeeded'
+          : t('check_tip_succeeded_n', { count: n }) || `${n} succeeded`,
+      skipped:
+        n === 1
+          ? t('check_tip_skipped_one') || '1 skipped'
+          : t('check_tip_skipped_n', { count: n }) || `${n} skipped`,
+    };
+    const head =
+      headings[outcome] ||
+      t('check_tip_checks_n', { count: n }) ||
+      `${n} checks`;
     if (!n) return head;
     // Cap long lists so tips stay readable
     const max = 12;
     const shown = list.slice(0, max);
     const more = n - shown.length;
     const body = shown.map((name) => `· ${name}`).join('\n');
-    return more > 0 ? `${head}\n${body}\n· +${more} more` : `${head}\n${body}`;
+    const moreLine =
+      t('check_tip_more', { count: more }) || `· +${more} more`;
+    return more > 0 ? `${head}\n${body}\n${moreLine}` : `${head}\n${body}`;
   }
 
   const api = {
@@ -558,6 +621,7 @@
     formatDurationMs,
     formatRelativeAgo,
     formatCheckSummary,
+    checksNeedElapsedTick,
     buildMergeBoxCheckGroups,
     mergeBoxChecksHeadline,
     summarizeCheckCounts,

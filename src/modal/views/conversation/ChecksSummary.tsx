@@ -36,7 +36,10 @@ export type CheckStackGroup = {
 };
 
 /** Pure: outcome groups for avatar-stack checks (shared with header meta stack). */
-export function buildCheckStackGroups(checks: any): CheckStackGroup[] {
+export function buildCheckStackGroups(
+  checks: any,
+  locale?: string | null
+): CheckStackGroup[] {
   const byOutcome =
     typeof listCheckNamesByOutcome === 'function'
       ? listCheckNamesByOutcome(checks)
@@ -49,13 +52,23 @@ export function buildCheckStackGroups(checks: any): CheckStackGroup[] {
           state: 'unknown',
         };
 
+  let loc = locale || '';
+  if (!loc) {
+    try {
+      loc =
+        document.documentElement.getAttribute('data-prp-app-locale') || 'en';
+    } catch {
+      loc = 'en';
+    }
+  }
+
   const out: CheckStackGroup[] = [];
   for (const key of OUTCOME_ORDER) {
     const names = Array.isArray(byOutcome[key]) ? byOutcome[key] : [];
     if (!names.length) continue;
     const tip =
       typeof formatCheckGroupTip === 'function'
-        ? formatCheckGroupTip(key, names)
+        ? formatCheckGroupTip(key, names, loc)
         : `${names.length} ${key}\n${names.map((n: string) => `· ${n}`).join('\n')}`;
     out.push({ key, names, tip });
   }

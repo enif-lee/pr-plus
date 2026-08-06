@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   buildMergeBoxCheckGroups,
+  checksNeedElapsedTick,
   mergeBoxChecksHeadline,
 } from '@lib/checks';
 import { IconCircleSlash, IconDisclosure } from '@common/icons';
@@ -18,14 +19,32 @@ function GroupHeaderIcon({ outcome }: { outcome: string }) {
 /**
  * GitHub-style check list for the merge box:
  * grouped failing / expected / skipped / successful with collapsible sections.
+ * While any check is in progress with a start time, re-build groups every ~1s
+ * so elapsed duration advances (start-relative), not frozen at first paint.
  */
 export function MergeBoxChecks({ checks }: { checks: any }) {
+  const needsTick =
+    typeof checksNeedElapsedTick === 'function'
+      ? checksNeedElapsedTick(checks)
+      : false;
+
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!needsTick) return undefined;
+    setNowMs(Date.now());
+    const id = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [needsTick, checks]);
+
   const grouped = useMemo(
     () =>
       typeof buildMergeBoxCheckGroups === 'function'
-        ? buildMergeBoxCheckGroups(checks)
+        ? buildMergeBoxCheckGroups(checks, { nowMs })
         : { state: 'unknown', totalCount: 0, groups: [] },
-    [checks]
+    [checks, nowMs]
   );
 
   // Failing / working / expected open by default; successful/skipped when few

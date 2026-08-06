@@ -277,6 +277,33 @@ function createPrTreeApp(deps: any) {
       if (prefs && typeof prefs.treeView === 'boolean') {
         setTreeModeEnabled(prefs.treeView, { persist: false });
       }
+      // Language pref: re-localize Tree/Original toggle labels
+      if (prefs && prefs.uiLanguage != null) {
+        try {
+          const pure = (globalThis as any).PRModalI18n;
+          const resolve =
+            pure?.mapToAppLocale ||
+            ((raw: string) => (raw === 'auto' ? null : raw));
+          let locale = String(prefs.uiLanguage || 'auto');
+          if (locale === 'auto') {
+            locale =
+              document.documentElement.getAttribute('lang') ||
+              document.documentElement.getAttribute('data-prp-app-locale') ||
+              'en';
+          } else {
+            locale = resolve(locale) || locale;
+          }
+          document.documentElement.setAttribute('data-prp-ui-language', String(prefs.uiLanguage));
+          document.documentElement.setAttribute('data-prp-app-locale', locale);
+        } catch {
+          /* ignore */
+        }
+        try {
+          (toggleButton as any)?.rebindLocale?.();
+        } catch {
+          /* ignore */
+        }
+      }
     });
   }
 

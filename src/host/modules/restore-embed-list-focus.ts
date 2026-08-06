@@ -147,6 +147,7 @@
     const sameSurface =
       samePr &&
       current.routePage === target.page &&
+      String(current.routePosition || '') === String(target.position || '') &&
       String(current.routeCommitSha || '') === String(target.commitSha || '') &&
       String(current.routeCommitEndSha || '') === String(target.commitEndSha || '') &&
       String(current.routeFileKey || '') === String(target.fileKey || '') &&
@@ -183,6 +184,7 @@
       repo: target.repo,
       number: target.number,
       page: target.page,
+      position: target.position || null,
       presentation: 'embed',
       commitSha: target.commitSha || null,
       commitEndSha: target.commitEndSha || null,
@@ -199,6 +201,7 @@
       repo: target.repo,
       number: target.number,
       page: target.page,
+      position: target.position || null,
     };
   }
 

@@ -7,6 +7,8 @@ import { IconPencil } from '@common/icons';
 import { CommentReactions } from '@common/CommentReactions';
 import { BodyEditor } from '../composers/BodyEditor';
 
+import { useT } from '@lib/locale-context';
+
 export function DescriptionCard({
   detail,
   sectionLoading,
@@ -41,9 +43,10 @@ export function DescriptionCard({
   onToggleReaction?: any;
   onLoadReactors?: any;
 }) {
+  const t = useT();
   return (
     <Card
-      title="Description"
+      title={t('meta_description')}
       className={searchClassName}
       data-search-anchor="body"
       actions={

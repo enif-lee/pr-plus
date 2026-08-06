@@ -169,28 +169,60 @@
     };
   }
 
-  /** Path + hash for embed soft-nav identity (commit/range + #diff-). */
+  /** Path + search + hash for embed soft-nav (includes prp_position deep-links). */
   function embedLocationKey() {
     if (typeof location === 'undefined') return '';
-    return `${location.pathname || ''}${location.hash || ''}`;
+    return `${location.pathname || ''}${location.search || ''}${location.hash || ''}`;
   }
 
   /**
-   * Parse full GH PR location (path + #diff-) when github route API available.
+   * Merge pathname PR target with location.search/hash prp_* deep-link.
+   * Pure helper when available (PRModalUriRoute.mergePathTargetWithUriRoute).
+   */
+  function withUriRouteFromLocation(pathTarget) {
+    if (!pathTarget) return null;
+    const loc =
+      typeof location !== 'undefined'
+        ? { search: location.search || '', hash: location.hash || '' }
+        : { search: '', hash: '' };
+    const uri = uriApi();
+    if (typeof uri?.mergePathTargetWithUriRoute === 'function') {
+      return uri.mergePathTargetWithUriRoute(pathTarget, loc);
+    }
+    // Fallback: parseLocationRoute only
+    if (typeof uri?.parseLocationRoute === 'function') {
+      const r = uri.parseLocationRoute(loc) || {};
+      const page =
+        r.page === 'diff' || r.page === 'conversation'
+          ? r.page
+          : pathTarget.page || null;
+      const position =
+        r.position != null && String(r.position).trim()
+          ? String(r.position).trim()
+          : null;
+      return { ...pathTarget, page, position };
+    }
+    return { ...pathTarget, position: pathTarget.position || null };
+  }
+
+  /**
+   * Parse full GH PR location (path + #diff- + prp_* query) when APIs available.
    */
   function parseGithubLocation() {
     const gh = githubRouteApi();
+    let pathTarget = null;
     if (typeof gh?.parseGithubPrLocation === 'function' && typeof location !== 'undefined') {
-      return gh.parseGithubPrLocation({
+      pathTarget = gh.parseGithubPrLocation({
         pathname: location.pathname,
         hash: location.hash,
       });
     }
-    const pathTarget = parsePrPagePath(
-      typeof location !== 'undefined' ? location.pathname : ''
-    );
-    if (!pathTarget) return null;
-    return pathTarget;
+    if (!pathTarget) {
+      pathTarget = parsePrPagePath(
+        typeof location !== 'undefined' ? location.pathname : ''
+      );
+    }
+    return withUriRouteFromLocation(pathTarget);
   }
 
   /**
@@ -202,6 +234,9 @@
     if (!target) return;
     if (target.page === 'diff' || target.page === 'conversation') {
       current.routePage = target.page;
+    }
+    if (target.position !== undefined) {
+      current.routePosition = target.position || null;
     }
     current.routeCommitSha = target.commitSha || null;
     current.routeCommitEndSha = target.commitEndSha || null;

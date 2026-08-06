@@ -17,6 +17,13 @@ import {
 } from '@lib/command-palette';
 import { FloatingScrollbar } from '../../components/common/FloatingScrollbar';
 import { useModalStore } from '../../store/modal-store';
+import { useT } from '@lib/locale-context';
+import {
+  avatarImageDecodingAttr,
+  avatarImageLoadingAttr,
+  markAvatarImageFailed,
+  markAvatarImageWarm,
+} from '@lib/avatar-image-cache';
 
 /**
  * Step focus index with wrap (shared with pulls palette behavior).
@@ -50,6 +57,10 @@ function PalettePrAvatar({
   const url = String(authorAvatarUrl || '').trim();
   const initials = login ? login.slice(0, 2).toUpperCase() : '?';
   if (url) {
+    // Prefer shared Avatar so warm-cache + initials-on-error match list rows.
+    // Keep img fallback attrs in sync with avatar-image-cache for remounts.
+    const loading = avatarImageLoadingAttr(url);
+    const decoding = avatarImageDecodingAttr(url);
     return (
       <img
         className="prp-pp-avatar"
@@ -57,8 +68,12 @@ function PalettePrAvatar({
         alt=""
         width={28}
         height={28}
-        loading="lazy"
-        decoding="async"
+        loading={loading}
+        decoding={decoding}
+        referrerPolicy="no-referrer"
+        data-avatar-loading={loading}
+        onLoad={() => markAvatarImageWarm(url)}
+        onError={() => markAvatarImageFailed(url)}
       />
     );
   }
@@ -143,6 +158,7 @@ export function CommandPalette({
   owner = '',
   repo = '',
 }: any) {
+  const t = useT();
   const storeQuery = useModalStore((s) => s.paletteQuery);
   const storeSetQuery = useModalStore((s) => s.setPaletteQuery);
   const query = queryProp !== undefined ? queryProp : storeQuery;
@@ -283,15 +299,26 @@ export function CommandPalette({
   const helpEntries = useMemo(() => {
     if (Array.isArray(helpEntriesProp)) return helpEntriesProp;
     if (typeof buildModalPaletteHelpEntries === 'function') {
+      // Prefer document stamp so help matches live app locale without prop drilling
+      let locale = 'en';
+      try {
+        locale =
+          document.documentElement.getAttribute('data-prp-app-locale') ||
+          document.documentElement.getAttribute('data-prp-ui-language') ||
+          'en';
+      } catch {
+        /* ignore */
+      }
       return buildModalPaletteHelpEntries(detail, {
         layoutMode:
           String(layoutMode || '').toLowerCase() === 'diff'
             ? 'diff'
             : 'centered',
+        locale,
       });
     }
     return [];
-  }, [helpEntriesProp, detail, layoutMode]);
+  }, [helpEntriesProp, detail, layoutMode, open]);
 
   const filtered = useMemo(() => {
     if (prSearch.isPrSearch) {
@@ -545,7 +572,7 @@ export function CommandPalette({
               type="search"
               autoComplete="off"
               spellCheck={false}
-              placeholder="Type a command…  #123  #name  help  stack  merge"
+              placeholder={t('palette_shell_placeholder')}
               value={query}
               onChange={(e) => handleQuery(e.target.value)}
               onKeyDown={onKeyDown}
@@ -553,9 +580,9 @@ export function CommandPalette({
             <div className="prp-pp-meta prp-muted" data-prp-pp-meta>
               {isPrSearchMode
                 ? prSearch.loading
-                  ? 'PR search · loading…'
-                  : 'PR search · #number or #name'
-                : 'Opt+Shift actions · ↑↓ / ⌥J ⌥K · Enter · Esc · #PR · help'}
+                  ? t('pulls_palette_hint')
+                  : t('pulls_palette_hint')
+                : t('pulls_palette_hint')}
             </div>
           </div>
           <div className="prp-scroll-float-host prp-edge-fade prp-pp-list-host">
@@ -565,13 +592,17 @@ export function CommandPalette({
               data-prp-pp-list
               data-prp-pp-epoch={listEpoch}
               role="listbox"
-              aria-label={isPrSearchMode ? 'Pull request results' : 'Commands'}
+              aria-label={
+                isPrSearchMode
+                  ? t('palette_shell_no_prs')
+                  : t('palette_shell_no_commands')
+              }
             >
               {filtered.length === 0 ? (
                 <li className="prp-pp-empty prp-muted">
                   {isPrSearchMode
-                    ? 'No matching pull requests'
-                    : 'No matching commands'}
+                    ? t('palette_shell_no_prs')
+                    : t('palette_shell_no_commands')}
                 </li>
               ) : (
                 filtered.map((c: any, i: number) => {
@@ -706,7 +737,7 @@ export function CommandPalette({
           <div className="prp-pp-help__list" data-prp-pp-help-list>
             {helpEntries.length === 0 ? (
               <div className="prp-pp-help__empty prp-muted">
-                No actions configured
+                {t('palette_help_empty')}
               </div>
             ) : (
               helpEntries.map((e: any) => (

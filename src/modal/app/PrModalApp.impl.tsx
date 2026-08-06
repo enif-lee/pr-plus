@@ -307,6 +307,12 @@ import {
   makeLocalTimelineEvent,
 } from '../lib/conversation-timeline';
 import { resolveGithubTheme } from '../lib/theme';
+import {
+  normalizeUiLanguagePref,
+  resolveEffectiveGithubLocale,
+} from '../lib/locale-resolve';
+import { LocaleProvider } from '../lib/locale-context';
+import { formatMessage } from '../lib/i18n';
 import { buildStackStrip, buildStackPathModel } from '../lib/ui-polish';
 import {
   mergeCommentsById,
@@ -339,6 +345,8 @@ import {
   normalizePage,
   buildPositionFromComment,
   findCommentIndexByPosition,
+  parsePosition,
+  resolveConversationAnchorForCommentId,
   replaceLocationRoute,
   clearLocationRoute,
 } from '../lib/uri-route';
@@ -394,6 +402,31 @@ export function PrModalApp({
 }: any) {
   const reverseComments = prefs?.reverseComments !== false;
   const timelineVisibility = prefs?.timelineVisibility ?? null;
+  /**
+   * Plugin language: `auto` follows GitHub page locale; concrete codes override.
+   * Passed to chrome that uses pure catalogs (Diff settings labels, …).
+   */
+  const uiLanguagePref = normalizeUiLanguagePref(prefs?.uiLanguage);
+  const appLocale = useMemo(
+    () =>
+      resolveEffectiveGithubLocale(
+        typeof document !== 'undefined' ? document : null,
+        uiLanguagePref
+      ),
+    [uiLanguagePref]
+  );
+  // Keep page attribute in sync even before LocaleProvider paint (watch path)
+  useEffect(() => {
+    try {
+      document.documentElement.setAttribute('data-prp-app-locale', appLocale);
+      document.documentElement.setAttribute(
+        'data-prp-ui-language',
+        uiLanguagePref
+      );
+    } catch {
+      /* ignore */
+    }
+  }, [appLocale, uiLanguagePref]);
   /** Diff hunk list shows only the active file; file tree still lists all. */
   const singleFileMode = prefs?.singleFileMode === true;
   /**
@@ -1346,8 +1379,11 @@ export function PrModalApp({
     const expected = Number(detail.changedFiles);
     const startLabel =
       Number.isFinite(expected) && expected > 0
-        ? `Loading files 0/${Math.min(Math.floor(expected), 999)}`
-        : 'Loading all files…';
+        ? formatMessage('progress_loading_files_n', appLocale, {
+            loaded: 0,
+            total: Math.min(Math.floor(expected), 999),
+          })
+        : formatMessage('progress_loading_all_files', appLocale);
     ui.setLoadStage({ busy: true, label: startLabel, percent: 18 });
     // Soft mid progress while REST pages walk (no per-page callbacks yet).
     const midTimer =
@@ -1358,8 +1394,8 @@ export function PrModalApp({
               busy: true,
               label:
                 Number.isFinite(expected) && expected > 0
-                  ? `Loading files…`
-                  : 'Loading all files…',
+                  ? formatMessage('progress_loading_files', appLocale)
+                  : formatMessage('progress_loading_all_files', appLocale),
               percent: 58,
             });
           }, 400)
@@ -1405,8 +1441,11 @@ export function PrModalApp({
         busy: true,
         label:
           count > 0
-            ? `Loading files ${Math.min(count, 999)}/${Math.min(count, 999)}`
-            : 'Files ready',
+            ? formatMessage('progress_loading_files_n', appLocale, {
+                loaded: Math.min(count, 999),
+                total: Math.min(count, 999),
+              })
+            : formatMessage('progress_files_ready', appLocale),
         percent: 96,
       });
     } catch {
@@ -1445,7 +1484,14 @@ export function PrModalApp({
         }
       }
     }
-  }, [detail, onFetchAllPrFiles, onPatchDetail, diffFilesOverride, prIdentity]);
+  }, [
+    detail,
+    onFetchAllPrFiles,
+    onPatchDetail,
+    diffFilesOverride,
+    prIdentity,
+    appLocale,
+  ]);
 
   // Diff: re-fetch when empty, incomplete count, or slim IDB — not when GitHub
   // already omitted some large-file patches after a full page.
@@ -3632,18 +3678,91 @@ export function PrModalApp({
     setLineSelection,
   ]);
 
-  // Focus review comment/thread from URI/session position once comments map
+  // Focus comment/thread from URI/session position (Conversation or Diff).
   useEffect(() => {
     if (!open || !detail?.number) return;
     const pos = initialRoute?.position || null;
     if (!pos) return;
     const applyKey = `${detail.number}:${pos}`;
     if (positionAppliedRef.current === applyKey) return;
+    const parsed = parsePosition(pos);
+    if (!parsed) return;
+    const routePage = normalizePage(initialRoute?.page);
+
+    // Conversation deep-link: scroll/focus timeline or thread card
+    if (routePage === 'conversation') {
+      const anchor = resolveConversationAnchorForCommentId(
+        detail,
+        parsed.id
+      );
+      if (!anchor) return;
+      // Need at least comments or threads present so the row can mount
+      const hasFeed =
+        (Array.isArray(detail.comments) && detail.comments.length > 0) ||
+        (Array.isArray(detail.reviewThreads) &&
+          detail.reviewThreads.length > 0) ||
+        (Array.isArray(detail.review_threads) &&
+          detail.review_threads.length > 0) ||
+        (Array.isArray(detail.timelineItems) &&
+          detail.timelineItems.length > 0);
+      if (!hasFeed) return;
+      positionAppliedRef.current = applyKey;
+      if (layoutMode === LAYOUT_DIFF) setLayoutMode(LAYOUT_CENTERED);
+      try {
+        useModalStore.setState({
+          pendingConversationNavAnchor: anchor,
+        });
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+
+    // Diff (default when page omitted or page=diff): mapped review comment roots.
+    // Copy-link uses the exact comment id (root or reply). mappedComments is
+    // roots-only — resolve reply → root so c:{replyId} still scrolls the thread.
     if (!mappedComments.length) return;
-    const idx = findCommentIndexByPosition(mappedComments, pos);
-    if (idx < 0) return;
+    let diffPos = pos;
+    if (typeof resolveRootReviewCommentId === 'function') {
+      const rootId = resolveRootReviewCommentId(
+        detail?.reviewComments || detail?.review_comments || [],
+        parsed.id
+      );
+      if (rootId != null && String(rootId) !== '') {
+        diffPos = `c:${rootId}`;
+      }
+    }
+    const idx = findCommentIndexByPosition(mappedComments, diffPos);
+    if (idx < 0) {
+      // Issue-only comment may only exist on conversation — fall back
+      if (routePage == null || routePage === 'diff') {
+        const anchor = resolveConversationAnchorForCommentId(
+          detail,
+          parsed.id
+        );
+        if (anchor && routePage == null) {
+          // Prefer conversation when not found on Diff and page was unspecified
+          const hasIssue =
+            Array.isArray(detail.comments) &&
+            detail.comments.some(
+              (c: any) => c && String(c.id) === String(parsed.id)
+            );
+          if (hasIssue) {
+            positionAppliedRef.current = applyKey;
+            if (layoutMode === LAYOUT_DIFF) setLayoutMode(LAYOUT_CENTERED);
+            try {
+              useModalStore.setState({
+                pendingConversationNavAnchor: anchor,
+              });
+            } catch {
+              /* ignore */
+            }
+          }
+        }
+      }
+      return;
+    }
     positionAppliedRef.current = applyKey;
-    // Position implies diff context
     if (layoutMode !== LAYOUT_DIFF) setLayoutMode(LAYOUT_DIFF);
     setCommentIndex(idx);
     const row = mappedComments[idx];
@@ -3663,8 +3782,10 @@ export function PrModalApp({
     }
   }, [
     open,
+    detail,
     detail?.number,
     initialRoute?.position,
+    initialRoute?.page,
     mappedComments,
     layoutMode,
     viewportHeightRef.current,
@@ -5218,8 +5339,9 @@ export function PrModalApp({
       canSubmitReviewVerdict: canVerdict,
       // Diff-only commands (file nav, selection, filters, viewed…)
       layoutMode: layoutMode === LAYOUT_DIFF ? 'diff' : 'centered',
+      locale: appLocale,
     });
-  }, [detail, stackItems, openPulls, layoutMode]);
+  }, [detail, stackItems, openPulls, layoutMode, appLocale]);
 
   /** Async PR search boundary for palette `#…` mode (injectable fetch). */
   const searchPalettePrs = useCallback(
@@ -7688,6 +7810,7 @@ export function PrModalApp({
   });
 
   return (
+    <LocaleProvider uiLanguage={prefs?.uiLanguage ?? uiLanguagePref}>
     <div
       ref={overlayRef}
       className={`prp-overlay ${
@@ -7703,6 +7826,8 @@ export function PrModalApp({
       data-fs-hint={shellFullscreenHint ? '1' : '0'}
       data-layout={layoutMode === LAYOUT_DIFF ? 'diff' : 'conversation'}
       data-leaving={closing ? '1' : '0'}
+      data-prp-app-locale={appLocale}
+      data-prp-ui-language={uiLanguagePref}
     >
       <OptHintsOverlayClass targetRef={overlayRef} />
       {!isEmbed ? (
@@ -8002,6 +8127,7 @@ export function PrModalApp({
               setDiffMode={setDiffMode}
               hideWhitespace={hideWhitespace}
               onHideWhitespace={applyHideWhitespace}
+              locale={appLocale}
               setScrollTop={setScrollTop}
               listRef={listRef}
               hasAnyReviewThreads={hasAnyReviewThreads}
@@ -8200,6 +8326,7 @@ export function PrModalApp({
         />
       </div>
     </div>
+    </LocaleProvider>
   );
 }
 

@@ -8,6 +8,7 @@ import { Badge } from '@common/Badge';
 import { Card } from '@common/Card';
 import { MarkdownComposer } from '@common/MarkdownComposer';
 import { OptBtnHint } from '@common/OptBtnHint';
+import { useT } from '@lib/locale-context';
 
 export function ComposerCard({
   composerMode,
@@ -50,6 +51,7 @@ export function ComposerCard({
   renderSearchableBody: (body: string, anchor: string, mark: boolean) => React.ReactNode;
   renderPendingThreadList: (item: any, keyPrefix: string, opts: { compact?: boolean }) => React.ReactNode;
 }) {
+  const t = useT();
   const pendingThreadCount = Array.isArray(pendingReviewGroup?.threads)
     ? pendingReviewGroup.threads.length
     : pendingCount;
@@ -78,9 +80,9 @@ export function ComposerCard({
               }`}
               onClick={() => setComposerMode('comment')}
               data-prp-composer-mode="comment"
-              title="Comment mode (⌥T toggles)"
+              title={`${t('cta_comment')} (⌥T)`}
             >
-              Comment
+              {t('cta_comment')}
             </button>
           </span>
           <button
@@ -92,13 +94,13 @@ export function ComposerCard({
             }`}
             onClick={() => setComposerMode('review')}
             data-prp-composer-mode="review"
-            title="Review mode (⌥T toggles)"
+            title={`${t('cta_review')} (⌥T)`}
           >
-            Review
+            {t('cta_review')}
             {pendingCount > 0 ? (
               <span
                 className="prp-composer-mode__badge ml-1 inline-flex min-w-[1.1rem] items-center justify-center rounded-full px-1 text-[10px] font-semibold"
-                title="Pending review items"
+                title={t('cta_pending_review')}
               >
                 {pendingCount}
               </span>
@@ -121,9 +123,9 @@ export function ComposerCard({
           >
             <div className="prp-composer__pending-head flex items-center gap-2">
               <span className="prp-composer__pending-title font-semibold text-sm">
-                Pending review
+                {t('cta_pending_review')}
               </span>
-              <Badge tone="warn" title="Not yet submitted">
+              <Badge tone="warn" title={t('cta_pending_review')}>
                 {pendingThreadCount} thread{pendingThreadCount === 1 ? '' : 's'}
               </Badge>
             </div>
@@ -149,8 +151,8 @@ export function ComposerCard({
             onChange={setCommentText}
             placeholder={
               composerMode === 'review'
-                ? 'Leave a review summary (optional with pending threads)…'
-                : 'Write a comment…'
+                ? t('cta_write_comment')
+                : t('cta_write_comment')
             }
             compact
             rows={3}
@@ -174,10 +176,10 @@ export function ComposerCard({
                 loading={Boolean(actionBusy)}
                 disabled={!String(commentText || '').trim()}
                 onClick={submitComment}
-                title="Post conversation comment (⌥C · ⌘↵)"
+                title={`${t('cta_post_comment')} (⌥C · ⌘↵)`}
                 data-prp-composer-submit="1"
               >
-                {actionBusy ? 'Submitting…' : 'Submit'}
+                {actionBusy ? t('cta_submitting') : t('cta_submit')}
               </Button>
             </span>
             {detail.state === 'open' && !detail.merged ? (
@@ -187,9 +189,9 @@ export function ComposerCard({
                 disabled={actionBusy}
                 loading={Boolean(actionBusy)}
                 onClick={onClosePr}
-                title="Close pull request"
+                title={t('cta_close_pr')}
               >
-                Close pull request
+                {t('cta_close_pr')}
               </Button>
             ) : null}
             {detail.state === 'closed' && !detail.merged ? (
@@ -199,9 +201,9 @@ export function ComposerCard({
                 disabled={actionBusy}
                 loading={Boolean(actionBusy)}
                 onClick={onReopenPr}
-                title="Reopen pull request"
+                title={t('cta_reopen_pr')}
               >
-                Reopen
+                {t('cta_reopen_pr')}
               </Button>
             ) : null}
           </div>
@@ -217,14 +219,10 @@ export function ComposerCard({
                   !String(commentText || '').trim() && !pendingCount
                 }
                 onClick={submitReview}
-                title={
-                  pendingCount > 0
-                    ? 'Submit pending review as comment (⌥C · ⌘↵)'
-                    : 'Submit review as comment (⌥C · ⌘↵)'
-                }
+                title={`${t('cta_submit_review_comment')} (⌥C · ⌘↵)`}
                 data-prp-composer-submit="1"
               >
-                {actionBusy ? 'Submitting…' : 'Submit review'}
+                {actionBusy ? t('cta_submitting') : t('cta_submit_review')}
               </Button>
             </span>
             {showReviewVerdict ? (
@@ -235,9 +233,9 @@ export function ComposerCard({
                   disabled={actionBusy}
                   loading={Boolean(actionBusy)}
                   onClick={() => onLeaveReviewAction?.('approve')}
-                  title="Approve pull request"
+                  title={t('cta_approve_pr')}
                 >
-                  {actionBusy ? 'Working…' : 'Approve'}
+                  {actionBusy ? t('cta_working') : t('cta_approve')}
                 </Button>
                 <Button
                   size="sm"
@@ -245,9 +243,9 @@ export function ComposerCard({
                   disabled={actionBusy}
                   loading={Boolean(actionBusy)}
                   onClick={() => onLeaveReviewAction?.('request_changes')}
-                  title="Request changes"
+                  title={t('cta_request_changes')}
                 >
-                  {actionBusy ? 'Working…' : 'Request changes'}
+                  {actionBusy ? t('cta_working') : t('cta_request_changes')}
                 </Button>
               </>
             ) : null}
@@ -258,9 +256,9 @@ export function ComposerCard({
                 disabled={actionBusy}
                 loading={Boolean(actionBusy)}
                 onClick={() => onDiscardPending?.()}
-                title="Discard pending review"
+                title={t('cta_discard_pending')}
               >
-                {actionBusy ? 'Working…' : 'Discard'}
+                {actionBusy ? t('cta_working') : t('cta_discard')}
               </Button>
             ) : null}
           </div>

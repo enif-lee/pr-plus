@@ -61,6 +61,12 @@ const DEFAULT_PREFS = {
   autoExpandOnFileNav: false,
   onboardingCompleted: false,
   /**
+   * UI language for pr+ chrome strings.
+   * - `auto` (default): follow GitHub page `html[lang]` / locale signals
+   * - `en` | `ko` | `ja` | `zh_CN`: force catalog (overrides page detect)
+   */
+  uiLanguage: 'auto',
+  /**
    * Conversation timeline category visibility (plugin-global).
    * events | participants | comments | review-threads
    * — each true = tip on / rows shown. Synced with conversation tip row + popup.
@@ -87,6 +93,30 @@ function normalizeShortcutMonitorSizePref(raw: unknown): string {
   if (v === 'small' || v === 'sm' || v === '1' || v === '1x') return 'small';
   if (raw === false) return 'none';
   return DEFAULT_PREFS.shortcutMonitorSize;
+}
+
+/** Plugin UI language: auto | en | ko | ja | zh_CN */
+function normalizeUiLanguagePref(raw: unknown): string {
+  if (raw == null) return DEFAULT_PREFS.uiLanguage;
+  const v = String(raw).trim();
+  if (!v) return DEFAULT_PREFS.uiLanguage;
+  const lower = v.toLowerCase().replace(/_/g, '-');
+  if (
+    lower === 'auto' ||
+    lower === 'detect' ||
+    lower === 'default' ||
+    lower === 'system' ||
+    lower === 'github'
+  ) {
+    return 'auto';
+  }
+  if (v === 'zh_CN' || lower === 'zh-cn' || lower === 'zh_cn' || lower === 'zh') {
+    return 'zh_CN';
+  }
+  if (lower === 'en' || lower.startsWith('en-')) return 'en';
+  if (lower === 'ko' || lower.startsWith('ko-')) return 'ko';
+  if (lower === 'ja' || lower.startsWith('ja-')) return 'ja';
+  return DEFAULT_PREFS.uiLanguage;
 }
 
 function getStorageArea(storageApi: any = (globalThis as any).chrome?.storage?.local) {
@@ -180,6 +210,7 @@ function normalizePrefs(raw: any) {
       typeof src.onboardingCompleted === 'boolean'
         ? src.onboardingCompleted
         : DEFAULT_PREFS.onboardingCompleted,
+    uiLanguage: normalizeUiLanguagePref(src.uiLanguage),
     timelineVisibility: normalizeTimelineVisibilityPref(
       src.timelineVisibility ?? DEFAULT_PREFS.timelineVisibility
     ),
@@ -344,10 +375,16 @@ async function setExtensionPrefs(patch: any, storageApi: any) {
   if (!area) return Promise.reject(new Error('chrome.storage unavailable'));
 
   const prev = await getExtensionPrefs(area);
+  const patchObj = patch && typeof patch === 'object' ? patch : {};
+  // Explicit merge: keep uiLanguage and all known keys after normalize
   const next = normalizePrefs({
     ...(prev as any),
-    ...(patch && typeof patch === 'object' ? patch : {}),
+    ...patchObj,
   });
+  // Pin uiLanguage if the patch set it (guards against any normalize slip)
+  if (Object.prototype.hasOwnProperty.call(patchObj, 'uiLanguage')) {
+    (next as any).uiLanguage = normalizeUiLanguagePref(patchObj.uiLanguage);
+  }
 
   return new Promise((resolve, reject) => {
     area.set({ [PREFS_KEY]: next }, () => {
@@ -734,6 +771,7 @@ const storageApi = {
   RATE_LIMIT_KEY,
   DEFAULT_PREFS,
   normalizePrefs,
+  normalizeUiLanguagePref,
   normalizeHostAccounts,
   maskGithubToken,
   looksLikeGithubToken,

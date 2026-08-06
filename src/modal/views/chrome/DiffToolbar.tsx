@@ -29,6 +29,9 @@ import {
   type DiffReviewFilterState,
   type DiffReviewStatus,
 } from '@lib/diff-review-filter';
+import { createTranslator } from '@lib/i18n';
+import { resolveGithubLocale } from '@lib/locale-resolve';
+import { useLocale } from '@lib/locale-context';
 import { TipPopover } from '@common/TipPopover';
 import { SearchBar } from './SearchBar';
 import './DiffToolbar.css';
@@ -116,7 +119,20 @@ export function DiffToolbar(props: any) {
     onSearchClose = null,
     onSearchNext = null,
     onSearchPrev = null,
+    /** Override locale (tests); default follows GitHub page html[lang]. */
+    locale: localeProp = null,
   } = props;
+
+  const localeCtx = useLocale();
+  const locale = useMemo(() => {
+    // Prefer explicit prop, then context (plugin pref), then page detect.
+    if (localeProp) return localeProp;
+    if (localeCtx?.locale) return localeCtx.locale;
+    return resolveGithubLocale(
+      typeof document !== 'undefined' ? document : null
+    );
+  }, [localeProp, localeCtx?.locale]);
+  const t = useMemo(() => createTranslator(locale), [locale]);
 
   // Unified: GitHub PENDING review only (totalPendingCount from App).
   // Legacy fallback: local batch count if host not yet updated.
@@ -429,7 +445,9 @@ export function DiffToolbar(props: any) {
             aria-expanded={commitPickerOpen}
             title="Select commits: 1 = single, 2 endpoints fill the range between them"
           >
-            {commitLoading && !commitOpts.length ? 'Loading…' : triggerLabel}
+            {commitLoading && !commitOpts.length
+              ? t('stats_loading')
+              : triggerLabel}
             <span className="prp-diff-toolbar__chevron" aria-hidden="true">
               <IconChevronDown size={12} />
             </span>
@@ -504,7 +522,7 @@ export function DiffToolbar(props: any) {
                 title={`Toggle unresolved threads (${unresN}). Empty selection shows all.`}
                 onClick={() => toggleStatus('unresolved')}
               >
-                Unresolved{' '}
+                {t('unresolved')}{' '}
                 <span className="prp-review-filter__count">{unresN}</span>
               </button>
               <button
@@ -518,7 +536,8 @@ export function DiffToolbar(props: any) {
                 title={`Toggle resolved threads (${resN}). Empty selection shows all.`}
                 onClick={() => toggleStatus('resolved')}
               >
-                Resolved <span className="prp-review-filter__count">{resN}</span>
+                {t('resolved')}{' '}
+                <span className="prp-review-filter__count">{resN}</span>
               </button>
               {pending > 0 ? (
                 <button
@@ -532,7 +551,7 @@ export function DiffToolbar(props: any) {
                   title={`Toggle pending (unsubmitted) comments (${pending}). Empty selection shows all.`}
                   onClick={() => toggleStatus('pending')}
                 >
-                  Pending{' '}
+                  {t('pending')}{' '}
                   <span className="prp-review-filter__count">{pending}</span>
                 </button>
               ) : null}
@@ -578,10 +597,10 @@ export function DiffToolbar(props: any) {
                       ? 'prp-diff-toolbar__filter-gear'
                       : 'prp-diff-toolbar__filter-gear prp-diff-toolbar__filter-gear--alone'
                   }
-                  aria-label="Diff view settings"
+                  aria-label={t('diff_view_settings')}
                   aria-haspopup="menu"
                   aria-expanded={settingsOpen}
-                  title="View and filter options"
+                  title={t('display_options')}
                   onClick={(e) => {
                     e.stopPropagation();
                     setSettingsOpen((v) => !v);
@@ -598,7 +617,7 @@ export function DiffToolbar(props: any) {
                         ref={settingsMenuRef}
                         className="prp-diff-review-settings prp-diff-review-settings--portal"
                         role="menu"
-                        aria-label="Diff view settings"
+                        aria-label={t('diff_view_settings')}
                         data-prp-review-filter-menu="1"
                         style={{
                           top: settingsCoords.top,
@@ -608,7 +627,7 @@ export function DiffToolbar(props: any) {
                       >
                         <div className="prp-diff-review-settings__section">
                           <p className="prp-diff-review-settings__heading">
-                            Diff view
+                            {t('diff_view')}
                           </p>
                           {/* Segmented toggle (same chrome as former toolbar control) */}
                           <div
@@ -653,7 +672,7 @@ export function DiffToolbar(props: any) {
                           </div>
                           <label
                             className="prp-diff-review-settings__row prp-diff-review-settings__row--after-mode"
-                            title="Hide lines that change only whitespace"
+                            title={t('hide_whitespace_title')}
                           >
                             <input
                               type="checkbox"
@@ -663,12 +682,12 @@ export function DiffToolbar(props: any) {
                               }
                               data-prp-hide-whitespace="1"
                             />
-                            <span>Hide whitespace</span>
+                            <span>{t('hide_whitespace')}</span>
                           </label>
                           {showReviewFilter || authorList.length > 0 ? (
                             <label
                               className="prp-diff-review-settings__row"
-                              title="Hide outdated review comments"
+                              title={t('hide_outdated_comments_title')}
                             >
                               <input
                                 type="checkbox"
@@ -680,7 +699,7 @@ export function DiffToolbar(props: any) {
                                 }
                                 data-prp-hide-outdated="1"
                               />
-                              <span>Hide outdated comments</span>
+                              <span>{t('hide_outdated_comments')}</span>
                             </label>
                           ) : null}
                         </div>
@@ -689,7 +708,7 @@ export function DiffToolbar(props: any) {
                             <hr className="prp-diff-review-settings__divider" />
                             <div className="prp-diff-review-settings__section">
                               <p className="prp-diff-review-settings__heading">
-                                Reviewed by…
+                                {t('reviewed_by')}
                               </p>
                               {authorList.length === 0 ? (
                                 <p className="prp-diff-review-settings__empty">
@@ -771,13 +790,13 @@ export function DiffToolbar(props: any) {
               }}
               title={
                 pending > 0
-                  ? `Finish your review (${pending} pending)`
-                  : 'Finish your review'
+                  ? `${t('cta_finish_review')} (${pending})`
+                  : t('cta_finish_review')
               }
               shortcut={isMac ? '⌥↵' : 'Alt+Enter'}
               tipPlacement="top"
             >
-              Submit review
+              {t('submit_review')}
               {pending > 0 ? (
                 <span className="prp-diff-toolbar__pending-count" aria-hidden="true">
                   {pending}

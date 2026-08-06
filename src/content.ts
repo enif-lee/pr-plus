@@ -113,12 +113,40 @@
       ].join(';');
       const text = document.createElement('div');
       text.style.flex = '1 1 auto';
+      const i18n = (globalThis as any).PRModalI18n;
+      let locale = 'en';
+      try {
+        locale =
+          document.documentElement.getAttribute('data-prp-app-locale') ||
+          document.documentElement.getAttribute('data-prp-ui-language') ||
+          document.documentElement.getAttribute('lang') ||
+          'en';
+        if (locale === 'auto') {
+          locale = document.documentElement.getAttribute('lang') || 'en';
+        }
+      } catch {
+        locale = 'en';
+      }
+      const msg = (key: string, fallback: string) => {
+        try {
+          if (typeof i18n?.formatMessage === 'function') {
+            const m = i18n.formatMessage(key, locale);
+            if (m && m !== key) return m;
+          }
+        } catch {
+          /* ignore */
+        }
+        return fallback;
+      };
       text.textContent =
         message ||
-        'pr+ was reloaded. Refresh this GitHub tab (⌘R / Ctrl+R) to reconnect.';
+        msg(
+          'content_reload_message',
+          'pr+ was reloaded. Refresh this GitHub tab (⌘R / Ctrl+R) to reconnect.'
+        );
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.textContent = 'Refresh';
+      btn.textContent = msg('content_refresh', 'Refresh');
       btn.style.cssText =
         'flex:0 0 auto;appearance:none;border:1px solid #d0d7de;background:#f6f8fa;border-radius:6px;padding:4px 10px;font:inherit;cursor:pointer;font-weight:600';
       btn.onclick = () => {
@@ -130,7 +158,10 @@
       };
       const close = document.createElement('button');
       close.type = 'button';
-      close.setAttribute('aria-label', 'Dismiss');
+      close.setAttribute(
+        'aria-label',
+        msg('content_dismiss', 'Dismiss')
+      );
       close.textContent = '×';
       close.style.cssText =
         'flex:0 0 auto;appearance:none;border:0;background:transparent;font-size:18px;line-height:1;cursor:pointer;color:#656d76;padding:0 2px';
@@ -300,6 +331,18 @@
       globalThis.PRTreeStorage?.watchExtensionPrefs?.((prefs) => {
         if (prefs?.pluginEnabled === false) disableFeatures();
         else void enableFeatures();
+      });
+    } catch {
+      /* ignore */
+    }
+    // Unpacked rebuilds leave a stale SW until reload — e2e / agents dispatch this.
+    try {
+      document.addEventListener('prp-reload-extension', () => {
+        try {
+          (globalThis as any).chrome?.runtime?.reload?.();
+        } catch {
+          /* ignore */
+        }
       });
     } catch {
       /* ignore */

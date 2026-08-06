@@ -13,6 +13,35 @@ import { allowedMergeMethods, canUpdateBranch } from './merge-box-status';
 import {
   optShortcutForCommandId,
 } from './command-palette-opt';
+import { formatMessage } from './i18n';
+
+/** Localize palette title/section from catalogs; keep English as fallback. */
+function localizePaletteCommand(cmd: any, locale: string) {
+  if (!cmd || typeof cmd !== 'object') return cmd;
+  const id = String(cmd.id || '');
+  const titleKey = id ? `palette_cmd_${id.replace(/-/g, '_')}` : '';
+  const sectionRaw = String(cmd.section || '');
+  const sectionKey = sectionRaw
+    ? `palette_sec_${sectionRaw.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`
+    : '';
+  let title = cmd.title;
+  if (titleKey) {
+    const m = formatMessage(titleKey, locale);
+    if (m && m !== titleKey) title = m;
+  }
+  let section = cmd.section;
+  if (sectionKey) {
+    const m = formatMessage(sectionKey, locale);
+    if (m && m !== sectionKey) section = m;
+  }
+  return { ...cmd, title, section };
+}
+
+export function localizePaletteCommands(commands: any[], locale: string) {
+  const list = Array.isArray(commands) ? commands : [];
+  const loc = locale || 'en';
+  return list.map((c) => localizePaletteCommand(c, loc));
+}
 
 
 /**
@@ -850,7 +879,9 @@ export function buildPaletteCommands(detail: any, opts: any = {}) {
     for (const c of buildDiffPaletteCommands()) cmds.push(c);
   }
 
-  return cmds;
+  // Localize titles/sections for the active app locale (opts.locale)
+  const locale = String(opts.locale || opts.appLocale || 'en');
+  return localizePaletteCommands(cmds, locale);
 }
 
 /**

@@ -31,8 +31,10 @@ import { InlineThread } from '../diff/InlineThread';
 import { MarkdownView as Md } from '@common/MarkdownView';
 import { hasChecksData } from '../conversation/ChecksPanel';
 import { ChecksSummary } from '../conversation/ChecksSummary';
+import { useT } from '@lib/locale-context';
 
 export function DiffChrome({ detail }: any) {
+  const t = useT();
   if (!detail) return null;
   const labels = detail.labels || [];
   const checks = detail.checks;
@@ -42,7 +44,11 @@ export function DiffChrome({ detail }: any) {
   return (
     <div className="prp-diff-chrome">
       {hasChecks ? (
-        <ChecksSummary checks={checks} label="Checks" className="prp-diff-chrome__checks" />
+        <ChecksSummary
+          checks={checks}
+          label={t('meta_checks')}
+          className="prp-diff-chrome__checks"
+        />
       ) : null}
       {hasLabels ? (
         <div className="prp-diff-chrome__labels">

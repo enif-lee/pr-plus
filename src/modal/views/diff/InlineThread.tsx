@@ -7,7 +7,14 @@ import { MarkdownComposer } from '@common/MarkdownComposer';
 import { OptBtnHint } from '@common/OptBtnHint';
 import { formatWhen } from '@common/utils';
 import { Avatar } from '@common/Avatar';
-import { IconDisclosure, IconPencil, IconSync, IconTrash } from '@common/icons';
+import {
+  IconCopy,
+  IconDisclosure,
+  IconLink,
+  IconPencil,
+  IconSync,
+  IconTrash,
+} from '@common/icons';
 import { CommentReactions } from '@common/CommentReactions';
 import { BodyEditor } from '../composers/BodyEditor';
 import { DiffSnippetView } from '../conversation/DiffSnippetView';
@@ -17,6 +24,16 @@ import {
   isContextThreadCommentActive,
   stepContextThreadComposerTab,
 } from '@lib/context-thread-dom';
+import { useT } from '@lib/locale-context';
+import {
+  copyTextToClipboard,
+  stampCommentCopyResult,
+} from '@lib/copy-to-clipboard';
+import {
+  buildCommentShareUrl,
+  buildPositionFromComment,
+  commentBodyForCopy,
+} from '@lib/uri-route';
 
 /**
  * Inline review thread card (Diff + Conversation).
@@ -28,6 +45,7 @@ import {
  *   (lines + path). Only used when showHunk is true.
  */
 function InlineThreadImpl(props: any) {
+  const t = useT();
   const {
     row,
     thread,
@@ -69,7 +87,19 @@ function InlineThreadImpl(props: any) {
     showFileHeader = true,
     /** Lazy by-ids comments in flight (expand shell/resolved threads). */
     commentsLoading = false,
+    /**
+     * Deep-link page stamp for copy-link (`conversation` | `diff`).
+     * Conversation embeds pass `conversation`; Diff defaults to `diff`.
+     */
+    sharePage = null as 'conversation' | 'diff' | null,
   } = props;
+
+  const linkPage: 'conversation' | 'diff' =
+    sharePage === 'conversation' || sharePage === 'diff'
+      ? sharePage
+      : showHunk
+        ? 'conversation'
+        : 'diff';
 
   const qSearch = String(searchQuery || '').trim();
   function commentOcc(commentId: any) {
@@ -260,30 +290,120 @@ function InlineThreadImpl(props: any) {
     return editingCommentId != null && String(editingCommentId) === String(id);
   }
 
+  function flashCopy(msg: string) {
+    try {
+      useModalStore.getState().setActionMsg?.(msg);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async function copyCommentBody(body: unknown, commentId?: unknown) {
+    const text = commentBodyForCopy(body);
+    if (!text) {
+      flashCopy('No comment text');
+      stampCommentCopyResult({
+        kind: 'body',
+        ok: false,
+        text: '',
+        commentId,
+      });
+      return;
+    }
+    const ok = await copyTextToClipboard(text);
+    stampCommentCopyResult({ kind: 'body', ok, text, commentId });
+    flashCopy(ok ? 'Comment copied' : 'Copy failed');
+  }
+
+  async function copyCommentLink(id: unknown) {
+    const position = buildPositionFromComment({ id });
+    if (!position) {
+      flashCopy('Link unavailable');
+      stampCommentCopyResult({ kind: 'link', ok: false, url: '', commentId: id });
+      return;
+    }
+    const prHtmlUrl =
+      linkCtx?.htmlUrl ||
+      linkCtx?.html_url ||
+      (linkCtx?.owner && linkCtx?.repo && linkCtx?.number
+        ? `https://github.com/${linkCtx.owner}/${linkCtx.repo}/pull/${linkCtx.number}`
+        : null);
+    const url = buildCommentShareUrl({
+      prHtmlUrl,
+      page: linkPage,
+      position,
+      number: linkCtx?.number,
+    });
+    if (!url) {
+      flashCopy('Link unavailable');
+      stampCommentCopyResult({ kind: 'link', ok: false, url: '', commentId: id });
+      return;
+    }
+    const ok = await copyTextToClipboard(url);
+    stampCommentCopyResult({ kind: 'link', ok, url, commentId: id });
+    flashCopy(ok ? 'Link copied' : 'Copy failed');
+  }
+
+  /**
+   * Copy body/link for any reader; edit/delete only when own.
+   * Copy controls sit to the left of edit.
+   */
   function renderCommentActions(id: any, commentBody: any, own: boolean) {
-    if (!own || isEditingId(id)) return null;
+    if (isEditingId(id)) return null;
+    const canLink = Boolean(buildPositionFromComment({ id }));
+    if (!own && !canLink && !commentBody) return null;
     return (
       <div className="prp-icon-actions">
         <button
           type="button"
           className="prp-icon-btn"
           disabled={actionBusy}
-          title="Edit"
-          aria-label="Edit comment"
-          onClick={() => onEdit?.(id, commentBody)}
+          title="Copy comment"
+          aria-label="Copy comment text"
+          data-prp-copy-comment="1"
+          data-prp-comment-id={id != null ? String(id) : undefined}
+          onClick={() => void copyCommentBody(commentBody, id)}
         >
-          <IconPencil size={13} />
+          <IconCopy size={13} />
         </button>
-        <button
-          type="button"
-          className="prp-icon-btn prp-icon-btn--danger"
-          disabled={actionBusy}
-          title="Delete"
-          aria-label="Delete comment"
-          onClick={() => onDelete?.(id)}
-        >
-          <IconTrash size={13} />
-        </button>
+        {canLink ? (
+          <button
+            type="button"
+            className="prp-icon-btn"
+            disabled={actionBusy}
+            title="Copy link"
+            aria-label="Copy link to comment"
+            data-prp-copy-comment-link="1"
+            data-prp-comment-id={id != null ? String(id) : undefined}
+            onClick={() => void copyCommentLink(id)}
+          >
+            <IconLink size={13} />
+          </button>
+        ) : null}
+        {own ? (
+          <>
+            <button
+              type="button"
+              className="prp-icon-btn"
+              disabled={actionBusy}
+              title="Edit"
+              aria-label={t('cta_edit_comment')}
+              onClick={() => onEdit?.(id, commentBody)}
+            >
+              <IconPencil size={13} />
+            </button>
+            <button
+              type="button"
+              className="prp-icon-btn prp-icon-btn--danger"
+              disabled={actionBusy}
+              title="Delete"
+              aria-label="Delete comment"
+              onClick={() => onDelete?.(id)}
+            >
+              <IconTrash size={13} />
+            </button>
+          </>
+        ) : null}
       </div>
     );
   }
@@ -337,7 +457,7 @@ function InlineThreadImpl(props: any) {
           actionBusy={actionBusy}
           rows={4}
           compact
-          placeholder="Edit comment…"
+          placeholder={t('cta_edit_comment')}
           onSave={(body: string) => onSaveEdit?.(id, body)}
           onCancel={onCancelEdit}
           onRegisterSave={onRegisterEditorSave}
@@ -805,8 +925,8 @@ function InlineThreadImpl(props: any) {
                       }
                       title={
                         isThreadResolved
-                          ? 'Unresolve conversation'
-                          : 'Resolve conversation'
+                          ? t('unresolve_conversation')
+                          : t('resolve_conversation')
                       }
                       shortcut="⌥⌃R"
                       tipPlacement="top"
@@ -814,8 +934,8 @@ function InlineThreadImpl(props: any) {
                       data-prp-thread-node-id={resolveThreadNodeId || undefined}
                     >
                       {isThreadResolved
-                        ? 'Unresolve conversation'
-                        : 'Resolve conversation'}
+                        ? t('unresolve_conversation')
+                        : t('resolve_conversation')}
                     </Button>
                   </span>
                 ) : null}

@@ -43,6 +43,8 @@ import {
 } from '../conversation/ChecksSummary';
 import { useModalStore } from '../../store/modal-store';
 import { useDetailUiStore } from '../../store/detail-ui-store';
+import { useT } from '@lib/locale-context';
+import { formatMessage } from '@lib/i18n';
 import './Header.css';
 import '../../components/common/MarkdownComposer.css';
 
@@ -50,17 +52,25 @@ import '../../components/common/MarkdownComposer.css';
 const HEADER_REVIEWER_MAX_FULL = 4;
 const HEADER_REVIEWER_MAX_OVERFLOW = 3;
 
-export function formatReviewStatusTip(status: unknown): string {
+export function formatReviewStatusTip(
+  status: unknown,
+  localeOrT?: string | ((key: string) => string)
+): string {
+  const t =
+    typeof localeOrT === 'function'
+      ? localeOrT
+      : (key: string) => formatMessage(key, localeOrT || 'en');
   const s = String(status || '')
     .trim()
     .toUpperCase()
     .replace(/-/g, '_');
-  if (!s) return 'No review';
-  if (s === 'APPROVED') return 'Approved';
-  if (s === 'CHANGES_REQUESTED') return 'Changes requested';
-  if (s === 'PENDING' || s === 'REVIEW_REQUIRED') return 'Pending review';
-  if (s === 'COMMENTED') return 'Commented';
-  if (s === 'DISMISSED') return 'Dismissed';
+  if (!s) return t('review_status_none');
+  if (s === 'APPROVED') return t('review_status_approved');
+  if (s === 'CHANGES_REQUESTED') return t('review_status_changes_requested');
+  if (s === 'PENDING' || s === 'REVIEW_REQUIRED')
+    return t('review_status_pending');
+  if (s === 'COMMENTED') return t('review_status_commented');
+  if (s === 'DISMISSED') return t('review_status_dismissed');
   return String(status);
 }
 
@@ -69,6 +79,7 @@ export function formatReviewStatusTip(status: unknown): string {
  * overlapping stack. Leftmost is topmost (highest z-index).
  */
 export function HeaderCompactMetaStack({ detail }: { detail: any }) {
+  const t = useT();
   const avatars =
     detail?.avatarUrls && typeof detail.avatarUrls === 'object'
       ? detail.avatarUrls
@@ -91,7 +102,7 @@ export function HeaderCompactMetaStack({ detail }: { detail: any }) {
           (typeof row === 'object' && (row.avatarUrl || row.avatar_url)) ||
           avatars[String(login).toLowerCase()] ||
           null;
-        const statusLabel = formatReviewStatusTip(status);
+        const statusLabel = formatReviewStatusTip(status, t);
         return {
           login: String(login),
           avatarUrl,
@@ -107,7 +118,7 @@ export function HeaderCompactMetaStack({ detail }: { detail: any }) {
       tone: string;
       tip: string;
     }>;
-  }, [detail, avatars]);
+  }, [detail, avatars, t]);
 
   const checkGroups = useMemo(
     () =>
@@ -172,7 +183,7 @@ export function HeaderCompactMetaStack({ detail }: { detail: any }) {
         style={{ zIndex: z }}
         role="listitem"
         tabIndex={0}
-        aria-label={`+${extra} more reviewers`}
+        aria-label={t('header_more_reviewers', { count: extra })}
       >
         <span className="prp-header__meta-stack__more-txt">+{extra}</span>
         <TipPopover
@@ -208,7 +219,7 @@ export function HeaderCompactMetaStack({ detail }: { detail: any }) {
     <span
       className="prp-header__meta-stack"
       role="group"
-      aria-label="Reviewers and checks"
+      aria-label={t('header_reviewers_and_checks')}
     >
       {nodes}
     </span>
@@ -295,6 +306,7 @@ export function HeaderStatsBadge({
   deletions?: number;
   fileCount?: number;
 }) {
+  const t = useT();
   // Host prop is primary for open/refresh; modal store can surface Diff-side
   // work (ensureAllFiles) when host bar is idle, or when store is actively busy.
   const storePercent = useDetailUiStore((s) => s.loadPercent);
@@ -442,10 +454,10 @@ export function HeaderStatsBadge({
       data-load-percent={showStage ? String(animPercent) : undefined}
       title={
         showStage
-          ? `${stageLabel || 'Loading'}${rawPercent != null ? ` · ${animPercent}%` : ''}`
+          ? `${stageLabel || t('stats_loading_short')}${rawPercent != null ? ` · ${animPercent}%` : ''}`
           : skeleton
             ? undefined
-            : 'Files changed'
+            : t('stats_files_changed')
       }
       role={showStage ? 'status' : undefined}
       aria-live={showStage ? 'polite' : undefined}
@@ -469,7 +481,7 @@ export function HeaderStatsBadge({
               <span className="prp-header__stats-spinner" aria-hidden="true" />
             ) : null}
             <span className="prp-header__stats-label">
-              {stageLabel || 'Loading…'}
+              {stageLabel || t('stats_loading')}
             </span>
             <span className="prp-header__stats-pct" aria-hidden="true">
               {animPercent}%
@@ -481,7 +493,9 @@ export function HeaderStatsBadge({
           <>
             <span className="prp-stat-add">+{additions}</span>
             <span className="prp-stat-del">−{deletions}</span>
-            <span className="prp-muted prp-header__stats-files">{fileCount} files</span>
+            <span className="prp-muted prp-header__stats-files">
+              {t('stats_n_files', { count: fileCount })}
+            </span>
           </>
         )}
       </span>

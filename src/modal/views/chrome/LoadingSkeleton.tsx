@@ -112,7 +112,7 @@ export function LoadingSkeleton({ variant = 'conversation' }: { variant?: 'conve
           </div>
         </div>
         <aside className="prp-skeleton-conversation__aside">
-          {['Reviewers', 'Assignees', 'Labels', 'Milestone', 'Checks', 'Commits', 'Files'].map(
+          {['meta_reviewers', 'meta_assignees', 'meta_labels', 'meta_milestone', 'meta_checks', 'meta_commits', 'meta_files'].map(
             (label) => (
               <div key={label} className="prp-skeleton-card prp-skeleton-card--aside">
                 <div className="prp-skeleton-card__head">

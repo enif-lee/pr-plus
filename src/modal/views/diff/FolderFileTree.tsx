@@ -20,11 +20,13 @@ import {
   TOGGLE_VIEWED_SHORTCUT,
 } from '@lib/shortcut-policy';
 import { FloatingScrollbar } from '../../components/common/FloatingScrollbar';
+import { useT } from '@lib/locale-context';
 
 /** Cap extension chips so the search row stays usable on narrow nav. */
 const MAX_EXT_CHIPS = 10;
 
 function FolderFileTreeImpl(props: any) {
+  const t = useT();
   const {
     files,
     /**
@@ -185,14 +187,16 @@ function FolderFileTreeImpl(props: any) {
           <input
             className="prp-filetree__search-input"
             placeholder={
-              filesLoading ? 'Loading all files…' : 'Search files by path…'
+              filesLoading
+                ? t('aside_loading_all_files')
+                : t('aside_search_files_path')
             }
             value={fileQuery || ''}
             onChange={(e) => onFileQuery?.(e.target.value)}
             onFocus={() => {
               void onSearchFocus?.();
             }}
-            aria-label="Search files"
+            aria-label={t('aside_search_files')}
             aria-busy={filesLoading ? true : undefined}
           />
           {Number(fileTotal) > 0 && (onPrevFile || onNextFile) ? (

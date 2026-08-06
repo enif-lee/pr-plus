@@ -1,0 +1,62 @@
+{
+  "extName": {
+    "message": "pr+",
+    "description": "Extension name"
+  },
+  "extDescription": {
+    "message": "GitHub PR stack tree + fast in-page review shell for conversation, diff, and merge.",
+    "description": "Extension description"
+  },
+  "actionTitle": {
+    "message": "pr+",
+    "description": "Toolbar action tooltip"
+  },
+  "hide_whitespace": {
+    "message": "Hide whitespace",
+    "description": "Diff settings: hide whitespace"
+  },
+  "hide_whitespace_title": {
+    "message": "Hide lines that change only whitespace",
+    "description": "Diff settings: hide whitespace title"
+  },
+  "hide_outdated_comments": {
+    "message": "Hide outdated comments",
+    "description": "Diff settings: hide outdated comments"
+  },
+  "hide_outdated_comments_title": {
+    "message": "Hide outdated review comments",
+    "description": "Diff settings: hide outdated title"
+  },
+  "tab_conversation": {
+    "message": "Conversation",
+    "description": "Conversation tab label"
+  },
+  "tab_files": {
+    "message": "Files changed",
+    "description": "Files changed tab label"
+  },
+  "resolve_conversation": {
+    "message": "Resolve conversation",
+    "description": "Resolve conversation button"
+  },
+  "unresolved": {
+    "message": "Unresolved",
+    "description": "Unresolved filter"
+  },
+  "resolved": {
+    "message": "Resolved",
+    "description": "Resolved filter"
+  },
+  "pending": {
+    "message": "Pending",
+    "description": "Pending filter"
+  },
+  "display_options": {
+    "message": "Display options",
+    "description": "Display options heading"
+  },
+  "reviewed_by": {
+    "message": "Reviewed by…",
+    "description": "Reviewed by heading"
+  }
+}

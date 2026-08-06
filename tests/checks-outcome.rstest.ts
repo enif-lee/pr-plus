@@ -11,6 +11,8 @@ const {
   listCheckNamesByOutcome,
   formatCheckGroupTip,
   formatCheckSummary,
+  formatDurationMs,
+  checksNeedElapsedTick,
 } = checks;
 
 describe('classifyCheckOutcome', () => {
@@ -111,5 +113,118 @@ describe('formatCheckSummary', () => {
 
   test('pending expected copy', () => {
     expect(formatCheckSummary({ outcome: 'pending' })).toMatch(/Expected/i);
+  });
+});
+
+describe('in-progress elapsed advances with nowMs (shipped pure)', () => {
+  const startedAt = '2026-08-06T10:00:00.000Z';
+  const startMs = Date.parse(startedAt);
+
+  test('formatDurationMs multi-second spans are not stuck at <1s', () => {
+    expect(formatDurationMs(500)).toBe('<1s');
+    expect(formatDurationMs(2500)).toBe('3s'); // rounded
+    expect(formatDurationMs(5000)).toBe('5s');
+    expect(formatDurationMs(65_000)).toMatch(/1m/);
+  });
+
+  test('formatCheckSummary grows when nowMs advances (start-relative)', () => {
+    const item = {
+      outcome: 'in_progress',
+      status: 'in_progress',
+      startedAt,
+      // GitHub-ish freeze bug: updatedAt often equals startedAt for running jobs
+      updatedAt: startedAt,
+      completedAt: '',
+    };
+    const at2s = formatCheckSummary(item, startMs + 2000);
+    const at5s = formatCheckSummary(item, startMs + 5000);
+    const at12s = formatCheckSummary(item, startMs + 12_000);
+    expect(at2s).toMatch(/In progress/i);
+    expect(at2s).toMatch(/2s/);
+    expect(at5s).toMatch(/5s/);
+    expect(at12s).toMatch(/12s/);
+    expect(at2s).not.toBe(at5s);
+    expect(at5s).not.toBe(at12s);
+    // Must not freeze at <1s when multi-second wall time has passed
+    expect(at5s).not.toMatch(/<1s/);
+  });
+
+  test('buildMergeBoxCheckGroups passes nowMs into in-progress summary', () => {
+    const checks = {
+      state: 'pending',
+      statuses: [],
+      checkRuns: [
+        {
+          id: 42,
+          name: 'build',
+          status: 'in_progress',
+          conclusion: null,
+          started_at: startedAt,
+          updated_at: startedAt,
+          appName: 'CI',
+        },
+      ],
+    };
+    const early = buildMergeBoxCheckGroups(checks, { nowMs: startMs + 3000 });
+    const later = buildMergeBoxCheckGroups(checks, { nowMs: startMs + 9000 });
+    const sEarly = early.groups
+      .flatMap((g: any) => g.items)
+      .find((i: any) => i.outcome === 'in_progress')?.summary;
+    const sLater = later.groups
+      .flatMap((g: any) => g.items)
+      .find((i: any) => i.outcome === 'in_progress')?.summary;
+    expect(sEarly).toMatch(/3s/);
+    expect(sLater).toMatch(/9s/);
+    expect(sEarly).not.toBe(sLater);
+  });
+
+  test('finished success duration does not change with nowMs', () => {
+    const completedAt = '2026-08-06T10:00:10.000Z';
+    const item = {
+      outcome: 'success',
+      status: 'completed',
+      conclusion: 'success',
+      startedAt,
+      completedAt,
+      updatedAt: completedAt,
+    };
+    const a = formatCheckSummary(item, startMs + 60_000);
+    const b = formatCheckSummary(item, startMs + 120_000);
+    expect(a).toMatch(/Successful in 10s/);
+    expect(a).toBe(b);
+  });
+
+  test('checksNeedElapsedTick only when live in-progress has start', () => {
+    expect(
+      checksNeedElapsedTick({
+        checkRuns: [
+          {
+            id: 1,
+            name: 'build',
+            status: 'in_progress',
+            started_at: startedAt,
+          },
+        ],
+      })
+    ).toBe(true);
+    expect(
+      checksNeedElapsedTick({
+        checkRuns: [
+          {
+            id: 2,
+            name: 'done',
+            status: 'completed',
+            conclusion: 'success',
+            started_at: startedAt,
+            completed_at: '2026-08-06T10:00:05.000Z',
+          },
+        ],
+      })
+    ).toBe(false);
+    expect(
+      checksNeedElapsedTick({
+        checkRuns: [{ id: 3, name: 'queued', status: 'queued' }],
+      })
+    ).toBe(false);
   });
 });

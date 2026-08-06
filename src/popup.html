@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ko">
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <title>pr+</title>
@@ -373,77 +373,65 @@
   </style>
 </head>
 <body>
-  <h1>pr+</h1>
+  <h1 data-i18n="popup_title">pr+</h1>
 
   <!-- 1. Default PAT -->
   <section class="config" aria-labelledby="cfg-default-pat">
     <h2 class="config__title" id="cfg-default-pat">
-      <span class="config__title-num" aria-hidden="true">1</span>Default PAT
+      <span class="config__title-num" aria-hidden="true">1</span><span data-i18n="popup_section_default_pat">Default PAT</span>
     </h2>
-    <label for="token">github.com PAT (public cloud)</label>
-    <input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="ghp_… / github_pat_…" />
-    <p id="token-saved" class="saved" hidden>Saved: <code id="token-mask"></code></p>
+    <label for="token" data-i18n="popup_label_github_pat">github.com PAT (public cloud)</label>
+    <input id="token" type="password" autocomplete="off" spellcheck="false" data-i18n-placeholder="popup_placeholder_token" placeholder="ghp_… / github_pat_…" />
+    <p id="token-saved" class="saved" hidden><span data-i18n="popup_token_saved">Saved:</span> <code id="token-mask"></code></p>
     <div class="row">
-      <button id="save" class="primary" type="button">Save</button>
-      <button id="clear" type="button">Clear</button>
+      <button id="save" class="primary" type="button" data-i18n="popup_btn_save">Save</button>
+      <button id="clear" type="button" data-i18n="popup_btn_clear">Clear</button>
       <span id="status"></span>
     </div>
     <p class="hint">
-      <a href="https://github.com/settings/tokens" target="_blank" rel="noreferrer">Create token</a>
-      · github.com 전용. Enterprise는 아래 섹션에 별도 등록.
-      · 확장 <code>storage</code>에만 저장(동기화 안 함).
+      <a href="https://github.com/settings/tokens" target="_blank" rel="noreferrer" data-i18n="popup_hint_create_token">Create token</a>
+      <span data-i18n="popup_hint_pat_scope">· github.com only. Register Enterprise hosts below. · Stored only in extension storage (not synced).</span>
     </p>
 
     <details class="fold">
-      <summary>Required permissions</summary>
+      <summary data-i18n="popup_perm_summary">Required permissions</summary>
       <div class="fold__body">
-        <p class="hint" style="margin-top: 0">
-          사용에 필요한 Chrome 권한과 GitHub 토큰 스코프입니다.
+        <p class="hint" style="margin-top: 0" data-i18n="popup_perm_intro">
+          Chrome permissions and GitHub token scopes required for pr+.
         </p>
-        <ul class="perm-list" aria-label="Chrome extension permissions">
+        <ul class="perm-list" data-i18n-aria="popup_perm_list_aria" aria-label="Chrome extension permissions">
           <li>
             <span class="perm-key">storage</span>
-            <span class="perm-why">PAT·옵션 로컬 저장 (<code>chrome.storage.local</code>)</span>
+            <span class="perm-why" data-i18n="popup_perm_storage">PAT and options in local storage (chrome.storage.local)</span>
           </li>
           <li>
             <span class="perm-key">scripting</span>
-            <span class="perm-why">Enterprise 호스트에 content script 등록</span>
+            <span class="perm-why" data-i18n="popup_perm_scripting">Register content scripts on Enterprise hosts</span>
           </li>
           <li>
             <span class="perm-key">https://github.com/*</span>
-            <span class="perm-why">github.com PR 리스트·모달 (기본)</span>
+            <span class="perm-why" data-i18n="popup_perm_github_web">github.com PR list and modal (default)</span>
           </li>
           <li>
             <span class="perm-key">https://api.github.com/*</span>
-            <span class="perm-why">github.com REST / GraphQL API</span>
+            <span class="perm-why" data-i18n="popup_perm_github_api">github.com REST / GraphQL API</span>
           </li>
           <li>
             <span class="perm-key">optional https://*/*</span>
-            <span class="perm-why">Enterprise 웹/API 호스트 (설정에서 허용 요청)</span>
+            <span class="perm-why" data-i18n="popup_perm_optional">Enterprise web/API hosts (requested from settings)</span>
           </li>
         </ul>
         <div class="perm-note">
-          <strong>GitHub PAT scopes</strong>
+          <strong data-i18n="popup_pat_scopes_title">GitHub PAT scopes</strong>
           <ul>
-            <li>
-              <strong>Classic:</strong>
-              <code>repo</code>
-              (프라이빗 포함 전체 PR 기능).
-              구독(Subscribe) 쓰려면
-              <code>notifications</code>
-              추가.
+            <li data-i18n="popup_pat_classic">
+              Classic: repo (full PR features including private). Add notifications to Subscribe.
             </li>
-            <li>
-              <strong>Fine-grained:</strong>
-              대상 저장소에
-              <code>Pull requests</code>
-              Read &amp; Write.
-              제안 적용·파일 업로드는
-              <code>Contents</code>
-              Read &amp; Write.
+            <li data-i18n="popup_pat_fine">
+              Fine-grained: Pull requests Read &amp; Write on target repos. Contents Read &amp; Write for apply suggestion and file upload.
             </li>
           </ul>
-          토큰은 서비스 워커에서만 사용되며 content script에는 노출되지 않습니다.
+          <span data-i18n="popup_pat_security_note">Tokens are used only in the service worker and are never exposed to content scripts.</span>
         </div>
       </div>
     </details>
@@ -452,40 +440,40 @@
   <!-- 2. GitHub Enterprise PAT -->
   <section class="config" aria-labelledby="cfg-ghe-pat">
     <h2 class="config__title" id="cfg-ghe-pat">
-      <span class="config__title-num" aria-hidden="true">2</span>GitHub Enterprise PAT
+      <span class="config__title-num" aria-hidden="true">2</span><span data-i18n="popup_section_ghe_pat">GitHub Enterprise PAT</span>
     </h2>
-    <p class="hint" style="margin-top: 0">
-      호스트마다 PAT를 함께 등록합니다 (최대 3개).
-      수동 등록한 호스트만 활성화되며, Default PAT는 사용하지 않습니다.
+    <p class="hint" style="margin-top: 0" data-i18n="popup_ghe_intro">
+      Register a PAT with each host (max 3). Only hosts you add are active; Default PAT is not used for them.
     </p>
-    <ul id="host-accounts-list" class="host-list" aria-label="Registered enterprise hosts"></ul>
-    <p id="host-accounts-empty" class="hint" style="margin: 4px 0 0">등록된 Enterprise 호스트 없음</p>
+    <ul id="host-accounts-list" class="host-list" data-i18n-aria="popup_hosts_aria" aria-label="Registered enterprise hosts"></ul>
+    <p id="host-accounts-empty" class="hint" style="margin: 4px 0 0" data-i18n="popup_hosts_empty">No Enterprise hosts registered</p>
 
     <details class="fold">
-      <summary>Add / update host &amp; PAT</summary>
+      <summary data-i18n="popup_add_host_summary">Add / update host &amp; PAT</summary>
       <div class="fold__body">
-        <label for="enterprise-host">Web host</label>
+        <label for="enterprise-host" data-i18n="popup_label_web_host">Web host</label>
         <input
           id="enterprise-host"
           type="text"
           autocomplete="off"
           spellcheck="false"
+          data-i18n-placeholder="popup_placeholder_host"
           placeholder="github.mycorp.com or octocorp.ghe.com"
         />
-        <label for="enterprise-token" style="margin-top: 8px">PAT for this host</label>
+        <label for="enterprise-token" style="margin-top: 8px" data-i18n="popup_label_host_pat">PAT for this host</label>
         <input
           id="enterprise-token"
           type="password"
           autocomplete="off"
           spellcheck="false"
+          data-i18n-placeholder="popup_placeholder_token"
           placeholder="ghp_… / github_pat_…"
         />
-        <p class="hint">
-          API 자동: GHES → <code>https://{host}/api/v3</code> ·
-          <code>*.ghe.com</code> → <code>https://api.{host}</code>
+        <p class="hint" data-i18n="popup_host_api_hint">
+          API auto: GHES → https://{host}/api/v3 · *.ghe.com → https://api.{host}
         </p>
         <div class="row" style="margin-top: 8px">
-          <button id="add-host-account" class="primary" type="button">Add host &amp; grant access</button>
+          <button id="add-host-account" class="primary" type="button" data-i18n="popup_btn_add_host">Add host &amp; grant access</button>
           <span id="enterprise-status" class="hint" style="margin: 0; flex: 1"></span>
         </div>
         <p id="endpoint-preview" class="hint" style="margin-top: 6px"></p>
@@ -496,22 +484,21 @@
   <!-- 3. Config (Options + Storage) -->
   <section class="config" aria-labelledby="cfg-options">
     <h2 class="config__title" id="cfg-options">
-      <span class="config__title-num" aria-hidden="true">3</span>Config
+      <span class="config__title-num" aria-hidden="true">3</span><span data-i18n="popup_section_config">Config</span>
     </h2>
 
-    <h3>Options</h3>
+    <h3 data-i18n="popup_h3_options">Options</h3>
     <label class="pref" for="pref-plugin-enabled">
       <input id="pref-plugin-enabled" type="checkbox" />
       <span class="pref__body">
-        <span class="pref__title">pr+ 활성화</span>
-        <span class="pref__desc">끄면 GitHub API 호출과 목록/모달 호스트를 중지합니다. PAT rate limit(429) 시 자동으로 꺼지며, reset 시각 이후 다시 켤 수 있습니다.</span>
+        <span class="pref__title" data-i18n="popup_pref_plugin_title">Enable pr+</span>
+        <span class="pref__desc" data-i18n="popup_pref_plugin_desc">When off, GitHub API calls and list/modal host stop. Auto-disables on PAT rate limit (429); re-enable after reset.</span>
       </span>
     </label>
 
-    <h3>API rate limits</h3>
-    <p class="hint" style="margin: 0 0 6px">
-      최근 API 응답의 <code>x-ratelimit-*</code> (resource: core / graphql / search).
-      GraphQL 포인트와 REST core 한도는 별개입니다.
+    <h3 data-i18n="popup_h3_rate_limits">API rate limits</h3>
+    <p class="hint" style="margin: 0 0 6px" data-i18n="popup_rate_limits_hint">
+      Latest API x-ratelimit-* (core / graphql / search). GraphQL points and REST core limits are separate.
     </p>
     <div class="rl-bars" id="rate-limit-bars" aria-live="polite">
       <div class="rl-row" data-rl="core">
@@ -542,48 +529,48 @@
         </div>
       </div>
     </div>
-    <p id="rate-limit-status" class="rl-status">Rate limit 정보가 아직 없습니다. GitHub에서 PR을 한 번 열어 주세요.</p>
+    <p id="rate-limit-status" class="rl-status" data-i18n="popup_rate_limit_empty">No rate-limit data yet. Open a PR on GitHub once.</p>
 
     <label class="pref" for="pref-auto-open-embed">
       <input id="pref-auto-open-embed" type="checkbox" />
       <span class="pref__body">
-        <span class="pref__title">PR 페이지에서 pr+ 뷰 자동 열기</span>
-        <span class="pref__desc">GitHub PR 페이지로 이동하면 기본 UI 대신 pr+ 뷰를 바로 엽니다. 끄면 기본 PR 화면이 유지되며 헤더 pr+ 버튼 또는 ⌘⇧E / Ctrl+Shift+E로 전환합니다.</span>
+        <span class="pref__title" data-i18n="popup_pref_auto_open_title">Auto-open pr+ on PR pages</span>
+        <span class="pref__desc" data-i18n="popup_pref_auto_open_desc">Open pr+ instead of the native PR UI. When off, use the header pr+ button or ⌘⇧E / Ctrl+Shift+E.</span>
       </span>
     </label>
     <label class="pref" for="pref-reverse-comments">
       <input id="pref-reverse-comments" type="checkbox" />
       <span class="pref__body">
-        <span class="pref__title">PR Comments 역순 정렬</span>
-        <span class="pref__desc">코멘트 작성란 → Merge box → Conversation(최신 우선) 순으로 배치합니다.</span>
+        <span class="pref__title" data-i18n="popup_pref_reverse_title">Reverse PR comments order</span>
+        <span class="pref__desc" data-i18n="popup_pref_reverse_desc">Layout: composer → Merge box → Conversation (latest first).</span>
       </span>
     </label>
     <div class="pref pref--action" style="cursor: default" data-prp-timeline-prefs="1">
       <span class="pref__body">
-        <span class="pref__title">Conversation timeline filters</span>
-        <span class="pref__desc">
-          Conversation 타임라인 상단 팁과 동기화됩니다. 끄면 해당 유형 이벤트가 타임라인에서 숨겨집니다.
+        <span class="pref__title" data-i18n="popup_pref_timeline_title">Conversation timeline filters</span>
+        <span class="pref__desc" data-i18n="popup_pref_timeline_desc">
+          Synced with Conversation tip row. Off hides those event types from the timeline.
         </span>
         <div style="margin-top: 8px; display: flex; flex-direction: column; gap: 6px">
           <label class="hint" style="display: flex; align-items: center; gap: 8px; cursor: pointer">
             <input id="pref-tl-all" type="checkbox" data-prp-pref-tl="all" checked />
-            <span><strong>All</strong></span>
+            <span><strong data-i18n="popup_tl_all">All</strong></span>
           </label>
           <label class="hint" style="display: flex; align-items: center; gap: 8px; cursor: pointer">
             <input id="pref-tl-events" type="checkbox" data-prp-pref-tl="events" checked />
-            <span>events</span>
+            <span data-i18n="popup_tl_events">events</span>
           </label>
           <label class="hint" style="display: flex; align-items: center; gap: 8px; cursor: pointer">
             <input id="pref-tl-participants" type="checkbox" data-prp-pref-tl="participants" checked />
-            <span>participants</span>
+            <span data-i18n="popup_tl_participants">participants</span>
           </label>
           <label class="hint" style="display: flex; align-items: center; gap: 8px; cursor: pointer">
             <input id="pref-tl-comments" type="checkbox" data-prp-pref-tl="comments" checked />
-            <span>comments</span>
+            <span data-i18n="popup_tl_comments">comments</span>
           </label>
           <label class="hint" style="display: flex; align-items: center; gap: 8px; cursor: pointer">
             <input id="pref-tl-review-threads" type="checkbox" data-prp-pref-tl="review-threads" checked />
-            <span>threads</span>
+            <span data-i18n="popup_tl_threads">threads</span>
           </label>
         </div>
       </span>
@@ -591,70 +578,89 @@
     <label class="pref" for="pref-single-file-mode">
       <input id="pref-single-file-mode" type="checkbox" />
       <span class="pref__body">
-        <span class="pref__title">단일 파일 모드 (Diff)</span>
-        <span class="pref__desc">Diff 본문에는 현재 선택한 파일만 표시합니다. 왼쪽 파일 목록·이전/다음 파일 이동은 그대로 동작합니다. 기본값: 꺼짐.</span>
+        <span class="pref__title" data-i18n="popup_pref_single_file_title">Single-file mode (Diff)</span>
+        <span class="pref__desc" data-i18n="popup_pref_single_file_desc">Diff body shows only the active file. File list and prev/next still work. Default: off.</span>
       </span>
     </label>
     <label class="pref" for="pref-auto-expand-file-nav">
       <input id="pref-auto-expand-file-nav" type="checkbox" />
       <span class="pref__body">
-        <span class="pref__title">파일 이동 시 자동 펼치기</span>
-        <span class="pref__desc">파일 트리 클릭 또는 ⌥⇧[ / ⌥⇧] 로 이동할 때 대상 파일을 자동으로 펼칩니다. 끄면 접힌 상태가 유지되며 ⌥F 또는 헤더로 직접 펼칩니다. 기본값: 꺼짐.</span>
+        <span class="pref__title" data-i18n="popup_pref_auto_expand_title">Auto-expand on file navigation</span>
+        <span class="pref__desc" data-i18n="popup_pref_auto_expand_desc">Expand the target file when using the tree or ⌥⇧[ / ⌥⇧]. When off, stay collapsed until ⌥F or header expand. Default: off.</span>
       </span>
     </label>
     <label class="pref" for="pref-tree-view">
       <input id="pref-tree-view" type="checkbox" />
       <span class="pref__body">
-        <span class="pref__title">PR 스택 Tree view</span>
-        <span class="pref__desc">/pulls 목록에서 스택 관계를 들여쓰기로 표시합니다. 헤더의 Tree / Original 토글과 동기화됩니다. 기본값: 켜짐.</span>
+        <span class="pref__title" data-i18n="popup_pref_tree_title">PR stack Tree view</span>
+        <span class="pref__desc" data-i18n="popup_pref_tree_desc">Indent stack relationships on /pulls. Synced with Tree / Original header toggle. Default: on.</span>
       </span>
     </label>
     <div class="pref pref--action" style="cursor: default">
       <span class="pref__body">
-        <span class="pref__title">Shortcut / action monitor</span>
-        <span class="pref__desc">
-          모달 하단 중앙에 표시되는 단축키·액션 HUD 크기입니다.
-          None은 숨김, Small은 현재 크기, Medium/Large는 각각 2×·3× 입니다.
+        <span class="pref__title" data-i18n="popup_pref_monitor_title">Shortcut / action monitor</span>
+        <span class="pref__desc" data-i18n="popup_pref_monitor_desc">
+          Size of the bottom-center shortcut HUD. None hides; Small is default; Medium/Large are 2×/3×.
         </span>
-        <label for="pref-shortcut-monitor-size" class="hint" style="margin-top: 8px; display: block">
+        <label for="pref-shortcut-monitor-size" class="hint" style="margin-top: 8px; display: block" data-i18n="popup_label_size">
           Size
         </label>
         <select
           id="pref-shortcut-monitor-size"
           style="margin-top: 4px; width: 100%; max-width: 100%; padding: 6px 8px; border: 1px solid #d0d7de; border-radius: 6px; font-size: 12px; background: #fff"
         >
-          <option value="none">None — hidden</option>
-          <option value="small" selected>Small — 1× (default)</option>
-          <option value="medium">Medium — 2×</option>
-          <option value="large">Large — 3×</option>
+          <option value="none" data-i18n="popup_opt_monitor_none">None — hidden</option>
+          <option value="small" selected data-i18n="popup_opt_monitor_small">Small — 1× (default)</option>
+          <option value="medium" data-i18n="popup_opt_monitor_medium">Medium — 2×</option>
+          <option value="large" data-i18n="popup_opt_monitor_large">Large — 3×</option>
+        </select>
+      </span>
+    </div>
+    <div class="pref pref--action" style="cursor: default" data-prp-language-pref="1">
+      <span class="pref__body">
+        <span class="pref__title" data-i18n="popup_pref_lang_title">Language</span>
+        <span class="pref__desc" data-i18n="popup_pref_lang_desc">
+          pr+ UI language. Auto follows the GitHub page locale (html[lang], etc.). Choosing English / 한국어 / 日本語 / 简体中文 overrides detection.
+        </span>
+        <label for="pref-ui-language" class="hint" style="margin-top: 8px; display: block" data-i18n="popup_label_locale">
+          Locale
+        </label>
+        <select
+          id="pref-ui-language"
+          data-prp-pref-ui-language="1"
+          style="margin-top: 4px; width: 100%; max-width: 100%; padding: 6px 8px; border: 1px solid #d0d7de; border-radius: 6px; font-size: 12px; background: #fff"
+        >
+          <option value="auto" selected data-i18n="popup_opt_lang_auto">Auto — detect from GitHub (default)</option>
+          <option value="en" data-i18n="popup_opt_lang_en">English</option>
+          <option value="ko" data-i18n="popup_opt_lang_ko">한국어 (Korean)</option>
+          <option value="ja" data-i18n="popup_opt_lang_ja">日本語 (Japanese)</option>
+          <option value="zh_CN" data-i18n="popup_opt_lang_zh">简体中文 (Chinese)</option>
         </select>
       </span>
     </div>
 
-    <h3>Onboarding</h3>
+    <h3 data-i18n="popup_h3_onboarding">Onboarding</h3>
     <div class="pref pref--action">
       <span class="pref__body">
-        <span class="pref__title">Setup tour</span>
-        <span class="pref__desc">
-          첫 실행 온보딩을 다시 시작합니다 (PAT · Option · demo PR #1 · Diff 데모 · 코멘트 이동 · 팔레트 · 옵션).
-          pulls 페이지를 열고 우측 상단 카드를 표시합니다.
+        <span class="pref__title" data-i18n="popup_pref_onboarding_title">Setup tour</span>
+        <span class="pref__desc" data-i18n="popup_pref_onboarding_desc">
+          Restart first-run onboarding (PAT · Option · demo PR · Diff · comments · palette · options). Open /pulls to show the top-right card.
         </span>
         <div class="row" style="margin-top: 8px">
-          <button id="restart-onboarding" class="primary" type="button">Start onboarding</button>
+          <button id="restart-onboarding" class="primary" type="button" data-i18n="popup_btn_start_onboarding">Start onboarding</button>
         </div>
       </span>
     </div>
 
-    <h3>Storage</h3>
+    <h3 data-i18n="popup_h3_storage">Storage</h3>
     <div class="pref pref--action">
       <span class="pref__body">
-        <span class="pref__title">PR detail cache (IndexedDB)</span>
-        <span class="pref__desc">
-          GitHub 탭에 저장된 PR 상세 캐시(메모리 + IndexedDB)를 지웁니다.
-          다음 PR 열 때 네트워크에서 다시 불러옵니다. 열려 있는 github.com 탭이 필요합니다.
+        <span class="pref__title" data-i18n="popup_pref_idb_title">PR detail cache (IndexedDB)</span>
+        <span class="pref__desc" data-i18n="popup_pref_idb_desc">
+          Clear PR detail cache on GitHub tabs (memory + IndexedDB). Next open fetches from the network. Requires an open github.com tab.
         </span>
         <div class="row" style="margin-top: 8px">
-          <button id="clear-idb" type="button">Clear IndexedDB cache</button>
+          <button id="clear-idb" type="button" data-i18n="popup_btn_clear_idb">Clear IndexedDB cache</button>
         </div>
       </span>
     </div>

@@ -56,6 +56,8 @@ export type DiffWorkspaceProps = {
   setDiffMode: (m: string) => void;
   hideWhitespace?: boolean;
   onHideWhitespace?: ((v: boolean) => void) | null;
+  /** App locale (plugin pref override or GitHub detect). */
+  locale?: string | null;
   setScrollTop?: (n: number) => void;
   listRef: React.RefObject<HTMLElement | null>;
   hasAnyReviewThreads: (c: any) => boolean;
@@ -192,6 +194,7 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
     setDiffMode,
     hideWhitespace = false,
     onHideWhitespace = null,
+    locale = null,
     setScrollTop: setScrollTopProp,
     listRef,
     hasAnyReviewThreads,
@@ -376,6 +379,7 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
           diffMode={diffMode}
           hideWhitespace={hideWhitespace}
           onHideWhitespace={onHideWhitespace}
+          locale={locale}
           reviewFilter={diffReviewFilter}
           onReviewFilter={setDiffReviewFilter}
           onToggleReviewStatus={(status: string) => {
@@ -426,6 +430,8 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
           linkCtx={{
             owner: detail.owner,
             repo: detail.repo,
+            number: detail.number,
+            htmlUrl: detail.htmlUrl || detail.html_url || null,
             magicLinks,
           }}
           searchOpen={searchOpen && layoutIsDiff}
@@ -514,6 +520,8 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
           linkCtx={{
             owner: detail.owner,
             repo: detail.repo,
+            number: detail.number,
+            htmlUrl: detail.htmlUrl || detail.html_url || null,
             magicLinks,
           }}
           onUploadFile={onUploadFile}
@@ -546,6 +554,8 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
                 linkCtx={{
                   owner: detail.owner,
                   repo: detail.repo,
+                  number: detail.number,
+                  htmlUrl: detail.htmlUrl || detail.html_url || null,
                   magicLinks: detail.magicLinks || [],
                 }}
               />

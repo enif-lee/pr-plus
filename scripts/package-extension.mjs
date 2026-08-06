@@ -78,6 +78,10 @@ if (fs.existsSync(path.join(root, 'PRIVACY.md'))) {
 if (fs.existsSync(path.join(root, 'assets'))) {
   copyRecursive(path.join(root, 'assets'), path.join(outDir, 'assets'));
 }
+// Chrome i18n catalogs (default_locale + _locales/*)
+if (fs.existsSync(path.join(root, '_locales'))) {
+  copyRecursive(path.join(root, '_locales'), path.join(outDir, '_locales'));
+}
 copyRecursive(path.join(root, 'src'), path.join(outDir, 'src'));
 
 // Prefer system zip for broad compatibility (macOS / Linux CI)

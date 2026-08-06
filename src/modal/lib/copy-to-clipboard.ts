@@ -19,6 +19,57 @@ export function branchRefCopyText(refName: unknown): string {
  * falls back to a temporary textarea + execCommand('copy').
  * @returns true when the write likely succeeded
  */
+/**
+ * Stamp comment body/link copy results for e2e (page-readable attributes).
+ * Mirrors data-prp-last-copied-pr-url used by header PR-link copy.
+ */
+export function stampCommentCopyResult(opts: {
+  kind: 'body' | 'link';
+  ok: boolean;
+  text?: string | null;
+  url?: string | null;
+  commentId?: string | number | null;
+}): void {
+  try {
+    const doc =
+      typeof document !== 'undefined' ? document : null;
+    const root = doc?.documentElement;
+    if (!root) return;
+    if (opts.kind === 'body') {
+      const t = String(opts.text ?? '');
+      root.setAttribute('data-prp-last-copied-comment-body', t);
+      try {
+        (globalThis as any).__prpLastCopiedCommentBody = t;
+      } catch {
+        /* ignore */
+      }
+    } else {
+      const u = String(opts.url ?? '');
+      root.setAttribute('data-prp-last-copied-comment-url', u);
+      try {
+        (globalThis as any).__prpLastCopiedCommentUrl = u;
+      } catch {
+        /* ignore */
+      }
+    }
+    if (opts.commentId != null && String(opts.commentId) !== '') {
+      const id = String(opts.commentId);
+      root.setAttribute('data-prp-last-copied-comment-id', id);
+      try {
+        (globalThis as any).__prpLastCopiedCommentId = id;
+      } catch {
+        /* ignore */
+      }
+    }
+    root.setAttribute(
+      'data-prp-last-copy-comment-ok',
+      opts.ok ? '1' : '0'
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
 export async function copyTextToClipboard(
   text: string,
   opts: {

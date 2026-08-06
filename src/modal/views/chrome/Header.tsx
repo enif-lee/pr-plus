@@ -28,6 +28,7 @@ import {
 import { EMBED_RESTORE_SHORTCUT } from '@lib/page-embed';
 import { LAYOUT_DIFF } from '@lib/layout-mode';
 import { headerReviewCompact } from '@lib/header-layout';
+import { useT } from '@lib/locale-context';
 import { branchRefCopyText, copyTextToClipboard } from '@lib/copy-to-clipboard';
 import { buildGithubPrPageUrl } from '@lib/ui-polish';
 import { buildUnifiedReviewerRows } from '@lib/searchable-select';
@@ -58,6 +59,7 @@ import {
 } from './HeaderStats';
 
 export function Header(props: any) {
+  const t = useT();
   const {
     detail,
     onClose,
@@ -131,7 +133,7 @@ export function Header(props: any) {
     if (!text) return;
     const ok = await copyTextToClipboard(text);
     if (typeof onActionMsg === 'function') {
-      onActionMsg(ok ? 'Branch copied' : 'Copy failed');
+      onActionMsg(ok ? t('header_branch_copied') : t('header_copy_failed'));
     }
     if (!ok) return;
     setCopiedRef(kind);
@@ -164,7 +166,7 @@ export function Header(props: any) {
           })
         : String(d.htmlUrl || '').trim();
     if (!url) {
-      if (typeof onActionMsg === 'function') onActionMsg('No PR link to copy');
+      if (typeof onActionMsg === 'function') onActionMsg(t('header_no_pr_link'));
       return false;
     }
     // Publish URL before clipboard write so e2e can assert even if clipboard is blocked
@@ -176,7 +178,7 @@ export function Header(props: any) {
     }
     const ok = await copyTextToClipboard(url);
     if (typeof onActionMsg === 'function') {
-      onActionMsg(ok ? 'PR link copied' : 'Copy failed');
+      onActionMsg(ok ? t('header_pr_link_copied') : t('header_copy_failed'));
     }
     try {
       (globalThis as any).__prpLastCopyPrOk = ok;
@@ -377,10 +379,10 @@ export function Header(props: any) {
               type="button"
               className="prp-header__icon-btn prp-has-tip"
               onClick={onClose}
-              aria-label="Close"
+              aria-label={t('header_close')}
             >
               <IconX size={16} aria-hidden="true" />
-              <TipPopover title="Close" shortcut="Esc" />
+              <TipPopover title={t('header_close')} shortcut="Esc" />
             </button>
           </div>
         ) : null}
@@ -417,7 +419,7 @@ export function Header(props: any) {
                   type="text"
                   value={titleDraft}
                   disabled={actionBusy}
-                  aria-label="Pull request title"
+                  aria-label={t('header_pr_title')}
                   maxLength={256}
                   style={
                     titleInputWidthPx != null
@@ -514,7 +516,7 @@ export function Header(props: any) {
                   <ul
                     className="prp-composer-menu prp-composer-menu--emoji prp-header__title-emoji-menu"
                     role="listbox"
-                    aria-label="Emoji suggestions"
+                    aria-label={t('header_emoji_suggestions')}
                   >
                     {titleEmojiMenu.items.map((item: any, idx: number) => {
                       const label =
@@ -560,7 +562,7 @@ export function Header(props: any) {
                   type="button"
                   className="prp-icon-btn prp-header__title-action prp-has-tip"
                   disabled={actionBusy || !String(titleDraft || '').trim()}
-                  aria-label="Save title"
+                  aria-label={t('header_save_title')}
                   onMouseDown={(e) => {
                     e.preventDefault();
                     skipBlurSaveRef.current = true;
@@ -568,13 +570,13 @@ export function Header(props: any) {
                   onClick={() => void commitEditTitle()}
                 >
                   <IconCheck size={14} />
-                  <TipPopover title="Save title" />
+                  <TipPopover title={t('header_save_title')} />
                 </button>
                 <button
                   type="button"
                   className="prp-icon-btn prp-header__title-action prp-has-tip"
                   disabled={actionBusy}
-                  aria-label="Cancel title edit"
+                  aria-label={t('header_cancel_title_edit')}
                   onMouseDown={(e) => {
                     e.preventDefault();
                     skipBlurSaveRef.current = true;
@@ -582,7 +584,7 @@ export function Header(props: any) {
                   onClick={cancelEditTitle}
                 >
                   <IconX size={14} />
-                  <TipPopover title="Cancel" />
+                  <TipPopover title={t('cta_cancel')} />
                 </button>
               </div>
             ) : (
@@ -595,22 +597,22 @@ export function Header(props: any) {
                     type="button"
                     className="prp-icon-btn prp-header__title-edit-btn prp-has-tip prp-opt-hint-host"
                     disabled={actionBusy}
-                    aria-label="Edit title"
+                    aria-label={t('cta_edit_title')}
                     onClick={beginEditTitle}
                   >
                     <OptBtnHint label="⌥⇧T" />
                     <IconPencil size={14} />
-                    <TipPopover title="Edit title" shortcut="⌥⇧T" />
+                    <TipPopover title={t('cta_edit_title')} shortcut="⌥⇧T" />
                   </button>
                 ) : null}
               </>
             )}
           </div>
           {/* Status badges: draft / merged (purple) / closed (red). Open has no badge. */}
-          {detail.draft ? <Badge tone="draft">Draft</Badge> : null}
-          {detail.merged ? <Badge tone="merged">Merged</Badge> : null}
+          {detail.draft ? <Badge tone="draft">{t('badge_draft')}</Badge> : null}
+          {detail.merged ? <Badge tone="merged">{t('badge_merged')}</Badge> : null}
           {!detail.merged && detail.state === 'closed' ? (
-            <Badge tone="closed">Closed</Badge>
+            <Badge tone="closed">{t('badge_closed')}</Badge>
           ) : null}
           {/* Conversation: reviewers/checks live in the right rail.
               Diff compact: continuous overlapping stack — reviewers then checks. */}
@@ -626,7 +628,7 @@ export function Header(props: any) {
 
       {/* Branch meta — second row when wide; same line as identity when compact */}
       <div className="prp-header__branch-meta">
-        <span className="prp-branch-split" title="Base ← head">
+        <span className="prp-branch-split" title={t('header_base_head')}>
           <span className="prp-branch-tag prp-branch-tag--base">
             <RefLink
               className="prp-branch-tag__text"
@@ -643,10 +645,14 @@ export function Header(props: any) {
               onClick={() => void copyBranchRef('base', detail.baseRef)}
               title={
                 copiedRef === 'base'
-                  ? 'Copied!'
-                  : `Copy base branch “${detail.baseRef || ''}”`
+                  ? t('header_copied')
+                  : t('header_copy_base_branch', {
+                      branch: detail.baseRef || '',
+                    })
               }
-              aria-label={`Copy base branch ${detail.baseRef || ''}`}
+              aria-label={t('header_copy_base_branch_aria', {
+                branch: detail.baseRef || '',
+              })}
             >
               {copiedRef === 'base' ? (
                 <IconCheck size={12} aria-hidden="true" />
@@ -659,8 +665,8 @@ export function Header(props: any) {
               className="prp-branch-tag__edit-btn prp-opt-hint-host"
               disabled={actionBusy || !onChangeBase}
               onClick={onChangeBase}
-              title="Change base branch"
-              aria-label="Change base branch"
+              title={t('header_change_base')}
+              aria-label={t('header_change_base')}
               ref={(el) => {
                 localBaseRef.current = el;
                 if (baseBranchRef) baseBranchRef.current = el;
@@ -689,10 +695,14 @@ export function Header(props: any) {
               onClick={() => void copyBranchRef('head', detail.headRef)}
               title={
                 copiedRef === 'head'
-                  ? 'Copied!'
-                  : `Copy head branch “${detail.headRef || ''}”`
+                  ? t('header_copied')
+                  : t('header_copy_head_branch', {
+                      branch: detail.headRef || '',
+                    })
               }
-              aria-label={`Copy head branch ${detail.headRef || ''}`}
+              aria-label={t('header_copy_head_branch_aria', {
+                branch: detail.headRef || '',
+              })}
             >
               {copiedRef === 'head' ? (
                 <IconCheck size={12} aria-hidden="true" />
@@ -704,7 +714,7 @@ export function Header(props: any) {
         </span>
         {detail.author ? (
           <span className="prp-muted prp-header__author">
-            by <UserLink login={detail.author} />
+            {t('header_by')} <UserLink login={detail.author} />
           </span>
         ) : null}
         {/* Merge status lives only in the conversation merge box — not the header */}
@@ -722,8 +732,8 @@ export function Header(props: any) {
                 onClick={onToggleShell}
                 aria-label={
                   shellMode === 'sheet'
-                    ? 'Switch to modal view'
-                    : 'Switch to side sheet view'
+                    ? t('header_shell_modal')
+                    : t('header_shell_sheet')
                 }
                 aria-pressed={shellMode === 'sheet'}
                 data-shell={shellMode}
@@ -732,8 +742,8 @@ export function Header(props: any) {
                 <TipPopover
                   title={
                     shellMode === 'sheet'
-                      ? 'Switch to modal view'
-                      : 'Switch to side sheet view'
+                      ? t('header_shell_modal')
+                      : t('header_shell_sheet')
                   }
                 />
               </button>
@@ -745,7 +755,9 @@ export function Header(props: any) {
                 className="prp-header__icon-btn prp-fullscreen-toggle prp-has-tip prp-opt-hint-host"
                 onClick={onToggleFullscreen}
                 aria-label={
-                  shellFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'
+                  shellFullscreen
+                    ? t('header_exit_fullscreen')
+                    : t('header_enter_fullscreen')
                 }
                 aria-pressed={Boolean(shellFullscreen)}
                 data-fullscreen={shellFullscreen ? '1' : '0'}
@@ -754,7 +766,9 @@ export function Header(props: any) {
                 <IconFullscreen active={Boolean(shellFullscreen)} size={16} />
                 <TipPopover
                   title={
-                    shellFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'
+                    shellFullscreen
+                      ? t('header_exit_fullscreen')
+                      : t('header_enter_fullscreen')
                   }
                   shortcut="⌥⇧F"
                 />
@@ -770,8 +784,8 @@ export function Header(props: any) {
                 onClick={() => onSubscribe(!subscribed)}
                 aria-label={
                   subscribed
-                    ? 'Unsubscribe from notifications'
-                    : 'Subscribe to notifications'
+                    ? t('header_unsubscribe')
+                    : t('header_subscribe')
                 }
                 aria-pressed={subscribed}
               >
@@ -784,8 +798,8 @@ export function Header(props: any) {
                 <TipPopover
                   title={
                     subscribed
-                      ? 'Unsubscribe from notifications'
-                      : 'Subscribe to notifications'
+                      ? t('header_unsubscribe')
+                      : t('header_subscribe')
                   }
                 />
               </button>
@@ -799,13 +813,13 @@ export function Header(props: any) {
                 data-prp-refresh="1"
                 aria-label={
                   effectiveLayout === LAYOUT_DIFF
-                    ? 'Refresh metadata and all review threads (⌥⇧G)'
-                    : 'Refresh metadata and visible review threads (⌥⇧G)'
+                    ? t('header_refresh_all_aria')
+                    : t('header_refresh_visible_aria')
                 }
                 title={
                   effectiveLayout === LAYOUT_DIFF
-                    ? 'Refresh (metadata + all threads) · ⌥⇧G'
-                    : 'Refresh (metadata + visible threads) · ⌥⇧G'
+                    ? t('header_refresh_all_title')
+                    : t('header_refresh_visible_title')
                 }
               >
                 <OptBtnHint label="⌥⇧G" preferredPlacement="bottom" />
@@ -813,8 +827,8 @@ export function Header(props: any) {
                 <TipPopover
                   title={
                     effectiveLayout === LAYOUT_DIFF
-                      ? 'Refresh (metadata + all threads)'
-                      : 'Refresh (metadata + visible threads)'
+                      ? t('header_refresh_all_tip')
+                      : t('header_refresh_visible_tip')
                   }
                   shortcut="⌥⇧G"
                 />
@@ -826,8 +840,8 @@ export function Header(props: any) {
               onClick={onToggleDiff}
               aria-label={
                 effectiveLayout === LAYOUT_DIFF
-                  ? 'Show conversation'
-                  : 'Show file diff'
+                  ? t('header_show_conversation')
+                  : t('cta_show_file_diff')
               }
               data-layout={
                 effectiveLayout === LAYOUT_DIFF ? 'diff' : 'conversation'
@@ -842,8 +856,8 @@ export function Header(props: any) {
               <TipPopover
                 title={
                   effectiveLayout === LAYOUT_DIFF
-                    ? 'Show conversation'
-                    : 'Show file diff'
+                    ? t('tab_conversation')
+                    : t('cta_show_file_diff')
                 }
                 shortcut="⌥."
               />
@@ -854,10 +868,10 @@ export function Header(props: any) {
                 className="prp-header__icon-btn prp-header__icon-btn--danger prp-has-tip"
                 disabled={actionBusy}
                 onClick={onClosePr}
-                aria-label="Close pull request"
+                aria-label={t('cta_close_pr')}
               >
                 <IconCircleSlash size={16} aria-hidden="true" />
-                <TipPopover title="Close pull request" />
+                <TipPopover title={t('cta_close_pr')} />
               </button>
             ) : null}
             {canReopen ? (
@@ -867,9 +881,9 @@ export function Header(props: any) {
                 className="prp-header__reopen-btn"
                 disabled={actionBusy}
                 onClick={onReopenPr}
-                title="Reopen pull request"
+                title={t('cta_reopen_pr')}
               >
-                Reopen PR
+                {t('cta_reopen_pr')}
               </Button>
             ) : null}
             {detail.htmlUrl || prPageUrl ? (
@@ -878,11 +892,11 @@ export function Header(props: any) {
                 href={detail.htmlUrl || prPageUrl}
                 target="_blank"
                 rel="noreferrer"
-                aria-label="Open on GitHub"
+                aria-label={t('cta_open_github')}
                 data-prp-open-github="1"
               >
                 <IconLinkExternal size={16} aria-hidden="true" />
-                <TipPopover title="Open on GitHub" />
+                <TipPopover title={t('cta_open_github')} />
               </a>
             ) : null}
             {showRestoreNative ? (
@@ -890,13 +904,13 @@ export function Header(props: any) {
                 type="button"
                 className="prp-header__icon-btn prp-restore-native prp-has-tip"
                 onClick={() => onRestoreNative?.()}
-                aria-label="Show GitHub PR page"
+                aria-label={t('cta_show_github')}
                 data-action="restore-native"
                 data-prp-github-mark="1"
               >
                 <IconMarkGithub size={16} aria-hidden="true" />
                 <TipPopover
-                  title="Show GitHub PR page"
+                  title={t('cta_show_github')}
                   shortcut={restoreShortcut}
                   preferredPlacement="bottom"
                 />
@@ -912,13 +926,13 @@ export function Header(props: any) {
                   e.stopPropagation();
                   void copyPrGithubPageUrl();
                 }}
-                aria-label="Copy link to PR on GitHub"
-                title="Copy link to PR on GitHub"
+                aria-label={t('cta_copy_link')}
+                title={t('cta_copy_link')}
                 data-prp-copy-pr-link="1"
                 data-prp-pr-url={prPageUrl}
               >
                 <IconLink size={16} aria-hidden="true" />
-                <TipPopover title="Copy link to PR on GitHub" />
+                <TipPopover title={t('cta_copy_link')} />
               </button>
             ) : null}
             {showClose ? (
@@ -926,10 +940,10 @@ export function Header(props: any) {
                 type="button"
                 className="prp-header__icon-btn prp-has-tip"
                 onClick={onClose}
-                aria-label="Close"
+                aria-label={t('header_close')}
               >
                 <IconX size={16} aria-hidden="true" />
-                <TipPopover title="Close" shortcut="Esc" />
+                <TipPopover title={t('header_close')} shortcut="Esc" />
               </button>
             ) : null}
           </div>
@@ -941,11 +955,11 @@ export function Header(props: any) {
               className="prp-header__more-btn prp-has-tip"
               aria-haspopup="menu"
               aria-expanded={overflowOpen}
-              aria-label="More actions"
+              aria-label={t('header_more_actions')}
               onClick={() => setOverflowOpen((o) => !o)}
             >
               <IconKebab size={16} />
-              <TipPopover title="More actions" />
+              <TipPopover title={t('header_more_actions')} />
             </button>
             {overflowOpen ? (
               <ul className="prp-header__more-menu" role="menu">
@@ -961,8 +975,8 @@ export function Header(props: any) {
                       }}
                     >
                       {shellMode === 'sheet'
-                        ? 'Switch to modal view'
-                        : 'Switch to side sheet'}
+                        ? t('header_shell_modal')
+                        : t('header_shell_sheet_short')}
                     </button>
                   </li>
                 ) : null}
@@ -977,7 +991,9 @@ export function Header(props: any) {
                         onToggleFullscreen();
                       }}
                     >
-                      {shellFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+                      {shellFullscreen
+                        ? t('header_exit_fullscreen')
+                        : t('header_enter_fullscreen')}
                     </button>
                   </li>
                 ) : null}
@@ -993,7 +1009,9 @@ export function Header(props: any) {
                         onSubscribe(!subscribed);
                       }}
                     >
-                      {subscribed ? 'Unsubscribe' : 'Subscribe'}
+                      {subscribed
+                        ? t('header_unsubscribe_short')
+                        : t('header_subscribe_short')}
                     </button>
                   </li>
                 ) : null}
@@ -1011,8 +1029,8 @@ export function Header(props: any) {
                       }}
                     >
                       {effectiveLayout === LAYOUT_DIFF
-                        ? 'Refresh (all threads)'
-                        : 'Refresh (visible threads)'}
+                        ? t('header_refresh_all_menu')
+                        : t('header_refresh_visible_menu')}
                       {' · ⌥⇧G'}
                     </button>
                   </li>
@@ -1027,7 +1045,9 @@ export function Header(props: any) {
                       onToggleDiff?.();
                     }}
                   >
-                    {effectiveLayout === LAYOUT_DIFF ? 'Conversation' : 'Diff'}
+                    {effectiveLayout === LAYOUT_DIFF
+                      ? t('tab_conversation')
+                      : t('header_tab_diff')}
                     {shortcutMod ? ` (${shortcutMod}.)` : ''}
                   </button>
                 </li>
@@ -1043,7 +1063,7 @@ export function Header(props: any) {
                         onClosePr?.();
                       }}
                     >
-                      Close PR
+                      {t('header_close_pr_short')}
                     </button>
                   </li>
                 ) : null}
@@ -1059,7 +1079,7 @@ export function Header(props: any) {
                         onReopenPr?.();
                       }}
                     >
-                      Reopen PR
+                      {t('header_reopen_pr_short')}
                     </button>
                   </li>
                 ) : null}
@@ -1073,7 +1093,7 @@ export function Header(props: any) {
                       rel="noreferrer"
                       onClick={() => setOverflowOpen(false)}
                     >
-                      Open on GitHub
+                      {t('cta_open_github')}
                     </a>
                   </li>
                 ) : null}
@@ -1089,7 +1109,7 @@ export function Header(props: any) {
                         void copyPrGithubPageUrl();
                       }}
                     >
-                      Copy PR link
+                      {t('cta_copy_link')}
                     </button>
                   </li>
                 ) : null}
@@ -1105,7 +1125,7 @@ export function Header(props: any) {
                         onRestoreNative?.();
                       }}
                     >
-                      Show GitHub PR page
+                      {t('cta_show_github')}
                       {restoreShortcut ? ` (${restoreShortcut})` : ''}
                     </button>
                   </li>
@@ -1121,7 +1141,7 @@ export function Header(props: any) {
                         onClose?.();
                       }}
                     >
-                      Close modal
+                      {t('header_close_modal')}
                     </button>
                   </li>
                 ) : null}

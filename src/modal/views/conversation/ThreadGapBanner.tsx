@@ -4,6 +4,7 @@
  * May sit at list end or mid-list (threads complete, timeline still partial).
  */
 import React from 'react';
+import { useT } from '@lib/locale-context';
 import './ThreadGapBanner.css';
 
 export function ThreadGapBanner({
@@ -18,6 +19,7 @@ export function ThreadGapBanner({
   /** 'end' | 'middle' — middle when older threads already painted past timeline window */
   gapPlacement?: string;
 }) {
+  const t = useT();
   if (typeof onLoadMore !== 'function') return null;
   const n = Number(hiddenCount) || 0;
   const mid = String(gapPlacement || 'end') === 'middle';
@@ -49,7 +51,7 @@ export function ThreadGapBanner({
             onClick={() => void onLoadMore?.()}
             title="Load the next page of review threads and/or timeline items"
           >
-            Load more…
+            {t('cta_load_more')}
           </button>
           <button
             type="button"
@@ -58,7 +60,7 @@ export function ThreadGapBanner({
             onClick={() => void onLoadMore?.('all')}
             title="Load every remaining review thread and timeline item"
           >
-            Load all
+            {t('cta_load_all')}
           </button>
         </div>
       </div>

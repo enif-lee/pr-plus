@@ -81,8 +81,10 @@ for (const name of ENTRIES) {
   let stripped;
   try {
     // Multi-file entries (onboarding/* barrel) need bundle; others type-erase only.
+    // popup bundles pure i18n catalogs for settings-page localization.
     const needsBundle =
       name === 'onboarding' ||
+      name === 'popup' ||
       fs.existsSync(path.join(src, `${name}-steps.ts`)) ||
       /export \* from '\.\//.test(fs.readFileSync(tsPath, 'utf8').slice(0, 500));
     if (needsBundle) {

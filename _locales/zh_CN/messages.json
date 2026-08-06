@@ -1,0 +1,62 @@
+{
+  "extName": {
+    "message": "pr+",
+    "description": "Extension name"
+  },
+  "extDescription": {
+    "message": "GitHub PR 堆栈树，以及用于对话、差异与合并的快速页内审阅界面。",
+    "description": "Extension description"
+  },
+  "actionTitle": {
+    "message": "pr+",
+    "description": "Toolbar action tooltip"
+  },
+  "hide_whitespace": {
+    "message": "隐藏空白",
+    "description": "Diff settings: hide whitespace"
+  },
+  "hide_whitespace_title": {
+    "message": "隐藏仅空白变更的行",
+    "description": "Diff settings: hide whitespace title"
+  },
+  "hide_outdated_comments": {
+    "message": "隐藏过时评论",
+    "description": "Diff settings: hide outdated comments"
+  },
+  "hide_outdated_comments_title": {
+    "message": "隐藏过时的审阅评论",
+    "description": "Diff settings: hide outdated title"
+  },
+  "tab_conversation": {
+    "message": "对话",
+    "description": "Conversation tab label"
+  },
+  "tab_files": {
+    "message": "已更改的文件",
+    "description": "Files changed tab label"
+  },
+  "resolve_conversation": {
+    "message": "解决对话",
+    "description": "Resolve conversation button"
+  },
+  "unresolved": {
+    "message": "未解决",
+    "description": "Unresolved filter"
+  },
+  "resolved": {
+    "message": "已解决",
+    "description": "Resolved filter"
+  },
+  "pending": {
+    "message": "待处理",
+    "description": "Pending filter"
+  },
+  "display_options": {
+    "message": "显示选项",
+    "description": "Display options heading"
+  },
+  "reviewed_by": {
+    "message": "审阅者…",
+    "description": "Reviewed by heading"
+  }
+}

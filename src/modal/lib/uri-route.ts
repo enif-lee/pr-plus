@@ -43,19 +43,182 @@ export function normalizePage(value: unknown): RoutePage | null {
 }
 
 /**
+ * True when a comment id is stable enough to share (not tmp/optimistic).
+ */
+export function isShareableCommentId(id: unknown): boolean {
+  if (id == null || id === '') return false;
+  const s = String(id);
+  if (/^tmp[-_]/i.test(s) || /optimistic/i.test(s)) return false;
+  // Prefer real API ids (numeric) or GraphQL node-looking ids
+  if (!/^\d+$/.test(s) && !/^[A-Za-z0-9_.=+-]{4,}$/.test(s)) return false;
+  return true;
+}
+
+/**
  * Build a stable position token for a focused review comment/thread.
  * Skips optimistic temp ids (tmp-, optimistic, non-numeric garbage).
  * Format: c:{id}  (comment / thread root id)
  */
 export function buildPositionFromComment(comment: any): string | null {
-  if (!comment || typeof comment !== 'object') return null;
+  if (comment == null) return null;
+  if (typeof comment !== 'object') {
+    return isShareableCommentId(comment) ? `c:${String(comment)}` : null;
+  }
   const id = comment.commentId ?? comment.id ?? null;
-  if (id == null || id === '') return null;
+  if (!isShareableCommentId(id)) return null;
+  return `c:${String(id)}`;
+}
+
+/**
+ * Plain text body for clipboard (issue / review comment / thread root).
+ */
+export function commentBodyForCopy(body: unknown): string {
+  if (body == null) return '';
+  return String(body);
+}
+
+/**
+ * Conversation virtual-list anchor candidates for a comment id (order preferred).
+ */
+export function conversationAnchorsForCommentId(id: unknown): string[] {
+  if (!isShareableCommentId(id)) return [];
   const s = String(id);
-  if (/^tmp[-_]/i.test(s) || /optimistic/i.test(s)) return null;
-  // Prefer real API ids (numeric) or GraphQL node-looking ids
-  if (!/^\d+$/.test(s) && !/^[A-Za-z0-9_.=+-]{4,}$/.test(s)) return null;
-  return `c:${s}`;
+  return [
+    `issue-comment:${s}`,
+    `review-comment:${s}`,
+    `review:${s}`,
+    `review-group:${s}`,
+  ];
+}
+
+/**
+ * Prefer an anchor that exists on the PR detail snapshot (issue comments or
+ * review thread roots/replies). Falls back to first candidate.
+ */
+export function resolveConversationAnchorForCommentId(
+  detail: any,
+  id: unknown
+): string | null {
+  if (!isShareableCommentId(id)) return null;
+  const s = String(id);
+  const comments = Array.isArray(detail?.comments) ? detail.comments : [];
+  if (comments.some((c: any) => c && String(c.id) === s)) {
+    return `issue-comment:${s}`;
+  }
+  const threads =
+    detail?.reviewThreads ||
+    detail?.review_threads ||
+    detail?.threads ||
+    [];
+  const list = Array.isArray(threads) ? threads : [];
+  for (const th of list) {
+    const root = th?.root || th;
+    const rootId = root?.id ?? root?.commentId ?? th?.id ?? th?.commentId;
+    if (rootId != null && String(rootId) === s) return `review-comment:${s}`;
+    const replies = th?.replies || root?.replies || [];
+    if (
+      Array.isArray(replies) &&
+      replies.some((r: any) => r && String(r.id) === s)
+    ) {
+      return `review-comment:${s}`;
+    }
+  }
+  // Timeline-style review comments array
+  const revComments =
+    detail?.reviewComments || detail?.review_comments || [];
+  if (
+    Array.isArray(revComments) &&
+    revComments.some((c: any) => c && String(c.id) === s)
+  ) {
+    return `review-comment:${s}`;
+  }
+  // No guess: return null so open/restore can retry after progressive load
+  return null;
+}
+
+/**
+ * Merge pathname PR target with query/hash deep-link (prp_page / prp_position).
+ * URI page/position win when present; otherwise keep path tab page.
+ * Host openModal / embed open must use this so copied comment links restore.
+ */
+export function mergePathTargetWithUriRoute<
+  T extends {
+    owner?: string;
+    repo?: string;
+    number?: number;
+    page?: string | null;
+    [k: string]: any;
+  },
+>(
+  pathTarget: T | null | undefined,
+  locationLike: { search?: string; hash?: string } | null | undefined
+): (T & { page: RoutePage | null; position: string | null }) | null {
+  if (!pathTarget || typeof pathTarget !== 'object') return null;
+  const uri = parseLocationRoute(locationLike || {});
+  const page =
+    normalizePage(uri.page) ||
+    normalizePage(pathTarget.page) ||
+    null;
+  const position =
+    uri.position != null && String(uri.position).trim()
+      ? String(uri.position).trim()
+      : null;
+  return {
+    ...pathTarget,
+    page,
+    position,
+  };
+}
+
+/**
+ * Absolute share URL for a comment: PR page + prp_page + prp_position.
+ * Returns null when base URL or position is missing/unshareable.
+ */
+export function buildCommentShareUrl(opts: {
+  /** e.g. https://github.com/o/r/pull/7 */
+  prHtmlUrl?: string | null;
+  page?: RoutePage | string | null;
+  /** c:{id} or bare id */
+  position?: string | null;
+  /** comment object or id — used when position omitted */
+  comment?: any;
+  number?: number | null;
+} = {}): string | null {
+  const position =
+    opts.position != null && String(opts.position).trim()
+      ? String(opts.position).trim()
+      : buildPositionFromComment(opts.comment);
+  if (!position) return null;
+  const parsed = parsePosition(position);
+  if (!parsed) return null;
+  const page = normalizePage(opts.page) || 'conversation';
+  const base = String(opts.prHtmlUrl || '')
+    .trim()
+    .replace(/\/+$/, '');
+  if (!base) return null;
+  try {
+    const u = new URL(base);
+    // Keep path (…/pull/N); stamp page + position into query
+    const num =
+      opts.number != null && Number.isFinite(Number(opts.number))
+        ? Math.floor(Number(opts.number))
+        : null;
+    const nextSearch = serializeRouteToSearch(
+      {
+        page,
+        position: `c:${parsed.id}`,
+        number: num,
+      },
+      u.search
+    );
+    u.search = nextSearch.startsWith('?') ? nextSearch.slice(1) : nextSearch;
+    // Drop route keys from hash so they do not fight the query
+    const nextHash = clearRouteFromHash(u.hash);
+    u.hash = nextHash.startsWith('#') ? nextHash.slice(1) : nextHash;
+    return u.toString();
+  } catch {
+    return null;
+  }
 }
 
 /**

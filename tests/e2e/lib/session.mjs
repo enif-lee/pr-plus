@@ -156,6 +156,61 @@ export function softResetBrowser(label = 'soft-reset') {
     slog(`  cleared prp: sessionStorage keys=${sess.removed || 0}`);
   }
 
+  // Pin e2e-stable prefs so prior suites cannot leave:
+  // - uiLanguage=ko (or auto→page-ko) → Korean chrome breaks EN selectors
+  // - timelineVisibility all-off (timeline-tips toggles) → empty conversation feed
+  // Page world has no PRTreeStorage — content-bridge listens for prp-set-prefs.
+  try {
+    evalInPage(`
+      (() => {
+        const r = document.documentElement;
+        const patch = {
+          uiLanguage: 'en',
+          timelineVisibility: {
+            events: true,
+            participants: true,
+            comments: true,
+            'review-threads': true,
+          },
+        };
+        r.removeAttribute('data-prp-prefs-ok');
+        r.removeAttribute('data-prp-prefs-err');
+        r.setAttribute('data-prp-prefs-request', JSON.stringify(patch));
+        document.dispatchEvent(
+          new CustomEvent('prp-set-prefs', {
+            detail: patch,
+            bubbles: true,
+          })
+        );
+        return true;
+      })()
+    `);
+    const t0 = Date.now();
+    let prefsOk = false;
+    while (Date.now() - t0 < 4_000) {
+      try {
+        const snap = evalInPage(`
+          (() => ({
+            ok: document.documentElement.getAttribute('data-prp-prefs-ok'),
+            ui: document.documentElement.getAttribute('data-prp-ui-language'),
+          }))()
+        `);
+        if (snap?.ok === '1' && snap?.ui === 'en') {
+          prefsOk = true;
+          break;
+        }
+      } catch {
+        /* inject lag */
+      }
+      sleepSync(120);
+    }
+    slog(
+      `  soft reset prefs en+timeline tips via prp-set-prefs ${prefsOk ? 'ok' : 'timeout (best-effort)'}`
+    );
+  } catch (e) {
+    slog(`  soft reset prefs pin skipped (${e?.message || e})`);
+  }
+
   ensureSingleTab();
   return {
     mode: opens ? 'open' : 'in-place',

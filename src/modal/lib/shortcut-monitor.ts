@@ -17,6 +17,7 @@ import {
   REVIEW_FILTER_SHORTCUT,
 } from './shortcut-policy';
 import { PR_MODAL_OPT_ACTIONS } from './command-palette';
+import { formatMessage } from './i18n';
 
 /** Auto-dismiss fired-action HUD after this idle (ms). Successive fires reset. */
 export const SHORTCUT_MONITOR_DISMISS_MS = 1800;
@@ -372,46 +373,104 @@ for (const def of PR_MODAL_OPT_ACTIONS as readonly {
   };
 }
 
+/** camelCase action id → monitor_* catalog key */
+function monitorTitleKeyForAction(actionId: string): string {
+  const snake = String(actionId || '')
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/-/g, '_')
+    .toLowerCase();
+  // Map catalog ids that differ slightly from key names
+  const aliases: Record<string, string> = {
+    toggle_review_filter_unresolved: 'monitor_filter_unresolved',
+    toggle_review_filter_resolved: 'monitor_filter_resolved',
+    toggle_review_filter_pending: 'monitor_filter_pending',
+  };
+  if (aliases[snake]) return aliases[snake];
+  return `monitor_${snake}`;
+}
+
+function resolveMonitorLocale(
+  locale?: string | null
+): string {
+  if (locale) return locale;
+  try {
+    if (typeof document !== 'undefined') {
+      return (
+        document.documentElement.getAttribute('data-prp-app-locale') ||
+        document.documentElement.getAttribute('data-prp-ui-language') ||
+        'en'
+      );
+    }
+  } catch {
+    /* ignore */
+  }
+  return 'en';
+}
+
 /** `[{shortcut} - {title}]` — criterion 1 format. Never surface bare `?`. */
 export function formatShortcutMonitorText(
   shortcut: string,
-  title: string
+  title: string,
+  locale?: string | null
 ): string {
   const s = String(shortcut || '').trim();
-  const t = String(title || '').trim() || 'Action';
+  const fallback = formatMessage(
+    'monitor_action',
+    resolveMonitorLocale(locale)
+  );
+  const t = String(title || '').trim() || fallback || 'Action';
   if (!s || s === '?') return `[${t}]`;
   return `[${s} - ${t}]`;
 }
 
-export function formatOptHeldLabel(isMac = true): string {
-  return isMac ? '⌥ held' : 'Alt held';
+export function formatOptHeldLabel(
+  isMac = true,
+  locale?: string | null
+): string {
+  const loc = resolveMonitorLocale(locale);
+  return isMac
+    ? formatMessage('monitor_opt_held', loc)
+    : formatMessage('monitor_alt_held', loc);
 }
 
 /**
  * Resolve display shortcut + title for a modal action id.
  * navStackDigitN → "Stack slot N".
+ * Titles resolve via pure catalogs when locale is set / stamped.
  */
 export function describeShortcutAction(
   action: string,
-  isMac = true
+  isMac = true,
+  locale?: string | null
 ): { shortcut: string; title: string } {
+  const loc = resolveMonitorLocale(locale);
   const id = String(action || '').trim();
-  if (!id) return { shortcut: '', title: 'Action' };
+  if (!id) {
+    return {
+      shortcut: '',
+      title: formatMessage('monitor_action', loc) || 'Action',
+    };
+  }
 
   const stack = id.match(/^navStackDigit([1-9])$/);
   if (stack) {
     const n = stack[1];
     return {
       shortcut: isMac ? `⌥${n}` : `Alt+${n}`,
-      title: `Open stack PR slot ${n}`,
+      title: formatMessage('monitor_stack_slot', loc, { n }) ||
+        `Open stack PR slot ${n}`,
     };
   }
 
   const entry = SHORTCUT_MONITOR_CATALOG[id];
   if (entry) {
+    const key = monitorTitleKeyForAction(id);
+    const localized = formatMessage(key, loc);
+    const title =
+      localized && localized !== key ? localized : entry.title;
     return {
       shortcut: isMac ? entry.labelMac : entry.labelWin,
-      title: entry.title,
+      title,
     };
   }
 
@@ -425,14 +484,16 @@ export function describeShortcutAction(
 export function buildShortcutMonitorFire(
   action: string,
   isMac = true,
-  at = Date.now()
+  at = Date.now(),
+  locale?: string | null
 ): ShortcutMonitorFire {
-  const { shortcut, title } = describeShortcutAction(action, isMac);
+  const loc = resolveMonitorLocale(locale);
+  const { shortcut, title } = describeShortcutAction(action, isMac, loc);
   return {
     action: String(action || ''),
     shortcut,
     title,
-    text: formatShortcutMonitorText(shortcut, title),
+    text: formatShortcutMonitorText(shortcut, title, loc),
     at: Number(at) || Date.now(),
   };
 }
@@ -442,21 +503,26 @@ export function buildShortcutMonitorFireFromParts(
   shortcut: string,
   title: string,
   action = '',
-  at = Date.now()
+  at = Date.now(),
+  locale?: string | null
 ): ShortcutMonitorFire {
+  const loc = resolveMonitorLocale(locale);
   let s = String(shortcut || '').trim();
-  const t = String(title || '').trim() || 'Action';
-  // Prefer catalog chord when peer label missing (avoids "[? - …]")
-  if ((!s || s === '?') && action) {
-    const desc = describeShortcutAction(action, true);
-    if (desc.shortcut) s = desc.shortcut;
+  let t = String(title || '').trim();
+  // Prefer catalog chord + localized title when action is known
+  if (action) {
+    const desc = describeShortcutAction(action, true, loc);
+    if ((!s || s === '?') && desc.shortcut) s = desc.shortcut;
+    // Prefer localized catalog title over English peer title
+    if (desc.title) t = desc.title;
   }
+  if (!t) t = formatMessage('monitor_action', loc) || 'Action';
   if (s === '?') s = '';
   return {
     action: String(action || ''),
     shortcut: s,
     title: t,
-    text: formatShortcutMonitorText(s, t),
+    text: formatShortcutMonitorText(s, t, loc),
     at: Number(at) || Date.now(),
   };
 }

@@ -39,6 +39,7 @@ function costRowsForThreads(summary) {
     (m, r) => Math.max(m, Number(r.maxCost) || Number(r.cost) || 0),
     0
   );
+  const shellCalls = shell.reduce((s, r) => s + (Number(r.calls) || 0), 0);
   const byIdsCost = byIds.reduce((s, r) => s + (Number(r.cost) || 0), 0);
   const byIdsMax = byIds.reduce(
     (m, r) => Math.max(m, Number(r.maxCost) || Number(r.cost) || 0),
@@ -50,6 +51,7 @@ function costRowsForThreads(summary) {
     byIds,
     shellCost,
     shellMax,
+    shellCalls,
     byIdsCost,
     byIdsMax,
     byIdsCalls,
@@ -224,10 +226,12 @@ export function getSteps() {
       rows.shell.length > 0,
       `expected reviewThreads.*.shell in cost log; byOp=${JSON.stringify(summary?.byOp || [])}`
     );
+    // byOp rows aggregate multiple calls: bound total by call count, not row count
+    const shellCallCap = Math.max(1, rows.shellCalls || rows.shell.length);
     assert(
-      rows.shellMax <= 1 && rows.shellCost <= rows.shell.length * 1,
+      rows.shellMax <= 1 && rows.shellCost <= shellCallCap,
       `shell cost must be ≤1 per call; got cost=${rows.shellCost} max=${rows.shellMax} ` +
-        `shellRows=${JSON.stringify(rows.shell)}`
+        `calls=${rows.shellCalls} shellRows=${JSON.stringify(rows.shell)}`
     );
     // If byIds ran (unresolved eager), count-only reactors keep cost flat (~1),
     // not ≈ unresolved thread count. Demo PR#7 has multiple unresolved; with

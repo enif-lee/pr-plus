@@ -7,6 +7,28 @@ import {
   matchesDiffDemoStep,
   splitChordKeys,
 } from './onboarding-diff-demo';
+
+/** Page-world catalog lookup (pure i18n inject). */
+function onbMsg(key: string, fallback: string, subs?: Record<string, string | number>) {
+  try {
+    const pure = (globalThis as any).PRModalI18n;
+    let locale =
+      document.documentElement?.getAttribute?.('data-prp-app-locale') ||
+      document.documentElement?.getAttribute?.('data-prp-ui-language') ||
+      document.documentElement?.getAttribute?.('lang') ||
+      'en';
+    if (locale === 'auto') {
+      locale = document.documentElement?.getAttribute?.('lang') || 'en';
+    }
+    if (typeof pure?.formatMessage === 'function') {
+      const m = pure.formatMessage(key, locale, subs);
+      if (m && m !== key) return m;
+    }
+  } catch {
+    /* ignore */
+  }
+  return fallback;
+}
 import {
   fireKey,
   isEscapeEvent,
@@ -430,7 +452,10 @@ export function createOnboardingTour(deps: any) {
     if (!saved) {
       setStatus(
         lastErr?.message ||
-          'Could not save setup progress — try again or Skip tour',
+          onbMsg(
+            'onboarding_save_error',
+            'Could not save setup progress — try again or Skip tour'
+          ),
         true
       );
     }
@@ -529,7 +554,12 @@ export function createOnboardingTour(deps: any) {
     const id = currentId();
     if (prefsIdx >= 0 && planIndex < prefsIdx && id !== 'prefs') {
       goToPlanIndex(prefsIdx);
-      setStatus('Skipped ahead — review feature settings, then Done.');
+      setStatus(
+        onbMsg(
+          'onboarding_skipped_status',
+          'Skipped ahead — review feature settings, then Done.'
+        )
+      );
       return;
     }
     void markComplete();
@@ -892,23 +922,47 @@ export function createOnboardingTour(deps: any) {
       const flags: Array<{ key: string; title: string; desc: string }> = [
         {
           key: 'treeView',
-          title: 'PR stack tree view',
-          desc: 'Indent stacked PRs on the /pulls list',
+          title: onbMsg(
+            'onboarding_pref_tree_title',
+            'PR stack tree view'
+          ),
+          desc: onbMsg(
+            'onboarding_pref_tree_desc',
+            'Indent stacked PRs on the /pulls list'
+          ),
         },
         {
           key: 'autoOpenEmbed',
-          title: 'Auto-open pr+ on PR pages',
-          desc: 'Open the pr+ shell when you land on a PR URL',
+          title: onbMsg(
+            'onboarding_pref_auto_open_title',
+            'Auto-open pr+ on PR pages'
+          ),
+          desc: onbMsg(
+            'onboarding_pref_auto_open_desc',
+            'Open the pr+ shell when you land on a PR URL'
+          ),
         },
         {
           key: 'reverseComments',
-          title: 'Newest comments first',
-          desc: 'Composer → merge box → latest conversation',
+          title: onbMsg(
+            'onboarding_pref_newest_title',
+            'Newest comments first'
+          ),
+          desc: onbMsg(
+            'onboarding_pref_newest_desc',
+            'Composer → merge box → latest conversation'
+          ),
         },
         {
           key: 'singleFileMode',
-          title: 'Single-file Diff mode',
-          desc: 'Show only the active file in the Diff list',
+          title: onbMsg(
+            'onboarding_pref_single_file_title',
+            'Single-file Diff mode'
+          ),
+          desc: onbMsg(
+            'onboarding_pref_single_file_desc',
+            'Show only the active file in the Diff list'
+          ),
         },
       ];
       const draft = prefsDraft || {};
@@ -967,7 +1021,9 @@ export function createOnboardingTour(deps: any) {
       '.prp-onboarding__btn--back'
     ) as HTMLButtonElement | null;
 
-    if (titleEl) titleEl.textContent = meta?.title || 'pr+ setup';
+    if (titleEl)
+      titleEl.textContent =
+        meta?.title || onbMsg('onboarding_setup_title', 'pr+ setup');
     if (stepEl) stepEl.textContent = `${planIndex + 1} / ${plan.length}`;
     if (body) renderBody(body);
 
@@ -976,46 +1032,75 @@ export function createOnboardingTour(deps: any) {
     }
     if (primary) {
       if (id === 'pat') {
-        primary.textContent = tokenConfigured ? 'Continue' : 'Save & continue';
+        primary.textContent = tokenConfigured
+          ? onbMsg('onboarding_continue', 'Continue')
+          : onbMsg('onboarding_save_continue', 'Save & continue');
         primary.hidden = false;
       } else if (id === 'prefs') {
-        primary.textContent = 'Save & continue';
+        primary.textContent = onbMsg(
+          'onboarding_save_continue',
+          'Save & continue'
+        );
         primary.hidden = false;
       } else if (id === 'done') {
-        primary.textContent = 'Done';
+        primary.textContent = onbMsg('onboarding_done', 'Done');
         primary.hidden = false;
       } else if (id === 'openPr' && isModalOpen(doc)) {
-        primary.textContent = 'Continue · ⏎';
+        primary.textContent = onbMsg(
+          'onboarding_continue_enter',
+          'Continue · ⏎'
+        );
         primary.hidden = false;
       } else if (id === 'openPr' && !isModalOpen(doc)) {
         // Guidance only — do not auto-open; user presses ⌥N or clicks the row
-        primary.textContent = 'Skip · ⏎';
+        primary.textContent = onbMsg('onboarding_skip_enter', 'Skip · ⏎');
         primary.hidden = false;
       } else if (id === 'diffToggle' && isDiffLayout(doc)) {
         // Live Diff open → allow Continue without requiring a toggle
-        primary.textContent = 'Continue · ⏎';
+        primary.textContent = onbMsg(
+          'onboarding_continue_enter',
+          'Continue · ⏎'
+        );
         primary.hidden = false;
       } else if (id === 'convDemo') {
         if (convSubIndex >= CONVERSATION_DEMO_STEPS.length - 1) {
-          primary.textContent = 'Continue · ⏎';
+          primary.textContent = onbMsg(
+            'onboarding_continue_enter',
+            'Continue · ⏎'
+          );
         } else {
-          primary.textContent = 'Next tip · ⏎';
+          primary.textContent = onbMsg(
+            'onboarding_next_tip_enter',
+            'Next tip · ⏎'
+          );
         }
         primary.hidden = false;
       } else if (id === 'diffDemo') {
         if (!isDiffLayout(doc)) {
-          primary.textContent = 'Skip Diff tips · ⏎';
+          primary.textContent = onbMsg(
+            'onboarding_skip_diff_tips_enter',
+            'Skip Diff tips · ⏎'
+          );
         } else if (demoSubIndex >= DIFF_DEMO_STEPS.length - 1) {
-          primary.textContent = 'Continue · ⏎';
+          primary.textContent = onbMsg(
+            'onboarding_continue_enter',
+            'Continue · ⏎'
+          );
         } else {
-          primary.textContent = 'Next tip · ⏎';
+          primary.textContent = onbMsg(
+            'onboarding_next_tip_enter',
+            'Next tip · ⏎'
+          );
         }
         primary.hidden = false;
       } else if (id === 'opt' || id === 'diffToggle' || id === 'optShiftK') {
-        primary.textContent = 'Skip · ⏎';
+        primary.textContent = onbMsg('onboarding_skip_enter', 'Skip · ⏎');
         primary.hidden = false;
       } else {
-        primary.textContent = 'Continue · ⏎';
+        primary.textContent = onbMsg(
+          'onboarding_continue_enter',
+          'Continue · ⏎'
+        );
         primary.hidden = false;
       }
       // Annotate other primaries with Enter where not already
@@ -1028,16 +1113,25 @@ export function createOnboardingTour(deps: any) {
       ) {
         if (id === 'pat') {
           primary.textContent = tokenConfigured
-            ? 'Continue · ⏎'
-            : 'Save & continue · ⏎';
+            ? onbMsg('onboarding_continue_enter', 'Continue · ⏎')
+            : onbMsg(
+                'onboarding_save_continue_enter',
+                'Save & continue · ⏎'
+              );
         } else if (id === 'prefs') {
-          primary.textContent = 'Save & continue · ⏎';
+          primary.textContent = onbMsg(
+            'onboarding_save_continue_enter',
+            'Save & continue · ⏎'
+          );
         } else if (id === 'done') {
-          primary.textContent = 'Done · ⏎';
+          primary.textContent = onbMsg('onboarding_done_enter', 'Done · ⏎');
         } else if (id === 'openPr' && isModalOpen(doc)) {
-          primary.textContent = 'Continue · ⏎';
+          primary.textContent = onbMsg(
+            'onboarding_continue_enter',
+            'Continue · ⏎'
+          );
         } else if (id === 'openPr' && !isModalOpen(doc)) {
-          primary.textContent = 'Skip · ⏎';
+          primary.textContent = onbMsg('onboarding_skip_enter', 'Skip · ⏎');
         }
       }
     }
@@ -1330,8 +1424,17 @@ export function createOnboardingTour(deps: any) {
     header.appendChild(stepEl);
     const closeBtn = el('button', 'prp-onboarding__close', '×');
     closeBtn.setAttribute('type', 'button');
-    closeBtn.setAttribute('aria-label', 'Skip to settings');
-    closeBtn.setAttribute('title', 'Skip to feature settings (Esc)');
+    closeBtn.setAttribute(
+      'aria-label',
+      onbMsg('onboarding_skip_to_settings', 'Skip to settings · Esc')
+    );
+    closeBtn.setAttribute(
+      'title',
+      onbMsg(
+        'onboarding_skip_to_settings_title',
+        'Skip remaining tips and open feature settings (Esc)'
+      )
+    );
     closeBtn.addEventListener('click', () => {
       skipToSettings();
     });
@@ -1354,10 +1457,16 @@ export function createOnboardingTour(deps: any) {
     const skip = el(
       'button',
       'prp-onboarding__btn prp-onboarding__btn--ghost prp-onboarding__btn--skip',
-      'Skip to settings · Esc'
+      onbMsg('onboarding_skip_to_settings', 'Skip to settings · Esc')
     );
     skip.setAttribute('type', 'button');
-    skip.setAttribute('title', 'Skip remaining tips and open feature settings (Esc)');
+    skip.setAttribute(
+      'title',
+      onbMsg(
+        'onboarding_skip_to_settings_title',
+        'Skip remaining tips and open feature settings (Esc)'
+      )
+    );
     skip.addEventListener('click', () => {
       skipToSettings();
     });

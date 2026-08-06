@@ -865,14 +865,47 @@ function createToggleButton(doc, { onShowTree, onShowOriginal, initialMode = 'tr
 
   let mode = initialMode;
 
+  function listMsg(key: string, fallback: string) {
+    try {
+      const pure = (globalThis as any).PRModalI18n;
+      // Prefer resolved app locale stamp over raw pref (auto)
+      let locale =
+        doc.documentElement?.getAttribute?.('data-prp-app-locale') ||
+        doc.documentElement?.getAttribute?.('data-prp-ui-language') ||
+        'en';
+      if (locale === 'auto') {
+        locale =
+          doc.documentElement?.getAttribute?.('lang') ||
+          (doc.documentElement as any)?.lang ||
+          'en';
+      }
+      if (typeof pure?.formatMessage === 'function') {
+        const m = pure.formatMessage(key, locale);
+        if (m && m !== key) return m;
+      }
+    } catch {
+      /* ignore */
+    }
+    return fallback;
+  }
+
   function updateLabel() {
+    // list_original ≈ default GitHub order; list_tree_view ≈ stack tree
     btn.textContent =
-      mode === 'tree' ? 'Show default order' : 'Show stack tree';
+      mode === 'tree'
+        ? listMsg('list_original', 'Show default order')
+        : listMsg('list_tree_view', 'Show stack tree');
     btn.setAttribute(
       'aria-label',
       mode === 'tree'
-        ? 'Restore GitHub default pull request sort order'
-        : 'Reorder and indent pull requests by branch stack depth'
+        ? listMsg(
+            'list_original',
+            'Restore GitHub default pull request sort order'
+          )
+        : listMsg(
+            'list_tree_view',
+            'Reorder and indent pull requests by branch stack depth'
+          )
     );
   }
 
@@ -892,6 +925,10 @@ function createToggleButton(doc, { onShowTree, onShowOriginal, initialMode = 'tr
   // External sync (prefs / onboarding) without firing click handlers
   (btn as any).setMode = (nextMode: any) => {
     mode = nextMode === 'original' ? 'original' : 'tree';
+    updateLabel();
+  };
+  // Language pref change — re-read catalogs without changing mode
+  (btn as any).rebindLocale = () => {
     updateLabel();
   };
 

@@ -19,13 +19,24 @@ import { CommentReactions } from '@common/CommentReactions';
 import {
   IconChevronLeft,
   IconChevronRight,
+  IconCopy,
   IconDisclosure,
   IconFileDiff,
+  IconLink,
   IconLinkExternal,
   IconPencil,
   IconSync,
   IconTrash,
 } from '@common/icons';
+import {
+  copyTextToClipboard,
+  stampCommentCopyResult,
+} from '@lib/copy-to-clipboard';
+import {
+  buildCommentShareUrl,
+  buildPositionFromComment,
+  commentBodyForCopy,
+} from '@lib/uri-route';
 import {
   GroupThreadFoldBtn,
   GroupThreadJumpBtn,
@@ -34,6 +45,7 @@ import { ThreadGapBanner } from './ThreadGapBanner';
 import { MergeBox } from './MergeBox';
 import { DescriptionCard } from './DescriptionCard';
 import { ComposerCard } from './ComposerCard';
+import { useT } from '@lib/locale-context';
 import { buildUnifiedReviewerRows, isBotAccount } from '@lib/searchable-select';
 import {
   conversationAsideWidthPx,
@@ -104,6 +116,7 @@ import {
 } from '@common/ConversationKbFocus';
 
 function ConversationViewImpl(props: any) {
+  const t = useT();
   // Leaf: composer text — typing must not re-render PrModalApp.
   const storeCommentText = useModalStore((s) => s.commentText);
   const storeSetCommentText = useModalStore((s) => s.setCommentText);
@@ -547,6 +560,8 @@ function ConversationViewImpl(props: any) {
   const linkCtx = {
     owner: detail.owner,
     repo: detail.repo,
+    number: detail.number,
+    htmlUrl: detail.htmlUrl || detail.html_url || null,
     magicLinks: detail.magicLinks || [],
   };
   // Aside Checks card (not merge-box badge farm)
@@ -684,32 +699,122 @@ function ConversationViewImpl(props: any) {
     return body;
   }
 
-  function commentActions(kind: string | null, id: any, canDelete: boolean, body?: string) {
-    if (!canDelete || !kind) return null;
+  function flashCopy(msg: string) {
+    try {
+      useModalStore.getState().setActionMsg?.(msg);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async function copyCommentBody(body: unknown, commentId?: unknown) {
+    const text = commentBodyForCopy(body);
+    if (!text) {
+      flashCopy('No comment text');
+      stampCommentCopyResult({
+        kind: 'body',
+        ok: false,
+        text: '',
+        commentId,
+      });
+      return;
+    }
+    const ok = await copyTextToClipboard(text);
+    stampCommentCopyResult({ kind: 'body', ok, text, commentId });
+    flashCopy(ok ? 'Comment copied' : 'Copy failed');
+  }
+
+  async function copyCommentLink(id: unknown) {
+    const position = buildPositionFromComment({ id });
+    if (!position) {
+      flashCopy('Link unavailable');
+      stampCommentCopyResult({ kind: 'link', ok: false, url: '', commentId: id });
+      return;
+    }
+    const url = buildCommentShareUrl({
+      prHtmlUrl: detail?.htmlUrl || detail?.html_url,
+      page: 'conversation',
+      position,
+      number: detail?.number,
+    });
+    if (!url) {
+      flashCopy('Link unavailable');
+      stampCommentCopyResult({ kind: 'link', ok: false, url: '', commentId: id });
+      return;
+    }
+    const ok = await copyTextToClipboard(url);
+    stampCommentCopyResult({ kind: 'link', ok, url, commentId: id });
+    flashCopy(ok ? 'Link copied' : 'Copy failed');
+  }
+
+  /**
+   * Comment chrome actions: copy body + copy link always (left of edit);
+   * edit/delete only when owner (canDelete).
+   */
+  function commentActions(
+    kind: string | null,
+    id: any,
+    canDelete: boolean,
+    body?: string
+  ) {
+    if (!kind && !id) return null;
+    const canLink = Boolean(buildPositionFromComment({ id }));
     return (
       <div className="prp-icon-actions">
         <button
           type="button"
           className="prp-icon-btn"
           disabled={actionBusy}
-          title="Edit"
-          aria-label="Edit comment"
-          onClick={() => onStartEditComment?.(kind, id, body)}
+          title="Copy comment"
+          aria-label="Copy comment text"
+          data-prp-copy-comment="1"
+          data-prp-comment-id={id != null ? String(id) : undefined}
+          onClick={() => void copyCommentBody(body, id)}
         >
-          <IconPencil size={13} />
+          <IconCopy size={13} />
         </button>
-        <button
-          type="button"
-          className="prp-icon-btn prp-icon-btn--danger"
-          disabled={actionBusy}
-          title="Delete"
-          aria-label="Delete comment"
-          onClick={() =>
-            kind === 'issue' ? onDeleteIssueComment?.(id) : onDeleteReviewComment?.(id)
-          }
-        >
-          <IconTrash size={13} />
-        </button>
+        {canLink ? (
+          <button
+            type="button"
+            className="prp-icon-btn"
+            disabled={actionBusy}
+            title="Copy link"
+            aria-label="Copy link to comment"
+            data-prp-copy-comment-link="1"
+            data-prp-comment-id={id != null ? String(id) : undefined}
+            onClick={() => void copyCommentLink(id)}
+          >
+            <IconLink size={13} />
+          </button>
+        ) : null}
+        {canDelete && kind ? (
+          <>
+            <button
+              type="button"
+              className="prp-icon-btn"
+              disabled={actionBusy}
+              title="Edit"
+              aria-label={t('cta_edit_comment')}
+              onClick={() => onStartEditComment?.(kind, id, body)}
+            >
+              <IconPencil size={13} />
+            </button>
+            <button
+              type="button"
+              className="prp-icon-btn prp-icon-btn--danger"
+              disabled={actionBusy}
+              title="Delete"
+              aria-label="Delete comment"
+              onClick={() =>
+                kind === 'issue'
+                  ? onDeleteIssueComment?.(id)
+                  : onDeleteReviewComment?.(id)
+              }
+            >
+              <IconTrash size={13} />
+            </button>
+          </>
+        ) : null}
       </div>
     );
   }
@@ -1809,6 +1914,7 @@ function ConversationViewImpl(props: any) {
           className="prp-inline-thread--conversation"
           row={row}
           thread={thread}
+          sharePage="conversation"
           onReply={(th: any, opts: any) =>
             onReplyToThread?.(
               {
@@ -1939,7 +2045,20 @@ function ConversationViewImpl(props: any) {
               : timelineVisibilityNorm[
                   tipId as keyof typeof timelineVisibilityNorm
                 ] !== false;
-          const label = TIMELINE_TIP_LABELS[tipId] || tipId;
+          const tipKey =
+            tipId === 'all'
+              ? 'popup_tl_all'
+              : tipId === 'review-threads'
+                ? 'popup_tl_threads'
+                : tipId === 'events'
+                  ? 'popup_tl_events'
+                  : tipId === 'participants'
+                    ? 'popup_tl_participants'
+                    : tipId === 'comments'
+                      ? 'popup_tl_comments'
+                      : '';
+          const label =
+            (tipKey && t(tipKey)) || TIMELINE_TIP_LABELS[tipId] || tipId;
           return (
             <button
               key={tipId}
@@ -2153,7 +2272,7 @@ function ConversationViewImpl(props: any) {
         ) : (
           <>
         <MetaList
-          title="Reviewers"
+          title={t('meta_reviewers')}
           rows={
             typeof buildUnifiedReviewerRows === 'function'
               ? buildUnifiedReviewerRows(detail).map((row: any) => {
@@ -2186,7 +2305,7 @@ function ConversationViewImpl(props: any) {
                   };
                 })
           }
-          emptyLabel="No reviewers yet"
+          emptyLabel={t('empty_no_reviewers')}
           onAdd={canEditMeta ? onAddReviewer : null}
           onRemove={canEditMeta ? onRemoveReviewer : null}
           onRerequest={
@@ -2194,7 +2313,7 @@ function ConversationViewImpl(props: any) {
               ? (login: string) => onRerequestReviewer(login)
               : null
           }
-          addLabel="Add reviewer…"
+          addLabel={t('meta_add_reviewer')}
           actionBusy={actionBusy}
           addButtonRef={reviewerAddRef}
           avatarUrls={detail.avatarUrls}
@@ -2202,7 +2321,7 @@ function ConversationViewImpl(props: any) {
           addShortcut="⌥⇧R"
         />
         <MetaList
-          title="Assignees"
+          title={t('meta_assignees')}
           rows={(detail.assignees || []).map((login: string) => {
             const bot =
               typeof isBotAccount === 'function'
@@ -2210,20 +2329,20 @@ function ConversationViewImpl(props: any) {
                 : /\[bot\]$/i.test(String(login || ''));
             return { login, isBot: bot, canRemove: !bot };
           })}
-          emptyLabel="No assignees"
+          emptyLabel={t('empty_no_assignees')}
           onAdd={canEditMeta ? onAddAssignee : null}
           onRemove={canEditMeta ? onRemoveAssignee : null}
-          addLabel="Add assignee…"
+          addLabel={t('meta_add_assignee')}
           actionBusy={actionBusy}
           addButtonRef={assigneeAddRef}
           avatarUrls={detail.avatarUrls}
           
           addShortcut="⌥⇧A"
         />
-        <AsideSection title="Labels">
+        <AsideSection title={t('meta_labels')}>
           <div className="prp-label-row">
             {(detail.labels || []).length === 0 ? (
-              <span className="prp-muted">No labels</span>
+              <span className="prp-muted">{t('empty_no_labels')}</span>
             ) : (
               (detail.labels || []).map((l: any) => (
                 <span key={l.name || l} className="prp-label-chip">
@@ -2249,20 +2368,20 @@ function ConversationViewImpl(props: any) {
               disabled={actionBusy}
               onClick={onAddLabel}
               ref={labelAddRef}
-              title="Add label… (⌥⇧L)"
+              title={`${t('meta_add_label')} (⌥⇧L)`}
             >
               <OptBtnHint label="⌥⇧L"
                 preferredPlacement="right"
               />
-              Add label…
+              {t('meta_add_label')}
             </button>
           ) : null}
         </AsideSection>
-        <AsideSection title="Projects">
+        <AsideSection title={t('meta_projects')}>
           {(detail.projects || []).length ? (
             <ul className="prp-list prp-aside-projects">
               {(detail.projects || []).map((p: any) => {
-                const title = String(p?.title || '').trim() || 'Project';
+                const title = String(p?.title || '').trim() || t('meta_projects');
                 const href = String(p?.url || '').trim();
                 const num = p?.number != null ? Number(p.number) : null;
                 return (
@@ -2290,13 +2409,13 @@ function ConversationViewImpl(props: any) {
               })}
             </ul>
           ) : (
-            <span className="prp-muted">None yet</span>
+            <span className="prp-muted">{t('meta_none')}</span>
           )}
         </AsideSection>
-        <AsideSection title="Milestone">
+        <AsideSection title={t('meta_milestone')}>
           <div className="prp-label-row prp-milestone">
             {!detail.milestone ? (
-              <span className="prp-muted prp-milestone__empty">No milestone</span>
+              <span className="prp-muted prp-milestone__empty">{t('empty_no_milestone')}</span>
             ) : (
               <span className="prp-label-chip prp-milestone-chip">
                 <span
@@ -2304,7 +2423,7 @@ function ConversationViewImpl(props: any) {
                   title={`#${detail.milestone.number}`}
                 >
                   {detail.milestone.title ||
-                    `Milestone #${detail.milestone.number}`}
+                    `${t('meta_milestone')} #${detail.milestone.number}`}
                 </span>
                 <span className="prp-muted prp-milestone-chip__num">
                   #{detail.milestone.number}
@@ -2314,8 +2433,8 @@ function ConversationViewImpl(props: any) {
                     type="button"
                     className="prp-label-chip__remove"
                     disabled={actionBusy}
-                    title="Clear milestone"
-                    aria-label="Clear milestone"
+                    title={t('palette_cmd_clear_milestone')}
+                    aria-label={t('palette_cmd_clear_milestone')}
                     onClick={onClearMilestone}
                   >
                     ✕
@@ -2335,16 +2454,18 @@ function ConversationViewImpl(props: any) {
                   : onSetMilestone?.(false)
               }
               ref={milestoneAddRef}
-              title={`${detail.milestone ? 'Change' : 'Set'} milestone… (⌥⇧P)`}
+              title={`${
+                detail.milestone ? t('meta_change_milestone') : t('meta_set_milestone')
+              } (⌥⇧P)`}
             >
               <OptBtnHint label="⌥⇧P"
                 preferredPlacement="right"
               />
-              {detail.milestone ? 'Change milestone…' : 'Set milestone…'}
+              {detail.milestone ? t('meta_change_milestone') : t('meta_set_milestone')}
             </button>
           ) : null}
         </AsideSection>
-        <AsideSection title="Development" loading={pendingDevelopment}>
+        <AsideSection title={t('meta_development')} loading={pendingDevelopment}>
           {(() => {
             const dev =
               Array.isArray(detail.developmentIssues) &&
@@ -2358,7 +2479,7 @@ function ConversationViewImpl(props: any) {
                   }));
             if (!dev.length) {
               return pendingDevelopment ? null : (
-                <span className="prp-muted">None yet</span>
+                <span className="prp-muted">{t('meta_none')}</span>
               );
             }
             return (
@@ -2448,12 +2569,12 @@ function ConversationViewImpl(props: any) {
           })()}
         </AsideSection>
         {showChecks || pendingChecks ? (
-          <AsideSection title="Checks" loading={pendingChecks && !showChecks}>
+          <AsideSection title={t('meta_checks')} loading={pendingChecks && !showChecks}>
             {showChecks ? <ChecksPanel checks={detail.checks} /> : null}
           </AsideSection>
         ) : null}
         <AsideSection
-          title={`Tags${
+          title={`${t('meta_tags')}${
             Array.isArray(prTags) && prTags.length ? ` (${prTags.length})` : ''
           }`}
           collapsible

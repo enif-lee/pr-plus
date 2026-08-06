@@ -58,6 +58,10 @@ export {
   getSteps as getReviewFilterSteps,
   runReviewFilter,
 } from './review-filter.mjs';
+export {
+  getSteps as getLocaleCommentCopySteps,
+  runLocaleCommentCopy,
+} from './locale-comment-copy.mjs';
 
 import { createRunner } from '../lib/runner.mjs';
 import { closeAll, ensureBrowser, log } from '../lib/harness.mjs';
@@ -77,6 +81,7 @@ import { getSteps as getViewerGesturesSteps } from './viewer-gestures.mjs';
 import { getSteps as getCopyPrLinkSteps } from './copy-pr-link.mjs';
 import { getSteps as getRefreshActionSteps } from './refresh-action.mjs';
 import { getSteps as getReviewFilterSteps } from './review-filter.mjs';
+import { getSteps as getLocaleCommentCopySteps } from './locale-comment-copy.mjs';
 
 /** Ordered feature suite (shared browser session for legacy runner). */
 export const FEATURE_SUITE = [
@@ -96,6 +101,7 @@ export const FEATURE_SUITE = [
   { id: 'copy-pr-link', getSteps: getCopyPrLinkSteps },
   { id: 'refresh-action', getSteps: getRefreshActionSteps },
   { id: 'review-filter', getSteps: getReviewFilterSteps },
+  { id: 'locale-comment-copy', getSteps: getLocaleCommentCopySteps },
 ];
 
 /**

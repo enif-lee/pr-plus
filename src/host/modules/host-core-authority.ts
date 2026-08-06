@@ -183,7 +183,10 @@
     reverseComments: true,
     autoOpenEmbed: true,
     singleFileMode: false,
+    autoExpandOnFileNav: false,
     shortcutMonitorSize: 'small',
+    /** auto | en | ko | ja | zh_CN — custom overrides GitHub page detect */
+    uiLanguage: 'auto',
     timelineVisibility: { ...DEFAULT_TIMELINE_VISIBILITY },
   };
 
@@ -197,6 +200,37 @@
     if (v === 'small' || v === 'sm' || v === '1' || v === '1x') return 'small';
     if (raw === false) return 'none';
     return 'small';
+  }
+
+  function normalizeUiLanguage(raw: unknown): string {
+    try {
+      const pure = (globalThis as any).PRModalLocaleResolve;
+      if (typeof pure?.normalizeUiLanguagePref === 'function') {
+        return pure.normalizeUiLanguagePref(raw);
+      }
+    } catch {
+      /* fall through */
+    }
+    if (raw == null) return 'auto';
+    const v = String(raw).trim();
+    if (!v) return 'auto';
+    const lower = v.toLowerCase().replace(/_/g, '-');
+    if (
+      lower === 'auto' ||
+      lower === 'detect' ||
+      lower === 'default' ||
+      lower === 'system' ||
+      lower === 'github'
+    ) {
+      return 'auto';
+    }
+    if (v === 'zh_CN' || lower === 'zh-cn' || lower === 'zh_cn' || lower === 'zh') {
+      return 'zh_CN';
+    }
+    if (lower === 'en' || lower.startsWith('en-')) return 'en';
+    if (lower === 'ko' || lower.startsWith('ko-')) return 'ko';
+    if (lower === 'ja' || lower.startsWith('ja-')) return 'ja';
+    return 'auto';
   }
 
   let prefs = { ...DEFAULT_PREFS };

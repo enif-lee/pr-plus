@@ -4,6 +4,7 @@ import { Button } from '@common/Button';
 import { MarkdownComposer } from '@common/MarkdownComposer';
 import { OptBtnHint } from '@common/OptBtnHint';
 import { canSubmitReviewVerdict } from '@lib/pr-edit-api';
+import { useT } from '@lib/locale-context';
 import './FinishReview.css';
 
 export type FinishReviewEvent = 'comment' | 'approve' | 'request_changes';
@@ -59,6 +60,7 @@ export function FinishReviewModal({
   mentionCandidates = [],
   linkCtx = null,
 }: FinishReviewModalProps) {
+  const t = useT();
   const titleId = useId();
   const panelRef = useRef<HTMLDivElement | null>(null);
   const [body, setBody] = useState('');
@@ -275,7 +277,7 @@ export function FinishReviewModal({
       >
         <header className="prp-finish-review__head">
           <h2 id={titleId} className="prp-finish-review__title">
-            Finish your review
+            {t('cta_finish_review_title')}
           </h2>
           <p id={`${titleId}-desc`} className="prp-finish-review__sub">
             {sub}
@@ -286,7 +288,7 @@ export function FinishReviewModal({
           <MarkdownComposer
             value={body}
             onChange={setBody}
-            placeholder="Leave a comment"
+            placeholder={t('cta_write_comment')}
             forceOpen
             compact={false}
             rows={4}
@@ -306,10 +308,10 @@ export function FinishReviewModal({
                 variant="danger"
                 disabled={actionBusy}
                 onClick={() => void onDiscard?.()}
-                title="Discard pending review"
+                title={t('cta_discard_pending')}
                 tipPlacement="top"
               >
-                Discard
+                {t('cta_discard')}
               </Button>
             ) : null}
             <span className="prp-opt-hint-host">
@@ -318,18 +320,18 @@ export function FinishReviewModal({
                 variant="default"
                 disabled={actionBusy}
                 onClick={() => onClose?.()}
-                title="Cancel"
+                title={t('cta_cancel')}
                 shortcut={scEsc}
                 tipPlacement="top"
               >
-                Cancel
+                {t('cta_cancel')}
               </Button>
             </span>
           </div>
           <div
             className="prp-finish-review__actions-end"
             role="group"
-            aria-label="Submit review"
+            aria-label={t('cta_submit_review')}
           >
             <span className="prp-opt-hint-host">
               <OptBtnHint
@@ -343,11 +345,11 @@ export function FinishReviewModal({
                 loading={Boolean(actionBusy)}
                 disabled={!canSubmit}
                 onClick={() => void handleSubmit('comment')}
-                title={canSubmit ? 'Submit review as comment' : submitBlockedTitle}
+                title={canSubmit ? t('cta_submit_review_comment') : submitBlockedTitle}
                 shortcut={scComment}
                 tipPlacement="top"
               >
-                {actionBusy ? 'Submitting…' : 'Comment'}
+                {actionBusy ? t('cta_submitting') : t('cta_comment_verb')}
               </Button>
             </span>
             {showVerdict ? (
@@ -363,11 +365,11 @@ export function FinishReviewModal({
                   loading={Boolean(actionBusy)}
                   disabled={!canSubmit}
                   onClick={() => void handleSubmit('approve')}
-                  title={canSubmit ? 'Approve pull request' : submitBlockedTitle}
+                  title={canSubmit ? t('cta_approve_pr') : submitBlockedTitle}
                   shortcut={scApprove}
                   tipPlacement="top"
                 >
-                  {actionBusy ? 'Working…' : 'Approve'}
+                  {actionBusy ? t('cta_working') : t('cta_approve')}
                 </Button>
               </span>
             ) : null}
@@ -385,12 +387,12 @@ export function FinishReviewModal({
                   disabled={!canSubmit}
                   onClick={() => void handleSubmit('request_changes')}
                   title={
-                    canSubmit ? 'Request changes' : submitBlockedTitle
+                    canSubmit ? t('cta_request_changes') : submitBlockedTitle
                   }
                   shortcut={scChanges}
                   tipPlacement="top"
                 >
-                  {actionBusy ? 'Working…' : 'Request changes'}
+                  {actionBusy ? t('cta_working') : t('cta_request_changes')}
                 </Button>
               </span>
             ) : null}

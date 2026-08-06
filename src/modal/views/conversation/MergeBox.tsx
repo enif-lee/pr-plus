@@ -17,9 +17,14 @@ import {
   type MergeMethod,
 } from '@lib/merge-box-status';
 import {
-  shouldShowDeleteHeadBranch,
-  deleteHeadBranchButtonLabel,
-} from '@lib/delete-head-branch';
+  localizeDeleteHeadBranchLabel,
+  localizeMergeButtonLabel,
+  localizeMergeChecksLine,
+  localizeMergeMethodRow,
+  mergeBoxLocalizedCopy,
+} from '@lib/merge-box-i18n';
+import { shouldShowDeleteHeadBranch } from '@lib/delete-head-branch';
+import { useT } from '@lib/locale-context';
 import './MergeBox.css';
 
 export function MergeBox({
@@ -41,7 +46,11 @@ export function MergeBox({
   onDeleteHeadBranch?: (() => void) | null;
   onSetDraftStage?: (stage: string) => void;
 }) {
-  const methods = useMemo(() => mergeMethodsForUi(detail), [detail]);
+  const t = useT();
+  const methods = useMemo(() => {
+    const base = mergeMethodsForUi(detail);
+    return base.map((m) => localizeMergeMethodRow(m.id, detail, t));
+  }, [detail, t]);
   const [mergeMethod, setMergeMethod] = useState<MergeMethod>(() =>
     defaultMergeMethod(detail)
   );
@@ -49,6 +58,12 @@ export function MergeBox({
   /** GitHub-style admin bypass opt-in (default off). */
   const [bypassRulesAccepted, setBypassRulesAccepted] = useState(false);
   const mergeMenuRef = useRef<HTMLDivElement | null>(null);
+
+  const statusCopy = useMemo(() => mergeBoxLocalizedCopy(ms, t), [ms, t]);
+  const checksLine = useMemo(
+    () => localizeMergeChecksLine(ms?.checksLine, t),
+    [ms?.checksLine, t]
+  );
 
   // Keep selection valid when repo settings load / change.
   useEffect(() => {
@@ -88,33 +103,33 @@ export function MergeBox({
       ? shouldShowDeleteHeadBranch(detail)
       : Boolean(detail?.merged && detail?.headRef && !detail?.headBranchDeleted);
 
-  const primaryAction = useMemo(
-    () =>
+  const primaryAction = useMemo(() => {
+    const base =
       typeof resolveMergePrimaryAction === 'function'
         ? resolveMergePrimaryAction(ms, { bypassRulesAccepted })
-        : {
-            showBypassCheckbox: false,
-            bypassCheckboxLabel: '',
-            mergeEnabled: Boolean(ms?.canMerge),
-            forceWording: Boolean(ms?.forceMerge),
-            bypassWording: false,
-            ctaVariant: ms?.ctaVariant || 'default',
-            buttonLabel: (method: MergeMethod) =>
-              method === 'squash'
-                ? 'Squash and merge'
-                : method === 'rebase'
-                  ? 'Rebase and merge'
-                  : 'Merge pull request',
-          },
-    [ms, bypassRulesAccepted]
-  );
+        : null;
+    const force = Boolean(base?.forceWording ?? ms?.forceMerge);
+    const bypass = Boolean(base?.bypassWording);
+    return {
+      showBypassCheckbox: Boolean(base?.showBypassCheckbox),
+      bypassCheckboxLabel: t('merge_bypass_checkbox'),
+      mergeEnabled: base
+        ? Boolean(base.mergeEnabled)
+        : Boolean(ms?.canMerge),
+      forceWording: force,
+      bypassWording: bypass,
+      ctaVariant: base?.ctaVariant || ms?.ctaVariant || 'default',
+      buttonLabel: (method: MergeMethod) =>
+        localizeMergeButtonLabel(method, { force, bypass }, t),
+    };
+  }, [ms, bypassRulesAccepted, t]);
 
   return (
     <div
       className={`prp-merge-box prp-merge-box--${boxTone} my-3 mb-1 flex flex-col gap-3.5 rounded-xl px-[18px] py-4`}
       data-merge-kind={ms.kind}
       role="region"
-      aria-label="Merge status"
+      aria-label={t('merge_aria_status')}
     >
       <div className="prp-merge-box__status-block flex min-w-0 items-start gap-3">
         <span
@@ -125,23 +140,26 @@ export function MergeBox({
         </span>
         <div className="prp-merge-box__copy min-w-0 flex-1">
           <h3 className="prp-merge-box__headline m-0 mb-1 text-sm font-semibold leading-snug">
-            {ms.headline}
+            {statusCopy.headline}
           </h3>
           <p className="prp-merge-box__helper m-0 text-[13px] leading-snug text-[var(--prp-fg-muted)]">
             {ms.kind === 'conflicts' ? (
               <>
-                Use the{' '}
+                {t('merge_conflicts_use')}{' '}
                 {resolveUrl ? (
                   <a href={resolveUrl} target="_blank" rel="noopener noreferrer">
-                    web editor
+                    {t('merge_conflicts_web_editor')}
                   </a>
                 ) : (
-                  'web editor'
+                  t('merge_conflicts_web_editor')
                 )}{' '}
-                or the command line to resolve conflicts before continuing.
+                {t('merge_conflicts_or_cli')}
+                {statusCopy.conflictsFilesNote
+                  ? ` ${statusCopy.conflictsFilesNote}`
+                  : null}
               </>
             ) : (
-              ms.helper
+              statusCopy.helper
             )}
           </p>
         </div>
@@ -152,7 +170,7 @@ export function MergeBox({
             target="_blank"
             rel="noopener noreferrer"
           >
-            Resolve conflicts
+            {t('cta_resolve_conflicts')}
           </a>
         ) : null}
       </div>
@@ -160,7 +178,7 @@ export function MergeBox({
       {ms.kind === 'conflicts' && conflictFiles.length > 0 ? (
         <ul
           className="prp-merge-box__conflict-files m-0 flex list-none flex-col gap-1.5 p-0"
-          aria-label="Conflicting files"
+          aria-label={t('merge_aria_conflict_files')}
         >
           {conflictFiles.map((path: string) => (
             <li
@@ -181,9 +199,9 @@ export function MergeBox({
 
       {hasChecksData(detail.checks) ? (
         <MergeBoxChecks checks={detail.checks} />
-      ) : ms.checksLine ? (
+      ) : checksLine ? (
         <p className="prp-merge-box__checks-line prp-muted m-0 mt-1.5 text-xs">
-          {ms.checksLine}
+          {checksLine}
         </p>
       ) : null}
 
@@ -195,9 +213,9 @@ export function MergeBox({
             disabled={actionBusy}
             onClick={() => onDeleteHeadBranch?.()}
             data-prp-delete-head-branch="1"
-            title="Delete the pull request head branch from the repository"
+            title={t('merge_delete_branch_title')}
           >
-            {deleteHeadBranchButtonLabel(detail)}
+            {localizeDeleteHeadBranchLabel(detail, t)}
           </Button>
         </div>
       ) : null}
@@ -262,8 +280,8 @@ export function MergeBox({
                   onClick={() => onMergePr?.(normalizeMergeMethod(mergeMethod))}
                   title={
                     primaryAction.bypassWording
-                      ? 'Bypass repository rules and merge — requires admin permission on the token'
-                      : activeMethodMeta?.description || 'Merge pull request'
+                      ? t('cta_bypass_rules')
+                      : activeMethodMeta?.description || t('cta_merge_pr')
                   }
                   shortcut="⌥⇧M"
                   data-prp-merge-primary="1"
@@ -279,8 +297,8 @@ export function MergeBox({
                     disabled={actionBusy}
                     aria-haspopup="menu"
                     aria-expanded={mergeMenuOpen}
-                    aria-label="Select merge method"
-                    title="Select merge method"
+                    aria-label={t('cta_select_merge_method')}
+                    title={t('cta_select_merge_method')}
                     onClick={() => setMergeMenuOpen((o) => !o)}
                   >
                     ▾
@@ -291,7 +309,7 @@ export function MergeBox({
                 <ul
                   className="prp-merge-method__menu m-0 list-none rounded-[10px] p-1.5"
                   role="menu"
-                  aria-label="Merge method"
+                  aria-label={t('merge_aria_method')}
                 >
                   {methods.map((m) => {
                     const active = mergeMethod === m.id;
@@ -337,7 +355,7 @@ export function MergeBox({
             <span className="prp-opt-hint-host">
               <OptBtnHint label="⌥⇧U" />
               <Button size="sm" disabled={actionBusy} onClick={onUpdateBranch} shortcut="⌥⇧U">
-                Update branch
+                {t('cta_update_branch')}
               </Button>
             </span>
           ) : null}
@@ -352,7 +370,7 @@ export function MergeBox({
                 onClick={() => onSetDraftStage?.('ready')}
                 shortcut="⌥⇧D"
               >
-                Ready for review
+                {t('cta_ready_review')}
               </Button>
             </span>
           ) : null}
@@ -365,7 +383,7 @@ export function MergeBox({
                 onClick={() => onSetDraftStage?.('draft')}
                 shortcut="⌥⇧D"
               >
-                Convert to draft
+                {t('cta_convert_draft')}
               </Button>
             </span>
           ) : null}

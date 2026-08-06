@@ -10,6 +10,7 @@ import {
   blurEditable,
   clearPrPlusIdb,
   clearPrPlusSessionStorage,
+  clickPrPlusToggleIfNeeded,
   closeOverlay,
   evalInPage,
   holdChord,
@@ -18,6 +19,7 @@ import {
   openPr,
   press,
   setLayout,
+  waitContentInject,
   waitDetailReady,
   waitMs,
 } from '../lib/harness.mjs';
@@ -256,39 +258,45 @@ function dragPanViewer(dx = 40, dy = 60) {
 }
 
 /**
- * Bust in-memory detail cache + IDB so a just-posted issue comment is not
- * masked by a stale PR #7 snapshot (common mid full-suite after soft reset
- * still leaves content-script Map entries until a hard navigation).
+ * Re-open conversation so a just-posted issue comment is visible.
+ * Prefer a normal open + soft refresh over wiping IDB/sessionStorage: full
+ * cache clear can leave timeline on a graphql-since path with zero painted
+ * feed cards (maxScroll=0, desc+composer only) until a full cold rebuild.
  */
 function reopenConversationFresh(label = 'VG reopen') {
   closeOverlay();
   waitMs(120);
-  try {
-    openPage('https://github.com/');
-    waitMs(250);
-  } catch {
-    /* ignore */
-  }
-  try {
-    clearPrPlusIdb();
-  } catch {
-    /* ignore */
-  }
-  try {
-    clearPrPlusSessionStorage();
-  } catch {
-    /* ignore */
-  }
-  waitMs(150);
+  // Hard navigation to the PR URL forces content re-inject without nuking
+  // timeline watermark state the host needs for a full first page.
   openPr(DEMO_PR, { viaUrl: true });
   setLayout('conversation');
   blurEditable();
   waitDetailReady({ meta: true, files: false, label });
   waitMs(500);
-  // Soft refresh re-pulls timeline/comments when first paint used a racey empty window
+  // Soft refresh re-pulls issue comments / timeline after the seed post
   evalInPage(`document.querySelector('[data-prp-refresh]')?.click?.()`);
-  waitMs(1400);
+  waitMs(1600);
   waitDetailReady({ meta: true, files: false, label: `${label} refresh` });
+  // If the feed still has no scrollable corpus, one more open (no IDB wipe)
+  const feed = evalInPage(`
+    (() => {
+      const sc = document.querySelector('.prp-conversation-virtual');
+      const max = sc
+        ? Math.max(0, (sc.scrollHeight || 0) - (sc.clientHeight || 0))
+        : 0;
+      const cards = document.querySelectorAll(
+        '.prp-overlay .prp-card, .prp-timeline-event, [data-search-anchor^="issue-comment"]'
+      ).length;
+      return { max, cards };
+    })()
+  `);
+  log(`  ${label} feed probe: ${JSON.stringify(feed)}`);
+  if ((feed?.max || 0) < 40 && (feed?.cards || 0) < 3) {
+    openPr(DEMO_PR, { viaUrl: true });
+    setLayout('conversation');
+    waitDetailReady({ meta: true, files: false, label: `${label} re-open` });
+    waitMs(800);
+  }
 }
 
 function waitForMermaidExpand(mark, timeoutMs = 28_000) {
@@ -301,7 +309,9 @@ function waitForMermaidExpand(mark, timeoutMs = 28_000) {
         const mark = ${JSON.stringify(mark)};
         const sc =
           document.querySelector('.prp-conversation-virtual') ||
+          document.querySelector('.prp-conversation-virtual-host .prp-scroll-float') ||
           document.querySelector('.prp-conversation__scroller') ||
+          document.querySelector('.prp-overlay .prp-scroll-float') ||
           document.querySelector('.prp-overlay .prp-vlist');
         const max = sc
           ? Math.max(0, (sc.scrollHeight || 0) - (sc.clientHeight || 0))
@@ -384,6 +394,23 @@ export function getSteps() {
   });
 
   run('VG.1 mermaid renders + open fullscreen viewer', () => {
+    // Prefer deep-link to the seeded issue comment (stable product path).
+    if (seed.id) {
+      const deep = `https://github.com/${REPO}/pull/${DEMO_PR}?prp_page=conversation&prp_number=${DEMO_PR}&prp_position=c%3A${seed.id}`;
+      log(`  deep-link seed comment ${seed.id}`);
+      try {
+        openPage(deep);
+        waitMs(500);
+        waitContentInject({ timeoutMs: 12_000, label: 'VG.1 inject' });
+        clickPrPlusToggleIfNeeded();
+        waitMs(400);
+        setLayout('conversation');
+        waitDetailReady({ meta: true, files: false, label: 'VG.1 deep-link' });
+        waitMs(800);
+      } catch (e) {
+        log(`  deep-link open soft-fail: ${e?.message || e}`);
+      }
+    }
     // Dense PR #7: seed may sit past first timeline page — Load more until mark.
     let found = waitForMermaidExpand(seed.mark, 12_000);
     for (let i = 0; i < 8 && !found?.hasMark; i++) {
@@ -406,6 +433,18 @@ export function getSteps() {
     if (!found?.hasMark) {
       log(`  mermaid mark still missing — cache-bust reopen: ${JSON.stringify(found)}`);
       reopenConversationFresh('VG.1 retry');
+      // After cache bust, deep-link again so restore targets the seed
+      if (seed.id) {
+        const deep = `https://github.com/${REPO}/pull/${DEMO_PR}?prp_page=conversation&prp_number=${DEMO_PR}&prp_position=c%3A${seed.id}`;
+        openPage(deep);
+        waitMs(500);
+        waitContentInject({ timeoutMs: 12_000, label: 'VG.1 inject retry' });
+        clickPrPlusToggleIfNeeded();
+        waitMs(400);
+        setLayout('conversation');
+        waitDetailReady({ meta: true, files: false, label: 'VG.1 deep-link retry' });
+        waitMs(900);
+      }
       found = waitForMermaidExpand(seed.mark, 14_000);
       for (let i = 0; i < 4 && !found?.hasMark; i++) {
         evalInPage(`

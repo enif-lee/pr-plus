@@ -6,6 +6,7 @@ import {
   filterCommitsByQuery,
   takeCommitsForTimeline,
 } from '@lib/aside-lists';
+import { useT } from '@lib/locale-context';
 
 const DEFAULT_CAP = 12;
 
@@ -26,6 +27,7 @@ export function AsideCommitsTimeline({
   loadingMore?: boolean;
   onEnsureAll?: (() => void | Promise<void>) | null;
 }) {
+  const t = useT();
   const [query, setQuery] = useState('');
   const [showAll, setShowAll] = useState(false);
   const ensureTriedRef = useRef('');
@@ -144,7 +146,7 @@ export function AsideCommitsTimeline({
             : mayHaveMore
               ? overflowFromCap
                 ? `+${truncated} more… · load all`
-                : 'Load all commits…'
+                : t('cta_load_all_commits')
               : `+${truncated} more… · ${total} commits total`}
         </button>
       ) : null}

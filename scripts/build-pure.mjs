@@ -76,6 +76,11 @@ const MAP = {
     global: 'PRModalShortcutPolicy',
   },
   theme: { lib: 'theme.ts', global: 'PRModalTheme' },
+  'locale-resolve': {
+    lib: 'locale-resolve.ts',
+    global: 'PRModalLocaleResolve',
+  },
+  i18n: { lib: 'i18n.ts', global: 'PRModalI18n' },
   'ui-polish': { lib: 'ui-polish.ts', global: 'PRModalUiPolish' },
   'virtual-range': { lib: 'virtual-range.ts', global: 'PRModalVirtualRange' },
 };

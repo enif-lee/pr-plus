@@ -1,3 +1,10 @@
+import { createTranslator, formatMessage } from './modal/lib/i18n';
+import {
+  normalizeUiLanguagePref,
+  resolveEffectiveLocale,
+  type AppLocale,
+} from './modal/lib/locale-resolve';
+
 const tokenInput = document.getElementById('token');
 const saveBtn = document.getElementById('save');
 const clearBtn = document.getElementById('clear');
@@ -16,6 +23,9 @@ const prefAutoExpandFileNav = document.getElementById(
 const prefTreeView = document.getElementById('pref-tree-view');
 const prefShortcutMonitorSize = document.getElementById(
   'pref-shortcut-monitor-size'
+) as HTMLSelectElement | null;
+const prefUiLanguage = document.getElementById(
+  'pref-ui-language'
 ) as HTMLSelectElement | null;
 const rateLimitBarsEl = document.getElementById('rate-limit-bars');
 const rateLimitStatusEl = document.getElementById('rate-limit-status');
@@ -39,6 +49,7 @@ const DEFAULT_PREFS = {
   autoExpandOnFileNav: false,
   treeView: true,
   shortcutMonitorSize: 'small',
+  uiLanguage: 'auto',
   onboardingCompleted: false,
   timelineVisibility: {
     events: true,
@@ -164,6 +175,106 @@ function normalizeShortcutMonitorSize(raw: unknown): string {
   return 'small';
 }
 
+function normalizeUiLanguage(raw: unknown): string {
+  return normalizeUiLanguagePref(
+    raw == null ? undefined : String(raw)
+  );
+}
+
+/** Active UI locale for the popup (after pref + browser detect). */
+let popupLocale: AppLocale = 'en';
+let t = createTranslator(popupLocale);
+
+/**
+ * Popup has no GitHub document: `auto` uses browser language, then English.
+ * Custom pref always wins.
+ */
+function resolvePopupLocale(preferred: string | null | undefined): AppLocale {
+  let navigatorLanguage: string | null = null;
+  try {
+    navigatorLanguage =
+      (typeof navigator !== 'undefined' &&
+        (navigator.language || (navigator as any).userLanguage)) ||
+      null;
+  } catch {
+    navigatorLanguage = null;
+  }
+  // chrome.i18n UI language as extra signal when available
+  try {
+    const chromeApi = (globalThis as any).chrome;
+    const ui =
+      typeof chromeApi?.i18n?.getUILanguage === 'function'
+        ? chromeApi.i18n.getUILanguage()
+        : null;
+    if (ui && !navigatorLanguage) navigatorLanguage = ui;
+  } catch {
+    /* ignore */
+  }
+  return resolveEffectiveLocale(preferred, { navigatorLanguage });
+}
+
+/**
+ * Apply catalog strings to all [data-i18n*] nodes.
+ * Chrome resets <select> to the first option when option label text is rewritten —
+ * always restore language / monitor select values after applying labels.
+ */
+function applyPopupI18n(preferred: string | null | undefined) {
+  const pref = normalizeUiLanguage(
+    preferred != null && preferred !== ''
+      ? preferred
+      : prefUiLanguage?.value
+  );
+  // Snapshot before option textContent updates (can clobber selectedIndex → "auto")
+  const prevLang =
+    preferred != null && String(preferred).trim() !== ''
+      ? normalizeUiLanguage(preferred)
+      : normalizeUiLanguage(prefUiLanguage?.value);
+  const prevMonitor = prefShortcutMonitorSize?.value;
+
+  popupLocale = resolvePopupLocale(pref);
+  t = createTranslator(popupLocale);
+  try {
+    document.documentElement.lang =
+      popupLocale === 'zh_CN' ? 'zh-CN' : popupLocale;
+  } catch {
+    /* ignore */
+  }
+  document.querySelectorAll('[data-i18n]').forEach((el) => {
+    const key = el.getAttribute('data-i18n');
+    if (!key) return;
+    // Prefer option.label / text for <option>; value attribute must stay intact
+    if (el instanceof HTMLOptionElement) {
+      el.text = formatMessage(key, popupLocale);
+    } else {
+      el.textContent = formatMessage(key, popupLocale);
+    }
+  });
+  document.querySelectorAll('[data-i18n-placeholder]').forEach((el) => {
+    const key = el.getAttribute('data-i18n-placeholder');
+    if (!key || !('placeholder' in el)) return;
+    (el as HTMLInputElement).placeholder = formatMessage(key, popupLocale);
+  });
+  document.querySelectorAll('[data-i18n-aria]').forEach((el) => {
+    const key = el.getAttribute('data-i18n-aria');
+    if (!key) return;
+    el.setAttribute('aria-label', formatMessage(key, popupLocale));
+  });
+  try {
+    document.title = formatMessage('popup_title', popupLocale);
+  } catch {
+    /* ignore */
+  }
+
+  // Restore selects: value must be the *preference* (auto|en|ko|ja|zh_CN),
+  // not the resolved display locale when pref is auto.
+  if (prefUiLanguage) {
+    prefUiLanguage.value = prevLang;
+  }
+  if (prefShortcutMonitorSize && prevMonitor) {
+    prefShortcutMonitorSize.value = normalizeShortcutMonitorSize(prevMonitor);
+  }
+}
+
 /** @type {{ host: string, mask: string }[]} */
 let hostAccountsState = [];
 
@@ -177,12 +288,12 @@ function renderTokenStatus(status: any) {
     tokenSavedEl.hidden = false;
     tokenMaskEl.textContent = status.mask;
   // @ts-expect-error classic content-script dynamic shapes
-    tokenInput.placeholder = 'Replace github.com token…';
+    tokenInput.placeholder = t('popup_placeholder_token_replace');
   } else {
     tokenSavedEl.hidden = true;
     tokenMaskEl.textContent = '';
   // @ts-expect-error classic content-script dynamic shapes
-    tokenInput.placeholder = 'ghp_… / github_pat_…';
+    tokenInput.placeholder = t('popup_placeholder_token');
   }
 }
 
@@ -210,6 +321,9 @@ function renderPrefs(prefs: any) {
     prefShortcutMonitorSize.value = normalizeShortcutMonitorSize(
       p.shortcutMonitorSize
     );
+  }
+  if (prefUiLanguage) {
+    prefUiLanguage.value = normalizeUiLanguage(p.uiLanguage);
   }
   const tl = normalizeTimelineVisibilityPopup(p.timelineVisibility);
   if (prefTlEvents) prefTlEvents.checked = tl.events;
@@ -274,7 +388,12 @@ function renderRateLimitState(state: any, pluginEnabled = true) {
     const lim = snap?.limit != null ? snap.limit : '—';
     const used = snap?.used != null ? snap.used : '—';
     if (meta) {
-      meta.textContent = `${rem} / ${lim} left · used ${used} · reset ${formatReset(snap, now)}`;
+      meta.textContent = t('popup_rl_meta', [
+        String(rem),
+        String(lim),
+        String(used),
+        formatReset(snap, now),
+      ]);
     }
     if (fill) {
       fill.style.width = `${pct}%`;
@@ -292,15 +411,16 @@ function renderRateLimitState(state: any, pluginEnabled = true) {
     if (pluginEnabled === false) {
       rateLimitStatusEl.textContent =
         blocked.length > 0
-          ? `pr+ disabled (rate limit: ${blocked.join(', ')}). Re-enable after reset or use the toggle.`
-          : 'pr+ is disabled in settings.';
+          ? t('popup_rate_limit_blocked', [blocked.join(', ')])
+          : t('popup_rate_limit_disabled');
     } else if (blocked.length > 0) {
-      rateLimitStatusEl.textContent = `Blocked resources until reset: ${blocked.join(', ')}.`;
+      rateLimitStatusEl.textContent = t('popup_rate_limit_blocked', [
+        blocked.join(', '),
+      ]);
     } else if (!any) {
-      rateLimitStatusEl.textContent =
-        'Rate limit 정보가 아직 없습니다. GitHub에서 PR을 한 번 열어 주세요.';
+      rateLimitStatusEl.textContent = t('popup_rate_limit_empty');
     } else {
-      rateLimitStatusEl.textContent = 'API rate limits look healthy.';
+      rateLimitStatusEl.textContent = t('popup_rate_limit_healthy');
     }
   }
 }
@@ -359,7 +479,7 @@ function renderHostAccounts(accounts: any) {
     mask.textContent = row.mask || '••••';
     const removeBtn = document.createElement('button');
     removeBtn.type = 'button';
-    removeBtn.textContent = 'Remove';
+    removeBtn.textContent = t('popup_btn_remove');
     removeBtn.dataset.host = row.host;
     removeBtn.addEventListener('click', () => void removeHostAccount(row.host));
     li.appendChild(name);
@@ -395,8 +515,8 @@ function updateAddHostButtonState() {
   // @ts-expect-error classic content-script dynamic shapes
   addHostAccountBtn.disabled = atMax && !isUpdate;
   addHostAccountBtn.textContent = isUpdate
-    ? 'Update PAT & grant access'
-    : 'Add host & grant access';
+    ? t('popup_btn_update_host')
+    : t('popup_btn_add_host');
   if (atMax && !isUpdate && !inputHost) {
     setEnterpriseStatus(
       `Maximum ${MAX_HOST_ACCOUNTS} hosts — remove one to add another, or type an existing host to rotate its PAT`
@@ -444,29 +564,98 @@ async function send(message, { retries = 4 } = {}) {
   throw lastErr || new Error('Failed to message background worker');
 }
 
+/** Read extensionPrefs from chrome.storage.local (not SW — SW may drop new keys). */
+function readLocalExtensionPrefs(): Promise<any> {
+  return new Promise((resolve) => {
+    try {
+      const chromeApi = (globalThis as any).chrome;
+      if (!chromeApi?.storage?.local?.get) {
+        resolve({ ...DEFAULT_PREFS });
+        return;
+      }
+      chromeApi.storage.local.get(['extensionPrefs'], (cur: any) => {
+        const raw =
+          cur?.extensionPrefs && typeof cur.extensionPrefs === 'object'
+            ? cur.extensionPrefs
+            : {};
+        resolve({
+          ...DEFAULT_PREFS,
+          ...raw,
+          pluginEnabled: raw.pluginEnabled !== false,
+          reverseComments: raw.reverseComments !== false,
+          autoOpenEmbed: raw.autoOpenEmbed !== false,
+          singleFileMode: raw.singleFileMode === true,
+          autoExpandOnFileNav: raw.autoExpandOnFileNav === true,
+          treeView: raw.treeView !== false,
+          shortcutMonitorSize: normalizeShortcutMonitorSize(
+            raw.shortcutMonitorSize
+          ),
+          uiLanguage: normalizeUiLanguage(raw.uiLanguage),
+          timelineVisibility: normalizeTimelineVisibilityPopup(
+            raw.timelineVisibility
+          ),
+          onboardingCompleted: raw.onboardingCompleted === true,
+        });
+      });
+    } catch {
+      resolve({ ...DEFAULT_PREFS });
+    }
+  });
+}
+
+/** Persist full prefs object; never go through SW normalize (can strip keys). */
+function writeLocalExtensionPrefs(prefs: any): Promise<void> {
+  return new Promise((resolve, reject) => {
+    try {
+      const chromeApi = (globalThis as any).chrome;
+      if (!chromeApi?.storage?.local?.set) {
+        reject(new Error('chrome.storage.local unavailable'));
+        return;
+      }
+      chromeApi.storage.local.get(['extensionPrefs'], (cur: any) => {
+        const prev =
+          cur?.extensionPrefs && typeof cur.extensionPrefs === 'object'
+            ? cur.extensionPrefs
+            : {};
+        const merged = {
+          ...prev,
+          ...prefs,
+          // Always pin language last so it cannot be clobbered by prev merge
+          uiLanguage: normalizeUiLanguage(prefs?.uiLanguage),
+        };
+        chromeApi.storage.local.set({ extensionPrefs: merged }, () => {
+          const err = chromeApi.runtime?.lastError;
+          if (err) reject(err);
+          else resolve();
+        });
+      });
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
 async function load() {
   try {
-    const [status, prefsRes, hostsRes] = await Promise.all([
+    // Prefs: storage.local is SoT (SW PREFS_GET can omit uiLanguage if SW stale)
+    const [status, localPrefs, hostsRes] = await Promise.all([
       send({ type: 'PR_TREE_TOKEN_STATUS' }),
-      send({ type: 'PR_TREE_PREFS_GET' }),
+      readLocalExtensionPrefs(),
       send({ type: 'PR_TREE_HOST_ACCOUNTS_LIST' }),
     ]);
     if (!status?.ok && status?.error) {
       throw new Error(status.error);
     }
+    const prefs = localPrefs || DEFAULT_PREFS;
+    // Settings chrome first so titles match saved language on open
+    applyPopupI18n(prefs.uiLanguage);
     renderTokenStatus(status);
-    renderPrefs(prefsRes?.prefs || DEFAULT_PREFS);
-    renderRateLimitState(
-      prefsRes?.rateLimit || null,
-      prefsRes?.prefs?.pluginEnabled !== false
-    );
-    const accounts =
-      hostsRes?.accounts ||
-      prefsRes?.hostAccounts ||
-      [];
+    renderPrefs(prefs);
+    renderRateLimitState(null, prefs?.pluginEnabled !== false);
+    const accounts = hostsRes?.accounts || [];
     renderHostAccounts(accounts);
     if (!status?.configured && accounts.length === 0) {
-      setStatus('No github.com token saved yet');
+      setStatus(t('popup_status_no_token'));
     }
     // Fresh rate-limit snapshot (auto-refresh from GET /rate_limit when empty)
     try {
@@ -481,6 +670,7 @@ async function load() {
       /* ignore */
     }
   } catch (err) {
+    applyPopupI18n(DEFAULT_PREFS.uiLanguage);
     setStatus(err.message || 'Failed to load status', true);
     renderPrefs(DEFAULT_PREFS);
     renderHostAccounts([]);
@@ -489,6 +679,11 @@ async function load() {
 
 async function savePrefs() {
   try {
+    // Read form values *before* any i18n DOM rewrites
+    const uiLanguage = normalizeUiLanguage(prefUiLanguage?.value);
+    const shortcutMonitorSize = normalizeShortcutMonitorSize(
+      prefShortcutMonitorSize?.value
+    );
     const prefs = {
       pluginEnabled: prefPluginEnabled
         ? Boolean(prefPluginEnabled.checked)
@@ -503,23 +698,18 @@ async function savePrefs() {
       autoExpandOnFileNav: Boolean(prefAutoExpandFileNav?.checked),
   // @ts-expect-error classic content-script dynamic shapes
       treeView: Boolean(prefTreeView?.checked),
-      shortcutMonitorSize: normalizeShortcutMonitorSize(
-        prefShortcutMonitorSize?.value
-      ),
+      shortcutMonitorSize,
+      uiLanguage,
       timelineVisibility: readTimelineVisibilityFromDom(),
     };
-    const res = await send({ type: 'PR_TREE_PREFS_SET', prefs });
-    if (!res?.ok && res?.error) {
-      throw new Error(res.error);
-    }
-    renderPrefs(res.prefs || prefs);
-    if (res.rateLimit) {
-      renderRateLimitState(
-        res.rateLimit,
-        (res.prefs || prefs)?.pluginEnabled !== false
-      );
-    }
-    setStatus('Options saved');
+    // Storage.local is authoritative. Do NOT call PREFS_SET afterward —
+    // a stale service worker re-normalizes and strips uiLanguage, which
+    // made refresh always fall back to auto.
+    await writeLocalExtensionPrefs(prefs);
+    applyPopupI18n(uiLanguage);
+    renderPrefs(prefs);
+    if (hostAccountsState?.length) renderHostAccounts(hostAccountsState);
+    setStatus(t('popup_status_options_saved'));
   } catch (err) {
     setStatus(err.message || 'Failed to save options', true);
   }
@@ -532,7 +722,7 @@ async function removeHostAccount(host: any) {
     if (!res?.ok && res?.error) throw new Error(res.error);
     renderHostAccounts(res.accounts || []);
     setEnterpriseStatus(`Removed ${host}`);
-    setStatus('Enterprise host removed');
+    setStatus(t('popup_status_enterprise_removed'));
   } catch (err) {
     setEnterpriseStatus(err.message || 'Remove failed', true);
   }
@@ -543,7 +733,7 @@ saveBtn.addEventListener('click', async () => {
   // @ts-expect-error classic content-script dynamic shapes
     const value = tokenInput.value;
     if (!String(value || '').trim()) {
-      setStatus('Paste a GitHub PAT first', true);
+      setStatus(t('popup_status_paste_pat'), true);
       return;
     }
     const status = await send({ type: 'PR_TREE_TOKEN_SET', token: value });
@@ -553,7 +743,7 @@ saveBtn.addEventListener('click', async () => {
   // @ts-expect-error classic content-script dynamic shapes
     tokenInput.value = '';
     renderTokenStatus(status);
-    setStatus('github.com PAT saved');
+    setStatus(t('popup_status_pat_saved'));
   } catch (err) {
     setStatus(err.message || 'Save failed', true);
   }
@@ -565,7 +755,7 @@ clearBtn.addEventListener('click', async () => {
     tokenInput.value = '';
     await send({ type: 'PR_TREE_TOKEN_CLEAR' });
     renderTokenStatus({ configured: false, mask: '' });
-    setStatus('github.com token removed');
+    setStatus(t('popup_status_pat_removed'));
   } catch (err) {
     setStatus(err.message || 'Clear failed', true);
   }
@@ -582,6 +772,14 @@ prefSingleFileMode?.addEventListener('change', () => void savePrefs());
 prefAutoExpandFileNav?.addEventListener('change', () => void savePrefs());
 prefTreeView?.addEventListener('change', () => void savePrefs());
 prefShortcutMonitorSize?.addEventListener('change', () => void savePrefs());
+prefUiLanguage?.addEventListener('change', () => {
+  // Capture before label rewrite — Chrome may reset select to first option (auto).
+  const chosen = normalizeUiLanguage(prefUiLanguage.value);
+  applyPopupI18n(chosen);
+  // Keep select on the chosen pref while save runs
+  if (prefUiLanguage) prefUiLanguage.value = chosen;
+  void savePrefs();
+});
 // All master: check → every category on; uncheck → every category off
 prefTlAll?.addEventListener('change', () => {
   const on = Boolean(prefTlAll.checked);
@@ -672,7 +870,11 @@ addHostAccountBtn?.addEventListener('click', async () => {
         }`
       );
     }
-    setStatus(isUpdate ? 'Enterprise PAT updated' : 'Enterprise host saved');
+    setStatus(
+      isUpdate
+        ? t('popup_status_enterprise_updated')
+        : t('popup_status_enterprise_saved')
+    );
     updateEndpointPreview(host);
   } catch (err) {
     setEnterpriseStatus(err.message || 'Save failed', true);
@@ -725,9 +927,7 @@ restartOnboardingBtn?.addEventListener('click', async () => {
     } catch {
       chrome.tabs?.create?.({ url: INSTALL_PULLS_URL });
     }
-    setStatus(
-      `Onboarding restarted — use demo PR #1 (${DEMO_PR_URL.split('/').slice(-2).join('/')})`
-    );
+    setStatus(t('popup_status_onboarding_started'));
   } catch (err) {
     setStatus(err.message || 'Could not restart onboarding', true);
   } finally {
@@ -754,21 +954,11 @@ clearIdbBtn?.addEventListener('click', async () => {
     const tabs = Number(res?.tabs) || 0;
     const cleared = Number(res?.cleared) || 0;
     if (tabs === 0) {
-      setStatus(
-        'No GitHub tabs open — open github.com or your enterprise host, then clear again',
-        true
-      );
+      setStatus(t('popup_status_idb_need_tab'), true);
     } else if (cleared === 0) {
-      setStatus(
-        `No content scripts responded (${tabs} tab${tabs === 1 ? '' : 's'}). Reload the GitHub tab and retry.`,
-        true
-      );
+      setStatus(t('popup_status_idb_need_tab'), true);
     } else {
-      setStatus(
-        `Cleared cache on ${cleared} tab${cleared === 1 ? '' : 's'}${
-          tabs > cleared ? ` (${tabs - cleared} skipped)` : ''
-        }`
-      );
+      setStatus(t('popup_status_idb_cleared'));
     }
   } catch (err) {
     setStatus(err.message || 'Clear cache failed', true);
@@ -778,4 +968,6 @@ clearIdbBtn?.addEventListener('click', async () => {
   }
 });
 
+// English shell until prefs load; load() re-applies preferred language.
+applyPopupI18n('auto');
 load();

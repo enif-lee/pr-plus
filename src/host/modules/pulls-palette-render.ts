@@ -7,6 +7,28 @@
       .replace(/"/g, '&quot;');
   }
 
+  /** Localized pulls-palette chrome via pure catalogs. */
+  function pullsPaletteMsg(key, fallback) {
+    try {
+      const pure = globalThis.PRModalI18n;
+      let locale =
+        document.documentElement?.getAttribute?.('data-prp-app-locale') ||
+        document.documentElement?.getAttribute?.('data-prp-ui-language') ||
+        document.documentElement?.getAttribute?.('lang') ||
+        'en';
+      if (locale === 'auto') {
+        locale = document.documentElement?.getAttribute?.('lang') || 'en';
+      }
+      if (typeof pure?.formatMessage === 'function') {
+        const m = pure.formatMessage(key, locale);
+        if (m && m !== key) return m;
+      }
+    } catch {
+      /* ignore */
+    }
+    return fallback;
+  }
+
   /** Author avatar or initials fallback for palette PR rows. */
   function renderPullsPaletteAvatar(item) {
     const login = String(item?.author || '').trim();
@@ -17,9 +39,29 @@
           .toUpperCase()
       : '?';
     if (url) {
+      // Warm URLs (session cache from modal Avatar) skip cold lazy remount delay
+      let loading = 'lazy';
+      let decoding = 'async';
+      try {
+        const cache = globalThis.PRModalAvatarImageCache;
+        if (cache && typeof cache.avatarImageLoadingAttr === 'function') {
+          loading = cache.avatarImageLoadingAttr(url) || loading;
+        }
+        if (cache && typeof cache.avatarImageDecodingAttr === 'function') {
+          decoding = cache.avatarImageDecodingAttr(url) || decoding;
+        }
+      } catch {
+        /* ignore */
+      }
       return `<img class="prp-pp-avatar" src="${escapeHtml(
         url
-      )}" alt="" width="28" height="28" loading="lazy" decoding="async" />`;
+      )}" alt="" width="28" height="28" loading="${escapeHtml(
+        loading
+      )}" decoding="${escapeHtml(
+        decoding
+      )}" referrerpolicy="no-referrer" data-avatar-loading="${escapeHtml(
+        loading
+      )}" />`;
     }
     return `<span class="prp-pp-avatar prp-pp-avatar--fallback" aria-hidden="true">${escapeHtml(
       initials
@@ -132,8 +174,13 @@
         ? api.buildPullsPaletteHelpEntries()
         : [];
     if (!entries.length) {
-      list.innerHTML =
-        '<div class="prp-pp-help__empty prp-muted">No actions configured</div>';
+      const empty = pullsPaletteMsg(
+        'palette_help_empty',
+        'No actions configured'
+      );
+      list.innerHTML = `<div class="prp-pp-help__empty prp-muted">${escapeHtml(
+        empty
+      )}</div>`;
       return;
     }
     list.innerHTML = entries
@@ -308,20 +355,29 @@
           ? api.parsePalettePrSearchQuery(pullsPaletteQuery)
           : { isPrSearch: false };
       if (prSearch.isPrSearch) {
-        meta.textContent = pullsPalettePrSearchLoading
-          ? `PR search · loading…${viewer ? `  ·  @${viewer}` : ''}`
-          : `PR search · #number or #name${viewer ? `  ·  @${viewer}` : ''}`;
+        const hint = pullsPaletteMsg(
+          'pulls_palette_hint',
+          'Type to filter · #PR search · open help for actions'
+        );
+        meta.textContent = viewer ? `${hint}  ·  @${viewer}` : hint;
       } else {
-        meta.textContent = viewer
-          ? `Type to filter · #PR search · open help  ·  @${viewer}`
-          : 'Type to filter · #PR search · open help for actions';
+        const hint = pullsPaletteMsg(
+          'pulls_palette_hint',
+          'Type to filter · #PR search · open help for actions'
+        );
+        meta.textContent = viewer ? `${hint}  ·  @${viewer}` : hint;
       }
     }
     if (!listEl) return;
     if (items.length === 0) {
       listEl.removeAttribute('data-prp-pp-animate');
-      listEl.innerHTML =
-        '<li class="prp-pp-empty prp-muted">No matching results</li>';
+      const empty = pullsPaletteMsg(
+        'pulls_palette_empty',
+        'No matching results'
+      );
+      listEl.innerHTML = `<li class="prp-pp-empty prp-muted">${escapeHtml(
+        empty
+      )}</li>`;
       return;
     }
     // One-shot enter animation on full rebuild only (not focus moves)
@@ -432,7 +488,12 @@
           <div class="prp-pp-main">
             <div class="prp-pp-head">
               <input class="prp-pp-input" data-prp-pp-input type="search" autocomplete="off" spellcheck="false"
-                placeholder="Search PRs · #123 · #name · np  am  df  help" />
+                placeholder="${escapeHtml(
+                  pullsPaletteMsg(
+                    'pulls_palette_placeholder',
+                    'Search PRs · #123 · #name · np  am  df  help'
+                  )
+                )}" />
               <div class="prp-pp-meta prp-muted" data-prp-pp-meta></div>
             </div>
             <div class="prp-scroll-float-host prp-edge-fade prp-pp-list-host" data-prp-pp-list-host>
@@ -452,7 +513,9 @@
           <aside class="prp-pp-help" id="prp-pp-help-panel" data-prp-pp-help hidden>
             <div class="prp-pp-help__head">
               <div class="prp-pp-help__title">Actions</div>
-              <button type="button" class="prp-pp-help-close" data-prp-pp-help-toggle aria-label="Close help">×</button>
+              <button type="button" class="prp-pp-help-close" data-prp-pp-help-toggle aria-label="${escapeHtml(
+                pullsPaletteMsg('pulls_palette_help_close', 'Close help')
+              )}">×</button>
             </div>
             <div class="prp-pp-help__list" data-prp-pp-help-list></div>
             <div class="prp-pp-help__hint prp-muted">Click a row to run · or type alias + Enter</div>

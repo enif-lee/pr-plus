@@ -16,6 +16,7 @@ export {
   formatDurationMs,
   formatRelativeAgo,
   formatCheckSummary,
+  checksNeedElapsedTick,
   buildMergeBoxCheckGroups,
   mergeBoxChecksHeadline,
   summarizeCheckCounts,

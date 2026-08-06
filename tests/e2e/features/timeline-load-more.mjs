@@ -185,9 +185,16 @@ function clickLoadMore() {
  * Progress = more cards/comments/events OR diag hasMore flipped OR gap gone
  * OR comments-fetch attr increased.
  */
+/** Parse "N hidden items" from gap banner text (virtual list may not remount cards). */
+function hiddenCountFromGapText(gapText) {
+  const m = String(gapText || '').match(/(\d+)\s*hidden/i);
+  return m ? Number(m[1]) : null;
+}
+
 function waitPaginationProgress(before, timeoutMs = 25_000) {
   const deadline = Date.now() + timeoutMs;
   let last = null;
+  const beforeHidden = hiddenCountFromGapText(before?.gapText);
   while (Date.now() < deadline) {
     waitMs(350);
     last = paginationProbe();
@@ -203,6 +210,9 @@ function waitPaginationProgress(before, timeoutMs = 25_000) {
     const afterDiagC = Number(last.diag?.comments) || 0;
     const beforeDiagE = Number(before.diag?.events) || 0;
     const afterDiagE = Number(last.diag?.events) || 0;
+    const afterHidden = hiddenCountFromGapText(last?.gapText);
+    const beforeLoaded = Number(before.diag?.loadedCount) || 0;
+    const afterLoaded = Number(last.diag?.loadedCount) || 0;
 
     if (
       afterCards > beforeCards ||
@@ -210,7 +220,11 @@ function waitPaginationProgress(before, timeoutMs = 25_000) {
       afterEv > beforeEv ||
       afterFetch > beforeFetch ||
       afterDiagC > beforeDiagC ||
-      afterDiagE > beforeDiagE
+      afterDiagE > beforeDiagE ||
+      afterLoaded > beforeLoaded ||
+      (beforeHidden != null &&
+        afterHidden != null &&
+        afterHidden < beforeHidden)
     ) {
       return { ok: true, kind: 'grew', last };
     }
@@ -347,13 +361,24 @@ export function buildTimelineLoadMoreSteps() {
       log(`  bridge-res ${JSON.stringify(bridgeRes)}`);
       log(`  bridge-probe ${JSON.stringify(bridgeProbe)}`);
       assert((p.cards || 0) >= 1, `expected timeline cards: ${JSON.stringify(p)}`);
-      // Bridge probe must prove GraphQL page (totalCount / hasMore) works
-      assert(
+      // Prefer content-script bridge probe when present; otherwise host
+      // prp:diag:timeline-gql (side-fetch) is the same GraphQL page proof.
+      const gqlDiag =
+        p.diag &&
+        (p.diag.phase === 'result' || p.diag.source === 'graphql') &&
+        (p.diag.hasMore === true ||
+          p.diag.pageHasMore === true ||
+          Number(p.diag.totalCount) > 100 ||
+          Number(p.diag.events) >= 1 ||
+          Number(p.diag.loadedCount) >= 1);
+      const bridgeOk =
         bridgeProbe?.ok &&
-          (bridgeProbe.hasMore === true ||
-            Number(bridgeProbe.totalCount) > 100 ||
-            Number(bridgeProbe.events) >= 1),
-        `timeline GraphQL page probe failed: ${JSON.stringify(bridgeProbe)} res=${JSON.stringify(bridgeRes)}`
+        (bridgeProbe.hasMore === true ||
+          Number(bridgeProbe.totalCount) > 100 ||
+          Number(bridgeProbe.events) >= 1);
+      assert(
+        bridgeOk || gqlDiag,
+        `timeline GraphQL page probe failed: ${JSON.stringify(bridgeProbe)} res=${JSON.stringify(bridgeRes)} diag=${JSON.stringify(p.diag)}`
       );
 
       // Poll scroll + re-probe — threads/timeline meta may land after first paint
