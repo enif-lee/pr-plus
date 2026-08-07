@@ -64,7 +64,7 @@ export function getSteps() {
       `expected merged merge-box chrome: ${JSON.stringify(box)}`
     );
     assert(
-      /merged/i.test(String(box.headline || '')),
+      /merged|머지|マージ|已合并/i.test(String(box.headline || '')),
       `merge box headline should mention merged: ${box.headline}`
     );
   });

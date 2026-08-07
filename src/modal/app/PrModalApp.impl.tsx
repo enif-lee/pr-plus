@@ -1073,6 +1073,17 @@ export function PrModalApp({
   /** Live virtual rows for keydown handoff (avoid stale closure on ↑/↓ exit). */
   const virtualRowsRef = useRef<any[]>([]);
   /**
+   * After multi-reply continuum exits to a line, one reverse arrow re-enters
+   * that thread with direction-aware unit seed (P3c). Cleared on other moves.
+   */
+  const lastExitedMultiReplyRef = useRef<{
+    rootId: string;
+    /** Array index of the line we exited onto (for reverse adjacency). */
+    exitLineArrIdx: number;
+    /** Direction used to exit (+1 down / -1 up). */
+    exitDelta: number;
+  } | null>(null);
+  /**
    * Single-file mode: hop to adjacent file at EOF/BOF, then seed first/last
    * selectable line once virtualRows rebuild for that path.
    */
@@ -3063,15 +3074,13 @@ export function PrModalApp({
   }
 
   /**
-   * After leaving the last/first unit of a multi-reply thread, pin selection on
-   * that thread row then step once into the line/thread continuum.
+   * Array index of Diff inline-comment row for `rootId` (never row.rowIndex alone).
    */
-  function handoffThreadExitToSelection(rootId: string, delta: number): boolean {
-    const st = useModalStore.getState();
-    st.setFocusedThreadUnitId(null);
-    const rows = virtualRowsRef.current;
-    const list = Array.isArray(rows) ? rows : [];
-    let arrIdx = -1;
+  function findThreadArrayIndex(rootId: string): number {
+    const list = Array.isArray(virtualRowsRef.current)
+      ? virtualRowsRef.current
+      : [];
+    const want = String(rootId);
     for (let i = 0; i < list.length; i++) {
       const r = list[i];
       if (!r) continue;
@@ -3080,78 +3089,151 @@ export function PrModalApp({
           ? isInlineCommentRow(r)
           : r.kind === 'inline-comment' || r.kind === 'thread';
       if (!isThreadRow) continue;
-      if (String(r.commentId) !== String(rootId)) continue;
-      arrIdx = i;
-      break;
+      if (String(r.commentId) === want) return i;
     }
-    if (arrIdx < 0 && typeof findRowIndexForCommentId === 'function') {
-      const found = findRowIndexForCommentId(list, rootId);
-      if (found != null && Number.isFinite(Number(found))) {
-        // Prefer array index matching comment row
-        for (let i = 0; i < list.length; i++) {
-          if (
-            isInlineCommentRow?.(list[i]) &&
-            String(list[i]?.commentId) === String(rootId)
-          ) {
-            arrIdx = i;
-            break;
-          }
-        }
-        if (arrIdx < 0) arrIdx = Number(found);
+    return -1;
+  }
+
+  /** Pin Diff lineSelection caret on the thread virtual row (array index). */
+  function pinThreadRowSelection(rootId: string): number {
+    const list = Array.isArray(virtualRowsRef.current)
+      ? virtualRowsRef.current
+      : [];
+    const arrIdx = findThreadArrayIndex(rootId);
+    if (arrIdx < 0 || typeof beginSelectionOnRow !== 'function') return arrIdx;
+    const pinned = beginSelectionOnRow(list[arrIdx], 'RIGHT', arrIdx);
+    if (pinned) {
+      try {
+        useModalStore.getState().setLineSelection(pinned);
+      } catch {
+        /* ignore */
       }
     }
-    // Always re-pin caret on this thread row so the following step leaves from
-    // a known continuum stop (avoids skipping the thread on reverse ↑/↓).
-    if (arrIdx >= 0 && typeof beginSelectionOnRow === 'function') {
-      const pinned = beginSelectionOnRow(list[arrIdx], 'RIGHT', arrIdx);
-      if (pinned) st.setLineSelection(pinned);
-    }
-    // Drop Diff thread id / unit so ↑ is moveSelectionUp (line continuum) and
-    // can re-enter the thread stop; multi-reply policy needs a real root.
+    return arrIdx;
+  }
+
+  /**
+   * After leaving the last/first unit of a multi-reply thread, pin selection on
+   * that thread row then one pure moveLineSelection step so reverse ↑ re-enters
+   * the same stop (continuum covered by line-selection unit tests).
+   */
+  function handoffThreadExitToSelection(rootId: string, delta: number): boolean {
+    const st = useModalStore.getState();
+    st.setFocusedThreadUnitId(null);
+    const list = Array.isArray(virtualRowsRef.current)
+      ? virtualRowsRef.current
+      : [];
+    const arrIdx = pinThreadRowSelection(rootId);
     try {
       st.setActiveDiffCommentId(null);
     } catch {
       /* ignore */
     }
-    // One step off the thread using array-index math when possible so reverse
-    // ↑ lands back on this stop without rAF coalesce / stale head drift.
     const d = delta < 0 ? -1 : 1;
-    if (arrIdx >= 0 && typeof beginSelectionOnRow === 'function') {
-      const targetIdx = arrIdx + d;
-      if (targetIdx >= 0 && targetIdx < list.length) {
-        // Walk to nearest nav stop in direction (thread / line / header)
-        let i = targetIdx;
-        while (i >= 0 && i < list.length) {
-          const row = list[i];
-          const isStop =
-            (typeof isInlineCommentRow === 'function'
-              ? isInlineCommentRow(row)
-              : row?.kind === 'inline-comment') ||
-            (typeof isSelectableDiffRow === 'function'
-              ? isSelectableDiffRow(row)
-              : row?.kind === 'diff-line') ||
-            (typeof isFileHeaderRow === 'function'
-              ? isFileHeaderRow(row)
-              : row?.kind === 'file-header');
-          if (isStop) {
-            const next = beginSelectionOnRow(row, 'RIGHT', i);
-            if (next) {
-              st.setLineSelection(next);
-              try {
-                scrollDiffCaretIntoView(next);
-              } catch {
-                /* ignore */
-              }
-              return true;
-            }
-            break;
-          }
-          i += d;
+    const cur = useModalStore.getState().lineSelection;
+    if (
+      arrIdx >= 0 &&
+      cur &&
+      typeof moveLineSelection === 'function' &&
+      list.length
+    ) {
+      const path = String(cur.filePath || list[arrIdx]?.filePath || '').trim();
+      const next = moveLineSelection(cur, list, d, {
+        shift: false,
+        activeFilePath: path || null,
+      });
+      if (next && next !== cur) {
+        st.setLineSelection(next);
+        // Remember exit so reverse arrow re-enters multi-reply (even when
+        // virtual rowIndex vs array index drift skips the thread stop).
+        const exitHead = Number(next.headRowIndex);
+        lastExitedMultiReplyRef.current = {
+          rootId: String(rootId),
+          exitLineArrIdx: Number.isFinite(exitHead) ? exitHead : arrIdx + d,
+          exitDelta: d,
+        };
+        try {
+          scrollDiffCaretIntoView(next);
+        } catch {
+          /* ignore */
         }
+        return true;
       }
     }
-    // Fallback: flush keyboard move (bypass rAF)
     flushSelectionKeyboardMove(d, false);
+    // Latch AFTER flush so flush does not treat this as "continue exit dir"
+    // and drop re-entry (P3c reverse ↑).
+    const after = useModalStore.getState().lineSelection;
+    lastExitedMultiReplyRef.current = {
+      rootId: String(rootId),
+      exitLineArrIdx: Number.isFinite(Number(after?.headRowIndex))
+        ? Number(after.headRowIndex)
+        : arrIdx >= 0
+          ? arrIdx + d
+          : -1,
+      exitDelta: d,
+    };
+    return true;
+  }
+
+  /**
+   * Reverse of multi-reply exit: one opposite arrow re-enters that thread with
+   * seedReviewThreadFocusUnit (↑ after exit-down → last reply). Consumes latch.
+   */
+  function tryReenterExitedMultiReply(delta: number): boolean {
+    const latch = lastExitedMultiReplyRef.current;
+    if (!latch?.rootId) return false;
+    const d = delta < 0 ? -1 : 1;
+    // Only reverse of the exit direction
+    if (d === latch.exitDelta) return false;
+    const st = useModalStore.getState();
+    // Consume latch once reverse is requested (even if pin misses — jump below)
+    lastExitedMultiReplyRef.current = null;
+    if (isThreadSelection(st.lineSelection)) return false;
+
+    const rootId = String(latch.rootId);
+    // Ensure Diff has the thread row in the virtual list / viewport
+    try {
+      jumpToReviewComment({
+        id: rootId,
+        path: st.lineSelection?.filePath || null,
+        line: null,
+        side: 'RIGHT',
+      });
+    } catch {
+      /* ignore */
+    }
+    pinThreadRowSelection(rootId);
+    try {
+      st.setActiveDiffCommentId(rootId);
+    } catch {
+      /* ignore */
+    }
+    const replies = repliesForRootCommentId(rootId);
+    const units = listReviewThreadFocusUnits(rootId, replies);
+    if (units.length < 2) {
+      // Still count as handled if we at least re-selected the thread row
+      return pinThreadRowSelection(rootId) >= 0;
+    }
+    const seed =
+      typeof seedReviewThreadFocusUnit === 'function'
+        ? seedReviewThreadFocusUnit(units, d)
+        : d < 0
+          ? units[units.length - 1]
+          : units[0];
+    if (seed?.id) {
+      st.setFocusedThreadUnitId(String(seed.id));
+    }
+    try {
+      requestAnimationFrame(() => {
+        scrollFocusedThreadUnitIntoView(String(seed?.id || rootId), {
+          attempts: 12,
+          sel: useModalStore.getState().lineSelection,
+        });
+      });
+    } catch {
+      /* ignore */
+    }
     return true;
   }
 
@@ -3194,6 +3276,11 @@ export function PrModalApp({
     ) {
       // Align root if store pointed elsewhere (e.g. reply id)
       st.setActiveDiffCommentId(rootId);
+    }
+    // Pin thread row selection so exit handoff leaves from the correct stop
+    // (array index), not a stale/top-of-file line caret.
+    if (liveLayout === LAYOUT_DIFF) {
+      pinThreadRowSelection(rootId);
     }
     st.setFocusedThreadUnitId(next.id);
     // Scroll the focused unit band only (minimal reveal)
@@ -3994,6 +4081,21 @@ export function PrModalApp({
 
   function flushSelectionKeyboardMove(delta: number, shift: boolean) {
     if (typeof moveLineSelection !== 'function') return;
+    // Multi-reply continuum reverse: re-enter exited thread before line walk
+    if (!shift && tryReenterExitedMultiReply(delta)) {
+      scheduleSelectionActionsReveal();
+      return;
+    }
+    // Continued in the same direction as exit → abandon reverse re-entry.
+    // (Do not clear on opposite-direction failure here — tryReenter already
+    // clears; and handoff may call flush after setting the latch.)
+    const latch = lastExitedMultiReplyRef.current;
+    if (latch) {
+      const d = delta < 0 ? -1 : 1;
+      if (d === latch.exitDelta) {
+        lastExitedMultiReplyRef.current = null;
+      }
+    }
     const st = useModalStore.getState();
     const activePath = String(st.activeFilePath || '').trim();
     const prevSel = st.lineSelection;
@@ -7568,6 +7670,11 @@ export function PrModalApp({
     focusConversationCommentItem,
     clearConversationCommentFocus,
     runContextThreadAction,
+    // Live refs so capture-phase keydown (deps only open/isEmbed) always hits
+    // current continuum / re-entry latch logic.
+    stepThreadReply,
+    applySelectionKeyboardMove,
+    tryReenterExitedMultiReply,
     // Tab-leave from focused thread composer (next/prev comment)
     stepContextThreadFromTab: (dir: number) => {
       const d = dir < 0 ? -1 : 1;
@@ -7726,7 +7833,6 @@ export function PrModalApp({
     setActiveFileCollapse,
     applyReviewFilterToggle,
     applyGotoQuery,
-    applySelectionKeyboardMove,
     toggleSidePanel,
     openStackOrListPr,
     navigateAdjacentPr,
@@ -8807,10 +8913,10 @@ export function PrModalApp({
           act.runContextThreadAction?.('comment');
           break;
         case 'stepThreadReplyPrev':
-          stepThreadReply(-1);
+          act.stepThreadReply?.(-1);
           break;
         case 'stepThreadReplyNext':
-          stepThreadReply(1);
+          act.stepThreadReply?.(1);
           break;
         case 'contextThreadResolve':
         case 'focusedThreadResolve':
@@ -9154,12 +9260,17 @@ export function PrModalApp({
           break;
         case 'moveSelectionUp':
           if (ui.layoutMode === LAYOUT_DIFF) {
-            act.applySelectionKeyboardMove?.(-1, false);
+            // Prefer live re-entry latch before rAF-coalesced line move
+            if (!act.tryReenterExitedMultiReply?.(-1)) {
+              act.applySelectionKeyboardMove?.(-1, false);
+            }
           }
           break;
         case 'moveSelectionDown':
           if (ui.layoutMode === LAYOUT_DIFF) {
-            act.applySelectionKeyboardMove?.(1, false);
+            if (!act.tryReenterExitedMultiReply?.(1)) {
+              act.applySelectionKeyboardMove?.(1, false);
+            }
           }
           break;
         case 'extendSelectionUp':

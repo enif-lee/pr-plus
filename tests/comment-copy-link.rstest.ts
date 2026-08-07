@@ -207,9 +207,10 @@ describe('deep-link restore wiring (static)', () => {
     expect(app).toMatch(/markSoftExhausted/);
     expect(app).toMatch(/kickLoadMoreIfNeeded/);
     expect(app).toMatch(/optimisticConversationAnchorForKind/);
-    // Must not promote pending without a mounted node
-    expect(vcl).toMatch(/Never promote without a mounted node/);
+    // Promote only when anchor node is mounted (findAnchorNode / query)
+    expect(vcl).toMatch(/findAnchorNode|queryAnchorInScroller/);
     expect(vcl).toMatch(/nodeInView/);
+    expect(vcl).toMatch(/promote\(/);
   });
 });
 

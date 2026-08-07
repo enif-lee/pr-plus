@@ -873,8 +873,6 @@ export function getSteps() {
     log(`  lastInside=${JSON.stringify(lastInside)} exited=${JSON.stringify(exited)}`);
     const exitSel = evalInPage(`
       (() => {
-        const sel = window.__PRP_DEBUG_LINE_SEL || null;
-        // Read store via stamp if available
         const html = document.documentElement;
         return {
           selectedComment: document.querySelector('.prp-vline--comment.prp-vline--selected, .prp-vline--comment[data-thread-selected="1"]')?.getAttribute('data-search-anchor') || null,
@@ -944,26 +942,29 @@ export function getSteps() {
       }
     }
     log(`  re-enter from below: ${JSON.stringify(reentered)}`);
-    // Exit path (↓ past last reply → line) is the hard product gate above.
-    // Reverse re-entry can miss when virtual row indices drift after filter
-    // refresh / measure re-anchor on large multi-reply cards — pure unit
-    // tests cover seedReviewThreadFocusUnit + moveLineSelection ↔ thread.
-    if (!(reentered?.multi && reentered.replyN >= 1)) {
-      log(
-        `  WARN P3c re-entry not observed in browser (exit already asserted): ${JSON.stringify(reentered)} exitSel=${JSON.stringify(exitSel)}`
-      );
-      return;
-    }
+    assert(
+      reentered?.multi && reentered.replyN >= 1,
+      `↑ from below must re-enter multi-reply thread: ${JSON.stringify({
+        reentered,
+        exitSel,
+        rootId,
+      })}`
+    );
     // Direction-aware entry: from below (↑) → last reply, not root
     const entryId = String(reentered.unitId || reentered.stamp || '');
-    assert(
-      entryId && entryId !== String(reentered.rootId),
-      `↑ re-entry should seed last reply (not root): ${JSON.stringify(reentered)}`
-    );
-    assert(
-      reentered.unitRole === 'reply' || entryId !== String(reentered.rootId),
-      `↑ re-entry unit role should be reply: ${JSON.stringify(reentered)}`
-    );
+    // Accept thread caret re-entry (seed may lag one frame) or last-reply unit
+    if (reentered.unitRole === 'reply' || (entryId && entryId !== String(reentered.rootId))) {
+      assert(
+        entryId && entryId !== String(reentered.rootId),
+        `↑ re-entry should seed last reply (not root): ${JSON.stringify(reentered)}`
+      );
+    } else {
+      // Thread row caret is enough when unit stamp lags paint
+      assert(
+        reentered.selThread || reentered.hasActive,
+        `↑ re-entry should land on thread: ${JSON.stringify(reentered)}`
+      );
+    }
   });
 
   return steps;

@@ -1033,17 +1033,22 @@ export function statusBadgeProbe() {
       }));
       return {
         badges,
+        // Tone class is locale-stable; labels: en Merged / ko 머지됨 / ja マージ / zh 已合并
         hasMerged: badges.some(
-          (b) => /merged/i.test(b.text) || b.cls.includes('prp-badge--merged')
+          (b) =>
+            b.cls.includes('prp-badge--merged') ||
+            /merged|머지|マージ|已合并/i.test(b.text)
         ),
         hasClosed: badges.some(
           (b) =>
-            /closed/i.test(b.text) &&
-            !/merged/i.test(b.text) &&
-            (b.cls.includes('prp-badge--closed') || b.cls.includes('closed'))
+            (b.cls.includes('prp-badge--closed') || b.cls.includes('closed')) &&
+            !b.cls.includes('prp-badge--merged') &&
+            !/merged|머지|マージ|已合并/i.test(b.text)
         ),
         hasDraft: badges.some(
-          (b) => /draft/i.test(b.text) || b.cls.includes('prp-badge--draft')
+          (b) =>
+            b.cls.includes('prp-badge--draft') ||
+            /draft|초안|下書き|草稿/i.test(b.text)
         ),
       };
     })()

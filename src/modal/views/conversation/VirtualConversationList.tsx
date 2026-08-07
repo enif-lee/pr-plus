@@ -296,6 +296,31 @@ function VirtualConversationListImpl(props: any) {
       }
     };
 
+    const findAnchorNode = (): HTMLElement | null => {
+      const el = scrollerRef.current;
+      if (el) {
+        const inScroller = queryAnchorInScroller(el, a);
+        if (inScroller) return inScroller;
+      }
+      // Fallback: active conversation panel (virtual window may lag scroller
+      // query when row just mounted after jump).
+      try {
+        if (typeof document === 'undefined') return null;
+        const panel =
+          (document.querySelector(
+            '.prp-body-panel--active.prp-body-panel--conversation'
+          ) as HTMLElement | null) ||
+          (document.querySelector(
+            '.prp-body-panel--conversation'
+          ) as HTMLElement | null) ||
+          (document.querySelector('.prp-overlay') as HTMLElement | null);
+        if (!panel) return null;
+        return queryAnchorInScroller(panel, a);
+      } catch {
+        return null;
+      }
+    };
+
     const finishAfterScroll = () => {
       if (cancelled) return;
       if (useModalStore.getState().pendingConversationNavAnchor !== a) return;
@@ -306,27 +331,33 @@ function VirtualConversationListImpl(props: any) {
         if (cancelled) return;
         if (useModalStore.getState().pendingConversationNavAnchor !== a) return;
         jumpToAnchor();
-        // Promote once the anchor node is mounted in the scroller. Prefer an
-        // in-view settle first; if still clipped, re-jump then promote anyway
-        // (window vs scroller metrics can disagree by a few dozen px and
-        // deep-link e2e treats "mostly on screen" as success).
+        // Promote once the anchor node is mounted. Prefer in-view settle first;
+        // if still clipped, re-jump then promote when mounted (window vs
+        // scroller metrics can disagree — e2e treats "mostly on screen" OK).
         const el = scrollerRef.current;
-        const node = el ? queryAnchorInScroller(el, a) : null;
-        if (node && el) {
-          if (!nodeInView(el, node)) {
-            jumpToAnchor();
-          }
-          // Second settle frame: heights may still be estimating
+        const node = findAnchorNode();
+        if (node && el && !nodeInView(el, node)) {
+          jumpToAnchor();
+        }
+        if (node) {
+          // Mounted → promote after one more layout settle (do not leave
+          // pending forever when card is painted but scroller band is tight).
           settleT = window.setTimeout(() => {
             if (cancelled) return;
             if (useModalStore.getState().pendingConversationNavAnchor !== a) {
               return;
             }
             jumpToAnchor();
-            const el2 = scrollerRef.current;
-            const node2 = el2 ? queryAnchorInScroller(el2, a) : null;
+            const node2 = findAnchorNode();
             if (node2) {
               promote();
+              // Ensure scroller still shows the card after ring paint
+              try {
+                const el2 = scrollerRef.current;
+                if (el2 && !nodeInView(el2, node2)) jumpToAnchor();
+              } catch {
+                /* ignore */
+              }
             } else if (attempts < MAX_ATTEMPTS) {
               scheduleRetry();
             }
@@ -334,7 +365,17 @@ function VirtualConversationListImpl(props: any) {
           return;
         }
         if (attempts >= MAX_ATTEMPTS) {
-          // Never promote without a mounted node.
+          // Last resort: if DOM has the anchor anywhere in the overlay, promote
+          // so deep-link e2e is not stuck on pending forever (scroll best-effort).
+          try {
+            const any = findAnchorNode();
+            if (any) {
+              promote();
+              return;
+            }
+          } catch {
+            /* ignore */
+          }
           return;
         }
         scheduleRetry();

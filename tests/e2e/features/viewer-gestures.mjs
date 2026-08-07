@@ -477,30 +477,53 @@ export function getSteps() {
       `mermaid not ready: ${JSON.stringify(found)} hasSvg=${hasSvg}`
     );
 
-    const opened = evalInPage(`
-      (() => {
-        const btn =
-          document.querySelector('.prp-mermaid__expand') ||
-          [...document.querySelectorAll('button')].find((b) =>
-            /자세히|fullscreen|diagram/i.test(
-              (b.textContent || '') + (b.getAttribute('aria-label') || '') + (b.title || '')
-            )
-          );
-        if (btn) {
-          btn.scrollIntoView?.({ block: 'center' });
-          btn.click();
-          return { ok: true, via: 'btn' };
-        }
-        const block = document.querySelector('.prp-mermaid');
-        if (block) {
-          block.dispatchEvent(
-            new MouseEvent('dblclick', { bubbles: true, cancelable: true })
-          );
-          return { ok: true, via: 'dblclick' };
-        }
-        return { ok: false, reason: 'no-expand-btn' };
-      })()
-    `);
+    // Expand can race mermaid paint after long suites — retry with broader
+    // selectors (ko/en labels + data attrs).
+    let opened = null;
+    for (let attempt = 0; attempt < 6; attempt++) {
+      opened = evalInPage(`
+        (() => {
+          const pick = () =>
+            document.querySelector('.prp-mermaid__expand, [data-prp-mermaid-expand="1"]') ||
+            [...document.querySelectorAll('button, a, [role="button"]')].find((b) =>
+              /자세히|전체|fullscreen|expand|diagram|viewer/i.test(
+                (b.textContent || '') +
+                  (b.getAttribute('aria-label') || '') +
+                  (b.title || '') +
+                  (b.className || '')
+              )
+            );
+          const btn = pick();
+          if (btn) {
+            btn.scrollIntoView?.({ block: 'center' });
+            try {
+              btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+              btn.click();
+            } catch {
+              btn.click?.();
+            }
+            return { ok: true, via: 'btn', t: (btn.textContent || '').slice(0, 40) };
+          }
+          const block =
+            document.querySelector('.prp-mermaid-wrap .prp-mermaid, .prp-mermaid') ||
+            document.querySelector('.prp-mermaid-wrap');
+          if (block) {
+            block.scrollIntoView?.({ block: 'center' });
+            block.dispatchEvent(
+              new MouseEvent('dblclick', { bubbles: true, cancelable: true })
+            );
+            return { ok: true, via: 'dblclick' };
+          }
+          return {
+            ok: false,
+            reason: 'no-expand-btn',
+            mermaidN: document.querySelectorAll('.prp-mermaid, .prp-mermaid-wrap').length,
+          };
+        })()
+      `);
+      if (opened?.ok) break;
+      waitMs(400);
+    }
     waitMs(500);
     let viewer = evalInPage(`
       (() => {
