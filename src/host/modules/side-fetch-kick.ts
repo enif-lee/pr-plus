@@ -458,7 +458,9 @@
                 : Array.isArray(restPage)
                   ? restPage
                   : [];
-              // Prefer union of GraphQL + REST comments by id
+              // Prefer union of GraphQL + REST comments by id.
+              // mergeTimelineItemsById preserves GraphQL isMinimized when REST
+              // omits Minimizable (otherwise hide state vanishes on refresh).
               let comments = gqlComments;
               if (restItems.length) {
                 if (typeof pure?.mergeTimelineItemsById === 'function') {
@@ -470,8 +472,15 @@
                   const byId = new Map(
                     gqlComments.map((c: any) => [String(c?.id), c])
                   );
+                  const mergeMin =
+                    typeof pure?.mergeCommentMinimizeFields === 'function'
+                      ? pure.mergeCommentMinimizeFields
+                      : (a: any, b: any) => ({ ...a, ...b });
                   for (const c of restItems) {
-                    if (c?.id != null) byId.set(String(c.id), c);
+                    if (c?.id == null) continue;
+                    const k = String(c.id);
+                    const prev = byId.get(k);
+                    byId.set(k, prev ? mergeMin(prev, c) : c);
                   }
                   comments = [...byId.values()];
                 }

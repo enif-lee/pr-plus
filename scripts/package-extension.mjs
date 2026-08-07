@@ -75,6 +75,9 @@ copyFile(path.join(root, 'manifest.json'), path.join(outDir, 'manifest.json'));
 if (fs.existsSync(path.join(root, 'PRIVACY.md'))) {
   copyFile(path.join(root, 'PRIVACY.md'), path.join(outDir, 'PRIVACY.md'));
 }
+if (fs.existsSync(path.join(root, 'LICENSE'))) {
+  copyFile(path.join(root, 'LICENSE'), path.join(outDir, 'LICENSE'));
+}
 if (fs.existsSync(path.join(root, 'assets'))) {
   copyRecursive(path.join(root, 'assets'), path.join(outDir, 'assets'));
 }

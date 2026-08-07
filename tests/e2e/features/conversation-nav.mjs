@@ -149,20 +149,28 @@ export function getSteps() {
     blurEditable();
     // Clear existing focus so the next ⌥J seeds from empty.
     // ⌥⇧C toggles: only press while focused (pressing unfocused seeds).
-    if (convFocusStop().hasFocus) {
+    // Check DOM ring + data-prp-*-conv-anchor stamps (store can outlive class).
+    for (let i = 0; i < 3; i++) {
+      const stop = convFocusStop();
+      const stamp = evalInPage(`
+        document.documentElement.getAttribute('data-prp-focused-conv-anchor') ||
+        document.documentElement.getAttribute('data-prp-pending-conv-anchor') ||
+        ''
+      `);
+      if (!stop.hasFocus && !stamp) break;
       press('Alt+Shift+c');
       waitMs(TICK);
     }
-    if (convFocusStop().hasFocus) {
-      press('Alt+Shift+c');
-      waitMs(TICK);
-    }
-    // Scroll near top so description + composer + merge (reverse layout) mount.
     evalInPage(`
       (() => {
         document.documentElement.removeAttribute('data-prp-opt-held');
         document.documentElement.classList.remove('prp-opt-held');
         document.body?.classList?.remove?.('prp-opt-held');
+      })()
+    `);
+    // Scroll near top so description + composer + merge (reverse layout) mount.
+    evalInPage(`
+      (() => {
         const el = document.querySelector('.prp-conversation-virtual');
         if (el) {
           el.scrollTop = 0;

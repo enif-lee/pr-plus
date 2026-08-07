@@ -222,6 +222,25 @@ export function getSteps() {
     setLayout('diff');
     blurEditable();
     waitDiffFilesReady(`P2.1 PR #${DEMO_PR} Diff files ready`);
+    // Demo PR often has 0 Unresolved — enable Resolved so threads paint
+    evalInPage(`
+      (() => {
+        const btns = [
+          ...document.querySelectorAll(
+            '.prp-review-filter button, .prp-review-filter__btn'
+          ),
+        ];
+        for (const b of btns) {
+          const t = (b.textContent || '').replace(/\\s+/g, ' ').trim();
+          const on =
+            b.getAttribute('aria-pressed') === 'true' ||
+            b.classList.contains('prp-review-filter__btn--on');
+          if (/Resolved/i.test(t) && !on) b.click();
+        }
+        return true;
+      })()
+    `);
+    waitMs(800);
     // Review threads may land after files (GraphQL or REST fallback).
     let before = diffThreadProbe();
     const t0 = Date.now();

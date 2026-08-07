@@ -65,6 +65,9 @@ query TimelineItemsPage(
             createdAt
             body
             author { login avatarUrl }
+            isMinimized
+            minimizedReason
+            viewerCanMinimize
             reactionGroups {
               content
               viewerHasReacted
@@ -274,6 +277,9 @@ export function mapGraphqlTimelineNode(node: any): {
       },
       created_at: node.createdAt,
       updated_at: node.createdAt,
+      isMinimized: node.isMinimized,
+      minimizedReason: node.minimizedReason,
+      viewerCanMinimize: node.viewerCanMinimize,
     });
     const reactions = mapReactionGroups(node.reactionGroups);
     if (reactions.length) comment.reactions = reactions;

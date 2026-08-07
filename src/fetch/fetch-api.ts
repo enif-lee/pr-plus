@@ -96,12 +96,14 @@ import {
   closePullRequest,
   deleteIssueComment,
   deleteReviewComment,
+  minimizeComment,
   postIssueComment,
   postReviewComment,
   reopenPullRequest,
   replyToReviewComment,
   resolveReviewThread,
   submitPullReview,
+  unminimizeComment,
   updatePullState,
 } from './mutations-comments';
 import {
@@ -158,6 +160,8 @@ import {
   prMatchText,
 } from './pulls';
 import {
+  applyMinimizableStates,
+  fetchMinimizableStates,
   fetchReactableReactionGroups,
   fetchReactableReactors,
   toggleCommentReaction,
@@ -248,6 +252,8 @@ export const fetchApi = {
   fetchIssueOrPrSummaries,
   fetchReactableReactionGroups,
   fetchReactableReactors,
+  fetchMinimizableStates,
+  applyMinimizableStates,
   fetchCompareFiles,
   mapAndAnnotateFiles,
   fetchPullReviewThreads,
@@ -287,6 +293,8 @@ export const fetchApi = {
   reopenPullRequest,
   deleteReviewComment,
   deleteIssueComment,
+  minimizeComment,
+  unminimizeComment,
   toggleCommentReaction,
   updatePullRequest,
   editIssueComment,

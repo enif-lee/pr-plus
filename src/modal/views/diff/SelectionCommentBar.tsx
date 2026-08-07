@@ -258,10 +258,7 @@ export function SelectionCommentBar(props: any) {
     >
       <div className="prp-opt-hint-host prp-selection-island__composer-field">
         {selComposerFocused ? (
-          <>
-            <OptBtnHint label="⌥E" preferredPlacement="top" />
-            <OptBtnHint label="⌥I" preferredPlacement="top" />
-          </>
+          <OptBtnHint label="⌥I" preferredPlacement="top" />
         ) : null}
         <MarkdownComposer
           value={draft}

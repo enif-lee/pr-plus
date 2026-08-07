@@ -2,7 +2,7 @@
  * Conversation footer: Comment vs Review composer with pending threads slot.
  * Layout tabs prefer Tailwind; residual tokens stay in ComposerTabs.css.
  */
-import React from 'react';
+import React, { useState } from 'react';
 import { Button } from '@common/Button';
 import { Badge } from '@common/Badge';
 import { Card } from '@common/Card';
@@ -30,6 +30,8 @@ export function ComposerCard({
   showReviewVerdict,
   renderSearchableBody,
   renderPendingThreadList,
+  /** Conversation kb-focus on the composer host (⌥J/K). */
+  showShortcutHint = false,
 }: {
   composerMode: 'comment' | 'review';
   setComposerMode: (m: 'comment' | 'review') => void;
@@ -50,11 +52,15 @@ export function ComposerCard({
   showReviewVerdict?: boolean;
   renderSearchableBody: (body: string, anchor: string, mark: boolean) => React.ReactNode;
   renderPendingThreadList: (item: any, keyPrefix: string, opts: { compact?: boolean }) => React.ReactNode;
+  showShortcutHint?: boolean;
 }) {
   const t = useT();
   const pendingThreadCount = Array.isArray(pendingReviewGroup?.threads)
     ? pendingReviewGroup.threads.length
     : pendingCount;
+  /** Typing in the composer field counts as focused for Opt badges. */
+  const [fieldFocused, setFieldFocused] = useState(false);
+  const hintsOn = Boolean(showShortcutHint || fieldFocused);
 
   const submitComment = () => onLeaveReviewAction?.('issue-comment');
   const submitReview = () => onLeaveReviewAction?.('comment');
@@ -69,8 +75,12 @@ export function ComposerCard({
           aria-label="Comment or review"
           data-prp-composer-mode-tabs="1"
         >
-          <span className="prp-opt-hint-host inline-flex">
-            <OptBtnHint label="⌥T" preferredPlacement="top" />
+          <span
+            className={`inline-flex${hintsOn ? ' prp-opt-hint-host' : ''}`}
+          >
+            {hintsOn ? (
+              <OptBtnHint label="⌥T" preferredPlacement="top" />
+            ) : null}
             <button
               type="button"
               role="tab"
@@ -143,9 +153,14 @@ export function ComposerCard({
             })}
           </div>
         ) : null}
-        <div className="prp-opt-hint-host prp-composer__field-hint">
-          <OptBtnHint label="⌥E" preferredPlacement="top" />
-          <OptBtnHint label="⌥I" preferredPlacement="top" />
+        <div
+          className={`prp-composer__field-hint${
+            hintsOn ? ' prp-opt-hint-host' : ''
+          }`}
+        >
+          {hintsOn ? (
+            <OptBtnHint label="⌥I" preferredPlacement="top" />
+          ) : null}
           <MarkdownComposer
             value={commentText}
             onChange={setCommentText}
@@ -164,12 +179,17 @@ export function ComposerCard({
             onSubmitRequest={
               composerMode === 'comment' ? submitComment : submitReview
             }
+            onComposerFocusChange={(on: boolean) => setFieldFocused(Boolean(on))}
           />
         </div>
         {composerMode === 'comment' ? (
           <div className="prp-composer__row prp-composer__row--review flex flex-wrap gap-2 items-center mt-2">
-            <span className="prp-opt-hint-host inline-flex">
-              <OptBtnHint label="⌥C · ⌘↵" preferredPlacement="top" />
+            <span
+              className={`inline-flex${hintsOn ? ' prp-opt-hint-host' : ''}`}
+            >
+              {hintsOn ? (
+                <OptBtnHint label="⌥C · ⌘↵" preferredPlacement="top" />
+              ) : null}
               <Button
                 variant="primary"
                 size="sm"
@@ -209,8 +229,12 @@ export function ComposerCard({
           </div>
         ) : (
           <div className="prp-composer__row prp-composer__row--review flex flex-wrap gap-2 items-center mt-2">
-            <span className="prp-opt-hint-host inline-flex">
-              <OptBtnHint label="⌥C · ⌘↵" preferredPlacement="top" />
+            <span
+              className={`inline-flex${hintsOn ? ' prp-opt-hint-host' : ''}`}
+            >
+              {hintsOn ? (
+                <OptBtnHint label="⌥C · ⌘↵" preferredPlacement="top" />
+              ) : null}
               <Button
                 variant="primary"
                 size="sm"

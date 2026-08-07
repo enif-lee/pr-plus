@@ -21,10 +21,13 @@ import {
   IconChevronRight,
   IconCopy,
   IconDisclosure,
+  IconEye,
+  IconEyeClosed,
   IconFileDiff,
   IconLink,
   IconLinkExternal,
   IconPencil,
+  IconQuote,
   IconSync,
   IconTrash,
 } from '@common/icons';
@@ -37,6 +40,16 @@ import {
   buildPositionFromComment,
   commentBodyForCopy,
 } from '@lib/uri-route';
+import {
+  DEFAULT_HIDE_REASON,
+  focusMainConversationComposer,
+  hideReasonLabel,
+  insertQuoteIntoDraft,
+  isCommentMinimized,
+  quoteReplyMarkdown,
+  stampQuoteReplyResult,
+  viewerCanMinimizeComment,
+} from '@lib/comment-quote-hide';
 import {
   GroupThreadFoldBtn,
   GroupThreadJumpBtn,
@@ -92,12 +105,14 @@ import {
 import { resolveDevelopmentMainOpen } from '@lib/command-palette';
 import { canSubmitReviewVerdict } from '@lib/pr-edit-api';
 import { OptBtnHint } from '@common/OptBtnHint';
+import { CommentActionIconBtn } from '@common/CommentActionIconBtn';
 import { useModalStore } from '../../store/modal-store';
 import {
   focusContextThreadReplyAfterPaint,
   isContextThreadReplyFocused,
   queryContextThreadHost,
 } from '@lib/context-thread-dom';
+import { CONTEXT_COMMENT_ACTION_SHORTCUT } from '@lib/shortcut-policy';
 import './ConversationShell.css';
 import './ConversationThread.css';
 import './AsideRail.css';
@@ -120,6 +135,10 @@ function ConversationViewImpl(props: any) {
   // Leaf: composer text — typing must not re-render PrModalApp.
   const storeCommentText = useModalStore((s) => s.commentText);
   const storeSetCommentText = useModalStore((s) => s.setCommentText);
+  /** Local expand of still-minimized comments (Show comment without unhide). */
+  const [expandedMinimized, setExpandedMinimized] = useState<
+    Record<string, boolean>
+  >({});
   const {
     detail,
     commentText: commentTextProp,
@@ -133,6 +152,8 @@ function ConversationViewImpl(props: any) {
     presentation = 'modal',
     onDeleteIssueComment,
     onDeleteReviewComment,
+    onHideComment = null,
+    onUnhideComment = null,
     onToggleReaction = null,
     onLoadReactors = null,
     editingBody,
@@ -634,7 +655,12 @@ function ConversationViewImpl(props: any) {
     return c.trim();
   }
 
-  function renderTimelineBody(item: any, kind: string, anchorId?: string) {
+  function renderTimelineBody(
+    item: any,
+    kind: string,
+    anchorId?: string,
+    focused = false
+  ) {
     const isEditing =
       editingComment &&
       editingComment.kind === kind &&
@@ -692,6 +718,8 @@ function ConversationViewImpl(props: any) {
             busy={actionBusy}
             onToggle={onToggleReaction}
             onLoadReactors={onLoadReactors}
+            showShortcutHint={focused}
+            reactionShortcut={CONTEXT_COMMENT_ACTION_SHORTCUT.react.labelMac}
           />
         </>
       );
@@ -724,7 +752,11 @@ function ConversationViewImpl(props: any) {
     flashCopy(ok ? 'Comment copied' : 'Copy failed');
   }
 
-  async function copyCommentLink(id: unknown) {
+  async function copyCommentLink(
+    id: unknown,
+    /** issue → #issuecomment-…; review → #discussion_r… */
+    shareKind: 'issue' | 'review' | null = 'issue'
+  ) {
     const position = buildPositionFromComment({ id });
     if (!position) {
       flashCopy('Link unavailable');
@@ -733,7 +765,8 @@ function ConversationViewImpl(props: any) {
     }
     const url = buildCommentShareUrl({
       prHtmlUrl: detail?.htmlUrl || detail?.html_url,
-      page: 'conversation',
+      page: shareKind === 'review' ? 'diff' : 'conversation',
+      kind: shareKind === 'review' ? 'review' : 'issue',
       position,
       number: detail?.number,
     });
@@ -747,64 +780,165 @@ function ConversationViewImpl(props: any) {
     flashCopy(ok ? 'Link copied' : 'Copy failed');
   }
 
+  function quoteReplyToMainComposer(
+    body: unknown,
+    author?: string | null,
+    commentId?: unknown
+  ) {
+    const quote = quoteReplyMarkdown(body, author);
+    const cur = String(
+      useModalStore.getState().commentText ?? commentText ?? ''
+    );
+    const next = insertQuoteIntoDraft(cur, quote);
+    setCommentText(next);
+    stampQuoteReplyResult({
+      ok: true,
+      text: quote,
+      commentId,
+      target: 'main',
+    });
+    // Open + focus main composer after paint
+    queueMicrotask(() => focusMainConversationComposer());
+    setTimeout(() => focusMainConversationComposer(), 50);
+    flashCopy('Quoted into reply');
+  }
+
   /**
-   * Comment chrome actions: copy body + copy link always (left of edit);
+   * Comment chrome actions: copy body + copy link + quote + hide;
    * edit/delete only when owner (canDelete).
+   * TipPopover always; OptBtnHint when this card is kb-focused.
    */
   function commentActions(
     kind: string | null,
     id: any,
     canDelete: boolean,
-    body?: string
+    body?: string,
+    meta: {
+      author?: string | null;
+      nodeId?: string | null;
+      isMinimized?: boolean;
+      minimizedReason?: string | null;
+      viewerCanMinimize?: boolean | null;
+      focused?: boolean;
+    } = {}
   ) {
     if (!kind && !id) return null;
     const canLink = Boolean(buildPositionFromComment({ id }));
+    const shareKind: 'issue' | 'review' =
+      kind === 'review' ? 'review' : 'issue';
+    const minimized = Boolean(meta.isMinimized);
+    const canHide = viewerCanMinimizeComment({
+      viewerCanMinimize: meta.viewerCanMinimize,
+      nodeId: meta.nodeId,
+      isMinimized: minimized,
+    });
+    const sc = Boolean(meta.focused);
+    const S = CONTEXT_COMMENT_ACTION_SHORTCUT;
     return (
       <div className="prp-icon-actions">
-        <button
-          type="button"
-          className="prp-icon-btn"
+        <CommentActionIconBtn
+          tipTitle={S.copyBody.title}
+          shortcut={S.copyBody.labelMac}
+          showShortcutHint={sc}
           disabled={actionBusy}
-          title="Copy comment"
           aria-label="Copy comment text"
           data-prp-copy-comment="1"
           data-prp-comment-id={id != null ? String(id) : undefined}
           onClick={() => void copyCommentBody(body, id)}
         >
           <IconCopy size={13} />
-        </button>
+        </CommentActionIconBtn>
         {canLink ? (
-          <button
-            type="button"
-            className="prp-icon-btn"
+          <CommentActionIconBtn
+            tipTitle={S.copyLink.title}
+            shortcut={S.copyLink.labelMac}
+            showShortcutHint={sc}
             disabled={actionBusy}
-            title="Copy link"
             aria-label="Copy link to comment"
             data-prp-copy-comment-link="1"
             data-prp-comment-id={id != null ? String(id) : undefined}
-            onClick={() => void copyCommentLink(id)}
+            onClick={() => void copyCommentLink(id, shareKind)}
           >
             <IconLink size={13} />
-          </button>
+          </CommentActionIconBtn>
+        ) : null}
+        {body != null && String(body).length >= 0 ? (
+          <CommentActionIconBtn
+            tipTitle={S.quote.title}
+            shortcut={S.quote.labelMac}
+            showShortcutHint={sc}
+            disabled={actionBusy}
+            aria-label="Quote reply"
+            data-prp-quote-reply="1"
+            data-prp-comment-id={id != null ? String(id) : undefined}
+            onClick={() => quoteReplyToMainComposer(body, meta.author, id)}
+          >
+            <IconQuote size={13} />
+          </CommentActionIconBtn>
+        ) : null}
+        {canHide && meta.nodeId ? (
+          minimized ? (
+            <CommentActionIconBtn
+              tipTitle="Unhide comment"
+              shortcut={S.hide.labelMac}
+              showShortcutHint={sc}
+              disabled={actionBusy}
+              aria-label="Unhide comment"
+              data-prp-unhide-comment="1"
+              data-prp-comment-id={id != null ? String(id) : undefined}
+              onClick={() =>
+                onUnhideComment?.({
+                  commentId: id,
+                  nodeId: meta.nodeId,
+                })
+              }
+            >
+              <IconEye size={13} />
+            </CommentActionIconBtn>
+          ) : (
+            <CommentActionIconBtn
+              tipTitle={S.hide.title}
+              shortcut={S.hide.labelMac}
+              showShortcutHint={sc}
+              disabled={actionBusy}
+              aria-label="Hide comment"
+              data-prp-hide-comment="1"
+              data-prp-comment-id={id != null ? String(id) : undefined}
+              onClick={() =>
+                onHideComment?.({
+                  commentId: id,
+                  nodeId: meta.nodeId,
+                  reason: DEFAULT_HIDE_REASON,
+                })
+              }
+            >
+              <IconEyeClosed size={13} />
+            </CommentActionIconBtn>
+          )
         ) : null}
         {canDelete && kind ? (
           <>
-            <button
-              type="button"
-              className="prp-icon-btn"
+            <CommentActionIconBtn
+              tipTitle={S.edit.title}
+              shortcut={S.edit.labelMac}
+              showShortcutHint={sc}
               disabled={actionBusy}
-              title="Edit"
               aria-label={t('cta_edit_comment')}
+              data-prp-edit-comment="1"
+              data-prp-comment-id={id != null ? String(id) : undefined}
               onClick={() => onStartEditComment?.(kind, id, body)}
             >
               <IconPencil size={13} />
-            </button>
-            <button
-              type="button"
-              className="prp-icon-btn prp-icon-btn--danger"
+            </CommentActionIconBtn>
+            <CommentActionIconBtn
+              tipTitle={S.delete.title}
+              shortcut={S.delete.labelMac}
+              showShortcutHint={sc}
+              className="prp-icon-btn--danger"
               disabled={actionBusy}
-              title="Delete"
               aria-label="Delete comment"
+              data-prp-delete-comment="1"
+              data-prp-comment-id={id != null ? String(id) : undefined}
               onClick={() =>
                 kind === 'issue'
                   ? onDeleteIssueComment?.(id)
@@ -812,7 +946,7 @@ function ConversationViewImpl(props: any) {
               }
             >
               <IconTrash size={13} />
-            </button>
+            </CommentActionIconBtn>
           </>
         ) : null}
       </div>
@@ -1659,6 +1793,36 @@ function ConversationViewImpl(props: any) {
       itemAnchor,
       `prp-card--timeline prp-card--timeline-${item.kind || 'item'}`
     );
+    const idKey = String(item.id);
+    const minimized = isIssue && isCommentMinimized(item);
+    const bodyExpanded = Boolean(expandedMinimized[idKey]);
+
+    // Compact hide chrome: only banner row until Show expands the full card.
+    if (minimized && !bodyExpanded) {
+      return (
+        <ConversationKbFocusClassName
+          key={`${keyPrefix}${String(item.id || item.key)}`}
+          anchor={itemAnchor}
+          baseClass={`${baseClass} prp-card--minimized-only`}
+        >
+          {(className, focused) => (
+            <div
+              className={`${className} prp-comment-minimized-card`.trim()}
+              data-search-anchor={itemAnchor}
+              data-prp-comment-minimized="1"
+              data-prp-comment-id={idKey}
+              data-prp-minimized-reason={
+                item.minimizedReason || DEFAULT_HIDE_REASON
+              }
+              tabIndex={focused ? -1 : undefined}
+            >
+              {renderMinimizedBanner(item, { compact: true })}
+            </div>
+          )}
+        </ConversationKbFocusClassName>
+      );
+    }
+
     return (
       <ConversationKbFocusClassName
         key={`${keyPrefix}${String(item.id || item.key)}`}
@@ -1683,16 +1847,88 @@ function ConversationViewImpl(props: any) {
               {item.at ? (
                 <span className="prp-muted">{formatWhen(item.at)}</span>
               ) : null}
-              {commentActions(editKind, item.id, Boolean(item.canDelete), item.body)}
+              {commentActions(
+                editKind,
+                item.id,
+                Boolean(item.canDelete),
+                item.body,
+                {
+                  author: item.author,
+                  nodeId: item.nodeId || null,
+                  isMinimized: item.isMinimized,
+                  minimizedReason: item.minimizedReason,
+                  viewerCanMinimize: item.viewerCanMinimize,
+                  focused,
+                }
+              )}
             </div>
-            {editKind ? (
-              renderTimelineBody(item, editKind, itemAnchor)
+            {minimized ? (
+              <>
+                {renderMinimizedBanner(item, { compact: false })}
+                {renderTimelineBody(item, editKind, itemAnchor, focused)}
+              </>
+            ) : editKind ? (
+              renderTimelineBody(item, editKind, itemAnchor, focused)
             ) : (
               renderSearchableBody(item.body || '', itemAnchor, true)
             )}
           </Card>
         )}
       </ConversationKbFocusClassName>
+    );
+  }
+
+  function renderMinimizedBanner(
+    item: any,
+    opts: { compact?: boolean } = {}
+  ) {
+    const reason = hideReasonLabel(item.minimizedReason || DEFAULT_HIDE_REASON);
+    const idKey = String(item.id);
+    const shown = Boolean(expandedMinimized[idKey]);
+    return (
+      <div
+        className={`prp-comment-minimized${
+          opts.compact ? ' prp-comment-minimized--compact' : ''
+        }`}
+        data-prp-comment-minimized="1"
+        data-prp-comment-id={idKey}
+        data-prp-minimized-reason={item.minimizedReason || DEFAULT_HIDE_REASON}
+      >
+        <span className="prp-muted">
+          This comment was marked as {reason}.
+        </span>
+        <button
+          type="button"
+          className="prp-link-btn"
+          data-prp-toggle-minimized-body="1"
+          data-prp-comment-id={idKey}
+          onClick={() =>
+            setExpandedMinimized((prev) => ({
+              ...prev,
+              [idKey]: !prev[idKey],
+            }))
+          }
+        >
+          {shown ? 'Hide' : 'Show'}
+        </button>
+        {viewerCanMinimizeComment(item) && item.nodeId ? (
+          <button
+            type="button"
+            className="prp-link-btn"
+            data-prp-unhide-comment="1"
+            data-prp-comment-id={idKey}
+            disabled={actionBusy}
+            onClick={() =>
+              onUnhideComment?.({
+                commentId: item.id,
+                nodeId: item.nodeId,
+              })
+            }
+          >
+            Unhide
+          </button>
+        ) : null}
+      </div>
     );
   }
 
@@ -1771,6 +2007,9 @@ function ConversationViewImpl(props: any) {
       threadNodeId: item.threadNodeId || null,
       nodeId: item.nodeId || null,
       reactions: Array.isArray(item.reactions) ? item.reactions : [],
+      isMinimized: Boolean(item.isMinimized),
+      minimizedReason: item.minimizedReason ?? null,
+      viewerCanMinimize: item.viewerCanMinimize ?? null,
       resolved: Boolean(item.resolved),
       outdated: Boolean(item.outdated),
       pending: Boolean(item.pending),
@@ -1794,6 +2033,9 @@ function ConversationViewImpl(props: any) {
         threadNodeId: item.threadNodeId || null,
         nodeId: item.nodeId || null,
         reactions: Array.isArray(item.reactions) ? item.reactions : [],
+        isMinimized: Boolean(item.isMinimized),
+        minimizedReason: item.minimizedReason ?? null,
+        viewerCanMinimize: item.viewerCanMinimize ?? null,
       },
       replies: reviewReplies,
       threadNodeId: item.threadNodeId || null,
@@ -1930,6 +2172,8 @@ function ConversationViewImpl(props: any) {
           }
           onResolve={onResolveThread}
           onDelete={(id: any) => onDeleteReviewComment?.(id)}
+          onHide={onHideComment}
+          onUnhide={onUnhideComment}
           onEdit={(id: any, body: string) =>
             onStartEditComment?.('review', id, body)
           }
@@ -2116,6 +2360,7 @@ function ConversationViewImpl(props: any) {
               onClosePr={onClosePr}
               onReopenPr={onReopenPr}
               showReviewVerdict={showReviewVerdict}
+              showShortcutHint={focused}
               renderSearchableBody={(body, anchor, mark) =>
                 renderSearchableBody(body, anchor, mark)
               }

@@ -132,8 +132,37 @@ export function resolveConversationAnchorForCommentId(
   ) {
     return `review-comment:${s}`;
   }
+  // Submitted review body / #pullrequestreview-{id}
+  const reviews = Array.isArray(detail?.reviews) ? detail.reviews : [];
+  if (reviews.some((r: any) => r && String(r.id) === s)) {
+    return `review:${s}`;
+  }
   // No guess: return null so open/restore can retry after progressive load
   return null;
+}
+
+/**
+ * Optimistic conversation anchor from a GitHub hash kind before the comment
+ * exists in the progressive feed (deep-link restore).
+ */
+export function optimisticConversationAnchorForKind(
+  id: unknown,
+  kind?: CommentShareKind | string | null
+): string | null {
+  if (!isShareableCommentId(id)) return null;
+  const s = String(id);
+  const k = String(kind || 'issue').toLowerCase();
+  if (k === 'review' || k === 'discussion' || k === 'discussion_r') {
+    return `review-comment:${s}`;
+  }
+  if (
+    k === 'pull_request_review' ||
+    k === 'pullrequestreview' ||
+    k === 'review-event'
+  ) {
+    return `review:${s}`;
+  }
+  return `issue-comment:${s}`;
 }
 
 /**
@@ -171,18 +200,103 @@ export function mergePathTargetWithUriRoute<
 }
 
 /**
- * Absolute share URL for a comment: PR page + prp_page + prp_position.
- * Returns null when base URL or position is missing/unshareable.
+ * GitHub native comment deep-link kinds (hash fragment on /pull/N).
+ * - issue → #issuecomment-{id} (conversation issue comments)
+ * - review → #discussion_r{id} (review / line comments)
+ * - pull_request_review → #pullrequestreview-{id}
+ */
+export type CommentShareKind = 'issue' | 'review' | 'pull_request_review';
+
+/**
+ * Parse GitHub official PR comment hash fragments.
+ * @returns null when not a known GitHub comment anchor
+ */
+export function parseGithubCommentHash(hash: unknown): {
+  kind: CommentShareKind;
+  id: string;
+  /** Internal c:{id} token used by Diff/conversation restore */
+  position: string;
+  page: RoutePage;
+} | null {
+  let h = String(hash || '').trim();
+  if (h.startsWith('#')) h = h.slice(1);
+  // GitHub sometimes appends extra fragments with &; take the first segment
+  h = h.split('&')[0].split('?')[0].trim();
+  if (!h) return null;
+  let m = h.match(/^issuecomment-(\d+)\b/i);
+  if (m) {
+    return {
+      kind: 'issue',
+      id: m[1],
+      position: `c:${m[1]}`,
+      page: 'conversation',
+    };
+  }
+  m = h.match(/^discussion_r(\d+)\b/i);
+  if (m) {
+    return {
+      kind: 'review',
+      id: m[1],
+      position: `c:${m[1]}`,
+      page: 'diff',
+    };
+  }
+  m = h.match(/^pullrequestreview-(\d+)\b/i);
+  if (m) {
+    return {
+      kind: 'pull_request_review',
+      id: m[1],
+      position: `c:${m[1]}`,
+      page: 'conversation',
+    };
+  }
+  return null;
+}
+
+/**
+ * Official GitHub hash fragment for a shareable comment id.
+ */
+export function githubCommentHashFragment(
+  kind: CommentShareKind | string | null | undefined,
+  id: unknown
+): string | null {
+  if (!isShareableCommentId(id)) return null;
+  const s = String(id);
+  const k = String(kind || 'issue').toLowerCase();
+  if (k === 'review' || k === 'discussion' || k === 'discussion_r') {
+    return `discussion_r${s}`;
+  }
+  if (
+    k === 'pull_request_review' ||
+    k === 'pullrequestreview' ||
+    k === 'review-event'
+  ) {
+    return `pullrequestreview-${s}`;
+  }
+  // issue / conversation default
+  return `issuecomment-${s}`;
+}
+
+/**
+ * Absolute share URL for a comment using GitHub official hash form, e.g.
+ * `https://github.com/o/r/pull/8#issuecomment-5139498092` or `#discussion_r…`.
+ * Returns null when base URL or id is missing/unshareable.
  */
 export function buildCommentShareUrl(opts: {
   /** e.g. https://github.com/o/r/pull/7 */
   prHtmlUrl?: string | null;
+  /** Preferred when kind omitted: conversation → issuecomment, diff → discussion_r */
   page?: RoutePage | string | null;
-  /** c:{id} or bare id */
+  /** c:{id}, bare id, or GitHub hash fragment */
   position?: string | null;
   /** comment object or id — used when position omitted */
   comment?: any;
   number?: number | null;
+  /**
+   * Share fragment kind. Defaults from page (diff → review, else issue).
+   * Pass explicitly for review comments on the conversation timeline.
+   */
+  kind?: CommentShareKind | string | null;
 } = {}): string | null {
   const position =
     opts.position != null && String(opts.position).trim()
@@ -191,30 +305,39 @@ export function buildCommentShareUrl(opts: {
   if (!position) return null;
   const parsed = parsePosition(position);
   if (!parsed) return null;
-  const page = normalizePage(opts.page) || 'conversation';
+  const page = normalizePage(opts.page);
+  let kind = opts.kind;
+  if (kind == null || kind === '') {
+    kind = page === 'diff' ? 'review' : 'issue';
+  }
+  // comment object may carry explicit type
+  if (
+    (kind == null || kind === '') &&
+    opts.comment &&
+    typeof opts.comment === 'object'
+  ) {
+    const ck = String(
+      (opts.comment as any).shareKind ||
+        (opts.comment as any).kind ||
+        ''
+    ).toLowerCase();
+    if (ck) kind = ck;
+  }
+  const frag = githubCommentHashFragment(kind, parsed.id);
+  if (!frag) return null;
   const base = String(opts.prHtmlUrl || '')
     .trim()
     .replace(/\/+$/, '');
   if (!base) return null;
   try {
     const u = new URL(base);
-    // Keep path (…/pull/N); stamp page + position into query
-    const num =
-      opts.number != null && Number.isFinite(Number(opts.number))
-        ? Math.floor(Number(opts.number))
-        : null;
-    const nextSearch = serializeRouteToSearch(
-      {
-        page,
-        position: `c:${parsed.id}`,
-        number: num,
-      },
-      u.search
-    );
-    u.search = nextSearch.startsWith('?') ? nextSearch.slice(1) : nextSearch;
-    // Drop route keys from hash so they do not fight the query
-    const nextHash = clearRouteFromHash(u.hash);
-    u.hash = nextHash.startsWith('#') ? nextHash.slice(1) : nextHash;
+    // Official links: clean path …/pull/N + hash only (no prp_* query).
+    // Drop our deep-link keys from search/hash so the clipboard is GH-native.
+    const cleanedSearch = clearRouteFromSearch(u.search);
+    u.search = cleanedSearch.startsWith('?')
+      ? cleanedSearch.slice(1)
+      : cleanedSearch;
+    u.hash = frag;
     return u.toString();
   } catch {
     return null;
@@ -229,6 +352,9 @@ export function parsePosition(position: unknown): { kind: 'comment'; id: string 
   let raw = String(position).trim();
   // Allow accidental leading #
   if (raw.startsWith('#')) raw = raw.slice(1);
+  // GitHub official fragments
+  const gh = parseGithubCommentHash(raw);
+  if (gh) return { kind: 'comment', id: gh.id };
   if (raw.startsWith('c:') || raw.startsWith('C:')) {
     const id = raw.slice(2).trim();
     if (!id || /^tmp[-_]/i.test(id)) return null;
@@ -249,13 +375,23 @@ function readParamsFromSearch(search: string): URLSearchParams {
 }
 
 /**
- * Hash may be `#prp_page=diff&prp_number=1` or `#foo&prp_number=1` or legacy `#c:12`.
+ * Hash may be:
+ * - GitHub official: `#issuecomment-12`, `#discussion_r12`, `#pullrequestreview-12`
+ * - pr+ keys: `#prp_page=diff&prp_number=1` or legacy `#c:12`
  */
 function readParamsFromHash(hash: string): URLSearchParams {
   let h = String(hash || '');
   if (h.startsWith('#')) h = h.slice(1);
   if (!h) return new URLSearchParams();
-  // If hash looks like a bare position (no =), treat as position only
+  // Official GitHub comment anchors (preferred share format)
+  const gh = parseGithubCommentHash(h);
+  if (gh) {
+    const p = new URLSearchParams();
+    p.set(URI_PARAM_POSITION, gh.position);
+    p.set(URI_PARAM_PAGE, gh.page);
+    return p;
+  }
+  // Bare position token (c:{id} or numeric)
   if (!h.includes('=') && !h.includes('&')) {
     const p = new URLSearchParams();
     if (h) p.set(URI_PARAM_POSITION, h);
@@ -389,16 +525,24 @@ export function clearRouteFromSearch(existingSearch = ''): string {
 }
 
 /**
- * Strip prp_* / legacy pr+* keys from hash when they were used; leave unrelated fragments.
+ * Strip prp_* / legacy pr+* keys from hash when they were used; leave unrelated
+ * fragments — including GitHub official comment anchors so open/persist does
+ * not wipe `#issuecomment-…` / `#discussion_r…` / `#pullrequestreview-…`.
  */
 export function clearRouteFromHash(existingHash = ''): string {
   let h = String(existingHash || '');
   if (h.startsWith('#')) h = h.slice(1);
   if (!h) return '';
   if (!h.includes('=')) {
-    // bare position token
-    if (parsePosition(h) || h.startsWith('c:')) return '';
-    return existingHash.startsWith('#') || h ? `#${h}` : '';
+    // GitHub native deep-links must stay in the address bar when PR+ opens.
+    if (parseGithubCommentHash(h)) {
+      return `#${h}`;
+    }
+    // Legacy bare prp position tokens (c:12) — strip; query owns position now.
+    if (parsePosition(h) || h.startsWith('c:')) {
+      return '';
+    }
+    return `#${h}`;
   }
   const params = new URLSearchParams(h);
   stripAllRouteKeys(params);

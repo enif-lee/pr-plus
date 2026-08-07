@@ -15,12 +15,13 @@ import {
   openPr,
   openPulls,
   setLayout,
+  waitContentInject,
   waitDetailReady,
   waitDiffFilesReady,
   waitMs,
   log,
 } from '../lib/harness.mjs';
-import { evalInPage } from '../lib/ab.mjs';
+import { evalInPage, open } from '../lib/ab.mjs';
 
 /**
  * Pick cost-log rows for shell / byIds ops from dumpGraphqlCostLog summary.
@@ -150,12 +151,23 @@ export function getSteps() {
 
   run('TB.0 reload extension (pick up SW fetch query)', () => {
     // Unpacked SW can stay stale across rebuilds; force chrome.runtime.reload.
+    // Must re-open + waitContentInject so bridge can answer GQL_COST_LOG_GET
+    // (otherwise TB.3b sees byOp=[] even though Diff threads painted).
     try {
+      open('https://github.com/enif-lee/pr-plus/pulls');
+      waitMs(400);
+      waitContentInject({ timeoutMs: 12_000, label: 'TB.0 inject pre-reload' });
       evalInPage(
         `document.dispatchEvent(new CustomEvent('prp-reload-extension', { bubbles: true })); true`
       );
       log('  [TB.0] prp-reload-extension dispatched');
-      waitMs(3500);
+      waitMs(5500);
+      open('https://github.com/enif-lee/pr-plus/pulls');
+      waitMs(800);
+      waitContentInject({
+        timeoutMs: 15_000,
+        label: 'TB.0 inject post-reload',
+      });
     } catch (e) {
       log(`  [TB.0] reload soft-fail ${e?.message || e}`);
     }
@@ -163,6 +175,7 @@ export function getSteps() {
 
   run('TB.1 open pulls', () => {
     openPulls();
+    waitContentInject({ timeoutMs: 10_000, label: 'TB.1 pulls inject' });
   });
 
   run(`TB.2 open PR #${DEMO_PR}`, () => {
@@ -213,9 +226,24 @@ export function getSteps() {
   });
 
   run('TB.3b GraphQL cost: shell ≤1; byIds not first:1-scaled', () => {
-    const dump = dumpGraphqlCostLog({ label: 'TB open/diff settle' });
-    const summary = dump?.summary || null;
-    const rows = costRowsForThreads(summary);
+    let dump = dumpGraphqlCostLog({ label: 'TB open/diff settle' });
+    let summary = dump?.summary || null;
+    let rows = costRowsForThreads(summary);
+    // Post-reload SW can miss the first flush window — one cold re-open.
+    if (!(rows.shell.length > 0)) {
+      log('  [TB.3b] empty shell ops — re-clear cost + cold reopen Diff');
+      clearGraphqlCostLog();
+      openPulls();
+      waitMs(400);
+      openPr(DEMO_PR);
+      waitDetailReady({ number: DEMO_PR, timeoutMs: 60000 });
+      setLayout('diff');
+      waitDiffFilesReady(`thread-bodies re-open #${DEMO_PR}`);
+      waitMs(1500);
+      dump = dumpGraphqlCostLog({ label: 'TB reopen settle' });
+      summary = dump?.summary || null;
+      rows = costRowsForThreads(summary);
+    }
     log(
       `  [TB.3b] shellCost=${rows.shellCost} shellMax=${rows.shellMax} ` +
         `byIdsCost=${rows.byIdsCost} byIdsMax=${rows.byIdsMax} byIdsCalls=${rows.byIdsCalls} ` +

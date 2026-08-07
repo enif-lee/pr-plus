@@ -27,7 +27,11 @@ import {
   fetchAllPrFiles,
   fetchPrFiles,
 } from './detail-sides-files';
-import { fetchReactableReactionGroups } from './reactions';
+import {
+  applyMinimizableStates,
+  fetchMinimizableStates,
+  fetchReactableReactionGroups,
+} from './reactions';
 
 export async function fetchPrIssueComments(owner: any, repo: any, number: any, fetchImpl: any, token: any = null, ctx: any = null) {
   ctx = normalizeApiCtx(ctx);
@@ -335,23 +339,29 @@ export async function fetchPrCommentsPage(owner: any, repo: any, pullNumber: any
     const raw = Array.isArray(data) ? data : [];
     const items =
       kind === 'review' ? raw.map(mapReviewComment) : raw.map(mapIssueComment);
-    // Enrich viewerHasReacted + reactor logins via GraphQL when nodeIds exist.
-    // Soft-fail: missing reactions must never drop the comment bodies themselves.
-    if (kind === 'issue' && token && items.length) {
+    // Enrich via GraphQL when nodeIds exist (soft-fail — never drop bodies).
+    // Minimizable (hide): REST omits isMinimized for both issue + review lists.
+    // Reactions: issue REST path only (review reactions come from thread by-ids).
+    if (token && items.length) {
       const ids = items.map((c) => c?.nodeId).filter(Boolean);
       if (ids.length) {
         try {
-          const byId = await fetchReactableReactionGroups(
-            ids,
-            fetchImpl,
-            token,
-            ctx
-          );
-          for (const c of items) {
-            if (!c?.nodeId) continue;
-            const groups = byId.get(String(c.nodeId));
-            if (groups && groups.length) c.reactions = groups;
+          const reactionsP =
+            kind === 'issue'
+              ? fetchReactableReactionGroups(ids, fetchImpl, token, ctx)
+              : Promise.resolve(null);
+          const [byId, minById] = await Promise.all([
+            reactionsP,
+            fetchMinimizableStates(ids, fetchImpl, token, ctx),
+          ]);
+          if (byId) {
+            for (const c of items) {
+              if (!c?.nodeId) continue;
+              const groups = byId.get(String(c.nodeId));
+              if (groups && groups.length) c.reactions = groups;
+            }
           }
+          applyMinimizableStates(items, minById);
         } catch (err) {
           if (
             err?.name === 'AbortError' ||
@@ -359,7 +369,7 @@ export async function fetchPrCommentsPage(owner: any, repo: any, pullNumber: any
           ) {
             throw err;
           }
-          // keep REST reaction summary from mapIssueComment
+          // keep REST reaction summary from mapIssueComment / mapReviewComment
         }
       }
     }

@@ -321,7 +321,7 @@ export function MarkdownComposer({
     });
   }
 
-  /** Insert `:` at caret to open emoji shortcode typeahead (⌥E). */
+  /** Insert `:` at caret to open emoji shortcode typeahead. */
   function insertEmojiTrigger() {
     if (disabled) return;
     const ta = taRef.current;
@@ -387,19 +387,7 @@ export function MarkdownComposer({
       requestSubmit();
       return;
     }
-    // ⌥E — emoji typeahead (also handled in App; local path keeps focus stable)
-    if (
-      e.altKey &&
-      !e.metaKey &&
-      !e.ctrlKey &&
-      !e.shiftKey &&
-      (e.key === 'e' || e.key === 'E' || e.code === 'KeyE')
-    ) {
-      e.preventDefault();
-      e.stopPropagation();
-      insertEmojiTrigger();
-      return;
-    }
+    // (⌥E is comment reaction picker globally — emoji shortcodes: type `:`)
     if (!menu?.items?.length) return;
     const n = menu.items.length;
     if (e.key === 'Escape') {

@@ -31,11 +31,9 @@ describe('resolveComposerContextShortcutAction', () => {
     ).toBeNull();
   });
 
-  test('⌥E / ⌥C / ⌥I / ⌥T when focused', () => {
+  test('⌥C / ⌥I / ⌥T when focused (⌥E is comment reaction, not composer)', () => {
     const base = { composerFocused: true, alt: true, mod: false, shift: false };
-    expect(resolveComposerContextShortcutAction({ ...base, key: 'e' })).toBe(
-      'composerEmoji'
-    );
+    expect(resolveComposerContextShortcutAction({ ...base, key: 'e' })).toBeNull();
     expect(resolveComposerContextShortcutAction({ ...base, key: 'c' })).toBe(
       'composerSubmit'
     );
@@ -114,7 +112,7 @@ describe('resolveModalShortcutAction composer path', () => {
     ).toBe('composerSubmit');
   });
 
-  test('⌥E when composer focused', () => {
+  test('⌥E is not a composer chord (reaction chrome owns it)', () => {
     expect(
       resolveModalShortcutAction({
         mod: false,
@@ -123,10 +121,10 @@ describe('resolveModalShortcutAction composer path', () => {
         editableTarget: true,
         composerFocused: true,
       })
-    ).toBe('composerEmoji');
+    ).toBeNull();
   });
 
-  test('⌥E does not fire without composer focus (editable other)', () => {
+  test('⌥E without context focus is not composer emoji', () => {
     expect(
       resolveModalShortcutAction({
         mod: false,
@@ -219,8 +217,8 @@ describe('isComposerKeyboardTarget', () => {
 });
 
 describe('COMPOSER_CONTEXT_SHORTCUT labels', () => {
-  test('exports stable action ids', () => {
-    expect(COMPOSER_CONTEXT_SHORTCUT.emoji.action).toBe('composerEmoji');
+  test('exports stable action ids (no emoji chord)', () => {
+    expect((COMPOSER_CONTEXT_SHORTCUT as any).emoji).toBeUndefined();
     expect(COMPOSER_CONTEXT_SHORTCUT.submit.action).toBe('composerSubmit');
     expect(COMPOSER_CONTEXT_SHORTCUT.submitModEnter.chord).toBe('mod+enter');
   });

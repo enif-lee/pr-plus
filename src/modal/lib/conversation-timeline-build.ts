@@ -49,6 +49,14 @@ export function buildThreadEntry(c, children, snippetFn, files, viewerLogin, i) 
       pending: Boolean(r.pending),
       nodeId: r.nodeId || r.node_id || null,
       reactions: Array.isArray(r.reactions) ? r.reactions : [],
+      isMinimized: Boolean(r.isMinimized ?? r.is_minimized ?? false),
+      minimizedReason: r.minimizedReason ?? r.minimized_reason ?? null,
+      viewerCanMinimize:
+        r.viewerCanMinimize != null
+          ? Boolean(r.viewerCanMinimize)
+          : r.viewer_can_minimize != null
+            ? Boolean(r.viewer_can_minimize)
+            : null,
       canDelete: Boolean(
         viewerLogin && r.author && r.author === viewerLogin && !r.pending
       ),
@@ -99,6 +107,14 @@ export function buildThreadEntry(c, children, snippetFn, files, viewerLogin, i) 
     threadNodeId: c.threadNodeId || null,
     nodeId: c.nodeId || c.node_id || null,
     reactions: Array.isArray(c.reactions) ? c.reactions : [],
+    isMinimized: Boolean(c.isMinimized ?? c.is_minimized ?? false),
+    minimizedReason: c.minimizedReason ?? c.minimized_reason ?? null,
+    viewerCanMinimize:
+      c.viewerCanMinimize != null
+        ? Boolean(c.viewerCanMinimize)
+        : c.viewer_can_minimize != null
+          ? Boolean(c.viewer_can_minimize)
+          : null,
     reviewId: Number.isFinite(reviewId) ? reviewId : null,
     pending: Boolean(c.pending),
     replies,
@@ -186,6 +202,14 @@ export function buildConversationTimeline(detail, opts: any = {}) {
       at: c.createdAt,
       nodeId: c.nodeId || c.node_id || null,
       reactions: Array.isArray(c.reactions) ? c.reactions : [],
+      isMinimized: Boolean(c.isMinimized ?? c.is_minimized ?? false),
+      minimizedReason: c.minimizedReason ?? c.minimized_reason ?? null,
+      viewerCanMinimize:
+        c.viewerCanMinimize != null
+          ? Boolean(c.viewerCanMinimize)
+          : c.viewer_can_minimize != null
+            ? Boolean(c.viewer_can_minimize)
+            : null,
       canDelete: Boolean(
         viewerLogin && c.author && c.author === viewerLogin
       ),

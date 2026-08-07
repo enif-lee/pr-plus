@@ -290,8 +290,38 @@ export const SHORTCUT_MONITOR_CATALOG: Record<string, ShortcutMonitorEntry> = {
     labelMac: '⌥⌃R',
     labelWin: 'Alt+Ctrl+R',
   },
-  composerEmoji: {
-    title: 'Emoji in composer',
+  contextCommentCopyBody: {
+    title: 'Copy comment',
+    labelMac: '⌥Y',
+    labelWin: 'Alt+Y',
+  },
+  contextCommentCopyLink: {
+    title: 'Copy link',
+    labelMac: '⌥L',
+    labelWin: 'Alt+L',
+  },
+  contextCommentQuote: {
+    title: 'Quote reply',
+    labelMac: '⌥Q',
+    labelWin: 'Alt+Q',
+  },
+  contextCommentHide: {
+    title: 'Hide / unhide comment',
+    labelMac: '⌥H',
+    labelWin: 'Alt+H',
+  },
+  contextCommentEdit: {
+    title: 'Edit comment',
+    labelMac: '⌥W',
+    labelWin: 'Alt+W',
+  },
+  contextCommentDelete: {
+    title: 'Delete comment',
+    labelMac: '⌥X',
+    labelWin: 'Alt+X',
+  },
+  contextCommentReact: {
+    title: 'Add reaction',
     labelMac: '⌥E',
     labelWin: 'Alt+E',
   },

@@ -27,6 +27,11 @@ export type GithubPrRoute = {
   side?: 'LEFT' | 'RIGHT' | null;
   /** Tab token as found (files|changes|'') */
   tab?: string | null;
+  /**
+   * Deep-link position token (`c:{id}`, bare id, or already-official hash body).
+   * When no #diff- is written, serialized as #issuecomment- / #discussion_r-.
+   */
+  position?: string | null;
 };
 
 /** Normalize path the way GitHub hashes it (no leading slash). */
@@ -239,13 +244,61 @@ export function buildGithubPrLocation(route: GithubPrRoute): {
 }
 
 /**
+ * Keep GitHub official comment anchors (#issuecomment- / #discussion_r /
+ * #pullrequestreview-) when we are not writing a #diff- fragment.
+ */
+export function preserveGithubCommentHash(existingHash: unknown): string {
+  let h = String(existingHash || '').trim();
+  if (!h) return '';
+  if (h.startsWith('#')) h = h.slice(1);
+  // Lazy import-free: same patterns as uri-route parseGithubCommentHash
+  if (
+    /^issuecomment-\d+\b/i.test(h) ||
+    /^discussion_r\d+\b/i.test(h) ||
+    /^pullrequestreview-\d+\b/i.test(h)
+  ) {
+    return `#${h}`;
+  }
+  return '';
+}
+
+/**
+ * Map pr+ position / bare id → official GH comment hash for the address bar.
+ * conversation (default) → #issuecomment-{id}; diff → #discussion_r{id}.
+ */
+export function commentPositionToGithubHash(
+  position: unknown,
+  page?: 'conversation' | 'diff' | string | null
+): string {
+  let raw = String(position || '').trim();
+  if (!raw) return '';
+  if (raw.startsWith('#')) raw = raw.slice(1);
+  // Already official
+  if (
+    /^issuecomment-\d+\b/i.test(raw) ||
+    /^discussion_r\d+\b/i.test(raw) ||
+    /^pullrequestreview-\d+\b/i.test(raw)
+  ) {
+    return `#${raw.split(/[?&]/)[0]}`;
+  }
+  let id = '';
+  if (/^c:/i.test(raw)) id = raw.slice(2).trim();
+  else if (/^\d+$/.test(raw)) id = raw;
+  if (!id || !/^\d+$/.test(id)) return '';
+  const isDiff = String(page || '').toLowerCase() === 'diff';
+  return isDiff ? `#discussion_r${id}` : `#issuecomment-${id}`;
+}
+
+/**
  * Full relative URL (pathname + optional preserved search without prp_* + hash).
+ * @param existingHash When no #diff- is written, keep official comment hashes.
  */
 export function buildGithubPrHref(
   route: GithubPrRoute,
-  existingSearch = ''
+  existingSearch = '',
+  existingHash = ''
 ): string {
-  const { pathname, hash } = buildGithubPrLocation(route);
+  const { pathname, hash: routeHash } = buildGithubPrLocation(route);
   if (!pathname) return '';
   // Strip prp_* from search so GH path is primary
   let search = String(existingSearch || '');
@@ -267,6 +320,13 @@ export function buildGithubPrHref(
   } else {
     search = '';
   }
+  // Diff file selection hash wins; else keep / re-write comment deep-link so
+  // open(…#issuecomment-N) is not stripped when embed rewrites the path.
+  const hash =
+    routeHash ||
+    preserveGithubCommentHash(existingHash) ||
+    commentPositionToGithubHash(route.position, route.page) ||
+    '';
   return `${pathname}${search}${hash || ''}`;
 }
 
@@ -283,7 +343,11 @@ export function replaceGithubPrLocation(
   if (!historyApi || typeof historyApi.replaceState !== 'function') return false;
   if (!locationApi) return false;
   try {
-    const next = buildGithubPrHref(route, locationApi.search || '');
+    const next = buildGithubPrHref(
+      route,
+      locationApi.search || '',
+      locationApi.hash || ''
+    );
     if (!next) return false;
     const cur = `${locationApi.pathname || '/'}${locationApi.search || ''}${locationApi.hash || ''}`;
     if (cur === next) return true;

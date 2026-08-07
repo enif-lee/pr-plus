@@ -105,6 +105,8 @@ function VirtualDiffImpl(props: any) {
     onReply,
     onResolve,
     onDeleteReviewComment,
+    onHideComment = null,
+    onUnhideComment = null,
     onEditReviewComment,
     onSaveEditReviewComment,
     onCancelEditReviewComment,
@@ -898,6 +900,8 @@ function VirtualDiffImpl(props: any) {
                   onReply={onReply}
                   onResolve={onResolve}
                   onDelete={onDeleteReviewComment}
+                  onHide={onHideComment}
+                  onUnhide={onUnhideComment}
                   onEdit={onEditReviewComment}
                   onSaveEdit={onSaveEditReviewComment}
                   onCancelEdit={onCancelEditReviewComment}

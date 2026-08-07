@@ -1440,6 +1440,8 @@ function mapGraphqlReviewThreadNodes(allNodes) {
           avatarUrl: node.author?.avatarUrl || "",
           createdAt: node.createdAt || null,
           inReplyToId: node.replyTo?.databaseId ?? null,
+          // GraphQL global id required for hide/unhide + minimizable enrich
+          nodeId: node.id || null,
           threadNodeId: t.id,
           // Shell first:1 includes pullRequestReview so timeline can group
           // before by-ids hydrate (resolved threads skip eager bulk).
@@ -1448,6 +1450,10 @@ function mapGraphqlReviewThreadNodes(allNodes) {
           outdated: Boolean(node.outdated ?? t.isOutdated),
           pending,
           pendingReviewId: pending ? reviewDbId : null,
+          // Hide/minimize — shell query selects these; do not drop on map
+          isMinimized: node.isMinimized != null ? Boolean(node.isMinimized) : null,
+          minimizedReason: node.minimizedReason ?? null,
+          viewerCanMinimize: node.viewerCanMinimize != null ? Boolean(node.viewerCanMinimize) : null,
           // Preview-only root when shell first:1 and more replies remain
           _commentsPreview: commentsLoaded ? false : true
         });
@@ -3686,6 +3692,7 @@ __export(conversation_timeline_exports, {
   loginKey: () => loginKey,
   makeLocalTimelineEvent: () => makeLocalTimelineEvent,
   maxTimelineWatermark: () => maxTimelineWatermark,
+  mergeCommentMinimizeFields: () => mergeCommentMinimizeFields,
   mergeTimelineEventsById: () => mergeTimelineEventsById,
   mergeTimelineItemsById: () => mergeTimelineItemsById,
   milestoneChangeTimelineEvents: () => milestoneChangeTimelineEvents,
@@ -4213,6 +4220,27 @@ function maxTimelineWatermark(items) {
   }
   return best;
 }
+function mergeCommentMinimizeFields(prev, next) {
+  if (!prev) return next;
+  if (!next) return prev;
+  const pickMin = (a, b) => {
+    if (a?.isMinimized != null) return Boolean(a.isMinimized);
+    if (b?.isMinimized != null) return Boolean(b.isMinimized);
+    return false;
+  };
+  const nextKnowsMin = next.isMinimized != null;
+  const isMinimized = nextKnowsMin ? Boolean(next.isMinimized) : pickMin(prev, next);
+  const minimizedReason = isMinimized ? nextKnowsMin ? next.minimizedReason ?? prev.minimizedReason ?? null : prev.minimizedReason ?? next.minimizedReason ?? null : null;
+  const viewerCanMinimize = next.viewerCanMinimize != null ? Boolean(next.viewerCanMinimize) : prev.viewerCanMinimize != null ? Boolean(prev.viewerCanMinimize) : null;
+  return {
+    ...prev,
+    ...next,
+    isMinimized,
+    minimizedReason,
+    viewerCanMinimize,
+    nodeId: next.nodeId || prev.nodeId || next.node_id || prev.node_id || null
+  };
+}
 function mergeTimelineItemsById(prevItems, nextItems, opts = {}) {
   const map = /* @__PURE__ */ new Map();
   const keyOf = (it, i2) => {
@@ -4228,7 +4256,9 @@ function mergeTimelineItemsById(prevItems, nextItems, opts = {}) {
   }
   for (const it of Array.isArray(nextItems) ? nextItems : []) {
     if (!it) continue;
-    map.set(keyOf(it, i++), it);
+    const k = keyOf(it, i++);
+    const prev = map.get(k);
+    map.set(k, prev ? mergeCommentMinimizeFields(prev, it) : it);
   }
   const out = [...map.values()];
   if (opts.sortNewest !== false) {
@@ -4446,6 +4476,9 @@ function buildThreadEntry(c, children, snippetFn, files, viewerLogin, i) {
     pending: Boolean(r.pending),
     nodeId: r.nodeId || r.node_id || null,
     reactions: Array.isArray(r.reactions) ? r.reactions : [],
+    isMinimized: Boolean(r.isMinimized ?? r.is_minimized ?? false),
+    minimizedReason: r.minimizedReason ?? r.minimized_reason ?? null,
+    viewerCanMinimize: r.viewerCanMinimize != null ? Boolean(r.viewerCanMinimize) : r.viewer_can_minimize != null ? Boolean(r.viewer_can_minimize) : null,
     canDelete: Boolean(
       viewerLogin && r.author && r.author === viewerLogin && !r.pending
     )
@@ -4480,6 +4513,9 @@ function buildThreadEntry(c, children, snippetFn, files, viewerLogin, i) {
     threadNodeId: c.threadNodeId || null,
     nodeId: c.nodeId || c.node_id || null,
     reactions: Array.isArray(c.reactions) ? c.reactions : [],
+    isMinimized: Boolean(c.isMinimized ?? c.is_minimized ?? false),
+    minimizedReason: c.minimizedReason ?? c.minimized_reason ?? null,
+    viewerCanMinimize: c.viewerCanMinimize != null ? Boolean(c.viewerCanMinimize) : c.viewer_can_minimize != null ? Boolean(c.viewer_can_minimize) : null,
     reviewId: Number.isFinite(reviewId) ? reviewId : null,
     pending: Boolean(c.pending),
     replies,
@@ -4536,6 +4572,9 @@ function buildConversationTimeline(detail, opts = {}) {
       at: c.createdAt,
       nodeId: c.nodeId || c.node_id || null,
       reactions: Array.isArray(c.reactions) ? c.reactions : [],
+      isMinimized: Boolean(c.isMinimized ?? c.is_minimized ?? false),
+      minimizedReason: c.minimizedReason ?? c.minimized_reason ?? null,
+      viewerCanMinimize: c.viewerCanMinimize != null ? Boolean(c.viewerCanMinimize) : c.viewer_can_minimize != null ? Boolean(c.viewer_can_minimize) : null,
       canDelete: Boolean(
         viewerLogin && c.author && c.author === viewerLogin
       )
@@ -6071,7 +6110,11 @@ function mapIssueComment(c) {
     body: c.body || "",
     createdAt: c.created_at,
     nodeId: c.node_id || null,
-    reactions: mapRestReactions(c.reactions)
+    reactions: mapRestReactions(c.reactions),
+    // null = unknown (REST omits Minimizable) — must not clobber GraphQL true on merge
+    isMinimized: c.isMinimized != null || c.is_minimized != null ? Boolean(c.isMinimized ?? c.is_minimized) : null,
+    minimizedReason: c.minimizedReason ?? c.minimized_reason ?? null,
+    viewerCanMinimize: c.viewerCanMinimize != null ? Boolean(c.viewerCanMinimize) : c.viewer_can_minimize != null ? Boolean(c.viewer_can_minimize) : null
   };
 }
 function mapReviewComment(c, extra = {}) {
@@ -6098,6 +6141,12 @@ function mapReviewComment(c, extra = {}) {
     inReplyToId: c.in_reply_to_id ?? null,
     nodeId: c.node_id || null,
     reactions: mapRestReactions(c.reactions),
+    // null = unknown (REST omits Minimizable) — must not clobber GraphQL true
+    isMinimized: extra.isMinimized != null || c.isMinimized != null || c.is_minimized != null ? Boolean(
+      extra.isMinimized ?? c.isMinimized ?? c.is_minimized
+    ) : null,
+    minimizedReason: extra.minimizedReason ?? c.minimizedReason ?? c.minimized_reason ?? null,
+    viewerCanMinimize: extra.viewerCanMinimize != null ? Boolean(extra.viewerCanMinimize) : c.viewerCanMinimize != null ? Boolean(c.viewerCanMinimize) : null,
     threadNodeId: extra.threadNodeId ?? null,
     /** Pull request review id (groups file threads under one review event). */
     reviewId: c.pull_request_review_id != null ? Number(c.pull_request_review_id) : extra.reviewId != null ? Number(extra.reviewId) : null,
@@ -6140,6 +6189,9 @@ function mapGraphqlReviewCommentNode(node, threadMeta = {}) {
     inReplyToId: node.replyTo?.databaseId ?? null,
     nodeId: node.id || null,
     reactions: mapGraphqlReactionGroups(node.reactionGroups),
+    isMinimized: Boolean(node.isMinimized ?? false),
+    minimizedReason: node.minimizedReason ?? null,
+    viewerCanMinimize: node.viewerCanMinimize != null ? Boolean(node.viewerCanMinimize) : null,
     threadNodeId: threadMeta.threadNodeId || null,
     reviewId: reviewDbId,
     resolved: Boolean(threadMeta.resolved),
@@ -6661,6 +6713,60 @@ async function fetchReactableReactionGroups(nodeIds, fetchImpl, token, ctx = nul
   }
   return out;
 }
+async function fetchMinimizableStates(nodeIds, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
+  const ids = [
+    ...new Set(
+      (Array.isArray(nodeIds) ? nodeIds : []).map((id) => String(id || "").trim()).filter(Boolean)
+    )
+  ].slice(0, 100);
+  const out = /* @__PURE__ */ new Map();
+  if (!ids.length || !token) return out;
+  const query = `query($ids:[ID!]!){
+    nodes(ids:$ids){
+      ... on IssueComment {
+        id
+        isMinimized
+        minimizedReason
+        viewerCanMinimize
+      }
+      ... on PullRequestReviewComment {
+        id
+        isMinimized
+        minimizedReason
+        viewerCanMinimize
+      }
+    }
+  }`;
+  try {
+    const data = await apiGraphql(query, { ids }, fetchImpl, token, ctx);
+    for (const node of data?.nodes || []) {
+      if (!node?.id) continue;
+      out.set(String(node.id), {
+        isMinimized: Boolean(node.isMinimized),
+        minimizedReason: node.minimizedReason ?? null,
+        viewerCanMinimize: node.viewerCanMinimize != null ? Boolean(node.viewerCanMinimize) : null
+      });
+    }
+  } catch {
+  }
+  return out;
+}
+function applyMinimizableStates(items, byId) {
+  if (!byId?.size || !Array.isArray(items)) return items;
+  for (const c of items) {
+    const id = c?.nodeId || c?.node_id || c?.id;
+    if (id == null) continue;
+    const m = byId.get(String(id));
+    if (!m) continue;
+    c.isMinimized = Boolean(m.isMinimized);
+    c.minimizedReason = m.minimizedReason ?? null;
+    if (m.viewerCanMinimize != null) {
+      c.viewerCanMinimize = Boolean(m.viewerCanMinimize);
+    }
+  }
+  return items;
+}
 async function fetchReactableReactors(nodeId, fetchImpl, token, ctx = null, opts = null) {
   ctx = normalizeApiCtx(ctx);
   const id = String(nodeId || "").trim();
@@ -6982,21 +7088,23 @@ async function fetchPrCommentsPage(owner, repo, pullNumber, kind, opts, fetchImp
     const { data, link } = await apiJsonWithLink(url, fetchImpl, token);
     const raw = Array.isArray(data) ? data : [];
     const items = kind === "review" ? raw.map(mapReviewComment) : raw.map(mapIssueComment);
-    if (kind === "issue" && token && items.length) {
+    if (token && items.length) {
       const ids = items.map((c) => c?.nodeId).filter(Boolean);
       if (ids.length) {
         try {
-          const byId = await fetchReactableReactionGroups(
-            ids,
-            fetchImpl,
-            token,
-            ctx2
-          );
-          for (const c of items) {
-            if (!c?.nodeId) continue;
-            const groups = byId.get(String(c.nodeId));
-            if (groups && groups.length) c.reactions = groups;
+          const reactionsP = kind === "issue" ? fetchReactableReactionGroups(ids, fetchImpl, token, ctx2) : Promise.resolve(null);
+          const [byId, minById] = await Promise.all([
+            reactionsP,
+            fetchMinimizableStates(ids, fetchImpl, token, ctx2)
+          ]);
+          if (byId) {
+            for (const c of items) {
+              if (!c?.nodeId) continue;
+              const groups = byId.get(String(c.nodeId));
+              if (groups && groups.length) c.reactions = groups;
+            }
           }
+          applyMinimizableStates(items, minById);
         } catch (err) {
           if (err?.name === "AbortError" || /aborted|AbortError/i.test(String(err?.message || ""))) {
             throw err;
@@ -8503,6 +8611,64 @@ async function deleteIssueComment(owner, repo, commentId, fetchImpl, token, ctx 
     { method: "DELETE" }
   );
 }
+var MINIMIZE_CLASSIFIERS = [
+  "SPAM",
+  "ABUSE",
+  "OFF_TOPIC",
+  "OUTDATED",
+  "DUPLICATE",
+  "RESOLVED"
+];
+async function minimizeComment(subjectNodeId, classifier = "OFF_TOPIC", fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
+  const id = String(subjectNodeId || "").trim();
+  if (!id) throw new Error("subjectNodeId required to minimize comment");
+  let c = String(classifier || "OFF_TOPIC").trim().toUpperCase().replace(/[-\s]+/g, "_");
+  if (!MINIMIZE_CLASSIFIERS.includes(c)) {
+    c = "OFF_TOPIC";
+  }
+  const mutation = `mutation($input: MinimizeCommentInput!) {
+    minimizeComment(input: $input) {
+      minimizedComment {
+        ... on Minimizable {
+          isMinimized
+          minimizedReason
+          viewerCanMinimize
+        }
+      }
+    }
+  }`;
+  return apiGraphql(
+    mutation,
+    { input: { subjectId: id, classifier: c } },
+    fetchImpl,
+    token,
+    ctx
+  );
+}
+async function unminimizeComment(subjectNodeId, fetchImpl, token, ctx = null) {
+  ctx = normalizeApiCtx(ctx);
+  const id = String(subjectNodeId || "").trim();
+  if (!id) throw new Error("subjectNodeId required to unminimize comment");
+  const mutation = `mutation($input: UnminimizeCommentInput!) {
+    unminimizeComment(input: $input) {
+      unminimizedComment {
+        ... on Minimizable {
+          isMinimized
+          minimizedReason
+          viewerCanMinimize
+        }
+      }
+    }
+  }`;
+  return apiGraphql(
+    mutation,
+    { input: { subjectId: id } },
+    fetchImpl,
+    token,
+    ctx
+  );
+}
 
 // src/fetch/mutations-meta.ts
 async function updatePullRequest(owner, repo, pullNumber, fields, fetchImpl, token, ctx = null) {
@@ -9059,12 +9225,16 @@ var REVIEW_THREAD_SHELL_FIELDS = `
   comments(first:1) {
     totalCount
     nodes {
+      id
       databaseId
       body
       path
       line
       createdAt
       author { login avatarUrl }
+      isMinimized
+      minimizedReason
+      viewerCanMinimize
       # reviewId for first-paint review-group (cost stays 1 \u2014 measured on
       # callabo-server#2424 last:10/100 baseline vs +pullRequestReview).
       pullRequestReview { databaseId state }
@@ -9088,6 +9258,9 @@ var REVIEW_THREAD_COMMENTS_FIELDS = `
       author { login avatarUrl }
       replyTo { databaseId }
       pullRequestReview { databaseId state }
+      isMinimized
+      minimizedReason
+      viewerCanMinimize
       reactionGroups {
         content
         viewerHasReacted
@@ -9127,6 +9300,9 @@ var REVIEW_THREADS_BY_IDS_NODE_SELECTION = `
       author { login avatarUrl }
       replyTo { databaseId }
       pullRequestReview { databaseId state }
+      isMinimized
+      minimizedReason
+      viewerCanMinimize
       reactionGroups {
         content
         viewerHasReacted
@@ -10812,6 +10988,9 @@ query TimelineItemsPage(
             createdAt
             body
             author { login avatarUrl }
+            isMinimized
+            minimizedReason
+            viewerCanMinimize
             reactionGroups {
               content
               viewerHasReacted
@@ -11001,7 +11180,10 @@ function mapGraphqlTimelineNode(node) {
         avatar_url: node.author?.avatarUrl || ""
       },
       created_at: node.createdAt,
-      updated_at: node.createdAt
+      updated_at: node.createdAt,
+      isMinimized: node.isMinimized,
+      minimizedReason: node.minimizedReason,
+      viewerCanMinimize: node.viewerCanMinimize
     });
     const reactions = mapReactionGroups(node.reactionGroups);
     if (reactions.length) comment.reactions = reactions;
@@ -11332,6 +11514,8 @@ var fetchApi = {
   fetchIssueOrPrSummaries,
   fetchReactableReactionGroups,
   fetchReactableReactors,
+  fetchMinimizableStates,
+  applyMinimizableStates,
   fetchCompareFiles,
   mapAndAnnotateFiles,
   fetchPullReviewThreads,
@@ -11371,6 +11555,8 @@ var fetchApi = {
   reopenPullRequest,
   deleteReviewComment,
   deleteIssueComment,
+  minimizeComment,
+  unminimizeComment,
   toggleCommentReaction,
   updatePullRequest,
   editIssueComment,
@@ -11601,6 +11787,8 @@ var MSG = {
   UPDATE_PULL_STATE: "PR_TREE_UPDATE_PULL_STATE",
   DELETE_REVIEW_COMMENT: "PR_TREE_DELETE_REVIEW_COMMENT",
   DELETE_ISSUE_COMMENT: "PR_TREE_DELETE_ISSUE_COMMENT",
+  MINIMIZE_COMMENT: "PR_TREE_MINIMIZE_COMMENT",
+  UNMINIMIZE_COMMENT: "PR_TREE_UNMINIMIZE_COMMENT",
   TOGGLE_COMMENT_REACTION: "PR_TREE_TOGGLE_COMMENT_REACTION",
   FETCH_REACTABLE_REACTORS: "PR_TREE_FETCH_REACTABLE_REACTORS",
   UPDATE_PULL: "PR_TREE_UPDATE_PULL",
@@ -12081,6 +12269,8 @@ async function handleMessagePartA(message) {
         pong: true,
         hasFetch: typeof PRTreeFetch?.fetchPrDetail === "function",
         hasTimelineItems: typeof PRTreeFetch?.fetchPrTimelineItemsPage === "function",
+        hasMinimize: typeof PRTreeFetch?.minimizeComment === "function",
+        hasUnminimize: typeof PRTreeFetch?.unminimizeComment === "function",
         hasStorage: typeof PRTreeStorage?.getGithubTokenStatus === "function",
         hasEndpoints: typeof PRGithubEndpoints?.resolveGithubEndpoints === "function"
       };
@@ -12594,6 +12784,35 @@ async function handleMessagePartA(message) {
         message.owner,
         message.repo,
         message.commentId,
+        fetchImpl(),
+        token,
+        apiCtx
+      );
+      return { ok: true, result };
+    }
+    case MSG.MINIMIZE_COMMENT: {
+      const token = await tokenForMessage(message);
+      if (!token) throw new Error("GitHub PAT required to hide comments");
+      if (typeof PRTreeFetch.minimizeComment !== "function") {
+        throw new Error("Hide comment API unavailable");
+      }
+      const result = await PRTreeFetch.minimizeComment(
+        message.subjectNodeId || message.nodeId,
+        message.classifier || message.reason || "OFF_TOPIC",
+        fetchImpl(),
+        token,
+        apiCtx
+      );
+      return { ok: true, result };
+    }
+    case MSG.UNMINIMIZE_COMMENT: {
+      const token = await tokenForMessage(message);
+      if (!token) throw new Error("GitHub PAT required to unhide comments");
+      if (typeof PRTreeFetch.unminimizeComment !== "function") {
+        throw new Error("Unhide comment API unavailable");
+      }
+      const result = await PRTreeFetch.unminimizeComment(
+        message.subjectNodeId || message.nodeId,
         fetchImpl(),
         token,
         apiCtx

@@ -8,14 +8,22 @@ import {
   parsePosition,
   commentBodyForCopy,
   buildCommentShareUrl,
+  parseGithubCommentHash,
+  githubCommentHashFragment,
   isShareableCommentId,
   resolveConversationAnchorForCommentId,
+  optimisticConversationAnchorForKind,
   mergePathTargetWithUriRoute,
   findCommentIndexByPosition,
   parseLocationRoute,
   URI_PARAM_POSITION,
   URI_PARAM_PAGE,
 } from '../src/modal/lib/uri-route';
+import {
+  buildGithubPrHref,
+  commentPositionToGithubHash,
+  preserveGithubCommentHash,
+} from '../src/modal/lib/github-pr-route';
 import { copyTextToClipboard } from '../src/modal/lib/copy-to-clipboard';
 import { resolveRootReviewCommentId } from '../src/modal/lib/review-threads';
 
@@ -55,32 +63,45 @@ describe('buildPositionFromComment + parsePosition round-trip', () => {
   });
 });
 
-describe('buildCommentShareUrl', () => {
-  test('stamps prp_page + prp_position on PR htmlUrl', () => {
+describe('buildCommentShareUrl (GitHub official hash)', () => {
+  test('issue comment → #issuecomment-{id}', () => {
     const url = buildCommentShareUrl({
-      prHtmlUrl: 'https://github.com/enif-lee/pr-plus/pull/7',
+      prHtmlUrl: 'https://github.com/enif-lee/pr-plus/pull/8',
       page: 'conversation',
-      comment: { id: 4242 },
+      kind: 'issue',
+      comment: { id: 5139498092 },
     });
-    expect(url).toBeTruthy();
+    expect(url).toBe(
+      'https://github.com/enif-lee/pr-plus/pull/8#issuecomment-5139498092'
+    );
     const u = new URL(String(url));
-    expect(u.pathname).toMatch(/\/pull\/7$/);
-    expect(u.searchParams.get(URI_PARAM_POSITION)).toBe('c:4242');
-    expect(u.searchParams.get(URI_PARAM_PAGE)).toBe('conversation');
-    const again = parsePosition(u.searchParams.get(URI_PARAM_POSITION));
-    expect(again?.id).toBe('4242');
+    expect(u.search).toBe('');
+    expect(u.hash).toBe('#issuecomment-5139498092');
+    const gh = parseGithubCommentHash(u.hash);
+    expect(gh?.id).toBe('5139498092');
+    expect(gh?.kind).toBe('issue');
+    expect(gh?.page).toBe('conversation');
+    expect(parsePosition(u.hash)?.id).toBe('5139498092');
   });
 
-  test('diff page stamp', () => {
+  test('review / line comment → #discussion_r{id}', () => {
     const url = buildCommentShareUrl({
       prHtmlUrl: 'https://github.com/o/r/pull/3',
       page: 'diff',
+      kind: 'review',
       position: 'c:12',
     });
-    expect(url).toBeTruthy();
-    const u = new URL(String(url));
-    expect(u.searchParams.get(URI_PARAM_PAGE)).toBe('diff');
-    expect(u.searchParams.get(URI_PARAM_POSITION)).toBe('c:12');
+    expect(url).toBe('https://github.com/o/r/pull/3#discussion_r12');
+    expect(githubCommentHashFragment('review', 12)).toBe('discussion_r12');
+  });
+
+  test('page=diff defaults to discussion_r without kind', () => {
+    const url = buildCommentShareUrl({
+      prHtmlUrl: 'https://github.com/o/r/pull/3',
+      page: 'diff',
+      comment: { id: 99 },
+    });
+    expect(url).toBe('https://github.com/o/r/pull/3#discussion_r99');
   });
 
   test('null without base or shareable id', () => {
@@ -93,6 +114,20 @@ describe('buildCommentShareUrl', () => {
         comment: { id: 'tmp-1' },
       })
     ).toBe(null);
+  });
+
+  test('strips legacy prp_* query from base when sharing', () => {
+    const url = buildCommentShareUrl({
+      prHtmlUrl:
+        'https://github.com/o/r/pull/1?prp_page=conversation&prp_position=c:1&other=1',
+      kind: 'issue',
+      comment: { id: 5 },
+    });
+    const u = new URL(String(url));
+    expect(u.searchParams.get(URI_PARAM_PAGE)).toBe(null);
+    expect(u.searchParams.get(URI_PARAM_POSITION)).toBe(null);
+    expect(u.searchParams.get('other')).toBe('1');
+    expect(u.hash).toBe('#issuecomment-5');
   });
 });
 
@@ -131,14 +166,59 @@ describe('findCommentIndexByPosition + conversation anchor', () => {
       )
     ).toBe(null);
   });
+
+  test('resolveConversationAnchorForCommentId maps pullrequestreview id', () => {
+    expect(
+      resolveConversationAnchorForCommentId(
+        { comments: [], reviews: [{ id: 777, state: 'APPROVED' }] },
+        777
+      )
+    ).toBe('review:777');
+  });
+
+  test('optimisticConversationAnchorForKind matches GH hash kinds', () => {
+    expect(optimisticConversationAnchorForKind(12, 'issue')).toBe(
+      'issue-comment:12'
+    );
+    expect(optimisticConversationAnchorForKind(12, 'review')).toBe(
+      'review-comment:12'
+    );
+    expect(
+      optimisticConversationAnchorForKind(12, 'pull_request_review')
+    ).toBe('review:12');
+    expect(optimisticConversationAnchorForKind(null, 'issue')).toBe(null);
+  });
+});
+
+describe('deep-link restore wiring (static)', () => {
+  test('App deep-link uses jumpToReviewComment + soft exhaust (not false promote)', () => {
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const root = path.join(__dirname, '..');
+    const app = fs.readFileSync(
+      path.join(root, 'src/modal/app/PrModalApp.impl.tsx'),
+      'utf8'
+    );
+    const vcl = fs.readFileSync(
+      path.join(root, 'src/modal/views/conversation/VirtualConversationList.tsx'),
+      'utf8'
+    );
+    expect(app).toMatch(/jumpToReviewComment\(/);
+    expect(app).toMatch(/markSoftExhausted/);
+    expect(app).toMatch(/kickLoadMoreIfNeeded/);
+    expect(app).toMatch(/optimisticConversationAnchorForKind/);
+    // Must not promote pending without a mounted node
+    expect(vcl).toMatch(/Never promote without a mounted node/);
+    expect(vcl).toMatch(/nodeInView/);
+  });
 });
 
 /**
- * Host openModal wiring: PR-page location.search prp_position must become
- * the position field passed into open (same merge pure host uses).
+ * Host openModal wiring: GitHub #issuecomment- / #discussion_r / legacy prp_*
+ * must become the position field passed into open.
  */
-describe('host open path: location prp_position → openModal args', () => {
-  test('mergePathTargetWithUriRoute stamps c:{id} from search', () => {
+describe('host open path: location comment hash → openModal args', () => {
+  test('mergePathTargetWithUriRoute stamps c:{id} from #discussion_r', () => {
     const pathTarget = {
       owner: 'enif-lee',
       repo: 'pr-plus',
@@ -148,9 +228,12 @@ describe('host open path: location prp_position → openModal args', () => {
     const share = buildCommentShareUrl({
       prHtmlUrl: 'https://github.com/enif-lee/pr-plus/pull/7',
       page: 'diff',
+      kind: 'review',
       comment: { id: 4242 },
     });
-    expect(share).toBeTruthy();
+    expect(share).toBe(
+      'https://github.com/enif-lee/pr-plus/pull/7#discussion_r4242'
+    );
     const u = new URL(String(share));
     const merged = mergePathTargetWithUriRoute(pathTarget, {
       search: u.search,
@@ -164,27 +247,83 @@ describe('host open path: location prp_position → openModal args', () => {
     expect(parsePosition(merged!.position)?.id).toBe('4242');
   });
 
-  test('parseLocationRoute alone recovers position (openModal input contract)', () => {
+  test('parseLocationRoute recovers #issuecomment-{id}', () => {
+    const route = parseLocationRoute({
+      search: '',
+      hash: '#issuecomment-5139498092',
+    });
+    expect(route.page).toBe('conversation');
+    expect(route.position).toBe('c:5139498092');
+    const openArgs = {
+      owner: 'o',
+      repo: 'r',
+      number: 8,
+      page: route.page,
+      position: route.position,
+      presentation: 'embed',
+    };
+    expect(openArgs.position).toBe('c:5139498092');
+    expect(openArgs.page).toBe('conversation');
+  });
+
+  test('write URI keeps #issuecomment- / #discussion_r (open must not strip)', () => {
+    const {
+      clearRouteFromHash,
+      buildUrlWithRoute,
+    } = require('../src/modal/lib/uri-route') as typeof import('../src/modal/lib/uri-route');
+    const {
+      buildGithubPrHref,
+      preserveGithubCommentHash,
+    } = require('../src/modal/lib/github-pr-route') as typeof import('../src/modal/lib/github-pr-route');
+
+    expect(clearRouteFromHash('#issuecomment-5139498092')).toBe(
+      '#issuecomment-5139498092'
+    );
+    expect(clearRouteFromHash('#discussion_r99')).toBe('#discussion_r99');
+    expect(clearRouteFromHash('#pullrequestreview-7')).toBe(
+      '#pullrequestreview-7'
+    );
+    // Legacy bare c: tokens still stripped
+    expect(clearRouteFromHash('#c:12')).toBe('');
+
+    const withRoute = buildUrlWithRoute(
+      {
+        pathname: '/enif-lee/pr-plus/pull/7',
+        search: '',
+        hash: '#issuecomment-111',
+      },
+      { page: 'conversation', number: 7, position: 'c:111' }
+    );
+    expect(withRoute).toContain('#issuecomment-111');
+
+    expect(preserveGithubCommentHash('#discussion_r42')).toBe(
+      '#discussion_r42'
+    );
+    const embedHref = buildGithubPrHref(
+      {
+        owner: 'enif-lee',
+        repo: 'pr-plus',
+        number: 7,
+        page: 'conversation',
+      },
+      '',
+      '#issuecomment-5139498092'
+    );
+    expect(embedHref).toBe(
+      '/enif-lee/pr-plus/pull/7#issuecomment-5139498092'
+    );
+  });
+
+  test('legacy prp_position still parses', () => {
     const route = parseLocationRoute({
       search: '?prp_page=conversation&prp_position=c:99',
       hash: '',
     });
     expect(route.page).toBe('conversation');
     expect(route.position).toBe('c:99');
-    // Simulated openModal args from tryEmbedFromLocation / openEmbedFromNativePr
-    const openArgs = {
-      owner: 'o',
-      repo: 'r',
-      number: 1,
-      page: route.page,
-      position: route.position,
-      presentation: 'embed',
-    };
-    expect(openArgs.position).toBe('c:99');
-    expect(openArgs.page).toBe('conversation');
   });
 
-  test('path page kept when URI omits prp_page', () => {
+  test('path page kept when URI omits page (legacy prp_position only)', () => {
     const merged = mergePathTargetWithUriRoute(
       {
         owner: 'o',
@@ -244,6 +383,51 @@ describe('host open path: location prp_position → openModal args', () => {
     expect(findCommentIndexByPosition(mappedRoots, 'c:100')).toBe(0);
   });
 
+  test('goal URL #issuecomment-4743059284 → position c:4743059284 (shipped parse)', () => {
+    const gh = parseGithubCommentHash(
+      '#issuecomment-4743059284'
+    );
+    expect(gh).toEqual({
+      kind: 'issue',
+      id: '4743059284',
+      position: 'c:4743059284',
+      page: 'conversation',
+    });
+    expect(parsePosition('#issuecomment-4743059284')?.id).toBe('4743059284');
+    const merged = mergePathTargetWithUriRoute(
+      { owner: 'enif-lee', repo: 'pr-plus', number: 7 },
+      { search: '', hash: '#issuecomment-4743059284' }
+    );
+    expect(merged?.position).toBe('c:4743059284');
+    expect(merged?.page).toBe('conversation');
+  });
+
+  test('embed rewrite re-emits #issuecomment- from position (not strip)', () => {
+    expect(commentPositionToGithubHash('c:4743059284', 'conversation')).toBe(
+      '#issuecomment-4743059284'
+    );
+    expect(commentPositionToGithubHash('4743059284', 'diff')).toBe(
+      '#discussion_r4743059284'
+    );
+    expect(preserveGithubCommentHash('#issuecomment-4743059284')).toBe(
+      '#issuecomment-4743059284'
+    );
+    const href = buildGithubPrHref(
+      {
+        owner: 'enif-lee',
+        repo: 'pr-plus',
+        number: 7,
+        page: 'conversation',
+        position: 'c:4743059284',
+      },
+      '',
+      '' // existing hash already gone — position must re-create it
+    );
+    expect(href).toBe(
+      '/enif-lee/pr-plus/pull/7#issuecomment-4743059284'
+    );
+  });
+
   test('host source wires position into openModal (static)', () => {
     const fs = require('node:fs');
     const path = require('node:path');
@@ -293,7 +477,7 @@ describe('copyTextToClipboard path (injected clipboard)', () => {
       page: 'diff',
       comment: { id: 88 },
     });
-    expect(url).toMatch(/prp_position=c(%3A|:)88/);
+    expect(url).toBe('https://github.com/o/r/pull/2#discussion_r88');
     const ok = await copyTextToClipboard(String(url), {
       clipboard: {
         writeText: async (t: string) => {
@@ -304,8 +488,6 @@ describe('copyTextToClipboard path (injected clipboard)', () => {
     });
     expect(ok).toBe(true);
     expect(written[0]).toBe(url);
-    expect(
-      parsePosition(new URL(written[0]).searchParams.get('prp_position'))?.id
-    ).toBe('88');
+    expect(parsePosition(new URL(written[0]).hash)?.id).toBe('88');
   });
 });

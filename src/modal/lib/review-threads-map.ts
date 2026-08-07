@@ -133,6 +133,8 @@ export function mapGraphqlReviewThreadNodes(allNodes: any) {
           avatarUrl: node.author?.avatarUrl || '',
           createdAt: node.createdAt || null,
           inReplyToId: node.replyTo?.databaseId ?? null,
+          // GraphQL global id required for hide/unhide + minimizable enrich
+          nodeId: node.id || null,
           threadNodeId: t.id,
           // Shell first:1 includes pullRequestReview so timeline can group
           // before by-ids hydrate (resolved threads skip eager bulk).
@@ -141,6 +143,14 @@ export function mapGraphqlReviewThreadNodes(allNodes: any) {
           outdated: Boolean(node.outdated ?? t.isOutdated),
           pending,
           pendingReviewId: pending ? reviewDbId : null,
+          // Hide/minimize — shell query selects these; do not drop on map
+          isMinimized:
+            node.isMinimized != null ? Boolean(node.isMinimized) : null,
+          minimizedReason: node.minimizedReason ?? null,
+          viewerCanMinimize:
+            node.viewerCanMinimize != null
+              ? Boolean(node.viewerCanMinimize)
+              : null,
           // Preview-only root when shell first:1 and more replies remain
           _commentsPreview: commentsLoaded ? false : true,
         });

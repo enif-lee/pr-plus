@@ -216,15 +216,23 @@ describe('composer context chords only when focused (policy)', () => {
       resolveComposerContextShortcutAction({
         composerFocused: false,
         alt: true,
-        key: 'e',
+        key: 'c',
       })
     ).toBeNull();
     expect(
       resolveComposerContextShortcutAction({
         composerFocused: true,
         alt: true,
+        key: 'c',
+      })
+    ).toBe('composerSubmit');
+    // ⌥E is no longer a composer chord (comment reaction chrome)
+    expect(
+      resolveComposerContextShortcutAction({
+        composerFocused: true,
+        alt: true,
         key: 'e',
       })
-    ).toBe('composerEmoji');
+    ).toBeNull();
   });
 });

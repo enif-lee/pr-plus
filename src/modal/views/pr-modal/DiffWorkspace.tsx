@@ -123,6 +123,8 @@ export type DiffWorkspaceProps = {
   onToggleReaction?: any;
   onLoadReactors?: any;
   onDeleteReviewComment: any;
+  onHideComment?: any;
+  onUnhideComment?: any;
   onStartEditReviewComment: any;
   onSaveEditComment: any;
   setEditingComment: any;
@@ -259,6 +261,8 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
     onToggleReaction = null,
     onLoadReactors = null,
     onDeleteReviewComment,
+    onHideComment = null,
+    onUnhideComment = null,
     onStartEditReviewComment,
     onSaveEditComment,
     setEditingComment,
@@ -499,6 +503,8 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
           onToggleReaction={onToggleReaction}
           onLoadReactors={onLoadReactors}
           onDeleteReviewComment={onDeleteReviewComment}
+          onHideComment={onHideComment}
+          onUnhideComment={onUnhideComment}
           onEditReviewComment={onStartEditReviewComment}
           onSaveEditReviewComment={(id, body) =>
             onSaveEditComment('review', id, body)

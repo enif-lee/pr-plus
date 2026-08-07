@@ -54,7 +54,7 @@ export function isComposerKeyboardTarget(
 }
 
 /**
- * Surface for composer-context chords (⌥E/C/I/T, ⌘↵).
+ * Surface for composer-context chords (⌥C/I/T, ⌘↵).
  *
  * 1. Focused reply / selection / conversation composer → that surface.
  * 2. Else, if focus is not another editable, the main conversation footer

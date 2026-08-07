@@ -64,17 +64,8 @@ export const PR_MODAL_OPT_ACTIONS = [
     labelWin: 'Alt+Shift+T',
     section: 'PR',
   },
-  {
-    id: 'opt-edit-body',
-    action: 'editBody',
-    title: 'Edit PR description',
-    key: 'e',
-    code: 'KeyE',
-    shift: false,
-    labelMac: '⌥E',
-    labelWin: 'Alt+E',
-    section: 'PR',
-  },
+  // Edit PR description: no plain ⌥E (reserved for comment reaction picker).
+  // Reach via command palette / UI pencil.
   {
     id: 'opt-base',
     action: 'promptBase',
@@ -229,8 +220,8 @@ export const PR_MODAL_OPT_ACTIONS = [
  *
  * - Opt+Shift (⌥⇧L labels, ⌥⇧P milestone, …) → always allow: these chords
  *   never type characters and are shown on Opt-hold tips even in composers.
- * - Plain Opt (⌥E, ⌥.) → block while typing so composer-local chords
- *   (⌥E emoji) and normal text entry are not stolen.
+ * - Plain Opt (⌥., ⌥I, …) → block while typing so text entry and
+ *   composer-local chords are not stolen. (⌥E = comment reaction when focused.)
  */
 export function allowPrModalOptPeerWhileEditable(opts: {
   editableTarget?: boolean;
@@ -331,7 +322,7 @@ export function optShortcutForCommandId(commandId: string): string | null {
     'find-in-pr': 'mod+f',
     'toggle-fullscreen': 'opt+shift+f',
     'edit-title': 'opt+shift+t',
-    'edit-body': 'opt+e',
+    // edit-body: no opt chord (⌥E = comment reaction)
     'set-base': 'opt+shift+b',
     'set-labels': 'opt+shift+l',
     'set-milestone': 'opt+shift+p',

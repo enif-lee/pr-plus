@@ -251,6 +251,7 @@ export const prTreeFetchPartA = {
         sessionStorage.removeItem('prp:gql-cost-log');
         sessionStorage.removeItem('prp:gql-cost-summary');
         sessionStorage.removeItem('prp:gql-cost-err');
+        document.documentElement?.removeAttribute?.('data-prp-gql-cost-ready');
       } catch {
         /* ignore */
       }
@@ -501,6 +502,43 @@ export const prTreeFetchPartA = {
     return res.result;
   },
   /**
+   * Hide (minimize) a comment via GraphQL.
+   * @param {string} subjectNodeId GraphQL global id (IC_… / PRRC_…)
+   * @param {string} [classifier='OFF_TOPIC']
+   */
+  async minimizeComment(subjectNodeId, classifier = 'OFF_TOPIC') {
+    const res = await send({
+      type: 'PR_TREE_MINIMIZE_COMMENT',
+      subjectNodeId,
+      nodeId: subjectNodeId,
+      classifier,
+      reason: classifier,
+    });
+    if (!res?.ok) {
+      const err = new Error(res?.error || 'Failed to hide comment');
+      err.status = res?.status;
+      throw err;
+    }
+    return res.result;
+  },
+  /**
+   * Unhide (unminimize) a comment via GraphQL.
+   * @param {string} subjectNodeId GraphQL global id
+   */
+  async unminimizeComment(subjectNodeId) {
+    const res = await send({
+      type: 'PR_TREE_UNMINIMIZE_COMMENT',
+      subjectNodeId,
+      nodeId: subjectNodeId,
+    });
+    if (!res?.ok) {
+      const err = new Error(res?.error || 'Failed to unhide comment');
+      err.status = res?.status;
+      throw err;
+    }
+    return res.result;
+  },
+  /**
    * Toggle a GitHub reaction on an issue or review comment.
    * @param {'issue'|'review'} kind
    * @param {{ content: string, viewerHasReacted?: boolean, nodeId?: string|null, commentId?: number|string }} opts
@@ -619,3 +657,19 @@ export const prTreeFetchPartA = {
     return res.result;
   },
 };
+
+/**
+ * Page-world e2e harness dispatches CustomEvents (agent-browser cannot call
+ * content-script PRTreeFetch directly). Wire flush/clear → SW cost log mirror.
+ */
+try {
+  document.documentElement?.setAttribute?.('data-prp-gql-cost-hook', '1');
+  document.addEventListener('prp-flush-gql-cost', () => {
+    void prTreeFetchPartA.getGraphqlCostLog();
+  });
+  document.addEventListener('prp-clear-gql-cost', () => {
+    void prTreeFetchPartA.clearGraphqlCostLog();
+  });
+} catch {
+  /* ignore (non-DOM / tests) */
+}

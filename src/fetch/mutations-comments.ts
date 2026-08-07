@@ -507,3 +507,92 @@ export async function deleteIssueComment(owner: any, repo: any, commentId: any, 
   );
 }
 
+/**
+ * GitHub ReportedContentClassifiers for minimizeComment.
+ * @see https://docs.github.com/en/graphql/reference/enums#reportedcontentclassifiers
+ */
+export const MINIMIZE_CLASSIFIERS = [
+  'SPAM',
+  'ABUSE',
+  'OFF_TOPIC',
+  'OUTDATED',
+  'DUPLICATE',
+  'RESOLVED',
+] as const;
+
+/**
+ * Hide (minimize) a comment/thread subject via GraphQL.
+ * subjectNodeId must be a GraphQL global id (IC_… / PRRC_… / etc.).
+ * @param {string} subjectNodeId
+ * @param {string} [classifier='OFF_TOPIC']
+ */
+export async function minimizeComment(
+  subjectNodeId: any,
+  classifier: any = 'OFF_TOPIC',
+  fetchImpl: any,
+  token: any,
+  ctx: any = null
+) {
+  ctx = normalizeApiCtx(ctx);
+  const id = String(subjectNodeId || '').trim();
+  if (!id) throw new Error('subjectNodeId required to minimize comment');
+  let c = String(classifier || 'OFF_TOPIC')
+    .trim()
+    .toUpperCase()
+    .replace(/[-\s]+/g, '_');
+  if (!(MINIMIZE_CLASSIFIERS as readonly string[]).includes(c)) {
+    c = 'OFF_TOPIC';
+  }
+  const mutation = `mutation($input: MinimizeCommentInput!) {
+    minimizeComment(input: $input) {
+      minimizedComment {
+        ... on Minimizable {
+          isMinimized
+          minimizedReason
+          viewerCanMinimize
+        }
+      }
+    }
+  }`;
+  return apiGraphql(
+    mutation,
+    { input: { subjectId: id, classifier: c } },
+    fetchImpl,
+    token,
+    ctx
+  );
+}
+
+/**
+ * Unhide (unminimize) a comment via GraphQL.
+ * @param {string} subjectNodeId GraphQL global id
+ */
+export async function unminimizeComment(
+  subjectNodeId: any,
+  fetchImpl: any,
+  token: any,
+  ctx: any = null
+) {
+  ctx = normalizeApiCtx(ctx);
+  const id = String(subjectNodeId || '').trim();
+  if (!id) throw new Error('subjectNodeId required to unminimize comment');
+  const mutation = `mutation($input: UnminimizeCommentInput!) {
+    unminimizeComment(input: $input) {
+      unminimizedComment {
+        ... on Minimizable {
+          isMinimized
+          minimizedReason
+          viewerCanMinimize
+        }
+      }
+    }
+  }`;
+  return apiGraphql(
+    mutation,
+    { input: { subjectId: id } },
+    fetchImpl,
+    token,
+    ctx
+  );
+}
+

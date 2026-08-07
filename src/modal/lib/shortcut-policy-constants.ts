@@ -242,11 +242,93 @@ export const REVIEW_FILTER_SHORTCUT = {
 } as const;
 
 /**
+ * Focused comment / review-thread **action chrome** (copy · link · quote ·
+ * hide · edit · delete · reactions). Active with contextThreadActive and not
+ * typing in a composer.
+ *
+ *   ⌥Y copy body · ⌥L copy link · ⌥Q quote · ⌥H hide/unhide
+ *   ⌥W edit · ⌥X delete · ⌥E reactions picker
+ *
+ * Note: ⌥. is reserved for global Diff ↔ Conversation toggle — do not reuse.
+ * Composer no longer owns ⌥E (was emoji typeahead); type `:` for emoji shortcodes.
+ */
+export const CONTEXT_COMMENT_ACTION_SHORTCUT = {
+  copyBody: {
+    key: 'y',
+    code: 'KeyY',
+    action: 'contextCommentCopyBody' as const,
+    chord: 'opt+y',
+    labelMac: '⌥Y',
+    labelWin: 'Alt+Y',
+    title: 'Copy comment',
+  },
+  copyLink: {
+    key: 'l',
+    code: 'KeyL',
+    action: 'contextCommentCopyLink' as const,
+    chord: 'opt+l',
+    labelMac: '⌥L',
+    labelWin: 'Alt+L',
+    title: 'Copy link',
+  },
+  quote: {
+    key: 'q',
+    code: 'KeyQ',
+    action: 'contextCommentQuote' as const,
+    chord: 'opt+q',
+    labelMac: '⌥Q',
+    labelWin: 'Alt+Q',
+    title: 'Quote reply',
+  },
+  hide: {
+    key: 'h',
+    code: 'KeyH',
+    action: 'contextCommentHide' as const,
+    chord: 'opt+h',
+    labelMac: '⌥H',
+    labelWin: 'Alt+H',
+    title: 'Hide / unhide comment',
+  },
+  edit: {
+    key: 'w',
+    code: 'KeyW',
+    action: 'contextCommentEdit' as const,
+    chord: 'opt+w',
+    labelMac: '⌥W',
+    labelWin: 'Alt+W',
+    title: 'Edit comment',
+  },
+  delete: {
+    key: 'x',
+    code: 'KeyX',
+    action: 'contextCommentDelete' as const,
+    chord: 'opt+x',
+    labelMac: '⌥X',
+    labelWin: 'Alt+X',
+    title: 'Delete comment',
+  },
+  /**
+   * Reactions picker. Not ⌥. (global Diff ↔ Conversation toggle).
+   * Former composer emoji typeahead (⌥E) was removed — type `:` in composers.
+   */
+  react: {
+    key: 'e',
+    code: 'KeyE',
+    action: 'contextCommentReact' as const,
+    chord: 'opt+e',
+    labelMac: '⌥E',
+    labelWin: 'Alt+E',
+    title: 'Add reaction',
+  },
+} as const;
+
+/**
  * Context-thread shortcuts — active review thread / comment unit in either
  * Conversation (⌥J/K · ⌥⇧C focus) or Diff (⌥J/K thread nav / commentIndex).
  *
- *   ⌥F fold/expand · ⌥D reveal in Diff · ⌥C comment (1st focus, 2nd submit)
+ *   ⌥F fold/expand · ⌥D reveal in Diff · ⌥I open/focus reply composer
  *   ⌥⌃R resolve / unresolve
+ *   (While reply textarea is focused: ⌥C / ⌘↵ submit via COMPOSER_CONTEXT_SHORTCUT)
  */
 export const CONTEXT_THREAD_SHORTCUT = {
   fold: {
@@ -265,13 +347,14 @@ export const CONTEXT_THREAD_SHORTCUT = {
     labelMac: '⌥D',
     labelWin: 'Alt+D',
   },
+  /** Open / focus thread reply composer (not submit — submit is ⌥C while typing) */
   comment: {
-    key: 'c',
-    code: 'KeyC',
+    key: 'i',
+    code: 'KeyI',
     action: 'contextThreadComment' as const,
-    chord: 'opt+c',
-    labelMac: '⌥C',
-    labelWin: 'Alt+C',
+    chord: 'opt+i',
+    labelMac: '⌥I',
+    labelWin: 'Alt+I',
   },
   resolve: {
     key: 'r',
@@ -292,18 +375,11 @@ export const FOCUSED_THREAD_SHORTCUT = CONTEXT_THREAD_SHORTCUT;
  * Composer-focused context chords — active while a markdown composer
  * textarea (comment / reply / thread / selection bar) is focused.
  *
- *   ⌥E emoji typeahead (`:`) · ⌥C / ⌘↵ submit · ⌥⌃R resolve (when form has it)
+ *   ⌥C / ⌘↵ submit · ⌥⌃R resolve (when form has it)
  *   ⌥I focus input · ⌥T review↔comment mode toggle (main conversation composer)
+ * (Emoji shortcodes: type `:` — ⌥E is reserved for comment reaction picker.)
  */
 export const COMPOSER_CONTEXT_SHORTCUT = {
-  emoji: {
-    key: 'e',
-    code: 'KeyE',
-    action: 'composerEmoji' as const,
-    chord: 'opt+e',
-    labelMac: '⌥E',
-    labelWin: 'Alt+E',
-  },
   submit: {
     key: 'c',
     code: 'KeyC',

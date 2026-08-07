@@ -9,6 +9,8 @@ import {
   type ReactionContent,
   type ReactionGroup,
 } from '@lib/comment-reactions';
+import { TipPopover } from './TipPopover';
+import { OptBtnHint } from './OptBtnHint';
 import './CommentReactions.css';
 
 export type CommentReactionTarget = {
@@ -42,6 +44,13 @@ type Props = {
   onLoadReactors?: (
     target: CommentReactionTarget
   ) => void | Promise<void>;
+  /**
+   * When true (parent comment/thread kb-focused), show OptBtnHint for ⌥.
+   * TipPopover with shortcut always when a shortcut label is provided.
+   */
+  showShortcutHint?: boolean;
+  /** e.g. ⌥. */
+  reactionShortcut?: string | null;
 };
 
 /**
@@ -57,6 +66,8 @@ export function CommentReactions({
   busy = false,
   onToggle,
   onLoadReactors = null,
+  showShortcutHint = false,
+  reactionShortcut = '⌥E',
 }: Props) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerPos, setPickerPos] = useState<{
@@ -67,10 +78,53 @@ export function CommentReactions({
   const addBtnRef = useRef<HTMLButtonElement | null>(null);
   const pickerRef = useRef<HTMLDivElement | null>(null);
   const reactorsRequested = useRef(false);
+  /** Prefer focusing emoji list after open (⌥E / keyboard). */
+  const focusPickerOnOpenRef = useRef(false);
   const pickerId = useId();
   const active = activeReactionGroups(reactions);
   const byContent = new Map(active.map((g) => [g.content, g]));
   const locked = Boolean(disabled || busy || !onToggle);
+
+  function listPickerButtons(): HTMLButtonElement[] {
+    const root = pickerRef.current;
+    if (!root) return [];
+    return [
+      ...root.querySelectorAll<HTMLButtonElement>(
+        'button.prp-reactions__picker-btn:not([disabled])'
+      ),
+    ];
+  }
+
+  function focusPickerItem(index: number) {
+    const btns = listPickerButtons();
+    if (!btns.length) return;
+    const i = ((index % btns.length) + btns.length) % btns.length;
+    try {
+      btns[i].focus({ preventScroll: true });
+    } catch {
+      btns[i].focus?.();
+    }
+  }
+
+  function openPicker(opts: { focusList?: boolean } = {}) {
+    if (locked) return;
+    focusPickerOnOpenRef.current = opts.focusList !== false;
+    setPickerOpen(true);
+  }
+
+  function closePicker(opts: { restoreAddFocus?: boolean } = {}) {
+    setPickerOpen(false);
+    focusPickerOnOpenRef.current = false;
+    if (opts.restoreAddFocus) {
+      queueMicrotask(() => {
+        try {
+          addBtnRef.current?.focus?.({ preventScroll: true });
+        } catch {
+          addBtnRef.current?.focus?.();
+        }
+      });
+    }
+  }
 
   function maybeLoadReactors() {
     if (!onLoadReactors || reactorsRequested.current) return;
@@ -115,22 +169,109 @@ export function CommentReactions({
     };
   }, [pickerOpen]);
 
+  // After open + portal paint: focus first emoji so Tab/arrows start in the list
+  useLayoutEffect(() => {
+    if (!pickerOpen || !pickerPos) return;
+    if (!focusPickerOnOpenRef.current) return;
+    focusPickerOnOpenRef.current = false;
+    // Double rAF: portal + layout must settle before focus sticks
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => focusPickerItem(0));
+    });
+    return () => {
+      cancelAnimationFrame(raf1);
+      if (raf2) cancelAnimationFrame(raf2);
+    };
+  }, [pickerOpen, pickerPos]);
+
   useEffect(() => {
     if (!pickerOpen) return;
     function onDoc(e: MouseEvent) {
       const t = e.target as Node | null;
       if (hostRef.current?.contains(t)) return;
       if (pickerRef.current?.contains(t)) return;
-      setPickerOpen(false);
+      closePicker();
     }
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') setPickerOpen(false);
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        closePicker({ restoreAddFocus: true });
+        return;
+      }
+      // Ignore when chords are held (stack digits / product shortcuts)
+      if (e.altKey || e.metaKey || e.ctrlKey) return;
+
+      const picker = pickerRef.current;
+      if (!picker) return;
+      const ae = document.activeElement as HTMLElement | null;
+      const inPicker = Boolean(ae && picker.contains(ae));
+      const onAdd = ae === addBtnRef.current;
+      // Digits work anytime the menu is open; arrows/Tab only when focus is in menu
+      const digitRaw = e.key;
+      const digitFromCode = /^Digit([1-9])$/.exec(String(e.code || ''));
+      const digitFromKey = /^[1-9]$/.test(digitRaw) ? digitRaw : null;
+      const digitChar = digitFromKey || (digitFromCode ? digitFromCode[1] : null);
+      if (digitChar) {
+        const n = Number(digitChar);
+        // 1…N maps to REACTION_DEFS order (GitHub picker order)
+        if (n >= 1 && n <= REACTION_DEFS.length) {
+          e.preventDefault();
+          e.stopPropagation();
+          const def = REACTION_DEFS[n - 1];
+          if (def && !locked) void toggle(def.content);
+        }
+        return;
+      }
+
+      if (!inPicker && !onAdd) return;
+
+      const btns = listPickerButtons();
+      if (!btns.length) return;
+      const idx = ae ? btns.indexOf(ae as HTMLButtonElement) : -1;
+
+      // Arrow / Tab navigation stays inside the emoji list first
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        e.stopPropagation();
+        focusPickerItem(idx < 0 ? 0 : idx + 1);
+        return;
+      }
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        e.stopPropagation();
+        focusPickerItem(idx < 0 ? btns.length - 1 : idx - 1);
+        return;
+      }
+      if (e.key === 'Home') {
+        e.preventDefault();
+        e.stopPropagation();
+        focusPickerItem(0);
+        return;
+      }
+      if (e.key === 'End') {
+        e.preventDefault();
+        e.stopPropagation();
+        focusPickerItem(btns.length - 1);
+        return;
+      }
+      if (e.key === 'Tab') {
+        // Cycle within emoji list before leaving the menu
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.shiftKey) {
+          focusPickerItem(idx < 0 ? btns.length - 1 : idx - 1);
+        } else {
+          focusPickerItem(idx < 0 ? 0 : idx + 1);
+        }
+      }
     }
     document.addEventListener('mousedown', onDoc);
-    document.addEventListener('keydown', onKey);
+    document.addEventListener('keydown', onKey, true);
     return () => {
       document.removeEventListener('mousedown', onDoc);
-      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('keydown', onKey, true);
     };
   }, [pickerOpen]);
 
@@ -138,7 +279,7 @@ export function CommentReactions({
     if (locked) return;
     const cur = byContent.get(content);
     const currently = Boolean(cur?.viewerHasReacted);
-    setPickerOpen(false);
+    closePicker();
     try {
       // Fire-and-forget paint path: parent applies optimistic groups synchronously
       // (flushSync). Awaiting a slow REST call here left the picker closing without
@@ -182,28 +323,45 @@ export function CommentReactions({
                   : undefined,
             }}
           >
-            {REACTION_DEFS.map((d) => {
+            {REACTION_DEFS.map((d, i) => {
               const g = byContent.get(d.content);
               const reacted = Boolean(g?.viewerHasReacted);
+              const hotkey = i < 9 ? String(i + 1) : null;
               return (
                 <button
                   key={d.content}
                   type="button"
                   role="menuitem"
+                  tabIndex={i === 0 ? 0 : -1}
+                  data-prp-reaction-emoji="1"
+                  data-prp-reaction-index={String(i)}
+                  data-prp-reaction-key={hotkey || undefined}
                   className={`prp-reactions__picker-btn${
                     reacted ? ' is-reacted' : ''
                   }`}
                   disabled={locked}
                   title={
                     reacted
-                      ? `Remove your ${d.label} reaction`
-                      : `React with ${d.label}`
+                      ? `Remove your ${d.label} reaction${
+                          hotkey ? ` (${hotkey})` : ''
+                        }`
+                      : `React with ${d.label}${hotkey ? ` (${hotkey})` : ''}`
                   }
-                  aria-label={d.label}
+                  aria-label={
+                    hotkey ? `${d.label} (${hotkey})` : d.label
+                  }
+                  aria-keyshortcuts={hotkey || undefined}
                   aria-pressed={reacted}
                   onClick={() => void toggle(d.content)}
                 >
-                  {d.emoji}
+                  <span className="prp-reactions__picker-emoji" aria-hidden="true">
+                    {d.emoji}
+                  </span>
+                  {hotkey ? (
+                    <span className="prp-reactions__picker-key" aria-hidden="true">
+                      {hotkey}
+                    </span>
+                  ) : null}
                 </button>
               );
             })}
@@ -243,17 +401,41 @@ export function CommentReactions({
         );
       })}
       {!disabled ? (
-        <div className="prp-reactions__picker-host" ref={hostRef}>
+        <div
+          className={`prp-reactions__picker-host prp-has-tip${
+            showShortcutHint && reactionShortcut ? ' prp-opt-hint-host' : ''
+          }`}
+          ref={hostRef}
+        >
+          {showShortcutHint && reactionShortcut ? (
+            <OptBtnHint label={reactionShortcut} preferredPlacement="top" />
+          ) : null}
+          <TipPopover
+            title="Add reaction"
+            shortcut={
+              showShortcutHint && reactionShortcut ? reactionShortcut : null
+            }
+            preferredPlacement="top"
+          />
           <button
             ref={addBtnRef}
             type="button"
             className="prp-reactions__add"
             disabled={locked}
             aria-label="Add reaction"
-            title="Add reaction"
+            title={undefined}
+            data-prp-reaction-add="1"
             aria-expanded={pickerOpen}
             aria-controls={pickerOpen ? pickerId : undefined}
-            onClick={() => setPickerOpen((o) => !o)}
+            aria-haspopup="menu"
+            onClick={() => {
+              if (pickerOpen) {
+                closePicker();
+              } else {
+                // Keyboard (⌥E click()) and pointer: land focus in emoji list
+                openPicker({ focusList: true });
+              }
+            }}
           >
             <SmileyIcon size={16} />
           </button>

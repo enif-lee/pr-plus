@@ -287,6 +287,25 @@
       startLine != null ? startLine : ghLoc?.startLine ?? null;
     const resolvedEndLine = endLine != null ? endLine : ghLoc?.endLine ?? null;
     const resolvedSide = side != null ? side : ghLoc?.side || null;
+    // Deep-link: explicit arg wins; else parse location hash (#issuecomment- /
+    // #discussion_r / prp_position) so paste-URL open still restores focus.
+    const resolvedPosition = (() => {
+      if (position != null && String(position).trim()) {
+        return String(position).trim();
+      }
+      if (ghLoc?.position != null && String(ghLoc.position).trim()) {
+        return String(ghLoc.position).trim();
+      }
+      return null;
+    })();
+    // Prefer page implied by comment hash (conversation for issuecomment,
+    // diff for discussion_r) when caller did not pin a page.
+    const resolvedPageWithPos =
+      page === 'diff' || page === 'conversation'
+        ? page
+        : ghLoc?.page === 'diff' || ghLoc?.page === 'conversation'
+          ? ghLoc.page
+          : resolvedPage;
 
     const initialSideSettled = sideSettledFromDetail(initialDetail);
     const fetchTl = beginFetchTimeline(
@@ -310,8 +329,8 @@
       owner,
       repo,
       number,
-      routePage: resolvedPage,
-      routePosition: position || null,
+      routePage: resolvedPageWithPos,
+      routePosition: resolvedPosition,
       routeCommitSha: resolvedCommitSha,
       routeCommitEndSha: resolvedCommitEndSha,
       routeFilePath: resolvedFilePath,
@@ -362,13 +381,13 @@
       }
     }
     persistOpenModal(owner, repo, number, {
-      page: resolvedPage,
-      position,
+      page: resolvedPageWithPos,
+      position: resolvedPosition,
     });
     writeUriRoute({
-      page: resolvedPage || 'conversation',
+      page: resolvedPageWithPos || 'conversation',
       number,
-      position,
+      position: resolvedPosition,
       commitSha: resolvedCommitSha,
       commitEndSha: resolvedCommitEndSha,
       filePath: resolvedFilePath,

@@ -28,12 +28,16 @@ export const REVIEW_THREAD_SHELL_FIELDS = `
   comments(first:1) {
     totalCount
     nodes {
+      id
       databaseId
       body
       path
       line
       createdAt
       author { login avatarUrl }
+      isMinimized
+      minimizedReason
+      viewerCanMinimize
       # reviewId for first-paint review-group (cost stays 1 — measured on
       # callabo-server#2424 last:10/100 baseline vs +pullRequestReview).
       pullRequestReview { databaseId state }
@@ -59,6 +63,9 @@ export const REVIEW_THREAD_COMMENTS_FIELDS = `
       author { login avatarUrl }
       replyTo { databaseId }
       pullRequestReview { databaseId state }
+      isMinimized
+      minimizedReason
+      viewerCanMinimize
       reactionGroups {
         content
         viewerHasReacted
@@ -105,6 +112,9 @@ export const REVIEW_THREADS_BY_IDS_NODE_SELECTION = `
       author { login avatarUrl }
       replyTo { databaseId }
       pullRequestReview { databaseId state }
+      isMinimized
+      minimizedReason
+      viewerCanMinimize
       reactionGroups {
         content
         viewerHasReacted

@@ -177,6 +177,8 @@
             startLine: startLine ?? null,
             endLine: endLine ?? null,
             side: side || null,
+            // Keep / re-emit #issuecomment- / #discussion_r from deep-link
+            position: position || null,
           }
         );
         lastEmbedPath = embedLocationKey();

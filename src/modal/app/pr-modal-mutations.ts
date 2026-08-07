@@ -32,6 +32,12 @@ import {
   mapLabelsFromApi,
   mergeAvatarUrls,
 } from './pr-modal-mappers';
+import {
+  DEFAULT_HIDE_REASON,
+  normalizeHideReason,
+  patchDetailCommentMinimized,
+  stampHideCommentResult,
+} from '../lib/comment-quote-hide';
 
 export function installPrModalMutations(d: Record<string, any>) {
   function timelineActorFromDetail(snap: any = d.detail) {
@@ -1673,6 +1679,119 @@ export function installPrModalMutations(d: Record<string, any>) {
       d.setActionBusy(false);
     }
   }
+
+  /**
+   * Hide (minimize) a comment via GraphQL minimizeComment.
+   * @param {{ commentId: any, nodeId: string, reason?: string }} opts
+   */
+  async function onHideComment(opts: {
+    commentId?: any;
+    nodeId?: string | null;
+    reason?: string | null;
+  } = {}) {
+    const commentId = opts.commentId;
+    const nodeId = String(opts.nodeId || '').trim();
+    const reason = normalizeHideReason(opts.reason || DEFAULT_HIDE_REASON);
+    if (!nodeId) {
+      d.setActionMsg('Hide unavailable (missing comment id).');
+      stampHideCommentResult({
+        ok: false,
+        commentId,
+        isMinimized: false,
+        reason,
+        action: 'hide',
+      });
+      return;
+    }
+    d.setActionBusy(true);
+    d.setActionMsg('');
+    try {
+      const api = globalThis.PRTreeFetch;
+      if (!api?.minimizeComment) {
+        throw new Error('Hide comment API unavailable');
+      }
+      await api.minimizeComment(nodeId, reason);
+      const base = d.detailRef.current || d.detail;
+      const next = patchDetailCommentMinimized(base, commentId, {
+        isMinimized: true,
+        minimizedReason: reason,
+      });
+      commitCommentListPatch(next);
+      d.setActionMsg(`Comment hidden (${reason.toLowerCase().replace(/_/g, '-')}).`);
+      stampHideCommentResult({
+        ok: true,
+        commentId,
+        isMinimized: true,
+        reason,
+        action: 'hide',
+      });
+    } catch (err: any) {
+      d.setActionMsg(err?.message || String(err));
+      stampHideCommentResult({
+        ok: false,
+        commentId,
+        isMinimized: false,
+        reason,
+        action: 'hide',
+      });
+    } finally {
+      d.setActionBusy(false);
+    }
+  }
+
+  /**
+   * Unhide (unminimize) a comment via GraphQL unminimizeComment.
+   */
+  async function onUnhideComment(opts: {
+    commentId?: any;
+    nodeId?: string | null;
+  } = {}) {
+    const commentId = opts.commentId;
+    const nodeId = String(opts.nodeId || '').trim();
+    if (!nodeId) {
+      d.setActionMsg('Unhide unavailable (missing comment id).');
+      stampHideCommentResult({
+        ok: false,
+        commentId,
+        isMinimized: true,
+        action: 'unhide',
+      });
+      return;
+    }
+    d.setActionBusy(true);
+    d.setActionMsg('');
+    try {
+      const api = globalThis.PRTreeFetch;
+      if (!api?.unminimizeComment) {
+        throw new Error('Unhide comment API unavailable');
+      }
+      await api.unminimizeComment(nodeId);
+      const base = d.detailRef.current || d.detail;
+      const next = patchDetailCommentMinimized(base, commentId, {
+        isMinimized: false,
+        minimizedReason: null,
+      });
+      commitCommentListPatch(next);
+      d.setActionMsg('Comment restored.');
+      stampHideCommentResult({
+        ok: true,
+        commentId,
+        isMinimized: false,
+        action: 'unhide',
+      });
+    } catch (err: any) {
+      d.setActionMsg(err?.message || String(err));
+      stampHideCommentResult({
+        ok: false,
+        commentId,
+        isMinimized: true,
+        action: 'unhide',
+      });
+    } finally {
+      d.setActionBusy(false);
+    }
+  }
+
   return {
     timelineActorFromDetail,
     refreshTimelineEvents,
@@ -1707,5 +1826,7 @@ export function installPrModalMutations(d: Record<string, any>) {
     commitCommentListPatch,
     onDeleteReviewComment,
     onDeleteIssueComment,
+    onHideComment,
+    onUnhideComment,
   };
 }

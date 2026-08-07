@@ -294,7 +294,13 @@ import {
   focusContextThreadReplyAfterPaint,
   isContextThreadReplyFocused,
   PRP_CONTEXT_THREAD_TAB_LEAVE,
+  scrollChildToMaximizeInScroller,
 } from '../lib/context-thread-dom';
+import {
+  listReviewThreadFocusUnits,
+  stepReviewThreadFocusUnit,
+  collectThreadReplyComments,
+} from '../lib/thread-reply-nav';
 import { resolveDiffDisplayFiles } from '../lib/single-file-mode';
 import {
   buildConversationTimeline,
@@ -346,7 +352,9 @@ import {
   buildPositionFromComment,
   findCommentIndexByPosition,
   parsePosition,
+  parseGithubCommentHash,
   resolveConversationAnchorForCommentId,
+  optimisticConversationAnchorForKind,
   replaceLocationRoute,
   clearLocationRoute,
 } from '../lib/uri-route';
@@ -581,6 +589,8 @@ export function PrModalApp({
     commitCommentListPatch,
     onDeleteReviewComment,
     onDeleteIssueComment,
+    onHideComment,
+    onUnhideComment,
   } = mut;
 
   /** Diff files scoped to a commit or commit range (null = full PR files). */
@@ -1059,7 +1069,23 @@ export function PrModalApp({
   const pickerAnchorRef = useRef<HTMLElement | null>(null);
   /** Apply session/URI page+position once per PR open. */
   const routeRestoreKeyRef = useRef<string | null>(null);
+  /** Position deep-link fully applied (scrolled/focused). */
   const positionAppliedRef = useRef<string | null>(null);
+  /** In-flight deep-link verify loop key — avoid stacking timers. */
+  const positionInFlightRef = useRef<string | null>(null);
+  /**
+   * Soft budget exhausted for applyKey@corpusSig — re-try only when the
+   * progressive corpus grows (new comments / mapped threads).
+   */
+  const positionExhaustedRef = useRef<{
+    key: string;
+    corpus: string;
+  } | null>(null);
+  const positionVerifyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
+  /** Guard deep-link load-more kicks. */
+  const positionLoadMoreKickRef = useRef(0);
   /** Skip writing URI until after initial restore settles. */
   const [routeWriteReady, setRouteWriteReady] = useState(false);
   const isMac =
@@ -2658,6 +2684,12 @@ export function PrModalApp({
     if (!mappedComments.length) return;
     // Thread focus owns the surface — release any line selection.
     clearLineSelectionForNav();
+    // Reset in-thread unit when hopping threads
+    try {
+      useModalStore.getState().setFocusedThreadUnitId(null);
+    } catch {
+      /* ignore */
+    }
     if (typeof resolveCommentNav === 'function') {
       const st = resolveCommentNav(mappedComments, commentIndex, delta);
       const active = st.active;
@@ -2685,6 +2717,193 @@ export function PrModalApp({
       } else {
         setCommentIndex(next);
       }
+    }
+  }
+
+  /** Collect reply rows for a root review-comment id from groups + flat list. */
+  function repliesForRootCommentId(rootId: string): any[] {
+    if (!rootId) return [];
+    const rid = String(rootId);
+    const thread = threadsByCommentId?.get?.(rid) || null;
+    if (Array.isArray(thread?.replies) && thread.replies.length) {
+      return thread.replies;
+    }
+    if (Array.isArray(thread?.root?.replies) && thread.root.replies.length) {
+      return thread.root.replies;
+    }
+    // Transitive flat walk (nested in_reply_to chains + shell lag)
+    const all = detail?.reviewComments || detail?.review_comments || [];
+    if (typeof collectThreadReplyComments === 'function') {
+      const nested = collectThreadReplyComments(rid, all);
+      if (nested.length) return nested;
+    } else {
+      const direct = (Array.isArray(all) ? all : []).filter((c: any) => {
+        if (!c || c.id == null) return false;
+        const parent = c.inReplyToId ?? c.in_reply_to_id ?? null;
+        return parent != null && String(parent) === rid;
+      });
+      if (direct.length) return direct;
+    }
+    // DOM fallback: InlineThread already painted reply units (lazy/by-ids body
+    // may be in the virtual row while App's reviewComments map is still roots).
+    try {
+      if (typeof document === 'undefined') return [];
+      const active =
+        (document.querySelector(
+          `.prp-inline-thread--context-active[data-search-anchor="review-comment:${CSS.escape(rid)}"]`
+        ) as HTMLElement | null) ||
+        (document.querySelector(
+          `.prp-inline-thread[data-context-active="1"][data-search-anchor="review-comment:${CSS.escape(rid)}"]`
+        ) as HTMLElement | null);
+      if (!active) return [];
+      const ids = [
+        ...active.querySelectorAll(
+          '[data-prp-thread-unit="reply"][data-prp-thread-unit-id]'
+        ),
+      ]
+        .map((el) => el.getAttribute('data-prp-thread-unit-id'))
+        .filter((id): id is string => Boolean(id && id !== rid));
+      return ids.map((id) => ({ id }));
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * ↑/↓ within a multi-reply review thread (root + replies). Returns true when
+   * handled so callers can skip file/line selection.
+   */
+  function stepThreadReply(delta: number): boolean {
+    const st = useModalStore.getState();
+    const liveLayout = st.layoutMode;
+    // Diff: activeDiffCommentId / commentIndex root
+    let rootId: string | null = null;
+    if (liveLayout === LAYOUT_DIFF) {
+      const c =
+        commentIndex >= 0 && mappedComments[commentIndex]
+          ? mappedComments[commentIndex]
+          : st.activeDiffCommentId != null
+            ? mappedComments.find(
+                (m: any) =>
+                  m && String(m.id) === String(st.activeDiffCommentId)
+              )
+            : null;
+      if (!c) return false;
+      rootId = c.id != null ? String(c.id) : null;
+    } else {
+      // Conversation: focused review-comment anchor
+      const a = String(
+        st.focusedConversationAnchor || st.pendingConversationNavAnchor || ''
+      ).trim();
+      if (!a.startsWith('review-comment:')) return false;
+      rootId = a.slice('review-comment:'.length);
+    }
+    if (!rootId) return false;
+    const replies = repliesForRootCommentId(rootId);
+    const units = listReviewThreadFocusUnits(rootId, replies);
+    if (units.length < 2) return false;
+    const cur =
+      st.focusedThreadUnitId != null
+        ? String(st.focusedThreadUnitId)
+        : rootId;
+    const next = stepReviewThreadFocusUnit(units, cur, delta);
+    if (!next) return false;
+    // Keep Diff thread root selected while stepping units. setActiveDiffCommentId
+    // clears focusedThreadUnitId — set root first, then the unit.
+    if (liveLayout === LAYOUT_DIFF && st.activeDiffCommentId == null) {
+      st.setActiveDiffCommentId(rootId);
+    }
+    st.setFocusedThreadUnitId(next.id);
+    // Scroll unit into view (thread list or virtual scroller)
+    try {
+      requestAnimationFrame(() => {
+        try {
+          const host =
+            (typeof document !== 'undefined' &&
+              (document.querySelector(
+                `[data-prp-thread-unit-id="${CSS.escape(next.id)}"]`
+              ) as HTMLElement | null)) ||
+            null;
+          if (!host) return;
+          const scroller =
+            (host.closest(
+              '.prp-vlist, .prp-conversation-virtual, .prp-diff-scroll, .prp-scroll'
+            ) as HTMLElement | null) || null;
+          if (scroller) {
+            scrollChildToMaximizeInScroller(scroller, host, {
+              padTop: 24,
+              padBottom: 24,
+            });
+          } else {
+            host.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+          }
+        } catch {
+          /* ignore */
+        }
+      });
+    } catch {
+      /* ignore */
+    }
+    return true;
+  }
+
+  /** True when focused Diff/Conversation thread has ≥1 reply (↑/↓ unit nav). */
+  function isMultiReplyThreadFocused(): boolean {
+    const st = useModalStore.getState();
+    let rootId: string | null = null;
+    if (st.layoutMode === LAYOUT_DIFF) {
+      const c =
+        commentIndex >= 0 && mappedComments[commentIndex]
+          ? mappedComments[commentIndex]
+          : st.activeDiffCommentId != null
+            ? mappedComments.find(
+                (m: any) =>
+                  m && String(m.id) === String(st.activeDiffCommentId)
+              )
+            : null;
+      if (!c?.id) {
+        // Fallback: any context-active multi-reply card in DOM
+        try {
+          if (typeof document !== 'undefined') {
+            const active = document.querySelector(
+              '.prp-inline-thread--context-active, .prp-inline-thread[data-context-active="1"]'
+            );
+            if (
+              active?.querySelector(
+                '[data-prp-thread-unit="reply"][data-prp-thread-unit-id]'
+              )
+            ) {
+              return true;
+            }
+          }
+        } catch {
+          /* ignore */
+        }
+        return false;
+      }
+      rootId = String(c.id);
+    } else {
+      const a = String(
+        st.focusedConversationAnchor || st.pendingConversationNavAnchor || ''
+      ).trim();
+      if (!a.startsWith('review-comment:')) return false;
+      rootId = a.slice('review-comment:'.length);
+    }
+    if (!rootId) return false;
+    if (repliesForRootCommentId(rootId).length > 0) return true;
+    // Last resort: painted reply units on the focused thread card
+    try {
+      if (typeof document === 'undefined') return false;
+      const active = document.querySelector(
+        `.prp-inline-thread--context-active[data-search-anchor="review-comment:${CSS.escape(rootId)}"], .prp-inline-thread[data-context-active="1"][data-search-anchor="review-comment:${CSS.escape(rootId)}"]`
+      );
+      return Boolean(
+        active?.querySelector(
+          '[data-prp-thread-unit="reply"][data-prp-thread-unit-id]'
+        )
+      );
+    } catch {
+      return false;
     }
   }
 
@@ -2922,9 +3141,20 @@ export function PrModalApp({
     if (layoutMode === LAYOUT_DIFF) collapseDiff();
     const ordered = conversationCommentPageOrder();
     const focusOpts = { reverseComments };
+    const st = useModalStore.getState();
+    // Prefer live store ring/pending. A leftover ref after virtual unmount or
+    // incomplete clear would make ⌥J step mid-list instead of re-seeding
+    // description (e2e P1.2b: first stop must be description).
+    const storeCur =
+      st.focusedConversationAnchor ||
+      st.pendingConversationNavAnchor ||
+      null;
+    if (!storeCur && conversationCommentFocusRef.current) {
+      conversationCommentFocusRef.current = null;
+    }
     const cur =
+      storeCur ||
       conversationCommentFocusRef.current?.anchor ||
-      useModalStore.getState().focusedConversationAnchor ||
       null;
     const next =
       typeof stepConversationCommentFocus === 'function'
@@ -3467,6 +3697,13 @@ export function PrModalApp({
     if (routeRestoreKeyRef.current === key) return;
     routeRestoreKeyRef.current = key;
     positionAppliedRef.current = null;
+    positionInFlightRef.current = null;
+    positionExhaustedRef.current = null;
+    positionLoadMoreKickRef.current = 0;
+    if (positionVerifyTimerRef.current) {
+      clearTimeout(positionVerifyTimerRef.current);
+      positionVerifyTimerRef.current = null;
+    }
     setRouteWriteReady(false);
     // Zustand survives host unmount — never carry focused comment into a new PR URI
     setCommentIndex(-1);
@@ -3679,120 +3916,321 @@ export function PrModalApp({
   ]);
 
   // Focus comment/thread from URI/session position (Conversation or Diff).
+  // Progressive load: do not mark applied until scroll/focus succeeds.
+  // Comment may appear after timeline/thread pages settle or off-window.
   useEffect(() => {
     if (!open || !detail?.number) return;
-    const pos = initialRoute?.position || null;
+    // Prefer host initialRoute; also re-read location.hash so soft-nav / race
+    // where routePosition lagged still restores #issuecomment- / #discussion_r-.
+    let pos = initialRoute?.position || null;
+    let routePage = normalizePage(initialRoute?.page);
+    let hashKind: string | null = null;
+    try {
+      if (typeof location !== 'undefined') {
+        const gh = parseGithubCommentHash(location.hash || '');
+        if (gh) {
+          if (!pos) pos = gh.position;
+          if (!routePage) routePage = normalizePage(gh.page);
+          hashKind = gh.kind || null;
+        }
+      }
+    } catch {
+      /* ignore */
+    }
     if (!pos) return;
     const applyKey = `${detail.number}:${pos}`;
     if (positionAppliedRef.current === applyKey) return;
     const parsed = parsePosition(pos);
     if (!parsed) return;
-    const routePage = normalizePage(initialRoute?.page);
 
-    // Conversation deep-link: scroll/focus timeline or thread card
-    if (routePage === 'conversation') {
-      const anchor = resolveConversationAnchorForCommentId(
-        detail,
-        parsed.id
-      );
-      if (!anchor) return;
-      // Need at least comments or threads present so the row can mount
-      const hasFeed =
-        (Array.isArray(detail.comments) && detail.comments.length > 0) ||
-        (Array.isArray(detail.reviewThreads) &&
-          detail.reviewThreads.length > 0) ||
-        (Array.isArray(detail.review_threads) &&
-          detail.review_threads.length > 0) ||
-        (Array.isArray(detail.timelineItems) &&
-          detail.timelineItems.length > 0);
-      if (!hasFeed) return;
+    const corpusSig = [
+      Array.isArray(detail.comments) ? detail.comments.length : 0,
+      Array.isArray(detail.reviewComments)
+        ? detail.reviewComments.length
+        : Array.isArray(detail.review_comments)
+          ? detail.review_comments.length
+          : 0,
+      Array.isArray(detail.reviewThreads)
+        ? detail.reviewThreads.length
+        : Array.isArray(detail.review_threads)
+          ? detail.review_threads.length
+          : 0,
+      mappedComments.length,
+      detail?.timelineMeta?.loadedCount ?? '',
+      detail?.commentsMeta?.loadedCount ?? '',
+      detail?.reviewThreadsMeta?.loadedCount ??
+        detail?.reviewThreadsMeta?.loadedThreadCount ??
+        '',
+    ].join('|');
+    const exhausted = positionExhaustedRef.current;
+    if (
+      exhausted &&
+      exhausted.key === applyKey &&
+      exhausted.corpus === corpusSig
+    ) {
+      // Same incomplete corpus as last soft-budget — wait for more data.
+      return;
+    }
+
+    const clearVerifyTimer = () => {
+      if (positionVerifyTimerRef.current) {
+        clearTimeout(positionVerifyTimerRef.current);
+        positionVerifyTimerRef.current = null;
+      }
+    };
+
+    const markApplied = () => {
       positionAppliedRef.current = applyKey;
+      positionInFlightRef.current = null;
+      positionExhaustedRef.current = null;
+      clearVerifyTimer();
+    };
+
+    const markSoftExhausted = () => {
+      positionInFlightRef.current = null;
+      positionExhaustedRef.current = { key: applyKey, corpus: corpusSig };
+      clearVerifyTimer();
+    };
+
+    const kickLoadMoreIfNeeded = () => {
+      if (typeof onLoadMoreReviewThreads !== 'function') return;
+      const now = Date.now();
+      // Throttle kicks — load-more is expensive.
+      if (now - positionLoadMoreKickRef.current < 900) return;
+      const tl = detail?.timelineMeta || {};
+      const cm = detail?.commentsMeta || {};
+      const tm = detail?.reviewThreadsMeta || {};
+      const need =
+        Boolean(tl.hasMore) ||
+        tl.complete === false ||
+        Boolean(cm.hasMore) ||
+        Boolean(tm.hasMore) ||
+        Boolean(tm.hasOlder);
+      if (!need) return;
+      positionLoadMoreKickRef.current = now;
+      void onLoadMoreReviewThreads('all').catch(() => {
+        /* host surfaces stage errors */
+      });
+    };
+
+    /**
+     * Keep re-requesting conversation nav until focused.
+     * Virtual list may miss the first paint when the row is off-window / not
+     * yet in the progressive feed — also kick timeline/thread pagination.
+     *
+     * Always (re)starts the verify loop: React effect cleanup clears the prior
+     * timer on dependency change, so an in-flight early-return would stall.
+     */
+    const startConversationDeepLink = (anchor: string) => {
+      clearVerifyTimer();
+      positionInFlightRef.current = applyKey;
+      positionExhaustedRef.current = null;
+      // Always leave Diff so VirtualConversationList can mount and scroll.
       if (layoutMode === LAYOUT_DIFF) setLayoutMode(LAYOUT_CENTERED);
       try {
-        useModalStore.setState({
-          pendingConversationNavAnchor: anchor,
-        });
+        useModalStore.getState().requestConversationNav(anchor);
       } catch {
         /* ignore */
       }
-      return;
+      let ticks = 0;
+      const MAX_TICKS = 100; // ~20s @ 200ms
+      const tick = () => {
+        ticks += 1;
+        try {
+          const st = useModalStore.getState();
+          if (st.focusedConversationAnchor === anchor) {
+            // Confirm the node is in the active conversation scroller viewport
+            // when possible; stamp alone can race height settle.
+            try {
+              const scroller = document.querySelector(
+                '.prp-body-panel--active .prp-conversation-virtual'
+              ) as HTMLElement | null;
+              const node = scroller
+                ? (scroller.querySelector(
+                    `[data-search-anchor="${CSS.escape(anchor)}"]`
+                  ) as HTMLElement | null)
+                : null;
+              if (node && scroller) {
+                const s = scroller.getBoundingClientRect();
+                const r = node.getBoundingClientRect();
+                const visible =
+                  Math.min(r.bottom, s.bottom) - Math.max(r.top, s.top);
+                const ok =
+                  visible > Math.min(48, Math.max(20, r.height * 0.15));
+                if (ok) {
+                  markApplied();
+                  return;
+                }
+                // Focused but not in view — re-request nav to re-scroll.
+                st.requestConversationNav(anchor);
+              } else {
+                markApplied();
+                return;
+              }
+            } catch {
+              markApplied();
+              return;
+            }
+          } else if (st.pendingConversationNavAnchor !== anchor) {
+            // Pending cleared without focus (lost) or never set — re-request
+            st.requestConversationNav(anchor);
+          }
+          // Still waiting: ensure older pages load when target is off first window.
+          if (ticks === 1 || ticks % 5 === 0) {
+            kickLoadMoreIfNeeded();
+          }
+        } catch {
+          /* ignore */
+        }
+        if (ticks >= MAX_TICKS) {
+          // Soft exhaust — re-enter when corpus grows (more pages arrive).
+          markSoftExhausted();
+          return;
+        }
+        positionVerifyTimerRef.current = setTimeout(tick, 200);
+      };
+      positionVerifyTimerRef.current = setTimeout(tick, 80);
+    };
+
+    // Conversation deep-link: scroll/focus timeline or thread card
+    if (routePage === 'conversation') {
+      let anchor = resolveConversationAnchorForCommentId(detail, parsed.id);
+      if (!anchor && parsed.id) {
+        anchor = optimisticConversationAnchorForKind(parsed.id, hashKind);
+      }
+      if (!anchor) return;
+      // Start immediately even before first feed paint so pending is live when
+      // VirtualConversationList mounts (and layout switches off Diff).
+      startConversationDeepLink(anchor);
+      return () => clearVerifyTimer();
     }
 
     // Diff (default when page omitted or page=diff): mapped review comment roots.
     // Copy-link uses the exact comment id (root or reply). mappedComments is
     // roots-only — resolve reply → root so c:{replyId} still scrolls the thread.
-    if (!mappedComments.length) return;
-    let diffPos = pos;
+    if (!mappedComments.length) {
+      // Kick thread drain so Diff corpus can appear; conversation fallback later.
+      kickLoadMoreIfNeeded();
+      return;
+    }
+    let rootId: string | number | null = parsed.id;
     if (typeof resolveRootReviewCommentId === 'function') {
-      const rootId = resolveRootReviewCommentId(
+      const resolved = resolveRootReviewCommentId(
         detail?.reviewComments || detail?.review_comments || [],
         parsed.id
       );
-      if (rootId != null && String(rootId) !== '') {
-        diffPos = `c:${rootId}`;
+      if (resolved != null && String(resolved) !== '') {
+        rootId = resolved;
       }
     }
+    const diffPos = `c:${rootId}`;
     const idx = findCommentIndexByPosition(mappedComments, diffPos);
     if (idx < 0) {
-      // Issue-only comment may only exist on conversation — fall back
-      if (routePage == null || routePage === 'diff') {
-        const anchor = resolveConversationAnchorForCommentId(
-          detail,
-          parsed.id
-        );
-        if (anchor && routePage == null) {
-          // Prefer conversation when not found on Diff and page was unspecified
-          const hasIssue =
-            Array.isArray(detail.comments) &&
-            detail.comments.some(
-              (c: any) => c && String(c.id) === String(parsed.id)
-            );
-          if (hasIssue) {
-            positionAppliedRef.current = applyKey;
-            if (layoutMode === LAYOUT_DIFF) setLayoutMode(LAYOUT_CENTERED);
-            try {
-              useModalStore.setState({
-                pendingConversationNavAnchor: anchor,
-              });
-            } catch {
-              /* ignore */
-            }
-          }
+      // Not in Diff map yet — load more threads; fall back to conversation when
+      // the comment exists there (issue comment or timeline review card).
+      kickLoadMoreIfNeeded();
+      const anchor = resolveConversationAnchorForCommentId(detail, parsed.id);
+      if (anchor) {
+        // Prefer conversation when hash page was unspecified OR when Diff cannot
+        // host the target (issue comments; filtered/outdated threads).
+        if (routePage == null || anchor.startsWith('issue-comment:')) {
+          startConversationDeepLink(anchor);
+          return () => clearVerifyTimer();
         }
       }
+      // Thread not in mapped list yet (shell/by-ids still loading) — retry later
       return;
     }
-    positionAppliedRef.current = applyKey;
-    if (layoutMode !== LAYOUT_DIFF) setLayoutMode(LAYOUT_DIFF);
-    setCommentIndex(idx);
-    const row = mappedComments[idx];
-    if (row?.rowIndex != null) {
-      const { avgH: h, rowOffsetList: offs } = getDiffScrollMetrics();
-      const top = scrollTopForIndex(
-        row.rowIndex,
-        h,
-        viewportHeightRef.current,
-        virtualRows.length,
-        offs
-      );
-      setScrollTop(top);
-      requestAnimationFrame(() => {
-        if (listRef.current) listRef.current.scrollTop = top;
+
+    // Use the full Diff jump path (expand file, clear filters, pending re-scroll)
+    // rather than a single raw scrollTop which fails for collapsed / off-window rows.
+    // Always restart verify loop (effect cleanup clears prior timers).
+    clearVerifyTimer();
+    positionInFlightRef.current = applyKey;
+    positionExhaustedRef.current = null;
+    try {
+      const row = mappedComments[idx];
+      jumpToReviewComment({
+        id: row?.id ?? rootId,
+        path: row?.path || row?.filePath || null,
+        line: row?.line ?? row?.originalLine ?? null,
+        side: row?.side || null,
       });
+    } catch {
+      /* ignore */
     }
+
+    let ticks = 0;
+    const MAX_TICKS = 60; // ~12s
+    const tick = () => {
+      ticks += 1;
+      try {
+        // Re-resolve index in case mappedComments rebuilt
+        let liveIdx = idx;
+        const live = findCommentIndexByPosition(mappedComments, diffPos);
+        if (live >= 0) liveIdx = live;
+        const liveRow = mappedComments[liveIdx] || mappedComments[idx];
+        if (liveRow) {
+          jumpToReviewComment({
+            id: liveRow?.id ?? rootId,
+            path: liveRow?.path || liveRow?.filePath || null,
+            line: liveRow?.line ?? liveRow?.originalLine ?? null,
+            side: liveRow?.side || null,
+          });
+        }
+        // Success when the inline thread is mounted in the Diff scroller and
+        // intersects the viewport.
+        const list = listRef.current as HTMLElement | null;
+        const idStr = String(liveRow?.id ?? rootId ?? '');
+        const thr =
+          list?.querySelector?.(
+            `.prp-inline-thread[data-search-anchor="review-comment:${CSS.escape(idStr)}"]`
+          ) ||
+          list?.querySelector?.(
+            `[data-prp-comment-id="${CSS.escape(idStr)}"]`
+          );
+        if (thr && list) {
+          const s = list.getBoundingClientRect();
+          const r = (thr as HTMLElement).getBoundingClientRect();
+          const visible =
+            Math.min(r.bottom, s.bottom) - Math.max(r.top, s.top);
+          if (visible > Math.min(40, Math.max(16, r.height * 0.12))) {
+            markApplied();
+            return;
+          }
+        }
+        if (ticks % 5 === 0) kickLoadMoreIfNeeded();
+      } catch {
+        /* ignore */
+      }
+      if (ticks >= MAX_TICKS) {
+        markSoftExhausted();
+        return;
+      }
+      positionVerifyTimerRef.current = setTimeout(tick, 200);
+    };
+    positionVerifyTimerRef.current = setTimeout(tick, 120);
+    return () => clearVerifyTimer();
   }, [
     open,
     detail,
     detail?.number,
+    detail?.comments,
+    detail?.reviewThreads,
+    detail?.review_threads,
+    detail?.reviewComments,
+    detail?.review_comments,
+    detail?.timelineMeta,
+    detail?.commentsMeta,
+    detail?.reviewThreadsMeta,
     initialRoute?.position,
     initialRoute?.page,
     mappedComments,
     layoutMode,
-    viewportHeightRef.current,
     virtualRows.length,
     setLayoutMode,
-    setCommentIndex,
-    setScrollTop,
+    jumpToReviewComment,
+    onLoadMoreReviewThreads,
   ]);
 
   // Persist page UI for refresh: PR identity + page + file/line selection + forms.
@@ -3886,6 +4324,29 @@ export function PrModalApp({
     let position: string | null = null;
     if (commentIndex >= 0 && mappedComments[commentIndex]) {
       position = buildPositionFromComment(mappedComments[commentIndex]);
+    } else {
+      // Keep deep-link / keyboard-focus position in the URL. Writing null here
+      // used to race with open(prp_position=…) and strip the share query before
+      // the conversation scroller could promote pending → focused.
+      try {
+        const st = useModalStore.getState();
+        const anchor = String(
+          st.focusedConversationAnchor ||
+            st.pendingConversationNavAnchor ||
+            ''
+        ).trim();
+        const m = anchor.match(/^(?:issue|review)-comment:(.+)$/i);
+        if (m?.[1]) {
+          position = `c:${m[1]}`;
+        } else if (
+          initialRoute?.position != null &&
+          String(initialRoute.position).trim()
+        ) {
+          position = String(initialRoute.position).trim();
+        }
+      } catch {
+        /* ignore */
+      }
     }
 
     const commits = githubCommitsFromFilter(diffCommitFilter);
@@ -3930,6 +4391,8 @@ export function PrModalApp({
             startLine: routePayload.startLine,
             endLine: routePayload.endLine,
             side: routePayload.side,
+            // Re-emit #issuecomment- / #discussion_r so deep-link survives rewrites
+            position: routePayload.position,
           });
         } else {
           replaceLocationRoute(history, location, {
@@ -3958,6 +4421,7 @@ export function PrModalApp({
     routeWriteReady,
     isEmbed,
     diffCommitFilter,
+    initialRoute?.position,
   ]);
 
   // Debounced URI/hash update when selection moves (no App re-render per caret)
@@ -4007,6 +4471,13 @@ export function PrModalApp({
     if (open) return undefined;
     routeRestoreKeyRef.current = null;
     positionAppliedRef.current = null;
+    positionInFlightRef.current = null;
+    positionExhaustedRef.current = null;
+    positionLoadMoreKickRef.current = 0;
+    if (positionVerifyTimerRef.current) {
+      clearTimeout(positionVerifyTimerRef.current);
+      positionVerifyTimerRef.current = null;
+    }
     setRouteWriteReady(false);
     return undefined;
   }, [open]);
@@ -6598,6 +7069,17 @@ export function PrModalApp({
   }
 
   function reportShortcutAction(action: string) {
+    // E2E / host observability: last resolved product action
+    try {
+      if (typeof document !== 'undefined' && action) {
+        document.documentElement.setAttribute(
+          'data-prp-last-shortcut-action',
+          String(action)
+        );
+      }
+    } catch {
+      /* ignore */
+    }
     if (!action || typeof buildShortcutMonitorFire !== 'function') return;
     reportShortcutMonitor(buildShortcutMonitorFire(action, isMac));
   }
@@ -6973,7 +7455,7 @@ export function PrModalApp({
           ? (document.activeElement as HTMLElement | null)
           : null) || (e.target as HTMLElement | null);
       // Footer tips stay visible without focus — default to conversation
-      // composer so ⌥E/C/I/T match the OptBtnHint badges on that form.
+      // composer so ⌥C/I/T match the OptBtnHint badges on that form.
       const composerSurface =
         typeof findComposerShortcutSurface === 'function'
           ? findComposerShortcutSurface({
@@ -7018,8 +7500,7 @@ export function PrModalApp({
       }
 
       // Composer-context chords win over product peers when a surface is
-      // active (focused mdc OR default conversation footer). Otherwise ⌥E
-      // is stolen by editBody peer before composerEmoji can run.
+      // active (focused mdc OR default conversation footer).
       if (
         composerFocused &&
         !ui.paletteOpen &&
@@ -7070,28 +7551,6 @@ export function PrModalApp({
                   '[data-prp-composer-submit]:not([disabled])'
                 ) as HTMLButtonElement | null;
                 btn?.click?.();
-              } catch {
-                /* ignore */
-              }
-              break;
-            }
-            case 'composerEmoji': {
-              try {
-                // Collapsed ghost: open write surface first so emoji lands in ta
-                if (mdc && !mdc.querySelector?.('[data-prp-composer-input]')) {
-                  mdc.dispatchEvent(
-                    new CustomEvent('prp-composer-focus-input', {
-                      bubbles: true,
-                      cancelable: true,
-                    })
-                  );
-                }
-                mdc?.dispatchEvent(
-                  new CustomEvent('prp-composer-emoji', {
-                    bubbles: true,
-                    cancelable: true,
-                  })
-                );
               } catch {
                 /* ignore */
               }
@@ -7159,7 +7618,7 @@ export function PrModalApp({
 
       // Option / Option+Shift command actions (former mod → opt; no mod back-compat)
       // Opt+Shift peers (⌥⇧L labels, ⌥⇧P milestone, …) fire even while typing.
-      // Plain Opt stays blocked so composers keep ⌥E emoji / text entry.
+      // Plain Opt stays blocked while typing so text entry is not stolen.
       if (
         altOnly &&
         !ui.paletteOpen &&
@@ -7350,6 +7809,8 @@ export function PrModalApp({
               layoutMode: ui.layoutMode,
               conversationCommentFocused: liveConvFocus,
               contextThreadActive: liveContextThread,
+              multiReplyThreadFocused:
+                liveContextThread && isMultiReplyThreadFocused(),
               presentation: isEmbed ? 'embed' : 'modal',
               isEmbed,
             })
@@ -7434,10 +7895,93 @@ export function PrModalApp({
         case 'focusedThreadComment':
           act.runContextThreadAction?.('comment');
           break;
+        case 'stepThreadReplyPrev':
+          stepThreadReply(-1);
+          break;
+        case 'stepThreadReplyNext':
+          stepThreadReply(1);
+          break;
         case 'contextThreadResolve':
         case 'focusedThreadResolve':
           act.runContextThreadAction?.('resolve');
           break;
+        case 'contextCommentCopyBody':
+        case 'contextCommentCopyLink':
+        case 'contextCommentQuote':
+        case 'contextCommentHide':
+        case 'contextCommentEdit':
+        case 'contextCommentDelete':
+        case 'contextCommentReact': {
+          try {
+            const selMap: Record<string, string[]> = {
+              contextCommentCopyBody: ['[data-prp-copy-comment="1"]'],
+              contextCommentCopyLink: ['[data-prp-copy-comment-link="1"]'],
+              contextCommentQuote: ['[data-prp-quote-reply="1"]'],
+              contextCommentHide: [
+                '[data-prp-hide-comment="1"]',
+                '[data-prp-unhide-comment="1"]',
+              ],
+              contextCommentEdit: [
+                '[data-prp-edit-comment="1"]',
+                'button[aria-label*="Edit" i]',
+              ],
+              contextCommentDelete: [
+                '[data-prp-delete-comment="1"]',
+                'button[aria-label*="Delete" i]',
+              ],
+              contextCommentReact: [
+                '[data-prp-reaction-add="1"]',
+                '.prp-reactions__add',
+              ],
+            };
+            const sels = selMap[String(action)] || [];
+            const host =
+              (document.querySelector(
+                '.prp-card--kb-focus, .prp-conversation-kb-focus, .prp-review-group__row--kb-focus, .prp-inline-thread[data-context-active="1"], .prp-vline--comment-selected .prp-inline-thread, .prp-inline-thread--context-active'
+              ) as HTMLElement | null) ||
+              (document.querySelector(
+                '.prp-overlay [data-search-anchor].prp-card--kb-focus, .prp-overlay .prp-card--kb-focus'
+              ) as HTMLElement | null) ||
+              null;
+            const root = host || document.querySelector('.prp-overlay');
+            let btn: HTMLElement | null = null;
+            for (const s of sels) {
+              btn = (root?.querySelector?.(s) ||
+                document.querySelector(`.prp-overlay ${s}`)) as HTMLElement | null;
+              if (btn && !(btn as HTMLButtonElement).disabled) break;
+              btn = null;
+            }
+            if (btn) {
+              btn.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+              btn.click();
+              // ⌥E: after picker mounts, focus first emoji so Tab/arrows start there
+              if (String(action) === 'contextCommentReact') {
+                const focusFirstEmoji = () => {
+                  const emoji = document.querySelector(
+                    '.prp-reactions__picker [data-prp-reaction-emoji="1"], .prp-reactions__picker-btn'
+                  ) as HTMLButtonElement | null;
+                  if (!emoji) return false;
+                  try {
+                    emoji.focus({ preventScroll: true });
+                  } catch {
+                    emoji.focus?.();
+                  }
+                  return document.activeElement === emoji;
+                };
+                requestAnimationFrame(() => {
+                  if (focusFirstEmoji()) return;
+                  requestAnimationFrame(() => {
+                    if (focusFirstEmoji()) return;
+                    window.setTimeout(focusFirstEmoji, 40);
+                  });
+                });
+              }
+            }
+          } catch {
+            /* ignore */
+          }
+          break;
+        }
         case 'composerSubmit': {
           // Prefer custom event on focused MarkdownComposer; fallback click submit btn
           try {
@@ -7457,21 +8001,6 @@ export function PrModalApp({
               '[data-prp-composer-submit]:not([disabled])'
             ) as HTMLButtonElement | null;
             btn?.click?.();
-          } catch {
-            /* ignore */
-          }
-          break;
-        }
-        case 'composerEmoji': {
-          try {
-            const ae = document.activeElement as HTMLElement | null;
-            const mdc = ae?.closest?.('[data-prp-composer]') as HTMLElement | null;
-            mdc?.dispatchEvent(
-              new CustomEvent('prp-composer-emoji', {
-                bubbles: true,
-                cancelable: true,
-              })
-            );
           } catch {
             /* ignore */
           }
@@ -7983,6 +8512,8 @@ export function PrModalApp({
             onDiscardPending={onDiscardPendingReview}
             sectionLoading={isInitialLoad}
             onDeleteIssueComment={onDeleteIssueComment}
+            onHideComment={onHideComment}
+            onUnhideComment={onUnhideComment}
             onToggleReaction={onToggleReaction}
             onLoadReactors={onLoadReactors}
             onDeleteReviewComment={onDeleteReviewComment}
@@ -8196,6 +8727,8 @@ export function PrModalApp({
               onToggleReaction={onToggleReaction}
               onLoadReactors={onLoadReactors}
               onDeleteReviewComment={onDeleteReviewComment}
+              onHideComment={onHideComment}
+              onUnhideComment={onUnhideComment}
               onStartEditReviewComment={onStartEditReviewComment}
               onSaveEditComment={onSaveEditComment}
               setEditingComment={setEditingComment}

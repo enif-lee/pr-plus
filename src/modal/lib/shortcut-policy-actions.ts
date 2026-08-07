@@ -1,5 +1,6 @@
 import {
   COMPOSER_CONTEXT_SHORTCUT,
+  CONTEXT_COMMENT_ACTION_SHORTCUT,
   CONTEXT_THREAD_SHORTCUT,
   CONVERSATION_SCROLL_SHORTCUT,
   DIFF_OPT_ARROW_SHORTCUT,
@@ -124,7 +125,6 @@ export function resolveComposerContextShortcutAction(opts: any = {}) {
 
   if (shift) return null;
 
-  if (key === 'e') return COMPOSER_CONTEXT_SHORTCUT.emoji.action;
   if (key === 'c') return COMPOSER_CONTEXT_SHORTCUT.submit.action;
   if (key === 'i') return COMPOSER_CONTEXT_SHORTCUT.focusInput.action;
   if (key === 't') {
@@ -318,9 +318,20 @@ export function resolveModalShortcutAction(opts: any = {}) {
         }
       } else if (key === 'd' && !opts.editableTarget) {
         return CONTEXT_THREAD_SHORTCUT.gotoDiff.action;
-      } else if (key === 'c') {
-        // First press focuses composer; second (while typing) submits.
+      } else if (key === 'i' && !opts.editableTarget) {
+        // ⌥I — open/focus thread reply composer (submit is ⌥C while typing)
         return CONTEXT_THREAD_SHORTCUT.comment.action;
+      }
+      // Comment chrome actions (not while typing in a composer field)
+      if (!opts.editableTarget) {
+        if (key === 'y') return CONTEXT_COMMENT_ACTION_SHORTCUT.copyBody.action;
+        if (key === 'l') return CONTEXT_COMMENT_ACTION_SHORTCUT.copyLink.action;
+        if (key === 'q') return CONTEXT_COMMENT_ACTION_SHORTCUT.quote.action;
+        if (key === 'h') return CONTEXT_COMMENT_ACTION_SHORTCUT.hide.action;
+        if (key === 'w') return CONTEXT_COMMENT_ACTION_SHORTCUT.edit.action;
+        if (key === 'x') return CONTEXT_COMMENT_ACTION_SHORTCUT.delete.action;
+        // ⌥E reactions — not ⌥. (toggleDiff); composer typeahead removed
+        if (key === 'e') return CONTEXT_COMMENT_ACTION_SHORTCUT.react.action;
       }
     }
   }
@@ -424,6 +435,22 @@ export function resolveModalShortcutAction(opts: any = {}) {
     if (/^[1-9]$/.test(key)) return `navStackDigit${key}`;
   }
 
+  // Multi-reply review thread: plain ↑/↓ steps root ↔ replies (before Diff
+  // line selection or generic scroll). Requires explicit multiReplyThreadFocused.
+  if (
+    !alt &&
+    !mod &&
+    !ctrl &&
+    !shift &&
+    (key === 'arrowup' || key === 'arrowdown') &&
+    !opts.editableTarget &&
+    Boolean(opts.multiReplyThreadFocused)
+  ) {
+    return key === 'arrowup'
+      ? 'stepThreadReplyPrev'
+      : 'stepThreadReplyNext';
+  }
+
   // Diff line-selection move (no Opt): plain arrows = single-line move;
   // Shift+arrows = extend range. Allowed without an active selection so that
   // after file nav the first arrow seeds the first displayed line of the file.
@@ -466,7 +493,8 @@ export function resolveModalShortcutAction(opts: any = {}) {
   }
 
   // Composer-focused context (comment / reply / thread / selection form):
-  // ⌥E emoji · ⌥C submit · ⌥⌃R resolve · ⌥I focus · ⌥T mode · ⌘↵ submit
+  // ⌥C submit · ⌥⌃R resolve · ⌥I focus · ⌥T mode · ⌘↵ submit
+  // (⌥E is comment reaction chrome — handled above when contextThreadActive)
   if (opts.composerFocused) {
     const ca = resolveComposerContextShortcutAction({
       mod,

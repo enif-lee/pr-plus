@@ -78,6 +78,92 @@ export async function fetchReactableReactionGroups(
  * Caps nodes at `first` (default 5).
  * @returns ReactionGroup[] with users filled when available
  */
+/**
+ * Batch-load Minimizable fields for IssueComment / ReviewComment node ids.
+ * REST list comments omit isMinimized — this restores hide state after refresh.
+ * @returns Map<nodeId, { isMinimized, minimizedReason, viewerCanMinimize }>
+ */
+export async function fetchMinimizableStates(
+  nodeIds: any,
+  fetchImpl: any,
+  token: any,
+  ctx: any = null
+) {
+  ctx = normalizeApiCtx(ctx);
+  const ids = [
+    ...new Set(
+      (Array.isArray(nodeIds) ? nodeIds : [])
+        .map((id) => String(id || '').trim())
+        .filter(Boolean)
+    ),
+  ].slice(0, 100);
+  const out = new Map<
+    string,
+    {
+      isMinimized: boolean;
+      minimizedReason: string | null;
+      viewerCanMinimize: boolean | null;
+    }
+  >();
+  if (!ids.length || !token) return out;
+  // Use concrete types (not `... on Minimizable { id }`) — Minimizable has no
+  // `id`, and a bare Minimizable spread used to fail GraphQL validation so the
+  // soft catch returned an empty map and REST comments painted un-hidden.
+  const query = `query($ids:[ID!]!){
+    nodes(ids:$ids){
+      ... on IssueComment {
+        id
+        isMinimized
+        minimizedReason
+        viewerCanMinimize
+      }
+      ... on PullRequestReviewComment {
+        id
+        isMinimized
+        minimizedReason
+        viewerCanMinimize
+      }
+    }
+  }`;
+  try {
+    const data = await apiGraphql(query, { ids }, fetchImpl, token, ctx);
+    for (const node of data?.nodes || []) {
+      if (!node?.id) continue;
+      // isMinimized is Boolean! on these types — always present when type matches.
+      out.set(String(node.id), {
+        isMinimized: Boolean(node.isMinimized),
+        minimizedReason: node.minimizedReason ?? null,
+        viewerCanMinimize:
+          node.viewerCanMinimize != null
+            ? Boolean(node.viewerCanMinimize)
+            : null,
+      });
+    }
+  } catch {
+    /* soft */
+  }
+  return out;
+}
+
+/**
+ * Apply Minimizable map onto comment-like objects (mutates items).
+ */
+export function applyMinimizableStates(items: any[], byId: Map<string, any>) {
+  if (!byId?.size || !Array.isArray(items)) return items;
+  for (const c of items) {
+    const id = c?.nodeId || c?.node_id || c?.id;
+    if (id == null) continue;
+    const m = byId.get(String(id));
+    if (!m) continue;
+    c.isMinimized = Boolean(m.isMinimized);
+    c.minimizedReason = m.minimizedReason ?? null;
+    if (m.viewerCanMinimize != null) {
+      c.viewerCanMinimize = Boolean(m.viewerCanMinimize);
+    }
+  }
+  return items;
+}
+
 export async function fetchReactableReactors(
   nodeId: any,
   fetchImpl: any,

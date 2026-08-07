@@ -59,9 +59,17 @@ export {
   runReviewFilter,
 } from './review-filter.mjs';
 export {
-  getSteps as getLocaleCommentCopySteps,
-  runLocaleCommentCopy,
-} from './locale-comment-copy.mjs';
+  getSteps as getUiLocaleSteps,
+  runUiLocale,
+} from './ui-locale.mjs';
+export {
+  getSteps as getCommentCopySteps,
+  runCommentCopy,
+} from './comment-copy.mjs';
+export {
+  getSteps as getHideQuoteSteps,
+  runHideQuote,
+} from './hide-quote.mjs';
 
 import { createRunner } from '../lib/runner.mjs';
 import { closeAll, ensureBrowser, log } from '../lib/harness.mjs';
@@ -81,7 +89,10 @@ import { getSteps as getViewerGesturesSteps } from './viewer-gestures.mjs';
 import { getSteps as getCopyPrLinkSteps } from './copy-pr-link.mjs';
 import { getSteps as getRefreshActionSteps } from './refresh-action.mjs';
 import { getSteps as getReviewFilterSteps } from './review-filter.mjs';
-import { getSteps as getLocaleCommentCopySteps } from './locale-comment-copy.mjs';
+import { getSteps as getUiLocaleSteps } from './ui-locale.mjs';
+import { getSteps as getCommentCopySteps } from './comment-copy.mjs';
+import { getSteps as getHideQuoteSteps } from './hide-quote.mjs';
+import { getSteps as getThreadOptReplySteps } from './thread-opt-reply.mjs';
 
 /** Ordered feature suite (shared browser session for legacy runner). */
 export const FEATURE_SUITE = [
@@ -101,7 +112,10 @@ export const FEATURE_SUITE = [
   { id: 'copy-pr-link', getSteps: getCopyPrLinkSteps },
   { id: 'refresh-action', getSteps: getRefreshActionSteps },
   { id: 'review-filter', getSteps: getReviewFilterSteps },
-  { id: 'locale-comment-copy', getSteps: getLocaleCommentCopySteps },
+  { id: 'ui-locale', getSteps: getUiLocaleSteps },
+  { id: 'comment-copy', getSteps: getCommentCopySteps },
+  { id: 'hide-quote', getSteps: getHideQuoteSteps },
+  { id: 'thread-opt-reply', getSteps: getThreadOptReplySteps },
 ];
 
 /**

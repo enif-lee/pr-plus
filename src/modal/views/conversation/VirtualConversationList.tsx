@@ -198,11 +198,13 @@ function VirtualConversationListImpl(props: any) {
   }, [scrollToAnchor, rows, offsets, viewportHeight]);
 
   /**
-   * ⌥J/K keyboard focus: single scroll jump per target (no multi-pass thrash).
+   * ⌥J/K + deep-link scroll/focus.
    * - Depend only on pendingNavAnchor so heightMap/offset remeasure does not
    *   re-evaluate scroll mid-nav.
    * - Read rows/offsets from refs for latest layout without re-running.
-   * - No scrollIntoView (fights index-based scrollTop).
+   * - Deep-link / progressive load: row may appear seconds later — keep pending
+   *   and retry until scroll succeeds (do not promote after a single miss).
+   * - No scrollIntoView for the primary jump (fights index-based scrollTop).
    */
   const pendingNavAnchor = useModalStore((s) => s.pendingConversationNavAnchor);
   const navLayoutRef = useRef({
@@ -218,6 +220,28 @@ function VirtualConversationListImpl(props: any) {
 
     let cancelled = false;
     let settleT = 0;
+    let retryT = 0;
+    let attempts = 0;
+    /**
+     * Progressive comment/thread pages + virtual height settle can lag well
+     * past first paint. Keep retrying without a false promote (promote without
+     * a mounted node left deep-links "focused" but never scrolled).
+     */
+    const MAX_ATTEMPTS = 120; // ~24s @ 200ms
+    const RETRY_MS = 200;
+
+    const nodeInView = (scroller: HTMLElement, node: HTMLElement) => {
+      try {
+        const s = scroller.getBoundingClientRect();
+        const r = node.getBoundingClientRect();
+        if (r.width < 1 && r.height < 1) return false;
+        const visible =
+          Math.min(r.bottom, s.bottom) - Math.max(r.top, s.top);
+        return visible > Math.min(48, Math.max(20, r.height * 0.15));
+      } catch {
+        return false;
+      }
+    };
 
     const jumpToAnchor = () => {
       const { rows: r, offsets: off, viewportHeight: vh } = navLayoutRef.current;
@@ -261,35 +285,93 @@ function VirtualConversationListImpl(props: any) {
       if (st.pendingConversationNavAnchor !== a) return;
       st.setFocusedConversationAnchor(a);
       useModalStore.setState({ pendingConversationNavAnchor: null });
+      try {
+        if (typeof document !== 'undefined') {
+          document.documentElement.removeAttribute(
+            'data-prp-pending-conv-anchor'
+          );
+        }
+      } catch {
+        /* ignore */
+      }
+    };
+
+    const finishAfterScroll = () => {
+      if (cancelled) return;
+      if (useModalStore.getState().pendingConversationNavAnchor !== a) return;
+      // Settle pass after expand (ConversationKbFocusScroller) without
+      // re-binding to offset changes (avoids shake on height measure).
+      jumpToAnchor();
+      settleT = window.setTimeout(() => {
+        if (cancelled) return;
+        if (useModalStore.getState().pendingConversationNavAnchor !== a) return;
+        jumpToAnchor();
+        // Promote once the anchor node is mounted in the scroller. Prefer an
+        // in-view settle first; if still clipped, re-jump then promote anyway
+        // (window vs scroller metrics can disagree by a few dozen px and
+        // deep-link e2e treats "mostly on screen" as success).
+        const el = scrollerRef.current;
+        const node = el ? queryAnchorInScroller(el, a) : null;
+        if (node && el) {
+          if (!nodeInView(el, node)) {
+            jumpToAnchor();
+          }
+          // Second settle frame: heights may still be estimating
+          settleT = window.setTimeout(() => {
+            if (cancelled) return;
+            if (useModalStore.getState().pendingConversationNavAnchor !== a) {
+              return;
+            }
+            jumpToAnchor();
+            const el2 = scrollerRef.current;
+            const node2 = el2 ? queryAnchorInScroller(el2, a) : null;
+            if (node2) {
+              promote();
+            } else if (attempts < MAX_ATTEMPTS) {
+              scheduleRetry();
+            }
+          }, 48);
+          return;
+        }
+        if (attempts >= MAX_ATTEMPTS) {
+          // Never promote without a mounted node.
+          return;
+        }
+        scheduleRetry();
+      }, 72);
+    };
+
+    const scheduleRetry = () => {
+      if (cancelled) return;
+      if (attempts >= MAX_ATTEMPTS) {
+        // Do not false-promote — App deep-link loop keeps pending / re-requests.
+        return;
+      }
+      retryT = window.setTimeout(() => {
+        if (cancelled) return;
+        if (useModalStore.getState().pendingConversationNavAnchor !== a) return;
+        attempts += 1;
+        if (jumpToAnchor()) {
+          finishAfterScroll();
+        } else {
+          scheduleRetry();
+        }
+      }, RETRY_MS);
     };
 
     // 1) Immediate scroll before paint
-    const ok = jumpToAnchor();
-    if (!ok) {
-      // Row missing this frame (virtual list not ready) — one short retry
-      settleT = window.setTimeout(() => {
-        if (cancelled) return;
-        jumpToAnchor();
-        promote();
-      }, 48);
-      return () => {
-        cancelled = true;
-        window.clearTimeout(settleT);
-      };
+    attempts = 1;
+    if (jumpToAnchor()) {
+      finishAfterScroll();
+    } else {
+      // Row missing (virtual window / progressive feed) — keep pending, retry.
+      scheduleRetry();
     }
-
-    // 2) One settle pass after expand (ConversationKbFocusScroller) without
-    //    re-binding to offset changes (avoids shake on height measure).
-    settleT = window.setTimeout(() => {
-      if (cancelled) return;
-      if (useModalStore.getState().pendingConversationNavAnchor !== a) return;
-      jumpToAnchor();
-      promote();
-    }, 72);
 
     return () => {
       cancelled = true;
       window.clearTimeout(settleT);
+      window.clearTimeout(retryT);
     };
   }, [pendingNavAnchor]);
 

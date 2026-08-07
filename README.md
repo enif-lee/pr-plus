@@ -391,4 +391,4 @@ https://github.com/enif-lee/pr-plus/blob/main/PRIVACY.md
 
 ## License
 
-Intended for personal and team use. Update this section if you add a license file.
+[MIT](./LICENSE) © 2026 Ed Lee

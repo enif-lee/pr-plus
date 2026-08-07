@@ -203,6 +203,18 @@ export function mapIssueComment(c: any) {
     createdAt: c.created_at,
     nodeId: c.node_id || null,
     reactions: mapRestReactions(c.reactions),
+    // null = unknown (REST omits Minimizable) — must not clobber GraphQL true on merge
+    isMinimized:
+      c.isMinimized != null || c.is_minimized != null
+        ? Boolean(c.isMinimized ?? c.is_minimized)
+        : null,
+    minimizedReason: c.minimizedReason ?? c.minimized_reason ?? null,
+    viewerCanMinimize:
+      c.viewerCanMinimize != null
+        ? Boolean(c.viewerCanMinimize)
+        : c.viewer_can_minimize != null
+          ? Boolean(c.viewer_can_minimize)
+          : null,
   };
 }
 
@@ -249,6 +261,23 @@ export function mapReviewComment(c, extra: any = {}) {
     inReplyToId: c.in_reply_to_id ?? null,
     nodeId: c.node_id || null,
     reactions: mapRestReactions(c.reactions),
+    // null = unknown (REST omits Minimizable) — must not clobber GraphQL true
+    isMinimized:
+      extra.isMinimized != null ||
+      c.isMinimized != null ||
+      c.is_minimized != null
+        ? Boolean(
+            extra.isMinimized ?? c.isMinimized ?? c.is_minimized
+          )
+        : null,
+    minimizedReason:
+      extra.minimizedReason ?? c.minimizedReason ?? c.minimized_reason ?? null,
+    viewerCanMinimize:
+      extra.viewerCanMinimize != null
+        ? Boolean(extra.viewerCanMinimize)
+        : c.viewerCanMinimize != null
+          ? Boolean(c.viewerCanMinimize)
+          : null,
     threadNodeId: extra.threadNodeId ?? null,
     /** Pull request review id (groups file threads under one review event). */
     reviewId:
@@ -309,6 +338,10 @@ export function mapGraphqlReviewCommentNode(node, threadMeta: any = {}) {
     inReplyToId: node.replyTo?.databaseId ?? null,
     nodeId: node.id || null,
     reactions: mapGraphqlReactionGroups(node.reactionGroups),
+    isMinimized: Boolean(node.isMinimized ?? false),
+    minimizedReason: node.minimizedReason ?? null,
+    viewerCanMinimize:
+      node.viewerCanMinimize != null ? Boolean(node.viewerCanMinimize) : null,
     threadNodeId: threadMeta.threadNodeId || null,
     reviewId: reviewDbId,
     resolved: Boolean(threadMeta.resolved),

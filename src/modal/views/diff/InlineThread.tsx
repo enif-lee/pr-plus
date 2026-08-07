@@ -10,8 +10,11 @@ import { Avatar } from '@common/Avatar';
 import {
   IconCopy,
   IconDisclosure,
+  IconEye,
+  IconEyeClosed,
   IconLink,
   IconPencil,
+  IconQuote,
   IconSync,
   IconTrash,
 } from '@common/icons';
@@ -34,6 +37,18 @@ import {
   buildPositionFromComment,
   commentBodyForCopy,
 } from '@lib/uri-route';
+import {
+  DEFAULT_HIDE_REASON,
+  focusComposerRoot,
+  hideReasonLabel,
+  insertQuoteIntoDraft,
+  isCommentMinimized,
+  quoteReplyMarkdown,
+  stampQuoteReplyResult,
+  viewerCanMinimizeComment,
+} from '@lib/comment-quote-hide';
+import { CommentActionIconBtn } from '@common/CommentActionIconBtn';
+import { CONTEXT_COMMENT_ACTION_SHORTCUT } from '@lib/shortcut-policy';
 
 /**
  * Inline review thread card (Diff + Conversation).
@@ -55,6 +70,8 @@ function InlineThreadImpl(props: any) {
     onReply,
     onResolve,
     onDelete,
+    onHide = null,
+    onUnhide = null,
     onEdit,
     onSaveEdit,
     onCancelEdit,
@@ -165,9 +182,17 @@ function InlineThreadImpl(props: any) {
   const contextActive = useModalStore((s) =>
     isContextThreadCommentActive(rootCommentId, s)
   );
+  /** ↑/↓ unit within this thread (root or a reply id) */
+  const focusedThreadUnitId = useModalStore((s) => s.focusedThreadUnitId);
+  const replyList = Array.isArray(thread?.replies) ? thread.replies : [];
   /** Resolve tip only while reply input is focused (not on idle threads) */
   const [replyFocused, setReplyFocused] = useState(false);
   const composerRootRef = useRef<HTMLDivElement | null>(null);
+  const threadRootRef = useRef<HTMLDivElement | null>(null);
+  /** Local expand of still-minimized comments (Show without Unhide). */
+  const [expandedMinimized, setExpandedMinimized] = useState<
+    Record<string, boolean>
+  >({});
 
   /**
    * Thread focus: Tab cycles input → Comment → Start review → Resolve → next
@@ -328,9 +353,11 @@ function InlineThreadImpl(props: any) {
       (linkCtx?.owner && linkCtx?.repo && linkCtx?.number
         ? `https://github.com/${linkCtx.owner}/${linkCtx.repo}/pull/${linkCtx.number}`
         : null);
+    // Diff inline threads are review comments → official #discussion_r{id}
     const url = buildCommentShareUrl({
       prHtmlUrl,
-      page: linkPage,
+      page: 'diff',
+      kind: 'review',
       position,
       number: linkCtx?.number,
     });
@@ -344,65 +371,253 @@ function InlineThreadImpl(props: any) {
     flashCopy(ok ? 'Link copied' : 'Copy failed');
   }
 
+  function quoteReplyIntoThread(
+    body: unknown,
+    author?: string | null,
+    commentId?: unknown
+  ) {
+    const quote = quoteReplyMarkdown(body, author);
+    const draftKey = rootId != null ? String(rootId) : '';
+    const cur =
+      draftKey && useModalStore.getState().replyDrafts?.[draftKey] != null
+        ? String(useModalStore.getState().replyDrafts[draftKey])
+        : String(replyText || '');
+    const next = insertQuoteIntoDraft(cur, quote);
+    if (draftKey) {
+      useModalStore.getState().setReplyDraft?.(draftKey, next);
+    }
+    onReplyText?.(next);
+    stampQuoteReplyResult({
+      ok: true,
+      text: quote,
+      commentId,
+      target: 'thread',
+    });
+    // Expand thread + focus reply composer
+    if (collapsed) {
+      try {
+        onToggleCollapse?.();
+      } catch {
+        /* ignore */
+      }
+    }
+    queueMicrotask(() => {
+      const host =
+        threadRootRef.current?.querySelector?.(
+          '[data-prp-composer-root="1"]'
+        ) ||
+        threadRootRef.current?.querySelector?.('.prp-inline-thread__reply') ||
+        null;
+      focusComposerRoot(host as Element | null);
+    });
+    setTimeout(() => {
+      const host =
+        threadRootRef.current?.querySelector?.(
+          '[data-prp-composer-root="1"]'
+        ) || null;
+      focusComposerRoot(host as Element | null);
+    }, 80);
+    flashCopy('Quoted into reply');
+  }
+
   /**
-   * Copy body/link for any reader; edit/delete only when own.
-   * Copy controls sit to the left of edit.
+   * Copy body/link + quote + hide for any reader; edit/delete only when own.
+   * TipPopover always; OptBtnHint only on the **root** when the thread is
+   * context-focused (replies never get Option digit badges).
    */
-  function renderCommentActions(id: any, commentBody: any, own: boolean) {
+  function renderCommentActions(
+    id: any,
+    commentBody: any,
+    own: boolean,
+    meta: {
+      author?: string | null;
+      nodeId?: string | null;
+      isMinimized?: boolean;
+      minimizedReason?: string | null;
+      viewerCanMinimize?: boolean | null;
+      /** When false, suppress OptBtnHint even if thread is context-active */
+      isRoot?: boolean;
+    } = {}
+  ) {
     if (isEditingId(id)) return null;
     const canLink = Boolean(buildPositionFromComment({ id }));
-    if (!own && !canLink && !commentBody) return null;
+    const minimized = Boolean(meta.isMinimized);
+    const canHide = viewerCanMinimizeComment({
+      viewerCanMinimize: meta.viewerCanMinimize,
+      nodeId: meta.nodeId,
+      isMinimized: minimized,
+    });
+    if (!own && !canLink && !commentBody && !canHide) return null;
+    // Root-only Opt badges when thread is keyboard-focused
+    const sc = Boolean(contextActive) && meta.isRoot !== false;
+    const S = CONTEXT_COMMENT_ACTION_SHORTCUT;
     return (
       <div className="prp-icon-actions">
-        <button
-          type="button"
-          className="prp-icon-btn"
+        <CommentActionIconBtn
+          tipTitle={S.copyBody.title}
+          shortcut={S.copyBody.labelMac}
+          showShortcutHint={sc}
           disabled={actionBusy}
-          title="Copy comment"
           aria-label="Copy comment text"
           data-prp-copy-comment="1"
           data-prp-comment-id={id != null ? String(id) : undefined}
           onClick={() => void copyCommentBody(commentBody, id)}
         >
           <IconCopy size={13} />
-        </button>
+        </CommentActionIconBtn>
         {canLink ? (
-          <button
-            type="button"
-            className="prp-icon-btn"
+          <CommentActionIconBtn
+            tipTitle={S.copyLink.title}
+            shortcut={S.copyLink.labelMac}
+            showShortcutHint={sc}
             disabled={actionBusy}
-            title="Copy link"
             aria-label="Copy link to comment"
             data-prp-copy-comment-link="1"
             data-prp-comment-id={id != null ? String(id) : undefined}
             onClick={() => void copyCommentLink(id)}
           >
             <IconLink size={13} />
-          </button>
+          </CommentActionIconBtn>
+        ) : null}
+        {commentBody != null ? (
+          <CommentActionIconBtn
+            tipTitle={S.quote.title}
+            shortcut={S.quote.labelMac}
+            showShortcutHint={sc}
+            disabled={actionBusy}
+            aria-label="Quote reply"
+            data-prp-quote-reply="1"
+            data-prp-comment-id={id != null ? String(id) : undefined}
+            onClick={() => quoteReplyIntoThread(commentBody, meta.author, id)}
+          >
+            <IconQuote size={13} />
+          </CommentActionIconBtn>
+        ) : null}
+        {canHide && meta.nodeId ? (
+          minimized ? (
+            <CommentActionIconBtn
+              tipTitle="Unhide comment"
+              shortcut={S.hide.labelMac}
+              showShortcutHint={sc}
+              disabled={actionBusy}
+              aria-label="Unhide comment"
+              data-prp-unhide-comment="1"
+              data-prp-comment-id={id != null ? String(id) : undefined}
+              onClick={() =>
+                onUnhide?.({
+                  commentId: id,
+                  nodeId: meta.nodeId,
+                })
+              }
+            >
+              <IconEye size={13} />
+            </CommentActionIconBtn>
+          ) : (
+            <CommentActionIconBtn
+              tipTitle={S.hide.title}
+              shortcut={S.hide.labelMac}
+              showShortcutHint={sc}
+              disabled={actionBusy}
+              aria-label="Hide comment"
+              data-prp-hide-comment="1"
+              data-prp-comment-id={id != null ? String(id) : undefined}
+              onClick={() =>
+                onHide?.({
+                  commentId: id,
+                  nodeId: meta.nodeId,
+                  reason: DEFAULT_HIDE_REASON,
+                })
+              }
+            >
+              <IconEyeClosed size={13} />
+            </CommentActionIconBtn>
+          )
         ) : null}
         {own ? (
           <>
-            <button
-              type="button"
-              className="prp-icon-btn"
+            <CommentActionIconBtn
+              tipTitle={S.edit.title}
+              shortcut={S.edit.labelMac}
+              showShortcutHint={sc}
               disabled={actionBusy}
-              title="Edit"
               aria-label={t('cta_edit_comment')}
+              data-prp-edit-comment="1"
+              data-prp-comment-id={id != null ? String(id) : undefined}
               onClick={() => onEdit?.(id, commentBody)}
             >
               <IconPencil size={13} />
-            </button>
-            <button
-              type="button"
-              className="prp-icon-btn prp-icon-btn--danger"
+            </CommentActionIconBtn>
+            <CommentActionIconBtn
+              tipTitle={S.delete.title}
+              shortcut={S.delete.labelMac}
+              showShortcutHint={sc}
+              className="prp-icon-btn--danger"
               disabled={actionBusy}
-              title="Delete"
               aria-label="Delete comment"
+              data-prp-delete-comment="1"
+              data-prp-comment-id={id != null ? String(id) : undefined}
               onClick={() => onDelete?.(id)}
             >
               <IconTrash size={13} />
-            </button>
+            </CommentActionIconBtn>
           </>
+        ) : null}
+      </div>
+    );
+  }
+
+  function renderMinimizedBanner(
+    id: any,
+    comment: any,
+    opts: { compact?: boolean } = {}
+  ) {
+    const reason = hideReasonLabel(
+      comment?.minimizedReason || DEFAULT_HIDE_REASON
+    );
+    const idKey = String(id);
+    const shown = Boolean(expandedMinimized[idKey]);
+    return (
+      <div
+        className={`prp-comment-minimized${
+          opts.compact !== false ? ' prp-comment-minimized--compact' : ''
+        }`}
+        data-prp-comment-minimized="1"
+        data-prp-comment-id={idKey}
+        data-prp-minimized-reason={
+          comment?.minimizedReason || DEFAULT_HIDE_REASON
+        }
+      >
+        <span className="prp-muted">This comment was marked as {reason}.</span>
+        <button
+          type="button"
+          className="prp-link-btn"
+          data-prp-toggle-minimized-body="1"
+          data-prp-comment-id={idKey}
+          onClick={() =>
+            setExpandedMinimized((prev) => ({
+              ...prev,
+              [idKey]: !prev[idKey],
+            }))
+          }
+        >
+          {shown ? 'Hide' : 'Show'}
+        </button>
+        {viewerCanMinimizeComment(comment) && comment?.nodeId ? (
+          <button
+            type="button"
+            className="prp-link-btn"
+            data-prp-unhide-comment="1"
+            data-prp-comment-id={idKey}
+            disabled={actionBusy}
+            onClick={() =>
+              onUnhide?.({
+                commentId: id,
+                nodeId: comment.nodeId,
+              })
+            }
+          >
+            Unhide
+          </button>
         ) : null}
       </div>
     );
@@ -431,6 +646,8 @@ function InlineThreadImpl(props: any) {
         busy={actionBusy}
         onToggle={onToggleReaction}
         onLoadReactors={onLoadReactors}
+        showShortcutHint={Boolean(contextActive)}
+        reactionShortcut={CONTEXT_COMMENT_ACTION_SHORTCUT.react.labelMac}
       />
     );
   }
@@ -500,17 +717,45 @@ function InlineThreadImpl(props: any) {
     );
   }
 
+  const rootMinimizeMeta = {
+    author,
+    nodeId:
+      row?.nodeId || thread?.root?.nodeId || thread?.nodeId || null,
+    isMinimized: Boolean(
+      row?.isMinimized ??
+        thread?.root?.isMinimized ??
+        thread?.isMinimized ??
+        false
+    ),
+    minimizedReason:
+      row?.minimizedReason ??
+      thread?.root?.minimizedReason ??
+      thread?.minimizedReason ??
+      null,
+    viewerCanMinimize:
+      row?.viewerCanMinimize ??
+      thread?.root?.viewerCanMinimize ??
+      thread?.viewerCanMinimize ??
+      null,
+  };
+
   return (
     <div
+      ref={threadRootRef}
       className={`prp-inline-thread${
         useTimeline ? ' prp-inline-thread--threaded' : ' prp-inline-thread--single'
       }${collapsed ? ' prp-inline-thread--collapsed' : ''}${
         rootPending ? ' prp-inline-thread--pending' : ''
-      }${props.className ? ` ${props.className}` : ''}`}
+      }${contextActive ? ' prp-inline-thread--context-active' : ''}${
+        props.className ? ` ${props.className}` : ''
+      }`}
       data-search-anchor={
         rootId != null ? `review-comment:${rootId}` : undefined
       }
       data-pending={rootPending ? '1' : undefined}
+      data-context-active={contextActive ? '1' : undefined}
+      data-prp-multi-reply={replyCount > 0 ? '1' : undefined}
+      data-prp-reply-count={replyCount > 0 ? String(replyCount) : undefined}
       data-comments-loading={commentsLoading ? '1' : undefined}
       aria-busy={commentsLoading ? true : undefined}
     >
@@ -629,7 +874,34 @@ function InlineThreadImpl(props: any) {
           <>
             {useTimeline ? (
               <ul className="prp-review-thread">
-                <li className="prp-review-thread__item">
+                {(() => {
+                  const rootIdKey = String(row?.commentId || thread?.id || '');
+                  const rootMin = isCommentMinimized(rootMinimizeMeta);
+                  const rootShown = Boolean(expandedMinimized[rootIdKey]);
+                  if (rootMin && !rootShown) {
+                    return (
+                      <li className="prp-review-thread__item prp-review-thread__item--minimized">
+                        {renderMinimizedBanner(
+                          row?.commentId || thread?.id,
+                          rootMinimizeMeta,
+                          { compact: true }
+                        )}
+                      </li>
+                    );
+                  }
+                  const rootUnitActive =
+                    contextActive &&
+                    (!focusedThreadUnitId ||
+                      String(focusedThreadUnitId) === rootIdKey);
+                  return (
+                <li
+                  className={`prp-review-thread__item${
+                    rootUnitActive ? ' prp-review-thread__item--unit-focus' : ''
+                  }`}
+                  data-prp-thread-unit="root"
+                  data-prp-thread-unit-id={rootIdKey}
+                  data-prp-thread-unit-active={rootUnitActive ? '1' : undefined}
+                >
                   <Avatar
                     login={author}
                     avatarUrl={row?.avatarUrl || thread?.root?.avatarUrl}
@@ -643,24 +915,47 @@ function InlineThreadImpl(props: any) {
                       </strong>
                       {rootAt ? <span className="prp-muted">{formatWhen(rootAt)}</span> : null}
                       {canOwn ? <Badge tone="muted">you</Badge> : null}
-                      {renderCommentActions(row?.commentId || thread?.id, body, canOwn)}
+                      {renderCommentActions(
+                        row?.commentId || thread?.id,
+                        body,
+                        canOwn,
+                        { ...rootMinimizeMeta, isRoot: true }
+                      )}
                     </div>
-                    {renderCommentBody(row?.commentId || thread?.id, body, {
-                      canApplySuggestion: canApply,
-                      reactions:
-                        row?.reactions ||
-                        thread?.root?.reactions ||
-                        thread?.reactions ||
-                        [],
-                      nodeId:
-                        row?.nodeId ||
-                        thread?.root?.nodeId ||
-                        thread?.nodeId ||
-                        null,
-                      pending: rootPending,
-                    })}
+                    {rootMin ? (
+                      <>
+                        {renderMinimizedBanner(
+                          row?.commentId || thread?.id,
+                          rootMinimizeMeta,
+                          { compact: false }
+                        )}
+                        {renderCommentBody(row?.commentId || thread?.id, body, {
+                          canApplySuggestion: canApply,
+                          reactions:
+                            row?.reactions ||
+                            thread?.root?.reactions ||
+                            thread?.reactions ||
+                            [],
+                          nodeId: rootMinimizeMeta.nodeId,
+                          pending: rootPending,
+                        })}
+                      </>
+                    ) : (
+                      renderCommentBody(row?.commentId || thread?.id, body, {
+                        canApplySuggestion: canApply,
+                        reactions:
+                          row?.reactions ||
+                          thread?.root?.reactions ||
+                          thread?.reactions ||
+                          [],
+                        nodeId: rootMinimizeMeta.nodeId,
+                        pending: rootPending,
+                      })
+                    )}
                   </div>
                 </li>
+                  );
+                })()}
                 {replies.map((r: any, idx: number) => {
                   const ownReply =
                     viewerLogin &&
@@ -668,12 +963,49 @@ function InlineThreadImpl(props: any) {
                     String(r.author).toLowerCase() === String(viewerLogin).toLowerCase();
                   const isLast = idx === replies.length - 1;
                   const isPending = Boolean(r.pending);
+                  const replyMeta = {
+                    author: r.author,
+                    nodeId: r.nodeId || null,
+                    isMinimized:
+                      r.isMinimized != null ? Boolean(r.isMinimized) : null,
+                    minimizedReason: r.minimizedReason ?? null,
+                    viewerCanMinimize: r.viewerCanMinimize ?? null,
+                  };
+                  const replyMin = isCommentMinimized(replyMeta);
+                  const replyShown = Boolean(expandedMinimized[String(r.id)]);
+                  if (replyMin && !replyShown) {
+                    return (
+                      <li
+                        key={r.id}
+                        className={`prp-review-thread__item prp-review-thread__item--minimized${
+                          isLast ? ' prp-review-thread__item--last' : ''
+                        }`}
+                      >
+                        {renderMinimizedBanner(r.id, replyMeta, {
+                          compact: true,
+                        })}
+                      </li>
+                    );
+                  }
+                  const replyUnitActive =
+                    contextActive &&
+                    focusedThreadUnitId != null &&
+                    String(focusedThreadUnitId) === String(r.id);
                   return (
                     <li
                       key={r.id}
                       className={`prp-review-thread__item${
                         isLast ? ' prp-review-thread__item--last' : ''
-                      }${isPending ? ' prp-review-thread__item--pending' : ''}`}
+                      }${isPending ? ' prp-review-thread__item--pending' : ''}${
+                        replyUnitActive
+                          ? ' prp-review-thread__item--unit-focus'
+                          : ''
+                      }`}
+                      data-prp-thread-unit="reply"
+                      data-prp-thread-unit-id={String(r.id)}
+                      data-prp-thread-unit-active={
+                        replyUnitActive ? '1' : undefined
+                      }
                     >
                       <Avatar
                         login={r.author}
@@ -699,18 +1031,45 @@ function InlineThreadImpl(props: any) {
                           {r.createdAt ? (
                             <span className="prp-muted">{formatWhen(r.createdAt)}</span>
                           ) : null}
-                          {!isPending ? renderCommentActions(r.id, r.body, ownReply) : null}
+                          {!isPending
+                            ? renderCommentActions(r.id, r.body, ownReply, {
+                                ...replyMeta,
+                                isRoot: false,
+                              })
+                            : null}
                         </div>
-                        {renderCommentBody(r.id, r.body, {
-                          reactions: r.reactions || [],
-                          nodeId: r.nodeId || null,
-                          pending: isPending,
-                        })}
+                        {replyMin ? (
+                          <>
+                            {renderMinimizedBanner(r.id, replyMeta, {
+                              compact: false,
+                            })}
+                            {renderCommentBody(r.id, r.body, {
+                              reactions: r.reactions || [],
+                              nodeId: r.nodeId || null,
+                              pending: isPending,
+                            })}
+                          </>
+                        ) : (
+                          renderCommentBody(r.id, r.body, {
+                            reactions: r.reactions || [],
+                            nodeId: r.nodeId || null,
+                            pending: isPending,
+                          })
+                        )}
                       </div>
                     </li>
                   );
                 })}
               </ul>
+            ) : isCommentMinimized(rootMinimizeMeta) &&
+              !expandedMinimized[String(row?.commentId || thread?.id)] ? (
+              <div className="prp-inline-thread__single prp-inline-thread__single--minimized">
+                {renderMinimizedBanner(
+                  row?.commentId || thread?.id,
+                  rootMinimizeMeta,
+                  { compact: true }
+                )}
+              </div>
             ) : (
               <div className="prp-inline-thread__single">
                 <div className="prp-inline-thread__head prp-inline-thread__head--flat">
@@ -733,23 +1092,44 @@ function InlineThreadImpl(props: any) {
                       {canOwn ? <Badge tone="muted">you</Badge> : null}
                     </div>
                   </div>
-                  {renderCommentActions(row?.commentId || thread?.id, body, canOwn)}
+                  {renderCommentActions(
+                    row?.commentId || thread?.id,
+                    body,
+                    canOwn,
+                    { ...rootMinimizeMeta, isRoot: true }
+                  )}
                 </div>
                 <div className="prp-inline-thread__body">
-                  {renderCommentBody(row?.commentId || thread?.id, body, {
-                    canApplySuggestion: canApply,
-                    reactions:
-                      row?.reactions ||
-                      thread?.root?.reactions ||
-                      thread?.reactions ||
-                      [],
-                    nodeId:
-                      row?.nodeId ||
-                      thread?.root?.nodeId ||
-                      thread?.nodeId ||
-                      null,
-                    pending: rootPending,
-                  })}
+                  {isCommentMinimized(rootMinimizeMeta) ? (
+                    <>
+                      {renderMinimizedBanner(
+                        row?.commentId || thread?.id,
+                        rootMinimizeMeta,
+                        { compact: false }
+                      )}
+                      {renderCommentBody(row?.commentId || thread?.id, body, {
+                            canApplySuggestion: canApply,
+                            reactions:
+                              row?.reactions ||
+                              thread?.root?.reactions ||
+                              thread?.reactions ||
+                              [],
+                            nodeId: rootMinimizeMeta.nodeId,
+                            pending: rootPending,
+                          })}
+                    </>
+                  ) : (
+                    renderCommentBody(row?.commentId || thread?.id, body, {
+                      canApplySuggestion: canApply,
+                      reactions:
+                        row?.reactions ||
+                        thread?.root?.reactions ||
+                        thread?.reactions ||
+                        [],
+                      nodeId: rootMinimizeMeta.nodeId,
+                      pending: rootPending,
+                    })
+                  )}
                 </div>
               </div>
             )}
@@ -770,16 +1150,17 @@ function InlineThreadImpl(props: any) {
               }}
             >
               <div className="prp-inline-thread__composer-field">
-                <div className="prp-opt-hint-host">
+                <div
+                  className={
+                    contextActive || replyFocused ? 'prp-opt-hint-host' : undefined
+                  }
+                >
                   {replyFocused ? (
-                    <>
-                      <OptBtnHint label="⌥E" preferredPlacement="top" />
-                      <OptBtnHint label="⌥I" preferredPlacement="top" />
-                    </>
+                    <OptBtnHint label="⌥I" preferredPlacement="top" />
                   ) : null}
-                  {/* 1st ⌥C: focus reply when thread focused but input not yet */}
+                  {/* 1st ⌥I: focus reply when thread focused but input not yet */}
                   {contextActive && !replyFocused ? (
-                    <OptBtnHint label="⌥C" preferredPlacement="top" />
+                    <OptBtnHint label="⌥I" preferredPlacement="top" />
                   ) : null}
                   <MarkdownComposer
                     value={replyText || ''}
@@ -816,7 +1197,11 @@ function InlineThreadImpl(props: any) {
                 }`}
               >
                 <span
-                  className="prp-opt-hint-host"
+                  className={
+                    replyFocused || contextActive
+                      ? 'prp-opt-hint-host'
+                      : undefined
+                  }
                   data-prp-thread-tab-host="comment"
                   tabIndex={0}
                   onKeyDown={(e) => {
@@ -846,14 +1231,13 @@ function InlineThreadImpl(props: any) {
                         mode: 'comment',
                       })
                     }
-                    title="Comment (⌥C · ⌘↵)"
+                    title="Comment (⌥C · ⌘↵ when typing · ⌥I to focus)"
                     data-prp-composer-submit="1"
                   >
                     {actionBusy ? 'Submitting…' : 'Comment'}
                   </Button>
                 </span>
                 <span
-                  className="prp-opt-hint-host"
                   data-prp-thread-tab-host="start-review"
                   tabIndex={0}
                   onKeyDown={(e) => {
@@ -894,7 +1278,11 @@ function InlineThreadImpl(props: any) {
                 </span>
                 {canResolveThread ? (
                   <span
-                    className="prp-opt-hint-host"
+                    className={
+                      contextActive || replyFocused
+                        ? 'prp-opt-hint-host'
+                        : undefined
+                    }
                     data-prp-thread-tab-host="resolve"
                     tabIndex={0}
                     onKeyDown={(e) => {
@@ -904,8 +1292,8 @@ function InlineThreadImpl(props: any) {
                       onResolve?.(resolveThreadNodeId, !isThreadResolved);
                     }}
                   >
-                    {/* Thread/comment focus (not only reply input) — ⌥⌃R always
-                        advertised while the unit is the context target. */}
+                    {/* Thread/comment focus (not only reply input) — ⌥⌃R only
+                        while the unit is the context target. */}
                     {contextActive || replyFocused ? (
                       <OptBtnHint label="⌥⌃R" preferredPlacement="top" />
                     ) : null}

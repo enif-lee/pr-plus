@@ -31,6 +31,9 @@ import {
   LinkIcon,
   MarkGithubIcon,
   PencilIcon,
+  QuoteIcon,
+  EyeClosedIcon,
+  EyeIcon,
   ScreenFullIcon,
   ScreenNormalIcon,
   SidebarCollapseIcon,
@@ -74,6 +77,12 @@ export const IconPencil = wrap(PencilIcon, 'prp-pen-icon');
 export const IconCheck = wrap(CheckIcon);
 export const IconX = wrap(XIcon);
 export const IconCopy = wrap(CopyIcon);
+/** Quote reply — insert blockquoted body into composer */
+export const IconQuote = wrap(QuoteIcon);
+/** Hide / minimize comment (GitHub minimizeComment) */
+export const IconEyeClosed = wrap(EyeClosedIcon);
+/** Show / unhide minimized comment */
+export const IconEye = wrap(EyeIcon);
 export const IconTrash = wrap(TrashIcon);
 export const IconSync = wrap(SyncIcon);
 /** Outline bell — not subscribed (invite to turn on notifications). */

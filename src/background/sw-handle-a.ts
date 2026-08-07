@@ -36,6 +36,8 @@ export async function handleMessagePartA(message: any): Promise<any> {
         hasFetch: typeof PRTreeFetch?.fetchPrDetail === 'function',
         hasTimelineItems:
           typeof PRTreeFetch?.fetchPrTimelineItemsPage === 'function',
+        hasMinimize: typeof PRTreeFetch?.minimizeComment === 'function',
+        hasUnminimize: typeof PRTreeFetch?.unminimizeComment === 'function',
         hasStorage: typeof PRTreeStorage?.getGithubTokenStatus === 'function',
         hasEndpoints: typeof PRGithubEndpoints?.resolveGithubEndpoints === 'function',
       };
@@ -566,6 +568,35 @@ export async function handleMessagePartA(message: any): Promise<any> {
         message.commentId,
         fetchImpl(),
         token, apiCtx);
+      return { ok: true, result };
+    }
+    case MSG.MINIMIZE_COMMENT: {
+      const token = await tokenForMessage(message);
+      if (!token) throw new Error('GitHub PAT required to hide comments');
+      if (typeof PRTreeFetch.minimizeComment !== 'function') {
+        throw new Error('Hide comment API unavailable');
+      }
+      const result = await PRTreeFetch.minimizeComment(
+        message.subjectNodeId || message.nodeId,
+        message.classifier || message.reason || 'OFF_TOPIC',
+        fetchImpl(),
+        token,
+        apiCtx
+      );
+      return { ok: true, result };
+    }
+    case MSG.UNMINIMIZE_COMMENT: {
+      const token = await tokenForMessage(message);
+      if (!token) throw new Error('GitHub PAT required to unhide comments');
+      if (typeof PRTreeFetch.unminimizeComment !== 'function') {
+        throw new Error('Unhide comment API unavailable');
+      }
+      const result = await PRTreeFetch.unminimizeComment(
+        message.subjectNodeId || message.nodeId,
+        fetchImpl(),
+        token,
+        apiCtx
+      );
       return { ok: true, result };
     }
     case MSG.TOGGLE_COMMENT_REACTION: {

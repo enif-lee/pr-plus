@@ -107,8 +107,48 @@ export function maxTimelineWatermark(items: any[]): string | null {
 }
 
 /**
+ * Prefer non-null minimize fields when merging REST (no Minimizable) over
+ * GraphQL IssueComment (has isMinimized / minimizedReason / viewerCanMinimize).
+ */
+export function mergeCommentMinimizeFields(prev: any, next: any): any {
+  if (!prev) return next;
+  if (!next) return prev;
+  const pickMin = (a: any, b: any) => {
+    // null/undefined = unknown (do not clobber the other side)
+    if (a?.isMinimized != null) return Boolean(a.isMinimized);
+    if (b?.isMinimized != null) return Boolean(b.isMinimized);
+    return false;
+  };
+  // Prefer next for most fields; next only wins isMinimized when it is non-null
+  const nextKnowsMin = next.isMinimized != null;
+  const isMinimized = nextKnowsMin
+    ? Boolean(next.isMinimized)
+    : pickMin(prev, next);
+  const minimizedReason = isMinimized
+    ? nextKnowsMin
+      ? next.minimizedReason ?? prev.minimizedReason ?? null
+      : prev.minimizedReason ?? next.minimizedReason ?? null
+    : null;
+  const viewerCanMinimize =
+    next.viewerCanMinimize != null
+      ? Boolean(next.viewerCanMinimize)
+      : prev.viewerCanMinimize != null
+        ? Boolean(prev.viewerCanMinimize)
+        : null;
+  return {
+    ...prev,
+    ...next,
+    isMinimized,
+    minimizedReason,
+    viewerCanMinimize,
+    nodeId: next.nodeId || prev.nodeId || next.node_id || prev.node_id || null,
+  };
+}
+
+/**
  * Merge incremental timeline page items into prior list by stable id/key.
  * Newer page wins on conflict. Returns sorted newest-first when sortNewest.
+ * Minimize/hide fields: non-null wins so REST (unknown) never wipes GraphQL.
  */
 export function mergeTimelineItemsById(
   prevItems: any[],
@@ -129,7 +169,9 @@ export function mergeTimelineItemsById(
   }
   for (const it of Array.isArray(nextItems) ? nextItems : []) {
     if (!it) continue;
-    map.set(keyOf(it, i++), it);
+    const k = keyOf(it, i++);
+    const prev = map.get(k);
+    map.set(k, prev ? mergeCommentMinimizeFields(prev, it) : it);
   }
   const out = [...map.values()];
   if (opts.sortNewest !== false) {

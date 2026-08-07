@@ -75,6 +75,11 @@ export interface ModalUiState {
    * on the matching InlineThread — not every thread.
    */
   activeDiffCommentId: string | number | null;
+  /**
+   * Within the focused review thread: root or reply comment id for ↑/↓ unit
+   * focus. Null = treat as root of the active thread.
+   */
+  focusedThreadUnitId: string | null;
 
   setLayoutMode: (m: LayoutMode) => void;
   toggleDiffLayout: () => void;
@@ -117,6 +122,7 @@ export interface ModalUiState {
   requestConversationNav: (a: string | null) => void;
   setOptHintsActive: (v: boolean) => void;
   setActiveDiffCommentId: (id: string | number | null) => void;
+  setFocusedThreadUnitId: (id: string | null) => void;
   resetForClose: () => void;
   hydrateLocalDetail: (detail: PrDetail | null | undefined) => void;
 }
@@ -164,6 +170,7 @@ export const useModalStore = create<ModalUiState>((set, get) => ({
   pendingConversationNavAnchor: null,
   optHintsActive: false,
   activeDiffCommentId: null,
+  focusedThreadUnitId: null,
 
   setLayoutMode: (m) => set({ layoutMode: m }),
   toggleDiffLayout: () =>
@@ -203,7 +210,8 @@ export const useModalStore = create<ModalUiState>((set, get) => ({
     set((s) => ({
       expandedDirs: typeof fn === 'function' ? (fn as any)(s.expandedDirs) : (fn as Set<string>),
     })),
-  setCommentIndex: (i) => set({ commentIndex: i }),
+  setCommentIndex: (i) =>
+    set({ commentIndex: i, focusedThreadUnitId: null }),
   setLineSelection: (s) =>
     set((prev) => ({
       lineSelection: typeof s === 'function' ? s(prev.lineSelection) : s,
@@ -243,6 +251,23 @@ export const useModalStore = create<ModalUiState>((set, get) => ({
     const cur = get().focusedConversationAnchor;
     if (cur === next) return;
     set({ focusedConversationAnchor: next });
+    // E2E / host observability: stamp active kb-focus target on <html>
+    try {
+      if (typeof document !== 'undefined') {
+        if (next) {
+          document.documentElement.setAttribute(
+            'data-prp-focused-conv-anchor',
+            next
+          );
+        } else {
+          document.documentElement.removeAttribute(
+            'data-prp-focused-conv-anchor'
+          );
+        }
+      }
+    } catch {
+      /* ignore */
+    }
   },
   requestConversationNav: (a) => {
     const next = a == null || a === '' ? null : String(a);
@@ -251,6 +276,18 @@ export const useModalStore = create<ModalUiState>((set, get) => ({
         focusedConversationAnchor: null,
         pendingConversationNavAnchor: null,
       });
+      try {
+        if (typeof document !== 'undefined') {
+          document.documentElement.removeAttribute(
+            'data-prp-focused-conv-anchor'
+          );
+          document.documentElement.removeAttribute(
+            'data-prp-pending-conv-anchor'
+          );
+        }
+      } catch {
+        /* ignore */
+      }
       return;
     }
     // Drop ring while scrolling; scroller promotes pending → focused.
@@ -258,6 +295,19 @@ export const useModalStore = create<ModalUiState>((set, get) => ({
       focusedConversationAnchor: null,
       pendingConversationNavAnchor: next,
     });
+    try {
+      if (typeof document !== 'undefined') {
+        document.documentElement.removeAttribute(
+          'data-prp-focused-conv-anchor'
+        );
+        document.documentElement.setAttribute(
+          'data-prp-pending-conv-anchor',
+          next
+        );
+      }
+    } catch {
+      /* ignore */
+    }
   },
   setOptHintsActive: (v) => {
     const next = Boolean(v);
@@ -266,8 +316,38 @@ export const useModalStore = create<ModalUiState>((set, get) => ({
   },
   setActiveDiffCommentId: (id) => {
     const next = id == null || id === '' ? null : id;
-    if (get().activeDiffCommentId === next) return;
-    set({ activeDiffCommentId: next });
+    const prev = get().activeDiffCommentId;
+    if (prev === next) return;
+    // New thread focus — unit resets to root; same-id no-op above.
+    // String-equal still resets unit (root hop via string/number forms).
+    const sameRoot =
+      next != null && prev != null && String(prev) === String(next);
+    if (sameRoot) {
+      set({ activeDiffCommentId: next });
+      return;
+    }
+    set({ activeDiffCommentId: next, focusedThreadUnitId: null });
+  },
+  setFocusedThreadUnitId: (id) => {
+    const next = id == null || id === '' ? null : String(id);
+    if (get().focusedThreadUnitId === next) return;
+    set({ focusedThreadUnitId: next });
+    try {
+      if (typeof document !== 'undefined') {
+        if (next) {
+          document.documentElement.setAttribute(
+            'data-prp-focused-thread-unit',
+            next
+          );
+        } else {
+          document.documentElement.removeAttribute(
+            'data-prp-focused-thread-unit'
+          );
+        }
+      }
+    } catch {
+      /* ignore */
+    }
   },
   hydrateLocalDetail: (detail) => {
     if (detail) set({ localDetail: detail });
@@ -289,6 +369,7 @@ export const useModalStore = create<ModalUiState>((set, get) => ({
       pendingConversationNavAnchor: null,
       optHintsActive: false,
       activeDiffCommentId: null,
+      focusedThreadUnitId: null,
       commentIndex: -1,
     }),
 }));

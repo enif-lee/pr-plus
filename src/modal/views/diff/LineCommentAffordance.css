@@ -174,6 +174,56 @@
   margin-left: auto;
 }
 
+/* GitHub-style minimized (hidden) comment — compact row */
+.prp-comment-minimized {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 5px 10px;
+  margin: 0;
+  border-radius: 6px;
+  border: 1px solid var(--prp-border, rgba(128, 128, 128, 0.22));
+  background: var(--prp-bg-muted, rgba(128, 128, 128, 0.07));
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--prp-fg-muted, #656d76);
+}
+.prp-comment-minimized--compact {
+  padding: 5px 10px;
+}
+.prp-comment-minimized .prp-link-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--prp-accent, #0969da);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 500;
+  padding: 0;
+  text-decoration: none;
+}
+.prp-comment-minimized .prp-link-btn:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.prp-comment-minimized .prp-link-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.prp-review-thread__item--minimized,
+.prp-inline-thread__single--minimized {
+  list-style: none;
+  margin: 2px 0;
+  padding: 0;
+}
+/* ↑/↓ unit focus within a multi-reply review thread */
+.prp-review-thread__item--unit-focus {
+  outline: 2px solid var(--prp-accent, #0969da);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
 /* ── Base branch pencil ── */
 .prp-branch-tag--base {
   gap: 4px;

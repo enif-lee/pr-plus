@@ -368,14 +368,15 @@ export function dumpGraphqlCostLog(opts = {}) {
   } catch {
     /* ignore */
   }
-  // Content script async sendMessage + SW — poll briefly (not fixed 600ms)
+  // Content script async sendMessage + SW — poll until ready (or timeout).
+  // Flush is CustomEvent → content-bridge → SW; needs more than one tick after reload.
   let summary = null;
   let logEntries = [];
   let err = null;
   let hook = null;
   try {
     let snap = null;
-    const flushDeadline = Date.now() + 500;
+    const flushDeadline = Date.now() + 2500;
     while (Date.now() < flushDeadline) {
       snap = evalInPage(`(() => {
         try {
@@ -390,8 +391,25 @@ export function dumpGraphqlCostLog(opts = {}) {
           return { summary: null, log: [], err: String(e), hook: null, ready: null };
         }
       })()`);
-      if (snap?.ready === '1' || snap?.ready === 1 || snap?.summary) break;
-      waitMs(50);
+      const hasOps =
+        Array.isArray(snap?.summary?.byOp) && snap.summary.byOp.length > 0;
+      if (
+        snap?.ready === '1' ||
+        snap?.ready === 1 ||
+        hasOps ||
+        (Array.isArray(snap?.log) && snap.log.length > 0)
+      ) {
+        break;
+      }
+      // Re-dispatch flush while waiting (listener may register after first event)
+      try {
+        evalInPage(
+          `document.dispatchEvent(new CustomEvent('prp-flush-gql-cost', { bubbles: true })); true`
+        );
+      } catch {
+        /* ignore */
+      }
+      waitMs(80);
     }
     summary = snap?.summary ?? null;
     logEntries = Array.isArray(snap?.log) ? snap.log : [];
@@ -1462,10 +1480,17 @@ export function parseChord(chord) {
 export function press(chord) {
   const spec = parseChord(chord);
   // Plain Escape/Enter still via CDP is fine; product chords always synthetic.
+  // Plain ArrowUp/Down/Left/Right also synthetic: Diff reply-step, line
+  // selection, and fold are capture-phase handlers on documentElement — CDP
+  // press often never reaches them (focus/scroll-target mismatch).
+  const isProductArrow = /^arrow(up|down|left|right)$/i.test(
+    String(spec.key || '')
+  );
   const needsSynthetic =
     spec.altKey ||
     spec.metaKey ||
     spec.ctrlKey ||
+    isProductArrow ||
     (spec.shiftKey && /^arrow/i.test(spec.key)) ||
     spec.key === '.' ||
     spec.code === 'Period';

@@ -130,6 +130,88 @@ export function getSteps() {
     waitDetailReady({ number: DEMO_PR, files: true, timeoutMs: 45000 });
     blurEditable();
     waitMs(300);
+    // Demo PR often has 0 Unresolved open threads — enable Resolved so
+    // inline threads paint (same pattern as thread-opt-reply / review-filter).
+    evalInPage(`
+      (() => {
+        const btns = [
+          ...document.querySelectorAll(
+            '.prp-review-filter button, .prp-review-filter__btn'
+          ),
+        ];
+        for (const b of btns) {
+          const t = (b.textContent || '').replace(/\\s+/g, ' ').trim();
+          const on =
+            b.getAttribute('aria-pressed') === 'true' ||
+            b.classList.contains('prp-review-filter__btn--on');
+          if (/Resolved/i.test(t) && !on) b.click();
+        }
+        return true;
+      })()
+    `);
+    waitMs(1200);
+
+    // Expand collapsed (resolved) rows so composer + resolve/unresolve chrome mounts.
+    evalInPage(`
+      (() => {
+        for (const t of document.querySelectorAll('.prp-inline-thread--collapsed')) {
+          const b =
+            t.querySelector('[aria-expanded="false"]') ||
+            t.querySelector('.prp-thread-toggle');
+          try { b?.click?.(); } catch {}
+        }
+        return document.querySelectorAll('.prp-inline-thread').length;
+      })()
+    `);
+    waitMs(600);
+
+    // If every painted thread is already resolved, unresolve one so R2/R3 can
+    // exercise "Resolve conversation" (product default filter is Unresolved).
+    evalInPage(`
+      (() => {
+        const un = [...document.querySelectorAll('[data-prp-composer-resolve="1"]')].find(
+          (b) => /Unresolve conversation/i.test((b.textContent || '').trim())
+        );
+        if (un && !un.disabled) {
+          un.click();
+          return { unresolveClicked: true, id: un.getAttribute('data-prp-thread-node-id') };
+        }
+        return { unresolveClicked: false };
+      })()
+    `);
+    waitMs(1500);
+    // Prefer Unresolved filter so open threads stay visible after unresolve
+    evalInPage(`
+      (() => {
+        const btns = [
+          ...document.querySelectorAll(
+            '.prp-review-filter button, .prp-review-filter__btn'
+          ),
+        ];
+        for (const b of btns) {
+          const t = (b.textContent || '').replace(/\\s+/g, ' ').trim();
+          const on =
+            b.getAttribute('aria-pressed') === 'true' ||
+            b.classList.contains('prp-review-filter__btn--on');
+          if (/Unresolved/i.test(t) && !on) b.click();
+        }
+        return true;
+      })()
+    `);
+    waitMs(800);
+    // Expand again after filter flip
+    evalInPage(`
+      (() => {
+        for (const t of document.querySelectorAll('.prp-inline-thread--collapsed')) {
+          const b =
+            t.querySelector('[aria-expanded="false"]') ||
+            t.querySelector('.prp-thread-toggle');
+          try { b?.click?.(); } catch {}
+        }
+        return true;
+      })()
+    `);
+    waitMs(400);
 
     const snap = waitForVisibleResolve(12000);
     assert(
@@ -141,6 +223,19 @@ export function getSteps() {
   run('R2 Resolve button rendered (DOM + visible + PRRT + open actions)', () => {
     blurEditable();
     waitMs(100);
+    // Ensure expanded before probing resolve chrome
+    evalInPage(`
+      (() => {
+        for (const t of document.querySelectorAll('.prp-inline-thread--collapsed')) {
+          const b =
+            t.querySelector('[aria-expanded="false"]') ||
+            t.querySelector('.prp-thread-toggle');
+          try { b?.click?.(); } catch {}
+        }
+        return true;
+      })()
+    `);
+    waitMs(300);
     const snap = waitForVisibleResolve(10000);
 
     assert(
