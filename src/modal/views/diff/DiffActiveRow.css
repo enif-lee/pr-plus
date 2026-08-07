@@ -195,9 +195,11 @@
   flex-direction: column;
   overflow: hidden;
   /* Same type metrics as .prp-vlist so sticky sibling matches in-list rows */
+  /* --prp-diff-row-h must match ROW_HEIGHT in utils.tsx (virtual offsets). */
+  --prp-diff-row-h: 20px;
   font-family: var(--prp-mono);
   font-size: 11.5px;
-  line-height: 22px;
+  line-height: var(--prp-diff-row-h, 20px);
 }
 .prp-vlist {
   overflow: auto;

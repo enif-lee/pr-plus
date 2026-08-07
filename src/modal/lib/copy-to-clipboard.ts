@@ -28,7 +28,8 @@ export function stampCommentCopyResult(opts: {
   ok: boolean;
   text?: string | null;
   url?: string | null;
-  commentId?: string | number | null;
+  /** Coerced via String(); callers pass raw comment ids from props. */
+  commentId?: string | number | null | unknown;
 }): void {
   try {
     const doc =

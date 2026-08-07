@@ -572,19 +572,36 @@
           cacheSnap.reviewComments.length &&
           (!Array.isArray(detail.reviewComments) || !detail.reviewComments.length)
         ) {
-          detail = {
-            ...detail,
-            reviewComments: cacheSnap.reviewComments,
-            reviewThreads: cacheSnap.reviewThreads || detail.reviewThreads,
-            reviewThreadsMeta:
-              cacheSnap.reviewThreadsMeta || detail.reviewThreadsMeta,
-            reviewCommentsMeta:
-              cacheSnap.reviewCommentsMeta || detail.reviewCommentsMeta,
-            comments:
-              Array.isArray(detail.comments) && detail.comments.length
-                ? detail.comments
-                : cacheSnap.comments || detail.comments,
-          };
+          // Never re-inject IDB empty "user"/No content ghosts as core detail.
+          // Network may legitimately have empty reviewComments until threads
+          // side-fetch; still strip unverifiable local-only rows from cache.
+          const cleanedCacheRc = cacheSnap.reviewComments.filter((c) => {
+            if (!c || c.id == null) return false;
+            if (c.pending) return true;
+            if (c._commentsPending || c.commentsLoaded === false) return true;
+            if (String(c.id).startsWith('shell:')) return true;
+            const body = String(c.body ?? c.bodyText ?? '').trim();
+            if (body) return true;
+            const author = String(
+              c.author || c.user?.login || c.user?.name || ''
+            ).trim();
+            return Boolean(author && author.toLowerCase() !== 'user');
+          });
+          if (cleanedCacheRc.length) {
+            detail = {
+              ...detail,
+              reviewComments: cleanedCacheRc,
+              reviewThreads: cacheSnap.reviewThreads || detail.reviewThreads,
+              reviewThreadsMeta:
+                cacheSnap.reviewThreadsMeta || detail.reviewThreadsMeta,
+              reviewCommentsMeta:
+                cacheSnap.reviewCommentsMeta || detail.reviewCommentsMeta,
+              comments:
+                Array.isArray(detail.comments) && detail.comments.length
+                  ? detail.comments
+                  : cacheSnap.comments || detail.comments,
+            };
+          }
         }
         if (
           reuse.reuseFiles &&

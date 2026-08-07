@@ -5,7 +5,10 @@ import { describe, expect, test } from '@rstest/core';
 import {
   listReviewThreadFocusUnits,
   stepReviewThreadFocusUnit,
+  seedReviewThreadFocusUnit,
+  wouldExitReviewThreadFocus,
   shouldShowThreadOptHints,
+  resolveFinishReviewEscapeAction,
   collectThreadReplyComments,
 } from '../src/modal/lib/thread-reply-nav';
 import {
@@ -38,42 +41,122 @@ describe('listReviewThreadFocusUnits / stepReviewThreadFocusUnit', () => {
     expect(u[1].role).toBe('reply');
   });
 
-  test('step wraps within multi-unit thread', () => {
+  test('step mid-thread stays in-thread (no wrap)', () => {
     const u = listReviewThreadFocusUnits(10, [{ id: 11 }, { id: 12 }]);
-    expect(stepReviewThreadFocusUnit(u, 10, 1)?.id).toBe('11');
-    expect(stepReviewThreadFocusUnit(u, 11, 1)?.id).toBe('12');
-    expect(stepReviewThreadFocusUnit(u, 12, 1)?.id).toBe('10');
-    expect(stepReviewThreadFocusUnit(u, 10, -1)?.id).toBe('12');
+    expect(stepReviewThreadFocusUnit(u, 10, 1)).toEqual({
+      unit: { id: '11', role: 'reply' },
+      exit: false,
+    });
+    expect(stepReviewThreadFocusUnit(u, 11, 1)).toEqual({
+      unit: { id: '12', role: 'reply' },
+      exit: false,
+    });
+    expect(stepReviewThreadFocusUnit(u, 11, -1)).toEqual({
+      unit: { id: '10', role: 'root' },
+      exit: false,
+    });
   });
 
-  test('single-unit thread → no step', () => {
+  test('at last unit + down exits (no wrap to root)', () => {
+    const u = listReviewThreadFocusUnits(10, [{ id: 11 }, { id: 12 }]);
+    const r = stepReviewThreadFocusUnit(u, 12, 1);
+    expect(r.exit).toBe(true);
+    expect(r.unit).toBe(null);
+    expect(wouldExitReviewThreadFocus(u, 12, 1)).toBe(true);
+  });
+
+  test('at first unit + up exits (no wrap to last)', () => {
+    const u = listReviewThreadFocusUnits(10, [{ id: 11 }, { id: 12 }]);
+    const r = stepReviewThreadFocusUnit(u, 10, -1);
+    expect(r.exit).toBe(true);
+    expect(r.unit).toBe(null);
+    expect(wouldExitReviewThreadFocus(u, 10, -1)).toBe(true);
+  });
+
+  test('single-unit thread → no multi-unit step / no exit', () => {
     const u = listReviewThreadFocusUnits(5, []);
     expect(u).toHaveLength(1);
-    expect(stepReviewThreadFocusUnit(u, 5, 1)).toBe(null);
+    expect(stepReviewThreadFocusUnit(u, 5, 1)).toEqual({
+      unit: null,
+      exit: false,
+    });
   });
 
-  test('seed down skips to first reply when current missing', () => {
-    const u = listReviewThreadFocusUnits(1, [{ id: 2 }]);
-    // current unknown → down prefers first reply
-    expect(stepReviewThreadFocusUnit(u, null, 1)?.id).toBe('2');
+  test('entry seed: down → first (root), up → last', () => {
+    const u = listReviewThreadFocusUnits(1, [{ id: 2 }, { id: 3 }]);
+    expect(seedReviewThreadFocusUnit(u, 1)?.id).toBe('1');
+    expect(seedReviewThreadFocusUnit(u, -1)?.id).toBe('3');
+    // Unknown current uses same seeds
+    expect(stepReviewThreadFocusUnit(u, null, 1)).toEqual({
+      unit: { id: '1', role: 'root' },
+      exit: false,
+    });
+    expect(stepReviewThreadFocusUnit(u, null, -1)).toEqual({
+      unit: { id: '3', role: 'reply' },
+      exit: false,
+    });
   });
 });
 
-describe('shouldShowThreadOptHints (root-only)', () => {
+describe('shouldShowThreadOptHints (unit focus)', () => {
   test('inactive thread → no hints', () => {
     expect(shouldShowThreadOptHints({ contextActive: false, isRoot: true })).toBe(
       false
     );
   });
-  test('active root → hints', () => {
+  test('active, no unit id → root only', () => {
     expect(shouldShowThreadOptHints({ contextActive: true, isRoot: true })).toBe(
       true
     );
-  });
-  test('active reply → no Opt badges', () => {
     expect(
       shouldShowThreadOptHints({ contextActive: true, isRoot: false })
     ).toBe(false);
+  });
+  test('focused reply unit → reply gets hints, root does not', () => {
+    expect(
+      shouldShowThreadOptHints({
+        contextActive: true,
+        isRoot: true,
+        commentId: 10,
+        focusedUnitId: 20,
+      })
+    ).toBe(false);
+    expect(
+      shouldShowThreadOptHints({
+        contextActive: true,
+        isRoot: false,
+        commentId: 20,
+        focusedUnitId: 20,
+      })
+    ).toBe(true);
+  });
+  test('focused root unit → root gets hints', () => {
+    expect(
+      shouldShowThreadOptHints({
+        contextActive: true,
+        isRoot: true,
+        commentId: 10,
+        focusedUnitId: 10,
+      })
+    ).toBe(true);
+  });
+});
+
+describe('resolveFinishReviewEscapeAction', () => {
+  test('layers blur → close-form → none', () => {
+    expect(resolveFinishReviewEscapeAction({})).toBe('none');
+    expect(
+      resolveFinishReviewEscapeAction({
+        finishReviewOpen: true,
+        finishInputFocused: true,
+      })
+    ).toBe('blur-input');
+    expect(
+      resolveFinishReviewEscapeAction({
+        finishReviewOpen: true,
+        finishInputFocused: false,
+      })
+    ).toBe('close-form');
   });
 });
 

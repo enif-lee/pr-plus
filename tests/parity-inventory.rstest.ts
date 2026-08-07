@@ -59,7 +59,7 @@ describe('shipped code paths exist', () => {
       join(root, 'src/modal/views/chrome/DiffToolbar.tsx'),
       'utf8'
     );
-    expect(t).toMatch(/Hide whitespace/);
+    expect(t).toMatch(/hide_whitespace|data-prp-hide-whitespace/);
     expect(t).toMatch(/data-prp-hide-whitespace/);
   });
   test('MergeBox exposes delete head branch CTA', () => {

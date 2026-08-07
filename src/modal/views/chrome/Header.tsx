@@ -227,7 +227,15 @@ export function Header(props: any) {
       setOverflowOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOverflowOpen(false);
+      if (e.key !== 'Escape') return;
+      try {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+      } catch {
+        /* ignore */
+      }
+      setOverflowOpen(false);
     };
     document.addEventListener('mousedown', onDoc, true);
     document.addEventListener('keydown', onKey, true);
@@ -962,7 +970,12 @@ export function Header(props: any) {
               <TipPopover title={t('header_more_actions')} />
             </button>
             {overflowOpen ? (
-              <ul className="prp-header__more-menu" role="menu">
+              <ul
+                className="prp-header__more-menu"
+                role="menu"
+                data-prp-header-overflow="1"
+                data-prp-nested-layer="1"
+              >
                 {showShellToggle && effectiveLayout !== LAYOUT_DIFF ? (
                   <li role="none">
                     <button

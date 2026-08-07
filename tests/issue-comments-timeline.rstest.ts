@@ -139,8 +139,9 @@ describe('issue comments on long conversation PR', () => {
       path.join(root, 'src/fetch/detail-sides-comments.ts'),
       'utf8'
     );
+    // Multi-name import from ./reactions (not a free global)
     expect(sides).toMatch(
-      /import\s*\{\s*fetchReactableReactionGroups\s*\}\s*from\s*['"]\.\/reactions['"]/
+      /fetchReactableReactionGroups[\s\S]{0,120}from\s*['"]\.\/reactions['"]/
     );
     expect(sides).toMatch(/fetchReactableReactionGroups\s*\(/);
     const bundled = fs.readFileSync(

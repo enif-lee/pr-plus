@@ -70,6 +70,10 @@ export {
   getSteps as getHideQuoteSteps,
   runHideQuote,
 } from './hide-quote.mjs';
+export {
+  getSteps as getStartReviewSteps,
+  runStartReview,
+} from './start-review.mjs';
 
 import { createRunner } from '../lib/runner.mjs';
 import { closeAll, ensureBrowser, log } from '../lib/harness.mjs';
@@ -93,6 +97,10 @@ import { getSteps as getUiLocaleSteps } from './ui-locale.mjs';
 import { getSteps as getCommentCopySteps } from './comment-copy.mjs';
 import { getSteps as getHideQuoteSteps } from './hide-quote.mjs';
 import { getSteps as getThreadOptReplySteps } from './thread-opt-reply.mjs';
+import { getSteps as getFinishReviewSteps } from './finish-review.mjs';
+import { getSteps as getEscNestedSteps } from './esc-nested.mjs';
+import { getSteps as getSelectionRevealNavSteps } from './selection-reveal-nav.mjs';
+import { getSteps as getStartReviewSteps } from './start-review.mjs';
 
 /** Ordered feature suite (shared browser session for legacy runner). */
 export const FEATURE_SUITE = [
@@ -116,6 +124,10 @@ export const FEATURE_SUITE = [
   { id: 'comment-copy', getSteps: getCommentCopySteps },
   { id: 'hide-quote', getSteps: getHideQuoteSteps },
   { id: 'thread-opt-reply', getSteps: getThreadOptReplySteps },
+  { id: 'finish-review', getSteps: getFinishReviewSteps },
+  { id: 'esc-nested', getSteps: getEscNestedSteps },
+  { id: 'selection-reveal-nav', getSteps: getSelectionRevealNavSteps },
+  { id: 'start-review', getSteps: getStartReviewSteps },
 ];
 
 /**

@@ -408,6 +408,9 @@ export const prTreeFetchPartA = {
       startSide: payload.startSide ?? payload.start_side,
       asPending: Boolean(payload.asPending),
       subjectType: payload.subjectType ?? payload.subject_type ?? 'line',
+      pendingReviewNodeId:
+        payload.pendingReviewNodeId || payload.pendingReviewNodeID || null,
+      pendingReviewId: payload.pendingReviewId || null,
     });
     if (!res?.ok) {
       const err = new Error(res?.error || 'Failed to post review comment');

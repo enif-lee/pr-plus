@@ -497,6 +497,8 @@ export async function handleMessagePartA(message: any): Promise<any> {
           startSide: message.startSide,
           asPending: Boolean(message.asPending),
           subjectType: message.subjectType || message.subject_type || 'line',
+          pendingReviewNodeId: message.pendingReviewNodeId || null,
+          pendingReviewId: message.pendingReviewId || null,
         },
         fetchImpl(),
         token, apiCtx);

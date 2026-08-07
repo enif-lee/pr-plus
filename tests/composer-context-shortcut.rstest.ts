@@ -31,7 +31,7 @@ describe('resolveComposerContextShortcutAction', () => {
     ).toBeNull();
   });
 
-  test('⌥C / ⌥I / ⌥T when focused (⌥E is comment reaction, not composer)', () => {
+  test('⌥C / ⌥I / ⌥S / ⌥T when focused (⌥E is comment reaction, not composer)', () => {
     const base = { composerFocused: true, alt: true, mod: false, shift: false };
     expect(resolveComposerContextShortcutAction({ ...base, key: 'e' })).toBeNull();
     expect(resolveComposerContextShortcutAction({ ...base, key: 'c' })).toBe(
@@ -40,9 +40,23 @@ describe('resolveComposerContextShortcutAction', () => {
     expect(resolveComposerContextShortcutAction({ ...base, key: 'i' })).toBe(
       'composerFocusInput'
     );
+    expect(resolveComposerContextShortcutAction({ ...base, key: 's' })).toBe(
+      'composerStartPending'
+    );
     expect(resolveComposerContextShortcutAction({ ...base, key: 't' })).toBe(
       'composerModeToggle'
     );
+  });
+
+  test('⌥S null when canStartPending false', () => {
+    expect(
+      resolveComposerContextShortcutAction({
+        composerFocused: true,
+        alt: true,
+        key: 's',
+        canStartPending: false,
+      })
+    ).toBeNull();
   });
 
   test('⌥T null when canToggleMode false', () => {
@@ -246,5 +260,10 @@ describe('COMPOSER_CONTEXT_SHORTCUT labels', () => {
     expect((COMPOSER_CONTEXT_SHORTCUT as any).emoji).toBeUndefined();
     expect(COMPOSER_CONTEXT_SHORTCUT.submit.action).toBe('composerSubmit');
     expect(COMPOSER_CONTEXT_SHORTCUT.submitModEnter.chord).toBe('mod+enter');
+    expect(COMPOSER_CONTEXT_SHORTCUT.startPending.action).toBe(
+      'composerStartPending'
+    );
+    expect(COMPOSER_CONTEXT_SHORTCUT.startPending.chord).toBe('opt+s');
+    expect(COMPOSER_CONTEXT_SHORTCUT.startPending.labelMac).toBe('⌥S');
   });
 });

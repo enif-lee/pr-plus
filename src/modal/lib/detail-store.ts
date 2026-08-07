@@ -2,6 +2,8 @@
  * Isolated progressive PR detail store (TypeScript ESM).
  * Source of truth for slice isolation; content-script pure twin stays for MV3 order.
  */
+import { reconcileReviewCommentsAgainstRemote } from './stale-local-review';
+
 export const META_KEYS = [
   'owner',
   'repo',
@@ -816,7 +818,22 @@ export function mergeProgressiveSidesIntoFlat(prevFlat: any, nextFlat: any): any
     : [];
   if (prevTh.length > nextTh.length || prevRc.length > nextRc.length) {
     if (prevTh.length >= nextTh.length) out.reviewThreads = prevTh.slice();
-    if (prevRc.length >= nextRc.length) out.reviewComments = prevRc.slice();
+    // Prefer longer prev for progressive incomplete next — but never re-win
+    // IDB/cache empty "user"/No content ghosts over a cleaner network snapshot.
+    if (prevRc.length >= nextRc.length) {
+      const remoteAuth =
+        nextRc.length > 0 ||
+        Boolean(nextSettled.reviews) ||
+        Boolean(nextSettled.comments) ||
+        nextTh.length > 0 ||
+        (nextFlat.reviewThreadsMeta != null &&
+          nextFlat.reviewThreadsMeta.totalCount != null);
+      out.reviewComments = reconcileReviewCommentsAgainstRemote(
+        prevRc,
+        nextRc,
+        { remoteAuthoritative: remoteAuth }
+      );
+    }
     if (prevFlat.reviewThreadsMeta != null) {
       out.reviewThreadsMeta = prevFlat.reviewThreadsMeta;
     }

@@ -1,7 +1,10 @@
 /**
  * Comment reaction pure helpers.
  */
+import fs from 'node:fs';
+import path from 'node:path';
 import { describe, expect, test } from '@rstest/core';
+import { JSDOM } from 'jsdom';
 import {
   REACTION_DEFS,
   mapRestReactionsSummary,
@@ -12,6 +15,10 @@ import {
   gqlReactionToContent,
   patchCommentReactionsInList,
   formatReactionUsersTooltip,
+  isCommentReactionPickerOpen,
+  dismissCommentReactionPicker,
+  placeReactionPicker,
+  isReactionPickerAnchorLive,
 } from '../src/modal/lib/comment-reactions';
 
 describe('comment-reactions pure', () => {
@@ -134,5 +141,198 @@ describe('comment-reactions pure', () => {
     ]);
     expect(next[0].reactions).toEqual([]);
     expect(next[1].reactions[0].content).toBe('heart');
+  });
+});
+
+describe('placeReactionPicker', () => {
+  const picker = { width: 280, height: 44 };
+  const viewport = { width: 1000, height: 800 };
+
+  test('places above the button when there is room (explicit top, no translate)', () => {
+    // Button near bottom of viewport
+    const button = {
+      top: 600,
+      bottom: 626,
+      left: 100,
+      width: 26,
+      height: 26,
+    };
+    const pos = placeReactionPicker({ button, picker, viewport });
+    expect(pos.placement).toBe('above');
+    // top of menu = button.top - gap - pickerH
+    expect(pos.top).toBe(600 - 8 - 44);
+    expect(pos.left).toBe(100);
+  });
+
+  test('places below when near the top of the viewport', () => {
+    const button = {
+      top: 20,
+      bottom: 46,
+      left: 50,
+      width: 26,
+      height: 26,
+    };
+    const pos = placeReactionPicker({ button, picker, viewport });
+    expect(pos.placement).toBe('below');
+    expect(pos.top).toBe(46 + 8);
+    expect(pos.left).toBe(50);
+  });
+
+  test('clamps horizontal position into the viewport', () => {
+    const button = {
+      top: 400,
+      bottom: 426,
+      left: 900,
+      width: 26,
+      height: 26,
+    };
+    const pos = placeReactionPicker({ button, picker, viewport });
+    // left + 280 must stay within 1000 - 8
+    expect(pos.left + 280).toBeLessThanOrEqual(1000 - 8);
+    expect(pos.left).toBeGreaterThanOrEqual(8);
+  });
+
+  test('menu box sits flush above button (bottom of menu ≈ button.top - gap)', () => {
+    const button = {
+      top: 500,
+      bottom: 526,
+      left: 40,
+      width: 26,
+      height: 26,
+    };
+    const pos = placeReactionPicker({ button, picker, viewport });
+    expect(pos.placement).toBe('above');
+    expect(pos.top + picker.height).toBe(button.top - 8);
+  });
+});
+
+describe('isReactionPickerAnchorLive', () => {
+  test('rejects zero-size and inactive keep-alive panel hosts', () => {
+    const dom = new JSDOM(
+      `<!doctype html><html><body>
+        <div class="prp-body-panel">
+          <button class="prp-reactions__add" style="width:26px;height:26px">☺</button>
+        </div>
+        <div class="prp-body-panel prp-body-panel--active">
+          <button class="prp-reactions__add live" style="width:26px;height:26px">☺</button>
+        </div>
+      </body></html>`,
+      { pretendToBeVisual: true }
+    );
+    const doc = dom.window.document;
+    // jsdom getBoundingClientRect is often 0 — stub sizes
+    const inactive = doc.querySelector(
+      '.prp-body-panel:not(.prp-body-panel--active) .prp-reactions__add'
+    ) as HTMLElement;
+    const live = doc.querySelector(
+      '.prp-body-panel--active .prp-reactions__add'
+    ) as HTMLElement;
+    for (const el of [inactive, live]) {
+      el.getBoundingClientRect = () =>
+        ({
+          x: 10,
+          y: 10,
+          top: 10,
+          left: 10,
+          bottom: 36,
+          right: 36,
+          width: 26,
+          height: 26,
+          toJSON() {
+            return {};
+          },
+        }) as DOMRect;
+    }
+    expect(isReactionPickerAnchorLive(inactive, { width: 800, height: 600 })).toBe(
+      false
+    );
+    expect(isReactionPickerAnchorLive(live, { width: 800, height: 600 })).toBe(
+      true
+    );
+
+    const tiny = doc.createElement('button');
+    tiny.getBoundingClientRect = () =>
+      ({
+        x: 0,
+        y: 0,
+        top: 0,
+        left: 0,
+        bottom: 0,
+        right: 0,
+        width: 0,
+        height: 0,
+        toJSON() {
+          return {};
+        },
+      }) as DOMRect;
+    expect(isReactionPickerAnchorLive(tiny, { width: 800, height: 600 })).toBe(
+      false
+    );
+  });
+});
+
+describe('isCommentReactionPickerOpen / dismissCommentReactionPicker', () => {
+  test('detects open picker by data attr or expanded add button', () => {
+    const dom = new JSDOM(
+      `<!doctype html><html><body>
+        <button class="prp-reactions__add" aria-expanded="false">☺</button>
+      </body></html>`
+    );
+    const doc = dom.window.document;
+    expect(isCommentReactionPickerOpen(doc)).toBe(false);
+
+    const add = doc.querySelector('.prp-reactions__add') as HTMLButtonElement;
+    add.setAttribute('aria-expanded', 'true');
+    expect(isCommentReactionPickerOpen(doc)).toBe(true);
+
+    add.setAttribute('aria-expanded', 'false');
+    const menu = doc.createElement('div');
+    menu.setAttribute('data-prp-reaction-picker', '1');
+    menu.className = 'prp-reactions__picker';
+    doc.body.appendChild(menu);
+    expect(isCommentReactionPickerOpen(doc)).toBe(true);
+  });
+
+  test('dismiss clicks expanded add control', () => {
+    const dom = new JSDOM(
+      `<!doctype html><html><body>
+        <button class="prp-reactions__add" aria-expanded="true">☺</button>
+      </body></html>`
+    );
+    const doc = dom.window.document;
+    const add = doc.querySelector('.prp-reactions__add') as HTMLButtonElement;
+    let clicks = 0;
+    add.addEventListener('click', () => {
+      clicks += 1;
+      add.setAttribute('aria-expanded', 'false');
+    });
+    expect(dismissCommentReactionPicker(doc)).toBe(true);
+    expect(clicks).toBe(1);
+    expect(isCommentReactionPickerOpen(doc)).toBe(false);
+  });
+
+  test('modal Escape path dismisses reaction picker before shell close', () => {
+    const root = path.resolve(__dirname, '..');
+    const app = fs.readFileSync(
+      path.join(root, 'src/modal/app/PrModalApp.impl.tsx'),
+      'utf8'
+    );
+    expect(app).toMatch(/isCommentReactionPickerOpen/);
+    expect(app).toMatch(/dismissCommentReactionPicker/);
+    // Escape branch: resolve owner then dismiss reaction before shell close
+    expect(app).toMatch(
+      /isCommentReactionPickerOpen[\s\S]{0,2500}dismissCommentReactionPicker/
+    );
+    expect(app).toMatch(/reactionPickerOpen:\s*Boolean\(reactionOpen\)/);
+    expect(app).toMatch(/if \(reactionOpen\)/);
+    const reactionsUi = fs.readFileSync(
+      path.join(root, 'src/modal/components/common/CommentReactions.tsx'),
+      'utf8'
+    );
+    expect(reactionsUi).toMatch(/data-prp-reaction-picker=["']1["']/);
+    // Portal uses explicit top/left from placeReactionPicker (no translateY)
+    expect(reactionsUi).toMatch(/placeReactionPicker/);
+    expect(reactionsUi).toMatch(/isReactionPickerAnchorLive/);
+    expect(reactionsUi).not.toMatch(/translateY\(-100%\)/);
   });
 });

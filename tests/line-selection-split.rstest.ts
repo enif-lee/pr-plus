@@ -8,6 +8,8 @@ import {
   extendLineSelection,
   extractSelectedCodeText,
   firstSelectableRowAnywhere,
+  firstSelectableRowInFile,
+  firstContentNavRowInFile,
   isCodeBodySelection,
   isFileLevelSelection,
   isMultiLineBodySelection,
@@ -19,6 +21,11 @@ import {
   rebindSelectionRowIndices,
   resolveSelectionHeadIndex,
   resolveSelectionIslandRevealPhase,
+  resolveSelectionDockVerticalPlacement,
+  shouldShowSelectionActionGroup,
+  jumpSelectionToAdjacentChangeRegion,
+  listChangeRegions,
+  isChangedDiffLineRow,
   rowSelectionVisualKey,
   selectionActiveSide,
 } from '../src/modal/lib/line-selection';
@@ -28,10 +35,11 @@ function splitChangeRow(opts: {
   oldLine?: number | null;
   newLine?: number | null;
   path?: string;
+  lineType?: string;
 }) {
   return {
     kind: 'diff-line',
-    lineType: 'change',
+    lineType: opts.lineType || 'change',
     split: true,
     filePath: opts.path || 'a.ts',
     rowIndex: opts.rowIndex,
@@ -124,7 +132,7 @@ describe('rowSelectionVisualKey', () => {
 });
 
 describe('moveLineSelection seed without active file', () => {
-  test('ArrowDown with null selection seeds first selectable row', () => {
+  test('ArrowDown with null selection seeds first content stop (body line)', () => {
     const rows = [
       { kind: 'file-header', filePath: 'a.ts', rowIndex: 0 },
       splitChangeRow({ rowIndex: 1, oldLine: 1, newLine: 1, path: 'a.ts' }),
@@ -140,6 +148,40 @@ describe('moveLineSelection seed without active file', () => {
       activeFilePath: 'a.ts',
     });
     expect(moved.headRowIndex).toBe(2);
+  });
+
+  test('ArrowDown seeds file-level review thread before first body line', () => {
+    const rows = [
+      { kind: 'file-header', filePath: 'a.ts', rowIndex: 0 },
+      {
+        kind: 'inline-comment',
+        filePath: 'a.ts',
+        rowIndex: 1,
+        commentId: 99,
+        subjectType: 'file',
+        side: 'RIGHT',
+        newLine: null,
+        oldLine: null,
+      },
+      splitChangeRow({ rowIndex: 2, oldLine: 1, newLine: 1, path: 'a.ts' }),
+      splitChangeRow({ rowIndex: 3, oldLine: 2, newLine: 2, path: 'a.ts' }),
+    ];
+    // Body-line helper still points at first line (index 2)
+    expect(firstSelectableRowInFile(rows, 'a.ts')?.rowIndex).toBe(2);
+    // Content nav / seed follows scroll order: thread under header first
+    const seeded = moveLineSelection(null, rows, 1, {
+      activeFilePath: 'a.ts',
+    });
+    expect(isThreadSelection(seeded)).toBe(true);
+    expect(seeded.commentId).toBe(99);
+    expect(seeded.headRowIndex).toBe(1);
+    // Next ↓ leaves thread for first body line
+    const moved = moveLineSelection(seeded, rows, 1, {
+      activeFilePath: 'a.ts',
+    });
+    expect(isThreadSelection(moved)).toBe(false);
+    expect(moved.headRowIndex).toBe(2);
+    expect(moved.headLine).toBe(1);
   });
 
   test('empty list cannot seed', () => {
@@ -350,6 +392,17 @@ describe('moveLineSelection visits review threads (plain only)', () => {
     expect(next.headRowIndex).toBe(3);
   });
 
+  test('ArrowUp from line below re-enters thread (P3c reverse continuum)', () => {
+    const onLineBelow = beginSelectionOnRow(rows[3], 'RIGHT', 3);
+    expect(isThreadSelection(onLineBelow)).toBe(false);
+    const up = moveLineSelection(onLineBelow, rows, -1, {
+      activeFilePath: 'a.ts',
+    });
+    expect(isThreadSelection(up)).toBe(true);
+    expect(up.commentId).toBe(42);
+    expect(Number(up.headRowIndex)).toBe(2);
+  });
+
   test('Shift+Arrow skips threads (multi-line stays on body lines)', () => {
     const onLine = beginLineSelection(rows[1]);
     const next = moveLineSelection(onLine, rows, 1, {
@@ -451,8 +504,8 @@ describe('cross-side keyboard multi-select (sticky head past opposing region)', 
   });
 });
 
-describe('resolveSelectionIslandRevealPhase (shipped idle-reveal path)', () => {
-  test('file header selection reveals actions (not comment)', () => {
+describe('resolveSelectionIslandRevealPhase (supported phase, not auto-show)', () => {
+  test('file header selection supports actions phase', () => {
     const fileSel = beginSelectionOnRow({
       kind: 'file-header',
       filePath: 'a.ts',
@@ -462,7 +515,7 @@ describe('resolveSelectionIslandRevealPhase (shipped idle-reveal path)', () => {
     expect(resolveSelectionIslandRevealPhase(fileSel)).toBe('actions');
   });
 
-  test('line selection reveals actions', () => {
+  test('line selection supports actions phase', () => {
     const line = beginLineSelection(
       splitChangeRow({ rowIndex: 1, oldLine: 1, newLine: 1 }),
       'RIGHT'
@@ -481,7 +534,206 @@ describe('resolveSelectionIslandRevealPhase (shipped idle-reveal path)', () => {
     expect(isThreadSelection(thr)).toBe(true);
     expect(resolveSelectionIslandRevealPhase(thr)).toBe('hidden');
   });
+});
 
+describe('resolveSelectionDockVerticalPlacement (flip above when tight below)', () => {
+  test('prefers below when enough room under host', () => {
+    expect(
+      resolveSelectionDockVerticalPlacement({
+        hostTop: 100,
+        hostBottom: 120,
+        dockHeight: 160,
+        clipTop: 0,
+        clipBottom: 400,
+        minBelow: 160,
+      })
+    ).toBe('below');
+  });
+
+  test('flips above when below is tight and above has room (comment form)', () => {
+    // Host near bottom of Diff scroller
+    expect(
+      resolveSelectionDockVerticalPlacement({
+        hostTop: 500,
+        hostBottom: 520,
+        dockHeight: 180,
+        clipTop: 80,
+        clipBottom: 560,
+        gap: 8,
+        minBelow: 160,
+      })
+    ).toBe('above');
+  });
+
+  test('stays below when both sides tight but below has more', () => {
+    expect(
+      resolveSelectionDockVerticalPlacement({
+        hostTop: 200,
+        hostBottom: 220,
+        dockHeight: 40,
+        clipTop: 180,
+        clipBottom: 280,
+        minBelow: 40,
+      })
+    ).toBe('below');
+  });
+
+  test('defaults below on incomplete geometry', () => {
+    expect(resolveSelectionDockVerticalPlacement({})).toBe('below');
+  });
+});
+
+describe('shouldShowSelectionActionGroup (Opt / hover / comment)', () => {
+  test('selection alone does not show', () => {
+    expect(
+      shouldShowSelectionActionGroup({
+        hasLineOrFileSelection: true,
+        selecting: false,
+        optHeld: false,
+        hoverReveal: false,
+        phase: 'actions',
+      })
+    ).toBe(false);
+  });
+
+  test('Opt-hold shows actions', () => {
+    expect(
+      shouldShowSelectionActionGroup({
+        hasLineOrFileSelection: true,
+        optHeld: true,
+        phase: 'actions',
+      })
+    ).toBe(true);
+  });
+
+  test('hover shows actions', () => {
+    expect(
+      shouldShowSelectionActionGroup({
+        hasLineOrFileSelection: true,
+        hoverReveal: true,
+        phase: 'actions',
+      })
+    ).toBe(true);
+  });
+
+  test('comment phase stays open without Opt/hover', () => {
+    expect(
+      shouldShowSelectionActionGroup({
+        hasLineOrFileSelection: true,
+        optHeld: false,
+        hoverReveal: false,
+        phase: 'comment',
+      })
+    ).toBe(true);
+  });
+
+  test('selecting drag hides dock', () => {
+    expect(
+      shouldShowSelectionActionGroup({
+        hasLineOrFileSelection: true,
+        selecting: true,
+        optHeld: true,
+        phase: 'actions',
+      })
+    ).toBe(false);
+  });
+
+  test('no selection never shows', () => {
+    expect(
+      shouldShowSelectionActionGroup({
+        hasLineOrFileSelection: false,
+        optHeld: true,
+      })
+    ).toBe(false);
+  });
+});
+
+describe('jumpSelectionToAdjacentChangeRegion (⌥↑/⌥↓ next/prev change)', () => {
+  function ctxRow(i: number, line: number) {
+    return {
+      kind: 'diff-line',
+      lineType: 'context',
+      filePath: 'a.ts',
+      rowIndex: i,
+      oldLine: line,
+      newLine: line,
+      leftCode: 'ctx',
+      rightCode: 'ctx',
+    };
+  }
+
+  /** Two change regions separated by context (and a hunk header gap). */
+  const multiRegionRows = [
+    { kind: 'file-header', filePath: 'a.ts', rowIndex: 0 },
+    // region A: two changed lines
+    splitChangeRow({ rowIndex: 1, oldLine: 1, newLine: 1, lineType: 'add' }),
+    splitChangeRow({ rowIndex: 2, oldLine: null, newLine: 2, lineType: 'add' }),
+    // break
+    ctxRow(3, 3),
+    ctxRow(4, 4),
+    // region B: three changed lines (would be "huge" if fully selected)
+    splitChangeRow({ rowIndex: 5, oldLine: 5, newLine: 5, lineType: 'del' }),
+    splitChangeRow({ rowIndex: 6, oldLine: 6, newLine: null, lineType: 'del' }),
+    splitChangeRow({ rowIndex: 7, oldLine: 7, newLine: 7, lineType: 'change' }),
+    ctxRow(8, 8),
+    // region C
+    splitChangeRow({ rowIndex: 9, oldLine: null, newLine: 9, lineType: 'add' }),
+  ];
+
+  test('listChangeRegions finds three regions', () => {
+    const regs = listChangeRegions(multiRegionRows);
+    expect(regs.map((r) => r.startIndex)).toEqual([1, 5, 9]);
+    expect(regs[0].endIndex).toBe(2);
+    expect(regs[1].endIndex).toBe(7);
+    expect(isChangedDiffLineRow(multiRegionRows[1])).toBe(true);
+    expect(isChangedDiffLineRow(multiRegionRows[3])).toBe(false);
+  });
+
+  test('⌥↓ from region A first line → first line of region B only', () => {
+    const start = beginLineSelection(multiRegionRows[1], 'RIGHT', 1);
+    const next = jumpSelectionToAdjacentChangeRegion(
+      start,
+      multiRegionRows,
+      1
+    );
+    expect(next).toBeTruthy();
+    expect(next.headRowIndex).toBe(5);
+    expect(next.anchorRowIndex).toBe(5);
+    expect(next.headLine).toBe(next.anchorLine);
+    // Single-line: not the whole region B (indices 5–7)
+    expect(next.headRowIndex).not.toBe(7);
+  });
+
+  test('⌥↑ from region B → first line of region A', () => {
+    const start = beginLineSelection(multiRegionRows[6], 'RIGHT', 6);
+    const prev = jumpSelectionToAdjacentChangeRegion(
+      start,
+      multiRegionRows,
+      -1
+    );
+    expect(prev.headRowIndex).toBe(1);
+    expect(prev.anchorRowIndex).toBe(1);
+  });
+
+  test('at last region ⌥↓ stays single-line first of last region (no wrap)', () => {
+    const start = beginLineSelection(multiRegionRows[9], 'RIGHT', 9);
+    const next = jumpSelectionToAdjacentChangeRegion(
+      start,
+      multiRegionRows,
+      1
+    );
+    expect(next.headRowIndex).toBe(9);
+    expect(next.anchorRowIndex).toBe(9);
+  });
+
+  test('null selection ⌥↓ seeds first change region first line', () => {
+    const next = jumpSelectionToAdjacentChangeRegion(
+      null,
+      multiRegionRows,
+      1
+    );
+    expect(next.headRowIndex).toBe(1);
+  });
 });
 
 describe('file-level extractSelectedCodeText = whole file body', () => {

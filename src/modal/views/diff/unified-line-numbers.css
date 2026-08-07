@@ -13,7 +13,7 @@
   min-width: 42px;
   text-align: right;
   padding: 0 8px 0 4px;
-  line-height: 22px;
+  line-height: var(--prp-diff-row-h, 20px);
   white-space: pre;
 }
 .prp-unified-ln--old {

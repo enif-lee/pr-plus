@@ -38,10 +38,12 @@ const PANEL_WIDTH_FALLBACK = 540;
  * Finish-your-review popover: shared MarkdownComposer (Write/Preview) +
  * bottom action buttons with contextual Opt shortcuts (same as leave-review).
  *
- *   Esc        → Cancel / close
- *   ⌥↵         → Comment
- *   ⌥⇧↵        → Approve
- *   ⌥⇧X        → Request changes
+ *   Esc (input focused) → blur input only
+ *   Esc (form focused)  → Cancel / close finish form (not PR shell)
+ *   ⌥I                  → focus comment input
+ *   ⌥↵                  → Comment
+ *   ⌥⇧↵                 → Approve
+ *   ⌥⇧X                 → Request changes
  *
  * Opt-held shows OptBtnHint badges on CTAs (class `prp-opt-btn-hint--finish`
  * so background page hints stay suppressed while this dialog is open).
@@ -81,6 +83,7 @@ export function FinishReviewModal({
   const scApprove = isMac ? '⌥⇧↵' : 'Alt+Shift+Enter';
   const scChanges = isMac ? '⌥⇧X' : 'Alt+Shift+X';
   const scEsc = 'Esc';
+  const scFocusInput = isMac ? '⌥I' : 'Alt+I';
 
   const showVerdict =
     typeof canSubmitReviewVerdict === 'function'
@@ -141,9 +144,8 @@ export function FinishReviewModal({
     };
   }, [open, anchorRef]);
 
-  // Contextual shortcuts while open.
-  // Use bubble phase so App capture can no-op on open finish-review marker first,
-  // then we handle submit here. Also stopPropagation so nothing else re-fires.
+  // Contextual shortcuts while open (capture; stopImmediate so App shell Esc
+  // never wins). Esc layering: blur finish input → close form only.
   useEffect(() => {
     if (!open) return undefined;
 
@@ -152,6 +154,46 @@ export function FinishReviewModal({
       e.stopPropagation();
       e.stopImmediatePropagation();
     };
+
+    function isFinishInputFocused(): boolean {
+      const panel = panelRef.current;
+      const ae =
+        typeof document !== 'undefined'
+          ? (document.activeElement as HTMLElement | null)
+          : null;
+      if (!panel || !ae) return false;
+      if (!panel.contains(ae)) return false;
+      if (ae.isContentEditable) return true;
+      const tag = String(ae.tagName || '').toUpperCase();
+      return tag === 'TEXTAREA' || tag === 'INPUT' || tag === 'SELECT';
+    }
+
+    function focusFinishInput(): boolean {
+      const panel = panelRef.current;
+      if (!panel) return false;
+      const ta =
+        (panel.querySelector(
+          'textarea.prp-mdc__ta, textarea[data-prp-composer-input], [data-prp-composer-input]'
+        ) as HTMLTextAreaElement | null) ||
+        (panel.querySelector('textarea') as HTMLTextAreaElement | null);
+      if (!ta || ta.disabled) return false;
+      try {
+        ta.focus({ preventScroll: true } as FocusOptions);
+      } catch {
+        try {
+          ta.focus();
+        } catch {
+          return false;
+        }
+      }
+      try {
+        const len = String(ta.value || '').length;
+        ta.setSelectionRange?.(len, len);
+      } catch {
+        /* ignore */
+      }
+      return true;
+    }
 
     async function submit(kind: FinishReviewEvent) {
       if (actionBusyRef.current) return;
@@ -168,10 +210,19 @@ export function FinishReviewModal({
     }
 
     const onKey = (e: KeyboardEvent) => {
-      // Esc → close (also when typing in composer)
+      // Esc → blur finish input first; then close form (never PR shell here)
       if (e.key === 'Escape') {
         stop(e);
-        if (!actionBusyRef.current) onCloseRef.current?.();
+        if (actionBusyRef.current) return;
+        if (isFinishInputFocused()) {
+          try {
+            (document.activeElement as HTMLElement | null)?.blur?.();
+          } catch {
+            /* ignore */
+          }
+          return;
+        }
+        onCloseRef.current?.();
         return;
       }
 
@@ -179,6 +230,17 @@ export function FinishReviewModal({
       if (!e.altKey || e.metaKey || e.ctrlKey) return;
       const code = String(e.code || '');
       const shift = Boolean(e.shiftKey);
+      const keyLower = String(e.key || '').toLowerCase();
+
+      // ⌥I → focus comment input (physical KeyI; macOS may emit dead-key glyphs)
+      if (
+        !shift &&
+        (code === 'KeyI' || keyLower === 'i' || keyLower === 'ˆ')
+      ) {
+        stop(e);
+        focusFinishInput();
+        return;
+      }
 
       // ⌥↵ → Comment
       if (
@@ -199,7 +261,7 @@ export function FinishReviewModal({
         return;
       }
       // ⌥⇧X → Request changes
-      if (shift && (code === 'KeyX' || String(e.key || '').toLowerCase() === 'x')) {
+      if (shift && (code === 'KeyX' || keyLower === 'x')) {
         stop(e);
         void submit('request_changes');
       }
@@ -284,7 +346,15 @@ export function FinishReviewModal({
           </p>
         </header>
 
-        <div className="prp-finish-review__composer">
+        <div
+          className="prp-finish-review__composer prp-opt-hint-host"
+          data-prp-finish-composer="1"
+        >
+          <OptBtnHint
+            label={scFocusInput}
+            preferredPlacement="top"
+            className="prp-opt-btn-hint--finish"
+          />
           <MarkdownComposer
             value={body}
             onChange={setBody}
@@ -314,7 +384,12 @@ export function FinishReviewModal({
                 {t('cta_discard')}
               </Button>
             ) : null}
-            <span className="prp-opt-hint-host">
+            <span className="prp-opt-hint-host" data-prp-finish-cancel="1">
+              <OptBtnHint
+                label={scEsc}
+                preferredPlacement="top"
+                className="prp-opt-btn-hint--finish"
+              />
               <Button
                 size="sm"
                 variant="default"

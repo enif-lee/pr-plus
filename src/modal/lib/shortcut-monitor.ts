@@ -155,12 +155,12 @@ export const SHORTCUT_MONITOR_CATALOG: Record<string, ShortcutMonitorEntry> = {
     labelWin: DIFF_PAGE_SCROLL_SHORTCUT.next.labelWin,
   },
   optArrowScrollSelectPrev: {
-    title: 'Jump selection up + scroll',
+    title: 'Previous change (first line)',
     labelMac: '⌥↑',
     labelWin: 'Alt+↑',
   },
   optArrowScrollSelectNext: {
-    title: 'Jump selection down + scroll',
+    title: 'Next change (first line)',
     labelMac: '⌥↓',
     labelWin: 'Alt+↓',
   },
@@ -344,6 +344,11 @@ export const SHORTCUT_MONITOR_CATALOG: Record<string, ShortcutMonitorEntry> = {
     title: 'Toggle comment / review mode',
     labelMac: '⌥T',
     labelWin: 'Alt+T',
+  },
+  composerStartPending: {
+    title: 'Start review / Add comment',
+    labelMac: '⌥S',
+    labelWin: 'Alt+S',
   },
   contextThreadCollapse: {
     title: 'Collapse thread',

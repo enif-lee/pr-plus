@@ -95,6 +95,8 @@ function VirtualDiffImpl(props: any) {
     onSelectionStart,
     onSelectionExtend,
     onSelectionEnd,
+    /** Pointer over selection / dock → reveal action group (no Opt). */
+    onSelectionHoverReveal = null,
     onToggleCollapse,
     /** Expand omitted context between hunks (controls sit on @@ rows) */
     onExpandGap = null,
@@ -135,6 +137,7 @@ function VirtualDiffImpl(props: any) {
      */
     onVirtualMetricsChange = null,
     pendingCount = 0,
+    hasViewerPendingReview = false,
     searchQuery = '',
     searchMatchRows = null,
     activeSearchHit = null,
@@ -220,6 +223,45 @@ function VirtualDiffImpl(props: any) {
   }, []);
 
   const showSelectionIsland = Boolean(selectionIsland);
+
+  const hoverRevealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const setHoverReveal = useCallback(
+    (on: boolean) => {
+      if (typeof onSelectionHoverReveal !== 'function') return;
+      if (hoverRevealTimerRef.current != null) {
+        clearTimeout(hoverRevealTimerRef.current);
+        hoverRevealTimerRef.current = null;
+      }
+      if (on) {
+        onSelectionHoverReveal(true);
+        return;
+      }
+      // Short delay so pointer can move from selected line → dock without flicker
+      hoverRevealTimerRef.current = setTimeout(() => {
+        hoverRevealTimerRef.current = null;
+        onSelectionHoverReveal(false);
+      }, 120);
+    },
+    [onSelectionHoverReveal]
+  );
+  useEffect(
+    () => () => {
+      if (hoverRevealTimerRef.current != null) {
+        clearTimeout(hoverRevealTimerRef.current);
+      }
+    },
+    []
+  );
+
+  function isSelectionHoverTarget(el: EventTarget | null): boolean {
+    const node = el as Element | null;
+    if (!node || typeof node.closest !== 'function') return false;
+    return Boolean(
+      node.closest(
+        '.prp-vline--selected, .prp-vline--header-selected, [data-file-selected="1"], .prp-selection-dock, .prp-selection-group, .prp-selection-island, [data-prp-selection-hover="1"]'
+      )
+    );
+  }
 
   const matchRowSet = useMemo(() => {
     if (searchMatchRows instanceof Set) return searchMatchRows;
@@ -843,6 +885,16 @@ function VirtualDiffImpl(props: any) {
         onMouseUp={(e) => onSelectionEnd?.({ x: e.clientX, y: e.clientY })}
         onMouseLeave={(e) => {
           if (selecting) onSelectionEnd?.({ x: e.clientX, y: e.clientY });
+          setHoverReveal(false);
+        }}
+        onMouseOver={(e) => {
+          if (isSelectionHoverTarget(e.target)) setHoverReveal(true);
+        }}
+        onMouseOut={(e) => {
+          // Leaving selection/dock into non-selection chrome → clear (delayed)
+          if (isSelectionHoverTarget(e.target) && !isSelectionHoverTarget(e.relatedTarget)) {
+            setHoverReveal(false);
+          }
         }}
       >
       <div className="prp-vlist__spacer" style={{ height: range.totalHeight }}>
@@ -934,6 +986,7 @@ function VirtualDiffImpl(props: any) {
                       )
                   )}
                   pendingCount={pendingCount}
+                  hasViewerPendingReview={hasViewerPendingReview}
                   showHunk={false}
                   searchQuery={qActive ? searchQuery : ''}
                   activeSearchHit={activeSearchHit}

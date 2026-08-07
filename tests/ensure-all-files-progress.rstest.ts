@@ -38,9 +38,9 @@ describe('ensureAllFiles progress wiring (structural)', () => {
     );
     expect(src).toMatch(/useDetailUiStore/);
     expect(src).toMatch(/const ensureAllFiles = useCallback/);
-    // Start / mid / settle labels
-    expect(src).toMatch(/Loading files/);
-    expect(src).toMatch(/Loading all files/);
+    // Start / mid / settle labels (i18n keys; catalogs hold English copy)
+    expect(src).toMatch(/progress_loading_files/);
+    expect(src).toMatch(/progress_loading_all_files|progress_loading_files_n/);
     expect(src).toMatch(/setLoadStage\(\{\s*busy:\s*true/);
     expect(src).toMatch(/clearLoadStage/);
     // Still sets file tree busy flag
@@ -61,7 +61,8 @@ describe('ensureAllFiles progress wiring (structural)', () => {
       resolve(root, 'src/host/modules/side-fetch-progress.ts'),
       'utf8'
     );
-    expect(src).toMatch(/case 'files-all'/);
-    expect(src).toMatch(/Loading all files/);
+    // Inline map uses if (k === 'files-all' …) + i18n keys
+    expect(src).toMatch(/files-all/);
+    expect(src).toMatch(/load_stage_files_all|Loading all files/);
   });
 });

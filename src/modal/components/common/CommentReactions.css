@@ -134,10 +134,17 @@
     0 0 0 1px rgba(140, 149, 159, 0.06);
 }
 
-/* Portaled above overflow:hidden cards / virtual rows */
+/* Portaled to document.body — viewport-fixed coords from placeReactionPicker()
+   (explicit top/left; no translateY so height never shifts the box).
+   Do not set left with !important — that would beat the inline left from JS
+   and pin the menu at x=0. Override absolute host defaults (bottom/left:0)
+   only where needed; top/left come from style={{ top, left }}. */
 .prp-reactions__picker--portal {
-  position: fixed;
-  bottom: auto;
+  position: fixed !important;
+  right: auto;
+  bottom: auto !important; /* beat absolute bottom: calc(100% + 6px) */
+  margin: 0;
+  transform: none !important;
   z-index: var(--prp-z-tip, 100020);
   box-shadow:
     0 12px 32px rgba(1, 4, 9, 0.22),

@@ -7,6 +7,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  protectCjsDualExportPlugin,
+  restoreCjsDualExport,
+} from './cjs-dual-export.mjs';
+import {
   esbuildReleaseExtras,
   isReleaseBuild,
   maybeStripDebugLogs,
@@ -15,6 +19,7 @@ import {
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const entry = path.join(root, 'src/fetch/fetch-api.ts');
 const out = path.join(root, 'src/fetch-pulls.js');
+const fetchRoot = path.join(root, 'src/fetch');
 
 if (!fs.existsSync(entry)) {
   console.error('Missing SoT entry', entry);
@@ -29,12 +34,13 @@ const result = await esbuild.build({
   platform: 'neutral',
   target: 'es2020',
   logLevel: 'warning',
-  // Keep classic module.exports / globalThis attach from entry
+  // Keep classic module.exports / globalThis attach from entry (protect during parse)
   banner: {},
+  plugins: [protectCjsDualExportPlugin(fetchRoot)],
   ...esbuildReleaseExtras(),
 });
 
-let code = result.outputFiles[0].text;
+let code = restoreCjsDualExport(result.outputFiles[0].text);
 
 // Drop ESM export statements — SW loads as classic script via importScripts
 code = code

@@ -217,11 +217,15 @@
   margin: 2px 0;
   padding: 0;
 }
-/* ↑/↓ unit focus within a multi-reply review thread */
+/* ↑/↓ unit focus within a multi-reply review thread.
+ * Outline is painted outside the box — item margin (ConversationThread.css
+ * --prp-rt-item-gap) keeps the ring from overlapping the next comment. */
 .prp-review-thread__item--unit-focus {
   outline: 2px solid var(--prp-accent, #0969da);
   outline-offset: 2px;
   border-radius: 8px;
+  /* Ensure ring sits above sibling content / rail paint */
+  z-index: 1;
 }
 
 /* ── Base branch pencil ── */

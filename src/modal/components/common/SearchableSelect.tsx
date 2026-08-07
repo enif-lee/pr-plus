@@ -164,7 +164,16 @@ export function SearchableSelect({
     if (!open) return undefined;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        e.preventDefault();
+        // Claim before App shell close (both on window capture; later
+        // registration alone is not enough if App runs first — App also
+        // gates on .prp-sselect-panel / data-prp-nested-layer).
+        try {
+          e.preventDefault();
+          e.stopPropagation();
+          e.stopImmediatePropagation();
+        } catch {
+          /* ignore */
+        }
         onClose?.();
       }
     };
@@ -314,6 +323,7 @@ export function SearchableSelect({
       role="dialog"
       aria-label={title || 'Select'}
       aria-multiselectable={multi || undefined}
+      data-prp-nested-layer="1"
       style={pos ? style : undefined}
     >
       {title ? <div className="prp-sselect-title">{title}</div> : null}
@@ -327,6 +337,7 @@ export function SearchableSelect({
         onKeyDown={(e) => {
           if (e.key === 'Escape') {
             e.preventDefault();
+            e.stopPropagation();
             onClose?.();
           } else if (e.key === 'Enter') {
             e.preventDefault();

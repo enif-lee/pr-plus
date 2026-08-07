@@ -10,6 +10,11 @@ import * as esbuild from 'esbuild';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  protectCjsDualExport,
+  protectCjsDualExportPlugin,
+  restoreCjsDualExport,
+} from './cjs-dual-export.mjs';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const src = path.join(root, 'src');
@@ -28,31 +33,6 @@ const ENTRIES = [
   'popup',
   'storage',
 ];
-
-const MODULE_SENTINEL = '__PRP_MODULE_EXPORTS__';
-const MODULE_OBJ_SENTINEL = '__PRP_MODULE_OBJ__';
-
-function protectCjsDualExport(code) {
-  // Avoid esbuild treating the file as CJS because of module.exports / top-level this.
-  return (
-    code
-      .replace(/\bmodule\.exports\b/g, MODULE_SENTINEL)
-      .replace(/\btypeof\s+module\b/g, `typeof ${MODULE_OBJ_SENTINEL}`)
-      .replace(/\bmodule\b/g, MODULE_OBJ_SENTINEL)
-      // esbuild rewrites bare top-level `this` to `exports` → __commonJS wrap
-      .replace(
-        /\)\(\s*typeof\s+globalThis\s*!==\s*['"]undefined['"]\s*\?\s*globalThis\s*:\s*this\s*\)/g,
-        ')(typeof globalThis !== "undefined" ? globalThis : globalThis)'
-      )
-      .replace(/:\s*this\s*\)\s*;\s*$/gm, ': globalThis);')
-  );
-}
-
-function restoreCjsDualExport(code) {
-  return code
-    .replace(new RegExp(MODULE_SENTINEL, 'g'), 'module.exports')
-    .replace(new RegExp(MODULE_OBJ_SENTINEL, 'g'), 'module');
-}
 
 function stripModuleSyntax(code) {
   return code
@@ -88,6 +68,8 @@ for (const name of ENTRIES) {
       fs.existsSync(path.join(src, `${name}-steps.ts`)) ||
       /export \* from '\.\//.test(fs.readFileSync(tsPath, 'utf8').slice(0, 500));
     if (needsBundle) {
+      // Protect dual-export *before* parse (plugin); post-bundle protect was too late
+      // and left esbuild commonjs-variable-in-esm warnings on barrel entries.
       const result = await esbuild.build({
         entryPoints: [tsPath],
         bundle: true,
@@ -96,10 +78,9 @@ for (const name of ENTRIES) {
         platform: 'neutral',
         target: 'es2020',
         logLevel: 'warning',
+        plugins: [protectCjsDualExportPlugin(src)],
       });
-      stripped = restoreCjsDualExport(
-        stripModuleSyntax(protectCjsDualExport(result.outputFiles[0].text))
-      );
+      stripped = restoreCjsDualExport(stripModuleSyntax(result.outputFiles[0].text));
     } else {
       let code = fs.readFileSync(tsPath, 'utf8');
       code = code.replace(/^\/\/ @ts-nocheck.*$/m, '');

@@ -20,6 +20,7 @@ import {
   emojiMenuLabel,
   SLASH_COMMANDS,
 } from '@lib/markdown-composer';
+import { scrollFocusedComposerIntoView } from '@lib/context-thread-dom';
 
 /**
  * Write / Preview markdown composer (no B/I/code toolbar).
@@ -125,6 +126,79 @@ export function MarkdownComposer({
       }
     }
   }, [open, focused, tab, disabled]);
+
+  /**
+   * Keep the full form (tabs + textarea + action buttons) inside the product
+   * scroller when focus opens the composer or the form grows while typing.
+   * Virtual Diff / Conversation lists ignore native focus scroll.
+   */
+  useLayoutEffect(() => {
+    if (!open || !focused || disabled) return;
+    const root = rootRef.current;
+    if (!root) return;
+    const reveal = () => {
+      try {
+        scrollFocusedComposerIntoView(root, { padTop: 16, padBottom: 28 });
+      } catch {
+        /* ignore */
+      }
+    };
+    reveal();
+    const raf =
+      typeof requestAnimationFrame === 'function'
+        ? requestAnimationFrame(() => reveal())
+        : 0;
+    // Pass after sibling CTA row mounts (thread reply actions --open)
+    const t1 = window.setTimeout(reveal, 48);
+    // Pass after virtual-list height remeasure / offset re-anchor settles
+    const t2 = window.setTimeout(reveal, 140);
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+    };
+  }, [open, focused, tab, disabled, value]);
+
+  useLayoutEffect(() => {
+    if (!open || !focused || disabled) return;
+    const root = rootRef.current;
+    if (!root || typeof ResizeObserver === 'undefined') return;
+    let form: HTMLElement = root;
+    try {
+      // Outer-first: full card / thread composer (CTAs), not only .prp-mdc
+      form =
+        (root.closest(
+          '.prp-card--composer, .prp-inline-thread__composer, .prp-selection-dock, [data-prp-composer-root]'
+        ) as HTMLElement | null) || root;
+    } catch {
+      form = root;
+    }
+    let raf = 0;
+    const ro = new ResizeObserver(() => {
+      if (raf) cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        try {
+          scrollFocusedComposerIntoView(form, { padTop: 16, padBottom: 28 });
+        } catch {
+          /* ignore */
+        }
+      });
+    });
+    try {
+      ro.observe(form);
+      if (form !== root) ro.observe(root);
+    } catch {
+      /* ignore */
+    }
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      try {
+        ro.disconnect();
+      } catch {
+        /* ignore */
+      }
+    };
+  }, [open, focused, disabled]);
 
   // App / host can dispatch these on the .prp-mdc root (composer context chords)
   useEffect(() => {

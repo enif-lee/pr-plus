@@ -51,14 +51,21 @@ export function mergePendingReviewComments(published: any, pendingList: any) {
  */
 export function pickViewerPendingFromReviews(reviews: any, login: any) {
   const list = Array.isArray(reviews) ? reviews : [];
-  const mine = list.filter((r) => {
-    if (!r || String(r.state || '').toUpperCase() !== 'PENDING') return false;
-    if (!login) return true;
-    return (
-      String(r.user?.login || '').toLowerCase() === String(login).toLowerCase()
+  const pending = list.filter(
+    (r) => r && String(r.state || '').toUpperCase() === 'PENDING'
+  );
+  if (!pending.length) return null;
+  let mine = pending;
+  if (login) {
+    const byLogin = pending.filter(
+      (r) =>
+        String(r.user?.login || r.author?.login || '').toLowerCase() ===
+        String(login).toLowerCase()
     );
-  });
-  if (!mine.length) return null;
+    // Prefer viewer match; if login filter empties the set, still take any
+    // PENDING so Add comment can attach (avoids create → 422 one-pending).
+    if (byLogin.length) mine = byLogin;
+  }
   const r = mine[mine.length - 1];
   return {
     id: Number(r.id),
@@ -150,13 +157,16 @@ export async function createPendingPullReview(
   token
 , ctx = null) {
   ctx = normalizeApiCtx(ctx);
+  // Omit `event` → PENDING. Prefer commit_id so later GraphQL threads bind
+  // to the same head (Start review + subsequent Add comment).
+  // Do not send empty body: some API versions treat body+no-event oddly.
   const body: any = {};
-  if (opts?.commitId) body.commit_id = opts.commitId;
+  if (opts?.commitId) body.commit_id = String(opts.commitId);
   return apiSend(
     githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`, ctx),
     fetchImpl,
     token,
-    { method: 'POST', body }
+    { method: 'POST', body: Object.keys(body).length ? body : {} }
   );
 }
 
@@ -352,8 +362,94 @@ export async function postReviewCommentViaPendingGraphql(
     subject_type: isFile ? 'file' : 'line',
     pending: true,
     pendingReviewId: node.pullRequestReview?.databaseId ?? null,
+    /** PRR_… used for attach — store on viewerPendingReview for next Add comment */
+    pendingReviewNodeId: String(pendingReviewNodeId || ''),
     threadNodeId,
   };
+}
+
+/**
+ * GraphQL: resolve the viewer's PENDING review global id (PRR_…).
+ * Used when REST list/GET omits node_id or hydrate fails — required so
+ * second "Add comment" can attach via addPullRequestReviewThread instead of
+ * REST POST /comments (422: one pending review per PR).
+ *
+ * @returns {Promise<{ id: number, node_id: string }|null>}
+ */
+export async function resolveViewerPendingReviewViaGraphql(
+  owner,
+  repo,
+  pullNumber,
+  fetchImpl,
+  token,
+  ctx = null,
+  opts: { login?: string | null; preferDatabaseId?: number | null } = {}
+) {
+  ctx = normalizeApiCtx(ctx);
+  if (!token) return null;
+  const n = Number(pullNumber);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  try {
+    // Fetch recent reviews and filter PENDING client-side. Some GH/GHE
+    // surfaces omit states:[PENDING] results or lag; client filter is safer
+    // for Add comment attach after Start review.
+    // Prefer **last** 50 so a fresh PENDING (usually newest) is not pushed
+    // out of the window by older reviews on busy PRs.
+    const data = await apiGraphql(
+      `query($owner:String!,$name:String!,$number:Int!){
+        repository(owner:$owner,name:$name){
+          pullRequest(number:$number){
+            reviews(last:50){
+              nodes{
+                id
+                databaseId
+                state
+                author { login }
+              }
+            }
+          }
+        }
+      }`,
+      {
+        owner: String(owner || ''),
+        name: String(repo || ''),
+        number: n,
+      },
+      fetchImpl,
+      token,
+      ctx
+    );
+    const nodes = (data?.repository?.pullRequest?.reviews?.nodes || []).filter(
+      (r: any) => r && r.id && String(r.state || '').toUpperCase() === 'PENDING'
+    );
+    if (!Array.isArray(nodes) || !nodes.length) return null;
+    const login = opts.login != null ? String(opts.login).toLowerCase() : '';
+    const preferId =
+      opts.preferDatabaseId != null && Number.isFinite(Number(opts.preferDatabaseId))
+        ? Number(opts.preferDatabaseId)
+        : null;
+    let mine = nodes.filter((r) => r && r.id);
+    if (login) {
+      const byLogin = mine.filter(
+        (r) =>
+          String(r.author?.login || '').toLowerCase() === login
+      );
+      if (byLogin.length) mine = byLogin;
+    }
+    if (preferId != null) {
+      const hit = mine.find((r) => Number(r.databaseId) === preferId);
+      if (hit?.id) {
+        return { id: Number(hit.databaseId) || preferId, node_id: String(hit.id) };
+      }
+    }
+    const last = mine[mine.length - 1];
+    if (!last?.id) return null;
+    const id = Number(last.databaseId);
+    if (!Number.isFinite(id) || id <= 0) return null;
+    return { id, node_id: String(last.id) };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -361,6 +457,7 @@ export async function postReviewCommentViaPendingGraphql(
  * Recovers from 422 "one pending review" by re-fetching the existing review.
  * Always re-GETs the review so discarded/stale list entries (with a dead
  * node_id) are not returned after Discard.
+ * Falls back to GraphQL when REST omits node_id (second Add comment attach).
  */
 export async function ensureViewerPendingReview(
   owner,
@@ -381,6 +478,11 @@ export async function ensureViewerPendingReview(
         token
       );
       if (!full || String(full.state || '').toUpperCase() !== 'PENDING') {
+        // GET lag / wrong row — keep list node_id so Add can still GraphQL-attach
+        // instead of create → 422 "one pending review".
+        if (pending?.node_id) {
+          return { id: Number(pending.id), node_id: pending.node_id };
+        }
         return null;
       }
       return {
@@ -388,15 +490,56 @@ export async function ensureViewerPendingReview(
         node_id: full.node_id || pending.node_id || null,
       };
     } catch (err) {
-      // 404 after discard — list can briefly still show the dead PENDING row
-      if (err?.status === 404) return null;
-      // Keep list node_id only when re-GET is unavailable (network); prefer null
-      // over a known-dead id when status is 4xx.
-      if (err?.status >= 400 && err?.status < 500) return null;
-      return pending?.node_id
-        ? { id: Number(pending.id), node_id: pending.node_id }
-        : null;
+      // 404 after discard — list can briefly still show the dead PENDING row.
+      // If list still carries a GraphQL node_id, keep it (GET can lag).
+      if (err?.status === 404) {
+        if (pending?.node_id) {
+          return { id: Number(pending.id), node_id: pending.node_id };
+        }
+        return null;
+      }
+      // Keep list node_id when re-GET fails (403/429/network). Dropping it
+      // forces create → 422 "one pending review" on the next Add comment.
+      if (pending?.node_id) {
+        return { id: Number(pending.id), node_id: pending.node_id };
+      }
+      // Preserve id so GraphQL resolve can still supply node_id
+      if (pending?.id) {
+        return { id: Number(pending.id), node_id: null };
+      }
+      return null;
     }
+  };
+
+  /**
+   * @param pending
+   * @param {{ forceDiscover?: boolean }} [opts]
+   *   forceDiscover: always try GraphQL PENDING list (422 recover / attach).
+   *   Without force, skip GraphQL when createIfMissing and REST found nothing
+   *   (first Start review should create via REST, not double-scan).
+   */
+  const withGraphqlNode = async (
+    pending,
+    opts: { forceDiscover?: boolean } = {}
+  ) => {
+    if (pending?.node_id) return pending;
+    const force = Boolean(opts.forceDiscover);
+    if (!pending?.id && createIfMissing && !force) return pending;
+    const login = await fetchViewerLogin(fetchImpl, token).catch(() => null);
+    const viaGql = await resolveViewerPendingReviewViaGraphql(
+      owner,
+      repo,
+      pullNumber,
+      fetchImpl,
+      token,
+      ctx,
+      {
+        login,
+        preferDatabaseId: pending?.id ?? null,
+      }
+    );
+    if (viaGql?.node_id) return viaGql;
+    return pending;
   };
 
   let pending = await findViewerPendingReview(
@@ -404,11 +547,17 @@ export async function ensureViewerPendingReview(
     repo,
     pullNumber,
     fetchImpl,
-    token
+    token,
+    ctx
   );
   pending = await hydrateNodeId(pending);
+  pending = await withGraphqlNode(pending);
   if (pending?.node_id) return pending;
-  if (!createIfMissing) return pending;
+  if (!createIfMissing) {
+    // Attach path: always try GraphQL discovery before giving up
+    pending = await withGraphqlNode(pending, { forceDiscover: true });
+    return pending;
+  }
 
   try {
     const created = await createPendingPullReview(
@@ -417,12 +566,20 @@ export async function ensureViewerPendingReview(
       pullNumber,
       { commitId },
       fetchImpl,
-      token
+      token,
+      ctx
     );
-    return {
+    const createdRow = {
       id: Number(created?.id),
       node_id: created?.node_id || null,
     };
+    if (createdRow.node_id) return createdRow;
+    // Create response omitted node_id — hydrate / GraphQL
+    pending = await hydrateNodeId(createdRow);
+    pending = await withGraphqlNode(pending || createdRow, {
+      forceDiscover: true,
+    });
+    return pending;
   } catch (err) {
     // Already have a PENDING review (race or find missed it) — attach to it
     const msg = String(err?.message || err || '');
@@ -431,15 +588,23 @@ export async function ensureViewerPendingReview(
       /one pending review/i.test(msg) ||
       /Unprocessable Entity/i.test(msg)
     ) {
-      pending = await findViewerPendingReview(
-        owner,
-        repo,
-        pullNumber,
-        fetchImpl,
-        token
-      );
-      pending = await hydrateNodeId(pending);
-      if (pending?.node_id) return pending;
+      // REST list / GraphQL can lag after another create; retry with backoff.
+      for (let attempt = 0; attempt < 5; attempt++) {
+        if (attempt > 0) {
+          await new Promise((r) => setTimeout(r, 250 * attempt));
+        }
+        pending = await findViewerPendingReview(
+          owner,
+          repo,
+          pullNumber,
+          fetchImpl,
+          token,
+          ctx
+        );
+        pending = await hydrateNodeId(pending);
+        pending = await withGraphqlNode(pending, { forceDiscover: true });
+        if (pending?.node_id) return pending;
+      }
     }
     throw err;
   }

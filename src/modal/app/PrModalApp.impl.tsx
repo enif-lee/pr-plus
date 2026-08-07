@@ -128,7 +128,11 @@ import {
   resolveRootReviewCommentId,
   normalizeReviewCommentId,
 } from '../lib/review-threads';
-import { applyReactionToggle } from '../lib/comment-reactions';
+import {
+  applyReactionToggle,
+  dismissCommentReactionPicker,
+  isCommentReactionPickerOpen,
+} from '../lib/comment-reactions';
 import {
   filterTagsByCommitShas,
   getRepoTagsCache,
@@ -218,6 +222,9 @@ import {
   isSelectableDiffRow,
   isThreadSelection,
   isCodeBodySelection,
+  isInlineCommentRow,
+  isFileHeaderRow,
+  beginSelectionOnRow,
   selectionBlockRole,
   extractSelectedCodeText,
   githubBlobLinePermalink,
@@ -227,10 +234,15 @@ import {
   coalesceSelectionMoveDelta,
   firstSelectableRowInFile,
   lastSelectableRowInFile,
+  firstContentNavRowInFile,
+  lastContentNavRowInFile,
   isSelectionAtFileEdge,
   rebindSelectionRowIndices,
+  findRowIndexForCommentId,
   SELECTION_ACTIONS_REVEAL_MS,
   resolveSelectionIslandRevealPhase,
+  shouldShowSelectionActionGroup,
+  jumpSelectionToAdjacentChangeRegion,
   resolvePendingGotoSelection,
   resolveGotoPathAmongFiles,
 } from '../lib/line-selection';
@@ -291,14 +303,21 @@ import {
   resolveComposerContextShortcutAction,
 } from '../lib/shortcut-policy';
 import {
+  isNestedEscapeLayerOpen,
+  resolveModalEscapeOwner,
+} from '../lib/escape-layer';
+import {
+  focusContextThreadReply,
   focusContextThreadReplyAfterPaint,
   isContextThreadReplyFocused,
   PRP_CONTEXT_THREAD_TAB_LEAVE,
   scrollChildToMaximizeInScroller,
+  scrollChildToRevealInScroller,
 } from '../lib/context-thread-dom';
 import {
   listReviewThreadFocusUnits,
   stepReviewThreadFocusUnit,
+  seedReviewThreadFocusUnit,
   collectThreadReplyComments,
 } from '../lib/thread-reply-nav';
 import { resolveDiffDisplayFiles } from '../lib/single-file-mode';
@@ -476,6 +495,8 @@ export function PrModalApp({
    * merged snapshot. Clear the flag only once the host also has no PENDING.
    */
   const forceDropPendingRef = useRef(false);
+  /** PRR_… from last Start review / pending attach — survives host detail merge wiping nodeId */
+  const pendingReviewNodeIdRef = useRef<string | null>(null);
   // Merge host detail onto optimistic local state so reply/comment flash-revert is avoided.
   // When host closes the sheet (detailProp null), drop localDetail so a reopen cannot
   // keep a stale _metaSeq title/body/milestone over network core (reverse e2e / GH edits).
@@ -865,6 +886,7 @@ export function PrModalApp({
   const [selectionIslandPhase, setSelectionIslandPhase] = useState<
     'actions' | 'comment'
   >('actions');
+  // Keep phase ref in sync for Opt/hover reveal (declared below with other refs)
   const setShowSelectionComposer = useModalStore((s) => s.setShowSelectionComposer);
   const selectionIslandLeaving = useModalStore((s) => s.selectionIslandLeaving);
   const setSelectionIslandLeaving = useModalStore((s) => s.setSelectionIslandLeaving);
@@ -1033,17 +1055,23 @@ export function PrModalApp({
   /** Shift-click range: finalize as multi (do not collapse head to anchor). */
   const shiftRangeRef = useRef<boolean>(false);
   /**
-   * Delay selection action toggles after line select/move so key-hold does not
-   * remount the island (TipPopover layout) every keydown.
+   * Settle timer after select/move (no longer auto-shows the action group).
    */
   const selectionActionsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null
   );
+  /** Pointer over selected rows / dock — reveal action group without Opt. */
+  const selectionHoverRevealRef = useRef(false);
+  /** Latest island phase for Opt/hover sync (avoid stale closure). */
+  const selectionIslandPhaseRef = useRef<'actions' | 'comment'>('actions');
+  selectionIslandPhaseRef.current = selectionIslandPhase;
   /** Coalesce key-repeat line moves to one React update per animation frame. */
   const selectionMoveRafRef = useRef(0);
   const pendingSelectionMoveRef = useRef<{ delta: number; shift: boolean } | null>(
     null
   );
+  /** Live virtual rows for keydown handoff (avoid stale closure on ↑/↓ exit). */
+  const virtualRowsRef = useRef<any[]>([]);
   /**
    * Single-file mode: hop to adjacent file at EOF/BOF, then seed first/last
    * selectable line once virtualRows rebuild for that path.
@@ -1873,6 +1901,8 @@ export function PrModalApp({
   );
 
   const fileStarts = useMemo(() => fileStartIndexMap(virtualRows), [virtualRows]);
+  // Always-current rows for ↑/↓ thread exit handoff (keydown effect is long-lived)
+  virtualRowsRef.current = Array.isArray(virtualRows) ? virtualRows : [];
 
   /**
    * Inline comments (and fold/expand) renumber virtual rowIndex. Selection stores
@@ -2620,21 +2650,31 @@ export function PrModalApp({
       pendingCrossFileSeedRef.current = null;
       return;
     }
+    // Match ↑/↓ continuum: file-level review threads before first body line
     const row =
       pending.edge === 'last'
-        ? typeof lastSelectableRowInFile === 'function'
-          ? lastSelectableRowInFile(virtualRows, path)
-          : null
-        : typeof firstSelectableRowInFile === 'function'
-          ? firstSelectableRowInFile(virtualRows, path)
-          : null;
+        ? typeof lastContentNavRowInFile === 'function'
+          ? lastContentNavRowInFile(virtualRows, path)
+          : typeof lastSelectableRowInFile === 'function'
+            ? lastSelectableRowInFile(virtualRows, path)
+            : null
+        : typeof firstContentNavRowInFile === 'function'
+          ? firstContentNavRowInFile(virtualRows, path)
+          : typeof firstSelectableRowInFile === 'function'
+            ? firstSelectableRowInFile(virtualRows, path)
+            : null;
     if (!row) {
       // Still collapsed / not in rows yet — keep waiting
       return;
     }
     pendingCrossFileSeedRef.current = null;
+    const arrIdx = Array.isArray(virtualRows) ? virtualRows.indexOf(row) : -1;
     const sel =
-      typeof beginLineSelection === 'function' ? beginLineSelection(row) : null;
+      typeof beginSelectionOnRow === 'function'
+        ? beginSelectionOnRow(row, 'RIGHT', arrIdx >= 0 ? arrIdx : null)
+        : typeof beginLineSelection === 'function'
+          ? beginLineSelection(row)
+          : null;
     if (sel) {
       setLineSelection(sel);
       setSelectionIslandLeaving(false);
@@ -2720,19 +2760,67 @@ export function PrModalApp({
     }
   }
 
-  /** Collect reply rows for a root review-comment id from groups + flat list. */
+  /**
+   * Focused multi-reply thread root id from **live** store + DOM.
+   * Must not use keydown-effect closed-over `mappedComments` / `commentIndex`
+   * (effect deps are only open/isEmbed — stale empty after detail loads).
+   */
+  function resolveFocusedReviewThreadRootId(
+    st: ReturnType<typeof useModalStore.getState> = useModalStore.getState()
+  ): string | null {
+    if (st.layoutMode === LAYOUT_DIFF) {
+      if (st.activeDiffCommentId != null && st.activeDiffCommentId !== '') {
+        return String(st.activeDiffCommentId);
+      }
+    } else {
+      const a = String(
+        st.focusedConversationAnchor || st.pendingConversationNavAnchor || ''
+      ).trim();
+      if (a.startsWith('review-comment:')) {
+        return a.slice('review-comment:'.length);
+      }
+    }
+    // DOM: context-active thread card (works when store lags paint / Diff caret)
+    try {
+      if (typeof document === 'undefined') return null;
+      const active = document.querySelector(
+        '.prp-inline-thread--context-active, .prp-inline-thread[data-context-active="1"]'
+      ) as HTMLElement | null;
+      const anchor = String(active?.getAttribute('data-search-anchor') || '').trim();
+      if (anchor.startsWith('review-comment:')) {
+        return anchor.slice('review-comment:'.length);
+      }
+    } catch {
+      /* ignore */
+    }
+    return null;
+  }
+
+  /** Collect reply rows for a root review-comment id from live detail + DOM. */
   function repliesForRootCommentId(rootId: string): any[] {
     if (!rootId) return [];
     const rid = String(rootId);
-    const thread = threadsByCommentId?.get?.(rid) || null;
-    if (Array.isArray(thread?.replies) && thread.replies.length) {
-      return thread.replies;
-    }
-    if (Array.isArray(thread?.root?.replies) && thread.root.replies.length) {
-      return thread.root.replies;
+    // Live detail (detailRef) — not closed-over `detail` / threadsByCommentId
+    const liveDetail = detailRef.current;
+    const all =
+      liveDetail?.reviewComments || liveDetail?.review_comments || [];
+    if (typeof groupReviewThreads === 'function' && Array.isArray(all) && all.length) {
+      try {
+        const groups = groupReviewThreads(all);
+        const thread = (groups || []).find(
+          (t: any) => t && String(t.id) === rid
+        );
+        if (Array.isArray(thread?.replies) && thread.replies.length) {
+          return thread.replies;
+        }
+        if (Array.isArray(thread?.root?.replies) && thread.root.replies.length) {
+          return thread.root.replies;
+        }
+      } catch {
+        /* fall through */
+      }
     }
     // Transitive flat walk (nested in_reply_to chains + shell lag)
-    const all = detail?.reviewComments || detail?.review_comments || [];
     if (typeof collectThreadReplyComments === 'function') {
       const nested = collectThreadReplyComments(rid, all);
       if (nested.length) return nested;
@@ -2754,8 +2842,16 @@ export function PrModalApp({
         ) as HTMLElement | null) ||
         (document.querySelector(
           `.prp-inline-thread[data-context-active="1"][data-search-anchor="review-comment:${CSS.escape(rid)}"]`
+        ) as HTMLElement | null) ||
+        (document.querySelector(
+          `.prp-inline-thread--context-active, .prp-inline-thread[data-context-active="1"]`
         ) as HTMLElement | null);
       if (!active) return [];
+      // If we landed on a different card, only accept when its root matches rid
+      const cardRoot = String(active.getAttribute('data-search-anchor') || '')
+        .replace(/^review-comment:/, '')
+        .trim();
+      if (cardRoot && cardRoot !== rid) return [];
       const ids = [
         ...active.querySelectorAll(
           '[data-prp-thread-unit="reply"][data-prp-thread-unit-id]'
@@ -2769,35 +2865,305 @@ export function PrModalApp({
     }
   }
 
+  /** Sticky Diff file-header overlay height for caret pad. */
+  function diffStickyPadTop(): number {
+    return typeof ROW_HEIGHT === 'number' && ROW_HEIGHT > 0
+      ? ROW_HEIGHT + 4
+      : 28;
+  }
+
+  /**
+   * Active Diff list root — never query keep-alive Conversation (duplicate
+   * thread units off-screen would steal scroll targets).
+   */
+  function activeDiffScrollRoot(): HTMLElement | null {
+    if (typeof document === 'undefined') return null;
+    try {
+      return (
+        (listRef.current as HTMLElement | null) ||
+        (document.querySelector(
+          '.prp-body-panel--active .prp-vlist, .prp-body-panel--diff.prp-body-panel--active .prp-vlist, .prp-diff .prp-vlist, .prp-vlist'
+        ) as HTMLElement | null)
+      );
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Minimal DOM scroll for a focus host inside the Diff vlist.
+   * Uses reveal (not whole-thread maximize). Always syncs store scrollTop so
+   * VirtualDiff does not snap DOM back to a stale prop.
+   */
+  function revealDiffDomFocus(
+    host: HTMLElement | null | undefined
+  ): boolean {
+    if (!host || typeof document === 'undefined') return false;
+    try {
+      const scroller =
+        activeDiffScrollRoot() ||
+        (host.closest(
+          '.prp-vlist, .prp-conversation-virtual, .prp-diff-scroll, .prp-scroll'
+        ) as HTMLElement | null);
+      if (!scroller) {
+        host.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        return true;
+      }
+      // Reject hosts outside the Diff scroller (Conversation keep-alive clones)
+      if (!scroller.contains(host)) return false;
+      const stickyPad = diffStickyPadTop();
+      // Selection island (~40–56px) + slack — keep caret clear of dock
+      const padBottom = 56;
+      if (typeof scrollChildToRevealInScroller === 'function') {
+        scrollChildToRevealInScroller(scroller, host, {
+          padTop: stickyPad,
+          padBottom,
+          minVisiblePx: 14,
+        });
+      } else if (typeof scrollChildToMaximizeInScroller === 'function') {
+        scrollChildToMaximizeInScroller(scroller, host, {
+          padTop: stickyPad,
+          padBottom,
+        });
+      } else {
+        host.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      }
+      // Sync store with low threshold so VirtualDiff prop tracks DOM
+      if (typeof applyProgrammaticDiffScroll === 'function') {
+        applyProgrammaticDiffScroll(scroller, scroller.scrollTop, {
+          storeTop: useModalStore.getState().scrollTop,
+          setStoreTop: setScrollTop,
+          minDomDelta: 0,
+          minStoreDelta: 0.5,
+        });
+      } else {
+        try {
+          setScrollTop(scroller.scrollTop);
+        } catch {
+          /* ignore */
+        }
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Scroll the focused root/reply **unit** into view (DOM node in Diff only).
+   * If the unit is not mounted yet (virtual window), scroll the selection head
+   * first so the thread row mounts, then reveal the unit.
+   */
+  function scrollFocusedThreadUnitIntoView(
+    unitId: unknown,
+    opts: { attempts?: number; sel?: any } = {}
+  ): boolean {
+    const id = unitId != null ? String(unitId).trim() : '';
+    if (!id || typeof document === 'undefined') return false;
+    const maxAttempts = Math.max(1, Number(opts.attempts) || 10);
+    let left = maxAttempts;
+    let didHead = false;
+    const findHost = (): HTMLElement | null => {
+      try {
+        const scope = activeDiffScrollRoot() || document;
+        return (
+          (scope.querySelector(
+            `[data-prp-thread-unit-id="${CSS.escape(id)}"]`
+          ) as HTMLElement | null) ||
+          (scope.querySelector(
+            `.prp-review-thread__item--unit-focus[data-prp-thread-unit-id="${CSS.escape(id)}"]`
+          ) as HTMLElement | null)
+        );
+      } catch {
+        return null;
+      }
+    };
+    const tryScroll = (): boolean => {
+      const host = findHost();
+      if (host) return revealDiffDomFocus(host);
+      // Not in virtual window — nudge list via selection head once
+      if (!didHead && opts.sel) {
+        didHead = true;
+        try {
+          scrollSelectionHeadDomOnly(opts.sel);
+        } catch {
+          /* ignore */
+        }
+      }
+      return false;
+    };
+    if (tryScroll()) return true;
+    const tick = () => {
+      left -= 1;
+      if (tryScroll() || left <= 0) return;
+      requestAnimationFrame(() => {
+        window.setTimeout(tick, 32);
+      });
+    };
+    requestAnimationFrame(() => {
+      window.setTimeout(tick, 32);
+    });
+    return false;
+  }
+
+  /**
+   * After ↑/↓ selection change: prefer live DOM caret (selected vline / unit)
+   * over virtual-index math alone — offsets lag tall thread rows.
+   * Double-rAF: wait for React paint of `.prp-vline--selected` / unit-focus.
+   */
+  function scrollDiffCaretIntoView(sel: any) {
+    if (typeof document === 'undefined') return;
+    const run = () => {
+      try {
+        const unitId = useModalStore.getState().focusedThreadUnitId;
+        if (unitId) {
+          scrollFocusedThreadUnitIntoView(unitId, {
+            attempts: 12,
+            sel,
+          });
+          return;
+        }
+        const scope = activeDiffScrollRoot() || document;
+        const selEl =
+          (scope.querySelector(
+            '.prp-vline--selected.prp-vline--sel-only, .prp-vline--selected.prp-vline--sel-start, .prp-vline--selected.prp-vline--sel-end, .prp-vline--selected'
+          ) as HTMLElement | null) ||
+          (scope.querySelector(
+            '.prp-vline--header.prp-vline--selected'
+          ) as HTMLElement | null);
+        if (selEl) {
+          revealDiffDomFocus(selEl);
+          // Second pass after layout — catch residual bottom clip
+          requestAnimationFrame(() => {
+            try {
+              const again =
+                (scope.querySelector(
+                  '.prp-vline--selected'
+                ) as HTMLElement | null) || selEl;
+              revealDiffDomFocus(again);
+            } catch {
+              /* ignore */
+            }
+          });
+          return;
+        }
+        // Fallback: virtual index (file hop / not yet painted)
+        scrollSelectionHeadDomOnly(sel);
+      } catch {
+        try {
+          scrollSelectionHeadDomOnly(sel);
+        } catch {
+          /* ignore */
+        }
+      }
+    };
+    requestAnimationFrame(() => {
+      requestAnimationFrame(run);
+    });
+  }
+
+  /**
+   * After leaving the last/first unit of a multi-reply thread, pin selection on
+   * that thread row then step once into the line/thread continuum.
+   */
+  function handoffThreadExitToSelection(rootId: string, delta: number): boolean {
+    const st = useModalStore.getState();
+    st.setFocusedThreadUnitId(null);
+    const rows = virtualRowsRef.current;
+    const list = Array.isArray(rows) ? rows : [];
+    let arrIdx = -1;
+    for (let i = 0; i < list.length; i++) {
+      const r = list[i];
+      if (!r) continue;
+      const isThreadRow =
+        typeof isInlineCommentRow === 'function'
+          ? isInlineCommentRow(r)
+          : r.kind === 'inline-comment' || r.kind === 'thread';
+      if (!isThreadRow) continue;
+      if (String(r.commentId) !== String(rootId)) continue;
+      arrIdx = i;
+      break;
+    }
+    if (arrIdx < 0 && typeof findRowIndexForCommentId === 'function') {
+      const found = findRowIndexForCommentId(list, rootId);
+      if (found != null && Number.isFinite(Number(found))) {
+        // Prefer array index matching comment row
+        for (let i = 0; i < list.length; i++) {
+          if (
+            isInlineCommentRow?.(list[i]) &&
+            String(list[i]?.commentId) === String(rootId)
+          ) {
+            arrIdx = i;
+            break;
+          }
+        }
+        if (arrIdx < 0) arrIdx = Number(found);
+      }
+    }
+    // Always re-pin caret on this thread row so the following step leaves from
+    // a known continuum stop (avoids skipping the thread on reverse ↑/↓).
+    if (arrIdx >= 0 && typeof beginSelectionOnRow === 'function') {
+      const pinned = beginSelectionOnRow(list[arrIdx], 'RIGHT', arrIdx);
+      if (pinned) st.setLineSelection(pinned);
+    }
+    // Drop Diff thread id / unit so ↑ is moveSelectionUp (line continuum) and
+    // can re-enter the thread stop; multi-reply policy needs a real root.
+    try {
+      st.setActiveDiffCommentId(null);
+    } catch {
+      /* ignore */
+    }
+    // One step off the thread using array-index math when possible so reverse
+    // ↑ lands back on this stop without rAF coalesce / stale head drift.
+    const d = delta < 0 ? -1 : 1;
+    if (arrIdx >= 0 && typeof beginSelectionOnRow === 'function') {
+      const targetIdx = arrIdx + d;
+      if (targetIdx >= 0 && targetIdx < list.length) {
+        // Walk to nearest nav stop in direction (thread / line / header)
+        let i = targetIdx;
+        while (i >= 0 && i < list.length) {
+          const row = list[i];
+          const isStop =
+            (typeof isInlineCommentRow === 'function'
+              ? isInlineCommentRow(row)
+              : row?.kind === 'inline-comment') ||
+            (typeof isSelectableDiffRow === 'function'
+              ? isSelectableDiffRow(row)
+              : row?.kind === 'diff-line') ||
+            (typeof isFileHeaderRow === 'function'
+              ? isFileHeaderRow(row)
+              : row?.kind === 'file-header');
+          if (isStop) {
+            const next = beginSelectionOnRow(row, 'RIGHT', i);
+            if (next) {
+              st.setLineSelection(next);
+              try {
+                scrollDiffCaretIntoView(next);
+              } catch {
+                /* ignore */
+              }
+              return true;
+            }
+            break;
+          }
+          i += d;
+        }
+      }
+    }
+    // Fallback: flush keyboard move (bypass rAF)
+    flushSelectionKeyboardMove(d, false);
+    return true;
+  }
+
   /**
    * ↑/↓ within a multi-reply review thread (root + replies). Returns true when
-   * handled so callers can skip file/line selection.
+   * handled (in-thread step **or** exit handoff to line/thread selection).
+   * No wrap at ends — one more step leaves the thread in the continuum.
    */
   function stepThreadReply(delta: number): boolean {
     const st = useModalStore.getState();
     const liveLayout = st.layoutMode;
-    // Diff: activeDiffCommentId / commentIndex root
-    let rootId: string | null = null;
-    if (liveLayout === LAYOUT_DIFF) {
-      const c =
-        commentIndex >= 0 && mappedComments[commentIndex]
-          ? mappedComments[commentIndex]
-          : st.activeDiffCommentId != null
-            ? mappedComments.find(
-                (m: any) =>
-                  m && String(m.id) === String(st.activeDiffCommentId)
-              )
-            : null;
-      if (!c) return false;
-      rootId = c.id != null ? String(c.id) : null;
-    } else {
-      // Conversation: focused review-comment anchor
-      const a = String(
-        st.focusedConversationAnchor || st.pendingConversationNavAnchor || ''
-      ).trim();
-      if (!a.startsWith('review-comment:')) return false;
-      rootId = a.slice('review-comment:'.length);
-    }
+    const rootId = resolveFocusedReviewThreadRootId(st);
     if (!rootId) return false;
     const replies = repliesForRootCommentId(rootId);
     const units = listReviewThreadFocusUnits(rootId, replies);
@@ -2806,40 +3172,37 @@ export function PrModalApp({
       st.focusedThreadUnitId != null
         ? String(st.focusedThreadUnitId)
         : rootId;
-    const next = stepReviewThreadFocusUnit(units, cur, delta);
+    const stepped = stepReviewThreadFocusUnit(units, cur, delta);
+    if (stepped.exit) {
+      if (liveLayout === LAYOUT_DIFF) {
+        return handoffThreadExitToSelection(rootId, delta);
+      }
+      // Conversation: clear unit; do not invent Diff line selection
+      st.setFocusedThreadUnitId(null);
+      return true;
+    }
+    const next = stepped.unit;
     if (!next) return false;
     // Keep Diff thread root selected while stepping units. setActiveDiffCommentId
     // clears focusedThreadUnitId — set root first, then the unit.
     if (liveLayout === LAYOUT_DIFF && st.activeDiffCommentId == null) {
       st.setActiveDiffCommentId(rootId);
+    } else if (
+      liveLayout === LAYOUT_DIFF &&
+      st.activeDiffCommentId != null &&
+      String(st.activeDiffCommentId) !== rootId
+    ) {
+      // Align root if store pointed elsewhere (e.g. reply id)
+      st.setActiveDiffCommentId(rootId);
     }
     st.setFocusedThreadUnitId(next.id);
-    // Scroll unit into view (thread list or virtual scroller)
+    // Scroll the focused unit band only (minimal reveal)
     try {
       requestAnimationFrame(() => {
-        try {
-          const host =
-            (typeof document !== 'undefined' &&
-              (document.querySelector(
-                `[data-prp-thread-unit-id="${CSS.escape(next.id)}"]`
-              ) as HTMLElement | null)) ||
-            null;
-          if (!host) return;
-          const scroller =
-            (host.closest(
-              '.prp-vlist, .prp-conversation-virtual, .prp-diff-scroll, .prp-scroll'
-            ) as HTMLElement | null) || null;
-          if (scroller) {
-            scrollChildToMaximizeInScroller(scroller, host, {
-              padTop: 24,
-              padBottom: 24,
-            });
-          } else {
-            host.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-          }
-        } catch {
-          /* ignore */
-        }
+        scrollFocusedThreadUnitIntoView(next.id, {
+          attempts: 12,
+          sel: useModalStore.getState().lineSelection,
+        });
       });
     } catch {
       /* ignore */
@@ -2850,57 +3213,46 @@ export function PrModalApp({
   /** True when focused Diff/Conversation thread has ≥1 reply (↑/↓ unit nav). */
   function isMultiReplyThreadFocused(): boolean {
     const st = useModalStore.getState();
-    let rootId: string | null = null;
-    if (st.layoutMode === LAYOUT_DIFF) {
-      const c =
-        commentIndex >= 0 && mappedComments[commentIndex]
-          ? mappedComments[commentIndex]
-          : st.activeDiffCommentId != null
-            ? mappedComments.find(
-                (m: any) =>
-                  m && String(m.id) === String(st.activeDiffCommentId)
-              )
-            : null;
-      if (!c?.id) {
-        // Fallback: any context-active multi-reply card in DOM
-        try {
-          if (typeof document !== 'undefined') {
-            const active = document.querySelector(
-              '.prp-inline-thread--context-active, .prp-inline-thread[data-context-active="1"]'
-            );
-            if (
-              active?.querySelector(
-                '[data-prp-thread-unit="reply"][data-prp-thread-unit-id]'
-              )
-            ) {
-              return true;
-            }
-          }
-        } catch {
-          /* ignore */
-        }
-        return false;
-      }
-      rootId = String(c.id);
-    } else {
-      const a = String(
-        st.focusedConversationAnchor || st.pendingConversationNavAnchor || ''
-      ).trim();
-      if (!a.startsWith('review-comment:')) return false;
-      rootId = a.slice('review-comment:'.length);
-    }
+    // Require a real root id. DOM-only multi-reply (stale context-active after
+    // continuum exit) must not claim ↑/↓ — that no-ops stepThreadReply and
+    // blocks line/thread re-entry (P3c e2e).
+    const rootId = resolveFocusedReviewThreadRootId(st);
     if (!rootId) return false;
-    if (repliesForRootCommentId(rootId).length > 0) return true;
-    // Last resort: painted reply units on the focused thread card
+    // In-thread unit focus always multi-capable while a root is active
+    if (
+      st.focusedThreadUnitId != null &&
+      String(st.focusedThreadUnitId).trim() !== ''
+    ) {
+      if (repliesForRootCommentId(rootId).length > 0) return true;
+    }
+    if (repliesForRootCommentId(rootId).length > 0) {
+      // Active Diff comment nav on this root (⌥J/K or continuum seed)
+      if (
+        st.activeDiffCommentId != null &&
+        String(st.activeDiffCommentId) === String(rootId)
+      ) {
+        return true;
+      }
+      // Line selection parked on this thread row
+      const sel = st.lineSelection;
+      if (
+        isThreadSelection(sel) &&
+        String(sel?.commentId ?? '') === String(rootId)
+      ) {
+        return true;
+      }
+    }
     try {
       if (typeof document === 'undefined') return false;
       const active = document.querySelector(
         `.prp-inline-thread--context-active[data-search-anchor="review-comment:${CSS.escape(rootId)}"], .prp-inline-thread[data-context-active="1"][data-search-anchor="review-comment:${CSS.escape(rootId)}"]`
       );
       return Boolean(
-        active?.querySelector(
-          '[data-prp-thread-unit="reply"][data-prp-thread-unit-id]'
-        )
+        active &&
+          (active.querySelector(
+            '[data-prp-thread-unit="reply"][data-prp-thread-unit-id]'
+          ) ||
+            active.getAttribute('data-prp-multi-reply') === '1')
       );
     } catch {
       return false;
@@ -3035,18 +3387,49 @@ export function PrModalApp({
   }
 
   /**
-   * ⌥↑ / ⌥↓ on Diff: override browser default — multi-step selection jump.
-   * Scroll is handled once by selection reveal (no second scroll path — that
-   * double-setState was a key-hold lag source).
+   * ⌥↑ / ⌥↓ on Diff: jump to first line of next/prev **change region**
+   * (contiguous add/del/change run). Single-line selection only — never
+   * multi-select a whole huge hunk. Scroll via caret reveal.
    */
   function optArrowScrollSelect(delta: number) {
     if (layoutMode !== LAYOUT_DIFF) return;
     const dir = delta < 0 ? -1 : 1;
-    const steps =
-      (typeof DIFF_OPT_ARROW_SHORTCUT !== 'undefined' &&
-        Number(DIFF_OPT_ARROW_SHORTCUT.selectionSteps)) ||
-      8;
-    applySelectionKeyboardMove(dir * steps, false);
+    const list =
+      (Array.isArray(virtualRowsRef.current) && virtualRowsRef.current.length
+        ? virtualRowsRef.current
+        : Array.isArray(virtualRows)
+          ? virtualRows
+          : []) || [];
+    const st = useModalStore.getState();
+    const next =
+      typeof jumpSelectionToAdjacentChangeRegion === 'function'
+        ? jumpSelectionToAdjacentChangeRegion(st.lineSelection, list, dir)
+        : null;
+    if (!next) return;
+    // Collapse multi-line → single caret on the target first line
+    setLineSelection(next);
+    try {
+      clearDiffThreadFocusIfNeeded();
+    } catch {
+      /* ignore */
+    }
+    const path = String(next.filePath || '').trim();
+    if (path) {
+      try {
+        ensureFileExpandedForSelection(path);
+        if (path !== String(useModalStore.getState().activeFilePath || '')) {
+          setActiveFilePath(path);
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    scheduleSelectionActionsReveal();
+    try {
+      scrollDiffCaretIntoView(next);
+    } catch {
+      /* ignore */
+    }
   }
 
   /** Conversation timeline scroller (virtual list). */
@@ -3415,39 +3798,101 @@ export function PrModalApp({
   }
 
   /**
-   * Hide action toggles immediately; re-show after idle so key-hold stays light.
-   * File-target composer stays immediate (caller sets show + phase).
+   * Mount/unmount the selection action group from pure policy:
+   * selection alone never shows — need Opt-hold, hover, or comment phase.
+   */
+  function syncSelectionActionReveal() {
+    const st = useModalStore.getState();
+    const sel = st.lineSelection;
+    const phase = selectionIslandPhaseRef.current;
+    const thread =
+      !sel ||
+      (typeof isThreadSelection === 'function'
+        ? isThreadSelection(sel)
+        : sel.kind === 'thread' ||
+          sel.subjectType === 'thread' ||
+          sel.kind === 'inline-comment');
+    const hasLineOrFile = Boolean(sel && !thread);
+    let domOpt = false;
+    try {
+      const root = typeof document !== 'undefined' ? document.documentElement : null;
+      domOpt = Boolean(
+        root?.hasAttribute?.('data-prp-opt-held') ||
+          root?.classList?.contains?.('prp-opt-held')
+      );
+    } catch {
+      domOpt = false;
+    }
+    const optHeld = Boolean(
+      optHeldRef.current || st.optHintsActive || domOpt
+    );
+    const show =
+      typeof shouldShowSelectionActionGroup === 'function'
+        ? shouldShowSelectionActionGroup({
+            hasLineOrFileSelection: hasLineOrFile,
+            selecting: Boolean(st.selecting || selectingRef.current),
+            optHeld,
+            hoverReveal: Boolean(selectionHoverRevealRef.current),
+            phase,
+          })
+        : phase === 'comment' || optHeld || selectionHoverRevealRef.current;
+
+    if (show) {
+      setSelectionIslandLeaving(false);
+      // Ensure actions phase when revealing via Opt/hover (comment stays)
+      if (phase !== 'comment') {
+        const nextPhase =
+          typeof resolveSelectionIslandRevealPhase === 'function'
+            ? resolveSelectionIslandRevealPhase(sel)
+            : 'actions';
+        if (nextPhase === 'hidden') {
+          if (st.showSelectionComposer) setShowSelectionComposer(false);
+          return;
+        }
+        if (selectionIslandPhaseRef.current !== 'actions') {
+          selectionIslandPhaseRef.current = 'actions';
+          setSelectionIslandPhase('actions');
+        }
+      }
+      if (!st.showSelectionComposer) setShowSelectionComposer(true);
+      return;
+    }
+    // Hide action dock; never tear down an open comment island here
+    if (phase === 'comment') return;
+    if (st.showSelectionComposer) setShowSelectionComposer(false);
+  }
+
+  /**
+   * After select/move: hide actions dock (selection alone must not show it).
+   * Comment phase stays open. Opt/hover re-sync reveals the group.
    */
   function scheduleSelectionActionsReveal() {
     clearSelectionActionsTimer();
+    const phase = selectionIslandPhaseRef.current;
+    if (phase === 'comment' && useModalStore.getState().lineSelection) {
+      // Keep comment island; do not auto-flip to actions
+      setShowSelectionComposer(true);
+      return;
+    }
+    // Hide immediately while settling (key-hold / drag) — no idle auto-show
     if (useModalStore.getState().showSelectionComposer) {
       setShowSelectionComposer(false);
     }
     const delay =
       typeof SELECTION_ACTIONS_REVEAL_MS === 'number'
-        ? SELECTION_ACTIONS_REVEAL_MS
-        : 300;
+        ? Math.min(SELECTION_ACTIONS_REVEAL_MS, 50)
+        : 50;
     selectionActionsTimerRef.current = setTimeout(() => {
       selectionActionsTimerRef.current = null;
-      const st = useModalStore.getState();
-      if (!st.lineSelection || st.selecting) return;
-      // Pure reveal policy: file + line → actions; thread → hide island
-      const phase =
-        typeof resolveSelectionIslandRevealPhase === 'function'
-          ? resolveSelectionIslandRevealPhase(st.lineSelection)
-          : st.lineSelection.kind === 'thread' ||
-              st.lineSelection.subjectType === 'thread' ||
-              st.lineSelection.kind === 'inline-comment'
-            ? 'hidden'
-            : 'actions';
-      if (phase === 'hidden') {
-        setShowSelectionComposer(false);
-        return;
-      }
-      setSelectionIslandLeaving(false);
-      setSelectionIslandPhase(phase);
-      setShowSelectionComposer(true);
+      syncSelectionActionReveal();
     }, delay);
+  }
+
+  function setSelectionHoverReveal(next: boolean) {
+    const v = Boolean(next);
+    if (selectionHoverRevealRef.current === v) return;
+    selectionHoverRevealRef.current = v;
+    syncSelectionActionReveal();
   }
 
   /**
@@ -3482,7 +3927,8 @@ export function PrModalApp({
               vp,
               virtualRows.length,
               offs,
-              { padTop: stickyTop + 2, padBottom: 2 }
+              // padBottom: selection island (~56px) so caret is not under dock
+              { padTop: stickyTop + 2, padBottom: Math.max(56, h * 2) }
             )
           : cur;
       applyProgrammaticDiffScroll(el, top, {
@@ -3554,8 +4000,11 @@ export function PrModalApp({
     // Prefer selection.filePath for seed context so lagging tree activeFile
     // cannot reseed to the previous file top under key-hold (jump-up).
     const pathHint = String(prevSel?.filePath || activePath || '').trim();
+    const rowsLive = virtualRowsRef.current?.length
+      ? virtualRowsRef.current
+      : virtualRows;
     const nextSel =
-      moveLineSelection(prevSel, virtualRows, delta, {
+      moveLineSelection(prevSel, rowsLive, delta, {
         shift,
         activeFilePath: pathHint,
       }) || prevSel;
@@ -3631,32 +4080,51 @@ export function PrModalApp({
       setSelectionIslandLeaving(false);
     }
     // Thread caret: align Diff comment-nav index so ⌥C opens that reply.
+    // Direction-aware multi-reply unit seed (↓ → first/root, ↑ → last reply).
     // Line/file selection leaves thread focus — drop hit ring (`.prp-vline--hit`).
     if (
       nextSel &&
       (nextSel.kind === 'thread' ||
         nextSel.subjectType === 'thread' ||
         nextSel.kind === 'inline-comment') &&
-      nextSel.commentId != null &&
-      Array.isArray(mappedComments)
+      nextSel.commentId != null
     ) {
-      const tIdx = mappedComments.findIndex(
-        (c: any) => String(c?.id) === String(nextSel.commentId)
-      );
-      if (tIdx >= 0 && tIdx !== commentIndex) setCommentIndex(tIdx);
+      const rootId = String(nextSel.commentId);
+      if (Array.isArray(mappedComments)) {
+        const tIdx = mappedComments.findIndex(
+          (c: any) => String(c?.id) === rootId
+        );
+        if (tIdx >= 0 && tIdx !== commentIndex) setCommentIndex(tIdx);
+      }
+      try {
+        useModalStore.getState().setActiveDiffCommentId(rootId);
+      } catch {
+        /* ignore */
+      }
+      if (!shift) {
+        const replies = repliesForRootCommentId(rootId);
+        const units = listReviewThreadFocusUnits(rootId, replies);
+        if (units.length >= 2 && typeof seedReviewThreadFocusUnit === 'function') {
+          const seed = seedReviewThreadFocusUnit(units, delta);
+          if (seed?.id) {
+            useModalStore.getState().setFocusedThreadUnitId(String(seed.id));
+          }
+        } else {
+          useModalStore.getState().setFocusedThreadUnitId(null);
+        }
+      }
     } else {
       clearDiffThreadFocusIfNeeded();
     }
     scheduleSelectionActionsReveal();
-    // DOM scroll after paint only (path already synced above)
-    queueMicrotask(() => {
-      try {
-        const sel = useModalStore.getState().lineSelection || nextSel;
-        scrollSelectionHeadDomOnly(sel);
-      } catch {
-        /* ignore */
-      }
-    });
+    // After paint: DOM-first caret reveal (unit or selected vline).
+    try {
+      const live = useModalStore.getState();
+      const sel = live.lineSelection || nextSel;
+      scrollDiffCaretIntoView(sel);
+    } catch {
+      /* ignore */
+    }
   }
 
   /**
@@ -4824,17 +5292,42 @@ export function PrModalApp({
         );
         return true;
       }
-      // Ensure thread row is mounted/visible, expand, then focus reply.
-      jumpToReviewComment({
-        id,
-        path: c.path || thread?.root?.path || thread?.path,
-        line: c.line ?? c.originalLine ?? thread?.root?.line ?? null,
-        side: c.side || thread?.root?.side || 'RIGHT',
-      });
+      // Expand if collapsed before focus (composer unmounts when collapsed).
       if (isDiffThreadCollapsed(id, resolved)) {
         onToggleThreadCollapse(id, resolved);
       }
+      // Jump only when the thread is not already the active Diff context —
+      // jumpToReviewComment can virtualize/remount and race ghost→textarea open.
+      const stLive = useModalStore.getState();
+      const alreadyActive =
+        stLive.activeDiffCommentId != null &&
+        String(stLive.activeDiffCommentId) === String(id);
+      let mounted = false;
+      try {
+        mounted = Boolean(
+          typeof document !== 'undefined' &&
+            document.querySelector(
+              `.prp-body-panel--active .prp-inline-thread--context-active, .prp-body-panel--active [data-search-anchor="review-comment:${String(id)}"]`
+            )
+        );
+      } catch {
+        mounted = false;
+      }
+      if (!alreadyActive || !mounted) {
+        jumpToReviewComment({
+          id,
+          path: c.path || thread?.root?.path || thread?.path,
+          line: c.line ?? c.originalLine ?? thread?.root?.line ?? null,
+          side: c.side || thread?.root?.side || 'RIGHT',
+        });
+      }
       focusContextThreadReplyAfterPaint(anchor);
+      // Immediate best-effort focus (AfterPaint retries if ghost still mounting)
+      try {
+        focusContextThreadReply(anchor);
+      } catch {
+        /* ignore */
+      }
       return true;
     }
     if (kind === 'resolve') {
@@ -5577,6 +6070,14 @@ export function PrModalApp({
           : { comments: [], body: '' }
       );
       forceDropPendingRef.current = true;
+      pendingReviewNodeIdRef.current = null;
+      try {
+        if (typeof document !== 'undefined') {
+          document.documentElement.removeAttribute('data-prp-pending-review-node');
+        }
+      } catch {
+        /* ignore */
+      }
       setLocalDetail((prev) =>
         typeof stripPendingReviewFromDetail === 'function'
           ? stripPendingReviewFromDetail(prev)
@@ -5988,6 +6489,25 @@ export function PrModalApp({
     // from this post is not immediately stripped on the next refresh merge.
     if (asPending) forceDropPendingRef.current = false;
     const isFile = payload.subject_type === 'file' || payload.subjectType === 'file';
+    let domPendingNode: string | null = null;
+    try {
+      if (typeof document !== 'undefined') {
+        const attr = document.documentElement.getAttribute(
+          'data-prp-pending-review-node'
+        );
+        if (attr && String(attr).trim()) domPendingNode = String(attr).trim();
+      }
+    } catch {
+      /* ignore */
+    }
+    const knownPendingNode =
+      pendingReviewNodeIdRef.current ||
+      detail?.viewerPendingReview?.nodeId ||
+      detail?.viewerPendingReview?.node_id ||
+      domPendingNode ||
+      null;
+    const knownPendingId =
+      detail?.viewerPendingReview?.id || serverPendingReviewId || null;
     const raw = await api.postReviewComment(detail.owner, detail.repo, detail.number, {
       body: payload.body,
       path: payload.path,
@@ -5998,9 +6518,37 @@ export function PrModalApp({
       startSide: isFile ? null : payload.start_side,
       asPending: Boolean(asPending),
       subjectType: isFile ? 'file' : 'line',
+      // Reuse PRR_… from Start review so Add comment attaches (no create→422)
+      pendingReviewNodeId: knownPendingNode,
+      pendingReviewId: knownPendingId,
     });
     const isPending = Boolean(raw?.pending || asPending || serverPendingReviewId);
     if (isPending) forceDropPendingRef.current = false;
+    // Latch PRR_… for subsequent Add comment (detail merges may drop nodeId).
+    // Prefer explicit pendingReviewNodeId; fall back to PRR_-shaped node_id only
+    // (comment nodes are PRRC_ / thread PRRT_ — never those).
+    const rawNode = String(
+      raw?.pendingReviewNodeId || raw?.pending_review_node_id || ''
+    ).trim();
+    const maybeReviewNode = String(raw?.node_id || raw?.nodeId || '').trim();
+    const latchNode = (
+      rawNode ||
+      (maybeReviewNode.startsWith('PRR_') ? maybeReviewNode : '') ||
+      String(knownPendingNode || '').trim()
+    ).trim();
+    if (latchNode) {
+      pendingReviewNodeIdRef.current = latchNode;
+      try {
+        if (typeof document !== 'undefined') {
+          document.documentElement.setAttribute(
+            'data-prp-pending-review-node',
+            latchNode
+          );
+        }
+      } catch {
+        /* ignore */
+      }
+    }
     // Pessimistic: only after API success, write server-mapped row to host cache.
     const mapped = mapRestReviewComment(raw, {
       body: payload.body,
@@ -6032,22 +6580,40 @@ export function PrModalApp({
       let next = withComment;
       if (isPending) {
         const reviewId =
-          mapped.pendingReviewId || raw?.pendingReviewId || null;
+          mapped.pendingReviewId || raw?.pendingReviewId || knownPendingId || null;
+        const nodeId =
+          raw?.pendingReviewNodeId ||
+          raw?.pending_review_node_id ||
+          pendingReviewNodeIdRef.current ||
+          knownPendingNode ||
+          withComment.viewerPendingReview?.nodeId ||
+          null;
+        if (nodeId) {
+          pendingReviewNodeIdRef.current = String(nodeId);
+          try {
+            if (typeof document !== 'undefined') {
+              document.documentElement.setAttribute(
+                'data-prp-pending-review-node',
+                String(nodeId)
+              );
+            }
+          } catch {
+            /* ignore */
+          }
+        }
         const pendingRows = (withComment.reviewComments || []).filter(
           (c: any) => c?.pending
         );
         next = {
           ...withComment,
           _dropPending: undefined,
-          viewerPendingReview:
-            withComment.viewerPendingReview ||
-            (reviewId
-              ? {
-                  id: reviewId,
-                  nodeId: null,
-                  commentCount: pendingRows.length,
-                }
-              : null),
+          viewerPendingReview: reviewId
+            ? {
+                id: reviewId,
+                nodeId: nodeId ? String(nodeId) : null,
+                commentCount: pendingRows.length,
+              }
+            : withComment.viewerPendingReview || null,
         };
       } else if (withComment._dropPending) {
         next = { ...withComment, _dropPending: undefined };
@@ -7013,6 +7579,134 @@ export function PrModalApp({
     openSelectionComment: () => {
       setSelectionIslandPhase('comment');
       setShowSelectionComposer(true);
+      // Keep island mounted while focus settles (comment phase policy).
+      selectionIslandPhaseRef.current = 'comment';
+      try {
+        const liveSel = useModalStore.getState().lineSelection;
+        if (liveSel) scrollSelectionIntoView(liveSel);
+      } catch {
+        /* ignore */
+      }
+      // ⌥C: land focus in the selection comment box (thread / finish parity).
+      const focusSelectionComposer = () => {
+        try {
+          // Prefer active Diff panel so keep-alive Conversation cannot win.
+          const activePanel = document.querySelector(
+            '.prp-body-panel--active'
+          ) as HTMLElement | null;
+          const scope = activePanel || document;
+          const root =
+            (scope.querySelector(
+              '[data-prp-composer-kind="selection"][data-prp-composer-root="1"]'
+            ) as HTMLElement | null) ||
+            (scope.querySelector(
+              '.prp-selection-island--comment[data-prp-composer-root="1"]'
+            ) as HTMLElement | null) ||
+            (document.querySelector(
+              '[data-prp-composer-kind="selection"][data-prp-composer-root="1"]'
+            ) as HTMLElement | null);
+          if (!root) return false;
+          try {
+            root.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+          } catch {
+            /* ignore */
+          }
+          const mdc =
+            (root.querySelector(
+              '[data-prp-composer], .prp-mdc'
+            ) as HTMLElement | null) || root;
+          try {
+            // Listeners live on the mdc root — dispatch there (not only parent).
+            mdc.dispatchEvent(
+              new CustomEvent('prp-composer-focus-input', {
+                bubbles: true,
+                cancelable: true,
+              })
+            );
+          } catch {
+            /* ignore */
+          }
+          let ta =
+            (root.querySelector(
+              'textarea.prp-mdc__ta, [data-prp-composer-input], textarea'
+            ) as HTMLTextAreaElement | null) || null;
+          if (!ta) {
+            // forceOpen may still be mounting — open ghost if present
+            const ghost = root.querySelector(
+              'button.prp-mdc__ghost, .prp-mdc__ghost'
+            ) as HTMLButtonElement | null;
+            if (ghost && !ghost.disabled) {
+              try {
+                ghost.dispatchEvent(
+                  new MouseEvent('mousedown', {
+                    bubbles: true,
+                    cancelable: true,
+                  })
+                );
+                ghost.click();
+              } catch {
+                /* ignore */
+              }
+              ta =
+                (root.querySelector(
+                  'textarea.prp-mdc__ta, [data-prp-composer-input], textarea'
+                ) as HTMLTextAreaElement | null) || null;
+            }
+          }
+          if (!ta || ta.disabled) return false;
+          try {
+            // Click then focus — some Chromium paths ignore focus() until the
+            // control has received a user-gesture-like activation.
+            ta.click?.();
+            ta.focus({ preventScroll: true });
+          } catch {
+            try {
+              ta.focus();
+            } catch {
+              /* ignore */
+            }
+          }
+          try {
+            const len = String(ta.value || '').length;
+            ta.setSelectionRange?.(len, len);
+          } catch {
+            /* ignore */
+          }
+          const ok =
+            document.activeElement === ta ||
+            root.contains(document.activeElement);
+          if (!ok) {
+            // Last resort: focus without preventScroll
+            try {
+              ta.focus();
+            } catch {
+              /* ignore */
+            }
+          }
+          return (
+            document.activeElement === ta ||
+            root.contains(document.activeElement)
+          );
+        } catch {
+          return false;
+        }
+      };
+      // Island mounts after phase paint / virtual scroll — retry longer so
+      // CDP/automation still lands focus before e2e probes (~500ms).
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (focusSelectionComposer()) return;
+          const delays = [40, 80, 120, 200, 320, 480, 700];
+          const runAt = (i: number) => {
+            if (i >= delays.length) return;
+            window.setTimeout(() => {
+              if (focusSelectionComposer()) return;
+              runAt(i + 1);
+            }, delays[i]);
+          };
+          runAt(0);
+        });
+      });
     },
     openSelectionActions: () => {
       setSelectionIslandPhase('actions');
@@ -7108,6 +7802,12 @@ export function PrModalApp({
       !ui.confirmOpen &&
       !viewerOpen;
     useModalStore.getState().setOptHintsActive(active);
+    // Selection action group: Opt-hold reveal (no idle auto-show)
+    try {
+      syncSelectionActionReveal();
+    } catch {
+      /* ignore */
+    }
   }
 
   useEffect(() => {
@@ -7335,13 +8035,24 @@ export function PrModalApp({
           ? false
           : (ae as HTMLElement).isContentEditable ||
             /^(INPUT|TEXTAREA|SELECT)$/i.test((ae as HTMLElement).tagName || ''));
-      // Live store — App may not re-render on every selection change
-      const hasSel = Boolean(useModalStore.getState().lineSelection);
+      // Live store — App may not re-render on every selection change.
+      // Action dock may be hidden (Opt/hover only); shortcuts still work on
+      // line/file selection alone (AC: ⌥C without dock).
+      const chordSel = useModalStore.getState().lineSelection;
+      const hasLineOrFileSel = Boolean(
+        chordSel &&
+          !(
+            typeof isThreadSelection === 'function'
+              ? isThreadSelection(chordSel)
+              : chordSel.kind === 'thread' ||
+                chordSel.subjectType === 'thread' ||
+                chordSel.kind === 'inline-comment'
+          )
+      );
       if (
         !typing &&
         ui.layoutMode === LAYOUT_DIFF &&
-        ui.showSelectionComposer &&
-        hasSel &&
+        hasLineOrFileSel &&
         key === 'c'
       ) {
         // ⌥C → Comment · ⌘C → Copy code · ⌘⌥C → Copy URL
@@ -7368,74 +8079,120 @@ export function PrModalApp({
         }
       }
 
+      // Finish-review form owns Esc layering + Opt chords (⌥I focus input,
+      // leave-review submit) while open. Do not pre-blur, close shell, or
+      // steal ⌥I into Diff/Conversation composers.
+      const finishReviewOpen = Boolean(
+        typeof document !== 'undefined' &&
+          document.querySelector('[data-prp-finish-review="1"]')
+      );
+      if (finishReviewOpen) {
+        if (e.key === 'Escape') return;
+        if (e.altKey && !e.metaKey && !e.ctrlKey) return;
+      }
+
       // Escape: dismiss nested UI first, otherwise close the whole modal
       // (including from Diff — do not shrink back to conversation).
+      // Window-capture runs *before* document listeners (Diff settings, etc.),
+      // so shell close must gate on open nested markers, not only stopPropagation.
       if (e.key === 'Escape') {
-        // Confirm owns Escape (cancel) — do not close the PR shell
-        if (ui.confirmOpen) {
-          e.preventDefault();
-          e.stopPropagation();
-          return;
-        }
-        // Mermaid / image fullscreen viewers own Escape — close viewer only, keep modal
-        if (
-          typeof document !== 'undefined' &&
-          (document.querySelector('[data-prp-mermaid-viewer="1"]') ||
-            document.querySelector('[data-prp-image-viewer="1"]'))
-        ) {
-          return;
-        }
-        // Inline title editor owns Escape (cancel) while focused
-        const ae = typeof document !== 'undefined' ? document.activeElement : null;
-        if (
+        const ae =
+          typeof document !== 'undefined'
+            ? (document.activeElement as HTMLElement | null)
+            : null;
+        const nestedOpen =
+          typeof isNestedEscapeLayerOpen === 'function'
+            ? isNestedEscapeLayerOpen(document)
+            : Boolean(
+                document.querySelector?.(
+                  '[data-prp-review-filter-menu="1"], .prp-sselect-panel, [data-prp-nested-layer="1"]'
+                )
+              );
+        const titleEditFocused = Boolean(
           ae &&
-          (ae as HTMLElement).classList?.contains('prp-header__title-input')
-        ) {
-          return;
-        }
-        if (ui.pickerOpen) {
-          e.preventDefault();
-          e.stopPropagation();
-          act.closePicker?.();
-          return;
-        }
-        if (ui.paletteOpen) {
-          e.preventDefault();
-          e.stopPropagation();
-          setPaletteOpen(false);
-          return;
-        }
-        if (ui.searchOpen) {
-          e.preventDefault();
-          setSearchOpen(false);
-          return;
-        }
-        if (ui.showSelectionComposer) {
-          e.preventDefault();
-          // Comment phase → back to action chips; actions → dismiss island
-          if (ui.selectionIslandPhase === 'comment') {
-            act.openSelectionActions?.();
-          } else {
-            dismissSelectionIsland();
-          }
-          return;
-        }
-        if (ui.editingBody || ui.editingComment) {
-          e.preventDefault();
-          setEditingBody(false);
-          setEditingComment(null);
-          editorSaveRef.current = null;
-          return;
-        }
-        // Reply / other inputs: Esc blurs only — never close sheet or Diff.
-        {
-          const focusEl =
-            (typeof document !== 'undefined'
-              ? (document.activeElement as HTMLElement | null)
-              : null) || (e.target as HTMLElement | null);
-          if (isEditableKeyboardTarget(focusEl) || isEditableKeyboardTarget(e.target)) {
+            (ae as HTMLElement).classList?.contains('prp-header__title-input')
+        );
+        const reactionOpen =
+          typeof isCommentReactionPickerOpen === 'function' &&
+          isCommentReactionPickerOpen(document);
+        const viewerOpen = Boolean(
+          typeof document !== 'undefined' &&
+            (document.querySelector('[data-prp-mermaid-viewer="1"]') ||
+              document.querySelector('[data-prp-image-viewer="1"]'))
+        );
+        const focusEl =
+          ae ||
+          (e.target as HTMLElement | null);
+        const editableFocused = Boolean(
+          isEditableKeyboardTarget(focusEl) ||
+            isEditableKeyboardTarget(e.target)
+        );
+
+        const owner =
+          typeof resolveModalEscapeOwner === 'function'
+            ? resolveModalEscapeOwner({
+                finishReviewOpen: Boolean(
+                  typeof document !== 'undefined' &&
+                    document.querySelector('[data-prp-finish-review="1"]')
+                ),
+                confirmOpen: Boolean(ui.confirmOpen),
+                paletteOpen: Boolean(ui.paletteOpen),
+                pickerOpen: Boolean(ui.pickerOpen),
+                searchOpen: Boolean(ui.searchOpen),
+                selectionComposerOpen: Boolean(ui.showSelectionComposer),
+                editingBodyOrComment: Boolean(
+                  ui.editingBody || ui.editingComment
+                ),
+                reactionPickerOpen: Boolean(reactionOpen),
+                viewerOpen,
+                titleEditFocused,
+                nestedLayerOpen: nestedOpen,
+                editableFocused,
+              })
+            : null;
+
+        // Pure owner says nested: never close shell (finish-review / confirm /
+        // pickers / Diff settings / SearchableSelect / viewers / title edit).
+        if (owner === 'dismiss-nested' || nestedOpen) {
+          // Confirm / finish already own Esc; store pickers/palette/search need
+          // explicit dismiss here when App is the only handler for store state.
+          if (ui.confirmOpen) {
             e.preventDefault();
             e.stopPropagation();
+            return;
+          }
+          if (viewerOpen) {
+            // Viewer components close themselves
+            return;
+          }
+          if (reactionOpen) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (typeof dismissCommentReactionPicker === 'function') {
+              dismissCommentReactionPicker(document);
+            }
+            return;
+          }
+          if (titleEditFocused) {
+            // Header title Esc cancels edit
+            return;
+          }
+          if (ui.pickerOpen) {
+            e.preventDefault();
+            e.stopPropagation();
+            act.closePicker?.();
+            return;
+          }
+          if (ui.paletteOpen) {
+            e.preventDefault();
+            e.stopPropagation();
+            setPaletteOpen(false);
+            return;
+          }
+          if (ui.searchOpen || useModalStore.getState().searchOpen) {
+            e.preventDefault();
+            e.stopPropagation();
+            setSearchOpen(false);
             try {
               focusEl?.blur?.();
             } catch {
@@ -7443,7 +8200,90 @@ export function PrModalApp({
             }
             return;
           }
+          if (ui.showSelectionComposer) {
+            e.preventDefault();
+            if (ui.selectionIslandPhase === 'comment') {
+              act.openSelectionActions?.();
+            } else {
+              dismissSelectionIsland();
+            }
+            return;
+          }
+          if (ui.editingBody || ui.editingComment) {
+            e.preventDefault();
+            setEditingBody(false);
+            setEditingComment(null);
+            editorSaveRef.current = null;
+            return;
+          }
+          // Diff settings / SearchableSelect / header overflow: window-capture
+          // runs before their document listeners — actively dismiss here so Esc
+          // is not a no-op when CDP/synthetic keys skip document capture order.
+          e.preventDefault();
+          e.stopPropagation();
+          try {
+            const gear = document.querySelector(
+              '[data-prp-review-filter-gear="1"][aria-expanded="true"]'
+            ) as HTMLElement | null;
+            if (gear) {
+              gear.click();
+            } else if (
+              document.querySelector(
+                '[data-prp-review-filter-menu="1"], .prp-diff-review-settings--portal'
+              )
+            ) {
+              // Menu open without expanded attr — toggle gear or remove marker
+              const g = document.querySelector(
+                '[data-prp-review-filter-gear="1"]'
+              ) as HTMLElement | null;
+              g?.click?.();
+            }
+          } catch {
+            /* ignore */
+          }
+          try {
+            // SearchableSelect: close open panels via Escape on trigger/panel
+            const panel = document.querySelector(
+              '.prp-sselect-panel, [data-prp-nested-layer="1"]'
+            ) as HTMLElement | null;
+            if (panel) {
+              panel.dispatchEvent(
+                new KeyboardEvent('keydown', {
+                  key: 'Escape',
+                  bubbles: true,
+                  cancelable: true,
+                })
+              );
+            }
+          } catch {
+            /* ignore */
+          }
+          // Also blur if an editable still holds focus under a nested layer
+          if (editableFocused) {
+            try {
+              focusEl?.blur?.();
+            } catch {
+              /* ignore */
+            }
+          }
+          return;
         }
+
+        if (owner === 'blur-input' || editableFocused) {
+          e.preventDefault();
+          e.stopPropagation();
+          try {
+            focusEl?.blur?.();
+          } catch {
+            /* ignore */
+          }
+          // Diff Find may stay mounted one frame after close — force store
+          if (useModalStore.getState().searchOpen) {
+            setSearchOpen(false);
+          }
+          return;
+        }
+
         e.preventDefault();
         act.onClose?.();
         return;
@@ -7480,6 +8320,7 @@ export function PrModalApp({
       // Capabilities for composer-context chords (DOM on focused / default form)
       let canResolveComposer = false;
       let canToggleModeComposer = false;
+      let canStartPendingComposer = false;
       if (composerFocused && typeof document !== 'undefined') {
         try {
           const root =
@@ -7497,6 +8338,9 @@ export function PrModalApp({
               document.querySelector?.(
                 '.prp-card--composer [data-prp-composer-mode-tabs]'
               )
+          );
+          canStartPendingComposer = Boolean(
+            root?.querySelector?.('[data-prp-composer-start-review]')
           );
         } catch {
           /* ignore */
@@ -7521,6 +8365,7 @@ export function PrModalApp({
           composerFocused: true,
           canResolve: canResolveComposer,
           canToggleMode: canToggleModeComposer,
+          canStartPending: canStartPendingComposer,
         });
         let takeComposerEarly = Boolean(composerAct);
         if (
@@ -7637,6 +8482,17 @@ export function PrModalApp({
                     cTab.getAttribute('aria-selected') === 'true';
                   (commentOn ? rTab : cTab).click();
                 }
+              } catch {
+                /* ignore */
+              }
+              break;
+            }
+            case 'composerStartPending': {
+              try {
+                const btn = root?.querySelector?.(
+                  '[data-prp-composer-start-review]:not([disabled])'
+                ) as HTMLButtonElement | null;
+                btn?.click?.();
               } catch {
                 /* ignore */
               }
@@ -7835,6 +8691,7 @@ export function PrModalApp({
               composerFocused,
               canResolve: canResolveComposer,
               canToggleMode: canToggleModeComposer,
+              canStartPending: canStartPendingComposer,
               searchOpen: Boolean(ui.searchOpen),
               hasLineSelection: liveLineSelection,
               diffThreadFocused: liveDiffThreadFocused,
@@ -7893,18 +8750,39 @@ export function PrModalApp({
         case 'toggleSidePanel':
           act.toggleSidePanel?.();
           break;
-        case 'openSearch':
+        case 'openSearch': {
           setSearchOpen(true);
-          // Focus after SearchBar mounts
-          queueMicrotask(() => {
+          // Focus finder input + select all (also on re-press after navigate).
+          // Retry: bar may still be mounting; when already open, re-claim focus
+          // from Diff rows so Cmd+F never falls through to the browser find UI.
+          const focusSearchInput = () => {
             try {
-              searchInputRef.current?.focus?.();
-              searchInputRef.current?.select?.();
+              const el = searchInputRef.current as HTMLInputElement | null;
+              if (!el) return false;
+              el.focus({ preventScroll: true });
+              // Select full value so re-type replaces the previous query
+              const len = String(el.value || '').length;
+              if (typeof el.select === 'function') el.select();
+              else if (typeof el.setSelectionRange === 'function') {
+                el.setSelectionRange(0, len);
+              }
+              return (
+                typeof document !== 'undefined' &&
+                document.activeElement === el
+              );
             } catch {
-              /* ignore */
+              return false;
             }
+          };
+          queueMicrotask(() => {
+            if (focusSearchInput()) return;
+            requestAnimationFrame(() => {
+              if (focusSearchInput()) return;
+              window.setTimeout(focusSearchInput, 40);
+            });
           });
           break;
+        }
         case 'toggleFullscreen':
           if (!isEmbed) {
             setShellFullscreen((prev) => toggleShellFullscreen(prev));
@@ -7968,21 +8846,50 @@ export function PrModalApp({
               ],
             };
             const sels = selMap[String(action)] || [];
-            const host =
+            // Prefer the visible layout panel (Diff/Conversation) so keep-alive
+            // clones do not receive ⌥E and open a mis-positioned emoji menu.
+            const activePanel =
               (document.querySelector(
-                '.prp-card--kb-focus, .prp-conversation-kb-focus, .prp-review-group__row--kb-focus, .prp-inline-thread[data-context-active="1"], .prp-vline--comment-selected .prp-inline-thread, .prp-inline-thread--context-active'
+                '.prp-body-panel--active'
+              ) as HTMLElement | null) || null;
+            const host =
+              (activePanel?.querySelector?.(
+                '.prp-inline-thread--context-active, .prp-inline-thread[data-context-active="1"], .prp-card--kb-focus, .prp-conversation-kb-focus, .prp-review-group__row--kb-focus, .prp-vline--comment-selected .prp-inline-thread'
+              ) as HTMLElement | null) ||
+              (document.querySelector(
+                '.prp-body-panel--active .prp-inline-thread--context-active, .prp-body-panel--active .prp-inline-thread[data-context-active="1"], .prp-card--kb-focus, .prp-conversation-kb-focus, .prp-review-group__row--kb-focus, .prp-inline-thread[data-context-active="1"], .prp-vline--comment-selected .prp-inline-thread, .prp-inline-thread--context-active'
               ) as HTMLElement | null) ||
               (document.querySelector(
                 '.prp-overlay [data-search-anchor].prp-card--kb-focus, .prp-overlay .prp-card--kb-focus'
               ) as HTMLElement | null) ||
               null;
-            const root = host || document.querySelector('.prp-overlay');
+            const root =
+              host ||
+              activePanel ||
+              (document.querySelector('.prp-overlay') as HTMLElement | null);
             let btn: HTMLElement | null = null;
             for (const s of sels) {
-              btn = (root?.querySelector?.(s) ||
-                document.querySelector(`.prp-overlay ${s}`)) as HTMLElement | null;
-              if (btn && !(btn as HTMLButtonElement).disabled) break;
+              btn = (root?.querySelector?.(s) || null) as HTMLElement | null;
+              // Prefer a visible control (non-zero box) when duplicates exist
+              if (btn && !(btn as HTMLButtonElement).disabled) {
+                const br = btn.getBoundingClientRect?.();
+                if (br && br.width >= 2 && br.height >= 2) break;
+              }
               btn = null;
+            }
+            if (!btn) {
+              for (const s of sels) {
+                const candidates = [
+                  ...(root?.querySelectorAll?.(s) || []),
+                ] as HTMLElement[];
+                btn =
+                  candidates.find((el) => {
+                    if ((el as HTMLButtonElement).disabled) return false;
+                    const br = el.getBoundingClientRect?.();
+                    return br && br.width >= 2 && br.height >= 2;
+                  }) || null;
+                if (btn) break;
+              }
             }
             if (btn) {
               btn.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
@@ -8076,6 +8983,21 @@ export function PrModalApp({
             /* ignore */
           }
           act.runContextThreadAction?.('resolve');
+          break;
+        }
+        case 'composerStartPending': {
+          try {
+            const ae = document.activeElement as HTMLElement | null;
+            const root = ae?.closest?.(
+              '[data-prp-composer-root]'
+            ) as HTMLElement | null;
+            const btn = root?.querySelector?.(
+              '[data-prp-composer-start-review]:not([disabled])'
+            ) as HTMLButtonElement | null;
+            btn?.click?.();
+          } catch {
+            /* ignore */
+          }
           break;
         }
         case 'composerModeToggle': {
@@ -8561,6 +9483,7 @@ export function PrModalApp({
             onCancelEditComment={() => setEditingComment(null)}
             onSaveEditComment={onSaveEditComment}
             pendingCount={totalPendingCount}
+            hasViewerPendingReview={hasServerPending}
             onLoadMoreReviewThreads={onLoadMoreReviewThreads}
             onEnsureThreadComments={ensureThreadCommentsLoaded}
             isThreadCommentsLoading={(id: any) => {
@@ -8717,6 +9640,7 @@ export function PrModalApp({
               commentIndex={commentIndex}
               navComment={navComment}
               pendingCount={pendingCount}
+              hasViewerPendingReview={hasServerPending}
               onDiscardPending={onDiscardPendingReview}
               onLeaveReviewAction={onLeaveReviewAction}
               actionBusy={actionBusy}
@@ -8751,6 +9675,7 @@ export function PrModalApp({
               onSelectionStart={onSelectionStart}
               onSelectionExtend={onSelectionExtend}
               onSelectionEnd={onSelectionEnd}
+              onSelectionHoverReveal={setSelectionHoverReveal}
               onFileHeaderComment={onFileHeaderComment}
               onExpandDiffGap={onExpandDiffGap}
               diffExpandBusyKey={diffExpandBusyKey}

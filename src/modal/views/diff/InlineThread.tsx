@@ -49,6 +49,11 @@ import {
 } from '@lib/comment-quote-hide';
 import { CommentActionIconBtn } from '@common/CommentActionIconBtn';
 import { CONTEXT_COMMENT_ACTION_SHORTCUT } from '@lib/shortcut-policy';
+import { shouldShowThreadOptHints } from '@lib/thread-reply-nav';
+import {
+  canPublishImmediateReviewComment,
+  pendingAttachCtaLabel,
+} from '@lib/pending-review';
 
 /**
  * Inline review thread card (Diff + Conversation).
@@ -90,6 +95,8 @@ function InlineThreadImpl(props: any) {
     collapsed: collapsedProp,
     onToggleCollapse,
     pendingCount = 0,
+    /** Server PENDING review exists (id and/or rows) — gates single Comment */
+    hasViewerPendingReview = false,
     searchQuery = '',
     activeSearchHit = null,
     searchHits = null,
@@ -280,6 +287,20 @@ function InlineThreadImpl(props: any) {
   const rootPending = Boolean(
     thread?.root?.pending || row?.pending || thread?.pending
   );
+  // GitHub: one PENDING review per PR — only Add comment while reviewing.
+  // Include hasViewerPendingReview (server id) even when pendingCount is 0.
+  const canImmediateComment = canPublishImmediateReviewComment({
+    pendingCount,
+    hasServerPending: Boolean(hasViewerPendingReview),
+    hasPendingReplies,
+    rootPending,
+  });
+  const pendingCtaLabel = pendingAttachCtaLabel({
+    pendingCount,
+    hasServerPending: Boolean(hasViewerPendingReview),
+    hasPendingReplies,
+    rootPending,
+  });
   // GraphQL resolveReviewThread requires PRRT_… (not REST rest-thread-*)
   const resolveThreadNodeId = (() => {
     const raw = thread?.threadNodeId || row?.threadNodeId || null;
@@ -448,8 +469,19 @@ function InlineThreadImpl(props: any) {
       isMinimized: minimized,
     });
     if (!own && !canLink && !commentBody && !canHide) return null;
-    // Root-only Opt badges when thread is keyboard-focused
-    const sc = Boolean(contextActive) && meta.isRoot !== false;
+    // Opt badges follow unit focus (reply when unit-active is reply; root otherwise)
+    const sc =
+      typeof shouldShowThreadOptHints === 'function'
+        ? shouldShowThreadOptHints({
+            contextActive: Boolean(contextActive),
+            isRoot: meta.isRoot !== false,
+            commentId: id,
+            focusedUnitId: focusedThreadUnitId,
+          })
+        : Boolean(contextActive) &&
+          (focusedThreadUnitId != null && String(focusedThreadUnitId).trim() !== ''
+            ? String(id) === String(focusedThreadUnitId)
+            : meta.isRoot !== false);
     const S = CONTEXT_COMMENT_ACTION_SHORTCUT;
     return (
       <div className="prp-icon-actions">
@@ -636,8 +668,19 @@ function InlineThreadImpl(props: any) {
     if (isEditingId(id)) return null;
     if (comment?.pending) return null;
     if (typeof onToggleReaction !== 'function') return null;
-    // Replies never paint ⌥E OptBtnHint — only the root row does when focused.
-    const sc = Boolean(contextActive) && isRoot !== false;
+    // ⌥E OptBtnHint on the focused unit (root or reply), not root-only.
+    const sc =
+      typeof shouldShowThreadOptHints === 'function'
+        ? shouldShowThreadOptHints({
+            contextActive: Boolean(contextActive),
+            isRoot,
+            commentId: id,
+            focusedUnitId: focusedThreadUnitId,
+          })
+        : Boolean(contextActive) &&
+          (focusedThreadUnitId != null && String(focusedThreadUnitId).trim() !== ''
+            ? String(id) === String(focusedThreadUnitId)
+            : isRoot !== false);
     return (
       <CommentReactions
         reactions={comment?.reactions || []}
@@ -1193,7 +1236,7 @@ function InlineThreadImpl(props: any) {
                     onComposerFocusChange={setReplyFocused}
                     onSubmitRequest={() =>
                       onReply?.(thread || { id: row?.commentId, root: row }, {
-                        mode: 'comment',
+                        mode: canImmediateComment ? 'comment' : 'pending',
                       })
                     }
                   />
@@ -1202,7 +1245,7 @@ function InlineThreadImpl(props: any) {
               {/* Actions: open when focused/draft OR resolvable (Resolve must stay
                   clickable without typing — empty reply blur used to hide this row
                   before click landed). Also open when context-focused so Tab
-                  stops stay mounted. */}
+                  stops stay mounted. With PENDING review, only Add comment. */}
               <div
                 className={`prp-composer__row prp-inline-thread__composer-actions${
                   String(replyText || '').trim() ||
@@ -1212,49 +1255,59 @@ function InlineThreadImpl(props: any) {
                     ? ' prp-inline-thread__composer-actions--open'
                     : ''
                 }`}
+                data-prp-pending-only={
+                  canImmediateComment ? undefined : '1'
+                }
               >
+                {canImmediateComment ? (
+                  <span
+                    className={
+                      replyFocused || contextActive
+                        ? 'prp-opt-hint-host'
+                        : undefined
+                    }
+                    data-prp-thread-tab-host="comment"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key !== 'Enter' && e.key !== ' ') return;
+                      if (!String(replyText || '').trim() || actionBusy) return;
+                      e.preventDefault();
+                      onReply?.(thread || { id: row?.commentId, root: row }, {
+                        mode: 'comment',
+                      });
+                    }}
+                  >
+                    {replyFocused || contextActive ? (
+                      <OptBtnHint label="⌥C · ⌘↵" preferredPlacement="top" />
+                    ) : null}
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      loading={Boolean(actionBusy)}
+                      disabled={!String(replyText || '').trim()}
+                      tabIndex={-1}
+                      onMouseDown={(e) => {
+                        // Keep composer focus so actions row does not unmount mid-click
+                        e.preventDefault();
+                      }}
+                      onClick={() =>
+                        onReply?.(thread || { id: row?.commentId, root: row }, {
+                          mode: 'comment',
+                        })
+                      }
+                      title="Comment (⌥C · ⌘↵ when typing · ⌥I to focus)"
+                      data-prp-composer-submit="1"
+                    >
+                      {actionBusy ? 'Submitting…' : 'Comment'}
+                    </Button>
+                  </span>
+                ) : null}
                 <span
                   className={
                     replyFocused || contextActive
                       ? 'prp-opt-hint-host'
                       : undefined
                   }
-                  data-prp-thread-tab-host="comment"
-                  tabIndex={0}
-                  onKeyDown={(e) => {
-                    if (e.key !== 'Enter' && e.key !== ' ') return;
-                    if (!String(replyText || '').trim() || actionBusy) return;
-                    e.preventDefault();
-                    onReply?.(thread || { id: row?.commentId, root: row }, {
-                      mode: 'comment',
-                    });
-                  }}
-                >
-                  {replyFocused || contextActive ? (
-                    <OptBtnHint label="⌥C · ⌘↵" preferredPlacement="top" />
-                  ) : null}
-                  <Button
-                    size="sm"
-                    variant="primary"
-                    loading={Boolean(actionBusy)}
-                    disabled={!String(replyText || '').trim()}
-                    tabIndex={-1}
-                    onMouseDown={(e) => {
-                      // Keep composer focus so actions row does not unmount mid-click
-                      e.preventDefault();
-                    }}
-                    onClick={() =>
-                      onReply?.(thread || { id: row?.commentId, root: row }, {
-                        mode: 'comment',
-                      })
-                    }
-                    title="Comment (⌥C · ⌘↵ when typing · ⌥I to focus)"
-                    data-prp-composer-submit="1"
-                  >
-                    {actionBusy ? 'Submitting…' : 'Comment'}
-                  </Button>
-                </span>
-                <span
                   data-prp-thread-tab-host="start-review"
                   tabIndex={0}
                   onKeyDown={(e) => {
@@ -1266,8 +1319,15 @@ function InlineThreadImpl(props: any) {
                     });
                   }}
                 >
+                  {replyFocused || contextActive ? (
+                    <OptBtnHint
+                      label={canImmediateComment ? '⌥S' : '⌥C · ⌘↵'}
+                      preferredPlacement="top"
+                    />
+                  ) : null}
                   <Button
                     size="sm"
+                    variant={canImmediateComment ? 'default' : 'primary'}
                     loading={Boolean(actionBusy)}
                     disabled={!String(replyText || '').trim()}
                     tabIndex={-1}
@@ -1280,17 +1340,16 @@ function InlineThreadImpl(props: any) {
                       })
                     }
                     title={
-                      pendingCount > 0 || hasPendingReplies
-                        ? 'Add this reply to your pending review'
-                        : 'Start a pending review with this reply'
+                      canImmediateComment
+                        ? 'Start a pending review with this reply (⌥S when typing)'
+                        : 'Add this reply to your pending review (⌥C · ⌘↵ when typing)'
                     }
                     data-prp-composer-start-review="1"
+                    data-prp-composer-submit={
+                      canImmediateComment ? undefined : '1'
+                    }
                   >
-                    {actionBusy
-                      ? 'Working…'
-                      : pendingCount > 0 || hasPendingReplies
-                        ? 'Add comment'
-                        : 'Start review'}
+                    {actionBusy ? 'Working…' : pendingCtaLabel}
                   </Button>
                 </span>
                 {canResolveThread ? (

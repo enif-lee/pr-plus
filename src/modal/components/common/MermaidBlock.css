@@ -71,7 +71,7 @@
   text-overflow: ellipsis;
   white-space: pre;
   color: inherit;
-  line-height: 22px;
+  line-height: var(--prp-diff-row-h, 20px);
 }
 .prp-vline--hunk > .prp-hunk-expand-rail {
   grid-column: 3;
@@ -286,6 +286,11 @@
 
 .prp-file-header__status {
   flex: 0 0 auto;
+  /* Fixed width so added / modified / deleted / renamed badges align in the column */
+  box-sizing: border-box;
+  width: 5.5rem;
+  min-width: 5.5rem;
+  text-align: center;
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
@@ -295,6 +300,9 @@
   border: 1px solid var(--prp-border-muted);
   color: var(--prp-fg-muted);
   background: var(--prp-bg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .prp-file-header__status--add {

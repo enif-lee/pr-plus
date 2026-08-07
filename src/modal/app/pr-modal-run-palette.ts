@@ -215,10 +215,16 @@ export function runPaletteCommand(d: Record<string, any>, cmd: any) {
       break;
     case 'openSearch':
       setSearchOpen?.(true);
+      // Same as keyboard openSearch: focus + select all (re-press after nav)
       queueMicrotask(() => {
         try {
-          searchInputRef?.current?.focus?.();
-          searchInputRef?.current?.select?.();
+          const el = searchInputRef?.current as HTMLInputElement | null;
+          if (!el) return;
+          el.focus?.({ preventScroll: true });
+          if (typeof el.select === 'function') el.select();
+          else if (typeof el.setSelectionRange === 'function') {
+            el.setSelectionRange(0, String(el.value || '').length);
+          }
         } catch {
           /* ignore */
         }

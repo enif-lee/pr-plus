@@ -1792,11 +1792,14 @@ var stdin_exports = {};
 __export(stdin_exports, {
   addPendingComment: () => addPendingComment,
   buildPendingReviewSubmitPayload: () => buildPendingReviewSubmitPayload,
+  canPublishImmediateReviewComment: () => canPublishImmediateReviewComment,
   createEmptyPendingReview: () => createEmptyPendingReview,
   discardPendingReview: () => discardPendingReview,
+  pendingAttachCtaLabel: () => pendingAttachCtaLabel,
   pendingReviewCount: () => pendingReviewCount,
   pendingReviewCtaLabel: () => pendingReviewCtaLabel,
-  setPendingReviewBody: () => setPendingReviewBody
+  setPendingReviewBody: () => setPendingReviewBody,
+  viewerHasPendingReview: () => viewerHasPendingReview
 });
 module.exports = __toCommonJS(stdin_exports);
 function createEmptyPendingReview() {
@@ -1838,6 +1841,31 @@ function pendingReviewCount(batch) {
 }
 function pendingReviewCtaLabel(batch) {
   return pendingReviewCount(batch) > 0 ? "Add comment" : "Start review";
+}
+function viewerHasPendingReview(input) {
+  if (input == null || input === false) return false;
+  if (input === true) return true;
+  if (typeof input === "number") {
+    return Number.isFinite(input) && input > 0;
+  }
+  if (typeof input === "object") {
+    if (input.hasServerPending) return true;
+    const sid = input.serverPendingReviewId;
+    if (sid != null && String(sid).trim() !== "" && String(sid) !== "0") {
+      return true;
+    }
+    if (Number(input.pendingCount) > 0) return true;
+    if (input.hasPendingReplies) return true;
+    if (input.rootPending) return true;
+    return false;
+  }
+  return Boolean(input);
+}
+function canPublishImmediateReviewComment(input) {
+  return !viewerHasPendingReview(input);
+}
+function pendingAttachCtaLabel(input) {
+  return viewerHasPendingReview(input) ? "Add comment" : "Start review";
 }
 function buildPendingReviewSubmitPayload(batch, opts = {
   // typed loosely for mutable REST payloads
@@ -7829,12 +7857,17 @@ function mergePendingReviewComments(published, pendingList) {
 }
 function pickViewerPendingFromReviews(reviews, login) {
   const list = Array.isArray(reviews) ? reviews : [];
-  const mine = list.filter((r2) => {
-    if (!r2 || String(r2.state || "").toUpperCase() !== "PENDING") return false;
-    if (!login) return true;
-    return String(r2.user?.login || "").toLowerCase() === String(login).toLowerCase();
-  });
-  if (!mine.length) return null;
+  const pending = list.filter(
+    (r2) => r2 && String(r2.state || "").toUpperCase() === "PENDING"
+  );
+  if (!pending.length) return null;
+  let mine = pending;
+  if (login) {
+    const byLogin = pending.filter(
+      (r2) => String(r2.user?.login || r2.author?.login || "").toLowerCase() === String(login).toLowerCase()
+    );
+    if (byLogin.length) mine = byLogin;
+  }
   const r = mine[mine.length - 1];
   return {
     id: Number(r.id),
@@ -7903,12 +7936,12 @@ async function fetchViewerPendingReviewComments(owner, repo, pullNumber, fetchIm
 async function createPendingPullReview(owner, repo, pullNumber, opts = {}, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
   const body = {};
-  if (opts?.commitId) body.commit_id = opts.commitId;
+  if (opts?.commitId) body.commit_id = String(opts.commitId);
   return apiSend(
     githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`, ctx),
     fetchImpl,
     token,
-    { method: "POST", body }
+    { method: "POST", body: Object.keys(body).length ? body : {} }
   );
 }
 async function submitPendingPullReview(owner, repo, pullNumber, reviewId, { event = "COMMENT", body = "" } = {}, fetchImpl, token, ctx = null) {
@@ -8062,8 +8095,68 @@ async function postReviewCommentViaPendingGraphql(pendingReviewNodeId, { body, p
     subject_type: isFile ? "file" : "line",
     pending: true,
     pendingReviewId: node.pullRequestReview?.databaseId ?? null,
+    /** PRR_… used for attach — store on viewerPendingReview for next Add comment */
+    pendingReviewNodeId: String(pendingReviewNodeId || ""),
     threadNodeId
   };
+}
+async function resolveViewerPendingReviewViaGraphql(owner, repo, pullNumber, fetchImpl, token, ctx = null, opts = {}) {
+  ctx = normalizeApiCtx(ctx);
+  if (!token) return null;
+  const n = Number(pullNumber);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  try {
+    const data = await apiGraphql(
+      `query($owner:String!,$name:String!,$number:Int!){
+        repository(owner:$owner,name:$name){
+          pullRequest(number:$number){
+            reviews(last:50){
+              nodes{
+                id
+                databaseId
+                state
+                author { login }
+              }
+            }
+          }
+        }
+      }`,
+      {
+        owner: String(owner || ""),
+        name: String(repo || ""),
+        number: n
+      },
+      fetchImpl,
+      token,
+      ctx
+    );
+    const nodes = (data?.repository?.pullRequest?.reviews?.nodes || []).filter(
+      (r) => r && r.id && String(r.state || "").toUpperCase() === "PENDING"
+    );
+    if (!Array.isArray(nodes) || !nodes.length) return null;
+    const login = opts.login != null ? String(opts.login).toLowerCase() : "";
+    const preferId = opts.preferDatabaseId != null && Number.isFinite(Number(opts.preferDatabaseId)) ? Number(opts.preferDatabaseId) : null;
+    let mine = nodes.filter((r) => r && r.id);
+    if (login) {
+      const byLogin = mine.filter(
+        (r) => String(r.author?.login || "").toLowerCase() === login
+      );
+      if (byLogin.length) mine = byLogin;
+    }
+    if (preferId != null) {
+      const hit = mine.find((r) => Number(r.databaseId) === preferId);
+      if (hit?.id) {
+        return { id: Number(hit.databaseId) || preferId, node_id: String(hit.id) };
+      }
+    }
+    const last = mine[mine.length - 1];
+    if (!last?.id) return null;
+    const id = Number(last.databaseId);
+    if (!Number.isFinite(id) || id <= 0) return null;
+    return { id, node_id: String(last.id) };
+  } catch {
+    return null;
+  }
 }
 async function ensureViewerPendingReview(owner, repo, pullNumber, { commitId = null, createIfMissing = false } = {}, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
@@ -8076,6 +8169,9 @@ async function ensureViewerPendingReview(owner, repo, pullNumber, { commitId = n
         token
       );
       if (!full || String(full.state || "").toUpperCase() !== "PENDING") {
+        if (pending2?.node_id) {
+          return { id: Number(pending2.id), node_id: pending2.node_id };
+        }
         return null;
       }
       return {
@@ -8083,21 +8179,56 @@ async function ensureViewerPendingReview(owner, repo, pullNumber, { commitId = n
         node_id: full.node_id || pending2.node_id || null
       };
     } catch (err) {
-      if (err?.status === 404) return null;
-      if (err?.status >= 400 && err?.status < 500) return null;
-      return pending2?.node_id ? { id: Number(pending2.id), node_id: pending2.node_id } : null;
+      if (err?.status === 404) {
+        if (pending2?.node_id) {
+          return { id: Number(pending2.id), node_id: pending2.node_id };
+        }
+        return null;
+      }
+      if (pending2?.node_id) {
+        return { id: Number(pending2.id), node_id: pending2.node_id };
+      }
+      if (pending2?.id) {
+        return { id: Number(pending2.id), node_id: null };
+      }
+      return null;
     }
+  };
+  const withGraphqlNode = async (pending2, opts = {}) => {
+    if (pending2?.node_id) return pending2;
+    const force = Boolean(opts.forceDiscover);
+    if (!pending2?.id && createIfMissing && !force) return pending2;
+    const login = await fetchViewerLogin(fetchImpl, token).catch(() => null);
+    const viaGql = await resolveViewerPendingReviewViaGraphql(
+      owner,
+      repo,
+      pullNumber,
+      fetchImpl,
+      token,
+      ctx,
+      {
+        login,
+        preferDatabaseId: pending2?.id ?? null
+      }
+    );
+    if (viaGql?.node_id) return viaGql;
+    return pending2;
   };
   let pending = await findViewerPendingReview(
     owner,
     repo,
     pullNumber,
     fetchImpl,
-    token
+    token,
+    ctx
   );
   pending = await hydrateNodeId(pending);
+  pending = await withGraphqlNode(pending);
   if (pending?.node_id) return pending;
-  if (!createIfMissing) return pending;
+  if (!createIfMissing) {
+    pending = await withGraphqlNode(pending, { forceDiscover: true });
+    return pending;
+  }
   try {
     const created = await createPendingPullReview(
       owner,
@@ -8105,24 +8236,38 @@ async function ensureViewerPendingReview(owner, repo, pullNumber, { commitId = n
       pullNumber,
       { commitId },
       fetchImpl,
-      token
+      token,
+      ctx
     );
-    return {
+    const createdRow = {
       id: Number(created?.id),
       node_id: created?.node_id || null
     };
+    if (createdRow.node_id) return createdRow;
+    pending = await hydrateNodeId(createdRow);
+    pending = await withGraphqlNode(pending || createdRow, {
+      forceDiscover: true
+    });
+    return pending;
   } catch (err) {
     const msg = String(err?.message || err || "");
     if (err?.status === 422 || /one pending review/i.test(msg) || /Unprocessable Entity/i.test(msg)) {
-      pending = await findViewerPendingReview(
-        owner,
-        repo,
-        pullNumber,
-        fetchImpl,
-        token
-      );
-      pending = await hydrateNodeId(pending);
-      if (pending?.node_id) return pending;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        if (attempt > 0) {
+          await new Promise((r) => setTimeout(r, 250 * attempt));
+        }
+        pending = await findViewerPendingReview(
+          owner,
+          repo,
+          pullNumber,
+          fetchImpl,
+          token,
+          ctx
+        );
+        pending = await hydrateNodeId(pending);
+        pending = await withGraphqlNode(pending, { forceDiscover: true });
+        if (pending?.node_id) return pending;
+      }
     }
     throw err;
   }
@@ -8283,11 +8428,14 @@ async function postReviewComment(owner, repo, pullNumber, {
   path,
   line,
   side = "RIGHT",
-  commitId,
-  startLine,
-  startSide,
+  commitId = null,
+  startLine = null,
+  startSide = null,
   asPending = false,
-  subjectType = "line"
+  subjectType = "line",
+  /** Optional PRR_… from prior Start review (viewerPendingReview.nodeId) */
+  pendingReviewNodeId = null,
+  pendingReviewId = null
 }, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
   const text = String(body || "").trim();
@@ -8295,18 +8443,84 @@ async function postReviewComment(owner, repo, pullNumber, {
   if (!path) throw new Error("path is required");
   const isFile = String(subjectType || "").toLowerCase() === "file";
   if (!isFile && line == null) throw new Error("path and line are required");
+  const knownNode = String(pendingReviewNodeId || "").trim();
+  if (knownNode && (asPending || knownNode)) {
+    try {
+      const raw = await postReviewCommentViaPendingGraphql(
+        knownNode,
+        {
+          body: text,
+          path,
+          line: isFile ? null : line,
+          side,
+          startLine: isFile ? null : startLine,
+          startSide: isFile ? null : startSide,
+          subjectType: isFile ? "file" : "line"
+        },
+        fetchImpl,
+        token,
+        ctx
+      );
+      return {
+        ...raw,
+        pending: true,
+        pendingReviewId: raw.pendingReviewId || pendingReviewId || null,
+        pendingReviewNodeId: knownNode
+      };
+    } catch (knownErr) {
+      const km = String(knownErr?.message || knownErr || "");
+      if (!/Could not resolve to a node|global id|NOT_FOUND|Could not find/i.test(
+        km
+      )) {
+        throw knownErr;
+      }
+    }
+  }
   let pending = await ensureViewerPendingReview(
     owner,
     repo,
     pullNumber,
-    {
-      commitId: commitId || null,
-      // Create only when caller wants pending; also create path recovers on 422
-      createIfMissing: Boolean(asPending)
-    },
+    { commitId: commitId || null, createIfMissing: false },
     fetchImpl,
-    token
+    token,
+    ctx
   );
+  if (!pending?.node_id && asPending) {
+    try {
+      pending = await ensureViewerPendingReview(
+        owner,
+        repo,
+        pullNumber,
+        { commitId: commitId || null, createIfMissing: true },
+        fetchImpl,
+        token,
+        ctx
+      );
+    } catch (ensureErr) {
+      const em = String(ensureErr?.message || ensureErr || "");
+      if (ensureErr?.status === 422 || /one pending review/i.test(em) || /Unprocessable Entity/i.test(em)) {
+        for (let i = 0; i < 6 && !pending?.node_id; i++) {
+          if (i > 0) {
+            await new Promise((r) => setTimeout(r, 300 * i));
+          }
+          pending = await ensureViewerPendingReview(
+            owner,
+            repo,
+            pullNumber,
+            { commitId: commitId || null, createIfMissing: false },
+            fetchImpl,
+            token,
+            ctx
+          );
+        }
+        if (!pending?.node_id) {
+          pending = null;
+        }
+      } else {
+        throw ensureErr;
+      }
+    }
+  }
   const gqlFields = {
     body: text,
     path,
@@ -8316,71 +8530,126 @@ async function postReviewComment(owner, repo, pullNumber, {
     startSide: isFile ? null : startSide,
     subjectType: isFile ? "file" : "line"
   };
-  if (pending?.node_id) {
-    try {
-      const raw = await postReviewCommentViaPendingGraphql(
-        pending.node_id,
-        gqlFields,
+  async function attachViaGraphql(pendingRow) {
+    if (!pendingRow?.node_id) return null;
+    const nodeId = String(pendingRow.node_id);
+    const raw = await postReviewCommentViaPendingGraphql(
+      nodeId,
+      gqlFields,
+      fetchImpl,
+      token,
+      ctx
+    );
+    return {
+      ...raw,
+      pending: true,
+      pendingReviewId: raw.pendingReviewId || pendingRow.id || null,
+      // Always echo PRR_… so App can latch for the next Add comment
+      pendingReviewNodeId: String(raw.pendingReviewNodeId || nodeId || "").trim() || nodeId
+    };
+  }
+  async function recoverAttachFromExistingPending() {
+    let row = await ensureViewerPendingReview(
+      owner,
+      repo,
+      pullNumber,
+      { commitId: commitId || null, createIfMissing: false },
+      fetchImpl,
+      token,
+      ctx
+    );
+    if (!row?.node_id && pendingReviewId) {
+      row = await ensureViewerPendingReview(
+        owner,
+        repo,
+        pullNumber,
+        { commitId: commitId || null, createIfMissing: false },
         fetchImpl,
         token,
         ctx
       );
-      return {
-        ...raw,
-        pending: true,
-        pendingReviewId: raw.pendingReviewId || pending.id || null
-      };
+    }
+    if (row?.node_id) {
+      try {
+        return await attachViaGraphql(row);
+      } catch {
+      }
+    }
+    return null;
+  }
+  if (pending?.node_id) {
+    try {
+      const attached = await attachViaGraphql(pending);
+      if (attached) return attached;
     } catch (err) {
       const msg = String(err?.message || err || "");
-      if (asPending && /Could not resolve to a node|global id|NOT_FOUND|Could not find/i.test(msg)) {
-        try {
-          const created = await createPendingPullReview(
-            owner,
-            repo,
-            pullNumber,
-            { commitId: commitId || null },
-            fetchImpl,
-            token,
-            ctx
-          );
-          pending = {
-            id: Number(created?.id),
-            node_id: created?.node_id || null
-          };
-        } catch (createErr) {
-          if (createErr?.status === 422 || /one pending review/i.test(String(createErr?.message || ""))) {
-            pending = await ensureViewerPendingReview(
+      const reResolve = asPending && (/Could not resolve to a node|global id|NOT_FOUND|Could not find/i.test(
+        msg
+      ) || /one pending review/i.test(msg) || err?.status === 422);
+      if (reResolve) {
+        const recovered = await recoverAttachFromExistingPending();
+        if (recovered) return recovered;
+        pending = await ensureViewerPendingReview(
+          owner,
+          repo,
+          pullNumber,
+          { commitId: commitId || null, createIfMissing: false },
+          fetchImpl,
+          token,
+          ctx
+        );
+        if (!pending?.node_id) {
+          try {
+            const created = await createPendingPullReview(
               owner,
               repo,
               pullNumber,
-              { commitId: commitId || null, createIfMissing: false },
+              { commitId: commitId || null },
               fetchImpl,
               token,
               ctx
             );
-          } else {
-            throw createErr;
+            pending = {
+              id: Number(created?.id),
+              node_id: created?.node_id || null
+            };
+          } catch (createErr) {
+            if (createErr?.status === 422 || /one pending review/i.test(String(createErr?.message || ""))) {
+              const recovered2 = await recoverAttachFromExistingPending();
+              if (recovered2) return recovered2;
+            } else {
+              throw createErr;
+            }
           }
-        }
-        if (pending?.node_id) {
-          const raw = await postReviewCommentViaPendingGraphql(
-            pending.node_id,
-            gqlFields,
-            fetchImpl,
-            token,
-            ctx
-          );
-          return {
-            ...raw,
-            pending: true,
-            pendingReviewId: raw.pendingReviewId || pending.id || null
-          };
+          const retry2 = await attachViaGraphql(pending);
+          if (retry2) return retry2;
         }
       }
       throw err;
     }
   }
   if (asPending) {
+    const lastTry = await recoverAttachFromExistingPending();
+    if (lastTry) return lastTry;
+    try {
+      pending = await ensureViewerPendingReview(
+        owner,
+        repo,
+        pullNumber,
+        { commitId: commitId || null, createIfMissing: true },
+        fetchImpl,
+        token,
+        ctx
+      );
+      const afterCreate = await attachViaGraphql(pending);
+      if (afterCreate) return afterCreate;
+    } catch (createLast) {
+      if (createLast?.status === 422 || /one pending review/i.test(String(createLast?.message || ""))) {
+        const recovered = await recoverAttachFromExistingPending();
+        if (recovered) return recovered;
+      }
+      throw createLast;
+    }
     throw new Error(
       "Could not start or find a pending review. Try Discard any leftover pending review, then retry."
     );
@@ -8391,12 +8660,30 @@ async function postReviewComment(owner, repo, pullNumber, {
     payload.start_line = Number(startLine);
     payload.start_side = startSide || side || "RIGHT";
   }
-  return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/comments`, ctx),
-    fetchImpl,
-    token,
-    { method: "POST", body: payload }
-  );
+  try {
+    return await apiSend(
+      githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/comments`, ctx),
+      fetchImpl,
+      token,
+      { method: "POST", body: payload }
+    );
+  } catch (err) {
+    const msg = String(err?.message || err || "");
+    if (err?.status === 422 || /one pending review/i.test(msg) || /Unprocessable Entity/i.test(msg)) {
+      pending = await ensureViewerPendingReview(
+        owner,
+        repo,
+        pullNumber,
+        { commitId: commitId || null, createIfMissing: false },
+        fetchImpl,
+        token,
+        ctx
+      );
+      const recovered = await attachViaGraphql(pending);
+      if (recovered) return recovered;
+    }
+    throw err;
+  }
 }
 async function replyToReviewComment(owner, repo, pullNumber, commentId, body, fetchImpl, token, opts = {}) {
   const ctx = normalizeApiCtx(opts?.ctx);
@@ -9906,6 +10193,19 @@ function collectUnresolvedThreadNodeIds(detail) {
 }
 
 // src/fetch/review-threads-bulk.ts
+function isUnverifiedLocalOnlyReviewCommentLocal(c) {
+  if (!c || c.id == null) return false;
+  if (c.pending) return false;
+  if (c._commentsPending || c.commentsLoaded === false) return false;
+  if (String(c.id).startsWith("shell:")) return false;
+  const body = String(c.body ?? c.bodyText ?? c.bodyHTML ?? "").trim();
+  if (body) return false;
+  const author = String(
+    c.author || c.user?.login || c.user?.name || ""
+  ).trim();
+  if (author && author.toLowerCase() !== "user") return false;
+  return true;
+}
 async function fetchReviewThreadsByIds(threadNodeIds, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
   const empty = {
@@ -10228,11 +10528,19 @@ function mergeReviewThreadsPageIntoDetail(detail, page, direction = "older") {
           if (tid.startsWith("rest-thread-")) return false;
           if (pageThreadIds.has(tid)) return false;
           if (deferredShellIds.has(tid)) return false;
+          if (isUnverifiedLocalOnlyReviewCommentLocal(c)) return false;
           return true;
         });
+      } else {
+        baseRc = baseRc.filter(
+          (c) => c && !isUnverifiedLocalOnlyReviewCommentLocal(c)
+        );
       }
     }
     reviewComments = mergePendingReviewComments(baseRc, page?.comments || []);
+    reviewComments = (Array.isArray(reviewComments) ? reviewComments : []).filter(
+      (c) => c && !isUnverifiedLocalOnlyReviewCommentLocal(c)
+    );
   }
   const resolvedByThread = /* @__PURE__ */ new Map();
   for (const t of page?.threads || []) {
@@ -10253,6 +10561,8 @@ function mergeReviewThreadsPageIntoDetail(detail, page, direction = "older") {
     }
   }
   let stampedComments = stampedCommentsRaw.filter((c) => {
+    if (!c) return false;
+    if (isUnverifiedLocalOnlyReviewCommentLocal(c)) return false;
     if (!c?._commentsPending) return true;
     return !realCommentThreadIds.has(String(c.threadNodeId || ""));
   });
@@ -11542,6 +11852,7 @@ var fetchApi = {
   replyToReviewComment,
   findViewerPendingReview,
   ensureViewerPendingReview,
+  resolveViewerPendingReviewViaGraphql,
   pickViewerPendingFromReviews,
   fetchViewerPendingReviewComments,
   fetchViewerPendingReviewBundle,
@@ -12706,7 +13017,9 @@ async function handleMessagePartA(message) {
           startLine: message.startLine,
           startSide: message.startSide,
           asPending: Boolean(message.asPending),
-          subjectType: message.subjectType || message.subject_type || "line"
+          subjectType: message.subjectType || message.subject_type || "line",
+          pendingReviewNodeId: message.pendingReviewNodeId || null,
+          pendingReviewId: message.pendingReviewId || null
         },
         fetchImpl(),
         token,

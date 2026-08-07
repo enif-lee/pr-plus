@@ -2,6 +2,17 @@
  * Pure helpers for markdown composers: attachment insert + optimistic detail merge.
  */
 import { filesListHasUsableDiffBodies } from './detail-idb';
+import {
+  isUnverifiedLocalOnlyReviewComment,
+  reconcileReviewCommentsAgainstRemote,
+  stripUnverifiedLocalOnlyReviewComments,
+} from './stale-local-review';
+
+export {
+  isUnverifiedLocalOnlyReviewComment,
+  reconcileReviewCommentsAgainstRemote,
+  stripUnverifiedLocalOnlyReviewComments,
+} from './stale-local-review';
 
 /**
  * Insert an attachment markdown snippet at a cursor offset (or append).
@@ -171,13 +182,28 @@ export function mergeDetailPreserveOptimistic(prev: any, next: any): any {
   const dropLocalPending =
     explicitDropPending ||
     (!nextHasPendingReview && !nextHasAnyPendingComment && !prevHoldsPendingReview);
+  // Host/next may itself be polluted with IDB ghosts — never seed byId with them.
+  // Host snapshot present (any length) or threads meta means GitHub is SoT for
+  // which threads exist — drop local-only ghosts on prev-only rows too.
+  const remoteReviewAuthoritative =
+    nextRc.length > 0 ||
+    Boolean(next._sideSettled?.reviews) ||
+    Boolean(next._sideSettled?.comments) ||
+    (Array.isArray(next.reviewThreads) && next.reviewThreads.length > 0) ||
+    (next.reviewThreadsMeta != null &&
+      Number(next.reviewThreadsMeta?.loadedThreadCount) >= 0 &&
+      next.reviewThreadsMeta?.totalCount != null);
+
   const byId = new Map<string, any>();
   for (const c of nextRc) {
     if (!c || c.id == null) continue;
     const key = String(c.id);
     if (deletedReviewIds.has(key)) continue;
+    // Host-polluted ghost is not GitHub SoT — drop even when present in next
+    if (isUnverifiedLocalOnlyReviewComment(c)) continue;
     byId.set(key, c);
   }
+
   for (const c of prevRc) {
     if (!c || c.id == null) continue;
     const key = String(c.id);
@@ -185,6 +211,15 @@ export function mergeDetailPreserveOptimistic(prev: any, next: any): any {
     if (!byId.has(key)) {
       // Do not resurrect pending-only comments after discard/submit (host no longer has them)
       if (c.pending && dropLocalPending) continue;
+      // Local-only empty "user" / No content ghosts — GitHub SoT, do not paint
+      if (
+        remoteReviewAuthoritative &&
+        isUnverifiedLocalOnlyReviewComment(c)
+      ) {
+        continue;
+      }
+      // Always drop ghosts even when remote is not yet authoritative
+      if (isUnverifiedLocalOnlyReviewComment(c)) continue;
       // Keep optimistic-only rows (temp ids or not yet in host snapshot)
       byId.set(key, c);
     } else {
@@ -207,13 +242,18 @@ export function mergeDetailPreserveOptimistic(prev: any, next: any): any {
     if (!c || c.id == null) continue;
     const key = String(c.id);
     if (deletedIssueIds.has(key)) continue;
+    if (isUnverifiedLocalOnlyReviewComment(c)) continue;
     cById.set(key, c);
   }
   for (const c of prevComments) {
     if (!c || c.id == null) continue;
     const key = String(c.id);
     if (deletedIssueIds.has(key)) continue;
-    if (!cById.has(key)) cById.set(key, c);
+    if (!cById.has(key)) {
+      // Same ghost policy for conversation issue comments (user / No content)
+      if (isUnverifiedLocalOnlyReviewComment(c)) continue;
+      cById.set(key, c);
+    }
   }
 
   const prevAssignees = Array.isArray(prev.assignees) ? prev.assignees : [];
@@ -283,7 +323,8 @@ export function mergeDetailPreserveOptimistic(prev: any, next: any): any {
         ...(next.avatarUrls && typeof next.avatarUrls === 'object' ? next.avatarUrls : {}),
       };
 
-  const mergedRc = [...byId.values()];
+  // Final strip: never leave user/No content ghosts in painted detail
+  const mergedRc = stripUnverifiedLocalOnlyReviewComments([...byId.values()]);
   const mergedHasPending = mergedRc.some((c) => c && c.pending);
   // Prefer host viewerPendingReview when present. If host is empty but we still
   // hold pending comment rows (post→refresh race), keep prev.viewerPendingReview

@@ -420,12 +420,15 @@
 /* Multi-comment: vertical rail between avatars; stops before last item */
 .prp-review-thread {
   --prp-rt-gutter: 32px;
+  /* Room for unit-focus outline (2px + offset 2px) between comments */
+  --prp-rt-item-gap: 8px;
   list-style: none;
   margin: 0;
   padding: 10px 12px 4px;
   position: relative;
   display: flex;
   flex-direction: column;
+  gap: 0;
 }
 
 .prp-review-thread__item {
@@ -433,7 +436,9 @@
   display: grid;
   grid-template-columns: var(--prp-rt-gutter) minmax(0, 1fr);
   column-gap: 10px;
-  padding: 0 0 14px;
+  /* padding = content breathing; margin = outline clearance (outline is out-of-flow) */
+  padding: 2px 2px 12px;
+  margin: 0 0 var(--prp-rt-item-gap);
   align-items: start;
 }
 
@@ -443,7 +448,8 @@
   position: absolute;
   left: calc(var(--prp-rt-gutter) / 2);
   top: 30px;
-  bottom: 0;
+  /* Extend through item margin so the rail stays continuous */
+  bottom: calc(-1 * var(--prp-rt-item-gap));
   width: 2px;
   transform: translateX(-50%);
   background: var(--prp-border-muted);
@@ -453,6 +459,7 @@
 
 .prp-review-thread__item--last {
   padding-bottom: 8px;
+  margin-bottom: 2px;
 }
 .prp-review-thread__item--last::after {
   content: none;

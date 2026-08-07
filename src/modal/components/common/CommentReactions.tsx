@@ -6,6 +6,8 @@ import {
   activeReactionGroups,
   reactionDef,
   formatReactionUsersTooltip,
+  placeReactionPicker,
+  isReactionPickerAnchorLive,
   type ReactionContent,
   type ReactionGroup,
 } from '@lib/comment-reactions';
@@ -73,6 +75,8 @@ export function CommentReactions({
   const [pickerPos, setPickerPos] = useState<{
     top: number;
     left: number;
+    /** Anchor edge of the ☺ button; transform flips above when 'above' */
+    placement: 'above' | 'below';
   } | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const addBtnRef = useRef<HTMLButtonElement | null>(null);
@@ -106,14 +110,47 @@ export function CommentReactions({
     }
   }
 
+  function measurePickerPos(): {
+    top: number;
+    left: number;
+    placement: 'above' | 'below';
+  } | null {
+    const btn = addBtnRef.current;
+    if (!btn || !isReactionPickerAnchorLive(btn)) return null;
+    const r = btn.getBoundingClientRect();
+    const pick = pickerRef.current;
+    return placeReactionPicker({
+      button: {
+        top: r.top,
+        bottom: r.bottom,
+        left: r.left,
+        right: r.right,
+        width: r.width,
+        height: r.height,
+      },
+      picker: {
+        width: Math.max(200, pick?.offsetWidth || 280),
+        height: Math.max(36, pick?.offsetHeight || 44),
+      },
+      viewport: {
+        width: window.innerWidth,
+        height: window.innerHeight,
+      },
+    });
+  }
+
   function openPicker(opts: { focusList?: boolean } = {}) {
     if (locked) return;
     focusPickerOnOpenRef.current = opts.focusList !== false;
+    // Seed coords before paint so the portal does not flash at (0,0) / wrong edge
+    const seeded = measurePickerPos();
+    if (seeded) setPickerPos(seeded);
     setPickerOpen(true);
   }
 
   function closePicker(opts: { restoreAddFocus?: boolean } = {}) {
     setPickerOpen(false);
+    setPickerPos(null);
     focusPickerOnOpenRef.current = false;
     if (opts.restoreAddFocus) {
       queueMicrotask(() => {
@@ -148,22 +185,36 @@ export function CommentReactions({
       setPickerPos(null);
       return;
     }
-    const btn = addBtnRef.current;
-    if (!btn) return;
     const place = () => {
-      const r = btn.getBoundingClientRect();
-      // Prefer above the button; if near top of viewport, open below
-      const preferAbove = r.top > 56;
-      const top = preferAbove ? r.top - 8 : r.bottom + 8;
-      setPickerPos({
-        top,
-        left: Math.max(8, Math.min(r.left, window.innerWidth - 280)),
+      const next = measurePickerPos();
+      if (!next) return;
+      setPickerPos((prev) => {
+        if (
+          prev &&
+          Math.abs(prev.top - next.top) < 0.5 &&
+          Math.abs(prev.left - next.left) < 0.5 &&
+          prev.placement === next.placement
+        ) {
+          return prev;
+        }
+        return next;
       });
     };
     place();
+    // Second pass after portal paints real picker size
+    const raf = requestAnimationFrame(() => place());
+    const t = window.setTimeout(place, 0);
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined' && pickerRef.current) {
+      ro = new ResizeObserver(() => place());
+      ro.observe(pickerRef.current);
+    }
     window.addEventListener('scroll', place, true);
     window.addEventListener('resize', place);
     return () => {
+      cancelAnimationFrame(raf);
+      window.clearTimeout(t);
+      ro?.disconnect();
       window.removeEventListener('scroll', place, true);
       window.removeEventListener('resize', place);
     };
@@ -298,11 +349,10 @@ export function CommentReactions({
   // Hide entirely when disabled and nothing to show (e.g. pending)
   if (disabled && active.length === 0) return null;
 
+  // body portal: viewport-fixed coords (same as OptBtnHint) — avoid overlay
+  // stacking/transform contexts shifting the menu away from the ☺ button.
   const portalRoot =
-    typeof document !== 'undefined'
-      ? (document.querySelector('.prp-overlay') as HTMLElement | null) ||
-        document.body
-      : null;
+    typeof document !== 'undefined' ? document.body : null;
 
   const pickerEl =
     pickerOpen && pickerPos && portalRoot
@@ -311,16 +361,14 @@ export function CommentReactions({
             ref={pickerRef}
             id={pickerId}
             className="prp-reactions__picker prp-reactions__picker--portal"
+            data-prp-reaction-picker="1"
+            data-placement={pickerPos.placement}
+            data-prp-picker-place="explicit"
             role="menu"
             aria-label="Pick a reaction"
             style={{
               top: pickerPos.top,
               left: pickerPos.left,
-              transform:
-                addBtnRef.current &&
-                addBtnRef.current.getBoundingClientRect().top > 56
-                  ? 'translateY(-100%)'
-                  : undefined,
             }}
           >
             {REACTION_DEFS.map((d, i) => {

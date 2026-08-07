@@ -127,6 +127,11 @@ export function resolveComposerContextShortcutAction(opts: any = {}) {
 
   if (key === 'c') return COMPOSER_CONTEXT_SHORTCUT.submit.action;
   if (key === 'i') return COMPOSER_CONTEXT_SHORTCUT.focusInput.action;
+  if (key === 's') {
+    if (opts.canStartPending === false) return null;
+    // Omitted → allow; handler no-ops when the form has no Start review control
+    return COMPOSER_CONTEXT_SHORTCUT.startPending.action;
+  }
   if (key === 't') {
     if (opts.canToggleMode === false) return null;
     // When canToggleMode omitted, still emit — handlers no-op if no mode UI
@@ -509,11 +514,13 @@ export function resolveModalShortcutAction(opts: any = {}) {
     if (ca) return ca;
   }
 
-  // Do not steal keys while typing in inputs/textareas/contenteditable
-  if (opts.editableTarget) return null;
-
-  // ⌘F / Ctrl+F → Find in PR (exception to opt-only product chords)
+  // ⌘F / Ctrl+F → Find in PR — even while focused in an input (incl. our
+  // search bar after navigate). Always claim so the browser find UI does not
+  // open; openSearch re-focuses the finder and selects existing text.
   if (mod && !alt && !shift && !ctrl && key === 'f') return 'openSearch';
+
+  // Do not steal other keys while typing in inputs/textareas/contenteditable
+  if (opts.editableTarget) return null;
 
   // Remaining product shortcuts are Option-only (Ctrl only used with ⌥ for resolve)
   if (!alt || mod) return null;

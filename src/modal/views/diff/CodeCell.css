@@ -19,7 +19,7 @@
   color: var(--prp-accent);
   font-size: 14px;
   font-weight: 700;
-  line-height: 22px;
+  line-height: var(--prp-diff-row-h, 20px);
   cursor: pointer;
   opacity: 0;
   padding: 0;
@@ -44,7 +44,7 @@
   box-sizing: border-box;
 }
 
-/* Long-line expand control lives in the existing 22px gutter */
+/* Long-line expand control lives in the existing gutter (~22px wide) */
 .prp-line-gutter {
   position: relative;
 }
@@ -95,13 +95,13 @@
   word-break: break-word;
   text-overflow: clip;
   overflow: visible;
-  line-height: 22px;
+  line-height: var(--prp-diff-row-h, 20px);
   padding-top: 0;
   padding-bottom: 0;
 }
 .prp-vline--line-expanded .prp-line-expand-btn {
-  top: 11px;
-  transform: none;
+  top: calc(var(--prp-diff-row-h, 20px) / 2);
+  transform: translateY(-50%);
 }
 .prp-vline--line-expanded .prp-split-cols,
 .prp-vline--line-expanded .prp-split-cols__left,

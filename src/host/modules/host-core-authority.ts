@@ -10,6 +10,14 @@
   let embedWatchInstalled = false;
   let lastEmbedPath = null;
   /**
+   * Once-per-PR auto-open latch (document lifetime / until leave-PR).
+   * After first evaluation for `owner/repo#n`, location/hash/tab events must
+   * not call openModal for auto-open again. Cleared when leaving PR pages.
+   * Manual open and pref false→true (force) bypass.
+   * @type {string|null}
+   */
+  let autoOpenEvaluatedPrKey = null;
+  /**
    * Open-session generation for progressive data apply (core/threads/sides).
    * Bumped on new open / hard supersede / close — NOT on meta write-through.
    */

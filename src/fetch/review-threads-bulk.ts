@@ -33,6 +33,25 @@ import {
   collectUnresolvedThreadNodeIds,
 } from './review-threads-page';
 
+/**
+ * Dual of modal/lib/stale-local-review.isUnverifiedLocalOnlyReviewComment —
+ * empty body + missing/generic author (not pending). Kept local so fetch
+ * does not import modal.
+ */
+function isUnverifiedLocalOnlyReviewCommentLocal(c: any): boolean {
+  if (!c || c.id == null) return false;
+  if (c.pending) return false;
+  if (c._commentsPending || c.commentsLoaded === false) return false;
+  if (String(c.id).startsWith('shell:')) return false;
+  const body = String(c.body ?? c.bodyText ?? c.bodyHTML ?? '').trim();
+  if (body) return false;
+  const author = String(
+    c.author || c.user?.login || c.user?.name || ''
+  ).trim();
+  if (author && author.toLowerCase() !== 'user') return false;
+  return true;
+}
+
 export async function fetchReviewThreadsByIds(threadNodeIds: any, fetchImpl: any, token: any, ctx: any = null) {
   ctx = normalizeApiCtx(ctx);
   const empty = {
@@ -460,11 +479,23 @@ export function mergeReviewThreadsPageIntoDetail(detail: any, page: any, directi
           if (tid.startsWith('rest-thread-')) return false;
           if (pageThreadIds.has(tid)) return false;
           if (deferredShellIds.has(tid)) return false;
+          // IDB/local ghosts with no usable thread id (or empty user/No content)
+          // must not survive GraphQL page merge — GitHub page is SoT.
+          if (isUnverifiedLocalOnlyReviewCommentLocal(c)) return false;
           return true;
         });
+      } else {
+        // GraphQL page with threads but empty id set is rare; still strip ghosts
+        baseRc = baseRc.filter(
+          (c) => c && !isUnverifiedLocalOnlyReviewCommentLocal(c)
+        );
       }
     }
     reviewComments = mergePendingReviewComments(baseRc, page?.comments || []);
+    // Final strip: never re-emit empty author=user / No content rows
+    reviewComments = (Array.isArray(reviewComments) ? reviewComments : []).filter(
+      (c) => c && !isUnverifiedLocalOnlyReviewCommentLocal(c)
+    );
   }
   // When GraphQL thread meta updates resolved, stamp onto all comments in those threads
   const resolvedByThread = new Map();
@@ -490,6 +521,8 @@ export function mergeReviewThreadsPageIntoDetail(detail: any, page: any, directi
     }
   }
   let stampedComments = stampedCommentsRaw.filter((c) => {
+    if (!c) return false;
+    if (isUnverifiedLocalOnlyReviewCommentLocal(c)) return false;
     if (!c?._commentsPending) return true;
     return !realCommentThreadIds.has(String(c.threadNodeId || ''));
   });

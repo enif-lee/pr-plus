@@ -62,6 +62,8 @@ export type DiffWorkspaceProps = {
   listRef: React.RefObject<HTMLElement | null>;
   hasAnyReviewThreads: (c: any) => boolean;
   totalPendingCount: number;
+  /** Viewer PENDING review (id or pending rows) — selection/thread CTA gate */
+  hasViewerPendingReview?: boolean;
   reviewThreadTotals: { unresolved: number; resolved: number };
   setDiffReviewFilter: any;
   onToggleReviewStatus?: (status: string) => void;
@@ -114,6 +116,7 @@ export type DiffWorkspaceProps = {
   onSelectionStart: any;
   onSelectionExtend: any;
   onSelectionEnd: any;
+  onSelectionHoverReveal?: ((on: boolean) => void) | null;
   onFileHeaderComment: any;
   onExpandDiffGap: any;
   diffExpandBusyKey: any;
@@ -201,6 +204,7 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
     listRef,
     hasAnyReviewThreads,
     totalPendingCount,
+    hasViewerPendingReview = false,
     reviewThreadTotals,
     setDiffReviewFilter,
     onToggleReviewStatus,
@@ -250,6 +254,7 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
     activeSearchHit,
     activeSearchOccurrence,
     onSelectionStart,
+    onSelectionHoverReveal = null,
     onSelectionExtend,
     onSelectionEnd,
     onFileHeaderComment,
@@ -490,6 +495,7 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
           onSelectionStart={onSelectionStart}
           onSelectionExtend={onSelectionExtend}
           onSelectionEnd={onSelectionEnd}
+          onSelectionHoverReveal={onSelectionHoverReveal}
           onFileComment={onFileHeaderComment}
           onToggleCollapse={onToggleFileCollapse}
           onExpandGap={onExpandDiffGap}
@@ -499,6 +505,7 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
           threadsByCommentId={threadsByCommentId}
           onReply={onReplyToThread}
           pendingCount={totalPendingCount}
+          hasViewerPendingReview={hasViewerPendingReview}
           onResolve={onResolveThread}
           onToggleReaction={onToggleReaction}
           onLoadReactors={onLoadReactors}
@@ -548,6 +555,7 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
                 actionBusy={actionBusy}
                 leaving={selectionIslandLeaving}
                 pendingCount={totalPendingCount}
+                hasViewerPendingReview={hasViewerPendingReview}
                 onUploadFile={onUploadFile}
                 mentionCandidates={mentionCandidates}
                 virtualRows={virtualRows}

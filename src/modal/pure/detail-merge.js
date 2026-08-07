@@ -206,11 +206,47 @@
     out.reviewThreads = mergeListField(prev.reviewThreads, next.reviewThreads, {
       trustEmpty: false,
     });
-    out.reviewComments = mergeListField(
-      prev.reviewComments,
-      next.reviewComments,
-      { trustEmpty: false }
-    );
+    // Review comments: when next has a non-empty GitHub snapshot, take it as SoT
+    // (do not union local-only empty "user"/No content ghosts from prev).
+    // When next is empty, still drop prev-only unverified ghosts if next carried
+    // any threads meta / settled reviews — otherwise keep progressive protection.
+    {
+      const prevRc = asArray(prev.reviewComments) || [];
+      const nextRc = Object.prototype.hasOwnProperty.call(next, 'reviewComments')
+        ? asArray(next.reviewComments) || []
+        : null;
+      if (nextRc && nextRc.length) {
+        out.reviewComments = nextRc;
+      } else if (nextRc && nextRc.length === 0) {
+        const remoteAuth =
+          Boolean(nextSettled.reviews) ||
+          Boolean(nextSettled.comments) ||
+          (Array.isArray(next.reviewThreads) && next.reviewThreads.length > 0) ||
+          (next.reviewThreadsMeta != null &&
+            next.reviewThreadsMeta.totalCount != null);
+        if (remoteAuth) {
+          // Authoritative empty (or only ghosts left on prev): drop unverified locals
+          out.reviewComments = prevRc.filter((c) => {
+            if (!c || c.id == null) return false;
+            if (c.pending) return true;
+            const body = String(c.body ?? '').trim();
+            if (body) return true;
+            const author = String(c.author || c.user?.login || '').trim();
+            return Boolean(author && author.toLowerCase() !== 'user');
+          });
+        } else {
+          out.reviewComments = mergeListField(prevRc, nextRc, {
+            trustEmpty: false,
+          });
+        }
+      } else {
+        out.reviewComments = mergeListField(
+          prev.reviewComments,
+          next.reviewComments,
+          { trustEmpty: false }
+        );
+      }
+    }
     if (next.reviewThreadsMeta) out.reviewThreadsMeta = next.reviewThreadsMeta;
     else if (prev.reviewThreadsMeta) out.reviewThreadsMeta = prev.reviewThreadsMeta;
 

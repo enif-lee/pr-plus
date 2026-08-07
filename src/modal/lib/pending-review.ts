@@ -76,6 +76,67 @@ export function pendingReviewCtaLabel(batch) {
 }
 
 /**
+ * Inputs for GitHub "viewer has a PENDING review" detection.
+ * Prefer object form so empty PENDING (id set, comment count 0) still gates.
+ */
+export type ViewerPendingGateInput =
+  | boolean
+  | number
+  | null
+  | undefined
+  | {
+      pendingCount?: number | null;
+      /** App `hasServerPending` — id or any pending comments */
+      hasServerPending?: boolean | null;
+      /** `detail.viewerPendingReview.id` alone (count may be 0) */
+      serverPendingReviewId?: string | number | null;
+      hasPendingReplies?: boolean | null;
+      rootPending?: boolean | null;
+    };
+
+/**
+ * True when the viewer already has a PENDING pull-request review (server id
+ * and/or pending comment rows). Empty PENDING (id only) counts.
+ */
+export function viewerHasPendingReview(input: ViewerPendingGateInput): boolean {
+  if (input == null || input === false) return false;
+  if (input === true) return true;
+  if (typeof input === 'number') {
+    return Number.isFinite(input) && input > 0;
+  }
+  if (typeof input === 'object') {
+    if (input.hasServerPending) return true;
+    const sid = input.serverPendingReviewId;
+    if (sid != null && String(sid).trim() !== '' && String(sid) !== '0') {
+      return true;
+    }
+    if (Number(input.pendingCount) > 0) return true;
+    if (input.hasPendingReplies) return true;
+    if (input.rootPending) return true;
+    return false;
+  }
+  return Boolean(input);
+}
+
+/**
+ * GitHub allows only one PENDING review per PR. While a viewer PENDING review
+ * exists, single-shot publish ("Comment") is not available — only attach
+ * ("Add comment" / Start review → Add comment).
+ */
+export function canPublishImmediateReviewComment(
+  input: ViewerPendingGateInput
+): boolean {
+  return !viewerHasPendingReview(input);
+}
+
+/**
+ * Pending-attach button label from whether a viewer PENDING review exists.
+ */
+export function pendingAttachCtaLabel(input: ViewerPendingGateInput): string {
+  return viewerHasPendingReview(input) ? 'Add comment' : 'Start review';
+}
+
+/**
  * Shape GitHub create-review payload (with inline comments).
  * @param {{ comments?: PendingComment[], body?: string }} batch
  * @param {{ event: 'COMMENT'|'APPROVE'|'REQUEST_CHANGES', commitId?: string, body?: string }} opts

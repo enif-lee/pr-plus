@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Button } from '@common/Button';
 import { MarkdownComposer } from '@common/MarkdownComposer';
 import { TipPopover } from '@common/TipPopover';
@@ -8,16 +8,45 @@ import {
   extractSelectedCodeText,
   githubBlobLinePermalink,
   normalizeSelection,
+  resolveSelectionDockVerticalPlacement,
 } from '@lib/line-selection';
 import { copyTextToClipboard } from '@lib/copy-to-clipboard';
+import {
+  canPublishImmediateReviewComment,
+  pendingAttachCtaLabel,
+} from '@lib/pending-review';
 import { useModalStore } from '../../store/modal-store';
 
 export type SelectionIslandPhase = 'actions' | 'comment';
 
 /**
+ * Clip rect for selection dock flip: Diff scroller when present, else viewport.
+ */
+function readSelectionDockClip(host: HTMLElement | null): {
+  top: number;
+  bottom: number;
+} {
+  if (typeof window === 'undefined') return { top: 0, bottom: 0 };
+  try {
+    const scroller =
+      (host?.closest?.('.prp-vlist') as HTMLElement | null) ||
+      (host?.closest?.('.prp-diff-pane') as HTMLElement | null) ||
+      null;
+    if (scroller) {
+      const r = scroller.getBoundingClientRect();
+      return { top: r.top, bottom: r.bottom };
+    }
+  } catch {
+    /* ignore */
+  }
+  return { top: 0, bottom: window.innerHeight || 0 };
+}
+
+/**
  * Selection floating UI — actions group or comment composer.
  * Mounted under the selection-end row (or file header) so it scrolls
  * with the virtual list and unmounts when that row leaves the window.
+ * Flips above the host when the Diff scroller has too little room below.
  */
 export function SelectionCommentBar(props: any) {
   const {
@@ -29,6 +58,11 @@ export function SelectionCommentBar(props: any) {
     onCancel,
     actionBusy,
     pendingCount,
+    /**
+     * True when viewer has a PENDING review (server id and/or pending rows).
+     * Must gate even when pendingCount === 0 (empty PENDING).
+     */
+    hasViewerPendingReview = false,
     leaving = false,
     onUploadFile,
     linkCtx,
@@ -38,8 +72,6 @@ export function SelectionCommentBar(props: any) {
     phase: phaseProp = null,
     onPhaseChange = null,
     onCopyFeedback = null,
-    /** Opt-hold: show shortcut badges on action buttons */
-
   } = props;
 
   // Prefer store so App need not re-render on every caret move
@@ -50,6 +82,8 @@ export function SelectionCommentBar(props: any) {
   const [phaseLocal, setPhaseLocal] = useState<SelectionIslandPhase>('actions');
   // Must be unconditional (before phase === 'actions' early return) — Rules of Hooks.
   const [selComposerFocused, setSelComposerFocused] = useState(false);
+  const dockRef = useRef<HTMLDivElement | null>(null);
+  const [dockPlacement, setDockPlacement] = useState<'below' | 'above'>('below');
 
   const isFileTarget =
     selection?.kind === 'file' || selection?.subjectType === 'file';
@@ -77,6 +111,76 @@ export function SelectionCommentBar(props: any) {
     selection?.anchorRowIndex,
     selection?.headRowIndex,
     phaseProp,
+  ]);
+
+  // Flip comment/actions dock above the selection when Diff scroller bottom is tight.
+  useLayoutEffect(() => {
+    if (!selection) {
+      setDockPlacement('below');
+      return undefined;
+    }
+    const measure = () => {
+      const dock = dockRef.current;
+      if (!dock || typeof dock.getBoundingClientRect !== 'function') return;
+      const host =
+        (dock.closest?.('.prp-sel-dock-host') as HTMLElement | null) ||
+        (dock.parentElement as HTMLElement | null);
+      if (!host) return;
+      const hostRect = host.getBoundingClientRect();
+      const dockRect = dock.getBoundingClientRect();
+      const clip = readSelectionDockClip(host);
+      // Prefer a floor for comment phase so we flip before the tall form mounts
+      // with only half visible (measure after paint may still be small once).
+      const minBelow =
+        phase === 'comment' ? Math.max(dockRect.height || 0, 160) : 48;
+      const next =
+        typeof resolveSelectionDockVerticalPlacement === 'function'
+          ? resolveSelectionDockVerticalPlacement({
+              hostTop: hostRect.top,
+              hostBottom: hostRect.bottom,
+              dockHeight: dockRect.height,
+              clipTop: clip.top,
+              clipBottom: clip.bottom,
+              gap: phase === 'comment' ? 8 : 6,
+              minBelow,
+            })
+          : 'below';
+      setDockPlacement((prev) => (prev === next ? prev : next));
+    };
+    measure();
+    // Second pass after composer rows paint (comment phase)
+    const raf =
+      typeof requestAnimationFrame === 'function'
+        ? requestAnimationFrame(() => measure())
+        : 0;
+    const scroller =
+      (dockRef.current?.closest?.('.prp-vlist') as HTMLElement | null) || null;
+    const onReposition = () => measure();
+    try {
+      scroller?.addEventListener?.('scroll', onReposition, { passive: true });
+      window.addEventListener('resize', onReposition);
+    } catch {
+      /* ignore */
+    }
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      try {
+        scroller?.removeEventListener?.('scroll', onReposition);
+        window.removeEventListener('resize', onReposition);
+      } catch {
+        /* ignore */
+      }
+    };
+  }, [
+    selection,
+    phase,
+    draft,
+    leaving,
+    pendingCount,
+    hasViewerPendingReview,
+    selection?.headRowIndex,
+    selection?.anchorRowIndex,
+    selection?.filePath,
   ]);
 
   if (!selection || typeof normalizeSelection !== 'function') return null;
@@ -150,21 +254,26 @@ export function SelectionCommentBar(props: any) {
   }
 
   // ── Actions: floating segmented group (line + file header targets) ──
+  const placeClass =
+    dockPlacement === 'above' ? ' prp-selection-dock--above' : '';
+
   if (phase === 'actions') {
     const kbdComment = `${opt}C`;
     const kbdCopyCode = `${mod}C`;
     const kbdCopyUrl = `${mod}${opt}C`;
     return (
       <div
+        ref={dockRef}
         className={`prp-selection-dock prp-selection-group${
           leaving ? ' prp-selection-group--out' : ' prp-selection-group--in'
         }${showOptHints ? ' prp-selection-group--opt-hints' : ''}${
           isFileTarget ? ' prp-selection-group--file' : ''
-        }`}
+        }${placeClass}`}
         role="toolbar"
         aria-label={isFileTarget ? 'File selection actions' : 'Selection actions'}
         data-phase="actions"
         data-file-target={isFileTarget ? '1' : '0'}
+        data-dock-place={dockPlacement}
         data-opt-hints={showOptHints ? '1' : undefined}
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => e.stopPropagation()}
@@ -244,22 +353,45 @@ export function SelectionCommentBar(props: any) {
   }
 
   // ── Comment composer (file or line) ──
+  // OptBtnHint always mounts; paints on Opt-hold (store) — same as FinishReview
+  // / thread reply. Focus after ⌥C also arms composer-context chords (⌥C/I/S).
+  // GitHub: with a PENDING review, only attach (Add comment) — no single Comment.
+  const kbdFocus = `${opt}I`;
+  const kbdSubmit = `${opt}C · ${mod}↵`;
+  const kbdStartPending = `${opt}S`;
+  /** Esc from comment phase returns to action chips (App Escape layering). */
+  const kbdCancel = 'Esc';
+  const canImmediate = canPublishImmediateReviewComment({
+    pendingCount,
+    hasServerPending: Boolean(hasViewerPendingReview),
+  });
+  const pendingLabel = pendingAttachCtaLabel({
+    pendingCount,
+    hasServerPending: Boolean(hasViewerPendingReview),
+  });
+  const submitPrimary = canImmediate ? onSubmitImmediate : onSubmitPending;
+  const hintsLive = Boolean(showOptHints || selComposerFocused);
+
   return (
     <div
+      ref={dockRef}
       className={`prp-selection-dock prp-selection-island prp-selection-island--comment${
         leaving ? ' prp-selection-island--out' : ' prp-selection-island--in'
-      }${isFileTarget ? ' prp-selection-island--file' : ''}`}
+      }${isFileTarget ? ' prp-selection-island--file' : ''}${
+        hintsLive ? ' prp-selection-island--opt-hints' : ''
+      }${placeClass}`}
       data-phase="comment"
       data-subject={norm.subjectType || 'line'}
       data-prp-composer-root="1"
       data-prp-composer-kind="selection"
+      data-prp-pending-only={canImmediate ? undefined : '1'}
+      data-dock-place={dockPlacement}
+      data-opt-hints={hintsLive ? '1' : undefined}
       onMouseDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
     >
       <div className="prp-opt-hint-host prp-selection-island__composer-field">
-        {selComposerFocused ? (
-          <OptBtnHint label="⌥I" preferredPlacement="top" />
-        ) : null}
+        <OptBtnHint label={kbdFocus} preferredPlacement="top" />
         <MarkdownComposer
           value={draft}
           onChange={onDraft}
@@ -276,50 +408,69 @@ export function SelectionCommentBar(props: any) {
           onUploadFile={onUploadFile}
           linkCtx={linkCtx}
           mentionCandidates={mentionCandidates}
-          onSubmitRequest={onSubmitImmediate}
+          onSubmitRequest={submitPrimary}
           onComposerFocusChange={setSelComposerFocused}
         />
       </div>
       <div className="prp-composer__row">
+        {canImmediate ? (
+          <span className="prp-opt-hint-host inline-flex">
+            <OptBtnHint label={kbdSubmit} preferredPlacement="top" />
+            <Button
+              size="sm"
+              variant="primary"
+              loading={Boolean(actionBusy)}
+              disabled={!canSubmit}
+              onClick={onSubmitImmediate}
+              data-prp-composer-submit="1"
+              title={`Comment (${kbdSubmit})`}
+              shortcut={kbdSubmit}
+              tipPlacement="top"
+            >
+              {actionBusy ? 'Submitting…' : 'Comment'}
+            </Button>
+          </span>
+        ) : null}
         <span className="prp-opt-hint-host inline-flex">
-          {selComposerFocused ? (
-            <OptBtnHint label="⌥C · ⌘↵" preferredPlacement="top" />
-          ) : null}
+          <OptBtnHint
+            label={canImmediate ? kbdStartPending : kbdSubmit}
+            preferredPlacement="top"
+          />
           <Button
             size="sm"
-            variant="primary"
+            variant={canImmediate ? 'default' : 'primary'}
             loading={Boolean(actionBusy)}
             disabled={!canSubmit}
-            onClick={onSubmitImmediate}
-            data-prp-composer-submit="1"
-            title="Comment (⌥C · ⌘↵)"
+            onClick={onSubmitPending}
+            data-prp-composer-start-review="1"
+            data-prp-composer-submit={canImmediate ? undefined : '1'}
+            title={
+              canImmediate
+                ? `Start review (${kbdStartPending})`
+                : `Add comment to pending review (${kbdSubmit})`
+            }
+            shortcut={canImmediate ? kbdStartPending : kbdSubmit}
+            tipPlacement="top"
           >
-            {actionBusy ? 'Submitting…' : 'Comment'}
+            {actionBusy ? 'Working…' : pendingLabel}
           </Button>
         </span>
-        <Button
-          size="sm"
-          loading={Boolean(actionBusy)}
-          disabled={!canSubmit}
-          onClick={onSubmitPending}
-        >
-          {actionBusy
-            ? 'Working…'
-            : pendingCount > 0
-              ? 'Add comment'
-              : 'Start review'}
-        </Button>
-        <Button
-          size="sm"
-          disabled={actionBusy}
-          onClick={() => setPhase('actions')}
-          data-prp-selection-back="1"
-        >
-          Back
-        </Button>
-        <Button size="sm" disabled={actionBusy} onClick={onCancel}>
-          Cancel
-        </Button>
+        <span className="prp-opt-hint-host inline-flex">
+          {/* Esc → action chips (App layering); second Esc on actions dismisses. */}
+          <OptBtnHint label={kbdCancel} preferredPlacement="top" />
+          <Button
+            size="sm"
+            disabled={actionBusy}
+            onClick={() => setPhase('actions')}
+            data-prp-selection-back="1"
+            data-prp-selection-cancel="1"
+            title={`Cancel comment (${kbdCancel})`}
+            shortcut={kbdCancel}
+            tipPlacement="top"
+          >
+            Cancel
+          </Button>
+        </span>
       </div>
     </div>
   );

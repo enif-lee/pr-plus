@@ -17,7 +17,7 @@ export function createInitialModalState() {
     virtualRows: [],
     scrollTop: 0,
     viewportHeight: 480,
-    rowHeight: 22,
+    rowHeight: 20,
     searchQuery: '',
     searchHits: [],
     searchHitIndex: -1,

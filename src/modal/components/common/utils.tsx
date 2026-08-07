@@ -2,7 +2,12 @@ import { languageFromPath } from '../../lib/diff-rows';
 import { ensureHljsLanguage } from '../../lib/hljs-lazy';
 import { enhanceMarkdownHtml } from '../../lib/ui-polish';
 
-export const ROW_HEIGHT = 22;
+/**
+ * Fixed height (px) for plain Diff code / header rows in the virtual list.
+ * Matches GitHub PR density (~20px line box) — keep in sync with
+ * `--prp-diff-row-h` on `.prp-vlist-host`.
+ */
+export const ROW_HEIGHT = 20;
 /**
  * Estimated height for expanded inline review threads in the virtualized list.
  * Must not under-estimate: short spacer clips bottom content (threads + reply UI).

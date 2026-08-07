@@ -124,6 +124,26 @@ export const SearchBar = memo(function SearchBar({
           scheduleCommit(v);
         }}
         onKeyDown={(e) => {
+          // ⌘F / Ctrl+F while already in the finder: select all + block browser find
+          const isFindChord =
+            (e.key === 'f' || e.key === 'F' || e.code === 'KeyF') &&
+            (e.metaKey || e.ctrlKey) &&
+            !e.altKey &&
+            !e.shiftKey;
+          if (isFindChord) {
+            e.preventDefault();
+            e.stopPropagation();
+            try {
+              const el = e.currentTarget as HTMLInputElement;
+              el.focus({ preventScroll: true });
+              const len = String(el.value || '').length;
+              if (typeof el.select === 'function') el.select();
+              else el.setSelectionRange?.(0, len);
+            } catch {
+              /* ignore */
+            }
+            return;
+          }
           if (e.key === 'Enter' && e.shiftKey) {
             e.preventDefault();
             if (pendingCommit) {

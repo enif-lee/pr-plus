@@ -283,13 +283,29 @@ export function DiffToolbar(props: any) {
       setSettingsOpen(false);
     }
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') setSettingsOpen(false);
+      if (e.key !== 'Escape') return;
+      // Claim Esc so App window-capture does not close the PR shell.
+      // App also gates on [data-prp-review-filter-menu] (window runs first).
+      try {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+      } catch {
+        /* ignore */
+      }
+      setSettingsOpen(false);
     }
     document.addEventListener('mousedown', onDoc, true);
+    // Window capture: App also listens on window; register here so Esc closes
+    // the menu even when CDP keys miss document-only handlers. claimNestedEscape
+    // is stopImmediatePropagation — register after App would block us, so use
+    // preventDefault+stopPropagation only and always setSettingsOpen(false).
+    window.addEventListener('keydown', onKey, true);
     document.addEventListener('keydown', onKey, true);
     return () => {
       window.clearTimeout(armTimer);
       document.removeEventListener('mousedown', onDoc, true);
+      window.removeEventListener('keydown', onKey, true);
       document.removeEventListener('keydown', onKey, true);
     };
   }, [settingsOpen]);

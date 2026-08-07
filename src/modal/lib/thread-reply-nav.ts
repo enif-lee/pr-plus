@@ -1,11 +1,26 @@
 /**
  * Pure helpers for in-thread root/reply focus (↑/↓ while a review thread is
  * keyboard-focused). Shared by Diff + Conversation InlineThread hosts.
+ *
+ * Diff plain ↑/↓ continuum: step units without wrap; at ends return exit so
+ * callers hand off to line/thread selection. Entry seeds first unit on ↓,
+ * last unit on ↑.
  */
 
 export type ThreadFocusUnit = {
   id: string;
   role: 'root' | 'reply';
+};
+
+/** Result of one in-thread ↑/↓ step (no wrap). */
+export type StepThreadFocusResult = {
+  /** Next unit when staying inside the thread */
+  unit: ThreadFocusUnit | null;
+  /**
+   * True when current is at the end in `delta` direction and navigation should
+   * leave the thread (line / other thread selection).
+   */
+  exit: boolean;
 };
 
 /**
@@ -78,37 +93,101 @@ export function listReviewThreadFocusUnits(
 }
 
 /**
- * Step within a multi-unit thread. Wraps. Returns null when no multi-unit
- * navigation is possible (0–1 units).
+ * Direction-aware entry seed when landing on a multi-unit thread from
+ * line/thread selection (↓ → first/root, ↑ → last reply).
+ */
+export function seedReviewThreadFocusUnit(
+  units: ThreadFocusUnit[] | null | undefined,
+  delta: number
+): ThreadFocusUnit | null {
+  const list = Array.isArray(units) ? units : [];
+  if (!list.length) return null;
+  if (list.length === 1) return list[0];
+  return delta < 0 ? list[list.length - 1] : list[0];
+}
+
+/**
+ * Step within a multi-unit thread. **Does not wrap.**
+ * - Missing/unknown current → entry seed (down: first, up: last)
+ * - At last unit + down → `{ unit: null, exit: true }`
+ * - At first unit + up → `{ unit: null, exit: true }`
+ * - 0–1 units → `{ unit: null, exit: false }` (no multi-unit nav)
  */
 export function stepReviewThreadFocusUnit(
   units: ThreadFocusUnit[] | null | undefined,
   currentId: unknown,
   delta: number
-): ThreadFocusUnit | null {
+): StepThreadFocusResult {
   const list = Array.isArray(units) ? units : [];
-  if (list.length < 2) return null;
+  if (list.length < 2) return { unit: null, exit: false };
   const d = delta < 0 ? -1 : 1;
   const cur = currentId != null ? String(currentId) : '';
   let idx = cur ? list.findIndex((u) => u.id === cur) : -1;
   if (idx < 0) {
-    // Seed: down → first reply (skip root if already on thread), up → last
-    return d > 0 ? list[1] || list[0] : list[list.length - 1];
+    // Entry / reseed: direction preserved
+    const seeded = seedReviewThreadFocusUnit(list, d);
+    return { unit: seeded, exit: false };
   }
-  const next = (idx + d + list.length) % list.length;
-  return list[next] || null;
+  const next = idx + d;
+  if (next < 0 || next >= list.length) {
+    return { unit: null, exit: true };
+  }
+  return { unit: list[next] || null, exit: false };
 }
 
 /**
- * OptBtnHint / digit chrome only on the root action row of a multi-reply
- * thread. Single-comment threads keep root hints.
+ * True when a further step in `delta` would leave the multi-unit thread.
+ */
+export function wouldExitReviewThreadFocus(
+  units: ThreadFocusUnit[] | null | undefined,
+  currentId: unknown,
+  delta: number
+): boolean {
+  return stepReviewThreadFocusUnit(units, currentId, delta).exit;
+}
+
+/**
+ * OptBtnHint eligibility for a comment row inside a context-active thread.
+ *
+ * - Inactive thread → no hints
+ * - When a unit is focused (`focusedUnitId`): only that unit's row
+ * - When unit unset (thread focus without unit step): root row only
+ *   (legacy root-only for single-comment / not-yet-stepped multi-reply)
  */
 export function shouldShowThreadOptHints(opts: {
   contextActive?: boolean;
   isRoot?: boolean;
   replyCount?: number;
+  /** Comment id of this action/reaction row */
+  commentId?: string | number | null;
+  /** Active unit within the thread (root or reply id) */
+  focusedUnitId?: string | number | null;
 } = {}): boolean {
   if (!opts.contextActive) return false;
+  const unit =
+    opts.focusedUnitId != null && String(opts.focusedUnitId).trim() !== ''
+      ? String(opts.focusedUnitId)
+      : '';
+  if (unit) {
+    if (opts.commentId == null || opts.commentId === '') return false;
+    return String(opts.commentId) === unit;
+  }
+  // No unit focus: root-only (single-comment threads / pre-step multi)
   if (opts.isRoot === false) return false;
   return true;
+}
+
+/**
+ * Pure finish-review Escape owner (layered).
+ * - `blur-input`: comment field focused → blur only
+ * - `close-form`: form open, no field focus → close finish-review
+ * - `none`: finish-review not open (shell may handle Esc)
+ */
+export function resolveFinishReviewEscapeAction(opts: {
+  finishReviewOpen?: boolean;
+  finishInputFocused?: boolean;
+} = {}): 'blur-input' | 'close-form' | 'none' {
+  if (!opts.finishReviewOpen) return 'none';
+  if (opts.finishInputFocused) return 'blur-input';
+  return 'close-form';
 }

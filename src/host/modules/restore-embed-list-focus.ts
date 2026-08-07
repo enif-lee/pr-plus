@@ -123,9 +123,13 @@
 
   /**
    * On PR conversation/files/changes routes, mount pr+ as in-page embed under GH header.
-   * Soft-nav re-entry when path / commit / #diff- changes.
+   * Soft-nav re-entry when path / commit / #diff- changes **while already open**.
+   * Auto-open is once per PR key (see resolveEmbedAutoOpen); later location events
+   * do not force-open again after the first evaluation (or after restore-native).
+   *
+   * @param {{ force?: boolean }} [opts] force:true — pref false→true while on a PR
    */
-  function tryEmbedFromLocation() {
+  function tryEmbedFromLocation(opts: { force?: boolean } = {}) {
     if (!hostEnabled) return { ok: false, reason: 'disabled' };
     const locKey = embedLocationKey();
     const path = typeof location !== 'undefined' ? location.pathname : '';
@@ -135,9 +139,19 @@
         closeModal();
       }
       lastEmbedPath = locKey;
+      // Left PR pages — allow auto-open again when entering a PR later
+      autoOpenEvaluatedPrKey = null;
       removeGithubPrToggle();
       return { ok: false, reason: 'not-pr-page' };
     }
+    const pe = pageEmbedApi();
+    const prKey =
+      typeof pe?.prEmbedAutoOpenKey === 'function'
+        ? pe.prEmbedAutoOpenKey(target.owner, target.repo, target.number)
+        : `${String(target.owner || '')
+            .toLowerCase()}/${String(target.repo || '').toLowerCase()}#${Number(
+            target.number
+          )}`;
     const samePr =
       current.open &&
       isEmbedPresentation(current.presentation) &&
@@ -155,14 +169,16 @@
       Number(current.routeEndLine || 0) === Number(target.endLine || 0);
     lastEmbedPath = locKey;
     if (sameSurface) {
-      // Re-hide native if Turbo re-injected content, and remount if host was destroyed
+      // Already open: mark PR evaluated; rebind if Turbo replaced the host
+      if (prKey) autoOpenEvaluatedPrKey = prKey;
       ensureEmbedHost();
       render();
       removeGithubPrToggle();
       return { ok: true, reason: 'already-open' };
     }
     if (samePr) {
-      // Same PR, path/hash changed — remount so App re-applies commit/selection
+      // Same PR open, path/hash changed — update route only (not a new auto-open)
+      if (prKey) autoOpenEvaluatedPrKey = prKey;
       applyRouteFieldsFromTarget(target);
       dropReactRoot();
       ensureEmbedHost();
@@ -170,14 +186,39 @@
       removeGithubPrToggle();
       return { ok: true, reason: 'route-updated', page: target.page };
     }
-    // Auto-open only when pref allows (manual: header pr+ / ⌘⇧E)
-    if (prefs.autoOpenEmbed === false) {
+    // Closed / never open: auto-open at most once per PR key
+    const decision =
+      typeof pe?.resolveEmbedAutoOpen === 'function'
+        ? pe.resolveEmbedAutoOpen({
+            prKey,
+            lastEvaluatedPrKey: autoOpenEvaluatedPrKey,
+            autoOpenEmbed: prefs.autoOpenEmbed !== false,
+            force: Boolean(opts.force),
+          })
+        : {
+            shouldOpen:
+              Boolean(opts.force) ||
+              (prefs.autoOpenEmbed !== false &&
+                autoOpenEvaluatedPrKey !== prKey),
+            nextEvaluatedKey: prKey,
+            reason:
+              prefs.autoOpenEmbed === false
+                ? 'auto-open-disabled'
+                : autoOpenEvaluatedPrKey === prKey
+                  ? 'already-evaluated'
+                  : 'first-entry',
+          };
+    autoOpenEvaluatedPrKey = decision.nextEvaluatedKey;
+    if (!decision.shouldOpen) {
       try {
         ensureGithubPrToggle();
       } catch {
         /* ignore */
       }
-      return { ok: false, reason: 'auto-open-disabled' };
+      return {
+        ok: false,
+        reason: String(decision.reason || 'auto-open-skipped'),
+      };
     }
     void openModal({
       owner: target.owner,
@@ -202,6 +243,7 @@
       number: target.number,
       page: target.page,
       position: target.position || null,
+      reason: String(decision.reason || 'opened'),
     };
   }
 

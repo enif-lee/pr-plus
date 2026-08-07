@@ -452,3 +452,104 @@ export function resolveEmbedShortcutAction(opts: {
   if (opts.onNativePrPage) return 'openEmbedView';
   return null;
 }
+
+/**
+ * Stable PR identity for the location-driven auto-open latch.
+ * Ignores conversation/files tab, hash (`#discussion_r…`), and query.
+ * @returns e.g. `owner/repo#7` or null when invalid
+ */
+export function prEmbedAutoOpenKey(
+  owner: unknown,
+  repo: unknown,
+  number: unknown
+): string | null {
+  const o = String(owner || '')
+    .trim()
+    .toLowerCase();
+  const r = String(repo || '')
+    .trim()
+    .toLowerCase();
+  const n = Number(number);
+  if (!o || !r || !Number.isFinite(n) || n <= 0) return null;
+  return `${o}/${r}#${n}`;
+}
+
+export type EmbedAutoOpenDecision = {
+  /** Call openModal for auto-open (not route-update of an already-open embed). */
+  shouldOpen: boolean;
+  /** Latch value after this evaluation (null = left PR pages). */
+  nextEvaluatedKey: string | null;
+  reason:
+    | 'not-pr-page'
+    | 'auto-open-disabled'
+    | 'already-evaluated'
+    | 'first-entry'
+    | 'force';
+};
+
+/**
+ * Whether location-driven auto-open should open pr+ embed.
+ *
+ * Product: evaluate each PR at most once per document lifetime (or until the
+ * user soft-navigates away from all PR pages). Hash-only / Files tab changes
+ * on the **same** PR must not re-open after the first decision (opened or
+ * stayed native). A **different** PR key may open once. `force` is for pref
+ * flip false→true (open even if this PR was already evaluated).
+ *
+ * Manual open (header toggle / ⌥⇧E) bypasses this gate in the host.
+ */
+export function resolveEmbedAutoOpen(
+  opts: {
+    prKey?: string | null;
+    lastEvaluatedPrKey?: string | null;
+    autoOpenEmbed?: boolean;
+    /** Pref turned on while already on a PR page */
+    force?: boolean;
+  } = {}
+): EmbedAutoOpenDecision {
+  const rawKey = opts.prKey == null ? '' : String(opts.prKey).trim();
+  const prKey = rawKey || null;
+  if (!prKey) {
+    return {
+      shouldOpen: false,
+      nextEvaluatedKey: null,
+      reason: 'not-pr-page',
+    };
+  }
+  const lastRaw =
+    opts.lastEvaluatedPrKey == null
+      ? ''
+      : String(opts.lastEvaluatedPrKey).trim();
+  const last = lastRaw || null;
+  const auto = opts.autoOpenEmbed !== false;
+  const force = Boolean(opts.force);
+
+  if (force && auto) {
+    return {
+      shouldOpen: true,
+      nextEvaluatedKey: prKey,
+      reason: 'force',
+    };
+  }
+  if (!auto) {
+    // Stay native; still mark so later hash/tab events with pref off are quiet.
+    // Pref false→true uses force.
+    return {
+      shouldOpen: false,
+      nextEvaluatedKey: prKey,
+      reason: 'auto-open-disabled',
+    };
+  }
+  if (last === prKey) {
+    return {
+      shouldOpen: false,
+      nextEvaluatedKey: prKey,
+      reason: 'already-evaluated',
+    };
+  }
+  return {
+    shouldOpen: true,
+    nextEvaluatedKey: prKey,
+    reason: 'first-entry',
+  };
+}

@@ -165,6 +165,7 @@ function ConversationViewImpl(props: any) {
     onCancelEditComment,
     onSaveEditComment,
     pendingCount,
+    hasViewerPendingReview = false,
     onAddReviewer,
     onRemoveReviewer,
     onAddAssignee,
@@ -2198,6 +2199,7 @@ function ConversationViewImpl(props: any) {
           collapsed={collapsed}
           onToggleCollapse={() => toggleThreadCollapse(item)}
           pendingCount={pendingCount}
+          hasViewerPendingReview={hasViewerPendingReview}
           searchQuery={qSearch}
           activeSearchHit={activeSearchHit}
           searchHits={searchHits}

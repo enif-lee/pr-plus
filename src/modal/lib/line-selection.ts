@@ -431,8 +431,9 @@ export function resolveGotoPathAmongFiles(
 }
 
 /**
- * First selectable diff-line for a file in virtual order (top of file body).
- * Used after file nav so ArrowUp/Down seed the first displayed line.
+ * First selectable **diff-line** for a file in virtual order (top of file body).
+ * Does **not** include file-level review threads — use firstContentNavRowInFile
+ * for ↑/↓ seed that matches scroll order under the header.
  */
 export function firstSelectableRowInFile(
   virtualRows: any[] | null | undefined,
@@ -471,6 +472,65 @@ export function lastSelectableRowInFile(
   for (let i = list.length - 1; i >= 0; i--) {
     const row = list[i];
     if (row && row.filePath === path && isSelectableDiffRow(row)) return row;
+  }
+  return null;
+}
+
+/**
+ * First ↑/↓ **content** stop for a file in virtual list order (under header):
+ * file-level review threads, then line threads / body lines as laid out.
+ * Skips the file-header so the first Down lands on the first visible content
+ * stop — not always the first diff line.
+ */
+export function firstContentNavRowInFile(
+  virtualRows: any[] | null | undefined,
+  filePath: string | null | undefined
+) {
+  const path = String(filePath || '').trim();
+  if (!path) return null;
+  const list = Array.isArray(virtualRows) ? virtualRows : [];
+  for (let i = 0; i < list.length; i++) {
+    const row = list[i];
+    if (!row || row.filePath !== path) continue;
+    if (isFileHeaderRow(row)) continue;
+    if (isInlineCommentRow(row) || isSelectableDiffRow(row)) return row;
+  }
+  return null;
+}
+
+/** Last content nav stop for a file (threads + body lines, reverse order). */
+export function lastContentNavRowInFile(
+  virtualRows: any[] | null | undefined,
+  filePath: string | null | undefined
+) {
+  const path = String(filePath || '').trim();
+  if (!path) return null;
+  const list = Array.isArray(virtualRows) ? virtualRows : [];
+  for (let i = list.length - 1; i >= 0; i--) {
+    const row = list[i];
+    if (!row || row.filePath !== path) continue;
+    if (isFileHeaderRow(row)) continue;
+    if (isInlineCommentRow(row) || isSelectableDiffRow(row)) return row;
+  }
+  return null;
+}
+
+/**
+ * First content nav stop anywhere in the list (any file), visual order.
+ * Skips file headers; falls back to first header if the list is header-only.
+ */
+export function firstContentNavRowAnywhere(
+  virtualRows: any[] | null | undefined
+) {
+  const list = Array.isArray(virtualRows) ? virtualRows : [];
+  for (let i = 0; i < list.length; i++) {
+    const row = list[i];
+    if (!row) continue;
+    if (isFileHeaderRow(row)) continue;
+    if (isInlineCommentRow(row) || isSelectableDiffRow(row)) return row;
+  }
+  for (let i = 0; i < list.length; i++) {
+    if (isFileHeaderRow(list[i])) return list[i];
   }
   return null;
 }
@@ -771,10 +831,11 @@ export function coalesceSelectionMoveDelta(
 
 /**
  * Move or extend an active line selection by nav rows.
- * - shift=false → single-line caret; visits **file headers** and body lines;
+ * - shift=false → single-line caret; visits **file headers**, review threads, body lines;
  *   continues into next/prev file at EOF/BOF
  * - shift=true → multi-line extend; body lines only; blocked at file boundary
- * - no selection / wrong file + activeFilePath → seed first body line (or header if folded)
+ * - no selection → seed first **content** stop in scroll order (file-level review
+ *   thread before first line when present; header only if file is empty/folded)
  * - folded file: only the header is selectable; ↑/↓ → prev last line / next header|line
  * - |delta| > 1: **one scan** to the N-th stop (key-hold / ⌥↑↓ coalesce)
  */
@@ -796,10 +857,10 @@ export function moveLineSelection(
 
   if (selectionNeedsSeed(cur, activePath)) {
     const seedPath = activePath || String(cur?.filePath || '').trim();
-    // Prefer body of active/selection file; folded → that file's header.
+    // Scroll order under header: file-level threads → lines (not body-line only).
     let seedRow =
-      seedPath && typeof firstSelectableRowInFile === 'function'
-        ? firstSelectableRowInFile(list, seedPath)
+      seedPath && typeof firstContentNavRowInFile === 'function'
+        ? firstContentNavRowInFile(list, seedPath)
         : null;
     if (!seedRow && seedPath) {
       seedRow = fileHeaderRowInVirtualRows(list, seedPath);
@@ -810,9 +871,11 @@ export function moveLineSelection(
     }
     if (!seedRow) {
       seedRow =
-        typeof firstSelectableRowAnywhere === 'function'
-          ? firstSelectableRowAnywhere(list)
-          : null;
+        typeof firstContentNavRowAnywhere === 'function'
+          ? firstContentNavRowAnywhere(list)
+          : typeof firstSelectableRowAnywhere === 'function'
+            ? firstSelectableRowAnywhere(list)
+            : null;
     }
     // Ultimate fallback: first file header in the list
     if (!seedRow) {
@@ -912,11 +975,14 @@ export function isSelectionAtFileEdge(
   return nextPath !== path;
 }
 
-/** Delay before selection action toggles appear (hides island during key-hold). */
+/**
+ * Legacy idle delay (no longer auto-shows the action group).
+ * Kept for tests / callers that still wait a settle frame after selection.
+ */
 export const SELECTION_ACTIONS_REVEAL_MS = 300;
 
 /**
- * Island phase after selection idle reveal (keyboard/mouse caret settle).
+ * Which island phase a selection *supports* after settle (not whether to show).
  * - line + **file** header → `actions` (Comment / Copy code / Copy URL / Dismiss)
  * - thread caret → no line island (`hidden`)
  * Explicit open-comment paths (⌥C / onFileHeaderComment) set `comment` themselves.
@@ -926,8 +992,217 @@ export function resolveSelectionIslandRevealPhase(
 ): 'actions' | 'hidden' {
   if (!selection) return 'hidden';
   if (isThreadSelection(selection)) return 'hidden';
-  // File-level and line-level both show the action group first
+  // File-level and line-level both support the action group
   return 'actions';
+}
+
+/**
+ * Whether the selection **action group** (or comment island) should be mounted.
+ *
+ * Product: selection alone does **not** show the dock. Reveal only when:
+ * - Opt is held, or
+ * - pointer is over the selection / dock (hover), or
+ * - user is already in **comment** phase (keep until dismiss/submit).
+ * Hide while actively dragging a selection.
+ */
+export function shouldShowSelectionActionGroup(opts: {
+  hasLineOrFileSelection?: boolean;
+  selecting?: boolean;
+  optHeld?: boolean;
+  hoverReveal?: boolean;
+  /** 'comment' keeps island open without Opt/hover */
+  phase?: 'actions' | 'comment' | string | null;
+} = {}): boolean {
+  if (!opts.hasLineOrFileSelection) return false;
+  if (opts.selecting) return false;
+  if (String(opts.phase || '') === 'comment') return true;
+  return Boolean(opts.optHeld || opts.hoverReveal);
+}
+
+/**
+ * Prefer docking the selection UI **below** the host row; flip **above** when
+ * the scroller/viewport has too little room under the selection (comment form
+ * was fully clipped at the bottom of Diff).
+ *
+ * Pure geometry — used by SelectionCommentBar layout effect.
+ */
+export function resolveSelectionDockVerticalPlacement(opts: {
+  /** Host row bottom (viewport coords) */
+  hostBottom?: number;
+  /** Host row top */
+  hostTop?: number;
+  /** Measured dock height (comment island ~160–220; actions ~40) */
+  dockHeight?: number;
+  /** Clip rect top (scroller or viewport) */
+  clipTop?: number;
+  /** Clip rect bottom */
+  clipBottom?: number;
+  gap?: number;
+  /**
+   * Minimum free space below to keep below placement. Defaults to dockHeight
+   * (or 120 when unmeasured).
+   */
+  minBelow?: number;
+} = {}): 'below' | 'above' {
+  const gap = Number.isFinite(Number(opts.gap)) ? Math.max(0, Number(opts.gap)) : 8;
+  const hostBottom = Number(opts.hostBottom);
+  const hostTop = Number(opts.hostTop);
+  const clipTop = Number(opts.clipTop);
+  const clipBottom = Number(opts.clipBottom);
+  if (
+    !Number.isFinite(hostBottom) ||
+    !Number.isFinite(hostTop) ||
+    !Number.isFinite(clipTop) ||
+    !Number.isFinite(clipBottom)
+  ) {
+    return 'below';
+  }
+  const dockH = Math.max(0, Number(opts.dockHeight) || 0);
+  const need = Math.max(
+    dockH > 0 ? dockH : 0,
+    Number.isFinite(Number(opts.minBelow)) ? Number(opts.minBelow) : dockH > 0 ? dockH : 120
+  );
+  const spaceBelow = clipBottom - hostBottom - gap;
+  const spaceAbove = hostTop - clipTop - gap;
+  if (spaceBelow >= need) return 'below';
+  // Prefer the side with more room when below is tight
+  if (spaceAbove > spaceBelow && spaceAbove >= 48) return 'above';
+  if (spaceBelow < 48 && spaceAbove >= spaceBelow) return 'above';
+  return 'below';
+}
+
+/**
+ * Changed body line (add/del/change) — not context.
+ * Contiguous runs form "change regions" for ⌥↑/⌥↓ navigation.
+ */
+export function isChangedDiffLineRow(row: any): boolean {
+  if (!isSelectableDiffRow(row)) return false;
+  const t = String(row.lineType || '');
+  return t === 'add' || t === 'del' || t === 'change';
+}
+
+/**
+ * List of change regions in virtual-row order.
+ * A region is a maximal contiguous run of changed lines (array index ±1).
+ * Context / hunk headers / file headers / comments break the run.
+ */
+export function listChangeRegions(list: any[]): Array<{
+  startIndex: number;
+  endIndex: number;
+  firstRow: any;
+}> {
+  const rows = Array.isArray(list) ? list : [];
+  const regions: Array<{
+    startIndex: number;
+    endIndex: number;
+    firstRow: any;
+  }> = [];
+  let cur: { startIndex: number; endIndex: number; firstRow: any } | null =
+    null;
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    if (!isChangedDiffLineRow(row)) {
+      if (cur) {
+        regions.push(cur);
+        cur = null;
+      }
+      continue;
+    }
+    if (!cur) {
+      cur = { startIndex: i, endIndex: i, firstRow: row };
+    } else if (i === cur.endIndex + 1) {
+      cur.endIndex = i;
+    } else {
+      regions.push(cur);
+      cur = { startIndex: i, endIndex: i, firstRow: row };
+    }
+  }
+  if (cur) regions.push(cur);
+  return regions;
+}
+
+/**
+ * ⌥↑ / ⌥↓: move caret to the first line of the next/prev change region.
+ * Returns a **single-line** selection (never multi-line whole hunk).
+ * @param delta >0 next, <0 previous
+ * @returns new selection or null if no region / no move possible
+ */
+export function jumpSelectionToAdjacentChangeRegion(
+  selection: any,
+  list: any[],
+  delta: number,
+  preferredSide?: string
+): any | null {
+  const regions = listChangeRegions(list);
+  if (!regions.length) return null;
+  const d = delta < 0 ? -1 : 1;
+  const prefer =
+    String(
+      preferredSide ||
+        selection?.headSide ||
+        selection?.anchorSide ||
+        'RIGHT'
+    ).toUpperCase() === 'LEFT'
+      ? 'LEFT'
+      : 'RIGHT';
+
+  const headIdx = Number(selection?.headRowIndex);
+  const hasHead = Number.isFinite(headIdx) && headIdx >= 0;
+  if (
+    !selection ||
+    isFileLevelSelection(selection) ||
+    isThreadSelection(selection) ||
+    !hasHead
+  ) {
+    const reg = d > 0 ? regions[0] : regions[regions.length - 1];
+    return beginLineSelection(reg.firstRow, prefer, reg.startIndex);
+  }
+
+  // Region containing head
+  let ri = -1;
+  for (let i = 0; i < regions.length; i++) {
+    const r = regions[i];
+    if (headIdx >= r.startIndex && headIdx <= r.endIndex) {
+      ri = i;
+      break;
+    }
+  }
+  if (ri < 0) {
+    // Head on context/header: nearest region after (↓) or before (↑)
+    if (d > 0) {
+      for (let i = 0; i < regions.length; i++) {
+        if (regions[i].startIndex > headIdx) {
+          ri = i - 1;
+          break;
+        }
+      }
+      if (ri < 0 && regions[regions.length - 1].endIndex < headIdx) {
+        return null;
+      }
+    } else {
+      for (let i = regions.length - 1; i >= 0; i--) {
+        if (regions[i].endIndex < headIdx) {
+          ri = i + 1;
+          break;
+        }
+      }
+      if (ri < 0 && regions[0].startIndex > headIdx) {
+        return null;
+      }
+    }
+  }
+
+  const target = ri + d;
+  if (target < 0 || target >= regions.length) {
+    // Edge: stay on first line of current region as single caret (no wrap)
+    if (ri >= 0 && ri < regions.length) {
+      const reg = regions[ri];
+      return beginLineSelection(reg.firstRow, prefer, reg.startIndex);
+    }
+    return null;
+  }
+  const reg = regions[target];
+  return beginLineSelection(reg.firstRow, prefer, reg.startIndex);
 }
 
 /**

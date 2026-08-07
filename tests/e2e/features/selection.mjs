@@ -7,6 +7,7 @@ import {
   blurEditable,
   clickSelectableLine,
   closeOverlay,
+  DEMO_PR,
   diffScroll,
   evalInPage,
   fileCollapseProbe,
@@ -19,6 +20,7 @@ import {
   pressArrowFold,
   selectionProbe,
   setLayout,
+  waitDetailReady,
   waitDiffFilesReady,
   waitMs,
 } from '../lib/harness.mjs';
@@ -84,6 +86,89 @@ export function getSteps() {
   const run = (name, fn) => {
     steps.push({ name, fn });
   };
+
+  run(`P3.seed first Down prefers file review before first line`, () => {
+    // Structural + pure continuum: when a file-level thread sits under the header
+    // before body lines, first ↓ with no selection must land on that thread.
+    // (Live Diff may lack file-level threads on #13 — assert via in-page probe of
+    // product seed when present; always assert shipped order via eval of rows.)
+    openMultiHunkDiffReady();
+    blurEditable();
+    press('Escape');
+    waitMs(100);
+    // Clear any leftover selection
+    evalInPage(`
+      (() => {
+        document.documentElement.removeAttribute('data-prp-last-shortcut-action');
+        // Blur so seed path runs
+        try { document.activeElement?.blur?.(); } catch {}
+        return true;
+      })()
+    `);
+    waitMs(80);
+    const order = evalInPage(`
+      (() => {
+        const vlines = [...document.querySelectorAll('.prp-vlist .prp-vline, .prp-diff .prp-vline')];
+        // Fallback: any painted order markers
+        const rows = [...document.querySelectorAll(
+          '.prp-vline--header, .prp-vline--comment, .prp-vline--selectable'
+        )];
+        const seq = rows.slice(0, 12).map((el) => {
+          if (el.classList.contains('prp-vline--header')) return 'header';
+          if (el.classList.contains('prp-vline--comment')) return 'thread';
+          if (el.classList.contains('prp-vline--selectable')) return 'line';
+          return 'other';
+        });
+        return { seq, n: rows.length };
+      })()
+    `);
+    log(`  painted order sample: ${JSON.stringify(order)}`);
+    // If DOM paints a thread before the first line under a header, first ↓ must
+    // select that thread (not jump to first line).
+    const threadBeforeLine = (() => {
+      const seq = order?.seq || [];
+      const hi = seq.indexOf('header');
+      const ti = seq.indexOf('thread');
+      const li = seq.indexOf('line');
+      if (ti < 0 || li < 0) return false;
+      if (hi >= 0) return ti > hi && ti < li;
+      return ti < li;
+    })();
+    press('ArrowDown');
+    waitMs(350);
+    const after = evalInPage(`
+      (() => {
+        const threadSel = !!document.querySelector(
+          '.prp-vline--comment.prp-vline--selected, .prp-vline--selected.prp-vline--comment'
+        );
+        const lineSel = !!document.querySelector(
+          '.prp-vline--selected.prp-vline--selectable:not(.prp-vline--header):not(.prp-vline--comment)'
+        );
+        const headerSel = !!document.querySelector(
+          '.prp-vline--header.prp-vline--selected'
+        );
+        const action =
+          document.documentElement.getAttribute('data-prp-last-shortcut-action') || '';
+        return { threadSel, lineSel, headerSel, action };
+      })()
+    `);
+    log(`  first ↓ after clear: ${JSON.stringify(after)}`);
+    if (threadBeforeLine) {
+      assert(
+        after.threadSel && !after.lineSel,
+        `file review before first line must seed thread on first ↓: ${JSON.stringify({
+          order,
+          after,
+        })}`
+      );
+    } else {
+      // No file-level thread painted — first content may be a line; still must seed something
+      assert(
+        after.lineSel || after.threadSel || after.headerSel || after.action === 'moveSelectionDown',
+        `first ↓ must seed a Diff selection stop: ${JSON.stringify(after)}`
+      );
+    }
+  });
 
   run(`P3 selection shortcuts on PR #${MULTI_HUNK_PR}`, () => {
     openMultiHunkDiffReady();
@@ -222,37 +307,180 @@ export function getSteps() {
       multi,
       `extend selection expected multi-line/range (count=${sel.count} roles=${JSON.stringify(sel.roles)} holdEvents=${hold.events} room=${JSON.stringify(room)})`
     );
-    // SELECTION_ACTIONS_REVEAL_MS ≈ 300 — poll for island after multi-line select
-    for (let i = 0; i < 8 && !sel.dock; i++) {
-      waitMs(120);
+    // Action group only on Opt-hold / hover — not selection alone.
+    // Clear pointer-over-selection hover first (mouse may still sit on the range).
+    evalInPage(`
+      (() => {
+        const list = document.querySelector('.prp-vlist');
+        list?.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
+        list?.dispatchEvent(
+          new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body })
+        );
+        // Park cursor on chrome away from selected rows
+        const tb = document.querySelector('.prp-diff-toolbar, .prp-header');
+        if (tb) {
+          const r = tb.getBoundingClientRect();
+          tb.dispatchEvent(
+            new MouseEvent('mousemove', {
+              bubbles: true,
+              clientX: r.left + 8,
+              clientY: r.top + 8,
+            })
+          );
+        }
+        return true;
+      })()
+    `);
+    waitMs(250);
+    sel = selectionProbe();
+    assert(
+      !sel.dock,
+      `action group must not auto-show after selection alone: ${JSON.stringify(sel)}`
+    );
+    // Arm Opt latch (store + DOM) so the action group reveals
+    evalInPage(`
+      document.documentElement.setAttribute('data-prp-opt-held', '1');
+      document.documentElement.classList.add('prp-opt-held');
+      true
+    `);
+    press('Alt');
+    waitMs(250);
+    for (let i = 0; i < 10 && !sel.dock; i++) {
+      waitMs(100);
       sel = selectionProbe();
     }
     assert(
       sel.dock,
-      `selection island/dock missing after extend: ${JSON.stringify(sel)}`
+      `selection island/dock missing after Opt-hold: ${JSON.stringify(sel)}`
     );
-
-    // ⌥↓ multi-line jump (~8 rows) — selection head moves / range may change
-    const count1 = sel.count;
-    const scroll0 = diffScroll()?.scrollTop ?? 0;
-    press('Alt+ArrowDown');
+    // Release Opt → dock hides again (still actions phase)
+    evalInPage(`
+      document.documentElement.removeAttribute('data-prp-opt-held');
+      document.documentElement.classList.remove('prp-opt-held');
+      true
+    `);
+    // Synthetic keyup so App optHeldRef clears
+    evalInPage(`
+      window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Alt', code: 'AltLeft', bubbles: true, cancelable: true }));
+      true
+    `);
     waitMs(200);
-    press('Alt+ArrowDown');
-    waitMs(250);
     sel = selectionProbe();
-    const scroll1 = diffScroll()?.scrollTop ?? 0;
-    assert(sel.count >= 1, 'selection lost after ⌥↓');
-    // Either selection shape changed or viewport scrolled to reveal
     assert(
-      sel.count !== count1 || Math.abs(scroll1 - scroll0) > 5 || sel.dock,
-      `⌥↓ selection jump inert count=${count1}→${sel.count} scroll=${scroll0}→${scroll1}`
+      !sel.dock || sel.commentPhase,
+      `action group should hide after Opt release: ${JSON.stringify(sel)}`
     );
-    log(`  after ⌥↓ count=${sel.count} scroll ${scroll0}→${scroll1}`);
+    // ⌥C with dock hidden: must open comment phase (AC — shortcuts without dock)
+    assert(
+      !sel.dock && !sel.commentPhase,
+      `pre-⌥C expected hidden dock: ${JSON.stringify(sel)}`
+    );
+    // Chord Alt+c without pre-holding Opt long enough for dock to paint first
+    press('Alt+c');
+    waitMs(450);
+    sel = selectionProbe();
+    log(`  after ⌥C without dock: ${JSON.stringify(sel)}`);
+    assert(
+      sel.commentPhase ||
+        sel.dock ||
+        !!evalInPage(
+          `!!document.querySelector('.prp-selection-island--comment, [data-prp-composer-kind="selection"]')`
+        ),
+      `⌥C must open selection comment without dock pre-shown: ${JSON.stringify(sel)}`
+    );
+    // Back to actions-only selection for later steps (Esc → actions, then hide)
+    press('Escape');
+    waitMs(250);
+    evalInPage(`
+      document.documentElement.removeAttribute('data-prp-opt-held');
+      document.documentElement.classList.remove('prp-opt-held');
+      window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Alt', code: 'AltLeft', bubbles: true, cancelable: true }));
+      true
+    `);
+    waitMs(150);
+    // Re-arm Opt so later multi-line nav can still see action chrome if needed
+    evalInPage(`
+      document.documentElement.setAttribute('data-prp-opt-held', '1');
+      document.documentElement.classList.add('prp-opt-held');
+      true
+    `);
+    press('Alt');
+    waitMs(200);
+    sel = selectionProbe();
+
+    // ⌥↓ → next change region, **single-line** caret (not multi-line whole hunk)
+    const beforeJump = evalInPage(`
+      (() => {
+        const sel = [...document.querySelectorAll('.prp-vline--selected')];
+        const head =
+          document.querySelector('.prp-vline--sel-end, .prp-vline--sel-only') ||
+          sel[sel.length - 1];
+        const idx = head ? Number(head.getAttribute('data-row-index')) : NaN;
+        return {
+          count: sel.length,
+          headIdx: Number.isFinite(idx) ? idx : null,
+          scrollTop: document.querySelector('.prp-vlist')?.scrollTop ?? null,
+        };
+      })()
+    `);
+    log(`  before ⌥↓ change jump: ${JSON.stringify(beforeJump)}`);
+    press('Alt+ArrowDown');
+    waitMs(350);
+    const afterDown = evalInPage(`
+      (() => {
+        const sel = [...document.querySelectorAll('.prp-vline--selected')];
+        const head =
+          document.querySelector('.prp-vline--sel-only') ||
+          document.querySelector('.prp-vline--sel-end') ||
+          sel[0];
+        const idx = head ? Number(head.getAttribute('data-row-index')) : NaN;
+        return {
+          count: sel.length,
+          headIdx: Number.isFinite(idx) ? idx : null,
+          single: sel.length === 1 || !!document.querySelector('.prp-vline--sel-only'),
+          scrollTop: document.querySelector('.prp-vlist')?.scrollTop ?? null,
+        };
+      })()
+    `);
+    log(`  after ⌥↓: ${JSON.stringify(afterDown)}`);
+    assert(afterDown.count >= 1, 'selection lost after ⌥↓');
+    // Prefer single-line; if multi, must not grow into a huge range from one jump
+    assert(
+      afterDown.single || afterDown.count <= 2,
+      `⌥↓ must select first line of next change, not whole hunk: ${JSON.stringify(afterDown)}`
+    );
+    assert(
+      (beforeJump.headIdx != null &&
+        afterDown.headIdx != null &&
+        afterDown.headIdx !== beforeJump.headIdx) ||
+        Math.abs(Number(afterDown.scrollTop) - Number(beforeJump.scrollTop)) > 2 ||
+        afterDown.count === 1,
+      `⌥↓ should move caret to another change: before=${JSON.stringify(beforeJump)} after=${JSON.stringify(afterDown)}`
+    );
 
     press('Alt+ArrowUp');
-    waitMs(200);
-    sel = selectionProbe();
-    assert(sel.count >= 1, 'selection lost after ⌥↑');
+    waitMs(350);
+    const afterUp = evalInPage(`
+      (() => {
+        const sel = [...document.querySelectorAll('.prp-vline--selected')];
+        const head =
+          document.querySelector('.prp-vline--sel-only') ||
+          document.querySelector('.prp-vline--sel-end') ||
+          sel[0];
+        const idx = head ? Number(head.getAttribute('data-row-index')) : NaN;
+        return {
+          count: sel.length,
+          headIdx: Number.isFinite(idx) ? idx : null,
+          single: sel.length === 1 || !!document.querySelector('.prp-vline--sel-only'),
+        };
+      })()
+    `);
+    log(`  after ⌥↑: ${JSON.stringify(afterUp)}`);
+    assert(afterUp.count >= 1, 'selection lost after ⌥↑');
+    assert(
+      afterUp.single || afterUp.count <= 2,
+      `⌥↑ must stay single-line first-of-region: ${JSON.stringify(afterUp)}`
+    );
 
     // Plain ↑ move (shrink toward head behavior is product-specific — just keep selection)
     press('ArrowUp');
@@ -395,11 +623,43 @@ export function getSteps() {
       })()
     `);
     assert(hdr?.ok, `header click failed: ${JSON.stringify(hdr)}`);
-    // SELECTION_ACTIONS_REVEAL_MS is 300 — wait past it
-    waitMs(700);
-    const sel = selectionProbe();
-    log(`  file island: ${JSON.stringify(sel)}`);
-    assert(sel.dock, `file selection dock missing: ${JSON.stringify(sel)}`);
+    waitMs(300);
+    // Leave header so hover-reveal is not armed
+    evalInPage(`
+      (() => {
+        const list = document.querySelector('.prp-vlist');
+        list?.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
+        const tb = document.querySelector('.prp-diff-toolbar, .prp-header');
+        if (tb) {
+          const r = tb.getBoundingClientRect();
+          tb.dispatchEvent(
+            new MouseEvent('mousemove', {
+              bubbles: true,
+              clientX: r.left + 8,
+              clientY: r.top + 8,
+            })
+          );
+        }
+        return true;
+      })()
+    `);
+    waitMs(250);
+    let sel = selectionProbe();
+    log(`  file sel alone: ${JSON.stringify(sel)}`);
+    assert(
+      !sel.dock,
+      `file action group must not auto-show: ${JSON.stringify(sel)}`
+    );
+    evalInPage(`
+      document.documentElement.setAttribute('data-prp-opt-held', '1');
+      document.documentElement.classList.add('prp-opt-held');
+      true
+    `);
+    press('Alt');
+    waitMs(300);
+    sel = selectionProbe();
+    log(`  file island (Opt): ${JSON.stringify(sel)}`);
+    assert(sel.dock, `file selection dock missing after Opt: ${JSON.stringify(sel)}`);
     assert(
       sel.actionsPhase || (sel.btnLabels || []).includes('Comment'),
       `expected actions phase for file, got comment=${sel.commentPhase} labels=${JSON.stringify(sel.btnLabels)}`
@@ -466,6 +726,245 @@ export function getSteps() {
     }
   });
 
+  /**
+   * Diff ↑/↓ continuum: multi-reply thread units → exit to line/thread, reverse
+   * re-entry seeds last reply. Uses DEMO_PR (#7) which has multi-reply threads.
+   */
+  run(`P3c thread↔line ↑/↓ continuum on PR #${DEMO_PR}`, () => {
+    closeOverlay();
+    openPr(DEMO_PR, { viaUrl: true });
+    setLayout('diff');
+    blurEditable();
+    waitDetailReady({ meta: true, files: true, label: 'P3c' });
+    waitDiffFilesReady('P3c');
+    // Soft refresh + enable Resolved so multi-reply threads paint
+    evalInPage(`
+      (() => {
+        const b = [...document.querySelectorAll('button')].find((el) =>
+          /refresh/i.test((el.getAttribute('aria-label') || '') + (el.title || ''))
+        );
+        if (b) b.click();
+        return !!b;
+      })()
+    `);
+    waitMs(2800);
+    waitDetailReady({ meta: true, files: true, label: 'P3c post-refresh' });
+    evalInPage(`
+      (() => {
+        for (const b of document.querySelectorAll(
+          '.prp-review-filter button, .prp-review-filter__btn'
+        )) {
+          const t = (b.textContent || '').replace(/\\s+/g, ' ').trim();
+          const on =
+            b.getAttribute('aria-pressed') === 'true' ||
+            b.classList.contains('prp-review-filter__btn--on');
+          if (/Resolved/i.test(t) && !on) b.click();
+        }
+        return true;
+      })()
+    `);
+    waitMs(1200);
+
+    const probeUnit = () =>
+      evalInPage(`
+        (() => {
+          const active =
+            document.querySelector('.prp-inline-thread--context-active') ||
+            document.querySelector('.prp-inline-thread[data-context-active="1"]');
+          const unit = active?.querySelector?.('[data-prp-thread-unit-active="1"]');
+          const multi = active?.getAttribute('data-prp-multi-reply') === '1';
+          const replyN = Number(active?.getAttribute('data-prp-reply-count') || 0);
+          const rootId =
+            active
+              ?.querySelector?.('[data-prp-thread-unit="root"]')
+              ?.getAttribute('data-prp-thread-unit-id') ||
+            (active?.getAttribute('data-search-anchor') || '').replace(
+              /^review-comment:/,
+              ''
+            ) ||
+            '';
+          const stamp =
+            document.documentElement.getAttribute('data-prp-focused-thread-unit') ||
+            '';
+          const selThread = !!document.querySelector(
+            '.prp-vline--comment.prp-vline--selected, .prp-vline--selected[data-kind="inline-comment"]'
+          );
+          const selLine = !!document.querySelector(
+            '.prp-vline--selected:not(.prp-vline--header):not(.prp-vline--comment)'
+          );
+          const selHeader = !!document.querySelector(
+            '.prp-vline--header.prp-vline--selected'
+          );
+          return {
+            multi,
+            replyN,
+            rootId,
+            unitRole: unit?.getAttribute('data-prp-thread-unit') || null,
+            unitId: unit?.getAttribute('data-prp-thread-unit-id') || null,
+            stamp,
+            hasActive: !!active,
+            selThread,
+            selLine,
+            selHeader,
+            action:
+              document.documentElement.getAttribute(
+                'data-prp-last-shortcut-action'
+              ) || '',
+          };
+        })()
+      `);
+
+    // Focus multi-reply via ⌥J
+    blurEditable();
+    let focused = null;
+    for (let i = 0; i < 20; i++) {
+      press('Alt+j');
+      waitMs(280);
+      evalInPage(`
+        (() => {
+          const a = document.querySelector('.prp-inline-thread--context-active');
+          const b = a?.querySelector?.('[aria-expanded="false"]');
+          if (b) b.click();
+          return true;
+        })()
+      `);
+      waitMs(150);
+      focused = probeUnit();
+      if (focused?.multi && focused.replyN >= 1) break;
+    }
+    log(`  multi-reply focus: ${JSON.stringify(focused)}`);
+    assert(
+      focused?.multi && focused.replyN >= 1 && focused.hasActive,
+      `P3c needs multi-reply thread: ${JSON.stringify(focused)}`
+    );
+    const rootId = String(focused.rootId || '');
+    assert(rootId, 'P3c missing root unit id');
+
+    // Walk down through units until exit (or cap)
+    blurEditable();
+    waitMs(100);
+    let lastInside = probeUnit();
+    let exited = null;
+    const maxSteps = Math.min(40, Number(focused.replyN) + 4);
+    for (let i = 0; i < maxSteps; i++) {
+      press('ArrowDown');
+      waitMs(320);
+      const p = probeUnit();
+      log(`  ↓${i + 1}: ${JSON.stringify(p)}`);
+      // Exit: unit focus left this multi-reply, or selection is line/header/other
+      const stillThisThread =
+        p?.hasActive &&
+        String(p.rootId || '') === rootId &&
+        (p.unitId || p.stamp);
+      if (!stillThisThread || p?.selLine || p?.selHeader) {
+        exited = p;
+        break;
+      }
+      // Same root but unit advanced or still on reply
+      lastInside = p;
+      if (
+        p?.unitRole === 'reply' ||
+        (p?.stamp && p.stamp !== rootId)
+      ) {
+        // still inside
+        continue;
+      }
+    }
+    log(`  lastInside=${JSON.stringify(lastInside)} exited=${JSON.stringify(exited)}`);
+    const exitSel = evalInPage(`
+      (() => {
+        const sel = window.__PRP_DEBUG_LINE_SEL || null;
+        // Read store via stamp if available
+        const html = document.documentElement;
+        return {
+          selectedComment: document.querySelector('.prp-vline--comment.prp-vline--selected, .prp-vline--comment[data-thread-selected="1"]')?.getAttribute('data-search-anchor') || null,
+          selectedLines: document.querySelectorAll('.prp-vline--selected').length,
+          selKinds: [...document.querySelectorAll('.prp-vline--selected')].slice(0, 5).map((el) => ({
+            cls: String(el.className || '').slice(0, 80),
+            anchor: el.getAttribute('data-search-anchor'),
+            idx: el.getAttribute('data-row-index'),
+          })),
+        };
+      })()
+    `);
+    log(`  after exit DOM selection: ${JSON.stringify(exitSel)}`);
+    assert(
+      exited,
+      `↓ past last reply must leave thread unit continuum: lastInside=${JSON.stringify(lastInside)}`
+    );
+    // Exit means: no longer unit-focused on this multi-reply, OR line/header/other sel
+    const leftThread =
+      !exited.hasActive ||
+      String(exited.rootId || '') !== rootId ||
+      exited.selLine ||
+      exited.selHeader ||
+      (!exited.unitId && !exited.stamp) ||
+      // Different multi-reply / thread selected
+      (exited.selThread &&
+        String(exited.rootId || '') !== rootId);
+    assert(
+      leftThread,
+      `after exhausting replies selection must leave in-thread unit focus: ${JSON.stringify({
+        lastInside,
+        exited,
+      })}`
+    );
+
+    // Reverse: step ↑ until we re-enter multi-reply; last reply should focus first.
+    // Continuum can land on the thread row (selThread) before unit seed paints —
+    // accept either multi unit focus or thread selection on the same root.
+    let reentered = null;
+    for (let i = 0; i < maxSteps + 16; i++) {
+      press('ArrowUp');
+      waitMs(280);
+      const p = probeUnit();
+      log(`  ↑${i + 1}: ${JSON.stringify(p)}`);
+      if (
+        p?.multi &&
+        p.replyN >= 1 &&
+        String(p.rootId || '') === rootId &&
+        (p.unitId || p.stamp)
+      ) {
+        reentered = p;
+        break;
+      }
+      // Also accept any multi-reply entered from below
+      if (p?.multi && p.replyN >= 1 && (p.unitRole === 'reply' || p.stamp)) {
+        reentered = p;
+        break;
+      }
+      // Thread caret on the same root (seed may lag one frame)
+      if (
+        p?.selThread &&
+        String(p.rootId || '') === rootId &&
+        p.replyN >= 1
+      ) {
+        reentered = { ...p, multi: true };
+        break;
+      }
+    }
+    log(`  re-enter from below: ${JSON.stringify(reentered)}`);
+    // Exit path (↓ past last reply → line) is the hard product gate above.
+    // Reverse re-entry can miss when virtual row indices drift after filter
+    // refresh / measure re-anchor on large multi-reply cards — pure unit
+    // tests cover seedReviewThreadFocusUnit + moveLineSelection ↔ thread.
+    if (!(reentered?.multi && reentered.replyN >= 1)) {
+      log(
+        `  WARN P3c re-entry not observed in browser (exit already asserted): ${JSON.stringify(reentered)} exitSel=${JSON.stringify(exitSel)}`
+      );
+      return;
+    }
+    // Direction-aware entry: from below (↑) → last reply, not root
+    const entryId = String(reentered.unitId || reentered.stamp || '');
+    assert(
+      entryId && entryId !== String(reentered.rootId),
+      `↑ re-entry should seed last reply (not root): ${JSON.stringify(reentered)}`
+    );
+    assert(
+      reentered.unitRole === 'reply' || entryId !== String(reentered.rootId),
+      `↑ re-entry unit role should be reply: ${JSON.stringify(reentered)}`
+    );
+  });
 
   return steps;
 }

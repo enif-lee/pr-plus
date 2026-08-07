@@ -728,12 +728,13 @@ a.prp-branch-tag__text:focus-visible {
 /*
  * Selection dock host — wraps the fixed-height row + floating UI.
  * Must NOT use contain:paint (that's on .prp-vline and was clipping the dock).
- * Host keeps virtual height = ROW_HEIGHT; dock overflows below and scrolls away.
+ * Host height = ROW_HEIGHT / --prp-diff-row-h (same as virtual offsets).
+ * Dock overflows below and scrolls away.
  */
 .prp-sel-dock-host {
   position: relative;
   z-index: var(--prp-z-sticky-header, 24);
-  height: var(--prp-row-height, 22px);
+  height: var(--prp-diff-row-h, 20px);
   overflow: visible;
   /* no contain — absolute dock must paint outside host box */
 }
@@ -755,6 +756,13 @@ a.prp-branch-tag__text:focus-visible {
   font-weight: 400;
   color: var(--prp-fg);
 }
+/* Flip above selection when Diff scroller has too little room below (comment form). */
+.prp-selection-dock.prp-selection-dock--above {
+  top: auto;
+  bottom: 100%;
+  margin-top: 0;
+  margin-bottom: 6px;
+}
 .prp-selection-dock.prp-selection-island {
   left: 28px;
   right: 16px;
@@ -762,6 +770,10 @@ a.prp-branch-tag__text:focus-visible {
   max-width: 560px;
   min-width: min(320px, 100%);
   margin-top: 8px;
+}
+.prp-selection-dock.prp-selection-island.prp-selection-dock--above {
+  margin-top: 0;
+  margin-bottom: 8px;
 }
 
 /*

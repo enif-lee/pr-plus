@@ -72,11 +72,14 @@ export const DIFF_PAGE_SCROLL_SHORTCUT = {
 
 /**
  * Option + ArrowUp/Down (no Shift) — override browser default.
- * - Diff: jump selection by several lines (+ scroll via reveal)
+ * - Diff: jump caret to next/prev **change region** (first line only)
  * - Conversation: scroll the timeline panel by a matching amount
  */
 export const DIFF_OPT_ARROW_SHORTCUT = {
-  /** How many selectable lines to move the caret per chord */
+  /**
+   * Conversation Opt-arrow scroll still uses this as a step count proxy
+   * (px ≈ steps × rowHeight). Diff no longer multi-steps by this amount.
+   */
   selectionSteps: 8,
   /** Scroll multiplier of selectionSteps × rowHeight (1 = track caret) */
   scrollStepScale: 1,
@@ -377,6 +380,7 @@ export const FOCUSED_THREAD_SHORTCUT = CONTEXT_THREAD_SHORTCUT;
  *
  *   ⌥C / ⌘↵ submit · ⌥⌃R resolve (when form has it)
  *   ⌥I focus input · ⌥T review↔comment mode toggle (main conversation composer)
+ *   ⌥S Start review / Add comment (selection + thread reply when control present)
  * (Emoji shortcodes: type `:` — ⌥E is reserved for comment reaction picker.)
  */
 export const COMPOSER_CONTEXT_SHORTCUT = {
@@ -421,6 +425,18 @@ export const COMPOSER_CONTEXT_SHORTCUT = {
     chord: 'opt+t',
     labelMac: '⌥T',
     labelWin: 'Alt+T',
+  },
+  /**
+   * Start review / Add comment (pending attach) — selection bar + thread reply.
+   * Omitted on conversation footer (no start-review control).
+   */
+  startPending: {
+    key: 's',
+    code: 'KeyS',
+    action: 'composerStartPending' as const,
+    chord: 'opt+s',
+    labelMac: '⌥S',
+    labelWin: 'Alt+S',
   },
 } as const;
 

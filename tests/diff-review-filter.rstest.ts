@@ -314,23 +314,23 @@ describe('product wiring structure', () => {
     expect(tb).toMatch(/isStatusActive/);
     expect(tb).toMatch(/onToggleReviewStatus/);
     expect(tb).toMatch(/data-prp-review-filter-gear/);
-    expect(tb).toMatch(/Hide outdated comments/);
-    expect(tb).toMatch(/Reviewed by/);
+    // Labels via i18n keys (locale catalogs hold English copy)
+    expect(tb).toMatch(/hide_outdated_comments/);
+    expect(tb).toMatch(/reviewed_by/);
     expect(tb).toMatch(/IconGear/);
     expect(tb).toMatch(/Avatar/);
     expect(tb).toMatch(/prp-diff-review-settings__author/);
     // Display options live in the gear popover (not primary toolbar row)
-    expect(tb).toMatch(/Hide whitespace/);
+    expect(tb).toMatch(/hide_whitespace/);
     expect(tb).toMatch(/data-prp-hide-whitespace/);
     expect(tb).toMatch(/value="unified"/);
     expect(tb).toMatch(/value="split"/);
-    expect(tb).toMatch(/Diff view/);
     // Portaled so Diff shell overflow never clips Reviewed-by / Diff view
     expect(tb).toMatch(/createPortal/);
     expect(tb).toMatch(/prp-diff-review-settings--portal/);
     // StepNav stays when filters yield 0 mapped roots but PR has threads
     expect(tb).toMatch(/showReviewFilter \|\|/);
-    expect(tb).toMatch(/Filtered review threads/);
+    expect(tb).toMatch(/filtered_review_threads|Filtered review threads/);
     // No exclusive single-select assignment of string modes only
     expect(tb).not.toMatch(/reviewFilter === 'unresolved' \? null : 'unresolved'/);
   });

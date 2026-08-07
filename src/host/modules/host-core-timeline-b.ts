@@ -441,11 +441,12 @@
               /* ignore */
             }
           }
-          // Turning auto-open on while on a PR page: enter embed.
+          // Turning auto-open on while on a PR page: enter embed (force
+          // bypasses once-per-PR latch so pref flip still opens).
           // Turning it off does not force-close an open embed.
           if (!prevAuto && prefs.autoOpenEmbed) {
             try {
-              tryEmbedFromLocation();
+              tryEmbedFromLocation({ force: true });
             } catch {
               /* ignore */
             }

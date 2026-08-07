@@ -35,7 +35,10 @@ import {
 } from '@lib/line-selection';
 import { isPathViewed } from '@lib/review-threads';
 import { OptBtnHint } from '@common/OptBtnHint';
-import { FILE_FOLD_SHORTCUT } from '@lib/shortcut-policy';
+import {
+  FILE_FOLD_SHORTCUT,
+  TOGGLE_VIEWED_SHORTCUT,
+} from '@lib/shortcut-policy';
 import {
   stickyFileHeaderForScroll,
   resolveStickyFileHeaderLayout,
@@ -80,6 +83,21 @@ export function fileHeaderTone(row: any) {
   if (adds > 0 && dels === 0) return 'add';
   if (dels > 0 && adds === 0) return 'del';
   return 'mod';
+}
+
+/**
+ * OptBtnHint label for the file-header viewed/read checkbox.
+ * Only when the file header is focused (same gate as fold chevron).
+ * Labels from TOGGLE_VIEWED_SHORTCUT (⌥⇧R / Alt+Shift+R).
+ */
+export function fileHeaderViewedOptHintLabel(
+  focused: boolean,
+  isMac: boolean = true
+): string | null {
+  if (!focused) return null;
+  return isMac
+    ? TOGGLE_VIEWED_SHORTCUT.labelMac
+    : TOGGLE_VIEWED_SHORTCUT.labelWin;
 }
 
 /** Shared chrome for inline + sticky file headers (identical markup either way). */
@@ -138,11 +156,13 @@ export function FileHeaderRow(props: {
   const dels = row.deletions ?? 0;
   const headerTone = fileHeaderTone(row);
   const hasIsland = Boolean(selectionIsland);
-  const foldKbd =
+  const isMac =
     typeof navigator !== 'undefined' &&
-    /Mac|iPhone|iPad/.test(navigator.platform || '')
-      ? FILE_FOLD_SHORTCUT.labelMac
-      : FILE_FOLD_SHORTCUT.labelWin;
+    /Mac|iPhone|iPad/.test(navigator.platform || '');
+  const foldKbd = isMac
+    ? FILE_FOLD_SHORTCUT.labelMac
+    : FILE_FOLD_SHORTCUT.labelWin;
+  const viewedKbd = fileHeaderViewedOptHintLabel(focused, isMac);
 
   const headerEl = (
     <div
@@ -180,12 +200,28 @@ export function FileHeaderRow(props: {
         });
       }}
     >
-      <label className="prp-file-header__viewed" title="Mark as viewed">
+      <label
+        className={`prp-file-header__viewed${
+          viewedKbd ? ' prp-opt-hint-host' : ''
+        }`}
+        title={
+          viewedKbd
+            ? viewed
+              ? `Mark as unread (${viewedKbd})`
+              : `Mark as viewed (${viewedKbd})`
+            : 'Mark as viewed'
+        }
+        data-prp-file-viewed-hint={viewedKbd ? '1' : undefined}
+      >
+        {viewedKbd ? (
+          <OptBtnHint label={viewedKbd} preferredPlacement="bottom" />
+        ) : null}
         <input
           type="checkbox"
           checked={viewed}
           onChange={() => onToggleViewed?.(row.filePath)}
           onClick={(e) => e.stopPropagation()}
+          aria-label={viewed ? 'Mark as unread' : 'Mark as viewed'}
         />
       </label>
       {openable ? (

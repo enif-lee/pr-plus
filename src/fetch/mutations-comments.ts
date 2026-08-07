@@ -79,11 +79,14 @@ export async function postReviewComment(
     path,
     line,
     side = 'RIGHT',
-    commitId,
-    startLine,
-    startSide,
+    commitId = null,
+    startLine = null,
+    startSide = null,
     asPending = false,
     subjectType = 'line',
+    /** Optional PRR_… from prior Start review (viewerPendingReview.nodeId) */
+    pendingReviewNodeId = null,
+    pendingReviewId = null,
   },
   fetchImpl,
   token
@@ -95,19 +98,103 @@ export async function postReviewComment(
   const isFile = String(subjectType || '').toLowerCase() === 'file';
   if (!isFile && line == null) throw new Error('path and line are required');
 
-  // Unified PENDING: attach to existing, or create (asPending). Recover from 422.
+  // Fast path: client already knows the PENDING review GraphQL id (Add comment
+  // after Start review). Avoid create → 422 when list/find lags.
+  const knownNode = String(pendingReviewNodeId || '').trim();
+  if (knownNode && (asPending || knownNode)) {
+    try {
+      const raw = await postReviewCommentViaPendingGraphql(
+        knownNode,
+        {
+          body: text,
+          path,
+          line: isFile ? null : line,
+          side,
+          startLine: isFile ? null : startLine,
+          startSide: isFile ? null : startSide,
+          subjectType: isFile ? 'file' : 'line',
+        },
+        fetchImpl,
+        token,
+        ctx
+      );
+      return {
+        ...raw,
+        pending: true,
+        pendingReviewId:
+          raw.pendingReviewId || pendingReviewId || null,
+        pendingReviewNodeId: knownNode,
+      };
+    } catch (knownErr) {
+      // Fall through to ensure/find if node is stale
+      const km = String(knownErr?.message || knownErr || '');
+      if (
+        !/Could not resolve to a node|global id|NOT_FOUND|Could not find/i.test(
+          km
+        )
+      ) {
+        // Line/side errors should surface; one-pending is not expected here
+        throw knownErr;
+      }
+    }
+  }
+
+  // Unified PENDING: prefer **attach** before **create**.
+  // Add comment must not POST /reviews when a PENDING already exists (422
+  // "one pending review"). Start review (no pending yet) falls through to create.
   let pending = await ensureViewerPendingReview(
     owner,
     repo,
     pullNumber,
-    {
-      commitId: commitId || null,
-      // Create only when caller wants pending; also create path recovers on 422
-      createIfMissing: Boolean(asPending),
-    },
+    { commitId: commitId || null, createIfMissing: false },
     fetchImpl,
-    token
+    token,
+    ctx
   );
+  if (!pending?.node_id && asPending) {
+    try {
+      pending = await ensureViewerPendingReview(
+        owner,
+        repo,
+        pullNumber,
+        { commitId: commitId || null, createIfMissing: true },
+        fetchImpl,
+        token,
+        ctx
+      );
+    } catch (ensureErr: any) {
+      // create raced into 422 — resolve existing PENDING for GraphQL attach
+      const em = String(ensureErr?.message || ensureErr || '');
+      if (
+        ensureErr?.status === 422 ||
+        /one pending review/i.test(em) ||
+        /Unprocessable Entity/i.test(em)
+      ) {
+        // Retries: REST list / GraphQL can lag right after create elsewhere
+        for (let i = 0; i < 6 && !pending?.node_id; i++) {
+          if (i > 0) {
+            await new Promise((r) => setTimeout(r, 300 * i));
+          }
+          pending = await ensureViewerPendingReview(
+            owner,
+            repo,
+            pullNumber,
+            { commitId: commitId || null, createIfMissing: false },
+            fetchImpl,
+            token,
+            ctx
+          );
+        }
+        // Do not rethrow 422 — attach path below will try again / last-resort
+        // recover. Rethrowing here is what surfaces the toast on Add comment.
+        if (!pending?.node_id) {
+          pending = null;
+        }
+      } else {
+        throw ensureErr;
+      }
+    }
+  }
 
   const gqlFields = {
     body: text,
@@ -119,82 +206,150 @@ export async function postReviewComment(
     subjectType: isFile ? 'file' : 'line',
   };
 
-  // Existing PENDING (or just created) → always GraphQL attach (REST 422s)
-  if (pending?.node_id) {
-    try {
-      const raw = await postReviewCommentViaPendingGraphql(
-        pending.node_id,
-        gqlFields,
+  async function attachViaGraphql(pendingRow) {
+    if (!pendingRow?.node_id) return null;
+    const nodeId = String(pendingRow.node_id);
+    const raw = await postReviewCommentViaPendingGraphql(
+      nodeId,
+      gqlFields,
+      fetchImpl,
+      token,
+      ctx
+    );
+    return {
+      ...raw,
+      pending: true,
+      pendingReviewId: raw.pendingReviewId || pendingRow.id || null,
+      // Always echo PRR_… so App can latch for the next Add comment
+      pendingReviewNodeId:
+        String(raw.pendingReviewNodeId || nodeId || '').trim() || nodeId,
+    };
+  }
+
+  /** Re-find PENDING + attach; never creates. Used after 422 / dead node. */
+  async function recoverAttachFromExistingPending() {
+    let row = await ensureViewerPendingReview(
+      owner,
+      repo,
+      pullNumber,
+      { commitId: commitId || null, createIfMissing: false },
+      fetchImpl,
+      token,
+      ctx
+    );
+    // Prefer known REST id when ensure omitted node_id
+    if (!row?.node_id && pendingReviewId) {
+      row = await ensureViewerPendingReview(
+        owner,
+        repo,
+        pullNumber,
+        { commitId: commitId || null, createIfMissing: false },
         fetchImpl,
         token,
         ctx
       );
-      return {
-        ...raw,
-        pending: true,
-        pendingReviewId: raw.pendingReviewId || pending.id || null,
-      };
+    }
+    if (row?.node_id) {
+      try {
+        return await attachViaGraphql(row);
+      } catch {
+        /* continue */
+      }
+    }
+    return null;
+  }
+
+  // Existing PENDING (or just created) → always GraphQL attach (REST 422s)
+  if (pending?.node_id) {
+    try {
+      const attached = await attachViaGraphql(pending);
+      if (attached) return attached;
     } catch (err) {
       // Discarded review can linger in the list with a dead GraphQL node id.
+      // Also re-resolve when GraphQL fails after ensure missed a live PENDING
+      // (Add comment 422 "one pending review" recovery path).
       const msg = String(err?.message || err || '');
-      if (
+      const reResolve =
         asPending &&
-        /Could not resolve to a node|global id|NOT_FOUND|Could not find/i.test(msg)
-      ) {
-        // Force a fresh PENDING review and retry once
-        try {
-          const created = await createPendingPullReview(
-            owner,
-            repo,
-            pullNumber,
-            { commitId: commitId || null },
-            fetchImpl,
-            token,
-            ctx
-          );
-          pending = {
-            id: Number(created?.id),
-            node_id: created?.node_id || null,
-          };
-        } catch (createErr) {
-          if (
-            createErr?.status === 422 ||
-            /one pending review/i.test(String(createErr?.message || ''))
-          ) {
-            pending = await ensureViewerPendingReview(
+        (/Could not resolve to a node|global id|NOT_FOUND|Could not find/i.test(
+          msg
+        ) ||
+          /one pending review/i.test(msg) ||
+          err?.status === 422);
+      if (reResolve) {
+        const recovered = await recoverAttachFromExistingPending();
+        if (recovered) return recovered;
+        // Dead node: try create only if re-resolve found nothing
+        pending = await ensureViewerPendingReview(
+          owner,
+          repo,
+          pullNumber,
+          { commitId: commitId || null, createIfMissing: false },
+          fetchImpl,
+          token,
+          ctx
+        );
+        if (!pending?.node_id) {
+          try {
+            const created = await createPendingPullReview(
               owner,
               repo,
               pullNumber,
-              { commitId: commitId || null, createIfMissing: false },
+              { commitId: commitId || null },
               fetchImpl,
               token,
               ctx
             );
-          } else {
-            throw createErr;
+            pending = {
+              id: Number(created?.id),
+              node_id: created?.node_id || null,
+            };
+          } catch (createErr) {
+            if (
+              createErr?.status === 422 ||
+              /one pending review/i.test(String(createErr?.message || ''))
+            ) {
+              const recovered2 = await recoverAttachFromExistingPending();
+              if (recovered2) return recovered2;
+            } else {
+              throw createErr;
+            }
           }
-        }
-        if (pending?.node_id) {
-          const raw = await postReviewCommentViaPendingGraphql(
-            pending.node_id,
-            gqlFields,
-            fetchImpl,
-            token,
-            ctx
-          );
-          return {
-            ...raw,
-            pending: true,
-            pendingReviewId: raw.pendingReviewId || pending.id || null,
-          };
+          const retry2 = await attachViaGraphql(pending);
+          if (retry2) return retry2;
         }
       }
       throw err;
     }
   }
 
-  // asPending but still no node_id — cannot attach
+  // asPending but still no node_id — last GraphQL discovery before fail
   if (asPending) {
+    const lastTry = await recoverAttachFromExistingPending();
+    if (lastTry) return lastTry;
+    // One more create-if-missing only when truly nothing found
+    try {
+      pending = await ensureViewerPendingReview(
+        owner,
+        repo,
+        pullNumber,
+        { commitId: commitId || null, createIfMissing: true },
+        fetchImpl,
+        token,
+        ctx
+      );
+      const afterCreate = await attachViaGraphql(pending);
+      if (afterCreate) return afterCreate;
+    } catch (createLast: any) {
+      if (
+        createLast?.status === 422 ||
+        /one pending review/i.test(String(createLast?.message || ''))
+      ) {
+        const recovered = await recoverAttachFromExistingPending();
+        if (recovered) return recovered;
+      }
+      throw createLast;
+    }
     throw new Error(
       'Could not start or find a pending review. Try Discard any leftover pending review, then retry.'
     );
@@ -209,12 +364,35 @@ export async function postReviewComment(
     payload.start_line = Number(startLine);
     payload.start_side = startSide || side || 'RIGHT';
   }
-  return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/comments`, ctx),
-    fetchImpl,
-    token,
-    { method: 'POST', body: payload }
-  );
+  try {
+    return await apiSend(
+      githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/comments`, ctx),
+      fetchImpl,
+      token,
+      { method: 'POST', body: payload }
+    );
+  } catch (err) {
+    // Race / missed PENDING: REST 422 "one pending review" → GraphQL attach
+    const msg = String(err?.message || err || '');
+    if (
+      err?.status === 422 ||
+      /one pending review/i.test(msg) ||
+      /Unprocessable Entity/i.test(msg)
+    ) {
+      pending = await ensureViewerPendingReview(
+        owner,
+        repo,
+        pullNumber,
+        { commitId: commitId || null, createIfMissing: false },
+        fetchImpl,
+        token,
+        ctx
+      );
+      const recovered = await attachViaGraphql(pending);
+      if (recovered) return recovered;
+    }
+    throw err;
+  }
 }
 
 /**

@@ -5,6 +5,182 @@
  * @see https://docs.github.com/en/rest/reactions/reactions
  */
 
+/**
+ * True when a comment/PR reaction emoji picker is open in `root`.
+ * Used by modal Escape: dismiss picker before closing the shell (window
+ * capture runs before CommentReactions' document listener).
+ */
+export function isCommentReactionPickerOpen(
+  root: ParentNode | null | undefined = typeof document !== 'undefined'
+    ? document
+    : null
+): boolean {
+  if (!root || typeof (root as ParentNode).querySelector !== 'function') {
+    return false;
+  }
+  try {
+    return Boolean(
+      root.querySelector(
+        '[data-prp-reaction-picker="1"], .prp-reactions__picker, .prp-reactions__add[aria-expanded="true"]'
+      )
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Close an open reaction picker via the expanded ☺ control (toggles
+ * CommentReactions local state). Returns true when a close click was fired.
+ */
+export function dismissCommentReactionPicker(
+  root: ParentNode | null | undefined = typeof document !== 'undefined'
+    ? document
+    : null
+): boolean {
+  if (!root || typeof (root as ParentNode).querySelector !== 'function') {
+    return false;
+  }
+  try {
+    const add = root.querySelector(
+      '.prp-reactions__add[aria-expanded="true"]'
+    ) as HTMLElement | null;
+    if (add && !(add as HTMLButtonElement).disabled) {
+      add.click();
+      return true;
+    }
+    // Picker portaled without expanded add (edge): remove is wrong for React —
+    // rely on isCommentReactionPickerOpen gate so shell stays open; next click
+    // outside closes via CommentReactions mousedown.
+    return isCommentReactionPickerOpen(root);
+  } catch {
+    return false;
+  }
+}
+
+export type ReactionPickerPlacement = 'above' | 'below';
+
+export type ReactionPickerRect = {
+  top: number;
+  bottom: number;
+  left: number;
+  right?: number;
+  width: number;
+  height: number;
+};
+
+/**
+ * Viewport-fixed coords for the reaction emoji menu (portaled to body).
+ * Uses explicit top (no translateY) so height estimates never leave the
+ * menu floating away from the ☺ button. Prefers above when it fits.
+ */
+export function placeReactionPicker(opts: {
+  button: ReactionPickerRect;
+  picker: { width: number; height: number };
+  viewport: { width: number; height: number };
+  gap?: number;
+  margin?: number;
+}): { top: number; left: number; placement: ReactionPickerPlacement } {
+  const gap = Number.isFinite(opts.gap as number) ? Number(opts.gap) : 8;
+  const margin = Number.isFinite(opts.margin as number)
+    ? Number(opts.margin)
+    : 8;
+  const r = opts.button;
+  const vp = opts.viewport;
+  const pw = Math.max(1, Number(opts.picker?.width) || 280);
+  const ph = Math.max(1, Number(opts.picker?.height) || 44);
+  const vw = Math.max(1, Number(vp?.width) || 800);
+  const vh = Math.max(1, Number(vp?.height) || 600);
+
+  const btnTop = Number(r.top) || 0;
+  const btnBottom =
+    Number.isFinite(r.bottom as number) && r.bottom != null
+      ? Number(r.bottom)
+      : btnTop + (Number(r.height) || 0);
+  const btnLeft = Number(r.left) || 0;
+
+  const spaceAbove = btnTop - margin;
+  const spaceBelow = vh - btnBottom - margin;
+
+  let placement: ReactionPickerPlacement;
+  if (spaceAbove >= ph + gap) {
+    placement = 'above';
+  } else if (spaceBelow >= ph + gap) {
+    placement = 'below';
+  } else {
+    placement = spaceAbove >= spaceBelow ? 'above' : 'below';
+  }
+
+  // Explicit top of the menu box (FinishReview-style — no CSS translate)
+  let top =
+    placement === 'above' ? btnTop - gap - ph : btnBottom + gap;
+  top = Math.max(margin, Math.min(top, vh - ph - margin));
+
+  let left = btnLeft;
+  left = Math.max(margin, Math.min(left, vw - pw - margin));
+
+  return { top, left, placement };
+}
+
+/**
+ * True when the ☺ add-reaction control is a live layout anchor (not a
+ * keep-alive inactive panel clone / zero-size / fully off-screen).
+ */
+export function isReactionPickerAnchorLive(
+  el: Element | null | undefined,
+  viewport?: { width: number; height: number }
+): boolean {
+  if (!el || !(el as HTMLElement).getBoundingClientRect) return false;
+  const btn = el as HTMLElement;
+  try {
+    const panel = btn.closest?.('.prp-body-panel') as HTMLElement | null;
+    if (panel && !panel.classList.contains('prp-body-panel--active')) {
+      return false;
+    }
+  } catch {
+    /* ignore */
+  }
+  if (typeof (btn as any).checkVisibility === 'function') {
+    try {
+      if (
+        !(btn as any).checkVisibility({
+          checkOpacity: true,
+          checkVisibilityCSS: true,
+        })
+      ) {
+        return false;
+      }
+    } catch {
+      /* older engines */
+    }
+  }
+  try {
+    if (typeof getComputedStyle === 'function') {
+      const cs = getComputedStyle(btn);
+      if (
+        cs.visibility === 'hidden' ||
+        cs.display === 'none' ||
+        Number(cs.opacity) === 0
+      ) {
+        return false;
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  const r = btn.getBoundingClientRect();
+  if (r.width < 2 || r.height < 2) return false;
+  const vw =
+    viewport?.width ??
+    (typeof window !== 'undefined' ? window.innerWidth : 0);
+  const vh =
+    viewport?.height ??
+    (typeof window !== 'undefined' ? window.innerHeight : 0);
+  if (vh > 0 && (r.bottom < 0 || r.top > vh)) return false;
+  if (vw > 0 && (r.right < 0 || r.left > vw)) return false;
+  return true;
+}
+
 export type ReactionContent =
   | '+1'
   | '-1'
