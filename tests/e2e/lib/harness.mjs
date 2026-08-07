@@ -33,6 +33,11 @@ export const DEMO_PR = 7;
 export const HEAVY_PR = 14;
 /** Multi-hunk expand chrome (open) */
 export const MULTI_HUNK_PR = 13;
+/**
+ * Empty-commit-only PR (changedFiles: 0) — Diff layout must stay gated.
+ * Fixture: demo/empty-commits-fixture branch; do not add file changes.
+ */
+export const EMPTY_DIFF_PR = 17;
 
 export function prUrl(n) {
   return `https://github.com/${REPO}/pull/${Number(n)}`;

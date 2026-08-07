@@ -26,7 +26,7 @@ import {
   IconConversation,
 } from '@common/icons';
 import { EMBED_RESTORE_SHORTCUT } from '@lib/page-embed';
-import { LAYOUT_DIFF } from '@lib/layout-mode';
+import { LAYOUT_DIFF, isDiffUnavailable } from '@lib/layout-mode';
 import { headerReviewCompact } from '@lib/header-layout';
 import { useT } from '@lib/locale-context';
 import { branchRefCopyText, copyTextToClipboard } from '@lib/copy-to-clipboard';
@@ -402,6 +402,11 @@ export function Header(props: any) {
   const canReopen = detail.state === 'closed' && !detail.merged;
   const fileCount = detail.changedFiles ?? (detail.files || []).length;
   const subscribed = detail.subscribed === true;
+  /** Empty-commit PR: block entry to Diff (leaving Diff → Conversation still OK). */
+  const diffUnavailable =
+    typeof isDiffUnavailable === 'function' && isDiffUnavailable(detail);
+  const layoutToggleDisabled =
+    diffUnavailable && effectiveLayout !== LAYOUT_DIFF;
 
   return (
     <header
@@ -846,10 +851,20 @@ export function Header(props: any) {
               type="button"
               className="prp-header__icon-btn prp-header__icon-btn--layout prp-has-tip prp-opt-hint-host"
               onClick={onToggleDiff}
+              disabled={layoutToggleDisabled}
+              aria-disabled={layoutToggleDisabled ? 'true' : undefined}
+              data-prp-diff-unavailable={diffUnavailable ? '1' : '0'}
               aria-label={
-                effectiveLayout === LAYOUT_DIFF
-                  ? t('header_show_conversation')
-                  : t('cta_show_file_diff')
+                layoutToggleDisabled
+                  ? t('aside_no_files')
+                  : effectiveLayout === LAYOUT_DIFF
+                    ? t('header_show_conversation')
+                    : t('cta_show_file_diff')
+              }
+              title={
+                layoutToggleDisabled
+                  ? t('aside_no_files')
+                  : undefined
               }
               data-layout={
                 effectiveLayout === LAYOUT_DIFF ? 'diff' : 'conversation'
@@ -863,11 +878,13 @@ export function Header(props: any) {
               )}
               <TipPopover
                 title={
-                  effectiveLayout === LAYOUT_DIFF
-                    ? t('tab_conversation')
-                    : t('cta_show_file_diff')
+                  layoutToggleDisabled
+                    ? t('aside_no_files')
+                    : effectiveLayout === LAYOUT_DIFF
+                      ? t('tab_conversation')
+                      : t('cta_show_file_diff')
                 }
-                shortcut="⌥."
+                shortcut={layoutToggleDisabled ? undefined : '⌥.'}
               />
             </button>
             {canClose ? (

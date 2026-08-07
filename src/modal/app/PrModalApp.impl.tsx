@@ -34,7 +34,12 @@ import { canUpdateBranch, coerceMergeMethod } from '../lib/merge-box-status';
 import { ConversationView } from '../views/conversation/ConversationView';
 import { DiffWorkspace } from '../views/pr-modal/DiffWorkspace';
 import { ShellResizers } from '../views/pr-modal/ShellResizers';
-import { LAYOUT_CENTERED, LAYOUT_DIFF, layoutClassName } from '../lib/layout-mode';
+import {
+  LAYOUT_CENTERED,
+  LAYOUT_DIFF,
+  layoutClassName,
+  isDiffUnavailable,
+} from '../lib/layout-mode';
 import {
   compareCacheKey,
   isAllCommitsFilter,
@@ -2121,7 +2126,8 @@ export function PrModalApp({
        */
       if (searchHitHasRowIndex(hit)) {
         if (layoutMode !== LAYOUT_DIFF) {
-          setLayoutMode(LAYOUT_DIFF);
+          expandDiff();
+          if (useModalStore.getState().layoutMode !== LAYOUT_DIFF) return;
         }
         const j = searchJumpRef.current;
         const top = scrollTopForIndex(
@@ -2507,7 +2513,10 @@ export function PrModalApp({
       line?: number | null;
       side?: string | null;
     }) => {
-      if (layoutMode !== LAYOUT_DIFF) setLayoutMode(LAYOUT_DIFF);
+      if (layoutMode !== LAYOUT_DIFF) {
+        expandDiff();
+        if (useModalStore.getState().layoutMode !== LAYOUT_DIFF) return;
+      }
       // Thread jump is a focus change — clear any line selection island.
       clearLineSelectionForNav();
 
@@ -4300,7 +4309,13 @@ export function PrModalApp({
     // stacked PRs (do not clobber with the target PR's stored session layout).
     const routePage = normalizePage(initialRoute?.page);
     if (routePage) {
-      setLayoutMode(routePage === 'diff' ? LAYOUT_DIFF : LAYOUT_CENTERED);
+      const wantDiff = routePage === 'diff';
+      const emptyDiff =
+        typeof isDiffUnavailable === 'function' &&
+        isDiffUnavailable(detail);
+      setLayoutMode(
+        wantDiff && !emptyDiff ? LAYOUT_DIFF : LAYOUT_CENTERED
+      );
     }
 
     // Effective page for session gate (URI page, else stored page)
@@ -4330,8 +4345,13 @@ export function PrModalApp({
         !routePage &&
         (stored.layoutMode === 'diff' || stored.layoutMode === 'centered')
       ) {
+        const emptyDiff =
+          typeof isDiffUnavailable === 'function' &&
+          isDiffUnavailable(detail);
         setLayoutMode(
-          stored.layoutMode === 'diff' ? LAYOUT_DIFF : LAYOUT_CENTERED
+          stored.layoutMode === 'diff' && !emptyDiff
+            ? LAYOUT_DIFF
+            : LAYOUT_CENTERED
         );
       }
       if (stored.diffMode === 'split' || stored.diffMode === 'unified') {
@@ -4446,7 +4466,10 @@ export function PrModalApp({
 
     ghSelectionAppliedRef.current = applyKey;
     setActiveFilePath(path);
-    if (layoutMode !== LAYOUT_DIFF) setLayoutMode(LAYOUT_DIFF);
+    if (layoutMode !== LAYOUT_DIFF) {
+      expandDiff();
+      if (useModalStore.getState().layoutMode !== LAYOUT_DIFF) return;
+    }
 
     if (startLine != null && Number(startLine) >= 1) {
       const end =
@@ -5054,6 +5077,15 @@ export function PrModalApp({
 
   /** Instant layout swap — keep-alive panels, no fade/scale on Diff ↔ Conversation. */
   function expandDiff(after?: any) {
+    // Empty-commit PRs (0 files) have no Diff surface — stay on Conversation.
+    const liveDetail =
+      useModalStore.getState().localDetail || detail || null;
+    if (
+      typeof isDiffUnavailable === 'function' &&
+      isDiffUnavailable(liveDetail)
+    ) {
+      return;
+    }
     setAnimClass('');
     setLayoutMode(LAYOUT_DIFF);
     after?.();
@@ -5069,9 +5101,29 @@ export function PrModalApp({
     // peer-opt → runPaletteCommand paths (monitor fired but layout stuck).
     const live =
       useModalStore.getState().layoutMode || layoutMode;
-    if (live === LAYOUT_DIFF) collapseDiff();
-    else expandDiff();
+    if (live === LAYOUT_DIFF) {
+      collapseDiff();
+      return;
+    }
+    expandDiff();
   }
+
+  // If meta settles to 0 files while Diff is open (or deep-link forced Diff
+  // before meta), leave Diff — empty-commit PRs have no file surface.
+  useEffect(() => {
+    if (!open) return;
+    const liveDetail =
+      useModalStore.getState().localDetail || detail || null;
+    if (
+      typeof isDiffUnavailable !== 'function' ||
+      !isDiffUnavailable(liveDetail)
+    ) {
+      return;
+    }
+    if (useModalStore.getState().layoutMode === LAYOUT_DIFF) {
+      setLayoutMode(LAYOUT_CENTERED);
+    }
+  }, [open, detail?.changedFiles, detail?.additions, detail?.deletions, detail?.files, setLayoutMode]);
 
   /** Play exit animation, then notify host to unmount (modal + side sheet). */
   const requestClose = useCallback(() => {

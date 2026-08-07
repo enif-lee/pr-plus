@@ -74,6 +74,11 @@ export {
   getSteps as getStartReviewSteps,
   runStartReview,
 } from './start-review.mjs';
+export {
+  getSteps as getEmptyDiffSteps,
+  runEmptyDiff,
+  EMPTY_DIFF_PR,
+} from './empty-diff.mjs';
 
 import { createRunner } from '../lib/runner.mjs';
 import { closeAll, ensureBrowser, log } from '../lib/harness.mjs';
@@ -101,6 +106,7 @@ import { getSteps as getFinishReviewSteps } from './finish-review.mjs';
 import { getSteps as getEscNestedSteps } from './esc-nested.mjs';
 import { getSteps as getSelectionRevealNavSteps } from './selection-reveal-nav.mjs';
 import { getSteps as getStartReviewSteps } from './start-review.mjs';
+import { getSteps as getEmptyDiffSteps } from './empty-diff.mjs';
 
 /** Ordered feature suite (shared browser session for legacy runner). */
 export const FEATURE_SUITE = [
@@ -128,6 +134,7 @@ export const FEATURE_SUITE = [
   { id: 'esc-nested', getSteps: getEscNestedSteps },
   { id: 'selection-reveal-nav', getSteps: getSelectionRevealNavSteps },
   { id: 'start-review', getSteps: getStartReviewSteps },
+  { id: 'empty-diff', getSteps: getEmptyDiffSteps },
 ];
 
 /**
