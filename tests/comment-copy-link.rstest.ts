@@ -212,6 +212,26 @@ describe('deep-link restore wiring (static)', () => {
     expect(vcl).toMatch(/nodeInView/);
     expect(vcl).toMatch(/promote\(/);
   });
+
+  test('issue-comment post navigates focus to new timeline card', () => {
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const app = fs.readFileSync(
+      path.join(__dirname, '..', 'src/modal/app/PrModalApp.impl.tsx'),
+      'utf8'
+    );
+    // After appendIssueCommentToDetail / commitCommentListPatch, leaveReview must
+    // requestConversationNav to the new issue-comment anchor (not leave focus on
+    // the composer).
+    const postBlock = app.slice(
+      app.indexOf('postIssueComment'),
+      app.indexOf("setActionMsg('Comment posted.')")
+    );
+    expect(postBlock.length).toBeGreaterThan(200);
+    expect(postBlock).toMatch(/requestConversationNav\(/);
+    expect(postBlock).toMatch(/issue-comment:/);
+    expect(postBlock).toMatch(/conversationCommentFocusRef\.current/);
+  });
 });
 
 /**

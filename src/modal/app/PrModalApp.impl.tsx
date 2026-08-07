@@ -6098,6 +6098,43 @@ export function PrModalApp({
                   comments: [...(detail.comments || []), mapped],
                 };
           commitCommentListPatch(next);
+          // Move conversation keyboard focus to the newly posted timeline card
+          // (scroll-then-promote via VirtualConversationList pending nav).
+          const newId = mapped.id;
+          if (newId != null && String(newId) !== '') {
+            const anchor =
+              typeof optimisticConversationAnchorForKind === 'function'
+                ? optimisticConversationAnchorForKind(newId, 'issue') ||
+                  `issue-comment:${newId}`
+                : `issue-comment:${newId}`;
+            conversationCommentFocusRef.current = {
+              id: String(newId),
+              kind: 'issue-comment',
+              anchor,
+            };
+            try {
+              const ae =
+                typeof document !== 'undefined'
+                  ? (document.activeElement as HTMLElement | null)
+                  : null;
+              if (
+                ae &&
+                (ae.tagName === 'TEXTAREA' ||
+                  ae.isContentEditable ||
+                  ae.closest?.('.prp-mdc, .prp-composer-card, .prp-wysi'))
+              ) {
+                ae.blur?.();
+              }
+            } catch {
+              /* ignore */
+            }
+            try {
+              if (layoutMode === LAYOUT_DIFF) collapseDiff();
+              useModalStore.getState().requestConversationNav(anchor);
+            } catch {
+              /* ignore */
+            }
+          }
         }
         setCommentText('');
         setActionMsg('Comment posted.');
