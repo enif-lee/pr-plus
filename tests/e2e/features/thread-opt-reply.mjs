@@ -354,41 +354,74 @@ export function getSteps() {
   });
 
   run('TOR.4 ⌥I focuses thread reply composer', () => {
-    press('Alt+j');
-    waitMs(250);
+    // Stay on multi-reply if already focused; else hop with ⌥J
+    let seed = probeThreadOptChrome();
+    if (!(seed?.hasActive && seed?.replyCount >= 1)) {
+      for (let i = 0; i < 12; i++) {
+        press('Alt+j');
+        waitMs(250);
+        seed = probeThreadOptChrome();
+        if (seed?.hasActive && seed?.replyCount >= 1) break;
+      }
+    }
     blurEditable();
-    waitMs(100);
+    waitMs(120);
+    evalInPage(`
+      document.documentElement.removeAttribute('data-prp-last-shortcut-action');
+      true
+    `);
     press('Alt+i');
-    waitMs(400);
+    waitMs(500);
     const focused = evalInPage(`
       (() => {
         const ae = document.activeElement;
         const inReply =
           ae &&
-          (ae.matches?.('textarea, [contenteditable="true"], [data-prp-composer-input]') ||
-            ae.closest?.('[data-prp-composer-kind="reply"], .prp-inline-thread__composer'));
+          (ae.matches?.(
+            'textarea, [contenteditable="true"], [data-prp-composer-input]'
+          ) ||
+            ae.closest?.(
+              '[data-prp-composer-kind="reply"], .prp-inline-thread__composer, .prp-inline-thread--context-active [data-prp-composer-root]'
+            ));
         const stamp =
-          document.documentElement.getAttribute('data-prp-last-shortcut-action') ||
+          document.documentElement.getAttribute(
+            'data-prp-last-shortcut-action'
+          ) ||
           document.documentElement.getAttribute('data-prp-shortcut-action') ||
           '';
-        const ta = document.querySelector(
-          '.prp-inline-thread--context-active textarea, .prp-inline-thread[data-context-active="1"] textarea, .prp-inline-thread__composer textarea'
-        );
+        const activeThread =
+          document.querySelector('.prp-inline-thread--context-active') ||
+          document.querySelector('.prp-inline-thread[data-context-active="1"]');
+        const ta =
+          activeThread?.querySelector?.(
+            'textarea, [contenteditable="true"], [data-prp-composer-input]'
+          ) || null;
+        const taFocused = !!(ta && document.activeElement === ta);
         return {
           inReply: Boolean(inReply),
           tag: ae?.tagName || null,
           stamp,
-          taFocused: ta && document.activeElement === ta,
-          contextActive: !!document.querySelector(
-            '.prp-inline-thread--context-active, .prp-inline-thread[data-context-active="1"]'
-          ),
+          taFocused,
+          contextActive: !!activeThread,
+          // Must NOT be stolen by keep-alive conversation footer
+          notComposerFocusInput: stamp !== 'composerFocusInput',
         };
       })()
     `);
     log(`  ⌥I focus: ${JSON.stringify(focused)}`);
+    // Hard: stamp must be thread comment path (or focus already in thread reply).
+    // contextActive alone is insufficient (broken ⌥I used to pass that way).
     assert(
-      focused?.inReply || focused?.taFocused || focused?.contextActive,
-      `⌥I did not focus reply composer: ${JSON.stringify(focused)}`
+      focused?.stamp === 'contextThreadComment' ||
+        focused?.stamp === 'focusedThreadComment' ||
+        (focused?.inReply && focused?.taFocused) ||
+        focused?.taFocused === true,
+      `⌥I must run contextThreadComment and focus reply input: ${JSON.stringify(focused)}`
+    );
+    assert(
+      focused?.notComposerFocusInput !== false &&
+        focused?.stamp !== 'composerFocusInput',
+      `⌥I stolen by conversation footer: ${JSON.stringify(focused)}`
     );
   });
 

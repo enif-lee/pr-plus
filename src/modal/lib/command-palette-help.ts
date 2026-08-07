@@ -146,7 +146,7 @@ export function listRequiredPaletteShortcutCoverage(
     },
     {
       id: 'context-thread-comment',
-      shortcut: 'opt+c',
+      shortcut: 'opt+i',
       action: 'contextThreadComment',
     },
     {

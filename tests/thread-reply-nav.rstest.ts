@@ -168,3 +168,44 @@ describe('CONTEXT_THREAD_SHORTCUT comment is ⌥I', () => {
     expect(up).toBe('moveSelectionUp');
   });
 });
+
+describe('monitor / palette labels match ⌥I for contextThreadComment', () => {
+  test('buildShortcutMonitorFire uses ⌥I', () => {
+    const mon =
+      require('../src/modal/lib/shortcut-monitor') as typeof import('../src/modal/lib/shortcut-monitor');
+    const fire = mon.buildShortcutMonitorFire('contextThreadComment', true);
+    expect(fire.shortcut).toMatch(/⌥I|Alt\+I/i);
+    expect(fire.shortcut).not.toMatch(/⌥C|Alt\+C/);
+  });
+
+  test('static palette/help/monitor source uses opt+i / ⌥I', () => {
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const root = path.join(__dirname, '..');
+    const build = fs.readFileSync(
+      path.join(root, 'src/modal/lib/command-palette-build.ts'),
+      'utf8'
+    );
+    const help = fs.readFileSync(
+      path.join(root, 'src/modal/lib/command-palette-help.ts'),
+      'utf8'
+    );
+    const mon = fs.readFileSync(
+      path.join(root, 'src/modal/lib/shortcut-monitor.ts'),
+      'utf8'
+    );
+    expect(build).toMatch(
+      /context-thread-comment[\s\S]{0,200}shortcut:\s*'opt\+i'/
+    );
+    expect(help).toMatch(
+      /context-thread-comment[\s\S]{0,120}shortcut:\s*'opt\+i'/
+    );
+    expect(mon).toMatch(
+      /contextThreadComment:\s*\{[\s\S]*?labelMac:\s*'⌥I'/
+    );
+    // No stale opt+c for the same action id in palette build
+    expect(build).not.toMatch(
+      /context-thread-comment[\s\S]{0,80}shortcut:\s*'opt\+c'/
+    );
+  });
+});

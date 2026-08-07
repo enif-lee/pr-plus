@@ -290,14 +290,13 @@ export function resolveModalShortcutAction(opts: any = {}) {
 
   /*
    * Context-thread shortcuts (Conversation focus or Diff comment nav):
-   *   ⌥F fold · ⌥D Diff · ⌥C comment (1st focus input, 2nd submit)
-   *   ⌥⌃R resolve / unresolve
-   * ⌥C allowed while the reply composer is focused (second stage).
+   *   ⌥F fold · ⌥D Diff · ⌥I open/focus reply · ⌥⌃R resolve / unresolve
+   * While typing in a reply composer, submit is ⌥C / ⌘↵ (composer context).
    *
    * ⌥F on Diff is special: **code-body** line selection → file fold; focused
    * review thread (⌥J/K or ↑↓ on thread) → thread fold. Thread/file carets are
    * not hasLineSelection. (contextThreadActive may be forced true on Diff so
-   * ⌥C/D seed the first thread — that force must not steal file fold.)
+   * ⌥I/D seed the first thread — that force must not steal file fold.)
    */
   if (contextThreadActive && alt && !shift) {
     if (ctrl && !mod && key === 'r') {

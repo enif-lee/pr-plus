@@ -57,13 +57,17 @@ export function isComposerKeyboardTarget(
  * Surface for composer-context chords (⌥C/I/T, ⌘↵).
  *
  * 1. Focused reply / selection / conversation composer → that surface.
- * 2. Else, if focus is not another editable, the main conversation footer
- *    composer (where Opt-hold tips always show, including collapsed ghost).
+ * 2. Else, if Conversation layout and focus is not another editable, the main
+ *    conversation footer composer (Opt-hold tips, including collapsed ghost).
+ * 3. On Diff, never claim the keep-alive conversation footer — it would steal
+ *    ⌥I from focused review threads (`contextThreadComment`).
  */
 export function findComposerShortcutSurface(opts: {
   activeElement?: Element | null;
   eventTarget?: EventTarget | null;
   doc?: Document | null;
+  /** When `diff`, skip keep-alive conversation footer default. */
+  layoutMode?: string | null;
 } = {}): {
   active: boolean;
   root: HTMLElement | null;
@@ -75,6 +79,7 @@ export function findComposerShortcutSurface(opts: {
   const ae = (opts.activeElement ||
     opts.eventTarget ||
     null) as HTMLElement | null;
+  const layout = String(opts.layoutMode || '').toLowerCase();
 
   if (ae && isComposerKeyboardTarget(ae)) {
     let mdc: HTMLElement | null = null;
@@ -101,6 +106,12 @@ export function findComposerShortcutSurface(opts: {
 
   // Typing outside a composer — do not steal for footer tips
   if (ae && isEditableKeyboardTarget(ae)) {
+    return { active: false, root: null, mdc: null };
+  }
+
+  // Diff keep-alive hosts Conversation's footer in the DOM; claiming it here
+  // makes ⌥I → composerFocusInput instead of contextThreadComment.
+  if (layout === 'diff') {
     return { active: false, root: null, mdc: null };
   }
 

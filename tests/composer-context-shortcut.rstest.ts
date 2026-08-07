@@ -188,6 +188,31 @@ describe('findComposerShortcutSurface', () => {
       input.remove();
     }
   });
+
+  test('layoutMode=diff never claims conversation footer (keep-alive steal)', () => {
+    if (typeof document === 'undefined') {
+      expect(true).toBe(true);
+      return;
+    }
+    const root = document.createElement('div');
+    root.setAttribute('data-prp-composer-root', '1');
+    root.setAttribute('data-prp-composer-kind', 'conversation');
+    const mdc = document.createElement('div');
+    mdc.setAttribute('data-prp-composer', '1');
+    root.appendChild(mdc);
+    document.body.appendChild(root);
+    try {
+      const surface = findComposerShortcutSurface({
+        activeElement: document.body,
+        doc: document,
+        layoutMode: 'diff',
+      });
+      expect(surface.active).toBe(false);
+      expect(surface.root).toBe(null);
+    } finally {
+      root.remove();
+    }
+  });
 });
 
 describe('isComposerKeyboardTarget', () => {

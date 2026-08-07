@@ -451,10 +451,10 @@ export function buildPaletteCommands(detail: any, opts: any = {}) {
     },
     {
       id: 'context-thread-comment',
-      title: 'Comment on focused thread (focus / submit)',
+      title: 'Comment on focused thread (focus reply)',
       section: 'Review',
-      keywords: ['comment', 'reply', 'submit', 'thread', 'context'],
-      shortcut: 'opt+c',
+      keywords: ['comment', 'reply', 'submit', 'thread', 'context', 'opt+i'],
+      shortcut: 'opt+i',
       action: 'contextThreadComment',
     },
     {

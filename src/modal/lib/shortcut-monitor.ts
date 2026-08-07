@@ -282,8 +282,8 @@ export const SHORTCUT_MONITOR_CATALOG: Record<string, ShortcutMonitorEntry> = {
   },
   contextThreadComment: {
     title: 'Comment on thread',
-    labelMac: '⌥C',
-    labelWin: 'Alt+C',
+    labelMac: '⌥I',
+    labelWin: 'Alt+I',
   },
   contextThreadResolve: {
     title: 'Resolve / unresolve',

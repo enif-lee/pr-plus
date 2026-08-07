@@ -629,11 +629,15 @@ function InlineThreadImpl(props: any) {
       reactions?: any[];
       nodeId?: string | null;
       pending?: boolean;
-    } | null
+    } | null,
+    /** Root-only Opt badges on multi-reply threads (same rule as action chrome). */
+    isRoot = true
   ) {
     if (isEditingId(id)) return null;
     if (comment?.pending) return null;
     if (typeof onToggleReaction !== 'function') return null;
+    // Replies never paint ⌥E OptBtnHint — only the root row does when focused.
+    const sc = Boolean(contextActive) && isRoot !== false;
     return (
       <CommentReactions
         reactions={comment?.reactions || []}
@@ -646,7 +650,7 @@ function InlineThreadImpl(props: any) {
         busy={actionBusy}
         onToggle={onToggleReaction}
         onLoadReactors={onLoadReactors}
-        showShortcutHint={Boolean(contextActive)}
+        showShortcutHint={sc}
         reactionShortcut={CONTEXT_COMMENT_ACTION_SHORTCUT.react.labelMac}
       />
     );
@@ -660,11 +664,14 @@ function InlineThreadImpl(props: any) {
       reactions = null,
       nodeId = null,
       pending = false,
+      isRoot = true,
     }: {
       canApplySuggestion?: boolean;
       reactions?: any[] | null;
       nodeId?: string | null;
       pending?: boolean;
+      /** Root-only Opt reaction hint on multi-reply threads */
+      isRoot?: boolean;
     } = {}
   ) {
     if (isEditingId(id)) {
@@ -708,11 +715,15 @@ function InlineThreadImpl(props: any) {
               : undefined
           }
         />
-        {renderCommentReactions(id, {
-          reactions: reactions || [],
-          nodeId,
-          pending,
-        })}
+        {renderCommentReactions(
+          id,
+          {
+            reactions: reactions || [],
+            nodeId,
+            pending,
+          },
+          isRoot
+        )}
       </>
     );
   }
@@ -938,6 +949,7 @@ function InlineThreadImpl(props: any) {
                             [],
                           nodeId: rootMinimizeMeta.nodeId,
                           pending: rootPending,
+                          isRoot: true,
                         })}
                       </>
                     ) : (
@@ -950,6 +962,7 @@ function InlineThreadImpl(props: any) {
                           [],
                         nodeId: rootMinimizeMeta.nodeId,
                         pending: rootPending,
+                        isRoot: true,
                       })
                     )}
                   </div>
@@ -1047,6 +1060,7 @@ function InlineThreadImpl(props: any) {
                               reactions: r.reactions || [],
                               nodeId: r.nodeId || null,
                               pending: isPending,
+                              isRoot: false,
                             })}
                           </>
                         ) : (
@@ -1054,6 +1068,7 @@ function InlineThreadImpl(props: any) {
                             reactions: r.reactions || [],
                             nodeId: r.nodeId || null,
                             pending: isPending,
+                            isRoot: false,
                           })
                         )}
                       </div>
@@ -1116,6 +1131,7 @@ function InlineThreadImpl(props: any) {
                               [],
                             nodeId: rootMinimizeMeta.nodeId,
                             pending: rootPending,
+                            isRoot: true,
                           })}
                     </>
                   ) : (
@@ -1128,6 +1144,7 @@ function InlineThreadImpl(props: any) {
                         [],
                       nodeId: rootMinimizeMeta.nodeId,
                       pending: rootPending,
+                      isRoot: true,
                     })
                   )}
                 </div>

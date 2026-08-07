@@ -7454,13 +7454,17 @@ export function PrModalApp({
         (typeof document !== 'undefined'
           ? (document.activeElement as HTMLElement | null)
           : null) || (e.target as HTMLElement | null);
-      // Footer tips stay visible without focus — default to conversation
-      // composer so ⌥C/I/T match the OptBtnHint badges on that form.
+      // Prefer live store layout so Diff keep-alive does not claim Conversation
+      // footer (would steal ⌥I from review-thread focus).
+      const liveLayoutForComposer =
+        useModalStore.getState().layoutMode || ui.layoutMode;
+      // Footer tips stay visible without focus on Conversation only.
       const composerSurface =
         typeof findComposerShortcutSurface === 'function'
           ? findComposerShortcutSurface({
               activeElement: aeForComposer,
               eventTarget: e.target,
+              layoutMode: liveLayoutForComposer,
             })
           : {
               active: isComposerKeyboardTarget(aeForComposer),
@@ -7500,7 +7504,8 @@ export function PrModalApp({
       }
 
       // Composer-context chords win over product peers when a surface is
-      // active (focused mdc OR default conversation footer).
+      // active (focused mdc OR Conversation footer). Exception: ⌥I while a
+      // review thread is keyboard-focused (not typing) → contextThreadComment.
       if (
         composerFocused &&
         !ui.paletteOpen &&
@@ -7517,7 +7522,35 @@ export function PrModalApp({
           canResolve: canResolveComposer,
           canToggleMode: canToggleModeComposer,
         });
-        if (composerAct) {
+        let takeComposerEarly = Boolean(composerAct);
+        if (
+          takeComposerEarly &&
+          composerAct === 'composerFocusInput' &&
+          !(
+            typeof isComposerKeyboardTarget === 'function' &&
+            isComposerKeyboardTarget(aeForComposer)
+          )
+        ) {
+          try {
+            const stc = useModalStore.getState();
+            const onDiffThread =
+              stc.layoutMode === LAYOUT_DIFF &&
+              (Number(stc.commentIndex) >= 0 ||
+                stc.activeDiffCommentId != null);
+            const convA = String(
+              stc.focusedConversationAnchor ||
+                stc.pendingConversationNavAnchor ||
+                ''
+            ).trim();
+            const onConvThread = convA.startsWith('review-comment:');
+            if (onDiffThread || onConvThread) {
+              takeComposerEarly = false;
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+        if (takeComposerEarly && composerAct) {
           e.preventDefault();
           e.stopPropagation();
           if (e.altKey) {
