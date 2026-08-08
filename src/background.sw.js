@@ -1790,11 +1790,13 @@ var __copyProps = (to, from, except, desc) => {
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 var stdin_exports = {};
 __export(stdin_exports, {
+  LOCKED_PR_START_REVIEW_MSG: () => LOCKED_PR_START_REVIEW_MSG,
   addPendingComment: () => addPendingComment,
   buildPendingReviewSubmitPayload: () => buildPendingReviewSubmitPayload,
   canPublishImmediateReviewComment: () => canPublishImmediateReviewComment,
   createEmptyPendingReview: () => createEmptyPendingReview,
   discardPendingReview: () => discardPendingReview,
+  formatStartReviewError: () => formatStartReviewError,
   pendingAttachCtaLabel: () => pendingAttachCtaLabel,
   pendingReviewCount: () => pendingReviewCount,
   pendingReviewCtaLabel: () => pendingReviewCtaLabel,
@@ -1831,6 +1833,12 @@ function addPendingComment(batch, comment) {
 }
 function discardPendingReview() {
   return createEmptyPendingReview();
+}
+const LOCKED_PR_START_REVIEW_MSG = "This pull request is locked \u2014 Start review / comments are disabled on GitHub.";
+function formatStartReviewError(err) {
+  const raw = err?.message || String(err || "");
+  const locked = /locked/i.test(raw) || Number(err?.status) === 422 && /lock/i.test(raw);
+  return locked ? LOCKED_PR_START_REVIEW_MSG : raw;
 }
 function setPendingReviewBody(batch, body) {
   const base = batch && Array.isArray(batch.comments) ? batch : createEmptyPendingReview();

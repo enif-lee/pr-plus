@@ -59,6 +59,10 @@ export {
   runReviewFilter,
 } from './review-filter.mjs';
 export {
+  getSteps as getLayoutShortcutIsolationSteps,
+} from './layout-shortcut-isolation.mjs';
+export { getSteps as getDiffGotoSteps } from './diff-goto.mjs';
+export {
   getSteps as getUiLocaleSteps,
   runUiLocale,
 } from './ui-locale.mjs';

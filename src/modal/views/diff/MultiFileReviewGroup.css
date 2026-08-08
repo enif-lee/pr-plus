@@ -56,6 +56,8 @@
   background: var(--prp-bg);
 }
 .prp-review-group__list .prp-review-group__row {
+  /* position for always-on full-unit outline (::after) */
+  position: relative;
   border-radius: 0;
   border: 0;
   border-bottom: 1px solid var(--prp-border-muted);
@@ -69,6 +71,32 @@
 }
 .prp-review-group__list .prp-review-group__row--open {
   background: var(--prp-bg);
+}
+/*
+ * Conversation spec: thread unit outline is ALWAYS drawn for open nested
+ * path rows (header + body), independent of comment unit-focus / kb-focus.
+ * ::after inset:0 guarantees full unit height (not header strip only).
+ */
+.prp-review-group__list .prp-review-group__row--open::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--prp-border, rgba(31, 35, 40, 0.22));
+  border-radius: 0;
+  pointer-events: none;
+  z-index: 4;
+  box-sizing: border-box;
+}
+/* Collapsed path rows: thin unit chrome around header-only box */
+.prp-review-group__list
+  .prp-review-group__row:not(.prp-review-group__row--open)::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1px solid transparent;
+  pointer-events: none;
+  z-index: 4;
+  box-sizing: border-box;
 }
 .prp-review-group__list .prp-review-group__row-btn {
   min-height: 32px;

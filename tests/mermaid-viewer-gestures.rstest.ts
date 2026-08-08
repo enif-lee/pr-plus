@@ -118,7 +118,7 @@ describe('viewer wiring (static shipped sources)', () => {
     const path = await import('node:path');
     const root = path.resolve(__dirname, '..');
     const app = fs.readFileSync(
-      path.join(root, 'src/modal/app/PrModalApp.impl.tsx'),
+      path.join(root, 'src/modal/app/PrModalShell.tsx'),
       'utf8'
     );
     expect(app).toMatch(/data-prp-mermaid-viewer/);

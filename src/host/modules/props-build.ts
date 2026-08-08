@@ -252,28 +252,77 @@
             let detail = raw;
             // Prefer live on-screen threads (may include early-fetched newest)
             // over stale prevDetail when network core has empty comments.
+            // Never re-seed discarded PENDING when network has no viewer PENDING.
             const threadSrc =
               current.detail &&
               Array.isArray(current.detail.reviewComments) &&
               current.detail.reviewComments.length
                 ? current.detail
                 : prevDetail;
-            if (
-              threadSrc &&
-              Array.isArray(threadSrc.reviewComments) &&
-              threadSrc.reviewComments.length &&
-              (!Array.isArray(detail.reviewComments) ||
-                !detail.reviewComments.length)
-            ) {
-              detail = {
-                ...detail,
-                reviewComments: threadSrc.reviewComments,
-                reviewThreads: threadSrc.reviewThreads || detail.reviewThreads,
-                reviewThreadsMeta:
-                  threadSrc.reviewThreadsMeta || detail.reviewThreadsMeta,
-                reviewCommentsMeta:
-                  threadSrc.reviewCommentsMeta || detail.reviewCommentsMeta,
-              };
+            const pureStore =
+              typeof globalThis !== 'undefined'
+                ? (globalThis as any).PRModalDetailStore
+                : null;
+            const netRc = Array.isArray(detail.reviewComments)
+              ? detail.reviewComments
+              : [];
+            const srcRc =
+              threadSrc && Array.isArray(threadSrc.reviewComments)
+                ? threadSrc.reviewComments
+                : [];
+            if (threadSrc && srcRc.length && netRc.length) {
+              const mergeFn =
+                typeof pureStore?.mergeCommentsHostFirst === 'function'
+                  ? pureStore.mergeCommentsHostFirst
+                  : null;
+              if (mergeFn) {
+                detail = {
+                  ...detail,
+                  reviewComments: mergeFn(netRc, srcRc, {
+                    hostAuthoritative: true,
+                    networkDetail: detail,
+                  }),
+                };
+              }
+            } else if (threadSrc && srcRc.length && !netRc.length) {
+              const netHasPending =
+                typeof pureStore?.detailHasViewerPending === 'function'
+                  ? pureStore.detailHasViewerPending(detail)
+                  : Boolean(detail?.viewerPendingReview?.id);
+              // After Discard / when network has no PENDING: do not reinject
+              if (netHasPending) {
+                const filterFn =
+                  typeof pureStore?.filterCacheReviewCommentsForCore ===
+                  'function'
+                    ? pureStore.filterCacheReviewCommentsForCore
+                    : null;
+                const cleanedRc = filterFn
+                  ? filterFn(srcRc, {
+                      ...detail,
+                      _deletedReviewCommentIds: [
+                        ...(Array.isArray(detail?._deletedReviewCommentIds)
+                          ? detail._deletedReviewCommentIds
+                          : []),
+                        ...(Array.isArray(threadSrc?._deletedReviewCommentIds)
+                          ? threadSrc._deletedReviewCommentIds
+                          : []),
+                      ],
+                    })
+                  : srcRc.filter((c) => c && c.id != null);
+                if (cleanedRc.length) {
+                  detail = {
+                    ...detail,
+                    reviewComments: cleanedRc,
+                    reviewThreads:
+                      threadSrc.reviewThreads || detail.reviewThreads,
+                    reviewThreadsMeta:
+                      threadSrc.reviewThreadsMeta || detail.reviewThreadsMeta,
+                    reviewCommentsMeta:
+                      threadSrc.reviewCommentsMeta ||
+                      detail.reviewCommentsMeta,
+                  };
+                }
+              }
             }
             if (prevDetail && Array.isArray(prevDetail.files) && prevDetail.files.length) {
               const netFiles = Array.isArray(detail.files) ? detail.files : [];

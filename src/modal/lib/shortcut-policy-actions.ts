@@ -407,6 +407,13 @@ export function resolveModalShortcutAction(opts: any = {}) {
     return FILE_FOLD_SHORTCUT.action;
   }
 
+  // ⌥G: open Diff Goto floating file jump (not ⌥⇧G refresh)
+  if (alt && !mod && !ctrl && !shift && key === 'g') {
+    if (opts.editableTarget) return null;
+    if (layout !== 'diff') return null;
+    return 'openDiffGoto';
+  }
+
   // ⌥J / ⌥K: step prev/next — Find hits, Diff review threads, or Conversation comments.
   // Allowed while Find input is focused (searchOpen); blocked for other editables.
   if (alt && !mod && !ctrl && !shift && (key === 'j' || key === 'k')) {

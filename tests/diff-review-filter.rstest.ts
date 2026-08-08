@@ -169,7 +169,7 @@ describe('normalize + multi-status', () => {
 
   test('jump-widen path in App uses unrestricted not default', () => {
     const app = readFileSync(
-      resolve(root, 'src/modal/app/PrModalApp.impl.tsx'),
+      resolve(root, 'src/modal/app/PrModalShell.tsx'),
       'utf8'
     );
     expect(app).toMatch(/createUnrestrictedDiffReviewFilter/);
@@ -337,7 +337,7 @@ describe('product wiring structure', () => {
 
   test('PrModalApp defaults to createDefaultDiffReviewFilter', () => {
     const app = readFileSync(
-      resolve(root, 'src/modal/app/PrModalApp.impl.tsx'),
+      resolve(root, 'src/modal/app/PrModalShell.tsx'),
       'utf8'
     );
     expect(app).toMatch(/createDefaultDiffReviewFilter/);
@@ -349,7 +349,7 @@ describe('product wiring structure', () => {
 
   test('PrModalApp schedules filter writes via startTransition (not urgent-only)', () => {
     const app = readFileSync(
-      resolve(root, 'src/modal/app/PrModalApp.impl.tsx'),
+      resolve(root, 'src/modal/app/PrModalShell.tsx'),
       'utf8'
     );
     expect(app).toMatch(/startTransition/);

@@ -328,11 +328,16 @@
   z-index: 50;
 }
 
-/* Fixed portal — escapes overflow:hidden on cards / virtual list */
+/* Fixed portal — escapes overflow:hidden on cards / virtual list.
+ * top/left/width come from JS (textarea rect); neutralize absolute defaults. */
 .prp-composer-menu--portal {
-  position: fixed;
-  right: auto;
-  top: auto;
+  position: fixed !important;
+  left: auto;
+  right: auto !important;
+  top: auto !important;
+  bottom: auto !important;
+  margin: 0;
+  transform: none !important;
   z-index: var(--prp-z-tip, 100020);
   max-height: min(280px, 40vh);
   box-shadow:

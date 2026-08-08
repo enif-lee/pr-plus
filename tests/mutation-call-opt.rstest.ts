@@ -162,10 +162,10 @@ describe('stampThreadResolved (shipped pure)', () => {
 });
 
 describe('post-mutation success paths: no full soft-refresh (source contract)', () => {
-  // Mutations live in pr-modal-mutations.ts (wired from PrModalApp.impl).
-  const mutations = read('src/modal/app/pr-modal-mutations.ts');
+  // Mutations live in commands/domain-mutations.ts (wired from PrModalShell).
+  const mutations = read('src/modal/commands/domain-mutations.ts');
   const palette = read('src/modal/app/pr-modal-run-palette.ts');
-  const appShell = read('src/modal/app/PrModalApp.impl.tsx');
+  const appShell = read('src/modal/app/PrModalShell.tsx');
 
   /**
    * Extract a function body by name. Skips default-param object literals
@@ -210,7 +210,7 @@ describe('post-mutation success paths: no full soft-refresh (source contract)', 
     throw new Error(`unclosed ${name}`);
   }
 
-  test('App shell still wires mutation handlers from pr-modal-mutations', () => {
+  test('App shell still wires mutation handlers from commands/*', () => {
     expect(appShell).toMatch(/applySetLabels/);
     expect(appShell).toMatch(/onResolveThread/);
     expect(appShell).toMatch(/onEditTitle/);
@@ -219,8 +219,9 @@ describe('post-mutation success paths: no full soft-refresh (source contract)', 
   test('onResolveThread stamps via stampThreadResolved + patchHostDetail after API; no onRefresh', () => {
     const body = extractFn(mutations, 'onResolveThread');
     expect(body).toMatch(/stampThreadResolved/);
-    expect(body).toMatch(/patchHostDetail/);
-    expect(body).toMatch(/reviewComments/);
+    // Host write via applyDomainDetail → patchHostDetail (no localDetail SoT)
+    expect(body).toMatch(/applyDomainDetail|patchHostDetail/);
+    expect(body).toMatch(/reviewComments|stamp\(/);
     expect(body).not.toMatch(/onRefresh/);
     // Pessimistic: await resolve before applyStamp paint
     expect(body.indexOf('await api.resolveReviewThread')).toBeLessThan(
@@ -234,7 +235,7 @@ describe('post-mutation success paths: no full soft-refresh (source contract)', 
     expect(body).toMatch(/refreshTimelineEvents/);
     expect(body).not.toMatch(/onRefresh/);
     expect(body.indexOf('await api.updatePullRequest')).toBeLessThan(
-      body.indexOf('setLocalDetail')
+      body.indexOf('applyDomainDetail')
     );
   });
 
@@ -243,7 +244,7 @@ describe('post-mutation success paths: no full soft-refresh (source contract)', 
     expect(body).toMatch(/patchHostDetail\(\{\s*body/);
     expect(body).not.toMatch(/onRefresh/);
     expect(body.indexOf('await api.updatePullRequest')).toBeLessThan(
-      body.indexOf('setLocalDetail')
+      body.indexOf('applyDomainDetail')
     );
   });
 

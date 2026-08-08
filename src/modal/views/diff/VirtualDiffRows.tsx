@@ -169,7 +169,9 @@ export function FileHeaderRow(props: {
       className={`prp-vline prp-vline--header prp-vline--header-${headerTone}${
         !openable ? ' prp-vline--header-binary' : ''
       }${focused ? ' prp-vline--header-focus' : ''}${
-        selected ? ' prp-vline--header-selected' : ''
+        selected
+          ? ' prp-vline--header-selected prp-vline--selected prp-vline--sel-only'
+          : ''
       }${searchRowClass}`}
       style={{ height: ROW_HEIGHT, ...style }}
       data-row-index={sticky ? undefined : row.rowIndex}

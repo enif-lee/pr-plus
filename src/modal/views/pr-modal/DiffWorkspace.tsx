@@ -17,6 +17,7 @@ import {
   useSelectionIslandGroup,
 } from '../../store/data-groups';
 import { useModalStore } from '../../store/modal-store';
+import { useDomainDetail } from '../../app/domain-detail-context';
 import '../diff/DiffLayout.css';
 
 export type DiffWorkspaceProps = {
@@ -156,6 +157,7 @@ export type DiffWorkspaceProps = {
 };
 
 export function DiffWorkspace(p: DiffWorkspaceProps) {
+  const domainDetail = useDomainDetail();
   // Leaf data groups — typing / scroll metrics re-render this shell only, not PrModalApp.
   const scrollMetrics = useScrollMetricsGroup();
   const selectionIsland = useSelectionIslandGroup();
@@ -191,7 +193,7 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
     activeFileNavIndex,
     navFile,
     onFileNavResizeStart,
-    detail,
+    detail: detailProp,
     virtualRows,
     diffFilesOverride,
     diffReviewFilter,
@@ -291,6 +293,7 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
     setSelectionIslandPhase,
     setActionMsg,
   } = p;
+  const detail = detailProp ?? domainDetail;
 
   const scrollTop =
     scrollTopProp != null && Number.isFinite(Number(scrollTopProp))
@@ -465,6 +468,7 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
           onPrevPage={() => scrollDiffPage(-1)}
           onNextPage={() => scrollDiffPage(1)}
           onGoto={(q: string) => applyGotoQuery(q)}
+          files={displayFiles || reviewScopedFiles || null}
           isMac={
             typeof navigator !== 'undefined' &&
             /Mac|iPhone|iPad/.test(navigator.platform || '')

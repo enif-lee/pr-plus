@@ -196,7 +196,7 @@ describe('deep-link restore wiring (static)', () => {
     const path = require('node:path');
     const root = path.join(__dirname, '..');
     const app = fs.readFileSync(
-      path.join(root, 'src/modal/app/PrModalApp.impl.tsx'),
+      path.join(root, 'src/modal/app/PrModalShell.tsx'),
       'utf8'
     );
     const vcl = fs.readFileSync(
@@ -217,7 +217,7 @@ describe('deep-link restore wiring (static)', () => {
     const fs = require('node:fs');
     const path = require('node:path');
     const app = fs.readFileSync(
-      path.join(__dirname, '..', 'src/modal/app/PrModalApp.impl.tsx'),
+      path.join(__dirname, '..', 'src/modal/app/PrModalShell.tsx'),
       'utf8'
     );
     // After appendIssueCommentToDetail / commitCommentListPatch, leaveReview must

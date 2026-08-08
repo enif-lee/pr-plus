@@ -532,7 +532,13 @@ function waitPred(fn, pred, ms = 12000, step = 350) {
 function selectionRowSnap() {
   return evalInPage(`
     (() => {
-      const selected = [...document.querySelectorAll('.prp-vline--selected')];
+      const selected = [
+        ...new Set([
+          ...document.querySelectorAll(
+            '.prp-vline--selected, .prp-vline--header-selected, [data-file-selected="1"]'
+          ),
+        ]),
+      ];
       const parse = (el) => {
         const ri = Number(el.getAttribute('data-row-index'));
         const top = el.getBoundingClientRect?.()?.top ?? 0;
@@ -694,29 +700,38 @@ export function getSteps() {
     setLayout('diff');
     blurEditable();
     waitDiffFilesReady(`SD3 #${MULTI_HUNK_PR} Diff ready`);
-    let clicked = clickSelectableLine(1);
+    // Seed mid-file so Shift+↓ has room; re-click until paint sticks (post-Esc).
+    let clicked = clickSelectableLine(4);
     assert(clicked?.ok, `clickSelectableLine failed: ${JSON.stringify(clicked)}`);
     waitMs(200);
     press('Escape');
     waitMs(120);
-    clicked = clickSelectableLine(2);
-    waitMs(200);
-    if ((selectionProbe().count || 0) < 1) {
-      clicked = clickSelectableLine(4);
-      waitMs(250);
+    let seedProbe = selectionProbe();
+    for (const idx of [5, 6, 3, 8, 2]) {
+      if ((seedProbe.count || 0) >= 1) break;
+      clicked = clickSelectableLine(idx);
+      waitMs(280);
+      seedProbe = selectionProbe();
     }
+    assert(
+      (seedProbe.count || 0) >= 1,
+      `no selection seed after clicks: ${JSON.stringify({ seedProbe, clicked })}`
+    );
     // Move mid-file so hold has room (only after selection is painted)
-    if ((selectionProbe().count || 0) >= 1) {
-      press('ArrowDown');
-      waitMs(80);
-      press('ArrowDown');
-      waitMs(120);
+    press('ArrowDown');
+    waitMs(100);
+    press('ArrowDown');
+    waitMs(150);
+    // If arrows cleared paint (edge/header), re-seed once without more arrows
+    if ((selectionProbe().count || 0) < 1) {
+      clicked = clickSelectableLine(6);
+      waitMs(300);
     }
     const before = selectionRowSnap();
     const beforeProbe = selectionProbe();
     log(`  before hold: ${JSON.stringify({ before, beforeProbe, clicked })}`);
     assert(
-      before.count >= 1 || beforeProbe.count >= 1 || (clicked?.selected || 0) >= 1,
+      before.count >= 1 || beforeProbe.count >= 1,
       `no selection seed before hold: ${JSON.stringify({ before, beforeProbe, clicked })}`
     );
 
@@ -745,28 +760,48 @@ export function getSteps() {
           const b = lines[Math.min(14, lines.length - 1)] || lines[lines.length - 1];
           if (!a || !b) return { ok: false, n: lines.length };
           a.scrollIntoView({ block: 'center' });
-          a.click();
-          const rect = b.getBoundingClientRect();
-          const opts = {
-            bubbles: true,
-            cancelable: true,
-            clientX: rect.left + 20,
-            clientY: rect.top + rect.height / 2,
-            button: 0,
-            buttons: 1,
-            shiftKey: true,
+          const fire = (el, shift) => {
+            const rect = el.getBoundingClientRect();
+            const opts = {
+              bubbles: true,
+              cancelable: true,
+              clientX: rect.left + 20,
+              clientY: rect.top + rect.height / 2,
+              button: 0,
+              buttons: 1,
+              shiftKey: Boolean(shift),
+            };
+            el.dispatchEvent(
+              new PointerEvent('pointerdown', {
+                ...opts,
+                pointerId: 1,
+                pointerType: 'mouse',
+              })
+            );
+            el.dispatchEvent(new MouseEvent('mousedown', opts));
+            el.dispatchEvent(
+              new PointerEvent('pointerup', {
+                ...opts,
+                pointerId: 1,
+                pointerType: 'mouse',
+                buttons: 0,
+              })
+            );
+            el.dispatchEvent(new MouseEvent('mouseup', { ...opts, buttons: 0 }));
+            el.dispatchEvent(new MouseEvent('click', { ...opts, buttons: 0 }));
           };
-          b.dispatchEvent(new MouseEvent('mousedown', opts));
-          b.dispatchEvent(new MouseEvent('mouseup', { ...opts, buttons: 0 }));
-          b.dispatchEvent(new MouseEvent('click', { ...opts, buttons: 0 }));
+          fire(a, false);
+          fire(b, true);
           return {
             ok: true,
             n: lines.length,
-            selected: document.querySelectorAll('.prp-vline--selected').length,
+            selected: document.querySelectorAll(
+              '.prp-vline--selected, .prp-vline--header-selected'
+            ).length,
           };
         })()
       `);
-      waitMs(300);
+      waitMs(400);
       after = selectionRowSnap();
       afterProbe = selectionProbe();
       log(`  shift-click multi fallback: ${JSON.stringify({ shiftClick, after, afterProbe })}`);

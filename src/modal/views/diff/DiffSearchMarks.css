@@ -25,16 +25,65 @@
   box-shadow: inset 0 0 0 3px color-mix(in srgb, #fbbf24 35%, transparent);
 }
 /*
- * Keyboard focus (⌥J/K · ⌥⇧C): outer thread / group container only
- * (includes file-name header). Internal comment bodies are not ringed.
- * Strong ring on land → settle to a softer border (restarts each nav).
+ * Keyboard focus (⌥J/K · ⌥⇧C): single owner ring on the stop container.
+ * Inset outline + box-shadow only (no second outer outline from host CSS).
+ * Strong ring on land → settle softer (restarts each nav).
+ *
+ * Geometry: paint on the same box that draws the card chrome.
+ *  - .prp-card → 10px (AsideRail .prp-card)
+ *  - review-group path row → full <li> (header + open body), square
+ *  - merge/composer hosts → ring the *child* box (host may include margins)
  */
 .prp-card--kb-focus,
 .prp-review-group__row--kb-focus {
   outline: 2px solid var(--prp-accent, #0969da);
   outline-offset: -2px;
-  box-shadow: inset 0 0 0 3px
-    color-mix(in srgb, var(--prp-accent, #0969da) 42%, transparent);
+  box-shadow: inset 0 0 0 2px
+    color-mix(in srgb, var(--prp-accent, #0969da) 28%, transparent);
+  border-radius: inherit;
+  position: relative;
+  z-index: 1;
+  animation: prp-kb-focus-settle 720ms ease forwards;
+}
+/* Match .prp-card { border-radius: 10px } — not tokens --prp-radius (12px) */
+.prp-card.prp-card--kb-focus {
+  border-radius: 10px;
+}
+/*
+ * Merge host wraps MergeBox (rounded-xl + vertical margin). Ring the painted
+ * merge box so outline matches the visible surface, not the margin box.
+ */
+.prp-merge-box-focus-host.prp-card--kb-focus {
+  outline: none !important;
+  box-shadow: none !important;
+  animation: none !important;
+  border-radius: 0;
+}
+.prp-merge-box-focus-host.prp-card--kb-focus > .prp-merge-box {
+  outline: 2px solid var(--prp-accent, #0969da);
+  outline-offset: -2px;
+  box-shadow: inset 0 0 0 2px
+    color-mix(in srgb, var(--prp-accent, #0969da) 28%, transparent);
+  /* Tailwind rounded-xl on MergeBox */
+  border-radius: 0.75rem;
+  position: relative;
+  z-index: 1;
+  animation: prp-kb-focus-settle 720ms ease forwards;
+}
+/*
+ * Composer host wraps .prp-card--composer (10px). Ring the card, not host.
+ */
+.prp-composer-focus-host.prp-card--kb-focus {
+  outline: none !important;
+  box-shadow: none !important;
+  animation: none !important;
+  border-radius: 0;
+}
+.prp-composer-focus-host.prp-card--kb-focus > .prp-card {
+  outline: 2px solid var(--prp-accent, #0969da);
+  outline-offset: -2px;
+  box-shadow: inset 0 0 0 2px
+    color-mix(in srgb, var(--prp-accent, #0969da) 28%, transparent);
   border-radius: 10px;
   position: relative;
   z-index: 1;
@@ -44,24 +93,106 @@
   0% {
     outline-color: var(--prp-accent, #0969da);
     box-shadow: inset 0 0 0 3px
-      color-mix(in srgb, var(--prp-accent, #0969da) 48%, transparent);
+      color-mix(in srgb, var(--prp-accent, #0969da) 42%, transparent);
   }
   100% {
     outline-color: color-mix(
       in srgb,
-      var(--prp-accent, #0969da) 42%,
+      var(--prp-accent, #0969da) 55%,
       transparent
     );
     box-shadow: inset 0 0 0 2px
-      color-mix(in srgb, var(--prp-accent, #0969da) 16%, transparent);
+      color-mix(in srgb, var(--prp-accent, #0969da) 18%, transparent);
   }
 }
-/* Thread rows inside a review-group list (square corners match list chrome) */
+/*
+ * Nested review-group path rows (Conversation):
+ * Structural full-unit outline is always-on via MultiFileReviewGroup ::after.
+ * Kb-focus only upgrades that same full-unit box to accent (never header-only,
+ * never a second ring on the inner comment card).
+ */
 .prp-review-group__list .prp-review-group__row--kb-focus {
   border-radius: 0;
-  /* list uses overflow:hidden — keep ring inside */
-  outline-offset: -2px;
+  /* Ring is on ::after (full unit); host outline off to avoid double paint */
+  outline: none !important;
+  box-shadow: none !important;
+  animation: none !important;
   z-index: 2;
+  overflow: hidden;
+  isolation: isolate;
+}
+.prp-review-group__list .prp-review-group__row--kb-focus::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 2px solid var(--prp-accent, #0969da);
+  border-radius: 0;
+  pointer-events: none;
+  z-index: 5;
+  box-sizing: border-box;
+  box-shadow: inset 0 0 0 2px
+    color-mix(in srgb, var(--prp-accent, #0969da) 28%, transparent);
+  animation: prp-kb-focus-settle-border 720ms ease forwards;
+}
+@keyframes prp-kb-focus-settle-border {
+  0% {
+    border-color: var(--prp-accent, #0969da);
+    box-shadow: inset 0 0 0 3px
+      color-mix(in srgb, var(--prp-accent, #0969da) 42%, transparent);
+  }
+  100% {
+    border-color: color-mix(
+      in srgb,
+      var(--prp-accent, #0969da) 55%,
+      transparent
+    );
+    box-shadow: inset 0 0 0 2px
+      color-mix(in srgb, var(--prp-accent, #0969da) 18%, transparent);
+  }
+}
+/* Never stack a second ring on nested thread cards inside a focused path row */
+.prp-review-group__row--kb-focus .prp-card--kb-focus,
+.prp-review-group__row--kb-focus .prp-card--search-current,
+.prp-review-group__row--kb-focus .prp-conversation-inline-thread {
+  outline: none !important;
+  box-shadow: none !important;
+  animation: none !important;
+}
+/*
+ * Minimized / off-topic compact host: painted chrome is 6px on the banner.
+ * Ring the banner child so outline radius matches (host has no radius).
+ */
+.prp-comment-minimized-card.prp-card--kb-focus,
+.prp-card--minimized-only.prp-card--kb-focus {
+  outline: none !important;
+  box-shadow: none !important;
+  animation: none !important;
+  border-radius: 0;
+}
+.prp-comment-minimized-card.prp-card--kb-focus > .prp-comment-minimized,
+.prp-card--minimized-only.prp-card--kb-focus > .prp-comment-minimized {
+  outline: 2px solid var(--prp-accent, #0969da);
+  outline-offset: -2px;
+  box-shadow: inset 0 0 0 2px
+    color-mix(in srgb, var(--prp-accent, #0969da) 28%, transparent);
+  border-radius: 6px;
+  position: relative;
+  z-index: 1;
+  animation: prp-kb-focus-settle 720ms ease forwards;
+}
+/*
+ * Standalone conversation review-thread shells always keep unit chrome;
+ * kb-focus only elevates border color (thread outline never disappears when
+ * an inner comment unit is focused).
+ */
+.prp-conversation-inline-thread.prp-card--kb-focus {
+  border-color: var(--prp-accent, #0969da);
+  outline: 2px solid var(--prp-accent, #0969da);
+  outline-offset: -2px;
+  box-shadow: inset 0 0 0 2px
+    color-mix(in srgb, var(--prp-accent, #0969da) 28%, transparent);
+  border-radius: 10px;
+  animation: prp-kb-focus-settle 720ms ease forwards;
 }
 .prp-review-thread__item--search-match {
   background: color-mix(in srgb, #eab308 10%, transparent);
@@ -364,10 +495,11 @@ kbd.prp-modal-hotkey {
   line-height: 1;
   transform: translateY(-0.04em);
 }
-/* Fixed portal — placement matches TipPopover transforms */
+/* Fixed portal — placement matches TipPopover transforms.
+ * Default below SearchableSelect portal (120000) so meta pickers win stacking. */
 .prp-opt-btn-hint--fixed {
   position: fixed;
-  z-index: var(--prp-z-dialog, 100100);
+  z-index: var(--prp-z-tip, 100020);
 }
 .prp-opt-btn-hint--top {
   transform: translate(-50%, -100%);

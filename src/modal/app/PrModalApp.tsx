@@ -1,5 +1,5 @@
 /**
- * PR modal entry — re-exports complete implementation SoT.
- * SoT: ./PrModalApp.impl.tsx
+ * PR modal public entry — shell composition (Phase 7).
+ * SoT: ./PrModalShell.tsx
  */
-export { PrModalApp, default } from './PrModalApp.impl';
+export { default, PrModalApp } from './PrModalShell';

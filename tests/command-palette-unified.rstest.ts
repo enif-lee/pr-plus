@@ -436,7 +436,7 @@ describe('open-PR action path (shipped runner contract)', () => {
     const openStackOrListPr = (num: number) => {
       opened.push(num);
     };
-    // Exact branch body used in PrModalApp.impl.tsx runPaletteCommand
+    // Exact branch body used in PrModalShell.tsx runPaletteCommand
     if (cmd.action === 'openPullRequest') {
       const num = Number(cmd.payload?.number ?? cmd.number);
       if (Number.isFinite(num) && num > 0) openStackOrListPr(num);

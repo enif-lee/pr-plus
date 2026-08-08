@@ -46,7 +46,7 @@ describe('product wiring', () => {
 
   test('App displayFiles uses commented filter not review-status file scope', () => {
     const app = readFileSync(
-      resolve(root, 'src/modal/app/PrModalApp.impl.tsx'),
+      resolve(root, 'src/modal/app/PrModalShell.tsx'),
       'utf8'
     );
     expect(app).toMatch(/filterFilesCommentedOnly/);

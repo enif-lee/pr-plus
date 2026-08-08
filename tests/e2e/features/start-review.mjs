@@ -428,6 +428,38 @@ function waitPendingCount(min = 1, ms = 12000) {
   return last;
 }
 
+/** Pending-only threads / badges left in the modal after Discard (cache ghosts). */
+function pendingUiProbe() {
+  return evalInPage(`
+    (() => {
+      const pendingThreads = [
+        ...document.querySelectorAll(
+          '.prp-inline-thread--pending, [data-pending="1"], .prp-inline-thread[data-pending="1"]'
+        ),
+      ].length;
+      const pendingBadges = [...document.querySelectorAll('.prp-badge, [class*="Badge"]')]
+        .filter((el) => /pending/i.test(el.textContent || ''))
+        .length;
+      const markHits = [
+        ...document.querySelectorAll(
+          '.prp-inline-thread, .prp-timeline-item, [data-prp-thread-unit]'
+        ),
+      ].filter((el) =>
+        (el.textContent || '').includes(${JSON.stringify(MARK)})
+      ).length;
+      const latched = document.documentElement.getAttribute(
+        'data-prp-pending-review-node'
+      );
+      return {
+        pendingThreads,
+        pendingBadges,
+        markHits,
+        latched: latched || null,
+      };
+    })()
+  `);
+}
+
 /**
  * @returns {import('../lib/e2e-register.ts').E2eStep[]}
  */
@@ -437,6 +469,8 @@ export function getSteps() {
   const run = (name, fn) => {
     steps.push({ name, fn });
   };
+  /** Set true once SR.2/SR.3 create PENDING — SR.4 must not soft-pass deletion. */
+  let sessionCreatedPending = false;
 
   run(`SR.0 open PR #${TARGET_PR} Diff (unlocked)`, () => {
     // Pick up SW/fetch after rebuild (attach path + pendingReviewNodeId latch)
@@ -580,6 +614,7 @@ export function getSteps() {
         post.hasAddComment,
       `Start review did not create PENDING: pend=${JSON.stringify(pend)} island=${JSON.stringify(post)} msg=${JSON.stringify(msgEnd)} toast=${JSON.stringify(lastToast)}`
     );
+    sessionCreatedPending = true;
   });
   run('SR.3 Add comment; Comment CTA hidden; Add comment present', () => {
     assert(overlayOpen(), 'shell closed before SR.3');
@@ -704,8 +739,9 @@ export function getSteps() {
       dismissed || toastOk || countUp,
       `Add comment did not complete: need island dismiss and/or "Added to pending" toast and/or pendingCount increase (before=${pendingBeforeN}). pend=${JSON.stringify(pend)} toast=${JSON.stringify(lastToast)} dismissed=${dismissed}`
     );
+    sessionCreatedPending = true;
   });
-  run('SR.4 Discard pending review (no submit/finish)', () => {
+  run('SR.4 Discard pending review (no submit/finish) + hard deletion asserts', () => {
     assert(overlayOpen(), 'shell closed before SR.4');
     // Close any open island
     press('Escape');
@@ -715,43 +751,168 @@ export function getSteps() {
     blurEditable();
 
     const before = pendingToolbarProbe();
+    const ghBefore = ghPendingReviews(TARGET_PR);
+    const latchBefore = evalInPage(
+      `document.documentElement.getAttribute('data-prp-pending-review-node')`
+    );
     log(`  pending before discard: ${JSON.stringify(before)}`);
-    if ((before.pendingCount || 0) < 1 && !before.hasCountBadge) {
-      log('  no pending to discard — soft-pass cleanup');
+    log(`  gh PENDING before discard: ${JSON.stringify(ghBefore)}`);
+    log(`  latch before discard: ${JSON.stringify(latchBefore)}`);
+
+    // Earlier Start/Add must leave verifiable PENDING — never soft-pass away deletion.
+    if (sessionCreatedPending) {
+      assert(
+        (before.pendingCount || 0) >= 1 ||
+          before.hasCountBadge ||
+          (Array.isArray(ghBefore) && ghBefore.length > 0) ||
+          !!latchBefore,
+        `SR.4 expected PENDING from Start+Add but none found (cannot verify delete): toolbar=${JSON.stringify(before)} gh=${JSON.stringify(ghBefore)} latch=${JSON.stringify(latchBefore)}`
+      );
+    } else if ((before.pendingCount || 0) < 1 && !before.hasCountBadge) {
+      log('  no pending to discard and session did not create PENDING — skip');
       return;
     }
+
     const d = discardPendingViaFinish();
     log(`  discard: ${JSON.stringify(d)}`);
     assert(d?.ok, `Discard failed: ${JSON.stringify(d)}`);
 
+    // Wait for toolbar + server + latch + UI pending ghosts to clear
     const t0 = Date.now();
     let after = pendingToolbarProbe();
-    while (Date.now() - t0 < 10000) {
+    let ghAfter = ghPendingReviews(TARGET_PR);
+    let uiAfter = pendingUiProbe();
+    while (Date.now() - t0 < 12000) {
       after = pendingToolbarProbe();
-      if ((after.pendingCount || 0) === 0 && !after.hasCountBadge) break;
-      waitMs(300);
+      ghAfter = ghPendingReviews(TARGET_PR);
+      uiAfter = pendingUiProbe();
+      const toolbarClear =
+        (after.pendingCount || 0) === 0 && !after.hasCountBadge;
+      const serverClear =
+        !Array.isArray(ghAfter) || ghAfter.length === 0;
+      const latchClear = !uiAfter.latched;
+      const uiClear =
+        (uiAfter.pendingThreads || 0) === 0 && (uiAfter.markHits || 0) === 0;
+      if (toolbarClear && serverClear && latchClear && uiClear) break;
+      waitMs(350);
     }
     log(`  pending after discard: ${JSON.stringify(after)}`);
+    log(`  gh PENDING after discard: ${JSON.stringify(ghAfter)}`);
+    log(`  ui after discard: ${JSON.stringify(uiAfter)}`);
+
+    // (a) Toolbar pending count/badge cleared
     assert(
       (after.pendingCount || 0) === 0 && !after.hasCountBadge,
-      `pending must clear after Discard (do not leave stuck PENDING): ${JSON.stringify(after)}`
+      `pending must clear after Discard (toolbar): ${JSON.stringify(after)}`
     );
 
-    // Comment CTA returns when no PENDING
+    // (b) Server-side DELETE — not UI-only strip (gh PENDING must be empty)
+    if (ghAfter && typeof ghAfter === 'object' && ghAfter.error) {
+      log(
+        `  WARN gh PENDING probe failed (auth?): ${ghAfter.error} — still require UI clear`
+      );
+    } else {
+      assert(
+        Array.isArray(ghAfter) && ghAfter.length === 0,
+        `GitHub must report no PENDING reviews after Discard (server delete, not cache-only): ${JSON.stringify(ghAfter)}`
+      );
+    }
+
+    // (c) Latched pending review node cleared (attach id)
+    assert(
+      !uiAfter.latched,
+      `pending-review latch must clear after Discard: ${JSON.stringify(uiAfter.latched)}`
+    );
+
+    // (d) No stuck pending-only threads / scenario mark still painted as pending
+    assert(
+      (uiAfter.pendingThreads || 0) === 0,
+      `pending inline threads must not remain after Discard: ${JSON.stringify(uiAfter)}`
+    );
+    assert(
+      (uiAfter.markHits || 0) === 0,
+      `Start/Add comment bodies (${MARK}) must not remain in modal after Discard: ${JSON.stringify(uiAfter)}`
+    );
+
+    // Selection CTA returns to Comment/Start review (not Add-comment-only pending mode)
     const open = openSelectionComment(5);
     const island = open.island || selectionIslandProbe();
     log(`  CTAs after discard: ${JSON.stringify(island)}`);
-    if (island.island) {
-      assert(
-        !island.pendingOnly && (island.hasCommentCta || island.hasStartReview),
-        `after discard expect Comment/Start review again: ${JSON.stringify(island)}`
-      );
-    }
+    assert(island?.island, `need selection island after discard: ${JSON.stringify(open)}`);
+    assert(
+      !island.pendingOnly &&
+        !island.hasAddComment &&
+        (island.hasCommentCta || island.hasStartReview),
+      `after discard expect Comment/Start review again (not pending-only Add): ${JSON.stringify(island)}`
+    );
     // Leave clean: close island without posting
     press('Escape');
     waitMs(80);
     press('Escape');
     waitMs(80);
+
+    // Late re-check: auto-refresh / IDB / core merge must not resurrect pending.
+    // User report: "clears first then reappears later" — sample at ~2s and ~8s.
+    for (const delay of [2000, 6000]) {
+      waitMs(delay === 2000 ? 2000 : 4000);
+      const lateToolbar = pendingToolbarProbe();
+      const lateGh = ghPendingReviews(TARGET_PR);
+      const lateUi = pendingUiProbe();
+      log(
+        `  late+${delay}ms post-discard: toolbar=${JSON.stringify(lateToolbar)} gh=${JSON.stringify(lateGh)} ui=${JSON.stringify(lateUi)}`
+      );
+      assert(
+        (lateToolbar.pendingCount || 0) === 0 && !lateToolbar.hasCountBadge,
+        `pending resurrected in toolbar after Discard (+${delay}ms): ${JSON.stringify(lateToolbar)}`
+      );
+      if (Array.isArray(lateGh)) {
+        assert(
+          lateGh.length === 0,
+          `PENDING resurrected on GitHub after Discard (+${delay}ms): ${JSON.stringify(lateGh)}`
+        );
+      }
+      assert(
+        !lateUi.latched &&
+          (lateUi.pendingThreads || 0) === 0 &&
+          (lateUi.markHits || 0) === 0,
+        `pending UI/latch resurrected after Discard (+${delay}ms): ${JSON.stringify(lateUi)}`
+      );
+    }
+
+    // Soft reopen path: re-open same PR should not rehydrate discarded pending from IDB
+    press('Escape');
+    waitMs(100);
+    openPr(TARGET_PR, { viaUrl: true });
+    setLayout('diff');
+    waitDetailReady({ meta: true, files: true, label: 'SR.4-reopen' });
+    waitDiffFilesReady('SR.4-reopen');
+    waitMs(1500);
+    const reopenToolbar = pendingToolbarProbe();
+    const reopenUi = pendingUiProbe();
+    const reopenGh = ghPendingReviews(TARGET_PR);
+    log(
+      `  reopen after discard: toolbar=${JSON.stringify(reopenToolbar)} gh=${JSON.stringify(reopenGh)} ui=${JSON.stringify(reopenUi)}`
+    );
+    assert(
+      (reopenToolbar.pendingCount || 0) === 0 && !reopenToolbar.hasCountBadge,
+      `pending rehydrated from cache on reopen after Discard: ${JSON.stringify(reopenToolbar)}`
+    );
+    assert(
+      (reopenUi.pendingThreads || 0) === 0 && !reopenUi.latched,
+      `pending threads/latch rehydrated on reopen after Discard: ${JSON.stringify(reopenUi)}`
+    );
+    // Hard-fail demoted ghost rehydrate: discarded Start/Add bodies must not
+    // reappear as non-pending review threads after reopen (skeptic residual).
+    assert(
+      (reopenUi.markHits || 0) === 0,
+      `discarded comment bodies rehydrated on reopen after Discard (markHits): ${JSON.stringify(reopenUi)}`
+    );
+    if (Array.isArray(reopenGh)) {
+      assert(
+        reopenGh.length === 0,
+        `PENDING on server after reopen: ${JSON.stringify(reopenGh)}`
+      );
+    }
   });
 
   return steps;

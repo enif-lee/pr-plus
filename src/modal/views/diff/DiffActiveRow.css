@@ -84,8 +84,68 @@
 
 .prp-diff-float-nav__goto {
   display: flex;
-  padding: 2px 2px 0;
-  min-width: 200px;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 4px 2px;
+  min-width: 260px;
+  max-width: min(420px, 70vw);
+}
+
+.prp-diff-float-nav__suggest {
+  list-style: none;
+  margin: 0;
+  padding: 2px;
+  max-height: 180px;
+  overflow: auto;
+  border: 1px solid var(--prp-border-muted);
+  border-radius: 8px;
+  background: var(--prp-bg);
+}
+
+.prp-diff-float-nav__suggest-item {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin: 0;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--prp-fg);
+  font: inherit;
+  font-size: 11px;
+  font-family: var(--prp-mono);
+  text-align: left;
+  cursor: pointer;
+}
+
+.prp-diff-float-nav__suggest-item--active,
+.prp-diff-float-nav__suggest-item[aria-selected='true'],
+.prp-diff-float-nav__suggest-item:hover {
+  background: color-mix(in srgb, var(--prp-accent) 14%, transparent);
+  color: var(--prp-accent);
+}
+
+.prp-diff-float-nav__suggest-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prp-diff-float-nav__suggest-meta {
+  flex: 0 0 auto;
+  font-size: 10px;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+
+.prp-diff-float-nav__suggest-empty {
+  padding: 6px 8px;
+  font-size: 11px;
 }
 
 .prp-diff-float-nav__goto-input {

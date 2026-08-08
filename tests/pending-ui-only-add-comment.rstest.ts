@@ -204,7 +204,7 @@ describe('SelectionCommentBar + InlineThread + App wiring', () => {
 
   test('App passes hasServerPending as hasViewerPendingReview', () => {
     const app = fs.readFileSync(
-      path.join(root, 'src/modal/app/PrModalApp.impl.tsx'),
+      path.join(root, 'src/modal/app/PrModalShell.tsx'),
       'utf8'
     );
     expect(app).toMatch(/hasViewerPendingReview=\{hasServerPending\}/);
@@ -228,5 +228,41 @@ describe('SelectionCommentBar + InlineThread + App wiring', () => {
       bundle.includes('data-prp-pending-only') ||
       bundle.includes('hasViewerPendingReview');
     expect(hasGate).toBe(true);
+  });
+});
+
+import {
+  formatStartReviewError,
+  LOCKED_PR_START_REVIEW_MSG,
+} from '../src/modal/lib/pending-review';
+
+describe('formatStartReviewError (locked PR Start review)', () => {
+  test('maps locked / 422 lock messages to clear product copy', () => {
+    expect(formatStartReviewError(new Error('Issue is locked'))).toBe(
+      LOCKED_PR_START_REVIEW_MSG
+    );
+    expect(
+      formatStartReviewError({ message: 'Validation Failed', status: 422 })
+    ).not.toBe(LOCKED_PR_START_REVIEW_MSG); // 422 without lock word keeps raw
+    expect(
+      formatStartReviewError({
+        message: '422 locked conversation',
+        status: 422,
+      })
+    ).toBe(LOCKED_PR_START_REVIEW_MSG);
+    expect(formatStartReviewError(new Error('network fail'))).toBe(
+      'network fail'
+    );
+  });
+
+  test('App Start review catch uses formatStartReviewError (wiring)', () => {
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const src = fs.readFileSync(
+      path.join(__dirname, '../src/modal/app/PrModalShell.tsx'),
+      'utf8'
+    );
+    expect(src).toMatch(/formatStartReviewError/);
+    expect(src).toMatch(/onSubmitSelectionCommentPending/);
   });
 });

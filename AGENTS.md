@@ -65,6 +65,23 @@ Prefer **build + extensions reload** over restarting the whole browser for day-t
 
 ## Architecture (overview)
 
+### Domain / UI SoT (host-data-first)
+
+- **Domain SoT:** host open-session detail store → React reads `detail` prop / `useDomainDetail()` (no `localDetail` mirror).
+- **Mutations:** `src/modal/commands/*` — API success → narrow `onPatchDetail` ack (`applied|stale|failed`; void ≠ applied).
+- **Settled set-authority:** `mergeCommentsHostFirst` / `src/modal/lib/set-authority.ts`; no durable `_dropPending` latch.
+- **UiStore:** Zustand `modal-store` / `ui-store` — layout/drafts/focus only (no PrDetail domain blob).
+- **Verify:** `npm run build:pure && build:host && build:modal`, then chrome://extensions reload after SW/host/pure changes.
+
+### UI labels (i18n)
+
+- **User-visible UI labels** (buttons, badges, section titles, empty states, toast copy, aria-labels shown as text, timeline narratives) **must** go through `useT()` / `t('key')` and the catalogs in `src/modal/lib/i18n*.ts`.
+- Do **not** hard-code English (or any locale) strings in JSX/TS for UI chrome when adding or changing labels.
+- Add new keys to the appropriate catalog (`i18n.ts` core, `i18n-chrome.ts`, `i18n-residual.ts`, …) for **en + ko + ja + zh_CN**.
+- Non-UI exceptions: log messages, GraphQL operation names, test fixtures, pure algorithm comments.
+
+
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  github.com (page)                                           │

@@ -16,3 +16,42 @@
   color: var(--prp-accent);
   font-weight: 600;
 }
+
+/*
+ * Meta pickers must stack above Conversation OptBtnHint portals
+ * (--prp-z-dialog 100100). Use portal token on panel + backdrop.
+ */
+.prp-sselect-panel,
+.prp-sselect-panel--popover {
+  z-index: var(--prp-z-portal, 120000) !important;
+}
+.prp-sselect-backdrop,
+.prp-sselect-backdrop--soft {
+  z-index: 119990 !important;
+}
+.prp-sselect-layer {
+  z-index: var(--prp-z-portal, 120000);
+}
+.prp-sselect-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--prp-border-muted);
+}
+.prp-sselect-footer__btn-host {
+  position: relative;
+  display: inline-flex;
+}
+/* Hide conversation Opt tips while a meta picker is open (no paint-over). */
+body:has([data-prp-sselect='1']) .prp-opt-btn-hint:not(.prp-opt-btn-hint--sselect),
+body:has([data-prp-sselect='1']) .prp-tip-pop {
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+/* Picker-local Opt hints stay visible and above panel chrome */
+.prp-opt-btn-hint--sselect.prp-opt-btn-hint--fixed {
+  z-index: calc(var(--prp-z-portal, 120000) + 10) !important;
+}

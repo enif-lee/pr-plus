@@ -141,8 +141,11 @@
    only where needed; top/left come from style={{ top, left }}. */
 .prp-reactions__picker--portal {
   position: fixed !important;
-  right: auto;
-  bottom: auto !important; /* beat absolute bottom: calc(100% + 6px) */
+  /* Beat absolute host defaults so only JS top/left place the menu */
+  left: auto;
+  right: auto !important;
+  bottom: auto !important;
+  top: auto;
   margin: 0;
   transform: none !important;
   z-index: var(--prp-z-tip, 100020);

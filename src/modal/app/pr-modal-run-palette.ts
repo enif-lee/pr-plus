@@ -1,6 +1,7 @@
 /** Command palette action runner extracted from PrModalApp */
 import { buildGithubPrPageUrl } from '../lib/ui-polish';
 import { copyTextToClipboard } from '../lib/copy-to-clipboard';
+import { isSideActionAllowedOnLayout } from '../lib/layout-side-actions';
 
 export function runPaletteCommand(d: Record<string, any>, cmd: any) {
   const {
@@ -60,6 +61,13 @@ export function runPaletteCommand(d: Record<string, any>, cmd: any) {
     (typeof useModalStoreDep?.getState === 'function'
       ? useModalStoreDep.getState()?.layoutMode
       : null) || layoutMode;
+  // Diff ↔ Conversation isolation: Conversation meta / Diff file chrome
+  if (
+    typeof isSideActionAllowedOnLayout === 'function' &&
+    !isSideActionAllowedOnLayout(String(action || ''), liveLayout)
+  ) {
+    return;
+  }
   switch (action) {
     case 'openPullRequest': {
       const n = Number(p.number ?? cmd.number);
@@ -277,10 +285,20 @@ export function runPaletteCommand(d: Record<string, any>, cmd: any) {
       void onSubscribe(false);
       break;
     case 'promptMilestone':
-      void onSetMilestone(false);
+      // Prefer openMilestonePicker (wired in shell bag). onSetMilestone may be
+      // absent when peers route only open* handlers — avoid no-op TypeError.
+      if (typeof openMilestonePicker === 'function') {
+        void openMilestonePicker();
+      } else if (typeof onSetMilestone === 'function') {
+        void onSetMilestone(false);
+      }
       break;
     case 'clearMilestone':
-      void onSetMilestone(true);
+      if (typeof onSetMilestone === 'function') {
+        void onSetMilestone(true);
+      } else if (typeof clearMilestone === 'function') {
+        void clearMilestone();
+      }
       break;
     case 'rerequestReview':
       void onRerequestReview();

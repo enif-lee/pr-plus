@@ -3,14 +3,26 @@
  */
 import { filesListHasUsableDiffBodies } from './detail-idb';
 import {
+  detailHasViewerPending,
+  filterCacheReviewCommentsForCore,
+  hydrateDiscardedPendingBodies,
+  isDiscardedPendingBody,
   isUnverifiedLocalOnlyReviewComment,
+  noteDiscardedPendingBodies,
   reconcileReviewCommentsAgainstRemote,
+  stripOrphanPendingReviewComments,
   stripUnverifiedLocalOnlyReviewComments,
 } from './stale-local-review';
 
 export {
+  detailHasViewerPending,
+  filterCacheReviewCommentsForCore,
+  hydrateDiscardedPendingBodies,
+  isDiscardedPendingBody,
   isUnverifiedLocalOnlyReviewComment,
+  noteDiscardedPendingBodies,
   reconcileReviewCommentsAgainstRemote,
+  stripOrphanPendingReviewComments,
   stripUnverifiedLocalOnlyReviewComments,
 } from './stale-local-review';
 
@@ -167,21 +179,26 @@ export function mergeDetailPreserveOptimistic(prev: any, next: any): any {
 
   const prevRc = Array.isArray(prev.reviewComments) ? prev.reviewComments : [];
   const nextRc = Array.isArray(next.reviewComments) ? next.reviewComments : [];
-  // Host has no PENDING review → drop local pending-only rows only when local
-  // also cleared viewerPendingReview (explicit discard/submit strip). If local
-  // still has viewerPendingReview (just-posted optimistic), keep pending rows
-  // across a racey refresh that hasn't seen the PENDING yet.
-  // `_dropPending` is set by stripPendingReviewFromDetail after Discard/Submit so
-  // a racey merge cannot resurrect pending via raceKeep before React applies strip.
+  // Host-data-first (no durable drop latch): live host PENDING always wins.
+  // Drop local pending only when host has no VPR/pending rows and local also
+  // does not hold a just-posted VPR (race keep for in-flight Start/Add).
   const nextHasPendingReview = Boolean(next.viewerPendingReview?.id);
-  const nextHasAnyPendingComment = nextRc.some(
-    (c) => c && c.pending && !deletedReviewIds.has(String(c.id))
-  );
+  const nextHasAnyPendingComment = nextRc.some((c) => c && c.pending);
   const prevHoldsPendingReview = Boolean(prev.viewerPendingReview?.id);
-  const explicitDropPending = Boolean(prev._dropPending) && !nextHasPendingReview && !nextHasAnyPendingComment;
+  const hostHasPending = nextHasAnyPendingComment || nextHasPendingReview;
+  if (hostHasPending) {
+    for (const c of nextRc) {
+      if (c?.pending && c.id != null) deletedReviewIds.delete(String(c.id));
+    }
+  }
+  // Explicit strip: prev cleared VPR (discard/submit) and host still empty.
+  const explicitDropPending =
+    prev.viewerPendingReview === null && !hostHasPending;
   const dropLocalPending =
     explicitDropPending ||
-    (!nextHasPendingReview && !nextHasAnyPendingComment && !prevHoldsPendingReview);
+    (!nextHasPendingReview &&
+      !nextHasAnyPendingComment &&
+      !prevHoldsPendingReview);
   // Host/next may itself be polluted with IDB ghosts — never seed byId with them.
   // Host snapshot present (any length) or threads meta means GitHub is SoT for
   // which threads exist — drop local-only ghosts on prev-only rows too.
@@ -195,12 +212,44 @@ export function mergeDetailPreserveOptimistic(prev: any, next: any): any {
       next.reviewThreadsMeta?.totalCount != null);
 
   const byId = new Map<string, any>();
+  // Drop window only while host still has no PENDING (post-Discard empty SoT).
+  const dropping = explicitDropPending;
   for (const c of nextRc) {
     if (!c || c.id == null) continue;
     const key = String(c.id);
+    // Live pending from host is never tombstoned.
+    if (c.pending && hostHasPending) {
+      byId.set(key, c);
+      continue;
+    }
     if (deletedReviewIds.has(key)) continue;
     // Host-polluted ghost is not GitHub SoT — drop even when present in next
     if (isUnverifiedLocalOnlyReviewComment(c)) continue;
+    // After Discard (host empty): do not accept demoted pending ghosts.
+    if (dropping) {
+      if (c.pending) {
+        deletedReviewIds.add(key);
+        continue;
+      }
+      if (
+        c.pendingReviewId != null &&
+        String(c.pendingReviewId).trim() !== '' &&
+        String(c.pendingReviewId) !== '0'
+      ) {
+        deletedReviewIds.add(key);
+        continue;
+      }
+      if (isDiscardedPendingBody(prev, c.body) || isDiscardedPendingBody(next, c.body)) {
+        deletedReviewIds.add(key);
+        continue;
+      }
+      const prevHad = prevRc.find((p) => p && String(p.id) === key);
+      // Host-only or was-pending during drop window → tombstone, never paint
+      if (!prevHad || prevHad.pending) {
+        deletedReviewIds.add(key);
+        continue;
+      }
+    }
     byId.set(key, c);
   }
 
@@ -328,8 +377,7 @@ export function mergeDetailPreserveOptimistic(prev: any, next: any): any {
   const mergedHasPending = mergedRc.some((c) => c && c.pending);
   // Prefer host viewerPendingReview when present. If host is empty but we still
   // hold pending comment rows (post→refresh race), keep prev.viewerPendingReview
-  // so Submit/Discard keep working. Explicit strip sets prev.viewerPendingReview=null
-  // and `_dropPending` so we never resurrect after Discard/Submit.
+  // so Submit/Discard keep working. Explicit strip sets prev.viewerPendingReview=null.
   let viewerPendingReview = next.viewerPendingReview;
   if (viewerPendingReview === undefined) {
     viewerPendingReview = prev.viewerPendingReview ?? null;
@@ -344,14 +392,6 @@ export function mergeDetailPreserveOptimistic(prev: any, next: any): any {
   if (explicitDropPending) {
     viewerPendingReview = null;
   }
-
-  // Keep drop flag only while host still has no PENDING (discard not fully
-  // confirmed on a later snapshot). Clear as soon as host shows PENDING again
-  // (new Start review) so we never strip a freshly posted review.
-  const dropPending =
-    !nextHasPendingReview &&
-    !nextHasAnyPendingComment &&
-    (explicitDropPending || Boolean(prev._dropPending));
 
   // Prefer boolean host/local subscription; keep local when host is still null
   // after an optimistic toggle (refresh can lag the PUT/DELETE).
@@ -552,13 +592,13 @@ export function mergeDetailPreserveOptimistic(prev: any, next: any): any {
     avatarUrls,
     subscribed,
     _metaSeq: metaSeq,
-    _dropPending: dropPending ? true : undefined,
     _resolveStamps: resolveStampsOut,
-    // Keep tombstones local so a stale host snapshot cannot re-add deleted rows
+    // Keep tombstones local so a stale host snapshot cannot re-add deleted rows.
+    // Always arrays (Set serializes to {} in IDB JSON and loses discard ghosts).
     _deletedReviewCommentIds:
-      deletedReviewIds.size > 0 ? deletedReviewIds : undefined,
+      deletedReviewIds.size > 0 ? [...deletedReviewIds] : undefined,
     _deletedIssueCommentIds:
-      deletedIssueIds.size > 0 ? deletedIssueIds : undefined,
+      deletedIssueIds.size > 0 ? [...deletedIssueIds] : undefined,
   };
 }
 
@@ -627,19 +667,55 @@ function mergeSideSettledFlags(
 
 /**
  * Remove all PENDING review comments/replies and clear viewerPendingReview
- * (local optimistic discard after DELETE succeeds).
- * Sets `_dropPending` so mergeDetailPreserveOptimistic will not resurrect
- * pending rows across a racey host refresh.
+ * (post-API discard strip). No durable `_dropPending` latch — host settled
+ * set-authority (null VPR) + id/body tombstones block demote lag ghosts.
  */
 export function stripPendingReviewFromDetail(detail: any): any {
   if (!detail) return detail;
   const list = Array.isArray(detail.reviewComments) ? detail.reviewComments : [];
-  return {
+  const pendingRows = list.filter((c) => c && c.pending);
+  const pendingIds = pendingRows
+    .filter((c) => c.id != null)
+    .map((c) => String(c.id));
+  const pendingBodies = pendingRows.map((c) => String(c.body || '').trim()).filter(Boolean);
+  const deleted = new Set([
+    ...idSetFrom(detail._deletedReviewCommentIds),
+    ...pendingIds,
+  ]);
+  // Also drop demoted orphans already missing pending but matching pendingReviewId
+  // of the cleared viewer pending review.
+  const vprId =
+    detail.viewerPendingReview?.id != null
+      ? String(detail.viewerPendingReview.id)
+      : null;
+  const nextList = list.filter((c) => {
+    if (!c || c.id == null) return false;
+    if (c.pending) return false;
+    if (deleted.has(String(c.id))) return false;
+    if (
+      vprId &&
+      c.pendingReviewId != null &&
+      String(c.pendingReviewId) === vprId
+    ) {
+      deleted.add(String(c.id));
+      return false;
+    }
+    return true;
+  });
+  const out: any = {
     ...detail,
     viewerPendingReview: null,
-    reviewComments: list.filter((c) => c && !c.pending),
-    _dropPending: true,
+    reviewComments: nextList,
+    _deletedReviewCommentIds: deleted.size ? [...deleted] : undefined,
   };
+  // Strip legacy latch if present on the prior projection.
+  if (Object.prototype.hasOwnProperty.call(out, '_dropPending')) {
+    delete out._dropPending;
+  }
+  if (pendingBodies.length) {
+    noteDiscardedPendingBodies(out, pendingBodies);
+  }
+  return out;
 }
 
 /**
@@ -714,17 +790,17 @@ export function removeReviewCommentFromDetail(detail: any, commentId: any): any 
       commentCount: remainingPending.length,
     };
   }
-  return {
+  const out: any = {
     ...detail,
     reviewComments: nextList,
     reviewThreads: nextThreads !== undefined ? nextThreads : detail.reviewThreads,
     viewerPendingReview,
     _deletedReviewCommentIds: deleted,
-    // If we cleared all pending, force-drop so merge won't reattach them
-    ...(remainingPending.length === 0 && detail.viewerPendingReview
-      ? { _dropPending: true }
-      : {}),
   };
+  if (Object.prototype.hasOwnProperty.call(out, '_dropPending')) {
+    delete out._dropPending;
+  }
+  return out;
 }
 
 /**

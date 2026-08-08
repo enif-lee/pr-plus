@@ -116,7 +116,15 @@ export function placeReactionPicker(opts: {
     placement === 'above' ? btnTop - gap - ph : btnBottom + gap;
   top = Math.max(margin, Math.min(top, vh - ph - margin));
 
-  let left = btnLeft;
+  // Center horizontally on the ☺ control, then clamp into the viewport so
+  // the menu never parks at an unrelated edge of the modal.
+  const width = Number.isFinite(Number(r.width)) ? Number(r.width) : 0;
+  const btnRight =
+    Number.isFinite(r.right as number) && r.right != null
+      ? Number(r.right)
+      : btnLeft + width;
+  const mid = btnLeft + Math.max(0, btnRight - btnLeft) / 2;
+  let left = mid - pw / 2;
   left = Math.max(margin, Math.min(left, vw - pw - margin));
 
   return { top, left, placement };

@@ -241,7 +241,7 @@ describe('architecture gates', () => {
       'src/storage.ts',
       'src/github-endpoints.ts',
       'src/modal/lib/detail-store.ts',
-      'src/modal/app/PrModalApp.impl.tsx',
+      'src/modal/app/PrModalShell.tsx',
       'src/modal/views/conversation/ConversationView.tsx',
     ];
     for (const rel of roots) {
@@ -253,32 +253,32 @@ describe('architecture gates', () => {
     expect(fs.existsSync(path.join(root, 'src/background/parts'))).toBe(false);
     // Domain typecheck includes complete modal shells + SW SoT (not generated background.ts alone)
     const domainTs = read('tsconfig.json');
-    expect(domainTs).toMatch(/PrModalApp\.impl\.tsx/);
+    expect(domainTs).toMatch(/PrModalShell\.tsx/);
     expect(domainTs).toMatch(/background\/sw-api\.ts/);
     expect(domainTs).not.toMatch(/pr-modal\/parts/);
   });
 
 
-  test('PrModalApp and ConversationView are complete typechecked SoT (no mid-IIFE parts)', () => {
-    expect(fs.existsSync(path.join(root, 'src/modal/app/PrModalApp.impl.tsx'))).toBe(true);
+  test('PrModalShell and ConversationView are complete typechecked SoT (no mid-IIFE parts)', () => {
+    expect(fs.existsSync(path.join(root, 'src/modal/app/PrModalShell.tsx'))).toBe(true);
     expect(fs.existsSync(path.join(root, 'src/modal/views/conversation/ConversationView.tsx'))).toBe(true);
     // Mid-IIFE part directories must not exist
     expect(fs.existsSync(path.join(root, 'src/modal/app/pr-modal/parts'))).toBe(false);
     expect(fs.existsSync(path.join(root, 'src/modal/views/conversation/parts'))).toBe(false);
     expect(fs.existsSync(path.join(root, 'src/modal/app/PrModalApp.generated.tsx'))).toBe(false);
-    const impl = read('src/modal/app/PrModalApp.impl.tsx');
+    const shell = read('src/modal/app/PrModalShell.tsx');
     const cv = read('src/modal/views/conversation/ConversationView.tsx');
-    expect(impl.slice(0, 400)).not.toMatch(/\/\/\s*@ts-nocheck/);
+    expect(shell.slice(0, 400)).not.toMatch(/\/\/\s*@ts-nocheck/);
     expect(cv.slice(0, 400)).not.toMatch(/\/\/\s*@ts-nocheck/);
-    expect(impl.slice(0, 500)).not.toMatch(/AUTO-ASSEMBLED from pr-modal\/parts/);
+    expect(shell.slice(0, 500)).not.toMatch(/AUTO-ASSEMBLED from pr-modal\/parts/);
     expect(cv.slice(0, 500)).not.toMatch(/AUTO-ASSEMBLED from conversation\/parts/);
-    expect(impl).toMatch(/export function PrModalApp/);
+    expect(shell).toMatch(/export function PrModalApp/);
     expect(cv).toMatch(/ConversationView/);
-    // Documented exceptions: complete React roots may exceed 1500 until further hook extraction
-    const implN = impl.split(/\n/).length;
+    // Shell owns the mount graph; ConversationView remains a large view SoT
+    const shellN = shell.split(/\n/).length;
     const cvN = cv.split(/\n/).length;
-    console.log('PrModalApp.impl lines', implN, 'ConversationView lines', cvN);
-    expect(implN).toBeGreaterThan(100);
+    console.log('PrModalShell lines', shellN, 'ConversationView lines', cvN);
+    expect(shellN).toBeGreaterThan(100);
     expect(cvN).toBeGreaterThan(100);
   });
 
@@ -298,7 +298,7 @@ describe('architecture gates', () => {
     for (const rel of extracted) {
       expect(fs.existsSync(path.join(root, rel))).toBe(true);
     }
-    const impl = read('src/modal/app/PrModalApp.impl.tsx');
+    const impl = read('src/modal/app/PrModalShell.tsx');
     const cv = read('src/modal/views/conversation/ConversationView.tsx');
     // Composition roots import real components (not cat-assembled parts)
     expect(impl).toMatch(/from ['\"].*pr-modal\/DiffWorkspace['\"]/);
@@ -362,10 +362,65 @@ describe('architecture gates', () => {
     // Must be imported by real UI surfaces (not dead file)
     const header = read('src/modal/views/chrome/Header.tsx');
     expect(header).toMatch(/useDetailUiStore/);
-    const appImpl = read('src/modal/app/PrModalApp.impl.tsx');
+    const appImpl = read('src/modal/app/PrModalShell.tsx');
     expect(appImpl).toMatch(/useDetailUiStore|useModalStore/);
     const conv = read('src/modal/views/conversation/ConversationView.tsx');
     expect(conv).toMatch(/useDetailUiStore|useModalStore/);
+  });
+
+  test('host-data-first: no forceDropPending latch; set-authority helper shipped', () => {
+    const appImpl = read('src/modal/app/PrModalShell.tsx');
+    expect(appImpl).not.toMatch(/forceDropPendingRef/);
+    expect(appImpl).not.toMatch(/\bsetLocalDetail\b/);
+    expect(appImpl).not.toMatch(/useState\(detailProp\)/);
+    const mut = read('src/modal/commands/domain-mutations.ts');
+    expect(mut).not.toMatch(/forceDropPendingRef/);
+    expect(mut).not.toMatch(/\bsetLocalDetail\b/);
+    expect(mut).not.toMatch(/_dropPending\s*:\s*true/);
+    expect(mut).toMatch(/void|no status/); expect(mut).toMatch(/applyDomainDetail/);
+    const stale = read('src/modal/lib/stale-local-review.ts');
+    expect(stale).toMatch(/export function mergeCommentsHostFirst/);
+    const idb = read('src/modal/lib/detail-idb.ts');
+    expect(idb).toMatch(/_dropPending:\s*_dropIgnored|_dropPending:\s*_d/);
+    expect(idb).not.toMatch(/keepDropPending/);
+    const attach = read('src/modal/lib/composer-attach.ts');
+    expect(attach).not.toMatch(/_dropPending\s*:\s*true/);
+    const detailStore = read('src/modal/lib/detail-store.ts');
+    expect(detailStore).not.toMatch(/_dropPending\s*:\s*true/);
+    expect(detailStore).not.toMatch(/store\.dropPending\s*=\s*true/);
+    const store = read('src/modal/store/modal-store.ts');
+    expect(store).not.toMatch(/localDetail/);
+    expect(fs.existsSync(path.join(root, 'src/modal/commands/domain-mutations.ts'))).toBe(true);
+    expect(fs.existsSync(path.join(root, 'src/modal/app/domain-detail-context.tsx'))).toBe(true);
+    const open = read('src/host/modules/open-modal-run.ts');
+    expect(open).toMatch(/mergeCommentsHostFirst/);
+    expect(fs.existsSync(path.join(root, 'src/modal/commands/review-actions.ts'))).toBe(true);
+    expect(fs.existsSync(path.join(root, 'src/modal/commands/side-actions.ts'))).toBe(true);
+    expect(fs.existsSync(path.join(root, 'src/modal/hooks/useDomainDetailHost.ts'))).toBe(true);
+    expect(fs.existsSync(path.join(root, 'src/modal/hooks/useCommandContext.ts'))).toBe(true);
+    expect(fs.existsSync(path.join(root, 'src/modal/hooks/usePrModalHotkeys.ts'))).toBe(true);
+    const hotkeys = read('src/modal/hooks/usePrModalHotkeys.ts');
+    expect(hotkeys).toMatch(/addEventListener\(\s*['\"]keydown['\"]/);
+    expect(hotkeys).not.toMatch(/intentionally empty/);
+    const implSrc = read('src/modal/app/PrModalShell.tsx');
+    // Capture-phase product keydown must not remain inlined in the god file.
+    expect(implSrc).not.toMatch(/window\.addEventListener\(\s*['\"]keydown['\"]/);
+    expect(implSrc).toMatch(/usePrModalHotkeys\(hotkeyBag\)/);
+    expect(fs.existsSync(path.join(root, 'src/modal/lib/set-authority.ts'))).toBe(true);
+    expect(fs.existsSync(path.join(root, 'src/modal/store/ui-store.ts'))).toBe(true);
+    const composer = read('src/modal/views/conversation/ComposerCard.tsx');
+    expect(composer).toMatch(/useDomainDetail/);
+    const conv = read('src/modal/views/conversation/ConversationView.tsx');
+    expect(conv).toMatch(/useDomainDetail/);
+    const diffWs = read('src/modal/views/pr-modal/DiffWorkspace.tsx');
+    expect(diffWs).toMatch(/useDomainDetail/);
+    const reviewActions = read('src/modal/commands/review-actions.ts');
+    expect(reviewActions).toMatch(/postSelectionLineComment/);
+    expect(reviewActions).toMatch(/onLeaveReviewAction/);
+    const side = read('src/modal/commands/side-actions.ts');
+    expect(side).toMatch(/onDeleteHeadBranch/);
+    expect(side).toMatch(/onToggleReaction/);
+    expect(side).not.toMatch(/_dropPending\s*:\s*true/);
   });
 
   test('host modules are function-boundary cuts under 1800 lines', () => {
@@ -441,16 +496,31 @@ describe('architecture gates', () => {
     expect(overs).toEqual([]);
   });
 
-  test('PrModalApp entry is thin; impl is complete typechecked SoT', () => {
+  test('PrModalApp entry is thin; shell is mount SoT; impl re-export-only if present', () => {
     const entry = read('src/modal/app/PrModalApp.tsx');
     expect(entry.split(/\n/).length).toBeLessThan(40);
-    expect(entry).toMatch(/PrModalApp\.impl/);
+    // Public entry must resolve to shell composition (not an impl body).
+    expect(entry).toMatch(/PrModalShell/);
+    expect(entry).not.toMatch(/export function PrModalApp\s*\(/);
     expect(
-      fs.existsSync(path.join(root, 'src/modal/app/PrModalApp.impl.tsx'))
+      fs.existsSync(path.join(root, 'src/modal/app/PrModalShell.tsx'))
     ).toBe(true);
-    expect(read('src/modal/app/PrModalApp.impl.tsx').slice(0, 400)).not.toMatch(
-      /\/\/\s*@ts-nocheck/
-    );
+    const shell = read('src/modal/app/PrModalShell.tsx');
+    expect(shell.slice(0, 400)).not.toMatch(/\/\/\s*@ts-nocheck/);
+    expect(shell).toMatch(/export function PrModalApp/);
+    // Legacy PrModalApp.impl.tsx may remain only as a thin re-export (≤300 lines).
+    const implPath = path.join(root, 'src/modal/app/PrModalApp.impl.tsx');
+    if (fs.existsSync(implPath)) {
+      const impl = read('src/modal/app/PrModalApp.impl.tsx');
+      const implN = impl.split(/\n/).length;
+      expect(implN).toBeLessThanOrEqual(300);
+      expect(impl).not.toMatch(/export function PrModalApp\s*\(/);
+      expect(impl).toMatch(/export\s*\{[^}]*\}\s*from\s*['\"]\.\/PrModalShell['\"]/);
+    }
+    // pr-modal-mutations bag deleted — commands/* is the mutation SoT.
+    expect(
+      fs.existsSync(path.join(root, 'src/modal/app/pr-modal-mutations.ts'))
+    ).toBe(false);
   });
 
   test('ConversationView is complete typechecked SoT (no mid-IIFE parts)', () => {
@@ -465,7 +535,7 @@ describe('architecture gates', () => {
 
   test('generated/assembled runtime artifacts are marked', () => {
     const assembled = [
-      'src/modal/app/PrModalApp.impl.tsx',
+      'src/modal/app/PrModalShell.tsx',
       'src/pr-modal-host.js',
       'src/fetch-pulls.js',
       'src/content-bridge.js',

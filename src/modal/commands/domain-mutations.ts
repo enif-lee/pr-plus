@@ -1,5 +1,4 @@
 /** PrModal mutations/meta/write-through — nested install scope for mutual calls. */
-import { flushSync } from 'react-dom';
 import { buildLabelOptions } from '../lib/searchable-select';
 import { toggleViewedPath } from '../lib/review-threads';
 import {
@@ -31,7 +30,7 @@ import {
   mapAssigneesFromApi,
   mapLabelsFromApi,
   mergeAvatarUrls,
-} from './pr-modal-mappers';
+} from '../app/pr-modal-mappers';
 import {
   DEFAULT_HIDE_REASON,
   normalizeHideReason,
@@ -105,7 +104,7 @@ export function installPrModalMutations(d: Record<string, any>) {
       if (live) {
         d.detailRef.current = { ...live, timelineEvents: merged };
       }
-      d.setLocalDetail((prev: any) => {
+      applyDomainDetail((prev: any) => {
         const base = prev || live;
         if (!base) return prev;
         return {
@@ -158,19 +157,8 @@ export function installPrModalMutations(d: Record<string, any>) {
       // Never persist _metaSeq to host/cache — that blocked empty API results on reopen.
       _metaSeq: (Number(base._metaSeq) || 0) + 1,
     };
-    // Sync ref + flush paint before host patch / async refresh. Without
-    // flushSync, a lagging host re-render or refresh poll can merge before the
-    // optimistic timeline rows ever reach ConversationView's virtual list.
+    // Host SoT: detailRef for same-tick chains + narrow onPatchDetail (no localDetail).
     d.detailRef.current = next;
-    try {
-      flushSync(() => {
-        d.setLocalDetail(next);
-      });
-    } catch {
-      // Nested update / unmounted edge: fall back to async setState
-      d.setLocalDetail(next);
-    }
-    // Narrow host payload: only keys the caller intended to write.
     const forHost: Record<string, unknown> = { ...patch };
     if (Object.prototype.hasOwnProperty.call(patch, 'avatarUrls') || next.avatarUrls) {
       forHost.avatarUrls = next.avatarUrls;
@@ -178,9 +166,6 @@ export function installPrModalMutations(d: Record<string, any>) {
     if (localTe.length > 0) {
       forHost.timelineEvents = timelineEvents;
     }
-    // Host write-through must be synchronous: a soft close/reopen right after
-    // a meta write (milestone e2e) used to race the previous queueMicrotask and
-    // reopen from a pre-write cache/list sketch ("No milestone").
     void patchHostDetail(forHost);
     if (opts.refreshTimeline !== false) {
       queueMicrotask(() => {
@@ -203,9 +188,14 @@ export function installPrModalMutations(d: Record<string, any>) {
     const run = () => {
       try {
         const res = d.onPatchDetail(patch);
-        if (res && typeof res === 'object' && res.status) return res;
-        // Legacy void return → treat as applied (pre-ack hosts)
-        return { status: 'applied' as const };
+        if (res && typeof res === 'object' && typeof res.status === 'string') {
+          return res as { status: 'applied' | 'stale' | 'failed' | 'skipped'; error?: string };
+        }
+        // Phase 3 contract: void/legacy return is NOT applied.
+        return {
+          status: 'failed' as const,
+          error: 'onPatchDetail returned no status (void ≠ applied)',
+        };
       } catch (err: any) {
         return {
           status: 'failed' as const,
@@ -228,6 +218,52 @@ export function installPrModalMutations(d: Record<string, any>) {
     }
     return res;
   }
+
+  /** Host-data-first domain paint: detailRef + narrow onPatchDetail only (no localDetail SoT). */
+  const DOMAIN_DETAIL_KEYS = [
+    'title', 'body', 'draft', 'state', 'merged', 'mergeable', 'mergeableState', 'mergeStateStatus',
+    'assignees', 'labels', 'requestedReviewers', 'milestone', 'baseRef', 'baseSha', 'headRef', 'headSha',
+    'subscribed', 'avatarUrls', 'bodyReactions', 'comments', 'commentsMeta', 'timelineEvents',
+    'reviewComments', 'reviewThreads', 'reviewCommentsMeta', 'reviewThreadsMeta', 'viewerPendingReview',
+    'reviews', 'files', 'commits', 'commitsCount', 'changedFiles', 'gitattributesText',
+    '_deletedReviewCommentIds', '_deletedReviewBodies', '_deletedIssueCommentIds', '_resolveStamps',
+    'headBranchDeleted', 'headRefDeleted',
+  ] as const;
+
+  function pickDomainPatch(next: any, base: any = null): Record<string, unknown> {
+    const patch: Record<string, unknown> = {};
+    if (!next || typeof next !== 'object') return patch;
+    for (const k of DOMAIN_DETAIL_KEYS) {
+      if (!Object.prototype.hasOwnProperty.call(next, k)) continue;
+      if (base && next[k] === base[k]) continue;
+      patch[k] = next[k];
+    }
+    return patch;
+  }
+
+  /**
+   * Apply domain snapshot via host SoT only.
+   * Updates detailRef for same-tick mutation chaining; UI paints from host props.
+   */
+  function applyDomainDetail(
+    nextOrUpdater: any
+  ): { status: 'applied' | 'stale' | 'failed' | 'skipped'; error?: string } {
+    const base = d.detailRef.current || d.detail;
+    const next =
+      typeof nextOrUpdater === 'function' ? nextOrUpdater(base) : nextOrUpdater;
+    if (!next) return { status: 'skipped' };
+    d.detailRef.current = next;
+    const patch = pickDomainPatch(next, base);
+    if (!Object.keys(patch).length) {
+      // Full replace keys when updater returned whole detail without diffs detected
+      for (const k of DOMAIN_DETAIL_KEYS) {
+        if (Object.prototype.hasOwnProperty.call(next, k)) patch[k] = next[k];
+      }
+    }
+    if (!Object.keys(patch).length) return { status: 'skipped' };
+    return patchHostDetail(patch);
+  }
+
   async function applyAddAssignees(logins: any) {
     const base = d.detailRef.current || d.detail;
     if (!base) return;
@@ -236,29 +272,12 @@ export function installPrModalMutations(d: Record<string, any>) {
       .filter(Boolean);
     if (!names.length) return;
     const prevAssignees = Array.isArray(base.assignees) ? base.assignees.slice() : [];
-    // Optimistic paint immediately so multi-select Apply never waits on REST.
-    const optimistic = prevAssignees.slice();
-    for (const name of names) {
-      if (!optimistic.some((x) => String(x).toLowerCase() === name.toLowerCase())) {
-        optimistic.push(name);
-      }
-    }
-    commitMetaPatch(
-      { assignees: optimistic },
-      {
-        localTimelineEvents: assigneeChangeTimelineEvents(
-          prevAssignees,
-          optimistic,
-          timelineActorFromDetail(base)
-        ),
-        refreshTimeline: false,
-      }
-    );
     d.setActionBusy(true);
     d.setActionMsg('');
     try {
       const api = globalThis.PRTreeFetch;
       if (!api?.addAssignees) throw new Error('Add assignees API unavailable');
+      // Pessimistic: paint assignees only after API success.
       const result = await api.addAssignees(
         base.owner,
         base.repo,
@@ -266,9 +285,7 @@ export function installPrModalMutations(d: Record<string, any>) {
         names
       );
       const fromApi = mapAssigneesFromApi(result, []);
-      // Prefer API assignees when present; always union requested names so a
-      // lagging empty body cannot wipe the optimistic write.
-      const merged = (fromApi.length ? fromApi.slice() : optimistic.slice());
+      const merged = fromApi.length ? fromApi.slice() : prevAssignees.slice();
       for (const name of names) {
         if (!merged.some((x) => String(x).toLowerCase() === name.toLowerCase())) {
           merged.push(name);
@@ -276,24 +293,20 @@ export function installPrModalMutations(d: Record<string, any>) {
       }
       const assignees = merged;
       const avatarUrls = mergeAvatarUrls(base, result, assignees);
-      // Trust write response + host cache patch only — full soft-refresh races
-      // with in-flight d.detail fetches and was resurrecting stale labels/assignees.
       commitMetaPatch(
         { assignees, avatarUrls },
         {
-          // Timeline already injected optimistically — refresh only.
-          localTimelineEvents: [],
+          localTimelineEvents: assigneeChangeTimelineEvents(
+            prevAssignees,
+            assignees,
+            timelineActorFromDetail(base)
+          ),
         }
       );
       d.setActionMsg(
         names.length === 1 ? `Assigned ${names[0]}.` : `Assigned ${names.length} people.`
       );
     } catch (err) {
-      // Roll back optimistic assignees on API failure.
-      commitMetaPatch(
-        { assignees: prevAssignees },
-        { localTimelineEvents: [], refreshTimeline: false }
-      );
       d.setActionMsg(err?.message || String(err));
     } finally {
       d.setActionBusy(false);
@@ -316,19 +329,15 @@ export function installPrModalMutations(d: Record<string, any>) {
             },
           }));
     d.pickerAnchorRef.current = d.assigneeAddRef?.current;
+    // Shared single-select surface with openReviewerPicker (not multi-Apply).
     d.setPicker({
       type: 'assignee',
-      title: 'Add assignees',
+      title: 'Add assignee',
       options,
       query: '',
       allowFreeText: true,
-      multi: true,
-      confirmLabel: 'Add assignees',
-      onConfirm: (ids: string[]) => {
-        d.closePicker();
-        void applyAddAssignees(ids);
-      },
-      // single-click fallback
+      multi: false,
+      placeholder: 'Filter or type a username…',
       onPick: (opt) => {
         d.closePicker();
         void applyAddAssignees([opt?.id || opt?.label || opt?.meta?.login]);
@@ -623,7 +632,7 @@ export function installPrModalMutations(d: Record<string, any>) {
       const next = base ? { ...base, body: nextBody } : null;
       if (next) {
         d.detailRef.current = next;
-        d.setLocalDetail(next);
+        applyDomainDetail(next);
       }
       void patchHostDetail({ body: nextBody });
     } catch (err) {
@@ -688,7 +697,7 @@ export function installPrModalMutations(d: Record<string, any>) {
       const api = globalThis.PRTreeFetch;
       if (!api?.updatePullRequest) throw new Error('Update PR API unavailable');
       await api.updatePullRequest(d.detail.owner, d.detail.repo, d.detail.number, { base: next });
-      d.setLocalDetail((prev) => (prev ? { ...prev, baseRef: next } : prev));
+      applyDomainDetail((prev) => (prev ? { ...prev, baseRef: next } : prev));
       d.setActionMsg(`Base branch changed to ${next}.`);
       await d.onRefresh?.();
     } catch (err) {
@@ -779,12 +788,15 @@ export function installPrModalMutations(d: Record<string, any>) {
             meta: { login: id, kind: 'user', avatarUrl: d.detail.avatarUrls?.[String(id).toLowerCase()] || '' },
           }));
     d.pickerAnchorRef.current = d.reviewerAddRef?.current;
+    // Shared single-select surface with openAssigneePicker (⌥1–3 quick pick).
     d.setPicker({
       type: 'reviewer',
       title: 'Add reviewer',
       options,
       query: '',
       allowFreeText: true,
+      multi: false,
+      placeholder: 'Filter or type a username…',
       onPick: (opt) => {
         d.closePicker();
         void applyAddReviewer(opt?.id || opt?.label);
@@ -906,23 +918,76 @@ export function installPrModalMutations(d: Record<string, any>) {
           ? d.discardPendingReview()
           : { comments: [], body: '' }
       );
-      // Force-drop pending across the post-discard refresh race.
-      d.forceDropPendingRef.current = true;
-      d.setLocalDetail((prev) =>
-        typeof d.stripPendingReviewFromDetail === 'function'
-          ? d.stripPendingReviewFromDetail(prev)
-          : prev
-            ? {
-                ...prev,
-                viewerPendingReview: null,
-                reviewComments: (prev.reviewComments || []).filter(
-                  (c: any) => c && !c.pending
-                ),
-              }
+      // Clear PRR_ latch so Add comment cannot re-attach to a deleted review.
+      if (d.pendingReviewNodeIdRef) {
+        d.pendingReviewNodeIdRef.current = null;
+      }
+      try {
+        if (typeof document !== 'undefined') {
+          document.documentElement.removeAttribute(
+            'data-prp-pending-review-node'
+          );
+        }
+      } catch {
+        /* ignore */
+      }
+      let stripped: any = null;
+      applyDomainDetail((prev) => {
+        stripped =
+          typeof d.stripPendingReviewFromDetail === 'function'
+            ? d.stripPendingReviewFromDetail(prev)
             : prev
-      );
+              ? {
+                  ...prev,
+                  viewerPendingReview: null,
+                  reviewComments: (prev.reviewComments || []).filter(
+                    (c: any) => c && !c.pending
+                  ),
+                }
+              : prev;
+        return stripped;
+      });
+      // Write-through host: null VPR + filtered comments (set-authority; no latch).
+      if (stripped) {
+        void patchHostDetail({
+          viewerPendingReview: null,
+          reviewComments: stripped.reviewComments,
+          ...(stripped._deletedReviewCommentIds
+            ? { _deletedReviewCommentIds: stripped._deletedReviewCommentIds }
+            : {}),
+          ...(stripped._deletedReviewBodies
+            ? { _deletedReviewBodies: stripped._deletedReviewBodies }
+            : {}),
+          ...(Object.prototype.hasOwnProperty.call(stripped, 'reviewThreads')
+            ? { reviewThreads: stripped.reviewThreads }
+            : {}),
+        });
+      }
       d.setActionMsg('Pending review discarded.');
       await d.onRefresh?.();
+      // Re-strip after refresh so a racey onRefresh/IDB write cannot leave a
+      // pre-discard snapshot. Host live PENDING (if delete failed/recreated)
+      // wins via settled set-authority on the next core/threads apply.
+      let post: any = null;
+      applyDomainDetail((prev) => {
+        post =
+          typeof d.stripPendingReviewFromDetail === 'function'
+            ? d.stripPendingReviewFromDetail(prev)
+            : prev;
+        return post;
+      });
+      if (post) {
+        void patchHostDetail({
+          viewerPendingReview: null,
+          reviewComments: post.reviewComments,
+          ...(post._deletedReviewCommentIds
+            ? { _deletedReviewCommentIds: post._deletedReviewCommentIds }
+            : {}),
+          ...(post._deletedReviewBodies
+            ? { _deletedReviewBodies: post._deletedReviewBodies }
+            : {}),
+        });
+      }
     } catch (err: any) {
       d.setActionMsg(err?.message || String(err));
     } finally {
@@ -964,8 +1029,6 @@ export function installPrModalMutations(d: Record<string, any>) {
     try {
       const api = globalThis.PRTreeFetch;
       if (!api?.replyToReviewComment) throw new Error('Reply API unavailable');
-      // Pending reply cancels a prior discard force-drop
-      if (mode === 'pending') d.forceDropPendingRef.current = false;
       const threadNodeId =
         thread?.threadNodeId || thread?.root?.threadNodeId || null;
       const parentNodeId =
@@ -990,7 +1053,6 @@ export function installPrModalMutations(d: Record<string, any>) {
         }
       );
       const isPending = Boolean(raw?.pending || mode === 'pending');
-      if (isPending) d.forceDropPendingRef.current = false;
       // Pessimistic: server-mapped reply → host write-through (no pre-paint).
       const mapped = mapRestReviewComment(raw, {
         body,
@@ -1026,7 +1088,6 @@ export function installPrModalMutations(d: Record<string, any>) {
             d.serverPendingReviewId;
           next = {
             ...withReply,
-            _dropPending: undefined,
             viewerPendingReview:
               withReply.viewerPendingReview ||
               (reviewId
@@ -1089,19 +1150,7 @@ export function installPrModalMutations(d: Record<string, any>) {
       const base = d.detailRef.current || d.detail;
       const next = stamp(base, nextResolved);
       if (!next) return;
-      d.detailRef.current = next;
-      try {
-        flushSync(() => {
-          d.setLocalDetail(next);
-        });
-      } catch {
-        d.setLocalDetail(next);
-      }
-      void patchHostDetail({
-        reviewComments: next.reviewComments,
-        reviewThreads: next.reviewThreads,
-        // Local-only stamp map is not persisted on host; keep via d.detailRef + merge.
-      });
+      applyDomainDetail(next);
     };
     try {
       const api = globalThis.PRTreeFetch;
@@ -1202,7 +1251,7 @@ export function installPrModalMutations(d: Record<string, any>) {
         mergeable: false,
         merged: false,
       };
-      d.setLocalDetail((d) => (d ? { ...d, ...closedPatch } : d));
+      applyDomainDetail((d) => (d ? { ...d, ...closedPatch } : d));
       void patchHostDetail(closedPatch);
       // Return to the pulls list (centered modal and side sheet).
       d.requestClose();
@@ -1237,14 +1286,14 @@ export function installPrModalMutations(d: Record<string, any>) {
         merged: false,
         mergeable: null as boolean | null,
       };
-      d.setLocalDetail((d) => (d ? { ...d, ...openPatch } : d));
+      applyDomainDetail((d) => (d ? { ...d, ...openPatch } : d));
       void patchHostDetail(openPatch);
       try {
         await d.onRefresh?.();
       } catch {
         /* best-effort */
       }
-      d.setLocalDetail((d) =>
+      applyDomainDetail((d) =>
         d ? { ...d, state: 'open', merged: false } : d
       );
       void patchHostDetail({ state: 'open', merged: false });
@@ -1282,7 +1331,7 @@ export function installPrModalMutations(d: Record<string, any>) {
             : [],
         [renameEv]
       );
-      d.setLocalDetail((prev) =>
+      applyDomainDetail((prev) =>
         prev
           ? {
               ...prev,
@@ -1324,7 +1373,7 @@ export function installPrModalMutations(d: Record<string, any>) {
     // Pessimistic: draft flag + host cache only after API success; re-assert after
     // refresh so SWR/IDB cannot resurrect pre-write draft.
     const applyDraft = (draft: boolean) => {
-      d.setLocalDetail((prev) => (prev ? { ...prev, draft: Boolean(draft) } : prev));
+      applyDomainDetail((prev) => (prev ? { ...prev, draft: Boolean(draft) } : prev));
       void patchHostDetail({ draft: Boolean(draft) });
     };
     d.setActionBusy(true);
@@ -1416,7 +1465,7 @@ export function installPrModalMutations(d: Record<string, any>) {
         draft: false,
       };
       const applyMerged = () => {
-        d.setLocalDetail((d) => (d ? { ...d, ...mergedPatch } : d));
+        applyDomainDetail((d) => (d ? { ...d, ...mergedPatch } : d));
         void patchHostDetail(mergedPatch);
       };
       applyMerged();
@@ -1475,7 +1524,7 @@ export function installPrModalMutations(d: Record<string, any>) {
     const nextSubscribed = Boolean(want);
     const prevSubscribed = d.detail.subscribed;
     // Optimistic UI — swap icon immediately; revert on failure
-    d.setLocalDetail((prev) =>
+    applyDomainDetail((prev) =>
       prev ? { ...prev, subscribed: nextSubscribed } : prev
     );
     void patchHostDetail({ subscribed: nextSubscribed });
@@ -1493,7 +1542,7 @@ export function installPrModalMutations(d: Record<string, any>) {
           { subscribed: true, ignored: false, nodeId }
         );
         if (result && typeof result.subscribed === 'boolean') {
-          d.setLocalDetail((prev) =>
+          applyDomainDetail((prev) =>
             prev ? { ...prev, subscribed: result.subscribed } : prev
           );
         }
@@ -1518,7 +1567,7 @@ export function installPrModalMutations(d: Record<string, any>) {
           );
         }
         if (result && typeof result.subscribed === 'boolean') {
-          d.setLocalDetail((prev) =>
+          applyDomainDetail((prev) =>
             prev ? { ...prev, subscribed: result.subscribed } : prev
           );
         }
@@ -1527,7 +1576,7 @@ export function installPrModalMutations(d: Record<string, any>) {
       d.setActionMsg('');
       // Keep optimistic value — skip full refresh (stale subscription can clobber UI)
     } catch (err) {
-      d.setLocalDetail((prev) =>
+      applyDomainDetail((prev) =>
         prev
           ? {
               ...prev,
@@ -1544,59 +1593,8 @@ export function installPrModalMutations(d: Record<string, any>) {
   }
   function commitCommentListPatch(next: any) {
     if (!next) return;
-    d.detailRef.current = next;
-    const hasBodyReactions = Object.prototype.hasOwnProperty.call(
-      next,
-      'bodyReactions'
-    );
-    try {
-      if (hasBodyReactions) {
-        flushSync(() => {
-          d.setLocalDetail(next);
-        });
-      } else {
-        d.setLocalDetail(next);
-      }
-    } catch {
-      d.setLocalDetail(next);
-    }
-    const forHost: Record<string, unknown> = {};
-    if (Object.prototype.hasOwnProperty.call(next, 'comments')) {
-      forHost.comments = next.comments;
-    }
-    if (Object.prototype.hasOwnProperty.call(next, 'commentsMeta')) {
-      forHost.commentsMeta = next.commentsMeta;
-    }
-    if (Object.prototype.hasOwnProperty.call(next, 'timelineEvents')) {
-      forHost.timelineEvents = next.timelineEvents;
-    }
-    if (Object.prototype.hasOwnProperty.call(next, 'reviewComments')) {
-      forHost.reviewComments = next.reviewComments;
-    }
-    if (Object.prototype.hasOwnProperty.call(next, 'reviewThreads')) {
-      forHost.reviewThreads = next.reviewThreads;
-    }
-    if (Object.prototype.hasOwnProperty.call(next, 'reviewCommentsMeta')) {
-      forHost.reviewCommentsMeta = next.reviewCommentsMeta;
-    }
-    if (Object.prototype.hasOwnProperty.call(next, 'reviewThreadsMeta')) {
-      forHost.reviewThreadsMeta = next.reviewThreadsMeta;
-    }
-    if (Object.prototype.hasOwnProperty.call(next, 'viewerPendingReview')) {
-      forHost.viewerPendingReview = next.viewerPendingReview ?? null;
-    }
-    if (hasBodyReactions) {
-      forHost.bodyReactions = next.bodyReactions;
-    }
-    if (Object.prototype.hasOwnProperty.call(next, 'reviews')) {
-      forHost.reviews = next.reviews;
-    }
-    if (Object.keys(forHost).length) {
-      // Defer host patch so flushSync paint is not nested inside host→props→merge.
-      queueMicrotask(() => {
-        void patchHostDetail(forHost);
-      });
-    }
+    // Host-data-first: single write path (detailRef + onPatchDetail).
+    applyDomainDetail(next);
   }
   async function onDeleteReviewComment(commentId: any) {
     if (!d.detail || commentId == null) return;

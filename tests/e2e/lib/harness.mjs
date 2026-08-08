@@ -972,7 +972,15 @@ export function activeFileLabel() {
 export function selectionProbe() {
   return evalInPage(`
     (() => {
-      const selected = [...document.querySelectorAll('.prp-vline--selected')];
+      // Body selection uses .prp-vline--selected; file-header caret uses
+      // --header-selected / data-file-selected (plain ↑ from first body line).
+      const selected = [
+        ...document.querySelectorAll(
+          '.prp-vline--selected, .prp-vline--header-selected, [data-file-selected="1"]'
+        ),
+      ];
+      // De-dupe nodes that carry both selected + header-selected
+      const uniq = [...new Set(selected)];
       const roles = {
         start: document.querySelectorAll('.prp-vline--sel-start').length,
         middle: document.querySelectorAll('.prp-vline--sel-middle').length,
@@ -991,10 +999,10 @@ export function selectionProbe() {
         .map((b) => (b.textContent || '').replace(/\\s+/g, ' ').trim())
         .filter(Boolean);
       const headerSelected = !!document.querySelector(
-        '.prp-vline--header.prp-vline--selected'
+        '.prp-vline--header.prp-vline--selected, .prp-vline--header-selected, [data-file-selected="1"]'
       );
       return {
-        count: selected.length,
+        count: uniq.length,
         roles,
         dock: !!dock,
         dockCls: dock?.className?.slice(0, 100) || null,

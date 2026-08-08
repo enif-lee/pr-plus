@@ -421,13 +421,15 @@ function VirtualDiffImpl(props: any) {
    * Visible window only — NOT scrollTop. Native overflow moves pixels between
    * row boundaries; React re-renders solely when start/end/offsetY change.
    */
+  /** Extra rows above/below viewport — larger overscan cuts blank bands on jump. */
+  const DIFF_OVERSCAN = 20;
   const [range, setRange] = useState(() =>
     calculateVisibleRange({
       totalRows: Array.isArray(virtualRows) ? virtualRows.length : 0,
       rowHeight: ROW_HEIGHT,
       viewportHeight: Math.max(120, Number(viewportHeight) || 520),
       scrollTop: initialTop,
-      overscan: 8,
+      overscan: DIFF_OVERSCAN,
     })
   );
   /**
@@ -496,7 +498,7 @@ function VirtualDiffImpl(props: any) {
     virtualRows,
   };
 
-  const applyScrollTop = useCallback((scrollTop: number, overscan = 8) => {
+  const applyScrollTop = useCallback((scrollTop: number, overscan = DIFF_OVERSCAN) => {
     const m = metricsRef.current;
     const top = Math.max(0, scrollTop);
     const next = calculateVisibleRange({
@@ -645,12 +647,13 @@ function VirtualDiffImpl(props: any) {
     prevScrollTopPropRef.current = scrollTopProp;
 
     // Programmatic jump from App: force DOM scrollTop then recompute window.
+    // Larger overscan on jumps pre-renders neighbors → fewer blank bands.
     if (propChanged && propTop != null) {
       programmaticTopRef.current = propTop;
       if (el) el.scrollTop = propTop;
       pendingScrollRef.current = propTop;
       prevOffsetsRef.current = offsets;
-      applyScrollTop(propTop);
+      applyScrollTop(propTop, Math.max(DIFF_OVERSCAN, 32));
       return;
     }
 
@@ -664,7 +667,7 @@ function VirtualDiffImpl(props: any) {
       el.scrollTop = held;
       pendingScrollRef.current = held;
       prevOffsetsRef.current = offsets;
-      applyScrollTop(held);
+      applyScrollTop(held, Math.max(DIFF_OVERSCAN, 32));
       return;
     }
 

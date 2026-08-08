@@ -247,10 +247,15 @@ export function parseGotoQuery(raw: unknown): {
 
   const parts = s.split(':');
   if (parts.length === 1) {
-    if (!/^\d+$/.test(parts[0])) return null;
-    const startLine = Number(parts[0]);
-    if (!Number.isFinite(startLine) || startLine < 1) return null;
-    return { path: null, startLine, endLine: null };
+    if (/^\d+$/.test(parts[0])) {
+      const startLine = Number(parts[0]);
+      if (!Number.isFinite(startLine) || startLine < 1) return null;
+      return { path: null, startLine, endLine: null };
+    }
+    // Bare path (Diff Goto file pick) — jump to file top (line 1)
+    const pathOnly = parts[0].trim();
+    if (!pathOnly) return null;
+    return { path: pathOnly, startLine: 1, endLine: null };
   }
 
   const last = parts[parts.length - 1];

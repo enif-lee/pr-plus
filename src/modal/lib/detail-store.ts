@@ -2,7 +2,25 @@
  * Isolated progressive PR detail store (TypeScript ESM).
  * Source of truth for slice isolation; content-script pure twin stays for MV3 order.
  */
-import { reconcileReviewCommentsAgainstRemote } from './stale-local-review';
+import {
+  detailHasViewerPending,
+  filterCacheReviewCommentsForCore,
+  hydrateDiscardedPendingBodies,
+  isDiscardedPendingBody,
+  mergeCommentsHostFirst,
+  reconcileReviewCommentsAgainstRemote,
+  stripOrphanPendingReviewComments,
+} from './stale-local-review';
+
+// Host (open-modal / refresh) reads these from globalThis.PRModalDetailStore.
+export {
+  detailHasViewerPending,
+  filterCacheReviewCommentsForCore,
+  hydrateDiscardedPendingBodies,
+  isDiscardedPendingBody,
+  mergeCommentsHostFirst,
+  stripOrphanPendingReviewComments,
+} from './stale-local-review';
 
 export const META_KEYS = [
   'owner',
@@ -115,6 +133,10 @@ export function createEmptyStore() {
       settled: false,
     },
     pendingReview: null,
+    /** Tombstones from Discard / single delete — survive toAppDetail projection. */
+    deletedReviewCommentIds: null as string[] | null,
+    deletedReviewBodies: null as string[] | null,
+    dropPending: false,
     flags: {
       sketch: false,
       source: null,
@@ -486,22 +508,86 @@ export function fromAppDetail(flat) {
       (Array.isArray(flat.linkedIssues) && flat.linkedIssues.length > 0),
   };
 
+  // Host-data-first: live VPR / pending rows in the snapshot win over any
+  // durable drop latch left in IDB after a prior Discard.
+  hydrateDiscardedPendingBodies(flat);
+  let deletedIds = new Set<string>();
+  if (flat._deletedReviewCommentIds != null) {
+    const src = flat._deletedReviewCommentIds;
+    if (src instanceof Set) {
+      for (const id of src) deletedIds.add(String(id));
+    } else if (Array.isArray(src)) {
+      for (const id of src) if (id != null) deletedIds.add(String(id));
+    }
+  }
+  let reviewComments = Array.isArray(flat.reviewComments)
+    ? flat.reviewComments.slice()
+    : [];
+  const liveVpr = Boolean(flat.viewerPendingReview?.id);
+  // Settled set-authority: no VPR ⇒ pending comment set empty (no durable latch).
+  // Live VPR / pending rows are host SoT and never tombstoned away.
+
+  reviewComments = reviewComments.filter((c: any) => {
+    if (!c || c.id == null) return false;
+    if (c.pending && liveVpr) {
+      deletedIds.delete(String(c.id));
+      return true;
+    }
+    if (deletedIds.has(String(c.id)) && !(c.pending && liveVpr)) return false;
+    if (!liveVpr && isDiscardedPendingBody(flat, c?.body)) {
+      deletedIds.add(String(c.id));
+      return false;
+    }
+    return true;
+  });
+
+  if (!liveVpr) {
+    reviewComments = reviewComments.filter((c: any) => {
+      if (!c || c.id == null) return false;
+      if (c.pending) {
+        deletedIds.add(String(c.id));
+        return false;
+      }
+      if (
+        c.pendingReviewId != null &&
+        String(c.pendingReviewId).trim() !== '' &&
+        String(c.pendingReviewId) !== '0'
+      ) {
+        deletedIds.add(String(c.id));
+        return false;
+      }
+      return true;
+    });
+  }
+
+  const remainingPending = reviewComments.some((c: any) => c && c.pending);
+  const hasVpr = liveVpr;
+
   const hasThreads =
     (Array.isArray(flat.reviewThreads) && flat.reviewThreads.length > 0) ||
-    (Array.isArray(flat.reviewComments) && flat.reviewComments.length > 0);
+    reviewComments.length > 0;
   store.threads = {
     reviewThreads: Array.isArray(flat.reviewThreads)
       ? flat.reviewThreads.slice()
       : [],
-    reviewComments: Array.isArray(flat.reviewComments)
-      ? flat.reviewComments.slice()
-      : [],
+    reviewComments,
     reviewThreadsMeta: flat.reviewThreadsMeta || null,
     reviewCommentsMeta: flat.reviewCommentsMeta || null,
     settled: hasThreads,
   };
 
-  store.pendingReview = flat.viewerPendingReview || null;
+  // Prefer VPR only when pending rows remain (avoids dead PRR latch after Discard).
+  store.pendingReview = remainingPending
+    ? flat.viewerPendingReview || {
+        id: reviewComments.find((c: any) => c?.pending)?.pendingReviewId,
+      }
+    : null;
+  store.deletedReviewCommentIds = deletedIds.size ? [...deletedIds] : null;
+  store.deletedReviewBodies = Array.isArray(flat._deletedReviewBodies)
+    ? flat._deletedReviewBodies.map(String)
+    : null;
+  // Durable drop latch removed — always false (set-authority + tombs only).
+  store.dropPending = false;
   return store;
 }
 
@@ -568,6 +654,12 @@ export function toAppDetail(store) {
     _cacheFull: store.flags?.cacheFull ? true : undefined,
     _incompleteIdentity:
       m.owner == null || m.repo == null || m.number == null ? true : undefined,
+    _deletedReviewCommentIds: Array.isArray(store.deletedReviewCommentIds)
+      ? store.deletedReviewCommentIds.slice()
+      : undefined,
+    _deletedReviewBodies: Array.isArray(store.deletedReviewBodies)
+      ? store.deletedReviewBodies.slice()
+      : undefined,
   };
 }
 
@@ -840,8 +932,30 @@ export function mergeProgressiveSidesIntoFlat(prevFlat: any, nextFlat: any): any
     if (prevFlat.reviewCommentsMeta != null) {
       out.reviewCommentsMeta = prevFlat.reviewCommentsMeta;
     }
-    if (prevFlat.viewerPendingReview !== undefined) {
-      out.viewerPendingReview = prevFlat.viewerPendingReview;
+    // PENDING: do not resurrect discarded viewer pending from longer local/IDB
+    // prev when next has no PENDING signal (post-Discard/Submit network/core).
+    // Sparse sketches that omit viewerPendingReview still keep prev.
+    const nextHasPendingReview = Boolean(nextFlat.viewerPendingReview?.id);
+    const nextHasPendingComments = nextRc.some((c: any) => c && c.pending);
+    const nextExplicitNoPending =
+      Object.prototype.hasOwnProperty.call(nextFlat, 'viewerPendingReview') &&
+      !nextHasPendingReview &&
+      !nextHasPendingComments;
+    if (nextExplicitNoPending) {
+      out.viewerPendingReview = null;
+      const rc = Array.isArray(out.reviewComments) ? out.reviewComments : [];
+      out.reviewComments = rc.filter((c: any) => c && !c.pending);
+    } else if (
+      prevFlat.viewerPendingReview !== undefined &&
+      (nextHasPendingReview ||
+        nextHasPendingComments ||
+        !Object.prototype.hasOwnProperty.call(nextFlat, 'viewerPendingReview'))
+    ) {
+      // Keep prev pending only when next still shows PENDING or omitted the field.
+      out.viewerPendingReview =
+        nextFlat.viewerPendingReview !== undefined
+          ? nextFlat.viewerPendingReview
+          : prevFlat.viewerPendingReview;
     }
   }
 
@@ -923,13 +1037,81 @@ export function applyDevelopment(store, dev, opts: ApplyOpts = {}) {
  */
 export function applyThreadsFromMergedDetail(store, mergedFlat) {
   if (!store || !mergedFlat) return store;
+  const deleted = new Set(
+    Array.isArray(store.deletedReviewCommentIds)
+      ? store.deletedReviewCommentIds.map(String)
+      : []
+  );
+  let reviewComments = Array.isArray(mergedFlat.reviewComments)
+    ? mergedFlat.reviewComments.slice()
+    : store.threads.reviewComments;
+  const livePending =
+    detailHasViewerPending(mergedFlat) ||
+    (Array.isArray(reviewComments) &&
+      reviewComments.some((c: any) => c && c.pending));
+  // Host-data-first: live PENDING clears any id tombs for those rows.
+  if (livePending) {
+    store.dropPending = false;
+    for (const c of reviewComments || []) {
+      if (c?.pending && c.id != null) deleted.delete(String(c.id));
+    }
+  }
+  const noVpr = !(
+    store.pendingReview?.id ||
+    mergedFlat.viewerPendingReview?.id ||
+    livePending
+  );
+  if (deleted.size || noVpr) {
+    reviewComments = (Array.isArray(reviewComments) ? reviewComments : []).filter(
+      (c: any) => {
+        if (!c || c.id == null) return false;
+        // Live pending from host is SoT — never drop.
+        if (c.pending && livePending) {
+          deleted.delete(String(c.id));
+          return true;
+        }
+        if (deleted.has(String(c.id))) return false;
+        if (
+          !c.pending &&
+          (isDiscardedPendingBody(mergedFlat, c.body) ||
+            isDiscardedPendingBody(
+              {
+                owner: store.meta?.owner,
+                repo: store.meta?.repo,
+                number: store.meta?.number,
+                _deletedReviewBodies: store.deletedReviewBodies,
+              },
+              c.body
+            ))
+        ) {
+          deleted.add(String(c.id));
+          return false;
+        }
+        if (noVpr && c.pending) {
+          deleted.add(String(c.id));
+          return false;
+        }
+        if (
+          noVpr &&
+          c.pendingReviewId != null &&
+          String(c.pendingReviewId).trim() !== '' &&
+          String(c.pendingReviewId) !== '0'
+        ) {
+          deleted.add(String(c.id));
+          return false;
+        }
+        return true;
+      }
+    );
+    if (deleted.size) {
+      store.deletedReviewCommentIds = [...deleted];
+    }
+  }
   store.threads = {
     reviewThreads: Array.isArray(mergedFlat.reviewThreads)
       ? mergedFlat.reviewThreads.slice()
       : store.threads.reviewThreads,
-    reviewComments: Array.isArray(mergedFlat.reviewComments)
-      ? mergedFlat.reviewComments.slice()
-      : store.threads.reviewComments,
+    reviewComments,
     reviewThreadsMeta:
       mergedFlat.reviewThreadsMeta != null
         ? mergedFlat.reviewThreadsMeta
@@ -942,18 +1124,97 @@ export function applyThreadsFromMergedDetail(store, mergedFlat) {
       store.threads.settled ||
       (Array.isArray(mergedFlat.reviewThreads) &&
         mergedFlat.reviewThreads.length > 0) ||
-      (Array.isArray(mergedFlat.reviewComments) &&
-        mergedFlat.reviewComments.length > 0),
+      (Array.isArray(reviewComments) && reviewComments.length > 0),
   };
   if (mergedFlat.viewerPendingReview !== undefined) {
-    store.pendingReview = mergedFlat.viewerPendingReview;
+    store.pendingReview = noVpr ? null : mergedFlat.viewerPendingReview;
+  } else if (livePending && !store.pendingReview) {
+    const pid = (reviewComments || []).find((c: any) => c?.pending)?.pendingReviewId;
+    if (pid != null) store.pendingReview = { id: pid };
   }
+  store.dropPending = false;
   return store;
 }
 
 export function applyPendingReview(store, pending) {
   if (!store) return store;
   store.pendingReview = pending || null;
+  return store;
+}
+
+/** Merge discard tombstones onto the store (partial App patches). */
+export function applyDiscardTombstones(store, flat) {
+  if (!store || !flat) return store;
+  hydrateDiscardedPendingBodies(flat);
+  if (flat._deletedReviewCommentIds != null) {
+    const src = flat._deletedReviewCommentIds;
+    const next = new Set(
+      Array.isArray(store.deletedReviewCommentIds)
+        ? store.deletedReviewCommentIds.map(String)
+        : []
+    );
+    if (src instanceof Set) {
+      for (const id of src) next.add(String(id));
+    } else if (Array.isArray(src)) {
+      for (const id of src) if (id != null) next.add(String(id));
+    }
+    store.deletedReviewCommentIds = next.size ? [...next] : null;
+  }
+  if (flat._deletedReviewBodies != null) {
+    const bodies = new Set(
+      Array.isArray(store.deletedReviewBodies)
+        ? store.deletedReviewBodies.map(String)
+        : []
+    );
+    const src = flat._deletedReviewBodies;
+    if (Array.isArray(src)) {
+      for (const b of src) {
+        const t = String(b || '').trim();
+        if (t) bodies.add(t);
+      }
+    }
+    store.deletedReviewBodies = bodies.size ? [...bodies] : null;
+  }
+  // Host-first: live VPR / pending on the patch is SoT (Start/Add).
+  const patchLivePending =
+    Boolean(flat.viewerPendingReview?.id) ||
+    (Array.isArray(flat.reviewComments) &&
+      flat.reviewComments.some((c: any) => c && c.pending));
+  // Drop demoted (non-pending) rows matching id/body tombs — never live pending.
+  if (Array.isArray(store.threads?.reviewComments)) {
+    const ids = new Set(
+      (store.deletedReviewCommentIds || []).map(String)
+    );
+    const bodies = new Set(
+      (store.deletedReviewBodies || []).map((b) => String(b).trim())
+    );
+    store.threads.reviewComments = store.threads.reviewComments.filter(
+      (c: any) => {
+        if (!c || c.id == null) return false;
+        if (c.pending && patchLivePending) return true;
+        if (c.pending && !patchLivePending && flat.viewerPendingReview === null) {
+          return false;
+        }
+        if (ids.has(String(c.id)) && !(c.pending && patchLivePending)) return false;
+        const body = String(c.body || '').trim();
+        if (body && bodies.has(body) && !c.pending) return false;
+        return true;
+      }
+    );
+  }
+  // Explicit discard strip: VPR null on patch (no durable _dropPending latch).
+  if (flat.viewerPendingReview === null && !patchLivePending) {
+    store.pendingReview = null;
+    if (Array.isArray(store.threads?.reviewComments)) {
+      store.threads.reviewComments = store.threads.reviewComments.filter(
+        (c: any) => c && !c.pending
+      );
+    }
+  }
+  if (flat.viewerPendingReview?.id) {
+    store.pendingReview = flat.viewerPendingReview;
+  }
+  store.dropPending = false;
   return store;
 }
 
@@ -1033,6 +1294,18 @@ export function applyCorePayload(store, coreFlat, opts: ApplyOpts = {}) {
   }
   if (coreFlat.viewerPendingReview !== undefined) {
     applyPendingReview(store, coreFlat.viewerPendingReview);
+    store.dropPending = false;
+    if (!coreFlat.viewerPendingReview?.id) {
+      // Settled core: no PENDING → drop orphan pending rows (set-authority).
+      const rc = Array.isArray(store.threads?.reviewComments)
+        ? store.threads.reviewComments
+        : [];
+      if (rc.some((c: any) => c && c.pending)) {
+        store.threads.reviewComments = rc.filter(
+          (c: any) => c && !c.pending
+        );
+      }
+    }
   }
   // Core may include first-page threads when not skipped — optional
   if (
@@ -1040,6 +1313,20 @@ export function applyCorePayload(store, coreFlat, opts: ApplyOpts = {}) {
     (Array.isArray(coreFlat.reviewComments) && coreFlat.reviewComments.length)
   ) {
     applyThreadsFromMergedDetail(store, coreFlat);
+    // After threads apply, still drop orphan pending if core cleared vpr
+    if (
+      coreFlat.viewerPendingReview !== undefined &&
+      !coreFlat.viewerPendingReview?.id
+    ) {
+      const rc = Array.isArray(store.threads?.reviewComments)
+        ? store.threads.reviewComments
+        : [];
+      if (rc.some((c: any) => c && c.pending)) {
+        store.threads.reviewComments = rc.filter(
+          (c: any) => c && !c.pending
+        );
+      }
+    }
   }
   return store;
 }

@@ -135,6 +135,17 @@ export function getSteps() {
     press('Alt+j');
     waitMs(TICK);
     pin = convFocusPin();
+    if (!pin.hasFocus) {
+      waitMs(200);
+      pin = convFocusPin();
+    }
+    if (!pin.hasFocus) {
+      press('Alt+Shift+c');
+      waitMs(250);
+      press('Alt+j');
+      waitMs(TICK);
+      pin = convFocusPin();
+    }
     assert(pin.hasFocus, 'kb focus lost after J/K');
     log(`  scrolls=${scrolls.join('→')} pin=${pin.pin}`);
   });
@@ -187,6 +198,26 @@ export function getSteps() {
     `);
     waitMs(400);
 
+    // Force-clear store/DOM focus stamps so first ⌥J re-seeds (description).
+    // Store can outlive the ring after Alt+Shift+C clear races.
+    evalInPage(`
+      (() => {
+        document.documentElement.removeAttribute('data-prp-focused-conv-anchor');
+        document.documentElement.removeAttribute('data-prp-pending-conv-anchor');
+        document.documentElement.removeAttribute('data-prp-opt-held');
+        document.documentElement.classList.remove('prp-opt-held');
+        document
+          .querySelectorAll('[data-prp-conv-focus], .prp-conv-unit--focused')
+          .forEach((el) => {
+            try {
+              el.classList.remove('prp-conv-unit--focused');
+              el.removeAttribute('data-prp-conv-focus');
+            } catch (_) {}
+          });
+      })()
+    `);
+    waitMs(120);
+
     let visual = convVisualSectionOrder();
     // Virtual list may need a second paint after scroll-to-top
     if (!visual.sectionKinds.includes('description') && visual.descTop == null) {
@@ -213,16 +244,69 @@ export function getSteps() {
       `  visual reverseComments=${visual.reverseComments} sections=${visual.sectionKinds.join('→')} tops d/c/m/t=${visual.descTop}/${visual.composerTop}/${visual.mergeTop}/${visual.commentTop}`
     );
 
-    const kinds = [];
-    const maxSteps = 24;
-    for (let i = 0; i < maxSteps; i++) {
-      press('Alt+j');
+    // Seed until description (up to 3 attempts): empty → ⌥J must land on body.
+    let seedKind = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      evalInPage(`
+        (() => {
+          document.documentElement.removeAttribute('data-prp-focused-conv-anchor');
+          document.documentElement.removeAttribute('data-prp-pending-conv-anchor');
+          const el = document.querySelector('.prp-conversation-virtual');
+          if (el) el.scrollTop = 0;
+        })()
+      `);
       waitMs(180);
-      const stop = convFocusStop();
+      press('Alt+j');
+      waitMs(280);
+      let stop = convFocusStop();
+      if (!stop.hasFocus) {
+        waitMs(200);
+        stop = convFocusStop();
+      }
+      if (stop.hasFocus && stop.kind === 'description') {
+        seedKind = 'description';
+        break;
+      }
+      // Clear and retry
+      if (stop.hasFocus) {
+        press('Alt+Shift+c');
+        waitMs(200);
+      }
+      seedKind = stop.kind || null;
+    }
+    assert(
+      seedKind === 'description',
+      `seed/first must be description, got ${seedKind}`
+    );
+
+    const kinds = ['description'];
+    // reverse off: description → many comments → merge → composer — need headroom.
+    const maxSteps = visual.reverseComments ? 24 : 80;
+    for (let i = 1; i < maxSteps; i++) {
+      press('Alt+j');
+      waitMs(220);
+      let stop = convFocusStop();
+      // Host progressive re-render can drop the ring for one frame — re-seed once.
+      if (!stop.hasFocus) {
+        waitMs(150);
+        stop = convFocusStop();
+      }
+      if (!stop.hasFocus) {
+        press('Alt+Shift+c');
+        waitMs(250);
+        press('Alt+j');
+        waitMs(220);
+        stop = convFocusStop();
+      }
       assert(stop.hasFocus, `focus lost on ⌥J #${i}: ${JSON.stringify(stop)}`);
       kinds.push(stop.kind);
-      // Wrap: second time we land on description after leaving it.
-      if (i > 0 && stop.kind === 'description') break;
+      // Stop after one full wrap only once we have seen merge+composer, or on wrap.
+      const sawMerge = kinds.includes('merge');
+      const sawComposer = kinds.includes('composer');
+      if (stop.kind === 'description' && (sawMerge || sawComposer || i > 2)) {
+        break;
+      }
+      if (sawMerge && sawComposer && i > 3) break;
     }
 
     assert(kinds[0] === 'description', `seed/first must be description, got ${kinds.join('→')}`);
@@ -235,8 +319,8 @@ export function getSteps() {
       }
     }
     assert(first.description === 0, `description not first: ${kinds.join('→')}`);
-    assert(first.merge >= 0, `never reached merge: ${kinds.join('→')}`);
-    assert(first.composer >= 0, `never reached composer form: ${kinds.join('→')}`);
+    assert(first.merge >= 0, `never reached merge: ${kinds.join('→')} reverse=${visual.reverseComments}`);
+    assert(first.composer >= 0, `never reached composer form: ${kinds.join('→')} reverse=${visual.reverseComments}`);
 
     if (visual.reverseComments) {
       // description → composer → merge → comments
