@@ -654,7 +654,27 @@ export function installPrModalMutations(d: Record<string, any>) {
         await api.editIssueComment(d.detail.owner, d.detail.repo, id, nextBody);
       } else {
         if (!api?.editReviewComment) throw new Error('Edit review comment API unavailable');
-        await api.editReviewComment(d.detail.owner, d.detail.repo, id, nextBody);
+        // PENDING review comments 404 on REST PATCH — pass PRRC_ nodeId for GraphQL.
+        const list = Array.isArray(d.detail.reviewComments)
+          ? d.detail.reviewComments
+          : [];
+        const row = list.find(
+          (c: any) => c && String(c.id) === String(id)
+        );
+        const nodeId =
+          row?.nodeId ||
+          row?.node_id ||
+          null;
+        await api.editReviewComment(
+          d.detail.owner,
+          d.detail.repo,
+          id,
+          nextBody,
+          {
+            nodeId: nodeId || undefined,
+            pullNumber: d.detail.number,
+          }
+        );
       }
       d.setEditingComment(null);
       d.setActionMsg('Comment updated.');

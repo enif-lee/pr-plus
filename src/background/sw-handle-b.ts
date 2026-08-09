@@ -40,7 +40,13 @@ export async function handleMessagePartB(message: any): Promise<any> {
         message.commentId,
         message.body,
         fetchImpl(),
-        token, apiCtx);
+        token,
+        apiCtx,
+        {
+          nodeId: message.nodeId || null,
+          pullNumber: message.pullNumber ?? message.number ?? null,
+        }
+      );
       return { ok: true, result };
     }
     case MSG.REQUEST_REVIEWERS: {

@@ -9043,14 +9043,165 @@ async function editIssueComment(owner, repo, commentId, body, fetchImpl, token, 
     { method: "PATCH", body: { body: String(body || "") } }
   );
 }
-async function editReviewComment(owner, repo, commentId, body, fetchImpl, token, ctx = null) {
+async function resolveReviewCommentNodeId(owner, repo, commentId, fetchImpl, token, ctx) {
+  const idNum = Number(commentId);
+  if (!Number.isFinite(idNum) || idNum <= 0) return null;
+  try {
+    const raw = await apiJson(
+      githubRestUrl(`/repos/${owner}/${repo}/pulls/comments/${idNum}`, ctx),
+      fetchImpl,
+      token
+    );
+    if (raw?.node_id && /^PRRC_/i.test(String(raw.node_id))) {
+      return String(raw.node_id);
+    }
+  } catch {
+  }
+  try {
+    const data = await apiGraphql(
+      `query ResolveReviewCommentNode($owner:String!,$name:String!,$number:Int!) {
+        repository(owner:$owner, name:$name) {
+          pullRequest(number:$number) {
+            reviews(last:10, states:[PENDING]) {
+              nodes {
+                comments(last:50) {
+                  nodes { id databaseId }
+                }
+              }
+            }
+          }
+        }
+      }`,
+      {
+        owner: String(owner || ""),
+        name: String(repo || ""),
+        number: Number(ctx?.pullNumber) || 0
+      },
+      fetchImpl,
+      token,
+      ctx
+    );
+    const nodes = data?.repository?.pullRequest?.reviews?.nodes || [];
+    for (const rev of nodes) {
+      for (const c of rev?.comments?.nodes || []) {
+        if (Number(c?.databaseId) === idNum && c?.id) return String(c.id);
+      }
+    }
+  } catch {
+  }
+  try {
+    const reviews = await apiJson(
+      githubRestUrl(`/repos/${owner}/${repo}/pulls/comments?per_page=100`, ctx),
+      fetchImpl,
+      token
+    );
+  } catch {
+  }
+  try {
+    const revs = await apiJson(
+      githubRestUrl(
+        `/repos/${owner}/${repo}/pulls/${Number(ctx?.pullNumber) || 0}/reviews?per_page=100`,
+        ctx
+      ),
+      fetchImpl,
+      token
+    );
+    const pending = (Array.isArray(revs) ? revs : []).filter(
+      (r) => String(r?.state || "").toUpperCase() === "PENDING"
+    );
+    for (const r of pending) {
+      try {
+        const comments = await apiJson(
+          githubRestUrl(
+            `/repos/${owner}/${repo}/pulls/${Number(ctx?.pullNumber) || 0}/reviews/${r.id}/comments?per_page=100`,
+            ctx
+          ),
+          fetchImpl,
+          token
+        );
+        const hit = (Array.isArray(comments) ? comments : []).find(
+          (c) => Number(c?.id) === idNum
+        );
+        if (hit?.node_id && /^PRRC_/i.test(String(hit.node_id))) {
+          return String(hit.node_id);
+        }
+      } catch {
+      }
+    }
+  } catch {
+  }
+  return null;
+}
+async function editReviewComment(owner, repo, commentId, body, fetchImpl, token, ctx = null, opts = null) {
   ctx = normalizeApiCtx(ctx);
-  return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/pulls/comments/${commentId}`, ctx),
-    fetchImpl,
-    token,
-    { method: "PATCH", body: { body: String(body || "") } }
-  );
+  const nextBody = String(body || "");
+  const nodeIdRaw = opts?.nodeId != null && String(opts.nodeId).trim() ? String(opts.nodeId).trim() : "";
+  const preferGraphql = /^PRRC_/i.test(nodeIdRaw);
+  if (opts?.pullNumber != null && Number.isFinite(Number(opts.pullNumber))) {
+    ctx = { ...ctx, pullNumber: Number(opts.pullNumber) };
+  }
+  async function viaGraphql(nodeId) {
+    const data = await apiGraphql(
+      `mutation UpdatePullRequestReviewComment($id: ID!, $body: String!) {
+        updatePullRequestReviewComment(
+          input: { pullRequestReviewCommentId: $id, body: $body }
+        ) {
+          pullRequestReviewComment {
+            databaseId
+            body
+            id
+          }
+        }
+      }`,
+      { id: nodeId, body: nextBody },
+      fetchImpl,
+      token,
+      ctx
+    );
+    const node = data?.updatePullRequestReviewComment?.pullRequestReviewComment || null;
+    if (!node) {
+      throw new Error("GraphQL updatePullRequestReviewComment returned empty");
+    }
+    return {
+      id: node.databaseId ?? commentId,
+      body: node.body ?? nextBody,
+      node_id: node.id || nodeId,
+      nodeId: node.id || nodeId
+    };
+  }
+  if (preferGraphql) {
+    return viaGraphql(nodeIdRaw);
+  }
+  try {
+    return await apiSend(
+      githubRestUrl(`/repos/${owner}/${repo}/pulls/comments/${commentId}`, ctx),
+      fetchImpl,
+      token,
+      { method: "PATCH", body: { body: nextBody } }
+    );
+  } catch (err) {
+    const status = Number(err?.status || err?.statusCode || 0);
+    const msg = String(err?.message || err || "");
+    const is404 = status === 404 || /\b404\b/.test(msg) || /not\s*found/i.test(msg);
+    if (!is404) throw err;
+    let nodeId = nodeIdRaw;
+    if (!/^PRRC_/i.test(nodeId)) {
+      nodeId = await resolveReviewCommentNodeId(
+        owner,
+        repo,
+        commentId,
+        fetchImpl,
+        token,
+        ctx
+      ) || "";
+    }
+    if (!/^PRRC_/i.test(nodeId)) {
+      throw new Error(
+        `GitHub API 404 editing review comment ${commentId} (pending comments need GraphQL). Could not resolve PRRC_ node id \u2014 refresh and retry.`
+      );
+    }
+    return viaGraphql(nodeId);
+  }
 }
 async function requestReviewers(owner, repo, pullNumber, { reviewers = [], teamReviewers = [] }, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
@@ -13281,7 +13432,11 @@ async function handleMessagePartB(message) {
         message.body,
         fetchImpl(),
         token,
-        apiCtx
+        apiCtx,
+        {
+          nodeId: message.nodeId || null,
+          pullNumber: message.pullNumber ?? message.number ?? null
+        }
       );
       return { ok: true, result };
     }

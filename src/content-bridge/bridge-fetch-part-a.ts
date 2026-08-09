@@ -612,13 +612,21 @@ export const prTreeFetchPartA = {
     }
     return res.result;
   },
-  async editReviewComment(owner, repo, commentId, body) {
+  async editReviewComment(owner, repo, commentId, body, opts = null) {
+    const o = opts && typeof opts === 'object' ? opts : {};
+    const nodeId = o.nodeId != null ? String(o.nodeId) : null;
+    const pullNumber =
+      o.pullNumber != null && Number.isFinite(Number(o.pullNumber))
+        ? Number(o.pullNumber)
+        : null;
     const res = await send({
       type: 'PR_TREE_EDIT_REVIEW_COMMENT',
       owner,
       repo,
       commentId,
       body,
+      nodeId,
+      pullNumber,
     });
     if (!res?.ok) {
       const err = new Error(res?.error || 'Failed to edit review comment');
