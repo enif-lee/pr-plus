@@ -226,6 +226,8 @@ export function mergeDetailPreserveOptimistic(prev: any, next: any): any {
     // Host-polluted ghost is not GitHub SoT — drop even when present in next
     if (isUnverifiedLocalOnlyReviewComment(c)) continue;
     // After Discard (host empty): do not accept demoted pending ghosts.
+    // After Submit strip (null VPR, no id tombs): host re-sends the same
+    // comment ids as published (pending:false) — must accept those.
     if (dropping) {
       if (c.pending) {
         deletedReviewIds.add(key);
@@ -244,8 +246,9 @@ export function mergeDetailPreserveOptimistic(prev: any, next: any): any {
         continue;
       }
       const prevHad = prevRc.find((p) => p && String(p.id) === key);
-      // Host-only or was-pending during drop window → tombstone, never paint
-      if (!prevHad || prevHad.pending) {
+      // Was still pending on prev during a discard window — block demoted reinject.
+      // Do NOT drop clean host-only published rows (post-submit full refresh).
+      if (prevHad?.pending) {
         deletedReviewIds.add(key);
         continue;
       }
@@ -666,24 +669,38 @@ function mergeSideSettledFlags(
 }
 
 /**
- * Remove all PENDING review comments/replies and clear viewerPendingReview
- * (post-API discard strip). No durable `_dropPending` latch — host settled
- * set-authority (null VPR) + id/body tombstones block demote lag ghosts.
+ * Remove all PENDING review comments/replies and clear viewerPendingReview.
+ *
+ * @param detail
+ * @param opts.mode
+ *   - `'discard'` (default): id + body tombstones so demoted host races cannot
+ *     reinject deleted pending comments.
+ *   - `'submit'`: strip pending chrome only — **do not** tombstone ids/bodies.
+ *     Submit keeps the same REST comment ids as published rows; tombstoning
+ *     would block post-submit refresh from painting Diff/Conversation.
+ *     No durable `_dropPending` latch.
  */
-export function stripPendingReviewFromDetail(detail: any): any {
+export function stripPendingReviewFromDetail(
+  detail: any,
+  opts?: { mode?: 'discard' | 'submit' } | null
+): any {
   if (!detail) return detail;
+  const mode = opts?.mode === 'submit' ? 'submit' : 'discard';
   const list = Array.isArray(detail.reviewComments) ? detail.reviewComments : [];
   const pendingRows = list.filter((c) => c && c.pending);
   const pendingIds = pendingRows
     .filter((c) => c.id != null)
     .map((c) => String(c.id));
-  const pendingBodies = pendingRows.map((c) => String(c.body || '').trim()).filter(Boolean);
-  const deleted = new Set([
-    ...idSetFrom(detail._deletedReviewCommentIds),
-    ...pendingIds,
-  ]);
+  const pendingBodies = pendingRows
+    .map((c) => String(c.body || '').trim())
+    .filter(Boolean);
+  // Submit: keep prior tombs only — never add submitted ids (they reappear published).
+  const deleted = new Set([...idSetFrom(detail._deletedReviewCommentIds)]);
+  if (mode === 'discard') {
+    for (const id of pendingIds) deleted.add(id);
+  }
   // Also drop demoted orphans already missing pending but matching pendingReviewId
-  // of the cleared viewer pending review.
+  // of the cleared viewer pending review (discard only).
   const vprId =
     detail.viewerPendingReview?.id != null
       ? String(detail.viewerPendingReview.id)
@@ -693,11 +710,22 @@ export function stripPendingReviewFromDetail(detail: any): any {
     if (c.pending) return false;
     if (deleted.has(String(c.id))) return false;
     if (
+      mode === 'discard' &&
       vprId &&
       c.pendingReviewId != null &&
       String(c.pendingReviewId) === vprId
     ) {
       deleted.add(String(c.id));
+      return false;
+    }
+    // Submit: drop demoted rows still tagged with the submitted review id so
+    // only the post-refresh published host snapshot repaints them.
+    if (
+      mode === 'submit' &&
+      vprId &&
+      c.pendingReviewId != null &&
+      String(c.pendingReviewId) === vprId
+    ) {
       return false;
     }
     return true;
@@ -712,7 +740,8 @@ export function stripPendingReviewFromDetail(detail: any): any {
   if (Object.prototype.hasOwnProperty.call(out, '_dropPending')) {
     delete out._dropPending;
   }
-  if (pendingBodies.length) {
+  // Body tombs only on discard (submit reuses the same bodies as published).
+  if (mode === 'discard' && pendingBodies.length) {
     noteDiscardedPendingBodies(out, pendingBodies);
   }
   return out;

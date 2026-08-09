@@ -198,13 +198,21 @@ export function installReviewActions(d: Record<string, any>) {
       } catch {
         /* ignore */
       }
+      // Clear pending chrome only — mode 'submit' does NOT tombstone comment ids
+      // (those ids become the published Diff/Conversation rows after refresh).
       const apply =
         d.applyDomainDetail || d.applyDomainDetailToHost;
       apply?.((prev: any) =>
         typeof d.stripPendingReviewFromDetail === 'function'
-          ? d.stripPendingReviewFromDetail(prev)
+          ? d.stripPendingReviewFromDetail(prev, { mode: 'submit' })
           : prev
-            ? { ...prev, viewerPendingReview: null }
+            ? {
+                ...prev,
+                viewerPendingReview: null,
+                reviewComments: (prev.reviewComments || []).filter(
+                  (c: any) => c && !c.pending
+                ),
+              }
             : prev
       );
       d.setActionMsg?.(
@@ -216,7 +224,11 @@ export function installReviewActions(d: Record<string, any>) {
               ? 'Pending review submitted.'
               : 'Review submitted.'
       );
-      await d.onRefresh?.();
+      // Server truth for published threads/reviews — never paint submit optimistically.
+      // full-threads so Diff + Conversation both get published review comments.
+      if (typeof d.onRefresh === 'function') {
+        await d.onRefresh({ mode: 'full-threads' });
+      }
       return true;
     } catch (err: any) {
       d.setActionMsg?.(err?.message || String(err));

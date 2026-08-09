@@ -622,6 +622,69 @@ describe('stripPendingReviewFromDetail tombstones pending ids', () => {
       false
     );
   });
+
+  test('submit mode strips pending without tombstones; refresh paints published', () => {
+    const { stripPendingReviewFromDetail, mergeDetailPreserveOptimistic } =
+      require('../src/modal/lib/composer-attach') as typeof import('../src/modal/lib/composer-attach');
+    const prev = {
+      ...basePr,
+      viewerPendingReview: { id: 88, nodeId: 'PRR_submit' },
+      reviewComments: [
+        {
+          id: 601,
+          body: 'pending then submit',
+          author: 'me',
+          pending: true,
+          pendingReviewId: 88,
+          path: 'a.ts',
+          line: 3,
+        },
+        real(42, 'erin'),
+      ],
+    };
+    const stripped = stripPendingReviewFromDetail(prev, { mode: 'submit' });
+    expect(stripped.viewerPendingReview).toBeNull();
+    // Must NOT tombstone submitted ids — same REST ids become published
+    expect(stripped._deletedReviewCommentIds || []).not.toEqual(
+      expect.arrayContaining(['601'])
+    );
+    expect(
+      (stripped.reviewComments || []).some((c: any) => Number(c.id) === 601)
+    ).toBe(false);
+    expect((stripped.reviewComments || []).map((c: any) => Number(c.id))).toEqual(
+      [42]
+    );
+    expect(stripped._deletedReviewBodies || []).not.toEqual(
+      expect.arrayContaining(['pending then submit'])
+    );
+
+    // Post-submit full-threads refresh: host returns same ids as published
+    const host = {
+      ...basePr,
+      viewerPendingReview: null,
+      _sideSettled: { reviews: true, comments: true },
+      reviewComments: [
+        {
+          id: 601,
+          body: 'pending then submit',
+          author: 'me',
+          pending: false,
+          path: 'a.ts',
+          line: 3,
+        },
+        real(42, 'erin'),
+      ],
+      reviews: [{ id: 9001, state: 'COMMENTED', author: 'me' }],
+    };
+    const m = mergeDetailPreserveOptimistic(stripped, host);
+    const ids = (m.reviewComments || []).map((c: any) => Number(c.id)).sort();
+    expect(ids).toEqual([42, 601]);
+    const published = (m.reviewComments || []).find(
+      (c: any) => Number(c.id) === 601
+    );
+    expect(published?.pending).toBeFalsy();
+    expect(m.viewerPendingReview).toBeNull();
+  });
 });
 
 import { fromAppDetail, toAppDetail } from '../src/modal/lib/detail-store';
