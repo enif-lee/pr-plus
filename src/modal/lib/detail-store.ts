@@ -542,18 +542,17 @@ export function fromAppDetail(flat) {
   });
 
   if (!liveVpr) {
+    // Drop PENDING chrome without id-tombstoning. Submit reuses the same REST
+    // comment ids as published rows — auto-tombs would block post-submit paint.
+    // Discard already writes explicit `_deletedReviewCommentIds` / body tombs.
     reviewComments = reviewComments.filter((c: any) => {
       if (!c || c.id == null) return false;
-      if (c.pending) {
-        deletedIds.add(String(c.id));
-        return false;
-      }
+      if (c.pending) return false;
       if (
         c.pendingReviewId != null &&
         String(c.pendingReviewId).trim() !== '' &&
         String(c.pendingReviewId) !== '0'
       ) {
-        deletedIds.add(String(c.id));
         return false;
       }
       return true;
@@ -1087,8 +1086,10 @@ export function applyThreadsFromMergedDetail(store, mergedFlat) {
           deleted.add(String(c.id));
           return false;
         }
+        // Drop PENDING / demoted pendingReviewId rows without id-tombs.
+        // Submit keeps those ids for the published refresh; Discard already
+        // put them in `_deletedReviewCommentIds` (checked above).
         if (noVpr && c.pending) {
-          deleted.add(String(c.id));
           return false;
         }
         if (
@@ -1097,7 +1098,6 @@ export function applyThreadsFromMergedDetail(store, mergedFlat) {
           String(c.pendingReviewId).trim() !== '' &&
           String(c.pendingReviewId) !== '0'
         ) {
-          deleted.add(String(c.id));
           return false;
         }
         return true;

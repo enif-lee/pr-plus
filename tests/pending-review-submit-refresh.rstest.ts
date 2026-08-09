@@ -242,4 +242,100 @@ describe('pending review submit → refresh contract (shipped)', () => {
     // Must not optimistically invent published reviews
     expect(src).not.toMatch(/appendOptimisticPublishedReview|optimisticPublish/);
   });
+
+  test('host detail-store: submit strip + threads apply must not tombstone published ids', () => {
+    const {
+      fromAppDetail,
+      toAppDetail,
+      applyThreadsFromMergedDetail,
+      applyPendingReview,
+      applyDiscardTombstones,
+    } = require('../src/modal/lib/detail-store') as typeof import('../src/modal/lib/detail-store');
+
+    // Start with pending review in store
+    const store = fromAppDetail({
+      owner: 'enif-lee',
+      repo: 'pr-plus',
+      number: 14,
+      viewerPendingReview: { id: 555 },
+      reviewComments: [
+        {
+          id: 7001,
+          body: 'pending line note',
+          author: 'enif-lee',
+          pending: true,
+          pendingReviewId: 555,
+          path: 'src/a.ts',
+          line: 10,
+        },
+        {
+          id: 42,
+          body: 'older published',
+          author: 'other',
+          pending: false,
+          path: 'src/b.ts',
+          line: 2,
+        },
+      ],
+      reviews: [],
+    });
+    expect(store).toBeTruthy();
+
+    // Simulate strip(submit) patch path used by onPatchDetail
+    const stripped = stripPendingReviewFromDetail(toAppDetail(store), {
+      mode: 'submit',
+    });
+    applyThreadsFromMergedDetail(store, stripped);
+    applyPendingReview(store, null);
+    applyDiscardTombstones(store, stripped);
+
+    const mid = toAppDetail(store)!;
+    expect(mid.viewerPendingReview).toBeNull();
+    expect((mid._deletedReviewCommentIds || []).includes('7001')).toBe(false);
+    expect((mid.reviewComments || []).some((c: any) => c.pending)).toBe(false);
+    expect(
+      (mid.reviewComments || []).some((c: any) => Number(c.id) === 7001)
+    ).toBe(false);
+
+    // Post-submit full-threads host refresh: same id as published
+    applyThreadsFromMergedDetail(store, {
+      ...stripped,
+      viewerPendingReview: null,
+      reviewComments: [
+        {
+          id: 7001,
+          body: 'pending line note',
+          author: 'enif-lee',
+          pending: false,
+          path: 'src/a.ts',
+          line: 10,
+        },
+        {
+          id: 42,
+          body: 'older published',
+          author: 'other',
+          pending: false,
+          path: 'src/b.ts',
+          line: 2,
+        },
+      ],
+      reviewThreads: [
+        {
+          threadNodeId: 'PRRT_7001',
+          path: 'src/a.ts',
+          line: 10,
+          comments: [{ id: 7001, body: 'pending line note' }],
+        },
+      ],
+    });
+    const final = toAppDetail(store)!;
+    const ids = (final.reviewComments || []).map((c: any) => Number(c.id)).sort();
+    expect(ids).toEqual([42, 7001]);
+    const pub = (final.reviewComments || []).find(
+      (c: any) => Number(c.id) === 7001
+    );
+    expect(pub?.pending).toBeFalsy();
+    expect(pub?.body).toBe('pending line note');
+    expect((final._deletedReviewCommentIds || []).includes('7001')).toBe(false);
+  });
 });

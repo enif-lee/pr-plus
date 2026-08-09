@@ -364,20 +364,16 @@ export function sanitizeDetailForCache(detail: any, opts: SanitizeDetailOptions 
         deleted.add(id);
         continue;
       }
-      // Explicit pending rows
+      // Drop PENDING / demoted pendingReviewId without auto id-tombs.
+      // Submit reuses those ids as published; Discard already set explicit tombs.
       if (c.pending) {
-        deleted.add(id);
-        if (body) bodyTombs.add(body);
         continue;
       }
-      // Demoted orphans still carrying pendingReviewId
       if (
         c.pendingReviewId != null &&
         String(c.pendingReviewId).trim() !== '' &&
         String(c.pendingReviewId) !== '0'
       ) {
-        deleted.add(id);
-        if (body) bodyTombs.add(body);
         continue;
       }
       nextRc.push(c);

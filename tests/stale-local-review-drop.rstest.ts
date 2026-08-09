@@ -479,7 +479,9 @@ describe('sanitizeDetailForCache drops orphan pending', () => {
     expect((out.reviewComments || []).map((c: any) => Number(c.id))).toEqual([
       42,
     ]);
-    expect(out._deletedReviewCommentIds).toEqual(
+    // Drop only — do not auto-tombstone (submit reuses same ids as published).
+    // Explicit discard tombs still live in `_deletedReviewCommentIds` when set.
+    expect(out._deletedReviewCommentIds || []).not.toEqual(
       expect.arrayContaining(['501', '502'])
     );
   });
