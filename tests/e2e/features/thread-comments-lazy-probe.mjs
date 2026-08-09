@@ -50,7 +50,7 @@ function ghJson(query) {
   return JSON.parse(out);
 }
 
-const RESOLVE_ID = 'PRRT_kwDOTe7KcM6S2nVg'; // PR#7 first thread
+const RESOLVE_ID = 'PRRT_kwDOTe7KcM6Xj6hO'; // PR#19 e2e-seed-thread-1
 
 function resolveThread(id, resolved) {
   const mut = resolved

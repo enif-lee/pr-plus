@@ -18,6 +18,8 @@ import {
   isCommentReactionPickerOpen,
   dismissCommentReactionPicker,
   placeReactionPicker,
+  resolveReactionAddControl,
+  findCommentForReactionTarget,
   isReactionPickerAnchorLive,
 } from '../src/modal/lib/comment-reactions';
 
@@ -141,6 +143,76 @@ describe('comment-reactions pure', () => {
     ]);
     expect(next[0].reactions).toEqual([]);
     expect(next[1].reactions[0].content).toBe('heart');
+  });
+
+  test('patchCommentReactionsInList matches mid-thread reply by nodeId', () => {
+    const list = [
+      { id: 10, nodeId: 'PRRC_root', reactions: [] },
+      { id: 11, nodeId: 'PRRC_mid', reactions: [] },
+    ];
+    const next = patchCommentReactionsInList(
+      list,
+      null,
+      [{ content: 'rocket', count: 1, viewerHasReacted: true }],
+      'PRRC_mid'
+    );
+    expect(next[0].reactions).toEqual([]);
+    expect(next[1].reactions[0].content).toBe('rocket');
+  });
+
+  test('findCommentForReactionTarget prefers id then nodeId', () => {
+    const list = [
+      { id: 1, nodeId: 'N1' },
+      { id: 2, nodeId: 'N2' },
+    ];
+    expect(findCommentForReactionTarget(list, { commentId: 2 })?.id).toBe(2);
+    expect(
+      findCommentForReactionTarget(list, { commentId: 'x', nodeId: 'N1' })?.id
+    ).toBe(1);
+    expect(
+      findCommentForReactionTarget(list, { commentId: 99, nodeId: 'N2' })?.id
+    ).toBe(2);
+  });
+});
+
+describe('resolveReactionAddControl (unit-active mid-thread)', () => {
+  test('prefers unit-active reply over first root add control', () => {
+    const dom = new JSDOM(
+      `<!doctype html><html><body>
+        <div class="prp-body-panel prp-body-panel--active">
+          <ul class="prp-review-thread">
+            <li data-prp-thread-unit="root">
+              <button class="prp-reactions__add" data-prp-reaction-add="1"
+                style="width:26px;height:26px" data-id="root">root</button>
+            </li>
+            <li data-prp-thread-unit="reply" data-prp-thread-unit-active="1">
+              <button class="prp-reactions__add" data-prp-reaction-add="1"
+                style="width:26px;height:26px" data-id="mid">mid</button>
+            </li>
+          </ul>
+        </div>
+      </body></html>`,
+      { pretendToBeVisual: true }
+    );
+    const doc = dom.window.document;
+    // jsdom may zero getBoundingClientRect — stub sizes for live check
+    for (const btn of doc.querySelectorAll('.prp-reactions__add')) {
+      (btn as any).getBoundingClientRect = () => ({
+        top: 100,
+        bottom: 126,
+        left: 40,
+        right: 66,
+        width: 26,
+        height: 26,
+        x: 40,
+        y: 100,
+        toJSON() {},
+      });
+    }
+    globalThis.window = dom.window as any;
+    globalThis.document = doc as any;
+    const hit = resolveReactionAddControl(doc);
+    expect(hit?.getAttribute('data-id')).toBe('mid');
   });
 });
 
@@ -337,6 +409,7 @@ describe('isCommentReactionPickerOpen / dismissCommentReactionPicker', () => {
       path.join(root, 'src/modal/hooks/usePrModalHotkeys.ts'),
       'utf8'
     );
+    expect(hotkeys).toMatch(/resolveReactionAddControl/);
     expect(hotkeys).toMatch(/isCommentReactionPickerOpen/);
     expect(hotkeys).toMatch(/dismissCommentReactionPicker/);
     // Escape branch: resolve owner then dismiss reaction before shell close

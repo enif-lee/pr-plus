@@ -314,14 +314,70 @@ function editModalTitle(nextTitle) {
   waitMs(400);
 }
 
+/** Description card is near virtual-list top; dense timelines unmount it when scrolled. */
+function ensureDescriptionMounted(timeoutMs = 12_000) {
+  setLayout('conversation');
+  const deadline = Date.now() + timeoutMs;
+  let last = null;
+  while (Date.now() < deadline) {
+    last = evalInPage(`
+      (() => {
+        const sc =
+          document.querySelector('.prp-conversation-virtual') ||
+          document.querySelector('[data-prp-conversation-scroll]');
+        if (sc) {
+          sc.scrollTop = 0;
+          sc.dispatchEvent(new Event('scroll', { bubbles: true }));
+        }
+        const body = document.querySelector(
+          '.prp-overlay [data-search-anchor="body"]'
+        );
+        const edit = document.querySelector(
+          '.prp-overlay button[aria-label="Edit description"]'
+        );
+        const reactions = document.querySelector(
+          '.prp-overlay [data-search-anchor="body"] [data-prp-reactions], .prp-overlay [data-search-anchor="body"] .prp-reactions'
+        );
+        return {
+          ok: !!(body && (edit || reactions)),
+          body: !!body,
+          edit: !!edit,
+          reactions: !!reactions,
+          scrollTop: sc ? sc.scrollTop : null,
+        };
+      })()
+    `);
+    if (last?.ok) return last;
+    waitMs(200);
+  }
+  return last;
+}
+
 function editModalBody(nextBody) {
+  const mounted = ensureDescriptionMounted();
+  assert(
+    mounted?.body,
+    `description card not mounted: ${JSON.stringify(mounted)}`
+  );
   const opened = evalInPage(`
     (() => {
       const btn = document.querySelector(
         '.prp-overlay button[aria-label="Edit description"]'
       );
-      if (!btn) return { ok: false, reason: 'no edit description' };
-      btn.click();
+      if (!btn) {
+        // Hover / focus card actions if they are CSS-hidden until interaction
+        const card = document.querySelector(
+          '.prp-overlay [data-search-anchor="body"]'
+        );
+        card?.dispatchEvent?.(
+          new MouseEvent('mouseenter', { bubbles: true })
+        );
+      }
+      const btn2 = document.querySelector(
+        '.prp-overlay button[aria-label="Edit description"]'
+      );
+      if (!btn2) return { ok: false, reason: 'no edit description' };
+      btn2.click();
       return { ok: true };
     })()
   `);
@@ -775,7 +831,11 @@ function addReviewerIfPossible() {
 }
 
 function toggleBodyHeartReaction() {
-  // Scroll description into view so reaction chrome mounts
+  // Description is virtualized — force top mount before hunting reactions.
+  const mounted = ensureDescriptionMounted();
+  if (!mounted?.body) {
+    return { ok: false, reason: 'no body', mounted };
+  }
   evalInPage(`
     (() => {
       const body = document.querySelector('[data-search-anchor="body"]');

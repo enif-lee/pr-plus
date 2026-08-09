@@ -6558,7 +6558,7 @@ export function PrModalApp({
       dismissSelectionIsland();
       // Host cache updated in postSelectionLineComment — no soft-refresh race.
     } catch (err: any) {
-      // GitHub 422 on locked PRs (e.g. demo #7) — clear product message, not silent no-op
+      // GitHub 422 on locked PRs (e.g. demo DEMO_PR) — clear product message, not silent no-op
       const format =
         typeof formatStartReviewError === 'function'
           ? formatStartReviewError

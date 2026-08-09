@@ -6,7 +6,11 @@ import {
   milestoneChangeTimelineEvents,
   reviewerChangeTimelineEvents,
 } from '../lib/conversation-timeline-events';
-import { applyReactionToggle } from '../lib/comment-reactions';
+import {
+  applyReactionToggle,
+  findCommentForReactionTarget,
+  patchCommentReactionsInList,
+} from '../lib/comment-reactions';
 import {
   resolveDeleteHeadBranchTarget,
   shouldShowDeleteHeadBranch,
@@ -469,6 +473,19 @@ export function installSideActions(d: Record<string, any>) {
     }
   }
 
+  function stampReactionDiag(payload: Record<string, unknown>) {
+    try {
+      if (typeof document === 'undefined') return;
+      const json = JSON.stringify({
+        t: Date.now(),
+        ...payload,
+      });
+      document.documentElement.setAttribute('data-prp-last-reaction', json);
+    } catch {
+      /* ignore */
+    }
+  }
+
   async function onToggleReaction(
     target: {
       kind: 'issue' | 'review' | 'pr';
@@ -479,86 +496,214 @@ export function installSideActions(d: Record<string, any>) {
     content: string,
     currentlyReacted: boolean
   ) {
-    const detail = d.detail;
-    if (!detail || !content) return;
+    // Live host detail — closed-over render detail can miss mid-thread replies
+    // that hydrated after the last shell snapshot.
+    const detail = d.detailRef?.current || d.detail;
+    if (!detail || !content) {
+      stampReactionDiag({
+        phase: 'abort',
+        reason: !detail ? 'no-detail' : 'no-content',
+      });
+      return;
+    }
     const kindRaw = String(target?.kind || '').toLowerCase();
     const kind =
       kindRaw === 'review' ? 'review' : kindRaw === 'pr' ? 'pr' : 'issue';
     const viewerLogin = detail.viewerLogin || null;
+    const api = globalThis.PRTreeFetch;
+    if (!api?.toggleCommentReaction) {
+      stampReactionDiag({ phase: 'abort', reason: 'no-api' });
+      d.setActionMsg?.('Reaction API unavailable');
+      return;
+    }
 
+    // Reactions stay **optimistic** (host-first plan): paint first, API, rollback.
     if (kind === 'pr') {
       const live = d.detailRef?.current || detail;
       const prevReactions = Array.isArray(live.bodyReactions)
         ? live.bodyReactions
         : [];
-      // Pessimistic: API first, then host patch
-      try {
-        const api = globalThis.PRTreeFetch;
-        if (!api?.toggleCommentReaction) {
-          throw new Error('Reaction API unavailable');
-        }
-        await api.toggleCommentReaction(live.owner, live.repo, 'pr', {
-          content,
-          viewerHasReacted: currentlyReacted,
-          nodeId: (() => {
-            const id = String(target.nodeId || live.nodeId || '').trim();
-            if (id.startsWith('I_') || id.includes('Issue')) return id;
-            return null;
-          })(),
-          number: target.number ?? live.number,
-          commentId: target.commentId ?? live.number,
-        });
-        const nextReactions = applyReactionToggle(
-          prevReactions,
-          content,
-          !currentlyReacted,
-          viewerLogin
-        );
-        d.commitCommentListPatch?.({ ...live, bodyReactions: nextReactions });
-      } catch (err: any) {
-        d.setActionMsg(err?.message || String(err) || 'Reaction failed');
-      }
-      return;
-    }
-
-    if (target?.commentId == null) return;
-    const listKey = kind === 'review' ? 'reviewComments' : 'comments';
-    const list = Array.isArray(detail[listKey]) ? detail[listKey] : [];
-    const comment = list.find(
-      (c: any) => c && String(c.id) === String(target.commentId)
-    );
-    if (!comment) return;
-    const prevReactions = Array.isArray(comment.reactions)
-      ? comment.reactions
-      : [];
-    try {
-      const api = globalThis.PRTreeFetch;
-      if (!api?.toggleCommentReaction) {
-        throw new Error('Reaction API unavailable');
-      }
-      await api.toggleCommentReaction(detail.owner, detail.repo, kind, {
-        content,
-        viewerHasReacted: currentlyReacted,
-        nodeId: target.nodeId || comment.nodeId || null,
-        commentId: target.commentId,
-      });
       const nextReactions = applyReactionToggle(
         prevReactions,
         content,
         !currentlyReacted,
         viewerLogin
       );
-      const patchedList = list.map((c: any) =>
-        c && String(c.id) === String(target.commentId)
-          ? { ...c, reactions: nextReactions }
-          : c
-      );
+      const nodeId = (() => {
+        const id = String(target.nodeId || live.nodeId || '').trim();
+        if (
+          id.startsWith('I_') ||
+          id.startsWith('PR_') ||
+          id.includes('Issue') ||
+          id.includes('PullRequest')
+        ) {
+          return id;
+        }
+        return null;
+      })();
+      stampReactionDiag({
+        phase: 'start',
+        kind: 'pr',
+        content,
+        currentlyReacted,
+        commentId: target.commentId ?? live.number,
+        number: target.number ?? live.number,
+        nodeId,
+        owner: live.owner,
+        repo: live.repo,
+      });
+      d.commitCommentListPatch?.({ ...live, bodyReactions: nextReactions });
+      try {
+        const result = await api.toggleCommentReaction(live.owner, live.repo, 'pr', {
+          content,
+          viewerHasReacted: currentlyReacted,
+          nodeId,
+          number: target.number ?? live.number,
+          commentId: target.commentId ?? live.number,
+        });
+        stampReactionDiag({
+          phase: 'ok',
+          kind: 'pr',
+          content,
+          nodeId,
+          via: (result as any)?.via || null,
+        });
+      } catch (err: any) {
+        d.commitCommentListPatch?.({ ...live, bodyReactions: prevReactions });
+        const msg = err?.message || String(err) || 'Reaction failed';
+        stampReactionDiag({
+          phase: 'err',
+          kind: 'pr',
+          content,
+          nodeId,
+          message: msg,
+          status: err?.status ?? null,
+        });
+        d.setActionMsg(msg);
+      }
+      return;
+    }
+
+    if (target?.commentId == null && !target?.nodeId) {
+      stampReactionDiag({ phase: 'abort', reason: 'no-id', kind });
+      return;
+    }
+    const listKey = kind === 'review' ? 'reviewComments' : 'comments';
+    const live = d.detailRef?.current || detail;
+    const list = Array.isArray(live[listKey]) ? live[listKey] : [];
+    // Mid-thread reply: match REST id **or** GraphQL nodeId (not root-only).
+    const comment = findCommentForReactionTarget(list, target);
+    const prevReactions = Array.isArray(comment?.reactions)
+      ? comment.reactions
+      : [];
+    const nodeId = String(target.nodeId || comment?.nodeId || '').trim() || null;
+    const commentId =
+      target.commentId != null && target.commentId !== ''
+        ? target.commentId
+        : comment?.id;
+    // Refuse synthetic shell / non-comment ids before hitting the network
+    const idStr = commentId != null ? String(commentId) : '';
+    if (/^shell:/i.test(idStr) || /^PRRT_/i.test(idStr)) {
+      stampReactionDiag({
+        phase: 'abort',
+        reason: 'synthetic-id',
+        kind,
+        commentId,
+        nodeId,
+      });
+      d.setActionMsg('Reaction unavailable until comments finish loading.');
+      return;
+    }
+    const nextReactions = applyReactionToggle(
+      prevReactions,
+      content,
+      !currentlyReacted,
+      viewerLogin
+    );
+    const optimisticList = patchCommentReactionsInList(
+      list,
+      commentId,
+      nextReactions,
+      nodeId
+    );
+    // Never soft-upsert synthetic rows — only patch matched comments.
+    // Soft-upsert of missing ids polluted the list and left UI without pills.
+    stampReactionDiag({
+      phase: 'start',
+      kind,
+      content,
+      currentlyReacted,
+      commentId,
+      nodeId,
+      listKey,
+      listLen: list.length,
+      foundInList: Boolean(comment),
+      matchedPatch: optimisticList !== list,
+      owner: live.owner,
+      repo: live.repo,
+    });
+    if (optimisticList !== list) {
       d.commitCommentListPatch?.({
-        ...detail,
-        [listKey]: patchedList,
+        ...live,
+        [listKey]: optimisticList,
+      });
+    }
+    try {
+      const result = await api.toggleCommentReaction(live.owner, live.repo, kind, {
+        content,
+        viewerHasReacted: currentlyReacted,
+        nodeId,
+        commentId,
+      });
+      // If we could not paint optimistically (not in list), re-read live and force
+      // a patch now that the server accepted the toggle.
+      if (optimisticList === list) {
+        const live2 = d.detailRef?.current || live;
+        const list2 = Array.isArray(live2[listKey]) ? live2[listKey] : list;
+        const forced = patchCommentReactionsInList(
+          list2,
+          commentId,
+          nextReactions,
+          nodeId
+        );
+        if (forced !== list2) {
+          d.commitCommentListPatch?.({ ...live2, [listKey]: forced });
+        }
+      }
+      stampReactionDiag({
+        phase: 'ok',
+        kind,
+        content,
+        commentId,
+        nodeId,
+        via: (result as any)?.via || null,
       });
     } catch (err: any) {
-      d.setActionMsg(err?.message || String(err) || 'Reaction failed');
+      // Rollback optimistic paint
+      if (optimisticList !== list) {
+        const rolled = patchCommentReactionsInList(
+          optimisticList,
+          commentId,
+          prevReactions,
+          nodeId
+        );
+        d.commitCommentListPatch?.({
+          ...live,
+          [listKey]: rolled,
+        });
+      }
+      const msg = err?.message || String(err) || 'Reaction failed';
+      stampReactionDiag({
+        phase: 'err',
+        kind,
+        content,
+        commentId,
+        nodeId,
+        foundInList: Boolean(comment),
+        message: msg,
+        status: err?.status ?? null,
+      });
+      d.setActionMsg(msg);
     }
   }
 

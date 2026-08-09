@@ -1,7 +1,8 @@
 /**
  * Conversation timeline pagination e2e:
  * Load more / Load all fold for timelineItems (+ review threads).
- * Target: dense demo PR #7 (timelineItems.totalCount >> 100).
+ * Target: dense demo DEMO_PR (#19). Former #7 had ~2k timeline items; #19 is
+ * reseeded lighter — tests still assert Load-more when totalCount ≫ page size.
  */
 import {
   DEMO_PR,
@@ -322,7 +323,7 @@ export function buildTimelineLoadMoreSteps() {
   steps.push({
     name: 'TLM.1 wait for timeline paint + find Load more fold',
     fn: () => {
-      // GraphQL timeline path should mark source + incomplete corpus on #7
+      // GraphQL timeline path should mark source + incomplete corpus on DEMO_PR
       const deadline = Date.now() + 35_000;
       let p = paginationProbe();
       while (Date.now() < deadline) {
@@ -408,7 +409,7 @@ export function buildTimelineLoadMoreSteps() {
       }
       log(`  gap-after-scroll found=${found} ${JSON.stringify(p)}`);
 
-      // Dense #7: totalCount ~1300 ≫ first page — Load more fold must appear
+      // Dense DEMO_PR: totalCount ≫ first page — Load more fold must appear
       assert(
         p.hasGap && p.hasLoadMore,
         `expected Load more gap on dense PR #${DEMO_PR}: ${JSON.stringify(p)}`

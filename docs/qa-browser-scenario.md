@@ -2,7 +2,7 @@
 
 **Target:** `https://github.com/enif-lee/pr-plus/pulls`  
 **Extension:** local workspace via `agent-browser.json` (`extensions: ["."]`, profile `./.browser/profile`).  
-**Preferred PR for deep keyboard tests:** open demo with many threads (e.g. **#7** `[demo] g — stack root DEMO-300`).
+**Preferred PR for deep keyboard tests:** open demo with many threads (e.g. **#19** `[demo] g — stack root DEMO-300`; former #7 closed).
 
 **Automated local e2e (not in `npm test`):** see `tests/e2e/README.md`  
 - `npm run test:e2e:features` — feature / style / layout scenario  
@@ -49,7 +49,7 @@ Sources: `shortcut-policy.ts`, `PrModalApp.tsx`, `VirtualConversationList.tsx`, 
 | # | Step | Expect |
 |---|------|--------|
 | P0.1 | Open `/enif-lee/pr-plus/pulls` | PR rows; extension not broken |
-| P0.2 | Click a PR title (e.g. #7) | `.prp-overlay` mounts; URL may include `prp_page` / `prp_number` |
+| P0.2 | Click a PR title (e.g. #19) | `.prp-overlay` mounts; URL may include `prp_page` / `prp_number` |
 | P0.3 | Conversation chrome | Virtual scroller `.prp-conversation-virtual`; desc / merge / timeline / aside |
 | P0.4 | ⌥. → Diff | `data-layout=diff`; file tree + virtual list; panel `--active` |
 | P0.5 | ⌥. → Conversation | `data-layout=conversation` (or centered) |
@@ -208,7 +208,7 @@ npm run check       # typecheck + lint + unit
 
 ### 2026-07-27 — agent-browser + local extension (prior)
 
-**Target:** https://github.com/enif-lee/pr-plus/pulls → **#7** `[demo] g — stack root DEMO-300`  
+**Target:** https://github.com/enif-lee/pr-plus/pulls → **#19** `[demo] g — stack root DEMO-300`  
 **URL:** `.../pulls?prp_page=conversation&prp_number=7`
 
 | ID | Result | Notes |
@@ -229,7 +229,7 @@ Screenshot: workspace `.tmp-qa-pr.png` / scratch `browser-qa.png`.
 
 **Inventory:** three explore subagents mapped Conversation, Diff, chrome/palette/store (P0–P7).
 
-**Target:** https://github.com/enif-lee/pr-plus/pulls → **#7** DEMO-300  
+**Target:** https://github.com/enif-lee/pr-plus/pulls → **#19** DEMO-300  
 **Probe:** `.tmp-run-browser-probe.js` / scratch `run-browser-probe.js`  
 **Evidence:** scratch `browser-qa.json`, `qa-summary.md`, `browser-qa.png` (`tmp-qa-full-scenario.png`)
 
@@ -270,4 +270,4 @@ Screenshot: workspace `.tmp-qa-pr.png` / scratch `browser-qa.png`.
 
 **Unit:** shortcut/scroll/selection suite → scratch `final-gating.log`.
 
-**Not exercised (by design):** live resolve/reply/merge writes; multi-file ⌥⇧] (N/A on #7); physical Opt-hold badges.
+**Not exercised (by design):** live resolve/reply/merge writes; multi-file ⌥⇧] (N/A on #19); physical Opt-hold badges.

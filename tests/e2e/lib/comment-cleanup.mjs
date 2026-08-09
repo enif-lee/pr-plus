@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 
 /** Defaults match harness DEMO_PR / REPO (avoid importing harness → browser deps). */
 export const COMMENT_CLEANUP_REPO = 'enif-lee/pr-plus';
-export const COMMENT_CLEANUP_PR = 7;
+export const COMMENT_CLEANUP_PR = 19;
 const REPO = COMMENT_CLEANUP_REPO;
 const DEMO_PR = COMMENT_CLEANUP_PR;
 

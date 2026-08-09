@@ -141,6 +141,187 @@ export function filePathMatchesQuery(path: string, query: string): boolean {
 }
 
 /**
+ * Path portion of a Goto query (strip trailing `:line[:line]`; bare line → empty).
+ * Same strip rules as `rankGotoFileSuggestions`.
+ */
+export function gotoPathQueryForMatch(query: string): string {
+  const q = String(query || '').trim();
+  if (!q) return '';
+  if (/^\d+(:\d+)?$/.test(q)) return '';
+  const m = q.match(/^(.*?)(?::\d+){1,2}$/);
+  if (m && m[1] != null && m[1].length) return m[1];
+  return q;
+}
+
+export type GotoMatchRange = {
+  start: number;
+  end: number;
+  mode: 'contains' | 'initial';
+};
+
+export type GotoPathSegment = {
+  text: string;
+  bold: boolean;
+};
+
+/**
+ * Character ranges in `path` to bold for the active match mode.
+ * - **contains**: first case-insensitive contiguous hit of the query
+ * - **initial**: path-segment first letters (or basename camel initials) that
+ *   form a subsequence / prefix of the compact query
+ * Idle / no match → empty (no invented spans).
+ */
+export function gotoMatchRanges(
+  path: string,
+  query: string
+): GotoMatchRange[] {
+  const p = String(path || '');
+  const pathQ = gotoPathQueryForMatch(query);
+  if (!p || !pathQ) return [];
+
+  const pl = p.toLowerCase();
+  const ql = pathQ.toLowerCase();
+
+  // Contains (substring) — prefer over initial when both would match
+  const idx = pl.indexOf(ql);
+  if (idx >= 0) {
+    return [{ start: idx, end: idx + pathQ.length, mode: 'contains' }];
+  }
+
+  // Initial: segment-first-letter positions in the path string
+  const segStarts = pathSegmentStartIndices(p);
+  const qCompact = ql.replace(/[^a-z0-9]/g, '');
+  if (!qCompact) return [];
+
+  const fromSegs = matchInitialsAgainstPositions(p, qCompact, segStarts);
+  if (fromSegs.length) return fromSegs;
+
+  // Basename camelCase / snake initials (e.g. FooBar → fb)
+  const segs = p.replace(/\\/g, '/').split('/');
+  const baseName = segs[segs.length - 1] || '';
+  const baseNoExt = baseName.includes('.')
+    ? baseName.slice(0, baseName.lastIndexOf('.'))
+    : baseName;
+  const baseOffset = p.length - baseName.length;
+  const identStarts = identifierInitialIndices(baseNoExt).map(
+    (i) => baseOffset + i
+  );
+  return matchInitialsAgainstPositions(p, qCompact, identStarts);
+}
+
+/**
+ * Split path into plain / bold segments for suggestion rendering.
+ */
+export function gotoHighlightSegments(
+  path: string,
+  query: string
+): GotoPathSegment[] {
+  const p = String(path || '');
+  if (!p) return [];
+  const ranges = gotoMatchRanges(p, query);
+  if (!ranges.length) return [{ text: p, bold: false }];
+
+  const marks = new Array<boolean>(p.length).fill(false);
+  for (const r of ranges) {
+    const a = Math.max(0, Math.min(p.length, r.start));
+    const b = Math.max(a, Math.min(p.length, r.end));
+    for (let i = a; i < b; i++) marks[i] = true;
+  }
+
+  const out: GotoPathSegment[] = [];
+  let i = 0;
+  while (i < p.length) {
+    const bold = marks[i];
+    let j = i + 1;
+    while (j < p.length && marks[j] === bold) j++;
+    out.push({ text: p.slice(i, j), bold });
+    i = j;
+  }
+  return out;
+}
+
+/** First letter index of each path segment (skip empty). */
+function pathSegmentStartIndices(path: string): number[] {
+  const p = String(path || '');
+  const out: number[] = [];
+  let i = 0;
+  while (i < p.length) {
+    // skip slashes
+    while (i < p.length && (p[i] === '/' || p[i] === '\\')) i++;
+    if (i >= p.length) break;
+    // first alnum in this segment (or first char)
+    let j = i;
+    while (j < p.length && p[j] !== '/' && p[j] !== '\\') {
+      if (/[A-Za-z0-9]/.test(p[j])) {
+        out.push(j);
+        break;
+      }
+      j++;
+    }
+    if (j === i || (j < p.length && p[j] !== '/' && p[j] !== '\\' && !/[A-Za-z0-9]/.test(p[j]))) {
+      // no alnum — still count first char of segment if any
+      if (i < p.length && p[i] !== '/' && p[i] !== '\\' && !out.includes(i)) {
+        out.push(i);
+      }
+    }
+    while (i < p.length && p[i] !== '/' && p[i] !== '\\') i++;
+  }
+  return out;
+}
+
+/** Indices of identifier initials inside a single basename (no path). */
+function identifierInitialIndices(ident: string): number[] {
+  const s = String(ident || '');
+  if (!s) return [];
+  const parts = s.split(/[^A-Za-z0-9]+/).filter(Boolean);
+  if (parts.length > 1) {
+    const idxs: number[] = [];
+    let searchFrom = 0;
+    for (const part of parts) {
+      const at = s.indexOf(part, searchFrom);
+      if (at >= 0) {
+        idxs.push(at);
+        searchFrom = at + part.length;
+      }
+    }
+    return idxs;
+  }
+  const camel = s.match(/[A-Z]?[a-z0-9]+|[A-Z]+(?![a-z])/g);
+  if (camel && camel.length > 1) {
+    const idxs: number[] = [];
+    let searchFrom = 0;
+    for (const part of camel) {
+      const at = s.indexOf(part, searchFrom);
+      if (at >= 0) {
+        idxs.push(at);
+        searchFrom = at + part.length;
+      }
+    }
+    return idxs;
+  }
+  return s[0] ? [0] : [];
+}
+
+function matchInitialsAgainstPositions(
+  path: string,
+  qCompact: string,
+  positions: number[]
+): GotoMatchRange[] {
+  if (!qCompact || !positions.length) return [];
+  const ranges: GotoMatchRange[] = [];
+  let qi = 0;
+  for (const pos of positions) {
+    if (qi >= qCompact.length) break;
+    if (pos < 0 || pos >= path.length) continue;
+    if (path[pos].toLowerCase() === qCompact[qi]) {
+      ranges.push({ start: pos, end: pos + 1, mode: 'initial' });
+      qi++;
+    }
+  }
+  return qi === qCompact.length ? ranges : [];
+}
+
+/**
  * Rank suggestions for Diff Goto.
  * - Empty query: most-changed first, top `idleLimit` (default 3).
  * - Typed query: matches only, score then volume, top `searchLimit` (default 12).

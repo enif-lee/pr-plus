@@ -24,8 +24,8 @@ import {
 
 export const REPO = 'enif-lee/pr-plus';
 export const PULLS_URL = `https://github.com/${REPO}/pulls`;
-/** Preferred multi-thread conversation / keyboard PR (open) */
-export const DEMO_PR = 7;
+/** Preferred multi-thread conversation / keyboard PR (open). Was #7 (closed; reaction-locked). */
+export const DEMO_PR = 19;
 /**
  * Large architecture PR for heavy diff scroll.
  * Merged — not on default open /pulls; open via closed PR URL.

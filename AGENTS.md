@@ -6,7 +6,7 @@ Agent-oriented guide for build, verify, architecture, and tests. Humans can use 
 
 **pr+** is a Chromium MV3 extension for GitHub PRs: stack tree on `/pulls`, and a fast in-page **modal / embed shell** for Conversation, Diff, and merge. UI is React (modal); network and extension plumbing live in background + content bridge + host.
 
-Demo / e2e target repo: `enif-lee/pr-plus` (e.g. open PR `#7`).
+Demo / e2e target repo: `enif-lee/pr-plus` (e.g. open PR `#19` — stack root DEMO-300; former `#7` closed).
 
 ---
 

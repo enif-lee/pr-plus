@@ -5,6 +5,7 @@
 import { useEffect } from 'react';
 import { useModalStore } from '../store/modal-store';
 import { isSideActionAllowedOnLayout } from '../lib/layout-side-actions';
+import { resolveReactionAddControl } from '../lib/comment-reactions';
 
 export function usePrModalHotkeys(h: Record<string, any>): void {
   const open = h.open;
@@ -1299,14 +1300,19 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
               activePanel ||
               (document.querySelector('.prp-overlay') as HTMLElement | null);
             let btn: HTMLElement | null = null;
-            for (const s of sels) {
-              btn = (root?.querySelector?.(s) || null) as HTMLElement | null;
-              // Prefer a visible control (non-zero box) when duplicates exist
-              if (btn && !(btn as HTMLButtonElement).disabled) {
-                const br = btn.getBoundingClientRect?.();
-                if (br && br.width >= 2 && br.height >= 2) break;
+            // ⌥E / react: prefer unit-focused reply (not root-first querySelector)
+            if (String(action) === 'contextCommentReact') {
+              btn = resolveReactionAddControl(root) || null;
+            }
+            if (!btn) {
+              for (const s of sels) {
+                btn = (root?.querySelector?.(s) || null) as HTMLElement | null;
+                if (btn && !(btn as HTMLButtonElement).disabled) {
+                  const br = btn.getBoundingClientRect?.();
+                  if (br && br.width >= 2 && br.height >= 2) break;
+                }
+                btn = null;
               }
-              btn = null;
             }
             if (!btn) {
               for (const s of sels) {

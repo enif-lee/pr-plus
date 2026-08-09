@@ -146,7 +146,7 @@ export function flattenFilesToVirtualRows(files, mode = 'unified', options: any 
 
     // Collapsed / non-openable: header + file comments only (binary never opens as text).
     // Still surface *line* threads so Diff thread nav / Resolve e2e can land on
-    // them when the file is viewed/default-collapsed (demo PR #7: all threads on
+    // them when the file is viewed/default-collapsed (demo DEMO_PR: all threads on
     // a one-line file that is often marked viewed).
     if (isCollapsed || !openable) {
       for (const c of rootsByPath.get(path) || []) {

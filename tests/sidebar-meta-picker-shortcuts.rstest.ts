@@ -118,11 +118,20 @@ describe('reviewer/assignee single-select shared pattern (source)', () => {
     expect(revBlock).toMatch(/title:\s*['"]Add reviewer['"]/);
   });
 
-  test('SearchableSelect wires Opt digit pick + footer chords', () => {
+  test('SearchableSelect wires Opt digit pick; multi footer only', () => {
     const ui = read('src/modal/components/common/SearchableSelect.tsx');
     expect(ui).toMatch(/resolveOptDigitPickIndex/);
     expect(ui).toMatch(/pickFilteredOptionByIndex/);
     expect(ui).toMatch(/OptBtnHint/);
+    expect(ui).toMatch(/createPortal/);
+    // Prefer .prp-overlay for theme tokens; body only as fallback shell
+    expect(ui).toMatch(/\.prp-overlay/);
+    expect(ui).toMatch(/document\.body/);
+    expect(ui).toMatch(/prp-sselect-portal/);
+    expect(ui).toMatch(/data-prp-sselect-open/);
+    expect(ui).toMatch(/footerVisible/);
+    expect(ui).toMatch(/showFooter/);
+    // Multi still has Cancel/Apply chords
     expect(ui).toMatch(/data-prp-sselect-confirm/);
     expect(ui).toMatch(/data-prp-sselect-cancel/);
     expect(ui).toMatch(/label=\{`⌥\$\{rowIndex \+ 1\}`\}/);
@@ -130,6 +139,10 @@ describe('reviewer/assignee single-select shared pattern (source)', () => {
     expect(ui).toMatch(/label=["']⌘↵["']/);
     expect(ui).toMatch(/metaKey/);
     expect(ui).toMatch(/data-prp-sselect=["']1["']/);
+    // Default footer only when multi (assignee/reviewer single = no Cancel/Apply)
+    expect(ui).toMatch(
+      /showFooter\s*==\s*null\s*\?\s*Boolean\(multi\)\s*:\s*Boolean\(showFooter\)/
+    );
   });
 });
 
@@ -188,7 +201,20 @@ describe('z-index: picker above OptBtnHint', () => {
   test('SearchableSelect CSS forces portal z-index; hides outer opt hints', () => {
     const css = read('src/modal/components/common/SearchableSelect.css');
     expect(css).toMatch(/--prp-z-portal/);
+    expect(css).toMatch(/120000/);
+    expect(css).toMatch(/data-prp-sselect-open/);
     expect(css).toMatch(/body:has\(\[data-prp-sselect=['"]1['"]\]\)/);
+    expect(css).toMatch(/display:\s*none\s*!important/);
+    // Opaque panel — must not bleed aside through transparent --prp-bg
+    expect(css).toMatch(
+      /\.prp-sselect-panel(?:--popover)?[\s\S]*?background(?:-color)?:\s*#ffffff\s*!important/
+    );
+    expect(css).toMatch(/\.prp-sselect-portal\s*\{/);
+    const afford = read('src/modal/views/diff/LineCommentAffordance.css');
+    // Must not pin popover to toast/island band (loses to body Opt tips)
+    expect(afford).not.toMatch(
+      /\.prp-sselect-panel--popover\s*\{[\s\S]*?--prp-z-toast/
+    );
     const hint = read('src/modal/views/diff/DiffSearchMarks.css');
     // Conversation opt hints use tip layer (below portal pickers)
     expect(hint).toMatch(

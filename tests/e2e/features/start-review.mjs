@@ -22,7 +22,7 @@ import {
 } from '../lib/harness.mjs';
 
 /**
- * Prefer MULTI_HUNK_PR (#13): DEMO_PR (#7) is locked on GH → Start review 422
+ * Prefer MULTI_HUNK_PR (#13): DEMO_PR may be locked / rate-limited on GH → Start review 422
  * "Issue is locked". #13 is unlocked and has multi-line diffs for selection.
  */
 const TARGET_PR = MULTI_HUNK_PR;

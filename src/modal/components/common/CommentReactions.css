@@ -136,16 +136,12 @@
 
 /* Portaled to document.body — viewport-fixed coords from placeReactionPicker()
    (explicit top/left; no translateY so height never shifts the box).
-   Do not set left with !important — that would beat the inline left from JS
-   and pin the menu at x=0. Override absolute host defaults (bottom/left:0)
-   only where needed; top/left come from style={{ top, left }}. */
+   Do not set top/left with !important — that would beat the inline coords from
+   JS and pin the menu at (0,0) / thread top. Only clear absolute host defaults. */
 .prp-reactions__picker--portal {
   position: fixed !important;
-  /* Beat absolute host defaults so only JS top/left place the menu */
-  left: auto;
   right: auto !important;
   bottom: auto !important;
-  top: auto;
   margin: 0;
   transform: none !important;
   z-index: var(--prp-z-tip, 100020);

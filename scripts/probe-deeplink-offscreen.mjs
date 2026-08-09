@@ -14,7 +14,7 @@ import {
   waitMs,
 } from '../tests/e2e/lib/harness.mjs';
 
-const PR = process.env.PR_URL || 'https://github.com/enif-lee/pr-plus/pull/7';
+const PR = process.env.PR_URL || 'https://github.com/enif-lee/pr-plus/pull/19';
 const BUDGET_MS = Number(process.env.BUDGET_MS || 20_000);
 
 function probe(id) {

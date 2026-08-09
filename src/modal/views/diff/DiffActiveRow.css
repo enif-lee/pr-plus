@@ -56,42 +56,43 @@
   background: var(--prp-bg);
 }
 
-/* Diff floating file/page controller — bottom-right of the hunk pane */
-.prp-diff-float-nav {
+/* Diff floating stack — layout only (bottom-right of the hunk pane).
+ * Two separate floating surfaces sit inside; Goto is NOT chrome of the nav. */
+.prp-diff-float-stack {
   position: absolute;
   right: 12px;
   bottom: 12px;
   z-index: var(--prp-z-sticky-header, 24);
   display: flex;
   flex-direction: column;
-  align-items: stretch;
-  gap: 4px;
-  padding: 2px;
-  border: 1px solid var(--prp-border);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--prp-bg) 92%, transparent);
-  box-shadow: 0 4px 16px rgba(1, 4, 9, 0.12);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  min-width: 0;
+  align-items: flex-end;
+  gap: 8px;
+  pointer-events: none;
+}
+.prp-diff-float-stack > * {
+  pointer-events: auto;
 }
 
-.prp-diff-float-nav__btns {
-  display: inline-flex;
-  align-items: center;
-  gap: 0;
-}
-
-.prp-diff-float-nav__goto {
+/* ── Goto floating surface (separate from control island) ── */
+.prp-diff-float-goto {
+  /* Fixed width — does not grow/shrink with query or suggestion text */
+  width: 320px;
+  min-width: 320px;
+  max-width: 320px;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 4px 4px 2px;
-  min-width: 260px;
-  max-width: min(420px, 70vw);
+  padding: 6px;
+  border: 1px solid var(--prp-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--prp-bg) 96%, transparent);
+  box-shadow: 0 4px 16px rgba(1, 4, 9, 0.14);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
-.prp-diff-float-nav__suggest {
+.prp-diff-float-goto__suggest {
   list-style: none;
   margin: 0;
   padding: 2px;
@@ -102,7 +103,7 @@
   background: var(--prp-bg);
 }
 
-.prp-diff-float-nav__suggest-item {
+.prp-diff-float-goto__suggest-item {
   appearance: none;
   display: flex;
   align-items: center;
@@ -121,38 +122,45 @@
   cursor: pointer;
 }
 
-.prp-diff-float-nav__suggest-item--active,
-.prp-diff-float-nav__suggest-item[aria-selected='true'],
-.prp-diff-float-nav__suggest-item:hover {
+.prp-diff-float-goto__suggest-item--active,
+.prp-diff-float-goto__suggest-item[aria-selected='true'],
+.prp-diff-float-goto__suggest-item:hover {
   background: color-mix(in srgb, var(--prp-accent) 14%, transparent);
   color: var(--prp-accent);
 }
 
-.prp-diff-float-nav__suggest-path {
+.prp-diff-float-goto__suggest-path {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-weight: 400;
 }
 
-.prp-diff-float-nav__suggest-meta {
+/* Contains + initial match letters */
+.prp-diff-float-goto__match {
+  font-weight: 700;
+  color: inherit;
+}
+
+.prp-diff-float-goto__suggest-meta {
   flex: 0 0 auto;
   font-size: 10px;
   opacity: 0.7;
   font-variant-numeric: tabular-nums;
 }
 
-.prp-diff-float-nav__suggest-empty {
+.prp-diff-float-goto__suggest-empty {
   padding: 6px 8px;
   font-size: 11px;
 }
 
-.prp-diff-float-nav__goto-input {
-  flex: 1 1 auto;
-  min-width: 0;
-  height: 28px;
+.prp-diff-float-goto__input {
+  display: block;
+  width: 100%;
   box-sizing: border-box;
+  height: 28px;
   margin: 0;
   padding: 0 8px;
   border: 1px solid var(--prp-border);
@@ -165,10 +173,31 @@
   line-height: 1;
 }
 
-.prp-diff-float-nav__goto-input:focus {
+.prp-diff-float-goto__input:focus {
   outline: none;
   border-color: var(--prp-accent);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--prp-accent) 22%, transparent);
+}
+
+/* ── Control island (file/page nav + Goto toggle only) ── */
+.prp-diff-float-nav {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 2px;
+  border: 1px solid var(--prp-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--prp-bg) 92%, transparent);
+  box-shadow: 0 4px 16px rgba(1, 4, 9, 0.12);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  min-width: 0;
+}
+
+.prp-diff-float-nav__btns {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
 }
 
 .prp-diff-float-nav__btn {

@@ -14,6 +14,13 @@ E2E uses a **separate** config: `rstest.e2e.config.ts`.
    One-time: `npm run browser:login` then sign in.
 4. Network access to `github.com/enif-lee/pr-plus`.
 
+## Demo PR fixture
+
+Default multi-thread / conversation target is **`DEMO_PR` in `lib/harness.mjs`**
+(currently **#19**, stack root DEMO-300 on `demo/g`). Former **#7** was closed
+(subject-level reaction lock). Comment cleanup defaults to the same number via
+`COMMENT_CLEANUP_PR` in `lib/comment-cleanup.mjs`.
+
 ## Commands
 
 ```bash
@@ -71,13 +78,13 @@ E2E helpers: `probeLoad()`, `waitDetailReady({ number, meta, files })`,
 
 **Perf budgets:** conversation / light Diff use tight rAF budgets (~50ms p95).
 Heavy PR **#14** page/file holds use separate `PRP_E2E_*_HEAVY_MS` ceilings —
-large virtual remounts are not comparable to #7/#13.
+large virtual remounts are not comparable to #19/#13.
 
 ## Groups
 
 | Group | File | What it covers |
 |-------|------|----------------|
-| `smoke` | `features/smoke.rstest.ts` | open PR #7, layout chrome, Diff toggle |
+| `smoke` | `features/smoke.rstest.ts` | open PR #19, layout chrome, Diff toggle |
 | `conversation-nav` | `features/conversation-nav.rstest.ts` | ⌥J/K, fold, reply, composer |
 | `diff-nav` | `features/diff-nav.rstest.ts` | Diff thread/file/page nav, Find, mode |
 | `selection` | `features/selection.rstest.ts` | PR #13 selection island, fold, multi-hunk |

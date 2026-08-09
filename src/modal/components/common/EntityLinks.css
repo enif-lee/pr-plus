@@ -195,14 +195,9 @@ button.prp-stack-strip__item {
   cursor: pointer;
   appearance: none;
 }
-/* Floating path picker sits above modal chrome, aligned to the level chip */
-.prp-overlay .prp-sselect-panel--popover {
-  z-index: var(--prp-z-portal, 120000);
+/* Stack strip path picker: body-portaled; stacking via SearchableSelect.css */
+.prp-sselect-panel--popover {
   pointer-events: auto;
-}
-.prp-overlay .prp-sselect-backdrop--soft {
-  z-index: 119990;
-  pointer-events: none;
 }
 
 /* Diff chrome (checks + labels) */

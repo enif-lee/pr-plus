@@ -45,7 +45,7 @@ const REPEAT_MS = Number(process.env.PRP_E2E_REPEAT_MS || 40);
 /**
  * Frame/longtask budgets.
  *
- * Conversation / light Diff (#7, #13) stay tight (rAF ~16ms).
+ * Conversation / light Diff (#19, #13) stay tight (rAF ~16ms).
  * Heavy architecture Diff (#14) intentionally remounts large virtual ranges
  * on page/file hops — measured p95 often 200–350ms with longtask sum ~1s.
  * Applying the light budget to #14 is a false failure (root cause: budget

@@ -7,6 +7,9 @@ import { describe, expect, test } from '@rstest/core';
 import {
   fileChangeVolume,
   filePathMatchesQuery,
+  gotoHighlightSegments,
+  gotoMatchRanges,
+  gotoPathQueryForMatch,
   pathInitials,
   rankGotoFileSuggestions,
   resolveGotoSubmitQuery,
@@ -122,6 +125,49 @@ describe('diff-goto-suggest match + rank', () => {
   });
 });
 
+describe('goto match bold ranges (contains + initial)', () => {
+  test('gotoPathQueryForMatch strips :line and bare digits', () => {
+    expect(gotoPathQueryForMatch('src/foo.ts:12')).toBe('src/foo.ts');
+    expect(gotoPathQueryForMatch('foo:3:5')).toBe('foo');
+    expect(gotoPathQueryForMatch('42')).toBe('');
+    expect(gotoPathQueryForMatch('10:20')).toBe('');
+    expect(gotoPathQueryForMatch('  Diff  ')).toBe('Diff');
+  });
+
+  test('contains match: first contiguous hit is bold', () => {
+    const path = 'src/modal/views/diff/DiffFloatingController.tsx';
+    const ranges = gotoMatchRanges(path, 'diff');
+    expect(ranges.length).toBe(1);
+    expect(ranges[0].mode).toBe('contains');
+    const slice = path.slice(ranges[0].start, ranges[0].end);
+    expect(slice.toLowerCase()).toBe('diff');
+    const segs = gotoHighlightSegments(path, 'floating');
+    const bold = segs.filter((s) => s.bold).map((s) => s.text).join('');
+    expect(bold.toLowerCase()).toBe('floating');
+    expect(segs.some((s) => !s.bold && s.text.length > 0)).toBe(true);
+  });
+
+  test('initial match: path segment first letters are bold', () => {
+    const path = 'abc/def/gg';
+    const ranges = gotoMatchRanges(path, 'adg');
+    expect(ranges.length).toBe(3);
+    expect(ranges.every((r) => r.mode === 'initial')).toBe(true);
+    const chars = ranges.map((r) => path.slice(r.start, r.end)).join('');
+    expect(chars.toLowerCase()).toBe('adg');
+    const segs = gotoHighlightSegments(path, 'adg');
+    const bold = segs.filter((s) => s.bold).map((s) => s.text).join('');
+    expect(bold.toLowerCase()).toBe('adg');
+  });
+
+  test('idle / no match: no bold spans invented', () => {
+    expect(gotoMatchRanges('a/b.ts', '')).toEqual([]);
+    expect(gotoHighlightSegments('a/b.ts', '')).toEqual([
+      { text: 'a/b.ts', bold: false },
+    ]);
+    expect(gotoMatchRanges('a/b.ts', 'zzz')).toEqual([]);
+  });
+});
+
 describe('Diff Goto UI + hotkey contracts', () => {
   test('⌥G resolves to openDiffGoto on Diff only', () => {
     expect(
@@ -148,17 +194,37 @@ describe('Diff Goto UI + hotkey contracts', () => {
     ).not.toBe('openDiffGoto');
   });
 
-  test('DiffFloatingController: floating input, suggest list, arrows, open event', () => {
+  test('DiffFloatingController: separate Goto surface + bold match wiring', () => {
     const ui = read('src/modal/views/diff/DiffFloatingController.tsx');
     expect(ui).toMatch(/data-prp-diff-goto=["']1["']/);
     expect(ui).toMatch(/data-prp-diff-goto-input=["']1["']/);
     expect(ui).toMatch(/data-prp-diff-goto-suggest=["']1["']/);
+    expect(ui).toMatch(/data-prp-diff-float-nav=["']1["']/);
+    expect(ui).toMatch(/data-prp-diff-float-stack=["']1["']/);
     expect(ui).toMatch(/rankGotoFileSuggestions/);
+    expect(ui).toMatch(/gotoHighlightSegments/);
+    expect(ui).toMatch(/prp-diff-float-goto__match/);
     expect(ui).toMatch(/ArrowDown/);
     expect(ui).toMatch(/ArrowUp/);
     expect(ui).toMatch(/prp-open-diff-goto|PRP_OPEN_DIFF_GOTO/);
     expect(ui).toMatch(/setTimeout\(\s*\(\)\s*=>\s*setDebouncedQuery/);
     expect(ui).toMatch(/inputRef\.current\?\.focus/);
+    // Goto is not nested inside float-nav chrome
+    expect(ui).not.toMatch(
+      /prp-diff-float-nav["'][\s\S]{0,200}data-prp-diff-goto=["']1["']/
+    );
+  });
+
+  test('Goto CSS: fixed width bar + separate surface classes', () => {
+    const css = read('src/modal/views/diff/DiffActiveRow.css');
+    expect(css).toMatch(/\.prp-diff-float-goto\s*\{/);
+    expect(css).toMatch(/\.prp-diff-float-nav\s*\{/);
+    expect(css).toMatch(/\.prp-diff-float-stack\s*\{/);
+    // Fixed width (not min/max-only shrink wrap)
+    expect(css).toMatch(
+      /\.prp-diff-float-goto\s*\{[\s\S]*?width:\s*320px[\s\S]*?min-width:\s*320px[\s\S]*?max-width:\s*320px/
+    );
+    expect(css).toMatch(/\.prp-diff-float-goto__match\s*\{[\s\S]*?font-weight:\s*700/);
   });
 
   test('hotkeys dispatch openDiffGoto; workspace passes files', () => {

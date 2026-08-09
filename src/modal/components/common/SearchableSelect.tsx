@@ -1,4 +1,5 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   filterSelectOptions,
   labelColorCss,
@@ -13,9 +14,12 @@ import './SearchableSelect.css';
 
 /**
  * Anchored popover searchable select.
- * - Single: click option → onPick
+ * - Single: click option → onPick (no Cancel/Apply footer by default)
  * - Multi: toggle options, free-text Enter adds to selection, Apply → onConfirm(ids)
  * - allowCreate: when free-text does not match any option, show Create… row
+ *
+ * Renders via document.body portal so z-index beats Conversation OptBtnHint
+ * portals (tip layer lives on body at --prp-z-tip; panel uses --prp-z-portal).
  */
 export function SearchableSelect({
   open,
@@ -51,6 +55,11 @@ export function SearchableSelect({
   onConfirm = null,
   confirmLabel = 'Apply',
   /**
+   * Footer (Cancel / Apply). Default: multi only.
+   * Assignee/reviewer single-select uses click · ⌥1–3 · Enter · Esc — no buttons.
+   */
+  showFooter = null,
+  /**
    * Optional multi-toggle resolver (e.g. commit range fill).
    * When set, called as (prevSelectedIds, clickedId) → nextSelectedIds
    * instead of plain add/remove.
@@ -63,6 +72,8 @@ export function SearchableSelect({
   minWidth = 220,
   maxWidth = 320,
 }: any) {
+  const footerVisible =
+    showFooter == null ? Boolean(multi) : Boolean(showFooter);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
@@ -182,6 +193,25 @@ export function SearchableSelect({
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
 
+  // Latch body attr so CSS can hide Conversation Opt tips even if :has is flaky.
+  useEffect(() => {
+    if (!open || typeof document === 'undefined') return undefined;
+    try {
+      document.body.setAttribute('data-prp-sselect-open', '1');
+      document.documentElement.setAttribute('data-prp-sselect-open', '1');
+    } catch {
+      /* ignore */
+    }
+    return () => {
+      try {
+        document.body.removeAttribute('data-prp-sselect-open');
+        document.documentElement.removeAttribute('data-prp-sselect-open');
+      } catch {
+        /* ignore */
+      }
+    };
+  }, [open]);
+
   useEffect(() => {
     if (!open) return undefined;
     const claim = (e: KeyboardEvent) => {
@@ -200,7 +230,7 @@ export function SearchableSelect({
         onClose?.();
         return;
       }
-      // ⌘/Ctrl+Enter confirms: multi → Apply selection; single → pickEnter (first/create).
+      // ⌘/Ctrl+Enter confirms: multi → Apply selection; single → pick first/create.
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.altKey) {
         claim(e);
         if (multiRef.current) {
@@ -211,7 +241,6 @@ export function SearchableSelect({
             onPickRef.current?.({ id: ids[0], label: ids[0] });
           }
         } else {
-          // Fire primary footer confirm for single (milestone / reviewer / assignee)
           try {
             const btn = panelRef.current?.querySelector?.(
               '[data-prp-sselect-confirm="1"]'
@@ -547,61 +576,85 @@ export function SearchableSelect({
           </li>
         ) : null}
       </ul>
-      {/* Multi (labels) and single meta pickers (milestone / people): Cancel +
-          confirm chords with OptBtnHint under Opt-hold. */}
-      <div className="prp-sselect-footer" data-prp-sselect-footer="1">
-        <span className="prp-opt-hint-host prp-sselect-footer__btn-host">
-          <OptBtnHint
-            label="Esc"
-            preferredPlacement="top"
-            className="prp-opt-btn-hint--sselect"
-          />
-          <button
-            type="button"
-            className="prp-btn prp-btn--size-sm"
-            data-prp-sselect-cancel="1"
-            onClick={onClose}
-          >
-            Cancel
-          </button>
-        </span>
-        <span className="prp-opt-hint-host prp-sselect-footer__btn-host">
-          <OptBtnHint
-            label="⌘↵"
-            preferredPlacement="top"
-            className="prp-opt-btn-hint--sselect"
-          />
-          <button
-            type="button"
-            className="prp-btn prp-btn--primary prp-btn--size-sm"
-            data-prp-sselect-confirm="1"
-            onClick={() => {
-              if (multi) confirmMulti();
-              else pickEnter();
-            }}
-          >
-            {confirmLabel}
-            {multi && selected.length ? ` (${selected.length})` : ''}
-          </button>
-        </span>
-      </div>
+      {/* Multi (labels / commit range): Cancel + Apply with Opt chords.
+          Single people/milestone: no footer — click · ⌥1–3 · Enter · Esc. */}
+      {footerVisible ? (
+        <div className="prp-sselect-footer" data-prp-sselect-footer="1">
+          <span className="prp-opt-hint-host prp-sselect-footer__btn-host">
+            <OptBtnHint
+              label="Esc"
+              preferredPlacement="top"
+              className="prp-opt-btn-hint--sselect"
+            />
+            <button
+              type="button"
+              className="prp-btn prp-btn--size-sm"
+              data-prp-sselect-cancel="1"
+              onClick={onClose}
+            >
+              Cancel
+            </button>
+          </span>
+          <span className="prp-opt-hint-host prp-sselect-footer__btn-host">
+            <OptBtnHint
+              label="⌘↵"
+              preferredPlacement="top"
+              className="prp-opt-btn-hint--sselect"
+            />
+            <button
+              type="button"
+              className="prp-btn prp-btn--primary prp-btn--size-sm"
+              data-prp-sselect-confirm="1"
+              onClick={() => {
+                if (multi) confirmMulti();
+                else pickEnter();
+              }}
+            >
+              {confirmLabel}
+              {multi && selected.length ? ` (${selected.length})` : ''}
+            </button>
+          </span>
+        </div>
+      ) : null}
     </div>
   );
 
+  // Prefer .prp-overlay so --prp-bg / theme tokens inherit (body alone has none →
+  // transparent panel). Fall back to body with a token-bearing shell.
+  // Outer Opt tips stay on body at tip-z; data-prp-sselect-open hides them.
+  if (typeof document === 'undefined') return null;
+  const overlayHost =
+    (document.querySelector('.prp-overlay') as HTMLElement | null) || null;
+  const portalRoot = overlayHost || document.body;
+  if (!portalRoot) return null;
+  const onBody = portalRoot === document.body;
+
   if (!pos && !anchorRef) {
-    return (
-      <div className="prp-sselect-layer" role="presentation">
+    return createPortal(
+      <div
+        className={`prp-sselect-layer${onBody ? ' prp-sselect-portal' : ''}`}
+        role="presentation"
+        data-prp-sselect-root="1"
+      >
         <div className="prp-sselect-backdrop" onClick={onClose} />
         {panel}
-      </div>
+      </div>,
+      portalRoot
     );
   }
 
-  return (
-    <>
-      <div className="prp-sselect-backdrop prp-sselect-backdrop--soft" onClick={onClose} />
+  return createPortal(
+    <div
+      className={onBody ? 'prp-sselect-portal' : undefined}
+      data-prp-sselect-root="1"
+    >
+      <div
+        className="prp-sselect-backdrop prp-sselect-backdrop--soft"
+        onClick={onClose}
+      />
       {panel}
-    </>
+    </div>,
+    portalRoot
   );
 }
 

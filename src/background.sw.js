@@ -6817,6 +6817,27 @@ async function fetchReactableReactors(nodeId, fetchImpl, token, ctx = null, opts
   );
   return map.get(id) || [];
 }
+function isReactableGraphqlId(id) {
+  const s = String(id || "").trim();
+  if (!s || /^\d+$/.test(s)) return false;
+  if (/^shell:/i.test(s) || /^rest-thread-/i.test(s)) return false;
+  if (/^PRRT_/i.test(s) || /PullRequestReviewThread/i.test(s)) return false;
+  if (/^(PRRC_|IC_|I_|PR_)/i.test(s)) return true;
+  if (/^[A-Za-z0-9_=-]{12,}$/.test(s) && /_/.test(s)) return true;
+  return false;
+}
+function isGraphqlNotFoundError(err) {
+  const msg = String(err?.message || err || "");
+  return /Could not resolve|NOT_FOUND|does not exist|invalid.*id/i.test(msg);
+}
+function restReactionCommentId(id) {
+  if (id == null || id === "") return null;
+  const s = String(id).trim();
+  if (!s) return null;
+  if (/^\d+$/.test(s)) return s;
+  if (isReactableGraphqlId(s)) return null;
+  return s;
+}
 async function toggleCommentReaction(owner, repo, kind, opts, fetchImpl, token, ctx = null) {
   ctx = normalizeApiCtx(ctx);
   const content = String(opts?.content || "").trim();
@@ -6824,7 +6845,8 @@ async function toggleCommentReaction(owner, repo, kind, opts, fetchImpl, token, 
   if (!gqlContent) {
     throw new Error(`Unsupported reaction: ${content || "(empty)"}`);
   }
-  const nodeId = String(opts?.nodeId || "").trim();
+  const rawNodeId = String(opts?.nodeId || "").trim();
+  const nodeId = isReactableGraphqlId(rawNodeId) ? rawNodeId : "";
   const currently = Boolean(opts?.viewerHasReacted);
   const nextReacted = !currently;
   const kRaw = String(kind || "issue").toLowerCase();
@@ -6847,42 +6869,74 @@ async function toggleCommentReaction(owner, repo, kind, opts, fetchImpl, token, 
         token,
         ctx
       );
-      return { content, reacted: nextReacted };
-    } catch {
+      return { content, reacted: nextReacted, via: "graphql" };
+    } catch (err) {
+      const restId = k === "pr" ? restReactionCommentId(opts?.number ?? opts?.commentId) : restReactionCommentId(opts?.commentId);
+      if (isGraphqlNotFoundError(err) && restId != null) {
+      } else {
+        const msg = String(err?.message || err || "GraphQL reaction failed");
+        const e = new Error(
+          `${msg} | rxv4 via=graphql nodeId=${nodeId} kind=${k}`
+        );
+        e.status = err?.status ?? 200;
+        e.via = "graphql";
+        e.nodeId = nodeId;
+        e.graphqlErrors = err?.graphqlErrors;
+        throw e;
+      }
     }
   }
   let basePath = "";
   let deletePath = (reactionId) => "";
+  let restSubject = null;
   if (k === "review") {
-    const commentId = opts?.commentId;
-    if (commentId == null || commentId === "") {
-      throw new Error("Reaction toggle needs nodeId or commentId");
+    const commentId = restReactionCommentId(opts?.commentId);
+    restSubject = commentId;
+    if (commentId == null) {
+      throw new Error(
+        "Reaction toggle needs a GraphQL comment nodeId (PRRC_\u2026) or numeric comment id"
+      );
     }
     basePath = `/repos/${owner}/${repo}/pulls/comments/${commentId}/reactions`;
     deletePath = (rid) => `/repos/${owner}/${repo}/pulls/comments/${commentId}/reactions/${rid}`;
   } else if (k === "pr") {
-    const num = opts?.number ?? opts?.commentId;
-    if (num == null || num === "") {
-      throw new Error("Reaction toggle needs nodeId or PR number");
+    const num = restReactionCommentId(opts?.number ?? opts?.commentId);
+    restSubject = num;
+    if (num == null) {
+      throw new Error("Reaction toggle needs PR GraphQL nodeId or PR number");
     }
     basePath = `/repos/${owner}/${repo}/issues/${num}/reactions`;
     deletePath = (rid) => `/repos/${owner}/${repo}/issues/${num}/reactions/${rid}`;
   } else {
-    const commentId = opts?.commentId;
-    if (commentId == null || commentId === "") {
-      throw new Error("Reaction toggle needs nodeId or commentId");
+    const commentId = restReactionCommentId(opts?.commentId);
+    restSubject = commentId;
+    if (commentId == null) {
+      throw new Error(
+        "Reaction toggle needs a GraphQL comment nodeId (IC_\u2026) or numeric comment id"
+      );
     }
     basePath = `/repos/${owner}/${repo}/issues/comments/${commentId}/reactions`;
     deletePath = (rid) => `/repos/${owner}/${repo}/issues/comments/${commentId}/reactions/${rid}`;
   }
   if (nextReacted) {
-    await apiSend(
-      githubRestUrl(basePath, ctx),
-      fetchImpl,
-      token,
-      { method: "POST", body: { content } }
-    );
-    return { content, reacted: true };
+    try {
+      await apiSend(
+        githubRestUrl(basePath, ctx),
+        fetchImpl,
+        token,
+        { method: "POST", body: { content } }
+      );
+      return { content, reacted: true, via: "rest" };
+    } catch (err) {
+      const restMsg = String(err?.message || err || "REST reaction failed");
+      const e = new Error(
+        `${restMsg} | rxv4 via=rest subject=${restSubject} path=${basePath}`
+      );
+      e.status = err?.status ?? 403;
+      e.via = "rest";
+      e.restPath = basePath;
+      throw e;
+    }
   }
   const listed = await apiJson(
     githubRestUrl(
@@ -6906,7 +6960,7 @@ async function toggleCommentReaction(owner, repo, kind, opts, fetchImpl, token, 
   } catch {
   }
   if (!target?.id) {
-    return { content, reacted: false };
+    return { content, reacted: false, via: "rest" };
   }
   await apiSend(
     githubRestUrl(deletePath(target.id), ctx),
@@ -6914,7 +6968,7 @@ async function toggleCommentReaction(owner, repo, kind, opts, fetchImpl, token, 
     token,
     { method: "DELETE" }
   );
-  return { content, reacted: false };
+  return { content, reacted: false, via: "rest" };
 }
 
 // src/fetch/detail-sides-comments.ts

@@ -10,6 +10,8 @@ import {
   FILE_NAV_SHORTCUT,
 } from '@lib/shortcut-policy';
 import {
+  gotoHighlightSegments,
+  gotoPathQueryForMatch,
   rankGotoFileSuggestions,
   resolveGotoSubmitQuery,
   type GotoFileLike,
@@ -19,9 +21,9 @@ import {
 export const PRP_OPEN_DIFF_GOTO = 'prp-open-diff-goto';
 
 /**
- * Bottom-right Diff chrome: prev/next file & page + Goto path:line.
- * Goto opens a floating input **above** the float controls with ranked
- * file suggestions (most-changed idle top-3; debounced filter on type).
+ * Bottom-right Diff chrome: two separate floating surfaces
+ * 1. Goto bar (fixed width) — path:line + ranked suggestions
+ * 2. Control island — prev/next file & page + Goto toggle
  */
 export function DiffFloatingController(props: {
   onPrevFile?: (() => void) | null;
@@ -100,6 +102,12 @@ export function DiffFloatingController(props: {
     [files, debouncedQuery]
   );
 
+  // Path text used for bold match spans (same strip as ranking)
+  const matchQuery = useMemo(
+    () => gotoPathQueryForMatch(debouncedQuery),
+    [debouncedQuery]
+  );
+
   // Keep highlight in range when list shrinks
   useEffect(() => {
     if (activeIndex >= suggestions.length) {
@@ -142,16 +150,12 @@ export function DiffFloatingController(props: {
     if (q) submitGoto(q);
   }
 
+  // Layout stack only — Goto and control island are separate floating surfaces.
   return (
-    <div
-      className={`prp-diff-float-nav${gotoOpen ? ' prp-diff-float-nav--goto-open' : ''}`}
-      role="toolbar"
-      aria-label="Diff file and page navigation"
-      data-prp-diff-float-nav="1"
-    >
+    <div className="prp-diff-float-stack" data-prp-diff-float-stack="1">
       {gotoOpen ? (
         <div
-          className="prp-diff-float-nav__goto"
+          className="prp-diff-float-goto"
           role="combobox"
           aria-expanded="true"
           aria-haspopup="listbox"
@@ -159,48 +163,64 @@ export function DiffFloatingController(props: {
         >
           {suggestions.length > 0 ? (
             <ul
-              className="prp-diff-float-nav__suggest"
+              id="prp-diff-goto-list"
+              className="prp-diff-float-goto__suggest"
               role="listbox"
               aria-label="File suggestions"
               data-prp-diff-goto-suggest="1"
             >
-              {suggestions.map((s, i) => (
-                <li key={s.path} role="presentation">
-                  <button
-                    type="button"
-                    role="option"
-                    aria-selected={i === activeIndex}
-                    className={`prp-diff-float-nav__suggest-item${
-                      i === activeIndex
-                        ? ' prp-diff-float-nav__suggest-item--active'
-                        : ''
-                    }`}
-                    data-prp-diff-goto-item={s.path}
-                    data-active={i === activeIndex ? '1' : '0'}
-                    onMouseEnter={() => setActiveIndex(i)}
-                    onClick={() => {
-                      setActiveIndex(i);
-                      const typed = String(gotoQuery || '').trim();
-                      // Explicit click on a row always targets that path (unless bare line)
-                      const q = resolveGotoSubmitQuery(typed, s.path);
-                      submitGoto(q || s.path);
-                    }}
-                  >
-                    <span className="prp-diff-float-nav__suggest-path">
-                      {s.path}
-                    </span>
-                    {s.volume > 0 ? (
-                      <span className="prp-diff-float-nav__suggest-meta">
-                        {s.volume}
+              {suggestions.map((s, i) => {
+                const segments = gotoHighlightSegments(s.path, matchQuery);
+                return (
+                  <li key={s.path} role="presentation">
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={i === activeIndex}
+                      className={`prp-diff-float-goto__suggest-item${
+                        i === activeIndex
+                          ? ' prp-diff-float-goto__suggest-item--active'
+                          : ''
+                      }`}
+                      data-prp-diff-goto-item={s.path}
+                      data-active={i === activeIndex ? '1' : '0'}
+                      onMouseEnter={() => setActiveIndex(i)}
+                      onClick={() => {
+                        setActiveIndex(i);
+                        const typed = String(gotoQuery || '').trim();
+                        // Explicit click on a row always targets that path (unless bare line)
+                        const q = resolveGotoSubmitQuery(typed, s.path);
+                        submitGoto(q || s.path);
+                      }}
+                    >
+                      <span className="prp-diff-float-goto__suggest-path">
+                        {segments.map((seg, si) =>
+                          seg.bold ? (
+                            <strong
+                              key={si}
+                              className="prp-diff-float-goto__match"
+                              data-prp-diff-goto-match="1"
+                            >
+                              {seg.text}
+                            </strong>
+                          ) : (
+                            <span key={si}>{seg.text}</span>
+                          )
+                        )}
                       </span>
-                    ) : null}
-                  </button>
-                </li>
-              ))}
+                      {s.volume > 0 ? (
+                        <span className="prp-diff-float-goto__suggest-meta">
+                          {s.volume}
+                        </span>
+                      ) : null}
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           ) : debouncedQuery.trim() ? (
             <div
-              className="prp-diff-float-nav__suggest-empty prp-muted"
+              className="prp-diff-float-goto__suggest-empty prp-muted"
               data-prp-diff-goto-empty="1"
             >
               No matching files
@@ -209,7 +229,7 @@ export function DiffFloatingController(props: {
           <input
             ref={inputRef}
             type="text"
-            className="prp-diff-float-nav__goto-input"
+            className="prp-diff-float-goto__input"
             value={gotoQuery}
             onChange={(e) => {
               setGotoQuery(e.target.value);
@@ -257,73 +277,81 @@ export function DiffFloatingController(props: {
           />
         </div>
       ) : null}
-      <div className="prp-diff-float-nav__btns">
-        <button
-          type="button"
-          className="prp-diff-float-nav__btn"
-          disabled={disabled || typeof onPrevFile !== 'function'}
-          onClick={() => onPrevFile?.()}
-          title={`Previous file (${filePrev})`}
-          aria-label={`Previous file (${filePrev})`}
-        >
-          <IconChevronLeft size={14} />
-        </button>
-        <button
-          type="button"
-          className="prp-diff-float-nav__btn"
-          disabled={disabled || typeof onPrevPage !== 'function'}
-          onClick={() => onPrevPage?.()}
-          title={`Previous page (${pagePrev})`}
-          aria-label={`Previous page (${pagePrev})`}
-        >
-          <IconChevronUp size={14} />
-        </button>
-        <button
-          type="button"
-          className="prp-diff-float-nav__btn"
-          disabled={disabled || typeof onNextPage !== 'function'}
-          onClick={() => onNextPage?.()}
-          title={`Next page (${pageNext})`}
-          aria-label={`Next page (${pageNext})`}
-        >
-          <IconChevronDown size={14} />
-        </button>
-        <button
-          type="button"
-          className="prp-diff-float-nav__btn"
-          disabled={disabled || typeof onNextFile !== 'function'}
-          onClick={() => onNextFile?.()}
-          title={`Next file (${fileNext})`}
-          aria-label={`Next file (${fileNext})`}
-        >
-          <IconChevronRight size={14} />
-        </button>
-        <button
-          type="button"
-          className={`prp-diff-float-nav__btn prp-diff-float-nav__btn--goto${
-            gotoOpen ? ' prp-diff-float-nav__btn--on' : ''
-          }`}
-          disabled={disabled || typeof onGoto !== 'function'}
-          data-prp-diff-goto-toggle="1"
-          onClick={() => {
-            setGotoOpen((o) => {
-              const next = !o;
-              if (!next) {
-                setGotoQuery('');
-                setDebouncedQuery('');
-                setActiveIndex(0);
-              }
-              return next;
-            });
-          }}
-          title="Go to file (⌥G)"
-          aria-label="Go to file path and line"
-          aria-expanded={gotoOpen}
-        >
-          <span className="prp-diff-float-nav__goto-label" aria-hidden="true">
-            :
-          </span>
-        </button>
+
+      <div
+        className="prp-diff-float-nav"
+        role="toolbar"
+        aria-label="Diff file and page navigation"
+        data-prp-diff-float-nav="1"
+      >
+        <div className="prp-diff-float-nav__btns">
+          <button
+            type="button"
+            className="prp-diff-float-nav__btn"
+            disabled={disabled || typeof onPrevFile !== 'function'}
+            onClick={() => onPrevFile?.()}
+            title={`Previous file (${filePrev})`}
+            aria-label={`Previous file (${filePrev})`}
+          >
+            <IconChevronLeft size={14} />
+          </button>
+          <button
+            type="button"
+            className="prp-diff-float-nav__btn"
+            disabled={disabled || typeof onPrevPage !== 'function'}
+            onClick={() => onPrevPage?.()}
+            title={`Previous page (${pagePrev})`}
+            aria-label={`Previous page (${pagePrev})`}
+          >
+            <IconChevronUp size={14} />
+          </button>
+          <button
+            type="button"
+            className="prp-diff-float-nav__btn"
+            disabled={disabled || typeof onNextPage !== 'function'}
+            onClick={() => onNextPage?.()}
+            title={`Next page (${pageNext})`}
+            aria-label={`Next page (${pageNext})`}
+          >
+            <IconChevronDown size={14} />
+          </button>
+          <button
+            type="button"
+            className="prp-diff-float-nav__btn"
+            disabled={disabled || typeof onNextFile !== 'function'}
+            onClick={() => onNextFile?.()}
+            title={`Next file (${fileNext})`}
+            aria-label={`Next file (${fileNext})`}
+          >
+            <IconChevronRight size={14} />
+          </button>
+          <button
+            type="button"
+            className={`prp-diff-float-nav__btn prp-diff-float-nav__btn--goto${
+              gotoOpen ? ' prp-diff-float-nav__btn--on' : ''
+            }`}
+            disabled={disabled || typeof onGoto !== 'function'}
+            data-prp-diff-goto-toggle="1"
+            onClick={() => {
+              setGotoOpen((o) => {
+                const next = !o;
+                if (!next) {
+                  setGotoQuery('');
+                  setDebouncedQuery('');
+                  setActiveIndex(0);
+                }
+                return next;
+              });
+            }}
+            title="Go to file (⌥G)"
+            aria-label="Go to file path and line"
+            aria-expanded={gotoOpen}
+          >
+            <span className="prp-diff-float-nav__goto-label" aria-hidden="true">
+              :
+            </span>
+          </button>
+        </div>
       </div>
     </div>
   );
