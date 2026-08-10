@@ -8,7 +8,11 @@ import {
   extractSelectedCodeText,
   githubBlobLinePermalink,
   normalizeSelection,
+  preferredOptHintPlacementForDock,
   resolveSelectionDockVerticalPlacement,
+  selectionDockSideNeed,
+  selectionHeadBlockRole,
+  SELECTION_DOCK_GAP_EST,
 } from '@lib/line-selection';
 import { copyTextToClipboard } from '@lib/copy-to-clipboard';
 import {
@@ -40,6 +44,47 @@ function readSelectionDockClip(host: HTMLElement | null): {
     /* ignore */
   }
   return { top: 0, bottom: window.innerHeight || 0 };
+}
+
+/**
+ * Full multi-line selection extent in viewport coords (all painted selected
+ * rows). Falls back to the dock host when nothing selected is measured.
+ */
+function readSelectionExtentRect(
+  host: HTMLElement | null,
+  scroller: HTMLElement | null
+): { top: number; bottom: number } {
+  const hostRect =
+    host && typeof host.getBoundingClientRect === 'function'
+      ? host.getBoundingClientRect()
+      : null;
+  const fallback = {
+    top: hostRect?.top ?? 0,
+    bottom: hostRect?.bottom ?? 0,
+  };
+  try {
+    const root = scroller || host?.ownerDocument || document;
+    const nodes = root.querySelectorAll?.(
+      '.prp-vline--selected, .prp-vline--header-selected, [data-file-selected="1"]'
+    );
+    if (!nodes || !nodes.length) return fallback;
+    let top = Infinity;
+    let bottom = -Infinity;
+    for (let i = 0; i < nodes.length; i++) {
+      const el = nodes[i] as HTMLElement;
+      if (!el || typeof el.getBoundingClientRect !== 'function') continue;
+      // Prefer rows inside the same scroller when known
+      if (scroller && !scroller.contains(el)) continue;
+      const r = el.getBoundingClientRect();
+      if (!(r.width > 0 || r.height > 0)) continue;
+      top = Math.min(top, r.top);
+      bottom = Math.max(bottom, r.bottom);
+    }
+    if (!Number.isFinite(top) || !Number.isFinite(bottom)) return fallback;
+    return { top, bottom };
+  } catch {
+    return fallback;
+  }
 }
 
 /**
@@ -114,6 +159,8 @@ export function SelectionCommentBar(props: any) {
   ]);
 
   // Flip comment/actions dock above the selection when Diff scroller bottom is tight.
+  // Multi-line: room uses full selection extent + Opt hint strip; head-at-start
+  // prefers above (outward from the block).
   useLayoutEffect(() => {
     if (!selection) {
       setDockPlacement('below');
@@ -129,29 +176,55 @@ export function SelectionCommentBar(props: any) {
       const hostRect = host.getBoundingClientRect();
       const dockRect = dock.getBoundingClientRect();
       const clip = readSelectionDockClip(host);
-      // Prefer a floor for comment phase so we flip before the tall form mounts
-      // with only half visible (measure after paint may still be small once).
-      const minBelow =
-        phase === 'comment' ? Math.max(dockRect.height || 0, 160) : 48;
+      const scroller =
+        (host.closest?.('.prp-vlist') as HTMLElement | null) ||
+        (host.closest?.('.prp-diff-pane') as HTMLElement | null) ||
+        null;
+      const extent = readSelectionExtentRect(host, scroller);
+      const measured = Math.max(0, dockRect.height || 0);
+      const gap = phase === 'comment' ? 8 : SELECTION_DOCK_GAP_EST;
+      const need =
+        typeof selectionDockSideNeed === 'function'
+          ? selectionDockSideNeed({
+              dockHeight: measured,
+              phase,
+              // Always reserve Opt hint strip for actions (appear with Opt-hold)
+              includeOptHints: phase !== 'comment',
+              gap: 0,
+            })
+          : measured + (phase === 'comment' ? 0 : 26);
+      const headRole =
+        typeof selectionHeadBlockRole === 'function'
+          ? selectionHeadBlockRole(selection)
+          : null;
       const next =
         typeof resolveSelectionDockVerticalPlacement === 'function'
           ? resolveSelectionDockVerticalPlacement({
               hostTop: hostRect.top,
               hostBottom: hostRect.bottom,
-              dockHeight: dockRect.height,
+              selectionTop: extent.top,
+              selectionBottom: extent.bottom,
+              dockHeight: measured,
               clipTop: clip.top,
               clipBottom: clip.bottom,
-              gap: phase === 'comment' ? 8 : 6,
-              minBelow,
+              gap,
+              minBelow: need,
+              phase,
+              includeOptHints: phase !== 'comment',
+              headBlockRole: headRole,
             })
           : 'below';
       setDockPlacement((prev) => (prev === next ? prev : next));
     };
     measure();
-    // Second pass after composer rows paint (comment phase)
+    // Second pass after composer rows paint (comment phase) + Opt hints layout
     const raf =
       typeof requestAnimationFrame === 'function'
         ? requestAnimationFrame(() => measure())
+        : 0;
+    const raf2 =
+      typeof requestAnimationFrame === 'function'
+        ? requestAnimationFrame(() => requestAnimationFrame(() => measure()))
         : 0;
     const scroller =
       (dockRef.current?.closest?.('.prp-vlist') as HTMLElement | null) || null;
@@ -164,6 +237,7 @@ export function SelectionCommentBar(props: any) {
     }
     return () => {
       if (raf) cancelAnimationFrame(raf);
+      if (raf2) cancelAnimationFrame(raf2);
       try {
         scroller?.removeEventListener?.('scroll', onReposition);
         window.removeEventListener('resize', onReposition);
@@ -178,6 +252,7 @@ export function SelectionCommentBar(props: any) {
     leaving,
     pendingCount,
     hasViewerPendingReview,
+    showOptHints,
     selection?.headRowIndex,
     selection?.anchorRowIndex,
     selection?.filePath,
@@ -256,6 +331,13 @@ export function SelectionCommentBar(props: any) {
   // ── Actions: floating segmented group (line + file header targets) ──
   const placeClass =
     dockPlacement === 'above' ? ' prp-selection-dock--above' : '';
+  // Dock above → hints further up; dock below → hints further down
+  const optHintPlace =
+    typeof preferredOptHintPlacementForDock === 'function'
+      ? preferredOptHintPlacementForDock(dockPlacement)
+      : dockPlacement === 'above'
+        ? 'top'
+        : 'bottom';
 
   if (phase === 'actions') {
     const kbdComment = `${opt}C`;
@@ -274,6 +356,7 @@ export function SelectionCommentBar(props: any) {
         data-phase="actions"
         data-file-target={isFileTarget ? '1' : '0'}
         data-dock-place={dockPlacement}
+        data-opt-hint-place={optHintPlace}
         data-opt-hints={showOptHints ? '1' : undefined}
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => e.stopPropagation()}
@@ -286,7 +369,7 @@ export function SelectionCommentBar(props: any) {
         >
           <OptBtnHint
             label={kbdComment}
-            preferredPlacement="top"
+            preferredPlacement={optHintPlace}
           />
           Comment
           <TipPopover
@@ -306,7 +389,7 @@ export function SelectionCommentBar(props: any) {
         >
           <OptBtnHint
             label={kbdCopyCode}
-            preferredPlacement="top"
+            preferredPlacement={optHintPlace}
           />
           Copy code
           <TipPopover
@@ -324,7 +407,7 @@ export function SelectionCommentBar(props: any) {
         >
           <OptBtnHint
             label={kbdCopyUrl}
-            preferredPlacement="top"
+            preferredPlacement={optHintPlace}
           />
           Copy URL
           <TipPopover
@@ -343,7 +426,7 @@ export function SelectionCommentBar(props: any) {
         >
           <OptBtnHint
             label="Esc"
-            preferredPlacement="top"
+            preferredPlacement={optHintPlace}
           />
           <IconX size={14} />
           <TipPopover title="Dismiss" shortcut="Esc" />
@@ -386,12 +469,13 @@ export function SelectionCommentBar(props: any) {
       data-prp-composer-kind="selection"
       data-prp-pending-only={canImmediate ? undefined : '1'}
       data-dock-place={dockPlacement}
+      data-opt-hint-place={optHintPlace}
       data-opt-hints={hintsLive ? '1' : undefined}
       onMouseDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
     >
       <div className="prp-opt-hint-host prp-selection-island__composer-field">
-        <OptBtnHint label={kbdFocus} preferredPlacement="top" />
+        <OptBtnHint label={kbdFocus} preferredPlacement={optHintPlace} />
         <MarkdownComposer
           value={draft}
           onChange={onDraft}
@@ -415,7 +499,7 @@ export function SelectionCommentBar(props: any) {
       <div className="prp-composer__row">
         {canImmediate ? (
           <span className="prp-opt-hint-host inline-flex">
-            <OptBtnHint label={kbdSubmit} preferredPlacement="top" />
+            <OptBtnHint label={kbdSubmit} preferredPlacement={optHintPlace} />
             <Button
               size="sm"
               variant="primary"
@@ -425,7 +509,7 @@ export function SelectionCommentBar(props: any) {
               data-prp-composer-submit="1"
               title={`Comment (${kbdSubmit})`}
               shortcut={kbdSubmit}
-              tipPlacement="top"
+              tipPlacement={optHintPlace}
             >
               {actionBusy ? 'Submitting…' : 'Comment'}
             </Button>
@@ -434,7 +518,7 @@ export function SelectionCommentBar(props: any) {
         <span className="prp-opt-hint-host inline-flex">
           <OptBtnHint
             label={canImmediate ? kbdStartPending : kbdSubmit}
-            preferredPlacement="top"
+            preferredPlacement={optHintPlace}
           />
           <Button
             size="sm"
@@ -450,14 +534,14 @@ export function SelectionCommentBar(props: any) {
                 : `Add comment to pending review (${kbdSubmit})`
             }
             shortcut={canImmediate ? kbdStartPending : kbdSubmit}
-            tipPlacement="top"
+            tipPlacement={optHintPlace}
           >
             {actionBusy ? 'Working…' : pendingLabel}
           </Button>
         </span>
         <span className="prp-opt-hint-host inline-flex">
           {/* Esc → action chips (App layering); second Esc on actions dismisses. */}
-          <OptBtnHint label={kbdCancel} preferredPlacement="top" />
+          <OptBtnHint label={kbdCancel} preferredPlacement={optHintPlace} />
           <Button
             size="sm"
             disabled={actionBusy}
@@ -466,7 +550,7 @@ export function SelectionCommentBar(props: any) {
             data-prp-selection-cancel="1"
             title={`Cancel comment (${kbdCancel})`}
             shortcut={kbdCancel}
-            tipPlacement="top"
+            tipPlacement={optHintPlace}
           >
             Cancel
           </Button>

@@ -339,10 +339,12 @@ export function CommentReactions({
       }
     }
     document.addEventListener('mousedown', onDoc);
-    document.addEventListener('keydown', onKey, true);
+    // window capture: embed key shield stopPropagates before document, so
+    // reaction-picker Esc/Tab must listen on window (same as App hotkeys).
+    window.addEventListener('keydown', onKey, true);
     return () => {
       document.removeEventListener('mousedown', onDoc);
-      document.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('keydown', onKey, true);
     };
   }, [pickerOpen]);
 

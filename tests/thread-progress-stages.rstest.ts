@@ -87,15 +87,17 @@ describe('open progress settle wiring (source)', () => {
     expect(markSrc).toMatch(/Busy hard-cap 99/);
   });
 
-  test('setLoadStage refuses to re-raise bar when open units complete (reconnect)', () => {
+  test('setLoadStage refuses to re-raise critical bar when critical complete', () => {
     const progress = read('src/host/modules/side-fetch-progress.ts');
-    expect(progress).toMatch(/isOpenProgressComplete/);
-    expect(progress).toMatch(/re-raising a 100%/);
+    expect(progress).toMatch(/isCriticalProgressComplete/);
+    expect(progress).toMatch(/mode:\s*['"]background['"]/);
     const timeline = read('src/host/modules/host-core-timeline-b.ts');
+    expect(timeline).toMatch(/function isCriticalProgressComplete/);
     expect(timeline).toMatch(/function isOpenProgressComplete/);
     expect(timeline).toMatch(
-      /tryFinishOpenProgress[\s\S]*isOpenProgressComplete/
+      /tryFinishOpenProgress[\s\S]*isCriticalProgressComplete/
     );
+    expect(timeline).toMatch(/mode:\s*['"]background['"]/);
   });
 
   test('revalidate settles thread ladder before unresolved bulk work', () => {

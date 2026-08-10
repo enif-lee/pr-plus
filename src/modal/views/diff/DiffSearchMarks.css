@@ -470,6 +470,18 @@ kbd.prp-modal-hotkey {
   overflow: hidden;
   pointer-events: none;
 }
+/*
+ * Selection ↑↓ / region hop settle: hide every OptBtnHint (floatbar delayed).
+ * Attr stamped on documentElement by scheduleSelectionActionsReveal.
+ */
+html[data-prp-selection-nav='1'] .prp-opt-btn-hint,
+html[data-prp-selection-nav='1'] .prp-opt-btn-hint--fixed {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
 .prp-opt-btn-hint {
   display: inline-flex;
   align-items: center;

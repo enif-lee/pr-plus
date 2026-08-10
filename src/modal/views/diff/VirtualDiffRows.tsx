@@ -31,6 +31,7 @@ import {
 import {
   isSelectableDiffRow,
   isOptHeldForPointerDrag,
+  isSelectionDockHostRow,
   rowSelectionVisualKey,
   selectionActiveSide,
   shouldUseNativeTextSelectOnDrag,
@@ -647,9 +648,10 @@ export const DiffCodeLine = memo(function DiffCodeLine({
 
   // Leaf store subscription: only this row re-renders when its key changes.
   // Middles stay "middle" under multi extend → no re-render. Override for tests.
-  // Pack visual role + dock side into one primitive so Object.is stays stable.
+  // Pack visual role + dock side + caret-host flag so multi-line head moves
+  // re-render the old/new dock hosts (role may stay "end" while head flips).
   const storeLeafPacked = useModalStore((s) => {
-    if (selectionOverride !== undefined) return '\x1eRIGHT';
+    if (selectionOverride !== undefined) return '\x1eRIGHT\x1e0';
     const visualKey =
       typeof rowSelectionVisualKey === 'function'
         ? rowSelectionVisualKey(s.lineSelection, row)
@@ -664,15 +666,18 @@ export const DiffCodeLine = memo(function DiffCodeLine({
           ).toUpperCase() === 'LEFT'
           ? 'LEFT'
           : 'RIGHT';
-    return `${visualKey}\x1e${side}`;
+    const dockHost =
+      typeof isSelectionDockHostRow === 'function' &&
+      isSelectionDockHostRow(s.lineSelection, row)
+        ? '1'
+        : '0';
+    return `${visualKey}\x1e${side}\x1e${dockHost}`;
   });
-  const storeSep = storeLeafPacked.lastIndexOf('\x1e');
-  const storeVisualKey =
-    storeSep >= 0 ? storeLeafPacked.slice(0, storeSep) : storeLeafPacked;
+  const storeParts = storeLeafPacked.split('\x1e');
+  const storeVisualKey = storeParts[0] || '';
   const storeDockSide: 'LEFT' | 'RIGHT' =
-    storeSep >= 0 && storeLeafPacked.slice(storeSep + 1) === 'LEFT'
-      ? 'LEFT'
-      : 'RIGHT';
+    storeParts[1] === 'LEFT' ? 'LEFT' : 'RIGHT';
+  const storeDockHost = storeParts[2] === '1';
   const visualKey =
     selectionOverride !== undefined
       ? typeof rowSelectionVisualKey === 'function'
@@ -681,9 +686,14 @@ export const DiffCodeLine = memo(function DiffCodeLine({
       : storeVisualKey;
   const selected = visualKey !== '';
   const selRole = visualKey || null;
-  // Single-line selection is role "only"; multi ends with "end"
+  // Dock follows the caret (head), not always the range bottom.
   const dockHere = Boolean(
-    selectionIsland && (selRole === 'end' || selRole === 'only')
+    selectionIsland &&
+      (selectionOverride !== undefined
+        ? typeof isSelectionDockHostRow === 'function'
+          ? isSelectionDockHostRow(selectionOverride, row)
+          : selRole === 'end' || selRole === 'only'
+        : storeDockHost)
   );
   const dockSide: 'LEFT' | 'RIGHT' =
     selectionOverride !== undefined

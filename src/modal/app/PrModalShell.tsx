@@ -75,6 +75,12 @@ import {
   resolveEmbedShortcutAction,
 } from '../lib/page-embed';
 import {
+  beginDiffNavPerfSample,
+  endDiffNavPerfSample,
+  installDiffNavPerfGlobal,
+  isDiffNavPerfEnabled,
+} from '../lib/diff-nav-perf';
+import {
   SHEET_DEFAULT_WIDTH,
   MODAL_DEFAULT_WIDTH,
   MODAL_DEFAULT_HEIGHT,
@@ -253,6 +259,7 @@ import {
   rebindSelectionRowIndices,
   findRowIndexForCommentId,
   SELECTION_ACTIONS_REVEAL_MS,
+  SELECTION_NAV_BUSY_ATTR,
   resolveSelectionIslandRevealPhase,
   shouldShowSelectionActionGroup,
   jumpSelectionToAdjacentChangeRegion,
@@ -1025,6 +1032,11 @@ export function PrModalApp({
   /**
    * Settle timer after select/move (no longer auto-shows the action group).
    */
+  /**
+   * True while selection ↑↓ / region hop is settling — hides OptBtnHints and
+   * delays action-group floatbar until SELECTION_ACTIONS_REVEAL_MS after last move.
+   */
+  const selectionNavBusyRef = useRef(false);
   const selectionActionsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null
   );
@@ -3028,8 +3040,9 @@ export function PrModalApp({
       // Reject hosts outside the Diff scroller (Conversation keep-alive clones)
       if (!scroller.contains(host)) return false;
       const stickyPad = diffStickyPadTop();
-      // Selection island (~40–56px) + slack — keep caret clear of dock
-      const padBottom = 56;
+      // Only sticky-header inset — floatbar flips above when bottom is tight
+      // (resolveSelectionDockVerticalPlacement); do not reserve ~3 empty lines.
+      const padBottom = 8;
       if (typeof scrollChildToRevealInScroller === 'function') {
         scrollChildToRevealInScroller(scroller, host, {
           padTop: stickyPad,
@@ -4106,6 +4119,21 @@ export function PrModalApp({
     }
   }
 
+  /** Stamp documentElement so OptBtnHint / CSS can hide badges during jump. */
+  function setSelectionNavBusy(busy: boolean) {
+    const next = Boolean(busy);
+    selectionNavBusyRef.current = next;
+    try {
+      const root =
+        typeof document !== 'undefined' ? document.documentElement : null;
+      if (!root) return;
+      if (next) root.setAttribute(SELECTION_NAV_BUSY_ATTR, '1');
+      else root.removeAttribute(SELECTION_NAV_BUSY_ATTR);
+    } catch {
+      /* ignore */
+    }
+  }
+
   /**
    * Drop Diff line selection + island chrome.
    * Used when navigating threads or files so selection does not linger
@@ -4113,6 +4141,7 @@ export function PrModalApp({
    */
   function clearLineSelectionForNav() {
     clearSelectionActionsTimer();
+    setSelectionNavBusy(false);
     if (selectionMoveRafRef.current) {
       cancelAnimationFrame(selectionMoveRafRef.current);
       selectionMoveRafRef.current = 0;
@@ -4164,9 +4193,12 @@ export function PrModalApp({
             selecting: Boolean(st.selecting || selectingRef.current),
             optHeld,
             hoverReveal: Boolean(selectionHoverRevealRef.current),
+            selectionNavBusy: Boolean(selectionNavBusyRef.current),
             phase,
           })
-        : phase === 'comment' || optHeld || selectionHoverRevealRef.current;
+        : phase === 'comment' ||
+          (!selectionNavBusyRef.current &&
+            (optHeld || selectionHoverRevealRef.current));
 
     if (show) {
       setSelectionIslandLeaving(false);
@@ -4194,46 +4226,54 @@ export function PrModalApp({
   }
 
   /**
-   * After select/move: hide actions dock (selection alone must not show it).
-   * Comment phase stays open. Opt/hover re-sync reveals the group.
+   * After select/move: hide actions dock + OptBtnHints immediately, then after
+   * SELECTION_ACTIONS_REVEAL_MS settle re-sync (Opt-hold / hover may show dock).
+   * Comment phase stays open. Jump-hold resets the timer on every move.
    */
   function scheduleSelectionActionsReveal() {
     clearSelectionActionsTimer();
     const phase = selectionIslandPhaseRef.current;
     if (phase === 'comment' && useModalStore.getState().lineSelection) {
       // Keep comment island; do not auto-flip to actions
+      setSelectionNavBusy(false);
       if (!useModalStore.getState().showSelectionComposer) {
         setShowSelectionComposer(true);
       }
       return;
     }
-    // Hide immediately while settling (key-hold / drag) — no idle auto-show
+    // Jump in flight: suppress floatbar + all OptBtnHints until settle
+    setSelectionNavBusy(true);
     if (useModalStore.getState().showSelectionComposer) {
       setShowSelectionComposer(false);
     }
-    // Skip setTimeout storm under key-hold when dock is already hidden —
-    // re-sync only when Opt/hover needs it (syncSelectionActionReveal).
-    // A single trailing timer still covers end-of-hold edge cases.
     const delay =
-      typeof SELECTION_ACTIONS_REVEAL_MS === 'number'
-        ? Math.min(SELECTION_ACTIONS_REVEAL_MS, 50)
-        : 50;
+      typeof SELECTION_ACTIONS_REVEAL_MS === 'number' &&
+      SELECTION_ACTIONS_REVEAL_MS > 0
+        ? SELECTION_ACTIONS_REVEAL_MS
+        : 450;
     selectionActionsTimerRef.current = setTimeout(() => {
       selectionActionsTimerRef.current = null;
-      // No-op if still not showing and not Opt-held
+      setSelectionNavBusy(false);
+      // Arm store + floatbar in one turn so OptBtnHints mount with the dock
+      // (same Opt-hold gesture after selection settle).
       try {
-        const st = useModalStore.getState();
-        if (
-          !st.showSelectionComposer &&
-          !st.optHintsActive &&
-          !selectionHoverRevealRef.current
-        ) {
-          return;
+        const optDown =
+          Boolean(optHeldRef.current) ||
+          (typeof document !== 'undefined' &&
+            Boolean(
+              document.documentElement?.hasAttribute?.('data-prp-opt-held')
+            ));
+        if (optDown && !optHintsSuppressedRef.current) {
+          useModalStore.getState().setOptHintsActive(true);
         }
       } catch {
-        /* fall through */
+        /* ignore */
       }
-      syncSelectionActionReveal();
+      try {
+        syncSelectionActionReveal();
+      } catch {
+        /* ignore */
+      }
     }, delay);
   }
 
@@ -4265,6 +4305,9 @@ export function PrModalApp({
       const { avgH: h, rowOffsetList: offs } = getDiffScrollMetrics();
       // Sticky file header overlays the top of the Diff list (~ROW_HEIGHT).
       // Without padTop, ArrowUp pins the caret under that fixed bar.
+      // padBottom stays minimal: action floatbar flips **above** the selection
+      // when the scroller bottom is tight (SelectionCommentBar +
+      // resolveSelectionDockVerticalPlacement) — no need to reserve ~3 lines.
       const stickyTop =
         typeof ROW_HEIGHT === 'number' && ROW_HEIGHT > 0 ? ROW_HEIGHT : h;
       const top =
@@ -4276,8 +4319,7 @@ export function PrModalApp({
               vp,
               virtualRows.length,
               offs,
-              // padBottom: selection island (~56px) so caret is not under dock
-              { padTop: stickyTop + 2, padBottom: Math.max(56, h * 2) }
+              { padTop: stickyTop + 2, padBottom: 8 }
             )
           : cur;
       applyProgrammaticDiffScroll(el, top, {
@@ -4540,7 +4582,20 @@ export function PrModalApp({
       const p = pendingSelectionMoveRef.current;
       pendingSelectionMoveRef.current = null;
       if (!p || !p.delta) return;
-      flushSelectionKeyboardMove(p.delta, p.shift);
+      // Opt-in: window.__PRP_DIFF_NAV_PERF__.enable() or localStorage prp:diff-nav-perf=1
+      const perfStart = isDiffNavPerfEnabled()
+        ? beginDiffNavPerfSample()
+        : null;
+      try {
+        flushSelectionKeyboardMove(p.delta, p.shift);
+      } finally {
+        if (perfStart) {
+          endDiffNavPerfSample(perfStart, {
+            presentation: isEmbed ? 'embed' : 'modal',
+            delta: p.delta,
+          });
+        }
+      }
     });
   }
 
@@ -5566,6 +5621,14 @@ export function PrModalApp({
    * re-renders during fetch must not re-fire sheet/modal enter motion.
    */
   const enterAnimTokenRef = useRef(0);
+  // Install Diff nav perf DevTools API once (no-op when disabled).
+  useEffect(() => {
+    try {
+      installDiffNavPerfGlobal();
+    } catch {
+      /* ignore */
+    }
+  }, []);
   useEffect(() => {
     if (!open) {
       if (closeTimerRef.current) {
@@ -6324,6 +6387,7 @@ export function PrModalApp({
 
   function dismissSelectionIsland(after?: any) {
     clearSelectionActionsTimer();
+    setSelectionNavBusy(false);
     setSelectionIslandLeaving(true);
     setTimeout(() => {
       setShowSelectionComposer(false);
@@ -6798,6 +6862,7 @@ export function PrModalApp({
     }
     // Hide island while dragging; reveal after pointer-up idle delay
     clearSelectionActionsTimer();
+    setSelectionNavBusy(true);
     setShowSelectionComposer(false);
   }
 

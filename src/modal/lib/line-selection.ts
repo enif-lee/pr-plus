@@ -981,10 +981,17 @@ export function isSelectionAtFileEdge(
 }
 
 /**
- * Legacy idle delay (no longer auto-shows the action group).
- * Kept for tests / callers that still wait a settle frame after selection.
+ * Settle delay after selection jump (↑↓ / region hop / pointer extend) before
+ * the action-group floatbar may reappear (Opt-hold / hover). Longer than a
+ * single key-repeat frame so the dock does not flicker under hold.
  */
-export const SELECTION_ACTIONS_REVEAL_MS = 300;
+export const SELECTION_ACTIONS_REVEAL_MS = 450;
+
+/**
+ * documentElement attribute while keyboard/pointer selection nav is in flight
+ * or within the settle window. OptBtnHint + CSS hide badges; floatbar stays down.
+ */
+export const SELECTION_NAV_BUSY_ATTR = 'data-prp-selection-nav';
 
 /**
  * Which island phase a selection *supports* after settle (not whether to show).
@@ -1008,34 +1015,170 @@ export function resolveSelectionIslandRevealPhase(
  * - Opt is held, or
  * - pointer is over the selection / dock (hover), or
  * - user is already in **comment** phase (keep until dismiss/submit).
- * Hide while actively dragging a selection.
+ * Hide while actively dragging a selection **or** selection nav is busy
+ * (↑↓ jump settle window — delayed floatbar).
  */
 export function shouldShowSelectionActionGroup(opts: {
   hasLineOrFileSelection?: boolean;
   selecting?: boolean;
   optHeld?: boolean;
   hoverReveal?: boolean;
+  /** Keyboard/region selection jump in flight or settling */
+  selectionNavBusy?: boolean;
   /** 'comment' keeps island open without Opt/hover */
   phase?: 'actions' | 'comment' | string | null;
 } = {}): boolean {
   if (!opts.hasLineOrFileSelection) return false;
   if (opts.selecting) return false;
   if (String(opts.phase || '') === 'comment') return true;
+  // Jump settle: keep floatbar down even if Opt is held
+  if (opts.selectionNavBusy) return false;
   return Boolean(opts.optHeld || opts.hoverReveal);
 }
 
+/** Estimated action floatbar height (segmented Comment / Copy / …). */
+export const SELECTION_DOCK_ACTIONS_H_EST = 40;
+/** Estimated comment island height floor. */
+export const SELECTION_DOCK_COMMENT_H_EST = 160;
 /**
- * Prefer docking the selection UI **below** the host row; flip **above** when
- * the scroller/viewport has too little room under the selection (comment form
- * was fully clipped at the bottom of Diff).
+ * OptBtnHint strip outside the bar (badge ~18 + gap ~8).
+ * Always reserved for actions so Opt-hold does not clip after flip.
+ */
+export const SELECTION_DOCK_OPT_HINT_H_EST = 26;
+export const SELECTION_DOCK_GAP_EST = 6;
+
+/**
+ * Vertical space required on the dock side (bar + optional Opt hint strip).
+ * Actions always reserve the Opt hint strip (hints appear with Opt-hold).
+ */
+export function selectionDockSideNeed(opts: {
+  dockHeight?: number;
+  phase?: 'actions' | 'comment' | string | null;
+  /** Default true for actions — include OptBtnHint strip in the need. */
+  includeOptHints?: boolean;
+  gap?: number;
+} = {}): number {
+  const phase = String(opts.phase || 'actions');
+  const measured = Math.max(0, Number(opts.dockHeight) || 0);
+  const base =
+    phase === 'comment'
+      ? Math.max(measured, SELECTION_DOCK_COMMENT_H_EST)
+      : Math.max(measured, SELECTION_DOCK_ACTIONS_H_EST);
+  const includeHints =
+    opts.includeOptHints !== false && phase !== 'comment';
+  const hint = includeHints ? SELECTION_DOCK_OPT_HINT_H_EST : 0;
+  const gap = Number.isFinite(Number(opts.gap))
+    ? Math.max(0, Number(opts.gap))
+    : SELECTION_DOCK_GAP_EST;
+  return base + hint + gap;
+}
+
+/**
+ * OptBtnHint preferred placement relative to the floatbar:
+ * - dock **above** selection → hints further up (`top`)
+ * - dock **below** selection → hints further down (`bottom`)
+ */
+export function preferredOptHintPlacementForDock(
+  dockPlace: 'above' | 'below' | string | null | undefined
+): 'top' | 'bottom' {
+  return String(dockPlace || '') === 'above' ? 'top' : 'bottom';
+}
+
+/**
+ * Whether this painted row should host the selection floatbar.
+ * Multi-line: dock follows the **head (caret)**, not always the range bottom —
+ * room is judged from the cursor edge (fixes false “enough room below” when
+ * the caret is at the top of a multi-line selection).
+ */
+export function isSelectionDockHostRow(selection: any, row: any): boolean {
+  if (!selection || !row) return false;
+  if (isFileLevelSelection(selection)) {
+    if (!isFileHeaderRow(row)) return false;
+    return (
+      String(row.filePath || row.path || '') ===
+      String(selection.filePath || '')
+    );
+  }
+  if (isThreadSelection(selection)) {
+    return (
+      isInlineCommentRow(row) &&
+      String(row.commentId) === String(selection.commentId)
+    );
+  }
+  if (row.filePath !== selection.filePath) return false;
+  if (!isSelectableDiffRow(row) && !isFileHeaderRow(row)) return false;
+
+  const h = Number(selection.headRowIndex);
+  const ri = Number(row.rowIndex);
+  if (Number.isFinite(h) && Number.isFinite(ri)) {
+    return h === ri;
+  }
+  // Fallback: single-line by line+side
+  if (isSingleLineCaretSelection(selection)) {
+    return rowMatchesLineSide(
+      row,
+      selection.headLine,
+      selection.headSide || selection.anchorSide
+    );
+  }
+  // Last resort: range end (max index)
+  const a = Number(selection.anchorRowIndex);
+  if (Number.isFinite(a) && Number.isFinite(ri)) {
+    return ri === Math.max(a, h);
+  }
+  return false;
+}
+
+/**
+ * Head’s role inside a multi-line block (for outward dock preference).
+ * - start: caret on top edge of the block → prefer dock **above**
+ * - end: caret on bottom edge → prefer dock **below**
+ * - only: single-line caret
+ */
+export function selectionHeadBlockRole(
+  selection: any
+): 'start' | 'end' | 'only' | null {
+  if (!selection) return null;
+  if (
+    isFileLevelSelection(selection) ||
+    isThreadSelection(selection) ||
+    isSingleLineCaretSelection(selection)
+  ) {
+    return 'only';
+  }
+  const a = Number(selection.anchorRowIndex);
+  const h = Number(selection.headRowIndex);
+  if (!Number.isFinite(a) || !Number.isFinite(h)) return 'only';
+  if (a === h) return 'only';
+  const lo = Math.min(a, h);
+  const hi = Math.max(a, h);
+  if (h === lo) return 'start';
+  if (h === hi) return 'end';
+  return 'only';
+}
+
+/**
+ * Prefer docking the selection UI **below** the host (caret) row; flip
+ * **above** when below is tight. Multi-line head-at-start prefers **above**
+ * (outward from the block) so we do not treat “space under the caret into the
+ * selected body” as free room for the floatbar.
+ *
+ * `need` includes the OptBtnHint strip for actions (see selectionDockSideNeed).
  *
  * Pure geometry — used by SelectionCommentBar layout effect.
  */
 export function resolveSelectionDockVerticalPlacement(opts: {
-  /** Host row bottom (viewport coords) */
+  /** Dock host (caret) row bottom (viewport coords) */
   hostBottom?: number;
-  /** Host row top */
+  /** Dock host (caret) row top */
   hostTop?: number;
+  /**
+   * Full multi-line selection extent (optional). When provided, “below” room
+   * uses max(hostBottom, selectionBottom) so a head-at-top multi-line near the
+   * scroller bottom is not judged as having free space under the caret alone.
+   */
+  selectionTop?: number;
+  selectionBottom?: number;
   /** Measured dock height (comment island ~160–220; actions ~40) */
   dockHeight?: number;
   /** Clip rect top (scroller or viewport) */
@@ -1044,12 +1187,20 @@ export function resolveSelectionDockVerticalPlacement(opts: {
   clipBottom?: number;
   gap?: number;
   /**
-   * Minimum free space below to keep below placement. Defaults to dockHeight
-   * (or 120 when unmeasured).
+   * Minimum free space required on a side. Defaults to selectionDockSideNeed.
    */
   minBelow?: number;
+  phase?: 'actions' | 'comment' | string | null;
+  /** Reserve Opt hint strip (default true for actions). */
+  includeOptHints?: boolean;
+  /**
+   * Head role in multi-line block — `start` prefers above when that side fits.
+   */
+  headBlockRole?: 'start' | 'end' | 'only' | null;
 } = {}): 'below' | 'above' {
-  const gap = Number.isFinite(Number(opts.gap)) ? Math.max(0, Number(opts.gap)) : 8;
+  const gap = Number.isFinite(Number(opts.gap))
+    ? Math.max(0, Number(opts.gap))
+    : SELECTION_DOCK_GAP_EST;
   const hostBottom = Number(opts.hostBottom);
   const hostTop = Number(opts.hostTop);
   const clipTop = Number(opts.clipTop);
@@ -1062,17 +1213,40 @@ export function resolveSelectionDockVerticalPlacement(opts: {
   ) {
     return 'below';
   }
-  const dockH = Math.max(0, Number(opts.dockHeight) || 0);
+
+  const selBottom = Number(opts.selectionBottom);
+  const selTop = Number(opts.selectionTop);
+  // Outward edges of the multi-line block (fallback: caret host)
+  const blockBottom =
+    Number.isFinite(selBottom) ? Math.max(hostBottom, selBottom) : hostBottom;
+  const blockTop =
+    Number.isFinite(selTop) ? Math.min(hostTop, selTop) : hostTop;
+
   const need = Math.max(
-    dockH > 0 ? dockH : 0,
-    Number.isFinite(Number(opts.minBelow)) ? Number(opts.minBelow) : dockH > 0 ? dockH : 120
+    selectionDockSideNeed({
+      dockHeight: opts.dockHeight,
+      phase: opts.phase,
+      includeOptHints: opts.includeOptHints,
+      gap: 0,
+    }),
+    Number.isFinite(Number(opts.minBelow)) ? Number(opts.minBelow) : 0
   );
-  const spaceBelow = clipBottom - hostBottom - gap;
-  const spaceAbove = hostTop - clipTop - gap;
+
+  // Room outside the full selection block (not “into” multi-line body)
+  const spaceBelow = clipBottom - blockBottom - gap;
+  const spaceAbove = blockTop - clipTop - gap;
+  const role = opts.headBlockRole || null;
+
+  // Prefer outward from multi-line body when that side fits (incl. Opt hints)
+  if (role === 'start' && spaceAbove >= need) return 'above';
+  if (role === 'end' && spaceBelow >= need) return 'below';
+  if ((role === 'only' || !role) && spaceBelow >= need) return 'below';
+
   if (spaceBelow >= need) return 'below';
-  // Prefer the side with more room when below is tight
-  if (spaceAbove > spaceBelow && spaceAbove >= 48) return 'above';
-  if (spaceBelow < 48 && spaceAbove >= spaceBelow) return 'above';
+  if (spaceAbove >= need) return 'above';
+  // Neither side fully fits — pick the larger free side
+  if (spaceAbove > spaceBelow && spaceAbove >= 24) return 'above';
+  if (spaceBelow < 24 && spaceAbove >= spaceBelow) return 'above';
   return 'below';
 }
 

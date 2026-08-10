@@ -24,6 +24,11 @@ import {
   resolveSelectionHeadIndex,
   resolveSelectionIslandRevealPhase,
   resolveSelectionDockVerticalPlacement,
+  selectionDockSideNeed,
+  selectionHeadBlockRole,
+  preferredOptHintPlacementForDock,
+  isSelectionDockHostRow,
+  SELECTION_DOCK_OPT_HINT_H_EST,
   shouldShowSelectionActionGroup,
   jumpSelectionToAdjacentChangeRegion,
   listChangeRegions,
@@ -551,16 +556,17 @@ describe('resolveSelectionDockVerticalPlacement (flip above when tight below)', 
       resolveSelectionDockVerticalPlacement({
         hostTop: 100,
         hostBottom: 120,
-        dockHeight: 160,
+        dockHeight: 40,
         clipTop: 0,
         clipBottom: 400,
-        minBelow: 160,
+        phase: 'actions',
+        includeOptHints: true,
+        headBlockRole: 'only',
       })
     ).toBe('below');
   });
 
   test('flips above when below is tight and above has room (comment form)', () => {
-    // Host near bottom of Diff scroller
     expect(
       resolveSelectionDockVerticalPlacement({
         hostTop: 500,
@@ -569,26 +575,135 @@ describe('resolveSelectionDockVerticalPlacement (flip above when tight below)', 
         clipTop: 80,
         clipBottom: 560,
         gap: 8,
-        minBelow: 160,
+        phase: 'comment',
+        includeOptHints: false,
+        headBlockRole: 'only',
       })
     ).toBe('above');
   });
 
-  test('stays below when both sides tight but below has more', () => {
+  test('defaults below on incomplete geometry', () => {
+    expect(resolveSelectionDockVerticalPlacement({})).toBe('below');
+  });
+
+  test('action floatbar flips above near Diff bottom (need includes Opt hints)', () => {
+    const need = selectionDockSideNeed({
+      dockHeight: 40,
+      phase: 'actions',
+      includeOptHints: true,
+      gap: 0,
+    });
+    expect(need).toBeGreaterThanOrEqual(40 + SELECTION_DOCK_OPT_HINT_H_EST);
+    expect(
+      resolveSelectionDockVerticalPlacement({
+        hostTop: 520,
+        hostBottom: 540,
+        dockHeight: 40,
+        clipTop: 80,
+        clipBottom: 560,
+        gap: 6,
+        phase: 'actions',
+        includeOptHints: true,
+        headBlockRole: 'only',
+      })
+    ).toBe('above');
+  });
+
+  test('multi-line head-at-start prefers above (outward from block)', () => {
+    // Caret mid-viewport; selection extends down near scroller bottom.
+    // Must not treat space under the caret into the block as free room.
+    expect(
+      resolveSelectionDockVerticalPlacement({
+        hostTop: 300,
+        hostBottom: 320,
+        selectionTop: 300,
+        selectionBottom: 520,
+        dockHeight: 40,
+        clipTop: 80,
+        clipBottom: 560,
+        gap: 6,
+        phase: 'actions',
+        includeOptHints: true,
+        headBlockRole: 'start',
+      })
+    ).toBe('above');
+  });
+
+  test('multi-line head-at-end stays below when block bottom has room', () => {
     expect(
       resolveSelectionDockVerticalPlacement({
         hostTop: 200,
         hostBottom: 220,
+        selectionTop: 100,
+        selectionBottom: 220,
         dockHeight: 40,
-        clipTop: 180,
-        clipBottom: 280,
-        minBelow: 40,
+        clipTop: 80,
+        clipBottom: 600,
+        phase: 'actions',
+        includeOptHints: true,
+        headBlockRole: 'end',
       })
     ).toBe('below');
   });
+});
 
-  test('defaults below on incomplete geometry', () => {
-    expect(resolveSelectionDockVerticalPlacement({})).toBe('below');
+describe('selectionHeadBlockRole / preferredOptHintPlacementForDock', () => {
+  test('head at min index → start; max → end', () => {
+    expect(
+      selectionHeadBlockRole({
+        filePath: 'a.ts',
+        anchorRowIndex: 10,
+        headRowIndex: 5,
+        anchorLine: 10,
+        headLine: 5,
+      })
+    ).toBe('start');
+    expect(
+      selectionHeadBlockRole({
+        filePath: 'a.ts',
+        anchorRowIndex: 5,
+        headRowIndex: 10,
+        anchorLine: 5,
+        headLine: 10,
+      })
+    ).toBe('end');
+  });
+
+  test('Opt hint place follows dock place', () => {
+    expect(preferredOptHintPlacementForDock('above')).toBe('top');
+    expect(preferredOptHintPlacementForDock('below')).toBe('bottom');
+  });
+});
+
+describe('isSelectionDockHostRow (caret host)', () => {
+  test('multi-line docks on head not range end when head is start', () => {
+    const sel = {
+      filePath: 'a.ts',
+      anchorRowIndex: 10,
+      headRowIndex: 5,
+      anchorLine: 10,
+      headLine: 5,
+      anchorSide: 'RIGHT',
+      headSide: 'RIGHT',
+    };
+    const headRow = {
+      kind: 'diff-line',
+      lineType: 'context',
+      filePath: 'a.ts',
+      rowIndex: 5,
+      newLine: 5,
+      oldLine: 5,
+    };
+    const endRow = {
+      kind: 'diff-line',
+      lineType: 'context',
+      filePath: 'a.ts',
+      rowIndex: 10,
+      newLine: 10,
+      oldLine: 10,
+    };
+    expect(isSelectionDockHostRow(sel, headRow)).toBe(true);
+    expect(isSelectionDockHostRow(sel, endRow)).toBe(false);
   });
 });
 
@@ -645,6 +760,27 @@ describe('shouldShowSelectionActionGroup (Opt / hover / comment)', () => {
         phase: 'actions',
       })
     ).toBe(false);
+  });
+
+  test('selection nav busy hides dock even with Opt', () => {
+    expect(
+      shouldShowSelectionActionGroup({
+        hasLineOrFileSelection: true,
+        optHeld: true,
+        selectionNavBusy: true,
+        phase: 'actions',
+      })
+    ).toBe(false);
+  });
+
+  test('comment phase stays open during selection nav busy', () => {
+    expect(
+      shouldShowSelectionActionGroup({
+        hasLineOrFileSelection: true,
+        selectionNavBusy: true,
+        phase: 'comment',
+      })
+    ).toBe(true);
   });
 
   test('no selection never shows', () => {

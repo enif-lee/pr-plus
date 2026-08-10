@@ -331,6 +331,9 @@
     animation: none;
     opacity: 0.7;
   }
+  .prp-header__stats--bg-loading {
+    border-color: var(--prp-accent, #0969da);
+  }
 }
 
 

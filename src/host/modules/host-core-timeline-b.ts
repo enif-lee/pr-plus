@@ -550,10 +550,8 @@
       tryFinishOpenProgress(prog);
       return;
     }
-    // While the review-thread ladder is still open, advance % without
-    // replacing the stage copy (threads → comments → reactions) — unless
-    // percent is already high (sides dominating): then show panel label so
-    // the bar does not look "stuck" on review threads at ~90%+.
+    // While critical (progress bar) is open, advance % without replacing
+    // thread ladder copy. After critical, sides only move background border.
     const has =
       prog.tracker && typeof prog.tracker.has === 'function'
         ? (k) => prog.tracker.has(k)
@@ -567,33 +565,64 @@
             has('threadsComments') &&
             has('threadsReactions')) ||
           (has('threadsNewest') && has('threadsFollow'));
-    const pctNow =
-      typeof prog.percent === 'function' ? Number(prog.percent()) || 0 : 0;
+    const criticalOk =
+      typeof lp?.criticalProgressComplete === 'function'
+        ? Boolean(lp.criticalProgressComplete(has))
+        : has('start') && has('core') && threadsOk;
     const keepThreadLabel =
+      !criticalOk &&
       !threadsOk &&
-      pctNow < 85 &&
       current.loadStage &&
       current.loadStage.busy &&
+      current.loadStage.mode !== 'background' &&
       current.loadStage.label;
     prog.mark(
       name,
       w,
-      keepThreadLabel ? current.loadStage.phase || 'threads' : 'panels',
+      keepThreadLabel
+        ? current.loadStage.phase || 'threads'
+        : criticalOk
+          ? 'background'
+          : 'panels',
       keepThreadLabel
         ? current.loadStage.label
-        : loadStageLabel(labelKind, { panel: name })
+        : criticalOk
+          ? null
+          : loadStageLabel(labelKind, { panel: name })
     );
-    // mark() already tryFinishOpenProgress; call again is cheap/idempotent.
     tryFinishOpenProgress(prog);
   }
 
   /**
-   * True when all open/refresh weight units are credited (bar may clear).
-   * Used by tryFinish and setLoadStage (refuse to re-raise a settled bar).
+   * Critical path complete → progress bar may leave (stats + border loading).
+   */
+  function isCriticalProgressComplete(prog = activeOpenProgress) {
+    if (!prog?.tracker || typeof prog.tracker.has !== 'function') return false;
+    const has = (k) => prog.tracker.has(k);
+    const lp = globalThis.PRModalLoadProgress;
+    if (typeof lp?.criticalProgressComplete === 'function') {
+      return Boolean(lp.criticalProgressComplete(has));
+    }
+    const threadsOk =
+      typeof lp?.threadsProgressComplete === 'function'
+        ? Boolean(lp.threadsProgressComplete(has))
+        : has('threadsVisible') ||
+          (has('threadsShell') &&
+            has('threadsComments') &&
+            has('threadsReactions'));
+    return has('start') && has('core') && threadsOk;
+  }
+
+  /**
+   * All open units credited (critical + background) → stats only, no border.
    */
   function isOpenProgressComplete(prog = activeOpenProgress) {
     if (!prog?.tracker || typeof prog.tracker.has !== 'function') return false;
     const has = (k) => prog.tracker.has(k);
+    const lp = globalThis.PRModalLoadProgress;
+    if (typeof lp?.openProgressFullyComplete === 'function') {
+      return Boolean(lp.openProgressFullyComplete(has));
+    }
     const sides = [
       'files',
       'comments',
@@ -604,42 +633,115 @@
     ];
     const sidesDone = sides.every(has);
     const openDone = openProgressKeys().every(has);
-    const lp = globalThis.PRModalLoadProgress;
-    const threadsOk =
-      typeof lp?.threadsProgressComplete === 'function'
-        ? Boolean(lp.threadsProgressComplete(has))
-        : has('threadsVisible') ||
-          (has('threadsShell') &&
-            has('threadsComments') &&
-            has('threadsReactions')) ||
-          (has('threadsNewest') &&
-            has('threadsRemaining') &&
-            has('threadsEarlier')) ||
-          (has('threadsNewest') && has('threadsFollow'));
-    const refreshDone =
-      has('start') && has('core') && threadsOk && sidesDone;
-    return openDone || refreshDone;
+    const criticalOk = isCriticalProgressComplete(prog);
+    return (openDone || (criticalOk && sidesDone)) && criticalOk;
   }
 
   /**
-   * Ready only when core+threads+all independent panels have been credited.
-   * (Percent is capped at 99 in mark(); clearLoadStage owns settle/clear.)
+   * Minimum time to keep background border loading visible after critical ends.
+   * Sides often finish in the same frame as threads — without a hold the ring
+   * is a single paint and “has bg” is not perceptible.
+   */
+  const BACKGROUND_LOAD_MIN_MS = 900;
+  let backgroundHoldUntil = 0;
+  let backgroundClearTimer = null;
+
+  function clearBackgroundHoldTimer() {
+    if (backgroundClearTimer) {
+      clearTimeout(backgroundClearTimer);
+      backgroundClearTimer = null;
+    }
+  }
+
+  function scheduleBackgroundClearIfReady(prog = activeOpenProgress) {
+    clearBackgroundHoldTimer();
+    const wait = Math.max(0, backgroundHoldUntil - Date.now());
+    backgroundClearTimer = setTimeout(() => {
+      backgroundClearTimer = null;
+      if (!current.open) return;
+      if (!isOpenProgressComplete(prog || activeOpenProgress)) return;
+      // Hold elapsed and still fully complete
+      if (Date.now() < backgroundHoldUntil) {
+        scheduleBackgroundClearIfReady(prog);
+        return;
+      }
+      clearLoadStage();
+      try {
+        render();
+      } catch {
+        /* ignore */
+      }
+      try {
+        void globalThis.PRTreeFetch?.getGraphqlCostLog?.();
+      } catch {
+        /* ignore */
+      }
+    }, wait || 0);
+  }
+
+  /**
+   * Critical done → background border mode (diff stats + loading border).
+   * All done → clearLoadStage (diff stats only), after min hold when bg showed.
    */
   function tryFinishOpenProgress(prog = activeOpenProgress) {
-    if (!isOpenProgressComplete(prog)) return false;
-    clearLoadStage();
+    if (!isCriticalProgressComplete(prog)) return false;
+    if (isOpenProgressComplete(prog)) {
+      // If we never entered background (sides already done with critical),
+      // still flash border briefly so the three-phase model is visible.
+      const alreadyBg =
+        current.loadStage?.mode === 'background' ||
+        current.loadStage?.background;
+      if (!alreadyBg) {
+        backgroundHoldUntil = Date.now() + BACKGROUND_LOAD_MIN_MS;
+        setLoadStage('background', null, false, {
+          mode: 'background',
+          background: true,
+          percent: 100,
+        });
+        try {
+          render();
+        } catch {
+          /* ignore */
+        }
+        scheduleBackgroundClearIfReady(prog);
+        return false;
+      }
+      if (Date.now() < backgroundHoldUntil) {
+        scheduleBackgroundClearIfReady(prog);
+        return false;
+      }
+      clearBackgroundHoldTimer();
+      clearLoadStage();
+      try {
+        render();
+      } catch {
+        /* ignore */
+      }
+      try {
+        void globalThis.PRTreeFetch?.getGraphqlCostLog?.();
+      } catch {
+        /* ignore */
+      }
+      return true;
+    }
+    // Critical complete, background still in flight — start/hold border phase
+    if (
+      current.loadStage?.mode !== 'background' &&
+      !current.loadStage?.background
+    ) {
+      backgroundHoldUntil = Date.now() + BACKGROUND_LOAD_MIN_MS;
+    }
+    setLoadStage('background', null, false, {
+      mode: 'background',
+      background: true,
+      percent: 100,
+    });
     try {
       render();
     } catch {
       /* ignore */
     }
-    // Mirror GraphQL cost log into sessionStorage/DOM for e2e observation.
-    try {
-      void globalThis.PRTreeFetch?.getGraphqlCostLog?.();
-    } catch {
-      /* ignore */
-    }
-    return true;
+    return false;
   }
 
   /**

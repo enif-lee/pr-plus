@@ -1001,11 +1001,21 @@ export function selectionProbe() {
       const headerSelected = !!document.querySelector(
         '.prp-vline--header.prp-vline--selected, .prp-vline--header-selected, [data-file-selected="1"]'
       );
+      const dockPlace = dock?.getAttribute('data-dock-place') || null;
+      const optHintPlace = dock?.getAttribute('data-opt-hint-place') || null;
+      const dockAbove = !!dock?.classList?.contains?.('prp-selection-dock--above');
+      const hintPlacements = [...document.querySelectorAll('kbd.prp-opt-btn-hint, .prp-opt-btn-hint')]
+        .map((el) => el.getAttribute('data-placement') || null)
+        .filter(Boolean);
       return {
         count: uniq.length,
         roles,
         dock: !!dock,
         dockCls: dock?.className?.slice(0, 100) || null,
+        dockPlace,
+        optHintPlace,
+        dockAbove,
+        hintPlacements,
         commentPhase,
         actionsPhase,
         fileTarget,

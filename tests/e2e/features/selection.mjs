@@ -792,6 +792,169 @@ export function getSteps() {
   });
 
   /**
+   * Multi-line selection dock placement:
+   * - head-at-start near scroller bottom → floatbar above (not false room under caret)
+   * - Opt-hold: OptBtnHints place with dock (above→top, below→bottom)
+   * - need reserves Opt hint strip
+   */
+  run(`P3b.4 multi-line dock flip + Opt hint place on PR #${MULTI_HUNK_PR}`, () => {
+    openMultiHunkDiffReady();
+    blurEditable();
+    press('Escape');
+    waitMs(120);
+
+    // Seed a body line selection mid-file
+    clickSelectableLine(2);
+    waitMs(200);
+    let seed = selectionProbe();
+    if (!seed.count) {
+      clickSelectableLine(0);
+      waitMs(200);
+      seed = selectionProbe();
+    }
+    assert(seed.count >= 1, `no selection seed: ${JSON.stringify(seed)}`);
+
+    // Multi-line extend downward so head is at range end first
+    for (let i = 0; i < 8; i++) {
+      press('Shift+ArrowDown');
+      waitMs(40);
+    }
+    waitMs(150);
+    let multi = selectionProbe();
+    assert(
+      multi.count >= 2 || multi.roles?.middle > 0 || multi.roles?.end > 0,
+      `expected multi-line selection: ${JSON.stringify(multi)}`
+    );
+
+    // Move head to start of the block (caret at top of multi-line)
+    for (let i = 0; i < 12; i++) {
+      press('Shift+ArrowUp');
+      waitMs(35);
+    }
+    waitMs(120);
+
+    // Scroll so selection sits near the Diff scroller bottom (tight below)
+    evalInPage(`
+      (() => {
+        const vlist = document.querySelector('.prp-vlist');
+        const host =
+          document.querySelector('.prp-sel-dock-host') ||
+          document.querySelector('.prp-vline--selected');
+        if (!vlist || !host) return { ok: false };
+        const vr = vlist.getBoundingClientRect();
+        const hr = host.getBoundingClientRect();
+        // Put host ~36px above scroller bottom
+        const delta = hr.bottom - (vr.bottom - 36);
+        if (Number.isFinite(delta) && Math.abs(delta) > 1) {
+          vlist.scrollTop = Math.max(0, (vlist.scrollTop || 0) + delta);
+        }
+        return {
+          ok: true,
+          scrollTop: vlist.scrollTop,
+          hostBottom: hr.bottom,
+          clipBottom: vr.bottom,
+        };
+      })()
+    `);
+    waitMs(200);
+
+    // Reveal floatbar (Opt-hold) after selection-nav settle
+    evalInPage(`
+      document.documentElement.setAttribute('data-prp-opt-held', '1');
+      document.documentElement.classList.add('prp-opt-held');
+      window.dispatchEvent(new CustomEvent('prp-set-opt-hints', { detail: { active: true } }));
+      true
+    `);
+    press('Alt');
+    waitMs(550);
+
+    const dockSnap = selectionProbe();
+    log(`  dock snap (head-at-start near bottom): ${JSON.stringify(dockSnap)}`);
+    assert(dockSnap.dock, `floatbar missing: ${JSON.stringify(dockSnap)}`);
+    assert(
+      dockSnap.dockPlace === 'above' || dockSnap.dockAbove,
+      `multi-line head-at-start near bottom must dock above: ${JSON.stringify(dockSnap)}`
+    );
+    assert(
+      dockSnap.optHintPlace === 'top',
+      `dock above → Opt hints preferred top: ${JSON.stringify(dockSnap)}`
+    );
+
+    // When hints are painted, data-placement should be top (above the bar)
+    if (dockSnap.hintPlacements?.length) {
+      assert(
+        dockSnap.hintPlacements.every((p) => p === 'top'),
+        `OptBtnHint data-placement should be top when dock above: ${JSON.stringify(dockSnap.hintPlacements)}`
+      );
+    }
+
+    // Move head to range end and leave room below → dock below, hints bottom
+    for (let i = 0; i < 14; i++) {
+      press('Shift+ArrowDown');
+      waitMs(35);
+    }
+    waitMs(120);
+    evalInPage(`
+      (() => {
+        const vlist = document.querySelector('.prp-vlist');
+        const host =
+          document.querySelector('.prp-sel-dock-host') ||
+          document.querySelector('.prp-vline--selected');
+        if (!vlist || !host) return false;
+        const vr = vlist.getBoundingClientRect();
+        const hr = host.getBoundingClientRect();
+        // Center host in scroller so both sides have room; prefer below for end
+        const mid = (vr.top + vr.bottom) / 2;
+        const delta = hr.top - (mid - 40);
+        vlist.scrollTop = Math.max(0, (vlist.scrollTop || 0) + delta);
+        return true;
+      })()
+    `);
+    waitMs(200);
+    evalInPage(`
+      window.dispatchEvent(new CustomEvent('prp-set-opt-hints', { detail: { active: true } }));
+      document.documentElement.setAttribute('data-prp-opt-held', '1');
+      true
+    `);
+    waitMs(550);
+
+    const belowSnap = selectionProbe();
+    log(`  dock snap (head-at-end mid): ${JSON.stringify(belowSnap)}`);
+    assert(belowSnap.dock, `floatbar missing after head-end: ${JSON.stringify(belowSnap)}`);
+    // Prefer below when mid-viewport with room; if still above (tight), at least
+    // opt-hint-place must match data-dock-place.
+    assert(
+      belowSnap.optHintPlace === 'top' || belowSnap.optHintPlace === 'bottom',
+      `opt-hint-place must be set: ${JSON.stringify(belowSnap)}`
+    );
+    if (belowSnap.dockPlace === 'below') {
+      assert(
+        belowSnap.optHintPlace === 'bottom',
+        `dock below → Opt hints bottom: ${JSON.stringify(belowSnap)}`
+      );
+    }
+    if (belowSnap.dockPlace === 'above') {
+      assert(
+        belowSnap.optHintPlace === 'top',
+        `dock above → Opt hints top: ${JSON.stringify(belowSnap)}`
+      );
+    }
+    assert(
+      (belowSnap.dockPlace === 'above' && belowSnap.optHintPlace === 'top') ||
+        (belowSnap.dockPlace === 'below' && belowSnap.optHintPlace === 'bottom'),
+      `opt-hint-place must match dock-place: ${JSON.stringify(belowSnap)}`
+    );
+
+    // Cleanup Opt latch
+    evalInPage(`
+      document.documentElement.removeAttribute('data-prp-opt-held');
+      document.documentElement.classList.remove('prp-opt-held');
+      window.dispatchEvent(new CustomEvent('prp-set-opt-hints', { detail: { active: false } }));
+      true
+    `);
+  });
+
+  /**
    * Diff ↑/↓ continuum: multi-reply thread units → exit to line/thread, reverse
    * re-entry seeds last reply. Uses DEMO_PR (#19) which has multi-reply threads.
    */

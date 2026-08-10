@@ -171,9 +171,21 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
     } catch {
       viewerOpen = false;
     }
+    // Selection jump settle stamps data-prp-selection-nav — keep store off while
+    // busy so floatbar + hints re-arm together when busy clears + Opt still held.
+    let selectionNavBusy = false;
+    try {
+      selectionNavBusy = Boolean(
+        typeof document !== 'undefined' &&
+          document.documentElement?.hasAttribute?.('data-prp-selection-nav')
+      );
+    } catch {
+      selectionNavBusy = false;
+    }
     const active =
       Boolean(optHeldRef.current) &&
       !optHintsSuppressedRef.current &&
+      !selectionNavBusy &&
       !ui.paletteOpen &&
       !ui.confirmOpen &&
       !viewerOpen;

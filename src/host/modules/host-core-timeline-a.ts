@@ -282,15 +282,114 @@
     return null;
   }
 
+  /**
+   * Isolate keyboard from the buried GH PR SPA while embed is open.
+   * Window capture + stopPropagation: document/body GH listeners never see the
+   * event. Other window-capture listeners (pr+ hotkeys) still run.
+   */
+  let embedKeyShieldBound = false;
+  function onEmbedKeyShield(e) {
+    try {
+      if (!current.open || !isEmbedPresentation(current.presentation)) return;
+      // Only shield when embed host is actually mounted
+      if (!document.getElementById(embedHostId())) return;
+      e.stopPropagation();
+    } catch {
+      /* ignore */
+    }
+  }
+  function ensureEmbedKeyShield() {
+    if (embedKeyShieldBound) return;
+    embedKeyShieldBound = true;
+    const pe = pageEmbedApi();
+    const events =
+      (Array.isArray(pe?.PAGE_EMBED_KEY_SHIELD_EVENTS) &&
+        pe.PAGE_EMBED_KEY_SHIELD_EVENTS) ||
+      ['keydown', 'keyup', 'keypress'];
+    for (const type of events) {
+      try {
+        window.addEventListener(type, onEmbedKeyShield, true);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
   function hideNativeMainChildren(main, embedEl) {
     if (!main) return;
+    const api = pageEmbedApi();
+    const mark =
+      typeof api?.markNativeHidden === 'function'
+        ? api.markNativeHidden
+        : null;
     for (const child of [...main.children]) {
       if (child === embedEl) continue;
+      if (mark) {
+        mark(child);
+        continue;
+      }
+      // Fallback if pure module missing
       if (child.getAttribute('data-prp-native-hidden') === '1') continue;
       child.setAttribute('data-prp-native-hidden', '1');
       child.style.setProperty('display', 'none', 'important');
+      try {
+        child.inert = true;
+        child.setAttribute('data-prp-native-inert', '1');
+      } catch {
+        /* ignore */
+      }
     }
     main.classList.add('prp-embed-main');
+  }
+
+  /**
+   * Strong residual suppress: body-level GH SPA + chrome outside main + footers.
+   * Cuts paint/layout and focus theft under full-window embed (modal is overlay-only).
+   */
+  function suppressGithubResidual(embedEl) {
+    const api = pageEmbedApi();
+    if (typeof api?.applyNativeResidualHide === 'function') {
+      try {
+        return api.applyNativeResidualHide(document, embedEl);
+      } catch {
+        /* fall through */
+      }
+    }
+    // Fallback: body children + main children + footer
+    try {
+      const body = document.body;
+      if (body) {
+        for (const child of [...body.children]) {
+          if (child === embedEl) continue;
+          const id = child.id || '';
+          if (id === embedHostId() || id === 'prp-modal-host') continue;
+          const tag = String(child.tagName || '').toUpperCase();
+          if (
+            tag === 'SCRIPT' ||
+            tag === 'STYLE' ||
+            tag === 'LINK' ||
+            tag === 'TEMPLATE' ||
+            tag === 'META' ||
+            tag === 'NOSCRIPT'
+          ) {
+            continue;
+          }
+          if (child.getAttribute('data-prp-native-hidden') === '1') continue;
+          child.setAttribute('data-prp-native-hidden', '1');
+          child.style.setProperty('display', 'none', 'important');
+          try {
+            child.inert = true;
+            child.setAttribute('data-prp-native-inert', '1');
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    hideGithubFooter();
+    return null;
   }
 
   function hideGithubFooter() {
@@ -336,10 +435,26 @@
       /* ignore */
     }
     try {
-      document.querySelectorAll('[data-prp-native-hidden="1"]').forEach((el) => {
-        el.removeAttribute('data-prp-native-hidden');
-        el.style.removeProperty('display');
-      });
+      const api = pageEmbedApi();
+      if (typeof api?.restoreNativeHiddenNodes === 'function') {
+        api.restoreNativeHiddenNodes(document);
+      } else {
+        document
+          .querySelectorAll('[data-prp-native-hidden="1"]')
+          .forEach((el) => {
+            el.removeAttribute('data-prp-native-hidden');
+            el.style.removeProperty('display');
+            el.style.removeProperty('content-visibility');
+            if (el.getAttribute('data-prp-native-inert') === '1') {
+              try {
+                el.inert = false;
+              } catch {
+                /* ignore */
+              }
+              el.removeAttribute('data-prp-native-inert');
+            }
+          });
+      }
       document.querySelectorAll('.prp-embed-main').forEach((el) => {
         el.classList.remove('prp-embed-main');
       });
@@ -383,12 +498,17 @@
     stampHostCssReady(host);
     const main = findGithubMainRegion();
     if (main) hideNativeMainChildren(main, host);
+    // Body-level residual + header/flash chrome (stronger than main-only hide)
+    suppressGithubResidual(host);
+    // Block GH SPA shortcuts under the fixed cover (pr+ uses window listeners)
+    ensureEmbedKeyShield();
     document.documentElement.classList.add(embedActiveClass());
     try {
       document.body?.classList?.add(embedActiveClass());
     } catch {
       /* ignore */
     }
+    // Footer also covered by residual, but keep explicit call for pure API path
     hideGithubFooter();
     return host;
   }
