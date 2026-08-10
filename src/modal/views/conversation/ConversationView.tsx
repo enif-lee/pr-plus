@@ -540,12 +540,42 @@ function ConversationViewImpl(props: any) {
    * are complete but timelineItems still has older pages (Diff full-load case).
    */
   const threadGap: any = useMemo(() => {
+    // Prefer explicit timelineMeta; fall back to commentsMeta (host settles both
+    // on the comments side-fetch — cold open can lag timelineMeta projection).
+    const cm =
+      detail?.commentsMeta && typeof detail.commentsMeta === 'object'
+        ? detail.commentsMeta
+        : null;
+    const tl =
+      timelineMeta && typeof timelineMeta === 'object'
+        ? timelineMeta
+        : cm
+          ? {
+              hasMore: Boolean(cm.hasMore),
+              complete: cm.hasMore === false,
+              totalCount: cm.totalCount,
+              loadedCount:
+                cm.loadedCount != null
+                  ? cm.loadedCount
+                  : Array.isArray(detail?.comments)
+                    ? detail.comments.length
+                    : 0,
+            }
+          : null;
     if (typeof partitionTimelineWithThreadGap !== 'function') {
+      const tlTotal = Number(tl?.totalCount);
+      const tlLoaded = Number(tl?.loadedCount);
+      const tlCountLag =
+        Number.isFinite(tlTotal) &&
+        Number.isFinite(tlLoaded) &&
+        tlTotal > tlLoaded;
       const hasMore =
         Boolean(reviewThreadsMeta?.hasMore) ||
         Boolean(reviewThreadsMeta?.hasOlder) ||
-        Boolean(timelineMeta?.hasMore) ||
-        timelineMeta?.complete === false;
+        Boolean(tl?.hasMore) ||
+        tl?.complete === false ||
+        tlCountLag ||
+        Boolean(cm?.hasMore);
       return {
         top: timelineItems,
         bottom: [],
@@ -557,9 +587,15 @@ function ConversationViewImpl(props: any) {
     return partitionTimelineWithThreadGap(
       timelineItems,
       reviewThreadsMeta,
-      timelineMeta
+      tl
     );
-  }, [timelineItems, reviewThreadsMeta, timelineMeta]);
+  }, [
+    timelineItems,
+    reviewThreadsMeta,
+    timelineMeta,
+    detail?.commentsMeta,
+    detail?.comments,
+  ]);
 
   // Search jump is handled inside VirtualConversationList (scrollToAnchor).
   // Load more / Load all: single handle for threads + timelineItems.
@@ -576,6 +612,59 @@ function ConversationViewImpl(props: any) {
       gapPlacement: threadGap.gapPlacement || 'end',
     };
   }, [timelineItems, threadGap]);
+
+  // E2E / host observability: Load-more fold state (TLM.1)
+  useEffect(() => {
+    try {
+      if (typeof document === 'undefined') return;
+      const tm = timelineMeta || detail?.timelineMeta || null;
+      const cm = detail?.commentsMeta || null;
+      const stamp = (id: string) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.setAttribute(
+          'data-prp-conv-show-gap',
+          paged?.showThreadGap ? '1' : '0'
+        );
+        el.setAttribute(
+          'data-prp-conv-gap-place',
+          String(paged?.gapPlacement || 'none')
+        );
+        el.setAttribute(
+          'data-prp-conv-tl-has-more',
+          tm?.hasMore ? '1' : tm?.complete === false ? 'partial' : '0'
+        );
+        el.setAttribute(
+          'data-prp-conv-tl-loaded',
+          String(tm?.loadedCount ?? cm?.loadedCount ?? '')
+        );
+        el.setAttribute(
+          'data-prp-conv-tl-total',
+          String(tm?.totalCount ?? cm?.totalCount ?? '')
+        );
+        el.setAttribute(
+          'data-prp-conv-load-more-fn',
+          typeof onLoadMoreReviewThreads === 'function' ? '1' : '0'
+        );
+        el.setAttribute(
+          'data-prp-conv-timeline-n',
+          String(Array.isArray(timelineItems) ? timelineItems.length : 0)
+        );
+      };
+      stamp('prp-page-embed');
+      stamp('prp-modal-host');
+    } catch {
+      /* ignore */
+    }
+  }, [
+    paged?.showThreadGap,
+    paged?.gapPlacement,
+    timelineMeta,
+    detail?.timelineMeta,
+    detail?.commentsMeta,
+    onLoadMoreReviewThreads,
+    timelineItems,
+  ]);
 
   const mergeStatus = useMemo(
     () => (typeof buildMergeBoxStatus === 'function' ? buildMergeBoxStatus(detail) : null),

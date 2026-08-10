@@ -4358,6 +4358,11 @@ function isTimelineLoadIncomplete(meta) {
   if (!meta || typeof meta !== "object") return false;
   if (meta.hasMore) return true;
   if (meta.complete === false) return true;
+  const total = Number(meta.totalCount);
+  const loaded = Number(meta.loadedCount);
+  if (Number.isFinite(total) && Number.isFinite(loaded) && total > loaded) {
+    return true;
+  }
   return false;
 }
 function conversationLoadMoreState(threadsMeta = null, timelineMeta = null) {

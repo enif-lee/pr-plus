@@ -139,8 +139,42 @@ function paginationProbe() {
 /**
  * Scroll conversation virtual list to surface the gap (end or middle).
  * Returns true if gap is in DOM after scrolls.
+ *
+ * VirtualConversationList only mounts rows in the React scroll window — setting
+ * scrollTop must allow a paint before querying .prp-timeline-gap (sync check
+ * after scrollTop=max still shows start=0..7 until React re-renders).
  */
-function scrollToFindGap(maxSteps = 24) {
+function scrollToFindGap(maxSteps = 40) {
+  const scrollTo = (topExpr) => {
+    evalInPage(`
+      (() => {
+        const sc =
+          document.querySelector('.prp-conversation-virtual') ||
+          document.querySelector('.prp-overlay [data-virtual-scroll]') ||
+          document.querySelector('.prp-conversation__main');
+        if (!sc) return false;
+        const max = Math.max(0, sc.scrollHeight - sc.clientHeight);
+        const top = Math.max(0, Math.min(max, (${topExpr})));
+        sc.scrollTop = top;
+        sc.dispatchEvent(new Event('scroll', { bubbles: true }));
+        return true;
+      })()
+    `);
+    // Let React apply data-virtual-start/end for the new scrollTop
+    waitMs(180);
+    return Boolean(evalInPage(`!!document.querySelector('.prp-timeline-gap')`));
+  };
+
+  if (evalInPage(`!!document.querySelector('.prp-timeline-gap')`)) return true;
+
+  // Dense DEMO_PR: jump end / mid / 3-quarter (do NOT finish at 0 — that
+  // undoes the jump and leaves only a short crawl from the top).
+  if (scrollTo('max')) return true;
+  if (scrollTo('Math.floor(max * 0.5)')) return true;
+  if (scrollTo('Math.floor(max * 0.75)')) return true;
+  if (scrollTo('max')) return true;
+
+  // Crawl from current position (prefer continuing near end)
   for (let i = 0; i < maxSteps; i++) {
     const found = evalInPage(`
       (() => {
@@ -152,14 +186,22 @@ function scrollToFindGap(maxSteps = 24) {
         if (!sc) return false;
         const max = Math.max(0, sc.scrollHeight - sc.clientHeight);
         const next = Math.min(max, sc.scrollTop + Math.max(240, sc.clientHeight * 0.85));
-        if (next <= sc.scrollTop + 2 && sc.scrollTop >= max - 4) return false;
+        if (next <= sc.scrollTop + 2 && sc.scrollTop >= max - 4) {
+          // Stuck at end without gap — nudge from top once mid-crawl
+          return false;
+        }
         sc.scrollTop = next;
         sc.dispatchEvent(new Event('scroll', { bubbles: true }));
-        return !!document.querySelector('.prp-timeline-gap');
+        return false;
       })()
     `);
-    if (found) return true;
-    waitMs(120);
+    waitMs(140);
+    if (
+      found ||
+      evalInPage(`!!document.querySelector('.prp-timeline-gap')`)
+    ) {
+      return true;
+    }
   }
   return Boolean(evalInPage(`!!document.querySelector('.prp-timeline-gap')`));
 }

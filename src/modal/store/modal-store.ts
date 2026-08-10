@@ -206,8 +206,20 @@ export const useModalStore = create<ModalUiState>((set, get) => ({
     set((s) => ({
       expandedDirs: typeof fn === 'function' ? (fn as any)(s.expandedDirs) : (fn as Set<string>),
     })),
-  setCommentIndex: (i) =>
-    set({ commentIndex: i, focusedThreadUnitId: null }),
+  setCommentIndex: (i) => {
+    set({ commentIndex: i, focusedThreadUnitId: null });
+    // Keep DOM stamp in sync — stale data-prp-focused-thread-unit misleads e2e
+    // and isMultiReplyThreadFocused DOM fallbacks after ⌥J/K root hops.
+    try {
+      if (typeof document !== 'undefined') {
+        document.documentElement.removeAttribute(
+          'data-prp-focused-thread-unit'
+        );
+      }
+    } catch {
+      /* ignore */
+    }
+  },
   setLineSelection: (s) =>
     set((prev) => ({
       lineSelection: typeof s === 'function' ? s(prev.lineSelection) : s,
@@ -319,6 +331,17 @@ export const useModalStore = create<ModalUiState>((set, get) => ({
       return;
     }
     set({ activeDiffCommentId: next, focusedThreadUnitId: null });
+    // Clear unit DOM stamp when hopping threads (setFocusedThreadUnitId no-op
+    // path would leave a stale reply id after store unit reset).
+    try {
+      if (typeof document !== 'undefined') {
+        document.documentElement.removeAttribute(
+          'data-prp-focused-thread-unit'
+        );
+      }
+    } catch {
+      /* ignore */
+    }
   },
   setFocusedThreadUnitId: (id) => {
     const next = id == null || id === '' ? null : String(id);

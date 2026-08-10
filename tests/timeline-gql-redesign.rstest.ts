@@ -311,12 +311,43 @@ describe('since/watermark + dirty threads', () => {
     expect(isTimelineLoadIncomplete({ hasMore: false, complete: true })).toBe(
       false
     );
+    // pageInfo lag: hasPreviousPage false but totalCount > loadedCount
+    expect(
+      isTimelineLoadIncomplete({
+        hasMore: false,
+        complete: true,
+        totalCount: 256,
+        loadedCount: 99,
+      })
+    ).toBe(true);
+    expect(
+      isTimelineLoadIncomplete({
+        hasMore: false,
+        complete: true,
+        totalCount: 50,
+        loadedCount: 50,
+      })
+    ).toBe(false);
     const st = conversationLoadMoreState(
       { hasMore: false, hiddenCount: 0 },
       { hasMore: true, coverageEndAt: '2026-01-01T00:00:00Z' }
     );
     expect(st.preferMiddleGap).toBe(true);
     expect(st.anyIncomplete).toBe(true);
+    // totalCount lag path must still open the end gap
+    const lag = conversationLoadMoreState(
+      { hasMore: false, hiddenCount: 0 },
+      { hasMore: false, complete: true, totalCount: 256, loadedCount: 99 }
+    );
+    expect(lag.anyIncomplete).toBe(true);
+    expect(lag.timelineIncomplete).toBe(true);
+    expect(
+      partitionConversationLoadMore(
+        [{ kind: 'issue-comment', id: 1, at: '2026-06-01T00:00:00Z' }],
+        { hasMore: false },
+        { hasMore: false, complete: true, totalCount: 256, loadedCount: 99 }
+      ).showGap
+    ).toBe(true);
     expect(
       partitionConversationLoadMore([], { hasMore: false }, { hasMore: false })
         .showGap

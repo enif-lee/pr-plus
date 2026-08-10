@@ -2755,22 +2755,84 @@ export function PrModalApp({
    * Must not use keydown-effect closed-over `mappedComments` / `commentIndex`
    * (effect deps are only open/isEmbed — stale empty after detail loads).
    */
+  /**
+   * Walk reviewComments inReplyTo chain to the thread root id.
+   * activeDiffCommentId / unit stamps may point at a reply (TOR continuum).
+   */
+  function walkReviewCommentToRootId(commentId: string): string | null {
+    const start = String(commentId || '').trim();
+    if (!start) return null;
+    try {
+      const liveDetail = detailRef.current;
+      const all = Array.isArray(liveDetail?.reviewComments)
+        ? liveDetail.reviewComments
+        : [];
+      if (!all.length) return start;
+      const byId = new Map<string, any>();
+      for (const c of all) {
+        if (c && c.id != null) byId.set(String(c.id), c);
+      }
+      let cur = start;
+      const seen = new Set<string>();
+      while (cur && !seen.has(cur)) {
+        seen.add(cur);
+        const row = byId.get(cur);
+        if (!row) return cur;
+        const parent =
+          row.inReplyToId != null
+            ? String(row.inReplyToId)
+            : row.in_reply_to_id != null
+              ? String(row.in_reply_to_id)
+              : '';
+        if (!parent || parent === '0' || parent === cur) return cur;
+        cur = parent;
+      }
+      return cur || start;
+    } catch {
+      return start;
+    }
+  }
+
+  function readFocusedThreadUnitStamp(
+    st: ReturnType<typeof useModalStore.getState> = useModalStore.getState()
+  ): string {
+    const fromStore =
+      st.focusedThreadUnitId != null
+        ? String(st.focusedThreadUnitId).trim()
+        : '';
+    if (fromStore) return fromStore;
+    // DOM attr is written by setFocusedThreadUnitId; prefer store, fall back
+    // when a concurrent store hop left the stamp briefly (TOR.3 seed).
+    try {
+      if (typeof document === 'undefined') return '';
+      return (
+        document.documentElement.getAttribute(
+          'data-prp-focused-thread-unit'
+        ) || ''
+      ).trim();
+    } catch {
+      return '';
+    }
+  }
+
   function resolveFocusedReviewThreadRootId(
     st: ReturnType<typeof useModalStore.getState> = useModalStore.getState()
   ): string | null {
     if (st.layoutMode === LAYOUT_DIFF) {
       if (st.activeDiffCommentId != null && st.activeDiffCommentId !== '') {
-        return String(st.activeDiffCommentId);
+        return walkReviewCommentToRootId(String(st.activeDiffCommentId));
       }
     } else {
       const a = String(
         st.focusedConversationAnchor || st.pendingConversationNavAnchor || ''
       ).trim();
       if (a.startsWith('review-comment:')) {
-        return a.slice('review-comment:'.length);
+        return walkReviewCommentToRootId(a.slice('review-comment:'.length));
       }
     }
-    // DOM: context-active thread card (works when store lags paint / Diff caret)
+    // DOM: context-active thread card (works when store lags paint / Diff caret).
+    // Prefer anchor root over unit-walk — reviewComments may lag by-ids load
+    // so walking a reply stamp returns the reply itself as "root" (TOR.3).
     try {
       if (typeof document === 'undefined') return null;
       const active = document.querySelector(
@@ -2778,10 +2840,19 @@ export function PrModalApp({
       ) as HTMLElement | null;
       const anchor = String(active?.getAttribute('data-search-anchor') || '').trim();
       if (anchor.startsWith('review-comment:')) {
-        return anchor.slice('review-comment:'.length);
+        return walkReviewCommentToRootId(
+          anchor.slice('review-comment:'.length)
+        );
       }
     } catch {
       /* ignore */
+    }
+    // Unit focus stamp (root or reply) — keep ↑/↓ multi-reply routing when
+    // activeDiffCommentId / context-active DOM cleared but unit stamp remains
+    // (TOR.3: stamp reply id after continuum seed without Diff root id).
+    const unit = readFocusedThreadUnitStamp(st);
+    if (unit) {
+      return walkReviewCommentToRootId(unit);
     }
     return null;
   }
@@ -3284,45 +3355,67 @@ export function PrModalApp({
     // blocks line/thread re-entry (P3c e2e).
     const rootId = resolveFocusedReviewThreadRootId(st);
     if (!rootId) return false;
-    // In-thread unit focus always multi-capable while a root is active
-    if (
-      st.focusedThreadUnitId != null &&
-      String(st.focusedThreadUnitId).trim() !== ''
-    ) {
-      if (repliesForRootCommentId(rootId).length > 0) return true;
+    const unit = readFocusedThreadUnitStamp(st);
+    // Unit stamp on a reply (≠ root) ⇒ multi-reply mode even if reply rows lag
+    // in detail.reviewComments (TOR.3 seed leaves stamp on reply id).
+    if (unit && unit !== String(rootId)) return true;
+    // Context-active multi-reply + any unit/active/selection focus latch.
+    // reviewComments lag used to make repliesForRoot empty while the thread
+    // is clearly multi-reply in the Diff DOM (TOR.3).
+    try {
+      if (typeof document !== 'undefined') {
+        const active = document.querySelector(
+          `.prp-inline-thread--context-active[data-search-anchor="review-comment:${CSS.escape(rootId)}"], .prp-inline-thread[data-context-active="1"][data-search-anchor="review-comment:${CSS.escape(rootId)}"], .prp-inline-thread--threaded[data-search-anchor="review-comment:${CSS.escape(rootId)}"]`
+        );
+        const multiDom = Boolean(
+          active &&
+            (active.querySelector(
+              '[data-prp-thread-unit="reply"][data-prp-thread-unit-id]'
+            ) ||
+              active.getAttribute('data-prp-multi-reply') === '1' ||
+              active.classList.contains('prp-inline-thread--threaded'))
+        );
+        if (multiDom) {
+          if (unit) return true;
+          if (st.activeDiffCommentId != null) {
+            const activeRoot = walkReviewCommentToRootId(
+              String(st.activeDiffCommentId)
+            );
+            if (activeRoot && String(activeRoot) === String(rootId)) {
+              return true;
+            }
+          }
+          const sel = st.lineSelection;
+          if (isThreadSelection(sel) && sel?.commentId != null) {
+            const selRoot = walkReviewCommentToRootId(String(sel.commentId));
+            if (selRoot && String(selRoot) === String(rootId)) return true;
+          }
+          // Do not claim multi-reply from multi DOM alone (P3c continuum exit
+          // can leave context-active). Require unit / activeDiff / thread sel.
+        }
+      }
+    } catch {
+      /* fall through to data replies */
     }
-    if (repliesForRootCommentId(rootId).length > 0) {
+    const replies = repliesForRootCommentId(rootId);
+    if (replies.length > 0) {
+      // Any unit stamp under this root (root or reply)
+      if (unit) return true;
       // Active Diff comment nav on this root (⌥J/K or continuum seed)
-      if (
-        st.activeDiffCommentId != null &&
-        String(st.activeDiffCommentId) === String(rootId)
-      ) {
-        return true;
+      if (st.activeDiffCommentId != null) {
+        const activeRoot = walkReviewCommentToRootId(
+          String(st.activeDiffCommentId)
+        );
+        if (activeRoot && String(activeRoot) === String(rootId)) return true;
       }
       // Line selection parked on this thread row
       const sel = st.lineSelection;
-      if (
-        isThreadSelection(sel) &&
-        String(sel?.commentId ?? '') === String(rootId)
-      ) {
-        return true;
+      if (isThreadSelection(sel) && sel?.commentId != null) {
+        const selRoot = walkReviewCommentToRootId(String(sel.commentId));
+        if (selRoot && String(selRoot) === String(rootId)) return true;
       }
     }
-    try {
-      if (typeof document === 'undefined') return false;
-      const active = document.querySelector(
-        `.prp-inline-thread--context-active[data-search-anchor="review-comment:${CSS.escape(rootId)}"], .prp-inline-thread[data-context-active="1"][data-search-anchor="review-comment:${CSS.escape(rootId)}"]`
-      );
-      return Boolean(
-        active &&
-          (active.querySelector(
-            '[data-prp-thread-unit="reply"][data-prp-thread-unit-id]'
-          ) ||
-            active.getAttribute('data-prp-multi-reply') === '1')
-      );
-    } catch {
-      return false;
-    }
+    return false;
   }
 
   /** Scroll left file-nav so the active file row is visible when off-screen. */
