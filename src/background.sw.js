@@ -4936,6 +4936,12 @@ const ONBOARDING_KEY = "onboardingCompleted";
 const DEFAULT_PREFS = {
   reverseComments: true,
   autoOpenEmbed: true,
+  /**
+   * /pulls list title click (and Enter on focused row):
+   * - modal (default): open pr+ sheet/modal overlay on the list page
+   * - page: navigate to GitHub /pull/N (pr+ embed still follows autoOpenEmbed)
+   */
+  listOpenMode: "modal",
   singleFileMode: false,
   treeView: true,
   /**
@@ -4982,6 +4988,16 @@ function normalizeShortcutMonitorSizePref(raw) {
   if (v === "small" || v === "sm" || v === "1" || v === "1x") return "small";
   if (raw === false) return "none";
   return DEFAULT_PREFS.shortcutMonitorSize;
+}
+function normalizeListOpenModePref(raw) {
+  const v = String(raw ?? "").trim().toLowerCase();
+  if (v === "page" || v === "pr-page" || v === "pr_page" || v === "navigate" || v === "native" || v === "github") {
+    return "page";
+  }
+  if (v === "modal" || v === "overlay" || v === "sheet" || v === "pr+" || v === "prp" || v === "pr-plus") {
+    return "modal";
+  }
+  return DEFAULT_PREFS.listOpenMode;
 }
 function normalizeUiLanguagePref(raw) {
   if (raw == null) return DEFAULT_PREFS.uiLanguage;
@@ -5041,6 +5057,7 @@ function normalizePrefs(raw) {
   return {
     reverseComments: typeof src.reverseComments === "boolean" ? src.reverseComments : DEFAULT_PREFS.reverseComments,
     autoOpenEmbed: typeof src.autoOpenEmbed === "boolean" ? src.autoOpenEmbed : DEFAULT_PREFS.autoOpenEmbed,
+    listOpenMode: normalizeListOpenModePref(src.listOpenMode),
     singleFileMode: typeof src.singleFileMode === "boolean" ? src.singleFileMode : DEFAULT_PREFS.singleFileMode,
     treeView: typeof src.treeView === "boolean" ? src.treeView : DEFAULT_PREFS.treeView,
     pluginEnabled: typeof src.pluginEnabled === "boolean" ? src.pluginEnabled : DEFAULT_PREFS.pluginEnabled,

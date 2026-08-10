@@ -49,6 +49,16 @@
 
     if (!looksLikeTitle) return;
 
+    // Pref: listOpenMode=page → let GitHub navigate to /pull/N (no modal).
+    // autoOpenEmbed still decides embed vs native on the PR page.
+    try {
+      if (normalizeListOpenMode(prefs?.listOpenMode) === 'page') {
+        return;
+      }
+    } catch {
+      /* fall through to modal */
+    }
+
     event.preventDefault();
     event.stopPropagation();
     if (typeof event.stopImmediatePropagation === 'function') {

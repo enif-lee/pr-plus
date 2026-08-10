@@ -30,8 +30,10 @@ import {
 } from '@lib/virtual-range';
 import {
   isSelectableDiffRow,
+  isOptHeldForPointerDrag,
   rowSelectionVisualKey,
   selectionActiveSide,
+  shouldUseNativeTextSelectOnDrag,
 } from '@lib/line-selection';
 import { isPathViewed } from '@lib/review-threads';
 import { OptBtnHint } from '@common/OptBtnHint';
@@ -766,6 +768,40 @@ export const DiffCodeLine = memo(function DiffCodeLine({
         if ((e.target as HTMLElement)?.closest?.('.prp-line-expand-btn')) {
           return;
         }
+        // Opt/Alt held → native browser text selection (copy partial code).
+        // Skip preventDefault + line-selection so the browser owns the gesture.
+        const nativeText =
+          typeof shouldUseNativeTextSelectOnDrag === 'function'
+            ? shouldUseNativeTextSelectOnDrag({
+                altKey: Boolean(e.altKey),
+                optHeld: isOptHeldForPointerDrag(e),
+                metaKey: Boolean(e.metaKey),
+                ctrlKey: Boolean(e.ctrlKey),
+              })
+            : Boolean(e.altKey);
+        if (nativeText) {
+          // Notify shell (auto-copy on mouseup) but do not preventDefault —
+          // browser owns the text selection gesture.
+          onSelectionStart?.(row, { x: e.clientX, y: e.clientY }, {
+            shiftKey: Boolean(e.shiftKey),
+            preferredSide: 'RIGHT',
+            altKey: true,
+            optHeld: true,
+            nativeTextSelect: true,
+          });
+          // Page-world / capture bridge (e2e + dual listeners)
+          try {
+            document.dispatchEvent(
+              new CustomEvent('prp-native-text-select-start', {
+                bubbles: true,
+                detail: { rowIndex: row?.rowIndex ?? null },
+              })
+            );
+          } catch {
+            /* ignore */
+          }
+          return;
+        }
         e.preventDefault();
         // Split: pick LEFT/RIGHT from click X so comments land on that pane
         let preferredSide: 'LEFT' | 'RIGHT' = 'RIGHT';
@@ -786,6 +822,7 @@ export const DiffCodeLine = memo(function DiffCodeLine({
         onSelectionStart?.(row, { x: e.clientX, y: e.clientY }, {
           shiftKey: Boolean(e.shiftKey),
           preferredSide,
+          altKey: Boolean(e.altKey),
         });
       }}
       // Extend multi-line while primary button is held. Do not gate on the

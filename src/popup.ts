@@ -15,6 +15,9 @@ const prefPluginEnabled = document.getElementById(
   'pref-plugin-enabled'
 ) as HTMLInputElement | null;
 const prefAutoOpenEmbed = document.getElementById('pref-auto-open-embed');
+const prefListOpenMode = document.getElementById(
+  'pref-list-open-mode'
+) as HTMLSelectElement | null;
 const prefReverseComments = document.getElementById('pref-reverse-comments');
 const prefSingleFileMode = document.getElementById('pref-single-file-mode');
 const prefAutoExpandFileNav = document.getElementById(
@@ -45,6 +48,7 @@ const DEFAULT_PREFS = {
   pluginEnabled: true,
   reverseComments: true,
   autoOpenEmbed: true,
+  listOpenMode: 'modal',
   singleFileMode: false,
   autoExpandOnFileNav: false,
   treeView: true,
@@ -58,6 +62,23 @@ const DEFAULT_PREFS = {
     'review-threads': true,
   },
 };
+
+function normalizeListOpenMode(raw: unknown): 'modal' | 'page' {
+  const v = String(raw ?? '')
+    .trim()
+    .toLowerCase();
+  if (
+    v === 'page' ||
+    v === 'pr-page' ||
+    v === 'pr_page' ||
+    v === 'navigate' ||
+    v === 'native' ||
+    v === 'github'
+  ) {
+    return 'page';
+  }
+  return 'modal';
+}
 
 const prefTlAll = document.getElementById(
   'pref-tl-all'
@@ -304,6 +325,9 @@ function renderPrefs(prefs: any) {
   }
   // @ts-expect-error classic content-script dynamic shapes
   if (prefAutoOpenEmbed) prefAutoOpenEmbed.checked = p.autoOpenEmbed !== false;
+  if (prefListOpenMode) {
+    prefListOpenMode.value = normalizeListOpenMode(p.listOpenMode);
+  }
   (prefReverseComments as HTMLInputElement).checked =
     p.reverseComments !== false;
   if (prefSingleFileMode) {
@@ -584,6 +608,7 @@ function readLocalExtensionPrefs(): Promise<any> {
           pluginEnabled: raw.pluginEnabled !== false,
           reverseComments: raw.reverseComments !== false,
           autoOpenEmbed: raw.autoOpenEmbed !== false,
+          listOpenMode: normalizeListOpenMode(raw.listOpenMode),
           singleFileMode: raw.singleFileMode === true,
           autoExpandOnFileNav: raw.autoExpandOnFileNav === true,
           treeView: raw.treeView !== false,
@@ -690,6 +715,7 @@ async function savePrefs() {
         : true,
   // @ts-expect-error classic content-script dynamic shapes
       autoOpenEmbed: Boolean(prefAutoOpenEmbed?.checked),
+      listOpenMode: normalizeListOpenMode(prefListOpenMode?.value),
   // @ts-expect-error classic content-script dynamic shapes
       reverseComments: Boolean(prefReverseComments.checked),
   // @ts-expect-error classic content-script dynamic shapes

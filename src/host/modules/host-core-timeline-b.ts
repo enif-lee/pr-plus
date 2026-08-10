@@ -251,6 +251,7 @@
         prefs = {
           reverseComments: next.reverseComments !== false,
           autoOpenEmbed: next.autoOpenEmbed !== false,
+          listOpenMode: normalizeListOpenMode(next.listOpenMode),
           singleFileMode: next.singleFileMode === true,
           autoExpandOnFileNav: next.autoExpandOnFileNav === true,
           shortcutMonitorSize: normalizeShortcutMonitorSize(
@@ -265,6 +266,10 @@
           document.documentElement.setAttribute(
             'data-prp-ui-language',
             prefs.uiLanguage || 'auto'
+          );
+          document.documentElement.setAttribute(
+            'data-prp-list-open-mode',
+            prefs.listOpenMode || 'modal'
           );
         } catch {
           /* ignore */
@@ -411,6 +416,7 @@
           prefs = {
             reverseComments: next?.reverseComments !== false,
             autoOpenEmbed: next?.autoOpenEmbed !== false,
+            listOpenMode: normalizeListOpenMode(next?.listOpenMode),
             singleFileMode: next?.singleFileMode === true,
             autoExpandOnFileNav: next?.autoExpandOnFileNav === true,
             shortcutMonitorSize: normalizeShortcutMonitorSize(
@@ -425,6 +431,10 @@
             document.documentElement.setAttribute(
               'data-prp-ui-language',
               prefs.uiLanguage || 'auto'
+            );
+            document.documentElement.setAttribute(
+              'data-prp-list-open-mode',
+              prefs.listOpenMode || 'modal'
             );
           } catch {
             /* ignore */

@@ -7,6 +7,15 @@
     const parsed = parsePrFromListRow(row);
     if (!parsed) return false;
     applyPullsListFocus(index);
+    // listOpenMode=page: keyboard Enter matches title-click → /pull/N.
+    try {
+      if (normalizeListOpenMode(prefs?.listOpenMode) === 'page') {
+        const href = `/${parsed.owner}/${parsed.repo}/pull/${parsed.number}`;
+        return navigatePage(href);
+      }
+    } catch {
+      /* fall through to modal */
+    }
     void openModal({ ...parsed, page: 'conversation' });
     return true;
   }

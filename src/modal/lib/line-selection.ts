@@ -1090,57 +1090,208 @@ export function isChangedDiffLineRow(row: any): boolean {
  * List of change regions in virtual-row order.
  * A region is a maximal contiguous run of changed lines (array index ±1).
  * Context / hunk headers / file headers / comments break the run.
+ *
+ * Prefer {@link buildChangeRegionIndex} + hop APIs under key-hold: this is O(n)
+ * and must not run on every ⌥↑/⌥↓ event for large Diff lists.
  */
 export function listChangeRegions(list: any[]): Array<{
   startIndex: number;
   endIndex: number;
   firstRow: any;
 }> {
+  const index = buildChangeRegionIndex(list);
   const rows = Array.isArray(list) ? list : [];
-  const regions: Array<{
-    startIndex: number;
-    endIndex: number;
-    firstRow: any;
-  }> = [];
-  let cur: { startIndex: number; endIndex: number; firstRow: any } | null =
-    null;
+  const out: Array<{ startIndex: number; endIndex: number; firstRow: any }> =
+    [];
+  for (let i = 0; i < index.starts.length; i++) {
+    const startIndex = index.starts[i];
+    out.push({
+      startIndex,
+      endIndex: index.ends[i],
+      firstRow: rows[startIndex],
+    });
+  }
+  return out;
+}
+
+/**
+ * Compact in-memory index of change-region starts/ends for O(log R) hops.
+ * Built once per virtual-row generation; hop must not re-scan all rows.
+ */
+export type ChangeRegionIndex = {
+  /** Array index of first changed line in each region (sorted ascending). */
+  starts: number[];
+  /** Array index of last changed line in each region. */
+  ends: number[];
+  /** `list.length` when built — invalidates when rows are replaced/resized. */
+  listLength: number;
+  /** Region count. */
+  regionCount: number;
+};
+
+/**
+ * Single O(n) pass over virtual rows → region start/end arrays.
+ * @param {any[]} list
+ * @returns {ChangeRegionIndex}
+ */
+export function buildChangeRegionIndex(list: any[]): ChangeRegionIndex {
+  const rows = Array.isArray(list) ? list : [];
+  const starts: number[] = [];
+  const ends: number[] = [];
+  let start = -1;
+  let end = -1;
   for (let i = 0; i < rows.length; i++) {
-    const row = rows[i];
-    if (!isChangedDiffLineRow(row)) {
-      if (cur) {
-        regions.push(cur);
-        cur = null;
+    if (!isChangedDiffLineRow(rows[i])) {
+      if (start >= 0) {
+        starts.push(start);
+        ends.push(end);
+        start = -1;
+        end = -1;
       }
       continue;
     }
-    if (!cur) {
-      cur = { startIndex: i, endIndex: i, firstRow: row };
-    } else if (i === cur.endIndex + 1) {
-      cur.endIndex = i;
+    if (start < 0) {
+      start = i;
+      end = i;
+    } else if (i === end + 1) {
+      end = i;
     } else {
-      regions.push(cur);
-      cur = { startIndex: i, endIndex: i, firstRow: row };
+      starts.push(start);
+      ends.push(end);
+      start = i;
+      end = i;
     }
   }
-  if (cur) regions.push(cur);
-  return regions;
+  if (start >= 0) {
+    starts.push(start);
+    ends.push(end);
+  }
+  return {
+    starts,
+    ends,
+    listLength: rows.length,
+    regionCount: starts.length,
+  };
+}
+
+/**
+ * True when `index` was built for this `list` (same length + same starts valid).
+ * Ref identity is checked by the shell; this is a cheap content gate.
+ */
+export function isChangeRegionIndexValid(
+  index: ChangeRegionIndex | null | undefined,
+  list: any[]
+): boolean {
+  if (!index || !Array.isArray(index.starts) || !Array.isArray(index.ends)) {
+    return false;
+  }
+  const n = Array.isArray(list) ? list.length : 0;
+  if (index.listLength !== n) return false;
+  if (index.starts.length !== index.ends.length) return false;
+  if (index.regionCount !== index.starts.length) return false;
+  return true;
+}
+
+/**
+ * Binary search: region index containing `headIdx`, or -1 if none.
+ * @param {ChangeRegionIndex} index
+ * @param {number} headIdx
+ * @returns {number}
+ */
+export function findChangeRegionIndexContaining(
+  index: ChangeRegionIndex,
+  headIdx: number
+): number {
+  const starts = index.starts;
+  const ends = index.ends;
+  let lo = 0;
+  let hi = starts.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (headIdx < starts[mid]) hi = mid - 1;
+    else if (headIdx > ends[mid]) lo = mid + 1;
+    else return mid;
+  }
+  return -1;
+}
+
+/**
+ * Resolve region array index for hop (same semantics as legacy linear scan).
+ * @param {ChangeRegionIndex} index
+ * @param {number} headIdx
+ * @param {1|-1} d
+ * @returns {number} ri (may be -1 at edges before clamp)
+ */
+export function resolveChangeRegionHopBase(
+  index: ChangeRegionIndex,
+  headIdx: number,
+  d: 1 | -1
+): number {
+  let ri = findChangeRegionIndexContaining(index, headIdx);
+  if (ri >= 0) return ri;
+  const starts = index.starts;
+  const ends = index.ends;
+  const n = starts.length;
+  if (!n) return -1;
+  if (d > 0) {
+    // First region with start > headIdx → base is i-1; past last → null signal
+    let lo = 0;
+    let hi = n;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (starts[mid] <= headIdx) lo = mid + 1;
+      else hi = mid;
+    }
+    // lo = first index with start > headIdx (or n)
+    if (lo < n) return lo - 1;
+    if (ends[n - 1] < headIdx) return Number.NaN; // past end → no next
+    return -1;
+  }
+  // d < 0: last region with end < headIdx → base is i+1
+  let lo = 0;
+  let hi = n - 1;
+  let found = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (ends[mid] < headIdx) {
+      found = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  if (found >= 0) return found + 1;
+  if (starts[0] > headIdx) return Number.NaN; // before first → no prev
+  return -1;
 }
 
 /**
  * ⌥↑ / ⌥↓: move caret to the first line of the next/prev change region.
  * Returns a **single-line** selection (never multi-line whole hunk).
+ *
+ * Pass a prebuilt {@link ChangeRegionIndex} (from {@link buildChangeRegionIndex})
+ * so key-hold does not O(n)-scan virtualRows on every event. When `regionIndex`
+ * is missing/stale, rebuilds once for this call.
+ *
  * @param delta >0 next, <0 previous
+ * @param preferredSide LEFT | RIGHT
+ * @param regionIndex optional prebuilt index for this list
  * @returns new selection or null if no region / no move possible
  */
 export function jumpSelectionToAdjacentChangeRegion(
   selection: any,
   list: any[],
   delta: number,
-  preferredSide?: string
+  preferredSide?: string,
+  regionIndex?: ChangeRegionIndex | null
 ): any | null {
-  const regions = listChangeRegions(list);
-  if (!regions.length) return null;
-  const d = delta < 0 ? -1 : 1;
+  const rows = Array.isArray(list) ? list : [];
+  const index =
+    regionIndex && isChangeRegionIndexValid(regionIndex, rows)
+      ? regionIndex
+      : buildChangeRegionIndex(rows);
+  if (!index.regionCount) return null;
+  const d: 1 | -1 = delta < 0 ? -1 : 1;
   const prefer =
     String(
       preferredSide ||
@@ -1159,55 +1310,26 @@ export function jumpSelectionToAdjacentChangeRegion(
     isThreadSelection(selection) ||
     !hasHead
   ) {
-    const reg = d > 0 ? regions[0] : regions[regions.length - 1];
-    return beginLineSelection(reg.firstRow, prefer, reg.startIndex);
+    const si = d > 0 ? 0 : index.regionCount - 1;
+    const startIndex = index.starts[si];
+    return beginLineSelection(rows[startIndex], prefer, startIndex);
   }
 
-  // Region containing head
-  let ri = -1;
-  for (let i = 0; i < regions.length; i++) {
-    const r = regions[i];
-    if (headIdx >= r.startIndex && headIdx <= r.endIndex) {
-      ri = i;
-      break;
-    }
-  }
-  if (ri < 0) {
-    // Head on context/header: nearest region after (↓) or before (↑)
-    if (d > 0) {
-      for (let i = 0; i < regions.length; i++) {
-        if (regions[i].startIndex > headIdx) {
-          ri = i - 1;
-          break;
-        }
-      }
-      if (ri < 0 && regions[regions.length - 1].endIndex < headIdx) {
-        return null;
-      }
-    } else {
-      for (let i = regions.length - 1; i >= 0; i--) {
-        if (regions[i].endIndex < headIdx) {
-          ri = i + 1;
-          break;
-        }
-      }
-      if (ri < 0 && regions[0].startIndex > headIdx) {
-        return null;
-      }
-    }
-  }
+  const base = resolveChangeRegionHopBase(index, headIdx, d);
+  if (Number.isNaN(base)) return null;
 
+  let ri = base;
   const target = ri + d;
-  if (target < 0 || target >= regions.length) {
+  if (target < 0 || target >= index.regionCount) {
     // Edge: stay on first line of current region as single caret (no wrap)
-    if (ri >= 0 && ri < regions.length) {
-      const reg = regions[ri];
-      return beginLineSelection(reg.firstRow, prefer, reg.startIndex);
+    if (ri >= 0 && ri < index.regionCount) {
+      const startIndex = index.starts[ri];
+      return beginLineSelection(rows[startIndex], prefer, startIndex);
     }
     return null;
   }
-  const reg = regions[target];
-  return beginLineSelection(reg.firstRow, prefer, reg.startIndex);
+  const startIndex = index.starts[target];
+  return beginLineSelection(rows[startIndex], prefer, startIndex);
 }
 
 /**
@@ -1241,22 +1363,109 @@ export function extendLineSelection(selection, row) {
 }
 
 /**
+ * Text from a browser Selection-like object (window.getSelection()).
+ * Empty / whitespace-only → '' (callers skip auto-copy).
+ *
+ * @param {{ toString?: () => string } | null | undefined} sel
+ * @returns {string}
+ */
+export function browserSelectionCopyText(
+  sel?: { toString?: () => string } | null
+): string {
+  try {
+    const raw = String(sel?.toString?.() ?? '');
+    // Keep internal whitespace; only reject pure empty/whitespace selections.
+    return raw.trim() ? raw : '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Opt/Alt held at Diff drag start → native browser text selection (copy partial
+ * code). Default (no Opt) → product line-selection mode.
+ *
+ * Does not treat meta/ctrl as Opt. Shift alone stays line-selection (multi-line).
+ *
+ * @param {{
+ *   altKey?: boolean,
+ *   optHeld?: boolean,
+ *   metaKey?: boolean,
+ *   ctrlKey?: boolean,
+ * }} [opts]
+ * @returns {boolean}
+ */
+export function shouldUseNativeTextSelectOnDrag(opts: {
+  altKey?: boolean;
+  optHeld?: boolean;
+  metaKey?: boolean;
+  ctrlKey?: boolean;
+} = {}): boolean {
+  if (opts.metaKey || opts.ctrlKey) return false;
+  return Boolean(opts.altKey || opts.optHeld);
+}
+
+/**
+ * Read Opt-held latch from the event and/or document attribute used by
+ * OptBtnHint / e2e (`data-prp-opt-held` / class `prp-opt-held`).
+ *
+ * @param {{ altKey?: boolean } | null | undefined} eventLike
+ * @param {Document | null | undefined} [doc]
+ * @returns {boolean}
+ */
+export function isOptHeldForPointerDrag(
+  eventLike?: { altKey?: boolean } | null,
+  doc?: Document | null
+): boolean {
+  if (eventLike?.altKey) return true;
+  try {
+    const root =
+      doc?.documentElement ||
+      (typeof document !== 'undefined' ? document.documentElement : null);
+    if (!root) return false;
+    if (root.getAttribute?.('data-prp-opt-held') === '1') return true;
+    if (root.hasAttribute?.('data-prp-opt-held')) return true;
+    if (root.classList?.contains?.('prp-opt-held')) return true;
+    const body = doc?.body || (typeof document !== 'undefined' ? document.body : null);
+    if (body?.classList?.contains?.('prp-opt-held')) return true;
+  } catch {
+    /* ignore */
+  }
+  return false;
+}
+
+/**
  * Pointer-down decision for click vs Shift-click.
  * - Normal click → begin new single-line selection (new anchor)
  * - Shift-click with same-file anchor → extend head only (range)
  * - Shift-click with no prior selection or other file → begin new
  * - Non-selectable row → leave selection unchanged
+ * - Opt/Alt held → mode 'native-text' (caller skips line-selection drag)
  *
  * @param {object|null} currentSelection
  * @param {object} row
- * @param {{ shiftKey?: boolean }} [opts]
+ * @param {{ shiftKey?: boolean, altKey?: boolean, optHeld?: boolean, metaKey?: boolean, ctrlKey?: boolean, preferredSide?: string }} [opts]
  * @returns {{
  *   selection: object|null,
- *   mode: 'begin'|'extend'|'ignore',
+ *   mode: 'begin'|'extend'|'ignore'|'native-text',
  *   keepRange: boolean,
  * }}
  */
 export function applySelectionPointerDown(currentSelection, row, opts: any = {}) {
+  if (
+    shouldUseNativeTextSelectOnDrag({
+      altKey: opts?.altKey,
+      optHeld: opts?.optHeld,
+      metaKey: opts?.metaKey,
+      ctrlKey: opts?.ctrlKey,
+    })
+  ) {
+    return {
+      selection: currentSelection || null,
+      mode: 'native-text',
+      keepRange: false,
+    };
+  }
   const shiftKey = Boolean(opts?.shiftKey);
   const preferredSide =
     String(opts?.preferredSide || 'RIGHT').toUpperCase() === 'LEFT'

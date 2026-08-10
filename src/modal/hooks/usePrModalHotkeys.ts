@@ -187,10 +187,29 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
   }
 
   useEffect(() => {
+    /**
+     * documentElement[data-prp-opt-held] drives Opt text-select CSS + drag gate.
+     * Must always clear on close/unmount — if Opt is held when the modal closes,
+     * keyup listeners are gone and a sticky attr would force native-text on every
+     * later Diff drag until reload.
+     */
+    const stampOptHeldAttr = (held: boolean) => {
+      try {
+        const root =
+          typeof document !== 'undefined' ? document.documentElement : null;
+        if (!root) return;
+        if (held) root.setAttribute('data-prp-opt-held', '1');
+        else root.removeAttribute('data-prp-opt-held');
+      } catch {
+        /* ignore */
+      }
+    };
+
     if (!open) {
       optHeldRef.current = false;
       optHintsSuppressedRef.current = false;
       useModalStore.getState().setOptHintsActive(false);
+      stampOptHeldAttr(false);
       return undefined;
     }
     let lastHeld = false;
@@ -205,6 +224,7 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
       }
       lastHeld = held;
       optHeldRef.current = held;
+      stampOptHeldAttr(held);
       if (!held) optHintsSuppressedRef.current = false;
       syncOptHintsActive();
     };
@@ -219,6 +239,7 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
         const active = Boolean((e as CustomEvent)?.detail?.active);
         lastHeld = active;
         optHeldRef.current = active;
+        stampOptHeldAttr(active);
         if (!active) optHintsSuppressedRef.current = false;
         syncOptHintsActive();
       } catch {
@@ -226,9 +247,10 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
       }
     };
     const clear = () => {
-      if (!lastHeld) return;
+      // Always clear DOM latch (may be set even if lastHeld lagged).
       lastHeld = false;
       optHeldRef.current = false;
+      stampOptHeldAttr(false);
       optHintsSuppressedRef.current = false;
       useModalStore.getState().setOptHintsActive(false);
     };
@@ -244,6 +266,10 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
       window.removeEventListener('keydown', sync, true);
       window.removeEventListener('keyup', sync, true);
       window.removeEventListener('blur', clear);
+      // Force-clear sticky Opt latch on unmount / open flip (keyup may never fire).
+      lastHeld = false;
+      optHeldRef.current = false;
+      stampOptHeldAttr(false);
     };
   }, [open]);
 
@@ -338,6 +364,92 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
     const onKey = (e) => {
       const mod = e.metaKey || e.ctrlKey;
       const alt = Boolean(e.altKey);
+      const ui = uiRef.current || {};
+      const act = actionsRef.current || {};
+      const doc = typeof document !== 'undefined' ? document : null;
+
+      /**
+       * Diff ↑/↓ / Shift+↑↓ hot path — key-hold fires 30–60×/s.
+       * Skip GH palette touch, full shortcut resolve, and chord machinery.
+       * (1.9.6 thrift: selection flush already rAF-coalesces.)
+       */
+      const liveLayout =
+        ui.layoutMode === LAYOUT_DIFF ||
+        useModalStore.getState().layoutMode === LAYOUT_DIFF;
+      if (liveLayout && !mod) {
+        const ae =
+          typeof document !== 'undefined' ? document.activeElement : null;
+        const typing =
+          ae &&
+          ae !== document.body &&
+          ((ae as HTMLElement).isContentEditable ||
+            /^(INPUT|TEXTAREA|SELECT)$/i.test(
+              (ae as HTMLElement).tagName || ''
+            ));
+        if (!typing) {
+          // Plain / Shift line selection
+          if (
+            !alt &&
+            (e.key === 'ArrowUp' || e.key === 'ArrowDown')
+          ) {
+            e.preventDefault();
+            e.stopPropagation();
+            const d = e.key === 'ArrowUp' ? -1 : 1;
+            const shift = Boolean(e.shiftKey);
+            reportShortcutAction(
+              shift
+                ? d < 0
+                  ? 'extendSelectionUp'
+                  : 'extendSelectionDown'
+                : d < 0
+                  ? 'moveSelectionUp'
+                  : 'moveSelectionDown'
+            );
+            if (!shift && act.tryReenterExitedMultiReply?.(d)) return;
+            act.applySelectionKeyboardMove?.(d, shift);
+            return;
+          }
+          // ⌥↑/⌥↓ change-region hop
+          if (
+            alt &&
+            !e.shiftKey &&
+            (e.key === 'ArrowUp' || e.key === 'ArrowDown')
+          ) {
+            e.preventDefault();
+            e.stopPropagation();
+            const d = e.key === 'ArrowUp' ? -1 : 1;
+            reportShortcutAction(
+              d < 0
+                ? 'optArrowScrollSelectPrev'
+                : 'optArrowScrollSelectNext'
+            );
+            act.optArrowScrollSelect?.(d);
+            return;
+          }
+          // ⌥⇧[ / ⌥⇧] next/prev file
+          if (
+            alt &&
+            e.shiftKey &&
+            (e.code === 'BracketLeft' ||
+              e.code === 'BracketRight' ||
+              e.key === '[' ||
+              e.key === ']' ||
+              e.key === '{' ||
+              e.key === '}')
+          ) {
+            e.preventDefault();
+            e.stopPropagation();
+            const next =
+              e.code === 'BracketRight' ||
+              e.key === ']' ||
+              e.key === '}';
+            reportShortcutAction(next ? 'navFileNext' : 'navFilePrev');
+            act.navFile?.(next ? 1 : -1);
+            return;
+          }
+        }
+      }
+
       // Physical-key token — never use raw e.key for product chords (macOS ⌥ glyphs)
       const key =
         typeof shortcutKeyFromEvent === 'function'
@@ -349,11 +461,9 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
                 alt,
               })
             : String(e.key || '').toLowerCase();
-      const ui = uiRef.current || {};
-      const act = actionsRef.current || {};
-      const doc = typeof document !== 'undefined' ? document : null;
 
-      // Keep sticky "was open" timestamp current while typing in GH palette
+      // Keep sticky "was open" timestamp current while typing in GH palette.
+      // Skip on bare Diff arrows (handled above) — DOM queries on every hold tick.
       let ghOpenNow = false;
       try {
         ghOpenNow =

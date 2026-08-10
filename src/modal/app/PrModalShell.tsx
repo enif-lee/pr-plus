@@ -44,6 +44,11 @@ import {
   isDiffUnavailable,
 } from '../lib/layout-mode';
 import {
+  conversationDeepLinkApplyKey,
+  decideConversationDeepLinkLayout,
+  shouldAbandonConversationDeepLinkOnExpandDiff,
+} from '../lib/deep-link-layout-intent';
+import {
   compareCacheKey,
   isAllCommitsFilter,
   normalizeDiffCommitFilter,
@@ -251,6 +256,10 @@ import {
   resolveSelectionIslandRevealPhase,
   shouldShowSelectionActionGroup,
   jumpSelectionToAdjacentChangeRegion,
+  buildChangeRegionIndex,
+  isChangeRegionIndexValid,
+  type ChangeRegionIndex,
+  browserSelectionCopyText,
   resolvePendingGotoSelection,
   resolveGotoPathAmongFiles,
 } from '../lib/line-selection';
@@ -1006,6 +1015,14 @@ export function PrModalApp({
   /** Shift-click range: finalize as multi (do not collapse head to anchor). */
   const shiftRangeRef = useRef<boolean>(false);
   /**
+   * Opt+drag native text-selection gesture is active — on mouseup, auto-copy
+   * window.getSelection() and toast. Cleared after copy / cancel.
+   */
+  const nativeTextSelectDragRef = useRef(false);
+  const nativeTextSelectMouseUpRef = useRef<((e: MouseEvent) => void) | null>(
+    null
+  );
+  /**
    * Settle timer after select/move (no longer auto-shows the action group).
    */
   const selectionActionsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
@@ -1023,6 +1040,18 @@ export function PrModalApp({
   );
   /** Live virtual rows for keydown handoff (avoid stale closure on ↑/↓ exit). */
   const virtualRowsRef = useRef<any[]>([]);
+  /**
+   * Change-region index for ⌥↑/⌥↓. Rebuilt only when virtualRows ref/length
+   * changes — never on every key-hold hop (listChangeRegions is O(n)).
+   */
+  const changeRegionIndexRef = useRef<{
+    list: any[] | null;
+    listLength: number;
+    index: ChangeRegionIndex | null;
+  }>({ list: null, listLength: -1, index: null });
+  /** Coalesce ⌥↑/⌥↓ under key-repeat: one region hop per animation frame. */
+  const pendingOptArrowDirRef = useRef(0);
+  const optArrowRafRef = useRef(0);
   /**
    * After multi-reply continuum exits to a line, one reverse arrow re-enters
    * that thread with direction-aware unit seed (P3c). Cleared on other moves.
@@ -1074,6 +1103,17 @@ export function PrModalApp({
   const positionVerifyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null
   );
+  /**
+   * Active conversation deep-link applyKey (set while verify loop runs).
+   * Used so expandDiff can abandon without also killing Diff deep-links
+   * (jumpToReviewComment → expandDiff).
+   */
+  const positionConvDeepLinkKeyRef = useRef<string | null>(null);
+  /**
+   * User left Conversation (opened Diff) while a conversation deep-link was
+   * pending or about to re-enter — never re-steal layout for this applyKey.
+   */
+  const positionLayoutDismissedRef = useRef<string | null>(null);
   /** Guard deep-link load-more kicks. */
   const positionLoadMoreKickRef = useRef(0);
   /** Skip writing URI until after initial restore settles. */
@@ -2861,10 +2901,25 @@ export function PrModalApp({
   function repliesForRootCommentId(rootId: string): any[] {
     if (!rootId) return [];
     const rid = String(rootId);
-    // Live detail (detailRef) — not closed-over `detail` / threadsByCommentId
+    // O(1) hot path: precomputed map (never regroup full comments on every ↑↓ hop)
+    try {
+      const th = threadsByCommentId?.get?.(rid);
+      if (th) {
+        if (Array.isArray(th.replies) && th.replies.length) return th.replies;
+        if (Array.isArray(th.root?.replies) && th.root.replies.length) {
+          return th.root.replies;
+        }
+        // Known thread with no replies — stop; do not regroup
+        return [];
+      }
+    } catch {
+      /* fall through */
+    }
+    // Live detail (detailRef) — not closed-over `detail`
     const liveDetail = detailRef.current;
     const all =
       liveDetail?.reviewComments || liveDetail?.review_comments || [];
+    // Rare cold path only (map miss): regroup once
     if (typeof groupReviewThreads === 'function' && Array.isArray(all) && all.length) {
       try {
         const groups = groupReviewThreads(all);
@@ -2953,8 +3008,8 @@ export function PrModalApp({
 
   /**
    * Minimal DOM scroll for a focus host inside the Diff vlist.
-   * Uses reveal (not whole-thread maximize). Always syncs store scrollTop so
-   * VirtualDiff does not snap DOM back to a stale prop.
+   * Uses reveal (not whole-thread maximize). Store scrollTop is thrifted
+   * (1.9.6-style) so key-hold does not re-render DiffWorkspace every hop.
    */
   function revealDiffDomFocus(
     host: HTMLElement | null | undefined
@@ -2989,13 +3044,19 @@ export function PrModalApp({
       } else {
         host.scrollIntoView({ block: 'nearest', inline: 'nearest' });
       }
-      // Sync store with low threshold so VirtualDiff prop tracks DOM
+      // Thrift store sync — tiny DOM deltas must not thrash React under key-hold
       if (typeof applyProgrammaticDiffScroll === 'function') {
+        let h = 20;
+        try {
+          h = getDiffScrollMetrics().avgH || 20;
+        } catch {
+          /* ignore */
+        }
         applyProgrammaticDiffScroll(scroller, scroller.scrollTop, {
           storeTop: useModalStore.getState().scrollTop,
           setStoreTop: setScrollTop,
-          minDomDelta: 0,
-          minStoreDelta: 0.5,
+          minDomDelta: 0.5,
+          minStoreDelta: Math.max(24, h * 2),
         });
       } else {
         try {
@@ -3068,48 +3129,22 @@ export function PrModalApp({
   }
 
   /**
-   * After ↑/↓ selection change: prefer live DOM caret (selected vline / unit)
-   * over virtual-index math alone — offsets lag tall thread rows.
-   * Double-rAF: wait for React paint of `.prp-vline--selected` / unit-focus.
+   * Multi-reply thread unit only: wait for paint then DOM-measure reveal.
+   * Tall unit rows lag virtual offsets — line hops must NOT use this path.
    */
-  function scrollDiffCaretIntoView(sel: any) {
+  function scrollDiffThreadUnitIntoView(sel: any) {
     if (typeof document === 'undefined') return;
+    const unitId = useModalStore.getState().focusedThreadUnitId;
+    if (!unitId) {
+      scrollSelectionHeadDomOnly(sel);
+      return;
+    }
     const run = () => {
       try {
-        const unitId = useModalStore.getState().focusedThreadUnitId;
-        if (unitId) {
-          scrollFocusedThreadUnitIntoView(unitId, {
-            attempts: 12,
-            sel,
-          });
-          return;
-        }
-        const scope = activeDiffScrollRoot() || document;
-        const selEl =
-          (scope.querySelector(
-            '.prp-vline--selected.prp-vline--sel-only, .prp-vline--selected.prp-vline--sel-start, .prp-vline--selected.prp-vline--sel-end, .prp-vline--selected'
-          ) as HTMLElement | null) ||
-          (scope.querySelector(
-            '.prp-vline--header.prp-vline--selected'
-          ) as HTMLElement | null);
-        if (selEl) {
-          revealDiffDomFocus(selEl);
-          // Second pass after layout — catch residual bottom clip
-          requestAnimationFrame(() => {
-            try {
-              const again =
-                (scope.querySelector(
-                  '.prp-vline--selected'
-                ) as HTMLElement | null) || selEl;
-              revealDiffDomFocus(again);
-            } catch {
-              /* ignore */
-            }
-          });
-          return;
-        }
-        // Fallback: virtual index (file hop / not yet painted)
-        scrollSelectionHeadDomOnly(sel);
+        scrollFocusedThreadUnitIntoView(unitId, {
+          attempts: 6,
+          sel,
+        });
       } catch {
         try {
           scrollSelectionHeadDomOnly(sel);
@@ -3118,9 +3153,50 @@ export function PrModalApp({
         }
       }
     };
-    requestAnimationFrame(() => {
+    // One rAF is enough for leaf paint of unit-focus; avoid double-rAF chain
+    // that made every hop wait 2–3 frames under key-hold.
+    if (typeof requestAnimationFrame === 'function') {
       requestAnimationFrame(run);
-    });
+    } else {
+      run();
+    }
+  }
+
+  /**
+   * After ↑/↓ / ⌥↑↓ selection hop: thrifted virtual-index scroll (1.9.6 path)
+   * for line/file caret; DOM unit reveal only when multi-reply unit is focused.
+   * Line hops scroll **synchronously** (before React paint) so hold keeps up.
+   */
+  function scrollSelectionCaretAfterHop(sel: any) {
+    try {
+      const st = useModalStore.getState();
+      const unitId = st.focusedThreadUnitId;
+      const isThread =
+        sel &&
+        (sel.kind === 'thread' ||
+          sel.subjectType === 'thread' ||
+          sel.kind === 'inline-comment');
+      if (unitId && isThread) {
+        scrollDiffThreadUnitIntoView(sel);
+        return;
+      }
+      // Sync index scroll — do not wait for paint / microtask
+      scrollSelectionHeadDomOnly(sel);
+    } catch {
+      try {
+        scrollSelectionHeadDomOnly(sel);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  /**
+   * @deprecated Prefer scrollSelectionCaretAfterHop. Kept for call sites that
+   * still need unit-aware reveal; delegates to the thrifted hop path.
+   */
+  function scrollDiffCaretIntoView(sel: any) {
+    scrollSelectionCaretAfterHop(sel);
   }
 
   /**
@@ -3203,7 +3279,7 @@ export function PrModalApp({
           exitDelta: d,
         };
         try {
-          scrollDiffCaretIntoView(next);
+          scrollSelectionCaretAfterHop(next);
         } catch {
           /* ignore */
         }
@@ -3231,6 +3307,7 @@ export function PrModalApp({
    * seedReviewThreadFocusUnit (↑ after exit-down → last reply). Consumes latch.
    */
   function tryReenterExitedMultiReply(delta: number): boolean {
+    // Hot path: most ↑↓ have no latch — return before any work
     const latch = lastExitedMultiReplyRef.current;
     if (!latch?.rootId) return false;
     const d = delta < 0 ? -1 : 1;
@@ -3546,23 +3623,60 @@ export function PrModalApp({
   }
 
   /**
-   * ⌥↑ / ⌥↓ on Diff: jump to first line of next/prev **change region**
-   * (contiguous add/del/change run). Single-line selection only — never
-   * multi-select a whole huge hunk. Scroll via caret reveal.
+   * Cached change-region index for the current virtual row list.
+   * Rebuild only when list identity or length changes (not per hop).
    */
-  function optArrowScrollSelect(delta: number) {
+  function getChangeRegionIndexForList(list: any[]): ChangeRegionIndex | null {
+    if (!Array.isArray(list) || !list.length) {
+      changeRegionIndexRef.current = {
+        list: null,
+        listLength: 0,
+        index: null,
+      };
+      return null;
+    }
+    const cached = changeRegionIndexRef.current;
+    if (
+      cached.list === list &&
+      cached.listLength === list.length &&
+      cached.index &&
+      isChangeRegionIndexValid(cached.index, list)
+    ) {
+      return cached.index;
+    }
+    if (typeof buildChangeRegionIndex !== 'function') return null;
+    const index = buildChangeRegionIndex(list);
+    changeRegionIndexRef.current = {
+      list,
+      listLength: list.length,
+      index,
+    };
+    return index;
+  }
+
+  /**
+   * Apply one ⌥↑/⌥↓ change-region hop (uses cached region index).
+   */
+  function applyOptArrowScrollSelect(dir: number) {
     if (layoutMode !== LAYOUT_DIFF) return;
-    const dir = delta < 0 ? -1 : 1;
+    const d = dir < 0 ? -1 : 1;
     const list =
       (Array.isArray(virtualRowsRef.current) && virtualRowsRef.current.length
         ? virtualRowsRef.current
         : Array.isArray(virtualRows)
           ? virtualRows
           : []) || [];
+    const regionIndex = getChangeRegionIndexForList(list);
     const st = useModalStore.getState();
     const next =
       typeof jumpSelectionToAdjacentChangeRegion === 'function'
-        ? jumpSelectionToAdjacentChangeRegion(st.lineSelection, list, dir)
+        ? jumpSelectionToAdjacentChangeRegion(
+            st.lineSelection,
+            list,
+            d,
+            undefined,
+            regionIndex
+          )
         : null;
     if (!next) return;
     // Collapse multi-line → single caret on the target first line
@@ -3585,10 +3699,40 @@ export function PrModalApp({
     }
     scheduleSelectionActionsReveal();
     try {
-      scrollDiffCaretIntoView(next);
+      // Region hop is always a single line caret — thrifted index scroll
+      scrollSelectionCaretAfterHop(next);
     } catch {
       /* ignore */
     }
+  }
+
+  /**
+   * ⌥↑ / ⌥↓ on Diff: jump to first line of next/prev **change region**
+   * (contiguous add/del/change run). Single-line selection only — never
+   * multi-select a whole huge hunk. Scroll via caret reveal.
+   *
+   * Key-hold: rAF-coalesce like navFile (one hop per frame). Region list is
+   * indexed once per virtualRows generation — not O(n) re-scanned per event.
+   */
+  function optArrowScrollSelect(delta: number) {
+    if (layoutMode !== LAYOUT_DIFF) return;
+    const dir = delta < 0 ? -1 : 1;
+    // Latest direction wins under hold (same thrift as navFile).
+    pendingOptArrowDirRef.current = dir;
+    if (optArrowRafRef.current) return;
+    if (typeof requestAnimationFrame !== 'function') {
+      const d = pendingOptArrowDirRef.current;
+      pendingOptArrowDirRef.current = 0;
+      applyOptArrowScrollSelect(d);
+      return;
+    }
+    optArrowRafRef.current = requestAnimationFrame(() => {
+      optArrowRafRef.current = 0;
+      const d = pendingOptArrowDirRef.current;
+      pendingOptArrowDirRef.current = 0;
+      if (!d) return;
+      applyOptArrowScrollSelect(d);
+    });
   }
 
   /** Conversation timeline scroller (virtual list). */
@@ -4058,19 +4202,37 @@ export function PrModalApp({
     const phase = selectionIslandPhaseRef.current;
     if (phase === 'comment' && useModalStore.getState().lineSelection) {
       // Keep comment island; do not auto-flip to actions
-      setShowSelectionComposer(true);
+      if (!useModalStore.getState().showSelectionComposer) {
+        setShowSelectionComposer(true);
+      }
       return;
     }
     // Hide immediately while settling (key-hold / drag) — no idle auto-show
     if (useModalStore.getState().showSelectionComposer) {
       setShowSelectionComposer(false);
     }
+    // Skip setTimeout storm under key-hold when dock is already hidden —
+    // re-sync only when Opt/hover needs it (syncSelectionActionReveal).
+    // A single trailing timer still covers end-of-hold edge cases.
     const delay =
       typeof SELECTION_ACTIONS_REVEAL_MS === 'number'
         ? Math.min(SELECTION_ACTIONS_REVEAL_MS, 50)
         : 50;
     selectionActionsTimerRef.current = setTimeout(() => {
       selectionActionsTimerRef.current = null;
+      // No-op if still not showing and not Opt-held
+      try {
+        const st = useModalStore.getState();
+        if (
+          !st.showSelectionComposer &&
+          !st.optHintsActive &&
+          !selectionHoverRevealRef.current
+        ) {
+          return;
+        }
+      } catch {
+        /* fall through */
+      }
       syncSelectionActionReveal();
     }, delay);
   }
@@ -4268,10 +4430,18 @@ export function PrModalApp({
       return;
     }
 
+    // Scroll BEFORE React paint using nextSel indices (1.9.6 snappy hold).
+    // Thread multi-reply unit focus is applied after, then may re-scroll.
+    const isThreadNext =
+      nextSel &&
+      (nextSel.kind === 'thread' ||
+        nextSel.subjectType === 'thread' ||
+        nextSel.kind === 'inline-comment') &&
+      nextSel.commentId != null;
+
     setLineSelection(nextSel);
     // Sync tree path **synchronously** when caret crosses files so the next
     // key-repeat frame does not reseed using a stale activeFilePath (jump-up).
-    // Microtask-only sync was one frame too late under OS key-hold.
     if (nextPath && nextPath !== activePath) {
       setActiveFilePath(nextPath);
       if (crossedFile) {
@@ -4279,56 +4449,69 @@ export function PrModalApp({
         scrollFileNavRowIntoView(nextPath);
       }
     }
-    // Avoid setSelectionIslandLeaving every frame if already false
     if (useModalStore.getState().selectionIslandLeaving) {
       setSelectionIslandLeaving(false);
     }
-    // Thread caret: align Diff comment-nav index so ⌥C opens that reply.
-    // Direction-aware multi-reply unit seed (↓ → first/root, ↑ → last reply).
-    // Line/file selection leaves thread focus — drop hit ring (`.prp-vline--hit`).
-    if (
-      nextSel &&
-      (nextSel.kind === 'thread' ||
-        nextSel.subjectType === 'thread' ||
-        nextSel.kind === 'inline-comment') &&
-      nextSel.commentId != null
-    ) {
+
+    if (isThreadNext) {
       const rootId = String(nextSel.commentId);
+      // Cheap id stamp only on hop — defer multi-reply unit seed off critical path
+      try {
+        useModalStore.getState().setActiveDiffCommentId(rootId);
+      } catch {
+        /* ignore */
+      }
       if (Array.isArray(mappedComments)) {
         const tIdx = mappedComments.findIndex(
           (c: any) => String(c?.id) === rootId
         );
         if (tIdx >= 0 && tIdx !== commentIndex) setCommentIndex(tIdx);
       }
+      // Index scroll first (thread row), then optional unit focus in rAF
       try {
-        useModalStore.getState().setActiveDiffCommentId(rootId);
+        scrollSelectionHeadDomOnly(nextSel);
       } catch {
         /* ignore */
       }
       if (!shift) {
-        const replies = repliesForRootCommentId(rootId);
-        const units = listReviewThreadFocusUnits(rootId, replies);
-        if (units.length >= 2 && typeof seedReviewThreadFocusUnit === 'function') {
-          const seed = seedReviewThreadFocusUnit(units, delta);
-          if (seed?.id) {
-            useModalStore.getState().setFocusedThreadUnitId(String(seed.id));
+        const seedUnit = () => {
+          try {
+            const live = useModalStore.getState();
+            // Still on this thread?
+            if (String(live.activeDiffCommentId || '') !== rootId) return;
+            const replies = repliesForRootCommentId(rootId);
+            const units = listReviewThreadFocusUnits(rootId, replies);
+            if (
+              units.length >= 2 &&
+              typeof seedReviewThreadFocusUnit === 'function'
+            ) {
+              const seed = seedReviewThreadFocusUnit(units, delta);
+              if (seed?.id) {
+                live.setFocusedThreadUnitId(String(seed.id));
+                scrollDiffThreadUnitIntoView(live.lineSelection || nextSel);
+                return;
+              }
+            }
+            live.setFocusedThreadUnitId(null);
+          } catch {
+            /* ignore */
           }
+        };
+        if (typeof requestAnimationFrame === 'function') {
+          requestAnimationFrame(seedUnit);
         } else {
-          useModalStore.getState().setFocusedThreadUnitId(null);
+          seedUnit();
         }
       }
     } else {
       clearDiffThreadFocusIfNeeded();
+      try {
+        scrollSelectionHeadDomOnly(nextSel);
+      } catch {
+        /* ignore */
+      }
     }
     scheduleSelectionActionsReveal();
-    // After paint: DOM-first caret reveal (unit or selected vline).
-    try {
-      const live = useModalStore.getState();
-      const sel = live.lineSelection || nextSel;
-      scrollDiffCaretIntoView(sel);
-    } catch {
-      /* ignore */
-    }
   }
 
   /**
@@ -4371,6 +4554,8 @@ export function PrModalApp({
     positionAppliedRef.current = null;
     positionInFlightRef.current = null;
     positionExhaustedRef.current = null;
+    positionConvDeepLinkKeyRef.current = null;
+    positionLayoutDismissedRef.current = null;
     positionLoadMoreKickRef.current = 0;
     if (positionVerifyTimerRef.current) {
       clearTimeout(positionVerifyTimerRef.current);
@@ -4669,12 +4854,18 @@ export function PrModalApp({
       positionAppliedRef.current = applyKey;
       positionInFlightRef.current = null;
       positionExhaustedRef.current = null;
+      if (positionConvDeepLinkKeyRef.current === applyKey) {
+        positionConvDeepLinkKeyRef.current = null;
+      }
       clearVerifyTimer();
     };
 
     const markSoftExhausted = () => {
       positionInFlightRef.current = null;
       positionExhaustedRef.current = { key: applyKey, corpus: corpusSig };
+      if (positionConvDeepLinkKeyRef.current === applyKey) {
+        positionConvDeepLinkKeyRef.current = null;
+      }
       clearVerifyTimer();
     };
 
@@ -4706,13 +4897,38 @@ export function PrModalApp({
      *
      * Always (re)starts the verify loop: React effect cleanup clears the prior
      * timer on dependency change, so an in-flight early-return would stall.
+     *
+     * Layout: leave Diff only on the first attempt for this applyKey. If the
+     * user opens Diff while we are mid-verify (or after soft-exhaust), do not
+     * yank layout back — that was blocking Conversation → Diff toggles when
+     * prp_position deep-links stayed pending on large progressive timelines.
      */
     const startConversationDeepLink = (anchor: string) => {
+      // Pure ownership contract — consumable intent, not durable layout veto.
+      // Live layout from store (render-closure layoutMode lags under toggle).
+      const decision = decideConversationDeepLinkLayout({
+        applyKey,
+        liveLayout: useModalStore.getState().layoutMode,
+        appliedKey: positionAppliedRef.current,
+        dismissedKey: positionLayoutDismissedRef.current,
+        inFlightKey: positionInFlightRef.current,
+        convDeepLinkKey: positionConvDeepLinkKeyRef.current,
+        exhaustedKey: positionExhaustedRef.current?.key ?? null,
+        layoutDiff: LAYOUT_DIFF,
+      });
+      if (decision === 'noop') return;
+      if (decision === 'abandon') {
+        positionLayoutDismissedRef.current = applyKey;
+        markApplied();
+        return;
+      }
       clearVerifyTimer();
       positionInFlightRef.current = applyKey;
+      positionConvDeepLinkKeyRef.current = applyKey;
       positionExhaustedRef.current = null;
-      // Always leave Diff so VirtualConversationList can mount and scroll.
-      if (layoutMode === LAYOUT_DIFF) setLayoutMode(LAYOUT_CENTERED);
+      if (decision === 'force_leave_diff') {
+        setLayoutMode(LAYOUT_CENTERED);
+      }
       try {
         useModalStore.getState().requestConversationNav(anchor);
       } catch {
@@ -4721,6 +4937,16 @@ export function PrModalApp({
       let ticks = 0;
       const MAX_TICKS = 100; // ~20s @ 200ms
       const tick = () => {
+        // User opened Diff mid-loop — stop fighting layout / conversation focus.
+        if (positionLayoutDismissedRef.current === applyKey) {
+          markApplied();
+          return;
+        }
+        if (useModalStore.getState().layoutMode === LAYOUT_DIFF) {
+          positionLayoutDismissedRef.current = applyKey;
+          markApplied();
+          return;
+        }
         ticks += 1;
         try {
           const st = useModalStore.getState();
@@ -4780,6 +5006,10 @@ export function PrModalApp({
 
     // Conversation deep-link: scroll/focus timeline or thread card
     if (routePage === 'conversation') {
+      if (positionLayoutDismissedRef.current === applyKey) {
+        positionAppliedRef.current = applyKey;
+        return;
+      }
       let anchor = resolveConversationAnchorForCommentId(detail, parsed.id);
       if (!anchor && parsed.id) {
         anchor = optimisticConversationAnchorForKind(parsed.id, hashKind);
@@ -4912,7 +5142,9 @@ export function PrModalApp({
     initialRoute?.position,
     initialRoute?.page,
     mappedComments,
-    layoutMode,
+    // Intentionally omit layoutMode: Conversation deep-link re-entry used to
+    // re-force LAYOUT_CENTERED whenever the user opened Diff. Live layout is
+    // read from the store inside startConversationDeepLink / expandDiff.
     virtualRows.length,
     setLayoutMode,
     jumpToReviewComment,
@@ -5159,6 +5391,8 @@ export function PrModalApp({
     positionAppliedRef.current = null;
     positionInFlightRef.current = null;
     positionExhaustedRef.current = null;
+    positionConvDeepLinkKeyRef.current = null;
+    positionLayoutDismissedRef.current = null;
     positionLoadMoreKickRef.current = 0;
     if (positionVerifyTimerRef.current) {
       clearTimeout(positionVerifyTimerRef.current);
@@ -5167,6 +5401,42 @@ export function PrModalApp({
     setRouteWriteReady(false);
     return undefined;
   }, [open]);
+
+  /**
+   * Stop conversation deep-link verify / re-entry from reclaiming Conversation
+   * after the user opens Diff (toggle, search jump, file deep-link).
+   * Diff-position deep-links call expandDiff via jumpToReviewComment while
+   * positionConvDeepLinkKeyRef is null — those are left alone.
+   */
+  function abandonConversationPositionDeepLink() {
+    try {
+      const page = normalizePage(initialRoute?.page);
+      const pos = initialRoute?.position ?? null;
+      const num = detailRef.current?.number ?? detail?.number;
+      const routeKey = conversationDeepLinkApplyKey(num, pos);
+      if (
+        !shouldAbandonConversationDeepLinkOnExpandDiff({
+          convDeepLinkKey: positionConvDeepLinkKeyRef.current,
+          routePage: page,
+          position: pos,
+        })
+      ) {
+        return;
+      }
+      const key = positionConvDeepLinkKeyRef.current || routeKey;
+      if (!key) return;
+      positionLayoutDismissedRef.current = key;
+      positionAppliedRef.current = key;
+      positionInFlightRef.current = null;
+      positionConvDeepLinkKeyRef.current = null;
+      if (positionVerifyTimerRef.current) {
+        clearTimeout(positionVerifyTimerRef.current);
+        positionVerifyTimerRef.current = null;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
 
   /** Instant layout swap — keep-alive panels, no fade/scale on Diff ↔ Conversation. */
   function expandDiff(after?: any) {
@@ -5179,6 +5449,7 @@ export function PrModalApp({
     ) {
       return;
     }
+    abandonConversationPositionDeepLink();
     setAnimClass('');
     setLayoutMode(LAYOUT_DIFF);
     after?.();
@@ -5898,7 +6169,17 @@ export function PrModalApp({
   }, [open]);
 
   function onSelectFile(path: any) {
-    setActiveFilePath(path);
+    const p = String(path || '').trim();
+    if (!p) return;
+    const prevPath = String(
+      useModalStore.getState().activeFilePath || ''
+    ).trim();
+    // Same-file re-select under key-hold: skip clear + rebuild + scroll pin.
+    if (p === prevPath) {
+      scrollFileNavRowIntoView(p);
+      return;
+    }
+    setActiveFilePath(p);
     // Drop prior-file line selection so the next Arrow seeds the first
     // selectable (displayed) line of this file.
     clearLineSelectionForNav();
@@ -5908,11 +6189,11 @@ export function PrModalApp({
     if (autoExpandOnFileNav) {
       setCollapsedFiles((prev) => {
         const file = annotatedFiles.find(
-          (f: any) => (f.filename || f.path) === path
+          (f: any) => (f.filename || f.path) === p
         );
         if (
           !isPathCollapsed(
-            path,
+            p,
             prev,
             Boolean(file?.defaultCollapsed),
             false,
@@ -5924,21 +6205,20 @@ export function PrModalApp({
         if (typeof expandPathInCollapsedSet === 'function') {
           return expandPathInCollapsedSet(
             prev,
-            path,
+            p,
             annotatedFiles,
             viewedPaths
           );
         }
         const n = materializeCollapsedPaths(prev, annotatedFiles, viewedPaths);
-        n.delete(path);
+        n.delete(p);
         return n;
       });
     }
-    const idx = fileStarts.get(path);
+    const idx = fileStarts.get(p);
     if (typeof idx === 'number') {
-      // Pin file header to the first line of the Diff scrollport — DOM first.
-      // Store sync thrifted so we don't stack an extra DiffWorkspace paint on
-      // top of activeFilePath (already batched in this handler).
+      // Pin file header once — thrifted store so key-hold file nav does not
+      // stack DiffWorkspace paints on top of activeFilePath.
       const { avgH: h, rowOffsetList: offs } = getDiffScrollMetrics();
       const top = scrollTopForIndex(
         idx,
@@ -5953,13 +6233,11 @@ export function PrModalApp({
         storeTop: useModalStore.getState().scrollTop,
         setStoreTop: setScrollTop,
         minDomDelta: 0.5,
-        // File pin often needs store for post-expand rebuild hold — allow
-        // modest thrift still (skip no-op / sub-pixel).
-        minStoreDelta: 1,
+        minStoreDelta: Math.max(24, h * 2),
       });
     }
     // Keep left nav focus visible when stepping to an off-screen file
-    scrollFileNavRowIntoView(String(path || ''));
+    scrollFileNavRowIntoView(p);
   }
 
   function onToggleDir(path: any) {
@@ -6465,9 +6743,19 @@ export function PrModalApp({
       const result = applySelectionPointerDown(prev, row, {
         shiftKey,
         preferredSide,
+        altKey: Boolean(opts?.altKey),
+        optHeld: Boolean(opts?.optHeld || optHeldRef.current),
+        metaKey: Boolean(opts?.metaKey),
+        ctrlKey: Boolean(opts?.ctrlKey),
       });
-      if (result.mode === 'ignore') {
+      // Opt+drag: native text selection — do not enter line-selection drag.
+      if (result.mode === 'native-text' || result.mode === 'ignore') {
         shiftRangeRef.current = false;
+        if (result.mode === 'native-text' || opts?.nativeTextSelect) {
+          selectingRef.current = false;
+          setSelecting(false);
+          armNativeTextSelectCopy();
+        }
         return;
       }
       next = result.selection;
@@ -6518,7 +6806,187 @@ export function PrModalApp({
     setLineSelection((prev) => extendLineSelection(prev, row) || prev);
   }
 
+  function disarmNativeTextSelectCopy() {
+    nativeTextSelectDragRef.current = false;
+    const fn = nativeTextSelectMouseUpRef.current;
+    nativeTextSelectMouseUpRef.current = null;
+    if (fn && typeof window !== 'undefined') {
+      try {
+        window.removeEventListener('mouseup', fn, true);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  /**
+   * After Opt+drag text selection ends: copy selected text + toast.
+   * rAF so the browser finishes the selection before we read getSelection().
+   * @param {string} [forcedText] optional override (e2e / custom event)
+   */
+  function finishNativeTextSelectCopy(forcedText?: string) {
+    if (!nativeTextSelectDragRef.current && forcedText == null) return;
+    disarmNativeTextSelectCopy();
+    const run = async () => {
+      try {
+        let text = String(forcedText ?? '');
+        if (!text) {
+          const sel =
+            typeof window !== 'undefined' &&
+            typeof window.getSelection === 'function'
+              ? window.getSelection()
+              : null;
+          text =
+            typeof browserSelectionCopyText === 'function'
+              ? browserSelectionCopyText(sel)
+              : String(sel?.toString?.() || '').trim();
+        }
+        // Page-world e2e may stamp selected text (isolated worlds don't share
+        // window.getSelection stubs).
+        if (!text) {
+          try {
+            text = String(
+              document.documentElement.getAttribute(
+                'data-prp-native-select-text'
+              ) || ''
+            );
+          } catch {
+            /* ignore */
+          }
+        }
+        text =
+          typeof browserSelectionCopyText === 'function'
+            ? browserSelectionCopyText({ toString: () => text })
+            : text.trim()
+              ? text
+              : '';
+        if (!text) return;
+        const ok = await copyTextToClipboard(text);
+        try {
+          const root =
+            typeof document !== 'undefined' ? document.documentElement : null;
+          if (root) {
+            root.setAttribute(
+              'data-prp-last-copied-text',
+              text.slice(0, 2000)
+            );
+            root.setAttribute('data-prp-last-copy-text-ok', ok ? '1' : '0');
+            root.removeAttribute('data-prp-native-select-text');
+          }
+        } catch {
+          /* ignore */
+        }
+        const msg = ok
+          ? formatMessage('toast_text_copied', appLocale)
+          : formatMessage('toast_copy_failed', appLocale);
+        setActionMsg(msg);
+      } catch {
+        setActionMsg(formatMessage('toast_copy_failed', appLocale));
+      }
+    };
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => {
+        void run();
+      });
+    } else {
+      void run();
+    }
+  }
+
+  function armNativeTextSelectCopy() {
+    if (nativeTextSelectDragRef.current && nativeTextSelectMouseUpRef.current) {
+      // Already armed for this gesture
+      return;
+    }
+    disarmNativeTextSelectCopy();
+    nativeTextSelectDragRef.current = true;
+    if (typeof window === 'undefined') return;
+    const onUp = () => {
+      finishNativeTextSelectCopy();
+    };
+    nativeTextSelectMouseUpRef.current = onUp;
+    try {
+      window.addEventListener('mouseup', onUp, true);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // Opt+drag native text: arm auto-copy from React path and page CustomEvent
+  // (e2e / capture bridges may not hit React onMouseDown reliably).
+  useEffect(() => {
+    if (!open || layoutMode !== LAYOUT_DIFF) return undefined;
+    const onStart = () => {
+      armNativeTextSelectCopy();
+    };
+    const onEnd = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail;
+      const forced =
+        detail && typeof detail.text === 'string' ? detail.text : undefined;
+      if (!nativeTextSelectDragRef.current) {
+        // End without start (page-world only path) — still try copy if text given
+        if (forced != null && String(forced).trim()) {
+          nativeTextSelectDragRef.current = true;
+          finishNativeTextSelectCopy(String(forced));
+        }
+        return;
+      }
+      finishNativeTextSelectCopy(forced);
+    };
+    const onDown = (e: MouseEvent) => {
+      if (e.button !== 0) return;
+      if (
+        !e.altKey &&
+        !(
+          typeof document !== 'undefined' &&
+          document.documentElement?.hasAttribute?.('data-prp-opt-held')
+        )
+      ) {
+        return;
+      }
+      const t = e.target as HTMLElement | null;
+      if (!t?.closest) return;
+      if (
+        !t.closest(
+          '.prp-vline--selectable .prp-code, .prp-vline--selectable code.prp-code, .prp-vline--selectable'
+        )
+      ) {
+        return;
+      }
+      if (t.closest('.prp-line-expand-btn, button, input, a, textarea')) return;
+      armNativeTextSelectCopy();
+    };
+    try {
+      document.addEventListener('prp-native-text-select-start', onStart as any);
+      document.addEventListener('prp-native-text-select-end', onEnd as any);
+      window.addEventListener('mousedown', onDown, true);
+    } catch {
+      /* ignore */
+    }
+    return () => {
+      try {
+        document.removeEventListener(
+          'prp-native-text-select-start',
+          onStart as any
+        );
+        document.removeEventListener(
+          'prp-native-text-select-end',
+          onEnd as any
+        );
+        window.removeEventListener('mousedown', onDown, true);
+      } catch {
+        /* ignore */
+      }
+      disarmNativeTextSelectCopy();
+    };
+  }, [open, layoutMode]);
+
   function onSelectionEnd(point, forcedMode) {
+    // Opt+drag native text path never sets selectingRef — still finalize copy.
+    if (nativeTextSelectDragRef.current) {
+      finishNativeTextSelectCopy();
+      return;
+    }
     if (!selectingRef.current && forcedMode !== 'click') return;
     selectingRef.current = false;
     setSelecting(false);

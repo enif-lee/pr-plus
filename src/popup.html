@@ -538,6 +538,25 @@
         <span class="pref__desc" data-i18n="popup_pref_auto_open_desc">Open pr+ instead of the native PR UI. When off, use the header pr+ button or ⌘⇧E / Ctrl+Shift+E.</span>
       </span>
     </label>
+    <div class="pref pref--action" style="cursor: default" data-prp-list-open-mode="1">
+      <span class="pref__body">
+        <span class="pref__title" data-i18n="popup_pref_list_open_title">Open from /pulls list</span>
+        <span class="pref__desc" data-i18n="popup_pref_list_open_desc">
+          When you click a PR title on the pulls list: pr+ modal (overlay) or navigate to the GitHub PR page. PR-page embed still follows Auto-open above.
+        </span>
+        <label for="pref-list-open-mode" class="hint" style="margin-top: 8px; display: block" data-i18n="popup_label_list_open">
+          List open target
+        </label>
+        <select
+          id="pref-list-open-mode"
+          data-prp-pref-list-open-mode="1"
+          style="margin-top: 4px; width: 100%; max-width: 100%; padding: 6px 8px; border: 1px solid #d0d7de; border-radius: 6px; font-size: 12px; background: #fff"
+        >
+          <option value="modal" selected data-i18n="popup_opt_list_open_modal">pr+ modal (default)</option>
+          <option value="page" data-i18n="popup_opt_list_open_page">PR page</option>
+        </select>
+      </span>
+    </div>
     <label class="pref" for="pref-reverse-comments">
       <input id="pref-reverse-comments" type="checkbox" />
       <span class="pref__body">

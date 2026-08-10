@@ -31,6 +31,7 @@ const ONBOARDING_KEY = 'onboardingCompleted';
  * Default extension preferences.
  * - reverseComments: composer → merge box → conversation (latest-first timeline)
  * - autoOpenEmbed: on GitHub PR routes, open pr+ embed automatically (vs native + toggle)
+ * - listOpenMode: /pulls title click — 'modal' (pr+ overlay) | 'page' (navigate to /pull/N)
  * - singleFileMode: Diff virtual list shows only the active file (nav still lists all)
  * - treeView: PR stack tree indent on /pulls list (toggle also in list header)
  * - onboardingCompleted: first-run pulls-page tour finished (or skipped)
@@ -42,6 +43,12 @@ const ONBOARDING_KEY = 'onboardingCompleted';
 const DEFAULT_PREFS = {
   reverseComments: true,
   autoOpenEmbed: true,
+  /**
+   * /pulls list title click (and Enter on focused row):
+   * - modal (default): open pr+ sheet/modal overlay on the list page
+   * - page: navigate to GitHub /pull/N (pr+ embed still follows autoOpenEmbed)
+   */
+  listOpenMode: 'modal',
   singleFileMode: false,
   treeView: true,
   /**
@@ -93,6 +100,34 @@ function normalizeShortcutMonitorSizePref(raw: unknown): string {
   if (v === 'small' || v === 'sm' || v === '1' || v === '1x') return 'small';
   if (raw === false) return 'none';
   return DEFAULT_PREFS.shortcutMonitorSize;
+}
+
+/** /pulls open target: modal | page */
+function normalizeListOpenModePref(raw: unknown): 'modal' | 'page' {
+  const v = String(raw ?? '')
+    .trim()
+    .toLowerCase();
+  if (
+    v === 'page' ||
+    v === 'pr-page' ||
+    v === 'pr_page' ||
+    v === 'navigate' ||
+    v === 'native' ||
+    v === 'github'
+  ) {
+    return 'page';
+  }
+  if (
+    v === 'modal' ||
+    v === 'overlay' ||
+    v === 'sheet' ||
+    v === 'pr+' ||
+    v === 'prp' ||
+    v === 'pr-plus'
+  ) {
+    return 'modal';
+  }
+  return DEFAULT_PREFS.listOpenMode as 'modal' | 'page';
 }
 
 /** Plugin UI language: auto | en | ko | ja | zh_CN */
@@ -189,6 +224,7 @@ function normalizePrefs(raw: any) {
       typeof src.autoOpenEmbed === 'boolean'
         ? src.autoOpenEmbed
         : DEFAULT_PREFS.autoOpenEmbed,
+    listOpenMode: normalizeListOpenModePref(src.listOpenMode),
     singleFileMode:
       typeof src.singleFileMode === 'boolean'
         ? src.singleFileMode

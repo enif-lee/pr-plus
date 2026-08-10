@@ -181,6 +181,9 @@ export const RESIDUAL_MESSAGE_KEYS = [
   'monitor_expand_fold',
   'monitor_toggle_side_panel',
   'monitor_leave_review',
+  /** Opt+drag native text selection auto-copy toast */
+  'toast_text_copied',
+  'toast_copy_failed',
 ] as const;
 
 export const residualEn: MessageCatalog = {
@@ -224,6 +227,8 @@ export const residualEn: MessageCatalog = {
   progress_loading_all_files: 'Loading all files…',
   progress_loading_files: 'Loading files…',
   progress_files_ready: 'Files ready',
+  toast_text_copied: 'Text copied',
+  toast_copy_failed: 'Copy failed',
   palette_shell_placeholder:
     'Type a command…  #123  #name  help  stack  merge',
   palette_shell_no_commands: 'No matching commands',
@@ -412,6 +417,8 @@ export const residualKo: MessageCatalog = {
   progress_loading_all_files: '모든 파일 로딩…',
   progress_loading_files: '파일 로딩…',
   progress_files_ready: '파일 준비됨',
+  toast_text_copied: '텍스트 복사됨',
+  toast_copy_failed: '복사 실패',
   palette_shell_placeholder:
     '명령 입력…  #123  #이름  help  stack  merge',
   palette_shell_no_commands: '일치하는 명령 없음',
@@ -598,6 +605,8 @@ export const residualJa: MessageCatalog = {
   progress_loading_all_files: 'すべてのファイルを読み込み中…',
   progress_loading_files: 'ファイルを読み込み中…',
   progress_files_ready: 'ファイル準備完了',
+  toast_text_copied: 'テキストをコピーしました',
+  toast_copy_failed: 'コピーに失敗しました',
   palette_shell_placeholder:
     'コマンド入力…  #123  #名前  help  stack  merge',
   palette_shell_no_commands: '一致するコマンドがありません',
@@ -785,6 +794,8 @@ export const residualZh: MessageCatalog = {
   progress_loading_all_files: '正在加载全部文件…',
   progress_loading_files: '正在加载文件…',
   progress_files_ready: '文件已就绪',
+  toast_text_copied: '已复制文本',
+  toast_copy_failed: '复制失败',
   palette_shell_placeholder:
     '输入命令…  #123  #名称  help  stack  merge',
   palette_shell_no_commands: '无匹配命令',

@@ -190,6 +190,8 @@
   const DEFAULT_PREFS = {
     reverseComments: true,
     autoOpenEmbed: true,
+    /** /pulls title click: modal | page */
+    listOpenMode: 'modal',
     singleFileMode: false,
     autoExpandOnFileNav: false,
     shortcutMonitorSize: 'small',
@@ -197,6 +199,23 @@
     uiLanguage: 'auto',
     timelineVisibility: { ...DEFAULT_TIMELINE_VISIBILITY },
   };
+
+  function normalizeListOpenMode(raw: unknown): 'modal' | 'page' {
+    const v = String(raw ?? '')
+      .trim()
+      .toLowerCase();
+    if (
+      v === 'page' ||
+      v === 'pr-page' ||
+      v === 'pr_page' ||
+      v === 'navigate' ||
+      v === 'native' ||
+      v === 'github'
+    ) {
+      return 'page';
+    }
+    return 'modal';
+  }
 
   function normalizeShortcutMonitorSize(raw: unknown): string {
     const v = String(raw ?? '')
