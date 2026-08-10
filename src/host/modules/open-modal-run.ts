@@ -1114,7 +1114,11 @@
       const wShell = uw.threadsShell ?? uw.threadsNewest ?? 8;
       const wComments = uw.threadsComments ?? uw.threadsRemaining ?? 8;
       const wReactions = uw.threadsReactions ?? uw.threadsEarlier ?? 4;
-      /** Credit review-thread ladder stages (idempotent via prog.mark). */
+      /**
+       * Credit review-thread ladder (idempotent via prog.mark).
+       * UI stages: shell → comments only. reactions weight is silent-credited
+       * with comments (same by-ids payload; no "Updating reactions…" flash).
+       */
       const markThreadStage = (stage, labelKind) => {
         if (stage === 'shell') {
           prog.mark(
@@ -1123,45 +1127,32 @@
             'threads',
             loadStageLabel(labelKind || 'threads-shell')
           );
-        } else if (stage === 'comments' || stage === 'comments-start') {
-          if (stage === 'comments-start') {
-            setLoadStage(
-              'threads',
-              loadStageLabel('threads-comments'),
-              true,
-              { percent: prog.percent() }
-            );
-            try {
-              render();
-            } catch {
-              /* ignore */
-            }
-            return;
-          }
+        } else if (stage === 'comments') {
+          const commentsLabel = loadStageLabel(
+            labelKind || 'threads-comments'
+          );
           prog.mark(
             'threadsComments',
             wComments,
             'threads',
-            loadStageLabel(labelKind || 'threads-comments')
+            commentsLabel
           );
-        } else if (stage === 'reactions') {
+          // Silent credit — keep comments label; do not open a reactions stage.
           prog.mark(
             'threadsReactions',
             wReactions,
             'threads',
-            loadStageLabel(labelKind || 'threads-reactions')
+            commentsLabel
           );
         }
       };
-      // Always credit with per-stage labels (never one shared kind for all three).
       const creditAllThreadStages = () => {
         markThreadStage('shell', 'threads-shell');
         markThreadStage('comments', 'threads-comments');
-        markThreadStage('reactions', 'threads-reactions');
       };
 
       // Start threads in parallel with core — paint as soon as *this* fetch lands.
-      // onStage fires shell → comments → reactions so the open bar steps.
+      // onStage fires shell → comments (reactions co-credited with comments).
       // Outer bound: nested shell/byIds timeouts can still stall on rAF yields
       // or un-raced awaits; never leave openModal threads in-flight forever.
       const THREADS_ADAPTIVE_BUDGET_MS = 18_000;
@@ -1180,13 +1171,10 @@
                     'shell',
                     warmOrCache ? 'threads-update' : 'threads-load'
                   );
-                } else if (stage === 'comments-start') {
-                  markThreadStage('comments-start', 'threads-comments');
                 } else if (stage === 'comments') {
                   markThreadStage('comments', 'threads-comments');
-                } else if (stage === 'reactions') {
-                  markThreadStage('reactions', 'threads-reactions');
                 }
+                // comments-start / reactions: ignored (removed from adaptive ladder)
               },
             }),
             new Promise((_, reject) => {

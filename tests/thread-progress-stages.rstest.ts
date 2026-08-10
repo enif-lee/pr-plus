@@ -1,6 +1,6 @@
 /**
- * Three-stage review-thread open progress: shell → comments → reactions.
- * Drives shipped load-progress helpers (not re-implemented weights).
+ * Thread open progress: UI stages shell → comments; reactions weight is
+ * silent-credited with comments (no third label flash).
  */
 import { describe, expect, test } from '@rstest/core';
 import { readFileSync } from 'node:fs';
@@ -15,8 +15,8 @@ import {
 const root = resolve(__dirname, '..');
 const read = (rel: string) => readFileSync(resolve(root, rel), 'utf8');
 
-describe('thread progress 3 stages (pure)', () => {
-  test('OPEN_PROGRESS_KEYS lists shell / comments / reactions', () => {
+describe('thread progress ladder (pure + wiring)', () => {
+  test('OPEN_PROGRESS_KEYS lists shell / comments / reactions weight keys', () => {
     expect(OPEN_PROGRESS_KEYS).toContain('threadsShell');
     expect(OPEN_PROGRESS_KEYS).toContain('threadsComments');
     expect(OPEN_PROGRESS_KEYS).toContain('threadsReactions');
@@ -24,7 +24,7 @@ describe('thread progress 3 stages (pure)', () => {
     expect(OPEN_PROGRESS_KEYS).not.toContain('threadsNewest');
   });
 
-  test('three thread weights are positive and sum with open keys to 100', () => {
+  test('thread weights are positive and sum with open keys to 100', () => {
     expect(FETCH_UNIT_WEIGHTS.threadsShell).toBeGreaterThan(0);
     expect(FETCH_UNIT_WEIGHTS.threadsComments).toBeGreaterThan(0);
     expect(FETCH_UNIT_WEIGHTS.threadsReactions).toBeGreaterThan(0);
@@ -35,7 +35,7 @@ describe('thread progress 3 stages (pure)', () => {
     expect(sum).toBe(100);
   });
 
-  test('each stage mark advances percent; all three complete threads ladder', () => {
+  test('shell then comments (+ silent reactions) completes threads ladder', () => {
     const prog = createWeightProgress({ total: 100 });
     prog.complete('start', FETCH_UNIT_WEIGHTS.start);
     prog.complete('core', FETCH_UNIT_WEIGHTS.core);
@@ -45,15 +45,25 @@ describe('thread progress 3 stages (pure)', () => {
     const afterShell = prog.percent();
     expect(afterShell).toBeGreaterThan(afterCore);
 
+    // Product: credit comments + reactions together (same by-ids)
     prog.complete('threadsComments', FETCH_UNIT_WEIGHTS.threadsComments);
+    prog.complete('threadsReactions', FETCH_UNIT_WEIGHTS.threadsReactions);
     const afterComments = prog.percent();
     expect(afterComments).toBeGreaterThan(afterShell);
 
-    prog.complete('threadsReactions', FETCH_UNIT_WEIGHTS.threadsReactions);
-    const afterReactions = prog.percent();
-    expect(afterReactions).toBeGreaterThan(afterComments);
-
     expect(threadsProgressComplete((k) => prog.has(k))).toBe(true);
+  });
+
+  test('host adaptive ladder drops comments-start and reactions UI stages', () => {
+    const adaptive = read('src/host/modules/side-fetch-cache-assets.ts');
+    expect(adaptive).not.toMatch(/onStage\(['"]comments-start['"]/);
+    expect(adaptive).not.toMatch(/onStage\(['"]reactions['"]/);
+    expect(adaptive).toMatch(/onStage\(['"]shell['"]/);
+    expect(adaptive).toMatch(/onStage\(['"]comments['"]/);
+    const open = read('src/host/modules/open-modal-run.ts');
+    expect(open).toMatch(/Silent credit/);
+    expect(open).not.toMatch(/markThreadStage\(['"]reactions['"]/);
+    expect(open).not.toMatch(/markThreadStage\(['"]comments-start['"]/);
   });
 
   test('skip-with-credit still completes threads ladder', () => {

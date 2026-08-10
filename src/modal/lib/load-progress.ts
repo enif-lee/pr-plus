@@ -156,15 +156,15 @@ export function tweenCounterSamples(
  *   + threadsShell + threadsComments + threadsReactions
  *   + files + comments + reviews + commits + checks + development
  *
- * Review-thread open ladder (progress bar labels / marks):
+ * Review-thread open ladder (progress bar **labels**):
  *   1. threadsShell — GraphQL shell window (thread meta + root preview)
- *   2. threadsComments — by-ids full comment bodies (eager + remaining)
- *   3. threadsReactions — reaction counts (co-fetched on by-ids; separate mark)
+ *   2. threadsComments — by-ids full bodies (+ reactors on same document)
+ * threadsReactions remains a weight key, silent-credited with comments
+ * (no "Updating reactions…" stage).
  *
  * Side-panel `comments` is issue comments (not review-thread bodies).
- * refresh may use threadsVisible instead of the three open thread keys.
- * Legacy aliases (threadsNewest / Remaining / Earlier / Follow) keep weights
- * for older call sites; prefer the shell/comments/reactions names.
+ * refresh may use threadsVisible instead of shell+comments keys.
+ * Legacy aliases (threadsNewest / Remaining / Earlier / Follow) keep weights.
  */
 export const FETCH_UNIT_WEIGHTS = {
   start: 4,
@@ -173,7 +173,7 @@ export const FETCH_UNIT_WEIGHTS = {
   threadsShell: 8,
   /** Stage 2: full review-comment bodies (by-ids). */
   threadsComments: 8,
-  /** Stage 3: reaction counts on review comments. */
+  /** Silent credit with comments (reactors on same by-ids; no UI stage). */
   threadsReactions: 4,
   /** @deprecated alias → threadsShell */
   threadsNewest: 8,
@@ -215,7 +215,8 @@ export const OPEN_PROGRESS_KEYS = [
 
 /**
  * Critical path — header shows **progress bar** (label + %) until these complete.
- * Core PR detail + review-thread ladder (shell → bodies → reactions).
+ * Core PR detail + review-thread ladder (shell → comments; reactions weight
+ * silent-credited with comments).
  */
 export const OPEN_PROGRESS_CRITICAL_KEYS = [
   'start',

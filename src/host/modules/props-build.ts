@@ -426,7 +426,7 @@
           const refreshWShell = uw.threadsShell ?? uw.threadsNewest ?? 8;
           const refreshWComments = uw.threadsComments ?? uw.threadsRemaining ?? 8;
           const refreshWReactions = uw.threadsReactions ?? uw.threadsEarlier ?? 4;
-          // Per-stage labels so re-credit never flattens to one shared phrase.
+          // shell → comments UI; reactions weight silent-credited with comments.
           const creditRefreshThreadLadder = () => {
             prog.mark(
               'threadsShell',
@@ -434,17 +434,18 @@
               'threads',
               loadStageLabel('threads-shell')
             );
+            const commentsLabel = loadStageLabel('threads-comments');
             prog.mark(
               'threadsComments',
               refreshWComments,
               'threads',
-              loadStageLabel('threads-comments')
+              commentsLabel
             );
             prog.mark(
               'threadsReactions',
               refreshWReactions,
               'threads',
-              loadStageLabel('threads-reactions')
+              commentsLabel
             );
           };
           const threadsNewestP =
@@ -462,31 +463,19 @@
                         'threads',
                         loadStageLabel('threads-shell')
                       );
-                    } else if (stage === 'comments-start') {
-                      setLoadStage(
-                        'threads',
-                        loadStageLabel('threads-comments'),
-                        true,
-                        { percent: prog.percent() }
-                      );
-                      try {
-                        render();
-                      } catch {
-                        /* ignore */
-                      }
                     } else if (stage === 'comments') {
+                      const commentsLabel = loadStageLabel('threads-comments');
                       prog.mark(
                         'threadsComments',
                         refreshWComments,
                         'threads',
-                        loadStageLabel('threads-comments')
+                        commentsLabel
                       );
-                    } else if (stage === 'reactions') {
                       prog.mark(
                         'threadsReactions',
                         refreshWReactions,
                         'threads',
-                        loadStageLabel('threads-reactions')
+                        commentsLabel
                       );
                     }
                   },
@@ -621,17 +610,19 @@
               'threads',
               loadStageLabel('threads-shell')
             );
+            const commentsLabel = loadStageLabel('threads-comments');
             prog.mark(
               'threadsComments',
               wComments,
               'threads',
-              loadStageLabel('threads-comments')
+              commentsLabel
             );
+            // Silent reactions credit (co-fetched on by-ids; no UI stage)
             prog.mark(
               'threadsReactions',
               wReactions,
               'threads',
-              loadStageLabel('threads-reactions')
+              commentsLabel
             );
           };
 
