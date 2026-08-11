@@ -823,33 +823,22 @@ export function getSteps() {
     }
     assert(seed.count >= 1, `no selection seed: ${JSON.stringify(seed)}`);
 
-    // Multi-line extend downward so head is at range end first
-    for (let i = 0; i < 8; i++) {
-      press('Shift+ArrowDown');
-      waitMs(40);
-    }
-    waitMs(150);
-    let multi = selectionProbe();
-    assert(
-      multi.count >= 2 || multi.roles?.middle > 0 || multi.roles?.end > 0,
-      `expected multi-line selection: ${JSON.stringify(multi)}`
-    );
-
-    // Move head to start of the block (caret at top of multi-line). Do not
-    // assume every synthetic press survives a busy browser frame: assert the
-    // actual dock-host role before testing vertical placement.
+    // Build head-at-start directly. The former down×8→up loop could observe a
+    // stale intermediate role while rAF-coalesced selection was collapsing to
+    // one line, then run geometry assertions against `only`.
     let headRole = '';
-    for (let i = 0; i < 24; i++) {
+    let multi = selectionProbe();
+    for (let i = 0; i < 4; i++) {
       press('Shift+ArrowUp');
-      waitMs(35);
-      headRole = evalInPage(`
-        document.querySelector('.prp-vline[data-sel-head="1"]')
-          ?.getAttribute('data-sel-role') || ''
-      `);
-      if (headRole === 'start') break;
+      waitMs(120);
+      multi = selectionProbe();
+      headRole = multi.headRole || '';
+      if (headRole === 'start' && multi.count >= 2) break;
     }
-    waitMs(120);
-    assert(headRole === 'start', `selection head did not reach start: ${headRole}`);
+    assert(
+      headRole === 'start' && multi.count >= 2,
+      `selection head did not form a multi-line start: ${JSON.stringify(multi)}`
+    );
 
     // Scroll so selection sits near the Diff scroller bottom (tight below)
     evalInPage(`
@@ -924,19 +913,30 @@ export function getSteps() {
       );
     }
 
-    // Move head to range end and leave room below → dock below, hints bottom
+    // Re-seed and build head-at-end directly. This keeps the second geometry
+    // case independent from the first range's anchor and virtual-row remounts.
+    evalInPage(`
+      document.documentElement.removeAttribute('data-prp-opt-held');
+      document.documentElement.classList.remove('prp-opt-held');
+      true
+    `);
+    press('Escape');
+    waitMs(150);
+    clickSelectableLine(2);
+    waitMs(150);
     headRole = '';
-    for (let i = 0; i < 28; i++) {
+    let endMulti = selectionProbe();
+    for (let i = 0; i < 4; i++) {
       press('Shift+ArrowDown');
-      waitMs(35);
-      headRole = evalInPage(`
-        document.querySelector('.prp-vline[data-sel-head="1"]')
-          ?.getAttribute('data-sel-role') || ''
-      `);
-      if (headRole === 'end') break;
+      waitMs(120);
+      endMulti = selectionProbe();
+      headRole = endMulti.headRole || '';
+      if (headRole === 'end' && endMulti.count >= 2) break;
     }
-    waitMs(120);
-    assert(headRole === 'end', `selection head did not reach end: ${headRole}`);
+    assert(
+      headRole === 'end' && endMulti.count >= 2,
+      `selection head did not form a multi-line end: ${JSON.stringify(endMulti)}`
+    );
     evalInPage(`
       (() => {
         const vlist = document.querySelector('.prp-vlist');

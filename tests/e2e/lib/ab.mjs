@@ -10,7 +10,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const ROOT = path.resolve(__dirname, '../../..');
 
 const SESSION = process.env.PRP_E2E_SESSION || 'pr-plus-e2e';
-const DEFAULT_TIMEOUT_MS = Number(process.env.PRP_E2E_CMD_TIMEOUT_MS || 60_000);
+// Local CDP operations normally finish in well under a second. Keep their
+// sync-spawn ceiling below RSTest's per-step timeout so a wedged CLI cannot
+// block the event loop for minutes. Cold navigation/waits pass larger,
+// explicit timeouts at their call sites.
+const DEFAULT_TIMEOUT_MS = Number(process.env.PRP_E2E_CMD_TIMEOUT_MS || 20_000);
 /**
  * E2e defaults to headless (no OS focus issues for chords). Override:
  *   PRP_E2E_HEADED=1 npm run test:e2e
