@@ -77,6 +77,14 @@
   pointer-events: auto;
   z-index: 1;
 }
+/*
+ * Keep active Diff reconciliation inside the full-size panel. The outer page
+ * embed cannot be contained safely (it owns fixed viewport geometry), but this
+ * boundary prevents file/selection commits from invalidating the buried GH SPA.
+ */
+.prp-body-panel--diff.prp-body-panel--active {
+  contain: layout style paint;
+}
 .prp-body-panel > .prp-conversation,
 .prp-body-panel > .prp-diff-layout,
 .prp-body-panel > .prp-skeleton,

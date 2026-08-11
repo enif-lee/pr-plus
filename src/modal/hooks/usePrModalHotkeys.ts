@@ -177,7 +177,10 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
     try {
       selectionNavBusy = Boolean(
         typeof document !== 'undefined' &&
-          document.documentElement?.hasAttribute?.('data-prp-selection-nav')
+          (document.documentElement?.hasAttribute?.('data-prp-selection-nav') ||
+            document.documentElement?.hasAttribute?.(
+              'data-prp-diff-nav-active'
+            ))
       );
     } catch {
       selectionNavBusy = false;
@@ -267,6 +270,7 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
       useModalStore.getState().setOptHintsActive(false);
     };
     window.addEventListener('prp-set-opt-hints', onForce as any, true);
+    window.addEventListener('prp-sync-opt-hints', syncOptHintsActive as any, true);
     window.addEventListener('keydown', sync, true);
     window.addEventListener('keyup', sync, true);
     window.addEventListener('blur', clear);
@@ -275,6 +279,11 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
     });
     return () => {
       window.removeEventListener('prp-set-opt-hints', onForce as any, true);
+      window.removeEventListener(
+        'prp-sync-opt-hints',
+        syncOptHintsActive as any,
+        true
+      );
       window.removeEventListener('keydown', sync, true);
       window.removeEventListener('keyup', sync, true);
       window.removeEventListener('blur', clear);
@@ -408,6 +417,16 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
             e.stopPropagation();
             const d = e.key === 'ArrowUp' ? -1 : 1;
             const shift = Boolean(e.shiftKey);
+            // Multi-reply units own plain arrows before the line-selection
+            // fast path. Read through actionsRef so progressive detail renders
+            // cannot leave this capture listener with a stale thread closure.
+            if (!shift && act.isMultiReplyThreadFocused?.()) {
+              reportShortcutAction(
+                d < 0 ? 'stepThreadReplyPrev' : 'stepThreadReplyNext'
+              );
+              act.stepThreadReply?.(d);
+              return;
+            }
             reportShortcutAction(
               shift
                 ? d < 0
@@ -1032,7 +1051,6 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
           key === 'r' &&
           (peer?.action === 'promptAddReviewer' ||
             peer?.id === 'opt-reviewer' ||
-  // @ts-expect-error modal dynamic action/picker shapes
             peer?.id === 'add-reviewer');
         // Conversation-only meta (labels/assignees/…) never runs on Diff;
         // Diff-only side peers never run on Conversation.
@@ -1074,9 +1092,7 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
           // Shortcut monitor: opt peer already has title + chord labels
           if (typeof buildShortcutMonitorFireFromParts === 'function') {
             const chord = isMac
-  // @ts-expect-error modal dynamic action/picker shapes
               ? peer.labelMac || peer.label
-  // @ts-expect-error modal dynamic action/picker shapes
               : peer.labelWin || peer.labelMac || peer.label;
             reportShortcutMonitor(
               buildShortcutMonitorFireFromParts(
@@ -1088,7 +1104,6 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
           } else {
             reportShortcutAction(String(peer.action));
           }
-  // @ts-expect-error modal dynamic action/picker shapes
           if (peer.action === 'openPalette') {
             setPaletteOpen(true);
             setPaletteQuery('');
@@ -1194,6 +1209,11 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
       // Code-body selection only — thread/file carets must not force file fold
       // (otherwise ← / ⌥F close the file while a thread is focused via ↑↓).
       const liveLineSelection = isCodeBodySelection(liveSel);
+      const multiReplyThreadFocused =
+        liveContextThread &&
+        Boolean(
+          act.isMultiReplyThreadFocused?.() ?? isMultiReplyThreadFocused()
+        );
 
       let action =
         typeof resolveModalShortcutAction === 'function'
@@ -1223,8 +1243,7 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
               layoutMode: ui.layoutMode,
               conversationCommentFocused: liveConvFocus,
               contextThreadActive: liveContextThread,
-              multiReplyThreadFocused:
-                liveContextThread && isMultiReplyThreadFocused(),
+              multiReplyThreadFocused,
               presentation: isEmbed ? 'embed' : 'modal',
               isEmbed,
             })

@@ -110,6 +110,19 @@ describe('open progress settle wiring (source)', () => {
     expect(timeline).toMatch(/mode:\s*['"]background['"]/);
   });
 
+  test('open progress watchdog has an absolute deadline and retries core loading', () => {
+    const progress = read('src/host/modules/side-fetch-progress.ts');
+    const watchdog = progress.slice(
+      progress.indexOf('function armOpenProgressWatchdog'),
+      progress.indexOf('function beginFetchProgress')
+    );
+    expect(watchdog).toMatch(/if \(openProgressWatchdogTimer\) return/);
+    expect(watchdog).not.toMatch(
+      /if \(openProgressWatchdogTimer\) clearTimeout/
+    );
+    expect(watchdog).toMatch(/if \(current\.loading\)[\s\S]*armOpenProgressWatchdog\(1_000\)/);
+  });
+
   test('revalidate settles thread ladder before unresolved bulk work', () => {
     const open = read('src/host/modules/open-modal-run.ts');
     // After await kickoff: creditAllThreadStages + tryFinish before remaining by-ids.

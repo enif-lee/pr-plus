@@ -121,11 +121,19 @@ describe('sample record', () => {
 
     const a = beginDiffNavPerfSample(g);
     clock = 1004.5;
-    endDiffNavPerfSample(a, { presentation: 'modal', delta: 1 }, g);
+    endDiffNavPerfSample(
+      a,
+      { presentation: 'modal', operation: 'file', delta: 1 },
+      g
+    );
 
     const b = beginDiffNavPerfSample(g);
     clock = 1012;
-    endDiffNavPerfSample(b, { presentation: 'embed', delta: -1 }, g);
+    endDiffNavPerfSample(
+      b,
+      { presentation: 'embed', operation: 'region', delta: -1 },
+      g
+    );
 
     const snap = getDiffNavPerfSnapshot(g);
     expect(snap.enabled).toBe(true);
@@ -134,7 +142,12 @@ describe('sample record', () => {
     expect(snap.byPresentation.embed.count).toBe(1);
     expect(snap.byPresentation.modal.meanMs).toBeCloseTo(4.5, 5);
     expect(snap.byPresentation.embed.meanMs).toBeCloseTo(7.5, 5);
+    expect(snap.byOperation.file.count).toBe(1);
+    expect(snap.byOperation.region.count).toBe(1);
+    expect(snap.byOperation.page.count).toBe(0);
     expect(measures).toContain('prp-diff-nav');
+    expect(measures).toContain('prp-diff-nav-file');
+    expect(measures).toContain('prp-diff-nav-region');
     expect(marks.length).toBeGreaterThanOrEqual(2);
   });
 

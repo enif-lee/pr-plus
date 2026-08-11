@@ -479,11 +479,18 @@ export function getSteps() {
 
     // Expand can race mermaid paint after long suites — retry with broader
     // selectors (ko/en labels + data attrs).
+    const seedAnchor = seed.id ? `[data-search-anchor="issue-comment:${seed.id}"]` : '';
     let opened = null;
     for (let attempt = 0; attempt < 6; attempt++) {
       opened = evalInPage(`
         (() => {
+          const seedRoot = ${JSON.stringify(seedAnchor)}
+            ? document.querySelector(${JSON.stringify(seedAnchor)})
+            : null;
           const pick = () =>
+            seedRoot?.querySelector(
+              '.prp-mermaid__expand, [data-prp-mermaid-expand="1"]'
+            ) ||
             document.querySelector('.prp-mermaid__expand, [data-prp-mermaid-expand="1"]') ||
             [...document.querySelectorAll('button, a, [role="button"]')].find((b) =>
               /자세히|전체|fullscreen|expand|diagram|viewer/i.test(
@@ -550,13 +557,19 @@ export function getSteps() {
     for (let r = 0; r < 5 && !viewer?.viewer; r++) {
       evalInPage(`
         (() => {
+          const seedRoot = ${JSON.stringify(seedAnchor)}
+            ? document.querySelector(${JSON.stringify(seedAnchor)})
+            : null;
+          const exact = seedRoot?.querySelector(
+            '[data-prp-mermaid-expand="1"], .prp-mermaid__expand'
+          );
           const btns = [
             ...document.querySelectorAll(
               '[data-prp-mermaid-expand="1"], .prp-mermaid__expand'
             ),
           ];
           // Prefer expand on the in-view mermaid wrap that has our seed mark nearby
-          let btn = btns.find((b) => {
+          let btn = exact || btns.find((b) => {
             const wrap = b.closest?.('.prp-mermaid-wrap, .prp-card, [data-search-anchor]');
             const host = wrap || b.parentElement;
             const t = (host?.textContent || '').slice(0, 400);

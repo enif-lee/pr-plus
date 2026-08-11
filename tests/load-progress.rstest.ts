@@ -28,8 +28,8 @@ describe('load-progress', () => {
   });
 
   test('critical + background partition open keys without overlap', () => {
-    const crit = new Set(OPEN_PROGRESS_CRITICAL_KEYS);
-    const bg = new Set(OPEN_PROGRESS_BACKGROUND_KEYS);
+    const crit = new Set<string>(OPEN_PROGRESS_CRITICAL_KEYS);
+    const bg = new Set<string>(OPEN_PROGRESS_BACKGROUND_KEYS);
     for (const k of OPEN_PROGRESS_CRITICAL_KEYS) {
       expect(bg.has(k)).toBe(false);
       expect(OPEN_PROGRESS_KEYS).toContain(k);

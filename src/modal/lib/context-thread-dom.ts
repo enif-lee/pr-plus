@@ -698,15 +698,21 @@ export function isContextThreadCommentActive(
     focusedConversationAnchor?: string | null;
     pendingConversationNavAnchor?: string | null;
     activeDiffCommentId?: string | number | null;
+    layoutMode?: string | null;
   }
 ): boolean {
   if (commentId == null || commentId === '') return false;
   const id = String(commentId);
   const anchor = `review-comment:${id}`;
+  const layout = String(state.layoutMode || '').trim().toLowerCase();
+  const diffId = state.activeDiffCommentId;
+  if (layout === 'diff') {
+    return diffId != null && String(diffId) === id;
+  }
   const focused = String(state.focusedConversationAnchor || '').trim();
   const pending = String(state.pendingConversationNavAnchor || '').trim();
   if (focused === anchor || pending === anchor) return true;
-  const diffId = state.activeDiffCommentId;
+  if (layout === 'conversation') return false;
   return diffId != null && String(diffId) === id;
 }
 

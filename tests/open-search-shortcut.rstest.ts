@@ -73,7 +73,7 @@ describe('openSearch (mod+f) claims over editable targets', () => {
 describe('openSearch focus+select wiring (source)', () => {
   test('App openSearch focuses input and selects', () => {
     const src = fs.readFileSync(
-      path.join(root, 'src/modal/app/PrModalShell.tsx'),
+      path.join(root, 'src/modal/hooks/usePrModalHotkeys.ts'),
       'utf8'
     );
     expect(src).toMatch(/case 'openSearch'/);

@@ -836,7 +836,20 @@ export function getSteps() {
 
     // Selection CTA returns to Comment/Start review (not Add-comment-only pending mode)
     const open = openSelectionComment(5);
-    const island = open.island || selectionIslandProbe();
+    let island = open.island || selectionIslandProbe();
+    // Discard's React onClick is async, while the server/latch can become clear
+    // before its trailing refresh/finally releases shared actionBusy. Wait for
+    // the actual CTA state under test instead of asserting on loading labels.
+    const ctaDeadline = Date.now() + 20_000;
+    while (
+      Date.now() < ctaDeadline &&
+      island?.island &&
+      !island.hasCommentCta &&
+      !island.hasStartReview
+    ) {
+      waitMs(250);
+      island = selectionIslandProbe();
+    }
     log(`  CTAs after discard: ${JSON.stringify(island)}`);
     assert(island?.island, `need selection island after discard: ${JSON.stringify(open)}`);
     assert(

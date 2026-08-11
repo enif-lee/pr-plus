@@ -2,12 +2,18 @@
   /** Force-clear a stuck open progress pill after shell is interactive. */
   let openProgressWatchdogTimer = null;
   function armOpenProgressWatchdog(ms = 10_000) {
-    if (openProgressWatchdogTimer) clearTimeout(openProgressWatchdogTimer);
+    // Absolute deadline from the first critical stage. Re-arming on every
+    // label/percent update allowed a busy pill to extend indefinitely.
+    if (openProgressWatchdogTimer) return;
     openProgressWatchdogTimer = setTimeout(() => {
       openProgressWatchdogTimer = null;
       if (!current.open || !current.loadStage?.busy) return;
       const d = current.detail;
-      if (!d || (d.title == null && d.number == null) || current.loading) return;
+      if (!d || (d.title == null && d.number == null)) return;
+      if (current.loading) {
+        armOpenProgressWatchdog(1_000);
+        return;
+      }
       console.log(
         '[pr-plus] open progress watchdog: force clearLoadStage (shell ready, bar still busy)'
       );
@@ -424,4 +430,3 @@
     }) ||
     globalThis.PRModalDetailCache?.createDetailCache?.({ ttlMs: 60_000 }) ||
     createFallbackCache();
-

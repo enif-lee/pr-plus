@@ -378,7 +378,7 @@
           child.setAttribute('data-prp-native-hidden', '1');
           child.style.setProperty('display', 'none', 'important');
           try {
-            child.inert = true;
+            (child as HTMLElement).inert = true;
             child.setAttribute('data-prp-native-inert', '1');
           } catch {
             /* ignore */
@@ -447,7 +447,7 @@
             el.style.removeProperty('content-visibility');
             if (el.getAttribute('data-prp-native-inert') === '1') {
               try {
-                el.inert = false;
+                (el as HTMLElement).inert = false;
               } catch {
                 /* ignore */
               }
@@ -567,4 +567,3 @@
     }
     return null;
   }
-

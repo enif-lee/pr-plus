@@ -1001,10 +1001,13 @@ export function selectionProbe() {
       const headerSelected = !!document.querySelector(
         '.prp-vline--header.prp-vline--selected, .prp-vline--header-selected, [data-file-selected="1"]'
       );
+      const headRole = document
+        .querySelector('.prp-vline[data-sel-head="1"]')
+        ?.getAttribute('data-sel-role') || null;
       const dockPlace = dock?.getAttribute('data-dock-place') || null;
       const optHintPlace = dock?.getAttribute('data-opt-hint-place') || null;
       const dockAbove = !!dock?.classList?.contains?.('prp-selection-dock--above');
-      const hintPlacements = [...document.querySelectorAll('kbd.prp-opt-btn-hint, .prp-opt-btn-hint')]
+      const hintPlacements = [...(dock?.querySelectorAll('kbd.prp-opt-btn-hint, .prp-opt-btn-hint') || [])]
         .map((el) => el.getAttribute('data-placement') || null)
         .filter(Boolean);
       return {
@@ -1021,6 +1024,7 @@ export function selectionProbe() {
         fileTarget,
         btnLabels,
         headerSelected,
+        headRole,
       };
     })()
   `);

@@ -239,16 +239,10 @@ function seedMultiReplyContextActive(maxHops = 28) {
   let click = clickMultiReplyDiffThread();
   waitMs(450);
   let last = probeThreadOptChrome();
-  if (
-    last?.hasActive &&
-    (last.replyCount >= 1 ||
-      last.unitFocus ||
-      found?.multi ||
-      found?.replyItems >= 2 ||
-      click?.replyItems >= 2)
-  ) {
-    return { ok: true, hops: 0, last, found, click, via: 'click' };
-  }
+  // A click can leave a visually context-active card from an earlier store
+  // selection without latching commentIndex/activeDiffCommentId. Plain arrows
+  // then correctly route to line selection. Always perform at least one real
+  // Opt+J navigation hop before declaring the thread keyboard-focused.
   for (let i = 0; i < maxHops; i++) {
     if (i % 5 === 0) {
       click = clickMultiReplyDiffThread();
@@ -278,14 +272,55 @@ function seedMultiReplyContextActive(maxHops = 28) {
         };
       })()
     `);
-    if (
-      last?.hasActive &&
-      (last.replyCount >= 1 ||
-        last.unitFocus ||
-        multiDom?.multi ||
-        multiDom?.replyN >= 2)
-    ) {
-      return { ok: true, hops: i + 1, last, multiDom, found, click, via: 'nav' };
+    if (last?.hasActive && (multiDom?.multi || multiDom?.replyN >= 2)) {
+      // Progressive thread/by-ids patches can reorder mappedComments while an
+      // Opt+J hop is painting. Require the same active multi-thread anchor over
+      // several frames so the following plain arrow exercises reply navigation,
+      // not a newly remapped single-thread index.
+      let stable = true;
+      const wantAnchor = String(multiDom.anchor || '');
+      for (let sample = 0; sample < 3; sample++) {
+        waitMs(300);
+        const snap = evalInPage(`
+          (() => {
+            const all = [
+              ...document.querySelectorAll(
+                '.prp-inline-thread--context-active, .prp-inline-thread[data-context-active="1"]'
+              ),
+            ];
+            const a = all[0] || null;
+            return {
+              count: all.length,
+              anchor: a?.getAttribute('data-search-anchor') || '',
+              multi: !!(
+                a &&
+                (a.classList.contains('prp-inline-thread--threaded') ||
+                  a.getAttribute('data-prp-multi-reply') === '1' ||
+                  a.querySelector('[data-prp-thread-unit="reply"]'))
+              ),
+            };
+          })()
+        `);
+        if (
+          snap?.count !== 1 ||
+          snap?.anchor !== wantAnchor ||
+          !snap?.multi
+        ) {
+          stable = false;
+          break;
+        }
+      }
+      if (stable) {
+        return {
+          ok: true,
+          hops: i + 1,
+          last: probeThreadOptChrome(),
+          multiDom,
+          found,
+          click,
+          via: 'nav-stable',
+        };
+      }
     }
   }
   return { ok: false, found, last, click };
@@ -599,8 +634,15 @@ export function getSteps() {
     log(
       `  before arrows: ${JSON.stringify(before)} root=${rootUnitId} replies=${replyIds.length}`
     );
-    blurEditable();
-    waitMs(120);
+    // Expansion/measurement above can itself receive a progressive mappedComments
+    // patch. Re-latch through the product's Opt+J path after all setup, then
+    // press the plain arrow immediately against that stable store id.
+    const keySeed = seedMultiReplyContextActive(24);
+    assert(
+      keySeed?.ok,
+      `TOR.3 final keyboard seed failed: ${JSON.stringify(keySeed)}`
+    );
+    before = probeThreadOptChrome();
     // Clear prior *action* stamp so we observe a fresh ↓ step, but keep unit focus
     // (clearing data-prp-focused-thread-unit leaves product in line-selection mode).
     evalInPage(`
@@ -613,6 +655,15 @@ export function getSteps() {
           const a = document.querySelector('.prp-inline-thread--context-active');
           const unit = a?.querySelector('[data-prp-thread-unit-active="1"]');
           return {
+            hasActive: !!a,
+            anchor: a?.getAttribute('data-search-anchor') || null,
+            threaded: !!(
+              a?.classList.contains('prp-inline-thread--threaded') ||
+              a?.getAttribute('data-prp-multi-reply') === '1'
+            ),
+            selected: !!a?.closest('.prp-vline--comment-selected'),
+            replyCount: a?.querySelectorAll('[data-prp-thread-unit="reply"]')
+              .length || 0,
             role: unit?.getAttribute('data-prp-thread-unit') || null,
             id: unit?.getAttribute('data-prp-thread-unit-id') || null,
             stamp:
@@ -645,7 +696,7 @@ export function getSteps() {
     // stepThreadReplyNext while setFocusedThreadUnitId never ran (stale closure).
     assert(
       mid?.action === 'stepThreadReplyNext',
-      `↓ must fire stepThreadReplyNext: ${JSON.stringify(mid)}`
+      `↓ must fire stepThreadReplyNext: ${JSON.stringify({ mid, before, seeded, keySeed })}`
     );
     assert(
       mid?.role === 'reply' &&

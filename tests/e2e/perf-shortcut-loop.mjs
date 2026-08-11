@@ -26,12 +26,15 @@ import {
   evalInPage,
   holdChord,
   log,
+  open,
   openPr,
   openPulls,
   press,
   selectionProbe,
   setLayout,
   step,
+  waitDetailReady,
+  waitFor,
   waitMs,
 } from './lib/harness.mjs';
 
@@ -46,10 +49,9 @@ const REPEAT_MS = Number(process.env.PRP_E2E_REPEAT_MS || 40);
  * Frame/longtask budgets.
  *
  * Conversation / light Diff (#19, #13) stay tight (rAF ~16ms).
- * Heavy architecture Diff (#14) intentionally remounts large virtual ranges
- * on page/file hops — measured p95 often 200–350ms with longtask sum ~1s.
- * Applying the light budget to #14 is a false failure (root cause: budget
- * mismatch, not a regression). Use HEAVY_* ceilings for those holds.
+ * Heavy architecture Diff (#14) must remain interactive under key-repeat.
+ * The prior 400ms/2s ceilings normalized dropped repeats; the leaf-store +
+ * DOM-first path keeps steady-state page/file holds below these tighter caps.
  */
 const BUDGET = {
   // Full-suite serial run shares a long-lived browser: GC/CDP/extension
@@ -60,10 +62,10 @@ const BUDGET = {
   frameP95FileMs: Number(process.env.PRP_E2E_FRAME_P95_FILE_MS || 80),
   longTaskMaxMs: Number(process.env.PRP_E2E_LONGTASK_MAX_MS || 200),
   longTaskSumMs: Number(process.env.PRP_E2E_LONGTASK_SUM_MS || 400),
-  /** Heavy PR (#14) page scroll / file hop — virtual list remount. */
-  frameP95HeavyMs: Number(process.env.PRP_E2E_FRAME_P95_HEAVY_MS || 400),
-  longTaskMaxHeavyMs: Number(process.env.PRP_E2E_LONGTASK_MAX_HEAVY_MS || 400),
-  longTaskSumHeavyMs: Number(process.env.PRP_E2E_LONGTASK_SUM_HEAVY_MS || 2000),
+  /** Heavy PR (#14) steady-state page/file hold. */
+  frameP95HeavyMs: Number(process.env.PRP_E2E_FRAME_P95_HEAVY_MS || 80),
+  longTaskMaxHeavyMs: Number(process.env.PRP_E2E_LONGTASK_MAX_HEAVY_MS || 120),
+  longTaskSumHeavyMs: Number(process.env.PRP_E2E_LONGTASK_SUM_HEAVY_MS || 600),
 };
 
 function installPerfProbe() {
@@ -249,6 +251,63 @@ export function getSteps() {
   const run = (name, fn) => {
     steps.push({ name, fn });
   };
+  let samePrModal = null;
+
+  function prepareSamePrComparison(mode) {
+    if (mode === 'modal') {
+      open('https://github.com/enif-lee/pr-plus/pulls?q=is%3Apr+is%3Aclosed');
+      waitMs(700);
+      openPr(HEAVY_PR);
+    } else {
+      closeOverlay();
+      openPr(HEAVY_PR, { viaUrl: true });
+    }
+    setLayout('diff');
+    blurEditable();
+    waitDetailReady({ number: HEAVY_PR, files: true });
+    waitFor(
+      `
+      const h = document.getElementById('prp-page-embed') ||
+        document.getElementById('prp-modal-host');
+      return h && h.getAttribute('data-prp-load-busy') !== '1';
+      `,
+      { timeoutMs: 12_000, intervalMs: 100, label: `${mode} #${HEAVY_PR} settled` }
+    );
+    installPerfProbe();
+    evalInPage(`
+      (() => {
+        const row = document.querySelector('.prp-filetree [data-file-path]');
+        row?.click?.();
+        document.querySelector('.prp-vlist')?.focus?.({ preventScroll: true });
+        return !!row;
+      })()
+    `);
+    waitMs(180);
+  }
+
+  function measureSamePr(mode) {
+    const page = holdUnderProbe(
+      'Alt+Shift+ArrowDown',
+      `same-pr-${mode}-page`,
+      'diff',
+      HEAVY_BUDGET
+    );
+    const file = holdUnderProbe(
+      'Alt+Shift+]',
+      `same-pr-${mode}-file`,
+      'diff',
+      HEAVY_BUDGET
+    );
+    const clicked = clickSelectableLine(4);
+    assert(clicked?.ok, `${mode}: comparison selection seed failed`);
+    const region = holdUnderProbe(
+      'Alt+ArrowDown',
+      `same-pr-${mode}-region`,
+      'diff',
+      HEAVY_BUDGET
+    );
+    return { page, file, region };
+  }
 
   // --- Conversation: hold ⌥J then ⌥K ---
   run(`open PR #${DEMO_PR} conversation`, () => {
@@ -473,6 +532,31 @@ export function getSteps() {
     );
   });
 
+  // Same data, different presentation: catches detail/embed-only regressions.
+  run(`same PR #${HEAVY_PR} list modal baseline`, () => {
+    prepareSamePrComparison('modal');
+    samePrModal = measureSamePr('modal');
+  });
+
+  run(`same PR #${HEAVY_PR} detail embed parity`, () => {
+    prepareSamePrComparison('embed');
+    const embed = measureSamePr('embed');
+    assert(samePrModal, 'same-PR modal baseline missing');
+    for (const key of ['page', 'file', 'region']) {
+      const modalLeg = samePrModal[key];
+      const embedLeg = embed[key];
+      const p95Limit = Math.max(50, modalLeg.metrics.frameP95 + 25);
+      assert(
+        embedLeg.metrics.frameP95 <= p95Limit,
+        `${key}: embed p95 ${embedLeg.metrics.frameP95}ms > modal ${modalLeg.metrics.frameP95}ms + parity allowance`
+      );
+      assert(
+        embedLeg.hold.events >= Math.max(3, modalLeg.hold.events - 4),
+        `${key}: embed repeat delivery ${embedLeg.hold.events} < modal ${modalLeg.hold.events} - 4`
+      );
+    }
+  });
+
   return steps;
 }
 
@@ -500,5 +584,3 @@ if (process.argv[1] && /perf-shortcut-loop\.mjs$/.test(process.argv[1])) {
     process.exit(1);
   });
 }
-
-

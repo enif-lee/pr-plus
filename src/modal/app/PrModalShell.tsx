@@ -312,7 +312,6 @@ import {
   resolveModalShortcutAction,
   pickConversationCommentFocusTarget,
   stepConversationCommentFocus,
-  activeFileNavIndex,
   resolveAdjacentFileNav,
   isGithubCommandPaletteOpen,
   touchGithubCommandPaletteOpen,
@@ -825,7 +824,17 @@ export function PrModalApp({
   const setSearchHits = (hits: any, index?: number) => setSearchHitsStore(hits, index);
   const searchHitIndex = useModalStore((s) => s.searchHitIndex);
   const setSearchHitIndex = useModalStore((s) => s.setSearchHitIndex);
-  const activeFilePath = useModalStore((s) => s.activeFilePath);
+  // Multi-file Diff paints active chrome in leaf rows. Root only needs the
+  // value when single-file mode changes the actual virtual-row source.
+  const activeFilePathForRows = useModalStore((s) =>
+    singleFileMode ? s.activeFilePath : null
+  );
+  // Multi-file key-hold keeps the latest path off React's synchronous path;
+  // the final tree/header chrome is committed once the burst goes idle.
+  const pendingActiveFilePathRef = useRef('');
+  const readActiveFilePath = () =>
+    pendingActiveFilePathRef.current ||
+    String(useModalStore.getState().activeFilePath || '').trim();
   const setActiveFilePath = useModalStore((s) => s.setActiveFilePath);
   const animClass = useModalStore((s) => s.animClass);
   const setAnimClass = useModalStore((s) => s.setAnimClass);
@@ -1779,9 +1788,13 @@ export function PrModalApp({
   const diffDisplayFiles = useMemo(
     () =>
       typeof resolveDiffDisplayFiles === 'function'
-        ? resolveDiffDisplayFiles(displayFiles, activeFilePath, singleFileMode)
+        ? resolveDiffDisplayFiles(
+            displayFiles,
+            activeFilePathForRows,
+            singleFileMode
+          )
         : displayFiles,
-    [singleFileMode, displayFiles, activeFilePath]
+    [singleFileMode, displayFiles, activeFilePathForRows]
   );
 
   /** @deprecated alias — keep names used below / tests */
@@ -2059,11 +2072,23 @@ export function PrModalApp({
       useModalStore.getState().setActiveDiffCommentId(null);
       return;
     }
+    const live = useModalStore.getState();
+    const activeId = live.activeDiffCommentId;
+    if (activeId != null && activeId !== '') {
+      const stableIdx = mappedComments.findIndex(
+        (c: any) => String(c?.id) === String(activeId)
+      );
+      // Progressive shell/by-ids patches can insert or reorder comments. Keep
+      // the user's focused thread by stable id instead of silently assigning
+      // the new row at the old numeric index.
+      if (stableIdx >= 0 && stableIdx !== commentIndex) {
+        setCommentIndex(stableIdx);
+        return;
+      }
+    }
     const id = mappedComments[commentIndex]?.id;
-    useModalStore
-      .getState()
-      .setActiveDiffCommentId(id != null ? id : null);
-  }, [layoutMode, commentIndex, mappedComments]);
+    live.setActiveDiffCommentId(id != null ? id : null);
+  }, [layoutMode, commentIndex, mappedComments, setCommentIndex]);
 
   // Search is view-scoped: Conversation corpus vs Diff virtual rows only.
   // Never mix the two so Find does not surface off-screen content.
@@ -2872,7 +2897,30 @@ export function PrModalApp({
   ): string | null {
     if (st.layoutMode === LAYOUT_DIFF) {
       if (st.activeDiffCommentId != null && st.activeDiffCommentId !== '') {
-        return walkReviewCommentToRootId(String(st.activeDiffCommentId));
+        const activeId = String(st.activeDiffCommentId);
+        // InlineThread is mounted from the root virtual row, so its anchor is
+        // authoritative. Prefer it when it agrees with activeDiffCommentId;
+        // progressive reviewComments can temporarily expose a misleading
+        // inReplyTo chain for the same id and route plain arrows as line nav.
+        try {
+          if (typeof document !== 'undefined') {
+            const active = document.querySelector(
+              '.prp-inline-thread--context-active, .prp-inline-thread[data-context-active="1"]'
+            ) as HTMLElement | null;
+            const anchor = String(
+              active?.getAttribute('data-search-anchor') || ''
+            ).trim();
+            if (
+              anchor.startsWith('review-comment:') &&
+              anchor.slice('review-comment:'.length) === activeId
+            ) {
+              return activeId;
+            }
+          }
+        } catch {
+          /* fall through to detail chain */
+        }
+        return walkReviewCommentToRootId(activeId);
       }
     } else {
       const a = String(
@@ -2892,9 +2940,7 @@ export function PrModalApp({
       ) as HTMLElement | null;
       const anchor = String(active?.getAttribute('data-search-anchor') || '').trim();
       if (anchor.startsWith('review-comment:')) {
-        return walkReviewCommentToRootId(
-          anchor.slice('review-comment:'.length)
-        );
+        return anchor.slice('review-comment:'.length);
       }
     } catch {
       /* ignore */
@@ -3468,9 +3514,9 @@ export function PrModalApp({
         if (multiDom) {
           if (unit) return true;
           if (st.activeDiffCommentId != null) {
-            const activeRoot = walkReviewCommentToRootId(
-              String(st.activeDiffCommentId)
-            );
+            const activeId = String(st.activeDiffCommentId);
+            if (activeId === String(rootId)) return true;
+            const activeRoot = walkReviewCommentToRootId(activeId);
             if (activeRoot && String(activeRoot) === String(rootId)) {
               return true;
             }
@@ -3512,29 +3558,59 @@ export function PrModalApp({
   function scrollFileNavRowIntoView(path: string) {
     const p = String(path || '').trim();
     if (!p) return;
-    requestAnimationFrame(() => {
-      try {
-        const root =
-          typeof document !== 'undefined'
-            ? document.querySelector('.prp-filetree')
-            : null;
-        if (!root) return;
-        const esc =
-          typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
-            ? CSS.escape(p)
-            : p.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-        const row =
-          (root.querySelector(
-            `.prp-filetree__item--active[data-file-path="${esc}"]`
-          ) as HTMLElement | null) ||
-          (root.querySelector(
-            `[data-file-path="${esc}"]`
-          ) as HTMLElement | null);
-        row?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
-      } catch {
-        /* ignore */
+    try {
+      const root =
+        typeof document !== 'undefined'
+          ? document.querySelector('.prp-filetree')
+          : null;
+      if (!root) return;
+      const esc =
+        typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+          ? CSS.escape(p)
+          : p.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+      const row = root.querySelector(
+        `[data-file-path="${esc}"]`
+      ) as HTMLElement | null;
+      const scroller = root.querySelector(
+        '.prp-filetree__list'
+      ) as HTMLElement | null;
+      if (!row || !scroller) return;
+      // Read clean tree geometry before the active-path commit; keep the write
+      // local so no document ancestor participates in scrolling.
+      const top = row.offsetTop;
+      const bottom = top + row.offsetHeight;
+      const viewTop = scroller.scrollTop;
+      const viewBottom = viewTop + scroller.clientHeight;
+      if (top < viewTop) scroller.scrollTop = top;
+      else if (bottom > viewBottom) {
+        scroller.scrollTop = Math.max(0, bottom - scroller.clientHeight);
       }
-    });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /**
+   * File path ownership for keyboard navigation. Multi-file Diff can scroll
+   * directly from fileStarts, so tree/header React chrome may settle on idle.
+   * Single-file mode still commits immediately because it changes row source.
+   */
+  function setActiveFilePathForNav(path: string) {
+    const p = String(path || '').trim();
+    if (!p) return;
+    const navActive =
+      !singleFileMode &&
+      typeof document !== 'undefined' &&
+      document.documentElement.hasAttribute('data-prp-diff-nav-active');
+    if (navActive) {
+      pendingActiveFilePathRef.current = p;
+      return;
+    }
+    pendingActiveFilePathRef.current = '';
+    scrollFileNavRowIntoView(p);
+    if (p !== String(useModalStore.getState().activeFilePath || '').trim()) {
+      setActiveFilePath(p);
+    }
   }
 
   /**
@@ -3548,6 +3624,76 @@ export function PrModalApp({
   /** Coalesce page-scroll under key-hold: one hop per frame when rAF runs. */
   const pendingPageScrollDirRef = useRef(0);
   const pageScrollRafRef = useRef(0);
+  const diffNavIdleTimerRef = useRef(0);
+
+  /**
+   * Cross-layer input-pressure signal. Host progressive paints and URI writes
+   * wait until the held navigation burst settles instead of competing for the
+   * same main-thread frames.
+   */
+  function noteDiffNavActivity() {
+    try {
+      document.documentElement.setAttribute('data-prp-diff-nav-active', '1');
+      // File-nav uses Alt, but mounting/moving body-portaled hint bubbles on
+      // every active row would force full-document layout during the hold.
+      useModalStore.getState().setOptHintsActive(false);
+      window.clearTimeout(diffNavIdleTimerRef.current);
+      diffNavIdleTimerRef.current = window.setTimeout(() => {
+        diffNavIdleTimerRef.current = 0;
+        document.documentElement.removeAttribute('data-prp-diff-nav-active');
+        const pendingPath = pendingActiveFilePathRef.current;
+        pendingActiveFilePathRef.current = '';
+        if (pendingPath) {
+          scrollFileNavRowIntoView(pendingPath);
+          if (
+            pendingPath !==
+            String(useModalStore.getState().activeFilePath || '').trim()
+          ) {
+            setActiveFilePath(pendingPath);
+          }
+        }
+        const el = diffScrollerEl();
+        if (el) setScrollTop(el.scrollTop);
+        window.dispatchEvent(new CustomEvent('prp-sync-opt-hints'));
+      }, 140);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function sampleDiffNav<T>(
+    operation: 'selection' | 'region' | 'file' | 'page',
+    delta: number,
+    run: () => T
+  ): T {
+    const perfStart = isDiffNavPerfEnabled()
+      ? beginDiffNavPerfSample()
+      : null;
+    try {
+      return run();
+    } finally {
+      if (perfStart) {
+        endDiffNavPerfSample(perfStart, {
+          presentation: isEmbed ? 'embed' : 'modal',
+          operation,
+          delta,
+        });
+      }
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      window.clearTimeout(diffNavIdleTimerRef.current);
+      diffNavIdleTimerRef.current = 0;
+      pendingActiveFilePathRef.current = '';
+      try {
+        document.documentElement.removeAttribute('data-prp-diff-nav-active');
+      } catch {
+        /* ignore */
+      }
+    };
+  }, [open]);
 
   /** Live Diff scroller — prefer connected listRef, else DOM query. */
   function diffScrollerEl(): HTMLElement | null {
@@ -3593,6 +3739,7 @@ export function PrModalApp({
   /** Diff file step — same DFS order as explorer + Diff list (displayFiles). */
   function navFile(delta: number) {
     if (typeof resolveAdjacentFileNav !== 'function') return;
+    noteDiffNavActivity();
     const d = delta < 0 ? -1 : 1;
     // One hop per frame (like page scroll dir): do not multi-jump on key-hold.
     pendingFileNavDeltaRef.current = d;
@@ -3602,8 +3749,12 @@ export function PrModalApp({
       const steps = pendingFileNavDeltaRef.current;
       pendingFileNavDeltaRef.current = 0;
       if (!steps) return;
-      const st = resolveAdjacentFileNav(displayFiles, activeFilePath, steps);
-      if (st.path) onSelectFile(st.path);
+      const st = resolveAdjacentFileNav(
+        displayFiles,
+        readActiveFilePath(),
+        steps
+      );
+      if (st.path) sampleDiffNav('file', steps, () => onSelectFile(st.path));
     });
   }
 
@@ -3618,10 +3769,11 @@ export function PrModalApp({
    * rAF coalesce still drops multi-fires in the same frame when rAF runs.
    */
   function scrollDiffPage(delta: number) {
+    noteDiffNavActivity();
     const dir = delta < 0 ? -1 : 1;
     pendingPageScrollDirRef.current = dir;
     // Always move now so unfocused/headless sessions still page.
-    applyDiffPageScroll(dir);
+    sampleDiffNav('page', dir, () => applyDiffPageScroll(dir));
     // Coalesce further OS key-repeat in this frame (no-op if rAF is frozen).
     if (pageScrollRafRef.current) return;
     if (typeof requestAnimationFrame !== 'function') {
@@ -3703,8 +3855,8 @@ export function PrModalApp({
     if (path) {
       try {
         ensureFileExpandedForSelection(path);
-        if (path !== String(useModalStore.getState().activeFilePath || '')) {
-          setActiveFilePath(path);
+        if (path !== readActiveFilePath()) {
+          setActiveFilePathForNav(path);
         }
       } catch {
         /* ignore */
@@ -3729,6 +3881,7 @@ export function PrModalApp({
    */
   function optArrowScrollSelect(delta: number) {
     if (layoutMode !== LAYOUT_DIFF) return;
+    noteDiffNavActivity();
     const dir = delta < 0 ? -1 : 1;
     // Latest direction wins under hold (same thrift as navFile).
     pendingOptArrowDirRef.current = dir;
@@ -3736,7 +3889,7 @@ export function PrModalApp({
     if (typeof requestAnimationFrame !== 'function') {
       const d = pendingOptArrowDirRef.current;
       pendingOptArrowDirRef.current = 0;
-      applyOptArrowScrollSelect(d);
+      sampleDiffNav('region', d, () => applyOptArrowScrollSelect(d));
       return;
     }
     optArrowRafRef.current = requestAnimationFrame(() => {
@@ -3744,7 +3897,7 @@ export function PrModalApp({
       const d = pendingOptArrowDirRef.current;
       pendingOptArrowDirRef.current = 0;
       if (!d) return;
-      applyOptArrowScrollSelect(d);
+      sampleDiffNav('region', d, () => applyOptArrowScrollSelect(d));
     });
   }
 
@@ -3900,7 +4053,7 @@ export function PrModalApp({
   }
 
   function toggleViewedActiveFile() {
-    const path = String(activeFilePath || '').trim();
+    const path = readActiveFilePath();
     if (!path) return;
     onToggleViewed(path);
   }
@@ -3912,7 +4065,7 @@ export function PrModalApp({
   function toggleActiveFileCollapse() {
     const path = resolveActiveFileForCollapse({
       lineSelection: useModalStore.getState().lineSelection,
-      activeFilePath,
+      activeFilePath: readActiveFilePath(),
     });
     if (!path) return;
     onToggleFileCollapse(path);
@@ -3922,7 +4075,7 @@ export function PrModalApp({
   function setActiveFileCollapse(wantCollapsed: boolean) {
     const path = resolveActiveFileForCollapse({
       lineSelection: useModalStore.getState().lineSelection,
-      activeFilePath,
+      activeFilePath: readActiveFilePath(),
     });
     if (!path) return;
     setCollapsedFiles((prev) =>
@@ -4026,14 +4179,15 @@ export function PrModalApp({
       setActionMsg('Invalid Goto query. Use path:line[:line] or line[:line].');
       return false;
     }
+    const activePath = readActiveFilePath();
     const path =
       typeof resolveGotoPathAmongFiles === 'function'
         ? resolveGotoPathAmongFiles(
             parsed.path,
-            activeFilePath,
+            activePath,
             displayFiles
           )
-        : String(parsed.path || activeFilePath || '').trim() || null;
+        : String(parsed.path || activePath || '').trim() || null;
     if (!path) {
       setActionMsg('No file for Goto — open a file or include a path.');
       return false;
@@ -4326,7 +4480,8 @@ export function PrModalApp({
         storeTop: useModalStore.getState().scrollTop,
         setStoreTop: setScrollTop,
         minDomDelta: 0.5,
-        minStoreDelta: Math.max(24, h * 2),
+        // Key navigation owns the DOM; sync one store snapshot on idle.
+        minStoreDelta: Number.POSITIVE_INFINITY,
       });
     } catch {
       /* ignore */
@@ -4376,11 +4531,10 @@ export function PrModalApp({
   function syncActiveFileFromSelection(sel: any) {
     const path = String(sel?.filePath || '').trim();
     if (!path) return;
-    const cur = String(useModalStore.getState().activeFilePath || '').trim();
+    const cur = readActiveFilePath();
     if (path === cur) return;
-    setActiveFilePath(path);
+    setActiveFilePathForNav(path);
     ensureFileExpandedForSelection(path);
-    scrollFileNavRowIntoView(path);
   }
 
   function flushSelectionKeyboardMove(delta: number, shift: boolean) {
@@ -4401,7 +4555,7 @@ export function PrModalApp({
       }
     }
     const st = useModalStore.getState();
-    const activePath = String(st.activeFilePath || '').trim();
+    const activePath = readActiveFilePath();
     const prevSel = st.lineSelection;
     // Prefer selection.filePath for seed context so lagging tree activeFile
     // cannot reseed to the previous file top under key-hold (jump-up).
@@ -4455,9 +4609,8 @@ export function PrModalApp({
             path: adj.path,
             edge: d > 0 ? 'first' : 'last',
           };
-          setActiveFilePath(adj.path);
+          setActiveFilePathForNav(adj.path);
           ensureFileExpandedForSelection(adj.path);
-          scrollFileNavRowIntoView(adj.path);
           // Clear only as we hop — keep caret painted when hop is a no-op.
           setLineSelection(null);
           scheduleSelectionActionsReveal();
@@ -4482,13 +4635,12 @@ export function PrModalApp({
       nextSel.commentId != null;
 
     setLineSelection(nextSel);
-    // Sync tree path **synchronously** when caret crosses files so the next
-    // key-repeat frame does not reseed using a stale activeFilePath (jump-up).
+    // Sync the navigation path immediately through the pending ref so the next
+    // repeat does not reseed from the old file; React chrome settles on idle.
     if (nextPath && nextPath !== activePath) {
-      setActiveFilePath(nextPath);
+      setActiveFilePathForNav(nextPath);
       if (crossedFile) {
         ensureFileExpandedForSelection(nextPath);
-        scrollFileNavRowIntoView(nextPath);
       }
     }
     if (useModalStore.getState().selectionIslandLeaving) {
@@ -4563,6 +4715,7 @@ export function PrModalApp({
    * so ↑ after a burst of ↓ is not net-positive.
    */
   function applySelectionKeyboardMove(delta: number, shift: boolean) {
+    noteDiffNavActivity();
     const pending = pendingSelectionMoveRef.current;
     const next =
       typeof coalesceSelectionMoveDelta === 'function'
@@ -4592,6 +4745,7 @@ export function PrModalApp({
         if (perfStart) {
           endDiffNavPerfSample(perfStart, {
             presentation: isEmbed ? 'embed' : 'modal',
+            operation: 'selection',
             delta: p.delta,
           });
         }
@@ -5347,6 +5501,12 @@ export function PrModalApp({
       endLine: sel.endLine,
       side: sel.side,
     };
+    // Outbound route updates are echoed back by the host as initialRoute.
+    // Stamp the exact inbound dedupe key before writing so an older single-line
+    // echo cannot overwrite a newer multi-line selection during key-repeat.
+    ghSelectionAppliedRef.current = `${detail.number}:${fileKey || ''}:${
+      sel.filePath || ''
+    }:${sel.startLine ?? null}:${sel.endLine ?? ''}`;
 
     // Fixture / non-extension: write location directly (no chrome.*)
     try {
@@ -5405,7 +5565,15 @@ export function PrModalApp({
       if (state.lineSelection === prev.lineSelection) return;
       if (state.layoutMode !== LAYOUT_DIFF) return;
       window.clearTimeout(timer);
-      timer = window.setTimeout(() => {
+      const flushRoute = () => {
+        // Long frames can create >280ms gaps inside a held burst. Do not turn
+        // those gaps into history/style work; wait for the shared idle stamp.
+        if (
+          document.documentElement.hasAttribute('data-prp-diff-nav-active')
+        ) {
+          timer = window.setTimeout(flushRoute, 80);
+          return;
+        }
         try {
           const sel = githubSelectionFields(
             useModalStore.getState().lineSelection
@@ -5414,6 +5582,11 @@ export function PrModalApp({
           const fileKey = sel.filePath
             ? githubDiffFileKey(sel.filePath)
             : null;
+          ghSelectionAppliedRef.current = `${detail.number}:${
+            fileKey || ''
+          }:${sel.filePath || ''}:${sel.startLine ?? null}:${
+            sel.endLine ?? ''
+          }`;
           if (typeof onRouteChange === 'function') {
             onRouteChange({
               page: 'diff',
@@ -5431,7 +5604,8 @@ export function PrModalApp({
         } catch {
           /* ignore */
         }
-      }, 280);
+      };
+      timer = window.setTimeout(flushRoute, 280);
     });
     return () => {
       unsub();
@@ -6234,15 +6408,12 @@ export function PrModalApp({
   function onSelectFile(path: any) {
     const p = String(path || '').trim();
     if (!p) return;
-    const prevPath = String(
-      useModalStore.getState().activeFilePath || ''
-    ).trim();
+    const prevPath = readActiveFilePath();
     // Same-file re-select under key-hold: skip clear + rebuild + scroll pin.
     if (p === prevPath) {
-      scrollFileNavRowIntoView(p);
       return;
     }
-    setActiveFilePath(p);
+    setActiveFilePathForNav(p);
     // Drop prior-file line selection so the next Arrow seeds the first
     // selectable (displayed) line of this file.
     clearLineSelectionForNav();
@@ -6296,11 +6467,10 @@ export function PrModalApp({
         storeTop: useModalStore.getState().scrollTop,
         setStoreTop: setScrollTop,
         minDomDelta: 0.5,
-        minStoreDelta: Math.max(24, h * 2),
+        // Avoid a DiffWorkspace render on every held file hop.
+        minStoreDelta: Number.POSITIVE_INFINITY,
       });
     }
-    // Keep left nav focus visible when stepping to an off-screen file
-    scrollFileNavRowIntoView(p);
   }
 
   function onToggleDir(path: any) {
@@ -7635,6 +7805,7 @@ export function PrModalApp({
     runContextThreadAction,
     // Live refs so capture-phase keydown (deps only open/isEmbed) always hits
     // current continuum / re-entry latch logic.
+    isMultiReplyThreadFocused,
     stepThreadReply,
     applySelectionKeyboardMove,
     tryReenterExitedMultiReply,
@@ -8295,7 +8466,6 @@ export function PrModalApp({
               fileTree={fileTree}
               expandedDirs={expandedDirs}
               onToggleDir={onToggleDir}
-              activeFilePath={activeFilePath}
               onSelectFile={onSelectFile}
               collapsedFiles={collapsedFiles}
               onToggleFileCollapse={onToggleFileCollapse}
@@ -8313,7 +8483,6 @@ export function PrModalApp({
               viewedPaths={viewedPaths}
               onToggleViewed={onToggleViewed}
               onToggleFileNavCollapse={onToggleFileNavCollapse}
-              activeFileNavIndex={activeFileNavIndex}
               navFile={navFile}
               onFileNavResizeStart={onFileNavResizeStart}
               detail={detail}

@@ -71,7 +71,12 @@ export function getSteps() {
     waitMs(400);
     // Prefer a real issue comment on the open PR timeline; fall back to any
     // data-search-anchor comment id present in the conversation scroller.
-    const found = evalInPage(`
+    let found = null;
+    // Meta readiness intentionally precedes the progressively fetched timeline.
+    // Probe across virtual-list paints instead of assuming comments are present
+    // in the very first frame after waitDetailReady().
+    for (let attempt = 0; attempt < 40 && !found?.id; attempt++) {
+      found = evalInPage(`
       (() => {
         const sc =
           document.querySelector(
@@ -100,25 +105,20 @@ export function getSteps() {
             if (m?.[1]) return { id: m[1], kind: 'review' };
           }
         }
-        // Walk virtual list for off-window rows
+        // Move one virtual-list window per outer probe. React needs a paint
+        // between scroll and query, so the next attempt observes this position.
         if (sc) {
           const max = Math.max(0, sc.scrollHeight - sc.clientHeight);
-          for (const f of [0, 0.35, 0.7, 1]) {
-            sc.scrollTop = Math.round(max * f);
-            sc.dispatchEvent(new Event('scroll', { bubbles: true }));
-            const issue = sc.querySelector(
-              '[data-search-anchor^="issue-comment:"]'
-            );
-            if (issue) {
-              const a = issue.getAttribute('data-search-anchor') || '';
-              const m = a.match(/^issue-comment:(.+)$/i);
-              if (m?.[1]) return { id: m[1], kind: 'issue-scrolled' };
-            }
-          }
+          const fractions = [0, 0.35, 0.7, 1];
+          const f = fractions[${attempt} % fractions.length];
+          sc.scrollTop = Math.round(max * f);
+          sc.dispatchEvent(new Event('scroll', { bubbles: true }));
         }
         return null;
       })()
-    `);
+      `);
+      if (!found?.id) waitMs(250);
+    }
     log(`  comment probe: ${JSON.stringify(found)}`);
     assert(found?.id, `no conversation comment id on #${DEMO_PR}`);
     bag.commentId = String(found.id);

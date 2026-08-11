@@ -22,10 +22,12 @@ export const DIFF_NAV_PERF_MEASURE = 'prp-diff-nav';
 export const DIFF_NAV_PERF_MAX_SAMPLES = 200;
 
 export type DiffNavPerfPresentation = 'modal' | 'embed';
+export type DiffNavPerfOperation = 'selection' | 'region' | 'file' | 'page';
 
 export type DiffNavPerfSample = {
   ms: number;
   presentation: DiffNavPerfPresentation;
+  operation: DiffNavPerfOperation;
   delta: number;
   t: number;
 };
@@ -42,6 +44,10 @@ export type DiffNavPerfSnapshot = {
     modal: { count: number; meanMs: number | null; p95Ms: number | null };
     embed: { count: number; meanMs: number | null; p95Ms: number | null };
   };
+  byOperation: Record<
+    DiffNavPerfOperation,
+    { count: number; meanMs: number | null; p95Ms: number | null }
+  >;
   samples: DiffNavPerfSample[];
 };
 
@@ -232,6 +238,7 @@ export function endDiffNavPerfSample(
   start: DiffNavPerfStart | null | undefined,
   meta: {
     presentation: DiffNavPerfPresentation;
+    operation?: DiffNavPerfOperation;
     delta?: number;
   },
   g: PerfGlobal | null | undefined = typeof globalThis !== 'undefined'
@@ -250,6 +257,11 @@ export function endDiffNavPerfSample(
     try {
       g?.performance?.mark?.(endName);
       g?.performance?.measure?.(DIFF_NAV_PERF_MEASURE, startName, endName);
+      g?.performance?.measure?.(
+        `${DIFF_NAV_PERF_MEASURE}-${meta.operation || 'selection'}`,
+        startName,
+        endName
+      );
     } catch {
       /* ignore */
     }
@@ -263,6 +275,7 @@ export function endDiffNavPerfSample(
   const sample: DiffNavPerfSample = {
     ms,
     presentation: meta.presentation === 'embed' ? 'embed' : 'modal',
+    operation: meta.operation || 'selection',
     delta: Number(meta.delta) || 0,
     t: Date.now(),
   };
@@ -291,6 +304,21 @@ export function getDiffNavPerfSnapshot(
   const embed = samples
     .filter((s) => s.presentation === 'embed')
     .map((s) => s.ms);
+  const byOperation = Object.fromEntries(
+    (['selection', 'region', 'file', 'page'] as DiffNavPerfOperation[]).map(
+      (operation) => {
+        const sum = summarizeMs(
+          samples
+            .filter((sample) => sample.operation === operation)
+            .map((sample) => sample.ms)
+        );
+        return [
+          operation,
+          { count: sum.count, meanMs: sum.meanMs, p95Ms: sum.p95Ms },
+        ];
+      }
+    )
+  ) as DiffNavPerfSnapshot['byOperation'];
   const allSum = summarizeMs(all);
   const modalSum = summarizeMs(modal);
   const embedSum = summarizeMs(embed);
@@ -314,6 +342,7 @@ export function getDiffNavPerfSnapshot(
         p95Ms: embedSum.p95Ms,
       },
     },
+    byOperation,
     samples: getDiffNavPerfSamples(),
   };
 }

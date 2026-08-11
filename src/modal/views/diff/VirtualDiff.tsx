@@ -151,8 +151,6 @@ function VirtualDiffImpl(props: any) {
      * row (or file header) so they scroll/unmount with the virtual list.
      */
     selectionIsland = null,
-    /** Path of the active file (tree / prev-next) — focus ring on its header */
-    activeFilePath = null,
   } = props;
 
   // Do NOT subscribe to full lineSelection here — that re-renders every visible
@@ -202,8 +200,6 @@ function VirtualDiffImpl(props: any) {
         ? String(selectionOverride.commentId)
         : ''
       : storeThreadSelectionId;
-
-  const activePathNorm = String(activeFilePath || '').trim();
 
   // Stable handler identities → DiffCodeLine memo works across selection moves
   const onSelectionStartRef = useRef(onSelectionStart);
@@ -863,10 +859,6 @@ function VirtualDiffImpl(props: any) {
             onFileComment={onFileComment}
             onSelectionStart={stableSelectionStart}
             sticky
-            focused={
-              Boolean(activePathNorm) &&
-              String(stickyMeta.row?.filePath || '') === activePathNorm
-            }
             selected={
               isFileSelection &&
               fileSelectionPath === String(stickyMeta.row?.filePath || '')
@@ -1077,10 +1069,6 @@ function VirtualDiffImpl(props: any) {
                   activeHitForMarks={activeHitForMarks}
                   occ={occ}
                   searchQuery={qActive ? searchQuery : ''}
-                  focused={
-                    Boolean(activePathNorm) &&
-                    String(row.filePath || '') === activePathNorm
-                  }
                   selected={headerSelected}
                   selectionIsland={dockFile ? selectionIsland : null}
                 />

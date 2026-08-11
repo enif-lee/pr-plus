@@ -27,7 +27,6 @@ export type DiffWorkspaceProps = {
   fileTree: any;
   expandedDirs: any;
   onToggleDir: any;
-  activeFilePath: string | null;
   onSelectFile: any;
   collapsedFiles: any;
   onToggleFileCollapse: any;
@@ -45,7 +44,6 @@ export type DiffWorkspaceProps = {
   viewedPaths: any;
   onToggleViewed: any;
   onToggleFileNavCollapse: () => void;
-  activeFileNavIndex: any;
   navFile: (dir: number) => void;
   onFileNavResizeStart: (e: React.PointerEvent) => void;
   // toolbar + diff
@@ -172,7 +170,6 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
     fileTree,
     expandedDirs,
     onToggleDir,
-    activeFilePath,
     onSelectFile,
     collapsedFiles,
     onToggleFileCollapse,
@@ -190,7 +187,6 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
     viewedPaths,
     onToggleViewed,
     onToggleFileNavCollapse,
-    activeFileNavIndex,
     navFile,
     onFileNavResizeStart,
     detail: detailProp,
@@ -341,7 +337,6 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
         tree={fileTree}
         expandedDirs={expandedDirs}
         onToggleDir={onToggleDir}
-        activePath={activeFilePath}
         onSelect={onSelectFile}
         collapsedFiles={collapsedFiles}
         onToggleFileCollapse={onToggleFileCollapse}
@@ -362,11 +357,6 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
         onToggleViewed={onToggleViewed}
         navCollapsed={fileNav.collapsed}
         onToggleNavCollapse={onToggleFileNavCollapse}
-        fileIndex={
-          typeof activeFileNavIndex === 'function'
-            ? activeFileNavIndex(displayFiles, activeFilePath)
-            : -1
-        }
         fileTotal={displayFiles.length}
         onPrevFile={() => navFile(-1)}
         onNextFile={() => navFile(1)}
@@ -484,7 +474,6 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
             }
           }}
           listRef={listRef}
-          activeFilePath={activeFilePath}
           highlightRowIndex={
             hit?.rowIndex ??
             (commentIndex >= 0 ? mappedComments[commentIndex]?.rowIndex : undefined)

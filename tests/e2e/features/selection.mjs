@@ -803,12 +803,21 @@ export function getSteps() {
     press('Escape');
     waitMs(120);
 
-    // Seed a body line selection mid-file
-    clickSelectableLine(2);
+    // Seed far enough into the Diff that the head can be positioned near both
+    // viewport edges (top-of-document rows cannot be scrolled down to bottom).
+    evalInPage(`
+      (() => {
+        const list = document.querySelector('.prp-vlist');
+        if (list) list.scrollTop = Math.max(0, list.scrollHeight * 0.45);
+        return list?.scrollTop || 0;
+      })()
+    `);
+    waitMs(250);
+    clickSelectableLine(6);
     waitMs(200);
     let seed = selectionProbe();
     if (!seed.count) {
-      clickSelectableLine(0);
+      clickSelectableLine(2);
       waitMs(200);
       seed = selectionProbe();
     }
@@ -826,12 +835,21 @@ export function getSteps() {
       `expected multi-line selection: ${JSON.stringify(multi)}`
     );
 
-    // Move head to start of the block (caret at top of multi-line)
-    for (let i = 0; i < 12; i++) {
+    // Move head to start of the block (caret at top of multi-line). Do not
+    // assume every synthetic press survives a busy browser frame: assert the
+    // actual dock-host role before testing vertical placement.
+    let headRole = '';
+    for (let i = 0; i < 24; i++) {
       press('Shift+ArrowUp');
       waitMs(35);
+      headRole = evalInPage(`
+        document.querySelector('.prp-vline[data-sel-head="1"]')
+          ?.getAttribute('data-sel-role') || ''
+      `);
+      if (headRole === 'start') break;
     }
     waitMs(120);
+    assert(headRole === 'start', `selection head did not reach start: ${headRole}`);
 
     // Scroll so selection sits near the Diff scroller bottom (tight below)
     evalInPage(`
@@ -869,11 +887,29 @@ export function getSteps() {
     waitMs(550);
 
     const dockSnap = selectionProbe();
-    log(`  dock snap (head-at-start near bottom): ${JSON.stringify(dockSnap)}`);
+    const dockGeom = evalInPage(`
+      (() => {
+        const dock = document.querySelector('.prp-selection-dock');
+        const host = dock?.closest('.prp-sel-dock-host');
+        const list = host?.closest('.prp-vlist');
+        const rect = (el) => {
+          const r = el?.getBoundingClientRect?.();
+          return r ? { top: r.top, bottom: r.bottom, height: r.height } : null;
+        };
+        return {
+          dock: rect(dock),
+          host: rect(host),
+          list: rect(list),
+          selected: [...(list?.querySelectorAll('.prp-vline--selected') || [])]
+            .map(rect),
+        };
+      })()
+    `);
+    log(`  dock snap (head-at-start near bottom): ${JSON.stringify({ dockSnap, dockGeom })}`);
     assert(dockSnap.dock, `floatbar missing: ${JSON.stringify(dockSnap)}`);
     assert(
       dockSnap.dockPlace === 'above' || dockSnap.dockAbove,
-      `multi-line head-at-start near bottom must dock above: ${JSON.stringify(dockSnap)}`
+      `multi-line head-at-start near bottom must dock above: ${JSON.stringify({ dockSnap, dockGeom })}`
     );
     assert(
       dockSnap.optHintPlace === 'top',
@@ -889,11 +925,18 @@ export function getSteps() {
     }
 
     // Move head to range end and leave room below → dock below, hints bottom
-    for (let i = 0; i < 14; i++) {
+    headRole = '';
+    for (let i = 0; i < 28; i++) {
       press('Shift+ArrowDown');
       waitMs(35);
+      headRole = evalInPage(`
+        document.querySelector('.prp-vline[data-sel-head="1"]')
+          ?.getAttribute('data-sel-role') || ''
+      `);
+      if (headRole === 'end') break;
     }
     waitMs(120);
+    assert(headRole === 'end', `selection head did not reach end: ${headRole}`);
     evalInPage(`
       (() => {
         const vlist = document.querySelector('.prp-vlist');

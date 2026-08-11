@@ -78,7 +78,7 @@ describe('openSelectionComment focus after ⌥C', () => {
   });
 
   test('⌥C product chord dispatches openSelectionComment on Diff selection', () => {
-    const src = read('src/modal/app/PrModalShell.tsx');
+    const src = read('src/modal/hooks/usePrModalHotkeys.ts');
     expect(src).toMatch(/reportShortcutAction\('openSelectionComment'\)/);
     expect(src).toMatch(/act\.openSelectionComment\?\.\(\)/);
   });

@@ -145,12 +145,17 @@ export function FileHeaderRow(props: {
     occ = 0,
     searchQuery = '',
     sticky = false,
-    focused = false,
+    focused: focusedProp,
     selected = false,
     style,
     selectionIsland = null,
     onSelectionStart,
   } = props;
+  const storeFocused = useModalStore(
+    (s) => String(s.activeFilePath || '') === String(row?.filePath || '')
+  );
+  const focused =
+    typeof focusedProp === 'boolean' ? focusedProp : storeFocused;
   const viewed = isPathViewed ? isPathViewed(viewedPaths, row.filePath) : false;
   const collapsed = Boolean(row.collapsed);
   const openable = row.openable !== false;
@@ -761,6 +766,7 @@ export const DiffCodeLine = memo(function DiffCodeLine({
       data-old-line={row.oldLine ?? ''}
       data-new-line={row.newLine ?? ''}
       data-sel-role={selRole || undefined}
+      data-sel-head={storeDockHost ? '1' : undefined}
       data-sel-side={selected && isSplit ? dockSide : undefined}
       data-split={isSplit ? '1' : '0'}
       data-search-match={isSearchMatch ? '1' : undefined}
@@ -974,4 +980,3 @@ export function DiffVirtualRowShell({
     </div>
   );
 }
-
