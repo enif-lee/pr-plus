@@ -496,19 +496,19 @@ function VirtualConversationListImpl(props: any) {
                 zIndex: 1,
               }}
             >
-              {visible.map((row) => {
-                const h = conversationRowHeight(row, heightMap, heightOpts);
-                return (
-                  <VirtualRowShell
-                    key={row.key}
-                    rowKey={row.key}
-                    estimatedHeight={h}
-                    onHeight={reportHeight}
-                  >
-                    {typeof renderRow === 'function' ? renderRow(row) : null}
-                  </VirtualRowShell>
-                );
-              })}
+              {visible.map((row) => (
+                <VirtualConversationRow
+                  key={row.key}
+                  row={row}
+                  estimatedHeight={conversationRowHeight(
+                    row,
+                    heightMap,
+                    heightOpts
+                  )}
+                  onHeight={reportHeight}
+                  renderRow={renderRow}
+                />
+              ))}
             </div>
           </div>
         </div>
@@ -520,6 +520,29 @@ function VirtualConversationListImpl(props: any) {
     </ConversationScrollIdleProvider>
   );
 }
+
+/** Keep mounted cards out of the virtual scroller's per-frame range render. */
+const VirtualConversationRow = memo(function VirtualConversationRow({
+  row,
+  estimatedHeight,
+  onHeight,
+  renderRow,
+}: {
+  row: ConversationVirtualRow;
+  estimatedHeight: number;
+  onHeight: (key: string, h: number) => void;
+  renderRow: (row: ConversationVirtualRow) => React.ReactNode;
+}) {
+  return (
+    <VirtualRowShell
+      rowKey={row.key}
+      estimatedHeight={estimatedHeight}
+      onHeight={onHeight}
+    >
+      {typeof renderRow === 'function' ? renderRow(row) : null}
+    </VirtualRowShell>
+  );
+});
 
 function VirtualRowShell({
   rowKey,

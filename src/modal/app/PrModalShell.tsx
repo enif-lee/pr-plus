@@ -1016,11 +1016,26 @@ export function PrModalApp({
     kind: string;
     anchor: string;
   } | null>(null);
-  // Drop keyboard focus when switching PRs
+  /** Same contract as file nav: keep the latest direction, paint one hop/rAF. */
+  const pendingConversationNavDeltaRef = useRef(0);
+  const conversationNavRafRef = useRef(0);
+  // Drop keyboard focus and any queued paint when closing or switching PRs.
   useEffect(() => {
+    if (conversationNavRafRef.current) {
+      cancelAnimationFrame(conversationNavRafRef.current);
+      conversationNavRafRef.current = 0;
+    }
+    pendingConversationNavDeltaRef.current = 0;
     conversationCommentFocusRef.current = null;
     useModalStore.getState().requestConversationNav(null);
-  }, [prIdentity]);
+    return () => {
+      if (conversationNavRafRef.current) {
+        cancelAnimationFrame(conversationNavRafRef.current);
+        conversationNavRafRef.current = 0;
+      }
+      pendingConversationNavDeltaRef.current = 0;
+    };
+  }, [open, prIdentity]);
   const collapseInitRef = useRef<any>(null);
   const selectingRef = useRef<boolean>(false);
   const pointerStartRef = useRef<any>(null);
@@ -3943,7 +3958,7 @@ export function PrModalApp({
    * newest window (top) → oldest window (bottom). reverseComments only moves
    * composer/merge, not item order — do not reverse the list here.
    */
-  function conversationCommentPageOrder() {
+  const conversationCommentPageItems = useMemo(() => {
     const items =
       typeof buildConversationTimeline === 'function' && detail
         ? buildConversationTimeline(detail)
@@ -3961,16 +3976,15 @@ export function PrModalApp({
       }
     }
     return timeline;
-  }
+  }, [detail]);
 
   /**
    * ⌥J / ⌥K on Conversation: step next/prev in visual UI order (wraps).
    * Order follows reverseComments (merge before vs after timeline).
    * Seeds on first press; focuses conversation layout if needed.
    */
-  function navConversationComment(delta: number) {
-    if (layoutMode === LAYOUT_DIFF) collapseDiff();
-    const ordered = conversationCommentPageOrder();
+  function applyConversationCommentNav(delta: number) {
+    const ordered = conversationCommentPageItems;
     const focusOpts = { reverseComments };
     const st = useModalStore.getState();
     // Prefer live store ring/pending. A leftover ref after virtual unmount or
@@ -4027,8 +4041,21 @@ export function PrModalApp({
       return;
     }
     conversationCommentFocusRef.current = next;
-    // Scroll first; leaf scroller promotes focus ring after scroll.
-    useModalStore.getState().requestConversationNav(next.anchor);
+    // Commit the ring with the pending scroll. Mounted leaf cards update without
+    // re-rendering ConversationView; an off-window row mounts in this paint.
+    useModalStore.getState().requestConversationNav(next.anchor, true);
+  }
+
+  function navConversationComment(delta: number) {
+    if (layoutMode === LAYOUT_DIFF) collapseDiff();
+    pendingConversationNavDeltaRef.current = delta < 0 ? -1 : 1;
+    if (conversationNavRafRef.current) return;
+    conversationNavRafRef.current = requestAnimationFrame(() => {
+      conversationNavRafRef.current = 0;
+      const queued = pendingConversationNavDeltaRef.current;
+      pendingConversationNavDeltaRef.current = 0;
+      if (queued) applyConversationCommentNav(queued);
+    });
   }
 
   function toggleViewedActiveFile() {
@@ -6502,7 +6529,7 @@ export function PrModalApp({
     // Always land on conversation layout so the timeline is visible.
     // Scroll then focus via ConversationKbFocusScroller (leaf store sub).
     if (layoutMode === LAYOUT_DIFF) collapseDiff();
-    const ordered = conversationCommentPageOrder();
+    const ordered = conversationCommentPageItems;
     const target =
       typeof pickConversationCommentFocusTarget === 'function'
         ? pickConversationCommentFocusTarget(ordered, { reverseComments })

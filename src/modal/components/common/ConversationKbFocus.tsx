@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useLayoutEffect } from 'react';
 import { useModalStore } from '../../store/modal-store';
 
 /**
@@ -91,7 +91,7 @@ export function ConversationKbFocusScroller(props: {
   const pending = useModalStore((s) => s.pendingConversationNavAnchor);
   const onFocusThread = props.onFocusThread;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const a = String(pending || '').trim();
     if (!a.startsWith('review-comment:') || typeof onFocusThread !== 'function') {
       return;
