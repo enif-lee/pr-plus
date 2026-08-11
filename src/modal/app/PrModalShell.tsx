@@ -17,7 +17,6 @@ import React, {
   startTransition,
 } from 'react';
 import { createRoot } from 'react-dom/client';
-import { flushSync } from 'react-dom';
 import { Button } from '@common/Button';
 import { ActionToast } from '@common/ActionToast';
 import { ShortcutMonitor } from '@common/ShortcutMonitor';
@@ -338,6 +337,7 @@ import {
   focusContextThreadReply,
   focusContextThreadReplyAfterPaint,
   isContextThreadReplyFocused,
+  isContextThreadCommentActive,
   PRP_CONTEXT_THREAD_TAB_LEAVE,
   scrollChildToMaximizeInScroller,
   scrollChildToRevealInScroller,
@@ -829,11 +829,7 @@ export function PrModalApp({
   const activeFilePathForRows = useModalStore((s) =>
     singleFileMode ? s.activeFilePath : null
   );
-  // Multi-file key-hold keeps the latest path off React's synchronous path;
-  // the final tree/header chrome is committed once the burst goes idle.
-  const pendingActiveFilePathRef = useRef('');
   const readActiveFilePath = () =>
-    pendingActiveFilePathRef.current ||
     String(useModalStore.getState().activeFilePath || '').trim();
   const setActiveFilePath = useModalStore((s) => s.setActiveFilePath);
   const animClass = useModalStore((s) => s.animClass);
@@ -3492,6 +3488,7 @@ export function PrModalApp({
     const rootId = resolveFocusedReviewThreadRootId(st);
     if (!rootId) return false;
     const unit = readFocusedThreadUnitStamp(st);
+    const contextActive = isContextThreadCommentActive(rootId, st);
     // Unit stamp on a reply (≠ root) ⇒ multi-reply mode even if reply rows lag
     // in detail.reviewComments (TOR.3 seed leaves stamp on reply id).
     if (unit && unit !== String(rootId)) return true;
@@ -3512,7 +3509,7 @@ export function PrModalApp({
               active.classList.contains('prp-inline-thread--threaded'))
         );
         if (multiDom) {
-          if (unit) return true;
+          if (unit || contextActive) return true;
           if (st.activeDiffCommentId != null) {
             const activeId = String(st.activeDiffCommentId);
             if (activeId === String(rootId)) return true;
@@ -3527,7 +3524,7 @@ export function PrModalApp({
             if (selRoot && String(selRoot) === String(rootId)) return true;
           }
           // Do not claim multi-reply from multi DOM alone (P3c continuum exit
-          // can leave context-active). Require unit / activeDiff / thread sel.
+          // can leave context-active). Require layout focus, unit, or Diff caret.
         }
       }
     } catch {
@@ -3536,7 +3533,7 @@ export function PrModalApp({
     const replies = repliesForRootCommentId(rootId);
     if (replies.length > 0) {
       // Any unit stamp under this root (root or reply)
-      if (unit) return true;
+      if (unit || contextActive) return true;
       // Active Diff comment nav on this root (⌥J/K or continuum seed)
       if (st.activeDiffCommentId != null) {
         const activeRoot = walkReviewCommentToRootId(
@@ -3575,15 +3572,14 @@ export function PrModalApp({
         '.prp-filetree__list'
       ) as HTMLElement | null;
       if (!row || !scroller) return;
-      // Read clean tree geometry before the active-path commit; keep the write
-      // local so no document ancestor participates in scrolling.
-      const top = row.offsetTop;
-      const bottom = top + row.offsetHeight;
-      const viewTop = scroller.scrollTop;
-      const viewBottom = viewTop + scroller.clientHeight;
-      if (top < viewTop) scroller.scrollTop = top;
-      else if (bottom > viewBottom) {
-        scroller.scrollTop = Math.max(0, bottom - scroller.clientHeight);
+      // offsetTop is relative to the row's offsetParent (often the <li>, so 0).
+      // Rect deltas keep the write local without scrolling document ancestors.
+      const rowRect = row.getBoundingClientRect();
+      const viewRect = scroller.getBoundingClientRect();
+      if (rowRect.top < viewRect.top) {
+        scroller.scrollTop += rowRect.top - viewRect.top;
+      } else if (rowRect.bottom > viewRect.bottom) {
+        scroller.scrollTop += rowRect.bottom - viewRect.bottom;
       }
     } catch {
       /* ignore */
@@ -3591,22 +3587,13 @@ export function PrModalApp({
   }
 
   /**
-   * File path ownership for keyboard navigation. Multi-file Diff can scroll
-   * directly from fileStarts, so tree/header React chrome may settle on idle.
-   * Single-file mode still commits immediately because it changes row source.
+   * Decision: every adjacent file reached during key-hold must be visible.
+   * Do not defer activeFilePath to the end of the hold; tree/header leaves
+   * subscribe directly, so exact intermediate chrome does not re-render root.
    */
   function setActiveFilePathForNav(path: string) {
     const p = String(path || '').trim();
     if (!p) return;
-    const navActive =
-      !singleFileMode &&
-      typeof document !== 'undefined' &&
-      document.documentElement.hasAttribute('data-prp-diff-nav-active');
-    if (navActive) {
-      pendingActiveFilePathRef.current = p;
-      return;
-    }
-    pendingActiveFilePathRef.current = '';
     scrollFileNavRowIntoView(p);
     if (p !== String(useModalStore.getState().activeFilePath || '').trim()) {
       setActiveFilePath(p);
@@ -3614,10 +3601,8 @@ export function PrModalApp({
   }
 
   /**
-   * rAF-coalesce file/page nav under key-repeat (selection already does this).
-   * Soft thrift: one file hop per frame. Held ⌥⇧] used to collapse N OS keydowns
-   * into a multi-file jump (felt sparse when React work delayed rAF); now only the
-   * latest direction is kept so intermediate files still appear under key-hold.
+   * Keep file navigation on the next paint boundary. Each rAF advances one
+   * adjacent file, so key-repeat never skips an intermediate rendered state.
    */
   const pendingFileNavDeltaRef = useRef(0);
   const fileNavRafRef = useRef(0);
@@ -3641,17 +3626,6 @@ export function PrModalApp({
       diffNavIdleTimerRef.current = window.setTimeout(() => {
         diffNavIdleTimerRef.current = 0;
         document.documentElement.removeAttribute('data-prp-diff-nav-active');
-        const pendingPath = pendingActiveFilePathRef.current;
-        pendingActiveFilePathRef.current = '';
-        if (pendingPath) {
-          scrollFileNavRowIntoView(pendingPath);
-          if (
-            pendingPath !==
-            String(useModalStore.getState().activeFilePath || '').trim()
-          ) {
-            setActiveFilePath(pendingPath);
-          }
-        }
         const el = diffScrollerEl();
         if (el) setScrollTop(el.scrollTop);
         window.dispatchEvent(new CustomEvent('prp-sync-opt-hints'));
@@ -3686,7 +3660,11 @@ export function PrModalApp({
     return () => {
       window.clearTimeout(diffNavIdleTimerRef.current);
       diffNavIdleTimerRef.current = 0;
-      pendingActiveFilePathRef.current = '';
+      if (fileNavRafRef.current) {
+        cancelAnimationFrame(fileNavRafRef.current);
+        fileNavRafRef.current = 0;
+      }
+      pendingFileNavDeltaRef.current = 0;
       try {
         document.documentElement.removeAttribute('data-prp-diff-nav-active');
       } catch {
@@ -3741,20 +3719,21 @@ export function PrModalApp({
     if (typeof resolveAdjacentFileNav !== 'function') return;
     noteDiffNavActivity();
     const d = delta < 0 ? -1 : 1;
-    // One hop per frame (like page scroll dir): do not multi-jump on key-hold.
     pendingFileNavDeltaRef.current = d;
     if (fileNavRafRef.current) return;
     fileNavRafRef.current = requestAnimationFrame(() => {
       fileNavRafRef.current = 0;
-      const steps = pendingFileNavDeltaRef.current;
+      const queued = pendingFileNavDeltaRef.current;
       pendingFileNavDeltaRef.current = 0;
-      if (!steps) return;
+      if (!queued) return;
       const st = resolveAdjacentFileNav(
         displayFiles,
         readActiveFilePath(),
-        steps
+        queued
       );
-      if (st.path) sampleDiffNav('file', steps, () => onSelectFile(st.path));
+      if (st.path) {
+        sampleDiffNav('file', queued, () => onSelectFile(st.path));
+      }
     });
   }
 
@@ -4635,8 +4614,8 @@ export function PrModalApp({
       nextSel.commentId != null;
 
     setLineSelection(nextSel);
-    // Sync the navigation path immediately through the pending ref so the next
-    // repeat does not reseed from the old file; React chrome settles on idle.
+    // Sync the navigation path before the next repeat; leaf subscribers update
+    // the tree/header chrome without re-rendering the composition root.
     if (nextPath && nextPath !== activePath) {
       setActiveFilePathForNav(nextPath);
       if (crossedFile) {
@@ -6451,8 +6430,8 @@ export function PrModalApp({
     }
     const idx = fileStarts.get(p);
     if (typeof idx === 'number') {
-      // Pin file header once — thrifted store so key-hold file nav does not
-      // stack DiffWorkspace paints on top of activeFilePath.
+      // Pin each file header. VirtualDiff renders this hop from the synchronous
+      // scroll event; the scrollTop store remains only an idle snapshot.
       const { avgH: h, rowOffsetList: offs } = getDiffScrollMetrics();
       const top = scrollTopForIndex(
         idx,
@@ -6467,7 +6446,7 @@ export function PrModalApp({
         storeTop: useModalStore.getState().scrollTop,
         setStoreTop: setScrollTop,
         minDomDelta: 0.5,
-        // Avoid a DiffWorkspace render on every held file hop.
+        // Visible rows already commit above; skip only the redundant store mirror.
         minStoreDelta: Number.POSITIVE_INFINITY,
       });
     }

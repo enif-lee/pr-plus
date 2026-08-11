@@ -226,7 +226,7 @@
   align-items: center;
   gap: 6px;
   min-width: 0;
-  max-width: min(36cqi, 18rem);
+  max-width: min(54cqi, 27rem);
   overflow: hidden;
   font-size: 12px;
   grid-area: unset;
@@ -262,7 +262,7 @@
 
 .prp-header--review-compact .prp-branch-tag,
 .prp-header[data-review-compact='1'] .prp-branch-tag {
-  max-width: min(18cqi, 9rem);
+  max-width: min(27cqi, 13.5rem);
   min-width: 0;
   padding: 1px 6px;
   font-size: 11px;

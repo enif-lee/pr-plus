@@ -189,15 +189,17 @@
       btn.setAttribute('aria-label', openWithLabel);
       btn.title = openWithLabel;
       btn.textContent = 'pr+';
-      btn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        openEmbedFromNativePr();
-      });
     } else {
       btn.setAttribute('aria-label', openWithLabel);
       btn.title = openWithLabel;
     }
+    // GitHub may clone/recreate the PR action cluster while opening diffs.
+    // Property assignment reattaches one handler without accumulating listeners.
+    btn.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openEmbedFromNativePr();
+    };
 
     const mount = findGithubPrHeaderMount();
     if (!mount) {

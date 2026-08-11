@@ -577,6 +577,8 @@ function createPrTreeApp(deps: any) {
 
   function watchPullsPage() {
     const observer = new MutationObserver(() => {
+      // This observer only owns /pulls. Ignore pr+ React commits on PR pages.
+      if (!currentPullsContext()) return;
       if (Date.now() < suppressObserverUntil) return;
       scheduleSync(200);
     });

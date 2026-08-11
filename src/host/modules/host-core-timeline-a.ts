@@ -315,6 +315,36 @@
     }
   }
 
+  /** Keep pr+ events out of GitHub's document-level React/event delegates. */
+  function ensureEmbedBubbleShield(host) {
+    if (!host || host.getAttribute('data-prp-bubble-shield') === '1') return;
+    const pe = pageEmbedApi();
+    const events =
+      (Array.isArray(pe?.PAGE_EMBED_BUBBLE_SHIELD_EVENTS) &&
+        pe.PAGE_EMBED_BUBBLE_SHIELD_EVENTS) ||
+      [
+        'click',
+        'auxclick',
+        'dblclick',
+        'contextmenu',
+        'mousedown',
+        'mouseup',
+        'mousemove',
+        'pointerdown',
+        'pointerup',
+        'pointermove',
+        'touchstart',
+        'touchend',
+        'input',
+        'change',
+        'submit',
+      ];
+    for (const type of events) {
+      host.addEventListener(type, (event) => event.stopPropagation());
+    }
+    host.setAttribute('data-prp-bubble-shield', '1');
+  }
+
   function hideNativeMainChildren(main, embedEl) {
     if (!main) return;
     const api = pageEmbedApi();
@@ -496,6 +526,7 @@
       }
     }
     stampHostCssReady(host);
+    ensureEmbedBubbleShield(host);
     const main = findGithubMainRegion();
     if (main) hideNativeMainChildren(main, host);
     // Body-level residual + header/flash chrome (stronger than main-only hide)

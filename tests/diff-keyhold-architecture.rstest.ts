@@ -32,6 +32,9 @@ describe('Diff key-hold architecture', () => {
       shell.indexOf('/** Live Diff scroller')
     );
     expect(fileNav).not.toMatch(/scrollIntoView\?\.\(/);
+    expect(fileNav).not.toMatch(/row\.offsetTop/);
+    expect(fileNav).toMatch(/row\.getBoundingClientRect\(\)/);
+    expect(fileNav).toMatch(/scroller\.getBoundingClientRect\(\)/);
     expect(fileNav).toMatch(/scroller\.scrollTop/);
     const selectFile = shell.slice(
       shell.indexOf('function onSelectFile'),
@@ -40,25 +43,42 @@ describe('Diff key-hold architecture', () => {
     expect(selectFile).toMatch(/minStoreDelta: Number\.POSITIVE_INFINITY/);
   });
 
-  test('multi-file key-hold commits only the final active path on idle', () => {
+  test('multi-file key-hold commits every active path through leaf subscriptions', () => {
     const shell = read('src/modal/app/PrModalShell.tsx');
-    expect(shell).toMatch(/pendingActiveFilePathRef = useRef\(''\)/);
-    expect(shell).toMatch(/function setActiveFilePathForNav/);
-    expect(shell).toMatch(
-      /if \(navActive\) \{\s*pendingActiveFilePathRef\.current = p;\s*return;/s
+    const setPath = shell.slice(
+      shell.indexOf('function setActiveFilePathForNav'),
+      shell.indexOf('Keep file navigation on the next paint boundary')
     );
-    expect(shell).toMatch(
-      /const pendingPath = pendingActiveFilePathRef\.current;[\s\S]*setActiveFilePath\(pendingPath\)/
+    expect(shell).not.toMatch(/pendingActiveFilePathRef/);
+    expect(setPath).toMatch(/setActiveFilePath\(p\)/);
+    expect(setPath).not.toMatch(/data-prp-diff-nav-active/);
+  });
+
+  test('file nav advances one adjacent file per animation frame', () => {
+    const shell = read('src/modal/app/PrModalShell.tsx');
+    const nav = shell.slice(
+      shell.indexOf('/** Diff file step'),
+      shell.indexOf('function scrollDiffPage')
     );
+    expect(nav).toMatch(/function navFile\(delta: number\)/);
+    expect(nav).toMatch(/pendingFileNavDeltaRef\.current = d;[\s\S]*requestAnimationFrame/);
+    expect(nav).toMatch(/resolveAdjacentFileNav\([\s\S]*queued/);
   });
 
   test('host paints and URI writes yield while Diff navigation is active', () => {
     const shell = read('src/modal/app/PrModalShell.tsx');
     const host = read('src/host/modules/props-render-close.ts');
+    const optHint = read('src/modal/components/common/OptBtnHint.tsx');
     expect(shell).toMatch(/data-prp-diff-nav-active/);
     expect(shell).toMatch(/window\.setTimeout\(flushRoute, 80\)/);
     expect(host).toMatch(/diffNavDeferredRenderTimer/);
     expect(host).toMatch(/data-prp-diff-nav-active/);
+    expect(optHint).toMatch(
+      /hasAttribute\?\.\('data-prp-diff-nav-active'\)/
+    );
+    expect(optHint).toMatch(
+      /attributeFilter:\s*\[[\s\S]*'data-prp-diff-nav-active'/
+    );
   });
 
   test('selection route writes stamp the inbound dedupe key before host echo', () => {

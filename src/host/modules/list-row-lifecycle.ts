@@ -511,7 +511,22 @@
     };
     scan();
     try {
-      const rootMo = new MutationObserver(() => scan());
+      const rootMo = new MutationObserver((records) => {
+        // pr+ commits are unrelated to GitHub's palette and can be frequent.
+        if (document.documentElement.classList.contains('prp-embed-active')) {
+          return;
+        }
+        if (
+          records.every((record) =>
+            (record.target as Element)?.closest?.(
+              '#prp-page-embed, #prp-modal-host, .prp-overlay'
+            )
+          )
+        ) {
+          return;
+        }
+        scan();
+      });
       rootMo.observe(document.documentElement, {
         childList: true,
         subtree: true,
