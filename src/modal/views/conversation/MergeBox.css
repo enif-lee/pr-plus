@@ -198,13 +198,13 @@
   cursor: pointer;
 }
 
-/* ⌥J/K focus ring host around merge box */
+/* ⌥J/K focus ring host around merge box — ring paint is DiffSearchMarks .prp-card--kb-focus */
 .prp-merge-box-focus-host {
   border-radius: 12px;
   min-width: 0;
 }
-.prp-merge-box-focus-host--focused,
-.prp-merge-box-focus-host.prp-card--kb-focus {
+/* Suppress legacy outer-outline so only the shared inset ring paints */
+.prp-merge-box-focus-host--focused:not(.prp-card--kb-focus) {
   outline: 2px solid var(--prp-accent, #0969da);
-  outline-offset: 2px;
+  outline-offset: -2px;
 }

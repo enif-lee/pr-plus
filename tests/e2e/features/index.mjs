@@ -59,6 +59,22 @@ export {
   runReviewFilter,
 } from './review-filter.mjs';
 export {
+  getSteps as getLayoutShortcutIsolationSteps,
+} from './layout-shortcut-isolation.mjs';
+export { getSteps as getDiffGotoSteps } from './diff-goto.mjs';
+export {
+  getSteps as getDeeplinkLayoutOwnershipSteps,
+  runDeeplinkLayoutOwnership,
+} from './deeplink-layout-ownership.mjs';
+export {
+  getSteps as getListOpenModeSteps,
+  runListOpenMode,
+} from './list-open-mode.mjs';
+export {
+  getSteps as getOptTextSelectSteps,
+  runOptTextSelect,
+} from './opt-text-select.mjs';
+export {
   getSteps as getUiLocaleSteps,
   runUiLocale,
 } from './ui-locale.mjs';
@@ -107,6 +123,9 @@ import { getSteps as getEscNestedSteps } from './esc-nested.mjs';
 import { getSteps as getSelectionRevealNavSteps } from './selection-reveal-nav.mjs';
 import { getSteps as getStartReviewSteps } from './start-review.mjs';
 import { getSteps as getEmptyDiffSteps } from './empty-diff.mjs';
+import { getSteps as getDeeplinkLayoutOwnershipSteps } from './deeplink-layout-ownership.mjs';
+import { getSteps as getListOpenModeSteps } from './list-open-mode.mjs';
+import { getSteps as getOptTextSelectSteps } from './opt-text-select.mjs';
 
 /** Ordered feature suite (shared browser session for legacy runner). */
 export const FEATURE_SUITE = [
@@ -135,6 +154,12 @@ export const FEATURE_SUITE = [
   { id: 'selection-reveal-nav', getSteps: getSelectionRevealNavSteps },
   { id: 'start-review', getSteps: getStartReviewSteps },
   { id: 'empty-diff', getSteps: getEmptyDiffSteps },
+  {
+    id: 'deeplink-layout-ownership',
+    getSteps: getDeeplinkLayoutOwnershipSteps,
+  },
+  { id: 'list-open-mode', getSteps: getListOpenModeSteps },
+  { id: 'opt-text-select', getSteps: getOptTextSelectSteps },
 ];
 
 /**

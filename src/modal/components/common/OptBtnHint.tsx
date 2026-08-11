@@ -8,6 +8,7 @@ import {
 } from './TipPopover';
 import { KeyGlyphs } from './KeyGlyphs';
 import { useModalStore } from '../../store/modal-store';
+import { SELECTION_NAV_BUSY_ATTR } from '../../lib/line-selection';
 
 /**
  * Option-hold shortcut badge above a control.
@@ -38,6 +39,18 @@ function readDomOptHeld(): boolean {
   }
 }
 
+/** Selection ↑↓ / region hop settle window — hide all OptBtnHints. */
+function readSelectionNavBusy(): boolean {
+  try {
+    if (typeof document === 'undefined') return false;
+    return Boolean(
+      document.documentElement?.hasAttribute?.(SELECTION_NAV_BUSY_ATTR)
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function OptBtnHint({
   show: showProp,
   label,
@@ -51,14 +64,18 @@ export function OptBtnHint({
 }) {
   const storeShow = useModalStore((s) => s.optHintsActive);
   const [domHeld, setDomHeld] = useState(() => readDomOptHeld());
-  // Observe DOM latch (data-prp-opt-held) — page-world e2e sets the attribute.
+  const [navBusy, setNavBusy] = useState(() => readSelectionNavBusy());
+  // Observe DOM latch (data-prp-opt-held) + selection-nav busy — page-world e2e
+  // sets the opt attribute; selection jump stamps SELECTION_NAV_BUSY_ATTR.
   // MutationObserver + cheap interval; not per-frame rAF (many instances).
   useLayoutEffect(() => {
     let alive = true;
     const sync = () => {
       if (!alive) return;
-      const next = readDomOptHeld();
-      setDomHeld((prev) => (prev === next ? prev : next));
+      const nextHeld = readDomOptHeld();
+      const nextBusy = readSelectionNavBusy();
+      setDomHeld((prev) => (prev === nextHeld ? prev : nextHeld));
+      setNavBusy((prev) => (prev === nextBusy ? prev : nextBusy));
     };
     sync();
     let mo: MutationObserver | null = null;
@@ -66,7 +83,7 @@ export function OptBtnHint({
       mo = new MutationObserver(sync);
       mo.observe(document.documentElement, {
         attributes: true,
-        attributeFilter: ['data-prp-opt-held', 'class'],
+        attributeFilter: ['data-prp-opt-held', 'class', SELECTION_NAV_BUSY_ATTR],
       });
       if (document.body) {
         mo.observe(document.body, {
@@ -86,8 +103,8 @@ export function OptBtnHint({
   }, []);
   const show =
     showProp !== undefined
-      ? Boolean(showProp)
-      : Boolean(storeShow || domHeld);
+      ? Boolean(showProp) && !navBusy
+      : Boolean(storeShow || domHeld) && !navBusy;
   const anchorRef = useRef<HTMLSpanElement | null>(null);
   const tipRef = useRef<HTMLSpanElement | null>(null);
   const [placement, setPlacement] = useState<TipPlacement>(preferredPlacement);
@@ -123,13 +140,24 @@ export function OptBtnHint({
       return host;
     };
 
-    /** Hosts in keep-alive inactive panels still layout — never portal over them. */
+    /**
+     * Hosts in keep-alive inactive panels still layout — never portal over them.
+     * Do **not** reject opacity:0: selection floatbar uses prp-island-in
+     * (opacity 0→1, fill both). Opt-hold opens dock + hints together; if we
+     * wait for opacity>0, coords stay null and hints never paint (hover→then
+     * Opt works because the dock animation already finished).
+     */
     const hostIsLive = (box: HTMLElement) => {
+      const panel = box.closest?.('.prp-body-panel') as HTMLElement | null;
+      if (panel && !panel.classList.contains('prp-body-panel--active')) {
+        return false;
+      }
       if (typeof box.checkVisibility === 'function') {
         try {
+          // checkOpacity:false — enter animations start at opacity 0
           if (
             !box.checkVisibility({
-              checkOpacity: true,
+              checkOpacity: false,
               checkVisibilityCSS: true,
             } as any)
           ) {
@@ -139,12 +167,8 @@ export function OptBtnHint({
           /* older engines */
         }
       }
-      const panel = box.closest?.('.prp-body-panel') as HTMLElement | null;
-      if (panel && !panel.classList.contains('prp-body-panel--active')) {
-        return false;
-      }
       const cs = getComputedStyle(box);
-      if (cs.visibility === 'hidden' || cs.display === 'none' || Number(cs.opacity) === 0) {
+      if (cs.visibility === 'hidden' || cs.display === 'none') {
         return false;
       }
       const r = box.getBoundingClientRect();
@@ -204,8 +228,17 @@ export function OptBtnHint({
     };
 
     update();
-    // Second pass after portal paints real tip size
-    const raf = requestAnimationFrame(update);
+    // Portal tip size + floatbar enter animation (~180ms) — keep remeasuring
+    // so Opt-hold + dock mount land badges on the first frame that has geometry.
+    let raf = 0;
+    let frames = 0;
+    const maxFrames = 24; // ~400ms @ 60fps covers island-in
+    const tick = () => {
+      frames += 1;
+      update();
+      if (frames < maxFrames) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
     let ro: ResizeObserver | null = null;
     if (typeof ResizeObserver !== 'undefined') {
       ro = new ResizeObserver(update);

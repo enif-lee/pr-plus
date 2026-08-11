@@ -24,8 +24,8 @@ import {
 
 export const REPO = 'enif-lee/pr-plus';
 export const PULLS_URL = `https://github.com/${REPO}/pulls`;
-/** Preferred multi-thread conversation / keyboard PR (open) */
-export const DEMO_PR = 7;
+/** Preferred multi-thread conversation / keyboard PR (open). Was #7 (closed; reaction-locked). */
+export const DEMO_PR = 19;
 /**
  * Large architecture PR for heavy diff scroll.
  * Merged — not on default open /pulls; open via closed PR URL.
@@ -972,7 +972,15 @@ export function activeFileLabel() {
 export function selectionProbe() {
   return evalInPage(`
     (() => {
-      const selected = [...document.querySelectorAll('.prp-vline--selected')];
+      // Body selection uses .prp-vline--selected; file-header caret uses
+      // --header-selected / data-file-selected (plain ↑ from first body line).
+      const selected = [
+        ...document.querySelectorAll(
+          '.prp-vline--selected, .prp-vline--header-selected, [data-file-selected="1"]'
+        ),
+      ];
+      // De-dupe nodes that carry both selected + header-selected
+      const uniq = [...new Set(selected)];
       const roles = {
         start: document.querySelectorAll('.prp-vline--sel-start').length,
         middle: document.querySelectorAll('.prp-vline--sel-middle').length,
@@ -991,18 +999,32 @@ export function selectionProbe() {
         .map((b) => (b.textContent || '').replace(/\\s+/g, ' ').trim())
         .filter(Boolean);
       const headerSelected = !!document.querySelector(
-        '.prp-vline--header.prp-vline--selected'
+        '.prp-vline--header.prp-vline--selected, .prp-vline--header-selected, [data-file-selected="1"]'
       );
+      const headRole = document
+        .querySelector('.prp-vline[data-sel-head="1"]')
+        ?.getAttribute('data-sel-role') || null;
+      const dockPlace = dock?.getAttribute('data-dock-place') || null;
+      const optHintPlace = dock?.getAttribute('data-opt-hint-place') || null;
+      const dockAbove = !!dock?.classList?.contains?.('prp-selection-dock--above');
+      const hintPlacements = [...(dock?.querySelectorAll('kbd.prp-opt-btn-hint, .prp-opt-btn-hint') || [])]
+        .map((el) => el.getAttribute('data-placement') || null)
+        .filter(Boolean);
       return {
-        count: selected.length,
+        count: uniq.length,
         roles,
         dock: !!dock,
         dockCls: dock?.className?.slice(0, 100) || null,
+        dockPlace,
+        optHintPlace,
+        dockAbove,
+        hintPlacements,
         commentPhase,
         actionsPhase,
         fileTarget,
         btnLabels,
         headerSelected,
+        headRole,
       };
     })()
   `);

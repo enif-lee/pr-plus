@@ -62,7 +62,7 @@ describe('isDiffUnavailable (pure gate)', () => {
 describe('empty-diff gate wiring (static)', () => {
   const root = path.join(__dirname, '..');
   const app = fs.readFileSync(
-    path.join(root, 'src/modal/app/PrModalApp.impl.tsx'),
+    path.join(root, 'src/modal/app/PrModalShell.tsx'),
     'utf8'
   );
   const header = fs.readFileSync(

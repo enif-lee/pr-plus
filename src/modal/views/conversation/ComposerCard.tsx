@@ -9,6 +9,8 @@ import { Card } from '@common/Card';
 import { MarkdownComposer } from '@common/MarkdownComposer';
 import { OptBtnHint } from '@common/OptBtnHint';
 import { useT } from '@lib/locale-context';
+import { useDomainDetail } from '../../app/domain-detail-context';
+import { pendingReviewCount } from '@lib/pending-review';
 
 export function ComposerCard({
   composerMode,
@@ -18,7 +20,7 @@ export function ComposerCard({
   commentText,
   setCommentText,
   actionBusy,
-  detail,
+  detail: detailProp,
   commentBoxRef,
   onUploadFile,
   linkCtx,
@@ -55,9 +57,16 @@ export function ComposerCard({
   showShortcutHint?: boolean;
 }) {
   const t = useT();
+  // Host-data-first: prefer DomainContext when parent props lag progressive host.
+  const domainDetail = useDomainDetail();
+  const detail = domainDetail || detailProp;
+  const domainPending = Array.isArray(detail?.reviewComments)
+    ? detail.reviewComments.filter((c: any) => c && c.pending).length
+    : 0;
+  const effectivePending = Math.max(Number(pendingCount) || 0, Number(domainPending) || 0);
   const pendingThreadCount = Array.isArray(pendingReviewGroup?.threads)
     ? pendingReviewGroup.threads.length
-    : pendingCount;
+    : effectivePending;
   /** Typing in the composer field counts as focused for Opt badges. */
   const [fieldFocused, setFieldFocused] = useState(false);
   const hintsOn = Boolean(showShortcutHint || fieldFocused);
@@ -107,12 +116,12 @@ export function ComposerCard({
             title={`${t('cta_review')} (⌥T)`}
           >
             {t('cta_review')}
-            {pendingCount > 0 ? (
+            {effectivePending > 0 ? (
               <span
                 className="prp-composer-mode__badge ml-1 inline-flex min-w-[1.1rem] items-center justify-center rounded-full px-1 text-[10px] font-semibold"
                 title={t('cta_pending_review')}
               >
-                {pendingCount}
+                {effectivePending}
               </span>
             ) : null}
           </button>
@@ -240,7 +249,7 @@ export function ComposerCard({
                 size="sm"
                 loading={Boolean(actionBusy)}
                 disabled={
-                  !String(commentText || '').trim() && !pendingCount
+                  !String(commentText || '').trim() && !effectivePending
                 }
                 onClick={submitReview}
                 title={`${t('cta_submit_review_comment')} (⌥C · ⌘↵)`}
@@ -273,7 +282,7 @@ export function ComposerCard({
                 </Button>
               </>
             ) : null}
-            {pendingCount > 0 && typeof onDiscardPending === 'function' ? (
+            {effectivePending > 0 && typeof onDiscardPending === 'function' ? (
               <Button
                 size="sm"
                 variant="danger"

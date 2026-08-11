@@ -64,7 +64,7 @@ describe('SelectionCommentBar comment-phase OptBtnHints wiring', () => {
 
 describe('openSelectionComment focus after ⌥C', () => {
   test('App openSelectionComment sets comment phase and focuses selection composer', () => {
-    const src = read('src/modal/app/PrModalApp.impl.tsx');
+    const src = read('src/modal/app/PrModalShell.tsx');
     expect(src).toMatch(/openSelectionComment:\s*\(\)\s*=>\s*\{/);
     expect(src).toMatch(/setSelectionIslandPhase\('comment'\)/);
     expect(src).toMatch(/selectionIslandPhaseRef\.current\s*=\s*'comment'/);
@@ -78,7 +78,7 @@ describe('openSelectionComment focus after ⌥C', () => {
   });
 
   test('⌥C product chord dispatches openSelectionComment on Diff selection', () => {
-    const src = read('src/modal/app/PrModalApp.impl.tsx');
+    const src = read('src/modal/hooks/usePrModalHotkeys.ts');
     expect(src).toMatch(/reportShortcutAction\('openSelectionComment'\)/);
     expect(src).toMatch(/act\.openSelectionComment\?\.\(\)/);
   });

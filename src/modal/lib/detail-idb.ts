@@ -293,10 +293,12 @@ export type SanitizeDetailOptions = {
  */
 export function sanitizeDetailForCache(detail: any, opts: SanitizeDetailOptions = {}) {
   if (!detail || typeof detail !== 'object') return detail;
+  // Host-data-first: do not durable-cache _dropPending (it hid live GitHub
+  // PENDING after Discard). Ephemeral _fetchTimings/_metaSeq stay stripped.
   const {
     _fetchTimings: _t,
     _metaSeq: _m,
-    _dropPending: _d,
+    _dropPending: _dropIgnored,
     files,
     ...rest
   } = detail;
@@ -329,14 +331,78 @@ export function sanitizeDetailForCache(detail: any, opts: SanitizeDetailOptions 
       })
     : files;
 
+  // Never durable-cache orphan/demoted pending rows after Discard (vpr cleared).
+  // Demoted (pending:false + body) rehydrate on reopen as non-pending "ghost reviews".
+  const vprId = rest.viewerPendingReview?.id;
+  const hasVpr =
+    vprId != null && String(vprId).trim() !== '' && String(vprId) !== '0';
+  let reviewComments = Array.isArray(rest.reviewComments)
+    ? rest.reviewComments
+    : [];
+  let viewerPendingReview = rest.viewerPendingReview ?? null;
+  const deleted = new Set<string>();
+  const delSrc = rest._deletedReviewCommentIds;
+  if (delSrc instanceof Set) {
+    for (const id of delSrc) deleted.add(String(id));
+  } else if (Array.isArray(delSrc)) {
+    for (const id of delSrc) if (id != null) deleted.add(String(id));
+  }
+  const bodyTombs = new Set<string>(
+    Array.isArray(rest._deletedReviewBodies)
+      ? rest._deletedReviewBodies.map((b: any) => String(b || '').trim()).filter(Boolean)
+      : []
+  );
+  if (!hasVpr) {
+    viewerPendingReview = null;
+    const nextRc: any[] = [];
+    for (const c of reviewComments) {
+      if (!c || c.id == null) continue;
+      const id = String(c.id);
+      if (deleted.has(id)) continue;
+      const body = String(c.body || '').trim();
+      if (body && bodyTombs.has(body)) {
+        deleted.add(id);
+        continue;
+      }
+      // Drop PENDING / demoted pendingReviewId without auto id-tombs.
+      // Submit reuses those ids as published; Discard already set explicit tombs.
+      if (c.pending) {
+        continue;
+      }
+      if (
+        c.pendingReviewId != null &&
+        String(c.pendingReviewId).trim() !== '' &&
+        String(c.pendingReviewId) !== '0'
+      ) {
+        continue;
+      }
+      nextRc.push(c);
+    }
+    reviewComments = nextRc;
+  } else if (deleted.size || bodyTombs.size) {
+    // With live VPR, never tombstone pending rows out of the cache snapshot.
+    reviewComments = reviewComments.filter((c: any) => {
+      if (!c || c.id == null) return false;
+      if (c.pending) return true;
+      if (deleted.has(String(c.id))) return false;
+      const body = String(c.body || '').trim();
+      if (body && bodyTombs.has(body)) return false;
+      return true;
+    });
+  }
+
   return {
     ...rest,
     files: nextFiles,
     comments: Array.isArray(rest.comments) ? rest.comments : [],
     reviews: Array.isArray(rest.reviews) ? rest.reviews : [],
-    reviewComments: Array.isArray(rest.reviewComments) ? rest.reviewComments : [],
+    reviewComments,
     reviewThreads: Array.isArray(rest.reviewThreads) ? rest.reviewThreads : [],
     commits: Array.isArray(rest.commits) ? rest.commits : [],
+    viewerPendingReview,
+    // Keep id/body tombs for demoted ghosts only — not _dropPending latch.
+    _deletedReviewCommentIds: deleted.size ? [...deleted] : rest._deletedReviewCommentIds,
+    _deletedReviewBodies: bodyTombs.size ? [...bodyTombs] : rest._deletedReviewBodies,
     _cacheFull: wantFull ? true : undefined,
   };
 }

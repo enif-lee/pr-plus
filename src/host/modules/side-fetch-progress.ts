@@ -2,12 +2,18 @@
   /** Force-clear a stuck open progress pill after shell is interactive. */
   let openProgressWatchdogTimer = null;
   function armOpenProgressWatchdog(ms = 10_000) {
-    if (openProgressWatchdogTimer) clearTimeout(openProgressWatchdogTimer);
+    // Absolute deadline from the first critical stage. Re-arming on every
+    // label/percent update allowed a busy pill to extend indefinitely.
+    if (openProgressWatchdogTimer) return;
     openProgressWatchdogTimer = setTimeout(() => {
       openProgressWatchdogTimer = null;
       if (!current.open || !current.loadStage?.busy) return;
       const d = current.detail;
-      if (!d || (d.title == null && d.number == null) || current.loading) return;
+      if (!d || (d.title == null && d.number == null)) return;
+      if (current.loading) {
+        armOpenProgressWatchdog(1_000);
+        return;
+      }
       console.log(
         '[pr-plus] open progress watchdog: force clearLoadStage (shell ready, bar still busy)'
       );
@@ -69,21 +75,48 @@
     function mark(key, weight, phase, label, opts = null) {
       if (!progressAlive()) return tracker.percent();
       const res = tracker.complete(String(key), Number(weight) || 0);
-      // Cap at 99 while busy so clearLoadStage owns the 100 settle
-      const percent = Math.min(99, Math.max(0, res.percent));
+      const has = (k) => tracker.has(k);
+      const lp = globalThis.PRModalLoadProgress;
+      // Critical bar % only (sides do not dilute 0–100 progress)
+      let percent = Math.min(99, Math.max(0, res.percent));
+      if (typeof lp?.criticalProgressPercent === 'function') {
+        percent = Math.min(
+          99,
+          Math.max(0, Number(lp.criticalProgressPercent(has, prog.weights)) || 0)
+        );
+      }
       if (res.added) {
-        setLoadStage(phase, label, true, {
-          percent,
-          ...(opts && typeof opts === 'object' ? opts : {}),
-        });
+        const criticalOk =
+          typeof lp?.criticalProgressComplete === 'function'
+            ? Boolean(lp.criticalProgressComplete(has))
+            : false;
+        const allOk =
+          typeof lp?.openProgressFullyComplete === 'function'
+            ? Boolean(lp.openProgressFullyComplete(has))
+            : false;
+        if (allOk) {
+          // tryFinish will clear
+        } else if (criticalOk) {
+          // Progress bar done — show stats + border loading
+          setLoadStage('background', null, false, {
+            mode: 'background',
+            background: true,
+            percent: 100,
+            ...(opts && typeof opts === 'object' ? opts : {}),
+          });
+        } else {
+          setLoadStage(phase, label, true, {
+            percent,
+            mode: 'critical',
+            ...(opts && typeof opts === 'object' ? opts : {}),
+          });
+        }
         try {
           render();
         } catch {
           /* ignore */
         }
       }
-      // Thread ladder last key (reactions) must settle here — markSideProgress
-      // alone used to call tryFinish; mark() did not, so reconnect stuck at ~99%.
       tryFinishOpenProgress(prog);
       return percent;
     }
@@ -101,18 +134,47 @@
   }
 
   function setLoadStage(phase, label, busy = true, opts = null) {
-    if (!phase && !label) {
+    if (!phase && !label && !(opts && (opts.mode === 'background' || opts.background))) {
       current.loadStage = null;
       return;
     }
-    const b = Boolean(busy);
-    // Revalidate/reconnect: threads kickoff often finishes during core paint and
-    // tryFinish already cleared the bar. Later setLoadStage('threads-update',
-    // { percent: prog.percent() }) was re-raising a 100% "Updating review
-    // threads…" pill for the whole unresolved/post-await window.
-    // Do not re-raise the bar once all open units are already credited
-    // (reconnect post-await setLoadStage used to stick at 100%).
-    if (b && isOpenProgressComplete(activeOpenProgress)) {
+    const modeRaw =
+      opts && opts.mode != null
+        ? String(opts.mode)
+        : opts && opts.background
+          ? 'background'
+          : null;
+    const isBackground = modeRaw === 'background' || Boolean(opts?.background);
+    const b = Boolean(busy) && !isBackground;
+    // Do not re-raise **critical** progress once critical (or full) is complete.
+    if (b && isCriticalProgressComplete(activeOpenProgress)) {
+      if (isOpenProgressComplete(activeOpenProgress)) {
+        clearLoadStage();
+        try {
+          render();
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
+      // Stay on background border loading
+      current.loadStage = {
+        phase: 'background',
+        label: null,
+        busy: false,
+        percent: 100,
+        mode: 'background',
+        background: true,
+      };
+      try {
+        publishE2eLoadHook('setLoadStage:background:hold');
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+    // Full done: refuse any re-raise
+    if ((b || isBackground) && isOpenProgressComplete(activeOpenProgress)) {
       clearLoadStage();
       try {
         render();
@@ -128,7 +190,7 @@
       opts && Number.isFinite(opts.percent)
         ? Math.min(100, Math.max(0, Math.round(opts.percent)))
         : loadStagePercent(phase, b, fraction);
-    // Never decrease percent during a busy session (parallel completions can race).
+    // Never decrease percent during a busy critical session (parallel races).
     // Busy hard-cap 99 — only clearLoadStage removes the pill (never show 100% stuck).
     const prev =
       current.loadStage && Number.isFinite(current.loadStage.percent)
@@ -144,14 +206,16 @@
       : percent;
     current.loadStage = {
       phase: phase || null,
-      label: label || null,
+      label: isBackground ? null : label || null,
       busy: b,
       percent: nextPercent,
+      mode: isBackground ? 'background' : b ? 'critical' : modeRaw || null,
+      background: isBackground,
     };
     if (b) armOpenProgressWatchdog(10_000);
     try {
       publishE2eLoadHook(
-        `setLoadStage:${phase || ''}:${b ? 'busy' : 'idle'}`
+        `setLoadStage:${phase || ''}:${isBackground ? 'background' : b ? 'busy' : 'idle'}`
       );
     } catch {
       /* ignore */
@@ -303,6 +367,18 @@
       openProgressWatchdogTimer = null;
     }
     try {
+      if (typeof clearBackgroundHoldTimer === 'function') {
+        clearBackgroundHoldTimer();
+      }
+    } catch {
+      /* ignore */
+    }
+    try {
+      backgroundHoldUntil = 0;
+    } catch {
+      /* ignore */
+    }
+    try {
       const tl = getFetchTimeline();
       if (tl) {
         tl.mark('session', 'done', { note: 'load stage cleared' });
@@ -354,4 +430,3 @@
     }) ||
     globalThis.PRModalDetailCache?.createDetailCache?.({ ttlMs: 60_000 }) ||
     createFallbackCache();
-

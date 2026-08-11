@@ -388,7 +388,7 @@ export function getSteps() {
     seed = seedMermaidComment();
     log(`  seeded mermaid comment mark=${seed.mark} id=${seed.id}`);
     assert(seed.id, `gh seed comment failed (no id): ${JSON.stringify(seed)}`);
-    // Full-suite: prior files leave content-script detailCache for #7. Bust
+    // Full-suite: prior files leave content-script detailCache for DEMO_PR. Bust
     // before open so REST issue comments include the brand-new seed.
     reopenConversationFresh('VG.0');
   });
@@ -411,7 +411,7 @@ export function getSteps() {
         log(`  deep-link open soft-fail: ${e?.message || e}`);
       }
     }
-    // Dense PR #7: seed may sit past first timeline page — Load more until mark.
+    // Dense DEMO_PR: seed may sit past first timeline page — Load more until mark.
     let found = waitForMermaidExpand(seed.mark, 12_000);
     for (let i = 0; i < 8 && !found?.hasMark; i++) {
       const clicked = evalInPage(`
@@ -479,11 +479,18 @@ export function getSteps() {
 
     // Expand can race mermaid paint after long suites — retry with broader
     // selectors (ko/en labels + data attrs).
+    const seedAnchor = seed.id ? `[data-search-anchor="issue-comment:${seed.id}"]` : '';
     let opened = null;
     for (let attempt = 0; attempt < 6; attempt++) {
       opened = evalInPage(`
         (() => {
+          const seedRoot = ${JSON.stringify(seedAnchor)}
+            ? document.querySelector(${JSON.stringify(seedAnchor)})
+            : null;
           const pick = () =>
+            seedRoot?.querySelector(
+              '.prp-mermaid__expand, [data-prp-mermaid-expand="1"]'
+            ) ||
             document.querySelector('.prp-mermaid__expand, [data-prp-mermaid-expand="1"]') ||
             [...document.querySelectorAll('button, a, [role="button"]')].find((b) =>
               /자세히|전체|fullscreen|expand|diagram|viewer/i.test(
@@ -524,12 +531,18 @@ export function getSteps() {
       if (opened?.ok) break;
       waitMs(400);
     }
-    waitMs(500);
+    waitMs(700);
     let viewer = evalInPage(`
       (() => {
-        const v = document.querySelector('[data-prp-mermaid-viewer="1"]');
-        const stage = document.querySelector('.prp-mermaid-viewer__stage');
-        const canvas = document.querySelector('.prp-mermaid-viewer__canvas');
+        const v = document.querySelector(
+          '[data-prp-mermaid-viewer="1"], .prp-mermaid-viewer, [class*="mermaid-viewer"]'
+        );
+        const stage = document.querySelector(
+          '.prp-mermaid-viewer__stage, [class*="mermaid-viewer__stage"]'
+        );
+        const canvas = document.querySelector(
+          '.prp-mermaid-viewer__canvas, [class*="mermaid-viewer__canvas"]'
+        );
         const svg = canvas?.querySelector?.('svg');
         return {
           viewer: !!v,
@@ -540,13 +553,40 @@ export function getSteps() {
         };
       })()
     `);
-    // Retry expand once
-    if (!viewer?.viewer) {
-      evalInPage(`document.querySelector('.prp-mermaid__expand')?.click?.()`);
-      waitMs(500);
+    // Retry expand with more attempts (React paint can lag under suite pressure)
+    for (let r = 0; r < 5 && !viewer?.viewer; r++) {
+      evalInPage(`
+        (() => {
+          const seedRoot = ${JSON.stringify(seedAnchor)}
+            ? document.querySelector(${JSON.stringify(seedAnchor)})
+            : null;
+          const exact = seedRoot?.querySelector(
+            '[data-prp-mermaid-expand="1"], .prp-mermaid__expand'
+          );
+          const btns = [
+            ...document.querySelectorAll(
+              '[data-prp-mermaid-expand="1"], .prp-mermaid__expand'
+            ),
+          ];
+          // Prefer expand on the in-view mermaid wrap that has our seed mark nearby
+          let btn = exact || btns.find((b) => {
+            const wrap = b.closest?.('.prp-mermaid-wrap, .prp-card, [data-search-anchor]');
+            const host = wrap || b.parentElement;
+            const t = (host?.textContent || '').slice(0, 400);
+            return /e2e-mermaid|flowchart/i.test(t);
+          }) || btns[0];
+          if (!btn) return false;
+          btn.scrollIntoView?.({ block: 'center' });
+          btn.click();
+          return true;
+        })()
+      `);
+      waitMs(450);
       viewer = evalInPage(`
         (() => {
-          const v = document.querySelector('[data-prp-mermaid-viewer="1"]');
+          const v = document.querySelector(
+            '[data-prp-mermaid-viewer="1"], .prp-mermaid-viewer'
+          );
           const stage = document.querySelector('.prp-mermaid-viewer__stage');
           const canvas = document.querySelector('.prp-mermaid-viewer__canvas');
           return {

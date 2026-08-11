@@ -117,13 +117,13 @@ describe('viewer wiring (static shipped sources)', () => {
     const fs = await import('node:fs');
     const path = await import('node:path');
     const root = path.resolve(__dirname, '..');
-    const app = fs.readFileSync(
-      path.join(root, 'src/modal/app/PrModalApp.impl.tsx'),
+    const hotkeys = fs.readFileSync(
+      path.join(root, 'src/modal/hooks/usePrModalHotkeys.ts'),
       'utf8'
     );
-    expect(app).toMatch(/data-prp-mermaid-viewer/);
-    expect(app).toMatch(/data-prp-image-viewer/);
-    expect(app).toMatch(/!viewerOpen/);
+    expect(hotkeys).toMatch(/data-prp-mermaid-viewer/);
+    expect(hotkeys).toMatch(/data-prp-image-viewer/);
+    expect(hotkeys).toMatch(/!viewerOpen/);
   });
 });
 

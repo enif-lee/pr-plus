@@ -12,6 +12,8 @@
   border: 0;
   background: transparent;
   min-width: 0;
+  /* Host is transparent; painted radius lives on .prp-comment-minimized (6px).
+   * Kb-focus ring targets the banner child (DiffSearchMarks). */
 }
 .prp-comment-minimized {
   display: flex;
@@ -26,6 +28,7 @@
   font-size: 12px;
   line-height: 1.35;
   color: var(--prp-fg-muted, #656d76);
+  box-sizing: border-box;
 }
 .prp-comment-minimized--compact {
   /* Single thin row — no surrounding full comment chrome */
@@ -309,11 +312,6 @@
   border-top: 1px solid var(--prp-border-muted);
   padding: 0;
 }
-.prp-review-group__thread .prp-conversation-inline-thread {
-  margin: 0;
-  border: 0;
-  border-radius: 0;
-}
 .prp-review-group__thread .prp-inline-thread__hunk,
 .prp-review-group__thread .prp-inline-thread__card {
   border-radius: 0;
@@ -337,12 +335,25 @@
   outline: none;
 }
 
+/*
+ * Conversation review-thread unit chrome: ALWAYS drawn (independent of
+ * comment unit-focus / kb-focus). Kb-focus only elevates accent; do not
+ * remove this border when an inner comment is unit-focused.
+ */
 .prp-conversation-inline-thread {
   margin: 0 0 var(--prp-gap-stack, 14px);
   border: 1px solid var(--prp-border);
-  border-radius: 0;
+  /* Match .prp-card / shell (10px) so focus ring geometry aligns */
+  border-radius: 10px;
   background: var(--prp-bg);
   overflow: hidden;
+  box-sizing: border-box;
+}
+/* Nested under a review-group path row: outer row owns the always-on unit outline */
+.prp-review-group__thread .prp-conversation-inline-thread {
+  border: 0;
+  border-radius: 0;
+  margin: 0;
 }
 .prp-conversation-inline-thread .prp-inline-thread {
   margin: 0;

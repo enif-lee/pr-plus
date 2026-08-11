@@ -54,7 +54,7 @@ describe('refresh wiring (static shipped sources)', () => {
       'utf8'
     );
     const app = fs.readFileSync(
-      path.join(root, 'src/modal/app/PrModalApp.impl.tsx'),
+      path.join(root, 'src/modal/app/PrModalShell.tsx'),
       'utf8'
     );
     expect(palette).toMatch(/refresh-pr/);

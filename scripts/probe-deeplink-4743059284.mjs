@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-path deep-link probe for issue comment hashes on PR #7.
+ * Real-path deep-link probe for issue comment hashes on PR #19 (was #7).
  *
  *   COMMENT_ID=5175738702 node scripts/probe-deeplink-4743059284.mjs
  *   COMMENT_ID=4743059284 node scripts/probe-deeplink-4743059284.mjs  # goal URL (may 404 on GH)
@@ -21,7 +21,7 @@ import {
 const COMMENT_ID = String(process.env.COMMENT_ID || '4743059284');
 const TARGET_URL =
   process.env.TARGET_URL ||
-  `https://github.com/enif-lee/pr-plus/pull/7#issuecomment-${COMMENT_ID}`;
+  `https://github.com/enif-lee/pr-plus/pull/19#issuecomment-${COMMENT_ID}`;
 const BUDGET_MS = Number(process.env.BUDGET_MS || 30_000);
 
 function probe() {

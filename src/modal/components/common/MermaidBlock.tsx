@@ -239,6 +239,7 @@ export function MermaidBlock({ code }: { code?: string }) {
         <button
           type="button"
           className="prp-mermaid__expand"
+          data-prp-mermaid-expand="1"
           onClick={() => setViewerOpen(true)}
           title="View diagram fullscreen"
           aria-label="View diagram fullscreen"

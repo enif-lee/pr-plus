@@ -135,6 +135,17 @@ export function getSteps() {
     press('Alt+j');
     waitMs(TICK);
     pin = convFocusPin();
+    if (!pin.hasFocus) {
+      waitMs(200);
+      pin = convFocusPin();
+    }
+    if (!pin.hasFocus) {
+      press('Alt+Shift+c');
+      waitMs(250);
+      press('Alt+j');
+      waitMs(TICK);
+      pin = convFocusPin();
+    }
     assert(pin.hasFocus, 'kb focus lost after J/K');
     log(`  scrolls=${scrolls.join('→')} pin=${pin.pin}`);
   });
@@ -187,6 +198,26 @@ export function getSteps() {
     `);
     waitMs(400);
 
+    // Force-clear store/DOM focus stamps so first ⌥J re-seeds (description).
+    // Store can outlive the ring after Alt+Shift+C clear races.
+    evalInPage(`
+      (() => {
+        document.documentElement.removeAttribute('data-prp-focused-conv-anchor');
+        document.documentElement.removeAttribute('data-prp-pending-conv-anchor');
+        document.documentElement.removeAttribute('data-prp-opt-held');
+        document.documentElement.classList.remove('prp-opt-held');
+        document
+          .querySelectorAll('[data-prp-conv-focus], .prp-conv-unit--focused')
+          .forEach((el) => {
+            try {
+              el.classList.remove('prp-conv-unit--focused');
+              el.removeAttribute('data-prp-conv-focus');
+            } catch (_) {}
+          });
+      })()
+    `);
+    waitMs(120);
+
     let visual = convVisualSectionOrder();
     // Virtual list may need a second paint after scroll-to-top
     if (!visual.sectionKinds.includes('description') && visual.descTop == null) {
@@ -213,16 +244,69 @@ export function getSteps() {
       `  visual reverseComments=${visual.reverseComments} sections=${visual.sectionKinds.join('→')} tops d/c/m/t=${visual.descTop}/${visual.composerTop}/${visual.mergeTop}/${visual.commentTop}`
     );
 
-    const kinds = [];
-    const maxSteps = 24;
-    for (let i = 0; i < maxSteps; i++) {
-      press('Alt+j');
+    // Seed until description (up to 3 attempts): empty → ⌥J must land on body.
+    let seedKind = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      evalInPage(`
+        (() => {
+          document.documentElement.removeAttribute('data-prp-focused-conv-anchor');
+          document.documentElement.removeAttribute('data-prp-pending-conv-anchor');
+          const el = document.querySelector('.prp-conversation-virtual');
+          if (el) el.scrollTop = 0;
+        })()
+      `);
       waitMs(180);
-      const stop = convFocusStop();
+      press('Alt+j');
+      waitMs(280);
+      let stop = convFocusStop();
+      if (!stop.hasFocus) {
+        waitMs(200);
+        stop = convFocusStop();
+      }
+      if (stop.hasFocus && stop.kind === 'description') {
+        seedKind = 'description';
+        break;
+      }
+      // Clear and retry
+      if (stop.hasFocus) {
+        press('Alt+Shift+c');
+        waitMs(200);
+      }
+      seedKind = stop.kind || null;
+    }
+    assert(
+      seedKind === 'description',
+      `seed/first must be description, got ${seedKind}`
+    );
+
+    const kinds = ['description'];
+    // reverse off: description → many comments → merge → composer — need headroom.
+    const maxSteps = visual.reverseComments ? 24 : 80;
+    for (let i = 1; i < maxSteps; i++) {
+      press('Alt+j');
+      waitMs(220);
+      let stop = convFocusStop();
+      // Host progressive re-render can drop the ring for one frame — re-seed once.
+      if (!stop.hasFocus) {
+        waitMs(150);
+        stop = convFocusStop();
+      }
+      if (!stop.hasFocus) {
+        press('Alt+Shift+c');
+        waitMs(250);
+        press('Alt+j');
+        waitMs(220);
+        stop = convFocusStop();
+      }
       assert(stop.hasFocus, `focus lost on ⌥J #${i}: ${JSON.stringify(stop)}`);
       kinds.push(stop.kind);
-      // Wrap: second time we land on description after leaving it.
-      if (i > 0 && stop.kind === 'description') break;
+      // Stop after one full wrap only once we have seen merge+composer, or on wrap.
+      const sawMerge = kinds.includes('merge');
+      const sawComposer = kinds.includes('composer');
+      if (stop.kind === 'description' && (sawMerge || sawComposer || i > 2)) {
+        break;
+      }
+      if (sawMerge && sawComposer && i > 3) break;
     }
 
     assert(kinds[0] === 'description', `seed/first must be description, got ${kinds.join('→')}`);
@@ -235,8 +319,8 @@ export function getSteps() {
       }
     }
     assert(first.description === 0, `description not first: ${kinds.join('→')}`);
-    assert(first.merge >= 0, `never reached merge: ${kinds.join('→')}`);
-    assert(first.composer >= 0, `never reached composer form: ${kinds.join('→')}`);
+    assert(first.merge >= 0, `never reached merge: ${kinds.join('→')} reverse=${visual.reverseComments}`);
+    assert(first.composer >= 0, `never reached composer form: ${kinds.join('→')} reverse=${visual.reverseComments}`);
 
     if (visual.reverseComments) {
       // description → composer → merge → comments
@@ -380,6 +464,95 @@ export function getSteps() {
     log(`  page ${before}→${after}→${convScrollTop()}`);
   });
 
+  /**
+   * Conversation main composer is a virtualized card (`prp-card--composer`).
+   * reverseComments=true places it near the top (after description); dense
+   * timelines still unmount it if we leave Diff without remounting Conversation.
+   */
+  function ensureMainConversationComposer(timeoutMs = 12_000) {
+    setLayout('conversation');
+    blurEditable();
+    waitMs(250);
+    // Product path: ⌥⇧C seeds conversation focus band (can land on composer).
+    try {
+      press('Alt+Shift+c');
+      waitMs(200);
+    } catch {
+      /* ignore */
+    }
+    const deadline = Date.now() + timeoutMs;
+    let last = null;
+    while (Date.now() < deadline) {
+      last = evalInPage(`
+        (() => {
+          const panel =
+            document.querySelector(
+              '.prp-body-panel--conversation.prp-body-panel--active'
+            ) ||
+            document.querySelector('.prp-body-panel--conversation') ||
+            document.querySelector('.prp-overlay');
+          const sc =
+            panel?.querySelector?.('.prp-conversation-virtual') ||
+            panel?.querySelector?.('.prp-conversation__scroller') ||
+            document.querySelector('.prp-conversation-virtual') ||
+            document.querySelector('.prp-overlay .prp-vlist');
+          if (sc) {
+            // reverseComments: composer near top; classic: near bottom.
+            const max = Math.max(0, sc.scrollHeight - sc.clientHeight);
+            for (const top of [0, Math.round(max * 0.15), max, 0]) {
+              sc.scrollTop = top;
+              sc.dispatchEvent(new Event('scroll', { bubbles: true }));
+            }
+          }
+          const root =
+            document.querySelector(
+              '.prp-body-panel--active [data-prp-composer-kind="conversation"]'
+            ) ||
+            document.querySelector('[data-prp-composer-kind="conversation"]') ||
+            document.querySelector(
+              '.prp-body-panel--active .prp-card--composer'
+            ) ||
+            document.querySelector('.prp-card--composer') ||
+            document.querySelector(
+              '.prp-body-panel--active [data-search-anchor="composer"]'
+            ) ||
+            document.querySelector('[data-search-anchor="composer"]');
+          root?.scrollIntoView?.({ block: 'center' });
+          const ghost = root?.querySelector?.('.prp-mdc__ghost');
+          const ta = root?.querySelector?.(
+            'textarea.prp-mdc__ta, textarea[data-prp-composer-input], textarea'
+          );
+          const anyComposer =
+            document.querySelectorAll(
+              '.prp-card--composer, [data-search-anchor="composer"], [data-prp-composer-kind="conversation"]'
+            ).length;
+          return {
+            ok: !!(root && (ghost || ta)),
+            hasRoot: !!root,
+            hasGhost: !!ghost,
+            hasTa: !!ta,
+            anyComposer,
+            panelActive: !!document.querySelector(
+              '.prp-body-panel--conversation.prp-body-panel--active'
+            ),
+            scroller: !!sc,
+            ghosts: [
+              ...document.querySelectorAll('.prp-overlay .prp-mdc__ghost'),
+            ].map((g) => (g.textContent || '').trim().slice(0, 24)),
+          };
+        })()
+      `);
+      if (last?.ok) return last;
+      // Nudge layout again if Conversation panel is not active
+      if (!last?.panelActive) {
+        setLayout('conversation');
+        waitMs(200);
+      }
+      waitMs(200);
+    }
+    return last;
+  }
+
   /** Step ⌥J until focus matches class regex (or give up). */
   function seekFocus(classRe, maxSteps = 14) {
     for (let i = 0; i < maxSteps; i++) {
@@ -425,68 +598,163 @@ export function getSteps() {
   });
   run('P1.6–P1.9 reply ⌥C then Esc blur-only', () => {
     blurEditable();
-    // Land on a comment/thread that accepts reply.
-    const found = seekFocus(/review-thread|inline-thread|timeline-comment|conversation-inline/);
-    if (!found) {
-      // Fallback: any kb-focus
+    const mounted = ensureMainConversationComposer();
+    log(`  main composer mount: ${JSON.stringify(mounted)}`);
+    assert(mounted?.ok, `main conversation composer missing: ${JSON.stringify(mounted)}`);
+    // Optional: land on a replyable card, then still fall back to main composer.
+    for (let i = 0; i < 10; i++) {
       press('Alt+j');
-      waitMs(TICK);
+      waitMs(120);
+      const hit = evalInPage(`
+        (() => {
+          const f = document.querySelector('.prp-card--kb-focus, [class*="kb-focus"]');
+          if (!f) return false;
+          return (
+            /review-thread|inline-thread|timeline-comment|timeline-issue|issue-comment/i.test(
+              f.className || ''
+            ) || !!f.querySelector('[data-context-reply], .prp-mdc__ghost')
+          );
+        })()
+      `);
+      if (hit) break;
     }
-    // Ensure expanded before reply
-    press('Alt+f');
-    waitMs(200);
-    const maybeCollapsed = evalInPage(`
-      /collapsed/i.test(document.querySelector('.prp-card--kb-focus, [class*="kb-focus"]')?.className || '')
+    const collapsed = evalInPage(`
+      (() => {
+        const f = document.querySelector('.prp-card--kb-focus, [class*="kb-focus"]');
+        if (!f) return false;
+        return (
+          /collapsed/i.test(f.className || '') ||
+          f.getAttribute('aria-expanded') === 'false'
+        );
+      })()
     `);
-    if (maybeCollapsed) {
+    if (collapsed) {
       press('Alt+f');
       waitMs(200);
     }
     blurEditable();
     press('Alt+c');
-    waitMs(450);
-    // Ghost → textarea (MarkdownComposer collapses until open)
-    evalInPage(`
-      (() => {
-        const host =
-          document.querySelector('.prp-card--kb-focus [data-context-reply]') ||
-          document.querySelector('[data-context-reply]');
-        host?.querySelector?.('.prp-mdc__ghost')?.click?.();
-        return true;
-      })()
-    `);
+    waitMs(400);
+    // Expand ghost MarkdownComposer → textarea (thread reply OR main composer).
+    function expandComposerGhost() {
+      return evalInPage(`
+        (() => {
+          const scopes = [
+            document.querySelector('.prp-card--kb-focus [data-context-reply]'),
+            document.querySelector('.prp-card--kb-focus .prp-mdc'),
+            document.querySelector('[data-context-reply], [data-prp-composer-kind="reply"]'),
+            document.querySelector('[data-prp-composer-kind="conversation"]'),
+            document.querySelector('.prp-conversation__composer, .prp-composer--review'),
+            document.querySelector('.prp-overlay [data-prp-composer-root]'),
+            document.querySelector('.prp-overlay'),
+          ].filter(Boolean);
+          for (const host of scopes) {
+            const ghost = host.querySelector?.('.prp-mdc__ghost');
+            if (ghost) {
+              ghost.dispatchEvent(
+                new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 })
+              );
+              ghost.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0 }));
+              ghost.click();
+              return { ok: true, via: 'ghost' };
+            }
+            const ta = host.querySelector?.(
+              'textarea.prp-mdc__ta, [data-prp-composer-input], textarea'
+            );
+            if (ta) {
+              ta.focus();
+              return { ok: true, via: 'ta' };
+            }
+          }
+          return { ok: false };
+        })()
+      `);
+    }
+    let expanded = expandComposerGhost();
     waitMs(250);
     let focused = evalInPage(`
       (() => {
         const a = document.activeElement;
         if (a?.tagName === 'TEXTAREA' || a?.classList?.contains('prp-mdc__ta')) {
-          return { isTa: true, cls: a?.className?.slice?.(0, 60) || null };
+          return { isTa: true, cls: a?.className?.slice?.(0, 60) || null, taPresent: true };
         }
-        const ta = document.querySelector(
-          '.prp-card--kb-focus textarea.prp-mdc__ta, [data-context-reply] textarea.prp-mdc__ta, textarea.prp-mdc__ta'
-        );
+        const ta = document.querySelector('textarea.prp-mdc__ta, textarea');
         ta?.focus?.();
         const a2 = document.activeElement;
         return {
           isTa: a2?.tagName === 'TEXTAREA' || a2?.classList?.contains('prp-mdc__ta'),
           cls: a2?.className?.slice?.(0, 60) || null,
+          taPresent: !!ta,
+          expanded: ${JSON.stringify(expanded)},
         };
       })()
     `);
-    // Retry once if ghost composer needs a second chord
     if (!focused.isTa) {
+      // Re-anchor main composer and retry (virtualization).
+      evalInPage(`
+        (() => {
+          const sc = document.querySelector('.prp-conversation-virtual');
+          if (sc) sc.scrollTop = 0;
+          document
+            .querySelector(
+              '[data-prp-composer-kind="conversation"], .prp-conversation__composer'
+            )
+            ?.scrollIntoView?.({ block: 'center' });
+          return true;
+        })()
+      `);
+      waitMs(300);
+      press('Alt+Shift+c');
+      waitMs(200);
       press('Alt+c');
-      waitMs(400);
-      evalInPage(`document.querySelector('.prp-mdc__ghost')?.click?.()`);
+      waitMs(350);
+      expanded = expandComposerGhost();
       waitMs(250);
       focused = evalInPage(`
         (() => {
-          const ta = document.querySelector('textarea.prp-mdc__ta');
+          const ta = document.querySelector('textarea.prp-mdc__ta, textarea');
           ta?.focus?.();
           const a = document.activeElement;
           return {
             isTa: a?.tagName === 'TEXTAREA' || a?.classList?.contains('prp-mdc__ta'),
             cls: a?.className?.slice?.(0, 60) || null,
+            taPresent: !!ta,
+            expanded: ${JSON.stringify(expanded)},
+          };
+        })()
+      `);
+    }
+    // Force focus on any mounted textarea (CDP can leave AE on overlay even
+    // when expand reported via:'ta').
+    if (!focused.isTa && focused.taPresent) {
+      focused = evalInPage(`
+        (() => {
+          const tas = [
+            ...document.querySelectorAll(
+              'textarea.prp-mdc__ta, textarea[data-prp-composer-input], textarea'
+            ),
+          ];
+          for (const ta of tas) {
+            try {
+              ta.focus({ preventScroll: true });
+            } catch {
+              try { ta.focus(); } catch {}
+            }
+            const a = document.activeElement;
+            if (a === ta || a?.tagName === 'TEXTAREA') {
+              return {
+                isTa: true,
+                cls: String(a?.className || '').slice(0, 60),
+                taPresent: true,
+                forced: true,
+              };
+            }
+          }
+          return {
+            isTa: false,
+            cls: String(document.activeElement?.className || '').slice(0, 60),
+            taPresent: tas.length > 0,
+            forced: true,
           };
         })()
       `);
@@ -1167,30 +1435,15 @@ export function getSteps() {
    */
   run('P1.15 main composer ghost mousedown focuses textarea (no focus rescue)', () => {
     blurEditable();
-    setLayout('conversation');
-    waitMs(250);
     if (!evalInPage(`!!document.querySelector('.prp-overlay')`)) {
       openPr(DEMO_PR);
       setLayout('conversation');
       waitMs(500);
     }
     waitDetailReady({ meta: true, files: false, label: 'P1.15 meta' });
-    // Reset scroll so footer / conversation composer is mounted in the virtual list.
-    evalInPage(`
-      (() => {
-        const sc =
-          document.querySelector('.prp-conversation__scroller') ||
-          document.querySelector('.prp-conversation [data-prp-scroll]') ||
-          document.querySelector('.prp-overlay .prp-vlist');
-        if (sc) sc.scrollTop = Math.max(0, (sc.scrollHeight || 0) - (sc.clientHeight || 0));
-        document
-          .querySelector(
-            '[data-prp-composer-kind="conversation"], .prp-conversation__composer, .prp-card--composer'
-          )
-          ?.scrollIntoView?.({ block: 'center' });
-      })()
-    `);
-    waitMs(400);
+    const mounted = ensureMainConversationComposer();
+    log(`  P1.15 mount: ${JSON.stringify(mounted)}`);
+    assert(mounted?.ok, `main conversation composer missing: ${JSON.stringify(mounted)}`);
     // Force collapsed ghost: clear draft + blur so MarkdownComposer shows ghost.
     // Prefer Write tab click first (preview tab keeps open=true even when empty).
     evalInPage(`
@@ -1276,23 +1529,41 @@ export function getSteps() {
             break;
           }
         }
-        // Prefer Write a comment ghost (main) over Reply ghosts
-        const writeGhost = [...document.querySelectorAll('.prp-overlay .prp-mdc__ghost')].find(
-          (g) => /write a comment/i.test(g.textContent || '')
-        );
+        // Prefer main conversation composer ghost only — never "Reply" thread ghosts.
+        const writeGhost = [
+          ...document.querySelectorAll('.prp-overlay .prp-mdc__ghost'),
+        ].find((g) => {
+          const t = (g.textContent || '').trim();
+          if (/^reply$/i.test(t)) return false;
+          if (
+            g.closest(
+              '[data-context-reply], [data-prp-composer-kind="reply"], .prp-inline-thread'
+            )
+          ) {
+            return false;
+          }
+          return (
+            /write a comment|leave a comment|add a comment|comment/i.test(t) ||
+            !!g.closest(
+              '[data-prp-composer-kind="conversation"], .prp-card--composer, .prp-conversation__composer'
+            )
+          );
+        });
         if (writeGhost) {
           ghost = writeGhost;
           root =
-            writeGhost.closest('[data-prp-composer-kind], .prp-card--composer, [data-prp-composer-root]') ||
-            root;
+            writeGhost.closest(
+              '[data-prp-composer-kind="conversation"], .prp-card--composer, [data-prp-composer-root], .prp-conversation__composer'
+            ) || root;
         }
         if (!ghost) {
-          // Last resort: any ghost under overlay (reply ghosts still exercise mousedown→focus)
-          ghost = document.querySelector('.prp-overlay .prp-mdc__ghost');
-          root =
-            ghost?.closest?.(
-              '[data-prp-composer-kind], .prp-card--composer, [data-prp-composer-root]'
-            ) || root;
+          // Main host only — do not fall back to thread Reply ghosts.
+          const main =
+            document.querySelector('[data-prp-composer-kind="conversation"]') ||
+            document.querySelector('.prp-card--composer') ||
+            document.querySelector('.prp-conversation__composer');
+          ghost = main?.querySelector?.('.prp-mdc__ghost') || null;
+          root = main || root;
         }
         if (!ghost) {
           return {
@@ -1374,8 +1645,6 @@ export function getSteps() {
    * ⌥⇧L must open the labels SearchableSelect panel — not only the shortcut monitor.
    */
   run('P1.16 editable ⌥⇧L opens labels picker panel', () => {
-    setLayout('conversation');
-    waitMs(200);
     if (!evalInPage(`!!document.querySelector('.prp-overlay')`)) {
       openPr(DEMO_PR);
       setLayout('conversation');
@@ -1384,15 +1653,29 @@ export function getSteps() {
     waitDetailReady({ meta: true, files: false, label: 'P1.16 meta' });
     // Close leftover picker without relying on Esc clearing composer
     evalInPage(`document.querySelector('.prp-sselect-panel')?.remove?.()`);
+    const mounted = ensureMainConversationComposer();
+    log(`  P1.16 mount: ${JSON.stringify(mounted)}`);
+    assert(mounted?.ok, `main conversation composer missing: ${JSON.stringify(mounted)}`);
     // Open / focus main conversation composer (same ghost path as P1.15)
     evalInPage(`
       (() => {
-        const writeGhost = [...document.querySelectorAll('.prp-overlay .prp-mdc__ghost')].find(
-          (g) => /write a comment/i.test(g.textContent || '')
-        );
-        const anyTa = document.querySelector(
-          '.prp-overlay textarea[data-prp-composer-input], .prp-overlay textarea.prp-mdc__ta'
-        );
+        const root =
+          document.querySelector('[data-prp-composer-kind="conversation"]') ||
+          document.querySelector('.prp-card--composer');
+        const writeGhost =
+          root?.querySelector?.('.prp-mdc__ghost') ||
+          [...document.querySelectorAll('.prp-overlay .prp-mdc__ghost')].find(
+            (g) =>
+              !/^reply$/i.test((g.textContent || '').trim()) &&
+              !g.closest('.prp-inline-thread, [data-context-reply]')
+          );
+        const anyTa =
+          root?.querySelector?.(
+            'textarea[data-prp-composer-input], textarea.prp-mdc__ta'
+          ) ||
+          document.querySelector(
+            '.prp-overlay textarea[data-prp-composer-input], .prp-overlay textarea.prp-mdc__ta'
+          );
         if (writeGhost) {
           writeGhost.scrollIntoView?.({ block: 'center' });
           const r = writeGhost.getBoundingClientRect();

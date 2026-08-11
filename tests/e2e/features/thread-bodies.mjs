@@ -262,7 +262,7 @@ export function getSteps() {
         `calls=${rows.shellCalls} shellRows=${JSON.stringify(rows.shell)}`
     );
     // If byIds ran (unresolved eager), count-only reactors keep cost flat (~1),
-    // not ≈ unresolved thread count. Demo PR#7 has multiple unresolved; with
+    // not ≈ unresolved thread count. Demo PR#19 has multiple unresolved; with
     // reactors(first:1) maxCost was ≈ id count. Allow small multi-call total.
     if (rows.byIdsCalls > 0) {
       assert(

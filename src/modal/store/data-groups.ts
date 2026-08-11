@@ -55,7 +55,6 @@ export function useModalActions() {
       setPaletteOpen: s.setPaletteOpen,
       setPaletteQuery: s.setPaletteQuery,
       setPicker: s.setPicker,
-      setLocalDetail: s.setLocalDetail,
       setFocusedConversationAnchor: s.setFocusedConversationAnchor,
       requestConversationNav: s.requestConversationNav,
       setOptHintsActive: s.setOptHintsActive,

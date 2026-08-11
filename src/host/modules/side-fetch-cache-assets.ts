@@ -890,6 +890,8 @@
       });
 
     // Progress stage: shell list/meta is ready.
+    // Ladder is shell → comments only (reactions co-fetched on by-ids; no
+    // separate "Updating reactions…" / comments-start flash stages).
     try {
       if (typeof opts?.onStage === 'function') {
         opts.onStage('shell', {
@@ -902,8 +904,7 @@
       /* ignore stage */
     }
 
-    // Eager full comments + reaction counts on host (by-ids) so the open bar
-    // can advance threads → comments → reactions separately.
+    // Eager full comments + reaction counts on host (by-ids).
     // Warm early-exit still loads unresolved bodies when comments are missing.
     const pureMerge =
       typeof RT.mergeCommentsBulkIntoThreadsPage === 'function'
@@ -921,7 +922,6 @@
           (t) => t && t.commentsLoaded !== true && !Boolean(t.resolved)
         ));
     let eagerN = 0;
-    let didCommentsFetch = false;
     if (
       needBodies &&
       page?.source === 'graphql' &&
@@ -934,14 +934,6 @@
       eagerN = eagerIds.length;
       if (eagerIds.length) {
         try {
-          try {
-            if (typeof opts?.onStage === 'function') {
-              opts.onStage('comments-start', { ids: eagerIds.length });
-            }
-          } catch {
-            /* ignore */
-          }
-          didCommentsFetch = true;
           // Bound by-ids: shell already has PRRT + preview bodies; a stuck
           // SW channel must not block Diff thread paint indefinitely.
           let bulkTimer: ReturnType<typeof setTimeout> | null = null;
@@ -976,23 +968,12 @@
       }
     }
 
-    // No network between shell→comments (skipped) or comments→reactions:
-    // yield so each label can paint before the next mark overwrites it.
+    // Comments stage only — reactors{totalCount} already on by-ids (or shell).
     try {
       if (typeof opts?.onStage === 'function') {
-        if (!didCommentsFetch) {
-          await yieldStagePaint();
-          opts.onStage('comments-start', { ids: 0, skipped: true });
-          await yieldStagePaint();
-        }
-        opts.onStage('comments', {
-          page,
-          eager: eagerN,
-          skipped: eagerN === 0,
-        });
-        // Reaction counts ship on the same by-ids document (reactors{totalCount}).
+        // Yield once so shell label can paint before comments overwrites it.
         await yieldStagePaint();
-        opts.onStage('reactions', {
+        opts.onStage('comments', {
           page,
           eager: eagerN,
           skipped: eagerN === 0,

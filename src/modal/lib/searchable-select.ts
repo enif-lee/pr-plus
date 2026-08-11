@@ -36,6 +36,40 @@ export function filterSelectOptions(options, query, opts: any = {}) {
 }
 
 /**
+ * ⌥1 / ⌥2 / ⌥3 → filtered option index 0..2 (single-select quick pick).
+ * Ignores meta/ctrl/shift so it does not steal ⌘1 / etc.
+ */
+export function resolveOptDigitPickIndex(e: {
+  altKey?: boolean;
+  metaKey?: boolean;
+  ctrlKey?: boolean;
+  shiftKey?: boolean;
+  code?: string;
+  key?: string;
+} | null | undefined): number | null {
+  if (!e || !e.altKey || e.metaKey || e.ctrlKey || e.shiftKey) return null;
+  const code = String(e.code || '');
+  if (code === 'Digit1' || code === 'Numpad1') return 0;
+  if (code === 'Digit2' || code === 'Numpad2') return 1;
+  if (code === 'Digit3' || code === 'Numpad3') return 2;
+  const k = String(e.key || '');
+  if (k === '1') return 0;
+  if (k === '2') return 1;
+  if (k === '3') return 2;
+  return null;
+}
+
+/** Pick filtered[i] only for the first three hits (⌥1–3 contract). */
+export function pickFilteredOptionByIndex(
+  filtered: any[] | null | undefined,
+  index: number
+): any | null {
+  if (!Array.isArray(filtered)) return null;
+  if (!Number.isFinite(index) || index < 0 || index > 2) return null;
+  return filtered[index] != null ? filtered[index] : null;
+}
+
+/**
  * Build people options from logins + optional status / avatar maps.
  * @param {string[]} logins
  * @param {Record<string, string>} [statusByLogin]

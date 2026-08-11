@@ -43,6 +43,7 @@
     "src/modal/views/**/*.ts",
     "src/modal/views/**/*.tsx",
     "src/modal/app/PrModalApp.tsx",
+    "src/modal/app/PrModalShell.tsx",
     "src/modal/app/PrModalApp.impl.tsx",
     "src/modal/main.tsx",
     "src/modal/types.ts",

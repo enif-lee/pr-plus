@@ -114,13 +114,20 @@ describe('wiring: Diff settings + App gate use nested markers', () => {
 
   test('App Escape uses isNestedEscapeLayerOpen / resolveModalEscapeOwner', () => {
     const root = path.resolve(__dirname, '..');
-    const app = fs.readFileSync(
-      path.join(root, 'src/modal/app/PrModalApp.impl.tsx'),
+    // Capture keydown lives in usePrModalHotkeys (Phase 7); shell wires deps.
+    const shell = fs.readFileSync(
+      path.join(root, 'src/modal/app/PrModalShell.tsx'),
       'utf8'
     );
-    expect(app).toMatch(/isNestedEscapeLayerOpen/);
-    expect(app).toMatch(/resolveModalEscapeOwner/);
-    expect(app).toMatch(/nestedLayerOpen/);
+    expect(shell).toMatch(/isNestedEscapeLayerOpen/);
+    expect(shell).toMatch(/resolveModalEscapeOwner/);
+    const hotkeys = fs.readFileSync(
+      path.join(root, 'src/modal/hooks/usePrModalHotkeys.ts'),
+      'utf8'
+    );
+    expect(hotkeys).toMatch(/isNestedEscapeLayerOpen/);
+    expect(hotkeys).toMatch(/resolveModalEscapeOwner/);
+    expect(hotkeys).toMatch(/nestedLayerOpen/);
   });
 
   test('SearchableSelect marks nested layer and claims Escape', () => {

@@ -16,3 +16,122 @@
   color: var(--prp-accent);
   font-weight: 600;
 }
+
+/*
+ * Meta pickers: portal into .prp-overlay (theme tokens) when possible.
+ * Opaque panel is required — var(--prp-bg) without a host is transparent and
+ * the aside bleeds through (labels picker "ghost" bug).
+ */
+.prp-sselect-panel,
+.prp-sselect-panel--popover {
+  position: fixed;
+  z-index: 120000 !important;
+  z-index: var(--prp-z-portal, 120000) !important;
+  /* Solid paint always — never see-through over the rail */
+  background: #ffffff !important;
+  background: var(--prp-bg, #ffffff) !important;
+  background-color: #ffffff !important;
+  background-color: var(--prp-bg, #ffffff) !important;
+  color: var(--prp-fg, #1f2328);
+  border: 1px solid var(--prp-border, #d0d7de);
+  box-shadow: 0 16px 48px rgba(1, 4, 9, 0.22);
+  opacity: 1 !important;
+  isolation: isolate;
+}
+.prp-overlay.prp-theme-dark .prp-sselect-panel,
+.prp-overlay.prp-theme-dark .prp-sselect-panel--popover,
+.prp-overlay[data-color-mode='dark'] .prp-sselect-panel,
+.prp-overlay[data-color-mode='dark'] .prp-sselect-panel--popover,
+.prp-sselect-portal.prp-theme-dark .prp-sselect-panel,
+.prp-sselect-portal[data-prp-color-mode='dark'] .prp-sselect-panel {
+  background: #0d1117 !important;
+  background: var(--prp-bg, #0d1117) !important;
+  background-color: #0d1117 !important;
+  background-color: var(--prp-bg, #0d1117) !important;
+  color: var(--prp-fg, #e6edf3);
+  border-color: var(--prp-border, #30363d);
+}
+.prp-sselect-input {
+  background: var(--prp-bg-muted, #f6f8fa);
+  color: var(--prp-fg, #1f2328);
+  border-color: var(--prp-border, #d0d7de);
+}
+.prp-sselect-list {
+  background: transparent;
+}
+.prp-sselect-backdrop,
+.prp-sselect-backdrop--soft {
+  position: fixed;
+  inset: 0;
+  z-index: 119990 !important;
+}
+.prp-sselect-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 120000;
+  z-index: var(--prp-z-portal, 120000);
+}
+/*
+ * Body-only portal shell: re-declare tokens (same idea as .prp-confirm-layer).
+ * Transparent host — only the panel is opaque.
+ */
+.prp-sselect-portal {
+  --prp-fg: var(--fgColor-default, #1f2328);
+  --prp-fg-muted: var(--fgColor-muted, #656d76);
+  --prp-bg: var(--bgColor-default, #ffffff);
+  --prp-bg-muted: var(--bgColor-muted, #f6f8fa);
+  --prp-border: var(--borderColor-default, #d0d7de);
+  --prp-border-muted: var(--borderColor-muted, #d8dee4);
+  --prp-accent: var(--fgColor-accent, #0969da);
+  --prp-accent-bg: var(--bgColor-accent-emphasis, #1f6feb);
+  --prp-z-portal: 120000;
+  --prp-z-tip: 100020;
+  color: var(--prp-fg);
+  font-family: var(
+    --prp-font,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Helvetica,
+    Arial,
+    sans-serif
+  );
+  background: transparent !important;
+}
+.prp-sselect-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--prp-border-muted, #d8dee4);
+  background: inherit;
+}
+.prp-sselect-footer__btn-host {
+  position: relative;
+  display: inline-flex;
+}
+/*
+ * Hide Conversation Opt tips / tip-pops while any meta picker is open.
+ * Latch on html/body[data-prp-sselect-open] (set by SearchableSelect) + :has.
+ */
+html[data-prp-sselect-open='1'] .prp-opt-btn-hint:not(.prp-opt-btn-hint--sselect),
+body[data-prp-sselect-open='1'] .prp-opt-btn-hint:not(.prp-opt-btn-hint--sselect),
+body:has([data-prp-sselect='1']) .prp-opt-btn-hint:not(.prp-opt-btn-hint--sselect),
+html[data-prp-sselect-open='1'] .prp-tip-pop,
+body[data-prp-sselect-open='1'] .prp-tip-pop,
+body:has([data-prp-sselect='1']) .prp-tip-pop {
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  display: none !important;
+}
+/* Picker-local Opt hints stay visible and above panel chrome */
+.prp-opt-btn-hint--sselect.prp-opt-btn-hint--fixed {
+  z-index: 120010 !important;
+  z-index: calc(var(--prp-z-portal, 120000) + 10) !important;
+  display: inline-flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: none !important;
+}

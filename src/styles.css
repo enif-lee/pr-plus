@@ -380,16 +380,42 @@ html.prp-embed-active body {
   /* Panel owns scroll — no document scroll under fixed fullscreen embed */
   overflow: hidden !important;
 }
+/*
+ * Strong residual suppress under full-window embed:
+ * - Marked nodes (JS) stay display:none + content-visibility:hidden
+ * - Direct body children except pr+ hosts / non-layout tags (belt + suspenders
+ *   with host applyNativeResidualHide — cuts GH PR SPA paint even if a node
+ *   was re-injected without the data attribute)
+ */
 html.prp-embed-active [data-prp-native-hidden='1'] {
   display: none !important;
+  content-visibility: hidden !important;
+  contain: size layout style paint !important;
+  pointer-events: none !important;
 }
-/* Covered by fixed embed; hide to avoid focus/tab into buried header chrome */
+/*
+ * Body-level GH residual only — never hide pr+ portals on body
+ * (ConfirmDialog, OptBtnHint, reaction picker, viewers).
+ */
+html.prp-embed-active
+  body
+  > *:not(#prp-page-embed):not(#prp-modal-host):not(script):not(style):not(link):not(template):not(meta):not(noscript):not([class*='prp-']):not([id*='prp']):not([data-prp-confirm]):not([data-prp-reaction-picker]) {
+  display: none !important;
+  content-visibility: hidden !important;
+  contain: size layout style paint !important;
+  pointer-events: none !important;
+}
+/* Covered by fixed embed — display:none (was visibility only) so no layout/paint */
 html.prp-embed-active .AppHeader,
 html.prp-embed-active header.AppHeader,
 html.prp-embed-active .js-header-wrapper,
-html.prp-embed-active [data-target='app-header'] {
+html.prp-embed-active [data-target='app-header'],
+html.prp-embed-active .js-notification-shelf,
+html.prp-embed-active #js-flash-container {
+  display: none !important;
   visibility: hidden !important;
   pointer-events: none !important;
+  content-visibility: hidden !important;
 }
 /* GitHub site footer while pr+ in-page replace is active */
 html.prp-embed-active [data-prp-footer-hidden='1'],
@@ -397,6 +423,7 @@ html.prp-embed-active footer.footer,
 html.prp-embed-active footer.Footer,
 html.prp-embed-active #footer {
   display: none !important;
+  content-visibility: hidden !important;
 }
 
 .pr-tree-toggle:hover {

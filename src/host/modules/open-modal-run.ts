@@ -566,41 +566,75 @@
                 reason: sameHead ? 'reuse' : 'head-mismatch',
               };
 
-        if (
-          cacheSnap &&
-          Array.isArray(cacheSnap.reviewComments) &&
-          cacheSnap.reviewComments.length &&
-          (!Array.isArray(detail.reviewComments) || !detail.reviewComments.length)
-        ) {
-          // Never re-inject IDB empty "user"/No content ghosts as core detail.
-          // Network may legitimately have empty reviewComments until threads
-          // side-fetch; still strip unverifiable local-only rows from cache.
-          const cleanedCacheRc = cacheSnap.reviewComments.filter((c) => {
-            if (!c || c.id == null) return false;
-            if (c.pending) return true;
-            if (c._commentsPending || c.commentsLoaded === false) return true;
-            if (String(c.id).startsWith('shell:')) return true;
-            const body = String(c.body ?? c.bodyText ?? '').trim();
-            if (body) return true;
-            const author = String(
-              c.author || c.user?.login || c.user?.name || ''
-            ).trim();
-            return Boolean(author && author.toLowerCase() !== 'user');
-          });
-          if (cleanedCacheRc.length) {
-            detail = {
-              ...detail,
-              reviewComments: cleanedCacheRc,
-              reviewThreads: cacheSnap.reviewThreads || detail.reviewThreads,
-              reviewThreadsMeta:
-                cacheSnap.reviewThreadsMeta || detail.reviewThreadsMeta,
-              reviewCommentsMeta:
-                cacheSnap.reviewCommentsMeta || detail.reviewCommentsMeta,
-              comments:
-                Array.isArray(detail.comments) && detail.comments.length
-                  ? detail.comments
-                  : cacheSnap.comments || detail.comments,
-            };
+        // Host set-authority for reviewComments vs IDB cache.
+        const pureStore =
+          typeof globalThis !== 'undefined'
+            ? (globalThis as any).PRModalDetailStore
+            : null;
+        const netRc = Array.isArray(detail.reviewComments)
+          ? detail.reviewComments
+          : [];
+        const cacheRc = Array.isArray(cacheSnap?.reviewComments)
+          ? cacheSnap.reviewComments
+          : [];
+        if (cacheSnap && cacheRc.length) {
+          if (netRc.length) {
+            // Settled host list: cache-only ids drop; host fields win.
+            const mergeFn =
+              typeof pureStore?.mergeCommentsHostFirst === 'function'
+                ? pureStore.mergeCommentsHostFirst
+                : null;
+            const mergedRc = mergeFn
+              ? mergeFn(netRc, cacheRc, {
+                  hostAuthoritative: true,
+                  networkDetail: detail,
+                })
+              : netRc;
+            detail = { ...detail, reviewComments: mergedRc };
+          } else {
+            // Empty network window: only reinject when network still has PENDING
+            // (attach race). Else GraphQL threads side-fetch is SoT.
+            const netHasPending =
+              typeof pureStore?.detailHasViewerPending === 'function'
+                ? pureStore.detailHasViewerPending(detail)
+                : Boolean(detail?.viewerPendingReview?.id);
+            if (netHasPending) {
+              const filterFn =
+                typeof pureStore?.filterCacheReviewCommentsForCore ===
+                'function'
+                  ? pureStore.filterCacheReviewCommentsForCore
+                  : null;
+              const netWithTombstones = {
+                ...detail,
+                _deletedReviewCommentIds: [
+                  ...(Array.isArray(detail?._deletedReviewCommentIds)
+                    ? detail._deletedReviewCommentIds
+                    : []),
+                  ...(Array.isArray(cacheSnap?._deletedReviewCommentIds)
+                    ? cacheSnap._deletedReviewCommentIds
+                    : []),
+                ],
+              };
+              const cleanedCacheRc = filterFn
+                ? filterFn(cacheRc, netWithTombstones)
+                : cacheRc.filter((c) => c && c.id != null);
+              if (cleanedCacheRc.length) {
+                detail = {
+                  ...detail,
+                  reviewComments: cleanedCacheRc,
+                  reviewThreads:
+                    cacheSnap.reviewThreads || detail.reviewThreads,
+                  reviewThreadsMeta:
+                    cacheSnap.reviewThreadsMeta || detail.reviewThreadsMeta,
+                  reviewCommentsMeta:
+                    cacheSnap.reviewCommentsMeta || detail.reviewCommentsMeta,
+                  comments:
+                    Array.isArray(detail.comments) && detail.comments.length
+                      ? detail.comments
+                      : cacheSnap.comments || detail.comments,
+                };
+              }
+            }
           }
         }
         if (
@@ -1080,7 +1114,11 @@
       const wShell = uw.threadsShell ?? uw.threadsNewest ?? 8;
       const wComments = uw.threadsComments ?? uw.threadsRemaining ?? 8;
       const wReactions = uw.threadsReactions ?? uw.threadsEarlier ?? 4;
-      /** Credit review-thread ladder stages (idempotent via prog.mark). */
+      /**
+       * Credit review-thread ladder (idempotent via prog.mark).
+       * UI stages: shell → comments only. reactions weight is silent-credited
+       * with comments (same by-ids payload; no "Updating reactions…" flash).
+       */
       const markThreadStage = (stage, labelKind) => {
         if (stage === 'shell') {
           prog.mark(
@@ -1089,45 +1127,32 @@
             'threads',
             loadStageLabel(labelKind || 'threads-shell')
           );
-        } else if (stage === 'comments' || stage === 'comments-start') {
-          if (stage === 'comments-start') {
-            setLoadStage(
-              'threads',
-              loadStageLabel('threads-comments'),
-              true,
-              { percent: prog.percent() }
-            );
-            try {
-              render();
-            } catch {
-              /* ignore */
-            }
-            return;
-          }
+        } else if (stage === 'comments') {
+          const commentsLabel = loadStageLabel(
+            labelKind || 'threads-comments'
+          );
           prog.mark(
             'threadsComments',
             wComments,
             'threads',
-            loadStageLabel(labelKind || 'threads-comments')
+            commentsLabel
           );
-        } else if (stage === 'reactions') {
+          // Silent credit — keep comments label; do not open a reactions stage.
           prog.mark(
             'threadsReactions',
             wReactions,
             'threads',
-            loadStageLabel(labelKind || 'threads-reactions')
+            commentsLabel
           );
         }
       };
-      // Always credit with per-stage labels (never one shared kind for all three).
       const creditAllThreadStages = () => {
         markThreadStage('shell', 'threads-shell');
         markThreadStage('comments', 'threads-comments');
-        markThreadStage('reactions', 'threads-reactions');
       };
 
       // Start threads in parallel with core — paint as soon as *this* fetch lands.
-      // onStage fires shell → comments → reactions so the open bar steps.
+      // onStage fires shell → comments (reactions co-credited with comments).
       // Outer bound: nested shell/byIds timeouts can still stall on rAF yields
       // or un-raced awaits; never leave openModal threads in-flight forever.
       const THREADS_ADAPTIVE_BUDGET_MS = 18_000;
@@ -1146,13 +1171,10 @@
                     'shell',
                     warmOrCache ? 'threads-update' : 'threads-load'
                   );
-                } else if (stage === 'comments-start') {
-                  markThreadStage('comments-start', 'threads-comments');
                 } else if (stage === 'comments') {
                   markThreadStage('comments', 'threads-comments');
-                } else if (stage === 'reactions') {
-                  markThreadStage('reactions', 'threads-reactions');
                 }
+                // comments-start / reactions: ignored (removed from adaptive ladder)
               },
             }),
             new Promise((_, reject) => {

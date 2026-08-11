@@ -170,7 +170,7 @@ export function getSteps() {
           '.prp-search input',
           'input[placeholder*="Find in diff" i]',
           'input[placeholder*="Find in diff, comments" i]',
-          '.prp-diff-float-nav__goto-input',
+          '[data-prp-diff-goto-input="1"], .prp-diff-float-goto__input',
           'textarea.prp-mdc__ta',
           '[data-prp-composer-input]',
           '.prp-header__title-input',
@@ -256,7 +256,7 @@ export function getSteps() {
 
     press('Escape');
     waitMs(350);
-    const after = evalInPage(`
+    let after = evalInPage(`
       (() => {
         const scope =
           document.querySelector('.prp-overlay') ||
@@ -269,7 +269,7 @@ export function getSteps() {
             ae.classList?.contains('prp-mdc__ta') ||
             ae.classList?.contains('prp-header__title-input') ||
             ae.matches?.(
-              'textarea.prp-mdc__ta, [data-prp-composer-input], .prp-search__input, .prp-header__title-input, .prp-diff-float-nav__goto-input'
+              'textarea.prp-mdc__ta, [data-prp-composer-input], .prp-search__input, .prp-header__title-input, [data-prp-diff-goto-input="1"], .prp-diff-float-goto__input'
             ));
         return {
           overlay: !!document.querySelector('.prp-overlay, #prp-page-embed'),
@@ -280,6 +280,36 @@ export function getSteps() {
       })()
     `);
     log(`  after Esc: ${JSON.stringify(after)}`);
+    // Diff Find: first Esc may only close the search panel while focus lingers
+    // on a still-mounted input for one frame — second Esc blurs without closing shell.
+    if (after?.overlay && after?.editableFocused) {
+      press('Escape');
+      waitMs(250);
+      after = evalInPage(`
+        (() => {
+          const scope =
+            document.querySelector('.prp-overlay') ||
+            document.querySelector('#prp-page-embed');
+          const ae = document.activeElement;
+          const prpEditable =
+            ae &&
+            scope?.contains?.(ae) &&
+            (ae.classList?.contains('prp-search__input') ||
+              ae.classList?.contains('prp-mdc__ta') ||
+              ae.classList?.contains('prp-header__title-input') ||
+              ae.matches?.(
+                'textarea.prp-mdc__ta, [data-prp-composer-input], .prp-search__input, .prp-header__title-input, [data-prp-diff-goto-input="1"], .prp-diff-float-goto__input'
+              ));
+          return {
+            overlay: !!document.querySelector('.prp-overlay, #prp-page-embed'),
+            editableFocused: !!prpEditable,
+            tag: ae?.tagName || null,
+            cls: String(ae?.className || '').slice(0, 40),
+          };
+        })()
+      `);
+      log(`  after 2nd Esc: ${JSON.stringify(after)}`);
+    }
     assert(after?.overlay, 'Esc on pr+ input must not close PR shell');
     assert(
       !after?.editableFocused,

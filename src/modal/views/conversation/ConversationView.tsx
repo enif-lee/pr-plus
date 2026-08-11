@@ -107,6 +107,7 @@ import { canSubmitReviewVerdict } from '@lib/pr-edit-api';
 import { OptBtnHint } from '@common/OptBtnHint';
 import { CommentActionIconBtn } from '@common/CommentActionIconBtn';
 import { useModalStore } from '../../store/modal-store';
+import { useDomainDetail } from '../../app/domain-detail-context';
 import {
   focusContextThreadReplyAfterPaint,
   isContextThreadReplyFocused,
@@ -139,8 +140,9 @@ function ConversationViewImpl(props: any) {
   const [expandedMinimized, setExpandedMinimized] = useState<
     Record<string, boolean>
   >({});
+  const domainDetail = useDomainDetail();
   const {
-    detail,
+    detail: detailFromProps,
     commentText: commentTextProp,
     setCommentText: setCommentTextProp,
     actionBusy,
@@ -254,6 +256,19 @@ function ConversationViewImpl(props: any) {
     mentionCandidates = [],
   } = props;
 
+  // DomainContext first; props still accepted for host-annotated detail overlays.
+  const detail = detailFromProps ?? domainDetail;
+  const domainPendingCount = useMemo(() => {
+    const list = Array.isArray(detail?.reviewComments) ? detail.reviewComments : [];
+    return list.filter((c: any) => c && c.pending).length;
+  }, [detail?.reviewComments]);
+  const resolvedPendingCount =
+    pendingCount != null ? pendingCount : domainPendingCount;
+  const resolvedHasViewerPending =
+    hasViewerPendingReview ||
+    Boolean(detail?.viewerPendingReview?.id) ||
+    domainPendingCount > 0;
+
   const commentText =
     commentTextProp !== undefined ? commentTextProp : storeCommentText;
   const setCommentText = setCommentTextProp || storeSetCommentText;
@@ -314,7 +329,7 @@ function ConversationViewImpl(props: any) {
   }, [embedScrollChain, detail?.number]);
   /** Conversation footer: Comment (issue) vs Review (pending + review events). */
   const [composerMode, setComposerMode] = useState<'comment' | 'review'>(() =>
-    Number(pendingCount) > 0 ? 'review' : 'comment'
+    Number(resolvedPendingCount) > 0 ? 'review' : 'comment'
   );
   /**
    * Collapse overrides for review threads (id → collapsed).
@@ -376,8 +391,8 @@ function ConversationViewImpl(props: any) {
 
   // When a pending review appears, surface Review controls
   useEffect(() => {
-    if (Number(pendingCount) > 0) setComposerMode('review');
-  }, [pendingCount]);
+    if (Number(resolvedPendingCount) > 0) setComposerMode('review');
+  }, [resolvedPendingCount]);
 
   // Fresh PR → reset collapse overrides (resolved again start collapsed)
   useEffect(() => {
@@ -525,12 +540,42 @@ function ConversationViewImpl(props: any) {
    * are complete but timelineItems still has older pages (Diff full-load case).
    */
   const threadGap: any = useMemo(() => {
+    // Prefer explicit timelineMeta; fall back to commentsMeta (host settles both
+    // on the comments side-fetch — cold open can lag timelineMeta projection).
+    const cm =
+      detail?.commentsMeta && typeof detail.commentsMeta === 'object'
+        ? detail.commentsMeta
+        : null;
+    const tl =
+      timelineMeta && typeof timelineMeta === 'object'
+        ? timelineMeta
+        : cm
+          ? {
+              hasMore: Boolean(cm.hasMore),
+              complete: cm.hasMore === false,
+              totalCount: cm.totalCount,
+              loadedCount:
+                cm.loadedCount != null
+                  ? cm.loadedCount
+                  : Array.isArray(detail?.comments)
+                    ? detail.comments.length
+                    : 0,
+            }
+          : null;
     if (typeof partitionTimelineWithThreadGap !== 'function') {
+      const tlTotal = Number(tl?.totalCount);
+      const tlLoaded = Number(tl?.loadedCount);
+      const tlCountLag =
+        Number.isFinite(tlTotal) &&
+        Number.isFinite(tlLoaded) &&
+        tlTotal > tlLoaded;
       const hasMore =
         Boolean(reviewThreadsMeta?.hasMore) ||
         Boolean(reviewThreadsMeta?.hasOlder) ||
-        Boolean(timelineMeta?.hasMore) ||
-        timelineMeta?.complete === false;
+        Boolean(tl?.hasMore) ||
+        tl?.complete === false ||
+        tlCountLag ||
+        Boolean(cm?.hasMore);
       return {
         top: timelineItems,
         bottom: [],
@@ -542,9 +587,15 @@ function ConversationViewImpl(props: any) {
     return partitionTimelineWithThreadGap(
       timelineItems,
       reviewThreadsMeta,
-      timelineMeta
+      tl
     );
-  }, [timelineItems, reviewThreadsMeta, timelineMeta]);
+  }, [
+    timelineItems,
+    reviewThreadsMeta,
+    timelineMeta,
+    detail?.commentsMeta,
+    detail?.comments,
+  ]);
 
   // Search jump is handled inside VirtualConversationList (scrollToAnchor).
   // Load more / Load all: single handle for threads + timelineItems.
@@ -561,6 +612,59 @@ function ConversationViewImpl(props: any) {
       gapPlacement: threadGap.gapPlacement || 'end',
     };
   }, [timelineItems, threadGap]);
+
+  // E2E / host observability: Load-more fold state (TLM.1)
+  useEffect(() => {
+    try {
+      if (typeof document === 'undefined') return;
+      const tm = timelineMeta || detail?.timelineMeta || null;
+      const cm = detail?.commentsMeta || null;
+      const stamp = (id: string) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.setAttribute(
+          'data-prp-conv-show-gap',
+          paged?.showThreadGap ? '1' : '0'
+        );
+        el.setAttribute(
+          'data-prp-conv-gap-place',
+          String(paged?.gapPlacement || 'none')
+        );
+        el.setAttribute(
+          'data-prp-conv-tl-has-more',
+          tm?.hasMore ? '1' : tm?.complete === false ? 'partial' : '0'
+        );
+        el.setAttribute(
+          'data-prp-conv-tl-loaded',
+          String(tm?.loadedCount ?? cm?.loadedCount ?? '')
+        );
+        el.setAttribute(
+          'data-prp-conv-tl-total',
+          String(tm?.totalCount ?? cm?.totalCount ?? '')
+        );
+        el.setAttribute(
+          'data-prp-conv-load-more-fn',
+          typeof onLoadMoreReviewThreads === 'function' ? '1' : '0'
+        );
+        el.setAttribute(
+          'data-prp-conv-timeline-n',
+          String(Array.isArray(timelineItems) ? timelineItems.length : 0)
+        );
+      };
+      stamp('prp-page-embed');
+      stamp('prp-modal-host');
+    } catch {
+      /* ignore */
+    }
+  }, [
+    paged?.showThreadGap,
+    paged?.gapPlacement,
+    timelineMeta,
+    detail?.timelineMeta,
+    detail?.commentsMeta,
+    onLoadMoreReviewThreads,
+    timelineItems,
+  ]);
 
   const mergeStatus = useMemo(
     () => (typeof buildMergeBoxStatus === 'function' ? buildMergeBoxStatus(detail) : null),
@@ -1628,67 +1732,71 @@ function ConversationViewImpl(props: any) {
           opts.compact ? ' prp-review-group__list--in-composer' : ''
         }`}
       >
-        {allThreads.map((t: any) => {
-          const open = isGroupThreadOpen(reviewId, t);
-          const fileLoc = formatThreadFileLoc(t);
+        {allThreads.map((th: any) => {
+          const open = isGroupThreadOpen(reviewId, th);
+          const fileLoc = formatThreadFileLoc(th);
           const threadAnchor =
-            t?.id != null ? `review-comment:${t.id}` : '';
+            th?.id != null ? `review-comment:${th.id}` : '';
           const baseRowClass = `prp-review-group__row${
             open ? ' prp-review-group__row--open' : ''
-          }${t.resolved ? ' prp-review-group__row--resolved' : ''}${
-            t.pending ? ' prp-review-group__row--pending' : ''
+          }${th.resolved ? ' prp-review-group__row--resolved' : ''}${
+            th.pending ? ' prp-review-group__row--pending' : ''
           }`;
           return (
             <ConversationKbFocusHost
-              key={String(t.id)}
+              key={String(th.id)}
               as="li"
               anchor={threadAnchor}
               className={baseRowClass}
               focusClassName="prp-review-group__row--kb-focus"
               data-thread-focus-anchor={threadAnchor || undefined}
               data-search-anchor={threadAnchor || undefined}
+              /* Full path-row is the thread unit (header + body). Always-on
+               * unit outline is CSS ::after; kb-focus only elevates accent.
+               * Inner comment unit-focus must not own the thread outline. */
+              data-prp-thread-unit="path-row"
             >
               <div className="prp-review-group__row-head">
                 <GroupThreadFoldBtn
                   anchor={threadAnchor}
                   open={open}
-                  onToggle={() => toggleGroupThread(reviewId, t)}
+                  onToggle={() => toggleGroupThread(reviewId, th)}
                   fileLoc={fileLoc || ''}
-                  path={t.path}
+                  path={th.path}
                   pendingBadge={
-                    t.pending && !opts.compact ? (
+                    th.pending && !opts.compact ? (
                       <Badge tone="warn" className="prp-review-group__badge">
-                        Pending
+                        {t('pending')}
                       </Badge>
                     ) : null
                   }
                   outdatedBadge={
-                    t.outdated ? (
+                    th.outdated ? (
                       <Badge tone="muted" className="prp-review-group__badge">
-                        Outdated
+                        {t('outdated')}
                       </Badge>
                     ) : null
                   }
                   resolvedBadge={
-                    t.resolved && !t.pending ? (
+                    th.resolved && !th.pending ? (
                       <Badge tone="ok" className="prp-review-group__badge">
-                        Resolved
+                        {t('resolved')}
                       </Badge>
                     ) : null
                   }
                 />
-                {typeof onJumpToReviewThread === 'function' && t.path ? (
+                {typeof onJumpToReviewThread === 'function' && th.path ? (
                   <GroupThreadJumpBtn
                     anchor={threadAnchor}
-                    fileLoc={fileLoc || t.path}
+                    fileLoc={fileLoc || th.path}
                     onJump={() =>
                       onJumpToReviewThread({
-                        id: t.id,
-                        path: t.path,
-                        line: t.line,
-                        startLine: t.startLine ?? t.line,
-                        side: t.side || 'RIGHT',
-                        outdated: Boolean(t.outdated),
+                        id: th.id,
+                        path: th.path,
+                        line: th.line,
+                        startLine: th.startLine ?? th.line,
+                        side: th.side || 'RIGHT',
+                        outdated: Boolean(th.outdated),
                       })
                     }
                   />
@@ -1696,9 +1804,11 @@ function ConversationViewImpl(props: any) {
               </div>
               {open ? (
                 <div className="prp-review-group__thread">
-                  {renderReviewThreadCard(t, `${keyPrefix}g${reviewId}-`, {
+                  {renderReviewThreadCard(th, `${keyPrefix}g${reviewId}-`, {
                     forceExpanded: true,
                     hideOuterHeader: true,
+                    // Path-row owns always-on + kb-focus thread outline.
+                    skipKbFocus: true,
                   })}
                 </div>
               ) : null}
@@ -1721,10 +1831,10 @@ function ConversationViewImpl(props: any) {
     if (isPending) return null;
     const stateLabel =
       state === 'APPROVED'
-        ? 'approved'
+        ? t('review_group_action_approved')
         : state === 'CHANGES_REQUESTED'
-          ? 'requested changes'
-          : 'left a comment';
+          ? t('review_group_action_changes_requested')
+          : t('review_group_action_commented');
     const groupAnchor = `review-group:${reviewId}`;
     const baseClass = searchCardClass(
       groupAnchor,
@@ -1964,7 +2074,12 @@ function ConversationViewImpl(props: any) {
   function renderReviewThreadCard(
     item: any,
     keyPrefix = '',
-    opts: { forceExpanded?: boolean; hideOuterHeader?: boolean } = {}
+    opts: {
+      forceExpanded?: boolean;
+      hideOuterHeader?: boolean;
+      /** Outer review-group row already owns kb-focus — avoid dual rings. */
+      skipKbFocus?: boolean;
+    } = {}
   ) {
     const threadId = item.id;
     const rootAnchor = `review-comment:${threadId}`;
@@ -2051,13 +2166,7 @@ function ConversationViewImpl(props: any) {
       threadCurrent ? ' prp-card--search-current' : ''
     }`;
 
-    return (
-      <ConversationKbFocusClassName
-        key={`${keyPrefix}${String(item.id || item.key)}`}
-        anchor={rootAnchor}
-        baseClass={threadBaseClass}
-      >
-        {(className, focused) => (
+    const renderThreadShell = (className: string, focused: boolean) => (
       <div
         className={className}
         data-search-anchor={rootAnchor}
@@ -2115,12 +2224,14 @@ function ConversationViewImpl(props: any) {
                 </span>
               ) : null}
               {item.pending ? (
-                <Badge tone="warn">Pending</Badge>
+                <Badge tone="warn">{t('pending')}</Badge>
               ) : null}
               {item.outdated ? (
-                <Badge tone="muted">Outdated</Badge>
+                <Badge tone="muted">{t('outdated')}</Badge>
               ) : null}
-              {item.resolved ? <Badge tone="ok">Resolved</Badge> : null}
+              {item.resolved ? (
+                <Badge tone="ok">{t('resolved')}</Badge>
+              ) : null}
             </button>
             {typeof onJumpToReviewThread === 'function' && item.path ? (
               <button
@@ -2198,8 +2309,8 @@ function ConversationViewImpl(props: any) {
           mentionCandidates={mentionCandidates}
           collapsed={collapsed}
           onToggleCollapse={() => toggleThreadCollapse(item)}
-          pendingCount={pendingCount}
-          hasViewerPendingReview={hasViewerPendingReview}
+          pendingCount={resolvedPendingCount}
+          hasViewerPendingReview={resolvedHasViewerPending}
           searchQuery={qSearch}
           activeSearchHit={activeSearchHit}
           searchHits={searchHits}
@@ -2210,7 +2321,24 @@ function ConversationViewImpl(props: any) {
           commentsLoading={commentsLoading}
         />
       </div>
-        )}
+    );
+
+    // Nested under a review-group path row: outer li owns kb-focus ring.
+    if (opts.skipKbFocus) {
+      return (
+        <React.Fragment key={`${keyPrefix}${String(item.id || item.key)}`}>
+          {renderThreadShell(threadBaseClass, false)}
+        </React.Fragment>
+      );
+    }
+
+    return (
+      <ConversationKbFocusClassName
+        key={`${keyPrefix}${String(item.id || item.key)}`}
+        anchor={rootAnchor}
+        baseClass={threadBaseClass}
+      >
+        {(className, focused) => renderThreadShell(className, focused)}
       </ConversationKbFocusClassName>
     );
   }
@@ -2347,7 +2475,7 @@ function ConversationViewImpl(props: any) {
             <ComposerCard
               composerMode={composerMode}
               setComposerMode={setComposerMode}
-              pendingCount={Number(pendingCount) || 0}
+              pendingCount={Number(resolvedPendingCount) || 0}
               pendingReviewGroup={pendingReviewGroup}
               commentText={commentText}
               setCommentText={setCommentText}

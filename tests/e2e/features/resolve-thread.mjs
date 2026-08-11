@@ -534,7 +534,32 @@ export function getSteps() {
     waitMs(400);
 
     let unresolveProbe = null;
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 100; i++) {
+      // Under full-suite pressure a progressive host snapshot can briefly
+      // overwrite the mutation's local write-through. After the first 12s,
+      // exercise the product Refresh path once so server authority repaints
+      // the resolved target before declaring the Unresolve UI missing.
+      if (i === 40) {
+        const refreshed = evalInPage(`
+          (() => {
+            const refresh = [...document.querySelectorAll('button')].find((el) =>
+              /refresh/i.test(
+                (el.getAttribute('aria-label') || '') + (el.title || '')
+              )
+            );
+            refresh?.click?.();
+            const resolved = [...document.querySelectorAll(
+              '.prp-review-filter__btn'
+            )].find((el) => /^\s*Resolved\b/i.test((el.textContent || '').trim()));
+            if (resolved?.getAttribute('aria-pressed') !== 'true') {
+              resolved?.click?.();
+            }
+            return { refresh: !!refresh, resolved: !!resolved };
+          })()
+        `);
+        log(`  R4 authority refresh ${JSON.stringify(refreshed)}`);
+        waitMs(1800);
+      }
       // Keep expanding while we still have collapsed shells (lazy comments settle).
       if (i === 0 || i % 4 === 0) {
         const mid = expandCollapsedThreads();

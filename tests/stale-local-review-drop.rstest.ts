@@ -14,10 +14,14 @@ import {
   isUnverifiedLocalOnlyReviewComment,
   reconcileReviewCommentsAgainstRemote,
   stripUnverifiedLocalOnlyReviewComments,
+  filterCacheReviewCommentsForCore,
+  stripOrphanPendingReviewComments,
+  detailHasViewerPending,
   mergeDetailPreserveOptimistic,
 } from '../src/modal/lib/composer-attach';
 import { mergeProgressiveSidesIntoFlat } from '../src/modal/lib/detail-store';
 import { mergeReviewThreadsPageIntoDetail } from '../src/fetch/review-threads-bulk';
+import { sanitizeDetailForCache } from '../src/modal/lib/detail-idb';
 
 const basePr = { owner: 'enif-lee', repo: 'pr-plus', number: 13 };
 
@@ -43,20 +47,12 @@ function real(id: number | string, author = 'alice') {
   };
 }
 
-/** Host open-modal-run cache reinject filter (same predicate as product). */
-function cleanCacheReviewCommentsForCore(list: any[]) {
-  return (Array.isArray(list) ? list : []).filter((c) => {
-    if (!c || c.id == null) return false;
-    if (c.pending) return true;
-    if (c._commentsPending || c.commentsLoaded === false) return true;
-    if (String(c.id).startsWith('shell:')) return true;
-    const body = String(c.body ?? c.bodyText ?? '').trim();
-    if (body) return true;
-    const author = String(
-      c.author || c.user?.login || c.user?.name || ''
-    ).trim();
-    return Boolean(author && author.toLowerCase() !== 'user');
-  });
+/** Host open-modal-run cache reinject filter — drive the shipped pure helper. */
+function cleanCacheReviewCommentsForCore(
+  list: any[],
+  networkDetail: any = null
+) {
+  return filterCacheReviewCommentsForCore(list, networkDetail);
 }
 
 describe('isUnverifiedLocalOnlyReviewComment', () => {
@@ -256,6 +252,52 @@ describe('mergeProgressiveSidesIntoFlat does not re-win longer ghost prev', () =
       false
     );
   });
+
+  test('post-Discard next with no PENDING does not re-seed longer prev pending', () => {
+    // Live/IDB still holds discarded pending rows; network next is clean.
+    const prevFlat = {
+      ...basePr,
+      viewerPendingReview: { id: 99, nodeId: 'PRR_dead' },
+      reviewComments: [
+        {
+          id: 9001,
+          body: 'e2e-sr start pending',
+          author: 'me',
+          path: 'a.ts',
+          line: 2,
+          pending: true,
+          pendingReviewId: 99,
+        },
+        {
+          id: 9002,
+          body: 'e2e-sr add pending',
+          author: 'me',
+          path: 'a.ts',
+          line: 6,
+          pending: true,
+          pendingReviewId: 99,
+        },
+        real(42, 'erin'),
+      ],
+      reviewThreads: [
+        { threadNodeId: 'PRRT_p1', id: 9001 },
+        { threadNodeId: 'PRRT_p2', id: 9002 },
+        { threadNodeId: 'PRRT_1', id: 42 },
+      ],
+    };
+    const nextFlat = {
+      ...basePr,
+      viewerPendingReview: null,
+      reviewComments: [real(42, 'erin')],
+      reviewThreads: [{ threadNodeId: 'PRRT_1', id: 42 }],
+      reviewThreadsMeta: { totalCount: 1, loadedThreadCount: 1 },
+      _sideSettled: { comments: true, reviews: true },
+    };
+    const out = mergeProgressiveSidesIntoFlat(prevFlat, nextFlat);
+    expect(out.viewerPendingReview).toBeNull();
+    expect((out.reviewComments || []).some((c: any) => c.pending)).toBe(false);
+    expect((out.reviewComments || []).map((c: any) => Number(c.id))).toEqual([42]);
+  });
 });
 
 describe('mergeReviewThreadsPageIntoDetail drops no-threadNodeId ghosts', () => {
@@ -314,7 +356,10 @@ describe('mergeCoreWithCache cache reinject filter', () => {
       reviewComments: [ghost(9), real(10, 'ivy')],
     };
     // Product: only reinject cleaned cache when network empty
-    const cleaned = cleanCacheReviewCommentsForCore(cacheSnap.reviewComments);
+    const cleaned = cleanCacheReviewCommentsForCore(cacheSnap.reviewComments, {
+      viewerPendingReview: null,
+      reviewComments: [],
+    });
     expect(cleaned.map((c) => Number(c.id))).toEqual([10]);
     expect(cleaned.some((c) => isUnverifiedLocalOnlyReviewComment(c))).toBe(
       false
@@ -327,7 +372,175 @@ describe('mergeCoreWithCache cache reinject filter', () => {
       'utf8'
     );
     expect(src).toMatch(/cleanedCacheRc/);
-    expect(src).toMatch(/toLowerCase\(\) !== 'user'/);
+    expect(src).toMatch(/filterCacheReviewCommentsForCore|netHasPending/);
+  });
+
+  test('network without PENDING does not reinject discarded pending rows', () => {
+    const cacheSnap = {
+      reviewComments: [
+        {
+          id: 9001,
+          body: 'e2e discarded pending',
+          author: 'me',
+          pending: true,
+          pendingReviewId: 99,
+        },
+        real(42, 'erin'),
+      ],
+    };
+    const network = {
+      viewerPendingReview: null,
+      reviewComments: [],
+    };
+    const cleaned = filterCacheReviewCommentsForCore(
+      cacheSnap.reviewComments,
+      network
+    );
+    expect(cleaned.map((c: any) => Number(c.id))).toEqual([42]);
+    expect(cleaned.some((c: any) => c.pending)).toBe(false);
+    expect(detailHasViewerPending(network)).toBe(false);
+  });
+
+  test('network with PENDING keeps cache pending rows', () => {
+    const cacheSnap = {
+      reviewComments: [
+        {
+          id: 1,
+          body: 'still pending',
+          author: 'me',
+          pending: true,
+        },
+        real(2),
+      ],
+    };
+    const network = {
+      viewerPendingReview: { id: 55, nodeId: 'PRR_x' },
+      reviewComments: [],
+    };
+    const cleaned = filterCacheReviewCommentsForCore(
+      cacheSnap.reviewComments,
+      network
+    );
+    expect(cleaned.some((c: any) => c.pending && Number(c.id) === 1)).toBe(
+      true
+    );
+    expect(cleaned.map((c: any) => Number(c.id)).sort()).toEqual([1, 2]);
+  });
+});
+
+describe('sanitizeDetailForCache drops orphan pending', () => {
+  test('vpr null strips pending reviewComments from durable cache', () => {
+    const out = sanitizeDetailForCache({
+      ...basePr,
+      viewerPendingReview: null,
+      reviewComments: [
+        {
+          id: 1,
+          body: 'ghost pending',
+          author: 'me',
+          pending: true,
+        },
+        real(2, 'erin'),
+      ],
+      files: [],
+      commits: [],
+    });
+    expect(out.viewerPendingReview).toBeNull();
+    expect((out.reviewComments || []).some((c: any) => c.pending)).toBe(false);
+    expect((out.reviewComments || []).map((c: any) => Number(c.id))).toEqual([
+      2,
+    ]);
+  });
+
+  test('vpr null strips demoted pending:false rows with pendingReviewId', () => {
+    const out = sanitizeDetailForCache({
+      ...basePr,
+      viewerPendingReview: null,
+      reviewComments: [
+        {
+          id: 501,
+          body: 'e2e demoted start',
+          author: 'me',
+          pending: false,
+          pendingReviewId: 99,
+        },
+        {
+          id: 502,
+          body: 'e2e demoted add',
+          author: 'me',
+          pending: false,
+          pendingReviewId: 99,
+        },
+        real(42, 'erin'),
+      ],
+      files: [],
+      commits: [],
+    });
+    expect((out.reviewComments || []).map((c: any) => Number(c.id))).toEqual([
+      42,
+    ]);
+    // Drop only — do not auto-tombstone (submit reuses same ids as published).
+    // Explicit discard tombs still live in `_deletedReviewCommentIds` when set.
+    expect(out._deletedReviewCommentIds || []).not.toEqual(
+      expect.arrayContaining(['501', '502'])
+    );
+  });
+
+  test('vpr null applies tombstones to demoted bodies without pendingReviewId', () => {
+    const out = sanitizeDetailForCache({
+      ...basePr,
+      viewerPendingReview: null,
+      _deletedReviewCommentIds: ['9001', '9002'],
+      reviewComments: [
+        {
+          id: 9001,
+          body: 'tombstoned demoted',
+          author: 'me',
+          pending: false,
+        },
+        real(3, 'bob'),
+      ],
+      files: [],
+      commits: [],
+    });
+    expect((out.reviewComments || []).map((c: any) => Number(c.id))).toEqual([
+      3,
+    ]);
+  });
+
+  test('stripOrphanPendingReviewComments pure helper', () => {
+    const out = stripOrphanPendingReviewComments({
+      viewerPendingReview: null,
+      reviewComments: [
+        { id: 1, body: 'p', pending: true },
+        { id: 2, body: 'ok', pending: false },
+      ],
+    });
+    expect(out.reviewComments.map((c: any) => c.id)).toEqual([2]);
+  });
+
+  test('PRModalDetailStore ships filterCacheReviewCommentsForCore (host path)', () => {
+    // Structural: pure detail-store re-exports filter for globalThis host lookup
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const src = fs.readFileSync(
+      path.join(__dirname, '../src/modal/lib/detail-store.ts'),
+      'utf8'
+    );
+    expect(src).toMatch(/export \{\s*[\s\S]*filterCacheReviewCommentsForCore/);
+    const pure = fs.readFileSync(
+      path.join(__dirname, '../src/modal/pure/detail-store.js'),
+      'utf8'
+    );
+    // After rebuild pure must export the filter name
+    expect(pure).toMatch(/filterCacheReviewCommentsForCore/);
+    const open = fs.readFileSync(
+      path.join(__dirname, '../src/host/modules/open-modal-run.ts'),
+      'utf8'
+    );
+    expect(open).toMatch(/PRModalDetailStore/);
+    expect(open).toMatch(/filterCacheReviewCommentsForCore/);
+    expect(open).not.toMatch(/PRModalStaleLocalReview/);
   });
 });
 
@@ -348,5 +561,243 @@ describe('stripUnverifiedLocalOnlyReviewComments', () => {
       '2',
       'shell:PRRT_z',
     ]);
+  });
+});
+
+describe('stripPendingReviewFromDetail tombstones pending ids', () => {
+  test('discarded pending ids cannot reinject via merge', () => {
+    const { stripPendingReviewFromDetail, mergeDetailPreserveOptimistic } =
+      require('../src/modal/lib/composer-attach') as typeof import('../src/modal/lib/composer-attach');
+    const prev = {
+      ...basePr,
+      viewerPendingReview: { id: 77, nodeId: 'PRR_x' },
+      reviewComments: [
+        {
+          id: 501,
+          body: 'start pending',
+          author: 'me',
+          pending: true,
+          pendingReviewId: 77,
+        },
+        {
+          id: 502,
+          body: 'add pending',
+          author: 'me',
+          pending: true,
+          pendingReviewId: 77,
+        },
+        real(42, 'erin'),
+      ],
+    };
+    const stripped = stripPendingReviewFromDetail(prev);
+    expect(stripped.viewerPendingReview).toBeNull();
+    expect(stripped._dropPending).toBeFalsy();
+    expect(stripped._deletedReviewCommentIds).toEqual(
+      expect.arrayContaining(['501', '502'])
+    );
+    expect((stripped.reviewComments || []).map((c: any) => c.id)).toEqual([42]);
+
+    // Host race reinjects demoted (pending:false) rows with same ids
+    const host = {
+      ...basePr,
+      viewerPendingReview: null,
+      reviewComments: [
+        {
+          id: 501,
+          body: 'start pending',
+          author: 'me',
+          pending: false,
+          pendingReviewId: 77,
+        },
+        {
+          id: 502,
+          body: 'add pending',
+          author: 'me',
+          pending: false,
+        },
+        real(42, 'erin'),
+      ],
+    };
+    const m = mergeDetailPreserveOptimistic(stripped, host);
+    expect((m.reviewComments || []).map((c: any) => Number(c.id))).toEqual([42]);
+    expect((m.reviewComments || []).some((c: any) => Number(c.id) === 501)).toBe(
+      false
+    );
+  });
+
+  test('submit mode strips pending without tombstones; refresh paints published', () => {
+    const { stripPendingReviewFromDetail, mergeDetailPreserveOptimistic } =
+      require('../src/modal/lib/composer-attach') as typeof import('../src/modal/lib/composer-attach');
+    const prev = {
+      ...basePr,
+      viewerPendingReview: { id: 88, nodeId: 'PRR_submit' },
+      reviewComments: [
+        {
+          id: 601,
+          body: 'pending then submit',
+          author: 'me',
+          pending: true,
+          pendingReviewId: 88,
+          path: 'a.ts',
+          line: 3,
+        },
+        real(42, 'erin'),
+      ],
+    };
+    const stripped = stripPendingReviewFromDetail(prev, { mode: 'submit' });
+    expect(stripped.viewerPendingReview).toBeNull();
+    // Must NOT tombstone submitted ids — same REST ids become published
+    expect(stripped._deletedReviewCommentIds || []).not.toEqual(
+      expect.arrayContaining(['601'])
+    );
+    expect(
+      (stripped.reviewComments || []).some((c: any) => Number(c.id) === 601)
+    ).toBe(false);
+    expect((stripped.reviewComments || []).map((c: any) => Number(c.id))).toEqual(
+      [42]
+    );
+    expect(stripped._deletedReviewBodies || []).not.toEqual(
+      expect.arrayContaining(['pending then submit'])
+    );
+
+    // Post-submit full-threads refresh: host returns same ids as published
+    const host = {
+      ...basePr,
+      viewerPendingReview: null,
+      _sideSettled: { reviews: true, comments: true },
+      reviewComments: [
+        {
+          id: 601,
+          body: 'pending then submit',
+          author: 'me',
+          pending: false,
+          path: 'a.ts',
+          line: 3,
+        },
+        real(42, 'erin'),
+      ],
+      reviews: [{ id: 9001, state: 'COMMENTED', author: 'me' }],
+    };
+    const m = mergeDetailPreserveOptimistic(stripped, host);
+    const ids = (m.reviewComments || []).map((c: any) => Number(c.id)).sort();
+    expect(ids).toEqual([42, 601]);
+    const published = (m.reviewComments || []).find(
+      (c: any) => Number(c.id) === 601
+    );
+    expect(published?.pending).toBeFalsy();
+    expect(m.viewerPendingReview).toBeNull();
+  });
+});
+
+import { fromAppDetail, toAppDetail } from '../src/modal/lib/detail-store';
+import { noteDiscardedPendingBodies } from '../src/modal/lib/stale-local-review';
+
+describe('fromAppDetail host-data-first for PENDING', () => {
+  test('live VPR+pending wins over stale tombs (GitHub SoT)', () => {
+    // Stale id/body tombs must not hide live host PENDING.
+    const live = {
+      owner: 'enif-lee',
+      repo: 'pr-plus',
+      number: 13,
+      _deletedReviewCommentIds: ['1001'],
+      _deletedReviewBodies: ['test'],
+      viewerPendingReview: { id: 99, nodeId: 'PRR_live', commentCount: 1 },
+      reviewComments: [
+        {
+          id: 1001,
+          body: 'test',
+          author: 'me',
+          pending: true,
+          pendingReviewId: 99,
+          path: 'a.ts',
+          line: 1,
+        },
+        real(42, 'erin'),
+      ],
+    };
+    const store = fromAppDetail(live);
+    const flat = toAppDetail(store);
+    expect(store.dropPending).toBe(false);
+    expect(flat?._dropPending).toBeFalsy();
+    expect(flat?.viewerPendingReview?.id).toBe(99);
+    expect((flat?.reviewComments || []).some((c: any) => c.pending)).toBe(true);
+    expect(
+      (flat?.reviewComments || [])
+        .map((c: any) => Number(c.id))
+        .sort((a: number, b: number) => a - b)
+    ).toEqual([42, 1001]);
+  });
+
+  test('null VPR set-authority strips orphan pending rows (no latch)', () => {
+    const orphan = {
+      owner: 'enif-lee',
+      repo: 'pr-plus',
+      number: 13,
+      viewerPendingReview: null,
+      reviewComments: [
+        {
+          id: 1001,
+          body: 'gone',
+          author: 'me',
+          pending: true,
+          pendingReviewId: 99,
+        },
+        real(42, 'erin'),
+      ],
+    };
+    const store = fromAppDetail(orphan);
+    expect(store.dropPending).toBe(false);
+    expect(toAppDetail(store)?.viewerPendingReview).toBeNull();
+    expect(toAppDetail(store)?._dropPending).toBeFalsy();
+    expect(
+      (toAppDetail(store)?.reviewComments || []).some((c: any) => c.pending)
+    ).toBe(false);
+    expect((toAppDetail(store)?.reviewComments || []).map((c: any) => Number(c.id))).toEqual([
+      42,
+    ]);
+  });
+});
+
+describe('mergeCommentsHostFirst set authority', () => {
+  test('host authoritative drops cache-only ids', () => {
+    const {
+      mergeCommentsHostFirst,
+    } = require('../src/modal/lib/stale-local-review') as typeof import('../src/modal/lib/stale-local-review');
+    const host = [real(1, 'a'), real(2, 'b')];
+    const cache = [
+      real(1, 'a'),
+      real(2, 'b'),
+      { id: 999, body: 'ghost', author: 'x', pending: false },
+    ];
+    const out = mergeCommentsHostFirst(host, cache, { hostAuthoritative: true });
+    expect(out.map((c: any) => Number(c.id)).sort()).toEqual([1, 2]);
+  });
+
+  test('mergeDetail host PENDING wins after local discard strip', () => {
+    const { mergeDetailPreserveOptimistic } =
+      require('../src/modal/lib/composer-attach') as typeof import('../src/modal/lib/composer-attach');
+    const prev = {
+      ...basePr,
+      viewerPendingReview: null,
+      reviewComments: [real(42, 'erin')],
+    };
+    const host = {
+      ...basePr,
+      viewerPendingReview: { id: 77, nodeId: 'PRR_x' },
+      reviewComments: [
+        real(42, 'erin'),
+        {
+          id: 501,
+          body: 'test',
+          author: 'me',
+          pending: true,
+          pendingReviewId: 77,
+        },
+      ],
+    };
+    const m = mergeDetailPreserveOptimistic(prev, host);
+    expect(m._dropPending).toBeFalsy();
+    expect(m.viewerPendingReview?.id).toBe(77);
+    expect((m.reviewComments || []).some((c: any) => c.pending)).toBe(true);
   });
 });

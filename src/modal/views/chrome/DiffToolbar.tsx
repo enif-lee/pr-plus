@@ -300,13 +300,12 @@ export function DiffToolbar(props: any) {
     // the menu even when CDP keys miss document-only handlers. claimNestedEscape
     // is stopImmediatePropagation — register after App would block us, so use
     // preventDefault+stopPropagation only and always setSettingsOpen(false).
+    // window only — embed key shield stops document propagation
     window.addEventListener('keydown', onKey, true);
-    document.addEventListener('keydown', onKey, true);
     return () => {
       window.clearTimeout(armTimer);
       document.removeEventListener('mousedown', onDoc, true);
       window.removeEventListener('keydown', onKey, true);
-      document.removeEventListener('keydown', onKey, true);
     };
   }, [settingsOpen]);
   function toggleStatus(status: DiffReviewStatus) {

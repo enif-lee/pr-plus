@@ -17,6 +17,7 @@ import {
   useSelectionIslandGroup,
 } from '../../store/data-groups';
 import { useModalStore } from '../../store/modal-store';
+import { useDomainDetail } from '../../app/domain-detail-context';
 import '../diff/DiffLayout.css';
 
 export type DiffWorkspaceProps = {
@@ -26,7 +27,6 @@ export type DiffWorkspaceProps = {
   fileTree: any;
   expandedDirs: any;
   onToggleDir: any;
-  activeFilePath: string | null;
   onSelectFile: any;
   collapsedFiles: any;
   onToggleFileCollapse: any;
@@ -44,7 +44,6 @@ export type DiffWorkspaceProps = {
   viewedPaths: any;
   onToggleViewed: any;
   onToggleFileNavCollapse: () => void;
-  activeFileNavIndex: any;
   navFile: (dir: number) => void;
   onFileNavResizeStart: (e: React.PointerEvent) => void;
   // toolbar + diff
@@ -156,6 +155,7 @@ export type DiffWorkspaceProps = {
 };
 
 export function DiffWorkspace(p: DiffWorkspaceProps) {
+  const domainDetail = useDomainDetail();
   // Leaf data groups — typing / scroll metrics re-render this shell only, not PrModalApp.
   const scrollMetrics = useScrollMetricsGroup();
   const selectionIsland = useSelectionIslandGroup();
@@ -170,7 +170,6 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
     fileTree,
     expandedDirs,
     onToggleDir,
-    activeFilePath,
     onSelectFile,
     collapsedFiles,
     onToggleFileCollapse,
@@ -188,10 +187,9 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
     viewedPaths,
     onToggleViewed,
     onToggleFileNavCollapse,
-    activeFileNavIndex,
     navFile,
     onFileNavResizeStart,
-    detail,
+    detail: detailProp,
     virtualRows,
     diffFilesOverride,
     diffReviewFilter,
@@ -291,6 +289,7 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
     setSelectionIslandPhase,
     setActionMsg,
   } = p;
+  const detail = detailProp ?? domainDetail;
 
   const scrollTop =
     scrollTopProp != null && Number.isFinite(Number(scrollTopProp))
@@ -338,7 +337,6 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
         tree={fileTree}
         expandedDirs={expandedDirs}
         onToggleDir={onToggleDir}
-        activePath={activeFilePath}
         onSelect={onSelectFile}
         collapsedFiles={collapsedFiles}
         onToggleFileCollapse={onToggleFileCollapse}
@@ -359,11 +357,6 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
         onToggleViewed={onToggleViewed}
         navCollapsed={fileNav.collapsed}
         onToggleNavCollapse={onToggleFileNavCollapse}
-        fileIndex={
-          typeof activeFileNavIndex === 'function'
-            ? activeFileNavIndex(displayFiles, activeFilePath)
-            : -1
-        }
         fileTotal={displayFiles.length}
         onPrevFile={() => navFile(-1)}
         onNextFile={() => navFile(1)}
@@ -465,6 +458,7 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
           onPrevPage={() => scrollDiffPage(-1)}
           onNextPage={() => scrollDiffPage(1)}
           onGoto={(q: string) => applyGotoQuery(q)}
+          files={displayFiles || reviewScopedFiles || null}
           isMac={
             typeof navigator !== 'undefined' &&
             /Mac|iPhone|iPad/.test(navigator.platform || '')
@@ -480,7 +474,6 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
             }
           }}
           listRef={listRef}
-          activeFilePath={activeFilePath}
           highlightRowIndex={
             hit?.rowIndex ??
             (commentIndex >= 0 ? mappedComments[commentIndex]?.rowIndex : undefined)

@@ -33,6 +33,7 @@ describe('stats pill + progress keys', () => {
       'stats_n_files',
       'stats_loading',
       'stats_loading_short',
+      'stats_loading_panels',
       'progress_loading_all_files',
       'progress_files_ready',
       'progress_loading_files_n',

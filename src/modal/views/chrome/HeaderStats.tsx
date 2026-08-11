@@ -300,6 +300,9 @@ export function HeaderStatsBadge({
     busy?: boolean;
     phase?: string | null;
     percent?: number | null;
+    /** critical = progress bar; background = stats + border load; done/null = stats */
+    mode?: 'critical' | 'background' | string | null;
+    background?: boolean;
   } | null;
   skeleton?: boolean;
   additions?: number;
@@ -313,6 +316,8 @@ export function HeaderStatsBadge({
   const storeLabel = useDetailUiStore((s) => s.loadLabel);
   const storeBusy = useDetailUiStore((s) => s.loadBusy);
   const hostBusy = Boolean(loadStage?.busy);
+  const hostBackground =
+    loadStage?.mode === 'background' || Boolean(loadStage?.background);
   const storeStage =
     storeBusy || storeLabel
       ? {
@@ -320,15 +325,23 @@ export function HeaderStatsBadge({
           label: storeLabel,
           busy: storeBusy,
           phase: storeBusy ? 'files' : null,
+          mode: storeBusy ? 'critical' : null,
         }
       : null;
+  // Background host mode must win over idle store so border loading shows.
   const effectiveStage =
-    storeBusy && storeLabel && !hostBusy
-      ? storeStage
-      : loadStage || storeStage;
+    hostBackground
+      ? loadStage
+      : storeBusy && storeLabel && !hostBusy
+        ? storeStage
+        : loadStage || storeStage;
   const stageLabel = effectiveStage?.label ? String(effectiveStage.label) : '';
   const stageBusy = Boolean(effectiveStage?.busy);
   const stagePhase = effectiveStage?.phase != null ? String(effectiveStage.phase) : '';
+  const isBackground =
+    effectiveStage?.mode === 'background' ||
+    Boolean((effectiveStage as any)?.background) ||
+    stagePhase === 'background';
   const rawPercent =
     effectiveStage && Number.isFinite(Number(effectiveStage.percent))
       ? clampPct(Number(effectiveStage.percent))
@@ -337,26 +350,38 @@ export function HeaderStatsBadge({
         : stageLabel || stagePhase === 'done'
           ? 100
           : null;
-  // Show stage chrome for labeled busy work, or a brief 100% settle (done).
+  // Critical: progress bar (label + %). Background: diff stats + border only.
   const showStage =
-    Boolean(stageLabel) ||
-    (rawPercent != null && stageBusy) ||
-    (stagePhase === 'done' && rawPercent === 100);
+    !isBackground &&
+    (Boolean(stageLabel) ||
+      (rawPercent != null && stageBusy) ||
+      (stagePhase === 'done' && rawPercent === 100));
+  const showBgLoading = Boolean(isBackground) && !showStage && !skeleton;
   const animPercent = useAnimatedPercent(
     showStage ? rawPercent ?? 0 : null,
     showStage
   );
   const badgeRef = useRef<HTMLDivElement | null>(null);
   const sizeRef = useRef({ w: 0, h: 0 });
-  const modeRef = useRef<'stage' | 'metrics' | 'skeleton' | null>(null);
+  const modeRef = useRef<'stage' | 'metrics' | 'metrics-bg' | 'skeleton' | null>(
+    null
+  );
   const morphTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Mode key drives width morph; stage omits label so phrase swaps stay still.
-  const mode = showStage ? 'stage' : skeleton ? 'skeleton' : 'metrics';
+  const mode = showStage
+    ? 'stage'
+    : skeleton
+      ? 'skeleton'
+      : showBgLoading
+        ? 'metrics-bg'
+        : 'metrics';
   const contentKey = showStage
     ? `stage:${stageBusy ? 'busy' : 'idle'}`
     : skeleton
       ? 'metrics:skeleton'
-      : `metrics:${additions}:${deletions}:${fileCount}`;
+      : showBgLoading
+        ? `metrics-bg:${additions}:${deletions}:${fileCount}`
+        : `metrics:${additions}:${deletions}:${fileCount}`;
 
   useLayoutEffect(() => {
     const el = badgeRef.current;
@@ -446,22 +471,30 @@ export function HeaderStatsBadge({
         'prp-header__stats',
         skeleton ? 'prp-header__stats--skeleton' : '',
         showStage ? 'prp-header__stats--busy' : '',
+        showBgLoading ? 'prp-header__stats--bg-loading' : '',
       ]
         .filter(Boolean)
         .join(' ')}
-      data-stats-mode={showStage ? 'stage' : 'metrics'}
+      data-stats-mode={
+        showStage ? 'stage' : showBgLoading ? 'metrics-loading' : 'metrics'
+      }
       data-content-key={contentKey}
       data-load-percent={showStage ? String(animPercent) : undefined}
+      data-bg-loading={showBgLoading ? '1' : undefined}
       title={
         showStage
           ? `${stageLabel || t('stats_loading_short')}${rawPercent != null ? ` · ${animPercent}%` : ''}`
-          : skeleton
-            ? undefined
-            : t('stats_files_changed')
+          : showBgLoading
+            ? t('stats_loading_panels')
+            : skeleton
+              ? undefined
+              : t('stats_files_changed')
       }
-      role={showStage ? 'status' : undefined}
-      aria-live={showStage ? 'polite' : undefined}
-      aria-busy={showStage && stageBusy ? true : undefined}
+      role={showStage || showBgLoading ? 'status' : undefined}
+      aria-live={showStage || showBgLoading ? 'polite' : undefined}
+      aria-busy={
+        showStage && stageBusy ? true : showBgLoading ? true : undefined
+      }
       aria-valuemin={showStage ? 0 : undefined}
       aria-valuemax={showStage ? 100 : undefined}
       aria-valuenow={showStage ? animPercent : undefined}
@@ -474,7 +507,7 @@ export function HeaderStatsBadge({
         />
       ) : null}
       {/* Stable key within a mode — remount only on stage↔metrics for fade-in */}
-      <span key={mode} className="prp-header__stats-inner">
+      <span key={mode === 'metrics-bg' ? 'metrics' : mode} className="prp-header__stats-inner">
         {showStage ? (
           <>
             {stageBusy ? (
@@ -491,6 +524,9 @@ export function HeaderStatsBadge({
           <span className="prp-skeleton__chip prp-skeleton__chip--stat" />
         ) : (
           <>
+            {showBgLoading ? (
+              <span className="prp-header__stats-spinner" aria-hidden="true" />
+            ) : null}
             <span className="prp-stat-add">+{additions}</span>
             <span className="prp-stat-del">−{deletions}</span>
             <span className="prp-muted prp-header__stats-files">

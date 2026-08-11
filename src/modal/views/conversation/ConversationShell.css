@@ -241,7 +241,8 @@
   background: var(--prp-bg);
 }
 
-/* Review thread shell may not inherit .prp-card bg — force opaque cover */
+/* Review thread shell may not inherit .prp-card bg — force opaque cover.
+ * Radius matches .prp-card (10px) so kb-focus ring aligns with the painted box. */
 .prp-conversation-virtual__row > .prp-conversation-inline-thread,
 .prp-conversation-virtual__row > .prp-card--timeline-review-thread {
   background: var(--prp-bg);

@@ -238,10 +238,11 @@ export function Header(props: any) {
       setOverflowOpen(false);
     };
     document.addEventListener('mousedown', onDoc, true);
-    document.addEventListener('keydown', onKey, true);
+    // window capture so Esc still works under embed key shield (GH isolation)
+    window.addEventListener('keydown', onKey, true);
     return () => {
       document.removeEventListener('mousedown', onDoc, true);
-      document.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('keydown', onKey, true);
     };
   }, [overflowOpen]);
 

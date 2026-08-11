@@ -28,6 +28,7 @@ import {
 import { calculateVisibleRange } from '@lib/virtual-range';
 import { languageFromPath } from '@lib/diff-rows';
 import { pendingReviewCount } from '@lib/pending-review';
+import { useDomainDetail } from '../../app/domain-detail-context';
 import { InlineThread } from '../diff/InlineThread';
 import { MarkdownView as Md } from '@common/MarkdownView';
 
@@ -39,7 +40,13 @@ export function PendingReviewBar({
   /** When false, hide Approve / Request changes (own PR). Default true. */
   canSubmitReviewVerdict = true,
 }: any) {
-  const count = typeof pendingReviewCount === 'function' ? pendingReviewCount(batch) : 0;
+  const domain = useDomainDetail();
+  const countFromBatch =
+    typeof pendingReviewCount === 'function' ? pendingReviewCount(batch) : 0;
+  const countFromDomain = Array.isArray(domain?.reviewComments)
+    ? domain.reviewComments.filter((c: any) => c && c.pending).length
+    : 0;
+  const count = Math.max(Number(countFromBatch) || 0, Number(countFromDomain) || 0);
   if (!count) return null;
   const showVerdict = canSubmitReviewVerdict !== false;
   return (

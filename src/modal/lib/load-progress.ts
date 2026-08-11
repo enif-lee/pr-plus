@@ -156,15 +156,15 @@ export function tweenCounterSamples(
  *   + threadsShell + threadsComments + threadsReactions
  *   + files + comments + reviews + commits + checks + development
  *
- * Review-thread open ladder (progress bar labels / marks):
+ * Review-thread open ladder (progress bar **labels**):
  *   1. threadsShell — GraphQL shell window (thread meta + root preview)
- *   2. threadsComments — by-ids full comment bodies (eager + remaining)
- *   3. threadsReactions — reaction counts (co-fetched on by-ids; separate mark)
+ *   2. threadsComments — by-ids full bodies (+ reactors on same document)
+ * threadsReactions remains a weight key, silent-credited with comments
+ * (no "Updating reactions…" stage).
  *
  * Side-panel `comments` is issue comments (not review-thread bodies).
- * refresh may use threadsVisible instead of the three open thread keys.
- * Legacy aliases (threadsNewest / Remaining / Earlier / Follow) keep weights
- * for older call sites; prefer the shell/comments/reactions names.
+ * refresh may use threadsVisible instead of shell+comments keys.
+ * Legacy aliases (threadsNewest / Remaining / Earlier / Follow) keep weights.
  */
 export const FETCH_UNIT_WEIGHTS = {
   start: 4,
@@ -173,7 +173,7 @@ export const FETCH_UNIT_WEIGHTS = {
   threadsShell: 8,
   /** Stage 2: full review-comment bodies (by-ids). */
   threadsComments: 8,
-  /** Stage 3: reaction counts on review comments. */
+  /** Silent credit with comments (reactors on same by-ids; no UI stage). */
   threadsReactions: 4,
   /** @deprecated alias → threadsShell */
   threadsNewest: 8,
@@ -195,7 +195,10 @@ export const FETCH_UNIT_WEIGHTS = {
   threadsVisible: 20,
 } as const;
 
-/** Keys that must complete for open progress to reach Ready (100). */
+/**
+ * All open-session weight units (critical + background).
+ * Tracker still credits every key; UI finish is split (see critical vs background).
+ */
 export const OPEN_PROGRESS_KEYS = [
   'start',
   'core',
@@ -209,6 +212,34 @@ export const OPEN_PROGRESS_KEYS = [
   'checks',
   'development',
 ] as const;
+
+/**
+ * Critical path — header shows **progress bar** (label + %) until these complete.
+ * Core PR detail + review-thread ladder (shell → comments; reactions weight
+ * silent-credited with comments).
+ */
+export const OPEN_PROGRESS_CRITICAL_KEYS = [
+  'start',
+  'core',
+  'threadsShell',
+  'threadsComments',
+  'threadsReactions',
+] as const;
+
+/**
+ * Background path — after critical, header shows **diff stats + border loading**
+ * until these complete; then stats only.
+ */
+export const OPEN_PROGRESS_BACKGROUND_KEYS = [
+  'files',
+  'comments',
+  'reviews',
+  'commits',
+  'checks',
+  'development',
+] as const;
+
+export type OpenProgressUiMode = 'critical' | 'background' | 'done';
 
 /**
  * Whether open/refresh thread units are fully credited.
@@ -238,6 +269,80 @@ export function threadsProgressComplete(
   if (hasKey('threadsNewest') && hasKey('threadsFollow')) return true;
   if (hasKey('threadsShell') && hasKey('threadsFollow')) return true;
   return false;
+}
+
+/** True when critical open units are credited (progress bar may leave). */
+export function criticalProgressComplete(
+  hasKey: (key: string) => boolean
+): boolean {
+  if (typeof hasKey !== 'function') return false;
+  // Refresh path: threadsVisible stands in for the three thread keys
+  const threadsOk = threadsProgressComplete(hasKey);
+  if (!hasKey('start') || !hasKey('core')) return false;
+  return threadsOk;
+}
+
+/** True when background side panels are credited. */
+export function backgroundProgressComplete(
+  hasKey: (key: string) => boolean
+): boolean {
+  if (typeof hasKey !== 'function') return false;
+  return OPEN_PROGRESS_BACKGROUND_KEYS.every((k) => hasKey(k));
+}
+
+/**
+ * Full open complete (critical + background). Progress bar clear only after
+ * critical; full done clears border loading too.
+ */
+export function openProgressFullyComplete(
+  hasKey: (key: string) => boolean
+): boolean {
+  return criticalProgressComplete(hasKey) && backgroundProgressComplete(hasKey);
+}
+
+/**
+ * Percent 0–100 for the **critical** bar only (not diluted by side panels).
+ * Caps at 99 while still critical-busy so UI can own the settle.
+ */
+export function criticalProgressPercent(
+  hasKey: (key: string) => boolean,
+  weights: Record<string, number> = FETCH_UNIT_WEIGHTS as any
+): number {
+  if (typeof hasKey !== 'function') return 0;
+  const w = (k: string) => Math.max(0, Number(weights?.[k]) || 0);
+  let done = 0;
+  let total = 0;
+  for (const k of ['start', 'core'] as const) {
+    total += w(k);
+    if (hasKey(k)) done += w(k);
+  }
+  const wShell = w('threadsShell');
+  const wComments = w('threadsComments');
+  const wReactions = w('threadsReactions');
+  const threadTotal = wShell + wComments + wReactions;
+  total += threadTotal;
+  if (threadsProgressComplete(hasKey)) {
+    done += threadTotal;
+  } else {
+    if (hasKey('threadsShell') || hasKey('threadsNewest')) done += wShell;
+    if (hasKey('threadsComments') || hasKey('threadsRemaining')) done += wComments;
+    if (hasKey('threadsReactions') || hasKey('threadsEarlier')) done += wReactions;
+    // Partial legacy follow-up
+    if (hasKey('threadsFollow') && !hasKey('threadsComments')) {
+      done += Math.min(w('threadsFollow'), wComments + wReactions);
+    }
+  }
+  if (total <= 0) return 0;
+  return clampPercent(Math.min(99, Math.round((done / total) * 100)));
+}
+
+/** Resolve header stats UI mode from tracker keys. */
+export function resolveOpenProgressUiMode(
+  hasKey: (key: string) => boolean
+): OpenProgressUiMode {
+  if (!criticalProgressComplete(hasKey)) return 'critical';
+  if (!backgroundProgressComplete(hasKey)) return 'background';
+  return 'done';
 }
 
 /**

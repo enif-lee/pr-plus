@@ -58,6 +58,22 @@ export function discardPendingReview() {
   return createEmptyPendingReview();
 }
 
+/** Product message when Start review / Add comment hits a locked PR (GitHub 422). */
+export const LOCKED_PR_START_REVIEW_MSG =
+  'This pull request is locked — Start review / comments are disabled on GitHub.';
+
+/**
+ * Map Start review / pending-attach errors to a user-visible action message.
+ * Locked PRs must not look like a silent no-op.
+ */
+export function formatStartReviewError(err: any): string {
+  const raw = err?.message || String(err || '');
+  const locked =
+    /locked/i.test(raw) ||
+    (Number(err?.status) === 422 && /lock/i.test(raw));
+  return locked ? LOCKED_PR_START_REVIEW_MSG : raw;
+}
+
 export function setPendingReviewBody(batch, body) {
   const base = batch && Array.isArray(batch.comments) ? batch : createEmptyPendingReview();
   return { ...base, body: String(body || '') };

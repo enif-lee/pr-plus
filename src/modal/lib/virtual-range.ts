@@ -452,6 +452,17 @@ export function applyProgrammaticDiffScroll(
   if (plan.applyDom && el) {
     el.scrollTop = plan.top;
     appliedDom = true;
+    // Synchronously notify listeners that wait on scrollTop (VirtualDiff range)
+    // so the next paint already has the expanded window — reduces blank bands.
+    try {
+      if (typeof (el as any).dispatchEvent === 'function') {
+        (el as any).dispatchEvent(
+          new Event('scroll', { bubbles: false, cancelable: false })
+        );
+      }
+    } catch {
+      /* non-DOM / jsdom */
+    }
   }
   if (
     plan.applyStore &&

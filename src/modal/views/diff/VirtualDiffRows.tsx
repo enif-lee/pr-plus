@@ -30,8 +30,11 @@ import {
 } from '@lib/virtual-range';
 import {
   isSelectableDiffRow,
+  isOptHeldForPointerDrag,
+  isSelectionDockHostRow,
   rowSelectionVisualKey,
   selectionActiveSide,
+  shouldUseNativeTextSelectOnDrag,
 } from '@lib/line-selection';
 import { isPathViewed } from '@lib/review-threads';
 import { OptBtnHint } from '@common/OptBtnHint';
@@ -142,12 +145,17 @@ export function FileHeaderRow(props: {
     occ = 0,
     searchQuery = '',
     sticky = false,
-    focused = false,
+    focused: focusedProp,
     selected = false,
     style,
     selectionIsland = null,
     onSelectionStart,
   } = props;
+  const storeFocused = useModalStore(
+    (s) => String(s.activeFilePath || '') === String(row?.filePath || '')
+  );
+  const focused =
+    typeof focusedProp === 'boolean' ? focusedProp : storeFocused;
   const viewed = isPathViewed ? isPathViewed(viewedPaths, row.filePath) : false;
   const collapsed = Boolean(row.collapsed);
   const openable = row.openable !== false;
@@ -169,7 +177,9 @@ export function FileHeaderRow(props: {
       className={`prp-vline prp-vline--header prp-vline--header-${headerTone}${
         !openable ? ' prp-vline--header-binary' : ''
       }${focused ? ' prp-vline--header-focus' : ''}${
-        selected ? ' prp-vline--header-selected' : ''
+        selected
+          ? ' prp-vline--header-selected prp-vline--selected prp-vline--sel-only'
+          : ''
       }${searchRowClass}`}
       style={{ height: ROW_HEIGHT, ...style }}
       data-row-index={sticky ? undefined : row.rowIndex}
@@ -643,9 +653,10 @@ export const DiffCodeLine = memo(function DiffCodeLine({
 
   // Leaf store subscription: only this row re-renders when its key changes.
   // Middles stay "middle" under multi extend → no re-render. Override for tests.
-  // Pack visual role + dock side into one primitive so Object.is stays stable.
+  // Pack visual role + dock side + caret-host flag so multi-line head moves
+  // re-render the old/new dock hosts (role may stay "end" while head flips).
   const storeLeafPacked = useModalStore((s) => {
-    if (selectionOverride !== undefined) return '\x1eRIGHT';
+    if (selectionOverride !== undefined) return '\x1eRIGHT\x1e0';
     const visualKey =
       typeof rowSelectionVisualKey === 'function'
         ? rowSelectionVisualKey(s.lineSelection, row)
@@ -660,15 +671,18 @@ export const DiffCodeLine = memo(function DiffCodeLine({
           ).toUpperCase() === 'LEFT'
           ? 'LEFT'
           : 'RIGHT';
-    return `${visualKey}\x1e${side}`;
+    const dockHost =
+      typeof isSelectionDockHostRow === 'function' &&
+      isSelectionDockHostRow(s.lineSelection, row)
+        ? '1'
+        : '0';
+    return `${visualKey}\x1e${side}\x1e${dockHost}`;
   });
-  const storeSep = storeLeafPacked.lastIndexOf('\x1e');
-  const storeVisualKey =
-    storeSep >= 0 ? storeLeafPacked.slice(0, storeSep) : storeLeafPacked;
+  const storeParts = storeLeafPacked.split('\x1e');
+  const storeVisualKey = storeParts[0] || '';
   const storeDockSide: 'LEFT' | 'RIGHT' =
-    storeSep >= 0 && storeLeafPacked.slice(storeSep + 1) === 'LEFT'
-      ? 'LEFT'
-      : 'RIGHT';
+    storeParts[1] === 'LEFT' ? 'LEFT' : 'RIGHT';
+  const storeDockHost = storeParts[2] === '1';
   const visualKey =
     selectionOverride !== undefined
       ? typeof rowSelectionVisualKey === 'function'
@@ -677,9 +691,14 @@ export const DiffCodeLine = memo(function DiffCodeLine({
       : storeVisualKey;
   const selected = visualKey !== '';
   const selRole = visualKey || null;
-  // Single-line selection is role "only"; multi ends with "end"
+  // Dock follows the caret (head), not always the range bottom.
   const dockHere = Boolean(
-    selectionIsland && (selRole === 'end' || selRole === 'only')
+    selectionIsland &&
+      (selectionOverride !== undefined
+        ? typeof isSelectionDockHostRow === 'function'
+          ? isSelectionDockHostRow(selectionOverride, row)
+          : selRole === 'end' || selRole === 'only'
+        : storeDockHost)
   );
   const dockSide: 'LEFT' | 'RIGHT' =
     selectionOverride !== undefined
@@ -747,6 +766,7 @@ export const DiffCodeLine = memo(function DiffCodeLine({
       data-old-line={row.oldLine ?? ''}
       data-new-line={row.newLine ?? ''}
       data-sel-role={selRole || undefined}
+      data-sel-head={storeDockHost ? '1' : undefined}
       data-sel-side={selected && isSplit ? dockSide : undefined}
       data-split={isSplit ? '1' : '0'}
       data-search-match={isSearchMatch ? '1' : undefined}
@@ -762,6 +782,40 @@ export const DiffCodeLine = memo(function DiffCodeLine({
         if (e.button !== 0 || !selectable) return;
         // Don't start line selection when clicking the expand control
         if ((e.target as HTMLElement)?.closest?.('.prp-line-expand-btn')) {
+          return;
+        }
+        // Opt/Alt held → native browser text selection (copy partial code).
+        // Skip preventDefault + line-selection so the browser owns the gesture.
+        const nativeText =
+          typeof shouldUseNativeTextSelectOnDrag === 'function'
+            ? shouldUseNativeTextSelectOnDrag({
+                altKey: Boolean(e.altKey),
+                optHeld: isOptHeldForPointerDrag(e),
+                metaKey: Boolean(e.metaKey),
+                ctrlKey: Boolean(e.ctrlKey),
+              })
+            : Boolean(e.altKey);
+        if (nativeText) {
+          // Notify shell (auto-copy on mouseup) but do not preventDefault —
+          // browser owns the text selection gesture.
+          onSelectionStart?.(row, { x: e.clientX, y: e.clientY }, {
+            shiftKey: Boolean(e.shiftKey),
+            preferredSide: 'RIGHT',
+            altKey: true,
+            optHeld: true,
+            nativeTextSelect: true,
+          });
+          // Page-world / capture bridge (e2e + dual listeners)
+          try {
+            document.dispatchEvent(
+              new CustomEvent('prp-native-text-select-start', {
+                bubbles: true,
+                detail: { rowIndex: row?.rowIndex ?? null },
+              })
+            );
+          } catch {
+            /* ignore */
+          }
           return;
         }
         e.preventDefault();
@@ -784,6 +838,7 @@ export const DiffCodeLine = memo(function DiffCodeLine({
         onSelectionStart?.(row, { x: e.clientX, y: e.clientY }, {
           shiftKey: Boolean(e.shiftKey),
           preferredSide,
+          altKey: Boolean(e.altKey),
         });
       }}
       // Extend multi-line while primary button is held. Do not gate on the
@@ -925,4 +980,3 @@ export function DiffVirtualRowShell({
     </div>
   );
 }
-

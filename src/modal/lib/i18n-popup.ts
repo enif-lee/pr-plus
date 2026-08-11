@@ -53,6 +53,11 @@ export const POPUP_MESSAGE_KEYS = [
   'popup_pref_plugin_desc',
   'popup_pref_auto_open_title',
   'popup_pref_auto_open_desc',
+  'popup_pref_list_open_title',
+  'popup_pref_list_open_desc',
+  'popup_label_list_open',
+  'popup_opt_list_open_modal',
+  'popup_opt_list_open_page',
   'popup_pref_reverse_title',
   'popup_pref_reverse_desc',
   'popup_pref_timeline_title',
@@ -162,6 +167,12 @@ export const popupEn: MessageCatalog = {
   popup_pref_auto_open_title: 'Auto-open pr+ on PR pages',
   popup_pref_auto_open_desc:
     'Open pr+ instead of the native PR UI. When off, use the header pr+ button or ⌘⇧E / Ctrl+Shift+E.',
+  popup_pref_list_open_title: 'Open from /pulls list',
+  popup_pref_list_open_desc:
+    'When you click a PR title on the pulls list: pr+ modal (overlay) or navigate to the GitHub PR page. PR-page embed still follows Auto-open above.',
+  popup_label_list_open: 'List open target',
+  popup_opt_list_open_modal: 'pr+ modal (default)',
+  popup_opt_list_open_page: 'PR page',
   popup_pref_reverse_title: 'Reverse PR comments order',
   popup_pref_reverse_desc:
     'Layout: composer → Merge box → Conversation (latest first).',
@@ -280,6 +291,12 @@ export const popupKo: MessageCatalog = {
   popup_pref_auto_open_title: 'PR 페이지에서 pr+ 뷰 자동 열기',
   popup_pref_auto_open_desc:
     'GitHub PR 페이지로 이동하면 기본 UI 대신 pr+ 뷰를 바로 엽니다. 끄면 기본 PR 화면이 유지되며 헤더 pr+ 버튼 또는 ⌘⇧E / Ctrl+Shift+E로 전환합니다.',
+  popup_pref_list_open_title: '/pulls 목록에서 열기 방식',
+  popup_pref_list_open_desc:
+    'pulls 목록에서 PR 제목을 클릭할 때: pr+ 모달(오버레이) 또는 GitHub PR 페이지로 이동. PR 페이지에서의 pr+ embed는 위 자동 열기 설정을 따릅니다.',
+  popup_label_list_open: '목록 열기 대상',
+  popup_opt_list_open_modal: 'pr+ 모달 (기본)',
+  popup_opt_list_open_page: 'PR 페이지',
   popup_pref_reverse_title: 'PR Comments 역순 정렬',
   popup_pref_reverse_desc:
     '코멘트 작성란 → Merge box → Conversation(최신 우선) 순으로 배치합니다.',
@@ -398,6 +415,12 @@ export const popupJa: MessageCatalog = {
   popup_pref_auto_open_title: 'PR ページで pr+ を自動表示',
   popup_pref_auto_open_desc:
     'GitHub PR ではネイティブ UI の代わりに pr+ を開きます。オフ時はヘッダーの pr+ または ⌘⇧E / Ctrl+Shift+E。',
+  popup_pref_list_open_title: '/pulls 一覧からの開き方',
+  popup_pref_list_open_desc:
+    'pulls 一覧で PR タイトルをクリックしたとき: pr+ モーダル（オーバーレイ）または GitHub の PR ページへ移動。PR ページの embed は上の自動表示設定に従います。',
+  popup_label_list_open: '一覧の開き先',
+  popup_opt_list_open_modal: 'pr+ モーダル（既定）',
+  popup_opt_list_open_page: 'PR ページ',
   popup_pref_reverse_title: 'PR コメントを逆順',
   popup_pref_reverse_desc:
     '配置: コンポーザー → Merge box → Conversation（新しい順）。',
@@ -514,6 +537,12 @@ export const popupZh: MessageCatalog = {
   popup_pref_auto_open_title: '在 PR 页自动打开 pr+',
   popup_pref_auto_open_desc:
     '进入 GitHub PR 时直接打开 pr+。关闭后使用页头 pr+ 按钮或 ⌘⇧E / Ctrl+Shift+E。',
+  popup_pref_list_open_title: '从 /pulls 列表打开方式',
+  popup_pref_list_open_desc:
+    '在 pulls 列表点击 PR 标题时：打开 pr+ 弹层，或跳转到 GitHub PR 页。PR 页的 embed 仍遵循上方“自动打开”。',
+  popup_label_list_open: '列表打开目标',
+  popup_opt_list_open_modal: 'pr+ 弹层（默认）',
+  popup_opt_list_open_page: 'PR 页面',
   popup_pref_reverse_title: 'PR 评论倒序',
   popup_pref_reverse_desc: '布局：撰写框 → Merge box → Conversation（最新在前）。',
   popup_pref_timeline_title: 'Conversation 时间线筛选',

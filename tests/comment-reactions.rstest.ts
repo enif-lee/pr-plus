@@ -18,6 +18,8 @@ import {
   isCommentReactionPickerOpen,
   dismissCommentReactionPicker,
   placeReactionPicker,
+  resolveReactionAddControl,
+  findCommentForReactionTarget,
   isReactionPickerAnchorLive,
 } from '../src/modal/lib/comment-reactions';
 
@@ -142,6 +144,76 @@ describe('comment-reactions pure', () => {
     expect(next[0].reactions).toEqual([]);
     expect(next[1].reactions[0].content).toBe('heart');
   });
+
+  test('patchCommentReactionsInList matches mid-thread reply by nodeId', () => {
+    const list = [
+      { id: 10, nodeId: 'PRRC_root', reactions: [] },
+      { id: 11, nodeId: 'PRRC_mid', reactions: [] },
+    ];
+    const next = patchCommentReactionsInList(
+      list,
+      null,
+      [{ content: 'rocket', count: 1, viewerHasReacted: true }],
+      'PRRC_mid'
+    );
+    expect(next[0].reactions).toEqual([]);
+    expect(next[1].reactions[0].content).toBe('rocket');
+  });
+
+  test('findCommentForReactionTarget prefers id then nodeId', () => {
+    const list = [
+      { id: 1, nodeId: 'N1' },
+      { id: 2, nodeId: 'N2' },
+    ];
+    expect(findCommentForReactionTarget(list, { commentId: 2 })?.id).toBe(2);
+    expect(
+      findCommentForReactionTarget(list, { commentId: 'x', nodeId: 'N1' })?.id
+    ).toBe(1);
+    expect(
+      findCommentForReactionTarget(list, { commentId: 99, nodeId: 'N2' })?.id
+    ).toBe(2);
+  });
+});
+
+describe('resolveReactionAddControl (unit-active mid-thread)', () => {
+  test('prefers unit-active reply over first root add control', () => {
+    const dom = new JSDOM(
+      `<!doctype html><html><body>
+        <div class="prp-body-panel prp-body-panel--active">
+          <ul class="prp-review-thread">
+            <li data-prp-thread-unit="root">
+              <button class="prp-reactions__add" data-prp-reaction-add="1"
+                style="width:26px;height:26px" data-id="root">root</button>
+            </li>
+            <li data-prp-thread-unit="reply" data-prp-thread-unit-active="1">
+              <button class="prp-reactions__add" data-prp-reaction-add="1"
+                style="width:26px;height:26px" data-id="mid">mid</button>
+            </li>
+          </ul>
+        </div>
+      </body></html>`,
+      { pretendToBeVisual: true }
+    );
+    const doc = dom.window.document;
+    // jsdom may zero getBoundingClientRect — stub sizes for live check
+    for (const btn of doc.querySelectorAll('.prp-reactions__add')) {
+      (btn as any).getBoundingClientRect = () => ({
+        top: 100,
+        bottom: 126,
+        left: 40,
+        right: 66,
+        width: 26,
+        height: 26,
+        x: 40,
+        y: 100,
+        toJSON() {},
+      });
+    }
+    globalThis.window = dom.window as any;
+    globalThis.document = doc as any;
+    const hit = resolveReactionAddControl(doc);
+    expect(hit?.getAttribute('data-id')).toBe('mid');
+  });
 });
 
 describe('placeReactionPicker', () => {
@@ -154,6 +226,7 @@ describe('placeReactionPicker', () => {
       top: 600,
       bottom: 626,
       left: 100,
+      right: 126,
       width: 26,
       height: 26,
     };
@@ -161,21 +234,24 @@ describe('placeReactionPicker', () => {
     expect(pos.placement).toBe('above');
     // top of menu = button.top - gap - pickerH
     expect(pos.top).toBe(600 - 8 - 44);
-    expect(pos.left).toBe(100);
+    // Centered on button mid (113) − half picker (140) = -27 → clamped to margin 8
+    expect(pos.left).toBe(8);
   });
 
   test('places below when near the top of the viewport', () => {
     const button = {
       top: 20,
       bottom: 46,
-      left: 50,
+      left: 200,
+      right: 226,
       width: 26,
       height: 26,
     };
     const pos = placeReactionPicker({ button, picker, viewport });
     expect(pos.placement).toBe('below');
     expect(pos.top).toBe(46 + 8);
-    expect(pos.left).toBe(50);
+    // mid 213 − 140 = 73
+    expect(pos.left).toBe(213 - 140);
   });
 
   test('clamps horizontal position into the viewport', () => {
@@ -197,12 +273,27 @@ describe('placeReactionPicker', () => {
       top: 500,
       bottom: 526,
       left: 40,
+      right: 66,
       width: 26,
       height: 26,
     };
     const pos = placeReactionPicker({ button, picker, viewport });
     expect(pos.placement).toBe('above');
     expect(pos.top + picker.height).toBe(button.top - 8);
+  });
+
+  test('centers horizontally on the add-reaction control', () => {
+    const button = {
+      top: 300,
+      bottom: 326,
+      left: 400,
+      right: 426,
+      width: 26,
+      height: 26,
+    };
+    const pos = placeReactionPicker({ button, picker, viewport });
+    const mid = 413;
+    expect(pos.left).toBe(mid - picker.width / 2);
   });
 });
 
@@ -313,18 +404,26 @@ describe('isCommentReactionPickerOpen / dismissCommentReactionPicker', () => {
 
   test('modal Escape path dismisses reaction picker before shell close', () => {
     const root = path.resolve(__dirname, '..');
-    const app = fs.readFileSync(
-      path.join(root, 'src/modal/app/PrModalApp.impl.tsx'),
+    // Capture keydown lives in usePrModalHotkeys (Phase 7 extract from shell).
+    const hotkeys = fs.readFileSync(
+      path.join(root, 'src/modal/hooks/usePrModalHotkeys.ts'),
       'utf8'
     );
-    expect(app).toMatch(/isCommentReactionPickerOpen/);
-    expect(app).toMatch(/dismissCommentReactionPicker/);
+    expect(hotkeys).toMatch(/resolveReactionAddControl/);
+    expect(hotkeys).toMatch(/isCommentReactionPickerOpen/);
+    expect(hotkeys).toMatch(/dismissCommentReactionPicker/);
     // Escape branch: resolve owner then dismiss reaction before shell close
-    expect(app).toMatch(
+    expect(hotkeys).toMatch(
       /isCommentReactionPickerOpen[\s\S]{0,2500}dismissCommentReactionPicker/
     );
-    expect(app).toMatch(/reactionPickerOpen:\s*Boolean\(reactionOpen\)/);
-    expect(app).toMatch(/if \(reactionOpen\)/);
+    expect(hotkeys).toMatch(/reactionPickerOpen:\s*Boolean\(reactionOpen\)/);
+    expect(hotkeys).toMatch(/if \(reactionOpen\)/);
+    const shell = fs.readFileSync(
+      path.join(root, 'src/modal/app/PrModalShell.tsx'),
+      'utf8'
+    );
+    expect(shell).toMatch(/isCommentReactionPickerOpen/);
+    expect(shell).toMatch(/dismissCommentReactionPicker/);
     const reactionsUi = fs.readFileSync(
       path.join(root, 'src/modal/components/common/CommentReactions.tsx'),
       'utf8'
@@ -334,5 +433,11 @@ describe('isCommentReactionPickerOpen / dismissCommentReactionPicker', () => {
     expect(reactionsUi).toMatch(/placeReactionPicker/);
     expect(reactionsUi).toMatch(/isReactionPickerAnchorLive/);
     expect(reactionsUi).not.toMatch(/translateY\(-100%\)/);
+    const portalCss = fs.readFileSync(
+      path.join(root, 'src/modal/components/common/CommentReactions.css'),
+      'utf8'
+    );
+    expect(portalCss).toMatch(/\.prp-reactions__picker--portal/);
+    expect(portalCss).toMatch(/position:\s*fixed/);
   });
 });

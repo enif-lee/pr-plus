@@ -3,11 +3,13 @@
  * Drives real installPrModalMutations with a deps bag + mocked PRTreeFetch.
  */
 import { describe, expect, test, beforeEach, afterEach } from '@rstest/core';
-import { installPrModalMutations } from '../src/modal/app/pr-modal-mutations';
+import { installPrModalMutations } from '../src/modal/commands/domain-mutations';
 import {
   removeIssueCommentFromDetail,
   removeReviewCommentFromDetail,
+  stripPendingReviewFromDetail,
 } from '../src/modal/lib/composer-attach';
+import { discardPendingReview } from '../src/modal/lib/pending-review';
 
 type Detail = Record<string, any>;
 
@@ -17,27 +19,35 @@ function makeBag(initial: Detail) {
   const paints: Detail[] = [];
   const detailRef = { current: local as Detail | null };
 
-  const setLocalDetail = (updater: any) => {
+  const applyDomainDetail = (updater: any) => {
     if (typeof updater === 'function') {
       local = updater(local);
     } else {
       local = updater;
     }
     detailRef.current = local;
+    bag.detail = local;
     if (local) paints.push(JSON.parse(JSON.stringify(local)));
   };
 
   const bag: Record<string, any> = {
     detail: initial,
     detailRef,
-    setLocalDetail,
+    applyDomainDetail,
     setActionBusy: () => {},
     setActionMsg: () => {},
     setEditingBody: () => {},
     setEditingComment: () => {},
-    onPatchDetail: async (patch: Record<string, unknown>) => {
+    // Host ack shape required (void ≠ applied).
+    onPatchDetail: (patch: Record<string, unknown>) => {
       hostPatches.push({ ...patch });
-      return 'applied';
+      if (local && patch && typeof patch === 'object') {
+        local = { ...local, ...patch };
+        detailRef.current = local;
+        bag.detail = local;
+        paints.push(JSON.parse(JSON.stringify(local)));
+      }
+      return { status: 'applied' as const };
     },
     onRefresh: async () => {},
     requestConfirm: async () => true,
@@ -49,8 +59,11 @@ function makeBag(initial: Detail) {
     openPulls: [],
     setReplyDrafts: () => {},
     setPendingReview: () => {},
-    forceDropPendingRef: { current: false },
+
+    pendingReviewNodeIdRef: { current: null as string | null },
     serverPendingReviewId: null,
+    discardPendingReview,
+    stripPendingReviewFromDetail,
     baseBranchRef: { current: null },
     pickerAnchorRef: { current: null },
     reviewerAddRef: { current: null },
@@ -65,8 +78,8 @@ function makeBag(initial: Detail) {
   };
 
   // Keep bag.detail in sync for handlers that read d.detail mid-flight
-  const origSet = setLocalDetail;
-  bag.setLocalDetail = (updater: any) => {
+  const origSet = applyDomainDetail;
+  bag.applyDomainDetail = (updater: any) => {
     origSet(updater);
     bag.detail = local;
   };
@@ -367,13 +380,100 @@ describe('pessimistic mutations (installPrModalMutations)', () => {
     await h.mut.onReopenPr();
     expect(h.local?.state).toBe('open');
   });
+
+  test('onDiscardPendingReview: DELETEs server id, strips pending, clears latch + host', async () => {
+    const pendingDetail = {
+      ...baseDetail(),
+      viewerPendingReview: { id: 77, nodeId: 'PRR_pending' },
+      reviewComments: [
+        {
+          id: 501,
+          body: 'start pending',
+          path: 'a.ts',
+          line: 2,
+          pending: true,
+          pendingReviewId: 77,
+        },
+        {
+          id: 502,
+          body: 'add pending',
+          path: 'a.ts',
+          line: 6,
+          pending: true,
+          pendingReviewId: 77,
+        },
+        {
+          id: 20,
+          body: 'review c',
+          threadNodeId: 'PRRT_A',
+          resolved: false,
+        },
+      ],
+    };
+    const h = makeBag(pendingDetail);
+    h.bag.serverPendingReviewId = 77;
+    h.bag.pendingReviewNodeIdRef.current = 'PRR_pending';
+    let deletedId: number | null = null;
+    let pendingReviewSet: any = null;
+    h.bag.setPendingReview = (v: any) => {
+      pendingReviewSet = v;
+    };
+    (globalThis as any).PRTreeFetch = {
+      deletePendingPullReview: async (
+        _o: string,
+        _r: string,
+        _n: number,
+        reviewId: number
+      ) => {
+        deletedId = reviewId;
+        // During await, local still has pending (API-first)
+        expect(h.local?.viewerPendingReview?.id).toBe(77);
+        return {};
+      },
+    };
+    // DOM latch used by attach path
+    if (typeof document !== 'undefined') {
+      document.documentElement.setAttribute(
+        'data-prp-pending-review-node',
+        'PRR_pending'
+      );
+    }
+
+    await h.mut.onDiscardPendingReview();
+
+    expect(deletedId).toBe(77);
+    expect(h.bag.pendingReviewNodeIdRef.current).toBeNull();
+    expect(h.local?.viewerPendingReview).toBeNull();
+    expect((h.local?.reviewComments || []).some((c: any) => c.pending)).toBe(
+      false
+    );
+    expect((h.local?.reviewComments || []).map((c: any) => c.id)).toContain(20);
+    expect((h.local?.reviewComments || []).map((c: any) => c.id)).not.toContain(
+      501
+    );
+    expect(h.local?._dropPending).toBeFalsy();
+    expect(pendingReviewSet).toEqual({ comments: [], body: '' });
+    expect(
+      h.hostPatches.some(
+        (p) =>
+          p.viewerPendingReview === null &&
+          Array.isArray(p.reviewComments) &&
+          !(p.reviewComments as any[]).some((c) => c?.pending)
+      )
+    ).toBe(true);
+    if (typeof document !== 'undefined') {
+      expect(
+        document.documentElement.getAttribute('data-prp-pending-review-node')
+      ).toBeNull();
+    }
+  });
 });
 
 describe('pessimistic source order contracts', () => {
   const { readFileSync } = require('node:fs') as typeof import('node:fs');
   const { resolve } = require('node:path') as typeof import('node:path');
   const src = readFileSync(
-    resolve(__dirname, '../src/modal/app/pr-modal-mutations.ts'),
+    resolve(__dirname, '../src/modal/commands/domain-mutations.ts'),
     'utf8'
   );
 
@@ -414,7 +514,7 @@ describe('pessimistic source order contracts', () => {
     throw new Error(`unclosed ${name}`);
   }
 
-  /** True if first await of apiMethod appears before first setLocalDetail/commitCommentListPatch. */
+  /** True if first await of apiMethod appears before first applyDomainDetail/commitCommentListPatch. */
   function apiBeforePaint(body: string, apiNeedle: string, paintNeedle: RegExp): boolean {
     const apiIdx = body.indexOf(apiNeedle);
     const paintMatch = paintNeedle.exec(body);
@@ -422,9 +522,9 @@ describe('pessimistic source order contracts', () => {
     return apiIdx < paintMatch.index;
   }
 
-  test('onSaveBody awaits update before setLocalDetail body paint', () => {
+  test('onSaveBody awaits update before applyDomainDetail body paint', () => {
     const body = extractFn('onSaveBody');
-    expect(apiBeforePaint(body, 'await api.updatePullRequest', /setLocalDetail/)).toBe(
+    expect(apiBeforePaint(body, 'await api.updatePullRequest', /applyDomainDetail/)).toBe(
       true
     );
   });
@@ -450,9 +550,9 @@ describe('pessimistic source order contracts', () => {
     );
   });
 
-  test('onEditTitle awaits update before title setLocalDetail', () => {
+  test('onEditTitle awaits update before title applyDomainDetail', () => {
     const body = extractFn('onEditTitle');
-    expect(apiBeforePaint(body, 'await api.updatePullRequest', /setLocalDetail/)).toBe(
+    expect(apiBeforePaint(body, 'await api.updatePullRequest', /applyDomainDetail/)).toBe(
       true
     );
   });

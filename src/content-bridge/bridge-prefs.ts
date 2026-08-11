@@ -12,6 +12,8 @@ import { PRTreeFetch } from './bridge-fetch-proxy';
 export const DEFAULT_PREFS = {
   reverseComments: true,
   autoOpenEmbed: true,
+  /** /pulls title click: modal (pr+ overlay) | page (/pull/N) */
+  listOpenMode: 'modal',
   singleFileMode: false,
   treeView: true,
   pluginEnabled: true,
@@ -27,6 +29,34 @@ export const DEFAULT_PREFS = {
     'review-threads': true,
   },
 };
+
+/** /pulls open target: modal | page */
+export function normalizeListOpenModeLocal(raw: unknown): 'modal' | 'page' {
+  const v = String(raw ?? '')
+    .trim()
+    .toLowerCase();
+  if (
+    v === 'page' ||
+    v === 'pr-page' ||
+    v === 'pr_page' ||
+    v === 'navigate' ||
+    v === 'native' ||
+    v === 'github'
+  ) {
+    return 'page';
+  }
+  if (
+    v === 'modal' ||
+    v === 'overlay' ||
+    v === 'sheet' ||
+    v === 'pr+' ||
+    v === 'prp' ||
+    v === 'pr-plus'
+  ) {
+    return 'modal';
+  }
+  return 'modal';
+}
 
 export function normalizeShortcutMonitorSizeLocal(raw) {
   const v = String(raw ?? '')
@@ -110,6 +140,7 @@ export function normalizePrefsLocal(raw) {
       typeof src.autoOpenEmbed === 'boolean'
         ? src.autoOpenEmbed
         : DEFAULT_PREFS.autoOpenEmbed,
+    listOpenMode: normalizeListOpenModeLocal(src.listOpenMode),
     singleFileMode:
       typeof src.singleFileMode === 'boolean'
         ? src.singleFileMode
@@ -332,6 +363,17 @@ function stampUiLanguageAttr(prefs: any) {
   }
 }
 
+function stampListOpenModeAttr(prefs: any) {
+  try {
+    const root = document.documentElement;
+    if (!root) return;
+    const mode = normalizeListOpenModeLocal(prefs?.listOpenMode);
+    root.setAttribute('data-prp-list-open-mode', mode);
+  } catch {
+    /* ignore */
+  }
+}
+
 /**
  * Page → content-script bridge for e2e / agent-browser:
  *   document.documentElement.setAttribute('data-prp-prefs-request', JSON.stringify({ uiLanguage: 'ko' }))
@@ -370,11 +412,13 @@ try {
       try {
         const next = await PRTreeStorage.setExtensionPrefs(patch);
         stampUiLanguageAttr(next);
+        stampListOpenModeAttr(next);
         document.documentElement.setAttribute('data-prp-prefs-ok', '1');
         document.documentElement.setAttribute(
           'data-prp-prefs-echo',
           JSON.stringify({
             uiLanguage: next?.uiLanguage,
+            listOpenMode: next?.listOpenMode,
             reverseComments: next?.reverseComments,
             keys: next ? Object.keys(next) : [],
             resRaw: null,

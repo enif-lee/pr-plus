@@ -196,7 +196,7 @@ describe('deep-link restore wiring (static)', () => {
     const path = require('node:path');
     const root = path.join(__dirname, '..');
     const app = fs.readFileSync(
-      path.join(root, 'src/modal/app/PrModalApp.impl.tsx'),
+      path.join(root, 'src/modal/app/PrModalShell.tsx'),
       'utf8'
     );
     const vcl = fs.readFileSync(
@@ -213,24 +213,51 @@ describe('deep-link restore wiring (static)', () => {
     expect(vcl).toMatch(/promote\(/);
   });
 
-  test('issue-comment post navigates focus to new timeline card', () => {
+  test('Conversation deep-link abandons layout ownership when user opens Diff', () => {
     const fs = require('node:fs');
     const path = require('node:path');
     const app = fs.readFileSync(
-      path.join(__dirname, '..', 'src/modal/app/PrModalApp.impl.tsx'),
+      path.join(__dirname, '..', 'src/modal/app/PrModalShell.tsx'),
+      'utf8'
+    );
+    // expandDiff must abandon in-flight conversation position deep-links so
+    // progressive detail patches / verify ticks cannot yank Diff → Conversation
+    // (regression: prp_page=conversation&prp_position=c:… blocked Diff toggle).
+    expect(app).toMatch(/abandonConversationPositionDeepLink/);
+    expect(app).toMatch(/positionLayoutDismissedRef/);
+    expect(app).toMatch(/positionConvDeepLinkKeyRef/);
+    expect(app).toMatch(/decideConversationDeepLinkLayout/);
+    expect(app).toMatch(/shouldAbandonConversationDeepLinkOnExpandDiff/);
+    const expandIdx = app.indexOf('function expandDiff');
+    expect(expandIdx).toBeGreaterThan(0);
+    const expandBlock = app.slice(expandIdx, expandIdx + 900);
+    expect(expandBlock).toMatch(/abandonConversationPositionDeepLink\(\)/);
+    // Verify loop must stop when live layout is Diff (user left Conversation).
+    expect(app).toMatch(
+      /layoutMode === LAYOUT_DIFF\) \{\s*positionLayoutDismissedRef\.current = applyKey/s
+    );
+  });
+
+  test('issue-comment post navigates focus to new timeline card', () => {
+    const fs = require('node:fs');
+    const path = require('node:path');
+    // Host-first: post path lives in commands/review-actions (not PrModalShell).
+    const src = fs.readFileSync(
+      path.join(__dirname, '..', 'src/modal/commands/review-actions.ts'),
       'utf8'
     );
     // After appendIssueCommentToDetail / commitCommentListPatch, leaveReview must
     // requestConversationNav to the new issue-comment anchor (not leave focus on
     // the composer).
-    const postBlock = app.slice(
-      app.indexOf('postIssueComment'),
-      app.indexOf("setActionMsg('Comment posted.')")
-    );
+    const start = src.indexOf('postIssueComment');
+    const end = src.indexOf("setActionMsg?.('Comment posted.')");
+    expect(start).toBeGreaterThan(0);
+    expect(end).toBeGreaterThan(start);
+    const postBlock = src.slice(start, end);
     expect(postBlock.length).toBeGreaterThan(200);
     expect(postBlock).toMatch(/requestConversationNav\(/);
     expect(postBlock).toMatch(/issue-comment:/);
-    expect(postBlock).toMatch(/conversationCommentFocusRef\.current/);
+    expect(postBlock).toMatch(/conversationCommentFocusRef/);
   });
 });
 

@@ -225,15 +225,23 @@
           (next.reviewThreadsMeta != null &&
             next.reviewThreadsMeta.totalCount != null);
         if (remoteAuth) {
-          // Authoritative empty (or only ghosts left on prev): drop unverified locals
+          // Authoritative empty: drop unverified locals AND orphan pending
+          // when next has no viewerPendingReview (post-Discard / server empty).
+          const nextHasPending =
+            Boolean(next.viewerPendingReview?.id) ||
+            (Array.isArray(next.reviewComments) &&
+              next.reviewComments.some((c) => c && c.pending));
           out.reviewComments = prevRc.filter((c) => {
             if (!c || c.id == null) return false;
-            if (c.pending) return true;
+            if (c.pending) return nextHasPending;
             const body = String(c.body ?? '').trim();
             if (body) return true;
             const author = String(c.author || c.user?.login || '').trim();
             return Boolean(author && author.toLowerCase() !== 'user');
           });
+          if (!nextHasPending) {
+            out.viewerPendingReview = null;
+          }
         } else {
           out.reviewComments = mergeListField(prevRc, nextRc, {
             trustEmpty: false,

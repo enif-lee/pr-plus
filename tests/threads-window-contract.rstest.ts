@@ -85,7 +85,7 @@ describe('product wiring: open first-window only; Diff drains threads-all', () =
 
   test('PrModalApp Diff enter drains remaining threads (threads-all)', () => {
     const app = readFileSync(
-      resolve(root, 'src/modal/app/PrModalApp.impl.tsx'),
+      resolve(root, 'src/modal/app/PrModalShell.tsx'),
       'utf8'
     );
     expect(app).toMatch(/Diff enter/);

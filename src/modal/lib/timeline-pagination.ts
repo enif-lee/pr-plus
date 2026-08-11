@@ -274,6 +274,13 @@ export function isTimelineLoadIncomplete(meta: any): boolean {
   if (!meta || typeof meta !== 'object') return false;
   if (meta.hasMore) return true;
   if (meta.complete === false) return true;
+  // GraphQL pageInfo can lag (hasPreviousPage false) while totalCount is known.
+  // Match isReviewThreadsLoadIncomplete: total > loaded ⇒ more to fetch.
+  const total = Number(meta.totalCount);
+  const loaded = Number(meta.loadedCount);
+  if (Number.isFinite(total) && Number.isFinite(loaded) && total > loaded) {
+    return true;
+  }
   return false;
 }
 

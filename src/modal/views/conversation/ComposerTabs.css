@@ -3,15 +3,14 @@
  * Layout (flex/gap/radius) lives as Tailwind on ComposerCard.tsx.
  */
 
-/* ⌥J/K focus ring host around Comment/Review form */
+/* ⌥J/K focus ring host around Comment/Review form — shared inset ring in DiffSearchMarks */
 .prp-composer-focus-host {
   border-radius: 12px;
   min-width: 0;
 }
-.prp-composer-focus-host--focused,
-.prp-composer-focus-host.prp-card--kb-focus {
+.prp-composer-focus-host--focused:not(.prp-card--kb-focus) {
   outline: 2px solid var(--prp-accent, #0969da);
-  outline-offset: 2px;
+  outline-offset: -2px;
 }
 
 .prp-composer-mode {

@@ -242,6 +242,26 @@ export function CommentReactions({
       const t = e.target as Node | null;
       if (hostRef.current?.contains(t)) return;
       if (pickerRef.current?.contains(t)) return;
+      // composedPath: portaled emoji buttons must count as "inside" even if
+      // React reparenting races the contains() check on mousedown.
+      try {
+        const path =
+          typeof e.composedPath === 'function' ? e.composedPath() : [];
+        if (
+          path.some(
+            (n) =>
+              n === pickerRef.current ||
+              n === hostRef.current ||
+              (n instanceof Element &&
+                (n.closest?.('[data-prp-reaction-picker="1"]') ||
+                  n.closest?.('.prp-reactions__picker')))
+          )
+        ) {
+          return;
+        }
+      } catch {
+        /* ignore */
+      }
       closePicker();
     }
     function onKey(e: KeyboardEvent) {
@@ -319,10 +339,12 @@ export function CommentReactions({
       }
     }
     document.addEventListener('mousedown', onDoc);
-    document.addEventListener('keydown', onKey, true);
+    // window capture: embed key shield stopPropagates before document, so
+    // reaction-picker Esc/Tab must listen on window (same as App hotkeys).
+    window.addEventListener('keydown', onKey, true);
     return () => {
       document.removeEventListener('mousedown', onDoc);
-      document.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('keydown', onKey, true);
     };
   }, [pickerOpen]);
 
@@ -473,10 +495,17 @@ export function CommentReactions({
             aria-label="Add reaction"
             title={undefined}
             data-prp-reaction-add="1"
+            data-prp-reaction-comment-id={
+              target?.commentId != null ? String(target.commentId) : undefined
+            }
+            data-prp-reaction-kind={target?.kind || undefined}
             aria-expanded={pickerOpen}
             aria-controls={pickerOpen ? pickerId : undefined}
             aria-haspopup="menu"
-            onClick={() => {
+            onClick={(e) => {
+              // Stop bubbling into thread chrome that might re-target unit focus
+              // to the root before measure runs.
+              e.stopPropagation();
               if (pickerOpen) {
                 closePicker();
               } else {

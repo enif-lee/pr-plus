@@ -38,6 +38,8 @@
     reactRootHost = null;
   }
 
+  let diffNavDeferredRenderTimer = null;
+
   function render() {
     if (typeof globalThis.mountPrModal !== 'function') {
       console.warn('[pr+] modal bundle not loaded (mountPrModal missing)');
@@ -45,6 +47,10 @@
     }
 
     if (!current.open) {
+      if (diffNavDeferredRenderTimer) {
+        clearTimeout(diffNavDeferredRenderTimer);
+        diffNavDeferredRenderTimer = null;
+      }
       dropReactRoot();
       // Tear down both hosts when closed
       try {
@@ -60,6 +66,26 @@
         restoreNativeMain();
       }
       return;
+    }
+
+    // Coalesce progressive host patches while Diff key-repeat owns the main
+    // thread. Local Zustand/DOM navigation keeps painting; the latest domain
+    // snapshot is rendered once the 140ms input-pressure stamp clears.
+    if (
+      reactRoot &&
+      document.documentElement?.hasAttribute?.('data-prp-diff-nav-active')
+    ) {
+      if (!diffNavDeferredRenderTimer) {
+        diffNavDeferredRenderTimer = setTimeout(() => {
+          diffNavDeferredRenderTimer = null;
+          render();
+        }, 80);
+      }
+      return;
+    }
+    if (diffNavDeferredRenderTimer) {
+      clearTimeout(diffNavDeferredRenderTimer);
+      diffNavDeferredRenderTimer = null;
     }
 
     // Keep CSS warming; host stays invisible (styles.css FOUC gate) until ready.

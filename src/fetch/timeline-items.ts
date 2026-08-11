@@ -12,7 +12,7 @@
  *   PullRequest.timelineItems or issue events/timeline. Do not conflate.
  *   docs.github.com/en/rest/activity/events
  *
- * Undocumented platform behavior (observed on dense/spam PRs, e.g. #7):
+ * Undocumented platform behavior (observed on dense/spam PRs, e.g. former #7 / DEMO_PR):
  * - Unfiltered timelineItems may omit newer renames/labels while the same
  *   nodes still appear under itemTypes: [RENAMED_TITLE] / REST gaps vs
  *   totalCount. Not a client bug; prefer itemTypes streams if product needs

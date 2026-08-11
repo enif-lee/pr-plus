@@ -16,14 +16,148 @@ import { IconDisclosure } from '@common/icons';
 import { TipPopover } from '@common/TipPopover';
 import { StepNav } from '@common/StepNav';
 import {
+  activeFileNavIndex,
   fileNavShortcutLabel,
   TOGGLE_VIEWED_SHORTCUT,
 } from '@lib/shortcut-policy';
 import { FloatingScrollbar } from '../../components/common/FloatingScrollbar';
 import { useT } from '@lib/locale-context';
+import { useModalStore } from '../../store/modal-store';
 
 /** Cap extension chips so the search row stays usable on narrow nav. */
 const MAX_EXT_CHIPS = 10;
+
+const ActiveFileStepNav = memo(function ActiveFileStepNav({
+  files,
+  fileIndex: fileIndexProp,
+  fileTotal,
+  onPrevFile,
+  onNextFile,
+  filePrevShortcut,
+  fileNextShortcut,
+}: any) {
+  const activePath = useModalStore((s) => s.activeFilePath);
+  const fileIndex = Number.isFinite(Number(fileIndexProp))
+    ? Number(fileIndexProp)
+    : activeFileNavIndex(files, activePath);
+  return (
+    <StepNav
+      className="prp-filetree__file-nav"
+      index={fileIndex}
+      total={fileTotal}
+      onPrev={onPrevFile}
+      onNext={onNextFile}
+      label="Files"
+      title="Previous / next file (from current file)"
+      prevTitle="Previous file"
+      nextTitle="Next file"
+      prevShortcut={filePrevShortcut}
+      nextShortcut={fileNextShortcut}
+    />
+  );
+});
+
+const FileTreeFileRow = memo(function FileTreeFileRow({
+  node,
+  collapsedFiles,
+  viewedPaths,
+  threadCounts,
+  onToggleViewed,
+  onSelect,
+}: any) {
+  const active = useModalStore(
+    (s) => String(s.activeFilePath || '') === String(node.path || '')
+  );
+  const f = node.file || {};
+  const isCollapsed = isPathCollapsed(
+    node.path,
+    collapsedFiles,
+    Boolean(f.defaultCollapsed),
+    false,
+    viewedPaths
+  );
+  const threads =
+    threadCounts?.get?.(node.path) || threadCounts?.[node.path] || 0;
+  const viewed = isPathViewed ? isPathViewed(viewedPaths, node.path) : false;
+  const status = String(f.status || '').toLowerCase();
+  const statusTone =
+    status === 'added' || status === 'add'
+      ? 'add'
+      : status === 'removed' ||
+          status === 'deleted' ||
+          status === 'del'
+        ? 'del'
+        : status === 'renamed'
+          ? 'rename'
+          : '';
+  return (
+    <li
+      className="prp-filetree__row"
+      style={{ paddingLeft: 4 + (node.depth || 0) * 12 }}
+      data-file-status={status || undefined}
+    >
+      <label
+        className={`prp-filetree__viewed${active ? ' prp-has-tip' : ''}`}
+        title={active ? undefined : 'Mark as viewed'}
+      >
+        <input
+          type="checkbox"
+          checked={viewed}
+          onChange={() => onToggleViewed?.(node.path)}
+          onClick={(e) => e.stopPropagation()}
+          aria-label={viewed ? 'Mark as unread' : 'Mark as viewed'}
+        />
+        {active ? (
+          <TipPopover
+            title={viewed ? 'Mark as unread' : 'Mark as viewed'}
+            shortcut={
+              typeof navigator !== 'undefined' &&
+              /Mac|iPhone|iPad/.test(navigator.platform || '')
+                ? TOGGLE_VIEWED_SHORTCUT.labelMac
+                : TOGGLE_VIEWED_SHORTCUT.labelWin
+            }
+            preferredPlacement="right"
+          />
+        ) : null}
+      </label>
+      <button
+        type="button"
+        className={[
+          'prp-filetree__item',
+          active ? 'prp-filetree__item--active' : '',
+          statusTone ? `prp-filetree__item--${statusTone}` : '',
+        ]
+          .filter(Boolean)
+          .join(' ')}
+        onClick={() => onSelect?.(node.path)}
+        data-file-status={status || undefined}
+        data-file-path={node.path}
+      >
+        <span
+          className={[
+            'prp-filetree__name',
+            statusTone ? `prp-filetree__name--${statusTone}` : '',
+          ]
+            .filter(Boolean)
+            .join(' ')}
+          title={node.path}
+        >
+          {node.name}
+          {isCollapsed ? ' ·' : ''}
+        </span>
+        {threads > 0 ? (
+          <span className="prp-filetree__threads" title="Review threads">
+            {threads}
+          </span>
+        ) : null}
+        <span className="prp-filetree__stat">
+          <span className="prp-stat-add">+{f.additions ?? 0}</span>
+          <span className="prp-stat-del">−{f.deletions ?? 0}</span>
+        </span>
+      </button>
+    </li>
+  );
+});
 
 function FolderFileTreeImpl(props: any) {
   const t = useT();
@@ -38,7 +172,6 @@ function FolderFileTreeImpl(props: any) {
     tree: treeProp,
     expandedDirs,
     onToggleDir,
-    activePath,
     onSelect,
     collapsedFiles,
     fileQuery,
@@ -59,12 +192,11 @@ function FolderFileTreeImpl(props: any) {
     commentedOnly: commentedOnlyProp = null,
     onCommentedOnly = null,
     /** Visible file list index for prev/next (0-based; -1 if unknown) */
-    fileIndex = -1,
+    fileIndex: fileIndexProp = null,
     fileTotal = 0,
     onPrevFile = null,
     onNextFile = null,
   } = props;
-
   const isMac =
     typeof navigator !== 'undefined' &&
     /Mac|iPhone|iPad/.test(navigator.platform || '');
@@ -200,18 +332,14 @@ function FolderFileTreeImpl(props: any) {
             aria-busy={filesLoading ? true : undefined}
           />
           {Number(fileTotal) > 0 && (onPrevFile || onNextFile) ? (
-            <StepNav
-              className="prp-filetree__file-nav"
-              index={fileIndex}
-              total={fileTotal}
-              onPrev={onPrevFile}
-              onNext={onNextFile}
-              label="Files"
-              title="Previous / next file (from current file)"
-              prevTitle="Previous file"
-              nextTitle="Next file"
-              prevShortcut={filePrevShortcut}
-              nextShortcut={fileNextShortcut}
+            <ActiveFileStepNav
+              files={files}
+              fileIndex={fileIndexProp}
+              fileTotal={fileTotal}
+              onPrevFile={onPrevFile}
+              onNextFile={onNextFile}
+              filePrevShortcut={filePrevShortcut}
+              fileNextShortcut={fileNextShortcut}
             />
           ) : null}
         </div>
@@ -304,104 +432,16 @@ function FolderFileTreeImpl(props: any) {
                 </li>
               );
             }
-            const f = node.file || {};
-            const isCollapsed = isPathCollapsed(
-              node.path,
-              collapsedFiles,
-              Boolean(f.defaultCollapsed),
-              false,
-              viewedPaths
-            );
-            const threads =
-              threadCounts?.get?.(node.path) || threadCounts?.[node.path] || 0;
-            const viewed = isPathViewed
-              ? isPathViewed(viewedPaths, node.path)
-              : false;
-            const status = String(f.status || '').toLowerCase();
-            const statusTone =
-              status === 'added' || status === 'add'
-                ? 'add'
-                : status === 'removed' ||
-                    status === 'deleted' ||
-                    status === 'del'
-                  ? 'del'
-                  : status === 'renamed'
-                    ? 'rename'
-                    : '';
             return (
-              <li
+              <FileTreeFileRow
                 key={`f-${node.path}`}
-                className="prp-filetree__row"
-                style={{ paddingLeft: 4 + (node.depth || 0) * 12 }}
-                data-file-status={status || undefined}
-              >
-                <label
-                  className={`prp-filetree__viewed${
-                    node.path === activePath ? ' prp-has-tip' : ''
-                  }`}
-                  title={node.path === activePath ? undefined : 'Mark as viewed'}
-                >
-                  <input
-                    type="checkbox"
-                    checked={viewed}
-                    onChange={() => onToggleViewed?.(node.path)}
-                    onClick={(e) => e.stopPropagation()}
-                    aria-label={
-                      viewed ? 'Mark as unread' : 'Mark as viewed'
-                    }
-                  />
-                  {node.path === activePath ? (
-                    <TipPopover
-                      title={viewed ? 'Mark as unread' : 'Mark as viewed'}
-                      shortcut={
-                        typeof navigator !== 'undefined' &&
-                        /Mac|iPhone|iPad/.test(navigator.platform || '')
-                          ? TOGGLE_VIEWED_SHORTCUT.labelMac
-                          : TOGGLE_VIEWED_SHORTCUT.labelWin
-                      }
-                      preferredPlacement="right"
-                    />
-                  ) : null}
-                </label>
-                <button
-                  type="button"
-                  className={[
-                    'prp-filetree__item',
-                    node.path === activePath ? 'prp-filetree__item--active' : '',
-                    statusTone ? `prp-filetree__item--${statusTone}` : '',
-                  ]
-                    .filter(Boolean)
-                    .join(' ')}
-                  onClick={() => onSelect?.(node.path)}
-                  data-file-status={status || undefined}
-                  data-file-path={node.path}
-                >
-                  <span
-                    className={[
-                      'prp-filetree__name',
-                      statusTone ? `prp-filetree__name--${statusTone}` : '',
-                    ]
-                      .filter(Boolean)
-                      .join(' ')}
-                    title={node.path}
-                  >
-                    {node.name}
-                    {isCollapsed ? ' ·' : ''}
-                  </span>
-                  {threads > 0 ? (
-                    <span
-                      className="prp-filetree__threads"
-                      title="Review threads"
-                    >
-                      {threads}
-                    </span>
-                  ) : null}
-                  <span className="prp-filetree__stat">
-                    <span className="prp-stat-add">+{f.additions ?? 0}</span>
-                    <span className="prp-stat-del">−{f.deletions ?? 0}</span>
-                  </span>
-                </button>
-              </li>
+                node={node}
+                collapsedFiles={collapsedFiles}
+                viewedPaths={viewedPaths}
+                threadCounts={threadCounts}
+                onToggleViewed={onToggleViewed}
+                onSelect={onSelect}
+              />
             );
           })}
         </ul>

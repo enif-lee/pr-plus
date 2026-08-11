@@ -91,10 +91,11 @@
   font-size: 11px;
 }
 
-/* ── Anchored searchable select popover ── */
+/* ── Anchored searchable select popover ──
+ * Base geometry only — stacking is owned by SearchableSelect.css
+ * (body portal at --prp-z-portal 120000 above OptBtnHint tips). */
 .prp-sselect-panel--popover {
   position: fixed;
-  z-index: var(--prp-z-toast, 80);
   width: min(320px, 92vw);
   max-height: min(50vh, 320px);
   box-shadow: 0 12px 40px rgba(1, 4, 9, 0.22);
@@ -106,7 +107,6 @@
 .prp-sselect-backdrop--soft {
   position: fixed;
   inset: 0;
-  z-index: var(--prp-z-island, 70);
   background: transparent;
   /* Do not steal clicks from stack chips / modal — outside close uses mousedown capture */
   pointer-events: none;

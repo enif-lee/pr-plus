@@ -2,6 +2,8 @@
  * Split-view line selection: side stickiness + visual helpers.
  */
 import { describe, expect, test } from '@rstest/core';
+import fs from 'node:fs';
+import path from 'node:path';
 import {
   beginLineSelection,
   beginSelectionOnRow,
@@ -22,12 +24,24 @@ import {
   resolveSelectionHeadIndex,
   resolveSelectionIslandRevealPhase,
   resolveSelectionDockVerticalPlacement,
+  selectionDockSideNeed,
+  selectionHeadBlockRole,
+  preferredOptHintPlacementForDock,
+  isSelectionDockHostRow,
+  SELECTION_DOCK_OPT_HINT_H_EST,
   shouldShowSelectionActionGroup,
   jumpSelectionToAdjacentChangeRegion,
   listChangeRegions,
+  buildChangeRegionIndex,
+  isChangeRegionIndexValid,
+  findChangeRegionIndexContaining,
   isChangedDiffLineRow,
   rowSelectionVisualKey,
   selectionActiveSide,
+  shouldUseNativeTextSelectOnDrag,
+  isOptHeldForPointerDrag,
+  applySelectionPointerDown,
+  browserSelectionCopyText,
 } from '../src/modal/lib/line-selection';
 
 function splitChangeRow(opts: {
@@ -542,16 +556,17 @@ describe('resolveSelectionDockVerticalPlacement (flip above when tight below)', 
       resolveSelectionDockVerticalPlacement({
         hostTop: 100,
         hostBottom: 120,
-        dockHeight: 160,
+        dockHeight: 40,
         clipTop: 0,
         clipBottom: 400,
-        minBelow: 160,
+        phase: 'actions',
+        includeOptHints: true,
+        headBlockRole: 'only',
       })
     ).toBe('below');
   });
 
   test('flips above when below is tight and above has room (comment form)', () => {
-    // Host near bottom of Diff scroller
     expect(
       resolveSelectionDockVerticalPlacement({
         hostTop: 500,
@@ -560,26 +575,135 @@ describe('resolveSelectionDockVerticalPlacement (flip above when tight below)', 
         clipTop: 80,
         clipBottom: 560,
         gap: 8,
-        minBelow: 160,
+        phase: 'comment',
+        includeOptHints: false,
+        headBlockRole: 'only',
       })
     ).toBe('above');
   });
 
-  test('stays below when both sides tight but below has more', () => {
+  test('defaults below on incomplete geometry', () => {
+    expect(resolveSelectionDockVerticalPlacement({})).toBe('below');
+  });
+
+  test('action floatbar flips above near Diff bottom (need includes Opt hints)', () => {
+    const need = selectionDockSideNeed({
+      dockHeight: 40,
+      phase: 'actions',
+      includeOptHints: true,
+      gap: 0,
+    });
+    expect(need).toBeGreaterThanOrEqual(40 + SELECTION_DOCK_OPT_HINT_H_EST);
+    expect(
+      resolveSelectionDockVerticalPlacement({
+        hostTop: 520,
+        hostBottom: 540,
+        dockHeight: 40,
+        clipTop: 80,
+        clipBottom: 560,
+        gap: 6,
+        phase: 'actions',
+        includeOptHints: true,
+        headBlockRole: 'only',
+      })
+    ).toBe('above');
+  });
+
+  test('multi-line head-at-start prefers above (outward from block)', () => {
+    // Caret mid-viewport; selection extends down near scroller bottom.
+    // Must not treat space under the caret into the block as free room.
+    expect(
+      resolveSelectionDockVerticalPlacement({
+        hostTop: 300,
+        hostBottom: 320,
+        selectionTop: 300,
+        selectionBottom: 520,
+        dockHeight: 40,
+        clipTop: 80,
+        clipBottom: 560,
+        gap: 6,
+        phase: 'actions',
+        includeOptHints: true,
+        headBlockRole: 'start',
+      })
+    ).toBe('above');
+  });
+
+  test('multi-line head-at-end stays below when block bottom has room', () => {
     expect(
       resolveSelectionDockVerticalPlacement({
         hostTop: 200,
         hostBottom: 220,
+        selectionTop: 100,
+        selectionBottom: 220,
         dockHeight: 40,
-        clipTop: 180,
-        clipBottom: 280,
-        minBelow: 40,
+        clipTop: 80,
+        clipBottom: 600,
+        phase: 'actions',
+        includeOptHints: true,
+        headBlockRole: 'end',
       })
     ).toBe('below');
   });
+});
 
-  test('defaults below on incomplete geometry', () => {
-    expect(resolveSelectionDockVerticalPlacement({})).toBe('below');
+describe('selectionHeadBlockRole / preferredOptHintPlacementForDock', () => {
+  test('head at min index → start; max → end', () => {
+    expect(
+      selectionHeadBlockRole({
+        filePath: 'a.ts',
+        anchorRowIndex: 10,
+        headRowIndex: 5,
+        anchorLine: 10,
+        headLine: 5,
+      })
+    ).toBe('start');
+    expect(
+      selectionHeadBlockRole({
+        filePath: 'a.ts',
+        anchorRowIndex: 5,
+        headRowIndex: 10,
+        anchorLine: 5,
+        headLine: 10,
+      })
+    ).toBe('end');
+  });
+
+  test('Opt hint place follows dock place', () => {
+    expect(preferredOptHintPlacementForDock('above')).toBe('top');
+    expect(preferredOptHintPlacementForDock('below')).toBe('bottom');
+  });
+});
+
+describe('isSelectionDockHostRow (caret host)', () => {
+  test('multi-line docks on head not range end when head is start', () => {
+    const sel = {
+      filePath: 'a.ts',
+      anchorRowIndex: 10,
+      headRowIndex: 5,
+      anchorLine: 10,
+      headLine: 5,
+      anchorSide: 'RIGHT',
+      headSide: 'RIGHT',
+    };
+    const headRow = {
+      kind: 'diff-line',
+      lineType: 'context',
+      filePath: 'a.ts',
+      rowIndex: 5,
+      newLine: 5,
+      oldLine: 5,
+    };
+    const endRow = {
+      kind: 'diff-line',
+      lineType: 'context',
+      filePath: 'a.ts',
+      rowIndex: 10,
+      newLine: 10,
+      oldLine: 10,
+    };
+    expect(isSelectionDockHostRow(sel, headRow)).toBe(true);
+    expect(isSelectionDockHostRow(sel, endRow)).toBe(false);
   });
 });
 
@@ -636,6 +760,27 @@ describe('shouldShowSelectionActionGroup (Opt / hover / comment)', () => {
         phase: 'actions',
       })
     ).toBe(false);
+  });
+
+  test('selection nav busy hides dock even with Opt', () => {
+    expect(
+      shouldShowSelectionActionGroup({
+        hasLineOrFileSelection: true,
+        optHeld: true,
+        selectionNavBusy: true,
+        phase: 'actions',
+      })
+    ).toBe(false);
+  });
+
+  test('comment phase stays open during selection nav busy', () => {
+    expect(
+      shouldShowSelectionActionGroup({
+        hasLineOrFileSelection: true,
+        selectionNavBusy: true,
+        phase: 'comment',
+      })
+    ).toBe(true);
   });
 
   test('no selection never shows', () => {
@@ -733,6 +878,321 @@ describe('jumpSelectionToAdjacentChangeRegion (⌥↑/⌥↓ next/prev change)',
       1
     );
     expect(next.headRowIndex).toBe(1);
+  });
+
+  test('buildChangeRegionIndex matches listChangeRegions starts/ends', () => {
+    const index = buildChangeRegionIndex(multiRegionRows);
+    const regs = listChangeRegions(multiRegionRows);
+    expect(index.starts).toEqual(regs.map((r) => r.startIndex));
+    expect(index.ends).toEqual(regs.map((r) => r.endIndex));
+    expect(index.regionCount).toBe(3);
+    expect(isChangeRegionIndexValid(index, multiRegionRows)).toBe(true);
+    expect(isChangeRegionIndexValid(index, multiRegionRows.slice(0, 3))).toBe(
+      false
+    );
+    expect(findChangeRegionIndexContaining(index, 6)).toBe(1);
+    expect(findChangeRegionIndexContaining(index, 3)).toBe(-1);
+  });
+
+  test('prebuilt index hop matches cold jump (semantics)', () => {
+    const index = buildChangeRegionIndex(multiRegionRows);
+    const start = beginLineSelection(multiRegionRows[1], 'RIGHT', 1);
+    const withIdx = jumpSelectionToAdjacentChangeRegion(
+      start,
+      multiRegionRows,
+      1,
+      undefined,
+      index
+    );
+    const cold = jumpSelectionToAdjacentChangeRegion(
+      start,
+      multiRegionRows,
+      1
+    );
+    expect(withIdx.headRowIndex).toBe(cold.headRowIndex);
+    expect(withIdx.headRowIndex).toBe(5);
+  });
+
+  test('hop with prebuilt index does not re-scan all rows', () => {
+    const n = 40_000;
+    /** Regions at 0..9, 1000..1009, … every 1000 (40 regions). */
+    const rows: any[] = new Array(n);
+    for (let i = 0; i < n; i++) {
+      const inRegion = i % 1000 < 10;
+      if (inRegion) {
+        rows[i] = {
+          kind: 'diff-line',
+          lineType: 'add',
+          filePath: 'big.ts',
+          rowIndex: i,
+          oldLine: null,
+          newLine: i + 1,
+          leftCode: '',
+          rightCode: 'x',
+        };
+      } else {
+        rows[i] = {
+          kind: 'diff-line',
+          lineType: 'context',
+          filePath: 'big.ts',
+          rowIndex: i,
+          oldLine: i + 1,
+          newLine: i + 1,
+          leftCode: 'c',
+          rightCode: 'c',
+        };
+      }
+    }
+    const index = buildChangeRegionIndex(rows);
+    expect(index.regionCount).toBe(40);
+    expect(index.starts[0]).toBe(0);
+    expect(index.starts[1]).toBe(1000);
+
+    let indexedReads = 0;
+    const proxied = new Proxy(rows, {
+      get(target, prop, receiver) {
+        if (prop === 'length') return target.length;
+        if (typeof prop === 'string' && /^\d+$/.test(prop)) {
+          indexedReads += 1;
+          return target[Number(prop)];
+        }
+        if (prop === Symbol.iterator) {
+          // Forbid full for-of / spread scans through the proxy
+          throw new Error('unexpected full list iteration during hop');
+        }
+        return Reflect.get(target, prop, receiver);
+      },
+    });
+
+    const start = beginLineSelection(rows[0], 'RIGHT', 0);
+    // 20 hops forward with the same prebuilt index
+    let sel = start;
+    for (let h = 0; h < 20; h++) {
+      const before = indexedReads;
+      sel = jumpSelectionToAdjacentChangeRegion(
+        sel,
+        proxied,
+        1,
+        undefined,
+        index
+      );
+      // Each hop should only touch the target first row (beginLineSelection),
+      // not walk tens of thousands of rows.
+      expect(indexedReads - before).toBeLessThan(30);
+    }
+    expect(sel.headRowIndex).toBe(20_000);
+    // Total reads across 20 hops must be far below one full list scan
+    expect(indexedReads).toBeLessThan(n / 10);
+
+    // Cold path without index would scan ~n rows per hop; prove rebuild is
+    // separate: one buildChangeRegionIndex is O(n), hops reuse starts.
+    const t0 = performance.now();
+    for (let h = 0; h < 50; h++) {
+      jumpSelectionToAdjacentChangeRegion(
+        start,
+        rows,
+        1,
+        undefined,
+        index
+      );
+    }
+    const indexedMs = performance.now() - t0;
+    const t1 = performance.now();
+    for (let h = 0; h < 50; h++) {
+      jumpSelectionToAdjacentChangeRegion(start, rows, 1);
+    }
+    const coldMs = performance.now() - t1;
+    // Indexed hops should be meaningfully cheaper than full re-scan (or at
+    // least not slower on tiny CI noise). Soft gate: cold spends more time.
+    // On very fast machines both can be ~0; then skip ratio assert.
+    if (coldMs > 2 && indexedMs > 0) {
+      expect(coldMs).toBeGreaterThan(indexedMs * 1.5);
+    }
+  });
+});
+
+describe('optArrow shell wiring (static)', () => {
+  test('PrModalShell caches region index and rAF-coalesces ⌥↑/⌥↓', () => {
+    const shell = fs.readFileSync(
+      path.join(__dirname, '..', 'src/modal/app/PrModalShell.tsx'),
+      'utf8'
+    );
+    expect(shell).toMatch(/buildChangeRegionIndex/);
+    expect(shell).toMatch(/getChangeRegionIndexForList/);
+    expect(shell).toMatch(/changeRegionIndexRef/);
+    expect(shell).toMatch(/optArrowRafRef/);
+    expect(shell).toMatch(/pendingOptArrowDirRef/);
+    expect(shell).toMatch(/applyOptArrowScrollSelect/);
+    // Passes prebuilt index into pure hop
+    expect(shell).toMatch(
+      /jumpSelectionToAdjacentChangeRegion\(\s*st\.lineSelection,\s*list,\s*d,\s*undefined,\s*regionIndex\s*\)/s
+    );
+  });
+
+  test('selection hop uses thrifted index scroll; thread unit only uses DOM reveal', () => {
+    const shell = fs.readFileSync(
+      path.join(__dirname, '..', 'src/modal/app/PrModalShell.tsx'),
+      'utf8'
+    );
+    // Line hop path (1.9.6 thrift)
+    expect(shell).toMatch(/function scrollSelectionCaretAfterHop/);
+    expect(shell).toMatch(/function scrollSelectionHeadDomOnly/);
+    // flush uses sync index scroll on line hops (not double-rAF for all)
+    const flushIdx = shell.indexOf('function flushSelectionKeyboardMove');
+    expect(flushIdx).toBeGreaterThan(0);
+    const flushBlock = shell.slice(flushIdx, flushIdx + 14000);
+    expect(flushBlock).toMatch(/scrollSelectionHeadDomOnly\(nextSel\)/);
+    // Multi-reply unit seed deferred off critical path
+    expect(flushBlock).toMatch(/seedUnit/);
+    expect(shell).toMatch(/function scrollDiffThreadUnitIntoView/);
+    // Store thrift restored (not 0.5 on every reveal)
+    expect(shell).toMatch(/minStoreDelta:\s*Math\.max\(24,\s*h\s*\*\s*2\)/);
+    // File nav same-path short-circuit
+    const onSel = shell.indexOf('function onSelectFile');
+    expect(onSel).toBeGreaterThan(0);
+    expect(shell.slice(onSel, onSel + 900)).toMatch(/Same-file re-select/);
+    // replies hot path uses threadsByCommentId (no regroup every hop)
+    const repliesIdx = shell.indexOf('function repliesForRootCommentId');
+    expect(repliesIdx).toBeGreaterThan(0);
+    expect(shell.slice(repliesIdx, repliesIdx + 800)).toMatch(
+      /threadsByCommentId/
+    );
+  });
+
+  test('usePrModalHotkeys has Diff ↑↓ fast path before GH palette touch', () => {
+    const hk = fs.readFileSync(
+      path.join(__dirname, '..', 'src/modal/hooks/usePrModalHotkeys.ts'),
+      'utf8'
+    );
+    const onKey = hk.indexOf('const onKey = (e)');
+    expect(onKey).toBeGreaterThan(0);
+    const body = hk.slice(onKey, onKey + 6000);
+    const fast = body.indexOf('Diff ↑/↓ / Shift+↑↓ hot path');
+    const ghInOnKey = body.indexOf('touchGithubCommandPaletteOpen');
+    expect(fast).toBeGreaterThan(0);
+    expect(ghInOnKey).toBeGreaterThan(fast);
+    expect(body).toMatch(/applySelectionKeyboardMove/);
+    expect(body).toMatch(/navFile/);
+    expect(body).toMatch(/optArrowScrollSelect/);
+  });
+});
+
+describe('shouldUseNativeTextSelectOnDrag (Opt+drag text mode)', () => {
+  test('default plain drag is line-selection (false)', () => {
+    expect(shouldUseNativeTextSelectOnDrag({})).toBe(false);
+    expect(shouldUseNativeTextSelectOnDrag({ altKey: false })).toBe(false);
+  });
+
+  test('altKey or optHeld → native text mode', () => {
+    expect(shouldUseNativeTextSelectOnDrag({ altKey: true })).toBe(true);
+    expect(shouldUseNativeTextSelectOnDrag({ optHeld: true })).toBe(true);
+  });
+
+  test('meta/ctrl suppress native text gate (do not steal cmd-click)', () => {
+    expect(
+      shouldUseNativeTextSelectOnDrag({ altKey: true, metaKey: true })
+    ).toBe(false);
+    expect(
+      shouldUseNativeTextSelectOnDrag({ altKey: true, ctrlKey: true })
+    ).toBe(false);
+  });
+
+  test('isOptHeldForPointerDrag reads event altKey and data-prp-opt-held', () => {
+    expect(isOptHeldForPointerDrag({ altKey: true })).toBe(true);
+    expect(isOptHeldForPointerDrag({ altKey: false })).toBe(false);
+    // Minimal DOM stub
+    const root = {
+      getAttribute: (k: string) => (k === 'data-prp-opt-held' ? '1' : null),
+      hasAttribute: (k: string) => k === 'data-prp-opt-held',
+      classList: { contains: () => false },
+    };
+    const doc = { documentElement: root, body: null } as any;
+    expect(isOptHeldForPointerDrag({ altKey: false }, doc)).toBe(true);
+  });
+
+  test('applySelectionPointerDown returns native-text when Opt held', () => {
+    const row = {
+      kind: 'diff-line',
+      lineType: 'add',
+      filePath: 'a.ts',
+      rowIndex: 1,
+      oldLine: null,
+      newLine: 1,
+      leftCode: '',
+      rightCode: 'hello',
+    };
+    const plain = applySelectionPointerDown(null, row, { shiftKey: false });
+    expect(plain.mode).toBe('begin');
+    expect(plain.selection).toBeTruthy();
+
+    const opt = applySelectionPointerDown(null, row, {
+      altKey: true,
+      preferredSide: 'RIGHT',
+    });
+    expect(opt.mode).toBe('native-text');
+    // Does not replace selection with a new line caret
+    expect(opt.selection).toBe(null);
+  });
+
+  test('VirtualDiffRows Opt path skips preventDefault; notifies shell for auto-copy', () => {
+    const rows = fs.readFileSync(
+      path.join(__dirname, '..', 'src/modal/views/diff/VirtualDiffRows.tsx'),
+      'utf8'
+    );
+    expect(rows).toMatch(/shouldUseNativeTextSelectOnDrag/);
+    expect(rows).toMatch(/isOptHeldForPointerDrag/);
+    expect(rows).toMatch(/nativeTextSelect:\s*true/);
+    // Opt branch notifies onSelectionStart then returns before preventDefault
+    const idx = rows.indexOf('const nativeText');
+    expect(idx).toBeGreaterThan(0);
+    const block = rows.slice(idx, idx + 900);
+    expect(block).toMatch(/if \(nativeText\) \{/);
+    expect(block).toMatch(/nativeTextSelect:\s*true/);
+    const nativeIf = block.indexOf('if (nativeText)');
+    const prevent = block.indexOf('preventDefault');
+    expect(prevent).toBeGreaterThan(nativeIf);
+  });
+
+  test('browserSelectionCopyText trims empty-only selections', () => {
+    expect(browserSelectionCopyText(null)).toBe('');
+    expect(browserSelectionCopyText({ toString: () => '   ' })).toBe('');
+    expect(browserSelectionCopyText({ toString: () => '  hello  ' })).toBe(
+      '  hello  '
+    );
+    expect(browserSelectionCopyText({ toString: () => 'foo\nbar' })).toBe(
+      'foo\nbar'
+    );
+  });
+
+  test('shell arms native text auto-copy on Opt+drag start', () => {
+    const shell = fs.readFileSync(
+      path.join(__dirname, '..', 'src/modal/app/PrModalShell.tsx'),
+      'utf8'
+    );
+    expect(shell).toMatch(/armNativeTextSelectCopy/);
+    expect(shell).toMatch(/finishNativeTextSelectCopy/);
+    expect(shell).toMatch(/browserSelectionCopyText/);
+    expect(shell).toMatch(/toast_text_copied/);
+    expect(shell).toMatch(/data-prp-last-copied-text/);
+  });
+
+  test('usePrModalHotkeys clears data-prp-opt-held on close and effect cleanup', () => {
+    const hotkeys = fs.readFileSync(
+      path.join(__dirname, '..', 'src/modal/hooks/usePrModalHotkeys.ts'),
+      'utf8'
+    );
+    expect(hotkeys).toMatch(/stampOptHeldAttr/);
+    // open === false branch must unstamp (not only reset refs)
+    const closedIdx = hotkeys.indexOf('if (!open)');
+    expect(closedIdx).toBeGreaterThan(0);
+    const closedBlock = hotkeys.slice(closedIdx, closedIdx + 350);
+    expect(closedBlock).toMatch(/stampOptHeldAttr\(false\)/);
+    // Effect cleanup return must force-clear sticky latch after removeEventListener
+    const cleanupIdx = hotkeys.indexOf('return () =>');
+    expect(cleanupIdx).toBeGreaterThan(0);
+    const cleanupBlock = hotkeys.slice(cleanupIdx, cleanupIdx + 550);
+    expect(cleanupBlock).toMatch(/removeEventListener\('keyup'/);
+    expect(cleanupBlock).toMatch(/stampOptHeldAttr\(false\)/);
   });
 });
 

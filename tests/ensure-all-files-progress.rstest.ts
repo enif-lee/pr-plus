@@ -33,7 +33,7 @@ describe('detail-ui-store load stage (shipped)', () => {
 describe('ensureAllFiles progress wiring (structural)', () => {
   test('PrModalApp ensureAllFiles drives detail-ui-store load stage', () => {
     const src = readFileSync(
-      resolve(root, 'src/modal/app/PrModalApp.impl.tsx'),
+      resolve(root, 'src/modal/app/PrModalShell.tsx'),
       'utf8'
     );
     expect(src).toMatch(/useDetailUiStore/);

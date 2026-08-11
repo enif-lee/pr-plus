@@ -31,6 +31,18 @@ export const PAGE_EMBED_HOST_ID = 'prp-page-embed';
 export const PAGE_EMBED_ACTIVE_CLASS = 'prp-embed-active';
 
 /**
+ * While embed covers the PR page, host installs a window-capture key shield
+ * so GitHub SPA document-level shortcuts never see keydown/keyup/keypress.
+ * pr+ handlers must listen on `window` (same phase) — stopPropagation does not
+ * cancel other listeners on the same target.
+ */
+export const PAGE_EMBED_KEY_SHIELD_EVENTS: readonly string[] = [
+  'keydown',
+  'keyup',
+  'keypress',
+];
+
+/**
  * Legacy GH header height token (px). Kept for scroll helpers / tests;
  * embed host is now fixed full-viewport and covers the header.
  */
@@ -47,6 +59,53 @@ export const PAGE_EMBED_HOST_Z_INDEX = 100000;
 
 /** Mark applied to GitHub footer nodes while embed is active */
 export const PAGE_EMBED_FOOTER_HIDDEN_ATTR = 'data-prp-footer-hidden';
+
+/**
+ * Mark applied to native GH nodes we fully suppress under embed
+ * (`display:none` + optional `inert`). Restored by host restoreNativeMain.
+ */
+export const PAGE_EMBED_NATIVE_HIDDEN_ATTR = 'data-prp-native-hidden';
+
+/** Companion mark when we set `element.inert = true` (safe restore only). */
+export const PAGE_EMBED_NATIVE_INERT_ATTR = 'data-prp-native-inert';
+
+/**
+ * Body-level ids that must stay mounted while embed is active.
+ * Everything else under `body` is residual GH (or other) chrome we can hide.
+ */
+export const PAGE_EMBED_BODY_KEEP_IDS: readonly string[] = [
+  PAGE_EMBED_HOST_ID,
+  'prp-modal-host',
+];
+
+/**
+ * Tags under body that carry no paint cost and must not be display:none'd
+ * (extension injectors / GH boot scripts may still need them in the tree).
+ */
+export const PAGE_EMBED_BODY_KEEP_TAGS: readonly string[] = [
+  'SCRIPT',
+  'STYLE',
+  'LINK',
+  'TEMPLATE',
+  'META',
+  'NOSCRIPT',
+];
+
+/**
+ * Extra GH chrome selectors outside `application-main` children
+ * (header shelf, global banners). Applied with native-hidden + inert.
+ */
+export const GH_RESIDUAL_CHROME_SELECTORS: readonly string[] = [
+  '.AppHeader',
+  'header.AppHeader',
+  '.js-header-wrapper',
+  '[data-target="app-header"]',
+  '.js-notification-shelf',
+  '#js-flash-container',
+  '.flash-messages',
+  '#ajax-error-message',
+  '[data-turbo-permanent][data-prp-gh-chrome]',
+];
 
 /**
  * Resilient github.com footer selectors (hide under replace mode).
@@ -419,6 +478,208 @@ export function restoreFooters(
     } catch {
       /* ignore */
     }
+  }
+  return n;
+}
+
+type ResidualEl = {
+  id?: string;
+  tagName?: string;
+  getAttribute?: (name: string) => string | null;
+  setAttribute?: (name: string, value: string) => void;
+  removeAttribute?: (name: string) => void;
+  style?: {
+    setProperty?: (name: string, value: string, priority?: string) => void;
+    removeProperty?: (name: string) => void;
+  };
+  inert?: boolean;
+  closest?: (sel: string) => Element | null;
+};
+
+/**
+ * Whether a direct `body` child should stay visible/mounted under embed.
+ * Keeps pr+ hosts, non-layout tags (script/style/link/…), and pr+ portals
+ * (ConfirmDialog / OptBtnHint / reaction picker live on document.body).
+ */
+export function shouldKeepEmbedBodyChild(
+  el: ResidualEl | null | undefined,
+  embedEl?: ResidualEl | null
+): boolean {
+  if (!el) return true;
+  if (embedEl && el === embedEl) return true;
+  const id = String(el.id || '');
+  if (id && PAGE_EMBED_BODY_KEEP_IDS.includes(id)) return true;
+  if (id.includes('prp')) return true;
+  const tag = String(el.tagName || '').toUpperCase();
+  if (tag && PAGE_EMBED_BODY_KEEP_TAGS.includes(tag)) return true;
+  // className may be string or SVGAnimatedString
+  try {
+    const cls = String((el as { className?: unknown }).className ?? '');
+    if (cls.includes('prp-')) return true;
+  } catch {
+    /* ignore */
+  }
+  try {
+    if (
+      el.getAttribute?.('data-prp-confirm') != null ||
+      el.getAttribute?.('data-prp-reaction-picker') != null
+    ) {
+      return true;
+    }
+  } catch {
+    /* ignore */
+  }
+  // Nested pr+ UI (should not be a body child, but be defensive)
+  try {
+    if (el.closest?.(`#${PAGE_EMBED_HOST_ID}, .prp-page-embed, .prp-overlay`)) {
+      return true;
+    }
+  } catch {
+    /* ignore */
+  }
+  return false;
+}
+
+/** Apply display:none + inert + native-hidden attr. Idempotent. */
+export function markNativeHidden(el: ResidualEl | null | undefined): boolean {
+  if (!el || typeof el.setAttribute !== 'function') return false;
+  if (el.getAttribute?.(PAGE_EMBED_NATIVE_HIDDEN_ATTR) === '1') return false;
+  try {
+    el.setAttribute(PAGE_EMBED_NATIVE_HIDDEN_ATTR, '1');
+    el.style?.setProperty?.('display', 'none', 'important');
+    el.style?.setProperty?.('content-visibility', 'hidden', 'important');
+    try {
+      el.inert = true;
+      el.setAttribute?.(PAGE_EMBED_NATIVE_INERT_ATTR, '1');
+    } catch {
+      /* inert unsupported */
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Undo markNativeHidden for one node. */
+export function unmarkNativeHidden(el: ResidualEl | null | undefined): boolean {
+  if (!el || typeof el.removeAttribute !== 'function') return false;
+  if (el.getAttribute?.(PAGE_EMBED_NATIVE_HIDDEN_ATTR) !== '1') return false;
+  try {
+    el.removeAttribute(PAGE_EMBED_NATIVE_HIDDEN_ATTR);
+    el.style?.removeProperty?.('display');
+    el.style?.removeProperty?.('content-visibility');
+    if (el.getAttribute?.(PAGE_EMBED_NATIVE_INERT_ATTR) === '1') {
+      try {
+        el.inert = false;
+      } catch {
+        /* ignore */
+      }
+      el.removeAttribute(PAGE_EMBED_NATIVE_INERT_ATTR);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Hide every direct `body` child except pr+ hosts and non-layout tags.
+ * Strong residual suppress: GH PR SPA root, side panels, turbo frames at body.
+ * @returns newly hidden count
+ */
+export function applyBodyResidualHide(
+  doc: {
+    body?: { children?: ArrayLike<ResidualEl> } | null;
+  } | null,
+  embedEl?: ResidualEl | null
+): number {
+  const body = doc?.body;
+  if (!body || !body.children) return 0;
+  let n = 0;
+  const kids = body.children;
+  for (let i = 0; i < kids.length; i++) {
+    const child = kids[i];
+    if (shouldKeepEmbedBodyChild(child, embedEl)) continue;
+    if (markNativeHidden(child)) n += 1;
+  }
+  return n;
+}
+
+/**
+ * Hide known GH chrome nodes (header, flash, notification shelf) even when
+ * they are not direct body children.
+ * @returns newly hidden count
+ */
+export function applyGithubChromeHide(
+  doc: {
+    querySelectorAll?: (sel: string) => ArrayLike<ResidualEl>;
+  } | null
+): number {
+  if (!doc || typeof doc.querySelectorAll !== 'function') return 0;
+  let n = 0;
+  const seen = new Set<ResidualEl>();
+  for (const sel of GH_RESIDUAL_CHROME_SELECTORS) {
+    let list: ArrayLike<ResidualEl>;
+    try {
+      list = doc.querySelectorAll(sel);
+    } catch {
+      continue;
+    }
+    for (let i = 0; i < list.length; i++) {
+      const el = list[i];
+      if (!el || seen.has(el)) continue;
+      try {
+        if (
+          el.closest?.(
+            `#${PAGE_EMBED_HOST_ID}, .prp-page-embed, .prp-overlay, #prp-modal-host`
+          )
+        ) {
+          continue;
+        }
+      } catch {
+        /* ignore */
+      }
+      seen.add(el);
+      if (markNativeHidden(el)) n += 1;
+    }
+  }
+  return n;
+}
+
+/**
+ * Full residual suppress for embed open: body children + GH chrome + footers.
+ * Safe to call repeatedly (idempotent).
+ * @returns total newly hidden nodes (body + chrome + footer)
+ */
+export function applyNativeResidualHide(
+  doc: Document | null | undefined,
+  embedEl?: ResidualEl | null
+): { body: number; chrome: number; footer: number; total: number } {
+  const body = applyBodyResidualHide(doc as any, embedEl);
+  const chrome = applyGithubChromeHide(doc as any);
+  const footer = applyFooterHide(doc as any);
+  return { body, chrome, footer, total: body + chrome + footer };
+}
+
+/**
+ * Restore every node marked with PAGE_EMBED_NATIVE_HIDDEN_ATTR.
+ * @returns restored count
+ */
+export function restoreNativeHiddenNodes(
+  doc: {
+    querySelectorAll?: (sel: string) => ArrayLike<ResidualEl>;
+  } | null
+): number {
+  if (!doc || typeof doc.querySelectorAll !== 'function') return 0;
+  let n = 0;
+  let list: ArrayLike<ResidualEl>;
+  try {
+    list = doc.querySelectorAll(`[${PAGE_EMBED_NATIVE_HIDDEN_ATTR}="1"]`);
+  } catch {
+    return 0;
+  }
+  for (let i = 0; i < list.length; i++) {
+    if (unmarkNativeHidden(list[i])) n += 1;
   }
   return n;
 }

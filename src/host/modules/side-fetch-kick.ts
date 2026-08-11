@@ -53,9 +53,11 @@
     };
     const settleSide = (key, partial) => {
       if (!alive()) return;
+      let applied = false;
       if (partial && typeof partial === 'object') {
         // Slice-only write — never spreads into other domains
         applySideToStore(key, partial);
+        applied = true;
         try {
           const keyStr = detailKey(owner, repo, number);
           detailCache.set(keyStr, current.detail);
@@ -63,7 +65,22 @@
           /* ignore */
         }
       }
-      setSideFlag(key, { pending: false, settled: true }, { render: true });
+      // Flag-only settle may no-op when already settled (IDB/cache revalidate).
+      // setSideFlag only re-renders on flag *change*, so GraphQL timelineMeta
+      // upgrades after a prior comments settle would never reach React — Load
+      // more gap stays missing despite host diag hasMore:true (TLM.1).
+      const flagChanged = setSideFlag(
+        key,
+        { pending: false, settled: true },
+        { render: false }
+      );
+      if (applied || flagChanged) {
+        try {
+          render();
+        } catch {
+          /* ignore */
+        }
+      }
       markSideProgress(key);
       console.log(
         `[pr-plus] side-fetch ${key} ${owner}/${repo}#${number} painted`
@@ -387,6 +404,33 @@
               if (!prev.length) patch.reviews = reviews;
             }
             settleSide('comments', patch);
+            // After settle: stamp Load-more observability (cold-open e2e)
+            try {
+              const tl = current.detail?.timelineMeta;
+              for (const id of [
+                HOST_ID,
+                typeof embedHostId === 'function'
+                  ? embedHostId()
+                  : 'prp-page-embed',
+              ]) {
+                const el = document.getElementById(id);
+                if (!el || !tl || typeof tl !== 'object') continue;
+                el.setAttribute(
+                  'data-prp-timeline-has-more',
+                  tl.hasMore ? '1' : '0'
+                );
+                el.setAttribute(
+                  'data-prp-timeline-loaded',
+                  String(tl.loadedCount ?? '')
+                );
+                el.setAttribute(
+                  'data-prp-timeline-total',
+                  String(tl.totalCount ?? '')
+                );
+              }
+            } catch {
+              /* ignore */
+            }
             return page;
           };
 

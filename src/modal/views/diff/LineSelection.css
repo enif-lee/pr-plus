@@ -143,6 +143,27 @@
   flex: 0 0 auto;
 }
 
+/*
+ * Default: code body is non-selectable so plain drag is line-selection only.
+ * Opt/Alt held (documentElement[data-prp-opt-held]): allow native browser
+ * text selection so users can copy a partial code range.
+ */
+.prp-vline--selectable .prp-code,
+.prp-vline--selectable code.prp-code {
+  -webkit-user-select: none;
+  user-select: none;
+}
+:root[data-prp-opt-held] .prp-vline--selectable .prp-code,
+:root[data-prp-opt-held] .prp-vline--selectable code.prp-code,
+:root.prp-opt-held .prp-vline--selectable .prp-code,
+:root.prp-opt-held .prp-vline--selectable code.prp-code,
+body.prp-opt-held .prp-vline--selectable .prp-code,
+body.prp-opt-held .prp-vline--selectable code.prp-code {
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: text;
+}
+
 /* Unified dual line numbers (old | new) — GitHub-style gutter */
 .prp-unified-lns {
   display: inline-flex;

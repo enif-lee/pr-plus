@@ -77,6 +77,14 @@
   pointer-events: auto;
   z-index: 1;
 }
+/*
+ * Keep active Diff reconciliation inside the full-size panel. The outer page
+ * embed cannot be contained safely (it owns fixed viewport geometry), but this
+ * boundary prevents file/selection commits from invalidating the buried GH SPA.
+ */
+.prp-body-panel--diff.prp-body-panel--active {
+  contain: layout style paint;
+}
 .prp-body-panel > .prp-conversation,
 .prp-body-panel > .prp-diff-layout,
 .prp-body-panel > .prp-skeleton,
@@ -967,6 +975,43 @@
   min-width: calc(34ch - 4px);
   max-width: min(56vw, calc(34ch - 4px));
   overflow: hidden;
+}
+/*
+ * Background loading: diff stats stay; soft border/glow pulse (no spin).
+ */
+.prp-header__stats--bg-loading {
+  border-width: 1.5px;
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--prp-accent, #0969da) 55%, var(--prp-border));
+  background: color-mix(in srgb, var(--prp-accent, #0969da) 8%, var(--prp-bg));
+  /* Don't fight the pulse with the base border/box-shadow transitions */
+  transition:
+    width 280ms cubic-bezier(0.33, 1, 0.36, 1),
+    background 220ms ease,
+    color 220ms ease !important;
+  animation: prp-header-stats-border-breathe 1.4s ease-in-out infinite;
+}
+.prp-header__stats--bg-loading .prp-header__stats-spinner {
+  border-color: color-mix(in srgb, var(--prp-accent, #0969da) 30%, transparent);
+  border-top-color: var(--prp-accent, #0969da);
+}
+@keyframes prp-header-stats-border-breathe {
+  0%,
+  100% {
+    border-color: color-mix(in srgb, var(--prp-accent, #0969da) 40%, var(--prp-border));
+    box-shadow: 0 0 0 0 transparent;
+  }
+  50% {
+    border-color: color-mix(in srgb, var(--prp-accent, #0969da) 85%, var(--prp-border));
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--prp-accent, #0969da) 22%, transparent);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .prp-header__stats--bg-loading {
+    animation: none;
+    border-color: var(--prp-accent, #0969da);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--prp-accent, #0969da) 25%, transparent);
+  }
 }
 .prp-header__stats--busy .prp-header__stats-inner {
   width: 100%;

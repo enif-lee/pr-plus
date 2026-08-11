@@ -58,6 +58,22 @@
             },
             _metaSeq: 0,
           };
+          // Preserve discard tombstones across partial patches
+          if (
+            Object.prototype.hasOwnProperty.call(patch, '_deletedReviewCommentIds')
+          ) {
+            const prevDel = current.detail._deletedReviewCommentIds;
+            const nextDel = patch._deletedReviewCommentIds;
+            const set = new Set<string>();
+            for (const src of [prevDel, nextDel]) {
+              if (src instanceof Set) {
+                for (const id of src) set.add(String(id));
+              } else if (Array.isArray(src)) {
+                for (const id of src) if (id != null) set.add(String(id));
+              }
+            }
+            next._deletedReviewCommentIds = set.size ? [...set] : undefined;
+          }
           if (Object.prototype.hasOwnProperty.call(patch, 'assignees')) {
             next.assignees = Array.isArray(patch.assignees)
               ? patch.assignees
@@ -141,6 +157,25 @@
                 next.viewerPendingReview ?? null
               );
             }
+            if (
+              Object.prototype.hasOwnProperty.call(
+                patch,
+                '_deletedReviewCommentIds'
+              ) ||
+              Object.prototype.hasOwnProperty.call(
+                patch,
+                '_deletedReviewBodies'
+              ) ||
+              (Object.prototype.hasOwnProperty.call(
+                patch,
+                'viewerPendingReview'
+              ) &&
+                patch.viewerPendingReview == null)
+            ) {
+              if (typeof S.applyDiscardTombstones === 'function') {
+                S.applyDiscardTombstones(current.detailStore, next);
+              }
+            }
             if (Object.prototype.hasOwnProperty.call(patch, 'reviews')) {
               S.applyReviews(current.detailStore, next.reviews, {
                 settled: true,
@@ -189,6 +224,29 @@
           }
           try {
             const key = detailKey(current.owner, current.repo, current.number);
+            // After Discard: write stripped detail (with tombstones). Prefer a
+            // full invalidate+set so reopen cannot rehydrate pre-discard IDB
+            // snapshots that still hold demoted pending comment bodies.
+            // Discard / clear-pending: null VPR + reviewComments write-through
+            // (no durable _dropPending latch).
+            const discardPatch =
+              Object.prototype.hasOwnProperty.call(
+                patch,
+                'viewerPendingReview'
+              ) &&
+              patch.viewerPendingReview == null &&
+              Object.prototype.hasOwnProperty.call(patch, 'reviewComments');
+            if (discardPatch) {
+              try {
+                if (typeof detailCache.invalidate === 'function') {
+                  detailCache.invalidate(key);
+                } else if (typeof detailCache.delete === 'function') {
+                  detailCache.delete(key);
+                }
+              } catch {
+                /* ignore */
+              }
+            }
             detailCache.set(key, current.detail);
           } catch {
             /* ignore cache */

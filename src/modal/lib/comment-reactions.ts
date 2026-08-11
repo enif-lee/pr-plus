@@ -116,7 +116,15 @@ export function placeReactionPicker(opts: {
     placement === 'above' ? btnTop - gap - ph : btnBottom + gap;
   top = Math.max(margin, Math.min(top, vh - ph - margin));
 
-  let left = btnLeft;
+  // Center horizontally on the ☺ control, then clamp into the viewport so
+  // the menu never parks at an unrelated edge of the modal.
+  const width = Number.isFinite(Number(r.width)) ? Number(r.width) : 0;
+  const btnRight =
+    Number.isFinite(r.right as number) && r.right != null
+      ? Number(r.right)
+      : btnLeft + width;
+  const mid = btnLeft + Math.max(0, btnRight - btnLeft) / 2;
+  let left = mid - pw / 2;
   left = Math.max(margin, Math.min(left, vw - pw - margin));
 
   return { top, left, placement };
@@ -179,6 +187,85 @@ export function isReactionPickerAnchorLive(
   if (vh > 0 && (r.bottom < 0 || r.top > vh)) return false;
   if (vw > 0 && (r.right < 0 || r.left > vw)) return false;
   return true;
+}
+
+const REACTION_ADD_SELECTORS = [
+  '[data-prp-reaction-add="1"]',
+  '.prp-reactions__add',
+] as const;
+
+/**
+ * Resolve which ☺ control to activate for ⌥E / context comment react.
+ *
+ * Multi-reply Diff threads have one add control per comment. Prefer the
+ * **unit-focused** reply (or root) so the picker anchors mid-thread instead of
+ * always opening on the first (root) control via `querySelector`.
+ */
+export function resolveReactionAddControl(
+  root: ParentNode | null | undefined
+): HTMLElement | null {
+  if (!root || typeof (root as ParentNode).querySelector !== 'function') {
+    return null;
+  }
+  const trySel = (sel: string): HTMLElement | null => {
+    try {
+      const el = (root as ParentNode).querySelector(sel) as HTMLElement | null;
+      if (el && isReactionPickerAnchorLive(el)) return el;
+    } catch {
+      /* ignore */
+    }
+    return null;
+  };
+  // 1) Explicit active unit (↑↓ within multi-reply thread)
+  for (const s of REACTION_ADD_SELECTORS) {
+    const hit = trySel(`[data-prp-thread-unit-active="1"] ${s}`);
+    if (hit) return hit;
+  }
+  // 2) Unit-focus class on the review-thread item
+  for (const s of REACTION_ADD_SELECTORS) {
+    const hit = trySel(`.prp-review-thread__item--unit-focus ${s}`);
+    if (hit) return hit;
+  }
+  // 3) First live control under root (single-comment threads)
+  for (const s of REACTION_ADD_SELECTORS) {
+    try {
+      const candidates = [
+        ...((root as ParentNode).querySelectorAll?.(s) || []),
+      ] as HTMLElement[];
+      const hit = candidates.find((el) => isReactionPickerAnchorLive(el));
+      if (hit) return hit;
+    } catch {
+      /* ignore */
+    }
+  }
+  return null;
+}
+
+/**
+ * Find a comment in a flat list by REST id and/or GraphQL nodeId.
+ * Mid-thread replies must match either key (list may only stamp one).
+ */
+export function findCommentForReactionTarget(
+  list: unknown,
+  target: {
+    commentId?: string | number | null;
+    nodeId?: string | null;
+  } | null
+): any | null {
+  const arr = Array.isArray(list) ? list : [];
+  if (!arr.length || !target) return null;
+  const id =
+    target.commentId != null && target.commentId !== ''
+      ? String(target.commentId)
+      : '';
+  const nodeId = target.nodeId ? String(target.nodeId).trim() : '';
+  if (!id && !nodeId) return null;
+  for (const c of arr) {
+    if (!c) continue;
+    if (id && String(c.id) === id) return c;
+    if (nodeId && String(c.nodeId || '').trim() === nodeId) return c;
+  }
+  return null;
 }
 
 export type ReactionContent =
@@ -434,19 +521,28 @@ export function applyReactionToggle(
 }
 
 /**
- * Patch reactions on a comment list (issue or review) by id.
+ * Patch reactions on a comment list (issue or review) by id and/or nodeId.
  */
 export function patchCommentReactionsInList(
   list: unknown,
   commentId: unknown,
-  reactions: ReactionGroup[]
+  reactions: ReactionGroup[],
+  nodeId?: unknown
 ): any[] {
   const arr = Array.isArray(list) ? list : [];
-  const id = String(commentId);
-  return arr.map((c) => {
-    if (!c || String(c.id) !== id) return c;
+  const id =
+    commentId != null && commentId !== '' ? String(commentId) : '';
+  const nid = nodeId != null && String(nodeId).trim() ? String(nodeId).trim() : '';
+  let matched = false;
+  const next = arr.map((c) => {
+    if (!c) return c;
+    const idHit = id && String(c.id) === id;
+    const nodeHit = nid && String(c.nodeId || '').trim() === nid;
+    if (!idHit && !nodeHit) return c;
+    matched = true;
     return { ...c, reactions };
   });
+  return matched ? next : arr;
 }
 
 /**

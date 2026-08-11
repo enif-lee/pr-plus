@@ -52,8 +52,6 @@ export interface ModalUiState {
   paletteOpen: boolean;
   paletteQuery: string;
   picker: PickerState | null;
-  /** Optimistic overlay; null means use host detail prop */
-  localDetail: PrDetail | null;
   /**
    * Conversation keyboard focus anchor (issue-comment:… / review-group:… /
    * review-comment:…). Visual ring only — set after scroll lands.
@@ -113,7 +111,6 @@ export interface ModalUiState {
   setPaletteOpen: (v: boolean) => void;
   setPaletteQuery: (q: string) => void;
   setPicker: (p: any) => void;
-  setLocalDetail: (d: PrDetail | null | ((prev: PrDetail | null) => PrDetail | null)) => void;
   setFocusedConversationAnchor: (a: string | null) => void;
   /**
    * Scroll-then-focus: clear visual ring, queue pending anchor for scroller.
@@ -165,7 +162,6 @@ export const useModalStore = create<ModalUiState>((set, get) => ({
   paletteOpen: false,
   paletteQuery: '',
   picker: null,
-  localDetail: null,
   focusedConversationAnchor: null,
   pendingConversationNavAnchor: null,
   optHintsActive: false,
@@ -210,8 +206,20 @@ export const useModalStore = create<ModalUiState>((set, get) => ({
     set((s) => ({
       expandedDirs: typeof fn === 'function' ? (fn as any)(s.expandedDirs) : (fn as Set<string>),
     })),
-  setCommentIndex: (i) =>
-    set({ commentIndex: i, focusedThreadUnitId: null }),
+  setCommentIndex: (i) => {
+    set({ commentIndex: i, focusedThreadUnitId: null });
+    // Keep DOM stamp in sync — stale data-prp-focused-thread-unit misleads e2e
+    // and isMultiReplyThreadFocused DOM fallbacks after ⌥J/K root hops.
+    try {
+      if (typeof document !== 'undefined') {
+        document.documentElement.removeAttribute(
+          'data-prp-focused-thread-unit'
+        );
+      }
+    } catch {
+      /* ignore */
+    }
+  },
   setLineSelection: (s) =>
     set((prev) => ({
       lineSelection: typeof s === 'function' ? s(prev.lineSelection) : s,
@@ -242,10 +250,6 @@ export const useModalStore = create<ModalUiState>((set, get) => ({
   setPaletteQuery: (q) => set({ paletteQuery: q }),
   setPicker: (p) =>
     set((s) => ({ picker: typeof p === 'function' ? p(s.picker) : p })),
-  setLocalDetail: (d) =>
-    set((s) => ({
-      localDetail: typeof d === 'function' ? d(s.localDetail) : d,
-    })),
   setFocusedConversationAnchor: (a) => {
     const next = a == null || a === '' ? null : String(a);
     const cur = get().focusedConversationAnchor;
@@ -327,6 +331,17 @@ export const useModalStore = create<ModalUiState>((set, get) => ({
       return;
     }
     set({ activeDiffCommentId: next, focusedThreadUnitId: null });
+    // Clear unit DOM stamp when hopping threads (setFocusedThreadUnitId no-op
+    // path would leave a stale reply id after store unit reset).
+    try {
+      if (typeof document !== 'undefined') {
+        document.documentElement.removeAttribute(
+          'data-prp-focused-thread-unit'
+        );
+      }
+    } catch {
+      /* ignore */
+    }
   },
   setFocusedThreadUnitId: (id) => {
     const next = id == null || id === '' ? null : String(id);
@@ -350,7 +365,6 @@ export const useModalStore = create<ModalUiState>((set, get) => ({
     }
   },
   hydrateLocalDetail: (detail) => {
-    if (detail) set({ localDetail: detail });
   },
   resetForClose: () =>
     set({

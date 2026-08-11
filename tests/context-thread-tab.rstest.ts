@@ -4,6 +4,7 @@
 import { describe, expect, test } from '@rstest/core';
 import { JSDOM } from 'jsdom';
 import {
+  isContextThreadCommentActive,
   listContextThreadComposerTabStops,
   stepContextThreadComposerTab,
 } from '../src/modal/lib/context-thread-dom';
@@ -66,5 +67,41 @@ describe('context-thread composer Tab stops', () => {
     `);
     const stops = listContextThreadComposerTabStops(root);
     expect(stops[0].classList.contains('prp-mdc__ghost')).toBe(true);
+  });
+});
+
+describe('context thread focus ownership by layout', () => {
+  test('Diff ignores a retained Conversation anchor', () => {
+    expect(
+      isContextThreadCommentActive('diff-root', {
+        layoutMode: 'diff',
+        activeDiffCommentId: 'diff-root',
+        focusedConversationAnchor: 'review-comment:conversation-root',
+      })
+    ).toBe(true);
+    expect(
+      isContextThreadCommentActive('conversation-root', {
+        layoutMode: 'diff',
+        activeDiffCommentId: 'diff-root',
+        focusedConversationAnchor: 'review-comment:conversation-root',
+      })
+    ).toBe(false);
+  });
+
+  test('Conversation ignores a retained Diff id', () => {
+    expect(
+      isContextThreadCommentActive('conversation-root', {
+        layoutMode: 'conversation',
+        activeDiffCommentId: 'diff-root',
+        focusedConversationAnchor: 'review-comment:conversation-root',
+      })
+    ).toBe(true);
+    expect(
+      isContextThreadCommentActive('diff-root', {
+        layoutMode: 'conversation',
+        activeDiffCommentId: 'diff-root',
+        focusedConversationAnchor: 'review-comment:conversation-root',
+      })
+    ).toBe(false);
   });
 });

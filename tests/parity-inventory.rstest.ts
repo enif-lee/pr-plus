@@ -85,7 +85,7 @@ describe('shipped code paths exist', () => {
 
   test('PrModalApp gates auto-close and viewed hydrate via shipped helpers', () => {
     const app = readFileSync(
-      join(root, 'src/modal/app/PrModalApp.impl.tsx'),
+      join(root, 'src/modal/app/PrModalShell.tsx'),
       'utf8'
     );
     expect(app).toMatch(/shouldAutoCloseOnTerminalTransition/);

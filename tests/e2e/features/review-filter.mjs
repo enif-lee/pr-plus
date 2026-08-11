@@ -161,7 +161,18 @@ export function getSteps() {
       waitMs(300);
     }
     assert(hasGear, 'review filter gear missing after Diff open');
-    const chips = probeChips();
+    // The gear belongs to the Diff shell and can paint before async review
+    // threads populate the status counts/chips. Wait for the actual control
+    // under test instead of treating shell readiness as thread readiness.
+    let chips = probeChips();
+    for (
+      let i = 0;
+      i < 40 && !(chips || []).some((c) => c.kind === 'unresolved');
+      i++
+    ) {
+      waitMs(250);
+      chips = probeChips();
+    }
     log('RF.0 chips', chips);
     // On demo PR with threads, Unresolved chip should exist
     const unresolved = (chips || []).find((c) => c.kind === 'unresolved');

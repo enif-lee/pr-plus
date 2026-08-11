@@ -52,14 +52,220 @@ export async function editIssueComment(owner: any, repo: any, commentId: any, bo
   );
 }
 
-export async function editReviewComment(owner: any, repo: any, commentId: any, body: any, fetchImpl: any, token: any, ctx: any = null) {
+/**
+ * Resolve PRRC_… global id for a pull review comment database id.
+ * PENDING comments often lack nodeId in the App detail row; GraphQL can
+ * still find them under the viewer's PENDING review comments.
+ */
+async function resolveReviewCommentNodeId(
+  owner: any,
+  repo: any,
+  commentId: any,
+  fetchImpl: any,
+  token: any,
+  ctx: any
+): Promise<string | null> {
+  const idNum = Number(commentId);
+  if (!Number.isFinite(idNum) || idNum <= 0) return null;
+  // 1) REST GET — works for published; often 404 for PENDING
+  try {
+    const raw = await apiJson(
+      githubRestUrl(`/repos/${owner}/${repo}/pulls/comments/${idNum}`, ctx),
+      fetchImpl,
+      token
+    );
+    if (raw?.node_id && /^PRRC_/i.test(String(raw.node_id))) {
+      return String(raw.node_id);
+    }
+  } catch {
+    /* pending → 404 */
+  }
+  // 2) GraphQL: scan PENDING review comments (last 5 reviews × 50 comments)
+  try {
+    const data = await apiGraphql(
+      `query ResolveReviewCommentNode($owner:String!,$name:String!,$number:Int!) {
+        repository(owner:$owner, name:$name) {
+          pullRequest(number:$number) {
+            reviews(last:10, states:[PENDING]) {
+              nodes {
+                comments(last:50) {
+                  nodes { id databaseId }
+                }
+              }
+            }
+          }
+        }
+      }`,
+      {
+        owner: String(owner || ''),
+        name: String(repo || ''),
+        number: Number(ctx?.pullNumber) || 0,
+      },
+      fetchImpl,
+      token,
+      ctx
+    );
+    // number may be 0 if ctx lacks it — also try without states filter below
+    const nodes =
+      data?.repository?.pullRequest?.reviews?.nodes || [];
+    for (const rev of nodes) {
+      for (const c of rev?.comments?.nodes || []) {
+        if (Number(c?.databaseId) === idNum && c?.id) return String(c.id);
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  // 3) REST list pending review comments for each PENDING review
+  try {
+    const reviews = await apiJson(
+      githubRestUrl(`/repos/${owner}/${repo}/pulls/comments?per_page=100`, ctx),
+      fetchImpl,
+      token
+    );
+    // Note: published list may omit PENDING — use reviews/{id}/comments
+  } catch {
+    /* ignore */
+  }
+  try {
+    const revs = await apiJson(
+      githubRestUrl(
+        `/repos/${owner}/${repo}/pulls/${Number(ctx?.pullNumber) || 0}/reviews?per_page=100`,
+        ctx
+      ),
+      fetchImpl,
+      token
+    );
+    const pending = (Array.isArray(revs) ? revs : []).filter(
+      (r: any) => String(r?.state || '').toUpperCase() === 'PENDING'
+    );
+    for (const r of pending) {
+      try {
+        const comments = await apiJson(
+          githubRestUrl(
+            `/repos/${owner}/${repo}/pulls/${Number(ctx?.pullNumber) || 0}/reviews/${r.id}/comments?per_page=100`,
+            ctx
+          ),
+          fetchImpl,
+          token
+        );
+        const hit = (Array.isArray(comments) ? comments : []).find(
+          (c: any) => Number(c?.id) === idNum
+        );
+        if (hit?.node_id && /^PRRC_/i.test(String(hit.node_id))) {
+          return String(hit.node_id);
+        }
+      } catch {
+        /* continue */
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+/**
+ * Edit a pull-request review comment.
+ *
+ * Published comments: REST PATCH works.
+ * PENDING review comments: REST returns 404 — use GraphQL
+ * `updatePullRequestReviewComment` with PRRC_ node id.
+ *
+ * @param opts.nodeId optional PRRC_… (preferred for pending)
+ * @param opts.pullNumber optional PR number (helps nodeId resolve)
+ */
+export async function editReviewComment(
+  owner: any,
+  repo: any,
+  commentId: any,
+  body: any,
+  fetchImpl: any,
+  token: any,
+  ctx: any = null,
+  opts: { nodeId?: string | null; pullNumber?: number | null } | null = null
+) {
   ctx = normalizeApiCtx(ctx);
-  return apiSend(
-    githubRestUrl(`/repos/${owner}/${repo}/pulls/comments/${commentId}`, ctx),
-    fetchImpl,
-    token,
-    { method: 'PATCH', body: { body: String(body || '') } }
-  );
+  const nextBody = String(body || '');
+  const nodeIdRaw =
+    opts?.nodeId != null && String(opts.nodeId).trim()
+      ? String(opts.nodeId).trim()
+      : '';
+  const preferGraphql = /^PRRC_/i.test(nodeIdRaw);
+  // Attach pullNumber into ctx for resolve helpers
+  if (opts?.pullNumber != null && Number.isFinite(Number(opts.pullNumber))) {
+    ctx = { ...ctx, pullNumber: Number(opts.pullNumber) };
+  }
+
+  async function viaGraphql(nodeId: string) {
+    const data = await apiGraphql(
+      `mutation UpdatePullRequestReviewComment($id: ID!, $body: String!) {
+        updatePullRequestReviewComment(
+          input: { pullRequestReviewCommentId: $id, body: $body }
+        ) {
+          pullRequestReviewComment {
+            databaseId
+            body
+            id
+          }
+        }
+      }`,
+      { id: nodeId, body: nextBody },
+      fetchImpl,
+      token,
+      ctx
+    );
+    const node =
+      data?.updatePullRequestReviewComment?.pullRequestReviewComment || null;
+    if (!node) {
+      throw new Error('GraphQL updatePullRequestReviewComment returned empty');
+    }
+    return {
+      id: node.databaseId ?? commentId,
+      body: node.body ?? nextBody,
+      node_id: node.id || nodeId,
+      nodeId: node.id || nodeId,
+    };
+  }
+
+  if (preferGraphql) {
+    return viaGraphql(nodeIdRaw);
+  }
+
+  try {
+    return await apiSend(
+      githubRestUrl(`/repos/${owner}/${repo}/pulls/comments/${commentId}`, ctx),
+      fetchImpl,
+      token,
+      { method: 'PATCH', body: { body: nextBody } }
+    );
+  } catch (err: any) {
+    const status = Number(err?.status || err?.statusCode || 0);
+    const msg = String(err?.message || err || '');
+    const is404 =
+      status === 404 || /\b404\b/.test(msg) || /not\s*found/i.test(msg);
+    if (!is404) throw err;
+    // PENDING comments 404 on REST — resolve PRRC_ and mutate via GraphQL
+    let nodeId = nodeIdRaw;
+    if (!/^PRRC_/i.test(nodeId)) {
+      nodeId =
+        (await resolveReviewCommentNodeId(
+          owner,
+          repo,
+          commentId,
+          fetchImpl,
+          token,
+          ctx
+        )) || '';
+    }
+    if (!/^PRRC_/i.test(nodeId)) {
+      throw new Error(
+        `GitHub API 404 editing review comment ${commentId} (pending comments need GraphQL). ` +
+          `Could not resolve PRRC_ node id — refresh and retry.`
+      );
+    }
+    return viaGraphql(nodeId);
+  }
 }
 
 export async function requestReviewers(
