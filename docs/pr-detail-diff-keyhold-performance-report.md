@@ -149,6 +149,27 @@ outer shell containment 한 줄만으로는 file/selection p95가 개선되지 �
 - modal 대비 embed p95는 `max(50ms, modal + 25ms)` 이하, event 수는 modal보다 4개 이상 적지 않도록 검증
 - architecture gate로 루트 구독, leaf 구독, local scroll, idle commit, host/URI yield, containment을 고정
 
+### 전체 E2E에서 추가로 확인한 정확성 문제
+
+성능 critical path를 줄인 뒤 전체 E2E를 반복하면서, 속도와 별개로 키보드 권한이 잘못 넘어갈 수 있는 회귀도 확인했다.
+
+- Diff의 plain ↑/↓ fast path가 일반 shortcut resolver보다 먼저 return하면서, multi-reply thread가 focus를 소유한 경우에도 line selection으로 보내고 있었다. fast path가 먼저 최신 `isMultiReplyThreadFocused`를 확인하고 reply 이동을 실행하도록 수정했다.
+- progressive comment patch가 배열 순서를 바꾸면 숫자 index 기반 focus가 다른 thread를 가리킬 수 있었다. active comment의 stable id를 보존한 뒤 새 배열에서 index를 다시 찾도록 했다.
+- Conversation과 Diff가 이전 layout의 DOM anchor를 잠시 유지할 때 반대 layout이 그 anchor를 focus source로 재사용할 수 있었다. context-thread root 해석에 layout ownership을 적용했다.
+- selection route의 outbound write가 host echo보다 늦게 dedupe stamp를 남겨 동일 selection을 다시 적용할 수 있었다. outbound 직전에 inbound key를 먼저 기록하도록 고쳤다.
+
+이 네 항목은 최초 p95 차이의 주원인은 아니지만, key-hold 최적화가 기존 thread/file/selection 탐색 의미를 바꾸지 않는다는 전체 E2E 조건을 충족하는 데 필요했다.
+
+### E2E 실행 자체의 안정화
+
+최종 직전 전체 실행에서는 제품 실패와 무관하게 동기식 `agent-browser` 명령이 반복해서 60초 동안 멈췄다. 동기 호출이 Node 이벤트 루프를 점유하므로 RSTest의 180초 test timeout도 제때 발화하지 못했고, 한 테스트가 약 15분, 전체가 약 64분까지 늘어났다.
+
+- 일반 CDP 명령의 기본 상한을 20초로 낮췄다. cold open과 장기 wait는 기존처럼 call site의 명시적 45~90초 상한을 사용한다.
+- multi-line dock E2E는 여러 번 아래로 확장했다가 위로 되돌리는 rAF 경쟁 시드 대신, 한 줄에서 `Shift+↑`/`Shift+↓`로 head-at-start/end를 직접 만든다.
+- 기하 검증 전 `headRole`이 `start` 또는 `end`이고 실제 선택 행이 2개 이상인지 함께 확인한다. 한 줄 `only` 상태를 multi-line 성공으로 오인하지 않는다.
+
+안정화 후 직전 실패 세 경로를 한 공유 세션에서 18/18 통과했고, 이어서 전체 E2E를 새 세션에서 185/185 통과했다.
+
 ## 수정 후 결과
 
 최종 build/reload 후 같은 브라우저 run에서 얻은 결과다.
@@ -170,9 +191,11 @@ embed의 최종 p95 차이는 page down +0.6ms, page up +0.6ms, file +0.1ms, cha
 
 - `npm run build`: 통과
 - `npm run typecheck`: 통과
-- 관련 unit/architecture: 34/34 통과
-- 전체 unit: 1,245/1,245 통과
+- 최종 관련 unit/architecture: 30/30 통과
+- 전체 unit: 1,250/1,250 통과
 - perf E2E: 8/8 통과
+- 직전 실패 경로 selection/list-open-mode/Opt-text-select: 18/18 통과
+- 전체 E2E: 33 files, 185/185 통과 (`930.760s`)
 - 동일 PR modal/embed manual probe: 세 동작 모두 약 18ms p95
 - `git diff --check`: 통과
 
