@@ -88,4 +88,22 @@ describe('Diff overscan / scroll path (shipped)', () => {
     expect(shell).toMatch(/function navComment\s*\(/);
     expect(shell).toMatch(/requestAnimationFrame\(run\)/);
   });
+
+  test('⌥J/K thread hops replace the ArrowUp/Down cursor atomically', () => {
+    const shell = read('src/modal/app/PrModalShell.tsx');
+    const jump = shell.slice(
+      shell.indexOf('const jumpToReviewComment'),
+      shell.indexOf('// Finish jump after collapse expand')
+    );
+    expect(jump).toMatch(/clearLineSelectionForNav\(true\)/);
+    expect(jump).toMatch(/commitDiffThreadCursor\(active\?\.id \?\? id, idx\)/);
+
+    const commit = shell.slice(
+      shell.indexOf('function commitDiffThreadCursor'),
+      shell.indexOf('function handoffThreadExitToSelection')
+    );
+    expect(commit).toMatch(
+      /useModalStore\.setState\(\{[\s\S]*?commentIndex: nextCommentIndex,[\s\S]*?activeDiffCommentId: rootId \?\? null,[\s\S]*?focusedThreadUnitId: null,[\s\S]*?lineSelection: pinned/
+    );
+  });
 });
