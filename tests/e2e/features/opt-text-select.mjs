@@ -255,7 +255,7 @@ export function getSteps() {
     log(`  Opt+drag: ${JSON.stringify(drag)}`);
     assert(drag?.ok, `Opt+drag dispatch failed: ${JSON.stringify(drag)}`);
 
-    // Wait for rAF + auto-copy path (stamp proves finishNativeTextSelectCopy ran;
+    // Wait for deferred auto-copy path (stamp proves finishNativeTextSelectCopy ran;
     // clipboard write may be ok:0 under headless permissions).
     waitFor(
       `

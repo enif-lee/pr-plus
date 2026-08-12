@@ -116,8 +116,8 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
     if (open) return undefined;
     clearSelectionActionsTimer();
     if (selectionMoveRafRef.current) {
-      cancelAnimationFrame(selectionMoveRafRef.current);
-      selectionMoveRafRef.current = 0;
+      selectionMoveRafRef.current.cancel?.();
+      selectionMoveRafRef.current = null;
     }
     pendingSelectionMoveRef.current = null;
     try {

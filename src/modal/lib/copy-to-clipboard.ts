@@ -89,10 +89,20 @@ export async function copyTextToClipboard(
         : null;
 
   if (clip && typeof clip.writeText === 'function') {
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      await clip.writeText(value);
-      return true;
+      // Chromium may leave writeText pending without user activation. Bound it
+      // so synthetic clicks and restricted contexts still reach the fallback.
+      const written = await Promise.race([
+        clip.writeText(value).then(() => true),
+        new Promise<boolean>((resolve) => {
+          timer = setTimeout(() => resolve(false), 500);
+        }),
+      ]);
+      if (timer) clearTimeout(timer);
+      if (written) return true;
     } catch {
+      if (timer) clearTimeout(timer);
       /* fall through */
     }
   }

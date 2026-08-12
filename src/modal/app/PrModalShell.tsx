@@ -424,6 +424,31 @@ import {
   rowOffsets,
 } from '@common/utils';
 
+type NavigationFrameHandle = { cancel: () => void };
+
+/** Keep normal paints rAF-coalesced, with a bound for suspended Chromium rAF. */
+function scheduleNavigationFrame(run: () => void): NavigationFrameHandle {
+  let active = true;
+  let raf = 0;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const cancel = () => {
+    if (!active) return;
+    active = false;
+    if (raf) cancelAnimationFrame(raf);
+    if (timer != null) clearTimeout(timer);
+  };
+  const finish = () => {
+    if (!active) return;
+    cancel();
+    run();
+  };
+  timer = setTimeout(finish, 32);
+  if (typeof requestAnimationFrame === 'function') {
+    raf = requestAnimationFrame(finish);
+  }
+  return { cancel };
+}
+
 export function PrModalApp({
   open,
   loading,
@@ -1018,22 +1043,35 @@ export function PrModalApp({
   } | null>(null);
   /** Same contract as file nav: keep the latest direction, paint one hop/rAF. */
   const pendingConversationNavDeltaRef = useRef(0);
-  const conversationNavRafRef = useRef(0);
+  const conversationNavRafRef = useRef<NavigationFrameHandle | null>(null);
+  /** In-thread root/reply hold: keep every visible step to one hop per frame. */
+  const pendingThreadReplyDeltaRef = useRef(0);
+  const threadReplyNavRafRef = useRef<NavigationFrameHandle | null>(null);
   // Drop keyboard focus and any queued paint when closing or switching PRs.
   useEffect(() => {
     if (conversationNavRafRef.current) {
-      cancelAnimationFrame(conversationNavRafRef.current);
-      conversationNavRafRef.current = 0;
+      conversationNavRafRef.current.cancel();
+      conversationNavRafRef.current = null;
+    }
+    if (threadReplyNavRafRef.current) {
+      threadReplyNavRafRef.current.cancel();
+      threadReplyNavRafRef.current = null;
     }
     pendingConversationNavDeltaRef.current = 0;
+    pendingThreadReplyDeltaRef.current = 0;
     conversationCommentFocusRef.current = null;
     useModalStore.getState().requestConversationNav(null);
     return () => {
       if (conversationNavRafRef.current) {
-        cancelAnimationFrame(conversationNavRafRef.current);
-        conversationNavRafRef.current = 0;
+        conversationNavRafRef.current.cancel();
+        conversationNavRafRef.current = null;
+      }
+      if (threadReplyNavRafRef.current) {
+        threadReplyNavRafRef.current.cancel();
+        threadReplyNavRafRef.current = null;
       }
       pendingConversationNavDeltaRef.current = 0;
+      pendingThreadReplyDeltaRef.current = 0;
     };
   }, [open, prIdentity]);
   const collapseInitRef = useRef<any>(null);
@@ -1066,7 +1104,7 @@ export function PrModalApp({
   const selectionIslandPhaseRef = useRef<'actions' | 'comment'>('actions');
   selectionIslandPhaseRef.current = selectionIslandPhase;
   /** Coalesce key-repeat line moves to one React update per animation frame. */
-  const selectionMoveRafRef = useRef(0);
+  const selectionMoveRafRef = useRef<NavigationFrameHandle | null>(null);
   const pendingSelectionMoveRef = useRef<{ delta: number; shift: boolean } | null>(
     null
   );
@@ -1083,7 +1121,7 @@ export function PrModalApp({
   }>({ list: null, listLength: -1, index: null });
   /** Coalesce ⌥↑/⌥↓ under key-repeat: one region hop per animation frame. */
   const pendingOptArrowDirRef = useRef(0);
-  const optArrowRafRef = useRef(0);
+  const optArrowRafRef = useRef<NavigationFrameHandle | null>(null);
   /**
    * After multi-reply continuum exits to a line, one reverse arrow re-enters
    * that thread with direction-aware unit seed (P3c). Cleared on other moves.
@@ -3101,6 +3139,8 @@ export function PrModalApp({
       // (resolveSelectionDockVerticalPlacement); do not reserve ~3 empty lines.
       const padBottom = 8;
       if (typeof scrollChildToRevealInScroller === 'function') {
+        // A visible focused comment must not move. Only reveal a clipped unit;
+        // scrolling the whole thread makes arrow entry jump despite no need.
         scrollChildToRevealInScroller(scroller, host, {
           padTop: stickyPad,
           padBottom,
@@ -3164,6 +3204,12 @@ export function PrModalApp({
           ) as HTMLElement | null) ||
           (scope.querySelector(
             `.prp-review-thread__item--unit-focus[data-prp-thread-unit-id="${CSS.escape(id)}"]`
+          ) as HTMLElement | null) ||
+          // Collapsed single threads do not mount their root unit yet. Their
+          // shell is still the real visible target; use row offsets only when
+          // neither the unit nor this root anchor is mounted.
+          (scope.querySelector(
+            `.prp-inline-thread[data-search-anchor="review-comment:${CSS.escape(id)}"]`
           ) as HTMLElement | null)
         );
       } catch {
@@ -3196,6 +3242,36 @@ export function PrModalApp({
       window.setTimeout(tick, 32);
     });
     return false;
+  }
+
+  /** Conversation units are already mounted; reveal once without Diff retries. */
+  function scrollConversationThreadUnitIntoView(unitId: unknown): boolean {
+    const id = unitId != null ? String(unitId).trim() : '';
+    if (!id || typeof document === 'undefined') return false;
+    try {
+      const panel = document.querySelector(
+        '.prp-body-panel--conversation.prp-body-panel--active'
+      ) as HTMLElement | null;
+      const host = panel?.querySelector(
+        `[data-prp-thread-unit-id="${CSS.escape(id)}"]`
+      ) as HTMLElement | null;
+      if (!host) return false;
+      const scroller = host.closest(
+        '.prp-conversation-virtual'
+      ) as HTMLElement | null;
+      if (scroller && typeof scrollChildToRevealInScroller === 'function') {
+        scrollChildToRevealInScroller(scroller, host, {
+          padTop: 24,
+          padBottom: 24,
+          minVisiblePx: 14,
+        });
+      } else {
+        host.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      }
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -3389,41 +3465,50 @@ export function PrModalApp({
     if (isThreadSelection(st.lineSelection)) return false;
 
     const rootId = String(latch.rootId);
-    // Ensure Diff has the thread row in the virtual list / viewport
-    try {
-      jumpToReviewComment({
-        id: rootId,
-        path: st.lineSelection?.filePath || null,
-        line: null,
-        side: 'RIGHT',
-      });
-    } catch {
-      /* ignore */
-    }
-    pinThreadRowSelection(rootId);
-    try {
-      st.setActiveDiffCommentId(rootId);
-    } catch {
-      /* ignore */
-    }
+    const list = Array.isArray(virtualRowsRef.current)
+      ? virtualRowsRef.current
+      : [];
+    const arrIdx = findThreadArrayIndex(rootId);
+    const pinned =
+      arrIdx >= 0 && typeof beginSelectionOnRow === 'function'
+        ? beginSelectionOnRow(list[arrIdx], 'RIGHT', arrIdx)
+        : null;
+    if (!pinned) return false;
+
     const replies = repliesForRootCommentId(rootId);
     const units = listReviewThreadFocusUnits(rootId, replies);
-    if (units.length < 2) {
-      // Still count as handled if we at least re-selected the thread row
-      return pinThreadRowSelection(rootId) >= 0;
-    }
     const seed =
-      typeof seedReviewThreadFocusUnit === 'function'
+      units.length >= 2 && typeof seedReviewThreadFocusUnit === 'function'
         ? seedReviewThreadFocusUnit(units, d)
-        : d < 0
-          ? units[units.length - 1]
-          : units[0];
-    if (seed?.id) {
-      st.setFocusedThreadUnitId(String(seed.id));
+        : null;
+    const unitId = seed?.id ? String(seed.id) : null;
+    const nextCommentIndex = Array.isArray(mappedComments)
+      ? mappedComments.findIndex((c: any) => String(c?.id) === rootId)
+      : -1;
+
+    // The latch only exists after leaving this mounted thread. Do not call
+    // jumpToReviewComment here: its root-first focus and scroll fight re-entry.
+    useModalStore.setState({
+      lineSelection: pinned,
+      activeDiffCommentId: rootId,
+      focusedThreadUnitId: unitId,
+      ...(nextCommentIndex >= 0 ? { commentIndex: nextCommentIndex } : {}),
+    });
+    try {
+      if (unitId) {
+        document.documentElement.setAttribute(
+          'data-prp-focused-thread-unit',
+          unitId
+        );
+      } else {
+        document.documentElement.removeAttribute('data-prp-focused-thread-unit');
+      }
+    } catch {
+      /* ignore */
     }
     try {
       requestAnimationFrame(() => {
-        scrollFocusedThreadUnitIntoView(String(seed?.id || rootId), {
+        scrollFocusedThreadUnitIntoView(unitId || rootId, {
           attempts: 12,
           sel: useModalStore.getState().lineSelection,
         });
@@ -3439,7 +3524,7 @@ export function PrModalApp({
    * handled (in-thread step **or** exit handoff to line/thread selection).
    * No wrap at ends — one more step leaves the thread in the continuum.
    */
-  function stepThreadReply(delta: number): boolean {
+  function applyThreadReplyStep(delta: number): boolean {
     const st = useModalStore.getState();
     const liveLayout = st.layoutMode;
     const rootId = resolveFocusedReviewThreadRootId(st);
@@ -3456,8 +3541,8 @@ export function PrModalApp({
       if (liveLayout === LAYOUT_DIFF) {
         return handoffThreadExitToSelection(rootId, delta);
       }
-      // Conversation: clear unit; do not invent Diff line selection
-      st.setFocusedThreadUnitId(null);
+      // Conversation owns only this thread: keep the first/last unit focused.
+      // Clearing it re-seeds the root on the next held keydown and wraps.
       return true;
     }
     const next = stepped.unit;
@@ -3480,17 +3565,31 @@ export function PrModalApp({
       pinThreadRowSelection(rootId);
     }
     st.setFocusedThreadUnitId(next.id);
-    // Scroll the focused unit band only (minimal reveal)
-    try {
+    if (liveLayout === LAYOUT_DIFF) {
+      // Diff can need a virtual-row mount; keep its bounded retry path.
       requestAnimationFrame(() => {
         scrollFocusedThreadUnitIntoView(next.id, {
           attempts: 12,
           sel: useModalStore.getState().lineSelection,
         });
       });
-    } catch {
-      /* ignore */
+    } else {
+      // Conversation replies are mounted in the focused thread. Never run the
+      // Diff retry loop against its hidden keep-alive list on every repeat.
+      scrollConversationThreadUnitIntoView(next.id);
     }
+    return true;
+  }
+
+  function stepThreadReply(delta: number): boolean {
+    pendingThreadReplyDeltaRef.current = delta < 0 ? -1 : 1;
+    if (threadReplyNavRafRef.current) return true;
+    threadReplyNavRafRef.current = scheduleNavigationFrame(() => {
+      threadReplyNavRafRef.current = null;
+      const queued = pendingThreadReplyDeltaRef.current;
+      pendingThreadReplyDeltaRef.current = 0;
+      if (queued) applyThreadReplyStep(queued);
+    });
     return true;
   }
 
@@ -3880,14 +3979,8 @@ export function PrModalApp({
     // Latest direction wins under hold (same thrift as navFile).
     pendingOptArrowDirRef.current = dir;
     if (optArrowRafRef.current) return;
-    if (typeof requestAnimationFrame !== 'function') {
-      const d = pendingOptArrowDirRef.current;
-      pendingOptArrowDirRef.current = 0;
-      sampleDiffNav('region', d, () => applyOptArrowScrollSelect(d));
-      return;
-    }
-    optArrowRafRef.current = requestAnimationFrame(() => {
-      optArrowRafRef.current = 0;
+    optArrowRafRef.current = scheduleNavigationFrame(() => {
+      optArrowRafRef.current = null;
       const d = pendingOptArrowDirRef.current;
       pendingOptArrowDirRef.current = 0;
       if (!d) return;
@@ -4050,8 +4143,8 @@ export function PrModalApp({
     if (layoutMode === LAYOUT_DIFF) collapseDiff();
     pendingConversationNavDeltaRef.current = delta < 0 ? -1 : 1;
     if (conversationNavRafRef.current) return;
-    conversationNavRafRef.current = requestAnimationFrame(() => {
-      conversationNavRafRef.current = 0;
+    conversationNavRafRef.current = scheduleNavigationFrame(() => {
+      conversationNavRafRef.current = null;
       const queued = pendingConversationNavDeltaRef.current;
       pendingConversationNavDeltaRef.current = 0;
       if (queued) applyConversationCommentNav(queued);
@@ -4303,8 +4396,8 @@ export function PrModalApp({
     clearSelectionActionsTimer();
     setSelectionNavBusy(false);
     if (selectionMoveRafRef.current) {
-      cancelAnimationFrame(selectionMoveRafRef.current);
-      selectionMoveRafRef.current = 0;
+      selectionMoveRafRef.current.cancel();
+      selectionMoveRafRef.current = null;
     }
     pendingSelectionMoveRef.current = null;
     selectingRef.current = false;
@@ -4631,8 +4724,8 @@ export function PrModalApp({
       return;
     }
 
-    // Scroll BEFORE React paint using nextSel indices (1.9.6 snappy hold).
-    // Thread multi-reply unit focus is applied after, then may re-scroll.
+    // Resolve thread entry before the first store paint so reverse entry never
+    // flashes the root comment before its directional reply.
     const isThreadNext =
       nextSel &&
       (nextSel.kind === 'thread' ||
@@ -4640,7 +4733,57 @@ export function PrModalApp({
         nextSel.kind === 'inline-comment') &&
       nextSel.commentId != null;
 
-    setLineSelection(nextSel);
+    let seededThreadEntry: {
+      rootId: string;
+      unitId: string;
+      commentIndex: number;
+    } | null = null;
+    if (isThreadNext && !shift) {
+      const rootId = String(nextSel.commentId);
+      try {
+        const replies = repliesForRootCommentId(rootId);
+        const units = listReviewThreadFocusUnits(rootId, replies);
+        const seed =
+          units.length >= 2 &&
+          typeof seedReviewThreadFocusUnit === 'function'
+            ? seedReviewThreadFocusUnit(units, delta)
+            : null;
+        if (seed?.id) {
+          seededThreadEntry = {
+            rootId,
+            unitId: String(seed.id),
+            commentIndex: Array.isArray(mappedComments)
+              ? mappedComments.findIndex((c: any) => String(c?.id) === rootId)
+              : -1,
+          };
+        }
+      } catch {
+        /* fall through to root-only thread entry */
+      }
+    }
+
+    if (seededThreadEntry) {
+      const { rootId, unitId, commentIndex: nextCommentIndex } =
+        seededThreadEntry;
+      // Keep thread entry atomic. setCommentIndex clears unit focus, so four
+      // separate updates would visibly paint root before the directional reply.
+      useModalStore.setState({
+        lineSelection: nextSel,
+        activeDiffCommentId: rootId,
+        focusedThreadUnitId: unitId,
+        ...(nextCommentIndex >= 0 ? { commentIndex: nextCommentIndex } : {}),
+      });
+      try {
+        document.documentElement.setAttribute(
+          'data-prp-focused-thread-unit',
+          unitId
+        );
+      } catch {
+        /* ignore */
+      }
+    } else {
+      setLineSelection(nextSel);
+    }
     // Sync the navigation path before the next repeat; leaf subscribers update
     // the tree/header chrome without re-rendering the composition root.
     if (nextPath && nextPath !== activePath) {
@@ -4655,53 +4798,33 @@ export function PrModalApp({
 
     if (isThreadNext) {
       const rootId = String(nextSel.commentId);
-      // Cheap id stamp only on hop — defer multi-reply unit seed off critical path
-      try {
-        useModalStore.getState().setActiveDiffCommentId(rootId);
-      } catch {
-        /* ignore */
-      }
-      if (Array.isArray(mappedComments)) {
+      if (!seededThreadEntry && Array.isArray(mappedComments)) {
         const tIdx = mappedComments.findIndex(
           (c: any) => String(c?.id) === rootId
         );
         if (tIdx >= 0 && tIdx !== commentIndex) setCommentIndex(tIdx);
       }
-      // Index scroll first (thread row), then optional unit focus in rAF
-      try {
-        scrollSelectionHeadDomOnly(nextSel);
-      } catch {
-        /* ignore */
-      }
       if (!shift) {
-        const seedUnit = () => {
-          try {
-            const live = useModalStore.getState();
-            // Still on this thread?
-            if (String(live.activeDiffCommentId || '') !== rootId) return;
-            const replies = repliesForRootCommentId(rootId);
-            const units = listReviewThreadFocusUnits(rootId, replies);
-            if (
-              units.length >= 2 &&
-              typeof seedReviewThreadFocusUnit === 'function'
-            ) {
-              const seed = seedReviewThreadFocusUnit(units, delta);
-              if (seed?.id) {
-                live.setFocusedThreadUnitId(String(seed.id));
-                scrollDiffThreadUnitIntoView(live.lineSelection || nextSel);
-                return;
-              }
-            }
-            live.setFocusedThreadUnitId(null);
-          } catch {
-            /* ignore */
+        try {
+          const live = useModalStore.getState();
+          if (seededThreadEntry) {
+            scrollDiffThreadUnitIntoView(live.lineSelection || nextSel);
+          } else {
+            live.setActiveDiffCommentId(rootId);
+            // Single-comment threads still expose the root unit DOM. Reveal it
+            // directly so a visible comment is a no-op; index scroll is only
+            // the not-yet-mounted fallback inside this helper.
+            scrollFocusedThreadUnitIntoView(rootId, {
+              attempts: 6,
+              sel: live.lineSelection || nextSel,
+            });
           }
-        };
-        if (typeof requestAnimationFrame === 'function') {
-          requestAnimationFrame(seedUnit);
-        } else {
-          seedUnit();
+        } catch {
+          scrollSelectionHeadDomOnly(nextSel);
         }
+      } else {
+        useModalStore.getState().setActiveDiffCommentId(rootId);
+        scrollSelectionHeadDomOnly(nextSel);
       }
     } else {
       clearDiffThreadFocusIfNeeded();
@@ -4736,8 +4859,8 @@ export function PrModalApp({
           : { delta, shift: Boolean(shift) };
     pendingSelectionMoveRef.current = next;
     if (selectionMoveRafRef.current) return;
-    selectionMoveRafRef.current = requestAnimationFrame(() => {
-      selectionMoveRafRef.current = 0;
+    selectionMoveRafRef.current = scheduleNavigationFrame(() => {
+      selectionMoveRafRef.current = null;
       const p = pendingSelectionMoveRef.current;
       pendingSelectionMoveRef.current = null;
       if (!p || !p.delta) return;
@@ -7062,7 +7185,8 @@ export function PrModalApp({
 
   /**
    * After Opt+drag text selection ends: copy selected text + toast.
-   * rAF so the browser finishes the selection before we read getSelection().
+   * Defer one task so the browser finishes the selection before getSelection().
+   * Do not use rAF: hidden/headless tabs may suspend rendering indefinitely.
    * @param {string} [forcedText] optional override (e2e / custom event)
    */
   function finishNativeTextSelectCopy(forcedText?: string) {
@@ -7125,10 +7249,8 @@ export function PrModalApp({
         setActionMsg(formatMessage('toast_copy_failed', appLocale));
       }
     };
-    if (typeof requestAnimationFrame === 'function') {
-      requestAnimationFrame(() => {
-        void run();
-      });
+    if (typeof setTimeout === 'function') {
+      setTimeout(() => void run(), 0);
     } else {
       void run();
     }

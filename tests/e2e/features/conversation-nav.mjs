@@ -214,25 +214,85 @@ export function getSteps() {
       `need a focused multi-reply root: ${JSON.stringify(before)}`
     );
 
-    press('ArrowDown');
+    evalInPage(`
+      (() => {
+        const trace = { done: false, frames: [] };
+        window.__prpThreadReplyTrace = trace;
+        const current =
+          document.documentElement.getAttribute(
+            'data-prp-focused-thread-unit'
+          ) || ${JSON.stringify(before.id)};
+        if (current) trace.frames.push({ id: current, at: performance.now() });
+        const sample = () => {
+          const id =
+            document.documentElement.getAttribute(
+              'data-prp-focused-thread-unit'
+            ) || '';
+          if (id && trace.frames.at(-1)?.id !== id) {
+            trace.frames.push({ id, at: performance.now() });
+          }
+        };
+        trace.observer = new MutationObserver(sample);
+        trace.observer.observe(document.documentElement, {
+          attributes: true,
+          attributeFilter: ['data-prp-focused-thread-unit'],
+        });
+      })()
+    `);
+    const downHold = holdChord('ArrowDown', {
+      holdMs: Math.max(450, Math.min(1500, (before.replies.length + 3) * 24)),
+      repeatMs: 8,
+      sample: 'conv',
+    });
     waitMs(TICK);
     const reply = probe();
+    const trace = evalInPage(`
+      (() => {
+        const trace = window.__prpThreadReplyTrace || { frames: [] };
+        trace.done = true;
+        trace.observer?.disconnect?.();
+        return trace.frames;
+      })()
+    `);
+    const order = [before.id, ...before.replies];
+    const tracedIndexes = trace
+      .map((frame) => order.indexOf(frame.id))
+      .filter((idx) => idx >= 0);
     assert(
-      reply?.action === 'stepThreadReplyNext' &&
+      downHold.events >= 20 &&
+        reply?.action === 'stepThreadReplyNext' &&
         reply.role === 'reply' &&
-        reply.id &&
-        before.replies.includes(reply.id),
-      `↓ must move root → reply: ${JSON.stringify({ before, reply })}`
+        reply.id === before.replies.at(-1) &&
+        tracedIndexes.length === order.length &&
+        tracedIndexes.every(
+          (idx, i) => i === 0 || idx - tracedIndexes[i - 1] === 1
+        ),
+      `8ms ↓ hold must paint adjacent units and clamp at last: ${JSON.stringify({ before, reply, downHold, trace })}`
     );
 
-    press('ArrowUp');
-    waitMs(TICK);
+    for (let i = 0; i < before.replies.length; i++) {
+      press('ArrowUp');
+      waitMs(TICK);
+    }
     const root = probe();
     assert(
       root?.action === 'stepThreadReplyPrev' &&
         root.role === 'root' &&
         root.id === before.id,
       `↑ must move reply → root: ${JSON.stringify({ before, reply, root })}`
+    );
+    const upHold = holdChord('ArrowUp', {
+      holdMs: 450,
+      repeatMs: 8,
+      sample: 'conv',
+    });
+    waitMs(TICK);
+    const first = probe();
+    assert(
+      upHold.events >= 20 &&
+        first?.role === 'root' &&
+        first.id === before.id,
+      `8ms ↑ hold must clamp at first: ${JSON.stringify({ before, first, upHold })}`
     );
     // Restore the expanded fixture thread so later composer scenarios do not
     // inherit its reply textarea.

@@ -1301,6 +1301,14 @@ export function clickSelectableLine(index = 3) {
     (() => {
       document.documentElement.removeAttribute('data-prp-opt-held');
       document.documentElement.classList.remove('prp-opt-held');
+      document.body?.classList.remove('prp-opt-held');
+      document.dispatchEvent(
+        new CustomEvent('prp-set-opt-hints', {
+          detail: { active: false },
+          bubbles: true,
+          composed: true,
+        })
+      );
       const v = document.querySelector('.prp-vlist, .prp-diff-vlist');
       if (v && typeof v.focus === 'function') {
         try { v.focus({ preventScroll: true }); } catch { v.focus(); }
@@ -1546,6 +1554,20 @@ export function press(chord) {
       };
       target.dispatchEvent(new KeyboardEvent('keydown', base));
       target.dispatchEvent(new KeyboardEvent('keyup', { ...base, bubbles: true }));
+      // A chord ends with the modifier release. Without this event the product's
+      // Opt-held ref stays true and later plain clicks become native-text drags.
+      if (spec.altKey) {
+        target.dispatchEvent(
+          new KeyboardEvent('keyup', {
+            key: 'Alt',
+            code: 'AltLeft',
+            altKey: false,
+            bubbles: true,
+            cancelable: true,
+            composed: true,
+          })
+        );
+      }
       return true;
     })()
   `);

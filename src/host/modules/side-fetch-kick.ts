@@ -332,16 +332,14 @@
             const totalCount =
               typeof page?.totalCount === 'number' ? page.totalCount : null;
             const loadedCount = items.length + events.length;
-            // Older/newer pagination — do not treat since-forward exhaustion as
-            // "timeline complete" when totalCount still exceeds loaded corpus.
+            // GraphQL pageInfo is the pagination authority. totalCount includes
+            // node types omitted by the Conversation mapper, so comparing it to
+            // rendered items creates a permanent false "Load all" gap.
             let hasMore = Boolean(page?.hasMore);
             if (direction === 'oldest') {
               hasMore = hasMore || Boolean(pi?.hasNextPage);
             } else {
               hasMore = hasMore || Boolean(pi?.hasPreviousPage);
-            }
-            if (totalCount != null && loadedCount < totalCount) {
-              hasMore = true;
             }
             // Preserve older-edge cursor after since-incremental merge
             const prevTl = current.detail?.timelineMeta || null;
@@ -351,11 +349,7 @@
               if (prevTl.startCursor && !startCursor) {
                 startCursor = prevTl.startCursor;
               }
-              if (prevTl.hasMore || prevTl.startCursor) {
-                if (totalCount == null || loadedCount < totalCount) {
-                  hasMore = true;
-                }
-              }
+              if (prevTl.hasMore) hasMore = true;
               // Keep newest endCursor for watermark; prefer prev older edge
               if (prevTl.startCursor) startCursor = prevTl.startCursor;
               if (!endCursor && prevTl.endCursor) endCursor = prevTl.endCursor;
@@ -594,9 +588,6 @@
                   paintHasMore || Boolean(pi?.hasPreviousPage);
               } else {
                 paintHasMore = paintHasMore || Boolean(pi?.hasNextPage);
-              }
-              if (totalCount != null && loadedCount < totalCount) {
-                paintHasMore = true;
               }
               if (
                 sinceWatermark &&
@@ -942,4 +933,3 @@
       developmentP,
     };
   }
-

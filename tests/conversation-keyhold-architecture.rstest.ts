@@ -16,11 +16,28 @@ describe('Conversation key-hold architecture', () => {
     const focus = read('src/modal/components/common/ConversationKbFocus.tsx');
 
     expect(shell).toMatch(
-      /pendingConversationNavDeltaRef\.current = delta < 0 \? -1 : 1;[\s\S]*requestAnimationFrame/
+      /pendingConversationNavDeltaRef\.current = delta < 0 \? -1 : 1;[\s\S]*scheduleNavigationFrame/
     );
     expect(shell).toMatch(/requestConversationNav\(next\.anchor, true\)/);
     expect(store).toMatch(/focusImmediately \? next : null/);
     expect(list).toMatch(/const VirtualConversationRow = memo/);
     expect(focus).toMatch(/useLayoutEffect\(\(\) => \{[\s\S]*onFocusThread\(id\)/);
+  });
+
+  test('paints held in-thread reply steps per frame and clamps Conversation ends', () => {
+    const shell = read('src/modal/app/PrModalShell.tsx');
+
+    expect(shell).toMatch(
+      /pendingThreadReplyDeltaRef\.current = delta < 0 \? -1 : 1;[\s\S]*scheduleNavigationFrame/
+    );
+    expect(shell).toMatch(
+      /function scheduleNavigationFrame[\s\S]*setTimeout\(finish, 32\)[\s\S]*requestAnimationFrame\(finish\)/
+    );
+    expect(shell).toMatch(
+      /if \(stepped\.exit\) \{[\s\S]*liveLayout === LAYOUT_DIFF[\s\S]*handoffThreadExitToSelection[\s\S]*return true;/
+    );
+    expect(shell).toMatch(
+      /scrollConversationThreadUnitIntoView\(next\.id\)/
+    );
   });
 });

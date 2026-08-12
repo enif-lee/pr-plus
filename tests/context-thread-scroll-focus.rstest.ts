@@ -240,6 +240,7 @@ describe('scrollChildToRevealInScroller (minimal focus band)', () => {
     expect(delta).toBeLessThanOrEqual(120);
     expect(scroller.scrollTop).toBeGreaterThan(0);
   });
+
 });
 
 describe('resolveComposerFormHost', () => {

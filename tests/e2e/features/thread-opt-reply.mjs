@@ -405,6 +405,129 @@ export function getSteps() {
     assert(Number(n) >= 1, `TOR.0 no .prp-inline-thread after settle n=${n}`);
   });
 
+  run('TOR.0b visible single-thread entry does not scroll', () => {
+    blurEditable();
+    const setup = evalInPage(`
+      (() => {
+        const list = document.querySelector(
+          '.prp-body-panel--active .prp-vlist'
+        );
+        const thread = document.querySelector(
+          '.prp-body-panel--active .prp-inline-thread--single'
+        );
+        if (!list || !thread) {
+          return {
+            ok: false,
+            hasList: !!list,
+            threadUnits: [
+              ...document.querySelectorAll(
+                '.prp-body-panel--active .prp-inline-thread'
+              ),
+            ].map((el) =>
+              el.querySelectorAll('[data-prp-thread-unit-id]').length
+            ),
+          };
+        }
+        const row = thread.closest('.prp-vline');
+        const rowIndex = Number(row?.getAttribute('data-row-index'));
+        const line = [
+          ...document.querySelectorAll(
+            '.prp-body-panel--active .prp-vline--selectable[data-row-index]'
+          ),
+        ]
+          .filter(
+            (el) => Number(el.getAttribute('data-row-index')) < rowIndex
+          )
+          .sort(
+            (a, b) =>
+              Number(b.getAttribute('data-row-index')) -
+              Number(a.getAttribute('data-row-index'))
+          )[0];
+        const rootId = (thread.getAttribute('data-search-anchor') || '').replace(
+          /^review-comment:/,
+          ''
+        );
+        const lr = list.getBoundingClientRect();
+        const rr = thread.getBoundingClientRect();
+        if (!row || !line || !rootId) return { ok: false };
+        document.documentElement.removeAttribute('data-prp-opt-held');
+        document.documentElement.classList.remove('prp-opt-held');
+        try { list.focus({ preventScroll: true }); } catch { list.focus(); }
+        list.scrollTop = Math.max(
+          0,
+          list.scrollTop + rr.top - lr.top - 80
+        );
+        list.dispatchEvent(new Event('scroll'));
+        return {
+          ok: true,
+          rowIndex,
+          lineRowIndex: Number(line.getAttribute('data-row-index')),
+          rootId,
+          anchor: thread.getAttribute('data-search-anchor'),
+        };
+      })()
+    `);
+    assert(setup?.ok, `TOR.0b single thread setup failed: ${JSON.stringify(setup)}`);
+    press('ArrowDown');
+    waitMs(350);
+    waitMs(300);
+    const before = evalInPage(`
+      (() => {
+        const list = document.querySelector('.prp-body-panel--active .prp-vlist');
+        const root = document.querySelector(
+          '.prp-inline-thread[data-search-anchor="review-comment:${String(setup.rootId)}"]'
+        );
+        if (!list || !root) return { ok: false };
+        const lr = list.getBoundingClientRect();
+        const rr = root.getBoundingClientRect();
+        return {
+          ok: true,
+          scrollTop: list.scrollTop,
+          selectedRow: Number(
+            document
+              .querySelector('.prp-vline--selected[data-row-index]')
+              ?.getAttribute('data-row-index')
+          ),
+          visible:
+            rr.top >= lr.top + 24 &&
+            rr.bottom <= lr.top + list.clientHeight - 8,
+        };
+      })()
+    `);
+    assert(before?.visible, `TOR.0b root must start visible: ${JSON.stringify(before)}`);
+    assert(
+      before?.selectedRow === setup.lineRowIndex,
+      `TOR.0b preceding line must be selected: ${JSON.stringify({ setup, before })}`
+    );
+    press('ArrowDown');
+    waitMs(450);
+    const after = evalInPage(`
+      (() => ({
+        scrollTop: document.querySelector(
+          '.prp-body-panel--active .prp-vlist'
+        )?.scrollTop ?? null,
+        anchor:
+          document.querySelector('.prp-inline-thread--context-active')
+            ?.getAttribute('data-search-anchor') || null,
+        selectedRow: Number(
+          document
+            .querySelector(
+              '.prp-vline--selected[data-row-index], .prp-vline--comment-selected[data-row-index]'
+            )
+            ?.getAttribute('data-row-index')
+        ),
+      }))()
+    `);
+    assert(
+      after?.anchor === setup.anchor,
+      `TOR.0b ArrowDown must enter the single thread: ${JSON.stringify({ setup, after })}`
+    );
+    assert(
+      Math.abs(Number(after?.scrollTop) - Number(before.scrollTop)) <= 1,
+      `TOR.0b visible single thread must not scroll: ${JSON.stringify({ before, after })}`
+    );
+  });
+
   run('TOR.1 seed multi-reply thread focus (⌥J)', () => {
     const seeded = seedMultiReplyContextActive(24);
     log(`  multi-reply seed: ${JSON.stringify(seeded)}`);
@@ -654,6 +777,8 @@ export function getSteps() {
         (() => {
           const a = document.querySelector('.prp-inline-thread--context-active');
           const unit = a?.querySelector('[data-prp-thread-unit-active="1"]');
+          const scroller = a?.closest('.prp-vlist');
+          const sr = scroller?.getBoundingClientRect();
           return {
             hasActive: !!a,
             anchor: a?.getAttribute('data-search-anchor') || null,
@@ -674,6 +799,19 @@ export function getSteps() {
               document.documentElement.getAttribute(
                 'data-prp-last-shortcut-action'
               ) || '',
+            scrollTop: scroller?.scrollTop ?? null,
+            visibleUnitIds:
+              a && sr && scroller
+                ? [...a.querySelectorAll('[data-prp-thread-unit-id]')]
+                    .filter((el) => {
+                      const r = el.getBoundingClientRect();
+                      return (
+                        r.top >= sr.top + 24 &&
+                        r.bottom <= sr.top + scroller.clientHeight - 8
+                      );
+                    })
+                    .map((el) => el.getAttribute('data-prp-thread-unit-id'))
+                : [],
             unitFocusCls: a
               ? [
                   ...a.querySelectorAll(
@@ -688,6 +826,46 @@ export function getSteps() {
         })()
       `);
 
+    const centerNextUnit = (delta) =>
+      evalInPage(`
+        (() => {
+          const a = document.querySelector('.prp-inline-thread--context-active');
+          const units = [
+            ...(a?.querySelectorAll('[data-prp-thread-unit-id]') || []),
+          ];
+          const active = a?.querySelector('[data-prp-thread-unit-active="1"]');
+          const i = units.indexOf(active);
+          const target = units[i + ${Number(delta) < 0 ? -1 : 1}];
+          const scroller = a?.closest('.prp-vlist');
+          if (!target || !scroller) return { ok: false };
+          const sr = scroller.getBoundingClientRect();
+          const tr = target.getBoundingClientRect();
+          const next = Math.max(
+            0,
+            Math.min(
+              scroller.scrollHeight - scroller.clientHeight,
+              scroller.scrollTop +
+                tr.top -
+                sr.top -
+                (scroller.clientHeight - tr.height) / 2
+            )
+          );
+          scroller.scrollTop = next;
+          scroller.dispatchEvent(new Event('scroll'));
+          return {
+            ok: true,
+            id: target.getAttribute('data-prp-thread-unit-id'),
+          };
+        })()
+      `);
+
+    const downTarget = centerNextUnit(1);
+    waitMs(300);
+    const beforeDown = probeUnit();
+    assert(
+      downTarget?.id && beforeDown?.visibleUnitIds?.includes(downTarget.id),
+      `↓ target must be visible before entry: ${JSON.stringify({ downTarget, beforeDown })}`
+    );
     press('ArrowDown');
     waitMs(450);
     const mid = probeUnit();
@@ -712,6 +890,10 @@ export function getSteps() {
     assert(
       mid?.stamp && String(mid.stamp) === String(mid.id),
       `↓ must stamp data-prp-focused-thread-unit to reply id: ${JSON.stringify(mid)}`
+    );
+    assert(
+      Math.abs(Number(mid?.scrollTop) - Number(beforeDown?.scrollTop)) <= 1,
+      `↓ must not scroll when its target is already visible: ${JSON.stringify({ beforeDown, mid })}`
     );
 
     const firstReplyId = String(mid.id);
@@ -742,6 +924,13 @@ export function getSteps() {
       );
     }
 
+    const upTarget = centerNextUnit(-1);
+    waitMs(300);
+    const beforeUp = probeUnit();
+    assert(
+      upTarget?.id && beforeUp?.visibleUnitIds?.includes(upTarget.id),
+      `↑ target must be visible before entry: ${JSON.stringify({ upTarget, beforeUp })}`
+    );
     press('ArrowUp');
     waitMs(450);
     const afterUp = probeUnit();
@@ -758,6 +947,10 @@ export function getSteps() {
         mid2,
         afterUp,
       })}`
+    );
+    assert(
+      Math.abs(Number(afterUp?.scrollTop) - Number(beforeUp?.scrollTop)) <= 1,
+      `↑ must not scroll when its target is already visible: ${JSON.stringify({ beforeUp, afterUp })}`
     );
   });
 

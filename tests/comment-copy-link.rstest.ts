@@ -538,4 +538,14 @@ describe('copyTextToClipboard path (injected clipboard)', () => {
     expect(written[0]).toBe(url);
     expect(parsePosition(new URL(written[0]).hash)?.id).toBe('88');
   });
+
+  test('does not hang when Clipboard API never settles', async () => {
+    const started = Date.now();
+    const ok = await copyTextToClipboard('reply body', {
+      clipboard: { writeText: () => new Promise<void>(() => {}) },
+      doc: null,
+    });
+    expect(ok).toBe(false);
+    expect(Date.now() - started).toBeLessThan(1500);
+  });
 });

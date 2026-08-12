@@ -1042,8 +1042,28 @@ describe('optArrow shell wiring (static)', () => {
     expect(flushIdx).toBeGreaterThan(0);
     const flushBlock = shell.slice(flushIdx, flushIdx + 14000);
     expect(flushBlock).toMatch(/scrollSelectionHeadDomOnly\(nextSel\)/);
-    // Multi-reply unit seed deferred off critical path
-    expect(flushBlock).toMatch(/seedUnit/);
+    // Multi-reply entry settles root + directional unit in one store commit.
+    expect(flushBlock).toMatch(
+      /useModalStore\.setState\(\{[\s\S]*?lineSelection: nextSel,[\s\S]*?activeDiffCommentId: rootId,[\s\S]*?focusedThreadUnitId: unitId,[\s\S]*?commentIndex: nextCommentIndex/
+    );
+    // Mounted single-comment threads also use DOM visibility, not row offsets.
+    expect(flushBlock).toMatch(
+      /scrollFocusedThreadUnitIntoView\(rootId,[\s\S]*?live\.lineSelection \|\| nextSel/
+    );
+    const reenterIdx = shell.indexOf('function tryReenterExitedMultiReply');
+    expect(reenterIdx).toBeGreaterThan(0);
+    const reenterBlock = shell.slice(reenterIdx, reenterIdx + 5000);
+    expect(reenterBlock).not.toMatch(/jumpToReviewComment\(\{/);
+    expect(reenterBlock).toMatch(
+      /useModalStore\.setState\(\{[\s\S]*?lineSelection: pinned,[\s\S]*?activeDiffCommentId: rootId,[\s\S]*?focusedThreadUnitId: unitId/
+    );
+    const inlineThread = fs.readFileSync(
+      path.join(__dirname, '..', 'src/modal/views/diff/InlineThread.tsx'),
+      'utf8'
+    );
+    expect(inlineThread).toMatch(
+      /useShallow\(\(s\) => \(\{[\s\S]*?contextActive:[\s\S]*?focusedThreadUnitId:/
+    );
     expect(shell).toMatch(/function scrollDiffThreadUnitIntoView/);
     // Store thrift restored (not 0.5 on every reveal)
     expect(shell).toMatch(/minStoreDelta:\s*Math\.max\(24,\s*h\s*\*\s*2\)/);
