@@ -6264,6 +6264,8 @@ export function PrModalApp({
     const startWidth = clampFileNavWidth(fileNav.width);
     fileNavDragRef.current = { startX, startWidth };
     const target = e.currentTarget as HTMLElement;
+    const layout = target.closest('.prp-diff-layout');
+    layout?.classList.add('prp-diff-layout--resizing');
     try {
       target.setPointerCapture?.(e.pointerId);
     } catch {
@@ -6278,6 +6280,7 @@ export function PrModalApp({
     };
     const onUp = (ev: PointerEvent) => {
       fileNavDragRef.current = null;
+      layout?.classList.remove('prp-diff-layout--resizing');
       try {
         target.releasePointerCapture?.(ev.pointerId);
       } catch {
@@ -7576,7 +7579,14 @@ export function PrModalApp({
     type?: string;
     size?: number;
   }): Promise<string> {
-    Object.assign(sideBag, { detail, buildAssetRepoPath });
+    Object.assign(sideBag, {
+      detail,
+      buildAssetRepoPath,
+      videoAttachmentUploadFailed: formatMessage(
+        'upload_video_failed',
+        appLocale
+      ),
+    });
     return sideAct.onUploadFile(fileMeta);
   }
 

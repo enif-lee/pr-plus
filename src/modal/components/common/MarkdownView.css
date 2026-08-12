@@ -173,6 +173,17 @@
   max-width: 100%;
 }
 
+.prp-md .prp-md-video {
+  display: block;
+  max-width: 100%;
+  max-height: 640px;
+  min-height: 200px;
+  margin: 0.5em 0;
+  border: 1px solid var(--prp-border-muted);
+  border-radius: 6px;
+  background: #000;
+}
+
 
 
 .prp-md h1,
