@@ -21,7 +21,7 @@ import {
 import { CommentReactions } from '@common/CommentReactions';
 import { BodyEditor } from '../composers/BodyEditor';
 import { DiffSnippetView } from '../conversation/DiffSnippetView';
-import { useModalStore } from '../../store/modal-store';
+import { useModalStore, useShallow } from '../../store/modal-store';
 import {
   dispatchContextThreadTabLeave,
   isContextThreadCommentActive,
@@ -185,12 +185,16 @@ function InlineThreadImpl(props: any) {
     replyTextProp !== undefined && replyTextProp !== null
       ? String(replyTextProp)
       : storeDraft;
-  /** Context tips only on the active keyboard / Diff-nav thread */
-  const contextActive = useModalStore((s) =>
-    isContextThreadCommentActive(rootCommentId, s)
+  /**
+   * One subscription keeps thread activation + unit focus in the same paint.
+   * Separate external-store listeners briefly paint root before a seeded reply.
+   */
+  const { contextActive, focusedThreadUnitId } = useModalStore(
+    useShallow((s) => ({
+      contextActive: isContextThreadCommentActive(rootCommentId, s),
+      focusedThreadUnitId: s.focusedThreadUnitId,
+    }))
   );
-  /** ↑/↓ unit within this thread (root or a reply id) */
-  const focusedThreadUnitId = useModalStore((s) => s.focusedThreadUnitId);
   const replyList = Array.isArray(thread?.replies) ? thread.replies : [];
   /** Resolve tip only while reply input is focused (not on idle threads) */
   const [replyFocused, setReplyFocused] = useState(false);

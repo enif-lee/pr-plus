@@ -90,6 +90,20 @@ describe('estimateInlineCommentHeight', () => {
     expect(long).toBeGreaterThan(short);
     expect(long).toBeLessThanOrEqual(1600);
   });
+
+  test('video attachments reserve player height before measurement', () => {
+    const plain = estimateInlineCommentHeight({
+      kind: 'inline-comment',
+      commentId: 3,
+      body: 'video',
+    });
+    const video = estimateInlineCommentHeight({
+      kind: 'inline-comment',
+      commentId: 4,
+      body: 'https://github.com/user-attachments/assets/12345678-abcd',
+    });
+    expect(video).toBeGreaterThanOrEqual(plain + 350);
+  });
 });
 
 describe('rowHeightFor measured-first', () => {

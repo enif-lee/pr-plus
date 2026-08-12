@@ -54,7 +54,8 @@ export interface ModalUiState {
   picker: PickerState | null;
   /**
    * Conversation keyboard focus anchor (issue-comment:… / review-group:… /
-   * review-comment:…). Visual ring only — set after scroll lands.
+   * review-comment:…). Held step-nav sets this with the pending scroll so the
+   * next virtual paint includes the ring; deep links set it after scroll lands.
    * Stored so ⌥J/K does not re-render the whole conversation.
    */
   focusedConversationAnchor: string | null;
@@ -114,9 +115,13 @@ export interface ModalUiState {
   setFocusedConversationAnchor: (a: string | null) => void;
   /**
    * Scroll-then-focus: clear visual ring, queue pending anchor for scroller.
+   * `focusImmediately` keeps held keyboard steps paint-bound to each rAF hop.
    * Pass null to clear both pending and focus.
    */
-  requestConversationNav: (a: string | null) => void;
+  requestConversationNav: (
+    a: string | null,
+    focusImmediately?: boolean
+  ) => void;
   setOptHintsActive: (v: boolean) => void;
   setActiveDiffCommentId: (id: string | number | null) => void;
   setFocusedThreadUnitId: (id: string | null) => void;
@@ -273,7 +278,7 @@ export const useModalStore = create<ModalUiState>((set, get) => ({
       /* ignore */
     }
   },
-  requestConversationNav: (a) => {
+  requestConversationNav: (a, focusImmediately = false) => {
     const next = a == null || a === '' ? null : String(a);
     if (!next) {
       set({
@@ -294,16 +299,25 @@ export const useModalStore = create<ModalUiState>((set, get) => ({
       }
       return;
     }
-    // Drop ring while scrolling; scroller promotes pending → focused.
+    // Held ⌥J/K commits every adjacent focus before paint, like Diff file nav.
+    // Deep links keep scroll-first promotion so a missing progressive row does
+    // not claim focus before it exists.
     set({
-      focusedConversationAnchor: null,
+      focusedConversationAnchor: focusImmediately ? next : null,
       pendingConversationNavAnchor: next,
     });
     try {
       if (typeof document !== 'undefined') {
-        document.documentElement.removeAttribute(
-          'data-prp-focused-conv-anchor'
-        );
+        if (focusImmediately) {
+          document.documentElement.setAttribute(
+            'data-prp-focused-conv-anchor',
+            next
+          );
+        } else {
+          document.documentElement.removeAttribute(
+            'data-prp-focused-conv-anchor'
+          );
+        }
         document.documentElement.setAttribute(
           'data-prp-pending-conv-anchor',
           next

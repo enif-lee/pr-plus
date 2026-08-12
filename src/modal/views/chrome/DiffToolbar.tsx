@@ -340,6 +340,13 @@ export function DiffToolbar(props: any) {
         : 'Alt+B';
 
   const commitOpts = useMemo(() => buildCommitFilterOptions(commits), [commits]);
+  const metadataCommitCount = Number(detail?.commitsCount);
+  const allCommitsCount =
+    detail?.commitsCount != null &&
+    Number.isFinite(metadataCommitCount) &&
+    metadataCommitCount >= 0
+      ? metadataCommitCount
+      : commitOpts.length || null;
   const f = normalizeDiffCommitFilter(commitFilter);
   const [commitPickerOpen, setCommitPickerOpen] = useState(false);
   const [commitQuery, setCommitQuery] = useState('');
@@ -391,7 +398,11 @@ export function DiffToolbar(props: any) {
   );
 
   const triggerLabel = (() => {
-    if (isAllCommitsFilter(f)) return `All commits (${commitOpts.length})`;
+    if (isAllCommitsFilter(f)) {
+      return allCommitsCount == null
+        ? 'All commits'
+        : `All commits (${allCommitsCount})`;
+    }
     if (f.mode === 'range' && f.sha && f.endSha) {
       const raw =
         commitLabel ||

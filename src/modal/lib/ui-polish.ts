@@ -229,7 +229,24 @@ export function enhanceMarkdownHtml(html: any, { owner, repo, magicLinks }: any 
   let out = String(html || '');
   out = linkifyMentionsAndIssues(out, { owner, repo });
   out = applyMagicLinksToHtml(out, magicLinks);
+  out = embedGithubVideoAttachments(out);
   return out;
+}
+
+/** GitHub stores native MP4/MOV comment uploads as a bare user-attachments URL. */
+export function isGithubVideoAttachmentUrl(value: unknown): boolean {
+  return /https:\/\/github\.com\/user-attachments\/assets\/[A-Za-z0-9-]+/.test(
+    String(value || '')
+  );
+}
+
+/** Replace only marked's exact standalone autolink form; code/link text stays intact. */
+export function embedGithubVideoAttachments(html: unknown): string {
+  return String(html || '').replace(
+    /<p>\s*<a\b[^>]*href=(['"])(https:\/\/github\.com\/user-attachments\/assets\/[A-Za-z0-9-]+)\1[^>]*>\s*\2\s*<\/a>\s*<\/p>/gi,
+    (_match, _quote, href) =>
+      `<video class="prp-md-video" src="${href}" controls muted playsinline preload="metadata"></video>`
+  );
 }
 
 /**

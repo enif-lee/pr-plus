@@ -33,11 +33,18 @@ export {
 export function buildAttachmentMarkdown(
   fileName: string,
   url: string,
-  opts: { isImage?: boolean } = {}
+  opts: { isImage?: boolean; isVideo?: boolean } = {}
 ): string {
   const name = String(fileName || 'file').replace(/[[\]]/g, '');
   const href = String(url || '').trim();
   if (!href) return '';
+  const video =
+    opts.isVideo != null
+      ? Boolean(opts.isVideo)
+      : /\.(mov|mp4)$/i.test(name);
+  // GitHub's native comment uploader stores MP4/MOV attachments as a bare
+  // user-attachments URL; its markdown renderer recognizes that exact form.
+  if (video) return `\n${href}\n`;
   const image =
     opts.isImage != null
       ? Boolean(opts.isImage)
@@ -81,10 +88,149 @@ export function guessContentType(fileName: string, fileType?: string): string {
   if (n.endsWith('.gif')) return 'image/gif';
   if (n.endsWith('.webp')) return 'image/webp';
   if (n.endsWith('.svg')) return 'image/svg+xml';
+  if (n.endsWith('.mov')) return 'video/quicktime';
+  if (n.endsWith('.mp4')) return 'video/mp4';
+  if (n.endsWith('.webm')) return 'video/webm';
   if (n.endsWith('.pdf')) return 'application/pdf';
   if (n.endsWith('.md')) return 'text/markdown';
   if (n.endsWith('.txt')) return 'text/plain';
   return 'application/octet-stream';
+}
+
+export function isGithubVideoAttachment(fileName: unknown, contentType?: unknown): boolean {
+  const type = String(contentType || '').toLowerCase();
+  if (type === 'video/mp4' || type === 'video/quicktime') return true;
+  return /\.(mov|mp4)$/i.test(String(fileName || ''));
+}
+
+/** GitHub comment attachment protocol: policy → object storage → completion. */
+export async function uploadGithubCommentAttachment(
+  file: File,
+  detail: { owner?: unknown; repo?: unknown; number?: unknown }
+): Promise<string> {
+  const owner = String(detail?.owner || '').trim();
+  const repo = String(detail?.repo || '').trim();
+  const number = Number(detail?.number);
+  if (!owner || !repo || !Number.isFinite(number) || number <= 0) {
+    throw new Error('GitHub attachment upload requires a pull request');
+  }
+  if (typeof document === 'undefined' || typeof fetch !== 'function') {
+    throw new Error('GitHub attachment upload is unavailable');
+  }
+
+  const pagePath = `/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pull/${Math.trunc(number)}`;
+  const pageResponse = await fetch(pagePath, {
+    credentials: 'same-origin',
+    headers: { Accept: 'text/html' },
+  });
+  if (!pageResponse.ok) {
+    throw new Error(`GitHub attachment setup failed (${pageResponse.status})`);
+  }
+  const page = new DOMParser().parseFromString(
+    await pageResponse.text(),
+    'text/html'
+  );
+  const policyNode = page.querySelector<HTMLElement>(
+    'file-attachment[data-upload-policy-url][data-upload-repository-id]'
+  );
+  const csrf = (
+    policyNode?.querySelector<HTMLInputElement>(
+      '.js-data-upload-policy-url-csrf'
+    )?.value || ''
+  ).trim();
+  const policyUrl = policyNode?.getAttribute('data-upload-policy-url') || '';
+  const repositoryId =
+    policyNode?.getAttribute('data-upload-repository-id') || '';
+  if (!policyNode || !csrf || !policyUrl || !repositoryId) {
+    throw new Error('GitHub attachment policy is unavailable');
+  }
+
+  const policyForm = new FormData();
+  policyForm.append('name', file.name);
+  policyForm.append('size', String(file.size));
+  policyForm.append('content_type', guessContentType(file.name, file.type));
+  policyForm.append('authenticity_token', csrf);
+  policyForm.append('repository_id', repositoryId);
+  const policyFields = [
+    ['data-subject-type', 'subject_type'],
+    ['data-subject-param', 'subject'],
+    ['data-upload-container-type', 'upload_container_type'],
+    ['data-upload-container-id', 'upload_container_id'],
+  ] as const;
+  for (const [attr, field] of policyFields) {
+    const value = policyNode.getAttribute(attr);
+    if (value) policyForm.append(field, value);
+  }
+
+  const policyResponse = await fetch(policyUrl, {
+    method: 'POST',
+    body: policyForm,
+    credentials: 'same-origin',
+    headers: { Accept: 'application/json' },
+  });
+  if (!policyResponse.ok) {
+    throw new Error(`GitHub rejected this attachment (${policyResponse.status})`);
+  }
+  const policy: any = await policyResponse.json();
+  if (!policy?.upload_url || !policy?.form) {
+    throw new Error('GitHub returned an invalid attachment policy');
+  }
+
+  const storageForm = new FormData();
+  if (policy.same_origin && policy.upload_authenticity_token) {
+    storageForm.append('authenticity_token', policy.upload_authenticity_token);
+  }
+  for (const [key, value] of Object.entries(policy.form)) {
+    if (value != null && value !== '') storageForm.append(key, String(value));
+  }
+  storageForm.append('file', file);
+  const storageResponse = await fetch(policy.upload_url, {
+    method: 'POST',
+    body: storageForm,
+    credentials: policy.same_origin ? 'include' : 'same-origin',
+    headers: new Headers(policy.header || {}),
+  });
+  if (!storageResponse.ok) {
+    throw new Error(`GitHub attachment upload failed (${storageResponse.status})`);
+  }
+  const uploaded =
+    storageResponse.status === 201
+      ? await storageResponse.json().catch(() => ({}))
+      : {};
+
+  let completed: any = null;
+  if (policy.asset_upload_url && policy.asset_upload_authenticity_token) {
+    const completionForm = new FormData();
+    completionForm.append(
+      'authenticity_token',
+      policy.asset_upload_authenticity_token
+    );
+    const completionHeaders = new Headers({ Accept: 'application/json' });
+    for (const name of ['X-Digest-Sha256', 'X-Digest-Sha256-Hmac']) {
+      const value = storageResponse.headers.get(name);
+      if (value) completionHeaders.set(name, value);
+    }
+    const completionResponse = await fetch(policy.asset_upload_url, {
+      method: 'PUT',
+      body: completionForm,
+      credentials: 'same-origin',
+      headers: completionHeaders,
+    });
+    if (!completionResponse.ok) {
+      throw new Error(
+        `GitHub attachment completion failed (${completionResponse.status})`
+      );
+    }
+    completed = await completionResponse.json().catch(() => null);
+  }
+
+  const href = String(
+    completed?.href || uploaded?.href || policy.asset?.href || ''
+  ).trim();
+  if (!/^https:\/\/github\.com\/user-attachments\/assets\/[A-Za-z0-9-]+$/.test(href)) {
+    throw new Error('GitHub returned an invalid attachment URL');
+  }
+  return href;
 }
 
 function samePrIdentity(a: any, b: any): boolean {

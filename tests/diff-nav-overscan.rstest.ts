@@ -5,7 +5,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, test } from '@rstest/core';
-import { applyProgrammaticDiffScroll } from '../src/modal/lib/virtual-range';
+import {
+  applyProgrammaticDiffScroll,
+  virtualRangeCoversViewport,
+} from '../src/modal/lib/virtual-range';
 
 const root = path.resolve(__dirname, '..');
 
@@ -17,15 +20,28 @@ describe('Diff overscan / scroll path (shipped)', () => {
   test('VirtualDiff uses elevated DIFF_OVERSCAN and larger jump overscan', () => {
     const src = read('src/modal/views/diff/VirtualDiff.tsx');
     expect(src).toMatch(/const\s+DIFF_OVERSCAN\s*=\s*20/);
+    expect(src).toMatch(/const\s+DIFF_SCROLL_OVERSCAN\s*=\s*32/);
     expect(src).toMatch(/overscan:\s*DIFF_OVERSCAN/);
+    expect(src).toMatch(/Math\.min\(measuredH[^,]+, viewportCap\)/);
+    expect(src).toMatch(/viewportHeight:\s*vp/);
     // Programmatic jump pre-renders neighbors
-    expect(src).toMatch(/Math\.max\(\s*DIFF_OVERSCAN\s*,\s*32\s*\)/);
+    expect(src).toMatch(/applyScrollTop\(propTop, DIFF_SCROLL_OVERSCAN\)/);
+    expect(src).not.toMatch(/applyScrollTop\(top\);/);
   });
 
   test('applyProgrammaticDiffScroll dispatches scroll so range updates same tick', () => {
     const src = read('src/modal/lib/virtual-range.ts');
+    const view = read('src/modal/views/diff/VirtualDiff.tsx');
     expect(src).toMatch(/dispatchEvent/);
     expect(src).toMatch(/['"]scroll['"]/);
+    expect(view).toMatch(/nativeEvent\.isTrusted === false/);
+    expect(view).toMatch(
+      /flushPendingScroll\(DIFF_SCROLL_OVERSCAN\)/
+    );
+    expect(view).toMatch(
+      /requestAnimationFrame\(\(\) =>\s*flushSync\(\(\) => flushPendingScroll\(DIFF_SCROLL_OVERSCAN\)\)\s*\)/
+    );
+    expect(view).not.toMatch(/requestAnimationFrame\(flushPendingScroll\)/);
 
     const events: string[] = [];
     const el = {
@@ -42,6 +58,27 @@ describe('Diff overscan / scroll path (shipped)', () => {
     expect(r.appliedDom).toBe(true);
     expect(el.scrollTop).toBe(120);
     expect(events).toContain('scroll');
+  });
+
+  test('trusted scroll bypasses rAF when the mounted range no longer covers viewport', () => {
+    const offsets = Array.from({ length: 11 }, (_, i) => i * 20);
+    const range = { start: 2, end: 7, offsetY: 40, totalHeight: 200 };
+    expect(
+      virtualRangeCoversViewport(range, 60, 80, { offsets, rowHeight: 20 })
+    ).toBe(true);
+    expect(
+      virtualRangeCoversViewport(range, 0, 80, { offsets, rowHeight: 20 })
+    ).toBe(false);
+    expect(
+      virtualRangeCoversViewport(range, 100, 80, { offsets, rowHeight: 20 })
+    ).toBe(false);
+
+    const view = read('src/modal/views/diff/VirtualDiff.tsx');
+    expect(view).toMatch(/visible intermediate Diff frames are a product contract/);
+    expect(view).toMatch(/!virtualRangeCoversViewport/);
+    expect(view).toMatch(
+      /flushSync\(\(\) => flushPendingScroll\(DIFF_SCROLL_OVERSCAN\)\);\s*return;/
+    );
   });
 
   test('navComment is rAF-coalesced under key-repeat (shell)', () => {

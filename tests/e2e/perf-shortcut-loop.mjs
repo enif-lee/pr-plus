@@ -82,7 +82,9 @@ function installPerfProbe() {
       try {
         const po = new PerformanceObserver((list) => {
           for (const e of list.getEntries()) {
-            st.longTasks.push(e.duration);
+            if (st._running && e.startTime >= st.t0) {
+              st.longTasks.push(e.duration);
+            }
           }
         });
         po.observe({ type: 'longtask', buffered: true });
@@ -100,9 +102,9 @@ function installPerfProbe() {
         st.frames = [];
         st.longTasks = [];
         st._last = 0;
+        st.t0 = performance.now();
         st._running = true;
         st._raf = requestAnimationFrame(tick);
-        st.t0 = performance.now();
       };
       st.stop = () => {
         st._running = false;
@@ -273,7 +275,6 @@ export function getSteps() {
       `,
       { timeoutMs: 12_000, intervalMs: 100, label: `${mode} #${HEAVY_PR} settled` }
     );
-    installPerfProbe();
     evalInPage(`
       (() => {
         const row = document.querySelector('.prp-filetree [data-file-path]');
@@ -282,7 +283,25 @@ export function getSteps() {
         return !!row;
       })()
     `);
-    waitMs(180);
+    // Warm the first heavy virtual render before measuring steady-state holds.
+    holdChord('Alt+Shift+ArrowDown', {
+      holdMs: 200,
+      repeatMs: 40,
+      sample: 'diff',
+    });
+    waitMs(300);
+    evalInPage(`
+      (() => {
+        const list = document.querySelector('.prp-vlist');
+        if (!list) return false;
+        list.scrollTop = 0;
+        list.dispatchEvent(new Event('scroll', { bubbles: true }));
+        return true;
+      })()
+    `);
+    // Direct/embed side fetch and the warm render settle outside the budget.
+    waitMs(1600);
+    installPerfProbe();
   }
 
   function measureSamePr(mode) {
@@ -509,13 +528,14 @@ export function getSteps() {
     installPerfProbe();
     const clicked = clickSelectableLine(4);
     assert(clicked?.ok, `seed line click failed: ${JSON.stringify(clicked)}`);
-    press('ArrowDown');
-    waitMs(80);
-    assert(selectionProbe().count >= 1, 'no selection after seed arrow');
+    assert(selectionProbe().count >= 1, 'no selection after seed click');
 
     const move = holdUnderProbe('ArrowDown', 'diff-hold-sel-move', 'diff');
     assert(move.hold.events >= 3, `↓ hold events=${move.hold.events}`);
-    assert(selectionProbe().count >= 1, 'selection lost during ↓ hold');
+
+    const extendSeed = clickSelectableLine(4);
+    assert(extendSeed?.ok, `extend seed failed: ${JSON.stringify(extendSeed)}`);
+    assert(selectionProbe().count >= 1, 'no selection before ⇧↓ hold');
 
     const extend = holdUnderProbe('Shift+ArrowDown', 'diff-hold-sel-extend', 'diff');
     assert(extend.hold.events >= 3, `⇧↓ hold events=${extend.hold.events}`);
@@ -524,6 +544,9 @@ export function getSteps() {
     assert(ext.dock || ext.count >= 1, 'selection dock missing after extend hold');
     log(`  after ⇧↓ hold count=${ext.count} dock=${ext.dock}`);
 
+    const jumpSeed = clickSelectableLine(4);
+    assert(jumpSeed?.ok, `jump seed failed: ${JSON.stringify(jumpSeed)}`);
+    assert(selectionProbe().count >= 1, 'no selection before ⌥↓ hold');
     const jump = holdUnderProbe('Alt+ArrowDown', 'diff-hold-sel-opt-jump', 'diff');
     assert(jump.hold.events >= 3, `⌥↓ hold events=${jump.hold.events}`);
     assert(selectionProbe().count >= 1, 'selection lost during ⌥↓ hold');

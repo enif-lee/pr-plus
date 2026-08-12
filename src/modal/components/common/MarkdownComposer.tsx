@@ -3,8 +3,9 @@ import { createPortal } from 'react-dom';
 import { MarkdownView } from './MarkdownView';
 import {
   buildAttachmentMarkdown,
-  insertMarkdownAtCursor,
   guessContentType,
+  insertMarkdownAtCursor,
+  isGithubVideoAttachment,
 } from '@lib/composer-attach';
 import './MarkdownComposer.css';
 import {
@@ -527,6 +528,7 @@ export function MarkdownComposer({
         if (!url) continue;
         const snip = buildAttachmentMarkdown(file.name, url, {
           isImage: /^image\//i.test(file.type || ''),
+          isVideo: isGithubVideoAttachment(file.name, file.type),
         });
         const next = insertMarkdownAtCursor(text, cursor, snip);
         text = next.text;

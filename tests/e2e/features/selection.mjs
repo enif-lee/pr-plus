@@ -613,6 +613,16 @@ export function getSteps() {
     waitMs(120);
     press('Escape');
     waitMs(200);
+    evalInPage(`
+      (() => {
+        const list = document.querySelector('.prp-vlist');
+        if (!list) return false;
+        list.scrollTop = 0;
+        list.dispatchEvent(new Event('scroll', { bubbles: true }));
+        return true;
+      })()
+    `);
+    waitMs(300);
     // Direct header mousedown first (file caret, not multi body range).
     const hdr = evalInPage(`
       (() => {
@@ -773,15 +783,30 @@ export function getSteps() {
   run(`P2 multi-hunk expand chrome PR #${MULTI_HUNK_PR}`, () => {
     setLayout('diff');
     blurEditable();
-    const expand = evalInPage(`
-      (() => {
-        const btns = [...document.querySelectorAll('.prp-hunk-expand__btn')];
-        const all = document.querySelector('.prp-hunk-expand__btn--all');
-        const before = document.querySelector('.prp-vlist')?.scrollHeight || 0;
-        if (all) all.click();
-        return { count: btns.length, before, hasAll: !!all };
-      })()
-    `);
+    let expand = null;
+    for (const fraction of [0, 0.25, 0.5, 0.75, 1]) {
+      evalInPage(`
+        (() => {
+          const list = document.querySelector('.prp-vlist');
+          if (!list) return false;
+          list.scrollTop = Math.max(0, (list.scrollHeight - list.clientHeight) * ${fraction});
+          list.dispatchEvent(new Event('scroll', { bubbles: true }));
+          return true;
+        })()
+      `);
+      waitMs(250);
+      expand = evalInPage(`
+        (() => {
+          const list = document.querySelector('.prp-vlist');
+          const btns = [...document.querySelectorAll('.prp-hunk-expand__btn')];
+          const all = document.querySelector('.prp-hunk-expand__btn--all');
+          const before = list?.scrollHeight || 0;
+          if (all) all.click();
+          return { count: btns.length, before, hasAll: !!all };
+        })()
+      `);
+      if (expand?.count) break;
+    }
     assert(expand.count >= 1, 'hunk expand controls missing');
     waitMs(350);
     if (expand.hasAll) {

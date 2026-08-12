@@ -7,6 +7,7 @@ import React, {
   useState,
   memo,
 } from 'react';
+import { flushSync } from 'react-dom';
 import {
   ROW_HEIGHT,
   COMMENT_ROW_HEIGHT_COLLAPSED,
@@ -27,6 +28,7 @@ import {
 import {
   adjustScrollTopForOffsetChange,
   calculateVisibleRange,
+  virtualRangeCoversViewport,
 } from '@lib/virtual-range';
 import {
   isSelectableDiffRow,
@@ -409,7 +411,14 @@ function VirtualDiffImpl(props: any) {
     });
   }, [offsets, avgH, measuredHeights, expandedLineKeys]);
 
-  const vp = Math.max(120, measuredH || Number(viewportHeight) || 520);
+  const viewportCap =
+    typeof window !== 'undefined' && window.innerHeight > 0
+      ? window.innerHeight
+      : Number.POSITIVE_INFINITY;
+  const vp = Math.max(
+    120,
+    Math.min(measuredH || Number(viewportHeight) || 520, viewportCap)
+  );
   const totalRows = virtualRows?.length || 0;
   const initialTop = Math.max(0, Number(scrollTopProp) || 0);
 
@@ -419,11 +428,14 @@ function VirtualDiffImpl(props: any) {
    */
   /** Extra rows above/below viewport — larger overscan cuts blank bands on jump. */
   const DIFF_OVERSCAN = 20;
+  // Variable rows start with estimated heights. Keep enough real rows mounted
+  // while those estimates settle so wheel/touchpad input cannot expose spacer.
+  const DIFF_SCROLL_OVERSCAN = 32;
   const [range, setRange] = useState(() =>
     calculateVisibleRange({
       totalRows: Array.isArray(virtualRows) ? virtualRows.length : 0,
       rowHeight: ROW_HEIGHT,
-      viewportHeight: Math.max(120, Number(viewportHeight) || 520),
+      viewportHeight: vp,
       scrollTop: initialTop,
       overscan: DIFF_OVERSCAN,
     })
@@ -599,10 +611,10 @@ function VirtualDiffImpl(props: any) {
     else setTimeout(run, 0);
   }, []);
 
-  const flushPendingScroll = useCallback(() => {
+  const flushPendingScroll = useCallback((overscan = DIFF_OVERSCAN) => {
     scrollRafRef.current = 0;
     const top = pendingScrollRef.current;
-    const changed = applyScrollTop(top);
+    const changed = applyScrollTop(top, overscan);
     if (!changed) return;
     warmHighlightAhead(rangeRef.current.end);
     const onScrollCb = metricsRef.current.onScroll;
@@ -614,12 +626,49 @@ function VirtualDiffImpl(props: any) {
 
   const handleScroll = useCallback(
     (e: React.UIEvent<HTMLDivElement>) => {
-      pendingScrollRef.current = e.currentTarget.scrollTop;
+      const top = e.currentTarget.scrollTop;
+      pendingScrollRef.current = top;
+      // applyProgrammaticDiffScroll dispatches an untrusted scroll event after
+      // its DOM write. Commit the new virtual window before this frame paints.
+      if (e.nativeEvent.isTrusted === false) {
+        if (scrollRafRef.current && typeof cancelAnimationFrame === 'function') {
+          cancelAnimationFrame(scrollRafRef.current);
+        }
+        flushPendingScroll(DIFF_SCROLL_OVERSCAN);
+        return;
+      }
+
+      /**
+       * Decision: visible intermediate Diff frames are a product contract.
+       * Do not optimize key, wheel, or touchpad input by omitting those paints.
+       * Trusted scroll stays rAF-coalesced while overscan covers the viewport;
+       * if fast input outruns that window, commit a new range before paint so
+       * the scroller never exposes its empty background.
+       */
+      const m = metricsRef.current;
+      if (
+        !virtualRangeCoversViewport(rangeRef.current, top, m.vp, {
+          offsets: m.offsets,
+          rowHeight: m.avgH,
+        })
+      ) {
+        if (scrollRafRef.current && typeof cancelAnimationFrame === 'function') {
+          cancelAnimationFrame(scrollRafRef.current);
+        }
+        // React classifies wheel/touchpad scroll as continuous input and may
+        // defer setRange past paint. An overscan escape must bypass rAF now.
+        flushSync(() => flushPendingScroll(DIFF_SCROLL_OVERSCAN));
+        return;
+      }
       if (scrollRafRef.current) return;
       if (typeof requestAnimationFrame === 'function') {
-        scrollRafRef.current = requestAnimationFrame(flushPendingScroll);
+        // Coalesce high-rate input to one update per frame, then land that
+        // larger measured-height-safe window before the browser paints it.
+        scrollRafRef.current = requestAnimationFrame(() =>
+          flushSync(() => flushPendingScroll(DIFF_SCROLL_OVERSCAN))
+        );
       } else {
-        flushPendingScroll();
+        flushSync(() => flushPendingScroll(DIFF_SCROLL_OVERSCAN));
       }
     },
     [flushPendingScroll]
@@ -649,7 +698,7 @@ function VirtualDiffImpl(props: any) {
       if (el) el.scrollTop = propTop;
       pendingScrollRef.current = propTop;
       prevOffsetsRef.current = offsets;
-      applyScrollTop(propTop, Math.max(DIFF_OVERSCAN, 32));
+      applyScrollTop(propTop, DIFF_SCROLL_OVERSCAN);
       return;
     }
 
@@ -663,7 +712,7 @@ function VirtualDiffImpl(props: any) {
       el.scrollTop = held;
       pendingScrollRef.current = held;
       prevOffsetsRef.current = offsets;
-      applyScrollTop(held, Math.max(DIFF_OVERSCAN, 32));
+      applyScrollTop(held, DIFF_SCROLL_OVERSCAN);
       return;
     }
 
@@ -697,7 +746,9 @@ function VirtualDiffImpl(props: any) {
       pendingScrollRef.current = clamped;
     }
     prevOffsetsRef.current = offsets;
-    applyScrollTop(top);
+    // Keep the scroll-safe window after variable-row measurements settle;
+    // shrinking back to base overscan here reintroduced a one-frame gap.
+    applyScrollTop(top, DIFF_SCROLL_OVERSCAN);
   }, [virtualRows, offsets, vp, scrollTopProp, listRef, applyScrollTop]);
 
   // Clear held jump after user scrolls (wheel)
@@ -730,7 +781,12 @@ function VirtualDiffImpl(props: any) {
     if (!el) return undefined;
     let lastReported = 0;
     const apply = () => {
-      const h = Math.floor(el.clientHeight || 0);
+      const h = Math.min(
+        Math.floor(el.clientHeight || 0),
+        typeof window !== 'undefined' && window.innerHeight > 0
+          ? window.innerHeight
+          : Number.POSITIVE_INFINITY
+      );
       if (h <= 0) return;
       setMeasuredH((prev) => (prev === h ? prev : h));
       if (typeof onViewportHeight === 'function' && Math.abs(h - lastReported) >= 4) {

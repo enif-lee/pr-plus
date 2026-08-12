@@ -1,6 +1,9 @@
 import { languageFromPath } from '../../lib/diff-rows';
 import { ensureHljsLanguage } from '../../lib/hljs-lazy';
-import { enhanceMarkdownHtml } from '../../lib/ui-polish';
+import {
+  enhanceMarkdownHtml,
+  isGithubVideoAttachmentUrl,
+} from '../../lib/ui-polish';
 
 /**
  * Fixed height (px) for plain Diff code / header rows in the virtual list.
@@ -118,6 +121,13 @@ export function estimateInlineCommentHeight(
   // ~40 chars/line at 14px; Korean packs denser — use /2.8 not /3.5
   h += Math.min(520, Math.floor(bodyLen / 2.8) * 1.15);
   h += Math.min(12, replies) * 72;
+  if (
+    isGithubVideoAttachmentUrl(row?.body) ||
+    isGithubVideoAttachmentUrl(row?.root?.body) ||
+    isGithubVideoAttachmentUrl(row?.comment?.body)
+  ) {
+    h += 360;
+  }
   if (row?.pending || row?.root?.pending) h += 96; // reply composer room
   if (row?.path || row?.root?.path) h += 28; // file bar
   // Reactions row + padding under body

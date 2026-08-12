@@ -759,7 +759,7 @@
 }
 .prp-header__branch-meta .prp-branch-tag {
   min-width: 0;
-  max-width: min(28cqi, 12rem);
+  max-width: min(42cqi, 18rem);
   overflow: hidden;
 }
 .prp-header__branch-meta .prp-branch-tag__text {

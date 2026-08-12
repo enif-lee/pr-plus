@@ -20,6 +20,10 @@ import {
   mergeAvatarUrls,
 } from '../app/pr-modal-mappers';
 import { confirmGateProceed } from '../lib/confirm-gate';
+import {
+  isGithubVideoAttachment,
+  uploadGithubCommentAttachment,
+} from '../lib/composer-attach';
 
 export function installSideActions(d: Record<string, any>) {
   async function onDeleteHeadBranch() {
@@ -248,12 +252,21 @@ export function installSideActions(d: Record<string, any>) {
   }): Promise<string> {
     const detail = d.detail;
     if (!detail) throw new Error('No PR open');
+    const file = fileMeta.file;
+    const name = fileMeta.name || file.name || 'file.bin';
+    if (isGithubVideoAttachment(name, fileMeta.type || file.type)) {
+      try {
+        return await uploadGithubCommentAttachment(file, detail);
+      } catch {
+        throw new Error(
+          d.videoAttachmentUploadFailed || 'Video attachment upload failed'
+        );
+      }
+    }
     const api = globalThis.PRTreeFetch;
     if (!api?.uploadRepoFile) {
       throw new Error('File upload requires PAT with repo contents write access');
     }
-    const file = fileMeta.file;
-    const name = fileMeta.name || file.name || 'file.bin';
     const path =
       typeof d.buildAssetRepoPath === 'function'
         ? d.buildAssetRepoPath(name)

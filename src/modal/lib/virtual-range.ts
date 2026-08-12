@@ -69,6 +69,24 @@ export function calculateVisibleRange(opts) {
   return { start, end, offsetY, totalHeight };
 }
 
+/** Whether the rows already mounted by `range` fully cover the next viewport. */
+export function virtualRangeCoversViewport(
+  range,
+  scrollTop,
+  viewportHeight,
+  opts = null
+) {
+  if (!range || range.end < range.start) return false;
+  const top = Math.max(0, Number(scrollTop) || 0);
+  const bottom = top + Math.max(0, Number(viewportHeight) || 0);
+  const offsets = Array.isArray(opts?.offsets) ? opts.offsets : null;
+  const rowHeight = Math.max(1, Number(opts?.rowHeight) || 1);
+  const renderedTop = offsets?.[range.start] ?? range.start * rowHeight;
+  const renderedBottom =
+    offsets?.[range.end + 1] ?? (range.end + 1) * rowHeight;
+  return top >= renderedTop && bottom <= renderedBottom;
+}
+
 /**
  * Whether an absolute row index is within the visible window (inclusive).
  */

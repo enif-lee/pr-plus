@@ -248,7 +248,11 @@ export function scrollChildToRevealInScroller(
     // Fully (or almost fully) in padded band — no jump. Use nearly full
     // height for short code rows (~22px) so a sliver at the edge still scrolls.
     const need = Math.min(minVisible, Math.max(8, childH * 0.85));
-    if (overlap >= need && childTopInView >= viewTop - 1 && childBottomInView <= viewBottom + 1) {
+    if (
+      overlap >= need &&
+      childTopInView >= viewTop - 1 &&
+      childBottomInView <= viewBottom + 1
+    ) {
       return 0;
     }
     // Partial edge clip: still adjust so the whole short row fits when possible

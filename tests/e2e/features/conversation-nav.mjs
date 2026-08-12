@@ -150,6 +150,158 @@ export function getSteps() {
     log(`  scrolls=${scrolls.join('→')} pin=${pin.pin}`);
   });
 
+  run('P1.2a ↑/↓ steps comments in a focused review thread', () => {
+    if (!evalInPage(`!!document.querySelector('.prp-overlay')`)) {
+      openPr(DEMO_PR);
+      waitDetailReady();
+    }
+    setLayout('conversation');
+    blurEditable();
+    if (convFocusStop().hasFocus) {
+      press('Alt+Shift+c');
+      waitMs(TICK);
+    }
+    const probe = () =>
+      evalInPage(`
+        (() => {
+          const thread = document.querySelector(
+            '.prp-inline-thread--context-active'
+          );
+          if (!thread) return null;
+          const active = thread.querySelector(
+            '[data-prp-thread-unit-active="1"]'
+          );
+          return {
+            anchor: thread.getAttribute('data-search-anchor') || '',
+            role: active?.getAttribute('data-prp-thread-unit') || null,
+            id: active?.getAttribute('data-prp-thread-unit-id') || null,
+            replies: [
+              ...thread.querySelectorAll(
+                '[data-prp-thread-unit="reply"][data-prp-thread-unit-id]'
+              ),
+            ].map((el) => el.getAttribute('data-prp-thread-unit-id')),
+            loading: thread.getAttribute('data-comments-loading') === '1',
+            action:
+              document.documentElement.getAttribute(
+                'data-prp-last-shortcut-action'
+              ) || '',
+          };
+        })()
+      `);
+
+    let before = probe();
+    for (let i = 0; i < 40 && !before?.replies?.length; i++) {
+      const stop = convFocusStop();
+      if (stop.anchor?.startsWith('review-comment:')) {
+        // Resolved/grouped threads start collapsed; expand through the product
+        // shortcut so lazy reply comments become real focus units.
+        press('ArrowRight');
+        for (let n = 0; n < 20; n++) {
+          waitMs(200);
+          before = probe();
+          if (before?.replies?.length || (before && !before.loading)) break;
+        }
+        if (before?.replies?.length) break;
+      }
+      // Recent E2E issue comments are numerous; backwards from an empty focus
+      // reaches the older review-thread stops without traversing all of them.
+      press('Alt+k');
+      waitMs(180);
+      before = probe();
+    }
+    assert(
+      before?.role === 'root' && before.replies.length > 0,
+      `need a focused multi-reply root: ${JSON.stringify(before)}`
+    );
+
+    evalInPage(`
+      (() => {
+        const trace = { done: false, frames: [] };
+        window.__prpThreadReplyTrace = trace;
+        const current =
+          document.documentElement.getAttribute(
+            'data-prp-focused-thread-unit'
+          ) || ${JSON.stringify(before.id)};
+        if (current) trace.frames.push({ id: current, at: performance.now() });
+        const sample = () => {
+          const id =
+            document.documentElement.getAttribute(
+              'data-prp-focused-thread-unit'
+            ) || '';
+          if (id && trace.frames.at(-1)?.id !== id) {
+            trace.frames.push({ id, at: performance.now() });
+          }
+        };
+        trace.observer = new MutationObserver(sample);
+        trace.observer.observe(document.documentElement, {
+          attributes: true,
+          attributeFilter: ['data-prp-focused-thread-unit'],
+        });
+      })()
+    `);
+    const downHold = holdChord('ArrowDown', {
+      holdMs: Math.max(450, Math.min(1500, (before.replies.length + 3) * 24)),
+      repeatMs: 8,
+      sample: 'conv',
+    });
+    waitMs(TICK);
+    const reply = probe();
+    const trace = evalInPage(`
+      (() => {
+        const trace = window.__prpThreadReplyTrace || { frames: [] };
+        trace.done = true;
+        trace.observer?.disconnect?.();
+        return trace.frames;
+      })()
+    `);
+    const order = [before.id, ...before.replies];
+    const tracedIndexes = trace
+      .map((frame) => order.indexOf(frame.id))
+      .filter((idx) => idx >= 0);
+    assert(
+      downHold.events >= 20 &&
+        reply?.action === 'stepThreadReplyNext' &&
+        reply.role === 'reply' &&
+        reply.id === before.replies.at(-1) &&
+        tracedIndexes.length === order.length &&
+        tracedIndexes.every(
+          (idx, i) => i === 0 || idx - tracedIndexes[i - 1] === 1
+        ),
+      `8ms ↓ hold must paint adjacent units and clamp at last: ${JSON.stringify({ before, reply, downHold, trace })}`
+    );
+
+    for (let i = 0; i < before.replies.length; i++) {
+      press('ArrowUp');
+      waitMs(TICK);
+    }
+    const root = probe();
+    assert(
+      root?.action === 'stepThreadReplyPrev' &&
+        root.role === 'root' &&
+        root.id === before.id,
+      `↑ must move reply → root: ${JSON.stringify({ before, reply, root })}`
+    );
+    const upHold = holdChord('ArrowUp', {
+      holdMs: 450,
+      repeatMs: 8,
+      sample: 'conv',
+    });
+    waitMs(TICK);
+    const first = probe();
+    assert(
+      upHold.events >= 20 &&
+        first?.role === 'root' &&
+        first.id === before.id,
+      `8ms ↑ hold must clamp at first: ${JSON.stringify({ before, first, upHold })}`
+    );
+    // Restore the expanded fixture thread so later composer scenarios do not
+    // inherit its reply textarea.
+    press('ArrowLeft');
+    waitMs(TICK);
+    press('Alt+Shift+c');
+    waitMs(TICK);
+  });
+
   /**
    * ⌥J/K stop order must match on-screen panel order under reverseComments:
    * reverse on  → description → composer → merge → comment/review…

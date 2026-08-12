@@ -116,8 +116,8 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
     if (open) return undefined;
     clearSelectionActionsTimer();
     if (selectionMoveRafRef.current) {
-      cancelAnimationFrame(selectionMoveRafRef.current);
-      selectionMoveRafRef.current = 0;
+      selectionMoveRafRef.current.cancel?.();
+      selectionMoveRafRef.current = null;
     }
     pendingSelectionMoveRef.current = null;
     try {
@@ -301,7 +301,9 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
 
   // Watch GH ⌘K palette open state so Escape race (GH closes first) still skips pr+ close
   useEffect(() => {
-    if (!open) return undefined;
+    // The GitHub page is hidden/inert in embed mode. Do not observe pr+ React
+    // commits through body's full subtree for a palette that cannot be opened.
+    if (!open || isEmbed) return undefined;
     const doc = typeof document !== 'undefined' ? document : null;
     if (!doc) return undefined;
 
@@ -352,7 +354,7 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
       mo.disconnect();
       window.removeEventListener('keydown', onMaybeOpen, true);
     };
-  }, [open]);
+  }, [open, isEmbed]);
 
   /**
    * Tab past last / before first stop in a focused thread composer → step

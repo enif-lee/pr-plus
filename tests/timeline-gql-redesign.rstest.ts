@@ -311,11 +311,19 @@ describe('since/watermark + dirty threads', () => {
     expect(isTimelineLoadIncomplete({ hasMore: false, complete: true })).toBe(
       false
     );
-    // pageInfo lag: hasPreviousPage false but totalCount > loadedCount
+    // Explicit completion wins: totalCount includes mapped-out timeline nodes.
     expect(
       isTimelineLoadIncomplete({
         hasMore: false,
         complete: true,
+        totalCount: 256,
+        loadedCount: 99,
+      })
+    ).toBe(false);
+    // Count fallback remains for legacy metadata with no completion bit.
+    expect(
+      isTimelineLoadIncomplete({
+        hasMore: false,
         totalCount: 256,
         loadedCount: 99,
       })
@@ -334,20 +342,20 @@ describe('since/watermark + dirty threads', () => {
     );
     expect(st.preferMiddleGap).toBe(true);
     expect(st.anyIncomplete).toBe(true);
-    // totalCount lag path must still open the end gap
+    // Exhausted connection must not retain a count-only Load all gap.
     const lag = conversationLoadMoreState(
       { hasMore: false, hiddenCount: 0 },
       { hasMore: false, complete: true, totalCount: 256, loadedCount: 99 }
     );
-    expect(lag.anyIncomplete).toBe(true);
-    expect(lag.timelineIncomplete).toBe(true);
+    expect(lag.anyIncomplete).toBe(false);
+    expect(lag.timelineIncomplete).toBe(false);
     expect(
       partitionConversationLoadMore(
         [{ kind: 'issue-comment', id: 1, at: '2026-06-01T00:00:00Z' }],
         { hasMore: false },
         { hasMore: false, complete: true, totalCount: 256, loadedCount: 99 }
       ).showGap
-    ).toBe(true);
+    ).toBe(false);
     expect(
       partitionConversationLoadMore([], { hasMore: false }, { hasMore: false })
         .showGap

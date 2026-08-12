@@ -39,12 +39,15 @@ function readDomOptHeld(): boolean {
   }
 }
 
-/** Selection ↑↓ / region hop settle window — hide all OptBtnHints. */
+/** Selection or Diff navigation settle window — hide all OptBtnHints. */
 function readSelectionNavBusy(): boolean {
   try {
     if (typeof document === 'undefined') return false;
+    // Decision: Diff key-hold must suppress DOM-latched Option hints too.
+    // Otherwise each active file header remounts and measures body portals.
     return Boolean(
-      document.documentElement?.hasAttribute?.(SELECTION_NAV_BUSY_ATTR)
+      document.documentElement?.hasAttribute?.(SELECTION_NAV_BUSY_ATTR) ||
+        document.documentElement?.hasAttribute?.('data-prp-diff-nav-active')
     );
   } catch {
     return false;
@@ -65,8 +68,8 @@ export function OptBtnHint({
   const storeShow = useModalStore((s) => s.optHintsActive);
   const [domHeld, setDomHeld] = useState(() => readDomOptHeld());
   const [navBusy, setNavBusy] = useState(() => readSelectionNavBusy());
-  // Observe DOM latch (data-prp-opt-held) + selection-nav busy — page-world e2e
-  // sets the opt attribute; selection jump stamps SELECTION_NAV_BUSY_ATTR.
+  // Observe DOM latch + navigation busy markers. Page-world e2e sets the Opt
+  // attribute; selection and Diff navigation stamp their own busy attributes.
   // MutationObserver + cheap interval; not per-frame rAF (many instances).
   useLayoutEffect(() => {
     let alive = true;
@@ -83,7 +86,12 @@ export function OptBtnHint({
       mo = new MutationObserver(sync);
       mo.observe(document.documentElement, {
         attributes: true,
-        attributeFilter: ['data-prp-opt-held', 'class', SELECTION_NAV_BUSY_ATTR],
+        attributeFilter: [
+          'data-prp-opt-held',
+          'data-prp-diff-nav-active',
+          'class',
+          SELECTION_NAV_BUSY_ATTR,
+        ],
       });
       if (document.body) {
         mo.observe(document.body, {

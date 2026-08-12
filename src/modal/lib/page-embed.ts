@@ -42,6 +42,25 @@ export const PAGE_EMBED_KEY_SHIELD_EVENTS: readonly string[] = [
   'keypress',
 ];
 
+/** Stop pr+ UI events before GitHub's document-level delegated handlers. */
+export const PAGE_EMBED_BUBBLE_SHIELD_EVENTS: readonly string[] = [
+  'click',
+  'auxclick',
+  'dblclick',
+  'contextmenu',
+  'mousedown',
+  'mouseup',
+  'mousemove',
+  'pointerdown',
+  'pointerup',
+  'pointermove',
+  'touchstart',
+  'touchend',
+  'input',
+  'change',
+  'submit',
+];
+
 /**
  * Legacy GH header height token (px). Kept for scroll helpers / tests;
  * embed host is now fixed full-viewport and covers the header.

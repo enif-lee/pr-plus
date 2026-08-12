@@ -56,6 +56,19 @@
   transition: opacity 160ms ease;
 }
 
+/* Keep the visible divider slim while giving mouse/touchpad users a 12px hit area. */
+.prp-file-nav-resizer::before {
+  content: '';
+  position: absolute;
+  inset: 0 -4px;
+}
+
+/* Width transitions are for collapse/expand, never live pointer tracking. */
+.prp-diff-layout--resizing .prp-filetree,
+.prp-diff-layout--resizing .prp-file-nav-resizer {
+  transition: none;
+}
+
 .prp-file-nav-resizer:hover::after,
 .prp-file-nav-resizer:focus-visible::after {
   width: 2px;
