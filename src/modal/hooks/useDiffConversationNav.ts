@@ -917,87 +917,97 @@ export function useDiffConversationNav(b: any) {
 
   /**
    * SearchBar already debounces typing → setSearchQuery.
-   * This effect only runs on committed query / corpus change: chunked async scan.
+   * Scan on committed query / corpus change. Read the store (subscribe), never
+   * a shellBag searchQuery snapshot — the root does not re-render on typing.
    */
   useEffect(() => {
-    const q = (searchQuery || '').trim();
-    if (!q) {
-      searchGenRef.current += 1;
-      setSearchBusy(false);
-      startTransition(() => {
-        setSearchHitsStore([], -1);
-      });
-      return undefined;
-    }
+    let effectCancelled = false;
 
-    const gen = ++searchGenRef.current;
-    setSearchBusy(true);
-
-    let cancelled = false;
-    void (async () => {
-      const isCancelled = () => cancelled || gen !== searchGenRef.current;
-      try {
-        let st: any = null;
-        // Use searchDocs snapshot only — do not depend on `detail` object identity
-        // (host re-renders with new detail refs during thread load and would restart search forever).
-        const sortOpts = {
-          isCancelled,
-          // Match sort order to the active view corpus
-          mode: searchMode === 'diff' ? 'diff' : 'conversation',
-          detail: detailRef.current,
-        };
-        if (typeof resolveQuerySearchStateAsync === 'function') {
-          st = await resolveQuerySearchStateAsync(searchDocs, q, sortOpts);
-        } else if (typeof resolveQuerySearchState === 'function') {
-          await new Promise((r) => setTimeout(r, 0));
-          if (isCancelled()) return;
-          st = resolveQuerySearchState(searchDocs, q, sortOpts);
-        } else {
-          st = { hits: [], hitIndex: -1, shouldJump: false, activeHit: null };
-        }
-        if (isCancelled() || st?.cancelled) return;
-
-        if (isCancelled()) return;
+    const runForQuery = (raw: string) => {
+      const q = String(raw || '').trim();
+      if (!q) {
+        searchGenRef.current += 1;
         setSearchBusy(false);
-        setSearchHasRun(true);
-        const hits = st.hits || [];
-        const hitIndex =
-          st.hitIndex != null && st.hitIndex >= 0
-            ? st.hitIndex
-            : hits.length
-              ? 0
-              : -1;
-        const activeHit = hits[hitIndex] || st.activeHit || null;
-        setSearchHitsStore(hits, hitIndex);
-        // Conversation stays on conversation; only jump to diff rows when already in Diff
-        // or when the active hit is a pure diff-row hit without conversation anchor.
-        // Only auto-jump when the hit is visible in the *current* layout.
-        // Avoid Diff → Conversation on first body/anchor match.
-        if (
-          st.shouldJump &&
-          activeHit &&
-          isNavigableSearchHit(activeHit) &&
-          (typeof isSearchHitVisibleInLayout !== 'function' ||
-            isSearchHitVisibleInLayout(activeHit, layoutMode))
-        ) {
-          queueMicrotask(() => {
-            if (isCancelled()) return;
-            jumpToSearchHit(activeHit);
-          });
-        }
-      } catch {
-        if (!isCancelled()) {
-          setSearchBusy(false);
-          startTransition(() => setSearchHitsStore([], -1));
-        }
+        startTransition(() => {
+          setSearchHitsStore([], -1);
+        });
+        return;
       }
-    })();
 
+      const gen = ++searchGenRef.current;
+      setSearchBusy(true);
+
+      void (async () => {
+        const isCancelled = () =>
+          effectCancelled || gen !== searchGenRef.current;
+        try {
+          let st: any = null;
+          // Use searchDocs snapshot only — do not depend on `detail` object identity
+          // (host re-renders with new detail refs during thread load and would restart search forever).
+          const sortOpts = {
+            isCancelled,
+            // Match sort order to the active view corpus
+            mode: searchMode === 'diff' ? 'diff' : 'conversation',
+            detail: detailRef.current,
+          };
+          if (typeof resolveQuerySearchStateAsync === 'function') {
+            st = await resolveQuerySearchStateAsync(searchDocs, q, sortOpts);
+          } else if (typeof resolveQuerySearchState === 'function') {
+            await new Promise((r) => setTimeout(r, 0));
+            if (isCancelled()) return;
+            st = resolveQuerySearchState(searchDocs, q, sortOpts);
+          } else {
+            st = { hits: [], hitIndex: -1, shouldJump: false, activeHit: null };
+          }
+          if (isCancelled() || st?.cancelled) return;
+
+          if (isCancelled()) return;
+          setSearchBusy(false);
+          setSearchHasRun(true);
+          const hits = st.hits || [];
+          const hitIndex =
+            st.hitIndex != null && st.hitIndex >= 0
+              ? st.hitIndex
+              : hits.length
+                ? 0
+                : -1;
+          const activeHit = hits[hitIndex] || st.activeHit || null;
+          setSearchHitsStore(hits, hitIndex);
+          // Conversation stays on conversation; only jump to diff rows when already in Diff
+          // or when the active hit is a pure diff-row hit without conversation anchor.
+          // Only auto-jump when the hit is visible in the *current* layout.
+          // Avoid Diff → Conversation on first body/anchor match.
+          if (
+            st.shouldJump &&
+            activeHit &&
+            isNavigableSearchHit(activeHit) &&
+            (typeof isSearchHitVisibleInLayout !== 'function' ||
+              isSearchHitVisibleInLayout(activeHit, layoutMode))
+          ) {
+            queueMicrotask(() => {
+              if (isCancelled()) return;
+              jumpToSearchHit(activeHit);
+            });
+          }
+        } catch {
+          if (!isCancelled()) {
+            setSearchBusy(false);
+            startTransition(() => setSearchHitsStore([], -1));
+          }
+        }
+      })();
+    };
+
+    runForQuery(String(useModalStore.getState().searchQuery || ''));
+    const unsub = useModalStore.subscribe((s, prev) => {
+      if (s.searchQuery === prev.searchQuery) return;
+      runForQuery(String(s.searchQuery || ''));
+    });
     return () => {
-      cancelled = true;
+      effectCancelled = true;
+      unsub();
     };
   }, [
-    searchQuery,
     searchDocs,
     setSearchHitsStore,
     jumpToSearchHit,

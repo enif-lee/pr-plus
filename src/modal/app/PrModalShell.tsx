@@ -137,7 +137,6 @@ import {
   shouldAutoExpandOnFileNav,
 } from '../lib/collapse';
 import {
-  filterFilesByQuery,
   countReviewThreadsByPath,
   countUnresolvedReviewThreadsByPath,
   countPendingReviewThreads,
@@ -854,8 +853,8 @@ export function PrModalApp({
 
   const searchOpen = useModalStore((s) => s.searchOpen);
   const setSearchOpen = useModalStore((s) => s.setSearchOpen);
-  // searchQuery is ROOT_FORBIDDEN — leaves use useSearchGroup(); callbacks use getState().
-  const searchQuery = useModalStore.getState().searchQuery;
+  // searchQuery is ROOT_FORBIDDEN — leaves use useSearchGroup(); scan
+  // watches the store via subscribe (useDiffConversationNav).
   const setSearchQuery = useModalStore((s) => s.setSearchQuery);
   const searchHits = useModalStore((s) => s.searchHits);
   const setSearchHitsStore = useModalStore((s) => s.setSearchHits);
@@ -900,7 +899,7 @@ export function PrModalApp({
   const setShowSelectionComposer = useModalStore((s) => s.setShowSelectionComposer);
   const selectionIslandLeaving = useModalStore((s) => s.selectionIslandLeaving);
   const setSelectionIslandLeaving = useModalStore((s) => s.setSelectionIslandLeaving);
-  const fileQuery = useModalStore.getState().fileQuery;
+  // fileQuery is ROOT_FORBIDDEN — FolderFileTree / DiffWorkspace leaf-subscribe.
   const setFileQuery = useModalStore((s) => s.setFileQuery);
   const viewedPaths = useModalStore((s) => s.viewedPaths);
   const setViewedPaths = useModalStore((s) => s.setViewedPaths);
@@ -1389,7 +1388,6 @@ export function PrModalApp({
     fileListLoading,
     fileNav,
     fileNavDragRef,
-    fileQuery,
     fileUnreadOnly,
     filesFlightRef,
     filesFlightSeqRef,
@@ -1453,7 +1451,6 @@ export function PrModalApp({
     searchHits,
     searchInputRef,
     searchOpen,
-    searchQuery,
     selectingRef,
     selectionInteractedRef,
     selectionActionsTimerRef,
@@ -1671,9 +1668,7 @@ export function PrModalApp({
    */
   const displayFiles = useMemo(() => {
     let list = Array.isArray(annotatedFiles) ? annotatedFiles : [];
-    if (typeof filterFilesByQuery === 'function') {
-      list = filterFilesByQuery(list, fileQuery);
-    }
+    // Name query is applied in FolderFileTree (live fileQuery leaf subscribe).
     list = filterFilesByExtensions(list, fileExtFilter);
     list = filterFilesUnreadOnly(list, viewedPaths, fileUnreadOnly);
     if (typeof filterFilesCommentedOnly === 'function') {
@@ -1686,7 +1681,6 @@ export function PrModalApp({
     return list;
   }, [
     annotatedFiles,
-    fileQuery,
     fileExtFilter,
     viewedPaths,
     fileUnreadOnly,
@@ -1973,7 +1967,6 @@ export function PrModalApp({
     hideWhitespace,
     setHideWhitespace,
     diffReviewFilter,
-    searchQuery,
     searchHits,
     searchHitIndex,
     searchOpen,
@@ -4331,7 +4324,9 @@ export function PrModalApp({
             Diff: search is inlined in DiffToolbar (replaces review filters). */}
         <SearchBar
           open={searchOpen && layoutMode !== LAYOUT_DIFF}
-          query={searchQuery}
+          query={
+            searchOpen ? useModalStore.getState().searchQuery : ''
+          }
           hits={searchHits}
           hitIndex={searchHitIndex}
           inputRef={searchInputRef}
@@ -4438,7 +4433,7 @@ export function PrModalApp({
             }
             reviewThreadsMeta={detail?.reviewThreadsMeta || null}
             timelineMeta={detail?.timelineMeta || null}
-            searchQuery={(searchQuery || '').trim()}
+            searchQuery={undefined /* leaf useSearchGroup */}
             searchHits={searchHits}
             searchHitIndex={searchHitIndex}
             activeSearchHit={activeSearchHit}
@@ -4510,7 +4505,7 @@ export function PrModalApp({
               onSelectFile={onSelectFile}
               collapsedFiles={collapsedFiles}
               onToggleFileCollapse={onToggleFileCollapse}
-              fileQuery={fileQuery}
+              fileQuery={undefined /* leaf useFileNavGroup */}
               setFileQuery={setFileQuery}
               ensureAllFiles={ensureAllFiles}
               fileListLoading={fileListLoading}
@@ -4571,7 +4566,7 @@ export function PrModalApp({
               openPulls={openPulls || []}
               searchOpen={searchOpen}
               layoutIsDiff={layoutMode === LAYOUT_DIFF}
-              searchQuery={searchQuery}
+              searchQuery={undefined /* leaf useSearchGroup */}
               searchHits={searchHits}
               searchHitIndex={searchHitIndex}
               searchInputRef={searchInputRef}
