@@ -2589,8 +2589,10 @@ export function PrModalApp({
         expandDiff();
         if (useModalStore.getState().layoutMode !== LAYOUT_DIFF) return;
       }
-      // Thread jump is a focus change — clear any line selection island.
-      clearLineSelectionForNav();
+      // A thread jump moves the same Diff cursor used by ArrowUp/Down. Cancel
+      // stale scheduled selection work, but keep the old caret painted until
+      // commitDiffThreadCursor atomically replaces it with the target thread.
+      clearLineSelectionForNav(true);
 
       // Clear thread filter if it hides the target file
       const path = target.path ? String(target.path) : '';
@@ -2652,11 +2654,8 @@ export function PrModalApp({
         return;
       }
 
-      setCommentIndex(idx);
       const active = mappedComments[idx];
-      useModalStore
-        .getState()
-        .setActiveDiffCommentId(active?.id ?? id ?? null);
+      commitDiffThreadCursor(active?.id ?? id, idx);
       // Prefer exact inline row; if only header (collapsed) or missing, re-try after expand
       const onlyHeader =
         active?.rowIndex != null &&
@@ -2682,7 +2681,6 @@ export function PrModalApp({
       expandFileForJump,
       mappedComments,
       virtualRows,
-      setCommentIndex,
       scrollMappedCommentIntoView,
       fileStarts,
     ]
@@ -2702,12 +2700,11 @@ export function PrModalApp({
     // Wait until we have more than a collapsed header when possible
     if (row?.kind === 'file-header' && row.collapsed) return;
     pendingCommentJumpRef.current = null;
-    setCommentIndex(idx);
+    commitDiffThreadCursor(active?.id ?? pending.commentId, idx);
     scrollMappedCommentIntoView(active);
   }, [
     mappedComments,
     virtualRows,
-    setCommentIndex,
     scrollMappedCommentIntoView,
   ]);
 
@@ -2831,13 +2828,6 @@ export function PrModalApp({
       if (!step) return;
       const list = mappedComments;
       if (!list.length) return;
-      // Thread focus owns the surface — release any line selection.
-      clearLineSelectionForNav();
-      try {
-        useModalStore.getState().setFocusedThreadUnitId(null);
-      } catch {
-        /* ignore */
-      }
       // Live index from store (avoid stale closure on rAF).
       const liveIdx = Number(useModalStore.getState().commentIndex);
       if (typeof resolveCommentNav === 'function') {
@@ -3380,6 +3370,37 @@ export function PrModalApp({
       } catch {
         /* ignore */
       }
+    }
+    return arrIdx;
+  }
+
+  /** Make a review-thread jump the authoritative Diff cursor for ArrowUp/Down. */
+  function commitDiffThreadCursor(
+    rootId: string | number | null | undefined,
+    nextCommentIndex: number
+  ): number {
+    const id = rootId == null ? '' : String(rootId);
+    const list = Array.isArray(virtualRowsRef.current)
+      ? virtualRowsRef.current
+      : [];
+    const arrIdx = id ? findThreadArrayIndex(id) : -1;
+    const pinned =
+      arrIdx >= 0 && typeof beginSelectionOnRow === 'function'
+        ? beginSelectionOnRow(list[arrIdx], 'RIGHT', arrIdx)
+        : null;
+
+    // One store commit keeps thread chrome, comment index, and the Arrow caret
+    // on one cursor; separate setters let an Arrow frame observe the old row.
+    useModalStore.setState({
+      commentIndex: nextCommentIndex,
+      activeDiffCommentId: rootId ?? null,
+      focusedThreadUnitId: null,
+      lineSelection: pinned,
+    });
+    try {
+      document.documentElement.removeAttribute('data-prp-focused-thread-unit');
+    } catch {
+      /* ignore */
     }
     return arrIdx;
   }
@@ -4387,12 +4408,8 @@ export function PrModalApp({
     }
   }
 
-  /**
-   * Drop Diff line selection + island chrome.
-   * Used when navigating threads or files so selection does not linger
-   * across focus contexts (⌥J/K threads, ⌥⇧[] files, tree click).
-   */
-  function clearLineSelectionForNav() {
+  /** Cancel queued Diff selection work; file jumps may also drop the cursor. */
+  function clearLineSelectionForNav(preserveCursor = false) {
     clearSelectionActionsTimer();
     setSelectionNavBusy(false);
     if (selectionMoveRafRef.current) {
@@ -4400,9 +4417,18 @@ export function PrModalApp({
       selectionMoveRafRef.current = null;
     }
     pendingSelectionMoveRef.current = null;
+    if (optArrowRafRef.current) {
+      optArrowRafRef.current.cancel();
+      optArrowRafRef.current = null;
+    }
+    pendingOptArrowDirRef.current = 0;
+    pendingCrossFileSeedRef.current = null;
+    pendingGotoRef.current = null;
+    pendingCommentJumpRef.current = null;
+    lastExitedMultiReplyRef.current = null;
     selectingRef.current = false;
     setSelecting(false);
-    if (useModalStore.getState().lineSelection) {
+    if (!preserveCursor && useModalStore.getState().lineSelection) {
       setLineSelection(null);
     }
     setShowSelectionComposer(false);
