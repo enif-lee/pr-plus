@@ -1,5 +1,5 @@
 /**
- * Diff ensureAllFiles reports header progress via detail-ui-store.
+ * Diff ensureAllFiles reports header loading via detail-ui-store (busy mode).
  */
 import { describe, expect, test, beforeEach } from '@rstest/core';
 import { readFileSync } from 'node:fs';
@@ -12,26 +12,22 @@ beforeEach(() => {
   useDetailUiStore.getState().resetDetailUi();
 });
 
-describe('detail-ui-store load stage (shipped)', () => {
-  test('setLoadStage + clearLoadStage round-trip', () => {
+describe('detail-ui-store diff loading mode (shipped)', () => {
+  test('setDiffLoading + clearLoadStage round-trip', () => {
     const s = useDetailUiStore.getState();
-    s.setLoadStage({
-      busy: true,
-      label: 'Loading files 0/12',
-      percent: 18,
-    });
+    s.setDiffLoading(true);
     expect(useDetailUiStore.getState().loadBusy).toBe(true);
-    expect(useDetailUiStore.getState().loadLabel).toMatch(/Loading files/);
-    expect(useDetailUiStore.getState().loadPercent).toBe(18);
+    s.setLoadStage({ busy: false });
+    expect(useDetailUiStore.getState().loadBusy).toBe(false);
+    s.setLoadStage({ busy: true });
+    expect(useDetailUiStore.getState().loadBusy).toBe(true);
     s.clearLoadStage();
     expect(useDetailUiStore.getState().loadBusy).toBe(false);
-    expect(useDetailUiStore.getState().loadLabel).toBe(null);
-    expect(useDetailUiStore.getState().loadPercent).toBe(null);
   });
 });
 
 describe('ensureAllFiles progress wiring (structural)', () => {
-  test('PrModalApp ensureAllFiles drives detail-ui-store load stage', () => {
+  test('PrModalApp ensureAllFiles drives detail-ui-store loading mode', () => {
     const src = [
       'src/modal/app/PrModalShell.tsx',
       'src/modal/hooks/useEnsureDiffLoads.ts',
@@ -40,31 +36,22 @@ describe('ensureAllFiles progress wiring (structural)', () => {
       .join('\n');
     expect(src).toMatch(/useDetailUiStore/);
     expect(src).toMatch(/const ensureAllFiles = useCallback/);
-    // Start / mid / settle labels (i18n keys; catalogs hold English copy)
-    expect(src).toMatch(/progress_loading_files/);
-    expect(src).toMatch(/progress_loading_all_files|progress_loading_files_n/);
-    expect(src).toMatch(/setLoadStage\(\{\s*busy:\s*true/);
-    expect(src).toMatch(/clearLoadStage/);
-    // Still sets file tree busy flag
+    expect(src).toMatch(/setDiffLoading\(true\)/);
+    expect(src).toMatch(/setDiffLoading\(false\)/);
     expect(src).toMatch(/setFileListLoading\(true\)/);
   });
 
-  test('HeaderStats prefers busy store stage when host bar idle', () => {
+  test('HeaderStats uses loading mode on the diff-stat pill (no stage bar)', () => {
     const src = readFileSync(
       resolve(root, 'src/modal/views/chrome/HeaderStats.tsx'),
       'utf8'
     );
-    expect(src).toMatch(/storeBusy && storeLabel && !hostBusy/);
     expect(src).toMatch(/useDetailUiStore/);
-  });
-
-  test('host loadStageLabel knows files-all', () => {
-    const src = readFileSync(
-      resolve(root, 'src/host/modules/side-fetch-progress.ts'),
-      'utf8'
-    );
-    // Inline map uses if (k === 'files-all' …) + i18n keys
-    expect(src).toMatch(/files-all/);
-    expect(src).toMatch(/load_stage_files_all|Loading all files/);
+    expect(src).toMatch(/hostLoading \|\| storeBusy/);
+    expect(src).toMatch(/data-stats-mode=\{loading \? 'metrics-loading' : 'metrics'\}/);
+    expect(src).not.toMatch(/prp-header__stats--busy/);
+    expect(src).not.toMatch(/prp-header__stats-pct/);
+    expect(src).not.toMatch(/data-load-percent/);
+    expect(src).not.toMatch(/showStage/);
   });
 });

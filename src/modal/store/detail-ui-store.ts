@@ -16,8 +16,7 @@ export type SideKey =
 export interface DetailUiState {
   sidePending: Record<SideKey, boolean>;
   sideSettled: Record<SideKey, boolean>;
-  loadPercent: number | null;
-  loadLabel: string | null;
+  /** Diff-stat pill loading mode (no stage/percent). */
   loadBusy: boolean;
   setSidePending: (key: SideKey, pending: boolean) => void;
   setSideSettled: (key: SideKey, settled: boolean) => void;
@@ -25,11 +24,8 @@ export interface DetailUiState {
     pending: Partial<Record<SideKey, boolean>>,
     settled?: Partial<Record<SideKey, boolean>>
   ) => void;
-  setLoadStage: (s: {
-    percent?: number | null;
-    label?: string | null;
-    busy?: boolean;
-  }) => void;
+  setDiffLoading: (busy: boolean) => void;
+  setLoadStage: (s: { busy?: boolean }) => void;
   clearLoadStage: () => void;
   resetDetailUi: () => void;
 }
@@ -46,8 +42,6 @@ const emptyFlags = (): Record<SideKey, boolean> => ({
 export const useDetailUiStore = create<DetailUiState>((set) => ({
   sidePending: emptyFlags(),
   sideSettled: emptyFlags(),
-  loadPercent: null,
-  loadLabel: null,
   loadBusy: false,
   setSidePending: (key, pending) =>
     set((s) => ({
@@ -65,20 +59,16 @@ export const useDetailUiStore = create<DetailUiState>((set) => ({
         ? { ...s.sideSettled, ...settled }
         : s.sideSettled,
     })),
-  setLoadStage: ({ percent, label, busy }) =>
+  setDiffLoading: (busy) => set({ loadBusy: Boolean(busy) }),
+  setLoadStage: ({ busy }) =>
     set((s) => ({
-      loadPercent: percent === undefined ? s.loadPercent : percent,
-      loadLabel: label === undefined ? s.loadLabel : label,
-      loadBusy: busy === undefined ? s.loadBusy : busy,
+      loadBusy: busy === undefined ? s.loadBusy : Boolean(busy),
     })),
-  clearLoadStage: () =>
-    set({ loadPercent: null, loadLabel: null, loadBusy: false }),
+  clearLoadStage: () => set({ loadBusy: false }),
   resetDetailUi: () =>
     set({
       sidePending: emptyFlags(),
       sideSettled: emptyFlags(),
-      loadPercent: null,
-      loadLabel: null,
       loadBusy: false,
     }),
 }));

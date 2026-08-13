@@ -15,7 +15,6 @@ import {
   resolveCompareRange,
 } from '../lib/diff-commit-filter';
 import { useDetailUiStore } from '../store/detail-ui-store';
-import { formatMessage } from '../lib/i18n';
 import { LAYOUT_DIFF } from '../lib/layout-mode';
 
 export function useEnsureDiffLoads(b: any) {
@@ -30,7 +29,7 @@ export function useEnsureDiffLoads(b: any) {
     setDiffCommitFilter, setDiffCommitError, setDiffCommitLabel,
     setDiffCommitLoading, compareFilesCacheRef, compareFetchGenRef,
     setScrollTop, listRef, annotatedFiles,
-    appLocale, layoutMode,
+    layoutMode,
   } = b;
   const patchHostDetail = b.patchHostDetail || applyDomainDetailToHost;
 
@@ -238,33 +237,8 @@ const ensureAllFiles = useCallback(async () => {
   const flight = ++filesFlightSeqRef.current;
   filesFlightRef.current = flight;
   setFileListLoading(true);
-  // Header progress pill (detail-ui-store) — open host bar does not track
-  // Diff-entry full file fetch; surface busy label + soft percent here.
-  const ui = useDetailUiStore.getState();
-  const expected = Number(detail.changedFiles);
-  const startLabel =
-    Number.isFinite(expected) && expected > 0
-      ? formatMessage('progress_loading_files_n', appLocale, {
-          loaded: 0,
-          total: Math.min(Math.floor(expected), 999),
-        })
-      : formatMessage('progress_loading_all_files', appLocale);
-  ui.setLoadStage({ busy: true, label: startLabel, percent: 18 });
-  // Soft mid progress while REST pages walk (no per-page callbacks yet).
-  const midTimer =
-    typeof window !== 'undefined'
-      ? window.setTimeout(() => {
-          if (filesFlightRef.current !== flight) return;
-          useDetailUiStore.getState().setLoadStage({
-            busy: true,
-            label:
-              Number.isFinite(expected) && expected > 0
-                ? formatMessage('progress_loading_files', appLocale)
-                : formatMessage('progress_loading_all_files', appLocale),
-            percent: 58,
-          });
-        }, 400)
-      : null;
+  // Diff-stat pill loading mode — host open bar does not track this fetch.
+  useDetailUiStore.getState().setDiffLoading(true);
   try {
     const all = await onFetchAllPrFiles({
       gitattributesText: detail.gitattributesText || '',
@@ -302,51 +276,16 @@ const ensureAllFiles = useCallback(async () => {
         ? { gitattributesText: detail.gitattributesText }
         : null),
     });
-    useDetailUiStore.getState().setLoadStage({
-      busy: true,
-      label:
-        count > 0
-          ? formatMessage('progress_loading_files_n', appLocale, {
-              loaded: Math.min(count, 999),
-              total: Math.min(count, 999),
-            })
-          : formatMessage('progress_files_ready', appLocale),
-      percent: 96,
-    });
   } catch {
     /* soft-fail: keep partial file list; do not invent settled empty */
   } finally {
-    if (midTimer != null) {
-      try {
-        window.clearTimeout(midTimer);
-      } catch {
-        /* ignore */
-      }
-    }
     const stillMine = filesFlightRef.current === flight;
     if (stillMine) {
       filesFlightRef.current = 0;
     }
     setFileListLoading(false);
-    // Only settle the header bar when this flight still owns the slot
-    // (a newer ensureAllFiles would have a higher flight id).
     if (stillMine) {
-      useDetailUiStore.getState().setLoadStage({
-        busy: false,
-        label: null,
-        percent: 100,
-      });
-      if (typeof window !== 'undefined') {
-        const settledFlight = flight;
-        window.setTimeout(() => {
-          // Newer flight in progress — leave its stage alone.
-          if (filesFlightRef.current !== 0) return;
-          if (filesFlightSeqRef.current !== settledFlight) return;
-          useDetailUiStore.getState().clearLoadStage();
-        }, 280);
-      } else {
-        useDetailUiStore.getState().clearLoadStage();
-      }
+      useDetailUiStore.getState().setDiffLoading(false);
     }
   }
 }, [
@@ -355,7 +294,6 @@ const ensureAllFiles = useCallback(async () => {
   onPatchDetail,
   diffFilesOverride,
   prIdentity,
-  appLocale,
 ]);
 
 // Diff: re-fetch when empty, incomplete count, or slim IDB — not when GitHub
