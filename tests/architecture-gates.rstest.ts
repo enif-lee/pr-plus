@@ -2,6 +2,7 @@
  * Structural gates for architecture overhaul (no fake re-implementations).
  */
 import { describe, expect, test } from '@rstest/core';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -561,9 +562,42 @@ describe('architecture gates', () => {
     expect(pureBuild).toMatch(/checks:\s*\{\s*lib:\s*['\"]checks\.ts['\"]/);
     expect(read('src/modal/lib/checks.ts')).toMatch(/export function normalizeChecks/);
     expect(read('src/modal/lib/checks.ts')).not.toMatch(/@ts-ignore/);
-    // generated pure should claim AUTO-GENERATED after build
-    const ds = read('src/modal/pure/detail-store.js').slice(0, 200);
-    expect(ds).toMatch(/SOURCE OF TRUTH|AUTO-GENERATED|detail-store/);
+    // generated pure should claim AUTO-GENERATED after a local build
+    const dsPath = path.join(root, 'src/modal/pure/detail-store.js');
+    if (fs.existsSync(dsPath)) {
+      expect(read('src/modal/pure/detail-store.js').slice(0, 200)).toMatch(
+        /SOURCE OF TRUTH|AUTO-GENERATED|detail-store/
+      );
+    }
+  });
+
+  test('generated runtime artifacts are not git-tracked', () => {
+    const tracked = new Set(
+      execFileSync('git', ['ls-files', '-z'], { cwd: root })
+        .toString()
+        .split('\0')
+        .filter(Boolean)
+    );
+    const generated = [
+      'src/background.sw.js',
+      'src/background.bundle.js',
+      'src/background.ts',
+      'src/onboarding.js',
+      'src/modal/pure/checks.js',
+      'src/fetch-pulls.js',
+      'src/pr-modal-host.js',
+      'src/content-bridge.js',
+      'src/tree.js',
+      'src/dom.js',
+      'src/content.js',
+      'src/storage.js',
+      'src/popup.js',
+    ];
+    for (const rel of generated) {
+      expect(tracked.has(rel)).toBe(false);
+    }
+    // Hand-written IIFE SoT (no lib twin) stays tracked.
+    expect(tracked.has('src/modal/pure/detail-merge.js')).toBe(true);
   });
 
   test('usePrModalOpenEffects is gone', () => {

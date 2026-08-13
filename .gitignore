@@ -50,9 +50,8 @@ src/modal/dist/
 #   extension-globals.d.ts, host-context.d.ts, modal/globals.d.ts, *-shims.d.ts, etc.
 
 # pure modules emitted from src/modal/lib/*.ts via `npm run build:pure`
-# Keep hand-written pure SoT (lib re-exports these):
+# Keep hand-written pure SoT (no lib twin; lib may re-export):
 src/modal/pure/**
-!src/modal/pure/checks.js
 !src/modal/pure/detail-merge.js
 
 # content-script / popup entries compiled from src/*.ts (`build:content-ts`)
@@ -63,6 +62,7 @@ src/pulls-palette.js
 src/github-endpoints.js
 src/content-bootstrap.js
 src/content.js
+src/onboarding.js
 src/popup.js
 src/storage.js
 
@@ -71,6 +71,8 @@ src/content-bridge.js
 src/fetch-pulls.js
 src/pr-modal-host.js
 src/background.bundle.js
+# MV3 service worker concat (build:sw). Manifest loads this after a local build.
+src/background.sw.js
 # intermediate emit from sw-api.ts (build:background-src); SW loads the bundle
 src/background.ts
 # legacy hand twin if present after migration
