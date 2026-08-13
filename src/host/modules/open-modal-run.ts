@@ -165,36 +165,35 @@
 
     let peeked = peekDetailMemory(key);
     let cached = peeked.value || null;
-    if (cached && listSketch) {
-      try {
-        const cTitle = String(cached.title || '').trim();
-        const lTitle = String(listSketch.title || '').trim();
-        const cMs = cached.milestone?.title || cached.milestone?.number || '';
-        const lMs =
-          listSketch.milestone?.title || listSketch.milestone?.number || '';
-        if (
-          (lTitle && cTitle && lTitle !== cTitle) ||
-          (lMs && String(cMs) !== String(lMs))
-        ) {
-          try {
-            if (typeof detailCache.invalidate === 'function') {
-              detailCache.invalidate(key);
-            } else if (typeof detailCache.delete === 'function') {
-              detailCache.delete(key);
-            }
-          } catch {
-            /* ignore */
-          }
-          cached = null;
-          peeked = { value: null, fresh: false, stale: false, source: null };
-        }
-      } catch {
-        /* ignore */
-      }
+    const idbApi =
+      typeof globalThis !== 'undefined'
+        ? (globalThis as any).PRModalDetailIdb
+        : null;
+    const firstPaint =
+      typeof idbApi?.chooseOpenFirstPaintDetail === 'function'
+        ? idbApi.chooseOpenFirstPaintDetail({
+            memory: cached,
+            listSketch,
+          })
+        : {
+            detail: cached || listSketch || null,
+            source: cached
+              ? 'memory'
+              : listSketch
+                ? 'list-sketch'
+                : 'empty',
+            keepCache: Boolean(cached),
+          };
+    // List-row title/milestone is not authoritative — never invalidate a
+    // warmer memory snapshot just because the pulls sketch string differs.
+    if (firstPaint.keepCache && firstPaint.detail) {
+      cached = firstPaint.detail;
+    } else if (firstPaint.source !== 'memory') {
+      cached = null;
     }
-    let fromCache = Boolean(cached);
-    const fromList = !fromCache && Boolean(listSketch);
-    let initialDetail = cached || listSketch || null;
+    let fromCache = firstPaint.source === 'memory' && Boolean(cached);
+    const fromList = firstPaint.source === 'list-sketch';
+    let initialDetail = firstPaint.detail || null;
     try {
       if (
         typeof lastPeopleMetaAuthority !== 'undefined' &&
@@ -412,12 +411,26 @@
           }
           const v = idbPeek?.value || null;
           if (!v) return null;
+          const pickIdb =
+            typeof idbApi?.chooseOpenFirstPaintDetail === 'function'
+              ? idbApi.chooseOpenFirstPaintDetail({
+                  memory: current.detail?._sketch ? null : current.detail,
+                  listSketch: current.detail?._sketch
+                    ? current.detail
+                    : listSketch,
+                  idb: v,
+                })
+              : null;
           const curRank = detailRank(current.detail);
           const idbRank = detailRank(v);
           if (curRank >= 2 && !current.detail?._sketch) {
             return v;
           }
-          if (idbRank > curRank || (current.detail?._sketch && idbRank >= 2)) {
+          if (
+            pickIdb?.source === 'idb' ||
+            idbRank > curRank ||
+            (current.detail?._sketch && idbRank >= 2)
+          ) {
             cached = v;
             fromCache = true;
             peeked = idbPeek;

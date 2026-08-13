@@ -406,6 +406,74 @@ export function sanitizeDetailForCache(detail: any, opts: SanitizeDetailOptions 
   };
 }
 
+export function detailTitleText(detail: any): string {
+  return String(detail?.title || '').trim();
+}
+
+export function detailBodyText(detail: any): string {
+  if (detail == null || detail.body == null) return '';
+  return String(detail.body);
+}
+
+/**
+ * List-row sketch title/milestone is not authoritative vs a warmer memory/IDB
+ * snapshot. Keep any cached detail that already has a title or body.
+ */
+export function shouldKeepCachedDetailOverListSketch(
+  cached: any,
+  _listSketch?: any
+): boolean {
+  if (!cached || typeof cached !== 'object') return false;
+  return Boolean(detailTitleText(cached) || detailBodyText(cached));
+}
+
+export type OpenFirstPaintSource = 'memory' | 'list-sketch' | 'idb' | 'empty';
+
+/**
+ * Choose first-paint detail for list-modal open.
+ * Sync memory (if rich) wins over a differing list sketch. IDB wins over
+ * empty memory when it already has title/body. Sketch title is used only
+ * when memory is empty (and IDB is absent or empty).
+ */
+export function chooseOpenFirstPaintDetail(opts: {
+  memory?: any;
+  listSketch?: any;
+  idb?: any;
+} = {}): {
+  detail: any;
+  source: OpenFirstPaintSource;
+  keepCache: boolean;
+} {
+  const memory =
+    opts.memory && typeof opts.memory === 'object' ? opts.memory : null;
+  const listSketch =
+    opts.listSketch && typeof opts.listSketch === 'object'
+      ? opts.listSketch
+      : null;
+  const idb = opts.idb && typeof opts.idb === 'object' ? opts.idb : null;
+
+  const keepCache = shouldKeepCachedDetailOverListSketch(memory, listSketch);
+  if (keepCache) {
+    return { detail: memory, source: 'memory', keepCache: true };
+  }
+
+  const idbTitle = detailTitleText(idb);
+  const idbBody = detailBodyText(idb);
+  if (idb && (idbTitle || idbBody)) {
+    return { detail: idb, source: 'idb', keepCache: false };
+  }
+
+  if (listSketch && detailTitleText(listSketch)) {
+    return { detail: listSketch, source: 'list-sketch', keepCache: false };
+  }
+
+  if (idb) {
+    return { detail: idb, source: 'idb', keepCache: false };
+  }
+
+  return { detail: null, source: 'empty', keepCache: false };
+}
+
 /** Ensure host/App never receive corrupt shapes from IDB. */
 export function normalizeDetailSnapshot(detail: any) {
   if (!detail || typeof detail !== 'object') return null;
