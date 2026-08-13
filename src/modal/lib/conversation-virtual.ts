@@ -144,7 +144,7 @@ export function buildConversationVirtualRows(paged: any, opts: any = {}) {
  *   descriptionBody?: string,
  * }} [opts]
  */
-export function estimateConversationRowHeight(row, opts: any = {}) {
+export function estimateConversationRowHeight(row: any, opts: any = {}) {
   if (!row) return CONV_EST_COMMENT + CONV_ROW_GAP;
 
   if (row.type === 'description') {
@@ -215,14 +215,14 @@ export function estimateConversationRowHeight(row, opts: any = {}) {
   return clampEst(h) + CONV_ROW_GAP;
 }
 
-function clampEst(h) {
+function clampEst(h: any) {
   return Math.max(CONV_EST_MIN, Math.min(CONV_EST_MAX, Math.round(h)));
 }
 
 /**
  * Resolve height for a row: measured map wins, else estimate.
  */
-export function conversationRowHeight(row, measured, opts: any = {}) {
+export function conversationRowHeight(row: any, measured: any, opts: any = {}) {
   const key = row?.key;
   if (key != null && measured) {
     if (measured instanceof Map) {
@@ -237,7 +237,7 @@ export function conversationRowHeight(row, measured, opts: any = {}) {
 /**
  * Prefix offsets [0, h0, h0+h1, …]; last = total height.
  */
-export function conversationRowOffsets(rows, measured, opts: any = {}) {
+export function conversationRowOffsets(rows: any, measured: any, opts: any = {}) {
   const list = Array.isArray(rows) ? rows : [];
   const offsets = new Array(list.length + 1);
   offsets[0] = 0;
@@ -286,7 +286,7 @@ function feedRowRailAnchorY(row: any, rowTop: number, rowH: number) {
  *
  * @returns {{ top: number, height: number }[]}
  */
-export function timelineEventRailSegments(rows, measured, opts: any = {}) {
+export function timelineEventRailSegments(rows: any, measured: any, opts: any = {}) {
   const list = Array.isArray(rows) ? rows : [];
   let firstAnchor: number | null = null;
   let lastAnchor = 0;
@@ -311,7 +311,7 @@ export function timelineEventRailSegments(rows, measured, opts: any = {}) {
 /**
  * Find row index for a search / deep-link anchor id.
  */
-export function indexForConversationAnchor(rows, anchorId) {
+export function indexForConversationAnchor(rows: any, anchorId: any) {
   const a = String(anchorId || '');
   if (!a) return -1;
   const list = Array.isArray(rows) ? rows : [];

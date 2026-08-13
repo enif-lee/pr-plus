@@ -73,6 +73,19 @@ for (const f of HOST_MODULE_ORDER) {
   if (n > 1500) console.warn('WARN', f, 'has', n, 'lines (>1500)');
 }
 
+const listed = new Set(HOST_MODULE_ORDER);
+const onDisk = fs
+  .readdirSync(modulesDir)
+  .filter((f) => f.endsWith('.ts') && !f.endsWith('.d.ts'));
+const missingFromOrder = onDisk.filter((f) => !listed.has(f));
+if (missingFromOrder.length) {
+  console.error(
+    'HOST_MODULE_ORDER incomplete; unlisted modules:',
+    missingFromOrder.join(', ')
+  );
+  process.exit(1);
+}
+
 const result = await assembleTsParts({
   partsDir: modulesDir,
   outFile: out,

@@ -25,7 +25,7 @@ export function broadcastToGithubTabs(message: any) {
   try {
     registeredEnterpriseHosts().then((hosts) => {
       const url = githubTabUrlPatterns(hosts);
-      chrome.tabs.query({ url }, (tabs) => {
+      chrome.tabs.query({ url }, (tabs: any) => {
         for (const tab of tabs || []) {
           if (tab.id == null) continue;
           try {
@@ -61,7 +61,7 @@ export function clearDetailCacheOnGithubTabs() {
     try {
       registeredEnterpriseHosts().then((hosts) => {
         const url = githubTabUrlPatterns(hosts);
-        chrome.tabs.query({ url }, (tabs) => {
+        chrome.tabs.query({ url }, (tabs: any) => {
           void chrome.runtime.lastError;
           const list = Array.isArray(tabs) ? tabs : [];
           if (!list.length) {
@@ -82,7 +82,7 @@ export function clearDetailCacheOnGithubTabs() {
               chrome.tabs.sendMessage(
                 tab.id,
                 { type: MSG.CLEAR_DETAIL_CACHE },
-                (res) => {
+                (res: any) => {
                   const err = chrome.runtime.lastError;
                   if (err || !res?.ok) failed += 1;
                   else cleared += 1;
@@ -104,7 +104,7 @@ export function clearDetailCacheOnGithubTabs() {
   });
 }
 
-chrome.storage.onChanged.addListener((changes, areaName) => {
+chrome.storage.onChanged.addListener((changes: any, areaName: any) => {
   if (areaName !== 'local') return;
   if (changes[PRTreeStorage.TOKEN_KEY]) {
     broadcastTokenChanged();

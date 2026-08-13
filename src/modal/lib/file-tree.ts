@@ -11,8 +11,8 @@
  * @param {Array<{ filename?: string, path?: string }>} files
  * @returns {TreeNode[]}
  */
-export function buildNestedFileTree(files) {
-  const root = { type: 'dir', name: '', path: '', children: [] };
+export function buildNestedFileTree(files: any) {
+  const root = { type: 'dir', name: '', path: '', children: [] as any[] };
   if (!Array.isArray(files)) return [];
 
   for (const file of files) {
@@ -45,8 +45,8 @@ export function buildNestedFileTree(files) {
     }
   }
 
-  function sortNodes(nodes) {
-    nodes.sort((a, b) => {
+  function sortNodes(nodes: any) {
+    nodes.sort((a: any, b: any) => {
       if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
       return a.name.localeCompare(b.name);
     });
@@ -67,12 +67,12 @@ export function buildNestedFileTree(files) {
  * @param {Array<{ filename?: string, path?: string }>} files
  * @returns {Array<{ filename?: string, path?: string }>}
  */
-export function filesInTreeOrder(files) {
+export function filesInTreeOrder(files: any) {
   const list = Array.isArray(files) ? files : [];
   if (!list.length) return [];
   const tree = buildNestedFileTree(list);
-  const out = [];
-  function walk(nodes) {
+  const out: any[] = [];
+  function walk(nodes: any) {
     if (!Array.isArray(nodes)) return;
     for (const n of nodes) {
       if (!n) continue;
@@ -94,8 +94,8 @@ export function filesInTreeOrder(files) {
  * @param {Set<string>|Map} [expandedDirs] dirs currently expanded (paths)
  * @returns {Array<{ type: string, name: string, path: string, depth: number, file?: object }>}
  */
-export function flattenVisibleTree(nodes, expandedDirs) {
-  const out = [];
+export function flattenVisibleTree(nodes: any, expandedDirs: any) {
+  const out: any[] = [];
   const expanded =
     expandedDirs instanceof Set
       ? expandedDirs
@@ -103,7 +103,7 @@ export function flattenVisibleTree(nodes, expandedDirs) {
         ? new Set([...expandedDirs.keys()].filter((k) => expandedDirs.get(k)))
         : new Set(expandedDirs || []);
 
-  function walk(list, depth) {
+  function walk(list: any, depth: any) {
     if (!Array.isArray(list)) return;
     for (const n of list) {
       out.push({
@@ -128,7 +128,7 @@ export function flattenVisibleTree(nodes, expandedDirs) {
  * @param {string|null|undefined} pathOrName
  * @returns {string}
  */
-export function fileExtensionFromPath(pathOrName) {
+export function fileExtensionFromPath(pathOrName: any) {
   const base = String(pathOrName || '')
     .split('/')
     .pop() || '';
@@ -175,7 +175,7 @@ export function listFileExtensions(
  * @param {Array<{ filename?: string, path?: string }>} files
  * @param {Iterable<string>|Set<string>|string[]|null|undefined} selected
  */
-export function filterFilesByExtensions(files, selected) {
+export function filterFilesByExtensions(files: any, selected: any) {
   const list = Array.isArray(files) ? files : [];
   const set =
     selected instanceof Set
@@ -200,7 +200,7 @@ export function filterFilesByExtensions(files, selected) {
  * @param {string} ext
  * @returns {Set<string>}
  */
-export function toggleFileExtension(selected, ext) {
+export function toggleFileExtension(selected: any, ext: any) {
   const next = selected instanceof Set ? new Set(selected) : new Set(selected || []);
   const key = String(ext ?? '');
   if (next.has(key)) next.delete(key);
@@ -212,7 +212,7 @@ export function toggleFileExtension(selected, ext) {
  * Display label for an extension token (`.ts` or `∅` for none).
  * @param {string} ext
  */
-export function formatFileExtensionLabel(ext) {
+export function formatFileExtensionLabel(ext: any) {
   const e = String(ext ?? '');
   return e ? `.${e}` : '∅';
 }
@@ -228,7 +228,7 @@ export type DiffReviewFilterMode =
  * True when threadCounts has at least one path with count > 0.
  * @param {Map<string, number>|Record<string, number>|null|undefined} threadCounts
  */
-export function hasAnyReviewThreads(threadCounts) {
+export function hasAnyReviewThreads(threadCounts: any) {
   if (!threadCounts) return false;
   if (threadCounts instanceof Map) {
     for (const n of threadCounts.values()) {
@@ -249,7 +249,7 @@ export function hasAnyReviewThreads(threadCounts) {
  * @param {Map<string, number>|Record<string, number>|null|undefined} threadCounts
  * @returns {number}
  */
-export function sumThreadCounts(threadCounts) {
+export function sumThreadCounts(threadCounts: any) {
   if (!threadCounts) return 0;
   let n = 0;
   if (threadCounts instanceof Map) {
@@ -291,10 +291,10 @@ function countOnPath(
  * @param {Map<string, number>|Record<string, number>|null|undefined} [pendingCounts]
  */
 export function filterFilesByReviewMode(
-  files,
-  allCounts,
-  unresolvedCounts,
-  mode,
+  files: any,
+  allCounts: any,
+  unresolvedCounts: any,
+  mode: any,
   pendingCounts: any = null
 ) {
   const list = Array.isArray(files) ? files : [];
@@ -325,7 +325,7 @@ export function filterFilesByReviewMode(
 }
 
 /** @deprecated use filterFilesByReviewMode */
-export function filterFilesWithReviewThreads(files, threadCounts, reviewOnly) {
+export function filterFilesWithReviewThreads(files: any, threadCounts: any, reviewOnly: any) {
   return filterFilesByReviewMode(
     files,
     threadCounts,
@@ -340,7 +340,7 @@ export function filterFilesWithReviewThreads(files, threadCounts, reviewOnly) {
  * @param {Set<string>|string[]|null|undefined} viewedPaths
  * @param {boolean} unreadOnly
  */
-export function filterFilesUnreadOnly(files, viewedPaths, unreadOnly) {
+export function filterFilesUnreadOnly(files: any, viewedPaths: any, unreadOnly: any) {
   const list = Array.isArray(files) ? files : [];
   if (!unreadOnly) return list.slice();
   const viewed =
@@ -362,7 +362,7 @@ export function filterFilesUnreadOnly(files, viewedPaths, unreadOnly) {
  * @param {Map<string, number>|Record<string, number>|null|undefined} threadCounts
  * @param {boolean} commentedOnly
  */
-export function filterFilesCommentedOnly(files, threadCounts, commentedOnly) {
+export function filterFilesCommentedOnly(files: any, threadCounts: any, commentedOnly: any) {
   const list = Array.isArray(files) ? files : [];
   if (!commentedOnly) return list.slice();
   return filterFilesByReviewMode(list, threadCounts, threadCounts, 'all');
@@ -373,9 +373,9 @@ export function filterFilesCommentedOnly(files, threadCounts, commentedOnly) {
  * @param {TreeNode[]} nodes
  * @returns {Set<string>}
  */
-export function collectDirPaths(nodes) {
+export function collectDirPaths(nodes: any) {
   const out = new Set();
-  function walk(list) {
+  function walk(list: any) {
     if (!Array.isArray(list)) return;
     for (const n of list) {
       if (n?.type === 'dir') {

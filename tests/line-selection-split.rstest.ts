@@ -1084,7 +1084,7 @@ describe('optArrow shell wiring (static)', () => {
       path.join(__dirname, '..', 'src/modal/hooks/usePrModalHotkeys.ts'),
       'utf8'
     );
-    const onKey = hk.indexOf('const onKey = (e)');
+    const onKey = hk.indexOf('const onKey = (e');
     expect(onKey).toBeGreaterThan(0);
     const body = hk.slice(onKey, onKey + 6000);
     const fast = body.indexOf('Diff ↑/↓ / Shift+↑↓ hot path');

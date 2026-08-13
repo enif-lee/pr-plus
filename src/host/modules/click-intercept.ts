@@ -1,6 +1,6 @@
 // TypeScript SoT — assembled by build scripts (classic runtime JS emit)
 
-  function onClickCapture(event) {
+  function onClickCapture(event: any) {
     // Always heal stuck GH ⌘K top layer (even when pr+ modal is open)
     recoverGithubPaletteIfStuck();
     // Clicks outside the pulls palette (non-palette targets) close it only via backdrop handler
@@ -15,7 +15,7 @@
     const path =
       typeof event.composedPath === 'function' ? event.composedPath() : [];
     const nodes = path.length ? path : [event.target];
-    let anchor = null;
+    let anchor: any = null;
     for (const n of nodes) {
       if (
         n &&
@@ -95,7 +95,7 @@
       if (!event?.persisted) return;
       if (!hostEnabled || !current.open) return;
       if (!current.owner || !current.repo || current.number == null) return;
-      const bridge = globalThis.PRTreeBridge;
+      const bridge = (globalThis as any).PRTreeBridge;
       if (
         typeof bridge?.isExtensionContextAlive === 'function' &&
         !bridge.isExtensionContextAlive()
@@ -133,7 +133,7 @@
     }
     // Fresh handle in case the singleton cache missed IDB (tests / fallback)
     try {
-      const idb = globalThis.PRModalDetailIdb?.createDetailIdb?.();
+      const idb = (globalThis as any).PRModalDetailIdb?.createDetailIdb?.();
       if (idb?.clear) await idb.clear();
     } catch (err) {
       console.warn('[pr+] IDB clear failed', err);
@@ -143,7 +143,7 @@
 
   function listenClearDetailCache() {
     try {
-      chrome.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
+      chrome.runtime?.onMessage?.addListener((message: any, _sender: any, sendResponse: any) => {
         if (message?.type !== 'PR_TREE_CLEAR_DETAIL_CACHE') return false;
         void clearDetailCache()
           .then((res) => {
@@ -171,7 +171,7 @@
     }
   }
 
-  globalThis.PRModalHost = {
+  (globalThis as any).PRModalHost = {
     install,
     openModal,
     closeModal,

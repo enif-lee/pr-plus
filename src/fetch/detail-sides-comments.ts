@@ -39,12 +39,12 @@ export async function fetchPrIssueComments(owner: any, repo: any, number: any, f
   const r = String(repo || '').trim();
   const n = Number(number);
   const empty = {
-    items: [],
+    items: [] as any[],
     meta: {
       page: 1,
       perPage: COMMENT_PAGE_SIZE,
       hasMore: false,
-      nextPage: null,
+      nextPage: null as any,
       order: 'from-end',
       loadedCount: 0,
     },
@@ -297,7 +297,7 @@ export async function fetchPrCommentsPage(owner: any, repo: any, pullNumber: any
   const preferNewest = Boolean(opts?.preferNewest) && !since;
   const orderHint = opts?.order || null;
 
-  async function fetchPage(pageNum, listOpts: any = {}, ctx = null) {
+  async function fetchPage(pageNum: any, listOpts: any = {}, ctx: any = null) {
   ctx = normalizeApiCtx(ctx);
     const sort =
       listOpts?.sort != null
@@ -663,7 +663,7 @@ export async function fetchConflictFilePaths(owner: any, repo: any, baseRef: any
     ]);
     const onBase = new Set(
       (Array.isArray(baseSide?.files) ? baseSide.files : [])
-        .map((f) => String(f?.filename || f?.previous_filename || '').trim())
+        .map((f: any) => String(f?.filename || f?.previous_filename || '').trim())
         .filter(Boolean)
     );
     const conflicts = [];
@@ -692,12 +692,12 @@ export async function fetchConflictFilePaths(owner: any, repo: any, baseRef: any
  * @returns {{ allowMergeCommit: boolean|null, allowSquashMerge: boolean|null, allowRebaseMerge: boolean|null } | null}
  */
 export async function resolvePrMergeability(
-  pr,
-  base,
-  pullNumber,
-  fetchImpl,
-  token,
-  timings,
+  pr: any,
+  base: any,
+  pullNumber: any,
+  fetchImpl: any,
+  token: any,
+  timings: any,
   /** @type {{ owner?: string, repo?: string, apiCtx?: object }} */
   meta: any = {}
 ) {
@@ -718,7 +718,7 @@ export async function resolvePrMergeability(
         timings,
         'pullMergeable',
         apiJson(`${base}/pulls/${pullNumber}`, fetchImpl, token),
-        (p) =>
+        (p: any) =>
           `(mergeable=${p?.mergeable} state=${p?.mergeable_state || '?'})`
       );
       if (again && typeof again === 'object') {
@@ -772,7 +772,7 @@ export async function resolvePrMergeability(
           timings,
           'branchBehind',
           apiJson(cmpUrl, fetchImpl, token),
-          (c) =>
+          (c: any) =>
             `(behind=${c?.behind_by ?? '?'} status=${c?.status || '?'})`
         );
         if (cmp && typeof cmp === 'object' && cmp.behind_by != null) {
@@ -814,8 +814,8 @@ export async function resolvePrMergeability(
         fetchImpl,
         token,
         apiCtx
-      ).catch(() => []),
-      (list) => `(${Array.isArray(list) ? list.length : 0} paths)`
+      ).catch((): any => []),
+      (list: any) => `(${Array.isArray(list) ? list.length : 0} paths)`
     );
     out = {
       ...out,
@@ -827,7 +827,7 @@ export async function resolvePrMergeability(
   return out;
 }
 
-export async function fetchCompareFiles(owner, repo, base, head, fetchImpl, token = null, options: any = {}) {
+export async function fetchCompareFiles(owner: any, repo: any, base: any, head: any, fetchImpl: any, token: any = null, options: any = {}) {
   const ctx = normalizeApiCtx(options?.ctx);
   const o = String(owner || '').trim();
   const r = String(repo || '').trim();

@@ -13,7 +13,7 @@ import {
  * @param {Array} comments
  * @returns {Array<{ id, path, line, side, root, replies, resolved, threadNodeId }>}
  */
-export function groupReviewThreads(comments) {
+export function groupReviewThreads(comments: any) {
   const list = Array.isArray(comments) ? comments : [];
   const byId = new Map();
   for (const c of list) {
@@ -33,7 +33,7 @@ export function groupReviewThreads(comments) {
     }
   }
   return roots.map((root) => {
-    const replies = (children.get(String(root.id)) || []).slice().sort((a, b) =>
+    const replies = (children.get(String(root.id)) || []).slice().sort((a: any, b: any) =>
       String(a.createdAt || a.created_at || '').localeCompare(
         String(b.createdAt || b.created_at || '')
       )
@@ -48,7 +48,7 @@ export function groupReviewThreads(comments) {
       resolved: Boolean(root.resolved ?? root.isResolved),
       outdated: Boolean(root.outdated),
       pending: Boolean(
-        root.pending || replies.some((r) => r && r.pending)
+        root.pending || replies.some((r: any) => r && r.pending)
       ),
       threadNodeId: root.threadNodeId || root.thread_id || root.pullRequestReviewThreadId || null,
       count: 1 + replies.length,
@@ -65,7 +65,7 @@ export function groupReviewThreads(comments) {
  * @param {Array<{ threadNodeId: string, resolved?: boolean, commentIds?: Array<number|string> }>} threads
  * @returns {Array}
  */
-export function countReviewThreadsByPath(comments) {
+export function countReviewThreadsByPath(comments: any) {
   const threads = groupReviewThreads(comments);
   const map = new Map();
   for (const t of threads) {
@@ -81,7 +81,7 @@ export function countReviewThreadsByPath(comments) {
  * @param {Array} comments
  * @returns {Map<string, number>}
  */
-export function countUnresolvedReviewThreadsByPath(comments) {
+export function countUnresolvedReviewThreadsByPath(comments: any) {
   const threads = groupReviewThreads(comments);
   const map = new Map();
   for (const t of threads) {
@@ -99,7 +99,7 @@ export function countUnresolvedReviewThreadsByPath(comments) {
  * @param {Array} comments
  * @returns {number}
  */
-export function countPendingReviewThreads(comments) {
+export function countPendingReviewThreads(comments: any) {
   const threads = groupReviewThreads(comments);
   let n = 0;
   for (const t of threads) {
@@ -116,7 +116,7 @@ export function countPendingReviewThreads(comments) {
  * @param {Array} comments
  * @returns {Map<string, number>}
  */
-export function countPendingReviewThreadsByPath(comments) {
+export function countPendingReviewThreadsByPath(comments: any) {
   const map = new Map();
   const threads = groupReviewThreads(comments);
   for (const t of threads) {
@@ -151,7 +151,7 @@ export function countPendingReviewThreadsByPath(comments) {
  * }} [opts]
  * @returns {{ total: number, unresolved: number, resolved: number, pendingThreads: number }}
  */
-export function countReviewThreadTotals(comments, opts: any = {}) {
+export function countReviewThreadTotals(comments: any, opts: any = {}) {
   const pathSet =
     opts?.allowedPaths instanceof Set
       ? opts.allowedPaths
@@ -188,7 +188,7 @@ export function countReviewThreadTotals(comments, opts: any = {}) {
  * @param {unknown} raw
  * @returns {number|null}
  */
-export function normalizeReviewCommentId(raw) {
+export function normalizeReviewCommentId(raw: any) {
   if (raw == null || raw === '') return null;
   if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) {
     return Math.floor(raw);
@@ -207,7 +207,7 @@ export function normalizeReviewCommentId(raw) {
  * @param {unknown} commentId any id in the thread
  * @returns {number|null} root REST id
  */
-export function resolveRootReviewCommentId(comments, commentId) {
+export function resolveRootReviewCommentId(comments: any, commentId: any) {
   const start = normalizeReviewCommentId(commentId);
   if (start == null) return null;
   const byId = new Map();
@@ -235,7 +235,7 @@ export function resolveRootReviewCommentId(comments, commentId) {
  * Shape GraphQL thread-reply mutation (preferred when pending review exists).
  * REST POST /comments and /replies 422 if the user already has a pending review.
  */
-export function filterFilesByQuery(files, query) {
+export function filterFilesByQuery(files: any, query: any) {
   const list = Array.isArray(files) ? files : [];
   const q = String(query || '')
     .trim()
@@ -253,7 +253,7 @@ export function filterFilesByQuery(files, query) {
  * @param {string} path
  * @returns {Set<string>}
  */
-export function toggleViewedPath(viewed, path) {
+export function toggleViewedPath(viewed: any, path: any) {
   const next = viewed instanceof Set ? new Set(viewed) : new Set(viewed || []);
   const p = String(path || '');
   if (!p) return next;
@@ -262,7 +262,7 @@ export function toggleViewedPath(viewed, path) {
   return next;
 }
 
-export function isPathViewed(viewed, path) {
+export function isPathViewed(viewed: any, path: any) {
   if (!path) return false;
   if (viewed instanceof Set) return viewed.has(path);
   if (Array.isArray(viewed)) return viewed.includes(path);

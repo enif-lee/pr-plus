@@ -30,13 +30,13 @@ export async function postIssueComment(owner: any, repo: any, issueNumber: any, 
  * @param {Array} [comments] pending inline comments for bulk submit
  */
 export async function submitPullReview(
-  owner,
-  repo,
-  pullNumber,
-  { event, body = '', commitId, comments },
-  fetchImpl,
-  token
-, ctx = null) {
+  owner: any,
+  repo: any,
+  pullNumber: any,
+  { event, body = '', commitId, comments }: any,
+  fetchImpl: any,
+  token: any
+, ctx: any = null) {
   ctx = normalizeApiCtx(ctx);
   const payload: any = { event, body: body || '' };
   if (commitId) payload.commit_id = commitId;
@@ -71,9 +71,9 @@ export async function submitPullReview(
  * REST POST /comments creates a second pending review → 422.
  */
 export async function postReviewComment(
-  owner,
-  repo,
-  pullNumber,
+  owner: any,
+  repo: any,
+  pullNumber: any,
   {
     body,
     path,
@@ -87,10 +87,10 @@ export async function postReviewComment(
     /** Optional PRR_… from prior Start review (viewerPendingReview.nodeId) */
     pendingReviewNodeId = null,
     pendingReviewId = null,
-  },
-  fetchImpl,
-  token
-, ctx = null) {
+  }: any,
+  fetchImpl: any,
+  token: any
+, ctx: any = null) {
   ctx = normalizeApiCtx(ctx);
   const text = String(body || '').trim();
   if (!text) throw new Error('Comment body is required');
@@ -206,7 +206,7 @@ export async function postReviewComment(
     subjectType: isFile ? 'file' : 'line',
   };
 
-  async function attachViaGraphql(pendingRow) {
+  async function attachViaGraphql(pendingRow: any) {
     if (!pendingRow?.node_id) return null;
     const nodeId = String(pendingRow.node_id);
     const raw = await postReviewCommentViaPendingGraphql(
@@ -402,13 +402,13 @@ export async function postReviewComment(
  * @returns {Promise<{ id: number, node_id: string|null }|null>}
  */
 export async function replyToReviewComment(
-  owner,
-  repo,
-  pullNumber,
-  commentId,
-  body,
-  fetchImpl,
-  token,
+  owner: any,
+  repo: any,
+  pullNumber: any,
+  commentId: any,
+  body: any,
+  fetchImpl: any,
+  token: any,
   opts: any = {}
 ) {
   const ctx = normalizeApiCtx(opts?.ctx);
@@ -437,7 +437,7 @@ export async function replyToReviewComment(
    * comments: GET /pulls/comments/{id} → 404).
    * Uses ensureViewerPendingReview (create + 422 recover + dead-node re-GET).
    */
-  async function attachReplyToPending({ createIfMissing }) {
+  async function attachReplyToPending({ createIfMissing }: any) {
     const pending = await ensureViewerPendingReview(
       owner,
       repo,

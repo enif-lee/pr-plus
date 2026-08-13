@@ -5,21 +5,21 @@ export function mapApiPullRequest(pr: any) {
   const author = pr.user?.login || '';
   const authorAvatarUrl = pr.user?.avatar_url || '';
   const labels = Array.isArray(pr.labels)
-    ? pr.labels.map((l) => ({
+    ? pr.labels.map((l: any) => ({
         name: l?.name || String(l || ''),
         color: l?.color || '',
         description: l?.description || '',
-      })).filter((l) => l.name)
+      })).filter((l: any) => l.name)
     : [];
   const assignees = Array.isArray(pr.assignees)
-    ? pr.assignees.map((u) => u?.login || u).filter(Boolean)
+    ? pr.assignees.map((u: any) => u?.login || u).filter(Boolean)
     : [];
   const requestedReviewers = Array.isArray(pr.requested_reviewers)
-    ? pr.requested_reviewers.map((u) => u?.login || u).filter(Boolean)
+    ? pr.requested_reviewers.map((u: any) => u?.login || u).filter(Boolean)
     : [];
   /** login → avatar_url for people chips */
-  const avatarUrls = {};
-  const putUser = (u) => {
+  const avatarUrls: Record<string, string> = {};
+  const putUser = (u: any) => {
     const login = u?.login || (typeof u === 'string' ? u : '');
     const url = u?.avatar_url || '';
     if (login && url) avatarUrls[String(login).toLowerCase()] = url;
@@ -82,7 +82,7 @@ export function mapPrCommitRow(c: any) {
 export function commentsPageHelpers() {
   try {
     let mod =
-      typeof globalThis !== 'undefined' ? globalThis.PRModalCommentsPage : null;
+      typeof globalThis !== 'undefined' ? (globalThis as any).PRModalCommentsPage : null;
     if (!mod && typeof require === 'function') {
       try {
         mod = require('./modal/pure/comments-page.js');
@@ -113,7 +113,7 @@ export function mapRestReactions(raw: any) {
   for (const content of DEFS) {
     const count = Number(raw[content]) || 0;
     if (count <= 0) continue;
-    out.push({ content, count, viewerHasReacted: false, users: [] });
+    out.push({ content, count, viewerHasReacted: false, users: [] as any[] });
   }
   return out;
 }
@@ -168,8 +168,8 @@ export function mapGraphqlReactionGroups(groups: any) {
   for (const g of groups) {
     if (!g) continue;
     const content =
-      GQL_REACTION_TO_REST[String(g.content || '').toUpperCase()] ||
-      GQL_REACTION_TO_REST[String(g.content || '')] ||
+      (GQL_REACTION_TO_REST as Record<string, string>)[String(g.content || '').toUpperCase()] ||
+      (GQL_REACTION_TO_REST as Record<string, string>)[String(g.content || '')] ||
       null;
     if (!content) continue;
     const users = extractReactorLogins(g.reactors);
@@ -218,7 +218,7 @@ export function mapIssueComment(c: any) {
   };
 }
 
-export function mapReviewComment(c, extra: any = {}) {
+export function mapReviewComment(c: any, extra: any = {}) {
   const subjectTypeRaw = String(
     extra.subjectType || c.subject_type || c.subjectType || ''
   ).toLowerCase();
@@ -299,7 +299,7 @@ export function mapReviewComment(c, extra: any = {}) {
 /**
  * Map a GraphQL PullRequestReviewComment node (+ parent thread meta) → app shape.
  */
-export function mapGraphqlReviewCommentNode(node, threadMeta: any = {}) {
+export function mapGraphqlReviewCommentNode(node: any, threadMeta: any = {}) {
   if (!node) return null;
   const id = node.databaseId ?? null;
   if (id == null) return null;
@@ -390,7 +390,7 @@ export function extractViewerCanMergeAsAdmin(repo: any): boolean | null {
  * Ensure mergeable/mergeable_state are computed; when dirty, attach conflict paths.
  * @returns {Promise<object>} pr with optional `_conflictFiles`
  */
-export function mapGraphqlReviewCommentToRest(c, fallback: any = {}) {
+export function mapGraphqlReviewCommentToRest(c: any, fallback: any = {}) {
   if (!c) return null;
   return {
     id: c.databaseId ?? fallback.id ?? null,
@@ -459,7 +459,7 @@ export function mapAndAnnotateFiles(files: any, gitattributesText: any = '') {
 
   let filesOut;
   try {
-    let collapse = typeof globalThis !== 'undefined' ? globalThis.PRModalCollapse : null;
+    let collapse = typeof globalThis !== 'undefined' ? (globalThis as any).PRModalCollapse : null;
     if (!collapse && typeof require === 'function') {
       try {
         collapse = require('./modal/pure/collapse.js');

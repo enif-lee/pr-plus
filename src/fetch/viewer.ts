@@ -15,17 +15,17 @@ import {
 } from './mappers';
 
 export async function fetchViewerViewedPaths(
-  owner,
-  repo,
-  pullNumber,
-  fetchImpl,
-  token,
+  owner: any,
+  repo: any,
+  pullNumber: any,
+  fetchImpl: any,
+  token: any,
   opts: any = {}
 ) {
   const apiCtx = normalizeApiCtx(opts?.ctx);
   // No token: do not pretend "zero viewed" — callers must check pullRequestId.
   if (!token) {
-    return { pullRequestId: null, viewedPaths: [], unauthorized: true };
+    return { pullRequestId: null as any, viewedPaths: [] as any[], unauthorized: true };
   }
   const maxPages = Math.max(1, Math.min(20, Number(opts.maxPages) || 5));
   const viewed: string[] = [];
@@ -75,11 +75,11 @@ export async function fetchViewerViewedPaths(
 }
 
 export async function markFileAsViewed(
-  pullRequestId,
-  path,
-  fetchImpl,
-  token,
-  ctx = null
+  pullRequestId: any,
+  path: any,
+  fetchImpl: any,
+  token: any,
+  ctx: any = null
 ) {
   ctx = normalizeApiCtx(ctx);
   const data = await apiGraphql(
@@ -102,11 +102,11 @@ export async function markFileAsViewed(
 }
 
 export async function unmarkFileAsViewed(
-  pullRequestId,
-  path,
-  fetchImpl,
-  token,
-  ctx = null
+  pullRequestId: any,
+  path: any,
+  fetchImpl: any,
+  token: any,
+  ctx: any = null
 ) {
   ctx = normalizeApiCtx(ctx);
   const data = await apiGraphql(
@@ -172,13 +172,13 @@ export async function resolvePullRequestNodeId(owner: any, repo: any, pullNumber
  * @param {string|null|undefined} state SUBSCRIBED | UNSUBSCRIBED | IGNORED
  */
 export async function setIssueSubscription(
-  owner,
-  repo,
-  issueNumber,
-  { subscribed = true, ignored = false, nodeId = null } = {},
-  fetchImpl,
-  token,
-  ctx = null
+  owner: any,
+  repo: any,
+  issueNumber: any,
+  { subscribed = true, ignored = false, nodeId = null }: any = {},
+  fetchImpl: any,
+  token: any,
+  ctx: any = null
 ) {
   ctx = normalizeApiCtx(ctx);
   if (!token) throw new Error('GitHub PAT required for notifications');
@@ -265,7 +265,7 @@ export async function fetchPullRequestSubscription(owner: any, repo: any, pullNu
       // Still surface mergeStateStatus when present
       if (node?.mergeStateStatus) {
         return {
-          subscribed: null,
+          subscribed: null as any,
           mergeStateStatus: String(node.mergeStateStatus || '') || null,
         };
       }
@@ -285,12 +285,12 @@ export async function fetchPullRequestSubscription(owner: any, repo: any, pullNu
 }
 
 export async function uploadRepoFile(
-  owner,
-  repo,
-  { path, contentBase64, message, branch },
-  fetchImpl,
-  token
-, ctx = null) {
+  owner: any,
+  repo: any,
+  { path, contentBase64, message, branch }: any,
+  fetchImpl: any,
+  token: any
+, ctx: any = null) {
   ctx = normalizeApiCtx(ctx);
   if (!path || !contentBase64) throw new Error('path and contentBase64 required');
   const encPath = String(path)
@@ -338,7 +338,7 @@ export async function uploadRepoFile(
  * Fetch a file's text content at a ref (branch or SHA).
  * @returns {{ path: string, ref: string, text: string, sha: string, size: number }}
  */
-export async function getRepoFileText(owner, repo, { path, ref }, fetchImpl, token, ctx = null) {
+export async function getRepoFileText(owner: any, repo: any, { path, ref }: any, fetchImpl: any, token: any, ctx: any = null) {
   ctx = normalizeApiCtx(ctx);
   if (!path) throw new Error('path required');
   const rev = ref || 'HEAD';
@@ -381,12 +381,12 @@ export async function getRepoFileText(owner, repo, { path, ref }, fetchImpl, tok
 }
 
 export async function applyReviewSuggestion(
-  owner,
-  repo,
-  { path, headRef, startLine, endLine, suggestion, message },
-  fetchImpl,
-  token
-, ctx = null) {
+  owner: any,
+  repo: any,
+  { path, headRef, startLine, endLine, suggestion, message }: any,
+  fetchImpl: any,
+  token: any
+, ctx: any = null) {
   ctx = normalizeApiCtx(ctx);
   const ref = headRef || 'HEAD';
   const file = await getRepoFileText(
@@ -400,7 +400,7 @@ export async function applyReviewSuggestion(
   let applyFn = null;
   try {
     let mod =
-      typeof globalThis !== 'undefined' ? globalThis.PRModalPrEditApi : null;
+      typeof globalThis !== 'undefined' ? (globalThis as any).PRModalPrEditApi : null;
     if (!mod && typeof require === 'function') {
       try {
         mod = require('./modal/pure/pr-edit-api.js');

@@ -83,13 +83,16 @@ const MAP = {
   i18n: { lib: 'i18n.ts', global: 'PRModalI18n' },
   'ui-polish': { lib: 'ui-polish.ts', global: 'PRModalUiPolish' },
   'virtual-range': { lib: 'virtual-range.ts', global: 'PRModalVirtualRange' },
+  checks: { lib: 'checks.ts', global: 'PRModalChecks' },
 };
 
 /**
  * Pure remains SoT (lib only re-exports pure, or pure has no lib twin).
  * Do not overwrite these from a thin re-export lib file.
  */
-const PURE_SOT = new Set(['checks', 'detail-merge']);
+const PURE_SOT = new Set(['detail-merge']);
+
+export { MAP, PURE_SOT };
 
 function isReexportOnly(src) {
   const body = src
@@ -135,6 +138,14 @@ function flattenApiAssign(gname) {
 `;
 }
 
+function nodeModuleExport(gname) {
+  return `
+if (typeof module !== 'undefined' && module.exports && typeof globalThis !== 'undefined' && globalThis.${gname}) {
+  module.exports = globalThis.${gname};
+}
+`;
+}
+
 let built = 0;
 let skipped = 0;
 const failures = [];
@@ -149,7 +160,8 @@ for (const [pureName, { lib, global: gname }] of Object.entries(MAP)) {
     continue;
   }
   if (!fs.existsSync(libPath)) {
-    console.warn('skip (no lib):', pureName);
+    failures.push(`${pureName}: missing lib ${lib}`);
+    console.error('missing lib', pureName, lib);
     skipped++;
     continue;
   }
@@ -212,7 +224,8 @@ for (const [pureName, { lib, global: gname }] of Object.entries(MAP)) {
       });
       transformedCode = transformed.code;
       if (/require\s*\(/.test(transformedCode)) {
-        console.warn('skip (emits require):', pureName);
+        failures.push(`${pureName}: leftover require()`);
+        console.error('leftover require()', pureName);
         skipped++;
         continue;
       }
@@ -236,7 +249,7 @@ for (const [pureName, { lib, global: gname }] of Object.entries(MAP)) {
 ${transformedCode}
 ${flattenApiAssign(gname)}
 })(typeof globalThis !== 'undefined' ? globalThis : typeof window !== 'undefined' ? window : this);
-`;
+${nodeModuleExport(gname)}`;
 
   fs.writeFileSync(purePath, file);
   built++;
@@ -246,6 +259,21 @@ ${flattenApiAssign(gname)}
 for (const name of PURE_SOT) {
   if (fs.existsSync(path.join(pureDir, `${name}.js`))) {
     console.log('keep pure-only', name);
+  } else {
+    failures.push(`${name}: missing pure-SoT file`);
+  }
+}
+
+const allowedPure = new Set([
+  ...Object.keys(MAP).map((n) => `${n}.js`),
+  ...[...PURE_SOT].map((n) => `${n}.js`),
+]);
+if (fs.existsSync(pureDir)) {
+  for (const name of fs.readdirSync(pureDir)) {
+    if (!name.endsWith('.js')) continue;
+    if (allowedPure.has(name)) continue;
+    failures.push(`${name}: unused generated pure (not in MAP / PURE_SOT)`);
+    console.error('unused generated pure', name);
   }
 }
 

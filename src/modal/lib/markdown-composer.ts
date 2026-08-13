@@ -72,7 +72,7 @@ export const SLASH_COMMANDS = [
  * @param {string} source
  * @returns {Array<{ type: 'md'|'mermaid', content: string }>}
  */
-export function splitMarkdownSegments(source) {
+export function splitMarkdownSegments(source: any) {
   const text = source == null ? '' : String(source);
   if (!text) return [{ type: 'md', content: '' }];
   const segments = [];
@@ -93,7 +93,7 @@ export function splitMarkdownSegments(source) {
   return segments;
 }
 
-export function hasMermaidFence(source) {
+export function hasMermaidFence(source: any) {
   return splitMarkdownSegments(source).some((s) => s.type === 'mermaid');
 }
 
@@ -101,7 +101,7 @@ export function hasMermaidFence(source) {
  * Detect @mention token at cursor.
  * @returns {{ query: string, start: number, end: number }|null}
  */
-export function detectMentionTrigger(text, cursor) {
+export function detectMentionTrigger(text: any, cursor: any) {
   const s = String(text || '');
   const c = Math.max(0, Math.min(cursor == null ? s.length : cursor, s.length));
   const before = s.slice(0, c);
@@ -115,7 +115,7 @@ export function detectMentionTrigger(text, cursor) {
 /**
  * Detect /slash token at start of line or after whitespace.
  */
-export function detectSlashTrigger(text, cursor) {
+export function detectSlashTrigger(text: any, cursor: any) {
   const s = String(text || '');
   const c = Math.max(0, Math.min(cursor == null ? s.length : cursor, s.length));
   const before = s.slice(0, c);
@@ -130,7 +130,7 @@ export function detectSlashTrigger(text, cursor) {
  * @param {string} query without @
  * @param {Array<string|{login:string}>} candidates
  */
-export function filterMentions(query, candidates) {
+export function filterMentions(query: any, candidates: any) {
   const q = String(query || '').toLowerCase();
   const list = (Array.isArray(candidates) ? candidates : [])
     .map((c) => (typeof c === 'string' ? c : c?.login || c?.name || ''))
@@ -142,7 +142,7 @@ export function filterMentions(query, candidates) {
 /**
  * @param {string} query without leading /
  */
-export function filterSlashCommands(query) {
+export function filterSlashCommands(query: any) {
   const q = String(query || '')
     .toLowerCase()
     .replace(/^\//, '');
@@ -152,7 +152,7 @@ export function filterSlashCommands(query) {
   );
 }
 
-export function applyInsertion(text, start, end, insertion, cursorBias = 0) {
+export function applyInsertion(text: any, start: any, end: any, insertion: any, cursorBias = 0) {
   const s = String(text || '');
   const a = Math.max(0, start);
   const b = Math.max(a, end);
@@ -161,13 +161,13 @@ export function applyInsertion(text, start, end, insertion, cursorBias = 0) {
   return { text: next, cursor };
 }
 
-export function applyMentionInsertion(text, trigger, username) {
+export function applyMentionInsertion(text: any, trigger: any, username: any) {
   if (!trigger) return { text: String(text || ''), cursor: String(text || '').length };
   const insert = `@${username} `;
   return applyInsertion(text, trigger.start, trigger.end, insert);
 }
 
-export function applySlashInsertion(text, trigger, command) {
+export function applySlashInsertion(text: any, trigger: any, command: any) {
   if (!trigger || !command) return { text: String(text || ''), cursor: String(text || '').length };
   return applyInsertion(text, trigger.start, trigger.end, command.insert);
 }

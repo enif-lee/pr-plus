@@ -161,7 +161,7 @@ export function toggleReviewFilter(
   if (current && typeof current === 'object' && !Array.isArray(current)) {
     const o = current as any;
     if (Array.isArray(o.statuses)) {
-      statuses = o.statuses.map(String).map((s) => s.toLowerCase());
+      statuses = o.statuses.map(String).map((s: any) => s.toLowerCase());
     }
     hideOutdated = Boolean(o.hideOutdated);
     if (Array.isArray(o.authors)) authors = o.authors.map(String);

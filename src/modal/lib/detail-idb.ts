@@ -299,6 +299,8 @@ export function sanitizeDetailForCache(detail: any, opts: SanitizeDetailOptions 
     _fetchTimings: _t,
     _metaSeq: _m,
     _dropPending: _dropIgnored,
+    _deletedReviewCommentIds: delIdsIn,
+    _deletedReviewBodies: delBodiesIn,
     files,
     ...rest
   } = detail;
@@ -341,15 +343,15 @@ export function sanitizeDetailForCache(detail: any, opts: SanitizeDetailOptions 
     : [];
   let viewerPendingReview = rest.viewerPendingReview ?? null;
   const deleted = new Set<string>();
-  const delSrc = rest._deletedReviewCommentIds;
+  const delSrc = delIdsIn;
   if (delSrc instanceof Set) {
     for (const id of delSrc) deleted.add(String(id));
   } else if (Array.isArray(delSrc)) {
     for (const id of delSrc) if (id != null) deleted.add(String(id));
   }
   const bodyTombs = new Set<string>(
-    Array.isArray(rest._deletedReviewBodies)
-      ? rest._deletedReviewBodies.map((b: any) => String(b || '').trim()).filter(Boolean)
+    Array.isArray(delBodiesIn)
+      ? delBodiesIn.map((b: any) => String(b || '').trim()).filter(Boolean)
       : []
   );
   if (!hasVpr) {
@@ -400,9 +402,6 @@ export function sanitizeDetailForCache(detail: any, opts: SanitizeDetailOptions 
     reviewThreads: Array.isArray(rest.reviewThreads) ? rest.reviewThreads : [],
     commits: Array.isArray(rest.commits) ? rest.commits : [],
     viewerPendingReview,
-    // Keep id/body tombs for demoted ghosts only — not _dropPending latch.
-    _deletedReviewCommentIds: deleted.size ? [...deleted] : rest._deletedReviewCommentIds,
-    _deletedReviewBodies: bodyTombs.size ? [...bodyTombs] : rest._deletedReviewBodies,
     _cacheFull: wantFull ? true : undefined,
   };
 }

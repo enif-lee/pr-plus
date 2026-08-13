@@ -2,8 +2,8 @@
  * Assemble ordered TypeScript parts into one classic JS artifact.
  * SoT = *.ts under partsDir (prefer over *.js).
  *
- * Mid-IIFE fragments may not parse alone — on transform failure we emit the
- * source body as-is (JS-compatible TypeScript without annotations).
+ * Fail closed: transform errors and `__commonJS` / `require_stdin` wraps
+ * abort the build instead of emitting raw TypeScript.
  */
 import * as esbuild from 'esbuild';
 import fs from 'node:fs';
@@ -12,6 +12,15 @@ import {
   esbuildReleaseExtras,
   maybeStripDebugLogs,
 } from './release-build-options.mjs';
+
+/** True when classic-script emit still looks like TypeScript parameter types. */
+export function hasTypeAnnotationLeak(code) {
+  const sample = String(code || '');
+  return (
+    /:\s*any\b/.test(sample.slice(0, 4000)) &&
+    /function \w+\([^)]*:\s*/.test(sample)
+  );
+}
 
 export async function assembleTsParts({
   partsDir,
@@ -79,16 +88,20 @@ export async function assembleTsParts({
           .replace(/^export\s+(async\s+)?function\s+/gm, 'function ')
           .replace(/^export\s+class\s+/gm, 'class ')
           .replace(/^export\s+(const|let|var)\s+/gm, '$1 ');
-        // If esbuild introduced cjs wrappers (module.exports dual export),
-        // prefer original body — classic multi-script load order needs bare code.
         if (/__commonJS|require_stdin/.test(out)) {
-          chunks.push(code.trimEnd());
-        } else {
-          chunks.push(out.trimEnd());
+          throw new Error(
+            `assembleTsParts: ${f} wrapped as CommonJS (__commonJS/require_stdin)`
+          );
         }
-      } catch {
-        // Mid-IIFE / incomplete fragment: emit as classic script text
-        chunks.push(code.trimEnd());
+        if (hasTypeAnnotationLeak(out)) {
+          throw new Error(`assembleTsParts: type annotations leaked in ${f}`);
+        }
+        chunks.push(out.trimEnd());
+      } catch (err) {
+        if (err && /assembleTsParts:/.test(String(err.message || err))) throw err;
+        throw new Error(
+          `assembleTsParts: transform failed for ${f}: ${err?.message || err}`
+        );
       }
     } else {
       chunks.push(code.trimEnd());

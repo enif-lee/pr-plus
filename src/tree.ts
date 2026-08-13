@@ -6,7 +6,7 @@
  * Child rule: pr.baseRef === parent.headRef within the same acyclic component.
  */
 
-function buildPrTree(prs) {
+function buildPrTree(prs: any) {
   if (!Array.isArray(prs) || prs.length === 0) {
     return [];
   }
@@ -25,7 +25,7 @@ function buildPrTree(prs) {
   }
 
   const rootCache = new Map();
-  function resolveRoot(pr) {
+  function resolveRoot(pr: any) {
     if (rootCache.has(pr)) return rootCache.get(pr);
     const stack = new Set();
     let cur = pr;
@@ -41,7 +41,7 @@ function buildPrTree(prs) {
     return cur;
   }
 
-  const roots = [];
+  const roots: any[] = [];
   const seenRoots = new Set();
   for (const pr of prs) {
     const root = resolveRoot(pr);
@@ -62,9 +62,9 @@ function buildPrTree(prs) {
     childrenByParentHead.get(parent.headRef).push(pr);
   }
 
-  function buildNode(pr) {
+  function buildNode(pr: any) {
     const childPrs = childrenByParentHead.get(pr.headRef) || [];
-    childPrs.sort((a, b) => b.number - a.number);
+    childPrs.sort((a: any, b: any) => b.number - a.number);
     return {
       pr,
       children: childPrs.map(buildNode),
@@ -76,9 +76,9 @@ function buildPrTree(prs) {
 }
 
 /** Flatten forest to depth-first order with depth for rendering. */
-function flattenPrTree(forest) {
-  const result = [];
-  function walk(node, depth) {
+function flattenPrTree(forest: any) {
+  const result: any[] = [];
+  function walk(node: any, depth: any) {
     result.push({ pr: node.pr, depth });
     for (const child of node.children) {
       walk(child, depth + 1);
@@ -91,7 +91,7 @@ function flattenPrTree(forest) {
 }
 
 /** Serialize forest to indented text (for tests / debugging). */
-function serializePrTree(forest) {
+function serializePrTree(forest: any) {
   return flattenPrTree(forest)
     .map(({ pr, depth }) => {
       const indent = '  '.repeat(depth);

@@ -4,7 +4,7 @@
  * and review-comment payload shaping.
  */
 
-export function isSelectableDiffRow(row) {
+export function isSelectableDiffRow(row: any) {
   if (!row || row.kind !== 'diff-line') return false;
   const t = row.lineType;
   // 'change' = split-mode paired del|add on one visual row
@@ -157,7 +157,7 @@ export function beginSelectionOnRow(
   return beginLineSelection(row, preferredSide, resolvedIdx);
 }
 
-export function lineForSide(row, preferredSide = 'RIGHT') {
+export function lineForSide(row: any, preferredSide = 'RIGHT') {
   if (!row) return null;
   if (preferredSide === 'LEFT') {
     if (row.oldLine != null) return { line: Number(row.oldLine), side: 'LEFT' };
@@ -208,7 +208,7 @@ export function lineForSideStrict(
  * @returns {object|null}
  */
 export function beginLineSelection(
-  row,
+  row: any,
   preferredSide = 'RIGHT',
   arrayIndex?: number | null
 ) {
@@ -1513,7 +1513,7 @@ export function jumpSelectionToAdjacentChangeRegion(
  * When the preferred side is missing on a row (pure del while selecting RIGHT),
  * still extend the row range but keep headSide sticky.
  */
-export function extendLineSelection(selection, row) {
+export function extendLineSelection(selection: any, row: any) {
   if (!selection || !isSelectableDiffRow(row)) return selection;
   if (row.filePath !== selection.filePath) return selection;
   const preferred =
@@ -1625,7 +1625,7 @@ export function isOptHeldForPointerDrag(
  *   keepRange: boolean,
  * }}
  */
-export function applySelectionPointerDown(currentSelection, row, opts: any = {}) {
+export function applySelectionPointerDown(currentSelection: any, row: any, opts: any = {}) {
   if (
     shouldUseNativeTextSelectOnDrag({
       altKey: opts?.altKey,
@@ -1688,7 +1688,7 @@ export function applySelectionPointerDown(currentSelection, row, opts: any = {})
  * Order selection ends by visual rowIndex when available (stable for interleaved
  * add/del). Falls back to line number order only when row indices are missing.
  */
-function orderedSelectionEnds(selection) {
+function orderedSelectionEnds(selection: any) {
   const aIdx = Number(selection.anchorRowIndex);
   const hIdx = Number(selection.headRowIndex);
   const hasRows = Number.isFinite(aIdx) && Number.isFinite(hIdx);
@@ -1724,7 +1724,7 @@ function orderedSelectionEnds(selection) {
   };
 }
 
-export function normalizeSelection(selection) {
+export function normalizeSelection(selection: any) {
   if (!selection) return null;
   // File-level comment target (no line range)
   if (selection.kind === 'file' || selection.subjectType === 'file') {
@@ -1759,8 +1759,8 @@ export function normalizeSelection(selection) {
       commentId: selection.commentId,
       anchorRowIndex: selection.anchorRowIndex ?? null,
       headRowIndex: selection.headRowIndex ?? null,
-      startRowIndex: null,
-      endRowIndex: null,
+      startRowIndex: null as any,
+      endRowIndex: null as any,
     };
   }
   const ends = orderedSelectionEnds(selection);
@@ -1784,7 +1784,7 @@ export function normalizeSelection(selection) {
  * @param {object} selection begin/extend result
  * @param {{ body: string, commitId?: string }} opts
  */
-export function selectionToCommentPayload(selection, opts: any = {
+export function selectionToCommentPayload(selection: any, opts: any = {
   // typed loosely for mutable REST payloads
 }) {
   const norm = normalizeSelection(selection);
@@ -1822,7 +1822,7 @@ export function selectionToCommentPayload(selection, opts: any = {
  * @param {object|null} selection
  * @param {'click'|'drag'|'shift'} mode
  */
-export function finalizeSelection(selection, mode) {
+export function finalizeSelection(selection: any, mode: any) {
   if (!selection) return null;
   // Structural carets have no line range to collapse
   if (isFileLevelSelection(selection) || isThreadSelection(selection)) {
@@ -1847,7 +1847,7 @@ export function finalizeSelection(selection, mode) {
  * @param {number} [thresholdPx=4]
  * @returns {'click'|'drag'}
  */
-export function selectionGestureMode(start, end, thresholdPx = 4) {
+export function selectionGestureMode(start: any, end: any, thresholdPx = 4) {
   if (!start || !end) return 'click';
   const dx = Math.abs(Number(end.x) - Number(start.x));
   const dy = Math.abs(Number(end.y) - Number(start.y));
@@ -1977,7 +1977,7 @@ export function rebindSelectionRowIndices(
  * **Single-line caret: line+side identity first** (survives comment-row renumber).
  * Multi-line: rowIndex range after rebind; line range as fallback.
  */
-export function isRowInSelection(selection, row) {
+export function isRowInSelection(selection: any, row: any) {
   if (!selection || !row) return false;
   const selPath = String(selection.filePath || '').trim();
   const rowPath = String(row.filePath || row.path || '').trim();
@@ -2034,7 +2034,7 @@ export function isRowInSelection(selection, row) {
  * Position of a selected row inside a multi-line selection block for CSS edges.
  * @returns {null|'only'|'start'|'middle'|'end'}
  */
-export function selectionBlockRole(selection, row) {
+export function selectionBlockRole(selection: any, row: any) {
   if (!isRowInSelection(selection, row)) return null;
   const a = Number(selection.anchorRowIndex);
   const h = Number(selection.headRowIndex);
@@ -2173,7 +2173,7 @@ function codeTextFromDiffRow(row: any, preferRight: boolean): string {
  * - File selection: **entire file** body (all selectable lines for that path)
  * Uses RIGHT (new) content when endSide is RIGHT, else LEFT (old).
  */
-export function extractSelectedCodeText(virtualRows, selection) {
+export function extractSelectedCodeText(virtualRows: any, selection: any) {
   const norm = normalizeSelection(selection);
   if (!norm) return '';
   const list = Array.isArray(virtualRows) ? virtualRows : [];

@@ -9,6 +9,7 @@ import {
   ENTERPRISE_CS_ID,
   CONTENT_SCRIPT_JS,
 } from './sw-enterprise';
+import { isSwMessage, type SwMessage } from '../sw-messages';
 import {
   isAbortError,
   withServiceWorkerKeepAlive,
@@ -21,7 +22,7 @@ export { ENTERPRISE_CS_ID, CONTENT_SCRIPT_JS };
  * Stateless API context from RPC message (webHost from content page).
  * No process-global mutation — pass returned ctx into every PRTreeFetch call.
  */
-export async function handleMessage(message: any): Promise<any> {
+export async function handleMessage(message: SwMessage): Promise<unknown> {
   const a = await handleMessagePartA(message);
   if (a !== undefined) return a;
   return handleMessagePartB(message);
@@ -32,13 +33,13 @@ export async function handleMessage(message: any): Promise<any> {
  * Lost during SW split — without this, popup/content get
  * "Receiving end does not exist" / Background worker offline.
  */
-chrome.runtime.onMessage.addListener((message, _sender) => {
+chrome.runtime.onMessage.addListener((message: any, _sender: any) => {
   // Fire-and-forget broadcasts: content scripts listen; no reply expected.
-  if (message?.type === MSG.TOKEN_CHANGED) {
+  if (isSwMessage(message) && message.type === MSG.TOKEN_CHANGED) {
     return false;
   }
 
-  if (!message || typeof message.type !== 'string') {
+  if (!isSwMessage(message)) {
     return Promise.resolve({ ok: false, error: 'invalid message' });
   }
 

@@ -1,14 +1,14 @@
 // TypeScript SoT — assembled by build scripts (classic runtime JS emit)
 
   const HOST_ID = 'prp-modal-host';
-  let reactRoot = null;
+  let reactRoot: any = null;
   /** DOM node the current reactRoot is bound to (soft-nav may replace it). */
-  let reactRootHost = null;
+  let reactRootHost: any = null;
   /** When false (no PAT), click intercept is idle — native GitHub navigation works. */
   let hostEnabled = false;
   /** Soft-nav poll / listeners for PR page embed */
   let embedWatchInstalled = false;
-  let lastEmbedPath = null;
+  let lastEmbedPath: any = null;
   /**
    * Once-per-PR auto-open latch (document lifetime / until leave-PR).
    * After first evaluation for `owner/repo#n`, location/hash/tab events must
@@ -16,7 +16,7 @@
    * Manual open and pref false→true (force) bypass.
    * @type {string|null}
    */
-  let autoOpenEvaluatedPrKey = null;
+  let autoOpenEvaluatedPrKey: any = null;
   /**
    * Open-session generation for progressive data apply (core/threads/sides).
    * Bumped on new open / hard supersede / close — NOT on meta write-through.
@@ -41,7 +41,7 @@
    *   fields: Record<string, unknown>,
    * }}
    */
-  let lastPeopleMetaAuthority = null;
+  let lastPeopleMetaAuthority: any = null;
   /**
    * People-meta write-through key.
    * - sessionStorage: soft close/reopen same tab (sync first paint)
@@ -70,7 +70,7 @@
     return parsed as any;
   }
 
-  function persistPeopleMetaAuthority(auth) {
+  function persistPeopleMetaAuthority(auth: any) {
     // Sync page sessionStorage
     try {
       if (typeof sessionStorage !== 'undefined') {
@@ -154,7 +154,7 @@
    * Aborted on closeModal / new open so SW cancels in-flight GitHub fetches.
    * @type {AbortController|null}
    */
-  let openFetchAbort = null;
+  let openFetchAbort: any = null;
   const DEFAULT_TIMELINE_VISIBILITY = {
     labels: true,
     title: true,
@@ -261,7 +261,7 @@
   }
 
   let prefs = { ...DEFAULT_PREFS };
-  let prefsWatchUnsub = null;
+  let prefsWatchUnsub: any = null;
 
   let current: any = {
     open: false,

@@ -332,7 +332,7 @@ function touchGithubCommandPaletteOpen(doc: any, now: any = Date.now()) {
  * @param {Document|null|undefined} doc
  * @param {{ target?: EventTarget|null, now?: number, graceMs?: number }} [opts]
  */
-function shouldIgnoreModalEscapeForGithubPalette(doc, opts: any = {}) {
+function shouldIgnoreModalEscapeForGithubPalette(doc: any, opts: any = {}) {
   const now = Number.isFinite(opts.now) ? opts.now : Date.now();
   const grace = Number.isFinite(opts.graceMs)
     ? Math.max(0, opts.graceMs)
@@ -538,7 +538,7 @@ function unwrapPrListAction(resolved: any) {
  * @param {Element[]} rows
  * @param {{ focusNumber?: number|null, focusClass?: string, getNumber?: (row: Element) => number }} opts
  */
-function findFocusIndex(rows, opts: any = {}) {
+function findFocusIndex(rows: any, opts: any = {}) {
   const list = Array.isArray(rows) ? rows : [];
   if (list.length === 0) return -1;
   const focusClass = opts.focusClass || PR_LIST_FOCUS_CLASS;
@@ -563,7 +563,7 @@ function findFocusIndex(rows, opts: any = {}) {
  * Apply focus class to rows[index]; clear others.
  * @returns {Element|null}
  */
-function applyFocusToRows(rows, index, opts: any = {}) {
+function applyFocusToRows(rows: any, index: any, opts: any = {}) {
   const list = Array.isArray(rows) ? rows : [];
   const focusClass = opts.focusClass || PR_LIST_FOCUS_CLASS;
   for (const row of list) {
@@ -623,7 +623,7 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = prListFocusApi;
 }
 if (typeof globalThis !== 'undefined') {
-  globalThis.PRListFocus = prListFocusApi;
+  (globalThis as any).PRListFocus = prListFocusApi;
 }
 
 // ESM named exports for unit tests / TypeScript imports

@@ -147,7 +147,7 @@ export function estimateInlineCommentHeight(
  *   expandedCodeLineHeight?: (row: any, opts: any) => number | null,
  * } | null | undefined} [opts]
  */
-export function rowHeightFor(row, opts: any = null) {
+export function rowHeightFor(row: any, opts: any = null) {
   // Measured heights win for any variable row (comments, images, expanded lines).
   // For comments, ignore a stale expanded measure while collapsed (RO will re-publish).
   const measureKey = diffRowMeasureKey(row, opts);
@@ -216,7 +216,7 @@ export function rowHeightFor(row, opts: any = null) {
   return ROW_HEIGHT;
 }
 
-export function averageRowHeight(rows, opts: any = null) {
+export function averageRowHeight(rows: any, opts: any = null) {
   if (!rows?.length) return ROW_HEIGHT;
   let sum = 0;
   for (const r of rows) sum += rowHeightFor(r, opts);
@@ -237,7 +237,7 @@ export function rowOffsets(rows: any[] | null | undefined, opts: any = null): nu
   return offsets;
 }
 
-export function escapeHtml(s) {
+export function escapeHtml(s: any) {
   return String(s)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -451,7 +451,7 @@ export function clearHighlightCodeCacheForLang(lang: unknown) {
   }
 }
 
-export function renderMdHtml(raw, linkCtx) {
+export function renderMdHtml(raw: any, linkCtx: any) {
   try {
     const md = (globalThis as any).marked;
     const purify = (globalThis as any).DOMPurify;
@@ -494,13 +494,13 @@ export function renderMdHtml(raw, linkCtx) {
   }
 }
 
-export function avatarInitials(login) {
+export function avatarInitials(login: any) {
   const s = String(login || '?').trim();
   if (!s) return '?';
   return s.slice(0, 2).toUpperCase();
 }
 
-export function formatWhen(iso) {
+export function formatWhen(iso: any) {
   if (!iso) return '';
   try {
     return new Date(iso).toLocaleString();
@@ -509,7 +509,7 @@ export function formatWhen(iso) {
   }
 }
 
-export function reviewStatusTone(status) {
+export function reviewStatusTone(status: any) {
   const s = String(status || '').toUpperCase();
   if (s === 'APPROVED') return 'ok';
   if (s === 'CHANGES_REQUESTED') return 'danger';

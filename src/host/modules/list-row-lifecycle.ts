@@ -1,6 +1,6 @@
 // TypeScript SoT — assembled by build scripts (classic runtime JS emit)
 
-  function openPullsListRowAt(index) {
+  function openPullsListRowAt(index: any) {
     const rows = getPullsListRows();
     if (index < 0 || index >= rows.length) return false;
     const row = rows[index];
@@ -41,7 +41,7 @@
       const candidates = document.querySelectorAll(
         'a[href*="/compare"], a.btn-primary, button.btn-primary, a.Button--primary'
       );
-      let fallback = null;
+      let fallback: any = null;
       for (const el of candidates) {
         const t = String(el.textContent || '')
           .replace(/\s+/g, ' ')
@@ -72,7 +72,7 @@
     return null;
   }
 
-  function findRowTitleAnchor(row) {
+  function findRowTitleAnchor(row: any) {
     if (!row?.querySelector) return null;
     return (
       row.querySelector('a.js-navigation-open') ||
@@ -82,7 +82,7 @@
     );
   }
 
-  function cleanControlLabel(el) {
+  function cleanControlLabel(el: any) {
     return String(el?.textContent || '')
       .replace(/\s+/g, ' ')
       .replace(/⌥⇧?[A-Z0-9]/gi, '')
@@ -120,7 +120,7 @@
         const text = cleanControlLabel(el);
         const def = matchFn
           ? matchFn(text)
-          : defs.find((d) => d.match?.test?.(text));
+          : defs.find((d: any) => d.match?.test?.(text));
         if (!def || seen.has(def.id)) continue;
         seen.add(def.id);
         found.push({ el, def });
@@ -131,7 +131,7 @@
   }
 
   /** Dispatch a full click sequence so GH SelectMenu / details open reliably. */
-  function clickControl(el) {
+  function clickControl(el: any) {
     if (!el) return false;
     try {
       el.focus?.({ preventScroll: true });
@@ -172,7 +172,7 @@
     }
   }
 
-  function activateFilterBar(filterId) {
+  function activateFilterBar(filterId: any) {
     // Filters ▾ open/close (toggle)
     if (filterId === 'filters-menu') {
       return toggleFiltersMenu();
@@ -211,7 +211,7 @@
    * While Option is held: show list hotkeys + filter-bar ⌥⇧ shortcuts + ⌥⇧N.
    * Filter badges are CSS-positioned on each control (scroll-follow for free).
    */
-  function setPullsListHotkeyHints(visible) {
+  function setPullsListHotkeyHints(visible: any) {
     const api = listFocusApi();
     const slots =
       (api && api.PR_LIST_HOTKEY_SLOTS) ||
@@ -227,7 +227,7 @@
     const labelFn =
       typeof api?.prListHotkeyLabel === 'function'
         ? api.prListHotkeyLabel
-        : (i) => slots[i] || null;
+        : (i: any) => slots[i] || null;
 
     if (!visible) {
       try {
@@ -336,7 +336,7 @@
     setPullsListHotkeyHints(false);
   }
 
-  function stepPullsListFocus(delta) {
+  function stepPullsListFocus(delta: any) {
     const api = listFocusApi();
     const rows = getPullsListRows();
     if (rows.length === 0) return false;
@@ -376,7 +376,7 @@
   }
 
   /** Escape race: GH often closes its palette before our listener runs. */
-  function githubPaletteOwnsEscape(event) {
+  function githubPaletteOwnsEscape(event: any) {
     const api = listFocusApi();
     if (typeof api?.shouldIgnoreModalEscapeForGithubPalette === 'function') {
       try {

@@ -4,8 +4,10 @@
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "strict": false,
-    "noImplicitAny": false,
+    "strict": true,
+    "noImplicitAny": true,
+    "useUnknownInCatchVariables": false,
+    "strictNullChecks": false,
     "noEmit": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
@@ -15,7 +17,6 @@
   },
   "include": [
     "src/extension-globals.d.ts",
-    "src/fetch/fetch-api.ts",
-    "src/fetch/fetch-shims.d.ts"
+    "src/fetch/**/*.ts"
   ]
 }

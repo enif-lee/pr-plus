@@ -443,6 +443,25 @@ export function isEditableKeyboardTarget(
 }
 
 /**
+ * When no shortcut resolved, still swallow bare ↑/↓ so a held arrow cannot
+ * native-scroll the conversation away after a multi-reply clamp. Never steal
+ * caret movement from a text-entry target (reply composer, search, title edit).
+ */
+export function shouldPreventConvArrowFallback(opts: {
+  liveConvFocus?: boolean;
+  editable?: boolean;
+  alt?: boolean;
+  mod?: boolean;
+  shift?: boolean;
+  key?: string;
+} = {}): boolean {
+  if (!opts.liveConvFocus || opts.editable) return false;
+  if (opts.alt || opts.mod || opts.shift) return false;
+  const key = String(opts.key || '');
+  return key === 'ArrowUp' || key === 'ArrowDown';
+}
+
+/**
  * Opt-hold badge slots for PR modal chrome (stack digits, adjacent, step-nav).
  * Pure mapping for UI + tests.
  *

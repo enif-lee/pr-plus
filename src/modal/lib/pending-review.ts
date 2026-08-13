@@ -17,14 +17,14 @@
  */
 
 export function createEmptyPendingReview() {
-  return { comments: [], body: '' };
+  return { comments: [] as any[], body: '' };
 }
 
 /**
  * @param {{ comments?: PendingComment[], body?: string }|null} batch
  * @param {PendingComment} comment
  */
-export function addPendingComment(batch, comment) {
+export function addPendingComment(batch: any, comment: any) {
   const base = batch && Array.isArray(batch.comments) ? batch : createEmptyPendingReview();
   const body = String(comment?.body || '').trim();
   if (!body || !comment?.path || comment.line == null) {
@@ -74,12 +74,12 @@ export function formatStartReviewError(err: any): string {
   return locked ? LOCKED_PR_START_REVIEW_MSG : raw;
 }
 
-export function setPendingReviewBody(batch, body) {
+export function setPendingReviewBody(batch: any, body: any) {
   const base = batch && Array.isArray(batch.comments) ? batch : createEmptyPendingReview();
   return { ...base, body: String(body || '') };
 }
 
-export function pendingReviewCount(batch) {
+export function pendingReviewCount(batch: any) {
   return Array.isArray(batch?.comments) ? batch.comments.length : 0;
 }
 
@@ -87,7 +87,7 @@ export function pendingReviewCount(batch) {
  * CTA label for pending batch: empty → "Start review", else "Add comment".
  * @param {{ comments?: unknown[] }|null} batch
  */
-export function pendingReviewCtaLabel(batch) {
+export function pendingReviewCtaLabel(batch: any) {
   return pendingReviewCount(batch) > 0 ? 'Add comment' : 'Start review';
 }
 
@@ -157,14 +157,14 @@ export function pendingAttachCtaLabel(input: ViewerPendingGateInput): string {
  * @param {{ comments?: PendingComment[], body?: string }} batch
  * @param {{ event: 'COMMENT'|'APPROVE'|'REQUEST_CHANGES', commitId?: string, body?: string }} opts
  */
-export function buildPendingReviewSubmitPayload(batch, opts: any = {
+export function buildPendingReviewSubmitPayload(batch: any, opts: any = {
   // typed loosely for mutable REST payloads
 }) {
   const event = opts.event || 'COMMENT';
   if (!['COMMENT', 'APPROVE', 'REQUEST_CHANGES'].includes(event)) {
     return null;
   }
-  const comments = (batch?.comments || []).map((c) => {
+  const comments = (batch?.comments || []).map((c: any) => {
     const row: any = {
       path: c.path,
       body: c.body,

@@ -21,7 +21,7 @@ import {
 
 export function mergePrSearchResults(cacheHits: any, asyncHits: any) {
   const byNum = new Map();
-  const order = [];
+  const order: any[] = [];
   const push = (pr: any) => {
     if (!pr || typeof pr !== 'object') return;
     const n = Number(pr.number);
@@ -56,7 +56,7 @@ export function mergePrSearchResults(cacheHits: any, asyncHits: any) {
  *   prSearchError?: string|null,
  * }} opts
  */
-export function buildPullsPaletteItems(prs, opts: any = {}) {
+export function buildPullsPaletteItems(prs: any, opts: any = {}) {
   const owner = String(opts.owner || '').trim();
   const repo = String(opts.repo || '').trim();
   const origin = String(opts.webOrigin || 'https://github.com').replace(
@@ -75,7 +75,7 @@ export function buildPullsPaletteItems(prs, opts: any = {}) {
     const asyncHits = matchCachedPrsForSearch(rawAsync, prSearch.term);
     const merged = mergePrSearchResults(cacheHits, asyncHits);
     /** @type {Array<object>} */
-    const items = [];
+    const items: any[] = [];
     if (opts.prSearchLoading) {
       items.push({
         id: 'pr-search-loading',
@@ -182,7 +182,7 @@ export function buildPullsPaletteItems(prs, opts: any = {}) {
     owner && repo ? `${origin}/${owner}/${repo}/compare` : `${origin}/`;
 
   /** @type {Array<object>} */
-  const items = [];
+  const items: any[] = [];
 
   // Peer action rows (create / filters) — only when query matches; same shape as PRs
   for (const def of PULLS_PALETTE_ACTIONS) {
@@ -454,14 +454,14 @@ export function resolveActivateIndex(items: any, focusIndex: any, query: any) {
     }
     // Any action with exact alias match (np, ff, …)
     const byAlias = list.findIndex((it) =>
-      (it?.aliases || []).some((a) => String(a).toLowerCase() === q)
+      (it?.aliases || []).some((a: any) => String(a).toLowerCase() === q)
     );
     if (byAlias >= 0) return byAlias;
     // New PR aliases (fallback)
     const createIdx = list.findIndex((it) => it?.action === 'createPullRequest');
     if (createIdx >= 0) {
       const aliases = list[createIdx].aliases || ['np', 'new'];
-      if (aliases.some((a) => String(a).toLowerCase() === q)) return createIdx;
+      if (aliases.some((a: any) => String(a).toLowerCase() === q)) return createIdx;
     }
   }
   const cur = Number(focusIndex);
@@ -540,7 +540,7 @@ export function listRequiredPullsPaletteShortcutCoverage() {
 /**
  * Build GitHub compare / new PR URL for repo.
  */
-export function buildCreatePullRequestUrl(owner, repo, webOrigin = 'https://github.com') {
+export function buildCreatePullRequestUrl(owner: any, repo: any, webOrigin = 'https://github.com') {
   const o = String(owner || '').trim();
   const r = String(repo || '').trim();
   const origin = String(webOrigin || 'https://github.com').replace(/\/+$/, '');
@@ -580,9 +580,9 @@ export function githubQueryForFilter(filterId: any) {
  * @returns {string}
  */
 export function buildPullsListFilterUrl(
-  owner,
-  repo,
-  filterId,
+  owner: any,
+  repo: any,
+  filterId: any,
   webOrigin = 'https://github.com'
 ) {
   const o = String(owner || '').trim();
@@ -603,7 +603,7 @@ export function buildPullsListFilterUrl(
     return pullsBase;
   }
 
-  const pathByFilter = {
+  const pathByFilter: Record<string, string> = {
     am: `${pullsBase}/assigned/@me`,
     cm: `${pullsBase}/created_by/@me`,
     hr: `${pullsBase}/review-requested/@me`,
@@ -692,5 +692,5 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = pullsPaletteApi;
 }
 if (typeof globalThis !== 'undefined') {
-  globalThis.PRPullsPalette = pullsPaletteApi;
+  (globalThis as any).PRPullsPalette = pullsPaletteApi;
 }

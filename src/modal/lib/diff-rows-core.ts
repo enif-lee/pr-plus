@@ -45,8 +45,8 @@ export function buildGithubRawUrl(opts: any = {}) {
  * }} [options]
  * @returns {Array<object>}
  */
-export function flattenFilesToVirtualRows(files, mode = 'unified', options: any = {}) {
-  const rows = [];
+export function flattenFilesToVirtualRows(files: any, mode = 'unified', options: any = {}) {
+  const rows: any[] = [];
   if (!Array.isArray(files)) return rows;
   const split = mode === 'split';
   const collapsedSet = toSet(options.collapsedPaths);
@@ -62,7 +62,7 @@ export function flattenFilesToVirtualRows(files, mode = 'unified', options: any 
   const placedIds = new Set();
   let index = 0;
 
-  const pushInline = (path, c, n, o) => {
+  const pushInline = (path: any, c: any, n: any, o: any) => {
     if (!c || c.id == null) return;
     const id = String(c.id);
     if (placedIds.has(id)) return;
@@ -93,7 +93,7 @@ export function flattenFilesToVirtualRows(files, mode = 'unified', options: any 
     });
   };
 
-  const pushFileLevelComments = (path) => {
+  const pushFileLevelComments = (path: any) => {
     for (const c of rootsByPath.get(path) || []) {
       if (isFileLevelComment(c)) pushInline(path, c, null, null);
     }
@@ -231,11 +231,11 @@ export function flattenFilesToVirtualRows(files, mode = 'unified', options: any 
      * same visual row (GitHub-style side-by-side). Context flushes first.
      * @type {Array<{ line: string, o: number|null, n: number|null }>}
      */
-    const pendingDels = [];
+    const pendingDels: any[] = [];
     /** @type {Array<{ line: string, o: number|null, n: number|null }>} */
-    const pendingAdds = [];
+    const pendingAdds: any[] = [];
 
-    const attachInlineComments = (o, n) => {
+    const attachInlineComments = (o: any, n: any) => {
       if (n != null) {
         for (const c of commentsByKey.get(commentLineKey(path, 'RIGHT', n)) || []) {
           pushInline(path, c, n, o);
@@ -248,7 +248,7 @@ export function flattenFilesToVirtualRows(files, mode = 'unified', options: any 
       }
     };
 
-    const emitSplitRow = (leftType, left, o, rightType, right, n, raw) => {
+    const emitSplitRow = (leftType: any, left: any, o: any, rightType: any, right: any, n: any, raw: any) => {
       const text = `${String(o ?? '').padStart(4)} │ ${left} │ ${String(n ?? '').padStart(4)} │ ${right}`;
       let lineType = 'context';
       if (leftType === 'del' && rightType === 'add') lineType = 'change';
@@ -298,7 +298,7 @@ export function flattenFilesToVirtualRows(files, mode = 'unified', options: any 
       pendingAdds.length = 0;
     };
 
-    const pushDiffLine = (lineType, line, o, n) => {
+    const pushDiffLine = (lineType: any, line: any, o: any, n: any) => {
       // Split: buffer del/add so consecutive change runs share a row
       if (split && (lineType === 'del' || lineType === 'add')) {
         if (lineType === 'del') {
@@ -341,7 +341,7 @@ export function flattenFilesToVirtualRows(files, mode = 'unified', options: any 
      * Emit already-expanded context lines in a gap; return remaining unexpanded
      * meta for the @@ hunk control (no separate expand row).
      */
-    const materializeGap = (gapStartNew, gapEndNew, gapStartOld) => {
+    const materializeGap = (gapStartNew: any, gapEndNew: any, gapStartOld: any) => {
       if (
         !Number.isFinite(gapStartNew) ||
         !Number.isFinite(gapEndNew) ||
@@ -515,7 +515,7 @@ export function flattenFilesToVirtualRows(files, mode = 'unified', options: any 
  * @param {number} start
  * @param {number} end
  */
-export function coveringRange(ranges, line) {
+export function coveringRange(ranges: any, line: any) {
   if (!Array.isArray(ranges)) return null;
   for (const r of ranges) {
     if (r && line >= r.start && line <= r.end) return r;
@@ -523,7 +523,7 @@ export function coveringRange(ranges, line) {
   return null;
 }
 
-export function toRangeMap(input) {
+export function toRangeMap(input: any) {
   const map = new Map();
   if (!input) return map;
   if (input instanceof Map) {
@@ -540,7 +540,7 @@ export function toRangeMap(input) {
   return map;
 }
 
-export function toLinesMap(input) {
+export function toLinesMap(input: any) {
   const map = new Map();
   if (!input) return map;
   if (input instanceof Map) {
@@ -557,19 +557,19 @@ export function toLinesMap(input) {
   return map;
 }
 
-export function toSet(paths) {
+export function toSet(paths: any) {
   if (!paths) return new Set();
   if (paths instanceof Set) return paths;
   return new Set(Array.isArray(paths) ? paths : []);
 }
 
 /** Placement key for an inline review root: path + side + line. */
-export function commentLineKey(path, side, line) {
+export function commentLineKey(path: any, side: any, line: any) {
   const s = String(side || 'RIGHT').toUpperCase() === 'LEFT' ? 'LEFT' : 'RIGHT';
   return `${path}:${s}:${Number(line)}`;
 }
 
-export function commentSide(c) {
+export function commentSide(c: any) {
   return String(c?.side || 'RIGHT').toUpperCase() === 'LEFT' ? 'LEFT' : 'RIGHT';
 }
 
@@ -577,7 +577,7 @@ export function commentSide(c) {
  * Line used for anchoring on the current diff.
  * Prefer live `line`; fall back to `originalLine` (outdated threads).
  */
-export function commentAnchorLine(c) {
+export function commentAnchorLine(c: any) {
   if (c == null) return null;
   if (isFileLevelComment(c)) return null;
   if (c.line != null && Number.isFinite(Number(c.line))) return Number(c.line);
@@ -593,7 +593,7 @@ export function commentAnchorLine(c) {
 /**
  * GitHub file-level review comment (subject_type: file) — no line anchor.
  */
-export function isFileLevelComment(c) {
+export function isFileLevelComment(c: any) {
   if (!c || !c.path) return false;
   const st = String(c.subjectType || c.subject_type || '').toLowerCase();
   if (st === 'file') return true;
@@ -609,7 +609,7 @@ export function isFileLevelComment(c) {
 /**
  * Top Y of virtual row `i` (prefix offsets or uniform rowHeight).
  */
-export function rowTopY(offsets, i, rowHeight = 22) {
+export function rowTopY(offsets: any, i: any, rowHeight = 22) {
   if (Array.isArray(offsets) && offsets.length > 0) {
     const y = Number(offsets[i]);
     if (Number.isFinite(y)) return y;
@@ -627,7 +627,7 @@ export function rowTopY(offsets, i, rowHeight = 22) {
  * @param {number} [rowHeight=22] fallback when offsets missing
  * @returns {object|null}
  */
-export function isReplyComment(c, byId) {
+export function isReplyComment(c: any, byId: any) {
   const parentId = c?.inReplyToId ?? c?.in_reply_to_id ?? null;
   return parentId != null && byId.has(String(parentId));
 }
@@ -638,7 +638,7 @@ export function isReplyComment(c, byId) {
  *
  * Also indexes legacy key `path:line` for RIGHT-side only (older call sites/tests).
  */
-export function groupComments(comments) {
+export function groupComments(comments: any) {
   const map = new Map();
   if (!Array.isArray(comments)) return map;
   const byId = new Map();
@@ -663,7 +663,7 @@ export function groupComments(comments) {
 }
 
 /** Root review comments grouped by file path (for orphan / no-patch placement). */
-export function rootCommentsByPath(comments) {
+export function rootCommentsByPath(comments: any) {
   const map = new Map();
   if (!Array.isArray(comments)) return map;
   const byId = new Map();
@@ -682,7 +682,7 @@ export function rootCommentsByPath(comments) {
 /**
  * Map of filePath -> first rowIndex for file tree jump.
  */
-export function fileStartIndexMap(virtualRows) {
+export function fileStartIndexMap(virtualRows: any) {
   const map = new Map();
   if (!Array.isArray(virtualRows)) return map;
   for (const row of virtualRows) {
@@ -697,7 +697,7 @@ export function fileStartIndexMap(virtualRows) {
  * Guess highlight.js language id from path (must match registered langs in main.tsx).
  * @param {string} filePath
  */
-export function languageFromPath(filePath) {
+export function languageFromPath(filePath: any) {
   const p = (filePath || '').toLowerCase();
   const base = p.split('/').pop() || '';
   // Bare / special filenames

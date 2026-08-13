@@ -497,7 +497,7 @@ function InlineThreadImpl(props: any) {
           aria-label="Copy comment text"
           data-prp-copy-comment="1"
           data-prp-comment-id={id != null ? String(id) : undefined}
-          onClick={() => void copyCommentBody(commentBody, id)}
+          onClick={(): any => void copyCommentBody(commentBody, id)}
         >
           <IconCopy size={13} />
         </CommentActionIconBtn>
@@ -510,7 +510,7 @@ function InlineThreadImpl(props: any) {
             aria-label="Copy link to comment"
             data-prp-copy-comment-link="1"
             data-prp-comment-id={id != null ? String(id) : undefined}
-            onClick={() => void copyCommentLink(id)}
+            onClick={(): any => void copyCommentLink(id)}
           >
             <IconLink size={13} />
           </CommentActionIconBtn>
@@ -1290,7 +1290,7 @@ function InlineThreadImpl(props: any) {
                       loading={Boolean(actionBusy)}
                       disabled={!String(replyText || '').trim()}
                       tabIndex={-1}
-                      onMouseDown={(e) => {
+                      onMouseDown={(e: any) => {
                         // Keep composer focus so actions row does not unmount mid-click
                         e.preventDefault();
                       }}
@@ -1335,7 +1335,7 @@ function InlineThreadImpl(props: any) {
                     loading={Boolean(actionBusy)}
                     disabled={!String(replyText || '').trim()}
                     tabIndex={-1}
-                    onMouseDown={(e) => {
+                    onMouseDown={(e: any) => {
                       e.preventDefault();
                     }}
                     onClick={() =>
@@ -1381,7 +1381,7 @@ function InlineThreadImpl(props: any) {
                       size="sm"
                       disabled={actionBusy || !resolveThreadNodeId}
                       tabIndex={-1}
-                      onMouseDown={(e) => {
+                      onMouseDown={(e: any) => {
                         // Prevent reply textarea blur → actions hide before click
                         e.preventDefault();
                       }}

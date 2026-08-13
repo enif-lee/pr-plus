@@ -30,9 +30,9 @@ function parseRepoFromPathname(pathname: any) {
 
 function queryAllPrRows(doc: any) {
   const seen = new Set();
-  const rows = [];
+  const rows: any[] = [];
   for (const selector of PR_ROW_SELECTORS) {
-    let matches;
+    let matches: any;
     try {
       matches = doc.querySelectorAll(selector);
     } catch {
@@ -58,7 +58,7 @@ function selectPrimaryRowGroup(rows: any) {
     if (!byParent.has(parent)) byParent.set(parent, []);
     byParent.get(parent).push(row);
   }
-  let best = [];
+  let best: any[] = [];
   for (const group of byParent.values()) {
     if (group.length > best.length) best = group;
   }
@@ -103,7 +103,7 @@ function getPrNumberFromRow(row: any) {
 }
 
 function collectPagePrNumbers(doc: any) {
-  const numbers = [];
+  const numbers: any[] = [];
   const seen = new Set();
   for (const row of findOriginalPrRows(doc)) {
     const num = getPrNumberFromRow(row);
@@ -137,10 +137,10 @@ function findPrListContainer(doc: any) {
 }
 
 function buildDepthAndOrderMaps(forest: any) {
-  const treeApi = globalThis.PRTree;
+  const treeApi = (globalThis as any).PRTree;
   const flat = treeApi.flattenPrTree(forest);
   const depthByNumber = new Map();
-  const order = [];
+  const order: any[] = [];
   for (const { pr, depth } of flat) {
     depthByNumber.set(pr.number, depth);
     order.push(pr.number);
@@ -167,7 +167,7 @@ function applyTreeIndents(doc: any, forest: any) {
   }
 
   // Prefer reordering only rows we can identify; keep unknowns at end.
-  const orderedRows = [];
+  const orderedRows: any[] = [];
   const used = new Set();
   for (const num of order) {
     const row = rowByNumber.get(num);
@@ -225,7 +225,7 @@ function clearTreeIndents(doc: any) {
 function countUnstyledPrRows(doc: any) {
   const rows = findOriginalPrRows(doc);
   if (rows.length === 0) return 0;
-  return rows.filter((row) => !row.classList.contains(PR_TREE_INDENT_CLASS)).length;
+  return rows.filter((row: any) => !row.classList.contains(PR_TREE_INDENT_CLASS)).length;
 }
 
 const PR_TREE_REVIEW_STATE = 'prTreeReviewState';
@@ -409,7 +409,7 @@ function buildMagicLinkEl(doc: any, link: any) {
   a.title = `Open ${link.key}`;
   a.setAttribute('aria-label', `Magic link ${link.key}`);
   // Don't trigger GitHub row navigation.
-  a.addEventListener('click', (e) => e.stopPropagation());
+  a.addEventListener('click', (e: any) => e.stopPropagation());
   return a;
 }
 
@@ -854,7 +854,7 @@ function countMissingDecorations(doc: any, prs: any) {
   return missing;
 }
 
-function createToggleButton(doc, { onShowTree, onShowOriginal, initialMode = 'tree' }) {
+function createToggleButton(doc: any, { onShowTree, onShowOriginal, initialMode = 'tree' }: any) {
   let existing = doc.getElementById(PR_TREE_TOGGLE_ID);
   if (existing) existing.remove();
 
@@ -909,7 +909,7 @@ function createToggleButton(doc, { onShowTree, onShowOriginal, initialMode = 'tr
     );
   }
 
-  btn.addEventListener('click', (event) => {
+  btn.addEventListener('click', (event: any) => {
     event.preventDefault();
     event.stopPropagation();
     if (mode === 'tree') {
@@ -995,5 +995,5 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = domApi;
 }
 if (typeof globalThis !== 'undefined') {
-  globalThis.PRTreeDOM = domApi;
+  (globalThis as any).PRTreeDOM = domApi;
 }

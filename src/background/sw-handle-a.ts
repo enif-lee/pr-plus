@@ -22,8 +22,9 @@ import {
   isAbortError,
   rlMem,
 } from './sw-rate-limit';
+import type { SwMessage } from '../sw-messages';
 
-export async function handleMessagePartA(message: any): Promise<any> {
+export async function handleMessagePartA(message: SwMessage): Promise<unknown> {
   const apiCtx = apiCtxFromMessage(message || {});
 
   // Per-message API ctx (stateless). Propagate into PRTreeFetch*; never set global.
@@ -107,7 +108,7 @@ export async function handleMessagePartA(message: any): Promise<any> {
         delete patch.enterpriseWebHosts;
       }
       // Manual re-enable after rate-limit: clear expired/all disable clocks
-      if (patch && patch.pluginEnabled === true) {
+      if (patch && (patch as { pluginEnabled?: unknown }).pluginEnabled === true) {
         try {
           await ensureRateLimitMem();
           const RL = rateLimitApi();
@@ -195,18 +196,18 @@ export async function handleMessagePartA(message: any): Promise<any> {
         return {
           ok: false,
           error: result.error,
-          accounts: (result.accounts || []).map((a) => ({
+          accounts: (result.accounts || []).map((a: any) => ({
             host: a.host,
             mask: PRTreeStorage.maskGithubToken(a.token),
           })),
         };
       }
-      const hosts = result.accounts.map((a) => a.host);
+      const hosts = result.accounts.map((a: any) => a.host);
       const permission = await requestEnterprisePermissions(hosts);
       const contentScripts = await syncEnterpriseContentScripts(hosts);
       return {
         ok: true,
-        accounts: result.accounts.map((a) => ({
+        accounts: result.accounts.map((a: any) => ({
           host: a.host,
           mask: PRTreeStorage.maskGithubToken(a.token),
         })),
@@ -217,11 +218,11 @@ export async function handleMessagePartA(message: any): Promise<any> {
     }
     case MSG.HOST_ACCOUNT_REMOVE: {
       const result = await PRTreeStorage.unregisterHostAccount(message.host);
-      const hosts = result.accounts.map((a) => a.host);
+      const hosts = result.accounts.map((a: any) => a.host);
       const contentScripts = await syncEnterpriseContentScripts(hosts);
       return {
         ok: true,
-        accounts: result.accounts.map((a) => ({
+        accounts: result.accounts.map((a: any) => ({
           host: a.host,
           mask: PRTreeStorage.maskGithubToken(a.token),
         })),

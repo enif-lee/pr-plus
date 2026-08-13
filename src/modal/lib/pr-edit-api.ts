@@ -4,7 +4,7 @@
  * Unit-tested without network; fetch layer uses the same shapes.
  */
 
-export function buildUpdatePullRequest(owner, repo, pullNumber, fields: any = {
+export function buildUpdatePullRequest(owner: any, repo: any, pullNumber: any, fields: any = {
   // typed loosely for mutable REST payloads
 }) {
   const body: any = {};
@@ -19,7 +19,7 @@ export function buildUpdatePullRequest(owner, repo, pullNumber, fields: any = {
   };
 }
 
-export function buildEditIssueComment(owner, repo, commentId, body) {
+export function buildEditIssueComment(owner: any, repo: any, commentId: any, body: any) {
   return {
     method: 'PATCH',
     url: `https://api.github.com/repos/${owner}/${repo}/issues/comments/${commentId}`,
@@ -27,7 +27,7 @@ export function buildEditIssueComment(owner, repo, commentId, body) {
   };
 }
 
-export function buildEditReviewComment(owner, repo, commentId, body) {
+export function buildEditReviewComment(owner: any, repo: any, commentId: any, body: any) {
   return {
     method: 'PATCH',
     url: `https://api.github.com/repos/${owner}/${repo}/pulls/comments/${commentId}`,
@@ -35,7 +35,7 @@ export function buildEditReviewComment(owner, repo, commentId, body) {
   };
 }
 
-export function buildRequestReviewers(owner, repo, pullNumber, { reviewers = [], teamReviewers = [] }: any = {}) {
+export function buildRequestReviewers(owner: any, repo: any, pullNumber: any, { reviewers = [], teamReviewers = [] }: any = {}) {
   return {
     method: 'POST',
     url: `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/requested_reviewers`,
@@ -46,7 +46,7 @@ export function buildRequestReviewers(owner, repo, pullNumber, { reviewers = [],
   };
 }
 
-export function buildRemoveReviewers(owner, repo, pullNumber, { reviewers = [], teamReviewers = [] }: any = {}) {
+export function buildRemoveReviewers(owner: any, repo: any, pullNumber: any, { reviewers = [], teamReviewers = [] }: any = {}) {
   return {
     method: 'DELETE',
     url: `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/requested_reviewers`,
@@ -57,7 +57,7 @@ export function buildRemoveReviewers(owner, repo, pullNumber, { reviewers = [], 
   };
 }
 
-export function buildSetAssignees(owner, repo, issueNumber, assignees) {
+export function buildSetAssignees(owner: any, repo: any, issueNumber: any, assignees: any) {
   return {
     method: 'POST',
     url: `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/assignees`,
@@ -65,7 +65,7 @@ export function buildSetAssignees(owner, repo, issueNumber, assignees) {
   };
 }
 
-export function buildRemoveAssignees(owner, repo, issueNumber, assignees) {
+export function buildRemoveAssignees(owner: any, repo: any, issueNumber: any, assignees: any) {
   return {
     method: 'DELETE',
     url: `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/assignees`,
@@ -73,7 +73,7 @@ export function buildRemoveAssignees(owner, repo, issueNumber, assignees) {
   };
 }
 
-export function buildSetLabels(owner, repo, issueNumber, labels) {
+export function buildSetLabels(owner: any, repo: any, issueNumber: any, labels: any) {
   return {
     method: 'PUT',
     url: `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/labels`,
@@ -82,7 +82,7 @@ export function buildSetLabels(owner, repo, issueNumber, labels) {
 }
 
 /** Merge PR via REST. mergeMethod: merge | squash | rebase */
-export function buildMergePullRequest(owner, repo, pullNumber, { mergeMethod = 'merge', commitTitle, commitMessage }: any = {}) {
+export function buildMergePullRequest(owner: any, repo: any, pullNumber: any, { mergeMethod = 'merge', commitTitle, commitMessage }: any = {}) {
   const body: any = { merge_method: mergeMethod };
   if (commitTitle != null) body.commit_title = String(commitTitle);
   if (commitMessage != null) body.commit_message = String(commitMessage);
@@ -94,7 +94,7 @@ export function buildMergePullRequest(owner, repo, pullNumber, { mergeMethod = '
 }
 
 /** Update PR head branch with latest base (update branch button). */
-export function buildUpdateBranch(owner, repo, pullNumber, { expectedHeadSha }: any = {}) {
+export function buildUpdateBranch(owner: any, repo: any, pullNumber: any, { expectedHeadSha }: any = {}) {
   const body: any = {};
   if (expectedHeadSha) body.expected_head_sha = String(expectedHeadSha);
   return {
@@ -109,9 +109,9 @@ export function buildUpdateBranch(owner, repo, pullNumber, { expectedHeadSha }: 
  * (REST /issues/{n}/subscription is 404 / removed for many tokens).
  */
 export function buildSetSubscription(
-  owner,
-  repo,
-  issueNumber,
+  owner: any,
+  repo: any,
+  issueNumber: any,
   { subscribed = true, ignored = false, nodeId = null }: any = {}
 ) {
   const state = ignored ? 'IGNORED' : subscribed ? 'SUBSCRIBED' : 'UNSUBSCRIBED';
@@ -135,7 +135,7 @@ export function buildSetSubscription(
   };
 }
 
-export function buildDeleteSubscription(owner, repo, issueNumber, nodeId = null) {
+export function buildDeleteSubscription(owner: any, repo: any, issueNumber: any, nodeId: any = null) {
   return buildSetSubscription(owner, repo, issueNumber, {
     subscribed: false,
     ignored: false,
@@ -144,7 +144,7 @@ export function buildDeleteSubscription(owner, repo, issueNumber, nodeId = null)
 }
 
 /** Set or clear milestone on the PR issue. */
-export function buildSetMilestone(owner, repo, issueNumber, milestoneNumber) {
+export function buildSetMilestone(owner: any, repo: any, issueNumber: any, milestoneNumber: any) {
   return {
     method: 'PATCH',
     url: `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}`,
@@ -156,7 +156,7 @@ export function buildSetMilestone(owner, repo, issueNumber, milestoneNumber) {
  * GraphQL mutation names for draft stage (need pullRequest node id).
  * @param {'draft'|'ready'} stage
  */
-export function buildDraftStageGraphql(stage, pullRequestId) {
+export function buildDraftStageGraphql(stage: any, pullRequestId: any) {
   const id = String(pullRequestId || '');
   if (stage === 'ready') {
     return {
@@ -191,7 +191,7 @@ export function draftFromStageGraphqlData(data: any): boolean | null {
  * Extract linked issue numbers from PR body (closes/fixes/refs #N and bare #N).
  * @returns {number[]}
  */
-export function parseLinkedIssueNumbers(body) {
+export function parseLinkedIssueNumbers(body: any) {
   const text = body == null ? '' : String(body);
   const nums = new Set();
   const re = /(?:(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+)?#(\d+)/gi;
@@ -217,21 +217,21 @@ export function parseLinkedIssueNumbers(body) {
  * }} detail
  * @returns {string[]}
  */
-export function buildRerequestReviewerLogins(detail) {
+export function buildRerequestReviewerLogins(detail: any) {
   const d = detail || {};
   const pending = new Set(
     (d.requestedReviewers || [])
-      .map((x) => String(x || '').trim())
+      .map((x: any) => String(x || '').trim())
       .filter(Boolean)
-      .map((x) => x.toLowerCase())
+      .map((x: any) => x.toLowerCase())
   );
   const author = String(d.author || '')
     .trim()
     .toLowerCase();
-  const out = [];
+  const out: any[] = [];
   const seen = new Set();
 
-  function isBotLogin(login, review) {
+  function isBotLogin(login: any, review: any) {
     if (review?.isBot === true || String(review?.type || '').toLowerCase() === 'bot') {
       return true;
     }
@@ -269,7 +269,7 @@ export function buildRerequestReviewerLogins(detail) {
  * Parse GitHub ```suggestion fences from a comment body.
  * @returns {Array<{ content: string, raw: string }>}
  */
-export function parseSuggestionFences(body) {
+export function parseSuggestionFences(body: any) {
   const text = body == null ? '' : String(body);
   const out = [];
   const re = /```suggestion[^\n]*\r?\n([\s\S]*?)```/gi;
@@ -286,7 +286,7 @@ export function parseSuggestionFences(body) {
  * @param {string} fileContent
  * @param {{ startLine: number, endLine: number, suggestion: string }} range
  */
-export function applySuggestionToFileContent(fileContent, { startLine, endLine, suggestion }) {
+export function applySuggestionToFileContent(fileContent: any, { startLine, endLine, suggestion }: any) {
   const lines = String(fileContent ?? '').split('\n');
   // Preserve trailing newline semantics: split keeps last empty if file ends with \n
   const endsWithNl = String(fileContent ?? '').endsWith('\n');
@@ -312,15 +312,9 @@ export function applySuggestionToFileContent(fileContent, { startLine, endLine, 
  * Contents API PUT shape for committing applied suggestion on head branch.
  */
 export function buildApplySuggestionCommitRequest(
-  owner,
-  repo,
-  {
-    path,
-    branch,
-    contentBase64,
-    sha,
-    message,
-  }
+  owner: any,
+  repo: any,
+  { path, branch, contentBase64, sha, message }: any
 ) {
   return {
     method: 'PUT',
@@ -341,7 +335,7 @@ export function buildApplySuggestionCommitRequest(
  * Map unified leave-review form button → GitHub review event or issue comment.
  * @param {'comment'|'approve'|'request_changes'} action
  */
-export function mapLeaveReviewAction(action) {
+export function mapLeaveReviewAction(action: any) {
   const a = String(action || '').toLowerCase();
   if (a === 'approve') return { kind: 'review', event: 'APPROVE' };
   if (a === 'request_changes' || a === 'request-changes') {
@@ -393,7 +387,7 @@ export function isReviewVerdictKind(kind: unknown): boolean {
  * @param {object|null} raw REST response body
  * @param {object} [fallback] path/line/body when raw is partial
  */
-export function mapRestReviewComment(raw, fallback: any = {}) {
+export function mapRestReviewComment(raw: any, fallback: any = {}) {
   if (!raw && !String(fallback.body || '').trim()) return null;
   const r = raw || {};
   const subjectRaw = String(
@@ -445,7 +439,7 @@ export function mapRestReviewComment(raw, fallback: any = {}) {
 /**
  * Map GitHub REST issue comment payload → app shape.
  */
-export function mapRestIssueComment(raw, fallback: any = {}) {
+export function mapRestIssueComment(raw: any, fallback: any = {}) {
   if (!raw && !fallback.body) return null;
   const r = raw || {};
   return {
@@ -466,11 +460,11 @@ export function mapRestIssueComment(raw, fallback: any = {}) {
  * @param {{ reviewComments?: Array }} detail
  * @param {object|null} comment mapped comment
  */
-export function appendOptimisticReviewComment(detail, comment) {
+export function appendOptimisticReviewComment(detail: any, comment: any) {
   const base = detail || {};
   if (!comment || comment.id == null) return base;
   const list = Array.isArray(base.reviewComments) ? base.reviewComments.slice() : [];
-  if (list.some((c) => String(c.id) === String(comment.id))) {
+  if (list.some((c: any) => String(c.id) === String(comment.id))) {
     return { ...base, reviewComments: list };
   }
   list.push(comment);
@@ -480,11 +474,11 @@ export function appendOptimisticReviewComment(detail, comment) {
 /**
  * Append a server-confirmed issue (conversation) comment after POST succeeds.
  */
-export function appendIssueCommentToDetail(detail, comment) {
+export function appendIssueCommentToDetail(detail: any, comment: any) {
   const base = detail || {};
   if (!comment || comment.id == null) return base;
   const list = Array.isArray(base.comments) ? base.comments.slice() : [];
-  if (list.some((c) => String(c.id) === String(comment.id))) {
+  if (list.some((c: any) => String(c.id) === String(comment.id))) {
     return { ...base, comments: list };
   }
   list.push(comment);
@@ -501,7 +495,7 @@ export function appendIssueCommentToDetail(detail, comment) {
  * @param {boolean} resolved
  * @returns {object|null|undefined}
  */
-export function stampThreadResolved(detail, threadNodeId, resolved) {
+export function stampThreadResolved(detail: any, threadNodeId: any, resolved: any) {
   if (!detail) return detail;
   const tid = threadNodeId != null ? String(threadNodeId).trim() : '';
   if (!tid) return detail;
@@ -537,7 +531,7 @@ export function stampThreadResolved(detail, threadNodeId, resolved) {
  * @param {Record<string, boolean>|null|undefined} stamps
  * @returns {object|null|undefined}
  */
-export function applyResolveStamps(detail, stamps) {
+export function applyResolveStamps(detail: any, stamps: any) {
   if (!detail) return detail;
   const map =
     stamps && typeof stamps === 'object' && !Array.isArray(stamps)

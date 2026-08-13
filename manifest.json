@@ -19,8 +19,7 @@
     "https://api.github.com/*"
   ],
   "optional_host_permissions": [
-    "https://*/*",
-    "http://*/*"
+    "https://*/*"
   ],
   "background": {
     "service_worker": "src/background.sw.js"
@@ -79,7 +78,6 @@
     {
       "resources": [
         "src/modal/dist/pr-modal.css",
-        "src/modal/dist/pr-modal.bundle.js",
         "src/modal/dist/mermaid.esm.js",
         "src/modal/dist/hljs-langs/*",
         "src/modal/dist/hljs-langs/*.js"

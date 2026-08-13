@@ -5,23 +5,23 @@
   let pullsPaletteQuery = '';
   let pullsPaletteFocusIndex = 0;
   /** @type {Array|null} */
-  let pullsPaletteItems = null;
+  let pullsPaletteItems: any = null;
   /** Snapshot of list-row focus number so Esc can restore it */
-  let pullsPaletteSavedListFocus = null;
-  let pullsPaletteRoot = null;
+  let pullsPaletteSavedListFocus: any = null;
+  let pullsPaletteRoot: any = null;
   /** @type {null|(() => void)} */
-  let pullsPaletteScrollbarDestroy = null;
+  let pullsPaletteScrollbarDestroy: any = null;
   /** Async PR-search (`#…`) state */
-  let pullsPalettePrSearchAsyncHits = [];
+  let pullsPalettePrSearchAsyncHits: any[] = [];
   let pullsPalettePrSearchLoading = false;
-  let pullsPalettePrSearchError = null;
+  let pullsPalettePrSearchError: any = null;
   /** @type {AbortController|null} */
-  let pullsPalettePrSearchAbort = null;
+  let pullsPalettePrSearchAbort: any = null;
   let pullsPalettePrSearchSeq = 0;
-  let pullsPalettePrSearchTimer = null;
+  let pullsPalettePrSearchTimer: any = null;
 
   function pullsPaletteApi() {
-    return globalThis.PRPullsPalette || null;
+    return (globalThis as any).PRPullsPalette || null;
   }
 
   function isPullsPaletteOpen() {
@@ -178,7 +178,7 @@
     }, 180);
   }
 
-  async function runPullsPalettePrSearchAsync(term, seq) {
+  async function runPullsPalettePrSearchAsync(term: any, seq: any) {
     if (seq !== pullsPalettePrSearchSeq) return;
     const repo = getRepoForPalette();
     if (!repo.owner || !repo.repo) {
@@ -198,8 +198,8 @@
     pullsPalettePrSearchAbort = ac;
     try {
       let remote = [];
-      if (typeof globalThis.PRTreeFetch?.fetchOpenPulls === 'function') {
-        const prs = await globalThis.PRTreeFetch.fetchOpenPulls(
+      if (typeof (globalThis as any).PRTreeFetch?.fetchOpenPulls === 'function') {
+        const prs = await (globalThis as any).PRTreeFetch.fetchOpenPulls(
           repo.owner,
           repo.repo,
           null,

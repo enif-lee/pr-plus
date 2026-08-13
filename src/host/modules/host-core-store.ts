@@ -1,18 +1,18 @@
   // continued host module segment
   function pageEmbedApi() {
-    return globalThis.PRModalPageEmbed || null;
+    return (globalThis as any).PRModalPageEmbed || null;
   }
 
   function githubRouteApi() {
-    return globalThis.PRModalGithubPrRoute || null;
+    return (globalThis as any).PRModalGithubPrRoute || null;
   }
 
   function detailStoreApi() {
-    return globalThis.PRModalDetailStore || null;
+    return (globalThis as any).PRModalDetailStore || null;
   }
 
-  function mergeDetailProgressive(prev, next, opts = null) {
-    const api = globalThis.PRModalDetailMerge;
+  function mergeDetailProgressive(prev: any, next: any, opts: any = null) {
+    const api = (globalThis as any).PRModalDetailMerge;
     if (api && typeof api.mergeDetailProgressive === 'function') {
       return api.mergeDetailProgressive(prev, next, opts || undefined);
     }
@@ -25,7 +25,7 @@
    * True when files[] can paint Diff text (or are legitimately patchless).
    * Mirrors modal filesListHasUsableDiffBodies — kept local so host has no import.
    */
-  function e2eFilesBodiesOk(files) {
+  function e2eFilesBodiesOk(files: any) {
     if (!Array.isArray(files) || files.length === 0) return false;
     let missingRequired = false;
     for (const f of files) {
@@ -196,7 +196,7 @@
         /* ignore */
       }
       try {
-        globalThis.dispatchEvent?.(
+        (globalThis as any).dispatchEvent?.(
           new CustomEvent('prp-e2e-load', { detail: snap })
         );
       } catch {
@@ -260,7 +260,7 @@
   }
 
   /** Ensure store exists; hydrate from flat seed when needed. */
-  function ensureDetailStore(seedFlat = null) {
+  function ensureDetailStore(seedFlat: any = null) {
     const S = detailStoreApi();
     if (!S) return null;
     if (!current.detailStore) {
@@ -280,7 +280,7 @@
    * a full reset without re-apply permanently drops those slices from the
    * conversation timeline.
    */
-  function resetDetailStoreFromFlat(flat) {
+  function resetDetailStoreFromFlat(flat: any) {
     const S = detailStoreApi();
     const prevFlat = current.detail;
     const mergedFlat =
@@ -299,7 +299,7 @@
   /**
    * Legacy progressive merge when store API missing; otherwise prefer isolation.
    */
-  function setDetailProgressive(next, opts = null) {
+  function setDetailProgressive(next: any, opts: any = null) {
     if (!next || typeof next !== 'object') {
       current.detail = next;
       return current.detail;
@@ -328,7 +328,7 @@
    * Record a confirmed App meta write so later open/revalidate core GETs cannot
    * clobber labels (etc.) while GitHub/cache is still stale.
    */
-  function notePeopleMetaAuthority(patch, identity: any = null) {
+  function notePeopleMetaAuthority(patch: any, identity: any = null) {
     const S = detailStoreApi();
     const build =
       typeof S?.buildPeopleMetaAuthority === 'function'
@@ -386,7 +386,7 @@
   }
 
   /** Prefer last write-through people meta over a stale core GET. */
-  function withPeopleMetaAuthority(coreFlat) {
+  function withPeopleMetaAuthority(coreFlat: any) {
     // Hydrate from sessionStorage if memory was wiped (force-close without host
     // closeModal, or a new content-script world). Soft reopen e2e relies on this.
     if (!lastPeopleMetaAuthority) {
@@ -419,7 +419,7 @@
     return flat || coreFlat;
   }
 
-  function applyCoreToStore(coreFlat, opts: any = null) {
+  function applyCoreToStore(coreFlat: any, opts: any = null) {
     const S = detailStoreApi();
     const metaGenAtStart =
       opts && Number.isFinite(opts.metaGenAtStart)
@@ -433,7 +433,7 @@
       let progressive = core;
       if (skipSupersedeMeta) {
         const strip =
-          globalThis.PRModalDetailStore?.stripSupersededMetaFields;
+          (globalThis as any).PRModalDetailStore?.stripSupersededMetaFields;
         progressive =
           typeof strip === 'function' ? strip(core) : core;
       }
@@ -467,7 +467,7 @@
     return publishDetailFromStore();
   }
 
-  function applySideToStore(key, payload) {
+  function applySideToStore(key: any, payload: any) {
     const S = detailStoreApi();
     if (!S || !current.detailStore) {
       return setDetailProgressive({
@@ -509,7 +509,7 @@
     return publishDetailFromStore();
   }
 
-  function applyThreadsToStore(mergedFlat) {
+  function applyThreadsToStore(mergedFlat: any) {
     const S = detailStoreApi();
     if (!S) {
       // No store API: merge threads fields only when possible
@@ -545,8 +545,8 @@
   /**
    * Structured open-session fetch timeline for performance analysis.
    * - console: `[pr-plus][tl +Nms] start|end name …`
-   * - globalThis.__PRP_FETCH_TIMELINE__ (content world)
+   * - (globalThis as any).__PRP_FETCH_TIMELINE__ (content world)
    * - #prp-modal-host[data-prp-tl] JSON for page-world agent-browser eval
    */
-  let activeFetchTimeline = null;
+  let activeFetchTimeline: any = null;
 

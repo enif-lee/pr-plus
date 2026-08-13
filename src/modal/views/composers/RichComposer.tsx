@@ -56,7 +56,7 @@ export function RichComposer({
   const [menu, setMenu] = useState(null); // { kind:'mention'|'slash'|'emoji', items, trigger }
   const [menuIndex, setMenuIndex] = useState(0);
 
-  function syncMenus(text, cursor) {
+  function syncMenus(text: any, cursor: any) {
     if (typeof detectMentionTrigger !== 'function') {
       setMenu(null);
       return;
@@ -88,7 +88,7 @@ export function RichComposer({
     setMenu(null);
   }
 
-  function applyItem(item) {
+  function applyItem(item: any) {
     const ta = taRef.current;
     let next;
     if (menu?.kind === 'mention') {
@@ -168,7 +168,7 @@ export function RichComposer({
           }`}
           role="listbox"
         >
-          {menu.items.map((item, idx) => {
+          {menu.items.map((item: any, idx: any) => {
             const isEmoji = menu.kind === 'emoji';
             const label = isEmoji
               ? emojiMenuLabel?.(item) || `:${item.name}:`

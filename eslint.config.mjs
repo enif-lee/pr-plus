@@ -1,11 +1,15 @@
 import js from '@eslint/js';
 import globals from 'globals';
+import tsStripParser from './scripts/eslint-ts-strip-parser.mjs';
 
 export default [
   {
     ignores: [
       '**/node_modules/**',
       '**/dist/**',
+      '**/.tmp-*/**',
+      '.tmp-*/**',
+      '.tmp-*',
       'src/modal/dist/**',
       'src/background.bundle.js',
       'src/host/parts/**',
@@ -21,12 +25,9 @@ export default [
       'src/background.js',
       'src/modal/app/PrModalApp.tsx',
       'src/modal/app/PrModalApp.generated.tsx',
-      'src/modal/views/conversation/ConversationView.tsx',
       'src/modal/styles.css',
       // Generated pure IIFEs (SoT is src/modal/lib/*.ts)
       'src/modal/pure/**',
-      // Function-boundary host modules assembled into pr-modal-host.js
-      'src/host/modules/**',
       // Content-script / entry JS emitted from TypeScript SoT
       'src/tree.js',
       'src/dom.js',
@@ -67,6 +68,42 @@ export default [
       'no-control-regex': 'off',
       'no-useless-assignment': 'off',
       'preserve-caught-error': 'off',
+    },
+  },
+  {
+    files: [
+      'src/host/modules/**/*.ts',
+      'src/modal/views/conversation/ConversationView.tsx',
+    ],
+    languageOptions: {
+      parser: tsStripParser,
+      parserOptions: {
+        ecmaVersion: 2022,
+        sourceType: 'module',
+        ecmaFeatures: { jsx: true },
+      },
+      globals: {
+        ...globals.browser,
+        chrome: 'readonly',
+        globalThis: 'readonly',
+      },
+    },
+    rules: {
+      'no-unused-vars': [
+        'warn',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+        },
+      ],
+      'no-undef': 'off',
+      'no-empty': ['warn', { allowEmptyCatch: true }],
+      'no-console': 'off',
+      'prefer-const': 'warn',
+      'no-control-regex': 'off',
+      'no-useless-assignment': 'off',
+      'no-extra-boolean-cast': 'off',
     },
   },
 ];

@@ -55,15 +55,15 @@ function isUnverifiedLocalOnlyReviewCommentLocal(c: any): boolean {
 export async function fetchReviewThreadsByIds(threadNodeIds: any, fetchImpl: any, token: any, ctx: any = null) {
   ctx = normalizeApiCtx(ctx);
   const empty = {
-    threads: [],
-    comments: [],
+    threads: [] as any[],
+    comments: [] as any[],
     pageCount: 0,
     direction: 'refresh',
-    totalCount: null,
+    totalCount: null as any,
     hasPreviousPage: false,
     hasNextPage: false,
-    requestedThreadIds: [],
-    missingThreadIds: [],
+    requestedThreadIds: [] as any[],
+    missingThreadIds: [] as any[],
   };
   if (!token) return empty;
   const ids = [
@@ -196,8 +196,8 @@ export function dropReviewThreadsFromDetail(detail: any, threadNodeIds: any) {
 
   const prevRc = Array.isArray(detail.reviewComments) ? detail.reviewComments : [];
   const prevTh = Array.isArray(detail.reviewThreads) ? detail.reviewThreads : [];
-  const droppedCommentIds = [];
-  const reviewComments = prevRc.filter((c) => {
+  const droppedCommentIds: any[] = [];
+  const reviewComments = prevRc.filter((c: any) => {
     if (!c) return false;
     const tid = c.threadNodeId ? String(c.threadNodeId) : '';
     if (tid && drop.has(tid)) {
@@ -207,7 +207,7 @@ export function dropReviewThreadsFromDetail(detail: any, threadNodeIds: any) {
     return true;
   });
   const reviewThreads = prevTh.filter(
-    (t) => !t?.threadNodeId || !drop.has(String(t.threadNodeId))
+    (t: any) => !t?.threadNodeId || !drop.has(String(t.threadNodeId))
   );
 
   const deleted = new Set(
@@ -222,7 +222,7 @@ export function dropReviewThreadsFromDetail(detail: any, threadNodeIds: any) {
   );
 
   const prevMeta = detail.reviewThreadsMeta || emptyReviewThreadsMeta();
-  const filterIdList = (list) =>
+  const filterIdList = (list: any) =>
     (Array.isArray(list) ? list : [])
       .map(String)
       .filter((id) => id && !drop.has(id));
@@ -279,21 +279,21 @@ export function dropReviewThreadsFromDetail(detail: any, threadNodeIds: any) {
  * Dual-window oldest seed is retired — load more/all expands one cursor.
  */
 export async function fetchPullReviewThreadsBundle(
-  owner,
-  repo,
-  pullNumber,
-  fetchImpl,
-  token,
+  owner: any,
+  repo: any,
+  pullNumber: any,
+  fetchImpl: any,
+  token: any,
   opts: any = {}
 ) {
   const ctx = normalizeApiCtx(opts?.ctx);
   if (!token) {
     return {
-      threads: [],
-      comments: [],
+      threads: [] as any[],
+      comments: [] as any[],
       hasMore: false,
-      endCursor: null,
-      startCursor: null,
+      endCursor: null as any,
+      startCursor: null as any,
       pageCount: 0,
       totalCount: 0,
       reviewThreadsMeta: emptyReviewThreadsMeta(),
@@ -344,11 +344,11 @@ export async function fetchPullReviewThreadsBundle(
     newestEndCursor: page.endCursor || null,
     hasOlder,
     // Dual-window retired
-    oldestStartCursor: null,
-    oldestEndCursor: null,
+    oldestStartCursor: null as any,
+    oldestEndCursor: null as any,
     hasNewerFromOldest: false,
     newestThreadIds: newestIds,
-    oldestThreadIds: [],
+    oldestThreadIds: [] as any[],
     hasMore: hiddenCount > 0 || hasOlder,
     endCursor: page.startCursor || null,
     direction,
@@ -374,16 +374,16 @@ export function emptyReviewThreadsMeta() {
     loadedThreadCount: 0,
     loadedCommentCount: 0,
     pagesLoaded: 0,
-    newestStartCursor: null,
-    newestEndCursor: null,
+    newestStartCursor: null as any,
+    newestEndCursor: null as any,
     hasOlder: false,
-    oldestStartCursor: null,
-    oldestEndCursor: null,
+    oldestStartCursor: null as any,
+    oldestEndCursor: null as any,
     hasNewerFromOldest: false,
-    newestThreadIds: [],
-    oldestThreadIds: [],
+    newestThreadIds: [] as any[],
+    oldestThreadIds: [] as any[],
     hasMore: false,
-    endCursor: null,
+    endCursor: null as any,
     direction: 'newest',
   };
 }
@@ -430,7 +430,7 @@ export function mergeReviewThreadsPageIntoDetail(detail: any, page: any, directi
   if ((dir === 'refresh' || dir === 'ids') && (page?.threads || []).length) {
     const refreshed = new Set(
       (page.threads || [])
-        .map((t) => (t?.threadNodeId ? String(t.threadNodeId) : ''))
+        .map((t: any) => (t?.threadNodeId ? String(t.threadNodeId) : ''))
         .filter(Boolean)
     );
     try {
@@ -451,7 +451,7 @@ export function mergeReviewThreadsPageIntoDetail(detail: any, page: any, directi
     if (!reviewComments) {
       // Fallback: drop refreshed threads then append (may reorder)
       baseRc = prevRc.filter(
-        (c) => !c?.threadNodeId || !refreshed.has(String(c.threadNodeId))
+        (c: any) => !c?.threadNodeId || !refreshed.has(String(c.threadNodeId))
       );
       reviewComments = mergePendingReviewComments(baseRc, page?.comments || []);
     }
@@ -473,7 +473,7 @@ export function mergeReviewThreadsPageIntoDetail(detail: any, page: any, directi
         if (t.commentsLoaded === false) deferredShellIds.add(id);
       }
       if (pageThreadIds.size) {
-        baseRc = baseRc.filter((c) => {
+        baseRc = baseRc.filter((c: any) => {
           if (!c) return false;
           const tid = c.threadNodeId != null ? String(c.threadNodeId) : '';
           if (tid.startsWith('rest-thread-')) return false;
@@ -487,7 +487,7 @@ export function mergeReviewThreadsPageIntoDetail(detail: any, page: any, directi
       } else {
         // GraphQL page with threads but empty id set is rare; still strip ghosts
         baseRc = baseRc.filter(
-          (c) => c && !isUnverifiedLocalOnlyReviewCommentLocal(c)
+          (c: any) => c && !isUnverifiedLocalOnlyReviewCommentLocal(c)
         );
       }
     }
@@ -507,7 +507,7 @@ export function mergeReviewThreadsPageIntoDetail(detail: any, page: any, directi
   const stampedCommentsRaw =
     resolvedByThread.size === 0
       ? reviewComments
-      : reviewComments.map((c) => {
+      : reviewComments.map((c: any) => {
           if (!c?.threadNodeId) return c;
           const key = String(c.threadNodeId);
           if (!resolvedByThread.has(key)) return c;
@@ -520,7 +520,7 @@ export function mergeReviewThreadsPageIntoDetail(detail: any, page: any, directi
       realCommentThreadIds.add(String(c.threadNodeId));
     }
   }
-  let stampedComments = stampedCommentsRaw.filter((c) => {
+  let stampedComments = stampedCommentsRaw.filter((c: any) => {
     if (!c) return false;
     if (isUnverifiedLocalOnlyReviewCommentLocal(c)) return false;
     if (!c?._commentsPending) return true;
@@ -580,7 +580,7 @@ export function mergeReviewThreadsPageIntoDetail(detail: any, page: any, directi
   }
 
   const thById = new Map(
-    prevTh.map((t) => [String(t.threadNodeId), t]).filter(([k]) => k && k !== 'undefined')
+    prevTh.map((t: any) => [String(t.threadNodeId), t]).filter(([k]: any[]) => k && k !== 'undefined')
   );
   for (const t of page?.threads || []) {
     if (t?.threadNodeId) {
@@ -613,7 +613,7 @@ export function mergeReviewThreadsPageIntoDetail(detail: any, page: any, directi
 
   let newestIds = new Set((prevMeta.newestThreadIds || []).map(String));
   const pageIds = (page?.threads || [])
-    .map((t) => t.threadNodeId)
+    .map((t: any) => t.threadNodeId)
     .filter(Boolean)
     .map(String);
 

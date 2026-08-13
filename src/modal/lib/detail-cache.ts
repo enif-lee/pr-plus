@@ -33,7 +33,7 @@ export function createDetailCache(options: any = {}) {
   /** @type {Map<string, { value: unknown, expiresAt: number }>} */
   const store = new Map();
 
-  function cacheKey(owner, repo, number) {
+  function cacheKey(owner: any, repo: any, number: any) {
     return `${String(owner || '').toLowerCase()}/${String(repo || '').toLowerCase()}#${Number(number)}`;
   }
 
@@ -41,7 +41,7 @@ export function createDetailCache(options: any = {}) {
    * Fresh value only. Expired entries remain for peek()/SWR until overwritten
    * or invalidated (get does not purge them).
    */
-  function get(key) {
+  function get(key: any) {
     if (!key) return null;
     const entry = store.get(key);
     if (!entry) return null;
@@ -52,7 +52,7 @@ export function createDetailCache(options: any = {}) {
   /**
    * Return cached value even if expired (for SWR), and whether it is fresh.
    */
-  function peek(key) {
+  function peek(key: any) {
     if (!key) return { value: null, fresh: false, stale: false, source: null as string | null };
     const entry = store.get(key);
     if (!entry) return { value: null, fresh: false, stale: false, source: null as string | null };
@@ -63,13 +63,13 @@ export function createDetailCache(options: any = {}) {
     return { value: entry.value, fresh: true, stale: false, source: 'memory' };
   }
 
-  function set(key, value, customTtlMs) {
+  function set(key: any, value: any, customTtlMs: any) {
     if (!key) return;
     const ttl = Number.isFinite(customTtlMs) ? customTtlMs : ttlMs;
     store.set(key, { value, expiresAt: now() + ttl });
   }
 
-  function invalidate(key) {
+  function invalidate(key: any) {
     if (key) store.delete(key);
   }
 

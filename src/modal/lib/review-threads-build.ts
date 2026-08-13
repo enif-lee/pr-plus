@@ -13,7 +13,7 @@ import {
  * @param {Array} comments
  * @returns {Array<{ id, path, line, side, root, replies, resolved, threadNodeId }>}
  */
-export function buildReplyReviewThreadGraphql(threadNodeId, body) {
+export function buildReplyReviewThreadGraphql(threadNodeId: any, body: any) {
   return {
     method: 'POST',
     url: 'https://api.github.com/graphql',
@@ -35,7 +35,7 @@ export function buildReplyReviewThreadGraphql(threadNodeId, body) {
  * Shape REST fallback reply (no pending review only).
  * POST /repos/{owner}/{repo}/pulls/{pull}/comments/{id}/replies
  */
-export function buildReplyReviewCommentRequest(owner, repo, pullNumber, commentId, body) {
+export function buildReplyReviewCommentRequest(owner: any, repo: any, pullNumber: any, commentId: any, body: any) {
   const parentId = normalizeReviewCommentId(commentId);
   const text = String(body || '').trim();
   return {
@@ -50,7 +50,7 @@ export function buildReplyReviewCommentRequest(owner, repo, pullNumber, commentI
  * @param {string} threadNodeId GraphQL node id (PRRT_…)
  * @param {boolean} resolved
  */
-export function buildResolveThreadGraphql(threadNodeId, resolved = true) {
+export function buildResolveThreadGraphql(threadNodeId: any, resolved = true) {
   const mutation = resolved
     ? `mutation($id:ID!){ resolveReviewThread(input:{threadId:$id}){ thread { id isResolved } } }`
     : `mutation($id:ID!){ unresolveReviewThread(input:{threadId:$id}){ thread { id isResolved } } }`;

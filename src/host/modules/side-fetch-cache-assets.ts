@@ -1,47 +1,47 @@
   // continued host module segment
   function sessionApi() {
-    return globalThis.PRModalSessionView || null;
+    return (globalThis as any).PRModalSessionView || null;
   }
 
   function uriApi() {
-    return globalThis.PRModalUriRoute || null;
+    return (globalThis as any).PRModalUriRoute || null;
   }
 
   function createFallbackCache() {
     const store = new Map();
     const TTL = 60_000;
     return {
-      cacheKey(owner, repo, number) {
+      cacheKey(owner: any, repo: any, number: any) {
         return `${String(owner || '').toLowerCase()}/${String(repo || '').toLowerCase()}#${Number(number)}`;
       },
-      peek(key) {
+      peek(key: any) {
         const e = store.get(key);
         if (!e) return { value: null, fresh: false, stale: false, source: null };
         const fresh = e.expiresAt > Date.now();
         return { value: e.value, fresh, stale: !fresh, source: 'memory' };
       },
-      async peekAsync(key) {
+      async peekAsync(key: any) {
         return this.peek(key);
       },
-      get(key) {
+      get(key: any) {
         const p = this.peek(key);
         return p.fresh ? p.value : null;
       },
-      set(key, value) {
+      set(key: any, value: any) {
         store.set(key, { value, expiresAt: Date.now() + TTL });
       },
-      invalidate(key) {
+      invalidate(key: any) {
         store.delete(key);
       },
     };
   }
 
   function emptyPeek() {
-    return { value: null, fresh: false, stale: false, source: null };
+    return { value: null as any, fresh: false, stale: false, source: null as any };
   }
 
   /** Sync memory only — never blocks paint. */
-  function peekDetailMemory(key) {
+  function peekDetailMemory(key: any) {
     try {
       return detailCache.peek?.(key) || emptyPeek();
     } catch {
@@ -54,7 +54,7 @@
    * @param {string} key
    * @param {number} [ms]
    */
-  async function peekDetailIdb(key, ms = 400) {
+  async function peekDetailIdb(key: any, ms = 400) {
     if (typeof detailCache.peekAsync !== 'function') return emptyPeek();
     try {
       const result = await Promise.race([
@@ -75,7 +75,7 @@
    * Hosts use data-prp-css-ready so FOUC gate does not hide a ready shell.
    */
   let modalCssReady = false;
-  let modalCssReadyP = null;
+  let modalCssReadyP: any = null;
 
   function markHostsCssReady() {
     modalCssReady = true;
@@ -90,7 +90,7 @@
     }
   }
 
-  function stampHostCssReady(host) {
+  function stampHostCssReady(host: any) {
     if (!host) return host;
     // Manifest content_scripts CSS is present at document_idle — stamp ready so
     // list sketch first paint is never delayed by the FOUC opacity gate.
@@ -160,7 +160,7 @@
     return stampHostCssReady(host);
   }
 
-  function detailKey(owner, repo, number) {
+  function detailKey(owner: any, repo: any, number: any) {
     return detailCache.cacheKey(owner, repo, number);
   }
 
@@ -170,17 +170,17 @@
    * cache is empty, use a host-fetched list so Stack matches fullscreen.
    * @type {Array|null}
    */
-  let openPullsFetched = null;
+  let openPullsFetched: any = null;
   /** @type {string} owner/repo key for openPullsFetched */
   let openPullsFetchedKey = '';
   /** @type {Promise<Array>|null} */
-  let openPullsFetchP = null;
+  let openPullsFetchP: any = null;
   /** epoch ms of last successful host open-list fetch for openPullsFetchedKey */
   let openPullsFetchedAt = 0;
   /** Monotonic gen — only the latest force/fetch may commit results */
   let openPullsFetchGen = 0;
   /** @type {AbortController|null} */
-  let openPullsFetchAbort = null;
+  let openPullsFetchAbort: any = null;
   /**
    * PR numbers removed by local lifecycle (merge/close) for the current
    * openPullsFetchedKey. Network open-list lag must not resurrect them.
@@ -191,12 +191,12 @@
   const OPEN_PULLS_MAX_AGE_MS = 30_000;
 
   function openPullsLifecycleApi() {
-    return globalThis.PRModalOpenPullsLifecycle || null;
+    return (globalThis as any).PRModalOpenPullsLifecycle || null;
   }
 
   function resolveOpenPulls() {
     try {
-      const app = globalThis.__PR_TREE_APP__;
+      const app = (globalThis as any).__PR_TREE_APP__;
       const list = app?.getCachedPrs?.();
       if (Array.isArray(list) && list.length) {
         return filterOpenPullsLocal(list);
@@ -210,7 +210,7 @@
     return [];
   }
 
-  function filterOpenPullsLocal(prs) {
+  function filterOpenPullsLocal(prs: any) {
     const api = openPullsLifecycleApi();
     if (typeof api?.filterOpenPullsByTombstones === 'function') {
       return api.filterOpenPullsByTombstones(prs, openPullsTombstones);
@@ -287,7 +287,7 @@
 
     // Tree list (preferred by resolveOpenPulls)
     try {
-      const app = globalThis.__PR_TREE_APP__;
+      const app = (globalThis as any).__PR_TREE_APP__;
       const removes =
         typeof life?.lifecycleRemovesFromOpenList === 'function'
           ? life.lifecycleRemovesFromOpenList(patch)
@@ -368,7 +368,7 @@
    * @param {string} repo
    * @param {{ signal?: AbortSignal, force?: boolean }} [opts]
    */
-  function ensureOpenPullsForStack(owner, repo, opts: any = {}) {
+  function ensureOpenPullsForStack(owner: any, repo: any, opts: any = {}) {
     const o = String(owner || '').trim();
     const r = String(repo || '').trim();
     if (!o || !r) return Promise.resolve([]);
@@ -396,7 +396,7 @@
     }
 
     if (openPullsFetchP && !force) return openPullsFetchP;
-    if (!globalThis.PRTreeFetch?.fetchOpenPulls) {
+    if (!(globalThis as any).PRTreeFetch?.fetchOpenPulls) {
       return Promise.resolve(cached);
     }
 
@@ -434,7 +434,7 @@
     openPullsFetchP = (async () => {
       try {
         if (ac?.signal?.aborted) return cached;
-        const prs = await globalThis.PRTreeFetch.fetchOpenPulls(o, r, null, {
+        const prs = await (globalThis as any).PRTreeFetch.fetchOpenPulls(o, r, null, {
           signal: ac?.signal || null,
         });
         const life = openPullsLifecycleApi();
@@ -460,7 +460,7 @@
         openPullsFetchedKey = key;
         openPullsFetchedAt = Date.now();
         try {
-          const app = globalThis.__PR_TREE_APP__;
+          const app = (globalThis as any).__PR_TREE_APP__;
           if (typeof app?.replaceCachedPrs === 'function') {
             app.replaceCachedPrs(next, { owner: o, repo: r });
           }
@@ -487,7 +487,7 @@
   }
 
   /** Find a PR already loaded by the pulls-list stack (no extra network). */
-  function findListPr(owner, repo, number) {
+  function findListPr(owner: any, repo: any, number: any) {
     const n = Number(number);
     if (!Number.isFinite(n) || n <= 0) return null;
     const o = String(owner || '').toLowerCase();
@@ -506,7 +506,7 @@
    * Minimal detail from list API row so header/title/body paint immediately.
    * Marked `_sketch: true` so later cache/network can upgrade freely.
    */
-  function detailSketchFromList(listPr, owner, repo, number) {
+  function detailSketchFromList(listPr: any, owner: any, repo: any, number: any) {
     const n = Number(number);
     if (!Number.isFinite(n) || n <= 0) return null;
     const title =
@@ -516,7 +516,7 @@
     // Labels: normalize to { name, color, description }
     const labels = Array.isArray(listPr?.labels)
       ? listPr.labels
-          .map((l) =>
+          .map((l: any) =>
             typeof l === 'string'
               ? { name: l, color: '', description: '' }
               : {
@@ -525,21 +525,21 @@
                   description: l?.description || '',
                 }
           )
-          .filter((l) => l.name)
+          .filter((l: any) => l.name)
       : [];
     // Assignees: login strings (MetaList shape)
     const assignees = Array.isArray(listPr?.assignees)
       ? listPr.assignees
-          .map((u) => (typeof u === 'string' ? u : u?.login || ''))
+          .map((u: any) => (typeof u === 'string' ? u : u?.login || ''))
           .filter(Boolean)
       : [];
     const requestedReviewers = Array.isArray(listPr?.requestedReviewers)
       ? listPr.requestedReviewers
-          .map((u) => (typeof u === 'string' ? u : u?.login || ''))
+          .map((u: any) => (typeof u === 'string' ? u : u?.login || ''))
           .filter(Boolean)
       : [];
     // Milestone: { number, title, state, dueOn }
-    let milestone = null;
+    let milestone: any = null;
     if (listPr?.milestone && typeof listPr.milestone === 'object') {
       const m = listPr.milestone;
       if (m.number != null || m.title) {
@@ -575,24 +575,24 @@
         listPr?.htmlUrl ||
         `https://github.com/${owner}/${repo}/pull/${n}`,
       merged: false,
-      mergeable: null,
+      mergeable: null as any,
       labels,
       assignees,
       requestedReviewers,
       milestone,
       avatarUrls,
-      files: [],
-      comments: [],
-      timelineEvents: [],
-      reviews: [],
-      reviewComments: [],
-      reviewThreads: [],
-      commits: [],
-      checks: { state: 'unknown', totalCount: 0, statuses: [], checkRuns: [] },
+      files: [] as any[],
+      comments: [] as any[],
+      timelineEvents: [] as any[],
+      reviews: [] as any[],
+      reviewComments: [] as any[],
+      reviewThreads: [] as any[],
+      commits: [] as any[],
+      checks: { state: 'unknown', totalCount: 0, statuses: [] as any[], checkRuns: [] as any[] },
       additions: listPr?.additions ?? null,
       deletions: listPr?.deletions ?? null,
       changedFiles: listPr?.changedFiles ?? null,
-      subscribed: null,
+      subscribed: null as any,
       _sketch: true,
       _source: 'list',
     };
@@ -602,7 +602,7 @@
    * Rank detail completeness for progressive upgrade decisions.
    * 0 empty · 1 list sketch · 2 core (no threads) · 3 cached/full with threads/files
    */
-  function detailRank(d) {
+  function detailRank(d: any) {
     if (!d || typeof d !== 'object') return 0;
     if (d._sketch) return 1;
     const hasThreads =
@@ -636,17 +636,17 @@
    * }>}
    */
   async function fetchNewestReviewThreadsAdaptive(
-    owner,
-    repo,
-    number,
+    owner: any,
+    repo: any,
+    number: any,
     opts: any = {}
   ) {
     const signal = opts?.signal || null;
     const cacheDetail = opts?.cacheDetail || null;
     const forceFull = Boolean(opts?.forceFull);
     const RT =
-      typeof globalThis !== 'undefined' && globalThis.PRModalReviewThreads
-        ? globalThis.PRModalReviewThreads
+      typeof globalThis !== 'undefined' && (globalThis as any).PRModalReviewThreads
+        ? (globalThis as any).PRModalReviewThreads
         : {};
     const apiMax = Number(RT.REVIEW_THREADS_PAGE_SIZE) || Number(RT.REVIEW_THREADS_API_MAX) || 100;
     const probeN = Number(RT.REVIEW_THREADS_WARM_PROBE_SIZE) || apiMax;
@@ -658,9 +658,9 @@
             cacheDetail &&
               !cacheDetail._sketch &&
               ((Array.isArray(cacheDetail.reviewThreads) &&
-                cacheDetail.reviewThreads.some((t) => t?.threadNodeId)) ||
+                cacheDetail.reviewThreads.some((t: any) => t?.threadNodeId)) ||
                 (Array.isArray(cacheDetail.reviewComments) &&
-                  cacheDetail.reviewComments.some((c) => c?.threadNodeId)))
+                  cacheDetail.reviewComments.some((c: any) => c?.threadNodeId)))
           ));
     const pageSize =
       typeof RT.pickNewestThreadsPageSize === 'function'
@@ -682,8 +682,8 @@
       }
       return null;
     })();
-    const fetchPage = (size, transport: any = {}) =>
-      globalThis.PRTreeFetch.fetchReviewThreadsPage(owner, repo, number, {
+    const fetchPage = (size: any, transport: any = {}) =>
+      (globalThis as any).PRTreeFetch.fetchReviewThreadsPage(owner, repo, number, {
         direction: 'newest',
         cursor: null,
         pageSize: size,
@@ -700,7 +700,7 @@
     /** Host-side REST page when SW GraphQL path is gated / empty. */
     async function restPageFromComments() {
       try {
-        const F = globalThis.PRTreeFetch;
+        const F = (globalThis as any).PRTreeFetch;
         if (typeof F?.fetchPrCommentsPage !== 'function') return null;
         const restPage = await F.fetchPrCommentsPage(owner, repo, number, {
           kind: 'review',
@@ -719,8 +719,8 @@
           // Minimal synthetic page so Diff can group from comments
           return {
             threads: items
-              .filter((c) => c && c.id != null && c.inReplyToId == null)
-              .map((r) => ({
+              .filter((c: any) => c && c.id != null && c.inReplyToId == null)
+              .map((r: any) => ({
                 threadNodeId:
                   r.threadNodeId || r.nodeId || `rest-thread-${r.id}`,
                 resolved: Boolean(r.resolved),
@@ -757,11 +757,11 @@
       }
     }
 
-    const pageHasData = (p) =>
+    const pageHasData = (p: any) =>
       (Array.isArray(p?.threads) && p.threads.length > 0) ||
       (Array.isArray(p?.comments) && p.comments.length > 0);
 
-    let page = null;
+    let page: any = null;
     let escalated = false;
     let earlyExit = false;
     let hostRestFallback = false;
@@ -919,13 +919,13 @@
       !hasWarm ||
       (Array.isArray(page?.threads) &&
         page.threads.some(
-          (t) => t && t.commentsLoaded !== true && !Boolean(t.resolved)
+          (t: any) => t && t.commentsLoaded !== true && !Boolean(t.resolved)
         ));
     let eagerN = 0;
     if (
       needBodies &&
       page?.source === 'graphql' &&
-      typeof globalThis.PRTreeFetch?.fetchReviewThreadsByIds === 'function' &&
+      typeof (globalThis as any).PRTreeFetch?.fetchReviewThreadsByIds === 'function' &&
       selectEager
     ) {
       const eagerIds = selectEager(page.threads || [], {
@@ -938,7 +938,7 @@
           // SW channel must not block Diff thread paint indefinitely.
           let bulkTimer: ReturnType<typeof setTimeout> | null = null;
           const bulk = await Promise.race([
-            globalThis.PRTreeFetch.fetchReviewThreadsByIds(eagerIds, {
+            (globalThis as any).PRTreeFetch.fetchReviewThreadsByIds(eagerIds, {
               signal,
             }),
             new Promise((_, reject) => {

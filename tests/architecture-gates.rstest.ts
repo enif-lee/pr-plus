@@ -110,6 +110,10 @@ describe('architecture gates', () => {
     expect(fs.existsSync(path.join(root, 'src/content-bridge/bridge-api.ts'))).toBe(true);
     expect(fs.existsSync(path.join(root, 'src/fetch/parts'))).toBe(false);
     expect(fs.existsSync(path.join(root, 'src/content-bridge/parts'))).toBe(false);
+    expect(fs.existsSync(path.join(root, 'src/host/parts'))).toBe(false);
+    expect(fs.existsSync(path.join(root, 'src/host/modules/MANIFEST.json'))).toBe(
+      false
+    );
     const bridgePtr = read('src/content-bridge.ts');
     expect(bridgePtr).toMatch(/bridge-api\.ts|CONTENT_BRIDGE_SOT/);
     expect(bridgePtr.split(/\n/).length).toBeLessThan(40);
@@ -554,8 +558,17 @@ describe('architecture gates', () => {
     expect(pureBuild).toMatch(/PURE_SOT|keep pure/);
     expect(pureBuild).toMatch(/detail-store/);
     expect(pureBuild).toMatch(/load-progress/);
+    expect(pureBuild).toMatch(/checks:\s*\{\s*lib:\s*['\"]checks\.ts['\"]/);
+    expect(read('src/modal/lib/checks.ts')).toMatch(/export function normalizeChecks/);
+    expect(read('src/modal/lib/checks.ts')).not.toMatch(/@ts-ignore/);
     // generated pure should claim AUTO-GENERATED after build
     const ds = read('src/modal/pure/detail-store.js').slice(0, 200);
     expect(ds).toMatch(/SOURCE OF TRUTH|AUTO-GENERATED|detail-store/);
+  });
+
+  test('usePrModalOpenEffects is gone', () => {
+    expect(
+      fs.existsSync(path.join(root, 'src/modal/hooks/usePrModalOpenEffects.ts'))
+    ).toBe(false);
   });
 });

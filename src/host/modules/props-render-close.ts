@@ -1,5 +1,5 @@
   // continued host module segment
-  function isReactRootLiveOn(host) {
+  function isReactRootLiveOn(host: any) {
     if (!reactRoot || !host) return false;
     if (typeof reactRoot.render !== 'function') return false;
     if (reactRootHost !== host) return false;
@@ -38,10 +38,10 @@
     reactRootHost = null;
   }
 
-  let diffNavDeferredRenderTimer = null;
+  let diffNavDeferredRenderTimer: any = null;
 
   function render() {
-    if (typeof globalThis.mountPrModal !== 'function') {
+    if (typeof (globalThis as any).mountPrModal !== 'function') {
       console.warn('[pr+] modal bundle not loaded (mountPrModal missing)');
       return;
     }
@@ -131,12 +131,12 @@
       /* ignore */
     }
 
-    reactRoot = globalThis.mountPrModal(host, props);
+    reactRoot = (globalThis as any).mountPrModal(host, props);
     reactRootHost = host;
   }
 
 
-  function persistOpenModal(owner, repo, number, extra: any = {}) {
+  function persistOpenModal(owner: any, repo: any, number: any, extra: any = {}) {
     const api = sessionApi();
     if (typeof sessionStorage === 'undefined' || !api?.saveOpenModal) return;
     api.saveOpenModal(sessionStorage, {
@@ -296,8 +296,8 @@
       const ids = ac?.signal?.__prpRequestIds
         ? [...ac.signal.__prpRequestIds]
         : [];
-      if (globalThis.PRTreeFetch?.cancelFetches) {
-        void globalThis.PRTreeFetch.cancelFetches(ids, { cancelAll: true });
+      if ((globalThis as any).PRTreeFetch?.cancelFetches) {
+        void (globalThis as any).PRTreeFetch.cancelFetches(ids, { cancelAll: true });
       }
     } catch {
       /* ignore */
@@ -459,7 +459,7 @@
 
     // 1) Tree / open-list cache (list sketch + decorations on reopen)
     try {
-      const app = globalThis.__PR_TREE_APP__;
+      const app = (globalThis as any).__PR_TREE_APP__;
       if (typeof app?.patchCachedPr === 'function') {
         const cachePatch: any = { ...fields };
         delete cachePatch.listCommentCount;
@@ -474,7 +474,7 @@
 
     // 2) Native row: labels / title / comment count / draft meta
     try {
-      const dom = globalThis.PRTreeDOM;
+      const dom = (globalThis as any).PRTreeDOM;
       if (typeof dom?.applyListRowFromDetail === 'function') {
         return Boolean(
           dom.applyListRowFromDetail(document, fields.number, fields)

@@ -97,13 +97,6 @@ export function installPrModalMutations(d: Record<string, any>) {
       // Fold onto d.detailRef first (commitMetaPatch writes optimistics there
       // synchronously — setState alone would still be stale mid-poll).
       const live = d.detailRef.current || d.detail;
-      const merged = mergeTimelineEventsById(
-        Array.isArray(live?.timelineEvents) ? live.timelineEvents : [],
-        events
-      );
-      if (live) {
-        d.detailRef.current = { ...live, timelineEvents: merged };
-      }
       applyDomainDetail((prev: any) => {
         const base = prev || live;
         if (!base) return prev;
@@ -112,7 +105,6 @@ export function installPrModalMutations(d: Record<string, any>) {
           timelineEvents: mergeTimelineEventsById(base.timelineEvents, events),
         };
       });
-      void patchHostDetail({ timelineEvents: merged });
     } catch {
       /* soft-fail: meta write + local timeline already applied */
     }
@@ -157,8 +149,6 @@ export function installPrModalMutations(d: Record<string, any>) {
       // Never persist _metaSeq to host/cache — that blocked empty API results on reopen.
       _metaSeq: (Number(base._metaSeq) || 0) + 1,
     };
-    // Host SoT: detailRef for same-tick chains + narrow onPatchDetail (no localDetail).
-    d.detailRef.current = next;
     const forHost: Record<string, unknown> = { ...patch };
     if (Object.prototype.hasOwnProperty.call(patch, 'avatarUrls') || next.avatarUrls) {
       forHost.avatarUrls = next.avatarUrls;
@@ -166,7 +156,10 @@ export function installPrModalMutations(d: Record<string, any>) {
     if (localTe.length > 0) {
       forHost.timelineEvents = timelineEvents;
     }
-    void patchHostDetail(forHost);
+    const ack = patchHostDetail(forHost);
+    if (ack.status === 'applied') {
+      d.detailRef.current = next;
+    }
     if (opts.refreshTimeline !== false) {
       queueMicrotask(() => {
         void refreshTimelineEvents();
@@ -226,7 +219,7 @@ export function installPrModalMutations(d: Record<string, any>) {
     'subscribed', 'avatarUrls', 'bodyReactions', 'comments', 'commentsMeta', 'timelineEvents',
     'reviewComments', 'reviewThreads', 'reviewCommentsMeta', 'reviewThreadsMeta', 'viewerPendingReview',
     'reviews', 'files', 'commits', 'commitsCount', 'changedFiles', 'gitattributesText',
-    '_deletedReviewCommentIds', '_deletedReviewBodies', '_deletedIssueCommentIds', '_resolveStamps',
+    '_deletedIssueCommentIds', '_resolveStamps',
     'headBranchDeleted', 'headRefDeleted',
   ] as const;
 
@@ -252,7 +245,6 @@ export function installPrModalMutations(d: Record<string, any>) {
     const next =
       typeof nextOrUpdater === 'function' ? nextOrUpdater(base) : nextOrUpdater;
     if (!next) return { status: 'skipped' };
-    d.detailRef.current = next;
     const patch = pickDomainPatch(next, base);
     if (!Object.keys(patch).length) {
       // Full replace keys when updater returned whole detail without diffs detected
@@ -260,8 +252,18 @@ export function installPrModalMutations(d: Record<string, any>) {
         if (Object.prototype.hasOwnProperty.call(next, k)) patch[k] = next[k];
       }
     }
+    if (Object.prototype.hasOwnProperty.call(next, '_deletedReviewCommentIds')) {
+      patch._deletedReviewCommentIds = next._deletedReviewCommentIds;
+    }
+    if (Object.prototype.hasOwnProperty.call(next, '_deletedReviewBodies')) {
+      patch._deletedReviewBodies = next._deletedReviewBodies;
+    }
     if (!Object.keys(patch).length) return { status: 'skipped' };
-    return patchHostDetail(patch);
+    const ack = patchHostDetail(patch);
+    if (ack.status === 'applied') {
+      d.detailRef.current = next;
+    }
+    return ack;
   }
 
   async function applyAddAssignees(logins: any) {
@@ -287,7 +289,7 @@ export function installPrModalMutations(d: Record<string, any>) {
       const fromApi = mapAssigneesFromApi(result, []);
       const merged = fromApi.length ? fromApi.slice() : prevAssignees.slice();
       for (const name of names) {
-        if (!merged.some((x) => String(x).toLowerCase() === name.toLowerCase())) {
+        if (!merged.some((x: any) => String(x).toLowerCase() === name.toLowerCase())) {
           merged.push(name);
         }
       }
@@ -319,7 +321,7 @@ export function installPrModalMutations(d: Record<string, any>) {
     const options =
       typeof d.buildPeopleOptions === 'function'
         ? d.buildPeopleOptions(logins, {}, d.detail.avatarUrls || {})
-        : logins.map((id) => ({
+        : logins.map((id: any) => ({
             id,
             label: id,
             meta: {
@@ -338,7 +340,7 @@ export function installPrModalMutations(d: Record<string, any>) {
       allowFreeText: true,
       multi: false,
       placeholder: 'Filter or type a username…',
-      onPick: (opt) => {
+      onPick: (opt: any) => {
         d.closePicker();
         void applyAddAssignees([opt?.id || opt?.label || opt?.meta?.login]);
       },
@@ -372,7 +374,7 @@ export function installPrModalMutations(d: Record<string, any>) {
             .map((s: string) => String(s).trim())
             .filter(Boolean)
         : (d.detail.assignees || []).filter(
-            (x) => String(x).toLowerCase() !== String(login).toLowerCase()
+            (x: any) => String(x).toLowerCase() !== String(login).toLowerCase()
           );
       commitMetaPatch(
         {
@@ -403,7 +405,7 @@ export function installPrModalMutations(d: Record<string, any>) {
       : Array.isArray(d.detail.labels)
         ? d.detail.labels
         : [];
-    const next = (labels || []).map((s) => String(s).trim()).filter(Boolean);
+    const next = (labels || []).map((s: any) => String(s).trim()).filter(Boolean);
     d.setActionBusy(true);
     d.setActionMsg('');
     try {
@@ -424,7 +426,7 @@ export function installPrModalMutations(d: Record<string, any>) {
         labelsOut =
           fromApi.length > 0 || next.length === 0
             ? fromApi
-            : next.map((name) => {
+            : next.map((name: any) => {
                 const existing = (prevLabels || []).find(
                   (l: any) =>
                     String(l.name || l).toLowerCase() === name.toLowerCase()
@@ -437,7 +439,7 @@ export function installPrModalMutations(d: Record<string, any>) {
       // Prefer API result for chips; for timeline delta also consider the
       // requested name set so an empty/lagging PUT body still paints events.
       const actor = timelineActorFromDetail(d.detailRef.current || d.detail);
-      const requestedAsLabels = next.map((name) => {
+      const requestedAsLabels = next.map((name: any) => {
         const existing = (labelsOut || prevLabels || []).find(
           (l: any) => String(l.name || l).toLowerCase() === name.toLowerCase()
         );
@@ -479,7 +481,7 @@ export function installPrModalMutations(d: Record<string, any>) {
   }
   async function openLabelPicker() {
     if (!d.detail) return;
-    const currentNames = (d.detail.labels || []).map((l) =>
+    const currentNames = (d.detail.labels || []).map((l: any) =>
       String(l.name || l).trim()
     );
     const common = [
@@ -595,13 +597,13 @@ export function installPrModalMutations(d: Record<string, any>) {
         d.closePicker();
         void applySetLabels(ids);
       },
-      onPick: (opt) => {
+      onPick: (opt: any) => {
         // single fallback: add one
         d.closePicker();
         const name = String(opt?.id || opt?.label || '').trim();
         if (!name) return;
         const names = currentNames.slice();
-        if (!names.some((n) => String(n).toLowerCase() === name.toLowerCase())) {
+        if (!names.some((n: any) => String(n).toLowerCase() === name.toLowerCase())) {
           names.push(name);
         }
         void applySetLabels(names);
@@ -611,8 +613,8 @@ export function installPrModalMutations(d: Record<string, any>) {
   function onRemoveLabel(name: any) {
     if (!d.detail || !name) return;
     const names = (d.detail.labels || [])
-      .map((l) => l.name || l)
-      .filter((n) => String(n).toLowerCase() !== String(name).toLowerCase());
+      .map((l: any) => l.name || l)
+      .filter((n: any) => String(n).toLowerCase() !== String(name).toLowerCase());
     void applySetLabels(names);
   }
   async function onSaveBody(body: any) {
@@ -631,10 +633,8 @@ export function installPrModalMutations(d: Record<string, any>) {
       const base = d.detailRef.current || d.detail;
       const next = base ? { ...base, body: nextBody } : null;
       if (next) {
-        d.detailRef.current = next;
         applyDomainDetail(next);
       }
-      void patchHostDetail({ body: nextBody });
     } catch (err) {
       // Prior settled body preserved (never pre-painted).
       d.setActionMsg(err?.message || String(err));
@@ -642,7 +642,7 @@ export function installPrModalMutations(d: Record<string, any>) {
       d.setActionBusy(false);
     }
   }
-  async function onSaveEditComment(kind, id, body) {
+  async function onSaveEditComment(kind: any, id: any, body: any) {
     if (!d.detail || id == null) return;
     const nextBody = body == null ? '' : String(body);
     d.setActionBusy(true);
@@ -717,7 +717,7 @@ export function installPrModalMutations(d: Record<string, any>) {
       const api = globalThis.PRTreeFetch;
       if (!api?.updatePullRequest) throw new Error('Update PR API unavailable');
       await api.updatePullRequest(d.detail.owner, d.detail.repo, d.detail.number, { base: next });
-      applyDomainDetail((prev) => (prev ? { ...prev, baseRef: next } : prev));
+      applyDomainDetail((prev: any) => (prev ? { ...prev, baseRef: next } : prev));
       d.setActionMsg(`Base branch changed to ${next}.`);
       await d.onRefresh?.();
     } catch (err) {
@@ -744,7 +744,7 @@ export function installPrModalMutations(d: Record<string, any>) {
       query: '',
       allowFreeText: true,
       placeholder: d.detail.baseRef ? `Current: ${d.detail.baseRef}` : 'Filter or type a branch…',
-      onPick: (opt) => {
+      onPick: (opt: any) => {
         d.closePicker();
         void applyBaseChange(opt?.id || opt?.label);
       },
@@ -802,7 +802,7 @@ export function installPrModalMutations(d: Record<string, any>) {
     const options =
       typeof d.buildPeopleOptions === 'function'
         ? d.buildPeopleOptions(logins, {}, d.detail.avatarUrls || {})
-        : logins.map((id) => ({
+        : logins.map((id: any) => ({
             id,
             label: id,
             meta: { login: id, kind: 'user', avatarUrl: d.detail.avatarUrls?.[String(id).toLowerCase()] || '' },
@@ -817,7 +817,7 @@ export function installPrModalMutations(d: Record<string, any>) {
       allowFreeText: true,
       multi: false,
       placeholder: 'Filter or type a username…',
-      onPick: (opt) => {
+      onPick: (opt: any) => {
         d.closePicker();
         void applyAddReviewer(opt?.id || opt?.label);
       },
@@ -860,7 +860,7 @@ export function installPrModalMutations(d: Record<string, any>) {
       const requestedReviewers = fromApi.length
         ? fromApi
         : (d.detail.requestedReviewers || []).filter(
-            (x) => String(x).toLowerCase() !== String(login).toLowerCase()
+            (x: any) => String(x).toLowerCase() !== String(login).toLowerCase()
           );
       commitMetaPatch(
         { requestedReviewers },
@@ -914,7 +914,7 @@ export function installPrModalMutations(d: Record<string, any>) {
       d.setActionBusy(false);
     }
   }
-  function onStartEditReviewComment(id, _body) {
+  function onStartEditReviewComment(id: any, _body: any) {
     // Opens inline BodyEditor (conversation timeline or Diff InlineThread)
     d.setEditingComment({ kind: 'review', id });
   }
@@ -952,7 +952,7 @@ export function installPrModalMutations(d: Record<string, any>) {
         /* ignore */
       }
       let stripped: any = null;
-      applyDomainDetail((prev) => {
+      applyDomainDetail((prev: any) => {
         stripped =
           typeof d.stripPendingReviewFromDetail === 'function'
             ? d.stripPendingReviewFromDetail(prev)
@@ -989,7 +989,7 @@ export function installPrModalMutations(d: Record<string, any>) {
       // pre-discard snapshot. Host live PENDING (if delete failed/recreated)
       // wins via settled set-authority on the next core/threads apply.
       let post: any = null;
-      applyDomainDetail((prev) => {
+      applyDomainDetail((prev: any) => {
         post =
           typeof d.stripPendingReviewFromDetail === 'function'
             ? d.stripPendingReviewFromDetail(prev)
@@ -1138,7 +1138,7 @@ export function installPrModalMutations(d: Record<string, any>) {
       d.setActionBusy(false);
     }
   }
-  async function onResolveThread(threadNodeId, resolved) {
+  async function onResolveThread(threadNodeId: any, resolved: any) {
     const tid = threadNodeId != null ? String(threadNodeId).trim() : '';
     if (!tid || !/^PRRT_/i.test(tid)) {
       d.setActionMsg(
@@ -1188,7 +1188,7 @@ export function installPrModalMutations(d: Record<string, any>) {
   function onToggleViewed(path: any) {
     if (!path) return;
     const markingViewed = !d.isPathViewed(d.viewedPaths, path);
-    d.setViewedPaths((prev) =>
+    d.setViewedPaths((prev: any) =>
       typeof d.applyViewedToggle === 'function'
         ? d.applyViewedToggle(prev, path, markingViewed)
         : typeof toggleViewedPath === 'function'
@@ -1196,7 +1196,7 @@ export function installPrModalMutations(d: Record<string, any>) {
           : prev
     );
     // Viewed → collapse; uncheck → expand so the file can be re-read.
-    d.setCollapsedFiles((prev) => {
+    d.setCollapsedFiles((prev: any) => {
       const n = d.materializeCollapsedPaths(prev, d.annotatedFiles, d.viewedPaths);
       if (markingViewed) n.add(path);
       else n.delete(path);
@@ -1271,7 +1271,7 @@ export function installPrModalMutations(d: Record<string, any>) {
         mergeable: false,
         merged: false,
       };
-      applyDomainDetail((d) => (d ? { ...d, ...closedPatch } : d));
+      applyDomainDetail((d: any) => (d ? { ...d, ...closedPatch } : d));
       void patchHostDetail(closedPatch);
       // Return to the pulls list (centered modal and side sheet).
       d.requestClose();
@@ -1306,14 +1306,14 @@ export function installPrModalMutations(d: Record<string, any>) {
         merged: false,
         mergeable: null as boolean | null,
       };
-      applyDomainDetail((d) => (d ? { ...d, ...openPatch } : d));
+      applyDomainDetail((d: any) => (d ? { ...d, ...openPatch } : d));
       void patchHostDetail(openPatch);
       try {
         await d.onRefresh?.();
       } catch {
         /* best-effort */
       }
-      applyDomainDetail((d) =>
+      applyDomainDetail((d: any) =>
         d ? { ...d, state: 'open', merged: false } : d
       );
       void patchHostDetail({ state: 'open', merged: false });
@@ -1351,7 +1351,7 @@ export function installPrModalMutations(d: Record<string, any>) {
             : [],
         [renameEv]
       );
-      applyDomainDetail((prev) =>
+      applyDomainDetail((prev: any) =>
         prev
           ? {
               ...prev,
@@ -1393,7 +1393,7 @@ export function installPrModalMutations(d: Record<string, any>) {
     // Pessimistic: draft flag + host cache only after API success; re-assert after
     // refresh so SWR/IDB cannot resurrect pre-write draft.
     const applyDraft = (draft: boolean) => {
-      applyDomainDetail((prev) => (prev ? { ...prev, draft: Boolean(draft) } : prev));
+      applyDomainDetail((prev: any) => (prev ? { ...prev, draft: Boolean(draft) } : prev));
       void patchHostDetail({ draft: Boolean(draft) });
     };
     d.setActionBusy(true);
@@ -1485,7 +1485,7 @@ export function installPrModalMutations(d: Record<string, any>) {
         draft: false,
       };
       const applyMerged = () => {
-        applyDomainDetail((d) => (d ? { ...d, ...mergedPatch } : d));
+        applyDomainDetail((d: any) => (d ? { ...d, ...mergedPatch } : d));
         void patchHostDetail(mergedPatch);
       };
       applyMerged();
@@ -1544,7 +1544,7 @@ export function installPrModalMutations(d: Record<string, any>) {
     const nextSubscribed = Boolean(want);
     const prevSubscribed = d.detail.subscribed;
     // Optimistic UI — swap icon immediately; revert on failure
-    applyDomainDetail((prev) =>
+    applyDomainDetail((prev: any) =>
       prev ? { ...prev, subscribed: nextSubscribed } : prev
     );
     void patchHostDetail({ subscribed: nextSubscribed });
@@ -1562,7 +1562,7 @@ export function installPrModalMutations(d: Record<string, any>) {
           { subscribed: true, ignored: false, nodeId }
         );
         if (result && typeof result.subscribed === 'boolean') {
-          applyDomainDetail((prev) =>
+          applyDomainDetail((prev: any) =>
             prev ? { ...prev, subscribed: result.subscribed } : prev
           );
         }
@@ -1587,7 +1587,7 @@ export function installPrModalMutations(d: Record<string, any>) {
           );
         }
         if (result && typeof result.subscribed === 'boolean') {
-          applyDomainDetail((prev) =>
+          applyDomainDetail((prev: any) =>
             prev ? { ...prev, subscribed: result.subscribed } : prev
           );
         }
@@ -1596,7 +1596,7 @@ export function installPrModalMutations(d: Record<string, any>) {
       d.setActionMsg('');
       // Keep optimistic value — skip full refresh (stale subscription can clobber UI)
     } catch (err) {
-      applyDomainDetail((prev) =>
+      applyDomainDetail((prev: any) =>
         prev
           ? {
               ...prev,

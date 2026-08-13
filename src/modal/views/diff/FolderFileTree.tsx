@@ -301,7 +301,7 @@ function FolderFileTreeImpl(props: any) {
   }, [filteredTree, effectiveExpanded]);
 
   const onToggleExt = useCallback((ext: string) => {
-    setSelectedExts((prev) => toggleFileExtension(prev, ext));
+    setSelectedExts((prev: any) => toggleFileExtension(prev, ext));
   }, []);
 
   const listScrollRef = useRef<HTMLUListElement | null>(null);

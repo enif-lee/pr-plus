@@ -13,7 +13,7 @@ import {
 
 
 /** Default chunk when expanding from one edge of a gap (GitHub uses 20). */
-export function mergeLineRanges(ranges, start, end) {
+export function mergeLineRanges(ranges: any, start: any, end: any) {
   const s = Math.min(Number(start), Number(end));
   const e = Math.max(Number(start), Number(end));
   if (!Number.isFinite(s) || !Number.isFinite(e)) {
@@ -46,7 +46,7 @@ export function mergeLineRanges(ranges, start, end) {
  * @param {'all'|'down'|'up'|'fromStart'|'fromEnd'} direction
  * @param {{ gapStartNew: number, gapEndNew: number, expandChunk?: number }} gap
  */
-export function resolveExpandRange(direction, gap) {
+export function resolveExpandRange(direction: any, gap: any) {
   const start = Number(gap?.gapStartNew);
   const end = Number(gap?.gapEndNew);
   if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
@@ -81,7 +81,7 @@ export function resolveExpandRange(direction, gap) {
  * @param {{ hiddenCount?: number, expandChunk?: number }|null|undefined} gap
  * @returns {Array<'fromStart'|'fromEnd'|'all'>}
  */
-export function expandControlKinds(_placement, gap) {
+export function expandControlKinds(_placement: any, gap: any) {
   const count = Math.max(0, Number(gap?.hiddenCount) || 0);
   if (!count) return [];
   const chunk =
@@ -103,7 +103,7 @@ export function expandControlKinds(_placement, gap) {
  * @param {{ gapStartNew?: number, gapEndNew?: number }|null|undefined} gap
  * @param {string} [direction]
  */
-export function makeExpandBusyKey(filePath, gap, direction = 'all') {
+export function makeExpandBusyKey(filePath: any, gap: any, direction = 'all') {
   const path = String(filePath || '');
   const a = Number(gap?.gapStartNew);
   const b = Number(gap?.gapEndNew);
@@ -113,7 +113,7 @@ export function makeExpandBusyKey(filePath, gap, direction = 'all') {
 }
 
 /** Gap-identity prefix shared by all directions for the same remaining gap. */
-export function expandBusyPrefix(filePath, gap) {
+export function expandBusyPrefix(filePath: any, gap: any) {
   const path = String(filePath || '');
   const a = Number(gap?.gapStartNew);
   const b = Number(gap?.gapEndNew);
@@ -126,7 +126,7 @@ export function expandBusyPrefix(filePath, gap) {
  * @param {string} filePath
  * @param {{ gapStartNew?: number, gapEndNew?: number }|null|undefined} gap
  */
-export function expandBusyMatches(expandBusyKey, filePath, gap) {
+export function expandBusyMatches(expandBusyKey: any, filePath: any, gap: any) {
   if (!expandBusyKey) return false;
   const prefix = expandBusyPrefix(filePath, gap);
   if (!prefix) return false;
@@ -134,9 +134,9 @@ export function expandBusyMatches(expandBusyKey, filePath, gap) {
 }
 
 export function stickyFileHeaderForScroll(
-  virtualRows,
-  offsets,
-  scrollTop,
+  virtualRows: any,
+  offsets: any,
+  scrollTop: any,
   rowHeight = 22
 ) {
   if (!Array.isArray(virtualRows) || !virtualRows.length) return null;
@@ -193,11 +193,11 @@ export function stickyFileHeaderForScroll(
  * @param {number} [rowHeight=22]
  */
 export function shouldShowStickyFileHeader(
-  header,
-  offsets,
-  scrollTop,
+  header: any,
+  offsets: any,
+  scrollTop: any,
   rowHeight = 22,
-  virtualRows = null
+  virtualRows: any = null
 ) {
   const layout = resolveStickyFileHeaderLayout(
     virtualRows,
@@ -213,7 +213,7 @@ export function shouldShowStickyFileHeader(
  * Array index of a file-header row in virtualRows (prefer identity, then path).
  * Prefer this over row.rowIndex — those can skip when intermediate rows are omitted.
  */
-export function fileHeaderArrayIndex(virtualRows, header) {
+export function fileHeaderArrayIndex(virtualRows: any, header: any) {
   if (!header || !Array.isArray(virtualRows)) return -1;
   const byRef = virtualRows.indexOf(header);
   if (byRef >= 0) return byRef;
@@ -247,11 +247,11 @@ export function fileHeaderArrayIndex(virtualRows, header) {
  * }|null}
  */
 export function resolveStickyFileHeaderLayout(
-  virtualRows,
-  offsets,
-  scrollTop,
+  virtualRows: any,
+  offsets: any,
+  scrollTop: any,
   rowHeight = 22,
-  header = null
+  header: any = null
 ) {
   const top = Math.max(0, Number(scrollTop) || 0);
   const list = Array.isArray(virtualRows) ? virtualRows : null;

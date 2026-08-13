@@ -16,7 +16,7 @@ export function findDanglingPrNumbers(pagePrNumbers: any, prs: any) {
   if (!Array.isArray(pagePrNumbers) || pagePrNumbers.length === 0) {
     return [];
   }
-  const have = new Set((prs || []).map((pr) => pr.number));
+  const have = new Set((prs || []).map((pr: any) => pr.number));
   const dangling = [];
   const seen = new Set();
   for (const raw of pagePrNumbers) {
@@ -56,7 +56,7 @@ export async function fetchPrHeadProbe(owner: any, repo: any, number: any, fetch
   const empty = {
     headSha: '',
     baseSha: '',
-    updatedAt: null,
+    updatedAt: null as any,
     draft: false,
     state: '',
     number: Number.isFinite(n) ? n : 0,
@@ -116,7 +116,7 @@ export async function fetchDanglingPulls(owner: any, repo: any, numbers: any, fe
   ctx = normalizeApiCtx(ctx);
   if (!numbers.length) return [];
 
-  const settled = await mapWithConcurrency(numbers, 5, async (pullNumber) => {
+  const settled = await mapWithConcurrency(numbers, 5, async (pullNumber: any) => {
     try {
       return await fetchPullByNumber(owner, repo, pullNumber, fetchImpl, token, ctx);
     } catch (err) {
@@ -226,7 +226,7 @@ export function attachMagicLinks(prs: any, autolinks: any) {
  * @param {number[]} [options.pagePrNumbers] PR numbers visible on the pulls page
  * @param {boolean} [options.includeAutolinks=true]
  */
-export async function fetchOpenPulls(owner, repo, fetchImpl, options: any = {}) {
+export async function fetchOpenPulls(owner: any, repo: any, fetchImpl: any, options: any = {}) {
   const {
     token = null,
     pagePrNumbers = [],
@@ -248,7 +248,7 @@ export async function fetchOpenPulls(owner, repo, fetchImpl, options: any = {}) 
       ctx
     );
     if (extras.length > 0) {
-      const byNumber = new Map(listed.map((pr) => [pr.number, pr]));
+      const byNumber = new Map(listed.map((pr: any) => [pr.number, pr]));
       for (const pr of extras) {
         byNumber.set(pr.number, pr);
       }

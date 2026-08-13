@@ -1,3 +1,4 @@
+import { MSG } from '../sw-messages';
 /** channel */
 /**
  * SOURCE OF TRUTH — complete content-script bridge body.
@@ -5,17 +6,17 @@
  * Do not split into mid-function fragments.
  */
 
-export function sleep(ms) {
+export function sleep(ms: any) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export function isTransientChannelError(msg) {
+export function isTransientChannelError(msg: any) {
   return /message channel closed|Receiving end does not exist|asynchronous response|Could not establish connection|Extension context invalidated/i.test(
     String(msg || '')
   );
 }
 
-export function isContextInvalidated(msg) {
+export function isContextInvalidated(msg: any) {
   return /Extension context invalidated/i.test(String(msg || ''));
 }
 
@@ -53,7 +54,7 @@ export function makeAbortError() {
   return err;
 }
 
-export function isAbortError(err) {
+export function isAbortError(err: any) {
   return (
     err?.name === 'AbortError' ||
     /aborted|AbortError/i.test(String(err?.message || err || ''))
@@ -72,7 +73,7 @@ export function nextRequestId() {
  * @param {string[]|string|null} requestIds
  * @param {{ cancelAll?: boolean }} [opts] cancelAll aborts every active SW GitHub fetch
  */
-export function cancelFetches(requestIds, opts: any = {}) {
+export function cancelFetches(requestIds: any, opts: any = {}) {
   const ids = Array.isArray(requestIds)
     ? requestIds.map(String).filter(Boolean)
     : requestIds != null
@@ -84,7 +85,7 @@ export function cancelFetches(requestIds, opts: any = {}) {
   }
   return chrome.runtime
     .sendMessage({
-      type: 'PR_TREE_CANCEL_FETCH',
+      type: MSG.CANCEL_FETCH,
       requestIds: ids,
       ...(cancelAll ? { cancelAll: true } : null),
     })
@@ -92,7 +93,7 @@ export function cancelFetches(requestIds, opts: any = {}) {
 }
 
 /** Reject when AbortSignal fires (unblocks await sendMessage on sheet close). */
-export function whenAborted(signal) {
+export function whenAborted(signal: any) {
   return new Promise((_, reject) => {
     if (!signal) return;
     if (signal.aborted) {
@@ -109,7 +110,7 @@ export function whenAborted(signal) {
   });
 }
 
-export async function send(message, { retries = 4, signal = null } = {} as any) {
+export async function send(message: any, { retries = 4, signal = null } = {} as any) {
   if (!(globalThis as any).chrome?.runtime?.sendMessage) {
     throw new Error('chrome.runtime unavailable');
   }
@@ -212,7 +213,7 @@ export async function send(message, { retries = 4, signal = null } = {} as any) 
         if (attempt < retries && isTransientChannelError(msg)) {
           // Wake SW: light PING then retry (idle SW common after minutes unused)
           try {
-            await chrome.runtime.sendMessage({ type: 'PR_TREE_PING' });
+            await chrome.runtime.sendMessage({ type: MSG.PING });
           } catch {
             /* ignore — next attempt is the real message */
           }

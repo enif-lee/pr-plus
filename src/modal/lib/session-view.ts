@@ -21,7 +21,7 @@ export const SESSION_VIEW_VERSION = 2;
  * @param {string} repo
  * @param {number|string} number
  */
-export function sessionViewKey(owner, repo, number) {
+export function sessionViewKey(owner: any, repo: any, number: any) {
   return `${STORAGE_PREFIX}${String(owner || '').toLowerCase()}/${String(repo || '').toLowerCase()}#${Number(number)}`;
 }
 
@@ -46,7 +46,7 @@ function normalizePageToken(raw: unknown): 'conversation' | 'diff' | null {
  * Optional page (`conversation`|`diff`) + position (`c:{id}`) for URI parity.
  * @param {{ owner: string, repo: string, number: number|string, page?: string, position?: string }} payload
  */
-export function serializeOpenModal(payload) {
+export function serializeOpenModal(payload: any) {
   if (!payload || typeof payload !== 'object') return null;
   const owner = String(payload.owner || '').trim();
   const repo = String(payload.repo || '').trim();
@@ -74,7 +74,7 @@ export function serializeOpenModal(payload) {
  * @param {{ now?: number, maxAgeMs?: number }} [opts]
  * @returns {{ owner: string, repo: string, number: number, page?: string|null, position?: string|null }|null}
  */
-export function parseOpenModal(raw, opts: any = {}) {
+export function parseOpenModal(raw: any, opts: any = {}) {
   let obj = raw;
   if (typeof raw === 'string') {
     try {
@@ -103,7 +103,7 @@ export function parseOpenModal(raw, opts: any = {}) {
   return { owner, repo, number, page, position };
 }
 
-export function saveOpenModal(storage, payload) {
+export function saveOpenModal(storage: any, payload: any) {
   if (!storage || typeof storage.setItem !== 'function') return false;
   const snap = serializeOpenModal({ ...payload, at: Date.now() });
   if (!snap) return false;
@@ -115,7 +115,7 @@ export function saveOpenModal(storage, payload) {
   }
 }
 
-export function loadOpenModal(storage, opts) {
+export function loadOpenModal(storage: any, opts: any) {
   if (!storage || typeof storage.getItem !== 'function') return null;
   try {
     return parseOpenModal(storage.getItem(OPEN_MODAL_KEY), opts);
@@ -124,7 +124,7 @@ export function loadOpenModal(storage, opts) {
   }
 }
 
-export function clearOpenModal(storage) {
+export function clearOpenModal(storage: any) {
   if (!storage || typeof storage.removeItem !== 'function') return;
   try {
     storage.removeItem(OPEN_MODAL_KEY);
@@ -169,7 +169,7 @@ export function parseLineSelection(raw: any) {
  * @param {object} state — UI snapshot (+ optional owner/repo/number for identity)
  * @returns {object|null} JSON-safe snapshot
  */
-export function serializeSessionView(state) {
+export function serializeSessionView(state: any) {
   if (!state || typeof state !== 'object') return null;
   const owner = String(state.owner || '').trim();
   const repo = String(state.repo || '').trim();
@@ -208,8 +208,8 @@ export function serializeSessionView(state) {
     layoutMode: page === 'diff' ? 'diff' : 'centered',
     diffMode: state.diffMode === 'split' ? 'split' : 'unified',
     hideWhitespace: Boolean(state.hideWhitespace),
-    collapsedFiles: collapsed.filter((p) => typeof p === 'string' && p),
-    viewedPaths: viewed.filter((p) => typeof p === 'string' && p),
+    collapsedFiles: collapsed.filter((p: any) => typeof p === 'string' && p),
+    viewedPaths: viewed.filter((p: any) => typeof p === 'string' && p),
     activeFilePath:
       typeof state.activeFilePath === 'string' && state.activeFilePath
         ? state.activeFilePath
@@ -234,7 +234,7 @@ const LAYOUT_DIFF_ALIAS = 'diff';
  * @param {unknown} raw
  * @returns {object|null}
  */
-export function parseSessionView(raw) {
+export function parseSessionView(raw: any) {
   let obj = raw;
   if (typeof raw === 'string') {
     try {
@@ -265,10 +265,10 @@ export function parseSessionView(raw) {
     diffMode: obj.diffMode === 'split' ? 'split' : 'unified',
     hideWhitespace: Boolean(obj.hideWhitespace),
     collapsedFiles: Array.isArray(obj.collapsedFiles)
-      ? obj.collapsedFiles.filter((p) => typeof p === 'string')
+      ? obj.collapsedFiles.filter((p: any) => typeof p === 'string')
       : [],
     viewedPaths: Array.isArray(obj.viewedPaths)
-      ? obj.viewedPaths.filter((p) => typeof p === 'string')
+      ? obj.viewedPaths.filter((p: any) => typeof p === 'string')
       : [],
     activeFilePath:
       typeof obj.activeFilePath === 'string' ? obj.activeFilePath : null,
@@ -327,7 +327,7 @@ export function canRestoreSessionView(stored: any, identity: any): boolean {
 /**
  * @param {Storage} storage sessionStorage-like
  */
-export function loadSessionView(storage, owner, repo, number) {
+export function loadSessionView(storage: any, owner: any, repo: any, number: any) {
   if (!storage || typeof storage.getItem !== 'function') return null;
   try {
     const key = sessionViewKey(owner, repo, number);
@@ -340,7 +340,7 @@ export function loadSessionView(storage, owner, repo, number) {
 /**
  * @param {Storage} storage
  */
-export function saveSessionView(storage, owner, repo, number, state) {
+export function saveSessionView(storage: any, owner: any, repo: any, number: any, state: any) {
   if (!storage || typeof storage.setItem !== 'function') return false;
   const snap = serializeSessionView({
     ...state,
@@ -357,7 +357,7 @@ export function saveSessionView(storage, owner, repo, number, state) {
   }
 }
 
-export function clearSessionView(storage, owner, repo, number) {
+export function clearSessionView(storage: any, owner: any, repo: any, number: any) {
   if (!storage || typeof storage.removeItem !== 'function') return;
   try {
     storage.removeItem(sessionViewKey(owner, repo, number));

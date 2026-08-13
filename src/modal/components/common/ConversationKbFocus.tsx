@@ -87,7 +87,7 @@ export function ConversationKbFocusClassName({
 export function ConversationKbFocusScroller(props: {
   /** Expand unresolved group path / collapsed threads when needed */
   onFocusThread?: (commentId: string) => void;
-}) {
+}): null {
   const pending = useModalStore((s) => s.pendingConversationNavAnchor);
   const onFocusThread = props.onFocusThread;
 
@@ -110,7 +110,7 @@ export function OptHintsOverlayClass({
   targetRef,
 }: {
   targetRef: React.RefObject<HTMLElement | null>;
-}) {
+}): null {
   const active = useModalStore((s) => s.optHintsActive);
   useEffect(() => {
     const el = targetRef.current;
@@ -130,7 +130,7 @@ export function ConversationKbEnterExpand({
 }: {
   onExpand: (commentId: string) => void;
   isCollapsed: (commentId: string) => boolean;
-}) {
+}): null {
   const anchor = useModalStore((s) => s.focusedConversationAnchor);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

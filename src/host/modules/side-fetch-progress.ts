@@ -1,6 +1,6 @@
   // continued host module segment
   /** Force-clear a stuck open progress pill after shell is interactive. */
-  let openProgressWatchdogTimer = null;
+  let openProgressWatchdogTimer: any = null;
   function armOpenProgressWatchdog(ms = 10_000) {
     // Absolute deadline from the first critical stage. Re-arming on every
     // label/percent update allowed a busy pill to extend indefinitely.
@@ -26,14 +26,14 @@
     }, ms);
   }
 
-  function beginFetchProgress(gen, stillOpenFn = null) {
-    const lp = globalThis.PRModalLoadProgress;
+  function beginFetchProgress(gen: any, stillOpenFn: any = null) {
+    const lp = (globalThis as any).PRModalLoadProgress;
     const w = fetchUnitWeights();
     const tracker =
       lp && typeof lp.createWeightProgress === 'function'
         ? lp.createWeightProgress({ total: 100, initial: 0 })
         : {
-            complete(key, weight) {
+            complete(key: any, weight: any) {
               this._c = Math.min(100, (this._c || 0) + Math.max(0, weight || 0));
               this._keys = this._keys || new Set();
               if (this._keys.has(key)) {
@@ -45,13 +45,14 @@
             percent() {
               return Math.min(100, Math.round(this._c || 0));
             },
-            has(key) {
+            has(key: any) {
               return (this._keys || new Set()).has(String(key || ''));
             },
             getKeys() {
               return [...(this._keys || [])];
             },
             _c: 0,
+            _keys: null as any,
           };
 
     function alive() {
@@ -72,11 +73,11 @@
       return Boolean(current.open);
     }
 
-    function mark(key, weight, phase, label, opts = null) {
+    function mark(key: any, weight: any, phase: any, label: any, opts: any = null) {
       if (!progressAlive()) return tracker.percent();
       const res = tracker.complete(String(key), Number(weight) || 0);
-      const has = (k) => tracker.has(k);
-      const lp = globalThis.PRModalLoadProgress;
+      const has = (k: any) => tracker.has(k);
+      const lp = (globalThis as any).PRModalLoadProgress;
       // Critical bar % only (sides do not dilute 0–100 progress)
       let percent = Math.min(99, Math.max(0, res.percent));
       if (typeof lp?.criticalProgressPercent === 'function') {
@@ -133,7 +134,7 @@
     return prog;
   }
 
-  function setLoadStage(phase, label, busy = true, opts = null) {
+  function setLoadStage(phase: any, label: any, busy = true, opts: any = null) {
     if (!phase && !label && !(opts && (opts.mode === 'background' || opts.background))) {
       current.loadStage = null;
       return;
@@ -234,7 +235,7 @@
    * Short, near-constant-width load copy for the header stats badge.
    * Locale via pure PRModalI18n + data-prp-app-locale (or English fallback).
    */
-  function loadStageLabel(kind, extra = null) {
+  function loadStageLabel(kind: any, extra: any = null) {
     try {
       const pure = (globalThis as any).PRModalI18n;
       let locale = 'en';
@@ -387,14 +388,14 @@
           `[pr-plus][tl] SESSION DONE ${dump.label} elapsed=${dump.elapsedMs}ms events=${dump.events.length}`
         );
         const ends = dump.events.filter(
-          (e) => e.phase === 'end' || e.phase === 'error'
+          (e: any) => e.phase === 'end' || e.phase === 'error'
         );
         if (ends.length) {
           console.log(
             '[pr-plus][tl] fetch durations: ' +
               ends
                 .map(
-                  (e) =>
+                  (e: any) =>
                     `${e.name}=${e.dur != null ? e.dur + 'ms' : '?'}${
                       e.ok === false ? '!' : ''
                     }`
@@ -420,13 +421,13 @@
    * Page reload → peekAsync hydrates IDB → paint → network revalidate.
    */
   const detailCache =
-    globalThis.PRModalDetailCache?.createPersistedDetailCache?.({
+    (globalThis as any).PRModalDetailCache?.createPersistedDetailCache?.({
       ttlMs: 60_000,
       createIdb: () =>
-        globalThis.PRModalDetailIdb?.createDetailIdb?.({
+        (globalThis as any).PRModalDetailIdb?.createDetailIdb?.({
           maxEntries: 24,
           maxAgeMs: 7 * 24 * 60 * 60 * 1000,
         }) || null,
     }) ||
-    globalThis.PRModalDetailCache?.createDetailCache?.({ ttlMs: 60_000 }) ||
+    (globalThis as any).PRModalDetailCache?.createDetailCache?.({ ttlMs: 60_000 }) ||
     createFallbackCache();

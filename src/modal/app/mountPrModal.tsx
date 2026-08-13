@@ -64,7 +64,7 @@ function renderApp(root: { render: (node: React.ReactNode) => void }, hostEl: HT
   );
 }
 
-export function mountPrModal(hostEl, props) {
+export function mountPrModal(hostEl: any, props: any) {
   let root = hostEl.__prpReactRoot;
   if (!root) {
     root = createRoot(hostEl);
@@ -72,7 +72,7 @@ export function mountPrModal(hostEl, props) {
   }
   renderApp(root, hostEl, props);
   return {
-    render(nextProps) {
+    render(nextProps: any) {
       renderApp(root, hostEl, nextProps);
     },
     unmount() {

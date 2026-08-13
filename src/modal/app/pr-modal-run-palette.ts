@@ -311,7 +311,7 @@ export function runPaletteCommand(d: Record<string, any>, cmd: any) {
         void onRemoveReviewer(p.login);
         break;
       }
-      const opts = (detail?.requestedReviewers || []).map((id) => ({ id, label: id }));
+      const opts = (detail?.requestedReviewers || []).map((id: any) => ({ id, label: id }));
       if (!opts.length) {
         setActionMsg('No requested reviewers to remove.');
         break;
@@ -322,7 +322,7 @@ export function runPaletteCommand(d: Record<string, any>, cmd: any) {
         options: opts,
         query: '',
         allowFreeText: true,
-        onPick: (opt) => {
+        onPick: (opt: any) => {
           closePicker();
           if (opt?.id) void onRemoveReviewer(opt.id);
         },
@@ -340,7 +340,7 @@ export function runPaletteCommand(d: Record<string, any>, cmd: any) {
         void onRemoveAssignee(p.login);
         break;
       }
-      const opts = (detail?.assignees || []).map((id) => ({ id, label: id }));
+      const opts = (detail?.assignees || []).map((id: any) => ({ id, label: id }));
       if (!opts.length) {
         setActionMsg('No assignees to remove.');
         break;
@@ -351,7 +351,7 @@ export function runPaletteCommand(d: Record<string, any>, cmd: any) {
         options: opts,
         query: '',
         allowFreeText: true,
-        onPick: (opt) => {
+        onPick: (opt: any) => {
           closePicker();
           if (opt?.id) void onRemoveAssignee(opt.id);
         },

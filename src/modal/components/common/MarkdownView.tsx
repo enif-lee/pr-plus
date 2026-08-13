@@ -68,7 +68,7 @@ function videoCacheScopeFor(segment: HTMLElement): VideoCacheScope | null {
   root.style.cssText =
     'position:fixed;left:-10000px;top:0;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none;';
   document.documentElement.appendChild(root);
-  const scope = { host, root, entries: [] };
+  const scope = { host, root, entries: [] as any[] };
   videoCacheScopes.set(host, scope);
   return scope;
 }

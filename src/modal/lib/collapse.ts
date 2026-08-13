@@ -16,7 +16,7 @@ const IMAGE_EXT_RE =
  * @param {unknown} path
  * @returns {boolean}
  */
-export function isImagePath(path) {
+export function isImagePath(path: any) {
   const p = String(path || '').split('?')[0].split('#')[0];
   return IMAGE_EXT_RE.test(p);
 }
@@ -68,8 +68,8 @@ export function classifyDiffFile(file: any) {
  * @param {string} text
  * @returns {Array<{ pattern: string, attrs: Record<string, string|boolean> }>}
  */
-export function parseGitattributes(text) {
-  const rules = [];
+export function parseGitattributes(text: any) {
+  const rules: any[] = [];
   if (!text || typeof text !== 'string') return rules;
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.replace(/#.*$/, '').trim();
@@ -99,7 +99,7 @@ export function parseGitattributes(text) {
  * @param {string} filePath
  * @param {string} pattern
  */
-export function matchAttrPattern(filePath, pattern) {
+export function matchAttrPattern(filePath: any, pattern: any) {
   if (!filePath || !pattern) return false;
   const path = filePath.replace(/^\/+/, '');
   if (pattern === path) return true;
@@ -131,7 +131,7 @@ export function matchAttrPattern(filePath, pattern) {
  * @param {string} filePath
  * @param {Array<{ pattern: string, attrs: Record<string, string|boolean> }>} rules
  */
-export function attributesForPath(filePath, rules) {
+export function attributesForPath(filePath: any, rules: any) {
   const out: any = {};
   if (!Array.isArray(rules)) return out;
   for (const rule of rules) {
@@ -148,7 +148,7 @@ export function attributesForPath(filePath, rules) {
  * @param {unknown} value
  * @returns {boolean}
  */
-export function isAttrEnabled(value) {
+export function isAttrEnabled(value: any) {
   if (value === true) return true;
   if (value === false || value == null) return false;
   if (typeof value === 'string') {
@@ -228,7 +228,7 @@ export function shouldCollapseFile(file: any, opts: any = {}) {
  * @param {object[]} files
  * @param {string} [gitattributesText]
  */
-export function annotateFilesForCollapse(files, gitattributesText) {
+export function annotateFilesForCollapse(files: any, gitattributesText: any) {
   const rules = parseGitattributes(gitattributesText || '');
   return (Array.isArray(files) ? files : []).map((f) => {
     const path = f.filename || f.path || '';
@@ -253,7 +253,7 @@ export function annotateFilesForCollapse(files, gitattributesText) {
   });
 }
 
-function toPathSet(paths) {
+function toPathSet(paths: any) {
   if (!paths) return new Set();
   if (paths instanceof Set) return paths;
   return new Set(Array.isArray(paths) ? paths : []);
@@ -271,11 +271,11 @@ function toPathSet(paths) {
  * @param {Set<string>|string[]|null|undefined} [viewedPaths]
  */
 export function isPathCollapsed(
-  path,
-  collapsedPaths,
+  path: any,
+  collapsedPaths: any,
   defaultCollapsed = false,
   expandAll = false,
-  viewedPaths = null
+  viewedPaths: any = null
 ) {
   if (expandAll || !path) return false;
   const set = toPathSet(collapsedPaths);
@@ -294,7 +294,7 @@ export function isPathCollapsed(
  * @param {Set<string>|string[]|null|undefined} [viewedPaths]
  * @returns {Set<string>}
  */
-export function defaultCollapsedPathSet(files, viewedPaths = null) {
+export function defaultCollapsedPathSet(files: any, viewedPaths: any = null) {
   const out = new Set();
   for (const f of Array.isArray(files) ? files : []) {
     if (!f?.defaultCollapsed) continue;
@@ -316,7 +316,7 @@ export function defaultCollapsedPathSet(files, viewedPaths = null) {
  * @param {Set<string>|string[]|null|undefined} [viewedPaths]
  * @returns {Set<string>}
  */
-export function materializeCollapsedPaths(collapsedPaths, files, viewedPaths = null) {
+export function materializeCollapsedPaths(collapsedPaths: any, files: any, viewedPaths: any = null) {
   if (collapsedPaths instanceof Set && collapsedPaths.size > 0) {
     return new Set(collapsedPaths);
   }
@@ -339,10 +339,10 @@ export const COLLAPSED_SET_EXPLICIT_EMPTY = '\0prp-collapsed-explicit';
  * the sole viewed/default-collapsed file (empty-set implicit collapse).
  */
 export function expandPathInCollapsedSet(
-  collapsedPaths,
-  path,
-  files,
-  viewedPaths = null
+  collapsedPaths: any,
+  path: any,
+  files: any,
+  viewedPaths: any = null
 ) {
   const p = String(path || '').trim();
   const n = materializeCollapsedPaths(collapsedPaths, files, viewedPaths);
@@ -359,10 +359,10 @@ export function expandPathInCollapsedSet(
  * @returns next collapsed set
  */
 export function togglePathInCollapsedSet(
-  collapsedPaths,
-  path,
-  files,
-  viewedPaths = null
+  collapsedPaths: any,
+  path: any,
+  files: any,
+  viewedPaths: any = null
 ) {
   const p = String(path || '').trim();
   if (!p) {
@@ -383,11 +383,11 @@ export function togglePathInCollapsedSet(
  * @returns next collapsed set
  */
 export function setPathCollapsedInSet(
-  collapsedPaths,
-  path,
+  collapsedPaths: any,
+  path: any,
   wantCollapsed: boolean,
-  files,
-  viewedPaths = null
+  files: any,
+  viewedPaths: any = null
 ) {
   const p = String(path || '').trim();
   if (!p) {

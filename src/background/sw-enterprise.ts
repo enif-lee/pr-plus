@@ -1,28 +1,17 @@
 /** SW unit: sw-enterprise.ts */
 /* global PRTreeStorage, PRTreeFetch, PRModalCollapse, PRGithubEndpoints */
 
+import {
+  CONTENT_SCRIPT_CSS,
+  CONTENT_SCRIPT_JS,
+} from '../content-scripts-list';
+import { MSG } from '../sw-messages';
+
+export { CONTENT_SCRIPT_CSS, CONTENT_SCRIPT_JS };
+export { MSG };
+export type { SwMessage, SwMessageType } from '../sw-messages';
+
 export const ENTERPRISE_CS_ID = 'prp-enterprise-hosts';
-export const CONTENT_SCRIPT_JS = [
-  'src/tree.js',
-  'src/dom.js',
-  'src/pr-list-focus.js',
-  'src/pulls-palette.js',
-  'src/github-endpoints.js',
-  'src/content-bridge.js',
-  'src/content-bootstrap.js',
-  'src/onboarding.js',
-  'src/content.js',
-  'src/modal/pure/detail-idb-cache.js',
-  'src/modal/pure/detail-cache.js',
-  'src/modal/pure/detail-merge.js',
-  'src/modal/pure/detail-store.js',
-  'src/modal/pure/load-progress.js',
-  'src/modal/pure/page-embed.js',
-  'src/modal/pure/floating-scrollbar.js',
-  'src/modal/pure/auto-refresh.js',
-  'src/modal/dist/pr-modal.bundle.js',
-  'src/pr-modal-host.js',
-];
 
 /**
  * Stateless API context from RPC message (webHost from content page).
@@ -83,8 +72,8 @@ export async function syncEnterpriseContentScripts(enterpriseHosts: any) {
   // Always continue the chain even if a prior sync rejected
   const next = enterpriseCsSyncChain.then(run, run);
   enterpriseCsSyncChain = next.then(
-    () => undefined,
-    () => undefined
+    (): any => undefined,
+    (): any => undefined
   );
   return next;
 }
@@ -121,8 +110,8 @@ export async function syncEnterpriseContentScriptsImpl(enterpriseHosts: any) {
   const script = {
     id: ENTERPRISE_CS_ID,
     matches,
-    js: CONTENT_SCRIPT_JS,
-    css: ['src/styles.css'],
+    js: [...CONTENT_SCRIPT_JS],
+    css: [...CONTENT_SCRIPT_CSS],
     runAt: 'document_idle',
     persistAcrossSessions: true,
   };
@@ -173,99 +162,13 @@ export async function requestEnterprisePermissions(enterpriseHosts: any) {
   const list = [...(origins as any)];
   if (!list.length) return { granted: true, origins: [] };
   return new Promise((resolve) => {
-    chrome.permissions.request({ origins: list }, (granted) => {
+    chrome.permissions.request({ origins: list }, (granted: any) => {
       const err = chrome.runtime.lastError;
       if (err) resolve({ granted: false, error: err.message, origins: list });
       else resolve({ granted: Boolean(granted), origins: list });
     });
   });
 }
-
-export const MSG = {
-  /** Lightweight wake / health check (content scripts retry against this). */
-  PING: 'PR_TREE_PING',
-  TOKEN_STATUS: 'PR_TREE_TOKEN_STATUS',
-  TOKEN_SET: 'PR_TREE_TOKEN_SET',
-  TOKEN_CLEAR: 'PR_TREE_TOKEN_CLEAR',
-  TOKEN_CHANGED: 'PR_TREE_TOKEN_CHANGED',
-  PREFS_GET: 'PR_TREE_PREFS_GET',
-  PREFS_SET: 'PR_TREE_PREFS_SET',
-  PREFS_CHANGED: 'PR_TREE_PREFS_CHANGED',
-  RATE_LIMIT_GET: 'PR_TREE_RATE_LIMIT_GET',
-  RATE_LIMIT_CHANGED: 'PR_TREE_RATE_LIMIT_CHANGED',
-  /** GraphQL per-query cost observation log (primary points). */
-  GQL_COST_LOG_GET: 'PR_TREE_GQL_COST_LOG_GET',
-  GQL_COST_LOG_CLEAR: 'PR_TREE_GQL_COST_LOG_CLEAR',
-  ONBOARDING_GET: 'PR_TREE_ONBOARDING_GET',
-  ONBOARDING_SET: 'PR_TREE_ONBOARDING_SET',
-  HOST_ACCOUNTS_LIST: 'PR_TREE_HOST_ACCOUNTS_LIST',
-  HOST_ACCOUNT_ADD: 'PR_TREE_HOST_ACCOUNT_ADD',
-  HOST_ACCOUNT_REMOVE: 'PR_TREE_HOST_ACCOUNT_REMOVE',
-  HOST_ACCOUNTS_CHANGED: 'PR_TREE_HOST_ACCOUNTS_CHANGED',
-  /** Clear PR detail memory + IndexedDB cache on open github.com tabs. */
-  CLEAR_DETAIL_CACHE: 'PR_TREE_CLEAR_DETAIL_CACHE',
-  /** Abort in-flight GitHub fetches by requestId (sheet closed / superseded open). */
-  CANCEL_FETCH: 'PR_TREE_CANCEL_FETCH',
-  FETCH_OPEN_PULLS: 'PR_TREE_FETCH_OPEN_PULLS',
-  FETCH_DANGLING: 'PR_TREE_FETCH_DANGLING',
-  FETCH_PR_DETAIL: 'PR_TREE_FETCH_PR_DETAIL',
-  FETCH_REVIEW_THREADS_PAGE: 'PR_TREE_FETCH_REVIEW_THREADS_PAGE',
-  FETCH_REVIEW_THREADS_BY_IDS: 'PR_TREE_FETCH_REVIEW_THREADS_BY_IDS',
-  FETCH_COMMENTS_PAGE: 'PR_TREE_FETCH_COMMENTS_PAGE',
-  FETCH_COMPARE_FILES: 'PR_TREE_FETCH_COMPARE_FILES',
-  POST_ISSUE_COMMENT: 'PR_TREE_POST_ISSUE_COMMENT',
-  SUBMIT_REVIEW: 'PR_TREE_SUBMIT_REVIEW',
-  SUBMIT_PENDING_REVIEW: 'PR_TREE_SUBMIT_PENDING_REVIEW',
-  DELETE_PENDING_REVIEW: 'PR_TREE_DELETE_PENDING_REVIEW',
-  POST_REVIEW_COMMENT: 'PR_TREE_POST_REVIEW_COMMENT',
-  REPLY_REVIEW_COMMENT: 'PR_TREE_REPLY_REVIEW_COMMENT',
-  RESOLVE_REVIEW_THREAD: 'PR_TREE_RESOLVE_REVIEW_THREAD',
-  UPDATE_PULL_STATE: 'PR_TREE_UPDATE_PULL_STATE',
-  DELETE_REVIEW_COMMENT: 'PR_TREE_DELETE_REVIEW_COMMENT',
-  DELETE_ISSUE_COMMENT: 'PR_TREE_DELETE_ISSUE_COMMENT',
-  MINIMIZE_COMMENT: 'PR_TREE_MINIMIZE_COMMENT',
-  UNMINIMIZE_COMMENT: 'PR_TREE_UNMINIMIZE_COMMENT',
-  TOGGLE_COMMENT_REACTION: 'PR_TREE_TOGGLE_COMMENT_REACTION',
-  FETCH_REACTABLE_REACTORS: 'PR_TREE_FETCH_REACTABLE_REACTORS',
-  UPDATE_PULL: 'PR_TREE_UPDATE_PULL',
-  EDIT_ISSUE_COMMENT: 'PR_TREE_EDIT_ISSUE_COMMENT',
-  EDIT_REVIEW_COMMENT: 'PR_TREE_EDIT_REVIEW_COMMENT',
-  REQUEST_REVIEWERS: 'PR_TREE_REQUEST_REVIEWERS',
-  REMOVE_REVIEWERS: 'PR_TREE_REMOVE_REVIEWERS',
-  ADD_ASSIGNEES: 'PR_TREE_ADD_ASSIGNEES',
-  REMOVE_ASSIGNEES: 'PR_TREE_REMOVE_ASSIGNEES',
-  SET_LABELS: 'PR_TREE_SET_LABELS',
-  FETCH_REPO_LABELS: 'PR_TREE_FETCH_REPO_LABELS',
-  CREATE_REPO_LABEL: 'PR_TREE_CREATE_REPO_LABEL',
-  FETCH_REPO_MILESTONES: 'PR_TREE_FETCH_REPO_MILESTONES',
-  CREATE_REPO_MILESTONE: 'PR_TREE_CREATE_REPO_MILESTONE',
-  FETCH_REPO_TAGS: 'PR_TREE_FETCH_REPO_TAGS',
-  FETCH_TAGS_FOR_COMMITS: 'PR_TREE_FETCH_TAGS_FOR_COMMITS',
-  FETCH_ALL_PR_COMMITS: 'PR_TREE_FETCH_ALL_PR_COMMITS',
-  FETCH_PR_COMMITS: 'PR_TREE_FETCH_PR_COMMITS',
-  FETCH_PR_FILES: 'PR_TREE_FETCH_PR_FILES',
-  FETCH_PR_ISSUE_COMMENTS: 'PR_TREE_FETCH_PR_ISSUE_COMMENTS',
-  FETCH_PR_TIMELINE_EVENTS: 'PR_TREE_FETCH_PR_TIMELINE_EVENTS',
-  FETCH_PR_TIMELINE_ITEMS: 'PR_TREE_FETCH_PR_TIMELINE_ITEMS',
-  FETCH_PR_HEAD_PROBE: 'PR_TREE_FETCH_PR_HEAD_PROBE',
-  FETCH_PR_REVIEWS: 'PR_TREE_FETCH_PR_REVIEWS',
-  FETCH_PR_CHECKS: 'PR_TREE_FETCH_PR_CHECKS',
-  FETCH_PR_DEVELOPMENT: 'PR_TREE_FETCH_PR_DEVELOPMENT',
-  FETCH_ALL_PR_FILES: 'PR_TREE_FETCH_ALL_PR_FILES',
-  APPLY_SUGGESTION: 'PR_TREE_APPLY_SUGGESTION',
-  GET_REPO_FILE_TEXT: 'PR_TREE_GET_REPO_FILE_TEXT',
-  MERGE_PULL: 'PR_TREE_MERGE_PULL',
-  UPDATE_BRANCH: 'PR_TREE_UPDATE_BRANCH',
-  DELETE_HEAD_BRANCH: 'PR_TREE_DELETE_HEAD_BRANCH',
-  FETCH_VIEWER_VIEWED_PATHS: 'PR_TREE_FETCH_VIEWER_VIEWED_PATHS',
-  MARK_FILE_VIEWED: 'PR_TREE_MARK_FILE_VIEWED',
-  UNMARK_FILE_VIEWED: 'PR_TREE_UNMARK_FILE_VIEWED',
-  SET_SUBSCRIPTION: 'PR_TREE_SET_SUBSCRIPTION',
-  DELETE_SUBSCRIPTION: 'PR_TREE_DELETE_SUBSCRIPTION',
-  SET_MILESTONE: 'PR_TREE_SET_MILESTONE',
-  SET_DRAFT_STAGE: 'PR_TREE_SET_DRAFT_STAGE',
-  UPLOAD_REPO_FILE: 'PR_TREE_UPLOAD_REPO_FILE',
-};
 
 /** Max time for one SW message (GitHub multi-request detail can be slow). */
 export const MESSAGE_TIMEOUT_MS = 120_000;
@@ -283,7 +186,7 @@ export async function rehydrateEnterpriseScripts() {
 export const INSTALL_PULLS_URL = 'https://github.com/enif-lee/pr-plus/pulls';
 
 try {
-  chrome.runtime.onInstalled.addListener((details) => {
+  chrome.runtime.onInstalled.addListener((details: any) => {
     void rehydrateEnterpriseScripts();
     // Fresh install only — not update / chrome.runtime.reload()
     if (details?.reason === 'install') {

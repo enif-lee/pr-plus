@@ -1,4 +1,5 @@
 /** PRTreeFetch part B */
+import { MSG } from '../sw-messages';
 import {
   send,
   isAbortError,
@@ -17,9 +18,9 @@ import {
 } from './bridge-threads-local';
 
 export const prTreeFetchPartB = {
-async addAssignees(owner, repo, number, assignees) {
+async addAssignees(owner: any, repo: any, number: any, assignees: any) {
     const res = await send({
-      type: 'PR_TREE_ADD_ASSIGNEES',
+      type: MSG.ADD_ASSIGNEES,
       owner,
       repo,
       number,
@@ -32,9 +33,9 @@ async addAssignees(owner, repo, number, assignees) {
     }
     return res.result;
   },
-  async removeAssignees(owner, repo, number, assignees) {
+  async removeAssignees(owner: any, repo: any, number: any, assignees: any) {
     const res = await send({
-      type: 'PR_TREE_REMOVE_ASSIGNEES',
+      type: MSG.REMOVE_ASSIGNEES,
       owner,
       repo,
       number,
@@ -47,9 +48,9 @@ async addAssignees(owner, repo, number, assignees) {
     }
     return res.result;
   },
-  async setIssueLabels(owner, repo, number, labels) {
+  async setIssueLabels(owner: any, repo: any, number: any, labels: any) {
     const res = await send({
-      type: 'PR_TREE_SET_LABELS',
+      type: MSG.SET_LABELS,
       owner,
       repo,
       number,
@@ -68,10 +69,10 @@ async addAssignees(owner, repo, number, assignees) {
    * @param {string} repo
    * @param {{ maxPages?: number, signal?: AbortSignal }} [opts]
    */
-  async fetchRepoLabels(owner, repo, opts: any = {}) {
+  async fetchRepoLabels(owner: any, repo: any, opts: any = {}) {
     const res = await send(
       {
-        type: 'PR_TREE_FETCH_REPO_LABELS',
+        type: MSG.FETCH_REPO_LABELS,
         owner,
         repo,
         maxPages: opts.maxPages,
@@ -86,9 +87,9 @@ async addAssignees(owner, repo, number, assignees) {
     }
     return Array.isArray(res.labels) ? res.labels : [];
   },
-  async createRepoLabel(owner, repo, { name, color, description } = {} as any as any) {
+  async createRepoLabel(owner: any, repo: any, { name, color, description }: { name?: unknown; color?: unknown; description?: unknown } = {}) {
     const res = await send({
-      type: 'PR_TREE_CREATE_REPO_LABEL',
+      type: MSG.CREATE_REPO_LABEL,
       owner,
       repo,
       name,
@@ -102,10 +103,10 @@ async addAssignees(owner, repo, number, assignees) {
     }
     return res.result;
   },
-  async fetchRepoMilestones(owner, repo, opts: any = {}) {
+  async fetchRepoMilestones(owner: any, repo: any, opts: any = {}) {
     const res = await send(
       {
-        type: 'PR_TREE_FETCH_REPO_MILESTONES',
+        type: MSG.FETCH_REPO_MILESTONES,
         owner,
         repo,
         maxPages: opts.maxPages,
@@ -121,9 +122,9 @@ async addAssignees(owner, repo, number, assignees) {
     }
     return Array.isArray(res.milestones) ? res.milestones : [];
   },
-  async createRepoMilestone(owner, repo, { title, description, state } = {} as any as any) {
+  async createRepoMilestone(owner: any, repo: any, { title, description, state }: { title?: unknown; description?: unknown; state?: unknown } = {}) {
     const res = await send({
-      type: 'PR_TREE_CREATE_REPO_MILESTONE',
+      type: MSG.CREATE_REPO_MILESTONE,
       owner,
       repo,
       title,
@@ -137,10 +138,10 @@ async addAssignees(owner, repo, number, assignees) {
     }
     return res.result;
   },
-  async fetchRepoTags(owner, repo, opts: any = {}) {
+  async fetchRepoTags(owner: any, repo: any, opts: any = {}) {
     const res = await send(
       {
-        type: 'PR_TREE_FETCH_REPO_TAGS',
+        type: MSG.FETCH_REPO_TAGS,
         owner,
         repo,
         maxPages: opts.maxPages,
@@ -155,7 +156,7 @@ async addAssignees(owner, repo, number, assignees) {
     }
     return Array.isArray(res.tags) ? res.tags : [];
   },
-  async fetchTagsForCommits(owner, repo, shas, opts: any = {}) {
+  async fetchTagsForCommits(owner: any, repo: any, shas: any, opts: any = {}) {
     const want = new Set(
       (Array.isArray(shas) ? shas : [])
         .map((s) => String(s || '').trim().toLowerCase())
@@ -163,7 +164,7 @@ async addAssignees(owner, repo, number, assignees) {
     );
     const res = await send(
       {
-        type: 'PR_TREE_FETCH_TAGS_FOR_COMMITS',
+        type: MSG.FETCH_TAGS_FOR_COMMITS,
         owner,
         repo,
         shas: Array.isArray(shas) ? shas : [],
@@ -195,10 +196,10 @@ async addAssignees(owner, repo, number, assignees) {
     err.status = res?.status;
     throw err;
   },
-  async fetchAllPrCommits(owner, repo, number, opts: any = {}) {
+  async fetchAllPrCommits(owner: any, repo: any, number: any, opts: any = {}) {
     const res = await send(
       {
-        type: 'PR_TREE_FETCH_ALL_PR_COMMITS',
+        type: MSG.FETCH_ALL_PR_COMMITS,
         owner,
         repo,
         number,
@@ -214,10 +215,10 @@ async addAssignees(owner, repo, number, assignees) {
     return Array.isArray(res.commits) ? res.commits : [];
   },
   /** First page of PR commits — independent of fetchPrDetail. */
-  async fetchPrCommits(owner, repo, number, opts: any = {}) {
+  async fetchPrCommits(owner: any, repo: any, number: any, opts: any = {}) {
     const res = await send(
       {
-        type: 'PR_TREE_FETCH_PR_COMMITS',
+        type: MSG.FETCH_PR_COMMITS,
         owner,
         repo,
         number,
@@ -233,10 +234,10 @@ async addAssignees(owner, repo, number, assignees) {
     return Array.isArray(res.commits) ? res.commits : [];
   },
   /** First page of PR files + optional gitattributes annotate. */
-  async fetchPrFiles(owner, repo, number, opts: any = {}) {
+  async fetchPrFiles(owner: any, repo: any, number: any, opts: any = {}) {
     const res = await send(
       {
-        type: 'PR_TREE_FETCH_PR_FILES',
+        type: MSG.FETCH_PR_FILES,
         owner,
         repo,
         number,
@@ -258,10 +259,10 @@ async addAssignees(owner, repo, number, assignees) {
     };
   },
   /** Newest-first issue comments window. */
-  async fetchPrIssueComments(owner, repo, number, opts: any = {}) {
+  async fetchPrIssueComments(owner: any, repo: any, number: any, opts: any = {}) {
     const res = await send(
       {
-        type: 'PR_TREE_FETCH_PR_ISSUE_COMMENTS',
+        type: MSG.FETCH_PR_ISSUE_COMMENTS,
         owner,
         repo,
         number,
@@ -291,10 +292,10 @@ async addAssignees(owner, repo, number, assignees) {
    * Lightweight head SHA probe for auto-refresh staleness checks.
    * @returns {Promise<{ headSha: string, baseSha: string, updatedAt: string|null, draft: boolean, state: string, number: number }>}
    */
-  async fetchPrHeadProbe(owner, repo, number, opts: any = {}) {
+  async fetchPrHeadProbe(owner: any, repo: any, number: any, opts: any = {}) {
     const res = await send(
       {
-        type: 'PR_TREE_FETCH_PR_HEAD_PROBE',
+        type: MSG.FETCH_PR_HEAD_PROBE,
         owner,
         repo,
         number,
@@ -323,10 +324,10 @@ async addAssignees(owner, repo, number, assignees) {
    * REST fallback; prefer fetchPrTimelineItemsPage for GraphQL-first path.
    * @returns {Promise<Array>}
    */
-  async fetchPrTimelineEvents(owner, repo, number, opts: any = {}) {
+  async fetchPrTimelineEvents(owner: any, repo: any, number: any, opts: any = {}) {
     const res = await send(
       {
-        type: 'PR_TREE_FETCH_PR_TIMELINE_EVENTS',
+        type: MSG.FETCH_PR_TIMELINE_EVENTS,
         owner,
         repo,
         number,
@@ -344,7 +345,7 @@ async addAssignees(owner, repo, number, assignees) {
    * GraphQL-first conversation timeline page (timelineItems, unfiltered).
    * Returns { comments, timelineEvents, reviews, pageInfo, hasMore, ... }.
    */
-  async fetchPrTimelineItemsPage(owner, repo, number, opts: any = {}) {
+  async fetchPrTimelineItemsPage(owner: any, repo: any, number: any, opts: any = {}) {
     // Prefer TIMELINE_EVENTS + graphql mode (long-stable SW route). Also try
     // dedicated TIMELINE_ITEMS type. Never treat REST {events} as a GraphQL page.
     const payload = {
@@ -360,8 +361,8 @@ async addAssignees(owner, repo, number, assignees) {
       graphql: true,
     };
     const attempts = [
-      { type: 'PR_TREE_FETCH_PR_TIMELINE_EVENTS', ...payload },
-      { type: 'PR_TREE_FETCH_PR_TIMELINE_ITEMS', ...payload },
+      { type: MSG.FETCH_PR_TIMELINE_EVENTS, ...payload },
+      { type: MSG.FETCH_PR_TIMELINE_ITEMS, ...payload },
     ];
     let lastRes = null;
     for (const msg of attempts) {
@@ -425,14 +426,14 @@ async addAssignees(owner, repo, number, assignees) {
       error: 'missing-graphql-page',
     };
   },
-  async fetchPrTimelineShell(owner, repo, number, opts: any = {}) {
+  async fetchPrTimelineShell(owner: any, repo: any, number: any, opts: any = {}) {
     return this.fetchPrTimelineItemsPage(owner, repo, number, opts);
   },
   /** Submitted PR reviews list. */
-  async fetchPrReviews(owner, repo, number, opts: any = {}) {
+  async fetchPrReviews(owner: any, repo: any, number: any, opts: any = {}) {
     const res = await send(
       {
-        type: 'PR_TREE_FETCH_PR_REVIEWS',
+        type: MSG.FETCH_PR_REVIEWS,
         owner,
         repo,
         number,
@@ -448,10 +449,10 @@ async addAssignees(owner, repo, number, assignees) {
     return Array.isArray(res.reviews) ? res.reviews : [];
   },
   /** Commit status + check runs for head SHA. */
-  async fetchPrChecks(owner, repo, headSha, opts: any = {}) {
+  async fetchPrChecks(owner: any, repo: any, headSha: any, opts: any = {}) {
     const res = await send(
       {
-        type: 'PR_TREE_FETCH_PR_CHECKS',
+        type: MSG.FETCH_PR_CHECKS,
         owner,
         repo,
         headSha,
@@ -467,10 +468,10 @@ async addAssignees(owner, repo, number, assignees) {
     return res.checks || { state: 'unknown', totalCount: 0, statuses: [], checkRuns: [] };
   },
   /** Development + Projects for conversation aside. */
-  async fetchPrDevelopment(owner, repo, number, opts: any = {}) {
+  async fetchPrDevelopment(owner: any, repo: any, number: any, opts: any = {}) {
     const res = await send(
       {
-        type: 'PR_TREE_FETCH_PR_DEVELOPMENT',
+        type: MSG.FETCH_PR_DEVELOPMENT,
         owner,
         repo,
         number,
@@ -492,10 +493,10 @@ async addAssignees(owner, repo, number, assignees) {
       }
     );
   },
-  async fetchAllPrFiles(owner, repo, number, options: any = {}) {
+  async fetchAllPrFiles(owner: any, repo: any, number: any, options: any = {}) {
     const res = await send(
       {
-        type: 'PR_TREE_FETCH_ALL_PR_FILES',
+        type: MSG.FETCH_ALL_PR_FILES,
         owner,
         repo,
         number,
@@ -511,9 +512,9 @@ async addAssignees(owner, repo, number, assignees) {
     }
     return Array.isArray(res.files) ? res.files : [];
   },
-  async applyReviewSuggestion(owner, repo, payload) {
+  async applyReviewSuggestion(owner: any, repo: any, payload: any) {
     const res = await send({
-      type: 'PR_TREE_APPLY_SUGGESTION',
+      type: MSG.APPLY_SUGGESTION,
       owner,
       repo,
       ...payload,
@@ -525,9 +526,9 @@ async addAssignees(owner, repo, number, assignees) {
     }
     return res.result;
   },
-  async getRepoFileText(owner, repo, { path, ref, headRef, headSha } = {} as any as any) {
+  async getRepoFileText(owner: any, repo: any, { path, ref, headRef, headSha }: { path?: unknown; ref?: unknown; headRef?: unknown; headSha?: unknown } = {}) {
     const res = await send({
-      type: 'PR_TREE_GET_REPO_FILE_TEXT',
+      type: MSG.GET_REPO_FILE_TEXT,
       owner,
       repo,
       path,
@@ -540,9 +541,9 @@ async addAssignees(owner, repo, number, assignees) {
     }
     return res.result;
   },
-  async mergePullRequest(owner, repo, number, opts: any = {}) {
+  async mergePullRequest(owner: any, repo: any, number: any, opts: any = {}) {
     const res = await send({
-      type: 'PR_TREE_MERGE_PULL',
+      type: MSG.MERGE_PULL,
       owner,
       repo,
       number,
@@ -557,9 +558,9 @@ async addAssignees(owner, repo, number, assignees) {
     }
     return res.result;
   },
-  async updatePullBranch(owner, repo, number, expectedHeadSha) {
+  async updatePullBranch(owner: any, repo: any, number: any, expectedHeadSha: any) {
     const res = await send({
-      type: 'PR_TREE_UPDATE_BRANCH',
+      type: MSG.UPDATE_BRANCH,
       owner,
       repo,
       number,
@@ -572,9 +573,9 @@ async addAssignees(owner, repo, number, assignees) {
     }
     return res.result;
   },
-  async deleteHeadBranch(owner, repo, branch) {
+  async deleteHeadBranch(owner: any, repo: any, branch: any) {
     const res = await send({
-      type: 'PR_TREE_DELETE_HEAD_BRANCH',
+      type: MSG.DELETE_HEAD_BRANCH,
       owner,
       repo,
       branch,
@@ -586,9 +587,9 @@ async addAssignees(owner, repo, number, assignees) {
     }
     return res.result;
   },
-  async fetchViewerViewedPaths(owner, repo, number, opts: any = {}) {
+  async fetchViewerViewedPaths(owner: any, repo: any, number: any, opts: any = {}) {
     const res = await send({
-      type: 'PR_TREE_FETCH_VIEWER_VIEWED_PATHS',
+      type: MSG.FETCH_VIEWER_VIEWED_PATHS,
       owner,
       repo,
       number,
@@ -601,9 +602,9 @@ async addAssignees(owner, repo, number, assignees) {
     }
     return res.result || { pullRequestId: null, viewedPaths: [] };
   },
-  async markFileAsViewed(pullRequestId, path) {
+  async markFileAsViewed(pullRequestId: any, path: any) {
     const res = await send({
-      type: 'PR_TREE_MARK_FILE_VIEWED',
+      type: MSG.MARK_FILE_VIEWED,
       pullRequestId,
       path,
     });
@@ -614,9 +615,9 @@ async addAssignees(owner, repo, number, assignees) {
     }
     return res.result;
   },
-  async unmarkFileAsViewed(pullRequestId, path) {
+  async unmarkFileAsViewed(pullRequestId: any, path: any) {
     const res = await send({
-      type: 'PR_TREE_UNMARK_FILE_VIEWED',
+      type: MSG.UNMARK_FILE_VIEWED,
       pullRequestId,
       path,
     });
@@ -628,13 +629,13 @@ async addAssignees(owner, repo, number, assignees) {
     return res.result;
   },
   async setIssueSubscription(
-    owner,
-    repo,
-    number,
+    owner: any,
+    repo: any,
+    number: any,
     { subscribed = true, ignored = false, nodeId = null } = {} as any
   ) {
     const res = await send({
-      type: 'PR_TREE_SET_SUBSCRIPTION',
+      type: MSG.SET_SUBSCRIPTION,
       owner,
       repo,
       number,
@@ -649,9 +650,9 @@ async addAssignees(owner, repo, number, assignees) {
     }
     return res.result;
   },
-  async deleteIssueSubscription(owner, repo, number, nodeId = null) {
+  async deleteIssueSubscription(owner: any, repo: any, number: any, nodeId: any = null) {
     const res = await send({
-      type: 'PR_TREE_DELETE_SUBSCRIPTION',
+      type: MSG.DELETE_SUBSCRIPTION,
       owner,
       repo,
       number,
@@ -664,9 +665,9 @@ async addAssignees(owner, repo, number, assignees) {
     }
     return res.result;
   },
-  async setIssueMilestone(owner, repo, number, milestone) {
+  async setIssueMilestone(owner: any, repo: any, number: any, milestone: any) {
     const res = await send({
-      type: 'PR_TREE_SET_MILESTONE',
+      type: MSG.SET_MILESTONE,
       owner,
       repo,
       number,
@@ -679,9 +680,9 @@ async addAssignees(owner, repo, number, assignees) {
     }
     return res.result;
   },
-  async setPullRequestDraftStage(owner, repo, number, stage, nodeId) {
+  async setPullRequestDraftStage(owner: any, repo: any, number: any, stage: any, nodeId: any) {
     const res = await send({
-      type: 'PR_TREE_SET_DRAFT_STAGE',
+      type: MSG.SET_DRAFT_STAGE,
       owner,
       repo,
       number,

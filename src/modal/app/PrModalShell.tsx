@@ -2525,7 +2525,7 @@ export function PrModalApp({
     (path: string) => {
       if (!path) return;
       setActiveFilePath(path);
-      setCollapsedFiles((prev) => {
+      setCollapsedFiles((prev: any) => {
         const file = annotatedFiles.find(
           (f: any) => (f.filename || f.path) === path
         );
@@ -4198,7 +4198,7 @@ export function PrModalApp({
       activeFilePath: readActiveFilePath(),
     });
     if (!path) return;
-    setCollapsedFiles((prev) =>
+    setCollapsedFiles((prev: any) =>
       typeof setPathCollapsedInSet === 'function'
         ? setPathCollapsedInSet(
             prev,
@@ -4313,7 +4313,7 @@ export function PrModalApp({
       return false;
     }
     // Force-expand collapsed/viewed/default-collapsed so selectable rows rebuild
-    setCollapsedFiles((prev) =>
+    setCollapsedFiles((prev: any) =>
       typeof expandPathInCollapsedSet === 'function'
         ? expandPathInCollapsedSet(prev, path, annotatedFiles, viewedPaths)
         : (() => {
@@ -4620,7 +4620,7 @@ export function PrModalApp({
     // Respect pref: do not force-open on selection hop unless auto-expand is on
     // (explicit jump/goto still uses expandFileForJump).
     if (!autoExpandOnFileNav) return;
-    setCollapsedFiles((prev) => {
+    setCollapsedFiles((prev: any) => {
       const file = annotatedFiles.find(
         (f: any) => (f.filename || f.path) === p
       );
@@ -6579,7 +6579,7 @@ export function PrModalApp({
     // Use expandPathInCollapsedSet so emptying the set does not re-collapse
     // the path via isPathCollapsed's empty-set + viewedPaths branch.
     if (autoExpandOnFileNav) {
-      setCollapsedFiles((prev) => {
+      setCollapsedFiles((prev: any) => {
         const file = annotatedFiles.find(
           (f: any) => (f.filename || f.path) === p
         );
@@ -6632,7 +6632,7 @@ export function PrModalApp({
   }
 
   function onToggleDir(path: any) {
-    setExpandedDirs((prev) => {
+    setExpandedDirs((prev: any) => {
       const n = new Set(prev);
       if (n.has(path)) n.delete(path);
       else n.add(path);
@@ -6643,7 +6643,7 @@ export function PrModalApp({
   function onToggleFileCollapse(path: any) {
     // Materialize defaults first so toggling one path does not open every
     // other binary/huge/generated/viewed file that only collapsed via defaults.
-    setCollapsedFiles((prev) =>
+    setCollapsedFiles((prev: any) =>
       typeof togglePathInCollapsedSet === 'function'
         ? togglePathInCollapsedSet(prev, path, annotatedFiles, viewedPaths)
         : (() => {
@@ -6778,10 +6778,10 @@ export function PrModalApp({
     pickerAnchorRef.current = null;
   }
 
-  function collectPeopleLogins(exclude = []) {
-    const excludeSet = new Set((exclude || []).map((x) => String(x || '').toLowerCase()));
+  function collectPeopleLogins(exclude: any = []) {
+    const excludeSet = new Set((exclude || []).map((x: any) => String(x || '').toLowerCase()));
     const names = new Set();
-    const add = (login) => {
+    const add = (login: any) => {
       const raw = String(login || '').trim();
       if (!raw || excludeSet.has(raw.toLowerCase())) return;
       names.add(raw);
@@ -6996,7 +6996,7 @@ export function PrModalApp({
         onSubscribe,
         // unsubscribe is onSubscribe(false) in the runner; no separate binding
         openMilestonePicker: () => openMilestonePicker?.(),
-        clearMilestone: () => void applyMilestoneNumber(null),
+        clearMilestone: (): any => void applyMilestoneNumber(null),
         onSetMilestone,
         onRerequestReview,
         openReviewerPicker,
@@ -7104,7 +7104,7 @@ export function PrModalApp({
   );
 
 
-  function onSelectionStart(row, point, opts: any = {}) {
+  function onSelectionStart(row: any, point: any, opts: any = {}) {
     // Drop sticky focus on toolbar radios (Unified/Split) so subsequent
     // Arrow keys move the line selection, not the radiogroup.
     try {
@@ -7196,7 +7196,7 @@ export function PrModalApp({
 
   function onSelectionExtend(row: any) {
     if (!selectingRef.current || typeof extendLineSelection !== 'function') return;
-    setLineSelection((prev) => extendLineSelection(prev, row) || prev);
+    setLineSelection((prev: any) => extendLineSelection(prev, row) || prev);
   }
 
   function disarmNativeTextSelectCopy() {
@@ -7373,7 +7373,7 @@ export function PrModalApp({
     };
   }, [open, layoutMode]);
 
-  function onSelectionEnd(point, forcedMode) {
+  function onSelectionEnd(point: any, forcedMode: any) {
     // Opt+drag native text path never sets selectingRef — still finalize copy.
     if (nativeTextSelectDragRef.current) {
       finishNativeTextSelectCopy();
@@ -7394,7 +7394,7 @@ export function PrModalApp({
                 point || pointerStartRef.current
               )
             : 'click');
-    setLineSelection((prev) => {
+    setLineSelection((prev: any) => {
       if (!prev) return prev;
       if (typeof finalizeSelection === 'function') return finalizeSelection(prev, mode);
       return prev;
@@ -8443,7 +8443,7 @@ export function PrModalApp({
             // Preserve current Diff / Conversation when hopping stacked PRs
             openStackOrListPr(n);
           }}
-          onPathChange={(parentHeadRef, childNumber) => {
+          onPathChange={(parentHeadRef: any, childNumber: any) => {
             setStackPathSelections((prev) => ({
               ...prev,
               [parentHeadRef]: Number(childNumber),
@@ -8495,7 +8495,7 @@ export function PrModalApp({
                       detail.magicLinks?.length
                         ? detail.magicLinks
                         : (openPulls || []).find(
-                            (p) => Number(p.number) === Number(detail.number)
+                            (p: any) => Number(p.number) === Number(detail.number)
                           )?.magicLinks || [],
                   }
                 : null
@@ -8516,14 +8516,14 @@ export function PrModalApp({
             onToggleReaction={onToggleReaction}
             onLoadReactors={onLoadReactors}
             onDeleteReviewComment={onDeleteReviewComment}
-            onEditIssueComment={(id, body) => onSaveEditComment('issue', id, body)}
-            onEditReviewComment={(id, body) => onSaveEditComment('review', id, body)}
+            onEditIssueComment={(id: any, body: any) => onSaveEditComment('issue', id, body)}
+            onEditReviewComment={(id: any, body: any) => onSaveEditComment('review', id, body)}
             editingBody={editingBody}
             onStartEditBody={() => setEditingBody(true)}
             onCancelEditBody={() => setEditingBody(false)}
             onSaveBody={onSaveBody}
             editingComment={editingComment}
-            onStartEditComment={(kind, id) => setEditingComment({ kind, id })}
+            onStartEditComment={(kind: any, id: any) => setEditingComment({ kind, id })}
             onCancelEditComment={() => setEditingComment(null)}
             onSaveEditComment={onSaveEditComment}
             pendingCount={totalPendingCount}
@@ -8572,15 +8572,15 @@ export function PrModalApp({
             onAddLabel={openLabelPicker}
             onRemoveLabel={onRemoveLabel}
             onApplySuggestion={onApplySuggestion}
-            onRegisterApply={(fn) => {
+            onRegisterApply={(fn: any) => {
               applyActionRef.current = fn;
             }}
-            onRegisterEditorSave={(fn) => {
+            onRegisterEditorSave={(fn: any) => {
               editorSaveRef.current = fn;
             }}
             onSetMilestone={onSetMilestone}
-            onOpenMilestonePicker={() => void openMilestonePicker()}
-            onClearMilestone={() => void onSetMilestone(true)}
+            onOpenMilestonePicker={(): any => void openMilestonePicker()}
+            onClearMilestone={(): any => void onSetMilestone(true)}
             onEnsureAllCommits={ensureAllCommits}
             onEnsureAllFiles={ensureAllFiles}
             onEnsurePrTags={ensurePrTags}
@@ -8654,7 +8654,7 @@ export function PrModalApp({
               diffFilesOverride={diffFilesOverride}
               diffReviewFilter={diffReviewFilter}
               diffMode={diffMode}
-              setDiffMode={setDiffMode}
+              setDiffMode={setDiffMode as (m: string) => void}
               hideWhitespace={hideWhitespace}
               onHideWhitespace={applyHideWhitespace}
               locale={appLocale}
@@ -8815,8 +8815,8 @@ export function PrModalApp({
           title={picker?.title}
           options={picker?.options || []}
           query={picker?.query || ''}
-          onQuery={(q) => setPicker((prev) => (prev ? { ...prev, query: q } : prev))}
-          onPick={(opt) => picker?.onPick?.(opt)}
+          onQuery={(q: any) => setPicker((prev: any) => (prev ? { ...prev, query: q } : prev))}
+          onPick={(opt: any) => picker?.onPick?.(opt)}
           onClose={closePicker}
           allowFreeText={picker?.allowFreeText !== false}
   // @ts-expect-error modal dynamic action/picker shapes

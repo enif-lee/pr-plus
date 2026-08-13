@@ -41,13 +41,13 @@ export interface HostCurrentSession {
  * Documented host module responsibilities (function-boundary starts only).
  * Assembly order: scripts/build-host.mjs HOST_MODULE_ORDER.
  *
- * host-core-detail-store — HOST_ID, current bag, detail-store writers, publish
- * side-fetch-progress-assets — side fetches, progress, assets/cache
- * props-render-session — buildProps, render, close/session
- * open-modal — openModal
+ * host-core-authority / host-core-store — HOST_ID, current bag, detail-store writers, publish
+ * side-fetch-progress / side-fetch-cache-assets — side fetches, progress, assets/cache
+ * props-build / props-render-close — buildProps, render, close/session
+ * open-modal / open-modal-run — openModal
  * restore-embed-list-focus — restore, embed watch, list focus
  * list-row-lifecycle — pulls list open / hotkeys
- * pulls-palette — pulls-page palette
+ * pulls-palette-* — pulls-page palette
  * auto-refresh-watch — head.sha poll (modal + embed), activity gate
  * click-intercept — onClickCapture + install
  */

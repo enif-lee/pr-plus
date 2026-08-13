@@ -297,7 +297,7 @@ function applyPopupI18n(preferred: string | null | undefined) {
 }
 
 /** @type {{ host: string, mask: string }[]} */
-let hostAccountsState = [];
+let hostAccountsState: any[] = [];
 
 function setStatus(text: any, isError: any = false) {
   statusEl.textContent = text;
@@ -461,8 +461,8 @@ function normalizeHostInput(raw: any) {
 function updateEndpointPreview(hostRaw: any) {
   if (!endpointPreviewEl) return;
   const webHost = normalizeHostInput(hostRaw) || 'github.com';
-  let rest;
-  let gql;
+  let rest: any;
+  let gql: any;
   if (webHost === 'github.com' || webHost === 'www.github.com') {
     rest = 'https://api.github.com';
     gql = 'https://api.github.com/graphql';
@@ -559,8 +559,8 @@ function isTransientChannelError(msg: any) {
 }
 
 /** Promise-based messaging with retries while the SW wakes from idle. */
-async function send(message, { retries = 4 } = {}) {
-  let lastErr;
+async function send(message: any, { retries = 4 } = {}) {
+  let lastErr: any;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       const response = await chrome.runtime.sendMessage(message);
@@ -936,13 +936,12 @@ restartOnboardingBtn?.addEventListener('click', async () => {
         url: ['https://github.com/*', 'https://*.github.com/*'],
       });
       await Promise.all(
-        (tabs || []).map(
-          (tab) =>
-            tab.id != null &&
-            chrome.tabs
-              .sendMessage(tab.id, { type: 'PR_TREE_ONBOARDING_RESTART' })
-              .catch(() => null)
-        )
+        (tabs || []).map((tab: any): any => {
+          if (tab.id == null) return null;
+          return chrome.tabs
+            .sendMessage(tab.id, { type: 'PR_TREE_ONBOARDING_RESTART' })
+            .catch((): any => null);
+        })
       );
     } catch {
       /* optional */

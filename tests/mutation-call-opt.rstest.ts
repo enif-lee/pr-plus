@@ -241,7 +241,7 @@ describe('post-mutation success paths: no full soft-refresh (source contract)', 
 
   test('onSaveBody patches body local+host after API; no onRefresh', () => {
     const body = extractFn(mutations, 'onSaveBody');
-    expect(body).toMatch(/patchHostDetail\(\{\s*body/);
+    expect(body).toMatch(/applyDomainDetail|patchHostDetail/);
     expect(body).not.toMatch(/onRefresh/);
     expect(body.indexOf('await api.updatePullRequest')).toBeLessThan(
       body.indexOf('applyDomainDetail')

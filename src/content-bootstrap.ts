@@ -10,7 +10,7 @@ function createPrTreeApp(deps: any) {
     PRTreeDOM,
     PRTreeFetch,
     PRTreeStorage,
-    fetchImpl = globalThis.fetch,
+    fetchImpl = (globalThis as any).fetch,
   } = deps;
 
   const {
@@ -37,21 +37,21 @@ function createPrTreeApp(deps: any) {
   const { watchGithubToken, getExtensionPrefs, setExtensionPrefs, watchExtensionPrefs } =
     PRTreeStorage || {};
 
-  let cachedForest = null;
-  let cachedPrs = null;
-  let cachedRepoKey = null;
+  let cachedForest: any = null;
+  let cachedPrs: any = null;
+  let cachedRepoKey: any = null;
   let treeModeEnabled = true;
-  let prefsUnsub = null;
+  let prefsUnsub: any = null;
   let active = false;
-  let toggleButton = null;
-  let syncTimer = null;
-  let reapplyTimers = [];
+  let toggleButton: any = null;
+  let syncTimer: any = null;
+  let reapplyTimers: any[] = [];
   let bootstrapping = false;
   let bootstrapQueued = false;
   let syncAttempts = 0;
-  let lastSyncedPath = null;
-  let lastPageSignature = null;
-  let lastLocationHref = null;
+  let lastSyncedPath: any = null;
+  let lastPageSignature: any = null;
+  let lastLocationHref: any = null;
   let suppressObserverUntil = 0;
   let fillingDangling = false;
 
@@ -159,7 +159,7 @@ function createPrTreeApp(deps: any) {
   }
 
   function pageSignature(numbers: any) {
-    return numbers.slice().sort((a, b) => a - b).join(',');
+    return numbers.slice().sort((a: any, b: any) => a - b).join(',');
   }
 
   function currentPullsContext() {
@@ -342,7 +342,7 @@ function createPrTreeApp(deps: any) {
   }
 
   function mergePrs(base: any, extras: any) {
-    const byNumber = new Map((base || []).map((pr) => [pr.number, pr]));
+    const byNumber = new Map((base || []).map((pr: any) => [pr.number, pr]));
     for (const pr of extras || []) {
       byNumber.set(pr.number, pr);
     }
@@ -553,10 +553,10 @@ function createPrTreeApp(deps: any) {
       window.dispatchEvent(new Event('pr-tree-location'));
     };
 
-    const wrap = (method) => {
+    const wrap = (method: any) => {
       const original = historyObj[method];
       if (typeof original !== 'function') return null;
-      historyObj[method] = function prTreePatchedHistory(...args) {
+      historyObj[method] = function prTreePatchedHistory(...args: any[]) {
         const ret = original.apply(this, args);
         fire();
         return ret;
@@ -667,5 +667,5 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = bootstrapApi;
 }
 if (typeof globalThis !== 'undefined') {
-  globalThis.PRTreeBootstrap = bootstrapApi;
+  (globalThis as any).PRTreeBootstrap = bootstrapApi;
 }

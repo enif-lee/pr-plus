@@ -52,7 +52,7 @@ export function DiffChrome({ detail }: any) {
       ) : null}
       {hasLabels ? (
         <div className="prp-diff-chrome__labels">
-          {labels.map((l) => (
+          {labels.map((l: any) => (
             <LabelLink key={l.name} owner={detail.owner} repo={detail.repo} label={l} />
           ))}
         </div>

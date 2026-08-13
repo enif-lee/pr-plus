@@ -6,6 +6,7 @@ import { useEffect } from 'react';
 import { useModalStore } from '../store/modal-store';
 import { isSideActionAllowedOnLayout } from '../lib/layout-side-actions';
 import { resolveReactionAddControl } from '../lib/comment-reactions';
+import { shouldPreventConvArrowFallback } from '../lib/shortcut-policy';
 
 export function usePrModalHotkeys(h: Record<string, any>): void {
   const open = h.open;
@@ -312,7 +313,7 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
         if (typeof touchGithubCommandPaletteOpen === 'function') {
           touchGithubCommandPaletteOpen(doc);
         } else {
-          globalThis.PRListFocus?.touchGithubCommandPaletteOpen?.(doc);
+          (globalThis as any).PRListFocus?.touchGithubCommandPaletteOpen?.(doc);
         }
       } catch {
         /* ignore */
@@ -384,7 +385,7 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
 
   useEffect(() => {
     if (!open) return undefined;
-    const onKey = (e) => {
+    const onKey = (e: any) => {
       const mod = e.metaKey || e.ctrlKey;
       const alt = Boolean(e.altKey);
       const ui = uiRef.current || {};
@@ -503,8 +504,8 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
           typeof touchGithubCommandPaletteOpen === 'function'
             ? touchGithubCommandPaletteOpen(doc)
             : Boolean(
-                globalThis.PRListFocus?.touchGithubCommandPaletteOpen?.(doc) ||
-                  globalThis.PRListFocus?.isGithubCommandPaletteOpen?.(doc) ||
+                (globalThis as any).PRListFocus?.touchGithubCommandPaletteOpen?.(doc) ||
+                  (globalThis as any).PRListFocus?.isGithubCommandPaletteOpen?.(doc) ||
                   (typeof isGithubCommandPaletteOpen === 'function' &&
                     isGithubCommandPaletteOpen(doc))
               );
@@ -529,7 +530,7 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
           typeof shouldIgnoreModalEscapeForGithubPalette === 'function'
             ? shouldIgnoreModalEscapeForGithubPalette(doc, { target: e.target })
             : Boolean(
-                globalThis.PRListFocus?.shouldIgnoreModalEscapeForGithubPalette?.(
+                (globalThis as any).PRListFocus?.shouldIgnoreModalEscapeForGithubPalette?.(
                   doc,
                   { target: e.target }
                 )
@@ -537,7 +538,7 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
         if (ignoreEsc) {
           // GH may leave <dialog> stuck in the CSS top layer after close
           try {
-            globalThis.PRListFocus?.recoverGithubCommandPaletteTopLayer?.(doc);
+            (globalThis as any).PRListFocus?.recoverGithubCommandPaletteTopLayer?.(doc);
           } catch {
             /* ignore */
           }
@@ -1155,7 +1156,7 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
           }
           if (peerAct === 'toggleFullscreen') {
             if (!isEmbed) {
-              setShellFullscreen((prev) => toggleShellFullscreen(prev));
+              setShellFullscreen((prev: any) => toggleShellFullscreen(prev));
             }
             return;
           }
@@ -1268,7 +1269,25 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
         });
       }
 
-      if (!action) return;
+      if (!action) {
+        // Keep held ↑/↓ from native-scrolling the conversation away after a
+        // multi-reply clamp (virtual row unmount can flap multiReply detection).
+        // Never swallow caret movement in a composer / search / title field.
+        if (
+          shouldPreventConvArrowFallback({
+            liveConvFocus,
+            editable,
+            alt,
+            mod,
+            shift: Boolean(e.shiftKey),
+            key: e.key,
+          })
+        ) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+        return;
+      }
 
       // Prefer live store for layout-gated chords (uiRef can lag under hold)
       const liveLayoutMode =
@@ -1360,7 +1379,7 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
         }
         case 'toggleFullscreen':
           if (!isEmbed) {
-            setShellFullscreen((prev) => toggleShellFullscreen(prev));
+            setShellFullscreen((prev: any) => toggleShellFullscreen(prev));
           }
           break;
         case 'focusConversationComment':

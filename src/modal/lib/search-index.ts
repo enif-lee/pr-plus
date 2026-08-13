@@ -19,7 +19,7 @@ export const SEARCH_MAX_HITS_PER_DOC = 8;
 /** Docs processed per slice before yielding to the event loop. */
 export const SEARCH_CHUNK_SIZE = 400;
 
-function pushDoc(docs, id, kind, text, extra: any = {}) {
+function pushDoc(docs: any, id: any, kind: any, text: any, extra: any = {}) {
   const t = (text == null ? '' : String(text)).trim();
   if (!t) return;
   docs.push({ id, kind, text: t, textLower: t.toLowerCase(), ...extra });
@@ -33,14 +33,14 @@ function pushDoc(docs, id, kind, text, extra: any = {}) {
  * @param {object} prDetail
  * @returns {SearchDoc[]}
  */
-export function buildConversationSearchIndex(prDetail) {
-  const docs = [];
+export function buildConversationSearchIndex(prDetail: any) {
+  const docs: any[] = [];
   const pr = prDetail || {};
 
   pushDoc(docs, 'body', 'body', pr.body, { anchorId: 'body' });
 
   if (Array.isArray(pr.comments)) {
-    pr.comments.forEach((c, i) => {
+    pr.comments.forEach((c: any, i: any) => {
       const id = c?.id ?? i;
       pushDoc(docs, `issue-comment-${id}`, 'issue-comment', c?.body || '', {
         anchorId: `issue-comment:${id}`,
@@ -50,7 +50,7 @@ export function buildConversationSearchIndex(prDetail) {
   }
 
   if (Array.isArray(pr.reviews)) {
-    pr.reviews.forEach((r, i) => {
+    pr.reviews.forEach((r: any, i: any) => {
       if (!r?.body) return;
       const id = r.id ?? i;
       pushDoc(docs, `review-${id}`, 'review', r.body || '', {
@@ -62,7 +62,7 @@ export function buildConversationSearchIndex(prDetail) {
 
   // Review thread roots + replies (each reply is its own navigable hit)
   if (Array.isArray(pr.reviewComments)) {
-    pr.reviewComments.forEach((c, i) => {
+    pr.reviewComments.forEach((c: any, i: any) => {
       if (!c) return;
       const id = c.id ?? i;
       const parentId = c.inReplyToId ?? c.in_reply_to_id ?? null;
@@ -93,8 +93,8 @@ export function buildConversationSearchIndex(prDetail) {
  * @param {Array<{ kind?: string, filePath?: string, text?: string, body?: string, code?: string, rowIndex?: number, commentId?: string|number }>} virtualRows
  * @returns {SearchDoc[]}
  */
-export function buildDiffSearchIndex(virtualRows) {
-  const docs = [];
+export function buildDiffSearchIndex(virtualRows: any) {
+  const docs: any[] = [];
   if (!Array.isArray(virtualRows)) return docs;
 
   for (const row of virtualRows) {
@@ -132,7 +132,7 @@ export function buildDiffSearchIndex(virtualRows) {
  * @param {{ mode?: 'full'|'conversation'|'diff' }} [opts]
  * @returns {SearchDoc[]}
  */
-export function buildSearchIndex(prDetail, virtualRows, opts: any = {}) {
+export function buildSearchIndex(prDetail: any, virtualRows: any, opts: any = {}) {
   // UI always passes 'conversation' | 'diff'. Omit → full for legacy callers/tests.
   const mode = opts.mode || 'full';
   if (mode === 'conversation') {
@@ -143,13 +143,13 @@ export function buildSearchIndex(prDetail, virtualRows, opts: any = {}) {
   }
 
   // Legacy full corpus (not used by the modal UI)
-  const docs = [];
+  const docs: any[] = [];
   const pr = prDetail || {};
 
   pushDoc(docs, 'body', 'body', pr.body, { anchorId: 'body' });
 
   if (Array.isArray(pr.comments)) {
-    pr.comments.forEach((c, i) => {
+    pr.comments.forEach((c: any, i: any) => {
       const id = c?.id ?? i;
       pushDoc(docs, `issue-comment-${id}`, 'issue-comment', c?.body || '', {
         anchorId: `issue-comment:${id}`,
@@ -158,7 +158,7 @@ export function buildSearchIndex(prDetail, virtualRows, opts: any = {}) {
     });
   }
   if (Array.isArray(pr.reviewComments)) {
-    pr.reviewComments.forEach((c, i) => {
+    pr.reviewComments.forEach((c: any, i: any) => {
       if (!c) return;
       const id = c.id ?? i;
       const parentId = c.inReplyToId ?? c.in_reply_to_id ?? null;
@@ -177,7 +177,7 @@ export function buildSearchIndex(prDetail, virtualRows, opts: any = {}) {
     });
   }
   if (Array.isArray(pr.reviews)) {
-    pr.reviews.forEach((r, i) => {
+    pr.reviews.forEach((r: any, i: any) => {
       if (!r?.body) return;
       const id = r.id ?? i;
       pushDoc(docs, `review-${id}`, 'review', r.body || '', {
@@ -198,7 +198,7 @@ export function buildSearchIndex(prDetail, virtualRows, opts: any = {}) {
  * Scan a single doc for query matches (mutates hits).
  * @returns {boolean} true if global maxHits reached
  */
-function collectDocHits(doc, lower, qLen, hits, maxHits, maxPerDoc) {
+function collectDocHits(doc: any, lower: any, qLen: any, hits: any, maxHits: any, maxPerDoc: any) {
   const text = doc.text || '';
   const hay = doc.textLower || text.toLowerCase();
   let from = 0;
@@ -231,7 +231,7 @@ function collectDocHits(doc, lower, qLen, hits, maxHits, maxPerDoc) {
  * @param {{ maxHits?: number, maxPerDoc?: number }} [opts]
  * @returns {SearchHit[]}
  */
-export function searchIndex(docs, query, opts: any = {}) {
+export function searchIndex(docs: any, query: any, opts: any = {}) {
   const q = (query || '').trim();
   if (!q || !Array.isArray(docs) || docs.length === 0) return [];
 
@@ -244,7 +244,7 @@ export function searchIndex(docs, query, opts: any = {}) {
     Number.isFinite(opts.maxPerDoc) && opts.maxPerDoc > 0
       ? Math.floor(opts.maxPerDoc)
       : SEARCH_MAX_HITS_PER_DOC;
-  const hits = [];
+  const hits: any[] = [];
 
   for (const doc of docs) {
     if (collectDocHits(doc, lower, q.length, hits, maxHits, maxPerDoc)) break;
@@ -280,7 +280,7 @@ function yieldToMain() {
  * }} [opts]
  * @returns {Promise<SearchHit[]>}
  */
-export async function searchIndexAsync(docs, query, opts: any = {}) {
+export async function searchIndexAsync(docs: any, query: any, opts: any = {}) {
   const q = (query || '').trim();
   if (!q || !Array.isArray(docs) || docs.length === 0) return [];
 
@@ -300,7 +300,7 @@ export async function searchIndexAsync(docs, query, opts: any = {}) {
   const isCancelled =
     typeof opts.isCancelled === 'function' ? opts.isCancelled : () => false;
 
-  const hits = [];
+  const hits: any[] = [];
   const n = docs.length;
 
   // Small corpora: finish sync (no yield overhead)
@@ -329,7 +329,7 @@ export async function searchIndexAsync(docs, query, opts: any = {}) {
 /**
  * Next hit index wrapping around.
  */
-export function nextHitIndex(current, total, delta) {
+export function nextHitIndex(current: any, total: any, delta: any) {
   if (!total || total <= 0) return -1;
   if (current < 0) return delta >= 0 ? 0 : total - 1;
   return (current + delta + total) % total;
@@ -345,7 +345,7 @@ export function nextHitIndex(current, total, delta) {
  * @returns {{ hits: SearchHit[], hitIndex: number, activeHit: SearchHit|null, shouldJump: boolean }}
  */
 /** True when hit maps to a virtualized Diff row. */
-export function searchHitHasRowIndex(hit) {
+export function searchHitHasRowIndex(hit: any) {
   return hit?.rowIndex != null && Number.isFinite(Number(hit.rowIndex));
 }
 
@@ -357,7 +357,7 @@ export function searchHitHasRowIndex(hit) {
  * @param {SearchHit[]} hits
  * @param {{ preferDiff?: boolean, mode?: string }} [opts]
  */
-export function firstNavigableHitIndex(hits, opts: any = {}) {
+export function firstNavigableHitIndex(hits: any, opts: any = {}) {
   const list = Array.isArray(hits) ? hits : [];
   const mode = String(opts.mode || '');
   const preferDiff =
@@ -377,7 +377,7 @@ export function firstNavigableHitIndex(hits, opts: any = {}) {
 }
 
 /** True if hit can be jumped to in some layout. */
-export function isNavigableSearchHit(hit) {
+export function isNavigableSearchHit(hit: any) {
   if (!hit) return false;
   if (hit.anchorId) return true;
   return searchHitHasRowIndex(hit);
@@ -393,7 +393,7 @@ export function isNavigableSearchHit(hit) {
  * @param {SearchHit|null|undefined} hit
  * @param {string} layoutMode 'diff' | 'centered' | …
  */
-export function isSearchHitVisibleInLayout(hit, layoutMode) {
+export function isSearchHitVisibleInLayout(hit: any, layoutMode: any) {
   if (!hit) return false;
   const inDiff =
     layoutMode === 'diff' ||
@@ -419,9 +419,9 @@ export function isSearchHitVisibleInLayout(hit, layoutMode) {
  * @param {string} [layoutMode]
  */
 export function resolveNavSearchStateForLayout(
-  hits,
-  hitIndex,
-  delta,
+  hits: any,
+  hitIndex: any,
+  delta: any,
   layoutMode = 'centered'
 ) {
   const list = Array.isArray(hits) ? hits : [];
@@ -461,7 +461,7 @@ export function resolveNavSearchStateForLayout(
  * @param {string} query
  * @param {{ mode?: 'conversation'|'diff'|'full', detail?: object }} [opts]
  */
-export function resolveQuerySearchState(docs, query, opts: any = {}) {
+export function resolveQuerySearchState(docs: any, query: any, opts: any = {}) {
   let hits = searchIndex(docs, query);
   if (opts.mode || opts.detail) {
     hits = sortSearchHitsForUi(hits, opts.mode || 'conversation', opts.detail || null);
@@ -484,7 +484,7 @@ export function resolveQuerySearchState(docs, query, opts: any = {}) {
  * @param {string} query
  * @param {{ isCancelled?: () => boolean, mode?: string, detail?: object }} [opts]
  */
-export async function resolveQuerySearchStateAsync(docs, query, opts: any = {}) {
+export async function resolveQuerySearchStateAsync(docs: any, query: any, opts: any = {}) {
   let hits = await searchIndexAsync(docs, query, opts);
   if (typeof opts.isCancelled === 'function' && opts.isCancelled()) {
     return { hits: [], hitIndex: -1, activeHit: null, shouldJump: false, cancelled: true };
@@ -508,7 +508,7 @@ export async function resolveQuerySearchStateAsync(docs, query, opts: any = {}) 
 /**
  * Escape HTML entities (for mark wrappers; keep local to avoid UI deps).
  */
-function escapeHtmlLocal(s) {
+function escapeHtmlLocal(s: any) {
   return String(s)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -526,7 +526,7 @@ function escapeHtmlLocal(s) {
  * @param {{ currentStart?: number|null }} [opts]
  * @returns {string} safe HTML
  */
-export function markSearchInText(text, query, opts: any = {}) {
+export function markSearchInText(text: any, query: any, opts: any = {}) {
   const src = text == null ? '' : String(text);
   const q = (query || '').trim();
   if (!src) return '';
@@ -562,7 +562,7 @@ export function markSearchInText(text, query, opts: any = {}) {
  * Decode a short HTML entity / numeric char ref at `html[i]` (must be '&').
  * Returns { ch, end } or null.
  */
-function decodeEntityAt(html, i) {
+function decodeEntityAt(html: any, i: any) {
   if (html[i] !== '&') return null;
   const semi = html.indexOf(';', i + 1);
   if (semi < 0 || semi - i > 12) return null;
@@ -581,7 +581,7 @@ function decodeEntityAt(html, i) {
     apos: "'",
     nbsp: '\u00a0',
   };
-  const ch = map[body.toLowerCase()];
+  const ch = (map as Record<string, string>)[body.toLowerCase()];
   if (!ch) return null;
   return { ch, end: semi + 1 };
 }
@@ -598,7 +598,7 @@ function decodeEntityAt(html, i) {
  * @param {{ currentStart?: number|null, occurrenceIndex?: number|null }} [opts]
  * @returns {string}
  */
-export function markSearchInHtml(html, query, opts: any = {}) {
+export function markSearchInHtml(html: any, query: any, opts: any = {}) {
   const src = html == null ? '' : String(html);
   const q = (query || '').trim();
   if (!src) return '';
@@ -644,7 +644,7 @@ export function markSearchInHtml(html, query, opts: any = {}) {
 
   // 2) Collect match ranges in plain-text space
   /** @type {Array<{ start: number, end: number, current: boolean }>} */
-  const ranges = [];
+  const ranges: any[] = [];
   let from = 0;
   let occ = 0;
   const wantOcc =
@@ -674,14 +674,14 @@ export function markSearchInHtml(html, query, opts: any = {}) {
   let htmlIdx = 0;
   inTag = false;
 
-  const openMark = (current) =>
+  const openMark = (current: any) =>
     current
       ? '<mark class="prp-search-mark prp-search-mark--current">'
       : '<mark class="prp-search-mark">';
   const closeMark = '</mark>';
 
   /** Active mark range covering plainIdx, if any */
-  const rangeAt = (p) => {
+  const rangeAt = (p: any) => {
     for (const r of ranges) {
       if (p >= r.start && p < r.end) return r;
     }
@@ -746,7 +746,7 @@ export function markSearchInHtml(html, query, opts: any = {}) {
  * @param {object} [detail]
  * @returns {SearchHit[]}
  */
-export function sortSearchHitsForUi(hits, mode, detail = null) {
+export function sortSearchHitsForUi(hits: any, mode: any, detail: any = null) {
   const list = Array.isArray(hits) ? hits.slice() : [];
   if (!list.length) return list;
 
@@ -766,7 +766,7 @@ export function sortSearchHitsForUi(hits, mode, detail = null) {
 
   // Conversation UI order
   const timeByAnchor = new Map();
-  const putTime = (anchorId, at) => {
+  const putTime = (anchorId: any, at: any) => {
     if (!anchorId) return;
     timeByAnchor.set(String(anchorId), String(at || ''));
   };
@@ -781,7 +781,7 @@ export function sortSearchHitsForUi(hits, mode, detail = null) {
     putTime(`review-comment:${c.id}`, c.createdAt);
   }
 
-  const kindRank = (h) => {
+  const kindRank = (h: any) => {
     const k = String(h.kind || '');
     if (k === 'body' || h.anchorId === 'body') return 0;
     if (k === 'issue-comment') return 1;
@@ -817,7 +817,7 @@ export function sortSearchHitsForUi(hits, mode, detail = null) {
  * @param {{ rowIndex?: number, start?: number, end?: number }|null} hit
  * @param {'text'|'code'|'left'|'right'} [field='code']
  */
-export function mapHitStartToDisplay(row, hit, field: any = 'code') {
+export function mapHitStartToDisplay(row: any, hit: any, field: any = 'code') {
   if (!row || !hit || hit.rowIndex == null) return null;
   if (Number(hit.rowIndex) !== Number(row.rowIndex)) return null;
   if (hit.start == null || !Number.isFinite(Number(hit.start))) return null;
@@ -858,7 +858,7 @@ export function mapHitStartToDisplay(row, hit, field: any = 'code') {
  * @param {Array<{ rowIndex?: number }>} hits
  * @returns {Set<number>}
  */
-export function searchHitRowIndexSet(hits) {
+export function searchHitRowIndexSet(hits: any) {
   const set = new Set();
   for (const h of Array.isArray(hits) ? hits : []) {
     if (h?.rowIndex != null && Number.isFinite(Number(h.rowIndex))) {
@@ -876,7 +876,7 @@ export function searchHitRowIndexSet(hits) {
  * @param {number} hitIndex
  * @returns {number}
  */
-export function occurrenceIndexAmongRowHits(hits, hitIndex) {
+export function occurrenceIndexAmongRowHits(hits: any, hitIndex: any) {
   const list = Array.isArray(hits) ? hits : [];
   const idx = Number(hitIndex);
   if (!Number.isFinite(idx) || idx < 0 || idx >= list.length) return 0;
@@ -897,7 +897,7 @@ export function occurrenceIndexAmongRowHits(hits, hitIndex) {
  * @param {number} n 0-based
  * @returns {number|null}
  */
-export function startOfNthOccurrence(text, query, n) {
+export function startOfNthOccurrence(text: any, query: any, n: any) {
   const src = text == null ? '' : String(text);
   const q = (query || '').trim();
   const want = Number(n);
@@ -928,11 +928,11 @@ export function startOfNthOccurrence(text, query, n) {
  * @param {'text'|'code'|'left'|'right'} field
  */
 export function resolveActiveMarkStart(
-  displayText,
-  query,
-  row,
-  activeHit,
-  occurrenceIndex,
+  displayText: any,
+  query: any,
+  row: any,
+  activeHit: any,
+  occurrenceIndex: any,
   field: any = 'code'
 ) {
   if (!activeHit || activeHit.rowIndex == null) return null;
@@ -951,7 +951,7 @@ export function resolveActiveMarkStart(
  * @param {number} hitIndex
  * @param {number} delta
  */
-export function resolveNavSearchState(hits, hitIndex, delta) {
+export function resolveNavSearchState(hits: any, hitIndex: any, delta: any) {
   const list = Array.isArray(hits) ? hits : [];
   if (!list.length) {
     return { hits: list, hitIndex: -1, activeHit: null, shouldJump: false };

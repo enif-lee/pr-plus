@@ -5,10 +5,10 @@
       : Date.now();
   }
 
-  function publishFetchTimeline(tl) {
+  function publishFetchTimeline(tl: any) {
     if (!tl) return;
     try {
-      globalThis.__PRP_FETCH_TIMELINE__ = {
+      (globalThis as any).__PRP_FETCH_TIMELINE__ = {
         label: tl.label,
         t0: tl.t0,
         elapsedMs: Math.round(nowMs() - tl.t0),
@@ -21,7 +21,7 @@
       const host = document.getElementById(HOST_ID);
       if (host) {
         // Cap payload size for attribute
-        const slim = tl.events.map((e) => ({
+        const slim = tl.events.map((e: any) => ({
           t: e.t,
           p: e.phase,
           n: e.name,
@@ -42,9 +42,9 @@
     }
   }
 
-  function beginFetchTimeline(label) {
+  function beginFetchTimeline(label: any) {
     const t0 = nowMs();
-    const events = [];
+    const events: any[] = [];
     const tl = {
       label: String(label || 'open'),
       t0,
@@ -52,7 +52,7 @@
       now() {
         return Math.round(nowMs() - t0);
       },
-      mark(name, phase, extra = null) {
+      mark(name: any, phase: any, extra: any = null) {
         const e = {
           t: Math.round(nowMs() - t0),
           name: String(name || ''),
@@ -80,7 +80,7 @@
        * @param {object} [meta]
        * @returns {Promise<T>}
        */
-      span(name, promise, meta = null) {
+      span(name: any, promise: any, meta: any = null) {
         const tStart = nowMs();
         tl.mark(name, 'start', meta || undefined);
         return Promise.resolve(promise).then(
@@ -123,13 +123,13 @@
     return activeFetchTimeline;
   }
 
-  function isEmbedPresentation(value) {
+  function isEmbedPresentation(value: any) {
     const api = pageEmbedApi();
     if (api?.isEmbedPresentation) return api.isEmbedPresentation(value);
     return String(value || '').toLowerCase() === 'embed';
   }
 
-  function parsePrPagePath(pathname) {
+  function parsePrPagePath(pathname: any) {
     const api = pageEmbedApi();
     if (typeof api?.parsePrPagePath === 'function') {
       return api.parsePrPagePath(pathname);
@@ -147,8 +147,8 @@
       .toLowerCase();
     if (tab && tab !== 'files' && tab !== 'changes') return null;
     const rest = String(m[5] || '').trim();
-    let commitSha = null;
-    let commitEndSha = null;
+    let commitSha: any = null;
+    let commitEndSha: any = null;
     if (rest) {
       const range = rest.match(/^([0-9a-f]{7,40})\.\.([0-9a-f]{7,40})$/i);
       if (range) {
@@ -179,7 +179,7 @@
    * Merge pathname PR target with location.search/hash prp_* deep-link.
    * Pure helper when available (PRModalUriRoute.mergePathTargetWithUriRoute).
    */
-  function withUriRouteFromLocation(pathTarget) {
+  function withUriRouteFromLocation(pathTarget: any) {
     if (!pathTarget) return null;
     const loc =
       typeof location !== 'undefined'
@@ -210,7 +210,7 @@
    */
   function parseGithubLocation() {
     const gh = githubRouteApi();
-    let pathTarget = null;
+    let pathTarget: any = null;
     if (typeof gh?.parseGithubPrLocation === 'function' && typeof location !== 'undefined') {
       pathTarget = gh.parseGithubPrLocation({
         pathname: location.pathname,
@@ -230,7 +230,7 @@
    * fields (null when absent) so soft-nav to /pull/N or /changes without #diff-
    * clears stale fileKey/startLine from a prior deep link.
    */
-  function applyRouteFieldsFromTarget(target) {
+  function applyRouteFieldsFromTarget(target: any) {
     if (!target) return;
     if (target.page === 'diff' || target.page === 'conversation') {
       current.routePage = target.page;
@@ -288,7 +288,7 @@
    * event. Other window-capture listeners (pr+ hotkeys) still run.
    */
   let embedKeyShieldBound = false;
-  function onEmbedKeyShield(e) {
+  function onEmbedKeyShield(e: any) {
     try {
       if (!current.open || !isEmbedPresentation(current.presentation)) return;
       // Only shield when embed host is actually mounted
@@ -316,7 +316,7 @@
   }
 
   /** Keep pr+ events out of GitHub's document-level React/event delegates. */
-  function ensureEmbedBubbleShield(host) {
+  function ensureEmbedBubbleShield(host: any) {
     if (!host || host.getAttribute('data-prp-bubble-shield') === '1') return;
     const pe = pageEmbedApi();
     const events =
@@ -340,12 +340,12 @@
         'submit',
       ];
     for (const type of events) {
-      host.addEventListener(type, (event) => event.stopPropagation());
+      host.addEventListener(type, (event: any) => event.stopPropagation());
     }
     host.setAttribute('data-prp-bubble-shield', '1');
   }
 
-  function hideNativeMainChildren(main, embedEl) {
+  function hideNativeMainChildren(main: any, embedEl: any) {
     if (!main) return;
     const api = pageEmbedApi();
     const mark =
@@ -376,7 +376,7 @@
    * Strong residual suppress: body-level GH SPA + chrome outside main + footers.
    * Cuts paint/layout and focus theft under full-window embed (modal is overlay-only).
    */
-  function suppressGithubResidual(embedEl) {
+  function suppressGithubResidual(embedEl: any) {
     const api = pageEmbedApi();
     if (typeof api?.applyNativeResidualHide === 'function') {
       try {

@@ -104,8 +104,8 @@
           }
         };
         try {
-          if (typeof globalThis.PRTreeStorage?.setExtensionPrefs === 'function') {
-            void globalThis.PRTreeStorage.setExtensionPrefs(patch)
+          if (typeof (globalThis as any).PRTreeStorage?.setExtensionPrefs === 'function') {
+            void (globalThis as any).PRTreeStorage.setExtensionPrefs(patch)
               .then(done)
               .catch(() => {});
             return;
@@ -150,7 +150,7 @@
        * @param {number} n
        * @param {{ page?: 'diff'|'conversation'|null }} [opts]
        */
-      onOpenStackPr: (n, opts: any = {}) => {
+      onOpenStackPr: (n: any, opts: any = {}) => {
         if (!owner || !repo || n == null) return;
         const page =
           opts?.page === 'diff' || opts?.page === 'conversation'
@@ -178,7 +178,7 @@
        */
       onRefresh: async (opts: any = {}) => {
         if (!owner || !repo || !number) return;
-        if (!globalThis.PRTreeFetch?.fetchPrDetail) return;
+        if (!(globalThis as any).PRTreeFetch?.fetchPrDetail) return;
         const modeRaw = String(opts?.mode || 'revalidate');
         const mode =
           modeRaw === 'full-threads'
@@ -189,7 +189,7 @@
         const visibleIds = [
           ...new Set(
             (Array.isArray(opts?.threadNodeIds) ? opts.threadNodeIds : [])
-              .map((id) => String(id || '').trim())
+              .map((id: any) => String(id || '').trim())
               .filter(Boolean)
           ),
         ];
@@ -218,9 +218,9 @@
           Number(current.number) === Number(number);
 
         const mergeFn =
-          globalThis.PRTreeFetch.mergeReviewThreadsPageIntoDetail || null;
+          (globalThis as any).PRTreeFetch.mergeReviewThreadsPageIntoDetail || null;
         const apiMax =
-          Number(globalThis.PRModalReviewThreads?.REVIEW_THREADS_PAGE_SIZE) ||
+          Number((globalThis as any).PRModalReviewThreads?.REVIEW_THREADS_PAGE_SIZE) ||
           15;
         const nowMs = () =>
           typeof performance !== 'undefined' && performance.now
@@ -235,19 +235,19 @@
           prog.mark('start', uw.start, 'refresh', loadStageLabel('refresh-meta'));
 
           const canPageThreads = Boolean(
-            globalThis.PRTreeFetch.fetchReviewThreadsPage
+            (globalThis as any).PRTreeFetch.fetchReviewThreadsPage
           );
           const canBulkThreads = Boolean(
-            globalThis.PRTreeFetch.fetchReviewThreadsByIds
+            (globalThis as any).PRTreeFetch.fetchReviewThreadsByIds
           );
 
           /** @type {any} */
-          let earlyRefreshThreadsPage = null;
+          let earlyRefreshThreadsPage: any = null;
           /** @type {any} */
-          let earlyRefreshVisibleBulk = null;
+          let earlyRefreshVisibleBulk: any = null;
 
           /** Partial paint helper for refresh core (immediate on resolve). */
-          function paintRefreshCore(raw) {
+          function paintRefreshCore(raw: any) {
             if (!stillOpen() || !raw) return null;
             let detail = raw;
             // Prefer live on-screen threads (may include early-fetched newest)
@@ -308,7 +308,7 @@
                           : []),
                       ],
                     })
-                  : srcRc.filter((c) => c && c.id != null);
+                  : srcRc.filter((c: any) => c && c.id != null);
                 if (cleanedRc.length) {
                   detail = {
                     ...detail,
@@ -327,14 +327,14 @@
             if (prevDetail && Array.isArray(prevDetail.files) && prevDetail.files.length) {
               const netFiles = Array.isArray(detail.files) ? detail.files : [];
               const cachedHasPatches = prevDetail.files.some(
-                (f) =>
+                (f: any) =>
                   f &&
                   typeof f.patch === 'string' &&
                   f.patch.length > 0 &&
                   !f._patchOmitted
               );
               const netHasPatches = netFiles.some(
-                (f) =>
+                (f: any) =>
                   f &&
                   typeof f.patch === 'string' &&
                   f.patch.length > 0 &&
@@ -342,7 +342,7 @@
               );
               const netSlim =
                 netFiles.length > 0 &&
-                (netFiles.some((f) => f && f._patchOmitted) || !netHasPatches);
+                (netFiles.some((f: any) => f && f._patchOmitted) || !netHasPatches);
               if (cachedHasPatches && (netFiles.length === 0 || netSlim)) {
                 detail = { ...detail, files: prevDetail.files };
               }
@@ -389,7 +389,7 @@
             return current.detail;
           }
 
-          function paintRefreshThreadsNewest(page) {
+          function paintRefreshThreadsNewest(page: any) {
             if (!stillOpen() || !page || typeof mergeFn !== 'function') return false;
             if (!current.detail) return false;
             const next = mergeFn(current.detail, page, 'newest');
@@ -405,7 +405,7 @@
             return true;
           }
 
-          function paintRefreshVisibleBulk(bulk) {
+          function paintRefreshVisibleBulk(bulk: any) {
             if (!stillOpen() || !bulk || typeof mergeFn !== 'function') return false;
             if (!current.detail) return false;
             const next = mergeFn(current.detail, bulk, 'refresh');
@@ -454,7 +454,7 @@
                   signal,
                   cacheDetail: refreshThreadsCacheSnap,
                   forceFull: mode === 'full-threads',
-                  onStage: (stage) => {
+                  onStage: (stage: any) => {
                     if (!stillOpen()) return;
                     if (stage === 'shell') {
                       prog.mark(
@@ -508,9 +508,9 @@
             mode === 'visible-threads' &&
             visibleIds.length &&
             canBulkThreads
-              ? globalThis.PRTreeFetch
+              ? (globalThis as any).PRTreeFetch
                   .fetchReviewThreadsByIds(visibleIds, { signal })
-                  .then((bulk) => {
+                  .then((bulk: any) => {
                     prog.mark(
                       'threadsVisible',
                       uw.threadsVisible,
@@ -523,7 +523,7 @@
                     paintRefreshVisibleBulk(bulk);
                     return { ok: true, bulk };
                   })
-                  .catch((err) => {
+                  .catch((err: any) => {
                     prog.mark(
                       'threadsVisible',
                       uw.threadsVisible,
@@ -534,12 +534,12 @@
                   })
               : Promise.resolve({ ok: false, skipped: true });
 
-          let detail = await globalThis.PRTreeFetch.fetchPrDetail(
+          let detail = await (globalThis as any).PRTreeFetch.fetchPrDetail(
             owner,
             repo,
             number,
             { skipReviewThreads: true, signal }
-          ).then((d) => {
+          ).then((d: any) => {
             prog.mark('core', uw.core, 'refresh', loadStageLabel('refresh-meta'));
             paintRefreshCore(d);
             return d;
@@ -667,7 +667,7 @@
 
           const updatedIdSet = new Set(
             (newest?.threads || [])
-              .map((t) => (t?.threadNodeId ? String(t.threadNodeId) : ''))
+              .map((t: any) => (t?.threadNodeId ? String(t.threadNodeId) : ''))
               .filter(Boolean)
           );
           const totalCount =
@@ -676,7 +676,7 @@
               : newest.threads?.length || 0;
           const RT =
             typeof globalThis !== 'undefined'
-              ? globalThis.PRModalReviewThreads
+              ? (globalThis as any).PRModalReviewThreads
               : null;
           const newestSource = newest?.source || adapt?.source || null;
           // Soft revalidate: by-id bulk for remaining unresolved PRRT (see open-modal).
@@ -713,8 +713,8 @@
             // (or full escalate). GraphQL newest may still need by-id for out-of-window
             // and missingThreadIds wipe of REST paint under rate-limit.
             const collectIds =
-              globalThis.PRTreeFetch.collectUnresolvedThreadNodeIds ||
-              ((d) => {
+              (globalThis as any).PRTreeFetch.collectUnresolvedThreadNodeIds ||
+              ((d: any) => {
                 const ids = new Set();
                 for (const t of d?.reviewThreads || []) {
                   if (t?.threadNodeId && !t.resolved) {
@@ -725,14 +725,14 @@
               });
             const filterRemaining =
               typeof RT?.remainingUnresolvedForByIdsBulk === 'function'
-                ? (unresolved, updated, known) =>
+                ? (unresolved: any, updated: any, known: any) =>
                     RT.remainingUnresolvedForByIdsBulk(
                       unresolved,
                       updated,
                       known
                     )
-                : (unresolved, updated, known) =>
-                    (unresolved || []).filter((id) => {
+                : (unresolved: any, updated: any, known: any) =>
+                    (unresolved || []).filter((id: any) => {
                       const s = String(id);
                       if (!/^PRRT_/i.test(s)) return false;
                       return !updated.has(s) && !known.has(s);
@@ -747,7 +747,7 @@
             while (
               !skipByIds &&
               unresolvedPass < 2 &&
-              typeof globalThis.PRTreeFetch.fetchReviewThreadsByIds ===
+              typeof (globalThis as any).PRTreeFetch.fetchReviewThreadsByIds ===
                 'function' &&
               typeof mergeFn === 'function'
             ) {
@@ -767,7 +767,7 @@
               render();
               const tBulk = nowMs();
               const bulk =
-                await globalThis.PRTreeFetch.fetchReviewThreadsByIds(
+                await (globalThis as any).PRTreeFetch.fetchReviewThreadsByIds(
                   remainingUnresolvedIds,
                   { signal }
                 );
@@ -839,7 +839,7 @@
        *   'timeline-all' | 'timeline' — timelineItems only
        *   older|newer|oldest|newest — thread direction (one page; + timeline page)
        */
-      onLoadMoreReviewThreads: async (direction) => {
+      onLoadMoreReviewThreads: async (direction: any) => {
         if (!owner || !repo || !number) return null;
         if (!current.detail) return null;
         const dirRaw = String(direction ?? 'more').toLowerCase();
@@ -876,22 +876,22 @@
             direction === false);
         const gen = detailFetchGen;
         const mergeFn =
-          globalThis.PRTreeFetch?.mergeReviewThreadsPageIntoDetail || null;
+          (globalThis as any).PRTreeFetch?.mergeReviewThreadsPageIntoDetail || null;
         const pure = (globalThis as any).PRModalConversationTimeline;
 
-        const pickDirection = (meta) => {
+        const pickDirection = (meta: any) => {
           if (meta.hasOlder || meta.hasMore) {
             if (meta.newestStartCursor || meta.endCursor) return 'older';
             return 'newest';
           }
           return null;
         };
-        const cursorFor = (meta, dir) =>
+        const cursorFor = (meta: any, dir: any) =>
           dir === 'older' || dir === 'newest'
             ? meta.newestStartCursor || meta.endCursor || null
             : meta.newestEndCursor || meta.oldestEndCursor || null;
 
-        const clearStuckThreads = (detailSnap, reason = '') => {
+        const clearStuckThreads = (detailSnap: any, reason = '') => {
           const meta = detailSnap?.reviewThreadsMeta || {};
           if (!meta.hasMore) return detailSnap;
           const loaded = Number(meta.loadedThreadCount) || 0;
@@ -918,7 +918,7 @@
           };
         };
 
-        const clearStuckTimeline = (detailSnap, reason = '') => {
+        const clearStuckTimeline = (detailSnap: any, reason = '') => {
           const meta = detailSnap?.timelineMeta || {};
           if (!meta.hasMore && meta.complete !== false) return detailSnap;
           if (reason) {
@@ -937,7 +937,7 @@
           };
         };
 
-        const paintLoadAllStage = (meta) => {
+        const paintLoadAllStage = (meta: any) => {
           if (!loadAll) return;
           const loaded = Number(meta?.loadedThreadCount) || 0;
           const total =
@@ -955,8 +955,8 @@
           render();
         };
 
-        const loadOneThreadPage = async (detailSnap) => {
-          if (!globalThis.PRTreeFetch?.fetchReviewThreadsPage) {
+        const loadOneThreadPage = async (detailSnap: any) => {
+          if (!(globalThis as any).PRTreeFetch?.fetchReviewThreadsPage) {
             return { detail: detailSnap, progressed: false };
           }
           const meta = detailSnap.reviewThreadsMeta || {};
@@ -964,15 +964,22 @@
           const beforeCount = Number(meta.loadedThreadCount) || 0;
           const pageSize =
             Number(
-              globalThis.PRModalReviewThreads?.REVIEW_THREADS_PAGE_SIZE
+              (globalThis as any).PRModalReviewThreads?.REVIEW_THREADS_PAGE_SIZE
             ) || 100;
 
+          const preferRestFn =
+            (globalThis as any).PRModalReviewThreads?.shouldPreferRestForThreadLoadMore;
           const restSource =
-            meta.source === 'rest' ||
-            (meta.restPage != null && !meta.newestStartCursor);
+            typeof preferRestFn === 'function'
+              ? Boolean(preferRestFn(meta))
+              : meta.source === 'rest' &&
+                !meta.newestStartCursor &&
+                !meta.oldestStartCursor &&
+                !meta.endCursor &&
+                !meta.startCursor;
           if (restSource && meta.hasMore) {
             const nextRestPage = Math.max(1, Number(meta.restPage) || 1) + 1;
-            const page = await globalThis.PRTreeFetch.fetchReviewThreadsPage(
+            const page = await (globalThis as any).PRTreeFetch.fetchReviewThreadsPage(
               owner,
               repo,
               number,
@@ -1028,7 +1035,7 @@
           if ((dir === 'older' || dir === 'newer') && !cursor) {
             return { detail: detailSnap, progressed: false };
           }
-          const page = await globalThis.PRTreeFetch.fetchReviewThreadsPage(
+          const page = await (globalThis as any).PRTreeFetch.fetchReviewThreadsPage(
             owner,
             repo,
             number,
@@ -1053,8 +1060,8 @@
         };
 
         /** One older (or newer) GraphQL timelineItems page + merge into detail. */
-        const loadOneTimelinePage = async (detailSnap) => {
-          if (typeof globalThis.PRTreeFetch?.fetchPrTimelineItemsPage !== 'function') {
+        const loadOneTimelinePage = async (detailSnap: any) => {
+          if (typeof (globalThis as any).PRTreeFetch?.fetchPrTimelineItemsPage !== 'function') {
             return { detail: detailSnap, progressed: false };
           }
           const meta = detailSnap.timelineMeta || {};
@@ -1082,7 +1089,7 @@
           const beforeEvents = Array.isArray(detailSnap.timelineEvents)
             ? detailSnap.timelineEvents.length
             : 0;
-          const page = await globalThis.PRTreeFetch.fetchPrTimelineItemsPage(
+          const page = await (globalThis as any).PRTreeFetch.fetchPrTimelineItemsPage(
             owner,
             repo,
             number,
@@ -1352,13 +1359,13 @@
        * @param {string|string[]} threadNodeIds PRRT_…
        * @returns {Promise<object|null>} updated detail or null
        */
-      onLoadReviewThreadComments: async (threadNodeIds) => {
+      onLoadReviewThreadComments: async (threadNodeIds: any) => {
         if (!owner || !repo || !number) return null;
-        if (!globalThis.PRTreeFetch?.fetchReviewThreadsByIds) return null;
+        if (!(globalThis as any).PRTreeFetch?.fetchReviewThreadsByIds) return null;
         if (!current.detail) return null;
         const RT =
-          typeof globalThis !== 'undefined' && globalThis.PRModalReviewThreads
-            ? globalThis.PRModalReviewThreads
+          typeof globalThis !== 'undefined' && (globalThis as any).PRModalReviewThreads
+            ? (globalThis as any).PRModalReviewThreads
             : {};
         const ids = [
           ...new Set(
@@ -1390,11 +1397,11 @@
               })
             : ids.filter((id) => {
                 const t = threads.find(
-                  (x) => x && String(x.threadNodeId) === id
+                  (x: any) => x && String(x.threadNodeId) === id
                 );
                 if (t?.commentsLoaded === true) return false;
                 return !comments.some(
-                  (c) =>
+                  (c: any) =>
                     c &&
                     !c._commentsPending &&
                     String(c.threadNodeId || '') === id
@@ -1404,7 +1411,7 @@
 
         const gen = detailFetchGen;
         try {
-          const bulk = await globalThis.PRTreeFetch.fetchReviewThreadsByIds(
+          const bulk = await (globalThis as any).PRTreeFetch.fetchReviewThreadsByIds(
             missing,
             { signal: openFetchAbort?.signal || null }
           );
@@ -1413,7 +1420,7 @@
             return null;
           }
           const mergeFn =
-            globalThis.PRTreeFetch?.mergeReviewThreadsPageIntoDetail || null;
+            (globalThis as any).PRTreeFetch?.mergeReviewThreadsPageIntoDetail || null;
           if (typeof mergeFn !== 'function') return current.detail;
           const next = mergeFn(current.detail, bulk, 'ids');
           applyThreadsToStore(next);
@@ -1446,15 +1453,15 @@
        * Narrow write-through. Returns { status: 'applied'|'stale'|'failed', error? }.
        * Never bumps detailFetchGen (openGen). Meta supersede keys bump metaRefreshGen only.
        */
-      onPatchDetail: (patch) => runOnPatchDetail(patch, owner, repo, number),
-      onFetchCompareFiles: async (base, head, options: any = {}) => {
+      onPatchDetail: (patch: any) => runOnPatchDetail(patch, owner, repo, number),
+      onFetchCompareFiles: async (base: any, head: any, options: any = {}) => {
         if (!owner || !repo) {
           throw new Error('No open repository for compare');
         }
-        if (!globalThis.PRTreeFetch?.fetchCompareFiles) {
+        if (!(globalThis as any).PRTreeFetch?.fetchCompareFiles) {
           throw new Error('Compare fetch unavailable');
         }
-        return globalThis.PRTreeFetch.fetchCompareFiles(owner, repo, base, head, {
+        return (globalThis as any).PRTreeFetch.fetchCompareFiles(owner, repo, base, head, {
           gitattributesText:
             options.gitattributesText ||
             current.detail?.gitattributesText ||
@@ -1467,10 +1474,10 @@
         if (!owner || !repo || !current.number) {
           throw new Error('No open pull request for commits');
         }
-        if (!globalThis.PRTreeFetch?.fetchAllPrCommits) {
+        if (!(globalThis as any).PRTreeFetch?.fetchAllPrCommits) {
           throw new Error('Full commits fetch unavailable');
         }
-        return globalThis.PRTreeFetch.fetchAllPrCommits(
+        return (globalThis as any).PRTreeFetch.fetchAllPrCommits(
           owner,
           repo,
           current.number
@@ -1481,10 +1488,10 @@
         if (!owner || !repo || !current.number) {
           throw new Error('No open pull request for files');
         }
-        if (!globalThis.PRTreeFetch?.fetchAllPrFiles) {
+        if (!(globalThis as any).PRTreeFetch?.fetchAllPrFiles) {
           throw new Error('Full files fetch unavailable');
         }
-        return globalThis.PRTreeFetch.fetchAllPrFiles(owner, repo, current.number, {
+        return (globalThis as any).PRTreeFetch.fetchAllPrFiles(owner, repo, current.number, {
           gitattributesText:
             options.gitattributesText ||
             current.detail?.gitattributesText ||

@@ -1,4 +1,5 @@
 /** prefs */
+import { MSG } from '../sw-messages';
 import {
   send,
   isExtensionContextAlive,
@@ -58,7 +59,7 @@ export function normalizeListOpenModeLocal(raw: unknown): 'modal' | 'page' {
   return 'modal';
 }
 
-export function normalizeShortcutMonitorSizeLocal(raw) {
+export function normalizeShortcutMonitorSizeLocal(raw: any) {
   const v = String(raw ?? '')
     .trim()
     .toLowerCase();
@@ -71,7 +72,7 @@ export function normalizeShortcutMonitorSizeLocal(raw) {
 }
 
 /** Plugin UI language: auto | en | ko | ja | zh_CN */
-export function normalizeUiLanguageLocal(raw) {
+export function normalizeUiLanguageLocal(raw: any) {
   try {
     const pure = (globalThis as any).PRModalLocaleResolve;
     if (typeof pure?.normalizeUiLanguagePref === 'function') {
@@ -129,7 +130,7 @@ function normalizeTimelineVisibilityLocal(raw: any) {
  * updates (uiLanguage, timelineVisibility, …). Stripping fields here made
  * language changes fail to apply until full reload.
  */
-export function normalizePrefsLocal(raw) {
+export function normalizePrefsLocal(raw: any) {
   const src = raw && typeof raw === 'object' ? raw : {};
   return {
     reverseComments:
@@ -180,7 +181,7 @@ export var PRTreeStorage = {
     );
   },
   async getGithubTokenStatus() {
-    const res = await send({ type: 'PR_TREE_TOKEN_STATUS' });
+    const res = await send({ type: MSG.TOKEN_STATUS });
     if (!res?.ok) {
       return { configured: false, mask: '' };
     }
@@ -195,10 +196,10 @@ export var PRTreeStorage = {
    * Signal-only watch: callback receives null (never the secret).
    * Re-fetch via background when this fires.
    */
-  watchGithubToken(onChange) {
+  watchGithubToken(onChange: any) {
     if (!(globalThis as any).chrome?.runtime?.onMessage) return () => {};
-    const listener = (message) => {
-      if (message?.type === 'PR_TREE_TOKEN_CHANGED') {
+    const listener = (message: any) => {
+      if (message?.type === MSG.TOKEN_CHANGED) {
         onChange(null);
       }
       // Never claim async response — broadcasts have no reply
@@ -224,14 +225,14 @@ export var PRTreeStorage = {
       /* fall through to SW */
     }
     try {
-      const res = await send({ type: 'PR_TREE_PREFS_GET' });
+      const res = await send({ type: MSG.PREFS_GET });
       if (res?.ok && res.prefs) return normalizePrefsLocal(res.prefs);
     } catch {
       /* fall through */
     }
     return { ...DEFAULT_PREFS };
   },
-  async setExtensionPrefs(patch) {
+  async setExtensionPrefs(patch: any) {
     const patchObj = patch && typeof patch === 'object' ? patch : {};
     // Direct storage write with content-side normalize (authoritative for new keys).
     try {
@@ -263,7 +264,7 @@ export var PRTreeStorage = {
       /* fall through to SW-only path */
     }
     const res = await send({
-      type: 'PR_TREE_PREFS_SET',
+      type: MSG.PREFS_SET,
       prefs: patchObj as any,
     });
     if (!res?.ok) {
@@ -273,7 +274,7 @@ export var PRTreeStorage = {
   },
   async getOnboardingCompleted() {
     try {
-      const res = await send({ type: 'PR_TREE_ONBOARDING_GET' });
+      const res = await send({ type: MSG.ONBOARDING_GET });
       if (res?.ok) return Boolean(res.completed);
     } catch {
       /* fall through */
@@ -286,9 +287,9 @@ export var PRTreeStorage = {
       return false;
     }
   },
-  async setOnboardingCompleted(completed) {
+  async setOnboardingCompleted(completed: any) {
     const res = await send({
-      type: 'PR_TREE_ONBOARDING_SET',
+      type: MSG.ONBOARDING_SET,
       completed: Boolean(completed),
     });
     if (!res?.ok) {
@@ -296,7 +297,7 @@ export var PRTreeStorage = {
     }
     return Boolean(res.completed);
   },
-  watchExtensionPrefs(onChange) {
+  watchExtensionPrefs(onChange: any) {
     if (typeof onChange !== 'function') return () => {};
     const chromeApi = (globalThis as any).chrome;
     const unsubs: Array<() => void> = [];
@@ -316,7 +317,7 @@ export var PRTreeStorage = {
     // Secondary: SW broadcast (may omit new keys if SW is stale — re-read storage)
     if (chromeApi?.runtime?.onMessage) {
       const msgListener = (message: any) => {
-        if (message?.type === 'PR_TREE_PREFS_CHANGED') {
+        if (message?.type === MSG.PREFS_CHANGED) {
           // Prefer a fresh local read so uiLanguage is never dropped by old SW
           void PRTreeStorage.getExtensionPrefs().then((prefs) =>
             onChange(prefs)
@@ -342,9 +343,9 @@ export var PRTreeStorage = {
   },
 };
 
-globalThis.PRTreeFetch = PRTreeFetch;
-globalThis.PRTreeStorage = PRTreeStorage;
-globalThis.PRTreeBridge = {
+(globalThis as any).PRTreeFetch = PRTreeFetch;
+(globalThis as any).PRTreeStorage = PRTreeStorage;
+(globalThis as any).PRTreeBridge = {
   isExtensionContextAlive,
   isContextInvalidated,
   isTransientChannelError,
@@ -426,7 +427,7 @@ try {
         );
         // Also surface raw SW response for diagnosis
         try {
-          const raw = await send({ type: 'PR_TREE_PREFS_GET' });
+          const raw = await send({ type: MSG.PREFS_GET });
           document.documentElement.setAttribute(
             'data-prp-prefs-get',
             JSON.stringify({
@@ -450,7 +451,7 @@ try {
       }
     })();
   });
-  PRTreeStorage.watchExtensionPrefs?.((prefs) => {
+  PRTreeStorage.watchExtensionPrefs?.((prefs: any) => {
     stampUiLanguageAttr(prefs);
   });
   void PRTreeStorage.getExtensionPrefs?.().then((prefs) => {

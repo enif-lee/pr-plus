@@ -6,14 +6,14 @@
 
 (function initPrTreeContentScript() {
   // Soft navigations can re-inject in some contexts; keep a single app instance.
-  if (globalThis.__PR_TREE_APP__) {
-    globalThis.__PR_TREE_APP__.scheduleSync?.(0);
+  if ((globalThis as any).__PR_TREE_APP__) {
+    (globalThis as any).__PR_TREE_APP__.scheduleSync?.(0);
     return;
   }
 
   // Only run on GitHub.com / Enterprise web UI (not arbitrary HTTPS sites).
   try {
-    const ep = globalThis.PRGithubEndpoints;
+    const ep = (globalThis as any).PRGithubEndpoints;
     if (
       ep &&
       typeof ep.isGithubWebDocument === 'function' &&
@@ -25,7 +25,7 @@
     /* continue — static github.com match still valid */
   }
 
-  const { createPrTreeApp } = globalThis.PRTreeBootstrap;
+  const { createPrTreeApp } = (globalThis as any).PRTreeBootstrap;
   if (typeof createPrTreeApp !== 'function') {
     console.warn('[pr+] PRTreeBootstrap missing');
     return;
@@ -34,13 +34,13 @@
   const app = createPrTreeApp({
     document,
     window,
-    PRTree: globalThis.PRTree,
-    PRTreeDOM: globalThis.PRTreeDOM,
-    PRTreeFetch: globalThis.PRTreeFetch,
-    PRTreeStorage: globalThis.PRTreeStorage,
+    PRTree: (globalThis as any).PRTree,
+    PRTreeDOM: (globalThis as any).PRTreeDOM,
+    PRTreeFetch: (globalThis as any).PRTreeFetch,
+    PRTreeStorage: (globalThis as any).PRTreeStorage,
   });
 
-  globalThis.__PR_TREE_APP__ = app;
+  (globalThis as any).__PR_TREE_APP__ = app;
   try {
     document.documentElement?.setAttribute('data-prp-content', '1');
   } catch {
@@ -51,7 +51,7 @@
 
   async function tokenConfigured() {
     try {
-      const status = await globalThis.PRTreeStorage?.getGithubTokenStatus?.();
+      const status = await (globalThis as any).PRTreeStorage?.getGithubTokenStatus?.();
       return Boolean(status?.configured);
     } catch {
       return false;
@@ -61,7 +61,7 @@
   function disableFeatures() {
     featuresEnabled = false;
     try {
-      globalThis.PRModalHost?.setEnabled?.(false);
+      (globalThis as any).PRModalHost?.setEnabled?.(false);
     } catch {
       /* ignore */
     }
@@ -76,7 +76,7 @@
 
   function isContextDeadError(err: any) {
     const msg = String(err?.message || err || '');
-    const bridge = globalThis.PRTreeBridge;
+    const bridge = (globalThis as any).PRTreeBridge;
     if (typeof bridge?.isExtensionContextAlive === 'function') {
       if (!bridge.isExtensionContextAlive()) return true;
     }
@@ -181,14 +181,14 @@
     try {
       // Skip restore when this tab's content script was orphaned by extension reload
       if (
-        globalThis.PRTreeBridge &&
-        typeof globalThis.PRTreeBridge.isExtensionContextAlive === 'function' &&
-        !globalThis.PRTreeBridge.isExtensionContextAlive()
+        (globalThis as any).PRTreeBridge &&
+        typeof (globalThis as any).PRTreeBridge.isExtensionContextAlive === 'function' &&
+        !(globalThis as any).PRTreeBridge.isExtensionContextAlive()
       ) {
-        showReloadBanner(globalThis.PRTreeBridge.RELOAD_REFRESH_MSG);
+        showReloadBanner((globalThis as any).PRTreeBridge.RELOAD_REFRESH_MSG);
         return { ok: false, reason: 'context-invalidated' };
       }
-      const res = await globalThis.PRModalHost?.tryRestoreOpenModal?.();
+      const res = await (globalThis as any).PRModalHost?.tryRestoreOpenModal?.();
       if (res?.ok) {
         // Diff/centered restored inside modal App via session view key for that PR
         return res;
@@ -200,7 +200,7 @@
     } catch (err) {
       if (isContextDeadError(err)) {
         showReloadBanner(
-          err?.message || globalThis.PRTreeBridge?.RELOAD_REFRESH_MSG
+          err?.message || (globalThis as any).PRTreeBridge?.RELOAD_REFRESH_MSG
         );
         // Expected after chrome://extensions → Reload; not a product bug
         console.info(
@@ -219,12 +219,12 @@
    */
   function warmModalAfterListPaint() {
     try {
-      const warm = globalThis.PRModalHost?.warmUp;
+      const warm = (globalThis as any).PRModalHost?.warmUp;
       if (typeof warm !== 'function') return;
       // Double rAF: after stack indents + browser paint
       window.requestAnimationFrame(() => {
         window.requestAnimationFrame(() => {
-          void warm.call(globalThis.PRModalHost);
+          void warm.call((globalThis as any).PRModalHost);
         });
       });
     } catch {
@@ -234,7 +234,7 @@
 
   async function pluginAllowed() {
     try {
-      const prefs = await globalThis.PRTreeStorage?.getExtensionPrefs?.();
+      const prefs = await (globalThis as any).PRTreeStorage?.getExtensionPrefs?.();
       return prefs?.pluginEnabled !== false;
     } catch {
       return true;
@@ -252,7 +252,7 @@
     }
     featuresEnabled = true;
     try {
-      globalThis.PRModalHost?.setEnabled?.(true);
+      (globalThis as any).PRModalHost?.setEnabled?.(true);
     } catch {
       /* ignore */
     }
@@ -291,7 +291,7 @@
   function listenTokenLifecycle() {
     // Bridge may broadcast TOKEN_CHANGED without the secret
     try {
-      chrome.runtime?.onMessage?.addListener((message) => {
+      chrome.runtime?.onMessage?.addListener((message: any) => {
         if (message?.type === 'PR_TREE_TOKEN_CHANGED') {
           void (async () => {
             const ok = await tokenConfigured();
@@ -320,7 +320,7 @@
     // storage.onChanged in content may not see extension local storage on all
     // browsers — runtime message from SW is primary; also try storage watcher.
     try {
-      globalThis.PRTreeStorage?.watchGithubToken?.((token) => {
+      (globalThis as any).PRTreeStorage?.watchGithubToken?.((token: any) => {
         if (token) void enableFeatures();
         else disableFeatures();
       });
@@ -328,7 +328,7 @@
       /* ignore */
     }
     try {
-      globalThis.PRTreeStorage?.watchExtensionPrefs?.((prefs) => {
+      (globalThis as any).PRTreeStorage?.watchExtensionPrefs?.((prefs: any) => {
         if (prefs?.pluginEnabled === false) disableFeatures();
         else void enableFeatures();
       });
@@ -350,7 +350,7 @@
   }
 
   // ── First-run onboarding (pulls page, top-right) ─────────────────────
-  let onboardingTour = null;
+  let onboardingTour: any = null;
 
   function isPullsListPath(pathname = window.location.pathname) {
     const path = String(pathname || '');
@@ -369,12 +369,12 @@
         onboardingTour = null;
         return;
       }
-      const api = globalThis.PROnboarding;
+      const api = (globalThis as any).PROnboarding;
       if (!api || typeof api.createOnboardingTour !== 'function') return;
       if (onboardingTour) return;
 
-      const storage = globalThis.PRTreeStorage;
-      const bridgeSend = async (message) => {
+      const storage = (globalThis as any).PRTreeStorage;
+      const bridgeSend = async (message: any) => {
         const chromeApi = (globalThis as any).chrome;
         if (!chromeApi?.runtime?.sendMessage) {
           throw new Error('chrome.runtime unavailable');
@@ -423,7 +423,7 @@
               resolve(null);
               return;
             }
-            area.get([ONBOARDING_KEY, 'extensionPrefs'], (result) => {
+            area.get([ONBOARDING_KEY, 'extensionPrefs'], (result: any) => {
               if (typeof result?.[ONBOARDING_KEY] === 'boolean') {
                 resolve(Boolean(result[ONBOARDING_KEY]));
                 return;
@@ -439,7 +439,7 @@
             resolve(null);
           }
         });
-      const writeOnboardingLocal = (completed) =>
+      const writeOnboardingLocal = (completed: any) =>
         new Promise((resolve) => {
           try {
             const area = chromeApi()?.storage?.local;
@@ -447,7 +447,7 @@
               resolve(false);
               return;
             }
-            area.get(['extensionPrefs'], (cur) => {
+            area.get(['extensionPrefs'], (cur: any) => {
               const prev =
                 cur?.extensionPrefs && typeof cur.extensionPrefs === 'object'
                   ? cur.extensionPrefs
@@ -527,7 +527,7 @@
         getTokenStatus: () =>
           storage?.getGithubTokenStatus?.() ||
           Promise.resolve({ configured: false, mask: '' }),
-        setToken: async (token) => {
+        setToken: async (token: any) => {
           const res = await bridgeSend({
             type: 'PR_TREE_TOKEN_SET',
             token: String(token || ''),
@@ -579,7 +579,7 @@
 
     // Popup "Start onboarding" — clear flag already done; remount tour
     try {
-      chrome.runtime?.onMessage?.addListener((message) => {
+      chrome.runtime?.onMessage?.addListener((message: any) => {
         if (message?.type !== 'PR_TREE_ONBOARDING_RESTART') return false;
         try {
           onboardingTour?.dispose?.();
@@ -596,7 +596,7 @@
   }
 
   // Expose for tests / host coordination
-  globalThis.__PR_PLUS_CONTENT__ = {
+  (globalThis as any).__PR_PLUS_CONTENT__ = {
     enableFeatures,
     disableFeatures,
     isEnabled: () => featuresEnabled,

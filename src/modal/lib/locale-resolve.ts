@@ -180,7 +180,7 @@ export function extractGithubLocaleSignals(
   let jsonLocale: string | null = null;
   try {
     // Prefer small next/bootstrap blobs when present; else skip full scan.
-    const scripts =
+    const scripts: any =
       typeof doc.querySelectorAll === 'function'
         ? doc.querySelectorAll(
             'script[type="application/json"], script[data-target], script#__NEXT_DATA__'

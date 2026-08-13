@@ -7,11 +7,11 @@
 export const LAYOUT_CENTERED = 'centered';
 export const LAYOUT_DIFF = 'diff';
 
-export function isValidLayoutMode(mode) {
+export function isValidLayoutMode(mode: any) {
   return mode === LAYOUT_CENTERED || mode === LAYOUT_DIFF;
 }
 
-export function toggleDiffLayout(mode) {
+export function toggleDiffLayout(mode: any) {
   return mode === LAYOUT_DIFF ? LAYOUT_CENTERED : LAYOUT_DIFF;
 }
 
@@ -23,7 +23,7 @@ export function closeDiffLayout() {
   return LAYOUT_CENTERED;
 }
 
-export function layoutClassName(mode) {
+export function layoutClassName(mode: any) {
   if (mode === LAYOUT_DIFF) {
     return 'prp-modal prp-modal--diff';
   }
@@ -41,7 +41,7 @@ export function layoutClassName(mode) {
  * @param {any} detail
  * @returns {boolean}
  */
-export function isDiffUnavailable(detail) {
+export function isDiffUnavailable(detail: any) {
   if (!detail || typeof detail !== 'object') return false;
   const cf = detail.changedFiles;
   if (cf != null && cf !== '') {

@@ -3,7 +3,7 @@
 // only when the tab is visible and the user was active in the last 10 minutes.
 
   /** @type {ReturnType<typeof setInterval>|null} */
-  let autoRefreshTimer = null;
+  let autoRefreshTimer: any = null;
   let autoRefreshListenersInstalled = false;
   let autoRefreshLastActionAt = Date.now();
   let autoRefreshProbeInFlight = false;
@@ -11,7 +11,7 @@
   let autoRefreshRevalidating = false;
 
   function autoRefreshApi() {
-    return globalThis.PRModalAutoRefresh || null;
+    return (globalThis as any).PRModalAutoRefresh || null;
   }
 
   function autoRefreshIdleMs() {
@@ -76,7 +76,7 @@
     return true;
   }
 
-  function headProbeIndicatesStale(baseline, next) {
+  function headProbeIndicatesStale(baseline: any, next: any) {
     const api = autoRefreshApi();
     if (typeof api?.headProbeIndicatesStale === 'function') {
       return Boolean(api.headProbeIndicatesStale(baseline, next));
@@ -101,7 +101,7 @@
     // Allow probe when SHA missing if we still have lifecycle fields to compare
     if (!baseline && detail?.state == null && detail?.draft == null) return;
 
-    const api = globalThis.PRTreeFetch;
+    const api = (globalThis as any).PRTreeFetch;
     if (typeof api?.fetchPrHeadProbe !== 'function') return;
 
     autoRefreshProbeInFlight = true;

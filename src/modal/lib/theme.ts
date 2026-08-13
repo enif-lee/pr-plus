@@ -8,7 +8,7 @@
  * @param {{ matchMedia?: Function }|null} [win]
  * @returns {{ mode: 'light'|'dark', className: string, colorMode: string }}
  */
-export function resolveGithubTheme(doc, win) {
+export function resolveGithubTheme(doc: any, win: any) {
   const html = doc?.documentElement;
   const body = doc?.body;
   const attr =

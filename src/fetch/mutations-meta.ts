@@ -269,13 +269,13 @@ export async function editReviewComment(
 }
 
 export async function requestReviewers(
-  owner,
-  repo,
-  pullNumber,
-  { reviewers = [], teamReviewers = [] },
-  fetchImpl,
-  token
-, ctx = null) {
+  owner: any,
+  repo: any,
+  pullNumber: any,
+  { reviewers = [], teamReviewers = [] }: any,
+  fetchImpl: any,
+  token: any
+, ctx: any = null) {
   ctx = normalizeApiCtx(ctx);
   return apiSend(
     githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/requested_reviewers`, ctx),
@@ -289,13 +289,13 @@ export async function requestReviewers(
 }
 
 export async function removeReviewers(
-  owner,
-  repo,
-  pullNumber,
-  { reviewers = [], teamReviewers = [] },
-  fetchImpl,
-  token
-, ctx = null) {
+  owner: any,
+  repo: any,
+  pullNumber: any,
+  { reviewers = [], teamReviewers = [] }: any,
+  fetchImpl: any,
+  token: any
+, ctx: any = null) {
   ctx = normalizeApiCtx(ctx);
   return apiSend(
     githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}/requested_reviewers`, ctx),
@@ -343,7 +343,7 @@ export async function setIssueLabels(owner: any, repo: any, issueNumber: any, la
  * Paginates up to maxPages × 100.
  * @returns {Promise<Array<{ name: string, color: string, description: string }>>}
  */
-export async function fetchRepoLabels(owner, repo, fetchImpl, token = null, opts: any = {}) {
+export async function fetchRepoLabels(owner: any, repo: any, fetchImpl: any, token: any = null, opts: any = {}) {
   const ctx = normalizeApiCtx(opts?.ctx);
   const perPage = 100;
   const maxPages = Math.max(1, Math.min(10, Number(opts.maxPages) || 5));
@@ -395,12 +395,12 @@ export function defaultNewLabelColor(name: any) {
  * @returns {Promise<{ name: string, color: string, description: string }>}
  */
 export async function createRepoLabel(
-  owner,
-  repo,
+  owner: any,
+  repo: any,
   { name, color, description }: { name?: string; color?: string; description?: string } = {},
-  fetchImpl,
-  token
-, ctx = null) {
+  fetchImpl: any,
+  token: any
+, ctx: any = null) {
   ctx = normalizeApiCtx(ctx);
   const rawName = String(name || '').trim();
   if (!rawName) throw new Error('Label name is required');
@@ -430,7 +430,7 @@ export async function createRepoLabel(
  * List repository milestones (open + closed, limited pages).
  * @returns {Promise<Array<{ number: number, title: string, state: string, description: string }>>}
  */
-export async function fetchRepoMilestones(owner, repo, fetchImpl, token = null, opts: any = {}) {
+export async function fetchRepoMilestones(owner: any, repo: any, fetchImpl: any, token: any = null, opts: any = {}) {
   const ctx = normalizeApiCtx(opts?.ctx);
   const perPage = 100;
   const maxPages = Math.max(1, Math.min(10, Number(opts.maxPages) || 5));
@@ -463,12 +463,12 @@ export async function fetchRepoMilestones(owner, repo, fetchImpl, token = null, 
  * @returns {Promise<{ number: number, title: string, state: string, description: string }>}
  */
 export async function createRepoMilestone(
-  owner,
-  repo,
+  owner: any,
+  repo: any,
   { title, description, state }: { title?: string; description?: string; state?: string } = {},
-  fetchImpl,
-  token
-, ctx = null) {
+  fetchImpl: any,
+  token: any
+, ctx: any = null) {
   ctx = normalizeApiCtx(ctx);
   const rawTitle = String(title || '').trim();
   if (!rawTitle) throw new Error('Milestone title is required');
@@ -493,7 +493,7 @@ export async function createRepoMilestone(
  * List repository tags (paginated). Used to surface tags related to a PR head/commits.
  * @returns {Promise<Array<{ name: string, sha: string, zipballUrl?: string, tarballUrl?: string }>>}
  */
-export async function fetchRepoTags(owner, repo, fetchImpl, token = null, opts: any = {}) {
+export async function fetchRepoTags(owner: any, repo: any, fetchImpl: any, token: any = null, opts: any = {}) {
   const ctx = normalizeApiCtx(opts?.ctx);
   const perPage = 100;
   const maxPages = Math.max(1, Math.min(20, Number(opts.maxPages) || 10));
@@ -526,16 +526,16 @@ export async function fetchRepoTags(owner, repo, fetchImpl, token = null, opts: 
  * @returns {Promise<Array<{ name: string, sha: string }>>}
  */
 export async function fetchTagsForCommits(
-  owner,
-  repo,
-  shas,
-  fetchImpl,
-  token = null,
+  owner: any,
+  repo: any,
+  shas: any,
+  fetchImpl: any,
+  token: any = null,
   opts: any = {}
 ) {
   const want = new Set(
     (shas || [])
-      .map((s) => String(s || '').trim().toLowerCase())
+      .map((s: any) => String(s || '').trim().toLowerCase())
       .filter(Boolean)
   );
   if (!want.size) return [];
@@ -548,17 +548,17 @@ export async function fetchTagsForCommits(
  * @param {{ path: string, headRef: string, startLine: number, endLine: number, suggestion: string, message?: string }} opts
  */
 export async function mergePullRequest(
-  owner,
-  repo,
-  pullNumber,
+  owner: any,
+  repo: any,
+  pullNumber: any,
   {
     mergeMethod = 'merge',
     commitTitle,
     commitMessage,
   }: { mergeMethod?: string; commitTitle?: string; commitMessage?: string } = {},
-  fetchImpl,
-  token
-, ctx = null) {
+  fetchImpl: any,
+  token: any
+, ctx: any = null) {
   ctx = normalizeApiCtx(ctx);
   const body: any = { merge_method: mergeMethod };
   if (commitTitle != null) body.commit_title = String(commitTitle);
@@ -572,13 +572,13 @@ export async function mergePullRequest(
 }
 
 export async function updatePullBranch(
-  owner,
-  repo,
-  pullNumber,
+  owner: any,
+  repo: any,
+  pullNumber: any,
   { expectedHeadSha }: { expectedHeadSha?: string } = {},
-  fetchImpl,
-  token
-, ctx = null) {
+  fetchImpl: any,
+  token: any
+, ctx: any = null) {
   ctx = normalizeApiCtx(ctx);
   const body: any = {};
   if (expectedHeadSha) body.expected_head_sha = String(expectedHeadSha);
@@ -595,12 +595,12 @@ export async function updatePullBranch(
  * Used post-merge optional "Delete branch".
  */
 export async function deleteHeadBranch(
-  owner,
-  repo,
-  branch,
-  fetchImpl,
-  token,
-  ctx = null
+  owner: any,
+  repo: any,
+  branch: any,
+  fetchImpl: any,
+  token: any,
+  ctx: any = null
 ) {
   ctx = normalizeApiCtx(ctx);
   const b = String(branch || '')
@@ -660,7 +660,7 @@ export async function setPullRequestDraftStage(owner: any, repo: any, pullNumber
   let buildFn = null;
   try {
     let mod =
-      typeof globalThis !== 'undefined' ? globalThis.PRModalPrEditApi : null;
+      typeof globalThis !== 'undefined' ? (globalThis as any).PRModalPrEditApi : null;
     if (!mod && typeof require === 'function') {
       try {
         mod = require('./modal/pure/pr-edit-api.js');
@@ -687,7 +687,7 @@ export async function setPullRequestDraftStage(owner: any, repo: any, pullNumber
   let parseFn = null;
   try {
     let mod =
-      typeof globalThis !== 'undefined' ? globalThis.PRModalPrEditApi : null;
+      typeof globalThis !== 'undefined' ? (globalThis as any).PRModalPrEditApi : null;
     if (!mod && typeof require === 'function') {
       try {
         mod = require('./modal/pure/pr-edit-api.js');

@@ -506,18 +506,18 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
           onHideComment={onHideComment}
           onUnhideComment={onUnhideComment}
           onEditReviewComment={onStartEditReviewComment}
-          onSaveEditReviewComment={(id, body) =>
+          onSaveEditReviewComment={(id: any, body: any) =>
             onSaveEditComment('review', id, body)
           }
           onCancelEditReviewComment={() => setEditingComment(null)}
           editingCommentId={
             editingComment?.kind === 'review' ? editingComment.id : null
           }
-          onRegisterEditorSave={(fn) => {
+          onRegisterEditorSave={(fn: any) => {
             editorSaveRef.current = fn;
           }}
           onApplySuggestion={onApplySuggestion}
-          onRegisterApply={(fn) => {
+          onRegisterApply={(fn: any) => {
             applyActionRef.current = fn;
           }}
           actionBusy={actionBusy}

@@ -9,8 +9,8 @@
  * @param {string} patch
  * @returns {Array<{ oldLine: number|null, newLine: number|null, type: string, text: string }>}
  */
-export function parsePatchLines(patch) {
-  const out = [];
+export function parsePatchLines(patch: any) {
+  const out: any[] = [];
   if (!patch || typeof patch !== 'string') return out;
   let oldLine = 0;
   let newLine = 0;
@@ -51,7 +51,7 @@ export function parsePatchLines(patch) {
  * @param {{ context?: number }} [opts]
  * @returns {{ lines: Array, startLine: number|null, endLine: number|null, side?: string }|null}
  */
-export function extractDiffSnippet(patch, anchor, opts: any = {}) {
+export function extractDiffSnippet(patch: any, anchor: any, opts: any = {}) {
   const lines = parsePatchLines(patch);
   if (!lines.length || !anchor || anchor.line == null) return null;
   const side = (anchor.side || 'RIGHT').toUpperCase();
@@ -111,7 +111,7 @@ export function extractDiffSnippet(patch, anchor, opts: any = {}) {
  * @param {{ line?: number|null, startLine?: number|null, originalLine?: number|null, side?: string }} [anchor]
  * @param {{ context?: number, maxLines?: number }} [opts]
  */
-export function snippetFromDiffHunk(diffHunk, anchor: any = {}, opts: any = {}) {
+export function snippetFromDiffHunk(diffHunk: any, anchor: any = {}, opts: any = {}) {
   if (!diffHunk || typeof diffHunk !== 'string') return null;
   const lines = parsePatchLines(diffHunk);
   if (!lines.length) return null;
@@ -180,7 +180,7 @@ export function snippetFromDiffHunk(diffHunk, anchor: any = {}, opts: any = {}) 
  * @param {object} comment { path, line, startLine, side, originalLine, diffHunk }
  * @param {Array<{ filename?: string, path?: string, patch?: string }>} files
  */
-export function snippetForComment(comment, files) {
+export function snippetForComment(comment: any, files: any) {
   if (!comment) return null;
   const path = comment.path || '';
   const line =

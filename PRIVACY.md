@@ -1,10 +1,10 @@
 # Privacy Policy for pr+
 
-**Last updated:** 2026-07-21
+**Last updated:** 2026-08-13
 
 This Privacy Policy describes how the **pr+** Chrome extension (“the Extension”, “we”, “us”) handles information when you install and use it.
 
-pr+ enhances the GitHub pull request list by showing stacked pull requests as a tree and adding branch, review, and related metadata badges. The Extension is designed so that sensitive credentials stay on your device and are used only to talk to GitHub.
+pr+ is an in-page GitHub pull request shell: a stack tree on `/pulls`, plus Conversation, Diff, and merge surfaces in a modal or embed. The Extension is designed so that sensitive credentials stay on your device and are used only to talk to GitHub.
 
 ---
 
@@ -22,10 +22,11 @@ For privacy questions or data-deletion requests related to the Extension, contac
 
 ### 2.1 Information from GitHub pages you open
 
-When you visit a GitHub pull request list page (for example `https://github.com/{owner}/{repo}/pulls`), the Extension may read **page content in the browser** (such as PR row markup and related UI text) solely to:
+When you visit a GitHub pull request list or an individual pull request (for example `https://github.com/{owner}/{repo}/pulls` or `/pull/{n}`), the Extension may read **page content in the browser** (such as PR row markup and related UI text) solely to:
 
 - reorder and indent rows into a stack tree  
-- rebuild the secondary metadata line (PR number, author, relative time, draft/review badges, branch chips, optional magic links)
+- rebuild the secondary metadata line (PR number, author, relative time, draft/review badges, branch chips, optional magic links)  
+- open the Conversation, Diff, and merge shell (timeline, review threads, file diffs, merge box)
 
 This processing happens **locally in your browser**.
 
@@ -56,14 +57,14 @@ We do **not** operate a first-party analytics backend that tracks your usage of 
 
 We use the information described above only to provide the Extension’s **single purpose**:
 
-> Improve the GitHub pull request list by visualizing stacked PRs and showing related metadata.
+> Review GitHub pull requests in-page: stacked PR list, Conversation, Diff, and merge.
 
 Specifically:
 
 | Use | Purpose |
 |-----|---------|
-| Read PR list DOM | Render stack tree and metadata badges |
-| Call `api.github.com` | Fetch open PR metadata (and optional autolinks) |
+| Read PR list / PR page DOM | Render stack tree, metadata badges, and the in-page shell |
+| Call `api.github.com` | Fetch and update PR conversation, review threads, diffs, checks, and merge state (and optional autolinks) |
 | Store optional PAT | Authenticate those GitHub API requests when you enable private-repo support |
 
 We do **not** use this data for:
@@ -158,9 +159,9 @@ We may update this Privacy Policy from time to time. The **Last updated** date a
 
 For Chrome Web Store privacy practices:
 
-- **Single purpose:** GitHub pull request list stack-tree and metadata enhancement only.  
+- **Single purpose:** GitHub pull request review — list stack-tree plus Conversation, Diff, and merge processing.  
 - **Remote code:** Not used; all extension code is packaged locally.  
-- **Host permissions:** `github.com` for UI enhancement; `api.github.com` for PR metadata.  
+- **Host permissions:** `github.com` for UI enhancement; `api.github.com` for PR conversation, diff, and merge APIs. Optional HTTPS hosts for GitHub Enterprise.  
 - **storage permission:** Optional local PAT storage for private-repo API access.  
 
 ---

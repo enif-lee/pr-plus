@@ -33,13 +33,13 @@ import { partitionConversationLoadMore } from './timeline-pagination';
  * @param {object} ev normalized event from fetchPrTimelineEvents
  * @returns {TimelinePart[]|null} null when the event should not be shown
  */
-export function buildThreadEntry(c, children, snippetFn, files, viewerLogin, i) {
+export function buildThreadEntry(c: any, children: any, snippetFn: any, files: any, viewerLogin: any, i: any) {
   const replies = (children.get(String(c.id)) || [])
     .slice()
-    .sort((a, b) =>
+    .sort((a: any, b: any) =>
       String(a.createdAt || '').localeCompare(String(b.createdAt || ''))
     )
-    .map((r) => ({
+    .map((r: any) => ({
       id: r.id,
       author: r.author,
       avatarUrl: r.avatarUrl || null,
@@ -155,15 +155,15 @@ export function compareTimelineItemsNewestFirst(a: any, b: any): number {
  * @param {{ snippetForComment?: Function }} [opts]
  * @returns {Array}
  */
-export function buildConversationTimeline(detail, opts: any = {}) {
+export function buildConversationTimeline(detail: any, opts: any = {}) {
   if (!detail) return [];
   const items = [];
   const snippetFn =
     typeof opts.snippetForComment === 'function'
       ? opts.snippetForComment
       : typeof globalThis !== 'undefined' &&
-          globalThis.PRModalDiffSnippet?.snippetForComment
-        ? globalThis.PRModalDiffSnippet.snippetForComment
+          (globalThis as any).PRModalDiffSnippet?.snippetForComment
+        ? (globalThis as any).PRModalDiffSnippet.snippetForComment
         : null;
   const files = detail.files || [];
   const viewerLogin = detail.viewerLogin;
@@ -191,7 +191,7 @@ export function buildConversationTimeline(detail, opts: any = {}) {
       : null;
 
   // Issue comments stay flat
-  (detail.comments || []).forEach((c, i) => {
+  (detail.comments || []).forEach((c: any, i: any) => {
     items.push({
       key: `c-${c.id || i}`,
       kind: 'issue-comment',
@@ -270,7 +270,7 @@ export function buildConversationTimeline(detail, opts: any = {}) {
     const review = reviewById.get(rid);
     const reviewBody = String(review?.body || '').trim();
     const anyPending =
-      threads.some((t) => t.pending) ||
+      threads.some((t: any) => t.pending) ||
       String(review?.state || '').toUpperCase() === 'PENDING' ||
       rid === 'viewer-pending' ||
       (viewerPendingId != null && rid === viewerPendingId);
@@ -282,7 +282,7 @@ export function buildConversationTimeline(detail, opts: any = {}) {
     // review-thread cards are only for true orphans (no reviewId/pending key).
     const shouldGroup = threads.length >= 1;
 
-    threads.sort((a, b) => {
+    threads.sort((a: any, b: any) => {
       const pa = a.path || '';
       const pb = b.path || '';
       if (pa !== pb) return pa.localeCompare(pb);
@@ -292,7 +292,7 @@ export function buildConversationTimeline(detail, opts: any = {}) {
     if (shouldGroup) {
       usedReviewIds.add(rid);
       const latestThreadAt = threads.reduce(
-        (max, t) => (String(t.at || '') > max ? String(t.at || '') : max),
+        (max: any, t: any) => (String(t.at || '') > max ? String(t.at || '') : max),
         ''
       );
       const at =
@@ -322,7 +322,7 @@ export function buildConversationTimeline(detail, opts: any = {}) {
         pending: anyPending,
         threads,
         threadCount: threads.length,
-        resolvedCount: threads.filter((t) => t.resolved).length,
+        resolvedCount: threads.filter((t: any) => t.resolved).length,
         canDelete: false,
       });
     } else {
@@ -331,7 +331,7 @@ export function buildConversationTimeline(detail, opts: any = {}) {
   }
 
   // Standalone review events (no grouped threads, or body-only approvals)
-  (detail.reviews || []).forEach((r, i) => {
+  (detail.reviews || []).forEach((r: any, i: any) => {
     if (r?.id != null && usedReviewIds.has(String(r.id))) return;
     if (!r.body && (!r.state || r.state === 'COMMENTED' || r.state === 'PENDING')) {
       return;
@@ -361,7 +361,7 @@ export function buildConversationTimeline(detail, opts: any = {}) {
   const events = Array.isArray(detail.timelineEvents)
     ? detail.timelineEvents
     : [];
-  events.forEach((ev, i) => {
+  events.forEach((ev: any, i: any) => {
     const item = timelineEventToItem(ev, i);
     if (item) items.push(item);
   });
@@ -376,7 +376,7 @@ export function buildConversationTimeline(detail, opts: any = {}) {
  * @param {Array} items
  * @param {{ page?: number, pageSize?: number }} opts
  */
-export function pageTimelineItems(items, opts: any = {}) {
+export function pageTimelineItems(items: any, opts: any = {}) {
   const list = Array.isArray(items) ? items : [];
   const pageSize =
     Number.isFinite(opts.pageSize) && opts.pageSize > 0
@@ -415,7 +415,7 @@ export function pageTimelineItems(items, opts: any = {}) {
  * @param {object|null} timelineMeta detail.timelineMeta
  */
 export function partitionTimelineWithThreadGap(
-  items,
+  items: any,
   threadsMeta: any = null,
   timelineMeta: any = null
 ) {

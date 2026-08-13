@@ -6,7 +6,7 @@
     if (current.open) return { ok: true, reason: 'already-open' };
 
     // Extension reload leaves orphan content scripts; restore needs a tab refresh
-    const bridge = globalThis.PRTreeBridge;
+    const bridge = (globalThis as any).PRTreeBridge;
     if (
       typeof bridge?.isExtensionContextAlive === 'function' &&
       !bridge.isExtensionContextAlive()
@@ -28,11 +28,11 @@
 
     const sess = sessionApi();
     const uri = uriApi();
-    let sessionOpen = null;
+    let sessionOpen: any = null;
     if (typeof sessionStorage !== 'undefined' && sess?.loadOpenModal) {
       sessionOpen = sess.loadOpenModal(sessionStorage);
     }
-    let sessionView = null;
+    let sessionView: any = null;
     if (
       sessionOpen &&
       typeof sessionStorage !== 'undefined' &&
@@ -300,7 +300,7 @@
     }
   }
 
-  function setEnabled(enabled) {
+  function setEnabled(enabled: any) {
     hostEnabled = Boolean(enabled);
     if (!hostEnabled) {
       // Tear down modal + stop intercepting so GitHub is fully native
@@ -362,7 +362,7 @@
       });
   }
 
-  function parsePrFromAnchor(anchor) {
+  function parsePrFromAnchor(anchor: any) {
     if (!anchor || !anchor.getAttribute) return null;
     const href = anchor.getAttribute('href') || '';
     const m = href.match(/\/?([^/]+)\/([^/]+)\/pull\/(\d+)(?:\/|$|\?|#)/);
@@ -378,15 +378,15 @@
    * Keyboard focus on the native PR list (⌥J / ⌥K + Enter).
    * Tracks by PR number so tree reorder does not lose the selection.
    */
-  let listFocusNumber = null;
+  let listFocusNumber: any = null;
   let listFocusKeyBound = false;
 
   function listFocusApi() {
-    return globalThis.PRListFocus || null;
+    return (globalThis as any).PRListFocus || null;
   }
 
   function listDomApi() {
-    return globalThis.PRTreeDOM || null;
+    return (globalThis as any).PRTreeDOM || null;
   }
 
   function getPullsListRows() {
@@ -401,7 +401,7 @@
     return [];
   }
 
-  function getRowPrNumber(row) {
+  function getRowPrNumber(row: any) {
     const dom = listDomApi();
     if (typeof dom?.getPrNumberFromRow === 'function') {
       try {
@@ -441,13 +441,13 @@
       });
     }
     if (listFocusNumber != null) {
-      const byNum = rows.findIndex((r) => getRowPrNumber(r) === listFocusNumber);
+      const byNum = rows.findIndex((r: any) => getRowPrNumber(r) === listFocusNumber);
       if (byNum >= 0) return byNum;
     }
-    return rows.findIndex((r) => r?.classList?.contains?.('prp-list-focus'));
+    return rows.findIndex((r: any) => r?.classList?.contains?.('prp-list-focus'));
   }
 
-  function applyPullsListFocus(index) {
+  function applyPullsListFocus(index: any) {
     const api = listFocusApi();
     const rows = getPullsListRows();
     const row = api?.applyFocusToRows
@@ -485,7 +485,7 @@
     return row;
   }
 
-  function parsePrFromListRow(row) {
+  function parsePrFromListRow(row: any) {
     if (!row) return null;
     const links = row.querySelectorAll?.(
       'a[href*="/pull/"], a.js-navigation-open, a[id$="_link"], h3 a'

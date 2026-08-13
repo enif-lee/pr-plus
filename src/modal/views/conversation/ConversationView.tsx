@@ -425,7 +425,7 @@ function ConversationViewImpl(props: any) {
     return [];
     // timelineEventsKey forces recompute when only system events change
     // (host may reuse a detail object shell with a new timelineEvents array).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // hooks: deps are intentional for this host/session subscription
   }, [detail, timelineEventsKey]);
 
   /** Pending review-group is embedded in the Review submit form (not the timeline). */
@@ -578,7 +578,7 @@ function ConversationViewImpl(props: any) {
         Boolean(cm?.hasMore);
       return {
         top: timelineItems,
-        bottom: [],
+        bottom: [] as any[],
         hiddenCount: 0,
         showGap: hasMore,
         gapPlacement: hasMore ? 'end' : 'none',
@@ -949,7 +949,7 @@ function ConversationViewImpl(props: any) {
           aria-label="Copy comment text"
           data-prp-copy-comment="1"
           data-prp-comment-id={id != null ? String(id) : undefined}
-          onClick={() => void copyCommentBody(body, id)}
+          onClick={(): any => void copyCommentBody(body, id)}
         >
           <IconCopy size={13} />
         </CommentActionIconBtn>
@@ -962,7 +962,7 @@ function ConversationViewImpl(props: any) {
             aria-label="Copy link to comment"
             data-prp-copy-comment-link="1"
             data-prp-comment-id={id != null ? String(id) : undefined}
-            onClick={() => void copyCommentLink(id, shareKind)}
+            onClick={(): any => void copyCommentLink(id, shareKind)}
           >
             <IconLink size={13} />
           </CommentActionIconBtn>
@@ -1555,7 +1555,7 @@ function ConversationViewImpl(props: any) {
       });
     },
     // findTimelineThreadById closes over timelineItems
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // hooks: deps are intentional for this host/session subscription
     [timelineItems]
   );
 
@@ -1699,7 +1699,7 @@ function ConversationViewImpl(props: any) {
       onRegisterContextThreadActions(null);
     };
     // Closures use latest timeline / handlers; drafts read via getState()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // hooks: deps are intentional for this host/session subscription
   }, [
     onRegisterContextThreadActions,
     layoutModeLive,
@@ -2535,7 +2535,7 @@ function ConversationViewImpl(props: any) {
       }
       return isReviewThreadCollapsed(found.thread);
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // hooks: deps are intentional for this host/session subscription
     [timelineItems, groupThreadOpenOverrides, threadCollapseOverrides]
   );
 

@@ -29,13 +29,13 @@ import {
 import { fetchReviewThreadsByIds } from './review-threads-bulk';
 
 export async function restReviewThreadsFallbackPage(
-  owner,
-  repo,
-  pullNumber,
-  direction,
-  fetchImpl,
-  token,
-  ctx,
+  owner: any,
+  repo: any,
+  pullNumber: any,
+  direction: any,
+  fetchImpl: any,
+  token: any,
+  ctx: any,
   opts: any = {}
 ) {
   const empty = buildRestReviewThreadsPageFromCommentsLocal([], direction);
@@ -130,9 +130,9 @@ export async function restReviewThreadsFallbackPage(
 }
 
 export async function fetchReviewThreadsPage(
-  owner,
-  repo,
-  pullNumber,
+  owner: any,
+  repo: any,
+  pullNumber: any,
   {
     direction = 'newest',
     cursor = null,
@@ -150,23 +150,23 @@ export async function fetchReviewThreadsPage(
      */
     skipEagerComments = false,
   }: any = {},
-  fetchImpl,
-  token,
-  ctx = null
+  fetchImpl: any,
+  token: any,
+  ctx: any = null
 ) {
   ctx = normalizeApiCtx(ctx);
   const empty = {
-    threads: [],
-    comments: [],
+    threads: [] as any[],
+    comments: [] as any[],
     hasMore: false,
-    endCursor: null,
-    startCursor: null,
+    endCursor: null as any,
+    startCursor: null as any,
     hasNextPage: false,
     hasPreviousPage: false,
-    totalCount: null,
+    totalCount: null as any,
     pageCount: 0,
     direction,
-    source: null,
+    source: null as any,
   };
   const n = Number(pullNumber);
   if (!Number.isFinite(n)) return empty;

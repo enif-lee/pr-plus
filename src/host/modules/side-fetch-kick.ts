@@ -5,7 +5,7 @@
    * legitimately patchless entries). Slim IDB rows use `_patchOmitted`.
    * Host pure global may lag rebuild — keep this inline for settle gates.
    */
-  function filesSnapshotHasUsableDiffBodies(files) {
+  function filesSnapshotHasUsableDiffBodies(files: any) {
     if (!Array.isArray(files) || files.length === 0) return false;
     let missingRequired = false;
     for (const f of files) {
@@ -36,22 +36,13 @@
     return !missingRequired;
   }
 
-  function kickIndependentSideFetches({
-    owner,
-    repo,
-    number,
-    headSha = null,
-    body = '',
-    gen,
-    stillOpenFn = null,
-    signal = null,
-  }) {
+  function kickIndependentSideFetches({ owner, repo, number, headSha = null, body = '', gen, stillOpenFn = null, signal = null }: any) {
     const alive = () => {
       if (gen != null && gen !== detailFetchGen) return false;
       if (typeof stillOpenFn === 'function' && !stillOpenFn()) return false;
       return Boolean(current.open);
     };
-    const settleSide = (key, partial) => {
+    const settleSide = (key: any, partial: any) => {
       if (!alive()) return;
       let applied = false;
       if (partial && typeof partial === 'object') {
@@ -86,7 +77,7 @@
         `[pr-plus] side-fetch ${key} ${owner}/${repo}#${number} painted`
       );
     };
-    const failSide = (key, err) => {
+    const failSide = (key: any, err: any) => {
       if (
         err?.name === 'AbortError' ||
         /aborted|AbortError/i.test(String(err?.message || ''))
@@ -106,11 +97,11 @@
       }
     };
     /** Credit progress when a panel is skipped (no API / no headSha). */
-    const creditSide = (key) => {
+    const creditSide = (key: any) => {
       markSideProgress(key);
     };
 
-    const api = globalThis.PRTreeFetch;
+    const api = (globalThis as any).PRTreeFetch;
     if (!api) {
       for (const k of [
         'files',
@@ -138,14 +129,14 @@
       current._sideKickGen = gen;
     }
     const started = current._sideKickStarted;
-    const claim = (key) => {
+    const claim = (key: any) => {
       if (started.has(key)) return false;
       started.add(key);
       return true;
     };
 
     // Mark pending only when panel has no settled cache — revalidate keeps content
-    const markPendingIfNeeded = (key, cond = true) => {
+    const markPendingIfNeeded = (key: any, cond = true) => {
       if (cond && !current.sideSettled?.[key]) {
         setSideFlag(key, { pending: true }, { render: true });
       }
@@ -159,7 +150,7 @@
     let developmentP = Promise.resolve(null);
 
     const tl = getFetchTimeline();
-    const wrap = (name, p, meta: any = undefined) =>
+    const wrap = (name: any, p: any, meta: any = undefined) =>
       tl && typeof tl.span === 'function' ? tl.span(name, p, meta) : p;
 
     // Files list is deferred: conversation aside / Diff first-need owns the
@@ -462,7 +453,7 @@
                 typeof api.fetchPrIssueComments === 'function'
                   ? api
                       .fetchPrIssueComments(owner, repo, number, { signal })
-                      .catch((err: any) => {
+                      .catch((err: any): any => {
                         if (
                           err?.name === 'AbortError' ||
                           /aborted|AbortError/i.test(
@@ -703,7 +694,7 @@
             typeof api.fetchPrTimelineEvents === 'function'
               ? api
                   .fetchPrTimelineEvents(owner, repo, number, { signal })
-                  .catch((err: any) => {
+                  .catch((err: any): any => {
                     if (
                       err?.name === 'AbortError' ||
                       /aborted|AbortError/i.test(String(err?.message || ''))
@@ -768,18 +759,18 @@
               'side.reviews',
               api
                 .fetchPrReviews(owner, repo, number, { signal })
-                .then((reviews) => {
+                .then((reviews: any) => {
                   settleSide('reviews', {
                     reviews: Array.isArray(reviews) ? reviews : [],
                   });
                   return reviews;
                 })
-                .catch((err) => {
+                .catch((err: any): any => {
                   failSide('reviews', err);
                   return null;
                 })
             )
-          : Promise.resolve(null).then(() => {
+          : Promise.resolve(null).then((): any => {
               if (alive() && !current.sideSettled?.reviews) {
                 setSideFlag('reviews', { pending: false, settled: true });
               }
@@ -848,7 +839,7 @@
               'side.checks',
               api
                 .fetchPrChecks(owner, repo, headSha, { signal })
-                .then((checks) => {
+                .then((checks: any) => {
                   settleSide('checks', {
                     checks: checks || {
                       state: 'unknown',
@@ -859,13 +850,13 @@
                   });
                   return checks;
                 })
-                .catch((err) => {
+                .catch((err: any): any => {
                   failSide('checks', err);
                   return null;
                 }),
               { headSha: String(headSha).slice(0, 7) }
             )
-          : Promise.resolve(null).then(() => {
+          : Promise.resolve(null).then((): any => {
               if (alive() && !current.sideSettled?.checks) {
                 setSideFlag('checks', { pending: false, settled: true });
               }
@@ -889,7 +880,7 @@
                   signal,
                   body: body || '',
                 })
-                .then((dev) => {
+                .then((dev: any) => {
                   if (!dev || typeof dev !== 'object') {
                     settleSide('development', {
                       linkedIssues: [],
@@ -910,12 +901,12 @@
                   return dev;
                 })
 
-                .catch((err) => {
+                .catch((err: any): any => {
                   failSide('development', err);
                   return null;
                 })
             )
-          : Promise.resolve(null).then(() => {
+          : Promise.resolve(null).then((): any => {
               if (alive() && !current.sideSettled?.development) {
                 setSideFlag('development', { pending: false, settled: true });
               }
