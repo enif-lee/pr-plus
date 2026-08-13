@@ -621,6 +621,21 @@ export function isOptHeldForPointerDrag(
  * }}
  */
 export function applySelectionPointerDown(currentSelection: any, row: any, opts: any = {}) {
+  const shiftKey = Boolean(opts?.shiftKey);
+  const preferredSide =
+    String(opts?.preferredSide || 'RIGHT').toUpperCase() === 'LEFT'
+      ? 'LEFT'
+      : 'RIGHT';
+  // File header has no native text — Opt-hold must not swallow the caret.
+  // Check before native-text so a leftover optHeld latch cannot block P3b.2.
+  if (isFileHeaderRow(row)) {
+    const started = beginSelectionOnRow(row, preferredSide);
+    return {
+      selection: started,
+      mode: 'begin',
+      keepRange: false,
+    };
+  }
   if (
     shouldUseNativeTextSelectOnDrag({
       altKey: opts?.altKey,
@@ -632,20 +647,6 @@ export function applySelectionPointerDown(currentSelection: any, row: any, opts:
     return {
       selection: currentSelection || null,
       mode: 'native-text',
-      keepRange: false,
-    };
-  }
-  const shiftKey = Boolean(opts?.shiftKey);
-  const preferredSide =
-    String(opts?.preferredSide || 'RIGHT').toUpperCase() === 'LEFT'
-      ? 'LEFT'
-      : 'RIGHT';
-  // File header click → file-level caret (not multi-line extend)
-  if (isFileHeaderRow(row)) {
-    const started = beginSelectionOnRow(row, preferredSide);
-    return {
-      selection: started,
-      mode: 'begin',
       keepRange: false,
     };
   }

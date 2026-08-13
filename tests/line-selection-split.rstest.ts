@@ -1160,6 +1160,33 @@ describe('shouldUseNativeTextSelectOnDrag (Opt+drag text mode)', () => {
     expect(opt.selection).toBe(null);
   });
 
+  test('file header click begins file caret even when Opt is held', () => {
+    const header = {
+      kind: 'file-header',
+      filePath: 'a.ts',
+      rowIndex: 0,
+    };
+    const leftover = {
+      filePath: 'a.ts',
+      anchorLine: 1,
+      headLine: 8,
+      anchorRowIndex: 1,
+      headRowIndex: 8,
+      anchorSide: 'RIGHT',
+      headSide: 'RIGHT',
+    };
+    const started = applySelectionPointerDown(leftover, header, {
+      altKey: true,
+      optHeld: true,
+      preferredSide: 'RIGHT',
+    });
+    expect(started.mode).toBe('begin');
+    expect(started.selection?.kind || started.selection?.subjectType).toBe(
+      'file'
+    );
+    expect(started.selection?.filePath).toBe('a.ts');
+  });
+
   test('VirtualDiffRows Opt path skips preventDefault; notifies shell for auto-copy', () => {
     const rows = fs.readFileSync(
       path.join(__dirname, '..', 'src/modal/views/diff/VirtualDiffRows.tsx'),

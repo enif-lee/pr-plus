@@ -673,6 +673,11 @@ export function PrModalApp({
   const ghCommitRouteAppliedRef = useRef<string | null>(null);
   /** Dedup GH #diff- selection restore / clear. */
   const ghSelectionAppliedRef = useRef<string | null>(null);
+  /**
+   * Pointer / keyboard established a live caret. Inbound #diff- echoes must
+   * not replace that selection (row indices + multi-line range).
+   */
+  const selectionInteractedRef = useRef(false);
 
   useEffect(() => {
     setDiffCommitFilter({ mode: 'all' });
@@ -703,6 +708,7 @@ export function PrModalApp({
     useModalStore.getState().setLineSelection(null);
     ghSelectionAppliedRef.current = null;
     ghCommitRouteAppliedRef.current = null;
+    selectionInteractedRef.current = false;
   }, [prIdentity]);
 
   // Lazy-load remaining comment / review-comment pages (offset) then since-refresh.
@@ -1449,6 +1455,7 @@ export function PrModalApp({
     searchOpen,
     searchQuery,
     selectingRef,
+    selectionInteractedRef,
     selectionActionsTimerRef,
     selectionHoverRevealRef,
     selectionIslandLeaving,
@@ -3223,7 +3230,9 @@ export function PrModalApp({
         shiftKey,
         preferredSide,
         altKey: Boolean(opts?.altKey),
-        optHeld: Boolean(opts?.optHeld || optHeldRef.current),
+        // Event/DOM latch only — a leftover optHeldRef must not turn header
+        // or body clicks into native-text (P3b.2 leftover multi-line).
+        optHeld: Boolean(opts?.optHeld),
         metaKey: Boolean(opts?.metaKey),
         ctrlKey: Boolean(opts?.ctrlKey),
       });
@@ -3259,6 +3268,7 @@ export function PrModalApp({
     }
     shiftRangeRef.current = keepRange;
     selectingRef.current = true;
+    selectionInteractedRef.current = true;
     pointerStartRef.current = point || null;
     setSelecting(true);
     setLineSelection(next);

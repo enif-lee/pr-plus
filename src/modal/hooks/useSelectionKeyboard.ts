@@ -1235,6 +1235,7 @@ export function useSelectionKeyboard(b: any) {
    */
   function applySelectionKeyboardMove(delta: number, shift: boolean) {
     noteDiffNavActivity?.();
+    if (b.selectionInteractedRef) b.selectionInteractedRef.current = true;
     // Shift-extend is a discrete caret change — flush immediately so
     // e2e / slow key-repeat cannot lose the range inside rAF coalesce.
     if (shift) {

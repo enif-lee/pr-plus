@@ -674,6 +674,7 @@ export function usePrModalSessionRoute(b: any) {
   const searchOpen = b.searchOpen;
   const searchQuery = b.searchQuery;
   const selectingRef = b.selectingRef;
+  const selectionInteractedRef = b.selectionInteractedRef;
   const selectionActionsTimerRef = b.selectionActionsTimerRef;
   const selectionHoverRevealRef = b.selectionHoverRevealRef;
   const selectionIslandLeaving = b.selectionIslandLeaving;
@@ -771,6 +772,7 @@ export function usePrModalSessionRoute(b: any) {
     const key = `${detail.owner}/${detail.repo}#${detail.number}`;
     if (routeRestoreKeyRef.current === key) return;
     routeRestoreKeyRef.current = key;
+    if (selectionInteractedRef) selectionInteractedRef.current = false;
     positionAppliedRef.current = null;
     positionInFlightRef.current = null;
     positionExhaustedRef.current = null;
@@ -939,22 +941,24 @@ export function usePrModalSessionRoute(b: any) {
   // (do not wipe file/line selection from matching PR+page session snap).
   useEffect(() => {
     if (!open || !detail?.number) return;
-    // Key-hold / pointer extend: host echoes of #diff- must not shrink the range.
-    try {
-      if (selectingRef?.current || pendingSelectionMoveRef?.current) return;
-      if (useModalStore.getState().selecting) return;
-    } catch {
-      /* ignore */
-    }
     const fileKey = initialRoute?.fileKey || null;
     const filePathHint = initialRoute?.filePath || null;
     const startLine = initialRoute?.startLine ?? null;
-    const applyKey = `${detail.number}:${fileKey || ''}:${filePathHint || ''}:${startLine}:${initialRoute?.endLine ?? ''}`;
+    const applyKey = `${detail.number}:${fileKey || filePathHint || ''}:${startLine ?? ''}:${initialRoute?.endLine ?? ''}`;
+    // Pointer / Shift+↑ own the caret. Host echoes of our own #diff- writer
+    // must not strip row indices or shrink a live multi-line / file caret.
+    // Session restore may pre-fill lineSelection — that is NOT user-owned;
+    // inbound #diff- still applies until the user clicks or moves.
     try {
-      const sel = useModalStore.getState().lineSelection;
-      const a = Number(sel?.anchorRowIndex);
-      const h = Number(sel?.headRowIndex);
-      if (sel && Number.isFinite(a) && Number.isFinite(h) && a !== h) {
+      if (selectingRef?.current || pendingSelectionMoveRef?.current) {
+        if (ghSelectionAppliedRef) ghSelectionAppliedRef.current = applyKey;
+        return;
+      }
+      if (useModalStore.getState().selecting) {
+        if (ghSelectionAppliedRef) ghSelectionAppliedRef.current = applyKey;
+        return;
+      }
+      if (selectionInteractedRef?.current) {
         if (ghSelectionAppliedRef) ghSelectionAppliedRef.current = applyKey;
         return;
       }
@@ -997,13 +1001,22 @@ export function usePrModalSessionRoute(b: any) {
         String(initialRoute?.side || 'RIGHT').toUpperCase() === 'LEFT'
           ? 'LEFT'
           : 'RIGHT';
-      setLineSelection({
+      let nextSel: any = {
         filePath: path,
         anchorLine: Math.floor(Number(startLine)),
         headLine: end,
         anchorSide: side,
         headSide: side,
-      });
+      };
+      try {
+        const rows = virtualRowsRef?.current || virtualRows;
+        if (typeof rebindSelectionRowIndices === 'function') {
+          nextSel = rebindSelectionRowIndices(nextSel, rows) || nextSel;
+        }
+      } catch {
+        /* keep line-only */
+      }
+      setLineSelection(nextSel);
     } else {
       // File-level #diff-{key} without lines — clear line range selection
       setLineSelection(null);
@@ -1538,9 +1551,9 @@ export function usePrModalSessionRoute(b: any) {
     // Outbound route updates are echoed back by the host as initialRoute.
     // Stamp the exact inbound dedupe key before writing so an older single-line
     // echo cannot overwrite a newer multi-line selection during key-repeat.
-    ghSelectionAppliedRef.current = `${detail.number}:${fileKey || ''}:${
-      sel.filePath || ''
-    }:${sel.startLine ?? null}:${sel.endLine ?? ''}`;
+    ghSelectionAppliedRef.current = `${detail.number}:${
+      fileKey || sel.filePath || ''
+    }:${sel.startLine ?? ''}:${sel.endLine ?? ''}`;
 
     // Fixture / non-extension: write location directly (no chrome.*)
     try {
@@ -1617,10 +1630,8 @@ export function usePrModalSessionRoute(b: any) {
             ? githubDiffFileKey(sel.filePath)
             : null;
           ghSelectionAppliedRef.current = `${detail.number}:${
-            fileKey || ''
-          }:${sel.filePath || ''}:${sel.startLine ?? null}:${
-            sel.endLine ?? ''
-          }`;
+            fileKey || sel.filePath || ''
+          }:${sel.startLine ?? ''}:${sel.endLine ?? ''}`;
           if (typeof onRouteChange === 'function') {
             onRouteChange({
               page: 'diff',
