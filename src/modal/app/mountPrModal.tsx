@@ -40,7 +40,9 @@ class MountErrorBoundary extends React.Component<
           },
         },
         'pr+ failed to render: ',
-        String(this.state.error?.message || this.state.error)
+        String(this.state.error?.message || this.state.error),
+        '\n',
+        String(this.state.error?.stack || '')
       );
     }
     return this.props.children;

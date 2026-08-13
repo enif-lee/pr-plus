@@ -169,7 +169,7 @@ describe('normalize + multi-status', () => {
 
   test('jump-widen path in App uses unrestricted not default', () => {
     const app = readFileSync(
-      resolve(root, 'src/modal/app/PrModalShell.tsx'),
+      resolve(root, 'src/modal/hooks/useDiffConversationNav.ts'),
       'utf8'
     );
     expect(app).toMatch(/createUnrestrictedDiffReviewFilter/);
@@ -336,10 +336,12 @@ describe('product wiring structure', () => {
   });
 
   test('PrModalApp defaults to createDefaultDiffReviewFilter', () => {
-    const app = readFileSync(
-      resolve(root, 'src/modal/app/PrModalShell.tsx'),
-      'utf8'
-    );
+    const app = [
+      'src/modal/app/PrModalShell.tsx',
+      'src/modal/hooks/useDiffConversationNav.ts',
+    ]
+      .map((rel) => readFileSync(resolve(root, rel), 'utf8'))
+      .join('\n');
     expect(app).toMatch(/createDefaultDiffReviewFilter/);
     expect(app).toMatch(/filterReviewRootsForDiffNav/);
     expect(app).toMatch(/filterFilesCommentedOnly/);
@@ -348,10 +350,12 @@ describe('product wiring structure', () => {
   });
 
   test('PrModalApp schedules filter writes via startTransition (not urgent-only)', () => {
-    const app = readFileSync(
-      resolve(root, 'src/modal/app/PrModalShell.tsx'),
-      'utf8'
-    );
+    const app = [
+      'src/modal/app/PrModalShell.tsx',
+      'src/modal/hooks/useDiffConversationNav.ts',
+    ]
+      .map((rel) => readFileSync(resolve(root, rel), 'utf8'))
+      .join('\n');
     expect(app).toMatch(/startTransition/);
     expect(app).toMatch(/function scheduleDiffReviewFilter/);
     // Toggle + patch go through the low-priority scheduler

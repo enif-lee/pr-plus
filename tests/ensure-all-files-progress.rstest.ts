@@ -32,10 +32,12 @@ describe('detail-ui-store load stage (shipped)', () => {
 
 describe('ensureAllFiles progress wiring (structural)', () => {
   test('PrModalApp ensureAllFiles drives detail-ui-store load stage', () => {
-    const src = readFileSync(
-      resolve(root, 'src/modal/app/PrModalShell.tsx'),
-      'utf8'
-    );
+    const src = [
+      'src/modal/app/PrModalShell.tsx',
+      'src/modal/hooks/useEnsureDiffLoads.ts',
+    ]
+      .map((rel) => readFileSync(resolve(root, rel), 'utf8'))
+      .join('\n');
     expect(src).toMatch(/useDetailUiStore/);
     expect(src).toMatch(/const ensureAllFiles = useCallback/);
     // Start / mid / settle labels (i18n keys; catalogs hold English copy)

@@ -5,10 +5,19 @@ import { resolve } from 'node:path';
 
 const root = resolve(__dirname, '..');
 const read = (rel: string) => readFileSync(resolve(root, rel), 'utf8');
+const readShell = () =>
+  [
+    'src/modal/app/PrModalShell.tsx',
+    'src/modal/hooks/useDiffConversationNav.ts',
+    'src/modal/hooks/useSelectionKeyboard.ts',
+    'src/modal/hooks/usePrModalSessionRoute.ts',
+  ]
+    .map((rel) => read(rel))
+    .join('\n');
 
 describe('Diff key-hold architecture', () => {
   test('multi-file active path does not subscribe the composition root', () => {
-    const shell = read('src/modal/app/PrModalShell.tsx');
+    const shell = readShell();
     expect(shell).not.toMatch(
       /const activeFilePath = useModalStore\(\(s\) => s\.activeFilePath\)/
     );
@@ -26,7 +35,7 @@ describe('Diff key-hold architecture', () => {
   });
 
   test('file/selection hops stay DOM-first and file-tree scrolling is local', () => {
-    const shell = read('src/modal/app/PrModalShell.tsx');
+    const shell = readShell();
     const fileNav = shell.slice(
       shell.indexOf('function scrollFileNavRowIntoView'),
       shell.indexOf('/** Live Diff scroller')
@@ -44,7 +53,7 @@ describe('Diff key-hold architecture', () => {
   });
 
   test('multi-file key-hold commits every active path through leaf subscriptions', () => {
-    const shell = read('src/modal/app/PrModalShell.tsx');
+    const shell = readShell();
     const setPath = shell.slice(
       shell.indexOf('function setActiveFilePathForNav'),
       shell.indexOf('Keep file navigation on the next paint boundary')
@@ -55,7 +64,7 @@ describe('Diff key-hold architecture', () => {
   });
 
   test('file nav advances one adjacent file per animation frame', () => {
-    const shell = read('src/modal/app/PrModalShell.tsx');
+    const shell = readShell();
     const nav = shell.slice(
       shell.indexOf('/** Diff file step'),
       shell.indexOf('function scrollDiffPage')
@@ -66,7 +75,7 @@ describe('Diff key-hold architecture', () => {
   });
 
   test('host paints and URI writes yield while Diff navigation is active', () => {
-    const shell = read('src/modal/app/PrModalShell.tsx');
+    const shell = readShell();
     const host = read('src/host/modules/props-render-close.ts');
     const optHint = read('src/modal/components/common/OptBtnHint.tsx');
     expect(shell).toMatch(/data-prp-diff-nav-active/);
@@ -82,7 +91,7 @@ describe('Diff key-hold architecture', () => {
   });
 
   test('selection route writes stamp the inbound dedupe key before host echo', () => {
-    const shell = read('src/modal/app/PrModalShell.tsx');
+    const shell = readShell();
     const outbound = shell.slice(
       shell.indexOf('// Sync URI + host session open snap.'),
       shell.indexOf('// Reset route restore markers when modal closes')
@@ -103,7 +112,7 @@ describe('Diff key-hold architecture', () => {
   });
 
   test('progressive comment patches preserve focused thread by stable id', () => {
-    const shell = read('src/modal/app/PrModalShell.tsx');
+    const shell = readShell();
     expect(shell).toContain('const stableIdx = mappedComments.findIndex');
     expect(shell).toContain('String(c?.id) === String(activeId)');
     expect(shell).toContain('setCommentIndex(stableIdx)');

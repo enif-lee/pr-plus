@@ -1,7 +1,7 @@
 # Host-data-first + Zustand + PrModal rewrite
 
-**Status:** executed (host-data-first phases 0–8)  
-**Decisions:** Host DomainStore SoT · Zustand UI-only · pessimistic mutations · progressive render kept · IDB cache kept · durable drop-latch removed · PrModal decomposed  
+**Status:** phases 0–8 executed · **phase 9 planned**  
+**Decisions:** Host DomainStore SoT · Zustand UI-only · pessimistic mutations · progressive render kept · IDB cache kept · durable drop-latch removed · PrModal mount decomposed · remaining >2000-line SoT split (shell first)  
 
 This directory is the **execution plan of record**. Phase docs list concrete files to create, edit, delete, and test.
 
@@ -16,6 +16,7 @@ This directory is the **execution plan of record**. Phase docs list concrete fil
 | 6 | [06-zustand-ui.md](./06-zustand-ui.md) | Zustand UI global; kill prop bags |
 | 7 | [07-prmodal-decomposition.md](./07-prmodal-decomposition.md) | Split PrModalApp god file |
 | 8 | [08-hardening.md](./08-hardening.md) | Gates, e2e matrix, docs |
+| 9 | [09-large-sot-split.md](./09-large-sot-split.md) | Shrink shell (~5000); leaf-subscribe; split Conversation/line-selection |
 
 ## Locked product rules
 
@@ -78,5 +79,6 @@ Earlier draft: [`docs/host-first-zustand-rewrite-plan.md`](../docs/host-first-zu
 | 6 Zustand UI | done (`ui-store` re-export; no localDetail) |
 | 7 PrModal decomposition | done — mount SoT `PrModalShell.tsx`; `PrModalApp.impl.tsx` re-export-only; `pr-modal-mutations.ts` deleted; hotkeys in hook; commands/* |
 | 8 hardening | done (gates + e2e matrix) |
+| 9 large SoT split | **in progress** — see [09-large-sot-split.md](./09-large-sot-split.md) |
 
 **Deviation:** command modules are cohesive (`domain-mutations` / `review-actions` / `side-actions`) rather than many tiny per-slice files. Runtime `PrModalApp.impl.tsx` remains the view orchestration host; domain write paths are not inlined there.

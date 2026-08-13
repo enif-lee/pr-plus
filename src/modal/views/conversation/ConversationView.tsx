@@ -55,6 +55,7 @@ import {
   GroupThreadJumpBtn,
 } from './GroupThreadControls';
 import { ThreadGapBanner } from './ThreadGapBanner';
+import { createCommentChrome } from './comment-chrome';
 import { MergeBox } from './MergeBox';
 import { DescriptionCard } from './DescriptionCard';
 import { ComposerCard } from './ComposerCard';
@@ -107,6 +108,7 @@ import { canSubmitReviewVerdict } from '@lib/pr-edit-api';
 import { OptBtnHint } from '@common/OptBtnHint';
 import { CommentActionIconBtn } from '@common/CommentActionIconBtn';
 import { useModalStore } from '../../store/modal-store';
+import { useSearchGroup } from '../../store/data-groups';
 import { useDomainDetail } from '../../app/domain-detail-context';
 import {
   focusContextThreadReplyAfterPaint,
@@ -136,6 +138,7 @@ function ConversationViewImpl(props: any) {
   // Leaf: composer text — typing must not re-render PrModalApp.
   const storeCommentText = useModalStore((s) => s.commentText);
   const storeSetCommentText = useModalStore((s) => s.setCommentText);
+  const searchGroup = useSearchGroup();
   /** Local expand of still-minimized comments (Show comment without unhide). */
   const [expandedMinimized, setExpandedMinimized] = useState<
     Record<string, boolean>
@@ -249,12 +252,16 @@ function ConversationViewImpl(props: any) {
     reviewThreadsMeta = null,
     /** GraphQL timelineItems page meta (comments + system events). */
     timelineMeta = null,
-    searchQuery = '',
-    searchHits = null,
-    searchHitIndex = -1,
+    searchQuery: searchQueryProp = '',
+    searchHits: searchHitsProp = null,
+    searchHitIndex: searchHitIndexProp = -1,
     activeSearchHit = null,
     mentionCandidates = [],
   } = props;
+  const searchQuery = searchQueryProp || searchGroup.searchQuery;
+  const searchHits = searchHitsProp ?? searchGroup.searchHits;
+  const searchHitIndex =
+    searchHitIndexProp >= 0 ? searchHitIndexProp : searchGroup.searchHitIndex;
 
   // DomainContext first; props still accepted for host-annotated detail overlays.
   const detail = detailFromProps ?? domainDetail;
@@ -832,231 +839,23 @@ function ConversationViewImpl(props: any) {
     return body;
   }
 
-  function flashCopy(msg: string) {
-    try {
-      useModalStore.getState().setActionMsg?.(msg);
-    } catch {
-      /* ignore */
-    }
-  }
-
-  async function copyCommentBody(body: unknown, commentId?: unknown) {
-    const text = commentBodyForCopy(body);
-    if (!text) {
-      flashCopy('No comment text');
-      stampCommentCopyResult({
-        kind: 'body',
-        ok: false,
-        text: '',
-        commentId,
-      });
-      return;
-    }
-    const ok = await copyTextToClipboard(text);
-    stampCommentCopyResult({ kind: 'body', ok, text, commentId });
-    flashCopy(ok ? 'Comment copied' : 'Copy failed');
-  }
-
-  async function copyCommentLink(
-    id: unknown,
-    /** issue → #issuecomment-…; review → #discussion_r… */
-    shareKind: 'issue' | 'review' | null = 'issue'
-  ) {
-    const position = buildPositionFromComment({ id });
-    if (!position) {
-      flashCopy('Link unavailable');
-      stampCommentCopyResult({ kind: 'link', ok: false, url: '', commentId: id });
-      return;
-    }
-    const url = buildCommentShareUrl({
-      prHtmlUrl: detail?.htmlUrl || detail?.html_url,
-      page: shareKind === 'review' ? 'diff' : 'conversation',
-      kind: shareKind === 'review' ? 'review' : 'issue',
-      position,
-      number: detail?.number,
-    });
-    if (!url) {
-      flashCopy('Link unavailable');
-      stampCommentCopyResult({ kind: 'link', ok: false, url: '', commentId: id });
-      return;
-    }
-    const ok = await copyTextToClipboard(url);
-    stampCommentCopyResult({ kind: 'link', ok, url, commentId: id });
-    flashCopy(ok ? 'Link copied' : 'Copy failed');
-  }
-
-  function quoteReplyToMainComposer(
-    body: unknown,
-    author?: string | null,
-    commentId?: unknown
-  ) {
-    const quote = quoteReplyMarkdown(body, author);
-    const cur = String(
-      useModalStore.getState().commentText ?? commentText ?? ''
-    );
-    const next = insertQuoteIntoDraft(cur, quote);
-    setCommentText(next);
-    stampQuoteReplyResult({
-      ok: true,
-      text: quote,
-      commentId,
-      target: 'main',
-    });
-    // Open + focus main composer after paint
-    queueMicrotask(() => focusMainConversationComposer());
-    setTimeout(() => focusMainConversationComposer(), 50);
-    flashCopy('Quoted into reply');
-  }
-
-  /**
-   * Comment chrome actions: copy body + copy link + quote + hide;
-   * edit/delete only when owner (canDelete).
-   * TipPopover always; OptBtnHint when this card is kb-focused.
-   */
-  function commentActions(
-    kind: string | null,
-    id: any,
-    canDelete: boolean,
-    body?: string,
-    meta: {
-      author?: string | null;
-      nodeId?: string | null;
-      isMinimized?: boolean;
-      minimizedReason?: string | null;
-      viewerCanMinimize?: boolean | null;
-      focused?: boolean;
-    } = {}
-  ) {
-    if (!kind && !id) return null;
-    const canLink = Boolean(buildPositionFromComment({ id }));
-    const shareKind: 'issue' | 'review' =
-      kind === 'review' ? 'review' : 'issue';
-    const minimized = Boolean(meta.isMinimized);
-    const canHide = viewerCanMinimizeComment({
-      viewerCanMinimize: meta.viewerCanMinimize,
-      nodeId: meta.nodeId,
-      isMinimized: minimized,
-    });
-    const sc = Boolean(meta.focused);
-    const S = CONTEXT_COMMENT_ACTION_SHORTCUT;
-    return (
-      <div className="prp-icon-actions">
-        <CommentActionIconBtn
-          tipTitle={S.copyBody.title}
-          shortcut={S.copyBody.labelMac}
-          showShortcutHint={sc}
-          disabled={actionBusy}
-          aria-label="Copy comment text"
-          data-prp-copy-comment="1"
-          data-prp-comment-id={id != null ? String(id) : undefined}
-          onClick={(): any => void copyCommentBody(body, id)}
-        >
-          <IconCopy size={13} />
-        </CommentActionIconBtn>
-        {canLink ? (
-          <CommentActionIconBtn
-            tipTitle={S.copyLink.title}
-            shortcut={S.copyLink.labelMac}
-            showShortcutHint={sc}
-            disabled={actionBusy}
-            aria-label="Copy link to comment"
-            data-prp-copy-comment-link="1"
-            data-prp-comment-id={id != null ? String(id) : undefined}
-            onClick={(): any => void copyCommentLink(id, shareKind)}
-          >
-            <IconLink size={13} />
-          </CommentActionIconBtn>
-        ) : null}
-        {body != null && String(body).length >= 0 ? (
-          <CommentActionIconBtn
-            tipTitle={S.quote.title}
-            shortcut={S.quote.labelMac}
-            showShortcutHint={sc}
-            disabled={actionBusy}
-            aria-label="Quote reply"
-            data-prp-quote-reply="1"
-            data-prp-comment-id={id != null ? String(id) : undefined}
-            onClick={() => quoteReplyToMainComposer(body, meta.author, id)}
-          >
-            <IconQuote size={13} />
-          </CommentActionIconBtn>
-        ) : null}
-        {canHide && meta.nodeId ? (
-          minimized ? (
-            <CommentActionIconBtn
-              tipTitle="Unhide comment"
-              shortcut={S.hide.labelMac}
-              showShortcutHint={sc}
-              disabled={actionBusy}
-              aria-label="Unhide comment"
-              data-prp-unhide-comment="1"
-              data-prp-comment-id={id != null ? String(id) : undefined}
-              onClick={() =>
-                onUnhideComment?.({
-                  commentId: id,
-                  nodeId: meta.nodeId,
-                })
-              }
-            >
-              <IconEye size={13} />
-            </CommentActionIconBtn>
-          ) : (
-            <CommentActionIconBtn
-              tipTitle={S.hide.title}
-              shortcut={S.hide.labelMac}
-              showShortcutHint={sc}
-              disabled={actionBusy}
-              aria-label="Hide comment"
-              data-prp-hide-comment="1"
-              data-prp-comment-id={id != null ? String(id) : undefined}
-              onClick={() =>
-                onHideComment?.({
-                  commentId: id,
-                  nodeId: meta.nodeId,
-                  reason: DEFAULT_HIDE_REASON,
-                })
-              }
-            >
-              <IconEyeClosed size={13} />
-            </CommentActionIconBtn>
-          )
-        ) : null}
-        {canDelete && kind ? (
-          <>
-            <CommentActionIconBtn
-              tipTitle={S.edit.title}
-              shortcut={S.edit.labelMac}
-              showShortcutHint={sc}
-              disabled={actionBusy}
-              aria-label={t('cta_edit_comment')}
-              data-prp-edit-comment="1"
-              data-prp-comment-id={id != null ? String(id) : undefined}
-              onClick={() => onStartEditComment?.(kind, id, body)}
-            >
-              <IconPencil size={13} />
-            </CommentActionIconBtn>
-            <CommentActionIconBtn
-              tipTitle={S.delete.title}
-              shortcut={S.delete.labelMac}
-              showShortcutHint={sc}
-              className="prp-icon-btn--danger"
-              disabled={actionBusy}
-              aria-label="Delete comment"
-              data-prp-delete-comment="1"
-              data-prp-comment-id={id != null ? String(id) : undefined}
-              onClick={() =>
-                kind === 'issue'
-                  ? onDeleteIssueComment?.(id)
-                  : onDeleteReviewComment?.(id)
-              }
-            >
-              <IconTrash size={13} />
-            </CommentActionIconBtn>
-          </>
-        ) : null}
-      </div>
-    );
-  }
+  const {
+    commentActions,
+    copyCommentBody,
+    copyCommentLink,
+    quoteReplyToMainComposer,
+  } = createCommentChrome({
+    detail,
+    actionBusy,
+    commentText,
+    setCommentText,
+    onUnhideComment,
+    onHideComment,
+    onStartEditComment,
+    onDeleteIssueComment,
+    onDeleteReviewComment,
+    t,
+  });
 
   function kindLabelFor(kind: string, isReply = false) {
     if (isReply) return 'reply';

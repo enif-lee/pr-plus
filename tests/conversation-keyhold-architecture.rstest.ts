@@ -5,10 +5,17 @@ import { resolve } from 'node:path';
 
 const root = resolve(__dirname, '..');
 const read = (rel: string) => readFileSync(resolve(root, rel), 'utf8');
+const readShell = () =>
+  [
+    'src/modal/app/PrModalShell.tsx',
+    'src/modal/hooks/useDiffConversationNav.ts',
+  ]
+    .map((rel) => read(rel))
+    .join('\n');
 
 describe('Conversation key-hold architecture', () => {
   test('paints one adjacent leaf focus per frame without rebuilding mounted rows', () => {
-    const shell = read('src/modal/app/PrModalShell.tsx');
+    const shell = readShell();
     const store = read('src/modal/store/modal-store.ts');
     const list = read(
       'src/modal/views/conversation/VirtualConversationList.tsx'
@@ -25,7 +32,7 @@ describe('Conversation key-hold architecture', () => {
   });
 
   test('paints held in-thread reply steps per frame and clamps Conversation ends', () => {
-    const shell = read('src/modal/app/PrModalShell.tsx');
+    const shell = readShell();
 
     expect(shell).toMatch(
       /pendingThreadReplyDeltaRef\.current = delta < 0 \? -1 : 1;[\s\S]*scheduleNavigationFrame/

@@ -1013,10 +1013,13 @@ describe('jumpSelectionToAdjacentChangeRegion (⌥↑/⌥↓ next/prev change)',
 
 describe('optArrow shell wiring (static)', () => {
   test('PrModalShell caches region index and rAF-coalesces ⌥↑/⌥↓', () => {
-    const shell = fs.readFileSync(
-      path.join(__dirname, '..', 'src/modal/app/PrModalShell.tsx'),
-      'utf8'
-    );
+    const shell = [
+      'src/modal/app/PrModalShell.tsx',
+      'src/modal/hooks/useDiffConversationNav.ts',
+      'src/modal/hooks/useSelectionKeyboard.ts',
+    ]
+      .map((rel) => fs.readFileSync(path.join(__dirname, '..', rel), 'utf8'))
+      .join('\n');
     expect(shell).toMatch(/buildChangeRegionIndex/);
     expect(shell).toMatch(/getChangeRegionIndexForList/);
     expect(shell).toMatch(/changeRegionIndexRef/);
@@ -1030,10 +1033,13 @@ describe('optArrow shell wiring (static)', () => {
   });
 
   test('selection hop uses thrifted index scroll; thread unit only uses DOM reveal', () => {
-    const shell = fs.readFileSync(
-      path.join(__dirname, '..', 'src/modal/app/PrModalShell.tsx'),
-      'utf8'
-    );
+    const shell = [
+      'src/modal/app/PrModalShell.tsx',
+      'src/modal/hooks/useDiffConversationNav.ts',
+      'src/modal/hooks/useSelectionKeyboard.ts',
+    ]
+      .map((rel) => fs.readFileSync(path.join(__dirname, '..', rel), 'utf8'))
+      .join('\n');
     // Line hop path (1.9.6 thrift)
     expect(shell).toMatch(/function scrollSelectionCaretAfterHop/);
     expect(shell).toMatch(/function scrollSelectionHeadDomOnly/);

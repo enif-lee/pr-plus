@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useModalStore } from '../../store/modal-store';
 import './ActionToast.css';
 
 export type ActionToastTone = 'ok' | 'error' | 'neutral';
@@ -41,7 +42,8 @@ export function ActionToast({
   onDismiss?: () => void;
   durationMs?: number;
 }) {
-  const text = String(message || '').trim();
+  const storeMsg = useModalStore((s) => s.actionMsg);
+  const text = String((message == null || message === '' ? storeMsg : message) || '').trim();
   const [shown, setShown] = useState('');
   const [phase, setPhase] = useState<'hidden' | 'in' | 'out'>('hidden');
   const leaveTimer = useRef(0);

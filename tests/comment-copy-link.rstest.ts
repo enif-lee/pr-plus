@@ -195,10 +195,13 @@ describe('deep-link restore wiring (static)', () => {
     const fs = require('node:fs');
     const path = require('node:path');
     const root = path.join(__dirname, '..');
-    const app = fs.readFileSync(
-      path.join(root, 'src/modal/app/PrModalShell.tsx'),
-      'utf8'
-    );
+    const app = [
+      'src/modal/app/PrModalShell.tsx',
+      'src/modal/hooks/useDiffConversationNav.ts',
+      'src/modal/hooks/usePrModalSessionRoute.ts',
+    ]
+      .map((rel) => fs.readFileSync(path.join(root, rel), 'utf8'))
+      .join('\n');
     const vcl = fs.readFileSync(
       path.join(root, 'src/modal/views/conversation/VirtualConversationList.tsx'),
       'utf8'
@@ -216,10 +219,15 @@ describe('deep-link restore wiring (static)', () => {
   test('Conversation deep-link abandons layout ownership when user opens Diff', () => {
     const fs = require('node:fs');
     const path = require('node:path');
-    const app = fs.readFileSync(
-      path.join(__dirname, '..', 'src/modal/app/PrModalShell.tsx'),
-      'utf8'
-    );
+    const app = [
+      'src/modal/app/PrModalShell.tsx',
+      'src/modal/hooks/useDiffConversationNav.ts',
+      'src/modal/hooks/usePrModalSessionRoute.ts',
+    ]
+      .map((rel) =>
+        fs.readFileSync(path.join(__dirname, '..', rel), 'utf8')
+      )
+      .join('\n');
     // expandDiff must abandon in-flight conversation position deep-links so
     // progressive detail patches / verify ticks cannot yank Diff → Conversation
     // (regression: prp_page=conversation&prp_position=c:… blocked Diff toggle).
