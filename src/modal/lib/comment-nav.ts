@@ -79,7 +79,10 @@ export function sortInlineComments(comments: any, pathOrder: any = null) {
         const ib = order.has(pb) ? order.get(pb) : Number.MAX_SAFE_INTEGER;
         if (ia !== ib) return ia - ib;
       }
-      return pa.localeCompare(pb);
+      return String(pa).localeCompare(String(pb), undefined, {
+        numeric: true,
+        sensitivity: 'base',
+      });
     }
     const la = a.line == null ? Number.MAX_SAFE_INTEGER : Number(a.line);
     const lb = b.line == null ? Number.MAX_SAFE_INTEGER : Number(b.line);
@@ -131,7 +134,10 @@ export function sortMappedCommentsByDiffOrder(mapped: any, pathOrder: any = null
         const ib = order.has(pb) ? order.get(pb) : Number.MAX_SAFE_INTEGER;
         if (ia !== ib) return ia - ib;
       }
-      return pa.localeCompare(pb);
+      return String(pa).localeCompare(String(pb), undefined, {
+        numeric: true,
+        sensitivity: 'base',
+      });
     }
     const la = a?.line == null ? Number.MAX_SAFE_INTEGER : Number(a.line);
     const lb = b?.line == null ? Number.MAX_SAFE_INTEGER : Number(b.line);

@@ -4,6 +4,16 @@
  */
 
 /**
+ * Natural name order: digits compare as numbers (V2 before V10, file2 before file10).
+ */
+export function compareFileTreeNames(a: unknown, b: unknown): number {
+  return String(a || '').localeCompare(String(b || ''), undefined, {
+    numeric: true,
+    sensitivity: 'base',
+  });
+}
+
+/**
  * @typedef {{ type: 'dir'|'file', name: string, path: string, children?: TreeNode[], file?: object }} TreeNode
  */
 
@@ -48,7 +58,7 @@ export function buildNestedFileTree(files: any) {
   function sortNodes(nodes: any) {
     nodes.sort((a: any, b: any) => {
       if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
-      return a.name.localeCompare(b.name);
+      return compareFileTreeNames(a.name, b.name);
     });
     for (const n of nodes) {
       if (n.type === 'dir' && n.children) sortNodes(n.children);
@@ -60,9 +70,10 @@ export function buildNestedFileTree(files: any) {
 }
 
 /**
- * Files in explorer / Diff / step-nav order: nested tree, dirs-first + name
- * sort at each level, DFS walk. Prefer this over raw GitHub `files[]` order so
- * Diff virtual list, left file tree, and prev/next file all agree.
+ * Files in explorer / Diff / step-nav order: nested tree, dirs-first +
+ * natural name sort at each level, DFS walk. Prefer this over raw GitHub
+ * `files[]` order so Diff virtual list, left file tree, and prev/next file
+ * all agree.
  *
  * @param {Array<{ filename?: string, path?: string }>} files
  * @returns {Array<{ filename?: string, path?: string }>}
