@@ -44,7 +44,7 @@ function probeThreadOptChrome() {
       ];
       /**
        * Ownership of Opt chrome is the in-tree host (showShortcutHint →
-       * .prp-opt-hint-host). OptBtnHint *paints* via body portal — do not
+       * .prp-opt-hint-host). ShortcutHint *paints* via body portal — do not
        * attribute portals by geometry (tall multi-reply stacks collide).
        */
       const countHintHosts = (el) => {
@@ -543,12 +543,12 @@ export function getSteps() {
     }
   });
 
-  run('TOR.2 OptBtnHint follows unit focus (root vs reply)', () => {
+  run('TOR.2 ShortcutHint follows unit focus (root vs reply)', () => {
     if (!bag.multiActive) {
       log('  soft-skip TOR.2 (no multi-reply context from TOR.1)');
       return;
     }
-    // Hold Option so OptBtnHint paints (optHintsActive).
+    // Hold Option so ShortcutHint paints (optHintsActive).
     // Prefer multi-reply thread first so unit step is meaningful.
     const seeded = seedMultiReplyContextActive(16);
     log(`  TOR.2 reseed: ${JSON.stringify(seeded)}`);
@@ -568,7 +568,7 @@ export function getSteps() {
       // Root unit active (default): reply rows must not own Opt hint hosts
       assert(
         onRoot.replyHints === 0,
-        `on root unit, replies must not show OptBtnHint: ${JSON.stringify(onRoot)}`
+        `on root unit, replies must not show ShortcutHint: ${JSON.stringify(onRoot)}`
       );
       // Root should be eligible (hosts or portals) when Opt latched
       if ((onRoot.bodyOptPortals || 0) > 0 || (onRoot.rootHints || 0) > 0) {
@@ -602,11 +602,11 @@ export function getSteps() {
       if (onReply.unitActiveRole === 'reply' || stepped?.unitActiveRole === 'reply') {
         assert(
           onReply.replyHints > 0,
-          `on reply unit, OptBtnHint hosts must appear on reply row: ${JSON.stringify(onReply)}`
+          `on reply unit, ShortcutHint hosts must appear on reply row: ${JSON.stringify(onReply)}`
         );
         assert(
           onReply.rootHints === 0,
-          `on reply unit, root must not keep OptBtnHint hosts: ${JSON.stringify(onReply)}`
+          `on reply unit, root must not keep ShortcutHint hosts: ${JSON.stringify(onReply)}`
         );
       }
     }

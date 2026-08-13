@@ -819,7 +819,7 @@ export function getSteps() {
   /**
    * Multi-line selection dock placement:
    * - head-at-start near scroller bottom → floatbar above (not false room under caret)
-   * - Opt-hold: OptBtnHints place with dock (above→top, below→bottom)
+   * - Opt-hold: ShortcutHints place with dock (above→top, below→bottom)
    * - need reserves Opt hint strip
    */
   run(`P3b.4 multi-line dock flip + Opt hint place on PR #${MULTI_HUNK_PR}`, () => {
@@ -934,7 +934,7 @@ export function getSteps() {
     if (dockSnap.hintPlacements?.length) {
       assert(
         dockSnap.hintPlacements.every((p) => p === 'top'),
-        `OptBtnHint data-placement should be top when dock above: ${JSON.stringify(dockSnap.hintPlacements)}`
+        `ShortcutHint data-placement should be top when dock above: ${JSON.stringify(dockSnap.hintPlacements)}`
       );
     }
 

@@ -625,7 +625,7 @@ export function PrModalApp({
     {}
   );
   /**
-   * Opt-hold badges live in the store (OptBtnHint leaf-subscribes).
+   * Opt-hold badges live in the store (ShortcutHint leaf-subscribes).
    * Refs track physical hold/suppress without re-rendering App/Conversation.
    */
   const optHeldRef = useRef(false);
@@ -1103,7 +1103,7 @@ export function PrModalApp({
    * Settle timer after select/move (no longer auto-shows the action group).
    */
   /**
-   * True while selection ↑↓ / region hop is settling — hides OptBtnHints and
+   * True while selection ↑↓ / region hop is settling — hides ShortcutHints and
    * delays action-group floatbar until SELECTION_ACTIONS_REVEAL_MS after last move.
    */
   const selectionNavBusyRef = useRef(false);

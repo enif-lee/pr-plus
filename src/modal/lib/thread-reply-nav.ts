@@ -147,7 +147,7 @@ export function wouldExitReviewThreadFocus(
 }
 
 /**
- * OptBtnHint eligibility for a comment row inside a context-active thread.
+ * ShortcutHint eligibility for a comment row inside a context-active thread.
  *
  * - Inactive thread → no hints
  * - When a unit is focused (`focusedUnitId`): only that unit's row

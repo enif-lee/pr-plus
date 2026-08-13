@@ -2,7 +2,6 @@ import React, { useLayoutEffect, useMemo, useRef } from 'react';
 import { Button } from '@common/Button';
 import { Badge } from '@common/Badge';
 import { TipPopover } from '@common/TipPopover';
-import { OptBtnHint } from '@common/OptBtnHint';
 import { UserLink } from '@common/UserLink';
 import { RefLink } from '@common/RefLink';
 import { Avatar } from '@common/Avatar';

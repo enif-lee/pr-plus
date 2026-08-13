@@ -1,5 +1,5 @@
 /**
- * Finish-review form Esc layering + ⌥I + OptBtnHint; does not close PR shell.
+ * Finish-review form Esc layering + ⌥I + ShortcutHint; does not close PR shell.
  *
  *   rstest run -c rstest.e2e.config.ts finish-review
  */
@@ -160,7 +160,7 @@ export function getSteps() {
     assert(overlayOpen(), 'Esc closing finish-review must not close PR shell');
   });
 
-  run('FR.4 ⌥I focuses finish composer + Cancel/⌥I OptBtnHint hosts', () => {
+  run('FR.4 ⌥I focuses finish composer + Cancel/⌥I ShortcutHint hosts', () => {
     openFinishReviewUi();
     waitMs(400);
     assert(finishOpen(), 're-open finish-review for ⌥I');
@@ -255,7 +255,7 @@ export function getSteps() {
     );
     assert(
       after?.cancelOptHost && after?.composerOptHost,
-      `OptBtnHint hosts missing class prp-opt-hint-host: ${JSON.stringify(after)}`
+      `ShortcutHint hosts missing class prp-opt-hint-host: ${JSON.stringify(after)}`
     );
     // Close form for clean teardown
     blurEditable();

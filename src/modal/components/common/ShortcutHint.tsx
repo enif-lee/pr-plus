@@ -39,7 +39,7 @@ function readDomOptHeld(): boolean {
   }
 }
 
-/** Selection or Diff navigation settle window — hide all OptBtnHints. */
+/** Selection or Diff navigation settle window — hide all ShortcutHints. */
 function readSelectionNavBusy(): boolean {
   try {
     if (typeof document === 'undefined') return false;
@@ -54,7 +54,7 @@ function readSelectionNavBusy(): boolean {
   }
 }
 
-export function OptBtnHint({
+export function ShortcutHint({
   show: showProp,
   label,
   className = '',

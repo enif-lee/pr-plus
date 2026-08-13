@@ -20,7 +20,7 @@ export type ConfirmDialogProps = {
 
 /**
  * In-app confirmation (replaces browser window.confirm for PR product shell).
- * Portaled to document.body above TipPopover / OptBtnHint layers.
+ * Portaled to document.body above TipPopover / ShortcutHint layers.
  */
 export function ConfirmDialog({
   open,

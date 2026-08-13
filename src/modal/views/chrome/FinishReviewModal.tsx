@@ -2,7 +2,7 @@ import React, { useEffect, useId, useLayoutEffect, useRef, useState } from 'reac
 import { createPortal } from 'react-dom';
 import { Button } from '@common/Button';
 import { MarkdownComposer } from '@common/MarkdownComposer';
-import { OptBtnHint } from '@common/OptBtnHint';
+import { ShortcutHint } from '@common/ShortcutHint';
 import { canSubmitReviewVerdict } from '@lib/pr-edit-api';
 import { useT } from '@lib/locale-context';
 import './FinishReview.css';
@@ -45,7 +45,7 @@ const PANEL_WIDTH_FALLBACK = 540;
  *   ⌥⇧↵                 → Approve
  *   ⌥⇧X                 → Request changes
  *
- * Opt-held shows OptBtnHint badges on CTAs (class `prp-opt-btn-hint--finish`
+ * Opt-held shows ShortcutHint badges on CTAs (class `prp-opt-btn-hint--finish`
  * so background page hints stay suppressed while this dialog is open).
  */
 export function FinishReviewModal({
@@ -350,7 +350,7 @@ export function FinishReviewModal({
           className="prp-finish-review__composer prp-opt-hint-host"
           data-prp-finish-composer="1"
         >
-          <OptBtnHint
+          <ShortcutHint
             label={scFocusInput}
             preferredPlacement="top"
             className="prp-opt-btn-hint--finish"
@@ -385,7 +385,7 @@ export function FinishReviewModal({
               </Button>
             ) : null}
             <span className="prp-opt-hint-host" data-prp-finish-cancel="1">
-              <OptBtnHint
+              <ShortcutHint
                 label={scEsc}
                 preferredPlacement="top"
                 className="prp-opt-btn-hint--finish"
@@ -409,7 +409,7 @@ export function FinishReviewModal({
             aria-label={t('cta_submit_review')}
           >
             <span className="prp-opt-hint-host">
-              <OptBtnHint
+              <ShortcutHint
                 label={scComment}
                 preferredPlacement="top"
                 className="prp-opt-btn-hint--finish"
@@ -429,7 +429,7 @@ export function FinishReviewModal({
             </span>
             {showVerdict ? (
               <span className="prp-opt-hint-host">
-                <OptBtnHint
+                <ShortcutHint
                   label={scApprove}
                   preferredPlacement="top"
                   className="prp-opt-btn-hint--finish"
@@ -450,7 +450,7 @@ export function FinishReviewModal({
             ) : null}
             {showVerdict ? (
               <span className="prp-opt-hint-host">
-                <OptBtnHint
+                <ShortcutHint
                   label={scChanges}
                   preferredPlacement="top"
                   className="prp-opt-btn-hint--finish"

@@ -395,7 +395,7 @@ html.prp-embed-active [data-prp-native-hidden='1'] {
 }
 /*
  * Body-level GH residual only — never hide pr+ portals on body
- * (ConfirmDialog, OptBtnHint, reaction picker, viewers).
+ * (ConfirmDialog, ShortcutHint, reaction picker, viewers).
  */
 html.prp-embed-active
   body

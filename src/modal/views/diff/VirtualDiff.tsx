@@ -36,7 +36,6 @@ import {
   selectionActiveSide,
 } from '@lib/line-selection';
 import { isPathViewed } from '@lib/review-threads';
-import { OptBtnHint } from '@common/OptBtnHint';
 import { FILE_FOLD_SHORTCUT } from '@lib/shortcut-policy';
 import {
   stickyFileHeaderForScroll,

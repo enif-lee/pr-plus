@@ -5,7 +5,7 @@ import { UserLink } from '@common/UserLink';
 import { reviewStatusTone } from '@common/utils';
 import { Avatar } from '@common/Avatar';
 import { IconSync, IconX } from '@common/icons';
-import { OptBtnHint } from '@common/OptBtnHint';
+import { ShortcutHint } from '@common/ShortcutHint';
 import './MetaList.css';
 
 export function MetaList({
@@ -21,7 +21,7 @@ export function MetaList({
   renderStatus,
   addButtonRef,
   avatarUrls,
-  /** e.g. ⌥⇧R / ⌥⇧A — OptBtnHint uses store optHintsActive */
+  /** e.g. ⌥⇧R / ⌥⇧A — ShortcutHint uses store optHintsActive */
   addShortcut = null,
 }: any) {
   const localRef = useRef<HTMLButtonElement | null>(null);
@@ -131,7 +131,7 @@ export function MetaList({
             if (addButtonRef) addButtonRef.current = el;
           }}
         >
-          <OptBtnHint
+          <ShortcutHint
             label={addShortcut}
             preferredPlacement="right"
           />

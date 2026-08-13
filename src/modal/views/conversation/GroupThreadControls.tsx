@@ -4,7 +4,7 @@
  */
 import React from 'react';
 import { IconDisclosure, IconFileDiff } from '@common/icons';
-import { OptBtnHint } from '@common/OptBtnHint';
+import { ShortcutHint } from '@common/ShortcutHint';
 import { useIsConversationKbFocused } from '@common/ConversationKbFocus';
 
 /** Group path-row fold control — ⌥F tip only when this thread is context-focused. */
@@ -48,7 +48,7 @@ export function GroupThreadFoldBtn({
           : undefined
       }
     >
-      {focused ? <OptBtnHint label="⌥F" preferredPlacement="top" /> : null}
+      {focused ? <ShortcutHint label="⌥F" preferredPlacement="top" /> : null}
       <span className="prp-review-group__chev shrink-0" aria-hidden="true">
         <IconDisclosure open={open} size={16} />
       </span>
@@ -94,7 +94,7 @@ export function GroupThreadJumpBtn({
         onJump();
       }}
     >
-      {focused ? <OptBtnHint label="⌥D" preferredPlacement="top" /> : null}
+      {focused ? <ShortcutHint label="⌥D" preferredPlacement="top" /> : null}
       <IconFileDiff size={16} />
     </button>
   );

@@ -9,7 +9,7 @@ import {
 } from '@lib/searchable-select';
 import { Avatar } from './Avatar';
 import { IconCheck } from './icons';
-import { OptBtnHint } from './OptBtnHint';
+import { ShortcutHint } from './ShortcutHint';
 import './SearchableSelect.css';
 
 /**
@@ -18,7 +18,7 @@ import './SearchableSelect.css';
  * - Multi: toggle options, free-text Enter adds to selection, Apply → onConfirm(ids)
  * - allowCreate: when free-text does not match any option, show Create… row
  *
- * Renders via document.body portal so z-index beats Conversation OptBtnHint
+ * Renders via document.body portal so z-index beats Conversation ShortcutHint
  * portals (tip layer lives on body at --prp-z-tip; panel uses --prp-z-portal).
  */
 export function SearchableSelect({
@@ -391,7 +391,7 @@ export function SearchableSelect({
     else if (ids.length === 1) onPick?.({ id: ids[0], label: ids[0] });
   }
 
-  // Portal layer above Conversation OptBtnHint (--prp-z-dialog 100100).
+  // Portal layer above Conversation ShortcutHint (--prp-z-dialog 100100).
   const panelZ = 'var(--prp-z-portal, 120000)';
   const style: React.CSSProperties = pos
     ? {
@@ -513,7 +513,7 @@ export function SearchableSelect({
                   }}
                 >
                   {showOptDigit ? (
-                    <OptBtnHint
+                    <ShortcutHint
                       label={`⌥${rowIndex + 1}`}
                       preferredPlacement="left"
                       className="prp-opt-btn-hint--sselect"
@@ -581,7 +581,7 @@ export function SearchableSelect({
       {footerVisible ? (
         <div className="prp-sselect-footer" data-prp-sselect-footer="1">
           <span className="prp-opt-hint-host prp-sselect-footer__btn-host">
-            <OptBtnHint
+            <ShortcutHint
               label="Esc"
               preferredPlacement="top"
               className="prp-opt-btn-hint--sselect"
@@ -596,7 +596,7 @@ export function SearchableSelect({
             </button>
           </span>
           <span className="prp-opt-hint-host prp-sselect-footer__btn-host">
-            <OptBtnHint
+            <ShortcutHint
               label="⌘↵"
               preferredPlacement="top"
               className="prp-opt-btn-hint--sselect"

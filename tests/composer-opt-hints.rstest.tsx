@@ -1,12 +1,12 @@
 /**
- * OptBtnHint portals only when show/optHintsActive is true.
- * Composer always mounts OptBtnHint leaves; tips paint only while Opt is held
+ * ShortcutHint portals only when show/optHintsActive is true.
+ * Composer always mounts ShortcutHint leaves; tips paint only while Opt is held
  * (store optHintsActive / data-prp-opt-held) — including collapsed ghost state.
  */
 import React from 'react';
 import { describe, expect, test } from '@rstest/core';
 import TestRenderer, { act } from 'react-test-renderer';
-import { OptBtnHint } from '../src/modal/components/common/OptBtnHint';
+import { ShortcutHint } from '../src/modal/components/common/ShortcutHint';
 import { useModalStore } from '../src/modal/store/modal-store';
 
 // Minimal document for createPortal (rstest may lack full DOM)
@@ -15,7 +15,7 @@ function ensureDom() {
   // skip if no document — structural tests only
 }
 
-describe('OptBtnHint gated on optHintsActive / show', () => {
+describe('ShortcutHint gated on optHintsActive / show', () => {
   test('show=false: no portal kbd tip', () => {
     ensureDom();
     if (typeof document === 'undefined') {
@@ -26,7 +26,7 @@ describe('OptBtnHint gated on optHintsActive / show', () => {
     act(() => {
       renderer = TestRenderer.create(
         <div className="prp-opt-hint-host" style={{ width: 100, height: 40 }}>
-          <OptBtnHint show={false} label="⌥E" />
+          <ShortcutHint show={false} label="⌥E" />
           <button type="button">Emoji</button>
         </div>
       );
@@ -42,7 +42,7 @@ describe('OptBtnHint gated on optHintsActive / show', () => {
       return;
     }
     // Host needs layout size for coords; jsdom rects may be 0 — still mounts portal only if coords set.
-    // Force show with preferredPlacement; OptBtnHint requires coords from measureHost.
+    // Force show with preferredPlacement; ShortcutHint requires coords from measureHost.
     // In jsdom getBoundingClientRect is often 0 → coords null → no portal.
     // Assert store-driven path instead: setOptHintsActive(true) and show prop true
     // with mock host that has non-zero rect.
@@ -67,7 +67,7 @@ describe('OptBtnHint gated on optHintsActive / show', () => {
       act(() => {
         renderer = TestRenderer.create(
           <div className="prp-opt-hint-host">
-            <OptBtnHint show label="⌥C · ⌘↵" />
+            <ShortcutHint show label="⌥C · ⌘↵" />
             <button type="button">Submit</button>
           </div>
         );
@@ -108,7 +108,7 @@ describe('OptBtnHint gated on optHintsActive / show', () => {
   });
 
   test('store setOptHintsActive toggles leaf show default', () => {
-    // Drive real modal store — OptBtnHint default uses optHintsActive
+    // Drive real modal store — ShortcutHint default uses optHintsActive
     const store = useModalStore.getState();
     store.setOptHintsActive(false);
     expect(useModalStore.getState().optHintsActive).toBe(false);
@@ -146,7 +146,7 @@ describe('OptBtnHint gated on optHintsActive / show', () => {
       act(() => {
         renderer = TestRenderer.create(
           <div className="prp-opt-hint-host">
-            <OptBtnHint label="⌥E" />
+            <ShortcutHint label="⌥E" />
             <span>host</span>
           </div>
         );
@@ -157,12 +157,12 @@ describe('OptBtnHint gated on optHintsActive / show', () => {
       act(() => {
         document.documentElement.setAttribute('data-prp-opt-held', '1');
       });
-      // rAF poll in OptBtnHint — advance frames
+      // rAF poll in ShortcutHint — advance frames
       act(() => {
         // force re-render by toggling
         renderer!.update(
           <div className="prp-opt-hint-host">
-            <OptBtnHint label="⌥E" />
+            <ShortcutHint label="⌥E" />
             <span>host</span>
           </div>
         );
@@ -173,7 +173,7 @@ describe('OptBtnHint gated on optHintsActive / show', () => {
         act(() => {
           renderer!.update(
             <div className="prp-opt-hint-host">
-              <OptBtnHint label="⌥E" />
+              <ShortcutHint label="⌥E" />
               <span>host{i}</span>
             </div>
           );

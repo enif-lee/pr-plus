@@ -352,7 +352,7 @@ export function getSteps() {
     );
     assert(
       focusProbe?.hosts >= 3 && focusProbe?.anchors >= 3,
-      `selection comment must mount OptBtnHint hosts (input/CTAs): ${JSON.stringify(focusProbe)}`
+      `selection comment must mount ShortcutHint hosts (input/CTAs): ${JSON.stringify(focusProbe)}`
     );
     assert(
       focusProbe?.hasStart && focusProbe?.hasCancel && focusProbe?.hasSubmit,
@@ -387,7 +387,7 @@ export function getSteps() {
     assert(
       tips?.n >= 2 ||
         /⌥I|⌥C|⌥S|Esc|Alt\+I|Alt\+C|Alt\+S/i.test(String(tips?.text || '')),
-      `Opt-hold must paint selection comment OptBtnHints: ${JSON.stringify(tips)}`
+      `Opt-hold must paint selection comment ShortcutHints: ${JSON.stringify(tips)}`
     );
     releaseOptHold();
 

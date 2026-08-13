@@ -4,7 +4,7 @@
  * Migrated from styles/parts/24-zero-size-host-marker-for-portaled-tips.css
  */
 
-/* ⇧ optical scale (also used by OptBtnHint via KeyGlyphs) */
+/* ⇧ optical scale (also used by ShortcutHint via KeyGlyphs) */
 .prp-key-glyph--shift {
   display: inline-block;
   font-size: 1.28em;

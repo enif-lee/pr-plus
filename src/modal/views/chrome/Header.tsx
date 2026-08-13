@@ -2,7 +2,7 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 're
 import { Button } from '@common/Button';
 import { Badge } from '@common/Badge';
 import { TipPopover } from '@common/TipPopover';
-import { OptBtnHint } from '@common/OptBtnHint';
+import { ShortcutHint } from '@common/ShortcutHint';
 import { UserLink } from '@common/UserLink';
 import { RefLink } from '@common/RefLink';
 import { Avatar } from '@common/Avatar';
@@ -614,7 +614,7 @@ export function Header(props: any) {
                     aria-label={t('cta_edit_title')}
                     onClick={beginEditTitle}
                   >
-                    <OptBtnHint label="⌥⇧T" preferredPlacement="bottom" />
+                    <ShortcutHint label="⌥⇧T" preferredPlacement="bottom" />
                     <IconPencil size={14} />
                     <TipPopover title={t('cta_edit_title')} shortcut="⌥⇧T" />
                   </button>
@@ -686,7 +686,7 @@ export function Header(props: any) {
                 if (baseBranchRef) baseBranchRef.current = el;
               }}
             >
-              <OptBtnHint label="⌥⇧B" preferredPlacement="bottom" />
+              <ShortcutHint label="⌥⇧B" preferredPlacement="bottom" />
               <IconPencil className="prp-branch-tag__edit" size={12} />
             </button>
           </span>
@@ -776,7 +776,7 @@ export function Header(props: any) {
                 aria-pressed={Boolean(shellFullscreen)}
                 data-fullscreen={shellFullscreen ? '1' : '0'}
               >
-                <OptBtnHint label="⌥⇧F" preferredPlacement="bottom" />
+                <ShortcutHint label="⌥⇧F" preferredPlacement="bottom" />
                 <IconFullscreen active={Boolean(shellFullscreen)} size={16} />
                 <TipPopover
                   title={
@@ -836,7 +836,7 @@ export function Header(props: any) {
                     : t('header_refresh_visible_title')
                 }
               >
-                <OptBtnHint label="⌥⇧G" preferredPlacement="bottom" />
+                <ShortcutHint label="⌥⇧G" preferredPlacement="bottom" />
                 <IconSync size={16} aria-hidden="true" />
                 <TipPopover
                   title={
@@ -871,7 +871,7 @@ export function Header(props: any) {
                 effectiveLayout === LAYOUT_DIFF ? 'diff' : 'conversation'
               }
             >
-              <OptBtnHint label="⌥." preferredPlacement="bottom" />
+              <ShortcutHint label="⌥." preferredPlacement="bottom" />
               {effectiveLayout === LAYOUT_DIFF ? (
                 <IconConversation size={16} aria-hidden="true" />
               ) : (

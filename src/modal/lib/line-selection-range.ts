@@ -21,7 +21,7 @@ export const SELECTION_ACTIONS_REVEAL_MS = 450;
 
 /**
  * documentElement attribute while keyboard/pointer selection nav is in flight
- * or within the settle window. OptBtnHint + CSS hide badges; floatbar stays down.
+ * or within the settle window. ShortcutHint + CSS hide badges; floatbar stays down.
  */
 export const SELECTION_NAV_BUSY_ATTR = 'data-prp-selection-nav';
 
@@ -73,7 +73,7 @@ export const SELECTION_DOCK_ACTIONS_H_EST = 40;
 /** Estimated comment island height floor. */
 export const SELECTION_DOCK_COMMENT_H_EST = 160;
 /**
- * OptBtnHint strip outside the bar (badge ~18 + gap ~8).
+ * ShortcutHint strip outside the bar (badge ~18 + gap ~8).
  * Always reserved for actions so Opt-hold does not clip after flip.
  */
 export const SELECTION_DOCK_OPT_HINT_H_EST = 26;
@@ -86,7 +86,7 @@ export const SELECTION_DOCK_GAP_EST = 6;
 export function selectionDockSideNeed(opts: {
   dockHeight?: number;
   phase?: 'actions' | 'comment' | string | null;
-  /** Default true for actions — include OptBtnHint strip in the need. */
+  /** Default true for actions — include ShortcutHint strip in the need. */
   includeOptHints?: boolean;
   gap?: number;
 } = {}): number {
@@ -106,7 +106,7 @@ export function selectionDockSideNeed(opts: {
 }
 
 /**
- * OptBtnHint preferred placement relative to the floatbar:
+ * ShortcutHint preferred placement relative to the floatbar:
  * - dock **above** selection → hints further up (`top`)
  * - dock **below** selection → hints further down (`bottom`)
  */
@@ -195,7 +195,7 @@ export function selectionHeadBlockRole(
  * (outward from the block) so we do not treat “space under the caret into the
  * selected body” as free room for the floatbar.
  *
- * `need` includes the OptBtnHint strip for actions (see selectionDockSideNeed).
+ * `need` includes the ShortcutHint strip for actions (see selectionDockSideNeed).
  *
  * Pure geometry — used by SelectionCommentBar layout effect.
  */
@@ -576,7 +576,7 @@ export function shouldUseNativeTextSelectOnDrag(opts: {
 
 /**
  * Read Opt-held latch from the event and/or document attribute used by
- * OptBtnHint / e2e (`data-prp-opt-held` / class `prp-opt-held`).
+ * ShortcutHint / e2e (`data-prp-opt-held` / class `prp-opt-held`).
  *
  * @param {{ altKey?: boolean } | null | undefined} eventLike
  * @param {Document | null | undefined} [doc]

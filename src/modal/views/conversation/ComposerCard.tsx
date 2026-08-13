@@ -7,7 +7,7 @@ import { Button } from '@common/Button';
 import { Badge } from '@common/Badge';
 import { Card } from '@common/Card';
 import { MarkdownComposer } from '@common/MarkdownComposer';
-import { OptBtnHint } from '@common/OptBtnHint';
+import { ShortcutHint } from '@common/ShortcutHint';
 import { useT } from '@lib/locale-context';
 import { useDomainDetail } from '../../app/domain-detail-context';
 import { pendingReviewCount } from '@lib/pending-review';
@@ -88,7 +88,7 @@ export function ComposerCard({
             className={`inline-flex${hintsOn ? ' prp-opt-hint-host' : ''}`}
           >
             {hintsOn ? (
-              <OptBtnHint label="⌥T" preferredPlacement="top" />
+              <ShortcutHint label="⌥T" preferredPlacement="top" />
             ) : null}
             <button
               type="button"
@@ -168,7 +168,7 @@ export function ComposerCard({
           }`}
         >
           {hintsOn ? (
-            <OptBtnHint label="⌥I" preferredPlacement="top" />
+            <ShortcutHint label="⌥I" preferredPlacement="top" />
           ) : null}
           <MarkdownComposer
             value={commentText}
@@ -197,7 +197,7 @@ export function ComposerCard({
               className={`inline-flex${hintsOn ? ' prp-opt-hint-host' : ''}`}
             >
               {hintsOn ? (
-                <OptBtnHint label="⌥C · ⌘↵" preferredPlacement="top" />
+                <ShortcutHint label="⌥C · ⌘↵" preferredPlacement="top" />
               ) : null}
               <Button
                 variant="primary"
@@ -242,7 +242,7 @@ export function ComposerCard({
               className={`inline-flex${hintsOn ? ' prp-opt-hint-host' : ''}`}
             >
               {hintsOn ? (
-                <OptBtnHint label="⌥C · ⌘↵" preferredPlacement="top" />
+                <ShortcutHint label="⌥C · ⌘↵" preferredPlacement="top" />
               ) : null}
               <Button
                 variant="primary"

@@ -518,7 +518,7 @@ type ResidualEl = {
 /**
  * Whether a direct `body` child should stay visible/mounted under embed.
  * Keeps pr+ hosts, non-layout tags (script/style/link/…), and pr+ portals
- * (ConfirmDialog / OptBtnHint / reaction picker live on document.body).
+ * (ConfirmDialog / ShortcutHint / reaction picker live on document.body).
  */
 export function shouldKeepEmbedBodyChild(
   el: ResidualEl | null | undefined,

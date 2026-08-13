@@ -275,7 +275,7 @@
   margin-left: auto;
 }
 /* Suppress background Opt / tip chrome while Finish review is open.
-   Modal CTA OptBtnHints use --finish and must stay visible on Opt-hold. */
+   Modal CTA ShortcutHints use --finish and must stay visible on Opt-hold. */
 body:has([data-prp-finish-review='1']) .prp-opt-btn-hint:not(.prp-opt-btn-hint--finish),
 body:has([data-prp-finish-review='1']) .prp-tip-pop:not(.prp-tip-pop--finish) {
   display: none !important;

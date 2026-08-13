@@ -1,10 +1,10 @@
 import React from 'react';
 import { TipPopover } from './TipPopover';
-import { OptBtnHint } from './OptBtnHint';
+import { ShortcutHint } from './ShortcutHint';
 
 /**
  * Icon chrome for comment actions: hover TipPopover (title + shortcut) and
- * Option-hold OptBtnHint when the parent comment/thread is focused.
+ * Option-hold ShortcutHint when the parent comment/thread is focused.
  */
 export function CommentActionIconBtn({
   tipTitle,
@@ -17,7 +17,7 @@ export function CommentActionIconBtn({
   ...rest
 }: {
   tipTitle: string;
-  /** e.g. ⌥Y — shown in TipPopover and OptBtnHint */
+  /** e.g. ⌥Y — shown in TipPopover and ShortcutHint */
   shortcut?: string | null;
   /** When true, Opt-hold badge is eligible (focus ring on this comment/thread). */
   showShortcutHint?: boolean;
@@ -49,12 +49,12 @@ export function CommentActionIconBtn({
       {...rest}
     >
       {hostOpt ? (
-        <OptBtnHint label={kbd} preferredPlacement="top" />
+        <ShortcutHint label={kbd} preferredPlacement="top" />
       ) : null}
       <TipPopover
         title={tip || null}
         // Shortcut in hover tip only when this comment/thread is focused
-        // (matches OptBtnHint eligibility).
+        // (matches ShortcutHint eligibility).
         shortcut={hostOpt ? kbd || null : null}
         preferredPlacement="top"
       />

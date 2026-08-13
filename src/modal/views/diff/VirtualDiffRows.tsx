@@ -37,7 +37,7 @@ import {
   shouldUseNativeTextSelectOnDrag,
 } from '@lib/line-selection';
 import { isPathViewed } from '@lib/review-threads';
-import { OptBtnHint } from '@common/OptBtnHint';
+import { ShortcutHint } from '@common/ShortcutHint';
 import {
   FILE_FOLD_SHORTCUT,
   TOGGLE_VIEWED_SHORTCUT,
@@ -89,7 +89,7 @@ export function fileHeaderTone(row: any) {
 }
 
 /**
- * OptBtnHint label for the file-header viewed/read checkbox.
+ * ShortcutHint label for the file-header viewed/read checkbox.
  * Only when the file header is focused (same gate as fold chevron).
  * Labels from TOGGLE_VIEWED_SHORTCUT (⌥⇧R / Alt+Shift+R).
  */
@@ -224,7 +224,7 @@ export function FileHeaderRow(props: {
         data-prp-file-viewed-hint={viewedKbd ? '1' : undefined}
       >
         {viewedKbd ? (
-          <OptBtnHint label={viewedKbd} preferredPlacement="bottom" />
+          <ShortcutHint label={viewedKbd} preferredPlacement="bottom" />
         ) : null}
         <input
           type="checkbox"
@@ -254,7 +254,7 @@ export function FileHeaderRow(props: {
           onClick={() => onToggleCollapse?.(row.filePath)}
         >
           {focused ? (
-            <OptBtnHint label={foldKbd} preferredPlacement="bottom" />
+            <ShortcutHint label={foldKbd} preferredPlacement="bottom" />
           ) : null}
           <IconDisclosure open={!collapsed} size={12} />
         </button>

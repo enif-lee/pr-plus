@@ -93,7 +93,7 @@
 
 /* ── Anchored searchable select popover ──
  * Base geometry only — stacking is owned by SearchableSelect.css
- * (body portal at --prp-z-portal 120000 above OptBtnHint tips). */
+ * (body portal at --prp-z-portal 120000 above ShortcutHint tips). */
 .prp-sselect-panel--popover {
   position: fixed;
   width: min(320px, 92vw);

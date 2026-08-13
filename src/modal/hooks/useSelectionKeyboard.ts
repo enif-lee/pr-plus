@@ -756,7 +756,7 @@ export function useSelectionKeyboard(b: any) {
     }
   }
 
-  /** Stamp documentElement so OptBtnHint / CSS can hide badges during jump. */
+  /** Stamp documentElement so ShortcutHint / CSS can hide badges during jump. */
   function setSelectionNavBusy(busy: boolean) {
     const next = Boolean(busy);
     selectionNavBusyRef.current = next;
@@ -869,7 +869,7 @@ export function useSelectionKeyboard(b: any) {
   }
 
   /**
-   * After select/move: hide actions dock + OptBtnHints immediately, then after
+   * After select/move: hide actions dock + ShortcutHints immediately, then after
    * SELECTION_ACTIONS_REVEAL_MS settle re-sync (Opt-hold / hover may show dock).
    * Comment phase stays open. Jump-hold resets the timer on every move.
    */
@@ -884,7 +884,7 @@ export function useSelectionKeyboard(b: any) {
       }
       return;
     }
-    // Jump in flight: suppress floatbar + all OptBtnHints until settle
+    // Jump in flight: suppress floatbar + all ShortcutHints until settle
     setSelectionNavBusy(true);
     if (useModalStore.getState().showSelectionComposer) {
       setShowSelectionComposer(false);
@@ -897,7 +897,7 @@ export function useSelectionKeyboard(b: any) {
     selectionActionsTimerRef.current = setTimeout(() => {
       selectionActionsTimerRef.current = null;
       setSelectionNavBusy(false);
-      // Arm store + floatbar in one turn so OptBtnHints mount with the dock
+      // Arm store + floatbar in one turn so ShortcutHints mount with the dock
       // (same Opt-hold gesture after selection settle).
       try {
         const optDown =

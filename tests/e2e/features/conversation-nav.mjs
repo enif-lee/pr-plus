@@ -1146,7 +1146,7 @@ export function getSteps() {
     `);
     waitMs(120);
 
-    // Composer-focused chrome: hosts with OptBtnHint for emoji/submit/resolve
+    // Composer-focused chrome: hosts with ShortcutHint for emoji/submit/resolve
     const chrome = evalInPage(`
       (() => {
         const ae = document.activeElement;
@@ -1205,10 +1205,10 @@ export function getSteps() {
         chrome.hosts > 0 ||
         /⌥C|⌘|Ctrl|Enter/.test(chrome.submitTitle) ||
         chrome.hasRoot,
-      `expected OptBtnHint anchors, hosts, or composer root: ${JSON.stringify(chrome)}`
+      `expected ShortcutHint anchors, hosts, or composer root: ${JSON.stringify(chrome)}`
     );
 
-    // Opt-hold: sample OptBtnHint portals WHILE Alt is still down (mid-hold).
+    // Opt-hold: sample ShortcutHint portals WHILE Alt is still down (mid-hold).
     // holdChord(sample:'optHints') records tipCount before keyup.
     const hold = holdChord('Alt', { holdMs: 700, repeatMs: 50, sample: 'optHints' });
     const mid = Array.isArray(hold.optSamples) ? hold.optSamples : [];
@@ -1226,7 +1226,7 @@ export function getSteps() {
     );
     assert(
       best.tipCount > 0 || best.on || best.hasEmoji || best.hasSubmit,
-      `expected OptBtnHint tips WHILE Alt held, got mid=${JSON.stringify(mid)} chrome=${JSON.stringify(chrome)}`
+      `expected ShortcutHint tips WHILE Alt held, got mid=${JSON.stringify(mid)} chrome=${JSON.stringify(chrome)}`
     );
     // Prefer emoji or submit labels among portaled tips
     if (best.tipCount > 0) {

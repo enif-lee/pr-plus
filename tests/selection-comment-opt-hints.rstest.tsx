@@ -1,5 +1,5 @@
 /**
- * Selection comment island (⌥C): OptBtnHints + composer surface parity with
+ * Selection comment island (⌥C): ShortcutHints + composer surface parity with
  * thread reply / finish-review forms — input (⌥I), Comment (⌥C·⌘↵),
  * Start review / Add comment (⌥S or ⌥C), Cancel (Esc). Focus after open.
  */
@@ -18,8 +18,8 @@ function read(rel: string) {
   return fs.readFileSync(path.join(root, rel), 'utf8');
 }
 
-describe('SelectionCommentBar comment-phase OptBtnHints wiring', () => {
-  test('comment phase always mounts OptBtnHint leaves for input/CTAs/cancel', () => {
+describe('SelectionCommentBar comment-phase ShortcutHints wiring', () => {
+  test('comment phase always mounts ShortcutHint leaves for input/CTAs/cancel', () => {
     const src = read('src/modal/views/diff/SelectionCommentBar.tsx');
     expect(src).toMatch(/data-prp-composer-kind="selection"/);
     expect(src).toMatch(/data-prp-composer-root="1"/);
@@ -31,8 +31,8 @@ describe('SelectionCommentBar comment-phase OptBtnHints wiring', () => {
     expect(src).toMatch(/const kbdCancel = ['"]Esc['"]/);
 
     // Always-mounted leaves (not focus-gated) so Opt-hold paints all controls
-    expect(src).toMatch(/<OptBtnHint label=\{kbdFocus\}/);
-    expect(src).toMatch(/<OptBtnHint label=\{kbdCancel\}/);
+    expect(src).toMatch(/<ShortcutHint label=\{kbdFocus\}/);
+    expect(src).toMatch(/<ShortcutHint label=\{kbdCancel\}/);
     expect(src).toMatch(/label=\{canImmediate \? kbdStartPending : kbdSubmit\}/);
     expect(src).toMatch(/label=\{kbdSubmit\}/);
 
@@ -53,7 +53,7 @@ describe('SelectionCommentBar comment-phase OptBtnHints wiring', () => {
     expect(src).toMatch(/\{canImmediate \? \(/);
   });
 
-  test('actions phase keeps Comment chip OptBtnHint (⌥C)', () => {
+  test('actions phase keeps Comment chip ShortcutHint (⌥C)', () => {
     const src = read('src/modal/views/diff/SelectionCommentBar.tsx');
     expect(src).toMatch(/const kbdComment = /);
     // Actions Comment button opens comment phase

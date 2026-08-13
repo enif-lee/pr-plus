@@ -551,7 +551,7 @@
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--prp-accent) 18%, transparent);
 }
 /*
- * OptBtnHint measures host getBoundingClientRect — must be non-zero size
+ * ShortcutHint measures host getBoundingClientRect — must be non-zero size
  * (width/height 0 made hostIsLive fail and tips never portal).
  */
 .prp-inline-thread__context-hint {

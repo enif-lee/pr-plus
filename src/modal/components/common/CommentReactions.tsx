@@ -12,7 +12,7 @@ import {
   type ReactionGroup,
 } from '@lib/comment-reactions';
 import { TipPopover } from './TipPopover';
-import { OptBtnHint } from './OptBtnHint';
+import { ShortcutHint } from './ShortcutHint';
 import './CommentReactions.css';
 
 export type CommentReactionTarget = {
@@ -47,7 +47,7 @@ type Props = {
     target: CommentReactionTarget
   ) => void | Promise<void>;
   /**
-   * When true (parent comment/thread kb-focused), show OptBtnHint for ⌥.
+   * When true (parent comment/thread kb-focused), show ShortcutHint for ⌥.
    * TipPopover with shortcut always when a shortcut label is provided.
    */
   showShortcutHint?: boolean;
@@ -371,7 +371,7 @@ export function CommentReactions({
   // Hide entirely when disabled and nothing to show (e.g. pending)
   if (disabled && active.length === 0) return null;
 
-  // body portal: viewport-fixed coords (same as OptBtnHint) — avoid overlay
+  // body portal: viewport-fixed coords (same as ShortcutHint) — avoid overlay
   // stacking/transform contexts shifting the menu away from the ☺ button.
   const portalRoot =
     typeof document !== 'undefined' ? document.body : null;
@@ -478,7 +478,7 @@ export function CommentReactions({
           ref={hostRef}
         >
           {showShortcutHint && reactionShortcut ? (
-            <OptBtnHint label={reactionShortcut} preferredPlacement="top" />
+            <ShortcutHint label={reactionShortcut} preferredPlacement="top" />
           ) : null}
           <TipPopover
             title="Add reaction"

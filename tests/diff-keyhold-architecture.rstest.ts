@@ -77,7 +77,7 @@ describe('Diff key-hold architecture', () => {
   test('host paints and URI writes yield while Diff navigation is active', () => {
     const shell = readShell();
     const host = read('src/host/modules/props-render-close.ts');
-    const optHint = read('src/modal/components/common/OptBtnHint.tsx');
+    const optHint = read('src/modal/components/common/ShortcutHint.tsx');
     expect(shell).toMatch(/data-prp-diff-nav-active/);
     expect(shell).toMatch(/window\.setTimeout\(flushRoute, 80\)/);
     expect(host).toMatch(/diffNavDeferredRenderTimer/);

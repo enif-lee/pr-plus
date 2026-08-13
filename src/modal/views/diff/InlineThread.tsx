@@ -4,7 +4,7 @@ import { Badge } from '@common/Badge';
 import { MarkdownView } from '@common/MarkdownView';
 import { UserLink } from '@common/UserLink';
 import { MarkdownComposer } from '@common/MarkdownComposer';
-import { OptBtnHint } from '@common/OptBtnHint';
+import { ShortcutHint } from '@common/ShortcutHint';
 import { formatWhen } from '@common/utils';
 import { Avatar } from '@common/Avatar';
 import {
@@ -447,7 +447,7 @@ function InlineThreadImpl(props: any) {
 
   /**
    * Copy body/link + quote + hide for any reader; edit/delete only when own.
-   * TipPopover always; OptBtnHint only on the **root** when the thread is
+   * TipPopover always; ShortcutHint only on the **root** when the thread is
    * context-focused (replies never get Option digit badges).
    */
   function renderCommentActions(
@@ -460,7 +460,7 @@ function InlineThreadImpl(props: any) {
       isMinimized?: boolean;
       minimizedReason?: string | null;
       viewerCanMinimize?: boolean | null;
-      /** When false, suppress OptBtnHint even if thread is context-active */
+      /** When false, suppress ShortcutHint even if thread is context-active */
       isRoot?: boolean;
     } = {}
   ) {
@@ -672,7 +672,7 @@ function InlineThreadImpl(props: any) {
     if (isEditingId(id)) return null;
     if (comment?.pending) return null;
     if (typeof onToggleReaction !== 'function') return null;
-    // ⌥E OptBtnHint on the focused unit (root or reply), not root-only.
+    // ⌥E ShortcutHint on the focused unit (root or reply), not root-only.
     const sc =
       typeof shouldShowThreadOptHints === 'function'
         ? shouldShowThreadOptHints({
@@ -848,7 +848,7 @@ function InlineThreadImpl(props: any) {
                 }
               >
                 {contextActive ? (
-                  <OptBtnHint label="⌥F" preferredPlacement="top" />
+                  <ShortcutHint label="⌥F" preferredPlacement="top" />
                 ) : null}
                 <span className="prp-thread-toggle__icon" aria-hidden="true">
                   <IconDisclosure open={!collapsed} size={16} />
@@ -1220,11 +1220,11 @@ function InlineThreadImpl(props: any) {
                   }
                 >
                   {replyFocused ? (
-                    <OptBtnHint label="⌥I" preferredPlacement="top" />
+                    <ShortcutHint label="⌥I" preferredPlacement="top" />
                   ) : null}
                   {/* 1st ⌥I: focus reply when thread focused but input not yet */}
                   {contextActive && !replyFocused ? (
-                    <OptBtnHint label="⌥I" preferredPlacement="top" />
+                    <ShortcutHint label="⌥I" preferredPlacement="top" />
                   ) : null}
                   <MarkdownComposer
                     value={replyText || ''}
@@ -1282,7 +1282,7 @@ function InlineThreadImpl(props: any) {
                     }}
                   >
                     {replyFocused || contextActive ? (
-                      <OptBtnHint label="⌥C · ⌘↵" preferredPlacement="top" />
+                      <ShortcutHint label="⌥C · ⌘↵" preferredPlacement="top" />
                     ) : null}
                     <Button
                       size="sm"
@@ -1324,7 +1324,7 @@ function InlineThreadImpl(props: any) {
                   }}
                 >
                   {replyFocused || contextActive ? (
-                    <OptBtnHint
+                    <ShortcutHint
                       label={canImmediateComment ? '⌥S' : '⌥C · ⌘↵'}
                       preferredPlacement="top"
                     />
@@ -1375,7 +1375,7 @@ function InlineThreadImpl(props: any) {
                     {/* Thread/comment focus (not only reply input) — ⌥⌃R only
                         while the unit is the context target. */}
                     {contextActive || replyFocused ? (
-                      <OptBtnHint label="⌥⌃R" preferredPlacement="top" />
+                      <ShortcutHint label="⌥⌃R" preferredPlacement="top" />
                     ) : null}
                     <Button
                       size="sm"

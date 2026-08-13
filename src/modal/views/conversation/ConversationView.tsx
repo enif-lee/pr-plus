@@ -105,7 +105,7 @@ import {
 } from '@lib/page-embed';
 import { resolveDevelopmentMainOpen } from '@lib/command-palette';
 import { canSubmitReviewVerdict } from '@lib/pr-edit-api';
-import { OptBtnHint } from '@common/OptBtnHint';
+import { ShortcutHint } from '@common/ShortcutHint';
 import { CommentActionIconBtn } from '@common/CommentActionIconBtn';
 import { useModalStore } from '../../store/modal-store';
 import { useSearchGroup } from '../../store/data-groups';
@@ -1997,7 +1997,7 @@ function ConversationViewImpl(props: any) {
               aria-label={collapsed ? 'Expand thread' : 'Collapse thread'}
             >
               {focused ? (
-                <OptBtnHint label="⌥F" preferredPlacement="top" />
+                <ShortcutHint label="⌥F" preferredPlacement="top" />
               ) : null}
               <span className="prp-conversation-thread-header__chev" aria-hidden="true">
                 <IconDisclosure open={!collapsed} size={16} />
@@ -2056,7 +2056,7 @@ function ConversationViewImpl(props: any) {
                 }
               >
                 {focused ? (
-                  <OptBtnHint label="⌥D" preferredPlacement="top" />
+                  <ShortcutHint label="⌥D" preferredPlacement="top" />
                 ) : null}
                 <IconFileDiff size={16} />
               </button>
@@ -2398,7 +2398,7 @@ function ConversationViewImpl(props: any) {
           }
           aria-expanded={!asideCollapsed}
         >
-          <OptBtnHint label={sidePanelKbd}
+          <ShortcutHint label={sidePanelKbd}
             preferredPlacement="bottom"
           />
           {asideCollapsed ? (
@@ -2544,7 +2544,7 @@ function ConversationViewImpl(props: any) {
               ref={labelAddRef}
               title={`${t('meta_add_label')} (⌥⇧L)`}
             >
-              <OptBtnHint label="⌥⇧L"
+              <ShortcutHint label="⌥⇧L"
                 preferredPlacement="right"
               />
               {t('meta_add_label')}
@@ -2632,7 +2632,7 @@ function ConversationViewImpl(props: any) {
                 detail.milestone ? t('meta_change_milestone') : t('meta_set_milestone')
               } (⌥⇧P)`}
             >
-              <OptBtnHint label="⌥⇧P"
+              <ShortcutHint label="⌥⇧P"
                 preferredPlacement="right"
               />
               {detail.milestone ? t('meta_change_milestone') : t('meta_set_milestone')}

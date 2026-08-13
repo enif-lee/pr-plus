@@ -2,7 +2,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Button } from '@common/Button';
 import { MarkdownComposer } from '@common/MarkdownComposer';
 import { TipPopover } from '@common/TipPopover';
-import { OptBtnHint } from '@common/OptBtnHint';
+import { ShortcutHint } from '@common/ShortcutHint';
 import { IconX } from '@common/icons';
 import {
   extractSelectedCodeText,
@@ -367,7 +367,7 @@ export function SelectionCommentBar(props: any) {
           disabled={actionBusy}
           onClick={() => setPhase('comment')}
         >
-          <OptBtnHint
+          <ShortcutHint
             label={kbdComment}
             preferredPlacement={optHintPlace}
           />
@@ -387,7 +387,7 @@ export function SelectionCommentBar(props: any) {
           disabled={actionBusy}
           onClick={() => void copyCode()}
         >
-          <OptBtnHint
+          <ShortcutHint
             label={kbdCopyCode}
             preferredPlacement={optHintPlace}
           />
@@ -405,7 +405,7 @@ export function SelectionCommentBar(props: any) {
           disabled={actionBusy}
           onClick={() => void copyUrl()}
         >
-          <OptBtnHint
+          <ShortcutHint
             label={kbdCopyUrl}
             preferredPlacement={optHintPlace}
           />
@@ -424,7 +424,7 @@ export function SelectionCommentBar(props: any) {
           onClick={onCancel}
           aria-label="Dismiss selection"
         >
-          <OptBtnHint
+          <ShortcutHint
             label="Esc"
             preferredPlacement={optHintPlace}
           />
@@ -436,7 +436,7 @@ export function SelectionCommentBar(props: any) {
   }
 
   // ── Comment composer (file or line) ──
-  // OptBtnHint always mounts; paints on Opt-hold (store) — same as FinishReview
+  // ShortcutHint always mounts; paints on Opt-hold (store) — same as FinishReview
   // / thread reply. Focus after ⌥C also arms composer-context chords (⌥C/I/S).
   // GitHub: with a PENDING review, only attach (Add comment) — no single Comment.
   const kbdFocus = `${opt}I`;
@@ -475,7 +475,7 @@ export function SelectionCommentBar(props: any) {
       onClick={(e) => e.stopPropagation()}
     >
       <div className="prp-opt-hint-host prp-selection-island__composer-field">
-        <OptBtnHint label={kbdFocus} preferredPlacement={optHintPlace} />
+        <ShortcutHint label={kbdFocus} preferredPlacement={optHintPlace} />
         <MarkdownComposer
           value={draft}
           onChange={onDraft}
@@ -499,7 +499,7 @@ export function SelectionCommentBar(props: any) {
       <div className="prp-composer__row">
         {canImmediate ? (
           <span className="prp-opt-hint-host inline-flex">
-            <OptBtnHint label={kbdSubmit} preferredPlacement={optHintPlace} />
+            <ShortcutHint label={kbdSubmit} preferredPlacement={optHintPlace} />
             <Button
               size="sm"
               variant="primary"
@@ -516,7 +516,7 @@ export function SelectionCommentBar(props: any) {
           </span>
         ) : null}
         <span className="prp-opt-hint-host inline-flex">
-          <OptBtnHint
+          <ShortcutHint
             label={canImmediate ? kbdStartPending : kbdSubmit}
             preferredPlacement={optHintPlace}
           />
@@ -541,7 +541,7 @@ export function SelectionCommentBar(props: any) {
         </span>
         <span className="prp-opt-hint-host inline-flex">
           {/* Esc → action chips (App layering); second Esc on actions dismisses. */}
-          <OptBtnHint label={kbdCancel} preferredPlacement={optHintPlace} />
+          <ShortcutHint label={kbdCancel} preferredPlacement={optHintPlace} />
           <Button
             size="sm"
             disabled={actionBusy}

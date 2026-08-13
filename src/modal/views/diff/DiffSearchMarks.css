@@ -471,7 +471,7 @@ kbd.prp-modal-hotkey {
   pointer-events: none;
 }
 /*
- * Selection ↑↓ / region hop settle: hide every OptBtnHint (floatbar delayed).
+ * Selection ↑↓ / region hop settle: hide every ShortcutHint (floatbar delayed).
  * Attr stamped on documentElement by scheduleSelectionActionsReveal.
  */
 html[data-prp-selection-nav='1'] .prp-opt-btn-hint,
@@ -562,7 +562,7 @@ html[data-prp-selection-nav='1'] .prp-opt-btn-hint--fixed {
  * While Opt hints are on, only lift overflow on header chrome.
  * Do NOT toggle overflow on .prp-body-panel / .prp-conversation / merge-box —
  * that reflows the scrollport (scrollbar + contain) and causes layout shake
- * every Opt press/release. OptBtnHint badges are position:fixed portals.
+ * every Opt press/release. ShortcutHint badges are position:fixed portals.
  */
 .prp-overlay.prp-opt-hints-on .prp-header,
 .prp-overlay.prp-opt-hints-on .prp-header__row,

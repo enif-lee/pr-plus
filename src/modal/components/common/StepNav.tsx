@@ -1,6 +1,6 @@
 import React, { memo } from 'react';
 import { TipPopover } from '@common/TipPopover';
-import { OptBtnHint } from '@common/OptBtnHint';
+import { ShortcutHint } from '@common/ShortcutHint';
 
 export type StepNavProps = {
   /** 0-based current hit/thread index; negative means none selected */
@@ -36,7 +36,7 @@ export type StepNavProps = {
  *
  * Order: n/m · ↑ · ↓. Prev and next share the same fixed width.
  * Tips show description + shortcut when provided.
- * Opt-hold badges: OptBtnHint leaf-subscribes to modal store.
+ * Opt-hold badges: ShortcutHint leaf-subscribes to modal store.
  */
 export const StepNav = memo(function StepNav({
   index = -1,
@@ -100,7 +100,7 @@ export const StepNav = memo(function StepNav({
         aria-label={prevKbd ? `${prevTip} (${prevKbd})` : prevTip}
       >
         {prevKbd ? (
-          <OptBtnHint label={prevKbd} preferredPlacement="top" />
+          <ShortcutHint label={prevKbd} preferredPlacement="top" />
         ) : null}
         {prevGlyph}
         <TipPopover
@@ -119,7 +119,7 @@ export const StepNav = memo(function StepNav({
         aria-label={nextKbd ? `${nextTip} (${nextKbd})` : nextTip}
       >
         {nextKbd ? (
-          <OptBtnHint label={nextKbd} preferredPlacement="top" />
+          <ShortcutHint label={nextKbd} preferredPlacement="top" />
         ) : null}
         {nextGlyph}
         <TipPopover

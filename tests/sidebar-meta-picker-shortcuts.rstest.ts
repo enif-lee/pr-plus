@@ -122,7 +122,7 @@ describe('reviewer/assignee single-select shared pattern (source)', () => {
     const ui = read('src/modal/components/common/SearchableSelect.tsx');
     expect(ui).toMatch(/resolveOptDigitPickIndex/);
     expect(ui).toMatch(/pickFilteredOptionByIndex/);
-    expect(ui).toMatch(/OptBtnHint/);
+    expect(ui).toMatch(/ShortcutHint/);
     expect(ui).toMatch(/createPortal/);
     // Prefer .prp-overlay for theme tokens; body only as fallback shell
     expect(ui).toMatch(/\.prp-overlay/);
@@ -185,7 +185,7 @@ describe('set milestone shortcut path', () => {
   });
 });
 
-describe('z-index: picker above OptBtnHint', () => {
+describe('z-index: picker above ShortcutHint', () => {
   test('portal token exceeds tip/dialog used by opt hints', () => {
     const tokens = read('src/modal/styles/tokens.css');
     const tip = tokens.match(/--prp-z-tip:\s*(\d+)/);

@@ -1,5 +1,5 @@
 /**
- * E2E: Finish-review Esc layering + ⌥I + OptBtnHint hosts
+ * E2E: Finish-review Esc layering + ⌥I + ShortcutHint hosts
  * rstest run -c rstest.e2e.config.ts finish-review
  */
 import { registerE2eFeature } from '../lib/e2e-register';

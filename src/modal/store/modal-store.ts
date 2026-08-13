@@ -65,7 +65,7 @@ export interface ModalUiState {
    */
   pendingConversationNavAnchor: string | null;
   /**
-   * Option-hold shortcut badges active. OptBtnHint subscribes; App toggles
+   * Option-hold shortcut badges active. ShortcutHint subscribes; App toggles
    * overlay class via DOM so the conversation tree does not re-render.
    */
   optHintsActive: boolean;

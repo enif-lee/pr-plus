@@ -1632,7 +1632,7 @@ export function holdChord(chord, opts = {}) {
         }
         return null;
       };
-      /** Mid-hold snapshot of OptBtnHint portals + overlay class. */
+      /** Mid-hold snapshot of ShortcutHint portals + overlay class. */
       const sampleOptHints = () => {
         const on = !!document.querySelector(
           '.prp-opt-hints-on, .prp-overlay.prp-opt-hints-on'
@@ -1689,7 +1689,7 @@ export function holdChord(chord, opts = {}) {
       } else {
         window.__prpE2eHold.events += 1;
       }
-      // Arm OptBtnHint via shared DOM latch (works across page/content worlds)
+      // Arm ShortcutHint via shared DOM latch (works across page/content worlds)
       // + CustomEvent for content-script store.
       const setOptHints = (active) => {
         try {
@@ -1798,7 +1798,7 @@ export function holdChord(chord, opts = {}) {
     events: result.events,
     holdMs: result.holdMs,
     samples: result.samples || [],
-    /** Mid-hold OptBtnHint snapshots (when sample: 'optHints') */
+    /** Mid-hold ShortcutHint snapshots (when sample: 'optHints') */
     optSamples: result.optSamples || [],
     scrollStart: result.scrollStart,
     scrollEnd: result.scrollEnd,

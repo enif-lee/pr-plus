@@ -156,7 +156,7 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
   }
 
   /**
-   * Opt-hold → store only (no App setState). Leaf OptBtnHint + overlay class bridge
+   * Opt-hold → store only (no App setState). Leaf ShortcutHint + overlay class bridge
    * re-render; ConversationView tree stays memoized.
    * Fullscreen Mermaid/Image viewers own the stage — never paint tips underneath.
    */
@@ -247,7 +247,7 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
     /**
      * Automation / mid-hold sampling bridge. Synthetic KeyboardEvents from the
      * page world sometimes fail to latch altKey for content-script listeners;
-     * e2e holdChord dispatches this while Alt is held so OptBtnHint portals paint.
+     * e2e holdChord dispatches this while Alt is held so ShortcutHint portals paint.
      * detail.active: boolean
      */
     const onForce = (e: Event) => {

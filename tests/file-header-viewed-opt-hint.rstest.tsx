@@ -1,5 +1,5 @@
 /**
- * File-header viewed/read checkbox OptBtnHint under file focus.
+ * File-header viewed/read checkbox ShortcutHint under file focus.
  * Drives real `fileHeaderViewedOptHintLabel` + TOGGLE_VIEWED_SHORTCUT SoT
  * and structural wiring in FileHeaderRow / shipped bundle.
  */
@@ -32,14 +32,14 @@ describe('fileHeaderViewedOptHintLabel (file focus gate)', () => {
     expect(win).not.toBe('Alt+R');
   });
 
-  test('unfocused: no label (no focused OptBtnHint claim)', () => {
+  test('unfocused: no label (no focused ShortcutHint claim)', () => {
     expect(fileHeaderViewedOptHintLabel(false, true)).toBeNull();
     expect(fileHeaderViewedOptHintLabel(false, false)).toBeNull();
   });
 });
 
-describe('FileHeaderRow viewed OptBtnHint wiring', () => {
-  test('FileHeaderRow mounts OptBtnHint from fileHeaderViewedOptHintLabel', () => {
+describe('FileHeaderRow viewed ShortcutHint wiring', () => {
+  test('FileHeaderRow mounts ShortcutHint from fileHeaderViewedOptHintLabel', () => {
     const src = fs.readFileSync(
       path.join(root, 'src/modal/views/diff/VirtualDiffRows.tsx'),
       'utf8'
@@ -48,10 +48,10 @@ describe('FileHeaderRow viewed OptBtnHint wiring', () => {
     expect(src).toMatch(/export function FileHeaderRow/);
     expect(src).toMatch(/fileHeaderViewedOptHintLabel\(focused/);
     expect(src).toMatch(/TOGGLE_VIEWED_SHORTCUT/);
-    // Focus-gated OptBtnHint on viewed host
+    // Focus-gated ShortcutHint on viewed host
     expect(src).toMatch(/data-prp-file-viewed-hint/);
     expect(src).toMatch(
-      /viewedKbd\s*\?\s*\(\s*<OptBtnHint\s+label=\{viewedKbd\}/
+      /viewedKbd\s*\?\s*\(\s*<ShortcutHint\s+label=\{viewedKbd\}/
     );
     expect(src).toMatch(/prp-file-header__viewed/);
     expect(src).toMatch(/prp-opt-hint-host/);

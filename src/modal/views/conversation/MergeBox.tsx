@@ -6,7 +6,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@common/Button';
 import { IconCheck, IconFileDiff, IconMergeStatus } from '@common/icons';
-import { OptBtnHint } from '@common/OptBtnHint';
+import { ShortcutHint } from '@common/ShortcutHint';
 import { MergeBoxChecks } from './MergeBoxChecks';
 import { hasChecksData } from './ChecksPanel';
 import {
@@ -267,7 +267,7 @@ export function MergeBox({
               data-menu-open={mergeMenuOpen ? '1' : '0'}
             >
               <div className="prp-merge-method__split prp-opt-hint-host inline-flex items-stretch overflow-hidden rounded-lg">
-                <OptBtnHint label="⌥⇧M" />
+                <ShortcutHint label="⌥⇧M" />
                 <Button
                   className={`prp-merge-method__primary prp-merge-method__primary--${
                     primaryAction.ctaVariant || 'default'
@@ -353,7 +353,7 @@ export function MergeBox({
 
           {ms.showUpdateBranch ? (
             <span className="prp-opt-hint-host">
-              <OptBtnHint label="⌥⇧U" />
+              <ShortcutHint label="⌥⇧U" />
               <Button size="sm" disabled={actionBusy} onClick={onUpdateBranch} shortcut="⌥⇧U">
                 {t('cta_update_branch')}
               </Button>
@@ -362,7 +362,7 @@ export function MergeBox({
 
           {ms.draftToggle === 'ready' ? (
             <span className="prp-opt-hint-host">
-              <OptBtnHint label="⌥⇧D" />
+              <ShortcutHint label="⌥⇧D" />
               <Button
                 size="sm"
                 variant="primary"
@@ -376,7 +376,7 @@ export function MergeBox({
           ) : null}
           {ms.draftToggle === 'draft' ? (
             <span className="prp-opt-hint-host">
-              <OptBtnHint label="⌥⇧D" />
+              <ShortcutHint label="⌥⇧D" />
               <Button
                 size="sm"
                 disabled={actionBusy}

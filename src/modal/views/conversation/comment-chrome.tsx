@@ -115,7 +115,7 @@ export function createCommentChrome(cv: any) {
   /**
    * Comment chrome actions: copy body + copy link + quote + hide;
    * edit/delete only when owner (canDelete).
-   * TipPopover always; OptBtnHint when this card is kb-focused.
+   * TipPopover always; ShortcutHint when this card is kb-focused.
    */
   function commentActions(
     kind: string | null,

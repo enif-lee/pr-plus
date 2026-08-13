@@ -9,7 +9,7 @@ import {
 } from '../src/modal/lib/line-selection';
 
 describe('SELECTION_NAV_BUSY_ATTR / REVEAL_MS', () => {
-  test('attr name is stable for CSS + OptBtnHint', () => {
+  test('attr name is stable for CSS + ShortcutHint', () => {
     expect(SELECTION_NAV_BUSY_ATTR).toBe('data-prp-selection-nav');
   });
 

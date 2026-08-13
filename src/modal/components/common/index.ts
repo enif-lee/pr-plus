@@ -6,7 +6,7 @@ export {
   inferPreferredPlacement,
 } from './TipPopover';
 export type { TipPlacement } from './TipPopover';
-export { OptBtnHint } from './OptBtnHint';
+export { ShortcutHint } from './ShortcutHint';
 export { ActionToast, actionToastTone } from './ActionToast';
 export type { ActionToastTone } from './ActionToast';
 export { ShortcutMonitor } from './ShortcutMonitor';

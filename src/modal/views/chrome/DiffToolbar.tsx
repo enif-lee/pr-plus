@@ -1,7 +1,7 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from '@common/Button';
-import { OptBtnHint } from '@common/OptBtnHint';
+import { ShortcutHint } from '@common/ShortcutHint';
 import { SearchableSelect } from '@common/SearchableSelect';
 import {
   buildCommitFilterOptions,
@@ -438,7 +438,7 @@ export function DiffToolbar(props: any) {
             fileNavCollapsed ? 'Show files navigator' : 'Hide files navigator'
           }
         >
-          <OptBtnHint
+          <ShortcutHint
             label={filesPanelShortcut}
             preferredPlacement="bottom"
           />
@@ -800,7 +800,7 @@ export function DiffToolbar(props: any) {
         {/* Always available — event/body live in FinishReviewModal */}
         <div className="prp-diff-toolbar__pending" role="group" aria-label="Leave a review">
           <span className="prp-opt-hint-host" ref={submitBtnRef}>
-            <OptBtnHint
+            <ShortcutHint
               label={isMac ? '⌥↵' : 'Alt+Enter'}
               preferredPlacement="top"
             />
