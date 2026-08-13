@@ -82,7 +82,9 @@ describe('Diff overscan / scroll path (shipped)', () => {
   });
 
   test('navComment is rAF-coalesced under key-repeat (shell)', () => {
-    const shell = read('src/modal/app/PrModalShell.tsx');
+    const shell =
+      read('src/modal/app/PrModalShell.tsx') +
+      read('src/modal/hooks/useDiffConversationNav.ts');
     expect(shell).toMatch(/navCommentRafRef/);
     expect(shell).toMatch(/navCommentDeltaRef/);
     expect(shell).toMatch(/function navComment\s*\(/);
@@ -90,7 +92,9 @@ describe('Diff overscan / scroll path (shipped)', () => {
   });
 
   test('⌥J/K thread hops replace the ArrowUp/Down cursor atomically', () => {
-    const shell = read('src/modal/app/PrModalShell.tsx');
+    const shell =
+      read('src/modal/app/PrModalShell.tsx') +
+      read('src/modal/hooks/useDiffConversationNav.ts');
     const jump = shell.slice(
       shell.indexOf('const jumpToReviewComment'),
       shell.indexOf('// Finish jump after collapse expand')

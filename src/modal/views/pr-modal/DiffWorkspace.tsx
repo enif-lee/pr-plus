@@ -2,7 +2,7 @@
  * Diff layout workspace: file tree + resizer + DiffToolbar + VirtualDiff.
  * Feature-local composition under views/pr-modal (not mid-function parts).
  */
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { FolderFileTree } from '../diff/FolderFileTree';
 import { VirtualDiff } from '../diff/VirtualDiff';
 import { SelectionCommentBar } from '../diff/SelectionCommentBar';
@@ -15,6 +15,8 @@ import {
 import {
   useScrollMetricsGroup,
   useSelectionIslandGroup,
+  useFileNavGroup,
+  useSearchGroup,
 } from '../../store/data-groups';
 import { useModalStore } from '../../store/modal-store';
 import { useDomainDetail } from '../../app/domain-detail-context';
@@ -159,6 +161,8 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
   // Leaf data groups — typing / scroll metrics re-render this shell only, not PrModalApp.
   const scrollMetrics = useScrollMetricsGroup();
   const selectionIsland = useSelectionIslandGroup();
+  const fileNavGroup = useFileNavGroup();
+  const searchGroup = useSearchGroup();
   const setScrollTopStore = useModalStore((s) => s.setScrollTop);
   const setViewportHeightStore = useModalStore((s) => s.setViewportHeight);
   const setSelectionDraftStore = useModalStore((s) => s.setSelectionDraft);
@@ -173,7 +177,7 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
     onSelectFile,
     collapsedFiles,
     onToggleFileCollapse,
-    fileQuery,
+    fileQuery: fileQueryProp,
     setFileQuery,
     ensureAllFiles,
     fileListLoading,
@@ -230,9 +234,9 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
     openPulls,
     searchOpen,
     layoutIsDiff,
-    searchQuery,
-    searchHits,
-    searchHitIndex,
+    searchQuery: searchQueryProp,
+    searchHits: searchHitsProp,
+    searchHitIndex: searchHitIndexProp,
     searchInputRef,
     searchBusy,
     showLoadComments,
@@ -278,8 +282,8 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
     isThreadCommentsLoading = null,
     commentHeightOpts,
     onVirtualMetricsChange = null,
-    showSelectionComposer,
-    selectionIslandLeaving,
+    showSelectionComposer: showSelectionComposerProp,
+    selectionIslandLeaving: selectionIslandLeavingProp,
     selectionDraft: selectionDraftProp,
     setSelectionDraft: setSelectionDraftProp,
     onSubmitSelectionCommentImmediate,
@@ -306,6 +310,40 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
       ? selectionDraftProp
       : selectionIsland.selectionDraft;
   const setSelectionDraft = setSelectionDraftProp || setSelectionDraftStore;
+  const fileQuery = fileQueryProp || fileNavGroup.fileQuery;
+  const searchQuery = searchQueryProp || searchGroup.searchQuery;
+  const searchHits = searchHitsProp ?? searchGroup.searchHits;
+  const searchHitIndex =
+    searchHitIndexProp >= 0 ? searchHitIndexProp : searchGroup.searchHitIndex;
+  const [domOptHeld, setDomOptHeld] = useState(false);
+  useEffect(() => {
+    const read = () => {
+      try {
+        setDomOptHeld(
+          typeof document !== 'undefined' &&
+            document.documentElement.hasAttribute('data-prp-opt-held')
+        );
+      } catch {
+        setDomOptHeld(false);
+      }
+    };
+    read();
+    if (typeof MutationObserver === 'undefined' || typeof document === 'undefined') {
+      return undefined;
+    }
+    const obs = new MutationObserver(read);
+    obs.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-prp-opt-held', 'class'],
+    });
+    return () => obs.disconnect();
+  }, []);
+  const showSelectionComposer =
+    showSelectionComposerProp ||
+    selectionIsland.showSelectionComposer ||
+    (domOptHeld && Boolean(selectionIsland.lineSelection) && !selectionIsland.selecting);
+  const selectionIslandLeaving =
+    selectionIslandLeavingProp || selectionIsland.selectionIslandLeaving;
 
   const magicLinks =
     detail.magicLinks?.length

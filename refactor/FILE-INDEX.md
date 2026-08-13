@@ -19,6 +19,11 @@ Quick map of paths mentioned across phases. **Authoritative instructions live in
 | `src/modal/lib/file-viewed.ts` | 4.7 |
 | `src/modal/lib/conversation-timeline-events.ts` | 4.4 |
 | `src/modal/lib/uri-route.ts` | 7 |
+| `src/modal/lib/line-selection.ts` | **9** barrel |
+| `src/modal/lib/line-selection-nav.ts` | **9** |
+| `src/modal/lib/line-selection-range.ts` | **9** |
+| `src/modal/lib/line-selection-payload.ts` | **9** |
+| `src/modal/lib/comment-nav.ts` | 7, 9 |
 | `scripts/build-pure.mjs` | 1, 8 |
 | `src/modal/pure/*.js` | generated 1, 5 |
 
@@ -56,7 +61,7 @@ Quick map of paths mentioned across phases. **Authoritative instructions live in
 | `src/modal/commands/index.ts` | **4** |
 | `src/modal/store/ui-store.ts` | **6** |
 | `src/modal/store/modal-store.ts` | 3 deprecate, 6 rewrite/delete |
-| `src/modal/store/data-groups.ts` | 3, 6 |
+| `src/modal/store/data-groups.ts` | 3, 6, **9** |
 | `src/modal/store/detail-ui-store.ts` | 6 delete/mirror |
 
 ## Modal app
@@ -66,9 +71,15 @@ Quick map of paths mentioned across phases. **Authoritative instructions live in
 | `src/modal/app/PrModalApp.impl.tsx` | 3, 4, 5, 6, **7 delete** |
 | `src/modal/app/pr-modal-mutations.ts` | 3, 4, 5, **7 delete** |
 | `src/modal/app/PrModalApp.tsx` | 3, 7 |
-| `src/modal/app/PrModalShell.tsx` | **7** create |
+| `src/modal/app/PrModalShell.tsx` | **7** create, **9** shrink |
 | `src/modal/app/mountPrModal.tsx` | 3, 7 |
-| `src/modal/app/pr-modal-run-palette.ts` | 4, 6, 7 |
+| `src/modal/app/pr-modal-run-palette.ts` | 4, 6, 7, 9 |
+| `src/modal/hooks/useDiffConversationNav.ts` | **9** |
+| `src/modal/hooks/useSelectionKeyboard.ts` | **9** |
+| `src/modal/hooks/useEnsureDiffLoads.ts` | **9** |
+| `src/modal/hooks/useContextThreadActions.ts` | **9** |
+| `src/modal/hooks/useThreadCommentsAndGap.ts` | **9** |
+| `src/modal/hooks/usePrModalSessionRoute.ts` | **9** optional G |
 | `src/modal/app/pr-modal-mappers.ts` | 7 |
 | `src/modal/app/hooks/usePrModalHotkeys.ts` | **7** |
 | `src/modal/app/hooks/usePrModalOpenEffects.ts` | **7** |
@@ -80,10 +91,11 @@ Quick map of paths mentioned across phases. **Authoritative instructions live in
 
 | Path | Phases |
 |------|--------|
-| `src/modal/views/conversation/ConversationView.tsx` | 3, 6, 7 |
+| `src/modal/views/conversation/ConversationView.tsx` | 3, 6, 7, **9** |
+| `src/modal/views/conversation/comment-chrome.tsx` | **9** |
 | `src/modal/views/conversation/ComposerCard.tsx` | 4.1, 6 |
 | `src/modal/views/conversation/VirtualConversationList.tsx` | 6 |
-| `src/modal/views/pr-modal/DiffWorkspace.tsx` | 3, 6, 7 |
+| `src/modal/views/pr-modal/DiffWorkspace.tsx` | 3, 6, 7, **9** |
 | `src/modal/views/diff/SelectionCommentBar.tsx` | 4.1, 6 |
 | `src/modal/views/diff/InlineThread.tsx` | 4.1, 4.3, 6, 7 |
 | `src/modal/views/chrome/DiffToolbar.tsx` | 4.1, 6, 7 |
@@ -124,6 +136,7 @@ Quick map of paths mentioned across phases. **Authoritative instructions live in
 | Path | Role |
 |------|------|
 | `refactor/README.md` | Index |
-| `refactor/00-contract.md` … `08-hardening.md` | Phases |
+| `refactor/00-contract.md` … `08-hardening.md` | Phases 0–8 |
+| `refactor/09-large-sot-split.md` | Phase 9 plan of record |
 | `refactor/FILE-INDEX.md` | This file |
 | `docs/host-first-zustand-rewrite-plan.md` | Superseded summary pointer |

@@ -129,10 +129,14 @@ describe('conversationDeepLinkApplyKey', () => {
 });
 
 describe('shell wires pure ownership into expandDiff + deep-link', () => {
-  const app = fs.readFileSync(
-    path.join(__dirname, '..', 'src/modal/app/PrModalShell.tsx'),
-    'utf8'
-  );
+  const app = [
+    'src/modal/app/PrModalShell.tsx',
+    'src/modal/hooks/usePrModalSessionRoute.ts',
+  ]
+    .map((rel) =>
+      fs.readFileSync(path.join(__dirname, '..', rel), 'utf8')
+    )
+    .join('\n');
 
   test('imports and uses decideConversationDeepLinkLayout', () => {
     expect(app).toMatch(/decideConversationDeepLinkLayout/);

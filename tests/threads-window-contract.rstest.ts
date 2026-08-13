@@ -84,10 +84,12 @@ describe('product wiring: open first-window only; Diff drains threads-all', () =
   });
 
   test('PrModalApp Diff enter drains remaining threads (threads-all)', () => {
-    const app = readFileSync(
-      resolve(root, 'src/modal/app/PrModalShell.tsx'),
-      'utf8'
-    );
+    const app = [
+      'src/modal/app/PrModalShell.tsx',
+      'src/modal/hooks/useDiffConversationNav.ts',
+    ]
+      .map((rel) => readFileSync(resolve(root, rel), 'utf8'))
+      .join('\n');
     expect(app).toMatch(/Diff enter/);
     expect(app).toMatch(/onLoadMoreReviewThreads\(['"]threads-all['"]\)/);
     expect(app).toMatch(/layoutMode !== LAYOUT_DIFF/);

@@ -1013,10 +1013,13 @@ describe('jumpSelectionToAdjacentChangeRegion (⌥↑/⌥↓ next/prev change)',
 
 describe('optArrow shell wiring (static)', () => {
   test('PrModalShell caches region index and rAF-coalesces ⌥↑/⌥↓', () => {
-    const shell = fs.readFileSync(
-      path.join(__dirname, '..', 'src/modal/app/PrModalShell.tsx'),
-      'utf8'
-    );
+    const shell = [
+      'src/modal/app/PrModalShell.tsx',
+      'src/modal/hooks/useDiffConversationNav.ts',
+      'src/modal/hooks/useSelectionKeyboard.ts',
+    ]
+      .map((rel) => fs.readFileSync(path.join(__dirname, '..', rel), 'utf8'))
+      .join('\n');
     expect(shell).toMatch(/buildChangeRegionIndex/);
     expect(shell).toMatch(/getChangeRegionIndexForList/);
     expect(shell).toMatch(/changeRegionIndexRef/);
@@ -1030,10 +1033,13 @@ describe('optArrow shell wiring (static)', () => {
   });
 
   test('selection hop uses thrifted index scroll; thread unit only uses DOM reveal', () => {
-    const shell = fs.readFileSync(
-      path.join(__dirname, '..', 'src/modal/app/PrModalShell.tsx'),
-      'utf8'
-    );
+    const shell = [
+      'src/modal/app/PrModalShell.tsx',
+      'src/modal/hooks/useDiffConversationNav.ts',
+      'src/modal/hooks/useSelectionKeyboard.ts',
+    ]
+      .map((rel) => fs.readFileSync(path.join(__dirname, '..', rel), 'utf8'))
+      .join('\n');
     // Line hop path (1.9.6 thrift)
     expect(shell).toMatch(/function scrollSelectionCaretAfterHop/);
     expect(shell).toMatch(/function scrollSelectionHeadDomOnly/);
@@ -1152,6 +1158,33 @@ describe('shouldUseNativeTextSelectOnDrag (Opt+drag text mode)', () => {
     expect(opt.mode).toBe('native-text');
     // Does not replace selection with a new line caret
     expect(opt.selection).toBe(null);
+  });
+
+  test('file header click begins file caret even when Opt is held', () => {
+    const header = {
+      kind: 'file-header',
+      filePath: 'a.ts',
+      rowIndex: 0,
+    };
+    const leftover = {
+      filePath: 'a.ts',
+      anchorLine: 1,
+      headLine: 8,
+      anchorRowIndex: 1,
+      headRowIndex: 8,
+      anchorSide: 'RIGHT',
+      headSide: 'RIGHT',
+    };
+    const started = applySelectionPointerDown(leftover, header, {
+      altKey: true,
+      optHeld: true,
+      preferredSide: 'RIGHT',
+    });
+    expect(started.mode).toBe('begin');
+    expect(started.selection?.kind || started.selection?.subjectType).toBe(
+      'file'
+    );
+    expect(started.selection?.filePath).toBe('a.ts');
   });
 
   test('VirtualDiffRows Opt path skips preventDefault; notifies shell for auto-copy', () => {

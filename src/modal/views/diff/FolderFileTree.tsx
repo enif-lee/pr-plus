@@ -246,15 +246,16 @@ function FolderFileTreeImpl(props: any) {
     return out;
   }, [extSourceFiles, files, selectedExts]);
 
-  // Parent App already applies name/ext/unread/commented filters when controlled.
-  // Re-apply here only for local (uncontrolled) mode, or when parent passes unfiltered files.
+  // Parent App applies ext/unread/commented when controlled. Name query is
+  // ROOT_FORBIDDEN on the shell (no live fileQuery there) — always apply it
+  // here so the tree narrows as the user types.
   const parentFiltersFiles = selectedExtsProp instanceof Set;
   const filteredTree = useMemo(() => {
     let list = Array.isArray(files) ? files : [];
+    if (typeof filterFilesByQuery === 'function') {
+      list = filterFilesByQuery(list, fileQuery);
+    }
     if (!parentFiltersFiles) {
-      if (typeof filterFilesByQuery === 'function') {
-        list = filterFilesByQuery(list, fileQuery);
-      }
       list = filterFilesByExtensions(list, selectedExts);
       list = filterFilesUnreadOnly(list, viewedPaths, unreadOnly);
       if (typeof filterFilesCommentedOnly === 'function') {
