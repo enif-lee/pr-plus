@@ -1,7 +1,7 @@
 // TypeScript SoT — assembled by build scripts (classic runtime JS emit)
 // Narrow onPatchDetail implementation (extracted for line-budget).
 
-  function runOnPatchDetail(patch, owner, repo, number) {
+  function runOnPatchDetail(patch: any, owner: any, repo: any, number: any) {
       
         const ack = (status: 'applied' | 'stale' | 'failed', error?: string) => ({
           status,

@@ -302,10 +302,10 @@ export function mergeCommentsBulkIntoThreadsPage(shellPage: any, bulkPage: any) 
   const bulkComments = Array.isArray(bulkPage?.comments) ? bulkPage.comments : [];
   const byId = new Map(
     bulkThreads
-      .filter((t) => t?.threadNodeId)
-      .map((t) => [String(t.threadNodeId), t])
+      .filter((t: any) => t?.threadNodeId)
+      .map((t: any) => [String(t.threadNodeId), t])
   );
-  const threads = shellThreads.map((t) => {
+  const threads = shellThreads.map((t: any) => {
     const id = t?.threadNodeId ? String(t.threadNodeId) : '';
     const full = id ? byId.get(id) : null;
     if (!full) {
@@ -323,7 +323,7 @@ export function mergeCommentsBulkIntoThreadsPage(shellPage: any, bulkPage: any) 
   });
   // Drop shell placeholders/previews for loaded ids; keep deferred first:1 bodies.
   const loadedIds = new Set(
-    threads.filter((t) => t.commentsLoaded).map((t) => String(t.threadNodeId))
+    threads.filter((t: any) => t.commentsLoaded).map((t: any) => String(t.threadNodeId))
   );
   const prevComments = Array.isArray(shellPage?.comments) ? shellPage.comments : [];
   let kept = [];
@@ -350,7 +350,7 @@ export function mergeCommentsBulkIntoThreadsPage(shellPage: any, bulkPage: any) 
   } catch {
     kept = prevComments.slice();
   }
-  const seen = new Set(kept.map((c) => String(c.id)));
+  const seen = new Set(kept.map((c: any) => String(c.id)));
   for (const c of bulkComments) {
     if (!c || c.id == null) continue;
     const k = String(c.id);
@@ -372,7 +372,7 @@ export function mergeCommentsBulkIntoThreadsPage(shellPage: any, bulkPage: any) 
         if (!t?.threadNodeId || t.commentsLoaded === true) continue;
         const tid = String(t.threadNodeId);
         if (!/^PRRT_/i.test(tid)) continue;
-        if (kept.some((c) => c && String(c.threadNodeId) === tid)) continue;
+        if (kept.some((c: any) => c && String(c.threadNodeId) === tid)) continue;
         kept.push({
           id: `shell:${tid}`,
           author: '',

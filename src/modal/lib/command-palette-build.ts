@@ -248,7 +248,7 @@ export function resolveDevelopmentMainOpen(item: any, ctx: any = {}) {
       : '');
 
   if (!Number.isFinite(num) || num <= 0) {
-    return { mode: 'none' as const, number: null, href: fallbackHref };
+    return { mode: 'none' as const, number: null as any, href: fallbackHref };
   }
 
   const urlIsPull = /\/pull\/\d+/i.test(href);
@@ -907,7 +907,7 @@ export function filterPaletteCommands(commands: any, query: any) {
 /**
  * Normalize shortcuts for display.
  */
-export function formatShortcut(shortcut, isMac = false) {
+export function formatShortcut(shortcut: any, isMac = false) {
   if (!shortcut) return '';
   return String(shortcut)
     .replace(/mod\+/gi, isMac ? '⌘' : 'Ctrl+')

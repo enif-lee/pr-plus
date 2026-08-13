@@ -17,7 +17,7 @@ import {
  * @param {Array} comments
  * @returns {Array<{ id, path, line, side, root, replies, resolved, threadNodeId }>}
  */
-export function mergeReviewThreadMeta(comments, threads) {
+export function mergeReviewThreadMeta(comments: any, threads: any) {
   const list = Array.isArray(comments) ? comments : [];
   /** @type {Map<string, { threadNodeId: string, resolved: boolean }>} */
   const byCommentId = new Map();
@@ -54,7 +54,7 @@ export function mergeReviewThreadMeta(comments, threads) {
  * Normalize GraphQL reviewThreads.nodes into merge-friendly rows.
  * @param {Array} nodes
  */
-export function mapGraphqlReviewThreads(nodes) {
+export function mapGraphqlReviewThreads(nodes: any) {
   if (!Array.isArray(nodes)) return [];
   return nodes
     .filter((t) => t && t.id)
@@ -62,8 +62,8 @@ export function mapGraphqlReviewThreads(nodes) {
       threadNodeId: t.id,
       resolved: Boolean(t.isResolved),
       commentIds: (t.comments?.nodes || [])
-        .map((c) => c?.databaseId)
-        .filter((id) => id != null),
+        .map((c: any) => c?.databaseId)
+        .filter((id: any) => id != null),
     }));
 }
 
@@ -189,10 +189,10 @@ export function mergeCommentsBulkIntoThreadsPage(shellPage: any, bulkPage: any) 
   const bulkComments = Array.isArray(bulkPage?.comments) ? bulkPage.comments : [];
   const byId = new Map(
     bulkThreads
-      .filter((t) => t?.threadNodeId)
-      .map((t) => [String(t.threadNodeId), t])
+      .filter((t: any) => t?.threadNodeId)
+      .map((t: any) => [String(t.threadNodeId), t])
   );
-  const threads = shellThreads.map((t) => {
+  const threads = shellThreads.map((t: any) => {
     const id = t?.threadNodeId ? String(t.threadNodeId) : '';
     const full = id ? byId.get(id) : null;
     if (!full) {
@@ -212,7 +212,7 @@ export function mergeCommentsBulkIntoThreadsPage(shellPage: any, bulkPage: any) 
     };
   });
   const loadedIds = new Set(
-    threads.filter((t) => t.commentsLoaded).map((t) => String(t.threadNodeId))
+    threads.filter((t: any) => t.commentsLoaded).map((t: any) => String(t.threadNodeId))
   );
   const prevComments = Array.isArray(shellPage?.comments)
     ? shellPage.comments
@@ -353,11 +353,11 @@ export function mergeThreadCommentsBulkIntoDetail(detail: any, bulkPage: any) {
   const bulkComments = Array.isArray(bulkPage?.comments) ? bulkPage.comments : [];
   const byId = new Map(
     bulkThreads
-      .filter((t) => t?.threadNodeId)
-      .map((t) => [String(t.threadNodeId), t])
+      .filter((t: any) => t?.threadNodeId)
+      .map((t: any) => [String(t.threadNodeId), t])
   );
   // Preserve reviewThreads array order from prev
-  const reviewThreads = prevTh.map((t) => {
+  const reviewThreads = prevTh.map((t: any) => {
     const id = t?.threadNodeId ? String(t.threadNodeId) : '';
     const full = id ? byId.get(id) : null;
     if (!full) return t;
@@ -374,11 +374,11 @@ export function mergeThreadCommentsBulkIntoDetail(detail: any, bulkPage: any) {
   // Also append bulk-only threads
   for (const t of bulkThreads) {
     const id = t?.threadNodeId ? String(t.threadNodeId) : '';
-    if (!id || prevTh.some((p) => String(p?.threadNodeId) === id)) continue;
+    if (!id || prevTh.some((p: any) => String(p?.threadNodeId) === id)) continue;
     reviewThreads.push({ ...t, commentsLoaded: true });
   }
   const loadedIds = new Set(
-    bulkThreads.map((t) => String(t?.threadNodeId || '')).filter(Boolean)
+    bulkThreads.map((t: any) => String(t?.threadNodeId || '')).filter(Boolean)
   );
   const reviewComments = hydrateReviewCommentsInPlace(
     prevRc,

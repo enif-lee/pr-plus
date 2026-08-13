@@ -297,16 +297,16 @@ describe('mapGraphqlReviewThreadNodes + merge bulk (shipped pure)', () => {
       { ...shell, source: 'graphql', shellOnly: true },
       bulk
     );
-    const open = page.threads.find((t) => t.threadNodeId === 'PRRT_open');
-    const res = page.threads.find((t) => t.threadNodeId === 'PRRT_res');
+    const open = page.threads.find((t: any) => t.threadNodeId === 'PRRT_open');
+    const res = page.threads.find((t: any) => t.threadNodeId === 'PRRT_res');
     expect(open?.commentsLoaded).toBe(true);
     expect(open?.commentIds).toEqual([10]);
     expect(res?.commentsLoaded).toBe(false);
     // Eager body for open + shell placeholder for deferred resolved
     expect(page.comments).toHaveLength(2);
-    expect(page.comments.some((c) => c.body === 'open body')).toBe(true);
+    expect(page.comments.some((c: any) => c.body === 'open body')).toBe(true);
     const shellPh = page.comments.find(
-      (c) => c.threadNodeId === 'PRRT_res' && c._commentsPending
+      (c: any) => c.threadNodeId === 'PRRT_res' && c._commentsPending
     );
     expect(shellPh).toBeTruthy();
     expect(shellPh?.id).toBe('shell:PRRT_res');
@@ -400,12 +400,12 @@ describe('mapGraphqlReviewThreadNodes + merge bulk (shipped pure)', () => {
     );
 
     // Open: full bulk replaced preview
-    expect(page.comments.some((c) => c.body === 'open full')).toBe(true);
-    expect(page.comments.some((c) => c.body === 'open reply')).toBe(true);
-    expect(page.comments.some((c) => c.body === 'open preview')).toBe(false);
+    expect(page.comments.some((c: any) => c.body === 'open full')).toBe(true);
+    expect(page.comments.some((c: any) => c.body === 'open reply')).toBe(true);
+    expect(page.comments.some((c: any) => c.body === 'open preview')).toBe(false);
 
     // Resolved deferred: first:1 description must survive (not empty shell)
-    const resRows = page.comments.filter((c) => c.threadNodeId === 'PRRT_res');
+    const resRows = page.comments.filter((c: any) => c.threadNodeId === 'PRRT_res');
     expect(resRows).toHaveLength(1);
     expect(resRows[0].body).toBe('resolved description');
     expect(resRows[0].author).toBe('r');
@@ -414,7 +414,7 @@ describe('mapGraphqlReviewThreadNodes + merge bulk (shipped pure)', () => {
     // No empty "No content" placeholder for that thread
     expect(
       page.comments.some(
-        (c) =>
+        (c: any) =>
           c.threadNodeId === 'PRRT_res' &&
           c._commentsPending &&
           !String(c.body || '').trim()

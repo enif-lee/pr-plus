@@ -47,7 +47,7 @@ describe('e2e comment cleanup pure tracker', () => {
       { id: 3, body: `prefix ${mark} suffix` },
     ];
     const hits = findCommentsByMark(comments, mark);
-    expect(hits.map((c) => c.id).sort()).toEqual([2, 3]);
+    expect(hits.map((c: any) => c.id).sort()).toEqual([2, 3]);
     expect(findCommentsByMark(comments, 'e2e-comment-never')).toEqual([]);
   });
 

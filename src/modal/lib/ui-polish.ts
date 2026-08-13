@@ -3,7 +3,7 @@
  * Pure helpers for modal UI polish: unique people, entity URLs, magic links, stack strip.
  */
 
-export function uniqueLogins(list) {
+export function uniqueLogins(list: any) {
   const out = [];
   const seen = new Set();
   for (const item of list || []) {
@@ -25,7 +25,7 @@ export function uniqueLogins(list) {
  * One row per author (last review wins) for review-status lists.
  * @param {Array<{ author?: string, state?: string, id?: * }>} reviews
  */
-export function uniqueReviewsByAuthor(reviews) {
+export function uniqueReviewsByAuthor(reviews: any) {
   const by = new Map();
   for (const r of reviews || []) {
     if (!r || !r.author) continue;
@@ -39,7 +39,7 @@ export function uniqueReviewsByAuthor(reviews) {
  * Public GitHub avatar URL for a login (no API required).
  * size is the requested pixel width (GitHub serves a square PNG).
  */
-export function githubAvatarUrl(login, size = 40) {
+export function githubAvatarUrl(login: any, size = 40) {
   const u = String(login || '')
     .trim()
     .replace(/^@/, '');
@@ -49,7 +49,7 @@ export function githubAvatarUrl(login, size = 40) {
   return `https://github.com/${encodeURIComponent(u)}.png?size=${px}`;
 }
 
-export function githubUserUrl(login) {
+export function githubUserUrl(login: any) {
   const u = String(login || '')
     .trim()
     .replace(/^@/, '');
@@ -57,7 +57,7 @@ export function githubUserUrl(login) {
   return `https://github.com/${encodeURIComponent(u)}`;
 }
 
-export function githubLabelUrl(owner, repo, labelName) {
+export function githubLabelUrl(owner: any, repo: any, labelName: any) {
   const o = String(owner || '').trim();
   const r = String(repo || '').trim();
   const name = String(labelName || '').trim();
@@ -65,7 +65,7 @@ export function githubLabelUrl(owner, repo, labelName) {
   return `https://github.com/${encodeURIComponent(o)}/${encodeURIComponent(r)}/labels/${encodeURIComponent(name)}`;
 }
 
-export function githubIssueUrl(owner, repo, number) {
+export function githubIssueUrl(owner: any, repo: any, number: any) {
   const o = String(owner || '').trim();
   const r = String(repo || '').trim();
   const n = Number(number);
@@ -73,7 +73,7 @@ export function githubIssueUrl(owner, repo, number) {
   return `https://github.com/${encodeURIComponent(o)}/${encodeURIComponent(r)}/issues/${n}`;
 }
 
-export function githubPullUrl(owner, repo, number) {
+export function githubPullUrl(owner: any, repo: any, number: any) {
   const o = String(owner || '').trim();
   const r = String(repo || '').trim();
   const n = Number(number);
@@ -122,7 +122,7 @@ export function buildGithubPrPageUrl(opts: GithubPrPageUrlOpts = {}): string {
 }
 
 /** Encode a git ref for a path (keep `/` as path separators). */
-export function encodeGitRefPath(ref) {
+export function encodeGitRefPath(ref: any) {
   const raw = String(ref || '').trim();
   if (!raw) return '';
   return raw
@@ -132,7 +132,7 @@ export function encodeGitRefPath(ref) {
 }
 
 /** Branch / tag tree page: /owner/repo/tree/ref */
-export function githubTreeUrl(owner, repo, ref) {
+export function githubTreeUrl(owner: any, repo: any, ref: any) {
   const o = String(owner || '').trim();
   const r = String(repo || '').trim();
   const path = encodeGitRefPath(ref);
@@ -141,7 +141,7 @@ export function githubTreeUrl(owner, repo, ref) {
 }
 
 /** Commit page: /owner/repo/commit/sha */
-export function githubCommitUrl(owner, repo, sha) {
+export function githubCommitUrl(owner: any, repo: any, sha: any) {
   const o = String(owner || '').trim();
   const r = String(repo || '').trim();
   const s = String(sha || '').trim();
@@ -149,7 +149,7 @@ export function githubCommitUrl(owner, repo, sha) {
   return `https://github.com/${encodeURIComponent(o)}/${encodeURIComponent(r)}/commit/${encodeURIComponent(s)}`;
 }
 
-function escapeHtmlLite(s) {
+function escapeHtmlLite(s: any) {
   return String(s)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -162,7 +162,7 @@ function escapeHtmlLite(s) {
  * @param {string} html
  * @param {{ owner?: string, repo?: string }} ctx
  */
-export function linkifyMentionsAndIssues(html, ctx: any = {}) {
+export function linkifyMentionsAndIssues(html: any, ctx: any = {}) {
   const owner = ctx.owner || '';
   const repo = ctx.repo || '';
   let out = String(html || '');
@@ -193,7 +193,7 @@ export function linkifyMentionsAndIssues(html, ctx: any = {}) {
  * @param {string} html
  * @param {Array<{ key: string, url: string }>} magicLinks
  */
-export function applyMagicLinksToHtml(html, magicLinks) {
+export function applyMagicLinksToHtml(html: any, magicLinks: any) {
   const links = Array.isArray(magicLinks) ? magicLinks : [];
   if (!links.length) return String(html || '');
   // Longer keys first to avoid partial clobber
@@ -253,7 +253,7 @@ export function embedGithubVideoAttachments(html: unknown): string {
  * Index open PRs for stack walks.
  * @returns {{ byNumber: Map, byHead: Map, childrenOf: Map<string, Array> }}
  */
-export function indexStackPulls(prs) {
+export function indexStackPulls(prs: any) {
   const list = Array.isArray(prs) ? prs : [];
   const byNumber = new Map();
   const byHead = new Map();
@@ -269,12 +269,12 @@ export function indexStackPulls(prs) {
   }
   for (const arr of childrenOf.values()) {
     // Stable “first branch” = highest number first (matches tree list ordering)
-    arr.sort((a, b) => Number(b.number) - Number(a.number));
+    arr.sort((a: any, b: any) => Number(b.number) - Number(a.number));
   }
   return { byNumber, byHead, childrenOf };
 }
 
-function stripItem(pr, curNum, depth) {
+function stripItem(pr: any, curNum: any, depth: any) {
   return {
     number: Number(pr.number),
     title: pr.title || '',
@@ -293,7 +293,7 @@ function stripItem(pr, curNum, depth) {
  * @param {string} parentHeadRef
  * @param {Record<string, number|string>} pathSelections
  */
-export function pickStackChild(kids, parentHeadRef, pathSelections: any = {}) {
+export function pickStackChild(kids: any, parentHeadRef: any, pathSelections: any = {}) {
   const list = Array.isArray(kids) ? kids : [];
   if (!list.length) return null;
   const pref = pathSelections?.[parentHeadRef];
@@ -311,9 +311,9 @@ export function pickStackChild(kids, parentHeadRef, pathSelections: any = {}) {
  * @param {Record<string, number|string>} [pathSelections] parentHeadRef → child PR number
  * @returns {{ items: Array, branches: Array }}
  */
-export function buildStackPathModel(prs, currentNumber, pathSelections: any = {}) {
+export function buildStackPathModel(prs: any, currentNumber: any, pathSelections: any = {}) {
   const curNum = Number(currentNumber);
-  const empty = { items: [], branches: [] };
+  const empty = { items: [] as any[], branches: [] as any[] };
   if (!Number.isFinite(curNum)) return empty;
 
   const { byNumber, byHead, childrenOf } = indexStackPulls(prs);
@@ -347,7 +347,7 @@ export function buildStackPathModel(prs, currentNumber, pathSelections: any = {}
     p = parent;
   }
 
-  const toOption = (c) => ({
+  const toOption = (c: any) => ({
     number: Number(c.number),
     title: c.title || '',
     headRef: c.headRef || '',
@@ -362,7 +362,7 @@ export function buildStackPathModel(prs, currentNumber, pathSelections: any = {}
   let node = current;
   while (node?.headRef) {
     const kids = (childrenOf.get(node.headRef) || []).filter(
-      (c) => !seenDown.has(c.number)
+      (c: any) => !seenDown.has(c.number)
     );
     if (!kids.length) break;
     const child = pickStackChild(kids, node.headRef, pathSelections);
@@ -393,7 +393,7 @@ export function buildStackPathModel(prs, currentNumber, pathSelections: any = {}
     seenParents.add(parentHeadRef);
     // Prefer pathSelections, else the node actually on the chain
     let selected = pickStackChild(kids, parentHeadRef, pathSelections);
-    const onChain = kids.find((c) =>
+    const onChain = kids.find((c: any) =>
       chain.some((x) => Number(x.number) === Number(c.number))
     );
     if (pathSelections?.[parentHeadRef] == null && onChain) selected = onChain;
@@ -422,7 +422,7 @@ export function buildStackPathModel(prs, currentNumber, pathSelections: any = {}
  * @param {Record<string, number|string>} [pathSelections]
  * @returns {Array}
  */
-export function buildStackStrip(prs, currentNumber, pathSelections: any = {}) {
+export function buildStackStrip(prs: any, currentNumber: any, pathSelections: any = {}) {
   return buildStackPathModel(prs, currentNumber, pathSelections).items;
 }
 
@@ -432,7 +432,7 @@ export const STACK_PATH_HOVER_MS = 450;
 /**
  * Whether a branch control should expose a path picker (degree ≥ 2).
  */
-export function stackBranchHasPathPicker(branch) {
+export function stackBranchHasPathPicker(branch: any) {
   return Boolean(branch && Array.isArray(branch.options) && branch.options.length >= 2);
 }
 
@@ -441,9 +441,9 @@ export function stackBranchHasPathPicker(branch) {
  * @param {{ options?: Array, selectedNumber?: number }} branch
  * @returns {Array<{ id: string, label: string, keywords?: string[], meta?: object }>}
  */
-export function buildStackBranchSelectOptions(branch) {
+export function buildStackBranchSelectOptions(branch: any) {
   const opts = Array.isArray(branch?.options) ? branch.options : [];
-  return opts.map((o) => {
+  return opts.map((o: any) => {
     const num = Number(o.number);
     const title = o.title ? String(o.title) : '';
     const head = o.headRef ? String(o.headRef) : '';
@@ -469,7 +469,7 @@ export function buildStackBranchSelectOptions(branch) {
  * @param {{ type: string, key?: string|null }} event
  * @returns {{ openKey: string|null, armedKey: string|null, scheduleOpen: boolean, cancelTimer: boolean }}
  */
-export function reduceStackPathHover(state, event) {
+export function reduceStackPathHover(state: any, event: any) {
   const cur = state || { openKey: null, armedKey: null };
   const type = event?.type;
   const key = event?.key == null ? null : String(event.key);

@@ -411,7 +411,7 @@ export function partitionConversationLoadMore(
   if (!st.anyIncomplete) {
     return {
       top: list,
-      bottom: [],
+      bottom: [] as any[],
       hiddenCount: 0,
       showGap: false,
       gapPlacement: 'none' as const,
@@ -447,7 +447,7 @@ export function partitionConversationLoadMore(
   // Default: single window, gap after all loaded items.
   return {
     top: list,
-    bottom: [],
+    bottom: [] as any[],
     hiddenCount: st.hiddenCount,
     showGap: true,
     gapPlacement: 'end' as const,
@@ -487,12 +487,12 @@ export function singleCursorReviewThreadsMeta(page: any, prev: any = null) {
     newestStartCursor: page?.startCursor || null,
     newestEndCursor: page?.endCursor || null,
     hasOlder: hasOlder || (dir === 'newest' && Boolean(page?.hasPreviousPage)),
-    oldestStartCursor: null,
-    oldestEndCursor: null,
+    oldestStartCursor: null as any,
+    oldestEndCursor: null as any,
     /** Dual-window retired — always false in product path */
     hasNewerFromOldest: false,
     newestThreadIds: threads.map((t: any) => t.threadNodeId).filter(Boolean),
-    oldestThreadIds: [],
+    oldestThreadIds: [] as any[],
     hasMore: hiddenCount > 0 || hasOlder || hasNewer,
     endCursor: page?.startCursor || null,
     direction: dir,

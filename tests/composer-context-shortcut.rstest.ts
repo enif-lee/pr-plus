@@ -10,7 +10,10 @@ import {
   isEditableKeyboardTarget,
   resolveComposerContextShortcutAction,
   resolveModalShortcutAction,
+  shouldPreventConvArrowFallback,
 } from '../src/modal/lib/shortcut-policy';
+import fs from 'node:fs';
+import path from 'node:path';
 
 describe('resolveComposerContextShortcutAction', () => {
   test('returns null when composer not focused', () => {
@@ -265,5 +268,70 @@ describe('COMPOSER_CONTEXT_SHORTCUT labels', () => {
     );
     expect(COMPOSER_CONTEXT_SHORTCUT.startPending.chord).toBe('opt+s');
     expect(COMPOSER_CONTEXT_SHORTCUT.startPending.labelMac).toBe('⌥S');
+  });
+});
+
+describe('shouldPreventConvArrowFallback (shipped swallow gate)', () => {
+  test('swallows bare ↑/↓ only when conversation is focused and not editing', () => {
+    expect(
+      shouldPreventConvArrowFallback({
+        liveConvFocus: true,
+        editable: false,
+        key: 'ArrowDown',
+      })
+    ).toBe(true);
+    expect(
+      shouldPreventConvArrowFallback({
+        liveConvFocus: true,
+        editable: false,
+        key: 'ArrowUp',
+      })
+    ).toBe(true);
+  });
+
+  test('does not swallow caret movement in a text-entry target', () => {
+    const ta = { tagName: 'TEXTAREA' };
+    expect(isEditableKeyboardTarget(ta as any)).toBe(true);
+    expect(
+      shouldPreventConvArrowFallback({
+        liveConvFocus: true,
+        editable: isEditableKeyboardTarget(ta as any),
+        key: 'ArrowDown',
+      })
+    ).toBe(false);
+    expect(
+      shouldPreventConvArrowFallback({
+        liveConvFocus: true,
+        editable: true,
+        key: 'ArrowUp',
+      })
+    ).toBe(false);
+  });
+
+  test('does not swallow when conversation is unfocused or modifiers are down', () => {
+    expect(
+      shouldPreventConvArrowFallback({
+        liveConvFocus: false,
+        editable: false,
+        key: 'ArrowDown',
+      })
+    ).toBe(false);
+    expect(
+      shouldPreventConvArrowFallback({
+        liveConvFocus: true,
+        editable: false,
+        alt: true,
+        key: 'ArrowDown',
+      })
+    ).toBe(false);
+  });
+
+  test('hotkeys hook calls the shipped gate with editable', () => {
+    const src = fs.readFileSync(
+      path.join(__dirname, '../src/modal/hooks/usePrModalHotkeys.ts'),
+      'utf8'
+    );
+    expect(src).toMatch(/shouldPreventConvArrowFallback\s*\(\s*\{/);
+    expect(src).toMatch(/shouldPreventConvArrowFallback\([\s\S]*editable/);
   });
 });

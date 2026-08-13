@@ -6,26 +6,26 @@
 export function createInitialModalState() {
   return {
     open: false,
-    owner: null,
-    repo: null,
-    number: null,
+    owner: null as any,
+    repo: null as any,
+    number: null as any,
     layoutMode: 'centered',
     loading: false,
-    error: null,
-    detail: null,
-    files: [],
-    virtualRows: [],
+    error: null as any,
+    detail: null as any,
+    files: [] as any[],
+    virtualRows: [] as any[],
     scrollTop: 0,
     viewportHeight: 480,
     rowHeight: 20,
     searchQuery: '',
-    searchHits: [],
+    searchHits: [] as any[],
     searchHitIndex: -1,
-    activeFilePath: null,
+    activeFilePath: null as any,
   };
 }
 
-export function openModal(state, { owner, repo, number }) {
+export function openModal(state: any, { owner, repo, number }: any) {
   return {
     ...state,
     open: true,
@@ -46,7 +46,7 @@ export function openModal(state, { owner, repo, number }) {
   };
 }
 
-export function closeModal(state) {
+export function closeModal(state: any) {
   return {
     ...createInitialModalState(),
     // keep measured geometry prefs
@@ -55,15 +55,15 @@ export function closeModal(state) {
   };
 }
 
-export function setLayoutMode(state, layoutMode) {
+export function setLayoutMode(state: any, layoutMode: any) {
   return { ...state, layoutMode };
 }
 
-export function setScrollTop(state, scrollTop) {
+export function setScrollTop(state: any, scrollTop: any) {
   return { ...state, scrollTop: Math.max(0, scrollTop) };
 }
 
-export function setSearchResults(state, query, hits, hitIndex = 0) {
+export function setSearchResults(state: any, query: any, hits: any, hitIndex = 0) {
   const list = Array.isArray(hits) ? hits : [];
   const idx =
     list.length === 0 ? -1 : Math.max(0, Math.min(hitIndex, list.length - 1));
@@ -77,7 +77,7 @@ export function setSearchResults(state, query, hits, hitIndex = 0) {
   };
 }
 
-export function selectSearchHit(state, hitIndex) {
+export function selectSearchHit(state: any, hitIndex: any) {
   const list = state.searchHits || [];
   if (!list.length) return { ...state, searchHitIndex: -1 };
   const idx = ((hitIndex % list.length) + list.length) % list.length;

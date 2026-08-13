@@ -1,20 +1,6 @@
 // TypeScript SoT — assembled by build scripts (classic runtime JS emit)
 
-  function openModal({
-    owner,
-    repo,
-    number,
-    page = null,
-    position = null,
-    presentation = null,
-    commitSha = null,
-    commitEndSha = null,
-    filePath = null,
-    fileKey = null,
-    startLine = null,
-    endLine = null,
-    side = null,
-  }) {
+  function openModal({ owner, repo, number, page = null, position = null, presentation = null, commitSha = null, commitEndSha = null, filePath = null, fileKey = null, startLine = null, endLine = null, side = null }: any) {
     return runOpenModalBody({
       owner,
       repo,

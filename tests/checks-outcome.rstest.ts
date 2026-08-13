@@ -2,10 +2,7 @@
  * Check outcome: pending (expected, static) vs in_progress (working, spin).
  */
 import { describe, expect, test } from '@rstest/core';
-// pure CJS
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const checks = require('../src/modal/pure/checks.js');
-const {
+import {
   classifyCheckOutcome,
   buildMergeBoxCheckGroups,
   listCheckNamesByOutcome,
@@ -13,7 +10,7 @@ const {
   formatCheckSummary,
   formatDurationMs,
   checksNeedElapsedTick,
-} = checks;
+} from '../src/modal/lib/checks';
 
 describe('classifyCheckOutcome', () => {
   test('commit status pending → expected (pending)', () => {

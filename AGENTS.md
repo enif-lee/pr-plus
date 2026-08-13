@@ -203,7 +203,7 @@ docs/                  # Design / migration notes (not runtime)
 
 ## Conventions for agents
 
-1. **Edit SoT TS/TSX**, then run the matching `build:*` (or full `build`). Do not treat generated `pure/*.js` or assembled host/SW as primary edit targets unless the pipeline requires dual-write.
+1. **Edit SoT TS/TSX**, then run the matching `build:*` (or full `build`). Generated `pure/*.js`, assembled host/SW, and `background.sw.js` are gitignored — do not commit them.
 2. After SW/fetch/pure changes: **reload extension** on `chrome://extensions` before claiming browser verification.
 3. Prefer **minimal diffs**; do not add unsolicited docs beyond what was asked.
 4. E2e is optional for pure logic; required when click/focus/network path is the bug (e.g. Resolve conversation).

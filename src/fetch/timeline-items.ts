@@ -524,18 +524,18 @@ export async function fetchPrTimelineItemsPage(
   const r = String(repo || '').trim();
   const n = Number(number);
   const empty = {
-    comments: [],
-    timelineEvents: [],
-    reviews: [],
+    comments: [] as any[],
+    timelineEvents: [] as any[],
+    reviews: [] as any[],
     pageInfo: {
       hasNextPage: false,
       hasPreviousPage: false,
-      startCursor: null,
-      endCursor: null,
+      startCursor: null as any,
+      endCursor: null as any,
     },
     totalCount: 0,
     filteredCount: 0,
-    updatedAt: null,
+    updatedAt: null as any,
     direction: 'newest',
     hasMore: false,
     source: 'graphql',

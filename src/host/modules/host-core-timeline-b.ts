@@ -68,7 +68,7 @@
     };
   }
 
-  function isEditableKeyTarget(target) {
+  function isEditableKeyTarget(target: any) {
     const el = target;
     if (!el || typeof el !== 'object') return false;
     try {
@@ -102,7 +102,7 @@
         const resolve =
           pe?.resolveEmbedShortcutAction ||
           (typeof globalThis !== 'undefined' &&
-            globalThis.PRModalPageEmbed?.resolveEmbedShortcutAction);
+            (globalThis as any).PRModalPageEmbed?.resolveEmbedShortcutAction);
         const action =
           typeof resolve === 'function'
             ? resolve({
@@ -226,14 +226,14 @@
 
   /** True after at least one successful prefs read (open can skip blocking wait). */
   let prefsReady = false;
-  let prefsWarmP = null;
-  let warmUpP = null;
+  let prefsWarmP: any = null;
+  let warmUpP: any = null;
 
   async function refreshPrefs() {
     try {
       // Prefer direct storage read (same as bridge) so uiLanguage is never lost
       // when SW PREFS_GET is stale. Fall back to bridge getExtensionPrefs.
-      let next = null;
+      let next: any = null;
       try {
         const area = (globalThis as any).chrome?.storage?.local;
         if (area?.get) {
@@ -247,7 +247,7 @@
         next = null;
       }
       if (!next || typeof next !== 'object') {
-        next = await globalThis.PRTreeStorage?.getExtensionPrefs?.();
+        next = await (globalThis as any).PRTreeStorage?.getExtensionPrefs?.();
       }
       if (next && typeof next === 'object') {
         prefs = {
@@ -412,7 +412,7 @@
     if (prefsWatchUnsub) return;
     try {
       prefsWatchUnsub =
-        globalThis.PRTreeStorage?.watchExtensionPrefs?.((next) => {
+        (globalThis as any).PRTreeStorage?.watchExtensionPrefs?.((next: any) => {
           const prevAuto = prefs.autoOpenEmbed !== false;
           const prevVis = prefs.timelineVisibility;
           prefs = {
@@ -474,8 +474,8 @@
     }
   }
 
-  function loadStagePercent(phase, busy = true, phaseFraction) {
-    const lp = globalThis.PRModalLoadProgress;
+  function loadStagePercent(phase: any, busy = true, phaseFraction: any) {
+    const lp = (globalThis as any).PRModalLoadProgress;
     if (lp && typeof lp.percentFromStageProgress === 'function') {
       return lp.percentFromStageProgress({
         phase,
@@ -493,12 +493,12 @@
       refresh: 70,
       done: 100,
     };
-    const base = map[String(phase || '')] ?? (busy ? 15 : 100);
+    const base = (map as Record<string, number>)[String(phase || '')] ?? (busy ? 15 : 100);
     return Math.min(100, Math.max(0, Math.round(base)));
   }
 
   function fetchUnitWeights() {
-    const lp = globalThis.PRModalLoadProgress;
+    const lp = (globalThis as any).PRModalLoadProgress;
     return (
       (lp && lp.FETCH_UNIT_WEIGHTS) || {
         start: 4,
@@ -522,7 +522,7 @@
   }
 
   function openProgressKeys() {
-    const lp = globalThis.PRModalLoadProgress;
+    const lp = (globalThis as any).PRModalLoadProgress;
     return (
       (lp && lp.OPEN_PROGRESS_KEYS) || [
         'start',
@@ -541,9 +541,9 @@
   }
 
   /** Active open/refresh progress — side fetches mark into this. */
-  let activeOpenProgress = null;
+  let activeOpenProgress: any = null;
 
-  function markSideProgress(name, labelKind = 'panels') {
+  function markSideProgress(name: any, labelKind = 'panels') {
     const prog = activeOpenProgress;
     if (!prog || typeof prog.mark !== 'function') return;
     const w = Number(prog.weights?.[name]) || 0;
@@ -556,9 +556,9 @@
     // thread ladder copy. After critical, sides only move background border.
     const has =
       prog.tracker && typeof prog.tracker.has === 'function'
-        ? (k) => prog.tracker.has(k)
+        ? (k: any) => prog.tracker.has(k)
         : () => false;
-    const lp = globalThis.PRModalLoadProgress;
+    const lp = (globalThis as any).PRModalLoadProgress;
     const threadsOk =
       typeof lp?.threadsProgressComplete === 'function'
         ? Boolean(lp.threadsProgressComplete(has))
@@ -600,8 +600,8 @@
    */
   function isCriticalProgressComplete(prog = activeOpenProgress) {
     if (!prog?.tracker || typeof prog.tracker.has !== 'function') return false;
-    const has = (k) => prog.tracker.has(k);
-    const lp = globalThis.PRModalLoadProgress;
+    const has = (k: any) => prog.tracker.has(k);
+    const lp = (globalThis as any).PRModalLoadProgress;
     if (typeof lp?.criticalProgressComplete === 'function') {
       return Boolean(lp.criticalProgressComplete(has));
     }
@@ -620,8 +620,8 @@
    */
   function isOpenProgressComplete(prog = activeOpenProgress) {
     if (!prog?.tracker || typeof prog.tracker.has !== 'function') return false;
-    const has = (k) => prog.tracker.has(k);
-    const lp = globalThis.PRModalLoadProgress;
+    const has = (k: any) => prog.tracker.has(k);
+    const lp = (globalThis as any).PRModalLoadProgress;
     if (typeof lp?.openProgressFullyComplete === 'function') {
       return Boolean(lp.openProgressFullyComplete(has));
     }
@@ -646,7 +646,7 @@
    */
   const BACKGROUND_LOAD_MIN_MS = 900;
   let backgroundHoldUntil = 0;
-  let backgroundClearTimer = null;
+  let backgroundClearTimer: any = null;
 
   function clearBackgroundHoldTimer() {
     if (backgroundClearTimer) {
@@ -674,7 +674,7 @@
         /* ignore */
       }
       try {
-        void globalThis.PRTreeFetch?.getGraphqlCostLog?.();
+        void (globalThis as any).PRTreeFetch?.getGraphqlCostLog?.();
       } catch {
         /* ignore */
       }
@@ -720,7 +720,7 @@
         /* ignore */
       }
       try {
-        void globalThis.PRTreeFetch?.getGraphqlCostLog?.();
+        void (globalThis as any).PRTreeFetch?.getGraphqlCostLog?.();
       } catch {
         /* ignore */
       }
@@ -767,7 +767,7 @@
    * Prefer explicit `_sideSettled` (includes empty-but-loaded panels).
    * Fall back to non-empty arrays so older cache without markers still works.
    */
-  function sideSettledFromDetail(detail) {
+  function sideSettledFromDetail(detail: any) {
     const d = detail && typeof detail === 'object' ? detail : null;
     if (!d || d._sketch) return emptySideFlags();
     const marked =
@@ -809,7 +809,7 @@
    * @param {{ pending?: boolean, settled?: boolean }} flags
    * @param {{ render?: boolean }} [opts]
    */
-  function setSideFlag(key, flags, opts = null) {
+  function setSideFlag(key: any, flags: any, opts: any = null) {
     let changed = false;
     if (flags && typeof flags.pending === 'boolean') {
       const prev = Boolean(current.sidePending?.[key]);

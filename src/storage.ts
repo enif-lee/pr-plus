@@ -254,7 +254,7 @@ function normalizePrefs(raw: any) {
 }
 
 function emptyRateLimitStateLocal() {
-  const RL = globalThis.PRModalRateLimit;
+  const RL = (globalThis as any).PRModalRateLimit;
   if (typeof RL?.emptyRateLimitState === 'function') {
     return RL.emptyRateLimitState();
   }
@@ -265,7 +265,7 @@ function emptyRateLimitStateLocal() {
 }
 
 function normalizeRateLimitStateLocal(raw: any) {
-  const RL = globalThis.PRModalRateLimit;
+  const RL = (globalThis as any).PRModalRateLimit;
   if (typeof RL?.normalizeRateLimitState === 'function') {
     return RL.normalizeRateLimitState(raw);
   }
@@ -280,7 +280,7 @@ function getRateLimitState(storageApi: any) {
   const area = getStorageArea(storageApi);
   if (!area) return Promise.resolve(emptyRateLimitStateLocal());
   return new Promise((resolve) => {
-    area.get([RATE_LIMIT_KEY], (result) => {
+    area.get([RATE_LIMIT_KEY], (result: any) => {
       resolve(normalizeRateLimitStateLocal(result?.[RATE_LIMIT_KEY]));
     });
   });
@@ -334,7 +334,7 @@ function watchRateLimitState(
   storageApi: any = (globalThis as any).chrome?.storage
 ) {
   if (!storageApi?.onChanged || typeof onChange !== 'function') return () => {};
-  const listener = (changes, areaName) => {
+  const listener = (changes: any, areaName: any) => {
     if (areaName !== 'local' || !changes[RATE_LIMIT_KEY]) return;
     onChange(normalizeRateLimitStateLocal(changes[RATE_LIMIT_KEY].newValue));
   };
@@ -347,12 +347,12 @@ function watchRateLimitState(
  * @returns {{ host: string, token: string }[]}
  */
 function normalizeHostAccounts(raw: any) {
-  if (globalThis.PRGithubEndpoints?.normalizeHostAccounts) {
-    return globalThis.PRGithubEndpoints.normalizeHostAccounts(raw);
+  if ((globalThis as any).PRGithubEndpoints?.normalizeHostAccounts) {
+    return (globalThis as any).PRGithubEndpoints.normalizeHostAccounts(raw);
   }
   // Fallback without endpoints module (tests may load storage alone).
   const list = Array.isArray(raw) ? raw : [];
-  const out = [];
+  const out: any[] = [];
   const seen = new Set();
   for (const row of list) {
     if (!row || typeof row !== 'object') continue;
@@ -389,7 +389,7 @@ function getExtensionPrefs(storageApi: any) {
   if (!area) return Promise.resolve({ ...(DEFAULT_PREFS as any) });
 
   return new Promise((resolve) => {
-    area.get([PREFS_KEY], (result) => {
+    area.get([PREFS_KEY], (result: any) => {
       resolve(normalizePrefs(result?.[PREFS_KEY]));
     });
   });
@@ -445,7 +445,7 @@ async function setExtensionPrefs(patch: any, storageApi: any) {
 function watchExtensionPrefs(onChange: any, storageApi: any = (globalThis as any).chrome?.storage) {
   if (!storageApi?.onChanged || typeof onChange !== 'function') return () => {};
 
-  const listener = (changes, areaName) => {
+  const listener = (changes: any, areaName: any) => {
     if (areaName !== 'local' || !changes[PREFS_KEY]) return;
     onChange(normalizePrefs(changes[PREFS_KEY].newValue));
   };
@@ -463,7 +463,7 @@ function getOnboardingCompleted(storageApi: any) {
   const area = getStorageArea(storageApi);
   if (!area) return Promise.resolve(false);
   return new Promise((resolve) => {
-    area.get([ONBOARDING_KEY, PREFS_KEY], (result) => {
+    area.get([ONBOARDING_KEY, PREFS_KEY], (result: any) => {
       // Dedicated key wins; fall back to legacy prefs field for older installs
       if (typeof result?.[ONBOARDING_KEY] === 'boolean') {
         resolve(Boolean(result[ONBOARDING_KEY]));
@@ -529,7 +529,7 @@ function getGithubToken(storageApi: any) {
   if (!area) return Promise.resolve(null);
 
   return new Promise((resolve) => {
-    area.get([TOKEN_KEY], (result) => {
+    area.get([TOKEN_KEY], (result: any) => {
       const token = result?.[TOKEN_KEY];
       resolve(typeof token === 'string' && token.trim() ? token.trim() : null);
     });
@@ -579,7 +579,7 @@ function setGithubToken(token: any, storageApi: any) {
 function watchGithubToken(onChange: any, storageApi: any = (globalThis as any).chrome?.storage) {
   if (!storageApi?.onChanged) return () => {};
 
-  const listener = (changes, areaName) => {
+  const listener = (changes: any, areaName: any) => {
     if (areaName !== 'local' || !changes[TOKEN_KEY]) return;
     const next = changes[TOKEN_KEY].newValue;
     // Callers must treat this as a signal only; avoid logging the value.
@@ -599,7 +599,7 @@ function getHostAccounts(storageApi: any) {
   if (!area) return Promise.resolve([]);
 
   return new Promise((resolve) => {
-    area.get([HOST_ACCOUNTS_KEY], (result) => {
+    area.get([HOST_ACCOUNTS_KEY], (result: any) => {
       resolve(normalizeHostAccounts(result?.[HOST_ACCOUNTS_KEY]));
     });
   });
@@ -612,8 +612,8 @@ function getHostAccounts(storageApi: any) {
  */
 async function getHostAccountHosts(storageApi: any) {
   const accounts = await getHostAccounts(storageApi);
-  if (globalThis.PRGithubEndpoints?.hostsFromAccounts) {
-    return globalThis.PRGithubEndpoints.hostsFromAccounts(accounts);
+  if ((globalThis as any).PRGithubEndpoints?.hostsFromAccounts) {
+    return (globalThis as any).PRGithubEndpoints.hostsFromAccounts(accounts);
   }
   // @ts-expect-error classic content-script dynamic shapes
   return accounts.map((a) => a.host);
@@ -678,9 +678,9 @@ async function registerHostAccount(host: any, token: any, storageApi: any) {
       accounts: existing,
     };
   }
-  let result;
-  if (globalThis.PRGithubEndpoints?.registerHostAccount) {
-    result = globalThis.PRGithubEndpoints.registerHostAccount(
+  let result: any;
+  if ((globalThis as any).PRGithubEndpoints?.registerHostAccount) {
+    result = (globalThis as any).PRGithubEndpoints.registerHostAccount(
       existing,
       host,
       t
@@ -737,9 +737,9 @@ async function registerHostAccount(host: any, token: any, storageApi: any) {
  */
 async function unregisterHostAccount(host: any, storageApi: any) {
   const existing = await getHostAccounts(storageApi);
-  let next;
-  if (globalThis.PRGithubEndpoints?.unregisterHostAccount) {
-    next = globalThis.PRGithubEndpoints.unregisterHostAccount(
+  let next: any;
+  if ((globalThis as any).PRGithubEndpoints?.unregisterHostAccount) {
+    next = (globalThis as any).PRGithubEndpoints.unregisterHostAccount(
       existing,
       host
     ).accounts;
@@ -771,8 +771,8 @@ async function getTokenForWebHost(webHost: any, storageApi: any) {
     getGithubToken(storageApi),
     getHostAccounts(storageApi),
   ]);
-  if (globalThis.PRGithubEndpoints?.selectTokenForWebHost) {
-    return globalThis.PRGithubEndpoints.selectTokenForWebHost(webHost, {
+  if ((globalThis as any).PRGithubEndpoints?.selectTokenForWebHost) {
+    return (globalThis as any).PRGithubEndpoints.selectTokenForWebHost(webHost, {
       defaultToken,
       hostAccounts,
     });
@@ -837,5 +837,5 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = storageApi;
 }
 if (typeof globalThis !== 'undefined') {
-  globalThis.PRTreeStorage = storageApi;
+  (globalThis as any).PRTreeStorage = storageApi;
 }

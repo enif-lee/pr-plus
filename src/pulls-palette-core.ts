@@ -8,7 +8,7 @@
  * Filter tokens → GitHub pulls search `q` qualifiers.
  * Activating a filter navigates the real list (not just in-palette filtering).
  */
-export const PULLS_PALETTE_FILTERS = {
+export const PULLS_PALETTE_FILTERS: Record<string, any> = {
   am: {
     id: 'am',
     label: 'Assigned to me',
@@ -67,7 +67,7 @@ export const CREATE_PR_ACTION_ID = 'new-pull-request';
  * GH “Filters ▾” preset searches (from the search Filters menu).
  * Navigate the real list via /issues?q=… (GitHub’s own targets).
  */
-export const PULLS_PRESET_FILTERS = {
+export const PULLS_PRESET_FILTERS: Record<string, any> = {
   oi: {
     id: 'oi',
     title: 'Open issues and pull requests',
@@ -426,7 +426,7 @@ export function normLogin(login: any) {
  */
 export function asLoginList(list: any) {
   if (!Array.isArray(list)) return [];
-  const out = [];
+  const out: any[] = [];
   for (const item of list) {
     const login =
       typeof item === 'string'
@@ -450,8 +450,8 @@ export function asLoginList(list: any) {
 export function parsePullsPaletteQuery(raw: any) {
   const source = String(raw || '');
   const tokens = source.trim().split(/\s+/).filter(Boolean);
-  const filters = [];
-  const rest = [];
+  const filters: any[] = [];
+  const rest: any[] = [];
   const seen = new Set();
   for (const t of tokens) {
     const low = t.toLowerCase();
@@ -511,7 +511,7 @@ export function prMatchesFilter(pr: any, filterId: any, viewerLogin: any) {
 export function prSearchText(pr: any) {
   const labels = Array.isArray(pr?.labels)
     ? pr.labels
-        .map((l) => (typeof l === 'string' ? l : l?.name || ''))
+        .map((l: any) => (typeof l === 'string' ? l : l?.name || ''))
         .filter(Boolean)
         .join(' ')
     : '';
@@ -547,11 +547,11 @@ export function prMatchesText(pr: any, text: any) {
  * @param {object[]} prs
  * @param {{ query?: string, filters?: string[], viewerLogin?: string }} opts
  */
-export function filterPullsForPalette(prs, opts: any = {}) {
+export function filterPullsForPalette(prs: any, opts: any = {}) {
   const list = Array.isArray(prs) ? prs : [];
   const parsed = parsePullsPaletteQuery(opts.query || '');
   const filters = Array.isArray(opts.filters)
-    ? [...opts.filters.map((f) => String(f).toLowerCase()), ...parsed.filters]
+    ? [...opts.filters.map((f: any) => String(f).toLowerCase()), ...parsed.filters]
     : parsed.filters;
   const uniqFilters = [...new Set(filters)].filter(
     (f) => PULLS_PALETTE_FILTERS[f]
@@ -643,7 +643,7 @@ export function matchCachedPrsForSearch(prs: any, term: any) {
     .toLowerCase();
   if (!t) return list.slice();
   const exactNum = /^\d+$/.test(t) ? Number(t) : NaN;
-  const out = [];
+  const out: any[] = [];
   for (const pr of list) {
     if (!pr || typeof pr !== 'object') continue;
     const num = Number(pr.number);

@@ -24,7 +24,7 @@
  * @param {InlineComment[]} comments
  * @returns {InlineComment[]}
  */
-export function filterThreadRootComments(comments) {
+export function filterThreadRootComments(comments: any) {
   const list = Array.isArray(comments) ? comments : [];
   const byId = new Map();
   for (const c of list) {
@@ -43,7 +43,7 @@ export function filterThreadRootComments(comments) {
  * @param {Array<{ filename?: string, path?: string }>|string[]|null|undefined} filesOrPaths
  * @returns {Map<string, number>}
  */
-export function buildPathOrderMap(filesOrPaths) {
+export function buildPathOrderMap(filesOrPaths: any) {
   const map = new Map();
   if (!Array.isArray(filesOrPaths)) return map;
   let i = 0;
@@ -64,7 +64,7 @@ export function buildPathOrderMap(filesOrPaths) {
  * @param {Map<string, number>|Array<{filename?:string,path?:string}>|string[]|null} [pathOrder]
  * @returns {InlineComment[]}
  */
-export function sortInlineComments(comments, pathOrder = null) {
+export function sortInlineComments(comments: any, pathOrder: any = null) {
   const list = Array.isArray(comments) ? comments.slice() : [];
   const order =
     pathOrder instanceof Map
@@ -99,7 +99,7 @@ export function sortInlineComments(comments, pathOrder = null) {
  * @param {Map<string, number>|Array|null} [pathOrder]
  * @returns {InlineComment[]}
  */
-export function sortThreadRootComments(comments, pathOrder = null) {
+export function sortThreadRootComments(comments: any, pathOrder: any = null) {
   return sortInlineComments(filterThreadRootComments(comments), pathOrder);
 }
 
@@ -109,7 +109,7 @@ export function sortThreadRootComments(comments, pathOrder = null) {
  * @param {InlineComment[]} mapped
  * @param {Map<string, number>|Array|null} [pathOrder]
  */
-export function sortMappedCommentsByDiffOrder(mapped, pathOrder = null) {
+export function sortMappedCommentsByDiffOrder(mapped: any, pathOrder: any = null) {
   const list = Array.isArray(mapped) ? mapped.slice() : [];
   const order =
     pathOrder instanceof Map
@@ -146,7 +146,7 @@ export function sortMappedCommentsByDiffOrder(mapped, pathOrder = null) {
  * @param {InlineComment} root
  * @param {InlineComment[]} comments
  */
-function rootIsPending(root, comments) {
+function rootIsPending(root: any, comments: any) {
   if (!root) return false;
   if (root.pending) return true;
   const rootId = root.id != null ? String(root.id) : '';
@@ -172,7 +172,7 @@ function rootIsPending(root, comments) {
  * @param {Set<string>|string[]|null} [allowedPaths]
  * @returns {InlineComment[]}
  */
-export function filterReviewRootsForNav(comments, mode = null, allowedPaths = null) {
+export function filterReviewRootsForNav(comments: any, mode: any = null, allowedPaths: any = null) {
   const list = Array.isArray(comments) ? comments : [];
   const roots = filterThreadRootComments(list);
   const pathSet =
@@ -200,7 +200,7 @@ export function filterReviewRootsForNav(comments, mode = null, allowedPaths = nu
  * @param {null|'unresolved'|'resolved'|'pending'|'all'} [mode]
  * @param {Set<string>|string[]|null} [allowedPaths]
  */
-export function filterReviewCommentsForNav(comments, mode = null, allowedPaths = null) {
+export function filterReviewCommentsForNav(comments: any, mode: any = null, allowedPaths: any = null) {
   const list = Array.isArray(comments) ? comments : [];
   const allowedRoots = filterReviewRootsForNav(list, mode, allowedPaths);
   const rootIds = new Set(
@@ -399,7 +399,7 @@ export function mapCommentsToRowIndices(
  * @param {number} total
  * @param {number} delta
  */
-export function nextCommentIndex(current, total, delta) {
+export function nextCommentIndex(current: any, total: any, delta: any) {
   if (!total || total <= 0) return -1;
   if (current < 0) return delta >= 0 ? 0 : total - 1;
   return (current + delta + total) % total;
@@ -410,7 +410,7 @@ export function nextCommentIndex(current, total, delta) {
  * @param {number} commentIndex
  * @param {number} delta
  */
-export function resolveCommentNav(mappedComments, commentIndex, delta) {
+export function resolveCommentNav(mappedComments: any, commentIndex: any, delta: any) {
   const list = Array.isArray(mappedComments) ? mappedComments : [];
   if (!list.length) {
     return { commentIndex: -1, active: null, shouldJump: false };

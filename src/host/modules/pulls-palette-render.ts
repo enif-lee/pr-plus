@@ -1,5 +1,5 @@
   // continued host module segment
-  function escapeHtml(s) {
+  function escapeHtml(s: any) {
     return String(s || '')
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
@@ -8,9 +8,9 @@
   }
 
   /** Localized pulls-palette chrome via pure catalogs. */
-  function pullsPaletteMsg(key, fallback) {
+  function pullsPaletteMsg(key: any, fallback: any) {
     try {
-      const pure = globalThis.PRModalI18n;
+      const pure = (globalThis as any).PRModalI18n;
       let locale =
         document.documentElement?.getAttribute?.('data-prp-app-locale') ||
         document.documentElement?.getAttribute?.('data-prp-ui-language') ||
@@ -30,7 +30,7 @@
   }
 
   /** Author avatar or initials fallback for palette PR rows. */
-  function renderPullsPaletteAvatar(item) {
+  function renderPullsPaletteAvatar(item: any) {
     const login = String(item?.author || '').trim();
     const url = String(item?.authorAvatarUrl || '').trim();
     const initials = login
@@ -43,7 +43,7 @@
       let loading = 'lazy';
       let decoding = 'async';
       try {
-        const cache = globalThis.PRModalAvatarImageCache;
+        const cache = (globalThis as any).PRModalAvatarImageCache;
         if (cache && typeof cache.avatarImageLoadingAttr === 'function') {
           loading = cache.avatarImageLoadingAttr(url) || loading;
         }
@@ -69,7 +69,7 @@
   }
 
   /** Rich meta row: #num · avatar @author · branch chips */
-  function renderPullsPalettePrBody(item) {
+  function renderPullsPalettePrBody(item: any) {
     const num = item?.number != null ? Number(item.number) : NaN;
     const numHtml = Number.isFinite(num)
       ? `<span class="prp-pp-pr-num">#${num}</span>`
@@ -118,14 +118,14 @@
    * Must wrap in __main so the digit kbd stays a single right-column badge
    * (bare title/sub children auto-place into col2 / row2).
    */
-  function renderPullsPaletteActionBody(item) {
+  function renderPullsPaletteActionBody(item: any) {
     const aliases = Array.isArray(item?.aliases)
-      ? item.aliases.map((a) => String(a || '').trim()).filter(Boolean)
+      ? item.aliases.map((a: any) => String(a || '').trim()).filter(Boolean)
       : [];
     const aliasHtml = aliases.length
       ? `<span class="prp-pp-aliases">${aliases
           .map(
-            (a) =>
+            (a: any) =>
               `<kbd class="prp-pp-alias">${escapeHtml(a)}</kbd>`
           )
           .join('')}</span>`
@@ -164,7 +164,7 @@
       </span>`;
   }
 
-  function fillPullsPaletteHelp(root) {
+  function fillPullsPaletteHelp(root: any) {
     const host = root || pullsPaletteRoot;
     const list = host?.querySelector?.('[data-prp-pp-help-list]');
     if (!list) return;
@@ -184,10 +184,10 @@
       return;
     }
     list.innerHTML = entries
-      .map((e) => {
+      .map((e: any) => {
         const codes = (e.aliases || [])
           .map(
-            (a) =>
+            (a: any) =>
               `<kbd class="prp-pp-help__alias">${escapeHtml(String(a))}</kbd>`
           )
           .join('');
@@ -206,7 +206,7 @@
   }
 
   /** Run a configured palette action (from help sidebar or list). */
-  function executePullsPaletteCommand(item) {
+  function executePullsPaletteCommand(item: any) {
     if (!item || typeof item !== 'object') return false;
     const api = pullsPaletteApi();
 
@@ -276,7 +276,7 @@
     return false;
   }
 
-  function runPullsPaletteHelpAction(el) {
+  function runPullsPaletteHelpAction(el: any) {
     if (!el) return false;
     const action = el.getAttribute('data-prp-pp-help-action') || '';
     const filterId = el.getAttribute('data-prp-pp-help-filter') || '';
@@ -321,7 +321,7 @@
     if (!listEl) return;
     const rows = listEl.querySelectorAll('.prp-pp-item[data-prp-pp-index]');
     if (!rows.length) return;
-    let focusedEl = null;
+    let focusedEl: any = null;
     for (const row of rows) {
       const i = Number(row.getAttribute('data-prp-pp-index'));
       const on = i === pullsPaletteFocusIndex;
@@ -383,7 +383,7 @@
     // One-shot enter animation on full rebuild only (not focus moves)
     listEl.setAttribute('data-prp-pp-animate', '1');
     listEl.innerHTML = items
-      .map((item, i) => {
+      .map((item: any, i: any) => {
         const focused = i === pullsPaletteFocusIndex ? ' is-focused' : '';
         const digit =
           item.digit != null
@@ -459,7 +459,7 @@
     ) {
       const want = Number(pullsPaletteSavedListFocus);
       const rows = getPullsListRows();
-      const idx = rows.findIndex((r) => getRowPrNumber(r) === want);
+      const idx = rows.findIndex((r: any) => getRowPrNumber(r) === want);
       if (idx >= 0) applyPullsListFocus(idx);
     }
     pullsPaletteSavedListFocus = null;
@@ -580,7 +580,7 @@
     pullsPaletteScrollbarDestroy = null;
     try {
       const attach =
-        globalThis.PRModalFloatingScrollbar?.attachFloatingScrollbar;
+        (globalThis as any).PRModalFloatingScrollbar?.attachFloatingScrollbar;
       const listEl = root.querySelector('[data-prp-pp-list]');
       const listHost = root.querySelector('[data-prp-pp-list-host]');
       if (typeof attach === 'function' && listEl) {
@@ -612,7 +612,7 @@
 
   /** Navigate the real tab (filters / create) so the pulls list page changes. */
 
-  function navigatePage(href) {
+  function navigatePage(href: any) {
     const raw = String(href || '').trim();
     if (!raw) return false;
     let abs = raw;
@@ -623,7 +623,7 @@
     }
     // GitHub Turbo soft-nav when available (keeps SPA shell, still updates list)
     try {
-      const turbo = globalThis.Turbo || globalThis.turbo;
+      const turbo = (globalThis as any).Turbo || (globalThis as any).turbo;
       if (turbo && typeof turbo.visit === 'function') {
         turbo.visit(abs);
         return true;
@@ -654,7 +654,7 @@
     }
   }
 
-  function activatePullsPaletteItem(index) {
+  function activatePullsPaletteItem(index: any) {
     const api = pullsPaletteApi();
     const items = pullsPaletteItems || rebuildPullsPaletteItems() || [];
     // Prefer exact alias (am/my/np) over stale focus index
@@ -672,7 +672,7 @@
     return executePullsPaletteCommand(item);
   }
 
-  function stepPullsPaletteFocus(delta) {
+  function stepPullsPaletteFocus(delta: any) {
     const api = pullsPaletteApi();
     const items = pullsPaletteItems || rebuildPullsPaletteItems() || [];
     const next =

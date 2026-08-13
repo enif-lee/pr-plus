@@ -339,7 +339,7 @@ export function AsideCompactRail({
         <section className="prp-aside-compact__group" aria-label={t('meta_labels')}>
           <h3 className="prp-aside-compact__label">{t('meta_labels')}</h3>
           <div className="prp-aside-compact__labels">
-            {labelItems.map((l) => (
+            {labelItems.map((l: any) => (
               <span
                 key={l.key}
                 className="prp-aside-compact__label-dot prp-has-tip"

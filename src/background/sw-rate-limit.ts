@@ -55,7 +55,7 @@ export function rawBrowserFetch() {
 }
 
 export function rateLimitApi() {
-  return globalThis.PRModalRateLimit || null;
+  return (globalThis as any).PRModalRateLimit || null;
 }
 
 export async function ensureRateLimitMem() {
@@ -199,7 +199,7 @@ export function noteGithubResponse(res: any, url: any, resourceHint: any) {
  * Used by fetchImpl() so bare handlers and beginTrackedFetch share one path.
  */
 export function wrapFetchWithRateLimit(baseFetch: any) {
-  return async (url, init: any = {}) => {
+  return async (url: any, init: any = {}) => {
     try {
       await ensureRateLimitMem();
     } catch {
@@ -231,7 +231,7 @@ export function fetchImpl() {
 
 /** AbortSignal merge only; rate-limit is already on baseFetch from fetchImpl(). */
 export function wrapFetchWithSignal(baseFetch: any, signal: any) {
-  return async (url, init: any = {}) => {
+  return async (url: any, init: any = {}) => {
     if (signal.aborted) return Promise.reject(makeAbortError());
     let nextSignal = signal;
     if (init.signal && init.signal !== signal) {
@@ -379,7 +379,7 @@ export function withServiceWorkerKeepAlive(work: any) {
 }
 
 export function withTimeout(promise: any, ms: any, label: any) {
-  let timer;
+  let timer: any;
   const timeout = new Promise((_, reject) => {
     timer = setTimeout(() => {
       const err = new Error(

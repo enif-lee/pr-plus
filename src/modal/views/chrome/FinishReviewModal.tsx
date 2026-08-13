@@ -377,7 +377,7 @@ export function FinishReviewModal({
                 size="sm"
                 variant="danger"
                 disabled={actionBusy}
-                onClick={() => void onDiscard?.()}
+                onClick={(): any => void onDiscard?.()}
                 title={t('cta_discard_pending')}
                 tipPlacement="top"
               >
@@ -419,7 +419,7 @@ export function FinishReviewModal({
                 variant="primary"
                 loading={Boolean(actionBusy)}
                 disabled={!canSubmit}
-                onClick={() => void handleSubmit('comment')}
+                onClick={(): any => void handleSubmit('comment')}
                 title={canSubmit ? t('cta_submit_review_comment') : submitBlockedTitle}
                 shortcut={scComment}
                 tipPlacement="top"
@@ -439,7 +439,7 @@ export function FinishReviewModal({
                   variant="ok"
                   loading={Boolean(actionBusy)}
                   disabled={!canSubmit}
-                  onClick={() => void handleSubmit('approve')}
+                  onClick={(): any => void handleSubmit('approve')}
                   title={canSubmit ? t('cta_approve_pr') : submitBlockedTitle}
                   shortcut={scApprove}
                   tipPlacement="top"
@@ -460,7 +460,7 @@ export function FinishReviewModal({
                   variant="warn"
                   loading={Boolean(actionBusy)}
                   disabled={!canSubmit}
-                  onClick={() => void handleSubmit('request_changes')}
+                  onClick={(): any => void handleSubmit('request_changes')}
                   title={
                     canSubmit ? t('cta_request_changes') : submitBlockedTitle
                   }

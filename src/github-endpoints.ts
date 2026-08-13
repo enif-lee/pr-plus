@@ -68,7 +68,7 @@
    */
   function normalizeHostAccounts(raw: any) {
     const list = Array.isArray(raw) ? raw : [];
-    const out = [];
+    const out: any[] = [];
     const seen = new Set();
     for (const row of list) {
       if (!row || typeof row !== 'object') continue;
@@ -103,7 +103,7 @@
    * @param {{ defaultToken?: string|null, hostAccounts?: unknown }} [opts]
    * @returns {{ token: string|null, source: 'default'|'host'|null, host: string }}
    */
-  function selectTokenForWebHost(webHost, opts: any = {}) {
+  function selectTokenForWebHost(webHost: any, opts: any = {}) {
     const host = normalizeHostname(webHost) || 'github.com';
     const defaultToken =
       typeof opts.defaultToken === 'string' && opts.defaultToken.trim()
@@ -400,7 +400,7 @@
       : typeof rawHosts === 'string'
         ? rawHosts.split(/[\s,]+/)
         : [];
-    const out = [];
+    const out: any[] = [];
     const seen = new Set();
     for (const raw of list) {
       const h = normalizeHostname(raw);

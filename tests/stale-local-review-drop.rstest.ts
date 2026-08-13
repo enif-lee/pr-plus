@@ -479,11 +479,9 @@ describe('sanitizeDetailForCache drops orphan pending', () => {
     expect((out.reviewComments || []).map((c: any) => Number(c.id))).toEqual([
       42,
     ]);
-    // Drop only — do not auto-tombstone (submit reuses same ids as published).
-    // Explicit discard tombs still live in `_deletedReviewCommentIds` when set.
-    expect(out._deletedReviewCommentIds || []).not.toEqual(
-      expect.arrayContaining(['501', '502'])
-    );
+    // Drop only — do not persist discard tombs on the cache snapshot.
+    expect(out._deletedReviewCommentIds).toBeUndefined();
+    expect(out._deletedReviewBodies).toBeUndefined();
   });
 
   test('vpr null applies tombstones to demoted bodies without pendingReviewId', () => {

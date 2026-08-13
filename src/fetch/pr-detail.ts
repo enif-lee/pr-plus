@@ -47,11 +47,11 @@ import {
 } from './viewer';
 
 export async function fetchPrDetail(
-  owner,
-  repo,
-  pullNumber,
-  fetchImpl,
-  token = null,
+  owner: any,
+  repo: any,
+  pullNumber: any,
+  fetchImpl: any,
+  token: any = null,
   opts: any = {}
 ) {
   const ctx = normalizeApiCtx(opts?.ctx);
@@ -100,7 +100,7 @@ export async function fetchPrDetail(
           timings,
           'issue',
           apiJson(`${base}/issues/${n}?${bust()}`, fetchImpl, token, noCache).catch(
-            (err) => {
+            (err): any => {
               if (
                 err?.name === 'AbortError' ||
                 /aborted|AbortError/i.test(String(err?.message || ''))
@@ -125,7 +125,7 @@ export async function fetchPrDetail(
       timings,
       'autolinks',
       fetchRepoAutolinks(owner, repo, fetchImpl, token, ctx),
-      (r) => `(${Array.isArray(r) ? r.length : 0} links)`,
+      (r: any) => `(${Array.isArray(r) ? r.length : 0} links)`,
       batchOpt
     ),
   ]);
@@ -218,17 +218,17 @@ export async function fetchPrDetail(
   );
   const files = [];
   const commentsPage = {
-    items: [],
+    items: [] as any[],
     meta: {
       page: 1,
       perPage: COMMENT_PAGE_SIZE,
       hasMore: false,
-      nextPage: null,
+      nextPage: null as any,
       order: 'from-end',
       loadedCount: 0,
     },
   };
-  const reviews = [];
+  const reviews: any[] = [];
 
   // GitHub computes mergeable async on first GET (often null/unknown).
   // Re-fetch once so conflict (dirty) is not mislabeled as "still calculating".
@@ -255,7 +255,7 @@ export async function fetchPrDetail(
         timings,
         'repoMergeSettings',
         apiJson(base, fetchImpl, token),
-        (r) =>
+        (r: any) =>
           `(merge=${r?.allow_merge_commit} squash=${r?.allow_squash_merge} rebase=${r?.allow_rebase_merge} admin=${r?.permissions?.admin})`
       );
       if (!repoMergeFlags) {
@@ -303,10 +303,10 @@ export async function fetchPrDetail(
 
   // First page (or zero) of review threads — not the full 500+ dump
   let reviewThreadBundle = {
-    threads: [],
-    comments: [],
+    threads: [] as any[],
+    comments: [] as any[],
     hasMore: false,
-    endCursor: null,
+    endCursor: null as any,
     pageCount: 0,
   };
   if (token && threadsMaxPages > 0) {
@@ -323,7 +323,7 @@ export async function fetchPrDetail(
         }
         return reviewThreadBundle;
       }),
-      (b) =>
+      (b: any) =>
         `(${(b?.threads || []).length} threads, ${(b?.comments || []).length} comments)`
     );
   } else {
@@ -357,7 +357,7 @@ export async function fetchPrDetail(
           fetchImpl,
           token,
           ctx
-        ).catch((err) => {
+        ).catch((err): any => {
           if (
             err?.name === 'AbortError' ||
             /aborted|AbortError/i.test(String(err?.message || ''))
@@ -366,7 +366,7 @@ export async function fetchPrDetail(
           }
           return null;
         }),
-        (p) => `(${(p?.items || []).length} rest review comments)`
+        (p: any) => `(${(p?.items || []).length} rest review comments)`
       );
       const items = Array.isArray(restPage?.items) ? restPage.items : [];
       if (items.length) {
@@ -374,19 +374,19 @@ export async function fetchPrDetail(
         for (const c of items) {
           if (c && c.id != null) byId.set(String(c.id), c);
         }
-        const roots = items.filter((c) => {
+        const roots = items.filter((c: any) => {
           if (!c || c.id == null) return false;
           const parent = c.inReplyToId ?? c.in_reply_to_id ?? null;
           return parent == null || !byId.has(String(parent));
         });
-        const threads = roots.map((r) => {
+        const threads = roots.map((r: any) => {
           const replyIds = items
             .filter(
-              (c) =>
+              (c: any) =>
                 c &&
                 String(c.inReplyToId ?? c.in_reply_to_id ?? '') === String(r.id)
             )
-            .map((c) => c.id);
+            .map((c: any) => c.id);
           const threadNodeId = r.nodeId || `rest-thread-${r.id}`;
           const commentIds = [r.id, ...replyIds];
           for (const cid of commentIds) {
@@ -435,7 +435,7 @@ export async function fetchPrDetail(
   const reviewThreads = reviewThreadBundle?.threads || [];
   // PENDING-only REST rows when GraphQL misses them (reviews list is independent;
   // pending bundle finds PENDING via its own lookup when preloaded reviews empty).
-  let pendingBundle = { comments: [], review: null };
+  let pendingBundle = { comments: [] as any[], review: null as any };
   if (token) {
     pendingBundle = await timedFetch(
       timings,
@@ -455,9 +455,9 @@ export async function fetchPrDetail(
         if (err?.name === 'AbortError' || /aborted|AbortError/i.test(String(err?.message || ''))) {
           throw err;
         }
-        return { comments: [], review: null };
+        return { comments: [] as any[], review: null as any };
       }),
-      (b) => `(${(b?.comments || []).length} pending comments)`
+      (b: any) => `(${(b?.comments || []).length} pending comments)`
     );
   } else {
   // @ts-expect-error classic fetch dynamic shapes
@@ -474,7 +474,7 @@ export async function fetchPrDetail(
     page: 1,
     perPage: (reviewThreadBundle?.comments || []).length || COMMENT_PAGE_SIZE,
     hasMore: Boolean(reviewThreadBundle?.hasMore),
-    nextPage: null,
+    nextPage: null as any,
     loadedCount: (reviewComments || []).length,
   };
   // @ts-expect-error classic fetch dynamic shapes
@@ -499,14 +499,14 @@ export async function fetchPrDetail(
 
   const headSha = pr.head?.sha || '';
   // files / comments / reviews / checks / commits / development: independent host fetches
-  const checks = { state: 'unknown', totalCount: 0, statuses: [], checkRuns: [] };
-  const commits = [];
+  const checks = { state: 'unknown', totalCount: 0, statuses: [] as any[], checkRuns: [] as any[] };
+  const commits: any[] = [];
   let linkedIssues = [];
-  const developmentIssues = [];
-  const projects = [];
+  const developmentIssues: any[] = [];
+  const projects: any[] = [];
   try {
     let editApi =
-      typeof globalThis !== 'undefined' ? globalThis.PRModalPrEditApi : null;
+      typeof globalThis !== 'undefined' ? (globalThis as any).PRModalPrEditApi : null;
     if (!editApi && typeof require === 'function') {
       try {
         editApi = require('./modal/pure/pr-edit-api.js');
@@ -524,7 +524,7 @@ export async function fetchPrDetail(
 
   // gitattributes + file annotate moved to fetchPrFiles (independent)
   const gitattributesText = '';
-  const filesOut = [];
+  const filesOut: any[] = [];
   // @ts-expect-error classic fetch dynamic shapes
   timings.mapAnnotateFiles = 0;
 
@@ -656,19 +656,19 @@ export async function fetchPrDetail(
     /** Total commits on the PR (REST field); may exceed first page of commits[]. */
     commitsCount: pr.commits != null ? Number(pr.commits) : null,
     labels: Array.isArray(pr.labels)
-      ? pr.labels.map((l) => ({
+      ? pr.labels.map((l: any) => ({
           name: l.name || '',
           color: l.color || '',
           description: l.description || '',
         }))
       : [],
     assignees: Array.isArray(pr.assignees)
-      ? pr.assignees.map((u) => u.login || u).filter(Boolean)
+      ? pr.assignees.map((u: any) => u.login || u).filter(Boolean)
       : [],
     /** login → avatar_url for people chips when API provided them */
     avatarUrls: (() => {
-      const map = {};
-      const putUser = (u) => {
+      const map: Record<string, string> = {};
+      const putUser = (u: any) => {
         const login = u?.login || (typeof u === 'string' ? u : '');
         const url = u?.avatar_url || '';
         if (login && url) map[String(login).toLowerCase()] = url;
@@ -686,8 +686,8 @@ export async function fetchPrDetail(
      * Used to hide re-request / remove for bot reviewers & assignees.
      */
     actorIsBot: (() => {
-      const map = {};
-      const put = (u) => {
+      const map: Record<string, boolean> = {};
+      const put = (u: any) => {
         const login = u?.login || (typeof u === 'string' ? u : '');
         if (!login) return;
         const key = String(login).toLowerCase();
@@ -702,10 +702,10 @@ export async function fetchPrDetail(
       return map;
     })(),
     requestedReviewers: Array.isArray(pr.requested_reviewers)
-      ? pr.requested_reviewers.map((u) => u.login || u).filter(Boolean)
+      ? pr.requested_reviewers.map((u: any) => u.login || u).filter(Boolean)
       : [],
     requestedTeams: Array.isArray(pr.requested_teams)
-      ? pr.requested_teams.map((t) => t.slug || t.name).filter(Boolean)
+      ? pr.requested_teams.map((t: any) => t.slug || t.name).filter(Boolean)
       : [],
     milestone: pr.milestone
       ? {
@@ -729,7 +729,7 @@ export async function fetchPrDetail(
       page: 1,
       perPage: COMMENT_PAGE_SIZE,
       hasMore: false,
-      nextPage: null,
+      nextPage: null as any,
       loadedCount: Array.isArray(comments) ? comments.length : 0,
     },
     // Populated by independent fetchPrReviews

@@ -238,7 +238,7 @@ export async function toggleCommentReaction(
 ) {
   ctx = normalizeApiCtx(ctx);
   const content = String(opts?.content || '').trim();
-  const gqlContent = REST_TO_GQL_REACTION[content];
+  const gqlContent = (REST_TO_GQL_REACTION as Record<string, string>)[content];
   if (!gqlContent) {
     throw new Error(`Unsupported reaction: ${content || '(empty)'}`);
   }

@@ -28,32 +28,32 @@
  * @param {object} ev normalized event from fetchPrTimelineEvents
  * @returns {TimelinePart[]|null} null when the event should not be shown
  */
-export function describeTimelineEvent(ev) {
+export function describeTimelineEvent(ev: any) {
   if (!ev || typeof ev !== 'object') return null;
   const event = String(ev.event || '').trim();
   if (!event) return null;
 
-  const t = (text) => ({ type: 'text', text: String(text) });
-  const strong = (text) => ({ type: 'strong', text: String(text) });
-  const title = (text) => ({ type: 'title', text: String(text) });
-  const status = (text, tone) => ({
+  const t = (text: any) => ({ type: 'text', text: String(text) });
+  const strong = (text: any) => ({ type: 'strong', text: String(text) });
+  const title = (text: any) => ({ type: 'title', text: String(text) });
+  const status = (text: any, tone: any) => ({
     type: 'status',
     text: String(text),
     tone: tone ? String(tone) : undefined,
   });
-  const commit = (text) => ({ type: 'commit', text: String(text) });
-  const user = (login) => ({ type: 'user', login: String(login || '') });
-  const label = (name, color) => ({
+  const commit = (text: any) => ({ type: 'commit', text: String(text) });
+  const user = (login: any) => ({ type: 'user', login: String(login || '') });
+  const label = (name: any, color: any) => ({
     type: 'label',
     name: String(name || ''),
     color: color ? String(color) : undefined,
   });
-  const milestone = (titleText) => ({
+  const milestone = (titleText: any) => ({
     type: 'milestone',
     title: String(titleText || ''),
   });
 
-  const shortSha = (sha) => {
+  const shortSha = (sha: any) => {
     const s = String(sha || '');
     return s.length > 7 ? s.slice(0, 7) : s;
   };
@@ -235,7 +235,7 @@ export function describeTimelineEvent(ev) {
  * @param {object} ev
  * @param {number} [i]
  */
-export function timelineEventToItem(ev, i = 0) {
+export function timelineEventToItem(ev: any, i = 0) {
   if (!ev) return null;
   const parts = describeTimelineEvent(ev);
   if (!parts || !parts.length) return null;
@@ -303,9 +303,9 @@ export function makeLocalTimelineEvent(partial: {
     milestone: partial.milestone || null,
     rename: partial.rename || null,
     commitId: partial.commitId || null,
-    lockReason: null,
-    dismissReason: null,
-    reviewState: null,
+    lockReason: null as any,
+    dismissReason: null as any,
+    reviewState: null as any,
     _local: true,
   };
 }

@@ -33,8 +33,6 @@ const DOMAIN_KEYS = [
   'subscribed',
   'avatarUrls',
   'bodyReactions',
-  '_deletedReviewCommentIds',
-  '_deletedReviewBodies',
   '_resolveStamps',
   'headBranchDeleted',
   'headRefDeleted',
@@ -55,10 +53,16 @@ export function createApplyDomainDetailToHost(opts: {
     if (typeof onPatchDetail !== 'function') {
       return { status: 'failed', error: 'onPatchDetail unavailable' };
     }
-    detailRef.current = next;
     const patch: Record<string, unknown> = {};
     for (const k of DOMAIN_KEYS) {
       if (Object.prototype.hasOwnProperty.call(next, k)) patch[k] = next[k];
+    }
+    // Session-only discard hints (never DOMAIN_KEYS / never IDB).
+    if (Object.prototype.hasOwnProperty.call(next, '_deletedReviewCommentIds')) {
+      patch._deletedReviewCommentIds = next._deletedReviewCommentIds;
+    }
+    if (Object.prototype.hasOwnProperty.call(next, '_deletedReviewBodies')) {
+      patch._deletedReviewBodies = next._deletedReviewBodies;
     }
     if (!Object.keys(patch).length) return { status: 'skipped' };
     try {
@@ -70,6 +74,9 @@ export function createApplyDomainDetailToHost(opts: {
         detail?.number
       );
       if (res && typeof res === 'object' && typeof res.status === 'string') {
+        if (res.status === 'applied') {
+          detailRef.current = next;
+        }
         if (res.status === 'failed') {
           const msg = res.error || 'host patch';
           try {

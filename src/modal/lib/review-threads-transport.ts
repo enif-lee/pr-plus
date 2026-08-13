@@ -30,7 +30,7 @@ export const REVIEW_THREADS_WARM_PROBE_SIZE = 100;
  * @param {any} detail
  * @returns {boolean}
  */
-export function hasUsableReviewThreadsCache(detail) {
+export function hasUsableReviewThreadsCache(detail: any) {
   if (!detail || typeof detail !== 'object') return false;
   if (detail._sketch) return false;
   const threads = Array.isArray(detail.reviewThreads) ? detail.reviewThreads : [];
@@ -40,8 +40,8 @@ export function hasUsableReviewThreadsCache(detail) {
   const meta = detail.reviewThreadsMeta || {};
   const loadedMeta = Number(meta.loadedThreadCount);
   const withNode =
-    threads.some((t) => t && t.threadNodeId) ||
-    comments.some((c) => c && c.threadNodeId);
+    threads.some((t: any) => t && t.threadNodeId) ||
+    comments.some((c: any) => c && c.threadNodeId);
   if (!withNode && !(loadedMeta > 0) && threads.length === 0 && comments.length === 0) {
     return false;
   }
@@ -109,6 +109,25 @@ export function chooseReviewThreadsTransport(opts: any = {}) {
   if (opts?.preferRest === false) return 'graphql';
   // newest/oldest/older/newer/cursor → GraphQL shell (PRRT always)
   return 'graphql';
+}
+
+/**
+ * Load-more must not re-lock a GraphQL-capable session onto REST.
+ * REST only when the existing window is already REST *and* there is no
+ * GraphQL cursor (newestStartCursor / oldestStartCursor / endCursor).
+ */
+export function shouldPreferRestForThreadLoadMore(meta: any): boolean {
+  if (!meta || typeof meta !== 'object') return false;
+  const source = String(meta.source || '').toLowerCase();
+  const hasGraphqlCursor = Boolean(
+    meta.newestStartCursor ||
+      meta.oldestStartCursor ||
+      meta.endCursor ||
+      meta.startCursor
+  );
+  if (hasGraphqlCursor) return false;
+  if (source && source !== 'rest') return false;
+  return source === 'rest';
 }
 
 /**
@@ -375,13 +394,13 @@ export function dropReviewThreadsByNodeIds(detail: any, threadNodeIds: any) {
     : [];
   return {
     ...detail,
-    reviewComments: prevRc.filter((c) => {
+    reviewComments: prevRc.filter((c: any) => {
       if (!c) return false;
       const tid = c.threadNodeId ? String(c.threadNodeId) : '';
       return !(tid && drop.has(tid));
     }),
     reviewThreads: prevTh.filter(
-      (t) => !t?.threadNodeId || !drop.has(String(t.threadNodeId))
+      (t: any) => !t?.threadNodeId || !drop.has(String(t.threadNodeId))
     ),
   };
 }
@@ -415,11 +434,11 @@ export function buildRestReviewThreadsPageFromComments(
 ) {
   const list = Array.isArray(items) ? items : [];
   const empty = {
-    threads: [],
-    comments: [],
+    threads: [] as any[],
+    comments: [] as any[],
     hasMore: false,
-    endCursor: null,
-    startCursor: null,
+    endCursor: null as any,
+    startCursor: null as any,
     hasNextPage: false,
     hasPreviousPage: false,
     totalCount: 0,
@@ -495,7 +514,7 @@ export function buildRestReviewThreadsPageFromComments(
  * @param {string} threadNodeId
  * @param {any} [thread] optional thread row with commentIds
  */
-export function countCommentsForThread(pageOrDetail, threadNodeId, thread = null) {
+export function countCommentsForThread(pageOrDetail: any, threadNodeId: any, thread: any = null) {
   const id = String(threadNodeId || '');
   if (!id) return 0;
   if (thread && Array.isArray(thread.commentIds) && thread.commentIds.length) {
@@ -523,7 +542,7 @@ export function countCommentsForThread(pageOrDetail, threadNodeId, thread = null
  * @param {any} detail cached detail
  * @returns {{ match: boolean, reason: string }}
  */
-export function newestThreadsPageMatchesCache(page, detail) {
+export function newestThreadsPageMatchesCache(page: any, detail: any) {
   if (!page || !detail) {
     return { match: false, reason: 'missing' };
   }
@@ -616,7 +635,7 @@ export function newestThreadsPageMatchesCache(page, detail) {
  * @param {number} pageSize size used for the probe
  * @returns {boolean}
  */
-export function shouldEscalateNewestThreadsProbe(page, detail, pageSize) {
+export function shouldEscalateNewestThreadsProbe(page: any, detail: any, pageSize: any) {
   const size = Math.max(0, Number(pageSize) || 0);
   if (size >= REVIEW_THREADS_API_MAX) return false;
   if (!hasUsableReviewThreadsCache(detail)) return true;

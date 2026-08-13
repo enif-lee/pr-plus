@@ -14,7 +14,7 @@
  * @param {{ limit?: number }} [opts]
  * @returns {SelectOption[]}
  */
-export function filterSelectOptions(options, query, opts: any = {}) {
+export function filterSelectOptions(options: any, query: any, opts: any = {}) {
   const list = Array.isArray(options) ? options : [];
   const limit =
     Number.isFinite(opts.limit) && opts.limit > 0 ? Math.floor(opts.limit) : 50;
@@ -76,7 +76,7 @@ export function pickFilteredOptionByIndex(
  * @param {Record<string, string>} [avatarByLogin] login → avatar URL
  * @returns {SelectOption[]}
  */
-export function buildPeopleOptions(logins, statusByLogin: any = {}, avatarByLogin: any = {}) {
+export function buildPeopleOptions(logins: any, statusByLogin: any = {}, avatarByLogin: any = {}) {
   const seen = new Set();
   const out = [];
   const avatars = avatarByLogin && typeof avatarByLogin === 'object' ? avatarByLogin : {};
@@ -142,7 +142,7 @@ export function resolveLabelColor(color: unknown, name?: unknown): string {
  * Later entries with a color upgrade earlier colorless ones (same name).
  * @param {Array<string|{name:string,color?:string}>} labels
  */
-export function buildLabelOptions(labels) {
+export function buildLabelOptions(labels: any) {
   const byKey = new Map<string, any>();
   for (const l of labels || []) {
     const name = typeof l === 'string' ? l : (l as any)?.name;
@@ -187,7 +187,7 @@ export function buildLabelOptions(labels) {
  * Whether free-text query already matches an option id/label (exact, case-insensitive).
  * Used to decide when to show a Create… row for labels / milestones.
  */
-export function queryMatchesOption(options, query) {
+export function queryMatchesOption(options: any, query: any) {
   const q = String(query || '')
     .trim()
     .toLowerCase();
@@ -214,7 +214,7 @@ export function queryMatchesOption(options, query) {
  * Build milestone options from API milestones (number + title).
  * @param {Array<{ number?: number, title?: string, state?: string, description?: string }>} milestones
  */
-export function buildMilestoneOptions(milestones) {
+export function buildMilestoneOptions(milestones: any) {
   const byNum = new Map();
   for (const m of milestones || []) {
     const number = Number(m?.number);
@@ -244,7 +244,7 @@ export function buildMilestoneOptions(milestones) {
  * @param {Array<{ headRef?: string, baseRef?: string }>} prs
  * @param {{ baseRef?: string, headRef?: string, extra?: string[] }} [ctx]
  */
-export function buildBranchOptions(prs, ctx: any = {}) {
+export function buildBranchOptions(prs: any, ctx: any = {}) {
   const names = new Set();
   for (const p of prs || []) {
     if (p?.headRef) names.add(String(p.headRef));
@@ -273,7 +273,7 @@ export function buildBranchOptions(prs, ctx: any = {}) {
  * @param {string|{ login?: string, type?: string, isBot?: boolean, bot?: boolean }|null|undefined} userOrLogin
  * @param {{ actorIsBot?: Record<string, boolean>|Map<string, boolean>|null }|null} [detail]
  */
-export function isBotAccount(userOrLogin, detail = null) {
+export function isBotAccount(userOrLogin: any, detail: any = null) {
   if (userOrLogin == null) return false;
   if (typeof userOrLogin === 'object') {
     if (userOrLogin.isBot === true || userOrLogin.bot === true) return true;
@@ -302,7 +302,7 @@ export function isBotAccount(userOrLogin, detail = null) {
  * requested_reviewers). Bots are flagged via isBot.
  * @returns {Array<{ login: string, status: string, isBot: boolean }>}
  */
-export function buildUnifiedReviewerRows(detail) {
+export function buildUnifiedReviewerRows(detail: any) {
   const d = detail || {};
   const authorKey = String(d.author || '')
     .trim()
@@ -338,7 +338,7 @@ export function buildUnifiedReviewerRows(detail) {
     } else {
       // use original casing from reviews
       const rev = (d.reviews || []).find(
-        (r) => String(r.author || '').toLowerCase() === key
+        (r: any) => String(r.author || '').toLowerCase() === key
       );
       rows.set(key, {
         login: rev?.author || key,

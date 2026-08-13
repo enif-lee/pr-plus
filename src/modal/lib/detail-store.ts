@@ -102,11 +102,11 @@ export function createEmptyStore() {
     files: emptyListSlice(),
     commits: emptyListSlice(),
     comments: {
-      items: [],
-      pageMeta: null,
-      timelineEvents: [],
+      items: [] as any[],
+      pageMeta: null as any,
+      timelineEvents: [] as any[],
       /** GraphQL timelineItems page cursors / coverage (not REST comments only). */
-      timelineMeta: null,
+      timelineMeta: null as any,
       settled: false,
     },
     reviews: emptyListSlice(),
@@ -114,38 +114,38 @@ export function createEmptyStore() {
       data: {
         state: 'unknown',
         totalCount: 0,
-        statuses: [],
-        checkRuns: [],
+        statuses: [] as any[],
+        checkRuns: [] as any[],
       },
       settled: false,
     },
     development: {
-      linkedIssues: [],
-      developmentIssues: [],
-      projects: [],
+      linkedIssues: [] as any[],
+      developmentIssues: [] as any[],
+      projects: [] as any[],
       settled: false,
     },
     threads: {
-      reviewThreads: [],
-      reviewComments: [],
-      reviewThreadsMeta: null,
-      reviewCommentsMeta: null,
+      reviewThreads: [] as any[],
+      reviewComments: [] as any[],
+      reviewThreadsMeta: null as any,
+      reviewCommentsMeta: null as any,
       settled: false,
     },
-    pendingReview: null,
+    pendingReview: null as any,
     /** Tombstones from Discard / single delete — survive toAppDetail projection. */
     deletedReviewCommentIds: null as string[] | null,
     deletedReviewBodies: null as string[] | null,
     dropPending: false,
     flags: {
       sketch: false,
-      source: null,
+      source: null as any,
       cacheFull: false,
     },
   };
 }
 
-export function cloneStore(store) {
+export function cloneStore(store: any) {
   return store ? JSON.parse(JSON.stringify(store)) : createEmptyStore();
 }
 
@@ -422,7 +422,7 @@ export function pickCommentPatchKeys(
   return out;
 }
 
-function mergeAvatarMaps(a, b) {
+function mergeAvatarMaps(a: any, b: any) {
   return {
     ...(a && typeof a === 'object' ? a : {}),
     ...(b && typeof b === 'object' ? b : {}),
@@ -432,7 +432,7 @@ function mergeAvatarMaps(a, b) {
 /**
  * Hydrate store from a flat app-detail (list sketch, cache, or legacy).
  */
-export function fromAppDetail(flat) {
+export function fromAppDetail(flat: any) {
   const store = createEmptyStore();
   if (!flat || typeof flat !== 'object') return store;
 
@@ -596,7 +596,7 @@ export function fromAppDetail(flat) {
  * never nulls `current.detail` while side slices settle before meta identity.
  * Returns null only for missing/invalid store arguments.
  */
-export function toAppDetail(store) {
+export function toAppDetail(store: any) {
   if (!store || typeof store !== 'object') return null;
   const m = store.meta && typeof store.meta === 'object' ? store.meta : {};
   const sideSettled = {
@@ -662,7 +662,7 @@ export function toAppDetail(store) {
   };
 }
 
-export function sidePendingFlags(store) {
+export function sidePendingFlags(store: any) {
   if (!store) {
     return {
       files: false,
@@ -683,7 +683,7 @@ export function sidePendingFlags(store) {
   };
 }
 
-export function sideSettledFlags(store) {
+export function sideSettledFlags(store: any) {
   const p = sidePendingFlags(store);
   return {
     files: !p.files,
@@ -698,7 +698,7 @@ export function sideSettledFlags(store) {
 // ── Slice writers (only touch their domain) ────────────────────────
 
 /** Core / list / cache meta. Never writes files/commits/reviews/threads. */
-export function applyMeta(store, metaPartial, opts: ApplyOpts = {}) {
+export function applyMeta(store: any, metaPartial: any, opts: ApplyOpts = {}) {
   if (!store || !metaPartial || typeof metaPartial !== 'object') return store;
   const next = { ...store.meta };
   for (const k of META_KEYS) {
@@ -751,7 +751,7 @@ export function applyMeta(store, metaPartial, opts: ApplyOpts = {}) {
   return store;
 }
 
-export function applyFiles(store, files, opts: ApplyOpts = {}) {
+export function applyFiles(store: any, files: any, opts: ApplyOpts = {}) {
   if (!store) return store;
   store.files = {
     items: Array.isArray(files) ? files.slice() : [],
@@ -766,7 +766,7 @@ export function applyFiles(store, files, opts: ApplyOpts = {}) {
   return store;
 }
 
-export function applyCommits(store, commits, opts: ApplyOpts = {}) {
+export function applyCommits(store: any, commits: any, opts: ApplyOpts = {}) {
   if (!store) return store;
   store.commits = {
     items: Array.isArray(commits) ? commits.slice() : [],
@@ -775,7 +775,7 @@ export function applyCommits(store, commits, opts: ApplyOpts = {}) {
   return store;
 }
 
-export function applyComments(store, comments, opts: ApplyOpts = {}) {
+export function applyComments(store: any, comments: any, opts: ApplyOpts = {}) {
   if (!store) return store;
   const prevEvents = Array.isArray(store.comments?.timelineEvents)
     ? store.comments.timelineEvents
@@ -985,7 +985,7 @@ export function mergeProgressiveSidesIntoFlat(prevFlat: any, nextFlat: any): any
   return out;
 }
 
-export function applyReviews(store, reviews, opts: ApplyOpts = {}) {
+export function applyReviews(store: any, reviews: any, opts: ApplyOpts = {}) {
   if (!store) return store;
   store.reviews = {
     items: Array.isArray(reviews) ? reviews.slice() : [],
@@ -1001,7 +1001,7 @@ export function applyReviews(store, reviews, opts: ApplyOpts = {}) {
   return store;
 }
 
-export function applyChecks(store, checks, opts: ApplyOpts = {}) {
+export function applyChecks(store: any, checks: any, opts: ApplyOpts = {}) {
   if (!store) return store;
   store.checks = {
     data: checks || {
@@ -1015,7 +1015,7 @@ export function applyChecks(store, checks, opts: ApplyOpts = {}) {
   return store;
 }
 
-export function applyDevelopment(store, dev, opts: ApplyOpts = {}) {
+export function applyDevelopment(store: any, dev: any, opts: ApplyOpts = {}) {
   if (!store) return store;
   const d = dev && typeof dev === 'object' ? dev : {};
   store.development = {
@@ -1034,7 +1034,7 @@ export function applyDevelopment(store, dev, opts: ApplyOpts = {}) {
  * `mergeFn(detail, page, dir)` can be provided for dual-window semantics —
  * we project to flat, merge, then write threads slice back (meta untouched).
  */
-export function applyThreadsFromMergedDetail(store, mergedFlat) {
+export function applyThreadsFromMergedDetail(store: any, mergedFlat: any) {
   if (!store || !mergedFlat) return store;
   const deleted = new Set(
     Array.isArray(store.deletedReviewCommentIds)
@@ -1136,14 +1136,14 @@ export function applyThreadsFromMergedDetail(store, mergedFlat) {
   return store;
 }
 
-export function applyPendingReview(store, pending) {
+export function applyPendingReview(store: any, pending: any) {
   if (!store) return store;
   store.pendingReview = pending || null;
   return store;
 }
 
 /** Merge discard tombstones onto the store (partial App patches). */
-export function applyDiscardTombstones(store, flat) {
+export function applyDiscardTombstones(store: any, flat: any) {
   if (!store || !flat) return store;
   hydrateDiscardedPendingBodies(flat);
   if (flat._deletedReviewCommentIds != null) {
@@ -1186,7 +1186,7 @@ export function applyDiscardTombstones(store, flat) {
       (store.deletedReviewCommentIds || []).map(String)
     );
     const bodies = new Set(
-      (store.deletedReviewBodies || []).map((b) => String(b).trim())
+      (store.deletedReviewBodies || []).map((b: any) => String(b).trim())
     );
     store.threads.reviewComments = store.threads.reviewComments.filter(
       (c: any) => {
@@ -1227,7 +1227,7 @@ export function applyDiscardTombstones(store, flat) {
  * GitHub — must overwrite list-sketch / cache so deleted labels do not
  * resurrect on reopen (applyMeta otherwise keeps non-empty previous).
  */
-export function applyCorePayload(store, coreFlat, opts: ApplyOpts = {}) {
+export function applyCorePayload(store: any, coreFlat: any, opts: ApplyOpts = {}) {
   if (!store || !coreFlat) return store;
   let metaSrc = opts.skipSupersedeMeta
     ? stripSupersededMetaFields(coreFlat)

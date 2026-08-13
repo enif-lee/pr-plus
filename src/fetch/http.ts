@@ -24,10 +24,10 @@ export function normalizeApiCtx(ctx: any) {
         : 'github.com';
   try {
     if (
-      globalThis.PRGithubEndpoints &&
-      typeof globalThis.PRGithubEndpoints.resolveGithubEndpoints === 'function'
+      (globalThis as any).PRGithubEndpoints &&
+      typeof (globalThis as any).PRGithubEndpoints.resolveGithubEndpoints === 'function'
     ) {
-      return globalThis.PRGithubEndpoints.resolveGithubEndpoints({ webHost });
+      return (globalThis as any).PRGithubEndpoints.resolveGithubEndpoints({ webHost });
     }
   } catch (_) {}
   return {
@@ -43,10 +43,10 @@ export function githubRestUrl(path: any, ctx: any) {
   const c = normalizeApiCtx(ctx);
   try {
     if (
-      globalThis.PRGithubEndpoints &&
-      typeof globalThis.PRGithubEndpoints.githubRestUrl === 'function'
+      (globalThis as any).PRGithubEndpoints &&
+      typeof (globalThis as any).PRGithubEndpoints.githubRestUrl === 'function'
     ) {
-      return globalThis.PRGithubEndpoints.githubRestUrl(path, c);
+      return (globalThis as any).PRGithubEndpoints.githubRestUrl(path, c);
     }
   } catch (_) {}
   const p = String(path || '');
@@ -58,10 +58,10 @@ export function githubGraphqlUrl(ctx: any) {
   const c = normalizeApiCtx(ctx);
   try {
     if (
-      globalThis.PRGithubEndpoints &&
-      typeof globalThis.PRGithubEndpoints.githubGraphqlUrl === 'function'
+      (globalThis as any).PRGithubEndpoints &&
+      typeof (globalThis as any).PRGithubEndpoints.githubGraphqlUrl === 'function'
     ) {
-      return globalThis.PRGithubEndpoints.githubGraphqlUrl(c);
+      return (globalThis as any).PRGithubEndpoints.githubGraphqlUrl(c);
     }
   } catch (_) {}
   return String(c.graphqlUrl || 'https://api.github.com/graphql');
@@ -207,7 +207,7 @@ export function parseLinkRelPage(linkHeader: any, rel: string) {
  * @param {{ maxPages?: number }} [opts]
  * @returns {Promise<Array>}
  */
-export async function fetchRestCollectionAll(firstUrl, fetchImpl, token, opts: any = {}) {
+export async function fetchRestCollectionAll(firstUrl: any, fetchImpl: any, token: any, opts: any = {}) {
   const maxPages =
     Number.isFinite(opts.maxPages) && opts.maxPages > 0
       ? Math.floor(opts.maxPages)
@@ -226,7 +226,7 @@ export async function fetchRestCollectionAll(firstUrl, fetchImpl, token, opts: a
   return all;
 }
 
-export async function apiSend(url, fetchImpl, token, opts: any = {}) {
+export async function apiSend(url: any, fetchImpl: any, token: any, opts: any = {}) {
   const method = opts?.method || 'GET';
   const body = opts?.body;
   const headers = buildApiHeaders(token);
@@ -244,7 +244,7 @@ export async function apiSend(url, fetchImpl, token, opts: any = {}) {
       // Surface field-level validation (common on 422 replies / review comments)
       if (Array.isArray(j?.errors) && j.errors.length) {
         const bits = j.errors
-          .map((e) => {
+          .map((e: any) => {
             if (!e || typeof e !== 'object') return String(e);
             if (e.message) return e.message;
             const field = e.field || e.resource || '';

@@ -1,4 +1,5 @@
 /** PRTreeFetch part A */
+import { MSG } from '../sw-messages';
 import {
   send,
   isAbortError,
@@ -18,10 +19,10 @@ import {
 
 export const prTreeFetchPartA = {
   findDanglingPrNumbers,
-  async fetchOpenPulls(owner, repo, _fetchImpl, options: any = {}) {
+  async fetchOpenPulls(owner: any, repo: any, _fetchImpl: any, options: any = {}) {
     const res = await send(
       {
-        type: 'PR_TREE_FETCH_OPEN_PULLS',
+        type: MSG.FETCH_OPEN_PULLS,
         owner,
         repo,
         pagePrNumbers: options.pagePrNumbers || [],
@@ -36,9 +37,9 @@ export const prTreeFetchPartA = {
     }
     return res.prs || [];
   },
-  async fetchDanglingPulls(owner, repo, numbers) {
+  async fetchDanglingPulls(owner: any, repo: any, numbers: any) {
     const res = await send({
-      type: 'PR_TREE_FETCH_DANGLING',
+      type: MSG.FETCH_DANGLING,
       owner,
       repo,
       numbers: numbers || [],
@@ -53,14 +54,14 @@ export const prTreeFetchPartA = {
   /**
    * @param {{ skipReviewThreads?: boolean, threadsMaxPages?: number }} [opts]
    */
-  async fetchPrDetail(owner, repo, number, opts: any = {}) {
+  async fetchPrDetail(owner: any, repo: any, number: any, opts: any = {}) {
     const t0 =
       typeof performance !== 'undefined' && performance.now
         ? performance.now()
         : Date.now();
     const res = await send(
       {
-        type: 'PR_TREE_FETCH_PR_DETAIL',
+        type: MSG.FETCH_PR_DETAIL,
         owner,
         repo,
         number,
@@ -99,10 +100,10 @@ export const prTreeFetchPartA = {
    *   oldest | newer  → first:N (after cursor for newer)
    * @param {{ direction?: string, cursor?: string|null, pageSize?: number }} [opts]
    */
-  async fetchReviewThreadsPage(owner, repo, number, opts: any = {}) {
+  async fetchReviewThreadsPage(owner: any, repo: any, number: any, opts: any = {}) {
     const res = await send(
       {
-        type: 'PR_TREE_FETCH_REVIEW_THREADS_PAGE',
+        type: MSG.FETCH_REVIEW_THREADS_PAGE,
         owner,
         repo,
         number,
@@ -135,10 +136,10 @@ export const prTreeFetchPartA = {
    * @param {string[]} threadNodeIds
    * @param {{ signal?: AbortSignal }} [opts]
    */
-  async fetchReviewThreadsByIds(threadNodeIds, opts: any = {}) {
+  async fetchReviewThreadsByIds(threadNodeIds: any, opts: any = {}) {
     const res = await send(
       {
-        type: 'PR_TREE_FETCH_REVIEW_THREADS_BY_IDS',
+        type: MSG.FETCH_REVIEW_THREADS_BY_IDS,
         threadNodeIds: Array.isArray(threadNodeIds) ? threadNodeIds : [],
       },
       { signal: opts.signal || null }
@@ -151,7 +152,7 @@ export const prTreeFetchPartA = {
     }
     return res.page;
   },
-  collectUnresolvedThreadNodeIds(detail) {
+  collectUnresolvedThreadNodeIds(detail: any) {
     return collectUnresolvedThreadNodeIdsLocal(detail);
   },
   /**
@@ -160,7 +161,7 @@ export const prTreeFetchPartA = {
    * @param {object} page
    * @param {string} [direction]
    */
-  mergeReviewThreadsPageIntoDetail(detail, page, direction) {
+  mergeReviewThreadsPageIntoDetail(detail: any, page: any, direction: any) {
     return mergeReviewThreadsPageIntoDetailLocal(detail, page, direction);
   },
   /**
@@ -169,10 +170,10 @@ export const prTreeFetchPartA = {
    */
   async getGraphqlCostLog() {
     try {
-      let res = await send({ type: 'PR_TREE_GQL_COST_LOG_GET' });
+      let res = await send({ type: MSG.GQL_COST_LOG_GET });
       // Fallback: older SW without GQL_COST message — RATE_LIMIT_GET carries log
       if (!res?.ok && /unknown type/i.test(String(res?.error || ''))) {
-        res = await send({ type: 'PR_TREE_RATE_LIMIT_GET' });
+        res = await send({ type: MSG.RATE_LIMIT_GET });
         if (res?.ok) {
           res = {
             ok: true,
@@ -246,7 +247,7 @@ export const prTreeFetchPartA = {
   },
   async clearGraphqlCostLog() {
     try {
-      const res = await send({ type: 'PR_TREE_GQL_COST_LOG_CLEAR' });
+      const res = await send({ type: MSG.GQL_COST_LOG_CLEAR });
       try {
         sessionStorage.removeItem('prp:gql-cost-log');
         sessionStorage.removeItem('prp:gql-cost-summary');
@@ -264,10 +265,10 @@ export const prTreeFetchPartA = {
    * Lazy page of issue or review comments (offset page or since= window).
    * @param {{ kind?: 'issue'|'review', page?: number, perPage?: number, since?: string }} [opts]
    */
-  async fetchPrCommentsPage(owner, repo, number, opts: any = {}) {
+  async fetchPrCommentsPage(owner: any, repo: any, number: any, opts: any = {}) {
     const res = await send(
       {
-        type: 'PR_TREE_FETCH_COMMENTS_PAGE',
+        type: MSG.FETCH_COMMENTS_PAGE,
         owner,
         repo,
         number,
@@ -287,10 +288,10 @@ export const prTreeFetchPartA = {
     }
     return res.page;
   },
-  async fetchCompareFiles(owner, repo, base, head, options: any = {}) {
+  async fetchCompareFiles(owner: any, repo: any, base: any, head: any, options: any = {}) {
     const res = await send(
       {
-        type: 'PR_TREE_FETCH_COMPARE_FILES',
+        type: MSG.FETCH_COMPARE_FILES,
         owner,
         repo,
         base,
@@ -310,9 +311,9 @@ export const prTreeFetchPartA = {
   /** Abort SW-tracked GitHub fetches (sheet closed / superseded open). */
   cancelFetches,
 
-  async uploadRepoFile(owner, repo, { path, contentBase64, message, branch }) {
+  async uploadRepoFile(owner: any, repo: any, { path, contentBase64, message, branch }: any) {
     const res = await send({
-      type: 'PR_TREE_UPLOAD_REPO_FILE',
+      type: MSG.UPLOAD_REPO_FILE,
       owner,
       repo,
       path,
@@ -327,9 +328,9 @@ export const prTreeFetchPartA = {
     }
     return res.result;
   },
-  async postIssueComment(owner, repo, number, body) {
+  async postIssueComment(owner: any, repo: any, number: any, body: any) {
     const res = await send({
-      type: 'PR_TREE_POST_ISSUE_COMMENT',
+      type: MSG.POST_ISSUE_COMMENT,
       owner,
       repo,
       number,
@@ -342,9 +343,9 @@ export const prTreeFetchPartA = {
     }
     return res.result;
   },
-  async submitPullReview(owner, repo, number, { event, body, commitId, comments }) {
+  async submitPullReview(owner: any, repo: any, number: any, { event, body, commitId, comments }: any) {
     const res = await send({
-      type: 'PR_TREE_SUBMIT_REVIEW',
+      type: MSG.SUBMIT_REVIEW,
       owner,
       repo,
       number,
@@ -360,9 +361,9 @@ export const prTreeFetchPartA = {
     }
     return res.result;
   },
-  async submitPendingPullReview(owner, repo, number, reviewId, { event, body } = {} as any as any) {
+  async submitPendingPullReview(owner: any, repo: any, number: any, reviewId: any, { event, body }: { event?: unknown; body?: unknown } = {}) {
     const res = await send({
-      type: 'PR_TREE_SUBMIT_PENDING_REVIEW',
+      type: MSG.SUBMIT_PENDING_REVIEW,
       owner,
 
       repo,
@@ -378,9 +379,9 @@ export const prTreeFetchPartA = {
     }
     return res.result;
   },
-  async deletePendingPullReview(owner, repo, number, reviewId) {
+  async deletePendingPullReview(owner: any, repo: any, number: any, reviewId: any) {
     const res = await send({
-      type: 'PR_TREE_DELETE_PENDING_REVIEW',
+      type: MSG.DELETE_PENDING_REVIEW,
       owner,
       repo,
       number,
@@ -393,9 +394,9 @@ export const prTreeFetchPartA = {
     }
     return res.result;
   },
-  async postReviewComment(owner, repo, number, payload) {
+  async postReviewComment(owner: any, repo: any, number: any, payload: any) {
     const res = await send({
-      type: 'PR_TREE_POST_REVIEW_COMMENT',
+      type: MSG.POST_REVIEW_COMMENT,
       owner,
       repo,
       number,
@@ -419,9 +420,9 @@ export const prTreeFetchPartA = {
     }
     return res.result;
   },
-  async replyToReviewComment(owner, repo, number, commentId, body, opts: any = {}) {
+  async replyToReviewComment(owner: any, repo: any, number: any, commentId: any, body: any, opts: any = {}) {
     const res = await send({
-      type: 'PR_TREE_REPLY_REVIEW_COMMENT',
+      type: MSG.REPLY_REVIEW_COMMENT,
       owner,
       repo,
       number,
@@ -442,9 +443,9 @@ export const prTreeFetchPartA = {
     }
     return res.result;
   },
-  async resolveReviewThread(threadNodeId, resolved = true) {
+  async resolveReviewThread(threadNodeId: any, resolved = true) {
     const res = await send({
-      type: 'PR_TREE_RESOLVE_REVIEW_THREAD',
+      type: MSG.RESOLVE_REVIEW_THREAD,
       threadNodeId,
       resolved,
     });
@@ -455,9 +456,9 @@ export const prTreeFetchPartA = {
     }
     return res.result;
   },
-  async updatePullState(owner, repo, number, state) {
+  async updatePullState(owner: any, repo: any, number: any, state: any) {
     const res = await send({
-      type: 'PR_TREE_UPDATE_PULL_STATE',
+      type: MSG.UPDATE_PULL_STATE,
       owner,
       repo,
       number,
@@ -470,15 +471,15 @@ export const prTreeFetchPartA = {
     }
     return res.result;
   },
-  async closePullRequest(owner, repo, number) {
+  async closePullRequest(owner: any, repo: any, number: any) {
     return prTreeFetchPartA.updatePullState(owner, repo, number, 'closed');
   },
-  async reopenPullRequest(owner, repo, number) {
+  async reopenPullRequest(owner: any, repo: any, number: any) {
     return prTreeFetchPartA.updatePullState(owner, repo, number, 'open');
   },
-  async deleteReviewComment(owner, repo, commentId) {
+  async deleteReviewComment(owner: any, repo: any, commentId: any) {
     const res = await send({
-      type: 'PR_TREE_DELETE_REVIEW_COMMENT',
+      type: MSG.DELETE_REVIEW_COMMENT,
       owner,
       repo,
       commentId,
@@ -490,9 +491,9 @@ export const prTreeFetchPartA = {
     }
     return res.result;
   },
-  async deleteIssueComment(owner, repo, commentId) {
+  async deleteIssueComment(owner: any, repo: any, commentId: any) {
     const res = await send({
-      type: 'PR_TREE_DELETE_ISSUE_COMMENT',
+      type: MSG.DELETE_ISSUE_COMMENT,
       owner,
       repo,
       commentId,
@@ -509,9 +510,9 @@ export const prTreeFetchPartA = {
    * @param {string} subjectNodeId GraphQL global id (IC_… / PRRC_…)
    * @param {string} [classifier='OFF_TOPIC']
    */
-  async minimizeComment(subjectNodeId, classifier = 'OFF_TOPIC') {
+  async minimizeComment(subjectNodeId: any, classifier = 'OFF_TOPIC') {
     const res = await send({
-      type: 'PR_TREE_MINIMIZE_COMMENT',
+      type: MSG.MINIMIZE_COMMENT,
       subjectNodeId,
       nodeId: subjectNodeId,
       classifier,
@@ -528,9 +529,9 @@ export const prTreeFetchPartA = {
    * Unhide (unminimize) a comment via GraphQL.
    * @param {string} subjectNodeId GraphQL global id
    */
-  async unminimizeComment(subjectNodeId) {
+  async unminimizeComment(subjectNodeId: any) {
     const res = await send({
-      type: 'PR_TREE_UNMINIMIZE_COMMENT',
+      type: MSG.UNMINIMIZE_COMMENT,
       subjectNodeId,
       nodeId: subjectNodeId,
     });
@@ -546,9 +547,9 @@ export const prTreeFetchPartA = {
    * @param {'issue'|'review'} kind
    * @param {{ content: string, viewerHasReacted?: boolean, nodeId?: string|null, commentId?: number|string }} opts
    */
-  async toggleCommentReaction(owner, repo, kind, opts) {
+  async toggleCommentReaction(owner: any, repo: any, kind: any, opts: any) {
     const res = await send({
-      type: 'PR_TREE_TOGGLE_COMMENT_REACTION',
+      type: MSG.TOGGLE_COMMENT_REACTION,
       owner,
       repo,
       kind,
@@ -565,10 +566,10 @@ export const prTreeFetchPartA = {
    * Hover: load reactor logins for one Reactable (first-N at query level).
    * @returns {Promise<Array>} reaction groups with users
    */
-  async fetchReactableReactors(nodeId, opts: any = {}) {
+  async fetchReactableReactors(nodeId: any, opts: any = {}) {
     const res = await send(
       {
-        type: 'PR_TREE_FETCH_REACTABLE_REACTORS',
+        type: MSG.FETCH_REACTABLE_REACTORS,
         nodeId,
         first: opts.first != null ? Number(opts.first) : 5,
       },
@@ -582,9 +583,9 @@ export const prTreeFetchPartA = {
     }
     return Array.isArray(res.groups) ? res.groups : [];
   },
-  async updatePullRequest(owner, repo, number, fields) {
+  async updatePullRequest(owner: any, repo: any, number: any, fields: any) {
     const res = await send({
-      type: 'PR_TREE_UPDATE_PULL',
+      type: MSG.UPDATE_PULL,
       owner,
       repo,
       number,
@@ -597,9 +598,9 @@ export const prTreeFetchPartA = {
     }
     return res.result;
   },
-  async editIssueComment(owner, repo, commentId, body) {
+  async editIssueComment(owner: any, repo: any, commentId: any, body: any) {
     const res = await send({
-      type: 'PR_TREE_EDIT_ISSUE_COMMENT',
+      type: MSG.EDIT_ISSUE_COMMENT,
       owner,
       repo,
       commentId,
@@ -612,7 +613,7 @@ export const prTreeFetchPartA = {
     }
     return res.result;
   },
-  async editReviewComment(owner, repo, commentId, body, opts = null) {
+  async editReviewComment(owner: any, repo: any, commentId: any, body: any, opts: any = null) {
     const o = opts && typeof opts === 'object' ? opts : {};
     const nodeId = o.nodeId != null ? String(o.nodeId) : null;
     const pullNumber =
@@ -620,7 +621,7 @@ export const prTreeFetchPartA = {
         ? Number(o.pullNumber)
         : null;
     const res = await send({
-      type: 'PR_TREE_EDIT_REVIEW_COMMENT',
+      type: MSG.EDIT_REVIEW_COMMENT,
       owner,
       repo,
       commentId,
@@ -635,9 +636,9 @@ export const prTreeFetchPartA = {
     }
     return res.result;
   },
-  async requestReviewers(owner, repo, number, reviewers, teamReviewers = []) {
+  async requestReviewers(owner: any, repo: any, number: any, reviewers: any, teamReviewers: any = []) {
     const res = await send({
-      type: 'PR_TREE_REQUEST_REVIEWERS',
+      type: MSG.REQUEST_REVIEWERS,
       owner,
       repo,
       number,
@@ -651,9 +652,9 @@ export const prTreeFetchPartA = {
     }
     return res.result;
   },
-  async removeReviewers(owner, repo, number, reviewers, teamReviewers = []) {
+  async removeReviewers(owner: any, repo: any, number: any, reviewers: any, teamReviewers: any = []) {
     const res = await send({
-      type: 'PR_TREE_REMOVE_REVIEWERS',
+      type: MSG.REMOVE_REVIEWERS,
       owner,
       repo,
       number,

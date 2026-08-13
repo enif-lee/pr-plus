@@ -13,13 +13,21 @@ Assembled into `src/pr-modal-host.js` by `scripts/build-host.mjs`.
 
 ## Module map
 
-| File | Starts with | Responsibility |
-|------|-------------|----------------|
-| `host-core-detail-store.ts` | `HOST_ID` | Host ids, `current`, detail-store apply/publish, route/embed helpers used early |
-| `side-fetch-progress-assets.ts` | `kickIndependentSideFetches` | Side fetches, load progress, CSS/assets, list/detail cache peeks |
-| `props-render-session.ts` | `buildProps` | React props builder, render, close/session abort |
-| `open-modal.ts` | `openModal` | Open PR modal path (first paint + progressive detail) |
-| `restore-embed-list-focus.ts` | `tryRestoreOpenModal` | Persist restore, embed watch, list-row focus helpers |
-| `list-row-lifecycle.ts` | `openPullsListRowAt` | Pulls list open, filter bar, list hotkeys, GH palette grace |
-| `pulls-palette.ts` | `PULLS_PALETTE_ROOT_ID` | Pulls-page command palette UI + actions |
-| `click-intercept.ts` | `onClickCapture` | List click intercept + host install |
+| File | Responsibility |
+|------|----------------|
+| `host-core-authority.ts` | Host ids, prefs, `current` bag, authority helpers |
+| `host-core-store.ts` | Detail-store apply / publish |
+| `host-core-timeline-a.ts` / `host-core-timeline-b.ts` | Timeline helpers |
+| `side-fetch-kick.ts` | Kick independent side fetches |
+| `side-fetch-progress.ts` | Load progress |
+| `side-fetch-cache-assets.ts` | CSS/assets, list/detail cache peeks |
+| `detail-on-patch.ts` | `onPatchDetail` ack path |
+| `props-build.ts` | React props builder |
+| `props-render-close.ts` | Render, close / session abort |
+| `open-modal-run.ts` | Open PR modal run (first paint + progressive detail) |
+| `open-modal.ts` | `openModal` entry |
+| `restore-embed-list-focus.ts` | Persist restore, embed watch, list-row focus |
+| `list-row-lifecycle.ts` | Pulls list open, filter bar, list hotkeys |
+| `pulls-palette-state.ts` / `pulls-palette-render.ts` / `pulls-palette-keys.ts` | Pulls-page command palette |
+| `auto-refresh-watch.ts` | head.sha poll (modal + embed) |
+| `click-intercept.ts` | List click intercept + host install |

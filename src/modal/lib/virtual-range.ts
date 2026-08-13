@@ -5,7 +5,7 @@
  * inclusive start/end indices plus overscan.
  */
 
-export function clamp(n, min, max) {
+export function clamp(n: any, min: any, max: any) {
   return Math.max(min, Math.min(max, n));
 }
 
@@ -18,7 +18,7 @@ export function clamp(n, min, max) {
  * @param {number} [opts.overscan=5]
  * @returns {{ start: number, end: number, offsetY: number, totalHeight: number }}
  */
-export function calculateVisibleRange(opts) {
+export function calculateVisibleRange(opts: any) {
   const totalRows = Math.max(0, Number(opts.totalRows) || 0);
   const rowHeight = Math.max(1, Number(opts.rowHeight) || 1);
   const viewportHeight = Math.max(0, Number(opts.viewportHeight) || 0);
@@ -71,10 +71,10 @@ export function calculateVisibleRange(opts) {
 
 /** Whether the rows already mounted by `range` fully cover the next viewport. */
 export function virtualRangeCoversViewport(
-  range,
-  scrollTop,
-  viewportHeight,
-  opts = null
+  range: any,
+  scrollTop: any,
+  viewportHeight: any,
+  opts: any = null
 ) {
   if (!range || range.end < range.start) return false;
   const top = Math.max(0, Number(scrollTop) || 0);
@@ -90,7 +90,7 @@ export function virtualRangeCoversViewport(
 /**
  * Whether an absolute row index is within the visible window (inclusive).
  */
-export function isIndexVisible(index, range) {
+export function isIndexVisible(index: any, range: any) {
   if (!range || range.end < range.start) return false;
   return index >= range.start && index <= range.end;
 }
@@ -150,11 +150,11 @@ export function adjustScrollTopForOffsetChange(
  * @param {{ align?: 'start'|'quarter'|'center'|'third', pad?: number }|null|undefined} [opts]
  */
 export function scrollTopForIndex(
-  index,
-  rowHeight,
-  viewportHeight,
-  totalRows,
-  offsets?,
+  index: any,
+  rowHeight: any,
+  viewportHeight: any,
+  totalRows: any,
+  offsets?: any,
   opts?: {
     align?: 'start' | 'quarter' | 'center' | 'third';
     pad?: number;
@@ -216,9 +216,9 @@ export function scrollTopForIndex(
  * Row top Y and height for a virtual index (fixed rowHeight or prefix offsets).
  */
 export function rowBoundsForIndex(
-  index,
-  rowHeight,
-  totalRows,
+  index: any,
+  rowHeight: any,
+  totalRows: any,
   offsets?: number[] | null
 ): { y: number; h: number; totalHeight: number } {
   const total = Math.max(0, Number(totalRows) || 0);
@@ -252,11 +252,11 @@ export function rowBoundsForIndex(
  * @returns {number} next scrollTop
  */
 export function scrollTopToRevealIndex(
-  index,
-  currentScrollTop,
-  rowHeight,
-  viewportHeight,
-  totalRows,
+  index: any,
+  currentScrollTop: any,
+  rowHeight: any,
+  viewportHeight: any,
+  totalRows: any,
   offsets?: number[] | null,
   opts?: {
     pad?: number;

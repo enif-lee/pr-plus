@@ -10,6 +10,7 @@ interface Error {
 }
 
 interface GlobalThis {
+  [key: string]: any;
   chrome?: any;
   PRTree?: any;
   PRTreeDOM?: any;

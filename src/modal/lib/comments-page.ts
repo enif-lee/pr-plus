@@ -15,7 +15,7 @@ export const DEFAULT_COMMENT_PAGE_SIZE = 50;
  * @param {string|null|undefined} linkHeader
  * @returns {number|null}
  */
-function parseLinkRelPage(linkHeader, rel) {
+function parseLinkRelPage(linkHeader: any, rel: any) {
   const raw = String(linkHeader || '');
   if (!raw) return null;
   const re = new RegExp(`rel="?${rel}"?`, 'i');
@@ -32,7 +32,7 @@ function parseLinkRelPage(linkHeader, rel) {
   return null;
 }
 
-export function parseLinkNextPage(linkHeader) {
+export function parseLinkNextPage(linkHeader: any) {
   return parseLinkRelPage(linkHeader, 'next');
 }
 
@@ -40,14 +40,14 @@ export function parseLinkNextPage(linkHeader) {
  * Last page number from GitHub Link header (rel="last").
  * Used to fetch newest issue comments first (API is ascending-only).
  */
-export function parseLinkLastPage(linkHeader) {
+export function parseLinkLastPage(linkHeader: any) {
   return parseLinkRelPage(linkHeader, 'last');
 }
 
 /**
  * Whether Link header indicates more pages.
  */
-export function linkHasMore(linkHeader) {
+export function linkHasMore(linkHeader: any) {
   return parseLinkNextPage(linkHeader) != null;
 }
 
@@ -59,7 +59,7 @@ export function linkHasMore(linkHeader) {
  * @param {number|string} number
  * @param {{ page?: number, perPage?: number, since?: string|null, sort?: string, direction?: string }} [opts]
  */
-export function buildCommentsListUrl(kind, owner, repo, number, opts: any = {}) {
+export function buildCommentsListUrl(kind: any, owner: any, repo: any, number: any, opts: any = {}) {
   const o = encodeURIComponent(String(owner || ''));
   const r = encodeURIComponent(String(repo || ''));
   const n = Number(number);
@@ -80,7 +80,7 @@ export function buildCommentsListUrl(kind, owner, repo, number, opts: any = {}) 
   return `${base}?${params.toString()}`;
 }
 
-export function clampPerPage(n, max = 100) {
+export function clampPerPage(n: any, max = 100) {
   const v = Number(n);
   if (!Number.isFinite(v) || v <= 0) return DEFAULT_COMMENT_PAGE_SIZE;
   return Math.min(max, Math.floor(v));
@@ -96,7 +96,7 @@ export function clampPerPage(n, max = 100) {
  * @param {Array} incoming
  * @param {Set<string>|string[]|null|undefined} [excludeIds] tombstoned (deleted) ids
  */
-export function mergeCommentsById(existing, incoming, excludeIds = null) {
+export function mergeCommentsById(existing: any, incoming: any, excludeIds: any = null) {
   const ban =
     excludeIds instanceof Set
       ? excludeIds
@@ -131,7 +131,7 @@ export function mergeCommentsById(existing, incoming, excludeIds = null) {
  * @param {Array} items mapped comments for this page
  * @param {{ page?: number, perPage?: number, linkHeader?: string, since?: string|null }} opts
  */
-export function buildCommentsPageMeta(items, opts: any = {}) {
+export function buildCommentsPageMeta(items: any, opts: any = {}) {
   const list = Array.isArray(items) ? items : [];
   const page = Math.max(1, Number(opts.page) || 1);
   const perPage = clampPerPage(opts.perPage);
@@ -192,7 +192,7 @@ export function buildCommentsPageMeta(items, opts: any = {}) {
 /**
  * Merge page meta after appending a page into an accumulated list.
  */
-export function advanceCommentsMeta(prevMeta, pageMeta, totalLoaded) {
+export function advanceCommentsMeta(prevMeta: any, pageMeta: any, totalLoaded: any) {
   const prev = prevMeta || {};
   const page = pageMeta || {};
   return {
@@ -212,12 +212,12 @@ export function advanceCommentsMeta(prevMeta, pageMeta, totalLoaded) {
   };
 }
 
-function minIso(a, b) {
+function minIso(a: any, b: any) {
   if (!a) return b || null;
   if (!b) return a;
   return a < b ? a : b;
 }
-function maxIso(a, b) {
+function maxIso(a: any, b: any) {
   if (!a) return b || null;
   if (!b) return a;
   return a > b ? a : b;
@@ -226,7 +226,7 @@ function maxIso(a, b) {
 /**
  * Cursor for since-based incremental refresh (use newest createdAt, or now).
  */
-export function sinceCursorFromMeta(meta) {
+export function sinceCursorFromMeta(meta: any) {
   if (meta?.newestCreatedAt) return meta.newestCreatedAt;
   return null;
 }

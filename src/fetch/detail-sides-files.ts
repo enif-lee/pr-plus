@@ -76,7 +76,7 @@ export async function fetchPrChecks(owner: any, repo: any, headSha: any, fetchIm
   const o = String(owner || '').trim();
   const r = String(repo || '').trim();
   const sha = String(headSha || '').trim();
-  const empty = { state: 'unknown', totalCount: 0, statuses: [], checkRuns: [] };
+  const empty = { state: 'unknown', totalCount: 0, statuses: [] as any[], checkRuns: [] as any[] };
   if (!o || !r || !sha) return empty;
   const base = githubRestUrl(`/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}`, ctx);
   let checks = { ...empty };
@@ -88,7 +88,7 @@ export async function fetchPrChecks(owner: any, repo: any, headSha: any, fetchIm
     checks = {
       state: emptyCombined ? 'unknown' : status.state || 'unknown',
       totalCount: emptyCombined ? 0 : status.total_count || statusList.length,
-      statuses: statusList.map((s) => ({
+      statuses: statusList.map((s: any) => ({
         context: s.context || '',
         state: s.state || '',
         description: s.description || '',
@@ -114,7 +114,7 @@ export async function fetchPrChecks(owner: any, repo: any, headSha: any, fetchIm
     );
     const list = runs?.check_runs || [];
     if (list.length) {
-      checks.checkRuns = list.map((r) => ({
+      checks.checkRuns = list.map((r: any) => ({
         id: r.id,
         name: r.name || '',
         status: r.status || '',
@@ -136,7 +136,7 @@ export async function fetchPrChecks(owner: any, repo: any, headSha: any, fetchIm
   }
   const normalize =
     (typeof globalThis !== 'undefined' &&
-      globalThis.PRModalChecks?.normalizeChecks) ||
+      (globalThis as any).PRModalChecks?.normalizeChecks) ||
     null;
   if (typeof normalize === 'function') {
     return normalize(checks);
@@ -174,11 +174,11 @@ export async function fetchPrChecks(owner: any, repo: any, headSha: any, fetchIm
  * @param {{ body?: string }} [opts] PR body for #N body links
  */
 export async function fetchPrDevelopment(
-  owner,
-  repo,
-  number,
-  fetchImpl,
-  token = null,
+  owner: any,
+  repo: any,
+  number: any,
+  fetchImpl: any,
+  token: any = null,
   opts: any = {}
 ) {
   const ctx = normalizeApiCtx(opts?.ctx);
@@ -189,7 +189,7 @@ export async function fetchPrDevelopment(
   let linkedIssues = [];
   try {
     let editApi =
-      typeof globalThis !== 'undefined' ? globalThis.PRModalPrEditApi : null;
+      typeof globalThis !== 'undefined' ? (globalThis as any).PRModalPrEditApi : null;
     if (!editApi && typeof require === 'function') {
       try {
         editApi = require('./modal/pure/pr-edit-api.js');
@@ -204,13 +204,13 @@ export async function fetchPrDevelopment(
     linkedIssues = [];
   }
 
-  let developmentIssues = [];
-  let projects = [];
+  let developmentIssues: any[] = [];
+  let projects: any[] = [];
   try {
     const side = await fetchPrSidebarMeta(o, r, n, fetchImpl, token, ctx);
     if (side && typeof side === 'object') {
       if (Array.isArray(side.developmentIssues) && side.developmentIssues.length) {
-        developmentIssues = side.developmentIssues.map((item) => ({
+        developmentIssues = side.developmentIssues.map((item: any) => ({
           number: Number(item?.number),
           title: String(item?.title || '').trim(),
           url: String(item?.url || '').trim(),
@@ -302,22 +302,18 @@ export async function fetchPrDevelopment(
     }
   }
 
-  return {
-    linkedIssues,
-    developmentIssues,
-    projects,
-  };
+  return { linkedIssues, developmentIssues, projects };
 }
 
 /**
  * All PR files (paginated) with collapse/annotation applied.
  */
 export async function fetchAllPrFiles(
-  owner,
-  repo,
-  number,
-  fetchImpl,
-  token = null,
+  owner: any,
+  repo: any,
+  number: any,
+  fetchImpl: any,
+  token: any = null,
   options: any = {}
 ) {
   const ctx = normalizeApiCtx(options?.ctx);
@@ -340,11 +336,11 @@ export async function fetchAllPrFiles(
  * @returns {Promise<{ files: Array, gitattributesText: string }>}
  */
 export async function fetchPrFiles(
-  owner,
-  repo,
-  number,
-  fetchImpl,
-  token = null,
+  owner: any,
+  repo: any,
+  number: any,
+  fetchImpl: any,
+  token: any = null,
   options: any = {}
 ) {
   const ctx = normalizeApiCtx(options?.ctx);

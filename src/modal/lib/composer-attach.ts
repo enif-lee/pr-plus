@@ -221,7 +221,7 @@ export async function uploadGithubCommentAttachment(
         `GitHub attachment completion failed (${completionResponse.status})`
       );
     }
-    completed = await completionResponse.json().catch(() => null);
+    completed = await completionResponse.json().catch((): any => null);
   }
 
   const href = String(
@@ -329,7 +329,7 @@ export function mergeDetailPreserveOptimistic(prev: any, next: any): any {
   // Drop local pending only when host has no VPR/pending rows and local also
   // does not hold a just-posted VPR (race keep for in-flight Start/Add).
   const nextHasPendingReview = Boolean(next.viewerPendingReview?.id);
-  const nextHasAnyPendingComment = nextRc.some((c) => c && c.pending);
+  const nextHasAnyPendingComment = nextRc.some((c: any) => c && c.pending);
   const prevHoldsPendingReview = Boolean(prev.viewerPendingReview?.id);
   const hostHasPending = nextHasAnyPendingComment || nextHasPendingReview;
   if (hostHasPending) {
@@ -391,7 +391,7 @@ export function mergeDetailPreserveOptimistic(prev: any, next: any): any {
         deletedReviewIds.add(key);
         continue;
       }
-      const prevHad = prevRc.find((p) => p && String(p.id) === key);
+      const prevHad = prevRc.find((p: any) => p && String(p.id) === key);
       // Was still pending on prev during a discard window — block demoted reinject.
       // Do NOT drop clean host-only published rows (post-submit full refresh).
       if (prevHad?.pending) {
@@ -632,16 +632,16 @@ export function mergeDetailPreserveOptimistic(prev: any, next: any): any {
         .filter((s) => s !== ':0:0')
         .sort()
         .join('|');
-    const prevViewer = prevBr.filter((g) => g && g.viewerHasReacted);
+    const prevViewer = prevBr.filter((g: any) => g && g.viewerHasReacted);
     const nextViewer =
-      nextBr != null ? nextBr.filter((g) => g && g.viewerHasReacted) : [];
+      nextBr != null ? nextBr.filter((g: any) => g && g.viewerHasReacted) : [];
     const prevHasViewer = prevViewer.length > 0;
     const nextMissingViewer =
       prevHasViewer &&
-      prevViewer.some((pg) => {
+      prevViewer.some((pg: any) => {
         const key = String(pg.content || '');
         const ng = (nextBr || []).find(
-          (g) => String(g?.content || '') === key
+          (g: any) => String(g?.content || '') === key
         );
         return !ng || !ng.viewerHasReacted;
       });
@@ -833,12 +833,12 @@ export function stripPendingReviewFromDetail(
   if (!detail) return detail;
   const mode = opts?.mode === 'submit' ? 'submit' : 'discard';
   const list = Array.isArray(detail.reviewComments) ? detail.reviewComments : [];
-  const pendingRows = list.filter((c) => c && c.pending);
+  const pendingRows = list.filter((c: any) => c && c.pending);
   const pendingIds = pendingRows
-    .filter((c) => c.id != null)
-    .map((c) => String(c.id));
+    .filter((c: any) => c.id != null)
+    .map((c: any) => String(c.id));
   const pendingBodies = pendingRows
-    .map((c) => String(c.body || '').trim())
+    .map((c: any) => String(c.body || '').trim())
     .filter(Boolean);
   // Submit: keep prior tombs only — never add submitted ids (they reappear published).
   const deleted = new Set([...idSetFrom(detail._deletedReviewCommentIds)]);
@@ -851,7 +851,7 @@ export function stripPendingReviewFromDetail(
     detail.viewerPendingReview?.id != null
       ? String(detail.viewerPendingReview.id)
       : null;
-  const nextList = list.filter((c) => {
+  const nextList = list.filter((c: any) => {
     if (!c || c.id == null) return false;
     if (c.pending) return false;
     if (deleted.has(String(c.id))) return false;
@@ -929,7 +929,7 @@ function scrubReviewThreads(threads: any, dropIds: Set<string>): any[] | undefin
       if (!t) return t;
       const ids = Array.isArray(t.commentIds) ? t.commentIds : null;
       if (!ids) return t;
-      const nextIds = ids.filter((id) => id != null && !dropIds.has(String(id)));
+      const nextIds = ids.filter((id: any) => id != null && !dropIds.has(String(id)));
       return { ...t, commentIds: nextIds };
     })
     .filter((t) => {
@@ -952,9 +952,9 @@ export function removeReviewCommentFromDetail(detail: any, commentId: any): any 
   const list = Array.isArray(detail.reviewComments) ? detail.reviewComments : [];
   const drop = collectCommentTreeIds(list, commentId);
   if (!drop.size) return detail;
-  const nextList = list.filter((c) => c && c.id != null && !drop.has(String(c.id)));
+  const nextList = list.filter((c: any) => c && c.id != null && !drop.has(String(c.id)));
   const deleted = new Set([...idSetFrom(detail._deletedReviewCommentIds), ...drop]);
-  const remainingPending = nextList.filter((c) => c && c.pending);
+  const remainingPending = nextList.filter((c: any) => c && c.pending);
   const nextThreads = scrubReviewThreads(detail.reviewThreads, drop);
   let viewerPendingReview = detail.viewerPendingReview;
   if (!remainingPending.length) {
@@ -985,7 +985,7 @@ export function removeIssueCommentFromDetail(detail: any, commentId: any): any {
   if (!detail || commentId == null) return detail;
   const list = Array.isArray(detail.comments) ? detail.comments : [];
   const key = String(commentId);
-  if (!list.some((c) => c && String(c.id) === key)) {
+  if (!list.some((c: any) => c && String(c.id) === key)) {
     // Still tombstone so a stale host page cannot reintroduce it
     const deleted = new Set([...idSetFrom(detail._deletedIssueCommentIds), key]);
     return { ...detail, _deletedIssueCommentIds: deleted };
@@ -993,7 +993,7 @@ export function removeIssueCommentFromDetail(detail: any, commentId: any): any {
   const deleted = new Set([...idSetFrom(detail._deletedIssueCommentIds), key]);
   return {
     ...detail,
-    comments: list.filter((c) => c && String(c.id) !== key),
+    comments: list.filter((c: any) => c && String(c.id) !== key),
     _deletedIssueCommentIds: deleted,
   };
 }

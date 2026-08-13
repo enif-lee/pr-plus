@@ -1,19 +1,5 @@
 
-  function runOpenModalBody({
-    owner,
-    repo,
-    number,
-    page = null,
-    position = null,
-    presentation = null,
-    commitSha = null,
-    commitEndSha = null,
-    filePath = null,
-    fileKey = null,
-    startLine = null,
-    endLine = null,
-    side = null,
-  }) {
+  function runOpenModalBody({ owner, repo, number, page = null, position = null, presentation = null, commitSha = null, commitEndSha = null, filePath = null, fileKey = null, startLine = null, endLine = null, side = null }: any) {
 
     if (!hostEnabled) return Promise.resolve({ ok: false, reason: 'disabled' });
     try {
@@ -452,19 +438,19 @@
 
     return (async () => {
     try {
-      if (!globalThis.PRTreeFetch?.fetchPrDetail) {
+      if (!(globalThis as any).PRTreeFetch?.fetchPrDetail) {
         throw new Error('PR detail bridge unavailable');
       }
 
-      function isAbortErr(err) {
+      function isAbortErr(err: any) {
         return (
           err?.name === 'AbortError' ||
           /aborted|AbortError/i.test(String(err?.message || err || ''))
         );
       }
 
-      async function fetchDetailOnce(opts) {
-        let lastErr;
+      async function fetchDetailOnce(opts: any) {
+        let lastErr: any;
         for (let attempt = 0; attempt < 2; attempt++) {
           if (signal.aborted || gen !== detailFetchGen) {
             const e = new Error('The operation was aborted.');
@@ -472,7 +458,7 @@
             throw e;
           }
           try {
-            return await globalThis.PRTreeFetch.fetchPrDetail(owner, repo, number, {
+            return await (globalThis as any).PRTreeFetch.fetchPrDetail(owner, repo, number, {
               ...opts,
               signal,
             });
@@ -526,19 +512,19 @@
       void idbHydrateP;
 
       const apiMax =
-        Number(globalThis.PRModalReviewThreads?.REVIEW_THREADS_PAGE_SIZE) || 100;
+        Number((globalThis as any).PRModalReviewThreads?.REVIEW_THREADS_PAGE_SIZE) || 100;
       const canFetchThreads = Boolean(
-        globalThis.PRTreeFetch.fetchReviewThreadsPage
+        (globalThis as any).PRTreeFetch.fetchReviewThreadsPage
       );
       const mergeFn =
-        globalThis.PRTreeFetch.mergeReviewThreadsPageIntoDetail || null;
+        (globalThis as any).PRTreeFetch.mergeReviewThreadsPageIntoDetail || null;
       /** @type {any} */
-      let earlyThreadsPage = null;
+      let earlyThreadsPage: any = null;
       let corePainted = false;
       let threadsPaintedEarly = false;
 
       /** Merge SWR preserve fields from cache into network core detail. */
-      function mergeCoreWithCache(raw, cacheSnap) {
+      function mergeCoreWithCache(raw: any, cacheSnap: any) {
         let detail = raw;
         const idb =
           typeof globalThis !== 'undefined'
@@ -617,7 +603,7 @@
               };
               const cleanedCacheRc = filterFn
                 ? filterFn(cacheRc, netWithTombstones)
-                : cacheRc.filter((c) => c && c.id != null);
+                : cacheRc.filter((c: any) => c && c.id != null);
               if (cleanedCacheRc.length) {
                 detail = {
                   ...detail,
@@ -645,14 +631,14 @@
         ) {
           const netFiles = Array.isArray(detail.files) ? detail.files : [];
           const cachedHasPatches = cacheSnap.files.some(
-            (f) =>
+            (f: any) =>
               f &&
               typeof f.patch === 'string' &&
               f.patch.length > 0 &&
               !f._patchOmitted
           );
           const netHasPatches = netFiles.some(
-            (f) =>
+            (f: any) =>
               f &&
               typeof f.patch === 'string' &&
               f.patch.length > 0 &&
@@ -660,7 +646,7 @@
           );
           const netSlim =
             netFiles.length > 0 &&
-            (netFiles.some((f) => f && f._patchOmitted) || !netHasPatches);
+            (netFiles.some((f: any) => f && f._patchOmitted) || !netHasPatches);
           if (cachedHasPatches && (netFiles.length === 0 || netSlim)) {
             detail = { ...detail, files: cacheSnap.files };
           }
@@ -691,7 +677,7 @@
       }
 
       /** Immediate partial paint when core fetch resolves (do not wait for threads/IDB). */
-      function paintCoreNow(raw) {
+      function paintCoreNow(raw: any) {
         if (!openStill() || !raw) return null;
         try {
           const rawMs = raw?.milestone;
@@ -1000,7 +986,7 @@
        * Immediate partial paint when newest threads resolve — works against
        * cache/list core already on screen, without waiting for network core.
        */
-      function stampThreadsDiag(page, extra: any = {}) {
+      function stampThreadsDiag(page: any, extra: any = {}) {
         try {
           const nT = Array.isArray(page?.threads) ? page.threads.length : 0;
           const nC = Array.isArray(page?.comments) ? page.comments.length : 0;
@@ -1028,7 +1014,7 @@
         }
       }
 
-      function paintThreadsNewestNow(page) {
+      function paintThreadsNewestNow(page: any) {
         if (!openStill() || !page || typeof mergeFn !== 'function') return false;
         const nT = Array.isArray(page?.threads) ? page.threads.length : 0;
         const nC = Array.isArray(page?.comments) ? page.comments.length : 0;
@@ -1099,16 +1085,16 @@
         Boolean(fromCache || detailRank(cached) >= 3) &&
         Boolean(threadsCacheSnap) &&
         !threadsCacheSnap?._sketch &&
-        (typeof globalThis.PRModalReviewThreads?.hasUsableReviewThreadsCache ===
+        (typeof (globalThis as any).PRModalReviewThreads?.hasUsableReviewThreadsCache ===
         'function'
-          ? globalThis.PRModalReviewThreads.hasUsableReviewThreadsCache(
+          ? (globalThis as any).PRModalReviewThreads.hasUsableReviewThreadsCache(
               threadsCacheSnap
             )
           : Boolean(
               (Array.isArray(threadsCacheSnap.reviewThreads) &&
-                threadsCacheSnap.reviewThreads.some((t) => t?.threadNodeId)) ||
+                threadsCacheSnap.reviewThreads.some((t: any) => t?.threadNodeId)) ||
                 (Array.isArray(threadsCacheSnap.reviewComments) &&
-                  threadsCacheSnap.reviewComments.some((c) => c?.threadNodeId))
+                  threadsCacheSnap.reviewComments.some((c: any) => c?.threadNodeId))
             ));
       const warmOrCache = fromCache || detailRank(cached) >= 3;
       const wShell = uw.threadsShell ?? uw.threadsNewest ?? 8;
@@ -1119,7 +1105,7 @@
        * UI stages: shell → comments only. reactions weight is silent-credited
        * with comments (same by-ids payload; no "Updating reactions…" flash).
        */
-      const markThreadStage = (stage, labelKind) => {
+      const markThreadStage = (stage: any, labelKind: any) => {
         if (stage === 'shell') {
           prog.mark(
             'threadsShell',
@@ -1163,7 +1149,7 @@
               cacheDetail: useWarmThreads ? threadsCacheSnap : null,
               // Cold open: GraphQL shell (not nested comments first:100).
               forceFull: false,
-              onStage: (stage) => {
+              onStage: (stage: any) => {
                 if (!openStill()) return;
                 if (stage === 'shell') {
                   // First ladder step: long "review threads" copy (matches product).
@@ -1247,7 +1233,7 @@
             {
               pageSize: useWarmThreads
                 ? Number(
-                    globalThis.PRModalReviewThreads
+                    (globalThis as any).PRModalReviewThreads
                       ?.REVIEW_THREADS_WARM_PROBE_SIZE
                   ) || 10
                 : apiMax,
@@ -1345,8 +1331,8 @@
       // finish / cancelAll races used to abort settle polls so hard reopen stuck
       // on "No milestone" while GH still had the board (MB3).
       async function fetchIdentityDetailLoose() {
-        if (!globalThis.PRTreeFetch?.fetchPrDetail) return null;
-        return globalThis.PRTreeFetch.fetchPrDetail(owner, repo, number, {
+        if (!(globalThis as any).PRTreeFetch?.fetchPrDetail) return null;
+        return (globalThis as any).PRTreeFetch.fetchPrDetail(owner, repo, number, {
           skipReviewThreads: true,
           // no signal — best-effort identity recovery
         });
@@ -1466,7 +1452,7 @@
 
             const updatedIdSet = new Set(
               (newest?.threads || [])
-                .map((t) => (t?.threadNodeId ? String(t.threadNodeId) : ''))
+                .map((t: any) => (t?.threadNodeId ? String(t.threadNodeId) : ''))
                 .filter(Boolean)
             );
 
@@ -1496,7 +1482,7 @@
                 : [];
             if (
               dirtyByCount.length &&
-              typeof globalThis.PRTreeFetch?.fetchReviewThreadsByIds ===
+              typeof (globalThis as any).PRTreeFetch?.fetchReviewThreadsByIds ===
                 'function' &&
               openStill()
             ) {
@@ -1512,7 +1498,7 @@
                 }
                 const tDirty0 = nowMs();
                 const dirtyBulk =
-                  await globalThis.PRTreeFetch.fetchReviewThreadsByIds(
+                  await (globalThis as any).PRTreeFetch.fetchReviewThreadsByIds(
                     dirtyByCount,
                     { signal }
                   );
@@ -1548,7 +1534,7 @@
             // Remaining unresolved not in newest page (extra comments bulk).
             const RT =
               typeof globalThis !== 'undefined'
-                ? globalThis.PRModalReviewThreads
+                ? (globalThis as any).PRModalReviewThreads
                 : null;
             const newestSource =
               newest?.source || adapt?.source || null;
@@ -1565,8 +1551,8 @@
                   Boolean(adapt?.hostRestFallback);
 
             const collectIds =
-              globalThis.PRTreeFetch.collectUnresolvedThreadNodeIds ||
-              ((d) => {
+              (globalThis as any).PRTreeFetch.collectUnresolvedThreadNodeIds ||
+              ((d: any) => {
                 const ids = new Set();
                 for (const t of d?.reviewThreads || []) {
                   if (t?.threadNodeId && !t.resolved) {
@@ -1577,10 +1563,10 @@
               });
             const filterRemaining =
               typeof RT?.remainingUnresolvedForByIdsBulk === 'function'
-                ? (unresolved, updated, known) =>
+                ? (unresolved: any, updated: any, known: any) =>
                     RT.remainingUnresolvedForByIdsBulk(unresolved, updated, known)
-                : (unresolved, updated, known) =>
-                    (unresolved || []).filter((id) => {
+                : (unresolved: any, updated: any, known: any) =>
+                    (unresolved || []).filter((id: any) => {
                       const s = String(id);
                       if (!/^PRRT_/i.test(s)) return false;
                       return !updated.has(s) && !known.has(s);
@@ -1600,7 +1586,7 @@
             while (
               !skipByIds &&
               unresolvedPass < 2 &&
-              typeof globalThis.PRTreeFetch.fetchReviewThreadsByIds === 'function'
+              typeof (globalThis as any).PRTreeFetch.fetchReviewThreadsByIds === 'function'
             ) {
               unresolvedPass += 1;
               const remainingUnresolvedIds = filterRemaining(
@@ -1627,7 +1613,7 @@
                 render();
               }
               const tBulk0 = nowMs();
-              const bulk = await globalThis.PRTreeFetch.fetchReviewThreadsByIds(
+              const bulk = await (globalThis as any).PRTreeFetch.fetchReviewThreadsByIds(
                 remainingUnresolvedIds,
                 { signal }
               );
@@ -1784,7 +1770,7 @@
         if (
           current.detail &&
           current.detail.milestone == null &&
-          globalThis.PRTreeFetch?.fetchPrDetail
+          (globalThis as any).PRTreeFetch?.fetchPrDetail
         ) {
           const settleGen = gen;
           void (async () => {
@@ -1800,7 +1786,7 @@
                 return;
               }
               try {
-                const again = await globalThis.PRTreeFetch.fetchPrDetail(
+                const again = await (globalThis as any).PRTreeFetch.fetchPrDetail(
                   owner,
                   repo,
                   number,

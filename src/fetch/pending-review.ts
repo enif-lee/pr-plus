@@ -149,13 +149,13 @@ export async function fetchViewerPendingReviewComments(owner: any, repo: any, pu
  * "Start review" replies when none exists yet.
  */
 export async function createPendingPullReview(
-  owner,
-  repo,
-  pullNumber,
+  owner: any,
+  repo: any,
+  pullNumber: any,
   opts: { commitId?: string } = {},
-  fetchImpl,
-  token
-, ctx = null) {
+  fetchImpl: any,
+  token: any
+, ctx: any = null) {
   ctx = normalizeApiCtx(ctx);
   // Omit `event` → PENDING. Prefer commit_id so later GraphQL threads bind
   // to the same head (Start review + subsequent Add comment).
@@ -175,14 +175,14 @@ export async function createPendingPullReview(
  * POST /repos/{owner}/{repo}/pulls/{pull}/reviews/{review_id}/events
  */
 export async function submitPendingPullReview(
-  owner,
-  repo,
-  pullNumber,
-  reviewId,
+  owner: any,
+  repo: any,
+  pullNumber: any,
+  reviewId: any,
   { event = 'COMMENT', body = '' } = {},
-  fetchImpl,
-  token
-, ctx = null) {
+  fetchImpl: any,
+  token: any
+, ctx: any = null) {
   ctx = normalizeApiCtx(ctx);
   const id = Number(reviewId);
   if (!Number.isFinite(id) || id <= 0) {
@@ -226,11 +226,11 @@ export async function deletePendingPullReview(owner: any, repo: any, pullNumber:
  * @param {{ page?: number, perPage?: number, since?: string|null }} [opts]
  */
 export async function postReviewCommentViaPendingGraphql(
-  pendingReviewNodeId,
-  { body, path, line, side = 'RIGHT', startLine, startSide, subjectType = 'line' },
-  fetchImpl,
-  token,
-  ctx = null
+  pendingReviewNodeId: any,
+  { body, path, line, side = 'RIGHT', startLine, startSide, subjectType = 'line' }: any,
+  fetchImpl: any,
+  token: any,
+  ctx: any = null
 ) {
   ctx = normalizeApiCtx(ctx);
   const isFile = String(subjectType || '').toLowerCase() === 'file';
@@ -377,12 +377,12 @@ export async function postReviewCommentViaPendingGraphql(
  * @returns {Promise<{ id: number, node_id: string }|null>}
  */
 export async function resolveViewerPendingReviewViaGraphql(
-  owner,
-  repo,
-  pullNumber,
-  fetchImpl,
-  token,
-  ctx = null,
+  owner: any,
+  repo: any,
+  pullNumber: any,
+  fetchImpl: any,
+  token: any,
+  ctx: any = null,
   opts: { login?: string | null; preferDatabaseId?: number | null } = {}
 ) {
   ctx = normalizeApiCtx(ctx);
@@ -460,16 +460,16 @@ export async function resolveViewerPendingReviewViaGraphql(
  * Falls back to GraphQL when REST omits node_id (second Add comment attach).
  */
 export async function ensureViewerPendingReview(
-  owner,
-  repo,
-  pullNumber,
-  { commitId = null, createIfMissing = false } = {},
-  fetchImpl,
-  token
-, ctx = null) {
+  owner: any,
+  repo: any,
+  pullNumber: any,
+  { commitId = null, createIfMissing = false }: any = {},
+  fetchImpl: any,
+  token: any
+, ctx: any = null) {
   ctx = normalizeApiCtx(ctx);
   /** Re-fetch review; return null if missing or no longer PENDING. */
-  const hydrateNodeId = async (pending) => {
+  const hydrateNodeId = async (pending: any) => {
     if (!pending?.id) return null;
     try {
       const full = await apiJson(
@@ -519,13 +519,13 @@ export async function ensureViewerPendingReview(
    *   (first Start review should create via REST, not double-scan).
    */
   const withGraphqlNode = async (
-    pending,
+    pending: any,
     opts: { forceDiscover?: boolean } = {}
   ) => {
     if (pending?.node_id) return pending;
     const force = Boolean(opts.forceDiscover);
     if (!pending?.id && createIfMissing && !force) return pending;
-    const login = await fetchViewerLogin(fetchImpl, token).catch(() => null);
+    const login = await fetchViewerLogin(fetchImpl, token).catch((): any => null);
     const viaGql = await resolveViewerPendingReviewViaGraphql(
       owner,
       repo,
@@ -635,8 +635,8 @@ export async function findViewerPendingReview(owner: any, repo: any, pullNumber:
         githubRestUrl(`/repos/${owner}/${repo}/pulls/${n}/reviews?per_page=100`, ctx),
         fetchImpl,
         token
-      ).catch(() => []),
-      fetchViewerLogin(fetchImpl, token).catch(() => null),
+      ).catch((): any => []),
+      fetchViewerLogin(fetchImpl, token).catch((): any => null),
     ]);
     return pickViewerPendingFromReviews(reviews, login);
   } catch {
@@ -648,7 +648,7 @@ export async function findViewerPendingReview(owner: any, repo: any, pullNumber:
  * Map GraphQL review-comment payload → REST-like shape (mapRestReviewComment).
  */
 
-export async function replyViaThreadGraphql(threadNodeId, body, fetchImpl, token, fallback: any = {}, ctx = null) {
+export async function replyViaThreadGraphql(threadNodeId: any, body: any, fetchImpl: any, token: any, fallback: any = {}, ctx: any = null) {
   ctx = normalizeApiCtx(ctx);
   const data = await apiGraphql(
     `mutation($id:ID!,$body:String!){
@@ -680,13 +680,13 @@ export async function replyViaThreadGraphql(threadNodeId, body, fetchImpl, token
  * GraphQL: addPullRequestReviewComment on an existing PENDING review.
  */
 export async function replyViaPendingReviewGraphql(
-  pendingReviewNodeId,
-  parentCommentNodeId,
-  body,
-  fetchImpl,
-  token,
+  pendingReviewNodeId: any,
+  parentCommentNodeId: any,
+  body: any,
+  fetchImpl: any,
+  token: any,
   fallback: any = {},
-  ctx = null
+  ctx: any = null
 ) {
   ctx = normalizeApiCtx(ctx);
   const data = await apiGraphql(

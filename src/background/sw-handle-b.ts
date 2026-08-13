@@ -14,8 +14,9 @@ import {
   fetchImpl,
   isAbortError,
 } from './sw-rate-limit';
+import type { SwMessage } from '../sw-messages';
 
-export async function handleMessagePartB(message: any): Promise<any> {
+export async function handleMessagePartB(message: SwMessage): Promise<unknown> {
   const apiCtx = apiCtxFromMessage(message || {});
   switch (message.type) {
 
@@ -333,8 +334,7 @@ export async function handleMessagePartB(message: any): Promise<any> {
           message.pageSize != null ||
           message.direction != null ||
           // Explicit product path: always prefer GraphQL when pageSize/direction set
-          message.type === MSG.FETCH_PR_TIMELINE_ITEMS ||
-          message.type === 'PR_TREE_FETCH_PR_TIMELINE_ITEMS';
+          String(message.type) === MSG.FETCH_PR_TIMELINE_ITEMS;
         const hasTimelineFn =
           typeof PRTreeFetch?.fetchPrTimelineItemsPage === 'function';
         if (wantGraphqlPage && hasTimelineFn) {

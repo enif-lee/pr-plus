@@ -1,5 +1,5 @@
   // continued host module segment
-  function onPullsListKeydown(event) {
+  function onPullsListKeydown(event: any) {
     // Escape / close races leave GH dialog in :modal — always schedule heal
     // (do not gate on current.open; embed can be open while top layer is stuck).
     if (event.key === 'Escape' || event.key === 'Esc') {
@@ -132,7 +132,7 @@
     const resolve =
       listApi?.resolvePrListShortcutAction ||
       (typeof globalThis !== 'undefined' &&
-        globalThis.PRListFocus?.resolvePrListShortcutAction);
+        (globalThis as any).PRListFocus?.resolvePrListShortcutAction);
     if (typeof resolve !== 'function') return;
 
     const rawList = resolve({
@@ -196,7 +196,7 @@
     }
   }
 
-  function onPullsListKeyup(event) {
+  function onPullsListKeyup(event: any) {
     if (event.key === 'Alt' || event.code === 'AltLeft' || event.code === 'AltRight') {
       hidePullsListHotkeyHints();
     }
@@ -215,7 +215,7 @@
     clearPullsListFocus();
   }
 
-  function onPointerDownCapture(event) {
+  function onPointerDownCapture(event: any) {
     // Heal stuck GH top layer before any early-return (incl. pr+ modal open)
     recoverGithubPaletteIfStuck();
     if (current.open) return;
@@ -228,7 +228,7 @@
     }
   }
 
-  function onDocumentFocusIn(event) {
+  function onDocumentFocusIn(event: any) {
     if (current.open) return;
     if (isPullsPaletteOpen()) return;
     if (!isPullsListPage()) return;
@@ -243,7 +243,7 @@
     // Focus outside any PR row → drop
     try {
       const rows = getPullsListRows();
-      const inside = rows.some((r) => r && (r === t || r.contains?.(t)));
+      const inside = rows.some((r: any) => r && (r === t || r.contains?.(t)));
       if (!inside) dismissPullsListFocusIfAny();
     } catch {
       dismissPullsListFocusIfAny();

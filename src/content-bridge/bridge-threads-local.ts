@@ -1,7 +1,7 @@
 /** threads local */
-export function findDanglingPrNumbers(pagePrNumbers, prs) {
+export function findDanglingPrNumbers(pagePrNumbers: any, prs: any) {
   if (!Array.isArray(pagePrNumbers) || pagePrNumbers.length === 0) return [];
-  const have = new Set((prs || []).map((pr) => pr.number));
+  const have = new Set((prs || []).map((pr: any) => pr.number));
   const dangling = [];
   const seen = new Set();
   for (const raw of pagePrNumbers) {
@@ -20,16 +20,16 @@ export function emptyReviewThreadsMetaLocal() {
     loadedThreadCount: 0,
     loadedCommentCount: 0,
     pagesLoaded: 0,
-    newestStartCursor: null,
-    newestEndCursor: null,
+    newestStartCursor: null as any,
+    newestEndCursor: null as any,
     hasOlder: false,
-    oldestStartCursor: null,
-    oldestEndCursor: null,
+    oldestStartCursor: null as any,
+    oldestEndCursor: null as any,
     hasNewerFromOldest: false,
-    newestThreadIds: [],
-    oldestThreadIds: [],
+    newestThreadIds: [] as any[],
+    oldestThreadIds: [] as any[],
     hasMore: false,
-    endCursor: null,
+    endCursor: null as any,
   };
 }
 
@@ -37,7 +37,7 @@ export function emptyReviewThreadsMetaLocal() {
  * Drop remote-deleted PRRT threads (and comments) from a detail snapshot.
  * Mirrors fetch-pulls.dropReviewThreadsFromDetail.
  */
-export function dropReviewThreadsFromDetailLocal(detail, threadNodeIds) {
+export function dropReviewThreadsFromDetailLocal(detail: any, threadNodeIds: any) {
   if (!detail) return detail;
   const drop = new Set(
     [...(threadNodeIds || [])]
@@ -48,8 +48,8 @@ export function dropReviewThreadsFromDetailLocal(detail, threadNodeIds) {
 
   const prevRc = Array.isArray(detail.reviewComments) ? detail.reviewComments : [];
   const prevTh = Array.isArray(detail.reviewThreads) ? detail.reviewThreads : [];
-  const droppedCommentIds = [];
-  const reviewComments = prevRc.filter((c) => {
+  const droppedCommentIds: any[] = [];
+  const reviewComments = prevRc.filter((c: any) => {
     if (!c) return false;
     const tid = (c as any).threadNodeId ? String((c as any).threadNodeId) : '';
     if (tid && drop.has(tid)) {
@@ -59,7 +59,7 @@ export function dropReviewThreadsFromDetailLocal(detail, threadNodeIds) {
     return true;
   });
   const reviewThreads = prevTh.filter(
-    (t) => !t?.threadNodeId || !drop.has(String(t.threadNodeId))
+    (t: any) => !t?.threadNodeId || !drop.has(String(t.threadNodeId))
   );
 
   const prevDeleted =
@@ -79,7 +79,7 @@ export function dropReviewThreadsFromDetailLocal(detail, threadNodeIds) {
   const droppedThreads = new Set([...prevDroppedThreads, ...drop].map(String));
 
   const prevMeta = detail.reviewThreadsMeta || emptyReviewThreadsMetaLocal();
-  const filterIdList = (list) =>
+  const filterIdList = (list: any) =>
     (Array.isArray(list) ? list : [])
       .map(String)
       .filter((id) => id && !drop.has(id));
@@ -125,7 +125,7 @@ export function dropReviewThreadsFromDetailLocal(detail, threadNodeIds) {
  * Dual-window merge (mirrors fetch-pulls.mergeReviewThreadsPageIntoDetail).
  * Keeps newest/oldest id sets + cursors so middle Load more can expand either end.
  */
-export function mergeReviewThreadsPageIntoDetailLocal(detail, page, direction = 'older') {
+export function mergeReviewThreadsPageIntoDetailLocal(detail: any, page: any, direction = 'older') {
   if (!detail) return detail;
   const dir = String(direction || page?.direction || 'older');
   const prevMeta = detail.reviewThreadsMeta || emptyReviewThreadsMetaLocal();
@@ -175,7 +175,7 @@ export function mergeReviewThreadsPageIntoDetailLocal(detail, page, direction = 
 
   let baseRc = prevRc;
   if (pageThreadIds.size) {
-    baseRc = prevRc.filter((c) => {
+    baseRc = prevRc.filter((c: any) => {
       if (!c) return false;
       const tid = (c as any).threadNodeId != null ? String((c as any).threadNodeId) : '';
       if (tid.startsWith('rest-thread-')) return false;
@@ -185,7 +185,7 @@ export function mergeReviewThreadsPageIntoDetailLocal(detail, page, direction = 
     });
   }
 
-  const byId = new Map(baseRc.map((c) => [String(c.id), c]));
+  const byId = new Map(baseRc.map((c: any) => [String(c.id), c]));
   for (const c of page?.comments || []) {
     if (c?.id != null) {
       byId.set(String(c.id), { ...(byId.get(String(c.id)) || ({} as any)), ...c });
@@ -218,7 +218,7 @@ export function mergeReviewThreadsPageIntoDetailLocal(detail, page, direction = 
   const newestIds = new Set((prevMeta.newestThreadIds || []).map(String));
   const oldestIds = new Set((prevMeta.oldestThreadIds || []).map(String));
   const pageIds = (page?.threads || [])
-    .map((t) => t.threadNodeId)
+    .map((t: any) => t.threadNodeId)
     .filter(Boolean)
     .map(String);
 
@@ -268,11 +268,11 @@ export function mergeReviewThreadsPageIntoDetailLocal(detail, page, direction = 
         );
       } else {
         const kept = prevRc.filter(
-          (c) =>
+          (c: any) =>
             !(c as any)?.threadNodeId ||
             !refreshed.has(String((c as any).threadNodeId))
         );
-        const keptMap = new Map(kept.map((c) => [String(c.id), c]));
+        const keptMap = new Map(kept.map((c: any) => [String(c.id), c]));
         for (const c of page?.comments || []) {
           if (c?.id != null) {
             keptMap.set(String(c.id), {
@@ -285,7 +285,7 @@ export function mergeReviewThreadsPageIntoDetailLocal(detail, page, direction = 
       }
     } catch {
       const kept = prevRc.filter(
-        (c) =>
+        (c: any) =>
           !(c as any)?.threadNodeId ||
           !refreshed.has(String((c as any).threadNodeId))
       );
@@ -425,7 +425,7 @@ export function isGraphqlReviewThreadNodeIdBridge(id: any): boolean {
   return /^PRRT_/i.test(String(id || '').trim());
 }
 
-export function collectUnresolvedThreadNodeIdsLocal(detail) {
+export function collectUnresolvedThreadNodeIdsLocal(detail: any) {
   const dropped =
     detail?._droppedThreadNodeIds instanceof Set
       ? detail._droppedThreadNodeIds
