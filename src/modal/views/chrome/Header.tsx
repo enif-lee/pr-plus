@@ -614,7 +614,7 @@ export function Header(props: any) {
                     aria-label={t('cta_edit_title')}
                     onClick={beginEditTitle}
                   >
-                    <OptBtnHint label="⌥⇧T" />
+                    <OptBtnHint label="⌥⇧T" preferredPlacement="bottom" />
                     <IconPencil size={14} />
                     <TipPopover title={t('cta_edit_title')} shortcut="⌥⇧T" />
                   </button>
@@ -686,7 +686,7 @@ export function Header(props: any) {
                 if (baseBranchRef) baseBranchRef.current = el;
               }}
             >
-              <OptBtnHint label="⌥⇧B" />
+              <OptBtnHint label="⌥⇧B" preferredPlacement="bottom" />
               <IconPencil className="prp-branch-tag__edit" size={12} />
             </button>
           </span>
@@ -776,7 +776,7 @@ export function Header(props: any) {
                 aria-pressed={Boolean(shellFullscreen)}
                 data-fullscreen={shellFullscreen ? '1' : '0'}
               >
-                <OptBtnHint label="⌥⇧F" />
+                <OptBtnHint label="⌥⇧F" preferredPlacement="bottom" />
                 <IconFullscreen active={Boolean(shellFullscreen)} size={16} />
                 <TipPopover
                   title={
@@ -871,7 +871,7 @@ export function Header(props: any) {
                 effectiveLayout === LAYOUT_DIFF ? 'diff' : 'conversation'
               }
             >
-              <OptBtnHint label="⌥." />
+              <OptBtnHint label="⌥." preferredPlacement="bottom" />
               {effectiveLayout === LAYOUT_DIFF ? (
                 <IconConversation size={16} aria-hidden="true" />
               ) : (
