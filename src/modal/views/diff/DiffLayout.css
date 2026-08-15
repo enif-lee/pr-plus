@@ -1,0 +1,171 @@
+/**
+ * Diff workspace layout: file nav + pane.
+ */
+
+/* Diff layout — fills modal shell (viewport-sized)
+   flex row: [file nav | resizer | pane]; open/close animates nav width */
+.prp-diff-layout {
+  --prp-file-nav-width: 260px;
+  --prp-file-nav-resizer: 4px;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  /* Panel fade handles enter; avoid double animation on keep-alive remount */
+}
+
+
+.prp-diff-layout--nav-collapsed {
+  /* width vars driven inline to 0; transitions live on children */
+}
+
+
+.prp-file-nav-resizer {
+  position: relative;
+  z-index: 2;
+  flex: 0 0 var(--prp-file-nav-resizer, 4px);
+  width: var(--prp-file-nav-resizer, 4px);
+  min-width: 0;
+  cursor: col-resize;
+  touch-action: none;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  outline: none;
+  opacity: 1;
+  transition:
+    flex-basis 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    width 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 160ms ease;
+}
+
+.prp-file-nav-resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: var(--prp-border-muted);
+  transition: opacity 160ms ease;
+}
+
+/* Keep the visible divider slim while giving mouse/touchpad users a 12px hit area. */
+.prp-file-nav-resizer::before {
+  content: '';
+  position: absolute;
+  inset: 0 -4px;
+}
+
+/* Width transitions are for collapse/expand, never live pointer tracking. */
+.prp-diff-layout--resizing .prp-filetree,
+.prp-diff-layout--resizing .prp-file-nav-resizer {
+  transition: none;
+}
+
+.prp-file-nav-resizer:hover::after,
+.prp-file-nav-resizer:focus-visible::after {
+  width: 2px;
+  background: var(--prp-accent);
+}
+
+.prp-file-nav-resizer[data-collapsed='1'] {
+  cursor: default;
+  pointer-events: none;
+  opacity: 0;
+}
+
+.prp-file-nav-resizer[data-collapsed='1']::after {
+  opacity: 0;
+}
+
+
+.prp-filetree {
+  /* Match Diff toolbar control height (search, step-nav, filter chips) */
+  --prp-filetree-ctrl-h: var(--prp-diff-ctrl-h, 28px);
+  flex: 0 0 var(--prp-file-nav-width, 260px);
+  width: var(--prp-file-nav-width, 260px);
+  border-right: 1px solid var(--prp-border-muted);
+  background: var(--prp-bg-muted);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  opacity: 1;
+  transition:
+    flex-basis 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    width 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 160ms ease,
+    border-color 160ms ease;
+}
+
+
+.prp-filetree--nav-collapsed,
+.prp-diff-layout--nav-collapsed .prp-filetree {
+  opacity: 0;
+  border-right-color: transparent;
+  pointer-events: none;
+}
+
+
+.prp-filetree--collapsed {
+  border-right: 1px solid var(--prp-border-muted);
+  align-items: center;
+  padding: 8px 0;
+}
+
+
+@media (prefers-reduced-motion: reduce) {
+  .prp-filetree,
+  .prp-file-nav-resizer {
+    transition: none;
+  }
+}
+
+
+.prp-filetree__rail-toggle,
+.prp-filetree__collapse-nav {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--prp-border);
+  border-radius: 6px;
+  background: var(--prp-bg);
+  color: var(--prp-fg-muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.prp-filetree__rail-toggle:hover,
+.prp-filetree__rail-toggle:focus-visible,
+.prp-filetree__collapse-nav:hover,
+.prp-filetree__collapse-nav:focus-visible {
+  color: var(--prp-accent);
+  border-color: var(--prp-accent);
+  outline: none;
+}
+
+
+.prp-filetree__search {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--prp-border-muted);
+  flex: 0 0 auto;
+  min-width: 0;
+}

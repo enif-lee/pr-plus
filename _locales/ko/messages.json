@@ -1,0 +1,62 @@
+{
+  "extName": {
+    "message": "pr+",
+    "description": "Extension name"
+  },
+  "extDescription": {
+    "message": "GitHub PR 스택 트리와 대화·디프·머지를 위한 빠른 인페이지 리뷰 셸.",
+    "description": "Extension description"
+  },
+  "actionTitle": {
+    "message": "pr+",
+    "description": "Toolbar action tooltip"
+  },
+  "hide_whitespace": {
+    "message": "공백 숨기기",
+    "description": "Diff settings: hide whitespace"
+  },
+  "hide_whitespace_title": {
+    "message": "공백만 변경된 줄 숨기기",
+    "description": "Diff settings: hide whitespace title"
+  },
+  "hide_outdated_comments": {
+    "message": "오래된 코멘트 숨기기",
+    "description": "Diff settings: hide outdated comments"
+  },
+  "hide_outdated_comments_title": {
+    "message": "outdated 리뷰 코멘트 숨기기",
+    "description": "Diff settings: hide outdated title"
+  },
+  "tab_conversation": {
+    "message": "대화",
+    "description": "Conversation tab label"
+  },
+  "tab_files": {
+    "message": "변경된 파일",
+    "description": "Files changed tab label"
+  },
+  "resolve_conversation": {
+    "message": "대화 해결",
+    "description": "Resolve conversation button"
+  },
+  "unresolved": {
+    "message": "미해결",
+    "description": "Unresolved filter"
+  },
+  "resolved": {
+    "message": "해결됨",
+    "description": "Resolved filter"
+  },
+  "pending": {
+    "message": "대기 중",
+    "description": "Pending filter"
+  },
+  "display_options": {
+    "message": "표시 옵션",
+    "description": "Display options heading"
+  },
+  "reviewed_by": {
+    "message": "리뷰한 사람…",
+    "description": "Reviewed by heading"
+  }
+}

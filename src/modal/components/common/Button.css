@@ -1,0 +1,221 @@
+/**
+ * Residual Button styles — variants / tokens that need CSS variables & complex
+ * :hover/:disabled states. Layout/sizing prefer Tailwind on the element.
+ * Loaded via styles/index.css import.
+ */
+
+.prp-btn {
+  font: inherit;
+  font-weight: 500;
+  border: 1px solid transparent;
+  cursor: pointer;
+  color: var(--prp-fg, #1f2328);
+  background: var(--prp-btn-bg, #f6f8fa);
+  border-color: var(--prp-border, #d0d7de);
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease,
+    color 0.12s ease,
+    box-shadow 0.12s ease;
+}
+
+.prp-btn:hover:not(:disabled) {
+  background: var(--prp-btn-hover, #eff2f5);
+}
+
+.prp-btn:focus-visible {
+  outline: 2px solid var(--prp-accent, #0969da);
+  outline-offset: 1px;
+}
+
+.prp-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.prp-btn--loading {
+  opacity: 0.85;
+  cursor: wait;
+  pointer-events: none;
+}
+
+.prp-btn__spinner {
+  width: 0.85em;
+  height: 0.85em;
+  border: 1.5px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  animation: prp-btn-spin 0.65s linear infinite;
+  opacity: 0.9;
+}
+
+.prp-btn__label--busy {
+  opacity: 0.92;
+}
+
+@keyframes prp-btn-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.prp-btn--primary {
+  color: #fff;
+  background: var(--prp-accent, #1f883d);
+  border-color: var(--prp-accent, #1f883d);
+}
+
+.prp-btn--primary:hover:not(:disabled) {
+  background: var(--prp-accent-hover, #1a7f37);
+  border-color: var(--prp-accent-hover, #1a7f37);
+}
+
+.prp-btn--ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--prp-fg-muted, #656d76);
+}
+
+.prp-btn--ghost:hover:not(:disabled) {
+  background: var(--prp-btn-hover, rgba(175, 184, 193, 0.2));
+  color: var(--prp-fg, #1f2328);
+}
+
+.prp-btn--size-sm {
+  font-size: 12px;
+}
+
+.prp-btn--size-lg {
+  font-size: 14px;
+}
+
+
+/* Button variants (moved from styles/residual) */
+
+/* shadcn-like buttons */
+.prp-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid var(--prp-border);
+  background: var(--prp-bg-muted);
+  color: var(--prp-fg);
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  text-decoration: none;
+  line-height: 20px;
+  transition: background 120ms ease, border-color 120ms ease, filter 120ms ease;
+}
+
+
+.prp-btn:hover {
+  filter: brightness(0.97);
+}
+
+
+.prp-theme-dark .prp-btn:hover {
+  filter: brightness(1.08);
+}
+
+
+.prp-btn--primary {
+  background: var(--prp-accent-bg);
+  border-color: var(--prp-accent-bg);
+  color: #fff;
+}
+
+
+.prp-btn--ok {
+  color: var(--prp-ok);
+}
+
+
+.prp-btn--warn {
+  color: var(--prp-warn);
+}
+
+
+.prp-btn--size-sm {
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+
+.prp-btn--size-default {
+  padding: 7px 14px;
+}
+
+
+/*
+ * Danger CTA (Delete branch, discard, …).
+ * Rest: low-chroma soft surface + danger label (quiet until intent).
+ * Hover/focus: solid high-chroma danger fill + white label.
+ * Cancel global .prp-btn:hover filter so reds stay clean.
+ */
+.prp-btn--danger {
+  color: var(--prp-danger);
+  border-color: color-mix(in srgb, var(--prp-danger) 55%, var(--prp-border));
+  background: color-mix(in srgb, var(--prp-danger) 12%, var(--prp-bg));
+}
+
+.prp-btn--danger:hover:not(:disabled),
+.prp-btn--danger:focus-visible:not(:disabled) {
+  color: #fff;
+  border-color: var(--prp-danger);
+  background: var(--prp-danger);
+  filter: none;
+}
+
+.prp-theme-dark .prp-btn--danger {
+  color: var(--prp-danger);
+  border-color: color-mix(in srgb, var(--prp-danger) 50%, var(--prp-border));
+  background: color-mix(in srgb, var(--prp-danger) 14%, var(--prp-bg));
+}
+
+.prp-theme-dark .prp-btn--danger:hover:not(:disabled),
+.prp-theme-dark .prp-btn--danger:focus-visible:not(:disabled) {
+  color: #fff;
+  border-color: var(--prp-danger);
+  background: var(--prp-danger);
+  filter: none;
+}
+
+
+.prp-btn--ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--prp-fg-muted);
+  padding-left: 6px;
+  padding-right: 6px;
+}
+
+
+.prp-btn--ghost:hover {
+  background: var(--prp-bg-muted);
+  color: var(--prp-fg);
+}
+
+
+.prp-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Keyboard badge inside buttons */
+.prp-btn__kbd {
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+  font-family: var(--prp-mono);
+  font-size: 10px;
+  font-weight: 500;
+  opacity: 0.75;
+  line-height: 1.4;
+}

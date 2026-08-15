@@ -1,0 +1,62 @@
+{
+  "extName": {
+    "message": "pr+",
+    "description": "Extension name"
+  },
+  "extDescription": {
+    "message": "GitHub PR のスタックツリーと、会話・差分・マージ用の高速インページレビューシェル。",
+    "description": "Extension description"
+  },
+  "actionTitle": {
+    "message": "pr+",
+    "description": "Toolbar action tooltip"
+  },
+  "hide_whitespace": {
+    "message": "空白を非表示",
+    "description": "Diff settings: hide whitespace"
+  },
+  "hide_whitespace_title": {
+    "message": "空白のみの変更行を非表示",
+    "description": "Diff settings: hide whitespace title"
+  },
+  "hide_outdated_comments": {
+    "message": "古いコメントを非表示",
+    "description": "Diff settings: hide outdated comments"
+  },
+  "hide_outdated_comments_title": {
+    "message": "outdated のレビューコメントを非表示",
+    "description": "Diff settings: hide outdated title"
+  },
+  "tab_conversation": {
+    "message": "会話",
+    "description": "Conversation tab label"
+  },
+  "tab_files": {
+    "message": "変更されたファイル",
+    "description": "Files changed tab label"
+  },
+  "resolve_conversation": {
+    "message": "会話を解決",
+    "description": "Resolve conversation button"
+  },
+  "unresolved": {
+    "message": "未解決",
+    "description": "Unresolved filter"
+  },
+  "resolved": {
+    "message": "解決済み",
+    "description": "Resolved filter"
+  },
+  "pending": {
+    "message": "保留中",
+    "description": "Pending filter"
+  },
+  "display_options": {
+    "message": "表示オプション",
+    "description": "Display options heading"
+  },
+  "reviewed_by": {
+    "message": "レビューした人…",
+    "description": "Reviewed by heading"
+  }
+}

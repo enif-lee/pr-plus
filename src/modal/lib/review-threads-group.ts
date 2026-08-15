@@ -1,0 +1,275 @@
+import {
+  REVIEW_THREADS_PAGE_SIZE,
+} from './review-threads-transport';
+
+/** Split from review-threads.ts: review-threads-group */
+/** @module modal/lib/review-threads */
+/**
+ * Pure review-thread grouping, counts, resolve/reply request builders.
+ */
+
+/**
+ * Group review comments into threads by root (in_reply_to_id).
+ * @param {Array} comments
+ * @returns {Array<{ id, path, line, side, root, replies, resolved, threadNodeId }>}
+ */
+export function groupReviewThreads(comments: any) {
+  const list = Array.isArray(comments) ? comments : [];
+  const byId = new Map();
+  for (const c of list) {
+    if (c && c.id != null) byId.set(String(c.id), c);
+  }
+  const roots = [];
+  const children = new Map();
+  for (const c of list) {
+    if (!c) continue;
+    const parentId = c.inReplyToId ?? c.in_reply_to_id ?? null;
+    if (parentId != null && byId.has(String(parentId))) {
+      const key = String(parentId);
+      if (!children.has(key)) children.set(key, []);
+      children.get(key).push(c);
+    } else {
+      roots.push(c);
+    }
+  }
+  return roots.map((root) => {
+    const replies = (children.get(String(root.id)) || []).slice().sort((a: any, b: any) =>
+      String(a.createdAt || a.created_at || '').localeCompare(
+        String(b.createdAt || b.created_at || '')
+      )
+    );
+    return {
+      id: root.id,
+      path: root.path || '',
+      line: root.line ?? root.original_line ?? null,
+      side: root.side || 'RIGHT',
+      root,
+      replies,
+      resolved: Boolean(root.resolved ?? root.isResolved),
+      outdated: Boolean(root.outdated),
+      pending: Boolean(
+        root.pending || replies.some((r: any) => r && r.pending)
+      ),
+      threadNodeId: root.threadNodeId || root.thread_id || root.pullRequestReviewThreadId || null,
+      count: 1 + replies.length,
+    };
+  });
+}
+
+/**
+ * Merge GraphQL review-thread metadata onto REST review comments.
+ * GitHub REST list comments never includes thread GraphQL ids or isResolved;
+ * threads come from repository.pullRequest.reviewThreads.
+ *
+ * @param {Array<{ id?: number|string }>} comments mapped REST comments
+ * @param {Array<{ threadNodeId: string, resolved?: boolean, commentIds?: Array<number|string> }>} threads
+ * @returns {Array}
+ */
+export function countReviewThreadsByPath(comments: any) {
+  const threads = groupReviewThreads(comments);
+  const map = new Map();
+  for (const t of threads) {
+    const p = t.path || '';
+    if (!p) continue;
+    map.set(p, (map.get(p) || 0) + 1);
+  }
+  return map;
+}
+
+/**
+ * Count **unresolved** review threads per file path.
+ * @param {Array} comments
+ * @returns {Map<string, number>}
+ */
+export function countUnresolvedReviewThreadsByPath(comments: any) {
+  const threads = groupReviewThreads(comments);
+  const map = new Map();
+  for (const t of threads) {
+    if (t.resolved) continue;
+    const p = t.path || '';
+    if (!p) continue;
+    map.set(p, (map.get(p) || 0) + 1);
+  }
+  return map;
+}
+
+/**
+ * Count **pending review threads** (root units), not individual replies.
+ * A thread counts once when its root or any reply is still PENDING.
+ * @param {Array} comments
+ * @returns {number}
+ */
+export function countPendingReviewThreads(comments: any) {
+  const threads = groupReviewThreads(comments);
+  let n = 0;
+  for (const t of threads) {
+    if (t.pending) n += 1;
+  }
+  return n;
+}
+
+/**
+ * Count **pending** (unsubmitted) review threads per file path.
+ * A thread is pending when the root or any reply is still PENDING.
+ * Also counts any comment with `pending: true` by path so optimistic /
+ * reply-only drafts still drive the Diff file filter.
+ * @param {Array} comments
+ * @returns {Map<string, number>}
+ */
+export function countPendingReviewThreadsByPath(comments: any) {
+  const map = new Map();
+  const threads = groupReviewThreads(comments);
+  for (const t of threads) {
+    if (!t.pending) continue;
+    const p = t.path || '';
+    if (!p) continue;
+    map.set(p, (map.get(p) || 0) + 1);
+  }
+  // Ensure every pending comment path is represented (root-less / optimistic)
+  for (const c of Array.isArray(comments) ? comments : []) {
+    if (!c?.pending) continue;
+    const p = c.path || '';
+    if (!p || map.has(p)) continue;
+    map.set(p, 1);
+  }
+  return map;
+}
+
+/**
+ * Aggregate thread totals for Diff review filter labels.
+ * Aligns with Diff comment nav: thread **roots** only, optionally limited to
+ * paths present in the current file list (so badge counts match 0/N nav).
+ *
+ * - unresolved: open submitted threads (excludes pending drafts)
+ * - resolved: resolved threads
+ * - pendingThreads: pending threads
+ *
+ * @param {Array} comments
+ * @param {{
+ *   allowedPaths?: Set<string>|string[]|null,
+ *   excludeOutdated?: boolean,
+ * }} [opts]
+ * @returns {{ total: number, unresolved: number, resolved: number, pendingThreads: number }}
+ */
+export function countReviewThreadTotals(comments: any, opts: any = {}) {
+  const pathSet =
+    opts?.allowedPaths instanceof Set
+      ? opts.allowedPaths
+      : opts?.allowedPaths
+        ? new Set(
+            Array.isArray(opts.allowedPaths)
+              ? opts.allowedPaths.map(String).filter(Boolean)
+              : []
+          )
+        : null;
+  const excludeOutdated = Boolean(opts?.excludeOutdated);
+  const threads = groupReviewThreads(comments);
+  let total = 0;
+  let unresolved = 0;
+  let resolved = 0;
+  let pendingThreads = 0;
+  for (const t of threads) {
+    const p = t.path || '';
+    // No path → not placeable on Diff; skip so counts match nav
+    if (!p) continue;
+    if (pathSet && !pathSet.has(p)) continue;
+    if (excludeOutdated && t.outdated) continue;
+    total += 1;
+    if (t.pending) pendingThreads += 1;
+    if (t.resolved) resolved += 1;
+    else if (!t.pending) unresolved += 1;
+  }
+  return { total, unresolved, resolved, pendingThreads };
+}
+
+/**
+ * Coerce a review-comment id to a positive integer (REST database id).
+ * GraphQL node ids / non-numeric values → null.
+ * @param {unknown} raw
+ * @returns {number|null}
+ */
+export function normalizeReviewCommentId(raw: any) {
+  if (raw == null || raw === '') return null;
+  if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) {
+    return Math.floor(raw);
+  }
+  const s = String(raw).trim();
+  if (!/^\d+$/.test(s)) return null;
+  const n = Number(s);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * Walk in_reply_to chain to the top-level review comment.
+ * GitHub rejects replies-to-replies (422 Validation Failed).
+ *
+ * @param {Array<{ id?: number|string, inReplyToId?: number|string|null, in_reply_to_id?: number|string|null }>} comments
+ * @param {unknown} commentId any id in the thread
+ * @returns {number|null} root REST id
+ */
+export function resolveRootReviewCommentId(comments: any, commentId: any) {
+  const start = normalizeReviewCommentId(commentId);
+  if (start == null) return null;
+  const byId = new Map();
+  for (const c of Array.isArray(comments) ? comments : []) {
+    if (!c || c.id == null) continue;
+    const id = normalizeReviewCommentId(c.id);
+    if (id != null) byId.set(id, c);
+  }
+  let cur = byId.get(start) || null;
+  if (!cur) return start;
+  const seen = new Set();
+  while (cur) {
+    const id = normalizeReviewCommentId(cur.id);
+    if (id == null || seen.has(id)) break;
+    seen.add(id);
+    const parentRaw = cur.inReplyToId ?? cur.in_reply_to_id ?? null;
+    const parentId = normalizeReviewCommentId(parentRaw);
+    if (parentId == null || !byId.has(parentId)) return id;
+    cur = byId.get(parentId);
+  }
+  return start;
+}
+
+/**
+ * Shape GraphQL thread-reply mutation (preferred when pending review exists).
+ * REST POST /comments and /replies 422 if the user already has a pending review.
+ */
+export function filterFilesByQuery(files: any, query: any) {
+  const list = Array.isArray(files) ? files : [];
+  const q = String(query || '')
+    .trim()
+    .toLowerCase();
+  if (!q) return list.slice();
+  return list.filter((f) => {
+    const path = String(f.filename || f.path || '').toLowerCase();
+    return path.includes(q);
+  });
+}
+
+/**
+ * Toggle path in a viewed set (immutable).
+ * @param {Set<string>|string[]} viewed
+ * @param {string} path
+ * @returns {Set<string>}
+ */
+export function toggleViewedPath(viewed: any, path: any) {
+  const next = viewed instanceof Set ? new Set(viewed) : new Set(viewed || []);
+  const p = String(path || '');
+  if (!p) return next;
+  if (next.has(p)) next.delete(p);
+  else next.add(p);
+  return next;
+}
+
+export function isPathViewed(viewed: any, path: any) {
+  if (!path) return false;
+  if (viewed instanceof Set) return viewed.has(path);
+  if (Array.isArray(viewed)) return viewed.includes(path);
+  return false;
+}
+
+/**
+ * Hard cap for GraphQL connection `first`/`last` (GitHub max 100).
+ * Used for by-id chunking only — normal pages use REVIEW_THREADS_PAGE_SIZE.
+ */

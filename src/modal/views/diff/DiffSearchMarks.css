@@ -1,0 +1,947 @@
+/**
+ * Residual CSS (cannot fully express via Tailwind utilities).
+ * Colocated next to owning domain; imported from styles/index.css.
+ * Migrated from styles/parts/13-in-diff-search-match-marks.css
+ */
+
+/* In-diff search match marks */
+.prp-search-mark {
+  background: color-mix(in srgb, #e4b300 55%, transparent);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+/* Conversation find chrome */
+.prp-card--search-match {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #eab308 55%, transparent);
+}
+.prp-card--search-current {
+  /* Inset ring — parent scroller clips outward outline */
+  outline: 2px solid var(--prp-accent, #0969da);
+  outline-offset: -2px;
+  box-shadow: inset 0 0 0 3px color-mix(in srgb, #fbbf24 35%, transparent);
+}
+/*
+ * Keyboard focus (⌥J/K · ⌥⇧C): single owner ring on the stop container.
+ * Inset outline + box-shadow only (no second outer outline from host CSS).
+ * Strong ring on land → settle softer (restarts each nav).
+ *
+ * Geometry: paint on the same box that draws the card chrome.
+ *  - .prp-card → 10px (AsideRail .prp-card)
+ *  - review-group path row → full <li> (header + open body), square
+ *  - merge/composer hosts → ring the *child* box (host may include margins)
+ */
+.prp-card--kb-focus,
+.prp-review-group__row--kb-focus {
+  outline: 2px solid var(--prp-accent, #0969da);
+  outline-offset: -2px;
+  box-shadow: inset 0 0 0 2px
+    color-mix(in srgb, var(--prp-accent, #0969da) 28%, transparent);
+  border-radius: inherit;
+  position: relative;
+  z-index: 1;
+  animation: prp-kb-focus-settle 720ms ease forwards;
+}
+/* Match .prp-card { border-radius: 10px } — not tokens --prp-radius (12px) */
+.prp-card.prp-card--kb-focus {
+  border-radius: 10px;
+}
+/*
+ * Merge host wraps MergeBox (rounded-xl + vertical margin). Ring the painted
+ * merge box so outline matches the visible surface, not the margin box.
+ */
+.prp-merge-box-focus-host.prp-card--kb-focus {
+  outline: none !important;
+  box-shadow: none !important;
+  animation: none !important;
+  border-radius: 0;
+}
+.prp-merge-box-focus-host.prp-card--kb-focus > .prp-merge-box {
+  outline: 2px solid var(--prp-accent, #0969da);
+  outline-offset: -2px;
+  box-shadow: inset 0 0 0 2px
+    color-mix(in srgb, var(--prp-accent, #0969da) 28%, transparent);
+  /* Tailwind rounded-xl on MergeBox */
+  border-radius: 0.75rem;
+  position: relative;
+  z-index: 1;
+  animation: prp-kb-focus-settle 720ms ease forwards;
+}
+/*
+ * Composer host wraps .prp-card--composer (10px). Ring the card, not host.
+ */
+.prp-composer-focus-host.prp-card--kb-focus {
+  outline: none !important;
+  box-shadow: none !important;
+  animation: none !important;
+  border-radius: 0;
+}
+.prp-composer-focus-host.prp-card--kb-focus > .prp-card {
+  outline: 2px solid var(--prp-accent, #0969da);
+  outline-offset: -2px;
+  box-shadow: inset 0 0 0 2px
+    color-mix(in srgb, var(--prp-accent, #0969da) 28%, transparent);
+  border-radius: 10px;
+  position: relative;
+  z-index: 1;
+  animation: prp-kb-focus-settle 720ms ease forwards;
+}
+@keyframes prp-kb-focus-settle {
+  0% {
+    outline-color: var(--prp-accent, #0969da);
+    box-shadow: inset 0 0 0 3px
+      color-mix(in srgb, var(--prp-accent, #0969da) 42%, transparent);
+  }
+  100% {
+    outline-color: color-mix(
+      in srgb,
+      var(--prp-accent, #0969da) 55%,
+      transparent
+    );
+    box-shadow: inset 0 0 0 2px
+      color-mix(in srgb, var(--prp-accent, #0969da) 18%, transparent);
+  }
+}
+/*
+ * Nested review-group path rows (Conversation):
+ * Structural full-unit outline is always-on via MultiFileReviewGroup ::after.
+ * Kb-focus only upgrades that same full-unit box to accent (never header-only,
+ * never a second ring on the inner comment card).
+ */
+.prp-review-group__list .prp-review-group__row--kb-focus {
+  border-radius: 0;
+  /* Ring is on ::after (full unit); host outline off to avoid double paint */
+  outline: none !important;
+  box-shadow: none !important;
+  animation: none !important;
+  z-index: 2;
+  overflow: hidden;
+  isolation: isolate;
+}
+.prp-review-group__list .prp-review-group__row--kb-focus::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 2px solid var(--prp-accent, #0969da);
+  border-radius: 0;
+  pointer-events: none;
+  z-index: 5;
+  box-sizing: border-box;
+  box-shadow: inset 0 0 0 2px
+    color-mix(in srgb, var(--prp-accent, #0969da) 28%, transparent);
+  animation: prp-kb-focus-settle-border 720ms ease forwards;
+}
+@keyframes prp-kb-focus-settle-border {
+  0% {
+    border-color: var(--prp-accent, #0969da);
+    box-shadow: inset 0 0 0 3px
+      color-mix(in srgb, var(--prp-accent, #0969da) 42%, transparent);
+  }
+  100% {
+    border-color: color-mix(
+      in srgb,
+      var(--prp-accent, #0969da) 55%,
+      transparent
+    );
+    box-shadow: inset 0 0 0 2px
+      color-mix(in srgb, var(--prp-accent, #0969da) 18%, transparent);
+  }
+}
+/* Never stack a second ring on nested thread cards inside a focused path row */
+.prp-review-group__row--kb-focus .prp-card--kb-focus,
+.prp-review-group__row--kb-focus .prp-card--search-current,
+.prp-review-group__row--kb-focus .prp-conversation-inline-thread {
+  outline: none !important;
+  box-shadow: none !important;
+  animation: none !important;
+}
+/*
+ * Minimized / off-topic compact host: painted chrome is 6px on the banner.
+ * Ring the banner child so outline radius matches (host has no radius).
+ */
+.prp-comment-minimized-card.prp-card--kb-focus,
+.prp-card--minimized-only.prp-card--kb-focus {
+  outline: none !important;
+  box-shadow: none !important;
+  animation: none !important;
+  border-radius: 0;
+}
+.prp-comment-minimized-card.prp-card--kb-focus > .prp-comment-minimized,
+.prp-card--minimized-only.prp-card--kb-focus > .prp-comment-minimized {
+  outline: 2px solid var(--prp-accent, #0969da);
+  outline-offset: -2px;
+  box-shadow: inset 0 0 0 2px
+    color-mix(in srgb, var(--prp-accent, #0969da) 28%, transparent);
+  border-radius: 6px;
+  position: relative;
+  z-index: 1;
+  animation: prp-kb-focus-settle 720ms ease forwards;
+}
+/*
+ * Standalone conversation review-thread shells always keep unit chrome;
+ * kb-focus only elevates border color (thread outline never disappears when
+ * an inner comment unit is focused).
+ */
+.prp-conversation-inline-thread.prp-card--kb-focus {
+  border-color: var(--prp-accent, #0969da);
+  outline: 2px solid var(--prp-accent, #0969da);
+  outline-offset: -2px;
+  box-shadow: inset 0 0 0 2px
+    color-mix(in srgb, var(--prp-accent, #0969da) 28%, transparent);
+  border-radius: 10px;
+  animation: prp-kb-focus-settle 720ms ease forwards;
+}
+.prp-review-thread__item--search-match {
+  background: color-mix(in srgb, #eab308 10%, transparent);
+  border-radius: 6px;
+}
+.prp-review-thread__item--search-current {
+  outline: 2px solid var(--prp-accent, #0969da);
+  outline-offset: -1px;
+  border-radius: 6px;
+  background: color-mix(in srgb, #ff9f1a 12%, transparent);
+}
+.prp-md--search-hit {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.prp-search-mark--current {
+  background: color-mix(in srgb, #ff9f1a 72%, #fff 10%);
+  outline: 1px solid color-mix(in srgb, #d97706 70%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, #fbbf24 35%, transparent);
+  font-weight: 600;
+}
+
+.prp-theme-dark .prp-search-mark,
+[data-color-mode='dark'] .prp-search-mark {
+  background: color-mix(in srgb, #eab308 42%, transparent);
+  color: var(--prp-fg);
+}
+
+.prp-theme-dark .prp-search-mark--current,
+[data-color-mode='dark'] .prp-search-mark--current {
+  background: color-mix(in srgb, #f59e0b 55%, transparent);
+  outline-color: #fbbf24;
+  box-shadow: 0 0 0 2px color-mix(in srgb, #f59e0b 30%, transparent);
+}
+
+.prp-vline--search-match {
+  background: color-mix(in srgb, #eab308 10%, var(--prp-bg));
+}
+
+.prp-vline--search-match.prp-vline--add {
+  background: color-mix(in srgb, #eab308 12%, var(--prp-add-bg));
+}
+
+.prp-vline--search-match.prp-vline--del {
+  background: color-mix(in srgb, #eab308 12%, var(--prp-del-bg));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .prp-search__spinner {
+    animation: none;
+    opacity: 0.75;
+  }
+  .prp-search__loading-bar::after {
+    animation: none;
+    width: 100%;
+    opacity: 0.85;
+    transform: none;
+  }
+}
+
+/* highlight.js — light + dark via GitHub theme vars */
+.prp-code.hljs,
+.prp-vline .hljs,
+.prp-md pre code.hljs {
+  background: transparent;
+  color: var(--prp-fg);
+  padding: 0;
+}
+
+.prp-theme-light .hljs-comment,
+.prp-theme-light .hljs-quote {
+  color: #6a737d;
+}
+.prp-theme-light .hljs-keyword,
+.prp-theme-light .hljs-selector-tag,
+.prp-theme-light .hljs-type {
+  color: #d73a49;
+}
+.prp-theme-light .hljs-string,
+.prp-theme-light .hljs-attr {
+  color: #032f62;
+}
+.prp-theme-light .hljs-number,
+.prp-theme-light .hljs-literal {
+  color: #005cc5;
+}
+.prp-theme-light .hljs-title,
+.prp-theme-light .hljs-section {
+  color: #6f42c1;
+}
+.prp-theme-light .hljs-built_in,
+.prp-theme-light .hljs-name {
+  color: #e36209;
+}
+
+.prp-theme-dark .hljs-comment,
+.prp-theme-dark .hljs-quote {
+  color: #8b949e;
+}
+.prp-theme-dark .hljs-keyword,
+.prp-theme-dark .hljs-selector-tag,
+.prp-theme-dark .hljs-type {
+  color: #ff7b72;
+}
+.prp-theme-dark .hljs-string,
+.prp-theme-dark .hljs-attr {
+  color: #a5d6ff;
+}
+.prp-theme-dark .hljs-number,
+.prp-theme-dark .hljs-literal {
+  color: #79c0ff;
+}
+.prp-theme-dark .hljs-title,
+.prp-theme-dark .hljs-section {
+  color: #d2a8ff;
+}
+.prp-theme-dark .hljs-built_in,
+.prp-theme-dark .hljs-name {
+  color: #ffa657;
+}
+
+/* Body editor (Write / Preview) */
+.prp-body-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.prp-body-editor__tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--prp-border-muted);
+  padding-bottom: 0;
+}
+
+.prp-tab {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--prp-fg-muted);
+  padding: 8px 12px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.prp-tab--active {
+  color: var(--prp-fg);
+  border-bottom-color: var(--prp-accent);
+}
+
+.prp-body-editor__ta {
+  min-height: 180px;
+}
+
+.prp-body-editor__preview {
+  min-height: 120px;
+  padding: 12px;
+  border: 1px solid var(--prp-border-muted);
+  border-radius: 8px;
+  background: var(--prp-bg-muted);
+}
+
+/* Suggestion blocks (GitHub-style) */
+.prp-suggestion {
+  margin: 10px 0;
+  border: 1px solid var(--prp-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--prp-bg);
+}
+
+.prp-suggestion__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  background: color-mix(in srgb, var(--prp-accent) 8%, var(--prp-bg-muted));
+  border-bottom: 1px solid var(--prp-border-muted);
+}
+
+.prp-suggestion__label {
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--prp-fg);
+}
+
+.prp-suggestion__code {
+  margin: 0;
+  padding: 10px 12px;
+  font-family: var(--prp-mono);
+  font-size: 12px;
+  line-height: 1.45;
+  background: var(--prp-add-bg);
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: pre;
+  word-break: normal;
+  overflow-wrap: normal;
+  word-wrap: normal;
+  max-width: 100%;
+}
+.prp-suggestion__code code {
+  display: block;
+  width: max-content;
+  min-width: 100%;
+  white-space: pre;
+  word-break: normal;
+  overflow-wrap: normal;
+  font-family: inherit;
+  font-size: inherit;
+  background: transparent;
+  padding: 0;
+  border: 0;
+}
+
+/* Command palette (Linear-style) */
+/* Opt-hold shortcut badges (stack chips) — matches list hotkeys */
+.prp-modal-hotkey,
+kbd.prp-modal-hotkey {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 6px;
+  padding: 0 5px;
+  min-width: 1.4em;
+  height: 18px;
+  box-sizing: border-box;
+  border-radius: 4px;
+  border: 1px solid var(--prp-border-muted, #d0d7de);
+  background: var(--prp-bg-muted, #f6f8fa);
+  color: var(--prp-fg-muted, #656d76);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  vertical-align: middle;
+  user-select: none;
+  pointer-events: none;
+  flex-shrink: 0;
+}
+/* Overlay on chip corner — never grows stack bar height */
+.prp-stack-strip__item {
+  position: relative;
+}
+.prp-stack-strip__item .prp-modal-hotkey {
+  position: absolute;
+  top: -5px;
+  right: -4px;
+  margin: 0;
+  height: 14px;
+  min-width: 1.25em;
+  padding: 0 3px;
+  font-size: 9.5px;
+  line-height: 1;
+  z-index: 2;
+  box-shadow: 0 1px 3px rgba(1, 4, 9, 0.12);
+  background: var(--prp-bg, #fff);
+}
+
+/* Opt-hold shortcut badge above a mapped control (not a floating dock).
+ * Badge is portaled fixed to body — also lift overflow on hosts while active. */
+.prp-opt-hint-host {
+  position: relative;
+}
+.prp-opt-btn-hint-anchor {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+/*
+ * Selection ↑↓ / region hop settle: hide every ShortcutHint (floatbar delayed).
+ * Attr stamped on documentElement by scheduleSelectionActionsReveal.
+ */
+html[data-prp-selection-nav='1'] .prp-opt-btn-hint,
+html[data-prp-selection-nav='1'] .prp-opt-btn-hint--fixed {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+.prp-opt-btn-hint {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 4px;
+  border: 1px solid var(--prp-border-muted, #d0d7de);
+  background: var(--prp-bg, #fff);
+  box-shadow: 0 4px 12px rgba(1, 4, 9, 0.18);
+  color: var(--prp-fg-muted, #656d76);
+  font-family: ui-monospace, SFMono-Regular, Menlo, 'Segoe UI Symbol',
+    monospace;
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.prp-opt-btn-hint .prp-key-glyph--shift {
+  font-size: 1.3em;
+  font-weight: 700;
+  line-height: 1;
+  transform: translateY(-0.04em);
+}
+/* Fixed portal — placement matches TipPopover transforms.
+ * Default below SearchableSelect portal (120000) so meta pickers win stacking. */
+.prp-opt-btn-hint--fixed {
+  position: fixed;
+  z-index: var(--prp-z-tip, 100020);
+}
+.prp-opt-btn-hint--top {
+  transform: translate(-50%, -100%);
+}
+.prp-opt-btn-hint--bottom {
+  transform: translate(-50%, 0);
+}
+.prp-opt-btn-hint--left {
+  transform: translate(-100%, -50%);
+}
+.prp-opt-btn-hint--right {
+  transform: translate(0, -50%);
+}
+.prp-opt-btn-hint--top::after,
+.prp-opt-btn-hint--bottom::after,
+.prp-opt-btn-hint--left::after,
+.prp-opt-btn-hint--right::after {
+  content: '';
+  position: absolute;
+  border: 4px solid transparent;
+  filter: drop-shadow(0 1px 0 var(--prp-border-muted, #d0d7de));
+}
+.prp-opt-btn-hint--top::after {
+  top: 100%;
+  left: 50%;
+  margin-left: -4px;
+  border-top-color: var(--prp-bg, #fff);
+}
+.prp-opt-btn-hint--bottom::after {
+  bottom: 100%;
+  left: 50%;
+  margin-left: -4px;
+  border-bottom-color: var(--prp-bg, #fff);
+}
+.prp-opt-btn-hint--left::after {
+  left: 100%;
+  top: 50%;
+  margin-top: -4px;
+  border-left-color: var(--prp-bg, #fff);
+}
+.prp-opt-btn-hint--right::after {
+  right: 100%;
+  top: 50%;
+  margin-top: -4px;
+  border-right-color: var(--prp-bg, #fff);
+}
+/*
+ * While Opt hints are on, only lift overflow on header chrome.
+ * Do NOT toggle overflow on .prp-body-panel / .prp-conversation / merge-box —
+ * that reflows the scrollport (scrollbar + contain) and causes layout shake
+ * every Opt press/release. ShortcutHint badges are position:fixed portals.
+ */
+.prp-overlay.prp-opt-hints-on .prp-header,
+.prp-overlay.prp-opt-hints-on .prp-header__row,
+.prp-overlay.prp-opt-hints-on .prp-header__actions,
+.prp-overlay.prp-opt-hints-on .prp-header__actions-inline,
+.prp-overlay.prp-opt-hints-on .prp-header__branch-meta,
+.prp-overlay.prp-opt-hints-on .prp-branch-tag {
+  overflow: visible !important;
+}
+/* Stack strip keeps fixed bar height (opt digit badges are absolute, not in-flow). */
+
+/* In-app confirm (replaces window.confirm) */
+@keyframes prp-confirm-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes prp-confirm-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+/*
+ * Confirm sits on document.body above all product chrome:
+ * overlay 100000 · tip-pop 100010 · palette 100060 · opt-hint 100090
+ * Tokens mirror .prp-overlay so .prp-btn variants paint correctly outside the shell.
+ */
+.prp-confirm-layer {
+  --prp-fg: var(--fgColor-default, #1f2328);
+  --prp-fg-muted: var(--fgColor-muted, #656d76);
+  --prp-bg: var(--bgColor-default, #ffffff);
+  --prp-bg-muted: var(--bgColor-muted, #f6f8fa);
+  --prp-border: var(--borderColor-default, #d0d7de);
+  --prp-border-muted: var(--borderColor-muted, #d8dee4);
+  --prp-accent: var(--fgColor-accent, #0969da);
+  --prp-accent-bg: var(--bgColor-accent-emphasis, #1f6feb);
+  --prp-danger: #cf222e;
+  --prp-ok: #1a7f37;
+  --prp-warn: #9a6700;
+  --prp-shadow: 0 16px 48px rgba(1, 4, 9, 0.28);
+  --prp-radius: 12px;
+  --prp-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  --prp-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+
+  position: fixed;
+  inset: 0;
+  z-index: var(--prp-z-dialog, 100100);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  pointer-events: none;
+  font-family: var(--prp-font);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--prp-fg);
+  /* Must stay transparent: only .prp-confirm-backdrop dims (soft veil).
+     Never use data-color-mode here — GH `[data-color-mode]{background:canvas}`
+     would paint this full-screen layer solid white/black. */
+  background: transparent !important;
+  background-color: transparent !important;
+  color-scheme: light;
+}
+.prp-confirm-layer.prp-theme-dark,
+.prp-confirm-layer[data-prp-color-mode='dark'] {
+  --prp-fg: var(--fgColor-default, #e6edf3);
+  --prp-fg-muted: var(--fgColor-muted, #8b949e);
+  --prp-bg: var(--bgColor-default, #0d1117);
+  --prp-bg-muted: var(--bgColor-muted, #161b22);
+  --prp-border: var(--borderColor-default, #30363d);
+  --prp-border-muted: var(--borderColor-muted, #21262d);
+  --prp-accent: var(--fgColor-accent, #2f81f7);
+  --prp-accent-bg: var(--bgColor-accent-emphasis, #1f6feb);
+  --prp-danger: #f85149;
+  --prp-ok: #3fb950;
+  --prp-warn: #d29922;
+  --prp-shadow: 0 16px 48px rgba(1, 4, 9, 0.65);
+  color-scheme: dark;
+  background: transparent !important;
+  background-color: transparent !important;
+}
+/* Hide floating tips/opt badges under confirm (translucent backdrop would show them) */
+body:has([data-prp-confirm='1']) .prp-opt-btn-hint,
+body:has([data-prp-confirm='1']) .prp-tip-pop {
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+.prp-confirm-layer--enter {
+  animation: prp-confirm-fade-in 160ms ease-out both;
+}
+.prp-confirm-backdrop {
+  position: absolute;
+  inset: 0;
+  /* Soft veil — page/modal remain readable (blur washes light pages to solid) */
+  background: rgba(1, 4, 9, 0.28);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  pointer-events: auto;
+}
+.prp-confirm-layer--enter .prp-confirm-backdrop {
+  animation: prp-confirm-fade-in 180ms ease-out both;
+}
+.prp-confirm-panel {
+  position: relative;
+  z-index: 1;
+  width: min(420px, 94vw);
+  padding: 18px 18px 14px;
+  border-radius: var(--prp-radius, 12px);
+  border: 1px solid var(--prp-border);
+  background: var(--prp-bg);
+  box-shadow: var(--prp-shadow);
+  pointer-events: auto;
+  color: var(--prp-fg);
+}
+.prp-confirm-panel--enter {
+  animation: prp-confirm-panel-in 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .prp-confirm-layer--enter,
+  .prp-confirm-layer--enter .prp-confirm-backdrop,
+  .prp-confirm-panel--enter {
+    animation: none;
+  }
+}
+.prp-confirm-title {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--prp-fg);
+}
+.prp-confirm-msg {
+  margin: 0 0 16px;
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--prp-fg-muted);
+  white-space: pre-wrap;
+}
+.prp-confirm-msg--empty {
+  display: none;
+}
+.prp-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+/* Ensure shared .prp-btn tokens resolve inside body-portaled confirm */
+.prp-confirm-actions .prp-btn {
+  border-color: var(--prp-border);
+  background: var(--prp-bg-muted);
+  color: var(--prp-fg);
+}
+.prp-confirm-actions .prp-btn--primary {
+  background: var(--prp-accent-bg);
+  border-color: var(--prp-accent-bg);
+  color: #fff;
+}
+.prp-confirm-actions .prp-btn--ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--prp-fg-muted);
+}
+.prp-confirm-actions .prp-btn--ghost:hover:not(:disabled) {
+  background: var(--prp-bg-muted);
+  color: var(--prp-fg);
+}
+.prp-confirm-actions .prp-btn--danger {
+  color: #fff;
+  border-color: var(--prp-danger);
+  background: var(--prp-danger);
+}
+.prp-confirm-actions .prp-btn--danger:hover:not(:disabled),
+.prp-confirm-actions .prp-btn--danger:focus-visible:not(:disabled) {
+  color: #fff;
+  border-color: var(--prp-danger);
+  background: color-mix(in srgb, var(--prp-danger) 88%, #000);
+  filter: none;
+}
+.prp-confirm-layer.prp-theme-dark .prp-confirm-actions .prp-btn:hover:not(:disabled),
+.prp-confirm-layer[data-prp-color-mode='dark'] .prp-confirm-actions .prp-btn:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+.prp-confirm-layer.prp-theme-dark .prp-confirm-actions .prp-btn--danger:hover:not(:disabled),
+.prp-confirm-layer[data-prp-color-mode='dark'] .prp-confirm-actions .prp-btn--danger:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+.prp-confirm--danger .prp-confirm-title {
+  color: var(--prp-danger);
+}
+.prp-pp-action-section {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fgColor-muted, #656d76);
+  flex-shrink: 0;
+}
+/* Modal command palette uses shared prp-pp shell; keep above modal chrome */
+.prp-pp-layer--modal {
+  z-index: var(--prp-z-tip, 100020);
+  pointer-events: none;
+}
+.prp-pp-layer--modal .prp-pp-backdrop,
+.prp-pp-layer--modal .prp-pp-panel {
+  pointer-events: auto;
+}
+/*
+ * Modal already has soft .prp-backdrop (α≈0.14). Palette dim must stay light
+ * so stacked layers do not read as a solid black overlay.
+ */
+.prp-pp-layer--modal .prp-pp-backdrop {
+  background: rgba(1, 4, 9, 0.16);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.prp-cmd-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+  pointer-events: none;
+  animation: prp-fade-in 140ms ease-out both;
+}
+
+.prp-cmd-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(1, 4, 9, 0.35);
+  pointer-events: auto;
+  animation: prp-fade-in 160ms ease-out both;
+}
+
+.prp-cmd-panel {
+  position: relative;
+  z-index: 1;
+  width: min(520px, 92%);
+  max-height: min(420px, 70vh);
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  border: 1px solid var(--prp-border);
+  background: var(--prp-bg);
+  box-shadow: var(--prp-shadow);
+  pointer-events: auto;
+  overflow: hidden;
+  animation: prp-float-scale 200ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes prp-float-up {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes prp-float-down {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes prp-float-scale {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .prp-selection-bar--bottom,
+  .prp-pending-bar,
+  .prp-float-layer,
+  .prp-float-backdrop,
+  .prp-float-panel,
+  .prp-cmd-layer,
+  .prp-cmd-backdrop,
+  .prp-cmd-panel {
+    animation: none !important;
+  }
+}
+
+.prp-cmd-input {
+  border: 0;
+  border-bottom: 1px solid var(--prp-border-muted);
+  padding: 14px 16px;
+  font: inherit;
+  font-size: 15px;
+  background: transparent;
+  color: var(--prp-fg);
+  outline: none;
+}
+
+.prp-cmd-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  overflow: auto;
+  flex: 1 1 auto;
+}
+
+.prp-cmd-item {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 72px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  text-align: left;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--prp-fg);
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+}
+
+.prp-cmd-item:hover,
+.prp-cmd-item:focus {
+  background: color-mix(in srgb, var(--prp-accent) 12%, transparent);
+  outline: none;
+}
+
+.prp-cmd-item__section {
+  font-size: 11px;
+  color: var(--prp-fg-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.prp-cmd-item__title {
+  font-weight: 500;
+}
+
+.prp-cmd-item__kbd {
+  font-family: var(--prp-mono);
+  font-size: 11px;
+  color: var(--prp-fg-muted);
+  border: 1px solid var(--prp-border-muted);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+.prp-cmd-empty {
+  padding: 16px;
+  text-align: center;
+}
+
+.prp-cmd-foot {
+  padding: 8px 12px;
+  border-top: 1px solid var(--prp-border-muted);
+  font-size: 11px;
+}
+

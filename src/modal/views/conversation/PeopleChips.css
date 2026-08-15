@@ -1,0 +1,119 @@
+/**
+ * Residual CSS (cannot fully express via Tailwind utilities).
+ * Colocated next to owning domain; imported from styles/index.css.
+ * Migrated from styles/parts/14-people-chips-meta-aside.css
+ */
+
+/* People chips / meta aside */
+.prp-people-list {
+  gap: 2px;
+}
+
+.prp-people-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  min-width: 0;
+  min-height: 22px;
+}
+
+.prp-people-chip__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prp-people-chip__name a,
+.prp-people-chip__name .prp-user-link {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.prp-people-chip__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.prp-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--prp-accent) 18%, var(--prp-bg-muted));
+  color: var(--prp-accent);
+  font-size: 11px;
+  font-weight: 700;
+  flex: 0 0 auto;
+  overflow: hidden;
+  vertical-align: middle;
+}
+
+.prp-avatar--sm {
+  width: 22px;
+  height: 22px;
+  font-size: 9px;
+}
+
+/* Aside people list stays compact — review comments keep the sizes above */
+.prp-people-chip .prp-avatar,
+.prp-people-chip .prp-avatar--sm {
+  width: 16px;
+  height: 16px;
+  font-size: 8px;
+}
+
+.prp-avatar--img {
+  padding: 0;
+  background: var(--prp-bg-muted);
+  border: 1px solid var(--prp-border-muted);
+  color: transparent;
+}
+
+.prp-avatar--img img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  border-radius: inherit;
+}
+
+.prp-branch-pill--block {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--prp-bg-muted);
+  border: 1px solid var(--prp-border-muted);
+}
+
+.prp-label-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.prp-review-states {
+  margin: -6px 0 10px;
+  padding: 0 2px;
+  font-size: 12px;
+}
+
+.prp-composer--review {
+  /* No top splitter — Card already frames the composer */
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+

@@ -1,0 +1,282 @@
+/**
+ * Residual CSS (cannot fully express via Tailwind utilities).
+ * Colocated next to owning domain; imported from styles/index.css.
+ * Migrated from styles/parts/22-grouped-review-comment-navigator.css
+ */
+
+/* Grouped review-comment navigator */
+/* Legacy alias — prefer .prp-step-nav */
+.prp-btn-group {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--prp-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--prp-bg);
+  flex-shrink: 0;
+}
+.prp-btn-group__meta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-size: 12px;
+  border-left: 1px solid var(--prp-border);
+  border-right: 1px solid var(--prp-border);
+  background: var(--prp-bg-muted);
+}
+.prp-btn-group__btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  width: 28px;
+  min-width: 28px;
+  padding: 0;
+  cursor: pointer;
+}
+.prp-btn-group__btn + .prp-btn-group__btn {
+  border-left: 1px solid var(--prp-border);
+}
+.prp-btn-group__btn:hover,
+.prp-btn-group__btn:focus-visible {
+  background: var(--prp-bg-muted);
+}
+
+/* Shared step navigator: count | prev | next (thread + finder)
+ * Count is content-sized (variable width); ↑ / ↓ share equal fixed cells. */
+.prp-step-nav {
+  --prp-step-nav-btn: var(--prp-diff-ctrl-h, 28px);
+  display: inline-grid;
+  grid-template-columns: max-content var(--prp-step-nav-btn) var(--prp-step-nav-btn);
+  align-items: stretch;
+  border: 1px solid var(--prp-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--prp-bg);
+  flex: 0 0 auto;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  height: var(--prp-diff-ctrl-h, 28px);
+  min-height: var(--prp-diff-ctrl-h, 28px);
+  width: max-content;
+  min-width: 0;
+  gap: 0;
+  padding: 0;
+  margin: 0;
+}
+.prp-step-nav__btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  border: 0;
+  border-left: 1px solid var(--prp-border);
+  background: transparent;
+  color: var(--prp-fg);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  /* Equal fixed ↑ / ↓ — no pad/margin */
+  width: var(--prp-step-nav-btn);
+  min-width: var(--prp-step-nav-btn);
+  max-width: var(--prp-step-nav-btn);
+  height: 100%;
+  padding: 0;
+  box-sizing: border-box;
+  cursor: pointer;
+}
+.prp-step-nav__btn + .prp-step-nav__btn {
+  margin: 0;
+  padding: 0;
+}
+.prp-step-nav__btn:hover:not(:disabled),
+.prp-step-nav__btn:focus-visible:not(:disabled) {
+  background: var(--prp-bg-muted);
+  outline: none;
+}
+.prp-step-nav__btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.prp-step-nav__meta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* Variable width for n/m (e.g. 3/3 vs 128/1300) */
+  width: auto;
+  min-width: var(--prp-step-nav-btn);
+  max-width: none;
+  height: 100%;
+  margin: 0;
+  /* Tight horizontal inset only — not a fixed column width */
+  padding: 0 6px;
+  border: 0;
+  background: transparent;
+  color: var(--prp-fg-muted);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  white-space: nowrap;
+  user-select: none;
+  box-sizing: border-box;
+}
+.prp-step-nav--busy .prp-step-nav__meta {
+  color: var(--prp-fg-muted);
+  font-weight: 600;
+}
+
+.prp-diff-toolbar__commit-btn:disabled,
+.prp-commit-filter__trigger:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.prp-diff-toolbar__chevron {
+  opacity: 0.6;
+  flex-shrink: 0;
+}
+
+.prp-diff-toolbar__pending {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  /* Sits after thread-tools; alone still pins right via its own margin-left */
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.prp-diff-toolbar__pending-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  background: rgba(255, 255, 255, 0.22);
+  color: inherit;
+}
+
+/* GitHub-style Finish your review popover (portaled into .prp-overlay or body).
+   Must stack above #prp-page-embed (z-index 100000) when body-portaled —
+   same band as ConfirmDialog (100100). */
+.prp-finish-review-layer {
+  --prp-fg: var(--fgColor-default, #1f2328);
+  --prp-fg-muted: var(--fgColor-muted, #656d76);
+  --prp-bg: var(--bgColor-default, #ffffff);
+  --prp-bg-muted: var(--bgColor-muted, #f6f8fa);
+  --prp-border: var(--borderColor-default, #d0d7de);
+  --prp-accent: var(--fgColor-accent, #0969da);
+  --prp-ok: #1a7f37;
+  --prp-warn: #9a6700;
+  --prp-danger: #cf222e;
+  --prp-radius: 12px;
+  --prp-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  position: fixed;
+  inset: 0;
+  z-index: var(--prp-z-dialog, 100100);
+  pointer-events: none;
+  font-family: var(--prp-font);
+  color: var(--prp-fg);
+}
+.prp-finish-review-layer.prp-theme-dark,
+.prp-finish-review-layer[data-prp-color-mode='dark'] {
+  --prp-fg: var(--fgColor-default, #e6edf3);
+  --prp-fg-muted: var(--fgColor-muted, #8b949e);
+  --prp-bg: var(--bgColor-default, #0d1117);
+  --prp-bg-muted: var(--bgColor-muted, #161b22);
+  --prp-border: var(--borderColor-default, #30363d);
+  --prp-accent: var(--fgColor-accent, #2f81f7);
+  --prp-ok: #3fb950;
+  --prp-warn: #d29922;
+  --prp-danger: #f85149;
+}
+.prp-finish-review {
+  position: fixed;
+  z-index: 1;
+  pointer-events: auto;
+  /* 1.5× prior 360px popover */
+  width: min(540px, calc(100vw - 24px));
+  max-height: min(520px, calc(100vh - 24px));
+  overflow: auto;
+  padding: 14px 16px 12px;
+  border: 1px solid var(--prp-border);
+  border-radius: var(--prp-radius);
+  background: var(--prp-bg);
+  box-shadow: 0 16px 48px rgba(1, 4, 9, 0.28);
+  color: var(--prp-fg);
+  box-sizing: border-box;
+  animation: prp-finish-review-in 160ms ease-out both;
+}
+@keyframes prp-finish-review-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.prp-finish-review__head {
+  margin: 0 0 12px;
+}
+.prp-finish-review__title {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.prp-finish-review__sub {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--prp-fg-muted);
+}
+/* Shared MarkdownComposer (Write / Preview) inside the popover */
+.prp-finish-review__composer {
+  margin: 0 0 12px;
+  min-width: 0;
+}
+.prp-finish-review__composer .prp-mdc {
+  width: 100%;
+}
+.prp-finish-review__composer .prp-mdc__ta {
+  min-height: 96px;
+}
+.prp-finish-review__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.prp-finish-review__actions-start {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.prp-finish-review__actions-end {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+/* Suppress background Opt / tip chrome while Finish review is open.
+   Modal CTA ShortcutHints use --finish and must stay visible on Opt-hold. */
+body:has([data-prp-finish-review='1']) .prp-opt-btn-hint:not(.prp-opt-btn-hint--finish),
+body:has([data-prp-finish-review='1']) .prp-tip-pop:not(.prp-tip-pop--finish) {
+  display: none !important;
+}

@@ -1,0 +1,99 @@
+/**
+ * Residual CSS (cannot fully express via Tailwind utilities).
+ * Colocated next to owning domain; imported from styles/index.css.
+ * Migrated from styles/parts/17-polished-inline-review-threads-on-diff.css
+ */
+
+/* Polished inline review threads on diff
+ * Padding tokens (collapsed === expanded chrome):
+ *   outer shell  6px 10px 8px
+ *   filebar      4px 10px
+ *   body/preview 8px 12px 10px  (see LineCommentAffordance + ConversationThread)
+ */
+.prp-inline-thread {
+  width: 100%;
+  max-width: min(720px, 100%);
+  min-width: 0;
+  padding: 6px 10px 8px;
+  box-sizing: border-box;
+  font-family: var(--prp-font);
+  font-size: 14px;
+  line-height: 1.5;
+  /* Never paint outside the Diff row / split pane */
+  overflow: hidden;
+}
+/* Collapsed keeps the same outer padding as open (no tighter bottom). */
+.prp-inline-thread--collapsed {
+  padding: 6px 10px 8px;
+}
+
+.prp-inline-thread__card {
+  border: 1px solid var(--prp-border);
+  border-radius: 10px;
+  background: var(--prp-bg);
+  box-shadow: 0 2px 8px rgba(1, 4, 9, 0.06);
+  /* Always clip children to the rounded rect — body/filebar must not sit on the border */
+  overflow: hidden;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  isolation: isolate;
+}
+
+.prp-inline-thread__filebar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--prp-bg-muted);
+  border-bottom: 1px solid var(--prp-border-muted);
+  font-size: 11px;
+  min-height: 22px;
+  line-height: 1.2;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+  /* Match card top radius so meta ("RIGHT") stays inside the curve */
+  border-radius: 10px 10px 0 0;
+}
+
+/* Lazy by-ids comments in flight (expand shell / resolved) */
+.prp-inline-thread__loading {
+  display: inline-flex;
+  align-items: center;
+  color: var(--prp-fg-muted);
+  flex-shrink: 0;
+}
+.prp-inline-thread__loading-icon {
+  animation: prp-inline-thread-spin 0.7s linear infinite;
+}
+@keyframes prp-inline-thread-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.prp-inline-thread[data-comments-loading='1'] .prp-inline-thread__filebar {
+  /* subtle cue while bodies hydrate — order stays stable */
+  opacity: 0.95;
+}
+/* Shared compact path header (Diff + Conversation) — same padding as base filebar */
+.prp-inline-thread__filebar.prp-review-thread__file-header {
+  margin: 0;
+  padding: 4px 10px;
+  min-height: 22px;
+}
+
+.prp-inline-thread__loc {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--prp-fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+

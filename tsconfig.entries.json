@@ -1,0 +1,46 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "lib": [
+      "ES2020",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noImplicitAny": true,
+    "useUnknownInCatchVariables": false,
+    "strictNullChecks": false,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "types": [
+      "chrome"
+    ],
+    "moduleDetection": "legacy"
+  },
+  "include": [
+    "src/extension-globals.d.ts",
+    "src/entries-shim.d.ts",
+    "src/tree.ts",
+    "src/dom.ts",
+    "src/content.ts",
+    "src/content-bootstrap.ts",
+    "src/content-bridge/bridge-api.ts",
+    "src/content-bridge/**/*.ts",
+    "src/sw-messages.ts",
+    "src/content-scripts-list.ts",
+    "src/onboarding.ts",
+    "src/onboarding-core.ts",
+    "src/onboarding-diff-demo.ts",
+    "src/onboarding-hotkeys.ts",
+    "src/onboarding-ui.ts",
+    "src/popup.ts",
+    "src/storage.ts",
+    "src/github-endpoints.ts",
+    "src/pr-list-focus.ts",
+    "src/pulls-palette.ts"
+  ]
+}

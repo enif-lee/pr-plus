@@ -1,0 +1,334 @@
+/**
+ * Conversation shell: main | splitter | aside, scroll-float hosts.
+ */
+
+.prp-conversation__main {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  /* Single virtual scroller owns the entire left panel — flush to splitter */
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+
+/* Timeline category tips (filter chips) — virtual row between merge & feed */
+.prp-timeline-tips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 6px 4px 10px;
+  border-bottom: 1px solid var(--prp-border, rgba(31, 35, 40, 0.12));
+  background: transparent;
+  z-index: 1;
+}
+.prp-timeline-tips__chip {
+  appearance: none;
+  margin: 0;
+  border: 1px solid var(--prp-border, #d0d7de);
+  background: var(--prp-bg, #fff);
+  color: var(--prp-fg-muted, #656d76);
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.5;
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease,
+    color 0.12s ease;
+}
+.prp-timeline-tips__chip:hover {
+  border-color: var(--prp-accent, #0969da);
+  color: var(--prp-fg, #1f2328);
+}
+.prp-timeline-tips__chip.is-selected {
+  background: color-mix(in srgb, var(--prp-accent, #0969da) 12%, transparent);
+  border-color: var(--prp-accent, #0969da);
+  color: var(--prp-accent, #0969da);
+}
+.prp-timeline-tips__chip:focus-visible {
+  outline: 2px solid var(--prp-accent, #0969da);
+  outline-offset: 1px;
+}
+
+/*
+ * Floating (overlay) scrollbars — native bar is fully hidden so Chrome cannot
+ * reserve a classic gutter; a custom thumb paints over content instead.
+ */
+.prp-scroll-float-host {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+
+/*
+ * Soft edge fade: content dissolves into the shell background over
+ * --prp-edge-fade-size instead of hard-stopping at a padding box.
+ * Pair with vertical padding on the scroller so resting content sits clear.
+ */
+.prp-scroll-float-host.prp-edge-fade::before,
+.prp-scroll-float-host.prp-edge-fade::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: var(--prp-edge-fade-size, 18px);
+  z-index: var(--prp-z-edge-fade, 12);
+  pointer-events: none;
+}
+
+.prp-scroll-float-host.prp-edge-fade::before {
+  top: 0;
+  background: linear-gradient(
+    to bottom,
+    var(--prp-bg) 0%,
+    color-mix(in srgb, var(--prp-bg) 88%, transparent) 28%,
+    color-mix(in srgb, var(--prp-bg) 45%, transparent) 62%,
+    transparent 100%
+  );
+}
+
+.prp-scroll-float-host.prp-edge-fade::after {
+  bottom: 0;
+  background: linear-gradient(
+    to top,
+    var(--prp-bg) 0%,
+    color-mix(in srgb, var(--prp-bg) 88%, transparent) 28%,
+    color-mix(in srgb, var(--prp-bg) 45%, transparent) 62%,
+    transparent 100%
+  );
+}
+
+.prp-scroll-float {
+  /* Kill native scrollbar width in every engine */
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* legacy Edge */
+  scrollbar-gutter: unset;
+}
+
+.prp-scroll-float::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+  display: none !important;
+  background: transparent;
+}
+
+
+/* Full left-panel virtual list (description + composer/merge + timeline) */
+.prp-conversation-virtual-host {
+  /* sizing comes from .prp-scroll-float-host */
+}
+
+.prp-conversation-virtual {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+  /*
+   * Vertical inset scrolls under edge-fade overlays.
+   * Horizontal inset keeps keyboard/search focus rings (outline-offset)
+   * from being clipped by overflow-x: hidden.
+   */
+  padding: 16px 10px;
+  box-sizing: border-box;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: block;
+  min-height: 0;
+  min-width: 0;
+}
+
+.prp-conversation-virtual__spacer {
+  width: 100%;
+  position: relative;
+}
+
+/*
+ * Continuous conversation timeline rail (first feed item → last).
+ * Ends clipped to item centers. Drawn under feed content so comments/threads
+ * stack on top of the line (포개짐) rather than sitting in a side gutter.
+ * X aligns with .prp-timeline-event__rail center (28px / 2).
+ */
+.prp-conversation-timeline-rail {
+  --prp-tl-rail: 28px;
+  --prp-tl-line: 2px;
+  position: absolute;
+  left: calc(var(--prp-tl-rail) / 2);
+  width: var(--prp-tl-line);
+  transform: translateX(-50%);
+  background: var(--prp-border-muted);
+  border-radius: 1px;
+  z-index: var(--prp-z-base, 0);
+  pointer-events: none;
+}
+
+.prp-conversation-virtual--timeline-rail {
+  --prp-tl-rail: 28px;
+}
+
+.prp-conversation-virtual__window {
+  display: flex;
+  flex-direction: column;
+  /* No flex gap — spacing is padding on each row so ResizeObserver includes it */
+  gap: 0;
+  width: 100%;
+  box-sizing: border-box;
+  padding-bottom: 2px;
+  /* Stack above spacer rail; opaque children cover the line */
+  isolation: isolate;
+}
+
+.prp-conversation-virtual__row {
+  flex: 0 0 auto;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  /* Matches former column gap; counted in measured row height */
+  padding-bottom: var(--prp-gap-stack);
+  position: relative;
+  z-index: var(--prp-z-content, 1);
+}
+
+/*
+ * Open popovers inside a virtual row (merge method menu, etc.) must stack
+ * above later siblings — timeline events paint after merge and otherwise
+ * cover the dropdown mid-scroll.
+ */
+.prp-conversation-virtual__row:has(.prp-merge-method--menu-open),
+.prp-conversation-virtual__row:has([data-menu-open='1']) {
+  z-index: var(--prp-z-raised-row, 40);
+  /* Let absolute menus extend past the row box without clipping */
+  overflow: visible;
+}
+
+/*
+ * Comments / threads / cards sit ON TOP of the vertical rail (overlap).
+ * Full width + opaque background so the line is covered under the card.
+ * System event rows stay transparent so the rail continues through them.
+ */
+.prp-conversation-virtual__row > .prp-card,
+.prp-conversation-virtual__row > .prp-timeline-gap,
+.prp-conversation-virtual__row > .prp-merge-box,
+.prp-conversation-virtual__row > .prp-merge-box-focus-host,
+.prp-conversation-virtual__row > .prp-pagination,
+.prp-conversation-virtual__row > .prp-conversation-empty,
+.prp-conversation-virtual__row > .prp-conversation-inline-thread {
+  width: 100%;
+  position: relative;
+  z-index: var(--prp-z-content-raised, 2);
+  background: var(--prp-bg);
+  box-sizing: border-box;
+}
+
+/* Focus host wraps merge box — keep opaque + raised when menu open */
+.prp-conversation-virtual__row > .prp-merge-box-focus-host:has(.prp-merge-method--menu-open) {
+  z-index: var(--prp-z-raised-row, 40);
+  overflow: visible;
+}
+.prp-conversation-virtual__row > .prp-merge-box-focus-host > .prp-merge-box {
+  background: var(--prp-bg);
+}
+
+/* Review thread shell may not inherit .prp-card bg — force opaque cover.
+ * Radius matches .prp-card (10px) so kb-focus ring aligns with the painted box. */
+.prp-conversation-virtual__row > .prp-conversation-inline-thread,
+.prp-conversation-virtual__row > .prp-card--timeline-review-thread {
+  background: var(--prp-bg);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+/* System events: transparent so rail shows; avatar ring masks the line */
+.prp-conversation-virtual__row > .prp-timeline-event {
+  width: 100%;
+  position: relative;
+  z-index: var(--prp-z-content-raised, 2);
+  background: transparent;
+}
+
+/* Description is a virtual row — full body height (no separate inner scroll) */
+.prp-conversation-virtual .prp-card--desc .prp-card__body {
+  max-height: none;
+  overflow: visible;
+}
+
+
+/* Vertical splitter between main and aside (hosts collapse control) */
+.prp-conversation__splitter {
+  position: relative;
+  z-index: var(--prp-z-splitter, 12); /* above edge-fade / scroll content */
+  align-self: stretch;
+  min-width: 0;
+  width: 100%;
+  background: transparent;
+  overflow: visible;
+}
+
+/* 1px hairline centered in the 28px track */
+.prp-conversation__splitter::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: var(--prp-border-muted);
+  pointer-events: none;
+}
+
+
+/* Host wraps aside so floating thumb can overlay flush on the panel edge */
+.prp-conversation__aside-host {
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  /* No host padding — float bar sits on the right edge; content pads inside scroller */
+  padding: 0;
+  box-sizing: border-box;
+}
+
+.prp-conversation__aside {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  width: 100%;
+  flex: 1 1 auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* Vertical inset under edge-fade + right inset for meta content */
+  padding: 16px 18px 16px 0;
+  box-sizing: border-box;
+}
+
+.prp-conversation__aside-host.prp-conversation__aside-host--collapsed {
+  padding: 0;
+  /* Cap rail to the grid track so overflow:visible tips do not inflate measured width */
+  max-width: var(--prp-aside-w, 80px);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.prp-conversation__aside-host--collapsed .prp-conversation__aside {
+  /* compact rail padding lives on the scroller itself */
+  padding: 12px 4px 8px;
+}

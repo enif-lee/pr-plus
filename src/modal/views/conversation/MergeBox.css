@@ -1,0 +1,210 @@
+/**
+ * Residual MergeBox styles — ONLY what Tailwind cannot reasonably express:
+ * color-mix tone surfaces, CSS-var-driven split CTA, method menu chrome.
+ * Layout / spacing / typography live as utilities on MergeBox.tsx.
+ */
+
+/* ── Tone surfaces (color-mix + design tokens) ── */
+.prp-merge-box {
+  border: 1px solid color-mix(in srgb, var(--prp-ok) 28%, var(--prp-border));
+  background: color-mix(in srgb, var(--prp-ok) 8%, var(--prp-bg));
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--prp-ok) 12%, transparent);
+}
+.prp-merge-box--ok {
+  border-color: color-mix(in srgb, var(--prp-ok) 32%, var(--prp-border));
+}
+.prp-merge-box--warn {
+  background: color-mix(in srgb, var(--prp-warn) 10%, var(--prp-bg));
+  border-color: color-mix(in srgb, var(--prp-warn) 35%, var(--prp-border));
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--prp-warn) 12%, transparent);
+}
+.prp-merge-box--danger {
+  background: color-mix(in srgb, var(--prp-danger) 8%, var(--prp-bg));
+  border-color: color-mix(in srgb, var(--prp-danger) 32%, var(--prp-border));
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--prp-danger) 10%, transparent);
+}
+.prp-merge-box--muted {
+  background: var(--prp-bg-muted);
+  border-color: var(--prp-border);
+  box-shadow: none;
+}
+/* Merged — GitHub purple surface */
+.prp-merge-box--merged {
+  background: color-mix(in srgb, var(--prp-merged, #8250df) 10%, var(--prp-bg));
+  border-color: color-mix(in srgb, var(--prp-merged, #8250df) 38%, var(--prp-border));
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--prp-merged, #8250df) 14%, transparent);
+}
+/* Closed (not merged) — danger/red surface */
+.prp-merge-box--closed {
+  background: color-mix(in srgb, var(--prp-danger) 8%, var(--prp-bg));
+  border-color: color-mix(in srgb, var(--prp-danger) 32%, var(--prp-border));
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--prp-danger) 10%, transparent);
+}
+
+/* Status icon chip tones */
+.prp-merge-box__icon {
+  background: color-mix(in srgb, var(--prp-ok) 18%, var(--prp-bg));
+  color: var(--prp-ok);
+}
+.prp-merge-box__icon--warn,
+.prp-merge-box__icon--draft {
+  background: color-mix(in srgb, var(--prp-warn) 18%, var(--prp-bg));
+  color: var(--prp-warn);
+}
+.prp-merge-box__icon--danger,
+.prp-merge-box__icon--closed {
+  background: color-mix(in srgb, var(--prp-danger) 16%, var(--prp-bg));
+  color: var(--prp-danger);
+}
+.prp-merge-box__icon--merged {
+  background: color-mix(in srgb, var(--prp-merged, #8250df) 18%, var(--prp-bg));
+  color: var(--prp-merged, #8250df);
+}
+.prp-merge-box__icon--muted {
+  background: var(--prp-bg-muted);
+  color: var(--prp-fg-muted);
+}
+
+/* Headline inherits tone for terminal states */
+.prp-merge-box__headline {
+  color: var(--prp-fg);
+}
+.prp-merge-box--merged .prp-merge-box__headline {
+  color: var(--prp-merged, #8250df);
+}
+.prp-merge-box--closed .prp-merge-box__headline,
+.prp-merge-box--danger .prp-merge-box__headline {
+  color: var(--prp-danger);
+}
+
+.prp-merge-box__conflict-file {
+  font-family: var(--prp-mono);
+  color: var(--prp-fg);
+}
+.prp-merge-box__conflict-file .prp-octicon {
+  color: var(--prp-fg-muted);
+}
+
+/* ── Split merge CTA (tracks --prp-merge-cta; not pure TW) ── */
+.prp-merge-method {
+  --prp-merge-cta: var(--prp-ok);
+  position: relative;
+}
+.prp-merge-method--warn {
+  --prp-merge-cta: var(--prp-warn);
+}
+.prp-merge-method--danger {
+  --prp-merge-cta: var(--prp-danger);
+}
+.prp-merge-method--default {
+  --prp-merge-cta: var(--prp-fg-muted);
+}
+.prp-merge-method__split {
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--prp-merge-cta) 25%, transparent);
+  border: 1px solid color-mix(in srgb, var(--prp-merge-cta) 70%, #000);
+  background: var(--prp-merge-cta);
+}
+.prp-merge-method__primary.prp-btn,
+.prp-merge-box .prp-merge-method__primary {
+  border-top-right-radius: 0 !important;
+  border-bottom-right-radius: 0 !important;
+  border: 0 !important;
+  border-right: 1px solid color-mix(in srgb, #fff 22%, var(--prp-merge-cta)) !important;
+  background: var(--prp-merge-cta) !important;
+  color: #fff !important;
+  box-shadow: none;
+}
+.prp-merge-method__primary.prp-btn:hover:not(:disabled),
+.prp-merge-box .prp-merge-method__primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--prp-merge-cta) 88%, #000) !important;
+  color: #fff !important;
+  filter: none;
+}
+.prp-merge-method__primary.prp-btn:disabled,
+.prp-merge-box .prp-merge-method__primary:disabled {
+  opacity: 0.72;
+  cursor: not-allowed;
+  filter: grayscale(0.15);
+}
+.prp-merge-method--force .prp-merge-method__primary {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #fff 35%, transparent);
+}
+.prp-merge-method__caret {
+  appearance: none;
+  border: 0;
+  background: var(--prp-merge-cta);
+  color: #fff;
+  cursor: pointer;
+}
+.prp-merge-method__caret:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--prp-merge-cta) 88%, #000);
+  color: #fff;
+  filter: none;
+}
+.prp-merge-method__caret:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+/*
+ * Open menu must paint above later virtual-list rows (timeline events).
+ * Raise the merge-method host + its virtual row (see ConversationShell.css).
+ */
+.prp-merge-method--menu-open {
+  position: relative;
+  z-index: var(--prp-z-dropdown, 50);
+}
+.prp-merge-method__menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: var(--prp-z-dropdown, 50);
+  min-width: min(360px, 92vw);
+  border: 1px solid var(--prp-border);
+  background: var(--prp-bg);
+  box-shadow: 0 12px 32px rgba(1, 4, 9, 0.16);
+}
+.prp-merge-method__item {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+.prp-merge-method__item:hover {
+  background: var(--prp-bg-muted);
+}
+/* GitHub-style selected method: accent outline + check */
+.prp-merge-method__item--active {
+  background: color-mix(in srgb, var(--prp-accent, #0969da) 6%, var(--prp-bg));
+  border-color: var(--prp-accent, #0969da);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--prp-accent, #0969da) 35%, transparent);
+}
+.prp-merge-method__item-check {
+  color: var(--prp-accent, #0969da);
+}
+.prp-merge-method__item--active .prp-merge-method__item-label {
+  color: var(--prp-fg);
+}
+
+/* Admin bypass opt-in (GitHub: Merge without waiting for requirements…) */
+.prp-merge-bypass {
+  user-select: none;
+}
+.prp-merge-bypass__input {
+  cursor: pointer;
+}
+.prp-merge-bypass__label {
+  cursor: pointer;
+}
+
+/* ⌥J/K focus ring host around merge box — ring paint is DiffSearchMarks .prp-card--kb-focus */
+.prp-merge-box-focus-host {
+  border-radius: 12px;
+  min-width: 0;
+}
+/* Suppress legacy outer-outline so only the shared inset ring paints */
+.prp-merge-box-focus-host--focused:not(.prp-card--kb-focus) {
+  outline: 2px solid var(--prp-accent, #0969da);
+  outline-offset: -2px;
+}

@@ -1,21 +1,69 @@
 <!DOCTYPE html>
-<html lang="ko">
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <title>pr+</title>
   <style>
     * { box-sizing: border-box; }
+    /* Hard cap: Chrome grows the popup to the widest unwrapped content. */
+    html {
+      width: 380px;
+      max-width: 380px;
+      overflow-x: hidden;
+    }
     body {
       margin: 0;
-      width: 280px;
+      width: 380px;
+      max-width: 380px;
       padding: 12px;
+      overflow-x: hidden;
       font: 13px/1.4 -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
       color: #1f2328;
     }
     h1 {
+      margin: 0 0 10px;
+      font-size: 14px;
+      font-weight: 650;
+    }
+    /* Top-level config sections */
+    .config {
+      margin: 0 0 12px;
+      padding: 10px;
+      border: 1px solid #d0d7de;
+      border-radius: 10px;
+      background: #fff;
+    }
+    .config:last-of-type {
+      margin-bottom: 0;
+    }
+    .config__title {
       margin: 0 0 8px;
-      font-size: 13px;
+      font-size: 12px;
+      font-weight: 650;
+      color: #1f2328;
+      letter-spacing: 0.01em;
+    }
+    .config__title-num {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 18px;
+      height: 18px;
+      margin-right: 6px;
+      border-radius: 999px;
+      background: #eef2f6;
+      color: #656d76;
+      font-size: 10px;
+      font-weight: 700;
+      vertical-align: middle;
+    }
+    h3 {
+      margin: 10px 0 6px;
+      font-size: 11px;
       font-weight: 600;
+      color: #656d76;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
     }
     label {
       display: block;
@@ -23,8 +71,11 @@
       font-size: 12px;
       color: #656d76;
     }
-    input {
+    input[type="password"],
+    input[type="text"] {
       width: 100%;
+      max-width: 100%;
+      min-width: 0;
       padding: 6px 8px;
       border: 1px solid #d0d7de;
       border-radius: 6px;
@@ -78,22 +129,561 @@
     }
     a { color: #0969da; text-decoration: none; }
     a:hover { text-decoration: underline; }
+    /* Collapsible blocks (permissions, GE form) */
+    details.fold {
+      margin-top: 10px;
+      border: 1px solid #d8dee4;
+      border-radius: 8px;
+      background: #f6f8fa;
+      overflow: hidden;
+    }
+    details.fold > summary {
+      list-style: none;
+      cursor: pointer;
+      user-select: none;
+      padding: 8px 10px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #1f2328;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    details.fold > summary::-webkit-details-marker {
+      display: none;
+    }
+    details.fold > summary::before {
+      content: '';
+      width: 0;
+      height: 0;
+      border-left: 5px solid #656d76;
+      border-top: 4px solid transparent;
+      border-bottom: 4px solid transparent;
+      transition: transform 80ms ease;
+      flex-shrink: 0;
+    }
+    details.fold[open] > summary::before {
+      transform: rotate(90deg);
+    }
+    details.fold > summary:hover {
+      background: #eef1f4;
+    }
+    .fold__body {
+      padding: 0 10px 10px;
+      border-top: 1px solid #d8dee4;
+      background: #fff;
+    }
+    .fold__body > :first-child {
+      margin-top: 8px;
+    }
+    .pref {
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+      margin: 0 0 8px;
+      padding: 8px;
+      border: 1px solid #d0d7de;
+      border-radius: 8px;
+      background: #f6f8fa;
+      cursor: pointer;
+    }
+    .pref:last-child {
+      margin-bottom: 0;
+    }
+    .pref:hover { border-color: #0969da66; }
+    .pref input {
+      margin: 2px 0 0;
+      flex-shrink: 0;
+    }
+    .pref__body {
+      min-width: 0;
+      flex: 1;
+    }
+    .pref__title {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: #1f2328;
+      margin-bottom: 2px;
+    }
+    .pref__desc {
+      display: block;
+      font-size: 11px;
+      color: #656d76;
+      line-height: 1.35;
+    }
+    .pref--action {
+      cursor: default;
+      flex-direction: column;
+    }
+    .pref--action:hover {
+      border-color: #d0d7de;
+    }
+    .pref--action button {
+      margin: 0;
+    }
+    .rl-bars {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 8px;
+    }
+    .rl-row {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .rl-row__head {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 8px;
+      font-size: 11px;
+      color: #656d76;
+    }
+    .rl-row__name {
+      font-weight: 650;
+      color: #1f2328;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      font-size: 10px;
+    }
+    .rl-row__meta {
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+      font-size: 10px;
+    }
+    .rl-bar {
+      height: 8px;
+      border-radius: 999px;
+      background: #eaeef2;
+      overflow: hidden;
+      border: 1px solid #d0d7de;
+    }
+    .rl-bar__fill {
+      height: 100%;
+      border-radius: 999px;
+      background: #1a7f37;
+      transition: width 0.2s ease;
+    }
+    .rl-bar__fill.is-warn { background: #9a6700; }
+    .rl-bar__fill.is-crit { background: #cf222e; }
+    .rl-status {
+      margin: 6px 0 0;
+      font-size: 11px;
+      color: #656d76;
+    }
+    .rl-status.is-off { color: #cf222e; font-weight: 600; }
+    .perm-list {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      border: 1px solid #d0d7de;
+      border-radius: 8px;
+      overflow: hidden;
+      background: #fff;
+    }
+    .perm-list li {
+      display: grid;
+      grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.2fr);
+      gap: 6px 8px;
+      padding: 8px 10px;
+      border-top: 1px solid #d8dee4;
+      font-size: 11px;
+      line-height: 1.4;
+      min-width: 0;
+      max-width: 100%;
+    }
+    .perm-list li:first-child {
+      border-top: 0;
+    }
+    .perm-list code,
+    .perm-list .perm-key {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 10.5px;
+      font-weight: 600;
+      color: #1f2328;
+      word-break: break-all;
+      overflow-wrap: anywhere;
+      min-width: 0;
+    }
+    .perm-list .perm-why {
+      color: #656d76;
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+    .perm-note {
+      margin: 8px 0 0;
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid #d0d7de;
+      background: #f6f8fa;
+      font-size: 11px;
+      color: #656d76;
+      line-height: 1.4;
+    }
+    .perm-note strong {
+      color: #1f2328;
+      font-weight: 600;
+    }
+    .perm-note ul {
+      margin: 6px 0 0;
+      padding-left: 1.15em;
+    }
+    .perm-note li {
+      margin: 2px 0;
+    }
+    .host-list {
+      list-style: none;
+      margin: 0 0 8px;
+      padding: 0;
+    }
+    .host-list:empty {
+      display: none;
+    }
+    .host-list li {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px;
+      margin: 0 0 4px;
+      border: 1px solid #d0d7de;
+      border-radius: 6px;
+      background: #f6f8fa;
+      font-size: 12px;
+    }
+    .host-list .host-name {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-weight: 600;
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .host-list .host-mask {
+      color: #656d76;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+    }
+    .host-list button {
+      flex-shrink: 0;
+      padding: 2px 8px;
+      font-size: 11px;
+    }
   </style>
 </head>
 <body>
-  <h1>pr+</h1>
-  <label for="token">API token (private repo)</label>
-  <input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="ghp_… / github_pat_…" />
-  <p id="token-saved" class="saved" hidden>Saved: <code id="token-mask"></code></p>
-  <div class="row">
-    <button id="save" class="primary" type="button">Save</button>
-    <button id="clear" type="button">Clear</button>
-    <span id="status"></span>
-  </div>
-  <p class="hint">
-    <a href="https://github.com/settings/tokens" target="_blank" rel="noreferrer">Create token</a>
-    · repo / PR read · stored only in this extension’s local storage (not synced)
-  </p>
+  <h1 data-i18n="popup_title">pr+</h1>
+
+  <!-- 1. Default PAT -->
+  <section class="config" aria-labelledby="cfg-default-pat">
+    <h2 class="config__title" id="cfg-default-pat">
+      <span class="config__title-num" aria-hidden="true">1</span><span data-i18n="popup_section_default_pat">Default PAT</span>
+    </h2>
+    <label for="token" data-i18n="popup_label_github_pat">github.com PAT (public cloud)</label>
+    <input id="token" type="password" autocomplete="off" spellcheck="false" data-i18n-placeholder="popup_placeholder_token" placeholder="ghp_… / github_pat_…" />
+    <p id="token-saved" class="saved" hidden><span data-i18n="popup_token_saved">Saved:</span> <code id="token-mask"></code></p>
+    <div class="row">
+      <button id="save" class="primary" type="button" data-i18n="popup_btn_save">Save</button>
+      <button id="clear" type="button" data-i18n="popup_btn_clear">Clear</button>
+      <span id="status"></span>
+    </div>
+    <p class="hint">
+      <a href="https://github.com/settings/tokens" target="_blank" rel="noreferrer" data-i18n="popup_hint_create_token">Create token</a>
+      <span data-i18n="popup_hint_pat_scope">· github.com only. Register Enterprise hosts below. · Stored only in extension storage (not synced).</span>
+    </p>
+
+    <details class="fold">
+      <summary data-i18n="popup_perm_summary">Required permissions</summary>
+      <div class="fold__body">
+        <p class="hint" style="margin-top: 0" data-i18n="popup_perm_intro">
+          Chrome permissions and GitHub token scopes required for pr+.
+        </p>
+        <ul class="perm-list" data-i18n-aria="popup_perm_list_aria" aria-label="Chrome extension permissions">
+          <li>
+            <span class="perm-key">storage</span>
+            <span class="perm-why" data-i18n="popup_perm_storage">PAT and options in local storage (chrome.storage.local)</span>
+          </li>
+          <li>
+            <span class="perm-key">scripting</span>
+            <span class="perm-why" data-i18n="popup_perm_scripting">Register content scripts on Enterprise hosts</span>
+          </li>
+          <li>
+            <span class="perm-key">https://github.com/*</span>
+            <span class="perm-why" data-i18n="popup_perm_github_web">github.com PR list and modal (default)</span>
+          </li>
+          <li>
+            <span class="perm-key">https://api.github.com/*</span>
+            <span class="perm-why" data-i18n="popup_perm_github_api">github.com REST / GraphQL API</span>
+          </li>
+          <li>
+            <span class="perm-key">optional https://*/*</span>
+            <span class="perm-why" data-i18n="popup_perm_optional">Enterprise web/API hosts (requested from settings)</span>
+          </li>
+        </ul>
+        <div class="perm-note">
+          <strong data-i18n="popup_pat_scopes_title">GitHub PAT scopes</strong>
+          <ul>
+            <li data-i18n="popup_pat_classic">
+              Classic: repo (full PR features including private). Add notifications to Subscribe.
+            </li>
+            <li data-i18n="popup_pat_fine">
+              Fine-grained: Pull requests Read &amp; Write on target repos. Contents Read &amp; Write for apply suggestion and file upload.
+            </li>
+          </ul>
+          <span data-i18n="popup_pat_security_note">Tokens are used only in the service worker and are never exposed to content scripts.</span>
+        </div>
+      </div>
+    </details>
+  </section>
+
+  <!-- 2. GitHub Enterprise PAT -->
+  <section class="config" aria-labelledby="cfg-ghe-pat">
+    <h2 class="config__title" id="cfg-ghe-pat">
+      <span class="config__title-num" aria-hidden="true">2</span><span data-i18n="popup_section_ghe_pat">GitHub Enterprise PAT</span>
+    </h2>
+    <p class="hint" style="margin-top: 0" data-i18n="popup_ghe_intro">
+      Register a PAT with each host (max 3). Only hosts you add are active; Default PAT is not used for them.
+    </p>
+    <ul id="host-accounts-list" class="host-list" data-i18n-aria="popup_hosts_aria" aria-label="Registered enterprise hosts"></ul>
+    <p id="host-accounts-empty" class="hint" style="margin: 4px 0 0" data-i18n="popup_hosts_empty">No Enterprise hosts registered</p>
+
+    <details class="fold">
+      <summary data-i18n="popup_add_host_summary">Add / update host &amp; PAT</summary>
+      <div class="fold__body">
+        <label for="enterprise-host" data-i18n="popup_label_web_host">Web host</label>
+        <input
+          id="enterprise-host"
+          type="text"
+          autocomplete="off"
+          spellcheck="false"
+          data-i18n-placeholder="popup_placeholder_host"
+          placeholder="github.mycorp.com or octocorp.ghe.com"
+        />
+        <label for="enterprise-token" style="margin-top: 8px" data-i18n="popup_label_host_pat">PAT for this host</label>
+        <input
+          id="enterprise-token"
+          type="password"
+          autocomplete="off"
+          spellcheck="false"
+          data-i18n-placeholder="popup_placeholder_token"
+          placeholder="ghp_… / github_pat_…"
+        />
+        <p class="hint" data-i18n="popup_host_api_hint">
+          API auto: GHES → https://{host}/api/v3 · *.ghe.com → https://api.{host}
+        </p>
+        <div class="row" style="margin-top: 8px">
+          <button id="add-host-account" class="primary" type="button" data-i18n="popup_btn_add_host">Add host &amp; grant access</button>
+          <span id="enterprise-status" class="hint" style="margin: 0; flex: 1"></span>
+        </div>
+        <p id="endpoint-preview" class="hint" style="margin-top: 6px"></p>
+      </div>
+    </details>
+  </section>
+
+  <!-- 3. Config (Options + Storage) -->
+  <section class="config" aria-labelledby="cfg-options">
+    <h2 class="config__title" id="cfg-options">
+      <span class="config__title-num" aria-hidden="true">3</span><span data-i18n="popup_section_config">Config</span>
+    </h2>
+
+    <h3 data-i18n="popup_h3_options">Options</h3>
+    <label class="pref" for="pref-plugin-enabled">
+      <input id="pref-plugin-enabled" type="checkbox" />
+      <span class="pref__body">
+        <span class="pref__title" data-i18n="popup_pref_plugin_title">Enable pr+</span>
+        <span class="pref__desc" data-i18n="popup_pref_plugin_desc">When off, GitHub API calls and list/modal host stop. Auto-disables on PAT rate limit (429); re-enable after reset.</span>
+      </span>
+    </label>
+
+    <h3 data-i18n="popup_h3_rate_limits">API rate limits</h3>
+    <p class="hint" style="margin: 0 0 6px" data-i18n="popup_rate_limits_hint">
+      Latest API x-ratelimit-* (core / graphql / search). GraphQL points and REST core limits are separate.
+    </p>
+    <div class="rl-bars" id="rate-limit-bars" aria-live="polite">
+      <div class="rl-row" data-rl="core">
+        <div class="rl-row__head">
+          <span class="rl-row__name">core (REST)</span>
+          <span class="rl-row__meta" data-rl-meta>—</span>
+        </div>
+        <div class="rl-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" data-rl-bar>
+          <div class="rl-bar__fill" data-rl-fill style="width:0%"></div>
+        </div>
+      </div>
+      <div class="rl-row" data-rl="graphql">
+        <div class="rl-row__head">
+          <span class="rl-row__name">graphql</span>
+          <span class="rl-row__meta" data-rl-meta>—</span>
+        </div>
+        <div class="rl-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" data-rl-bar>
+          <div class="rl-bar__fill" data-rl-fill style="width:0%"></div>
+        </div>
+      </div>
+      <div class="rl-row" data-rl="search">
+        <div class="rl-row__head">
+          <span class="rl-row__name">search</span>
+          <span class="rl-row__meta" data-rl-meta>—</span>
+        </div>
+        <div class="rl-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" data-rl-bar>
+          <div class="rl-bar__fill" data-rl-fill style="width:0%"></div>
+        </div>
+      </div>
+    </div>
+    <p id="rate-limit-status" class="rl-status" data-i18n="popup_rate_limit_empty">No rate-limit data yet. Open a PR on GitHub once.</p>
+
+    <label class="pref" for="pref-auto-open-embed">
+      <input id="pref-auto-open-embed" type="checkbox" />
+      <span class="pref__body">
+        <span class="pref__title" data-i18n="popup_pref_auto_open_title">Auto-open pr+ on PR pages</span>
+        <span class="pref__desc" data-i18n="popup_pref_auto_open_desc">Open pr+ instead of the native PR UI. When off, use the header pr+ button or ⌘⇧E / Ctrl+Shift+E.</span>
+      </span>
+    </label>
+    <div class="pref pref--action" style="cursor: default" data-prp-list-open-mode="1">
+      <span class="pref__body">
+        <span class="pref__title" data-i18n="popup_pref_list_open_title">Open from /pulls list</span>
+        <span class="pref__desc" data-i18n="popup_pref_list_open_desc">
+          When you click a PR title on the pulls list: pr+ modal (overlay) or navigate to the GitHub PR page. PR-page embed still follows Auto-open above.
+        </span>
+        <label for="pref-list-open-mode" class="hint" style="margin-top: 8px; display: block" data-i18n="popup_label_list_open">
+          List open target
+        </label>
+        <select
+          id="pref-list-open-mode"
+          data-prp-pref-list-open-mode="1"
+          style="margin-top: 4px; width: 100%; max-width: 100%; padding: 6px 8px; border: 1px solid #d0d7de; border-radius: 6px; font-size: 12px; background: #fff"
+        >
+          <option value="modal" selected data-i18n="popup_opt_list_open_modal">pr+ modal (default)</option>
+          <option value="page" data-i18n="popup_opt_list_open_page">PR page</option>
+        </select>
+      </span>
+    </div>
+    <label class="pref" for="pref-reverse-comments">
+      <input id="pref-reverse-comments" type="checkbox" />
+      <span class="pref__body">
+        <span class="pref__title" data-i18n="popup_pref_reverse_title">Reverse PR comments order</span>
+        <span class="pref__desc" data-i18n="popup_pref_reverse_desc">Layout: composer → Merge box → Conversation (latest first).</span>
+      </span>
+    </label>
+    <div class="pref pref--action" style="cursor: default" data-prp-timeline-prefs="1">
+      <span class="pref__body">
+        <span class="pref__title" data-i18n="popup_pref_timeline_title">Conversation timeline filters</span>
+        <span class="pref__desc" data-i18n="popup_pref_timeline_desc">
+          Synced with Conversation tip row. Off hides those event types from the timeline.
+        </span>
+        <div style="margin-top: 8px; display: flex; flex-direction: column; gap: 6px">
+          <label class="hint" style="display: flex; align-items: center; gap: 8px; cursor: pointer">
+            <input id="pref-tl-all" type="checkbox" data-prp-pref-tl="all" checked />
+            <span><strong data-i18n="popup_tl_all">All</strong></span>
+          </label>
+          <label class="hint" style="display: flex; align-items: center; gap: 8px; cursor: pointer">
+            <input id="pref-tl-events" type="checkbox" data-prp-pref-tl="events" checked />
+            <span data-i18n="popup_tl_events">events</span>
+          </label>
+          <label class="hint" style="display: flex; align-items: center; gap: 8px; cursor: pointer">
+            <input id="pref-tl-participants" type="checkbox" data-prp-pref-tl="participants" checked />
+            <span data-i18n="popup_tl_participants">participants</span>
+          </label>
+          <label class="hint" style="display: flex; align-items: center; gap: 8px; cursor: pointer">
+            <input id="pref-tl-comments" type="checkbox" data-prp-pref-tl="comments" checked />
+            <span data-i18n="popup_tl_comments">comments</span>
+          </label>
+          <label class="hint" style="display: flex; align-items: center; gap: 8px; cursor: pointer">
+            <input id="pref-tl-review-threads" type="checkbox" data-prp-pref-tl="review-threads" checked />
+            <span data-i18n="popup_tl_threads">threads</span>
+          </label>
+        </div>
+      </span>
+    </div>
+    <label class="pref" for="pref-single-file-mode">
+      <input id="pref-single-file-mode" type="checkbox" />
+      <span class="pref__body">
+        <span class="pref__title" data-i18n="popup_pref_single_file_title">Single-file mode (Diff)</span>
+        <span class="pref__desc" data-i18n="popup_pref_single_file_desc">Diff body shows only the active file. File list and prev/next still work. Default: off.</span>
+      </span>
+    </label>
+    <label class="pref" for="pref-auto-expand-file-nav">
+      <input id="pref-auto-expand-file-nav" type="checkbox" />
+      <span class="pref__body">
+        <span class="pref__title" data-i18n="popup_pref_auto_expand_title">Auto-expand on file navigation</span>
+        <span class="pref__desc" data-i18n="popup_pref_auto_expand_desc">Expand the target file when using the tree or ⌥⇧[ / ⌥⇧]. When off, stay collapsed until ⌥F or header expand. Default: off.</span>
+      </span>
+    </label>
+    <label class="pref" for="pref-tree-view">
+      <input id="pref-tree-view" type="checkbox" />
+      <span class="pref__body">
+        <span class="pref__title" data-i18n="popup_pref_tree_title">PR stack Tree view</span>
+        <span class="pref__desc" data-i18n="popup_pref_tree_desc">Indent stack relationships on /pulls. Synced with Tree / Original header toggle. Default: on.</span>
+      </span>
+    </label>
+    <div class="pref pref--action" style="cursor: default">
+      <span class="pref__body">
+        <span class="pref__title" data-i18n="popup_pref_monitor_title">Shortcut / action monitor</span>
+        <span class="pref__desc" data-i18n="popup_pref_monitor_desc">
+          Size of the bottom-center shortcut HUD. None hides; Small is default; Medium/Large are 2×/3×.
+        </span>
+        <label for="pref-shortcut-monitor-size" class="hint" style="margin-top: 8px; display: block" data-i18n="popup_label_size">
+          Size
+        </label>
+        <select
+          id="pref-shortcut-monitor-size"
+          style="margin-top: 4px; width: 100%; max-width: 100%; padding: 6px 8px; border: 1px solid #d0d7de; border-radius: 6px; font-size: 12px; background: #fff"
+        >
+          <option value="none" data-i18n="popup_opt_monitor_none">None — hidden</option>
+          <option value="small" selected data-i18n="popup_opt_monitor_small">Small — 1× (default)</option>
+          <option value="medium" data-i18n="popup_opt_monitor_medium">Medium — 2×</option>
+          <option value="large" data-i18n="popup_opt_monitor_large">Large — 3×</option>
+        </select>
+      </span>
+    </div>
+    <div class="pref pref--action" style="cursor: default" data-prp-language-pref="1">
+      <span class="pref__body">
+        <span class="pref__title" data-i18n="popup_pref_lang_title">Language</span>
+        <span class="pref__desc" data-i18n="popup_pref_lang_desc">
+          pr+ UI language. Auto follows the GitHub page locale (html[lang], etc.). Choosing English / 한국어 / 日本語 / 简体中文 overrides detection.
+        </span>
+        <label for="pref-ui-language" class="hint" style="margin-top: 8px; display: block" data-i18n="popup_label_locale">
+          Locale
+        </label>
+        <select
+          id="pref-ui-language"
+          data-prp-pref-ui-language="1"
+          style="margin-top: 4px; width: 100%; max-width: 100%; padding: 6px 8px; border: 1px solid #d0d7de; border-radius: 6px; font-size: 12px; background: #fff"
+        >
+          <option value="auto" selected data-i18n="popup_opt_lang_auto">Auto — detect from GitHub (default)</option>
+          <option value="en" data-i18n="popup_opt_lang_en">English</option>
+          <option value="ko" data-i18n="popup_opt_lang_ko">한국어 (Korean)</option>
+          <option value="ja" data-i18n="popup_opt_lang_ja">日本語 (Japanese)</option>
+          <option value="zh_CN" data-i18n="popup_opt_lang_zh">简体中文 (Chinese)</option>
+        </select>
+      </span>
+    </div>
+
+    <h3 data-i18n="popup_h3_onboarding">Onboarding</h3>
+    <div class="pref pref--action">
+      <span class="pref__body">
+        <span class="pref__title" data-i18n="popup_pref_onboarding_title">Setup tour</span>
+        <span class="pref__desc" data-i18n="popup_pref_onboarding_desc">
+          Restart first-run onboarding (PAT · Option · demo PR · Diff · comments · palette · options). Open /pulls to show the top-right card.
+        </span>
+        <div class="row" style="margin-top: 8px">
+          <button id="restart-onboarding" class="primary" type="button" data-i18n="popup_btn_start_onboarding">Start onboarding</button>
+        </div>
+      </span>
+    </div>
+
+    <h3 data-i18n="popup_h3_storage">Storage</h3>
+    <div class="pref pref--action">
+      <span class="pref__body">
+        <span class="pref__title" data-i18n="popup_pref_idb_title">PR detail cache (IndexedDB)</span>
+        <span class="pref__desc" data-i18n="popup_pref_idb_desc">
+          Clear PR detail cache on GitHub tabs (memory + IndexedDB). Next open fetches from the network. Requires an open github.com tab.
+        </span>
+        <div class="row" style="margin-top: 8px">
+          <button id="clear-idb" type="button" data-i18n="popup_btn_clear_idb">Clear IndexedDB cache</button>
+        </div>
+      </span>
+    </div>
+  </section>
 
   <script src="popup.js"></script>
 </body>

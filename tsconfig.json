@@ -1,0 +1,75 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "lib": [
+      "ES2020",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noImplicitAny": true,
+    "useUnknownInCatchVariables": false,
+    "strictNullChecks": false,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "allowImportingTsExtensions": true,
+    "paths": {
+      "@modal/*": [
+        "./src/modal/*"
+      ],
+      "@lib/*": [
+        "./src/modal/lib/*"
+      ],
+      "@common/*": [
+        "./src/modal/components/common/*"
+      ]
+    },
+    "types": [
+      "vite/client",
+      "chrome"
+    ]
+  },
+  "include": [
+    "src/extension-globals.d.ts",
+    "src/modal/lib/**/*.ts",
+    "src/modal/store/**/*.ts",
+    "src/modal/components/**/*.ts",
+    "src/modal/components/**/*.tsx",
+    "src/modal/views/**/*.ts",
+    "src/modal/views/**/*.tsx",
+    "src/modal/app/PrModalApp.tsx",
+    "src/modal/app/PrModalShell.tsx",
+    "src/modal/app/PrModalApp.impl.tsx",
+    "src/modal/main.tsx",
+    "src/modal/types.ts",
+    "src/modal/globals.d.ts",
+    "src/background/**/*.ts",
+    "src/background/sw-api.ts",
+    "src/sw-messages.ts",
+    "src/content-scripts-list.ts",
+    "src/tree.ts",
+    "src/content-bridge.ts",
+    "src/content-bridge/**/*.ts",
+    "src/onboarding.ts",
+    "src/onboarding-core.ts",
+    "src/onboarding-diff-demo.ts",
+    "src/onboarding-hotkeys.ts",
+    "src/onboarding-ui.ts",
+    "src/host/host-context.d.ts",
+    "rstest.config.ts",
+    "src/background-shims.d.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "src/background.ts",
+    "src/modal/dist",
+    "src/modal/pure"
+  ]
+}

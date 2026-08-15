@@ -1,0 +1,871 @@
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { Button } from '@common/Button';
+import { ShortcutHint } from '@common/ShortcutHint';
+import { SearchableSelect } from '@common/SearchableSelect';
+import {
+  buildCommitFilterOptions,
+  diffCommitFilterToSelection,
+  isAllCommitsFilter,
+  normalizeDiffCommitFilter,
+  selectionToDiffCommitFilter,
+  toggleCommitRangeSelection,
+  truncateCommitLabel,
+} from '@lib/diff-commit-filter';
+import { pendingReviewCount } from '@lib/pending-review';
+import { Avatar } from '@common/Avatar';
+import { IconChevronDown, IconFileNavToggle, IconGear } from '@common/icons';
+import { StepNav } from '@common/StepNav';
+import {
+  sidePanelShortcutLabel,
+  stepNavShortcutLabel,
+} from '@lib/shortcut-policy';
+import {
+  createDefaultDiffReviewFilter,
+  isStatusActive,
+  listReviewAuthorsFromComments,
+  normalizeDiffReviewFilter,
+  toggleDiffReviewStatus,
+  type DiffReviewFilterState,
+  type DiffReviewStatus,
+} from '@lib/diff-review-filter';
+import { createTranslator } from '@lib/i18n';
+import { resolveGithubLocale } from '@lib/locale-resolve';
+import { useLocale } from '@lib/locale-context';
+import { TipPopover } from '@common/TipPopover';
+import { SearchBar } from './SearchBar';
+import './DiffToolbar.css';
+import {
+  FinishReviewModal,
+  type FinishReviewEvent,
+} from './FinishReviewModal';
+
+/**
+ * Unified Diff top chrome: files, multi-checkbox commits, thread filters,
+ * grouped comment nav, pending review — no checks.
+ * (+/−/files stats live in the PR header only.)
+ *
+ * Leave-review CTAs live in FinishReviewModal (GitHub-style). Diff header
+ * only shows "Submit review" (always available, even with 0 pending).
+ *
+ * Display options (unified/split, hide whitespace) and review-filter extras
+ * (hide outdated, authors) live in the gear settings popover.
+ *
+ * When find-in-diff is open, Unresolved/Resolved/Pending filters are replaced
+ * by an inline search box (no extra header row).
+ */
+export function DiffToolbar(props: any) {
+  const {
+    detail,
+    fileNavCollapsed,
+    onToggleFileNav,
+    diffMode = 'unified',
+    onDiffMode,
+    hideWhitespace = false,
+    onHideWhitespace = null,
+    commits = [],
+    commitFilter,
+    onCommitFilter,
+    /** Called when the commits picker opens (fetch remaining pages). */
+    onOpenCommitPicker = null,
+    commitLoading = false,
+    commitError = null,
+    commitLabel = null,
+    commitDisabled = false,
+    comments = [],
+    commentIndex = -1,
+    onPrevComment,
+    onNextComment,
+    /**
+     * Multi-select review filter state (statuses + hideOutdated + authors).
+     * Legacy string/null still accepted via normalizeDiffReviewFilter.
+     */
+    reviewFilter = null,
+    onReviewFilter = null,
+    /** Toggle one status chip (multi-select). */
+    onToggleReviewStatus = null,
+    /** Patch hideOutdated / authors. */
+    onPatchReviewFilter = null,
+    showReviewFilter = false,
+    /** Thread totals for filter button labels */
+    unresolvedCount = 0,
+    resolvedCount = 0,
+    /** All review comments (for author list) */
+    reviewComments = null,
+    pendingBatch,
+    pendingServerCount = 0,
+    totalPendingCount = null,
+    onDiscardPending,
+    onLeaveReviewAction,
+    actionBusy = false,
+    actionMsg = null,
+    /** Shell color mode for portaled Finish review popover */
+    colorMode = null,
+    /** Shared with selection / conversation composers */
+    onUploadFile = null,
+    mentionCandidates = [],
+    linkCtx = null,
+    /** Inline find-in-diff (replaces review filter when open) */
+    searchOpen = false,
+    searchQuery = '',
+    searchHits = null,
+    searchHitIndex = -1,
+    searchInputRef = null,
+    searchBusy = false,
+    showSearchLoadComments = false,
+    onSearchLoadComments = null,
+    searchLoadCommentsBusy = false,
+    onSearchChange = null,
+    onSearchClose = null,
+    onSearchNext = null,
+    onSearchPrev = null,
+    /** Override locale (tests); default follows GitHub page html[lang]. */
+    locale: localeProp = null,
+  } = props;
+
+  const localeCtx = useLocale();
+  const locale = useMemo(() => {
+    // Prefer explicit prop, then context (plugin pref), then page detect.
+    if (localeProp) return localeProp;
+    if (localeCtx?.locale) return localeCtx.locale;
+    return resolveGithubLocale(
+      typeof document !== 'undefined' ? document : null
+    );
+  }, [localeProp, localeCtx?.locale]);
+  const t = useMemo(() => createTranslator(locale), [locale]);
+
+  // Unified: GitHub PENDING review only (totalPendingCount from App).
+  // Legacy fallback: local batch count if host not yet updated.
+  const localPending =
+    typeof pendingReviewCount === 'function' ? pendingReviewCount(pendingBatch) : 0;
+  const pending =
+    totalPendingCount != null
+      ? Number(totalPendingCount)
+      : Number(pendingServerCount || 0) || localPending;
+  const unresN = Number(unresolvedCount) || 0;
+  const resN = Number(resolvedCount) || 0;
+  /**
+   * Optimistic chip UI: parent filter recompute rebuilds virtualRows and can
+   * lag a frame (selected underline only appears after Diff steals focus).
+   * Local state paints --on immediately; drop when props catch up.
+   */
+  const [optimisticFilter, setOptimisticFilter] =
+    useState<DiffReviewFilterState | null>(null);
+  const propsFilter: DiffReviewFilterState = useMemo(
+    () =>
+      normalizeDiffReviewFilter(
+        reviewFilter ?? createDefaultDiffReviewFilter()
+      ),
+    [reviewFilter]
+  );
+  const filterState: DiffReviewFilterState = optimisticFilter ?? propsFilter;
+  useEffect(() => {
+    if (!optimisticFilter) return;
+    const a = optimisticFilter;
+    const b = propsFilter;
+    if (
+      a.hideOutdated === b.hideOutdated &&
+      a.statuses.length === b.statuses.length &&
+      a.statuses.every((s, i) => s === b.statuses[i]) &&
+      a.authors.length === b.authors.length &&
+      a.authors.every((s, i) => s === b.authors[i])
+    ) {
+      setOptimisticFilter(null);
+    }
+  }, [optimisticFilter, propsFilter]);
+  const authorList = useMemo(() => {
+    const src = Array.isArray(reviewComments)
+      ? reviewComments
+      : Array.isArray(comments)
+        ? comments
+        : Array.isArray(detail?.reviewComments)
+          ? detail.reviewComments
+          : [];
+    const raw =
+      typeof listReviewAuthorsFromComments === 'function'
+        ? listReviewAuthorsFromComments(src)
+        : [];
+    // Normalize legacy string[] if pure rebuild lags
+    const avatars =
+      detail?.avatarUrls && typeof detail.avatarUrls === 'object'
+        ? detail.avatarUrls
+        : null;
+    return (Array.isArray(raw) ? raw : []).map((row: any) => {
+      if (typeof row === 'string') {
+        const login = row.trim();
+        const key = login.toLowerCase();
+        const fromMap =
+          avatars && (avatars[key] || avatars[login])
+            ? String(avatars[key] || avatars[login])
+            : null;
+        return { login, avatarUrl: fromMap };
+      }
+      const login = String(row?.login || '').trim();
+      const key = login.toLowerCase();
+      const fromMap =
+        avatars && (avatars[key] || avatars[login])
+          ? String(avatars[key] || avatars[login])
+          : null;
+      return {
+        login,
+        avatarUrl: row?.avatarUrl || fromMap || null,
+      };
+    }).filter((a: { login: string }) => a.login);
+  }, [reviewComments, comments, detail?.reviewComments, detail?.avatarUrls]);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsWrapRef = useRef<HTMLDivElement | null>(null);
+  const settingsGearRef = useRef<HTMLButtonElement | null>(null);
+  const settingsMenuRef = useRef<HTMLDivElement | null>(null);
+  const [settingsCoords, setSettingsCoords] = useState<{
+    top: number;
+    left: number;
+    maxHeight: number;
+  } | null>(null);
+
+  const placeSettingsMenu = () => {
+    const gear = settingsGearRef.current;
+    if (!gear || typeof window === 'undefined') return;
+    const rect = gear.getBoundingClientRect();
+    const gap = 4;
+    const menuW = 240;
+    const pad = 8;
+    // Prefer below the gear; flip above if not enough room
+    const spaceBelow = window.innerHeight - rect.bottom - gap - pad;
+    const spaceAbove = rect.top - gap - pad;
+    const preferBelow = spaceBelow >= 160 || spaceBelow >= spaceAbove;
+    const maxHeight = Math.max(
+      120,
+      Math.min(360, preferBelow ? spaceBelow : spaceAbove)
+    );
+    let top = preferBelow
+      ? rect.bottom + gap
+      : Math.max(pad, rect.top - gap - maxHeight);
+    // Right-align to gear (toolbar sits on the right half of Diff chrome)
+    let left = rect.right - menuW;
+    left = Math.max(pad, Math.min(left, window.innerWidth - menuW - pad));
+    // If flipped above and we estimated height, keep top within viewport
+    if (!preferBelow) {
+      top = Math.max(pad, rect.top - gap - maxHeight);
+    }
+    setSettingsCoords({ top, left, maxHeight });
+  };
+
+  useLayoutEffect(() => {
+    if (!settingsOpen) {
+      setSettingsCoords(null);
+      return undefined;
+    }
+    placeSettingsMenu();
+    const onReposition = () => placeSettingsMenu();
+    window.addEventListener('resize', onReposition);
+    // Capture scroll on any ancestor (virtual list / modal shell)
+    window.addEventListener('scroll', onReposition, true);
+    return () => {
+      window.removeEventListener('resize', onReposition);
+      window.removeEventListener('scroll', onReposition, true);
+    };
+  }, [settingsOpen]);
+
+  useEffect(() => {
+    if (!settingsOpen) return undefined;
+    // Defer outside-click so the opening click does not immediately close.
+    let armed = false;
+    const armTimer = window.setTimeout(() => {
+      armed = true;
+    }, 0);
+    function onDoc(e: MouseEvent) {
+      if (!armed) return;
+      const t = e.target;
+      if (!(t instanceof Node)) return;
+      if (settingsWrapRef.current?.contains(t)) return;
+      if (settingsMenuRef.current?.contains(t)) return;
+      if (settingsGearRef.current?.contains(t)) return;
+      setSettingsOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== 'Escape') return;
+      // Claim Esc so App window-capture does not close the PR shell.
+      // App also gates on [data-prp-review-filter-menu] (window runs first).
+      try {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+      } catch {
+        /* ignore */
+      }
+      setSettingsOpen(false);
+    }
+    document.addEventListener('mousedown', onDoc, true);
+    // Window capture: App also listens on window; register here so Esc closes
+    // the menu even when CDP keys miss document-only handlers. claimNestedEscape
+    // is stopImmediatePropagation — register after App would block us, so use
+    // preventDefault+stopPropagation only and always setSettingsOpen(false).
+    // window only — embed key shield stops document propagation
+    window.addEventListener('keydown', onKey, true);
+    return () => {
+      window.clearTimeout(armTimer);
+      document.removeEventListener('mousedown', onDoc, true);
+      window.removeEventListener('keydown', onKey, true);
+    };
+  }, [settingsOpen]);
+  function toggleStatus(status: DiffReviewStatus) {
+    const next = toggleDiffReviewStatus(filterState, status);
+    setOptimisticFilter(next);
+    if (typeof onToggleReviewStatus === 'function') {
+      onToggleReviewStatus(status);
+      return;
+    }
+    // Fallback: full multi state for older hosts (not exclusive string)
+    onReviewFilter?.(next);
+  }
+  function patchFilter(partial: Partial<DiffReviewFilterState>) {
+    const next = normalizeDiffReviewFilter({ ...filterState, ...partial });
+    setOptimisticFilter(next);
+    if (typeof onPatchReviewFilter === 'function') {
+      onPatchReviewFilter(partial);
+      return;
+    }
+    onReviewFilter?.(next);
+  }
+  const isMac =
+    typeof navigator !== 'undefined' &&
+    /Mac|iPhone|iPad/.test(navigator.platform || '');
+  const threadPrevShortcut = stepNavShortcutLabel('prev', isMac);
+  const threadNextShortcut = stepNavShortcutLabel('next', isMac);
+  const filesPanelShortcut =
+    typeof sidePanelShortcutLabel === 'function'
+      ? sidePanelShortcutLabel(isMac)
+      : isMac
+        ? '⌥B'
+        : 'Alt+B';
+
+  const commitOpts = useMemo(() => buildCommitFilterOptions(commits), [commits]);
+  const metadataCommitCount = Number(detail?.commitsCount);
+  const allCommitsCount =
+    detail?.commitsCount != null &&
+    Number.isFinite(metadataCommitCount) &&
+    metadataCommitCount >= 0
+      ? metadataCommitCount
+      : commitOpts.length || null;
+  const f = normalizeDiffCommitFilter(commitFilter);
+  const [commitPickerOpen, setCommitPickerOpen] = useState(false);
+  const [commitQuery, setCommitQuery] = useState('');
+  const commitBtnRef = useRef<HTMLButtonElement | null>(null);
+  const submitBtnRef = useRef<HTMLSpanElement | null>(null);
+  const [finishOpen, setFinishOpen] = useState(false);
+  const [finishInitial, setFinishInitial] =
+    useState<FinishReviewEvent>('comment');
+
+  // Global leave-review chords / palette on Diff → open this modal
+  // (event dispatched from PrModalApp leaveReview when layout is Diff).
+  // Keep a stable listener for the whole toolbar lifetime (both keep-alive panels).
+  useEffect(() => {
+    function onOpen(e: Event) {
+      const detail = (e as CustomEvent)?.detail || {};
+      const kind = String(detail.kind || 'comment').toLowerCase();
+      const next: FinishReviewEvent =
+        kind === 'approve'
+          ? 'approve'
+          : kind === 'request_changes' || kind === 'request-changes'
+            ? 'request_changes'
+            : 'comment';
+      setFinishInitial(next);
+      setFinishOpen(true);
+    }
+    window.addEventListener('prp-open-finish-review', onOpen as EventListener);
+    return () => {
+      window.removeEventListener('prp-open-finish-review', onOpen as EventListener);
+    };
+  }, []);
+
+  const initialSelectedIds = useMemo(
+    () => diffCommitFilterToSelection(f, commits),
+    // Recompute when filter identity changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [f.mode, f.sha, f.endSha, commits]
+  );
+
+  const selectOptions = useMemo(
+    () =>
+      commitOpts.map((o) => ({
+        id: o.sha,
+        label: o.label,
+        keywords: [o.shortSha, o.sha, o.fullLabel, o.secondary].filter(Boolean),
+        secondary: o.secondary || '',
+        meta: { fullLabel: o.fullLabel, secondary: o.secondary || '' },
+      })),
+    [commitOpts]
+  );
+
+  const triggerLabel = (() => {
+    if (isAllCommitsFilter(f)) {
+      return allCommitsCount == null
+        ? 'All commits'
+        : `All commits (${allCommitsCount})`;
+    }
+    if (f.mode === 'range' && f.sha && f.endSha) {
+      const raw =
+        commitLabel ||
+        `${String(f.sha).slice(0, 7)}…${String(f.endSha).slice(0, 7)}`;
+      return truncateCommitLabel(raw, 36);
+    }
+    if (f.mode === 'single' && f.sha) {
+      const raw =
+        commitLabel ||
+        commitOpts.find((o) => o.sha === f.sha)?.fullLabel ||
+        String(f.sha).slice(0, 7);
+      return truncateCommitLabel(raw, 36);
+    }
+    return 'Commits';
+  })();
+
+  function applyCommitSelection(ids: string[]) {
+    const next = selectionToDiffCommitFilter(ids, commits);
+    onCommitFilter?.(next);
+    setCommitPickerOpen(false);
+    setCommitQuery('');
+  }
+
+  return (
+    <div className="prp-diff-toolbar" role="toolbar" aria-label="Diff controls">
+      <div className="prp-diff-toolbar__row prp-diff-toolbar__row--primary">
+        <button
+          type="button"
+          className="prp-diff-toolbar__nav-toggle prp-has-tip prp-opt-hint-host"
+          onClick={onToggleFileNav}
+          aria-pressed={!fileNavCollapsed}
+          aria-label={
+            fileNavCollapsed ? 'Show files navigator' : 'Hide files navigator'
+          }
+        >
+          <ShortcutHint
+            label={filesPanelShortcut}
+            preferredPlacement="bottom"
+          />
+          <IconFileNavToggle collapsed={fileNavCollapsed} size={14} />
+          <span className="prp-diff-toolbar__nav-label">Files</span>
+          <TipPopover
+            title={
+              fileNavCollapsed ? 'Show files panel' : 'Hide files panel'
+            }
+            shortcut={filesPanelShortcut}
+          />
+        </button>
+
+        <div className="prp-diff-toolbar__commits">
+          <button
+            type="button"
+            ref={commitBtnRef}
+            className="prp-diff-toolbar__commit-btn"
+            disabled={commitDisabled || (commitLoading && !commitOpts.length)}
+            onClick={() => {
+              setCommitPickerOpen((o) => {
+                const next = !o;
+                if (next) {
+                  void onOpenCommitPicker?.();
+                }
+                return next;
+              });
+            }}
+            aria-haspopup="dialog"
+            aria-expanded={commitPickerOpen}
+            title="Select commits: 1 = single, 2 endpoints fill the range between them"
+          >
+            {commitLoading && !commitOpts.length
+              ? t('stats_loading')
+              : triggerLabel}
+            <span className="prp-diff-toolbar__chevron" aria-hidden="true">
+              <IconChevronDown size={12} />
+            </span>
+          </button>
+          <SearchableSelect
+            open={commitPickerOpen}
+            title={commitLoading ? 'Commits — loading…' : 'Commits'}
+            options={selectOptions}
+            query={commitQuery}
+            onQuery={setCommitQuery}
+            onPick={null}
+            onConfirm={(ids: string[]) => applyCommitSelection(ids)}
+            onClose={() => {
+              setCommitPickerOpen(false);
+              setCommitQuery('');
+            }}
+            allowFreeText={false}
+            anchorRef={commitBtnRef}
+            placement="bottom"
+            multi
+            minWidth={480}
+            maxWidth={560}
+            initialSelectedIds={initialSelectedIds}
+            resolveMultiToggle={(prev: string[], id: string) =>
+              toggleCommitRangeSelection(prev, id, commits)
+            }
+            confirmLabel="Apply selection"
+            placeholder="Search commits by message or sha…"
+            emptyLabel={
+              commitLoading ? 'Loading remaining commits…' : 'No matches'
+            }
+          />
+        </div>
+
+        <div
+          className={`prp-diff-toolbar__thread-tools${
+            searchOpen ? ' prp-diff-toolbar__thread-tools--search' : ''
+          }`}
+        >
+          {searchOpen ? (
+            <SearchBar
+              variant="toolbar"
+              open
+              query={searchQuery}
+              hits={searchHits}
+              hitIndex={searchHitIndex}
+              inputRef={searchInputRef}
+              searching={searchBusy}
+              showLoadComments={showSearchLoadComments}
+              onLoadComments={onSearchLoadComments}
+              loadCommentsBusy={searchLoadCommentsBusy}
+              onChange={onSearchChange}
+              onClose={onSearchClose}
+              onNext={onSearchNext}
+              onPrev={onSearchPrev}
+              placeholder="Find in diff, comments…"
+            />
+          ) : showReviewFilter ? (
+            <div
+              className="prp-review-filter"
+              role="group"
+              aria-label="Filter review threads by status (multi-select)"
+            >
+              <button
+                type="button"
+                className={
+                  isStatusActive(filterState, 'unresolved')
+                    ? 'prp-review-filter__btn prp-review-filter__btn--on'
+                    : 'prp-review-filter__btn'
+                }
+                aria-pressed={isStatusActive(filterState, 'unresolved')}
+                title={`Toggle unresolved threads (${unresN}). Empty selection shows all.`}
+                onClick={() => toggleStatus('unresolved')}
+              >
+                {t('unresolved')}{' '}
+                <span className="prp-review-filter__count">{unresN}</span>
+              </button>
+              <button
+                type="button"
+                className={
+                  isStatusActive(filterState, 'resolved')
+                    ? 'prp-review-filter__btn prp-review-filter__btn--on'
+                    : 'prp-review-filter__btn'
+                }
+                aria-pressed={isStatusActive(filterState, 'resolved')}
+                title={`Toggle resolved threads (${resN}). Empty selection shows all.`}
+                onClick={() => toggleStatus('resolved')}
+              >
+                {t('resolved')}{' '}
+                <span className="prp-review-filter__count">{resN}</span>
+              </button>
+              {pending > 0 ? (
+                <button
+                  type="button"
+                  className={
+                    isStatusActive(filterState, 'pending')
+                      ? 'prp-review-filter__btn prp-review-filter__btn--on'
+                      : 'prp-review-filter__btn'
+                  }
+                  aria-pressed={isStatusActive(filterState, 'pending')}
+                  title={`Toggle pending (unsubmitted) comments (${pending}). Empty selection shows all.`}
+                  onClick={() => toggleStatus('pending')}
+                >
+                  {t('pending')}{' '}
+                  <span className="prp-review-filter__count">{pending}</span>
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+          {!searchOpen ? (
+            <div
+              className="prp-diff-toolbar__thread-nav-wrap"
+              ref={settingsWrapRef}
+            >
+              <div className="prp-diff-toolbar__thread-nav">
+                {/* Keep StepNav when PR has review threads even if the active
+                    multi-filter yields 0 mapped roots (e.g. default
+                    Unresolved+Pending on a resolved-only closed PR). */}
+                {showReviewFilter ||
+                (Array.isArray(comments) && comments.length > 0) ? (
+                  <StepNav
+                    className="prp-diff-toolbar__comments prp-comment-nav"
+                    index={commentIndex}
+                    total={Array.isArray(comments) ? comments.length : 0}
+                    onPrev={onPrevComment}
+                    onNext={onNextComment}
+                    label="Review threads"
+                    title={
+                      filterState.statuses.length ||
+                      filterState.hideOutdated ||
+                      filterState.authors.length
+                        ? `Filtered review threads (replies excluded)`
+                        : 'Review threads (replies excluded)'
+                    }
+                    prevTitle="Previous review thread"
+                    nextTitle="Next review thread"
+                    prevShortcut={threadPrevShortcut}
+                    nextShortcut={threadNextShortcut}
+                  />
+                ) : null}
+                <button
+                  ref={settingsGearRef}
+                  type="button"
+                  className={
+                    showReviewFilter ||
+                    (Array.isArray(comments) && comments.length > 0)
+                      ? 'prp-diff-toolbar__filter-gear'
+                      : 'prp-diff-toolbar__filter-gear prp-diff-toolbar__filter-gear--alone'
+                  }
+                  aria-label={t('diff_view_settings')}
+                  aria-haspopup="menu"
+                  aria-expanded={settingsOpen}
+                  title={t('display_options')}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSettingsOpen((v) => !v);
+                  }}
+                  data-prp-review-filter-gear="1"
+                >
+                  <IconGear size={14} />
+                </button>
+              </div>
+              {settingsOpen && settingsCoords
+                ? (() => {
+                    const menu = (
+                      <div
+                        ref={settingsMenuRef}
+                        className="prp-diff-review-settings prp-diff-review-settings--portal"
+                        role="menu"
+                        aria-label={t('diff_view_settings')}
+                        data-prp-review-filter-menu="1"
+                        style={{
+                          top: settingsCoords.top,
+                          left: settingsCoords.left,
+                          maxHeight: settingsCoords.maxHeight,
+                        }}
+                      >
+                        <div className="prp-diff-review-settings__section">
+                          <p className="prp-diff-review-settings__heading">
+                            {t('diff_view')}
+                          </p>
+                          {/* Segmented toggle (same chrome as former toolbar control) */}
+                          <div
+                            className="prp-diff-mode prp-diff-review-settings__mode"
+                            role="radiogroup"
+                            aria-label="Diff view mode"
+                          >
+                            <label className="prp-diff-mode__opt">
+                              <input
+                                type="radio"
+                                name="prp-diff-mode"
+                                value="unified"
+                                checked={diffMode === 'unified'}
+                                onChange={(e) => {
+                                  onDiffMode?.('unified');
+                                  try {
+                                    (e.currentTarget as HTMLInputElement).blur();
+                                  } catch {
+                                    /* ignore */
+                                  }
+                                }}
+                              />
+                              Unified
+                            </label>
+                            <label className="prp-diff-mode__opt">
+                              <input
+                                type="radio"
+                                name="prp-diff-mode"
+                                value="split"
+                                checked={diffMode === 'split'}
+                                onChange={(e) => {
+                                  onDiffMode?.('split');
+                                  try {
+                                    (e.currentTarget as HTMLInputElement).blur();
+                                  } catch {
+                                    /* ignore */
+                                  }
+                                }}
+                              />
+                              Split
+                            </label>
+                          </div>
+                          <label
+                            className="prp-diff-review-settings__row prp-diff-review-settings__row--after-mode"
+                            title={t('hide_whitespace_title')}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={Boolean(hideWhitespace)}
+                              onChange={(e) =>
+                                onHideWhitespace?.(Boolean(e.target.checked))
+                              }
+                              data-prp-hide-whitespace="1"
+                            />
+                            <span>{t('hide_whitespace')}</span>
+                          </label>
+                          {showReviewFilter || authorList.length > 0 ? (
+                            <label
+                              className="prp-diff-review-settings__row"
+                              title={t('hide_outdated_comments_title')}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={Boolean(filterState.hideOutdated)}
+                                onChange={(e) =>
+                                  patchFilter({
+                                    hideOutdated: e.target.checked,
+                                  })
+                                }
+                                data-prp-hide-outdated="1"
+                              />
+                              <span>{t('hide_outdated_comments')}</span>
+                            </label>
+                          ) : null}
+                        </div>
+                        {showReviewFilter || authorList.length > 0 ? (
+                          <>
+                            <hr className="prp-diff-review-settings__divider" />
+                            <div className="prp-diff-review-settings__section">
+                              <p className="prp-diff-review-settings__heading">
+                                {t('reviewed_by')}
+                              </p>
+                              {authorList.length === 0 ? (
+                                <p className="prp-diff-review-settings__empty">
+                                  No review authors yet
+                                </p>
+                              ) : (
+                                authorList.map((author) => {
+                                  const login = String(author.login || '').trim();
+                                  const key = login.toLowerCase();
+                                  const checked = filterState.authors.some(
+                                    (a) => a.toLowerCase() === key
+                                  );
+                                  return (
+                                    <label
+                                      key={key}
+                                      className="prp-diff-review-settings__row prp-diff-review-settings__row--author"
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={checked}
+                                        onChange={() => {
+                                          const next = new Set(
+                                            filterState.authors.map((a) =>
+                                              a.toLowerCase()
+                                            )
+                                          );
+                                          if (next.has(key)) next.delete(key);
+                                          else next.add(key);
+                                          patchFilter({ authors: [...next] });
+                                        }}
+                                      />
+                                      <span className="prp-diff-review-settings__author">
+                                        <Avatar
+                                          login={login}
+                                          avatarUrl={author.avatarUrl}
+                                          size="sm"
+                                        />
+                                        <span className="prp-diff-review-settings__author-login">
+                                          {login}
+                                        </span>
+                                      </span>
+                                    </label>
+                                  );
+                                })
+                              )}
+                            </div>
+                          </>
+                        ) : null}
+                      </div>
+                    );
+                    if (typeof document === 'undefined') return menu;
+                    const portalRoot =
+                      (document.querySelector(
+                        '.prp-overlay'
+                      ) as HTMLElement | null) || document.body;
+                    return createPortal(menu, portalRoot);
+                  })()
+                : null}
+            </div>
+          ) : null}
+        </div>
+
+        {/* Always available — event/body live in FinishReviewModal */}
+        <div className="prp-diff-toolbar__pending" role="group" aria-label="Leave a review">
+          <span className="prp-opt-hint-host" ref={submitBtnRef}>
+            <ShortcutHint
+              label={isMac ? '⌥↵' : 'Alt+Enter'}
+              preferredPlacement="top"
+            />
+            <Button
+              size="sm"
+              variant="primary"
+              disabled={actionBusy}
+              aria-haspopup="dialog"
+              aria-expanded={finishOpen}
+              onClick={() => {
+                setFinishInitial('comment');
+                setFinishOpen(true);
+              }}
+              title={
+                pending > 0
+                  ? `${t('cta_finish_review')} (${pending})`
+                  : t('cta_finish_review')
+              }
+              shortcut={isMac ? '⌥↵' : 'Alt+Enter'}
+              tipPlacement="top"
+            >
+              {t('submit_review')}
+              {pending > 0 ? (
+                <span className="prp-diff-toolbar__pending-count" aria-hidden="true">
+                  {pending}
+                </span>
+              ) : null}
+            </Button>
+          </span>
+          <FinishReviewModal
+            open={finishOpen}
+            anchorRef={submitBtnRef}
+            pendingCount={pending}
+            detail={detail}
+            actionBusy={actionBusy}
+            colorMode={colorMode}
+            initialEvent={finishInitial}
+            onUploadFile={onUploadFile}
+            mentionCandidates={mentionCandidates}
+            linkCtx={linkCtx}
+            onClose={() => setFinishOpen(false)}
+            onDiscard={
+              pending > 0 && typeof onDiscardPending === 'function'
+                ? async () => {
+                    await onDiscardPending?.();
+                    setFinishOpen(false);
+                  }
+                : null
+            }
+            onSubmit={async (kind, body) => {
+              const ok = await onLeaveReviewAction?.(kind, { body });
+              if (ok !== false) setFinishOpen(false);
+            }}
+          />
+        </div>
+
+        {commitError ? (
+          <span className="prp-commit-filter__error" role="alert">
+            {commitError}
+          </span>
+        ) : null}
+
+      </div>
+    </div>
+  );
+}
+
+export default DiffToolbar;

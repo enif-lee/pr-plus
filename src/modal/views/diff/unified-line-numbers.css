@@ -1,0 +1,21 @@
+/** Sibling residual CSS for unified dual line numbers. */
+.prp-unified-lns {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: stretch;
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+  color: var(--prp-fg-muted);
+  border-right: 1px solid var(--prp-border-muted);
+}
+.prp-unified-ln {
+  flex: 0 0 42px;
+  min-width: 42px;
+  text-align: right;
+  padding: 0 8px 0 4px;
+  line-height: var(--prp-diff-row-h, 20px);
+  white-space: pre;
+}
+.prp-unified-ln--old {
+  border-right: 1px solid color-mix(in srgb, var(--prp-border-muted) 70%, transparent);
+}

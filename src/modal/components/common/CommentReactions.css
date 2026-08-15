@@ -1,0 +1,269 @@
+/* GitHub-like reaction pills + picker (comment / review thread) */
+.prp-reactions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+  min-height: 0;
+}
+
+.prp-reactions__pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 8px;
+  margin: 0;
+  border: 1px solid var(--borderColor-muted, var(--prp-border-muted, #d0d7de));
+  border-radius: 100px;
+  background: var(--bgColor-muted, var(--prp-bg-muted, #f6f8fa));
+  color: var(--fgColor-default, var(--prp-fg, #1f2328));
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background 0.1s ease,
+    border-color 0.1s ease,
+    color 0.1s ease;
+}
+
+.prp-reactions__pill:hover:not(:disabled) {
+  background: var(--bgColor-neutral-muted, #afb8c133);
+  border-color: var(--borderColor-default, #d0d7de);
+}
+
+.prp-reactions__pill:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+
+/* Own reaction — accent fill (GitHub-like distinction from others) */
+.prp-reactions__pill.is-reacted {
+  background: var(
+    --bgColor-accent-muted,
+    color-mix(in srgb, var(--fgColor-accent, #0969da) 18%, transparent)
+  );
+  border-color: var(
+    --borderColor-accent-emphasis,
+    color-mix(in srgb, var(--fgColor-accent, #0969da) 55%, transparent)
+  );
+  color: var(--fgColor-accent, #0969da);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--fgColor-accent, #0969da) 12%, transparent);
+  font-weight: 600;
+}
+
+.prp-reactions__pill.is-reacted:hover:not(:disabled) {
+  background: var(
+    --bgColor-accent-muted,
+    color-mix(in srgb, var(--fgColor-accent, #0969da) 26%, transparent)
+  );
+}
+
+/* Others only — muted neutral */
+.prp-reactions__pill.is-others {
+  background: var(--bgColor-muted, var(--prp-bg-muted, #f6f8fa));
+  border-color: var(--borderColor-muted, var(--prp-border-muted, #d0d7de));
+  color: var(--fgColor-default, var(--prp-fg, #1f2328));
+  font-weight: 500;
+}
+
+.prp-reactions__emoji {
+  font-size: 14px;
+  line-height: 1;
+  font-family:
+    'Apple Color Emoji',
+    'Segoe UI Emoji',
+    'Noto Color Emoji',
+    sans-serif;
+}
+
+.prp-reactions__count {
+  font-variant-numeric: tabular-nums;
+  min-width: 0.75em;
+}
+
+.prp-reactions__add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  margin: 0;
+  border: 1px solid transparent;
+  border-radius: 100px;
+  background: transparent;
+  color: var(--fgColor-muted, var(--prp-fg-muted, #656d76));
+  cursor: pointer;
+}
+
+.prp-reactions__add:hover:not(:disabled),
+.prp-reactions__add[aria-expanded='true'] {
+  background: var(--bgColor-muted, var(--prp-bg-muted, #f6f8fa));
+  border-color: var(--borderColor-muted, var(--prp-border-muted, #d0d7de));
+  color: var(--fgColor-default, var(--prp-fg, #1f2328));
+}
+
+.prp-reactions__add:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.prp-reactions__picker-host {
+  position: relative;
+  display: inline-flex;
+}
+
+.prp-reactions__picker {
+  position: absolute;
+  z-index: 40;
+  bottom: calc(100% + 6px);
+  left: 0;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid var(--borderColor-default, var(--prp-border, #d0d7de));
+  border-radius: 12px;
+  background: var(--bgColor-default, var(--prp-bg, #fff));
+  box-shadow:
+    0 8px 24px rgba(140, 149, 159, 0.2),
+    0 0 0 1px rgba(140, 149, 159, 0.06);
+}
+
+/* Portaled to document.body — viewport-fixed coords from placeReactionPicker()
+   (explicit top/left; no translateY so height never shifts the box).
+   Do not set top/left with !important — that would beat the inline coords from
+   JS and pin the menu at (0,0) / thread top. Only clear absolute host defaults. */
+.prp-reactions__picker--portal {
+  position: fixed !important;
+  right: auto !important;
+  bottom: auto !important;
+  margin: 0;
+  transform: none !important;
+  z-index: var(--prp-z-tip, 100020);
+  box-shadow:
+    0 12px 32px rgba(1, 4, 9, 0.22),
+    0 0 0 1px rgba(140, 149, 159, 0.08);
+}
+
+.prp-reactions__picker-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.prp-reactions__picker-emoji {
+  font-size: 18px;
+  line-height: 1;
+  font-family:
+    'Apple Color Emoji',
+    'Segoe UI Emoji',
+    'Noto Color Emoji',
+    sans-serif;
+}
+
+/* Digit hotkeys 1–8: small chip, top-left of each emoji cell */
+.prp-reactions__picker-key {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 11px;
+  height: 11px;
+  padding: 0 2px;
+  border-radius: 3px;
+  border: 1px solid var(--borderColor-muted, var(--prp-border-muted, #d0d7de));
+  background: var(--bgColor-default, var(--prp-bg, #fff));
+  box-shadow: 0 1px 2px rgba(1, 4, 9, 0.08);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--fgColor-muted, var(--prp-fg-muted, #656d76));
+  pointer-events: none;
+}
+
+.prp-reactions__picker-btn:hover:not(:disabled) {
+  background: var(--bgColor-muted, var(--prp-bg-muted, #f6f8fa));
+}
+
+.prp-reactions__picker-btn:hover:not(:disabled) .prp-reactions__picker-key,
+.prp-reactions__picker-btn:focus-visible .prp-reactions__picker-key {
+  color: var(--fgColor-default, var(--prp-fg, #1f2328));
+  border-color: var(--borderColor-default, var(--prp-border, #d0d7de));
+  background: var(--bgColor-muted, var(--prp-bg-muted, #f6f8fa));
+}
+
+.prp-reactions__picker-btn.is-reacted {
+  background: var(
+    --bgColor-accent-muted,
+    color-mix(in srgb, var(--fgColor-accent, #0969da) 14%, transparent)
+  );
+}
+
+.prp-reactions__picker-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.prp-reactions__picker-btn:focus-visible {
+  outline: 1px solid
+    color-mix(in srgb, var(--fgColor-accent, #0969da) 38%, transparent);
+  outline-offset: 0;
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--fgColor-accent, #0969da) 16%, transparent);
+}
+
+/* Dark mode */
+[data-color-mode='dark'] .prp-reactions__pill,
+html[data-color-mode='dark'] .prp-reactions__pill {
+  background: var(--bgColor-muted, #21262d);
+  border-color: var(--borderColor-muted, #30363d);
+  color: var(--fgColor-default, #e6edf3);
+}
+
+[data-color-mode='dark'] .prp-reactions__pill.is-reacted,
+html[data-color-mode='dark'] .prp-reactions__pill.is-reacted {
+  background: rgba(56, 139, 253, 0.2);
+  border-color: rgba(56, 139, 253, 0.55);
+  color: #58a6ff;
+  box-shadow: inset 0 0 0 1px rgba(56, 139, 253, 0.15);
+}
+
+[data-color-mode='dark'] .prp-reactions__pill.is-others,
+html[data-color-mode='dark'] .prp-reactions__pill.is-others {
+  background: var(--bgColor-muted, #21262d);
+  border-color: var(--borderColor-muted, #30363d);
+  color: var(--fgColor-default, #e6edf3);
+}
+
+[data-color-mode='dark'] .prp-reactions__picker,
+html[data-color-mode='dark'] .prp-reactions__picker {
+  background: var(--bgColor-default, #161b22);
+  border-color: var(--borderColor-default, #30363d);
+  box-shadow: 0 8px 24px rgba(1, 4, 9, 0.45);
+}
+
+[data-color-mode='dark'] .prp-reactions__picker-key,
+html[data-color-mode='dark'] .prp-reactions__picker-key {
+  background: var(--bgColor-muted, #21262d);
+  border-color: var(--borderColor-muted, #30363d);
+  color: var(--fgColor-muted, #8b949e);
+}

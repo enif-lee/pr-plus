@@ -1,0 +1,643 @@
+/**
+ * Residual CSS (cannot fully express via Tailwind utilities).
+ * Colocated next to owning domain; imported from styles/index.css.
+ * Migrated from styles/parts/25-hide-line-comment-affordance-permanently.css
+ */
+
+/* Hide line + comment affordance permanently */
+.prp-line-comment-btn {
+  display: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .prp-selection-island--in,
+  .prp-selection-island--out,
+  .prp-selection-group--in,
+  .prp-selection-group--out,
+  .prp-sselect-panel,
+  .prp-sselect-backdrop,
+  .prp-btn__shortcut-pop {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* ── Markdown composer (Write / Preview, no B/I toolbar) ── */
+.prp-mdc {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  position: relative;
+  /* Allow @mention /slash menus to paint above neighboring rows */
+  overflow: visible;
+}
+.prp-mdc__ghost {
+  appearance: none;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid var(--prp-border);
+  border-radius: 8px;
+  background: var(--prp-bg-muted);
+  color: var(--prp-fg-muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: text;
+}
+.prp-mdc__ghost:hover,
+.prp-mdc__ghost:focus-visible {
+  border-color: var(--prp-accent);
+  outline: none;
+}
+.prp-mdc__tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--prp-border-muted);
+}
+.prp-mdc__ta {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 64px;
+  resize: vertical;
+}
+.prp-mdc__preview {
+  min-height: 80px;
+  padding: 10px 12px;
+  border: 1px solid var(--prp-border-muted);
+  border-radius: 8px;
+  background: var(--prp-bg-muted);
+}
+.prp-mdc--drag {
+  outline: 2px dashed var(--prp-accent);
+  outline-offset: 2px;
+  border-radius: 10px;
+}
+.prp-mdc__drop-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--prp-accent) 12%, transparent);
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--prp-accent);
+  pointer-events: none;
+  z-index: 2;
+}
+.prp-mdc__hint,
+.prp-mdc__upload-msg {
+  font-size: 11px;
+}
+
+/* ── Anchored searchable select popover ──
+ * Base geometry only — stacking is owned by SearchableSelect.css
+ * (body portal at --prp-z-portal 120000 above ShortcutHint tips). */
+.prp-sselect-panel--popover {
+  position: fixed;
+  width: min(320px, 92vw);
+  max-height: min(50vh, 320px);
+  box-shadow: 0 12px 40px rgba(1, 4, 9, 0.22);
+  animation: prp-float-up 160ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.prp-sselect-panel--center {
+  position: relative;
+}
+.prp-sselect-backdrop--soft {
+  position: fixed;
+  inset: 0;
+  background: transparent;
+  /* Do not steal clicks from stack chips / modal — outside close uses mousedown capture */
+  pointer-events: none;
+  pointer-events: auto;
+}
+
+/* ── Icon action buttons (edit/delete far-right) ── */
+.prp-icon-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.prp-icon-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--prp-fg-muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
+}
+/* Keep review-group goto-diff horizontal inset after base icon-btn margin:0 */
+.prp-icon-btn.prp-review-group__jump {
+  margin-left: 4px;
+  margin-right: 4px;
+}
+.prp-icon-btn:hover,
+.prp-icon-btn:focus-visible {
+  opacity: 1;
+  background: var(--prp-bg-muted);
+  color: var(--prp-fg);
+  outline: none;
+}
+.prp-icon-btn--danger:hover,
+.prp-icon-btn--danger:focus-visible {
+  color: var(--prp-danger, #cf222e);
+  background: color-mix(in srgb, var(--prp-danger, #cf222e) 12%, transparent);
+}
+.prp-icon-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.prp-conversation-feed__meta,
+.prp-review-thread__meta,
+.prp-inline-thread__head--flat {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.prp-conversation-feed__meta .prp-icon-actions,
+.prp-review-thread__meta .prp-icon-actions {
+  margin-left: auto;
+}
+
+/* GitHub-style minimized (hidden) comment — compact row */
+.prp-comment-minimized {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 5px 10px;
+  margin: 0;
+  border-radius: 6px;
+  border: 1px solid var(--prp-border, rgba(128, 128, 128, 0.22));
+  background: var(--prp-bg-muted, rgba(128, 128, 128, 0.07));
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--prp-fg-muted, #656d76);
+}
+.prp-comment-minimized--compact {
+  padding: 5px 10px;
+}
+.prp-comment-minimized .prp-link-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--prp-accent, #0969da);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 500;
+  padding: 0;
+  text-decoration: none;
+}
+.prp-comment-minimized .prp-link-btn:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.prp-comment-minimized .prp-link-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.prp-review-thread__item--minimized,
+.prp-inline-thread__single--minimized {
+  list-style: none;
+  margin: 2px 0;
+  padding: 0;
+}
+/* ↑/↓ unit focus within a multi-reply review thread.
+ * Outline is painted outside the box — item margin (ConversationThread.css
+ * --prp-rt-item-gap) keeps the ring from overlapping the next comment. */
+.prp-review-thread__item--unit-focus {
+  outline: 2px solid var(--prp-accent, #0969da);
+  outline-offset: 2px;
+  border-radius: 8px;
+  /* Ensure ring sits above sibling content / rail paint */
+  z-index: 1;
+}
+
+/* ── Base branch pencil ── */
+.prp-branch-tag--base {
+  gap: 4px;
+}
+.prp-branch-tag__edit {
+  font-size: 11px;
+  opacity: 0.65;
+  flex-shrink: 0;
+}
+.prp-branch-tag--base:hover .prp-branch-tag__edit,
+.prp-branch-tag__edit-btn:hover:not(:disabled) .prp-branch-tag__edit,
+.prp-branch-tag__edit-btn:focus-visible:not(:disabled) .prp-branch-tag__edit {
+  opacity: 1;
+}
+a.prp-commit-timeline__sha {
+  text-decoration: none;
+}
+a.prp-commit-timeline__sha:hover,
+a.prp-commit-timeline__sha:focus-visible {
+  text-decoration: underline;
+  color: var(--prp-accent);
+  outline: none;
+}
+a.prp-commit-timeline__sha code {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+}
+
+/* ── Thread collapse toggle ── */
+.prp-thread-toggle {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.prp-thread-toggle:hover .prp-inline-thread__loc,
+.prp-thread-toggle:focus-visible .prp-inline-thread__loc,
+.prp-thread-toggle:hover .prp-review-thread__file-loc,
+.prp-thread-toggle:focus-visible .prp-review-thread__file-loc {
+  color: var(--prp-accent);
+}
+.prp-thread-toggle:hover .prp-thread-toggle__icon,
+.prp-thread-toggle:focus-visible .prp-thread-toggle__icon {
+  color: var(--prp-accent);
+  background: transparent;
+}
+.prp-thread-toggle__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  border-radius: 6px;
+  color: var(--prp-fg);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
+  flex-shrink: 0;
+  background: transparent;
+}
+.prp-thread-toggle__count {
+  font-size: 12px;
+  white-space: nowrap;
+}
+.prp-inline-thread__filebar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+}
+/* Match expanded .prp-inline-thread__body horizontal rhythm (8px 12px 10px) */
+.prp-inline-thread__collapsed-preview {
+  padding: 8px 12px 10px;
+  cursor: pointer;
+  border-radius: 0 0 8px 8px;
+}
+.prp-inline-thread__collapsed-preview:hover,
+.prp-inline-thread__collapsed-preview:focus-visible {
+  background: color-mix(in srgb, var(--prp-fg-muted) 8%, transparent);
+  outline: none;
+}
+.prp-inline-thread--collapsed .prp-inline-thread__card {
+  opacity: 0.96;
+}
+/* Same filebar padding as open (4px 10px) — no tighter collapsed chrome */
+.prp-inline-thread--collapsed .prp-inline-thread__filebar {
+  margin: 0;
+  padding: 4px 10px;
+}
+
+/* ── Merge box checks detail ── */
+.prp-merge-box__checks {
+  margin: 8px 0 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--prp-border-muted);
+  background: var(--prp-bg-muted);
+}
+
+/* GitHub-style merge-box check groups (failing / skipped / successful) */
+.prp-merge-checks {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.prp-merge-checks__headline {
+  display: flex;
+  align-items: flex-start;
+  min-width: 0;
+}
+.prp-merge-checks__headline-copy {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.prp-merge-checks__title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.35;
+  color: var(--prp-fg);
+}
+.prp-merge-checks__subtitle {
+  margin: 2px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.prp-merge-checks__panel {
+  border: 1px solid var(--prp-border-muted);
+  border-radius: 8px;
+  background: var(--prp-bg);
+  overflow: hidden;
+}
+.prp-merge-checks__group + .prp-merge-checks__group {
+  border-top: 1px solid var(--prp-border-muted);
+}
+.prp-merge-checks__group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin: 0;
+  padding: 8px 12px;
+  border: 0;
+  background: transparent;
+  color: var(--prp-fg-muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.prp-merge-checks__group-toggle:hover {
+  background: color-mix(in srgb, var(--prp-bg-muted) 70%, var(--prp-bg));
+  color: var(--prp-fg);
+}
+.prp-merge-checks__group-label {
+  min-width: 0;
+}
+.prp-merge-checks__group-glyph {
+  color: var(--prp-fg-muted);
+  flex: 0 0 auto;
+}
+.prp-merge-checks__list {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 6px;
+}
+.prp-merge-checks__item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 12px 6px 14px;
+  min-width: 0;
+}
+.prp-merge-checks__item + .prp-merge-checks__item {
+  border-top: 1px solid color-mix(in srgb, var(--prp-border-muted) 70%, transparent);
+}
+.prp-merge-checks__item-status {
+  flex: 0 0 auto;
+  display: inline-flex;
+  margin-top: 1px;
+  line-height: 0;
+}
+.prp-merge-checks__item-icon--failure {
+  color: var(--prp-danger);
+}
+.prp-merge-checks__item-icon--success {
+  color: var(--prp-ok);
+}
+.prp-merge-checks__item-icon--skipped {
+  color: var(--prp-fg-muted);
+}
+.prp-merge-checks__item-icon--pending,
+.prp-merge-checks__item-icon--in_progress {
+  color: var(--prp-warn);
+}
+.prp-merge-checks__item-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.prp-merge-checks__item-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.prp-merge-checks__item-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--prp-fg);
+  text-decoration: none;
+  word-break: break-word;
+}
+a.prp-merge-checks__item-name:hover {
+  color: var(--prp-accent);
+  text-decoration: underline;
+}
+.prp-merge-checks__item-summary {
+  font-size: 12px;
+  line-height: 1.35;
+}
+.prp-merge-checks__required {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 3px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--prp-border);
+  color: var(--prp-fg-muted);
+  background: var(--prp-bg-muted);
+}
+
+.prp-checks--compact .prp-checks-list {
+  max-height: 140px;
+  overflow: auto;
+  font-size: 12px;
+}
+.prp-checks-list__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.prp-checks-list__icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+}
+.prp-checks-list__name {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prp-checks-link {
+  margin-left: auto;
+  flex: 0 0 auto;
+  font-size: 11px;
+}
+.prp-checks-link--icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+  color: var(--prp-fg-muted);
+  text-decoration: none;
+  padding: 2px;
+  border-radius: 4px;
+  line-height: 0;
+}
+.prp-checks-link--icon:hover,
+.prp-checks-link--icon:focus-visible {
+  color: var(--prp-accent);
+  background: color-mix(in srgb, var(--prp-accent) 10%, transparent);
+  outline: none;
+}
+.prp-checks-link__icon {
+  display: block;
+}
+.prp-checks-summary {
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
+/* Compact Checks: stacked outcome icons (avatar-stack style) + per-group tips */
+.prp-checks-summary-ctrl {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  color: var(--prp-fg);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+  border-radius: 6px;
+  outline: none;
+  overflow: visible;
+}
+.prp-checks-summary-ctrl__label {
+  color: var(--prp-fg-muted);
+  font-weight: 650;
+}
+.prp-checks-summary-stack {
+  display: inline-flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0;
+  line-height: 0;
+  min-height: 20px;
+}
+.prp-checks-summary-stack__item {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  margin-left: -6px;
+  border-radius: 999px;
+  background: var(--prp-bg);
+  box-shadow:
+    0 0 0 1.5px var(--prp-bg),
+    0 0 0 2.5px var(--prp-border-muted);
+  line-height: 0;
+  cursor: default;
+}
+.prp-checks-summary-stack__item:first-child {
+  margin-left: 0;
+}
+.prp-checks-summary-stack__item:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 1.5px var(--prp-bg),
+    0 0 0 2.5px var(--prp-accent);
+}
+.prp-checks-summary-stack__item--failure {
+  box-shadow:
+    0 0 0 1.5px var(--prp-bg),
+    0 0 0 2.5px var(--prp-danger);
+}
+.prp-checks-summary-stack__item--success {
+  box-shadow:
+    0 0 0 1.5px var(--prp-bg),
+    0 0 0 2.5px var(--prp-ok);
+}
+.prp-checks-summary-stack__item--pending,
+.prp-checks-summary-stack__item--in_progress {
+  box-shadow:
+    0 0 0 1.5px var(--prp-bg),
+    0 0 0 2.5px var(--prp-warn);
+}
+.prp-checks-summary-stack__item--skipped {
+  box-shadow:
+    0 0 0 1.5px var(--prp-bg),
+    0 0 0 2.5px var(--prp-fg-muted);
+}
+.prp-checks-summary-stack__item .prp-checks-summary-icon,
+.prp-checks-summary-stack__item .prp-octicon {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+.prp-checks-summary-icon--success {
+  color: var(--prp-ok);
+}
+.prp-checks-summary-icon--failure {
+  color: var(--prp-danger);
+}
+.prp-checks-summary-icon--pending {
+  color: var(--prp-warn);
+}
+.prp-checks-summary-icon--skipped {
+  color: var(--prp-fg-muted);
+}
+/* Working / in-progress: amber ring spinner (GitHub-like) */
+.prp-checks-summary-icon--working {
+  display: inline-block;
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  border: 2px solid color-mix(in srgb, var(--prp-warn) 28%, transparent);
+  border-top-color: var(--prp-warn);
+  border-radius: 50%;
+  animation: prp-spin 0.75s linear infinite;
+  vertical-align: middle;
+}
+.prp-checks-summary-icon--spin {
+  animation: prp-spin 0.85s linear infinite;
+}

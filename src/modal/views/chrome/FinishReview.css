@@ -1,0 +1,478 @@
+/**
+ * Residual CSS (cannot fully express via Tailwind utilities).
+ * Colocated next to owning domain; imported from styles/index.css.
+ * Migrated from styles/parts/23-finish-review-cta-opt-badges-stack-above.css
+ */
+
+/* Finish-review CTA Opt badges stack above the popover */
+.prp-opt-btn-hint--finish {
+  z-index: var(--prp-z-dialog-top, 100110);
+}
+/* Review filter + thread navigator — pin to the right of the toolbar */
+.prp-diff-toolbar__thread-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+/* When both thread-tools and pending are present, only the first margin-left:auto
+   absorbs free space — they stay grouped on the right. */
+.prp-diff-toolbar__thread-tools + .prp-diff-toolbar__pending {
+  margin-left: 0;
+}
+.prp-diff-toolbar__comments {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+}
+/* StepNav + gear: single control group (no inflated gap after ↑) */
+.prp-diff-toolbar__thread-nav {
+  display: inline-flex;
+  align-items: stretch;
+  flex: 0 0 auto;
+  gap: 0;
+}
+.prp-diff-toolbar__thread-nav .prp-step-nav {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.prp-diff-toolbar__filter-gear {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  margin-left: -1px;
+  box-sizing: border-box;
+  width: var(--prp-diff-ctrl-h, 28px);
+  min-width: var(--prp-diff-ctrl-h, 28px);
+  height: var(--prp-diff-ctrl-h, 28px);
+  min-height: var(--prp-diff-ctrl-h, 28px);
+  padding: 0;
+  border: 1px solid var(--prp-border);
+  border-radius: 0 8px 8px 0;
+  background: var(--prp-bg);
+  color: var(--prp-fg-muted);
+  cursor: pointer;
+}
+.prp-diff-toolbar__filter-gear:hover,
+.prp-diff-toolbar__filter-gear:focus-visible {
+  color: var(--prp-accent);
+  background: color-mix(in srgb, var(--prp-accent) 8%, transparent);
+  outline: none;
+}
+.prp-diff-toolbar__filter-gear[aria-expanded='true'] {
+  color: var(--prp-accent);
+  background: color-mix(in srgb, var(--prp-accent) 12%, var(--prp-bg));
+}
+/* Standalone gear (no StepNav): full rounded control */
+.prp-diff-toolbar__filter-gear--alone {
+  margin-left: 0;
+  border-radius: 8px;
+}
+.prp-diff-review-settings {
+  position: absolute;
+  z-index: var(--prp-z-popover, 100050);
+  right: 0;
+  min-width: 220px;
+  max-width: 280px;
+  max-height: min(360px, 70vh);
+  overflow: auto;
+  margin-top: 4px;
+  padding: 8px 0;
+  border: 1px solid var(--prp-border);
+  border-radius: 10px;
+  background: var(--prp-bg-elevated, var(--prp-bg));
+  box-shadow: var(--prp-shadow-md, 0 8px 24px rgba(0, 0, 0, 0.12));
+  color: var(--prp-fg);
+  font-size: 13px;
+}
+/**
+ * Portaled into `.prp-overlay` (or body) so Diff shell / toolbar
+ * `overflow: hidden` never clips Diff view / Reviewed-by content.
+ * Coordinates are set inline (viewport fixed).
+ */
+.prp-diff-review-settings--portal {
+  position: fixed;
+  right: auto;
+  margin-top: 0;
+  width: 240px;
+  min-width: 220px;
+  max-width: min(280px, calc(100vw - 16px));
+  /* Above Diff toolbar chrome; below dialogs (FinishReview ~100110) */
+  z-index: var(--prp-z-dialog, 100100);
+  box-sizing: border-box;
+}
+.prp-diff-review-settings__section {
+  padding: 4px 12px 8px;
+}
+.prp-diff-review-settings__heading {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--prp-fg-muted);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.prp-diff-review-settings__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 4px 0;
+  cursor: pointer;
+  line-height: 1.35;
+  font-weight: 500;
+  color: var(--prp-fg);
+}
+.prp-diff-review-settings__row input {
+  margin: 2px 0 0;
+  flex-shrink: 0;
+}
+.prp-diff-review-settings__row--author {
+  align-items: center;
+}
+.prp-diff-review-settings__row--author input {
+  margin: 0;
+}
+.prp-diff-review-settings__author {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.prp-diff-review-settings__author .prp-avatar {
+  flex-shrink: 0;
+}
+.prp-diff-review-settings__author-login {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Segmented Unified | Split — matches former Diff toolbar toggle */
+.prp-diff-review-settings__mode.prp-diff-mode {
+  display: flex;
+  width: 100%;
+  margin: 0 0 8px;
+  box-sizing: border-box;
+  height: var(--prp-diff-ctrl-h, 28px);
+  min-height: var(--prp-diff-ctrl-h, 28px);
+  align-items: stretch;
+  gap: 2px;
+  padding: 2px;
+}
+.prp-diff-review-settings__mode .prp-diff-mode__opt {
+  flex: 1 1 0;
+  justify-content: center;
+  margin: 0;
+  /* hide native radio; segment uses :has(input:checked) paint */
+  position: relative;
+}
+.prp-diff-review-settings__mode .prp-diff-mode__opt input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  pointer-events: none;
+}
+.prp-diff-review-settings__row--after-mode {
+  padding-top: 2px;
+}
+.prp-diff-review-settings__empty {
+  margin: 0;
+  padding: 4px 0;
+  color: var(--prp-fg-muted);
+  font-size: 12px;
+}
+.prp-diff-review-settings__divider {
+  height: 1px;
+  margin: 4px 0 8px;
+  background: var(--prp-border);
+  border: 0;
+}
+.prp-diff-toolbar__thread-nav-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Unresolved | All — deselectable segment, UI font (not mono ext chips) */
+.prp-review-filter {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--prp-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--prp-bg);
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  height: var(--prp-diff-ctrl-h, 28px);
+  min-height: var(--prp-diff-ctrl-h, 28px);
+}
+.prp-review-filter__btn {
+  appearance: none;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  border: 0;
+  border-right: 1px solid var(--prp-border);
+  background: transparent;
+  color: var(--prp-fg-muted);
+  font: inherit;
+  font-family: var(--prp-font);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  box-sizing: border-box;
+  height: 100%;
+  padding: 0 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 120ms ease, color 120ms ease;
+}
+.prp-review-filter__btn:last-child {
+  border-right: 0;
+}
+.prp-review-filter__btn:hover,
+.prp-review-filter__btn:focus-visible {
+  color: var(--prp-accent);
+  background: color-mix(in srgb, var(--prp-accent) 8%, transparent);
+  outline: none;
+}
+/*
+ * Selected underline via ::after (not inset box-shadow).
+ * Inset shadow + parent overflow:hidden often only painted after blur /
+ * when Diff stole focus — felt like random / delayed selected marking.
+ */
+.prp-review-filter__btn--on,
+.prp-review-filter__btn[aria-pressed='true'] {
+  color: var(--prp-accent);
+  background: color-mix(in srgb, var(--prp-accent) 14%, var(--prp-bg));
+  box-shadow: none;
+}
+.prp-review-filter__btn--on::after,
+.prp-review-filter__btn[aria-pressed='true']::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--prp-accent);
+  pointer-events: none;
+}
+.prp-review-filter__count {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+  margin-left: 0.2em;
+  font-weight: 600;
+}
+
+.prp-diff-toolbar__range-hint,
+.prp-commit-filter__status {
+  font-size: 11px;
+}
+
+/* Thread box: nested replies + reply composer inside one card */
+.prp-card--timeline-review-thread .prp-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding-bottom: 0;
+}
+
+/* Compact file:line header — path left, meta right */
+.prp-review-thread__file-header {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  margin: 0 0 4px;
+  padding: 0 0 3px;
+  border-bottom: 1px solid var(--prp-border-muted);
+  min-width: 0;
+  min-height: 18px;
+  line-height: 1.2;
+}
+
+.prp-review-thread__file-header-main {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: flex-start;
+}
+
+.prp-review-thread__file-header-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.prp-review-thread__file-loc {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.2;
+  color: var(--prp-fg-muted);
+  opacity: 0.95;
+  text-align: left;
+}
+button.prp-review-thread__file-loc--link {
+  appearance: none;
+  display: inline-block;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.2;
+  text-align: left;
+  color: var(--prp-accent);
+  opacity: 1;
+  cursor: pointer;
+  text-decoration: none;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+button.prp-review-thread__file-loc--link:hover,
+button.prp-review-thread__file-loc--link:focus-visible {
+  text-decoration: underline;
+  outline: none;
+}
+.prp-thread-toggle--icon-only {
+  flex: 0 0 auto !important;
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  padding: 0;
+  gap: 0;
+}
+.prp-thread-toggle--icon-only .prp-thread-toggle__icon {
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  border-radius: 6px;
+  font-size: 16px;
+}
+.prp-thread-toggle--icon-only .prp-octicon--disclosure {
+  width: 16px;
+  height: 16px;
+}
+
+.prp-review-thread__file-side {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  line-height: 1.2;
+}
+
+.prp-review-thread__file-header .prp-thread-toggle__count {
+  font-size: 10px;
+  line-height: 1.2;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.prp-review-thread__file-header .prp-badge {
+  flex-shrink: 0;
+  font-size: 9px;
+  padding: 0 5px;
+  line-height: 1.35;
+  min-height: 0;
+}
+
+.prp-conversation-thread {
+  margin: 0;
+  padding: 4px 0 0;
+}
+.prp-conversation-thread__composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 -2px 0;
+  padding: 12px 2px 14px;
+  border-top: 1px solid var(--prp-border-muted);
+}
+.prp-conversation-thread__collapsed-preview {
+  padding: 6px 2px 4px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+.prp-conversation-thread__collapsed-preview:hover,
+.prp-conversation-thread__collapsed-preview:focus-visible {
+  background: color-mix(in srgb, var(--prp-fg-muted) 8%, transparent);
+  outline: none;
+}
+/*
+ * Folded-thread 2-line markdown preview lives in MarkdownView.css
+ * under the double-class selector that beats bare .prp-md flow-root.
+ * Diff InlineThread + Conversation both use that class on collapsed bodies.
+ */
+.prp-card--timeline-review-thread--collapsed .prp-review-thread__file-header {
+  margin-bottom: 0;
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+.prp-thread-toggle--static {
+  cursor: default;
+}
+.prp-thread-toggle--static:hover .prp-review-thread__file-loc,
+.prp-thread-toggle--static:focus-visible .prp-review-thread__file-loc {
+  color: inherit;
+}
+
+.prp-diff-chrome {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--prp-border-muted);
+  background: var(--prp-bg);
+  font-size: 12px;
+}
+.prp-diff-chrome__labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+/* ── Hover/focus tip popover (buttons + header icon actions) ── */
+.prp-btn,
+.prp-header__icon-btn,
+.prp-header__more-btn,
+.prp-icon-btn,
+.prp-shell-toggle {
+  position: relative;
+}
+.prp-has-tip,
+.prp-btn--has-tip,
+.prp-btn--has-shortcut {
+  /* reserve nothing permanently; tooltip overlays */
+}

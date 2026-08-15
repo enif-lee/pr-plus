@@ -1,0 +1,593 @@
+/**
+ * Residual CSS (cannot fully express via Tailwind utilities).
+ * Colocated next to owning domain; imported from styles/index.css.
+ * Migrated from styles/parts/19-standalone-conversation-thread-1-level-p.css
+ */
+
+/* GitHub-style minimized (hidden) comment — compact row only */
+.prp-comment-minimized-card {
+  display: block;
+  margin: 2px 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  min-width: 0;
+  /* Host is transparent; painted radius lives on .prp-comment-minimized (6px).
+   * Kb-focus ring targets the banner child (DiffSearchMarks). */
+}
+.prp-comment-minimized {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 6px 10px;
+  margin: 0;
+  border-radius: 6px;
+  border: 1px solid var(--prp-border, rgba(128, 128, 128, 0.22));
+  background: var(--prp-bg-muted, rgba(128, 128, 128, 0.07));
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--prp-fg-muted, #656d76);
+  box-sizing: border-box;
+}
+.prp-comment-minimized--compact {
+  /* Single thin row — no surrounding full comment chrome */
+  padding: 5px 10px;
+  font-size: 12px;
+}
+.prp-comment-minimized .prp-link-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--prp-accent, #0969da);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 500;
+  padding: 0;
+  text-decoration: none;
+}
+.prp-comment-minimized .prp-link-btn:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.prp-comment-minimized .prp-link-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Compact GitHub-style system timeline rows (title rename, draft/ready, …)
+   Left rail: continuous vertical line with avatar centered on it. */
+.prp-timeline-event {
+  --prp-tl-rail: 28px;
+  --prp-tl-line: 2px;
+  display: flex;
+  align-items: center; /* avatar + body vertically centered */
+  gap: 10px;
+  min-width: 0;
+  min-height: 28px;
+  padding: 4px 4px 4px 0;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  color: var(--prp-fg-muted);
+  font-size: 13px;
+  line-height: 1.4;
+  position: relative;
+  /* Allow rail line to bridge into virtual-row gap */
+  overflow: visible;
+}
+.prp-timeline-event:focus-visible {
+  outline: 2px solid var(--prp-accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* Avatar column — continuous vertical line is drawn on the virtual spacer
+   (.prp-conversation-timeline-rail) so consecutive events share one stroke. */
+.prp-timeline-event__rail {
+  position: relative;
+  flex: 0 0 var(--prp-tl-rail);
+  width: var(--prp-tl-rail);
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100%;
+  z-index: 1;
+}
+/* Per-row stub removed; keep empty slot for layout only */
+.prp-timeline-event__rail-line {
+  display: none;
+}
+.prp-timeline-event__rail-avatar {
+  position: relative;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* Mask the continuous rail under the avatar */
+  box-shadow: 0 0 0 3px var(--prp-bg);
+  border-radius: 999px;
+  line-height: 0;
+  background: var(--prp-bg);
+}
+.prp-timeline-event__rail-avatar .prp-avatar {
+  flex: 0 0 auto;
+  opacity: 0.95;
+}
+
+.prp-timeline-event__body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center; /* narrative + time vertically centered */
+  gap: 4px 10px;
+  min-width: 0;
+  flex: 1 1 auto;
+  padding: 2px 0;
+}
+.prp-timeline-event__narrative {
+  min-width: 0;
+  color: var(--prp-fg-muted);
+  /* Inline pieces share one baseline / middle */
+  line-height: 1.4;
+}
+.prp-timeline-event__narrative > * {
+  vertical-align: middle;
+}
+.prp-timeline-event__actor {
+  color: var(--prp-fg);
+  font-weight: 600;
+}
+.prp-timeline-event__actor .prp-entity-link {
+  color: var(--prp-fg);
+  font-weight: 600;
+}
+.prp-timeline-event__actor .prp-entity-link:hover {
+  color: var(--prp-accent);
+}
+
+/* Value params = Badge chips (bordered / soft), not raw tinted text */
+.prp-timeline-event__narrative .prp-timeline-event__param,
+.prp-timeline-event__narrative .prp-badge {
+  margin: 0 2px;
+  vertical-align: middle;
+  position: relative;
+  top: -1px; /* optical center vs 13px narrative */
+}
+/* Title rename before/after: fixed max width + single-line ellipsis.
+   Full text lives on native `title` of the badge root *and* .prp-badge__text
+   so hover on the clipped span still shows the complete string. */
+.prp-timeline-event__param--title {
+  max-width: min(220px, 36vw) !important;
+  min-width: 0 !important;
+  height: 1.25rem !important;
+  min-height: 1.25rem;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis;
+  border-radius: 6px !important;
+  padding-top: 0;
+  padding-bottom: 0;
+  color: var(--prp-fg) !important;
+  background: var(--prp-bg-muted) !important;
+  vertical-align: middle;
+  /* Ensure pointer events reach the titled node (not a transparent overlay). */
+  pointer-events: auto;
+  cursor: default;
+}
+.prp-timeline-event__param--title .prp-badge__text {
+  display: block !important;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+  line-height: 1.25rem;
+  pointer-events: auto;
+}
+.prp-timeline-event__param--wide {
+  max-width: min(220px, 100%) !important;
+}
+.prp-timeline-event__param--mono {
+  font-family: var(--prp-mono);
+  font-weight: 500 !important;
+  letter-spacing: -0.01em;
+}
+.prp-timeline-event__param--mono code,
+.prp-timeline-event__param--mono .prp-mono {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  padding: 0;
+  border: 0;
+}
+/* User link inside soft badge inherits badge tone */
+.prp-timeline-event__param .prp-entity-link {
+  color: inherit;
+  font-weight: inherit;
+  text-decoration: none;
+}
+.prp-timeline-event__param .prp-entity-link:hover {
+  text-decoration: underline;
+}
+.prp-timeline-event__when {
+  flex: 0 0 auto;
+  font-size: 12px;
+  white-space: nowrap;
+  color: var(--prp-fg-muted);
+  opacity: 0.9;
+}
+/* Label chips inside system event narrative */
+.prp-timeline-event .prp-label-link,
+.prp-timeline-event a.prp-label {
+  vertical-align: middle;
+  display: inline-block;
+  margin: 0 2px;
+  position: relative;
+  top: -1px;
+}
+
+/* Let consecutive event rails connect across virtual-row padding */
+.prp-conversation-virtual__row:has(> .prp-timeline-event) {
+  overflow: visible;
+}
+
+/* Standalone conversation thread 1-level path header */
+.prp-conversation-thread-header {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px 6px 6px 8px;
+  border-bottom: 1px solid var(--prp-border-muted);
+  background: var(--prp-bg-muted);
+  border-radius: 0;
+}
+.prp-conversation-thread-header__toggle {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  min-height: 32px;
+}
+.prp-conversation-thread-header__toggle:hover,
+.prp-conversation-thread-header__toggle:focus-visible {
+  background: color-mix(in srgb, var(--prp-accent) 6%, transparent);
+  outline: none;
+}
+.prp-conversation-thread-header__chev {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  color: var(--prp-fg-muted);
+}
+.prp-conversation-thread-header__path {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--prp-fg);
+}
+/* Same inset as .prp-review-group__jump (shared path-row chrome) */
+.prp-conversation-thread-header__jump {
+  flex: 0 0 auto;
+  flex-shrink: 0;
+  margin-left: 4px;
+  margin-right: 4px;
+  color: var(--prp-fg-muted);
+}
+.prp-conversation-thread-header__jump:hover,
+.prp-conversation-thread-header__jump:focus-visible {
+  color: var(--prp-accent);
+}
+.prp-conversation-inline-thread .prp-inline-thread--conversation .prp-inline-thread__card {
+  border: 0;
+}
+.prp-review-group__badge {
+  flex-shrink: 0;
+}
+.prp-review-group__row-hint {
+  flex: 0 0 auto;
+  margin-left: auto;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.prp-review-group__thread {
+  border-top: 1px solid var(--prp-border-muted);
+  padding: 0;
+}
+.prp-review-group__thread .prp-inline-thread__hunk,
+.prp-review-group__thread .prp-inline-thread__card {
+  border-radius: 0;
+}
+.prp-review-group__show-resolved {
+  appearance: none;
+  align-self: flex-start;
+  margin: 2px 0 0;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--prp-accent);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.prp-review-group__show-resolved:hover,
+.prp-review-group__show-resolved:focus-visible {
+  text-decoration: underline;
+  outline: none;
+}
+
+/*
+ * Conversation review-thread unit chrome: ALWAYS drawn (independent of
+ * comment unit-focus / kb-focus). Kb-focus only elevates accent; do not
+ * remove this border when an inner comment is unit-focused.
+ */
+.prp-conversation-inline-thread {
+  margin: 0 0 var(--prp-gap-stack, 14px);
+  border: 1px solid var(--prp-border);
+  /* Match .prp-card / shell (10px) so focus ring geometry aligns */
+  border-radius: 10px;
+  background: var(--prp-bg);
+  overflow: hidden;
+  box-sizing: border-box;
+}
+/* Nested under a review-group path row: outer row owns the always-on unit outline */
+.prp-review-group__thread .prp-conversation-inline-thread {
+  border: 0;
+  border-radius: 0;
+  margin: 0;
+}
+.prp-conversation-inline-thread .prp-inline-thread {
+  margin: 0;
+  max-width: 100%;
+  padding: 0;
+}
+.prp-conversation-inline-thread .prp-inline-thread__card {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+/* Hunk sits under file header, above comments (GitHub conversation style) */
+.prp-inline-thread__hunk {
+  border-bottom: 1px solid var(--prp-border-muted);
+  background: var(--prp-bg);
+  overflow: auto;
+  border-radius: 0;
+}
+.prp-inline-thread__hunk .prp-diff-snippet {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  max-height: min(280px, 40vh);
+}
+.prp-conversation-inline-thread .prp-diff-snippet,
+.prp-conversation-inline-thread .prp-inline-thread__hunk {
+  border-bottom: 1px solid var(--prp-border-muted);
+  border-radius: 0 !important;
+}
+/* Conversation review-thread diff snippet: sharp corners (no rounded chip) */
+.prp-conversation-inline-thread .prp-diff-snippet,
+.prp-conversation-inline-thread .prp-diff-snippet--scroll,
+.prp-conversation-inline-thread .prp-diff-snippet__block,
+.prp-review-group__thread .prp-diff-snippet,
+.prp-review-group__thread .prp-diff-snippet--scroll,
+.prp-review-group__thread .prp-diff-snippet__block {
+  border-radius: 0 !important;
+}
+
+/* Single root comment: no vertical timeline */
+.prp-inline-thread--single .prp-inline-thread__head--flat {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px 0;
+  background: transparent;
+  border-bottom: 0;
+}
+
+.prp-inline-thread__head-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.prp-inline-thread__title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+/* Same inset as .prp-inline-thread__collapsed-preview (collapsed/open parity) */
+.prp-inline-thread__body {
+  padding: 8px 12px 10px;
+}
+
+.prp-inline-thread__comment-actions {
+  display: flex;
+  gap: 4px;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+/* Multi-comment: vertical rail between avatars; stops before last item */
+.prp-review-thread {
+  --prp-rt-gutter: 32px;
+  /* Room for unit-focus outline (2px + offset 2px) between comments */
+  --prp-rt-item-gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 10px 12px 4px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.prp-review-thread__item {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--prp-rt-gutter) minmax(0, 1fr);
+  column-gap: 10px;
+  /* padding = content breathing; margin = outline clearance (outline is out-of-flow) */
+  padding: 2px 2px 12px;
+  margin: 0 0 var(--prp-rt-item-gap);
+  align-items: start;
+}
+
+/* Connector line from this avatar down to the next — never on the last comment */
+.prp-review-thread__item:not(.prp-review-thread__item--last)::after {
+  content: '';
+  position: absolute;
+  left: calc(var(--prp-rt-gutter) / 2);
+  top: 30px;
+  /* Extend through item margin so the rail stays continuous */
+  bottom: calc(-1 * var(--prp-rt-item-gap));
+  width: 2px;
+  transform: translateX(-50%);
+  background: var(--prp-border-muted);
+  border-radius: 1px;
+  pointer-events: none;
+}
+
+.prp-review-thread__item--last {
+  padding-bottom: 8px;
+  margin-bottom: 2px;
+}
+.prp-review-thread__item--last::after {
+  content: none;
+  display: none;
+}
+
+.prp-review-thread__item--pending .prp-review-thread__content {
+  opacity: 0.92;
+}
+.prp-review-thread__item--pending .prp-md {
+  border-left: 2px solid color-mix(in srgb, var(--prp-warn) 55%, var(--prp-border));
+  padding-left: 8px;
+}
+
+.prp-review-thread__avatar {
+  justify-self: center;
+  z-index: 1;
+  position: relative;
+  background: var(--prp-bg);
+  box-shadow: 0 0 0 2px var(--prp-bg);
+}
+
+.prp-review-thread__content {
+  min-width: 0;
+  max-width: 100%;
+  padding-top: 2px;
+  font-size: 14px;
+  line-height: 1.5;
+  overflow: hidden; /* keep fenced code scroll inside the column */
+}
+.prp-review-thread__content .prp-md,
+.prp-review-thread__content .prp-md > div {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.prp-review-thread__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+
+.prp-inline-thread__composer {
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--prp-border-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--prp-bg);
+}
+
+/* Field wrapper keeps border chrome separate from opt-hint hosts */
+.prp-inline-thread__composer-field {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+/* Ensure reply input keeps a visible border (ghost + open textarea) */
+.prp-inline-thread__composer .prp-mdc__ghost {
+  border: 1px solid var(--prp-border);
+  border-radius: 8px;
+  background: var(--prp-bg-muted);
+}
+.prp-inline-thread__composer .prp-mdc__ta.prp-textarea,
+.prp-inline-thread__composer textarea.prp-mdc__ta {
+  border: 1px solid var(--prp-border);
+  border-radius: 8px;
+  background: var(--prp-bg);
+  color: var(--prp-fg);
+}
+.prp-inline-thread__composer .prp-mdc__ta:focus,
+.prp-inline-thread__composer .prp-mdc__ta:focus-visible {
+  border-color: var(--prp-accent);
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--prp-accent) 18%, transparent);
+}
+/*
+ * ShortcutHint measures host getBoundingClientRect — must be non-zero size
+ * (width/height 0 made hostIsLive fail and tips never portal).
+ */
+.prp-inline-thread__context-hint {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* Comment / Start review hidden until focus/draft; Resolve path forces --open in JSX */
+.prp-inline-thread__composer-actions {
+  display: none;
+}
+.prp-inline-thread__composer:focus-within .prp-inline-thread__composer-actions,
+.prp-inline-thread__composer-actions--open {
+  display: flex;
+}
+
+/* Expanded comment row: content-sized (do not force large min-height).
+ * Row may open overflow for virtual-list measure, but the card MUST keep
+ * overflow:hidden so filebar/body never paint over border-radius corners.
+ * (overflow:visible on the card made "RIGHT" etc. sit on top of the border.) */
+.prp-vline--comment:not(.prp-vline--comment-collapsed):not([data-collapsed='1']) {
+  min-height: 0 !important;
+  height: auto !important;
+  box-sizing: border-box;
+  overflow: visible !important;
+  contain: layout style !important; /* drop paint containment */
+}
+.prp-vline--comment:not(.prp-vline--comment-collapsed):not([data-collapsed='1'])
+  .prp-inline-thread__card {
+  overflow: hidden; /* clip to border-radius — never paint over the stroke */
+}
+.prp-vline--comment:not(.prp-vline--comment-collapsed):not([data-collapsed='1'])
+  .prp-review-thread__content {
+  overflow-x: auto;
+  overflow-y: visible;
+}
+

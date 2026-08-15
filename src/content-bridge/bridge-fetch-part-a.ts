@@ -1,0 +1,687 @@
+/** PRTreeFetch part A */
+import { MSG } from '../sw-messages';
+import {
+  send,
+  isAbortError,
+  pageEndpointContext,
+  whenAborted,
+  cancelFetches,
+  makeAbortError,
+} from './bridge-channel';
+import {
+  findDanglingPrNumbers,
+  emptyReviewThreadsMetaLocal,
+  dropReviewThreadsFromDetailLocal,
+  mergeReviewThreadsPageIntoDetailLocal,
+  collectUnresolvedThreadNodeIdsLocal,
+  isGraphqlReviewThreadNodeIdBridge,
+} from './bridge-threads-local';
+
+export const prTreeFetchPartA = {
+  findDanglingPrNumbers,
+  async fetchOpenPulls(owner: any, repo: any, _fetchImpl: any, options: any = {}) {
+    const res = await send(
+      {
+        type: MSG.FETCH_OPEN_PULLS,
+        owner,
+        repo,
+        pagePrNumbers: options.pagePrNumbers || [],
+      },
+      { signal: options.signal || null }
+    );
+    if (!res?.ok) {
+      if (res?.aborted) throw makeAbortError();
+      const err = new Error(res?.error || 'Failed to fetch pull requests');
+      err.status = res?.status;
+      throw err;
+    }
+    return res.prs || [];
+  },
+  async fetchDanglingPulls(owner: any, repo: any, numbers: any) {
+    const res = await send({
+      type: MSG.FETCH_DANGLING,
+      owner,
+      repo,
+      numbers: numbers || [],
+    });
+    if (!res?.ok) {
+      const err = new Error(res?.error || 'Failed to fetch dangling PRs');
+      err.status = res?.status;
+      throw err;
+    }
+    return res.prs || [];
+  },
+  /**
+   * @param {{ skipReviewThreads?: boolean, threadsMaxPages?: number }} [opts]
+   */
+  async fetchPrDetail(owner: any, repo: any, number: any, opts: any = {}) {
+    const t0 =
+      typeof performance !== 'undefined' && performance.now
+        ? performance.now()
+        : Date.now();
+    const res = await send(
+      {
+        type: MSG.FETCH_PR_DETAIL,
+        owner,
+        repo,
+        number,
+        skipReviewThreads: Boolean(opts.skipReviewThreads),
+        threadsMaxPages: opts.threadsMaxPages,
+      },
+      { signal: opts.signal || null }
+    );
+    const roundTrip = Math.round(
+      (typeof performance !== 'undefined' && performance.now
+        ? performance.now()
+        : Date.now()) - t0
+    );
+    if (!res?.ok) {
+      if (res?.aborted) throw makeAbortError();
+      console.log(
+        `[pr-plus] fetchPrDetail page round-trip ${owner}/${repo}#${number}: ${roundTrip}ms ERROR`,
+        res?.error
+      );
+      const err = new Error(res?.error || 'Failed to fetch PR detail');
+      err.status = res?.status;
+      throw err;
+    }
+    const timings = res.detail?._fetchTimings || res.timings || null;
+    console.log(
+      `[pr-plus] fetchPrDetail page round-trip ${owner}/${repo}#${number}: ${roundTrip}ms` +
+        ` skipReviewThreads=${Boolean(opts.skipReviewThreads)} ` +
+        (timings ? JSON.stringify(timings) : '(no per-request timings)')
+    );
+    return res.detail;
+  },
+  /**
+   * Lazy GraphQL page of review threads (+ comments with diffHunk).
+   * Dual-window directions:
+   *   newest | older  → last:N (before cursor for older)
+   *   oldest | newer  → first:N (after cursor for newer)
+   * @param {{ direction?: string, cursor?: string|null, pageSize?: number }} [opts]
+   */
+  async fetchReviewThreadsPage(owner: any, repo: any, number: any, opts: any = {}) {
+    const res = await send(
+      {
+        type: MSG.FETCH_REVIEW_THREADS_PAGE,
+        owner,
+        repo,
+        number,
+        direction: opts.direction || 'newest',
+        cursor: opts.cursor || null,
+        pageSize: opts.pageSize,
+        // GraphQL-first default (preferRest true only if caller opts in).
+        preferRest: opts.preferRest === true ? true : opts.preferRest === false ? false : false,
+        forceGraphql: Boolean(opts.forceGraphql),
+        forceFull: Boolean(opts.forceFull),
+        skipEagerComments: Boolean(opts.skipEagerComments),
+        reviewCommentsCount:
+          opts.reviewCommentsCount != null
+            ? Number(opts.reviewCommentsCount)
+            : null,
+        restPage: opts.restPage != null ? Number(opts.restPage) : 1,
+      },
+      { signal: opts.signal || null }
+    );
+    if (!res?.ok) {
+      if (res?.aborted) throw makeAbortError();
+      const err = new Error(res?.error || 'Failed to fetch review threads page');
+      err.status = res?.status;
+      throw err;
+    }
+    return res.page;
+  },
+  /**
+   * Bulk-fetch review threads by GraphQL PRRT_… ids (chunks of 100).
+   * @param {string[]} threadNodeIds
+   * @param {{ signal?: AbortSignal }} [opts]
+   */
+  async fetchReviewThreadsByIds(threadNodeIds: any, opts: any = {}) {
+    const res = await send(
+      {
+        type: MSG.FETCH_REVIEW_THREADS_BY_IDS,
+        threadNodeIds: Array.isArray(threadNodeIds) ? threadNodeIds : [],
+      },
+      { signal: opts.signal || null }
+    );
+    if (!res?.ok) {
+      if (res?.aborted) throw makeAbortError();
+      const err = new Error(res?.error || 'Failed to fetch review threads by ids');
+      err.status = res?.status;
+      throw err;
+    }
+    return res.page;
+  },
+  collectUnresolvedThreadNodeIds(detail: any) {
+    return collectUnresolvedThreadNodeIdsLocal(detail);
+  },
+  /**
+   * Pure merge of a dual-window review-threads page into detail (no network).
+   * @param {object} detail
+   * @param {object} page
+   * @param {string} [direction]
+   */
+  mergeReviewThreadsPageIntoDetail(detail: any, page: any, direction: any) {
+    return mergeReviewThreadsPageIntoDetailLocal(detail, page, direction);
+  },
+  /**
+   * GraphQL primary-point cost observation log (from SW apiGraphql).
+   * Also mirrors summary into sessionStorage for page-world e2e reads.
+   */
+  async getGraphqlCostLog() {
+    try {
+      let res = await send({ type: MSG.GQL_COST_LOG_GET });
+      // Fallback: older SW without GQL_COST message — RATE_LIMIT_GET carries log
+      if (!res?.ok && /unknown type/i.test(String(res?.error || ''))) {
+        res = await send({ type: MSG.RATE_LIMIT_GET });
+        if (res?.ok) {
+          res = {
+            ok: true,
+            log: res.gqlCostLog || [],
+            summary: res.gqlCostSummary || {
+              totalCalls: 0,
+              totalCost: 0,
+              byOp: [],
+            },
+            gqlCostBuild: res.gqlCostBuild || null,
+          };
+        }
+      }
+      if (!res?.ok) {
+        try {
+          sessionStorage.setItem(
+            'prp:gql-cost-err',
+            String(res?.error || 'GQL_COST_LOG_GET not ok')
+          );
+        } catch {
+          /* ignore */
+        }
+        return { log: [], summary: { totalCalls: 0, totalCost: 0, byOp: [] } };
+      }
+      const log = Array.isArray(res.log) ? res.log : [];
+      const summary = res.summary || {
+        totalCalls: 0,
+        totalCost: 0,
+        unknownCostCalls: 0,
+        byOp: [],
+      };
+      try {
+        sessionStorage.setItem('prp:gql-cost-log', JSON.stringify(log));
+        sessionStorage.setItem('prp:gql-cost-summary', JSON.stringify(summary));
+        sessionStorage.removeItem('prp:gql-cost-err');
+      } catch {
+        /* quota / private mode */
+      }
+      try {
+        for (const id of ['prp-page-embed', 'prp-modal-host']) {
+          const el = document.getElementById(id);
+          if (!el) continue;
+          el.setAttribute(
+            'data-prp-gql-cost-summary',
+            JSON.stringify({
+              totalCalls: summary.totalCalls,
+              totalCost: summary.totalCost,
+              top: (summary.byOp || []).slice(0, 8),
+            }).slice(0, 1800)
+          );
+        }
+        document.documentElement?.setAttribute?.(
+          'data-prp-gql-cost-ready',
+          '1'
+        );
+      } catch {
+        /* ignore */
+      }
+      return { log, summary };
+    } catch (e: any) {
+      try {
+        sessionStorage.setItem(
+          'prp:gql-cost-err',
+          String(e?.message || e || 'getGraphqlCostLog failed').slice(0, 300)
+        );
+      } catch {
+        /* ignore */
+      }
+      return { log: [], summary: { totalCalls: 0, totalCost: 0, byOp: [] } };
+    }
+  },
+  async clearGraphqlCostLog() {
+    try {
+      const res = await send({ type: MSG.GQL_COST_LOG_CLEAR });
+      try {
+        sessionStorage.removeItem('prp:gql-cost-log');
+        sessionStorage.removeItem('prp:gql-cost-summary');
+        sessionStorage.removeItem('prp:gql-cost-err');
+        document.documentElement?.removeAttribute?.('data-prp-gql-cost-ready');
+      } catch {
+        /* ignore */
+      }
+      return Boolean(res?.ok);
+    } catch {
+      return false;
+    }
+  },
+  /**
+   * Lazy page of issue or review comments (offset page or since= window).
+   * @param {{ kind?: 'issue'|'review', page?: number, perPage?: number, since?: string }} [opts]
+   */
+  async fetchPrCommentsPage(owner: any, repo: any, number: any, opts: any = {}) {
+    const res = await send(
+      {
+        type: MSG.FETCH_COMMENTS_PAGE,
+        owner,
+        repo,
+        number,
+        kind: opts.kind === 'review' ? 'review' : 'issue',
+        page: opts.page,
+        perPage: opts.perPage,
+        since: opts.since || null,
+        preferNewest: Boolean(opts.preferNewest),
+      },
+      { signal: opts.signal || null }
+    );
+    if (!res?.ok) {
+      if (res?.aborted) throw makeAbortError();
+      const err = new Error(res?.error || 'Failed to fetch comments page');
+      err.status = res?.status;
+      throw err;
+    }
+    return res.page;
+  },
+  async fetchCompareFiles(owner: any, repo: any, base: any, head: any, options: any = {}) {
+    const res = await send(
+      {
+        type: MSG.FETCH_COMPARE_FILES,
+        owner,
+        repo,
+        base,
+        head,
+        gitattributesText: options.gitattributesText || '',
+      },
+      { signal: options.signal || null }
+    );
+    if (!res?.ok) {
+      if (res?.aborted) throw makeAbortError();
+      const err = new Error(res?.error || 'Failed to fetch compare files');
+      err.status = res?.status;
+      throw err;
+    }
+    return res.result;
+  },
+  /** Abort SW-tracked GitHub fetches (sheet closed / superseded open). */
+  cancelFetches,
+
+  async uploadRepoFile(owner: any, repo: any, { path, contentBase64, message, branch }: any) {
+    const res = await send({
+      type: MSG.UPLOAD_REPO_FILE,
+      owner,
+      repo,
+      path,
+      contentBase64,
+      message,
+      branch,
+    });
+    if (!res?.ok) {
+      const err = new Error(res?.error || 'Failed to upload file');
+      err.status = res?.status;
+      throw err;
+    }
+    return res.result;
+  },
+  async postIssueComment(owner: any, repo: any, number: any, body: any) {
+    const res = await send({
+      type: MSG.POST_ISSUE_COMMENT,
+      owner,
+      repo,
+      number,
+      body,
+    });
+    if (!res?.ok) {
+      const err = new Error(res?.error || 'Failed to post comment');
+      err.status = res?.status;
+      throw err;
+    }
+    return res.result;
+  },
+  async submitPullReview(owner: any, repo: any, number: any, { event, body, commitId, comments }: any) {
+    const res = await send({
+      type: MSG.SUBMIT_REVIEW,
+      owner,
+      repo,
+      number,
+      event,
+      body,
+      commitId,
+      comments,
+    });
+    if (!res?.ok) {
+      const err = new Error(res?.error || 'Failed to submit review');
+      err.status = res?.status;
+      throw err;
+    }
+    return res.result;
+  },
+  async submitPendingPullReview(owner: any, repo: any, number: any, reviewId: any, { event, body }: { event?: unknown; body?: unknown } = {}) {
+    const res = await send({
+      type: MSG.SUBMIT_PENDING_REVIEW,
+      owner,
+
+      repo,
+      number,
+      reviewId,
+      event,
+      body,
+    });
+    if (!res?.ok) {
+      const err = new Error(res?.error || 'Failed to submit pending review');
+      err.status = res?.status;
+      throw err;
+    }
+    return res.result;
+  },
+  async deletePendingPullReview(owner: any, repo: any, number: any, reviewId: any) {
+    const res = await send({
+      type: MSG.DELETE_PENDING_REVIEW,
+      owner,
+      repo,
+      number,
+      reviewId,
+    });
+    if (!res?.ok) {
+      const err = new Error(res?.error || 'Failed to discard pending review');
+      err.status = res?.status;
+      throw err;
+    }
+    return res.result;
+  },
+  async postReviewComment(owner: any, repo: any, number: any, payload: any) {
+    const res = await send({
+      type: MSG.POST_REVIEW_COMMENT,
+      owner,
+      repo,
+      number,
+      body: payload.body,
+      path: payload.path,
+      line: payload.line,
+      side: payload.side,
+      commitId: payload.commitId,
+      startLine: payload.startLine ?? payload.start_line,
+      startSide: payload.startSide ?? payload.start_side,
+      asPending: Boolean(payload.asPending),
+      subjectType: payload.subjectType ?? payload.subject_type ?? 'line',
+      pendingReviewNodeId:
+        payload.pendingReviewNodeId || payload.pendingReviewNodeID || null,
+      pendingReviewId: payload.pendingReviewId || null,
+    });
+    if (!res?.ok) {
+      const err = new Error(res?.error || 'Failed to post review comment');
+      err.status = res?.status;
+      throw err;
+    }
+    return res.result;
+  },
+  async replyToReviewComment(owner: any, repo: any, number: any, commentId: any, body: any, opts: any = {}) {
+    const res = await send({
+      type: MSG.REPLY_REVIEW_COMMENT,
+      owner,
+      repo,
+      number,
+      commentId,
+      body,
+      mode: opts?.mode || 'comment',
+      threadNodeId: opts?.threadNodeId || null,
+      parentNodeId: opts?.parentNodeId || null,
+      path: opts?.path || null,
+      line: opts?.line ?? null,
+      side: opts?.side || null,
+      commitId: opts?.commitId || null,
+    });
+    if (!res?.ok) {
+      const err = new Error(res?.error || 'Failed to reply to review comment');
+      err.status = res?.status;
+      throw err;
+    }
+    return res.result;
+  },
+  async resolveReviewThread(threadNodeId: any, resolved = true) {
+    const res = await send({
+      type: MSG.RESOLVE_REVIEW_THREAD,
+      threadNodeId,
+      resolved,
+    });
+    if (!res?.ok) {
+      const err = new Error(res?.error || 'Failed to resolve review thread');
+      err.status = res?.status;
+      throw err;
+    }
+    return res.result;
+  },
+  async updatePullState(owner: any, repo: any, number: any, state: any) {
+    const res = await send({
+      type: MSG.UPDATE_PULL_STATE,
+      owner,
+      repo,
+      number,
+      state,
+    });
+    if (!res?.ok) {
+      const err = new Error(res?.error || 'Failed to update pull request state');
+      err.status = res?.status;
+      throw err;
+    }
+    return res.result;
+  },
+  async closePullRequest(owner: any, repo: any, number: any) {
+    return prTreeFetchPartA.updatePullState(owner, repo, number, 'closed');
+  },
+  async reopenPullRequest(owner: any, repo: any, number: any) {
+    return prTreeFetchPartA.updatePullState(owner, repo, number, 'open');
+  },
+  async deleteReviewComment(owner: any, repo: any, commentId: any) {
+    const res = await send({
+      type: MSG.DELETE_REVIEW_COMMENT,
+      owner,
+      repo,
+      commentId,
+    });
+    if (!res?.ok) {
+      const err = new Error(res?.error || 'Failed to delete review comment');
+      err.status = res?.status;
+      throw err;
+    }
+    return res.result;
+  },
+  async deleteIssueComment(owner: any, repo: any, commentId: any) {
+    const res = await send({
+      type: MSG.DELETE_ISSUE_COMMENT,
+      owner,
+      repo,
+      commentId,
+    });
+    if (!res?.ok) {
+      const err = new Error(res?.error || 'Failed to delete comment');
+      err.status = res?.status;
+      throw err;
+    }
+    return res.result;
+  },
+  /**
+   * Hide (minimize) a comment via GraphQL.
+   * @param {string} subjectNodeId GraphQL global id (IC_… / PRRC_…)
+   * @param {string} [classifier='OFF_TOPIC']
+   */
+  async minimizeComment(subjectNodeId: any, classifier = 'OFF_TOPIC') {
+    const res = await send({
+      type: MSG.MINIMIZE_COMMENT,
+      subjectNodeId,
+      nodeId: subjectNodeId,
+      classifier,
+      reason: classifier,
+    });
+    if (!res?.ok) {
+      const err = new Error(res?.error || 'Failed to hide comment');
+      err.status = res?.status;
+      throw err;
+    }
+    return res.result;
+  },
+  /**
+   * Unhide (unminimize) a comment via GraphQL.
+   * @param {string} subjectNodeId GraphQL global id
+   */
+  async unminimizeComment(subjectNodeId: any) {
+    const res = await send({
+      type: MSG.UNMINIMIZE_COMMENT,
+      subjectNodeId,
+      nodeId: subjectNodeId,
+    });
+    if (!res?.ok) {
+      const err = new Error(res?.error || 'Failed to unhide comment');
+      err.status = res?.status;
+      throw err;
+    }
+    return res.result;
+  },
+  /**
+   * Toggle a GitHub reaction on an issue or review comment.
+   * @param {'issue'|'review'} kind
+   * @param {{ content: string, viewerHasReacted?: boolean, nodeId?: string|null, commentId?: number|string }} opts
+   */
+  async toggleCommentReaction(owner: any, repo: any, kind: any, opts: any) {
+    const res = await send({
+      type: MSG.TOGGLE_COMMENT_REACTION,
+      owner,
+      repo,
+      kind,
+      opts: opts || {},
+    });
+    if (!res?.ok) {
+      const err = new Error(res?.error || 'Failed to update reaction');
+      err.status = res?.status;
+      throw err;
+    }
+    return res.result;
+  },
+  /**
+   * Hover: load reactor logins for one Reactable (first-N at query level).
+   * @returns {Promise<Array>} reaction groups with users
+   */
+  async fetchReactableReactors(nodeId: any, opts: any = {}) {
+    const res = await send(
+      {
+        type: MSG.FETCH_REACTABLE_REACTORS,
+        nodeId,
+        first: opts.first != null ? Number(opts.first) : 5,
+      },
+      { signal: opts.signal || null }
+    );
+    if (!res?.ok) {
+      if (res?.aborted) throw makeAbortError();
+      const err = new Error(res?.error || 'Failed to load reaction users');
+      err.status = res?.status;
+      throw err;
+    }
+    return Array.isArray(res.groups) ? res.groups : [];
+  },
+  async updatePullRequest(owner: any, repo: any, number: any, fields: any) {
+    const res = await send({
+      type: MSG.UPDATE_PULL,
+      owner,
+      repo,
+      number,
+      fields,
+    });
+    if (!res?.ok) {
+      const err = new Error(res?.error || 'Failed to update pull request');
+      err.status = res?.status;
+      throw err;
+    }
+    return res.result;
+  },
+  async editIssueComment(owner: any, repo: any, commentId: any, body: any) {
+    const res = await send({
+      type: MSG.EDIT_ISSUE_COMMENT,
+      owner,
+      repo,
+      commentId,
+      body,
+    });
+    if (!res?.ok) {
+      const err = new Error(res?.error || 'Failed to edit comment');
+      err.status = res?.status;
+      throw err;
+    }
+    return res.result;
+  },
+  async editReviewComment(owner: any, repo: any, commentId: any, body: any, opts: any = null) {
+    const o = opts && typeof opts === 'object' ? opts : {};
+    const nodeId = o.nodeId != null ? String(o.nodeId) : null;
+    const pullNumber =
+      o.pullNumber != null && Number.isFinite(Number(o.pullNumber))
+        ? Number(o.pullNumber)
+        : null;
+    const res = await send({
+      type: MSG.EDIT_REVIEW_COMMENT,
+      owner,
+      repo,
+      commentId,
+      body,
+      nodeId,
+      pullNumber,
+    });
+    if (!res?.ok) {
+      const err = new Error(res?.error || 'Failed to edit review comment');
+      err.status = res?.status;
+      throw err;
+    }
+    return res.result;
+  },
+  async requestReviewers(owner: any, repo: any, number: any, reviewers: any, teamReviewers: any = []) {
+    const res = await send({
+      type: MSG.REQUEST_REVIEWERS,
+      owner,
+      repo,
+      number,
+      reviewers,
+      teamReviewers,
+    });
+    if (!res?.ok) {
+      const err = new Error(res?.error || 'Failed to request reviewers');
+      err.status = res?.status;
+      throw err;
+    }
+    return res.result;
+  },
+  async removeReviewers(owner: any, repo: any, number: any, reviewers: any, teamReviewers: any = []) {
+    const res = await send({
+      type: MSG.REMOVE_REVIEWERS,
+      owner,
+      repo,
+      number,
+      reviewers,
+      teamReviewers,
+    });
+    if (!res?.ok) {
+      const err = new Error(res?.error || 'Failed to remove reviewers');
+      err.status = res?.status;
+      throw err;
+    }
+    return res.result;
+  },
+};
+
+/**
+ * Page-world e2e harness dispatches CustomEvents (agent-browser cannot call
+ * content-script PRTreeFetch directly). Wire flush/clear → SW cost log mirror.
+ */
+try {
+  document.documentElement?.setAttribute?.('data-prp-gql-cost-hook', '1');
+  document.addEventListener('prp-flush-gql-cost', () => {
+    void prTreeFetchPartA.getGraphqlCostLog();
+  });
+  document.addEventListener('prp-clear-gql-cost', () => {
+    void prTreeFetchPartA.clearGraphqlCostLog();
+  });
+} catch {
+  /* ignore (non-DOM / tests) */
+}

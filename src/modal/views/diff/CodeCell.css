@@ -1,0 +1,236 @@
+/**
+ * Residual CSS (cannot fully express via Tailwind utilities).
+ * Colocated next to owning domain; imported from styles/index.css.
+ * Migrated from styles/parts/10-unified-code-cell-shares-row-with-dual-l.css
+ */
+
+/* Unified code cell shares row with dual LN */
+.prp-vline:not(.prp-vline--split):not(.prp-vline--hunk) > .prp-code {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.prp-line-comment-btn {
+  appearance: none;
+  width: 22px;
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: var(--prp-accent);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: var(--prp-diff-row-h, 20px);
+  cursor: pointer;
+  opacity: 0;
+  padding: 0;
+}
+
+.prp-vline--selectable:hover .prp-line-comment-btn,
+.prp-vline--selected .prp-line-comment-btn {
+  opacity: 1;
+}
+
+.prp-vline code,
+.prp-vline .prp-code {
+  display: block;
+  width: 100%;
+  /* Horizontal padding on actual code view */
+  padding: 0 16px 0 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: inherit;
+  font-size: inherit;
+  background: transparent;
+  box-sizing: border-box;
+}
+
+/* Long-line expand control lives in the existing gutter (~22px wide) */
+.prp-line-gutter {
+  position: relative;
+}
+.prp-line-expand-btn {
+  appearance: none;
+  position: absolute;
+  left: 3px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--prp-fg-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  z-index: 2;
+}
+.prp-vline--line-expandable:hover .prp-line-expand-btn,
+.prp-vline--line-expandable:focus-within .prp-line-expand-btn,
+.prp-vline--line-expanded .prp-line-expand-btn,
+.prp-line-expand-btn:focus-visible {
+  opacity: 1;
+}
+.prp-line-expand-btn:hover,
+.prp-line-expand-btn:focus-visible {
+  color: var(--prp-accent);
+  background: color-mix(in srgb, var(--prp-accent) 12%, transparent);
+  outline: none;
+}
+.prp-vline--line-expanded {
+  align-items: flex-start;
+  white-space: pre-wrap;
+  /* Allow multi-line paint; height still fixed by virtualizer */
+  contain: layout style;
+  overflow: hidden;
+}
+.prp-vline--line-expanded code,
+.prp-vline--line-expanded .prp-code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  text-overflow: clip;
+  overflow: visible;
+  line-height: var(--prp-diff-row-h, 20px);
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.prp-vline--line-expanded .prp-line-expand-btn {
+  top: calc(var(--prp-diff-row-h, 20px) / 2);
+  transform: translateY(-50%);
+}
+.prp-vline--line-expanded .prp-split-cols,
+.prp-vline--line-expanded .prp-split-cols__left,
+.prp-vline--line-expanded .prp-split-cols__right {
+  align-items: stretch;
+  height: auto;
+  min-height: 100%;
+}
+
+.prp-diff-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  box-sizing: border-box;
+  height: var(--prp-diff-ctrl-h, 28px);
+  min-height: var(--prp-diff-ctrl-h, 28px);
+  padding: 2px;
+  border: 1px solid var(--prp-border);
+  border-radius: 8px;
+  background: var(--prp-bg);
+}
+
+.prp-diff-mode__opt {
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  height: 100%;
+  gap: 6px;
+  padding: 0 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--prp-fg);
+  cursor: pointer;
+  user-select: none;
+}
+
+.prp-diff-mode__opt:has(input:checked) {
+  background: color-mix(in srgb, var(--prp-accent) 16%, var(--prp-bg));
+  color: var(--prp-accent);
+}
+
+.prp-diff-mode__opt input {
+  margin: 0;
+  accent-color: var(--prp-accent);
+}
+
+/* ── Diff commit / range filter ── */
+.prp-commit-filter {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+.prp-commit-filter__range-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--prp-fg-muted);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.prp-commit-filter__range-toggle input {
+  margin: 0;
+  accent-color: var(--prp-accent);
+}
+.prp-commit-filter__select {
+  max-width: min(320px, 42vw);
+  min-width: 140px;
+  height: 28px;
+  padding: 2px 8px;
+  border: 1px solid var(--prp-border);
+  border-radius: 6px;
+  background: var(--prp-bg);
+  color: var(--prp-fg);
+  font-family: var(--prp-mono);
+  font-size: 11px;
+  line-height: 1.3;
+}
+.prp-commit-filter__select:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--prp-accent) 55%, transparent);
+  outline-offset: 1px;
+}
+.prp-commit-filter__select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.prp-commit-filter__range {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  min-width: 0;
+}
+.prp-commit-filter__arrow {
+  color: var(--prp-fg-muted);
+  font-size: 12px;
+  user-select: none;
+}
+.prp-commit-filter__status {
+  font-size: 11px;
+  color: var(--prp-fg-muted);
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prp-commit-filter__error {
+  font-size: 11px;
+  color: var(--prp-danger);
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prp-selection-bar {
+  flex: 0 0 auto;
+  padding: 12px 14px;
+  border-top: 1px solid var(--prp-border-muted);
+  background: var(--prp-bg-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
