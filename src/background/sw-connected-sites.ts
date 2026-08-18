@@ -158,6 +158,29 @@ export async function syncPartnerContentScripts(origins?: string[]) {
   return next;
 }
 
+export function urlMatchesConnectedOrigins(
+  url: string,
+  origins: string[]
+): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  const originPattern = `${parsed.protocol}//${parsed.host}/*`;
+  return normalizeConnectedOrigins(origins).some((p) => {
+    if (p === originPattern) return true;
+    if (
+      p.startsWith('https://*.') &&
+      parsed.hostname.endsWith(p.slice('https://*.'.length, -2))
+    ) {
+      return parsed.protocol === 'https:';
+    }
+    return false;
+  });
+}
+
 export async function injectPartnerScriptsIntoTab(tabId: number, url: string) {
   if (!chrome.scripting?.executeScript) return { ok: false };
   let parsed: URL;
@@ -166,16 +189,10 @@ export async function injectPartnerScriptsIntoTab(tabId: number, url: string) {
   } catch {
     return { ok: false };
   }
-  const originPattern = `${parsed.protocol}//${parsed.host}/*`;
   const sites = await getConnectedSites();
-  const granted = sites.origins.some((p) => {
-    if (p === originPattern) return true;
-    if (p.startsWith('https://*.') && parsed.hostname.endsWith(p.slice('https://*.'.length, -2))) {
-      return parsed.protocol === 'https:';
-    }
-    return false;
-  });
-  if (!granted) return { ok: false, reason: 'not-allowlisted' };
+  if (!urlMatchesConnectedOrigins(url, sites.origins)) {
+    return { ok: false, reason: 'not-allowlisted' };
+  }
   try {
     await chrome.scripting.executeScript({
       target: { tabId },
@@ -206,11 +223,49 @@ export async function injectPartnerScriptsIntoTab(tabId: number, url: string) {
   }
 }
 
+export async function injectPartnerScriptsIntoMatchingTabs(): Promise<{
+  injected: number;
+}> {
+  if (!chrome.tabs?.query) return { injected: 0 };
+  const sites = await getConnectedSites();
+  if (!sites.origins.length) return { injected: 0 };
+  let tabs: { id?: number; url?: string }[] = [];
+  try {
+    tabs = await chrome.tabs.query({});
+  } catch {
+    return { injected: 0 };
+  }
+  let injected = 0;
+  for (const tab of tabs) {
+    if (tab.id == null || !tab.url) continue;
+    if (!urlMatchesConnectedOrigins(tab.url, sites.origins)) continue;
+    const r = await injectPartnerScriptsIntoTab(tab.id, tab.url);
+    if (r?.ok) injected += 1;
+  }
+  return { injected };
+}
+
+export async function containsConnectedSiteOrigins(
+  origins: string[]
+): Promise<boolean> {
+  const list = normalizeConnectedOrigins(origins);
+  if (!list.length) return true;
+  if (!chrome.permissions?.contains) return false;
+  return new Promise((resolve) => {
+    chrome.permissions.contains({ origins: list }, (ok: boolean) => {
+      resolve(Boolean(ok));
+    });
+  });
+}
+
 export async function requestConnectedSiteOrigins(
   origins: string[]
 ): Promise<{ granted: boolean; origins: string[]; error?: string }> {
   const list = normalizeConnectedOrigins(origins);
   if (!list.length) return { granted: true, origins: [] };
+  if (await containsConnectedSiteOrigins(list)) {
+    return { granted: true, origins: list };
+  }
   if (!chrome.permissions?.request) {
     return { granted: false, error: 'permissions API unavailable', origins: list };
   }

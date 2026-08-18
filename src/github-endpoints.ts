@@ -175,6 +175,94 @@
   }
 
   /**
+   * Parse a GitHub PR URL (github.com or *.ghe.com) into openModal identity.
+   * Used by Linear click-intercept for linked-PR buttons.
+   */
+  function parseGithubPullUrl(href: any, base?: any) {
+    if (href == null) return null;
+    const raw = String(href).trim();
+    if (!raw || raw === '#') return null;
+    try {
+      const u = new URL(raw, base || 'https://github.com');
+      const host = normalizeHostname(u.hostname);
+      if (!host) return null;
+      const githubWeb =
+        isKnownGithubHostname(host) || /\.ghe\.com$/.test(host);
+      if (!githubWeb) return null;
+      const m = u.pathname.match(/^\/([^/]+)\/([^/]+)\/pull\/(\d+)(?:\/|$)/);
+      if (!m) return null;
+      const number = Number(m[3]);
+      if (!Number.isFinite(number) || number <= 0) return null;
+      return {
+        owner: m[1],
+        repo: m[2],
+        number,
+        githubWebHost: host === 'www.github.com' ? 'github.com' : host,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  function hrefFromClickNode(node: any): string | null {
+    if (!node) return null;
+    if (typeof node.getAttribute === 'function') {
+      const data =
+        node.getAttribute('href') ||
+        node.getAttribute('data-href') ||
+        node.getAttribute('data-url');
+      if (data) return data;
+    }
+    if (typeof node.href === 'string' && node.href) return node.href;
+    return null;
+  }
+
+  /**
+   * Resolve a GitHub PR from a click composedPath.
+   * Linear chips wrap the <a>; the click target is often the parent, not the link.
+   */
+  function findGithubPullFromClickPath(nodes: any, opts: any = {}) {
+    const list = Array.isArray(nodes) ? nodes : [];
+    const hrefOf =
+      typeof opts.hrefOf === 'function' ? opts.hrefOf : hrefFromClickNode;
+    const parse = (href: any) => parseGithubPullUrl(href, opts.base);
+
+    for (const n of list) {
+      const direct = parse(hrefOf(n));
+      if (direct) return direct;
+      if (n && typeof n.closest === 'function') {
+        const a = n.closest('a[href]');
+        const fromA = parse(hrefOf(a));
+        if (fromA) return fromA;
+      }
+    }
+
+    for (const start of list.slice(0, 8)) {
+      let el = start;
+      for (let i = 0; i < 6 && el; i++) {
+        const tag = String(el.tagName || '').toUpperCase();
+        if (tag === 'BODY' || tag === 'HTML' || tag === 'DOCUMENT') break;
+        if (typeof el.querySelectorAll === 'function') {
+          const found: any[] = [];
+          const seen = new Set();
+          const anchors = el.querySelectorAll('a[href]');
+          for (let j = 0; j < anchors.length; j++) {
+            const p = parse(hrefOf(anchors[j]));
+            if (!p) continue;
+            const key = `${p.githubWebHost}/${p.owner}/${p.repo}/${p.number}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            found.push(p);
+          }
+          if (found.length === 1) return found[0];
+        }
+        el = el.parentElement || el.parentNode;
+      }
+    }
+    return null;
+  }
+
+  /**
    * Resolve host then select PAT. Used by SW tokenForMessage after loading storage.
    */
   function selectTokenForMessage(message: any, opts: any = {}) {
@@ -505,6 +593,8 @@
     selectTokenForWebHost,
     isGithubApiHostname,
     resolveGithubWebHost,
+    parseGithubPullUrl,
+    findGithubPullFromClickPath,
     selectTokenForMessage,
     registerHostAccount,
     unregisterHostAccount,

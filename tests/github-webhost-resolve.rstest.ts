@@ -105,6 +105,54 @@ describe('resolveGithubWebHost + selectTokenForMessage', () => {
     ).toBe('api.corp.example');
   });
 
+  test('parseGithubPullUrl reads Linear-linked github.com PR hrefs', () => {
+    expect(typeof api.parseGithubPullUrl).toBe('function');
+    expect(
+      api.parseGithubPullUrl('https://github.com/enif-lee/pr-plus/pull/19')
+    ).toEqual({
+      owner: 'enif-lee',
+      repo: 'pr-plus',
+      number: 19,
+      githubWebHost: 'github.com',
+    });
+    expect(
+      api.parseGithubPullUrl('https://github.com/rtzr/iac/pull/1911')
+    ).toMatchObject({ owner: 'rtzr', repo: 'iac', number: 1911 });
+    expect(
+      api.parseGithubPullUrl('/acme/widgets/pull/7/files', 'https://github.com')
+    ).toMatchObject({ owner: 'acme', repo: 'widgets', number: 7 });
+    expect(api.parseGithubPullUrl('https://linear.app/rtzr/issue/CAL-7238')).toBe(
+      null
+    );
+  });
+
+  test('findGithubPullFromClickPath resolves Linear chip wrappers', () => {
+    const inner = {
+      tagName: 'A',
+      href: 'https://github.com/rtzr/iac/pull/1911',
+      getAttribute: (k: string) =>
+        k === 'href' ? 'https://github.com/rtzr/iac/pull/1911' : null,
+      closest(sel: string) {
+        return sel.startsWith('a') ? this : null;
+      },
+    };
+    const chip = {
+      tagName: 'DIV',
+      getAttribute: () => null,
+      closest: () => null,
+      parentElement: { tagName: 'BODY' },
+      querySelectorAll: (sel: string) => (sel.startsWith('a') ? [inner] : []),
+    };
+    expect(
+      api.findGithubPullFromClickPath([chip], { base: 'https://linear.app/' })
+    ).toEqual({
+      owner: 'rtzr',
+      repo: 'iac',
+      number: 1911,
+      githubWebHost: 'github.com',
+    });
+  });
+
   test('unregistered GHES page falls back to active host', () => {
     expect(
       api.resolveGithubWebHost(

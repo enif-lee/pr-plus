@@ -15,7 +15,10 @@ import {
   callerOriginFromSender,
   allowExternalSender,
 } from '../src/background/sw-open-pr';
-import { partnerScriptListsExcludeGithubStack } from '../src/background/sw-connected-sites';
+import {
+  partnerScriptListsExcludeGithubStack,
+  urlMatchesConnectedOrigins,
+} from '../src/background/sw-connected-sites';
 
 const root = path.join(__dirname, '..');
 
@@ -94,6 +97,31 @@ describe('page-api gates', () => {
         id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       } as chrome.runtime.MessageSender)
     ).toBe(false);
+  });
+
+  test('Linear issue URL matches connected-site patterns', () => {
+    const origins = ['https://linear.app/*', 'https://*.linear.app/*'];
+    expect(
+      urlMatchesConnectedOrigins(
+        'https://linear.app/rtzr/issue/CAL-7238',
+        origins
+      )
+    ).toBe(true);
+    expect(
+      urlMatchesConnectedOrigins('https://app.linear.app/rtzr', origins)
+    ).toBe(true);
+    expect(
+      urlMatchesConnectedOrigins('https://github.com/rtzr/iac/pull/1911', origins)
+    ).toBe(false);
+  });
+
+  test('popup requests host permission in the click turn', () => {
+    const popup = fs.readFileSync(path.join(root, 'src/popup.ts'), 'utf8');
+    expect(popup).toMatch(/permissions\.request/);
+    expect(popup).toMatch(/PR_TREE_CONNECTED_SITES_ADD/);
+    const partner = fs.readFileSync(path.join(root, 'src/partner/partner.ts'), 'utf8');
+    expect(partner).toMatch(/findGithubPullFromClickPath/);
+    expect(partner).toMatch(/pointerdown/);
   });
 
   test('open args type lists owner/repo/number in page-api SoT', () => {

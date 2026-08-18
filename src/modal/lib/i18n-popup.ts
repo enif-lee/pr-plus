@@ -105,6 +105,8 @@ export const POPUP_MESSAGE_KEYS = [
   'popup_label_active_host',
   'popup_section_connected_sites',
   'popup_connected_sites_intro',
+  'popup_status_site_added',
+  'popup_status_site_denied',
   'popup_status_enterprise_removed',
   'popup_status_enterprise_saved',
   'popup_status_enterprise_updated',
@@ -233,6 +235,8 @@ export const popupEn: MessageCatalog = {
   popup_section_connected_sites: 'Connected sites',
   popup_connected_sites_intro:
     'Allow these sites to call window.PRPlus. Linear also gets the PR overlay. Not a data partnership.',
+  popup_status_site_added: 'Site connected',
+  popup_status_site_denied: 'Permission denied',
   popup_status_enterprise_removed: 'Enterprise host removed',
   popup_status_enterprise_saved: 'Enterprise host saved',
   popup_status_enterprise_updated: 'Enterprise PAT updated',
@@ -361,6 +365,8 @@ export const popupKo: MessageCatalog = {
   popup_section_connected_sites: '연결 사이트',
   popup_connected_sites_intro:
     '이 사이트에서 window.PRPlus를 호출할 수 있습니다. Linear는 PR 오버레이도 받습니다. 제휴가 아닙니다.',
+  popup_status_site_added: '사이트 연결됨',
+  popup_status_site_denied: '권한이 거부되었습니다',
   popup_status_enterprise_removed: 'Enterprise 호스트 제거됨',
   popup_status_enterprise_saved: 'Enterprise 호스트 저장됨',
   popup_status_enterprise_updated: 'Enterprise PAT 업데이트됨',
@@ -489,6 +495,8 @@ export const popupJa: MessageCatalog = {
   popup_section_connected_sites: '接続サイト',
   popup_connected_sites_intro:
     'これらのサイトから window.PRPlus を呼べます。Linear には PR オーバーレイも入ります。提携ではありません。',
+  popup_status_site_added: 'サイトを接続しました',
+  popup_status_site_denied: '権限が拒否されました',
   popup_status_enterprise_removed: 'Enterprise ホストを削除しました',
   popup_status_enterprise_saved: 'Enterprise ホストを保存しました',
   popup_status_enterprise_updated: 'Enterprise PAT を更新しました',
@@ -612,6 +620,8 @@ export const popupZh: MessageCatalog = {
   popup_section_connected_sites: '已连接站点',
   popup_connected_sites_intro:
     '允许这些站点调用 window.PRPlus。Linear 还会获得 PR 浮层。并非数据合作。',
+  popup_status_site_added: '已连接站点',
+  popup_status_site_denied: '权限被拒绝',
   popup_status_enterprise_removed: '已移除 Enterprise 主机',
   popup_status_enterprise_saved: '已保存 Enterprise 主机',
   popup_status_enterprise_updated: '已更新 Enterprise PAT',
