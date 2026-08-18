@@ -329,6 +329,10 @@
   visibility: hidden !important;
 }
 
+html[data-prp-runtime="partner"] #prp-modal-host {
+  z-index: 2147483000;
+}
+
 /*
  * In-page PR embed host: full window size, covers GitHub global header.
  * Must mount on document.body (host JS) — fixed inside .application-main is

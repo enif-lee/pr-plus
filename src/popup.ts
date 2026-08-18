@@ -41,6 +41,13 @@ const enterpriseStatusEl = document.getElementById('enterprise-status');
 const endpointPreviewEl = document.getElementById('endpoint-preview');
 const hostAccountsListEl = document.getElementById('host-accounts-list');
 const hostAccountsEmptyEl = document.getElementById('host-accounts-empty');
+const activeGithubHostEl = document.getElementById(
+  'active-github-host'
+) as HTMLSelectElement | null;
+const connectLinearBtn = document.getElementById('connect-linear');
+const connectJiraBtn = document.getElementById('connect-jira');
+const connectLocalhostBtn = document.getElementById('connect-localhost');
+const connectedSitesListEl = document.getElementById('connected-sites-list');
 
 const MAX_HOST_ACCOUNTS = 3;
 
@@ -521,6 +528,49 @@ function renderHostAccounts(accounts: any) {
     hostAccountsState[0]?.host ||
     'github.com';
   updateEndpointPreview(previewHost);
+  fillActiveHostSelect(hostAccountsState);
+}
+
+function fillActiveHostSelect(accounts: any[], selected?: string) {
+  if (!activeGithubHostEl) return;
+  const current = selected || activeGithubHostEl.value || 'github.com';
+  const hosts = [
+    'github.com',
+    ...((Array.isArray(accounts) ? accounts : []).map((a: any) => a.host).filter(Boolean)),
+  ];
+  const uniq = [...new Set(hosts)];
+  activeGithubHostEl.innerHTML = '';
+  for (const h of uniq) {
+    const opt = document.createElement('option');
+    opt.value = h;
+    opt.textContent = h;
+    activeGithubHostEl.appendChild(opt);
+  }
+  activeGithubHostEl.value = uniq.includes(current) ? current : 'github.com';
+}
+
+function renderConnectedSites(origins: string[]) {
+  if (!connectedSitesListEl) return;
+  connectedSitesListEl.innerHTML = '';
+  for (const origin of origins || []) {
+    const li = document.createElement('li');
+    const name = document.createElement('span');
+    name.className = 'host-name';
+    name.textContent = origin;
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.textContent = t('popup_btn_remove');
+    removeBtn.addEventListener('click', () => {
+      void send({ type: 'PR_TREE_CONNECTED_SITES_REMOVE', origins: [origin] }).then(
+        (res) => {
+          if (res?.ok) renderConnectedSites(res.origins || []);
+        }
+      );
+    });
+    li.appendChild(name);
+    li.appendChild(removeBtn);
+    connectedSitesListEl.appendChild(li);
+  }
 }
 
 /**
@@ -663,10 +713,12 @@ function writeLocalExtensionPrefs(prefs: any): Promise<void> {
 async function load() {
   try {
     // Prefs: storage.local is SoT (SW PREFS_GET can omit uiLanguage if SW stale)
-    const [status, localPrefs, hostsRes] = await Promise.all([
+    const [status, localPrefs, hostsRes, activeHost, sitesRes] = await Promise.all([
       send({ type: 'PR_TREE_TOKEN_STATUS' }),
       readLocalExtensionPrefs(),
       send({ type: 'PR_TREE_HOST_ACCOUNTS_LIST' }),
+      send({ type: 'PR_TREE_ACTIVE_HOST_GET' }),
+      send({ type: 'PR_TREE_CONNECTED_SITES_LIST' }),
     ]);
     if (!status?.ok && status?.error) {
       throw new Error(status.error);
@@ -679,6 +731,8 @@ async function load() {
     renderRateLimitState(null, prefs?.pluginEnabled !== false);
     const accounts = hostsRes?.accounts || [];
     renderHostAccounts(accounts);
+    fillActiveHostSelect(accounts, activeHost?.host);
+    renderConnectedSites(sitesRes?.origins || []);
     if (!status?.configured && accounts.length === 0) {
       setStatus(t('popup_status_no_token'));
     }
@@ -991,6 +1045,30 @@ clearIdbBtn?.addEventListener('click', async () => {
   // @ts-expect-error classic content-script dynamic shapes
     clearIdbBtn.disabled = false;
   }
+});
+
+activeGithubHostEl?.addEventListener('change', () => {
+  void send({
+    type: 'PR_TREE_ACTIVE_HOST_SET',
+    host: activeGithubHostEl.value,
+  });
+});
+
+function addConnectedOrigins(origins: string[]) {
+  void send({ type: 'PR_TREE_CONNECTED_SITES_ADD', origins }).then((res) => {
+    if (res?.ok) renderConnectedSites(res.origins || []);
+    else setStatus(res?.error || 'Could not add site', true);
+  });
+}
+
+connectLinearBtn?.addEventListener('click', () => {
+  addConnectedOrigins(['https://linear.app/*', 'https://*.linear.app/*']);
+});
+connectJiraBtn?.addEventListener('click', () => {
+  addConnectedOrigins(['https://*.atlassian.net/*']);
+});
+connectLocalhostBtn?.addEventListener('click', () => {
+  addConnectedOrigins(['http://localhost/*', 'http://127.0.0.1/*']);
 });
 
 // English shell until prefs load; load() re-applies preferred language.

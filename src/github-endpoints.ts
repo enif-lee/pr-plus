@@ -127,6 +127,65 @@
   }
 
   /**
+   * GitHub API hostname (not a web UI host). Must not be used as webHost.
+   * @param {unknown} host
+   */
+  function isGithubApiHostname(host: any) {
+    const h = normalizeHostname(host);
+    if (!h) return false;
+    if (h === 'api.github.com') return true;
+    return /^api\.[^.]+\.ghe\.com$/.test(h);
+  }
+
+  /**
+   * Which GitHub web host a SW message should use for PAT + API base.
+   * Page hostname is only trusted when it is github.com / registered GHES.
+   * Linear / Jira / localhost / extension pages fall back to activeGithubWebHost.
+   *
+   * @param {object|null|undefined} message
+   * @param {{ registeredHosts?: unknown, activeGithubWebHost?: unknown }} [opts]
+   * @returns {string}
+   */
+  function resolveGithubWebHost(message: any, opts: any = {}) {
+    const registered = (
+      Array.isArray(opts.registeredHosts) ? opts.registeredHosts : []
+    )
+      .map((h: any) => normalizeHostname(h))
+      .filter(Boolean);
+    const activeRaw = normalizeHostname(opts.activeGithubWebHost) || 'github.com';
+    const active = isGithubApiHostname(activeRaw)
+      ? 'github.com'
+      : activeRaw === 'www.github.com'
+        ? 'github.com'
+        : activeRaw;
+
+    const explicit = normalizeHostname(
+      message?.githubWebHost ?? message?.githubHost
+    );
+    if (explicit) {
+      if (isGithubApiHostname(explicit)) return 'github.com';
+      return explicit === 'www.github.com' ? 'github.com' : explicit;
+    }
+
+    const page = normalizeHostname(message?.webHost || message?.webOrigin);
+    if (page && (isKnownGithubHostname(page) || registered.includes(page))) {
+      return page === 'www.github.com' ? 'github.com' : page;
+    }
+    return active || 'github.com';
+  }
+
+  /**
+   * Resolve host then select PAT. Used by SW tokenForMessage after loading storage.
+   */
+  function selectTokenForMessage(message: any, opts: any = {}) {
+    const host = resolveGithubWebHost(message, opts);
+    return selectTokenForWebHost(host, {
+      defaultToken: opts.defaultToken,
+      hostAccounts: opts.hostAccounts,
+    });
+  }
+
+  /**
    * Validate adding a host↔PAT pair.
    * @param {unknown} existingAccounts
    * @param {unknown} host
@@ -444,6 +503,9 @@
     normalizeHostAccounts,
     hostsFromAccounts,
     selectTokenForWebHost,
+    isGithubApiHostname,
+    resolveGithubWebHost,
+    selectTokenForMessage,
     registerHostAccount,
     unregisterHostAccount,
   };

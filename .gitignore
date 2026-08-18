@@ -65,6 +65,9 @@ src/content.js
 src/onboarding.js
 src/popup.js
 src/storage.js
+src/page-api/*.js
+src/partner/partner.js
+src/shell/shell.js
 
 # other classic scripts compiled / assembled from TS SoT
 src/content-bridge.js

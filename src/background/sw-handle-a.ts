@@ -45,8 +45,9 @@ export async function handleMessagePartA(message: SwMessage): Promise<unknown> {
     }
     case MSG.TOKEN_STATUS: {
       // Host-scoped: enterprise pages report configured when that host has a PAT.
-      // Popup (no webHost / github.com) reports the default github.com PAT only.
-      const webHost = message.webHost || message.webOrigin || 'github.com';
+      // Popup / Linear (no GitHub webHost) use extension-owned activeGithubWebHost.
+      const webHost =
+        message.githubWebHost || message.webHost || message.webOrigin || 'github.com';
       const sel = await PRTreeStorage.getTokenForWebHost(webHost);
       if (!sel.token) {
         return {
@@ -73,6 +74,14 @@ export async function handleMessagePartA(message: SwMessage): Promise<unknown> {
     case MSG.TOKEN_CLEAR: {
       await PRTreeStorage.setGithubToken('');
       return { ok: true, configured: false, mask: '' };
+    }
+    case MSG.ACTIVE_HOST_GET: {
+      const host = await PRTreeStorage.getActiveGithubWebHost();
+      return { ok: true, host };
+    }
+    case MSG.ACTIVE_HOST_SET: {
+      const host = await PRTreeStorage.setActiveGithubWebHost(message.host);
+      return { ok: true, host };
     }
     case MSG.PREFS_GET: {
       const prefs = await PRTreeStorage.getExtensionPrefs();

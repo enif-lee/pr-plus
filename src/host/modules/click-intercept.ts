@@ -70,6 +70,9 @@
   }
 
   function install() {
+    if (typeof isPartnerOrShellRuntime === 'function' && isPartnerOrShellRuntime()) {
+      return;
+    }
     document.addEventListener('click', onClickCapture, true);
     ensurePullsListKeyboard();
     // GH ⌘K can leave :modal stuck after Esc — watch Escape/pointer/mutations
@@ -144,6 +147,68 @@
   function listenClearDetailCache() {
     try {
       chrome.runtime?.onMessage?.addListener((message: any, _sender: any, sendResponse: any) => {
+        if (message?.type === 'PR_TREE_OPEN_PR') {
+          if (!hostFeaturesEvaluated) {
+            try {
+              sendResponse({ ok: true, ready: false });
+            } catch {
+              /* ignore */
+            }
+            return true;
+          }
+          if (!hostEnabled) {
+            try {
+              sendResponse({
+                ok: false,
+                ready: true,
+                hostEnabled: false,
+                reason: 'plugin-disabled',
+              });
+            } catch {
+              /* ignore */
+            }
+            return true;
+          }
+          try {
+            void openModal({
+              owner: message.owner,
+              repo: message.repo,
+              number: message.number,
+              page: message.page,
+              position: message.position,
+              presentation:
+                typeof isPartnerOrShellRuntime === 'function' &&
+                isPartnerOrShellRuntime()
+                  ? 'modal'
+                  : message.presentation,
+              commitSha: message.commitSha,
+              commitEndSha: message.commitEndSha,
+              filePath: message.filePath,
+              fileKey: message.fileKey,
+              startLine: message.startLine,
+              endLine: message.endLine,
+              side: message.side,
+            });
+            sendResponse({ ok: true, ready: true, hostEnabled: true });
+          } catch (err: any) {
+            sendResponse({
+              ok: false,
+              ready: true,
+              hostEnabled: true,
+              error: err?.message || String(err),
+            });
+          }
+          return true;
+        }
+        if (message?.type === 'PR_TREE_CLOSE_PR') {
+          try {
+            closeModal();
+            sendResponse({ ok: true });
+          } catch (err: any) {
+            sendResponse({ ok: false, error: err?.message || String(err) });
+          }
+          return true;
+        }
         if (message?.type !== 'PR_TREE_CLEAR_DETAIL_CACHE') return false;
         void clearDetailCache()
           .then((res) => {
@@ -184,6 +249,7 @@
     /** After list paint: CSS + prefs so click is not cold. */
     warmUp,
     isEnabled: () => hostEnabled,
+    runtime: () => HOST_RUNTIME,
     parsePrFromAnchor,
     parsePrPagePath,
     isPullsListPage,
