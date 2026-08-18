@@ -5,7 +5,7 @@
   "scripts": {
     "build:modal": "node scripts/build-modal.mjs",
     "build:sw": "node scripts/build-sw.mjs",
-    "build": "npm run build:pure && npm run build:content-ts && npm run build:fetch && npm run build:background-src && npm run build:sw && npm run build:host && npm run build:content-bridge && npm run build:app-parts && npm run build:modal",
+    "build": "npm run build:pure && npm run build:content-ts && npm run build:fetch && npm run build:background-src && npm run build:sw && npm run build:host && npm run build:content-bridge && npm run build:app-parts && npm run build:modal && npm run build:page-api",
     "build:release": "PRP_RELEASE=1 npm run build",
     "package": "PRP_RELEASE=1 npm run build && PRP_RELEASE=1 node scripts/package-extension.mjs",
     "test": "npm run build && rstest run",
@@ -35,6 +35,7 @@
     "build:background-src": "node scripts/build-background-src.mjs",
     "build:pure": "node scripts/build-pure.mjs",
     "build:content-ts": "node scripts/build-content-ts.mjs",
+    "build:page-api": "node scripts/build-page-api.mjs",
     "typecheck:domain": "tsc --noEmit",
     "typecheck:all-projects": "tsc --noEmit && tsc --noEmit -p tsconfig.host.json && tsc --noEmit -p tsconfig.fetch.json && tsc --noEmit -p tsconfig.bridge.json && tsc --noEmit -p tsconfig.entries.json",
     "typecheck:entries": "node scripts/typecheck-entries.mjs"

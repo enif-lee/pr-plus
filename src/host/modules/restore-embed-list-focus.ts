@@ -130,6 +130,9 @@
    * @param {{ force?: boolean }} [opts] force:true — pref false→true while on a PR
    */
   function tryEmbedFromLocation(opts: { force?: boolean } = {}) {
+    if (typeof isPartnerOrShellRuntime === 'function' && isPartnerOrShellRuntime()) {
+      return { ok: false, reason: 'not-github-runtime' };
+    }
     if (!hostEnabled) return { ok: false, reason: 'disabled' };
     const locKey = embedLocationKey();
     const path = typeof location !== 'undefined' ? location.pathname : '';
@@ -301,6 +304,7 @@
   }
 
   function setEnabled(enabled: any) {
+    hostFeaturesEvaluated = true;
     hostEnabled = Boolean(enabled);
     if (!hostEnabled) {
       // Tear down modal + stop intercepting so GitHub is fully native
@@ -347,6 +351,9 @@
     }
     // Light preload only — full warmUp runs after list paint (content.js)
     void ensureAssets();
+    if (typeof isPartnerOrShellRuntime === 'function' && isPartnerOrShellRuntime()) {
+      return;
+    }
     installEmbedWatch();
     ensurePrefsWatch();
     // Wait for prefs so autoOpenEmbed=false is respected before first open.
