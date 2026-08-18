@@ -172,4 +172,111 @@ export function applySlashInsertion(text: any, trigger: any, command: any) {
   return applyInsertion(text, trigger.start, trigger.end, command.insert);
 }
 
+/** Viewport box used to park the portaled @ / / / : suggest menu. */
+export type ComposerSuggestAnchor = {
+  top: number;
+  left: number;
+  bottom: number;
+  width: number;
+  height?: number;
+};
+
+export type ComposerSuggestMenuPos = {
+  top: number;
+  left: number;
+  width: number;
+  placement: 'above' | 'below';
+};
+
+/**
+ * Place the composer suggest menu next to the textarea (viewport coords).
+ * Prefers above so Diff/Conversation action rows stay visible; flips below
+ * when the preferred side cannot fit.
+ */
+export function placeComposerSuggestMenu(
+  anchor: ComposerSuggestAnchor,
+  opts: {
+    menuHeight?: number;
+    viewportWidth?: number;
+    viewportHeight?: number;
+    gap?: number;
+    edge?: number;
+    minWidth?: number;
+    maxWidth?: number;
+    prefer?: 'above' | 'below';
+  } = {}
+): ComposerSuggestMenuPos {
+  const gap = Number.isFinite(opts.gap as number) ? Number(opts.gap) : 4;
+  const edge = Number.isFinite(opts.edge as number) ? Number(opts.edge) : 8;
+  const vw = Number.isFinite(opts.viewportWidth as number)
+    ? Number(opts.viewportWidth)
+    : 1024;
+  const vh = Number.isFinite(opts.viewportHeight as number)
+    ? Number(opts.viewportHeight)
+    : 768;
+  const minW = Number.isFinite(opts.minWidth as number)
+    ? Math.max(160, Number(opts.minWidth))
+    : 220;
+  const maxW = Number.isFinite(opts.maxWidth as number)
+    ? Math.max(minW, Number(opts.maxWidth))
+    : 360;
+  const width = Math.max(minW, Math.min(maxW, Math.max(Number(anchor?.width) || 0, minW)));
+  const left = Math.min(
+    Math.max(edge, Number(anchor?.left) || 0),
+    Math.max(edge, vw - width - edge)
+  );
+  const h = Math.max(0, Number(opts.menuHeight) || 0);
+  const prefer = opts.prefer === 'below' ? 'below' : 'above';
+  const aTop = Number(anchor?.top) || 0;
+  const aBottom = Number(anchor?.bottom) || aTop;
+  const belowTop = aBottom + gap;
+  const aboveTop = aTop - (h || 0) - gap;
+
+  if (h <= 0) {
+    const top = prefer === 'above' ? Math.max(edge, aboveTop) : belowTop;
+    return { top: Math.max(edge, top), left, width, placement: prefer };
+  }
+
+  const fitsBelow = belowTop + h <= vh - edge;
+  const fitsAbove = aboveTop >= edge;
+  let placement: 'above' | 'below' = prefer;
+  let top: number;
+  if (prefer === 'above') {
+    if (fitsAbove) {
+      top = aboveTop;
+      placement = 'above';
+    } else if (fitsBelow) {
+      top = belowTop;
+      placement = 'below';
+    } else {
+      const spaceAbove = aTop - edge;
+      const spaceBelow = vh - aBottom - edge;
+      if (spaceAbove > spaceBelow) {
+        top = Math.max(edge, aboveTop);
+        placement = 'above';
+      } else {
+        top = belowTop;
+        placement = 'below';
+      }
+    }
+  } else if (fitsBelow) {
+    top = belowTop;
+    placement = 'below';
+  } else if (fitsAbove) {
+    top = aboveTop;
+    placement = 'above';
+  } else {
+    const spaceAbove = aTop - edge;
+    const spaceBelow = vh - aBottom - edge;
+    if (spaceBelow > spaceAbove) {
+      top = belowTop;
+      placement = 'below';
+    } else {
+      top = Math.max(edge, aboveTop);
+      placement = 'above';
+    }
+  }
+  return { top: Math.max(edge, top), left, width, placement };
+}
+
 // applyEmojiInsertion re-exported from emoji-shortcodes above

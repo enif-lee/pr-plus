@@ -20,6 +20,7 @@ import {
   applyEmojiInsertion,
   emojiMenuLabel,
   SLASH_COMMANDS,
+  placeComposerSuggestMenu,
 } from '@lib/markdown-composer';
 import { scrollFocusedComposerIntoView } from '@lib/context-thread-dom';
 
@@ -60,14 +61,18 @@ export function MarkdownComposer({
     top: number;
     left: number;
     width: number;
+    placement: 'above' | 'below';
   } | null>(null);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
+  const menuRef = useRef<HTMLUListElement | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const blurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** When kind+query stays the same, keep menuIndex (arrow keys must not reset). */
   const menuKeyRef = useRef('');
 
-  // Position portaled suggest menu under the textarea (avoids overflow:hidden clip)
+  // Viewport-fixed portal next to the textarea (overflow:hidden on cards / virtual list).
+  // CSS vars carry top/left so `.prp-composer-menu { top: calc(100%…) }` cannot park
+  // the list at the overlay's static position (top of Conversation / Diff).
   useLayoutEffect(() => {
     if (!menu?.items?.length) {
       setMenuPos(null);
@@ -75,18 +80,38 @@ export function MarkdownComposer({
     }
     const ta = taRef.current;
     if (!ta) return;
+    const itemCount = menu.items.length;
     const place = () => {
       const r = ta.getBoundingClientRect();
-      setMenuPos({
-        top: r.bottom + 4,
-        left: r.left,
-        width: Math.max(r.width, 220),
-      });
+      const measured = menuRef.current?.offsetHeight || 0;
+      const estimated = Math.min(280, Math.max(48, itemCount * 32 + 8));
+      setMenuPos(
+        placeComposerSuggestMenu(
+          {
+            top: r.top,
+            left: r.left,
+            bottom: r.bottom,
+            width: r.width,
+            height: r.height,
+          },
+          {
+            menuHeight: measured || estimated,
+            viewportWidth: window.innerWidth,
+            viewportHeight: window.innerHeight,
+            prefer: 'above',
+          }
+        )
+      );
     };
     place();
+    const id = requestAnimationFrame(() => {
+      place();
+      requestAnimationFrame(place);
+    });
     window.addEventListener('scroll', place, true);
     window.addEventListener('resize', place);
     return () => {
+      cancelAnimationFrame(id);
       window.removeEventListener('scroll', place, true);
       window.removeEventListener('resize', place);
     };
@@ -680,20 +705,28 @@ export function MarkdownComposer({
           {menu?.items?.length && menuPos && typeof document !== 'undefined'
             ? createPortal(
                 <ul
+                  ref={menuRef}
                   className={`prp-composer-menu prp-composer-menu--portal${
                     menu.kind === 'emoji' ? ' prp-composer-menu--emoji' : ''
                   }`}
                   role="listbox"
+                  data-prp-composer-menu={menu.kind}
+                  data-prp-composer-menu-placement={menuPos.placement}
                   aria-label={
                     menu.kind === 'emoji'
                       ? 'Emoji suggestions'
                       : 'Composer suggestions'
                   }
-                  style={{
-                    top: menuPos.top,
-                    left: menuPos.left,
-                    width: menuPos.width,
-                  }}
+                  style={
+                    {
+                      top: menuPos.top,
+                      left: menuPos.left,
+                      width: menuPos.width,
+                      '--prp-composer-menu-top': `${menuPos.top}px`,
+                      '--prp-composer-menu-left': `${menuPos.left}px`,
+                      '--prp-composer-menu-width': `${menuPos.width}px`,
+                    } as React.CSSProperties
+                  }
                 >
                   {menu.items.map((item: any, idx: number) => {
                     const isEmoji = menu.kind === 'emoji';

@@ -328,13 +328,16 @@
   z-index: 50;
 }
 
-/* Fixed portal — escapes overflow:hidden on cards / virtual list.
- * top/left/width come from JS (textarea rect); neutralize absolute defaults. */
-.prp-composer-menu--portal {
+/* Viewport-fixed portal — escapes overflow:hidden on cards / virtual list.
+ * Coordinates come from JS via --prp-composer-menu-* (and inline top/left).
+ * Never reset top/left to auto !important: that beats inline coords and
+ * parks the menu at the overlay static position (top of Conversation/Diff). */
+.prp-composer-menu.prp-composer-menu--portal {
   position: fixed !important;
-  left: auto;
+  top: var(--prp-composer-menu-top, 0px) !important;
+  left: var(--prp-composer-menu-left, 0px) !important;
+  width: var(--prp-composer-menu-width, 240px);
   right: auto !important;
-  top: auto !important;
   bottom: auto !important;
   margin: 0;
   transform: none !important;
