@@ -1054,11 +1054,44 @@ activeGithubHostEl?.addEventListener('change', () => {
   });
 });
 
-function addConnectedOrigins(origins: string[]) {
-  void send({ type: 'PR_TREE_CONNECTED_SITES_ADD', origins }).then((res) => {
-    if (res?.ok) renderConnectedSites(res.origins || []);
-    else setStatus(res?.error || 'Could not add site', true);
+function requestOrigins(
+  origins: string[]
+): Promise<{ granted: boolean; error?: string }> {
+  const chromeApi = (globalThis as any).chrome;
+  if (!chromeApi?.permissions?.request) {
+    return Promise.resolve({
+      granted: false,
+      error: 'permissions API unavailable',
+    });
+  }
+  return new Promise((resolve) => {
+    chromeApi.permissions.request({ origins }, (granted: boolean) => {
+      const err = chromeApi.runtime?.lastError;
+      if (err) resolve({ granted: false, error: err.message });
+      else resolve({ granted: Boolean(granted) });
+    });
   });
+}
+
+function addConnectedOrigins(origins: string[]) {
+  // permissions.request must run in this click turn — SW cannot show the prompt.
+  void requestOrigins(origins)
+    .then((req) => {
+      if (!req.granted) {
+        setStatus(req.error || t('popup_status_site_denied'), true);
+        return null;
+      }
+      return send({ type: 'PR_TREE_CONNECTED_SITES_ADD', origins });
+    })
+    .then((res) => {
+      if (!res) return;
+      if (res.ok) {
+        renderConnectedSites(res.origins || []);
+        setStatus(t('popup_status_site_added'));
+      } else {
+        setStatus(res.error || t('popup_status_site_denied'), true);
+      }
+    });
 }
 
 connectLinearBtn?.addEventListener('click', () => {

@@ -1,8 +1,87 @@
 /**
  * Linear partner boot. Host IIFE already ran (PARTNER_HOST_JS order).
  * Overlay only; enable after token/prefs evaluation.
+ * Capture-phase click on GitHub PR links (Linear "linked PR") opens pr+.
  */
 (function bootPartner(global: any) {
+  let lastOpenKey = '';
+  let lastOpenAt = 0;
+
+  function findPrFromEvent(event: any) {
+    const ep = global.PRGithubEndpoints;
+    if (typeof ep?.findGithubPullFromClickPath !== 'function') {
+      if (typeof ep?.parseGithubPullUrl === 'function') {
+        const t = event?.target;
+        const href =
+          (t && t.getAttribute && t.getAttribute('href')) || t?.href || null;
+        return ep.parseGithubPullUrl(href, global.location?.href);
+      }
+      return null;
+    }
+    const path =
+      typeof event.composedPath === 'function' ? event.composedPath() : [];
+    const nodes = path.length ? path : [event.target];
+    return ep.findGithubPullFromClickPath(nodes, {
+      base: global.location?.href,
+    });
+  }
+
+  function openOverlay(parsed: any) {
+    const host = global.PRModalHost;
+    if (host && typeof host.openModal === 'function') {
+      if (typeof host.isEnabled === 'function' && !host.isEnabled()) {
+        return false;
+      }
+      const key = `${parsed.githubWebHost}/${parsed.owner}/${parsed.repo}/${parsed.number}`;
+      const now = Date.now();
+      if (key === lastOpenKey && now - lastOpenAt < 500) return true;
+      lastOpenKey = key;
+      lastOpenAt = now;
+      void host.openModal({
+        owner: parsed.owner,
+        repo: parsed.repo,
+        number: parsed.number,
+        presentation: 'modal',
+      });
+      try {
+        global.chrome?.runtime?.sendMessage?.({
+          type: 'PR_TREE_OPEN_PR',
+          owner: parsed.owner,
+          repo: parsed.repo,
+          number: parsed.number,
+          githubWebHost: parsed.githubWebHost,
+          target: 'opener-embed',
+          source: 'local-host',
+        });
+      } catch {
+        /* ignore */
+      }
+      return true;
+    }
+    return false;
+  }
+
+  function onLinkedPrPointer(event: any) {
+    if (event.defaultPrevented) return;
+    if (event.button != null && event.button !== 0) return;
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    const parsed = findPrFromEvent(event);
+    if (!parsed) return;
+    if (!openOverlay(parsed)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (typeof event.stopImmediatePropagation === 'function') {
+      event.stopImmediatePropagation();
+    }
+  }
+
+  try {
+    global.document.addEventListener('pointerdown', onLinkedPrPointer, true);
+    global.document.addEventListener('click', onLinkedPrPointer, true);
+  } catch {
+    /* ignore */
+  }
+
   async function evalFeatures() {
     const host = global.PRModalHost;
     if (!host || typeof host.setEnabled !== 'function') return;

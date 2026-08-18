@@ -8,7 +8,7 @@ import {
   setConnectedSites,
   syncPartnerContentScripts,
   requestConnectedSiteOrigins,
-  injectPartnerScriptsIntoTab,
+  injectPartnerScriptsIntoMatchingTabs,
   normalizeConnectedOrigins,
   LINEAR_MATCHES,
 } from './sw-connected-sites';
@@ -501,11 +501,7 @@ export async function handlePageApiMessage(
       const next = [...new Set([...cur.origins, ...add])];
       const saved = await setConnectedSites(next);
       await syncPartnerContentScripts(saved.origins);
-      const tabId = sender?.tab?.id;
-      const tabUrl = sender?.tab?.url || sender?.url;
-      if (tabId != null && tabUrl) {
-        await injectPartnerScriptsIntoTab(tabId, tabUrl);
-      }
+      await injectPartnerScriptsIntoMatchingTabs();
       return { ok: true, ...saved };
     }
     case MSG.CONNECTED_SITES_REMOVE: {
