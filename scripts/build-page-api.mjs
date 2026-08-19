@@ -17,6 +17,10 @@ const entries = [
     outfile: path.join(root, 'src/page-api/prplus-isolated.js'),
   },
   {
+    entry: path.join(root, 'src/partner/mark-runtime.ts'),
+    outfile: path.join(root, 'src/partner/mark-runtime.js'),
+  },
+  {
     entry: path.join(root, 'src/partner/partner.ts'),
     outfile: path.join(root, 'src/partner/partner.js'),
   },

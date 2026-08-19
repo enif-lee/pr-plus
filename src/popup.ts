@@ -1,4 +1,5 @@
 import { createTranslator, formatMessage } from './modal/lib/i18n';
+import { parseCustomConnectedOrigins } from './background/sw-connected-sites';
 import {
   normalizeUiLanguagePref,
   resolveEffectiveLocale,
@@ -47,6 +48,10 @@ const activeGithubHostEl = document.getElementById(
 const connectLinearBtn = document.getElementById('connect-linear');
 const connectJiraBtn = document.getElementById('connect-jira');
 const connectLocalhostBtn = document.getElementById('connect-localhost');
+const connectCustomBtn = document.getElementById('connect-custom');
+const connectCustomHostEl = document.getElementById(
+  'connect-custom-host'
+) as HTMLInputElement | null;
 const connectedSitesListEl = document.getElementById('connected-sites-list');
 
 const MAX_HOST_ACCOUNTS = 3;
@@ -1094,6 +1099,33 @@ connectJiraBtn?.addEventListener('click', () => {
 });
 connectLocalhostBtn?.addEventListener('click', () => {
   addConnectedOrigins(['http://localhost/*', 'http://127.0.0.1/*']);
+});
+
+function siteErrorMessage(code: string) {
+  if (code === 'github') return t('popup_status_site_github');
+  if (code === 'https-only') return t('popup_status_site_https_only');
+  if (code === 'empty') return t('popup_status_site_invalid');
+  return t('popup_status_site_invalid');
+}
+
+function addCustomConnectedSite() {
+  const raw = String(connectCustomHostEl?.value || '');
+  const parsed = parseCustomConnectedOrigins(raw);
+  if (!parsed.ok) {
+    setStatus(siteErrorMessage(parsed.error), true);
+    return;
+  }
+  addConnectedOrigins(parsed.origins);
+}
+
+connectCustomBtn?.addEventListener('click', () => {
+  addCustomConnectedSite();
+});
+connectCustomHostEl?.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Enter') {
+    ev.preventDefault();
+    addCustomConnectedSite();
+  }
 });
 
 // English shell until prefs load; load() re-applies preferred language.

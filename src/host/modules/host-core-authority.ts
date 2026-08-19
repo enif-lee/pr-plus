@@ -6,6 +6,7 @@
     try {
       const href = String(globalThis.location?.href || '');
       if (href.startsWith('chrome-extension://')) return 'shell';
+      if ((globalThis as any).__PRP_PARTNER_RUNTIME) return 'partner';
       const host = String(globalThis.location?.hostname || '').toLowerCase();
       if (host === 'linear.app' || host.endsWith('.linear.app')) return 'partner';
     } catch {

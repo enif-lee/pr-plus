@@ -69,8 +69,9 @@ const PARTNER_HOST_SHARED = [
   'src/pr-modal-host.js',
 ] as const;
 
-/** Linear overlay — no list/onboarding/content.ts. */
+/** Partner overlay — no list/onboarding/content.ts. */
 export const PARTNER_HOST_JS = [
+  'src/partner/mark-runtime.js',
   ...PARTNER_HOST_SHARED,
   'src/partner/partner.js',
 ] as const;
