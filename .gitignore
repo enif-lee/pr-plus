@@ -67,6 +67,7 @@ src/popup.js
 src/storage.js
 src/page-api/*.js
 src/partner/partner.js
+src/partner/mark-runtime.js
 src/shell/shell.js
 
 # other classic scripts compiled / assembled from TS SoT

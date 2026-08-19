@@ -18,6 +18,8 @@ import {
 import {
   partnerScriptListsExcludeGithubStack,
   urlMatchesConnectedOrigins,
+  parseCustomConnectedOrigins,
+  partnerHostScriptEntry,
 } from '../src/background/sw-connected-sites';
 
 const root = path.join(__dirname, '..');
@@ -60,6 +62,7 @@ describe('page-api gates', () => {
       expect([...PARTNER_CS_MAIN_JS]).not.toContain(name);
     }
     expect(partnerScriptListsExcludeGithubStack()).toBe(true);
+    expect([...PARTNER_HOST_JS][0]).toBe('src/partner/mark-runtime.js');
     expect([...PARTNER_HOST_JS]).toContain('src/partner/partner.js');
     expect([...SHELL_SCRIPT_JS]).toContain('src/shell/shell.js');
     expect([...PARTNER_HOST_JS]).not.toEqual([...CONTENT_SCRIPT_JS]);
@@ -113,6 +116,34 @@ describe('page-api gates', () => {
     expect(
       urlMatchesConnectedOrigins('https://github.com/rtzr/iac/pull/1911', origins)
     ).toBe(false);
+  });
+
+  test('custom domain parses to HTTPS match patterns and gets overlay host', () => {
+    expect(parseCustomConnectedOrigins('app.example.com')).toEqual({
+      ok: true,
+      origins: ['https://app.example.com/*'],
+    });
+    expect(parseCustomConnectedOrigins('*.internal.example.com')).toEqual({
+      ok: true,
+      origins: ['https://*.internal.example.com/*'],
+    });
+    expect(parseCustomConnectedOrigins('https://jira.corp.example/browse/X')).toEqual({
+      ok: true,
+      origins: ['https://jira.corp.example/*'],
+    });
+    expect(parseCustomConnectedOrigins('github.com').ok).toBe(false);
+    expect(parseCustomConnectedOrigins('http://intranet.local').ok).toBe(false);
+    const entry = partnerHostScriptEntry(['https://app.example.com/*']);
+    expect(entry?.id).toBe('prp-partner-overlay-host');
+    expect(entry?.matches).toEqual(['https://app.example.com/*']);
+    expect(entry?.js).toContain('src/partner/partner.js');
+    expect(entry?.js[0]).toBe('src/partner/mark-runtime.js');
+    expect(
+      urlMatchesConnectedOrigins(
+        'https://app.example.com/board/1',
+        ['https://app.example.com/*']
+      )
+    ).toBe(true);
   });
 
   test('popup requests host permission in the click turn', () => {

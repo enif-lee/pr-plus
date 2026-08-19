@@ -11,6 +11,7 @@ export const CONNECTED_SITES_KEY = 'connectedSites';
 export const PARTNER_CS_ISOLATED_ID = 'prp-partner-prplus-isolated';
 export const PARTNER_CS_MAIN_ID = 'prp-partner-prplus-main';
 export const LINEAR_HOST_CS_ID = 'prp-linear-partner-host';
+export const PARTNER_HOST_CS_ID = 'prp-partner-overlay-host';
 
 export const LINEAR_MATCHES = [
   'https://linear.app/*',
@@ -30,6 +31,59 @@ export type ConnectedSitesState = {
 
 export function isLinearMatch(pattern: string): boolean {
   return LINEAR_MATCHES.includes(pattern as (typeof LINEAR_MATCHES)[number]);
+}
+
+/**
+ * Parse a user-typed host into chrome match patterns (HTTPS).
+ * `*.example.com` includes subdomains. github.com is rejected (static CS).
+ */
+export function parseCustomConnectedOrigins(
+  raw: unknown
+): { ok: true; origins: string[] } | { ok: false; error: string } {
+  let s = String(raw || '').trim();
+  if (!s) return { ok: false, error: 'empty' };
+  if (/^http:\/\//i.test(s)) {
+    const rest = s.slice('http://'.length);
+    const hostOnly = rest.split('/')[0].split('?')[0].toLowerCase();
+    if (hostOnly !== 'localhost' && hostOnly !== '127.0.0.1') {
+      return { ok: false, error: 'https-only' };
+    }
+  }
+  s = s.replace(/^https?:\/\//i, '');
+  const cut = s.search(/[/?#]/);
+  if (cut >= 0) s = s.slice(0, cut);
+  s = s.trim().toLowerCase();
+  let wildcard = false;
+  if (s.startsWith('*.')) {
+    wildcard = true;
+    s = s.slice(2);
+  }
+  let host = s;
+  let port = '';
+  const portMatch = host.match(/^(.+):(\d+)$/);
+  if (portMatch) {
+    host = portMatch[1];
+    port = portMatch[2];
+  }
+  if (host === '[::1]' || host === '::1' || host === '*' || host === 'http://*') {
+    return { ok: false, error: 'invalid' };
+  }
+  const ipv4 = /^(?:\d{1,3}\.){3}\d{1,3}$/.test(host);
+  const dns = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*$/.test(
+    host
+  );
+  if (!ipv4 && !dns) return { ok: false, error: 'invalid' };
+  if (host === 'github.com' || host.endsWith('.github.com')) {
+    return { ok: false, error: 'github' };
+  }
+  if (host === 'localhost' || host === '127.0.0.1') {
+    return { ok: true, origins: [...LOOPBACK_MATCHES] };
+  }
+  const portPart = port ? `:${port}` : '';
+  if (wildcard) {
+    return { ok: true, origins: [`https://*.${host}${portPart}/*`] };
+  }
+  return { ok: true, origins: [`https://${host}${portPart}/*`] };
 }
 
 export function normalizeConnectedOrigins(raw: unknown): string[] {
@@ -95,17 +149,24 @@ export function partnerScriptEntries(origins: string[]) {
   ];
 }
 
-export function linearHostScriptEntry(origins: string[]) {
-  const matches = normalizeConnectedOrigins(origins).filter(isLinearMatch);
+export function partnerHostScriptEntry(origins: string[]) {
+  const matches = normalizeConnectedOrigins(origins);
   if (!matches.length) return null;
   return {
-    id: LINEAR_HOST_CS_ID,
+    id: PARTNER_HOST_CS_ID,
     matches,
     js: [...PARTNER_HOST_JS],
     css: [...PARTNER_HOST_CSS],
     runAt: 'document_idle' as const,
     persistAcrossSessions: true,
   };
+}
+
+/** @deprecated use partnerHostScriptEntry — Linear-only host is no longer used. */
+export function linearHostScriptEntry(origins: string[]) {
+  return partnerHostScriptEntry(
+    normalizeConnectedOrigins(origins).filter(isLinearMatch)
+  );
 }
 
 export function partnerScriptListsExcludeGithubStack(): boolean {
@@ -137,6 +198,7 @@ export async function syncPartnerContentScripts(origins?: string[]) {
       PARTNER_CS_ISOLATED_ID,
       PARTNER_CS_MAIN_ID,
       LINEAR_HOST_CS_ID,
+      PARTNER_HOST_CS_ID,
     ];
     try {
       await chrome.scripting.unregisterContentScripts({ ids });
@@ -144,8 +206,8 @@ export async function syncPartnerContentScripts(origins?: string[]) {
       /* not registered */
     }
     const scripts: any[] = partnerScriptEntries(list);
-    const linear = linearHostScriptEntry(list);
-    if (linear) scripts.push(linear);
+    const overlay = partnerHostScriptEntry(list);
+    if (overlay) scripts.push(overlay);
     if (!scripts.length) return { registered: false, origins: list };
     await chrome.scripting.registerContentScripts(scripts);
     return { registered: true, origins: list, scripts: scripts.map((s) => s.id) };
@@ -203,19 +265,15 @@ export async function injectPartnerScriptsIntoTab(tabId: number, url: string) {
       files: [...PARTNER_CS_MAIN_JS],
       world: 'MAIN',
     });
-    const isLinear =
-      parsed.hostname === 'linear.app' || parsed.hostname.endsWith('.linear.app');
-    if (isLinear) {
-      await chrome.scripting.executeScript({
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: [...PARTNER_HOST_JS],
+    });
+    if (chrome.scripting.insertCSS) {
+      await chrome.scripting.insertCSS({
         target: { tabId },
-        files: [...PARTNER_HOST_JS],
+        files: [...PARTNER_HOST_CSS],
       });
-      if (chrome.scripting.insertCSS) {
-        await chrome.scripting.insertCSS({
-          target: { tabId },
-          files: [...PARTNER_HOST_CSS],
-        });
-      }
     }
     return { ok: true };
   } catch (err: any) {
