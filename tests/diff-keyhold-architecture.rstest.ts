@@ -90,6 +90,13 @@ describe('Diff key-hold architecture', () => {
     );
   });
 
+  test('session restore key survives host remount of the same PR', () => {
+    const src = read('src/modal/hooks/usePrModalSessionRoute.ts');
+    expect(src).toMatch(/let restoredSessionPrKey:\s*string \| null/);
+    expect(src).toMatch(/restoredSessionPrKey === key/);
+    expect(src).toMatch(/restoredSessionPrKey = null/);
+  });
+
   test('selection route writes stamp the inbound dedupe key before host echo', () => {
     const shell = readShell();
     const outbound = shell.slice(

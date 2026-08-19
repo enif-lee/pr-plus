@@ -14,10 +14,9 @@ import {
   clearPrPlusIdb,
   clearPrPlusSessionStorage,
   closeOverlay,
-  DEMO_PR,
+  META_PR,
   evalInPage,
   log,
-  MULTI_HUNK_PR,
   open as openPage,
   openPr,
   openPulls,
@@ -57,7 +56,7 @@ function ghJson(args, input = null) {
   }
 }
 
-function ghIssueGet(n = DEMO_PR) {
+function ghIssueGet(n = META_PR) {
   return ghJson([
     'api',
     `repos/${REPO}/issues/${Number(n)}`,
@@ -150,7 +149,8 @@ function probeListRow(n) {
       for (const r of rows) {
         if (r.id === 'issue_' + n) { row = r; break; }
         for (const a of r.querySelectorAll('a[href*="/pull/"]')) {
-          if ((a.getAttribute('href') || '').includes('/pull/' + n)) {
+          const m = (a.getAttribute('href') || '').match(/\\/pull\\/(\\d+)/);
+          if (m && Number(m[1]) === n) {
             row = r;
             break;
           }
@@ -955,7 +955,7 @@ function toggleBodyHeartReaction() {
   return picked;
 }
 
-function reopenModalFresh(n = DEMO_PR, { bustCache = false } = {}) {
+function reopenModalFresh(n = META_PR, { bustCache = false } = {}) {
   closeOverlay();
   waitMs(120);
   if (bustCache) {
@@ -1008,12 +1008,12 @@ export function getSteps() {
     heartOn: false,
   };
 
-  run(`MB0 open DEMO_PR #${DEMO_PR} + capture baseline`, () => {
+  run(`MB0 open META_PR #${META_PR} + capture baseline`, () => {
     closeOverlay();
     // Ensure milestone exists for later steps
     ctx.milestone = ghEnsureMilestone();
     log(`  milestone fixture: ${JSON.stringify(ctx.milestone)}`);
-    const gh = ghIssueGet(DEMO_PR);
+    const gh = ghIssueGet(META_PR);
     assert(!gh?._error, `gh issue get failed: ${JSON.stringify(gh)}`);
     ctx.originalTitle = String(gh.title || '');
     ctx.originalBody = String(gh.body || '');
@@ -1022,7 +1022,7 @@ export function getSteps() {
       `  gh baseline: title=${JSON.stringify(ctx.originalTitle)} assignees=${JSON.stringify(ctx.originalAssignees)} body=${JSON.stringify(ctx.originalBody).slice(0, 80)}`
     );
 
-    openPr(DEMO_PR, { viaUrl: true });
+    openPr(META_PR, { viaUrl: true });
     setLayout('conversation');
     waitDetailReady({ meta: true, files: false, label: 'MB0' });
     // Progressive open may paint a cold seed first — wait for GH title, not
@@ -1044,7 +1044,7 @@ export function getSteps() {
     );
   });
 
-  run(`MB1 modal title → list row + reopened modal #${DEMO_PR}`, () => {
+  run(`MB1 modal title → list row + reopened modal #${META_PR}`, () => {
     ctx.mutatedTitle = `${ctx.originalTitle} ✨${MARK}`;
     editModalTitle(ctx.mutatedTitle);
     const modal = waitPred(
@@ -1062,7 +1062,7 @@ export function getSteps() {
     openPulls();
     waitMs(250);
     const list = waitPred(
-      () => probeListRow(DEMO_PR),
+      () => probeListRow(META_PR),
       (r) => r.found && String(r.title || '').includes(MARK),
       14_000,
       250
@@ -1073,7 +1073,7 @@ export function getSteps() {
     );
     log(`  list title after modal edit: ${JSON.stringify(list.title)}`);
 
-    reopenModalFresh(DEMO_PR);
+    reopenModalFresh(META_PR);
     const again = waitPred(
       probeModalMeta,
       (m) => m.open && String(m.title || '').includes(MARK),
@@ -1085,7 +1085,7 @@ export function getSteps() {
     );
   });
 
-  run(`MB2 modal description → reopened modal #${DEMO_PR}`, () => {
+  run(`MB2 modal description → reopened modal #${META_PR}`, () => {
     // Visible marker (HTML comments are stripped from innerText probes)
     ctx.mutatedBody = `${ctx.originalBody}\n\n${MARK} body-mark`;
     editModalBody(ctx.mutatedBody);
@@ -1099,7 +1099,7 @@ export function getSteps() {
       `modal body missing mark after save: ${JSON.stringify(modal)}`
     );
     // Body is not on list row — reopen is the dual surface
-    reopenModalFresh(DEMO_PR);
+    reopenModalFresh(META_PR);
     const again = waitPred(
       probeModalMeta,
       (m) => m.open && (m.bodyHasMark || /e2e-meta-/i.test(m.bodyText || '')),
@@ -1111,7 +1111,7 @@ export function getSteps() {
     );
   });
 
-  run(`MB3 modal milestone set → aside + reopen #${DEMO_PR}`, () => {
+  run(`MB3 modal milestone set → aside + reopen #${META_PR}`, () => {
     assert(
       ctx.milestone?.number,
       `milestone fixture missing: ${JSON.stringify(ctx.milestone)}`
@@ -1146,7 +1146,7 @@ export function getSteps() {
     );
     // Fail-closed on the write itself (not only UI paint): modal path must land on GH.
     const ghAfterSet = waitPred(
-      () => ghIssueGet(DEMO_PR),
+      () => ghIssueGet(META_PR),
       (g) => /pr-plus-e2e-meta/i.test(String(g?.milestone || '')),
       16_000
     );
@@ -1161,7 +1161,7 @@ export function getSteps() {
     // same milestone on reopened modal aside (AC1 — not log-only).
     closeOverlay();
     waitMs(200);
-    openPr(DEMO_PR);
+    openPr(META_PR);
     setLayout('conversation');
     waitDetailReady({ meta: true, files: false, label: 'MB3 soft reopen' });
     const softMs = waitPred(
@@ -1197,13 +1197,13 @@ export function getSteps() {
     }
     waitMs(200);
     const listHit = waitPred(
-      () => probeListRow(DEMO_PR),
+      () => probeListRow(META_PR),
       (r) => r.found,
       12_000
     );
     log(`  list before hard reopen: ${JSON.stringify(listHit).slice(0, 160)}`);
     // Prefer viaUrl after hard clear so network core (issue+pull) is authoritative.
-    openPr(DEMO_PR, { viaUrl: true });
+    openPr(META_PR, { viaUrl: true });
     setLayout('conversation');
     waitDetailReady({ meta: true, files: false, label: 'MB3 hard reopen' });
     waitMs(300);
@@ -1216,7 +1216,7 @@ export function getSteps() {
       45_000,
       300
     );
-    const ghAtReopen = ghIssueGet(DEMO_PR);
+    const ghAtReopen = ghIssueGet(META_PR);
     assert(
       /pr-plus-e2e-meta/i.test(String(ghAtReopen?.milestone || '')),
       `GH lost milestone before hard-reopen assert: ${JSON.stringify(ghAtReopen)}`
@@ -1231,7 +1231,7 @@ export function getSteps() {
     );
   });
 
-  run(`MB4 modal assignee remove → re-add (aside) #${DEMO_PR}`, () => {
+  run(`MB4 modal assignee remove → re-add (aside) #${META_PR}`, () => {
     // Ensure enif-lee is assigned first
     let modal = probeModalMeta();
     if (!modal.assigneeMentionsEnif) {
@@ -1279,7 +1279,7 @@ export function getSteps() {
     );
   });
 
-  run(`MB5 modal reviewer add (if collaborator available) #${DEMO_PR}`, () => {
+  run(`MB5 modal reviewer add (if collaborator available) #${META_PR}`, () => {
     const pick = addReviewerIfPossible();
     log(`  reviewer pick: ${JSON.stringify(pick)}`);
     if (!pick.ok) {
@@ -1317,7 +1317,7 @@ export function getSteps() {
     );
   });
 
-  run(`MB6 modal body emoji reaction (heart) #${DEMO_PR}`, () => {
+  run(`MB6 modal body emoji reaction (heart) #${META_PR}`, () => {
     evalInPage(`
       document.querySelector('[data-search-anchor="body"]')?.scrollIntoView?.({block:'center'});
     `);
@@ -1428,23 +1428,23 @@ export function getSteps() {
     ctx.heartOn = false;
   });
 
-  run(`MB7 reverse: gh API mutates title/body/milestone → modal reflects #${DEMO_PR}`, () => {
+  run(`MB7 reverse: gh API mutates title/body/milestone → modal reflects #${META_PR}`, () => {
     const reverseTitle = `${ctx.originalTitle} [rev-${MARK}]`;
     const reverseBody = `${ctx.originalBody}\n\nrev-${MARK} body-mark`;
     const msNum = ctx.milestone?.number || null;
 
-    const t = ghPatchIssue(DEMO_PR, { title: reverseTitle });
+    const t = ghPatchIssue(META_PR, { title: reverseTitle });
     assert(!t?._error, `gh title patch failed: ${JSON.stringify(t)}`);
-    const b = ghPatchIssue(DEMO_PR, { body: reverseBody });
+    const b = ghPatchIssue(META_PR, { body: reverseBody });
     assert(!b?._error, `gh body patch failed: ${JSON.stringify(b)}`);
     if (msNum) {
-      ghPatchIssue(DEMO_PR, { milestone: msNum });
+      ghPatchIssue(META_PR, { milestone: msNum });
     }
-    ghPatchIssue(DEMO_PR, { assignees: ['enif-lee'] });
+    ghPatchIssue(META_PR, { assignees: ['enif-lee'] });
 
     // Confirm external truth before reopening product
     const ghRev = waitPred(
-      () => ghIssueGet(DEMO_PR),
+      () => ghIssueGet(META_PR),
       (g) => g && String(g.title || '').includes('rev-'),
       12_000
     );
@@ -1467,16 +1467,16 @@ export function getSteps() {
     }
     // Prefer list-click open so sketch title comes from live GH HTML when present
     const listRev = waitPred(
-      () => probeListRow(DEMO_PR),
+      () => probeListRow(META_PR),
       (r) => r.found && String(r.title || '').includes('rev-'),
       20_000,
       300
     );
     log(`  list after reverse: ${JSON.stringify(listRev)}`);
     if (listRev.found && String(listRev.title || '').includes('rev-')) {
-      openPr(DEMO_PR); // list click
+      openPr(META_PR); // list click
     } else {
-      openPr(DEMO_PR, { viaUrl: true });
+      openPr(META_PR, { viaUrl: true });
     }
     setLayout('conversation');
     waitDetailReady({ meta: true, files: false, label: 'MB7 reverse' });
@@ -1505,7 +1505,7 @@ export function getSteps() {
         /* ignore */
       }
       waitMs(200);
-      openPr(DEMO_PR, { viaUrl: true });
+      openPr(META_PR, { viaUrl: true });
       setLayout('conversation');
       waitDetailReady({ meta: true, files: false, label: 'MB7 reverse retry' });
       modal = waitPred(
@@ -1537,26 +1537,26 @@ export function getSteps() {
     );
   });
 
-  run(`MB8 hygiene: restore original title/body/milestone/assignees #${DEMO_PR}`, () => {
+  run(`MB8 hygiene: restore original title/body/milestone/assignees #${META_PR}`, () => {
     // Prefer gh for durable restore
-    const rt = ghPatchIssue(DEMO_PR, { title: ctx.originalTitle });
-    const rb = ghPatchIssue(DEMO_PR, { body: ctx.originalBody });
+    const rt = ghPatchIssue(META_PR, { title: ctx.originalTitle });
+    const rb = ghPatchIssue(META_PR, { body: ctx.originalBody });
     // Clear milestone
     ghJson([
       'api',
       '-X',
       'PATCH',
-      `repos/${REPO}/issues/${DEMO_PR}`,
+      `repos/${REPO}/issues/${META_PR}`,
       '-F',
       'milestone=',
     ]);
-    ghPatchIssue(DEMO_PR, {
+    ghPatchIssue(META_PR, {
       assignees: ctx.originalAssignees?.length
         ? ctx.originalAssignees
         : ['enif-lee'],
     });
     // Toggle heart off if still on
-    reopenModalFresh(DEMO_PR);
+    reopenModalFresh(META_PR);
     const m = probeModalMeta();
     if (m.reactedHeart) {
       toggleBodyHeartReaction();
@@ -1569,7 +1569,7 @@ export function getSteps() {
     log(
       `  hygiene gh: title=${JSON.stringify(rt?.title || rt)} bodyErr=${Boolean(rb?._error)}`
     );
-    const finalGh = ghIssueGet(DEMO_PR);
+    const finalGh = ghIssueGet(META_PR);
     log(`  final gh: ${JSON.stringify(finalGh)}`);
     assert(
       !finalGh?._error &&

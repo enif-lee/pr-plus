@@ -81,14 +81,14 @@ describe('Diff overscan / scroll path (shipped)', () => {
     );
   });
 
-  test('navComment is rAF-coalesced under key-repeat (shell)', () => {
+  test('navComment hops synchronously (shell)', () => {
     const shell =
       read('src/modal/app/PrModalShell.tsx') +
       read('src/modal/hooks/useDiffConversationNav.ts');
-    expect(shell).toMatch(/navCommentRafRef/);
-    expect(shell).toMatch(/navCommentDeltaRef/);
     expect(shell).toMatch(/function navComment\s*\(/);
-    expect(shell).toMatch(/requestAnimationFrame\(run\)/);
+    expect(shell).toMatch(/resolveCommentNav/);
+    expect(shell).toMatch(/setCommentIndex\(next\)/);
+    expect(shell).toMatch(/jumpToReviewComment/);
   });
 
   test('⌥J/K thread hops replace the ArrowUp/Down cursor atomically', () => {

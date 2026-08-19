@@ -156,10 +156,9 @@ describe('issue comments on long conversation PR', () => {
     const defIdx = bundled.indexOf(
       'async function fetchReactableReactionGroups'
     );
-    const callIdx = bundled.indexOf(
-      'const byId = await fetchReactableReactionGroups'
-    );
+    const afterDef = defIdx >= 0 ? bundled.slice(defIdx + 1) : '';
+    const callIdx = afterDef.search(/await fetchReactableReactionGroups\s*\(/);
     expect(defIdx).toBeGreaterThanOrEqual(0);
-    expect(callIdx).toBeGreaterThan(defIdx);
+    expect(callIdx).toBeGreaterThanOrEqual(0);
   });
 });

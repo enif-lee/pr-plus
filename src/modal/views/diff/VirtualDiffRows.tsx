@@ -57,6 +57,7 @@ import {
   isDiffLineExpandable,
   expandedCodeLineHeight,
   toggleExpandKey,
+  capExpandedLineHeight,
 } from '@lib/line-expand';
 import { IconDisclosure } from '@common/icons';
 import { FloatingScrollbar } from '../../components/common/FloatingScrollbar';
@@ -729,8 +730,10 @@ export const DiffCodeLine = memo(function DiffCodeLine({
     const el = lineRef.current;
     if (!el) return;
     const measure = () => {
-      // Prefer content box (code) so padding is included via offsetHeight of row
-      const next = Math.ceil(el.scrollHeight || el.offsetHeight || h);
+      // Use the laid-out box, not content scrollHeight — a minified line can
+      // wrap to tens of thousands of px and blow the virtualizer.
+      const box = Math.ceil(el.offsetHeight || el.clientHeight || h);
+      const next = capExpandedLineHeight(box);
       if (next > 0) onMeasureLineHeight(next);
     };
     measure();

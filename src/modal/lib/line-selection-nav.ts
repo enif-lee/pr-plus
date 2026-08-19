@@ -207,7 +207,7 @@ export function lineForSideStrict(
  * @returns {object|null}
  */
 export function beginLineSelection(
-  row,
+  row: any,
   preferredSide = 'RIGHT',
   arrayIndex?: number | null
 ) {

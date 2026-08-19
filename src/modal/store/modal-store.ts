@@ -217,6 +217,10 @@ export const useModalStore = create<ModalUiState>((set, get) => ({
     // and isMultiReplyThreadFocused DOM fallbacks after ⌥J/K root hops.
     try {
       if (typeof document !== 'undefined') {
+        document.documentElement.setAttribute(
+          'data-prp-comment-index',
+          String(i)
+        );
         document.documentElement.removeAttribute(
           'data-prp-focused-thread-unit'
         );

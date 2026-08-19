@@ -1340,7 +1340,6 @@ export function PrModalApp({
     annotatedFiles,
     appLocale,
     applyActionRef,
-    applyDomainDetailToHost,
     assigneeAddRef,
     autoExpandOnFileNav,
     baseBranchRef,
@@ -1848,6 +1847,7 @@ export function PrModalApp({
     pendingThreadCounts,
     reviewFilterEvalOpts,
     displayFiles,
+    reviewFilteredFiles,
     displayPathSet,
     threadsByCommentId,
     virtualRows,
@@ -2789,14 +2789,14 @@ export function PrModalApp({
   function clearConversationCommentFocus() {
     conversationCommentFocusRef.current = null;
     useModalStore.getState().requestConversationNav(null);
-    if (commentIndex >= 0) setCommentIndex(-1);
+    if (useModalStore.getState().commentIndex >= 0) setCommentIndex(-1);
     useModalStore.getState().setActiveDiffCommentId(null);
   }
 
   /** Drop Diff thread caret / hit ring when focus moves to code/file selection. */
   function clearDiffThreadFocusIfNeeded() {
-    if (commentIndex >= 0) setCommentIndex(-1);
     const st = useModalStore.getState();
+    if (st.commentIndex >= 0) setCommentIndex(-1);
     if (st.activeDiffCommentId != null) st.setActiveDiffCommentId(null);
   }
 

@@ -1,5 +1,5 @@
 // @ts-nocheck — Phase 9 extract
-import React, { useCallback, useEffect, useMemo, useRef, useState, startTransition } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, startTransition } from 'react';
 /**
  * SOURCE OF TRUTH — PR modal shell composition root (Phase 7).
  * Complete TypeScript module: providers, layout, command wiring, page switch.
@@ -188,7 +188,7 @@ import {
 import {
   createDefaultDiffReviewFilter,
   createUnrestrictedDiffReviewFilter,
-
+  shouldAutoWidenEmptyDiffReviewFilter,
   filterReviewCommentsForDiffNav,
   filterReviewRootsForDiffNav,
   normalizeDiffReviewFilter,
@@ -730,7 +730,7 @@ export function useDiffConversationNav(b: any) {
     const roots = sortThreadRootComments(
       filterReviewRootsForDiffNav(
         detail?.reviewComments || [],
-        deferredDiffReviewFilter,
+        diffReviewFilter,
         displayPathSet,
         reviewFilterEvalOpts
       ),
@@ -740,20 +740,51 @@ export function useDiffConversationNav(b: any) {
   }, [
     detail?.reviewComments,
     virtualRows,
-    deferredDiffReviewFilter,
+    diffReviewFilter,
     displayPathSet,
     displayFiles,
     navReviewComments,
     reviewFilterEvalOpts,
   ]);
 
-  // Keep commentIndex inside the filtered list when filters change
-  useEffect(() => {
-    if (commentIndex < 0) return;
-    if (!mappedComments.length) {
-      setCommentIndex(-1);
+  // Default Unresolved+Pending → 0 mapped on resolved-only PRs. Widen before
+  // paint so StepNav is not stuck at disabled 0/0.
+  useLayoutEffect(() => {
+    const all = detail?.reviewComments || [];
+    if (!all.length) return;
+    const unrestrictedN = filterReviewRootsForDiffNav(
+      all,
+      createUnrestrictedDiffReviewFilter(),
+      displayPathSet,
+      reviewFilterEvalOpts
+    ).length;
+    if (
+      !shouldAutoWidenEmptyDiffReviewFilter({
+        filter: diffReviewFilter,
+        filteredRootCount: mappedComments.length,
+        unrestrictedRootCount: unrestrictedN,
+      })
+    ) {
       return;
     }
+    setDiffReviewFilter(createUnrestrictedDiffReviewFilter());
+  }, [
+    detail?.reviewComments,
+    diffReviewFilter,
+    displayPathSet,
+    mappedComments.length,
+    reviewFilterEvalOpts,
+    setDiffReviewFilter,
+  ]);
+
+  const mappedCommentsRef = useRef(mappedComments);
+  mappedCommentsRef.current = mappedComments;
+
+  // Keep commentIndex inside the filtered list when filters change.
+  // Do not snap back to -1 when the list is briefly empty (file expand /
+  // virtual-row rebuild) — that races StepNav / ⌥J hops and leaves 0/N.
+  useEffect(() => {
+    if (commentIndex < 0 || !mappedComments.length) return;
     if (commentIndex >= mappedComments.length) {
       setCommentIndex(mappedComments.length - 1);
     }
@@ -1179,25 +1210,11 @@ export function useDiffConversationNav(b: any) {
     (path: string) => {
       if (!path) return;
       setActiveFilePath(path);
-      setCollapsedFiles((prev: any) => {
-        const file = annotatedFiles.find(
-          (f: any) => (f.filename || f.path) === path
-        );
-        if (
-          !isPathCollapsed(
-            path,
-            prev,
-            Boolean(file?.defaultCollapsed),
-            false,
-            viewedPaths
-          )
-        ) {
-          return prev;
-        }
-        const n = materializeCollapsedPaths(prev, annotatedFiles, viewedPaths);
-        n.delete(path);
-        return n;
-      });
+      setCollapsedFiles((prev: any) =>
+        typeof expandPathInCollapsedSet === 'function'
+          ? expandPathInCollapsedSet(prev, path, annotatedFiles, viewedPaths)
+          : prev
+      );
     },
     [annotatedFiles, setActiveFilePath, setCollapsedFiles, viewedPaths]
   );
@@ -1239,7 +1256,7 @@ export function useDiffConversationNav(b: any) {
       line?: number | null;
       side?: string | null;
     }) => {
-      if (layoutMode !== LAYOUT_DIFF) {
+      if (useModalStore.getState().layoutMode !== LAYOUT_DIFF) {
         expandDiff();
         if (useModalStore.getState().layoutMode !== LAYOUT_DIFF) return;
       }
@@ -1250,11 +1267,15 @@ export function useDiffConversationNav(b: any) {
 
       // Clear thread filter if it hides the target file
       const path = target.path ? String(target.path) : '';
+      const files = Array.isArray(reviewFilteredFiles)
+        ? reviewFilteredFiles
+        : Array.isArray(displayFiles)
+          ? displayFiles
+          : [];
       if (
         path &&
-        !reviewFilteredFiles.some(
-          (f: any) => (f.filename || f.path) === path
-        )
+        files.length > 0 &&
+        !files.some((f: any) => (f.filename || f.path) === path)
       ) {
         // Widen to unrestricted (empty statuses ≡ all) — not product default
         // unresolved+pending, which would still hide resolved-only paths.
@@ -1266,10 +1287,11 @@ export function useDiffConversationNav(b: any) {
 
       if (path) expandFileForJump(path);
 
+      const list = mappedCommentsRef.current;
       const id = target.id;
       let idx = -1;
       if (id != null) {
-        idx = mappedComments.findIndex((c) => String(c.id) === String(id));
+        idx = list.findIndex((c) => String(c.id) === String(id));
       }
       if (idx < 0 && path) {
         const line =
@@ -1280,7 +1302,7 @@ export function useDiffConversationNav(b: any) {
           String(target.side || 'RIGHT').toUpperCase() === 'LEFT'
             ? 'LEFT'
             : 'RIGHT';
-        idx = mappedComments.findIndex((c) => {
+        idx = list.findIndex((c) => {
           if (c.path !== path) return false;
           if (line == null) return true;
           const cl =
@@ -1297,7 +1319,12 @@ export function useDiffConversationNav(b: any) {
       }
 
       if (idx < 0) {
-        // Still open Diff at file; comment may load later via Load more
+        if (id != null) {
+          pendingCommentJumpRef.current = {
+            commentId: id,
+            path: path || undefined,
+          };
+        }
         if (path) {
           expandFileForJump(path);
           const fileIdx = fileStarts.get(path);
@@ -1308,7 +1335,7 @@ export function useDiffConversationNav(b: any) {
         return;
       }
 
-      const active = mappedComments[idx];
+      const active = list[idx];
       commitDiffThreadCursor(active?.id ?? id, idx);
       // Prefer exact inline row; if only header (collapsed) or missing, re-try after expand
       const onlyHeader =
@@ -1332,6 +1359,7 @@ export function useDiffConversationNav(b: any) {
       setLayoutMode,
       diffReviewFilter,
       reviewFilteredFiles,
+      displayFiles,
       expandFileForJump,
       mappedComments,
       virtualRows,
@@ -1351,7 +1379,6 @@ export function useDiffConversationNav(b: any) {
     const active = mappedComments[idx];
     if (active?.rowIndex == null) return;
     const row = virtualRows[active.rowIndex];
-    // Wait until we have more than a collapsed header when possible
     if (row?.kind === 'file-header' && row.collapsed) return;
     pendingCommentJumpRef.current = null;
     commitDiffThreadCursor(active?.id ?? pending.commentId, idx);
@@ -1464,59 +1491,70 @@ export function useDiffConversationNav(b: any) {
   ]);
 
   /**
-   * Coalesce ⌥J/K key-repeat to one step per animation frame so hold does not
-   * stack N shell re-renders / jumps (shuttering).
+   * Diff thread StepNav / ⌥J/K. Hop is synchronous so a toolbar click is not
+   * lost behind a stuck rAF lock (headless / hidden tabs).
    */
-  const navCommentRafRef = useRef(0);
-  const navCommentDeltaRef = useRef(0);
-
+  /**
+   * Diff thread StepNav / ⌥J/K. Hop is synchronous so a toolbar click is not
+   * lost behind a stuck rAF lock (headless / hidden tabs).
+   */
   function navComment(delta: number) {
-    if (!mappedComments.length) return;
-    // Latest direction wins while a frame is pending (hold-repeat).
-    navCommentDeltaRef.current = delta < 0 ? -1 : 1;
-    if (navCommentRafRef.current) return;
-    const run = () => {
-      navCommentRafRef.current = 0;
-      const step = navCommentDeltaRef.current;
-      navCommentDeltaRef.current = 0;
-      if (!step) return;
-      const list = mappedComments;
-      if (!list.length) return;
-      // Live index from store (avoid stale closure on rAF).
-      const liveIdx = Number(useModalStore.getState().commentIndex);
-      if (typeof resolveCommentNav === 'function') {
-        const st = resolveCommentNav(list, liveIdx, step);
-        const active = st.active;
-        if (active) {
-          jumpToReviewComment({
-            id: active.id,
-            path: active.path,
-            line: active.line ?? active.originalLine ?? null,
-            side: active.side,
-          });
-        } else {
-          setCommentIndex(st.commentIndex);
-        }
-      } else {
-        const next =
-          ((liveIdx < 0 ? 0 : liveIdx) + step + list.length) % list.length;
-        const active = list[next];
-        if (active) {
-          jumpToReviewComment({
-            id: active.id,
-            path: active.path,
-            line: active.line ?? active.originalLine ?? null,
-            side: active.side,
-          });
-        } else {
-          setCommentIndex(next);
-        }
+    const step = delta < 0 ? -1 : 1;
+    const liveList = mappedCommentsRef.current;
+    if (!liveList.length) {
+      // Default Unresolved+Pending hides resolved-only PRs. Widen urgently
+      // so StepNav count / mappedComments update this render cycle, then jump.
+      const all =
+        (detailRef.current || detail)?.reviewComments || [];
+      const unrestricted = sortThreadRootComments(
+        filterReviewRootsForDiffNav(
+          all,
+          createUnrestrictedDiffReviewFilter(),
+          null,
+          reviewFilterEvalOpts
+        )
+      );
+      if (!unrestricted.length) return;
+      const seed =
+        step > 0
+          ? unrestricted[0]
+          : unrestricted[unrestricted.length - 1];
+      setDiffReviewFilter(createUnrestrictedDiffReviewFilter());
+      try {
+        jumpToReviewComment({
+          id: seed?.id,
+          path: seed?.path,
+          line: seed?.line ?? seed?.originalLine ?? null,
+          side: seed?.side,
+        });
+      } catch {
+        /* jump must not unwind the hop */
       }
-    };
-    if (typeof requestAnimationFrame === 'function') {
-      navCommentRafRef.current = requestAnimationFrame(run);
-    } else {
-      run();
+      return;
+    }
+    const rawIdx = Number(useModalStore.getState().commentIndex);
+    const liveIdx = Number.isFinite(rawIdx) ? rawIdx : -1;
+    const st =
+      typeof resolveCommentNav === 'function'
+        ? resolveCommentNav(liveList, liveIdx, step)
+        : null;
+    const next =
+      st?.commentIndex ??
+      ((liveIdx < 0 ? 0 : liveIdx) + step + liveList.length) % liveList.length;
+    const active = st?.active ?? liveList[next] ?? null;
+    if (typeof next === 'number' && next >= 0) {
+      useModalStore.getState().setCommentIndex(next);
+    }
+    if (!active) return;
+    try {
+      jumpToReviewComment({
+        id: active.id,
+        path: active.path,
+        line: active.line ?? active.originalLine ?? null,
+        side: active.side,
+      });
+    } catch {
+      /* index already committed */
     }
   }
 
@@ -2038,10 +2076,15 @@ export function useDiffConversationNav(b: any) {
       ? virtualRowsRef.current
       : [];
     const arrIdx = id ? findThreadArrayIndex(id) : -1;
-    const pinned =
-      arrIdx >= 0 && typeof beginSelectionOnRow === 'function'
-        ? beginSelectionOnRow(list[arrIdx], 'RIGHT', arrIdx)
-        : null;
+    let pinned = null;
+    try {
+      pinned =
+        arrIdx >= 0 && typeof beginSelectionOnRow === 'function'
+          ? beginSelectionOnRow(list[arrIdx], 'RIGHT', arrIdx)
+          : null;
+    } catch {
+      pinned = null;
+    }
 
     // One store commit keeps thread chrome, comment index, and the Arrow caret
     // on one cursor; separate setters let an Arrow frame observe the old row.
@@ -2052,6 +2095,10 @@ export function useDiffConversationNav(b: any) {
       lineSelection: pinned,
     });
     try {
+      document.documentElement.setAttribute(
+        'data-prp-comment-index',
+        String(nextCommentIndex)
+      );
       document.documentElement.removeAttribute('data-prp-focused-thread-unit');
     } catch {
       /* ignore */

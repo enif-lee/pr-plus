@@ -439,6 +439,10 @@ function scheduleNavigationFrame(run: () => void): NavigationFrameHandle {
   }
   return { cancel };
 }
+
+/** Survives React remount while the same PR stays open (route writes remount host). */
+let restoredSessionPrKey: string | null = null;
+
 /** session URI */
 export function usePrModalSessionRoute(b: any) {
   const open = b.open;
@@ -770,8 +774,14 @@ export function usePrModalSessionRoute(b: any) {
   useEffect(() => {
     if (!open || !detail?.owner || !detail?.repo || !detail?.number) return;
     const key = `${detail.owner}/${detail.repo}#${detail.number}`;
-    if (routeRestoreKeyRef.current === key) return;
+    if (
+      routeRestoreKeyRef.current === key ||
+      restoredSessionPrKey === key
+    ) {
+      return;
+    }
     routeRestoreKeyRef.current = key;
+    restoredSessionPrKey = key;
     if (selectionInteractedRef) selectionInteractedRef.current = false;
     positionAppliedRef.current = null;
     positionInFlightRef.current = null;
@@ -1662,6 +1672,7 @@ export function usePrModalSessionRoute(b: any) {
   useEffect(() => {
     if (open) return undefined;
     routeRestoreKeyRef.current = null;
+    restoredSessionPrKey = null;
     positionAppliedRef.current = null;
     positionInFlightRef.current = null;
     positionExhaustedRef.current = null;

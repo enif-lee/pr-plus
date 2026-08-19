@@ -52,6 +52,7 @@ import {
   isDiffLineExpandable,
   expandedCodeLineHeight,
   toggleExpandKey,
+  capExpandedLineHeight,
 } from '@lib/line-expand';
 import { IconDisclosure } from '@common/icons';
 import { FloatingScrollbar } from '../../components/common/FloatingScrollbar';
@@ -388,8 +389,7 @@ function VirtualDiffImpl(props: any) {
   const measureLineHeight = useCallback(
     (key: string, height: number) => {
       if (!key) return;
-      const h = Math.ceil(Number(height) || 0);
-      if (h < ROW_HEIGHT) return;
+      const h = capExpandedLineHeight(height);
       reportMeasuredHeight(key, h);
     },
     [reportMeasuredHeight]

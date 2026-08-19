@@ -167,6 +167,16 @@ export function rowHeightFor(row: any, opts: any = null) {
         } else {
           return Math.max(COMMENT_ROW_HEIGHT_COLLAPSED, Math.ceil(m));
         }
+      } else if (row?.kind === 'diff-line') {
+        // Mega-line dblclick expand: never let RO scrollHeight blow the virtualizer.
+        const capped =
+          typeof opts?.expandedCodeLineHeight === 'function'
+            ? opts.expandedCodeLineHeight(row, opts)
+            : Math.min(ROW_HEIGHT * 48, Math.max(ROW_HEIGHT, Math.ceil(m)));
+        if (capped != null && Number.isFinite(capped) && capped > 0) {
+          return Math.max(ROW_HEIGHT, capped);
+        }
+        return Math.min(ROW_HEIGHT * 48, Math.max(ROW_HEIGHT, Math.ceil(m)));
       } else {
         return Math.max(ROW_HEIGHT, Math.ceil(m));
       }

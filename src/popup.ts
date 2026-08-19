@@ -793,6 +793,7 @@ tokenInput.addEventListener('keydown', (e) => {
 
 prefPluginEnabled?.addEventListener('change', () => void savePrefs());
 prefAutoOpenEmbed?.addEventListener('change', () => void savePrefs());
+prefListOpenMode?.addEventListener('change', () => void savePrefs());
 prefReverseComments.addEventListener('change', () => void savePrefs());
 prefSingleFileMode?.addEventListener('change', () => void savePrefs());
 prefAutoExpandFileNav?.addEventListener('change', () => void savePrefs());

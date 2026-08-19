@@ -1243,7 +1243,7 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
               hasLineSelection: liveLineSelection,
               diffThreadFocused: liveDiffThreadFocused,
               focusedReviewThread: liveFocusedReviewThread,
-              layoutMode: ui.layoutMode,
+              layoutMode: storeUi.layoutMode || ui.layoutMode,
               conversationCommentFocused: liveConvFocus,
               contextThreadActive: liveContextThread,
               multiReplyThreadFocused,
