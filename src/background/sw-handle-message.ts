@@ -12,6 +12,7 @@ import {
 } from './sw-enterprise';
 import { isSwMessage, type SwMessage } from '../sw-messages';
 import { handlePageApiMessage, allowExternalSender } from './sw-open-pr';
+import { handleDetailCacheMessage } from './sw-detail-cache';
 import {
   isAbortError,
   withServiceWorkerKeepAlive,
@@ -30,12 +31,18 @@ export async function handleMessage(
 ): Promise<unknown> {
   if (
     message.type !== MSG.PING &&
-    message.type !== MSG.CANCEL_FETCH
+    message.type !== MSG.CANCEL_FETCH &&
+    message.type !== MSG.DETAIL_CACHE_GET &&
+    message.type !== MSG.DETAIL_CACHE_SET &&
+    message.type !== MSG.DETAIL_CACHE_DELETE &&
+    message.type !== MSG.DETAIL_CACHE_CLEAR
   ) {
     await bindGithubWebHost(message);
   }
   const pageApi = await handlePageApiMessage(message, sender);
   if (pageApi !== undefined) return pageApi;
+  const cache = await handleDetailCacheMessage(message);
+  if (cache !== undefined) return cache;
   const a = await handleMessagePartA(message);
   if (a !== undefined) return a;
   return handleMessagePartB(message);

@@ -54,10 +54,7 @@
    * @param {string} key
    * @param {number} [ms]
    */
-  async function peekDetailIdb(key: any, ms = 400) {
-    if (typeof isPartnerOrShellRuntime === 'function' && isPartnerOrShellRuntime()) {
-      return emptyPeek();
-    }
+  async function peekDetailIdb(key: any, ms = 800) {
     if (typeof detailCache.peekAsync !== 'function') return emptyPeek();
     try {
       const result = await Promise.race([

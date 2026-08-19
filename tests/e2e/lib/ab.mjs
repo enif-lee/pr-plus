@@ -203,6 +203,23 @@ export function clearPrPlusIdb() {
         const run = async () => {
           const out = { ok: false, via: [], errors: [], host: location.host };
           try {
+            if (globalThis.chrome?.runtime?.sendMessage) {
+              await new Promise((resolve) => {
+                try {
+                  chrome.runtime.sendMessage(
+                    { type: 'PR_TREE_CLEAR_DETAIL_CACHE' },
+                    () => resolve(null)
+                  );
+                } catch {
+                  resolve(null);
+                }
+              });
+              out.via.push('PR_TREE_CLEAR_DETAIL_CACHE');
+            }
+          } catch (e) {
+            out.errors.push(String(e?.message || e));
+          }
+          try {
             const idb = globalThis.PRModalDetailIdb?.createDetailIdb?.();
             if (idb?.clear) {
               await Promise.race([

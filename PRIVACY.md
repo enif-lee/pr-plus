@@ -83,7 +83,8 @@ We do **not** use this data for:
 
 - Optional PAT is stored in **`chrome.storage.local`** on your device.  
 - It is **not** stored with `chrome.storage.sync` (it is not synced through your Google account by this Extension).  
-- The raw token is used by the Extension **service worker** only. Content scripts do not receive the raw token.
+- The raw token is used by the Extension **service worker** only. Content scripts do not receive the raw token.  
+- A sanitized PR-detail snapshot cache (title, conversation, file list) is stored in **extension-origin IndexedDB** owned by the service worker, so GitHub and granted Connected sites share the same cache. It is not stored in the page’s origin database.
 
 ### 4.2 Network requests
 
@@ -122,7 +123,7 @@ You can:
 ## 7. Data retention
 
 - PAT: retained in `chrome.storage.local` until you clear it or uninstall the Extension.  
-- Page/API data: processed ephemerally in memory to render the current page; not retained by us on developer servers (we do not operate such a retention store for pr+).
+- Page/API data: processed in memory to render the current page; a local extension IndexedDB cache of PR snapshots is kept on-device until you clear it or uninstall. Not retained on developer servers.
 
 ---
 
