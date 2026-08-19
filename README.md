@@ -230,7 +230,8 @@ Open a PR title from the list → **centered modal** or **side sheet** on the **
 | `Esc` | Nested UI → blur editable → close shell (hierarchy) |
 
 Full browser QA checklist: **[docs/qa-browser-scenario.md](./docs/qa-browser-scenario.md)**.  
-Deep matrix of GitHub PR-view vs modal: **[docs/github-pr-parity.md](./docs/github-pr-parity.md)**.
+Deep matrix of GitHub PR-view vs modal: **[docs/github-pr-parity.md](./docs/github-pr-parity.md)**.  
+Embed pr+ on your own site (`window.PRPlus`): **[docs/prplus-integration.md](./docs/prplus-integration.md)**.
 
 ---
 

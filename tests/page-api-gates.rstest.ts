@@ -180,5 +180,27 @@ describe('page-api gates', () => {
     );
     expect(isolated).toMatch(/PR_TREE_OPEN_PR/);
     expect(isolated).not.toMatch(/callerOrigin:/);
+    const openPr = fs.readFileSync(
+      path.join(root, 'src/background/sw-open-pr.ts'),
+      'utf8'
+    );
+    expect(openPr).toMatch(/urlMatchesConnectedOrigins/);
+    expect(openPr).toMatch(/senderIsPartnerHostPage/);
+    expect(openPr).not.toMatch(/host === 'linear\.app'/);
+  });
+
+  test('third-party integration guide documents PRPlus overlay control', () => {
+    const guide = fs.readFileSync(
+      path.join(root, 'docs/prplus-integration.md'),
+      'utf8'
+    );
+    expect(guide).toMatch(/window\.PRPlus/);
+    expect(guide).toMatch(/opener-embed/);
+    expect(guide).toMatch(/Connected sites/);
+    expect(guide).toMatch(/waitForPRPlus/);
+    expect(guide).toMatch(/githubHost/);
+    const readme = fs.readFileSync(path.join(root, 'README.md'), 'utf8');
+    expect(readme).toMatch(/docs\/prplus-integration\.md/);
   });
 });
+
