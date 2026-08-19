@@ -15,20 +15,30 @@ import { resolveSystemChrome, systemChromeEnv } from './system-chrome.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const url = process.argv.slice(2).find((a) => a && !a.startsWith('-')) || '';
 const chromeExe = resolveSystemChrome();
+const profileDir = path.join(root, '.browser', 'profile');
 console.log(`browser chrome ${chromeExe}`);
 
 /**
  * @param {string[]} args
- * @param {{ inherit?: boolean, allowFail?: boolean }} [opts]
+ * @param {{ allowFail?: boolean, launch?: boolean }} [opts]
  */
 function ab(args, opts = {}) {
+  const launchFlags = opts.launch
+    ? [
+        '--executable-path',
+        chromeExe,
+        '--profile',
+        profileDir,
+        '--extension',
+        root,
+      ]
+    : [];
   const r = spawnSync(
     'agent-browser',
-    ['--executable-path', chromeExe, ...args],
+    [...launchFlags, '--session', 'pr-tree', ...args],
     {
       cwd: root,
       encoding: 'utf8',
-      stdio: opts.inherit ? 'inherit' : ['ignore', 'pipe', 'pipe'],
       env: systemChromeEnv(),
     }
   );
@@ -38,6 +48,22 @@ function ab(args, opts = {}) {
     throw new Error(`agent-browser ${args.join(' ')} failed: ${err}`);
   }
   return r;
+}
+
+function waitForNoSessions(ms = 4000) {
+  const start = Date.now();
+  while (Date.now() - start < ms) {
+    const r = spawnSync('agent-browser', ['session', 'list'], {
+      cwd: root,
+      encoding: 'utf8',
+      env: systemChromeEnv(),
+    });
+    const out = `${r.stdout || ''}\n${r.stderr || ''}`;
+    if (/No active sessions/i.test(out) || (r.status === 0 && !/\bpr-tree\b|\bpr-plus-e2e\b/.test(out))) {
+      return;
+    }
+    spawnSync('sleep', ['0.2']);
+  }
 }
 
 function ensureSoloTab() {
@@ -68,11 +94,14 @@ function ensureSoloTab() {
   return { kept: keep?.tabId || null, closed };
 }
 
-// Fresh session so a just-rebuilt extension is picked up from extensions: ["."]
+// Fresh session so executable-path / rebuilt extension are not ignored by a live daemon.
 ab(['close', '--all'], { allowFail: true });
+waitForNoSessions();
 
-const openArgs = url ? ['open', url] : ['open'];
-ab(openArgs, { inherit: true });
+// Launch first (URL on a cold Chrome process is often dropped).
+ab(['open'], { launch: true });
+spawnSync('sleep', ['0.8']);
+if (url) ab(['open', url]);
 
 const solo = ensureSoloTab();
 const target = url || 'about:blank';
