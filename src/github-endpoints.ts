@@ -217,9 +217,34 @@
     return null;
   }
 
+  function isPrPlusUiNode(el: any): boolean {
+    if (!el) return false;
+    const id = String(el.id || '');
+    if (
+      id === 'prp-modal-host' ||
+      id === 'prp-page-embed' ||
+      id === 'prp-modal-root'
+    ) {
+      return true;
+    }
+    const cls = el.classList;
+    if (cls && typeof cls.contains === 'function') {
+      if (
+        cls.contains('prp-overlay') ||
+        cls.contains('prp-shell') ||
+        cls.contains('prp-header')
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /**
    * Resolve a GitHub PR from a click composedPath.
    * Linear chips wrap the <a>; the click target is often the parent, not the link.
+   * Do not walk descendants of the pr+ overlay — header "Open on GitHub" would
+   * steal Close / shell-toggle clicks.
    */
   function findGithubPullFromClickPath(nodes: any, opts: any = {}) {
     const list = Array.isArray(nodes) ? nodes : [];
@@ -228,20 +253,36 @@
     const parse = (href: any) => parseGithubPullUrl(href, opts.base);
 
     for (const n of list) {
+      if (isPrPlusUiNode(n)) break;
+      if (
+        n &&
+        typeof n.closest === 'function' &&
+        n.closest('#prp-modal-host, #prp-page-embed, .prp-overlay, .prp-shell')
+      ) {
+        break;
+      }
       const direct = parse(hrefOf(n));
       if (direct) return direct;
       if (n && typeof n.closest === 'function') {
         const a = n.closest('a[href]');
-        const fromA = parse(hrefOf(a));
-        if (fromA) return fromA;
+        if (
+          a &&
+          !isPrPlusUiNode(a) &&
+          !a.closest?.('#prp-modal-host, #prp-page-embed, .prp-overlay, .prp-shell')
+        ) {
+          const fromA = parse(hrefOf(a));
+          if (fromA) return fromA;
+        }
       }
     }
 
     for (const start of list.slice(0, 8)) {
+      if (isPrPlusUiNode(start)) continue;
       let el = start;
       for (let i = 0; i < 6 && el; i++) {
         const tag = String(el.tagName || '').toUpperCase();
         if (tag === 'BODY' || tag === 'HTML' || tag === 'DOCUMENT') break;
+        if (isPrPlusUiNode(el)) break;
         if (typeof el.querySelectorAll === 'function') {
           const found: any[] = [];
           const seen = new Set();

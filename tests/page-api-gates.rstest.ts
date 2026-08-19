@@ -122,6 +122,8 @@ describe('page-api gates', () => {
     const partner = fs.readFileSync(path.join(root, 'src/partner/partner.ts'), 'utf8');
     expect(partner).toMatch(/findGithubPullFromClickPath/);
     expect(partner).toMatch(/pointerdown/);
+    expect(partner).toMatch(/prp-modal-host/);
+    expect(partner).toMatch(/isPrPlusUiEvent/);
   });
 
   test('open args type lists owner/repo/number in page-api SoT', () => {
