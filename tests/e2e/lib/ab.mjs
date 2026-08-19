@@ -44,6 +44,10 @@ export function ab(args, opts = {}) {
     [
       '--executable-path',
       CHROME_EXE,
+      '--profile',
+      path.join(ROOT, '.browser', 'profile'),
+      '--extension',
+      ROOT,
       ...headedFlag,
       '--session',
       SESSION,
