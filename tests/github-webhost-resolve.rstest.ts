@@ -126,6 +126,54 @@ describe('resolveGithubWebHost + selectTokenForMessage', () => {
     );
   });
 
+  test('findGithubPullFromClickPath ignores chrome clicks inside pr+ overlay', () => {
+    const prLink = {
+      tagName: 'A',
+      id: '',
+      href: 'https://github.com/rtzr/iac/pull/1911',
+      getAttribute: (k: string) =>
+        k === 'href' ? 'https://github.com/rtzr/iac/pull/1911' : null,
+      closest(sel: string) {
+        if (sel.startsWith('a')) return this;
+        if (String(sel).includes('prp-overlay') || String(sel).includes('prp-modal-host')) {
+          return overlay;
+        }
+        return null;
+      },
+    };
+    const closeBtn: any = {
+      tagName: 'BUTTON',
+      id: '',
+      getAttribute: () => null,
+      closest(sel: string) {
+        if (String(sel).includes('prp-overlay') || String(sel).includes('prp-modal-host')) {
+          return overlay;
+        }
+        return null;
+      },
+    };
+    const overlay: any = {
+      tagName: 'DIV',
+      id: 'prp-modal-host',
+      classList: { contains: (c: string) => c === 'prp-overlay' },
+      getAttribute: () => null,
+      closest: () => null,
+      parentElement: { tagName: 'BODY' },
+      querySelectorAll: (sel: string) => (String(sel).startsWith('a') ? [prLink] : []),
+    };
+    closeBtn.parentElement = overlay;
+    expect(
+      api.findGithubPullFromClickPath([closeBtn, overlay], {
+        base: 'https://linear.app/',
+      })
+    ).toBe(null);
+    expect(
+      api.findGithubPullFromClickPath([prLink, overlay], {
+        base: 'https://linear.app/',
+      })
+    ).toBe(null);
+  });
+
   test('findGithubPullFromClickPath resolves Linear chip wrappers', () => {
     const inner = {
       tagName: 'A',

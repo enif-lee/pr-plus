@@ -7,6 +7,39 @@
   let lastOpenKey = '';
   let lastOpenAt = 0;
 
+  function isPrPlusUiEvent(event: any): boolean {
+    const path =
+      typeof event?.composedPath === 'function' ? event.composedPath() : [];
+    const nodes = path.length ? path : [event?.target];
+    for (const n of nodes) {
+      if (!n) continue;
+      const id = String(n.id || '');
+      if (
+        id === 'prp-modal-host' ||
+        id === 'prp-page-embed' ||
+        id === 'prp-modal-root'
+      ) {
+        return true;
+      }
+      const cls = n.classList;
+      if (
+        cls &&
+        typeof cls.contains === 'function' &&
+        (cls.contains('prp-overlay') ||
+          cls.contains('prp-shell') ||
+          cls.contains('prp-header'))
+      ) {
+        return true;
+      }
+      if (typeof n.closest === 'function') {
+        if (n.closest('#prp-modal-host, #prp-page-embed, .prp-overlay, .prp-shell')) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
   function findPrFromEvent(event: any) {
     const ep = global.PRGithubEndpoints;
     if (typeof ep?.findGithubPullFromClickPath !== 'function') {
@@ -65,6 +98,7 @@
     if (event.defaultPrevented) return;
     if (event.button != null && event.button !== 0) return;
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    if (isPrPlusUiEvent(event)) return;
     const parsed = findPrFromEvent(event);
     if (!parsed) return;
     if (!openOverlay(parsed)) return;
