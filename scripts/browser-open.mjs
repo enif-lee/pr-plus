@@ -10,20 +10,28 @@
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { resolveSystemChrome, systemChromeEnv } from './system-chrome.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const url = process.argv.slice(2).find((a) => a && !a.startsWith('-')) || '';
+const chromeExe = resolveSystemChrome();
+console.log(`browser chrome ${chromeExe}`);
 
 /**
  * @param {string[]} args
  * @param {{ inherit?: boolean, allowFail?: boolean }} [opts]
  */
 function ab(args, opts = {}) {
-  const r = spawnSync('agent-browser', args, {
-    cwd: root,
-    encoding: 'utf8',
-    stdio: opts.inherit ? 'inherit' : ['ignore', 'pipe', 'pipe'],
-  });
+  const r = spawnSync(
+    'agent-browser',
+    ['--executable-path', chromeExe, ...args],
+    {
+      cwd: root,
+      encoding: 'utf8',
+      stdio: opts.inherit ? 'inherit' : ['ignore', 'pipe', 'pipe'],
+      env: systemChromeEnv(),
+    }
+  );
   if (r.error && !opts.allowFail) throw r.error;
   if ((r.status ?? 1) !== 0 && !opts.allowFail) {
     const err = (r.stderr || r.stdout || '').trim() || `exit ${r.status}`;

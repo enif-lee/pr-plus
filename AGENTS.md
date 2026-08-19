@@ -49,7 +49,7 @@ Optional: `chrome.runtime.reload()` from an extension context (e2e may dispatch 
 
 - Extension was never loaded / path changed / “Load unpacked” broken.
 - Profile locks or corrupted agent-browser session (`npm run browser:close` then re-open).
-- SW refuses to activate after reload (rare); then quit Chrome-for-Testing / agent-browser session and relaunch with the extension load path.
+- SW refuses to activate after reload (rare); then quit the agent-browser Chrome session and relaunch with the extension load path (`npm run browser`). Sessions use system Google Chrome, not Chrome for Testing.
 
 ### Agent-browser / e2e note
 

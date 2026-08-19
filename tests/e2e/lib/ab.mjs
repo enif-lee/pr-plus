@@ -5,9 +5,14 @@
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  resolveSystemChrome,
+  systemChromeEnv,
+} from '../../../scripts/system-chrome.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const ROOT = path.resolve(__dirname, '../../..');
+const CHROME_EXE = resolveSystemChrome();
 
 const SESSION = process.env.PRP_E2E_SESSION || 'pr-plus-e2e';
 // Local CDP operations normally finish in well under a second. Keep their
@@ -34,18 +39,28 @@ export function ab(args, opts = {}) {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   // Boolean form overrides agent-browser.json "headed" (see agent-browser README).
   const headedFlag = HEADED ? ['--headed', 'true'] : ['--headed', 'false'];
-  const r = spawnSync('agent-browser', [...headedFlag, '--session', SESSION, ...args], {
-    cwd: ROOT,
-    encoding: 'utf8',
-    input: opts.input,
-    timeout: timeoutMs,
-    maxBuffer: 8 * 1024 * 1024,
-    env: {
-      ...process.env,
-      // Mirror CLI so child sessions stay consistent
-      AGENT_BROWSER_HEADED: HEADED ? '1' : '0',
-    },
-  });
+  const r = spawnSync(
+    'agent-browser',
+    [
+      '--executable-path',
+      CHROME_EXE,
+      ...headedFlag,
+      '--session',
+      SESSION,
+      ...args,
+    ],
+    {
+      cwd: ROOT,
+      encoding: 'utf8',
+      input: opts.input,
+      timeout: timeoutMs,
+      maxBuffer: 8 * 1024 * 1024,
+      env: {
+        ...systemChromeEnv(),
+        AGENT_BROWSER_HEADED: HEADED ? '1' : '0',
+      },
+    }
+  );
   // spawnSync sets r.error on timeout (ETIMEDOUT) even when the CLI may have
   // partially succeeded. allowFail must swallow that too — otherwise waitNetwork
   // / closeAll blow up hardLaunch soft-fail paths.
