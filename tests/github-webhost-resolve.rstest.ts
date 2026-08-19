@@ -121,7 +121,7 @@ describe('resolveGithubWebHost + selectTokenForMessage', () => {
     expect(
       api.parseGithubPullUrl('/acme/widgets/pull/7/files', 'https://github.com')
     ).toMatchObject({ owner: 'acme', repo: 'widgets', number: 7 });
-    expect(api.parseGithubPullUrl('https://linear.app/rtzr/issue/CAL-7238')).toBe(
+    expect(api.parseGithubPullUrl('https://linear.app/mornica/issue/PRP-2')).toBe(
       null
     );
   });

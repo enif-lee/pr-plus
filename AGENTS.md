@@ -6,7 +6,7 @@ Agent-oriented guide for build, verify, architecture, and tests. Humans can use 
 
 **pr+** is a Chromium MV3 extension for GitHub PRs: stack tree on `/pulls`, and a fast in-page **modal / embed shell** for Conversation, Diff, and merge. UI is React (modal); network and extension plumbing live in background + content bridge + host.
 
-Demo / e2e target repo: `enif-lee/pr-plus` (e.g. open PR `#19` — stack root DEMO-300; former `#7` closed).
+Demo / e2e target repo: `enif-lee/pr-plus` (e.g. open PR `#19` — stack root DEMO-300; former `#7` closed). Linear overlay fixture: workspace **mornica**, team **PR Plus**, issue **PRP-2** → linked `#19`.
 
 ---
 
@@ -56,12 +56,13 @@ Optional: `chrome.runtime.reload()` from an extension context (e2e may dispatch 
 Branded Chrome 137+ ignores `--load-extension`. **`npm run browser`** launches Playwright Chromium through [pikabo](https://github.com/sonic0002/pikabo) with this repo loaded unpacked.
 
 ```bash
-npm run browser              # Linear CAL-7238 + persistent profile
+npm run browser              # Linear PRP-2 (mornica) + persistent profile
 npm run browser:login        # GitHub login
 npm run browser:pulls
-npm run browser:linear
+npm run browser:linear       # https://linear.app/mornica/issue/PRP-2
 npm run browser:close
 npm run test:pikabo          # headless SW / popup / github.com inject smoke
+npm run test:e2e:linear      # Linear overlay e2e (PRP-2 → #19)
 ```
 
 Profile: `.browser/pikabo-profile` (PAT and cookies survive relaunches). Close the window or `npm run browser:close`.
@@ -193,6 +194,7 @@ Config: `rstest.e2e.config.ts`. Docs: `tests/e2e/README.md`.
 | GraphQL / fetch / resolve | `build:pure` + `build:fetch` + `build:sw` + unit + **extensions reload** + manual or e2e |
 | Host open / progress | `build:host` (+ bridge if API shape) + extensions reload |
 | InlineThread / Diff UI | `build:modal` + unit/e2e as needed + extensions reload + GH tab refresh |
+| Linear overlay | `npm run browser:linear` (PRP-2) or `npm run test:e2e:linear` after Connected sites → Linear |
 | Full confidence | `npm run build` → chrome://extensions **reload** → `npm run check` and/or targeted e2e |
 
 ---

@@ -11,10 +11,55 @@ import {
   waitMs,
 } from '../lib/harness.mjs';
 import { listTabs, open } from '../lib/ab.mjs';
+import {
+  LINEAR_ISSUE_ID,
+  LINEAR_ISSUE_URL,
+  LINEAR_LINKED_PR,
+} from '../lib/linear-fixture.mjs';
 
 export const LINEAR_URL = 'https://linear.app';
-/** User-specified issue: linked PR click should open the overlay. */
-export const LINEAR_ISSUE_URL = 'https://linear.app/rtzr/issue/CAL-7238';
+export { LINEAR_ISSUE_ID, LINEAR_ISSUE_URL, LINEAR_LINKED_PR };
+
+function inspectLinkedPr() {
+  const want = `${LINEAR_LINKED_PR.owner}/${LINEAR_LINKED_PR.repo}/pull/${LINEAR_LINKED_PR.number}`;
+  return evalInPage(`
+    (() => {
+      const want = ${JSON.stringify(want)};
+      const github = Array.from(document.querySelectorAll('a[href*="github.com"]'))
+        .map((el) => el.href || el.getAttribute('href') || '')
+        .filter((h) => /\\/pull\\/\\d+/.test(h));
+      const reviews = Array.from(document.querySelectorAll('a[href*="/review/"]'))
+        .map((el) => ({
+          href: el.href || el.getAttribute('href') || '',
+          text: String(el.innerText || el.getAttribute('aria-label') || '').trim(),
+        }))
+        .filter((row) => row.href);
+      const preferred = github.find((h) => h.includes(want)) || github[0] || null;
+      return { github, reviews, preferred };
+    })()
+  `);
+}
+
+function openLinkedPrViaApi() {
+  return evalInPage(`
+    (async () => {
+      if (!window.PRPlus || typeof window.PRPlus.open !== 'function') {
+        return { ok: false, error: 'no-prplus' };
+      }
+      try {
+        const out = await window.PRPlus.open({
+          owner: ${JSON.stringify(LINEAR_LINKED_PR.owner)},
+          repo: ${JSON.stringify(LINEAR_LINKED_PR.repo)},
+          number: ${LINEAR_LINKED_PR.number},
+          target: 'opener-embed',
+        });
+        return { ok: true, out };
+      } catch (e) {
+        return { ok: false, error: String(e && e.message ? e.message : e) };
+      }
+    })()
+  `);
+}
 
 export function probePrPlus() {
   return evalInPage(`
@@ -71,13 +116,18 @@ export function getSteps() {
     steps.push({ name, fn });
   };
 
-  run('L0 open Linear issue CAL-7238', () => {
+  run(`L0 open Linear issue ${LINEAR_ISSUE_ID}`, () => {
     open(LINEAR_ISSUE_URL);
     waitMs(2000);
     const host = evalInPage(`location.hostname || ''`);
     assert(
       String(host) === 'linear.app' || String(host).endsWith('.linear.app'),
       `expected linear.app, got ${host}`
+    );
+    const href = String(evalInPage(`location.pathname || ''`) || '');
+    assert(
+      href.includes(`/${LINEAR_ISSUE_ID}`) || href.includes('/issue/PRP-2'),
+      `expected ${LINEAR_ISSUE_ID} issue path, got ${href}`
     );
   });
 
@@ -98,50 +148,47 @@ export function getSteps() {
     }
   });
 
-  run('L2 click Linear linked GitHub PR', () => {
-    const click = evalInPage(`
-      (() => {
-        const sel = 'a[href*="github.com"][href*="/pull/"], a[href*="/pull/"]';
-        const links = Array.from(document.querySelectorAll(sel));
-        const a = links.find((el) => /\\/pull\\/\\d+/.test(el.getAttribute('href') || el.href || ''));
-        if (!a) {
-          return { clicked: false, hrefs: links.map((el) => el.href).slice(0, 8) };
-        }
-        a.click();
-        return { clicked: true, href: a.href || a.getAttribute('href') };
-      })()
-    `);
-    if (!click?.clicked) {
-      const result = evalInPage(`
-        (async () => {
-          if (!window.PRPlus || typeof window.PRPlus.open !== 'function') {
-            return { ok: false, error: 'no-prplus' };
-          }
-          try {
-            const out = await window.PRPlus.open({
-              owner: 'enif-lee',
-              repo: 'pr-plus',
-              number: ${DEMO_PR},
-              target: 'opener-embed',
-            });
-            return { ok: true, fallback: true, out };
-          } catch (e) {
-            return { ok: false, error: String(e && e.message ? e.message : e) };
-          }
+  run(`L2 open linked PR ${LINEAR_LINKED_PR.owner}/${LINEAR_LINKED_PR.repo}#${LINEAR_LINKED_PR.number}`, () => {
+    const found = inspectLinkedPr();
+    console.log('[linear-probe] L2-found', JSON.stringify(found));
+    const hasGithub = Array.isArray(found?.github) && found.github.length > 0;
+    const hasReview = Array.isArray(found?.reviews) && found.reviews.length > 0;
+    assert(
+      hasGithub || hasReview,
+      `PRP-2 has no linked GitHub PR or Linear review card (${JSON.stringify(found)})`
+    );
+    if (found?.preferred) {
+      const click = evalInPage(`
+        (() => {
+          const want = ${JSON.stringify(found.preferred)};
+          const links = Array.from(document.querySelectorAll('a[href*="github.com"]'));
+          const a = links.find((el) => (el.href || el.getAttribute('href') || '') === want)
+            || links.find((el) => /\\/pull\\/\\d+/.test(el.href || el.getAttribute('href') || ''));
+          if (!a) return { clicked: false };
+          a.click();
+          return { clicked: true, href: a.href || a.getAttribute('href') };
         })()
       `);
-      assert(
-        result && result.ok !== false,
-        `no linked PR to click (${JSON.stringify(click)}) and PRPlus.open failed: ${JSON.stringify(result)}`
-      );
-      if (result.out && result.out.ok === false) {
-        throw new Error(`PRPlus.open rejected: ${JSON.stringify(result.out)}`);
+      if (click?.clicked) {
+        console.log('[linear-probe] L2-click', JSON.stringify(click));
+        return;
       }
+    }
+    // Native Linear review cards are /{workspace}/review/… — not github.com hrefs.
+    const result = openLinkedPrViaApi();
+    console.log('[linear-probe] L2-open', JSON.stringify(result));
+    assert(
+      result && result.ok !== false,
+      `linked review visible but PRPlus.open failed: ${JSON.stringify(result)}`
+    );
+    if (result.out && result.out.ok === false) {
+      throw new Error(`PRPlus.open rejected: ${JSON.stringify(result.out)}`);
     }
   });
 
   run('L3 overlay sheet + meta-ready on linear.app', () => {
     waitDetailReady({
+      number: LINEAR_LINKED_PR.number,
       meta: true,
       timeoutMs: 45_000,
       label: 'linear linked-PR overlay',

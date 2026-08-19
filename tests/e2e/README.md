@@ -22,6 +22,19 @@ Default multi-thread / conversation target is **`DEMO_PR` in `lib/harness.mjs`**
 (subject-level reaction lock). Comment cleanup defaults to the same number via
 `COMMENT_CLEANUP_PR` in `lib/comment-cleanup.mjs`.
 
+## Linear overlay fixture
+
+`tests/e2e/features/linear-overlay.mjs` uses **mornica / PR Plus / PRP-2**
+(`https://linear.app/mornica/issue/PRP-2`), linked to **enif-lee/pr-plus#19**.
+Constants live in `tests/e2e/lib/linear-fixture.mjs`.
+
+```bash
+npm run test:e2e:linear
+npm run browser:linear
+```
+
+Needs Linear login plus Connected sites → Linear granted in that browser profile.
+
 ## Commands
 
 ```bash
