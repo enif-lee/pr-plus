@@ -204,6 +204,50 @@
     }
   }
 
+  function isLinearAppHost(host: any) {
+    const h = normalizeHostname(host);
+    return h === 'linear.app' || h.endsWith('.linear.app');
+  }
+
+  /** `/workspace/issue/PRP-2` (and `/issue/PRP-2/slug`). */
+  function isLinearIssuePath(pathname: any) {
+    return /\/issue\/[A-Z][A-Z0-9]*-\d+/i.test(String(pathname || ''));
+  }
+
+  /** `/workspace/review/{slug}` or `.../changes`. */
+  function isLinearReviewPath(pathname: any) {
+    return /\/review\/[^/]+/i.test(String(pathname || ''));
+  }
+
+  /**
+   * Linear GitHub-integration review URL.
+   * Slug is `{title-slug}-{slugId}`; slugId is the trailing hex token.
+   */
+  function parseLinearReviewPath(href: any, base?: any) {
+    if (href == null) return null;
+    const raw = String(href).trim();
+    if (!raw || raw === '#') return null;
+    try {
+      const u = new URL(raw, base || 'https://linear.app');
+      if (u.hostname && !isLinearAppHost(u.hostname)) return null;
+      const m = u.pathname.match(
+        /^\/([^/]+)\/review\/([^/]+)(?:\/(changes|overview))?\/?$/i
+      );
+      if (!m) return null;
+      const slug = m[2];
+      const slugIdMatch = String(slug).match(/-([a-f0-9]{8,16})$/i);
+      return {
+        workspace: m[1],
+        slug,
+        slugId: slugIdMatch ? slugIdMatch[1].toLowerCase() : '',
+        tab: String(m[3] || 'overview').toLowerCase() === 'changes' ? 'changes' : 'overview',
+        path: `/${m[1]}/review/${slug}`,
+      };
+    } catch {
+      return null;
+    }
+  }
+
   function hrefFromClickNode(node: any): string | null {
     if (!node) return null;
     if (typeof node.getAttribute === 'function') {
@@ -240,11 +284,34 @@
     return false;
   }
 
+  function isOtherControlNode(el: any): boolean {
+    const tag = String(el?.tagName || '').toUpperCase();
+    return (
+      tag === 'BUTTON' ||
+      tag === 'INPUT' ||
+      tag === 'SELECT' ||
+      tag === 'TEXTAREA' ||
+      tag === 'SUMMARY' ||
+      tag === 'LABEL'
+    );
+  }
+
+  function clickNodeIsPrPlusChrome(n: any): boolean {
+    if (isPrPlusUiNode(n)) return true;
+    return Boolean(
+      n &&
+        typeof n.closest === 'function' &&
+        n.closest('#prp-modal-host, #prp-page-embed, .prp-overlay, .prp-shell')
+    );
+  }
+
   /**
    * Resolve a GitHub PR from a click composedPath.
    * Linear chips wrap the <a>; the click target is often the parent, not the link.
    * Do not walk descendants of the pr+ overlay — header "Open on GitHub" would
    * steal Close / shell-toggle clicks.
+   * Do not walk large ancestors: Linear review pages have one github.com/pull
+   * link in the header, so a 6-level walk made every button open pr+.
    */
   function findGithubPullFromClickPath(nodes: any, opts: any = {}) {
     const list = Array.isArray(nodes) ? nodes : [];
@@ -253,36 +320,34 @@
     const parse = (href: any) => parseGithubPullUrl(href, opts.base);
 
     for (const n of list) {
-      if (isPrPlusUiNode(n)) break;
-      if (
-        n &&
-        typeof n.closest === 'function' &&
-        n.closest('#prp-modal-host, #prp-page-embed, .prp-overlay, .prp-shell')
-      ) {
-        break;
-      }
+      if (clickNodeIsPrPlusChrome(n)) break;
       const direct = parse(hrefOf(n));
       if (direct) return direct;
       if (n && typeof n.closest === 'function') {
         const a = n.closest('a[href]');
-        if (
-          a &&
-          !isPrPlusUiNode(a) &&
-          !a.closest?.('#prp-modal-host, #prp-page-embed, .prp-overlay, .prp-shell')
-        ) {
+        if (a && !clickNodeIsPrPlusChrome(a)) {
           const fromA = parse(hrefOf(a));
           if (fromA) return fromA;
         }
       }
     }
 
-    for (const start of list.slice(0, 8)) {
-      if (isPrPlusUiNode(start)) continue;
+    const start = list[0];
+    if (
+      start &&
+      !isOtherControlNode(start) &&
+      !clickNodeIsPrPlusChrome(start)
+    ) {
       let el = start;
-      for (let i = 0; i < 6 && el; i++) {
+      for (let i = 0; i < 3 && el; i++) {
         const tag = String(el.tagName || '').toUpperCase();
-        if (tag === 'BODY' || tag === 'HTML' || tag === 'DOCUMENT') break;
+        if (tag === 'BODY' || tag === 'HTML' || tag === 'MAIN' || tag === 'NAV') {
+          break;
+        }
         if (isPrPlusUiNode(el)) break;
+        if (typeof el.childElementCount === 'number' && el.childElementCount > 12) {
+          break;
+        }
         if (typeof el.querySelectorAll === 'function') {
           const found: any[] = [];
           const seen = new Set();
@@ -298,6 +363,39 @@
           if (found.length === 1) return found[0];
         }
         el = el.parentElement || el.parentNode;
+      }
+    }
+    return null;
+  }
+
+  /** Closest Linear `/review/{slug}` href in a click path (issue Diffs cards). */
+  function findLinearReviewHrefFromClickPath(nodes: any, opts: any = {}) {
+    const list = Array.isArray(nodes) ? nodes : [];
+    const hrefOf =
+      typeof opts.hrefOf === 'function' ? opts.hrefOf : hrefFromClickNode;
+    const base = opts.base || 'https://linear.app';
+    for (const n of list) {
+      if (clickNodeIsPrPlusChrome(n)) break;
+      const href = hrefOf(n);
+      if (parseLinearReviewPath(href, base)) {
+        try {
+          return new URL(String(href), base).href;
+        } catch {
+          return String(href);
+        }
+      }
+      if (n && typeof n.closest === 'function') {
+        const a = n.closest('a[href]');
+        if (a && !clickNodeIsPrPlusChrome(a)) {
+          const fromA = hrefOf(a);
+          if (parseLinearReviewPath(fromA, base)) {
+            try {
+              return new URL(String(fromA), base).href;
+            } catch {
+              return String(fromA);
+            }
+          }
+        }
       }
     }
     return null;
@@ -635,7 +733,11 @@
     isGithubApiHostname,
     resolveGithubWebHost,
     parseGithubPullUrl,
+    isLinearIssuePath,
+    isLinearReviewPath,
+    parseLinearReviewPath,
     findGithubPullFromClickPath,
+    findLinearReviewHrefFromClickPath,
     selectTokenForMessage,
     registerHostAccount,
     unregisterHostAccount,

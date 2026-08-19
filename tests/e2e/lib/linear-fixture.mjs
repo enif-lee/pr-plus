@@ -5,10 +5,8 @@
  * Team key: PRP (PR Plus)
  * Issue: PRP-2 Demo, linked to enif-lee/pr-plus#19 (DEMO_PR / DEMO-300).
  *
- * mornica renders that attachment as a Linear review card (`/mornica/review/…`),
- * not always as a raw github.com /pull/ href. Click intercept still prefers
- * github.com chips when present; otherwise the suite opens the same identity
- * via window.PRPlus.open.
+ * mornica renders that attachment as a Linear review card (`/mornica/review/…`).
+ * A plain click on Diffs/review cards opens pr+; Opt/Alt+click stays on Linear.
  */
 export const LINEAR_WORKSPACE = 'mornica';
 export const LINEAR_TEAM_KEY = 'PRP';

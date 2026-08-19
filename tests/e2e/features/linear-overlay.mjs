@@ -170,11 +170,33 @@ export function getSteps() {
         })()
       `);
       if (click?.clicked) {
-        console.log('[linear-probe] L2-click', JSON.stringify(click));
+        console.log('[linear-probe] L2-click-github', JSON.stringify(click));
         return;
       }
     }
-    // Native Linear review cards are /{workspace}/review/… — not github.com hrefs.
+    if (hasReview) {
+      const click = evalInPage(`
+        (() => {
+          const want = ${JSON.stringify(LINEAR_LINKED_PR.number)};
+          const cards = Array.from(document.querySelectorAll('a[href*="/review/"]'));
+          const preferred = cards.find((el) => {
+            const href = el.href || el.getAttribute('href') || '';
+            return /demo-g|c27ffba33fcd/i.test(href);
+          }) || cards.find((el) => String(el.getAttribute('aria-label') || el.innerText || '').includes('DEMO-300'))
+            || cards[0];
+          if (!preferred) return { clicked: false, want };
+          preferred.click();
+          return {
+            clicked: true,
+            href: preferred.href || preferred.getAttribute('href'),
+          };
+        })()
+      `);
+      if (click?.clicked) {
+        console.log('[linear-probe] L2-click-review', JSON.stringify(click));
+        return;
+      }
+    }
     const result = openLinkedPrViaApi();
     console.log('[linear-probe] L2-open', JSON.stringify(result));
     assert(

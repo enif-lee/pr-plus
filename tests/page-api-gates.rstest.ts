@@ -152,6 +152,20 @@ describe('page-api gates', () => {
     expect(popup).toMatch(/PR_TREE_CONNECTED_SITES_ADD/);
     const partner = fs.readFileSync(path.join(root, 'src/partner/partner.ts'), 'utf8');
     expect(partner).toMatch(/findGithubPullFromClickPath/);
+    expect(partner).toMatch(/findLinearReviewHrefFromClickPath/);
+    expect(partner).toMatch(/isLinearIssuePath/);
+    expect(partner).toMatch(/altKey/);
+    const restore = fs.readFileSync(
+      path.join(root, 'src/host/modules/restore-embed-list-focus.ts'),
+      'utf8'
+    );
+    expect(restore).toMatch(/installPartnerToggleWatch/);
+    const hostToggle = fs.readFileSync(
+      path.join(root, 'src/host/modules/host-core-timeline-b.ts'),
+      'utf8'
+    );
+    expect(hostToggle).toMatch(/findLinearReviewTabMount/);
+    expect(hostToggle).toMatch(/prp-linear-open-toggle/);
     expect(partner).toMatch(/pointerdown/);
     expect(partner).toMatch(/prp-modal-host/);
     expect(partner).toMatch(/isPrPlusUiEvent/);

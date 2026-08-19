@@ -250,6 +250,27 @@
     };
   }
 
+  let partnerToggleWatchInstalled = false;
+  function installPartnerToggleWatch() {
+    if (partnerToggleWatchInstalled) return;
+    partnerToggleWatchInstalled = true;
+    const pollId = window.setInterval(() => {
+      if (!hostEnabled) return;
+      try {
+        ensureGithubPrToggle();
+      } catch {
+        /* ignore */
+      }
+    }, 800);
+    try {
+      if (pollId != null && typeof pollId === 'object' && typeof (pollId as any).unref === 'function') {
+        (pollId as any).unref();
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
   function installEmbedWatch() {
     if (embedWatchInstalled) return;
     embedWatchInstalled = true;
@@ -287,6 +308,13 @@
     const pollId = window.setInterval(() => {
       if (!hostEnabled) return;
       if (embedLocationKey() !== lastEmbedPath) onNav();
+      else {
+        try {
+          ensureGithubPrToggle();
+        } catch {
+          /* ignore */
+        }
+      }
     }, 800);
     // Allow Node test processes to exit (browser ignores unref)
     try {
@@ -352,6 +380,12 @@
     // Light preload only — full warmUp runs after list paint (content.js)
     void ensureAssets();
     if (typeof isPartnerOrShellRuntime === 'function' && isPartnerOrShellRuntime()) {
+      installPartnerToggleWatch();
+      try {
+        ensureGithubPrToggle();
+      } catch {
+        /* ignore */
+      }
       return;
     }
     installEmbedWatch();
