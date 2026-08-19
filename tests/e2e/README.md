@@ -24,6 +24,19 @@ tests use **`LIST_PR` (#13)**; meta write-through uses **`META_PR` (#1)**. Both
 stay on default `/pulls`. Comment cleanup defaults to `DEMO_PR` via
 `COMMENT_CLEANUP_PR` in `lib/comment-cleanup.mjs`.
 
+## Linear overlay fixture
+
+`tests/e2e/features/linear-overlay.mjs` uses **mornica / PR Plus / PRP-2**
+(`https://linear.app/mornica/issue/PRP-2`), linked to **enif-lee/pr-plus#19**.
+Constants live in `tests/e2e/lib/linear-fixture.mjs`.
+
+```bash
+npm run test:e2e:linear
+npm run browser:linear
+```
+
+Needs Linear login plus Connected sites → Linear granted in that browser profile.
+
 ## Commands
 
 ```bash

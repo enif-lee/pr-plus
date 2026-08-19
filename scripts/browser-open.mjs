@@ -19,7 +19,7 @@ import { Session } from 'pikabo';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const profileDir = path.join(root, '.browser', 'pikabo-profile');
 const pidFile = path.join(root, '.browser', 'pikabo.pid');
-const DEFAULT_URL = 'https://linear.app/rtzr/issue/CAL-7238';
+const DEFAULT_URL = 'https://linear.app/mornica/issue/PRP-2';
 
 const argv = process.argv.slice(2).filter(Boolean);
 const closeOnly = argv.includes('--close');

@@ -106,12 +106,12 @@ describe('page-api gates', () => {
     const origins = ['https://linear.app/*', 'https://*.linear.app/*'];
     expect(
       urlMatchesConnectedOrigins(
-        'https://linear.app/rtzr/issue/CAL-7238',
+        'https://linear.app/mornica/issue/PRP-2',
         origins
       )
     ).toBe(true);
     expect(
-      urlMatchesConnectedOrigins('https://app.linear.app/rtzr', origins)
+      urlMatchesConnectedOrigins('https://app.linear.app/mornica', origins)
     ).toBe(true);
     expect(
       urlMatchesConnectedOrigins('https://github.com/rtzr/iac/pull/1911', origins)
