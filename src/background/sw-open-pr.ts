@@ -10,6 +10,7 @@ import {
   requestConnectedSiteOrigins,
   injectPartnerScriptsIntoMatchingTabs,
   normalizeConnectedOrigins,
+  urlMatchesConnectedOrigins,
   LINEAR_MATCHES,
 } from './sw-connected-sites';
 
@@ -302,17 +303,11 @@ async function openOnShell(
   return { ok: true, status: statusFromSession(sessionForOrigin(callerOrigin), callerOrigin) };
 }
 
-function senderIsLinear(sender?: any): boolean {
-  try {
-    const host = new URL(String(sender?.origin || sender?.url || '')).hostname;
-    return host === 'linear.app' || host.endsWith('.linear.app');
-  } catch {
-    return false;
-  }
-}
-
-function senderIsPartnerHostPage(sender?: any): boolean {
-  return senderIsLinear(sender);
+async function senderIsPartnerHostPage(sender?: any): Promise<boolean> {
+  const url = String(sender?.tab?.url || sender?.url || '');
+  if (!url) return false;
+  const sites = await getConnectedSites();
+  return urlMatchesConnectedOrigins(url, sites.origins);
 }
 
 export async function handleOpenPr(message: SwMessage, sender?: any) {
@@ -345,7 +340,7 @@ export async function handleOpenPr(message: SwMessage, sender?: any) {
   }
 
   if (target === 'opener-embed') {
-    if (!senderIsPartnerHostPage(sender) || sender?.tab?.id == null) {
+    if (!(await senderIsPartnerHostPage(sender)) || sender?.tab?.id == null) {
       return { ok: false, error: 'not-supported' };
     }
     const res = await retryOpenOnTab(sender.tab.id, args);
@@ -377,7 +372,9 @@ export async function handleOpenPr(message: SwMessage, sender?: any) {
   }
 
   const autoWantsOverlay =
-    target === 'auto' && senderIsPartnerHostPage(sender) && sender?.tab?.id != null;
+    target === 'auto' &&
+    (await senderIsPartnerHostPage(sender)) &&
+    sender?.tab?.id != null;
   if (autoWantsOverlay) {
     const res = await retryOpenOnTab(sender.tab.id, args);
     if (res?.ok && res.ready && res.hostEnabled) {
