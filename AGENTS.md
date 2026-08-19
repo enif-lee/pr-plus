@@ -48,18 +48,33 @@ Optional: `chrome.runtime.reload()` from an extension context (e2e may dispatch 
 ### When a full browser restart *is* needed
 
 - Extension was never loaded / path changed / “Load unpacked” broken.
-- Profile locks or corrupted agent-browser session (`npm run browser:close` then re-open).
-- SW refuses to activate after reload (rare); then quit the agent-browser Chrome session and relaunch with the extension load path (`npm run browser`). Sessions use system Google Chrome, not Chrome for Testing.
+- Profile locks or a stuck headed session (`npm run browser:close` then re-open).
+- SW refuses to activate after reload (rare); then quit the headed session and relaunch (`npm run browser`).
+
+### Headed manual load (pikabo)
+
+Branded Chrome 137+ ignores `--load-extension`. **`npm run browser`** launches Playwright Chromium through [pikabo](https://github.com/sonic0002/pikabo) with this repo loaded unpacked.
+
+```bash
+npm run browser              # Linear CAL-7238 + persistent profile
+npm run browser:login        # GitHub login
+npm run browser:pulls
+npm run browser:linear
+npm run browser:close
+npm run test:pikabo          # headless SW / popup / github.com inject smoke
+```
+
+Profile: `.browser/pikabo-profile` (PAT and cookies survive relaunches). Close the window or `npm run browser:close`.
 
 ### Agent-browser / e2e note
 
-E2e uses a **shared browser session** and often only **soft-resets** tabs + IDB between suites. After rebuilds that change the SW, either:
+`npm run test:e2e` still uses **agent-browser** (shared session, soft-reset between suites). After SW-affecting builds, either:
 
 - reload the extension via `chrome://extensions`, or  
 - set `PRP_E2E_RELOAD_EXT=1` so global setup dispatches extension reload, or  
 - `agent-browser close --all` and start a new session (heavier).
 
-Prefer **build + extensions reload** over restarting the whole browser for day-to-day verification.
+Prefer **build + extensions reload** over restarting the whole browser for day-to-day e2e.
 
 ---
 

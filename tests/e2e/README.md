@@ -10,10 +10,10 @@ E2E uses a **separate** config: `rstest.e2e.config.ts`.
 
 1. Extension built (`npm run build` or at least a current workspace loadable via `agent-browser.json`).
 2. [agent-browser](https://agent-browser.dev) installed and on `PATH`.
-3. **Google Chrome (stable)** installed — e2e and `npm run browser` launch that binary, not Chrome for Testing. Override with `PRP_CHROME_PATH`.
-4. GitHub login in the local profile (`./.browser/profile`).  
-   One-time: `npm run browser:login` then sign in.
-5. Network access to `github.com/enif-lee/pr-plus`.
+3. **Google Chrome (stable)** installed — `npm run test:e2e` launches that binary, not Chrome for Testing. Override with `PRP_CHROME_PATH`.
+4. GitHub login in the local agent-browser profile (`./.browser/profile`).
+5. For a headed unpacked load (Linear overlay, popup), use **pikabo**: `npm run browser` / `npm run browser:linear`. That is a separate Chromium profile (`.browser/pikabo-profile`) because branded Chrome 137+ ignores `--load-extension`.
+6. Network access to `github.com/enif-lee/pr-plus`.
 
 ## Demo PR fixture
 
