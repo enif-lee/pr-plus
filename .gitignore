@@ -5,9 +5,12 @@ node_modules/
 /dist/
 /dist/**
 
-# Local agent-browser profile, screenshots, session junk
+# Local agent-browser / pikabo profiles, screenshots, session junk
 .browser/
 screenshots/
+pikabo-results/
+tests/pikabo/last-session.yaml
+tests/pikabo/recorded.yaml
 
 # OS / editor
 .DS_Store
