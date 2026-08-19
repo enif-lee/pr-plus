@@ -11,6 +11,7 @@ import {
   applyPrefsToRlMem,
   applyRateLimitStateToRlMem,
 } from './sw-rate-limit';
+import { getConnectedSites } from './sw-connected-sites';
 
 export function broadcastToGithubTabs(message: any) {
   // Notify extension pages / open content scripts without sending secrets.
@@ -52,15 +53,21 @@ export function broadcastPrefsChanged(prefs: any) {
 }
 
 /**
- * Ask every open github.com tab to wipe PR detail memory + IndexedDB.
- * Content scripts own the page-origin IDB (`pr-plus-detail-cache`).
+ * Ask open GitHub + Connected-site tabs to drop in-tab memory SWR.
+ * Durable rows live in the service-worker IndexedDB, not page origin.
  * @returns {Promise<{ tabs: number, cleared: number, failed: number }>}
  */
 export function clearDetailCacheOnGithubTabs() {
   return new Promise((resolve) => {
     try {
-      registeredEnterpriseHosts().then((hosts) => {
-        const url = githubTabUrlPatterns(hosts);
+      Promise.all([
+        registeredEnterpriseHosts(),
+        getConnectedSites().catch(() => ({ origins: [] as string[] })),
+      ]).then(([hosts, sites]) => {
+        const url = [
+          ...githubTabUrlPatterns(hosts),
+          ...((sites && sites.origins) || []),
+        ];
         chrome.tabs.query({ url }, (tabs: any) => {
           void chrome.runtime.lastError;
           const list = Array.isArray(tabs) ? tabs : [];
@@ -81,7 +88,7 @@ export function clearDetailCacheOnGithubTabs() {
             try {
               chrome.tabs.sendMessage(
                 tab.id,
-                { type: MSG.CLEAR_DETAIL_CACHE },
+                { type: MSG.CLEAR_DETAIL_CACHE, memoryOnly: true },
                 (res: any) => {
                   const err = chrome.runtime.lastError;
                   if (err || !res?.ok) failed += 1;

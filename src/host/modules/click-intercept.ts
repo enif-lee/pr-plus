@@ -124,22 +124,19 @@
   }
 
   /**
-   * Wipe in-memory SWR + page-origin IndexedDB PR detail cache.
-   * Invoked from popup settings via PR_TREE_CLEAR_DETAIL_CACHE.
+   * Drop in-tab memory SWR. Durable rows live in the service worker IDB;
+   * popup CLEAR_DETAIL_CACHE wipes that first, then broadcasts memoryOnly.
    */
   async function clearDetailCache() {
     try {
-      const r = detailCache.clear?.();
-      if (r && typeof r.then === 'function') await r;
+      if (typeof detailCache.clearMemory === 'function') {
+        detailCache.clearMemory();
+      } else if (typeof detailCache.clear === 'function') {
+        const r = detailCache.clear();
+        if (r && typeof r.then === 'function') await r;
+      }
     } catch (err) {
       console.warn('[pr+] detailCache.clear failed', err);
-    }
-    // Fresh handle in case the singleton cache missed IDB (tests / fallback)
-    try {
-      const idb = (globalThis as any).PRModalDetailIdb?.createDetailIdb?.();
-      if (idb?.clear) await idb.clear();
-    } catch (err) {
-      console.warn('[pr+] IDB clear failed', err);
     }
     return { ok: true };
   }

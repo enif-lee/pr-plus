@@ -1030,15 +1030,7 @@ clearIdbBtn?.addEventListener('click', async () => {
     if (!res?.ok && res?.error) {
       throw new Error(res.error);
     }
-    const tabs = Number(res?.tabs) || 0;
-    const cleared = Number(res?.cleared) || 0;
-    if (tabs === 0) {
-      setStatus(t('popup_status_idb_need_tab'), true);
-    } else if (cleared === 0) {
-      setStatus(t('popup_status_idb_need_tab'), true);
-    } else {
-      setStatus(t('popup_status_idb_cleared'));
-    }
+    setStatus(t('popup_status_idb_cleared'));
   } catch (err) {
     setStatus(err.message || 'Clear cache failed', true);
   } finally {

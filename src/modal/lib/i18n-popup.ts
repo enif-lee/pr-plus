@@ -219,10 +219,10 @@ export const popupEn: MessageCatalog = {
   popup_pref_onboarding_desc:
     'Restart first-run onboarding (PAT · Option · demo PR · Diff · comments · palette · options). Open /pulls to show the top-right card.',
   popup_btn_start_onboarding: 'Start onboarding',
-  popup_pref_idb_title: 'PR detail cache (IndexedDB)',
+  popup_pref_idb_title: 'PR detail cache (extension)',
   popup_pref_idb_desc:
-    'Clear PR detail cache on GitHub tabs (memory + IndexedDB). Next open fetches from the network. Requires an open github.com tab.',
-  popup_btn_clear_idb: 'Clear IndexedDB cache',
+    'Clear the shared PR detail cache (extension IndexedDB + tab memory). Next open fetches from the network.',
+  popup_btn_clear_idb: 'Clear detail cache',
   popup_placeholder_token: 'ghp_… / github_pat_…',
   popup_placeholder_token_replace: 'Replace github.com token…',
   popup_placeholder_host: 'github.mycorp.com or octocorp.ghe.com',
@@ -349,10 +349,10 @@ export const popupKo: MessageCatalog = {
   popup_pref_onboarding_desc:
     '첫 실행 온보딩을 다시 시작합니다 (PAT · Option · demo PR · Diff · 코멘트 · 팔레트 · 옵션). pulls 페이지를 열고 우측 상단 카드를 표시합니다.',
   popup_btn_start_onboarding: '온보딩 시작',
-  popup_pref_idb_title: 'PR 상세 캐시 (IndexedDB)',
+  popup_pref_idb_title: 'PR 상세 캐시 (확장)',
   popup_pref_idb_desc:
-    'GitHub 탭에 저장된 PR 상세 캐시(메모리 + IndexedDB)를 지웁니다. 다음 PR 열 때 네트워크에서 다시 불러옵니다. 열려 있는 github.com 탭이 필요합니다.',
-  popup_btn_clear_idb: 'IndexedDB 캐시 지우기',
+    '공유 PR 상세 캐시(확장 IndexedDB + 탭 메모리)를 지웁니다. 다음 오픈은 네트워크에서 불러옵니다.',
+  popup_btn_clear_idb: '상세 캐시 지우기',
   popup_placeholder_token: 'ghp_… / github_pat_…',
   popup_placeholder_token_replace: 'github.com 토큰 교체…',
   popup_placeholder_host: 'github.mycorp.com 또는 octocorp.ghe.com',
@@ -479,10 +479,10 @@ export const popupJa: MessageCatalog = {
   popup_pref_onboarding_desc:
     '初回オンボーディングを再開します。/pulls を開くと右上カードを表示します。',
   popup_btn_start_onboarding: 'オンボーディング開始',
-  popup_pref_idb_title: 'PR 詳細キャッシュ (IndexedDB)',
+  popup_pref_idb_title: 'PR 詳細キャッシュ (拡張機能)',
   popup_pref_idb_desc:
-    'GitHub タブの PR 詳細キャッシュを消去します。次回はネットワークから取得。github.com タブが必要です。',
-  popup_btn_clear_idb: 'IndexedDB をクリア',
+    '共有 PR 詳細キャッシュ（拡張機能 IndexedDB + タブメモリ）を消去します。次回はネットワークから取得します。',
+  popup_btn_clear_idb: '詳細キャッシュをクリア',
   popup_placeholder_token: 'ghp_… / github_pat_…',
   popup_placeholder_token_replace: 'github.com トークンを置き換え…',
   popup_placeholder_host: 'github.mycorp.com または octocorp.ghe.com',
@@ -604,10 +604,10 @@ export const popupZh: MessageCatalog = {
   popup_pref_onboarding_desc:
     '重新开始首次引导。打开 /pulls 后在右上角显示卡片。',
   popup_btn_start_onboarding: '开始引导',
-  popup_pref_idb_title: 'PR 详情缓存 (IndexedDB)',
+  popup_pref_idb_title: 'PR 详情缓存（扩展）',
   popup_pref_idb_desc:
-    '清除 GitHub 标签页中的 PR 详情缓存（内存 + IndexedDB）。下次从网络加载。需要已打开的 github.com 标签。',
-  popup_btn_clear_idb: '清除 IndexedDB 缓存',
+    '清除共享 PR 详情缓存（扩展 IndexedDB + 标签内存）。下次从网络加载。',
+  popup_btn_clear_idb: '清除详情缓存',
   popup_placeholder_token: 'ghp_… / github_pat_…',
   popup_placeholder_token_replace: '替换 github.com 令牌…',
   popup_placeholder_host: 'github.mycorp.com 或 octocorp.ghe.com',

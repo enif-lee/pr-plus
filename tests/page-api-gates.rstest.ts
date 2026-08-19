@@ -124,6 +124,13 @@ describe('page-api gates', () => {
     expect(partner).toMatch(/pointerdown/);
     expect(partner).toMatch(/prp-modal-host/);
     expect(partner).toMatch(/isPrPlusUiEvent/);
+    const assets = fs.readFileSync(
+      path.join(root, 'src/host/modules/side-fetch-cache-assets.ts'),
+      'utf8'
+    );
+    expect(assets).not.toMatch(
+      /isPartnerOrShellRuntime\(\)\) \{\s*return emptyPeek/
+    );
   });
 
   test('open args type lists owner/repo/number in page-api SoT', () => {

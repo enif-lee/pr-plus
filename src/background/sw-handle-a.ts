@@ -11,6 +11,7 @@ import {
   CONTENT_SCRIPT_JS,
 } from './sw-enterprise';
 import { clearDetailCacheOnGithubTabs } from './sw-broadcast';
+import { getExtensionDetailIdb } from './sw-detail-cache';
 import {
   beginTrackedFetch,
   endTrackedFetch,
@@ -240,8 +241,9 @@ export async function handleMessagePartA(message: SwMessage): Promise<unknown> {
       };
     }
     case MSG.CLEAR_DETAIL_CACHE: {
+      await getExtensionDetailIdb().clear();
       const result = await clearDetailCacheOnGithubTabs();
-      return { ok: true, ...(result as any) };
+      return { ok: true, durable: true, ...(result as any) };
     }
     case MSG.FETCH_OPEN_PULLS: {
       const tracked = beginTrackedFetch(message.requestId);

@@ -19,7 +19,7 @@ pr+는 오늘 github.com(및 등록 GHES) 탭 안에서만 산다. Isolated `PRM
 
 Linear에서 fetch가 실패하는 이유는 금고가 비어서가 아니라, 브리지가 `location.hostname`(`linear.app`)을 조회 키로 붙이기 때문이다. [`selectTokenForWebHost`](src/github-endpoints.ts)는 미등록 호스트에 `{ token: null }`을 주고, API 베이스도 `https://linear.app/api/v3`로 붕괴한다.
 
-이 문서는 **캐시를 옮기지 않는다.** github.com 탭의 페이지 origin IDB·localStorage·sessionStorage는 그대로 둔다. Linear/셸 오픈은 콜드 네트워크다. `openModal`의 `peekDetailIdb(..., 400)`은 미스가 정상이며 빈 화면이 아니다.
+PR 상세 영속 계층은 **페이지 origin IDB가 아니라 확장 서비스 워커 IndexedDB**다. GitHub·Linear·셸이 같은 캐시를 읽고 쓴다. `openModal`의 `peekDetailIdb`는 SW IDB를 조회한다.
 
 푸는 것:
 
@@ -47,7 +47,7 @@ Linear에서 fetch가 실패하는 이유는 금고가 비어서가 아니라, �
 | 미등록 호스트 → token null | [`selectTokenForWebHost`](src/github-endpoints.ts) L106–127 |
 | overlay 마운트는 GH 노드 불필요 | `ensureHost()` → `document.documentElement` |
 | IDB hydrate는 선택 | `peekDetailIdb(key, 400)` 후 네트워크 ([`open-modal-run.ts`](src/host/modules/open-modal-run.ts)) |
-| Detail 캐시는 **페이지** origin IDB | `pr-plus-detail-cache`. Linear는 이 DB를 못 연다 |
+| Detail 캐시는 **확장** origin IDB | SW `pr-plus-detail-cache`. Linear/GitHub 공유 |
 
 ### 고통
 
@@ -232,7 +232,7 @@ export const PARTNER_HOST_JS = [
 
 `content.js` / `tree.js` / `dom.js` / 온보딩 / 리스트 없음. 게이트 테스트.
 
-파트너 호스트의 IDB 어댑터는 **no-op**(get→null, set 무시). Linear origin에 `pr-plus-detail-cache`를 만들지 않는다. 네트워크가 SoT에 가깝다(세션 DomainStore는 메모리).
+파트너 호스트는 페이지 origin IDB를 쓰지 않는다. get/set은 `PR_TREE_DETAIL_CACHE_*`로 SW IDB에 붙는다.
 
 ### 4. `window.PRPlus`
 
@@ -339,7 +339,7 @@ Linear = overlay `#prp-modal-host`. GH `presentation:'embed'` 금지.
 | 마운트 | overlay 또는 embed | overlay만 |
 | GH hide / URI / 리스트 / turbo | 함 | 안 함 |
 | 테마 | `data-color-mode` | `prefers-color-scheme` |
-| IDB peek | 페이지 IDB | no-op miss |
+| IDB peek | 확장 SW IDB | 확장 SW IDB |
 | `send()` 호스트 | 탭 또는 세션 | `activeGithubWebHost` / args |
 | z-index | 기존 | Linear 위 (`2147483000`) |
 
