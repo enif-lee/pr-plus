@@ -4,5 +4,6 @@
   "profile": "./.browser/profile",
   "session": "pr-tree",
   "extensions": ["."],
-  "executablePath": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+  "executablePath": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  "args": "--enable-unsafe-extension-debugging"
 }
