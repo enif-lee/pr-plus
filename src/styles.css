@@ -521,6 +521,19 @@ html.prp-embed-active .prp-gh-open-toggle {
   display: none !important;
 }
 
+/* Linear review Overview | Diff | pr+ row */
+.prp-linear-open-toggle {
+  height: 28px;
+  min-height: 28px;
+  padding: 0 10px;
+  margin-left: 6px !important;
+  font-size: 13px;
+  line-height: 18px;
+  border-radius: 5px;
+  align-self: center;
+  flex: 0 0 auto;
+}
+
 /* Option-held hotkey badges on PR list titles (⌥1–9 + a–z except j/k/n) and New PR (⌥N) */
 .prp-list-hotkey,
 kbd.prp-list-hotkey {

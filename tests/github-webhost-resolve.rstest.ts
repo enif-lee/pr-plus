@@ -126,6 +126,28 @@ describe('resolveGithubWebHost + selectTokenForMessage', () => {
     );
   });
 
+  test('parseLinearReviewPath reads workspace review slugs', () => {
+    expect(api.isLinearIssuePath('/mornica/issue/PRP-2/demo')).toBe(true);
+    expect(api.isLinearReviewPath('/mornica/review/demo-g-c27ffba33fcd')).toBe(
+      true
+    );
+    expect(api.isLinearReviewPath('/mornica/reviews')).toBe(false);
+    expect(
+      api.parseLinearReviewPath(
+        '/mornica/review/demo-g-stack-root-demo-300-e2e-title-chip-c27ffba33fcd/changes',
+        'https://linear.app'
+      )
+    ).toMatchObject({
+      workspace: 'mornica',
+      slugId: 'c27ffba33fcd',
+      tab: 'changes',
+      path: '/mornica/review/demo-g-stack-root-demo-300-e2e-title-chip-c27ffba33fcd',
+    });
+    expect(
+      api.parseLinearReviewPath('https://linear.app/mornica/issue/PRP-2')
+    ).toBe(null);
+  });
+
   test('findGithubPullFromClickPath ignores chrome clicks inside pr+ overlay', () => {
     const prLink = {
       tagName: 'A',
@@ -199,6 +221,53 @@ describe('resolveGithubWebHost + selectTokenForMessage', () => {
       number: 1911,
       githubWebHost: 'github.com',
     });
+  });
+
+  test('findGithubPullFromClickPath does not treat Linear review chrome as a PR chip', () => {
+    const prLink = {
+      tagName: 'A',
+      href: 'https://github.com/enif-lee/pr-plus/pull/19',
+      getAttribute: (k: string) =>
+        k === 'href' ? 'https://github.com/enif-lee/pr-plus/pull/19' : null,
+      closest: () => null,
+    };
+    const header = {
+      tagName: 'DIV',
+      childElementCount: 20,
+      getAttribute: () => null,
+      closest: () => null,
+      parentElement: { tagName: 'BODY' },
+      querySelectorAll: (sel: string) =>
+        String(sel).startsWith('a') ? [prLink] : [],
+    };
+    const mergeBtn: any = {
+      tagName: 'BUTTON',
+      getAttribute: () => null,
+      closest: () => null,
+      parentElement: header,
+    };
+    expect(
+      api.findGithubPullFromClickPath([mergeBtn, header], {
+        base: 'https://linear.app/mornica/review/demo-g-c27ffba33fcd',
+      })
+    ).toBe(null);
+  });
+
+  test('findLinearReviewHrefFromClickPath reads issue Diffs cards', () => {
+    const card = {
+      tagName: 'A',
+      href: '/mornica/review/largest-pr-test-10c61e25f2c2',
+      getAttribute: (k: string) =>
+        k === 'href' ? '/mornica/review/largest-pr-test-10c61e25f2c2' : null,
+      closest(sel: string) {
+        return sel.startsWith('a') ? this : null;
+      },
+    };
+    expect(
+      api.findLinearReviewHrefFromClickPath([card], {
+        base: 'https://linear.app/mornica/issue/PRP-2',
+      })
+    ).toBe('https://linear.app/mornica/review/largest-pr-test-10c61e25f2c2');
   });
 
   test('unregistered GHES page falls back to active host', () => {
