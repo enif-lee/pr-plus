@@ -8,6 +8,8 @@
 .prp-md {
   font-size: 14px;
   line-height: 1.5;
+  /* Diff list rows use white-space:pre; body copy must wrap independently. */
+  white-space: normal;
   /* break-word only — "anywhere" was soft-wrapping long tokens inside fenced code */
   word-wrap: break-word;
   overflow-wrap: break-word;

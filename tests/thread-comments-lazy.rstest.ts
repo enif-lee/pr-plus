@@ -3,6 +3,8 @@
  * Drives shipped helpers (not re-implementations).
  */
 import { describe, expect, test } from '@rstest/core';
+import fs from 'node:fs';
+import path from 'node:path';
 import {
   buildShellThreadPlaceholderComment,
   ensureShellPlaceholderComments,
@@ -492,5 +494,36 @@ describe('GraphQL cost labels (shipped pure)', () => {
         'query ReviewThreadsByIdsFull($ids:[ID!]!){ nodes(ids:$ids){ ... on PullRequestReviewThread { id } } }'
       )
     ).toBe('reviewThreads.byIds');
+  });
+});
+
+describe('loading chrome (thread box pulse)', () => {
+  test('Diff + Conversation pulse the thread box while comments load', () => {
+    const css = fs.readFileSync(
+      path.join(
+        process.cwd(),
+        'src/modal/views/diff/InlineReviewThreads.css'
+      ),
+      'utf8'
+    );
+    expect(css).toMatch(/prp-thread-loading-pulse/);
+    expect(css).toMatch(
+      /\.prp-inline-thread\[data-comments-loading='1'\]\s+\.prp-inline-thread__card/
+    );
+    expect(css).toMatch(
+      /\.prp-conversation-inline-thread\[data-comments-loading='1'\]/
+    );
+    expect(css).toMatch(/animation:\s*prp-thread-loading-pulse/);
+    expect(css).toMatch(/data-comments-settling='hold'/);
+    expect(css).toMatch(/data-comments-settling='fade'/);
+    expect(css).toMatch(/background-color:\s*var\(--prp-bg\)/);
+    const thread = fs.readFileSync(
+      path.join(process.cwd(), 'src/modal/views/diff/InlineThread.tsx'),
+      'utf8'
+    );
+    expect(thread).toMatch(/useCommentLoadSettle/);
+    expect(thread).toMatch(/data-comments-settling/);
+    expect(thread).toMatch(/COMMENT_LOAD_SETTLE_HOLD_MS/);
+    expect(thread).toMatch(/COMMENT_LOAD_SETTLE_FADE_MS/);
   });
 });

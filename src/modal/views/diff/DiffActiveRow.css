@@ -359,7 +359,7 @@
  * Use overflow:hidden (not visible) so split RIGHT threads never paint past
  * the column edge. Selection ring is inset-only (see LineSelection.css).
  */
-.prp-vline--comment,
+.prp-vline.prp-vline--comment,
 .prp-vline--comment-selected,
 .prp-vline--comment-pending {
   overflow: hidden;
@@ -367,6 +367,7 @@
   min-width: 0;
   max-width: 100%;
   box-sizing: border-box;
+  white-space: normal;
 }
 
 .prp-vline--selectable {

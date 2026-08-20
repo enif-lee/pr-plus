@@ -499,7 +499,14 @@
   padding-top: 2px;
   font-size: 14px;
   line-height: 1.5;
-  overflow: hidden; /* keep fenced code scroll inside the column */
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  /* Keep this a non-scrollport. A non-visible overflow on one axis computes
+   * the other as auto (CSS 2.1), which clips wrapping body text and inflates
+   * virtual-row scrollHeight. Fenced code / .prp-suggestion__code already
+   * scroll internally. */
+  overflow: visible;
 }
 .prp-review-thread__content .prp-md,
 .prp-review-thread__content .prp-md > div {
@@ -584,10 +591,5 @@
 .prp-vline--comment:not(.prp-vline--comment-collapsed):not([data-collapsed='1'])
   .prp-inline-thread__card {
   overflow: hidden; /* clip to border-radius — never paint over the stroke */
-}
-.prp-vline--comment:not(.prp-vline--comment-collapsed):not([data-collapsed='1'])
-  .prp-review-thread__content {
-  overflow-x: auto;
-  overflow-y: visible;
 }
 

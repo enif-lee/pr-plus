@@ -92,6 +92,24 @@ export function diffRowMeasureKey(
 }
 
 /**
+ * Visible box height for Diff virtual rows.
+ * Ignore scrollHeight: a thread scrollport (or pre/suggestion max-content)
+ * inflates it and the measured slot never shrinks, leaving empty card space.
+ */
+export function measureLaidOutBoxHeight(box: {
+  height?: number | null;
+  clientHeight?: number | null;
+  offsetHeight?: number | null;
+  scrollHeight?: number | null;
+} | null | undefined): number {
+  if (!box) return 0;
+  const rect = Number(box.height) || 0;
+  const client = Number(box.clientHeight) || 0;
+  const offset = Number(box.offsetHeight) || 0;
+  return Math.ceil(Math.max(rect, client, offset));
+}
+
+/**
  * Estimate open-thread height from row shape (before ResizeObserver).
  * Floors at COMMENT_ROW_HEIGHT so under-estimate never clips the card.
  */

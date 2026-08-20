@@ -6,7 +6,9 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
   buildCommentRowLookup,
+  findMappedCommentIndexForJump,
   mapCommentsToRowIndices,
+  shouldFollowThreadRelocateOnExpand,
 } from '../src/modal/lib/comment-nav.ts';
 
 const root = resolve(__dirname, '..');
@@ -144,5 +146,75 @@ describe('mapper structure (no per-root full-row nested scans)', () => {
     // Exactly one lookup build call
     const builds = body.match(/buildCommentRowLookup\(/g) || [];
     expect(builds.length).toBe(1);
+  });
+});
+
+describe('follow relocate after expand of no-line threads', () => {
+  test('shouldFollowThreadRelocateOnExpand: shells without line, not file-level', () => {
+    expect(
+      shouldFollowThreadRelocateOnExpand({
+        id: 'shell:PRRT_1',
+        path: 'a.py',
+        line: null,
+        threadNodeId: 'PRRT_1',
+      })
+    ).toBe(true);
+    expect(
+      shouldFollowThreadRelocateOnExpand({
+        id: 9,
+        path: 'a.py',
+        subjectType: 'file',
+        line: null,
+      })
+    ).toBe(false);
+    expect(
+      shouldFollowThreadRelocateOnExpand({
+        id: 9,
+        path: 'a.py',
+        originalLine: 431,
+        line: null,
+      })
+    ).toBe(false);
+  });
+
+  test('findMappedCommentIndexForJump matches shell id → numeric + threadNodeId', () => {
+    const mapped = [
+      { id: 42, threadNodeId: 'PRRT_1', rowIndex: 18, path: 'a.py' },
+      { id: 99, threadNodeId: 'PRRT_2', rowIndex: 40, path: 'b.py' },
+    ];
+    expect(
+      findMappedCommentIndexForJump(mapped, {
+        commentId: 'shell:PRRT_1',
+        threadNodeId: 'PRRT_1',
+      })
+    ).toBe(0);
+    expect(
+      findMappedCommentIndexForJump(mapped, {
+        commentId: 99,
+        threadNodeId: 'PRRT_2',
+      })
+    ).toBe(1);
+    expect(
+      findMappedCommentIndexForJump(mapped, {
+        commentId: 'missing',
+        threadNodeId: 'PRRT_NO',
+      })
+    ).toBe(-1);
+  });
+
+  test('expand queues waitUntilLoaded jump; finish waits for commentsLoaded', () => {
+    const gap = readFileSync(
+      resolve(root, 'src/modal/hooks/useThreadCommentsAndGap.ts'),
+      'utf8'
+    );
+    expect(gap).toMatch(/shouldFollowThreadRelocateOnExpand/);
+    expect(gap).toMatch(/waitUntilLoaded:\s*true/);
+    const nav = readFileSync(
+      resolve(root, 'src/modal/hooks/useDiffConversationNav.ts'),
+      'utf8'
+    );
+    expect(nav).toMatch(/findMappedCommentIndexForJump/);
+    expect(nav).toMatch(/waitUntilLoaded/);
+    expect(nav).toMatch(/commentsLoaded !== true/);
   });
 });

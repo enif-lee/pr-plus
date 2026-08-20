@@ -184,6 +184,7 @@ import {
   resolveCommentNav,
   filterReviewRootsForNav,
   buildPathOrderMap,
+  shouldFollowThreadRelocateOnExpand,
 } from '../lib/comment-nav';
 import {
   createDefaultDiffReviewFilter,
@@ -1055,6 +1056,42 @@ export function useThreadCommentsAndGap(b: any) {
       return next;
     });
     if (!nextCollapsed && tid) {
+      const comments = Array.isArray(detail?.reviewComments)
+        ? detail.reviewComments
+        : [];
+      const row = Array.isArray(virtualRows)
+        ? virtualRows.find(
+            (r: any) =>
+              r?.kind === 'inline-comment' &&
+              (String(r.commentId) === String(commentId) ||
+                (tid && String(r.threadNodeId) === tid))
+          )
+        : null;
+      const comment =
+        comments.find((x: any) => x && String(x.id) === String(commentId)) ||
+        comments.find((x: any) => x && String(x.threadNodeId) === tid) ||
+        null;
+      const th = (Array.isArray(detail?.reviewThreads)
+        ? detail.reviewThreads
+        : []
+      ).find((t: any) => t && String(t.threadNodeId) === tid);
+      const alreadyLoaded = Boolean(th?.commentsLoaded === true);
+      const follow =
+        shouldFollowThreadRelocateOnExpand(comment) ||
+        (!comment && row && row.newLine == null && row.oldLine == null);
+      if (follow && !alreadyLoaded) {
+        const jumpRef = b.pendingCommentJumpRef;
+        if (jumpRef && typeof jumpRef === 'object') {
+          jumpRef.current = {
+            commentId: commentId ?? comment?.id ?? tid,
+            path: comment?.path || row?.filePath || undefined,
+            threadNodeId: tid,
+            waitUntilLoaded: true,
+            fromRowIndex:
+              row?.rowIndex != null ? Number(row.rowIndex) : null,
+          };
+        }
+      }
       void ensureThreadCommentsLoaded(tid);
     }
   }

@@ -184,6 +184,8 @@ import {
   resolveCommentNav,
   filterReviewRootsForNav,
   buildPathOrderMap,
+  findMappedCommentIndexForJump,
+  type PendingCommentJump,
 } from '../lib/comment-nav';
 import {
   createDefaultDiffReviewFilter,
@@ -1203,10 +1205,7 @@ export function useDiffConversationNav(b: any) {
    * After expand / filter clear, remappedComments gains a real rowIndex — finish scroll.
    * Stores comment id (+ optional path) while virtual rows rebuild.
    */
-  const pendingCommentJumpRef = useRef<{
-    commentId: string | number;
-    path?: string;
-  } | null>(null);
+  const pendingCommentJumpRef = useRef<PendingCommentJump | null>(null);
   const pendingCommentNavDeltaRef = useRef(0);
   const commentNavRafRef = useRef<ReturnType<typeof scheduleNavigationFrame> | null>(
     null
@@ -1374,18 +1373,27 @@ export function useDiffConversationNav(b: any) {
     ]
   );
 
-  // Finish jump after collapse expand / filter clear rebuilds virtual rows
+  // Finish jump after collapse expand / filter clear / lazy hydrate rebuilds rows
   useEffect(() => {
     const pending = pendingCommentJumpRef.current;
     if (!pending || !mappedComments.length) return;
-    const idx = mappedComments.findIndex(
-      (c) => String(c.id) === String(pending.commentId)
-    );
+    const idx = findMappedCommentIndexForJump(mappedComments, pending);
     if (idx < 0) return;
     const active = mappedComments[idx];
     if (active?.rowIndex == null) return;
     const row = virtualRows[active.rowIndex];
     if (row?.kind === 'file-header' && row.collapsed) return;
+    if (pending.waitUntilLoaded) {
+      const tid = String(pending.threadNodeId || '').trim();
+      if (tid) {
+        const th = (
+          Array.isArray(detail?.reviewThreads) ? detail.reviewThreads : []
+        ).find((t: any) => t && String(t.threadNodeId) === tid);
+        // Preview-only shells must not count as loaded (threadCommentsAreLoaded
+        // is true for comments(first:1) previews).
+        if (th?.commentsLoaded !== true) return;
+      }
+    }
     pendingCommentJumpRef.current = null;
     commitDiffThreadCursor(active?.id ?? pending.commentId, idx);
     scrollMappedCommentIntoView(active);
@@ -1393,6 +1401,8 @@ export function useDiffConversationNav(b: any) {
     mappedComments,
     virtualRows,
     scrollMappedCommentIntoView,
+    detail?.reviewThreads,
+    detail?.reviewComments,
   ]);
 
   /** Pending Goto after expand: path + lines until virtualRows rebuild. */

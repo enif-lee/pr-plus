@@ -306,9 +306,9 @@ export const residualEn: MessageCatalog = {
   onboarding_pref_tree_title: 'PR stack tree view',
   onboarding_pref_tree_desc:
     'Indent and group pull requests by branch stack on the pulls list.',
-  onboarding_pref_auto_open_title: 'Auto-open pr+ on PR pages',
+  onboarding_pref_auto_open_title: 'Auto-open pr+ on GitHub PR detail pages',
   onboarding_pref_auto_open_desc:
-    'Open the pr+ shell automatically when you land on a pull request.',
+    'Open the pr+ shell automatically on a GitHub pull request detail page.',
   onboarding_pref_newest_title: 'Newest comments first',
   onboarding_pref_newest_desc:
     'Show the latest conversation comments at the top of the timeline.',
@@ -497,9 +497,9 @@ export const residualKo: MessageCatalog = {
   onboarding_pref_tree_title: 'PR 스택 트리 보기',
   onboarding_pref_tree_desc:
     '풀 목록에서 브랜치 스택 깊이로 PR을 들여쓰기·그룹화합니다.',
-  onboarding_pref_auto_open_title: 'PR 페이지에서 pr+ 자동 열기',
+  onboarding_pref_auto_open_title: 'GitHub PR 상세 페이지에서 pr+ 자동 열기',
   onboarding_pref_auto_open_desc:
-    '풀 리퀘스트 페이지에 들어가면 pr+ 셸을 자동으로 엽니다.',
+    'GitHub PR 상세 페이지에 들어가면 pr+ 셸을 자동으로 엽니다.',
   onboarding_pref_newest_title: '최신 코멘트 먼저',
   onboarding_pref_newest_desc:
     '타임라인 상단에 가장 최근 대화 코멘트를 표시합니다.',
@@ -687,9 +687,9 @@ export const residualJa: MessageCatalog = {
   onboarding_pref_tree_title: 'PR スタックツリー表示',
   onboarding_pref_tree_desc:
     'プル一覧でブランチスタック深度により PR をインデント・グループ化します。',
-  onboarding_pref_auto_open_title: 'PR ページで pr+ を自動表示',
+  onboarding_pref_auto_open_title: 'GitHub PR 詳細ページで pr+ を自動表示',
   onboarding_pref_auto_open_desc:
-    'プルリクエストページに入ると pr+ シェルを自動で開きます。',
+    'GitHub の PR 詳細ページに入ると pr+ シェルを自動で開きます。',
   onboarding_pref_newest_title: '新しいコメントを先に',
   onboarding_pref_newest_desc:
     'タイムライン上部に最新の会話コメントを表示します。',
@@ -876,8 +876,8 @@ export const residualZh: MessageCatalog = {
   onboarding_setup_title: 'pr+ 设置',
   onboarding_pref_tree_title: 'PR 堆栈树视图',
   onboarding_pref_tree_desc: '在拉取列表中按分支堆栈深度缩进并分组 PR。',
-  onboarding_pref_auto_open_title: '在 PR 页面自动打开 pr+',
-  onboarding_pref_auto_open_desc: '进入拉取请求页面时自动打开 pr+ 界面。',
+  onboarding_pref_auto_open_title: '在 GitHub PR 详情页自动打开 pr+',
+  onboarding_pref_auto_open_desc: '进入 GitHub PR 详情页时自动打开 pr+ 界面。',
   onboarding_pref_newest_title: '最新评论优先',
   onboarding_pref_newest_desc: '在时间线顶部显示最新的对话评论。',
   onboarding_pref_single_file_title: '单文件 Diff 模式',

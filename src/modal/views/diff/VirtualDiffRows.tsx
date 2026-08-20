@@ -14,6 +14,7 @@ import {
   rowHeightFor,
   rowOffsets,
   diffRowMeasureKey,
+  measureLaidOutBoxHeight,
   highlightCode,
   escapeHtml,
   clearHighlightCodeCache,
@@ -950,12 +951,11 @@ export function DiffVirtualRowShell({
     const el = ref.current;
     if (!el) return undefined;
     const publish = () => {
-      // Prefer content size (scrollHeight) over clipped client box — overflow:hidden
-      // ancestors can make getBoundingClientRect under-report after body hydrate.
-      const rect = el.getBoundingClientRect().height || 0;
-      const scroll = el.scrollHeight || 0;
-      const offset = el.offsetHeight || 0;
-      const h = Math.ceil(Math.max(rect, scroll, offset));
+      const h = measureLaidOutBoxHeight({
+        height: el.getBoundingClientRect().height,
+        clientHeight: el.clientHeight,
+        offsetHeight: el.offsetHeight,
+      });
       if (h > 0) onHeight(measureKey, h);
     };
     publish();

@@ -935,11 +935,11 @@ export function createOnboardingTour(deps: any) {
           key: 'autoOpenEmbed',
           title: onbMsg(
             'onboarding_pref_auto_open_title',
-            'Auto-open pr+ on PR pages'
+            'Auto-open pr+ on GitHub PR detail pages'
           ),
           desc: onbMsg(
             'onboarding_pref_auto_open_desc',
-            'Open the pr+ shell when you land on a PR URL'
+            'Open the pr+ shell on a GitHub PR detail page'
           ),
         },
         {

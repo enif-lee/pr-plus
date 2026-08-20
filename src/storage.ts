@@ -30,7 +30,7 @@ const ONBOARDING_KEY = 'onboardingCompleted';
 /**
  * Default extension preferences.
  * - reverseComments: composer → merge box → conversation (latest-first timeline)
- * - autoOpenEmbed: on GitHub PR routes, open pr+ embed automatically (vs native + toggle)
+ * - autoOpenEmbed: on GitHub PR detail pages, open pr+ embed automatically (vs native + toggle)
  * - listOpenMode: /pulls title click — 'modal' (pr+ overlay) | 'page' (navigate to /pull/N)
  * - singleFileMode: Diff virtual list shows only the active file (nav still lists all)
  * - treeView: PR stack tree indent on /pulls list (toggle also in list header)
