@@ -22,7 +22,12 @@ export const DIFF_NAV_PERF_MEASURE = 'prp-diff-nav';
 export const DIFF_NAV_PERF_MAX_SAMPLES = 200;
 
 export type DiffNavPerfPresentation = 'modal' | 'embed';
-export type DiffNavPerfOperation = 'selection' | 'region' | 'file' | 'page';
+export type DiffNavPerfOperation =
+  | 'selection'
+  | 'region'
+  | 'file'
+  | 'page'
+  | 'thread';
 
 export type DiffNavPerfSample = {
   ms: number;
@@ -305,7 +310,7 @@ export function getDiffNavPerfSnapshot(
     .filter((s) => s.presentation === 'embed')
     .map((s) => s.ms);
   const byOperation = Object.fromEntries(
-    (['selection', 'region', 'file', 'page'] as DiffNavPerfOperation[]).map(
+    (['selection', 'region', 'file', 'page', 'thread'] as DiffNavPerfOperation[]).map(
       (operation) => {
         const sum = summarizeMs(
           samples

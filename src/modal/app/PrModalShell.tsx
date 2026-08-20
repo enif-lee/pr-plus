@@ -882,7 +882,6 @@ export function PrModalApp({
   const setCollapsedFiles = useModalStore((s) => s.setCollapsedFiles);
   const expandedDirs = useModalStore((s) => s.expandedDirs);
   const setExpandedDirs = useModalStore((s) => s.setExpandedDirs);
-  const commentIndex = useModalStore((s) => s.commentIndex);
   const setCommentIndex = useModalStore((s) => s.setCommentIndex);
   // Do NOT subscribe to lineSelection/selecting for render — key-hold would
   // re-render the whole modal. VirtualDiff + SelectionCommentBar read the store.
@@ -1351,7 +1350,6 @@ export function PrModalApp({
     collapseInitRef,
     collapsedFiles,
     commentBoxRef,
-    commentIndex,
     commentPrefetchGenRef,
     commitListLoading,
     commitsFlightRef,
@@ -1957,7 +1955,6 @@ export function PrModalApp({
     setActionMsg,
     setScrollTop,
     setCommentIndex,
-    commentIndex,
     mappedComments: shellBag.mappedComments,
     listRef,
     readActiveFilePath,
@@ -3276,7 +3273,9 @@ export function PrModalApp({
       const tIdx = mappedComments.findIndex(
         (c: any) => String(c?.id) === String(next.commentId)
       );
-      if (tIdx >= 0 && tIdx !== commentIndex) setCommentIndex(tIdx);
+      if (tIdx >= 0 && tIdx !== useModalStore.getState().commentIndex) {
+        setCommentIndex(tIdx);
+      }
     }
     // Hide island while dragging; reveal after pointer-up idle delay
     clearSelectionActionsTimer();
@@ -3819,7 +3818,10 @@ export function PrModalApp({
     ),
     contextThreadActive: Boolean(
       layoutMode === LAYOUT_DIFF
-        ? commentIndex >= 0 && mappedComments[commentIndex]
+        ? (() => {
+            const idx = Number(useModalStore.getState().commentIndex);
+            return idx >= 0 && mappedComments[idx];
+          })()
         : conversationCommentFocusRef.current ||
             useModalStore.getState().focusedConversationAnchor ||
             useModalStore.getState().pendingConversationNavAnchor
@@ -4027,7 +4029,6 @@ export function PrModalApp({
     selectionIslandPhase,
     conversationCommentFocusRef,
     LAYOUT_DIFF,
-    commentIndex,
     mappedComments,
     requestClose,
     onToggleDiff,
@@ -4552,7 +4553,6 @@ export function PrModalApp({
               diffCommitLabel={diffCommitLabel}
               onFetchCompareFiles={onFetchCompareFiles}
               mappedComments={mappedComments}
-              commentIndex={commentIndex}
               navComment={navComment}
               pendingCount={pendingCount}
               hasViewerPendingReview={hasServerPending}

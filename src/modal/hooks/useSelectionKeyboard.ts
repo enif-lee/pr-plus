@@ -796,7 +796,9 @@ export function useSelectionKeyboard(b: any) {
     }
     setShowSelectionComposer(false);
     setSelectionIslandLeaving(false);
-    setSelectionIslandPhase('actions');
+    if (selectionIslandPhaseRef.current !== 'actions') {
+      setSelectionIslandPhase('actions');
+    }
   }
 
   /**
@@ -1192,7 +1194,9 @@ export function useSelectionKeyboard(b: any) {
         const tIdx = mappedComments.findIndex(
           (c: any) => String(c?.id) === rootId
         );
-        if (tIdx >= 0 && tIdx !== commentIndex) setCommentIndex(tIdx);
+        if (tIdx >= 0 && tIdx !== useModalStore.getState().commentIndex) {
+          setCommentIndex(tIdx);
+        }
       }
       if (!shift) {
         try {

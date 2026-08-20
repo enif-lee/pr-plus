@@ -175,8 +175,8 @@ describe('normalize + multi-status', () => {
       'utf8'
     );
     const fn = nav.slice(
-      nav.indexOf('function navComment'),
-      nav.indexOf('function walkReviewCommentToRootId')
+      nav.indexOf('function applyNavComment'),
+      nav.indexOf('function navComment')
     );
     expect(fn).toMatch(/if \(!liveList\.length\)/);
     expect(fn).toMatch(/createUnrestrictedDiffReviewFilter/);

@@ -25,7 +25,6 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
   const selectionIslandPhase = h.selectionIslandPhase;
   const conversationCommentFocusRef = h.conversationCommentFocusRef;
   const LAYOUT_DIFF = h.LAYOUT_DIFF;
-  const commentIndex = h.commentIndex;
   const mappedComments = h.mappedComments;
   const requestClose = h.requestClose;
   const onToggleDiff = h.onToggleDiff;

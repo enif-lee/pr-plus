@@ -81,14 +81,22 @@ describe('Diff overscan / scroll path (shipped)', () => {
     );
   });
 
-  test('navComment hops synchronously (shell)', () => {
+  test('navComment hops one step per frame (sync first, rAF lock)', () => {
     const shell =
       read('src/modal/app/PrModalShell.tsx') +
       read('src/modal/hooks/useDiffConversationNav.ts');
+    expect(shell).toMatch(/function applyNavComment\s*\(/);
     expect(shell).toMatch(/function navComment\s*\(/);
+    expect(shell).toMatch(/pendingCommentNavDeltaRef/);
+    expect(shell).toMatch(/scheduleNavigationFrame/);
     expect(shell).toMatch(/resolveCommentNav/);
-    expect(shell).toMatch(/setCommentIndex\(next\)/);
     expect(shell).toMatch(/jumpToReviewComment/);
+    const nav = shell.slice(
+      shell.indexOf('function navComment(delta: number)'),
+      shell.indexOf('Walk reviewComments inReplyTo')
+    );
+    expect(nav).toMatch(/if \(commentNavRafRef\.current\) return/);
+    expect(nav).toMatch(/applyNavComment/);
   });
 
   test('⌥J/K thread hops replace the ArrowUp/Down cursor atomically', () => {

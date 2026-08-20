@@ -482,7 +482,6 @@ export function useDiffConversationNav(b: any) {
   const collapsedFiles = b.collapsedFiles;
   const commentBoxRef = b.commentBoxRef;
   const commentHeightOpts = b.commentHeightOpts;
-  const commentIndex = b.commentIndex;
   const commentPrefetchGenRef = b.commentPrefetchGenRef;
   const commitListLoading = b.commitListLoading;
   const commitsFlightRef = b.commitsFlightRef;
@@ -783,20 +782,23 @@ export function useDiffConversationNav(b: any) {
   // Keep commentIndex inside the filtered list when filters change.
   // Do not snap back to -1 when the list is briefly empty (file expand /
   // virtual-row rebuild) — that races StepNav / ⌥J hops and leaves 0/N.
+  // Read live store so this hook does not subscribe the composition root.
   useEffect(() => {
-    if (commentIndex < 0 || !mappedComments.length) return;
-    if (commentIndex >= mappedComments.length) {
+    const idx = Number(useModalStore.getState().commentIndex);
+    if (idx < 0 || !mappedComments.length) return;
+    if (idx >= mappedComments.length) {
       setCommentIndex(mappedComments.length - 1);
     }
-  }, [mappedComments, commentIndex, setCommentIndex]);
+  }, [mappedComments, setCommentIndex]);
 
   // Sync Diff context-thread id for tips / shortcuts (leaf-subscribe in InlineThread)
   useEffect(() => {
-    if (layoutMode !== LAYOUT_DIFF || commentIndex < 0) {
-      useModalStore.getState().setActiveDiffCommentId(null);
+    const live = useModalStore.getState();
+    const idx = Number(live.commentIndex);
+    if (layoutMode !== LAYOUT_DIFF || idx < 0) {
+      live.setActiveDiffCommentId(null);
       return;
     }
-    const live = useModalStore.getState();
     const activeId = live.activeDiffCommentId;
     if (activeId != null && activeId !== '') {
       const stableIdx = mappedComments.findIndex(
@@ -805,14 +807,14 @@ export function useDiffConversationNav(b: any) {
       // Progressive shell/by-ids patches can insert or reorder comments. Keep
       // the user's focused thread by stable id instead of silently assigning
       // the new row at the old numeric index.
-      if (stableIdx >= 0 && stableIdx !== commentIndex) {
+      if (stableIdx >= 0 && stableIdx !== idx) {
         setCommentIndex(stableIdx);
         return;
       }
     }
-    const id = mappedComments[commentIndex]?.id;
+    const id = mappedComments[idx]?.id;
     live.setActiveDiffCommentId(id != null ? id : null);
-  }, [layoutMode, commentIndex, mappedComments, setCommentIndex]);
+  }, [layoutMode, mappedComments, setCommentIndex]);
 
   // Search is view-scoped: Conversation corpus vs Diff virtual rows only.
   // Never mix the two so Find does not surface off-screen content.
@@ -1205,6 +1207,10 @@ export function useDiffConversationNav(b: any) {
     commentId: string | number;
     path?: string;
   } | null>(null);
+  const pendingCommentNavDeltaRef = useRef(0);
+  const commentNavRafRef = useRef<ReturnType<typeof scheduleNavigationFrame> | null>(
+    null
+  );
 
   const expandFileForJump = useCallback(
     (path: string) => {
@@ -1491,14 +1497,11 @@ export function useDiffConversationNav(b: any) {
   ]);
 
   /**
-   * Diff thread StepNav / ⌥J/K. Hop is synchronous so a toolbar click is not
-   * lost behind a stuck rAF lock (headless / hidden tabs).
+   * Diff thread StepNav / ⌥J/K. First event in a frame hops immediately so
+   * toolbar clicks still work when rAF is frozen; further OS repeats in the
+   * same frame are dropped (same thrift as page scroll / file nav).
    */
-  /**
-   * Diff thread StepNav / ⌥J/K. Hop is synchronous so a toolbar click is not
-   * lost behind a stuck rAF lock (headless / hidden tabs).
-   */
-  function navComment(delta: number) {
+  function applyNavComment(delta: number) {
     const step = delta < 0 ? -1 : 1;
     const liveList = mappedCommentsRef.current;
     if (!liveList.length) {
@@ -1542,9 +1545,6 @@ export function useDiffConversationNav(b: any) {
       st?.commentIndex ??
       ((liveIdx < 0 ? 0 : liveIdx) + step + liveList.length) % liveList.length;
     const active = st?.active ?? liveList[next] ?? null;
-    if (typeof next === 'number' && next >= 0) {
-      useModalStore.getState().setCommentIndex(next);
-    }
     if (!active) return;
     try {
       jumpToReviewComment({
@@ -1556,6 +1556,18 @@ export function useDiffConversationNav(b: any) {
     } catch {
       /* index already committed */
     }
+  }
+
+  function navComment(delta: number) {
+    noteDiffNavActivity();
+    const d = delta < 0 ? -1 : 1;
+    pendingCommentNavDeltaRef.current = d;
+    if (commentNavRafRef.current) return;
+    sampleDiffNav('thread', d, () => applyNavComment(d));
+    commentNavRafRef.current = scheduleNavigationFrame(() => {
+      commentNavRafRef.current = null;
+      pendingCommentNavDeltaRef.current = 0;
+    });
   }
 
   /**
@@ -2472,7 +2484,7 @@ export function useDiffConversationNav(b: any) {
   }
 
   function sampleDiffNav<T>(
-    operation: 'selection' | 'region' | 'file' | 'page',
+    operation: 'selection' | 'region' | 'file' | 'page' | 'thread',
     delta: number,
     run: () => T
   ): T {
@@ -2501,6 +2513,11 @@ export function useDiffConversationNav(b: any) {
         fileNavRafRef.current = 0;
       }
       pendingFileNavDeltaRef.current = 0;
+      if (commentNavRafRef.current) {
+        commentNavRafRef.current.cancel();
+        commentNavRafRef.current = null;
+      }
+      pendingCommentNavDeltaRef.current = 0;
       try {
         document.documentElement.removeAttribute('data-prp-diff-nav-active');
       } catch {

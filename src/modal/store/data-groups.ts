@@ -161,4 +161,6 @@ export const ROOT_FORBIDDEN_HIGH_FREQ_FIELDS: (keyof ModalUiState)[] = [
   'searchQuery',
   'fileQuery',
   'actionMsg',
+  'commentIndex',
+  'activeDiffCommentId',
 ];

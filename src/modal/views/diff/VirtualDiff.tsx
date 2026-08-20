@@ -81,6 +81,57 @@ import {
 } from './VirtualDiffRows';
 // DiffVirtualRowShell exported from rows
 
+/** Leaf chrome for inline-comment rows so ⌥J/K hops do not re-render the list. */
+const DiffCommentRowFrame = memo(function DiffCommentRowFrame({
+  commentId,
+  className,
+  searchHit,
+  children,
+  ...dom
+}: {
+  commentId: string | number | null | undefined;
+  className: string;
+  searchHit: boolean;
+  children: React.ReactNode;
+  [key: string]: unknown;
+}) {
+  const id = commentId != null ? String(commentId) : '';
+  const threadSelected = useModalStore((s) => {
+    if (!id) return false;
+    const sel = s.lineSelection;
+    if (
+      !sel ||
+      !(
+        sel.kind === 'thread' ||
+        sel.subjectType === 'thread' ||
+        sel.kind === 'inline-comment'
+      )
+    ) {
+      return false;
+    }
+    return sel.commentId != null && String(sel.commentId) === id;
+  });
+  const threadHit = useModalStore((s) => {
+    if (!id || s.commentIndex < 0) return false;
+    return (
+      s.activeDiffCommentId != null && String(s.activeDiffCommentId) === id
+    );
+  });
+  const hit = searchHit || threadHit;
+  return (
+    <div
+      className={`${className}${
+        threadSelected ? ' prp-vline--comment-selected' : ''
+      }${hit ? ' prp-vline--hit' : ''}`}
+      data-thread-selected={threadSelected ? '1' : undefined}
+      data-search-current={hit ? '1' : undefined}
+      {...dom}
+    >
+      {children}
+    </div>
+  );
+});
+
 function VirtualDiffImpl(props: any) {
   const {
     virtualRows,
@@ -165,18 +216,6 @@ function VirtualDiffImpl(props: any) {
     }
     return '';
   });
-  const storeThreadSelectionId = useModalStore((s) => {
-    const sel = s.lineSelection;
-    if (
-      sel &&
-      (sel.kind === 'thread' ||
-        sel.subjectType === 'thread' ||
-        sel.kind === 'inline-comment')
-    ) {
-      return sel.commentId != null ? String(sel.commentId) : '';
-    }
-    return '';
-  });
   const storeSelecting = useModalStore((s) => s.selecting);
   const selecting =
     selectingProp !== undefined ? selectingProp : storeSelecting;
@@ -192,16 +231,6 @@ function VirtualDiffImpl(props: any) {
         : ''
       : storeFileSelectionPath;
   const isFileSelection = Boolean(fileSelectionPath);
-  const threadSelectionId =
-    selectionOverride !== undefined
-      ? selectionOverride &&
-        (selectionOverride.kind === 'thread' ||
-          selectionOverride.subjectType === 'thread' ||
-          selectionOverride.kind === 'inline-comment') &&
-        selectionOverride.commentId != null
-        ? String(selectionOverride.commentId)
-        : ''
-      : storeThreadSelectionId;
 
   // Stable handler identities → DiffCodeLine memo works across selection moves
   const onSelectionStartRef = useRef(onSelectionStart);
@@ -992,9 +1021,6 @@ function VirtualDiffImpl(props: any) {
                   : 'RIGHT';
               // Split line threads dock under the matching pane; file-level stays full width
               const isSplitComment = Boolean(row.split);
-              const threadSelected =
-                Boolean(threadSelectionId) &&
-                String(row.commentId) === threadSelectionId;
               const threadEl = (
                 <InlineThread
                   row={row}
@@ -1045,20 +1071,20 @@ function VirtualDiffImpl(props: any) {
                 />
               );
               const commentInner = (
-                <div
+                <DiffCommentRowFrame
+                  commentId={row.commentId}
                   className={`prp-vline prp-vline--comment${
                     isSplitComment ? ' prp-vline--comment-split' : ''
                   }${collapsed ? ' prp-vline--comment-collapsed' : ''}${
                     pending ? ' prp-vline--comment-pending' : ''
-                  }${threadSelected ? ' prp-vline--comment-selected' : ''}${searchRowClass}`}
+                  }${isSearchMatch ? ' prp-vline--search-match' : ''}`}
+                  searchHit={Boolean(isActiveHit)}
                   style={minH != null ? { minHeight: minH } : undefined}
                   data-row-index={row.rowIndex}
                   data-collapsed={collapsed ? '1' : '0'}
                   data-pending={pending ? '1' : undefined}
                   data-side={commentSide}
                   data-split={isSplitComment ? '1' : '0'}
-                  data-thread-selected={threadSelected ? '1' : undefined}
-                  data-search-current={isActiveHit ? '1' : undefined}
                   data-search-anchor={commentAnchor || undefined}
                   data-thread-focus-anchor={commentAnchor || undefined}
                 >
@@ -1083,7 +1109,7 @@ function VirtualDiffImpl(props: any) {
                   ) : (
                     threadEl
                   )}
-                </div>
+                </DiffCommentRowFrame>
               );
               return (
                 <DiffVirtualRowShell

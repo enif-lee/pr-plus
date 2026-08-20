@@ -12,6 +12,7 @@ import {
 import {
   togglePathInCollapsedSet,
   setPathCollapsedInSet,
+  expandPathInCollapsedSet,
   isPathCollapsed,
   shouldAutoExpandOnFileNav,
   materializeCollapsedPaths,
@@ -305,6 +306,43 @@ describe('ArrowLeft/Right directed fold', () => {
         hasLineSelection: false,
       })
     ).toBe('contextThreadExpand');
+  });
+});
+
+describe('expandPathInCollapsedSet identity', () => {
+  const files = [
+    { filename: 'a.ts', defaultCollapsed: false },
+    { filename: 'b.ts', defaultCollapsed: true },
+  ];
+
+  test('keeps the same Set when the path is already expanded', () => {
+    const start = new Set();
+    const next = expandPathInCollapsedSet(start, 'a.ts', files, null);
+    expect(next).toBe(start);
+    expect(isPathCollapsed('a.ts', next, false, false, null)).toBe(false);
+    expect(isPathCollapsed('b.ts', next, true, false, null)).toBe(true);
+  });
+
+  test('keeps an explicit Set when the path is already omitted', () => {
+    const start = materializeCollapsedPaths(new Set(), files, null);
+    const next = expandPathInCollapsedSet(start, 'a.ts', files, null);
+    expect(next).toBe(start);
+  });
+
+  test('still expands an implicitly collapsed default file', () => {
+    const start = new Set();
+    const next = expandPathInCollapsedSet(start, 'b.ts', files, null);
+    expect(next).not.toBe(start);
+    expect(isPathCollapsed('b.ts', next, true, false, null)).toBe(false);
+  });
+
+  test('still expands a viewed file from an empty implicit set', () => {
+    const start = new Set();
+    const viewed = new Set(['a.ts']);
+    expect(isPathCollapsed('a.ts', start, false, false, viewed)).toBe(true);
+    const next = expandPathInCollapsedSet(start, 'a.ts', files, viewed);
+    expect(next).not.toBe(start);
+    expect(isPathCollapsed('a.ts', next, false, false, viewed)).toBe(false);
   });
 });
 

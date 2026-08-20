@@ -1506,8 +1506,9 @@ export function usePrModalSessionRoute(b: any) {
     const page =
       layoutMode === LAYOUT_DIFF ? 'diff' : ('conversation' as const);
     let position: string | null = null;
-    if (commentIndex >= 0 && mappedComments[commentIndex]) {
-      position = buildPositionFromComment(mappedComments[commentIndex]);
+    const liveCommentIndex = Number(useModalStore.getState().commentIndex);
+    if (liveCommentIndex >= 0 && mappedComments[liveCommentIndex]) {
+      position = buildPositionFromComment(mappedComments[liveCommentIndex]);
     } else {
       // Keep deep-link / keyboard-focus position in the URL. Writing null here
       // used to race with open(prp_position=…) and strip the share query before
@@ -1605,7 +1606,6 @@ export function usePrModalSessionRoute(b: any) {
     detail?.owner,
     detail?.repo,
     layoutMode,
-    commentIndex,
     mappedComments,
     onRouteChange,
     routeWriteReady,

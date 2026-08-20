@@ -193,7 +193,10 @@ export const useModalStore = create<ModalUiState>((set, get) => ({
       searchHitIndex: index !== undefined ? index : hits.length ? 0 : -1,
     }),
   setSearchHitIndex: (i) => set({ searchHitIndex: i }),
-  setActiveFilePath: (p) => set({ activeFilePath: p }),
+  setActiveFilePath: (p) => {
+    if (get().activeFilePath === p) return;
+    set({ activeFilePath: p });
+  },
   setAnimClass: (c) => set({ animClass: c }),
   setCommentText: (t) => set({ commentText: t }),
   setActionBusy: (v) => set({ actionBusy: v }),
@@ -204,14 +207,20 @@ export const useModalStore = create<ModalUiState>((set, get) => ({
       return { actionMsg: msg, actionMsgSeq: (s.actionMsgSeq || 0) + 1 };
     }),
   setCollapsedFiles: (fn) =>
-    set((s) => ({
-      collapsedFiles: typeof fn === 'function' ? (fn as any)(s.collapsedFiles) : (fn as Set<string>),
-    })),
+    set((s) => {
+      const next =
+        typeof fn === 'function'
+          ? (fn as any)(s.collapsedFiles)
+          : (fn as Set<string>);
+      return next === s.collapsedFiles ? s : { collapsedFiles: next };
+    }),
   setExpandedDirs: (fn) =>
     set((s) => ({
       expandedDirs: typeof fn === 'function' ? (fn as any)(s.expandedDirs) : (fn as Set<string>),
     })),
   setCommentIndex: (i) => {
+    const st = get();
+    if (st.commentIndex === i && st.focusedThreadUnitId == null) return;
     set({ commentIndex: i, focusedThreadUnitId: null });
     // Keep DOM stamp in sync — stale data-prp-focused-thread-unit misleads e2e
     // and isMultiReplyThreadFocused DOM fallbacks after ⌥J/K root hops.
@@ -233,10 +242,19 @@ export const useModalStore = create<ModalUiState>((set, get) => ({
     set((prev) => ({
       lineSelection: typeof s === 'function' ? s(prev.lineSelection) : s,
     })),
-  setSelecting: (v) => set({ selecting: v }),
+  setSelecting: (v) => {
+    if (get().selecting === v) return;
+    set({ selecting: v });
+  },
   setSelectionDraft: (t) => set({ selectionDraft: t }),
-  setShowSelectionComposer: (v) => set({ showSelectionComposer: v }),
-  setSelectionIslandLeaving: (v) => set({ selectionIslandLeaving: v }),
+  setShowSelectionComposer: (v) => {
+    if (get().showSelectionComposer === v) return;
+    set({ showSelectionComposer: v });
+  },
+  setSelectionIslandLeaving: (v) => {
+    if (get().selectionIslandLeaving === v) return;
+    set({ selectionIslandLeaving: v });
+  },
   setFileQuery: (q) => set({ fileQuery: q }),
   setViewedPaths: (fn) =>
     set((s) => ({

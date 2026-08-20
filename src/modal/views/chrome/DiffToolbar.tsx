@@ -39,6 +39,7 @@ import {
   FinishReviewModal,
   type FinishReviewEvent,
 } from './FinishReviewModal';
+import { useModalStore } from '../../store/modal-store';
 
 /**
  * Unified Diff top chrome: files, multi-checkbox commits, thread filters,
@@ -73,7 +74,7 @@ export function DiffToolbar(props: any) {
     commitLabel = null,
     commitDisabled = false,
     comments = [],
-    commentIndex = -1,
+    commentIndex: commentIndexProp,
     onPrevComment,
     onNextComment,
     /**
@@ -133,6 +134,11 @@ export function DiffToolbar(props: any) {
     );
   }, [localeProp, localeCtx?.locale]);
   const t = useMemo(() => createTranslator(locale), [locale]);
+  const storeCommentIndex = useModalStore((s) => s.commentIndex);
+  const commentIndex =
+    commentIndexProp != null && Number.isFinite(Number(commentIndexProp))
+      ? Number(commentIndexProp)
+      : storeCommentIndex;
 
   // Unified: GitHub PENDING review only (totalPendingCount from App).
   // Legacy fallback: local batch count if host not yet updated.
