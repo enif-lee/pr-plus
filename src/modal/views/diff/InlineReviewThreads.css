@@ -75,9 +75,84 @@
     transform: rotate(360deg);
   }
 }
-.prp-inline-thread[data-comments-loading='1'] .prp-inline-thread__filebar {
-  /* subtle cue while bodies hydrate — order stays stable */
-  opacity: 0.95;
+
+/*
+ * Whole thread box pulses light-blue → slightly deeper light-blue while
+ * comment bodies hydrate. Filebar/hunk stay transparent so the card reads
+ * as one surface. Conversation uses the same attr on the outer unit.
+ */
+.prp-inline-thread[data-comments-loading='1'] .prp-inline-thread__card,
+.prp-conversation-inline-thread[data-comments-loading='1'],
+.prp-conversation-inline-thread:has([data-comments-loading='1']) {
+  animation: prp-thread-loading-pulse 1.05s ease-in-out infinite;
+}
+.prp-inline-thread[data-comments-loading='1'] .prp-inline-thread__filebar,
+.prp-inline-thread[data-comments-loading='1'] .prp-inline-thread__hunk,
+.prp-inline-thread[data-comments-loading='1'] .prp-inline-thread__composer,
+.prp-inline-thread[data-comments-settling] .prp-inline-thread__filebar,
+.prp-inline-thread[data-comments-settling] .prp-inline-thread__hunk,
+.prp-inline-thread[data-comments-settling] .prp-inline-thread__composer {
+  background: transparent;
+}
+.prp-inline-thread[data-comments-loading='1'].prp-inline-thread--collapsed
+  .prp-inline-thread__card {
+  opacity: 1;
+}
+@keyframes prp-thread-loading-pulse {
+  0%,
+  100% {
+    background-color: color-mix(in srgb, var(--prp-accent, #0969da) 3%, var(--prp-bg));
+    border-color: color-mix(in srgb, var(--prp-accent, #0969da) 8%, var(--prp-border));
+  }
+  50% {
+    background-color: color-mix(in srgb, var(--prp-accent, #0969da) 7%, var(--prp-bg));
+    border-color: color-mix(in srgb, var(--prp-accent, #0969da) 14%, var(--prp-border));
+  }
+}
+
+/* After hydrate + scroll: hold the pulse tint, then ease to the card bg. */
+.prp-inline-thread[data-comments-settling] .prp-inline-thread__card,
+.prp-conversation-inline-thread:has([data-comments-settling]),
+.prp-conversation-inline-thread[data-comments-settling] {
+  animation: none;
+  transition:
+    background-color 0.9s ease-out,
+    border-color 0.9s ease-out;
+}
+.prp-inline-thread[data-comments-settling='hold'] .prp-inline-thread__card,
+.prp-conversation-inline-thread:has([data-comments-settling='hold']),
+.prp-conversation-inline-thread[data-comments-settling='hold'] {
+  background-color: color-mix(in srgb, var(--prp-accent, #0969da) 7%, var(--prp-bg));
+  border-color: color-mix(in srgb, var(--prp-accent, #0969da) 14%, var(--prp-border));
+}
+.prp-inline-thread[data-comments-settling='fade'] .prp-inline-thread__card,
+.prp-conversation-inline-thread:has([data-comments-settling='fade']),
+.prp-conversation-inline-thread[data-comments-settling='fade'] {
+  background-color: var(--prp-bg);
+  border-color: var(--prp-border);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .prp-inline-thread[data-comments-loading='1'] .prp-inline-thread__card,
+  .prp-conversation-inline-thread[data-comments-loading='1'],
+  .prp-conversation-inline-thread:has([data-comments-loading='1']) {
+    animation: none;
+    background-color: color-mix(
+      in srgb,
+      var(--prp-accent, #0969da) 5%,
+      var(--prp-bg)
+    );
+  }
+  .prp-inline-thread[data-comments-settling] .prp-inline-thread__card,
+  .prp-conversation-inline-thread:has([data-comments-settling]),
+  .prp-conversation-inline-thread[data-comments-settling] {
+    transition: none;
+    background-color: var(--prp-bg);
+    border-color: var(--prp-border);
+  }
+  .prp-inline-thread__loading-icon {
+    animation: none;
+  }
 }
 /* Shared compact path header (Diff + Conversation) — same padding as base filebar */
 .prp-inline-thread__filebar.prp-review-thread__file-header {

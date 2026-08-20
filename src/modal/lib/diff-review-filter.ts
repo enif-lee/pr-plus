@@ -44,6 +44,30 @@ export function createUnrestrictedDiffReviewFilter(): DiffReviewFilterState {
   };
 }
 
+/** Product default Unresolved+Pending (pending chip may be hidden when count is 0). */
+export function isProductDefaultDiffReviewFilter(
+  filter: DiffReviewFilterState | null | undefined
+): boolean {
+  const f = normalizeDiffReviewFilter(filter ?? createDefaultDiffReviewFilter());
+  if (f.authors.length) return false;
+  const set = new Set(f.statuses);
+  return set.has('unresolved') && set.has('pending') && set.size === 2;
+}
+
+/**
+ * Default open-thread filter matched nothing, but threads exist — widen so
+ * Diff StepNav / ⌥J/K are not stuck at 0/0 (resolved-only PRs).
+ */
+export function shouldAutoWidenEmptyDiffReviewFilter(opts: {
+  filter: DiffReviewFilterState | null | undefined;
+  filteredRootCount: number;
+  unrestrictedRootCount: number;
+}): boolean {
+  if (Number(opts.filteredRootCount) > 0) return false;
+  if (Number(opts.unrestrictedRootCount) <= 0) return false;
+  return isProductDefaultDiffReviewFilter(opts.filter);
+}
+
 function asStatus(raw: unknown): DiffReviewStatus | null {
   const s = String(raw || '').toLowerCase();
   if (s === 'unresolved' || s === 'resolved' || s === 'pending') return s;

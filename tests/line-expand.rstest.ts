@@ -128,6 +128,21 @@ describe('heights', () => {
     expect(h).toBe(88);
   });
 
+  test('measured mega-line height is capped (dblclick expand)', () => {
+    const row = codeRow({ rowIndex: 6, text: 'm'.repeat(80_000) });
+    const key = diffLineExpandKey(row)!;
+    const h = expandedCodeLineHeight(row, {
+      expandedKeys: new Set([key]),
+      measuredHeights: new Map([[key, 48_000]]),
+    });
+    expect(h).toBe(ROW_HEIGHT * 48);
+    expect(rowHeightFor(row, {
+      expandedKeys: new Set([key]),
+      measuredHeights: new Map([[key, 48_000]]),
+      expandedCodeLineHeight,
+    })).toBe(ROW_HEIGHT * 48);
+  });
+
   test('rowHeightFor + rowOffsets grow when expanded', () => {
     const short = codeRow({ rowIndex: 0, text: 'hi' });
     const long = codeRow({ rowIndex: 1, text: 'w'.repeat(200) });

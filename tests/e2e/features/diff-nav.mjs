@@ -21,6 +21,47 @@ import {
 } from '../lib/harness.mjs';
 import { TICK } from '../lib/runner.mjs';
 
+function diffStepNavProbe() {
+  return evalInPage(`
+    (() => {
+      const root = document.querySelector('.prp-diff-toolbar__comments');
+      const meta = (root?.querySelector('.prp-step-nav__meta')?.textContent || '')
+        .replace(/\\s+/g, '')
+        .trim();
+      const btns = [...(root?.querySelectorAll('.prp-step-nav__btn') || [])];
+      const parse = meta.match(/^(\\d+)\\/(\\d+)$/);
+      return {
+        meta,
+        index: parse ? Number(parse[1]) : null,
+        total: parse ? Number(parse[2]) : null,
+        prevDisabled: Boolean(btns[0]?.disabled),
+        nextDisabled: Boolean(btns[1]?.disabled),
+        lastAction:
+          document.documentElement.getAttribute('data-prp-last-shortcut-action') ||
+          '',
+        storeIndex:
+          document.documentElement.getAttribute('data-prp-comment-index') ||
+          '',
+      };
+    })()
+  `);
+}
+
+function clickDiffStepNav(which) {
+  const i = which === 'prev' ? 0 : 1;
+  return evalInPage(`
+    (() => {
+      const btns = [...document.querySelectorAll(
+        '.prp-diff-toolbar__comments .prp-step-nav__btn'
+      )];
+      const btn = btns[${i}];
+      if (!btn) return { ok: false, reason: 'missing' };
+      btn.click();
+      return { ok: true, disabled: Boolean(btn.disabled) };
+    })()
+  `);
+}
+
 /**
  * Register ordered steps without executing them.
  * @returns {import('../lib/e2e-register.ts').E2eStep[]}
@@ -218,6 +259,26 @@ export function getSteps() {
     }
     log('P2.0b review filter OK', { snap, menuSnap, pendingChip: pendingChip || null });
   });
+  run('P2.1a Diff StepNav next at default filter', () => {
+    setLayout('diff');
+    blurEditable();
+    waitDiffFilesReady(`P2.1a PR #${DEMO_PR} Diff files ready`);
+    waitMs(500);
+    const before = diffStepNavProbe();
+    const clicked = clickDiffStepNav('next');
+    waitMs(900);
+    const after = diffStepNavProbe();
+    const threads = diffThreadProbe();
+    log(
+      `  default StepNav before=${JSON.stringify(before)} click=${JSON.stringify(clicked)} after=${JSON.stringify(after)} threads=${threads.threadCount} active=${threads.hasActive}`
+    );
+    assert(
+      clicked?.ok &&
+        after.total > 0 &&
+        (after.index >= 1 || threads.hasActive),
+      `default-filter StepNav dead: before=${JSON.stringify(before)} click=${JSON.stringify(clicked)} after=${JSON.stringify(after)} threads=${JSON.stringify(threads)}`
+    );
+  });
   run('P2.1 Diff ⌥J/K thread nav', () => {
     setLayout('diff');
     blurEditable();
@@ -284,16 +345,17 @@ export function getSteps() {
     tops.push(afterK.scrollTop ?? null);
     actives.push(afterK.hasActive);
     const moved = tops.some((t, i) => i > 0 && t != null && tops[0] != null && t !== tops[0]);
-    // Small single-file PR may keep scrollTop 0 if all threads fit — then still
-    // require threads mounted (or focus toggled) so handlers are not inert.
     const after = diffThreadProbe();
-    const focusSignal = actives.some(Boolean) || after.hasActive || after.nearest != null;
+    const nav = diffStepNavProbe();
+    const focusSignal = actives.some(Boolean) || after.hasActive;
     assert(
-      after.threadCount >= 1 || moved || focusSignal,
-      `thread nav inert: tops=${tops.join(',')} threads=${after.threadCount} actives=${actives.join(',')}`
+      after.threadCount >= 1 &&
+        nav.total > 0 &&
+        (moved || focusSignal || nav.index >= 1 || nav.lastAction === 'stepNavNext'),
+      `thread nav inert: tops=${tops.join(',')} threads=${after.threadCount} actives=${actives.join(',')} nav=${JSON.stringify(nav)}`
     );
     log(
-      `  threads=${after.threadCount} scrollTops=${tops.join('→')} nearest=${JSON.stringify(after.nearest)} actives=${actives.join('→')}`
+      `  threads=${after.threadCount} scrollTops=${tops.join('→')} nearest=${JSON.stringify(after.nearest)} actives=${actives.join('→')} nav=${JSON.stringify(nav)}`
     );
   });
   run('P2.5 Diff ⌥⇧[ / ⌥⇧] file nav', () => {

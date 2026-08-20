@@ -2,7 +2,7 @@
  * listOpenMode pref: /pulls title click → pr+ modal | PR page navigation.
  */
 import {
-  DEMO_PR,
+  LIST_PR,
   PULLS_URL,
   assert,
   closeOverlay,
@@ -29,22 +29,23 @@ export function getSteps() {
   };
 
   const clickPrTitleOnList = (n) =>
-    evalInPage(`
-      (() => {
-        const href = '/enif-lee/pr-plus/pull/${Number(n)}';
-        const a = [...document.querySelectorAll('a[href]')].find((el) => {
-          const h = el.getAttribute('href') || '';
-          if (!(h === href || h.startsWith(href + '#') || h.startsWith(href + '?'))) {
-            return false;
-          }
-          const t = (el.textContent || '').trim();
-          return t.length > 2;
-        });
-        if (!a) return { ok: false, reason: 'title-link-missing' };
-        a.click();
-        return { ok: true, text: (a.textContent || '').trim().slice(0, 60) };
-      })()
-    `);
+    waitFor(
+      `
+      const href = '/enif-lee/pr-plus/pull/${Number(n)}';
+      const a = [...document.querySelectorAll('a[href]')].find((el) => {
+        const h = el.getAttribute('href') || '';
+        if (!(h === href || h.startsWith(href + '#') || h.startsWith(href + '?'))) {
+          return false;
+        }
+        const t = (el.textContent || '').trim();
+        return t.length > 2;
+      });
+      if (!a) return false;
+      a.click();
+      return { ok: true, text: (a.textContent || '').trim().slice(0, 60) };
+      `,
+      { timeoutMs: 15_000, intervalMs: 250, label: `list title #${Number(n)}` }
+    );
 
   const probe = () =>
     evalInPage(`
@@ -82,10 +83,10 @@ export function getSteps() {
       openPulls();
       waitContentInject({ label: 'LOM.1 inject', timeoutMs: 12_000 });
     }
-    const clicked = clickPrTitleOnList(DEMO_PR);
+    const clicked = clickPrTitleOnList(LIST_PR);
     log(`  click: ${JSON.stringify(clicked)}`);
-    assert(clicked?.ok, `could not click PR #${DEMO_PR} title: ${JSON.stringify(clicked)}`);
-    waitPrShellReady(DEMO_PR, 'LOM.1 modal shell');
+    assert(clicked?.ok, `could not click PR #${LIST_PR} title: ${JSON.stringify(clicked)}`);
+    waitPrShellReady(LIST_PR, 'LOM.1 modal shell');
     const p = probe();
     log(`  probe: ${JSON.stringify(p)}`);
     assert(p?.overlay, 'modal mode: expected pr+ overlay');
@@ -107,15 +108,15 @@ export function getSteps() {
     }
     closeOverlay();
     waitMs(200);
-    const clicked = clickPrTitleOnList(DEMO_PR);
+    const clicked = clickPrTitleOnList(LIST_PR);
     log(`  click: ${JSON.stringify(clicked)}`);
-    assert(clicked?.ok, `could not click PR #${DEMO_PR}: ${JSON.stringify(clicked)}`);
+    assert(clicked?.ok, `could not click PR #${LIST_PR}: ${JSON.stringify(clicked)}`);
 
     const nav = waitFor(
       `
       const path = location.pathname || '';
       const m = path.match(/\\/pull\\/(\\d+)/);
-      if (m && Number(m[1]) === ${Number(DEMO_PR)}) {
+      if (m && Number(m[1]) === ${Number(LIST_PR)}) {
         return { ok: true, path, num: m[1] };
       }
       return false;
@@ -123,7 +124,7 @@ export function getSteps() {
       { timeoutMs: 15_000, intervalMs: 200, label: 'LOM.2 navigate to PR page' }
     );
     log(`  nav: ${JSON.stringify(nav)}`);
-    assert(nav?.ok, `page mode did not navigate to /pull/${DEMO_PR}: ${JSON.stringify(nav)}`);
+    assert(nav?.ok, `page mode did not navigate to /pull/${LIST_PR}: ${JSON.stringify(nav)}`);
 
     // Give click intercept a moment; must not re-open list-style modal on /pulls
     waitMs(800);
@@ -131,8 +132,8 @@ export function getSteps() {
     log(`  probe after page open: ${JSON.stringify(p)}`);
     assert(p?.onPr === true, `expected PR page path, got ${p?.path}`);
     assert(
-      Number(p?.prNum) === Number(DEMO_PR),
-      `expected PR #${DEMO_PR}, got ${p?.prNum}`
+      Number(p?.prNum) === Number(LIST_PR),
+      `expected PR #${LIST_PR}, got ${p?.prNum}`
     );
     // Path must not still be the pulls list
     assert(

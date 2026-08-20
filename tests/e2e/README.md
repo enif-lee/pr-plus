@@ -18,8 +18,10 @@ E2E uses a **separate** config: `rstest.e2e.config.ts`.
 ## Demo PR fixture
 
 Default multi-thread / conversation target is **`DEMO_PR` in `lib/harness.mjs`**
-(currently **#19**, stack root DEMO-300 on `demo/g`). Former **#7** was closed
-(subject-level reaction lock). Comment cleanup defaults to the same number via
+(currently **#19**, stack root DEMO-300 on `demo/g`, **merged** — open via URL).
+Former **#7** was closed (subject-level reaction lock). List click / list-row
+tests use **`LIST_PR` (#13)**; meta write-through uses **`META_PR` (#1)**. Both
+stay on default `/pulls`. Comment cleanup defaults to `DEMO_PR` via
 `COMMENT_CLEANUP_PR` in `lib/comment-cleanup.mjs`.
 
 ## Linear overlay fixture

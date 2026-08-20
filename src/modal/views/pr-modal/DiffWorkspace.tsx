@@ -79,7 +79,6 @@ export type DiffWorkspaceProps = {
   diffCommitLabel: string;
   onFetchCompareFiles: any;
   mappedComments: any[];
-  commentIndex: number;
   navComment: (dir: number) => void;
   pendingCount: number;
   onDiscardPending: any;
@@ -221,7 +220,6 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
     diffCommitLabel,
     onFetchCompareFiles,
     mappedComments,
-    commentIndex,
     navComment,
     pendingCount,
     onDiscardPending,
@@ -454,7 +452,6 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
           commitLabel={diffCommitLabel}
           commitDisabled={!onFetchCompareFiles}
           comments={mappedComments}
-          commentIndex={commentIndex}
           onPrevComment={() => navComment(-1)}
           onNextComment={() => navComment(1)}
           pendingBatch={null}
@@ -512,10 +509,7 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
             }
           }}
           listRef={listRef}
-          highlightRowIndex={
-            hit?.rowIndex ??
-            (commentIndex >= 0 ? mappedComments[commentIndex]?.rowIndex : undefined)
-          }
+          highlightRowIndex={hit?.rowIndex}
           searchQuery={(searchQuery || '').trim()}
           searchMatchRows={searchMatchRows}
           activeSearchHit={hit}

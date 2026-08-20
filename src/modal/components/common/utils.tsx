@@ -92,6 +92,24 @@ export function diffRowMeasureKey(
 }
 
 /**
+ * Visible box height for Diff virtual rows.
+ * Ignore scrollHeight: a thread scrollport (or pre/suggestion max-content)
+ * inflates it and the measured slot never shrinks, leaving empty card space.
+ */
+export function measureLaidOutBoxHeight(box: {
+  height?: number | null;
+  clientHeight?: number | null;
+  offsetHeight?: number | null;
+  scrollHeight?: number | null;
+} | null | undefined): number {
+  if (!box) return 0;
+  const rect = Number(box.height) || 0;
+  const client = Number(box.clientHeight) || 0;
+  const offset = Number(box.offsetHeight) || 0;
+  return Math.ceil(Math.max(rect, client, offset));
+}
+
+/**
  * Estimate open-thread height from row shape (before ResizeObserver).
  * Floors at COMMENT_ROW_HEIGHT so under-estimate never clips the card.
  */
@@ -167,6 +185,16 @@ export function rowHeightFor(row: any, opts: any = null) {
         } else {
           return Math.max(COMMENT_ROW_HEIGHT_COLLAPSED, Math.ceil(m));
         }
+      } else if (row?.kind === 'diff-line') {
+        // Mega-line dblclick expand: never let RO scrollHeight blow the virtualizer.
+        const capped =
+          typeof opts?.expandedCodeLineHeight === 'function'
+            ? opts.expandedCodeLineHeight(row, opts)
+            : Math.min(ROW_HEIGHT * 48, Math.max(ROW_HEIGHT, Math.ceil(m)));
+        if (capped != null && Number.isFinite(capped) && capped > 0) {
+          return Math.max(ROW_HEIGHT, capped);
+        }
+        return Math.min(ROW_HEIGHT * 48, Math.max(ROW_HEIGHT, Math.ceil(m)));
       } else {
         return Math.max(ROW_HEIGHT, Math.ceil(m));
       }

@@ -8,7 +8,7 @@
  * Run: node tests/e2e/list-row-resync.mjs
  */
 import {
-  DEMO_PR,
+  LIST_PR,
   assert,
   closeAll,
   closeOverlay,
@@ -40,7 +40,8 @@ function probeListRow(n) {
         var links = r.querySelectorAll('a[href*="/pull/"]');
         for (var j = 0; j < links.length; j++) {
           var h = links[j].getAttribute('href') || '';
-          if (h.indexOf('/pull/' + n) !== -1) {
+          var m = h.match(/\\/pull\\/(\\d+)/);
+          if (m && Number(m[1]) === n) {
             row = r;
             break;
           }
@@ -380,17 +381,17 @@ export function getSteps() {
     }
     log(`  ext=${JSON.stringify(ext)}`);
     assert(ext.decorated > 0 || ext.treeToggle, 'extension decorations missing');
-    baseline = probeListRow(DEMO_PR);
-    log(`  baseline=#${DEMO_PR} ${JSON.stringify(baseline)}`);
-    assert(baseline.found, `PR #${DEMO_PR} not on open pulls`);
+    baseline = probeListRow(LIST_PR);
+    log(`  baseline=#${LIST_PR} ${JSON.stringify(baseline)}`);
+    assert(baseline.found, `PR #${LIST_PR} not on open pulls`);
     assert(
       typeof baseline.title === 'string' && baseline.title.length > 2,
       `list row title missing: ${JSON.stringify(baseline)}`
     );
   });
 
-  run(`open PR #${DEMO_PR} shell`, () => {
-    openPr(DEMO_PR);
+  run(`open PR #${LIST_PR} shell`, () => {
+    openPr(LIST_PR);
     const ov = evalInPage(`!!document.querySelector('.prp-overlay')`);
     assert(ov, 'overlay missing');
     waitMs(600);
@@ -405,7 +406,7 @@ export function getSteps() {
     // "No labels" (prior suite write-through). Clear via product picker so both
     // surfaces settle — never leave list chips without a modal write-through.
     let aside = probeAsideLabels();
-    let under = probeListRow(DEMO_PR);
+    let under = probeListRow(LIST_PR);
     if (aside.hasBug || hasBugLabel(under)) {
       log(
         `  pre-state has bug — removing first aside=${aside.hasBug} list=${hasBugLabel(under)}`
@@ -425,18 +426,18 @@ export function getSteps() {
       forceBugLabel(false);
       const t0 = Date.now();
       aside = probeAsideLabels();
-      under = probeListRow(DEMO_PR);
+      under = probeListRow(LIST_PR);
       while (
         (aside.hasBug || hasBugLabel(under)) &&
         Date.now() - t0 < 12_000
       ) {
         waitMs(350);
         aside = probeAsideLabels();
-        under = probeListRow(DEMO_PR);
+        under = probeListRow(LIST_PR);
       }
     }
     assert(!aside.hasBug, `pre-state: bug still on after reset: ${JSON.stringify(aside)}`);
-    under = probeListRow(DEMO_PR);
+    under = probeListRow(LIST_PR);
     log(`  pre-state list=${JSON.stringify(under)} aside=${JSON.stringify(aside)}`);
     assert(!hasBugLabel(under), `pre-state list still has bug: ${JSON.stringify(under)}`);
   });
@@ -453,11 +454,11 @@ export function getSteps() {
   });
 
   run('mutation: list row under shell reflects bug (write-through hard)', () => {
-    let under = probeListRow(DEMO_PR);
+    let under = probeListRow(LIST_PR);
     const t0 = Date.now();
     while (!hasBugLabel(under) && Date.now() - t0 < 8000) {
       waitMs(300);
-      under = probeListRow(DEMO_PR);
+      under = probeListRow(LIST_PR);
     }
     log(`  under=${JSON.stringify(under)}`);
     assert(under.found, 'list row missing under shell');
@@ -481,11 +482,11 @@ export function getSteps() {
     if (!evalInPage(`location.pathname.indexOf('/pulls') !== -1`)) {
       openPulls();
     }
-    let after = probeListRow(DEMO_PR);
+    let after = probeListRow(LIST_PR);
     const t0 = Date.now();
     while (!hasBugLabel(after) && Date.now() - t0 < 8000) {
       waitMs(300);
-      after = probeListRow(DEMO_PR);
+      after = probeListRow(LIST_PR);
     }
     log(`  afterClose=${JSON.stringify(after)}`);
     assert(after.found, 'row missing after close');
@@ -501,7 +502,7 @@ export function getSteps() {
   });
 
   run('mutation: cleanup remove bug + assert gone', () => {
-    openPr(DEMO_PR, { viaUrl: true });
+    openPr(LIST_PR, { viaUrl: true });
     waitMs(500);
     // Retry remove: chip ✕ can race reopen paint; picker is fallback.
     let aside = probeAsideLabels();
@@ -525,11 +526,11 @@ export function getSteps() {
     if (!evalInPage(`location.pathname.indexOf('/pulls') !== -1`)) {
       openPulls();
     }
-    let cleaned = probeListRow(DEMO_PR);
+    let cleaned = probeListRow(LIST_PR);
     const t0 = Date.now();
     while (hasBugLabel(cleaned) && Date.now() - t0 < 10000) {
       waitMs(300);
-      cleaned = probeListRow(DEMO_PR);
+      cleaned = probeListRow(LIST_PR);
     }
     log(`  cleaned=${JSON.stringify(cleaned)}`);
     assert(cleaned.found, 'row missing after cleanup');

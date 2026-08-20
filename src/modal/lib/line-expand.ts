@@ -14,6 +14,18 @@ export const LINE_EXPAND_CHARS_PER_LINE = 100;
 /** Cap expanded height so a mega-line does not dominate the list. */
 export const LINE_EXPAND_MAX_LINES = 48;
 
+/** Virtual-list + CSS max height for an expanded code row. */
+export const LINE_EXPAND_MAX_HEIGHT = ROW_HEIGHT * LINE_EXPAND_MAX_LINES;
+
+/**
+ * Clamp a measured/estimated expanded-line height into [ROW_HEIGHT, MAX].
+ */
+export function capExpandedLineHeight(px: number): number {
+  const h = Math.ceil(Number(px) || 0);
+  if (!Number.isFinite(h) || h < 1) return ROW_HEIGHT;
+  return Math.min(LINE_EXPAND_MAX_HEIGHT, Math.max(ROW_HEIGHT, h));
+}
+
 /**
  * Stable key for a virtualized code row (unified or split visual row).
  * Prefer path + lineType + old/new line numbers so expand state survives
@@ -99,7 +111,7 @@ export function estimateExpandedLineHeight(
     .split('\n').length;
   const soft = Math.ceil(len / cpl) || 1;
   const lines = Math.min(maxLines, Math.max(hard, soft, 1));
-  return Math.max(lh, lines * lh);
+  return capExpandedLineHeight(lines * lh);
 }
 
 /**
@@ -131,7 +143,7 @@ export function expandedCodeLineHeight(
   if (!key || !opts.expandedKeys.has(key)) return null;
   const measured = opts.measuredHeights?.get(key);
   if (measured != null && Number.isFinite(measured) && measured > 0) {
-    return Math.max(ROW_HEIGHT, Math.ceil(measured));
+    return capExpandedLineHeight(measured);
   }
   return estimateExpandedLineHeight(row);
 }

@@ -55,6 +55,44 @@ import {
   pendingAttachCtaLabel,
 } from '@lib/pending-review';
 
+/** Pause after hydrate/scroll before the load tint eases to the card bg. */
+export const COMMENT_LOAD_SETTLE_HOLD_MS = 240;
+/** Ease duration from load tint → card background. */
+export const COMMENT_LOAD_SETTLE_FADE_MS = 900;
+
+export type CommentLoadChrome = 'off' | 'loading' | 'hold' | 'fade';
+
+/** Pulse while comments fetch; after load, hold then fade the tint to white. */
+export function useCommentLoadSettle(commentsLoading: boolean): CommentLoadChrome {
+  const [phase, setPhase] = useState<CommentLoadChrome>(
+    commentsLoading ? 'loading' : 'off'
+  );
+  useEffect(() => {
+    if (commentsLoading) {
+      setPhase('loading');
+      return;
+    }
+    setPhase((prev) => (prev === 'loading' ? 'hold' : prev));
+  }, [commentsLoading]);
+  useEffect(() => {
+    if (phase !== 'hold') return undefined;
+    const t = window.setTimeout(
+      () => setPhase('fade'),
+      COMMENT_LOAD_SETTLE_HOLD_MS
+    );
+    return () => window.clearTimeout(t);
+  }, [phase]);
+  useEffect(() => {
+    if (phase !== 'fade') return undefined;
+    const t = window.setTimeout(
+      () => setPhase('off'),
+      COMMENT_LOAD_SETTLE_FADE_MS
+    );
+    return () => window.clearTimeout(t);
+  }, [phase]);
+  return phase;
+}
+
 /**
  * Inline review thread card (Diff + Conversation).
  *
@@ -117,6 +155,8 @@ function InlineThreadImpl(props: any) {
      */
     sharePage = null as 'conversation' | 'diff' | null,
   } = props;
+
+  const loadChrome = useCommentLoadSettle(Boolean(commentsLoading));
 
   const linkPage: 'conversation' | 'diff' =
     sharePage === 'conversation' || sharePage === 'diff'
@@ -814,8 +854,11 @@ function InlineThreadImpl(props: any) {
       data-context-active={contextActive ? '1' : undefined}
       data-prp-multi-reply={replyCount > 0 ? '1' : undefined}
       data-prp-reply-count={replyCount > 0 ? String(replyCount) : undefined}
-      data-comments-loading={commentsLoading ? '1' : undefined}
-      aria-busy={commentsLoading ? true : undefined}
+      data-comments-loading={loadChrome === 'loading' ? '1' : undefined}
+      data-comments-settling={
+        loadChrome === 'hold' || loadChrome === 'fade' ? loadChrome : undefined
+      }
+      aria-busy={loadChrome === 'loading' ? true : undefined}
     >
       <div className="prp-inline-thread__card">
         {showFileHeader ? (

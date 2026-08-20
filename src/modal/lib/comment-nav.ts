@@ -429,3 +429,67 @@ export function resolveCommentNav(mappedComments: any, commentIndex: any, delta:
     shouldJump: Boolean(active && typeof active.rowIndex === 'number'),
   };
 }
+
+/**
+ * Pending Diff scroll after a thread is remapped (expand / filter / hydrate).
+ * `waitUntilLoaded`: do not commit while the row is still a no-line leftover;
+ * hydrate fills originalLine and flatten relocates the card.
+ */
+export type PendingCommentJump = {
+  commentId: string | number;
+  path?: string;
+  threadNodeId?: string;
+  waitUntilLoaded?: boolean;
+  fromRowIndex?: number | null;
+};
+
+/** Live `line` / `originalLine` used to attach a thread to a Diff hunk. */
+export function commentHasDiffAnchorLine(c: any): boolean {
+  if (!c) return false;
+  if (c.line != null && Number.isFinite(Number(c.line))) return true;
+  if (c.originalLine != null && Number.isFinite(Number(c.originalLine))) {
+    return true;
+  }
+  if (c.original_line != null && Number.isFinite(Number(c.original_line))) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Expand of a non-file thread with no hunk line: flatten will re-place it
+ * after by-ids hydrate. Scroll/focus must follow the new row.
+ */
+export function shouldFollowThreadRelocateOnExpand(comment: any): boolean {
+  if (!comment) return false;
+  const st = String(comment.subjectType || comment.subject_type || '').toLowerCase();
+  if (st === 'file') return false;
+  return !commentHasDiffAnchorLine(comment);
+}
+
+/** Match mapped Diff comment after shell:id → numeric hydrate. */
+export function findMappedCommentIndexForJump(
+  mapped: any,
+  pending: PendingCommentJump | null | undefined
+): number {
+  if (!pending) return -1;
+  const ids = new Set<string>();
+  if (pending.commentId != null && String(pending.commentId) !== '') {
+    ids.add(String(pending.commentId));
+  }
+  const tid = pending.threadNodeId != null ? String(pending.threadNodeId).trim() : '';
+  if (tid) {
+    ids.add(tid);
+    if (tid.startsWith('shell:')) ids.add(tid.slice('shell:'.length));
+    else ids.add(`shell:${tid}`);
+  }
+  if (!ids.size) return -1;
+  const list = Array.isArray(mapped) ? mapped : [];
+  return list.findIndex((c: any) => {
+    if (!c) return false;
+    if (c.id != null && ids.has(String(c.id))) return true;
+    const cTid = c.threadNodeId != null ? String(c.threadNodeId) : '';
+    if (cTid && (ids.has(cTid) || ids.has(`shell:${cTid}`))) return true;
+    return false;
+  });
+}

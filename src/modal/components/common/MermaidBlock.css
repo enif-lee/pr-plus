@@ -145,7 +145,7 @@
   padding: 0 8px;
 }
 
-.prp-vline--comment {
+.prp-vline.prp-vline--comment {
   height: auto !important;
   min-height: 0;
   white-space: normal;
@@ -547,7 +547,7 @@
   background: color-mix(in srgb, #ff9f1a 14%, var(--prp-bg));
 }
 
-.prp-vline--comment {
+.prp-vline.prp-vline--comment {
   white-space: normal;
   background: color-mix(in srgb, var(--prp-accent) 8%, var(--prp-bg));
   border-left-color: var(--prp-accent);

@@ -345,6 +345,23 @@ export function expandPathInCollapsedSet(
   viewedPaths: any = null
 ) {
   const p = String(path || '').trim();
+  if (p) {
+    const filesArr = Array.isArray(files) ? files : [];
+    let defaultCollapsed = false;
+    for (const f of filesArr) {
+      if ((f?.filename || f?.path) === p) {
+        defaultCollapsed = Boolean(f.defaultCollapsed);
+        break;
+      }
+    }
+    // Already expanded: keep identity so ⌥J/K hops do not rebuild Diff rows.
+    if (
+      !isPathCollapsed(p, collapsedPaths, defaultCollapsed, false, viewedPaths)
+    ) {
+      if (collapsedPaths instanceof Set) return collapsedPaths;
+      if (Array.isArray(collapsedPaths)) return collapsedPaths;
+    }
+  }
   const n = materializeCollapsedPaths(collapsedPaths, files, viewedPaths);
   if (p) n.delete(p);
   n.delete(COLLAPSED_SET_EXPLICIT_EMPTY);

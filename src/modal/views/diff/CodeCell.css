@@ -84,9 +84,11 @@
 .prp-vline--line-expanded {
   align-items: flex-start;
   white-space: pre-wrap;
-  /* Allow multi-line paint; height still fixed by virtualizer */
+  /* Cap matches LINE_EXPAND_MAX_LINES — uncapped wrap blows the virtualizer */
   contain: layout style;
-  overflow: hidden;
+  max-height: calc(var(--prp-diff-row-h, 20px) * 48);
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 .prp-vline--line-expanded code,
 .prp-vline--line-expanded .prp-code {

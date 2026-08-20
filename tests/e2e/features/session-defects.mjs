@@ -15,6 +15,7 @@ import {
   log,
   MULTI_HUNK_PR,
   DEMO_PR,
+  LIST_PR,
   openPr,
   openPulls,
   press,
@@ -980,12 +981,12 @@ export function getSteps() {
   });
 
   // ── 5) List-row write-through still holds after meta settle ───────
-  run(`SD5 list row reflects bug after set from shell PR #${DEMO_PR}`, () => {
-    // Ensure bug on (previous step restores; re-assert)
+  run(`SD5 list row reflects bug after set from shell PR #${LIST_PR}`, () => {
+    // DEMO_PR is merged (not on default /pulls). Use the open list fixture.
     closeOverlay();
     openPulls();
     waitMs(250);
-    openPr(DEMO_PR);
+    openPr(LIST_PR);
     setLayout('conversation');
     waitMs(200);
     let aside = asideLabelsProbe();
@@ -998,13 +999,14 @@ export function getSteps() {
     // List under shell (pulls page)
     const under = evalInPage(`
       (() => {
-        const n = ${DEMO_PR};
+        const n = ${LIST_PR};
         const rows = [...document.querySelectorAll('.js-issue-row, [id^="issue_"]')];
         let row = null;
         for (const r of rows) {
           if (r.id === 'issue_' + n) { row = r; break; }
           for (const a of r.querySelectorAll('a[href*="/pull/"]')) {
-            if ((a.getAttribute('href') || '').includes('/pull/' + n)) {
+            const m = (a.getAttribute('href') || '').match(/\\/pull\\/(\\d+)/);
+            if (m && Number(m[1]) === n) {
               row = r;
               break;
             }

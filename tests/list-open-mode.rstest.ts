@@ -58,6 +58,9 @@ describe('listOpenMode wiring (static)', () => {
     const popup = read('src/popup.ts');
     expect(popup).toMatch(/pref-list-open-mode/);
     expect(popup).toMatch(/listOpenMode:\s*normalizeListOpenMode/);
+    expect(popup).toMatch(
+      /prefListOpenMode\?\.addEventListener\(\s*'change'/
+    );
 
     const i18n = read('src/modal/lib/i18n-popup.ts');
     expect(i18n).toMatch(/popup_pref_list_open_title/);

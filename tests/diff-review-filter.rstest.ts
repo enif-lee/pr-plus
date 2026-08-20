@@ -12,12 +12,14 @@ import {
   filterFilesByDiffReviewFilter,
   filterReviewCommentsForDiffNav,
   filterReviewRootsForDiffNav,
+  isProductDefaultDiffReviewFilter,
   isStatusActive,
   isStatusFilterUnrestricted,
   listReviewAuthorsFromComments,
   normalizeDiffReviewFilter,
   rootMatchesDiffReviewFilter,
   setDiffReviewHideOutdated,
+  shouldAutoWidenEmptyDiffReviewFilter,
   toggleDiffReviewAuthor,
   toggleDiffReviewStatus,
   toggleReviewFilter,
@@ -167,12 +169,29 @@ describe('normalize + multi-status', () => {
     ).toEqual(['a.ts', 'b.ts', 'c.ts']);
   });
 
+  test('⌥J/K widens to unrestricted when default filter hides every thread', () => {
+    const nav = readFileSync(
+      resolve(root, 'src/modal/hooks/useDiffConversationNav.ts'),
+      'utf8'
+    );
+    const fn = nav.slice(
+      nav.indexOf('function applyNavComment'),
+      nav.indexOf('function navComment')
+    );
+    expect(fn).toMatch(/if \(!liveList\.length\)/);
+    expect(fn).toMatch(/createUnrestrictedDiffReviewFilter/);
+    expect(fn).toMatch(/jumpToReviewComment/);
+    expect(nav).toMatch(/shouldAutoWidenEmptyDiffReviewFilter/);
+    expect(nav).toMatch(/useLayoutEffect/);
+  });
+
   test('jump-widen path in App uses unrestricted not default', () => {
     const app = readFileSync(
       resolve(root, 'src/modal/hooks/useDiffConversationNav.ts'),
       'utf8'
     );
     expect(app).toMatch(/createUnrestrictedDiffReviewFilter/);
+    expect(app).toMatch(/Array\.isArray\(reviewFilteredFiles\)/);
     expect(app).toMatch(
       /Widen to unrestricted[\s\S]{0,400}createUnrestrictedDiffReviewFilter/
     );
@@ -246,6 +265,43 @@ describe('hide outdated + authors + compose', () => {
     const roots = filterReviewRootsForDiffNav(commentsFixture(), f);
     expect(roots.map((r) => r.id).sort()).toEqual([1, 3, 4]);
     expect(roots.some((r) => r.id === 2)).toBe(false);
+  });
+
+  test('auto-widen when default filter matches nothing but threads exist', () => {
+    expect(isProductDefaultDiffReviewFilter(createDefaultDiffReviewFilter())).toBe(
+      true
+    );
+    expect(
+      isProductDefaultDiffReviewFilter(createUnrestrictedDiffReviewFilter())
+    ).toBe(false);
+    expect(
+      shouldAutoWidenEmptyDiffReviewFilter({
+        filter: createDefaultDiffReviewFilter(),
+        filteredRootCount: 0,
+        unrestrictedRootCount: 4,
+      })
+    ).toBe(true);
+    expect(
+      shouldAutoWidenEmptyDiffReviewFilter({
+        filter: createDefaultDiffReviewFilter(),
+        filteredRootCount: 2,
+        unrestrictedRootCount: 4,
+      })
+    ).toBe(false);
+    expect(
+      shouldAutoWidenEmptyDiffReviewFilter({
+        filter: createUnrestrictedDiffReviewFilter(),
+        filteredRootCount: 0,
+        unrestrictedRootCount: 4,
+      })
+    ).toBe(false);
+    expect(
+      shouldAutoWidenEmptyDiffReviewFilter({
+        filter: createDefaultDiffReviewFilter(),
+        filteredRootCount: 0,
+        unrestrictedRootCount: 0,
+      })
+    ).toBe(false);
   });
 
   test('compose hide outdated + status + author', () => {
@@ -407,5 +463,14 @@ describe('product wiring structure', () => {
     );
     expect(css).toMatch(/\.prp-step-nav__btn\s*\{[^}]*padding:\s*0/s);
     expect(css).toMatch(/\.prp-step-nav__btn\s*\{[^}]*margin:\s*0/s);
+  });
+
+  test('StepNav prev/next stay clickable at 0/0 so parent can widen+jump', () => {
+    const src = readFileSync(
+      resolve(root, 'src/modal/components/common/StepNav.tsx'),
+      'utf8'
+    );
+    expect(src).toMatch(/disabled \|\| busy/);
+    expect(src).not.toMatch(/n <= 0/);
   });
 });

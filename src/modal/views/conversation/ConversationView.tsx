@@ -1970,6 +1970,7 @@ function ConversationViewImpl(props: any) {
         className={className}
         data-search-anchor={rootAnchor}
         data-thread-focus-anchor={rootAnchor}
+        aria-busy={commentsLoading ? true : undefined}
         tabIndex={focused ? -1 : undefined}
       >
         {showOuterHeader ? (

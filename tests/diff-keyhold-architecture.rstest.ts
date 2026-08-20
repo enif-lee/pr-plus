@@ -74,6 +74,21 @@ describe('Diff key-hold architecture', () => {
     expect(nav).toMatch(/resolveAdjacentFileNav\([\s\S]*queued/);
   });
 
+  test('thread nav does not subscribe commentIndex at the composition root', () => {
+    const shell = read('src/modal/app/PrModalShell.tsx');
+    expect(shell).not.toMatch(
+      /const commentIndex = useModalStore\(\(s\) => s\.commentIndex\)/
+    );
+    const toolbar = read('src/modal/views/chrome/DiffToolbar.tsx');
+    expect(toolbar).toMatch(/useModalStore\(\(s\) => s\.commentIndex\)/);
+    const view = read('src/modal/views/diff/VirtualDiff.tsx');
+    expect(view).toMatch(/const DiffCommentRowFrame = memo/);
+    expect(view).not.toMatch(/const storeThreadSelectionId = useModalStore/);
+    const nav = read('src/modal/hooks/useDiffConversationNav.ts');
+    expect(nav).toMatch(/function applyNavComment/);
+    expect(nav).toMatch(/if \(commentNavRafRef\.current\) return/);
+  });
+
   test('host paints and URI writes yield while Diff navigation is active', () => {
     const shell = readShell();
     const host = read('src/host/modules/props-render-close.ts');
@@ -88,6 +103,13 @@ describe('Diff key-hold architecture', () => {
     expect(optHint).toMatch(
       /attributeFilter:\s*\[[\s\S]*'data-prp-diff-nav-active'/
     );
+  });
+
+  test('session restore key survives host remount of the same PR', () => {
+    const src = read('src/modal/hooks/usePrModalSessionRoute.ts');
+    expect(src).toMatch(/let restoredSessionPrKey:\s*string \| null/);
+    expect(src).toMatch(/restoredSessionPrKey === key/);
+    expect(src).toMatch(/restoredSessionPrKey = null/);
   });
 
   test('selection route writes stamp the inbound dedupe key before host echo', () => {

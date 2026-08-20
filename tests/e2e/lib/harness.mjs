@@ -24,7 +24,11 @@ import {
 
 export const REPO = 'enif-lee/pr-plus';
 export const PULLS_URL = `https://github.com/${REPO}/pulls`;
-/** Preferred multi-thread conversation / keyboard PR (open). Was #7 (closed; reaction-locked). */
+/**
+ * Preferred multi-thread conversation / keyboard PR.
+ * Merged — still valid via `/pull/N` (`openPr` URL fallback). Not on default `/pulls`.
+ * Was #7 (closed; reaction-locked).
+ */
 export const DEMO_PR = 19;
 /**
  * Large architecture PR for heavy diff scroll.
@@ -33,6 +37,16 @@ export const DEMO_PR = 19;
 export const HEAVY_PR = 14;
 /** Multi-hunk expand chrome (open) */
 export const MULTI_HUNK_PR = 13;
+/**
+ * Open PR on default `/pulls` for list click / list-row write-through.
+ * Same fixture as MULTI_HUNK_PR — DEMO_PR is merged and absent from the open list.
+ */
+export const LIST_PR = MULTI_HUNK_PR;
+/**
+ * Open stack-root PR for title/body/aside ↔ list write-through.
+ * LIST_PR (#13) is a tiny Diff fixture; #1 has a normal Conversation description.
+ */
+export const META_PR = 1;
 /**
  * Empty-commit-only PR (changedFiles: 0) — Diff layout must stay gated.
  * Fixture: demo/empty-commits-fixture branch; do not add file changes.

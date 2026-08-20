@@ -61,7 +61,7 @@ export const StepNav = memo(function StepNav({
   const countLabel = n
     ? `${Number.isFinite(i) && i >= 0 ? i + 1 : 0}/${n}`
     : '0/0';
-  const navDisabled = Boolean(disabled || busy || n <= 0);
+  const navDisabled = Boolean(disabled || busy);
   const prevTip = prevTitle || 'Previous';
   const nextTip = nextTitle || 'Next';
   const prevKbd = prevShortcut ? String(prevShortcut).trim() : '';

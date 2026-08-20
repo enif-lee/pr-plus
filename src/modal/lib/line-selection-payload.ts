@@ -26,8 +26,8 @@ export function normalizeSelection(selection: any) {
     if (!filePath) return null;
     return {
       filePath,
-      startLine: null,
-      endLine: null,
+      startLine: null as number | null,
+      endLine: null as number | null,
       startSide: 'RIGHT',
       endSide: 'RIGHT',
       multi: false,
@@ -53,8 +53,8 @@ export function normalizeSelection(selection: any) {
       commentId: selection.commentId,
       anchorRowIndex: selection.anchorRowIndex ?? null,
       headRowIndex: selection.headRowIndex ?? null,
-      startRowIndex: null,
-      endRowIndex: null,
+      startRowIndex: null as number | null,
+      endRowIndex: null as number | null,
     };
   }
   const ends = orderedSelectionEnds(selection);

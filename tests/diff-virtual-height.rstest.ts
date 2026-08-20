@@ -3,6 +3,8 @@
  * and scroll-anchor when heights change.
  */
 import { describe, expect, test } from '@rstest/core';
+import fs from 'node:fs';
+import path from 'node:path';
 import {
   ROW_HEIGHT,
   COMMENT_ROW_HEIGHT,
@@ -10,6 +12,7 @@ import {
   IMAGE_ROW_HEIGHT,
   diffRowMeasureKey,
   estimateInlineCommentHeight,
+  measureLaidOutBoxHeight,
   rowHeightFor,
   rowOffsets,
 } from '../src/modal/components/common/utils';
@@ -58,6 +61,30 @@ describe('diffRowMeasureKey', () => {
     expect(diffRowMeasureKey({ kind: 'file-header', filePath: 'a.ts' })).toBe(
       null
     );
+  });
+});
+
+describe('measureLaidOutBoxHeight', () => {
+  test('uses the visible box, not overflowing scrollHeight', () => {
+    expect(
+      measureLaidOutBoxHeight({
+        height: 240,
+        clientHeight: 240,
+        offsetHeight: 240,
+        scrollHeight: 980,
+      })
+    ).toBe(240);
+  });
+
+  test('takes the max of rect / client / offset', () => {
+    expect(
+      measureLaidOutBoxHeight({
+        height: 180.4,
+        clientHeight: 200,
+        offsetHeight: 196,
+        scrollHeight: 900,
+      })
+    ).toBe(200);
   });
 });
 
@@ -232,5 +259,54 @@ describe('adjustScrollTopForOffsetChange', () => {
     expect(adjustScrollTopForOffsetChange(130, prev, next)).toBe(130);
     // after row 1 grew by 50, same in-row offset on row 2: 200+10 → 250+10
     expect(adjustScrollTopForOffsetChange(210, prev, next)).toBe(260);
+  });
+});
+
+describe('thread body overflow stays off the comment column', () => {
+  test('review-thread content is not a dual-axis scrollport', () => {
+    const css = fs.readFileSync(
+      path.join(
+        process.cwd(),
+        'src/modal/views/conversation/ConversationThread.css'
+      ),
+      'utf8'
+    );
+    const declarations = css.replace(/\/\*[\s\S]*?\*\//g, '');
+    const contentRule = declarations.match(
+      /(?:^|\n)\.prp-review-thread__content\s*\{[^}]+\}/
+    )?.[0];
+    expect(contentRule).toBeTruthy();
+    expect(contentRule).toMatch(/overflow\s*:\s*visible/);
+    expect(contentRule).not.toMatch(/overflow-x\s*:\s*auto/);
+    expect(declarations).not.toMatch(
+      /\.prp-review-thread__content[^{]*\{[^}]*overflow-x\s*:\s*auto/
+    );
+    const rows = fs.readFileSync(
+      path.join(process.cwd(), 'src/modal/views/diff/VirtualDiffRows.tsx'),
+      'utf8'
+    );
+    expect(rows).toMatch(/measureLaidOutBoxHeight/);
+    expect(rows).not.toMatch(/el\.scrollHeight/);
+  });
+
+  test('comment rows beat .prp-vline white-space:pre so body text wraps', () => {
+    const vline = fs.readFileSync(
+      path.join(process.cwd(), 'src/modal/views/diff/DiffActiveRow.css'),
+      'utf8'
+    );
+    expect(vline).toMatch(
+      /\.prp-vline\.prp-vline--comment[\s\S]*white-space\s*:\s*normal/
+    );
+    const md = fs.readFileSync(
+      path.join(
+        process.cwd(),
+        'src/modal/components/common/MarkdownView.css'
+      ),
+      'utf8'
+    );
+    const mdRule = md.replace(/\/\*[\s\S]*?\*\//g, '').match(
+      /(?:^|\n)\.prp-md\s*\{[^}]+\}/
+    )?.[0];
+    expect(mdRule).toMatch(/white-space\s*:\s*normal/);
   });
 });
