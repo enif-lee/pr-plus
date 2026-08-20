@@ -1,11 +1,36 @@
 // TypeScript SoT — assembled by build scripts (classic runtime JS emit)
 
   const HOST_ID = 'prp-modal-host';
+
+  function detectHostRuntime() {
+    try {
+      const href = String(globalThis.location?.href || '');
+      if (href.startsWith('chrome-extension://')) return 'shell';
+      if ((globalThis as any).__PRP_PARTNER_RUNTIME) return 'partner';
+      const host = String(globalThis.location?.hostname || '').toLowerCase();
+      if (host === 'linear.app' || host.endsWith('.linear.app')) return 'partner';
+    } catch {
+      /* ignore */
+    }
+    return 'github';
+  }
+  const HOST_RUNTIME = detectHostRuntime();
+  function isPartnerOrShellRuntime() {
+    return HOST_RUNTIME === 'partner' || HOST_RUNTIME === 'shell';
+  }
+  try {
+    document.documentElement?.setAttribute('data-prp-runtime', HOST_RUNTIME);
+  } catch {
+    /* ignore */
+  }
+
   let reactRoot: any = null;
   /** DOM node the current reactRoot is bound to (soft-nav may replace it). */
   let reactRootHost: any = null;
   /** When false (no PAT), click intercept is idle — native GitHub navigation works. */
   let hostEnabled = false;
+  /** True after setEnabled ran (PAT + pluginEnabled evaluated). */
+  let hostFeaturesEvaluated = false;
   /** Soft-nav poll / listeners for PR page embed */
   let embedWatchInstalled = false;
   let lastEmbedPath: any = null;

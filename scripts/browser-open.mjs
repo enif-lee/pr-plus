@@ -1,74 +1,156 @@
 /**
- * Open agent-browser with this repo's agent-browser.json (extension + profile).
+ * Headed manual session: load this unpacked extension via pikabo (Playwright Chromium).
+ *
+ * Branded Chrome 137+ ignores --load-extension. pikabo uses a Chromium build that still
+ * honours it, plus a persistent profile so PAT / cookies survive relaunches.
  *
  * Usage:
- *   node scripts/browser-open.mjs
- *   node scripts/browser-open.mjs https://github.com/enif-lee/pr-plus/pulls
  *   npm run browser
  *   npm run browser -- https://github.com/login
+ *   npm run browser:linear
+ *   npm run browser:close
  */
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { Session } from 'pikabo';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const url = process.argv.slice(2).find((a) => a && !a.startsWith('-')) || '';
+const profileDir = path.join(root, '.browser', 'pikabo-profile');
+const pidFile = path.join(root, '.browser', 'pikabo.pid');
+const DEFAULT_URL = 'https://linear.app/mornica/issue/PRP-2';
 
-/**
- * @param {string[]} args
- * @param {{ inherit?: boolean, allowFail?: boolean }} [opts]
- */
-function ab(args, opts = {}) {
-  const r = spawnSync('agent-browser', args, {
-    cwd: root,
-    encoding: 'utf8',
-    stdio: opts.inherit ? 'inherit' : ['ignore', 'pipe', 'pipe'],
-  });
-  if (r.error && !opts.allowFail) throw r.error;
-  if ((r.status ?? 1) !== 0 && !opts.allowFail) {
-    const err = (r.stderr || r.stdout || '').trim() || `exit ${r.status}`;
-    throw new Error(`agent-browser ${args.join(' ')} failed: ${err}`);
-  }
-  return r;
-}
+const argv = process.argv.slice(2).filter(Boolean);
+const closeOnly = argv.includes('--close');
+const openPopup = argv.includes('--popup');
+const urlArg = argv.find((a) => !a.startsWith('-'));
+const url = urlArg || (closeOnly ? '' : DEFAULT_URL);
 
-function ensureSoloTab() {
-  const r = ab(['tab', 'list', '--json'], { allowFail: true });
-  if ((r.status ?? 1) !== 0 || !r.stdout) return { kept: null, closed: 0 };
-  let tabs = [];
+function livePid(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
-    const parsed = JSON.parse(r.stdout);
-    tabs = parsed?.data?.tabs || parsed?.tabs || [];
+    process.kill(pid, 0);
+    return true;
   } catch {
-    return { kept: null, closed: 0 };
+    return false;
   }
-  if (!Array.isArray(tabs)) return { kept: null, closed: 0 };
-  const pages = tabs.filter(
-    (t) => t && t.tabId && String(t.type || 'page') !== 'service_worker'
-  );
-  if (pages.length <= 1) {
-    return { kept: pages[0]?.tabId || null, closed: 0 };
-  }
-  const keep = pages.find((t) => t.active) || pages[0];
-  let closed = 0;
-  for (const t of pages) {
-    if (String(t.tabId) === String(keep.tabId)) continue;
-    ab(['tab', 'close', String(t.tabId)], { allowFail: true });
-    closed += 1;
-  }
-  if (keep?.tabId) ab(['tab', String(keep.tabId)], { allowFail: true });
-  return { kept: keep?.tabId || null, closed };
 }
 
-// Fresh session so a just-rebuilt extension is picked up from extensions: ["."]
-ab(['close', '--all'], { allowFail: true });
+function readPid() {
+  if (!existsSync(pidFile)) return null;
+  const pid = Number(String(readFileSync(pidFile, 'utf8')).trim());
+  return Number.isInteger(pid) && pid > 0 ? pid : null;
+}
 
-const openArgs = url ? ['open', url] : ['open'];
-ab(openArgs, { inherit: true });
+function killProfileBrowsers() {
+  spawnSync('pkill', ['-f', profileDir], { encoding: 'utf8' });
+}
 
-const solo = ensureSoloTab();
-const target = url || 'about:blank';
-console.log(
-  `browser open ${target}` +
-    (solo.closed ? ` (closed ${solo.closed} extra tab${solo.closed === 1 ? '' : 's'})` : '')
-);
+function closeExisting() {
+  const pid = readPid();
+  if (pid && pid !== process.pid && livePid(pid)) {
+    try {
+      process.kill(pid, 'SIGTERM');
+    } catch {
+      /* already gone */
+    }
+    const deadline = Date.now() + 4000;
+    while (Date.now() < deadline && livePid(pid)) {
+      spawnSync('sleep', ['0.15']);
+    }
+    if (livePid(pid)) {
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  killProfileBrowsers();
+  if (existsSync(pidFile)) unlinkSync(pidFile);
+}
+
+if (closeOnly) {
+  closeExisting();
+  console.log('browser closed (pikabo)');
+  process.exit(0);
+}
+
+if (!existsSync(path.join(root, 'manifest.json'))) {
+  throw new Error(`No manifest.json in ${root}`);
+}
+if (!existsSync(path.join(root, 'src', 'background.sw.js'))) {
+  throw new Error('src/background.sw.js missing. Run `npm run build` first.');
+}
+
+closeExisting();
+mkdirSync(profileDir, { recursive: true });
+
+const session = await Session.start({
+  extensionPath: root,
+  profileDir,
+  headless: false,
+  keepProfile: true,
+  debugPort: true,
+});
+
+const ext = session.extension;
+const popupUrl = ext.popup ? `chrome-extension://${ext.id}/${ext.popup}` : '(no popup)';
+
+mkdirSync(path.dirname(pidFile), { recursive: true });
+writeFileSync(pidFile, String(process.pid), 'utf8');
+
+const page = session.page('page');
+if (url) {
+  await page.goto(url, { waitUntil: 'domcontentloaded' }).catch((err) => {
+    console.error(`navigate failed: ${err instanceof Error ? err.message : err}`);
+  });
+}
+if (openPopup && ext.popup) {
+  await session.openPopup().catch((err) => {
+    console.error(`openPopup failed: ${err instanceof Error ? err.message : err}`);
+  });
+}
+
+console.log(`browser chrome pikabo / ${session.browser.version || 'chromium'}`);
+console.log(`pr+ loaded id=${ext.id} mv${ext.manifestVersion ?? 3} sw=${ext.hasServiceWorker ? 'yes' : 'no'}`);
+console.log(`browser profile ${path.relative(root, profileDir)}`);
+console.log(`browser open ${url || 'about:blank'}`);
+console.log(`browser popup ${popupUrl}`);
+console.log('');
+console.log('Manual check:');
+console.log('  1. Open the popup (toolbar, or the chrome-extension:// URL above).');
+console.log('  2. Save a GitHub PAT if this profile is new.');
+console.log('  3. Connected sites → Linear (accept the permission prompt).');
+console.log('  4. Reload the Linear issue and click a linked GitHub PR.');
+console.log('Close the window, Ctrl+C, or `npm run browser:close` when done.');
+
+function finish() {
+  writeFileSync(pidFile, '', 'utf8');
+  if (existsSync(pidFile)) {
+    try {
+      unlinkSync(pidFile);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+await new Promise((resolve) => {
+  let done = false;
+  const stop = () => {
+    if (done) return;
+    done = true;
+    process.off('SIGINT', stop);
+    process.off('SIGTERM', stop);
+    resolve();
+  };
+  session.context.on('close', stop);
+  process.on('SIGINT', stop);
+  process.on('SIGTERM', stop);
+});
+
+await session.close().catch(() => undefined);
+finish();
+console.log('browser closed (pikabo)');

@@ -175,6 +175,10 @@ export function createPersistedDetailCache(options: any = {}) {
     }
   }
 
+  function clearMemory() {
+    memory.clear();
+  }
+
   async function clear() {
     memory.clear();
     if (idb) {
@@ -194,6 +198,7 @@ export function createPersistedDetailCache(options: any = {}) {
     peekAsync,
     set,
     invalidate,
+    clearMemory,
     clear,
     size: memory.size,
     /** @internal */

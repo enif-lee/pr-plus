@@ -4,6 +4,7 @@ import {
   filterSelectOptions,
   labelColorCss,
   pickFilteredOptionByIndex,
+  placeSearchableSelectPanel,
   queryMatchesOption,
   resolveOptDigitPickIndex,
 } from '@lib/searchable-select';
@@ -78,6 +79,20 @@ export function SearchableSelect({
   const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
 
+  function readLivePos(panelHeight = 0) {
+    if (typeof window === 'undefined') return null;
+    const el = (anchorRef?.current || null) as HTMLElement | null;
+    if (!el || typeof el.getBoundingClientRect !== 'function') return null;
+    return placeSearchableSelectPanel({
+      anchor: el.getBoundingClientRect(),
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+      panelHeight,
+      placement,
+      minWidth,
+      maxWidth,
+    });
+  }
+
   // Reset multi selection when opening
   useEffect(() => {
     if (!open) return;
@@ -98,66 +113,32 @@ export function SearchableSelect({
     }
 
     function measure() {
-      const el = (anchorRef?.current || null) as HTMLElement | null;
-      if (!el || typeof el.getBoundingClientRect !== 'function') return;
-      const r = el.getBoundingClientRect();
-      if (!r.width && !r.height && r.top === 0 && r.left === 0) return;
-
-      const gap = 6;
-      const edge = 8;
-      const minW = Number.isFinite(Number(minWidth)) ? Math.max(160, Number(minWidth)) : 220;
-      const maxW = Number.isFinite(Number(maxWidth))
-        ? Math.max(minW, Number(maxWidth))
-        : 320;
-      const width = Math.max(minW, Math.min(maxW, Math.max(r.width, minW)));
-      const left = Math.min(Math.max(edge, r.left), window.innerWidth - width - edge);
-      const h = panelRef.current?.offsetHeight || 0;
-      const preferBottom = placement !== 'top';
-
-      // Preferred side first; flip only when the preferred side cannot fit the panel.
-      let top = preferBottom ? r.bottom + gap : Math.max(edge, r.top - gap);
-      if (h > 0) {
-        const belowTop = r.bottom + gap;
-        const aboveTop = r.top - h - gap;
-        const fitsBelow = belowTop + h <= window.innerHeight - edge;
-        const fitsAbove = aboveTop >= edge;
-
-        if (preferBottom) {
-          if (fitsBelow) {
-            top = belowTop;
-          } else if (fitsAbove) {
-            top = aboveTop;
-          } else {
-            // Neither fits fully — pick the side with more free space
-            const spaceBelow = window.innerHeight - r.bottom - edge;
-            const spaceAbove = r.top - edge;
-            top = spaceAbove > spaceBelow ? Math.max(edge, aboveTop) : belowTop;
-          }
-        } else {
-          // placement === 'top'
-          if (fitsAbove) {
-            top = aboveTop;
-          } else if (fitsBelow) {
-            top = belowTop;
-          } else {
-            const spaceBelow = window.innerHeight - r.bottom - edge;
-            const spaceAbove = r.top - edge;
-            top = spaceBelow > spaceAbove ? belowTop : Math.max(edge, aboveTop);
-          }
+      const next = readLivePos(panelRef.current?.offsetHeight || 0);
+      if (!next) return;
+      setPos((prev) => {
+        if (
+          prev &&
+          prev.top === next.top &&
+          prev.left === next.left &&
+          prev.width === next.width
+        ) {
+          return prev;
         }
-      }
-      setPos({ top: Math.max(edge, top), left, width });
+        return next;
+      });
     }
 
     measure();
-    const id = requestAnimationFrame(() => {
-      measure();
-      requestAnimationFrame(measure);
-    });
+    const panel = panelRef.current;
+    const ro =
+      typeof ResizeObserver !== 'undefined' && panel
+        ? new ResizeObserver(() => measure())
+        : null;
+    if (ro && panel) ro.observe(panel);
     window.addEventListener('resize', measure);
     window.addEventListener('scroll', measure, true);
     return () => {
-      cancelAnimationFrame(id);
+      ro?.disconnect();
       window.removeEventListener('resize', measure);
       window.removeEventListener('scroll', measure, true);
     };
@@ -393,30 +374,45 @@ export function SearchableSelect({
 
   // Portal layer above Conversation ShortcutHint (--prp-z-dialog 100100).
   const panelZ = 'var(--prp-z-portal, 120000)';
-  const style: React.CSSProperties = pos
+  const anchored = Boolean(anchorRef);
+  // First open render often paints before useLayoutEffect. Reading the trigger
+  // here keeps left/width correct so `position:fixed` never lands at x=0.
+  const displayPos = pos || (open && anchored ? readLivePos(0) : null);
+  const style: React.CSSProperties = displayPos
     ? {
         position: 'fixed',
-        top: pos.top,
-        left: pos.left,
-        width: pos.width,
-        minWidth: pos.width,
-        maxWidth: pos.width,
+        top: displayPos.top,
+        left: displayPos.left,
+        width: displayPos.width,
+        minWidth: displayPos.width,
+        maxWidth: displayPos.width,
         zIndex: panelZ,
       }
-    : { zIndex: panelZ };
+    : anchored
+      ? {
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          visibility: 'hidden',
+          pointerEvents: 'none',
+          animation: 'none',
+          zIndex: panelZ,
+        }
+      : { zIndex: panelZ };
 
   const panel = (
     <div
       ref={panelRef}
-      className={`prp-sselect-panel prp-sselect-panel--popover${pos ? '' : ' prp-sselect-panel--center'}${
-        multi ? ' prp-sselect-panel--multi' : ''
-      }`}
+      className={`prp-sselect-panel prp-sselect-panel--popover${
+        !displayPos && !anchored ? ' prp-sselect-panel--center' : ''
+      }${multi ? ' prp-sselect-panel--multi' : ''}`}
       role="dialog"
       aria-label={title || 'Select'}
       aria-multiselectable={multi || undefined}
       data-prp-nested-layer="1"
       data-prp-sselect="1"
-      style={pos ? style : undefined}
+      style={style}
+      data-prp-sselect-ready={displayPos ? '1' : '0'}
     >
       {title ? <div className="prp-sselect-title">{title}</div> : null}
       {/* Search first so commit/file pickers open with filter ready */}

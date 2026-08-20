@@ -230,7 +230,8 @@ Open a PR title from the list → **centered modal** or **side sheet** on the **
 | `Esc` | Nested UI → blur editable → close shell (hierarchy) |
 
 Full browser QA checklist: **[docs/qa-browser-scenario.md](./docs/qa-browser-scenario.md)**.  
-Deep matrix of GitHub PR-view vs modal: **[docs/github-pr-parity.md](./docs/github-pr-parity.md)**.
+Deep matrix of GitHub PR-view vs modal: **[docs/github-pr-parity.md](./docs/github-pr-parity.md)**.  
+Embed pr+ on your own site (`window.PRPlus`): **[docs/prplus-integration.md](./docs/prplus-integration.md)**.
 
 ---
 
@@ -335,12 +336,14 @@ npm run package            # versioned zip under dist/
 npm test                   # build + rstest unit suite
 npm run test:unit          # rstest only (no rebuild)
 npm run check              # typecheck + lint + unit
+npm run browser            # headed pikabo Chromium with this unpacked extension
+npm run test:pikabo        # pikabo smoke (SW / popup / github.com inject)
 npm run test:e2e           # local agent-browser e2e (features + key-hold perf) — not in CI
 npm run test:e2e:features  # feature / style / layout scenario
 npm run test:e2e:perf      # key-hold scroll + selection budgets
 ```
 
-Local e2e needs a logged-in browser profile (`npm run browser:login` once) and a built workspace. See **[tests/e2e/README.md](./tests/e2e/README.md)**.
+Headed manual load is **pikabo** (`npm run browser`) — branded Chrome 137+ will not `--load-extension`. Local e2e still uses agent-browser and a logged-in profile; see **[tests/e2e/README.md](./tests/e2e/README.md)**.
 
 ### Architecture notes (1.7)
 

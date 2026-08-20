@@ -5,9 +5,12 @@ node_modules/
 /dist/
 /dist/**
 
-# Local agent-browser profile, screenshots, session junk
+# Local agent-browser / pikabo profiles, screenshots, session junk
 .browser/
 screenshots/
+pikabo-results/
+tests/pikabo/last-session.yaml
+tests/pikabo/recorded.yaml
 
 # OS / editor
 .DS_Store
@@ -65,6 +68,10 @@ src/content.js
 src/onboarding.js
 src/popup.js
 src/storage.js
+src/page-api/*.js
+src/partner/partner.js
+src/partner/mark-runtime.js
+src/shell/shell.js
 
 # other classic scripts compiled / assembled from TS SoT
 src/content-bridge.js

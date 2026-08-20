@@ -6,6 +6,7 @@ import {
   CONTENT_SCRIPT_JS,
 } from '../content-scripts-list';
 import { MSG } from '../sw-messages';
+import { syncPartnerContentScripts } from './sw-connected-sites';
 
 export { CONTENT_SCRIPT_CSS, CONTENT_SCRIPT_JS };
 export { MSG };
@@ -14,12 +15,40 @@ export type { SwMessage, SwMessageType } from '../sw-messages';
 export const ENTERPRISE_CS_ID = 'prp-enterprise-hosts';
 
 /**
- * Stateless API context from RPC message (webHost from content page).
- * No process-global mutation — pass returned ctx into every PRTreeFetch call.
- * @param {object|null|undefined} message
+ * Resolve the GitHub web host for PAT + API base.
+ * Linear/Jira/localhost fall back to extension-owned activeGithubWebHost.
+ */
+export async function resolveGithubWebHostFromStorage(message: any) {
+  const [registered, active] = await Promise.all([
+    registeredEnterpriseHosts().catch((): any[] => []),
+    typeof PRTreeStorage?.getActiveGithubWebHost === 'function'
+      ? PRTreeStorage.getActiveGithubWebHost()
+      : Promise.resolve('github.com'),
+  ]);
+  if (typeof PRGithubEndpoints?.resolveGithubWebHost === 'function') {
+    return PRGithubEndpoints.resolveGithubWebHost(message, {
+      registeredHosts: registered,
+      activeGithubWebHost: active,
+    });
+  }
+  return 'github.com';
+}
+
+export async function bindGithubWebHost(message: any) {
+  const host = await resolveGithubWebHostFromStorage(message);
+  if (message && typeof message === 'object') {
+    message.githubWebHost = host;
+  }
+  return host;
+}
+
+/**
+ * Stateless API context from RPC message.
+ * Prefers already-resolved githubWebHost (see bindGithubWebHost).
  */
 export function apiCtxFromMessage(message: any) {
-  const webHost = message?.webHost || message?.webOrigin || 'github.com';
+  const webHost =
+    message?.githubWebHost || message?.webHost || message?.webOrigin || 'github.com';
   if (typeof PRGithubEndpoints?.resolveGithubEndpoints === 'function') {
     return PRGithubEndpoints.resolveGithubEndpoints({ webHost });
   }
@@ -36,11 +65,31 @@ export function apiCtxFromMessage(message: any) {
 }
 
 /**
- * PAT for this message's web host.
+ * PAT for this message's resolved GitHub web host.
  * github.com → default token; registered enterprise → host pair; else null.
  */
 export async function tokenForMessage(message: any) {
-  const webHost = message?.webHost || message?.webOrigin || 'github.com';
+  const [registered, active, defaultToken, hostAccounts] = await Promise.all([
+    registeredEnterpriseHosts().catch((): any[] => []),
+    typeof PRTreeStorage?.getActiveGithubWebHost === 'function'
+      ? PRTreeStorage.getActiveGithubWebHost()
+      : Promise.resolve('github.com'),
+    PRTreeStorage.getGithubToken(),
+    PRTreeStorage.getHostAccounts(),
+  ]);
+  if (typeof PRGithubEndpoints?.selectTokenForMessage === 'function') {
+    const sel = PRGithubEndpoints.selectTokenForMessage(message, {
+      registeredHosts: registered,
+      activeGithubWebHost: active,
+      defaultToken,
+      hostAccounts,
+    });
+    if (message && typeof message === 'object') {
+      message.githubWebHost = sel.host;
+    }
+    return sel.token;
+  }
+  const webHost = await resolveGithubWebHostFromStorage(message);
   const sel = await PRTreeStorage.getTokenForWebHost(webHost);
   return sel.token;
 }
@@ -179,6 +228,11 @@ export async function rehydrateEnterpriseScripts() {
     await syncEnterpriseContentScripts(hosts);
   } catch (err) {
     console.warn('[pr+] enterprise content scripts', err?.message || err);
+  }
+  try {
+    await syncPartnerContentScripts();
+  } catch (err: any) {
+    console.warn('[pr+] partner content scripts', err?.message || err);
   }
 }
 

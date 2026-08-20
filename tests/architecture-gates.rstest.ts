@@ -44,8 +44,10 @@ describe('architecture gates', () => {
     expect(fs.existsSync(path.join(root, 'tests/e2e/features'))).toBe(true);
     expect(pkg.scripts['build:content-ts']).toMatch(/build-content-ts/);
     expect(pkg.scripts['build:pure']).toMatch(/build-pure/);
+    expect(pkg.scripts['build:page-api']).toMatch(/build-page-api/);
     expect(pkg.scripts.build).toMatch(/build:content-ts/);
     expect(pkg.scripts.build).toMatch(/build:pure/);
+    expect(pkg.scripts.build).toMatch(/build:page-api/);
   });
 
   test('service worker + content-script entries are TypeScript SoT', () => {

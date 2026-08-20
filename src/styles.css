@@ -329,6 +329,10 @@
   visibility: hidden !important;
 }
 
+html[data-prp-runtime="partner"] #prp-modal-host {
+  z-index: 2147483000;
+}
+
 /*
  * In-page PR embed host: full window size, covers GitHub global header.
  * Must mount on document.body (host JS) — fixed inside .application-main is
@@ -515,6 +519,19 @@ html.prp-embed-active #footer {
 /* Hide native toggle while pr+ embed covers the page */
 html.prp-embed-active .prp-gh-open-toggle {
   display: none !important;
+}
+
+/* Linear review Overview | Diff | pr+ row */
+.prp-linear-open-toggle {
+  height: 28px;
+  min-height: 28px;
+  padding: 0 10px;
+  margin-left: 6px !important;
+  font-size: 13px;
+  line-height: 18px;
+  border-radius: 5px;
+  align-self: center;
+  flex: 0 0 auto;
 }
 
 /* Option-held hotkey badges on PR list titles (⌥1–9 + a–z except j/k/n) and New PR (⌥N) */
