@@ -8,7 +8,7 @@ import React, {
   useCallback,
 } from 'react';
 // memo for render isolation
-import { parseSuggestionFences } from '@lib/pr-edit-api';
+import { parseSuggestionFences, splitSuggestionSegments } from '@lib/pr-edit-api';
 import {
   splitMarkdownSegments,
   expandEmojiShortcodes,
@@ -208,17 +208,11 @@ function MarkdownViewImpl({
         out.push(seg);
         continue;
       }
-      const text = seg.content || '';
-      const re = /```suggestion[^\n]*\r?\n([\s\S]*?)```/gi;
-      let last = 0;
-      let m;
-      while ((m = re.exec(text)) !== null) {
-        if (m.index > last) out.push({ type: 'md', content: text.slice(last, m.index) });
-        out.push({ type: 'suggestion', content: m[1].replace(/\n$/, '') });
-        last = m.index + m[0].length;
-      }
-      if (last < text.length) out.push({ type: 'md', content: text.slice(last) });
-      if (!last && !out.length) out.push(seg);
+      const parts =
+        typeof splitSuggestionSegments === 'function'
+          ? splitSuggestionSegments(seg.content || '')
+          : [{ type: 'md', content: seg.content || '' }];
+      out.push(...parts);
     }
     return out.length ? out : [{ type: 'md', content: raw }];
   }, [raw]);

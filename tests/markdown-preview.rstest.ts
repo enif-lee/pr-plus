@@ -309,6 +309,7 @@ describe('overlay / show-diff / i18n wiring (shipped sources)', () => {
       'utf8'
     );
     expect(mdView).toMatch(/rewriteMarkdownMediaHtml/);
+    expect(mdView).toMatch(/splitSuggestionSegments/);
   });
 
   test('preview / show-diff / close keys exist in en + ko + ja + zh_CN', () => {

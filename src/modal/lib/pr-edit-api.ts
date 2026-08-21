@@ -266,16 +266,56 @@ export function buildRerequestReviewerLogins(detail: any) {
 }
 
 /**
+ * GitHub suggestion fences must start a line (optional 0–3 space indent).
+ * Mid-line table/docs examples like ````suggestion` must not match.
+ */
+const SUGGESTION_FENCE_RE =
+  /(^|\n)([ \t]{0,3}```suggestion[^\n]*\r?\n)([\s\S]*?)(\r?\n[ \t]{0,3}```)/gi;
+
+/**
+ * Split markdown into md / suggestion segments. Opening fence is line-start only.
+ */
+export function splitSuggestionSegments(source: any): Array<{
+  type: 'md' | 'suggestion';
+  content: string;
+}> {
+  const text = source == null ? '' : String(source);
+  if (!text) return [{ type: 'md', content: '' }];
+  const out: Array<{ type: 'md' | 'suggestion'; content: string }> = [];
+  const re = new RegExp(SUGGESTION_FENCE_RE.source, 'gi');
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const prefix = m[1] || '';
+    const fenceStart = m.index + prefix.length;
+    if (fenceStart > last) {
+      out.push({ type: 'md', content: text.slice(last, fenceStart) });
+    }
+    out.push({
+      type: 'suggestion',
+      content: String(m[3] || '').replace(/\r?\n$/, ''),
+    });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push({ type: 'md', content: text.slice(last) });
+  if (!out.length) out.push({ type: 'md', content: text });
+  return out;
+}
+
+/**
  * Parse GitHub ```suggestion fences from a comment body.
  * @returns {Array<{ content: string, raw: string }>}
  */
 export function parseSuggestionFences(body: any) {
   const text = body == null ? '' : String(body);
   const out = [];
-  const re = /```suggestion[^\n]*\r?\n([\s\S]*?)```/gi;
-  let m;
+  const re = new RegExp(SUGGESTION_FENCE_RE.source, 'gi');
+  let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
-    out.push({ content: m[1].replace(/\n$/, ''), raw: m[0] });
+    out.push({
+      content: String(m[3] || '').replace(/\r?\n$/, ''),
+      raw: `${m[2] || ''}${m[3] || ''}${m[4] || ''}`,
+    });
   }
   return out;
 }
