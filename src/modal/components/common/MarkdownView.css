@@ -170,9 +170,43 @@
 .prp-md p > img:only-child {
   display: block;
   margin: 0.5em 0;
-  /* keep start edge; do not center */
+  /* keep start edge unless the paragraph asks for center/right */
   margin-inline: 0;
   max-width: 100%;
+}
+
+/* GitHub README `align="center|left|right"` (and stamped class fallback) */
+.prp-md [align='center'],
+.prp-md [align='middle'],
+.prp-md .prp-md-align-center {
+  text-align: center;
+}
+.prp-md [align='right'],
+.prp-md .prp-md-align-right {
+  text-align: right;
+}
+.prp-md [align='left'],
+.prp-md .prp-md-align-left {
+  text-align: left;
+}
+
+.prp-md p[align='center']:has(> img),
+.prp-md p.prp-md-align-center:has(> img) {
+  justify-content: center;
+}
+.prp-md p[align='right']:has(> img),
+.prp-md p.prp-md-align-right:has(> img) {
+  justify-content: flex-end;
+}
+
+.prp-md p[align='center'] > img:only-child,
+.prp-md p.prp-md-align-center > img:only-child {
+  margin-inline: auto;
+}
+.prp-md p[align='right'] > img:only-child,
+.prp-md p.prp-md-align-right > img:only-child {
+  margin-inline-start: auto;
+  margin-inline-end: 0;
 }
 
 .prp-md .prp-md-video {

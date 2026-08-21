@@ -1,9 +1,5 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
-import { IconX } from './icons';
-import { resolveMermaidColorMode } from '../../lib/mermaid-lazy';
-import { useModalStore } from '../../store/modal-store';
-import { registerEscapeOverlay } from '../../lib/escape-layer';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { FullscreenViewer } from './FullscreenViewer';
 import {
   applyViewerKeyGesture,
   applyViewerWheelEvent,
@@ -25,12 +21,6 @@ type Props = {
   title?: string;
   onClose: () => void;
 };
-
-function resolvePortalHost(): HTMLElement | null {
-  if (typeof document === 'undefined') return null;
-  const overlay = document.querySelector('.prp-overlay') as HTMLElement | null;
-  return overlay || document.body;
-}
 
 /**
  * Fullscreen overlay for markdown / diff images (MermaidViewer-style, portaled).
@@ -58,8 +48,6 @@ export function ImageViewer({
   const pinchRef = useRef<{ dist: number; mid: MermaidPoint } | null>(null);
   const wheelIdleTimerRef = useRef(0);
   const [panning, setPanning] = useState(false);
-  const colorMode = resolveMermaidColorMode();
-  const portalHost = useMemo(() => resolvePortalHost(), []);
 
   const paintTransform = useCallback((next: MermaidViewTransform) => {
     xfRef.current = next;
@@ -80,12 +68,6 @@ export function ImageViewer({
   useLayoutEffect(() => {
     paintTransform(xfRef.current);
   });
-
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
-  useEffect(() => {
-    return registerEscapeOverlay(() => onCloseRef.current());
-  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -119,20 +101,7 @@ export function ImageViewer({
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [onClose, commitTransform]);
-
-  useEffect(() => {
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    try {
-      useModalStore.getState().setOptHintsActive(false);
-    } catch {
-      /* ignore */
-    }
-    return () => {
-      document.body.style.overflow = prev;
-    };
-  }, []);
+  }, [commitTransform]);
 
   const fitToStage = useCallback(() => {
     const stage = stageRef.current;
@@ -375,87 +344,52 @@ export function ImageViewer({
     }
   }, []);
 
-  if (!portalHost || !src) return null;
+  if (!src) return null;
 
-  const node = (
-    <div
-      className="prp-image-viewer"
-      role="dialog"
-      aria-modal="true"
-      aria-label={title}
-      data-color-mode={colorMode}
-      data-prp-image-viewer="1"
-      onClick={(e) => e.stopPropagation()}
-      onMouseDown={(e) => e.stopPropagation()}
+  return (
+    <FullscreenViewer
+      layer="image"
+      title={title}
+      hint="Scroll pan · ⌥± / ⌥+scroll zoom · arrows pan · drag · Esc"
+      onClose={onClose}
+      closeLabel="Close image viewer"
+      closeTitle="Close"
+      stageRef={stageRef}
+      panning={panning}
+      stageProps={{
+        onPointerDown,
+        onPointerMove,
+        onPointerUp: endPointer,
+        onPointerCancel: endPointer,
+      }}
+      actions={
+        <button
+          type="button"
+          className="prp-btn prp-btn--sm"
+          onClick={fitToStage}
+          title="Fit image to view"
+        >
+          Reset
+        </button>
+      }
     >
       <div
-        className="prp-image-viewer__backdrop"
-        onClick={(e) => {
-          e.stopPropagation();
-          onClose();
-        }}
-        aria-hidden="true"
-      />
-      <div className="prp-image-viewer__chrome">
-        <div className="prp-image-viewer__bar">
-          <span className="prp-image-viewer__title">{title}</span>
-          <span className="prp-image-viewer__hint prp-muted">
-            Scroll pan · ⌥± / ⌥+scroll zoom · arrows pan · drag · Esc
-          </span>
-          <div className="prp-image-viewer__actions">
-            <button
-              type="button"
-              className="prp-btn prp-btn--sm"
-              onClick={fitToStage}
-              title="Fit image to view"
-            >
-              Reset
-            </button>
-            <button
-              type="button"
-              className="prp-icon-btn prp-image-viewer__close"
-              onClick={(e) => {
-                e.stopPropagation();
-                onClose();
-              }}
-              aria-label="Close image viewer"
-              title="Close"
-            >
-              <IconX size={16} />
-            </button>
-          </div>
-        </div>
-        <div
-          ref={stageRef}
-          className={`prp-image-viewer__stage${
-            panning ? ' prp-image-viewer__stage--panning' : ''
-          }`}
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={endPointer}
-          onPointerCancel={endPointer}
-        >
-          <div
-            ref={canvasRef}
-            className="prp-image-viewer__canvas"
-            style={{ transform: mermaidTransformStyle(xf) }}
-          >
-            <img
-              ref={imgRef}
-              className="prp-image-viewer__img"
-              src={src}
-              alt={alt || title}
-              draggable={false}
-              onLoad={fitToStage}
-              referrerPolicy="no-referrer-when-downgrade"
-            />
-          </div>
-        </div>
+        ref={canvasRef}
+        className="prp-overlay-viewer__canvas"
+        style={{ transform: mermaidTransformStyle(xf) }}
+      >
+        <img
+          ref={imgRef}
+          className="prp-overlay-viewer__img"
+          src={src}
+          alt={alt || title}
+          draggable={false}
+          onLoad={fitToStage}
+          referrerPolicy="no-referrer-when-downgrade"
+        />
       </div>
-    </div>
+    </FullscreenViewer>
   );
-
-  return createPortal(node, portalHost);
 }
 
 export default ImageViewer;

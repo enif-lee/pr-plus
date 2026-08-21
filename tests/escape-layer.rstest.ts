@@ -191,13 +191,18 @@ describe('wiring: Diff settings + App gate use nested markers', () => {
 
   test('viewers register on the overlay Esc stack instead of each claiming Esc', () => {
     const root = path.resolve(__dirname, '..');
+    const shell = fs.readFileSync(
+      path.join(root, 'src/modal/components/common/FullscreenViewer.tsx'),
+      'utf8'
+    );
+    expect(shell).toMatch(/registerEscapeOverlay/);
     for (const rel of [
       'src/modal/components/common/MarkdownViewer.tsx',
       'src/modal/components/common/ImageViewer.tsx',
       'src/modal/components/common/MermaidViewer.tsx',
     ]) {
       const src = fs.readFileSync(path.join(root, rel), 'utf8');
-      expect(src).toMatch(/registerEscapeOverlay/);
+      expect(src).toMatch(/FullscreenViewer/);
     }
   });
 

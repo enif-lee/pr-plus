@@ -1,9 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
-import { IconX } from './icons';
-import { resolveMermaidColorMode } from '../../lib/mermaid-lazy';
-import { useModalStore } from '../../store/modal-store';
-import { registerEscapeOverlay } from '../../lib/escape-layer';
+import { FullscreenViewer } from './FullscreenViewer';
 import {
   applyViewerKeyGesture,
   applyViewerWheelEvent,
@@ -26,12 +22,6 @@ type Props = {
   onClose: () => void;
   title?: string;
 };
-
-function resolvePortalHost(): HTMLElement | null {
-  if (typeof document === 'undefined') return null;
-  const overlay = document.querySelector('.prp-overlay') as HTMLElement | null;
-  return overlay || document.body;
-}
 
 /**
  * Fullscreen overlay for a rendered Mermaid SVG (portaled into .prp-overlay).
@@ -59,8 +49,6 @@ export function MermaidViewer({ svg, onClose, title = 'Diagram' }: Props) {
   } | null>(null);
   const wheelIdleTimerRef = useRef(0);
   const [panning, setPanning] = useState(false);
-  const colorMode = resolveMermaidColorMode();
-  const portalHost = useMemo(() => resolvePortalHost(), []);
   const viewerSvg = useMemo(() => prepareMermaidSvgForViewer(svg), [svg]);
 
   const paintTransform = useCallback((next: MermaidViewTransform) => {
@@ -84,12 +72,6 @@ export function MermaidViewer({ svg, onClose, title = 'Diagram' }: Props) {
   useLayoutEffect(() => {
     paintTransform(xfRef.current);
   });
-
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
-  useEffect(() => {
-    return registerEscapeOverlay(() => onCloseRef.current());
-  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -125,21 +107,7 @@ export function MermaidViewer({ svg, onClose, title = 'Diagram' }: Props) {
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [onClose, commitTransform]);
-
-  useEffect(() => {
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    // Hide Opt-hold tips that were already painted under the veil
-    try {
-      useModalStore.getState().setOptHintsActive(false);
-    } catch {
-      /* ignore */
-    }
-    return () => {
-      document.body.style.overflow = prev;
-    };
-  }, []);
+  }, [commitTransform]);
 
   const fitToStage = useCallback(() => {
     const stage = stageRef.current;
@@ -444,77 +412,41 @@ export function MermaidViewer({ svg, onClose, title = 'Diagram' }: Props) {
     fitToStage();
   }, [fitToStage]);
 
-  const node = (
-    <div
-      className="prp-mermaid-viewer"
-      role="dialog"
-      aria-modal="true"
-      aria-label={title}
-      data-color-mode={colorMode}
-      data-prp-mermaid-viewer="1"
-      onClick={(e) => e.stopPropagation()}
-      onMouseDown={(e) => e.stopPropagation()}
+  return (
+    <FullscreenViewer
+      layer="mermaid"
+      title={title}
+      hint="Scroll pan · ⌥± / ⌥+scroll zoom · arrows pan · drag · Esc"
+      onClose={onClose}
+      closeLabel="Close diagram viewer"
+      closeTitle="Close"
+      stageRef={stageRef}
+      panning={panning}
+      stageProps={{
+        onPointerDown,
+        onPointerMove,
+        onPointerUp: endPointer,
+        onPointerCancel: endPointer,
+      }}
+      actions={
+        <button
+          type="button"
+          className="prp-btn prp-btn--sm"
+          onClick={resetView}
+          title="Fit diagram to view"
+        >
+          Reset
+        </button>
+      }
     >
       <div
-        className="prp-mermaid-viewer__backdrop"
-        onClick={(e) => {
-          e.stopPropagation();
-          onClose();
-        }}
-        aria-hidden="true"
+        ref={canvasRef}
+        className="prp-overlay-viewer__canvas"
+        style={{ transform: mermaidTransformStyle(xf) }}
+        dangerouslySetInnerHTML={{ __html: viewerSvg }}
       />
-      <div className="prp-mermaid-viewer__chrome">
-        <div className="prp-mermaid-viewer__bar">
-          <span className="prp-mermaid-viewer__title">{title}</span>
-          <span className="prp-mermaid-viewer__hint prp-muted">
-            Scroll pan · ⌥± / ⌥+scroll zoom · arrows pan · drag · Esc
-          </span>
-          <div className="prp-mermaid-viewer__actions">
-            <button
-              type="button"
-              className="prp-btn prp-btn--sm"
-              onClick={resetView}
-              title="Fit diagram to view"
-            >
-              Reset
-            </button>
-            <button
-              type="button"
-              className="prp-icon-btn prp-mermaid-viewer__close"
-              onClick={(e) => {
-                e.stopPropagation();
-                onClose();
-              }}
-              aria-label="Close diagram viewer"
-              title="Close"
-            >
-              <IconX size={16} />
-            </button>
-          </div>
-        </div>
-        <div
-          ref={stageRef}
-          className={`prp-mermaid-viewer__stage${
-            panning ? ' prp-mermaid-viewer__stage--panning' : ''
-          }`}
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={endPointer}
-          onPointerCancel={endPointer}
-        >
-          <div
-            ref={canvasRef}
-            className="prp-mermaid-viewer__canvas"
-            style={{ transform: mermaidTransformStyle(xf) }}
-            dangerouslySetInnerHTML={{ __html: viewerSvg }}
-          />
-        </div>
-      </div>
-    </div>
+    </FullscreenViewer>
   );
-
-  if (!portalHost) return null;
-  return createPortal(node, portalHost);
 }
 
 export default MermaidViewer;

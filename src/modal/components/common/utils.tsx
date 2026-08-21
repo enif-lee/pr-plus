@@ -508,12 +508,11 @@ export function renderMdHtml(raw: any, linkCtx: any) {
           ? md(source)
           : source;
     const html = typeof parsed === 'string' ? parsed : String(parsed);
-    // Keep hljs class names on pre/code (default purify already allows class;
-    // be explicit for extension builds that tighten ALLOWED_ATTR).
+    // Keep hljs class names; GitHub README uses presentational align= on p/h1.
     const clean = purify?.sanitize
       ? purify.sanitize(html, {
           ADD_TAGS: ['ins', 'del'],
-          ADD_ATTR: ['class', 'data-lang'],
+          ADD_ATTR: ['class', 'data-lang', 'align', 'width', 'height'],
         })
       : html;
     if (typeof enhanceMarkdownHtml === 'function') {

@@ -480,3 +480,21 @@ export function rewriteMarkdownMediaHtml(
     }
   );
 }
+
+/**
+ * Keep GitHub-style `align="center|left|right"` as a class so CSS can honor
+ * it even if presentational attributes are later stripped.
+ */
+export function stampMarkdownAlignAttrs(html: unknown): string {
+  return String(html || '').replace(
+    /<([a-zA-Z][\w:-]*)\b([^>]*?)\salign\s*=\s*(["']?)(center|left|right)\3([^>]*)>/gi,
+    (full, tag: string, pre: string, _q: string, align: string, post: string) => {
+      const cls = `prp-md-align-${align.toLowerCase()}`;
+      if (full.includes(cls)) return full;
+      if (/\sclass\s*=\s*(["'])/i.test(`${pre}${post}`)) {
+        return full.replace(/\sclass\s*=\s*(["'])/i, ` class=$1${cls} `);
+      }
+      return `<${tag}${pre} class="${cls}" align="${align}"${post}>`;
+    }
+  );
+}

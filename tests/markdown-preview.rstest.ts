@@ -17,6 +17,7 @@ import {
   resolveMarkdownMediaUrl,
   resolveMarkdownSides,
   rewriteMarkdownMediaHtml,
+  stampMarkdownAlignAttrs,
 } from '../src/modal/lib/markdown-preview';
 import { formatMessage } from '../src/modal/lib/i18n';
 import { SUPPORTED_LOCALES } from '../src/modal/lib/locale-resolve';
@@ -264,6 +265,14 @@ describe('relative markdown images → repo raw URLs', () => {
     ).toBe('https://github.com/enif-lee/pr-plus/raw/abc123/assets/logo.jpeg');
   });
 
+  test('stampMarkdownAlignAttrs keeps GitHub align as a class', () => {
+    const html =
+      '<p align="center"><img src="assets/logo.jpeg" alt="logo" /></p>';
+    const out = stampMarkdownAlignAttrs(html);
+    expect(out).toContain('prp-md-align-center');
+    expect(out).toContain('align="center"');
+  });
+
   test('rewriteMarkdownMediaHtml patches img src, leaves badges', () => {
     const html = [
       '<img src="assets/logo.jpeg" alt="pr+ logo" />',
@@ -293,12 +302,18 @@ describe('overlay / show-diff / i18n wiring (shipped sources)', () => {
       path.join(root, 'src/modal/views/diff/VirtualDiff.tsx'),
       'utf8'
     );
-    expect(viewer).toMatch(/data-prp-md-viewer/);
-    expect(viewer).toMatch(/registerEscapeOverlay/);
+    expect(viewer).toMatch(/FullscreenViewer/);
+    expect(viewer).toMatch(/layer="markdown"/);
     expect(viewer).toMatch(/md_preview_show_diff/);
     expect(viewer).toMatch(/buildMarkdownPreviewSource/);
     expect(viewer).toMatch(/linkCtx=\{linkCtx\}/);
     expect(viewer).toMatch(/useT\(/);
+    const shell = fs.readFileSync(
+      path.join(root, 'src/modal/components/common/FullscreenViewer.tsx'),
+      'utf8'
+    );
+    expect(shell).toMatch(/data-prp-md-viewer/);
+    expect(shell).toMatch(/registerEscapeOverlay/);
     expect(rows).toMatch(/isMarkdownPath/);
     expect(rows).toMatch(/onPreviewMarkdown/);
     expect(rows).toMatch(/t\('md_preview'\)/);
@@ -309,7 +324,14 @@ describe('overlay / show-diff / i18n wiring (shipped sources)', () => {
       'utf8'
     );
     expect(mdView).toMatch(/rewriteMarkdownMediaHtml/);
+    expect(mdView).toMatch(/stampMarkdownAlignAttrs/);
     expect(mdView).toMatch(/splitSuggestionSegments/);
+    const css = fs.readFileSync(
+      path.join(root, 'src/modal/components/common/MarkdownView.css'),
+      'utf8'
+    );
+    expect(css).toMatch(/prp-md-align-center/);
+    expect(css).toMatch(/\[align=['"]center['"]\]/);
   });
 
   test('preview / show-diff / close keys exist in en + ko + ja + zh_CN', () => {

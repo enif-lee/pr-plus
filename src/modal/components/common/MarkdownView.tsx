@@ -19,7 +19,10 @@ import { MermaidBlock } from './MermaidBlock';
 import { SuggestionBlock } from './SuggestionBlock';
 import { ImageViewer } from './ImageViewer';
 import { clearHighlightCodeCache, renderMdHtml } from './utils';
-import { rewriteMarkdownMediaHtml } from '../../lib/markdown-preview';
+import {
+  rewriteMarkdownMediaHtml,
+  stampMarkdownAlignAttrs,
+} from '../../lib/markdown-preview';
 import './MarkdownView.css';
 
 type CachedVideo = {
@@ -251,6 +254,9 @@ function MarkdownViewImpl({
         let html = renderMdHtml(mdSource, linkCtx);
         if (typeof rewriteMarkdownMediaHtml === 'function') {
           html = rewriteMarkdownMediaHtml(html, linkCtx);
+        }
+        if (typeof stampMarkdownAlignAttrs === 'function') {
+          html = stampMarkdownAlignAttrs(html);
         }
         if (q && typeof markSearchInHtml === 'function') {
           html = markSearchInHtml(html, q, {
