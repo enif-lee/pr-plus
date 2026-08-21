@@ -19,6 +19,7 @@ import { MermaidBlock } from './MermaidBlock';
 import { SuggestionBlock } from './SuggestionBlock';
 import { ImageViewer } from './ImageViewer';
 import { clearHighlightCodeCache, renderMdHtml } from './utils';
+import { rewriteMarkdownMediaHtml } from '../../lib/markdown-preview';
 import './MarkdownView.css';
 
 type CachedVideo = {
@@ -254,6 +255,9 @@ function MarkdownViewImpl({
             ? expandEmojiShortcodes(seg.content || '')
             : seg.content || '';
         let html = renderMdHtml(mdSource, linkCtx);
+        if (typeof rewriteMarkdownMediaHtml === 'function') {
+          html = rewriteMarkdownMediaHtml(html, linkCtx);
+        }
         if (q && typeof markSearchInHtml === 'function') {
           html = markSearchInHtml(html, q, {
             currentStart: searchCurrentStart,

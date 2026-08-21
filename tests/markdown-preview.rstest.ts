@@ -14,7 +14,9 @@ import {
   wordDiff,
   coalesceAdjacentChangeGroups,
   markdownPreviewLoadPlan,
+  resolveMarkdownMediaUrl,
   resolveMarkdownSides,
+  rewriteMarkdownMediaHtml,
 } from '../src/modal/lib/markdown-preview';
 import { formatMessage } from '../src/modal/lib/i18n';
 import { SUPPORTED_LOCALES } from '../src/modal/lib/locale-resolve';
@@ -228,6 +230,55 @@ describe('buildMarkdownPreviewSource (shipped transform)', () => {
   });
 });
 
+describe('relative markdown images → repo raw URLs', () => {
+  const ctx = {
+    owner: 'enif-lee',
+    repo: 'pr-plus',
+    ref: 'abc123',
+    filePath: 'README.md',
+    webOrigin: 'https://github.com',
+  };
+
+  test('repo-relative img src resolves; shields/absolute URLs stay', () => {
+    expect(resolveMarkdownMediaUrl('assets/logo.jpeg', ctx)).toBe(
+      'https://github.com/enif-lee/pr-plus/raw/abc123/assets/logo.jpeg'
+    );
+    expect(resolveMarkdownMediaUrl('./screenshots/a.png', ctx)).toBe(
+      'https://github.com/enif-lee/pr-plus/raw/abc123/screenshots/a.png'
+    );
+    expect(
+      resolveMarkdownMediaUrl(
+        'https://img.shields.io/badge/manifest-v3-blue',
+        ctx
+      )
+    ).toBe('');
+    expect(resolveMarkdownMediaUrl('data:image/png;base64,xx', ctx)).toBe('');
+  });
+
+  test('nested markdown file resolves ../ relative to its directory', () => {
+    expect(
+      resolveMarkdownMediaUrl('../assets/logo.jpeg', {
+        ...ctx,
+        filePath: 'docs/guide.md',
+      })
+    ).toBe('https://github.com/enif-lee/pr-plus/raw/abc123/assets/logo.jpeg');
+  });
+
+  test('rewriteMarkdownMediaHtml patches img src, leaves badges', () => {
+    const html = [
+      '<img src="assets/logo.jpeg" alt="pr+ logo" />',
+      '<img src="https://img.shields.io/badge/manifest-v3-blue" alt="manifest" />',
+    ].join('');
+    const out = rewriteMarkdownMediaHtml(html, ctx);
+    expect(out).toContain(
+      'src="https://github.com/enif-lee/pr-plus/raw/abc123/assets/logo.jpeg"'
+    );
+    expect(out).toContain(
+      'src="https://img.shields.io/badge/manifest-v3-blue"'
+    );
+  });
+});
+
 describe('overlay / show-diff / i18n wiring (shipped sources)', () => {
   test('Diff file header and MarkdownViewer overlay exist with show-diff control', () => {
     const viewer = fs.readFileSync(
@@ -246,12 +297,18 @@ describe('overlay / show-diff / i18n wiring (shipped sources)', () => {
     expect(viewer).toMatch(/claimNestedEscape/);
     expect(viewer).toMatch(/md_preview_show_diff/);
     expect(viewer).toMatch(/buildMarkdownPreviewSource/);
+    expect(viewer).toMatch(/linkCtx=\{linkCtx\}/);
     expect(viewer).toMatch(/useT\(/);
     expect(rows).toMatch(/isMarkdownPath/);
     expect(rows).toMatch(/onPreviewMarkdown/);
     expect(rows).toMatch(/t\('md_preview'\)/);
     expect(diff).toMatch(/MarkdownViewer/);
     expect(diff).toMatch(/onPreviewMarkdown/);
+    const mdView = fs.readFileSync(
+      path.join(root, 'src/modal/components/common/MarkdownView.tsx'),
+      'utf8'
+    );
+    expect(mdView).toMatch(/rewriteMarkdownMediaHtml/);
   });
 
   test('preview / show-diff / close keys exist in en + ko + ja + zh_CN', () => {

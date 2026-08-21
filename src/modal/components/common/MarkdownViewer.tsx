@@ -208,6 +208,26 @@ export function MarkdownViewer({ path, status = 'modified', onClose }: Props) {
   }, [oldText, newText, showDiff, status, tooLarge]);
 
   const allAdded = showDiff && !oldText && Boolean(newText);
+  const statusLower = String(status || '').toLowerCase();
+  const deleted =
+    statusLower === 'removed' ||
+    statusLower === 'deleted' ||
+    statusLower === 'del';
+  const mediaRef = deleted
+    ? String(detail?.baseSha || detail?.baseRef || '')
+    : String(detail?.headSha || detail?.headRef || '');
+  const linkCtx = {
+    owner: detail?.owner,
+    repo: detail?.repo,
+    number: detail?.number,
+    htmlUrl: detail?.htmlUrl || detail?.html_url || null,
+    filePath: path,
+    ref: mediaRef,
+    webOrigin:
+      typeof location !== 'undefined' && location.origin
+        ? location.origin
+        : 'https://github.com',
+  };
 
   const onToggleDiff = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setShowDiff(e.target.checked);
@@ -285,6 +305,7 @@ export function MarkdownViewer({ path, status = 'modified', onClose }: Props) {
               <MarkdownView
                 source={source}
                 className={allAdded ? 'prp-md--diff-all-ins' : ''}
+                linkCtx={linkCtx}
               />
             </div>
           </div>

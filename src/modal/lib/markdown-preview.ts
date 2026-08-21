@@ -3,6 +3,7 @@
  * Diff overlay helpers for markdown files: path detect, old/new sides,
  * word-level ins/del, and show-diff off/on render input.
  */
+import { buildGithubRawUrl } from './diff-rows';
 
 /** Common markdown extensions (GitHub previewable). */
 const MARKDOWN_EXT_RE = /\.(md|markdown|mdown|mkdn|mkd|mdx)$/i;
@@ -382,4 +383,100 @@ export function buildMarkdownPreviewSource(input: {
   return wordDiff(sides.oldText, sides.newText)
     .map(wrapMarkdownDiffOp)
     .join('');
+}
+
+export type MarkdownMediaCtx = {
+  owner?: string;
+  repo?: string;
+  ref?: string;
+  filePath?: string;
+  webOrigin?: string;
+};
+
+function decodeHtmlAttr(s: string): string {
+  return String(s || '')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>');
+}
+
+function repoDirname(filePath: string): string {
+  const p = String(filePath || '').replace(/^\/+/, '').replace(/\/+$/, '');
+  const i = p.lastIndexOf('/');
+  if (i <= 0) return '';
+  return p.slice(0, i);
+}
+
+function normalizeRepoPath(p: string): string {
+  const parts: string[] = [];
+  for (const seg of String(p || '').split('/')) {
+    if (!seg || seg === '.') continue;
+    if (seg === '..') {
+      parts.pop();
+      continue;
+    }
+    parts.push(seg);
+  }
+  return parts.join('/');
+}
+
+/**
+ * Resolve a markdown/HTML media URL against the file's repo path.
+ * Relative `assets/logo.jpeg` → GitHub `/raw/<ref>/assets/logo.jpeg`.
+ * Absolute http(s) / data / blob URLs are left unchanged (return '').
+ */
+export function resolveMarkdownMediaUrl(
+  src: unknown,
+  ctx: MarkdownMediaCtx = {}
+): string {
+  let s = decodeHtmlAttr(String(src || '')).trim();
+  if (!s) return '';
+  const hashIdx = s.indexOf('#');
+  if (hashIdx >= 0) s = s.slice(0, hashIdx);
+  const qIdx = s.indexOf('?');
+  const pathOnly = qIdx >= 0 ? s.slice(0, qIdx) : s;
+  if (!pathOnly) return '';
+  if (/^(data:|blob:|javascript:|mailto:)/i.test(pathOnly)) return '';
+  if (pathOnly.startsWith('//')) return '';
+  if (/^[a-z][a-z0-9+.-]*:/i.test(pathOnly)) return '';
+
+  const owner = String(ctx.owner || '').trim();
+  const repo = String(ctx.repo || '').trim();
+  const ref = String(ctx.ref || '').trim();
+  if (!owner || !repo || !ref) return '';
+
+  const rel = pathOnly.trim();
+  const joined = rel.startsWith('/')
+    ? rel.replace(/^\/+/, '')
+    : [repoDirname(String(ctx.filePath || '')), rel].filter(Boolean).join('/');
+  const path = normalizeRepoPath(joined);
+  if (!path) return '';
+  return buildGithubRawUrl({
+    webOrigin: ctx.webOrigin,
+    owner,
+    repo,
+    ref,
+    path,
+  });
+}
+
+/**
+ * Rewrite relative `src="..."` in rendered markdown HTML to repo raw URLs.
+ * Shields / absolute CDN badges are unchanged.
+ */
+export function rewriteMarkdownMediaHtml(
+  html: unknown,
+  ctx: MarkdownMediaCtx = {}
+): string {
+  const input = String(html || '');
+  if (!input || !ctx.owner || !ctx.repo || !ctx.ref) return input;
+  return input.replace(
+    /(\ssrc\s*=\s*)(["'])([^"']*)\2/gi,
+    (full, pre: string, q: string, src: string) => {
+      const next = resolveMarkdownMediaUrl(src, ctx);
+      return next ? `${pre}${q}${next}${q}` : full;
+    }
+  );
 }
