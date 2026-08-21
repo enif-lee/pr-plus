@@ -1,11 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { IconX } from './icons';
 import { MarkdownView } from './MarkdownView';
 import { resolveMermaidColorMode } from '../../lib/mermaid-lazy';
 import { useModalStore } from '../../store/modal-store';
 import { useT } from '../../lib/locale-context';
-import { claimNestedEscape } from '../../lib/escape-layer';
+import { registerEscapeOverlay } from '../../lib/escape-layer';
 import { useDomainDetail } from '../../app/domain-detail-context';
 import { buildGithubRawUrl } from '../../lib/diff-rows';
 import {
@@ -99,16 +99,12 @@ export function MarkdownViewer({ path, status = 'modified', onClose }: Props) {
   const [newText, setNewText] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape' && e.code !== 'Escape') return;
-      claimNestedEscape(e);
-      onClose();
-    };
-    window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
-  }, [onClose]);
+    return registerEscapeOverlay(() => onCloseRef.current());
+  }, []);
 
   useEffect(() => {
     const prev = document.body.style.overflow;

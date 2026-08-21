@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { IconX } from './icons';
 import { resolveMermaidColorMode } from '../../lib/mermaid-lazy';
 import { useModalStore } from '../../store/modal-store';
+import { registerEscapeOverlay } from '../../lib/escape-layer';
 import {
   applyViewerKeyGesture,
   applyViewerWheelEvent,
@@ -84,6 +85,12 @@ export function MermaidViewer({ svg, onClose, title = 'Diagram' }: Props) {
     paintTransform(xfRef.current);
   });
 
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  useEffect(() => {
+    return registerEscapeOverlay(() => onCloseRef.current());
+  }, []);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const gesture = mapViewerKeyGesture({
@@ -96,10 +103,7 @@ export function MermaidViewer({ svg, onClose, title = 'Diagram' }: Props) {
       });
       if (!gesture) return;
       if (gesture.kind === 'close') {
-        e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
-        onClose();
+        // Overlay stack pops Esc; this listener only owns pan/zoom.
         return;
       }
       // Stage-center pivot for keyboard zoom

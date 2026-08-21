@@ -7,6 +7,7 @@ import { useModalStore } from '../store/modal-store';
 import { isSideActionAllowedOnLayout } from '../lib/layout-side-actions';
 import { resolveReactionAddControl } from '../lib/comment-reactions';
 import { shouldPreventConvArrowFallback } from '../lib/shortcut-policy';
+import { isEscapeOverlayOpen } from '../lib/escape-layer';
 
 export function usePrModalHotkeys(h: Record<string, any>): void {
   const open = h.open;
@@ -164,10 +165,11 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
     let viewerOpen = false;
     try {
       viewerOpen = Boolean(
-        typeof document !== 'undefined' &&
-          (document.querySelector('[data-prp-mermaid-viewer="1"]') ||
-            document.querySelector('[data-prp-image-viewer="1"]') ||
-            document.querySelector('[data-prp-md-viewer="1"]'))
+        (typeof isEscapeOverlayOpen === 'function' && isEscapeOverlayOpen()) ||
+          (typeof document !== 'undefined' &&
+            (document.querySelector('[data-prp-mermaid-viewer="1"]') ||
+              document.querySelector('[data-prp-image-viewer="1"]') ||
+              document.querySelector('[data-prp-md-viewer="1"]')))
       );
     } catch {
       viewerOpen = false;
@@ -636,10 +638,11 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
           typeof isCommentReactionPickerOpen === 'function' &&
           isCommentReactionPickerOpen(document);
         const viewerOpen = Boolean(
-          typeof document !== 'undefined' &&
-            (document.querySelector('[data-prp-mermaid-viewer="1"]') ||
-              document.querySelector('[data-prp-image-viewer="1"]') ||
-              document.querySelector('[data-prp-md-viewer="1"]'))
+          (typeof isEscapeOverlayOpen === 'function' && isEscapeOverlayOpen()) ||
+            (typeof document !== 'undefined' &&
+              (document.querySelector('[data-prp-mermaid-viewer="1"]') ||
+                document.querySelector('[data-prp-image-viewer="1"]') ||
+                document.querySelector('[data-prp-md-viewer="1"]')))
         );
         const focusEl =
           ae ||
