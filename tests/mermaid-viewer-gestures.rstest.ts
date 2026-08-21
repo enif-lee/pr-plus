@@ -84,12 +84,19 @@ describe('viewer wiring (static shipped sources)', () => {
       path.join(root, 'src/modal/components/common/ImageViewer.tsx'),
       'utf8'
     );
+    const shell = fs.readFileSync(
+      path.join(root, 'src/modal/components/common/FullscreenViewer.tsx'),
+      'utf8'
+    );
     expect(m).toMatch(/applyViewerWheelEvent/);
     expect(i).toMatch(/applyViewerWheelEvent/);
     expect(m).toMatch(/altKey/);
     expect(i).toMatch(/altKey/);
     expect(m).toMatch(/Scroll pan/);
     expect(i).toMatch(/Scroll pan/);
+    expect(m).toMatch(/FullscreenViewer/);
+    expect(i).toMatch(/FullscreenViewer/);
+    expect(shell).toMatch(/prp-overlay-viewer/);
   });
 
   test('MermaidViewer + ImageViewer wire Escape, Opt± zoom, Arrow pan', async () => {
@@ -123,6 +130,7 @@ describe('viewer wiring (static shipped sources)', () => {
     );
     expect(hotkeys).toMatch(/data-prp-mermaid-viewer/);
     expect(hotkeys).toMatch(/data-prp-image-viewer/);
+    expect(hotkeys).toMatch(/data-prp-md-viewer/);
     expect(hotkeys).toMatch(/!viewerOpen/);
   });
 });

@@ -10,6 +10,11 @@ import {
   resolveModalEscapeOwner,
   isNestedEscapeLayerOpen,
   NESTED_ESCAPE_LAYER_SELECTOR,
+  registerEscapeOverlay,
+  popEscapeOverlay,
+  resetEscapeOverlayStack,
+  isEscapeOverlayOpen,
+  escapeOverlayCount,
 } from '../src/modal/lib/escape-layer';
 
 describe('resolveModalEscapeOwner', () => {
@@ -85,6 +90,59 @@ describe('isNestedEscapeLayerOpen', () => {
     expect(NESTED_ESCAPE_LAYER_SELECTOR).toMatch(/data-prp-review-filter-menu/);
     expect(NESTED_ESCAPE_LAYER_SELECTOR).toMatch(/prp-sselect-panel/);
     expect(NESTED_ESCAPE_LAYER_SELECTOR).toMatch(/data-prp-nested-layer/);
+    expect(NESTED_ESCAPE_LAYER_SELECTOR).toMatch(/data-prp-md-viewer/);
+    expect(NESTED_ESCAPE_LAYER_SELECTOR).toMatch(/data-prp-mermaid-viewer/);
+    expect(NESTED_ESCAPE_LAYER_SELECTOR).toMatch(/data-prp-image-viewer/);
+  });
+
+  test('markdown overlay counts as a nested Escape layer', () => {
+    const dom = new JSDOM(
+      `<!doctype html><html><body>
+        <div class="prp-overlay"></div>
+      </body></html>`
+    );
+    const doc = dom.window.document;
+    expect(isNestedEscapeLayerOpen(doc)).toBe(false);
+    const viewer = doc.createElement('div');
+    viewer.setAttribute('data-prp-md-viewer', '1');
+    doc.body.appendChild(viewer);
+    expect(isNestedEscapeLayerOpen(doc)).toBe(true);
+  });
+});
+
+describe('fullscreen overlay Esc stack (LIFO)', () => {
+  test('Esc pops only the top overlay; a second pop closes the one below', () => {
+    resetEscapeOverlayStack();
+    const closed: string[] = [];
+    const offMd = registerEscapeOverlay(() => closed.push('md'));
+    const offImg = registerEscapeOverlay(() => closed.push('img'));
+    expect(isEscapeOverlayOpen()).toBe(true);
+    expect(escapeOverlayCount()).toBe(2);
+
+    expect(popEscapeOverlay()).toBe(true);
+    expect(closed).toEqual(['img']);
+    expect(escapeOverlayCount()).toBe(1);
+    expect(isEscapeOverlayOpen()).toBe(true);
+
+    expect(popEscapeOverlay()).toBe(true);
+    expect(closed).toEqual(['img', 'md']);
+    expect(isEscapeOverlayOpen()).toBe(false);
+
+    offImg();
+    offMd();
+    resetEscapeOverlayStack();
+  });
+
+  test('unregister (click X) removes that layer without closing others', () => {
+    resetEscapeOverlayStack();
+    const closed: string[] = [];
+    registerEscapeOverlay(() => closed.push('md'));
+    const offImg = registerEscapeOverlay(() => closed.push('img'));
+    offImg();
+    expect(escapeOverlayCount()).toBe(1);
+    expect(popEscapeOverlay()).toBe(true);
+    expect(closed).toEqual(['md']);
+    resetEscapeOverlayStack();
   });
 });
 
@@ -128,6 +186,24 @@ describe('wiring: Diff settings + App gate use nested markers', () => {
     expect(hotkeys).toMatch(/isNestedEscapeLayerOpen/);
     expect(hotkeys).toMatch(/resolveModalEscapeOwner/);
     expect(hotkeys).toMatch(/nestedLayerOpen/);
+    expect(hotkeys).toMatch(/isEscapeOverlayOpen/);
+  });
+
+  test('viewers register on the overlay Esc stack instead of each claiming Esc', () => {
+    const root = path.resolve(__dirname, '..');
+    const shell = fs.readFileSync(
+      path.join(root, 'src/modal/components/common/FullscreenViewer.tsx'),
+      'utf8'
+    );
+    expect(shell).toMatch(/registerEscapeOverlay/);
+    for (const rel of [
+      'src/modal/components/common/MarkdownViewer.tsx',
+      'src/modal/components/common/ImageViewer.tsx',
+      'src/modal/components/common/MermaidViewer.tsx',
+    ]) {
+      const src = fs.readFileSync(path.join(root, rel), 'utf8');
+      expect(src).toMatch(/FullscreenViewer/);
+    }
   });
 
   test('SearchableSelect marks nested layer and claims Escape', () => {

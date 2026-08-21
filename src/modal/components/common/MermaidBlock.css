@@ -383,7 +383,8 @@
   box-sizing: border-box;
 }
 
-.prp-file-header__comment {
+.prp-file-header__comment,
+.prp-file-header__preview {
   appearance: none;
   flex: 0 0 auto;
   margin: 0 8px 0 0;
@@ -400,7 +401,9 @@
   white-space: nowrap;
 }
 .prp-file-header__comment:hover,
-.prp-file-header__comment:focus-visible {
+.prp-file-header__comment:focus-visible,
+.prp-file-header__preview:hover,
+.prp-file-header__preview:focus-visible {
   color: var(--prp-accent);
   border-color: var(--prp-accent);
   background: color-mix(in srgb, var(--prp-accent) 8%, var(--prp-bg));
