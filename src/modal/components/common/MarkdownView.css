@@ -309,3 +309,17 @@
   border: 1px solid var(--prp-border);
   padding: 6px 13px;
 }
+
+/* Letter-level markdown overlay diff (show-diff on) */
+.prp-md del.prp-md-diff-del {
+  color: var(--prp-danger);
+  background: var(--prp-del-bg);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+  text-decoration-color: currentColor;
+}
+.prp-md ins.prp-md-diff-ins {
+  color: var(--prp-ok);
+  background: var(--prp-add-bg);
+  text-decoration: none;
+}

@@ -511,7 +511,10 @@ export function renderMdHtml(raw: any, linkCtx: any) {
     // Keep hljs class names on pre/code (default purify already allows class;
     // be explicit for extension builds that tighten ALLOWED_ATTR).
     const clean = purify?.sanitize
-      ? purify.sanitize(html, { ADD_ATTR: ['class', 'data-lang'] })
+      ? purify.sanitize(html, {
+          ADD_TAGS: ['ins', 'del'],
+          ADD_ATTR: ['class', 'data-lang'],
+        })
       : html;
     if (typeof enhanceMarkdownHtml === 'function') {
       return enhanceMarkdownHtml(clean, linkCtx || {});
