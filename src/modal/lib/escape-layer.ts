@@ -87,6 +87,7 @@ export const NESTED_ESCAPE_LAYER_SELECTOR = [
   '[data-prp-reaction-picker="1"]',
   '[data-prp-mermaid-viewer="1"]',
   '[data-prp-image-viewer="1"]',
+  '[data-prp-md-viewer="1"]',
 ].join(', ');
 
 /**

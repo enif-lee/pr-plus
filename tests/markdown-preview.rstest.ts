@@ -243,6 +243,7 @@ describe('overlay / show-diff / i18n wiring (shipped sources)', () => {
       'utf8'
     );
     expect(viewer).toMatch(/data-prp-md-viewer/);
+    expect(viewer).toMatch(/claimNestedEscape/);
     expect(viewer).toMatch(/md_preview_show_diff/);
     expect(viewer).toMatch(/buildMarkdownPreviewSource/);
     expect(viewer).toMatch(/useT\(/);

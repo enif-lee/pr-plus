@@ -5,6 +5,7 @@ import { MarkdownView } from './MarkdownView';
 import { resolveMermaidColorMode } from '../../lib/mermaid-lazy';
 import { useModalStore } from '../../store/modal-store';
 import { useT } from '../../lib/locale-context';
+import { claimNestedEscape } from '../../lib/escape-layer';
 import { useDomainDetail } from '../../app/domain-detail-context';
 import { buildGithubRawUrl } from '../../lib/diff-rows';
 import {
@@ -101,10 +102,8 @@ export function MarkdownViewer({ path, status = 'modified', onClose }: Props) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      e.preventDefault();
-      e.stopPropagation();
-      e.stopImmediatePropagation();
+      if (e.key !== 'Escape' && e.code !== 'Escape') return;
+      claimNestedEscape(e);
       onClose();
     };
     window.addEventListener('keydown', onKey, true);

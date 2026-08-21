@@ -85,6 +85,23 @@ describe('isNestedEscapeLayerOpen', () => {
     expect(NESTED_ESCAPE_LAYER_SELECTOR).toMatch(/data-prp-review-filter-menu/);
     expect(NESTED_ESCAPE_LAYER_SELECTOR).toMatch(/prp-sselect-panel/);
     expect(NESTED_ESCAPE_LAYER_SELECTOR).toMatch(/data-prp-nested-layer/);
+    expect(NESTED_ESCAPE_LAYER_SELECTOR).toMatch(/data-prp-md-viewer/);
+    expect(NESTED_ESCAPE_LAYER_SELECTOR).toMatch(/data-prp-mermaid-viewer/);
+    expect(NESTED_ESCAPE_LAYER_SELECTOR).toMatch(/data-prp-image-viewer/);
+  });
+
+  test('markdown overlay counts as a nested Escape layer', () => {
+    const dom = new JSDOM(
+      `<!doctype html><html><body>
+        <div class="prp-overlay"></div>
+      </body></html>`
+    );
+    const doc = dom.window.document;
+    expect(isNestedEscapeLayerOpen(doc)).toBe(false);
+    const viewer = doc.createElement('div');
+    viewer.setAttribute('data-prp-md-viewer', '1');
+    doc.body.appendChild(viewer);
+    expect(isNestedEscapeLayerOpen(doc)).toBe(true);
   });
 });
 

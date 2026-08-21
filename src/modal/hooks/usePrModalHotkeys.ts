@@ -166,7 +166,8 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
       viewerOpen = Boolean(
         typeof document !== 'undefined' &&
           (document.querySelector('[data-prp-mermaid-viewer="1"]') ||
-            document.querySelector('[data-prp-image-viewer="1"]'))
+            document.querySelector('[data-prp-image-viewer="1"]') ||
+            document.querySelector('[data-prp-md-viewer="1"]'))
       );
     } catch {
       viewerOpen = false;
@@ -637,7 +638,8 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
         const viewerOpen = Boolean(
           typeof document !== 'undefined' &&
             (document.querySelector('[data-prp-mermaid-viewer="1"]') ||
-              document.querySelector('[data-prp-image-viewer="1"]'))
+              document.querySelector('[data-prp-image-viewer="1"]') ||
+              document.querySelector('[data-prp-md-viewer="1"]'))
         );
         const focusEl =
           ae ||

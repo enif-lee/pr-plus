@@ -123,6 +123,7 @@ describe('viewer wiring (static shipped sources)', () => {
     );
     expect(hotkeys).toMatch(/data-prp-mermaid-viewer/);
     expect(hotkeys).toMatch(/data-prp-image-viewer/);
+    expect(hotkeys).toMatch(/data-prp-md-viewer/);
     expect(hotkeys).toMatch(/!viewerOpen/);
   });
 });
