@@ -1,13 +1,13 @@
 /** @module modal/lib/markdown-preview */
 /**
  * Diff overlay helpers for markdown files: path detect, old/new sides,
- * letter-level ins/del, and show-diff off/on render input.
+ * word-level ins/del, and show-diff off/on render input.
  */
 
 /** Common markdown extensions (GitHub previewable). */
 const MARKDOWN_EXT_RE = /\.(md|markdown|mdown|mkdn|mkd|mdx)$/i;
 
-/** Skip letter-level work past this combined size so the overlay stays usable. */
+/** Skip word-level work past this combined size so the overlay stays usable. */
 export const MD_PREVIEW_MAX_CHARS = 250_000;
 
 /** Cap DP cells (n+1)*(m+1). ~16MB at 4e6 Uint32 cells. */
@@ -16,12 +16,17 @@ const DP_CELL_CAP = 4_000_000;
 export const MD_DIFF_DEL_CLASS = 'prp-md-diff-del';
 export const MD_DIFF_INS_CLASS = 'prp-md-diff-ins';
 
-export type LetterDiffKind = 'eq' | 'del' | 'ins';
+export type MarkdownDiffKind = 'eq' | 'del' | 'ins';
 
-export type LetterDiffOp = {
-  kind: LetterDiffKind;
+export type MarkdownDiffOp = {
+  kind: MarkdownDiffKind;
   text: string;
 };
+
+/** @deprecated Use MarkdownDiffOp — kept for the first preview landing. */
+export type LetterDiffKind = MarkdownDiffKind;
+/** @deprecated Use MarkdownDiffOp */
+export type LetterDiffOp = MarkdownDiffOp;
 
 export type MarkdownSideRef = {
   path: string;
@@ -115,8 +120,8 @@ export function splitLinesKeep(text: string): string[] {
   return out;
 }
 
-function concatOps(ops: LetterDiffOp[]): LetterDiffOp[] {
-  const out: LetterDiffOp[] = [];
+function concatOps(ops: MarkdownDiffOp[]): MarkdownDiffOp[] {
+  const out: MarkdownDiffOp[] = [];
   for (const op of ops) {
     if (!op || !op.text) continue;
     const last = out[out.length - 1];
@@ -126,7 +131,27 @@ function concatOps(ops: LetterDiffOp[]): LetterDiffOp[] {
   return out;
 }
 
-type TokenOp = { kind: LetterDiffKind; token: string };
+type TokenOp = { kind: MarkdownDiffKind; token: string };
+
+/**
+ * Word / whitespace / punctuation tokens. Letter+number runs stay one token
+ * so `world` → `word` marks the whole word, not a single letter.
+ */
+export function splitWordsKeep(text: string): string[] {
+  const s = String(text ?? '');
+  if (s === '') return [];
+  const out: string[] = [];
+  const re = /(\s+)|([\p{L}\p{N}_]+)|([^\s\p{L}\p{N}_]+)/gu;
+  let m: RegExpExecArray | null;
+  let last = 0;
+  while ((m = re.exec(s)) !== null) {
+    if (m.index > last) out.push(s.slice(last, m.index));
+    out.push(m[0]);
+    last = m.index + m[0].length;
+  }
+  if (last < s.length) out.push(s.slice(last));
+  return out;
+}
 
 function diffTokenArraysUnmerged(a: string[], b: string[]): TokenOp[] {
   const n = a.length;
@@ -182,18 +207,14 @@ function diffTokenArraysUnmerged(a: string[], b: string[]): TokenOp[] {
   return raw;
 }
 
-function diffChars(a: string, b: string): LetterDiffOp[] {
+function diffWordsInLine(a: string, b: string): MarkdownDiffOp[] {
   if (a === b) return a ? [{ kind: 'eq', text: a }] : [];
-  const left = Array.from(a);
-  const right = Array.from(b);
-  const ops = diffTokenArraysUnmerged(left, right);
-  return concatOps(
-    ops.map((op) => ({ kind: op.kind, text: op.token }))
-  );
+  const ops = diffTokenArraysUnmerged(splitWordsKeep(a), splitWordsKeep(b));
+  return concatOps(ops.map((op) => ({ kind: op.kind, text: op.token })));
 }
 
-function expandLineOpsWithCharDiff(ops: TokenOp[]): LetterDiffOp[] {
-  const out: LetterDiffOp[] = [];
+function expandLineOpsWithWordDiff(ops: TokenOp[]): MarkdownDiffOp[] {
+  const out: MarkdownDiffOp[] = [];
   let i = 0;
   while (i < ops.length) {
     if (ops[i].kind === 'eq') {
@@ -210,7 +231,7 @@ function expandLineOpsWithCharDiff(ops: TokenOp[]): LetterDiffOp[] {
     const ins = hunk.filter((op) => op.kind === 'ins').map((op) => op.token);
     const pairCount = Math.min(dels.length, ins.length);
     for (let p = 0; p < pairCount; p++) {
-      out.push(...diffChars(dels[p], ins[p]));
+      out.push(...diffWordsInLine(dels[p], ins[p]));
     }
     for (let p = pairCount; p < dels.length; p++) {
       out.push({ kind: 'del', text: dels[p] });
@@ -223,14 +244,14 @@ function expandLineOpsWithCharDiff(ops: TokenOp[]): LetterDiffOp[] {
 }
 
 /**
- * Character-level diff of two documents. Lines are aligned first, then
- * paired changed lines are diffed by Unicode code point (not whole-line
- * −/+ blocks).
+ * Word-level diff of two documents. Lines are aligned first, then paired
+ * changed lines are diffed by word / whitespace / punctuation tokens (not
+ * whole-line −/+ blocks, and not intra-word letters).
  */
-export function letterDiff(
+export function wordDiff(
   oldText: unknown,
   newText: unknown
-): LetterDiffOp[] {
+): MarkdownDiffOp[] {
   const oldT = String(oldText ?? '');
   const newT = String(newText ?? '');
   if (oldT === newT) return oldT ? [{ kind: 'eq', text: oldT }] : [];
@@ -238,8 +259,11 @@ export function letterDiff(
     splitLinesKeep(oldT),
     splitLinesKeep(newT)
   );
-  return concatOps(expandLineOpsWithCharDiff(lineOps));
+  return concatOps(expandLineOpsWithWordDiff(lineOps));
 }
+
+/** @deprecated Use wordDiff */
+export const letterDiff = wordDiff;
 
 function escapeHtmlText(s: string): string {
   return s
@@ -264,7 +288,7 @@ function wrapChangedRun(kind: 'del' | 'ins', text: string): string {
     .join('');
 }
 
-export function wrapMarkdownDiffOp(op: LetterDiffOp): string {
+export function wrapMarkdownDiffOp(op: MarkdownDiffOp): string {
   if (!op || !op.text) return '';
   if (op.kind === 'eq') return op.text;
   if (op.kind === 'del' || op.kind === 'ins') {
@@ -275,7 +299,7 @@ export function wrapMarkdownDiffOp(op: LetterDiffOp): string {
 
 /**
  * Show-diff off → new-side document with no ins/del wrappers.
- * Show-diff on → same document with letter-level `<del>` / `<ins>` marks.
+ * Show-diff on → same document with word-level `<del>` / `<ins>` marks.
  *
  * Entire-file adds keep the new markdown unwrapped so it still renders;
  * the overlay paints those via a CSS class.
@@ -296,7 +320,7 @@ export function buildMarkdownPreviewSource(input: {
   if (sides.oldText && !sides.newText) {
     return wrapChangedRun('del', sides.oldText);
   }
-  return letterDiff(sides.oldText, sides.newText)
+  return wordDiff(sides.oldText, sides.newText)
     .map(wrapMarkdownDiffOp)
     .join('');
 }

@@ -86,7 +86,7 @@ async function fetchFileText(opts: {
 
 /**
  * Fullscreen overlay for a Diff markdown file (ImageViewer / MermaidViewer class).
- * Show-diff off renders the new file; on paints letter-level ins/del.
+ * Show-diff off renders the new file; on paints word-level ins/del.
  */
 export function MarkdownViewer({ path, status = 'modified', onClose }: Props) {
   const t = useT();

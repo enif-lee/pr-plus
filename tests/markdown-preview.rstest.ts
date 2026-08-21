@@ -1,5 +1,5 @@
 /**
- * Markdown overlay preview: shipped letter-diff / show-diff transform.
+ * Markdown overlay preview: shipped word-diff / show-diff transform.
  * Imports production helpers — no copy, mock, or reimplementation.
  */
 import { describe, expect, test } from '@rstest/core';
@@ -11,7 +11,7 @@ import {
   MD_DIFF_INS_CLASS,
   buildMarkdownPreviewSource,
   isMarkdownPath,
-  letterDiff,
+  wordDiff,
   markdownPreviewLoadPlan,
   resolveMarkdownSides,
 } from '../src/modal/lib/markdown-preview';
@@ -98,31 +98,30 @@ describe('buildMarkdownPreviewSource (shipped transform)', () => {
     expect(off).not.toMatch(new RegExp(MD_DIFF_INS_CLASS));
   });
 
-  test('intra-line letter change marks those letters; prefix/suffix stay unmarked', () => {
+  test('intra-line word change marks those words; prefix/suffix stay unmarked', () => {
     const oldText = 'Hello world';
     const newText = 'Hello word';
-    const ops = letterDiff(oldText, newText);
+    const ops = wordDiff(oldText, newText);
     const del = ops.filter((op) => op.kind === 'del');
     const ins = ops.filter((op) => op.kind === 'ins');
     const eq = ops.filter((op) => op.kind === 'eq');
 
-    expect(del).toEqual([{ kind: 'del', text: 'l' }]);
-    expect(ins).toEqual([]);
-    expect(eq.some((op) => op.text.includes('Hello wor'))).toBe(true);
-    expect(eq.some((op) => op.text.endsWith('d') || op.text === 'd')).toBe(
-      true
-    );
+    expect(del).toEqual([{ kind: 'del', text: 'world' }]);
+    expect(ins).toEqual([{ kind: 'ins', text: 'word' }]);
+    expect(eq.some((op) => op.text.includes('Hello'))).toBe(true);
+    // Word-level, not a single-letter `l` inside world
+    expect(del.some((op) => op.text === 'l')).toBe(false);
 
     const on = buildMarkdownPreviewSource({
       oldText,
       newText,
       showDiff: true,
     });
-    expect(on).toContain(`<del class="${MD_DIFF_DEL_CLASS}">l</del>`);
-    expect(on.startsWith('Hello wor')).toBe(true);
-    expect(on.endsWith('d')).toBe(true);
-    expect(on).not.toMatch(/<(del|ins)[^>]*>Hello wor/);
-    expect(on).not.toMatch(/<(del|ins)[^>]*>d</);
+    expect(on).toContain(`<del class="${MD_DIFF_DEL_CLASS}">world</del>`);
+    expect(on).toContain(`<ins class="${MD_DIFF_INS_CLASS}">word</ins>`);
+    expect(on.startsWith('Hello ')).toBe(true);
+    expect(on).not.toMatch(/<(del|ins)[^>]*>Hello/);
+    expect(on).not.toContain(`<del class="${MD_DIFF_DEL_CLASS}">l</del>`);
     // Not whole-line −/+ blocks
     expect(on).not.toMatch(/^-Hello world$/m);
     expect(on).not.toMatch(/^\+Hello word$/m);
@@ -130,14 +129,15 @@ describe('buildMarkdownPreviewSource (shipped transform)', () => {
     expect(on.includes('+Hello word')).toBe(false);
   });
 
-  test('heading letter substitution is delete+insert, not a whole-line replace', () => {
+  test('heading word substitution is delete+insert, not a whole-line replace', () => {
     const on = buildMarkdownPreviewSource({
       oldText: OLD_MD,
       newText: NEW_MD,
       showDiff: true,
     });
-    expect(on).toContain(`<del class="${MD_DIFF_DEL_CLASS}">l</del>`);
-    expect(on.startsWith('# Hello wor')).toBe(true);
+    expect(on).toContain(`<del class="${MD_DIFF_DEL_CLASS}">world</del>`);
+    expect(on).toContain(`<ins class="${MD_DIFF_INS_CLASS}">word</ins>`);
+    expect(on.startsWith('# Hello ')).toBe(true);
     expect(on).toContain('unique token');
     expect(on).not.toMatch(/<(del|ins)[^>]*># Hello world/);
     expect(on).not.toMatch(/<(del|ins)[^>]*>This is a paragraph/);
@@ -149,11 +149,13 @@ describe('buildMarkdownPreviewSource (shipped transform)', () => {
       newText: '# Hallo',
       showDiff: true,
     });
-    expect(sub).toContain(`<del class="${MD_DIFF_DEL_CLASS}">e</del>`);
-    expect(sub).toContain(`<ins class="${MD_DIFF_INS_CLASS}">a</ins>`);
-    expect(sub.startsWith('# H')).toBe(true);
-    expect(sub.endsWith('llo')).toBe(true);
-    expect(sub).not.toBe(`<del class="${MD_DIFF_DEL_CLASS}"># Hello</del><ins class="${MD_DIFF_INS_CLASS}"># Hallo</ins>`);
+    expect(sub).toContain(`<del class="${MD_DIFF_DEL_CLASS}">Hello</del>`);
+    expect(sub).toContain(`<ins class="${MD_DIFF_INS_CLASS}">Hallo</ins>`);
+    expect(sub.startsWith('# ')).toBe(true);
+    expect(sub).not.toContain(`<del class="${MD_DIFF_DEL_CLASS}">e</del>`);
+    expect(sub).not.toBe(
+      `<del class="${MD_DIFF_DEL_CLASS}"># Hello</del><ins class="${MD_DIFF_INS_CLASS}"># Hallo</ins>`
+    );
   });
 });
 
