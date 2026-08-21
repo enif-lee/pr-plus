@@ -12,6 +12,7 @@ import {
   buildMarkdownPreviewSource,
   isMarkdownPath,
   wordDiff,
+  coalesceAdjacentChangeGroups,
   markdownPreviewLoadPlan,
   resolveMarkdownSides,
 } from '../src/modal/lib/markdown-preview';
@@ -156,6 +157,74 @@ describe('buildMarkdownPreviewSource (shipped transform)', () => {
     expect(sub).not.toBe(
       `<del class="${MD_DIFF_DEL_CLASS}"># Hello</del><ins class="${MD_DIFF_INS_CLASS}"># Hallo</ins>`
     );
+  });
+
+  test('consecutive del/ins on one line coalesce into one replacement group', () => {
+    const ops = wordDiff('The cat sat', 'The dog ran');
+    expect(ops.filter((op) => op.kind === 'del')).toEqual([
+      { kind: 'del', text: 'cat sat' },
+    ]);
+    expect(ops.filter((op) => op.kind === 'ins')).toEqual([
+      { kind: 'ins', text: 'dog ran' },
+    ]);
+    expect(ops.some((op) => op.kind === 'eq' && op.text.includes('The'))).toBe(
+      true
+    );
+
+    const on = buildMarkdownPreviewSource({
+      oldText: 'foo bar baz qux',
+      newText: 'foo aaa bbb qux',
+      showDiff: true,
+    });
+    expect(on).toContain(`<del class="${MD_DIFF_DEL_CLASS}">bar baz</del>`);
+    expect(on).toContain(`<ins class="${MD_DIFF_INS_CLASS}">aaa bbb</ins>`);
+    expect(on).not.toContain(`<del class="${MD_DIFF_DEL_CLASS}">bar</del>`);
+    expect(on.startsWith('foo ')).toBe(true);
+    expect(on.endsWith(' qux')).toBe(true);
+  });
+
+  test('an unchanged word splits groups; does not paint the whole line', () => {
+    const ops = wordDiff(
+      'The cat sat on the mat',
+      'The dog sat on the rug'
+    );
+    const del = ops.filter((op) => op.kind === 'del').map((op) => op.text);
+    const ins = ops.filter((op) => op.kind === 'ins').map((op) => op.text);
+    expect(del).toEqual(['cat', 'mat']);
+    expect(ins).toEqual(['dog', 'rug']);
+    expect(
+      ops.some((op) => op.kind === 'eq' && op.text.includes('sat on the'))
+    ).toBe(true);
+
+    const feature = wordDiff(
+      'enable the feature flag today',
+      'disable a feature toggle today'
+    );
+    expect(
+      feature.some((op) => op.kind === 'eq' && op.text.includes('feature'))
+    ).toBe(true);
+    expect(
+      feature.filter((op) => op.kind === 'del').map((op) => op.text)
+    ).toEqual(['enable the', 'flag']);
+    expect(
+      feature.filter((op) => op.kind === 'ins').map((op) => op.text)
+    ).toEqual(['disable a', 'toggle']);
+  });
+
+  test('coalesceAdjacentChangeGroups leaves word-eq islands intact', () => {
+    const grouped = coalesceAdjacentChangeGroups([
+      { kind: 'eq', text: 'The ' },
+      { kind: 'del', text: 'cat' },
+      { kind: 'ins', text: 'dog' },
+      { kind: 'eq', text: ' ' },
+      { kind: 'del', text: 'sat' },
+      { kind: 'ins', text: 'ran' },
+    ]);
+    expect(grouped).toEqual([
+      { kind: 'eq', text: 'The ' },
+      { kind: 'del', text: 'cat sat' },
+      { kind: 'ins', text: 'dog ran' },
+    ]);
   });
 });
 

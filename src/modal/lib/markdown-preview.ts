@@ -207,10 +207,69 @@ function diffTokenArraysUnmerged(a: string[], b: string[]): TokenOp[] {
   return raw;
 }
 
+/** True when an equal run is only whitespace/punctuation (same line). */
+export function isMarkdownDiffGlue(text: string): boolean {
+  const s = String(text ?? '');
+  if (!s || s.includes('\n') || s.includes('\r')) return false;
+  return !/[\p{L}\p{N}_]/u.test(s);
+}
+
+/**
+ * On one line, merge consecutive del/ins separated only by glue (spaces,
+ * punctuation) into one replacement group. A real equal word splits groups.
+ */
+export function coalesceAdjacentChangeGroups(
+  ops: MarkdownDiffOp[]
+): MarkdownDiffOp[] {
+  const a = concatOps(ops);
+  const out: MarkdownDiffOp[] = [];
+  let i = 0;
+  while (i < a.length) {
+    const cur = a[i];
+    if (cur.kind === 'eq') {
+      out.push(cur);
+      i += 1;
+      continue;
+    }
+    let del = '';
+    let ins = '';
+    while (i < a.length) {
+      const op = a[i];
+      if (op.kind === 'del') {
+        del += op.text;
+        i += 1;
+        continue;
+      }
+      if (op.kind === 'ins') {
+        ins += op.text;
+        i += 1;
+        continue;
+      }
+      const next = a[i + 1];
+      if (
+        isMarkdownDiffGlue(op.text) &&
+        next &&
+        (next.kind === 'del' || next.kind === 'ins')
+      ) {
+        del += op.text;
+        ins += op.text;
+        i += 1;
+        continue;
+      }
+      break;
+    }
+    if (del) out.push({ kind: 'del', text: del });
+    if (ins) out.push({ kind: 'ins', text: ins });
+  }
+  return concatOps(out);
+}
+
 function diffWordsInLine(a: string, b: string): MarkdownDiffOp[] {
   if (a === b) return a ? [{ kind: 'eq', text: a }] : [];
   const ops = diffTokenArraysUnmerged(splitWordsKeep(a), splitWordsKeep(b));
-  return concatOps(ops.map((op) => ({ kind: op.kind, text: op.token })));
+  return coalesceAdjacentChangeGroups(
+    ops.map((op) => ({ kind: op.kind, text: op.token }))
+  );
 }
 
 function expandLineOpsWithWordDiff(ops: TokenOp[]): MarkdownDiffOp[] {
@@ -245,8 +304,8 @@ function expandLineOpsWithWordDiff(ops: TokenOp[]): MarkdownDiffOp[] {
 
 /**
  * Word-level diff of two documents. Lines are aligned first, then paired
- * changed lines are diffed by word / whitespace / punctuation tokens (not
- * whole-line −/+ blocks, and not intra-word letters).
+ * changed lines are diffed by word tokens. Consecutive del/ins on one line
+ * with only space/punct between them become one replacement group.
  */
 export function wordDiff(
   oldText: unknown,
