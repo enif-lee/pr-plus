@@ -57,6 +57,7 @@ import {
 import { IconDisclosure } from '@common/icons';
 import { FloatingScrollbar } from '../../components/common/FloatingScrollbar';
 import { ImageViewer } from '@common/ImageViewer';
+import { MarkdownViewer } from '@common/MarkdownViewer';
 import { InlineThread } from './InlineThread';
 import { SelectionCommentBar } from './SelectionCommentBar';
 import { HunkExpandControls } from './HunkExpandControls';
@@ -489,10 +490,19 @@ function VirtualDiffImpl(props: any) {
    * Included in DiffLineRow keys via render path (parent re-render is enough).
    */
   const [hljsEpoch, setHljsEpoch] = useState(0);
+  const [mdViewer, setMdViewer] = useState<{
+    path: string;
+    status: string;
+  } | null>(null);
   const [imageViewer, setImageViewer] = useState<{
     src: string;
     alt: string;
   } | null>(null);
+  const onPreviewMarkdown = useCallback((row: any) => {
+    const p = String(row?.filePath || '');
+    if (!p) return;
+    setMdViewer({ path: p, status: String(row?.status || 'modified') });
+  }, []);
   useLayoutEffect(() => {
     return onHljsLanguagesChanged(() => {
       clearHighlightCodeCache();
@@ -941,6 +951,7 @@ function VirtualDiffImpl(props: any) {
             onToggleViewed={onToggleViewed}
             onToggleCollapse={onToggleCollapse}
             onFileComment={onFileComment}
+            onPreviewMarkdown={onPreviewMarkdown}
             onSelectionStart={stableSelectionStart}
             sticky
             selected={
@@ -1143,6 +1154,7 @@ function VirtualDiffImpl(props: any) {
                   onToggleViewed={onToggleViewed}
                   onToggleCollapse={onToggleCollapse}
                   onFileComment={onFileComment}
+                  onPreviewMarkdown={onPreviewMarkdown}
                   onSelectionStart={stableSelectionStart}
                   searchRowClass={searchRowClass}
                   isSearchMatch={Boolean(isSearchMatch)}
@@ -1334,6 +1346,13 @@ function VirtualDiffImpl(props: any) {
           alt={imageViewer.alt}
           title={imageViewer.alt || 'Image'}
           onClose={() => setImageViewer(null)}
+        />
+      ) : null}
+      {mdViewer ? (
+        <MarkdownViewer
+          path={mdViewer.path}
+          status={mdViewer.status}
+          onClose={() => setMdViewer(null)}
         />
       ) : null}
     </div>

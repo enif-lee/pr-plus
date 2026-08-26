@@ -61,6 +61,8 @@ import {
   capExpandedLineHeight,
 } from '@lib/line-expand';
 import { IconDisclosure } from '@common/icons';
+import { useT } from '@lib/locale-context';
+import { isMarkdownPath } from '@lib/markdown-preview';
 import { FloatingScrollbar } from '../../components/common/FloatingScrollbar';
 import { ImageViewer } from '@common/ImageViewer';
 import { InlineThread } from './InlineThread';
@@ -133,6 +135,8 @@ export function FileHeaderRow(props: {
     point: { x: number; y: number },
     opts?: { shiftKey?: boolean; preferredSide?: string }
   ) => void;
+  /** Open fullscreen markdown overlay for .md files */
+  onPreviewMarkdown?: (row: any) => void;
 }) {
   const {
     row,
@@ -152,7 +156,12 @@ export function FileHeaderRow(props: {
     style,
     selectionIsland = null,
     onSelectionStart,
+    onPreviewMarkdown,
   } = props;
+  const t = useT();
+  const markdownPreviewable =
+    typeof onPreviewMarkdown === 'function' &&
+    isMarkdownPath(row?.filePath);
   const storeFocused = useModalStore(
     (s) => String(s.activeFilePath || '') === String(row?.filePath || '')
   );
@@ -199,7 +208,7 @@ export function FileHeaderRow(props: {
         const t = e.target as HTMLElement;
         if (
           t.closest?.(
-            '.prp-file-header__collapse, .prp-file-header__viewed, .prp-file-header__comment, input, button.prp-file-header__comment'
+            '.prp-file-header__collapse, .prp-file-header__viewed, .prp-file-header__comment, .prp-file-header__preview, input, button.prp-file-header__comment, button.prp-file-header__preview'
           )
         ) {
           return;
@@ -314,6 +323,21 @@ export function FileHeaderRow(props: {
           <span className="prp-stat-del">−{dels}</span>
         </span>
       </button>
+      {markdownPreviewable ? (
+        <button
+          type="button"
+          className="prp-file-header__preview"
+          title={t('md_preview')}
+          aria-label={t('md_preview')}
+          data-prp-md-preview-btn="1"
+          onClick={(e) => {
+            e.stopPropagation();
+            onPreviewMarkdown?.(row);
+          }}
+        >
+          {t('md_preview')}
+        </button>
+      ) : null}
       {typeof onFileComment === 'function' ? (
         <button
           type="button"

@@ -186,6 +186,13 @@ export const RESIDUAL_MESSAGE_KEYS = [
   'toast_text_copied',
   'toast_copy_failed',
   'upload_video_failed',
+  'md_preview',
+  'md_preview_show_diff',
+  'md_preview_close',
+  'md_preview_aria',
+  'md_preview_loading',
+  'md_preview_error',
+  'md_preview_too_large',
 ] as const;
 
 export const residualEn: MessageCatalog = {
@@ -378,6 +385,13 @@ export const residualEn: MessageCatalog = {
   monitor_expand_fold: 'Expand',
   monitor_toggle_side_panel: 'Toggle side panel',
   monitor_leave_review: 'Leave review',
+  md_preview: 'Preview',
+  md_preview_show_diff: 'Show diff',
+  md_preview_close: 'Close markdown preview',
+  md_preview_aria: 'Markdown preview',
+  md_preview_loading: 'Loading markdown…',
+  md_preview_error: 'Could not load markdown file',
+  md_preview_too_large: 'File is too large to preview as markdown',
 };
 
 export const residualKo: MessageCatalog = {
@@ -568,6 +582,13 @@ export const residualKo: MessageCatalog = {
   monitor_expand_fold: '펼치기',
   monitor_toggle_side_panel: '사이드 패널 전환',
   monitor_leave_review: '리뷰 남기기',
+  md_preview: '미리보기',
+  md_preview_show_diff: 'diff 표시',
+  md_preview_close: '마크다운 미리보기 닫기',
+  md_preview_aria: '마크다운 미리보기',
+  md_preview_loading: '마크다운 불러오는 중…',
+  md_preview_error: '마크다운 파일을 불러오지 못했습니다',
+  md_preview_too_large: '파일이 너무 커서 마크다운으로 미리볼 수 없습니다',
 };
 
 export const residualJa: MessageCatalog = {
@@ -759,6 +780,13 @@ export const residualJa: MessageCatalog = {
   monitor_expand_fold: '展開',
   monitor_toggle_side_panel: 'サイドパネル切替',
   monitor_leave_review: 'レビューを残す',
+  md_preview: 'プレビュー',
+  md_preview_show_diff: 'diff を表示',
+  md_preview_close: 'Markdown プレビューを閉じる',
+  md_preview_aria: 'Markdown プレビュー',
+  md_preview_loading: 'Markdown を読み込み中…',
+  md_preview_error: 'Markdown ファイルを読み込めませんでした',
+  md_preview_too_large: 'ファイルが大きすぎて Markdown プレビューできません',
 };
 
 export const residualZh: MessageCatalog = {
@@ -943,4 +971,11 @@ export const residualZh: MessageCatalog = {
   monitor_expand_fold: '展开',
   monitor_toggle_side_panel: '切换侧边栏',
   monitor_leave_review: '留下审阅',
+  md_preview: '预览',
+  md_preview_show_diff: '显示 diff',
+  md_preview_close: '关闭 Markdown 预览',
+  md_preview_aria: 'Markdown 预览',
+  md_preview_loading: '正在加载 Markdown…',
+  md_preview_error: '无法加载 Markdown 文件',
+  md_preview_too_large: '文件过大，无法预览 Markdown',
 };

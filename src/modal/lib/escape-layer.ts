@@ -6,6 +6,11 @@
  * stopImmediatePropagation *before* App, or App must gate shell close on a
  * stable open marker. Prefer both: nested closes itself; App never closes
  * the PR shell while a nested layer is open.
+ *
+ * Fullscreen overlays (markdown / mermaid / image) share one LIFO stack so
+ * Esc pops only the top viewer. Independent window-capture handlers would
+ * all see the same key (or the first would stopImmediate and close the
+ * wrong layer).
  */
 
 export type EscapeLayerAction =
@@ -87,6 +92,7 @@ export const NESTED_ESCAPE_LAYER_SELECTOR = [
   '[data-prp-reaction-picker="1"]',
   '[data-prp-mermaid-viewer="1"]',
   '[data-prp-image-viewer="1"]',
+  '[data-prp-md-viewer="1"]',
 ].join(', ');
 
 /**
@@ -106,4 +112,79 @@ export function isNestedEscapeLayerOpen(
   } catch {
     return false;
   }
+}
+
+type EscapeOverlayLayer = { close: () => void };
+
+const escapeOverlayStack: EscapeOverlayLayer[] = [];
+let overlayEscapeListening = false;
+
+function onOverlayEscapeKey(e: KeyboardEvent) {
+  if (e.key !== 'Escape' && e.code !== 'Escape') return;
+  if (!escapeOverlayStack.length) return;
+  claimNestedEscape(e);
+  popEscapeOverlay();
+}
+
+function ensureOverlayEscapeListen() {
+  if (overlayEscapeListening) return;
+  if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') {
+    return;
+  }
+  window.addEventListener('keydown', onOverlayEscapeKey, true);
+  overlayEscapeListening = true;
+}
+
+function maybeUnlistenOverlayEscape() {
+  if (!overlayEscapeListening || escapeOverlayStack.length) return;
+  if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
+    window.removeEventListener('keydown', onOverlayEscapeKey, true);
+  }
+  overlayEscapeListening = false;
+}
+
+/**
+ * Push a fullscreen overlay onto the Esc stack. Returns unregister.
+ * Esc pops the last registered layer only (image over markdown, etc.).
+ * Pass a stable `() => closeRef.current()` so re-renders do not reorder.
+ */
+export function registerEscapeOverlay(close: () => void): () => void {
+  const layer: EscapeOverlayLayer = { close };
+  escapeOverlayStack.push(layer);
+  ensureOverlayEscapeListen();
+  return () => {
+    const i = escapeOverlayStack.lastIndexOf(layer);
+    if (i >= 0) escapeOverlayStack.splice(i, 1);
+    maybeUnlistenOverlayEscape();
+  };
+}
+
+export function isEscapeOverlayOpen(): boolean {
+  return escapeOverlayStack.length > 0;
+}
+
+export function escapeOverlayCount(): number {
+  return escapeOverlayStack.length;
+}
+
+/** Close the top overlay. Used by the window listener and tests. */
+export function popEscapeOverlay(): boolean {
+  const top = escapeOverlayStack.pop();
+  if (!top) {
+    maybeUnlistenOverlayEscape();
+    return false;
+  }
+  try {
+    top.close();
+  } catch {
+    /* ignore */
+  }
+  maybeUnlistenOverlayEscape();
+  return true;
+}
+
+/** Test helper — clear stack without calling close. */
+export function resetEscapeOverlayStack(): void {
+  escapeOverlayStack.length = 0;
+  maybeUnlistenOverlayEscape();
 }

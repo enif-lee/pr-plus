@@ -21,6 +21,8 @@ export { MarkdownComposer } from './MarkdownComposer';
 export { MarkdownView } from './MarkdownView';
 export { MermaidBlock } from './MermaidBlock';
 export { ImageViewer } from './ImageViewer';
+export { MarkdownViewer } from './MarkdownViewer';
+export { FullscreenViewer } from './FullscreenViewer';
 export { SuggestionBlock } from './SuggestionBlock';
 export { UserLink } from './UserLink';
 export { LabelLink } from './LabelLink';
