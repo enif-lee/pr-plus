@@ -5,6 +5,8 @@ import { MarkdownComposer } from '@common/MarkdownComposer';
 import { ShortcutHint } from '@common/ShortcutHint';
 import { canSubmitReviewVerdict } from '@lib/pr-edit-api';
 import { useT } from '@lib/locale-context';
+import { ACTION_BUSY, isActionLoading } from '@lib/action-busy';
+import { useBusyKey } from '../../store/modal-store';
 import './FinishReview.css';
 
 export type FinishReviewEvent = 'comment' | 'approve' | 'request_changes';
@@ -63,6 +65,7 @@ export function FinishReviewModal({
   linkCtx = null,
 }: FinishReviewModalProps) {
   const t = useT();
+  const busyKey = useBusyKey();
   const titleId = useId();
   const panelRef = useRef<HTMLDivElement | null>(null);
   const [body, setBody] = useState('');
@@ -417,14 +420,16 @@ export function FinishReviewModal({
               <Button
                 size="sm"
                 variant="primary"
-                loading={Boolean(actionBusy)}
+                loading={isActionLoading(busyKey, ACTION_BUSY.reviewComment)}
                 disabled={!canSubmit}
                 onClick={(): any => void handleSubmit('comment')}
                 title={canSubmit ? t('cta_submit_review_comment') : submitBlockedTitle}
                 shortcut={scComment}
                 tipPlacement="top"
               >
-                {actionBusy ? t('cta_submitting') : t('cta_comment_verb')}
+                {isActionLoading(busyKey, ACTION_BUSY.reviewComment)
+                  ? t('cta_submitting')
+                  : t('cta_comment_verb')}
               </Button>
             </span>
             {showVerdict ? (
@@ -437,14 +442,16 @@ export function FinishReviewModal({
                 <Button
                   size="sm"
                   variant="ok"
-                  loading={Boolean(actionBusy)}
+                  loading={isActionLoading(busyKey, ACTION_BUSY.approve)}
                   disabled={!canSubmit}
                   onClick={(): any => void handleSubmit('approve')}
                   title={canSubmit ? t('cta_approve_pr') : submitBlockedTitle}
                   shortcut={scApprove}
                   tipPlacement="top"
                 >
-                  {actionBusy ? t('cta_working') : t('cta_approve')}
+                  {isActionLoading(busyKey, ACTION_BUSY.approve)
+                    ? t('cta_working')
+                    : t('cta_approve')}
                 </Button>
               </span>
             ) : null}
@@ -458,7 +465,7 @@ export function FinishReviewModal({
                 <Button
                   size="sm"
                   variant="warn"
-                  loading={Boolean(actionBusy)}
+                  loading={isActionLoading(busyKey, ACTION_BUSY.requestChanges)}
                   disabled={!canSubmit}
                   onClick={(): any => void handleSubmit('request_changes')}
                   title={
@@ -467,7 +474,9 @@ export function FinishReviewModal({
                   shortcut={scChanges}
                   tipPlacement="top"
                 >
-                  {actionBusy ? t('cta_working') : t('cta_request_changes')}
+                  {isActionLoading(busyKey, ACTION_BUSY.requestChanges)
+                    ? t('cta_working')
+                    : t('cta_request_changes')}
                 </Button>
               </span>
             ) : null}

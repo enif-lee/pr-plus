@@ -22,6 +22,7 @@ import { CommentReactions } from '@common/CommentReactions';
 import { BodyEditor } from '../composers/BodyEditor';
 import { DiffSnippetView } from '../conversation/DiffSnippetView';
 import { useModalStore, useShallow } from '../../store/modal-store';
+import { ACTION_BUSY, isActionLoading } from '@lib/action-busy';
 import {
   dispatchContextThreadTabLeave,
   isContextThreadCommentActive,
@@ -235,6 +236,7 @@ function InlineThreadImpl(props: any) {
       focusedThreadUnitId: s.focusedThreadUnitId,
     }))
   );
+  const busyKey = useModalStore((s) => s.busyKey);
   const replyList = Array.isArray(thread?.replies) ? thread.replies : [];
   /** Resolve tip only while reply input is focused (not on idle threads) */
   const [replyFocused, setReplyFocused] = useState(false);
@@ -1330,7 +1332,7 @@ function InlineThreadImpl(props: any) {
                     <Button
                       size="sm"
                       variant="primary"
-                      loading={Boolean(actionBusy)}
+                      loading={isActionLoading(busyKey, ACTION_BUSY.threadReply)}
                       disabled={!String(replyText || '').trim()}
                       tabIndex={-1}
                       onMouseDown={(e: any) => {
@@ -1345,7 +1347,9 @@ function InlineThreadImpl(props: any) {
                       title="Comment (⌥C · ⌘↵ when typing · ⌥I to focus)"
                       data-prp-composer-submit="1"
                     >
-                      {actionBusy ? 'Submitting…' : 'Comment'}
+                      {isActionLoading(busyKey, ACTION_BUSY.threadReply)
+                        ? 'Submitting…'
+                        : 'Comment'}
                     </Button>
                   </span>
                 ) : null}
@@ -1375,7 +1379,7 @@ function InlineThreadImpl(props: any) {
                   <Button
                     size="sm"
                     variant={canImmediateComment ? 'default' : 'primary'}
-                    loading={Boolean(actionBusy)}
+                    loading={isActionLoading(busyKey, ACTION_BUSY.threadPending)}
                     disabled={!String(replyText || '').trim()}
                     tabIndex={-1}
                     onMouseDown={(e: any) => {
@@ -1396,7 +1400,9 @@ function InlineThreadImpl(props: any) {
                       canImmediateComment ? undefined : '1'
                     }
                   >
-                    {actionBusy ? 'Working…' : pendingCtaLabel}
+                    {isActionLoading(busyKey, ACTION_BUSY.threadPending)
+                      ? 'Working…'
+                      : pendingCtaLabel}
                   </Button>
                 </span>
                 {canResolveThread ? (

@@ -6,6 +6,7 @@ import {
   mapRestIssueComment,
 } from '../lib/pr-edit-api';
 import { useModalStore } from '../store/modal-store';
+import { leaveReviewBusyKey } from '../lib/action-busy';
 
 /**
  * Install review leave + selection post handlers on a live deps bag.
@@ -61,7 +62,7 @@ export function installReviewActions(d: Record<string, any>) {
         d.focusCommentBox?.();
         return false;
       }
-      d.setActionBusy?.(true);
+      d.setActionBusy?.(true, leaveReviewBusyKey(kind));
       d.setActionMsg?.('');
       try {
         if (!fetchApi.postIssueComment) throw new Error('Comment API unavailable');
@@ -153,7 +154,7 @@ export function installReviewActions(d: Record<string, any>) {
         : null) ||
       null;
 
-    d.setActionBusy?.(true);
+    d.setActionBusy?.(true, leaveReviewBusyKey(kind));
     d.setActionMsg?.('');
     try {
       if (hasServerPending || pendingReviewId) {

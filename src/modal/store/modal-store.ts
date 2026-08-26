@@ -31,6 +31,8 @@ export interface ModalUiState {
   animClass: string;
   commentText: string;
   actionBusy: boolean;
+  /** Which CTA shows a spinner while `actionBusy` (null = lock only). */
+  busyKey: string | null;
   actionMsg: string;
   /** Bumps on each non-empty setActionMsg so identical toasts re-fire. */
   actionMsgSeq: number;
@@ -92,7 +94,7 @@ export interface ModalUiState {
   setActiveFilePath: (p: string | null) => void;
   setAnimClass: (c: string) => void;
   setCommentText: (t: string) => void;
-  setActionBusy: (v: boolean) => void;
+  setActionBusy: (v: boolean, key?: string | null) => void;
   setActionMsg: (m: string) => void;
   setCollapsedFiles: (fn: any) => void;
   setExpandedDirs: (fn: any) => void;
@@ -134,6 +136,23 @@ const emptyPending = (): PendingReviewBatch =>
     ? (createEmptyPendingReview() as PendingReviewBatch)
     : { comments: [], body: '' };
 
+function syncActionBusyDom(busy: boolean, key: string | null) {
+  if (typeof document === 'undefined') return;
+  try {
+    const el = document.documentElement;
+    if (busy) {
+      el.setAttribute('data-prp-action-busy', '1');
+      if (key) el.setAttribute('data-prp-busy-key', key);
+      else el.removeAttribute('data-prp-busy-key');
+    } else {
+      el.removeAttribute('data-prp-action-busy');
+      el.removeAttribute('data-prp-busy-key');
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 export const useModalStore = create<ModalUiState>((set, get) => ({
   layoutMode: LAYOUT_CENTERED as LayoutMode,
   diffMode: 'unified',
@@ -147,6 +166,7 @@ export const useModalStore = create<ModalUiState>((set, get) => ({
   animClass: '',
   commentText: '',
   actionBusy: false,
+  busyKey: null,
   actionMsg: '',
   actionMsgSeq: 0,
   collapsedFiles: new Set(),
@@ -199,7 +219,16 @@ export const useModalStore = create<ModalUiState>((set, get) => ({
   },
   setAnimClass: (c) => set({ animClass: c }),
   setCommentText: (t) => set({ commentText: t }),
-  setActionBusy: (v) => set({ actionBusy: v }),
+  setActionBusy: (v, key) => {
+    if (!v) {
+      syncActionBusyDom(false, null);
+      set({ actionBusy: false, busyKey: null });
+      return;
+    }
+    const busyKey = typeof key === 'string' && key ? key : null;
+    syncActionBusyDom(true, busyKey);
+    set({ actionBusy: true, busyKey });
+  },
   setActionMsg: (m) =>
     set((s) => {
       const msg = m == null ? '' : String(m);
@@ -402,7 +431,8 @@ export const useModalStore = create<ModalUiState>((set, get) => ({
   },
   hydrateLocalDetail: (detail) => {
   },
-  resetForClose: () =>
+  resetForClose: () => {
+    syncActionBusyDom(false, null);
     set({
       layoutMode: LAYOUT_CENTERED as LayoutMode,
       searchOpen: false,
@@ -413,6 +443,8 @@ export const useModalStore = create<ModalUiState>((set, get) => ({
       editingBody: false,
       editingComment: null,
       commentText: '',
+      actionBusy: false,
+      busyKey: null,
       actionMsg: '',
       pendingReview: emptyPending(),
       focusedConversationAnchor: null,
@@ -421,8 +453,19 @@ export const useModalStore = create<ModalUiState>((set, get) => ({
       activeDiffCommentId: null,
       focusedThreadUnitId: null,
       commentIndex: -1,
-    }),
+    });
+  },
 }));
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('prp-set-action-busy', (ev: Event) => {
+    const d = (ev as CustomEvent)?.detail || {};
+    const off = d.busy === false || d.busy === 0 || d.busy === '0';
+    useModalStore
+      .getState()
+      .setActionBusy(!off, off ? null : d.key ?? null);
+  });
+}
 
 /** Selective subscription helper — re-export shallow for call sites */
 export { useShallow };
@@ -433,4 +476,8 @@ export function useLayoutMode() {
 
 export function useActionBusy() {
   return useModalStore((s) => s.actionBusy);
+}
+
+export function useBusyKey() {
+  return useModalStore((s) => s.busyKey);
 }

@@ -20,6 +20,7 @@ import {
   pendingAttachCtaLabel,
 } from '@lib/pending-review';
 import { useModalStore } from '../../store/modal-store';
+import { ACTION_BUSY, isActionLoading } from '@lib/action-busy';
 
 export type SelectionIslandPhase = 'actions' | 'comment';
 
@@ -122,6 +123,7 @@ export function SelectionCommentBar(props: any) {
   // Prefer store so App need not re-render on every caret move
   const storeSelection = useModalStore((s) => s.lineSelection);
   const showOptHints = useModalStore((s) => s.optHintsActive);
+  const busyKey = useModalStore((s) => s.busyKey);
   const selection = selectionProp ?? storeSelection;
 
   const [phaseLocal, setPhaseLocal] = useState<SelectionIslandPhase>('actions');
@@ -503,7 +505,7 @@ export function SelectionCommentBar(props: any) {
             <Button
               size="sm"
               variant="primary"
-              loading={Boolean(actionBusy)}
+              loading={isActionLoading(busyKey, ACTION_BUSY.selectionComment)}
               disabled={!canSubmit}
               onClick={onSubmitImmediate}
               data-prp-composer-submit="1"
@@ -511,7 +513,9 @@ export function SelectionCommentBar(props: any) {
               shortcut={kbdSubmit}
               tipPlacement={optHintPlace}
             >
-              {actionBusy ? 'Submitting…' : 'Comment'}
+              {isActionLoading(busyKey, ACTION_BUSY.selectionComment)
+                ? 'Submitting…'
+                : 'Comment'}
             </Button>
           </span>
         ) : null}
@@ -523,7 +527,7 @@ export function SelectionCommentBar(props: any) {
           <Button
             size="sm"
             variant={canImmediate ? 'default' : 'primary'}
-            loading={Boolean(actionBusy)}
+            loading={isActionLoading(busyKey, ACTION_BUSY.selectionPending)}
             disabled={!canSubmit}
             onClick={onSubmitPending}
             data-prp-composer-start-review="1"
@@ -536,7 +540,9 @@ export function SelectionCommentBar(props: any) {
             shortcut={canImmediate ? kbdStartPending : kbdSubmit}
             tipPlacement={optHintPlace}
           >
-            {actionBusy ? 'Working…' : pendingLabel}
+            {isActionLoading(busyKey, ACTION_BUSY.selectionPending)
+              ? 'Working…'
+              : pendingLabel}
           </Button>
         </span>
         <span className="prp-opt-hint-host inline-flex">

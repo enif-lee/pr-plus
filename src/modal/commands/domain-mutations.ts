@@ -25,6 +25,7 @@ import {
   coerceMergeMethod,
 } from '../lib/merge-box-status';
 import { useModalStore } from '../store/modal-store';
+import { ACTION_BUSY } from '../lib/action-busy';
 import {
   mapRequestedReviewersFromApi,
   mapAssigneesFromApi,
@@ -620,7 +621,7 @@ export function installPrModalMutations(d: Record<string, any>) {
   async function onSaveBody(body: any) {
     if (!d.detail) return;
     const nextBody = body == null ? '' : String(body);
-    d.setActionBusy(true);
+    d.setActionBusy(true, ACTION_BUSY.saveBody);
     d.setActionMsg('');
     // Pessimistic: paint description only after API success (no pre-await body stamp).
     try {
@@ -919,7 +920,7 @@ export function installPrModalMutations(d: Record<string, any>) {
     d.setEditingComment({ kind: 'review', id });
   }
   async function onDiscardPendingReview() {
-    d.setActionBusy(true);
+    d.setActionBusy(true, ACTION_BUSY.discardPending);
     d.setActionMsg('');
     try {
       const api = globalThis.PRTreeFetch;
@@ -1044,7 +1045,10 @@ export function installPrModalMutations(d: Record<string, any>) {
       return;
     }
   
-    d.setActionBusy(true);
+    d.setActionBusy(
+      true,
+      mode === 'pending' ? ACTION_BUSY.threadPending : ACTION_BUSY.threadReply
+    );
     d.setActionMsg('');
     try {
       const api = globalThis.PRTreeFetch;
@@ -1252,7 +1256,7 @@ export function installPrModalMutations(d: Record<string, any>) {
     ) {
       return;
     }
-    d.setActionBusy(true);
+    d.setActionBusy(true, ACTION_BUSY.closePr);
     d.setActionMsg('');
     try {
       const api = globalThis.PRTreeFetch;
@@ -1288,7 +1292,7 @@ export function installPrModalMutations(d: Record<string, any>) {
   }
   async function onReopenPr() {
     if (!d.detail) return;
-    d.setActionBusy(true);
+    d.setActionBusy(true, ACTION_BUSY.reopenPr);
     d.setActionMsg('');
     try {
       const api = globalThis.PRTreeFetch;

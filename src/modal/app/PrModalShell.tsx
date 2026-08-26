@@ -61,6 +61,7 @@ import {
   type DiffCommitFilter as DiffCommitFilterState,
 } from '../lib/diff-commit-filter';
 import { filesListNeedsFullFetch } from '../lib/detail-idb';
+import { ACTION_BUSY } from '../lib/action-busy';
 import { useDetailUiStore } from '../store/detail-ui-store';
 import {
   SHELL_MODAL,
@@ -3554,7 +3555,7 @@ export function PrModalApp({
       commitId: detail.headSha,
     });
     if (!payload) return;
-    setActionBusy(true);
+    setActionBusy(true, ACTION_BUSY.selectionComment);
     setActionMsg('');
     try {
       // If a PENDING review already exists, GitHub forces attach — shown as pending
@@ -3579,7 +3580,7 @@ export function PrModalApp({
       commitId: detail.headSha,
     });
     if (!payload) return;
-    setActionBusy(true);
+    setActionBusy(true, ACTION_BUSY.selectionPending);
     setActionMsg('');
     try {
       // Unified: always create/attach GitHub PENDING review (no local-only batch)

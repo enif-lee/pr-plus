@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Button } from '@common/Button';
 import { MarkdownComposer } from '@common/MarkdownComposer';
+import { ACTION_BUSY, isActionLoading } from '@lib/action-busy';
+import { useBusyKey } from '../../store/modal-store';
 
 /** Keep in-progress edits when host patches settle `value` after open. */
 export function adoptIncomingBodyDraft(
@@ -24,6 +26,7 @@ export function BodyEditor({
   compact = false,
   placeholder = 'Write a description…',
 }: any) {
+  const busyKey = useBusyKey();
   const [draft, setDraft] = useState(value || '');
   const valueRef = useRef(value || '');
   useEffect(() => {
@@ -55,7 +58,13 @@ export function BodyEditor({
         className="prp-body-editor__wysi"
       />
       <div className="prp-composer__row">
-        <Button size="sm" variant="primary" disabled={actionBusy} onClick={() => onSave?.(draft)}>
+        <Button
+          size="sm"
+          variant="primary"
+          disabled={actionBusy}
+          loading={isActionLoading(busyKey, ACTION_BUSY.saveBody)}
+          onClick={() => onSave?.(draft)}
+        >
           Save
         </Button>
         <Button size="sm" disabled={actionBusy} onClick={onCancel}>
