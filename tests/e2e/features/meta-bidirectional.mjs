@@ -125,16 +125,40 @@ function waitPred(fn, pred, ms = 12_000, step = 350) {
 function waitActionIdle(ms = 8000) {
   const t0 = Date.now();
   while (Date.now() - t0 < ms) {
-    const busy = evalInPage(`
+    const snap = evalInPage(`
       (() => {
-        const o = document.querySelector('.prp-overlay');
-        if (!o) return false;
-        return !!o.querySelector(
-          'button[disabled][aria-busy="true"], .prp-action-toast[data-busy="1"]'
+        const host =
+          document.getElementById('prp-modal-host') ||
+          document.documentElement;
+        const loadBusy =
+          host.getAttribute('data-prp-load-busy') === '1' ||
+          document.documentElement.getAttribute('data-prp-load-busy') === '1';
+        const toastBusy = !!document.querySelector(
+          '.prp-action-toast[data-busy="1"]'
         );
+        const ariaBusy = !!document.querySelector(
+          '.prp-overlay button[disabled][aria-busy="true"]'
+        );
+        const editBtn = document.querySelector(
+          '.prp-overlay button[aria-label="Edit description"]'
+        );
+        const editor = document.querySelector('.prp-overlay .prp-body-editor');
+        const save =
+          editor &&
+          [...editor.querySelectorAll('.prp-composer__row button')].find((b) =>
+            /^\\s*Save\\s*$/i.test(b.textContent || '')
+          );
+        return {
+          loadBusy,
+          toastBusy,
+          ariaBusy,
+          editDisabled: !!(editBtn && editBtn.disabled),
+          saveDisabled: !!(save && save.disabled),
+          busy: loadBusy || toastBusy || ariaBusy,
+        };
       })()
     `);
-    if (!busy) break;
+    if (!snap?.busy) break;
     waitMs(200);
   }
   waitMs(200);
@@ -354,11 +378,13 @@ function ensureDescriptionMounted(timeoutMs = 12_000) {
 }
 
 function editModalBody(nextBody) {
+  waitActionIdle(10_000);
   const mounted = ensureDescriptionMounted();
   assert(
     mounted?.body,
     `description card not mounted: ${JSON.stringify(mounted)}`
   );
+  waitActionIdle(8_000);
   const opened = evalInPage(`
     (() => {
       const btn = document.querySelector(
@@ -377,22 +403,45 @@ function editModalBody(nextBody) {
         '.prp-overlay button[aria-label="Edit description"]'
       );
       if (!btn2) return { ok: false, reason: 'no edit description' };
+      if (btn2.disabled) return { ok: false, reason: 'edit-disabled' };
       btn2.click();
       return { ok: true };
     })()
   `);
   assert(opened.ok, `body edit open: ${JSON.stringify(opened)}`);
-  waitMs(500);
+  const editorReady = waitPred(
+    () =>
+      evalInPage(`
+        (() => {
+          const editor = document.querySelector('.prp-overlay .prp-body-editor');
+          const ta = editor?.querySelector(
+            'textarea[data-prp-composer-input], textarea.prp-mdc__ta, textarea'
+          );
+          const save =
+            editor &&
+            [...editor.querySelectorAll('.prp-composer__row button')].find((b) =>
+              /^\\s*Save\\s*$/i.test(b.textContent || '')
+            );
+          return {
+            ok: !!(editor && ta && save && !save.disabled && !ta.disabled),
+            hasEditor: !!editor,
+            hasTa: !!ta,
+            saveDisabled: !!(save && save.disabled),
+            taDisabled: !!(ta && ta.disabled),
+          };
+        })()
+      `),
+    (s) => s?.ok,
+    8_000,
+    150
+  );
+  assert(editorReady?.ok, `body editor not ready: ${JSON.stringify(editorReady)}`);
   const typed = evalInPage(`
     (() => {
       const bodyEditor = document.querySelector('.prp-overlay .prp-body-editor');
-      const ta =
-        bodyEditor?.querySelector('textarea.prp-mdc__ta') ||
-        bodyEditor?.querySelector('textarea.prp-textarea') ||
-        bodyEditor?.querySelector('textarea') ||
-        document.querySelector('.prp-overlay .prp-body-editor textarea') ||
-        document.querySelector('.prp-overlay textarea.prp-mdc__ta') ||
-        document.querySelector('.prp-overlay textarea');
+      const ta = bodyEditor?.querySelector(
+        'textarea[data-prp-composer-input], textarea.prp-mdc__ta, textarea'
+      );
       if (!ta) {
         return {
           ok: false,
@@ -400,11 +449,9 @@ function editModalBody(nextBody) {
           hasEditor: !!bodyEditor,
         };
       }
-      // Ensure Write tab (not Preview)
-      const writeTab = bodyEditor?.querySelector(
-        'button.prp-tab, [role="tab"]'
-      );
-      if (writeTab && /write/i.test(writeTab.textContent || '')) writeTab.click();
+      const writeTab = [...(bodyEditor?.querySelectorAll('button.prp-tab, [role="tab"]') || [])]
+        .find((b) => /write/i.test(b.textContent || ''));
+      writeTab?.click();
       const setter = Object.getOwnPropertyDescriptor(
         window.HTMLTextAreaElement.prototype,
         'value'
@@ -412,7 +459,6 @@ function editModalBody(nextBody) {
       setter?.call(ta, ${JSON.stringify(String(nextBody))});
       ta.dispatchEvent(new Event('input', { bubbles: true }));
       ta.dispatchEvent(new Event('change', { bubbles: true }));
-      // React 17+ sometimes needs InputEvent
       try {
         ta.dispatchEvent(
           new InputEvent('input', { bubbles: true, data: ${JSON.stringify(String(nextBody))}, inputType: 'insertText' })
@@ -422,7 +468,7 @@ function editModalBody(nextBody) {
     })()
   `);
   assert(typed.ok, `body type: ${JSON.stringify(typed)}`);
-  waitMs(300);
+  waitMs(200);
   const saved = evalInPage(`
     (() => {
       const editor = document.querySelector('.prp-overlay .prp-body-editor');
@@ -433,22 +479,15 @@ function editModalBody(nextBody) {
           /^\\s*Save\\s*$/i.test(b.textContent || '')
         );
       if (!save) {
-        const btns = [...document.querySelectorAll('.prp-overlay button')];
-        const fallback = btns.find((b) =>
-          /^\\s*Save\\s*$/i.test(b.textContent || '')
-        );
-        if (!fallback)
-          return {
-            ok: false,
-            reason: 'no Save',
-            labels: btns
-              .map((b) => (b.textContent || '').trim())
-              .filter(Boolean)
-              .slice(0, 15),
-          };
-        fallback.click();
-        return { ok: true, via: 'fallback' };
+        return {
+          ok: false,
+          reason: 'no Save in body editor',
+          labels: [...(row?.querySelectorAll('button') || [])]
+            .map((b) => (b.textContent || '').trim())
+            .filter(Boolean),
+        };
       }
+      if (save.disabled) return { ok: false, reason: 'save-disabled' };
       save.click();
       return { ok: true, via: 'row' };
     })()

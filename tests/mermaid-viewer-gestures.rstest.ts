@@ -99,6 +99,21 @@ describe('viewer wiring (static shipped sources)', () => {
     expect(shell).toMatch(/prp-overlay-viewer/);
   });
 
+  test('e2e viewer-gestures targets shared overlay-viewer chrome', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const root = path.resolve(__dirname, '..');
+    const e2e = fs.readFileSync(
+      path.join(root, 'tests/e2e/features/viewer-gestures.mjs'),
+      'utf8'
+    );
+    expect(e2e).toMatch(/prp-overlay-viewer__stage/);
+    expect(e2e).toMatch(/prp-overlay-viewer__canvas/);
+    expect(e2e).toMatch(/prp-overlay-viewer__close/);
+    expect(e2e).not.toMatch(/\.prp-mermaid-viewer__stage/);
+    expect(e2e).not.toMatch(/\.prp-mermaid-viewer__canvas/);
+  });
+
   test('MermaidViewer + ImageViewer wire Escape, Opt± zoom, Arrow pan', async () => {
     const fs = await import('node:fs');
     const path = await import('node:path');

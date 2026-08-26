@@ -1,6 +1,15 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Button } from '@common/Button';
 import { MarkdownComposer } from '@common/MarkdownComposer';
+
+/** Keep in-progress edits when host patches settle `value` after open. */
+export function adoptIncomingBodyDraft(
+  prevValue: string,
+  draft: string,
+  nextValue: string
+): string {
+  return draft === prevValue ? nextValue : draft;
+}
 
 export function BodyEditor({
   value,
@@ -16,8 +25,12 @@ export function BodyEditor({
   placeholder = 'Write a description…',
 }: any) {
   const [draft, setDraft] = useState(value || '');
+  const valueRef = useRef(value || '');
   useEffect(() => {
-    setDraft(value || '');
+    const next = value || '';
+    const prev = valueRef.current;
+    valueRef.current = next;
+    setDraft((d) => adoptIncomingBodyDraft(prev, d, next));
   }, [value]);
   // Register current draft saver so global mod+Enter can save without leaving a review.
   useEffect(() => {

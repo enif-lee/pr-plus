@@ -72,16 +72,45 @@ function seedMermaidComment() {
   return { mark, id };
 }
 
+/** Shared FullscreenViewer chrome (mermaid / image / markdown). */
+const VIEWER_ROOT_SEL =
+  '[data-prp-mermaid-viewer="1"], [data-prp-image-viewer="1"], [data-prp-md-viewer="1"]';
+const VIEWER_STAGE_SEL = '.prp-overlay-viewer__stage';
+const VIEWER_CANVAS_SEL = '.prp-overlay-viewer__canvas';
+
+function probeMermaidViewer() {
+  return evalInPage(`
+    (() => {
+      const v = document.querySelector(
+        '[data-prp-mermaid-viewer="1"], .prp-overlay-viewer--mermaid'
+      );
+      const stage =
+        v?.querySelector?.(${JSON.stringify(VIEWER_STAGE_SEL)}) ||
+        document.querySelector(${JSON.stringify(VIEWER_STAGE_SEL)});
+      const canvas =
+        v?.querySelector?.(${JSON.stringify(VIEWER_CANVAS_SEL)}) ||
+        document.querySelector(${JSON.stringify(VIEWER_CANVAS_SEL)});
+      const svg = canvas?.querySelector?.('svg');
+      return {
+        viewer: !!v,
+        stage: !!stage,
+        canvas: !!canvas,
+        svg: !!svg,
+        transform: canvas?.style?.transform || '',
+      };
+    })()
+  `);
+}
+
 function parseCanvasTransform() {
   return evalInPage(`
     (() => {
       const viewer = document.querySelector(
-        '[data-prp-mermaid-viewer="1"], [data-prp-image-viewer="1"]'
+        ${JSON.stringify(VIEWER_ROOT_SEL)}
       );
       const canvas =
-        document.querySelector('.prp-mermaid-viewer__canvas') ||
-        document.querySelector('.prp-image-viewer__canvas') ||
-        viewer?.querySelector?.('[class*="canvas"]');
+        viewer?.querySelector?.(${JSON.stringify(VIEWER_CANVAS_SEL)}) ||
+        document.querySelector(${JSON.stringify(VIEWER_CANVAS_SEL)});
       if (!canvas) {
         return {
           ok: false,
@@ -156,18 +185,14 @@ function wheelOnViewerStage(opts = {}) {
   } = opts;
   return evalInPage(`
     (() => {
-      const stage = document.querySelector(
-        '.prp-mermaid-viewer__stage, .prp-image-viewer__stage'
-      );
+      const stage = document.querySelector(${JSON.stringify(VIEWER_STAGE_SEL)});
       if (!stage) return { ok: false, reason: 'no-stage' };
       const rect = stage.getBoundingClientRect();
       const cx = rect.left + rect.width / 2;
       const cy = rect.top + rect.height / 2;
       let n = 0;
       const transforms = [];
-      const canvas =
-        document.querySelector('.prp-mermaid-viewer__canvas') ||
-        document.querySelector('.prp-image-viewer__canvas');
+      const canvas = document.querySelector(${JSON.stringify(VIEWER_CANVAS_SEL)});
       for (let i = 0; i < ${Number(times)}; i++) {
         const e = new WheelEvent('wheel', {
           bubbles: true,
@@ -201,12 +226,8 @@ function wheelOnViewerStage(opts = {}) {
 function dragPanViewer(dx = 40, dy = 60) {
   return evalInPage(`
     (() => {
-      const stage = document.querySelector(
-        '.prp-mermaid-viewer__stage, .prp-image-viewer__stage'
-      );
-      const canvas =
-        document.querySelector('.prp-mermaid-viewer__canvas') ||
-        document.querySelector('.prp-image-viewer__canvas');
+      const stage = document.querySelector(${JSON.stringify(VIEWER_STAGE_SEL)});
+      const canvas = document.querySelector(${JSON.stringify(VIEWER_CANVAS_SEL)});
       if (!stage || !canvas) return { ok: false, reason: 'no-stage' };
       const rect = stage.getBoundingClientRect();
       const x0 = rect.left + rect.width / 2;
@@ -532,29 +553,9 @@ export function getSteps() {
       waitMs(400);
     }
     waitMs(700);
-    let viewer = evalInPage(`
-      (() => {
-        const v = document.querySelector(
-          '[data-prp-mermaid-viewer="1"], .prp-mermaid-viewer, [class*="mermaid-viewer"]'
-        );
-        const stage = document.querySelector(
-          '.prp-mermaid-viewer__stage, [class*="mermaid-viewer__stage"]'
-        );
-        const canvas = document.querySelector(
-          '.prp-mermaid-viewer__canvas, [class*="mermaid-viewer__canvas"]'
-        );
-        const svg = canvas?.querySelector?.('svg');
-        return {
-          viewer: !!v,
-          stage: !!stage,
-          canvas: !!canvas,
-          svg: !!svg,
-          transform: canvas?.style?.transform || '',
-        };
-      })()
-    `);
+    let viewer = probeMermaidViewer();
     // Retry expand with more attempts (React paint can lag under suite pressure)
-    for (let r = 0; r < 5 && !viewer?.viewer; r++) {
+    for (let r = 0; r < 5 && !(viewer?.viewer && viewer?.stage); r++) {
       evalInPage(`
         (() => {
           const seedRoot = ${JSON.stringify(seedAnchor)}
@@ -582,21 +583,7 @@ export function getSteps() {
         })()
       `);
       waitMs(450);
-      viewer = evalInPage(`
-        (() => {
-          const v = document.querySelector(
-            '[data-prp-mermaid-viewer="1"], .prp-mermaid-viewer'
-          );
-          const stage = document.querySelector('.prp-mermaid-viewer__stage');
-          const canvas = document.querySelector('.prp-mermaid-viewer__canvas');
-          return {
-            viewer: !!v,
-            stage: !!stage,
-            canvas: !!canvas,
-            transform: canvas?.style?.transform || '',
-          };
-        })()
-      `);
+      viewer = probeMermaidViewer();
     }
     log(`  open viewer: ${JSON.stringify({ opened, viewer })}`);
     assert(opened?.ok, `failed to click expand: ${JSON.stringify(opened)}`);
@@ -784,7 +771,7 @@ export function getSteps() {
         (() => {
           const btn =
             document.querySelector(
-              '[data-prp-mermaid-viewer="1"] button[aria-label*="Close" i], [data-prp-image-viewer="1"] button[aria-label*="Close" i], .prp-mermaid-viewer__close, .prp-image-viewer__close'
+              '[data-prp-mermaid-viewer="1"] button[aria-label*="Close" i], [data-prp-image-viewer="1"] button[aria-label*="Close" i], .prp-overlay-viewer__close'
             ) ||
             [...document.querySelectorAll('[data-prp-mermaid-viewer="1"] button, [data-prp-image-viewer="1"] button')].find(
               (b) => /close|닫기|esc/i.test((b.getAttribute('aria-label') || '') + (b.textContent || ''))
