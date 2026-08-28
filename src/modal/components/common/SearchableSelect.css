@@ -22,6 +22,11 @@
  * Opaque panel is required — var(--prp-bg) without a host is transparent and
  * the aside bleeds through (labels picker "ghost" bug).
  */
+.prp-sselect-panel--popover[data-prp-sselect-ready='0'] {
+  animation: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
 .prp-sselect-panel,
 .prp-sselect-panel--popover {
   position: fixed;

@@ -10,9 +10,10 @@ E2E uses a **separate** config: `rstest.e2e.config.ts`.
 
 1. Extension built (`npm run build` or at least a current workspace loadable via `agent-browser.json`).
 2. [agent-browser](https://agent-browser.dev) installed and on `PATH`.
-3. GitHub login in the local profile (`./.browser/profile`).  
-   One-time: `npm run browser:login` then sign in.
-4. Network access to `github.com/enif-lee/pr-plus`.
+3. **Google Chrome (stable)** installed — `npm run test:e2e` launches that binary, not Chrome for Testing. Override with `PRP_CHROME_PATH`.
+4. GitHub login in the local agent-browser profile (`./.browser/profile`).
+5. For a headed unpacked load (Linear overlay, popup), use **pikabo**: `npm run browser` / `npm run browser:linear`. That is a separate Chromium profile (`.browser/pikabo-profile`) because branded Chrome 137+ ignores `--load-extension`.
+6. Network access to `github.com/enif-lee/pr-plus`.
 
 ## Demo PR fixture
 
@@ -22,6 +23,19 @@ Former **#7** was closed (subject-level reaction lock). List click / list-row
 tests use **`LIST_PR` (#13)**; meta write-through uses **`META_PR` (#1)**. Both
 stay on default `/pulls`. Comment cleanup defaults to `DEMO_PR` via
 `COMMENT_CLEANUP_PR` in `lib/comment-cleanup.mjs`.
+
+## Linear overlay fixture
+
+`tests/e2e/features/linear-overlay.mjs` uses **mornica / PR Plus / PRP-2**
+(`https://linear.app/mornica/issue/PRP-2`), linked to **enif-lee/pr-plus#19**.
+Constants live in `tests/e2e/lib/linear-fixture.mjs`.
+
+```bash
+npm run test:e2e:linear
+npm run browser:linear
+```
+
+Needs Linear login plus Connected sites → Linear granted in that browser profile.
 
 ## Commands
 

@@ -9,6 +9,10 @@
  */
 export { runSmoke, getSteps as getSmokeSteps } from './smoke.mjs';
 export {
+  getSteps as getLinearOverlaySteps,
+  runLinearOverlay,
+} from './linear-overlay.mjs';
+export {
   runConversationNav,
   getSteps as getConversationNavSteps,
 } from './conversation-nav.mjs';

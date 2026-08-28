@@ -19,6 +19,8 @@
 const TOKEN_KEY = 'githubToken';
 /** Enterprise host↔PAT pairs (secrets). */
 const HOST_ACCOUNTS_KEY = 'hostAccounts';
+/** Extension-owned GitHub web host used when the caller page is not GitHub. */
+const ACTIVE_GITHUB_WEB_HOST_KEY = 'activeGithubWebHost';
 /** User prefs in chrome.storage.local (non-secret). */
 const PREFS_KEY = 'extensionPrefs';
 /**
@@ -766,6 +768,41 @@ async function unregisterHostAccount(host: any, storageApi: any) {
  * @param {unknown} [storageApi]
  * @returns {Promise<{ token: string|null, source: 'default'|'host'|null, host: string }>}
  */
+function normalizeActiveGithubWebHost(raw: any) {
+  let host = String(raw || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .replace(/\/.*$/, '')
+    .replace(/:\d+$/, '');
+  if (host.includes('@')) host = host.slice(host.lastIndexOf('@') + 1);
+  if (!host || host === 'www.github.com') return 'github.com';
+  return host;
+}
+
+function getActiveGithubWebHost(storageApi: any) {
+  const area = getStorageArea(storageApi);
+  if (!area) return Promise.resolve('github.com');
+  return new Promise((resolve) => {
+    area.get([ACTIVE_GITHUB_WEB_HOST_KEY], (result: any) => {
+      resolve(normalizeActiveGithubWebHost(result?.[ACTIVE_GITHUB_WEB_HOST_KEY]));
+    });
+  });
+}
+
+function setActiveGithubWebHost(host: any, storageApi: any) {
+  const area = getStorageArea(storageApi);
+  if (!area) return Promise.reject(new Error('chrome.storage unavailable'));
+  const value = normalizeActiveGithubWebHost(host);
+  return new Promise((resolve, reject) => {
+    area.set({ [ACTIVE_GITHUB_WEB_HOST_KEY]: value }, () => {
+      const err = (globalThis as any).chrome?.runtime?.lastError;
+      if (err) reject(err);
+      else resolve(value);
+    });
+  });
+}
+
 async function getTokenForWebHost(webHost: any, storageApi: any) {
   const [defaultToken, hostAccounts] = await Promise.all([
     getGithubToken(storageApi),
@@ -802,6 +839,7 @@ async function getTokenForWebHost(webHost: any, storageApi: any) {
 const storageApi = {
   TOKEN_KEY,
   HOST_ACCOUNTS_KEY,
+  ACTIVE_GITHUB_WEB_HOST_KEY,
   PREFS_KEY,
   ONBOARDING_KEY,
   RATE_LIMIT_KEY,
@@ -831,6 +869,9 @@ const storageApi = {
   registerHostAccount,
   unregisterHostAccount,
   getTokenForWebHost,
+  getActiveGithubWebHost,
+  setActiveGithubWebHost,
+  normalizeActiveGithubWebHost,
 };
 
 if (typeof module !== 'undefined' && module.exports) {

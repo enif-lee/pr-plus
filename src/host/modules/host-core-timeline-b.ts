@@ -21,11 +21,76 @@
     }
   }
 
-  /** Enter embed for the current native GH PR URL (header button + ⌘⇧E). */
+  function resolveLinearReviewPrTarget() {
+    try {
+      const ep = (globalThis as any).PRGithubEndpoints;
+      if (!ep?.isLinearReviewPath?.(location.pathname)) return null;
+      const found: any[] = [];
+      const seen = new Set();
+      const anchors = document.querySelectorAll('a[href]');
+      for (let i = 0; i < anchors.length; i++) {
+        const p = ep.parseGithubPullUrl?.(
+          anchors[i].getAttribute('href') || (anchors[i] as HTMLAnchorElement).href,
+          location.href
+        );
+        if (!p) continue;
+        const key = `${p.githubWebHost}/${p.owner}/${p.repo}/${p.number}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        found.push(p);
+      }
+      if (found.length !== 1) return null;
+      return {
+        owner: found[0].owner,
+        repo: found[0].repo,
+        number: found[0].number,
+        page: 'conversation',
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  function findLinearReviewTabMount(doc = document) {
+    try {
+      const links = Array.from(doc.querySelectorAll('a[href*="/review/"]'));
+      const overview = links.find((a) =>
+        /^\s*Overview\s*$/i.test(String(a.textContent || ''))
+      );
+      const diff = links.find((a) =>
+        /^\s*Diff\s*$/i.test(String(a.textContent || ''))
+      );
+      if (!overview || !diff) return null;
+      let el: Element | null = overview.parentElement;
+      for (let i = 0; i < 8 && el; i++) {
+        if (
+          el.contains(diff) &&
+          el.children.length >= 2 &&
+          el.children.length <= 8
+        ) {
+          const texts = Array.from(el.children).map((c) =>
+            String((c as HTMLElement).innerText || '').trim()
+          );
+          if (
+            texts.some((t) => t === 'Overview' || t.startsWith('Overview')) &&
+            texts.some((t) => t === 'Diff' || t.startsWith('Diff'))
+          ) {
+            return el;
+          }
+        }
+        el = el.parentElement;
+      }
+    } catch {
+      /* ignore */
+    }
+    return null;
+  }
+
+  /** Enter embed/modal for the current native GH PR or Linear review. */
   function openEmbedFromNativePr() {
     if (!hostEnabled) return { ok: false, reason: 'disabled' };
-    if (current.open && isEmbedPresentation(current.presentation)) {
-      return { ok: false, reason: 'embed-open' };
+    if (current.open) {
+      return { ok: false, reason: 'already-open' };
     }
     // Prefer full location (path + prp_* query/hash) so comment deep-links restore
     const t =
@@ -40,7 +105,8 @@
           )
         : parsePrPagePath(
             typeof location !== 'undefined' ? location.pathname : ''
-          ));
+          )) ||
+      resolveLinearReviewPrTarget();
     if (!t) return { ok: false, reason: 'not-pr-page' };
     removeGithubPrToggle();
     void openModal({
@@ -49,7 +115,7 @@
       number: t.number,
       page: t.page,
       position: t.position || null,
-      presentation: 'embed',
+      presentation: isPartnerOrShellRuntime() ? 'modal' : 'embed',
       commitSha: t.commitSha || null,
       commitEndSha: t.commitEndSha || null,
       filePath: t.filePath || null,
@@ -129,7 +195,8 @@
 
   /**
    * On native GH PR pages (when pr+ embed is off), show a toggle next to the
-   * PR header to open the pr+ in-page view.
+   * PR header to open the pr+ in-page view. On Linear review pages, mount the
+   * same control to the right of Overview / Diff.
    */
   function ensureGithubPrToggle() {
     ensureNativePrOpenShortcut();
@@ -139,18 +206,16 @@
     }
     const path =
       typeof location !== 'undefined' ? location.pathname : '';
-    const target = parsePrPagePath(path);
+    const linearTarget = resolveLinearReviewPrTarget();
+    const target = parsePrPagePath(path) || linearTarget;
     if (!target) {
       removeGithubPrToggle();
       return { ok: false, reason: 'not-pr-page' };
     }
-    // Embed already open — restore control lives in pr+ header
-    if (
-      current.open &&
-      isEmbedPresentation(current.presentation)
-    ) {
+    const overlayLive = Boolean(document.querySelector('.prp-overlay'));
+    if (current.open && overlayLive) {
       removeGithubPrToggle();
-      return { ok: false, reason: 'embed-open' };
+      return { ok: false, reason: 'open' };
     }
 
     const scLabel = openEmbedShortcutLabel();
@@ -184,7 +249,9 @@
       btn.id = GH_PR_TOGGLE_ID;
       btn.type = 'button';
       // Match Primer PR header actions (32px / 14px / parent gap) — see styles.css
-      btn.className = 'prp-gh-open-toggle';
+      btn.className = linearTarget
+        ? 'prp-gh-open-toggle prp-linear-open-toggle'
+        : 'prp-gh-open-toggle';
       btn.setAttribute('data-prp-gh-toggle', '1');
       btn.setAttribute('aria-label', openWithLabel);
       btn.title = openWithLabel;
@@ -201,7 +268,9 @@
       openEmbedFromNativePr();
     };
 
-    const mount = findGithubPrHeaderMount();
+    const mount = linearTarget
+      ? findLinearReviewTabMount()
+      : findGithubPrHeaderMount();
     if (!mount) {
       // Keep button if already mounted; otherwise nothing to attach to yet
       if (!btn.isConnected) {
@@ -210,7 +279,7 @@
       return { ok: true, reason: 'already-mounted' };
     }
     if (btn.parentElement !== mount) {
-      // Prefer end of actions cluster (right side of PR header)
+      // Prefer end of actions cluster (right of Overview/Diff or GH header)
       try {
         mount.appendChild(btn);
       } catch {

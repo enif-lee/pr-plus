@@ -349,3 +349,77 @@ export function buildUnifiedReviewerRows(detail: any) {
   }
   return [...rows.values()].sort((a, b) => a.login.localeCompare(b.login));
 }
+
+export type SearchableSelectAnchorRect = {
+  top: number;
+  left: number;
+  right?: number;
+  bottom: number;
+  width: number;
+  height: number;
+};
+
+/**
+ * Viewport-fixed coords for an anchored SearchableSelect panel.
+ * Left/width come from the trigger only; height is used to flip above/below.
+ * Callers must not paint the panel until this returns (unpositioned
+ * `position:fixed` defaults to the overlay's static left edge).
+ */
+export function placeSearchableSelectPanel(opts: {
+  anchor: SearchableSelectAnchorRect;
+  viewport: { width: number; height: number };
+  panelHeight?: number;
+  placement?: 'top' | 'bottom';
+  minWidth?: number;
+  maxWidth?: number;
+  gap?: number;
+  edge?: number;
+}): { top: number; left: number; width: number } | null {
+  const r = opts?.anchor;
+  if (!r) return null;
+  if (!r.width && !r.height && r.top === 0 && r.left === 0) return null;
+
+  const vw = Number(opts.viewport?.width) || 0;
+  const vh = Number(opts.viewport?.height) || 0;
+  if (vw <= 0 || vh <= 0) return null;
+
+  const gap = Number.isFinite(Number(opts.gap)) ? Number(opts.gap) : 6;
+  const edge = Number.isFinite(Number(opts.edge)) ? Number(opts.edge) : 8;
+  const minW = Number.isFinite(Number(opts.minWidth))
+    ? Math.max(160, Number(opts.minWidth))
+    : 220;
+  const maxW = Number.isFinite(Number(opts.maxWidth))
+    ? Math.max(minW, Number(opts.maxWidth))
+    : 320;
+  const width = Math.max(minW, Math.min(maxW, Math.max(Number(r.width) || 0, minW)));
+  const left = Math.min(Math.max(edge, Number(r.left) || 0), Math.max(edge, vw - width - edge));
+
+  const h = Math.max(0, Number(opts.panelHeight) || 0);
+  const preferBottom = opts.placement !== 'top';
+  const belowTop = Number(r.bottom) + gap;
+  const aboveTop = Number(r.top) - h - gap;
+
+  let top = preferBottom ? belowTop : Math.max(edge, Number(r.top) - gap);
+  if (h > 0) {
+    const fitsBelow = belowTop + h <= vh - edge;
+    const fitsAbove = aboveTop >= edge;
+    if (preferBottom) {
+      if (fitsBelow) top = belowTop;
+      else if (fitsAbove) top = aboveTop;
+      else {
+        const spaceBelow = vh - Number(r.bottom) - edge;
+        const spaceAbove = Number(r.top) - edge;
+        top = spaceAbove > spaceBelow ? Math.max(edge, aboveTop) : belowTop;
+      }
+    } else if (fitsAbove) {
+      top = aboveTop;
+    } else if (fitsBelow) {
+      top = belowTop;
+    } else {
+      const spaceBelow = vh - Number(r.bottom) - edge;
+      const spaceAbove = Number(r.top) - edge;
+      top = spaceBelow > spaceAbove ? belowTop : Math.max(edge, aboveTop);
+    }
+  }
+  return { top: Math.max(edge, top), left, width };
+}

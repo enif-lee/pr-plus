@@ -1,4 +1,5 @@
 import { createTranslator, formatMessage } from './modal/lib/i18n';
+import { parseCustomConnectedOrigins } from './background/sw-connected-sites';
 import {
   normalizeUiLanguagePref,
   resolveEffectiveLocale,
@@ -41,6 +42,17 @@ const enterpriseStatusEl = document.getElementById('enterprise-status');
 const endpointPreviewEl = document.getElementById('endpoint-preview');
 const hostAccountsListEl = document.getElementById('host-accounts-list');
 const hostAccountsEmptyEl = document.getElementById('host-accounts-empty');
+const activeGithubHostEl = document.getElementById(
+  'active-github-host'
+) as HTMLSelectElement | null;
+const connectLinearBtn = document.getElementById('connect-linear');
+const connectJiraBtn = document.getElementById('connect-jira');
+const connectLocalhostBtn = document.getElementById('connect-localhost');
+const connectCustomBtn = document.getElementById('connect-custom');
+const connectCustomHostEl = document.getElementById(
+  'connect-custom-host'
+) as HTMLInputElement | null;
+const connectedSitesListEl = document.getElementById('connected-sites-list');
 
 const MAX_HOST_ACCOUNTS = 3;
 
@@ -521,6 +533,49 @@ function renderHostAccounts(accounts: any) {
     hostAccountsState[0]?.host ||
     'github.com';
   updateEndpointPreview(previewHost);
+  fillActiveHostSelect(hostAccountsState);
+}
+
+function fillActiveHostSelect(accounts: any[], selected?: string) {
+  if (!activeGithubHostEl) return;
+  const current = selected || activeGithubHostEl.value || 'github.com';
+  const hosts = [
+    'github.com',
+    ...((Array.isArray(accounts) ? accounts : []).map((a: any) => a.host).filter(Boolean)),
+  ];
+  const uniq = [...new Set(hosts)];
+  activeGithubHostEl.innerHTML = '';
+  for (const h of uniq) {
+    const opt = document.createElement('option');
+    opt.value = h;
+    opt.textContent = h;
+    activeGithubHostEl.appendChild(opt);
+  }
+  activeGithubHostEl.value = uniq.includes(current) ? current : 'github.com';
+}
+
+function renderConnectedSites(origins: string[]) {
+  if (!connectedSitesListEl) return;
+  connectedSitesListEl.innerHTML = '';
+  for (const origin of origins || []) {
+    const li = document.createElement('li');
+    const name = document.createElement('span');
+    name.className = 'host-name';
+    name.textContent = origin;
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.textContent = t('popup_btn_remove');
+    removeBtn.addEventListener('click', () => {
+      void send({ type: 'PR_TREE_CONNECTED_SITES_REMOVE', origins: [origin] }).then(
+        (res) => {
+          if (res?.ok) renderConnectedSites(res.origins || []);
+        }
+      );
+    });
+    li.appendChild(name);
+    li.appendChild(removeBtn);
+    connectedSitesListEl.appendChild(li);
+  }
 }
 
 /**
@@ -663,10 +718,12 @@ function writeLocalExtensionPrefs(prefs: any): Promise<void> {
 async function load() {
   try {
     // Prefs: storage.local is SoT (SW PREFS_GET can omit uiLanguage if SW stale)
-    const [status, localPrefs, hostsRes] = await Promise.all([
+    const [status, localPrefs, hostsRes, activeHost, sitesRes] = await Promise.all([
       send({ type: 'PR_TREE_TOKEN_STATUS' }),
       readLocalExtensionPrefs(),
       send({ type: 'PR_TREE_HOST_ACCOUNTS_LIST' }),
+      send({ type: 'PR_TREE_ACTIVE_HOST_GET' }),
+      send({ type: 'PR_TREE_CONNECTED_SITES_LIST' }),
     ]);
     if (!status?.ok && status?.error) {
       throw new Error(status.error);
@@ -679,6 +736,8 @@ async function load() {
     renderRateLimitState(null, prefs?.pluginEnabled !== false);
     const accounts = hostsRes?.accounts || [];
     renderHostAccounts(accounts);
+    fillActiveHostSelect(accounts, activeHost?.host);
+    renderConnectedSites(sitesRes?.origins || []);
     if (!status?.configured && accounts.length === 0) {
       setStatus(t('popup_status_no_token'));
     }
@@ -977,20 +1036,96 @@ clearIdbBtn?.addEventListener('click', async () => {
     if (!res?.ok && res?.error) {
       throw new Error(res.error);
     }
-    const tabs = Number(res?.tabs) || 0;
-    const cleared = Number(res?.cleared) || 0;
-    if (tabs === 0) {
-      setStatus(t('popup_status_idb_need_tab'), true);
-    } else if (cleared === 0) {
-      setStatus(t('popup_status_idb_need_tab'), true);
-    } else {
-      setStatus(t('popup_status_idb_cleared'));
-    }
+    setStatus(t('popup_status_idb_cleared'));
   } catch (err) {
     setStatus(err.message || 'Clear cache failed', true);
   } finally {
   // @ts-expect-error classic content-script dynamic shapes
     clearIdbBtn.disabled = false;
+  }
+});
+
+activeGithubHostEl?.addEventListener('change', () => {
+  void send({
+    type: 'PR_TREE_ACTIVE_HOST_SET',
+    host: activeGithubHostEl.value,
+  });
+});
+
+function requestOrigins(
+  origins: string[]
+): Promise<{ granted: boolean; error?: string }> {
+  const chromeApi = (globalThis as any).chrome;
+  if (!chromeApi?.permissions?.request) {
+    return Promise.resolve({
+      granted: false,
+      error: 'permissions API unavailable',
+    });
+  }
+  return new Promise((resolve) => {
+    chromeApi.permissions.request({ origins }, (granted: boolean) => {
+      const err = chromeApi.runtime?.lastError;
+      if (err) resolve({ granted: false, error: err.message });
+      else resolve({ granted: Boolean(granted) });
+    });
+  });
+}
+
+function addConnectedOrigins(origins: string[]) {
+  // permissions.request must run in this click turn — SW cannot show the prompt.
+  void requestOrigins(origins)
+    .then((req) => {
+      if (!req.granted) {
+        setStatus(req.error || t('popup_status_site_denied'), true);
+        return null;
+      }
+      return send({ type: 'PR_TREE_CONNECTED_SITES_ADD', origins });
+    })
+    .then((res) => {
+      if (!res) return;
+      if (res.ok) {
+        renderConnectedSites(res.origins || []);
+        setStatus(t('popup_status_site_added'));
+      } else {
+        setStatus(res.error || t('popup_status_site_denied'), true);
+      }
+    });
+}
+
+connectLinearBtn?.addEventListener('click', () => {
+  addConnectedOrigins(['https://linear.app/*', 'https://*.linear.app/*']);
+});
+connectJiraBtn?.addEventListener('click', () => {
+  addConnectedOrigins(['https://*.atlassian.net/*']);
+});
+connectLocalhostBtn?.addEventListener('click', () => {
+  addConnectedOrigins(['http://localhost/*', 'http://127.0.0.1/*']);
+});
+
+function siteErrorMessage(code: string) {
+  if (code === 'github') return t('popup_status_site_github');
+  if (code === 'https-only') return t('popup_status_site_https_only');
+  if (code === 'empty') return t('popup_status_site_invalid');
+  return t('popup_status_site_invalid');
+}
+
+function addCustomConnectedSite() {
+  const raw = String(connectCustomHostEl?.value || '');
+  const parsed = parseCustomConnectedOrigins(raw);
+  if (!parsed.ok) {
+    setStatus(siteErrorMessage(parsed.error), true);
+    return;
+  }
+  addConnectedOrigins(parsed.origins);
+}
+
+connectCustomBtn?.addEventListener('click', () => {
+  addCustomConnectedSite();
+});
+connectCustomHostEl?.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Enter') {
+    ev.preventDefault();
+    addCustomConnectedSite();
   }
 });
 
