@@ -693,6 +693,72 @@ export function focusContextThreadReplyAfterPaint(
 }
 
 /**
+ * True when a comment-chrome control is clickable (enabled + has a box).
+ */
+function isLiveCommentActionControl(el: Element | null | undefined): el is HTMLElement {
+  if (!el) return false;
+  const node = el as HTMLElement;
+  if ((node as HTMLButtonElement).disabled) return false;
+  try {
+    const br = node.getBoundingClientRect?.();
+    if (br && (br.width < 2 || br.height < 2)) return false;
+  } catch {
+    /* jsdom / detached */
+  }
+  return true;
+}
+
+/**
+ * Resolve copy/quote/hide/edit/delete chrome for a focused comment.
+ * Prefers the **unit-focused** reply (↑↓ within a thread) so ⌥W/⌥X land on
+ * the reply, not the first (root) button via `querySelector`.
+ */
+export function resolveContextCommentActionControl(
+  root: ParentNode | null | undefined,
+  selectors: string[] | null | undefined
+): HTMLElement | null {
+  if (!root || typeof (root as ParentNode).querySelector !== 'function') {
+    return null;
+  }
+  const sels = Array.isArray(selectors)
+    ? selectors.map(String).filter(Boolean)
+    : [];
+  if (!sels.length) return null;
+  const trySel = (sel: string): HTMLElement | null => {
+    try {
+      const el = (root as ParentNode).querySelector(sel) as HTMLElement | null;
+      return isLiveCommentActionControl(el) ? el : null;
+    } catch {
+      return null;
+    }
+  };
+  for (const s of sels) {
+    const hit = trySel(`[data-prp-thread-unit-active="1"] ${s}`);
+    if (hit) return hit;
+  }
+  for (const s of sels) {
+    const hit = trySel(`.prp-review-thread__item--unit-focus ${s}`);
+    if (hit) return hit;
+  }
+  for (const s of sels) {
+    const hit = trySel(s);
+    if (hit) return hit;
+  }
+  for (const s of sels) {
+    try {
+      const candidates = [
+        ...((root as ParentNode).querySelectorAll?.(s) || []),
+      ] as HTMLElement[];
+      const hit = candidates.find((el) => isLiveCommentActionControl(el));
+      if (hit) return hit;
+    } catch {
+      /* ignore */
+    }
+  }
+  return null;
+}
+
+/**
  * True when this review comment id is the active context-thread target
  * (Conversation kb focus or Diff comment nav).
  */

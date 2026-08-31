@@ -635,6 +635,9 @@ export function DiffToolbar(props: any) {
                   title={t('display_options')}
                   onClick={(e) => {
                     e.stopPropagation();
+                    // Place coords in the same tick so the portal can mount
+                    // without waiting on useLayoutEffect (e2e click-once).
+                    if (!settingsOpen) placeSettingsMenu();
                     setSettingsOpen((v) => !v);
                   }}
                   data-prp-review-filter-gear="1"

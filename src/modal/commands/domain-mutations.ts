@@ -1,5 +1,13 @@
 /** PrModal mutations/meta/write-through — nested install scope for mutual calls. */
-import { buildLabelOptions } from '../lib/searchable-select';
+import {
+  buildLabelOptions,
+  buildPeopleOptions,
+  peopleDirectoryKindForPicker,
+  peoplePickerOptionsFromDirectory,
+  peoplePickerShouldSearchDirectory,
+  reviewerPickerExcludeLogins,
+  isPullRequestAuthor,
+} from '../lib/searchable-select';
 import { toggleViewedPath } from '../lib/review-threads';
 import {
   stampThreadResolved,
@@ -315,27 +323,89 @@ export function installPrModalMutations(d: Record<string, any>) {
       d.setActionBusy(false);
     }
   }
+  let peopleDirTimer: ReturnType<typeof setTimeout> | null = null;
+  let peopleDirSeq = 0;
+
+  function peopleExcludeForType(type: string) {
+    if (type === 'assignee') return d.detail?.assignees || [];
+    return reviewerPickerExcludeLogins(d.detail);
+  }
+
+  function localPeopleExtraOptions(exclude: any[]) {
+    const logins =
+      typeof d.collectPeopleLogins === 'function'
+        ? d.collectPeopleLogins(exclude)
+        : [];
+    const build =
+      typeof d.buildPeopleOptions === 'function'
+        ? d.buildPeopleOptions
+        : buildPeopleOptions;
+    return build(logins, {}, d.detail?.avatarUrls || {});
+  }
+
+  async function refreshPeopleDirectoryPicker(type: string, query: string) {
+    const seq = ++peopleDirSeq;
+    const snap = d.detail;
+    if (!snap?.owner || !snap?.repo) return;
+    if (type !== 'assignee' && type !== 'reviewer') return;
+    const exclude = peopleExcludeForType(type);
+    // Reviewer extra (comment authors, etc.) is often not a collaborator → 422.
+    const extraOptions =
+      type === 'reviewer' ? [] : localPeopleExtraOptions(exclude);
+    let users: any[] = [];
+    try {
+      const api = globalThis.PRTreeFetch;
+      if (typeof api?.searchRepoPeople === 'function') {
+        users =
+          (await api.searchRepoPeople(snap.owner, snap.repo, {
+            query: String(query || ''),
+            kind: peopleDirectoryKindForPicker(type),
+          })) || [];
+      }
+    } catch {
+      users = [];
+    }
+    if (seq !== peopleDirSeq) return;
+    const picker = useModalStore.getState().picker;
+    if (!picker || picker.type !== type) return;
+    if (!peoplePickerShouldSearchDirectory(picker)) return;
+    if (String(picker.query || '').trim() !== String(query || '').trim()) {
+      return;
+    }
+    const options = peoplePickerOptionsFromDirectory(users, query, {
+      exclude,
+      extraOptions,
+    });
+    d.setPicker((prev: any) =>
+      prev && prev.type === type ? { ...prev, options } : prev
+    );
+  }
+
+  function onPeoplePickerQuery(q: any) {
+    const query = String(q || '');
+    if (peopleDirTimer) clearTimeout(peopleDirTimer);
+    peopleDirTimer = setTimeout(() => {
+      peopleDirTimer = null;
+      const p = useModalStore.getState().picker;
+      if (!peoplePickerShouldSearchDirectory(p)) return;
+      void refreshPeopleDirectoryPicker(p.type, query);
+    }, 180);
+  }
+
   function openAssigneePicker() {
     if (!d.detail) return;
     const exclude = d.detail.assignees || [];
-    const logins = d.collectPeopleLogins(exclude);
-    const options =
-      typeof d.buildPeopleOptions === 'function'
-        ? d.buildPeopleOptions(logins, {}, d.detail.avatarUrls || {})
-        : logins.map((id: any) => ({
-            id,
-            label: id,
-            meta: {
-              login: id,
-              kind: 'user',
-              avatarUrl: d.detail.avatarUrls?.[String(id).toLowerCase()] || '',
-            },
-          }));
+    const extraOptions = localPeopleExtraOptions(exclude);
+    const options = peoplePickerOptionsFromDirectory([], '', {
+      exclude,
+      extraOptions,
+    });
     d.pickerAnchorRef.current = d.assigneeAddRef?.current;
     // Shared single-select surface with openReviewerPicker (not multi-Apply).
     d.setPicker({
       type: 'assignee',
       title: 'Add assignee',
+      peopleDirectory: true,
       options,
       query: '',
       allowFreeText: true,
@@ -346,6 +416,7 @@ export function installPrModalMutations(d: Record<string, any>) {
         void applyAddAssignees([opt?.id || opt?.label || opt?.meta?.login]);
       },
     });
+    void refreshPeopleDirectoryPicker('assignee', '');
   }
   async function onRemoveAssignee(login: any) {
     if (!d.detail || !login) return;
@@ -755,6 +826,7 @@ export function installPrModalMutations(d: Record<string, any>) {
     if (!d.detail || !login) return;
     const name = String(login).trim();
     if (!name) return;
+    if (isPullRequestAuthor(name, d.detail)) return;
     d.setActionBusy(true);
     d.setActionMsg('');
     try {
@@ -798,21 +870,14 @@ export function installPrModalMutations(d: Record<string, any>) {
   }
   function openReviewerPicker() {
     if (!d.detail) return;
-    const exclude = d.detail.requestedReviewers || [];
-    const logins = d.collectPeopleLogins(exclude);
-    const options =
-      typeof d.buildPeopleOptions === 'function'
-        ? d.buildPeopleOptions(logins, {}, d.detail.avatarUrls || {})
-        : logins.map((id: any) => ({
-            id,
-            label: id,
-            meta: { login: id, kind: 'user', avatarUrl: d.detail.avatarUrls?.[String(id).toLowerCase()] || '' },
-          }));
+    const exclude = peopleExcludeForType('reviewer');
+    const options = peoplePickerOptionsFromDirectory([], '', { exclude });
     d.pickerAnchorRef.current = d.reviewerAddRef?.current;
     // Shared single-select surface with openAssigneePicker (⌥1–3 quick pick).
     d.setPicker({
       type: 'reviewer',
       title: 'Add reviewer',
+      peopleDirectory: true,
       options,
       query: '',
       allowFreeText: true,
@@ -823,6 +888,7 @@ export function installPrModalMutations(d: Record<string, any>) {
         void applyAddReviewer(opt?.id || opt?.label);
       },
     });
+    void refreshPeopleDirectoryPicker('reviewer', '');
   }
   async function onRemoveReviewer(login: any) {
     if (!d.detail || !login) return;
@@ -1821,6 +1887,8 @@ export function installPrModalMutations(d: Record<string, any>) {
     patchHostDetail,
     applyAddAssignees,
     openAssigneePicker,
+    onPeoplePickerQuery,
+    refreshPeopleDirectoryPicker,
     onRemoveAssignee,
     applySetLabels,
     openLabelPicker,

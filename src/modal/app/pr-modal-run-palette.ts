@@ -15,17 +15,17 @@ export function runPaletteCommand(d: Record<string, any>, cmd: any) {
     onLeaveReviewAction, onClosePr, onReopenPr, applySetLabels, detail, layoutMode, LAYOUT_DIFF,
     applyActionRef, setActionMsg, focusCommentBox, onRefresh, collapseActiveFile, expandActiveFile,
     collapseFold, expandFold, stepNavPrev, stepNavNext, scrollDiffPage, optArrowScrollSelect,
-    toggleViewedActiveFile, toggleActiveFileCollapse, contextThreadCollapse, contextThreadExpand,
+    toggleViewedActiveFile, toggleHideWhitespace, toggleHideOutdated, toggleDiffMode, expandHunkAtCaret, toggleActiveFileCollapse, contextThreadCollapse, contextThreadExpand,
     contextThreadFold, contextThreadGotoDiff, contextThreadComment, contextThreadResolve,
     focusedThreadFold, focusedThreadGotoDiff, focusedThreadComment, focusedThreadResolve,
-    scrollConversationPanel, navConversationComment, navComment, navSearch, navFile,
+    scrollConversationPanel, navConversationComment, navPendingReviewBox, navComment, navSearch, navFile,
     moveSelectionUp, moveSelectionDown,
     extendSelectionUp, extendSelectionDown, navAdjacentPrev, navAdjacentNext, openGithub,
     promptLabels, promptMilestone, promptBase, promptAddReviewer, promptRemoveReviewer,
     promptAddAssignee, promptRemoveAssignee, rerequestReview, leaveReview, mergePr, updateBranch,
     convertDraft, readyForReview, toggleDraftStage, editTitle, editBody, subscribe, unsubscribe,
     closePr, reopenPr, applySuggestion, focusComment, openStackPr, openPullRequest,
-    setActiveFileCollapse, applyGotoQuery, onDiscardPendingReview, onReplyToThread, onResolveThread,
+    setActiveFileCollapse, applyGotoQuery, onDiscardPendingReview, loadMoreReviewThreads, onReplyToThread, onResolveThread,
     runContextThreadAction, searchOpen, searchInputRef, setTitleEditSignal, setEditingBody,
     setSelectionIslandPhase, setShowSelectionComposer, setPicker, closePicker,
     useModalStore: useModalStoreDep, uiRef, isReviewVerdictKind, isViewerPrAuthor,
@@ -113,6 +113,31 @@ export function runPaletteCommand(d: Record<string, any>, cmd: any) {
     case 'toggleViewedActiveFile':
       toggleViewedActiveFile();
       break;
+    case 'toggleHideWhitespace':
+      toggleHideWhitespace?.();
+      break;
+    case 'toggleHideOutdated':
+      toggleHideOutdated?.();
+      break;
+    case 'toggleDiffMode':
+      toggleDiffMode?.();
+      break;
+    case 'expandHunkAtCaret':
+      expandHunkAtCaret?.();
+      break;
+    case 'discardPendingReview':
+      onDiscardPendingReview?.();
+      break;
+    case 'loadMoreThreads':
+      loadMoreReviewThreads?.();
+      break;
+    case 'openDiffGoto':
+      try {
+        window.dispatchEvent(new CustomEvent('prp-open-diff-goto'));
+      } catch {
+        /* ignore */
+      }
+      break;
     case 'toggleActiveFileCollapse':
       toggleActiveFileCollapse();
       break;
@@ -149,6 +174,12 @@ export function runPaletteCommand(d: Record<string, any>, cmd: any) {
       if (searchOpen) navSearch?.(1);
       else if (liveLayout === LAYOUT_DIFF) navComment?.(1);
       else navConversationComment?.(1);
+      break;
+    case 'stepPendingBoxPrev':
+      navPendingReviewBox?.(-1);
+      break;
+    case 'stepPendingBoxNext':
+      navPendingReviewBox?.(1);
       break;
     case 'scrollConversationOptPrev':
       scrollConversationPanel(-1, false);
@@ -319,6 +350,7 @@ export function runPaletteCommand(d: Record<string, any>, cmd: any) {
       setPicker({
         type: 'reviewer',
         title: 'Remove reviewer',
+        peopleDirectory: false,
         options: opts,
         query: '',
         allowFreeText: true,
@@ -348,6 +380,7 @@ export function runPaletteCommand(d: Record<string, any>, cmd: any) {
       setPicker({
         type: 'assignee',
         title: 'Unassign',
+        peopleDirectory: false,
         options: opts,
         query: '',
         allowFreeText: true,

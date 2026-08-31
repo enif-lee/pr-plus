@@ -170,6 +170,44 @@ export function buildDiffPaletteCommands(): any[] {
       action: 'toggleReviewFilterPending',
     },
     {
+      id: 'diff-goto',
+      title: 'Goto file / line…',
+      section: 'Diff',
+      keywords: ['goto', 'jump', 'file', 'line'],
+      shortcut: optShortcutForCommandId('diff-goto') || 'opt+g',
+      action: 'openDiffGoto',
+    },
+    {
+      id: 'diff-hide-whitespace',
+      title: 'Toggle hide whitespace',
+      section: 'Diff',
+      keywords: ['whitespace', 'hide', 'diff'],
+      shortcut: optShortcutForCommandId('diff-hide-whitespace') || 'opt+shift+h',
+      action: 'toggleHideWhitespace',
+    },
+    {
+      id: 'diff-toggle-mode',
+      title: 'Toggle unified / split Diff',
+      section: 'Diff',
+      keywords: ['unified', 'split', 'mode', 'layout'],
+      shortcut: optShortcutForCommandId('diff-toggle-mode') || 'opt+shift+\\',
+      action: 'toggleDiffMode',
+    },
+    {
+      id: 'diff-hide-outdated',
+      title: 'Toggle hide outdated comments',
+      section: 'Diff',
+      keywords: ['outdated', 'hide', 'filter', 'comments'],
+      action: 'toggleHideOutdated',
+    },
+    {
+      id: 'diff-expand-hunk',
+      title: 'Expand omitted hunk at caret',
+      section: 'Diff',
+      keywords: ['hunk', 'expand', 'context', 'omitted', 'gap'],
+      action: 'expandHunkAtCaret',
+    },
+    {
       id: 'diff-sel-up',
       title: 'Move line selection up',
       section: 'Diff',
@@ -548,7 +586,8 @@ export function buildPaletteCommands(detail: any, opts: any = {}) {
       title: 'Edit PR description',
       section: 'PR',
       keywords: ['body', 'description', 'edit'],
-      shortcut: optShortcutForCommandId('edit-body') || 'opt+e',
+      // ⌥E is comment reaction; description edit is palette or focused ⌥W
+      shortcut: optShortcutForCommandId('edit-body') || undefined,
       action: 'editBody',
     },
     {
@@ -706,6 +745,21 @@ export function buildPaletteCommands(detail: any, opts: any = {}) {
       shortcut: optShortcutForCommandId('review-comment') || 'opt+enter',
       action: 'leaveReview',
       payload: { kind: 'comment' },
+    },
+    {
+      id: 'discard-pending-review',
+      title: 'Discard pending review',
+      section: 'Review',
+      keywords: ['discard', 'pending', 'review'],
+      shortcut: optShortcutForCommandId('discard-pending-review') || 'opt+shift+backspace',
+      action: 'discardPendingReview',
+    },
+    {
+      id: 'load-more-threads',
+      title: 'Load more review threads',
+      section: 'Conversation',
+      keywords: ['load', 'more', 'threads', 'comments'],
+      action: 'loadMoreThreads',
     },
     ...(allowReviewVerdict
       ? [

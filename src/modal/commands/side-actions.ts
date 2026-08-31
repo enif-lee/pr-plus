@@ -340,28 +340,12 @@ export function installSideActions(d: Record<string, any>) {
   function openRerequestReviewerPicker() {
     const detail = d.detail;
     if (!detail) return;
-    const exclude = detail.requestedReviewers || [];
-    const logins =
-      typeof d.collectPeopleLogins === 'function'
-        ? d.collectPeopleLogins(exclude)
-        : [];
-    const options =
-      typeof d.buildPeopleOptions === 'function'
-        ? d.buildPeopleOptions(logins, {}, detail.avatarUrls || {})
-        : logins.map((id: string) => ({
-            id,
-            label: id,
-            meta: {
-              login: id,
-              kind: 'user',
-              avatarUrl: detail.avatarUrls?.[String(id).toLowerCase()] || '',
-            },
-          }));
     if (d.pickerAnchorRef) d.pickerAnchorRef.current = d.reviewerAddRef?.current;
     d.setPicker({
       type: 'reviewer',
       title: 'Re-request review (username)',
-      options,
+      peopleDirectory: true,
+      options: [],
       query: '',
       allowFreeText: true,
       placeholder: 'Filter or type a username…',
@@ -385,6 +369,9 @@ export function installSideActions(d: Record<string, any>) {
         void applyRerequestReviewers(filtered);
       },
     });
+    if (typeof d.refreshPeopleDirectoryPicker === 'function') {
+      void d.refreshPeopleDirectoryPicker('reviewer', '');
+    }
   }
 
   async function onRerequestReview() {

@@ -402,6 +402,50 @@
   color: var(--prp-fg, #1f2328);
 }
 
+.prp-composer-menu__item--mention {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.prp-composer-menu__avatar {
+  flex: 0 0 auto;
+}
+.prp-composer-menu__mention {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+}
+.prp-composer-menu__mention-name {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  font-size: 12px;
+  line-height: 1.25;
+}
+.prp-composer-menu__mention-login {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  line-height: 1.25;
+  color: var(--prp-fg-muted, #656d76);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.prp-composer-menu__item--mention .prp-composer-menu__mention-name + .prp-composer-menu__mention-login {
+  font-weight: 400;
+}
+.prp-composer-menu__item--active .prp-composer-menu__mention-login,
+.prp-composer-menu__item--mention:hover .prp-composer-menu__mention-login {
+  color: var(--prp-fg, #1f2328);
+}
+
 /* Title input emoji menu (Header) — floats under the field */
 .prp-header__title-edit {
   position: relative;

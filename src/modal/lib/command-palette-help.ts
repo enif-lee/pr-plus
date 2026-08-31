@@ -223,6 +223,21 @@ export function listRequiredPaletteShortcutCoverage(
         shortcut: 'opt+p',
         action: 'toggleReviewFilterPending',
       },
+      {
+        id: 'diff-goto',
+        shortcut: 'opt+g',
+        action: 'openDiffGoto',
+      },
+      {
+        id: 'diff-hide-whitespace',
+        shortcut: 'opt+shift+h',
+        action: 'toggleHideWhitespace',
+      },
+      {
+        id: 'diff-toggle-mode',
+        shortcut: 'opt+shift+\\',
+        action: 'toggleDiffMode',
+      },
       { id: 'diff-sel-up', shortcut: 'arrowup', action: 'moveSelectionUp' },
       {
         id: 'diff-sel-down',

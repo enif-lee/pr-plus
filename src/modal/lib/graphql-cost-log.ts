@@ -104,6 +104,7 @@ export function sanitizeGraphqlVariables(variables: any): Record<string, any> {
     'since',
     'before',
     'after',
+    'query',
   ]) {
     if (variables[k] === undefined) continue;
     if (k === 'ids' && Array.isArray(variables[k])) {

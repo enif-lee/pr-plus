@@ -206,6 +206,78 @@ describe('CONTEXT_THREAD_SHORTCUT comment is ⌥I', () => {
     expect(act).not.toBe('contextThreadComment');
   });
 
+  test('↑/↓ in pending-review box (no multi-reply) → box-local step', () => {
+    const up = resolveModalShortcutAction({
+      alt: false,
+      shift: false,
+      mod: false,
+      key: 'ArrowUp',
+      code: 'ArrowUp',
+      layoutMode: 'conversation',
+      pendingReviewBoxFocused: true,
+      multiReplyThreadFocused: false,
+      editableTarget: false,
+    });
+    const down = resolveModalShortcutAction({
+      alt: false,
+      shift: false,
+      mod: false,
+      key: 'ArrowDown',
+      code: 'ArrowDown',
+      layoutMode: 'conversation',
+      pendingReviewBoxFocused: true,
+      multiReplyThreadFocused: false,
+      editableTarget: false,
+    });
+    expect(up).toBe('stepPendingBoxPrev');
+    expect(down).toBe('stepPendingBoxNext');
+  });
+
+  test('⌥J/K in pending-review box still full conversation stepNav', () => {
+    expect(
+      resolveModalShortcutAction({
+        alt: true,
+        key: 'j',
+        code: 'KeyJ',
+        layoutMode: 'conversation',
+        pendingReviewBoxFocused: true,
+        editableTarget: false,
+      })
+    ).toBe('stepNavNext');
+    expect(
+      resolveModalShortcutAction({
+        alt: true,
+        key: 'k',
+        code: 'KeyK',
+        layoutMode: 'conversation',
+        pendingReviewBoxFocused: true,
+        editableTarget: false,
+      })
+    ).toBe('stepNavPrev');
+  });
+
+  test('pending-review box arrows yield to typing and to multi-reply', () => {
+    expect(
+      resolveModalShortcutAction({
+        key: 'ArrowDown',
+        code: 'ArrowDown',
+        layoutMode: 'conversation',
+        pendingReviewBoxFocused: true,
+        editableTarget: true,
+      })
+    ).toBeNull();
+    expect(
+      resolveModalShortcutAction({
+        key: 'ArrowDown',
+        code: 'ArrowDown',
+        layoutMode: 'conversation',
+        pendingReviewBoxFocused: true,
+        multiReplyThreadFocused: true,
+        editableTarget: false,
+      })
+    ).toBe('stepThreadReplyNext');
+  });
+
   test('↑/↓ with multiReplyThreadFocused → stepThreadReply*', () => {
     const up = resolveModalShortcutAction({
       alt: false,

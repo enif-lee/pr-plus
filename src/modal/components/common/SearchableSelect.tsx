@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import {
   filterSelectOptions,
   labelColorCss,
+  layoutSselectPopover,
   pickFilteredOptionByIndex,
   queryMatchesOption,
   resolveOptDigitPickIndex,
@@ -101,78 +102,50 @@ export function SearchableSelect({
       const el = (anchorRef?.current || null) as HTMLElement | null;
       if (!el || typeof el.getBoundingClientRect !== 'function') return;
       const r = el.getBoundingClientRect();
-      if (!r.width && !r.height && r.top === 0 && r.left === 0) return;
-
-      const gap = 6;
-      const edge = 8;
-      const minW = Number.isFinite(Number(minWidth)) ? Math.max(160, Number(minWidth)) : 220;
-      const maxW = Number.isFinite(Number(maxWidth))
-        ? Math.max(minW, Number(maxWidth))
-        : 320;
-      const width = Math.max(minW, Math.min(maxW, Math.max(r.width, minW)));
-      const left = Math.min(Math.max(edge, r.left), window.innerWidth - width - edge);
-      const h = panelRef.current?.offsetHeight || 0;
-      const preferBottom = placement !== 'top';
-
-      // Preferred side first; flip only when the preferred side cannot fit the panel.
-      let top = preferBottom ? r.bottom + gap : Math.max(edge, r.top - gap);
-      if (h > 0) {
-        const belowTop = r.bottom + gap;
-        const aboveTop = r.top - h - gap;
-        const fitsBelow = belowTop + h <= window.innerHeight - edge;
-        const fitsAbove = aboveTop >= edge;
-
-        if (preferBottom) {
-          if (fitsBelow) {
-            top = belowTop;
-          } else if (fitsAbove) {
-            top = aboveTop;
-          } else {
-            // Neither fits fully — pick the side with more free space
-            const spaceBelow = window.innerHeight - r.bottom - edge;
-            const spaceAbove = r.top - edge;
-            top = spaceAbove > spaceBelow ? Math.max(edge, aboveTop) : belowTop;
-          }
-        } else {
-          // placement === 'top'
-          if (fitsAbove) {
-            top = aboveTop;
-          } else if (fitsBelow) {
-            top = belowTop;
-          } else {
-            const spaceBelow = window.innerHeight - r.bottom - edge;
-            const spaceAbove = r.top - edge;
-            top = spaceBelow > spaceAbove ? belowTop : Math.max(edge, aboveTop);
-          }
+      if (!r.width && !r.height) return;
+      const next = layoutSselectPopover({
+        anchor: {
+          top: r.top,
+          left: r.left,
+          right: r.right,
+          bottom: r.bottom,
+          width: r.width,
+          height: r.height,
+        },
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+        panelHeight: panelRef.current?.offsetHeight || 0,
+        minWidth,
+        maxWidth,
+        placement,
+      });
+      setPos((prev) => {
+        if (
+          prev &&
+          prev.top === next.top &&
+          prev.left === next.left &&
+          prev.width === next.width
+        ) {
+          return prev;
         }
-      }
-      setPos({ top: Math.max(edge, top), left, width });
+        return next;
+      });
     }
 
     measure();
-    const id = requestAnimationFrame(() => {
-      measure();
-      requestAnimationFrame(measure);
-    });
+    const panel = panelRef.current;
+    const ro =
+      typeof ResizeObserver !== 'undefined' && panel
+        ? new ResizeObserver(() => measure())
+        : null;
+    if (ro && panel) ro.observe(panel);
     window.addEventListener('resize', measure);
     window.addEventListener('scroll', measure, true);
     return () => {
-      cancelAnimationFrame(id);
+      ro?.disconnect();
       window.removeEventListener('resize', measure);
       window.removeEventListener('scroll', measure, true);
     };
-  }, [
-    open,
-    anchorRef,
-    anchorKey,
-    placement,
-    query,
-    options?.length,
-    selected.length,
-    multi,
-    minWidth,
-    maxWidth,
-  ]);
+  }, [open, anchorRef, anchorKey, placement, minWidth, maxWidth]);
 
   const filteredLive = useMemo(() => {
     if (!open) return [];
@@ -393,30 +366,41 @@ export function SearchableSelect({
 
   // Portal layer above Conversation ShortcutHint (--prp-z-dialog 100100).
   const panelZ = 'var(--prp-z-portal, 120000)';
-  const style: React.CSSProperties = pos
+  const anchored = Boolean(anchorRef);
+  const placed = Boolean(pos);
+  const style: React.CSSProperties = placed
     ? {
         position: 'fixed',
-        top: pos.top,
-        left: pos.left,
-        width: pos.width,
-        minWidth: pos.width,
-        maxWidth: pos.width,
+        top: pos!.top,
+        left: pos!.left,
+        width: pos!.width,
+        minWidth: pos!.width,
+        maxWidth: pos!.width,
         zIndex: panelZ,
+        visibility: 'visible',
       }
-    : { zIndex: panelZ };
+    : {
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        zIndex: panelZ,
+        visibility: 'hidden',
+        pointerEvents: 'none',
+      };
 
   const panel = (
     <div
       ref={panelRef}
-      className={`prp-sselect-panel prp-sselect-panel--popover${pos ? '' : ' prp-sselect-panel--center'}${
-        multi ? ' prp-sselect-panel--multi' : ''
-      }`}
+      className={`prp-sselect-panel prp-sselect-panel--popover${
+        !anchored && !placed ? ' prp-sselect-panel--center' : ''
+      }${multi ? ' prp-sselect-panel--multi' : ''}`}
       role="dialog"
       aria-label={title || 'Select'}
       aria-multiselectable={multi || undefined}
       data-prp-nested-layer="1"
       data-prp-sselect="1"
-      style={pos ? style : undefined}
+      data-prp-sselect-placed={placed ? '1' : '0'}
+      style={style}
     >
       {title ? <div className="prp-sselect-title">{title}</div> : null}
       {/* Search first so commit/file pickers open with filter ready */}

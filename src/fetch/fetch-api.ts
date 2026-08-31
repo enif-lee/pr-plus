@@ -203,6 +203,10 @@ import {
   restReviewThreadsFallbackPage,
 } from './review-threads-page';
 import {
+  PEOPLE_DIRECTORY_PAGE_SIZE,
+  searchRepoPeople,
+} from './people-directory';
+import {
   applyReviewSuggestion,
   deleteIssueSubscription,
   fetchPullRequestSubscription,
@@ -307,6 +311,8 @@ export const fetchApi = {
   removeAssignees,
   setIssueLabels,
   fetchRepoLabels,
+  searchRepoPeople,
+  PEOPLE_DIRECTORY_PAGE_SIZE,
   createRepoLabel,
   fetchRepoMilestones,
   createRepoMilestone,

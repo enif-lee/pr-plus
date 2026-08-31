@@ -979,6 +979,37 @@ export function useSelectionKeyboard(b: any) {
     }
   }
 
+  /**
+   * Pin the selection head at ~1/3 of the Diff viewport (file / region hops).
+   * Not used for ArrowUp/Down (those stay on scrollSelectionHeadDomOnly).
+   */
+  function scrollSelectionHeadToThird(sel: any) {
+    const headIdx = Number(sel?.headRowIndex);
+    if (!Number.isFinite(headIdx) || headIdx < 0) return;
+    try {
+      const el = listRef.current as HTMLElement | null;
+      const vp =
+        el && el.clientHeight > 0
+          ? el.clientHeight
+          : viewportHeightRef.current;
+      const { avgH: h, rowOffsetList: offs } = getDiffScrollMetrics();
+      const top =
+        typeof scrollTopForIndex === 'function'
+          ? scrollTopForIndex(headIdx, h, vp, virtualRows.length, offs, {
+              align: 'third',
+            })
+          : 0;
+      applyProgrammaticDiffScroll(el, top, {
+        storeTop: useModalStore.getState().scrollTop,
+        setStoreTop: setScrollTop,
+        minDomDelta: 0.5,
+        minStoreDelta: Number.POSITIVE_INFINITY,
+      });
+    } catch {
+      /* ignore */
+    }
+  }
+
   /** Expand a path if collapsed so selectable lines exist after cross-file hop. */
   function ensureFileExpandedForSelection(path: string) {
     const p = String(path || '').trim();
@@ -1292,6 +1323,6 @@ export function useSelectionKeyboard(b: any) {
 
 
   return {
-    applySelectionKeyboardMove, clearLineSelectionForNav, clearSelectionActionsTimer, ensureFileExpandedForSelection, flushSelectionKeyboardMove, scheduleSelectionActionsReveal, scrollSelectionHeadDomOnly, setSelectionHoverReveal, setSelectionNavBusy, syncActiveFileFromSelection, syncSelectionActionReveal
+    applySelectionKeyboardMove, clearLineSelectionForNav, clearSelectionActionsTimer, ensureFileExpandedForSelection, flushSelectionKeyboardMove, scheduleSelectionActionsReveal, scrollSelectionHeadDomOnly, scrollSelectionHeadToThird, setSelectionHoverReveal, setSelectionNavBusy, syncActiveFileFromSelection, syncSelectionActionReveal
   };
 }

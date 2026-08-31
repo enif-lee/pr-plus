@@ -5,9 +5,12 @@ import {
   CONVERSATION_SCROLL_SHORTCUT,
   DIFF_OPT_ARROW_SHORTCUT,
   DIFF_PAGE_SCROLL_SHORTCUT,
+  DISCARD_PENDING_SHORTCUT,
   FILE_FOLD_SHORTCUT,
   FILE_NAV_SHORTCUT,
   REVIEW_FILTER_SHORTCUT,
+  TOGGLE_DIFF_MODE_SHORTCUT,
+  TOGGLE_HIDE_WHITESPACE_SHORTCUT,
   STEP_NAV_SHORTCUT,
   TOGGLE_SIDE_PANEL_SHORTCUT,
   TOGGLE_VIEWED_SHORTCUT,
@@ -83,6 +86,26 @@ export function resolveActiveFileForCollapse(opts: {
   if (fromSel) return fromSel;
   const active = String(opts.activeFilePath || '').trim();
   return active || null;
+}
+
+/**
+ * File to mark viewed/unread: focused collapse target, else first Diff file.
+ * Open Diff often has no tree `activeFilePath` until file-nav — still mark
+ * the file the user is looking at.
+ */
+export function resolveActiveFileForViewed(opts: {
+  lineSelection?: { filePath?: string | null } | null;
+  activeFilePath?: string | null;
+  files?: Array<{ filename?: string; path?: string } | null> | null;
+} = {}): string | null {
+  const focused = resolveActiveFileForCollapse(opts);
+  if (focused) return focused;
+  const list = Array.isArray(opts.files) ? opts.files : [];
+  for (const f of list) {
+    const p = String(f?.filename || f?.path || '').trim();
+    if (p) return p;
+  }
+  return null;
 }
 
 /**
@@ -400,6 +423,32 @@ export function resolveModalShortcutAction(opts: any = {}) {
     return TOGGLE_VIEWED_SHORTCUT.action;
   }
 
+  // ⌥⇧H: Diff hide-whitespace
+  if (alt && !mod && !ctrl && shift && key === 'h') {
+    if (opts.editableTarget) return null;
+    if (layout !== 'diff') return null;
+    return TOGGLE_HIDE_WHITESPACE_SHORTCUT.action;
+  }
+
+  // ⌥⇧\: Diff unified ↔ split
+  if (
+    alt &&
+    !mod &&
+    !ctrl &&
+    shift &&
+    (key === '\\' || key === 'backslash')
+  ) {
+    if (opts.editableTarget) return null;
+    if (layout !== 'diff') return null;
+    return TOGGLE_DIFF_MODE_SHORTCUT.action;
+  }
+
+  // ⌥⇧⌫: discard pending review (Finish dialog + global)
+  if (alt && !mod && !ctrl && shift && key === 'backspace') {
+    if (opts.editableTarget) return null;
+    return DISCARD_PENDING_SHORTCUT.action;
+  }
+
   // ⌥F: fold/expand focused Diff file (context-thread ⌥F handled above)
   if (alt && !mod && !ctrl && !shift && key === 'f') {
     if (opts.editableTarget) return null;
@@ -460,6 +509,24 @@ export function resolveModalShortcutAction(opts: any = {}) {
     return key === 'arrowup'
       ? 'stepThreadReplyPrev'
       : 'stepThreadReplyNext';
+  }
+
+  // Pending-review submit box: ↑/↓ stays inside pending threads + composer
+  // (wraps). Typing in the Review textarea still owns arrows. ⌥J/K remains
+  // full-conversation stepNav.
+  if (
+    !alt &&
+    !mod &&
+    !ctrl &&
+    !shift &&
+    (key === 'arrowup' || key === 'arrowdown') &&
+    !opts.editableTarget &&
+    Boolean(opts.pendingReviewBoxFocused) &&
+    (layout === 'centered' || layout === 'conversation')
+  ) {
+    return key === 'arrowup'
+      ? 'stepPendingBoxPrev'
+      : 'stepPendingBoxNext';
   }
 
   // Diff line-selection move (no Opt): plain arrows = single-line move;
@@ -628,8 +695,62 @@ export function pushThreadFocusTarget(
 }
 
 /**
+ * Pending review-group threads rendered inside the Review composer.
+ * The group card itself is not a stop (it lives in the submit box).
+ */
+export function listPendingReviewThreadFocusTargets(
+  items: any
+): Array<{ id: string; kind: string; anchor: string }> {
+  const list = Array.isArray(items) ? items : [];
+  const out: Array<{ id: string; kind: string; anchor: string }> = [];
+  for (const item of list) {
+    if (!item || item.kind !== 'review-group' || !item.pending) continue;
+    for (const t of item.threads || []) {
+      pushThreadFocusTarget(out, t);
+    }
+  }
+  return out;
+}
+
+/**
+ * Keyboard stops inside the Review submit box: pending file threads then
+ * the Review composer. Plain ↑/↓ wrap here so they do not jump to merge /
+ * description.
+ */
+export function listPendingReviewBoxFocusTargets(
+  items: any
+): Array<{ id: string; kind: string; anchor: string }> {
+  const pendingThreads = listPendingReviewThreadFocusTargets(items);
+  const composer = { id: 'composer', kind: 'composer', anchor: 'composer' };
+  return [...pendingThreads, composer];
+}
+
+/**
+ * Step ↑/↓ inside the pending-review submit box (wraps). When the current
+ * anchor is not a box stop, down seeds the first thread (or composer) and
+ * up seeds the last stop.
+ */
+export function stepPendingReviewBoxFocus(
+  items: any,
+  currentAnchor: unknown,
+  delta: number
+): { id: string; kind: string; anchor: string } | null {
+  const targets = listPendingReviewBoxFocusTargets(items);
+  if (!targets.length) return null;
+  const d = delta < 0 ? -1 : 1;
+  const cur = String(currentAnchor || '').trim();
+  let idx = cur ? targets.findIndex((t) => t.anchor === cur) : -1;
+  if (idx < 0) {
+    return d > 0 ? targets[0] : targets[targets.length - 1];
+  }
+  const next = ((idx + d) % targets.length + targets.length) % targets.length;
+  return targets[next];
+}
+
+/**
  * Timeline comment/review units only (no description/merge). Skips system events
- * and pending review-groups. Thread navigation is by **thread unit**, not per-reply.
+ * and pending review-groups (those threads are composer stops). Thread
+ * navigation is by **thread unit**, not per-reply.
  */
 export function listConversationTimelineFocusTargets(
   items: any
@@ -688,9 +809,10 @@ export function listConversationTimelineFocusTargets(
 /**
  * Ordered list of focusable Conversation stops for ⌥J / ⌥K.
  * Mirrors on-screen panel order from `buildConversationVirtualRows`:
- *   reverseComments true:  description → composer → merge → comment/review units
- *   reverseComments false: description → comment/review units → merge → composer
- * Skips pending review-groups and timeline-events.
+ *   reverseComments true:  description → pending threads → composer → merge → units
+ *   reverseComments false: description → units → merge → pending threads → composer
+ * Pending review-group threads sit in the Review submit box (above the textarea).
+ * Skips timeline-events.
  */
 export function listConversationCommentFocusTargets(
   items: any,
@@ -701,11 +823,12 @@ export function listConversationCommentFocusTargets(
   const composer = { id: 'composer', kind: 'composer', anchor: 'composer' };
   const merge = { id: 'merge', kind: 'merge', anchor: 'merge' };
   const timeline = listConversationTimelineFocusTargets(items);
+  const pendingThreads = listPendingReviewThreadFocusTargets(items);
 
   if (reverse) {
-    return [description, composer, merge, ...timeline];
+    return [description, ...pendingThreads, composer, merge, ...timeline];
   }
-  return [description, ...timeline, merge, composer];
+  return [description, ...timeline, merge, ...pendingThreads, composer];
 }
 
 /**

@@ -52,6 +52,41 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
+}
+
+.prp-action-toast--copyable {
+  pointer-events: auto;
+  gap: 6px;
+  padding-right: 8px;
+}
+
+.prp-action-toast__copy {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.78;
+}
+
+.prp-action-toast__copy:hover,
+.prp-action-toast__copy:focus-visible {
+  opacity: 1;
+  background: color-mix(in srgb, var(--prp-fg) 10%, transparent);
+}
+
+.prp-action-toast__copy:focus-visible {
+  outline: 2px solid var(--prp-accent, #0969da);
+  outline-offset: 1px;
 }
 
 .prp-action-toast--ok {

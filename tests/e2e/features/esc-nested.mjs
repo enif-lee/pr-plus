@@ -50,29 +50,51 @@ export function getSteps() {
 
   run('ESC.1 Diff settings Esc closes menu only', () => {
     blurEditable();
-    // Open gear settings
+    // Find-in-diff replaces review-filter chrome (including the gear).
+    for (let i = 0; i < 3; i++) {
+      const searchOpen = evalInPage(`
+        !!document.querySelector(
+          '.prp-diff-toolbar__thread-tools--search, .prp-search-bar, input[placeholder*="Find in diff" i]'
+        )
+      `);
+      if (!searchOpen) break;
+      press('Escape');
+      waitMs(150);
+    }
+    // Wait for the in-modal gear (do not match GitHub.com "settings" buttons).
+    const tGear = Date.now();
+    let gearReady = false;
+    while (Date.now() - tGear < 5000) {
+      gearReady = evalInPage(`
+        !!document.querySelector(
+          '.prp-overlay [data-prp-review-filter-gear="1"], #prp-page-embed [data-prp-review-filter-gear="1"]'
+        )
+      `);
+      if (gearReady) break;
+      waitMs(100);
+    }
+    assert(gearReady, 'Diff settings gear missing');
+    // Click once. Re-clicking toggles the menu shut if aria-expanded lags the portal.
     const opened = evalInPage(`
       (() => {
-        const gear = document.querySelector(
-          '[data-prp-review-filter-gear="1"], button[aria-label*="settings" i], button[aria-label*="View settings" i]'
-        );
+        const scope =
+          document.querySelector('.prp-overlay') ||
+          document.querySelector('#prp-page-embed');
+        const gear = scope?.querySelector('[data-prp-review-filter-gear="1"]');
         if (!gear) return { ok: false, reason: 'no-gear' };
         gear.scrollIntoView?.({ block: 'nearest' });
         gear.click();
-        return {
-          ok: true,
-          expanded: gear.getAttribute('aria-expanded'),
-        };
+        return { ok: true };
       })()
     `);
-    log(`  open settings: ${JSON.stringify(opened)}`);
-    waitMs(350);
+    log(`  open settings click: ${JSON.stringify(opened)}`);
+    assert(opened?.ok, `Diff settings gear click failed: ${JSON.stringify(opened)}`);
     const t0 = Date.now();
     let open = false;
-    while (Date.now() - t0 < 4000) {
+    while (Date.now() - t0 < 5000) {
       open = settingsOpen();
       if (open) break;
-      waitMs(150);
+      waitMs(100);
     }
     assert(open, `Diff settings menu did not open: ${JSON.stringify(opened)}`);
     assert(overlayOpen(), 'shell must stay open with settings');

@@ -6,6 +6,7 @@
 import { describe, expect, test } from '@rstest/core';
 import {
   listConversationCommentFocusTargets,
+  listPendingReviewThreadFocusTargets,
   pickConversationCommentFocusTarget,
   stepConversationCommentFocus,
   resolveArrowFoldAction,
@@ -110,6 +111,48 @@ describe('listConversationCommentFocusTargets', () => {
     expect(t.slice(1, -2).map((x) => x.kind)).toEqual([
       'issue-comment',
       'review-thread',
+    ]);
+  });
+
+  test('pending review-group threads sit next to composer (not skipped)', () => {
+    const items = [
+      { id: 10, kind: 'issue-comment' },
+      {
+        id: 99,
+        kind: 'review-group',
+        pending: true,
+        threads: [
+          { id: 501, path: 'a.ts' },
+          { id: 502, path: 'b.ts' },
+        ],
+      },
+    ];
+    expect(
+      listPendingReviewThreadFocusTargets(items).map((x) => x.anchor)
+    ).toEqual(['review-comment:501', 'review-comment:502']);
+
+    const rev = listConversationCommentFocusTargets(items, {
+      reverseComments: true,
+    });
+    expect(rev.map((x) => x.anchor)).toEqual([
+      'body',
+      'review-comment:501',
+      'review-comment:502',
+      'composer',
+      'merge',
+      'issue-comment:10',
+    ]);
+
+    const fwd = listConversationCommentFocusTargets(items, {
+      reverseComments: false,
+    });
+    expect(fwd.map((x) => x.anchor)).toEqual([
+      'body',
+      'issue-comment:10',
+      'merge',
+      'review-comment:501',
+      'review-comment:502',
+      'composer',
     ]);
   });
 });

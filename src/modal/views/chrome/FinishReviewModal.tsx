@@ -46,6 +46,7 @@ const PANEL_WIDTH_FALLBACK = 540;
  *   ⌥↵                  → Comment
  *   ⌥⇧↵                 → Approve
  *   ⌥⇧X                 → Request changes
+ *   ⌥⇧⌫                 → Discard pending review
  *
  * Opt-held shows ShortcutHint badges on CTAs (class `prp-opt-btn-hint--finish`
  * so background page hints stay suppressed while this dialog is open).
@@ -74,10 +75,12 @@ export function FinishReviewModal({
   const actionBusyRef = useRef(actionBusy);
   const onCloseRef = useRef(onClose);
   const onSubmitRef = useRef(onSubmit);
+  const onDiscardRef = useRef(onDiscard);
   bodyRef.current = body;
   actionBusyRef.current = actionBusy;
   onCloseRef.current = onClose;
   onSubmitRef.current = onSubmit;
+  onDiscardRef.current = onDiscard;
 
   const isMac =
     typeof navigator !== 'undefined' &&
@@ -85,6 +88,7 @@ export function FinishReviewModal({
   const scComment = isMac ? '⌥↵' : 'Alt+Enter';
   const scApprove = isMac ? '⌥⇧↵' : 'Alt+Shift+Enter';
   const scChanges = isMac ? '⌥⇧X' : 'Alt+Shift+X';
+  const scDiscard = isMac ? '⌥⇧⌫' : 'Alt+Shift+Backspace';
   const scEsc = 'Esc';
   const scFocusInput = isMac ? '⌥I' : 'Alt+I';
 
@@ -267,6 +271,17 @@ export function FinishReviewModal({
       if (shift && (code === 'KeyX' || keyLower === 'x')) {
         stop(e);
         void submit('request_changes');
+        return;
+      }
+      // ⌥⇧⌫ → Discard pending
+      if (
+        shift &&
+        (code === 'Backspace' || keyLower === 'backspace')
+      ) {
+        if (!onDiscardRef.current) return;
+        stop(e);
+        if (actionBusyRef.current) return;
+        void onDiscardRef.current();
       }
     };
 
@@ -376,16 +391,24 @@ export function FinishReviewModal({
         <footer className="prp-finish-review__actions">
           <div className="prp-finish-review__actions-start">
             {pending > 0 && typeof onDiscard === 'function' ? (
-              <Button
-                size="sm"
-                variant="danger"
-                disabled={actionBusy}
-                onClick={(): any => void onDiscard?.()}
-                title={t('cta_discard_pending')}
-                tipPlacement="top"
-              >
-                {t('cta_discard')}
-              </Button>
+              <span className="prp-opt-hint-host">
+                <ShortcutHint
+                  label={scDiscard}
+                  preferredPlacement="top"
+                  className="prp-opt-btn-hint--finish"
+                />
+                <Button
+                  size="sm"
+                  variant="danger"
+                  disabled={actionBusy}
+                  onClick={(): any => void onDiscard?.()}
+                  title={t('cta_discard_pending')}
+                  shortcut={scDiscard}
+                  tipPlacement="top"
+                >
+                  {t('cta_discard')}
+                </Button>
+              </span>
             ) : null}
             <span className="prp-opt-hint-host" data-prp-finish-cancel="1">
               <ShortcutHint

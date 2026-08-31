@@ -63,6 +63,93 @@ export function getSteps() {
     assert(pin.hasFocus, `seed focus missing: ${JSON.stringify(pin)}`);
     log(`  seed pin=${pin.pin} scrollTop=${pin.scrollTop}`);
   });
+  run('P1.1b description ⌥W edit → ⌥C/⌘↵ save chrome → Esc', () => {
+    setLayout('conversation');
+    blurEditable();
+    // First Conversation stop is the description card.
+    press('Alt+Shift+c');
+    waitMs(TICK);
+    const opened = evalInPage(`
+      (() => {
+        const body = document.querySelector(
+          '.prp-overlay .prp-body-panel--active [data-search-anchor="body"]'
+        );
+        const edit =
+          body?.querySelector('[data-prp-edit-body="1"]') ||
+          document.querySelector(
+            '.prp-overlay .prp-body-panel--active [data-prp-edit-body="1"]'
+          );
+        return {
+          hasCard: !!body,
+          hasEdit: !!edit,
+          focused: !!(
+            body?.classList.contains('prp-card--kb-focus') ||
+            body?.classList.contains('prp-conversation-kb-focus')
+          ),
+        };
+      })()
+    `);
+    assert(
+      opened.hasEdit,
+      `description edit control missing: ${JSON.stringify(opened)}`
+    );
+    press('Alt+w');
+    waitMs(400);
+    let editor = evalInPage(`
+      (() => {
+        const root = document.querySelector(
+          '.prp-overlay .prp-body-editor[data-prp-composer-root="1"]'
+        );
+        const ta = root?.querySelector(
+          'textarea[data-prp-composer-input], textarea'
+        );
+        const save = root?.querySelector('[data-prp-composer-submit="1"]');
+        return {
+          hasEditor: !!root,
+          hasTa: !!ta,
+          taFocused: !!(ta && document.activeElement === ta),
+          hasSubmit: !!save,
+        };
+      })()
+    `);
+    if (!editor?.hasEditor) {
+      evalInPage(`
+        document.querySelector(
+          '.prp-overlay .prp-body-panel--active [data-prp-edit-body="1"]'
+        )?.click();
+        true
+      `);
+      waitMs(400);
+      editor = evalInPage(`
+        (() => {
+          const root = document.querySelector(
+            '.prp-overlay .prp-body-editor[data-prp-composer-root="1"]'
+          );
+          const ta = root?.querySelector(
+            'textarea[data-prp-composer-input], textarea'
+          );
+          const save = root?.querySelector('[data-prp-composer-submit="1"]');
+          return {
+            hasEditor: !!root,
+            hasTa: !!ta,
+            taFocused: !!(ta && document.activeElement === ta),
+            hasSubmit: !!save,
+          };
+        })()
+      `);
+    }
+    assert(
+      editor.hasEditor && editor.hasTa && editor.hasSubmit,
+      `description editor after ⌥W: ${JSON.stringify(editor)}`
+    );
+    log(`  editor ${JSON.stringify(editor)}`);
+    press('Escape');
+    waitMs(250);
+    const closed = evalInPage(
+      `!document.querySelector('.prp-overlay .prp-body-editor')`
+    );
+    assert(closed, 'Esc should leave description edit');
+  });
   run('P1.2 ⌥J/K thread step + pin band', () => {
     blurEditable();
     // Allow timeline comments to mount after meta-ready (issue comments are REST).

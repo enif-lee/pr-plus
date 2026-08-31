@@ -4,6 +4,7 @@
  */
 import {
   DEMO_PR,
+  HEAVY_PR,
   activeFileLabel,
   assert,
   blurEditable,
@@ -45,6 +46,79 @@ function diffStepNavProbe() {
       };
     })()
   `);
+}
+
+function hopPinProbe(kind) {
+  return evalInPage(
+    `
+    (() => {
+      const v = document.querySelector('.prp-vlist');
+      if (!v || !v.clientHeight) return { ok: false, reason: 'no-vlist' };
+      const vh = v.clientHeight;
+      const vr = v.getBoundingClientRect();
+      const k = ${JSON.stringify(String(kind || ''))};
+      let row = null;
+      if (k === 'thread') {
+        row = v.querySelector(
+          '.prp-inline-thread--context-active, .prp-inline-thread[data-context-active="1"]'
+        );
+      } else if (k === 'file') {
+        row = v.querySelector('[data-file-focus="1"]:not([data-sticky="1"])');
+      } else {
+        row = [...v.querySelectorAll('.prp-vline--selected')].find(
+          (el) => !el.classList.contains('prp-vline--header')
+        );
+      }
+      if (!row) {
+        return { ok: false, reason: 'no-row', k, vh, scrollTop: v.scrollTop };
+      }
+      const rr = row.getBoundingClientRect();
+      const top = rr.top - vr.top;
+      const max = Math.max(0, v.scrollHeight - vh);
+      return {
+        ok: true,
+        k,
+        pct: top / vh,
+        top,
+        vh,
+        scrollTop: v.scrollTop,
+        max,
+        clamped: v.scrollTop <= 8 || v.scrollTop >= max - 8,
+      };
+    })()
+  `
+  );
+}
+
+/**
+ * ~33% band. List-end clamp is NOT a pass on a tall scroller — only when
+ * maxScroll < vh/3 (physically cannot pin below the top).
+ */
+function hopInThirdBand(p) {
+  if (!p || !p.ok) return false;
+  const vh = Number(p.vh) || 0;
+  const max = Number(p.max) || 0;
+  if (vh > 0 && max < vh / 3) return true;
+  const pct = Number(p.pct);
+  return pct >= 0.12 && pct <= 0.58;
+}
+
+function assertHopThird(label, p) {
+  assert(p && p.ok, `${label} hop row missing: ${JSON.stringify(p)}`);
+  assert(
+    hopInThirdBand(p),
+    `${label} hop not ~33% (maxScroll < vh/3 exemption only): ${JSON.stringify(p)}`
+  );
+}
+
+function waitHopPin(kind, timeoutMs = 1600) {
+  const t0 = Date.now();
+  let last = hopPinProbe(kind);
+  while (Date.now() - t0 < timeoutMs && !last.ok) {
+    waitMs(80);
+    last = hopPinProbe(kind);
+  }
+  return last;
 }
 
 function clickDiffStepNav(which) {
@@ -373,6 +447,95 @@ export function getSteps() {
       'filetree missing during file nav'
     );
     log(`  files ${a0 || '?'} → ${a1 || '?'} → ${a2 || '?'}`);
+  });
+  run('P2.hop Diff thread/file/region pin ~33% (arrows not required)', () => {
+    // DEMO_PR #19 is one file and maxScroll ≪ vh/3 — clamp exemption hid
+    // file/region pins. HEAVY_PR #14 is a tall multi-file list.
+    openPr(HEAVY_PR, { viaUrl: true });
+    setLayout('diff');
+    blurEditable();
+    waitDiffFilesReady(`P2.hop PR #${HEAVY_PR} files`);
+    waitMs(400);
+
+    evalInPage(`
+      (() => {
+        const btns = [...document.querySelectorAll('.prp-review-filter__btn')];
+        for (const b of btns) {
+          const t = (b.textContent || '').replace(/\\s+/g, ' ');
+          const on =
+            b.getAttribute('aria-pressed') === 'true' ||
+            b.classList.contains('prp-review-filter__btn--on');
+          if (/Resolved/i.test(t) && !on) b.click();
+        }
+        return true;
+      })()
+    `);
+    waitMs(600);
+
+    const hopTimes = (chord, n) => {
+      for (let i = 0; i < n; i++) {
+        press(chord);
+        waitMs(TICK + 80);
+      }
+    };
+
+    // Leave the document start so third-pin is physically possible.
+    hopTimes('Alt+j', 2);
+    const threadNext = waitHopPin('thread');
+    press('Alt+k');
+    waitMs(TICK + 80);
+    const threadPrev = waitHopPin('thread');
+    log(
+      `  thread pin next=${JSON.stringify(threadNext)} prev=${JSON.stringify(threadPrev)}`
+    );
+    if (threadNext.ok || threadPrev.ok) {
+      if (threadNext.ok) assertHopThird('thread next', threadNext);
+      if (threadPrev.ok) assertHopThird('thread prev', threadPrev);
+    } else {
+      log('  thread hop: no mounted review thread on #14 (file/region still required)');
+    }
+
+    hopTimes('Alt+Shift+]', 4);
+    const fileNext = waitHopPin('file');
+    press('Alt+Shift+[');
+    waitMs(TICK + 80);
+    const filePrev = waitHopPin('file');
+    log(
+      `  file pin next=${JSON.stringify(fileNext)} prev=${JSON.stringify(filePrev)}`
+    );
+    assertHopThird('file next', fileNext);
+    assertHopThird('file prev', filePrev);
+
+    press('ArrowDown');
+    waitMs(80);
+    hopTimes('Alt+ArrowDown', 3);
+    let regionNext = waitHopPin('region');
+    if (!regionNext.ok) {
+      hopTimes('Alt+Shift+]', 3);
+      press('ArrowDown');
+      waitMs(80);
+      hopTimes('Alt+ArrowDown', 3);
+      regionNext = waitHopPin('region');
+    }
+    press('Alt+ArrowUp');
+    waitMs(TICK + 80);
+    const regionPrev = waitHopPin('region');
+    log(
+      `  region pin next=${JSON.stringify(regionNext)} prev=${JSON.stringify(regionPrev)}`
+    );
+    assertHopThird('region next', regionNext);
+    assertHopThird('region prev', regionPrev);
+
+    press('ArrowDown');
+    waitMs(60);
+    press('ArrowDown');
+    waitMs(60);
+    const arrow = hopPinProbe('region');
+    log(`  arrow caret pin=${JSON.stringify(arrow)} (band not required)`);
+
+    openPr(DEMO_PR, { viaUrl: true });
+    setLayout('diff');
+    waitDiffFilesReady('P2.hop restore DEMO_PR');
   });
   run('P2.9 Diff ⌥⇧↑/↓ page scroll', () => {
     setLayout('diff');

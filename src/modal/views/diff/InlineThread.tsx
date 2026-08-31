@@ -1136,12 +1136,10 @@ function InlineThreadImpl(props: any) {
                           {r.createdAt ? (
                             <span className="prp-muted">{formatWhen(r.createdAt)}</span>
                           ) : null}
-                          {!isPending
-                            ? renderCommentActions(r.id, r.body, ownReply, {
-                                ...replyMeta,
-                                isRoot: false,
-                              })
-                            : null}
+                          {renderCommentActions(r.id, r.body, ownReply, {
+                            ...replyMeta,
+                            isRoot: false,
+                          })}
                         </div>
                         {replyMin ? (
                           <>

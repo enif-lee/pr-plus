@@ -4,10 +4,12 @@
 import { describe, expect, test } from '@rstest/core';
 import {
   resolveActiveFileForCollapse,
+  resolveActiveFileForViewed,
   resolveArrowFoldAction,
   resolveModalShortcutAction,
   isEditableKeyboardTarget,
   FILE_FOLD_SHORTCUT,
+  TOGGLE_VIEWED_SHORTCUT,
 } from '../src/modal/lib/shortcut-policy';
 import {
   togglePathInCollapsedSet,
@@ -44,6 +46,38 @@ describe('resolveActiveFileForCollapse', () => {
 
   test('null when nothing focused', () => {
     expect(resolveActiveFileForCollapse({})).toBe(null);
+  });
+});
+
+describe('resolveActiveFileForViewed', () => {
+  test('prefers line selection, then active tree file', () => {
+    expect(
+      resolveActiveFileForViewed({
+        lineSelection: { filePath: 'a.ts' },
+        activeFilePath: 'b.ts',
+        files: [{ filename: 'c.ts' }],
+      })
+    ).toBe('a.ts');
+    expect(
+      resolveActiveFileForViewed({
+        lineSelection: null,
+        activeFilePath: 'b.ts',
+        files: [{ filename: 'c.ts' }],
+      })
+    ).toBe('b.ts');
+  });
+
+  test('falls back to first Diff file when nothing is focused', () => {
+    expect(
+      resolveActiveFileForViewed({
+        files: [{ path: 'demo-stack/multi-hunk-expand.py' }],
+      })
+    ).toBe('demo-stack/multi-hunk-expand.py');
+  });
+
+  test('null when no focus and no files', () => {
+    expect(resolveActiveFileForViewed({})).toBe(null);
+    expect(resolveActiveFileForViewed({ files: [] })).toBe(null);
   });
 });
 
@@ -159,6 +193,44 @@ describe('FILE_FOLD_SHORTCUT / resolveModalShortcutAction', () => {
         layoutMode: 'centered',
       })
     ).toBe(null);
+  });
+});
+
+describe('TOGGLE_VIEWED_SHORTCUT / resolveModalShortcutAction', () => {
+  test('⌥⇧R on Diff toggles viewed', () => {
+    expect(
+      resolveModalShortcutAction({
+        alt: true,
+        shift: true,
+        key: 'r',
+        code: 'KeyR',
+        layoutMode: 'diff',
+      })
+    ).toBe(TOGGLE_VIEWED_SHORTCUT.action);
+  });
+
+  test('⌥⇧R on Conversation is not viewed-toggle', () => {
+    expect(
+      resolveModalShortcutAction({
+        alt: true,
+        shift: true,
+        key: 'r',
+        code: 'KeyR',
+        layoutMode: 'centered',
+      })
+    ).not.toBe(TOGGLE_VIEWED_SHORTCUT.action);
+  });
+
+  test('⌥R on Diff is resolved-filter, not viewed', () => {
+    expect(
+      resolveModalShortcutAction({
+        alt: true,
+        shift: false,
+        key: 'r',
+        code: 'KeyR',
+        layoutMode: 'diff',
+      })
+    ).toBe('toggleReviewFilterResolved');
   });
 });
 

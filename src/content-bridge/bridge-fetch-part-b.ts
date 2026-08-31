@@ -87,6 +87,37 @@ async addAssignees(owner: any, repo: any, number: any, assignees: any) {
     }
     return Array.isArray(res.labels) ? res.labels : [];
   },
+  /**
+   * Assignable / mentionable / collaborator people directory.
+   * @param {string} owner
+   * @param {string} repo
+   * @param {{ query?: string, kind?: 'assignable'|'mentionable'|'collaborator', first?: number, signal?: AbortSignal }} [opts]
+   */
+  async searchRepoPeople(owner: any, repo: any, opts: any = {}) {
+    const res = await send(
+      {
+        type: MSG.SEARCH_REPO_PEOPLE,
+        owner,
+        repo,
+        query: opts.query || '',
+        kind:
+          opts.kind === 'collaborator'
+            ? 'collaborator'
+            : opts.kind === 'mentionable'
+              ? 'mentionable'
+              : 'assignable',
+        first: opts.first,
+      },
+      { signal: opts.signal || null }
+    );
+    if (!res?.ok) {
+      if (res?.aborted) throw makeAbortError();
+      const err = new Error(res?.error || 'Failed to search repo people');
+      err.status = res?.status;
+      throw err;
+    }
+    return Array.isArray(res.users) ? res.users : [];
+  },
   async createRepoLabel(owner: any, repo: any, { name, color, description }: { name?: unknown; color?: unknown; description?: unknown } = {}) {
     const res = await send({
       type: MSG.CREATE_REPO_LABEL,

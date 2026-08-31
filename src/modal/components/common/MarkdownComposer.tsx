@@ -19,10 +19,13 @@ import {
   applySlashInsertion,
   applyEmojiInsertion,
   emojiMenuLabel,
+  mentionSuggestionView,
   SLASH_COMMANDS,
   placeComposerSuggestMenu,
 } from '@lib/markdown-composer';
 import { scrollFocusedComposerIntoView } from '@lib/context-thread-dom';
+import { useMentionableDirectory } from '../../hooks/useMentionableDirectory';
+import { Avatar } from './Avatar';
 
 /**
  * Write / Preview markdown composer (no B/I/code toolbar).
@@ -40,7 +43,7 @@ export function MarkdownComposer({
   showTabs = true,
   onUploadFile,
   linkCtx,
-  /** Logins for @mention typeahead (author, reviewers, assignees, …). */
+  /** Local logins / user rows for @mention typeahead; mentionableUsers merge in. */
   mentionCandidates = [],
   /**
    * Primary submit (Comment / Submit). Wired to ⌘/Ctrl+Enter and
@@ -69,6 +72,15 @@ export function MarkdownComposer({
   const blurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** When kind+query stays the same, keep menuIndex (arrow keys must not reset). */
   const menuKeyRef = useRef('');
+  const mentionDir = useMentionableDirectory(mentionCandidates);
+
+  useEffect(() => {
+    setMenu((prev: any) => {
+      if (!prev || prev.kind !== 'mention') return prev;
+      const items = filterMentions(prev.trigger?.query, mentionDir.candidates);
+      return { ...prev, items };
+    });
+  }, [mentionDir.candidates]);
 
   // Viewport-fixed portal next to the textarea (overflow:hidden on cards / virtual list).
   // CSS vars carry top/left so `.prp-composer-menu { top: calc(100%…) }` cannot park
@@ -366,7 +378,8 @@ export function MarkdownComposer({
     if (typeof detectMentionTrigger === 'function') {
       const mTrig = detectMentionTrigger(text, cursor);
       if (mTrig) {
-        const items = filterMentions(mTrig.query, mentionCandidates);
+        mentionDir.search(mTrig.query);
+        const items = filterMentions(mTrig.query, mentionDir.candidates);
         openMenu('mention', items, mTrig, String(mTrig.query || ''));
         return;
       }
@@ -730,18 +743,25 @@ export function MarkdownComposer({
                 >
                   {menu.items.map((item: any, idx: number) => {
                     const isEmoji = menu.kind === 'emoji';
+                    const isMention = menu.kind === 'mention';
+                    const mentionView = isMention
+                      ? mentionSuggestionView(item)
+                      : null;
+                    const mentionLogin = mentionView?.login || '';
                     const label = isEmoji
                       ? typeof emojiMenuLabel === 'function'
                         ? emojiMenuLabel(item)
                         : `:${item.name}:`
-                      : menu.kind === 'mention'
-                        ? `@${item}`
+                      : isMention
+                        ? mentionView?.primary || `@${mentionLogin}`
                         : item.label || item.id;
                     const desc =
                       menu.kind === 'slash' ? item.description : null;
                     const key = isEmoji
                       ? String(item.name || label)
-                      : String(label);
+                      : isMention
+                        ? mentionLogin
+                        : String(label);
                     return (
                       <li
                         key={key}
@@ -753,10 +773,15 @@ export function MarkdownComposer({
                           className={`prp-composer-menu__item${
                             isEmoji ? ' prp-composer-menu__item--emoji' : ''
                           }${
+                            isMention ? ' prp-composer-menu__item--mention' : ''
+                          }${
                             idx === menuIndex
                               ? ' prp-composer-menu__item--active'
                               : ''
                           }`}
+                          data-prp-mention-login={
+                            isMention ? mentionLogin : undefined
+                          }
                           onMouseDown={(ev) => {
                             ev.preventDefault();
                             applyMenuItem(item);
@@ -773,6 +798,31 @@ export function MarkdownComposer({
                               </span>
                               <span className="prp-composer-menu__emoji-name">
                                 {label}
+                              </span>
+                            </>
+                          ) : isMention && mentionView ? (
+                            <>
+                              <Avatar
+                                login={mentionView.login}
+                                avatarUrl={mentionView.avatarUrl}
+                                size="sm"
+                                className="prp-composer-menu__avatar"
+                              />
+                              <span className="prp-composer-menu__mention">
+                                <strong
+                                  className={
+                                    mentionView.name
+                                      ? 'prp-composer-menu__mention-name'
+                                      : 'prp-composer-menu__mention-login'
+                                  }
+                                >
+                                  {mentionView.primary}
+                                </strong>
+                                {mentionView.secondary ? (
+                                  <span className="prp-composer-menu__mention-login">
+                                    {mentionView.secondary}
+                                  </span>
+                                ) : null}
                               </span>
                             </>
                           ) : (

@@ -70,4 +70,19 @@ describe('FileHeaderRow viewed ShortcutHint wiring', () => {
       bundle.includes(TOGGLE_VIEWED_SHORTCUT.chord);
     expect(hasLabel).toBe(true);
   });
+
+  test('⌥⇧R handler live-calls bag onToggleViewed (not a first-render capture)', () => {
+    const nav = fs.readFileSync(
+      path.join(root, 'src/modal/hooks/useDiffConversationNav.ts'),
+      'utf8'
+    );
+    expect(nav).toMatch(/b\.onToggleViewed\?\.\(/);
+    expect(nav).toMatch(/resolveActiveFileForViewed/);
+    const shell = fs.readFileSync(
+      path.join(root, 'src/modal/app/PrModalShell.tsx'),
+      'utf8'
+    );
+    expect(shell).toMatch(/onToggleViewed,/);
+    expect(shell).toMatch(/onToggleFileCollapse/);
+  });
 });

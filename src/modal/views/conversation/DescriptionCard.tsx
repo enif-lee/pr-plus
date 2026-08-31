@@ -5,7 +5,9 @@ import React from 'react';
 import { Card } from '@common/Card';
 import { IconPencil } from '@common/icons';
 import { CommentReactions } from '@common/CommentReactions';
+import { CommentActionIconBtn } from '@common/CommentActionIconBtn';
 import { BodyEditor } from '../composers/BodyEditor';
+import { CONTEXT_COMMENT_ACTION_SHORTCUT } from '@lib/shortcut-policy';
 
 import { useT } from '@lib/locale-context';
 
@@ -15,6 +17,7 @@ export function DescriptionCard({
   editingBody,
   actionBusy,
   searchClassName,
+  focused = false,
   onStartEditBody,
   onCancelEditBody,
   onSaveBody,
@@ -31,6 +34,8 @@ export function DescriptionCard({
   editingBody?: boolean;
   actionBusy?: boolean;
   searchClassName: string;
+  /** Conversation keyboard focus on this description card. */
+  focused?: boolean;
   onStartEditBody?: () => void;
   onCancelEditBody?: () => void;
   onSaveBody?: (body: string) => void | Promise<void>;
@@ -44,6 +49,7 @@ export function DescriptionCard({
   onLoadReactors?: any;
 }) {
   const t = useT();
+  const editKbd = CONTEXT_COMMENT_ACTION_SHORTCUT.edit.labelMac;
   return (
     <Card
       title={t('meta_description')}
@@ -51,16 +57,18 @@ export function DescriptionCard({
       data-search-anchor="body"
       actions={
         !sectionLoading && !editingBody ? (
-          <button
-            type="button"
-            className="prp-icon-btn inline-flex items-center justify-center"
+          <CommentActionIconBtn
+            tipTitle={t('cta_edit_description')}
+            shortcut={editKbd}
+            showShortcutHint={focused}
             disabled={actionBusy}
-            title="Edit description"
-            aria-label="Edit description"
+            aria-label={t('cta_edit_description')}
+            data-prp-edit-body="1"
+            data-prp-edit-comment="1"
             onClick={onStartEditBody}
           >
             <IconPencil size={13} />
-          </button>
+          </CommentActionIconBtn>
         ) : null
       }
     >

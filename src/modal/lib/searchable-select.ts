@@ -36,6 +36,74 @@ export function filterSelectOptions(options: any, query: any, opts: any = {}) {
 }
 
 /**
+ * Viewport-fixed popover box for SearchableSelect.
+ * Horizontal: start-align to the anchor, flip to the anchor's right edge if
+ * that would overflow, then clamp. Never returns a left of 0 just because
+ * the panel has not been measured — callers must not paint until this runs.
+ */
+export function layoutSselectPopover(input: {
+  anchor: {
+    top?: number;
+    left?: number;
+    right?: number;
+    bottom?: number;
+    width?: number;
+    height?: number;
+  };
+  viewport: { width?: number; height?: number };
+  panelHeight?: number;
+  minWidth?: number;
+  maxWidth?: number;
+  placement?: 'bottom' | 'top' | string;
+  gap?: number;
+  edge?: number;
+}): { top: number; left: number; width: number } {
+  const edge = Math.max(0, Number(input.edge) || 8);
+  const gap = Number.isFinite(Number(input.gap)) ? Number(input.gap) : 6;
+  const minW = Math.max(160, Number(input.minWidth) || 220);
+  const maxW = Math.max(minW, Number(input.maxWidth) || 320);
+  const a = input.anchor || {};
+  const vw = Math.max(0, Number(input.viewport?.width) || 0);
+  const vh = Math.max(0, Number(input.viewport?.height) || 0);
+  const anchorW = Math.max(0, Number(a.width) || 0);
+  const width = Math.min(maxW, Math.max(minW, anchorW || minW));
+  const aLeft = Number(a.left) || 0;
+  const aRight = Number.isFinite(Number(a.right))
+    ? Number(a.right)
+    : aLeft + anchorW;
+  let left = aLeft;
+  if (vw > 0 && left + width > vw - edge) {
+    left = aRight - width;
+  }
+  const maxLeft = vw > 0 ? Math.max(edge, vw - width - edge) : edge;
+  left = Math.min(Math.max(edge, left), maxLeft);
+
+  const belowTop = (Number(a.bottom) || 0) + gap;
+  const panelH = Math.max(0, Number(input.panelHeight) || 0);
+  const aboveTop = (Number(a.top) || 0) - panelH - gap;
+  const preferBottom = input.placement !== 'top';
+  let top = preferBottom ? belowTop : Math.max(edge, aboveTop);
+  if (panelH > 0 && vh > 0) {
+    const fitsBelow = belowTop + panelH <= vh - edge;
+    const fitsAbove = aboveTop >= edge;
+    const spaceBelow = vh - (Number(a.bottom) || 0) - edge;
+    const spaceAbove = (Number(a.top) || 0) - edge;
+    if (preferBottom) {
+      if (fitsBelow) top = belowTop;
+      else if (fitsAbove) top = aboveTop;
+      else top = spaceAbove > spaceBelow ? Math.max(edge, aboveTop) : belowTop;
+    } else if (fitsAbove) {
+      top = aboveTop;
+    } else if (fitsBelow) {
+      top = belowTop;
+    } else {
+      top = spaceBelow > spaceAbove ? belowTop : Math.max(edge, aboveTop);
+    }
+  }
+  return { top: Math.max(edge, top), left, width };
+}
+
+/**
  * ⌥1 / ⌥2 / ⌥3 → filtered option index 0..2 (single-select quick pick).
  * Ignores meta/ctrl/shift so it does not steal ⌘1 / etc.
  */
@@ -96,6 +164,150 @@ export function buildPeopleOptions(logins: any, statusByLogin: any = {}, avatarB
     });
   }
   return out;
+}
+
+/**
+ * Map a GitHub directory user (assignable / mentionable) onto picker option
+ * shape. Keywords include login + display name so typed query matches both.
+ */
+export function mapDirectoryUserToSelectOption(user: any) {
+  const login = String(user?.login || '').trim();
+  if (!login) return null;
+  const name = String(user?.name || '').trim();
+  const avatarUrl = String(
+    user?.avatarUrl || user?.avatar_url || ''
+  ).trim();
+  const secondary =
+    name && name.toLowerCase() !== login.toLowerCase() ? name : '';
+  return {
+    id: login,
+    label: login,
+    keywords: [login, name].filter(Boolean),
+    secondary,
+    meta: { login, name, avatarUrl, kind: 'user' },
+  };
+}
+
+function excludeLoginSet(exclude: any): Set<string> {
+  const set = new Set<string>();
+  for (const x of Array.isArray(exclude) ? exclude : []) {
+    const k = String(x || '')
+      .trim()
+      .toLowerCase();
+    if (k) set.add(k);
+  }
+  return set;
+}
+
+/**
+ * Permission-directory users → select options. Already-assigned / already-
+ * requested logins are dropped. Does not consult local PR-actor unions.
+ */
+export function buildPeopleOptionsFromDirectory(
+  users: any,
+  opts: { exclude?: any[] } = {}
+) {
+  const exclude = excludeLoginSet(opts.exclude);
+  const seen = new Set<string>();
+  const out: any[] = [];
+  for (const u of Array.isArray(users) ? users : []) {
+    const opt = mapDirectoryUserToSelectOption(u);
+    if (!opt) continue;
+    const key = String(opt.id).toLowerCase();
+    if (exclude.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    out.push(opt);
+  }
+  return out;
+}
+
+/** Directory-first, then extras (local seed). First-seen login wins. */
+export function mergePeopleSelectOptions(primary: any, extra: any) {
+  const seen = new Set<string>();
+  const out: any[] = [];
+  for (const list of [primary, extra]) {
+    for (const o of Array.isArray(list) ? list : []) {
+      if (!o) continue;
+      const key = String(o.id || o.label || '')
+        .trim()
+        .toLowerCase();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      out.push(o);
+    }
+  }
+  return out;
+}
+
+/**
+ * Assignee/reviewer picker option list from a GitHub directory payload.
+ * Local `collectPeopleLogins` is not the source — pass it only as extraOptions.
+ */
+export function peoplePickerOptionsFromDirectory(
+  users: any,
+  query: any,
+  opts: {
+    exclude?: any[];
+    extraOptions?: any[];
+    limit?: number;
+  } = {}
+) {
+  const dir = buildPeopleOptionsFromDirectory(users, { exclude: opts.exclude });
+  const merged = mergePeopleSelectOptions(dir, opts.extraOptions || []);
+  return filterSelectOptions(merged, query, { limit: opts.limit });
+}
+
+/** Assignee → assignableUsers; reviewer → repo collaborators (request-review 422). */
+export function peopleDirectoryKindForPicker(
+  type: any
+): 'assignable' | 'mentionable' | 'collaborator' {
+  return String(type || '') === 'reviewer' ? 'collaborator' : 'assignable';
+}
+
+/**
+ * Logins GitHub will 422 on request-review: already requested + PR author.
+ */
+export function reviewerPickerExcludeLogins(detail: any): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const add = (raw: any) => {
+    const s = String(raw || '').trim();
+    if (!s) return;
+    const key = s.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(s);
+  };
+  add(detail?.author);
+  for (const x of detail?.requestedReviewers || []) add(x);
+  return out;
+}
+
+export function isPullRequestAuthor(login: any, detail: any): boolean {
+  const a = String(detail?.author || '')
+    .trim()
+    .toLowerCase();
+  const b = String(login || '')
+    .trim()
+    .toLowerCase();
+  return Boolean(a && b && a === b);
+}
+
+/**
+ * Directory search is only for *adding* an assignee/reviewer (or re-request).
+ * Palette Unassign / Remove reviewer reuse type assignee|reviewer but must
+ * keep their current-assignee / requested-reviewer option lists.
+ */
+export function peoplePickerShouldSearchDirectory(picker: any): boolean {
+  if (!picker || typeof picker !== 'object') return false;
+  if (picker.peopleDirectory === true) return true;
+  if (picker.peopleDirectory === false) return false;
+  const type = String(picker.type || '');
+  if (type !== 'assignee' && type !== 'reviewer') return false;
+  const title = String(picker.title || '')
+    .trim()
+    .toLowerCase();
+  return title === 'add assignee' || title === 'add reviewer';
 }
 
 /**

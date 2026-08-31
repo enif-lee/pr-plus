@@ -146,6 +146,36 @@ export const TOGGLE_VIEWED_SHORTCUT = {
   labelWin: 'Alt+Shift+R',
 };
 
+/** Option+Shift+H — Diff hide-whitespace toggle. */
+export const TOGGLE_HIDE_WHITESPACE_SHORTCUT = {
+  key: 'h',
+  code: 'KeyH',
+  action: 'toggleHideWhitespace' as const,
+  chord: 'opt+shift+h',
+  labelMac: '⌥⇧H',
+  labelWin: 'Alt+Shift+H',
+} as const;
+
+/** Option+Shift+\ — cycle Diff unified ↔ split. */
+export const TOGGLE_DIFF_MODE_SHORTCUT = {
+  key: '\\',
+  code: 'Backslash',
+  action: 'toggleDiffMode' as const,
+  chord: 'opt+shift+\\',
+  labelMac: '⌥⇧\\',
+  labelWin: 'Alt+Shift+\\',
+} as const;
+
+/** Option+Shift+Backspace — discard pending review. */
+export const DISCARD_PENDING_SHORTCUT = {
+  key: 'backspace',
+  code: 'Backspace',
+  action: 'discardPendingReview' as const,
+  chord: 'opt+shift+backspace',
+  labelMac: '⌥⇧⌫',
+  labelWin: 'Alt+Shift+Backspace',
+} as const;
+
 /**
  * Option+F on Diff — fold/expand the focused file (line-selection path,
  * else active tree file) when a review thread is not the active focus.

@@ -156,9 +156,33 @@ export function getSteps() {
     );
   });
 
+  const unmarkAllViewed = () => {
+    const n = evalInPage(`
+      (() => {
+        const ins = [...document.querySelectorAll('.prp-filetree__viewed input:checked')];
+        for (const inp of ins) inp.click();
+        return ins.length;
+      })()
+    `);
+    if (n) waitMs(300);
+    return n;
+  };
+
   run('P-ISO.1 Diff: Conversation meta chords do not open pickers', () => {
-    setLayout('diff');
+    // Avoid setLayout('diff') waitDiffFilesReady: a viewed/collapsed-only Diff
+    // has no selectable code rows and times out even though layout is Diff.
+    if (layout() !== 'diff') {
+      press('Alt+.');
+      waitMs(400);
+    }
+    if (layout() !== 'diff') {
+      evalInPage(
+        `document.querySelector('.prp-header__icon-btn--layout')?.click(); true`
+      );
+      waitMs(400);
+    }
     assert(layout() === 'diff', `expected diff layout, got ${layout()}`);
+    unmarkAllViewed();
     assert(diffPanelVisible(), 'Diff panel should be visible active surface');
     assert(!convAsideVisible(), 'Conversation panel must not be visible on Diff');
 
@@ -182,6 +206,82 @@ export function getSteps() {
       );
     }
     log('Diff blocked Conversation meta chords');
+    // ⌥⇧R is viewed-toggle on Diff — restore unread so later Diff waits still
+    // see code rows (viewed files collapse).
+    evalInPage(`
+      (() => {
+        const inp = document.querySelector('.prp-filetree__viewed input');
+        if (inp?.checked) inp.click();
+        return true;
+      })()
+    `);
+    waitMs(200);
+  });
+
+  run('P-ISO.1b Diff: ⌥⇧R toggles file viewed / unread', () => {
+    // Stay on Diff from P-ISO.1. Do not setLayout('diff') — that waits for
+    // selectable code rows, which vanish if the only file is marked viewed.
+    assert(layout() === 'diff', `expected diff layout, got ${layout()}`);
+    blurEditable();
+    waitMs(200);
+
+    const viewedProbe = () =>
+      evalInPage(`
+        (() => {
+          const tree = document.querySelector('.prp-filetree__viewed input');
+          const header = document.querySelector('.prp-file-header__viewed input');
+          const last =
+            document.documentElement.getAttribute('data-prp-last-shortcut-action') ||
+            '';
+          return {
+            tree: tree ? !!tree.checked : null,
+            header: header ? !!header.checked : null,
+            last,
+            hasTree: !!tree,
+            hasHeader: !!header,
+          };
+        })()
+      `);
+
+    const before = viewedProbe();
+    assert(
+      before.hasTree || before.hasHeader,
+      `viewed checkbox missing: ${JSON.stringify(before)}`
+    );
+    const start = Boolean(before.tree ?? before.header);
+
+    press('Alt+Shift+r');
+    waitMs(400);
+    let mid = viewedProbe();
+    if (Boolean(mid.tree ?? mid.header) === start) {
+      press('Alt+Shift+r');
+      waitMs(400);
+      mid = viewedProbe();
+    }
+    assert(
+      Boolean(mid.tree ?? mid.header) !== start,
+      `⌥⇧R must toggle viewed start=${start} mid=${JSON.stringify(mid)}`
+    );
+    assert(
+      mid.last === 'toggleViewedActiveFile',
+      `expected last action toggleViewedActiveFile, got ${mid.last}`
+    );
+
+    press('Alt+Shift+r');
+    waitMs(400);
+    const end = viewedProbe();
+    assert(
+      Boolean(end.tree ?? end.header) === start,
+      `⌥⇧R second press must restore viewed start=${start} end=${JSON.stringify(end)}`
+    );
+    // Leave the fixture unread (P-ISO.1 may have marked it via the same chord).
+    if (Boolean(end.tree ?? end.header)) {
+      press('Alt+Shift+r');
+      waitMs(300);
+    }
+    log(
+      `viewed toggle ${start} → ${Boolean(mid.tree ?? mid.header)} → ${Boolean(end.tree ?? end.header)}`
+    );
   });
 
   run('P-ISO.2 Conversation: positive control opens labels picker', () => {
