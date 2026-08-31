@@ -421,6 +421,23 @@ export function isReviewVerdictKind(kind: unknown): boolean {
 }
 
 /**
+ * GitHub allows an empty-body APPROVE. COMMENT and REQUEST_CHANGES still
+ * need a summary unless there are pending review comments.
+ */
+export function canSubmitLeaveReview(opts: {
+  event?: string;
+  kind?: string;
+  body?: string;
+  hasPending?: boolean;
+} = {}): boolean {
+  if (String(opts.body || '').trim()) return true;
+  if (opts.hasPending) return true;
+  const event = String(opts.event || '').toUpperCase();
+  const kind = String(opts.kind || '').toLowerCase().replace(/-/g, '_');
+  return event === 'APPROVE' || kind === 'approve';
+}
+
+/**
  * Map GitHub REST review-comment payload → app shape (optimistic UI).
  * Used after postReviewComment / replyToReviewComment so diff virtual rows
  * and groupReviewThreads update before the next full refresh.

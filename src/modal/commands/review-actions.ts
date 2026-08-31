@@ -2,6 +2,7 @@
 import {
   appendOptimisticReviewComment,
   appendIssueCommentToDetail,
+  canSubmitLeaveReview,
   mapRestReviewComment,
   mapRestIssueComment,
 } from '../lib/pr-edit-api';
@@ -137,7 +138,14 @@ export function installReviewActions(d: Record<string, any>) {
     const event =
       mapped.kind === 'issue-comment' ? 'COMMENT' : mapped.event || 'COMMENT';
     const hasServerPending = Boolean(d.hasServerPending);
-    if (!body && !hasServerPending) {
+    if (
+      !canSubmitLeaveReview({
+        event,
+        kind,
+        body,
+        hasPending: hasServerPending,
+      })
+    ) {
       d.setActionMsg?.(
         'Write a comment or add pending review comments before submitting.'
       );

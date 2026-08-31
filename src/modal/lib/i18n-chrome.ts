@@ -75,6 +75,9 @@ export const CHROME_MESSAGE_KEYS = [
   'cta_discard_pending',
   'cta_pending_review',
   'cta_finish_review_title',
+  'finish_review_sub_no_pending',
+  'finish_review_sub_pending',
+  'finish_review_need_body',
   'cta_select_merge_method',
   'cta_bypass_rules',
   'open_with_prp_title',
@@ -427,6 +430,12 @@ export const chromeEn: MessageCatalog = {
   cta_discard_pending: 'Discard pending review',
   cta_pending_review: 'Pending review',
   cta_finish_review_title: 'Finish your review',
+  finish_review_sub_no_pending:
+    'Approve does not require a comment. Comment and Request changes need a summary when there are no pending threads.',
+  finish_review_sub_pending:
+    'Submit your $count$ pending comments and other feedback. Summary is optional.',
+  finish_review_need_body:
+    'Write a comment or add pending review comments before submitting',
   cta_select_merge_method: 'Select merge method',
   cta_bypass_rules: 'Bypass repository rules and merge',
   open_with_prp_title: 'Open with pr+ (⌥⇧E)',
@@ -702,6 +711,12 @@ export const chromeKo: MessageCatalog = {
   cta_discard_pending: '대기 중 리뷰 폐기',
   cta_pending_review: '대기 중 리뷰',
   cta_finish_review_title: '리뷰 완료',
+  finish_review_sub_no_pending:
+    '승인은 코멘트 없이 가능합니다. 대기 스레드가 없으면 코멘트와 변경 요청은 요약이 필요합니다.',
+  finish_review_sub_pending:
+    '대기 중인 코멘트 $count$개와 기타 피드백을 제출합니다. 요약은 선택입니다.',
+  finish_review_need_body:
+    '제출하려면 코멘트를 쓰거나 대기 중인 리뷰 코멘트를 추가하세요',
   cta_select_merge_method: '머지 방법 선택',
   cta_bypass_rules: '저장소 규칙 우회 후 머지',
   open_with_prp_title: 'pr+로 열기 (⌥⇧E)',
@@ -973,6 +988,12 @@ export const chromeJa: MessageCatalog = {
   cta_discard_pending: '保留中のレビューを破棄',
   cta_pending_review: '保留中のレビュー',
   cta_finish_review_title: 'レビューを完了',
+  finish_review_sub_no_pending:
+    '承認はコメントなしで送信できます。保留スレッドがない場合、コメントと変更リクエストには要約が必要です。',
+  finish_review_sub_pending:
+    '保留中のコメント $count$ 件とその他のフィードバックを送信します。要約は任意です。',
+  finish_review_need_body:
+    'コメントを書くか、保留中のレビューコメントを追加してから送信してください',
   cta_select_merge_method: 'マージ方法を選択',
   cta_bypass_rules: 'リポジトリルールを回避してマージ',
   open_with_prp_title: 'pr+ で開く (⌥⇧E)',
@@ -1249,6 +1270,11 @@ export const chromeZh: MessageCatalog = {
   cta_discard_pending: '丢弃待处理审阅',
   cta_pending_review: '待处理审阅',
   cta_finish_review_title: '完成审阅',
+  finish_review_sub_no_pending:
+    '批准无需填写评论。在没有待处理线程时，评论和请求更改需要摘要。',
+  finish_review_sub_pending:
+    '提交 $count$ 条待处理评论及其他反馈。摘要为可选项。',
+  finish_review_need_body: '请先撰写评论或添加待处理审阅评论后再提交',
   cta_select_merge_method: '选择合并方式',
   cta_bypass_rules: '绕过仓库规则并合并',
   open_with_prp_title: '用 pr+ 打开 (⌥⇧E)',
