@@ -187,6 +187,7 @@ export const RESIDUAL_MESSAGE_KEYS = [
   'toast_copy_failed',
   'toast_copy_error',
   'upload_video_failed',
+  'upload_attachment_failed',
   'md_preview',
   'md_preview_show_diff',
   'md_preview_close',
@@ -242,6 +243,7 @@ export const residualEn: MessageCatalog = {
   toast_copy_failed: 'Copy failed',
   toast_copy_error: 'Copy error message',
   upload_video_failed: 'Video attachment upload failed',
+  upload_attachment_failed: 'Attachment upload failed',
   palette_shell_placeholder:
     'Type a command…  #123  #name  help  stack  merge',
   palette_shell_no_commands: 'No matching commands',
@@ -442,6 +444,7 @@ export const residualKo: MessageCatalog = {
   toast_copy_failed: '복사 실패',
   toast_copy_error: '에러 메시지 복사',
   upload_video_failed: '동영상 첨부 업로드 실패',
+  upload_attachment_failed: '첨부 업로드 실패',
   palette_shell_placeholder:
     '명령 입력…  #123  #이름  help  stack  merge',
   palette_shell_no_commands: '일치하는 명령 없음',
@@ -640,6 +643,7 @@ export const residualJa: MessageCatalog = {
   toast_copy_failed: 'コピーに失敗しました',
   toast_copy_error: 'エラーメッセージをコピー',
   upload_video_failed: '動画添付のアップロードに失敗しました',
+  upload_attachment_failed: '添付のアップロードに失敗しました',
   palette_shell_placeholder:
     'コマンド入力…  #123  #名前  help  stack  merge',
   palette_shell_no_commands: '一致するコマンドがありません',
@@ -839,6 +843,7 @@ export const residualZh: MessageCatalog = {
   toast_copy_failed: '复制失败',
   toast_copy_error: '复制错误信息',
   upload_video_failed: '视频附件上传失败',
+  upload_attachment_failed: '附件上传失败',
   palette_shell_placeholder:
     '输入命令…  #123  #名称  help  stack  merge',
   palette_shell_no_commands: '无匹配命令',

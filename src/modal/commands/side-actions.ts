@@ -21,7 +21,7 @@ import {
 } from '../app/pr-modal-mappers';
 import { confirmGateProceed } from '../lib/confirm-gate';
 import {
-  isGithubVideoAttachment,
+  usesGithubCommentAttachment,
   uploadGithubCommentAttachment,
 } from '../lib/composer-attach';
 
@@ -254,12 +254,15 @@ export function installSideActions(d: Record<string, any>) {
     if (!detail) throw new Error('No PR open');
     const file = fileMeta.file;
     const name = fileMeta.name || file.name || 'file.bin';
-    if (isGithubVideoAttachment(name, fileMeta.type || file.type)) {
+    const contentType = fileMeta.type || file.type;
+    if (usesGithubCommentAttachment(name, contentType)) {
       try {
         return await uploadGithubCommentAttachment(file, detail);
       } catch {
         throw new Error(
-          d.videoAttachmentUploadFailed || 'Video attachment upload failed'
+          d.attachmentUploadFailed ||
+            d.videoAttachmentUploadFailed ||
+            'Attachment upload failed'
         );
       }
     }

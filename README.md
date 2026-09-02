@@ -279,7 +279,7 @@ The popup also lists **Chrome permissions** and recommended **PAT scopes** (clas
 | Access | **Service worker only** holds the raw token — never exposed to content scripts |
 | UI | After save, only a mask is shown (`••••` + last 4 chars) |
 | Classic scopes | `repo` for full PR features; add `notifications` for Subscribe |
-| Fine-grained | **Pull requests** Read & Write on target repos; **Contents** Read & Write if applying suggestions or attaching files |
+| Fine-grained | **Pull requests** Read & Write on target repos; **Contents** Read & Write if applying suggestions or attaching non-image files. Images/videos paste into comments via the GitHub page session (`user-attachments`), not Contents. |
 
 ---
 

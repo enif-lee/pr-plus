@@ -5,6 +5,7 @@ import {
   buildAttachmentMarkdown,
   guessContentType,
   insertMarkdownAtCursor,
+  isGithubImageAttachment,
   isGithubVideoAttachment,
 } from '@lib/composer-attach';
 import './MarkdownComposer.css';
@@ -565,7 +566,7 @@ export function MarkdownComposer({
         });
         if (!url) continue;
         const snip = buildAttachmentMarkdown(file.name, url, {
-          isImage: /^image\//i.test(file.type || ''),
+          isImage: isGithubImageAttachment(file.name, file.type),
           isVideo: isGithubVideoAttachment(file.name, file.type),
         });
         const next = insertMarkdownAtCursor(text, cursor, snip);

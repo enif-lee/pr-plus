@@ -3725,6 +3725,10 @@ export function PrModalApp({
     Object.assign(sideBag, {
       detail,
       buildAssetRepoPath,
+      attachmentUploadFailed: formatMessage(
+        'upload_attachment_failed',
+        appLocale
+      ),
       videoAttachmentUploadFailed: formatMessage(
         'upload_video_failed',
         appLocale
