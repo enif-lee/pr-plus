@@ -86,10 +86,10 @@ export function headProbeIndicatesStale(
 
 /**
  * Whether a head probe indicates lifecycle or head drift vs open detail.
- * Compares headSha, draft, and state so draft↔ready / close / merge without
- * a new commit still trigger soft-refresh.
+ * Compares headSha, draft, state, and updatedAt so comments / reviewers /
+ * assignees without a new commit still trigger soft-refresh.
  *
- * @param baseline open detail (or partial { headSha, draft, state })
+ * @param baseline open detail (or partial { headSha, draft, state, updatedAt })
  * @param probe fetchPrHeadProbe result
  */
 export function prProbeIndicatesStale(
@@ -97,6 +97,7 @@ export function prProbeIndicatesStale(
     headSha?: string | null;
     draft?: boolean | null;
     state?: string | null;
+    updatedAt?: string | null;
   } | null | undefined,
   probe: {
     headSha?: string | null;
@@ -131,6 +132,10 @@ export function prProbeIndicatesStale(
   ) {
     return true;
   }
+
+  const baseUpdated = String(base.updatedAt || '').trim();
+  const probeUpdated = String(probe.updatedAt || '').trim();
+  if (baseUpdated && probeUpdated && baseUpdated !== probeUpdated) return true;
 
   return false;
 }

@@ -14,6 +14,7 @@ import {
   shouldFetchSystemTimelineEvents,
   partitionTimelineWithThreadGap,
   mergeTimelineItemsById,
+  replaceNewestTimelineWindow,
   maxTimelineWatermark,
   selectDirtyThreadIdsByCommentCount,
   isReviewThreadsLoadIncomplete,
@@ -273,6 +274,59 @@ describe('since/watermark + dirty threads', () => {
     expect(m).toHaveLength(2);
     expect(m[0].id).toBe(2); // newest first
     expect(m.find((x) => x.id === 1)?.body).toBe('updated');
+  });
+
+  test('replaceNewestTimelineWindow drops in-window deletes, keeps older, applies edits', () => {
+    const prev = [
+      {
+        key: 'c-old',
+        id: 1,
+        kind: 'issue-comment',
+        at: '2026-01-01T00:00:00Z',
+        body: 'older load-more',
+      },
+      {
+        key: 'c-edit',
+        id: 2,
+        kind: 'issue-comment',
+        at: '2026-03-01T00:00:00Z',
+        body: 'stale body',
+      },
+      {
+        key: 'c-del',
+        id: 3,
+        kind: 'issue-comment',
+        at: '2026-03-02T00:00:00Z',
+        body: 'deleted on github',
+      },
+    ];
+    const next = [
+      {
+        key: 'c-new',
+        id: 4,
+        kind: 'issue-comment',
+        at: '2026-03-03T00:00:00Z',
+        body: 'external new',
+      },
+      {
+        key: 'c-edit',
+        id: 2,
+        kind: 'issue-comment',
+        at: '2026-03-01T00:00:00Z',
+        body: 'edited body',
+      },
+    ];
+    const m = replaceNewestTimelineWindow(prev, next);
+    const bodies = m.map((x) => x.body).sort();
+    expect(bodies).toEqual(['edited body', 'external new', 'older load-more']);
+    expect(m.some((x) => x.id === 3)).toBe(false);
+  });
+
+  test('replaceNewestTimelineWindow keeps prev when network window is empty', () => {
+    const prev = [
+      { key: 'c-1', id: 1, kind: 'issue-comment', at: '2026-01-01T00:00:00Z' },
+    ];
+    expect(replaceNewestTimelineWindow(prev, [])).toHaveLength(1);
   });
 
   test('selectDirtyThreadIdsByCommentCount detects count/resolve changes', () => {

@@ -3048,14 +3048,16 @@ export function PrModalApp({
       );
       document.documentElement.setAttribute(
         'data-prp-last-refresh-mode',
-        layoutMode === LAYOUT_DIFF ? 'full-threads' : 'visible-threads'
+        layoutMode === LAYOUT_DIFF ? 'full-threads' : 'revalidate'
       );
     } catch {
       /* ignore */
     }
     if (typeof onRefresh !== 'function') return;
     return onRefresh({
-      mode: layoutMode === LAYOUT_DIFF ? 'full-threads' : 'visible-threads',
+      // Conversation: newest thread window + unresolved by-ids (not only
+      // on-screen PRRT ids — those miss new external review threads).
+      mode: layoutMode === LAYOUT_DIFF ? 'full-threads' : 'revalidate',
       threadNodeIds:
         layoutMode === LAYOUT_DIFF
           ? undefined

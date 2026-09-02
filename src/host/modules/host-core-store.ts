@@ -427,8 +427,12 @@
         : null;
     const skipSupersedeMeta =
       metaGenAtStart != null && metaGenAtStart !== metaRefreshGen;
+    const trustNetworkMeta = Boolean(opts?.trustNetworkMeta);
     // Session write-through shield (labels flash-then-gone on list→detail).
-    let core = withPeopleMetaAuthority(coreFlat);
+    // Manual/auto refresh asks for GitHub's current chips — do not overlay.
+    let core = trustNetworkMeta
+      ? coreFlat
+      : withPeopleMetaAuthority(coreFlat);
     if (!S) {
       let progressive = core;
       if (skipSupersedeMeta) {
@@ -445,8 +449,10 @@
     });
     // Re-assert people-meta authority after core apply. Lagging REST null
     // milestone/labels must not stick when App just write-through confirmed.
+    // Skip on explicit refresh so an external chip edit is not overwritten.
     try {
       if (
+        !trustNetworkMeta &&
         lastPeopleMetaAuthority &&
         Number(lastPeopleMetaAuthority.number) === Number(current.number) &&
         lastPeopleMetaAuthority.fields &&
@@ -495,6 +501,7 @@
       S.applyComments(current.detailStore, payload.comments, {
         settled: true,
         trustEmpty: true,
+        replaceTimelineEvents: Boolean(payload.replaceTimelineEvents),
         pageMeta: payload.commentsMeta,
         timelineEvents: payload.timelineEvents,
         timelineMeta: payload.timelineMeta,

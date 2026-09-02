@@ -9,6 +9,7 @@
   let autoRefreshProbeInFlight = false;
   /** Avoid re-entry while onRefresh is running from a probe hit */
   let autoRefreshRevalidating = false;
+  let autoRefreshChecksInFlight = false;
 
   function autoRefreshApi() {
     return (globalThis as any).PRModalAutoRefresh || null;
@@ -90,6 +91,58 @@
     return Boolean(a && b && a !== b);
   }
 
+  /**
+   * Same-SHA check runs can complete without bumping pull updated_at.
+   * Re-fetch checks without a full revalidate / gen bump.
+   */
+  async function refreshOpenChecksOnly(owner: any, repo: any, number: any) {
+    if (autoRefreshChecksInFlight || autoRefreshRevalidating) return;
+    const headSha = String(current.detail?.headSha || '').trim();
+    if (!headSha) return;
+    const api = (globalThis as any).PRTreeFetch;
+    if (typeof api?.fetchPrChecks !== 'function') return;
+    if (typeof applySideToStore !== 'function') return;
+    autoRefreshChecksInFlight = true;
+    try {
+      const checks = await api.fetchPrChecks(owner, repo, headSha);
+      if (
+        !current.open ||
+        String(current.owner || '') !== String(owner || '') ||
+        String(current.repo || '') !== String(repo || '') ||
+        Number(current.number) !== Number(number)
+      ) {
+        return;
+      }
+      applySideToStore('checks', {
+        checks: checks || {
+          state: 'unknown',
+          totalCount: 0,
+          statuses: [],
+          checkRuns: [],
+        },
+      });
+      try {
+        render();
+      } catch {
+        /* ignore */
+      }
+    } catch (err) {
+      if (
+        err?.name === 'AbortError' ||
+        /aborted|AbortError|Extension context invalidated/i.test(
+          String(err?.message || err || '')
+        )
+      ) {
+        return;
+      }
+      console.log(
+        `[pr-plus] auto-refresh checks soft-fail ${err?.message || err}`
+      );
+    } finally {
+      autoRefreshChecksInFlight = false;
+    }
+  }
+
   async function tickAutoRefresh() {
     if (!canRunAutoRefreshTick()) return;
     if (autoRefreshProbeInFlight || autoRefreshRevalidating) return;
@@ -126,12 +179,18 @@
                   headSha: detail?.headSha,
                   draft: detail?.draft,
                   state: detail?.state,
+                  updatedAt: detail?.updatedAt,
                 },
                 probe
               )
             )
           : headProbeIndicatesStale(baseline, nextHead);
-      if (!lifecycleStale) return;
+      if (!lifecycleStale) {
+        // Same head/draft/state/updatedAt: CI can still complete. Refresh
+        // checks only (does not abort the open session).
+        void refreshOpenChecksOnly(owner, repo, number);
+        return;
+      }
 
       console.log(
         `[pr-plus] auto-refresh stale ${owner}/${repo}#${number}` +

@@ -327,12 +327,22 @@ export function applyPeopleMetaAuthorityToCore(
     repo?: string | null;
     number?: number | string | null;
   },
-  opts: { now?: number; ttlMs?: number; clearTtlMs?: number } = {}
+  opts: {
+    now?: number;
+    ttlMs?: number;
+    clearTtlMs?: number;
+    /** Skip overlay — network core is the requested snapshot (manual refresh). */
+    preferNetwork?: boolean;
+  } = {}
 ): { flat: Record<string, any> | null | undefined; fullyMatched: boolean } {
   if (!coreFlat || typeof coreFlat !== 'object') {
     return { flat: coreFlat, fullyMatched: false };
   }
   if (!authorityMatchesIdentity(authority, identity)) {
+    return { flat: coreFlat, fullyMatched: false };
+  }
+  // Explicit refresh / user-requested GitHub snapshot: do not overlay.
+  if (opts.preferNetwork) {
     return { flat: coreFlat, fullyMatched: false };
   }
   const now = Number(opts.now) || Date.now();
@@ -790,19 +800,25 @@ export function applyComments(store: any, comments: any, opts: ApplyOpts = {}) {
     const incoming = Array.isArray(opts.timelineEvents)
       ? opts.timelineEvents
       : [];
-    const byId = new Map<string, any>();
-    for (const e of prevEvents) {
-      if (e && e.id != null) byId.set(String(e.id), e);
+    if (opts.replaceTimelineEvents) {
+      // Refresh newest-window replace: caller already kept older load-more
+      // rows. Do not union — that resurrected remotely deleted events.
+      timelineEvents = incoming.slice();
+    } else {
+      const byId = new Map<string, any>();
+      for (const e of prevEvents) {
+        if (e && e.id != null) byId.set(String(e.id), e);
+      }
+      for (const e of incoming) {
+        if (e && e.id != null) byId.set(String(e.id), e);
+      }
+      timelineEvents =
+        byId.size > 0
+          ? [...byId.values()]
+          : incoming.length
+            ? incoming.slice()
+            : prevEvents.slice();
     }
-    for (const e of incoming) {
-      if (e && e.id != null) byId.set(String(e.id), e);
-    }
-    timelineEvents =
-      byId.size > 0
-        ? [...byId.values()]
-        : incoming.length
-          ? incoming.slice()
-          : prevEvents.slice();
   }
   const incomingItems = Array.isArray(comments) ? comments : [];
   // Progressive isolation: lagging empty page must not wipe painted issue

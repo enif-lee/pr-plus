@@ -108,4 +108,51 @@ describe('prProbeIndicatesStale', () => {
       )
     ).toBe(true);
   });
+
+  test('updatedAt change without head change triggers revalidate', () => {
+    expect(
+      prProbeIndicatesStale(
+        {
+          headSha: 'abc',
+          draft: false,
+          state: 'open',
+          updatedAt: '2026-09-02T00:00:00Z',
+        },
+        {
+          headSha: 'abc',
+          draft: false,
+          state: 'open',
+          updatedAt: '2026-09-02T00:01:00Z',
+        }
+      )
+    ).toBe(true);
+  });
+
+  test('identical updatedAt is not stale', () => {
+    expect(
+      prProbeIndicatesStale(
+        {
+          headSha: 'abc',
+          draft: false,
+          state: 'open',
+          updatedAt: '2026-09-02T00:00:00Z',
+        },
+        {
+          headSha: 'abc',
+          draft: false,
+          state: 'open',
+          updatedAt: '2026-09-02T00:00:00Z',
+        }
+      )
+    ).toBe(false);
+  });
+
+  test('missing updatedAt does not force stale', () => {
+    expect(
+      prProbeIndicatesStale(
+        { headSha: 'abc', draft: false, state: 'open' },
+        { headSha: 'abc', draft: false, state: 'open', updatedAt: '2026-09-02T00:00:00Z' }
+      )
+    ).toBe(false);
+  });
 });

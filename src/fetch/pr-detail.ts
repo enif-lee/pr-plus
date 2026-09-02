@@ -46,6 +46,26 @@ import {
   fetchViewerLogin,
 } from './viewer';
 
+/**
+ * Issue REST is the people-meta identity for labels/assignees (and a non-null
+ * milestone). Pull can lag a non-empty stale list after an external clear or
+ * replacement — only filling when pull was empty left those edits stuck.
+ */
+export function mergeIssueIdentityIntoPull(pr: any, issue: any): any {
+  if (!pr || !issue || typeof issue !== 'object') return pr;
+  let next = pr;
+  if (issue.milestone) {
+    next = { ...next, milestone: issue.milestone };
+  }
+  if (Array.isArray(issue.labels)) {
+    next = { ...next, labels: issue.labels };
+  }
+  if (Array.isArray(issue.assignees)) {
+    next = { ...next, assignees: issue.assignees };
+  }
+  return next;
+}
+
 export async function fetchPrDetail(
   owner: any,
   repo: any,
@@ -132,24 +152,7 @@ export async function fetchPrDetail(
   // Prefer issue REST for people-meta identity when present (milestone/labels/
   // assignees). Pull can lag or omit milestone after modal set (soft/hard reopen).
   if (pr && issue && typeof issue === 'object') {
-    if (issue.milestone) {
-      pr = { ...pr, milestone: issue.milestone };
-    }
-    // Labels/assignees: prefer issue arrays when pull omitted them.
-    if (
-      Array.isArray(issue.labels) &&
-      (!Array.isArray(pr.labels) || pr.labels.length === 0) &&
-      issue.labels.length > 0
-    ) {
-      pr = { ...pr, labels: issue.labels };
-    }
-    if (
-      Array.isArray(issue.assignees) &&
-      (!Array.isArray(pr.assignees) || pr.assignees.length === 0) &&
-      issue.assignees.length > 0
-    ) {
-      pr = { ...pr, assignees: issue.assignees };
-    }
+    pr = mergeIssueIdentityIntoPull(pr, issue);
   }
   // One immediate re-GET when parallel path missed milestone (soft-fail / race).
   // Further host-side polls happen only when openModal expects a board (authority).

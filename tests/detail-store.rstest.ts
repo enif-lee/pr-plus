@@ -142,6 +142,31 @@ describe('detail-store isolation', () => {
     expect(again.timelineEvents).toHaveLength(1);
   });
 
+  test('replaceTimelineEvents drops in-window deletes instead of unioning', () => {
+    const store = fromAppDetail({
+      owner: 'o',
+      repo: 'r',
+      number: 1,
+      title: 'T',
+    });
+    applyComments(store, [{ id: 1, body: 'keep' }], {
+      settled: true,
+      trustEmpty: true,
+      timelineEvents: [
+        { id: 'e-old', event: 'labeled' },
+        { id: 'e-gone', event: 'assigned' },
+      ],
+    });
+    applyComments(store, [{ id: 1, body: 'keep' }], {
+      settled: true,
+      trustEmpty: true,
+      replaceTimelineEvents: true,
+      timelineEvents: [{ id: 'e-old', event: 'labeled' }],
+    });
+    const flat = toAppDetail(store)!;
+    expect(flat.timelineEvents.map((e: any) => e.id)).toEqual(['e-old']);
+  });
+
   test('timelineMeta survives applyThreadsFromMergedDetail (Diff threads-all path)', () => {
     const store = fromAppDetail({
       owner: 'o',

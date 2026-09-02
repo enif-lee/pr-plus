@@ -79,9 +79,19 @@ export async function fetchPrChecks(owner: any, repo: any, headSha: any, fetchIm
   const empty = { state: 'unknown', totalCount: 0, statuses: [] as any[], checkRuns: [] as any[] };
   if (!o || !r || !sha) return empty;
   const base = githubRestUrl(`/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}`, ctx);
+  // Same-SHA check-runs reuse one URL; bust + no-store so refresh after CI
+  // completes is not a cached in_progress snapshot.
+  const bust = () =>
+    `_prp=${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+  const noCache = { cache: 'no-store' as RequestCache };
   let checks = { ...empty };
   try {
-    const status = await apiJson(`${base}/commits/${encodeURIComponent(sha)}/status`, fetchImpl, token);
+    const status = await apiJson(
+      `${base}/commits/${encodeURIComponent(sha)}/status?${bust()}`,
+      fetchImpl,
+      token,
+      noCache
+    );
     const statusList = Array.isArray(status?.statuses) ? status.statuses : [];
     const emptyCombined =
       !statusList.length && !(Number(status?.total_count) > 0);
@@ -108,9 +118,10 @@ export async function fetchPrChecks(owner: any, repo: any, headSha: any, fetchIm
   }
   try {
     const runs = await apiJson(
-      `${base}/commits/${encodeURIComponent(sha)}/check-runs?per_page=100&filter=latest`,
+      `${base}/commits/${encodeURIComponent(sha)}/check-runs?per_page=100&filter=latest&${bust()}`,
       fetchImpl,
-      token
+      token,
+      noCache
     );
     const list = runs?.check_runs || [];
     if (list.length) {

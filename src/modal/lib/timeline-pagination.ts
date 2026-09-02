@@ -145,6 +145,57 @@ export function mergeCommentMinimizeFields(prev: any, next: any): any {
   };
 }
 
+/** Stable id/key for timeline comments and system events. */
+export function timelineItemKey(it: any, fallbackIndex = 0): string {
+  if (it?.key != null) return String(it.key);
+  if (it?.id != null) return `${it.kind || 'item'}-${it.id}`;
+  if (it?.nodeId != null) return String(it.nodeId);
+  return `idx-${fallbackIndex}-${it?.at || ''}`;
+}
+
+function timelineItemMs(it: any): number {
+  const ms = Date.parse(String(it?.at || it?.createdAt || it?.submittedAt || ''));
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+/**
+ * Refresh the newest timeline window from network while keeping older
+ * load-more history. Network is authoritative inside the fetched window:
+ * bodies/edits win, in-window deletes drop, items older than the window stay.
+ * Empty network (error / 0 rows) keeps prev so a failed refresh cannot wipe.
+ */
+export function replaceNewestTimelineWindow(
+  prevItems: any[],
+  nextItems: any[],
+  opts: { sortNewest?: boolean } = {}
+): any[] {
+  const next = (Array.isArray(nextItems) ? nextItems : []).filter(Boolean);
+  const prev = (Array.isArray(prevItems) ? prevItems : []).filter(Boolean);
+  if (!next.length) return prev.slice();
+  const nextIds = new Set(next.map((it, i) => timelineItemKey(it, i)));
+  let windowMinMs = Infinity;
+  for (const it of next) {
+    const ms = timelineItemMs(it);
+    if (ms > 0 && ms < windowMinMs) windowMinMs = ms;
+  }
+  const keptOlder: any[] = [];
+  for (let i = 0; i < prev.length; i++) {
+    const it = prev[i];
+    const k = timelineItemKey(it, i);
+    if (nextIds.has(k)) continue;
+    const ms = timelineItemMs(it);
+    if (
+      Number.isFinite(windowMinMs) &&
+      windowMinMs !== Infinity &&
+      ms > 0 &&
+      ms < windowMinMs
+    ) {
+      keptOlder.push(it);
+    }
+  }
+  return mergeTimelineItemsById(keptOlder, next, opts);
+}
+
 /**
  * Merge incremental timeline page items into prior list by stable id/key.
  * Newer page wins on conflict. Returns sorted newest-first when sortNewest.
@@ -156,20 +207,14 @@ export function mergeTimelineItemsById(
   opts: { sortNewest?: boolean } = {}
 ): any[] {
   const map = new Map<string, any>();
-  const keyOf = (it: any, i: number) => {
-    if (it?.key != null) return String(it.key);
-    if (it?.id != null) return `${it.kind || 'item'}-${it.id}`;
-    if (it?.nodeId != null) return String(it.nodeId);
-    return `idx-${i}-${it?.at || ''}`;
-  };
   let i = 0;
   for (const it of Array.isArray(prevItems) ? prevItems : []) {
     if (!it) continue;
-    map.set(keyOf(it, i++), it);
+    map.set(timelineItemKey(it, i++), it);
   }
   for (const it of Array.isArray(nextItems) ? nextItems : []) {
     if (!it) continue;
-    const k = keyOf(it, i++);
+    const k = timelineItemKey(it, i++);
     const prev = map.get(k);
     map.set(k, prev ? mergeCommentMinimizeFields(prev, it) : it);
   }

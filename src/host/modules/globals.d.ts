@@ -37,3 +37,4 @@ declare function notePeopleMetaAuthority(...args: any[]): any;
 declare function ensureDetailStore(...args: any[]): any;
 declare function detailStoreApi(...args: any[]): any;
 declare function publishDetailFromStore(...args: any[]): any;
+declare function applySideToStore(...args: any[]): any;
