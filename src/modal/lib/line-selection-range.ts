@@ -26,6 +26,13 @@ export const SELECTION_ACTIONS_REVEAL_MS = 450;
 export const SELECTION_NAV_BUSY_ATTR = 'data-prp-selection-nav';
 
 /**
+ * documentElement attribute while Opt-hold chrome is suppressed after a
+ * comment/file/diff hop. Cleared when Opt is released. ShortcutHint +
+ * selection dock must not treat the leftover hold as a fresh Opt press.
+ */
+export const OPT_HINTS_SUPPRESSED_ATTR = 'data-prp-opt-hints-suppressed';
+
+/**
  * Which island phase a selection *supports* after settle (not whether to show).
  * - line + **file** header → `actions` (Comment / Copy code / Copy URL / Dismiss)
  * - thread caret → no line island (`hidden`)
@@ -57,6 +64,11 @@ export function shouldShowSelectionActionGroup(opts: {
   hoverReveal?: boolean;
   /** Keyboard/region selection jump in flight or settling */
   selectionNavBusy?: boolean;
+  /**
+   * After comment/file/diff Opt chords: this hold does not reveal the dock
+   * until Opt is released and pressed again.
+   */
+  optHintsSuppressed?: boolean;
   /** 'comment' keeps island open without Opt/hover */
   phase?: 'actions' | 'comment' | string | null;
 } = {}): boolean {
@@ -65,7 +77,10 @@ export function shouldShowSelectionActionGroup(opts: {
   if (String(opts.phase || '') === 'comment') return true;
   // Jump settle: keep floatbar down even if Opt is held
   if (opts.selectionNavBusy) return false;
-  return Boolean(opts.optHeld || opts.hoverReveal);
+  // After an Opt chord (comment/file/diff hop), ignore this hold until
+  // Opt is released and pressed again. Hover still reveals.
+  const optHeld = opts.optHintsSuppressed ? false : Boolean(opts.optHeld);
+  return Boolean(optHeld || opts.hoverReveal);
 }
 
 /** Estimated action floatbar height (segmented Comment / Copy / …). */

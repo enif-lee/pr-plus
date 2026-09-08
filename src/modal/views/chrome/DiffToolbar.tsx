@@ -64,6 +64,12 @@ export function DiffToolbar(props: any) {
     onDiffMode,
     hideWhitespace = false,
     onHideWhitespace = null,
+    wordHighlight = true,
+    onWordHighlight = null,
+    wordStrike = true,
+    onWordStrike = null,
+    dimUnfocusedFiles = true,
+    onDimUnfocusedFiles = null,
     commits = [],
     commitFilter,
     onCommitFilter,
@@ -718,6 +724,48 @@ export function DiffToolbar(props: any) {
                               data-prp-hide-whitespace="1"
                             />
                             <span>{t('hide_whitespace')}</span>
+                          </label>
+                          <label
+                            className="prp-diff-review-settings__row"
+                            title={t('highlight_diff_words_title')}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={Boolean(wordHighlight)}
+                              onChange={(e) =>
+                                onWordHighlight?.(Boolean(e.target.checked))
+                              }
+                              data-prp-word-highlight="1"
+                            />
+                            <span>{t('highlight_diff_words')}</span>
+                          </label>
+                          <label
+                            className="prp-diff-review-settings__row"
+                            title={t('strike_deleted_words_title')}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={Boolean(wordStrike)}
+                              onChange={(e) =>
+                                onWordStrike?.(Boolean(e.target.checked))
+                              }
+                              data-prp-word-strike="1"
+                            />
+                            <span>{t('strike_deleted_words')}</span>
+                          </label>
+                          <label
+                            className="prp-diff-review-settings__row"
+                            title={t('dim_unfocused_files_title')}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={Boolean(dimUnfocusedFiles)}
+                              onChange={(e) =>
+                                onDimUnfocusedFiles?.(Boolean(e.target.checked))
+                              }
+                              data-prp-dim-unfocused="1"
+                            />
+                            <span>{t('dim_unfocused_files')}</span>
                           </label>
                           {showReviewFilter || authorList.length > 0 ? (
                             <label

@@ -10,6 +10,12 @@ export function clamp(n: any, min: any, max: any) {
 }
 
 /**
+ * Diff hops (comment ⌥J/K, file ⌥⇧[ ], change-region ⌥↑↓): pin the target
+ * this fraction down from the viewport top (was ~1/3).
+ */
+export const DIFF_HOP_FROM_TOP = 0.15;
+
+/**
  * @param {object} opts
  * @param {number} opts.totalRows
  * @param {number} opts.rowHeight
@@ -140,14 +146,15 @@ export function adjustScrollTopForOffsetChange(
  * - align: 'quarter' (default) — slightly below top (search jumps)
  * - align: 'start' — top of scrollport (+ optional pad; Conversation ⌥J/K)
  * - align: 'center' — vertical center of scrollport
- * - align: 'third' — ~1/3 from top (Diff ⌥J/K)
+ * - align: 'third' — ~1/3 from top
+ * - align: 'frac' — `frac` of viewport from top (Diff hops, default 0.15)
  *
  * @param {number} index
  * @param {number} rowHeight
  * @param {number} viewportHeight
  * @param {number} totalRows
  * @param {number[]|null|undefined} [offsets]
- * @param {{ align?: 'start'|'quarter'|'center'|'third', pad?: number }|null|undefined} [opts]
+ * @param {{ align?: 'start'|'quarter'|'center'|'third'|'frac', pad?: number, frac?: number }|null|undefined} [opts]
  */
 export function scrollTopForIndex(
   index: any,
@@ -156,8 +163,9 @@ export function scrollTopForIndex(
   totalRows: any,
   offsets?: any,
   opts?: {
-    align?: 'start' | 'quarter' | 'center' | 'third';
+    align?: 'start' | 'quarter' | 'center' | 'third' | 'frac';
     pad?: number;
+    frac?: number;
   } | null
 ) {
   const total = Math.max(0, totalRows);
@@ -166,7 +174,8 @@ export function scrollTopForIndex(
   const align =
     alignRaw === 'start' ||
     alignRaw === 'center' ||
-    alignRaw === 'third'
+    alignRaw === 'third' ||
+    alignRaw === 'frac'
       ? alignRaw
       : 'quarter';
   const vh = Math.max(0, Number(viewportHeight) || 0);
@@ -174,6 +183,16 @@ export function scrollTopForIndex(
     opts?.pad != null && Number.isFinite(Number(opts.pad))
       ? Math.max(0, Number(opts.pad))
       : null;
+  const pinFrac =
+    align === 'frac'
+      ? clamp(
+          Number.isFinite(Number(opts?.frac))
+            ? Number(opts?.frac)
+            : DIFF_HOP_FROM_TOP,
+          0,
+          1
+        )
+      : 1 / 3;
 
   if (Array.isArray(offsets) && offsets.length === total + 1) {
     const totalHeight = offsets[total] || 0;
@@ -183,9 +202,8 @@ export function scrollTopForIndex(
     if (align === 'center') {
       return clamp(y - vh / 2 + h / 2, 0, maxScroll);
     }
-    if (align === 'third') {
-      // Row top at ~1/3 of the viewport
-      return clamp(y - vh / 3, 0, maxScroll);
+    if (align === 'third' || align === 'frac') {
+      return clamp(y - vh * pinFrac, 0, maxScroll);
     }
     const pad =
       explicitPad != null
@@ -200,8 +218,8 @@ export function scrollTopForIndex(
   if (align === 'center') {
     return clamp(i * rh - vh / 2 + rh / 2, 0, maxScroll);
   }
-  if (align === 'third') {
-    return clamp(i * rh - vh / 3, 0, maxScroll);
+  if (align === 'third' || align === 'frac') {
+    return clamp(i * rh - vh * pinFrac, 0, maxScroll);
   }
   const pad =
     explicitPad != null

@@ -227,8 +227,9 @@ export function flattenFilesToVirtualRows(files: any, mode = 'unified', options:
     const lines = patch.split('\n');
 
     /**
-     * Split mode: buffer consecutive del/add runs, then pair them onto the
-     * same visual row (GitHub-style side-by-side). Context flushes first.
+     * Buffer consecutive del/add runs, then pair them (GitHub-style).
+     * Split: one visual row per pair. Unified: separate rows that still
+     * carry partner text for intra-line word marks. Context flushes first.
      * @type {Array<{ line: string, o: number|null, n: number|null }>}
      */
     const pendingDels: any[] = [];
@@ -298,12 +299,70 @@ export function flattenFilesToVirtualRows(files: any, mode = 'unified', options:
       pendingAdds.length = 0;
     };
 
+    /** Unified: emit dels then adds (patch order) with partner text for word marks. */
+    const flushUnifiedChangeGroup = () => {
+      if (!pendingDels.length && !pendingAdds.length) return;
+      for (let i = 0; i < pendingDels.length; i++) {
+        const d = pendingDels[i];
+        const a = pendingAdds[i] || null;
+        const left = d.line.slice(1);
+        const right = a ? a.line.slice(1) : '';
+        rows.push({
+          kind: 'diff-line',
+          filePath: path,
+          text: d.line,
+          code: left,
+          leftCode: left,
+          rightCode: right,
+          split: false,
+          raw: d.line,
+          rowIndex: index++,
+          lineType: 'del',
+          leftType: 'del',
+          rightType: a ? 'add' : null,
+          oldLine: d.o,
+          newLine: d.n,
+        });
+        attachInlineComments(d.o, d.n);
+      }
+      for (let i = 0; i < pendingAdds.length; i++) {
+        const a = pendingAdds[i];
+        const d = pendingDels[i] || null;
+        const left = d ? d.line.slice(1) : '';
+        const right = a.line.slice(1);
+        rows.push({
+          kind: 'diff-line',
+          filePath: path,
+          text: a.line,
+          code: right,
+          leftCode: left,
+          rightCode: right,
+          split: false,
+          raw: a.line,
+          rowIndex: index++,
+          lineType: 'add',
+          leftType: d ? 'del' : null,
+          rightType: 'add',
+          oldLine: a.o,
+          newLine: a.n,
+        });
+        attachInlineComments(a.o, a.n);
+      }
+      pendingDels.length = 0;
+      pendingAdds.length = 0;
+    };
+
+    const flushChangeGroup = () => {
+      if (split) flushSplitChangeGroup();
+      else flushUnifiedChangeGroup();
+    };
+
     const pushDiffLine = (lineType: any, line: any, o: any, n: any) => {
-      // Split: buffer del/add so consecutive change runs share a row
-      if (split && (lineType === 'del' || lineType === 'add')) {
+      // Buffer del/add so consecutive change runs pair (split row / unified marks)
+      if (lineType === 'del' || lineType === 'add') {
         if (lineType === 'del') {
           // del after add closes the previous change group
-          if (pendingAdds.length) flushSplitChangeGroup();
+          if (pendingAdds.length) flushChangeGroup();
           pendingDels.push({ line, o, n });
         } else {
           pendingAdds.push({ line, o, n });
@@ -311,7 +370,7 @@ export function flattenFilesToVirtualRows(files: any, mode = 'unified', options:
         return;
       }
 
-      if (split) flushSplitChangeGroup();
+      flushChangeGroup();
 
       if (split && lineType === 'context') {
         const code = line.slice(1);
@@ -433,7 +492,7 @@ export function flattenFilesToVirtualRows(files: any, mode = 'unified', options:
 
       if (lineType === 'hunk' || lineType === 'meta') {
         // Close any open del/add pair before chrome rows
-        if (split) flushSplitChangeGroup();
+        flushChangeGroup();
         const row: any = {
           kind: 'diff-line',
           filePath: path,
@@ -477,7 +536,7 @@ export function flattenFilesToVirtualRows(files: any, mode = 'unified', options:
     }
 
     // Flush trailing del/add pair at end of patch
-    if (split) flushSplitChangeGroup();
+    flushChangeGroup();
 
     // Trailing omitted context → expand on the last @@ row (right side)
     if (
@@ -691,6 +750,104 @@ export function fileStartIndexMap(virtualRows: any) {
     }
   }
   return map;
+}
+
+/**
+ * Path that owns Diff file-focus chrome (full-file outline + header leaf).
+ * Prefer the caret (`lineSelection.filePath`) so pointer clicks follow the
+ * cursor even when tree `activeFilePath` has not been synced yet. Fall back
+ * to `activeFilePath` for tree/file-nav with no caret (`onSelectFile` clears
+ * line selection).
+ */
+export function diffFileFocusPath(state: {
+  activeFilePath?: string | null;
+  lineSelection?: { filePath?: string | null } | null;
+} | null | undefined): string {
+  const fromSel = String(state?.lineSelection?.filePath || '').trim();
+  if (fromSel) return fromSel;
+  return String(state?.activeFilePath || '').trim();
+}
+
+/**
+ * Inclusive array-index range of the contiguous block for `filePath`.
+ * Files are laid out as contiguous runs (header + body + inline threads).
+ */
+export function focusedFileRowRange(
+  virtualRows: any[] | null | undefined,
+  filePath: unknown
+): { start: number; end: number } | null {
+  const path = String(filePath || '').trim();
+  if (!path) return null;
+  return fileRowRangesByPath(virtualRows).get(path) || null;
+}
+
+/**
+ * One pass over `virtualRows` → path → inclusive [start, end] index.
+ * Cache on `virtualRows` identity so file hops are O(1) lookups, not O(n).
+ */
+export function fileRowRangesByPath(
+  virtualRows: any[] | null | undefined
+): Map<string, { start: number; end: number }> {
+  const map = new Map<string, { start: number; end: number }>();
+  if (!Array.isArray(virtualRows) || virtualRows.length === 0) return map;
+  let i = 0;
+  const n = virtualRows.length;
+  while (i < n) {
+    const path = String(
+      virtualRows[i]?.filePath || virtualRows[i]?.path || ''
+    ).trim();
+    if (!path) {
+      i += 1;
+      continue;
+    }
+    const start = i;
+    i += 1;
+    while (i < n) {
+      const next = String(
+        virtualRows[i]?.filePath || virtualRows[i]?.path || ''
+      ).trim();
+      if (next !== path) break;
+      i += 1;
+    }
+    if (!map.has(path)) map.set(path, { start, end: i - 1 });
+  }
+  return map;
+}
+
+/**
+ * Pixel rect for the full-file focus outline overlay.
+ * `offsets` is `rowOffsets` output: length = rows.length + 1.
+ */
+export function focusedFileOutlineRect(
+  range: { start: number; end: number } | null,
+  offsets: number[] | null | undefined
+): { top: number; height: number } | null {
+  if (!range || !Array.isArray(offsets) || offsets.length < 2) return null;
+  const top = Number(offsets[range.start]);
+  const bottom = Number(offsets[range.end + 1]);
+  if (!Number.isFinite(top) || !Number.isFinite(bottom) || bottom <= top) {
+    return null;
+  }
+  return { top, height: bottom - top };
+}
+
+/**
+ * Dim strips above/below the focused file so unfocused files recede.
+ * Empty when there is no focus rect or the focused file fills the list.
+ */
+export function unfocusedFileDimBands(
+  rect: { top: number; height: number } | null,
+  totalHeight: unknown
+): { top: number; height: number }[] {
+  if (!rect) return [];
+  const total = Number(totalHeight);
+  if (!Number.isFinite(total) || total <= 0) return [];
+  const start = Math.max(0, Number(rect.top) || 0);
+  const end = Math.min(total, start + Math.max(0, Number(rect.height) || 0));
+  const bands: { top: number; height: number }[] = [];
+  if (start > 0.5) bands.push({ top: 0, height: start });
+  if (total - end > 0.5) bands.push({ top: end, height: total - end });
+  return bands;
 }
 
 /**

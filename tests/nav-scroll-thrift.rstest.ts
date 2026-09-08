@@ -12,6 +12,7 @@ import {
   applyProgrammaticDiffScroll,
   scrollTopForIndex,
   scrollTopToRevealIndex,
+  DIFF_HOP_FROM_TOP,
 } from '../src/modal/lib/virtual-range';
 import {
   nextScrollTopByPage as pageStep,
@@ -137,6 +138,37 @@ describe('offset helpers still ship (no product contract change)', () => {
     expect(Number.isFinite(third)).toBe(true);
   });
 
+  test('frac pin is rowTop - viewportHeight * frac (comment hop 15%)', () => {
+    const rh = 20;
+    const vh = 600;
+    const total = 80;
+    const idx = 30;
+    const rowTop = idx * rh;
+    const max = Math.max(0, total * rh - vh);
+    expect(DIFF_HOP_FROM_TOP).toBe(0.15);
+    const want = Math.min(
+      max,
+      Math.max(0, rowTop - vh * DIFF_HOP_FROM_TOP)
+    );
+    const down = scrollTopForIndex(idx, rh, vh, total, null, {
+      align: 'frac',
+      frac: DIFF_HOP_FROM_TOP,
+    });
+    expect(down).toBe(want);
+    const offs = Array.from({ length: total + 1 }, (_, i) => i * rh);
+    expect(
+      scrollTopForIndex(idx, rh, vh, total, offs, {
+        align: 'frac',
+        frac: DIFF_HOP_FROM_TOP,
+      })
+    ).toBe(want);
+    const third = scrollTopForIndex(idx, rh, vh, total, null, {
+      align: 'third',
+    });
+    // 15% pin sits higher than 33% → larger scrollTop
+    expect(down).toBeGreaterThan(third);
+  });
+
   test('third pin is rowTop - viewportHeight/3 (clamped), same both dirs', () => {
     const rh = 20;
     const vh = 600;
@@ -191,30 +223,41 @@ describe('hop wiring uses third; arrows use reveal', () => {
     return fs.readFileSync(path.join(root, rel), 'utf8');
   }
 
-  test('thread hop pins third', () => {
+  test('thread hop pins ~15% from top', () => {
     const nav = read('src/modal/hooks/useDiffConversationNav.ts');
     const start = nav.indexOf('scrollMappedCommentIntoView = useCallback');
-    const threadBlock = nav.slice(start, start + 900);
-    expect(threadBlock).toMatch(/align:\s*'third'/);
+    const threadBlock = nav.slice(start, start + 1100);
+    expect(threadBlock).toMatch(/align:\s*'frac'/);
+    expect(threadBlock).toMatch(/DIFF_HOP_FROM_TOP/);
+    expect(threadBlock).not.toMatch(/align:\s*'third'/);
   });
 
-  test('file hop pins third', () => {
+  test('file hop pins ~15% from top', () => {
     const shell = read('src/modal/app/PrModalShell.tsx');
     const block = shell.slice(
       shell.indexOf('function onSelectFile'),
       shell.indexOf('function onToggleDir')
     );
-    expect(block).toMatch(/align:\s*'third'/);
+    expect(block).toMatch(/align:\s*'frac'/);
+    expect(block).toMatch(/DIFF_HOP_FROM_TOP/);
+    expect(block).not.toMatch(/align:\s*'third'/);
     expect(block).not.toMatch(/align:\s*'start'/);
   });
 
-  test('change-region hop uses third helper', () => {
+  test('change-region hop uses 15% pin helper', () => {
     const nav = read('src/modal/hooks/useDiffConversationNav.ts');
     const block = nav.slice(
       nav.indexOf('function applyOptArrowScrollSelect'),
       nav.indexOf('function optArrowScrollSelect')
     );
     expect(block).toMatch(/scrollSelectionHeadToThird/);
+    const sel = read('src/modal/hooks/useSelectionKeyboard.ts');
+    const pin = sel.slice(
+      sel.indexOf('function scrollSelectionHeadToThird'),
+      sel.indexOf('function ensureFileExpandedForSelection')
+    );
+    expect(pin).toMatch(/align:\s*'frac'/);
+    expect(pin).toMatch(/DIFF_HOP_FROM_TOP/);
   });
 
   test('Arrow caret still uses reveal-only helper', () => {

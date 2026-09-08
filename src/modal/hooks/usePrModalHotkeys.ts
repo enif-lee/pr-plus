@@ -12,6 +12,7 @@ import {
   shouldPreventConvArrowFallback,
 } from '../lib/shortcut-policy';
 import { isEscapeOverlayOpen } from '../lib/escape-layer';
+import { OPT_HINTS_SUPPRESSED_ATTR } from '../lib/line-selection';
 
 export function usePrModalHotkeys(h: Record<string, any>): void {
   const open = h.open;
@@ -160,6 +161,21 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
     reportShortcutMonitor(buildShortcutMonitorFire(action, isMac));
   }
 
+  function setOptHintsSuppressed(on: boolean) {
+    const next = Boolean(on);
+    if (optHintsSuppressedRef.current === next) return;
+    optHintsSuppressedRef.current = next;
+    try {
+      const root =
+        typeof document !== 'undefined' ? document.documentElement : null;
+      if (!root) return;
+      if (next) root.setAttribute(OPT_HINTS_SUPPRESSED_ATTR, '1');
+      else root.removeAttribute(OPT_HINTS_SUPPRESSED_ATTR);
+    } catch {
+      /* ignore */
+    }
+  }
+
   /**
    * Opt-hold → store only (no App setState). Leaf ShortcutHint + overlay class bridge
    * re-render; ConversationView tree stays memoized.
@@ -230,7 +246,7 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
 
     if (!open) {
       optHeldRef.current = false;
-      optHintsSuppressedRef.current = false;
+      setOptHintsSuppressed(false);
       useModalStore.getState().setOptHintsActive(false);
       stampOptHeldAttr(false);
       return undefined;
@@ -240,7 +256,7 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
       const held = Boolean(e.altKey);
       if (held === lastHeld) {
         if (!held) {
-          optHintsSuppressedRef.current = false;
+          setOptHintsSuppressed(false);
           syncOptHintsActive();
         }
         return;
@@ -248,7 +264,7 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
       lastHeld = held;
       optHeldRef.current = held;
       stampOptHeldAttr(held);
-      if (!held) optHintsSuppressedRef.current = false;
+      if (!held) setOptHintsSuppressed(false);
       syncOptHintsActive();
     };
     /**
@@ -263,7 +279,7 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
         lastHeld = active;
         optHeldRef.current = active;
         stampOptHeldAttr(active);
-        if (!active) optHintsSuppressedRef.current = false;
+        if (!active) setOptHintsSuppressed(false);
         syncOptHintsActive();
       } catch {
         /* ignore */
@@ -274,7 +290,7 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
       lastHeld = false;
       optHeldRef.current = false;
       stampOptHeldAttr(false);
-      optHintsSuppressedRef.current = false;
+      setOptHintsSuppressed(false);
       useModalStore.getState().setOptHintsActive(false);
     };
     window.addEventListener('prp-set-opt-hints', onForce as any, true);
@@ -464,6 +480,12 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
                 ? 'optArrowScrollSelectPrev'
                 : 'optArrowScrollSelectNext'
             );
+            // First hop in the hold: hide Opt chrome. Later repeats must not
+            // re-stamp DOM attrs (ShortcutHint MutationObservers × N).
+            if (!optHintsSuppressedRef.current) {
+              setOptHintsSuppressed(true);
+              syncOptHintsActive();
+            }
             act.optArrowScrollSelect?.(d);
             return;
           }
@@ -485,6 +507,10 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
               e.key === ']' ||
               e.key === '}';
             reportShortcutAction(next ? 'navFileNext' : 'navFilePrev');
+            if (!optHintsSuppressedRef.current) {
+              setOptHintsSuppressed(true);
+              syncOptHintsActive();
+            }
             act.navFile?.(next ? 1 : -1);
             return;
           }
@@ -928,7 +954,7 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
           e.preventDefault();
           e.stopPropagation();
           if (e.altKey) {
-            optHintsSuppressedRef.current = true;
+            setOptHintsSuppressed(true);
             syncOptHintsActive();
           }
           reportShortcutAction(String(composerAct));
@@ -1099,7 +1125,7 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
               /* ignore */
             }
           }
-          optHintsSuppressedRef.current = true;
+          setOptHintsSuppressed(true);
           syncOptHintsActive();
           // Shortcut monitor: opt peer already has title + chord labels
           if (typeof buildShortcutMonitorFireFromParts === 'function') {
@@ -1321,7 +1347,7 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
       e.stopPropagation();
       // Opt-hold tips vanish immediately after a chord fires (until Opt release)
       if (e.altKey) {
-        optHintsSuppressedRef.current = true;
+        setOptHintsSuppressed(true);
         syncOptHintsActive();
       }
       // Bottom-right monitor — only real fires (resolved + about to run)

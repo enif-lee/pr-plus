@@ -99,6 +99,30 @@ describe('Diff CSS --prp-diff-row-h matches ROW_HEIGHT', () => {
     expect(thread).not.toMatch(/--prp-diff-row-h/);
   });
 
+  test('split review-thread box uses the same 720px cap as unified', () => {
+    const thread = read('src/modal/views/diff/InlineReviewThreads.css');
+    const split = read('src/modal/components/common/MarkdownComposer.css');
+    expect(thread).toMatch(
+      /\.prp-inline-thread\s*\{[^}]*max-width:\s*min\(720px,\s*100%\)/s
+    );
+    // Column grid stays 1fr 1fr so LEFT/RIGHT comments line up with code panes
+    expect(split).toMatch(
+      /\.prp-split-cols\s*\{[^}]*grid-template-columns:\s*1fr 1fr/s
+    );
+    expect(split).not.toMatch(
+      /\.prp-split-cols--comment\s*\{[^}]*display:\s*flex/s
+    );
+    expect(split).not.toMatch(
+      /\.prp-split-cols__comment-pane\s*\{[^}]*width:\s*min\(720px/s
+    );
+    expect(split).toMatch(
+      /\.prp-vline--comment-split \.prp-inline-thread\s*\{[^}]*max-width:\s*min\(720px,\s*100%\)/s
+    );
+    expect(split).not.toMatch(
+      /\.prp-vline--comment-split \.prp-inline-thread\s*\{[^}]*max-width:\s*100%;/s
+    );
+  });
+
   test('selection dock host height matches ROW_HEIGHT (not stale 22px fallback)', () => {
     const css = read('src/modal/components/common/TipPopover.css');
     // Host must use shared Diff row metric so virtual offsets do not drift

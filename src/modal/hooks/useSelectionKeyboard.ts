@@ -218,6 +218,7 @@ import {
   scrollTopForIndex,
   scrollTopToRevealIndex,
   applyProgrammaticDiffScroll,
+  DIFF_HOP_FROM_TOP,
 } from '../lib/virtual-range';
 import {
   beginLineSelection,
@@ -839,6 +840,7 @@ export function useSelectionKeyboard(b: any) {
             hoverReveal: Boolean(selectionHoverRevealRef.current),
             // Explicit Opt latch (DOM attr) wins over a stuck jump-busy flag.
             selectionNavBusy: Boolean(selectionNavBusyRef.current) && !domOpt,
+            optHintsSuppressed: Boolean(optHintsSuppressedRef.current),
             phase,
           })
         : phase === 'comment' ||
@@ -980,7 +982,7 @@ export function useSelectionKeyboard(b: any) {
   }
 
   /**
-   * Pin the selection head at ~1/3 of the Diff viewport (file / region hops).
+   * Pin the selection head near 15% of the Diff viewport (file / region hops).
    * Not used for ArrowUp/Down (those stay on scrollSelectionHeadDomOnly).
    */
   function scrollSelectionHeadToThird(sel: any) {
@@ -996,7 +998,8 @@ export function useSelectionKeyboard(b: any) {
       const top =
         typeof scrollTopForIndex === 'function'
           ? scrollTopForIndex(headIdx, h, vp, virtualRows.length, offs, {
-              align: 'third',
+              align: 'frac',
+              frac: DIFF_HOP_FROM_TOP,
             })
           : 0;
       applyProgrammaticDiffScroll(el, top, {

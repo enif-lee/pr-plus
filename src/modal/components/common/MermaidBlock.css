@@ -210,16 +210,33 @@
   border-left: 3px solid var(--prp-border-muted);
 }
 
-/* Active file (tree / prev-next) — focus chrome on Diff file header */
+/* Active file (tree / prev-next) — header leaf chrome.
+ * Full-file ring is `.prp-file-focus-outline` (header + body + threads).
+ * Line-caret focus keeps that ring via `diffFileFocusPath`. */
 .prp-vline--header-focus {
   position: relative;
   z-index: 2;
   border-left-width: 3px;
   border-left-color: var(--prp-accent);
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--prp-accent) 55%, transparent),
-    0 0 0 2px color-mix(in srgb, var(--prp-accent) 28%, transparent);
   outline: none;
+}
+
+/*
+ * Ring on ::after so viewed checkbox, status badge, and Comment cannot
+ * cover it (those have opaque backgrounds). Overlay in the spacer still
+ * wraps the file body; this completes the in-list header strip.
+ * Sticky clone is a scroller-sibling (not CSS position:sticky) — its ring
+ * lives on `.prp-file-header-sticky` so `.prp-vline` contain:paint cannot clip it.
+ */
+.prp-vline--header-focus::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 8;
+  box-shadow:
+    inset 0 0 0 1px var(--prp-accent),
+    inset 0 0 0 3px color-mix(in srgb, var(--prp-accent) 55%, transparent);
 }
 
 .prp-vline--header-focus .prp-file-header__path {
@@ -237,24 +254,52 @@
     inset 0 0 0 1px color-mix(in srgb, var(--prp-accent) 45%, transparent);
 }
 
-.prp-vline--header-selected.prp-vline--header-focus {
+/*
+ * Sticky clone sits above the scroller (absolute sibling of .prp-vlist, not
+ * CSS position:sticky). Overlay top scrolls away with the in-list header, so
+ * the pinned ring must live on this host — `.prp-vline` uses contain:paint
+ * and would clip an inner ::after. Host has no overflow/contain.
+ */
+.prp-file-header-sticky:has([data-file-focus="1"])::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 8;
   box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--prp-accent) 55%, transparent),
-    0 0 0 2px color-mix(in srgb, var(--prp-accent) 28%, transparent);
+    inset 0 0 0 1px var(--prp-accent),
+    inset 0 0 0 3px color-mix(in srgb, var(--prp-accent) 55%, transparent);
 }
-
 .prp-file-header-sticky .prp-vline--header-focus {
   border-radius: 0;
 }
+.prp-file-header-sticky .prp-vline--header-focus::after {
+  content: none;
+}
 
-/* File header tinted by overall file change (same palette as diff lines) */
+/*
+ * File header tinted by overall file change (same palette as diff lines).
+ * Dark --prp-add-bg/--prp-del-bg/--prp-hunk-bg are rgba (line washes). A
+ * lone color-mix keeps that alpha, so sticky clones show code through the
+ * bar. Flatten the wash onto opaque muted.
+ */
 .prp-vline--header-add {
-  background: color-mix(in srgb, var(--prp-add-bg) 70%, var(--prp-bg-muted));
+  background:
+    linear-gradient(
+      color-mix(in srgb, var(--prp-add-bg) 70%, transparent),
+      color-mix(in srgb, var(--prp-add-bg) 70%, transparent)
+    ),
+    var(--prp-bg-muted);
   border-left-color: var(--prp-ok);
 }
 
 .prp-vline--header-del {
-  background: color-mix(in srgb, var(--prp-del-bg) 70%, var(--prp-bg-muted));
+  background:
+    linear-gradient(
+      color-mix(in srgb, var(--prp-del-bg) 70%, transparent),
+      color-mix(in srgb, var(--prp-del-bg) 70%, transparent)
+    ),
+    var(--prp-bg-muted);
   border-left-color: var(--prp-danger);
 }
 
@@ -264,7 +309,12 @@
 }
 
 .prp-vline--header-rename {
-  background: color-mix(in srgb, var(--prp-hunk-bg) 55%, var(--prp-bg-muted));
+  background:
+    linear-gradient(
+      color-mix(in srgb, var(--prp-hunk-bg) 55%, transparent),
+      color-mix(in srgb, var(--prp-hunk-bg) 55%, transparent)
+    ),
+    var(--prp-bg-muted);
   border-left-color: var(--prp-accent);
 }
 
@@ -373,6 +423,8 @@
   pointer-events: auto;
   max-width: 100%;
   box-sizing: border-box;
+  overflow: visible;
+  background: var(--prp-bg-muted);
   will-change: transform;
   transform: translate3d(0, 0, 0);
   /* No transition on transform — scroll-driven updates must track the finger */

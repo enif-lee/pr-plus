@@ -329,6 +329,59 @@
   width: 100%;
 }
 
+/*
+ * Full-file focus outline: one overlay in the virtual spacer so the ring
+ * wraps the whole focused file (header + body + threads), not the header
+ * strip. Ring is inset — `.prp-vlist` contain:paint clips a 2px outset at
+ * the pane edge. Line-caret focus keeps this ring (`diffFileFocusPath`).
+ * Line selection box-shadow stays on the row; this overlay does not compete.
+ */
+.prp-file-focus-outline {
+  position: absolute;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+  z-index: var(--prp-z-content-raised, 2);
+  box-sizing: border-box;
+  border-radius: 0;
+  box-shadow:
+    inset 0 0 0 1px var(--prp-accent),
+    inset 0 0 0 3px color-mix(in srgb, var(--prp-accent) 55%, transparent);
+  outline: none;
+}
+
+/*
+ * Unfocused dim: sticky viewport strips, not full-list layers.
+ * Host is in-flow at spacer y=0 (height:0) so it pins; bands are ~vh tall.
+ * Full-list spacer overlays made ⌥⇧[ / ] key-hold hitch.
+ */
+.prp-file-unfocused-dim-host {
+  position: sticky;
+  top: 0;
+  height: 0;
+  pointer-events: none;
+  z-index: var(--prp-z-content, 1);
+}
+.prp-file-unfocused-dim {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: none;
+  pointer-events: none;
+  background: color-mix(in srgb, #000 10%, transparent);
+}
+[data-color-mode='dark'] .prp-file-unfocused-dim,
+html[data-color-mode='dark'] .prp-file-unfocused-dim {
+  background: color-mix(in srgb, #000 22%, transparent);
+}
+.prp-vline--header-dim {
+  filter: brightness(0.86);
+}
+[data-color-mode='dark'] .prp-vline--header-dim,
+html[data-color-mode='dark'] .prp-vline--header-dim {
+  filter: brightness(0.72);
+}
+
 .prp-vlist__window {
   position: absolute;
   left: 0;

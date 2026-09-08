@@ -1,8 +1,9 @@
 /** @module modal/lib/intra-line-diff */
 /**
- * Intra-line word-diff marks for split-mode paired change rows.
- * Ops reuse markdown-preview `wordDiff`; HTML wrap is offset-safe on
- * already-highlighted (or escaped) markup, same decoded-text walk as search.
+ * Intra-line word-diff marks for paired change rows (split panes and
+ * unified del/add pairs). Ops reuse markdown-preview `wordDiff`; HTML wrap
+ * is offset-safe on already-highlighted (or escaped) markup, same decoded-text
+ * walk as search.
  */
 
 import { wordDiff, type MarkdownDiffOp } from './markdown-preview';
@@ -26,7 +27,7 @@ export type SplitIntraLineRow = {
   rightCode?: string | null;
 };
 
-/** Same word-level del/eq/ins ops the split-mode code-line HTML path uses. */
+/** Same word-level del/eq/ins ops the split/unified code-line HTML path uses. */
 export function intraLineWordDiff(
   oldLine: unknown,
   newLine: unknown
@@ -34,7 +35,10 @@ export function intraLineWordDiff(
   return wordDiff(oldLine, newLine);
 }
 
-/** Paired split change: both panes have text (not unpaired whole-line add/del). */
+/**
+ * Paired change: both sides have text (not unpaired whole-line add/del).
+ * Split `change` rows and unified del/add rows that carry a partner.
+ */
 export function isPairedSplitChange(
   row: SplitIntraLineRow | null | undefined
 ): row is SplitIntraLineRow {
@@ -44,6 +48,16 @@ export function isPairedSplitChange(
   if (!left || !right) return false;
   if (row.lineType === 'change') return true;
   return row.leftType === 'del' && row.rightType === 'add';
+}
+
+/** Unified code cell: del → old/left marks; add → new/right marks. */
+export function unifiedIntraLineSide(
+  row: SplitIntraLineRow | null | undefined
+): 'left' | 'right' | null {
+  const t = String(row?.lineType || '');
+  if (t === 'del') return 'left';
+  if (t === 'add') return 'right';
+  return null;
 }
 
 /**
@@ -251,7 +265,7 @@ export function wrapIntraLineMarksInHtml(
 }
 
 /**
- * Thin helper `renderSearchableHtml` / split `DiffCodeLineBody` call after
+ * Thin helper `renderSearchableHtml` / `DiffCodeLineBody` call after
  * syntax highlight. Unpaired whole-line add/del stay pane-wash only.
  */
 export function applySplitIntraLineHtml(
@@ -264,4 +278,14 @@ export function applySplitIntraLineHtml(
   if (!isPairedSplitChange(row)) return src;
   const ops = intraLineWordDiff(row.leftCode ?? '', row.rightCode ?? '');
   return wrapIntraLineMarksInHtml(src, intraLineRangesForSide(ops, side));
+}
+
+/** Unified code field: same wrap as split, side derived from del/add. */
+export function applyUnifiedIntraLineHtml(
+  html: string,
+  row: SplitIntraLineRow | null | undefined
+): string {
+  const side = unifiedIntraLineSide(row);
+  if (!side) return html == null ? '' : String(html);
+  return applySplitIntraLineHtml(html, row, side);
 }

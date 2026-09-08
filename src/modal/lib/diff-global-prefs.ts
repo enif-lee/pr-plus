@@ -1,6 +1,7 @@
 /**
- * Global Diff view preferences: hide whitespace + hide outdated comments.
- * Orthogonal to per-PR session-view; survives PR switches and reloads.
+ * Global Diff view preferences: hide whitespace + hide outdated comments +
+ * intra-line word highlight / strikethrough. Orthogonal to per-PR
+ * session-view; survives PR switches and reloads.
  * Pure — no chrome.* dependency; storage is injected.
  */
 
@@ -9,12 +10,26 @@ export const DIFF_GLOBAL_PREFS_KEY = 'prp:diff-global-prefs';
 export type DiffGlobalPrefs = {
   hideWhitespace: boolean;
   hideOutdated: boolean;
+  /** Intra-line word highlight on paired change rows. Default on. */
+  wordHighlight: boolean;
+  /** Strikethrough on intra-line deletions. Default on. */
+  wordStrike: boolean;
+  /** Darken files that are not the focused file. Default on. */
+  dimUnfocusedFiles: boolean;
 };
 
 export const DEFAULT_DIFF_GLOBAL_PREFS: DiffGlobalPrefs = {
   hideWhitespace: false,
   hideOutdated: false,
+  wordHighlight: true,
+  wordStrike: true,
+  dimUnfocusedFiles: true,
 };
+
+function prefBool(v: unknown, fallback: boolean): boolean {
+  if (v == null) return fallback;
+  return Boolean(v);
+}
 
 /**
  * Normalize unknown input to a full prefs object. Safe defaults on garbage.
@@ -27,6 +42,12 @@ export function normalizeDiffGlobalPrefs(raw: unknown): DiffGlobalPrefs {
   return {
     hideWhitespace: Boolean(o.hideWhitespace),
     hideOutdated: Boolean(o.hideOutdated),
+    wordHighlight: prefBool(o.wordHighlight, DEFAULT_DIFF_GLOBAL_PREFS.wordHighlight),
+    wordStrike: prefBool(o.wordStrike, DEFAULT_DIFF_GLOBAL_PREFS.wordStrike),
+    dimUnfocusedFiles: prefBool(
+      o.dimUnfocusedFiles,
+      DEFAULT_DIFF_GLOBAL_PREFS.dimUnfocusedFiles
+    ),
   };
 }
 

@@ -220,6 +220,7 @@ import {
   scrollTopForIndex,
   scrollTopToRevealIndex,
   applyProgrammaticDiffScroll,
+  DIFF_HOP_FROM_TOP,
 } from '../lib/virtual-range';
 import {
   beginLineSelection,
@@ -1233,14 +1234,14 @@ export function useDiffConversationNav(b: any) {
     (active: { rowIndex?: number | null } | null | undefined) => {
       if (active?.rowIndex == null) return false;
       const { avgH: h, rowOffsetList: offs } = getDiffScrollMetrics();
-      // ⌥J/K thread nav on Diff: pin active comment near 1/3 viewport height
+      // ⌥J/K thread nav on Diff: pin active comment near 15% from viewport top
       const top = scrollTopForIndex(
         active.rowIndex,
         h,
         viewportHeightRef.current,
         virtualRows.length,
         offs,
-        { align: 'third' }
+        { align: 'frac', frac: DIFF_HOP_FROM_TOP }
       );
       // DOM-first thrift (same class as selection): avoid setScrollTop every hop
       // so DiffWorkspace leaf does not re-render on ⌥J/K key-repeat.
@@ -2509,7 +2510,11 @@ export function useDiffConversationNav(b: any) {
    */
   function noteDiffNavActivity() {
     try {
-      document.documentElement.setAttribute('data-prp-diff-nav-active', '1');
+      const root = document.documentElement;
+      // Same-value setAttribute still notifies every ShortcutHint observer.
+      if (!root.hasAttribute('data-prp-diff-nav-active')) {
+        root.setAttribute('data-prp-diff-nav-active', '1');
+      }
       // File-nav uses Alt, but mounting/moving body-portaled hint bubbles on
       // every active row would force full-document layout during the hold.
       useModalStore.getState().setOptHintsActive(false);
@@ -2739,8 +2744,8 @@ export function useDiffConversationNav(b: any) {
     }
     scheduleSelectionActionsReveal();
     try {
-      // Region hop: pin the destination first line at ~1/3 viewport (not
-      // Arrow reveal). Falls back to reveal if the third helper is missing.
+      // Region hop: pin the destination first line near 15% from the top (not
+      // Arrow reveal). Falls back to reveal if the hop helper is missing.
       if (typeof scrollSelectionHeadToThird === 'function') {
         scrollSelectionHeadToThird(next);
       } else {

@@ -79,6 +79,7 @@ import {
   DiffCodeLineBody,
   DiffCodeLine,
   DiffVirtualRowShell,
+  DiffFileFocusOutline,
 } from './VirtualDiffRows';
 // DiffVirtualRowShell exported from rows
 
@@ -157,6 +158,7 @@ function VirtualDiffImpl(props: any) {
     expandBusyKey = null,
     viewedPaths,
     onToggleViewed,
+    dimUnfocused = true,
     threadsByCommentId,
     onReply,
     onResolve,
@@ -954,6 +956,7 @@ function VirtualDiffImpl(props: any) {
             onPreviewMarkdown={onPreviewMarkdown}
             onSelectionStart={stableSelectionStart}
             sticky
+            dimUnfocused={dimUnfocused}
             selected={
               isFileSelection &&
               fileSelectionPath === String(stickyMeta.row?.filePath || '')
@@ -1334,6 +1337,11 @@ function VirtualDiffImpl(props: any) {
             );
           })}
         </div>
+        <DiffFileFocusOutline
+          virtualRows={virtualRows}
+          offsets={offsets}
+          dimUnfocused={dimUnfocused}
+        />
       </div>
       </div>
       <FloatingScrollbar

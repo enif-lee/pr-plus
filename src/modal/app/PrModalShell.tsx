@@ -233,6 +233,7 @@ import {
   scrollTopForIndex,
   scrollTopToRevealIndex,
   applyProgrammaticDiffScroll,
+  DIFF_HOP_FROM_TOP,
 } from '../lib/virtual-range';
 import {
   beginLineSelection,
@@ -1220,6 +1221,67 @@ export function PrModalApp({
       return false;
     }
   });
+  /** Intra-line word highlight / strikethrough — global Diff display prefs. */
+  const [wordHighlight, setWordHighlight] = useState(() => {
+    try {
+      if (typeof window === 'undefined') return true;
+      return loadDiffGlobalPrefs(resolveDiffGlobalPrefsStorage(window))
+        .wordHighlight;
+    } catch {
+      return true;
+    }
+  });
+  const [wordStrike, setWordStrike] = useState(() => {
+    try {
+      if (typeof window === 'undefined') return true;
+      return loadDiffGlobalPrefs(resolveDiffGlobalPrefsStorage(window))
+        .wordStrike;
+    } catch {
+      return true;
+    }
+  });
+  const [dimUnfocusedFiles, setDimUnfocusedFiles] = useState(() => {
+    try {
+      if (typeof window === 'undefined') return true;
+      return loadDiffGlobalPrefs(resolveDiffGlobalPrefsStorage(window))
+        .dimUnfocusedFiles;
+    } catch {
+      return true;
+    }
+  });
+  function applyWordHighlight(next: boolean) {
+    const v = Boolean(next);
+    setWordHighlight(v);
+    try {
+      saveDiffGlobalPrefs(resolveDiffGlobalPrefsStorage(window), {
+        wordHighlight: v,
+      });
+    } catch {
+      /* ignore */
+    }
+  }
+  function applyWordStrike(next: boolean) {
+    const v = Boolean(next);
+    setWordStrike(v);
+    try {
+      saveDiffGlobalPrefs(resolveDiffGlobalPrefsStorage(window), {
+        wordStrike: v,
+      });
+    } catch {
+      /* ignore */
+    }
+  }
+  function applyDimUnfocusedFiles(next: boolean) {
+    const v = Boolean(next);
+    setDimUnfocusedFiles(v);
+    try {
+      saveDiffGlobalPrefs(resolveDiffGlobalPrefsStorage(window), {
+        dimUnfocusedFiles: v,
+      });
+    } catch {
+      /* ignore */
+    }
+  }
   /** GraphQL pullRequest id for markFileAsViewed (may differ from REST nodeId). */
   const pullRequestGqlIdRef = useRef<string | null>(null);
 
@@ -1259,12 +1321,13 @@ export function PrModalApp({
     commitsFlightRef.current = 0;
     setPrTags(null);
     setPrTagsError(null);
-    // Re-apply global hideWhitespace (do not force false on PR switch).
+    // Re-apply global Diff display prefs (do not force defaults on PR switch).
     try {
-      setHideWhitespace(
-        loadDiffGlobalPrefs(resolveDiffGlobalPrefsStorage(window))
-          .hideWhitespace
-      );
+      const g = loadDiffGlobalPrefs(resolveDiffGlobalPrefsStorage(window));
+      setHideWhitespace(g.hideWhitespace);
+      setWordHighlight(g.wordHighlight);
+      setWordStrike(g.wordStrike);
+      setDimUnfocusedFiles(g.dimUnfocusedFiles);
     } catch {
       /* keep current */
     }
@@ -2720,7 +2783,7 @@ export function PrModalApp({
         viewportHeightRef.current,
         virtualRows.length,
         offs,
-        { align: 'third' }
+        { align: 'frac', frac: DIFF_HOP_FROM_TOP }
       );
       const el = listRef.current as HTMLElement | null;
       applyProgrammaticDiffScroll(el, top, {
@@ -3290,6 +3353,11 @@ export function PrModalApp({
     pointerStartRef.current = point || null;
     setSelecting(true);
     setLineSelection(next);
+    // Pointer caret must update tree/file-focus chrome the same way ↑↓ does.
+    // Do not call onSelectFile — that clears selection and re-pins scroll.
+    if (typeof syncActiveFileFromSelection === 'function') {
+      syncActiveFileFromSelection(next);
+    }
     // Code/file pointer selection leaves Diff thread keyboard focus
     const isThreadSel =
       next.kind === 'thread' ||
@@ -3547,13 +3615,17 @@ export function PrModalApp({
           const i = Number(h?.rowIndex);
           return Number.isFinite(i) ? i : null;
         })();
-    setLineSelection({
+    const fileSel = {
       kind: 'file',
       subjectType: 'file',
       filePath: path,
       anchorRowIndex: rowIndex,
       headRowIndex: rowIndex,
-    });
+    };
+    setLineSelection(fileSel);
+    if (typeof syncActiveFileFromSelection === 'function') {
+      syncActiveFileFromSelection(fileSel);
+    }
     setSelectionDraft('');
     setSelectionIslandPhase('comment');
     setShowSelectionComposer(true);
@@ -4572,6 +4644,12 @@ export function PrModalApp({
               setDiffMode={setDiffMode as (m: string) => void}
               hideWhitespace={hideWhitespace}
               onHideWhitespace={applyHideWhitespace}
+              wordHighlight={wordHighlight}
+              onWordHighlight={applyWordHighlight}
+              wordStrike={wordStrike}
+              onWordStrike={applyWordStrike}
+              dimUnfocusedFiles={dimUnfocusedFiles}
+              onDimUnfocusedFiles={applyDimUnfocusedFiles}
               locale={appLocale}
               setScrollTop={setScrollTop}
               listRef={listRef}

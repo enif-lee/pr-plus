@@ -1,5 +1,5 @@
 /**
- * Global Diff prefs (hide whitespace + hide outdated) — shipped load/save.
+ * Global Diff prefs (hide whitespace + hide outdated + word highlight/strike).
  */
 import { describe, expect, test } from '@rstest/core';
 import {
@@ -49,10 +49,49 @@ describe('normalizeDiffGlobalPrefs / parse', () => {
   test('booleans from object', () => {
     expect(
       normalizeDiffGlobalPrefs({ hideWhitespace: true, hideOutdated: false })
-    ).toEqual({ hideWhitespace: true, hideOutdated: false });
+    ).toEqual({
+      hideWhitespace: true,
+      hideOutdated: false,
+      wordHighlight: true,
+      wordStrike: true,
+      dimUnfocusedFiles: true,
+    });
     expect(
       normalizeDiffGlobalPrefs({ hideWhitespace: 1, hideOutdated: 'yes' })
-    ).toEqual({ hideWhitespace: true, hideOutdated: true });
+    ).toEqual({
+      hideWhitespace: true,
+      hideOutdated: true,
+      wordHighlight: true,
+      wordStrike: true,
+      dimUnfocusedFiles: true,
+    });
+    expect(
+      normalizeDiffGlobalPrefs({
+        hideWhitespace: false,
+        hideOutdated: false,
+        wordHighlight: false,
+        wordStrike: false,
+        dimUnfocusedFiles: false,
+      })
+    ).toEqual({
+      hideWhitespace: false,
+      hideOutdated: false,
+      wordHighlight: false,
+      wordStrike: false,
+      dimUnfocusedFiles: false,
+    });
+  });
+
+  test('missing wordHighlight / wordStrike / dimUnfocusedFiles default on (legacy storage)', () => {
+    expect(normalizeDiffGlobalPrefs({ hideWhitespace: true }).wordHighlight).toBe(
+      true
+    );
+    expect(normalizeDiffGlobalPrefs({ hideWhitespace: true }).wordStrike).toBe(
+      true
+    );
+    expect(
+      normalizeDiffGlobalPrefs({ hideWhitespace: true }).dimUnfocusedFiles
+    ).toBe(true);
   });
 });
 
@@ -72,11 +111,41 @@ describe('loadDiffGlobalPrefs / saveDiffGlobalPrefs round-trip', () => {
   });
 
   test('write both true/false combos and read back', () => {
-    const cases: Array<{ hideWhitespace: boolean; hideOutdated: boolean }> = [
-      { hideWhitespace: false, hideOutdated: false },
-      { hideWhitespace: true, hideOutdated: false },
-      { hideWhitespace: false, hideOutdated: true },
-      { hideWhitespace: true, hideOutdated: true },
+    const cases: Array<{
+      hideWhitespace: boolean;
+      hideOutdated: boolean;
+      wordHighlight: boolean;
+      wordStrike: boolean;
+      dimUnfocusedFiles: boolean;
+    }> = [
+      {
+        hideWhitespace: false,
+        hideOutdated: false,
+        wordHighlight: true,
+        wordStrike: true,
+        dimUnfocusedFiles: true,
+      },
+      {
+        hideWhitespace: true,
+        hideOutdated: false,
+        wordHighlight: false,
+        wordStrike: true,
+        dimUnfocusedFiles: false,
+      },
+      {
+        hideWhitespace: false,
+        hideOutdated: true,
+        wordHighlight: true,
+        wordStrike: false,
+        dimUnfocusedFiles: true,
+      },
+      {
+        hideWhitespace: true,
+        hideOutdated: true,
+        wordHighlight: false,
+        wordStrike: false,
+        dimUnfocusedFiles: false,
+      },
     ];
     for (const c of cases) {
       const s = makeStorage();
@@ -95,16 +164,49 @@ describe('loadDiffGlobalPrefs / saveDiffGlobalPrefs round-trip', () => {
     expect(loadDiffGlobalPrefs(s)).toEqual({
       hideWhitespace: true,
       hideOutdated: false,
+      wordHighlight: true,
+      wordStrike: true,
+      dimUnfocusedFiles: true,
     });
     expect(saveDiffGlobalPrefs(s, { hideOutdated: true })).toBe(true);
     expect(loadDiffGlobalPrefs(s)).toEqual({
       hideWhitespace: true,
       hideOutdated: true,
+      wordHighlight: true,
+      wordStrike: true,
+      dimUnfocusedFiles: true,
     });
     expect(saveDiffGlobalPrefs(s, { hideWhitespace: false })).toBe(true);
     expect(loadDiffGlobalPrefs(s)).toEqual({
       hideWhitespace: false,
       hideOutdated: true,
+      wordHighlight: true,
+      wordStrike: true,
+      dimUnfocusedFiles: true,
+    });
+    expect(saveDiffGlobalPrefs(s, { wordHighlight: false })).toBe(true);
+    expect(loadDiffGlobalPrefs(s)).toEqual({
+      hideWhitespace: false,
+      hideOutdated: true,
+      wordHighlight: false,
+      wordStrike: true,
+      dimUnfocusedFiles: true,
+    });
+    expect(saveDiffGlobalPrefs(s, { wordStrike: false })).toBe(true);
+    expect(loadDiffGlobalPrefs(s)).toEqual({
+      hideWhitespace: false,
+      hideOutdated: true,
+      wordHighlight: false,
+      wordStrike: false,
+      dimUnfocusedFiles: true,
+    });
+    expect(saveDiffGlobalPrefs(s, { dimUnfocusedFiles: false })).toBe(true);
+    expect(loadDiffGlobalPrefs(s)).toEqual({
+      hideWhitespace: false,
+      hideOutdated: true,
+      wordHighlight: false,
+      wordStrike: false,
+      dimUnfocusedFiles: false,
     });
   });
 

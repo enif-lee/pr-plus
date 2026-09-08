@@ -47,6 +47,9 @@ import {
   stickyFileHeaderForScroll,
   resolveStickyFileHeaderLayout,
   rowTopY,
+  diffFileFocusPath,
+  fileRowRangesByPath,
+  focusedFileOutlineRect,
 } from '@lib/diff-rows';
 import {
   markSearchInText,
@@ -63,7 +66,10 @@ import {
 import { IconDisclosure } from '@common/icons';
 import { useT } from '@lib/locale-context';
 import { isMarkdownPath } from '@lib/markdown-preview';
-import { applySplitIntraLineHtml } from '@lib/intra-line-diff';
+import {
+  applySplitIntraLineHtml,
+  applyUnifiedIntraLineHtml,
+} from '@lib/intra-line-diff';
 import { FloatingScrollbar } from '../../components/common/FloatingScrollbar';
 import { ImageViewer } from '@common/ImageViewer';
 import { InlineThread } from './InlineThread';
@@ -92,6 +98,109 @@ export function fileHeaderTone(row: any) {
   if (dels > 0 && adds === 0) return 'del';
   return 'mod';
 }
+
+/**
+ * Full-file focus ring overlay (header + body + inline threads).
+ * Leaf store subscription — VirtualDiffImpl must not subscribe to activeFilePath.
+ * File-header focus and line-caret focus share this ring (`diffFileFocusPath`).
+ */
+/**
+ * Viewport-sized dim strips (not full-list layers). Sticky host sits at the
+ * spacer top so it pins to the scroller; scroll handler only writes two
+ * heights — no React setState on the key-hold path.
+ */
+const DiffUnfocusedDim = memo(function DiffUnfocusedDim({
+  rect,
+}: {
+  rect: { top: number; height: number };
+}) {
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    const host = hostRef.current;
+    if (!host || !rect) return undefined;
+    const list = host.closest('.prp-vlist') as HTMLElement | null;
+    if (!list) return undefined;
+    const topBand = host.children[0] as HTMLElement | undefined;
+    const botBand = host.children[1] as HTMLElement | undefined;
+    if (!topBand || !botBand) return undefined;
+    const update = () => {
+      const vh = list.clientHeight;
+      const st = list.scrollTop;
+      const visTop = Math.max(0, rect.top - st);
+      const visBottom = Math.min(vh, rect.top + rect.height - st);
+      if (visTop > 0.5) {
+        topBand.style.display = 'block';
+        topBand.style.top = '0px';
+        topBand.style.height = `${visTop}px`;
+      } else {
+        topBand.style.display = 'none';
+      }
+      if (vh - visBottom > 0.5) {
+        botBand.style.display = 'block';
+        botBand.style.top = `${Math.max(0, visBottom)}px`;
+        botBand.style.height = `${vh - visBottom}px`;
+      } else {
+        botBand.style.display = 'none';
+      }
+    };
+    update();
+    list.addEventListener('scroll', update, { passive: true });
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(update);
+      ro.observe(list);
+    }
+    return () => {
+      list.removeEventListener('scroll', update);
+      ro?.disconnect();
+    };
+  }, [rect]);
+  return (
+    <div
+      ref={hostRef}
+      className="prp-file-unfocused-dim-host"
+      data-file-unfocused-dim-host="1"
+      aria-hidden="true"
+    >
+      <div className="prp-file-unfocused-dim" data-file-unfocused-dim="1" />
+      <div className="prp-file-unfocused-dim" data-file-unfocused-dim="1" />
+    </div>
+  );
+});
+
+export const DiffFileFocusOutline = memo(function DiffFileFocusOutline({
+  virtualRows,
+  offsets,
+  dimUnfocused = true,
+}: {
+  virtualRows: any[] | null | undefined;
+  offsets: number[] | null | undefined;
+  dimUnfocused?: boolean;
+}) {
+  const focusPath = useModalStore((s) => diffFileFocusPath(s));
+  const ranges = useMemo(
+    () => fileRowRangesByPath(virtualRows),
+    [virtualRows]
+  );
+  const rect = useMemo(
+    () =>
+      focusedFileOutlineRect(ranges.get(focusPath) || null, offsets),
+    [ranges, offsets, focusPath]
+  );
+  if (!focusPath || !rect) return null;
+  return (
+    <>
+      {dimUnfocused ? <DiffUnfocusedDim rect={rect} /> : null}
+      <div
+        className="prp-file-focus-outline"
+        style={{ top: rect.top, height: rect.height }}
+        data-file-focus-outline="1"
+        data-file-path={focusPath}
+        aria-hidden="true"
+      />
+    </>
+  );
+});
 
 /**
  * ShortcutHint label for the file-header viewed/read checkbox.
@@ -123,7 +232,7 @@ export function FileHeaderRow(props: {
   searchQuery?: string;
   /** When true, omit rowIndex so virtual list hits don't collide; visuals identical. */
   sticky?: boolean;
-  /** Active file from tree / prev-next — focus chrome on this header */
+  /** Active file from tree / prev-next — header leaf chrome (full-file ring is DiffFileFocusOutline) */
   focused?: boolean;
   /** File-level keyboard/pointer selection on this header */
   selected?: boolean;
@@ -138,6 +247,8 @@ export function FileHeaderRow(props: {
   ) => void;
   /** Open fullscreen markdown overlay for .md files */
   onPreviewMarkdown?: (row: any) => void;
+  /** Dim this sticky header when another file owns file-focus. */
+  dimUnfocused?: boolean;
 }) {
   const {
     row,
@@ -158,14 +269,20 @@ export function FileHeaderRow(props: {
     selectionIsland = null,
     onSelectionStart,
     onPreviewMarkdown,
+    dimUnfocused = true,
   } = props;
   const t = useT();
   const markdownPreviewable =
     typeof onPreviewMarkdown === 'function' &&
     isMarkdownPath(row?.filePath);
   const storeFocused = useModalStore(
-    (s) => String(s.activeFilePath || '') === String(row?.filePath || '')
+    (s) => diffFileFocusPath(s) === String(row?.filePath || '')
   );
+  const dimSticky = useModalStore((s) => {
+    if (!dimUnfocused || !sticky) return false;
+    const p = diffFileFocusPath(s);
+    return Boolean(p) && p !== String(row?.filePath || '');
+  });
   const focused =
     typeof focusedProp === 'boolean' ? focusedProp : storeFocused;
   const viewed = isPathViewed ? isPathViewed(viewedPaths, row.filePath) : false;
@@ -189,6 +306,8 @@ export function FileHeaderRow(props: {
       className={`prp-vline prp-vline--header prp-vline--header-${headerTone}${
         !openable ? ' prp-vline--header-binary' : ''
       }${focused ? ' prp-vline--header-focus' : ''}${
+        dimSticky ? ' prp-vline--header-dim' : ''
+      }${
         selected
           ? ' prp-vline--header-selected prp-vline--selected prp-vline--sel-only'
           : ''
@@ -371,8 +490,9 @@ export function FileHeaderRow(props: {
 }
 
 /**
- * Diff line HTML: optional syntax highlight, then intra-line split marks
- * (paired change rows), then search marks — all offset-safe so hljs spans stay.
+ * Diff line HTML: optional syntax highlight, then intra-line word marks
+ * (paired split / unified change rows), then search marks — all offset-safe
+ * so hljs spans stay.
  */
 export function renderSearchableHtml(
   displayText: string,
@@ -390,6 +510,8 @@ export function renderSearchableHtml(
     : escapeHtml(displayText ?? '');
   if (field === 'left' || field === 'right') {
     html = applySplitIntraLineHtml(html, row, field);
+  } else if (field === 'code') {
+    html = applyUnifiedIntraLineHtml(html, row);
   }
   if (!q) return html;
   const currentStart = resolveActiveMarkStart(
