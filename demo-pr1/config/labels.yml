@@ -1,0 +1,7 @@
+labels:
+  - name: demo
+    color: "0969da"
+  - name: onboarding
+    color: "1a7f37"
+  - name: stack
+    color: "8250df"
