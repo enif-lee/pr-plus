@@ -10,6 +10,10 @@ const PR_TREE_DECORATED_CLASS = 'pr-tree-decorated';
 const PR_TREE_META_CLASS = 'pr-tree-row-meta';
 const PR_TREE_META_HOST_CLASS = 'pr-tree-meta-host';
 
+/** GitHub React pulls dashboard (Preview list). Stable testids, not CSS-module hashes. */
+const PR_REACT_TITLE_LINK = 'a[data-testid="listitem-title-link"]';
+const PR_REACT_LIST_ROW = `li:has(${PR_REACT_TITLE_LINK})`;
+
 const PR_ROW_SELECTORS = [
   '.js-navigation-container .js-issue-row',
   '.js-issue-row:has(.octicon-git-pull-request)',
@@ -20,7 +24,21 @@ const PR_ROW_SELECTORS = [
   '#js-issues-results [id^="issue_"]',
   '[data-testid="issue-pr-row"]',
   'div[id^="issue_"]',
+  // 2026 React pulls dashboard: <li> has no role="listitem"
+  PR_REACT_LIST_ROW,
+  'li:has(> [data-listview-item-title-container])',
+  'li[class*="PullsListItem-module"]:has(a[href*="/pull/"])',
 ];
+
+/** closest() selector for title-click / row-click intercept. */
+const PR_LIST_ROW_CLOSEST = [
+  '.js-issue-row',
+  '[id^="issue_"]',
+  'li[role="listitem"]',
+  '.js-navigation-container',
+  '[data-testid="issue-pr-row"]',
+  PR_REACT_LIST_ROW,
+].join(', ');
 
 function parseRepoFromPathname(pathname: any) {
   const match = pathname.match(/^\/([^/]+)\/([^/]+)\/pulls(?:\/|$)/);
@@ -132,8 +150,20 @@ function findPrListContainer(doc: any) {
     doc.querySelector('[aria-label="Pull Requests"]') ||
     doc.querySelector('[aria-label="Issues"]') ||
     doc.querySelector('.js-navigation-container') ||
+    doc.querySelector('ul[class*="ListView-module__ul"]') ||
+    doc.querySelector('[id$="-list-view-container"]') ||
+    doc.querySelector('react-app[app-name="pull-requests"]') ||
     doc.querySelector('main')
   );
+}
+
+function closestPrListRow(el: any) {
+  if (!el?.closest) return null;
+  try {
+    return el.closest(PR_LIST_ROW_CLOSEST);
+  } catch {
+    return el.closest('.js-issue-row, [id^="issue_"], li[role="listitem"]');
+  }
 }
 
 function buildDepthAndOrderMaps(forest: any) {
@@ -238,13 +268,18 @@ function findSecondColumnHost(row: any) {
   if (!row) return null;
 
   const title =
+    row.querySelector(PR_REACT_TITLE_LINK) ||
     row.querySelector('a.js-navigation-open') ||
     row.querySelector('a[id$="_link"]') ||
     row.querySelector('h3 a[href*="/pull/"]') ||
     row.querySelector('a[href*="/pull/"]');
 
   if (title?.parentElement) {
-    const col = title.closest('.flex-auto, [class*="Title"]') || title.parentElement;
+    const col =
+      title.closest('[data-listview-item-title-container]') ||
+      title.closest('[class*="Title-module__container"]') ||
+      title.closest('.flex-auto') ||
+      title.parentElement;
     return col;
   }
 
@@ -274,6 +309,14 @@ function findNativeSecondRow(row: any) {
       openedBy.parentElement
     );
   }
+
+  const reactDesc =
+    row.querySelector('[class*="PullsListItem-module__description"]') ||
+    row.querySelector('[class*="Description-module__container"]') ||
+    row
+      .querySelector('[data-testid="timestamp-container"]')
+      ?.closest('[class*="Description-module"]');
+  if (reactDesc) return reactDesc;
 
   const col = findSecondColumnHost(row);
   if (!col) return null;
@@ -346,7 +389,8 @@ function extractNativeMetaBits(nativeSecond: any, pr: any) {
     nativeSecond?.querySelector?.('.opened-by a[data-hovercard-type="user"]') ||
     nativeSecond?.querySelector?.('.opened-by a.Link--muted') ||
     nativeSecond?.querySelector?.('.opened-by a[href*="author"]') ||
-    nativeSecond?.querySelector?.('.opened-by a');
+    nativeSecond?.querySelector?.('.opened-by a') ||
+    nativeSecond?.querySelector?.('[data-testid="author-filter-link"]');
 
   return {
     relativeTime: relativeTime ? relativeTime.cloneNode(true) : null,
@@ -446,6 +490,7 @@ function applyRowMeta(doc: any, row: any, pr: any) {
 
   const host = findSecondColumnHost(row);
   if (!host) return false;
+  host.classList.add(PR_TREE_META_HOST_CLASS);
 
   let nativeSecond = findNativeSecondRow(row);
   if (nativeSecond && !nativeSecond.classList.contains(PR_TREE_META_CLASS)) {
@@ -591,6 +636,7 @@ function findListRowByNumber(doc: any, prNumber: any) {
 function findListRowTitleAnchor(row: any) {
   if (!row?.querySelector) return null;
   return (
+    row.querySelector(PR_REACT_TITLE_LINK) ||
     row.querySelector('a.js-navigation-open') ||
     row.querySelector('a[id$="_link"]') ||
     row.querySelector('h3 a[href*="/pull/"]') ||
@@ -940,6 +986,8 @@ function mountToggleNearHeader(doc: any, button: any) {
   const anchors = [
     doc.querySelector('.gh-header-actions'),
     doc.querySelector('[data-testid="pr-list-header"]'),
+    doc.querySelector('[data-testid="header-title"]')?.parentElement,
+    doc.querySelector('button[aria-label="Preview options"]')?.parentElement,
     doc.querySelector('.subnav-search'),
     doc.querySelector('main .subnav-search'),
     doc.querySelector('.table-list-header-toggle'),
@@ -964,7 +1012,11 @@ const domApi = {
   PR_TREE_META_CLASS,
   PR_TREE_META_HOST_CLASS,
   PR_ROW_SELECTORS,
+  PR_REACT_TITLE_LINK,
+  PR_REACT_LIST_ROW,
+  PR_LIST_ROW_CLOSEST,
   parseRepoFromPathname,
+  closestPrListRow,
   findPrListContainer,
   findPrListMount,
   findOriginalPrRows,

@@ -1,5 +1,60 @@
 // TypeScript SoT — assembled by build scripts (classic runtime JS emit)
 
+  const PR_LIST_ROW_CLOSEST =
+    '.js-issue-row, [id^="issue_"], li[role="listitem"], .js-navigation-container, [data-testid="issue-pr-row"], li:has(a[data-testid="listitem-title-link"])';
+
+  function closestPullsListRow(el: any) {
+    if (!el?.closest) return null;
+    const dom = (globalThis as any).PRTreeDOM;
+    if (typeof dom?.closestPrListRow === 'function') {
+      try {
+        return dom.closestPrListRow(el);
+      } catch {
+        /* fall through */
+      }
+    }
+    try {
+      return el.closest(PR_LIST_ROW_CLOSEST);
+    } catch {
+      return el.closest(
+        '.js-issue-row, [id^="issue_"], li[role="listitem"], .js-navigation-container'
+      );
+    }
+  }
+
+  /** Filter chips / density / preview menu — not a PR open. */
+  function isPullsListChromeClick(target: any) {
+    if (!target?.closest) return false;
+    try {
+      if (
+        target.closest(
+          '#pr-tree-toggle, .pr-tree-badge, .pr-tree-list-label, .prp-onboarding'
+        )
+      ) {
+        return true;
+      }
+      const a = target.closest('a');
+      if (a) {
+        const testid = a.getAttribute('data-testid') || '';
+        if (testid === 'listitem-title-link') return false;
+        if (testid === 'author-filter-link') return true;
+        const href = a.getAttribute('href') || '';
+        if (/\/pull\/\d+/.test(href)) return false;
+        if (/\/pulls(?:\/|$|\?)/.test(href)) return true;
+      }
+      const btn = target.closest('button, summary');
+      if (btn) {
+        const aria = `${btn.getAttribute('aria-label') || ''} ${btn.textContent || ''}`;
+        if (/filter by|sort by|display density|preview options/i.test(aria)) {
+          return true;
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    return false;
+  }
+
   function onClickCapture(event: any) {
     // Always heal stuck GH ⌘K top layer (even when pr+ modal is open)
     recoverGithubPaletteIfStuck();
@@ -11,6 +66,8 @@
     if (event.defaultPrevented) return;
     if (event.button !== 0) return;
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+
+    if (isPullsListChromeClick(event.target)) return;
 
     const path =
       typeof event.composedPath === 'function' ? event.composedPath() : [];
@@ -33,21 +90,33 @@
         }
       }
     }
-    if (!anchor) return;
 
-    const parsed = parsePrFromAnchor(anchor);
-    if (!parsed) return;
-
-    const inRow = anchor.closest(
-      '.js-issue-row, [id^="issue_"], li[role="listitem"], .js-navigation-container'
-    );
+    let parsed = anchor ? parsePrFromAnchor(anchor) : null;
+    const inRow = anchor ? closestPullsListRow(anchor) : null;
     const looksLikeTitle =
-      anchor.classList.contains('js-navigation-open') ||
-      anchor.classList.contains('markdown-title') ||
-      Boolean(anchor.id?.endsWith('_link')) ||
-      Boolean(inRow);
+      Boolean(parsed) &&
+      (anchor.getAttribute?.('data-testid') === 'listitem-title-link' ||
+        anchor.classList.contains('js-navigation-open') ||
+        anchor.classList.contains('markdown-title') ||
+        Boolean(anchor.id?.endsWith('_link')) ||
+        Boolean(inRow));
 
-    if (!looksLikeTitle) return;
+    if (!looksLikeTitle) {
+      // React pulls dashboard: row click (icon / description) opens GH preview
+      // instead of following the title <a>. Same entry as a title click.
+      const row =
+        closestPullsListRow(event.target) ||
+        (() => {
+          for (const n of nodes) {
+            const r = closestPullsListRow(n);
+            if (r) return r;
+          }
+          return null;
+        })();
+      if (!row) return;
+      parsed = parsePrFromListRow(row);
+    }
+    if (!parsed) return;
 
     // Pref: listOpenMode=page → let GitHub navigate to /pull/N (no modal).
     // autoOpenEmbed still decides embed vs native on the PR page.

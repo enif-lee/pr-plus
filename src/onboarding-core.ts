@@ -110,7 +110,7 @@ export function countPullListItems(doc: Document | null | undefined) {
   );
   // Unique-ish: count rows preferred
   const rows = doc.querySelectorAll(
-    '.js-issue-row, [data-testid="issue-row"], .Box-row'
+    '.js-issue-row, [data-testid="issue-row"], [data-testid="issue-pr-row"], .Box-row, li:has(a[data-testid="listitem-title-link"])'
   );
   if (rows.length > 0) return rows.length;
   return links.length;
@@ -174,7 +174,9 @@ export function listPullRowsForHotkeys(
     '.js-navigation-container .js-issue-row',
     '.js-issue-row',
     '[data-testid="issue-row"]',
+    '[data-testid="issue-pr-row"]',
     '.Box-row.js-navigation-item',
+    'li:has(a[data-testid="listitem-title-link"])',
   ];
   for (const sel of selectors) {
     const rows = [...doc.querySelectorAll(sel)] as HTMLElement[];
@@ -211,7 +213,7 @@ export function resolveDemoPrHotkey(doc: Document | null | undefined): {
     index >= 0
       ? rows[index]
       : (link.closest(
-          '.js-issue-row, [data-testid="issue-row"], .Box-row, li'
+          '.js-issue-row, [data-testid="issue-row"], [data-testid="issue-pr-row"], .Box-row, li:has(a[data-testid="listitem-title-link"]), li'
         ) as HTMLElement | null) || link;
   const slot =
     index >= 0 && index < ONBOARDING_HOTKEY_SLOTS.length

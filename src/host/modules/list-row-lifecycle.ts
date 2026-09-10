@@ -75,6 +75,7 @@
   function findRowTitleAnchor(row: any) {
     if (!row?.querySelector) return null;
     return (
+      row.querySelector('a[data-testid="listitem-title-link"]') ||
       row.querySelector('a.js-navigation-open') ||
       row.querySelector('a[id$="_link"]') ||
       row.querySelector('h3 a[href*="/pull/"]') ||
@@ -106,21 +107,25 @@
       document.querySelector('.Box .Box-header'),
       document.querySelector('[class*="TableList"]'),
       document.querySelector('.js-check-all-container'),
+      document.querySelector('[role="toolbar"]'),
       document,
     ].filter(Boolean);
     const visited = new Set();
     for (const scope of scopes) {
       const summaries = scope.querySelectorAll?.(
-        'summary.btn-link, summary.select-menu-button, summary[role="button"], summary.Button, summary.Button--secondary, summary'
+        'summary.btn-link, summary.select-menu-button, summary[role="button"], summary.Button, summary.Button--secondary, summary, button[aria-label^="Filter by"], button[aria-label^="Sort"]'
       );
       if (!summaries) continue;
       for (const el of summaries) {
         if (visited.has(el)) continue;
         visited.add(el);
         const text = cleanControlLabel(el);
+        const aria = String(el.getAttribute?.('aria-label') || '');
         const def = matchFn
-          ? matchFn(text)
-          : defs.find((d: any) => d.match?.test?.(text));
+          ? matchFn(text) || matchFn(aria)
+          : defs.find(
+              (d: any) => d.match?.test?.(text) || d.match?.test?.(aria)
+            );
         if (!def || seen.has(def.id)) continue;
         seen.add(def.id);
         found.push({ el, def });

@@ -1394,11 +1394,18 @@ html[data-color-mode='dark'] .prp-pp-help__action {
 .js-issue-row.pr-tree-indented,
 li[role='listitem'].pr-tree-indented,
 div[id^='issue_'].pr-tree-indented,
+li:has(a[data-testid='listitem-title-link']).pr-tree-indented,
 .pr-tree-indented {
   position: relative;
   box-sizing: border-box;
   margin-left: calc(var(--pr-tree-depth, 0) * 24px) !important;
   padding-left: calc(8px + max(0, var(--pr-tree-depth, 0) - 1) * 4px);
+}
+
+/* React pulls dashboard rows are display:grid + width 100%; shrink so indent is visible. */
+li:has(a[data-testid='listitem-title-link']).pr-tree-indented {
+  width: calc(100% - var(--pr-tree-depth, 0) * 24px) !important;
+  max-width: 100%;
 }
 
 .pr-tree-indented:not([data-pr-tree-depth='0']) {
@@ -1430,6 +1437,13 @@ div.pr-tree-row-meta {
   font-size: 12px;
   color: var(--fgColor-muted, #656d76);
   pointer-events: auto;
+}
+
+/* React title cell is a horizontal flex (heading + badges); keep meta on its own row. */
+[data-listview-item-title-container] > .pr-tree-row-meta,
+[class*='Title-module__container'] > .pr-tree-row-meta {
+  flex: 1 1 100%;
+  width: 100%;
 }
 
 .pr-tree-pr-number {

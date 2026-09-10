@@ -251,6 +251,11 @@ function matchFilterBarLabel(text: any) {
   if (!t) return null;
   for (const def of PR_LIST_FILTER_BAR) {
     if (def.match.test(t)) return def;
+    const title = String(def.title || '');
+    if (title && new RegExp(`^(?:filter by\\s+)?${title}$`, 'i').test(t)) {
+      return def;
+    }
+    if (def.id === 'sort' && /^sort(?:\s+by)?/i.test(t)) return def;
   }
   return null;
 }
