@@ -36,7 +36,7 @@
     return !missingRequired;
   }
 
-  function kickIndependentSideFetches({ owner, repo, number, headSha = null, body = '', gen, stillOpenFn = null, signal = null }: any) {
+  function kickIndependentSideFetches({ owner, repo, number, headSha = null, body = '', gen, stillOpenFn = null, signal = null, replaceNewestTimeline = false }: any) {
     const alive = () => {
       if (gen != null && gen !== detailFetchGen) return false;
       if (typeof stillOpenFn === 'function' && !stillOpenFn()) return false;
@@ -239,10 +239,13 @@
       // Docs: GraphQL first/last ≤100; issue events/timeline have no published
       // total/30d cap (Activity Events 300/30d is a different API). Dense PRs
       // may still omit some system events unfiltered — see timeline-items.ts.
-      const sinceWatermark =
-        current.detail?.timelineMeta?.watermark ||
-        current.detail?.commentsMeta?.watermark ||
-        null;
+      // Refresh: skip since-incremental so edited/deleted rows in the newest
+      // window are not union-merged back from the previous snapshot.
+      const sinceWatermark = replaceNewestTimeline
+        ? null
+        : current.detail?.timelineMeta?.watermark ||
+          current.detail?.commentsMeta?.watermark ||
+          null;
       // reverseComments true → oldest-first (no since incremental).
       const sortNewest = prefs?.reverseComments !== true;
       commentsP = wrap(
@@ -336,7 +339,11 @@
             const prevTl = current.detail?.timelineMeta || null;
             let startCursor = pi?.startCursor || null;
             let endCursor = pi?.endCursor || null;
-            if (sinceWatermark && sortNewest && prevTl) {
+            if (
+              (sinceWatermark || replaceNewestTimeline) &&
+              sortNewest &&
+              prevTl
+            ) {
               if (prevTl.startCursor && !startCursor) {
                 startCursor = prevTl.startCursor;
               }
@@ -363,6 +370,7 @@
             };
             const patch: any = {
               comments: items,
+              replaceTimelineEvents: Boolean(replaceNewestTimeline),
               commentsMeta: {
                 ...(page?.meta && typeof page.meta === 'object'
                   ? page.meta
@@ -515,6 +523,29 @@
                 }
               }
 
+              // Refresh: replace the newest window (edits/deletes) and keep
+              // older load-more rows. Do not union-by-id onto prev.
+              if (replaceNewestTimeline && page && !page.error) {
+                const prevComments = Array.isArray(current.detail?.comments)
+                  ? current.detail.comments
+                  : [];
+                const prevEvents = Array.isArray(
+                  current.detail?.timelineEvents
+                )
+                  ? current.detail.timelineEvents
+                  : [];
+                if (typeof pure?.replaceNewestTimelineWindow === 'function') {
+                  comments = pure.replaceNewestTimelineWindow(
+                    prevComments,
+                    comments
+                  );
+                  gqlEvents = pure.replaceNewestTimelineWindow(
+                    prevEvents,
+                    gqlEvents
+                  );
+                }
+              }
+
               // since-incremental: merge onto prior
               if (sinceWatermark && sortNewest && page && !page.error) {
                 const prevComments = Array.isArray(current.detail?.comments)
@@ -581,7 +612,7 @@
                 paintHasMore = paintHasMore || Boolean(pi?.hasNextPage);
               }
               if (
-                sinceWatermark &&
+                (sinceWatermark || replaceNewestTimeline) &&
                 sortNewest &&
                 current.detail?.timelineMeta?.hasMore
               ) {

@@ -1112,7 +1112,7 @@ function siteErrorMessage(code: string) {
 function addCustomConnectedSite() {
   const raw = String(connectCustomHostEl?.value || '');
   const parsed = parseCustomConnectedOrigins(raw);
-  if (!parsed.ok) {
+  if (parsed.ok === false) {
     setStatus(siteErrorMessage(parsed.error), true);
     return;
   }

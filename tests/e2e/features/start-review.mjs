@@ -741,6 +741,102 @@ export function getSteps() {
     );
     sessionCreatedPending = true;
   });
+  run('SR.3b Conversation pending box: ↑/↓ + pending comment actions', () => {
+    setLayout('conversation');
+    blurEditable();
+    waitMs(400);
+    const box = evalInPage(`
+      (() => {
+        const host = document.querySelector('[data-prp-pending-review-box="1"]');
+        const rows = host
+          ? [...host.querySelectorAll('.prp-review-group__row')].length
+          : 0;
+        return { hasBox: !!host, rows };
+      })()
+    `);
+    log(`  pending box ${JSON.stringify(box)}`);
+    assert(box.hasBox, `pending review box missing: ${JSON.stringify(box)}`);
+    press('Alt+Shift+c');
+    waitMs(200);
+    let landed = '';
+    for (let i = 0; i < 8; i++) {
+      landed = evalInPage(
+        `document.documentElement.getAttribute('data-prp-focused-conv-anchor') || ''`
+      );
+      if (String(landed).startsWith('review-comment:')) break;
+      press('Alt+j');
+      waitMs(140);
+    }
+    assert(
+      String(landed).startsWith('review-comment:'),
+      `did not land on a pending thread (anchor=${landed})`
+    );
+    blurEditable();
+    const before = landed;
+    press('ArrowDown');
+    waitMs(250);
+    const after = evalInPage(`
+      (() => ({
+        last:
+          document.documentElement.getAttribute('data-prp-last-shortcut-action') ||
+          '',
+        anchor:
+          document.documentElement.getAttribute('data-prp-focused-conv-anchor') ||
+          '',
+      }))()
+    `);
+    log(`  arrow ${before} → ${JSON.stringify(after)}`);
+    assert(
+      after.last === 'stepPendingBoxNext' ||
+        after.last === 'stepNavNext' ||
+        after.last === 'stepThreadReplyNext' ||
+        (after.anchor && after.anchor !== before),
+      `pending box ↑/↓ did not step: before=${before} after=${JSON.stringify(after)}`
+    );
+    // Expand the pending path-row so root/reply action chrome mounts.
+    if (!String(after.anchor || before).startsWith('review-comment:')) {
+      press('ArrowUp');
+      waitMs(150);
+    }
+    press('Enter');
+    waitMs(400);
+    evalInPage(`
+      (() => {
+        const host = document.querySelector('[data-prp-pending-review-box="1"]');
+        const row =
+          host?.querySelector('.prp-review-group__row--kb-focus') ||
+          host?.querySelector('.prp-review-group__row');
+        const fold = row?.querySelector(
+          'button[aria-expanded="false"], .prp-review-group__fold, button'
+        );
+        if (fold && fold.getAttribute('aria-expanded') === 'false') fold.click();
+        return true;
+      })()
+    `);
+    waitMs(300);
+    const actions = evalInPage(`
+      (() => {
+        const host = document.querySelector('[data-prp-pending-review-box="1"]');
+        return {
+          edit: host
+            ? host.querySelectorAll('[data-prp-edit-comment="1"]').length
+            : 0,
+          del: host
+            ? host.querySelectorAll('[data-prp-delete-comment="1"]').length
+            : 0,
+          openRows: host
+            ? host.querySelectorAll('.prp-review-group__row--open').length
+            : 0,
+        };
+      })()
+    `);
+    log(`  pending actions ${JSON.stringify(actions)}`);
+    assert(
+      actions.edit >= 1 && actions.del >= 1,
+      `pending thread missing edit/delete: ${JSON.stringify(actions)}`
+    );
+    setLayout('diff');
+  });
   run('SR.4 Discard pending review (no submit/finish) + hard deletion asserts', () => {
     assert(overlayOpen(), 'shell closed before SR.4');
     // Close any open island

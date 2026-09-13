@@ -101,7 +101,7 @@ export function getSteps() {
     );
     assert(after.at, 'missing data-prp-last-refresh-at');
     assert(
-      after.mode === 'visible-threads' || after.mode === 'full-threads',
+      after.mode === 'revalidate' || after.mode === 'full-threads',
       `unexpected refresh mode: ${after.mode}`
     );
   });

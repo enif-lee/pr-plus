@@ -133,6 +133,7 @@ export function useChromeOverlayGroup() {
       paletteQuery: s.paletteQuery,
       picker: s.picker,
       actionBusy: s.actionBusy,
+      busyKey: s.busyKey,
       actionMsg: s.actionMsg,
       actionMsgSeq: s.actionMsgSeq,
       editingBody: s.editingBody,

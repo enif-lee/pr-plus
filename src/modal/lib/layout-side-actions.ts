@@ -44,6 +44,10 @@ export const DIFF_SIDE_ACTIONS = [
   'copySelectionUrl',
   'dismissSelectionIsland',
   'openDiffGoto',
+  'toggleHideWhitespace',
+  'toggleHideOutdated',
+  'toggleDiffMode',
+  'expandHunkAtCaret',
 ] as const;
 
 const CONV_SET = new Set<string>(CONVERSATION_SIDE_META_ACTIONS as readonly string[]);

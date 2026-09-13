@@ -67,5 +67,11 @@ describe('refresh wiring (static shipped sources)', () => {
     expect(app).toMatch(/function refreshDetail/);
     expect(app).toMatch(/data-prp-refresh-seq/);
     expect(app).toMatch(/onRefresh: refreshDetail/);
+    expect(app).toMatch(
+      /mode: layoutMode === LAYOUT_DIFF \? 'full-threads' : 'revalidate'/
+    );
+    expect(app).not.toMatch(
+      /mode: layoutMode === LAYOUT_DIFF \? 'full-threads' : 'visible-threads'/
+    );
   });
 });

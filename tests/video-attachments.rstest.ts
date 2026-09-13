@@ -6,8 +6,10 @@ import { describe, expect, test } from '@rstest/core';
 import {
   buildAttachmentMarkdown,
   guessContentType,
+  isGithubImageAttachment,
   isGithubVideoAttachment,
   uploadGithubCommentAttachment,
+  usesGithubCommentAttachment,
 } from '../src/modal/lib/composer-attach';
 import {
   embedGithubVideoAttachments,
@@ -29,6 +31,21 @@ describe('GitHub comment video attachments', () => {
     ).toBe(`\n${asset}\n`);
     expect(guessContentType('clip.mov')).toBe('video/quicktime');
     expect(guessContentType('clip.mp4')).toBe('video/mp4');
+  });
+
+  test('images use native comment attachments, not git Contents', () => {
+    expect(isGithubImageAttachment('shot.png', 'image/png')).toBe(true);
+    expect(isGithubImageAttachment('image.png', '')).toBe(true);
+    expect(isGithubImageAttachment('', 'image/png')).toBe(true);
+    expect(isGithubImageAttachment('notes.pdf', 'application/pdf')).toBe(false);
+    expect(usesGithubCommentAttachment('shot.png', 'image/png')).toBe(true);
+    expect(usesGithubCommentAttachment('clip.mp4', 'video/mp4')).toBe(true);
+    expect(usesGithubCommentAttachment('notes.pdf', 'application/pdf')).toBe(
+      false
+    );
+    expect(buildAttachmentMarkdown('shot.png', asset)).toBe(
+      `![shot.png](${asset})`
+    );
   });
 
   test('standalone GitHub asset autolink renders as a video player', () => {
@@ -188,11 +205,50 @@ describe('GitHub comment video attachments', () => {
       expect((calls[1].init?.body as FormData).get('content_type')).toBe(
         'video/mp4'
       );
+
+      calls.length = 0;
+      responses.push(
+        new Response(`
+        <file-attachment data-upload-policy-url="/upload/policies/assets" data-upload-repository-id="42">
+          <input class="js-data-upload-policy-url-csrf" value="policy-token">
+        </file-attachment>`),
+        Response.json({
+          upload_url: 'https://uploads.github.test/storage',
+          form: { key: 'asset-key' },
+          header: {},
+          asset_upload_url: '/upload/assets/2',
+          asset_upload_authenticity_token: 'completion-token',
+        }),
+        new Response(null, { status: 204 }),
+        Response.json({ href: asset })
+      );
+      const imageHref = await uploadGithubCommentAttachment(
+        new File(['png'], 'shot.png', { type: 'image/png' }),
+        { owner: 'enif-lee', repo: 'pr-plus', number: 1 }
+      );
+      expect(imageHref).toBe(asset);
+      expect((calls[1].init?.body as FormData).get('content_type')).toBe(
+        'image/png'
+      );
     } finally {
       (globalThis as any).document = originalDocument;
       (globalThis as any).DOMParser = originalDomParser;
       globalThis.fetch = originalFetch;
       dom.window.close();
     }
+  });
+});
+
+describe('composer image upload wiring', () => {
+  test('side-actions routes images through native comment attachments', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const src = fs.readFileSync(
+      path.resolve(__dirname, '../src/modal/commands/side-actions.ts'),
+      'utf8'
+    );
+    expect(src).toMatch(/usesGithubCommentAttachment/);
+    expect(src).toMatch(/uploadGithubCommentAttachment/);
+    expect(src).not.toMatch(/isGithubVideoAttachment\(name/);
   });
 });

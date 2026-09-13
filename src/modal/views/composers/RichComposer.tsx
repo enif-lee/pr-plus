@@ -24,8 +24,10 @@ import {
   applySlashInsertion,
   applyEmojiInsertion,
   emojiMenuLabel,
+  mentionSuggestionView,
   SLASH_COMMANDS,
 } from '@lib/markdown-composer';
+import { Avatar } from '@common/Avatar';
 import { filterPaletteCommands, formatShortcut } from '@lib/command-palette';
 import { githubUserUrl, githubLabelUrl, uniqueLogins, uniqueReviewsByAuthor, buildStackStrip } from '@lib/ui-polish';
 import { takeCommitsForTimeline, takeVisibleTreeNodes } from '@lib/aside-lists';
@@ -170,19 +172,29 @@ export function RichComposer({
         >
           {menu.items.map((item: any, idx: any) => {
             const isEmoji = menu.kind === 'emoji';
+            const isMention = menu.kind === 'mention';
+            const mentionView = isMention ? mentionSuggestionView(item) : null;
             const label = isEmoji
               ? emojiMenuLabel?.(item) || `:${item.name}:`
-              : menu.kind === 'mention'
-                ? `@${item}`
+              : isMention
+                ? mentionView?.primary || ''
                 : item.label || item.id;
             const desc = menu.kind === 'slash' ? item.description : null;
             return (
-              <li key={String(isEmoji ? item.name : label)} role="option">
+              <li
+                key={String(isEmoji ? item.name : mentionView?.login || label)}
+                role="option"
+              >
                 <button
                   type="button"
                   className={`prp-composer-menu__item${
                     isEmoji ? ' prp-composer-menu__item--emoji' : ''
-                  }${idx === menuIndex ? ' prp-composer-menu__item--active' : ''}`}
+                  }${isMention ? ' prp-composer-menu__item--mention' : ''}${
+                    idx === menuIndex ? ' prp-composer-menu__item--active' : ''
+                  }`}
+                  data-prp-mention-login={
+                    isMention ? mentionView?.login : undefined
+                  }
                   onMouseDown={(ev) => {
                     ev.preventDefault();
                     applyItem(item);
@@ -195,6 +207,31 @@ export function RichComposer({
                         {item.emoji}
                       </span>
                       <span className="prp-composer-menu__emoji-name">{label}</span>
+                    </>
+                  ) : isMention && mentionView ? (
+                    <>
+                      <Avatar
+                        login={mentionView.login}
+                        avatarUrl={mentionView.avatarUrl}
+                        size="sm"
+                        className="prp-composer-menu__avatar"
+                      />
+                      <span className="prp-composer-menu__mention">
+                        <strong
+                          className={
+                            mentionView.name
+                              ? 'prp-composer-menu__mention-name'
+                              : 'prp-composer-menu__mention-login'
+                          }
+                        >
+                          {mentionView.primary}
+                        </strong>
+                        {mentionView.secondary ? (
+                          <span className="prp-composer-menu__mention-login">
+                            {mentionView.secondary}
+                          </span>
+                        ) : null}
+                      </span>
                     </>
                   ) : (
                     <>

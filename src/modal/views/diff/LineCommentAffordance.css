@@ -101,7 +101,10 @@
   box-shadow: 0 12px 40px rgba(1, 4, 9, 0.22);
   animation: prp-float-up 160ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
-.prp-sselect-panel--center {
+/* Unanchored fallback only. Anchored pickers stay position:fixed — never
+ * in-flow relative, which paints at the overlay's left then jumps to the
+ * add-button. */
+.prp-sselect-panel--center:not(.prp-sselect-panel--popover) {
   position: relative;
 }
 .prp-sselect-backdrop--soft {

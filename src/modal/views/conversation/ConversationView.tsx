@@ -1286,21 +1286,27 @@ function ConversationViewImpl(props: any) {
     thread: any;
     reviewGroupId: any | null;
   } | null {
-    for (const item of timelineItems) {
-      if (item?.kind === 'review-thread' || item?.kind === 'review-comment') {
-        if (String(item.id) === commentId) {
-          return { thread: item, reviewGroupId: null };
+    const scan = (list: any[]) => {
+      for (const item of list) {
+        if (item?.kind === 'review-thread' || item?.kind === 'review-comment') {
+          if (String(item.id) === commentId) {
+            return { thread: item, reviewGroupId: null };
+          }
         }
-      }
-      if (item?.kind === 'review-group') {
-        for (const t of item.threads || []) {
-          if (String(t?.id) === commentId) {
-            return { thread: t, reviewGroupId: item.id };
+        if (item?.kind === 'review-group') {
+          for (const t of item.threads || []) {
+            if (String(t?.id) === commentId) {
+              return { thread: t, reviewGroupId: item.id };
+            }
           }
         }
       }
-    }
-    return null;
+      return null;
+    };
+    return (
+      scan(timelineItems) ||
+      (pendingReviewGroup ? scan([pendingReviewGroup]) : null)
+    );
   }
 
   /** Expand a focused thread unit (standalone or group path row). */
@@ -1353,9 +1359,9 @@ function ConversationViewImpl(props: any) {
         return next;
       });
     },
-    // findTimelineThreadById closes over timelineItems
+    // findTimelineThreadById closes over timelineItems + pendingReviewGroup
     // hooks: deps are intentional for this host/session subscription
-    [timelineItems]
+    [timelineItems, pendingReviewGroup]
   );
 
   /**
@@ -2150,13 +2156,14 @@ function ConversationViewImpl(props: any) {
         anchor="body"
         baseClass={baseClass}
       >
-        {(className) => (
+        {(className, focused) => (
           <DescriptionCard
             detail={detail}
             sectionLoading={sectionLoading}
             editingBody={editingBody}
             actionBusy={actionBusy}
             searchClassName={className}
+            focused={focused}
             onStartEditBody={onStartEditBody}
             onCancelEditBody={onCancelEditBody}
             onSaveBody={onSaveBody}
@@ -2270,6 +2277,9 @@ function ConversationViewImpl(props: any) {
           <div
             className={`${className}${focused ? ' prp-composer-focus-host--focused' : ''}`.trim()}
             data-search-anchor="composer"
+            data-prp-pending-review-box={
+              pendingReviewGroup ? '1' : undefined
+            }
             tabIndex={focused ? -1 : undefined}
           >
             <ComposerCard
@@ -2336,7 +2346,12 @@ function ConversationViewImpl(props: any) {
       return isReviewThreadCollapsed(found.thread);
     },
     // hooks: deps are intentional for this host/session subscription
-    [timelineItems, groupThreadOpenOverrides, threadCollapseOverrides]
+    [
+      timelineItems,
+      pendingReviewGroup,
+      groupThreadOpenOverrides,
+      threadCollapseOverrides,
+    ]
   );
 
   return (

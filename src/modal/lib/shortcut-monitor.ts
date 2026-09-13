@@ -134,6 +134,16 @@ export const SHORTCUT_MONITOR_CATALOG: Record<string, ShortcutMonitorEntry> = {
     labelMac: STEP_NAV_SHORTCUT.next.labelMac,
     labelWin: STEP_NAV_SHORTCUT.next.labelWin,
   },
+  stepPendingBoxPrev: {
+    title: 'Previous pending review',
+    labelMac: '↑',
+    labelWin: '↑',
+  },
+  stepPendingBoxNext: {
+    title: 'Next pending review',
+    labelMac: '↓',
+    labelWin: '↓',
+  },
   navFilePrev: {
     title: 'Previous file',
     labelMac: FILE_NAV_SHORTCUT.prev.labelMac,
@@ -168,6 +178,26 @@ export const SHORTCUT_MONITOR_CATALOG: Record<string, ShortcutMonitorEntry> = {
     title: 'Toggle file viewed',
     labelMac: TOGGLE_VIEWED_SHORTCUT.labelMac,
     labelWin: TOGGLE_VIEWED_SHORTCUT.labelWin,
+  },
+  toggleHideWhitespace: {
+    title: 'Toggle hide whitespace',
+    labelMac: '⌥⇧H',
+    labelWin: 'Alt+Shift+H',
+  },
+  toggleDiffMode: {
+    title: 'Toggle unified / split Diff',
+    labelMac: '⌥⇧\\',
+    labelWin: 'Alt+Shift+\\',
+  },
+  discardPendingReview: {
+    title: 'Discard pending review',
+    labelMac: '⌥⇧⌫',
+    labelWin: 'Alt+Shift+Backspace',
+  },
+  loadMoreThreads: {
+    title: 'Load more review threads',
+    labelMac: '',
+    labelWin: '',
   },
   toggleActiveFileCollapse: {
     title: 'Fold / expand focused file',

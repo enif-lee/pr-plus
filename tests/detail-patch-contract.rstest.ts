@@ -197,6 +197,28 @@ describe('detail-patch contract (PR0A)', () => {
     expect(late.fullyMatched).toBe(false);
   });
 
+  test('preferNetwork skips people-meta overlay (explicit refresh)', () => {
+    const auth = buildPeopleMetaAuthority(
+      { owner: 'o', repo: 'r', number: 7 },
+      { assignees: ['alice'], requestedReviewers: ['bob'] },
+      { gen: 1, at: 1_000 }
+    );
+    const { flat } = applyPeopleMetaAuthorityToCore(
+      {
+        owner: 'o',
+        repo: 'r',
+        number: 7,
+        assignees: ['carol'],
+        requestedReviewers: [],
+      },
+      auth,
+      { owner: 'o', repo: 'r', number: 7 },
+      { now: 1_000 + 5_000, preferNetwork: true }
+    );
+    expect(flat.assignees).toEqual(['carol']);
+    expect(flat.requestedReviewers).toEqual([]);
+  });
+
   test('files patch meta does not mark comments settled via toAppDetail', () => {
     const store = createEmptyStore();
     applyCorePayload(store, {

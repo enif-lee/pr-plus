@@ -239,4 +239,23 @@ describe('prProbeIndicatesStale', () => {
       )
     ).toBe(false);
   });
+
+  test('updatedAt drift is stale without sha change', () => {
+    expect(
+      prProbeIndicatesStale(
+        {
+          headSha: 'aaa',
+          draft: false,
+          state: 'open',
+          updatedAt: '2026-01-01T00:00:00Z',
+        },
+        {
+          headSha: 'aaa',
+          draft: false,
+          state: 'open',
+          updatedAt: '2026-01-01T00:00:01Z',
+        }
+      )
+    ).toBe(true);
+  });
 });

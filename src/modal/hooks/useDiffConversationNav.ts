@@ -304,6 +304,7 @@ import {
   resolveModalShortcutAction,
   pickConversationCommentFocusTarget,
   stepConversationCommentFocus,
+  stepPendingReviewBoxFocus,
   resolveAdjacentFileNav,
   isGithubCommandPaletteOpen,
   touchGithubCommandPaletteOpen,
@@ -317,6 +318,7 @@ import {
   shortcutKeyFromEvent,
   normalizeShortcutKey,
   resolveActiveFileForCollapse,
+  resolveActiveFileForViewed,
   isEditableKeyboardTarget,
   isComposerKeyboardTarget,
   findComposerShortcutSurface,
@@ -453,13 +455,16 @@ export function useDiffConversationNav(b: any) {
   const setHideWhitespace = b.setHideWhitespace;
   const setDiffReviewFilter = b.setDiffReviewFilter;
   const onSelectFile = (...args: any[]) => b.onSelectFile?.(...args);
-  const onToggleFileCollapse = b.onToggleFileCollapse;
-  const onToggleViewed = b.onToggleViewed;
+  // Live bag lookups: these are assigned on shellBag after this hook first runs.
+  const onToggleFileCollapse = (...args: any[]) =>
+    b.onToggleFileCollapse?.(...args);
+  const onToggleViewed = (...args: any[]) => b.onToggleViewed?.(...args);
   const clearLineSelectionForNav = (...args: any[]) => b.clearLineSelectionForNav?.(...args);
   const ensureFileExpandedForSelection = (...args: any[]) => b.ensureFileExpandedForSelection?.(...args);
   const flushSelectionKeyboardMove = (...args: any[]) => b.flushSelectionKeyboardMove?.(...args);
   const scheduleSelectionActionsReveal = (...args: any[]) => b.scheduleSelectionActionsReveal?.(...args);
   const scrollSelectionHeadDomOnly = (...args: any[]) => b.scrollSelectionHeadDomOnly?.(...args);
+  const scrollSelectionHeadToThird = (...args: any[]) => b.scrollSelectionHeadToThird?.(...args);
   const clearDiffThreadFocusIfNeeded = (...args: any[]) => b.clearDiffThreadFocusIfNeeded?.(...args);
   const actionBusy = b.actionBusy;
   const actionMsg = b.actionMsg;
@@ -2263,6 +2268,23 @@ export function useDiffConversationNav(b: any) {
     return true;
   }
 
+  function isPendingComposerThread(rootId: unknown): boolean {
+    const id = String(rootId || '').trim();
+    if (!id || typeof document === 'undefined') return false;
+    try {
+      const esc =
+        typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+          ? CSS.escape(id)
+          : id.replace(/"/g, '\\"');
+      const el = document.querySelector(
+        `[data-search-anchor="review-comment:${esc}"]`
+      );
+      return Boolean(el?.closest?.('[data-prp-pending-review-box="1"]'));
+    } catch {
+      return false;
+    }
+  }
+
   /**
    * ↑/↓ within a multi-reply review thread (root + replies). Returns true when
    * handled (in-thread step **or** exit handoff to line/thread selection).
@@ -2284,6 +2306,17 @@ export function useDiffConversationNav(b: any) {
     if (stepped.exit) {
       if (liveLayout === LAYOUT_DIFF) {
         return handoffThreadExitToSelection(rootId, delta);
+      }
+      // Pending-review box: leave this thread into the next pending stop /
+      // composer (↑/↓ between threads). Timeline threads still clamp.
+      if (isPendingComposerThread(rootId)) {
+        try {
+          st.setFocusedThreadUnitId(null);
+        } catch {
+          /* ignore */
+        }
+        navPendingReviewBox(delta);
+        return true;
       }
       // Conversation owns only this thread: keep the first/last unit focused.
       // Clearing it re-seeds the root on the next held keydown and wraps.
@@ -2706,8 +2739,13 @@ export function useDiffConversationNav(b: any) {
     }
     scheduleSelectionActionsReveal();
     try {
-      // Region hop is always a single line caret — thrifted index scroll
-      scrollSelectionCaretAfterHop(next);
+      // Region hop: pin the destination first line at ~1/3 viewport (not
+      // Arrow reveal). Falls back to reveal if the third helper is missing.
+      if (typeof scrollSelectionHeadToThird === 'function') {
+        scrollSelectionHeadToThird(next);
+      } else {
+        scrollSelectionCaretAfterHop(next);
+      }
     } catch {
       /* ignore */
     }
@@ -2805,19 +2843,26 @@ export function useDiffConversationNav(b: any) {
       typeof buildConversationTimeline === 'function' && detail
         ? buildConversationTimeline(detail)
         : [];
-    const timeline = (Array.isArray(items) ? items : []).filter(
+    const all = Array.isArray(items) ? items : [];
+    const pendingGroups = all.filter(
+      (i: any) => i && i.kind === 'review-group' && i.pending
+    );
+    const timeline = all.filter(
       (i: any) => !(i && i.kind === 'review-group' && i.pending)
     );
+    let page = timeline;
     if (typeof partitionTimelineWithThreadGap === 'function') {
       const gap = partitionTimelineWithThreadGap(
         timeline,
         detail?.reviewThreadsMeta || null
       );
       if (gap?.showGap && Array.isArray(gap.bottom) && gap.bottom.length > 0) {
-        return [...(gap.top || []), ...gap.bottom];
+        page = [...(gap.top || []), ...gap.bottom];
       }
     }
-    return timeline;
+    // Pending review-group threads live in the Review composer; keep them on
+    // the focus list so ↑/↓ / ⌥J/K can walk the submit box.
+    return pendingGroups.length ? [...page, ...pendingGroups] : page;
   }, [detail]);
 
   /**
@@ -2900,8 +2945,38 @@ export function useDiffConversationNav(b: any) {
     });
   }
 
+  /**
+   * Plain ↑/↓ inside the pending-review submit box: wrap pending file threads
+   * and the Review composer only (do not jump to merge / description).
+   */
+  function applyPendingReviewBoxNav(delta: number) {
+    const ordered = conversationCommentPageItems;
+    const st = useModalStore.getState();
+    const cur =
+      st.focusedConversationAnchor ||
+      st.pendingConversationNavAnchor ||
+      conversationCommentFocusRef.current?.anchor ||
+      null;
+    const next =
+      typeof stepPendingReviewBoxFocus === 'function'
+        ? stepPendingReviewBoxFocus(ordered, cur, delta)
+        : null;
+    if (!next) return;
+    conversationCommentFocusRef.current = next;
+    st.requestConversationNav(next.anchor, true);
+  }
+
+  function navPendingReviewBox(delta: number) {
+    if (layoutMode === LAYOUT_DIFF) collapseDiff();
+    applyPendingReviewBoxNav(delta);
+  }
+
   function toggleViewedActiveFile() {
-    const path = readActiveFilePath();
+    const path = resolveActiveFileForViewed({
+      lineSelection: useModalStore.getState().lineSelection,
+      activeFilePath: readActiveFilePath(),
+      files: annotatedFiles,
+    });
     if (!path) return;
     onToggleViewed(path);
   }
@@ -3014,6 +3089,86 @@ export function useDiffConversationNav(b: any) {
     }
   }
 
+  function toggleHideWhitespace() {
+    applyHideWhitespace(!hideWhitespace);
+  }
+
+  function toggleDiffMode() {
+    const cur = String(useModalStore.getState().diffMode || 'unified');
+    const next = cur === 'split' ? 'unified' : 'split';
+    try {
+      setDiffMode(next);
+    } catch {
+      /* ignore */
+    }
+    try {
+      setScrollTop(0);
+      if (listRef.current) listRef.current.scrollTop = 0;
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function loadMoreReviewThreads() {
+    if (typeof onLoadMoreReviewThreads !== 'function') return;
+    // Banner "Load all" drains threads + remaining timeline pages.
+    void onLoadMoreReviewThreads('all');
+  }
+
+  function toggleHideOutdated() {
+    const cur = Boolean(
+      (typeof normalizeDiffReviewFilter === 'function'
+        ? normalizeDiffReviewFilter(diffReviewFilter)
+        : diffReviewFilter
+      )?.hideOutdated
+    );
+    patchDiffReviewFilter({ hideOutdated: !cur });
+  }
+
+  function expandHunkAtCaret() {
+    if (layoutMode !== LAYOUT_DIFF) return;
+    try {
+      const el = listRef.current as HTMLElement | null;
+      if (!el) return;
+      const st = useModalStore.getState();
+      const head = Number(st.lineSelection?.headRowIndex);
+      const origin =
+        (Number.isFinite(head) && head >= 0
+          ? (el.querySelector(
+              `[data-row-index="${head}"]`
+            ) as HTMLElement | null)
+          : null) ||
+        (el.querySelector(
+          '.prp-vline--selected:not(.prp-vline--header)'
+        ) as HTMLElement | null) ||
+        el;
+      const originRect = origin.getBoundingClientRect?.();
+      const oy = originRect ? (originRect.top + originRect.bottom) / 2 : 0;
+      const buttons = [
+        ...el.querySelectorAll(
+          '.prp-hunk-expand__btn--all, .prp-hunk-expand__btn[data-expand-dir="all"]'
+        ),
+      ] as HTMLElement[];
+      if (!buttons.length) return;
+      let best: HTMLElement | null = null;
+      let bestDist = Infinity;
+      for (const btn of buttons) {
+        if ((btn as HTMLButtonElement).disabled) continue;
+        const r = btn.getBoundingClientRect?.();
+        if (!r) continue;
+        const cy = (r.top + r.bottom) / 2;
+        const d = Math.abs(cy - oy);
+        if (d < bestDist) {
+          bestDist = d;
+          best = btn;
+        }
+      }
+      best?.click();
+    } catch {
+      /* ignore */
+    }
+  }
+
   /**
    * Goto path:line[:line] or bare line[:line] — select file + line range.
    * Expands collapsed files first; if rows are not ready, queues pendingGotoRef
@@ -3115,6 +3270,6 @@ export function useDiffConversationNav(b: any) {
   }
 
   return {
-    activeSearchHit, activeSearchOccurrence, applyGotoQuery, applyHideWhitespace, applyReviewFilterToggle, avgH, conversationCommentPageItems, expandFileForJump, getDiffScrollMetrics, isMultiReplyThreadFocused, jumpToReviewComment, mappedComments, navComment, navConversationComment, navFile, navSearch, noteDiffNavActivity, onSearchClose, onSearchLoadComments, onSearchNext, onSearchPrev, onSearchQueryCommit, onVirtualMetricsChange, optArrowScrollSelect, patchDiffReviewFilter, pendingCommentJumpRef, pendingGotoRef, searchBusy, repliesForRootCommentId, rowOffsetList, scheduleDiffReviewFilter, scrollConversationPanel, scrollDiffPage, scrollDiffThreadUnitIntoView, scrollFocusedThreadUnitIntoView, scrollSelectionIntoView, searchMatchRows, setActiveFileCollapse, setActiveFilePathForNav, showLoadComments, stepThreadReply, toggleActiveFileCollapse, toggleViewedActiveFile, tryReenterExitedMultiReply
+    activeSearchHit, activeSearchOccurrence, applyGotoQuery, applyHideWhitespace, applyReviewFilterToggle, avgH, conversationCommentPageItems, expandFileForJump, getDiffScrollMetrics, isMultiReplyThreadFocused, jumpToReviewComment, loadMoreReviewThreads, mappedComments, navComment, navConversationComment, navPendingReviewBox, navFile, navSearch, noteDiffNavActivity, onSearchClose, onSearchLoadComments, onSearchNext, onSearchPrev, onSearchQueryCommit, onVirtualMetricsChange, optArrowScrollSelect, patchDiffReviewFilter, pendingCommentJumpRef, pendingGotoRef, searchBusy, repliesForRootCommentId, rowOffsetList, scheduleDiffReviewFilter, scrollConversationPanel, scrollDiffPage, scrollDiffThreadUnitIntoView, scrollFocusedThreadUnitIntoView, scrollSelectionIntoView, searchMatchRows, setActiveFileCollapse, setActiveFilePathForNav, showLoadComments, stepThreadReply, toggleActiveFileCollapse, toggleDiffMode, toggleHideOutdated, toggleHideWhitespace, toggleViewedActiveFile, expandHunkAtCaret, tryReenterExitedMultiReply
   };
 }

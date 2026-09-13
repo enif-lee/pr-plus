@@ -61,6 +61,7 @@ import {
   type DiffCommitFilter as DiffCommitFilterState,
 } from '../lib/diff-commit-filter';
 import { filesListNeedsFullFetch } from '../lib/detail-idb';
+import { ACTION_BUSY } from '../lib/action-busy';
 import { useDetailUiStore } from '../store/detail-ui-store';
 import {
   SHELL_MODAL,
@@ -386,6 +387,7 @@ import {
   buildBranchOptions,
   buildUnifiedReviewerRows,
   isBotAccount,
+  peoplePickerShouldSearchDirectory,
 } from '../lib/searchable-select';
 import {
   canRestoreSessionView,
@@ -575,6 +577,8 @@ export function PrModalApp({
     patchHostDetail,
     applyAddAssignees,
     openAssigneePicker,
+    onPeoplePickerQuery,
+    refreshPeopleDirectoryPicker,
     onRemoveAssignee,
     applySetLabels,
     openLabelPicker,
@@ -1312,6 +1316,7 @@ export function PrModalApp({
     onLoadMoreReviewThreads,
     onReplyToThread,
     onResolveThread,
+    onToggleViewed,
     setPrTags,
     setPrTagsError,
     setPrTagsLoading,
@@ -1987,9 +1992,11 @@ export function PrModalApp({
     getDiffScrollMetrics,
     isMultiReplyThreadFocused,
     jumpToReviewComment,
+    loadMoreReviewThreads,
     mappedComments,
     navComment,
     navConversationComment,
+    navPendingReviewBox,
     navFile,
     navSearch,
     noteDiffNavActivity,
@@ -2018,7 +2025,11 @@ export function PrModalApp({
     showLoadComments,
     stepThreadReply,
     toggleActiveFileCollapse,
+    toggleDiffMode,
+    toggleHideOutdated,
+    toggleHideWhitespace,
     toggleViewedActiveFile,
+    expandHunkAtCaret,
     tryReenterExitedMultiReply
   } = _useDiffConversationNav;
   Object.assign(shellBag, {
@@ -2033,9 +2044,11 @@ export function PrModalApp({
     getDiffScrollMetrics,
     isMultiReplyThreadFocused,
     jumpToReviewComment,
+    loadMoreReviewThreads,
     mappedComments,
     navComment,
     navConversationComment,
+    navPendingReviewBox,
     navFile,
     navSearch,
     noteDiffNavActivity,
@@ -2064,7 +2077,11 @@ export function PrModalApp({
     showLoadComments,
     stepThreadReply,
     toggleActiveFileCollapse,
+    toggleDiffMode,
+    toggleHideOutdated,
+    toggleHideWhitespace,
     toggleViewedActiveFile,
+    expandHunkAtCaret,
     tryReenterExitedMultiReply
   });
   const _useSelectionKeyboard = useSelectionKeyboard(shellBag);
@@ -2076,6 +2093,7 @@ export function PrModalApp({
     flushSelectionKeyboardMove,
     scheduleSelectionActionsReveal,
     scrollSelectionHeadDomOnly,
+    scrollSelectionHeadToThird,
     setSelectionHoverReveal,
     setSelectionNavBusy,
     syncActiveFileFromSelection,
@@ -2089,6 +2107,7 @@ export function PrModalApp({
     flushSelectionKeyboardMove,
     scheduleSelectionActionsReveal,
     scrollSelectionHeadDomOnly,
+    scrollSelectionHeadToThird,
     setSelectionHoverReveal,
     setSelectionNavBusy,
     syncActiveFileFromSelection,
@@ -2701,7 +2720,7 @@ export function PrModalApp({
         viewportHeightRef.current,
         virtualRows.length,
         offs,
-        { align: 'start' }
+        { align: 'third' }
       );
       const el = listRef.current as HTMLElement | null;
       applyProgrammaticDiffScroll(el, top, {
@@ -2714,7 +2733,6 @@ export function PrModalApp({
     }
   }
 
-  Object.assign(shellBag, { onSelectFile });
   function onToggleDir(path: any) {
     setExpandedDirs((prev: any) => {
       const n = new Set(prev);
@@ -2742,6 +2760,8 @@ export function PrModalApp({
           })()
     );
   }
+
+  Object.assign(shellBag, { onSelectFile, onToggleFileCollapse });
 
   function focusCommentBox() {
     try {
@@ -3028,14 +3048,16 @@ export function PrModalApp({
       );
       document.documentElement.setAttribute(
         'data-prp-last-refresh-mode',
-        layoutMode === LAYOUT_DIFF ? 'full-threads' : 'visible-threads'
+        layoutMode === LAYOUT_DIFF ? 'full-threads' : 'revalidate'
       );
     } catch {
       /* ignore */
     }
     if (typeof onRefresh !== 'function') return;
     return onRefresh({
-      mode: layoutMode === LAYOUT_DIFF ? 'full-threads' : 'visible-threads',
+      // Conversation: newest thread window + unresolved by-ids (not only
+      // on-screen PRRT ids — those miss new external review threads).
+      mode: layoutMode === LAYOUT_DIFF ? 'full-threads' : 'revalidate',
       threadNodeIds:
         layoutMode === LAYOUT_DIFF
           ? undefined
@@ -3117,12 +3139,18 @@ export function PrModalApp({
         scrollDiffPage,
         optArrowScrollSelect,
         toggleViewedActiveFile,
+        toggleHideWhitespace,
+        toggleHideOutdated,
+        toggleDiffMode,
+        expandHunkAtCaret,
         toggleActiveFileCollapse,
         scrollConversationPanel,
         navConversationComment,
+        navPendingReviewBox,
         navComment,
         navSearch,
         navFile,
+        loadMoreReviewThreads,
         runContextThreadAction,
         searchOpen,
         searchInputRef,
@@ -3554,7 +3582,7 @@ export function PrModalApp({
       commitId: detail.headSha,
     });
     if (!payload) return;
-    setActionBusy(true);
+    setActionBusy(true, ACTION_BUSY.selectionComment);
     setActionMsg('');
     try {
       // If a PENDING review already exists, GitHub forces attach — shown as pending
@@ -3579,7 +3607,7 @@ export function PrModalApp({
       commitId: detail.headSha,
     });
     if (!payload) return;
-    setActionBusy(true);
+    setActionBusy(true, ACTION_BUSY.selectionPending);
     setActionMsg('');
     try {
       // Unified: always create/attach GitHub PENDING review (no local-only batch)
@@ -3697,6 +3725,10 @@ export function PrModalApp({
     Object.assign(sideBag, {
       detail,
       buildAssetRepoPath,
+      attachmentUploadFailed: formatMessage(
+        'upload_attachment_failed',
+        appLocale
+      ),
       videoAttachmentUploadFailed: formatMessage(
         'upload_video_failed',
         appLocale
@@ -3726,6 +3758,7 @@ export function PrModalApp({
       reviewerAddRef,
       collectPeopleLogins,
       buildPeopleOptions,
+      refreshPeopleDirectoryPicker,
       buildRerequestReviewerLogins,
       commitMetaPatch,
       timelineActorFromDetail,
@@ -3993,15 +4026,22 @@ export function PrModalApp({
     navSearch,
     navComment,
     navConversationComment,
+    navPendingReviewBox,
     navFile,
     scrollDiffPage,
     optArrowScrollSelect,
     scrollConversationPanel,
     toggleViewedActiveFile,
+    toggleHideWhitespace,
+    toggleHideOutdated,
+    toggleDiffMode,
+    expandHunkAtCaret,
     toggleActiveFileCollapse,
     setActiveFileCollapse,
     applyReviewFilterToggle,
     applyGotoQuery,
+    onDiscardPendingReview,
+    loadMoreReviewThreads,
     toggleSidePanel,
     openStackOrListPr,
     navigateAdjacentPr,
@@ -4042,6 +4082,7 @@ export function PrModalApp({
     tryReenterExitedMultiReply,
     navComment,
     navConversationComment,
+    navPendingReviewBox,
     setSelectionIslandPhase,
     setShowSelectionComposer,
     selectionIslandPhaseRef,
@@ -4172,6 +4213,7 @@ export function PrModalApp({
     onRefresh,
     setPicker,
     closePicker,
+    onPeoplePickerQuery,
     requestConfirm,
     openPulls,
     setReplyDrafts,
@@ -4687,7 +4729,12 @@ export function PrModalApp({
           title={picker?.title}
           options={picker?.options || []}
           query={picker?.query || ''}
-          onQuery={(q: any) => setPicker((prev: any) => (prev ? { ...prev, query: q } : prev))}
+          onQuery={(q: any) => {
+            setPicker((prev: any) => (prev ? { ...prev, query: q } : prev));
+            if (peoplePickerShouldSearchDirectory(picker)) {
+              onPeoplePickerQuery?.(q);
+            }
+          }}
           onPick={(opt: any) => picker?.onPick?.(opt)}
           onClose={closePicker}
           allowFreeText={picker?.allowFreeText !== false}

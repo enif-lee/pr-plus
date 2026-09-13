@@ -2,10 +2,12 @@
 import {
   appendOptimisticReviewComment,
   appendIssueCommentToDetail,
+  canSubmitLeaveReview,
   mapRestReviewComment,
   mapRestIssueComment,
 } from '../lib/pr-edit-api';
 import { useModalStore } from '../store/modal-store';
+import { leaveReviewBusyKey } from '../lib/action-busy';
 
 /**
  * Install review leave + selection post handlers on a live deps bag.
@@ -61,7 +63,7 @@ export function installReviewActions(d: Record<string, any>) {
         d.focusCommentBox?.();
         return false;
       }
-      d.setActionBusy?.(true);
+      d.setActionBusy?.(true, leaveReviewBusyKey(kind));
       d.setActionMsg?.('');
       try {
         if (!fetchApi.postIssueComment) throw new Error('Comment API unavailable');
@@ -136,7 +138,14 @@ export function installReviewActions(d: Record<string, any>) {
     const event =
       mapped.kind === 'issue-comment' ? 'COMMENT' : mapped.event || 'COMMENT';
     const hasServerPending = Boolean(d.hasServerPending);
-    if (!body && !hasServerPending) {
+    if (
+      !canSubmitLeaveReview({
+        event,
+        kind,
+        body,
+        hasPending: hasServerPending,
+      })
+    ) {
       d.setActionMsg?.(
         'Write a comment or add pending review comments before submitting.'
       );
@@ -153,7 +162,7 @@ export function installReviewActions(d: Record<string, any>) {
         : null) ||
       null;
 
-    d.setActionBusy?.(true);
+    d.setActionBusy?.(true, leaveReviewBusyKey(kind));
     d.setActionMsg?.('');
     try {
       if (hasServerPending || pendingReviewId) {

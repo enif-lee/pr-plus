@@ -11,6 +11,8 @@ import { ShortcutHint } from '@common/ShortcutHint';
 import { useT } from '@lib/locale-context';
 import { useDomainDetail } from '../../app/domain-detail-context';
 import { pendingReviewCount } from '@lib/pending-review';
+import { ACTION_BUSY, isActionLoading } from '@lib/action-busy';
+import { useBusyKey } from '../../store/modal-store';
 
 export function ComposerCard({
   composerMode,
@@ -57,6 +59,7 @@ export function ComposerCard({
   showShortcutHint?: boolean;
 }) {
   const t = useT();
+  const busyKey = useBusyKey();
   // Host-data-first: prefer DomainContext when parent props lag progressive host.
   const domainDetail = useDomainDetail();
   const detail = domainDetail || detailProp;
@@ -202,13 +205,15 @@ export function ComposerCard({
               <Button
                 variant="primary"
                 size="sm"
-                loading={Boolean(actionBusy)}
+                loading={isActionLoading(busyKey, ACTION_BUSY.comment)}
                 disabled={!String(commentText || '').trim()}
                 onClick={submitComment}
                 title={`${t('cta_post_comment')} (⌥C · ⌘↵)`}
                 data-prp-composer-submit="1"
               >
-                {actionBusy ? t('cta_submitting') : t('cta_submit')}
+                {isActionLoading(busyKey, ACTION_BUSY.comment)
+                  ? t('cta_submitting')
+                  : t('cta_submit')}
               </Button>
             </span>
             {detail.state === 'open' && !detail.merged ? (
@@ -216,7 +221,7 @@ export function ComposerCard({
                 size="sm"
                 variant="danger"
                 disabled={actionBusy}
-                loading={Boolean(actionBusy)}
+                loading={isActionLoading(busyKey, ACTION_BUSY.closePr)}
                 onClick={onClosePr}
                 title={t('cta_close_pr')}
               >
@@ -228,7 +233,7 @@ export function ComposerCard({
                 size="sm"
                 variant="ok"
                 disabled={actionBusy}
-                loading={Boolean(actionBusy)}
+                loading={isActionLoading(busyKey, ACTION_BUSY.reopenPr)}
                 onClick={onReopenPr}
                 title={t('cta_reopen_pr')}
               >
@@ -247,7 +252,7 @@ export function ComposerCard({
               <Button
                 variant="primary"
                 size="sm"
-                loading={Boolean(actionBusy)}
+                loading={isActionLoading(busyKey, ACTION_BUSY.reviewComment)}
                 disabled={
                   !String(commentText || '').trim() && !effectivePending
                 }
@@ -255,7 +260,9 @@ export function ComposerCard({
                 title={`${t('cta_submit_review_comment')} (⌥C · ⌘↵)`}
                 data-prp-composer-submit="1"
               >
-                {actionBusy ? t('cta_submitting') : t('cta_submit_review')}
+                {isActionLoading(busyKey, ACTION_BUSY.reviewComment)
+                  ? t('cta_submitting')
+                  : t('cta_submit_review')}
               </Button>
             </span>
             {showReviewVerdict ? (
@@ -264,21 +271,25 @@ export function ComposerCard({
                   size="sm"
                   variant="ok"
                   disabled={actionBusy}
-                  loading={Boolean(actionBusy)}
+                  loading={isActionLoading(busyKey, ACTION_BUSY.approve)}
                   onClick={() => onLeaveReviewAction?.('approve')}
                   title={t('cta_approve_pr')}
                 >
-                  {actionBusy ? t('cta_working') : t('cta_approve')}
+                  {isActionLoading(busyKey, ACTION_BUSY.approve)
+                    ? t('cta_working')
+                    : t('cta_approve')}
                 </Button>
                 <Button
                   size="sm"
                   variant="warn"
                   disabled={actionBusy}
-                  loading={Boolean(actionBusy)}
+                  loading={isActionLoading(busyKey, ACTION_BUSY.requestChanges)}
                   onClick={() => onLeaveReviewAction?.('request_changes')}
                   title={t('cta_request_changes')}
                 >
-                  {actionBusy ? t('cta_working') : t('cta_request_changes')}
+                  {isActionLoading(busyKey, ACTION_BUSY.requestChanges)
+                    ? t('cta_working')
+                    : t('cta_request_changes')}
                 </Button>
               </>
             ) : null}
@@ -287,11 +298,13 @@ export function ComposerCard({
                 size="sm"
                 variant="danger"
                 disabled={actionBusy}
-                loading={Boolean(actionBusy)}
+                loading={isActionLoading(busyKey, ACTION_BUSY.discardPending)}
                 onClick={() => onDiscardPending?.()}
                 title={t('cta_discard_pending')}
               >
-                {actionBusy ? t('cta_working') : t('cta_discard')}
+                {isActionLoading(busyKey, ACTION_BUSY.discardPending)
+                  ? t('cta_working')
+                  : t('cta_discard')}
               </Button>
             ) : null}
           </div>

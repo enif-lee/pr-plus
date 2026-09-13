@@ -3,8 +3,10 @@ import { createPortal } from 'react-dom';
 import { Button } from '@common/Button';
 import { MarkdownComposer } from '@common/MarkdownComposer';
 import { ShortcutHint } from '@common/ShortcutHint';
-import { canSubmitReviewVerdict } from '@lib/pr-edit-api';
+import { canSubmitLeaveReview, canSubmitReviewVerdict } from '@lib/pr-edit-api';
 import { useT } from '@lib/locale-context';
+import { ACTION_BUSY, isActionLoading } from '@lib/action-busy';
+import { useBusyKey } from '../../store/modal-store';
 import './FinishReview.css';
 
 export type FinishReviewEvent = 'comment' | 'approve' | 'request_changes';
@@ -44,6 +46,7 @@ const PANEL_WIDTH_FALLBACK = 540;
  *   ⌥↵                  → Comment
  *   ⌥⇧↵                 → Approve
  *   ⌥⇧X                 → Request changes
+ *   ⌥⇧⌫                 → Discard pending review
  *
  * Opt-held shows ShortcutHint badges on CTAs (class `prp-opt-btn-hint--finish`
  * so background page hints stay suppressed while this dialog is open).
@@ -63,6 +66,7 @@ export function FinishReviewModal({
   linkCtx = null,
 }: FinishReviewModalProps) {
   const t = useT();
+  const busyKey = useBusyKey();
   const titleId = useId();
   const panelRef = useRef<HTMLDivElement | null>(null);
   const [body, setBody] = useState('');
@@ -71,10 +75,12 @@ export function FinishReviewModal({
   const actionBusyRef = useRef(actionBusy);
   const onCloseRef = useRef(onClose);
   const onSubmitRef = useRef(onSubmit);
+  const onDiscardRef = useRef(onDiscard);
   bodyRef.current = body;
   actionBusyRef.current = actionBusy;
   onCloseRef.current = onClose;
   onSubmitRef.current = onSubmit;
+  onDiscardRef.current = onDiscard;
 
   const isMac =
     typeof navigator !== 'undefined' &&
@@ -82,6 +88,7 @@ export function FinishReviewModal({
   const scComment = isMac ? '⌥↵' : 'Alt+Enter';
   const scApprove = isMac ? '⌥⇧↵' : 'Alt+Shift+Enter';
   const scChanges = isMac ? '⌥⇧X' : 'Alt+Shift+X';
+  const scDiscard = isMac ? '⌥⇧⌫' : 'Alt+Shift+Backspace';
   const scEsc = 'Esc';
   const scFocusInput = isMac ? '⌥I' : 'Alt+I';
 
@@ -201,8 +208,15 @@ export function FinishReviewModal({
       const pendingN = Number(
         panelRef.current?.getAttribute('data-pending-count') || 0
       );
-      // No pending threads and empty body → nothing to submit
-      if (!text && pendingN === 0) return;
+      if (
+        !canSubmitLeaveReview({
+          kind,
+          body: text,
+          hasPending: pendingN > 0,
+        })
+      ) {
+        return;
+      }
       if (kind === 'approve' || kind === 'request_changes') {
         if (!showVerdictRef.current) return;
       }
@@ -264,6 +278,17 @@ export function FinishReviewModal({
       if (shift && (code === 'KeyX' || keyLower === 'x')) {
         stop(e);
         void submit('request_changes');
+        return;
+      }
+      // ⌥⇧⌫ → Discard pending
+      if (
+        shift &&
+        (code === 'Backspace' || keyLower === 'backspace')
+      ) {
+        if (!onDiscardRef.current) return;
+        stop(e);
+        if (actionBusyRef.current) return;
+        void onDiscardRef.current();
       }
     };
 
@@ -296,13 +321,34 @@ export function FinishReviewModal({
   const themeCls = mode === 'dark' ? ' prp-theme-dark' : ' prp-theme-light';
   const pending = Number(pendingCount) || 0;
   const bodyTrim = String(body || '').trim();
-  /** Need body or pending line comments before any leave-review submit. */
-  const canSubmit = Boolean(bodyTrim || pending > 0);
-  const submitBlockedTitle =
-    'Write a comment or add pending review comments before submitting';
+  const canSubmitComment = canSubmitLeaveReview({
+    kind: 'comment',
+    body: bodyTrim,
+    hasPending: pending > 0,
+  });
+  const canSubmitApprove = canSubmitLeaveReview({
+    kind: 'approve',
+    body: bodyTrim,
+    hasPending: pending > 0,
+  });
+  const canSubmitChanges = canSubmitLeaveReview({
+    kind: 'request_changes',
+    body: bodyTrim,
+    hasPending: pending > 0,
+  });
+  const submitBlockedTitle = t('finish_review_need_body');
 
   async function handleSubmit(kind: FinishReviewEvent) {
-    if (actionBusy || !canSubmit) return;
+    if (actionBusy) return;
+    if (
+      !canSubmitLeaveReview({
+        kind,
+        body: bodyTrim,
+        hasPending: pending > 0,
+      })
+    ) {
+      return;
+    }
     if (kind === 'approve' || kind === 'request_changes') {
       if (!showVerdict) return;
     }
@@ -311,10 +357,8 @@ export function FinishReviewModal({
 
   const sub =
     pending > 0
-      ? `Submit your ${pending} pending comment${
-          pending === 1 ? '' : 's'
-        } and other feedback. Summary comment is optional.`
-      : 'Write a comment to submit a review (required when there are no pending comments).';
+      ? t('finish_review_sub_pending', { count: pending })
+      : t('finish_review_sub_no_pending');
 
   const layer = (
     <div
@@ -373,16 +417,24 @@ export function FinishReviewModal({
         <footer className="prp-finish-review__actions">
           <div className="prp-finish-review__actions-start">
             {pending > 0 && typeof onDiscard === 'function' ? (
-              <Button
-                size="sm"
-                variant="danger"
-                disabled={actionBusy}
-                onClick={(): any => void onDiscard?.()}
-                title={t('cta_discard_pending')}
-                tipPlacement="top"
-              >
-                {t('cta_discard')}
-              </Button>
+              <span className="prp-opt-hint-host">
+                <ShortcutHint
+                  label={scDiscard}
+                  preferredPlacement="top"
+                  className="prp-opt-btn-hint--finish"
+                />
+                <Button
+                  size="sm"
+                  variant="danger"
+                  disabled={actionBusy}
+                  onClick={(): any => void onDiscard?.()}
+                  title={t('cta_discard_pending')}
+                  shortcut={scDiscard}
+                  tipPlacement="top"
+                >
+                  {t('cta_discard')}
+                </Button>
+              </span>
             ) : null}
             <span className="prp-opt-hint-host" data-prp-finish-cancel="1">
               <ShortcutHint
@@ -417,14 +469,20 @@ export function FinishReviewModal({
               <Button
                 size="sm"
                 variant="primary"
-                loading={Boolean(actionBusy)}
-                disabled={!canSubmit}
+                loading={isActionLoading(busyKey, ACTION_BUSY.reviewComment)}
+                disabled={!canSubmitComment}
                 onClick={(): any => void handleSubmit('comment')}
-                title={canSubmit ? t('cta_submit_review_comment') : submitBlockedTitle}
+                title={
+                  canSubmitComment
+                    ? t('cta_submit_review_comment')
+                    : submitBlockedTitle
+                }
                 shortcut={scComment}
                 tipPlacement="top"
               >
-                {actionBusy ? t('cta_submitting') : t('cta_comment_verb')}
+                {isActionLoading(busyKey, ACTION_BUSY.reviewComment)
+                  ? t('cta_submitting')
+                  : t('cta_comment_verb')}
               </Button>
             </span>
             {showVerdict ? (
@@ -437,14 +495,20 @@ export function FinishReviewModal({
                 <Button
                   size="sm"
                   variant="ok"
-                  loading={Boolean(actionBusy)}
-                  disabled={!canSubmit}
+                  loading={isActionLoading(busyKey, ACTION_BUSY.approve)}
+                  disabled={!canSubmitApprove}
                   onClick={(): any => void handleSubmit('approve')}
-                  title={canSubmit ? t('cta_approve_pr') : submitBlockedTitle}
+                  title={
+                    canSubmitApprove
+                      ? t('cta_approve_pr')
+                      : submitBlockedTitle
+                  }
                   shortcut={scApprove}
                   tipPlacement="top"
                 >
-                  {actionBusy ? t('cta_working') : t('cta_approve')}
+                  {isActionLoading(busyKey, ACTION_BUSY.approve)
+                    ? t('cta_working')
+                    : t('cta_approve')}
                 </Button>
               </span>
             ) : null}
@@ -458,16 +522,20 @@ export function FinishReviewModal({
                 <Button
                   size="sm"
                   variant="warn"
-                  loading={Boolean(actionBusy)}
-                  disabled={!canSubmit}
+                  loading={isActionLoading(busyKey, ACTION_BUSY.requestChanges)}
+                  disabled={!canSubmitChanges}
                   onClick={(): any => void handleSubmit('request_changes')}
                   title={
-                    canSubmit ? t('cta_request_changes') : submitBlockedTitle
+                    canSubmitChanges
+                      ? t('cta_request_changes')
+                      : submitBlockedTitle
                   }
                   shortcut={scChanges}
                   tipPlacement="top"
                 >
-                  {actionBusy ? t('cta_working') : t('cta_request_changes')}
+                  {isActionLoading(busyKey, ACTION_BUSY.requestChanges)
+                    ? t('cta_working')
+                    : t('cta_request_changes')}
                 </Button>
               </span>
             ) : null}

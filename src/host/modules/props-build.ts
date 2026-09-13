@@ -171,10 +171,10 @@
        *   mode?: 'revalidate'|'full-threads'|'visible-threads',
        *   threadNodeIds?: string[],
        * }} [opts]
-       *   - visible-threads (conversation header): core + bulk only on-screen threads
+       *   - visible-threads: core + bulk only on-screen threads
        *   - full-threads (diff header): REST/GraphQL newest 15 + oldest window + Load all
-       *   - revalidate (mutations / default): REST newest 15 (empty trusted)
-       *     + remaining unresolved bulk when PRRT ids exist
+       *   - revalidate (conversation header / mutations / default): newest 15
+       *     (empty trusted) + remaining unresolved bulk when PRRT ids exist
        */
       onRefresh: async (opts: any = {}) => {
         if (!owner || !repo || !number) return;
@@ -358,8 +358,10 @@
             current.loading = false;
             // Core refresh: meta slice only (isolation). If App meta write
             // bumped metaRefreshGen mid-flight, skip supersede keys.
+            // trustNetworkMeta: do not re-assert people-meta write-through over
+            // an external GitHub chip/assignee/reviewer change.
             ensureDetailStore(current.detail || prevDetail);
-            applyCoreToStore(detail, { metaGenAtStart });
+            applyCoreToStore(detail, { metaGenAtStart, trustNetworkMeta: true });
             current.error = null;
             detailCache.set(key, current.detail);
             setLoadStage(
@@ -378,6 +380,7 @@
               gen,
               stillOpenFn: stillOpen,
               signal,
+              replaceNewestTimeline: true,
             });
             // Re-apply early thread fetches after core shell is updated
             if (earlyRefreshThreadsPage) {

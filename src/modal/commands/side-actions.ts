@@ -21,7 +21,7 @@ import {
 } from '../app/pr-modal-mappers';
 import { confirmGateProceed } from '../lib/confirm-gate';
 import {
-  isGithubVideoAttachment,
+  usesGithubCommentAttachment,
   uploadGithubCommentAttachment,
 } from '../lib/composer-attach';
 
@@ -254,12 +254,15 @@ export function installSideActions(d: Record<string, any>) {
     if (!detail) throw new Error('No PR open');
     const file = fileMeta.file;
     const name = fileMeta.name || file.name || 'file.bin';
-    if (isGithubVideoAttachment(name, fileMeta.type || file.type)) {
+    const contentType = fileMeta.type || file.type;
+    if (usesGithubCommentAttachment(name, contentType)) {
       try {
         return await uploadGithubCommentAttachment(file, detail);
       } catch {
         throw new Error(
-          d.videoAttachmentUploadFailed || 'Video attachment upload failed'
+          d.attachmentUploadFailed ||
+            d.videoAttachmentUploadFailed ||
+            'Attachment upload failed'
         );
       }
     }
@@ -340,28 +343,12 @@ export function installSideActions(d: Record<string, any>) {
   function openRerequestReviewerPicker() {
     const detail = d.detail;
     if (!detail) return;
-    const exclude = detail.requestedReviewers || [];
-    const logins =
-      typeof d.collectPeopleLogins === 'function'
-        ? d.collectPeopleLogins(exclude)
-        : [];
-    const options =
-      typeof d.buildPeopleOptions === 'function'
-        ? d.buildPeopleOptions(logins, {}, detail.avatarUrls || {})
-        : logins.map((id: string) => ({
-            id,
-            label: id,
-            meta: {
-              login: id,
-              kind: 'user',
-              avatarUrl: detail.avatarUrls?.[String(id).toLowerCase()] || '',
-            },
-          }));
     if (d.pickerAnchorRef) d.pickerAnchorRef.current = d.reviewerAddRef?.current;
     d.setPicker({
       type: 'reviewer',
       title: 'Re-request review (username)',
-      options,
+      peopleDirectory: true,
+      options: [],
       query: '',
       allowFreeText: true,
       placeholder: 'Filter or type a username…',
@@ -385,6 +372,9 @@ export function installSideActions(d: Record<string, any>) {
         void applyRerequestReviewers(filtered);
       },
     });
+    if (typeof d.refreshPeopleDirectoryPicker === 'function') {
+      void d.refreshPeopleDirectoryPicker('reviewer', '');
+    }
   }
 
   async function onRerequestReview() {

@@ -139,6 +139,38 @@ export async function handleMessagePartB(message: SwMessage): Promise<unknown> {
         endTrackedFetch(tracked.requestId);
       }
     }
+    case MSG.SEARCH_REPO_PEOPLE: {
+      const tracked = beginTrackedFetch(message.requestId);
+      try {
+        const token = await tokenForMessage(message);
+        const users =
+          typeof PRTreeFetch.searchRepoPeople === 'function'
+            ? await PRTreeFetch.searchRepoPeople(
+                message.owner,
+                message.repo,
+                {
+                  query: message.query || '',
+                  kind:
+                    message.kind === 'collaborator'
+                      ? 'collaborator'
+                      : message.kind === 'mentionable'
+                        ? 'mentionable'
+                        : 'assignable',
+                  first: message.first,
+                },
+                tracked.fetch,
+                token,
+                apiCtx
+              )
+            : [];
+        return { ok: true, users: Array.isArray(users) ? users : [] };
+      } catch (err) {
+        if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
+      }
+    }
     case MSG.CREATE_REPO_LABEL: {
       const token = await tokenForMessage(message);
       if (!token) throw new Error('GitHub PAT required to create labels');

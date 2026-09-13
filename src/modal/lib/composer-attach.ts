@@ -103,6 +103,24 @@ export function isGithubVideoAttachment(fileName: unknown, contentType?: unknown
   return /\.(mov|mp4)$/i.test(String(fileName || ''));
 }
 
+/** Comment-box images (incl. clipboard screenshots with only a MIME type). */
+export function isGithubImageAttachment(fileName: unknown, contentType?: unknown): boolean {
+  const type = String(contentType || '').toLowerCase();
+  if (type.startsWith('image/')) return true;
+  return /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i.test(String(fileName || ''));
+}
+
+/** Native GitHub comment assets (session upload), not Contents API commits. */
+export function usesGithubCommentAttachment(
+  fileName: unknown,
+  contentType?: unknown
+): boolean {
+  return (
+    isGithubVideoAttachment(fileName, contentType) ||
+    isGithubImageAttachment(fileName, contentType)
+  );
+}
+
 /** GitHub comment attachment protocol: policy → object storage → completion. */
 export async function uploadGithubCommentAttachment(
   file: File,

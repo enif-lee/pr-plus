@@ -6,7 +6,11 @@ import { useEffect } from 'react';
 import { useModalStore } from '../store/modal-store';
 import { isSideActionAllowedOnLayout } from '../lib/layout-side-actions';
 import { resolveReactionAddControl } from '../lib/comment-reactions';
-import { shouldPreventConvArrowFallback } from '../lib/shortcut-policy';
+import { resolveContextCommentActionControl } from '../lib/context-thread-dom';
+import {
+  isPendingReviewBoxKeyboardFocus,
+  shouldPreventConvArrowFallback,
+} from '../lib/shortcut-policy';
 import { isEscapeOverlayOpen } from '../lib/escape-layer';
 
 export function usePrModalHotkeys(h: Record<string, any>): void {
@@ -39,6 +43,7 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
   const tryReenterExitedMultiReply = h.tryReenterExitedMultiReply;
   const navComment = h.navComment;
   const navConversationComment = h.navConversationComment;
+  const navPendingReviewBox = h.navPendingReviewBox;
   const setSelectionIslandPhase = h.setSelectionIslandPhase;
   const setShowSelectionComposer = h.setShowSelectionComposer;
   const selectionIslandPhaseRef = h.selectionIslandPhaseRef;
@@ -1221,6 +1226,10 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
         Boolean(
           act.isMultiReplyThreadFocused?.() ?? isMultiReplyThreadFocused()
         );
+      const pendingReviewBoxFocused =
+        !onDiff &&
+        typeof isPendingReviewBoxKeyboardFocus === 'function' &&
+        isPendingReviewBoxKeyboardFocus(document);
 
       let action =
         typeof resolveModalShortcutAction === 'function'
@@ -1251,6 +1260,7 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
               conversationCommentFocused: liveConvFocus,
               contextThreadActive: liveContextThread,
               multiReplyThreadFocused,
+              pendingReviewBoxFocused,
               presentation: isEmbed ? 'embed' : 'modal',
               isEmbed,
             })
@@ -1431,6 +1441,7 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
                 '[data-prp-unhide-comment="1"]',
               ],
               contextCommentEdit: [
+                '[data-prp-edit-body="1"]',
                 '[data-prp-edit-comment="1"]',
                 'button[aria-label*="Edit" i]',
               ],
@@ -1466,33 +1477,45 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
               activePanel ||
               (document.querySelector('.prp-overlay') as HTMLElement | null);
             let btn: HTMLElement | null = null;
-            // ⌥E / react: prefer unit-focused reply (not root-first querySelector)
+            // Prefer unit-focused reply (not root-first querySelector)
             if (String(action) === 'contextCommentReact') {
               btn = resolveReactionAddControl(root) || null;
+            } else {
+              btn = resolveContextCommentActionControl(root, sels);
             }
-            if (!btn) {
-              for (const s of sels) {
-                btn = (root?.querySelector?.(s) || null) as HTMLElement | null;
-                if (btn && !(btn as HTMLButtonElement).disabled) {
-                  const br = btn.getBoundingClientRect?.();
-                  if (br && br.width >= 2 && br.height >= 2) break;
-                }
-                btn = null;
-              }
-            }
-            if (!btn) {
-              for (const s of sels) {
-                const candidates = [
-                  ...(root?.querySelectorAll?.(s) || []),
-                ] as HTMLElement[];
-                btn =
-                  candidates.find((el) => {
-                    if ((el as HTMLButtonElement).disabled) return false;
-                    const br = el.getBoundingClientRect?.();
-                    return br && br.width >= 2 && br.height >= 2;
-                  }) || null;
-                if (btn) break;
-              }
+            const clickControl = (el: HTMLElement | null) => {
+              if (!el) return false;
+              el.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+              el.click();
+              return true;
+            };
+            if (
+              !btn &&
+              (String(action) === 'contextCommentEdit' ||
+                String(action) === 'contextCommentDelete')
+            ) {
+              // Pending/resolved path-rows stay collapsed until expand — open
+              // then retry so ⌥W/⌥X reach the unit-focused comment.
+              act.runContextThreadAction?.('foldExpand');
+              requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                  const retryPanel =
+                    (document.querySelector(
+                      '.prp-body-panel--active'
+                    ) as HTMLElement | null) || activePanel;
+                  const retryHost =
+                    (retryPanel?.querySelector?.(
+                      '.prp-inline-thread--context-active, .prp-inline-thread[data-context-active="1"], .prp-card--kb-focus, .prp-conversation-kb-focus, .prp-review-group__row--kb-focus, .prp-vline--comment-selected .prp-inline-thread'
+                    ) as HTMLElement | null) ||
+                    retryPanel ||
+                    root;
+                  const retry =
+                    String(action) === 'contextCommentReact'
+                      ? resolveReactionAddControl(retryHost)
+                      : resolveContextCommentActionControl(retryHost, sels);
+                  if (retry) clickControl(retry);
+                });
+              });
             }
             if (btn) {
               btn.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
@@ -1666,6 +1689,12 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
             act.navConversationComment?.(1);
           }
           break;
+        case 'stepPendingBoxPrev':
+          (act.navPendingReviewBox || navPendingReviewBox)?.(-1);
+          break;
+        case 'stepPendingBoxNext':
+          (act.navPendingReviewBox || navPendingReviewBox)?.(1);
+          break;
         case 'navFilePrev':
           if (liveLayoutMode === LAYOUT_DIFF) act.navFile?.(-1);
           break;
@@ -1725,7 +1754,34 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
           }
           break;
         case 'toggleViewedActiveFile':
-          if (ui.layoutMode === LAYOUT_DIFF) act.toggleViewedActiveFile?.();
+          if (
+            ui.layoutMode === LAYOUT_DIFF ||
+            useModalStore.getState().layoutMode === LAYOUT_DIFF
+          ) {
+            act.toggleViewedActiveFile?.();
+          }
+          break;
+        case 'toggleHideWhitespace':
+          if (
+            ui.layoutMode === LAYOUT_DIFF ||
+            useModalStore.getState().layoutMode === LAYOUT_DIFF
+          ) {
+            act.toggleHideWhitespace?.();
+          }
+          break;
+        case 'toggleDiffMode':
+          if (
+            ui.layoutMode === LAYOUT_DIFF ||
+            useModalStore.getState().layoutMode === LAYOUT_DIFF
+          ) {
+            act.toggleDiffMode?.();
+          }
+          break;
+        case 'discardPendingReview':
+          act.onDiscardPendingReview?.();
+          break;
+        case 'loadMoreThreads':
+          act.loadMoreReviewThreads?.();
           break;
         case 'toggleActiveFileCollapse':
           if (ui.layoutMode === LAYOUT_DIFF) act.toggleActiveFileCollapse?.();

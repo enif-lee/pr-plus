@@ -5,7 +5,7 @@
  * Supported slash commands (bounded set):
  *   /approve /nit /blocking /question /suggestion /lgtm
  *
- * Mentions: filter collaborators by prefix after '@'.
+ * Mentions: filter mentionable users (login + display name) after '@'.
  * Emoji: `:` typeahead → `:shortcode:` (see emoji-shortcodes).
  */
 
@@ -126,17 +126,108 @@ export function detectSlashTrigger(text: any, cursor: any) {
   return { query, start, end: c };
 }
 
+export type MentionCandidate = {
+  login: string;
+  name: string;
+  avatarUrl: string;
+};
+
+/** Normalize a string or GitHub user node into a mention row. */
+export function normalizeMentionCandidate(c: any): MentionCandidate | null {
+  if (c == null || c === '') return null;
+  if (typeof c === 'string') {
+    const login = c.replace(/^@/, '').trim();
+    if (!login) return null;
+    return { login, name: '', avatarUrl: '' };
+  }
+  const login = String(c.login || c.id || '')
+    .replace(/^@/, '')
+    .trim();
+  if (!login) return null;
+  return {
+    login,
+    name: String(c.name || c.displayName || '').trim(),
+    avatarUrl: String(c.avatarUrl || c.avatar_url || '').trim(),
+  };
+}
+
+/** Directory-first merge (name/avatar from mentionableUsers win). */
+export function mergeMentionCandidates(primary: any, extra: any): MentionCandidate[] {
+  const seen = new Set<string>();
+  const out: MentionCandidate[] = [];
+  for (const list of [primary, extra]) {
+    for (const c of Array.isArray(list) ? list : []) {
+      const row = normalizeMentionCandidate(c);
+      if (!row) continue;
+      const key = row.login.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(row);
+    }
+  }
+  return out;
+}
+
+/** Login inserted as `@login ` (GitHub mention syntax). */
+export function mentionInsertLogin(item: any): string {
+  if (item == null) return '';
+  if (typeof item === 'string') return item.replace(/^@/, '').trim();
+  return String(item.login || item.id || '')
+    .replace(/^@/, '')
+    .trim();
+}
+
+/** Typeahead row: display name + @login; insert still uses login. */
+export function mentionSuggestionView(item: any): {
+  login: string;
+  name: string;
+  avatarUrl: string;
+  primary: string;
+  secondary: string;
+} {
+  const row = normalizeMentionCandidate(item);
+  if (!row) {
+    return { login: '', name: '', avatarUrl: '', primary: '', secondary: '' };
+  }
+  const at = `@${row.login}`;
+  if (row.name) {
+    return {
+      login: row.login,
+      name: row.name,
+      avatarUrl: row.avatarUrl,
+      primary: row.name,
+      secondary: at,
+    };
+  }
+  return {
+    login: row.login,
+    name: '',
+    avatarUrl: row.avatarUrl,
+    primary: at,
+    secondary: '',
+  };
+}
+
 /**
  * @param {string} query without @
- * @param {Array<string|{login:string}>} candidates
+ * @param {Array<string|{login:string,name?:string,avatarUrl?:string}>} candidates
+ * @returns {MentionCandidate[]}
  */
-export function filterMentions(query: any, candidates: any) {
+export function filterMentions(query: any, candidates: any): MentionCandidate[] {
   const q = String(query || '').toLowerCase();
-  const list = (Array.isArray(candidates) ? candidates : [])
-    .map((c) => (typeof c === 'string' ? c : c?.login || c?.name || ''))
-    .filter(Boolean);
+  const list = mergeMentionCandidates(candidates, []);
   if (!q) return list.slice(0, 8);
-  return list.filter((name) => name.toLowerCase().startsWith(q)).slice(0, 8);
+  return list
+    .filter((row) => {
+      const login = row.login.toLowerCase();
+      const name = String(row.name || '').toLowerCase();
+      if (login.startsWith(q) || login.includes(q)) return true;
+      if (name && (name.includes(q) || name.split(/\s+/).some((p) => p.startsWith(q)))) {
+        return true;
+      }
+      return false;
+    })
+    .slice(0, 8);
 }
 
 /**
@@ -163,7 +254,8 @@ export function applyInsertion(text: any, start: any, end: any, insertion: any, 
 
 export function applyMentionInsertion(text: any, trigger: any, username: any) {
   if (!trigger) return { text: String(text || ''), cursor: String(text || '').length };
-  const insert = `@${username} `;
+  const login = mentionInsertLogin(username);
+  const insert = login ? `@${login} ` : '@';
   return applyInsertion(text, trigger.start, trigger.end, insert);
 }
 

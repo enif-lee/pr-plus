@@ -3,8 +3,8 @@ import { createPortal } from 'react-dom';
 import {
   filterSelectOptions,
   labelColorCss,
+  layoutSselectPopover,
   pickFilteredOptionByIndex,
-  placeSearchableSelectPanel,
   queryMatchesOption,
   resolveOptDigitPickIndex,
 } from '@lib/searchable-select';
@@ -79,20 +79,6 @@ export function SearchableSelect({
   const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
 
-  function readLivePos(panelHeight = 0) {
-    if (typeof window === 'undefined') return null;
-    const el = (anchorRef?.current || null) as HTMLElement | null;
-    if (!el || typeof el.getBoundingClientRect !== 'function') return null;
-    return placeSearchableSelectPanel({
-      anchor: el.getBoundingClientRect(),
-      viewport: { width: window.innerWidth, height: window.innerHeight },
-      panelHeight,
-      placement,
-      minWidth,
-      maxWidth,
-    });
-  }
-
   // Reset multi selection when opening
   useEffect(() => {
     if (!open) return;
@@ -113,8 +99,25 @@ export function SearchableSelect({
     }
 
     function measure() {
-      const next = readLivePos(panelRef.current?.offsetHeight || 0);
-      if (!next) return;
+      const el = (anchorRef?.current || null) as HTMLElement | null;
+      if (!el || typeof el.getBoundingClientRect !== 'function') return;
+      const r = el.getBoundingClientRect();
+      if (!r.width && !r.height) return;
+      const next = layoutSselectPopover({
+        anchor: {
+          top: r.top,
+          left: r.left,
+          right: r.right,
+          bottom: r.bottom,
+          width: r.width,
+          height: r.height,
+        },
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+        panelHeight: panelRef.current?.offsetHeight || 0,
+        minWidth,
+        maxWidth,
+        placement,
+      });
       setPos((prev) => {
         if (
           prev &&
@@ -142,18 +145,7 @@ export function SearchableSelect({
       window.removeEventListener('resize', measure);
       window.removeEventListener('scroll', measure, true);
     };
-  }, [
-    open,
-    anchorRef,
-    anchorKey,
-    placement,
-    query,
-    options?.length,
-    selected.length,
-    multi,
-    minWidth,
-    maxWidth,
-  ]);
+  }, [open, anchorRef, anchorKey, placement, minWidth, maxWidth]);
 
   const filteredLive = useMemo(() => {
     if (!open) return [];
@@ -375,44 +367,40 @@ export function SearchableSelect({
   // Portal layer above Conversation ShortcutHint (--prp-z-dialog 100100).
   const panelZ = 'var(--prp-z-portal, 120000)';
   const anchored = Boolean(anchorRef);
-  // First open render often paints before useLayoutEffect. Reading the trigger
-  // here keeps left/width correct so `position:fixed` never lands at x=0.
-  const displayPos = pos || (open && anchored ? readLivePos(0) : null);
-  const style: React.CSSProperties = displayPos
+  const placed = Boolean(pos);
+  const style: React.CSSProperties = placed
     ? {
         position: 'fixed',
-        top: displayPos.top,
-        left: displayPos.left,
-        width: displayPos.width,
-        minWidth: displayPos.width,
-        maxWidth: displayPos.width,
+        top: pos!.top,
+        left: pos!.left,
+        width: pos!.width,
+        minWidth: pos!.width,
+        maxWidth: pos!.width,
         zIndex: panelZ,
+        visibility: 'visible',
       }
-    : anchored
-      ? {
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          visibility: 'hidden',
-          pointerEvents: 'none',
-          animation: 'none',
-          zIndex: panelZ,
-        }
-      : { zIndex: panelZ };
+    : {
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        zIndex: panelZ,
+        visibility: 'hidden',
+        pointerEvents: 'none',
+      };
 
   const panel = (
     <div
       ref={panelRef}
       className={`prp-sselect-panel prp-sselect-panel--popover${
-        !displayPos && !anchored ? ' prp-sselect-panel--center' : ''
+        !anchored && !placed ? ' prp-sselect-panel--center' : ''
       }${multi ? ' prp-sselect-panel--multi' : ''}`}
       role="dialog"
       aria-label={title || 'Select'}
       aria-multiselectable={multi || undefined}
       data-prp-nested-layer="1"
       data-prp-sselect="1"
+      data-prp-sselect-placed={placed ? '1' : '0'}
       style={style}
-      data-prp-sselect-ready={displayPos ? '1' : '0'}
     >
       {title ? <div className="prp-sselect-title">{title}</div> : null}
       {/* Search first so commit/file pickers open with filter ready */}

@@ -28,6 +28,12 @@ import { partitionConversationLoadMore } from './timeline-pagination';
  * } TimelinePart
  */
 
+function isSameLogin(a: unknown, b: unknown): boolean {
+  const x = String(a || '').trim().toLowerCase();
+  const y = String(b || '').trim().toLowerCase();
+  return Boolean(x && y && x === y);
+}
+
 /**
  * Build GitHub-style narrative parts for a system timeline event (after actor).
  * @param {object} ev normalized event from fetchPrTimelineEvents
@@ -57,9 +63,7 @@ export function buildThreadEntry(c: any, children: any, snippetFn: any, files: a
           : r.viewer_can_minimize != null
             ? Boolean(r.viewer_can_minimize)
             : null,
-      canDelete: Boolean(
-        viewerLogin && r.author && r.author === viewerLogin && !r.pending
-      ),
+      canDelete: isSameLogin(viewerLogin, r.author),
     }));
   const snippet = snippetFn
     ? snippetFn(
@@ -119,9 +123,7 @@ export function buildThreadEntry(c: any, children: any, snippetFn: any, files: a
     pending: Boolean(c.pending),
     replies,
     snippet,
-    canDelete: Boolean(
-      viewerLogin && c.author && c.author === viewerLogin && !c.pending
-    ),
+    canDelete: isSameLogin(viewerLogin, c.author),
   };
 }
 
@@ -210,9 +212,7 @@ export function buildConversationTimeline(detail: any, opts: any = {}) {
           : c.viewer_can_minimize != null
             ? Boolean(c.viewer_can_minimize)
             : null,
-      canDelete: Boolean(
-        viewerLogin && c.author && c.author === viewerLogin
-      ),
+      canDelete: isSameLogin(viewerLogin, c.author),
     });
   });
 

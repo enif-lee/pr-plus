@@ -63,6 +63,7 @@ import {
 import { IconDisclosure } from '@common/icons';
 import { useT } from '@lib/locale-context';
 import { isMarkdownPath } from '@lib/markdown-preview';
+import { applySplitIntraLineHtml } from '@lib/intra-line-diff';
 import { FloatingScrollbar } from '../../components/common/FloatingScrollbar';
 import { ImageViewer } from '@common/ImageViewer';
 import { InlineThread } from './InlineThread';
@@ -370,8 +371,8 @@ export function FileHeaderRow(props: {
 }
 
 /**
- * Diff line HTML: optional syntax highlight, then inject search marks into the
- * rendered HTML so structure (and hljs spans) are preserved.
+ * Diff line HTML: optional syntax highlight, then intra-line split marks
+ * (paired change rows), then search marks — all offset-safe so hljs spans stay.
  */
 export function renderSearchableHtml(
   displayText: string,
@@ -387,6 +388,9 @@ export function renderSearchableHtml(
   let html = useSyntax
     ? highlightCode(displayText, filePath)
     : escapeHtml(displayText ?? '');
+  if (field === 'left' || field === 'right') {
+    html = applySplitIntraLineHtml(html, row, field);
+  }
   if (!q) return html;
   const currentStart = resolveActiveMarkStart(
     displayText ?? '',

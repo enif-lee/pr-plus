@@ -113,6 +113,29 @@
   min-height: 100%;
 }
 
+/*
+ * Intra-line word-diff on split paired rows. Must be darker/more opaque than
+ * the pane wash (`.prp-split-cols__left--del` / `__right--add` use
+ * `var(--prp-del-bg)` / `var(--prp-add-bg)`). Do not reuse markdown overlay
+ * `.prp-md-diff-*` (those set the pane tokens and vanish on the wash).
+ */
+.prp-split-cols .prp-intra-del {
+  background: color-mix(in srgb, var(--prp-danger) 32%, var(--prp-del-bg));
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+  text-decoration-color: currentColor;
+  border-radius: 2px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+.prp-split-cols .prp-intra-ins {
+  background: color-mix(in srgb, var(--prp-ok) 32%, var(--prp-add-bg));
+  text-decoration: none;
+  border-radius: 2px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
 .prp-diff-mode {
   display: inline-flex;
   align-items: center;

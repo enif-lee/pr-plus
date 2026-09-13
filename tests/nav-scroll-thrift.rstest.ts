@@ -4,6 +4,9 @@
  * Drives shipped pure helpers.
  */
 import { describe, expect, test } from '@rstest/core';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   planProgrammaticScroll,
   applyProgrammaticDiffScroll,
@@ -134,6 +137,26 @@ describe('offset helpers still ship (no product contract change)', () => {
     expect(Number.isFinite(third)).toBe(true);
   });
 
+  test('third pin is rowTop - viewportHeight/3 (clamped), same both dirs', () => {
+    const rh = 20;
+    const vh = 600;
+    const total = 80;
+    const idx = 30;
+    const rowTop = idx * rh;
+    const max = Math.max(0, total * rh - vh);
+    const want = Math.min(max, Math.max(0, rowTop - vh / 3));
+    const down = scrollTopForIndex(idx, rh, vh, total, null, {
+      align: 'third',
+    });
+    const up = scrollTopForIndex(idx, rh, vh, total, null, { align: 'third' });
+    expect(down).toBe(want);
+    expect(up).toBe(want);
+    const offs = Array.from({ length: total + 1 }, (_, i) => i * rh);
+    expect(
+      scrollTopForIndex(idx, rh, vh, total, offs, { align: 'third' })
+    ).toBe(want);
+  });
+
   test('scrollTopToRevealIndex no-op when visible', () => {
     // row 5 at y=100 if rh=20; viewport 0..200 includes it
     const cur = 0;
@@ -143,4 +166,68 @@ describe('offset helpers still ship (no product contract change)', () => {
     });
     expect(next).toBe(0);
   });
+
+  test('reveal does not force third when already visible', () => {
+    const rh = 20;
+    const vh = 600;
+    const total = 80;
+    const idx = 15; // y=300, already in 0..600; third pin is 300-200=100
+    const cur = 0;
+    const revealed = scrollTopToRevealIndex(idx, cur, rh, vh, total, null, {
+      padTop: 0,
+      padBottom: 0,
+    });
+    const third = scrollTopForIndex(idx, rh, vh, total, null, {
+      align: 'third',
+    });
+    expect(revealed).toBe(0);
+    expect(third).not.toBe(revealed);
+  });
 });
+
+describe('hop wiring uses third; arrows use reveal', () => {
+  const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+  function read(rel: string): string {
+    return fs.readFileSync(path.join(root, rel), 'utf8');
+  }
+
+  test('thread hop pins third', () => {
+    const nav = read('src/modal/hooks/useDiffConversationNav.ts');
+    const start = nav.indexOf('scrollMappedCommentIntoView = useCallback');
+    const threadBlock = nav.slice(start, start + 900);
+    expect(threadBlock).toMatch(/align:\s*'third'/);
+  });
+
+  test('file hop pins third', () => {
+    const shell = read('src/modal/app/PrModalShell.tsx');
+    const block = shell.slice(
+      shell.indexOf('function onSelectFile'),
+      shell.indexOf('function onToggleDir')
+    );
+    expect(block).toMatch(/align:\s*'third'/);
+    expect(block).not.toMatch(/align:\s*'start'/);
+  });
+
+  test('change-region hop uses third helper', () => {
+    const nav = read('src/modal/hooks/useDiffConversationNav.ts');
+    const block = nav.slice(
+      nav.indexOf('function applyOptArrowScrollSelect'),
+      nav.indexOf('function optArrowScrollSelect')
+    );
+    expect(block).toMatch(/scrollSelectionHeadToThird/);
+  });
+
+  test('Arrow caret still uses reveal-only helper', () => {
+    const sel = read('src/modal/hooks/useSelectionKeyboard.ts');
+    expect(sel).toMatch(/function scrollSelectionHeadDomOnly/);
+    expect(sel).toMatch(/scrollTopToRevealIndex/);
+    const flush = sel.slice(
+      sel.indexOf('function flushSelectionKeyboardMove') >= 0
+        ? sel.indexOf('scrollSelectionHeadDomOnly(nextSel)')
+        : 0
+    );
+    expect(sel).toMatch(/scrollSelectionHeadDomOnly\(nextSel\)/);
+    expect(flush).not.toMatch(/scrollSelectionHeadToThird\(nextSel\)/);
+  });
+});
+

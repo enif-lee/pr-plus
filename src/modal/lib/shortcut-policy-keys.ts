@@ -36,7 +36,31 @@ export function optArrowScrollDeltaPx(
   return dy;
 }
 
-/** Option+Shift + R — toggle viewed/unread for the active Diff file. */
+/**
+ * True when Conversation keyboard focus is inside the pending-review
+ * submit box (pending threads + Review composer).
+ */
+export function isPendingReviewBoxKeyboardFocus(
+  doc?: Document | null
+): boolean {
+  if (!doc || typeof doc.querySelector !== 'function') return false;
+  try {
+    const box = doc.querySelector('[data-prp-pending-review-box="1"]');
+    if (!box) return false;
+    const focused = doc.querySelector(
+      '.prp-review-group__row--kb-focus, .prp-card--kb-focus, .prp-conversation-kb-focus, .prp-composer-focus-host--focused'
+    );
+    if (!focused) return false;
+    return Boolean(
+      focused === box ||
+        (box as Element).contains(focused) ||
+        (focused as Element).contains(box)
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function isComposerKeyboardTarget(
   el: EventTarget | null | undefined
 ): boolean {
