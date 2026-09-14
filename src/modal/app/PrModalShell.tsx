@@ -2245,10 +2245,12 @@ export function PrModalApp({
       /* ignore */
     }
     uriWasOpenRef.current = false;
-    // Docked sheet slides out; fullscreen Diff / modal scale-fades out
+    // Docked sheet slides out; fullscreen Diff / modal scale-fades out.
+    // Exit is 180ms CSS ease-out (mirrors the enter) — close must feel as fast
+    // as open; small buffer so the final frame paints before host unmount.
     const sheetSlide =
       shellMode === SHELL_SHEET && layoutMode !== LAYOUT_DIFF;
-    const duration = sheetSlide ? 240 : 280;
+    const duration = 190;
     setAnimClass(
       sheetSlide
         ? 'prp-modal--sheet-out'

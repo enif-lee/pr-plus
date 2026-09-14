@@ -39,13 +39,23 @@
   animation: prp-scale-in 280ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+/* Exit mirrors the enter ease-out (no ease-in lead-in) and runs shorter, so a
+   close never reads slower than the open it reverses. */
 .prp-modal--anim-out {
-  animation: prp-scale-out 280ms cubic-bezier(0.4, 0, 1, 1) forwards;
+  animation: prp-scale-out 180ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
-/* Close: fade dim layer with the panel */
+/* Close: fade dim layer with the panel (matches .prp-backdrop enter, 180ms) */
 .prp-overlay--leaving .prp-backdrop {
-  animation: prp-fade-out 260ms ease-out forwards;
+  animation: prp-fade-out 180ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+/* A leaving overlay is already on its way out — clicks belong to the page
+   underneath, not to a fading panel that would swallow them. (Children like
+   .prp-body-panel--active re-enable pointer-events, so override the subtree.) */
+.prp-overlay--leaving,
+.prp-overlay--leaving * {
+  pointer-events: none !important;
 }
 
 /* ── Diff ↔ Conversation keep-alive body panels (instant show/hide) ── */
@@ -345,9 +355,11 @@
     opacity: 1;
     transform: translateX(0);
   }
+  /* Must reach opacity 0 — ending at 0.9x left a nearly-visible sheet that
+     popped out of existence at unmount (read as a stutter at close end). */
   to {
-    opacity: 0.92;
-    transform: translateX(32px);
+    opacity: 0;
+    transform: translateX(40px);
   }
 }
 
@@ -359,7 +371,7 @@
 
 .prp-modal--sheet-out,
 .prp-overlay.prp-shell--sheet .prp-modal.prp-modal--sheet-out {
-  animation: prp-sheet-out 240ms cubic-bezier(0.4, 0, 1, 1) forwards;
+  animation: prp-sheet-out 180ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
 @keyframes prp-fade-out {
