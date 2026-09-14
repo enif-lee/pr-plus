@@ -14,7 +14,9 @@ import {
   popEscapeOverlay,
   resetEscapeOverlayStack,
   isEscapeOverlayOpen,
+  isFullscreenViewerOpen,
   escapeOverlayCount,
+  FULLSCREEN_VIEWER_OPEN_ATTR,
 } from '../src/modal/lib/escape-layer';
 
 describe('resolveModalEscapeOwner', () => {
@@ -107,6 +109,39 @@ describe('isNestedEscapeLayerOpen', () => {
     viewer.setAttribute('data-prp-md-viewer', '1');
     doc.body.appendChild(viewer);
     expect(isNestedEscapeLayerOpen(doc)).toBe(true);
+  });
+});
+
+describe('isFullscreenViewerOpen (Opt hint / chord gate)', () => {
+  test('false with no overlay and no root marker', () => {
+    resetEscapeOverlayStack();
+    const dom = new JSDOM('<!doctype html><html><body></body></html>');
+    expect(isFullscreenViewerOpen(dom.window.document)).toBe(false);
+  });
+
+  test('true while a fullscreen overlay is registered', () => {
+    resetEscapeOverlayStack();
+    const dom = new JSDOM('<!doctype html><html><body></body></html>');
+    const doc = dom.window.document;
+    const off = registerEscapeOverlay(() => {});
+    expect(isFullscreenViewerOpen(doc)).toBe(true);
+    off();
+    expect(isFullscreenViewerOpen(doc)).toBe(false);
+  });
+
+  test('root marker alone (viewer mounted) is enough', () => {
+    resetEscapeOverlayStack();
+    const dom = new JSDOM('<!doctype html><html><body></body></html>');
+    const doc = dom.window.document;
+    doc.documentElement.setAttribute(FULLSCREEN_VIEWER_OPEN_ATTR, '1');
+    expect(isFullscreenViewerOpen(doc)).toBe(true);
+    doc.documentElement.removeAttribute(FULLSCREEN_VIEWER_OPEN_ATTR);
+    expect(isFullscreenViewerOpen(doc)).toBe(false);
+  });
+
+  test('no document → false', () => {
+    resetEscapeOverlayStack();
+    expect(isFullscreenViewerOpen(null)).toBe(false);
   });
 });
 

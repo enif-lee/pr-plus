@@ -114,6 +114,33 @@ export function isNestedEscapeLayerOpen(
   }
 }
 
+/**
+ * Root marker stamped by FullscreenViewer while a preview overlay (mermaid /
+ * image / markdown) is mounted. Nested viewers keep it set until the last one
+ * unmounts.
+ */
+export const FULLSCREEN_VIEWER_OPEN_ATTR = 'data-prp-viewer-open';
+
+/**
+ * True while a fullscreen preview overlay owns the stage: ShortcutHint badges
+ * and modal Opt chords must stay off — the viewer owns Opt gestures (zoom/pan).
+ * Hot path (every hint leaf): module stack + one root attribute read, no query.
+ */
+export function isFullscreenViewerOpen(
+  doc: Document | null | undefined = typeof document !== 'undefined'
+    ? document
+    : null
+): boolean {
+  if (isEscapeOverlayOpen()) return true;
+  try {
+    return Boolean(
+      doc?.documentElement?.hasAttribute?.(FULLSCREEN_VIEWER_OPEN_ATTR)
+    );
+  } catch {
+    return false;
+  }
+}
+
 type EscapeOverlayLayer = { close: () => void };
 
 const escapeOverlayStack: EscapeOverlayLayer[] = [];

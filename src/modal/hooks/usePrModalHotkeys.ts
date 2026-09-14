@@ -11,7 +11,10 @@ import {
   isPendingReviewBoxKeyboardFocus,
   shouldPreventConvArrowFallback,
 } from '../lib/shortcut-policy';
-import { isEscapeOverlayOpen } from '../lib/escape-layer';
+import {
+  isEscapeOverlayOpen,
+  isFullscreenViewerOpen,
+} from '../lib/escape-layer';
 import { OPT_HINTS_SUPPRESSED_ATTR } from '../lib/line-selection';
 
 export function usePrModalHotkeys(h: Record<string, any>): void {
@@ -558,6 +561,15 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
       if (ghOpenNow) {
         return;
       }
+
+      // Fullscreen viewer (mermaid / image / markdown) owns the stage: Opt
+      // chords belong to its pan/zoom handlers (registered later, still run
+      // when we return here). Never fire modal Opt actions — or let the hint
+      // HUD report them — over the preview.
+      if (alt && !mod && isFullscreenViewerOpen()) {
+        return;
+      }
+
       if (e.key === 'Escape') {
         const ignoreEsc =
           typeof shouldIgnoreModalEscapeForGithubPalette === 'function'

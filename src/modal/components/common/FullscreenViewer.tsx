@@ -3,7 +3,11 @@ import { createPortal } from 'react-dom';
 import { IconX } from './icons';
 import { resolveMermaidColorMode } from '../../lib/mermaid-lazy';
 import { useModalStore } from '../../store/modal-store';
-import { registerEscapeOverlay } from '../../lib/escape-layer';
+import {
+  registerEscapeOverlay,
+  escapeOverlayCount,
+  FULLSCREEN_VIEWER_OPEN_ATTR,
+} from '../../lib/escape-layer';
 import './FullscreenViewer.css';
 
 export type FullscreenViewerLayer = 'image' | 'mermaid' | 'markdown';
@@ -70,6 +74,9 @@ export function FullscreenViewer({
   useEffect(() => {
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
+    // Root marker for the Opt-hint / Opt-chord gates (isFullscreenViewerOpen):
+    // hints and modal Opt shortcuts must never paint over the stage.
+    document.documentElement.setAttribute(FULLSCREEN_VIEWER_OPEN_ATTR, '1');
     try {
       useModalStore.getState().setOptHintsActive(false);
     } catch {
@@ -77,6 +84,11 @@ export function FullscreenViewer({
     }
     return () => {
       document.body.style.overflow = prev;
+      // Nested viewers: keep the marker until the last one unmounts. The
+      // escape-stack cleanup above already ran for this viewer.
+      if (escapeOverlayCount() === 0) {
+        document.documentElement.removeAttribute(FULLSCREEN_VIEWER_OPEN_ATTR);
+      }
     };
   }, []);
 
