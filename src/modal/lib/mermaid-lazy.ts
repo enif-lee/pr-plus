@@ -319,7 +319,7 @@ export function initMermaid(api: any, themeOverride?: string): void {
       securityLevel: 'strict',
       theme,
       look: MERMAID_LOOK,
-      fontFamily: 'inherit',
+      fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif",
       flowchart: { htmlLabels: true, useMaxWidth: true },
       sequence: { useMaxWidth: true },
       gantt: { useMaxWidth: true },
