@@ -379,6 +379,18 @@ describe('product wiring structure', () => {
     // Display options live in the gear popover (not primary toolbar row)
     expect(tb).toMatch(/hide_whitespace/);
     expect(tb).toMatch(/data-prp-hide-whitespace/);
+    expect(tb).toMatch(/highlight_diff_words/);
+    expect(tb).toMatch(/data-prp-word-highlight/);
+    expect(tb).toMatch(/strike_deleted_words/);
+    expect(tb).toMatch(/data-prp-word-strike/);
+    expect(tb).toMatch(/dim_unfocused_files/);
+    expect(tb).toMatch(/data-prp-dim-unfocused/);
+    const ws = readFileSync(
+      resolve(root, 'src/modal/views/pr-modal/DiffWorkspace.tsx'),
+      'utf8'
+    );
+    expect(ws).toMatch(/prp-diff--no-word-highlight/);
+    expect(ws).toMatch(/prp-diff--no-word-strike/);
     expect(tb).toMatch(/value="unified"/);
     expect(tb).toMatch(/value="split"/);
     // Portaled so Diff shell overflow never clips Reviewed-by / Diff view

@@ -90,7 +90,11 @@
   overflow-wrap: normal;
 }
 
-/* Split-mode review threads: dock under LEFT or RIGHT pane */
+/*
+ * Split-mode review threads: stay in the LEFT/RIGHT code column (1fr 1fr).
+ * Cap the card at the same 720px as unified *inside that pane* — do not
+ * shrink/shift the pane itself or the box overlaps the other column.
+ */
 .prp-vline--comment-split {
   align-items: stretch;
   /* Match code-row gutter + two panes */
@@ -109,20 +113,19 @@
 .prp-split-cols__comment-pane {
   display: flex;
   flex-direction: column;
-  flex: 1 1 50%;
   min-width: 0;
   max-width: 100%;
-  /* Contain thread card inside the pane — never spill into the sibling / edge */
   overflow: hidden;
   box-sizing: border-box;
-  padding: 4px 6px 6px;
+  /* Padding lives on .prp-inline-thread (same as unified) */
+  padding: 0;
 }
 .prp-split-cols__comment-pane:empty {
   padding: 0;
 }
 .prp-vline--comment-split .prp-inline-thread {
   width: 100%;
-  max-width: 100%;
+  max-width: min(720px, 100%);
   min-width: 0;
   box-sizing: border-box;
 }

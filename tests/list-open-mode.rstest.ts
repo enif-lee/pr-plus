@@ -40,6 +40,7 @@ describe('listOpenMode wiring (static)', () => {
     expect(click).toMatch(/listOpenMode/);
     expect(click).toMatch(/normalizeListOpenMode\(prefs/);
     expect(click).toMatch(/===\s*'page'/);
+    expect(click).toMatch(/listitem-title-link/);
 
     const row = read('src/host/modules/list-row-lifecycle.ts');
     expect(row).toMatch(/listOpenMode/);

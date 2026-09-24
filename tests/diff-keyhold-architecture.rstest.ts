@@ -28,10 +28,19 @@ describe('Diff key-hold architecture', () => {
   test('active file chrome subscribes at row/header leaves', () => {
     const tree = read('src/modal/views/diff/FolderFileTree.tsx');
     const rows = read('src/modal/views/diff/VirtualDiffRows.tsx');
+    const vdiff = read('src/modal/views/diff/VirtualDiff.tsx');
     expect(tree).toMatch(/const FileTreeFileRow = memo/);
-    expect(tree).toMatch(/s\.activeFilePath[^\n]+node\.path/);
-    expect(rows).toMatch(/const storeFocused = useModalStore/);
-    expect(rows).toMatch(/s\.activeFilePath[^\n]+row\?\.filePath/);
+    expect(tree).toMatch(/diffFileFocusPath\(s\) === String\(node\.path/);
+    // Header leaf: boolean equality so only the old+new file re-render per hop.
+    // A path-string subscription re-renders every mounted FileHeaderRow.
+    expect(rows).toMatch(
+      /diffFileFocusPath\(s\) === String\(row\?\.filePath/
+    );
+    expect(rows).toMatch(/export const DiffFileFocusOutline = memo/);
+    expect(vdiff).toMatch(/<DiffFileFocusOutline/);
+    expect(vdiff).not.toMatch(
+      /useModalStore\(\(s\) => s\.activeFilePath\)/
+    );
   });
 
   test('file/selection hops stay DOM-first and file-tree scrolling is local', () => {
@@ -87,6 +96,24 @@ describe('Diff key-hold architecture', () => {
     const nav = read('src/modal/hooks/useDiffConversationNav.ts');
     expect(nav).toMatch(/function applyNavComment/);
     expect(nav).toMatch(/if \(commentNavRafRef\.current\) return/);
+  });
+
+  test('file-nav key-hold does not restamp DOM latches every hop', () => {
+    const nav = read('src/modal/hooks/useDiffConversationNav.ts');
+    const hot = read('src/modal/hooks/usePrModalHotkeys.ts');
+    const note = nav.slice(
+      nav.indexOf('function noteDiffNavActivity'),
+      nav.indexOf('function sampleDiffNav')
+    );
+    expect(note).toMatch(/hasAttribute\('data-prp-diff-nav-active'\)/);
+    expect(hot).toMatch(
+      /if \(optHintsSuppressedRef\.current === next\) return/
+    );
+    const fileChord = hot.slice(
+      hot.indexOf("reportShortcutAction(next ? 'navFileNext'"),
+      hot.indexOf('act.navFile')
+    );
+    expect(fileChord).toMatch(/if \(!optHintsSuppressedRef\.current\)/);
   });
 
   test('host paints and URI writes yield while Diff navigation is active', () => {

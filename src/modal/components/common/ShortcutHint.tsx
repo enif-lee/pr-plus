@@ -8,7 +8,14 @@ import {
 } from './TipPopover';
 import { KeyGlyphs } from './KeyGlyphs';
 import { useModalStore } from '../../store/modal-store';
-import { SELECTION_NAV_BUSY_ATTR } from '../../lib/line-selection';
+import {
+  SELECTION_NAV_BUSY_ATTR,
+  OPT_HINTS_SUPPRESSED_ATTR,
+} from '../../lib/line-selection';
+import {
+  FULLSCREEN_VIEWER_OPEN_ATTR,
+  isFullscreenViewerOpen,
+} from '../../lib/escape-layer';
 
 /**
  * Option-hold shortcut badge above a control.
@@ -34,6 +41,26 @@ function readDomOptHeld(): boolean {
       document.body?.classList?.contains?.('prp-opt-held') ||
       Boolean(document.querySelector?.('.prp-opt-hints-on'))
     );
+  } catch {
+    return false;
+  }
+}
+
+function readOptHintsSuppressed(): boolean {
+  try {
+    if (typeof document === 'undefined') return false;
+    return Boolean(
+      document.documentElement?.hasAttribute?.(OPT_HINTS_SUPPRESSED_ATTR)
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** Fullscreen mermaid / image / markdown viewer owns the stage — no badges. */
+function readViewerOpen(): boolean {
+  try {
+    return isFullscreenViewerOpen();
   } catch {
     return false;
   }
@@ -68,6 +95,8 @@ export function ShortcutHint({
   const storeShow = useModalStore((s) => s.optHintsActive);
   const [domHeld, setDomHeld] = useState(() => readDomOptHeld());
   const [navBusy, setNavBusy] = useState(() => readSelectionNavBusy());
+  const [suppressed, setSuppressed] = useState(() => readOptHintsSuppressed());
+  const [viewerOpen, setViewerOpen] = useState(() => readViewerOpen());
   // Observe DOM latch + navigation busy markers. Page-world e2e sets the Opt
   // attribute; selection and Diff navigation stamp their own busy attributes.
   // MutationObserver + cheap interval; not per-frame rAF (many instances).
@@ -77,8 +106,12 @@ export function ShortcutHint({
       if (!alive) return;
       const nextHeld = readDomOptHeld();
       const nextBusy = readSelectionNavBusy();
+      const nextSuppressed = readOptHintsSuppressed();
+      const nextViewer = readViewerOpen();
       setDomHeld((prev) => (prev === nextHeld ? prev : nextHeld));
       setNavBusy((prev) => (prev === nextBusy ? prev : nextBusy));
+      setSuppressed((prev) => (prev === nextSuppressed ? prev : nextSuppressed));
+      setViewerOpen((prev) => (prev === nextViewer ? prev : nextViewer));
     };
     sync();
     let mo: MutationObserver | null = null;
@@ -89,8 +122,10 @@ export function ShortcutHint({
         attributeFilter: [
           'data-prp-opt-held',
           'data-prp-diff-nav-active',
+          FULLSCREEN_VIEWER_OPEN_ATTR,
           'class',
           SELECTION_NAV_BUSY_ATTR,
+          OPT_HINTS_SUPPRESSED_ATTR,
         ],
       });
       if (document.body) {
@@ -112,7 +147,7 @@ export function ShortcutHint({
   const show =
     showProp !== undefined
       ? Boolean(showProp) && !navBusy
-      : Boolean(storeShow || domHeld) && !navBusy;
+      : Boolean(storeShow || (domHeld && !suppressed)) && !navBusy && !viewerOpen;
   const anchorRef = useRef<HTMLSpanElement | null>(null);
   const tipRef = useRef<HTMLSpanElement | null>(null);
   const [placement, setPlacement] = useState<TipPlacement>(preferredPlacement);

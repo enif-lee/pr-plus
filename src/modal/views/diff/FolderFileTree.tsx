@@ -23,6 +23,7 @@ import {
 import { FloatingScrollbar } from '../../components/common/FloatingScrollbar';
 import { useT } from '@lib/locale-context';
 import { useModalStore } from '../../store/modal-store';
+import { diffFileFocusPath } from '@lib/diff-rows';
 
 /** Cap extension chips so the search row stays usable on narrow nav. */
 const MAX_EXT_CHIPS = 10;
@@ -66,7 +67,7 @@ const FileTreeFileRow = memo(function FileTreeFileRow({
   onSelect,
 }: any) {
   const active = useModalStore(
-    (s) => String(s.activeFilePath || '') === String(node.path || '')
+    (s) => diffFileFocusPath(s) === String(node.path || '')
   );
   const f = node.file || {};
   const isCollapsed = isPathCollapsed(

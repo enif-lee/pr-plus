@@ -19,6 +19,7 @@ import {
   useSearchGroup,
 } from '../../store/data-groups';
 import { useModalStore } from '../../store/modal-store';
+import { OPT_HINTS_SUPPRESSED_ATTR } from '../../lib/line-selection';
 import { useDomainDetail } from '../../app/domain-detail-context';
 import '../diff/DiffLayout.css';
 
@@ -57,6 +58,12 @@ export type DiffWorkspaceProps = {
   setDiffMode: (m: string) => void;
   hideWhitespace?: boolean;
   onHideWhitespace?: ((v: boolean) => void) | null;
+  wordHighlight?: boolean;
+  onWordHighlight?: ((v: boolean) => void) | null;
+  wordStrike?: boolean;
+  onWordStrike?: ((v: boolean) => void) | null;
+  dimUnfocusedFiles?: boolean;
+  onDimUnfocusedFiles?: ((v: boolean) => void) | null;
   /** App locale (plugin pref override or GitHub detect). */
   locale?: string | null;
   setScrollTop?: (n: number) => void;
@@ -200,6 +207,12 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
     setDiffMode,
     hideWhitespace = false,
     onHideWhitespace = null,
+    wordHighlight = true,
+    onWordHighlight = null,
+    wordStrike = true,
+    onWordStrike = null,
+    dimUnfocusedFiles = true,
+    onDimUnfocusedFiles = null,
     locale = null,
     setScrollTop: setScrollTopProp,
     listRef,
@@ -314,15 +327,21 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
   const searchHitIndex =
     searchHitIndexProp >= 0 ? searchHitIndexProp : searchGroup.searchHitIndex;
   const [domOptHeld, setDomOptHeld] = useState(false);
+  const [domOptSuppressed, setDomOptSuppressed] = useState(false);
   useEffect(() => {
     const read = () => {
       try {
-        setDomOptHeld(
-          typeof document !== 'undefined' &&
-            document.documentElement.hasAttribute('data-prp-opt-held')
-        );
+        if (typeof document === 'undefined') {
+          setDomOptHeld(false);
+          setDomOptSuppressed(false);
+          return;
+        }
+        const root = document.documentElement;
+        setDomOptHeld(root.hasAttribute('data-prp-opt-held'));
+        setDomOptSuppressed(root.hasAttribute(OPT_HINTS_SUPPRESSED_ATTR));
       } catch {
         setDomOptHeld(false);
+        setDomOptSuppressed(false);
       }
     };
     read();
@@ -332,14 +351,21 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
     const obs = new MutationObserver(read);
     obs.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: ['data-prp-opt-held', 'class'],
+      attributeFilter: [
+        'data-prp-opt-held',
+        'class',
+        OPT_HINTS_SUPPRESSED_ATTR,
+      ],
     });
     return () => obs.disconnect();
   }, []);
   const showSelectionComposer =
     showSelectionComposerProp ||
     selectionIsland.showSelectionComposer ||
-    (domOptHeld && Boolean(selectionIsland.lineSelection) && !selectionIsland.selecting);
+    (domOptHeld &&
+      !domOptSuppressed &&
+      Boolean(selectionIsland.lineSelection) &&
+      !selectionIsland.selecting);
   const selectionIslandLeaving =
     selectionIslandLeavingProp || selectionIsland.selectionIslandLeaving;
 
@@ -409,7 +435,16 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
         onPointerDown={onFileNavResizeStart}
         title="Drag to resize files navigator"
       />
-      <div className="prp-diff-pane flex min-w-0 flex-1 flex-col">
+      <div
+        className={`prp-diff-pane flex min-w-0 flex-1 flex-col${
+          wordHighlight ? '' : ' prp-diff--no-word-highlight'
+        }${wordStrike ? '' : ' prp-diff--no-word-strike'}${
+          dimUnfocusedFiles ? ' prp-diff--dim-unfocused' : ''
+        }`}
+        data-prp-word-highlight={wordHighlight ? '1' : '0'}
+        data-prp-word-strike={wordStrike ? '1' : '0'}
+        data-prp-dim-unfocused={dimUnfocusedFiles ? '1' : '0'}
+      >
         <DiffToolbar
           detail={detail}
           fileNavCollapsed={fileNav.collapsed}
@@ -417,6 +452,12 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
           diffMode={diffMode}
           hideWhitespace={hideWhitespace}
           onHideWhitespace={onHideWhitespace}
+          wordHighlight={wordHighlight}
+          onWordHighlight={onWordHighlight}
+          wordStrike={wordStrike}
+          onWordStrike={onWordStrike}
+          dimUnfocusedFiles={dimUnfocusedFiles}
+          onDimUnfocusedFiles={onDimUnfocusedFiles}
           locale={locale}
           reviewFilter={diffReviewFilter}
           onReviewFilter={setDiffReviewFilter}
@@ -527,6 +568,7 @@ export function DiffWorkspace(p: DiffWorkspaceProps) {
           expandBusyKey={diffExpandBusyKey}
           viewedPaths={viewedPaths}
           onToggleViewed={onToggleViewed}
+          dimUnfocused={dimUnfocusedFiles}
           threadsByCommentId={threadsByCommentId}
           onReply={onReplyToThread}
           pendingCount={totalPendingCount}

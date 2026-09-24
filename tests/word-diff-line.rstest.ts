@@ -10,8 +10,10 @@ import {
   INTRA_LINE_DEL_CLASS,
   INTRA_LINE_INS_CLASS,
   applySplitIntraLineHtml,
+  applyUnifiedIntraLineHtml,
   intraLineWordDiff,
 } from '../src/modal/lib/intra-line-diff';
+import { flattenFilesToVirtualRows } from '../src/modal/lib/diff-rows-core';
 import { MD_DIFF_DEL_CLASS, MD_DIFF_INS_CLASS } from '../src/modal/lib/markdown-preview';
 import { renderSearchableHtml } from '../src/modal/views/diff/VirtualDiffRows';
 
@@ -52,6 +54,38 @@ function splitSideHtml(
     null,
     0,
     side,
+    false
+  );
+}
+
+function unifiedPairRows(oldLine: string, newLine: string) {
+  const rows = flattenFilesToVirtualRows(
+    [
+      {
+        filename: 'example.ts',
+        status: 'modified',
+        additions: 1,
+        deletions: 1,
+        patch: ['@@ -1,2 +1,2 @@', `-${oldLine}`, `+${newLine}`].join('\n'),
+      },
+    ],
+    'unified',
+    { expandAll: true }
+  );
+  const del = rows.find((r: any) => r.lineType === 'del');
+  const add = rows.find((r: any) => r.lineType === 'add');
+  return { del, add };
+}
+
+function unifiedLineHtml(row: any, searchQuery = '') {
+  return renderSearchableHtml(
+    row.code ?? '',
+    'example.ts',
+    searchQuery,
+    row,
+    null,
+    0,
+    'code',
     false
   );
 }
@@ -208,25 +242,95 @@ describe('renderSearchableHtml (shipped split-line HTML path)', () => {
   });
 });
 
-describe('intra-line mark CSS (darker than pane + strike on deletes)', () => {
-  test('CodeCell.css: del mix is darker than pane and struck; ins darker, not struck', () => {
+describe('renderSearchableHtml (shipped unified-line HTML path)', () => {
+  test('paired unified del/add inject intra-line marks like split', () => {
+    const { del, add } = unifiedPairRows('Hello world', 'Hello word');
+    expect(del?.leftCode).toBe('Hello world');
+    expect(del?.rightCode).toBe('Hello word');
+    expect(add?.leftCode).toBe('Hello world');
+    expect(add?.rightCode).toBe('Hello word');
+
+    const delHtml = unifiedLineHtml(del);
+    const addHtml = unifiedLineHtml(add);
+    expect(delHtml).toContain(`<del class="${INTRA_LINE_DEL_CLASS}">world</del>`);
+    expect(addHtml).toContain(`<ins class="${INTRA_LINE_INS_CLASS}">word</ins>`);
+    expect(delHtml.startsWith('Hello ')).toBe(true);
+    expect(addHtml.startsWith('Hello ')).toBe(true);
+    expect(delHtml).not.toMatch(/<(del|ins)[^>]*>Hello/);
+    expect(addHtml).not.toMatch(/<(del|ins)[^>]*>Hello/);
+  });
+
+  test('unpaired unified whole-line add/del do not invent intra-line marks', () => {
+    const lone = flattenFilesToVirtualRows(
+      [
+        {
+          filename: 'example.ts',
+          status: 'modified',
+          additions: 0,
+          deletions: 1,
+          patch: ['@@ -1,2 +1,1 @@', ' keep', '-gone'].join('\n'),
+        },
+      ],
+      'unified',
+      { expandAll: true }
+    );
+    const delOnly = lone.find((r: any) => r.lineType === 'del');
+    expect(delOnly?.rightCode).toBe('');
+    const html = unifiedLineHtml(delOnly);
+    expect(html).toBe('gone');
+    expect(html).not.toMatch(/prp-intra-/);
+  });
+
+  test('applyUnifiedIntraLineHtml wraps changed tokens on the del side', () => {
+    const html = '<span class="hljs-title">Hello world</span>';
+    const out = applyUnifiedIntraLineHtml(html, {
+      lineType: 'del',
+      leftType: 'del',
+      rightType: 'add',
+      leftCode: 'Hello world',
+      rightCode: 'Hello word',
+    });
+    expect(out).toContain('class="hljs-title"');
+    expect(out).toContain(`<del class="${INTRA_LINE_DEL_CLASS}">world</del>`);
+  });
+});
+
+describe('intra-line mark CSS (subtle vs pane + strike on deletes)', () => {
+  test('CodeCell.css: del mix is 20% from pane and struck; ins not struck', () => {
     const css = read('src/modal/views/diff/CodeCell.css');
-    const del = cssRuleBody(css, '.prp-split-cols .prp-intra-del');
-    const ins = cssRuleBody(css, '.prp-split-cols .prp-intra-ins');
+    const del = cssRuleBody(css, '.prp-intra-del');
+    const ins = cssRuleBody(css, '.prp-intra-ins');
     expect(del.length).toBeGreaterThan(0);
     expect(ins.length).toBeGreaterThan(0);
 
     expect(del).toMatch(/background:\s*color-mix\(/);
     expect(del).toMatch(/--prp-danger/);
+    expect(del).toMatch(/--prp-del-bg/);
     expect(del).toMatch(/text-decoration:\s*line-through/);
+    expect(del).toMatch(/text-decoration-color:\s*color-mix\(/);
+    expect(del).not.toMatch(/text-decoration-color:\s*currentColor/);
+    expect(del).toMatch(
+      /color-mix\(\s*in srgb,\s*var\(--prp-danger\)\s*65%,\s*#000\)\s*75%/
+    );
     expect(del).not.toMatch(/background:\s*var\(--prp-del-bg\)\s*;/);
+    const delMix = del.match(/--prp-danger\)\s*(\d+)%/);
+    expect(delMix).toBeTruthy();
+    const delPct = Number(delMix![1]);
+    expect(delPct).toBe(20);
 
     expect(ins).toMatch(/background:\s*color-mix\(/);
     expect(ins).toMatch(/--prp-ok/);
+    expect(ins).toMatch(/--prp-add-bg/);
     expect(ins).toMatch(/text-decoration:\s*none/);
     expect(ins).not.toMatch(/line-through/);
     expect(ins).not.toMatch(/background:\s*var\(--prp-add-bg\)\s*;/);
+    const insMix = ins.match(/--prp-ok\)\s*(\d+)%/);
+    expect(insMix).toBeTruthy();
+    const insPct = Number(insMix![1]);
+    expect(insPct).toBe(20);
 
+    expect(css).toMatch(/prp-diff--no-word-highlight/);
+    expect(css).toMatch(/prp-diff--no-word-strike/);
     expect(css).not.toMatch(/prp-md-diff-del/);
     expect(css).not.toMatch(/prp-md-diff-ins/);
   });
@@ -240,6 +344,7 @@ describe('intra-line mark CSS (darker than pane + strike on deletes)', () => {
 
     const rows = read('src/modal/views/diff/VirtualDiffRows.tsx');
     expect(rows).toMatch(/applySplitIntraLineHtml/);
+    expect(rows).toMatch(/applyUnifiedIntraLineHtml/);
     expect(rows).toMatch(/from '@lib\/intra-line-diff'/);
     expect(rows).not.toMatch(new RegExp(MD_DIFF_DEL_CLASS));
   });

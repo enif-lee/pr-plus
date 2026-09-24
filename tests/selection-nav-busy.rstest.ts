@@ -5,12 +5,14 @@ import { describe, expect, test } from '@rstest/core';
 import {
   SELECTION_ACTIONS_REVEAL_MS,
   SELECTION_NAV_BUSY_ATTR,
+  OPT_HINTS_SUPPRESSED_ATTR,
   shouldShowSelectionActionGroup,
 } from '../src/modal/lib/line-selection';
 
 describe('SELECTION_NAV_BUSY_ATTR / REVEAL_MS', () => {
   test('attr name is stable for CSS + ShortcutHint', () => {
     expect(SELECTION_NAV_BUSY_ATTR).toBe('data-prp-selection-nav');
+    expect(OPT_HINTS_SUPPRESSED_ATTR).toBe('data-prp-opt-hints-suppressed');
   });
 
   test('reveal delay is long enough to outlast key-repeat settle', () => {

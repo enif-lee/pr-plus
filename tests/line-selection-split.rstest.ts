@@ -762,6 +762,26 @@ describe('shouldShowSelectionActionGroup (Opt / hover / comment)', () => {
     ).toBe(false);
   });
 
+  test('Opt-hold after hop suppress does not show dock (hover still does)', () => {
+    expect(
+      shouldShowSelectionActionGroup({
+        hasLineOrFileSelection: true,
+        optHeld: true,
+        optHintsSuppressed: true,
+        phase: 'actions',
+      })
+    ).toBe(false);
+    expect(
+      shouldShowSelectionActionGroup({
+        hasLineOrFileSelection: true,
+        optHeld: true,
+        optHintsSuppressed: true,
+        hoverReveal: true,
+        phase: 'actions',
+      })
+    ).toBe(true);
+  });
+
   test('selection nav busy hides dock even with Opt', () => {
     expect(
       shouldShowSelectionActionGroup({
@@ -1100,6 +1120,8 @@ describe('optArrow shell wiring (static)', () => {
     expect(body).toMatch(/applySelectionKeyboardMove/);
     expect(body).toMatch(/navFile/);
     expect(body).toMatch(/optArrowScrollSelect/);
+    // File / region hops suppress Opt chrome until Opt is released
+    expect(body).toMatch(/setOptHintsSuppressed\(true\)/);
   });
 });
 

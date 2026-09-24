@@ -527,30 +527,20 @@
     };
     // Re-stamp memory/IDB with the just-closed detail so soft reopen after a
     // meta write (milestone/assignees) does not fall back to a stale list sketch.
-    try {
-      if (
-        listResync.detail &&
+    const restampListRow = Boolean(
+      listResync.detail &&
         listResync.owner &&
         listResync.repo &&
         Number(listResync.number) > 0
-      ) {
+    );
+    try {
+      if (restampListRow) {
         const key = detailKey(
           listResync.owner,
           listResync.repo,
           listResync.number
         );
         detailCache.set(key, listResync.detail);
-        // Also force list-cache people-meta so the next list-sketch paint has
-        // the just-set milestone (pulls list API often omits it).
-        try {
-          applyOpenDetailToListRow({
-            number: listResync.number,
-            detail: listResync.detail,
-            forceLabels: Array.isArray(listResync.detail?.labels),
-          });
-        } catch {
-          /* ignore list restamp */
-        }
       }
     } catch {
       /* ignore */
@@ -581,22 +571,52 @@
       sideSettled: emptySideFlags(),
       presentation: 'modal',
     };
-    render();
-    if (wasEmbed) restoreNativeMain();
-    // After leaving embed (or closing overlay), re-offer native GH → pr+ toggle
-    try {
-      ensureGithubPrToggle();
-    } catch {
-      /* ignore */
-    }
-    // Modal on /pulls → list: re-render that PR row from detail (labels, title, …)
-    if (!wasEmbed) {
+    // The exit animation already holds the overlay fully transparent
+    // (animation-fill-mode: forwards), so the heavy tail — React unmount,
+    // DOM teardown, scroll-unlock reflow, list-row resync — runs right after
+    // the reveal paints instead of piling onto the same frame (the visible
+    // stutter at the end of close). rAF→setTimeout lands it just after that
+    // first paint; the 400ms fallback covers tabs where rAF is starved.
+    let tornDown = false;
+    const tearDown = () => {
+      if (tornDown) return;
+      tornDown = true;
+      render();
+      if (wasEmbed) restoreNativeMain();
+      // After leaving embed (or closing overlay), re-offer native GH → pr+ toggle
       try {
-        scheduleListResyncAfterPrShell(listResync);
+        ensureGithubPrToggle();
       } catch {
         /* ignore */
       }
-    }
+      // Force list-cache people-meta so the next list-sketch paint has the
+      // just-set milestone (pulls list API often omits it).
+      if (restampListRow) {
+        try {
+          applyOpenDetailToListRow({
+            number: listResync.number,
+            detail: listResync.detail,
+            forceLabels: Array.isArray(listResync.detail?.labels),
+          });
+        } catch {
+          /* ignore list restamp */
+        }
+      }
+      // Modal on /pulls → list: re-render that PR row from detail (labels, title, …)
+      if (!wasEmbed) {
+        try {
+          scheduleListResyncAfterPrShell(listResync);
+        } catch {
+          /* ignore */
+        }
+      }
+    };
+    const raf =
+      typeof requestAnimationFrame === 'function'
+        ? requestAnimationFrame
+        : (cb: any) => setTimeout(cb, 0);
+    raf(() => setTimeout(tearDown, 0));
+    setTimeout(tearDown, 400);
   }
 
   /**

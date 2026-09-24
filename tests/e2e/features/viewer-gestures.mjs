@@ -734,6 +734,14 @@ export function getSteps() {
       (tips.tipKbds || 0) === 0 && (tips.tipPortals || 0) === 0,
       `Opt tips must not paint under viewer: ${JSON.stringify(tips)}`
     );
+    // Mid-hold samples are the real signal — the probe above runs after the
+    // latch is released, so it alone would pass even if tips painted.
+    const heldSamples = Array.isArray(hold?.optSamples) ? hold.optSamples : [];
+    const dirty = heldSamples.filter((s) => (s?.tipCount || 0) > 0);
+    assert(
+      heldSamples.length > 0 && dirty.length === 0,
+      `Opt tips painted while the viewer was open: ${JSON.stringify(dirty.slice(0, 2))}`
+    );
   });
 
   run('VG.6 Esc closes viewer only (modal stays)', () => {

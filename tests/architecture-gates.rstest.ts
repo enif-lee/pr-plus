@@ -573,4 +573,54 @@ describe('architecture gates', () => {
       fs.existsSync(path.join(root, 'src/modal/hooks/usePrModalOpenEffects.ts'))
     ).toBe(false);
   });
+
+  test('modal close mirrors the enter motion (same ease-out, not slower)', () => {
+    const css = read('src/modal/views/chrome/ShellLayout.css');
+    const num = (re: RegExp) => {
+      const m = css.match(re);
+      return m ? Number(m[1]) : NaN;
+    };
+    const ease = (re: RegExp) => {
+      const m = css.match(re);
+      // Last capture group = the cubic-bezier args
+      return m ? String(m[m.length - 1]).replace(/\s+/g, ' ').trim() : '';
+    };
+    // Enter is the reference: aggressive ease-out, no slow lead-in.
+    const EASE_OUT = '0.22, 1, 0.36, 1';
+    const inMs = num(/\.prp-modal--anim-in\s*\{[^}]*?(\d+)ms/);
+    const outMs = num(/\.prp-modal--anim-out\s*\{[^}]*?(\d+)ms/);
+    expect(ease(/\.prp-modal--anim-in\s*\{[^}]*?\d+ms cubic-bezier\(([^)]+)\)/)).toBe(
+      EASE_OUT
+    );
+    expect(ease(/\.prp-modal--anim-out\s*\{[^}]*?\d+ms cubic-bezier\(([^)]+)\)/)).toBe(
+      EASE_OUT
+    );
+    expect(outMs).toBeLessThanOrEqual(inMs);
+    // Side sheet exit mirrors its own enter too.
+    const sheet = /\.prp-modal--sheet-(in|out)[\s\S]{0,200}?\d+ms cubic-bezier\(([^)]+)\)/;
+    expect(ease(sheet)).toBe(EASE_OUT);
+    const sheetOutMs = num(/\.prp-modal--sheet-out[\s\S]{0,200}?(\d+)ms/);
+    expect(sheetOutMs).toBeLessThanOrEqual(num(/\.prp-modal--sheet-in[\s\S]{0,200}?(\d+)ms/));
+    // Exit keyframes must end fully transparent — anything above 0 leaves a
+    // nearly-visible panel that pops out of existence at unmount.
+    const exitEndOpacity = (name: string) =>
+      num(
+        new RegExp(
+          `@keyframes ${name} \\{[\\s\\S]*?to \\{[^}]*?opacity:\\s*([\\d.]+)`
+        )
+      );
+    expect(exitEndOpacity('prp-scale-out')).toBe(0);
+    expect(exitEndOpacity('prp-sheet-out')).toBe(0);
+    // JS unmount wait must cover the CSS exit (host closes after the timer).
+    const shell = read('src/modal/app/PrModalShell.tsx');
+    const closeBody = (
+      shell.match(/const requestClose = useCallback\(\(\) => \{[\s\S]*?\}, \[open, onClose/) ||
+      ['']
+    )[0];
+    const closeWait = Number(
+      (closeBody.match(/const duration = (\d+);/) || [])[1]
+    );
+    expect(closeWait).toBeGreaterThanOrEqual(outMs);
+    expect(closeWait).toBeGreaterThanOrEqual(sheetOutMs);
+  });
 });

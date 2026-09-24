@@ -616,7 +616,7 @@ function locationOk() {
 export function closeOverlay() {
   // Prefer product chrome close so host closeModal runs (list resync + session
   // wipe). Escape alone can race GH palette ownership and leave host open.
-  // requestClose animates ~280ms before calling onClose — wait past that.
+  // requestClose animates ~190ms before calling onClose — wait past that.
   for (let i = 0; i < 4; i++) {
     const open = evalInPage(`!!document.querySelector('.prp-overlay')`);
     if (!open) return;
@@ -639,7 +639,7 @@ export function closeOverlay() {
       })()
     `);
     if (!clicked?.ok) press('Escape');
-    // Allow exit animation + host onClose (sheet 240ms / modal 280ms)
+    // Allow exit animation + host onClose (sheet/modal 180ms + buffer)
     waitMs(450);
   }
   // Last resort: only force-remove if still open after product close attempts

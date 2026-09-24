@@ -114,26 +114,39 @@
 }
 
 /*
- * Intra-line word-diff on split paired rows. Must be darker/more opaque than
- * the pane wash (`.prp-split-cols__left--del` / `__right--add` use
- * `var(--prp-del-bg)` / `var(--prp-add-bg)`). Do not reuse markdown overlay
- * `.prp-md-diff-*` (those set the pane tokens and vanish on the wash).
+ * Intra-line word-diff on paired change rows (split + unified). Mix is 20%
+ * from the line wash (`--prp-del-bg` / `--prp-add-bg`) so the mark is
+ * just perceptible. Do not reuse markdown overlay `.prp-md-diff-*` (those
+ * set the pane tokens and vanish on the wash).
+ * Pane flags `.prp-diff--no-word-highlight` / `--no-word-strike` opt out.
  */
-.prp-split-cols .prp-intra-del {
-  background: color-mix(in srgb, var(--prp-danger) 32%, var(--prp-del-bg));
+.prp-intra-del {
+  background: color-mix(in srgb, var(--prp-danger) 20%, var(--prp-del-bg));
   text-decoration: line-through;
   text-decoration-thickness: 1px;
-  text-decoration-color: currentColor;
+  /* Darker than --prp-danger, alpha 0.75 */
+  text-decoration-color: color-mix(
+    in srgb,
+    color-mix(in srgb, var(--prp-danger) 65%, #000) 75%,
+    transparent
+  );
   border-radius: 2px;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
 }
-.prp-split-cols .prp-intra-ins {
-  background: color-mix(in srgb, var(--prp-ok) 32%, var(--prp-add-bg));
+.prp-intra-ins {
+  background: color-mix(in srgb, var(--prp-ok) 20%, var(--prp-add-bg));
   text-decoration: none;
   border-radius: 2px;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
+}
+.prp-diff--no-word-highlight .prp-intra-del,
+.prp-diff--no-word-highlight .prp-intra-ins {
+  background: transparent;
+}
+.prp-diff--no-word-strike .prp-intra-del {
+  text-decoration: none;
 }
 
 .prp-diff-mode {

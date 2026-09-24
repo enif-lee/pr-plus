@@ -103,11 +103,28 @@ function hopInThirdBand(p) {
   return pct >= 0.12 && pct <= 0.58;
 }
 
+function hopInCommentBand(p) {
+  if (!p || !p.ok) return false;
+  const vh = Number(p.vh) || 0;
+  const max = Number(p.max) || 0;
+  if (vh > 0 && max < vh * 0.15) return true;
+  const pct = Number(p.pct);
+  return pct >= 0.04 && pct <= 0.28;
+}
+
 function assertHopThird(label, p) {
   assert(p && p.ok, `${label} hop row missing: ${JSON.stringify(p)}`);
   assert(
     hopInThirdBand(p),
     `${label} hop not ~33% (maxScroll < vh/3 exemption only): ${JSON.stringify(p)}`
+  );
+}
+
+function assertHopComment(label, p) {
+  assert(p && p.ok, `${label} hop row missing: ${JSON.stringify(p)}`);
+  assert(
+    hopInCommentBand(p),
+    `${label} hop not ~15% (maxScroll < vh*0.15 exemption only): ${JSON.stringify(p)}`
   );
 }
 
@@ -448,7 +465,7 @@ export function getSteps() {
     );
     log(`  files ${a0 || '?'} → ${a1 || '?'} → ${a2 || '?'}`);
   });
-  run('P2.hop Diff thread/file/region pin ~33% (arrows not required)', () => {
+  run('P2.hop Diff thread/file/region pin ~15% (arrows not required)', () => {
     // DEMO_PR #19 is one file and maxScroll ≪ vh/3 — clamp exemption hid
     // file/region pins. HEAVY_PR #14 is a tall multi-file list.
     openPr(HEAVY_PR, { viaUrl: true });
@@ -489,8 +506,8 @@ export function getSteps() {
       `  thread pin next=${JSON.stringify(threadNext)} prev=${JSON.stringify(threadPrev)}`
     );
     if (threadNext.ok || threadPrev.ok) {
-      if (threadNext.ok) assertHopThird('thread next', threadNext);
-      if (threadPrev.ok) assertHopThird('thread prev', threadPrev);
+      if (threadNext.ok) assertHopComment('thread next', threadNext);
+      if (threadPrev.ok) assertHopComment('thread prev', threadPrev);
     } else {
       log('  thread hop: no mounted review thread on #14 (file/region still required)');
     }
@@ -503,8 +520,8 @@ export function getSteps() {
     log(
       `  file pin next=${JSON.stringify(fileNext)} prev=${JSON.stringify(filePrev)}`
     );
-    assertHopThird('file next', fileNext);
-    assertHopThird('file prev', filePrev);
+    assertHopComment('file next', fileNext);
+    assertHopComment('file prev', filePrev);
 
     press('ArrowDown');
     waitMs(80);
@@ -523,8 +540,8 @@ export function getSteps() {
     log(
       `  region pin next=${JSON.stringify(regionNext)} prev=${JSON.stringify(regionPrev)}`
     );
-    assertHopThird('region next', regionNext);
-    assertHopThird('region prev', regionPrev);
+    assertHopComment('region next', regionNext);
+    assertHopComment('region prev', regionPrev);
 
     press('ArrowDown');
     waitMs(60);
