@@ -1,0 +1,42 @@
+# yaml-language-server: $schema=../../node_modules/pikabo/schema/suite.schema.json
+# Headless proof that pikabo can load this unpacked MV3 extension.
+# Does not replace tests/e2e (agent-browser). No GitHub/Linear login.
+name: pr+ pikabo smoke
+tests:
+  - name: service worker starts
+    steps:
+      - eval:
+          script: chrome.runtime.getManifest().version
+          in: worker
+      - expect:
+          truthy: true
+          description: service worker can read the manifest
+      - eval:
+          script: chrome.runtime.id
+          in: worker
+      - expect:
+          truthy: true
+          description: extension id is assigned
+
+  - name: popup renders
+    steps:
+      - openPopup
+      - assertVisible: '#connect-linear'
+      - assertVisible: '#token'
+      - screenshot: popup
+
+  - name: github.com content script injects
+    steps:
+      - navigate: https://github.com/
+      - waitForExtensionEvent:
+          type: contentScript.executed
+          contains:
+            file: src/content.js
+          timeout: 20000
+          description: Chrome executed src/content.js on github.com
+      - eval:
+          script: document.documentElement.getAttribute('data-prp-content')
+          in: page
+      - expect:
+          equals: '1'
+          description: content script stamped html[data-prp-content]

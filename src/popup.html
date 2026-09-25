@@ -392,6 +392,10 @@
       <a href="https://github.com/settings/tokens" target="_blank" rel="noreferrer" data-i18n="popup_hint_create_token">Create token</a>
       <span data-i18n="popup_hint_pat_scope">· github.com only. Register Enterprise hosts below. · Stored only in extension storage (not synced).</span>
     </p>
+    <label for="active-github-host" data-i18n="popup_label_active_host">Active GitHub (Linear / agents)</label>
+    <select id="active-github-host" style="width:100%;margin-top:4px;padding:6px 8px;border:1px solid #d0d7de;border-radius:6px;font-size:12px;">
+      <option value="github.com">github.com</option>
+    </select>
 
     <details class="fold">
       <summary data-i18n="popup_perm_summary">Required permissions</summary>
@@ -435,6 +439,32 @@
         </div>
       </div>
     </details>
+  </section>
+
+  <section class="config" aria-labelledby="cfg-sites">
+    <h2 class="config__title" id="cfg-sites">
+      <span class="config__title-num" aria-hidden="true">+</span><span data-i18n="popup_section_connected_sites">Connected sites</span>
+    </h2>
+    <p class="hint" style="margin-top:0" data-i18n="popup_connected_sites_intro">Allow these sites to call window.PRPlus and open the PR overlay. Not a data partnership.</p>
+    <div class="row" style="flex-wrap:wrap">
+      <button id="connect-linear" type="button">Linear</button>
+      <button id="connect-jira" type="button">Jira</button>
+      <button id="connect-localhost" type="button">Localhost</button>
+    </div>
+    <div class="row" style="margin-top:8px;flex-wrap:nowrap">
+      <input
+        id="connect-custom-host"
+        type="text"
+        autocomplete="off"
+        spellcheck="false"
+        data-i18n-placeholder="popup_placeholder_custom_site"
+        placeholder="app.example.com"
+        style="flex:1;min-width:0"
+      />
+      <button id="connect-custom" type="button" data-i18n="popup_btn_add_site">Add</button>
+    </div>
+    <p class="hint" data-i18n="popup_custom_site_hint">HTTPS only. Use *.example.com for all subdomains.</p>
+    <ul id="connected-sites-list" class="perm-list" style="margin-top:8px"></ul>
   </section>
 
   <!-- 2. GitHub Enterprise PAT -->

@@ -8,8 +8,15 @@ import {
   MESSAGE_TIMEOUT_MS,
   ENTERPRISE_CS_ID,
   CONTENT_SCRIPT_JS,
+  bindGithubWebHost,
 } from './sw-enterprise';
 import { isSwMessage, type SwMessage } from '../sw-messages';
+import {
+  handlePageApiMessage,
+  allowExternalSender,
+  EXTERNAL_MESSAGE_TYPES,
+} from './sw-open-pr';
+import { handleDetailCacheMessage } from './sw-detail-cache';
 import {
   isAbortError,
   withServiceWorkerKeepAlive,
@@ -22,7 +29,24 @@ export { ENTERPRISE_CS_ID, CONTENT_SCRIPT_JS };
  * Stateless API context from RPC message (webHost from content page).
  * No process-global mutation — pass returned ctx into every PRTreeFetch call.
  */
-export async function handleMessage(message: SwMessage): Promise<unknown> {
+export async function handleMessage(
+  message: SwMessage,
+  sender?: any
+): Promise<unknown> {
+  if (
+    message.type !== MSG.PING &&
+    message.type !== MSG.CANCEL_FETCH &&
+    message.type !== MSG.DETAIL_CACHE_GET &&
+    message.type !== MSG.DETAIL_CACHE_SET &&
+    message.type !== MSG.DETAIL_CACHE_DELETE &&
+    message.type !== MSG.DETAIL_CACHE_CLEAR
+  ) {
+    await bindGithubWebHost(message);
+  }
+  const pageApi = await handlePageApiMessage(message, sender);
+  if (pageApi !== undefined) return pageApi;
+  const cache = await handleDetailCacheMessage(message);
+  if (cache !== undefined) return cache;
   const a = await handleMessagePartA(message);
   if (a !== undefined) return a;
   return handleMessagePartB(message);
@@ -33,7 +57,7 @@ export async function handleMessage(message: SwMessage): Promise<unknown> {
  * Lost during SW split — without this, popup/content get
  * "Receiving end does not exist" / Background worker offline.
  */
-chrome.runtime.onMessage.addListener((message: any, _sender: any) => {
+chrome.runtime.onMessage.addListener((message: any, sender: any) => {
   // Fire-and-forget broadcasts: content scripts listen; no reply expected.
   if (isSwMessage(message) && message.type === MSG.TOKEN_CHANGED) {
     return false;
@@ -49,7 +73,7 @@ chrome.runtime.onMessage.addListener((message: any, _sender: any) => {
    */
   if (message.type === MSG.CANCEL_FETCH || message.type === MSG.PING) {
     return Promise.resolve()
-      .then(() => handleMessage(message))
+      .then(() => handleMessage(message, sender))
       .catch((err) => ({
         ok: false,
         error: err?.message || String(err),
@@ -60,7 +84,7 @@ chrome.runtime.onMessage.addListener((message: any, _sender: any) => {
   // Stateless concurrent handlers: each message carries webHost → apiCtx.
   return withServiceWorkerKeepAlive(() =>
     withTimeout(
-      handleMessage(message),
+      handleMessage(message, sender),
       MESSAGE_TIMEOUT_MS,
       message.type
     ).catch((err) => ({
@@ -71,4 +95,26 @@ chrome.runtime.onMessage.addListener((message: any, _sender: any) => {
     }))
   );
 });
+
+try {
+  chrome.runtime.onMessageExternal.addListener((message: any, sender: any) => {
+    if (!allowExternalSender(sender)) {
+      return Promise.resolve({ ok: false, error: 'not-allowlisted' });
+    }
+    if (!isSwMessage(message)) {
+      return Promise.resolve({ ok: false, error: 'invalid message' });
+    }
+    // Loopback pages get the PRPlus launcher surface only — never PAT-backed
+    // fetch / mutation / token / settings messages.
+    if (!EXTERNAL_MESSAGE_TYPES.has(message.type)) {
+      return Promise.resolve({ ok: false, error: 'not-allowed' });
+    }
+    return handleMessage(message, sender).catch((err) => ({
+      ok: false,
+      error: err?.message || String(err),
+    }));
+  });
+} catch {
+  /* tests / missing API */
+}
 

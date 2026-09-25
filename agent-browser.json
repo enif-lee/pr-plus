@@ -3,5 +3,7 @@
   "headed": true,
   "profile": "./.browser/profile",
   "session": "pr-tree",
-  "extensions": ["."]
+  "extensions": ["."],
+  "executablePath": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  "args": "--enable-unsafe-extension-debugging"
 }

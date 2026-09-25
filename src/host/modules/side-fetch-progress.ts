@@ -417,17 +417,61 @@
   }
 
   /**
-   * Memory SWR (60s fresh) + IndexedDB durable layer (7d / 24 PRs).
-   * Page reload → peekAsync hydrates IDB → paint → network revalidate.
+   * Memory SWR (60s fresh) + extension service-worker IndexedDB (7d / 24 PRs).
+   * Shared across github.com, Linear, and the shell — not page-origin IDB.
    */
+  function sendDetailCacheRpc(message: any) {
+    const chromeApi = (globalThis as any).chrome;
+    if (!chromeApi?.runtime?.sendMessage) {
+      return Promise.resolve({ ok: false, error: 'no-runtime' });
+    }
+    return new Promise((resolve) => {
+      try {
+        chromeApi.runtime.sendMessage(message, (res: any) => {
+          const err = chromeApi.runtime.lastError;
+          if (err) resolve({ ok: false, error: err.message });
+          else resolve(res || { ok: false });
+        });
+      } catch (err: any) {
+        resolve({ ok: false, error: err?.message || String(err) });
+      }
+    });
+  }
+
+  function createExtensionDetailIdb() {
+    const chromeApi = (globalThis as any).chrome;
+    if (!chromeApi?.runtime?.sendMessage) return null;
+    return {
+      get: async (key: string) => {
+        const res: any = await sendDetailCacheRpc({
+          type: 'PR_TREE_DETAIL_CACHE_GET',
+          key,
+        });
+        return res?.ok ? res.row || null : null;
+      },
+      set: async (key: string, value: unknown) => {
+        await sendDetailCacheRpc({
+          type: 'PR_TREE_DETAIL_CACHE_SET',
+          key,
+          value,
+        });
+      },
+      delete: async (key: string) => {
+        await sendDetailCacheRpc({
+          type: 'PR_TREE_DETAIL_CACHE_DELETE',
+          key,
+        });
+      },
+      clear: async () => {
+        await sendDetailCacheRpc({ type: 'PR_TREE_DETAIL_CACHE_CLEAR' });
+      },
+    };
+  }
+
   const detailCache =
     (globalThis as any).PRModalDetailCache?.createPersistedDetailCache?.({
       ttlMs: 60_000,
-      createIdb: () =>
-        (globalThis as any).PRModalDetailIdb?.createDetailIdb?.({
-          maxEntries: 24,
-          maxAgeMs: 7 * 24 * 60 * 60 * 1000,
-        }) || null,
+      createIdb: () => createExtensionDetailIdb(),
     }) ||
     (globalThis as any).PRModalDetailCache?.createDetailCache?.({ ttlMs: 60_000 }) ||
     createFallbackCache();

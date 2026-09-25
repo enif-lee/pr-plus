@@ -25,7 +25,7 @@ describe('shared SW message contract', () => {
     const channel = read('src/content-bridge/bridge-channel.ts');
     expect(ent).toMatch(/from ['\"]\.\.\/sw-messages['\"]/);
     expect(handle).toMatch(/from ['\"]\.\.\/sw-messages['\"]/);
-    expect(handle).toMatch(/handleMessage\(message: SwMessage\)/);
+    expect(handle).toMatch(/handleMessage\(\s*message: SwMessage/);
     expect(handle).not.toMatch(/handleMessage\(message:\s*any\)/);
     expect(partA).toMatch(/from ['\"]\.\.\/sw-messages['\"]/);
     expect(partB).toMatch(/from ['\"]\.\.\/sw-messages['\"]/);

@@ -130,6 +130,9 @@
    * @param {{ force?: boolean }} [opts] force:true — pref false→true while on a PR
    */
   function tryEmbedFromLocation(opts: { force?: boolean } = {}) {
+    if (typeof isPartnerOrShellRuntime === 'function' && isPartnerOrShellRuntime()) {
+      return { ok: false, reason: 'not-github-runtime' };
+    }
     if (!hostEnabled) return { ok: false, reason: 'disabled' };
     const locKey = embedLocationKey();
     const path = typeof location !== 'undefined' ? location.pathname : '';
@@ -247,6 +250,27 @@
     };
   }
 
+  let partnerToggleWatchInstalled = false;
+  function installPartnerToggleWatch() {
+    if (partnerToggleWatchInstalled) return;
+    partnerToggleWatchInstalled = true;
+    const pollId = window.setInterval(() => {
+      if (!hostEnabled) return;
+      try {
+        ensureGithubPrToggle();
+      } catch {
+        /* ignore */
+      }
+    }, 800);
+    try {
+      if (pollId != null && typeof pollId === 'object' && typeof (pollId as any).unref === 'function') {
+        (pollId as any).unref();
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
   function installEmbedWatch() {
     if (embedWatchInstalled) return;
     embedWatchInstalled = true;
@@ -284,6 +308,13 @@
     const pollId = window.setInterval(() => {
       if (!hostEnabled) return;
       if (embedLocationKey() !== lastEmbedPath) onNav();
+      else {
+        try {
+          ensureGithubPrToggle();
+        } catch {
+          /* ignore */
+        }
+      }
     }, 800);
     // Allow Node test processes to exit (browser ignores unref)
     try {
@@ -301,6 +332,7 @@
   }
 
   function setEnabled(enabled: any) {
+    hostFeaturesEvaluated = true;
     hostEnabled = Boolean(enabled);
     if (!hostEnabled) {
       // Tear down modal + stop intercepting so GitHub is fully native
@@ -347,6 +379,15 @@
     }
     // Light preload only — full warmUp runs after list paint (content.js)
     void ensureAssets();
+    if (typeof isPartnerOrShellRuntime === 'function' && isPartnerOrShellRuntime()) {
+      installPartnerToggleWatch();
+      try {
+        ensureGithubPrToggle();
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
     installEmbedWatch();
     ensurePrefsWatch();
     // Wait for prefs so autoOpenEmbed=false is respected before first open.
