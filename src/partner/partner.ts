@@ -365,6 +365,146 @@
     /* ignore */
   }
 
+  /**
+   * Keyboard isolation while the sheet is open. Linear binds single-key
+   * shortcuts (`c` create issue, `x` select, Esc, …) on document/body, so
+   * keys typed at the sheet — or with focus stranded on the Linear page —
+   * must not reach them. pr+ hotkeys listen on window capture and still run
+   * (stopPropagation keeps the other listeners on the same currentTarget).
+   */
+  const KEY_EVENTS = ['keydown', 'keypress', 'keyup'];
+
+  function overlayOpen(): boolean {
+    try {
+      return Boolean(global.document.querySelector('#prp-modal-host .prp-overlay'));
+    } catch {
+      return false;
+    }
+  }
+
+  // Utility classes pr+ stamps on the host page's <html>/<body>, not pr+ UI
+  // (SCROLL_LOCK_CLASS, PAGE_EMBED_ACTIVE_CLASS, Opt-hint root class).
+  const HOST_PAGE_CLASSES = new Set(['prp-scroll-lock', 'prp-embed-active', 'prp-opt-hints']);
+
+  function isPrPlusNode(n: any): boolean {
+    if (!n || n.nodeType !== 1) return false;
+    if (String(n.id || '').startsWith('prp-')) return true;
+    const cls = n.classList;
+    if (!cls) return false;
+    for (const c of cls) {
+      if (String(c).startsWith('prp-') && !HOST_PAGE_CLASSES.has(String(c))) return true;
+    }
+    return false;
+  }
+
+  function eventInPrPlus(event: any): boolean {
+    const path =
+      typeof event?.composedPath === 'function' ? event.composedPath() : [event?.target];
+    return path.some((n: any) => isPrPlusNode(n));
+  }
+
+  /** Focus stranded on Linear (or body): stop before document/target handlers. */
+  function onKeyCapture(event: any) {
+    if (!overlayOpen() || eventInPrPlus(event)) return;
+    event.stopPropagation();
+  }
+
+  /** Keys inside the sheet / its body portals: React already ran; stop bubbling. */
+  function onKeyBubble(event: any) {
+    if (!overlayOpen() || !eventInPrPlus(event)) return;
+    event.stopPropagation();
+  }
+
+  // Linear also reacts to focus moving outside its app and pulls it back.
+  const FOCUS_EVENTS = ['focusin', 'focusout'];
+
+  try {
+    for (const type of KEY_EVENTS) {
+      global.addEventListener(type, onKeyCapture, true);
+    }
+    for (const type of [...KEY_EVENTS, ...FOCUS_EVENTS]) {
+      global.document.documentElement.addEventListener(type, onKeyBubble, false);
+    }
+  } catch {
+    /* ignore */
+  }
+
+  /**
+   * Linear's shortcut listener runs on window capture ahead of ours and only
+   * skips events targeted outside its app, so focus must live in the sheet
+   * while it is open (modal focus trap).
+   */
+  /** @returns true once focus is inside pr+ UI. */
+  function focusSheet(): boolean {
+    if (!overlayOpen()) return false;
+    const active = global.document.activeElement;
+    if (active && eventInPrPlus({ composedPath: () => pathOf(active) })) return true;
+    const sheet = global.document.querySelector('#prp-modal-host .prp-modal');
+    if (!sheet) return false;
+    if (!sheet.hasAttribute('tabindex')) sheet.setAttribute('tabindex', '-1');
+    try {
+      sheet.focus({ preventScroll: true });
+    } catch {
+      /* ignore */
+    }
+    return global.document.activeElement === sheet;
+  }
+
+  function pathOf(node: any): any[] {
+    const out: any[] = [];
+    for (let n = node; n; n = n.parentNode) out.push(n);
+    return out;
+  }
+
+  // Overlay mounts before the sheet renders: keep trying until focus lands.
+  let focusPending = true;
+  function syncSheetFocus() {
+    if (!overlayOpen()) {
+      focusPending = true;
+      return;
+    }
+    if (focusPending && focusSheet()) focusPending = false;
+  }
+
+  try {
+    new MutationObserver(syncSheetFocus).observe(global.document.documentElement, {
+      childList: true,
+      subtree: true,
+    });
+    global.document.addEventListener(
+      'focusin',
+      (event: any) => {
+        if (!overlayOpen() || eventInPrPlus(event)) return;
+        // Put focus back where it was inside the sheet, else on the sheet.
+        const prev = event.relatedTarget;
+        if (prev && eventInPrPlus({ composedPath: () => pathOf(prev) })) {
+          try {
+            prev.focus({ preventScroll: true });
+            if (global.document.activeElement === prev) return;
+          } catch {
+            /* ignore */
+          }
+        }
+        focusSheet();
+      },
+      true
+    );
+    // Blur to <body> (Esc in a composer, removed node) fires no focusin.
+    global.document.addEventListener(
+      'focusout',
+      (event: any) => {
+        if (!overlayOpen() || event.relatedTarget || !eventInPrPlus(event)) return;
+        global.setTimeout(() => {
+          const active = global.document.activeElement;
+          if (!active || active === global.document.body) focusSheet();
+        }, 0);
+      },
+      true
+    );
+  } catch {
+    /* ignore */
+  }
+
   async function evalFeatures() {
     const host = global.PRModalHost;
     if (!host || typeof host.setEnabled !== 'function') return;

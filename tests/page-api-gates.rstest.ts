@@ -151,6 +151,21 @@ describe('page-api gates', () => {
     expect(host).toContain("message?.type === 'PR_TREE_PR_STATUS'");
   });
 
+  test('partner overlay isolates keyboard + focus from the host site', () => {
+    const src = fs.readFileSync(path.join(root, 'src/partner/partner.ts'), 'utf8');
+    // pr+ stamps prp-scroll-lock on <html> AND <body>; treating those as pr+ UI
+    // made every host-page event look like ours and disabled the guard.
+    expect(src).toMatch(/HOST_PAGE_CLASSES = new Set\(\[[^\]]*'prp-scroll-lock'/);
+    expect(src).toContain("const KEY_EVENTS = ['keydown', 'keypress', 'keyup']");
+    expect(src).toContain('global.addEventListener(type, onKeyCapture, true)');
+    expect(src).toContain("const FOCUS_EVENTS = ['focusin', 'focusout']");
+    // Focus moves into the sheet on open and is trapped while open.
+    expect(src).toContain('function focusSheet()');
+    expect(src).toContain('new MutationObserver(syncSheetFocus)');
+    expect(src).toMatch(/addEventListener\(\s*'focusin'/);
+    expect(src).toMatch(/addEventListener\(\s*'focusout'/);
+  });
+
   test('Linear issue URL matches connected-site patterns', () => {
     const origins = ['https://linear.app/*', 'https://*.linear.app/*'];
     expect(
