@@ -3,6 +3,8 @@
  * Uses repo agent-browser.json (extensions + profile) when cwd is project root.
  */
 import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -32,6 +34,27 @@ const HEADED =
   process.env.AGENT_BROWSER_HEADED === 'true';
 
 /**
+ * Attach to an already-running Chrome instead of launching one:
+ *   PRP_E2E_CDP=9333 npm run test:e2e
+ * Branded Chrome 137+ ignores --load-extension, so that Chrome must have pr+
+ * loaded via CDP `Extensions.loadUnpacked` (see README). The harness never
+ * closes an attached browser.
+ */
+export const CDP = String(process.env.PRP_E2E_CDP || '').trim();
+
+/** Repo agent-browser.json lists `extensions`, which agent-browser rejects with --cdp. */
+function cdpConfigPath() {
+  const file = path.join(os.tmpdir(), 'prp-e2e-agent-browser-cdp.json');
+  try {
+    fs.writeFileSync(file, '{}\n');
+  } catch {
+    /* ignore */
+  }
+  return file;
+}
+const CDP_CONFIG = CDP ? cdpConfigPath() : '';
+
+/**
  * @param {string[]} args
  * @param {{ input?: string, timeoutMs?: number, allowFail?: boolean }} [opts]
  */
@@ -39,20 +62,20 @@ export function ab(args, opts = {}) {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   // Boolean form overrides agent-browser.json "headed" (see agent-browser README).
   const headedFlag = HEADED ? ['--headed', 'true'] : ['--headed', 'false'];
+  const launchArgs = CDP
+    ? ['--config', CDP_CONFIG, '--cdp', CDP]
+    : [
+        '--executable-path',
+        CHROME_EXE,
+        '--profile',
+        path.join(ROOT, '.browser', 'profile'),
+        '--extension',
+        ROOT,
+        ...headedFlag,
+      ];
   const r = spawnSync(
     'agent-browser',
-    [
-      '--executable-path',
-      CHROME_EXE,
-      '--profile',
-      path.join(ROOT, '.browser', 'profile'),
-      '--extension',
-      ROOT,
-      ...headedFlag,
-      '--session',
-      SESSION,
-      ...args,
-    ],
+    [...launchArgs, '--session', SESSION, ...args],
     {
       cwd: ROOT,
       encoding: 'utf8',
@@ -145,6 +168,8 @@ export function open(url) {
 }
 
 export function closeAll() {
+  // Attached (CDP) browser belongs to the user — leave it running.
+  if (CDP) return { status: 0, stdout: '', stderr: '' };
   return ab(['close', '--all'], { allowFail: true });
 }
 
