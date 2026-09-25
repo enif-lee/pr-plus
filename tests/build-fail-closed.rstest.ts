@@ -14,6 +14,7 @@ import {
   REQUIRED_ARTIFACTS,
   shouldCopyPackagedPath,
 } from '../scripts/package-extension.mjs';
+import * as scriptLists from '../src/content-scripts-list';
 
 const root = path.join(__dirname, '..');
 
@@ -105,5 +106,30 @@ describe('packager allowlist', () => {
     expect(shouldCopyPackagedPath('src/background.sw.js')).toBe(true);
     expect(shouldCopyPackagedPath('src/modal/pure/i18n.js')).toBe(true);
     expect(shouldCopyPackagedPath('PRIVACY.md')).toBe(true);
+  });
+
+  test('every script the manifest or SW registers is packaged', () => {
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(root, 'manifest.json'), 'utf8')
+    );
+    const refs = new Set<string>([
+      manifest.background.service_worker,
+      manifest.action.default_popup,
+      'src/shell/shell.html',
+    ]);
+    for (const cs of manifest.content_scripts || []) {
+      for (const f of [...(cs.js || []), ...(cs.css || [])]) refs.add(f);
+    }
+    // Runtime-registered lists (enterprise, Connected sites, shell).
+    for (const list of Object.values(scriptLists)) {
+      if (!Array.isArray(list)) continue;
+      for (const f of list) {
+        if (typeof f === 'string' && f.startsWith('src/')) refs.add(f);
+      }
+    }
+    expect(refs.has('src/page-api/prplus-main.js')).toBe(true);
+    expect(refs.has('src/partner/partner.js')).toBe(true);
+    const missing = [...refs].filter((f) => !shouldCopyPackagedPath(f));
+    expect(missing).toEqual([]);
   });
 });

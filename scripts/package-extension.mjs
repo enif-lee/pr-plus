@@ -79,6 +79,9 @@ export function shouldCopyPackagedPath(rel) {
   if (n.startsWith('src/modal/pure/') && n.endsWith('.js')) return true;
   if (n.startsWith('src/modal/dist/')) return true;
   if (/^src\/[^/]+\.js$/.test(n)) return true;
+  // PRPlus page API, Connected-site overlay host, extension shell tab.
+  if (/^src\/(page-api|partner)\/[^/]+\.js$/.test(n)) return true;
+  if (/^src\/shell\/[^/]+\.(js|html)$/.test(n)) return true;
   return false;
 }
 
